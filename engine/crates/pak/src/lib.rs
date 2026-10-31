@@ -26,6 +26,7 @@ use std::sync::{Mutex, OnceLock};
 
 const MAGIC: &[u8; 8] = b"OPENBFPK";
 const FOOTER: u64 = 32;
+const COMPRESSED_FLAG: u64 = 1 << 63;
 
 /// An archive: the open file and its index (path -> offset, length).
 pub struct Archive {
@@ -71,11 +72,14 @@ impl Archive {
                 String::from_utf8(r[..l].to_vec()).map_err(|_| bad("index path not UTF-8"))?;
             r = &r[l..];
             let off = take_u64(&mut r)?;
-            let n = take_u64(&mut r)?;
-            if off < start || off.checked_add(n).is_none_or(|end| end > at) {
+            let raw_n = take_u64(&mut r)?;
+            let compressed = (raw_n & COMPRESSED_FLAG) != 0;
+            let n = raw_n & !COMPRESSED_FLAG;
+            if (compressed && n < 5) || off < start || off.checked_add(n).is_none_or(|end| end > at)
+            {
                 return Err(bad("entry outside the pack"));
             }
-            entries.insert(name, (off, n));
+            entries.insert(name, (off, raw_n));
         }
         Ok(Some(Archive {
             file,
@@ -134,11 +138,25 @@ impl Archive {
         out
     }
 
-    fn read(&self, off: u64, len: u64) -> io::Result<Vec<u8>> {
-        let len = usize::try_from(len).map_err(|_| bad("entry too large for this platform"))?;
+    fn read(&self, off: u64, raw_len: u64) -> io::Result<Vec<u8>> {
+        let compressed = (raw_len & COMPRESSED_FLAG) != 0;
+        let stored = raw_len & !COMPRESSED_FLAG;
+        let len = usize::try_from(stored).map_err(|_| bad("entry too large for this platform"))?;
         let mut buf = vec![0u8; len];
         read_exact_at(&self.file, &mut buf, off)?;
-        Ok(buf)
+        if !compressed {
+            return Ok(buf);
+        }
+        if buf.len() < 5 {
+            return Err(bad("compressed entry truncated"));
+        }
+        let expected = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
+        let mut out = Vec::with_capacity(expected);
+        flate2::read::DeflateDecoder::new(&buf[4..]).read_to_end(&mut out)?;
+        if out.len() != expected {
+            return Err(bad("decompressed length mismatch"));
+        }
+        Ok(out)
     }
 }
 
@@ -156,36 +174,82 @@ pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::
     index.extend_from_slice(&(entries.len() as u32).to_le_bytes());
     // Identical files are stored once (a planet's music sits under each of its maps): (length, hash) -> the first
     // such file and its offset, confirmed byte for byte before it is shared.
-    let mut seen: std::collections::HashMap<(u64, u64), Vec<(&Path, u64)>> =
+    let mut seen: std::collections::HashMap<(u64, u64), Vec<(&Path, usize)>> =
         std::collections::HashMap::new();
+    let mut uniques: Vec<(&str, &Path, u64)> = Vec::new();
+    let mut entry_unique: Vec<usize> = Vec::with_capacity(entries.len());
     for (name, src) in entries {
         if name.len() > u16::MAX as usize || name.contains('\\') || name.starts_with('/') {
             return Err(bad(&format!("bad archive path {name:?}")));
         }
         let key = (std::fs::metadata(src)?.len(), hash_file(src)?);
-        let mut at = None;
-        for &(p, off) in seen.get(&key).into_iter().flatten() {
+        let mut found = None;
+        for &(p, uidx) in seen.get(&key).into_iter().flatten() {
             if same_bytes(p, src)? {
-                at = Some(off);
+                found = Some(uidx);
                 break;
             }
         }
-        let off = match at {
-            Some(off) => off,
+        let uidx = match found {
+            Some(uidx) => uidx,
             None => {
-                let n = io::copy(&mut File::open(src)?, &mut w)?;
-                if n != key.0 {
-                    return Err(bad(&format!("{} changed while packing", src.display())));
-                }
-                seen.entry(key).or_default().push((src, pos));
-                pos += n;
-                pos - n
+                let uidx = uniques.len();
+                uniques.push((name.as_str(), src.as_path(), key.0));
+                seen.entry(key).or_default().push((src.as_path(), uidx));
+                uidx
             }
         };
+        entry_unique.push(uidx);
+    }
+    let workers = std::thread::available_parallelism()
+        .map(|n| n.get().clamp(1, 16))
+        .unwrap_or(4);
+    let mut stored_spans: Vec<(u64, u64)> = Vec::with_capacity(uniques.len());
+    for batch in uniques.chunks(64) {
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        type CompressedSlot = Mutex<Option<io::Result<Option<Vec<u8>>>>>;
+        let results: Vec<CompressedSlot> = (0..batch.len()).map(|_| Mutex::new(None)).collect();
+        std::thread::scope(|s| {
+            for _ in 0..workers.min(batch.len()) {
+                s.spawn(|| loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if i >= batch.len() {
+                        break;
+                    }
+                    let (uname, usrc, ulen) = batch[i];
+                    let res = maybe_compress(uname, usrc, ulen);
+                    *results[i].lock().unwrap() = Some(res);
+                });
+            }
+        });
+        for (i, &(_, usrc, ulen)) in batch.iter().enumerate() {
+            let compressed = results[i].lock().unwrap().take().unwrap()?;
+            let off = pos;
+            let raw_n = match compressed {
+                Some(buf) => {
+                    w.write_all(&buf)?;
+                    let clen = buf.len() as u64;
+                    pos += clen;
+                    clen | COMPRESSED_FLAG
+                }
+                None => {
+                    let n = io::copy(&mut File::open(usrc)?, &mut w)?;
+                    if n != ulen {
+                        return Err(bad(&format!("{} changed while packing", usrc.display())));
+                    }
+                    pos += n;
+                    n
+                }
+            };
+            stored_spans.push((off, raw_n));
+        }
+    }
+    for ((name, _), &uidx) in entries.iter().zip(&entry_unique) {
+        let (off, raw_n) = stored_spans[uidx];
         index.extend_from_slice(&(name.len() as u16).to_le_bytes());
         index.extend_from_slice(name.as_bytes());
         index.extend_from_slice(&off.to_le_bytes());
-        index.extend_from_slice(&key.0.to_le_bytes());
+        index.extend_from_slice(&raw_n.to_le_bytes());
     }
     w.write_all(&index)?;
     w.write_all(MAGIC)?;
@@ -405,6 +469,7 @@ pub enum Reader {
         len: u64,
         pos: u64,
     },
+    Mem(io::Cursor<Vec<u8>>),
 }
 
 pub fn open(path: impl AsRef<Path>) -> io::Result<Reader> {
@@ -413,12 +478,16 @@ pub fn open(path: impl AsRef<Path>) -> io::Result<Reader> {
         Place::Disk(p) => Ok(Reader::Disk(File::open(p)?)),
         Place::Pak(k) => {
             let (start, len) = pak().get(&k).ok_or_else(|| not_found(&k))?;
-            Ok(Reader::Pak {
-                file: File::open(&pak().path)?,
-                start,
-                len,
-                pos: 0,
-            })
+            if (len & COMPRESSED_FLAG) != 0 {
+                Ok(Reader::Mem(io::Cursor::new(pak().read(start, len)?)))
+            } else {
+                Ok(Reader::Pak {
+                    file: File::open(&pak().path)?,
+                    start,
+                    len,
+                    pos: 0,
+                })
+            }
         }
     }
 }
@@ -427,6 +496,7 @@ impl Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match self {
             Reader::Disk(f) => f.read(buf),
+            Reader::Mem(c) => c.read(buf),
             Reader::Pak {
                 file,
                 start,
@@ -449,6 +519,7 @@ impl Seek for Reader {
     fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
         match self {
             Reader::Disk(f) => f.seek(to),
+            Reader::Mem(c) => c.seek(to),
             Reader::Pak { len, pos, .. } => {
                 let p = match to {
                     SeekFrom::Start(n) => n as i128,
@@ -467,6 +538,37 @@ impl Seek for Reader {
                 Ok(*pos)
             }
         }
+    }
+}
+
+fn should_compress(name: &str, raw_len: u64) -> bool {
+    if !(128..=(u32::MAX as u64)).contains(&raw_len) {
+        return false;
+    }
+    let lower = name.to_ascii_lowercase();
+    lower.ends_with(".ktx2")
+        || lower.ends_with(".glb")
+        || lower.ends_with(".ron")
+        || lower.ends_with(".wav")
+}
+
+fn maybe_compress(name: &str, src: &Path, raw_len: u64) -> io::Result<Option<Vec<u8>>> {
+    if !should_compress(name, raw_len) {
+        return Ok(None);
+    }
+    let raw = std::fs::read(src)?;
+    if raw.len() as u64 != raw_len {
+        return Err(bad(&format!("{} changed while packing", src.display())));
+    }
+    let mut out = Vec::with_capacity(raw.len());
+    out.extend_from_slice(&(raw.len() as u32).to_le_bytes());
+    let mut enc = flate2::write::DeflateEncoder::new(&mut out, flate2::Compression::fast());
+    enc.write_all(&raw)?;
+    enc.finish()?;
+    if (out.len() as u64) + 64 < raw_len {
+        Ok(Some(out))
+    } else {
+        Ok(None)
     }
 }
 

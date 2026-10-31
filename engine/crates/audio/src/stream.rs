@@ -26,13 +26,68 @@ pub struct StreamTake {
     pub offset: u64,
     /// ADPCM bytes of audio, all channels, without the block padding.
     pub size: usize,
+    pub format: u32,
     pub channels: u32,
+    pub substreams: u32,
+    pub interleave: usize,
     pub frequency: u32,
     /// The stream's block size (16 KiB on every stream of both discs).
     pub block_size: usize,
 }
 
+const IMA_STEP_TABLE: [i32; 89] = [
+    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66,
+    73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449,
+    494, 544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272,
+    2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493,
+    10442, 11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
+];
+
+const IMA_INDEX_TABLE: [i32; 16] = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8];
+
+fn ima_step(pred: &mut i32, idx: &mut i32, nibble: u8) -> f32 {
+    let step = IMA_STEP_TABLE[*idx as usize];
+    let mut diff = step >> 3;
+    if (nibble & 4) != 0 {
+        diff += step;
+    }
+    if (nibble & 2) != 0 {
+        diff += step >> 1;
+    }
+    if (nibble & 1) != 0 {
+        diff += step >> 2;
+    }
+    if (nibble & 8) != 0 {
+        *pred -= diff;
+    } else {
+        *pred += diff;
+    }
+    *pred = (*pred).clamp(-32768, 32767);
+    *idx = (*idx + IMA_INDEX_TABLE[nibble as usize]).clamp(0, 88);
+    *pred as f32 / 32768.0
+}
+
 impl StreamTake {
+    fn ima_params(&self) -> (usize, usize, usize) {
+        let ch = self.channels.clamp(1, 2) as usize;
+        let sub = self.substreams.max(1) as usize;
+        (ch, sub, 36 * ch)
+    }
+
+    fn ima_sub0_bytes(&self) -> usize {
+        let (_, sub, unit) = self.ima_params();
+        (self.size / (unit * sub)) * unit
+    }
+
+    fn ima_chunk_bytes(&self) -> usize {
+        let (_, sub, unit) = self.ima_params();
+        if sub > 1 && self.interleave >= unit {
+            (self.interleave / unit) * unit
+        } else {
+            256 * unit
+        }
+    }
+
     /// ADPCM bytes of one channel.
     fn channel_bytes(&self) -> usize {
         self.size / self.channels.max(1) as usize / 16 * 16
@@ -40,7 +95,12 @@ impl StreamTake {
 
     /// Frames per channel.
     pub fn frames(&self) -> usize {
-        self.channel_bytes() / 16 * 28
+        if self.format == 5 {
+            let (_, _, unit) = self.ima_params();
+            (self.ima_sub0_bytes() / unit) * 64
+        } else {
+            self.channel_bytes() / 16 * 28
+        }
     }
 
     pub fn secs(&self) -> f32 {
@@ -98,7 +158,12 @@ impl TakeReader {
 
     /// Frames a full block holds per channel.
     pub fn block_frames(&self) -> usize {
-        self.take.block_size / 16 * 28
+        if self.take.format == 5 {
+            let (_, _, unit) = self.take.ima_params();
+            (self.take.ima_chunk_bytes() / unit) * 64
+        } else {
+            self.take.block_size / 16 * 28
+        }
     }
 
     /// Start again at the block that holds `frame`; returns that block's
@@ -111,6 +176,60 @@ impl TakeReader {
 
     /// The next block as (left, right) frames -1..1; empty at the end.
     pub fn next_block(&mut self) -> std::io::Result<Vec<[f32; 2]>> {
+        if self.take.format == 5 {
+            let (ch, sub, unit) = self.take.ima_params();
+            let sub0_bytes = self.take.ima_sub0_bytes();
+            let chunk_bytes = self.take.ima_chunk_bytes();
+            let done = self.block * chunk_bytes;
+            let left = (sub0_bytes.saturating_sub(done).min(chunk_bytes) / unit) * unit;
+            if left == 0 {
+                return Ok(Vec::new());
+            }
+            let at = self.take.offset + (self.block * chunk_bytes * sub) as u64;
+            let mut buf = vec![0u8; left];
+            self.file.seek(SeekFrom::Start(at))?;
+            self.file.read_exact(&mut buf)?;
+            self.block += 1;
+            let n_blocks = left / unit;
+            let mut out = Vec::with_capacity(n_blocks * 64);
+            if ch == 2 {
+                for blk in buf.as_chunks::<72>().0 {
+                    let mut lp = i32::from(i16::from_le_bytes([blk[0], blk[1]]));
+                    let mut li = i32::from(blk[2].min(88));
+                    let mut rp = i32::from(i16::from_le_bytes([blk[4], blk[5]]));
+                    let mut ri = i32::from(blk[6].min(88));
+                    out.push([lp as f32 / 32768.0, rp as f32 / 32768.0]);
+                    for w in 0..8 {
+                        let lw = &blk[8 + w * 8..12 + w * 8];
+                        let rw = &blk[12 + w * 8..16 + w * 8];
+                        for j in 0..4 {
+                            let l0 = ima_step(&mut lp, &mut li, lw[j] & 0x0f);
+                            let r0 = ima_step(&mut rp, &mut ri, rw[j] & 0x0f);
+                            out.push([l0, r0]);
+                            if !(w == 7 && j == 3) {
+                                let l1 = ima_step(&mut lp, &mut li, lw[j] >> 4);
+                                let r1 = ima_step(&mut rp, &mut ri, rw[j] >> 4);
+                                out.push([l1, r1]);
+                            }
+                        }
+                    }
+                }
+            } else {
+                for blk in buf.as_chunks::<36>().0 {
+                    let mut p = i32::from(i16::from_le_bytes([blk[0], blk[1]]));
+                    let mut idx = i32::from(blk[2].min(88));
+                    let s0 = p as f32 / 32768.0;
+                    out.push([s0, s0]);
+                    for i in 0..63 {
+                        let byte = blk[4 + i / 2];
+                        let nib = if i % 2 == 0 { byte & 0x0f } else { byte >> 4 };
+                        let s = ima_step(&mut p, &mut idx, nib);
+                        out.push([s, s]);
+                    }
+                }
+            }
+            return Ok(out);
+        }
         let bs = self.take.block_size.max(16);
         let ch = self.take.channels.clamp(1, 2) as usize;
         let done = self.block * bs;
@@ -258,7 +377,10 @@ mod tests {
             path,
             offset: 32,
             size: 2 * (pairs * bs + tail),
+            format: 1,
             channels: 2,
+            substreams: 1,
+            interleave: 0,
             frequency: 48_000,
             block_size: bs,
         }
@@ -320,7 +442,10 @@ mod tests {
             path: path.clone(),
             offset: 0,
             size: 128,
+            format: 1,
             channels: 1,
+            substreams: 1,
+            interleave: 0,
             frequency: 22_050,
             block_size: 32,
         };
@@ -353,5 +478,42 @@ mod tests {
         if crate::Audio::backend_compiled() {
             assert!(audio.play_stream(gone, 0.0, false).is_err());
         }
+    }
+
+    #[test]
+    fn an_ima_stereo_substream_take_decodes_substream_zero_frames() {
+        let mut blk0 = [0u8; 72];
+        blk0[0..2].copy_from_slice(&8192i16.to_le_bytes());
+        blk0[4..6].copy_from_slice(&(-8192i16).to_le_bytes());
+        let blk_sub1 = [0xFFu8; 72];
+        let mut data = Vec::new();
+        data.extend_from_slice(&blk0);
+        data.extend_from_slice(&blk_sub1);
+        data.extend_from_slice(&blk0);
+        data.extend_from_slice(&blk_sub1);
+        let path =
+            std::env::temp_dir().join(format!("openbf-stream-ima-{}.bin", std::process::id()));
+        std::fs::write(&path, &data).unwrap();
+        let take = StreamTake {
+            path: path.clone(),
+            offset: 0,
+            size: data.len(),
+            format: 5,
+            channels: 2,
+            substreams: 2,
+            interleave: 72,
+            frequency: 44_100,
+            block_size: 0,
+        };
+        assert_eq!(take.frames(), 128);
+        let mut r = TakeReader::open(take).unwrap();
+        assert_eq!(r.block_frames(), 64);
+        let b0 = r.next_block().unwrap();
+        let b1 = r.next_block().unwrap();
+        let b2 = r.next_block().unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!((b0.len(), b1.len(), b2.len()), (64, 64, 0));
+        assert_eq!(b0[0], [0.25, -0.25]);
+        assert_eq!(b1[0], [0.25, -0.25]);
     }
 }

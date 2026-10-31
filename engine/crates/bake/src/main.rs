@@ -72,12 +72,24 @@ fn extract_iso(iso: &str, out: &str) -> Result<()> {
     Ok(())
 }
 
+fn ci(s: &str) -> String {
+    bake::resolve_ci(s)
+}
+
+fn ci_csv(s: &str) -> String {
+    s.split(',')
+        .map(bake::resolve_ci)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("extract-iso") if args.len() == 4 => extract_iso(&args[2], &args[3]),
+        Some("extract-iso") if args.len() == 4 => extract_iso(&ci(&args[2]), &args[3]),
         Some("heroes") if args.len() == 4 => {
-            let result = bake::heroes::bake_heroes(Path::new(&args[2]), Path::new(&args[3]))?;
+            let p2 = ci(&args[2]);
+            let result = bake::heroes::bake_heroes(Path::new(&p2), Path::new(&args[3]))?;
             println!(
                 "baked {} BF2 hero classes: {} bodies, {} weapon/HUD models, {} extra textures",
                 result.heroes.len(),
@@ -88,16 +100,23 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("combos") if args.len() == 4 => {
-            bake::combo::bake_combos(&args[2], &args[3])?;
+            bake::combo::bake_combos(&ci(&args[2]), &args[3])?;
             Ok(())
         }
-        Some("tex-dump") if args.len() == 4 => tex_dump(&args[2], &args[3]),
-        Some("pc-tex") if args.len() == 4 => pc_tex(&args[2], &args[3]),
+        Some("tex-dump") if args.len() == 4 => tex_dump(&ci(&args[2]), &args[3]),
+        Some("pc-tex") if args.len() == 4 => pc_tex(&ci(&args[2]), &args[3]),
         Some("soldier") if (5..=7).contains(&args.len()) => {
-            let anims = args.get(5).map(String::as_str);
-            let pc = args.get(6).map(String::as_str);
+            let lvl = ci(&args[2]);
+            let anims = args.get(5).map(|s| ci(s));
+            let pc = args.get(6).map(|s| ci(s));
             for model in args[3].split(',') {
-                let b = bake::soldier::bake_soldier_anims(&args[2], model, anims, &args[4], pc)?;
+                let b = bake::soldier::bake_soldier_anims(
+                    &lvl,
+                    model,
+                    anims.as_deref(),
+                    &args[4],
+                    pc.as_deref(),
+                )?;
                 println!(
                     "baked soldier {}: {} bones, {} verts, {} tris, {} clips (missing {:?}), textures {:?}, cloths {:?}, extents {:?}..{:?} -> {}/soldiers",
                     b.name, b.bones, b.vertices, b.triangles, b.clips, b.missing_clips, b.textures, b.cloths, b.aabb.0, b.aabb.1, args[4]
@@ -105,17 +124,21 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Some("droid-chunks") if args.len() == 6 || args.len() == 7 => bake::droid_chunks::bake(
-            &args[2],
-            &args[3],
-            &args[4],
-            Path::new(&args[5]),
-            args.get(6).map(String::as_str),
-        ),
+        Some("droid-chunks") if args.len() == 6 || args.len() == 7 => {
+            let pc = args.get(6).map(|s| ci(s));
+            bake::droid_chunks::bake(
+                &ci(&args[2]),
+                &ci(&args[3]),
+                &ci(&args[4]),
+                Path::new(&args[5]),
+                pc.as_deref(),
+            )
+        }
         Some("weapon") if args.len() == 5 || args.len() == 6 => {
-            let pc = args.get(5).map(String::as_str);
+            let lvl = ci_csv(&args[2]);
+            let pc = args.get(5).map(|s| ci(s));
             for model in args[3].split(',') {
-                let w = bake::soldier::bake_weapon(&args[2], model, &args[4], pc)?;
+                let w = bake::soldier::bake_weapon(&lvl, model, &args[4], pc.as_deref())?;
                 println!(
                     "baked weapon {}: {} verts, {} tris, {} skel nodes, textures {:?} -> {}/weapons",
                     w.name, w.vertices, w.triangles, w.nodes, w.textures, args[4]
@@ -124,8 +147,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("vehicle") if args.len() == 4 || args.len() == 5 => {
-            let v =
-                bake::vehicle::bake_vehicles(&args[2], &args[3], args.get(4).map(String::as_str))?;
+            let pc = args.get(4).map(|s| ci(s));
+            let v = bake::vehicle::bake_vehicles(&ci(&args[2]), &args[3], pc.as_deref())?;
             println!(
                 "baked vehicles '{}': {} classes, {} geometries, {} models, {} textures, {} collision rows -> {}",
                 v.source,
@@ -139,8 +162,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("beep") if args.len() == 4 => {
-            let core = std::fs::read(&args[2]).with_context(|| args[2].clone())?;
-            let b = bake::beep::bake_beep(&core, &args[3])?;
+            let p2 = ci(&args[2]);
+            let core = std::fs::read(&p2).with_context(|| args[2].clone())?;
+            let b = bake::beep::bake_beep_with_path(Some(Path::new(&p2)), &core, &args[3])?;
             println!(
                 "baked {} beep renders to {} (ogg: {})",
                 b.outputs.len(),
@@ -150,7 +174,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("common") if args.len() == 4 || args.len() == 5 => {
-            let c = bake::map::bake_common(&args[2], &args[3], args.get(4).map(String::as_str))?;
+            let pc = args.get(4).map(|s| ci(s));
+            let c = bake::map::bake_common(&ci(&args[2]), &args[3], pc.as_deref())?;
             println!(
                 "baked common '{}': {} models, {} textures, {} classes -> {}",
                 c.source,
@@ -162,7 +187,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("effects") if args.len() == 5 && matches!(args[4].as_str(), "bf1" | "bf2") => {
-            let set = bake::effects::bake_side(&args[2], &args[3], &args[4])?;
+            let set = bake::effects::bake_side(&ci(&args[2]), &args[3], &args[4])?;
             println!(
                 "baked side effects '{}': {} effect(s) -> {}",
                 args[2],
@@ -172,8 +197,9 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("fonts") if args.len() == 5 => {
+            let p2 = ci(&args[2]);
             let fonts = bake::hud::bake_fonts(
-                std::path::Path::new(&args[2]),
+                std::path::Path::new(&p2),
                 std::path::Path::new(&args[3]),
                 &args[4],
             )?;
@@ -181,7 +207,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("locl") if args.len() == 4 => {
-            let l = bake::hud::bake_locl(&args[2], &args[3])?;
+            let l = bake::hud::bake_locl(&ci(&args[2]), &args[3])?;
             println!(
                 "baked {} {} text entries -> {}/locl",
                 l.entries.len(),
@@ -191,19 +217,25 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("specular") if args.len() == 4 => {
-            bake::spec::bake_table(&args[2], &args[3])?;
+            bake::spec::bake_table(&ci(&args[2]), &args[3])?;
             println!("baked the specular table -> {}/specular.ktx2", args[3]);
             Ok(())
         }
         Some("omniproj") if args.len() == 4 => {
             let name = bake::spec::OMNIPROJ_NAME;
-            bake::spec::bake_core_texture(&args[2], name, &args[3])?;
+            bake::spec::bake_core_texture(&ci(&args[2]), name, &args[3])?;
             println!("baked the terrain light texture -> {}/{name}.ktx2", args[3]);
             Ok(())
         }
         Some("shell") if args.len() == 7 => {
             // <SHELL.LVL> <MOVIES/SHELL.MVS> <SOUND/SHELL.LVL> <CORE.LVL> <out>
-            let s = bake::shell::bake_shell(&args[2], &args[3], &args[4], &args[5], &args[6])?;
+            let s = bake::shell::bake_shell(
+                &ci(&args[2]),
+                &ci(&args[3]),
+                &ci(&args[4]),
+                &ci(&args[5]),
+                &args[6],
+            )?;
             println!(
                 "baked shell: {} movies ({} segments), textures {:?}, music {} -> {}/shell",
                 s.movies.len(),
@@ -216,7 +248,8 @@ fn main() -> Result<()> {
         }
         Some("sounds") if args.len() == 4 || args.len() == 5 => {
             // <sound lvl> <mapdir> [the game's CORE.LVL: the Inherit templates]
-            let r = bake::sounds::bake_sounds(&args[2], &args[3], args.get(4).map(String::as_str))?;
+            let core = args.get(4).map(|s| ci(s));
+            let r = bake::sounds::bake_sounds(&ci(&args[2]), &args[3], core.as_deref())?;
             println!(
                 "baked sounds '{}': {} banks, {} samples, {} properties \
                  ({} odd frequency) -> {}/sounds",
@@ -244,10 +277,10 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("global-sound") if args.len() == 4 || args.len() == 5 => {
-            let sources: Vec<String> = args[2].split(',').map(str::to_string).collect();
+            let sources: Vec<String> = ci_csv(&args[2]).split(',').map(str::to_string).collect();
             let refs: Vec<String> = args
                 .get(4)
-                .map(|r| r.split(',').map(str::to_string).collect())
+                .map(|r| ci_csv(r).split(',').map(str::to_string).collect())
                 .unwrap_or_default();
             let opts = bake::global_sound::Options::default();
             let g = bake::global_sound::bake_global_sound(&sources, &args[3], &refs, &opts)?;
@@ -266,7 +299,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("loadscreen") if args.len() == 4 => {
-            let ls = bake::loadscreen::bake_loadscreen(&args[2], &args[3])?;
+            let ls = bake::loadscreen::bake_loadscreen(&ci(&args[2]), &args[3])?;
             println!(
                 "baked load screen: {} steps + {} extras -> {}/load",
                 ls.sequence.len(),
@@ -276,7 +309,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("classes") if args.len() == 4 => {
-            let c = bake::classes::bake_classes(&args[2], &args[3])?;
+            let c = bake::classes::bake_classes(&ci(&args[2]), &args[3])?;
             println!("baked {} classes -> {}", c.len(), args[3]);
             Ok(())
         }
@@ -300,7 +333,8 @@ fn main() -> Result<()> {
             Ok(())
         }
         Some("map") if args.len() == 4 || args.len() == 5 => {
-            let m = bake::map::bake_map(&args[2], &args[3], args.get(4).map(String::as_str))?;
+            let pc = args.get(4).map(|s| ci(s));
+            let m = bake::map::bake_map(&ci(&args[2]), &args[3], pc.as_deref())?;
             // Since item 11 (`two-tier-ktx2`) every base texture is the PS2
             // disc's own, and `texture_tiers` lists only the textures that
             // ALSO got a `<name>.tier2.ktx2` — so this counts classic-plus

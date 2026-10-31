@@ -22,29 +22,65 @@ pub struct BeepBake {
 }
 
 pub fn bake_beep(core_lvl: &[u8], outdir: &str) -> Result<BeepBake> {
+    bake_beep_with_path(None, core_lvl, outdir)
+}
+
+pub fn bake_beep_with_path(
+    core_path: Option<&Path>,
+    core_lvl: &[u8],
+    outdir: &str,
+) -> Result<BeepBake> {
     let inner = mungefs::open(core_lvl).map_err(|e| anyhow!("{e}"))?;
-    let banks = mungefs::soundbank::find_banks(inner);
     let global_hash = mungefs::fnv1a_lowercase("global");
-    let bank = banks
-        .iter()
-        .find(|b| b.name_hash == global_hash)
-        .ok_or_else(|| anyhow!("no 'global' SampleBank in CORE.LVL"))?;
+    let shallow_banks = mungefs::soundbank::find_banks(inner);
+    let deep_banks;
+    let bank = match shallow_banks.iter().find(|b| b.name_hash == global_hash) {
+        Some(b) => b,
+        None => {
+            deep_banks = mungefs::soundbank::find_banks_deep(inner);
+            deep_banks
+                .iter()
+                .find(|b| b.name_hash == global_hash)
+                .ok_or_else(|| anyhow!("no 'global' SampleBank in CORE.LVL"))?
+        }
+    };
     let s = bank
         .samples
         .iter()
         .find(|s| s.id_hash == UI_LOAD_LP_HASH)
         .ok_or_else(|| anyhow!("ui_load_lp not found in global bank"))?;
-    let adpcm = &bank.data[s.offset..s.offset + s.size];
-    let pcm = crate::adpcm::decode(adpcm);
-    if pcm.len() != s.frames as usize {
+    let bnk_buf = if bank.data.is_empty() {
+        core_path
+            .and_then(crate::sounds::find_common_bnk)
+            .and_then(|p| std::fs::read(p).ok())
+    } else {
+        None
+    };
+    let (format, native, expected_frames, raw_bytes): (u32, u32, usize, &[u8]) =
+        if !bank.data.is_empty() {
+            (
+                bank.format,
+                s.frequency,
+                s.frames as usize,
+                &bank.data[s.offset..s.offset + s.size],
+            )
+        } else if let Some(ref bbuf) = bnk_buf {
+            let common = crate::sounds::common_bnk_samples(bbuf);
+            let &(fmt, freq, frames, slice) = common
+                .get(&UI_LOAD_LP_HASH)
+                .ok_or_else(|| anyhow!("ui_load_lp not found in common.bnk"))?;
+            (fmt, freq, frames as usize, slice)
+        } else {
+            return Err(anyhow!("global bank has no local data and no common.bnk"));
+        };
+    let pcm = crate::adpcm::decode_bank_sample(format, raw_bytes);
+    if pcm.len() != expected_frames {
         return Err(anyhow!(
             "decoded {} frames, info says {}",
             pcm.len(),
-            s.frames
+            expected_frames
         ));
     }
-
-    let native = s.frequency;
     let pitched = |p: f64| (native as f64 * p).round() as u32;
     let outputs = vec![
         ("ui_load_lp".to_string(), native, pcm.clone()),

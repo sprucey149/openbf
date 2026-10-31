@@ -13,7 +13,7 @@ pub(crate) fn side_classes_lvl(lvl_path: &str) -> Option<std::path::PathBuf> {
     Path::new(lvl_path)
         .parent()
         .and_then(|p| p.parent())
-        .map(|p| p.join("SIDE").join("TUR.LVL"))
+        .map(|p| crate::join_ci(p, "SIDE/TUR.LVL"))
         .filter(|p| p.is_file())
 }
 

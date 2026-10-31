@@ -170,7 +170,7 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
     }
 
     // Fonts.
-    let fonts = bake_fonts(&dir.join(FONT_SOURCE), out, "")?;
+    let fonts = bake_fonts(&crate::join_ci(dir, FONT_SOURCE), out, "")?;
 
     // The sheets the layouts name that INGAME lacks.
     let mut wanted = BTreeSet::new();
@@ -187,7 +187,7 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
     std::fs::create_dir_all(&tex_dir)?;
     let mut textures = Vec::new();
     for src in SHEET_SOURCES {
-        let p = dir.join(src);
+        let p = crate::join_ci(dir, src);
         let bytes = std::fs::read(&p).with_context(|| p.display().to_string())?;
         let inner = mungefs::open(&bytes).map_err(|e| anyhow!("{}: {e}", p.display()))?;
         for c in mungefs::content_chunks(inner)

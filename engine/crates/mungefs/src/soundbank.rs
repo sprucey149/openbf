@@ -29,6 +29,7 @@ pub struct Sample {
 
 pub struct SampleBank<'a> {
     pub name_hash: u32,
+    pub format: u32,
     pub samples: Vec<Sample>,
     pub data: &'a [u8],
 }
@@ -227,16 +228,23 @@ fn parse_bank<'a>(bank: &Chunk<'a>) -> Result<SampleBank<'a>, UcfbError> {
             data = Some(c.payload);
         }
     }
-    let (info, data) = (info.ok_or_else(bad)?, data.ok_or_else(bad)?);
+    let (info, data) = (info.ok_or_else(bad)?, data.unwrap_or(&[]));
 
     let pairs = info_pairs(info);
     let h_name = fnv1a_lowercase("name");
+    let h_format = fnv1a_lowercase("format");
 
     let name_hash = pairs
         .iter()
         .find(|(k, _)| *k == h_name)
         .map(|(_, v)| *v)
         .ok_or_else(bad)?;
+
+    let format = pairs
+        .iter()
+        .find(|(k, _)| *k == h_format)
+        .map(|(_, v)| *v)
+        .unwrap_or(1);
 
     // Records are delimited by marker pairs whose VALUE is hash("sample").
     // Alias records (an `alias` field naming another sample id) own no data:
@@ -246,7 +254,13 @@ fn parse_bank<'a>(bank: &Chunk<'a>) -> Result<SampleBank<'a>, UcfbError> {
     for rec in sample_records(&pairs) {
         let size = rec.size;
         let padding = rec.padding as usize;
-        let frames = rec.frames.unwrap_or((size / 16).saturating_mul(28));
+        let frames = rec.frames.unwrap_or_else(|| {
+            if format == 2 {
+                size / 2
+            } else {
+                (size / 16).saturating_mul(28)
+            }
+        });
         samples.push(Sample {
             id_hash: rec.id,
             frequency: rec.frequency,
@@ -280,6 +294,7 @@ fn parse_bank<'a>(bank: &Chunk<'a>) -> Result<SampleBank<'a>, UcfbError> {
     });
     Ok(SampleBank {
         name_hash,
+        format,
         samples,
         data,
     })

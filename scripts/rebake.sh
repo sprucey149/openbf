@@ -13,7 +13,20 @@ set -euo pipefail
 
 # land.py reads this line too (it refuses a card whose `rebake=` names another).
 REBAKE_GROUPS="tat1 tat2 maps common side classes sounds global-sound load beep"
-for g in "$@"; do
+CLI_PC_DIR=""
+WANT_GROUPS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pc-dir) [ $# -ge 2 ] || { echo "rebake: --pc-dir needs a directory" >&2; exit 2; }; CLI_PC_DIR="${2//\\//}"; shift 2 ;;
+    --pc-dir=*) v="${1#*=}"; CLI_PC_DIR="${v//\\//}"; shift ;;
+    --pc1) [ $# -ge 2 ] || { echo "rebake: --pc1 needs a directory" >&2; exit 2; }; PC1="${2//\\//}"; shift 2 ;;
+    --pc1=*) v="${1#*=}"; PC1="${v//\\//}"; shift ;;
+    --pc2) [ $# -ge 2 ] || { echo "rebake: --pc2 needs a directory" >&2; exit 2; }; PC2="${2//\\//}"; shift 2 ;;
+    --pc2=*) v="${1#*=}"; PC2="${v//\\//}"; shift ;;
+    *) WANT_GROUPS+=("$1"); shift ;;
+  esac
+done
+for g in "${WANT_GROUPS[@]}"; do
   case " $REBAKE_GROUPS " in
     *" $g "*) ;;
     *) echo "rebake: unknown group '$g' (groups: $REBAKE_GROUPS)" >&2; exit 2 ;;
@@ -23,11 +36,65 @@ done
 # Under Git for Windows' bash (card WIN, scripts/pack.py) `pwd -W` gives C:/... : the bake.exe it runs reads
 # those as they are, comma-joined lists included (MSYS converts only whole /c/... arguments).
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && { pwd -W 2>/dev/null || pwd; })"
+ci() {
+  local cur="$1" rel="$2" part found entry base p_lc b_lc
+  [ -e "$cur/$rel" ] && { printf '%s\n' "$cur/$rel"; return 0; }
+  local IFS=/
+  for part in $rel; do
+    [ -z "$part" ] && continue
+    found=""
+    if [ -d "$cur" ]; then
+      p_lc=$(printf '%s' "$part" | tr 'A-Z' 'a-z')
+      for entry in "$cur"/*; do
+        [ -e "$entry" ] || continue
+        base="${entry##*/}"
+        b_lc=$(printf '%s' "$base" | tr 'A-Z' 'a-z')
+        if [ "$b_lc" = "$p_lc" ]; then
+          found="$entry"
+          break
+        fi
+      done
+    fi
+    cur="${found:-$cur/$part}"
+  done
+  printf '%s\n' "$cur"
+}
+
+is_pc_lvl_dir() {
+  local d="$1" want="$2"
+  [ -d "$d" ] && [ -f "$(ci "$d" CORE.LVL)" ] || return 1
+  case "$want" in
+    bf2) [ -f "$(ci "$d" INGAME.LVL)" ] ;;
+    bf1) [ -f "$(ci "$d" COMMON/ENG/COMMON.LVL)" ] ;;
+    *) return 1 ;;
+  esac
+}
+
+find_pc_lvl() {
+  local base="${1//\\//}" want="$2" d
+  for d in "$base" "$(ci "$base" GameData/Data/_LVL_PC)"; do
+    if is_pc_lvl_dir "$d" "$want"; then printf '%s\n' "$d"; return 0; fi
+  done
+  if [ -d "$base" ]; then
+    while IFS= read -r d; do
+      if [ -n "$d" ] && is_pc_lvl_dir "$d" "$want"; then printf '%s\n' "$d"; return 0; fi
+    done < <(find "$base" -maxdepth 6 -type d -iname '_lvl_pc' 2>/dev/null)
+  fi
+  return 1
+}
+
+[ -n "${PC1:-}" ] && PC1="$(find_pc_lvl "$PC1" bf1 || printf '%s' "${PC1//\\//}")"
+[ -n "${PC2:-}" ] && PC2="$(find_pc_lvl "$PC2" bf2 || printf '%s' "${PC2//\\//}")"
+if [ -n "$CLI_PC_DIR" ]; then
+  [ -n "${PC1:-}" ] || PC1="$(find_pc_lvl "$CLI_PC_DIR" bf1 || true)"
+  [ -n "${PC2:-}" ] || PC2="$(find_pc_lvl "$CLI_PC_DIR" bf2 || true)"
+fi
+
 E="$ROOT/extracted"
-B1="$E/bf1/lvl/DATA/_LVL_PS2"
-B2="$E/bf2/lvl/DATA/_LVL_PS2"
-S1="$E/bf1/sound/DATA/_LVL_PS2"
-S2="$E/bf2/sound/DATA/_LVL_PS2"
+B1="${PC1:-$E/bf1/lvl/DATA/_LVL_PS2}"
+B2="${PC2:-$E/bf2/lvl/DATA/_LVL_PS2}"
+S1="${PC1:-$E/bf1/sound/DATA/_LVL_PS2}"
+S2="${PC2:-$E/bf2/sound/DATA/_LVL_PS2}"
 # scripts/pack.py extracts each disc whole into lvl/ (bake extract-iso): the
 # sound LVLs are then beside the rest.
 [ -d "$S1" ] || S1="$B1"
@@ -42,7 +109,10 @@ OUT="${REBAKE_OUT:-$ROOT/engine/assets_baked}"
 # and optional: without it every bake is PS2-only, which is a real difference
 # in output, so the script SAYS which way it ran rather than deciding quietly.
 PC="$ROOT/PC_swbf2_exe/Star Wars Battlefront II Classic/GameData/data/_lvl_pc"
-if [ -d "$PC" ]; then
+if [ -n "${PC1:-}${PC2:-}" ]; then
+  echo "PC primary sources: BF1=$B1 BF2=$B2"
+  PC=""
+elif [ -d "$PC" ]; then
   echo "PC stock textures: $PC (BF2 maps get the larger PC texture where there is one)"
 else
   echo "PC stock textures: NOT PRESENT — baking PS2-only"
@@ -72,7 +142,7 @@ cargo build -p bake --release
 BAKE="${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/bake"
 [ -f "$BAKE.exe" ] && BAKE="$BAKE.exe"
 
-SEL=("$@")
+SEL=("${WANT_GROUPS[@]}")
 want() {
   [ "${#SEL[@]}" -eq 0 ] && return 0
   for g in "${SEL[@]}"; do [ "$g" = "$1" ] && return 0; done
@@ -88,41 +158,43 @@ clean() { local t; for t in "$@"; do rm -rf "$t"; done; }
 # Space (SPA*) is P8 and not baked here.
 BF1_MAPS="BES/BES1 BES/BES2 END/END1 GEO/GEO1 HOT/HOT1 KAM/KAM1 KAS/KAS1 KAS/KAS2 NAB/NAB1 NAB/NAB2 RHN/RHN1 RHN/RHN2 TAT/TAT2 YAV/YAV1 YAV/YAV2"
 BF2_MAPS="COR/COR1 DAG/DAG1 DEA/DEA1 END/END1 FEL/FEL1 GEO/GEO1 HOT/HOT1 KAM/KAM1 KAS/KAS2 MUS/MUS1 MYG/MYG1 NAB/NAB2 POL/POL1 TAN/TAN1 TAT/TAT3 UTA/UTA1 YAV/YAV1"
+BF1_MAPS="${OPENBF_BF1_MAPS:-$BF1_MAPS}"
+BF2_MAPS="${OPENBF_BF2_MAPS:-$BF2_MAPS}"
 
 
 if want tat1; then
   echo "== TAT1 (BF1) =="
   clean "$OUT/tat1/models" "$OUT/tat1/textures" "$OUT/tat1/collision" "$OUT/tat1/nav"
-  "$BAKE" map "$B1/TAT/TAT1.LVL" "$OUT/tat1"
+  "$BAKE" map "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/tat1"
 fi
 if want tat2; then
   echo "== TAT2 (BF2) =="
   clean "$OUT/tat2/models" "$OUT/tat2/textures" "$OUT/tat2/collision" "$OUT/tat2/nav"
   pc_arg tat tat2
-  "$BAKE" map "$B2/TAT/TAT2.LVL" "$OUT/tat2" "${PC_ARG[@]}"
+  "$BAKE" map "$(ci "$B2" TAT/TAT2.LVL)" "$OUT/tat2" "${PC_ARG[@]}"
 fi
 if want common; then
   echo "== common assets =="
   clean "$OUT/common_bf1/models" "$OUT/common_bf1/textures" "$OUT/common_bf1/collision" \
         "$OUT/common_bf2/models" "$OUT/common_bf2/textures" "$OUT/common_bf2/collision"
-  "$BAKE" common "$B1/COMMON/ENG/COMMON.LVL" "$OUT/common_bf1"
+  "$BAKE" common "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/common_bf1"
   PC_ARG=()
   [ -n "$PC" ] && [ -f "$PC/ingame.lvl" ] && PC_ARG=("$PC/ingame.lvl")
-  "$BAKE" common "$B2/INGAME.LVL" "$OUT/common_bf2" "${PC_ARG[@]}"
+  "$BAKE" common "$(ci "$B2" INGAME.LVL)" "$OUT/common_bf2" "${PC_ARG[@]}"
   # The specular pass's lookup table, from each game's own CORE.LVL (the
   # texels are identical on both discs; analysis/re-specular-pass.md §5).
-  "$BAKE" specular "$B1/CORE.LVL" "$OUT/common_bf1"
-  "$BAKE" specular "$B2/CORE.LVL" "$OUT/common_bf2"
+  "$BAKE" specular "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
+  "$BAKE" specular "$(ci "$B2" CORE.LVL)" "$OUT/common_bf2"
   # BF2's terrain light pass texture (card FXBL, analysis/re-bolt.md §5.3):
   # BF1 draws no light on its terrain (§5.1).
-  "$BAKE" omniproj "$B2/CORE.LVL" "$OUT/common_bf2"
+  "$BAKE" omniproj "$(ci "$B2" CORE.LVL)" "$OUT/common_bf2"
   # Each game's English text table (card EVMSG, analysis/re-event-messages.md):
   # the HUD's event lines, team, post and soldier names.
-  "$BAKE" locl "$B1/CORE.LVL" "$OUT/common_bf1"
-  "$BAKE" locl "$B2/CORE.LVL" "$OUT/common_bf2"
+  "$BAKE" locl "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
+  "$BAKE" locl "$(ci "$B2" CORE.LVL)" "$OUT/common_bf2"
   # BF1's own bitmap fonts (card SQHUD: the squad cross's labels are BF1's
   # gamefont_tiny), prefixed so they sit beside BF2's in one name space.
-  "$BAKE" fonts "$B1/CORE.LVL" "$OUT/common_bf1" bf1_
+  "$BAKE" fonts "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1" bf1_
   # BF2's PS2 shell (card BSHLA, analysis/re-bf2-shell.md §1, §4): SHELL.LVL's
   # logo, the background movie's menu loops (ffmpeg transcodes them to frame
   # packs) and SOUND/SHELL.LVL's bank + music index. The movie is read from
@@ -130,14 +202,14 @@ if want common; then
   # image (a dev tree's extracted discs leave MOVIES/ out).
   # A worktree links extracted/ but not iso/: the disc image is then the main
   # checkout's (git's common dir sits in it).
-  MVS="$B2/MOVIES/SHELL.MVS"
+  MVS="$(ci "$B2" MOVIES/SHELL.MVS)"
   [ -f "$MVS" ] || MVS="$ROOT/iso/SWBF2.iso"
   if [ ! -f "$MVS" ]; then
     MAIN_ROOT="$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)")"
     MVS="$MAIN_ROOT/iso/SWBF2.iso"
   fi
   clean "$OUT/common_bf2/shell"
-  "$BAKE" shell "$B2/SHELL.LVL" "$MVS" "$S2/SOUND/SHELL.LVL" "$B2/CORE.LVL" "$OUT/common_bf2"
+  "$BAKE" shell "$(ci "$B2" SHELL.LVL)" "$MVS" "$(ci "$S2" SOUND/SHELL.LVL)" "$(ci "$B2" CORE.LVL)" "$OUT/common_bf2"
 fi
 if want side; then
   echo "== soldiers + weapons + vehicles =="
@@ -213,48 +285,54 @@ if want side; then
   # destruction chunks, collision, textures -> side_<game>/vehicles/<side>/.
   for s in all cis imp rep; do
     S=$(echo "$s" | tr a-z A-Z)
-    "$BAKE" vehicle "$B1/SIDE/$S.LVL" "$OUT/side_bf1/vehicles/$s"
+    "$BAKE" vehicle "$(ci "$B1" "SIDE/$S.LVL")" "$OUT/side_bf1/vehicles/$s"
   done
   # BF1 SIDE/GUN: Naboo Plains' missions read it (nab1c/nab1i/nab1c_h.luac)
   # and three NAB1 pads key its gun_walk_kaadu for the defenders (card KAAD).
-  "$BAKE" vehicle "$B1/SIDE/GUN.LVL" "$OUT/side_bf1/vehicles/gun"
-  "$BAKE" vehicle "$B2/SIDE/ALL.LVL" "$OUT/side_bf2/vehicles/all"
-  "$BAKE" vehicle "$B2/SIDE/IMP.LVL" "$OUT/side_bf2/vehicles/imp"
-  "$BAKE" vehicle "$B2/SIDE/REP.LVL" "$OUT/side_bf2/vehicles/rep" ${PCSIDE_REP:+"$PCSIDE_REP"}
-  "$BAKE" vehicle "$B2/SIDE/CIS.LVL" "$OUT/side_bf2/vehicles/cis" ${PCSIDE_CIS:+"$PCSIDE_CIS"}
+  "$BAKE" vehicle "$(ci "$B1" SIDE/GUN.LVL)" "$OUT/side_bf1/vehicles/gun"
+  "$BAKE" vehicle "$(ci "$B2" SIDE/ALL.LVL)" "$OUT/side_bf2/vehicles/all"
+  "$BAKE" vehicle "$(ci "$B2" SIDE/IMP.LVL)" "$OUT/side_bf2/vehicles/imp"
+  "$BAKE" vehicle "$(ci "$B2" SIDE/REP.LVL)" "$OUT/side_bf2/vehicles/rep" ${PCSIDE_REP:+"$PCSIDE_REP"}
+  "$BAKE" vehicle "$(ci "$B2" SIDE/CIS.LVL)" "$OUT/side_bf2/vehicles/cis" ${PCSIDE_CIS:+"$PCSIDE_CIS"}
   # Every side LVL's `fx__` particle effects + the textures/models they name
   # (card FXP1, analysis/re-fx.md §1): BF2's sides carry per-class effects
   # (IMP 8, SNW 6, CIS 5, ...); BF1's carry none, and a side with none writes
   # nothing. ALL side LVLs, not only the four baked above: the runtime looks
   # an effect up by hash through whatever side a mission loads.
-  for f in "$B1"/SIDE/*.LVL; do
-    s=$(basename "$f" .LVL | tr 'A-Z' 'a-z')
+  SD1="$(ci "$B1" SIDE)"
+  for f in "$SD1"/*.[Ll][Vv][Ll]; do
+    [ -f "$f" ] || continue
+    base="${f##*/}"
+    s=$(printf '%s' "${base%.*}" | tr 'A-Z' 'a-z')
     "$BAKE" effects "$f" "$OUT/side_bf1/effects/$s" bf1
   done
-  for f in "$B2"/SIDE/*.LVL; do
-    s=$(basename "$f" .LVL | tr 'A-Z' 'a-z')
+  SD2="$(ci "$B2" SIDE)"
+  for f in "$SD2"/*.[Ll][Vv][Ll]; do
+    [ -f "$f" ] || continue
+    base="${f##*/}"
+    s=$(printf '%s' "${base%.*}" | tr 'A-Z' 'a-z')
     "$BAKE" effects "$f" "$OUT/side_bf2/effects/$s" bf2
   done
 fi
 if want classes; then
   echo "== entity/weapon classes =="
-  "$BAKE" classes "$B1/SIDE/ALL.LVL"        "$OUT/classes/bf1_all.ron"
-  "$BAKE" classes "$B1/SIDE/IMP.LVL"        "$OUT/classes/bf1_imp.ron"
-  "$BAKE" classes "$B1/COMMON/ENG/COMMON.LVL" "$OUT/classes/bf1_common.ron"
-  "$BAKE" classes "$B2/SIDE/REP.LVL"        "$OUT/classes/bf2_rep.ron"
-  "$BAKE" classes "$B2/SIDE/CIS.LVL"        "$OUT/classes/bf2_cis.ron"
-  "$BAKE" classes "$B2/INGAME.LVL"          "$OUT/classes/bf2_ingame.ron"
+  "$BAKE" classes "$(ci "$B1" SIDE/ALL.LVL)"          "$OUT/classes/bf1_all.ron"
+  "$BAKE" classes "$(ci "$B1" SIDE/IMP.LVL)"          "$OUT/classes/bf1_imp.ron"
+  "$BAKE" classes "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/classes/bf1_common.ron"
+  "$BAKE" classes "$(ci "$B2" SIDE/REP.LVL)"          "$OUT/classes/bf2_rep.ron"
+  "$BAKE" classes "$(ci "$B2" SIDE/CIS.LVL)"          "$OUT/classes/bf2_cis.ron"
+  "$BAKE" classes "$(ci "$B2" INGAME.LVL)"            "$OUT/classes/bf2_ingame.ron"
   # Bake all four factions per source game: game::roster::class_files loads
   # the sides in play, including clone-wars on BF1 maps and GCW on BF2 maps.
-  "$BAKE" classes "$B1/SIDE/REP.LVL"        "$OUT/classes/bf1_rep.ron"
-  "$BAKE" classes "$B1/SIDE/CIS.LVL"        "$OUT/classes/bf1_cis.ron"
-  "$BAKE" classes "$B2/SIDE/ALL.LVL"        "$OUT/classes/bf2_all.ron"
-  "$BAKE" classes "$B2/SIDE/IMP.LVL"        "$OUT/classes/bf2_imp.ron"
+  "$BAKE" classes "$(ci "$B1" SIDE/REP.LVL)"          "$OUT/classes/bf1_rep.ron"
+  "$BAKE" classes "$(ci "$B1" SIDE/CIS.LVL)"          "$OUT/classes/bf1_cis.ron"
+  "$BAKE" classes "$(ci "$B2" SIDE/ALL.LVL)"          "$OUT/classes/bf2_all.ron"
+  "$BAKE" classes "$(ci "$B2" SIDE/IMP.LVL)"          "$OUT/classes/bf2_imp.ron"
   # A mission's extra side (game::vehicle_pads::mission_side_files).
-  "$BAKE" classes "$B1/SIDE/GUN.LVL"        "$OUT/classes/bf1_gun.ron"
+  "$BAKE" classes "$(ci "$B1" SIDE/GUN.LVL)"          "$OUT/classes/bf1_gun.ron"
   # BF2's building turrets (card VTUR2): their PROPs; each map bake pulls the
   # models, collision and skel nodes of the TUR classes its worlds place.
-  "$BAKE" classes "$B2/SIDE/TUR.LVL"        "$OUT/classes/bf2_tur.ron"
+  "$BAKE" classes "$(ci "$B2" SIDE/TUR.LVL)"          "$OUT/classes/bf2_tur.ron"
 fi
 if want sounds; then
   # One SOUND LVL per PLANET on both discs (RE_LOG "BF1 does NOT ship sound
@@ -266,22 +344,25 @@ if want sounds; then
   # gain, rolloff) is there, not in the planet's LVL (card SNDT).
   bake_map_sounds() {  # <sound root> <map dir name> <map short name> <CORE.LVL>
     local root="$1" dir="$2" short="$3" core="$4"
-    local planet
+    local planet sf
     planet=$(echo "${short:0:3}" | tr 'a-z' 'A-Z')
-    if [ -f "$root/SOUND/$planet.LVL" ]; then
+    sf="$(ci "$root" "SOUND/$planet.LVL")"
+    if [ -f "$sf" ]; then
       clean "$OUT/$dir/sounds"
-      "$BAKE" sounds "$root/SOUND/$planet.LVL" "$OUT/$dir" "$core"
+      "$BAKE" sounds "$sf" "$OUT/$dir" "$core"
     else
       echo "  (no SOUND/$planet.LVL for $dir — skipped)"
     fi
   }
-  bake_map_sounds "$S1" tat1 tat1 "$B1/CORE.LVL"
-  bake_map_sounds "$S2" tat2 tat2 "$B2/CORE.LVL"
+  C1="$(ci "$B1" CORE.LVL)"
+  C2="$(ci "$B2" CORE.LVL)"
+  bake_map_sounds "$S1" tat1 tat1 "$C1"
+  bake_map_sounds "$S2" tat2 tat2 "$C2"
   for p in $BF1_MAPS; do
-    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S1" "bf1_$n" "$n" "$B1/CORE.LVL"
+    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S1" "bf1_$n" "$n" "$C1"
   done
   for p in $BF2_MAPS; do
-    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$B2/CORE.LVL"
+    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2"
   done
   # The RESIDENT bank both games load and never unload: CORE.LVL's `global`
   # SampleBank + `snd_` — every shell/load sound, incl. shell_menu_accept
@@ -290,8 +371,8 @@ if want sounds; then
   # these two directories on a FRESH tree too.
   echo "== resident global banks (CORE.LVL) =="
   clean "$OUT/core_bf1/sounds" "$OUT/core_bf2/sounds"
-  "$BAKE" sounds "$B1/CORE.LVL" "$OUT/core_bf1"
-  "$BAKE" sounds "$B2/CORE.LVL" "$OUT/core_bf2"
+  "$BAKE" sounds "$C1" "$OUT/core_bf1"
+  "$BAKE" sounds "$C2" "$OUT/core_bf2"
   # Recover readable names for the hashed properties/samples so
   # scripts/audition.sh can lay a bank out under names a human can read.
   # Needs the baked classes, so it runs after them; harmless if they are
@@ -313,16 +394,18 @@ if want global-sound; then
   # only name that data has.
   echo "== global VO streams =="
   clean "$OUT/audio/global_bf1" "$OUT/audio/global_bf2"
-  REF1=$(ls "$S1"/SOUND/*.LVL | grep -vE '/(CW|GCW|TEST)\.LVL$' | paste -sd,)
-  REF2=$(ls "$S2"/SOUND/*.LVL | grep -v '/GLOBAL\.LVL$' | paste -sd,)
-  "$BAKE" global-sound "$S1/SOUND/CW.LVL,$S1/SOUND/GCW.LVL" "$OUT/audio/global_bf1" "$REF1"
-  "$BAKE" global-sound "$S2/SOUND/GLOBAL.LVL" "$OUT/audio/global_bf2" "$REF2"
+  SND1="$(ci "$S1" SOUND)"
+  SND2="$(ci "$S2" SOUND)"
+  REF1=$(ls "$SND1"/*.[Ll][Vv][Ll] | grep -viE '/(cw|gcw|test)\.lvl$' | paste -sd,)
+  REF2=$(ls "$SND2"/*.[Ll][Vv][Ll] | grep -viE '/global\.lvl$' | paste -sd,)
+  "$BAKE" global-sound "$(ci "$S1" SOUND/CW.LVL),$(ci "$S1" SOUND/GCW.LVL)" "$OUT/audio/global_bf1" "$REF1"
+  "$BAKE" global-sound "$(ci "$S2" SOUND/GLOBAL.LVL)" "$OUT/audio/global_bf2" "$REF2"
 fi
 if want load; then
   echo "== load screens =="
-  "$BAKE" loadscreen "$B1/LOAD/TAT1.LVL"   "$OUT/tat1"
-  "$BAKE" loadscreen "$B2/LOAD/TAT2.LVL"   "$OUT/tat2"
-  "$BAKE" loadscreen "$B2/LOAD/COMMON.LVL" "$OUT/common_bf2"
+  "$BAKE" loadscreen "$(ci "$B1" LOAD/TAT1.LVL)"   "$OUT/tat1"
+  "$BAKE" loadscreen "$(ci "$B2" LOAD/TAT2.LVL)"   "$OUT/tat2"
+  "$BAKE" loadscreen "$(ci "$B2" LOAD/COMMON.LVL)" "$OUT/common_bf2"
 fi
 
 if want maps; then
@@ -330,24 +413,28 @@ if want maps; then
   for p in $BF1_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf1_$n"
     clean "$d/models" "$d/textures" "$d/collision" "$d/nav"
-    "$BAKE" map "$B1/$p.LVL" "$d"
-    [ -f "$B1/LOAD/$(basename "$p").LVL" ] && "$BAKE" loadscreen "$B1/LOAD/$(basename "$p").LVL" "$d"
+    "$BAKE" map "$(ci "$B1" "$p.LVL")" "$d"
+    LF="$(ci "$B1" "LOAD/$(basename "$p").LVL")"
+    [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"
   done
   for p in $BF2_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf2_$n"
     planet=$(dirname "$p" | tr 'A-Z' 'a-z')
     clean "$d/models" "$d/textures" "$d/collision" "$d/nav"
     pc_arg "$planet" "$n"
-    "$BAKE" map "$B2/$p.LVL" "$d" "${PC_ARG[@]}"
-    [ -f "$B2/LOAD/$(basename "$p").LVL" ] && "$BAKE" loadscreen "$B2/LOAD/$(basename "$p").LVL" "$d"
+    "$BAKE" map "$(ci "$B2" "$p.LVL")" "$d" "${PC_ARG[@]}"
+    LF="$(ci "$B2" "LOAD/$(basename "$p").LVL")"
+    [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"
   done
   # Card COVR: BF1 Yavin Temple takes BF2 Yavin Temple's Cover hints (same
   # graph; bake::donor::DONORS). After both are baked; run again it replaces
   # its own hints.
-  "$BAKE" donor-hints "$OUT"
+  if [ -f "$OUT/bf1_yav1/manifest.ron" ] && [ -f "$OUT/bf2_yav1/manifest.ron" ]; then
+    "$BAKE" donor-hints "$OUT"
+  fi
 fi
 if want beep; then
   echo "== BF1 loading beep =="
-  "$BAKE" beep "$S1/CORE.LVL" "$OUT/audio"
+  "$BAKE" beep "$(ci "$S1" CORE.LVL)" "$OUT/audio"
 fi
 echo "rebake done -> $OUT"

@@ -187,6 +187,29 @@ fn music(inner: &[u8]) -> Vec<MusicRon> {
         .collect()
 }
 
+pub(crate) fn find_common_bnk(lvl_path: &Path) -> Option<std::path::PathBuf> {
+    let parent = lvl_path.parent()?;
+    ["common.bnk", "sound/common.bnk"]
+        .into_iter()
+        .map(|rel| crate::join_ci(parent, rel))
+        .find(|p| p.is_file())
+}
+
+pub(crate) fn common_bnk_samples(bnk_buf: &[u8]) -> HashMap<u32, (u32, u32, u32, &[u8])> {
+    let mut out = HashMap::new();
+    let Ok(inner) = mungefs::open(bnk_buf) else {
+        return out;
+    };
+    for b in mungefs::soundbank::find_banks_deep(inner) {
+        for s in &b.samples {
+            if let Some(slice) = b.data.get(s.offset..s.offset.saturating_add(s.size)) {
+                out.insert(s.id_hash, (b.format, s.frequency, s.frames, slice));
+            }
+        }
+    }
+    out
+}
+
 /// `sound_lvl`'s banks and properties under `<outdir>/sounds`. `core_lvl` is
 /// the game's resident CORE.LVL: a property's `Inherit` template is looked up
 /// in its own LVL, then there. Nearly every template lives in CORE (58,459
@@ -198,6 +221,12 @@ pub fn bake_sounds(sound_lvl: &str, outdir: &str, core_lvl: Option<&str>) -> Res
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir).join("sounds");
     std::fs::create_dir_all(&out)?;
+
+    let bnk_buf = find_common_bnk(Path::new(sound_lvl)).and_then(|p| std::fs::read(p).ok());
+    let common_samples = bnk_buf
+        .as_deref()
+        .map(common_bnk_samples)
+        .unwrap_or_default();
 
     let banks = mungefs::soundbank::find_banks_deep(inner);
     let mut samples: Vec<(u32, String)> = Vec::new();
@@ -213,16 +242,27 @@ pub fn bake_sounds(sound_lvl: &str, outdir: &str, core_lvl: Option<&str>) -> Res
             if seen.contains(&s.id_hash) {
                 continue;
             }
-            let end = s.offset + s.size;
-            if end > b.data.len() {
+            let (format, rate, data_slice) = if !b.data.is_empty() {
+                let end = s.offset + s.size;
+                if end > b.data.len() {
+                    bail!(
+                        "sample {:08x} outside bank {:08x} data",
+                        s.id_hash,
+                        b.name_hash
+                    );
+                }
+                (b.format, s.frequency, &b.data[s.offset..end])
+            } else if let Some(&(fmt, freq, _, slice)) = common_samples.get(&s.id_hash) {
+                (fmt, freq, slice)
+            } else {
                 bail!(
-                    "sample {:08x} outside bank {:08x} data",
+                    "sample {:08x} in bank {:08x} has no local data and was not found in common.bnk",
                     s.id_hash,
                     b.name_hash
                 );
-            }
-            let pcm = crate::adpcm::decode(&b.data[s.offset..end]);
-            let wav = crate::adpcm::wav_mono_s16(s.frequency, &pcm);
+            };
+            let pcm = crate::adpcm::decode_bank_sample(format, data_slice);
+            let wav = crate::adpcm::wav_mono_s16(rate, &pcm);
             let rel = format!("{:08x}/{:08x}.wav", b.name_hash, s.id_hash);
             std::fs::write(out.join(&rel), wav)?;
             seen.insert(s.id_hash);

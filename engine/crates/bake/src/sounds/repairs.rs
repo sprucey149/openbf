@@ -26,6 +26,9 @@ pub(super) fn tantive_female_aliases(
     let Some(bank) = banks.iter().find(|b| b.name_hash == 0xd4cb_a316) else {
         return Ok(());
     };
+    if bank.format == 2 {
+        return Ok(());
+    }
     let female = mungefs::fnv1a_lowercase("all_inf_com_chatter_wound_female");
     if !props.iter().any(|p| {
         p.name_hash == female

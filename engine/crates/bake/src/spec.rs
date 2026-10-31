@@ -110,20 +110,61 @@ pub fn bake_table(core_lvl: &str, outdir: &str) -> Result<()> {
 /// every omni light. One level, like the specular table.
 pub const OMNIPROJ_NAME: &str = "com_sfx_omniproj";
 
+fn synth_core_texture(name: &str) -> Option<(u32, u32, Vec<u8>)> {
+    if name.eq_ignore_ascii_case(TABLE_NAME) {
+        let mut rgba = Vec::with_capacity(128 * 128 * 4);
+        for y in 0..128u32 {
+            let d = (2.0 * (y as f32 / 127.0) - 1.0).abs();
+            for x in 0..128u32 {
+                let v = if x == 0 {
+                    ((0.5 + 0.5 * d) * 255.0).round() as u8
+                } else {
+                    (d.powf(2.0 * x as f32) * 255.0).round().clamp(0.0, 255.0) as u8
+                };
+                rgba.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        Some((128, 128, rgba))
+    } else if name.eq_ignore_ascii_case(OMNIPROJ_NAME) {
+        let mut rgba = Vec::with_capacity(64 * 64 * 4);
+        for y in 0..64u32 {
+            let v = (y as f32 + 0.5) / 32.0 - 1.0;
+            for x in 0..64u32 {
+                let u = (x as f32 + 0.5) / 32.0 - 1.0;
+                let r = u.hypot(v);
+                let g = if r >= 1.0 {
+                    0
+                } else {
+                    ((r * std::f32::consts::FRAC_PI_2).cos().powi(2) * 255.0).round() as u8
+                };
+                rgba.extend_from_slice(&[g, g, g, 255]);
+            }
+        }
+        Some((64, 64, rgba))
+    } else {
+        None
+    }
+}
+
 /// Bake the CORE.LVL texture `name` into `<outdir>/<name>.ktx2`, its level 0
 /// only.
 pub fn bake_core_texture(core_lvl: &str, name: &str, outdir: &str) -> Result<()> {
     let bytes = std::fs::read(core_lvl).map_err(|e| anyhow!("{core_lvl}: {e}"))?;
     let inner = mungefs::open(&bytes).map_err(|e| anyhow!("{core_lvl}: {e}"))?;
-    let tex = mungefs::content_chunks(inner)
+    let found = mungefs::content_chunks(inner)
         .map_err(|e| anyhow!("{core_lvl}: {e}"))?
         .into_iter()
         .filter(|c| &c.tag == b"tex_")
         .filter_map(|c| mungefs::texture::Texture::parse(&c).ok())
-        .find(|t| t.name.eq_ignore_ascii_case(name))
-        .ok_or_else(|| anyhow!("{core_lvl}: no tex_ named {name:?}"))?;
-    let (w, h) = tex.mip_dims(0);
-    let level0 = tex.rgba8(0);
+        .find(|t| t.name.eq_ignore_ascii_case(name));
+    let (w, h, level0) = if let Some(tex) = found {
+        let (w, h) = tex.mip_dims(0);
+        (w, h, tex.rgba8(0))
+    } else if let Some(synth) = synth_core_texture(name) {
+        synth
+    } else {
+        return Err(anyhow!("{core_lvl}: no tex_ named {name:?}"));
+    };
     std::fs::create_dir_all(outdir)?;
     let ktx = crate::ktx2w::write_rgba8(w, h, std::slice::from_ref(&level0));
     std::fs::write(Path::new(outdir).join(format!("{name}.ktx2")), ktx)?;

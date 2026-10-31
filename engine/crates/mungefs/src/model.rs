@@ -203,14 +203,199 @@ impl Model {
     }
 }
 
+struct PcGeometry {
+    index_count: u32,
+    bind: Vec<[u8; 4]>,
+    wght: Vec<[u8; 4]>,
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    uvs: Vec<[f32; 2]>,
+    colors: Option<Vec<[u8; 4]>>,
+    triangles: Vec<[u32; 3]>,
+}
+
+fn parse_pc_geometry(
+    segm: &Chunk<'_>,
+    vertex_count: u32,
+    prim_type: u32,
+) -> Result<PcGeometry, UcfbError> {
+    let bad = || UcfbError::Truncated(segm.offset);
+    let n = vertex_count as usize;
+    let ip = segm.child(b"IBUF").ok_or_else(bad)?.payload;
+    if ip.len() < 4 {
+        return Err(bad());
+    }
+    let icount = le::u32_at(ip, 0) as usize;
+    let remaining = ip.len().saturating_sub(4);
+    let raw_indices: Vec<u32> = if remaining >= icount * 4 {
+        (0..icount).map(|i| le::u32_at(ip, 4 + i * 4)).collect()
+    } else if remaining >= icount * 2 {
+        (0..icount)
+            .map(|i| u32::from(le::u16_at(ip, 4 + i * 2)))
+            .collect()
+    } else {
+        return Err(bad());
+    };
+
+    let mut triangles = Vec::new();
+    let push_tri = |tris: &mut Vec<[u32; 3]>, a: u32, b: u32, c: u32| {
+        if a != b && b != c && a != c && a < vertex_count && b < vertex_count && c < vertex_count {
+            tris.push([a, b, c]);
+        }
+    };
+    if prim_type == 5 || (prim_type != 4 && !raw_indices.len().is_multiple_of(3)) {
+        for t in 0..raw_indices.len().saturating_sub(2) {
+            let (a, b, c) = (raw_indices[t], raw_indices[t + 1], raw_indices[t + 2]);
+            if t % 2 == 0 {
+                push_tri(&mut triangles, a, b, c);
+            } else {
+                push_tri(&mut triangles, b, a, c);
+            }
+        }
+    } else {
+        for t in (0..raw_indices.len().saturating_sub(2)).step_by(3) {
+            push_tri(
+                &mut triangles,
+                raw_indices[t],
+                raw_indices[t + 1],
+                raw_indices[t + 2],
+            );
+        }
+    }
+
+    let vbuf_chunk = segm
+        .child(b"VDAT")
+        .or_else(|| {
+            segm.children_tagged(b"VBUF")
+                .find(|c| c.payload.len() >= 12 && (le::u32_at(c.payload, 8) & 0xF000) == 0)
+        })
+        .or_else(|| {
+            segm.children_tagged(b"VBUF")
+                .filter(|c| c.payload.len() >= 12)
+                .last()
+        })
+        .ok_or_else(bad)?;
+
+    let vp = vbuf_chunk.payload;
+    if vp.len() < 12 {
+        return Err(bad());
+    }
+    let stride = le::u32_at(vp, 4) as usize;
+    let fvf = le::u32_at(vp, 8);
+    let weight_bytes = if (fvf & 0x008) != 0 { 8 } else { 0 };
+    let index_bytes = if (fvf & 0x004) != 0 { 4 } else { 0 };
+    let norm_offset = 12 + weight_bytes + index_bytes;
+    let has_norm = (fvf & 0x020) != 0;
+    let norm_bytes = if has_norm { 12 } else { 0 };
+    let tan_bytes = if (fvf & 0x040) != 0 { 24 } else { 0 };
+    let color0_bytes = if (fvf & 0x080) != 0 { 4 } else { 0 };
+    let color1_bytes = if (fvf & 0x100) != 0 { 4 } else { 0 };
+    let color_offset = ((fvf & 0x180) != 0).then_some(norm_offset + norm_bytes + tan_bytes);
+    let has_uv = (fvf & 0x200) != 0;
+    let uv_offset = norm_offset + norm_bytes + tan_bytes + color0_bytes + color1_bytes;
+    let min_stride = uv_offset + if has_uv { 8 } else { 0 };
+    if stride < min_stride || vp.len() < 12 + n * stride {
+        return Err(bad());
+    }
+
+    let to_gs = |x: u8| ((u16::from(x) * 128 + 127) / 255) as u8;
+    let mut positions = Vec::with_capacity(n);
+    let mut normals = Vec::with_capacity(n);
+    let mut uvs = Vec::with_capacity(n);
+    let mut colors_vec = Vec::with_capacity(if color_offset.is_some() { n } else { 0 });
+
+    for i in 0..n {
+        let off = 12 + i * stride;
+        positions.push([
+            le::f32_at(vp, off),
+            le::f32_at(vp, off + 4),
+            le::f32_at(vp, off + 8),
+        ]);
+        normals.push(if has_norm {
+            [
+                le::f32_at(vp, off + norm_offset),
+                le::f32_at(vp, off + norm_offset + 4),
+                le::f32_at(vp, off + norm_offset + 8),
+            ]
+        } else {
+            [0.0, 1.0, 0.0]
+        });
+        uvs.push(if has_uv {
+            [
+                le::f32_at(vp, off + uv_offset),
+                le::f32_at(vp, off + uv_offset + 4),
+            ]
+        } else {
+            [0.0, 0.0]
+        });
+        if let Some(coff) = color_offset {
+            let [b, g, r, a] = [
+                vp[off + coff],
+                vp[off + coff + 1],
+                vp[off + coff + 2],
+                vp[off + coff + 3],
+            ];
+            colors_vec.push([to_gs(r), to_gs(g), to_gs(b), to_gs(a)]);
+        }
+    }
+
+    let mut bind = Vec::new();
+    let mut wght = Vec::new();
+    if let Some(skin) = segm.child(b"SKIN").filter(|s| s.payload.len() >= 8) {
+        let bpv = le::u32_at(skin.payload, 4);
+        if bpv == 1 && skin.payload.len() >= 8 + n {
+            for v in 0..n {
+                bind.push([skin.payload[8 + v] << 2, 0, 0, 0]);
+                wght.push([255, 0, 0, 0]);
+            }
+        } else if bpv == 3 && skin.payload.len() >= 8 + n * 5 {
+            for v in 0..n {
+                let base = 8 + v * 5;
+                let w0 = skin.payload[base];
+                let w1 = skin.payload[base + 1];
+                let w2 = 255u8.saturating_sub(w0).saturating_sub(w1);
+                let mut pairs = [
+                    (w0, skin.payload[base + 2]),
+                    (w1, skin.payload[base + 3]),
+                    (w2, skin.payload[base + 4]),
+                ];
+                pairs.sort_by(|a, b| b.0.cmp(&a.0));
+                bind.push([pairs[0].1 << 2, pairs[1].1 << 2, pairs[2].1 << 2, 0]);
+                wght.push([pairs[0].0, pairs[1].0, pairs[2].0, 0]);
+            }
+        }
+    }
+
+    Ok(PcGeometry {
+        index_count: icount as u32,
+        bind,
+        wght,
+        positions,
+        normals,
+        uvs,
+        colors: color_offset.map(|_| colors_vec),
+        triangles,
+    })
+}
+
 fn parse_segment(segm: &Chunk<'_>, vbox: &Aabb) -> Result<Segment, UcfbError> {
     let bad = || UcfbError::Truncated(segm.offset);
     let info = segm.child(b"INFO").ok_or_else(bad)?.payload;
     if info.len() < 8 {
         return Err(bad());
     }
-    let vertex_count = u32::from_le_bytes(info[0..4].try_into().unwrap());
-    let index_count = u32::from_le_bytes(info[4..8].try_into().unwrap());
+    let is_pc = segm.child(b"VBUF").is_some()
+        || segm.child(b"VDAT").is_some()
+        || segm.child(b"IBUF").is_some();
+    let (vertex_count, index_count, prim_type) = if is_pc && info.len() >= 12 {
+        (
+            le::u32_at(info, 4),
+            le::u32_at(info, 8),
+            le::u32_at(info, 0),
+        )
+    } else {
+        (le::u32_at(info, 0), le::u32_at(info, 4), 0u32)
+    };
     let n = vertex_count as usize;
     let bf2_material = segm.child(b"MTRL").is_some_and(|c| c.payload.len() >= 25);
     let material_flags = segm
@@ -249,10 +434,18 @@ fn parse_segment(segm: &Chunk<'_>, vbox: &Aabb) -> Result<Segment, UcfbError> {
         .map(|c| {
             let p = c.payload;
             if p.first().is_some_and(|&b| (32..127).contains(&b)) {
-                let end = p.iter().position(|&b| b == 0).unwrap_or(p.len());
-                match std::str::from_utf8(&p[..end]) {
-                    Ok(s) => RenderType::Bf1(s.to_owned()),
-                    Err(_) => RenderType::Absent,
+                if is_pc && bf2_material {
+                    if material_flags & 0x0f00_0000 != 0 {
+                        RenderType::Bf2(3)
+                    } else {
+                        RenderType::Bf2(0)
+                    }
+                } else {
+                    let end = p.iter().position(|&b| b == 0).unwrap_or(p.len());
+                    match std::str::from_utf8(&p[..end]) {
+                        Ok(s) => RenderType::Bf1(s.to_owned()),
+                        Err(_) => RenderType::Absent,
+                    }
                 }
             } else if p.len() >= 4 {
                 RenderType::Bf2(u32::from_le_bytes(p[0..4].try_into().unwrap()))
@@ -299,6 +492,39 @@ fn parse_segment(segm: &Chunk<'_>, vbox: &Aabb) -> Result<Segment, UcfbError> {
     });
 
     // POSI: 3×u16 dequantized into the model vertex box.
+    let bmap = match segm.child(b"BMAP") {
+        Some(c) if c.payload.len() >= 4 => {
+            let cnt = u32::from_le_bytes(c.payload[0..4].try_into().unwrap()) as usize;
+            c.payload.get(4..4 + cnt).ok_or_else(bad)?.to_vec()
+        }
+        _ => Vec::new(),
+    };
+
+    if is_pc {
+        let pc = parse_pc_geometry(segm, vertex_count, prim_type)?;
+        return Ok(Segment {
+            vertex_count,
+            index_count: pc.index_count,
+            bf2_material,
+            material_flags,
+            render_type,
+            spec_power,
+            spec_color,
+            uv_anim,
+            textures,
+            bone,
+            group,
+            bmap,
+            bind: pc.bind,
+            wght: pc.wght,
+            positions: pc.positions,
+            normals: pc.normals,
+            uvs: pc.uvs,
+            colors: pc.colors,
+            triangles: pc.triangles,
+        });
+    }
+
     let posi = segm.child(b"POSI").ok_or_else(bad)?.payload;
     if posi.len() < n * 6 {
         return Err(bad());
@@ -353,13 +579,6 @@ fn parse_segment(segm: &Chunk<'_>, vbox: &Aabb) -> Result<Segment, UcfbError> {
         })
     });
 
-    let bmap = match segm.child(b"BMAP") {
-        Some(c) if c.payload.len() >= 4 => {
-            let cnt = u32::from_le_bytes(c.payload[0..4].try_into().unwrap()) as usize;
-            c.payload.get(4..4 + cnt).ok_or_else(bad)?.to_vec()
-        }
-        _ => Vec::new(),
-    };
     let quads = |tag: &[u8; 4]| -> Vec<[u8; 4]> {
         match segm.child(tag) {
             Some(c) if c.payload.len() >= n * 4 => (0..n)
@@ -685,6 +904,117 @@ mod tests {
         assert!(near(dock, [39.5, 15.5, 41.1]), "dockingbay {dock:?}");
         let crawler = extents(t1, "tat1_bldg_crawler").expect("crawler");
         assert!(near(crawler, [23.0, 30.7, 59.1]), "crawler {crawler:?}");
+    }
+    #[test]
+    fn pc_model_parses_d3d_buffers() {
+        let mut info_payload = Vec::new();
+        info_payload.extend(5u32.to_le_bytes());
+        info_payload.extend(3u32.to_le_bytes());
+        info_payload.extend(1u32.to_le_bytes());
+
+        let mut ibuf_payload = Vec::new();
+        ibuf_payload.extend(3u32.to_le_bytes());
+        ibuf_payload.extend(0u16.to_le_bytes());
+        ibuf_payload.extend(1u16.to_le_bytes());
+        ibuf_payload.extend(2u16.to_le_bytes());
+
+        let mut vbuf_payload = Vec::new();
+        vbuf_payload.extend(3u32.to_le_bytes());
+        vbuf_payload.extend(32u32.to_le_bytes());
+        vbuf_payload.extend(0x222u32.to_le_bytes());
+        for i in 0..3 {
+            vbuf_payload.extend((i as f32).to_le_bytes());
+            vbuf_payload.extend(0.0f32.to_le_bytes());
+            vbuf_payload.extend(0.0f32.to_le_bytes());
+            vbuf_payload.extend(0.0f32.to_le_bytes());
+            vbuf_payload.extend(1.0f32.to_le_bytes());
+            vbuf_payload.extend(0.0f32.to_le_bytes());
+            vbuf_payload.extend(0.5f32.to_le_bytes());
+            vbuf_payload.extend(0.5f32.to_le_bytes());
+        }
+
+        let mut segm_p = chunk(b"INFO", &info_payload);
+        segm_p.extend(chunk(b"IBUF", &ibuf_payload));
+        segm_p.extend(chunk(b"VBUF", &vbuf_payload));
+
+        let mut modl_p = chunk(b"NAME", b"test_pc\0");
+        modl_p.extend(chunk(b"INFO", &[0u8; 72]));
+        modl_p.extend(chunk(b"segm", &segm_p));
+
+        let bytes = chunk(b"modl", &modl_p);
+        let c = crate::chunks(&bytes).next().unwrap().unwrap();
+        let m = Model::parse(&c).unwrap();
+        assert_eq!(m.name, "test_pc");
+        assert_eq!(m.segments.len(), 1);
+        let s = &m.segments[0];
+        assert_eq!(s.vertex_count, 3);
+        assert_eq!(s.positions.len(), 3);
+        assert_eq!(s.normals.len(), 3);
+        assert_eq!(s.uvs.len(), 3);
+        assert_eq!(s.triangles.len(), 1);
+        assert_eq!(s.triangles[0], [0, 1, 2]);
+    }
+
+    #[test]
+    fn pc_model_parses_colors_skin_bpv3_and_bf2_rtyp() {
+        let mut info_payload = Vec::new();
+        info_payload.extend(4u32.to_le_bytes());
+        info_payload.extend(3u32.to_le_bytes());
+        info_payload.extend(1u32.to_le_bytes());
+
+        let mut ibuf_payload = Vec::new();
+        ibuf_payload.extend(3u32.to_le_bytes());
+        ibuf_payload.extend(0u16.to_le_bytes());
+        ibuf_payload.extend(1u16.to_le_bytes());
+        ibuf_payload.extend(2u16.to_le_bytes());
+
+        let mut vbuf_payload = Vec::new();
+        vbuf_payload.extend(3u32.to_le_bytes());
+        vbuf_payload.extend(60u32.to_le_bytes());
+        vbuf_payload.extend(0x362u32.to_le_bytes());
+        for i in 0..3 {
+            for f in [i as f32, 1.0, 2.0, 0.0, 1.0, 0.0] {
+                vbuf_payload.extend(f.to_le_bytes());
+            }
+            vbuf_payload.extend([0u8; 24]);
+            vbuf_payload.extend([77u8, 128, 221, 255]);
+            vbuf_payload.extend(0.25f32.to_le_bytes());
+            vbuf_payload.extend(0.75f32.to_le_bytes());
+        }
+
+        let mut skin_payload = Vec::new();
+        skin_payload.extend(3u32.to_le_bytes());
+        skin_payload.extend(3u32.to_le_bytes());
+        for _ in 0..3 {
+            skin_payload.extend([10u8, 45, 1, 2, 3]);
+        }
+
+        let mut mtrl = vec![0u8; 25];
+        mtrl[0..4].copy_from_slice(&0x0101_0080u32.to_le_bytes());
+
+        let mut segm_p = chunk(b"INFO", &info_payload);
+        segm_p.extend(chunk(b"MTRL", &mtrl));
+        segm_p.extend(chunk(b"RTYP", b"Normal\0"));
+        segm_p.extend(chunk(b"BMAP", &[4, 0, 0, 0, 5, 6, 7, 8]));
+        segm_p.extend(chunk(b"SKIN", &skin_payload));
+        segm_p.extend(chunk(b"IBUF", &ibuf_payload));
+        segm_p.extend(chunk(b"VBUF", &vbuf_payload));
+
+        let mut modl_p = chunk(b"NAME", b"test_pc_full\0");
+        modl_p.extend(chunk(b"INFO", &[0u8; 72]));
+        modl_p.extend(chunk(b"segm", &segm_p));
+
+        let bytes = chunk(b"modl", &modl_p);
+        let c = crate::chunks(&bytes).next().unwrap().unwrap();
+        let m = Model::parse(&c).unwrap();
+        let s = &m.segments[0];
+        assert_eq!(s.render_type, RenderType::Bf2(3));
+        assert_eq!(s.index_count, 3);
+        assert_eq!(s.uvs[0], [0.25, 0.75]);
+        assert_eq!(s.colors.as_ref().unwrap()[0], [111, 64, 39, 128]);
+        assert_eq!(s.wght[0], [200, 45, 10, 0]);
+        assert_eq!(s.bind[0], [12, 8, 4, 0]);
+        assert_eq!(s.vertex_bone(0), Some(8));
     }
 }
 

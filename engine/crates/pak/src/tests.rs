@@ -239,3 +239,23 @@ fn reader_seek_overflow_retains_position() {
     assert_eq!(r.stream_position().unwrap(), 0);
     let _ = std::fs::remove_dir_all(d);
 }
+
+#[test]
+fn compressible_entries_shrink_and_round_trip_identically() {
+    let d = scratch("compress");
+    std::fs::write(d.join("exe"), b"exe").unwrap();
+    let raw: Vec<u8> = (0..8192u32).flat_map(|i| (i % 7).to_le_bytes()).collect();
+    std::fs::write(d.join("tex.ktx2"), &raw).unwrap();
+    let entries = vec![(
+        "assets_baked/m/textures/t.ktx2".to_string(),
+        d.join("tex.ktx2"),
+    )];
+    write_pack(&d.join("exe"), &d.join("p"), &entries).unwrap();
+    let packed_len = std::fs::metadata(d.join("p")).unwrap().len() as usize;
+    assert!(packed_len < raw.len() / 2);
+    let a = Archive::open(&d.join("p")).unwrap().unwrap();
+    let (off, len) = a.get("assets_baked/m/textures/t.ktx2").unwrap();
+    assert_ne!(len & COMPRESSED_FLAG, 0);
+    assert_eq!(a.read(off, len).unwrap(), raw);
+    let _ = std::fs::remove_dir_all(d);
+}

@@ -79,6 +79,12 @@ struct IndexStream {
     /// decision — music stays streamed).
     baked: bool,
     segments: Vec<IndexSegment>,
+    #[serde(default)]
+    format: u32,
+    #[serde(default)]
+    substreams: u32,
+    #[serde(default)]
+    interleave: u32,
 }
 
 #[derive(Deserialize, Debug)]
@@ -115,7 +121,11 @@ pub fn level_db(level: f32) -> f32 {
 /// each streams from the copy of its ADPCM the bake wrote under the index's
 /// own directory `dir` ([`manifest::music_body`]).
 fn note_music(g: &GlobalRon, dir: &Path, out: &mut HashMap<(u32, u32), audio::StreamTake>) {
-    for s in g.streams.iter().filter(|s| !s.baked && s.block_size > 0) {
+    for s in g
+        .streams
+        .iter()
+        .filter(|s| !s.baked && (s.block_size > 0 || s.format == 5))
+    {
         let path = dir.join(manifest::music_body(&s.source, s.data_offset));
         for seg in &s.segments {
             out.entry((s.name_hash, seg.id))
@@ -123,7 +133,10 @@ fn note_music(g: &GlobalRon, dir: &Path, out: &mut HashMap<(u32, u32), audio::St
                     path: path.clone(),
                     offset: seg.offset,
                     size: seg.size,
+                    format: s.format,
                     channels: s.channels,
+                    substreams: s.substreams,
+                    interleave: s.interleave as usize,
                     frequency: seg.frequency,
                     block_size: s.block_size as usize,
                 });

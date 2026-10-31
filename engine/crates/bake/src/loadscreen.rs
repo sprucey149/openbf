@@ -16,7 +16,14 @@ pub use manifest::{LoadScreen, LoadStyle};
 
 /// Writes `<outdir>/load/<name>.ktx2` + `<outdir>/load/load.ron`.
 pub fn bake_loadscreen(lvl_path: &str, outdir: &str) -> Result<LoadScreen> {
-    let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
+    let mut buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
+    if buf.len() >= 8 && &buf[0..4] == b"ucfb" {
+        let total =
+            8usize.saturating_add(u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize);
+        if total > buf.len() && total - buf.len() <= 65536 {
+            buf.resize(total, 0);
+        }
+    }
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir).join("load");
     std::fs::create_dir_all(&out)?;

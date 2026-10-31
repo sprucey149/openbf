@@ -55,15 +55,95 @@ def step(msg):
     print(f"\n== {msg}", flush=True)
 
 
-def run(cmd, cwd=ROOT):
+def run(cmd, cwd=ROOT, env=None):
     print("   $ " + " ".join(cmd), flush=True)
-    r = subprocess.run(cmd, cwd=cwd)
+    kw = {"cwd": cwd}
+    if env is not None:
+        kw["env"] = env
+    r = subprocess.run(cmd, **kw)
     if r.returncode:
         sys.exit(f"pack: failed ({r.returncode}): {' '.join(cmd)}")
 
 
-def lvl_root(game):
+def ci_path(base, rel):
+    direct = os.path.join(base, rel)
+    if os.path.exists(direct):
+        return direct
+    cur = base
+    for part in rel.replace("\\", "/").split("/"):
+        if not part or part == ".":
+            continue
+        nxt = os.path.join(cur, part)
+        if os.path.exists(nxt):
+            cur = nxt
+            continue
+        found = None
+        if os.path.isdir(cur):
+            want = part.lower()
+            for entry in os.listdir(cur):
+                if entry.lower() == want:
+                    found = os.path.join(cur, entry)
+                    break
+        cur = found if found is not None else nxt
+    return cur
+
+
+def classify_lvl_pc(path):
+    if not os.path.isdir(path) or not os.path.isfile(ci_path(path, "CORE.LVL")):
+        return None
+    if os.path.isfile(ci_path(path, "INGAME.LVL")):
+        return "bf2"
+    if os.path.isfile(ci_path(path, "COMMON/ENG/COMMON.LVL")):
+        return "bf1"
+    return None
+
+
+def find_pc_lvl_dirs(search_root):
+    found = {}
+    root = os.path.abspath(search_root)
+    for cand in (root, ci_path(root, "GameData/Data/_LVL_PC")):
+        kind = classify_lvl_pc(cand)
+        if kind and kind not in found:
+            found[kind] = cand
+    if len(found) == 2 or not os.path.isdir(root):
+        return found
+    for dirpath, dirnames, _ in os.walk(root):
+        dirnames.sort()
+        for d in dirnames:
+            if d.lower() == "_lvl_pc":
+                cand = os.path.join(dirpath, d)
+                kind = classify_lvl_pc(cand)
+                if kind and kind not in found:
+                    found[kind] = cand
+                    if len(found) == 2:
+                        return found
+    return found
+
+
+def resolve_pc_roots(pc_dir, pc1, pc2):
+    roots = {}
+    if pc_dir:
+        found = find_pc_lvl_dirs(pc_dir)
+        if not found:
+            sys.exit(f"pack: no BF1/BF2 _LVL_PC directories found under {pc_dir}")
+        roots.update(found)
+    for game, arg in (("bf1", pc1), ("bf2", pc2)):
+        if not arg:
+            continue
+        found = find_pc_lvl_dirs(arg)
+        if game in found:
+            roots[game] = found[game]
+        elif classify_lvl_pc(arg) == game:
+            roots[game] = os.path.abspath(arg)
+        else:
+            sys.exit(f"pack: {arg} is not a {game.upper()} _LVL_PC directory")
+    return roots
+
+
+def lvl_root(game, pc_roots=None):
     """The disc's _LVL_PS2 directory: the dev layout's, else where extract-iso puts it."""
+    if pc_roots and game in pc_roots:
+        return pc_roots[game]
     return os.path.join(EXTRACTED, game, "lvl", "DATA", "_LVL_PS2")
 
 
@@ -224,10 +304,11 @@ def map_texture_sources(baked):
     return maps
 
 
-def source_report(root, baked, missions, images, extracted_used=(), images_used=(), full_bake=False):
+def source_report(root, baked, missions, images, extracted_used=(), images_used=(), full_bake=False, pc_roots=None):
     """Only successful pack steps establish which inputs were consumed."""
     root = Path(root)
     inputs = []
+    pc_roots = pc_roots or {}
 
     def note(path, label, used, reason):
         inputs.append(dict(path=str(Path(path).absolute()), label=label,
@@ -235,6 +316,12 @@ def source_report(root, baked, missions, images, extracted_used=(), images_used=
 
     selected = set()
     for game, image in images.items():
+        if game in pc_roots:
+            used = game in extracted_used
+            note(pc_roots[game], f'{game} PC data', used,
+                 'read directly from _LVL_PC by mission generation or bake this run' if used else
+                 'not read this run; cached bake and missions packed')
+            continue
         selected.add(Path(image).resolve())
         used = game in images_used
         note(image, f'{game} requested PS2 image', used,
@@ -302,9 +389,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--iso1", default=os.path.join(ROOT, "iso", "SWBF1.iso"), help="Star Wars: Battlefront (PS2) disc image")
     ap.add_argument("--iso2", default=os.path.join(ROOT, "iso", "SWBF2.iso"), help="Star Wars: Battlefront II (PS2) disc image")
+    ap.add_argument("--pc-dir", default=None, help="directory containing installed PC Battlefront I and/or II")
+    ap.add_argument("--pc1", default=None, help="Star Wars: Battlefront (PC) _LVL_PC or install directory")
+    ap.add_argument("--pc2", default=None, help="Star Wars: Battlefront II (PC) _lvl_pc or install directory")
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
     a = ap.parse_args()
+    pc_roots = resolve_pc_roots(a.pc_dir, a.pc1, a.pc2)
     out = os.path.abspath(a.out)
     images_used, extracted_used = set(), set()
     full_bake = False
@@ -318,11 +409,14 @@ def main():
 
     step("2/6 the discs")
     for g, iso in (("bf1", a.iso1), ("bf2", a.iso2)):
-        if os.path.isfile(os.path.join(lvl_root(g), "CORE.LVL")):
+        if g in pc_roots:
+            print(f"   {g}: using PC directory ({pc_roots[g]})")
+            continue
+        if os.path.isfile(ci_path(lvl_root(g), "CORE.LVL")):
             print(f"   {g}: already extracted ({lvl_root(g)})")
             continue
         if not os.path.isfile(iso):
-            sys.exit(f"pack: no disc image at {iso} (pass --iso1 / --iso2)")
+            sys.exit(f"pack: no disc image at {iso} (pass --iso1 / --iso2 or --pc-dir / --pc1 / --pc2)")
         run([bake, "extract-iso", iso, os.path.join(EXTRACTED, g, "lvl")])
         images_used.add(g)
 
@@ -333,7 +427,7 @@ def main():
             if os.path.isdir(d) and os.listdir(d):
                 continue
             run([sys.executable, "-I", os.path.join(ROOT, "scripts", "extract_lua.py"),
-                 os.path.join(lvl_root(g), lvl), "--out", d])
+                 ci_path(lvl_root(g, pc_roots), lvl), "--out", d])
             extracted_used.add(g)
 
     step("4/6 the missions")
@@ -349,20 +443,29 @@ def main():
             print(f"   making the missions again: {why}")
         run([sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"), "--ps2-only", "--out", MISSIONS])
         extracted_used.update(("bf1", "bf2"))
+        os.makedirs(EXTRACTED, exist_ok=True)
         with open(MISSION_STAMP, "w") as fh:
             fh.write(inputs_hash(MISSION_INPUTS) + "\n")
 
     step("5/6 the bake")
     bash = find_bash()
+    bake_env = None
+    if pc_roots:
+        bake_env = dict(os.environ)
+        if "bf1" in pc_roots:
+            bake_env["PC1"] = pc_roots["bf1"].replace("\\", "/")
+        if "bf2" in pc_roots:
+            bake_env["PC2"] = pc_roots["bf2"].replace("\\", "/")
     baked = os.path.isfile(os.path.join(BAKED, "classes", "bf1_all.ron"))
     why = stale(BAKE_STAMP, BAKE_INPUTS) if baked else None
     if a.rebake or not baked or why:
         if why and not a.rebake:
             print(f"   baking again: the bake in {BAKED} was {why}")
         need("ffmpeg", "the bake encodes speech and effects to OGG")
-        run([bash, os.path.join(ROOT, "scripts", "rebake.sh")])
+        run([bash, os.path.join(ROOT, "scripts", "rebake.sh")], **({"env": bake_env} if bake_env else {}))
         full_bake = True
         extracted_used.update(("bf1", "bf2"))
+        os.makedirs(EXTRACTED, exist_ok=True)
         with open(BAKE_STAMP, "w") as fh:
             fh.write(inputs_hash(BAKE_INPUTS) + "\n")
     else:
@@ -371,7 +474,8 @@ def main():
         if n:
             print(f"   {n} music streams not copied out yet: rebaking the sound groups")
             need("ffmpeg", "the bake encodes speech and effects to OGG")
-            run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "sounds", "global-sound"])
+            run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "sounds", "global-sound"],
+                **({"env": bake_env} if bake_env else {}))
             extracted_used.update(("bf1", "bf2"))
     left = missing_music()
     if left:
@@ -407,7 +511,7 @@ def main():
     print(f"\ndone: {out} ({size / 2**30:.2f} GiB). Run it from anywhere; nothing else is needed beside it.")
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
     report = source_report(ROOT, BAKED, MISSIONS, {"bf1": a.iso1, "bf2": a.iso2},
-                           extracted_used, images_used, full_bake)
+                           extracted_used, images_used, full_bake, pc_roots=pc_roots)
     write_source_report(out, report)
 
 

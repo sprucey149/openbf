@@ -71,6 +71,83 @@ pub(crate) fn remove_optional_file(path: &std::path::Path) -> std::io::Result<()
     }
 }
 
+fn find_entry_ci(dir: &std::path::Path, name: &str) -> Option<std::ffi::OsString> {
+    std::fs::read_dir(dir).ok()?.find_map(|e| {
+        let file_name = e.ok()?.file_name();
+        file_name
+            .to_str()
+            .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            .then_some(file_name)
+    })
+}
+
+pub fn join_ci(base: &std::path::Path, rel: &str) -> std::path::PathBuf {
+    let direct = base.join(rel);
+    if direct.exists() {
+        return direct;
+    }
+    let mut cur = base.to_path_buf();
+    for part in rel.split(['/', '\\']) {
+        if part.is_empty() || part == "." {
+            continue;
+        }
+        if part == ".." {
+            cur.pop();
+            continue;
+        }
+        let next = cur.join(part);
+        cur = if next.exists() {
+            next
+        } else {
+            find_entry_ci(&cur, part).map_or(next, |n| cur.join(n))
+        };
+    }
+    cur
+}
+
+pub fn resolve_ci(path: &str) -> String {
+    if path == "-" || std::path::Path::new(path).exists() {
+        return path.to_owned();
+    }
+    let p = std::path::Path::new(path);
+    let mut cur = std::path::PathBuf::new();
+    for comp in p.components() {
+        use std::path::Component;
+        match comp {
+            Component::Prefix(pre) => cur.push(pre.as_os_str()),
+            Component::RootDir => cur.push(comp.as_os_str()),
+            Component::CurDir => {
+                if cur.as_os_str().is_empty() {
+                    cur.push(".");
+                }
+            }
+            Component::ParentDir => cur.push(".."),
+            Component::Normal(part) => {
+                let base = if cur.as_os_str().is_empty() {
+                    std::path::Path::new(".")
+                } else {
+                    cur.as_path()
+                };
+                let next = cur.join(part);
+                cur = if next.exists() {
+                    next
+                } else if let Some(s) = part.to_str() {
+                    find_entry_ci(base, s).map_or(next, |name| {
+                        if cur.as_os_str().is_empty() {
+                            std::path::PathBuf::from(name)
+                        } else {
+                            cur.join(name)
+                        }
+                    })
+                } else {
+                    next
+                };
+            }
+        }
+    }
+    cur.to_string_lossy().into_owned()
+}
+
 /// The bake this working tree ships (`engine/assets_baked`), for the tests in
 /// this crate that read it. TEST-ONLY and crate-private on purpose:
 /// `game::assets::baked_root` is the same path by the same rule, and `bake` is

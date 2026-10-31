@@ -66,9 +66,10 @@ fn is_hero(classes: &[BakedClass], c: &BakedClass) -> bool {
 /// Bake the four BF2 sides' hero closure to a side output directory.
 /// `disc` is the extracted `DATA/_LVL_PS2` directory, not its parent.
 pub fn bake_heroes(disc: &Path, out: &Path) -> Result<HeroBake> {
-    let ingame = disc.join("INGAME.LVL");
+    let ingame = crate::join_ci(disc, "INGAME.LVL");
+    let side_dir = crate::join_ci(disc, "SIDE");
     let sides: Vec<_> = ["ALL", "IMP", "REP", "CIS"]
-        .map(|s| (s, disc.join("SIDE").join(format!("{s}.LVL"))))
+        .map(|s| (s, crate::join_ci(&side_dir, &format!("{s}.LVL"))))
         .into_iter()
         .collect();
     let mut inputs = Vec::new();
