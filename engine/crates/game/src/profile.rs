@@ -41,6 +41,15 @@ where
     }
 }
 
+// An icon choice from a newer build falls back to Auto; the rest of the profile stands.
+fn input_icons_or_auto<'de, D>(deserializer: D) -> Result<crate::input_icons::IconChoice, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Box::<ron::value::RawValue>::deserialize(deserializer)?;
+    Ok(ron::from_str(raw.get_ron()).unwrap_or_default())
+}
+
 fn keyboard_bindings<'de, D>(deserializer: D) -> Result<crate::kbm::Bindings, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -99,6 +108,9 @@ pub struct Settings {
     pub keyboard_bindings: crate::kbm::Bindings,
     #[serde(default, deserialize_with = "controller_bindings")]
     pub controller_bindings: input::Mapping,
+    /// Which icons the control prompts draw; Auto follows the device in use.
+    #[serde(default, deserialize_with = "input_icons_or_auto")]
+    pub input_icons: crate::input_icons::IconChoice,
     /// Map-relative population and reinforcement settings. Legacy absolute caps are ignored.
     #[serde(default = "hundred", deserialize_with = "bounded_team_pct")]
     pub team_size_pct: u32,
@@ -123,6 +135,7 @@ impl Default for Settings {
             viewpoint: crate::viewpoint::Viewpoint::default(),
             keyboard_bindings: crate::kbm::Bindings::default(),
             controller_bindings: input::Mapping::default(),
+            input_icons: crate::input_icons::IconChoice::default(),
             team_size_pct: 100,
             reinforcement_pct: 100,
             last_map: None,
@@ -283,6 +296,36 @@ mod tests {
             }
         );
         assert_eq!(profile.settings.assist_intensity, 0.7);
+    }
+
+    /// The input icon choice round-trips; a profile from before it, or one
+    /// holding a choice this build does not know, loads as Auto and keeps
+    /// its other settings.
+    #[test]
+    fn the_input_icon_choice_is_kept_and_never_costs_the_profile() {
+        use crate::input_icons::IconChoice;
+        let s = Settings {
+            input_icons: IconChoice::XboxOriginal,
+            ..Default::default()
+        };
+        let back: Settings = ron::from_str(&ron::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.input_icons, IconChoice::XboxOriginal);
+        let old: Settings = ron::from_str("(assist_intensity: 0.7)").unwrap();
+        assert_eq!(old.input_icons, IconChoice::Auto);
+        let newer: Settings =
+            ron::from_str("(assist_intensity: 0.7, input_icons: SteamDeck)").unwrap();
+        assert_eq!(newer.input_icons, IconChoice::Auto);
+        assert_eq!(newer.assist_intensity, 0.7);
+        // Any shape of value, and inside a whole profile as the game loads it.
+        for value in ["Pad(1, \"x\")", "3", "[Ds4]", "\"Ds4\""] {
+            let whole: Profile = ron::from_str(&format!(
+                "(name: \"p\", settings: (assist_intensity: 0.7, input_icons: {value}),
+                  career: (rounds: 0, wins: 0, kills: 0, deaths: 0, shots: 0, hits: 0, captures: 0))"
+            ))
+            .unwrap_or_else(|e| panic!("{value}: {e}"));
+            assert_eq!(whole.settings.input_icons, IconChoice::Auto, "{value}");
+            assert_eq!(whole.settings.assist_intensity, 0.7, "{value}");
+        }
     }
 
     /// Every name a profile may hold loads as the row it names today

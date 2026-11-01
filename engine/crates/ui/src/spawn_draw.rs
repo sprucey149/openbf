@@ -36,6 +36,7 @@ use crate::hud_draw::{
     anchor_shift, color, frame_scale, run_width, Ctx, Quad, Run, Screen, OVERFILL,
 };
 use crate::hud_tree::{HAlign, FRAME_H, FRAME_W};
+use crate::input_icons::Prompt;
 use glam::{Mat4, Vec3};
 
 pub(crate) const TITLE_PIECES: [&str; 3] = [
@@ -373,7 +374,8 @@ impl Ctx<'_> {
 
     /// A help line: the pad icon at the safe area's edge, its label beside
     /// it on the inside.
-    pub(crate) fn help(&mut self, size: [f32; 2], right: bool, icon: &str, text: &str) {
+    pub(crate) fn help(&mut self, size: [f32; 2], right: bool, prompt: Prompt, text: &str) {
+        let icon = self.art.icons.sheet(prompt);
         let (a, ix) = if right {
             (Anchor::Right, SAFE_X[1] - ICON[0])
         } else {
@@ -459,7 +461,7 @@ impl Ctx<'_> {
                     let mid = r[1] + (ROW_H - lh) * 0.5;
                     self.label(&s, BUTTON_FONT, text, (cx, mid), HAlign::Center, style);
                 }
-                self.help(size, true, "btna", select);
+                self.help(size, true, Prompt::SpawnAccept, select);
             }
             SpawnPage::Map { objective, legend } => {
                 self.map_spawn(size);
@@ -484,8 +486,8 @@ impl Ctx<'_> {
                     let at = (CLASS_TEXT_X, CLASS_TEXT_TOP + CLASS_LINE * k as f32);
                     self.label(&s, SMALL_FONT, line, at, HAlign::Left, ([255.0; 3], 1.0));
                 }
-                self.help(size, false, "btnb", back);
-                self.help(size, true, "btna", accept);
+                self.help(size, false, Prompt::SpawnBack, back);
+                self.help(size, true, Prompt::SpawnAccept, accept);
             }
         }
     }
@@ -521,7 +523,7 @@ fn tree_screen(size: [f32; 2], fx: f32) -> Screen {
 
 impl Ctx<'_> {
     /// The spawn map's legend: the post icon, the D-pad and the three
-    /// lines; a text's leading `{btna}` is the Cross icon, a line high.
+    /// lines; a text's leading `{btna}` is the accept icon, a line high.
     fn map_legend(&mut self, size: [f32; 2], texts: &[String; 3]) {
         let s = tree_screen(size, LEGEND_AT[0]);
         let at = |x: f32, y: f32| ((LEGEND_AT[0] + x) * FRAME_W, (LEGEND_AT[1] + y) * FRAME_H);
@@ -544,7 +546,8 @@ impl Ctx<'_> {
                 boxed: false,
             },
         );
-        self.sheet(&s, rect(LEGEND_PAD), full, "btn_directional_pad", 1.0);
+        let pad = self.art.icons.sheet(Prompt::DPad);
+        self.sheet(&s, rect(LEGEND_PAD), full, pad, 1.0);
         let lh = self.line_height(MAP_FONT);
         for (text, [x, y, alpha]) in texts.iter().zip(LEGEND_TEXT) {
             let (mut x0, mut y0) = at(x, y);
@@ -552,7 +555,8 @@ impl Ctx<'_> {
             let mut text = text.trim();
             if let Some(rest) = text.strip_prefix("{btna}") {
                 let (cx, cy, h) = (x0 + lh * 0.5, y0 + lh * 0.5, INLINE_ICON * 0.5);
-                self.sheet(&s, [cx - h, cy - h, cx + h, cy + h], full, "btna", alpha);
+                let icon = self.art.icons.sheet(Prompt::SpawnAccept);
+                self.sheet(&s, [cx - h, cy - h, cx + h, cy + h], full, icon, alpha);
                 x0 += lh + INLINE_ICON_GAP;
                 text = rest;
             }
@@ -644,6 +648,59 @@ mod tests {
     /// The texture of every batch, in draw order.
     fn sheets(f: &HudFrame) -> Vec<&str> {
         f.batches.iter().map(|b| b.texture.as_str()).collect()
+    }
+
+    /// The class and map pages draw the lookup's icons: a remapped accept
+    /// shows the bound button, the map's D-pad and inline icon follow.
+    #[test]
+    fn the_prompts_follow_the_icon_set() {
+        use crate::input_icons::{IconSet, Icons, PadButton};
+        let empty = HudLayout {
+            name: "t".into(),
+            nodes: Vec::new(),
+        };
+        let mut art = HudArt::default();
+        art.fonts.insert(SMALL_FONT.into(), font(SMALL_FONT, 18));
+        art.fonts.insert(MAP_FONT.into(), font(MAP_FONT, 12));
+        art.icons = Icons {
+            spawn_accept: PadButton::West,
+            ..Icons::of(IconSet::XboxOne)
+        };
+        let mut hud = Hud::new(&empty, &empty);
+        hud.spawn = Some(SpawnPage::Class {
+            title: "Trooper".into(),
+            lines: Vec::new(),
+            back: "Back".into(),
+            accept: "Select Character".into(),
+            team: 0,
+            class: 0,
+            classes: vec![0],
+            refused: 0,
+        });
+        let f = crate::hud_draw::draw(&hud, &art, [640.0, 480.0]);
+        let s = sheets(&f);
+        assert!(
+            s.contains(&"icon_xbone_x") && s.contains(&"icon_xbone_y"),
+            "{s:?}"
+        );
+        assert!(!s.contains(&"btna") && !s.contains(&"btnb"), "{s:?}");
+
+        art.icons = Icons::of(IconSet::KeyboardMouse);
+        hud.spawn = Some(SpawnPage::Map {
+            objective: "Capture".into(),
+            legend: [
+                "Command Post".into(),
+                "Change Command Post".into(),
+                "{btna} Select Command Post".into(),
+            ],
+        });
+        let f = crate::hud_draw::draw(&hud, &art, [640.0, 480.0]);
+        let s = sheets(&f);
+        assert!(
+            s.contains(&"icon_kb_arrows") && s.contains(&"icon_kb_enter"),
+            "{s:?}"
+        );
+        assert!(!s.contains(&"btn_directional_pad"), "{s:?}");
     }
 
     /// The side select: the veil, the title bar's three pieces, a row's

@@ -293,6 +293,15 @@ class PackTests(unittest.TestCase):
             self.assertEqual(rows['bf2 extracted PS2 data']['status'], 'unused')
             self.assertEqual(rows['other source file']['status'], 'not recognized')
             self.assertFalse(rows['optional BF2 PC texture directory']['present'])
+            xbox_row = 'optional Xbox BF2 extracted data'
+            self.assertIn('draws its own', rows[xbox_row]['reason'])
+            # A cached bake packs the disc's icons from an earlier run: say so.
+            (baked / 'common_bf2/textures').mkdir(parents=True)
+            (baked / 'common_bf2/textures/icon_duke_a.ktx2').touch()
+            cached = pack.source_report(root, baked, missions, images)
+            reason = next(r['reason'] for r in cached['inputs'] if r['label'] == xbox_row)
+            self.assertIn('earlier run', reason)
+            self.assertNotIn('draws its own', reason)
             pc = root / 'PC_swbf2_exe/Star Wars Battlefront II Classic/GameData/data/_lvl_pc'
             (pc / 'mus').mkdir(parents=True)
             (pc / 'mus/mus1.lvl').touch()

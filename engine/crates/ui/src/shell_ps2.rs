@@ -42,6 +42,7 @@
 
 use crate::hud_draw::{run_width, Ctx};
 use crate::hud_tree::HAlign;
+use crate::input_icons::Prompt;
 use crate::menu::MenuInput;
 use crate::shell_feel::{flashy, Cues, MenuSound, Pulse};
 use crate::spawn_draw::{
@@ -571,8 +572,8 @@ impl Ctx<'_> {
             let t = m.on_page - ROW_REVEAL * (k + 1) as f32;
             self.flashy_row(&s, &row, t, lh);
         }
-        self.help(size, false, "btnb", &m.back);
-        self.help(size, true, "btna", &m.select);
+        self.help(size, false, Prompt::Back, &m.back);
+        self.help(size, true, Prompt::Accept, &m.select);
     }
 
     /// One stack row (or the title) `t` seconds into its flashy entrance

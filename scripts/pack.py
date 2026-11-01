@@ -413,6 +413,13 @@ def source_report(root, baked, missions, images, extracted_used=(), images_used=
         note(pc, 'optional BF2 PC texture directory', bool(read_pc),
              'existing libraries passed to the supported PC texture reader' if read_pc else
              'no PC libraries read this run (missing optional input or cached bake)')
+    xbox = root / 'extracted' / 'xbox_bf2'
+    xbox_read = full_bake and not plan and any(p.name.lower() == 'common.lvl' for p in xbox.glob('*'))
+    xbox_cached = any((Path(baked) / 'common_bf2' / 'textures').glob('icon_duke_*.ktx2'))
+    note(xbox, 'optional Xbox BF2 extracted data', xbox_read,
+         'common.lvl read for the original Xbox button icons only' if xbox_read else
+         'not read this run; the bake packed holds Xbox button icons from a chosen disc or an earlier run' if xbox_cached else
+         'not read this run (missing optional input or cached bake); the game draws its own Xbox icons')
     note(baked, 'baked game assets', True, 'packed into the game; stored provenance listed separately')
     note(missions, 'mission data', True, 'packed into the game')
     return dict(schema=1, inputs=inputs, pc_libraries_read=read_pc, maps=map_texture_sources(baked),

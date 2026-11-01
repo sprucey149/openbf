@@ -17,6 +17,7 @@
 //!   `None` until the player first pushes: the respawn then draws from every
 //!   post's nodes.
 
+use crate::input_icons::Prompt;
 use egui::{Align2, Color32, FontId, Frame, RichText, Vec2};
 
 use crate::hud::TEAM_COLORS;
@@ -95,6 +96,8 @@ pub struct SpawnModel {
     /// (`crate::spawn_draw`, card SSELB); while it is `Some` this panel
     /// draws nothing. The game clears it where no HUD pass draws.
     pub page: Option<crate::spawn_draw::SpawnPage>,
+    /// The prompts' names on this panel (`crate::input_icons`).
+    pub icons: crate::input_icons::Icons,
 }
 
 /// The side select (card SSELA placeholder): the three rows, the highlighted
@@ -222,9 +225,13 @@ pub fn draw_spawn(ctx: &egui::Context, m: &SpawnModel) {
                             });
                             ui.label(
                                 RichText::new(if m.screen.is_some() {
-                                    "On the class screen: D-pad left / right or R1 / Select"
+                                    format!(
+                                        "On the class screen: {} left / right or {}",
+                                        m.icons.text(Prompt::DPad),
+                                        m.icons.class_keys()
+                                    )
                                 } else {
-                                    "R1 / Select to change class"
+                                    format!("{} to change class", m.icons.class_keys())
                                 })
                                 .size(12.0)
                                 .color(Color32::GRAY),
@@ -283,8 +290,15 @@ pub fn draw_spawn(ctx: &egui::Context, m: &SpawnModel) {
                     ui.separator();
                     ui.add_space(8.0);
                     let prompt = match &m.screen {
-                        Some(SpawnScreen::Map) => Some("X  SELECT COMMAND POST"),
-                        Some(SpawnScreen::Class) => Some("X  SELECT CHARACTER    △  BACK"),
+                        Some(SpawnScreen::Map) => Some(format!(
+                            "{}  SELECT COMMAND POST",
+                            m.icons.symbol(Prompt::SpawnAccept)
+                        )),
+                        Some(SpawnScreen::Class) => Some(format!(
+                            "{}  SELECT CHARACTER    {}  BACK",
+                            m.icons.symbol(Prompt::SpawnAccept),
+                            m.icons.symbol(Prompt::SpawnBack)
+                        )),
                         _ => None,
                     };
                     ui.vertical_centered(|ui| match (prompt, m.countdown) {
@@ -312,9 +326,12 @@ pub fn draw_spawn(ctx: &egui::Context, m: &SpawnModel) {
                         // The pick goes by direction on the map (the PS2's
                         // spawn map), not down the list: up = north (-z).
                         ui.label(
-                            RichText::new("D-pad: pick the post that way on the map")
-                                .size(12.0)
-                                .color(Color32::GRAY),
+                            RichText::new(format!(
+                                "{}: pick the post that way on the map",
+                                m.icons.text(Prompt::DPad)
+                            ))
+                            .size(12.0)
+                            .color(Color32::GRAY),
                         );
                     });
                 });
@@ -354,6 +371,7 @@ mod tests {
             countdown: Some(3.4),
             screen: None,
             page: None,
+            icons: Default::default(),
         }
     }
 

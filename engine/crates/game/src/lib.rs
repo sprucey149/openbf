@@ -32,6 +32,7 @@ mod hero_riders;
 pub mod heroes;
 pub mod holo;
 pub mod hud_feed;
+pub mod input_icons;
 pub mod kbm;
 pub mod layout;
 pub mod matchlog;

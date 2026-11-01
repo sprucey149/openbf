@@ -248,6 +248,16 @@ if want common; then
   # the HUD's event lines, team, post and soldier names.
   "$BAKE" locl "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
   "$BAKE" locl "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
+  # The original Xbox pad's button icons, from the Xbox BF2 disc the scan chose
+  # or, run by hand, a dev tree's own extraction; under pack.py only what it
+  # chose is read. The game draws its own without one (game::input_icons).
+  XBOX_COMMON="$(xbox_lvl bf2 common.lvl)"
+  if [ -z "$XBOX_COMMON" ] && [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
+    XBOX_COMMON="$(ci "$E/xbox_bf2" common.lvl)"
+  fi
+  if [ -f "$XBOX_COMMON" ]; then
+    "$BAKE" xbox-icons "$XBOX_COMMON" "$OUT/common_bf2"
+  fi
   # BF1's own bitmap fonts (card SQHUD: the squad cross's labels are BF1's
   # gamefont_tiny), prefixed so they sit beside BF2's in one name space.
   "$BAKE" fonts "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1" bf1_

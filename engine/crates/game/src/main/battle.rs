@@ -716,6 +716,7 @@ pub(super) fn spawn_model(
         countdown,
         screen,
         page,
+        icons: Default::default(),
     })
 }
 

@@ -14,6 +14,7 @@
 
 use crate::hud_draw::{color, run_width, Ctx, Quad};
 use crate::hud_tree::HAlign;
+use crate::input_icons::Prompt;
 use crate::shell::{
     InstantAction, ListRow, Page, Piece, State, COMMANDS, ERA_ROWS, LIST_ROWS, OPTION_ROWS,
 };
@@ -600,7 +601,7 @@ impl Ctx<'_> {
                     self.label(&s, SMALL_FONT, l, at, HAlign::Center, UNSELECTED_TEXT);
                 }
             }
-            self.help(size, true, "btna", &t.select);
+            self.help(size, true, Prompt::Accept, &t.select);
             return;
         }
         // The left window: Planet, or Mode / Era in their states (f12).
@@ -668,8 +669,8 @@ impl Ctx<'_> {
                 self.label(&s, LIST_FONT, line, at, HAlign::Left, SELECTED_TEXT);
             }
         }
-        self.help(size, false, "btnb", &t.back);
-        self.help(size, true, "btna", &t.select);
+        self.help(size, false, Prompt::Back, &t.back);
+        self.help(size, true, Prompt::Accept, &t.select);
     }
 
     /// "Session Options": the PS2 stack rule of `crate::shell_ps2`
@@ -727,8 +728,8 @@ impl Ctx<'_> {
             };
             self.label(&s, BUTTON_FONT, label, mid(r), HAlign::Center, style);
         }
-        self.help(size, false, "btnb", &t.back);
-        self.help(size, true, "btna", &t.select);
+        self.help(size, false, Prompt::Back, &t.back);
+        self.help(size, true, Prompt::Accept, &t.select);
     }
 
     /// A group's page: the window of option rows "Label: < value >", the
@@ -806,7 +807,7 @@ impl Ctx<'_> {
                 );
             }
         }
-        self.help(size, false, "btnb", &t.back);
+        self.help(size, false, Prompt::Back, &t.back);
     }
 }
 

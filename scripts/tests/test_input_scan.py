@@ -752,6 +752,22 @@ class Rebake(RebakeCase):
         self.assertNotIn('Inputs (recognized by content)', result.stderr)
         self.assertTrue(all(len(line.split()) == 3 for line in calls if line.startswith('map ')))
 
+    def test_xbox_icons_come_from_the_chosen_disc_or_a_hand_run_tree(self):
+        icons = lambda calls: [line.split()[1] for line in calls if line.startswith('xbox-icons ')]
+        write(self.root / 'extracted/bf2/lvl/DATA/_LVL_PS2/MOVIES/SHELL.MVS')
+        chosen = self.root / 'extracted/xbox/bf2/Data/_LVL_XBOX'
+        write(chosen / 'common.lvl')
+        _, calls = self.rebake('common', XB2=str(chosen))
+        self.assertEqual(icons(calls), [str(chosen / 'common.lvl')])
+        _, calls = self.rebake('common')
+        self.assertEqual(icons(calls), [])
+        # A leftover extraction is read by hand, never under a scan that did not choose it.
+        write(self.root / 'extracted/xbox_bf2/common.lvl')
+        _, calls = self.rebake('common')
+        self.assertEqual(icons(calls), [str(self.root / 'extracted/xbox_bf2/common.lvl')])
+        _, calls = self.rebake('common', OPENBF_INPUTS_CHOSEN='1')
+        self.assertEqual(icons(calls), [])
+
     def test_a_named_pc_folder_stops_the_scan_from_adding_another(self):
         first = tree(self.root / 'named/GameData/Data/_LVL_PC', 'bf2', 'pc')
         self.donors(first)

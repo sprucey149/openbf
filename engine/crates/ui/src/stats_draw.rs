@@ -19,6 +19,7 @@
 
 use crate::hud_draw::{color, run_width, Ctx, Quad, Run, Screen};
 use crate::hud_tree::HAlign;
+use crate::input_icons::{IconSet, Prompt};
 use crate::spawn_draw::{
     screen_at, Anchor, HELP_DROP, HELP_TEXT, ICON, ICON_GAP, MAP_FONT, SAFE_X, SMALL_FONT,
     TITLE_PIECES,
@@ -288,7 +289,7 @@ impl Ctx<'_> {
         let y = crate::spawn_draw::HELP_Y;
         let top = y - ICON[1] * 0.5;
         match icon {
-            Icon::Square => {
+            Icon::Square if self.art.icons.set == IconSet::Ds2 => {
                 let cx = ix + ICON[0] * 0.5;
                 let [w, h] = SQUARE;
                 let [x0, y0, x1, y1] = [cx - w * 0.5, y - h * 0.5, cx + w * 0.5, y + h * 0.5];
@@ -303,12 +304,12 @@ impl Ctx<'_> {
                     self.sheet_tinted(&s, r, full, "white", (SQUARE_PINK, 1.0));
                 }
             }
-            Icon::Cross | Icon::Triangle => {
-                let sheet = if matches!(icon, Icon::Cross) {
-                    "btna"
-                } else {
-                    "btnb"
-                };
+            Icon::Cross | Icon::Triangle | Icon::Square => {
+                let sheet = self.art.icons.sheet(match icon {
+                    Icon::Cross => Prompt::Accept,
+                    Icon::Triangle => Prompt::Back,
+                    Icon::Square => Prompt::Done,
+                });
                 let r = [ix, top, ix + ICON[0], top + ICON[1]];
                 self.sheet(&s, r, [0.0, 0.0, 1.0, 1.0], sheet, 1.0);
             }
@@ -718,6 +719,38 @@ mod tests {
         };
         assert!(has(WHITE.0), "the player's row");
         assert!(has(BLUE.0), "the cursor row's name");
+    }
+
+    /// Square is the PS2's drawn outline only on the PS2's set; any other
+    /// set's Done is its own icon.
+    #[test]
+    fn done_is_the_sets_own_icon() {
+        use crate::input_icons::{IconSet, Icons};
+        let mut art = HudArt::default();
+        art.fonts.insert(TEXT_FONT.into(), font(TEXT_FONT, 15));
+        art.fonts.insert(TITLE_FONT.into(), font(TITLE_FONT, 18));
+        art.fonts.insert(SMALL_FONT.into(), font(SMALL_FONT, 18));
+        art.icons = Icons::of(IconSet::XboxOne);
+        let empty = HudLayout {
+            name: "t".into(),
+            nodes: Vec::new(),
+        };
+        let mut hud = Hud::new(&empty, &empty);
+        hud.stats = Some(Box::new(screens()));
+        let f = draw(&hud, &art, [640.0, 480.0]);
+        let s = sheets(&f);
+        assert!(
+            s.contains(&"icon_xbone_x") && s.contains(&"icon_xbone_a"),
+            "{s:?}"
+        );
+        assert!(!s.contains(&"btna"), "{s:?}");
+        let pink = f.verts.iter().any(|v| {
+            v.color[..3]
+                .iter()
+                .zip(SQUARE_PINK)
+                .all(|(a, b)| (a - b / 255.0).abs() < 1e-4)
+        });
+        assert!(!pink, "the PS2's drawn Square stayed");
     }
 
     /// Personal Stats of the player: the Medals panel, Back and Career Stats

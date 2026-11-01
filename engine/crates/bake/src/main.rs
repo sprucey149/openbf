@@ -200,6 +200,11 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("xbox-icons") if args.len() == 4 => {
+            let n = bake::xbox_icons::bake_xbox_icons(&ci(&args[2]), &args[3])?;
+            println!("baked {n} Xbox button icon(s) -> {}/textures", args[3]);
+            Ok(())
+        }
         Some("fonts") if args.len() == 5 => {
             let p2 = ci(&args[2]);
             let fonts = bake::hud::bake_fonts(
@@ -367,6 +372,7 @@ fn main() -> Result<()> {
                  \x20 bake classes    <file.lvl>   <out.ron>      entc/wpnc/ordc/expc props\n\
                  \x20 bake loadscreen <load.lvl>   <mapdir>       load screen sequence/pool\n\
                  \x20 bake sounds     <sound.lvl>  <mapdir> [CORE.LVL]  sample banks + snd_ props (templates from CORE)\n\
+                 \x20 bake xbox-icons <xbox common.lvl> <outdir>  the original Xbox pad's button icons\n\
                  \x20 bake shell     <SHELL.LVL> <SHELL.MVS> <SOUND/SHELL.LVL> <CORE.LVL> <outdir>  BF2 shell logo, menu movie, music\n\
                  \x20 bake sound-names <classes dir> <lua roots> <mapdir>...  names.ron\n\
                  \x20 bake global-sound <lvl[,lvl]> <outdir> [ref.lvl,...]  stream VO to OGG\n\

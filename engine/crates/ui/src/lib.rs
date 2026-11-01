@@ -30,6 +30,7 @@ pub mod hud_map;
 pub mod hud_scope;
 pub mod hud_squad;
 pub mod hud_tree;
+pub mod input_icons;
 pub mod loading;
 pub mod menu;
 pub mod overlay;

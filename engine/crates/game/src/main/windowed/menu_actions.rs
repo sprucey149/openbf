@@ -30,6 +30,9 @@ pub(super) fn persist_setting(
             )
         }
         MenuAction::ToggleInvertY => profile.settings.invert_y = !profile.settings.invert_y,
+        MenuAction::CycleInputIcons(dir) => {
+            profile.settings.input_icons = profile.settings.input_icons.cycled(dir)
+        }
         MenuAction::ToggleViewpoint => {
             profile.settings.viewpoint = profile.settings.viewpoint.toggled()
         }

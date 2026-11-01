@@ -266,7 +266,9 @@ fn setting_sound(
     }
     match rows.get(to)? {
         Row::Music | Row::Resume => None,
-        Row::InvertY if input.confirm || input.left || input.right => Some(MenuSound::Accept),
+        Row::InvertY | Row::InputIcons if input.confirm || input.left || input.right => {
+            Some(MenuSound::Accept)
+        }
         _ if input.left || input.right => Some(MenuSound::Accept),
         _ => None,
     }
@@ -295,10 +297,16 @@ impl App {
                 format!("{trigger:?}"),
             ));
         }
+        // Named as the pad in use: the Controls page may be reached from a
+        // keyboard, where `pad_name` answers the PS2's names.
+        let set = self.icon_device.set(self.profile.settings.input_icons);
         for (button, bits) in &self.profile.settings.controller_bindings.table {
             rows.push((
                 format!("Controller: {}", action_name(*bits, (0, 0))),
-                format!("{button:?}"),
+                game::input_icons::pad_button(*button).map_or_else(
+                    || format!("{button:?}"),
+                    |b| ui::input_icons::pad_name(set, b).to_owned(),
+                ),
             ));
         }
         rows
@@ -622,6 +630,7 @@ impl App {
                 )
             });
         } else if let Some(cursor) = front.settings {
+            let icons = self.current_icons();
             let settings = &self.profile.settings;
             let k = settings.fov_scale;
             let model = ui::menu::MenuModel {
@@ -637,6 +646,8 @@ impl App {
                 music_volume: settings.music_volume,
                 mouse_sensitivity: settings.mouse_sensitivity,
                 invert_y: settings.invert_y,
+                input_icons_label: settings.input_icons.label(),
+                icons,
                 first_person: settings.viewpoint.is_first(),
                 cursor,
                 in_shell: Some(
@@ -754,6 +765,7 @@ impl App {
             .as_ref()
             .filter(|_| front.ia_open && front.settings.is_none() && front.controls.is_none());
         let movie_shown = has_movie && ia.is_none_or(|ia| ia.page != ui::shell::Page::Missions);
+        let icons = self.current_icons();
         let mut control_clicked = None;
         let mut setting_clicked = Vec::new();
         if let (Some(r), Some(overlay), Some(window)) =
@@ -761,6 +773,7 @@ impl App {
         {
             let (w, h) = r.size();
             if let Some(v) = front.view.as_mut() {
+                v.set_icons(icons);
                 match ia {
                     Some(ia) => v.update_instant(&front.menus, ia, movie_shown, [w, h]),
                     None => v.update_shell(&front.menus, has_movie, [w, h]),
@@ -804,7 +817,9 @@ impl App {
             // A pointer click sounds as its pad press (only toggles click).
             if matches!(
                 action,
-                ui::menu::MenuAction::ToggleInvertY | ui::menu::MenuAction::ToggleViewpoint
+                ui::menu::MenuAction::ToggleInvertY
+                    | ui::menu::MenuAction::ToggleViewpoint
+                    | ui::menu::MenuAction::CycleInputIcons(_)
             ) {
                 front.cue(MenuSound::Accept);
             }
@@ -868,6 +883,7 @@ impl App {
                 )
             }
             MenuAction::ToggleInvertY => s.invert_y = !s.invert_y,
+            MenuAction::CycleInputIcons(dir) => s.input_icons = s.input_icons.cycled(dir),
             MenuAction::ToggleViewpoint => s.viewpoint = s.viewpoint.toggled(),
         }
         self.kbm.follow(&self.profile.settings);

@@ -73,6 +73,8 @@ pub struct HudArt {
     pub meshes: HashMap<String, HudMesh>,
     /// Width / height of the sheets a `bitmap:<sheet>` weapon icon may name.
     pub sheet_aspect: HashMap<String, f32>,
+    /// The control prompts' icons (`crate::input_icons`).
+    pub icons: crate::input_icons::Icons,
 }
 
 impl HudArt {
@@ -332,7 +334,7 @@ impl Ctx<'_> {
     }
 
     fn bitmap(&mut self, i: usize, e: &Elem, m: &Mat4, s: &Screen, alpha: f32) {
-        let Some(texture) = e.texture.as_deref() else {
+        let Some(texture) = e.texture.as_deref().map(|t| self.art.icons.layout_sheet(t)) else {
             return;
         };
         let (x0, y0) = e.rect.origin();

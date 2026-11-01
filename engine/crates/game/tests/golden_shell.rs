@@ -88,6 +88,87 @@ fn ps2_front_screens_match_golden() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// The help lines draw each icon set through the real pass: only the icons
+/// change from the PS2's own, each is textured (its art rendered, not the
+/// untextured quad a missing sheet leaves), and the rest of the frame stands.
+/// `SHELL_PS2_OUT=<dir>`: also each frame.
+#[test]
+#[ignore = "requires a GPU adapter + the BF2 common bake"]
+fn help_lines_draw_every_icon_set() {
+    use ui::input_icons::{IconSet, Icons, ALL_SETS};
+    common::force_ps2_tier();
+    let assets = game::assets::baked_root();
+    game::shell_movie::load_index(&assets).expect("the shell index");
+    let m = front_screens()
+        .into_iter()
+        .find(|(name, _)| *name == "singleplayer")
+        .expect("the Singleplayer page")
+        .1;
+    let size = [1280, 720];
+    let frame = |icons: Icons| {
+        let mut r = render::Renderer::new_headless(size[0], size[1]).expect("headless renderer");
+        let mut view = game::hud_feed::HudView::for_renderer(&assets, &r).expect("the HUD bake");
+        view.set_icons(icons);
+        view.update_shell(&m, false, size);
+        let drawn: Vec<String> = view.drawn_sheets().map(str::to_owned).collect();
+        r.render_with_overlay(
+            &render::Camera::default(),
+            &[],
+            [0.2, 0.2, 0.2, 1.0],
+            Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+        )
+        .expect("render");
+        let (rgba, w, _) = r.capture_rgba().expect("capture");
+        (rgba, w as usize, drawn)
+    };
+    let (base, width, _) = frame(Icons::default());
+    let out = std::env::var_os("SHELL_PS2_OUT").map(std::path::PathBuf::from);
+    for set in ALL_SETS {
+        let icons = Icons::of(set);
+        let (rgba, _, drawn) = frame(icons);
+        let accept = icons.sheet(ui::input_icons::Prompt::Accept);
+        assert!(drawn.iter().any(|s| s == accept), "{set:?}: {drawn:?}");
+        // The two help lines stand at the screen's bottom corners.
+        let (mut inside, mut outside) = (0, 0);
+        // The colours each corner changed to: art has edges and shading, the
+        // untextured quad of a missing sheet is one flat colour.
+        let mut colours = [std::collections::HashSet::new(), Default::default()];
+        for (i, (a, b)) in rgba.chunks_exact(4).zip(base.chunks_exact(4)).enumerate() {
+            if a != b {
+                let (x, y) = (i % width, i / width);
+                let corner =
+                    y > size[1] as usize * 3 / 4 && (x < 200 || x > size[0] as usize - 200);
+                if corner {
+                    inside += 1;
+                    colours[usize::from(x >= size[0] as usize / 2)]
+                        .insert(<[u8; 4]>::try_from(a).unwrap());
+                } else {
+                    outside += 1;
+                }
+            }
+        }
+        if set != IconSet::Ds2 {
+            assert!(inside > 50, "{set:?}: the icons did not change ({inside})");
+            for (side, seen) in ["left", "right"].iter().zip(&colours) {
+                assert!(
+                    seen.len() > 8,
+                    "{set:?}: the {side} icon is {} flat colour(s): untextured",
+                    seen.len()
+                );
+            }
+        } else {
+            assert_eq!(inside, 0, "the PS2's own art is the base");
+        }
+        assert_eq!(outside, 0, "{set:?}: pixels moved away from the help lines");
+        if let Some(dir) = &out {
+            image::RgbaImage::from_raw(size[0], size[1], rgba)
+                .expect("frame")
+                .save(dir.join(format!("icons_{set:?}.png")))
+                .expect("write");
+        }
+    }
+}
+
 /// The Instant Action screen's states and Session Options' pages
 /// (`analysis/re-bf2-menus.md` §1-§2), each the PCSX2 reference frame's
 /// (`bshl/ref_frames/<name>.png`) counterpart where there is one.

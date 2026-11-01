@@ -39,6 +39,9 @@ pub struct MenuModel {
     pub music_volume: f32,
     pub mouse_sensitivity: f32,
     pub invert_y: bool,
+    /// The Input icons row's value and the footer's names.
+    pub input_icons_label: &'static str,
+    pub icons: crate::input_icons::Icons,
     pub first_person: bool,
     pub cursor: usize,
     /// Pending pause-menu Respawn confirmation (re-spawn-flow §7).
@@ -71,6 +74,8 @@ pub enum MenuAction {
     SetMusic(f32),
     SetMouseSensitivity(f32),
     ToggleInvertY,
+    /// The Input icons row, a step on (+1) or back (-1) through its choices.
+    CycleInputIcons(i32),
     ToggleViewpoint,
     Quit,
 }
@@ -234,6 +239,7 @@ pub enum Row {
     Music,
     MouseSensitivity,
     InvertY,
+    InputIcons,
     Quit,
 }
 
@@ -260,6 +266,7 @@ pub fn rows(m: &MenuModel) -> Vec<Row> {
     v.push(Row::Music);
     v.push(Row::MouseSensitivity);
     v.push(Row::InvertY);
+    v.push(Row::InputIcons);
     v.push(Row::Viewpoint);
     if m.in_shell.is_none() {
         if m.respawn_label.is_some() {
@@ -386,6 +393,11 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
         }
         Row::InvertY if input.confirm || input.left || input.right => {
             actions.push(MenuAction::ToggleInvertY)
+        }
+        // Cross steps on too: a paused frame's Left / Right are the Morse
+        // keys (`game::pause::rows_input`), so a pad needs another way round.
+        Row::InputIcons if input.confirm || input.left || input.right => {
+            actions.push(MenuAction::CycleInputIcons(if input.left { -1 } else { 1 }))
         }
         Row::Viewpoint if input.confirm || input.left || input.right => {
             actions.push(MenuAction::ToggleViewpoint)
@@ -536,6 +548,12 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                         let (label, value) = population_row(m, *row).unwrap();
                                         row_label(ui, sel, label.into(), Some(value))
                                     }
+                                    Row::InputIcons => row_label(
+                                        ui,
+                                        sel,
+                                        "Input icons  ◀ ▶".into(),
+                                        Some(m.input_icons_label.to_owned()),
+                                    ),
                                     Row::Viewpoint => row_label(
                                         ui,
                                         sel,
@@ -590,6 +608,9 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                         Row::Resume => actions.push(MenuAction::Resume),
                                         Row::Cheat(k) => actions.push(MenuAction::ToggleCheat(*k)),
                                         Row::InvertY => actions.push(MenuAction::ToggleInvertY),
+                                        Row::InputIcons => {
+                                            actions.push(MenuAction::CycleInputIcons(1))
+                                        }
                                         Row::Viewpoint => actions.push(MenuAction::ToggleViewpoint),
                                         Row::Quit => actions.push(MenuAction::Quit),
                                         _ => {}
@@ -613,13 +634,11 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     }
                     ui.add_space(8.0);
                     ui.label(
-                        RichText::new(
-                            if m.class_choices.is_some() {
-                                "Up/Down choose · Left/Right tabs · Enter select · Esc back"
-                            } else {
-                                "D-pad / arrows move · ✕ / Enter select · ◀▶ adjust · ○ / Start / Esc resume"
-                            },
-                        )
+                        RichText::new(if m.class_choices.is_some() {
+                            "Up/Down choose · Left/Right tabs · Enter select · Esc back".to_owned()
+                        } else {
+                            m.icons.menu_footer()
+                        })
                             .size(12.0)
                             .color(Color32::GRAY),
                     );
@@ -804,6 +823,8 @@ mod tests {
             music_volume: 1.0,
             mouse_sensitivity: 1.0,
             invert_y: false,
+            input_icons_label: "Auto",
+            icons: Default::default(),
             first_person: false,
             cursor: 0,
             respawn_confirm: false,
@@ -811,6 +832,33 @@ mod tests {
             outcome_line: None,
             in_shell: None,
         }
+    }
+
+    /// Both menus carry the row. Cross steps on, as a paused pad has no
+    /// Left / Right for rows; Left steps back.
+    #[test]
+    fn the_input_icons_row_steps_its_choices() {
+        let mut m = model();
+        let at = |m: &MenuModel| rows(m).iter().position(|r| *r == Row::InputIcons);
+        m.cursor = at(&m).unwrap();
+        let press = |m: &MenuModel, input| navigate(m, input).1;
+        let confirm = MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        assert_eq!(press(&m, confirm), vec![MenuAction::CycleInputIcons(1)]);
+        let left = MenuInput {
+            left: true,
+            ..Default::default()
+        };
+        assert_eq!(press(&m, left), vec![MenuAction::CycleInputIcons(-1)]);
+        let right = MenuInput {
+            right: true,
+            ..Default::default()
+        };
+        assert_eq!(press(&m, right), vec![MenuAction::CycleInputIcons(1)]);
+        m.in_shell = Some("Game Options".into());
+        assert!(at(&m).is_some());
     }
 
     #[test]

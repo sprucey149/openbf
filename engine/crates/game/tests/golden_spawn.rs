@@ -84,6 +84,7 @@ fn spawn() -> ui::spawn::SpawnModel {
         countdown: Some(3.4),
         screen: None,
         page: None,
+        icons: Default::default(),
     }
 }
 

@@ -344,6 +344,10 @@ pub fn active_pad_warning(
 /// over, so one press seen on two devices at once cannot flip between them.
 pub const PAD_SWITCH_IDLE: std::time::Duration = std::time::Duration::from_millis(500);
 
+/// How far a stick or trigger must travel to read as the player using the
+/// pad, not as drift. `[ours]`
+pub const DELIBERATE: f32 = 0.5;
+
 /// The pad the player is using (issue #56): the one that most recently sent
 /// real input, not gilrs's first pad, which on Windows can be a silent HID
 /// twin of an XInput pad. Generic over the ID so it tests without hardware.
@@ -352,6 +356,10 @@ pub struct ActivePad<Id> {
     pub id: Option<Id>,
     /// When the active pad last sent input.
     last: Option<std::time::Instant>,
+    /// Counts deliberate input ([`DELIBERATE`] or more) on the active pad.
+    /// A drifting stick keeps a pad awake but does not count here, so it
+    /// cannot take the prompts off the keyboard.
+    pub deliberate: u64,
 }
 
 impl<Id> Default for ActivePad<Id> {
@@ -359,6 +367,7 @@ impl<Id> Default for ActivePad<Id> {
         Self {
             id: None,
             last: None,
+            deliberate: 0,
         }
     }
 }
@@ -377,6 +386,9 @@ impl<Id: Copy + PartialEq> ActivePad<Id> {
         if self.id == Some(id) || self.id.is_none() || idle {
             self.id = Some(id);
             self.last = Some(now);
+            if value.abs() >= DELIBERATE {
+                self.deliberate += 1;
+            }
         }
     }
 
@@ -422,6 +434,85 @@ pub fn pad_kind(pad: &gilrs::Gamepad<'_>) -> PadKind {
     } else {
         PadKind::Raw
     }
+}
+
+/// Which pad a controller is, as far as the input library can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PadFamily {
+    /// DualShock 2 or 3, through an adapter or natively.
+    Ds2,
+    Ds4,
+    Ds5,
+    XboxOriginal,
+    /// Xbox One, Series and 360: the same buttons, the XInput class.
+    XboxOne,
+    Generic,
+}
+
+const SONY: u16 = 0x054c;
+const MICROSOFT: u16 = 0x045e;
+const SONY_DS3: [u16; 1] = [0x0268];
+const SONY_DS4: [u16; 3] = [0x05c4, 0x09cc, 0x0ba0];
+const SONY_DS5: [u16; 2] = [0x0ce6, 0x0df2];
+const MS_DUKE: [u16; 5] = [0x0202, 0x0285, 0x0287, 0x0288, 0x0289];
+const MS_XINPUT: [u16; 14] = [
+    0x028e, 0x028f, 0x0291, 0x02a1, 0x0719, 0x02d1, 0x02dd, 0x02e3, 0x02ea, 0x02fd, 0x0b00, 0x0b05,
+    0x0b12, 0x0b13,
+];
+
+/// [`PadFamily`] from what the OS reports: the USB IDs first, then the name,
+/// then a standard-layout pad neither identifies (Windows' XInput class).
+/// Anything else is [`PadFamily::Generic`]; a wrong guess only changes prompts.
+pub fn family_of(name: &str, hw: Option<HwId>, kind: PadKind) -> PadFamily {
+    match hw {
+        Some((SONY, p)) if SONY_DS3.contains(&p) => return PadFamily::Ds2,
+        Some((SONY, p)) if SONY_DS4.contains(&p) => return PadFamily::Ds4,
+        Some((SONY, p)) if SONY_DS5.contains(&p) => return PadFamily::Ds5,
+        Some((MICROSOFT, p)) if MS_DUKE.contains(&p) => return PadFamily::XboxOriginal,
+        Some((MICROSOFT, p)) if MS_XINPUT.contains(&p) => return PadFamily::XboxOne,
+        _ => {}
+    }
+    let name = name.to_ascii_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| name.contains(w));
+    if has(&["dualsense", "ps5"]) {
+        PadFamily::Ds5
+    } else if has(&["dualshock 4", "dualshock4", "ps4"]) {
+        PadFamily::Ds4
+    } else if has(&[
+        "dualshock",
+        "playstation",
+        "ps2",
+        "ps3",
+        "sony interactive entertainment wireless",
+    ]) {
+        // The kernel names a DS4 and a DS5 alike; their IDs were read above.
+        PadFamily::Ds2
+    } else if has(&[
+        "xbox one",
+        "xbox series",
+        "xbox 360",
+        "x-box 360",
+        "x-box one",
+    ]) || has(&["xbox wireless", "xinput"])
+    {
+        PadFamily::XboxOne
+    } else if has(&["x-box", "xbox"]) {
+        // Windows' own name for its XInput class says Xbox and nothing more.
+        if kind == PadKind::Unified {
+            PadFamily::XboxOne
+        } else {
+            PadFamily::XboxOriginal
+        }
+    } else if kind == PadKind::Unified {
+        PadFamily::XboxOne
+    } else {
+        PadFamily::Generic
+    }
+}
+
+/// [`PadFamily`] of a connected pad.
+pub fn pad_family(pad: &gilrs::Gamepad<'_>) -> PadFamily {
+    family_of(pad.name(), hw_id(pad), pad_kind(pad))
 }
 
 /// A pad's hardware identity: its USB vendor and product IDs, when the OS
@@ -614,6 +705,62 @@ pub fn pad_from_gamepad_with_arms(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The USB IDs decide first; the name only when they say nothing.
+    #[test]
+    fn pads_are_named_by_id_then_by_name() {
+        use PadFamily as F;
+        use PadKind::{Raw, Sdl, Unified};
+        for (hw, family) in [
+            ((0x054c, 0x05c4), F::Ds4),
+            ((0x054c, 0x09cc), F::Ds4),
+            ((0x054c, 0x0ce6), F::Ds5),
+            ((0x054c, 0x0df2), F::Ds5),
+            ((0x054c, 0x0268), F::Ds2),
+            ((0x045e, 0x0202), F::XboxOriginal),
+            ((0x045e, 0x0289), F::XboxOriginal),
+            ((0x045e, 0x02ea), F::XboxOne),
+            ((0x045e, 0x0b12), F::XboxOne),
+            ((0x045e, 0x028e), F::XboxOne),
+        ] {
+            assert_eq!(family_of("pad", Some(hw), Sdl), family, "{hw:04x?}");
+        }
+        // The kernel's name for a DS4 and a DS5 alike: the ID tells them apart.
+        let kernel = "Sony Interactive Entertainment Wireless Controller";
+        assert_eq!(family_of(kernel, Some((0x054c, 0x0ce6)), Sdl), F::Ds5);
+        assert_eq!(family_of(kernel, Some((0x054c, 0x09cc)), Sdl), F::Ds4);
+        for (name, kind, family) in [
+            ("DualSense Wireless Controller", Sdl, F::Ds5),
+            ("PS4 Controller", Sdl, F::Ds4),
+            ("Sony DualShock 4", Sdl, F::Ds4),
+            ("PS2 to USB adapter", Raw, F::Ds2),
+            ("Microsoft X-Box pad v1 (US)", Sdl, F::XboxOriginal),
+            ("Microsoft X-Box 360 pad", Sdl, F::XboxOne),
+            ("Microsoft X-Box One pad", Sdl, F::XboxOne),
+            ("Xbox Series X Controller", Sdl, F::XboxOne),
+            ("Xbox Controller", Unified, F::XboxOne),
+            ("Controller (GameSir G7 Pro)", Unified, F::XboxOne),
+            ("GameSir G7 Pro", Sdl, F::Generic),
+            ("Twin USB Joystick", Raw, F::Generic),
+        ] {
+            assert_eq!(family_of(name, None, kind), family, "{name}");
+        }
+    }
+
+    /// A drifting stick keeps a pad awake and does not count as using it.
+    #[test]
+    fn only_deliberate_input_counts_as_using_the_pad() {
+        let now = std::time::Instant::now();
+        let mut a = ActivePad::<u8>::default();
+        a.input(1, 0.2, now);
+        assert_eq!(a.id, Some(1), "drift wakes the pad");
+        assert_eq!(a.deliberate, 0);
+        a.input(1, 0.9, now);
+        assert_eq!(a.deliberate, 1);
+        // A press on a pad that cannot take over yet counts for nothing.
+        a.input(2, 1.0, now);
+        assert_eq!((a.id, a.deliberate), (Some(1), 1));
+    }
 
     #[test]
     fn active_pad_follows_input_and_falls_back_to_first() {

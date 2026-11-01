@@ -405,6 +405,8 @@ struct App {
     gameplay_stick: GameplayStick<gilrs::GamepadId>,
     /// The pad that last sent input; read instead of the first (issue #56).
     active_pad: input::ActivePad<gilrs::GamepadId>,
+    /// Which device the Auto input icons follow.
+    icon_device: game::input_icons::DeviceTracker,
     /// The menu bits the keyboard holds (the shell only: arrows, Enter as
     /// Cross + Start, Escape / Backspace as Back; card BSHLA).
     keys_held: u32,
@@ -625,6 +627,7 @@ impl App {
             prev_menu_buttons: 0,
             gameplay_stick: GameplayStick::default(),
             active_pad: input::ActivePad::default(),
+            icon_device: game::input_icons::DeviceTracker::default(),
             keys_held: 0,
             keys_tapped: 0,
             shell_pointer: ui::cursor::Pointer::default(),
@@ -1063,6 +1066,16 @@ impl App {
         self.init_shell();
     }
 
+    /// The control prompts' icons this frame.
+    fn current_icons(&mut self) -> ui::input_icons::Icons {
+        self.icon_device.sync(self.gilrs.as_ref(), &self.active_pad);
+        let settings = &self.profile.settings;
+        game::input_icons::icons(
+            self.icon_device.set(settings.input_icons),
+            &settings.controller_bindings,
+        )
+    }
+
     /// Raw menu buttons this frame as edge bits: 1 up, 2 down, 4 left,
     /// 8 right, 16 confirm (Cross), 32 back (Circle), 64 Start, 128 L1,
     /// 256 R1, 512 Square.
@@ -1308,6 +1321,9 @@ impl winit::application::ApplicationHandler for App {
         event: winit::event::WindowEvent,
     ) {
         use winit::event::WindowEvent;
+        if game::input_icons::is_keyboard_or_mouse_use(&event) {
+            self.icon_device.keyboard_or_mouse();
+        }
         if self.capture_keyboard(&event) {
             return;
         }
@@ -1414,6 +1430,7 @@ impl winit::application::ApplicationHandler for App {
                 let clear = self.gpu.as_ref().map_or(CLEAR, |g| g.clear);
                 let mut hud: Option<ui::hud::HudModel> = None;
                 let mut spawn: Option<ui::spawn::SpawnModel> = None;
+                let icons = self.current_icons();
                 let mut menu: Option<ui::menu::MenuModel> = None;
                 let edges = if self.walk.is_some() {
                     self.menu_edges()
@@ -1500,6 +1517,8 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             invert_y: self.profile.settings.invert_y,
+                            input_icons_label: self.profile.settings.input_icons.label(),
+                            icons,
                             first_person: self.profile.settings.viewpoint.is_first(),
                             cursor: self.pause_menu.cursor,
                             respawn_confirm: self.pause_menu.confirm,
@@ -1604,6 +1623,7 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             invert_y: self.profile.settings.invert_y,
+                            input_icons_label: self.profile.settings.input_icons.label(),
                             first_person: self.profile.settings.viewpoint.is_first(),
                             ..model
                         });
@@ -1907,7 +1927,8 @@ impl winit::application::ApplicationHandler for App {
                     }
                     // Spawn screen while dead: the post and class it shows
                     // are the sim's (card SPSEL), moved by the pad bits.
-                    spawn = spawn_model(walk, &self.feed);
+                    spawn =
+                        spawn_model(walk, &self.feed).map(|s| ui::spawn::SpawnModel { icons, ..s });
                     let camera = walk.camera();
                     if let (Some(p), Some(me)) =
                         (self.frame_profile.as_mut(), walk.sim.unit(walk.player))
@@ -2047,6 +2068,7 @@ impl winit::application::ApplicationHandler for App {
                     let hud_dt = if self.paused { 0.0 } else { dt };
                     let mut hud_view = match (&mut self.hud_view, &hud) {
                         (Some(hv), Some(model)) => {
+                            hv.set_icons(icons);
                             hv.update(model, hud_dt, [w, h]);
                             game::round_end::hud_pass_drawn(model.round_end.is_some(), hud_hidden)
                                 .then_some(hv)

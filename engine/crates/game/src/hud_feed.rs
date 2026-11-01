@@ -403,6 +403,11 @@ impl HudView {
         })
     }
 
+    /// The icons the control prompts draw from the next layout on.
+    pub fn set_icons(&mut self, icons: ui::input_icons::Icons) {
+        self.art.icons = icons;
+    }
+
     fn texture_file(&self, name: &str) -> Option<PathBuf> {
         self.texture_dirs
             .iter()
@@ -678,15 +683,18 @@ impl HudView {
                             .find(|p| pak::is_file(p))
                             .and_then(|p| pak::read(p).ok())
                             .and_then(|bytes| crate::assets::load_ktx2(&bytes).ok())
-                            .and_then(|mut t| {
+                            .map(|t| (t.rgba, t.width, t.height))
+                            // A control prompt no bake supplied is drawn here,
+                            // once; the texture map keeps it from then on.
+                            .or_else(|| crate::input_icons::rasterize(sheet))
+                            .and_then(|(mut rgba, width, height)| {
                                 if opaque {
-                                    t.rgba
-                                        .as_chunks_mut::<4>()
+                                    rgba.as_chunks_mut::<4>()
                                         .0
                                         .iter_mut()
                                         .for_each(|p| p[3] = 255);
                                 }
-                                pass.add_texture(device, queue, &t.rgba, t.width, t.height, repeat)
+                                pass.add_texture(device, queue, &rgba, width, height, repeat)
                             });
                         if t.is_none() {
                             eprintln!("hud: no sheet {:?}; drawn untextured", b.texture);
