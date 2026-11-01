@@ -399,3 +399,38 @@ fn pause_menus_and_focus_loss_release_motion_and_require_a_new_click() {
     k.sync_grab_with(true, |_| -> Result<(), ()> { panic!("kept a menu click") })
         .unwrap();
 }
+
+#[test]
+fn legacy_viewpoint_migration_keeps_a_remap_onto_v_when_loading_a_profile() {
+    let mut settings = crate::profile::Settings::default();
+    settings
+        .keyboard_bindings
+        .table
+        .retain(|(_, bind)| bind.bits != buttons::VIEW_TOGGLE);
+    assert!(settings
+        .keyboard_bindings
+        .remap(0, Trigger::Key(KeyCode::KeyV)));
+    let previous = settings.keyboard_bindings.table.clone();
+    let loaded: crate::profile::Settings =
+        ron::from_str(&ron::to_string(&settings).unwrap()).unwrap();
+    assert_eq!(
+        &loaded.keyboard_bindings.table[..previous.len()],
+        previous.as_slice()
+    );
+    assert!(loaded.keyboard_bindings.is_valid());
+    let (view_key, _) = loaded
+        .keyboard_bindings
+        .table
+        .iter()
+        .find(|(_, bind)| bind.bits == buttons::VIEW_TOGGLE)
+        .unwrap();
+    assert_ne!(*view_key, Trigger::Key(KeyCode::KeyV));
+    let mut input = Kbm::default();
+    input.follow(&loaded);
+    input.press(Trigger::Key(KeyCode::KeyV), true);
+    let moving = input.pad(PadState::default());
+    assert_eq!(moving.ly, i16::MAX);
+    assert!(!moving.pressed(buttons::VIEW_TOGGLE));
+    input.press(*view_key, true);
+    assert!(input.pad(PadState::default()).pressed(buttons::VIEW_TOGGLE));
+}

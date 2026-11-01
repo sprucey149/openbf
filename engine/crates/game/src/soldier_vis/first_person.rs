@@ -23,6 +23,8 @@ pub struct FpArms {
 
 #[derive(Debug, Clone, Default)]
 pub struct FpClass {
+    /// The class assets own their clip table and arm offset, even on another game's map.
+    pub bf2: bool,
     pub arms: Option<usize>,
     pub primary: (Option<usize>, usize),
     pub held: Vec<(u8, Option<usize>, usize)>,
@@ -70,6 +72,7 @@ impl FirstPersonVisuals {
             for c in &t.classes {
                 let primary = &c.first_person_weapon;
                 classes[team].push(FpClass {
+                    bf2: game.eq_ignore_ascii_case("bf2"),
                     arms: intern_name(&mut models, c.first_person.as_deref()),
                     primary: (
                         intern_name(&mut guns, primary.geometry.as_deref()),
@@ -108,6 +111,23 @@ impl FirstPersonVisuals {
             classes,
             state: None,
         }
+    }
+
+    /// Add a class loaded by the testing picker, retaining its source game and remapping its caches.
+    pub fn append_class(&mut self, team: usize, class: usize, mut added: Self) {
+        let arms = self.arms.len();
+        let weapons = self.weapons.len();
+        for c in &mut added.classes[team] {
+            c.arms = c.arms.map(|i| i + arms);
+            c.primary.0 = c.primary.0.map(|i| i + weapons);
+            for (_, gun, _) in &mut c.held {
+                *gun = gun.map(|i| i + weapons);
+            }
+        }
+        self.arms.extend(added.arms);
+        self.weapons.extend(added.weapons);
+        self.classes[team].resize_with(class, FpClass::default);
+        self.classes[team].append(&mut added.classes[team]);
     }
 
     fn load_arms(
@@ -167,7 +187,7 @@ impl FirstPersonVisuals {
     }
 
     /// Advance first-person arm animation state machine for the player.
-    pub fn update(&mut self, walk: &WalkSim, dt: f32, bf2: bool, units: &[UnitVisual]) {
+    pub fn update(&mut self, walk: &WalkSim, dt: f32, units: &[UnitVisual]) {
         let i = walk.player.index as usize;
         let Some(u) = walk
             .sim
@@ -227,7 +247,7 @@ impl FirstPersonVisuals {
         let finished = state.playback.finished(clips);
         let blending = state.playback.blend > 0.0;
         if let Some(play) = state.chooser.step(&input, finished, blending, dt) {
-            let name = clip_name(bf2, play.row, play.column);
+            let name = clip_name(class.bf2, play.row, play.column);
             let clip = clips.iter().position(|c| c.name.eq_ignore_ascii_case(name));
             state.playback.play(clip, play.looping, play.snap);
         }
@@ -238,7 +258,7 @@ impl FirstPersonVisuals {
     }
 
     /// The player's first-person weapon fire point in world coordinates.
-    pub fn muzzle(&self, walk: &WalkSim, bf2: bool) -> Option<(usize, Vec3)> {
+    pub fn muzzle(&self, walk: &WalkSim) -> Option<(usize, Vec3)> {
         let i = walk.player.index as usize;
         let u = walk.sim.unit(walk.player)?;
         if !walk.shows_first_person_arms() {
@@ -256,8 +276,8 @@ impl FirstPersonVisuals {
         let model = model_matrix(
             eye,
             bone_global(&a.asset.skeleton, &state.palette, a.camera),
-            bf2,
-            frame_scale(camera.fov_y, bf2),
+            class.bf2,
+            frame_scale(camera.fov_y, class.bf2),
         );
         let at: Mat4 = model * bone_global(&a.asset.skeleton, &state.palette, bone);
         let name = walk
@@ -302,12 +322,11 @@ impl SoldierVisuals {
         let (gun, _) = class.weapon_of(hand.slot);
         let skel = &a.asset.skeleton;
         let eye = camera.view().inverse();
-        let bf2 = self.bf2;
         let model = model_matrix(
             eye,
             bone_global(skel, &state.palette, a.camera),
-            bf2,
-            frame_scale(camera.fov_y, bf2),
+            class.bf2,
+            frame_scale(camera.fov_y, class.bf2),
         );
         for (mesh, tex, layer) in &a.meshes {
             skinned.push(SkinnedDrawCmd {
@@ -330,5 +349,115 @@ impl SoldierVisuals {
             }
         }
         (skinned, draws)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn arms() -> FpArms {
+        FpArms {
+            asset: SkinnedAsset {
+                name: "arms".into(),
+                mesh: crate::assets::CpuSkinnedMesh {
+                    positions: Vec::new(),
+                    normals: Vec::new(),
+                    uvs: Vec::new(),
+                    colors: Vec::new(),
+                    joints: Vec::new(),
+                    weights: Vec::new(),
+                    indices: Vec::new(),
+                    submeshes: Vec::new(),
+                    spec: Vec::new(),
+                },
+                skeleton: crate::skin::Skeleton::new(
+                    vec![CAMERA_BONE.into()],
+                    vec![None],
+                    vec![Mat4::IDENTITY],
+                ),
+                clips: [false, true]
+                    .into_iter()
+                    .map(|bf2| crate::skin::Clip {
+                        name: clip_name(bf2, 0, crate::first_person::column::HANDSDOWN).into(),
+                        fps: 30.0,
+                        frames: 2,
+                        tracks: vec![None],
+                    })
+                    .collect(),
+            },
+            meshes: Vec::new(),
+            camera: 0,
+            weapon: None,
+        }
+    }
+
+    #[test]
+    fn clips_follow_the_class_source_game_after_a_cross_game_append() {
+        let mut walk = WalkSim::new(7, Vec3::ZERO, None);
+        walk.sim.units[walk.player.index as usize].first_person = true;
+        for bf2 in [false, true] {
+            let mut visuals = FirstPersonVisuals::default();
+            let mut added = FirstPersonVisuals::default();
+            added.arms.push(arms());
+            added.classes[0].push(FpClass {
+                bf2,
+                arms: Some(0),
+                ..Default::default()
+            });
+            visuals.append_class(0, 0, added);
+            visuals.update(&walk, 1.0 / 30.0, &[]);
+            assert_eq!(
+                visuals.state.as_ref().unwrap().playback.clip,
+                Some(usize::from(bf2))
+            );
+            let teams = [
+                TeamTemplate::default_trooper(),
+                TeamTemplate::default_trooper(),
+            ];
+            let loaded = FirstPersonVisuals::load(
+                None,
+                Path::new("missing_fp_assets"),
+                if bf2 { "bf2" } else { "bf1" },
+                &teams,
+                &mut HashMap::new(),
+            );
+            assert_eq!(loaded.classes[0][0].bf2, bf2);
+        }
+    }
+
+    #[test]
+    fn appended_classes_keep_all_first_person_cache_indices_and_source_game() {
+        let mut visuals = FirstPersonVisuals::default();
+        visuals.arms.push(arms());
+        visuals.weapons.push(WeaponAsset::default());
+        visuals.classes[1].push(FpClass {
+            bf2: true,
+            arms: Some(0),
+            primary: (Some(0), 2),
+            ..Default::default()
+        });
+        let mut added = FirstPersonVisuals::default();
+        added.arms.push(arms());
+        added
+            .weapons
+            .extend([WeaponAsset::default(), WeaponAsset::default()]);
+        added.classes[1].push(FpClass {
+            bf2: false,
+            arms: Some(0),
+            primary: (Some(0), 0),
+            held: vec![(2, Some(1), 4)],
+        });
+        visuals.append_class(1, 1, added);
+        assert_eq!(visuals.arms.len(), 2);
+        assert_eq!(visuals.weapons.len(), 3);
+        assert_eq!(visuals.classes[1].len(), 2);
+        assert!(visuals.classes[1][0].bf2);
+        assert_eq!(visuals.classes[1][0].arms, Some(0));
+        let picked = &visuals.classes[1][1];
+        assert!(!picked.bf2);
+        assert_eq!(picked.arms, Some(1));
+        assert_eq!(picked.weapon_of(0), (Some(1), 0));
+        assert_eq!(picked.weapon_of(2), (Some(2), 4));
     }
 }

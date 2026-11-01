@@ -40,6 +40,7 @@ impl SoldierVisuals {
                 *model = model.map(|w| w + weapons);
             }
         }
+        self.fp.append_class(team, class, added.fp);
         self.assets.extend(added.assets);
         self.weapons.extend(added.weapons);
         self.per_class[team].append(&mut added.per_class[team]);
@@ -751,7 +752,7 @@ impl SoldierVisuals {
         }
         self.step_cloths(walk, dt);
         self.step_saber_trails(walk, dt);
-        self.fp.update(walk, dt, self.bf2, &self.units);
+        self.fp.update(walk, dt, &self.units);
     }
 
     /// One unit's animator on foot (not in a seat that shows him).
@@ -1233,7 +1234,7 @@ impl SoldierVisuals {
                 out[i] = Some(frame.w_axis.truncate());
             }
         }
-        if let Some((i, p)) = self.fp.muzzle(walk, self.bf2) {
+        if let Some((i, p)) = self.fp.muzzle(walk) {
             out[i] = Some(p);
         }
         out

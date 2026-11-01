@@ -112,11 +112,22 @@ impl Bindings {
     }
 
     pub fn with_new_actions(mut self) -> Bindings {
-        for (trigger, bind) in Self::pc_default().table {
-            let known = self.table.iter().any(|(_, b)| *b == bind);
-            let free = !self.table.iter().any(|(t, _)| *t == trigger);
-            if !known && free {
-                self.table.push((trigger, bind));
+        let defaults = Self::pc_default().table;
+        for (trigger, bind) in &defaults {
+            if self.table.iter().any(|(_, b)| b == bind) {
+                continue;
+            }
+            // A player's remap may already use a newly introduced default key.
+            // Give the new action a free trigger rather than invalidating the saved layout.
+            let free = std::iter::once(*trigger)
+                .chain(defaults.iter().map(|(t, _)| *t))
+                .find(|t| {
+                    !self.table.iter().any(|(used, _)| used == t)
+                        && (!matches!(t, Trigger::WheelUp | Trigger::WheelDown)
+                            || bind.walk == (0, 0))
+                });
+            if let Some(trigger) = free {
+                self.table.push((trigger, *bind));
             }
         }
         self

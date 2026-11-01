@@ -1157,3 +1157,38 @@ fn an_item_guns_shot_never_flashes_or_animates_its_owner() {
         Some(walk.sim.tick)
     );
 }
+
+/// From the eye the third-person body is hidden: a bolt starts at the arms' gun or at
+/// the sim's own spawn point, never at that hidden body's hand.
+#[test]
+fn the_hidden_body_gives_no_muzzle_in_the_eye_view() {
+    let root = crate::assets::baked_root();
+    let ok = |p: &str| root.join(format!("side_bf2/{p}")).exists();
+    if !ok("soldiers/rep_inf_ep3trooper.glb") || !ok("weapons/rep_weap_inf_rifle.nodes.ron") {
+        eprintln!("skip: no bf2 rep_inf_ep3trooper / rifle bake");
+        return;
+    }
+    let t = team(&[(
+        "rep_inf_ep3_rifleman",
+        Some("rep_inf_ep3trooper"),
+        Some("rep_weap_inf_rifle"),
+    )]);
+    let mut vis = SoldierVisuals::load_cpu(&root, "bf2", &[t.clone(), t]);
+    let mut w = WalkSim::new(1, Vec3::ZERO, None);
+    let me = w.player.index as usize;
+    vis.update(&w, core::TICK_DT);
+    assert!(vis.fire_points(&w)[me].is_some(), "third person draws his gun");
+    let zoom = |scope| core::unit::Zoom {
+        step: 0,
+        value: 2.0,
+        divisor: 2.0,
+        scope,
+    };
+    w.sim.units[me].zoom = Some(zoom(true));
+    assert_eq!(vis.fire_points(&w)[me], None, "the scope");
+    w.sim.units[me].zoom = Some(zoom(false));
+    w.sim.units[me].first_person = true;
+    assert_eq!(vis.fire_points(&w)[me], None, "zoomed first person");
+    w.sim.units[me].zoom = None;
+    assert_eq!(vis.fire_points(&w)[me], None, "a class with no arms bake");
+}

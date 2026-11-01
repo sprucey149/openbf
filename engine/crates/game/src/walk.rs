@@ -392,6 +392,11 @@ impl ClassVisual {
                 .iter()
                 .map(|h| (h.slot, h.geometry.clone()))
                 .collect(),
+            first_person_held: c
+                .held
+                .iter()
+                .map(|h| (h.slot, h.first_person.clone()))
+                .collect(),
             ..Self::from_roster(c)
         }
     }
