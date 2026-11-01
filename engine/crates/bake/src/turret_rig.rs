@@ -310,6 +310,7 @@ mod tests {
             vertex_count: 6,
             index_count: 6,
             bf2_material: true,
+            pc_geometry: false,
             material_flags: 2,
             render_type: mungefs::model::RenderType::Absent,
             spec_power: 4,

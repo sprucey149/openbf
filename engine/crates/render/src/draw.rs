@@ -154,6 +154,7 @@ pub enum LightPath {
     /// colour is the model's colour word, a factor on that light, not on
     /// the texel (`game::spawn_preview::colour_unit`).
     Iface = 9,
+    VertexLit = 10,
 }
 
 /// The interface light set's ambient, GS units (`FUN_00398000` writes 0.5
@@ -217,9 +218,7 @@ pub struct DrawCmd {
     pub fade: Option<Fade>,
     /// The model sphere this draw gathers BF2's local lights for (card BPNT,
     /// `crate::point_light`), or `None` for a draw that takes none — every
-    /// draw but a placed world model's. Only the `Lit`, `Character`, `Prelit`
-    /// and `PrelitAdd` paths add the lights; the two prelit ones skip the
-    /// Static lights.
+    /// draw but a placed world model's.
     pub lit: Option<LitSphere>,
 }
 

@@ -59,7 +59,13 @@ pub fn bake_soldier_anims(
     outdir: &str,
     pc_lvl: Option<&str>,
 ) -> Result<BakedSoldier> {
-    let pc = pc_lvl.map(crate::tier::PcTextures::load).transpose()?;
+    let lvl_resolved = crate::resolve_ci(lvl_path);
+    let lvl_path = lvl_resolved.as_str();
+    let pc_resolved = pc_lvl.map(crate::resolve_ci);
+    let pc = pc_resolved
+        .as_deref()
+        .map(crate::tier::PcTextures::load)
+        .transpose()?;
     let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let (m, mut skel) = find_soldier(inner, model)?;
@@ -88,7 +94,8 @@ pub fn bake_soldier_anims(
     let mut clips = Vec::new();
     let mut meta = SoldierAnims::default();
     if let Some(anim_path) = anim_lvl {
-        let abuf = std::fs::read(anim_path).with_context(|| anim_path.to_string())?;
+        let anim_resolved = crate::resolve_ci(anim_path);
+        let abuf = std::fs::read(&anim_resolved).with_context(|| anim_resolved.clone())?;
         let ainner = mungefs::open(&abuf).map_err(|e| anyhow!("{e}"))?;
         let sanm = mungefs::sanm::find_sanm(ainner).map_err(|e| anyhow!("{e}"))?;
         // BF2's sets take every soldier side's classes and banks (a level
@@ -97,7 +104,8 @@ pub fn bake_soldier_anims(
             Some(_) => ["ALL", "IMP", "REP", "CIS"]
                 .iter()
                 .filter_map(|s| {
-                    std::fs::read(Path::new(lvl_path).with_file_name(format!("{s}.LVL"))).ok()
+                    let parent = Path::new(lvl_path).parent()?;
+                    std::fs::read(crate::join_ci(parent, &format!("{s}.LVL"))).ok()
                 })
                 .collect(),
             None => Vec::new(),
@@ -256,7 +264,10 @@ pub fn bake_soldier_anims(
             None => ("BF2_ANIMS", BORROWED_THROW),
         };
         let lender_buf = match std::env::var_os(lender) {
-            Some(p) => Some(std::fs::read(&p).with_context(|| format!("{p:?}"))?),
+            Some(p) => {
+                let resolved = crate::resolve_ci(&p.to_string_lossy());
+                Some(std::fs::read(&resolved).with_context(|| format!("{p:?}"))?)
+            }
             None => None,
         };
         let lender_banks = match &lender_buf {
@@ -523,10 +534,17 @@ pub fn bake_weapon(
     outdir: &str,
     pc_lvl: Option<&str>,
 ) -> Result<BakedWeapon> {
-    let pc = pc_lvl.map(crate::tier::PcTextures::load).transpose()?;
+    let pc_resolved = pc_lvl.map(crate::resolve_ci);
+    let pc = pc_resolved
+        .as_deref()
+        .map(crate::tier::PcTextures::load)
+        .transpose()?;
     let bufs = lvl_path
         .split(',')
-        .map(|p| std::fs::read(p).with_context(|| p.to_string()))
+        .map(|p| {
+            let resolved = crate::resolve_ci(p);
+            std::fs::read(&resolved).with_context(|| p.to_string())
+        })
         .collect::<Result<Vec<_>>>()?;
     let inners = bufs
         .iter()

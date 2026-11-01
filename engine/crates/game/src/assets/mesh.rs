@@ -355,6 +355,7 @@ fn light_of(light: Option<&str>) -> render::LightPath {
         Some("prelit_add") => P::PrelitAdd,
         Some("unlit") => P::Unlit,
         Some("unlit_add") => P::UnlitAdd,
+        Some("vertex_lit") => P::VertexLit,
         Some("glow") => P::Glow,
         Some("unscaled") => P::Unscaled,
         _ => P::Lit,

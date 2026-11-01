@@ -250,6 +250,7 @@ pub enum LightPath {
     /// Unlit on a vc-lit segment: the material constant PLUS COL0 (VU1 0x2a3
     /// → 0x2bf).
     UnlitAdd,
+    VertexLit,
     /// BF2 self-lit (card GLOW, [`glow_path`]): unlit, then × (1 + As/128)
     /// in display units, clamped.
     Glow,
@@ -265,6 +266,7 @@ impl LightPath {
             LightPath::PrelitAdd => "prelit_add",
             LightPath::Unlit => "unlit",
             LightPath::UnlitAdd => "unlit_add",
+            LightPath::VertexLit => "vertex_lit",
             LightPath::Glow => "glow",
             LightPath::Unscaled => "unscaled",
         }
@@ -285,6 +287,10 @@ impl LightPath {
 ///   read, and no BF1 patched-state pair has checked it.
 pub fn light_path(m: &Model, seg: &mungefs::model::Segment) -> LightPath {
     let f = seg.material_flags;
+    let vertex_bit = if seg.bf2_material { 0x200 } else { 0x40 };
+    if seg.pc_geometry && f & vertex_bit != 0 && seg.colors.is_some() {
+        return LightPath::VertexLit;
+    }
     let (vc_lit, prelit) = if seg.bf2_material {
         let model_prelit = m
             .segments
@@ -444,6 +450,7 @@ mod tests {
             vertex_count: 3,
             index_count: 3,
             bf2_material: false,
+            pc_geometry: false,
             material_flags: flags,
             render_type: RenderType::Bf1("Normal".into()),
             spec_power: 0,
@@ -550,8 +557,23 @@ mod tests {
     fn bf2(flags: u32, col0: bool) -> Segment {
         Segment {
             bf2_material: true,
+            pc_geometry: false,
             colors: col0.then(|| vec![[0x40, 0x80, 0xff, 0x80]; 3]),
             ..seg("t", flags)
+        }
+    }
+
+    #[test]
+    fn pc_vertex_lighting_does_not_take_the_ps2_additive_path() {
+        for (bf2_material, flags) in [(false, 0x40), (false, 0x41), (true, 0x200), (true, 0x201)] {
+            let mut segment = seg("t", flags);
+            segment.bf2_material = bf2_material;
+            segment.colors = Some(vec![[64, 64, 64, 128]; 3]);
+            let ps2 = model(vec![segment.clone()]);
+            assert_ne!(light_path(&ps2, &ps2.segments[0]), LightPath::VertexLit);
+            segment.pc_geometry = true;
+            let pc = model(vec![segment]);
+            assert_eq!(light_path(&pc, &pc.segments[0]), LightPath::VertexLit);
         }
     }
 

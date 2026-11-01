@@ -47,6 +47,26 @@ impl Texture {
     /// Parse from a `tex_` chunk.
     pub fn parse(tex: &Chunk<'_>) -> Result<Texture, UcfbError> {
         let bad = || UcfbError::Truncated(tex.offset);
+        if tex.child(b"FMT_").is_some() {
+            let pc = crate::texture_pc::Texture::parse(tex)?;
+            let surface = pc.best().or_else(|| pc.surfaces.first()).ok_or_else(bad)?;
+            let face = surface.faces.first().ok_or_else(bad)?;
+            let mips: Vec<Vec<u8>> = face.mips.iter().map(|m| m.rgba.clone()).collect();
+            let info = TextureInfo {
+                width: surface.width,
+                height: surface.height,
+                bpp: 32,
+                detail_compressed: false,
+                mip_distance: 0.0,
+                mip_count: mips.len() as u32,
+            };
+            return Ok(Texture {
+                name: pc.name,
+                info,
+                palette: Vec::new(),
+                mips,
+            });
+        }
         let name = tex.child_string(b"NAME").ok_or_else(bad)?;
         let info = tex.child(b"INFO").ok_or_else(bad)?;
         let ip = info.payload;
@@ -325,5 +345,40 @@ mod tests {
         assert_eq!(t.mip_dims(31), (1, 1));
         assert_eq!(t.mip_dims(32), (1, 1));
         assert_eq!(t.mip_dims(usize::MAX), (1, 1));
+    }
+    #[test]
+    fn pc_texture_parses_via_texture_parse() {
+        use crate::build_chunk as chunk;
+        let name = chunk(b"NAME", b"pc_test\0");
+        let info = chunk(b"INFO", &[1, 0, 0, 0, 21, 0, 0, 0]);
+        let mut fmt_info = vec![0u8; 16];
+        fmt_info[0..4].copy_from_slice(&21u32.to_le_bytes());
+        fmt_info[4..6].copy_from_slice(&1u16.to_le_bytes());
+        fmt_info[6..8].copy_from_slice(&1u16.to_le_bytes());
+        fmt_info[8..10].copy_from_slice(&1u16.to_le_bytes());
+        fmt_info[10..12].copy_from_slice(&1u16.to_le_bytes());
+        fmt_info[12..16].copy_from_slice(&1u32.to_le_bytes());
+        let mut lvl_info = vec![0u8; 8];
+        lvl_info[0..4].copy_from_slice(&0u32.to_le_bytes());
+        lvl_info[4..8].copy_from_slice(&4u32.to_le_bytes());
+        let body = chunk(b"BODY", &[0, 255, 0, 255]);
+        let mut lvl = chunk(b"INFO", &lvl_info);
+        lvl.extend(body);
+        let lvl = chunk(b"LVL_", &lvl);
+        let face = chunk(b"FACE", &lvl);
+        let mut fmt = chunk(b"INFO", &fmt_info);
+        fmt.extend(face);
+        let fmt = chunk(b"FMT_", &fmt);
+        let mut tex = name;
+        tex.extend(info);
+        tex.extend(fmt);
+        let bytes = chunk(b"tex_", &tex);
+        let c = crate::chunks(&bytes).next().unwrap().unwrap();
+        let t = Texture::parse(&c).unwrap();
+        assert_eq!(t.name, "pc_test");
+        assert_eq!(t.info.width, 1);
+        assert_eq!(t.info.height, 1);
+        assert_eq!(t.info.bpp, 32);
+        assert_eq!(t.rgba8(0), vec![0, 255, 0, 255]);
     }
 }

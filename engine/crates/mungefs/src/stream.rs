@@ -43,7 +43,10 @@ pub struct Segment {
 
 pub struct Stream<'a> {
     pub name_hash: u32,
+    pub format: u32,
     pub channels: u32,
+    pub substreams: u32,
+    pub interleave: u32,
     /// Streaming block size (0x4000 = 16 KiB on every stream measured).
     pub block_size: u32,
     /// The `size` header field: the data payload length the header declares.
@@ -101,6 +104,10 @@ fn parse_stream<'a>(stream: &Chunk<'a>) -> Result<Stream<'a>, UcfbError> {
     let head = &pairs[..first_marker.unwrap_or(pairs.len())];
     let hget = |h: u32| head.iter().find(|(k, _)| *k == h).map(|(_, v)| *v);
     let name_hash = hget(h_name).ok_or_else(bad)?;
+    let format = hget(fnv1a_lowercase("format")).unwrap_or(1);
+    let channels = hget(h_channels).unwrap_or(1);
+    let substreams = hget(fnv1a_lowercase("numsubstreams")).unwrap_or(1);
+    let interleave = hget(0x740F_DB0C).unwrap_or(0);
 
     let mut segments = Vec::new();
     let mut offset = 0usize;
@@ -110,9 +117,15 @@ fn parse_stream<'a>(stream: &Chunk<'a>) -> Result<Stream<'a>, UcfbError> {
         // Include padding before converting to frames. Hostile u32 sizes
         // can exceed both the frame-count and (on 32-bit) offset ranges.
         let padded_size = u64::from(size) + padding as u64;
-        let frames = rec
-            .frames
-            .unwrap_or_else(|| u32::try_from(padded_size / 16 * 28).unwrap_or(u32::MAX));
+        let frames = rec.frames.unwrap_or_else(|| {
+            let computed = if format == 5 {
+                let blk = 36 * u64::from(channels.max(1));
+                padded_size / blk * 64
+            } else {
+                padded_size / 16 * 28
+            };
+            u32::try_from(computed).unwrap_or(u32::MAX)
+        });
         segments.push(Segment {
             id_hash: rec.id,
             frequency: rec.frequency,
@@ -131,7 +144,10 @@ fn parse_stream<'a>(stream: &Chunk<'a>) -> Result<Stream<'a>, UcfbError> {
     }
     Ok(Stream {
         name_hash,
-        channels: hget(h_channels).unwrap_or(1),
+        format,
+        channels,
+        substreams,
+        interleave,
         block_size: hget(h_block).unwrap_or(0),
         declared_size: hget(h_size).unwrap_or(0),
         segments,

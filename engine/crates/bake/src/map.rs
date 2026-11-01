@@ -282,7 +282,7 @@ fn pull_side_models(
     let Some(side_dir) = Path::new(lvl_path)
         .parent()
         .and_then(|p| p.parent())
-        .map(|p| p.join("SIDE"))
+        .map(|p| crate::join_ci(p, "SIDE"))
         .filter(|p| p.is_dir())
     else {
         eprintln!("sky objects: no SIDE directory beside {lvl_path}");

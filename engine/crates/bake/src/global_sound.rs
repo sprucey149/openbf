@@ -51,6 +51,14 @@ pub struct SegmentRon {
     pub frames: usize,
 }
 
+fn is_default_one(v: &u32) -> bool {
+    *v <= 1
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct StreamRon {
     pub name_hash: u32,
@@ -65,6 +73,12 @@ pub struct StreamRon {
     /// False for the music streams: indexed, never decoded.
     pub baked: bool,
     pub segments: Vec<SegmentRon>,
+    #[serde(default, skip_serializing_if = "is_default_one")]
+    pub format: u32,
+    #[serde(default, skip_serializing_if = "is_default_one")]
+    pub substreams: u32,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub interleave: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -171,12 +185,18 @@ pub fn bake_global_sound(
         let baked = s.channels == 1;
         let mut segs = Vec::new();
         for (gi, g) in s.segments.iter().enumerate() {
+            let frames = if s.format == 5 {
+                let blk = 36 * (s.channels.max(1) as usize) * (s.substreams.max(1) as usize);
+                g.size / blk * 64
+            } else {
+                g.size / 16 * 28
+            };
             segs.push(SegmentRon {
                 id: g.id_hash,
                 frequency: g.frequency,
                 offset: g.offset,
                 size: g.size,
-                frames: g.size / 16 * 28,
+                frames,
             });
             if !baked || g.alias_of.is_some() {
                 continue;
@@ -214,6 +234,9 @@ pub fn bake_global_sound(
             bytes: s.data.len(),
             baked,
             segments: segs,
+            format: s.format,
+            substreams: s.substreams,
+            interleave: s.interleave,
         });
     }
     if opts.limit > 0 {
@@ -335,7 +358,11 @@ fn encode_all(
                     let adpcm = stream
                         .segment_adpcm(seg)
                         .with_context(|| format!("segment {:08x} outside its data", j.id))?;
-                    let pcm = crate::adpcm::decode(adpcm);
+                    let pcm = if stream.format == 5 {
+                        crate::adpcm::decode_ima(adpcm)
+                    } else {
+                        crate::adpcm::decode(adpcm)
+                    };
                     // The serial is the segment id: reproducible, and an OGG
                     // taken out of the tree still says which segment it is.
                     let ogg = crate::ogg::encode_mono(&pcm, j.rate, opts.quality, j.id)?;

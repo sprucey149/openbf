@@ -9,8 +9,14 @@ use std::path::Path;
 /// Generate only the droid overlay; never modifies an input LVL. `pc_cis` is
 /// the PC install's CIS side LVL for the BF2 battle droid chunks' tier 2.
 pub fn bake(bf1: &str, bf2: &str, common: &str, out: &Path, pc_cis: Option<&str>) -> Result<()> {
-    let b1 = std::fs::read(bf1)?;
-    let b2 = std::fs::read(bf2)?;
+    let bf1_resolved = crate::resolve_ci(bf1);
+    let bf2_resolved = crate::resolve_ci(bf2);
+    let common_resolved = crate::resolve_ci(common);
+    let pc_cis_resolved = pc_cis.map(crate::resolve_ci);
+    let common = common_resolved.as_str();
+    let pc_cis = pc_cis_resolved.as_deref();
+    let b1 = std::fs::read(&bf1_resolved)?;
+    let b2 = std::fs::read(&bf2_resolved)?;
     let c1 = mungefs::content_chunks(mungefs::open(&b1)?)?;
     let c2 = mungefs::content_chunks(mungefs::open(&b2)?)?;
     let classes = crate::classes::read_classes(

@@ -161,11 +161,48 @@ fn each_path_takes_the_vu1_terms_it_should() {
     close(shot(LightPath::PrelitAdd), [c, add, c], "prelit_add");
     // Unlit (0x2a3 → 0x2da): c alone, no light at all.
     close(shot(LightPath::Unlit), [c; 3], "unlit");
+    let vertex_lit = shot(LightPath::VertexLit);
+    close(vertex_lit, [c; 3], "vertex_lit");
     // Unlit, COL0 added to the unit material (0x2a3 → 0x2bf): past white.
     close(shot(LightPath::UnlitAdd), [1.0; 3], "unlit_add");
     // Terrain (0x2a3 → 0x2da on the heightfield): the byte is the GS's, so
     // 128 is unity and no light is taken.
     close(shot(LightPath::Terrain), [1.0; 3], "terrain");
+    let dynamic = render::PointLight {
+        pos: Vec3::ZERO,
+        color: [0.25, 0.0, 0.0],
+        lum: 0.25,
+        range: 100.0,
+        is_static: false,
+        spot: false,
+        cone: None,
+    };
+    r.set_point_lights(vec![
+        dynamic,
+        render::PointLight {
+            color: [0.0, 1.0, 0.0],
+            is_static: true,
+            ..dynamic
+        },
+    ]);
+    let draw = DrawCmd::textured(quad, white, Mat4::IDENTITY)
+        .with_light(LightPath::VertexLit)
+        .with_lit(Some(render::LitSphere {
+            centre: Vec3::new(0.0, 0.0, -3.0),
+            radius: 6.0,
+        }));
+    r.render(&Camera::default(), &[draw], [0.0, 0.0, 0.0, 1.0])
+        .unwrap();
+    let lit = capture_pixel(&mut r, N / 2, N / 2);
+    assert!(
+        lit[0] > vertex_lit[0],
+        "dynamic point light is added: {lit:?}"
+    );
+    assert_eq!(
+        &lit[1..3],
+        &vertex_lit[1..3],
+        "static light is already baked"
+    );
 }
 
 /// The light sum is made in GS (display) units (card LSUM,

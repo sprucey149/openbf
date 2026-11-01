@@ -145,6 +145,11 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
     let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
     let content = mungefs::content_chunks(inner).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
+    let pc = content.iter().filter(|c| &c.tag == b"modl").any(|model| {
+        model
+            .children_tagged(b"segm")
+            .any(|segment| mungefs::model::is_pc_geometry(&segment))
+    });
     let mut layouts = Vec::new();
     for c in content.iter().filter(|c| &c.tag == b"hud_") {
         let l = mungefs::hud::parse(c).map_err(|e| anyhow!("hud_ 0x{:X}: {e}", c.offset))?;
@@ -152,10 +157,12 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
             .file_name()
             .ok_or_else(|| anyhow!("hud_ 0x{:X}: no FileInfo name", c.offset))?
             .to_owned();
-        layouts.push(HudLayout {
+        let mut layout = HudLayout {
             name,
             nodes: l.nodes.iter().map(node).collect(),
-        });
+        };
+        crate::hud_pc::normalize(&mut layout, pc);
+        layouts.push(layout);
     }
     if layouts.is_empty() {
         return Ok(None);
@@ -170,7 +177,7 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
     }
 
     // Fonts.
-    let fonts = bake_fonts(&dir.join(FONT_SOURCE), out, "")?;
+    let fonts = bake_fonts(&crate::join_ci(dir, FONT_SOURCE), out, "")?;
 
     // The sheets the layouts name that INGAME lacks.
     let mut wanted = BTreeSet::new();
@@ -187,7 +194,7 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
     std::fs::create_dir_all(&tex_dir)?;
     let mut textures = Vec::new();
     for src in SHEET_SOURCES {
-        let p = dir.join(src);
+        let p = crate::join_ci(dir, src);
         let bytes = std::fs::read(&p).with_context(|| p.display().to_string())?;
         let inner = mungefs::open(&bytes).map_err(|e| anyhow!("{}: {e}", p.display()))?;
         for c in mungefs::content_chunks(inner)
