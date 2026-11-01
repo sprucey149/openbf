@@ -384,29 +384,103 @@ fn malformed_compressed_bodies_are_bounded_and_rejected() {
     let _ = std::fs::remove_dir_all(d);
 }
 
+fn fixture_entries(d: &Path) -> Vec<(String, PathBuf)> {
+    std::fs::create_dir_all(d.join("a")).unwrap();
+    std::fs::write(d.join("exe"), b"PRETEND EXECUTABLE").unwrap();
+    std::fs::write(d.join("a/x.ron"), "(hello: \"world\")\n".repeat(200)).unwrap();
+    std::fs::write(d.join("a/y.bin"), b"raw stream").unwrap();
+    collect(&d.join("a"), "assets").unwrap()
+}
+
+fn assert_fixture(archive: &Archive) {
+    assert_eq!(
+        archive.read_entry("assets/x.ron").unwrap(),
+        "(hello: \"world\")\n".repeat(200).into_bytes()
+    );
+    assert_eq!(archive.read_entry("assets/y.bin").unwrap(), b"raw stream");
+    assert_eq!(archive.names().count(), 2);
+}
+
 #[test]
-fn windows_executable_size_includes_index_and_footer() {
-    assert!(check_pack_size(WINDOWS_EXE_LIMIT - 37, 4, Some(WINDOWS_EXE_LIMIT)).is_ok());
+fn a_build_below_the_limit_stays_one_file() {
+    let d = scratch("layout_single");
+    let entries = fixture_entries(&d);
+    let (out, pak) = (d.join("out"), d.join(PAK_NAME));
+    let layout = write_pack_at(&d.join("exe"), &out, &pak, &entries, 1 << 20).unwrap();
+    assert_eq!(layout, PackLayout::SingleFile);
+    assert!(!pak.exists());
+    let archive = find_archive(&out).unwrap();
+    assert_eq!(archive.start(), 18);
+    assert_fixture(&archive);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_build_at_the_limit_writes_a_small_executable_and_an_archive_beside_it() {
+    let d = scratch("layout_beside");
+    let entries = fixture_entries(&d);
+    let (out, pak) = (d.join("out"), d.join(PAK_NAME));
+    // Find the exact one-file size: one byte below it splits, exactly at it splits, one above stays one file.
+    write_pack_at(&d.join("exe"), &out, &pak, &entries, WINDOWS_EXE_LIMIT).unwrap();
+    let size = std::fs::metadata(&out).unwrap().len();
+    let one = write_pack_at(&d.join("exe"), &out, &pak, &entries, size + 1).unwrap();
+    assert_eq!(one, PackLayout::SingleFile);
+    let split = write_pack_at(&d.join("exe"), &out, &pak, &entries, size).unwrap();
+    assert_eq!(split, PackLayout::Beside);
+    assert_eq!(std::fs::read(&out).unwrap(), b"PRETEND EXECUTABLE");
+    let inside = Archive::open(&pak).unwrap().unwrap();
+    assert_eq!(inside.start(), 0);
+    assert_fixture(&inside);
+    assert!(Archive::open(&out).unwrap().is_none());
+    let found = find_archive(&out).unwrap();
+    assert_eq!(found.path, pak);
+    assert_fixture(&found);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn the_loader_prefers_the_executable_and_reports_no_archive_when_neither_exists() {
+    let d = scratch("layout_order");
+    let entries = fixture_entries(&d);
+    let (out, pak) = (d.join("out"), d.join(PAK_NAME));
+    write_pack_at(&d.join("exe"), &out, &pak, &entries, 1 << 20).unwrap();
+    // A stale archive of something else beside it changes nothing.
+    std::fs::write(d.join("other"), b"other").unwrap();
+    let other = vec![("assets/stale".to_string(), d.join("other"))];
+    write_pack_at(&d.join("exe"), &d.join("out2"), &pak, &other, 1).unwrap();
+    assert!(pak.is_file());
+    assert_fixture(&find_archive(&out).unwrap());
+    // The small executable finds it, and finds nothing once it is gone.
+    assert_eq!(find_archive(&d.join("out2")).unwrap().names().count(), 1);
+    std::fs::remove_file(&pak).unwrap();
+    assert!(find_archive(&d.join("out2")).is_none());
+    // A file of that name that is no archive is refused, not read.
+    std::fs::write(&pak, vec![0u8; 64]).unwrap();
+    assert!(find_archive(&d.join("out2")).is_none());
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_split_failure_leaves_no_partial_output() {
+    let d = scratch("layout_fail");
+    let entries = fixture_entries(&d);
+    let (out, pak) = (d.join("out"), d.join("missing_folder").join(PAK_NAME));
+    assert!(write_pack_at(&d.join("exe"), &out, &pak, &entries, 1).is_err());
+    assert!(!out.exists());
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn a_single_file_cannot_be_allowed_past_the_windows_limit() {
+    let d = scratch("layout_limit");
+    let entries = fixture_entries(&d);
+    let (out, pak) = (d.join("out"), d.join(PAK_NAME));
     assert!(
-        check_pack_size(WINDOWS_EXE_LIMIT - 36, 4, Some(WINDOWS_EXE_LIMIT))
+        write_pack_at(&d.join("exe"), &out, &pak, &entries, WINDOWS_EXE_LIMIT + 1)
             .unwrap_err()
             .to_string()
             .contains("4 GiB")
     );
-    assert!(check_pack_size(u64::MAX, 4, None).is_err());
-    let d = scratch("exe_limit");
-    // Sparse source: the guard must refuse before copying even one byte or replacing an existing output.
-    let exe = d.join("large.exe");
-    File::create(&exe)
-        .unwrap()
-        .set_len(WINDOWS_EXE_LIMIT - 36)
-        .unwrap();
-    let out = d.join("output");
-    std::fs::write(&out, b"keep previous output").unwrap();
-    assert!(write_pack(&exe, &out, &[])
-        .unwrap_err()
-        .to_string()
-        .contains("4 GiB"));
-    assert_eq!(std::fs::read(&out).unwrap(), b"keep previous output");
+    const { assert!(SINGLE_FILE_LIMIT < WINDOWS_EXE_LIMIT) };
     let _ = std::fs::remove_dir_all(d);
 }

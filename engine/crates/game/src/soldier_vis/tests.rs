@@ -1177,7 +1177,10 @@ fn the_hidden_body_gives_no_muzzle_in_the_eye_view() {
     let mut w = WalkSim::new(1, Vec3::ZERO, None);
     let me = w.player.index as usize;
     vis.update(&w, core::TICK_DT);
-    assert!(vis.fire_points(&w)[me].is_some(), "third person draws his gun");
+    assert!(
+        vis.fire_points(&w)[me].is_some(),
+        "third person draws his gun"
+    );
     let zoom = |scope| core::unit::Zoom {
         step: 0,
         value: 2.0,

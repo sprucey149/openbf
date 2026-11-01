@@ -27,11 +27,13 @@ python3 scripts/pack.py
 ```
 
 `pack.py` extracts the discs, bakes the assets, builds the game, and packs everything into
-`dist/openbf` (about 3 GB). Run that file from anywhere; it keeps your profile and its bug-report snapshots in an
-`openbf_data/` folder beside itself. Run the script again after pulling new code: it skips what is still current
+`dist/openbf` (about 3 GB). A build of about 3.9 GiB or more becomes a small `dist/openbf` plus `dist/openbf.pak`,
+on every OS: keep the two together, and on a filesystem other than FAT32, which cannot hold a file of 4 GiB or more.
+Run the game from anywhere; it keeps your profile and its bug-report snapshots in an `openbf_data/` folder beside
+itself. Run the script again after pulling new code: it skips what is still current
 and bakes again only when the code that bakes has changed (that can take a while).
 
-**`dist/openbf` contains the games' own content, so never upload or share it.**
+**`dist/openbf` and `dist/openbf.pak` contain the games' own content, so never upload or share them.**
 Everyone builds their own from their own discs.
 
 Requirements on Linux:

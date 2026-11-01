@@ -483,9 +483,11 @@ Every runtime read of baked data goes through `pak` (`read`, `read_to_string`, `
 sorted `read_dir`, a seekable `open` for the music); a direct `std::fs` read of `assets_baked/` or `missions/` in
 `game` or `audio` is a bug the packed game shows as a missing asset. Files the player owns (profile, black box, logs)
 stay on `std::fs`. `game`'s `main` mounts `assets_baked` and `missions`: the directory when it exists, else the
-archive. `game --write-pack <out> <name>=<dir>...` writes the packed copy (`scripts/pack.py` runs it on a stripped
-copy); unfinished packed builds keep dev mode on by default (`OPENBF_DEV=0` disables it; `dev::on`).
-- `pak/src/lib.rs` 577 — packed/disk runtime data facade · `Archive`, `write_pack`, `collect`, `mount`, `packed`, `read`, `read_dir`, `open`, `Reader`; archive layout, deduplication and mount policy in the module/API docs.
+archive. The archive is the one inside the executable, else `openbf.pak` in its folder (`find_archive`). `game
+--write-pack <out> [--pak <file>] [--split-at <bytes>] <name>=<dir>...` writes the packed copy (`scripts/pack.py` runs it
+on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak` from there on, on every OS; unfinished packed builds keep dev mode on by default (`OPENBF_DEV=0` disables it; `dev::on`).
+- `pak/src/lib.rs` 577 — packed/disk runtime data facade · `Archive`, `write_pack`, `write_pack_at`, `find_archive`, `collect`, `mount`, `packed`, `read`, `read_dir`, `open`, `Reader`; archive layout, deduplication and mount policy in the module/API docs.
+- `pak/examples/pack_load.rs` — writes and reads a pack as the game does (`scripts/tests/test_pack_limits.py`) and measures load cost: `bench <dir> <scratch> [rounds]` times reading every file raw, legacy Deflate and zstd.
 - `pak/src/tests.rs` 241 — round trip, re-pack, a damaged footer, ranged reads, dedupe, the disk fallback
 
 ## ui, input, audio, net

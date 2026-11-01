@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pack.py -- your two PS2 discs in, one self-contained game file out (card PACK).
+"""pack.py -- your two PS2 discs in, a self-contained game out (card PACK).
 
     python3 scripts/pack.py [--iso1 iso/SWBF1.iso] [--iso2 iso/SWBF2.iso] [--out dist/openbf]
 
@@ -11,16 +11,20 @@ recompiles and re-packs):
   4. build the missions from the disc's own bytecode -> engine/missions/   (gen_missions.py --ps2-only)
   5. bake every asset                           -> engine/assets_baked/    (rebake.sh)
   6. copy the game, strip the copy, append assets_baked/ + missions/  -> --out
+     Below about 3.9 GiB that is one file on every OS. From there on, also on every OS, --out is a small executable
+     and the data is openbf.pak in the same folder (Windows cannot run an executable of 4 GiB or more). The game looks
+     inside itself first, then for openbf.pak beside it; the two must stay together.
 
 A readable source summary and <output>.sources.json list inputs read this run,
 unused optional inputs and stored map-local texture provenance. Cached data is
 labelled separately; unsupported inputs are never claimed as consumed.
 
-The result plays from anywhere with nothing beside it. It holds the games' own
-content, so it is for your machine only: never upload or share it. Needs
+The result plays from anywhere. It holds the games' own content, so it is for
+your machine only: never upload or share it. Needs
 cargo, python3, bash and ffmpeg (the bake encodes speech to OGG); `strip` is
 used when present. Tested on Linux and Windows (card WIN: Git for Windows' bash
-runs the bake; the output is dist/openbf.exe).
+runs the bake; the output is dist/openbf.exe). FAT32 cannot hold a file of 4 GiB
+or more: --out needs a folder on another filesystem for a build that large.
 """
 
 import argparse
@@ -54,10 +58,53 @@ LUA = {
 }
 
 
-def check_packed_size(path):
-    """Windows cannot launch a PE executable whose complete appended pack reaches 4 GiB."""
-    if WINDOWS and os.path.getsize(path) >= 2**32:
-        sys.exit("pack: packed executable reaches Windows' 4 GiB limit; reduce the selected asset set or texture sizes and pack again")
+PAK_NAME = "openbf.pak"
+FAT32_LIMIT = 2**32
+PACK_MAGIC = b"OPENBFPK"
+
+
+def carries_pack(path):
+    """Does the executable at `path` hold its own data (the archive footer ends the file)?"""
+    try:
+        with open(path, "rb") as file:
+            file.seek(-32, os.SEEK_END)
+            return file.read(8) == PACK_MAGIC
+    except OSError:
+        return False
+
+
+def install_pack(new, new_pak, out, pak):
+    """Swap the finished files in: the archive first, so an old game keeps running from what it knows.
+
+    One-file builds drop only an archive the previous --out relied on; another build's stays.
+    Returns True when the build is an executable plus the archive.
+    """
+    split = os.path.exists(new_pak)
+    relied_on_pak = os.path.exists(pak) and os.path.exists(out) and not carries_pack(out)
+    try:
+        if split:
+            if os.path.exists(pak) and not relied_on_pak:
+                print(f"   replacing {pak}: another build in this folder may have used it")
+            os.replace(new_pak, pak)
+        os.replace(new, out)
+        if not split and relied_on_pak:
+            os.remove(pak)
+    except PermissionError:
+        sys.exit(f"pack: {out} is in use (Windows cannot replace a running game): close the game and run pack.py again")
+    return split
+
+
+def pack_summary(out, pak, split):
+    """The closing lines about the files just written."""
+    gib = lambda path: f"{os.path.getsize(path) / 2**30:.2f} GiB"
+    if not split:
+        return [f"done: {out} ({gib(out)}). Run it from anywhere; nothing else is needed beside it."]
+    lines = [f"done: {out} ({os.path.getsize(out) / 2**20:.0f} MiB) and {pak} ({gib(pak)}). "
+             "Run it from anywhere; keep the two files in the same folder.",
+             "FAT32 cannot hold a file of 4 GiB or more: keep this build on another filesystem."]
+    if os.path.getsize(pak) >= FAT32_LIMIT:
+        lines[1] = f"{PAK_NAME} is 4 GiB or more and FAT32 cannot hold such a file: keep this build on another filesystem."
+    return lines
 
 
 def step(msg):
@@ -522,21 +569,20 @@ def main():
         run(["strip", tmp])
     else:
         print("   (no `strip` on PATH: the game keeps its symbols, ~100 MB more)")
-    # Written beside --out and swapped in: a game still running from --out keeps its old file.
+    # Written beside --out and swapped in: a game still running from --out keeps its old files.
     new = out + ".new"
+    pak = os.path.join(os.path.dirname(out), PAK_NAME)
+    new_pak = pak + ".new"
     try:
-        run([tmp, "--write-pack", new, f"assets_baked={BAKED}", f"missions={MISSIONS}"])
-        check_packed_size(new)
-        try:
-            os.replace(new, out)
-        except PermissionError:
-            sys.exit(f"pack: {out} is in use (Windows cannot replace a running game): close the game and run pack.py again")
+        run([tmp, "--write-pack", new, "--pak", new_pak, f"assets_baked={BAKED}", f"missions={MISSIONS}"])
+        split = install_pack(new, new_pak, out, pak)
     finally:
         os.remove(tmp)
-        if os.path.exists(new):
-            os.remove(new)
-    size = os.path.getsize(out)
-    print(f"\ndone: {out} ({size / 2**30:.2f} GiB). Run it from anywhere; nothing else is needed beside it.")
+        for leftover in (new, new_pak):
+            if os.path.exists(leftover):
+                os.remove(leftover)
+    print()
+    print("\n".join(pack_summary(out, pak, split)))
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
     report = source_report(ROOT, BAKED, MISSIONS, {"bf1": a.iso1, "bf2": a.iso2},
                            extracted_used, images_used, full_bake, pc_roots=pc_roots)

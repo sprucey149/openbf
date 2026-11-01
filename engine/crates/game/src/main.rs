@@ -57,9 +57,12 @@
 //!     --bench-ticks <n>           sim ticks to time (default 900)
 //!     --bench-csv <file>          append the bench row to a CSV
 //!     --bench-player-cam          bench from the player's eye, not the overview
-//!   --write-pack <out> <name>=<dir>...  copy this executable to <out> with
-//!                                 each <dir> appended as the archive's
-//!                                 <name>/ (card PACK; scripts/pack.py)
+//!   --write-pack <out> [--pak <file>] [--split-at <bytes>] <name>=<dir>...
+//!                                 copy this executable to <out> with each
+//!                                 <dir> appended as the archive's <name>/;
+//!                                 at <bytes> (default about 3.9 GiB) the data
+//!                                 goes to <file> (default openbf.pak beside
+//!                                 <out>) instead (card PACK; scripts/pack.py)
 //!
 //! Environment — every variable is optional; unset means the default:
 //!   OPENBF_TEXTURE_TIER=1|2       1 = the PS2 disc's own pixels, 2 = the PC
@@ -249,18 +252,40 @@ fn main() -> Result<()> {
         "--write-pack" => {
             // Card PACK (`scripts/pack.py` runs it): copy this executable to
             // <out> with each <name>=<dir> appended as the archive's <name>/.
-            let out = PathBuf::from(it.next().context("--write-pack <out> <name>=<dir>...")?);
+            let usage = "--write-pack <out> [--pak <file>] [--split-at <bytes>] <name>=<dir>...";
+            let out = PathBuf::from(it.next().context(usage)?);
+            let mut pak_file = out.with_file_name(pak::PAK_NAME);
+            let mut split_at = pak::SINGLE_FILE_LIMIT;
             let mut entries = Vec::new();
-            for spec in it {
-                let (name, dir) = spec.split_once('=').context("--write-pack: <name>=<dir>")?;
-                entries.extend(
-                    pak::collect(std::path::Path::new(dir), name)
-                        .with_context(|| dir.to_string())?,
-                );
+            while let Some(spec) = it.next() {
+                match spec.as_str() {
+                    "--pak" => pak_file = PathBuf::from(it.next().context(usage)?),
+                    "--split-at" => {
+                        split_at = it.next().context(usage)?.parse().context("--split-at")?
+                    }
+                    _ => {
+                        let (name, dir) = spec.split_once('=').context(usage)?;
+                        entries.extend(
+                            pak::collect(std::path::Path::new(dir), name)
+                                .with_context(|| dir.to_string())?,
+                        );
+                    }
+                }
             }
             let exe = std::env::current_exe()?;
-            pak::write_pack(&exe, &out, &entries).with_context(|| out.display().to_string())?;
-            println!("packed {} files into {}", entries.len(), out.display());
+            let layout = pak::write_pack_at(&exe, &out, &pak_file, &entries, split_at)
+                .with_context(|| out.display().to_string())?;
+            match layout {
+                pak::PackLayout::SingleFile => {
+                    println!("packed {} files into {}", entries.len(), out.display())
+                }
+                pak::PackLayout::Beside => println!(
+                    "packed {} files into {} beside {}",
+                    entries.len(),
+                    pak_file.display(),
+                    out.display()
+                ),
+            }
             Ok(())
         }
         "--aim-replay" => headless::run_aim_replay(&args[1..]),

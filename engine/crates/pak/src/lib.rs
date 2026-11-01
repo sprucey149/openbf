@@ -1,8 +1,9 @@
-//! The game's read-only data: a directory on disk, or the archive appended to the game's own executable (card PACK).
+//! The game's read-only data: a directory on disk, or an archive (card PACK).
 //!
 //! A dev build reads `assets_baked/` and `missions/` as it always has. A packed build (`game --write-pack`, run by
-//! `scripts/pack.py`) carries both inside its one file. Every runtime read of baked data goes through this crate, so the
-//! rest of the game does not know which of the two it is reading.
+//! `scripts/pack.py`) carries both inside its one file, or, when that file would reach [`SINGLE_FILE_LIMIT`], in
+//! [`PAK_NAME`] beside a small executable. The rule is the same on every OS. Every runtime read of baked data goes
+//! through this crate, so the rest of the game does not know which of these it is reading.
 //!
 //! [`mount`] says which archive name serves which directory path. It picks ONE source per mount, at mount time: the
 //! directory if it exists, else the archive when the executable carries that name. Nothing mixes the two, so a stale
@@ -19,7 +20,7 @@
 //! u32 uncompressed length. Unflagged entries retain the original layout and remain directly seekable.
 //!
 //! Offsets are from the start of the file. The pack start is where the executable proper ends, so re-packing a packed
-//! binary copies only the executable.
+//! binary copies only the executable. [`PAK_NAME`] has the same layout with no executable bytes: its pack start is 0.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -32,7 +33,22 @@ const FOOTER: u64 = 32;
 const COMPRESSED_FLAG: u64 = 1 << 63;
 const ZSTD_FLAG: u64 = 1 << 62;
 const LENGTH_MASK: u64 = !(COMPRESSED_FLAG | ZSTD_FLAG);
+
+/// A build reaching this size (about 3.9 GiB) moves its data to [`PAK_NAME`] on every OS. It stays clear of the 4 GiB
+/// at which Windows refuses to load an executable, so a build that stays one file runs everywhere.
+pub const SINGLE_FILE_LIMIT: u64 = 39 * (1 << 30) / 10;
+/// The archive the loader looks for beside the executable when the executable carries none.
+pub const PAK_NAME: &str = "openbf.pak";
 const WINDOWS_EXE_LIMIT: u64 = 1 << 32;
+
+/// Where [`write_pack`] put the data.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PackLayout {
+    /// The executable carries its own data.
+    SingleFile,
+    /// A small executable, its data in a separate archive file.
+    Beside,
+}
 
 /// An archive: the open file and its index (path -> offset, length).
 pub struct Archive {
@@ -96,6 +112,12 @@ impl Archive {
             start,
             entries,
         }))
+    }
+
+    /// One entry's bytes, decompressed.
+    pub fn read_entry(&self, name: &str) -> io::Result<Vec<u8>> {
+        let (off, raw_len) = self.get(name).ok_or_else(|| not_found(name))?;
+        self.read(off, raw_len)
     }
 
     /// Bytes of the file before the pack: the executable proper.
@@ -215,34 +237,56 @@ impl Archive {
     }
 }
 
+/// [`write_pack_at`] with the standard rule: [`PAK_NAME`] beside `out`, at [`SINGLE_FILE_LIMIT`].
+pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::Result<PackLayout> {
+    write_pack_at(
+        exe,
+        out,
+        &out.with_file_name(PAK_NAME),
+        entries,
+        SINGLE_FILE_LIMIT,
+    )
+}
+
 /// Copy `exe` (without any pack it already carries) to `out` and append `entries` ((archive path, file on disk)).
 /// Archive paths are "<name>/<rel>" with '/' separators. The output is made executable on Unix.
-pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::Result<()> {
+///
+/// When the finished file would reach `split_at`, `out` holds only the executable and the data goes to `pak` instead.
+/// An existing `pak` is left alone by a build that stays one file: the caller chooses what to do with it.
+pub fn write_pack_at(
+    exe: &Path,
+    out: &Path,
+    pak: &Path,
+    entries: &[(String, PathBuf)],
+    split_at: u64,
+) -> io::Result<PackLayout> {
+    if split_at > WINDOWS_EXE_LIMIT {
+        return Err(bad(
+            "a single-file build must stay under Windows' 4 GiB limit",
+        ));
+    }
     let keep = match Archive::open(exe)? {
         Some(a) => a.start(),
         None => std::fs::metadata(exe)?.len(),
-    };
-    let limit = if cfg!(windows)
-        || exe
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
-    {
-        Some(WINDOWS_EXE_LIMIT)
-    } else {
-        None
     };
     let count = u32::try_from(entries.len()).map_err(|_| bad("too many archive entries"))?;
     let index_len = entries.iter().try_fold(4u64, |len, (name, _)| {
         len.checked_add(18 + name.len() as u64)
             .ok_or_else(|| bad("index too large"))
     })?;
-    check_pack_size(keep, index_len, limit)?;
     // An error must not leave a partial executable at the requested output path.
     let mut partial = PartialPack {
         path: out,
         remove: false,
     };
-    let mut w = io::BufWriter::new(File::create(out)?);
+    let mut w = io::BufWriter::new(
+        File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(out)?,
+    );
     partial.remove = true;
     io::copy(&mut File::open(exe)?.take(keep), &mut w)?;
     let mut pos = keep;
@@ -304,21 +348,11 @@ pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::
             let raw_n = match compressed {
                 Some(buf) => {
                     let clen = buf.len() as u64;
-                    check_pack_size(
-                        pos.checked_add(clen).ok_or_else(|| bad("pack too large"))?,
-                        index_len,
-                        limit,
-                    )?;
                     w.write_all(&buf)?;
                     pos += clen;
                     clen | COMPRESSED_FLAG | ZSTD_FLAG
                 }
                 None => {
-                    check_pack_size(
-                        pos.checked_add(ulen).ok_or_else(|| bad("pack too large"))?,
-                        index_len,
-                        limit,
-                    )?;
                     let n = io::copy(&mut File::open(usrc)?, &mut w)?;
                     if n != ulen {
                         return Err(bad(&format!("{} changed while packing", usrc.display())));
@@ -330,26 +364,62 @@ pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::
             stored_spans.push((off, raw_n));
         }
     }
+    // Only now is the size known. The executable stays first in the working file, so the usual one-file build copies
+    // nothing a second time; a build that splits moves its bodies out and cuts the working file back to the executable.
+    let total = pos
+        .checked_add(index_len)
+        .and_then(|n| n.checked_add(FOOTER))
+        .ok_or_else(|| bad("pack too large"))?;
+    let split = total >= split_at;
+    let (base, bodies_end) = if split { (keep, pos - keep) } else { (0, pos) };
     for ((name, _), &uidx) in entries.iter().zip(&entry_unique) {
         let (off, raw_n) = stored_spans[uidx];
         index.extend_from_slice(&(name.len() as u16).to_le_bytes());
         index.extend_from_slice(name.as_bytes());
-        index.extend_from_slice(&off.to_le_bytes());
+        index.extend_from_slice(&(off - base).to_le_bytes());
         index.extend_from_slice(&raw_n.to_le_bytes());
     }
-    w.write_all(&index)?;
-    w.write_all(MAGIC)?;
-    w.write_all(&keep.to_le_bytes())?;
-    w.write_all(&pos.to_le_bytes())?;
-    w.write_all(&(index.len() as u64).to_le_bytes())?;
-    w.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+    if split {
+        w.flush()?;
+        let mut file = w.into_inner().map_err(|e| e.into_error())?;
+        let mut partial_pak = PartialPack {
+            path: pak,
+            remove: false,
+        };
+        let mut data = io::BufWriter::new(File::create(pak)?);
+        partial_pak.remove = true;
+        file.seek(SeekFrom::Start(keep))?;
+        if io::copy(&mut (&mut file).take(bodies_end), &mut data)? != bodies_end {
+            return Err(bad("the working file ended early"));
+        }
+        write_tail(&mut data, 0, bodies_end, &index)?;
+        data.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+        file.set_len(keep)?;
+        file.sync_all()?;
+        partial_pak.remove = false;
+    } else {
+        write_tail(&mut w, keep, bodies_end, &index)?;
+        w.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(out, std::fs::Permissions::from_mode(0o755))?;
     }
     partial.remove = false;
-    Ok(())
+    Ok(if split {
+        PackLayout::Beside
+    } else {
+        PackLayout::SingleFile
+    })
+}
+
+fn write_tail(w: &mut impl Write, start: u64, index_at: u64, index: &[u8]) -> io::Result<()> {
+    w.write_all(index)?;
+    w.write_all(MAGIC)?;
+    w.write_all(&start.to_le_bytes())?;
+    w.write_all(&index_at.to_le_bytes())?;
+    w.write_all(&(index.len() as u64).to_le_bytes())
 }
 
 struct PartialPack<'a> {
@@ -401,25 +471,45 @@ struct Mount {
 static EXE: OnceLock<Option<Archive>> = OnceLock::new();
 static MOUNTS: Mutex<Vec<Mount>> = Mutex::new(Vec::new());
 
-/// The archive appended to the running executable, if any (opened once).
+/// The running game's archive, if any (opened once): see [`find_archive`].
 pub fn exe_archive() -> Option<&'static Archive> {
-    EXE.get_or_init(|| {
-        let exe = std::env::current_exe().ok()?;
-        match Archive::open(&exe) {
-            Ok(a) => a,
-            Err(e) => {
-                eprintln!(
-                    "pak: {} carries a damaged pack ({e}); reading from disk only",
-                    exe.display()
-                );
-                None
-            }
-        }
-    })
-    .as_ref()
+    EXE.get_or_init(|| find_archive(&std::env::current_exe().ok()?))
+        .as_ref()
 }
 
-/// Serve the path `dir` from the archive's `name/` when `dir` is not a directory on disk and the executable carries
+/// The archive for the executable at `exe`: the one inside it, else [`PAK_NAME`] in its folder.
+pub fn find_archive(exe: &Path) -> Option<Archive> {
+    match Archive::open(exe) {
+        Ok(Some(a)) => return Some(a),
+        Ok(None) => {}
+        Err(e) => eprintln!(
+            "pak: {} carries a damaged pack ({e}); reading from disk only",
+            exe.display()
+        ),
+    }
+    let beside = exe.with_file_name(PAK_NAME);
+    match Archive::open(&beside) {
+        Ok(found) => {
+            if found.is_none() {
+                eprintln!(
+                    "pak: {} is not a game archive; reading from disk only",
+                    beside.display()
+                );
+            }
+            found
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+        Err(e) => {
+            eprintln!(
+                "pak: {} cannot be read ({e}); reading from disk only",
+                beside.display()
+            );
+            None
+        }
+    }
+}
+
+/// Serve the path `dir` from the archive's `name/` when `dir` is not a directory on disk and the game's archive carries
 /// `name`. Returns true when the archive serves it. Mounting the same directory again replaces the earlier mount.
 pub fn mount(dir: &Path, name: &str) -> bool {
     let rel = normalize(dir);
@@ -668,17 +758,6 @@ fn maybe_compress(name: &str, src: &Path, raw_len: u64) -> io::Result<Option<Vec
     } else {
         Ok(None)
     }
-}
-
-fn check_pack_size(bodies_end: u64, index_len: u64, limit: Option<u64>) -> io::Result<()> {
-    let total = bodies_end
-        .checked_add(index_len)
-        .and_then(|n| n.checked_add(FOOTER))
-        .ok_or_else(|| bad("pack too large"))?;
-    if limit.is_some_and(|limit| total >= limit) {
-        return Err(bad("packed executable would reach Windows' 4 GiB limit; reduce the selected asset set or texture sizes and pack again"));
-    }
-    Ok(())
 }
 
 // ---------- helpers ----------
