@@ -836,8 +836,6 @@ impl SoldierVisuals {
             .flatten();
         v.animator
             .offhand_aim(cast.as_ref().map(|frame| frame.aim).or(custom));
-        v.animator
-            .step(rig, &sa.asset.clips, &sa.asset.skeleton, &input, dt);
         if !u.alive || u.mount.is_some() {
             v.cast.clear();
         }
@@ -845,18 +843,27 @@ impl SoldierVisuals {
             if let (Some(state), Some(class)) = (&u.weapon.melee, anim) {
                 if let Some((name, time, looping)) = state.pose() {
                     v.animator.combo_pose(
-                        rig,
                         &sa.asset.clips,
-                        &sa.asset.skeleton,
                         class,
                         &walk.sim.weapon_classes[u.weapon_class].name,
                         name,
                         time,
                         looping,
+                        state.movement_active,
                     );
+                } else {
+                    v.animator.clear_combo_pose();
                 }
+            } else {
+                v.animator.clear_combo_pose();
             }
+        } else {
+            v.animator.clear_combo_pose();
         }
+        v.animator
+            .hero_jump(s.jump_animation.map(|d| (d, s.jump_animation_serial)));
+        v.animator
+            .step(rig, &sa.asset.clips, &sa.asset.skeleton, &input, dt);
         if u.alive && u.mount.is_none() {
             if let Some(class) = anim {
                 if let Some(frame) = &cast {

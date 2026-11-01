@@ -299,6 +299,11 @@ pub(crate) fn clip_for<'a>(
     name: &str,
     layer: &str,
 ) -> Option<&'a Clip> {
+    if (name.ends_with("_upper") && layer == "lower")
+        || (name.ends_with("_lower") && layer == "upper")
+    {
+        return None;
+    }
     for family in [family, "human"] {
         let base = format!("{family}_{bank}_{name}");
         let scoped = ["_full", "_upper", "_lower"]

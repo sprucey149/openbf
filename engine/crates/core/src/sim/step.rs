@@ -689,6 +689,16 @@ impl Sim {
             // (The jets too, card JETP: `Stance::airborne`.)
             let in_air = !s0.grounded && s0.stance.airborne();
             if !self.collision.is_empty() {
+                let to = self.units[i].capsule();
+                if let Some((t, normal)) = self.collision.ceiling_sweep(&from, &to) {
+                    let delta = to.base - from.base;
+                    let rest = delta * (1.0 - t);
+                    let slide = rest - normal * rest.dot(normal).min(0.0);
+                    let soldier = &mut self.units[i].soldier;
+                    soldier.pos = from.base + delta * t + slide;
+                    let into = soldier.vel.dot(normal);
+                    soldier.vel -= normal * into.min(0.0);
+                }
                 let drop = if in_air { STEP_HEIGHT - AIR_STEP } else { 0.0 };
                 let low = |c: Capsule| Capsule {
                     base: c.base - Vec3::Y * drop,

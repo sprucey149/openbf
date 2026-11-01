@@ -438,6 +438,8 @@ pub struct Soldier {
     /// [`Soldier::spawn_fuel`], recharged outside the jet stances, spent by
     /// a jet's start and its seconds (re-jetpack.md §5.1).
     pub fuel: f32,
+    pub jump_animation: Option<u8>,
+    pub jump_animation_serial: u32,
     /// The previous tick's pad word — the EDGE source for every contextual
     /// button, and (Phase D) for the squad commands `Sim::step` phase 0b reads.
     /// NOT hashed: it is a copy of a pad the input log already determines, so a
@@ -693,6 +695,8 @@ impl Soldier {
             knock_draw: 0.0,
             fire_lock: false,
             fuel: 0.0,
+            jump_animation: None,
+            jump_animation_serial: 0,
             prev_buttons: 0,
         }
     }
@@ -1429,6 +1433,7 @@ impl Soldier {
     /// records the deliberate BF1 deviations. The ground mover runs first;
     /// the first air update skips gravity. Class constants remain unchanged.
     fn take_off(&mut self, c: &SoldierConstants) {
+        self.jump_animation = None;
         let (sy, cy) = fmath::sin_cos(self.yaw);
         let fwd_axis = Vec2::new(-sy, -cy);
         self.vel.y += c.jump_vy;
@@ -1480,6 +1485,20 @@ impl Soldier {
             .normalize();
         self.vel += dir * c.jet_jump;
         if c.saber && !c.jet_hover {
+            let direction = if fwd_in * fwd_in + strafe_in * strafe_in < 0.0625 {
+                0
+            } else if fwd_in > strafe_in.abs() {
+                1
+            } else if -fwd_in > strafe_in.abs() {
+                2
+            } else if strafe_in < 0.0 {
+                3
+            } else {
+                4
+            };
+            let restart = self.jump_animation != Some(direction)
+                || direction < 2
+                || (self.stance == Stance::Jump && self.time_in_stance >= 0.5);
             // The Jedi's double jump: the kick's horizontal part is thrown
             // away for the stick's run speeds, and the rise is the jump's
             // again, or 1.5 times it (B2:162553-162600).
@@ -1492,7 +1511,14 @@ impl Soldier {
             let vy = self.vel.y;
             self.vel = f * (fwd_in * run) + r * (strafe_in * c.max_strafe_speed);
             self.vel.y = if vy < 0.5 * j { vy + j } else { 1.5 * j };
+            let age = self.time_in_stance;
             self.set_stance(Stance::Jump);
+            self.jump_animation = Some(direction);
+            if restart {
+                self.jump_animation_serial = self.jump_animation_serial.wrapping_add(1);
+            } else {
+                self.time_in_stance = age;
+            }
         } else {
             self.set_stance(if c.jet_hover {
                 Stance::Hover
@@ -1809,6 +1835,11 @@ impl Soldier {
         if self.fuel != 0.0 {
             eat(b"SOLDIER_FUEL");
             eat(&self.fuel.to_bits().to_le_bytes());
+        }
+        if self.jump_animation_serial != 0 {
+            eat(b"HERO_JUMP");
+            eat(&[self.jump_animation.unwrap_or(u8::MAX)]);
+            eat(&self.jump_animation_serial.to_le_bytes());
         }
     }
 }

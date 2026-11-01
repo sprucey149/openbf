@@ -196,6 +196,32 @@ fn input(speed: f32) -> AnimInput {
 
 const DT: f32 = 1.0 / 60.0;
 
+#[test]
+fn custom_actions_release_legs_until_next_action_and_keep_authored_full_body_moves() {
+    let mut r = Run::new(rig_bf2());
+    r.clips.push(clip(9, "human_rifle_swing_full", 31, false));
+    r.rig.root.push(Some([0.0, 0.0]));
+    let class = ClassAnim {
+        family: "human".into(),
+        ..Default::default()
+    };
+    for (speed, force, wants_custom) in [
+        (0.0, false, true),
+        (7.0, false, false),
+        (0.0, false, false),
+        (7.0, true, true),
+    ] {
+        r.a.combo_pose(&r.clips, &class, "saber", "swing", 0.2, false, force);
+        r.a.step(&r.rig, &r.clips, &r.skel, &input(speed), DT);
+        assert_eq!(r.a.upper_clip(), Some(9));
+        assert_eq!(r.a.lower_clip() == Some(9), wants_custom);
+    }
+    r.a.clear_combo_pose();
+    r.a.step(&r.rig, &r.clips, &r.skel, &input(7.0), DT);
+    assert_eq!(r.a.lower_clip(), Some(RUN));
+    assert_ne!(r.a.upper_clip(), Some(9));
+}
+
 struct Run {
     rig: Rig,
     clips: Vec<Clip>,

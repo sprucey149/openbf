@@ -452,6 +452,7 @@ pub fn choose(
 /// A state with its own pair of clips and no weapon action (§3.6, §7).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Special {
+    DirectionalJump(u8),
     Dead,
     HeroDead,
     Roll,
@@ -496,6 +497,13 @@ impl Special {
             Special::HeroDead => "stand_deadhero",
             Special::Roll => "diveforward",
             Special::Jump => "jump",
+            Special::DirectionalJump(d) => [
+                "jump",
+                "jump_forward",
+                "jump_backward",
+                "jump_left",
+                "jump_right",
+            ][usize::from(d.min(4))],
             Special::Fall => "fall",
             Special::JetHover => "jetpack_hover",
             Special::Landing(hard) => ["landsoft", "landhard"][usize::from(hard)],
@@ -1168,6 +1176,9 @@ pub struct Animator {
     kept: Option<Pose>,
     combo_override: bool,
     combo_aim: bool,
+    combo: Option<combo_pose::ComboPose>,
+    hero_jump: Option<(u8, u32)>,
+    jump_serial: u32,
     next_aim: Option<(aim::AimKind, f32)>,
     action: Option<Action>,
     was_reloading: bool,
@@ -1303,6 +1314,10 @@ impl Animator {
             (s, _) => s,
         };
         let stance = self.jump.step(rig, clips, i, stance, dt);
+        let stance = match (stance, self.hero_jump) {
+            (Err(Special::Jump), Some((direction, _))) => Err(Special::DirectionalJump(direction)),
+            _ => stance,
+        };
         let scale = if i.root_scale > 0.0 {
             i.root_scale
         } else {
@@ -1445,15 +1460,43 @@ impl Animator {
             _ => false,
         };
         let legs = self.action.is_some_and(|a| a.legs);
+        let (combo_up, combo_low) = self.combo_slots(rig, i);
+        up = combo_up.or(up);
+        low = combo_low.or(low);
+        let jump_restart = self
+            .hero_jump
+            .is_some_and(|(_, serial)| serial != self.jump_serial);
+        if let Some((_, serial)) = self.hero_jump {
+            self.jump_serial = serial;
+        }
         if let Some(s) = low {
+            let previous_lower = self.lower_clip();
             let phase = keep.then_some(self.lower.t);
-            self.lower.set(rig, s, false, restart && legs, phase);
+            self.lower.set(
+                rig,
+                s,
+                false,
+                (restart && legs) || (jump_restart && combo_low.is_none()),
+                phase,
+            );
+            if combo_low.is_some() {
+                self.combo_transition(false, previous_lower);
+            }
         }
         let previous_upper = self.upper_clip();
         if let Some(s) = up {
             // A movement clip starts on the upper body at the legs' phase.
-            let phase = (!up_action && mv.is_some()).then_some(self.lower.t);
-            self.upper.set(rig, s, true, restart, phase);
+            let phase = (!up_action && combo_up.is_none() && mv.is_some()).then_some(self.lower.t);
+            self.upper.set(
+                rig,
+                s,
+                true,
+                restart || (jump_restart && combo_up.is_none()),
+                phase,
+            );
+            if combo_up.is_some() {
+                self.combo_transition(true, previous_upper);
+            }
         }
         // A movement clip plays at the speed over its root speed (both
         // players: B1:142668 / 142704, B2:202353).
@@ -1491,10 +1534,29 @@ impl Animator {
             _ => clock,
         };
         let (up_clock, low_clock) = (clock_of(&self.upper), clock_of(&self.lower));
-        self.upper
-            .advance(clips, dt * if up_action { rate } else { walk }, up_clock);
-        self.lower
-            .advance(clips, dt * if legs { rate } else { walk }, low_clock);
+        self.upper.advance(
+            clips,
+            dt * if combo_up.is_some() {
+                1.0
+            } else if up_action {
+                rate
+            } else {
+                walk
+            },
+            up_clock,
+        );
+        self.lower.advance(
+            clips,
+            dt * if combo_low.is_some() {
+                1.0
+            } else if legs {
+                rate
+            } else {
+                walk
+            },
+            low_clock,
+        );
+        self.combo_clock(clips, combo_up.is_some(), combo_low.is_some());
 
         let jump_pose = matches!(
             body,
@@ -1531,6 +1593,10 @@ impl Animator {
             .unwrap_or_else(|| up.map_or((aim::AimKind::None, 0.0), |s| (s.aim, s.blend_in)));
         self.aim.ease(&aim, kind, blend_in);
         self.step_twist(i, body, was_body, mv, dt);
+        if combo_low.is_some() && self.combo.as_ref().is_some_and(|c| c.forced()) {
+            self.combo_override = true;
+            self.combo_aim = kind != aim::AimKind::None;
+        }
     }
 
     /// The pose the two players keep, without the aim's turn.
