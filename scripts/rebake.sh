@@ -8,7 +8,8 @@
 #
 # Groups: REBAKE_GROUPS below; an unknown name is refused (exit 2) before
 # anything is built, so a typo cannot bake nothing and report success.
-# Sources are read-only (extracted/); nothing here touches iso/.
+# Sources are read-only: extracted/, and the inputs scripts/input_scan.py finds by
+# their content in iso/ (run by hand; under scripts/pack.py the scan already chose).
 set -euo pipefail
 
 # land.py reads this line too (it refuses a card whose `rebake=` names another).
@@ -60,6 +61,20 @@ ci() {
   printf '%s\n' "$cur"
 }
 
+# Run by hand, the scan supplies what the command line left out. Its SCAN_* are
+# empty for anything not chosen. Under pack.py the choice arrives in the environment.
+SCAN_PC1=""; SCAN_PC2=""; SCAN_XB1=""; SCAN_XB2=""; SCAN_BF2_CONSOLE_ISO=""
+if [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
+  SCAN="$(python3 "$ROOT/scripts/input_scan.py" --root "$ROOT" --shell | tr -d '\r')" || exit 2
+  eval "$SCAN"
+  if [ -z "$CLI_PC_DIR${PC1:-}${PC2:-}" ]; then
+    PC1="$SCAN_PC1"; PC2="$SCAN_PC2"
+  fi
+fi
+BF2_CONSOLE_ISO="${BF2_CONSOLE_ISO:-$SCAN_BF2_CONSOLE_ISO}"
+# Xbox texture donors: the trees `bake extract-xiso` wrote. Empty until pack.py chooses an Xbox disc.
+XB1="${XB1:-$SCAN_XB1}"; XB2="${XB2:-$SCAN_XB2}"
+
 is_pc_lvl_dir() {
   python3 "$ROOT/scripts/console_input.py" --pc "$2" "$1"
 }
@@ -97,30 +112,32 @@ done
 E="$ROOT/extracted"
 # Console BF2 exclusively supplies the shared menus, shell and HUD. PC assets
 # can replace map/side art, but cannot supply those console-only assets.
-UI2="$E/bf2/lvl/DATA/_LVL_PS2"
-if [ -n "$CLI_PC_DIR${PC1:-}${PC2:-}" ]; then
+# OPENBF_BF*_TREE: a game the scan chose non-PS2 gameplay data for (no PS2 copy).
+UI2="${OPENBF_BF2_TREE:-$E/bf2/lvl/DATA/_LVL_PS2}"
+if [ -n "$CLI_PC_DIR${PC1:-}${PC2:-}" ] && [ -z "${OPENBF_BF2_TREE:-}" ]; then
   python3 "$ROOT/scripts/console_input.py" "$UI2"
 fi
-B1="$E/bf1/lvl/DATA/_LVL_PS2"
-B2="$E/bf2/lvl/DATA/_LVL_PS2"
+B1="${OPENBF_BF1_TREE:-$E/bf1/lvl/DATA/_LVL_PS2}"
+B2="$UI2"
 S1="$E/bf1/sound/DATA/_LVL_PS2"
 S2="$E/bf2/sound/DATA/_LVL_PS2"
 # scripts/pack.py extracts each disc whole into lvl/ (bake extract-iso): the
 # sound LVLs are then beside the rest.
-[ -d "$S1" ] || S1="$B1"
-[ -d "$S2" ] || S2="$B2"
+{ [ -d "$S1" ] && [ -z "${OPENBF_BF1_TREE:-}" ]; } || S1="$B1"
+{ [ -d "$S2" ] && [ -z "${OPENBF_BF2_TREE:-}" ]; } || S2="$B2"
 OUT="${REBAKE_OUT:-$ROOT/engine/assets_baked}"
 
-# Classic-plus tier 2: the maintainer's PC SWBF2 install. Any texture the PC ships
+# Classic-plus tier 2: the PC install the scan chose (or one named on the command
+# line); a folder the scan refused is never read. Any texture the PC ships
 # LARGER than the PS2 one adds an optional tier; the PS2 base is preserved
 # (bake::tier; the maintainer's chain is
 # Harrisonfog HD > PC stock where larger > our upscale > PS2 original).
 # Explicit --pc1 also adds BF1 map texture tiers. The install is gitignored
 # and optional: without it every bake is PS2-only, which is a real difference
 # in output, so the script SAYS which way it ran rather than deciding quietly.
-PC="$ROOT/PC_swbf2_exe/Star Wars Battlefront II Classic/GameData/data/_lvl_pc"
+PC=""
 if [ -n "${PC1:-}${PC2:-}" ]; then
-  if [ -n "${PC1:-}" ]; then
+  if [ -n "${PC1:-}" ] && [ -z "${OPENBF_BF1_TREE:-}" ]; then
     python3 - "$ROOT/scripts" "$B1" <<'PYREF'
 import sys
 sys.path.insert(0, sys.argv[1])
@@ -133,31 +150,47 @@ PYREF
   fi
   echo "PC visual sources: BF1=${PC1:-absent} BF2=${PC2:-absent}; PS2 gameplay reference retained"
   PC="${PC2:-}"
-elif [ -d "$PC" ]; then
-  python3 "$ROOT/scripts/console_input.py" "$UI2"
-  echo "PC stock textures: $PC (BF2 maps get the larger PC texture where there is one)"
 else
   echo "PC stock textures: NOT PRESENT — baking PS2-only"
-  PC=""
 fi
-# The PC's own SIDE LVLs, for the soldier/weapon texture tiers (BF2 only).
-# Empty when the install is absent, and each is checked
-# individually so a partial install degrades to PS2 rather than failing.
-PCSIDE_REP=""; PCSIDE_CIS=""
-if [ -n "$PC" ]; then
-  [ -f "$(ci "$PC" side/rep.lvl)" ] && PCSIDE_REP="$(ci "$PC" side/rep.lvl)"
-  [ -f "$(ci "$PC" side/cis.lvl)" ] && PCSIDE_CIS="$(ci "$PC" side/cis.lvl)"
-fi
-# Set PC_ARG to the PC LVL for a BF2 map, or to nothing. An ARRAY, because
-# the install path contains spaces ("Star Wars Battlefront II Classic").
-PC_ARG=()
-pc_arg() {  # <planet dir> <map name>, both lowercase
-  PC_ARG=()
-  [ -n "$PC" ] || return 0
-  local f="$(ci "$PC" "$1/$2.lvl")"
-  [ -f "$f" ] && PC_ARG=("$f")
+# Every copy of an LVL the bake may take a larger texture from, as ONE comma-joined argument (bake::tier):
+# empty arguments and absent files are skipped, so a partial install degrades to the PS2 alone.
+join_donors() {
+  local list="" f
+  for f in "$@"; do
+    if [ -n "$f" ] && [ -f "$f" ]; then list="${list:+$list,}$f"; fi
+  done
+  printf '%s' "$list"
+}
+xbox_lvl() {  # <bf1|bf2> <lvl path under the game's data>
+  local tree="$XB1"
+  [ "$1" = bf2 ] && tree="$XB2"
+  if [ -n "$tree" ]; then ci "$tree" "$2"; fi
   return 0
 }
+# Set PC_ARG to one map's donors, or to nothing. An ARRAY, because the install
+# path contains spaces ("Star Wars Battlefront II Classic").
+PC_ARG=()
+map_donors() {  # <bf1|bf2> <lvl path under the game's data>
+  local root="${PC1:-}" pc="" list
+  [ "$1" = bf2 ] && root="$PC"
+  if [ -n "$root" ]; then pc="$(ci "$root" "$2")"; fi
+  list="$(join_donors "$pc" "$(xbox_lvl "$1" "$2")")"
+  PC_ARG=()
+  if [ -n "$list" ]; then PC_ARG=("$list"); fi
+  return 0
+}
+# One side's soldier, weapon and vehicle donors. The PC's own SIDE LVLs serve BF2 only: no PC BF1 side has been
+# compared with the PS2's.
+side_donors() {  # <bf1|bf2> <side, lowercase>
+  local pc=""
+  if [ "$1" = bf2 ] && [ -n "$PC" ]; then pc="$(ci "$PC" "side/$2.lvl")"; fi
+  join_donors "$pc" "$(xbox_lvl "$1" "side/$2.lvl")"
+}
+DS1_ALL="$(side_donors bf1 all)"; DS1_IMP="$(side_donors bf1 imp)"
+DS1_REP="$(side_donors bf1 rep)"; DS1_CIS="$(side_donors bf1 cis)"
+DS2_ALL="$(side_donors bf2 all)"; DS2_IMP="$(side_donors bf2 imp)"
+DS2_REP="$(side_donors bf2 rep)"; DS2_CIS="$(side_donors bf2 cis)"
 
 cd "$ROOT/engine"
 cargo build -p bake --release
@@ -187,14 +220,13 @@ BF2_MAPS="${OPENBF_BF2_MAPS:-$BF2_MAPS}"
 if want tat1; then
   echo "== TAT1 (BF1) =="
   clean "$OUT/tat1/models" "$OUT/tat1/textures" "$OUT/tat1/collision" "$OUT/tat1/nav"
-  PC_ARG=()
-  [ -n "${PC1:-}" ] && [ -f "$(ci "$PC1" TAT/TAT1.LVL)" ] && PC_ARG=("$(ci "$PC1" TAT/TAT1.LVL)")
+  map_donors bf1 TAT/TAT1.LVL
   "$BAKE" map "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/tat1" "${PC_ARG[@]}"
 fi
 if want tat2; then
   echo "== TAT2 (BF2) =="
   clean "$OUT/tat2/models" "$OUT/tat2/textures" "$OUT/tat2/collision" "$OUT/tat2/nav"
-  pc_arg tat tat2
+  map_donors bf2 tat/tat2.lvl
   "$BAKE" map "$(ci "$B2" TAT/TAT2.LVL)" "$OUT/tat2" "${PC_ARG[@]}"
 fi
 if want common; then
@@ -224,15 +256,15 @@ if want common; then
   # packs) and SOUND/SHELL.LVL's bank + music index. The movie is read from
   # the extracted tree when `bake extract-iso` kept it, else out of the disc
   # image (a dev tree's extracted discs leave MOVIES/ out).
-  # A worktree links extracted/ but not iso/: the disc image is then the main
-  # checkout's (git's common dir sits in it).
+  # The disc image is the one the scan chose (a worktree without iso/ scans the
+  # main checkout's).
   UI_SOUND2="$E/bf2/sound/DATA/_LVL_PS2"
   [ -d "$UI_SOUND2" ] || UI_SOUND2="$UI2"
   MVS="$(ci "$UI2" MOVIES/SHELL.MVS)"
-  [ -f "$MVS" ] || MVS="${BF2_CONSOLE_ISO:-$ROOT/iso/SWBF2.iso}"
+  [ -f "$MVS" ] || MVS="$BF2_CONSOLE_ISO"
   if [ ! -f "$MVS" ]; then
-    MAIN_ROOT="$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)")"
-    MVS="$MAIN_ROOT/iso/SWBF2.iso"
+    echo "rebake: common needs MOVIES/SHELL.MVS: no copy in $UI2 and no BF2 PS2 disc was chosen. Add the disc to iso/." >&2
+    exit 2
   fi
   clean "$OUT/common_bf2/shell"
   "$BAKE" shell "$(ci "$UI2" SHELL.LVL)" "$MVS" "$(ci "$UI_SOUND2" SOUND/SHELL.LVL)" "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
@@ -258,19 +290,19 @@ if want side; then
   # BF1 has BF2's throw on every map: BF2_ANIMS lends BF2's rifle throw clips
   # to every BF1 soldier (bake::soldier::BORROWED_THROW, card GTHRW).
   A1="$B1/COMMON/ENG/COMMON.LVL"
-  BF2_ANIMS="$B2/INGAME.LVL" "$BAKE" soldier "$B1/SIDE/ALL.LVL" all_inf_marksperson,all_inf_marksperson_snow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_trooperfleet,all_inf_wookie "$OUT/side_bf1" "$A1"
-  BF2_ANIMS="$B2/INGAME.LVL" "$BAKE" soldier "$B1/SIDE/IMP.LVL" imp_inf_atatpilot,imp_inf_atstpilot,imp_inf_darktrooper,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf1" "$A1"
-  BF2_ANIMS="$B2/INGAME.LVL" "$BAKE" soldier "$B1/SIDE/REP.LVL" rep_inf_arctrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf1" "$A1"
-  BF2_ANIMS="$B2/INGAME.LVL" "$BAKE" soldier "$B1/SIDE/CIS.LVL" cis_inf_bdroid,cis_inf_sbdroid "$OUT/side_bf1" "$A1"
-  # BF2 SIDE gets the PC-stock tier too, from the matching PC side LVL.
+  BF2_ANIMS="$B2/INGAME.LVL" "$BAKE" soldier "$B1/SIDE/ALL.LVL" all_inf_marksperson,all_inf_marksperson_snow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_trooperfleet,all_inf_wookie "$OUT/side_bf1" "$A1" ${DS1_ALL:+"$DS1_ALL"}
+  BF2_ANIMS="$B2/INGAME.LVL" "$BAKE" soldier "$B1/SIDE/IMP.LVL" imp_inf_atatpilot,imp_inf_atstpilot,imp_inf_darktrooper,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf1" "$A1" ${DS1_IMP:+"$DS1_IMP"}
+  BF2_ANIMS="$B2/INGAME.LVL" "$BAKE" soldier "$B1/SIDE/REP.LVL" rep_inf_arctrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf1" "$A1" ${DS1_REP:+"$DS1_REP"}
+  BF2_ANIMS="$B2/INGAME.LVL" "$BAKE" soldier "$B1/SIDE/CIS.LVL" cis_inf_bdroid,cis_inf_sbdroid "$OUT/side_bf1" "$A1" ${DS1_CIS:+"$DS1_CIS"}
+  # BF2 SIDE gets the PC-stock tier too, from the matching PC side LVL (the donors, above).
   # This is where the proportional gain is biggest: a first-person weapon
   # sheet is 128x64 on the PS2 and 512x256 on the PC.
   # BF2 has no prone clips: BF1_ANIMS lends BF1's rifle prone set to every BF2
   # soldier (bake::soldier::BORROWED_PRONE, issue #40; the bones share names).
-  BF1_ANIMS="$A1" "$BAKE" soldier "$B2/SIDE/REP.LVL" rep_inf_arctrooper,rep_inf_clonecommander,rep_inf_ep3armoredpilot,rep_inf_ep3heavytrooper,rep_inf_ep3jettrooper,rep_inf_ep3sniper,rep_inf_ep3trooper,rep_inf_feluciatrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf2" "$B2/INGAME.LVL" ${PCSIDE_REP:+"$PCSIDE_REP"}
-  BF1_ANIMS="$A1" "$BAKE" soldier "$B2/SIDE/CIS.LVL" cis_inf_bdroid,cis_inf_magnaguard,cis_inf_sbdroid "$OUT/side_bf2" "$B2/INGAME.LVL" ${PCSIDE_CIS:+"$PCSIDE_CIS"}
-  BF1_ANIMS="$A1" "$BAKE" soldier "$B2/SIDE/ALL.LVL" all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie "$OUT/side_bf2" "$B2/INGAME.LVL"
-  BF1_ANIMS="$A1" "$BAKE" soldier "$B2/SIDE/IMP.LVL" imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf2" "$B2/INGAME.LVL"
+  BF1_ANIMS="$A1" "$BAKE" soldier "$B2/SIDE/REP.LVL" rep_inf_arctrooper,rep_inf_clonecommander,rep_inf_ep3armoredpilot,rep_inf_ep3heavytrooper,rep_inf_ep3jettrooper,rep_inf_ep3sniper,rep_inf_ep3trooper,rep_inf_feluciatrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf2" "$B2/INGAME.LVL" ${DS2_REP:+"$DS2_REP"}
+  BF1_ANIMS="$A1" "$BAKE" soldier "$B2/SIDE/CIS.LVL" cis_inf_bdroid,cis_inf_magnaguard,cis_inf_sbdroid "$OUT/side_bf2" "$B2/INGAME.LVL" ${DS2_CIS:+"$DS2_CIS"}
+  BF1_ANIMS="$A1" "$BAKE" soldier "$B2/SIDE/ALL.LVL" all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie "$OUT/side_bf2" "$B2/INGAME.LVL" ${DS2_ALL:+"$DS2_ALL"}
+  BF1_ANIMS="$A1" "$BAKE" soldier "$B2/SIDE/IMP.LVL" imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf2" "$B2/INGAME.LVL" ${DS2_IMP:+"$DS2_IMP"}
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
   # its class references, including the campaign variants.
   BF1_ANIMS="$A1" "$BAKE" heroes "$B2" "$OUT/side_bf2"
@@ -283,20 +315,20 @@ if want side; then
   # BF1's pistols too since card WHELD: a soldier holds the model of the
   # weapon in his hand, and every class slot the sim can switch to must have
   # its model (game/tests/suite/roster.rs `every_held_slots_hand_model_is_baked`).
-  "$BAKE" weapon  "$B1/SIDE/ALL.LVL" all_weap_inf_bowcaster,all_weap_inf_fusioncutter,all_weap_inf_launcher,all_weap_inf_pistol,all_weap_inf_rifle,all_weap_inf_seeker,all_weap_inf_sniperrifle "$OUT/side_bf1"
-  "$BAKE" weapon  "$B1/SIDE/IMP.LVL" imp_weap_inf_fusioncutter,imp_weap_inf_launcher,imp_weap_inf_pistol,imp_weap_inf_rifle,imp_weap_inf_sniperrifle "$OUT/side_bf1"
-  "$BAKE" weapon  "$B1/SIDE/REP.LVL" rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle,rep_weap_inf_landmine "$OUT/side_bf1"
-  "$BAKE" weapon  "$B1/SIDE/CIS.LVL" cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_sniperrifle "$OUT/side_bf1"
-  "$BAKE" weapon  "$B2/SIDE/REP.LVL" rep_weap_inf_chaingun,rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle "$OUT/side_bf2" ${PCSIDE_REP:+"$PCSIDE_REP"}
-  "$BAKE" weapon  "$B2/SIDE/CIS.LVL" cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_rifle,cis_weap_inf_sniperrifle,hud_cis_wristblaster,hud_cis_trishot,hud_cis_wristrocket,hud_droideka_shield "$OUT/side_bf2" ${PCSIDE_CIS:+"$PCSIDE_CIS"}
+  "$BAKE" weapon  "$B1/SIDE/ALL.LVL" all_weap_inf_bowcaster,all_weap_inf_fusioncutter,all_weap_inf_launcher,all_weap_inf_pistol,all_weap_inf_rifle,all_weap_inf_seeker,all_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_ALL:+"$DS1_ALL"}
+  "$BAKE" weapon  "$B1/SIDE/IMP.LVL" imp_weap_inf_fusioncutter,imp_weap_inf_launcher,imp_weap_inf_pistol,imp_weap_inf_rifle,imp_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_IMP:+"$DS1_IMP"}
+  "$BAKE" weapon  "$B1/SIDE/REP.LVL" rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle,rep_weap_inf_landmine "$OUT/side_bf1" ${DS1_REP:+"$DS1_REP"}
+  "$BAKE" weapon  "$B1/SIDE/CIS.LVL" cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_sniperrifle "$OUT/side_bf1" ${DS1_CIS:+"$DS1_CIS"}
+  "$BAKE" weapon  "$B2/SIDE/REP.LVL" rep_weap_inf_chaingun,rep_weap_inf_fusioncutter,rep_weap_inf_launcher,rep_weap_inf_pistol,rep_weap_inf_rifle,rep_weap_inf_sniperrifle "$OUT/side_bf2" ${DS2_REP:+"$DS2_REP"}
+  "$BAKE" weapon  "$B2/SIDE/CIS.LVL" cis_weap_inf_fusioncutter,cis_weap_inf_launcher,cis_weap_inf_pistol,cis_weap_inf_rifle,cis_weap_inf_sniperrifle,hud_cis_wristblaster,hud_cis_trishot,hud_cis_wristrocket,hud_droideka_shield "$OUT/side_bf2" ${DS2_CIS:+"$DS2_CIS"}
   # [ours] BF1 SBD chunks on both games; reproducible Magnaguard mesh cuts.
   # Every droid chunk model goes through here, never `bake weapon`: its sheets
   # get an `openbf_droid_` name, so no living soldier's sheet is overwritten
   # (a chunk's weapon bake made the battle droid's sheet opaque). After the
   # soldier bake: the Magnaguard cuts draw its living sheets.
-  "$BAKE" droid-chunks "$B1/SIDE/CIS.LVL" "$B2/SIDE/CIS.LVL" "$A1" "$OUT" ${PCSIDE_CIS:+"$PCSIDE_CIS"}
-  "$BAKE" weapon  "$B2/SIDE/ALL.LVL" all_weap_inf_bowcaster,all_weap_inf_fusioncutter,all_weap_inf_launcher,all_weap_inf_pistol,all_weap_inf_rifle,all_weap_inf_seeker,all_weap_inf_sniperrifle "$OUT/side_bf2"
-  "$BAKE" weapon  "$B2/SIDE/IMP.LVL" imp_weap_inf_fusioncutter,imp_weap_inf_launcher,imp_weap_inf_pistol,imp_weap_inf_rifle,imp_weap_inf_sniperrifle "$OUT/side_bf2"
+  "$BAKE" droid-chunks "$B1/SIDE/CIS.LVL" "$B2/SIDE/CIS.LVL" "$A1" "$OUT" ${DS2_CIS:+"$DS2_CIS"}
+  "$BAKE" weapon  "$B2/SIDE/ALL.LVL" all_weap_inf_bowcaster,all_weap_inf_fusioncutter,all_weap_inf_launcher,all_weap_inf_pistol,all_weap_inf_rifle,all_weap_inf_seeker,all_weap_inf_sniperrifle "$OUT/side_bf2" ${DS2_ALL:+"$DS2_ALL"}
+  "$BAKE" weapon  "$B2/SIDE/IMP.LVL" imp_weap_inf_fusioncutter,imp_weap_inf_launcher,imp_weap_inf_pistol,imp_weap_inf_rifle,imp_weap_inf_sniperrifle "$OUT/side_bf2" ${DS2_IMP:+"$DS2_IMP"}
   # The torpedo launcher's model is SHARED, not per-side: BF1 IMP/REP/CIS's
   # `*_weap_inf_torpedo_launcher` and BF2 REP's all name `com_weap_inf_torpedo`,
   # whose `modl` is in each game's common LVL and in no side LVL (measured:
@@ -325,9 +357,7 @@ if want side; then
       [ "$s" = all ] && x="$x,bowcaster,seeker"
       [ "$s" = rep ] && [ "$g" = 1 ] && x="$x,landmine"
       [ "$s" = rep ] && [ "$g" = 2 ] && x="$x,chaingun"
-      pc=""
-      [ "$g" = 2 ] && [ "$s" = rep ] && pc="${PCSIDE_REP:-}"
-      [ "$g" = 2 ] && [ "$s" = cis ] && pc="${PCSIDE_CIS:-}"
+      eval "pc=\$DS${g}_$(echo "$s" | tr a-z A-Z)"
       "$BAKE" weapon "$G/SIDE/$(echo "$s" | tr a-z A-Z).LVL" "$(echo "$x" | sed "s/[^,]*/${s}_1st_weap_inf_&/g")" "$OUT/side_bf$g" ${pc:+"$pc"}
     done
   done
@@ -335,17 +365,17 @@ if want side; then
   "$BAKE" weapon  "$B2/INGAME.LVL" com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf2"
   # Every vehicle class of the four sides (card VBAKE): models (every LOD),
   # destruction chunks, collision, textures -> side_<game>/vehicles/<side>/.
-  for s in all cis imp rep; do
-    S=$(echo "$s" | tr a-z A-Z)
-    "$BAKE" vehicle "$(ci "$B1" "SIDE/$S.LVL")" "$OUT/side_bf1/vehicles/$s"
-  done
+  "$BAKE" vehicle "$(ci "$B1" SIDE/ALL.LVL)" "$OUT/side_bf1/vehicles/all" ${DS1_ALL:+"$DS1_ALL"}
+  "$BAKE" vehicle "$(ci "$B1" SIDE/CIS.LVL)" "$OUT/side_bf1/vehicles/cis" ${DS1_CIS:+"$DS1_CIS"}
+  "$BAKE" vehicle "$(ci "$B1" SIDE/IMP.LVL)" "$OUT/side_bf1/vehicles/imp" ${DS1_IMP:+"$DS1_IMP"}
+  "$BAKE" vehicle "$(ci "$B1" SIDE/REP.LVL)" "$OUT/side_bf1/vehicles/rep" ${DS1_REP:+"$DS1_REP"}
   # BF1 SIDE/GUN: Naboo Plains' missions read it (nab1c/nab1i/nab1c_h.luac)
   # and three NAB1 pads key its gun_walk_kaadu for the defenders (card KAAD).
   "$BAKE" vehicle "$(ci "$B1" SIDE/GUN.LVL)" "$OUT/side_bf1/vehicles/gun"
-  "$BAKE" vehicle "$(ci "$B2" SIDE/ALL.LVL)" "$OUT/side_bf2/vehicles/all"
-  "$BAKE" vehicle "$(ci "$B2" SIDE/IMP.LVL)" "$OUT/side_bf2/vehicles/imp"
-  "$BAKE" vehicle "$(ci "$B2" SIDE/REP.LVL)" "$OUT/side_bf2/vehicles/rep" ${PCSIDE_REP:+"$PCSIDE_REP"}
-  "$BAKE" vehicle "$(ci "$B2" SIDE/CIS.LVL)" "$OUT/side_bf2/vehicles/cis" ${PCSIDE_CIS:+"$PCSIDE_CIS"}
+  "$BAKE" vehicle "$(ci "$B2" SIDE/ALL.LVL)" "$OUT/side_bf2/vehicles/all" ${DS2_ALL:+"$DS2_ALL"}
+  "$BAKE" vehicle "$(ci "$B2" SIDE/IMP.LVL)" "$OUT/side_bf2/vehicles/imp" ${DS2_IMP:+"$DS2_IMP"}
+  "$BAKE" vehicle "$(ci "$B2" SIDE/REP.LVL)" "$OUT/side_bf2/vehicles/rep" ${DS2_REP:+"$DS2_REP"}
+  "$BAKE" vehicle "$(ci "$B2" SIDE/CIS.LVL)" "$OUT/side_bf2/vehicles/cis" ${DS2_CIS:+"$DS2_CIS"}
   # Every side LVL's `fx__` particle effects + the textures/models they name
   # (card FXP1, analysis/re-fx.md §1): BF2's sides carry per-class effects
   # (IMP 8, SNW 6, CIS 5, ...); BF1's carry none, and a side with none writes
@@ -468,8 +498,7 @@ if want maps; then
   for p in $BF1_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf1_$n"
     clean "$d/models" "$d/textures" "$d/collision" "$d/nav"
-    PC_ARG=()
-    [ -n "${PC1:-}" ] && [ -f "$(ci "$PC1" "$p.LVL")" ] && PC_ARG=("$(ci "$PC1" "$p.LVL")")
+    map_donors bf1 "$p.LVL"
     "$BAKE" map "$(ci "$B1" "$p.LVL")" "$d" "${PC_ARG[@]}"
     LF="$(ci "$B1" "LOAD/$(basename "$p").LVL")"
     [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"
@@ -478,7 +507,7 @@ if want maps; then
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf2_$n"
     planet=$(dirname "$p" | tr 'A-Z' 'a-z')
     clean "$d/models" "$d/textures" "$d/collision" "$d/nav"
-    pc_arg "$planet" "$n"
+    map_donors bf2 "$planet/$n.lvl"
     "$BAKE" map "$(ci "$B2" "$p.LVL")" "$d" "${PC_ARG[@]}"
     LF="$(ci "$B2" "LOAD/$(basename "$p").LVL")"
     [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"

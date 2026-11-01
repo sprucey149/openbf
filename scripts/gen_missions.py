@@ -164,8 +164,10 @@ def _dec40(i):
 class Call:
     """A reconstructed `name(arg, ...)` with literal arguments."""
 
-    def __init__(self, name, args):
+    def __init__(self, name, args, prototype=None):
         self.name, self.args = name, args
+        # Optional source provenance for census tools; no execution claim.
+        self.prototype = prototype
 
     def __repr__(self):
         return "%s(%s)" % (self.name, ", ".join(repr(a) for a in self.args))
@@ -244,7 +246,7 @@ def calls40(f, out=None):
             del stack[a:]
             name = fn.what[7:] if isinstance(fn, Unknown) and \
                 fn.what.startswith("global:") else "?"
-            out.append(Call(name, args))
+            out.append(Call(name, args, f))
             for _ in range(b):
                 push(Unknown("ret"))
         elif op in ("TAILCALL", "RETURN", "END"):
@@ -376,7 +378,25 @@ class Table(dict):
     pass
 
 
-def calls50(f, out=None, globs=None, base=None, ups=None, recurse=True):
+def _snapshot_tables(value, memo=None):
+    """Copy literal VM state while retaining opaque closure/prototype identity."""
+    if memo is None:
+        memo = {}
+    if not isinstance(value, (dict, list)):
+        return value
+    if id(value) in memo:
+        return memo[id(value)]
+    result = type(value)()
+    memo[id(value)] = result
+    if isinstance(value, dict):
+        result.update((key, _snapshot_tables(child, memo)) for key, child in value.items())
+    else:
+        result.extend(_snapshot_tables(child, memo) for child in value)
+    return result
+
+
+def calls50(f, out=None, globs=None, base=None, ups=None, recurse=True,
+            isolate_prototypes=False):
     """Abstract-interpret a Lua 5.0 proto tree and yield its engine calls.
 
     Enough of the VM to follow the mission scripts: constants, registers,
@@ -483,7 +503,7 @@ def calls50(f, out=None, globs=None, base=None, ups=None, recurse=True):
             nm = "?"
             if isinstance(fn, Unknown) and fn.what.startswith("global:"):
                 nm = fn.what[7:]
-            out.append(Call(nm, args))
+            out.append(Call(nm, args, f))
             for i in range(max(0, c - 1)):
                 R[a + i] = Unknown("ret")
         elif op == "GETUPVAL":
@@ -509,7 +529,14 @@ def calls50(f, out=None, globs=None, base=None, ups=None, recurse=True):
             R[a] = Unknown(op)
     if recurse:
         for i, p in enumerate(f.protos):
-            calls50(p, out, globs, base, closure_ups.get(i, []))
+            # A census must not let a dormant sibling callback mutate the
+            # next prototype's globals. Preserve historical bake behavior unless
+            # the caller explicitly requests independent declaration snapshots.
+            child_globals, child_ups = globs, closure_ups.get(i, [])
+            if isolate_prototypes:
+                child_globals, child_ups = _snapshot_tables([child_globals, child_ups])
+            calls50(p, out, child_globals, base, child_ups,
+                    isolate_prototypes=isolate_prototypes)
     return out
 
 

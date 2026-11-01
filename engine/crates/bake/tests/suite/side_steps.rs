@@ -52,19 +52,58 @@ fn side_steps_never_rewrite_or_shadow_another_steps_file() {
 
     let mut writers: BTreeMap<String, Vec<(String, u64)>> = BTreeMap::new();
     let mut step = 0;
-    for line in side.lines().map(str::trim).filter(|l| !l.starts_with('#')) {
+    // The first-person weapons are a shell loop: spell out what each pass runs.
+    let w1st = side
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("W1ST="))
+        .expect("rebake.sh's W1ST list");
+    let lines: Vec<String> = side
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.starts_with('#'))
+        .flat_map(|line| -> Vec<String> {
+            if !line.starts_with("\"$BAKE\" weapon \"$G/SIDE/") {
+                return vec![line.to_string()];
+            }
+            let mut passes = Vec::new();
+            for game in ["1", "2"] {
+                for s in ["all", "imp", "rep", "cis"] {
+                    let extra = match (s, game) {
+                        ("all", _) => ",bowcaster,seeker",
+                        ("rep", "1") => ",landmine",
+                        ("rep", "2") => ",chaingun",
+                        _ => "",
+                    };
+                    let models = format!("{w1st}{extra}")
+                        .split(',')
+                        .map(|w| format!("{s}_1st_weap_inf_{w}"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let big = s.to_uppercase();
+                    passes.push(format!(
+                        "\"$BAKE\" weapon \"$B{game}/SIDE/{big}.LVL\" {models} \"$OUT/side_bf{game}\" ${{DS{game}_{big}:+x}}"
+                    ));
+                }
+            }
+            passes
+        })
+        .collect();
+    for line in &lines {
         let Some(at) = line.find("\"$BAKE\" ") else {
             continue;
         };
         let mut args = Vec::new();
         let mut pc_arg = None;
         for t in line[at + 8..].split_whitespace() {
+            // ${DS2_REP:+...}: that side's donor. Only BF2 has a PC copy here; an
+            // unknown name is a change this parser must learn, not a silent "none".
             if let Some(var) = t.strip_prefix("${") {
-                pc_arg = pc_side(if var.starts_with("PCSIDE_REP") {
-                    "rep.lvl"
-                } else {
-                    "cis.lvl"
-                });
+                let name = var.split(':').next().unwrap();
+                pc_arg = match name.strip_prefix("DS2_") {
+                    Some(s) => pc_side(&format!("{}.lvl", s.to_lowercase())),
+                    None if name.starts_with("DS1_") => None,
+                    None => panic!("unknown donor variable in rebake.sh: {name}"),
+                };
                 continue;
             }
             args.push(

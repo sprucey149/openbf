@@ -277,8 +277,9 @@ fn side_material_names(side: &Path, overrides: bool) -> std::collections::BTreeS
 /// gates on (`viewer::upload_texture_file` returns `None` — an untextured soldier — when
 /// `<name>.ktx2` is missing, whatever the tier).
 ///
-/// BF2 only: `scripts/rebake.sh:36-40` passes a PC side LVL for `rep`/`cis`
-/// and for nothing else, so `side_bf1` must carry no override at all.
+/// BF2 only: `scripts/rebake.sh`'s `side_donors` passes the PC side LVL of
+/// `all`/`imp`/`rep`/`cis`. No PC copy of BF1 exists here, so `side_bf1` must
+/// carry no override at all.
 #[test]
 fn the_side_tier2_files_are_textures_the_soldier_path_asks_for() {
     let assets = baked_root();
@@ -342,13 +343,18 @@ fn the_side_tier2_files_are_textures_the_soldier_path_asks_for() {
             "missing cutter sheet {cutter}"
         );
     }
+    // The ALL and IMP sides' PC donors (largest copy wins) bring this to 53 and
+    // the class-skin count below to 11, measured on a whole `rebake.sh side`.
     assert_eq!(
         stems.len() - skin_stems,
-        25,
+        53,
         "side_bf2 tier-2 stems: {stems:?}"
     );
     if !skins.is_empty() {
-        assert_eq!(skin_stems, 6, "side_bf2 class-skin tier-2 stems: {stems:?}");
+        assert_eq!(
+            skin_stems, 11,
+            "side_bf2 class-skin tier-2 stems: {stems:?}"
+        );
     }
 
     let names = side_material_names(&side, true);

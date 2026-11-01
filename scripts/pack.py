@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""pack.py -- your two PS2 discs in, a self-contained game out (card PACK).
+"""pack.py -- what you own in iso/, a self-contained game out (card PACK).
 
-    python3 scripts/pack.py [--iso1 iso/SWBF1.iso] [--iso2 iso/SWBF2.iso] [--out dist/openbf]
+    python3 scripts/pack.py [--iso-dir iso] [--out dist/openbf] [--scan-only]
+
+Put your discs and install folders in iso/, under any names: scripts/input_scan.py knows them by their content and
+chooses what each game is built from. Each game needs one source; any PC input also needs a console BF2 disc. It says
+what to add when something is missing, and names what it refuses. --scan-only stops after that.
 
 Steps, each skipped when its output is already there (so a second run only
 recompiles and re-packs):
+  0. scan the inputs and choose                 -> <output>.inputs.txt, <output>.inputs.json
   1. build the `bake` tool and the `game` binary (cargo, release)
   2. extract each disc's DATA/_LVL_PS2 tree     -> extracted/bf{1,2}/lvl/  (bake extract-iso)
   3. extract the Lua scripts of the LVLs        -> extracted/bf{1,2}/lua/  (extract_lua.py)
@@ -39,7 +44,8 @@ import sys
 import tempfile
 from pathlib import Path
 
-from console_input import require_console_bf2, require_ps2_bf1_reference, pc_game
+import input_scan
+from console_input import pc_game
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENGINE = os.path.join(ROOT, "engine")
@@ -190,9 +196,13 @@ def resolve_pc_roots(pc_dir, pc1, pc2):
     return roots
 
 
+# Set from the scan for a game whose gameplay data is not a PS2 tree.
+GAMEPLAY_TREES = {}
+
+
 def lvl_root(game):
-    """The disc's _LVL_PS2 directory: the dev layout's, else where extract-iso puts it."""
-    return os.path.join(EXTRACTED, game, "lvl", "DATA", "_LVL_PS2")
+    """The game's data directory: the dev layout's _LVL_PS2, else where extract-iso puts it."""
+    return GAMEPLAY_TREES.get(game) or os.path.join(EXTRACTED, game, "lvl", "DATA", "_LVL_PS2")
 
 
 def need(tool, why):
@@ -201,9 +211,9 @@ def need(tool, why):
 
 
 # What a bake / the missions are made by: when any of it changes, the output is stale and is made again.
-BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py",
+BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py", "scripts/input_scan.py",
                "engine/crates/bake/src/effect_names.txt", "engine/Cargo.toml", "engine/Cargo.lock")
-MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py")
+MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py")
 # Kept in extracted/ (local, ignored by git): engine/missions/ is tracked in the dev tree.
 BAKE_STAMP = os.path.join(EXTRACTED, "bake_inputs.sha256")
 MISSION_STAMP = os.path.join(EXTRACTED, "mission_inputs.sha256")
@@ -354,7 +364,7 @@ def map_texture_sources(baked):
     return maps
 
 
-def source_report(root, baked, missions, images, extracted_used=(), images_used=(), full_bake=False, pc_roots=None):
+def source_report(root, baked, missions, images, extracted_used=(), images_used=(), full_bake=False, pc_roots=None, plan=None):
     """Only successful pack steps establish which inputs were consumed."""
     root = Path(root)
     inputs = []
@@ -370,16 +380,23 @@ def source_report(root, baked, missions, images, extracted_used=(), images_used=
             note(pc_roots[game], f'{game} PC visual input', full_bake,
                  'passed to texture-tier bake this run; console data supplies gameplay and shared UI' if full_bake else
                  'not read this run; cached bake and missions packed')
-        selected.add(Path(image).resolve())
-        used = game in images_used
-        note(image, f'{game} requested PS2 image', used,
-             'extracted successfully this run' if used else 'not read or verified this run; cached extraction used')
+        if image:
+            selected.add(Path(image).resolve())
+            used = game in images_used
+            note(image, f'{game} requested PS2 image', used,
+                 'extracted successfully this run' if used else 'not read or verified this run; cached extraction used')
         tree = root / 'extracted' / game
         used = game in extracted_used
         note(tree, f'{game} extracted PS2 data', used,
              'read for the console Lua cache, mission generation or bake this run' if used else 'not read this run; cached bake and missions packed')
     iso = root / 'iso'
-    if iso.is_dir():
+    if plan:
+        chosen = {Path(path).resolve() for path in pc_roots.values()} | selected
+        for row in plan['found']:
+            if Path(row['path']).resolve() not in chosen:
+                inputs.append(dict(path=row['path'], label=f"found: {row['kind']}", present=True,
+                                   status=row['status'], reason=row['reason']))
+    elif iso.is_dir():
         for path in sorted(p for p in iso.iterdir() if p.is_file()):
             if path.resolve() not in selected:
                 inputs.append(dict(path=str(path.absolute()), label='other source file', present=True,
@@ -390,13 +407,16 @@ def source_report(root, baked, missions, images, extracted_used=(), images_used=
     known_pc = {'side/rep.lvl', 'side/cis.lvl', 'tat/tat2.lvl'}
     if match:
         known_pc.update(token.lower() + '.lvl' for token in match[1].split())
-    read_pc = sorted(str(pc / name) for name in known_pc if full_bake and not pc_roots and (pc / name).is_file())
-    note(pc, 'optional BF2 PC texture directory', bool(read_pc),
-         'existing libraries passed to the supported PC texture reader' if read_pc else
-         'no PC libraries read this run (missing optional input or cached bake)')
+    # With a scan the bake reads only what it chose, and what it chose is listed above.
+    read_pc = sorted(str(pc / name) for name in known_pc if full_bake and not pc_roots and not plan and (pc / name).is_file())
+    if not any(Path(path).resolve() == pc.resolve() for path in pc_roots.values()):
+        note(pc, 'optional BF2 PC texture directory', bool(read_pc),
+             'existing libraries passed to the supported PC texture reader' if read_pc else
+             'no PC libraries read this run (missing optional input or cached bake)')
     note(baked, 'baked game assets', True, 'packed into the game; stored provenance listed separately')
     note(missions, 'mission data', True, 'packed into the game')
     return dict(schema=1, inputs=inputs, pc_libraries_read=read_pc, maps=map_texture_sources(baked),
+                input_scan=plan,
                 limits='Map-local base and alternative textures only. Shared/side model bakes do not retain per-texture source metadata. Other formats are not claimed as read.')
 
 
@@ -405,7 +425,7 @@ def write_source_report(out, report):
     temporary = path + '.new'
     try:
         with open(temporary, 'w', encoding='utf-8') as target:
-            json.dump(report, target, indent=2, ensure_ascii=False)
+            json.dump(report, target, indent=2)
             target.write('\n')
         os.replace(temporary, path)
     finally:
@@ -448,26 +468,49 @@ def console_lua_root():
 
 
 def main():
+    input_scan.tolerant_stdout()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--iso1", default=os.path.join(ROOT, "iso", "SWBF1.iso"), help="Star Wars: Battlefront (PS2) disc image")
-    ap.add_argument("--iso2", default=os.path.join(ROOT, "iso", "SWBF2.iso"), help="Star Wars: Battlefront II (PS2) disc image")
+    ap.add_argument("--iso-dir", default=None, help="the folder of discs and install folders to scan (default: iso/)")
+    ap.add_argument("--scan-only", action="store_true", help="print and write what the scan found and chose, then stop")
+    ap.add_argument("--iso1", default=None, help="use this Star Wars: Battlefront disc image, whatever else the scan finds")
+    ap.add_argument("--iso2", default=None, help="use this Star Wars: Battlefront II disc image, whatever else the scan finds")
     ap.add_argument("--pc-dir", default=None, help="directory containing installed PC Battlefront I and/or II")
     ap.add_argument("--pc1", default=None, help="Star Wars: Battlefront (PC) _LVL_PC or install directory")
     ap.add_argument("--pc2", default=None, help="Star Wars: Battlefront II (PC) _lvl_pc or install directory")
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
     a = ap.parse_args()
-    pc_roots = resolve_pc_roots(a.pc_dir, a.pc1 or os.environ.get("PC1"), a.pc2 or os.environ.get("PC2"))
-    try:
-        require_console_bf2(bool(pc_roots), lvl_root("bf2"), a.iso2)
-        require_ps2_bf1_reference("bf1" in pc_roots, lvl_root("bf1"), a.iso1)
-    except ValueError as error:
-        sys.exit("pack: " + str(error))
     out = os.path.abspath(a.out)
-    images_used, extracted_used = set(), set()
-    full_bake = False
     if out.startswith(os.path.join(ENGINE, "")) or os.path.isdir(out):
         sys.exit(f"pack: --out {out} must be a file outside engine/")
+    named_pc = resolve_pc_roots(a.pc_dir, a.pc1 or os.environ.get("PC1"), a.pc2 or os.environ.get("PC2"))
+    roots = [a.iso_dir] if a.iso_dir else input_scan.default_roots(ROOT)
+    plan = input_scan.scan(roots, {"bf1": a.iso1, "bf2": a.iso2}, named_pc, EXTRACTED, a.iso_dir)
+    print("\n".join(input_scan.summary_lines(plan)))
+    input_scan.write_summary(plan, out)
+    print(f"Input summary: {out}.inputs.txt")
+    if plan["refusals"]:
+        message = "pack: " + "\npack: ".join(plan["refusals"])
+        sys.exit(message.encode("utf-8", "backslashreplace").decode("utf-8"))
+    if a.scan_only:
+        return
+    pc_roots = {g: item["path"] for g, chosen in plan["games"].items()
+                for item in chosen["visual"] if item["kind"] == "pc-install"}
+    images = {g: chosen["gameplay"]["path"] if chosen["gameplay"]["kind"] == "ps2-disc" else None
+              for g, chosen in plan["games"].items()}
+    GAMEPLAY_TREES.clear()
+    for g, chosen in plan["games"].items():
+        if chosen["gameplay"].get("tree"):
+            GAMEPLAY_TREES[g] = chosen["gameplay"]["tree"]
+        elif chosen["gameplay"]["kind"] == "pc-install":
+            GAMEPLAY_TREES[g] = chosen["gameplay"]["path"]
+    bake_inputs = dict(pc_roots)
+    for g, image, _ in input_scan.discs_to_extract(plan):
+        bake_inputs["xbox_" + g] = image
+    if plan["dlc"]["used"]:
+        bake_inputs["dlc"] = plan["dlc"]["path"]
+    images_used, extracted_used = set(), set()
+    full_bake = False
     need("cargo", "the Rust toolchain, https://rustup.rs")
 
     step("1/6 build bake + game (release)")
@@ -475,17 +518,20 @@ def main():
     bake, game = os.path.join(TARGET, "release", "bake" + EXE), os.path.join(TARGET, "release", "game" + EXE)
 
     step("2/6 the discs")
-    for g, iso in (("bf1", a.iso1), ("bf2", a.iso2)):
+    for g, image in images.items():
         if g in pc_roots:
             print(f"   {g}: using PC assets ({pc_roots[g]})")
             # Console extraction remains the source of gameplay and the shared UI.
+        if g in GAMEPLAY_TREES:
+            continue
         if os.path.isfile(ci_path(lvl_root(g), "CORE.LVL")):
             print(f"   {g}: already extracted ({lvl_root(g)})")
             continue
-        if not os.path.isfile(iso):
-            sys.exit(f"pack: no disc image at {iso} (pass --iso1 / --iso2; PC assets also require a console BF2 disc)")
-        run([bake, "extract-iso", iso, os.path.join(EXTRACTED, g, "lvl")])
+        run([bake, "extract-iso", image, os.path.join(EXTRACTED, g, "lvl")])
         images_used.add(g)
+    for g, image, tree in input_scan.discs_to_extract(plan):
+        # The Xbox twin of extract-iso: a file already there at its size is left alone, so a second run costs little.
+        run([bake, input_scan.XBOX_EXTRACT, image, os.path.dirname(os.path.dirname(tree))])
 
     step("3/6 the Lua scripts")
     lua_root = console_lua_root()
@@ -523,15 +569,13 @@ def main():
     step("5/6 the bake")
     bash = find_bash()
     bake_env = dict(os.environ)
-    bake_env["BF2_CONSOLE_ISO"] = os.path.abspath(a.iso2).replace("\\", "/")
+    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR"):
+        bake_env.pop(name, None)  # the scan's choice is the whole story
+    bake_env.update(input_scan.bake_env(plan))
+    bake_env["OPENBF_INPUTS_CHOSEN"] = "1"  # rebake.sh need not scan again
     bake_env["OPENBF_CONSOLE_LUA_ROOT"] = lua_root.replace("\\", "/")
-    if pc_roots:
-        if "bf1" in pc_roots:
-            bake_env["PC1"] = pc_roots["bf1"].replace("\\", "/")
-        if "bf2" in pc_roots:
-            bake_env["PC2"] = pc_roots["bf2"].replace("\\", "/")
     baked = os.path.isfile(os.path.join(BAKED, "classes", "bf1_all.ron"))
-    why = stale(BAKE_STAMP, BAKE_INPUTS, pc_roots) if baked else None
+    why = stale(BAKE_STAMP, BAKE_INPUTS, bake_inputs) if baked else None
     if a.rebake or not baked or why:
         if why and not a.rebake:
             print(f"   baking again: the bake in {BAKED} was {why}")
@@ -541,7 +585,7 @@ def main():
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(BAKE_STAMP, "w") as fh:
-            fh.write(inputs_hash(BAKE_INPUTS, pc_roots) + "\n")
+            fh.write(inputs_hash(BAKE_INPUTS, bake_inputs) + "\n")
     else:
         print(f"   already baked ({BAKED}); --rebake bakes again")
         n = len(missing_music())
@@ -584,8 +628,8 @@ def main():
     print()
     print("\n".join(pack_summary(out, pak, split)))
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
-    report = source_report(ROOT, BAKED, MISSIONS, {"bf1": a.iso1, "bf2": a.iso2},
-                           extracted_used, images_used, full_bake, pc_roots=pc_roots)
+    report = source_report(ROOT, BAKED, MISSIONS, images,
+                           extracted_used, images_used, full_bake, pc_roots=pc_roots, plan=plan)
     write_source_report(out, report)
 
 

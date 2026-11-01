@@ -1,0 +1,5348 @@
+{
+ "collision_shapes": {
+  "bf1_ps2_vs_bf1_xbox": {
+   "different_surfaces": 49,
+   "largest": [
+    [
+     "nab/nab2.lvl",
+     "nab2_bldg_b_04",
+     58.841
+    ],
+    [
+     "nab/nab2_h.lvl",
+     "nab2_bldg_b_04",
+     58.841
+    ],
+    [
+     "rhn/rhn1.lvl",
+     "rhn1_bldg_fortified_tower_f",
+     37.339
+    ],
+    [
+     "bes/bes1.lvl",
+     "bes1_bldg_central_hub",
+     17.949
+    ],
+    [
+     "geo/geo1.lvl",
+     "geo_bldg_technounion",
+     9.885
+    ],
+    [
+     "nab/nab1.lvl",
+     "nab_prop_trees2",
+     9.233
+    ],
+    [
+     "nab/nab1_h.lvl",
+     "nab_prop_trees2",
+     9.233
+    ],
+    [
+     "rhn/rhn1.lvl",
+     "rhn1_prop_tunnel_special_01",
+     8.927
+    ],
+    [
+     "rhn/rhn1.lvl",
+     "rhn1_prop_tunnel_stalactite_5",
+     4.393
+    ],
+    [
+     "rhn/rhn2.lvl",
+     "rhn_bldg_catacombs_wall",
+     4.0
+    ],
+    [
+     "rhn/rhn2.lvl",
+     "rhn_bldg_broken_corner1",
+     3.827
+    ],
+    [
+     "rhn/rhn2.lvl",
+     "rhn_bldg_wall_facade_pillar_h3b",
+     3.74
+    ],
+    [
+     "yav/yav2.lvl",
+     "yav2_bldg_floor",
+     3.563
+    ],
+    [
+     "yav/yav2_h.lvl",
+     "yav2_bldg_floor",
+     3.563
+    ],
+    [
+     "rhn/rhn1.lvl",
+     "rhn1_prop_tunnel_height",
+     3.314
+    ]
+   ],
+   "left_only": 82,
+   "matched_meshes": 679,
+   "moved_over_1cm_by_file": {
+    "bes/bes1.lvl": 2,
+    "bes/bes2.lvl": 1,
+    "end/end1.lvl": 1,
+    "geo/geo1.lvl": 1,
+    "hot/hot1.lvl": 1,
+    "kas/kas1.lvl": 1,
+    "nab/nab1.lvl": 1,
+    "nab/nab1_h.lvl": 1,
+    "nab/nab2.lvl": 1,
+    "nab/nab2_h.lvl": 1,
+    "rhn/rhn1.lvl": 6,
+    "rhn/rhn2.lvl": 13,
+    "side/cis.lvl": 1,
+    "side/rep.lvl": 2,
+    "tat/tat1.lvl": 1,
+    "tat/tat1h.lvl": 1,
+    "tat/tat2.lvl": 1,
+    "yav/yav1.lvl": 1,
+    "yav/yav2.lvl": 2,
+    "yav/yav2_h.lvl": 2
+   },
+   "nearest_vertex_gap_bands": {
+    "over_5m": 8,
+    "up_to_10cm": 2,
+    "up_to_1cm": 8,
+    "up_to_1m": 10,
+    "up_to_5m": 21
+   },
+   "right_only": 131,
+   "schema": 1,
+   "whole_mesh_translations": []
+  },
+  "bf2_ps2_vs_bf2_pc": {
+   "different_surfaces": 109,
+   "largest": [
+    [
+     "kam/kam1.lvl",
+     "kam_bldg_mushplatform1",
+     94.562
+    ],
+    [
+     "spa/spa1.lvl",
+     "all_cap_rebelcruiser2",
+     51.126
+    ],
+    [
+     "spa/spa8.lvl",
+     "all_cap_rebelcruiser2",
+     51.126
+    ],
+    [
+     "spa/spa9.lvl",
+     "all_cap_rebelcruiser2",
+     51.126
+    ],
+    [
+     "tat/tat3.lvl",
+     "tat3_bldg_torture_grate",
+     23.865
+    ],
+    [
+     "tat/tat3.lvl",
+     "tat3_bldg_torture_main",
+     23.058
+    ],
+    [
+     "tat/tat2.lvl",
+     "tat2_bldg_cantina",
+     14.918
+    ],
+    [
+     "uta/uta1.lvl",
+     "uta1_bldg_rep_ground",
+     12.983
+    ],
+    [
+     "spa/spa1.lvl",
+     "spa1_prop_minidestroyer2",
+     8.104
+    ],
+    [
+     "spa/spa8.lvl",
+     "spa1_prop_minidestroyer2",
+     8.104
+    ],
+    [
+     "spa/spa9.lvl",
+     "spa1_prop_minidestroyer2",
+     8.104
+    ],
+    [
+     "tat/tat3.lvl",
+     "tat3_bldg_jabba_pal_02",
+     6.835
+    ],
+    [
+     "spa/spa1.lvl",
+     "imp_cap_stardestroyer_engine",
+     6.565
+    ],
+    [
+     "spa/spa1.lvl",
+     "imp_cap_stardestroyer_engine",
+     6.565
+    ],
+    [
+     "spa/spa8.lvl",
+     "imp_cap_stardestroyer_engine",
+     6.565
+    ]
+   ],
+   "left_only": 99,
+   "matched_meshes": 1345,
+   "moved_over_1cm_by_file": {
+    "dea/dea1.lvl": 3,
+    "end/end1.lvl": 1,
+    "fel/fel1.lvl": 1,
+    "hot/hot1.lvl": 1,
+    "kam/kam1.lvl": 1,
+    "kas/kas2.lvl": 1,
+    "mus/mus1.lvl": 2,
+    "pol/pol1.lvl": 1,
+    "side/all.lvl": 2,
+    "side/cis.lvl": 1,
+    "side/rep.lvl": 1,
+    "spa/spa1.lvl": 13,
+    "spa/spa2.lvl": 1,
+    "spa/spa3.lvl": 5,
+    "spa/spa4.lvl": 2,
+    "spa/spa6.lvl": 5,
+    "spa/spa7.lvl": 5,
+    "spa/spa8.lvl": 9,
+    "spa/spa9.lvl": 9,
+    "spa/spa_sky.lvl": 1,
+    "tan/tan1.lvl": 2,
+    "tat/tat2.lvl": 6,
+    "tat/tat3.lvl": 4,
+    "uta/uta1.lvl": 2,
+    "yav/yav1.lvl": 1
+   },
+   "nearest_vertex_gap_bands": {
+    "over_5m": 17,
+    "up_to_10cm": 1,
+    "up_to_1cm": 29,
+    "up_to_1m": 32,
+    "up_to_5m": 30
+   },
+   "right_only": 190,
+   "schema": 1,
+   "whole_mesh_translations": [
+    [
+     "side/rep.lvl",
+     "rep_hover_barcspeeder",
+     [
+      0.0,
+      1.0,
+      0.0
+     ]
+    ]
+   ]
+  },
+  "bf2_ps2_vs_bf2_xbox": {
+   "different_surfaces": 63,
+   "largest": [
+    [
+     "spa/spa1.lvl",
+     "all_cap_rebelcruiser2",
+     51.126
+    ],
+    [
+     "spa/spa8.lvl",
+     "all_cap_rebelcruiser2",
+     51.126
+    ],
+    [
+     "spa/spa9.lvl",
+     "all_cap_rebelcruiser2",
+     51.126
+    ],
+    [
+     "tat/tat3.lvl",
+     "tat3_bldg_torture_grate",
+     23.865
+    ],
+    [
+     "tat/tat3.lvl",
+     "tat3_bldg_torture_main",
+     23.058
+    ],
+    [
+     "tat/tat2.lvl",
+     "tat2_bldg_cantina",
+     14.918
+    ],
+    [
+     "uta/uta1.lvl",
+     "uta1_bldg_rep_ground",
+     12.983
+    ],
+    [
+     "spa/spa1.lvl",
+     "spa1_prop_minidestroyer2",
+     8.104
+    ],
+    [
+     "spa/spa8.lvl",
+     "spa1_prop_minidestroyer2",
+     8.104
+    ],
+    [
+     "spa/spa9.lvl",
+     "spa1_prop_minidestroyer2",
+     8.104
+    ],
+    [
+     "tat/tat3.lvl",
+     "tat3_bldg_jabba_pal_02",
+     6.835
+    ],
+    [
+     "spa/spa1.lvl",
+     "imp_cap_stardestroyer_engine",
+     6.565
+    ],
+    [
+     "spa/spa1.lvl",
+     "imp_cap_stardestroyer_engine",
+     6.565
+    ],
+    [
+     "spa/spa8.lvl",
+     "imp_cap_stardestroyer_engine",
+     6.565
+    ],
+    [
+     "spa/spa9.lvl",
+     "imp_cap_stardestroyer_engine",
+     6.565
+    ]
+   ],
+   "left_only": 85,
+   "matched_meshes": 1359,
+   "moved_over_1cm_by_file": {
+    "end/end1.lvl": 1,
+    "fel/fel1.lvl": 1,
+    "hot/hot1.lvl": 1,
+    "kas/kas2.lvl": 2,
+    "side/cis.lvl": 1,
+    "side/gar.lvl": 2,
+    "side/rep.lvl": 1,
+    "spa/spa1.lvl": 8,
+    "spa/spa2.lvl": 1,
+    "spa/spa3.lvl": 2,
+    "spa/spa4.lvl": 1,
+    "spa/spa6.lvl": 2,
+    "spa/spa7.lvl": 2,
+    "spa/spa8.lvl": 6,
+    "spa/spa9.lvl": 6,
+    "spa/spa_sky.lvl": 1,
+    "tat/tat2.lvl": 2,
+    "tat/tat3.lvl": 4,
+    "uta/uta1.lvl": 2,
+    "yav/yav1.lvl": 1
+   },
+   "nearest_vertex_gap_bands": {
+    "over_5m": 16,
+    "up_to_10cm": 3,
+    "up_to_1cm": 16,
+    "up_to_1m": 7,
+    "up_to_5m": 21
+   },
+   "right_only": 68,
+   "schema": 1,
+   "whole_mesh_translations": [
+    [
+     "side/rep.lvl",
+     "rep_hover_barcspeeder",
+     [
+      0.0,
+      1.0,
+      0.0
+     ]
+    ]
+   ]
+  },
+  "bf2_xbox_vs_bf2_pc": {
+   "different_surfaces": 67,
+   "largest": [
+    [
+     "kam/kam1.lvl",
+     "kam_bldg_mushplatform1",
+     94.562
+    ],
+    [
+     "tat/tat2.lvl",
+     "tat2_bldg_dockingbay_02",
+     69.949
+    ],
+    [
+     "tat/tat2.lvl",
+     "tat2_bldg_dockingbay_01",
+     62.551
+    ],
+    [
+     "tat/tat2.lvl",
+     "tat2_bldg_dockingbay_03",
+     59.231
+    ],
+    [
+     "tat/tat2.lvl",
+     "tat2_bldg_dockingbay_04",
+     58.056
+    ],
+    [
+     "uta/uta1.lvl",
+     "uta1_bldg_windmill",
+     14.789
+    ],
+    [
+     "uta/uta1.lvl",
+     "uta1_bldg_lizardpen",
+     10.85
+    ],
+    [
+     "spa/spa1.lvl",
+     "all_prop_blockaderunner",
+     10.061
+    ],
+    [
+     "spa/spa9.lvl",
+     "all_prop_blockaderunner",
+     10.061
+    ],
+    [
+     "uta/uta1.lvl",
+     "uta1_bldg_rep_ground",
+     7.01
+    ],
+    [
+     "mus/mus1.lvl",
+     "mus1_bldg_hanger_halls",
+     6.495
+    ],
+    [
+     "dea/dea1.lvl",
+     "dea1_bldg_froom_collision01",
+     5.0
+    ],
+    [
+     "tat/tat2.lvl",
+     "tat2_bldg_stair1",
+     3.932
+    ],
+    [
+     "spa/spa3.lvl",
+     "cis_fedcruiser_commandroom_server",
+     3.628
+    ],
+    [
+     "spa/spa6.lvl",
+     "cis_fedcruiser_commandroom_server",
+     3.628
+    ]
+   ],
+   "left_only": 20,
+   "matched_meshes": 1407,
+   "moved_over_1cm_by_file": {
+    "dea/dea1.lvl": 3,
+    "kam/kam1.lvl": 1,
+    "kas/kas2.lvl": 1,
+    "mus/mus1.lvl": 2,
+    "pol/pol1.lvl": 1,
+    "side/all.lvl": 2,
+    "spa/spa1.lvl": 6,
+    "spa/spa3.lvl": 3,
+    "spa/spa4.lvl": 1,
+    "spa/spa6.lvl": 3,
+    "spa/spa7.lvl": 3,
+    "spa/spa8.lvl": 3,
+    "spa/spa9.lvl": 4,
+    "tan/tan1.lvl": 2,
+    "tat/tat2.lvl": 8,
+    "uta/uta1.lvl": 6,
+    "yav/yav1.lvl": 1
+   },
+   "nearest_vertex_gap_bands": {
+    "over_5m": 11,
+    "up_to_10cm": 0,
+    "up_to_1cm": 17,
+    "up_to_1m": 26,
+    "up_to_5m": 13
+   },
+   "right_only": 128,
+   "schema": 1,
+   "whole_mesh_translations": []
+  }
+ },
+ "comparisons": {
+  "bf1_ps2_vs_bf1_xbox": {
+   "content": {
+    "changed": 0,
+    "compared": 9121,
+    "left_only_count": 738,
+    "right_only_count": 1406
+   },
+   "content_name_sets": {
+    "compared": 6386,
+    "left_only_count": 375,
+    "right_only_count": 328
+   },
+   "content_only_by_kind": {
+    "left_only": {
+     "coll": 18,
+     "entc": 15,
+     "expc": 1,
+     "gmod": 20,
+     "modl": 27,
+     "prim": 15,
+     "scr_": 5,
+     "skel": 116,
+     "tex_": 521
+    },
+    "right_only": {
+     "coll": 67,
+     "entc": 36,
+     "expc": 8,
+     "gmod": 81,
+     "modl": 89,
+     "ordc": 1,
+     "prim": 19,
+     "scr_": 114,
+     "skel": 185,
+     "tex_": 786,
+     "wpnc": 1,
+     "zaa_": 8,
+     "zaf_": 11
+    }
+   },
+   "entities": {
+    "changed": 128,
+    "compared": 1542,
+    "left_only_count": 16,
+    "right_only_count": 46
+   },
+   "entity_kinds": {
+    "entc": {
+     "changed": 67,
+     "compared": 893
+    },
+    "expc": {
+     "changed": 1,
+     "compared": 187
+    },
+    "ordc": {
+     "changed": 13,
+     "compared": 204
+    },
+    "wpnc": {
+     "changed": 47,
+     "compared": 258
+    }
+   },
+   "geometry": {
+    "animations": {
+     "changed": 14,
+     "compared": 413,
+     "field_changes": {
+      "bones": 9,
+      "frames": 1,
+      "roots": 5
+     },
+     "left_only_count": 0,
+     "right_only_count": 268,
+     "root_motion_NM": 29,
+     "root_motion_changed": 2,
+     "root_motion_compared": 384
+    },
+    "collision": {
+     "changed": 63,
+     "compared": 679,
+     "field_changes": {
+      "bounds": 34,
+      "fan_triangles": 38,
+      "polygons": 38,
+      "positions_sha256": 60,
+      "surface_sha256": 49,
+      "topology_sha256": 59,
+      "vertex_set_sha256": 44,
+      "vertices": 30
+     },
+     "left_only_count": 82,
+     "right_only_count": 131,
+     "surface_changes": {
+      "bounds_changed": 34,
+      "different_vertices": 44,
+      "largest_bounds_moves": [
+       [
+        "nab/nab2.lvl",
+        "nab2_bldg_b_04",
+        58.298912048339844
+       ],
+       [
+        "nab/nab2_h.lvl",
+        "nab2_bldg_b_04",
+        58.298912048339844
+       ],
+       [
+        "rhn/rhn1.lvl",
+        "rhn1_bldg_fortified_tower_f",
+        31.763239860534668
+       ],
+       [
+        "bes/bes1.lvl",
+        "bes1_bldg_central_hub",
+        14.727799415588379
+       ],
+       [
+        "nab/nab1.lvl",
+        "nab_prop_trees2",
+        9.203065872192383
+       ],
+       [
+        "nab/nab1_h.lvl",
+        "nab_prop_trees2",
+        9.203065872192383
+       ],
+       [
+        "geo/geo1.lvl",
+        "geo_bldg_technounion",
+        5.702165327966213
+       ],
+       [
+        "rhn/rhn1.lvl",
+        "rhn1_prop_tunnel_special_01",
+        1.7320480346679688
+       ],
+       [
+        "rhn/rhn2.lvl",
+        "rhn_bldg_ruin_rotunda",
+        0.8829402923583984
+       ],
+       [
+        "yav/yav1.lvl",
+        "yav_bldg_ruins_bldgpiece3",
+        0.8537192791700363
+       ]
+      ],
+      "order_only": 14,
+      "same_vertices_other_polygons": 5
+     }
+    },
+    "primitives": {
+     "changed": 110,
+     "compared": 1399,
+     "field_changes": {
+      "dimensions": 10,
+      "kind": 1,
+      "parent": 58,
+      "transform": 60
+     },
+     "left_only_count": 55,
+     "right_only_count": 42
+    },
+    "routes": {
+     "changed": 2,
+     "compared": 44,
+     "field_changes": {
+      "sha256": 2
+     },
+     "left_only_count": 0,
+     "right_only_count": 0
+    },
+    "terrain": {
+     "changed": 15,
+     "compared": 22,
+     "field_changes": {
+      "cutters_sha256": 2,
+      "heights_sha256": 15
+     },
+     "left_only_count": 0,
+     "right_only_count": 0
+    },
+    "world": {
+     "by_kind": {
+      "BARR": {
+       "changed": 3,
+       "compared": 8844,
+       "left_only": 0,
+       "right_only": 0
+      },
+      "Hint": {
+       "changed": 0,
+       "compared": 1967,
+       "left_only": 0,
+       "right_only": 12
+      },
+      "inst": {
+       "changed": 15,
+       "compared": 8246,
+       "left_only": 106,
+       "right_only": 74
+      },
+      "regn": {
+       "changed": 8,
+       "compared": 597,
+       "left_only": 10,
+       "right_only": 9
+      }
+     },
+     "changed": 26,
+     "compared": 19654,
+     "field_changes": {
+      "properties": 2,
+      "size": 8,
+      "transform": 24
+     },
+     "left_only_count": 116,
+     "right_only_count": 95
+    }
+   },
+   "geometry_gate": {
+    "maps": 22,
+    "other_ground": [
+     "end/end1.lvl",
+     "hot/hot1.lvl",
+     "kas/kas1.lvl",
+     "kas/kas2.lvl",
+     "kas/kas2_h.lvl",
+     "nab/nab1.lvl",
+     "nab/nab1_h.lvl",
+     "nab/nab2.lvl",
+     "nab/nab2_h.lvl",
+     "rhn/rhn1.lvl",
+     "rhn/rhn2.lvl",
+     "tat/tat1.lvl",
+     "tat/tat1h.lvl",
+     "tat/tat2.lvl",
+     "yav/yav1.lvl"
+    ],
+    "other_shared_meshes_missing": {},
+    "other_shared_meshes_with_other_surfaces": {},
+    "same_shapes": [
+     "kam/kam1.lvl",
+     "test/test.lvl"
+    ],
+    "same_shapes_other_routes": [],
+    "side_meshes_missing": {
+     "side/imp.lvl": 5
+    },
+    "side_meshes_with_other_surfaces": {
+     "side/all.lvl": 1,
+     "side/cis.lvl": 1,
+     "side/rep.lvl": 2
+    }
+   },
+   "mission_static_values": {
+    "changed": 8,
+    "compared": 3163,
+    "left_only": 0,
+    "right_only": 0,
+    "unmeasured": 1
+   },
+   "mission_values": {
+    "changed": 8,
+    "compared": 2448,
+    "left_only": 0,
+    "right_only": 0,
+    "unmeasured": 0
+   },
+   "missions": {
+    "changed": 3,
+    "compared": 44,
+    "left_only_count": 0,
+    "right_only_count": 0
+   },
+   "properties": {
+    "changed": 190,
+    "compared": 37290,
+    "left_only": 112,
+    "right_only": 253,
+    "unmeasured": 170
+   },
+   "property_order_changed": 104,
+   "schema": 1
+  },
+  "bf2_ps2_vs_bf2_pc": {
+   "content": {
+    "changed": 0,
+    "compared": 22603,
+    "left_only_count": 668,
+    "right_only_count": 1894
+   },
+   "content_name_sets": {
+    "compared": 12031,
+    "left_only_count": 300,
+    "right_only_count": 1090
+   },
+   "content_only_by_kind": {
+    "left_only": {
+     "coll": 30,
+     "entc": 11,
+     "gmod": 13,
+     "modl": 29,
+     "ordc": 4,
+     "prim": 87,
+     "scr_": 8,
+     "skel": 184,
+     "tex_": 296,
+     "wpnc": 4,
+     "zaa_": 1,
+     "zaf_": 1
+    },
+    "right_only": {
+     "coll": 121,
+     "entc": 120,
+     "font": 1,
+     "gmod": 132,
+     "modl": 150,
+     "path": 10,
+     "plan": 2,
+     "prim": 109,
+     "scr_": 22,
+     "skel": 303,
+     "tern": 2,
+     "tex_": 910,
+     "wrld": 12
+    }
+   },
+   "entities": {
+    "changed": 692,
+    "compared": 5343,
+    "left_only_count": 19,
+    "right_only_count": 120
+   },
+   "entity_kinds": {
+    "entc": {
+     "changed": 210,
+     "compared": 2152
+    },
+    "expc": {
+     "changed": 52,
+     "compared": 754
+    },
+    "ordc": {
+     "changed": 129,
+     "compared": 1117
+    },
+    "wpnc": {
+     "changed": 301,
+     "compared": 1320
+    }
+   },
+   "geometry": {
+    "animations": {
+     "changed": 2,
+     "compared": 2014,
+     "field_changes": {
+      "bones": 2,
+      "roots": 2
+     },
+     "left_only_count": 2,
+     "right_only_count": 2,
+     "root_motion_NM": 6,
+     "root_motion_changed": 0,
+     "root_motion_compared": 2008
+    },
+    "collision": {
+     "changed": 125,
+     "compared": 1345,
+     "field_changes": {
+      "bounds": 49,
+      "fan_triangles": 76,
+      "polygons": 81,
+      "positions_sha256": 119,
+      "surface_sha256": 109,
+      "topology_sha256": 116,
+      "vertex_set_sha256": 83,
+      "vertices": 59
+     },
+     "left_only_count": 99,
+     "right_only_count": 190,
+     "surface_changes": {
+      "bounds_changed": 49,
+      "different_vertices": 83,
+      "largest_bounds_moves": [
+       [
+        "tat/tat3.lvl",
+        "tat3_bldg_torture_grate",
+        18.464536666870117
+       ],
+       [
+        "tat/tat3.lvl",
+        "tat3_bldg_torture_main",
+        16.918609619140625
+       ],
+       [
+        "tat/tat2.lvl",
+        "tat2_bldg_cantina",
+        11.9641752243042
+       ],
+       [
+        "kam/kam1.lvl",
+        "kam_bldg_mushplatform1",
+        9.836860179901123
+       ],
+       [
+        "spa/spa1.lvl",
+        "spa1_prop_minidestroyer2",
+        8.104103088378906
+       ],
+       [
+        "spa/spa8.lvl",
+        "spa1_prop_minidestroyer2",
+        8.104103088378906
+       ],
+       [
+        "spa/spa9.lvl",
+        "spa1_prop_minidestroyer2",
+        8.104103088378906
+       ],
+       [
+        "mus/mus1.lvl",
+        "mus1_bldg_hanger_halls",
+        6.093131065368652
+       ],
+       [
+        "spa/spa1.lvl",
+        "all_cap_rebelcruiser2",
+        5.3389892578125
+       ],
+       [
+        "spa/spa8.lvl",
+        "all_cap_rebelcruiser2",
+        5.3389892578125
+       ]
+      ],
+      "order_only": 16,
+      "same_vertices_other_polygons": 26
+     }
+    },
+    "primitives": {
+     "changed": 398,
+     "compared": 7392,
+     "field_changes": {
+      "dimensions": 129,
+      "kind": 45,
+      "mask": 11,
+      "parent": 173,
+      "transform": 238
+     },
+     "left_only_count": 573,
+     "right_only_count": 878
+    },
+    "routes": {
+     "changed": 22,
+     "compared": 394,
+     "field_changes": {
+      "sha256": 22
+     },
+     "left_only_count": 0,
+     "right_only_count": 12
+    },
+    "terrain": {
+     "changed": 3,
+     "compared": 28,
+     "field_changes": {
+      "cutters_sha256": 1,
+      "grid_size": 1,
+      "heights_sha256": 2,
+      "samples": 1
+     },
+     "left_only_count": 0,
+     "right_only_count": 2
+    },
+    "world": {
+     "by_kind": {
+      "BARR": {
+       "changed": 622,
+       "compared": 7735,
+       "left_only": 6,
+       "right_only": 215
+      },
+      "Hint": {
+       "changed": 0,
+       "compared": 4801,
+       "left_only": 0,
+       "right_only": 157
+      },
+      "inst": {
+       "changed": 160,
+       "compared": 9655,
+       "left_only": 16,
+       "right_only": 1023
+      },
+      "regn": {
+       "changed": 46,
+       "compared": 1620,
+       "left_only": 3,
+       "right_only": 161
+      }
+     },
+     "changed": 828,
+     "compared": 23811,
+     "field_changes": {
+      "class": 2,
+      "flags": 618,
+      "properties": 32,
+      "size": 42,
+      "transform": 184
+     },
+     "left_only_count": 25,
+     "right_only_count": 1556
+    }
+   },
+   "geometry_gate": {
+    "maps": 28,
+    "other_ground": [
+     "dag/dag1.lvl",
+     "pol/pol1.lvl",
+     "yav/yav1.lvl"
+    ],
+    "other_shared_meshes_missing": {
+     "ingame.lvl": 2,
+     "spa/spa_sky.lvl": 4
+    },
+    "other_shared_meshes_with_other_surfaces": {
+     "spa/spa_sky.lvl": 1
+    },
+    "same_shapes": [
+     "gal/gal1.lvl",
+     "myg/myg1.lvl",
+     "nab/nab2.lvl"
+    ],
+    "same_shapes_other_routes": [],
+    "side_meshes_missing": {
+     "side/all.lvl": 1,
+     "side/gar.lvl": 2,
+     "side/gun.lvl": 3
+    },
+    "side_meshes_with_other_surfaces": {
+     "side/all.lvl": 4,
+     "side/cis.lvl": 1,
+     "side/imp.lvl": 2,
+     "side/rep.lvl": 1,
+     "side/tur.lvl": 2
+    }
+   },
+   "mission_static_values": {
+    "changed": 244,
+    "compared": 13822,
+    "left_only": 37,
+    "right_only": 25,
+    "unmeasured": 443
+   },
+   "mission_values": {
+    "changed": 155,
+    "compared": 7090,
+    "left_only": 2,
+    "right_only": 16,
+    "unmeasured": 386
+   },
+   "missions": {
+    "changed": 94,
+    "compared": 132,
+    "left_only_count": 0,
+    "right_only_count": 6
+   },
+   "properties": {
+    "changed": 1401,
+    "compared": 124470,
+    "left_only": 189,
+    "right_only": 747,
+    "unmeasured": 204
+   },
+   "property_order_changed": 338,
+   "schema": 1
+  },
+  "bf2_ps2_vs_bf2_xbox": {
+   "content": {
+    "changed": 0,
+    "compared": 22562,
+    "left_only_count": 709,
+    "right_only_count": 793
+   },
+   "content_name_sets": {
+    "compared": 12061,
+    "left_only_count": 270,
+    "right_only_count": 350
+   },
+   "content_only_by_kind": {
+    "left_only": {
+     "coll": 27,
+     "entc": 10,
+     "gmod": 12,
+     "modl": 15,
+     "ordc": 4,
+     "prim": 71,
+     "scr_": 5,
+     "skel": 148,
+     "tex_": 409,
+     "wpnc": 4,
+     "wrld": 2,
+     "zaa_": 1,
+     "zaf_": 1
+    },
+    "right_only": {
+     "coll": 10,
+     "entc": 6,
+     "gmod": 8,
+     "modl": 10,
+     "path": 1,
+     "prim": 76,
+     "scr_": 9,
+     "skel": 144,
+     "tex_": 527,
+     "wrld": 2
+    }
+   },
+   "entities": {
+    "changed": 191,
+    "compared": 5344,
+    "left_only_count": 18,
+    "right_only_count": 6
+   },
+   "entity_kinds": {
+    "entc": {
+     "changed": 105,
+     "compared": 2153
+    },
+    "expc": {
+     "changed": 29,
+     "compared": 754
+    },
+    "ordc": {
+     "changed": 7,
+     "compared": 1117
+    },
+    "wpnc": {
+     "changed": 50,
+     "compared": 1320
+    }
+   },
+   "geometry": {
+    "animations": {
+     "changed": 2,
+     "compared": 2012,
+     "field_changes": {
+      "bones": 2,
+      "roots": 2
+     },
+     "left_only_count": 4,
+     "right_only_count": 0,
+     "root_motion_NM": 6,
+     "root_motion_changed": 0,
+     "root_motion_compared": 2006
+    },
+    "collision": {
+     "changed": 72,
+     "compared": 1359,
+     "field_changes": {
+      "bounds": 34,
+      "fan_triangles": 40,
+      "polygons": 42,
+      "positions_sha256": 66,
+      "surface_sha256": 63,
+      "topology_sha256": 67,
+      "vertex_set_sha256": 51,
+      "vertices": 35
+     },
+     "left_only_count": 85,
+     "right_only_count": 68,
+     "surface_changes": {
+      "bounds_changed": 34,
+      "different_vertices": 51,
+      "largest_bounds_moves": [
+       [
+        "tat/tat3.lvl",
+        "tat3_bldg_torture_grate",
+        18.464536666870117
+       ],
+       [
+        "tat/tat3.lvl",
+        "tat3_bldg_torture_main",
+        16.918609619140625
+       ],
+       [
+        "tat/tat2.lvl",
+        "tat2_bldg_cantina",
+        11.9641752243042
+       ],
+       [
+        "spa/spa1.lvl",
+        "spa1_prop_minidestroyer2",
+        8.104103088378906
+       ],
+       [
+        "spa/spa8.lvl",
+        "spa1_prop_minidestroyer2",
+        8.104103088378906
+       ],
+       [
+        "spa/spa9.lvl",
+        "spa1_prop_minidestroyer2",
+        8.104103088378906
+       ],
+       [
+        "spa/spa1.lvl",
+        "all_cap_rebelcruiser2",
+        5.3389892578125
+       ],
+       [
+        "spa/spa8.lvl",
+        "all_cap_rebelcruiser2",
+        5.3389892578125
+       ],
+       [
+        "spa/spa9.lvl",
+        "all_cap_rebelcruiser2",
+        5.3389892578125
+       ],
+       [
+        "kas/kas2.lvl",
+        "kas2_bldg_treeplatform",
+        1.0756139755249023
+       ]
+      ],
+      "order_only": 9,
+      "same_vertices_other_polygons": 12
+     }
+    },
+    "primitives": {
+     "changed": 340,
+     "compared": 7448,
+     "field_changes": {
+      "dimensions": 101,
+      "kind": 43,
+      "parent": 181,
+      "transform": 164
+     },
+     "left_only_count": 517,
+     "right_only_count": 663
+    },
+    "routes": {
+     "changed": 10,
+     "compared": 394,
+     "field_changes": {
+      "sha256": 10
+     },
+     "left_only_count": 0,
+     "right_only_count": 1
+    },
+    "terrain": {
+     "changed": 2,
+     "compared": 28,
+     "field_changes": {
+      "cutters_sha256": 1,
+      "heights_sha256": 1
+     },
+     "left_only_count": 0,
+     "right_only_count": 0
+    },
+    "world": {
+     "by_kind": {
+      "BARR": {
+       "changed": 2,
+       "compared": 7741,
+       "left_only": 0,
+       "right_only": 16
+      },
+      "Hint": {
+       "changed": 0,
+       "compared": 4801,
+       "left_only": 0,
+       "right_only": 0
+      },
+      "inst": {
+       "changed": 102,
+       "compared": 9649,
+       "left_only": 22,
+       "right_only": 8
+      },
+      "regn": {
+       "changed": 41,
+       "compared": 1610,
+       "left_only": 13,
+       "right_only": 98
+      }
+     },
+     "changed": 145,
+     "compared": 23801,
+     "field_changes": {
+      "class": 2,
+      "properties": 29,
+      "size": 39,
+      "transform": 121
+     },
+     "left_only_count": 35,
+     "right_only_count": 122
+    }
+   },
+   "geometry_gate": {
+    "maps": 28,
+    "other_ground": [
+     "pol/pol1.lvl",
+     "yav/yav1.lvl"
+    ],
+    "other_shared_meshes_missing": {},
+    "other_shared_meshes_with_other_surfaces": {
+     "spa/spa_sky.lvl": 1
+    },
+    "same_shapes": [
+     "dag/dag1.lvl",
+     "dea/dea1.lvl",
+     "gal/gal1.lvl",
+     "geo/geo1.lvl",
+     "kam/kam1.lvl",
+     "mus/mus1.lvl",
+     "myg/myg1.lvl",
+     "nab/nab2.lvl",
+     "tan/tan1.lvl"
+    ],
+    "same_shapes_other_routes": [
+     "kam/kam1.lvl"
+    ],
+    "side_meshes_missing": {
+     "side/all.lvl": 1,
+     "side/gun.lvl": 3
+    },
+    "side_meshes_with_other_surfaces": {
+     "side/all.lvl": 4,
+     "side/cis.lvl": 1,
+     "side/gar.lvl": 2,
+     "side/imp.lvl": 2,
+     "side/rep.lvl": 1,
+     "side/tur.lvl": 1
+    }
+   },
+   "mission_static_values": {
+    "changed": 44,
+    "compared": 13822,
+    "left_only": 37,
+    "right_only": 11,
+    "unmeasured": 433
+   },
+   "mission_values": {
+    "changed": 15,
+    "compared": 7086,
+    "left_only": 4,
+    "right_only": 11,
+    "unmeasured": 388
+   },
+   "missions": {
+    "changed": 26,
+    "compared": 132,
+    "left_only_count": 0,
+    "right_only_count": 0
+   },
+   "properties": {
+    "changed": 354,
+    "compared": 124512,
+    "left_only": 134,
+    "right_only": 282,
+    "unmeasured": 204
+   },
+   "property_order_changed": 119,
+   "schema": 1
+  },
+  "bf2_xbox_vs_bf2_pc": {
+   "content": {
+    "changed": 0,
+    "compared": 23090,
+    "left_only_count": 265,
+    "right_only_count": 1407
+   },
+   "content_name_sets": {
+    "compared": 12240,
+    "left_only_count": 171,
+    "right_only_count": 881
+   },
+   "content_only_by_kind": {
+    "left_only": {
+     "coll": 6,
+     "entc": 3,
+     "gmod": 6,
+     "modl": 19,
+     "prim": 28,
+     "scr_": 11,
+     "skel": 48,
+     "tex_": 143,
+     "wrld": 1
+    },
+    "right_only": {
+     "coll": 114,
+     "entc": 116,
+     "font": 1,
+     "gmod": 129,
+     "modl": 145,
+     "path": 9,
+     "plan": 2,
+     "prim": 45,
+     "scr_": 21,
+     "skel": 171,
+     "tern": 2,
+     "tex_": 639,
+     "wrld": 13
+    }
+   },
+   "entities": {
+    "changed": 568,
+    "compared": 5347,
+    "left_only_count": 3,
+    "right_only_count": 116
+   },
+   "entity_kinds": {
+    "entc": {
+     "changed": 148,
+     "compared": 2156
+    },
+    "expc": {
+     "changed": 47,
+     "compared": 754
+    },
+    "ordc": {
+     "changed": 122,
+     "compared": 1117
+    },
+    "wpnc": {
+     "changed": 251,
+     "compared": 1320
+    }
+   },
+   "geometry": {
+    "animations": {
+     "changed": 0,
+     "compared": 2012,
+     "field_changes": {},
+     "left_only_count": 0,
+     "right_only_count": 4,
+     "root_motion_NM": 6,
+     "root_motion_changed": 0,
+     "root_motion_compared": 2006
+    },
+    "collision": {
+     "changed": 79,
+     "compared": 1407,
+     "field_changes": {
+      "bounds": 25,
+      "fan_triangles": 52,
+      "polygons": 55,
+      "positions_sha256": 79,
+      "surface_sha256": 67,
+      "topology_sha256": 75,
+      "vertex_set_sha256": 52,
+      "vertices": 41
+     },
+     "left_only_count": 20,
+     "right_only_count": 128,
+     "surface_changes": {
+      "bounds_changed": 25,
+      "different_vertices": 51,
+      "largest_bounds_moves": [
+       [
+        "tat/tat2.lvl",
+        "tat2_bldg_dockingbay_02",
+        67.49751472473145
+       ],
+       [
+        "tat/tat2.lvl",
+        "tat2_bldg_dockingbay_04",
+        54.40316581726074
+       ],
+       [
+        "tat/tat2.lvl",
+        "tat2_bldg_dockingbay_03",
+        54.07190227508545
+       ],
+       [
+        "tat/tat2.lvl",
+        "tat2_bldg_dockingbay_01",
+        41.092754364013565
+       ],
+       [
+        "kam/kam1.lvl",
+        "kam_bldg_mushplatform1",
+        9.836860179901123
+       ],
+       [
+        "mus/mus1.lvl",
+        "mus1_bldg_hanger_halls",
+        6.093131065368652
+       ],
+       [
+        "tat/tat2.lvl",
+        "tat2_bldg_stair1",
+        3.3703485801815987
+       ],
+       [
+        "tan/tan1.lvl",
+        "tan4_bldg_engine_b",
+        2.7948379516601562
+       ],
+       [
+        "uta/uta1.lvl",
+        "uta1_bldg_lizardpen",
+        2.0295987129211426
+       ],
+       [
+        "tat/tat2.lvl",
+        "tat2_prop_prop4",
+        1.5678629875183105
+       ]
+      ],
+      "order_only": 12,
+      "same_vertices_other_polygons": 16
+     }
+    },
+    "primitives": {
+     "changed": 170,
+     "compared": 8034,
+     "field_changes": {
+      "dimensions": 38,
+      "kind": 2,
+      "mask": 11,
+      "parent": 72,
+      "transform": 124
+     },
+     "left_only_count": 77,
+     "right_only_count": 236
+    },
+    "routes": {
+     "changed": 17,
+     "compared": 395,
+     "field_changes": {
+      "sha256": 17
+     },
+     "left_only_count": 0,
+     "right_only_count": 11
+    },
+    "terrain": {
+     "changed": 1,
+     "compared": 28,
+     "field_changes": {
+      "grid_size": 1,
+      "heights_sha256": 1,
+      "samples": 1
+     },
+     "left_only_count": 0,
+     "right_only_count": 2
+    },
+    "world": {
+     "by_kind": {
+      "BARR": {
+       "changed": 620,
+       "compared": 7751,
+       "left_only": 6,
+       "right_only": 199
+      },
+      "Hint": {
+       "changed": 0,
+       "compared": 4801,
+       "left_only": 0,
+       "right_only": 157
+      },
+      "inst": {
+       "changed": 59,
+       "compared": 9647,
+       "left_only": 10,
+       "right_only": 1031
+      },
+      "regn": {
+       "changed": 4,
+       "compared": 1697,
+       "left_only": 11,
+       "right_only": 84
+      }
+     },
+     "changed": 683,
+     "compared": 23896,
+     "field_changes": {
+      "flags": 618,
+      "properties": 3,
+      "size": 3,
+      "transform": 63
+     },
+     "left_only_count": 27,
+     "right_only_count": 1471
+    }
+   },
+   "geometry_gate": {
+    "maps": 28,
+    "other_ground": [
+     "dag/dag1.lvl"
+    ],
+    "other_shared_meshes_missing": {
+     "ingame.lvl": 2,
+     "spa/spa_sky.lvl": 4
+    },
+    "other_shared_meshes_with_other_surfaces": {},
+    "same_shapes": [
+     "cor/cor1.lvl",
+     "end/end1.lvl",
+     "gal/gal1.lvl",
+     "myg/myg1.lvl",
+     "nab/nab2.lvl",
+     "spa/spa2.lvl",
+     "spa/spa5.lvl",
+     "tat/tat3.lvl"
+    ],
+    "same_shapes_other_routes": [],
+    "side_meshes_missing": {
+     "side/gar.lvl": 2,
+     "side/gun.lvl": 3
+    },
+    "side_meshes_with_other_surfaces": {
+     "side/all.lvl": 2,
+     "side/tur.lvl": 1
+    }
+   },
+   "mission_static_values": {
+    "changed": 240,
+    "compared": 13827,
+    "left_only": 6,
+    "right_only": 20,
+    "unmeasured": 443
+   },
+   "mission_values": {
+    "changed": 151,
+    "compared": 7097,
+    "left_only": 0,
+    "right_only": 7,
+    "unmeasured": 388
+   },
+   "missions": {
+    "changed": 96,
+    "compared": 132,
+    "left_only_count": 0,
+    "right_only_count": 6
+   },
+   "properties": {
+    "changed": 1073,
+    "compared": 124756,
+    "left_only": 58,
+    "right_only": 468,
+    "unmeasured": 203
+   },
+   "property_order_changed": 222,
+   "schema": 1
+  }
+ },
+ "height_samples": {
+  "bf1_ps2_vs_bf1_xbox": {
+   "summary": {
+    "changed": 35285,
+    "compared": 1441792,
+    "left_only_samples_on_shared_terrains": 0,
+    "max_abs_metres": 33.30000114440918,
+    "right_only_samples_on_shared_terrains": 0,
+    "rms_metres": 1.368972430055881,
+    "unmeasured_terrain_pairs": 0
+   },
+   "terrains": [
+    {
+     "above_10cm": 3769,
+     "above_1cm": 3769,
+     "above_1m": 3074,
+     "above_1mm": 3769,
+     "changed": 3769,
+     "compared": 65536,
+     "file": "end/end1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 33.30000114440918,
+     "mean_abs_metres": 0.4460312066066763,
+     "name": "end1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 2.492744824769552
+    },
+    {
+     "above_10cm": 10834,
+     "above_1cm": 10834,
+     "above_1m": 7189,
+     "above_1mm": 10834,
+     "changed": 10834,
+     "compared": 65536,
+     "file": "hot/hot1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 23.0,
+     "mean_abs_metres": 0.6304083365573661,
+     "name": "hoth",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 2.3372537275298915
+    },
+    {
+     "above_10cm": 75,
+     "above_1cm": 75,
+     "above_1m": 19,
+     "above_1mm": 75,
+     "changed": 75,
+     "compared": 65536,
+     "file": "kas/kas1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 2.039997100830078,
+     "mean_abs_metres": 0.000908202986465767,
+     "name": "kashyyyk1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.03150055714829538
+    },
+    {
+     "above_10cm": 351,
+     "above_1cm": 351,
+     "above_1m": 25,
+     "above_1mm": 351,
+     "changed": 351,
+     "compared": 65536,
+     "file": "kas/kas2.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 5.760000228881836,
+     "mean_abs_metres": 0.0028536995696413214,
+     "name": "kas2",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.0718599318260217
+    },
+    {
+     "above_10cm": 351,
+     "above_1cm": 351,
+     "above_1m": 25,
+     "above_1mm": 351,
+     "changed": 351,
+     "compared": 65536,
+     "file": "kas/kas2_h.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 5.760000228881836,
+     "mean_abs_metres": 0.0028536995696413214,
+     "name": "kas2",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.0718599318260217
+    },
+    {
+     "above_10cm": 72,
+     "above_1cm": 72,
+     "above_1m": 8,
+     "above_1mm": 72,
+     "changed": 72,
+     "compared": 65536,
+     "file": "nab/nab1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 1.8000030517578125,
+     "mean_abs_metres": 0.0006097409641370177,
+     "name": "naboo1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.02216794952123111
+    },
+    {
+     "above_10cm": 72,
+     "above_1cm": 72,
+     "above_1m": 8,
+     "above_1mm": 72,
+     "changed": 72,
+     "compared": 65536,
+     "file": "nab/nab1_h.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 1.8000030517578125,
+     "mean_abs_metres": 0.0006097409641370177,
+     "name": "naboo1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.02216794952123111
+    },
+    {
+     "above_10cm": 945,
+     "above_1cm": 1207,
+     "above_1m": 945,
+     "above_1mm": 1207,
+     "changed": 1207,
+     "compared": 65536,
+     "file": "nab/nab2.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 5.220001220703125,
+     "mean_abs_metres": 0.07447356957709417,
+     "name": "naboo2",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.6182131846108505
+    },
+    {
+     "above_10cm": 945,
+     "above_1cm": 1207,
+     "above_1m": 945,
+     "above_1mm": 1207,
+     "changed": 1207,
+     "compared": 65536,
+     "file": "nab/nab2_h.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 5.220001220703125,
+     "mean_abs_metres": 0.07447356957709417,
+     "name": "naboo2",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.6182131846108505
+    },
+    {
+     "above_10cm": 383,
+     "above_1cm": 383,
+     "above_1m": 365,
+     "above_1mm": 383,
+     "changed": 383,
+     "compared": 65536,
+     "file": "rhn/rhn1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 27.600000381469727,
+     "mean_abs_metres": 0.07173111070096638,
+     "name": "rhenvar1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 1.1081406394819666
+    },
+    {
+     "above_10cm": 11,
+     "above_1cm": 11,
+     "above_1m": 3,
+     "above_1mm": 11,
+     "changed": 11,
+     "compared": 65536,
+     "file": "rhn/rhn2.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 17.019999980926514,
+     "mean_abs_metres": 0.0003649902228062274,
+     "name": "rhenvar2",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.0674127536345134
+    },
+    {
+     "above_10cm": 31,
+     "above_1cm": 31,
+     "above_1m": 11,
+     "above_1mm": 31,
+     "changed": 31,
+     "compared": 65536,
+     "file": "tat/tat1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 3.239999771118164,
+     "mean_abs_metres": 0.0004705811006715521,
+     "name": "tat1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.02794277149726691
+    },
+    {
+     "above_10cm": 31,
+     "above_1cm": 31,
+     "above_1m": 11,
+     "above_1mm": 31,
+     "changed": 31,
+     "compared": 65536,
+     "file": "tat/tat1h.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 3.239999771118164,
+     "mean_abs_metres": 0.0004705811006715521,
+     "name": "tat1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.02794277149726691
+    },
+    {
+     "above_10cm": 81,
+     "above_1cm": 81,
+     "above_1m": 81,
+     "above_1mm": 81,
+     "changed": 81,
+     "compared": 65536,
+     "file": "tat/tat2.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 15.059999998658895,
+     "mean_abs_metres": 0.018567810057959377,
+     "name": "tat2",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 0.5281520367806055
+    },
+    {
+     "above_10cm": 16675,
+     "above_1cm": 16810,
+     "above_1m": 15144,
+     "above_1mm": 16810,
+     "changed": 16810,
+     "compared": 65536,
+     "file": "yav/yav1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 16.079999923706055,
+     "mean_abs_metres": 2.4199458253278863,
+     "name": "yavin1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 5.221460076859056
+    }
+   ]
+  },
+  "bf2_ps2_vs_bf2_pc": {
+   "summary": {
+    "changed": 16810,
+    "compared": 348160,
+    "left_only_samples_on_shared_terrains": 0,
+    "max_abs_metres": 16.079999923706055,
+    "right_only_samples_on_shared_terrains": 49152,
+    "rms_metres": 2.2653874499097415,
+    "unmeasured_terrain_pairs": 0
+   },
+   "terrains": [
+    {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_1mm": 0,
+     "changed": 0,
+     "compared": 16384,
+     "file": "dag/dag1.lvl",
+     "left_grid_size": 128,
+     "left_only": 0,
+     "max_abs_metres": 0.0,
+     "mean_abs_metres": 0.0,
+     "name": "dag1",
+     "right_grid_size": 256,
+     "right_only": 49152,
+     "rms_metres": 0.0
+    },
+    {
+     "above_10cm": 16675,
+     "above_1cm": 16810,
+     "above_1m": 15144,
+     "above_1mm": 16810,
+     "changed": 16810,
+     "compared": 65536,
+     "file": "yav/yav1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 16.079999923706055,
+     "mean_abs_metres": 2.4199458253278863,
+     "name": "yavin1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 5.221460076859056
+    }
+   ]
+  },
+  "bf2_ps2_vs_bf2_xbox": {
+   "summary": {
+    "changed": 16810,
+    "compared": 348160,
+    "left_only_samples_on_shared_terrains": 0,
+    "max_abs_metres": 16.079999923706055,
+    "right_only_samples_on_shared_terrains": 0,
+    "rms_metres": 2.2653874499097415,
+    "unmeasured_terrain_pairs": 0
+   },
+   "terrains": [
+    {
+     "above_10cm": 16675,
+     "above_1cm": 16810,
+     "above_1m": 15144,
+     "above_1mm": 16810,
+     "changed": 16810,
+     "compared": 65536,
+     "file": "yav/yav1.lvl",
+     "left_grid_size": 256,
+     "left_only": 0,
+     "max_abs_metres": 16.079999923706055,
+     "mean_abs_metres": 2.4199458253278863,
+     "name": "yavin1",
+     "right_grid_size": 256,
+     "right_only": 0,
+     "rms_metres": 5.221460076859056
+    }
+   ]
+  },
+  "bf2_xbox_vs_bf2_pc": {
+   "summary": {
+    "changed": 0,
+    "compared": 348160,
+    "left_only_samples_on_shared_terrains": 0,
+    "max_abs_metres": 0,
+    "right_only_samples_on_shared_terrains": 49152,
+    "rms_metres": 0.0,
+    "unmeasured_terrain_pairs": 0
+   },
+   "terrains": [
+    {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_1mm": 0,
+     "changed": 0,
+     "compared": 16384,
+     "file": "dag/dag1.lvl",
+     "left_grid_size": 128,
+     "left_only": 0,
+     "max_abs_metres": 0.0,
+     "mean_abs_metres": 0.0,
+     "name": "dag1",
+     "right_grid_size": 256,
+     "right_only": 49152,
+     "rms_metres": 0.0
+    }
+   ]
+  }
+ },
+ "largest_numeric_differences": {
+  "bf1": [
+   {
+    "absolute_delta": 920,
+    "category": "properties",
+    "field": [
+     3868286198,
+     0
+    ],
+    "left": 80,
+    "name": "nab2_prop_leafpatch",
+    "occurrences": 2,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 1000
+   },
+   {
+    "absolute_delta": 920,
+    "category": "properties",
+    "field": [
+     3868286198,
+     0
+    ],
+    "left": 80,
+    "name": "nab2_prop_leafpatch_tall",
+    "occurrences": 2,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 1000
+   },
+   {
+    "absolute_delta": 880,
+    "category": "properties",
+    "field": [
+     3868286198,
+     0
+    ],
+    "left": 120,
+    "name": "yav_prop_leafpatch",
+    "occurrences": 3,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 1000
+   },
+   {
+    "absolute_delta": 880,
+    "category": "properties",
+    "field": [
+     3868286198,
+     0
+    ],
+    "left": 120,
+    "name": "yav_prop_leafpatch2",
+    "occurrences": 3,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 1000
+   },
+   {
+    "absolute_delta": 200,
+    "category": "properties",
+    "field": [
+     2130784112,
+     0
+    ],
+    "left": 200,
+    "name": "kam_weap_bldg_AAA_turret_cannon",
+    "occurrences": 1,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 0
+   },
+   {
+    "absolute_delta": 35,
+    "category": "properties",
+    "field": [
+     3267461434,
+     0
+    ],
+    "left": 50,
+    "name": "Rhnlight",
+    "occurrences": 1,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 15
+   },
+   {
+    "absolute_delta": 31,
+    "category": "properties",
+    "field": [
+     102245253,
+     4
+    ],
+    "left": 19,
+    "name": "nab_hover_gianspeeder",
+    "occurrences": 1,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 50
+   },
+   {
+    "absolute_delta": 30,
+    "category": "properties",
+    "field": [
+     2080349897,
+     0
+    ],
+    "left": 45,
+    "name": "bes_weap_cloudcar_miss",
+    "occurrences": 1,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 15
+   },
+   {
+    "absolute_delta": 30,
+    "category": "properties",
+    "field": [
+     3509843930,
+     0
+    ],
+    "left": 60,
+    "name": "nab1_grass",
+    "occurrences": 2,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 30
+   },
+   {
+    "absolute_delta": 20,
+    "category": "properties",
+    "field": [
+     102245253,
+     3
+    ],
+    "left": 30,
+    "name": "cis_tread_hailfire",
+    "occurrences": 1,
+    "pairs": [
+     "bf1_ps2_vs_bf1_xbox"
+    ],
+    "right": 50
+   }
+  ],
+  "bf2": [
+   {
+    "absolute_delta": 6000,
+    "category": "properties",
+    "field": [
+     429334299,
+     0
+    ],
+    "left": 70000,
+    "name": "rep_assultship_destruct_towers",
+    "occurrences": 8,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_ps2_vs_bf2_xbox"
+    ],
+    "right": 64000
+   },
+   {
+    "absolute_delta": 140,
+    "category": "properties",
+    "field": [
+     846470194,
+     0
+    ],
+    "left": 160,
+    "name": "com_weap_award_rifle_ord",
+    "occurrences": 36,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 300
+   },
+   {
+    "absolute_delta": 140,
+    "category": "properties",
+    "field": [
+     846470194,
+     0
+    ],
+    "left": 160,
+    "name": "com_weap_inf_rifle_ord",
+    "occurrences": 44,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 300
+   },
+   {
+    "absolute_delta": 140,
+    "category": "properties",
+    "field": [
+     846470194,
+     0
+    ],
+    "left": 160,
+    "name": "com_weap_veh_laser_ord",
+    "occurrences": 44,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 300
+   },
+   {
+    "absolute_delta": 85,
+    "category": "properties",
+    "field": [
+     307468710,
+     0
+    ],
+    "left": 100,
+    "name": "all_weap_moncal_roundturret_exp",
+    "occurrences": 10,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 15
+   },
+   {
+    "absolute_delta": 85,
+    "category": "properties",
+    "field": [
+     307468710,
+     0
+    ],
+    "left": 100,
+    "name": "cis_weap_bldg_boxturret_exp",
+    "occurrences": 14,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 15
+   },
+   {
+    "absolute_delta": 85,
+    "category": "properties",
+    "field": [
+     307468710,
+     0
+    ],
+    "left": 100,
+    "name": "imp_weap_bldg_boxturret_exp",
+    "occurrences": 24,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 15
+   },
+   {
+    "absolute_delta": 50,
+    "category": "properties",
+    "field": [
+     1508461632,
+     0
+    ],
+    "left": 200,
+    "name": "all_weap_moncal_roundturret_exp",
+    "occurrences": 10,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 150
+   },
+   {
+    "absolute_delta": 50,
+    "category": "properties",
+    "field": [
+     1508461632,
+     0
+    ],
+    "left": 200,
+    "name": "cis_weap_bldg_boxturret_exp",
+    "occurrences": 14,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 150
+   },
+   {
+    "absolute_delta": 50,
+    "category": "properties",
+    "field": [
+     1508461632,
+     0
+    ],
+    "left": 200,
+    "name": "imp_weap_bldg_boxturret_exp",
+    "occurrences": 24,
+    "pairs": [
+     "bf2_ps2_vs_bf2_pc",
+     "bf2_xbox_vs_bf2_pc"
+    ],
+    "right": 150
+   }
+  ]
+ },
+ "schema": 2,
+ "sources": {
+  "bf1_ps2": {
+   "animation_names_resolved": 291,
+   "animation_registry_sha256": "f7b47f9f2c0f84652ae2b214fec6f542aad27ced100507da32f7993cd6f7c061",
+   "census_sha256": "4a8749672a0d4e517075c583c7281831479a458c78b6f13a300157325605767f",
+   "content": 9859,
+   "entities": 1558,
+   "entity_kinds": {
+    "entc": 908,
+    "expc": 188,
+    "ordc": 204,
+    "wpnc": 258
+   },
+   "errors": [
+    {
+     "error": "not_ucfb",
+     "file": "test/testh.lvl"
+    }
+   ],
+   "geometry": {
+    "animations": 413,
+    "collision": 761,
+    "primitives": 1454,
+    "routes": 44,
+    "terrain": 22,
+    "world": 19770
+   },
+   "lvl_files": 134,
+   "lvl_files_sha256": "e7fe7ba3d53a13b06825697a7402e39fb85957cd120b629028d9b1d3f69d04d0",
+   "missions": 44,
+   "source": {
+    "game": "bf1",
+    "platform": "ps2",
+    "texture_format_counts": {
+     "ps2": 2425
+    }
+   },
+   "unmeasured": [
+    "mission_dynamic_execution",
+    "world_animation_chunks",
+    "animation_full_pose",
+    "sanm_blends",
+    "animation_unresolved_names"
+   ]
+  },
+  "bf1_xbox": {
+   "animation_names_resolved": 488,
+   "animation_registry_sha256": "f7b47f9f2c0f84652ae2b214fec6f542aad27ced100507da32f7993cd6f7c061",
+   "census_sha256": "7409bad1bc8f6dd8ed22d2da1968021a684d8c7165ea1a85522a7fc6c043288b",
+   "content": 10527,
+   "entities": 1588,
+   "entity_kinds": {
+    "entc": 929,
+    "expc": 195,
+    "ordc": 205,
+    "wpnc": 259
+   },
+   "errors": [],
+   "geometry": {
+    "animations": 681,
+    "collision": 810,
+    "primitives": 1441,
+    "routes": 44,
+    "terrain": 22,
+    "world": 19749
+   },
+   "lvl_files": 142,
+   "lvl_files_sha256": "20fa99693d9bb9673e9ddfeab69065f86497c5977065cb8fcc4018568a0b6a89",
+   "missions": 44,
+   "source": {
+    "game": "bf1",
+    "platform": "xbox",
+    "texture_format_counts": {
+     "xbox": 2690
+    }
+   },
+   "unmeasured": [
+    "mission_dynamic_execution",
+    "world_animation_chunks",
+    "animation_full_pose",
+    "sanm_blends",
+    "animation_unresolved_names"
+   ]
+  },
+  "bf2_pc": {
+   "animation_names_resolved": 584,
+   "animation_registry_sha256": "f7b47f9f2c0f84652ae2b214fec6f542aad27ced100507da32f7993cd6f7c061",
+   "census_sha256": "9c62d78fe39ad7e460262624ca8f8581cb359a0a2992f9c78b273a12b8e4006b",
+   "content": 24497,
+   "entities": 5463,
+   "entity_kinds": {
+    "entc": 2272,
+    "expc": 754,
+    "ordc": 1117,
+    "wpnc": 1320
+   },
+   "errors": [],
+   "geometry": {
+    "animations": 2016,
+    "collision": 1535,
+    "primitives": 8270,
+    "routes": 406,
+    "terrain": 30,
+    "world": 25367
+   },
+   "lvl_files": 191,
+   "lvl_files_sha256": "1d981780b5922969a5a5818574a7c6c4758c0044e6d0f1444b311e2d02ea7b7a",
+   "missions": 138,
+   "source": {
+    "game": "bf2",
+    "platform": "pc",
+    "texture_format_counts": {
+     "pc": 4073
+    }
+   },
+   "unmeasured": [
+    "mission_dynamic_execution",
+    "world_animation_chunks",
+    "animation_full_pose",
+    "sanm_blends",
+    "animation_unresolved_names"
+   ]
+  },
+  "bf2_ps2": {
+   "animation_names_resolved": 585,
+   "animation_registry_sha256": "f7b47f9f2c0f84652ae2b214fec6f542aad27ced100507da32f7993cd6f7c061",
+   "census_sha256": "b8300af31b7455feff70cc034507bfd9780400e40695d730740906bfe0b88a9c",
+   "content": 23271,
+   "entities": 5362,
+   "entity_kinds": {
+    "entc": 2163,
+    "expc": 754,
+    "ordc": 1121,
+    "wpnc": 1324
+   },
+   "errors": [],
+   "geometry": {
+    "animations": 2016,
+    "collision": 1444,
+    "primitives": 7965,
+    "routes": 394,
+    "terrain": 28,
+    "world": 23836
+   },
+   "lvl_files": 186,
+   "lvl_files_sha256": "1021f9d62ae5cb4cb4cc2bc69585604a4ed462776a2efbda05edb8d76a11695f",
+   "missions": 132,
+   "source": {
+    "game": "bf2",
+    "platform": "ps2",
+    "texture_format_counts": {
+     "ps2": 3459
+    }
+   },
+   "unmeasured": [
+    "mission_dynamic_execution",
+    "world_animation_chunks",
+    "animation_full_pose",
+    "sanm_blends",
+    "animation_unresolved_names"
+   ]
+  },
+  "bf2_xbox": {
+   "animation_names_resolved": 582,
+   "animation_registry_sha256": "f7b47f9f2c0f84652ae2b214fec6f542aad27ced100507da32f7993cd6f7c061",
+   "census_sha256": "2563c59a8912a8e4abaf6f651bb057db72469d0179a12ceae1c6cbfeb38928f0",
+   "content": 23355,
+   "entities": 5350,
+   "entity_kinds": {
+    "entc": 2159,
+    "expc": 754,
+    "ordc": 1117,
+    "wpnc": 1320
+   },
+   "errors": [],
+   "geometry": {
+    "animations": 2012,
+    "collision": 1427,
+    "primitives": 8111,
+    "routes": 395,
+    "terrain": 28,
+    "world": 23923
+   },
+   "lvl_files": 185,
+   "lvl_files_sha256": "cb65beab5c655ce8d4653da34d227987e46e11d7f493d7a04c8ac9bffc55512c",
+   "missions": 132,
+   "source": {
+    "game": "bf2",
+    "platform": "xbox",
+    "texture_format_counts": {
+     "xbox": 3577
+    }
+   },
+   "unmeasured": [
+    "mission_dynamic_execution",
+    "world_animation_chunks",
+    "animation_full_pose",
+    "sanm_blends",
+    "animation_unresolved_names"
+   ]
+  }
+ },
+ "terrain_play": {
+  "bf1": [
+   {
+    "baked_map": "bf1_end1",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "far_painted_inside": 157,
+     "far_painted_outside": 1220,
+     "near_nav_inside": 16,
+     "near_nav_outside": 531,
+     "on_nav_inside": 21,
+     "on_nav_outside": 44,
+     "unpainted_outside": 1780
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 1377,
+      "above_1cm": 1377,
+      "above_1m": 1111,
+      "above_50cm": 1233,
+      "above_5m": 775,
+      "bbox_xz": [
+       -344.0,
+       -376.0,
+       448.0,
+       136.0
+      ],
+      "max_abs_metres": 32.760000228881836,
+      "samples": 1377,
+      "under_object": 123
+     },
+     "near_nav": {
+      "above_10cm": 547,
+      "above_1cm": 547,
+      "above_1m": 434,
+      "above_50cm": 497,
+      "above_5m": 256,
+      "bbox_xz": [
+       -272.0,
+       -304.0,
+       376.0,
+       144.0
+      ],
+      "max_abs_metres": 17.100001335144043,
+      "samples": 547,
+      "under_object": 54
+     },
+     "on_nav": {
+      "above_10cm": 65,
+      "above_1cm": 65,
+      "above_1m": 35,
+      "above_50cm": 47,
+      "above_5m": 16,
+      "bbox_xz": [
+       -248.0,
+       -280.0,
+       352.0,
+       280.0
+      ],
+      "max_abs_metres": 15.84000015258789,
+      "samples": 65,
+      "under_object": 5
+     },
+     "unpainted": {
+      "above_10cm": 1780,
+      "above_1cm": 1780,
+      "above_1m": 1494,
+      "above_50cm": 1643,
+      "above_5m": 1058,
+      "bbox_xz": [
+       -408.0,
+       -504.0,
+       496.0,
+       0.0
+      ],
+      "max_abs_metres": 33.30000114440918,
+      "samples": 1780,
+      "under_object": 0
+     }
+    },
+    "file": "end/end1.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 112,
+     "above_1cm": 112,
+     "above_1m": 39,
+     "above_50cm": 72,
+     "above_5m": 5,
+     "max_abs_metres": 9.180000305175781,
+     "samples": 112
+    },
+    "in_play_under_object": {
+     "above_10cm": 82,
+     "above_1cm": 82,
+     "above_1m": 41,
+     "above_50cm": 56,
+     "above_5m": 11,
+     "max_abs_metres": 9.539999961853027,
+     "samples": 82
+    },
+    "instrument": {
+     "hubs_inside_boundary": 91,
+     "hubs_on_grid": 91,
+     "hubs_on_painted_patches": 91,
+     "hubs_total": 91,
+     "median_node_gap_m": 0.0,
+     "median_node_gap_with_z_flipped_m": 6.656
+    },
+    "map": "end1",
+    "outside_boundary": {
+     "above_10cm": 3575,
+     "above_1cm": 3575,
+     "above_1m": 2994,
+     "above_50cm": 3292,
+     "above_5m": 2089,
+     "max_abs_metres": 33.30000114440918,
+     "samples": 3575
+    },
+    "painted_patches": {
+     "reference": 152,
+     "total": 1024
+    },
+    "placed_collision_boxes": 942,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 5
+     },
+     "other_path_nodes": {
+      "largest": [
+       [
+        "jungle1",
+        14.7,
+        -0.0
+       ],
+       [
+        "jungle1",
+        13.602,
+        0.0
+       ],
+       [
+        "jungle1",
+        12.347,
+        -4.46
+       ],
+       [
+        "jungle1",
+        10.608,
+        -3.45
+       ],
+       [
+        "jungle1",
+        4.414,
+        0.0
+       ],
+       [
+        "jungle1",
+        4.136,
+        -0.2
+       ],
+       [
+        "jungle1",
+        3.939,
+        0.0
+       ],
+       [
+        "jungle1",
+        3.723,
+        0.13
+       ],
+       [
+        "jungle1",
+        3.137,
+        0.04
+       ],
+       [
+        "jungle1",
+        1.949,
+        0.02
+       ],
+       [
+        "jungle1",
+        1.135,
+        0.0
+       ],
+       [
+        "jungle1",
+        1.055,
+        -0.0
+       ]
+      ],
+      "moved_count": 22,
+      "moved_on_terrain": 20,
+      "total": 111
+     },
+     "soldier_arcs": {
+      "above_10cm": 2,
+      "above_1cm": 2,
+      "above_1m": 0,
+      "above_50cm": 1,
+      "above_5m": 0,
+      "arcs": 106,
+      "exposed": {
+       "above_10cm": 2,
+       "above_1cm": 2,
+       "above_1m": 0,
+       "above_50cm": 1,
+       "above_5m": 0,
+       "max_abs_metres": 0.5875596966033356
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        106,
+        0.59
+       ],
+       [
+        95,
+        0.24
+       ]
+      ],
+      "max_abs_metres": 0.5875596966033356
+     },
+     "spawn_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 7
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 1,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 14,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 1,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.03959490157335743
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0902208035850478
+     }
+    },
+    "total_changed": 3769
+   },
+   {
+    "baked_map": "bf1_hot1",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "cut_one_inside": 2,
+     "far_painted_inside": 105,
+     "far_painted_outside": 10680,
+     "near_nav_inside": 29,
+     "on_nav_inside": 18
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 2,
+      "above_1cm": 2,
+      "above_1m": 2,
+      "above_50cm": 2,
+      "above_5m": 0,
+      "bbox_xz": [
+       -328.0,
+       -56.0,
+       -328.0,
+       -48.0
+      ],
+      "max_abs_metres": 2.2999999821186066,
+      "samples": 2,
+      "under_object": 2
+     },
+     "far_painted": {
+      "above_10cm": 10785,
+      "above_1cm": 10785,
+      "above_1m": 7160,
+      "above_50cm": 8319,
+      "above_5m": 3072,
+      "bbox_xz": [
+       -1024.0,
+       -1016.0,
+       1016.0,
+       1024.0
+      ],
+      "max_abs_metres": 23.0,
+      "samples": 10785,
+      "under_object": 2
+     },
+     "near_nav": {
+      "above_10cm": 29,
+      "above_1cm": 29,
+      "above_1m": 16,
+      "above_50cm": 25,
+      "above_5m": 2,
+      "bbox_xz": [
+       -568.0,
+       -96.0,
+       -232.0,
+       208.0
+      ],
+      "max_abs_metres": 21.850000843405724,
+      "samples": 29,
+      "under_object": 16
+     },
+     "on_nav": {
+      "above_10cm": 18,
+      "above_1cm": 18,
+      "above_1m": 11,
+      "above_50cm": 14,
+      "above_5m": 0,
+      "bbox_xz": [
+       -456.0,
+       -80.0,
+       -232.0,
+       200.0
+      ],
+      "max_abs_metres": 2.989999771118164,
+      "samples": 18,
+      "under_object": 13
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "hot/hot1.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 121,
+     "above_1cm": 121,
+     "above_1m": 66,
+     "above_50cm": 92,
+     "above_5m": 0,
+     "max_abs_metres": 2.9900007247924805,
+     "samples": 121
+    },
+    "in_play_under_object": {
+     "above_10cm": 33,
+     "above_1cm": 33,
+     "above_1m": 23,
+     "above_50cm": 31,
+     "above_5m": 2,
+     "max_abs_metres": 21.850000843405724,
+     "samples": 33
+    },
+    "instrument": {
+     "hubs_inside_boundary": 42,
+     "hubs_on_grid": 46,
+     "hubs_on_painted_patches": 46,
+     "hubs_total": 46,
+     "median_node_gap_m": 0.553,
+     "median_node_gap_with_z_flipped_m": 15.362
+    },
+    "map": "hoth",
+    "outside_boundary": {
+     "above_10cm": 10680,
+     "above_1cm": 10680,
+     "above_1m": 7100,
+     "above_50cm": 8237,
+     "above_5m": 3072,
+     "max_abs_metres": 23.0,
+     "samples": 10680
+    },
+    "painted_patches": {
+     "reference": 1024,
+     "total": 1024
+    },
+    "placed_collision_boxes": 406,
+    "play_lines": {
+     "command_posts": {
+      "largest": [
+       [
+        "cp4",
+        1.353,
+        1.72
+       ]
+      ],
+      "moved_count": 1,
+      "moved_on_terrain": 1,
+      "total": 5
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 0
+     },
+     "soldier_arcs": {
+      "above_10cm": 6,
+      "above_1cm": 6,
+      "above_1m": 4,
+      "above_50cm": 6,
+      "above_5m": 0,
+      "arcs": 57,
+      "exposed": {
+       "above_10cm": 3,
+       "above_1cm": 3,
+       "above_1m": 2,
+       "above_50cm": 3,
+       "above_5m": 0,
+       "max_abs_metres": 1.2022288786432753
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        18,
+        1.2
+       ],
+       [
+        19,
+        1.2
+       ],
+       [
+        60,
+        0.96
+       ]
+      ],
+      "max_abs_metres": 2.823933208663714
+     },
+     "spawn_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 28
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 7,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 10834
+   },
+   {
+    "baked_map": "bf1_kas1",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "near_nav_inside": 23,
+     "on_nav_inside": 52
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "near_nav": {
+      "above_10cm": 23,
+      "above_1cm": 23,
+      "above_1m": 7,
+      "above_50cm": 18,
+      "above_5m": 0,
+      "bbox_xz": [
+       0.0,
+       -264.0,
+       216.0,
+       8.0
+      ],
+      "max_abs_metres": 1.9199981689453125,
+      "samples": 23,
+      "under_object": 2
+     },
+     "on_nav": {
+      "above_10cm": 52,
+      "above_1cm": 52,
+      "above_1m": 12,
+      "above_50cm": 31,
+      "above_5m": 0,
+      "bbox_xz": [
+       0.0,
+       -248.0,
+       216.0,
+       40.0
+      ],
+      "max_abs_metres": 2.039997100830078,
+      "samples": 52,
+      "under_object": 15
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "kas/kas1.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 58,
+     "above_1cm": 58,
+     "above_1m": 15,
+     "above_50cm": 40,
+     "above_5m": 0,
+     "max_abs_metres": 2.039997100830078,
+     "samples": 58
+    },
+    "in_play_under_object": {
+     "above_10cm": 17,
+     "above_1cm": 17,
+     "above_1m": 4,
+     "above_50cm": 9,
+     "above_5m": 0,
+     "max_abs_metres": 1.5599994659423828,
+     "samples": 17
+    },
+    "instrument": {
+     "hubs_inside_boundary": 108,
+     "hubs_on_grid": 108,
+     "hubs_on_painted_patches": 108,
+     "hubs_total": 108,
+     "median_node_gap_m": 0.045,
+     "median_node_gap_with_z_flipped_m": 2.599
+    },
+    "map": "kashyyyk1",
+    "outside_boundary": {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.0,
+     "samples": 0
+    },
+    "painted_patches": {
+     "reference": 73,
+     "total": 1024
+    },
+    "placed_collision_boxes": 631,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 6
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 0
+     },
+     "soldier_arcs": {
+      "above_10cm": 34,
+      "above_1cm": 42,
+      "above_1m": 5,
+      "above_50cm": 18,
+      "above_5m": 0,
+      "arcs": 166,
+      "exposed": {
+       "above_10cm": 28,
+       "above_1cm": 31,
+       "above_1m": 5,
+       "above_50cm": 18,
+       "above_5m": 0,
+       "max_abs_metres": 1.2589734562290857
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        140,
+        1.26
+       ],
+       [
+        141,
+        1.24
+       ],
+       [
+        143,
+        1.24
+       ],
+       [
+        83,
+        1.18
+       ],
+       [
+        99,
+        1.16
+       ],
+       [
+        108,
+        1.0
+       ],
+       [
+        102,
+        0.96
+       ],
+       [
+        67,
+        0.91
+       ],
+       [
+        21,
+        0.75
+       ],
+       [
+        20,
+        0.74
+       ],
+       [
+        77,
+        0.69
+       ],
+       [
+        28,
+        0.63
+       ]
+      ],
+      "max_abs_metres": 1.298348604107506
+     },
+     "spawn_nodes": {
+      "largest": [
+       [
+        "CP4Spawn",
+        0.056,
+        0.01
+       ]
+      ],
+      "moved_count": 1,
+      "moved_on_terrain": 1,
+      "total": 62
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 0,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 75
+   },
+   {
+    "baked_map": "bf1_kas2",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "far_painted_inside": 35,
+     "far_painted_outside": 1,
+     "near_nav_inside": 147,
+     "near_nav_outside": 2,
+     "on_nav_inside": 166
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 36,
+      "above_1cm": 36,
+      "above_1m": 0,
+      "above_50cm": 1,
+      "above_5m": 0,
+      "bbox_xz": [
+       200.0,
+       0.0,
+       344.0,
+       256.0
+      ],
+      "max_abs_metres": 0.5400004386901855,
+      "samples": 36,
+      "under_object": 0
+     },
+     "near_nav": {
+      "above_10cm": 149,
+      "above_1cm": 149,
+      "above_1m": 8,
+      "above_50cm": 32,
+      "above_5m": 2,
+      "bbox_xz": [
+       -56.0,
+       -56.0,
+       344.0,
+       304.0
+      ],
+      "max_abs_metres": 5.760000228881836,
+      "samples": 149,
+      "under_object": 13
+     },
+     "on_nav": {
+      "above_10cm": 166,
+      "above_1cm": 166,
+      "above_1m": 17,
+      "above_50cm": 66,
+      "above_5m": 3,
+      "bbox_xz": [
+       -56.0,
+       -64.0,
+       320.0,
+       296.0
+      ],
+      "max_abs_metres": 5.760000228881836,
+      "samples": 166,
+      "under_object": 42
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "kas/kas2.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 293,
+     "above_1cm": 293,
+     "above_1m": 8,
+     "above_50cm": 74,
+     "above_5m": 0,
+     "max_abs_metres": 2.1599998474121094,
+     "samples": 293
+    },
+    "in_play_under_object": {
+     "above_10cm": 55,
+     "above_1cm": 55,
+     "above_1m": 17,
+     "above_50cm": 25,
+     "above_5m": 5,
+     "max_abs_metres": 5.760000228881836,
+     "samples": 55
+    },
+    "instrument": {
+     "hubs_inside_boundary": 149,
+     "hubs_on_grid": 149,
+     "hubs_on_painted_patches": 149,
+     "hubs_total": 149,
+     "median_node_gap_m": 0.032,
+     "median_node_gap_with_z_flipped_m": 17.015
+    },
+    "map": "kas2",
+    "outside_boundary": {
+     "above_10cm": 3,
+     "above_1cm": 3,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.3600001335144043,
+     "samples": 3
+    },
+    "painted_patches": {
+     "reference": 621,
+     "total": 1024
+    },
+    "placed_collision_boxes": 290,
+    "play_lines": {
+     "command_posts": {
+      "largest": [
+       [
+        "cp4",
+        0.36,
+        22.83
+       ]
+      ],
+      "moved_count": 1,
+      "moved_on_terrain": 0,
+      "total": 7
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 36
+     },
+     "soldier_arcs": {
+      "above_10cm": 36,
+      "above_1cm": 40,
+      "above_1m": 9,
+      "above_50cm": 15,
+      "above_5m": 1,
+      "arcs": 190,
+      "exposed": {
+       "above_10cm": 13,
+       "above_1cm": 14,
+       "above_1m": 3,
+       "above_50cm": 4,
+       "above_5m": 0,
+       "max_abs_metres": 2.0161482753529723
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        71,
+        2.02
+       ],
+       [
+        50,
+        2.0
+       ],
+       [
+        12,
+        1.16
+       ],
+       [
+        48,
+        0.9
+       ],
+       [
+        29,
+        0.25
+       ],
+       [
+        150,
+        0.23
+       ],
+       [
+        149,
+        0.21
+       ],
+       [
+        176,
+        0.18
+       ],
+       [
+        186,
+        0.18
+       ],
+       [
+        185,
+        0.14
+       ],
+       [
+        175,
+        0.13
+       ],
+       [
+        64,
+        0.12
+       ]
+      ],
+      "max_abs_metres": 5.737306637980102
+     },
+     "spawn_nodes": {
+      "largest": [
+       [
+        "CP4SpawnPath",
+        0.491,
+        22.97
+       ],
+       [
+        "CP4SpawnPath",
+        0.418,
+        22.92
+       ],
+       [
+        "CP4SpawnPath",
+        0.36,
+        23.02
+       ],
+       [
+        "CP4SpawnPath",
+        0.312,
+        23.08
+       ],
+       [
+        "CP4SpawnPath",
+        0.299,
+        22.94
+       ],
+       [
+        "CP4SpawnPath",
+        0.057,
+        23.25
+       ],
+       [
+        "CP1SpawnPath",
+        0.011,
+        0.01
+       ]
+      ],
+      "moved_count": 7,
+      "moved_on_terrain": 1,
+      "total": 50
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 0,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 351
+   },
+   {
+    "baked_map": "bf1_nab1",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "near_nav_inside": 2,
+     "on_nav_inside": 70
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "near_nav": {
+      "above_10cm": 2,
+      "above_1cm": 2,
+      "above_1m": 0,
+      "above_50cm": 1,
+      "above_5m": 0,
+      "bbox_xz": [
+       -64.0,
+       152.0,
+       -56.0,
+       160.0
+      ],
+      "max_abs_metres": 0.720001220703125,
+      "samples": 2,
+      "under_object": 1
+     },
+     "on_nav": {
+      "above_10cm": 70,
+      "above_1cm": 70,
+      "above_1m": 8,
+      "above_50cm": 34,
+      "above_5m": 0,
+      "bbox_xz": [
+       -112.0,
+       -136.0,
+       32.0,
+       160.0
+      ],
+      "max_abs_metres": 1.8000030517578125,
+      "samples": 70,
+      "under_object": 22
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "nab/nab1.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 49,
+     "above_1cm": 49,
+     "above_1m": 4,
+     "above_50cm": 23,
+     "above_5m": 0,
+     "max_abs_metres": 1.8000030517578125,
+     "samples": 49
+    },
+    "in_play_under_object": {
+     "above_10cm": 23,
+     "above_1cm": 23,
+     "above_1m": 4,
+     "above_50cm": 12,
+     "above_5m": 0,
+     "max_abs_metres": 1.44000244140625,
+     "samples": 23
+    },
+    "instrument": {
+     "hubs_inside_boundary": 8,
+     "hubs_on_grid": 9,
+     "hubs_on_painted_patches": 9,
+     "hubs_total": 9,
+     "median_node_gap_m": 0.045,
+     "median_node_gap_with_z_flipped_m": 3.238
+    },
+    "map": "naboo1",
+    "outside_boundary": {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.0,
+     "samples": 0
+    },
+    "painted_patches": {
+     "reference": 1024,
+     "total": 1024
+    },
+    "placed_collision_boxes": 285,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 5
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 0
+     },
+     "soldier_arcs": {
+      "above_10cm": 5,
+      "above_1cm": 5,
+      "above_1m": 2,
+      "above_50cm": 4,
+      "above_5m": 0,
+      "arcs": 11,
+      "exposed": {
+       "above_10cm": 4,
+       "above_1cm": 4,
+       "above_1m": 2,
+       "above_50cm": 4,
+       "above_5m": 0,
+       "max_abs_metres": 1.7409103172527551
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        0,
+        1.74
+       ],
+       [
+        3,
+        1.21
+       ],
+       [
+        5,
+        0.81
+       ],
+       [
+        10,
+        0.7
+       ]
+      ],
+      "max_abs_metres": 1.7409103172527551
+     },
+     "spawn_nodes": {
+      "largest": [
+       [
+        "FambaSpawnPath",
+        0.723,
+        -1.71
+       ],
+       [
+        "CP1SpawnPath",
+        0.429,
+        0.43
+       ],
+       [
+        "FambaSpawnPath",
+        0.421,
+        -2.25
+       ],
+       [
+        "FambaSpawnPath",
+        0.365,
+        -2.0
+       ],
+       [
+        "FambaSpawnPath",
+        0.339,
+        -0.47
+       ],
+       [
+        "FambaSpawnPath",
+        0.296,
+        -0.07
+       ],
+       [
+        "FambaSpawnPath",
+        0.142,
+        0.05
+       ],
+       [
+        "CP3SpawnPath",
+        0.135,
+        -0.0
+       ],
+       [
+        "FambaSpawnPath",
+        0.117,
+        -0.83
+       ],
+       [
+        "FambaSpawnPath",
+        0.097,
+        -1.58
+       ],
+       [
+        "FambaSpawnPath",
+        0.078,
+        -1.01
+       ],
+       [
+        "FambaSpawnPath",
+        0.052,
+        -0.42
+       ]
+      ],
+      "moved_count": 16,
+      "moved_on_terrain": 14,
+      "total": 94
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 1,
+      "above_1cm": 1,
+      "above_1m": 0,
+      "above_50cm": 1,
+      "above_5m": 0,
+      "arcs": 2,
+      "exposed": {
+       "above_10cm": 1,
+       "above_1cm": 1,
+       "above_1m": 0,
+       "above_50cm": 1,
+       "above_5m": 0,
+       "max_abs_metres": 0.8710870980098804
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        7,
+        0.87
+       ]
+      ],
+      "max_abs_metres": 0.8710870980098804
+     }
+    },
+    "total_changed": 72
+   },
+   {
+    "baked_map": "bf1_nab2",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "far_painted_inside": 29,
+     "far_painted_outside": 790,
+     "near_nav_inside": 110,
+     "near_nav_outside": 239,
+     "on_nav_inside": 21,
+     "on_nav_outside": 18
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 785,
+      "above_1cm": 819,
+      "above_1m": 785,
+      "above_50cm": 785,
+      "above_5m": 785,
+      "bbox_xz": [
+       -424.0,
+       -296.0,
+       56.0,
+       0.0
+      ],
+      "max_abs_metres": 5.220001220703125,
+      "samples": 819,
+      "under_object": 251
+     },
+     "near_nav": {
+      "above_10cm": 155,
+      "above_1cm": 349,
+      "above_1m": 155,
+      "above_50cm": 155,
+      "above_5m": 155,
+      "bbox_xz": [
+       -376.0,
+       -224.0,
+       -8.0,
+       -56.0
+      ],
+      "max_abs_metres": 5.159999847412109,
+      "samples": 349,
+      "under_object": 250
+     },
+     "on_nav": {
+      "above_10cm": 5,
+      "above_1cm": 39,
+      "above_1m": 5,
+      "above_50cm": 5,
+      "above_5m": 5,
+      "bbox_xz": [
+       -352.0,
+       -200.0,
+       -32.0,
+       -56.0
+      ],
+      "max_abs_metres": 5.159999847412109,
+      "samples": 39,
+      "under_object": 37
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "nab/nab2.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 3,
+     "above_1cm": 64,
+     "above_1m": 3,
+     "above_50cm": 3,
+     "above_5m": 3,
+     "max_abs_metres": 5.159999847412109,
+     "samples": 64
+    },
+    "in_play_under_object": {
+     "above_10cm": 18,
+     "above_1cm": 96,
+     "above_1m": 18,
+     "above_50cm": 18,
+     "above_5m": 18,
+     "max_abs_metres": 5.159999847412109,
+     "samples": 96
+    },
+    "instrument": {
+     "hubs_inside_boundary": 86,
+     "hubs_on_grid": 86,
+     "hubs_on_painted_patches": 86,
+     "hubs_total": 86,
+     "median_node_gap_m": 0.18,
+     "median_node_gap_with_z_flipped_m": 0.862
+    },
+    "map": "naboo2",
+    "outside_boundary": {
+     "above_10cm": 924,
+     "above_1cm": 1047,
+     "above_1m": 924,
+     "above_50cm": 924,
+     "above_5m": 924,
+     "max_abs_metres": 5.220001220703125,
+     "samples": 1047
+    },
+    "painted_patches": {
+     "reference": 169,
+     "total": 1024
+    },
+    "placed_collision_boxes": 963,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 6
+     },
+     "other_path_nodes": {
+      "largest": [
+       [
+        "jungle1",
+        5.16,
+        0.0
+       ],
+       [
+        "jungle1",
+        2.181,
+        -2.24
+       ],
+       [
+        "jungle1",
+        0.06,
+        0.06
+       ],
+       [
+        "jungle1",
+        0.06,
+        -1.89
+       ],
+       [
+        "jungle1",
+        0.06,
+        -7.42
+       ],
+       [
+        "jungle1",
+        0.06,
+        0.06
+       ],
+       [
+        "jungle1",
+        0.06,
+        0.06
+       ],
+       [
+        "jungle1",
+        0.06,
+        1.24
+       ],
+       [
+        "jungle1",
+        0.059,
+        0.06
+       ],
+       [
+        "jungle1",
+        0.059,
+        0.06
+       ]
+      ],
+      "moved_count": 10,
+      "moved_on_terrain": 8,
+      "total": 19
+     },
+     "soldier_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 3,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 135,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.060001373291015625
+     },
+     "spawn_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 37
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 2,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 1207
+   },
+   {
+    "baked_map": "bf1_rhn1",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "far_painted_inside": 2,
+     "far_painted_outside": 381
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 383,
+      "above_1cm": 383,
+      "above_1m": 365,
+      "above_50cm": 371,
+      "above_5m": 299,
+      "bbox_xz": [
+       -960.0,
+       32.0,
+       40.0,
+       808.0
+      ],
+      "max_abs_metres": 27.600000381469727,
+      "samples": 383,
+      "under_object": 0
+     },
+     "near_nav": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "on_nav": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "rhn/rhn1.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 2,
+     "above_1cm": 2,
+     "above_1m": 2,
+     "above_50cm": 2,
+     "above_5m": 1,
+     "max_abs_metres": 8.050000190734863,
+     "samples": 2
+    },
+    "in_play_under_object": {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.0,
+     "samples": 0
+    },
+    "instrument": {
+     "hubs_inside_boundary": 121,
+     "hubs_on_grid": 121,
+     "hubs_on_painted_patches": 121,
+     "hubs_total": 121,
+     "median_node_gap_m": 0.058,
+     "median_node_gap_with_z_flipped_m": 77.123
+    },
+    "map": "rhenvar1",
+    "outside_boundary": {
+     "above_10cm": 381,
+     "above_1cm": 381,
+     "above_1m": 363,
+     "above_50cm": 369,
+     "above_5m": 298,
+     "max_abs_metres": 27.600000381469727,
+     "samples": 381
+    },
+    "painted_patches": {
+     "reference": 1024,
+     "total": 1024
+    },
+    "placed_collision_boxes": 412,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 5
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 0
+     },
+     "soldier_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 146,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     },
+     "spawn_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 26
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 0,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 383
+   },
+   {
+    "baked_map": "bf1_rhn2",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "on_nav_inside": 11
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "near_nav": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "on_nav": {
+      "above_10cm": 11,
+      "above_1cm": 11,
+      "above_1m": 3,
+      "above_50cm": 3,
+      "above_5m": 1,
+      "bbox_xz": [
+       -272.0,
+       -256.0,
+       -216.0,
+       -160.0
+      ],
+      "max_abs_metres": 17.019999980926514,
+      "samples": 11,
+      "under_object": 8
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "rhn/rhn2.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 3,
+     "above_1cm": 3,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.46000003814697266,
+     "samples": 3
+    },
+    "in_play_under_object": {
+     "above_10cm": 8,
+     "above_1cm": 8,
+     "above_1m": 3,
+     "above_50cm": 3,
+     "above_5m": 1,
+     "max_abs_metres": 17.019999980926514,
+     "samples": 8
+    },
+    "instrument": {
+     "hubs_inside_boundary": 97,
+     "hubs_on_grid": 97,
+     "hubs_on_painted_patches": 97,
+     "hubs_total": 97,
+     "median_node_gap_m": 0.23,
+     "median_node_gap_with_z_flipped_m": 69.097
+    },
+    "map": "rhenvar2",
+    "outside_boundary": {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.0,
+     "samples": 0
+    },
+    "painted_patches": {
+     "reference": 166,
+     "total": 1024
+    },
+    "placed_collision_boxes": 915,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 7
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 0
+     },
+     "soldier_arcs": {
+      "above_10cm": 7,
+      "above_1cm": 8,
+      "above_1m": 1,
+      "above_50cm": 2,
+      "above_5m": 1,
+      "arcs": 116,
+      "exposed": {
+       "above_10cm": 2,
+       "above_1cm": 2,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.42940067088479866
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        96,
+        0.43
+       ],
+       [
+        9,
+        0.37
+       ]
+      ],
+      "max_abs_metres": 6.233649489485662
+     },
+     "spawn_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 31
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 0,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 11
+   },
+   {
+    "baked_map": "tat1",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "near_nav_inside": 4,
+     "on_nav_inside": 27
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "near_nav": {
+      "above_10cm": 4,
+      "above_1cm": 4,
+      "above_1m": 1,
+      "above_50cm": 1,
+      "above_5m": 0,
+      "bbox_xz": [
+       -304.0,
+       40.0,
+       -272.0,
+       48.0
+      ],
+      "max_abs_metres": 1.0799999237060547,
+      "samples": 4,
+      "under_object": 2
+     },
+     "on_nav": {
+      "above_10cm": 27,
+      "above_1cm": 27,
+      "above_1m": 10,
+      "above_50cm": 20,
+      "above_5m": 0,
+      "bbox_xz": [
+       -296.0,
+       16.0,
+       24.0,
+       144.0
+      ],
+      "max_abs_metres": 3.239999771118164,
+      "samples": 27,
+      "under_object": 11
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "tat/tat1.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 18,
+     "above_1cm": 18,
+     "above_1m": 9,
+     "above_50cm": 13,
+     "above_5m": 0,
+     "max_abs_metres": 3.239999771118164,
+     "samples": 18
+    },
+    "in_play_under_object": {
+     "above_10cm": 13,
+     "above_1cm": 13,
+     "above_1m": 2,
+     "above_50cm": 8,
+     "above_5m": 0,
+     "max_abs_metres": 1.8000001907348633,
+     "samples": 13
+    },
+    "instrument": {
+     "hubs_inside_boundary": 112,
+     "hubs_on_grid": 114,
+     "hubs_on_painted_patches": 114,
+     "hubs_total": 115,
+     "median_node_gap_m": 0.031,
+     "median_node_gap_with_z_flipped_m": 4.989
+    },
+    "map": "tat1",
+    "outside_boundary": {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.0,
+     "samples": 0
+    },
+    "painted_patches": {
+     "reference": 1024,
+     "total": 1024
+    },
+    "placed_collision_boxes": 173,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 6
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 5
+     },
+     "soldier_arcs": {
+      "above_10cm": 8,
+      "above_1cm": 8,
+      "above_1m": 1,
+      "above_50cm": 5,
+      "above_5m": 0,
+      "arcs": 151,
+      "exposed": {
+       "above_10cm": 8,
+       "above_1cm": 8,
+       "above_1m": 1,
+       "above_50cm": 5,
+       "above_5m": 0,
+       "max_abs_metres": 2.8758886797255325
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        56,
+        2.88
+       ],
+       [
+        57,
+        0.79
+       ],
+       [
+        128,
+        0.79
+       ],
+       [
+        68,
+        0.58
+       ],
+       [
+        63,
+        0.52
+       ],
+       [
+        31,
+        0.3
+       ],
+       [
+        32,
+        0.3
+       ],
+       [
+        33,
+        0.23
+       ]
+      ],
+      "max_abs_metres": 2.8758886797255325
+     },
+     "spawn_nodes": {
+      "largest": [
+       [
+        "CP10SpawnPath",
+        0.392,
+        -0.0
+       ],
+       [
+        "CP10SpawnPath",
+        0.02,
+        -0.0
+       ],
+       [
+        "CP10SpawnPath",
+        0.015,
+        0.0
+       ]
+      ],
+      "moved_count": 3,
+      "moved_on_terrain": 3,
+      "total": 80
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 0,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 31
+   },
+   {
+    "baked_map": "bf1_tat2",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "far_painted_outside": 81
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 81,
+      "above_1cm": 81,
+      "above_1m": 81,
+      "above_50cm": 81,
+      "above_5m": 81,
+      "bbox_xz": [
+       -496.0,
+       96.0,
+       -408.0,
+       184.0
+      ],
+      "max_abs_metres": 15.059999998658895,
+      "samples": 81,
+      "under_object": 68
+     },
+     "near_nav": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "on_nav": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "tat/tat2.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.0,
+     "samples": 0
+    },
+    "in_play_under_object": {
+     "above_10cm": 0,
+     "above_1cm": 0,
+     "above_1m": 0,
+     "above_50cm": 0,
+     "above_5m": 0,
+     "max_abs_metres": 0.0,
+     "samples": 0
+    },
+    "instrument": {
+     "hubs_inside_boundary": 196,
+     "hubs_on_grid": 196,
+     "hubs_on_painted_patches": 196,
+     "hubs_total": 196,
+     "median_node_gap_m": 0.0,
+     "median_node_gap_with_z_flipped_m": 0.0
+    },
+    "map": "tat2",
+    "outside_boundary": {
+     "above_10cm": 81,
+     "above_1cm": 81,
+     "above_1m": 81,
+     "above_50cm": 81,
+     "above_5m": 81,
+     "max_abs_metres": 15.059999998658895,
+     "samples": 81
+    },
+    "painted_patches": {
+     "reference": 1024,
+     "total": 1024
+    },
+    "placed_collision_boxes": 1509,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 6
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 7
+     },
+     "soldier_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 230,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     },
+     "spawn_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 120
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 0,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 81
+   },
+   {
+    "baked_map": "bf1_yav1",
+    "boundary_paths": 1,
+    "by_boundary": {
+     "far_painted_outside": 16675,
+     "near_nav_inside": 20,
+     "near_nav_outside": 69,
+     "on_nav_inside": 46
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 16545,
+      "above_1cm": 16675,
+      "above_1m": 15077,
+      "above_50cm": 15681,
+      "above_5m": 13486,
+      "bbox_xz": [
+       -1024.0,
+       -840.0,
+       1016.0,
+       736.0
+      ],
+      "max_abs_metres": 16.079999923706055,
+      "samples": 16675,
+      "under_object": 3
+     },
+     "near_nav": {
+      "above_10cm": 84,
+      "above_1cm": 89,
+      "above_1m": 56,
+      "above_50cm": 70,
+      "above_5m": 20,
+      "bbox_xz": [
+       136.0,
+       -432.0,
+       288.0,
+       -48.0
+      ],
+      "max_abs_metres": 15.239999771118164,
+      "samples": 89,
+      "under_object": 56
+     },
+     "on_nav": {
+      "above_10cm": 46,
+      "above_1cm": 46,
+      "above_1m": 11,
+      "above_50cm": 31,
+      "above_5m": 0,
+      "bbox_xz": [
+       112.0,
+       -296.0,
+       184.0,
+       -24.0
+      ],
+      "max_abs_metres": 1.55999755859375,
+      "samples": 46,
+      "under_object": 45
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "yav/yav1.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 1,
+     "above_1cm": 1,
+     "above_1m": 0,
+     "above_50cm": 1,
+     "above_5m": 0,
+     "max_abs_metres": 0.6000022888183594,
+     "samples": 1
+    },
+    "in_play_under_object": {
+     "above_10cm": 65,
+     "above_1cm": 65,
+     "above_1m": 21,
+     "above_50cm": 48,
+     "above_5m": 0,
+     "max_abs_metres": 2.8800010681152344,
+     "samples": 65
+    },
+    "instrument": {
+     "hubs_inside_boundary": 85,
+     "hubs_on_grid": 85,
+     "hubs_on_painted_patches": 85,
+     "hubs_total": 85,
+     "median_node_gap_m": 0.297,
+     "median_node_gap_with_z_flipped_m": 18.86
+    },
+    "map": "yavin1",
+    "outside_boundary": {
+     "above_10cm": 16609,
+     "above_1cm": 16744,
+     "above_1m": 15123,
+     "above_50cm": 15733,
+     "above_5m": 13506,
+     "max_abs_metres": 16.079999923706055,
+     "samples": 16744
+    },
+    "painted_patches": {
+     "reference": 1024,
+     "total": 1024
+    },
+    "placed_collision_boxes": 861,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 7
+     },
+     "other_path_nodes": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 58
+     },
+     "soldier_arcs": {
+      "above_10cm": 10,
+      "above_1cm": 10,
+      "above_1m": 2,
+      "above_50cm": 8,
+      "above_5m": 0,
+      "arcs": 113,
+      "exposed": {
+       "above_10cm": 1,
+       "above_1cm": 1,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.2925245632568263
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        92,
+        0.29
+       ]
+      ],
+      "max_abs_metres": 1.2346648551592878
+     },
+     "spawn_nodes": {
+      "largest": [
+       [
+        "Bazaar_SpawnPath",
+        0.016,
+        0.16
+       ]
+      ],
+      "moved_count": 1,
+      "moved_on_terrain": 1,
+      "total": 90
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 0,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 16810
+   }
+  ],
+  "bf2": [
+   {
+    "baked_map": "bf2_yav1",
+    "boundary_paths": 2,
+    "by_boundary": {
+     "far_painted_outside": 16638,
+     "near_nav_inside": 17,
+     "near_nav_outside": 95,
+     "on_nav_inside": 49,
+     "on_nav_outside": 11
+    },
+    "classes": {
+     "cut_both": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "cut_one": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     },
+     "far_painted": {
+      "above_10cm": 16508,
+      "above_1cm": 16638,
+      "above_1m": 15040,
+      "above_50cm": 15644,
+      "above_5m": 13455,
+      "bbox_xz": [
+       -1024.0,
+       -840.0,
+       1016.0,
+       736.0
+      ],
+      "max_abs_metres": 16.079999923706055,
+      "samples": 16638,
+      "under_object": 0
+     },
+     "near_nav": {
+      "above_10cm": 107,
+      "above_1cm": 112,
+      "above_1m": 88,
+      "above_50cm": 96,
+      "above_5m": 51,
+      "bbox_xz": [
+       144.0,
+       -432.0,
+       296.0,
+       -48.0
+      ],
+      "max_abs_metres": 15.239999771118164,
+      "samples": 112,
+      "under_object": 45
+     },
+     "on_nav": {
+      "above_10cm": 60,
+      "above_1cm": 60,
+      "above_1m": 16,
+      "above_50cm": 42,
+      "above_5m": 0,
+      "bbox_xz": [
+       112.0,
+       -296.0,
+       272.0,
+       -24.0
+      ],
+      "max_abs_metres": 3.0,
+      "samples": 60,
+      "under_object": 59
+     },
+     "unpainted": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "max_abs_metres": 0.0,
+      "samples": 0,
+      "under_object": 0
+     }
+    },
+    "file": "yav/yav1.lvl",
+    "grid_size": 256,
+    "grid_unit": 8.0,
+    "in_play_exposed": {
+     "above_10cm": 1,
+     "above_1cm": 1,
+     "above_1m": 0,
+     "above_50cm": 1,
+     "above_5m": 0,
+     "max_abs_metres": 0.6000022888183594,
+     "samples": 1
+    },
+    "in_play_under_object": {
+     "above_10cm": 65,
+     "above_1cm": 65,
+     "above_1m": 21,
+     "above_50cm": 48,
+     "above_5m": 0,
+     "max_abs_metres": 2.8800010681152344,
+     "samples": 65
+    },
+    "instrument": {
+     "hubs_inside_boundary": 256,
+     "hubs_on_grid": 256,
+     "hubs_on_painted_patches": 256,
+     "hubs_total": 256,
+     "median_node_gap_m": 0.195,
+     "median_node_gap_with_z_flipped_m": 17.767
+    },
+    "map": "yavin1",
+    "outside_boundary": {
+     "above_10cm": 16609,
+     "above_1cm": 16744,
+     "above_1m": 15123,
+     "above_50cm": 15733,
+     "above_5m": 13506,
+     "max_abs_metres": 16.079999923706055,
+     "samples": 16744
+    },
+    "painted_patches": {
+     "reference": 1024,
+     "total": 1024
+    },
+    "placed_collision_boxes": 923,
+    "play_lines": {
+     "command_posts": {
+      "largest": [],
+      "moved_count": 0,
+      "moved_on_terrain": 0,
+      "total": 10
+     },
+     "other_path_nodes": {
+      "largest": [
+       [
+        "Jungle1",
+        0.913,
+        1.02
+       ],
+       [
+        "Jungle1Camp",
+        0.604,
+        -0.55
+       ],
+       [
+        "Jungle1",
+        0.446,
+        -0.43
+       ],
+       [
+        "Jungle1Camp",
+        0.34,
+        0.19
+       ],
+       [
+        "Jungle1Camp",
+        0.31,
+        2.95
+       ],
+       [
+        "Team1RightPAth",
+        0.179,
+        0.18
+       ],
+       [
+        "Jungle1",
+        0.177,
+        -0.18
+       ],
+       [
+        "ftrigger",
+        0.111,
+        1.72
+       ],
+       [
+        "ViaDuctAmbushPath",
+        0.026,
+        0.03
+       ]
+      ],
+      "moved_count": 9,
+      "moved_on_terrain": 8,
+      "total": 257
+     },
+     "soldier_arcs": {
+      "above_10cm": 30,
+      "above_1cm": 30,
+      "above_1m": 6,
+      "above_50cm": 24,
+      "above_5m": 0,
+      "arcs": 340,
+      "exposed": {
+       "above_10cm": 3,
+       "above_1cm": 3,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.2925245632568263
+      },
+      "exposed_arcs_over_10cm": [
+       [
+        92,
+        0.29
+       ],
+       [
+        205,
+        0.29
+       ],
+       [
+        318,
+        0.29
+       ]
+      ],
+      "max_abs_metres": 1.2346648551592878
+     },
+     "spawn_nodes": {
+      "largest": [
+       [
+        "Flag1Off1SpawnPath",
+        0.917,
+        -0.9
+       ],
+       [
+        "Team1SpawnPath",
+        0.727,
+        -0.71
+       ],
+       [
+        "Flag1Off1SpawnPath",
+        0.661,
+        -0.64
+       ],
+       [
+        "ViaductSpawnCamp",
+        0.6,
+        -0.59
+       ],
+       [
+        "Team2SpawnPath",
+        0.531,
+        0.63
+       ],
+       [
+        "Team1SpawnPath",
+        0.449,
+        -0.42
+       ],
+       [
+        "Team2SpawnPath",
+        0.437,
+        0.45
+       ],
+       [
+        "Team1SpawnPath",
+        0.418,
+        0.59
+       ],
+       [
+        "Team1SpawnPath",
+        0.389,
+        0.56
+       ],
+       [
+        "Team2SpawnPath",
+        0.249,
+        0.25
+       ],
+       [
+        "Team2SpawnPath",
+        0.207,
+        0.21
+       ],
+       [
+        "bazaarcampspawn",
+        0.061,
+        0.17
+       ]
+      ],
+      "moved_count": 15,
+      "moved_on_terrain": 15,
+      "total": 313
+     },
+     "vehicle_only_arcs": {
+      "above_10cm": 0,
+      "above_1cm": 0,
+      "above_1m": 0,
+      "above_50cm": 0,
+      "above_5m": 0,
+      "arcs": 0,
+      "exposed": {
+       "above_10cm": 0,
+       "above_1cm": 0,
+       "above_1m": 0,
+       "above_50cm": 0,
+       "above_5m": 0,
+       "max_abs_metres": 0.0
+      },
+      "exposed_arcs_over_10cm": [],
+      "max_abs_metres": 0.0
+     }
+    },
+    "total_changed": 16810
+   }
+  ]
+ },
+ "tool_sha256": {
+  "extract_lua.py": "a3e82761d85d92d8a3768afbf0c0782128cd50f5083d73230badf6ed55cf9289",
+  "gen_missions.py": "ef79bda4f14a2ffdb6bbff8f725c665fe49d416c5154e9c18b6aa406c40447a3",
+  "version_census.py": "576e122cc6b16bf7d0f46b1634c825db18db69fcb3bf663d4afb2c7776b61f80",
+  "version_collision.py": "9d6bbce0921d1d1028e6b8b6bcecdd5dc1c6999cde3da89443d45f51553751bb",
+  "version_geometry.py": "d90c3e9e5ac178e1fbb38203a762cd2c89cd3b438106c1317bfe872627ebea70",
+  "version_heights.py": "f5c430476b72a63262b8ead61dae534c09fe8e1b95821ae276f93520e6e5fa71",
+  "version_report.py": "9615edfac87cd141651a1387e187b2a110fba1adec1b93491adfb97f90c3146e",
+  "version_terrain_play.py": "b0cc33ef1cf65a2451d65c99ef8597d244e5146a9599ca3d73a9d761a7bc2757"
+ }
+}

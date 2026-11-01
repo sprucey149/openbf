@@ -323,7 +323,9 @@ class PackTests(unittest.TestCase):
                     lvl = root / 'extracted' / game / 'lvl/DATA/_LVL_PS2'
                     lvl.mkdir(parents=True)
                     (lvl / 'CORE.LVL').touch()
-                    for sub in lvls:
+                    for sub, library in lvls.items():
+                        (lvl / library).parent.mkdir(parents=True, exist_ok=True)
+                        (lvl / library).touch()
                         lua = root / 'extracted' / game / 'lua' / sub
                         lua.mkdir(parents=True)
                         (lua / 'one.lua').touch()
@@ -351,7 +353,8 @@ class PackTests(unittest.TestCase):
                     pack.main()
                 report = __import__('json').loads(Path(str(out) + '.sources.json').read_text())
                 extracted = [r for r in report['inputs'] if r['label'].endswith('extracted PS2 data')]
-                self.assertEqual({r['status'] for r in extracted}, {'used' if rebake else 'unused'})
+                # Read every run: their bytes key the console Lua cache.
+                self.assertEqual({r['status'] for r in extracted}, {'used'})
                 self.assertTrue(out.is_file())
 
     def test_map_sources_preserve_base_and_alternative_file_spelling(self):

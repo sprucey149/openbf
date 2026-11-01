@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Recognize supported console BF2 input before a PC asset bake.
 
-PS2 supplies the shell/HUD and gameplay reference. Xbox support will add another
-console detector here; an unrecognized image never satisfies the requirement.
+PS2 supplies the shell/HUD and gameplay reference. These are the content readers;
+scripts/input_scan.py decides what a folder of inputs adds up to. An unrecognized
+image never satisfies a requirement.
 """
 from pathlib import Path
 import argparse
 import struct
 
 REQUIRED = {"DATA/_LVL_PS2/CORE.LVL", "DATA/_LVL_PS2/INGAME.LVL", "DATA/_LVL_PS2/SHELL.LVL", "SWBFRNT2.ELF", "SYSTEM.CNF"}
+REQUIRED_BF1 = {"DATA/_LVL_PS2/COMMON/ENG/COMMON.LVL", "SWBFRONT.ELF", "SYSTEM.CNF"}
 MISSING = "PC input requires a console Battlefront II disc: add a PS2 BF2 disc with --iso2 (or extract it under extracted/bf2/lvl). Xbox BF2 support is not available yet."
 
 
@@ -39,6 +41,12 @@ def chunks(data):
 
 
 def geometry_platform(path):
+    """"ps2", "pc", "xbox" or None, from an LVL's structure.
+
+    Geometry splits PS2 (`_PS2`) from the rest (`VBUF`/`VDAT`). The Xbox shares that
+    geometry, so a texture decides between the two: PC `tex_` holds `FMT_` chunks,
+    Xbox `tex_` a bare `BODY`, PS2 `tex_` a `pal_` and a `BODY` (measured on all three).
+    """
     try:
         path = Path(path)
         if path.stat().st_size > 128 << 20:
@@ -48,24 +56,57 @@ def geometry_platform(path):
             return None
         pending = [(b"ucfb", blob[8:])]
         count = 0
+        vertex_buffers, xbox_texture, pc_texture = False, False, False
         # Only inspect structural chunks; matching text in an image is not evidence.
         while pending:
             parent, data = pending.pop()
             for tag, body in chunks(data):
                 count += 1
                 if count > 65536:
-                    return None
+                    pending = []
+                    break
                 if parent == b"segm" and tag == b"_PS2":
                     return "ps2"
                 if parent == b"segm" and tag in (b"VBUF", b"VDAT"):
-                    return "pc"
+                    vertex_buffers = True
+                if tag == b"tex_" and not (xbox_texture or pc_texture):
+                    inner = {child for child, _ in chunks(body)}
+                    pc_texture = b"FMT_" in inner
+                    xbox_texture = b"BODY" in inner and b"pal_" not in inner and not pc_texture
+                if vertex_buffers and (pc_texture or xbox_texture):
+                    return "xbox" if xbox_texture else "pc"
                 if tag == b"lvl_" and len(body) >= 8:
                     pending.append((tag, body[8:]))
                 elif tag in (b"ucfb", b"modl", b"segm"):
                     pending.append((tag, body))
+        return "pc" if vertex_buffers else None
     except (OSError, ValueError, struct.error):
         pass
     return None
+
+
+def entity_classes(path):
+    """Every entity class an LVL defines (`entc` `TYPE`, directly or inside `lvl_`), lowercased."""
+    names = set()
+    try:
+        path = Path(path)
+        if path.stat().st_size > 128 << 20:
+            return names
+        blob = memoryview(path.read_bytes())
+        if len(blob) < 8 or blob[:4] != b"ucfb":
+            return names
+        pending = [blob[8:8 + struct.unpack_from("<I", blob, 4)[0]]]
+        while pending:
+            for tag, body in chunks(pending.pop()):
+                if tag == b"lvl_" and len(body) >= 8:
+                    pending.append(body[8:])
+                elif tag == b"entc":
+                    for child, value in chunks(body):
+                        if child == b"TYPE":
+                            names.add(bytes(value).split(b"\0", 1)[0].decode("latin-1").lower())
+    except (OSError, ValueError, struct.error):
+        pass
+    return names
 
 
 def is_ps2_lvl(path):
@@ -86,7 +127,13 @@ def is_ps2_bf2_tree(root):
 
 
 def ps2_disc_files(path):
-    """Bounded ISO9660 directory inspection, independent of the image filename."""
+    """The files of a PS2 disc (an ISO9660 image whose system ID says PLAYSTATION), else nothing."""
+    system, files = iso9660_files(path)
+    return files if system == b"PLAYSTATION" else set()
+
+
+def iso9660_files(path):
+    """(system ID, files): bounded ISO9660 directory inspection, independent of the image filename."""
     try:
         with Path(path).open("rb") as source:
             length = source.seek(0, 2)
@@ -99,8 +146,9 @@ def ps2_disc_files(path):
                     raise ValueError("truncated ISO extent")
                 return data
             pvd = read(16 * 2048, 2048)
-            if pvd[:7] != b"\x01CD001\x01" or pvd[8:40].rstrip() != b"PLAYSTATION":
-                return set()
+            if pvd[:7] != b"\x01CD001\x01":
+                return None, set()
+            system = pvd[8:40].rstrip(b" \0")
             stack = [("", struct.unpack_from("<I", pvd, 158)[0], struct.unpack_from("<I", pvd, 166)[0])]
             seen, files = set(), set()
             records, total = 0, 0
@@ -111,7 +159,7 @@ def ps2_disc_files(path):
                 seen.add(lba)
                 total += size
                 if len(seen) > 4096 or size > 4 << 20 or total > 16 << 20 or len(prefix) > 4096:
-                    return set()
+                    return system, set()
                 data = read(lba * 2048, size)
                 off = 0
                 while off < len(data):
@@ -120,15 +168,15 @@ def ps2_disc_files(path):
                         off = (off // 2048 + 1) * 2048
                         continue
                     if size < 34 or off + size > len(data):
-                        return set()
+                        return system, set()
                     records += 1
                     if records > 65536:
-                        return set()
+                        return system, set()
                     rec = data[off:off + size]
                     off += size
                     n = rec[32]
                     if n + 33 > len(rec):
-                        return set()
+                        return system, set()
                     name = rec[33:33+n]
                     if name in (b"\0", b"\1"):
                         continue
@@ -139,11 +187,11 @@ def ps2_disc_files(path):
                         stack.append((full + "/", child_lba, child_size))
                     else:
                         if child_lba * 2048 + child_size > length:
-                            return set()
+                            return system, set()
                         files.add(full)
-            return files
+            return system, files
     except (OSError, ValueError, UnicodeError, struct.error):
-        return set()
+        return None, set()
 
 
 def ps2_bf2_disc(path):
@@ -159,7 +207,7 @@ def require_ps2_bf1_reference(pc_present, root, image=None):
     if not pc_present:
         return
     tree = is_ps2_lvl(ci_path(root, "COMMON/ENG/COMMON.LVL"))
-    disc = image and {"DATA/_LVL_PS2/COMMON/ENG/COMMON.LVL", "SWBFRONT.ELF", "SYSTEM.CNF"} <= ps2_disc_files(image)
+    disc = image and REQUIRED_BF1 <= ps2_disc_files(image)
     if not tree and not disc:
         raise ValueError("PC BF1 assets currently also need the BF1 PS2 gameplay reference: add its disc with --iso1 (or extract it under extracted/bf1/lvl). The PC mission/classes/collision cannot replace PS2 gameplay data.")
 

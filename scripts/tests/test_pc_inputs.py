@@ -106,7 +106,7 @@ class InputPolicy(unittest.TestCase):
             root = Path(directory)
             pc = root / 'GameData/Data/_LVL_PC'
             pc_tree(pc)
-            args = ['pack.py', '--pc2', str(pc), '--iso2', str(root / 'missing.iso')]
+            args = ['pack.py', '--pc2', str(pc), '--iso2', str(root / 'missing.iso'), '--iso-dir', str(root / 'iso'), '--out', str(root / 'dist/game')]
             with patch.object(pack, 'EXTRACTED', str(root / 'extracted')), patch.object(sys, 'argv', args), patch.object(pack, 'run') as run, contextlib.redirect_stdout(io.StringIO()):
                 with self.assertRaisesRegex(SystemExit, 'add a PS2 BF2 disc'):
                     pack.main()
@@ -147,11 +147,13 @@ class InputPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'scripts').mkdir()
-            for name in ('rebake.sh', 'console_input.py'):
+            for name in ('rebake.sh', 'console_input.py', 'input_scan.py'):
                 shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
             (root / 'engine').mkdir()
             console = root / 'extracted/bf2/lvl/DATA/_LVL_PS2'
             console_tree(console)
+            (console / 'MOVIES').mkdir()
+            (console / 'MOVIES/SHELL.MVS').touch()
             pc = root / 'pc/GameData/Data/_LVL_PC'
             pc_tree(pc)
             target = root / 'target/release'
