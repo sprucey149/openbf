@@ -1703,6 +1703,13 @@ impl BlackBox {
         alarm
     }
 
+    pub fn extend_class_names(&mut self, walk: &WalkSim) {
+        let mut ring = locked(&self.ring);
+        let names = names_of(walk);
+        ring.names.classes = names.classes;
+        ring.names.weapons = names.weapons;
+    }
+
     /// Add a `key=value` line to the header's environment list (a headless
     /// run's own settings, card DPRX's proxy).
     pub fn note_env(&mut self, key: &str, value: &str) {

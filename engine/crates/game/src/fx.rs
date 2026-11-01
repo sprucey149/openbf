@@ -700,6 +700,48 @@ impl std::fmt::Debug for Fx {
 }
 
 impl Fx {
+    pub fn extend_test_classes(&mut self, root: &Path, map_dir: &Path, game: &str, walk: &WalkSim) {
+        let added = Library::load(root, map_dir, game, &crate::roster::FACTION_ORDER);
+        if let Some(lib) = self.library.as_mut() {
+            for (key, value) in added.effects {
+                lib.effects.entry(key).or_insert(value);
+            }
+            for (key, value) in added.beams {
+                lib.beams.entry(key).or_insert(value);
+            }
+            for (key, value) in added.lightning {
+                lib.lightning.entry(key).or_insert(value);
+            }
+            for dir in added.texture_dirs {
+                if !lib.texture_dirs.contains(&dir) {
+                    lib.texture_dirs.push(dir);
+                }
+            }
+            for dir in added.model_dirs {
+                if !lib.model_dirs.contains(&dir) {
+                    lib.model_dirs.push(dir);
+                }
+            }
+        } else {
+            self.library = Some(added);
+        }
+        self.textures.retain(|_, texture| texture.is_some());
+        self.models.retain(|_, model| model.is_some());
+        if let Ok(db) =
+            crate::roster::load_classdb(&root.join("classes"), game, &crate::roster::FACTION_ORDER)
+        {
+            self.force.extend(&db, &walk.sim);
+            if let Some(lib) = self.library.as_ref() {
+                let names: Vec<_> = walk
+                    .teams
+                    .iter()
+                    .flat_map(|t| t.classes.iter().map(|c| c.name.clone()))
+                    .collect();
+                self.chunks.extend(&db, &names, &lib.model_dirs, lib.era);
+            }
+        }
+    }
+
     /// Effects over `library` (no placeholder puffs yet).
     pub fn with_library(library: Library) -> Fx {
         Fx {

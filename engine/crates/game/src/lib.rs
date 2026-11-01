@@ -11,6 +11,7 @@ pub mod bot_names;
 pub mod camera_collide;
 pub mod capture_feed;
 pub mod cheats;
+pub mod class_picker;
 pub mod classdb;
 pub mod cloth;
 pub mod collision_layers;

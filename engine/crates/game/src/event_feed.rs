@@ -525,6 +525,18 @@ impl EventFeed {
         &self.classes[usize::from(team.min(1))]
     }
 
+    pub fn extend_class_names(&mut self, walk: &crate::walk::WalkSim) {
+        for team in 0..2 {
+            for class in &walk.teams[team].classes[self.classes[team].len()..] {
+                self.classes[team].push(
+                    self.texts
+                        .class_name(&class.name)
+                        .unwrap_or_else(|| class.label.clone()),
+                );
+            }
+        }
+    }
+
     /// A shell or spawn-screen text from BF2's table by its key path
     /// (`ifs.sideselect.chooseteam`), else `fallback` - the disc's English.
     pub fn screen_text(&self, key: &str, fallback: &str) -> String {

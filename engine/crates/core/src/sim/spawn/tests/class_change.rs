@@ -1,6 +1,64 @@
 use super::*;
 use crate::soldier::GroundRules;
 
+#[test]
+fn testing_picker_preserves_team_position_tickets_and_bot_mix() {
+    for team in [0, 1] {
+        let mut s = change_sim(GroundRules::Bf2);
+        s.units[0].team = team;
+        s.units[0].spec.team = team;
+        s.battle.teams[0].alive_players = u32::from(team == 0);
+        s.battle.teams[1].alive_players = u32::from(team == 1);
+        let h = s.players[0].unwrap();
+        let position = s.units[0].soldier.pos;
+        let tickets = s.battle.teams.map(|t| t.tickets());
+        let weights = s.ai_class_weights(team);
+        let kills = s.units[0].kills;
+        s.begin_test_classes(team);
+        s.classes[usize::from(team)].push(s.classes[usize::from(team)][1].clone());
+        assert!(s.test_change_class(0, 2, true));
+        let next = s.players[0].unwrap();
+        assert_ne!(next, h);
+        let u = s.unit(next).unwrap();
+        assert_eq!(
+            (u.team, u.soldier.pos, u.spec.class, u.kills),
+            (team, position, 2, kills)
+        );
+        assert_eq!(u.health.cur, u.health.max);
+        assert!(s.is_hero(next));
+        assert_eq!(s.battle.teams.map(|t| t.tickets()), tickets);
+        assert_eq!(&s.ai_class_weights(team)[..2], &weights);
+        assert_eq!(s.ai_class_weights(team)[2], 0.0);
+        assert_eq!(s.spawn_class_indices(0, team), vec![0, 1]);
+        assert!(s.test_change_class(0, 1, false));
+        assert!(!s.is_hero(s.players[0].unwrap()));
+        assert_eq!(s.hero_class(team), None);
+        let next = s.players[0].unwrap();
+        s.units[next.index as usize].weapon.clip = 0;
+        assert!(s.test_change_class(0, 1, false));
+        assert!(s.unit(s.players[0].unwrap()).unwrap().weapon.clip > 0);
+        assert!(!s.test_change_class(0, 255, false));
+    }
+}
+
+#[test]
+fn testing_picker_keeps_the_original_hero_out_of_bot_spawns() {
+    let mut s = change_sim(GroundRules::Bf2);
+    s.heroes = Some(crate::sim::heroes::Heroes::new([Some(1), None]));
+    let weights = s.ai_class_weights(0);
+    s.begin_test_classes(0);
+    s.classes[0].push(s.classes[0][1].clone());
+    assert!(s.test_change_class(0, 2, true));
+    assert_eq!(&s.ai_class_weights(0)[..2], &weights);
+    assert_eq!(s.spawn_class_indices(0, 0), vec![0]);
+    assert!(s.test_change_class(0, 0, false));
+    assert_eq!(s.hero_class(0), Some(1));
+    assert!(s.test_change_class(0, 2, true));
+    s.units[0].alive = false;
+    s.step(&[PadState::default()]);
+    assert_eq!(s.hero_class(0), Some(1));
+}
+
 // ---- Issue #28: change class at a friendly post ------------------------
 
 /// Two classes per team: 0 a 300-health rifleman (weapon 0), 1 a

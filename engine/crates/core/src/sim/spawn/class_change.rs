@@ -20,6 +20,56 @@ fn rounds_of(u: &Unit) -> Vec<(u8, u32, u32)> {
 }
 
 impl Sim {
+    pub fn begin_test_classes(&mut self, team: u8) {
+        let t = usize::from(team.min(1));
+        let roster = (self.classes[t].len(), self.hero_class(team));
+        self.test_rosters[t].get_or_insert(roster);
+    }
+
+    pub fn test_change_class(&mut self, slot: usize, class: u8, hero: bool) -> bool {
+        let Some(h) = self.players.get(slot).copied().flatten() else {
+            return false;
+        };
+        let Some(u) = self.unit(h) else { return false };
+        let team = usize::from(u.team);
+        if !u.alive
+            || u.mount.is_some()
+            || self.outcome.is_some()
+            || usize::from(class) >= self.classes[team].len()
+        {
+            return false;
+        }
+        self.retire_saber_flights(h.index as usize);
+        self.class_change_life_ended(h);
+        self.change_class(slot, h, class, true);
+        let next = self.players[slot].unwrap();
+        let u = &mut self.units[next.index as usize];
+        u.health.cur = u.health.max;
+        self.spawn_choice[slot] = 0;
+        self.spawn_stage[slot] = SpawnStage::Accepted;
+        if hero && self.heroes.is_none() {
+            self.heroes = Some(crate::sim::heroes::Heroes::new([None; 2]));
+        }
+        if let Some(heroes) = self.heroes.as_mut() {
+            if hero || heroes.teams[team].owner == Some(next.index) {
+                heroes.classes[team] = if hero {
+                    Some(class)
+                } else {
+                    self.test_rosters[team].and_then(|(_, hero)| hero)
+                };
+                heroes.teams[team] = crate::sim::heroes::HeroTeam::default();
+                if hero {
+                    let state = &mut heroes.teams[team];
+                    state.unlocked = true;
+                    state.owner = Some(next.index);
+                    state.owner_gen = h.gen;
+                    state.spawned = true;
+                }
+            }
+        }
+        true
+    }
+
     /// The friendly post unit `i` may change class at now, if any: a live
     /// human on foot, counted inside the post's capture region (the PS2's
     /// players-inside mask, cp+0x74), the post spawnable by his team
@@ -125,7 +175,7 @@ impl Sim {
             return;
         }
         if usize::from(self.units[h.index as usize].spec.class) != c {
-            self.change_class(s, h, c as u8);
+            self.change_class(s, h, c as u8, false);
         }
         self.class_change_close(s, held);
     }
@@ -137,7 +187,13 @@ impl Sim {
     /// remembered this life, else full; the class it leaves is remembered.
     /// A new generation, as the PS2's new object (`Event::Respawn`, the
     /// member spawn `FUN_0034e1f0`).
-    pub(in crate::sim) fn change_class(&mut self, s: usize, h: UnitHandle, class: u8) {
+    pub(in crate::sim) fn change_class(
+        &mut self,
+        s: usize,
+        h: UnitHandle,
+        class: u8,
+        refill: bool,
+    ) {
         let i = h.index as usize;
         let old = &self.units[i];
         let team = old.team;
@@ -153,7 +209,11 @@ impl Sim {
         let memory = &mut self.class_ammo[s];
         memory.retain(|m| m.class != leaving.class);
         memory.push(leaving);
-        let back = memory.iter().find(|m| m.class == class).cloned();
+        let back = if refill {
+            None
+        } else {
+            memory.iter().find(|m| m.class == class).cloned()
+        };
 
         let old = &self.units[i];
         let base = self.bot_skill(team);

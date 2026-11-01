@@ -87,6 +87,11 @@ pub(super) struct State {
 }
 
 impl State {
+    pub fn extend(&mut self, db: &ClassDb, sim: &Sim) {
+        let mut added = Self::load(db, sim);
+        self.looks.extend(added.looks.drain(self.looks.len()..));
+    }
+
     pub fn load(db: &ClassDb, sim: &Sim) -> Self {
         Self {
             looks: sim

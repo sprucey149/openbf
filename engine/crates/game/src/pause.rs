@@ -10,6 +10,17 @@ pub const RESPAWN_LABEL_KEY: &str = "game.pause.suicide";
 pub struct PauseMenu {
     pub cursor: usize,
     pub confirm: bool,
+    pub class_picker: bool,
+    pub class_tab: usize,
+}
+
+impl PauseMenu {
+    pub fn class_picker_model(&self, walk: &WalkSim) -> Option<ui::menu::ClassPickerModel> {
+        if !self.class_picker {
+            return None;
+        }
+        walk.class_picker.as_ref().map(|p| p.model(self.class_tab))
+    }
 }
 
 /// Apply a pause-menu action to the battle/session.
@@ -21,7 +32,40 @@ pub fn apply_menu_action(
 ) {
     use ui::menu::MenuAction;
     match a {
+        MenuAction::SetClassTab(tab) => {
+            if *paused && menu.class_picker && tab < crate::class_picker::TABS.len() {
+                menu.class_tab = tab;
+                menu.cursor = 0;
+            }
+        }
+        MenuAction::OpenClassPicker => {
+            if *paused && crate::class_picker::ClassPicker::available(walk) {
+                if let Some(picker) = walk.class_picker.as_mut() {
+                    picker.load();
+                    menu.class_picker = true;
+                    menu.confirm = false;
+                    menu.cursor = 0;
+                }
+            }
+        }
+        MenuAction::CloseClassPicker => {
+            menu.class_picker = false;
+            menu.cursor = 0;
+        }
+        MenuAction::SelectClass(i) => {
+            if *paused && menu.class_picker {
+                if let Some(mut picker) = walk.class_picker.take() {
+                    if picker.select(walk, i) {
+                        menu.class_picker = false;
+                        menu.cursor = 0;
+                        *paused = false;
+                    }
+                    walk.class_picker = Some(picker);
+                }
+            }
+        }
         MenuAction::Resume => {
+            menu.class_picker = false;
             menu.confirm = false;
             *paused = false;
         }

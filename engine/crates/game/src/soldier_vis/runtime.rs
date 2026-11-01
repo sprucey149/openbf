@@ -19,6 +19,62 @@ use std::path::Path;
 pub const JET_BONE: &str = "bone_ribcage";
 
 impl SoldierVisuals {
+    pub fn append_test_class(
+        &mut self,
+        r: &mut Renderer,
+        root: &Path,
+        walk: &WalkSim,
+        request: &crate::walk::ClassAssetRequest,
+    ) {
+        let crate::walk::ClassAssetRequest { team, class, game } = *request;
+        let teams = request.templates(walk);
+        let mut added = Self::load(r, root, game, &teams);
+        let bodies = self.assets.len();
+        let weapons = self.weapons.len();
+        for draw in &mut added.per_class[team] {
+            draw.body = draw.body.map(|b| b + bodies);
+            draw.weapon = draw.weapon.map(|w| w + weapons);
+        }
+        for held in &mut added.held[team] {
+            for (_, model) in held {
+                *model = model.map(|w| w + weapons);
+            }
+        }
+        self.assets.extend(added.assets);
+        self.weapons.extend(added.weapons);
+        self.per_class[team].append(&mut added.per_class[team]);
+        self.held[team].append(&mut added.held[team]);
+        self.anim[team].append(&mut added.anim[team]);
+        self.skins[team].append(&mut added.skins[team]);
+        self.sabers[team].resize_with(class, || None);
+        self.sabers[team].push(added.sabers[team].pop().flatten());
+        let mut cache = HashMap::new();
+        for weapon in &walk.sim.weapon_classes[self.grenades.len()..] {
+            let model = weapon.ordnance.geometry.as_deref().map(|name| {
+                let index = self.weapons.len();
+                self.weapons.push(Self::load_weapon(
+                    Some(&mut *r),
+                    root,
+                    game,
+                    name,
+                    &mut cache,
+                ));
+                index
+            });
+            self.grenades.push(model);
+        }
+        self.sync_units(walk);
+        for (v, u) in self.units.iter_mut().zip(&walk.sim.units) {
+            if usize::from(u.team) == team && usize::from(u.spec.class) == class {
+                *v = UnitVisual {
+                    gen: u.gen,
+                    ..Default::default()
+                };
+            }
+        }
+        self.update(walk, 0.0);
+    }
+
     /// Load the battle's soldier models and install its turret and walker rigs.
     pub fn for_walk(
         r: &mut Renderer,

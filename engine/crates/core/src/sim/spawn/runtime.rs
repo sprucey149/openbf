@@ -796,15 +796,16 @@ impl Sim {
         let table = &self.classes[usize::from(team.min(1))];
         let cap = self.ai_limit(team).max(1) as f32;
         let hero = self.hero_class(team).map(usize::from);
-        let ordinary = table.len() - usize::from(hero.is_some());
-        let parts: f32 = (0..table.len())
-            .filter(|c| Some(*c) != hero)
-            .map(class_share)
-            .sum();
+        let (len, hero) = self.test_rosters[usize::from(team.min(1))]
+            .map_or((table.len(), hero), |(len, hero)| {
+                (len, hero.map(usize::from))
+            });
+        let ordinary = len - usize::from(hero.is_some());
+        let parts: f32 = (0..len).filter(|c| Some(*c) != hero).map(class_share).sum();
         let floor = CLASS_FLOOR * cap / ordinary.max(1) as f32;
         (0..table.len())
             .map(|c| {
-                if Some(c) == hero {
+                if c >= len || Some(c) == hero {
                     return 0.0;
                 }
                 let alive = self
@@ -1220,6 +1221,14 @@ impl Sim {
     /// Class membership, shared by the carousel, UI and unforced respawn.
     /// Ordinary unlock costs remain the separate confirmation refusal.
     pub fn spawn_class_available(&self, s: usize, team: u8, class: usize) -> bool {
+        if let Some((len, hero)) = self.test_rosters[usize::from(team.min(1))] {
+            if class >= len
+                || (hero.map(usize::from) == Some(class)
+                    && self.hero_class(team).map(usize::from) != Some(class))
+            {
+                return false;
+            }
+        }
         if class >= self.classes[usize::from(team.min(1))].len() {
             return false;
         }

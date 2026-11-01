@@ -489,6 +489,18 @@ pub(super) struct Chunks {
 }
 
 impl Chunks {
+    pub(super) fn extend(
+        &mut self,
+        db: &ClassDb,
+        names: &[String],
+        dirs: &[std::path::PathBuf],
+        era: Era,
+    ) {
+        for (name, pieces) in Self::load(db, names, dirs, era).defs {
+            self.defs.entry(name).or_insert(pieces);
+        }
+    }
+
     pub(super) fn load(
         db: &ClassDb,
         names: &[String],

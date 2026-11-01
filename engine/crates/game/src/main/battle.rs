@@ -164,10 +164,7 @@ fn team_templates(
                         if c.jet { "  [jet pack]" } else { "" }
                     );
                     table.push(uc);
-                    let mut visual = game::walk::ClassVisual::from_roster(c);
-                    visual.held_hud = c.held.iter().map(|h| (h.slot, h.hud.clone())).collect();
-                    visual.held_models = c.held.iter().map(|h| (h.slot, h.geometry.clone())).collect();
-                    visuals.push(visual);
+                    visuals.push(game::walk::ClassVisual::from_roster_with_held(c));
                 }
                 sim.classes[team] = table;
                 team += 1;
@@ -327,6 +324,7 @@ pub(super) fn make_walk_with_counts(
     walk.conquest_defaults = defaults;
     walk.team_size_pct = b.team_size_pct.unwrap_or(100);
     walk.reinforcement_pct = b.ticket_pct;
+    walk.class_picker = Some(game::class_picker::ClassPicker::new(&b.classes_dir, scene));
     // Model collision: the scene has already had its mode layer applied (see
     // `Scene::collision_world` — building it earlier misses every BF2 conquest
     // instance).
