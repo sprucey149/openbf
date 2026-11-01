@@ -31,6 +31,23 @@ fn second_jump_captures_direction_and_native_restart_gate() {
     }
 }
 
+#[test]
+fn wrapped_jump_serial_still_hashes_the_direction_used_by_restart_gating() {
+    let bytes = |s: &Soldier| {
+        let mut bytes = Vec::new();
+        s.hash_into(&mut |part: &[u8]| bytes.extend_from_slice(part));
+        bytes
+    };
+    let mut s = Soldier::new(Vec3::ZERO);
+    let plain = bytes(&s);
+    s.jump_animation_serial = 0;
+    s.jump_animation = Some(2);
+    let backward = bytes(&s);
+    s.jump_animation = Some(3);
+    assert_ne!(bytes(&s), backward);
+    assert_ne!(backward, plain);
+}
+
 const FWD: i16 = 32767;
 
 /// BF2 `imp_inf_dark_trooper` (the rebel trial class's run and jump).

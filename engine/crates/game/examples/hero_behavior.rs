@@ -7,14 +7,19 @@ use std::path::Path;
 
 fn main() -> Result<()> {
     let args: Vec<_> = std::env::args().collect();
-    let root = Path::new(&args[1]);
-    let out = Path::new(&args[3]);
-    let hero = &args[4];
-    let fps: u32 = args[5].parse()?;
-    let before = args.get(6).is_some_and(|s| s == "before-order");
-    let only = args.get(7).map(String::as_str);
+    let [_, root, map, out, hero, fps, options @ ..] = args.as_slice() else {
+        anyhow::bail!(
+            "usage: hero_behavior <baked-root> <map> <output-dir> <hero-class> <fps> [before-order|after-order] [only]"
+        );
+    };
+    let fps: u32 = fps.parse()?;
+    anyhow::ensure!((1..=1000).contains(&fps), "fps must be between 1 and 1000");
+    let root = Path::new(root);
+    let out = Path::new(out);
+    let before = options.first().is_some_and(|s| s == "before-order");
+    let only = options.get(1).map(String::as_str);
     std::fs::create_dir_all(out)?;
-    let (scene, _) = game::assets::load_battle_scene(&root.join(&args[2]), "con")?;
+    let (scene, _) = game::assets::load_battle_scene(&root.join(map), "con")?;
     let mut walk = WalkSim::new(198, Vec3::ZERO, None);
     walk.sim.ground_rules = if scene.manifest.source_game == "bf1" {
         core::soldier::GroundRules::Bf1
@@ -231,7 +236,7 @@ fn main() -> Result<()> {
     std::fs::write(
         out.join("frames.json"),
         serde_json::to_vec_pretty(&serde_json::json!({
-        "build":env!("OPENBF_BUILD_COMMIT"),"dirty":env!("OPENBF_BUILD_DIRTY"),"map":args[2],"hero":hero,"fps":fps,
+        "build":env!("OPENBF_BUILD_COMMIT"),"dirty":env!("OPENBF_BUILD_DIRTY"),"map":map,"hero":hero,"fps":fps,
         "renderer_order":if before {"reconstructed 1930789 live order: animate before blend"} else {"production Fx::advance_frame"},
         "map_rules":format!("{:?}",walk.sim.ground_rules),
         "intervention":"existing ClassPicker::select; flat diagnostic ground; reset actor per action; Force cases use infinite stamina and stationary 3000 HP dummy targets",

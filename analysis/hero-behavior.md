@@ -1,7 +1,7 @@
 # BF2 hero movement and animation fidelity
 
-Work item: HERO_BEHAVIOR. Owner: maintainer-directed Codex session, 2026-11-01.
-Branch: `codex/bf2-hero-behavior`, based on `b5ca5cb` with its existing pause picker.
+Work item: HERO_BEHAVIOR, 2026-11-01.
+Baseline: `b5ca5cb`, including the existing pause picker.
 Status: implemented; original-game visual acceptance remains open.
 
 Scope: moving saber attacks; moving block and its exit; solid-ceiling containment
@@ -153,13 +153,24 @@ claimed. The retained class-picker loading stalls are separate.
 
 Distribution refresh and final check results are recorded below after completion.
 
+## Integration review follow-up
+
+Restarting a custom action can reuse its current clip. A reset of the authored
+combo clock now also restarts both layer players' blend clocks, so repeated
+attacks blend into their opening frame instead of snapping there. The active
+jump direction stays in the deterministic hash when the jump serial wraps to
+zero. Ordinary soldiers with no directional jump retain their previous hash.
+
+The `hero_behavior` capture example requires five arguments and a frame rate
+between 1 and 1000; malformed invocations fail before loading or writing assets.
+
 ## Follow-up: hero combos, sustained Force powers and sprint (1930789)
 
 The maintainer's six follow-up reports remain part of this hero-behavior work item:
 Aayla's uneven saber combo, repeated held cast wind-ups, Force lightning resembling
 an Arc Caster shot, a frozen choke victim, incorrect Force push reactions, and hero
-sprint animation/movement/camera fidelity. The checkout was clean on
-`codex/bf2-hero-behavior` at `193078918b7e` when this investigation began.
+sprint animation/movement/camera fidelity. The checkout was clean at
+`193078918b7e` when this investigation began.
 
 ### Evidence boundaries
 
@@ -197,7 +208,7 @@ actions. That comparison and the maintainer's windowed playtest remain open.
 | Held casts replay the whole animation | `CastClock` expired after the clip and a later Ability event started it again. Custom `Loop("FinalFrame")` metadata was collapsed into ordinary non-looping metadata. It now retains the authored last frame while that weapon is firing and held, then clears on release. The caster starts from the weapon's firing transition, including its wind-up, rather than waiting for the first emitted shot. Choke's existing held-channel behavior stays separate. |
 | Force lightning looks like one Arc Caster shot | PS2 really does reference the same `com_sfx_lightning` asset, but Force authors intensity 0.15, five minimum bolts and angular spread 0.4. The port read spread from 0xce532e64 (an unrelated field at native class+0x10c); native parser 0x3156e0 maps **0xdd09f94e** to the spread at +0xcc. Five bolts consequently overlapped on one line. The correct property now fans the bolts out. First links follow the posed casting hand, and child-strand seeds refresh per display frame without consuming sim RNG. The Arc Caster path is unchanged. |
 | Choke victim freezes | `Animator::status_pose` always sampled a non-looping clip, clamping to its last frame. It now repeats the authored BF2 `(frames-1)/30` period, and the victim's presentation age interpolates between ticks and restores exactly. Damage, target hold, lift and release gameplay are unchanged. |
-| Force push distance/count/reactions | The emitter applied a flat normalized horizontal/radial shove through the map's knock rules. Native emitter 0x315f78 calls soldier vtable+0x90 (0x238b80) with inner radius `range*0.5`, outer radius `range*2`, and the authored push strength; 0x268fe0 subtracts half the scaled body radius for falloff, and 0x238b80 adds 0.6 up before BF2 knock dispatch. The positive Force push now uses that path's geometry, falloff and BF2 thrown/tumble selection on either disc's maps. Its authored cone, LOS, relations and four-target cap are retained and exercised with five candidates. Ordinary blast push deviations, saber knock and negative Force pull are unchanged. |
+| Force push distance/count/reactions | The emitter applied a flat normalized horizontal/radial shove through the map's knock rules. Native emitter 0x315f78 calls soldier vtable+0x90 (0x238b80) with inner radius `range*0.5`, outer radius `range*2`, and the authored push strength; 0x268fe0 subtracts half the scaled body radius for falloff, and 0x238b80 adds 0.6 up before BF2 knock dispatch. The positive Force push now uses that path's geometry, falloff and BF2 thrown/tumble selection on either disc's maps. Its authored cone, LOS, relations and four-target cap are retained and exercised with five candidates. Negative Force pull now replaces the target's momentum and scales from a point beyond it, through the same BF2 reaction. Ordinary blast push deviations and saber knock are unchanged. |
 | Hero sprint feels wrong | The game ignored inherited `ControlSpeed sprint` rows. Jedi used 1.5 forward instead of their authored 2.5; Vader, Yoda and Grievous also have their own rows. Sprint forward/strafe factors now load by stance through the class chain, preserving the approved turn factor. BF2 sprint playback uses planar speed divided by the lower sprint clip's root speed, without locomotion easing or root-scale division (0x27caf0 case 0). Hero camera sections also load from their class chain: common Jedi stand is eye 2.0/back 5.2, sprint eye 1.8/back 4.0. The old infantry stand back 3.2 reversed the camera change. Infantry camera settings and the player's FOV option remain intact. |
 
 All authored non-1.5 sprint rows in the retained class bake belong to Jedi/hero
@@ -242,26 +253,15 @@ Final validation for this follow-up:
 - `cargo fmt --all --check` and `git diff --check` pass. Clippy for core/game and
   all targets passes with `-D warnings -A clippy::let-and-return`; that exception
   is the existing `force_can_target` return-local lint, not a newly allowed lint.
-- Release `game` and `hero_behavior` were rebuilt. No asset format or bake
-  interpretation changed, so no assets required rebaking. The current complete
-  `engine/assets_baked` and `engine/missions` were packed using release
-  `game.exe --write-pack` to `dist/openbf.hero-behavior.tmp.exe`.
-- The staged executable successfully loaded embedded BF2 Mos Eisley from the
-  dist working directory with `--map assets_baked/tat2 --headless --scene-report`:
-  2708 draws, 727 instances, zero untextured/dangling draws. After that success it
-  replaced **`E:/Projects/openbf/dist/openbf.exe`**. The installed pack contains
-  24,574 files and is 2,908,633,842 bytes. Its build is **193078918b7e+dirty**.
-  The SHA-256 record and pack/smoke logs are in the phase2 artifact folder.
-- `dist/openbf_data` was preserved. The current maintainer `last.json` still has
-  the same SHA-256 as `phase2/baseline-last.json`. No commit, push or PR operation
-  was performed; changes remain on `codex/bf2-hero-behavior` for playtesting.
+- Release `game` and `hero_behavior` were rebuilt. The stored assets were not
+  rebaked for this check; a new bake also lends `human_choking` to BF1 soldiers
+  through `BORROWED_BF2_STATUS`. A pack of the existing `engine/assets_baked` and
+  `engine/missions` loaded embedded BF2 Mos Eisley with `--map assets_baked/tat2
+  --headless --scene-report`: 2708 draws, 727 instances, zero untextured or
+  dangling draws. The pack held 24,574 files and was 2,908,633,842 bytes.
 
-Local clips:
-[Aayla old-order control / production, 75 FPS](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/aayla-render-order-comparison.mp4),
-[Aayla sprint](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/aayla-sprint.mp4),
-[Dooku lightning](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/dooku-lightning.mp4),
-[Dooku choke](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/dooku-choke.mp4),
-[Obi-Wan push](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/obiwan-push.mp4).
+The clips, traces and pack logs of this investigation stayed on the contributor's
+machine and are not in the repository.
 
 The requested maintainer playtest and full matched PS2 visual comparisons remain
 the fidelity acceptance gap; passing these checks is not a claim of final parity.

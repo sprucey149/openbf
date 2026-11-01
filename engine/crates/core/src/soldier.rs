@@ -1440,6 +1440,13 @@ impl Soldier {
         }
     }
 
+    /// A hold takes him out of whatever he was doing, a throw's state included.
+    pub fn catch_upright(&mut self) {
+        if self.stance != Stance::Stand {
+            self.set_stance(Stance::Stand);
+        }
+    }
+
     /// A death's kick: [`DEATH_KICK`] m/s along `dir` (§3).
     pub fn kick(&mut self, dir: Vec3) {
         self.vel += dir.normalize_or_zero() * DEATH_KICK;
@@ -1864,7 +1871,7 @@ impl Soldier {
             eat(b"SOLDIER_FUEL");
             eat(&self.fuel.to_bits().to_le_bytes());
         }
-        if self.jump_animation_serial != 0 {
+        if self.jump_animation.is_some() || self.jump_animation_serial != 0 {
             eat(b"HERO_JUMP");
             eat(&[self.jump_animation.unwrap_or(u8::MAX)]);
             eat(&self.jump_animation_serial.to_le_bytes());

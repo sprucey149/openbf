@@ -890,12 +890,8 @@ impl SoldierVisuals {
             }
             if let Some(choked) = u.choked {
                 let family = anim.map_or("human", |a| &a.family);
-                v.animator.status_pose(
-                    &sa.asset.clips,
-                    &sa.asset.skeleton,
-                    family,
-                    choked.age,
-                );
+                v.animator
+                    .status_pose(&sa.asset.clips, &sa.asset.skeleton, family, choked.age);
             }
         }
         v.cast.advance(dt);

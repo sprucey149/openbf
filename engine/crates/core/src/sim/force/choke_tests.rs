@@ -34,6 +34,20 @@ fn choke_damages_an_exposed_rider_without_forcing_the_seated_actor_into_choked()
 }
 
 #[test]
+fn choke_catching_a_force_thrown_victim_leaves_the_throw_state_behind() {
+    let (mut sim, owner) = choke();
+    let target = victim(&mut sim, 4.0, 0.0);
+    let soldier = &mut sim.unit_mut(target).unwrap().soldier;
+    soldier.force_knock(Vec3::Y, 30.0, 0.0);
+    soldier.time_in_stance = 1.0;
+    assert_eq!(soldier.stance, crate::soldier::Stance::Thrown);
+    sim.force_input(owner.index as usize, None, true, false);
+    let soldier = &sim.unit(target).unwrap().soldier;
+    assert_eq!(soldier.stance, crate::soldier::Stance::Stand);
+    assert_eq!(soldier.time_in_stance, 0.0);
+}
+
+#[test]
 fn held_choke_does_not_acquire_a_late_target_and_release_allows_a_new_cast() {
     let (mut sim, owner) = choke();
     sim.force_input(owner.index as usize, None, true, false);

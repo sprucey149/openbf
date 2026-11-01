@@ -7,6 +7,7 @@ pub(super) struct ComboPose {
     lower: Option<Slot>,
     seconds: f32,
     force: bool,
+    restart: bool,
     legs: bool,
     transition: [Option<f32>; 2],
 }
@@ -14,6 +15,10 @@ pub(super) struct ComboPose {
 impl ComboPose {
     pub(super) fn forced(&self) -> bool {
         self.force
+    }
+
+    pub(super) fn restarting(&self) -> bool {
+        self.restart
     }
 }
 
@@ -98,12 +103,14 @@ impl Animator {
                 .as_ref()
                 .and_then(|old| class.custom.blend_to(&old.name, animation, upper))
         });
+        let restart = self.combo.as_ref().is_some_and(|old| seconds < old.seconds);
         self.combo = Some(ComboPose {
             name: animation.into(),
             upper,
             lower,
             seconds,
             force,
+            restart,
             legs,
             transition,
         });
@@ -139,7 +146,8 @@ impl Animator {
     }
 
     pub(super) fn combo_clock(&mut self, clips: &[Clip], upper: bool, lower: bool) {
-        let Some(combo) = &self.combo else { return };
+        let Some(combo) = &mut self.combo else { return };
+        combo.restart = false;
         for (player, active) in [(&mut self.upper, upper), (&mut self.lower, lower)] {
             if active {
                 let Some(slot) = player.slot else { continue };

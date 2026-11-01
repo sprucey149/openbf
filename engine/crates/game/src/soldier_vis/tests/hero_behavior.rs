@@ -359,7 +359,9 @@ fn test_choke_victim_has_animation() {
         cutters: vec![],
     };
     let mut walk = WalkSim::new(198, Vec3::ZERO, None);
-    let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["all", "rep", "cis", "imp"]).unwrap();
+    let db =
+        crate::roster::load_classdb(&root.join("classes"), "bf2", &["all", "rep", "cis", "imp"])
+            .unwrap();
     let base = crate::roster::ClassRoster::build(&db, "all_inf_rifleman", 0, None)
         .unwrap()
         .register(&mut walk.sim, &mut vec![]);
@@ -392,19 +394,43 @@ fn test_choke_victim_has_animation() {
     vis.update(&walk, 1.0 / 60.0);
 
     let sa = vis.asset_for(1, 0).expect("victim asset exists");
-    let choke_clip = sa.asset.clips.iter().find(|c| c.name == "human_choking").unwrap();
+    let choke_clip = sa
+        .asset
+        .clips
+        .iter()
+        .find(|c| c.name == "human_choking")
+        .unwrap();
     let sample = choke_clip.sample(&sa.asset.skeleton, 15.0, false);
-    let pose = vis.units[victim.index as usize].animator.pose(&sa.asset.skeleton);
+    let pose = vis.units[victim.index as usize]
+        .animator
+        .pose(&sa.asset.skeleton);
     assert_eq!(pose.0, sample.0, "BF2 victim should match human_choking");
 
     // BF1 soldier has no human_choking clip; verify status_pose falls back to flail:
-    let bf1_clip = sa.asset.clips.iter().find(|c| c.name.contains("flail")).unwrap();
+    let bf1_clip = sa
+        .asset
+        .clips
+        .iter()
+        .find(|c| c.name.contains("flail"))
+        .unwrap();
     let mut animator = crate::animator::Animator::default();
     // Simulate BF1 clips list (without human_choking):
-    let bf1_clips: Vec<_> = sa.asset.clips.iter().filter(|c| !c.name.contains("choking")).cloned().collect();
+    let bf1_clips: Vec<_> = sa
+        .asset
+        .clips
+        .iter()
+        .filter(|c| !c.name.contains("choking"))
+        .cloned()
+        .collect();
     assert!(animator.status_pose(&bf1_clips, &sa.asset.skeleton, "human", 0.5));
     let pose_bf1 = animator.pose(&sa.asset.skeleton);
-    let flail_sample = bf1_clip.sample(&sa.asset.skeleton, 15.0 % (bf1_clip.frames.saturating_sub(1).max(1) as f32), false);
-    assert_eq!(pose_bf1.0, flail_sample.0, "BF1 victim should match flail fallback sample");
+    let flail_sample = bf1_clip.sample(
+        &sa.asset.skeleton,
+        15.0 % (bf1_clip.frames.saturating_sub(1).max(1) as f32),
+        false,
+    );
+    assert_eq!(
+        pose_bf1.0, flail_sample.0,
+        "BF1 victim should match flail fallback sample"
+    );
 }
-

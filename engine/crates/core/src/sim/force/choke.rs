@@ -231,7 +231,7 @@ impl Sim {
                             ))
                     {
                         victim.choked.get_or_insert_with(Default::default).left = 0.5;
-                        victim.soldier.stance = crate::soldier::Stance::Stand;
+                        victim.soldier.catch_upright();
                         victim.soldier.yaw = crate::fmath::atan2(-direction.x, -direction.z);
                     }
                 }

@@ -222,6 +222,48 @@ fn custom_actions_release_legs_until_next_action_and_keep_authored_full_body_mov
     assert_ne!(r.a.upper_clip(), Some(9));
 }
 
+#[test]
+fn restarting_the_same_combo_clip_restarts_its_blend_clock() {
+    use manifest::combo::{ComboDef, ComboField, ComboKeyword as K, ComboValue as V};
+    let mut r = Run::new(rig_bf2());
+    r.clips.push(clip(9, "human_rifle_swing_full", 31, false));
+    r.rig.root.push(Some([0.0, 0.0]));
+    let mut class = ClassAnim {
+        family: "human".into(),
+        ..Default::default()
+    };
+    class.custom.register(&ComboDef {
+        name_hash: 0,
+        fields: vec![ComboField {
+            keyword: K::Animation,
+            args: vec![V::Text("swing".into())],
+            scoped: true,
+            children: [K::BlendInTime, K::BlendOutTime]
+                .map(|keyword| ComboField {
+                    keyword,
+                    args: vec![V::Number(0.2)],
+                    scoped: false,
+                    children: Vec::new(),
+                })
+                .to_vec(),
+        }],
+    });
+    for time in [0.2, 0.4, 0.6] {
+        r.a.combo_pose(&r.clips, &class, "saber", "swing", time, false, false);
+        r.a.step(&r.rig, &r.clips, &r.skel, &input(0.0), DT);
+    }
+    let before = r.a.kept_pose(&r.skel);
+    r.a.combo_pose(&r.clips, &class, "saber", "swing", 0.0, false, false);
+    r.a.step(&r.rig, &r.clips, &r.skel, &input(0.0), DT);
+    let after = r.a.kept_pose(&r.skel);
+    for bone in [ARM, LEG] {
+        // The first frame of clip 9 is x=1000. A fresh authored blend
+        // approaches it from the old pose instead of snapping to it.
+        let shown = after.0[bone].translation.x;
+        assert!(shown > 1006.0 && shown < before.0[bone].translation.x);
+    }
+}
+
 struct Run {
     rig: Rig,
     clips: Vec<Clip>,

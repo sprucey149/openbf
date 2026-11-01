@@ -1461,6 +1461,9 @@ impl Animator {
         };
         let legs = self.action.is_some_and(|a| a.legs);
         let (combo_up, combo_low) = self.combo_slots(rig, i);
+        // A restarted custom action may reuse the same clip. Its authored
+        // clock resets independently of the ordinary weapon-action edges.
+        let combo_restart = self.combo.as_ref().is_some_and(|c| c.restarting());
         up = combo_up.or(up);
         low = combo_low.or(low);
         let jump_restart = self
@@ -1476,7 +1479,9 @@ impl Animator {
                 rig,
                 s,
                 false,
-                (restart && legs) || (jump_restart && combo_low.is_none()),
+                (restart && legs)
+                    || (jump_restart && combo_low.is_none())
+                    || (combo_restart && combo_low.is_some()),
                 phase,
             );
             if combo_low.is_some() {
@@ -1491,7 +1496,9 @@ impl Animator {
                 rig,
                 s,
                 true,
-                restart || (jump_restart && combo_up.is_none()),
+                restart
+                    || (jump_restart && combo_up.is_none())
+                    || (combo_restart && combo_up.is_some()),
                 phase,
             );
             if combo_up.is_some() {
