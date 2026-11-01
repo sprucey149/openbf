@@ -380,6 +380,8 @@
 //! Run settings, all optional (stderr only: stdout is unchanged with them):
 //! - `SWEEP_TEAMS=<t0>:<t1>` sets each team's tier (`Sim::team_difficulty`);
 //! - `SWEEP_ERA=cw` reads `missions/<key>_con_cw.ron` where there is one;
+//! - `SWEEP_FLYER_TRACE=1` adds a per-second line per ridden flyer, with
+//!   `OPENBF_FLYER_BOTS=1`, to the flyer census row;
 //! - `SWEEP_MISSION_DIR=<dir>` reads the missions from another folder (the
 //!   faction-swap copies of a balance run);
 //! - `SWEEP_PROXY=<team>:<average|good>[,skill=N][,reaction=TICKS]
@@ -4047,6 +4049,119 @@ fn stuck_census(
     out
 }
 
+/// `OPENBF_FLYER_BOTS=1`: what bots did in flyers (`core::ai::flyer_drive`).
+#[derive(Default)]
+struct FlyerCensus {
+    was: Vec<(core::vehicle::flyer::FlightPhase, bool, bool)>,
+    boarded: u32,
+    took_off: u32,
+    air_ticks: u64,
+    low: Option<f32>,
+    /// Airborne ticks under the terrain where no cut or hangar opens it.
+    buried: u64,
+    buried_worst: Option<(f32, glam::Vec3)>,
+    high: f32,
+    top: f32,
+    falls: u32,
+    deaths: u32,
+    shots: u32,
+    kills: u32,
+}
+
+impl FlyerCensus {
+    fn observe(&mut self, sim: &core::sim::Sim) {
+        use core::vehicle::flyer::FlightPhase;
+        use core::vehicle::VehicleKind;
+        let trace = std::env::var_os("SWEEP_FLYER_TRACE").is_some();
+        self.was
+            .resize(sim.vehicles.len(), (FlightPhase::Landed, false, true));
+        for (i, v) in sim.vehicles.iter().enumerate() {
+            if v.kind != VehicleKind::Flyer {
+                continue;
+            }
+            let (phase, held, alive) = self.was[i];
+            let pilot = v.seats.first().is_some_and(|s| s.occupant.is_some());
+            self.boarded += u32::from(pilot && !held);
+            self.took_off +=
+                u32::from(phase == FlightPhase::Landed && v.flyer.phase == FlightPhase::Takeoff);
+            self.falls +=
+                u32::from(phase != FlightPhase::Falling && v.flyer.phase == FlightPhase::Falling);
+            self.deaths += u32::from(alive && !v.alive);
+            if trace && !v.is_empty() && sim.tick.is_multiple_of(30) {
+                let over = sim
+                    .heightfield
+                    .as_ref()
+                    .map_or(0.0, |h| v.pos.y - h.height_at(v.pos.x, v.pos.z));
+                eprintln!(
+                    "flyer {i} t{} {:?} {:?} pos {:.0},{:.1},{:.0} over {over:.1} v {:.1} in thr {:.2} turn {:.2} pitch {:.2} goal {:?} hp {:.0}",
+                    sim.tick / 30,
+                    v.flyer.phase,
+                    v.flyer.ai.agent,
+                    v.pos.x,
+                    v.pos.y,
+                    v.pos.z,
+                    v.vel.length(),
+                    v.input.throttle,
+                    v.input.turn,
+                    v.input.pitch,
+                    v.flyer.ai.goal.map(|g| (g.x as i32, g.y as i32, g.z as i32)),
+                    v.health.cur,
+                );
+            }
+            if v.alive && v.flyer.phase == FlightPhase::Flying {
+                self.air_ticks += 1;
+                if let Some(h) = sim.heightfield.as_ref() {
+                    let over = v.pos.y - h.height_at(v.pos.x, v.pos.z);
+                    self.low = Some(self.low.map_or(over, |l| l.min(over)));
+                    let surface = glam::Vec3::new(v.pos.x, v.pos.y - over, v.pos.z);
+                    if over < 0.0 && !sim.collision.is_cut(surface) {
+                        self.buried += 1;
+                        if self.buried_worst.is_none_or(|(w, _)| over < w) {
+                            self.buried_worst = Some((over, v.pos));
+                        }
+                    }
+                    self.high = self.high.max(over);
+                }
+                self.top = self.top.max(v.vel.length());
+            }
+            self.was[i] = (v.flyer.phase, pilot, v.alive);
+        }
+        let in_flyer = |h: core::unit::UnitHandle| {
+            sim.unit(h)
+                .and_then(|u| u.mount)
+                .and_then(|m| sim.vehicle(m.vehicle))
+                .is_some_and(|v| v.kind == VehicleKind::Flyer)
+        };
+        for ev in &sim.events {
+            match *ev {
+                core::sim::Event::Shot { unit, .. } if in_flyer(unit) => self.shots += 1,
+                core::sim::Event::Kill { shooter, .. } => {
+                    self.kills += u32::from(in_flyer(shooter));
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn line(&self, key: &str) -> String {
+        format!(
+            "flyers {key}: boarded {} took-off {} airborne {:.0} s clearance {:.1}..{:.1} m buried {} ticks worst {:?} top {:.1} m/s falls {} deaths {} shots {} kills {}",
+            self.boarded,
+            self.took_off,
+            self.air_ticks as f32 / core::TICK_HZ as f32,
+            self.low.unwrap_or(0.0),
+            self.high,
+            self.buried,
+            self.buried_worst,
+            self.top,
+            self.falls,
+            self.deaths,
+            self.shots,
+            self.kills,
+        )
+    }
+}
+
 /// Play one map's round and BUILD its output instead of printing it, so the
 /// maps can run on worker threads and still print in discovery order.
 fn run_map(
@@ -4266,6 +4381,8 @@ fn run_map(
     if let Some(a) = &applied {
         w.sim.death_regions = a.death_regions.clone();
         w.sim.fly_ceiling = a.fly_ceiling;
+        w.sim.flight_limits = a.flight_limits;
+        w.sim.ground_flyer_map = mission.as_ref().is_some_and(|m| m.ground_flyer_map);
     }
     w.add_posts(&layout);
     // The mission's AI settings (card MAIS), its capture bans by post.
@@ -4503,9 +4620,13 @@ fn run_map(
     let mut exit_other = [0u32; 2];
     let timing = std::env::var_os("SWEEP_TIMING").is_some();
     let mut tick_us = Vec::new();
+    let mut flyer_census = FlyerCensus::default();
     while t < max_ticks && w.sim.outcome.is_none() {
         let started = timing.then(std::time::Instant::now);
         w.step_tick(&idle);
+        if w.sim.flyer_bots {
+            flyer_census.observe(&w.sim);
+        }
         if let Some(started) = started {
             tick_us.push(started.elapsed().as_micros() as u64);
         }
@@ -4859,6 +4980,9 @@ fn run_map(
             t as f32 / 30.0
         ),
         None => outln!(out, "{key:10} NO OUTCOME in {t} ticks  {tail}"),
+    }
+    if w.sim.flyer_bots {
+        outln!(out, "{}", flyer_census.line(key));
     }
     for w in &roster_warnings {
         outln!(out, "    {w}");

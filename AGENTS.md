@@ -95,8 +95,9 @@ controller-only replays must stay bit-identical. The rules:
   GetUp and Dead), and zoom divides them by its magnification. The pitch limits, the prone clamp and the seat aimer
   limits still hold. Both fields default to 0 and are left out of logs when 0, so old logs and snapshots load.
 - `buttons::MOUSE_AIM` marks a pad aimed by the mouse; aim assist never acts on it. Moving the right stick clears it.
-- Hovers and flyers (flyers ride the hover model): the mouse yaw becomes the turn stick, full deflection at
-  `MOUSE_STEER` rad per tick. Walkers: the mouse aims directly, held inside the walker's yaw limits beside its legs
+- Hovers and flyers: the mouse yaw becomes the turn stick, full deflection at
+  `MOUSE_STEER` rad per tick. Flyers use their own flight model and also turn mouse pitch into the pitch stick.
+  Walkers: the mouse aims directly, held inside the walker's yaw limits beside its legs
   (`walker_aim`); the drawn aim keeps its heading while the legs turn the hull. Seats and building turrets: the look
   turns by the angle.
 - Between ticks the view draws the mouse look not yet consumed (`Sim::look_preview`, `render_blend::blend_in_looking`),

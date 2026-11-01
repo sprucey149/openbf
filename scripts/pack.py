@@ -354,10 +354,11 @@ def map_texture_sources(baked):
                        base_textures=sum((textures / f'{n}.ktx2').is_file() for n in set(names)),
                        missing_base_textures=sorted(n for n in set(names) if not (textures / f'{n}.ktx2').is_file()),
                        pc_alternatives=sorted({n for n, source in tiers if source == 'pc' and n in present}),
+                       xbox_alternatives=sorted({n for n, source in tiers if source == 'xbox' and n in present}),
                        missing_alternatives=sorted(tier_names.intersection(files) - present),
                        missing_alternative_metadata=sorted(tier_names - files.keys()),
                        unrecognized_alternative_metadata=sorted(files.keys() - tier_names),
-                       unrecognized_tiers=sorted({source for _, source in tiers if source != 'pc'}))
+                       unrecognized_tiers=sorted({source for _, source in tiers if source not in ('pc', 'xbox')}))
         except (OSError, ValueError) as error:
             row['error'] = str(error)
         maps.append(row)
@@ -447,7 +448,7 @@ def write_source_report(out, report):
             print(f"  {row['map']}: not recognized — {row['error']}")
         else:
             print(f"  {row['map']}: {row['base_textures']} {row['base_source']} base, "
-                  f"{len(row['pc_alternatives'])} PC alternatives; "
+                  f"{len(row['pc_alternatives'])} PC and {len(row['xbox_alternatives'])} Xbox alternatives; "
                   f"{len(row['missing_base_textures'])} missing base / {len(row['missing_alternatives'])} missing alternatives")
             if row['missing_alternative_metadata']:
                 print(f"    missing alternative filename metadata: {row['missing_alternative_metadata']!r}")

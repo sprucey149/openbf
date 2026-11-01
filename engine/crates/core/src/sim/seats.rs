@@ -356,6 +356,7 @@ impl Sim {
                     r.pickup = self.units[i].ai.ride.and_then(|r| r.pickup);
                     r.sticks = self.units[i].ai.ride.and_then(|r| r.sticks);
                     r.hover = self.units[i].ai.ride.and_then(|r| r.hover);
+                    r.flyer = self.units[i].ai.ride.and_then(|r| r.flyer);
                     r.bail_draw = self.units[i].ai.ride.and_then(|r| r.bail_draw);
                     r.bail_seen = false;
                     if following.is_some() {
@@ -533,6 +534,14 @@ impl Sim {
         let unit = self.unit(u).filter(|unit| unit.droideka.is_none())?;
         let v = self.vehicle(vh)?;
         if v.team.is_some_and(|t| t != unit.team) || v.held_against(u, self.tick) {
+            return None;
+        }
+        // BF2's CanEnter refuses a flyer in flight (B2:164851). BF1's has no
+        // such test; its bots are held off by the claim's Landed gate.
+        if v.kind == crate::vehicle::VehicleKind::Flyer
+            && self.ground_rules == crate::soldier::GroundRules::Bf2
+            && v.flyer.phase == crate::vehicle::flyer::FlightPhase::Flying
+        {
             return None;
         }
         let setup = self.seat_setup.get(v.class as usize)?.as_ref()?;
@@ -782,6 +791,7 @@ impl Sim {
         let ai = u.controller == Controller::Ai;
         let sticks = u.ai.ride.and_then(|r| r.sticks);
         let hover = u.ai.ride.and_then(|r| r.hover);
+        let flyer = u.ai.ride.and_then(|r| r.flyer);
         let Some(m) = u.mount else { return };
         let walker = self
             .vehicle(m.vehicle)
@@ -832,6 +842,21 @@ impl Sim {
                 };
                 v.hover.ai = h.ai;
             }
+            // A flyer's pilot writes all four, also raw; the pad keeps only
+            // its trigger. The takeoff toggle is the AI's request
+            // (BF1 FUN_001dd340), through the same edge as a human's button.
+            if let Some(f) = flyer.filter(|_| v.kind == VehicleKind::Flyer) {
+                let [throttle, strafe, turn, pitch] = f.sticks;
+                v.input = HoverInput {
+                    throttle,
+                    strafe,
+                    turn,
+                    pitch,
+                    jump: f.takeoff,
+                    ..v.input
+                };
+                v.flyer.ai = f.ai;
+            }
         }
     }
 
@@ -858,6 +883,9 @@ impl Sim {
                 v.input = HoverInput::default();
                 v.hover.stick_timer = 0.0;
                 v.hover.ai.unseat();
+                if v.kind == VehicleKind::Flyer {
+                    v.flyer.ai = crate::vehicle::flyer::FlyerAi::default();
+                }
             }
         }
     }

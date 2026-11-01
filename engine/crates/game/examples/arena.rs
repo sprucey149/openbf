@@ -679,6 +679,8 @@ fn run_map(key: &str, path: &Path, ticks: u64, seed: u32, tiers: [Difficulty; 2]
     if let Some(a) = &applied {
         w.sim.death_regions = a.death_regions.clone();
         w.sim.fly_ceiling = a.fly_ceiling;
+        w.sim.flight_limits = a.flight_limits;
+        w.sim.ground_flyer_map = mission.as_ref().is_some_and(|m| m.ground_flyer_map);
     }
     // Card DTEAM: the idle player in slot 0 (team 0) is no human of this
     // tier comparison; one counted on team 1 cancels him for the team rule

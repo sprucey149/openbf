@@ -26,7 +26,8 @@ pub(super) fn tantive_female_aliases(
     let Some(bank) = banks.iter().find(|b| b.name_hash == 0xd4cb_a316) else {
         return Ok(());
     };
-    if bank.format == 2 {
+    // The repaired samples are PS2 ADPCM cut out of the PS2 bank's own bytes.
+    if bank.format == 2 || bank.format == mungefs::stream::FORMAT_IMA {
         return Ok(());
     }
     let female = mungefs::fnv1a_lowercase("all_inf_com_chatter_wound_female");

@@ -67,6 +67,24 @@ impl Texture {
                 mips,
             });
         }
+        if crate::texture_xbox::is_xbox(tex) {
+            let xbox = crate::texture_xbox::Texture::parse(tex)?;
+            let mips = xbox.faces.into_iter().next().ok_or_else(bad)?;
+            let info = TextureInfo {
+                width: xbox.width,
+                height: xbox.height,
+                bpp: 32,
+                detail_compressed: false,
+                mip_distance: 0.0,
+                mip_count: mips.len() as u32,
+            };
+            return Ok(Texture {
+                name: xbox.name,
+                info,
+                palette: Vec::new(),
+                mips,
+            });
+        }
         let name = tex.child_string(b"NAME").ok_or_else(bad)?;
         let info = tex.child(b"INFO").ok_or_else(bad)?;
         let ip = info.payload;

@@ -37,6 +37,7 @@ pub mod texture_pc;
 pub mod texture_xbox;
 pub mod water;
 pub mod world;
+pub mod xdvdfs;
 
 use thiserror::Error;
 

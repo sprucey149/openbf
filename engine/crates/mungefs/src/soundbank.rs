@@ -240,11 +240,13 @@ fn parse_bank<'a>(bank: &Chunk<'a>) -> Result<SampleBank<'a>, UcfbError> {
         .map(|(_, v)| *v)
         .ok_or_else(bad)?;
 
-    let format = pairs
-        .iter()
-        .find(|(k, _)| *k == h_format)
-        .map(|(_, v)| *v)
-        .unwrap_or(1);
+    let format = crate::stream::normalized_format(
+        pairs
+            .iter()
+            .find(|(k, _)| *k == h_format)
+            .map(|(_, v)| *v)
+            .unwrap_or(1),
+    );
 
     // Records are delimited by marker pairs whose VALUE is hash("sample").
     // Alias records (an `alias` field naming another sample id) own no data:
@@ -257,6 +259,8 @@ fn parse_bank<'a>(bank: &Chunk<'a>) -> Result<SampleBank<'a>, UcfbError> {
         let frames = rec.frames.unwrap_or_else(|| {
             if format == 2 {
                 size / 2
+            } else if format == crate::stream::FORMAT_IMA {
+                (size / 36).saturating_mul(64)
             } else {
                 (size / 16).saturating_mul(28)
             }

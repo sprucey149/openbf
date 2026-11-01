@@ -778,6 +778,18 @@ pub struct Sim {
     /// class that is not a walker. SETUP data, NOT hashed. A walker whose
     /// class has none stands still (`Sim::tick_walkers`).
     pub walker_params: Vec<Option<crate::vehicle::walker::WalkerParams>>,
+    /// PS2 flyer class parameters; absent for other vehicle kinds. Setup only.
+    pub flyer_params: Vec<Option<crate::vehicle::flyer::FlyerParams>>,
+    /// Mission flight bands and AddLandingRegion volumes, setup only.
+    pub flight_limits: super::flyers::FlightLimits,
+    pub landing_regions: Vec<Region>,
+    /// Do bots board and fly flyers? Setup only. Off on ground maps, so their
+    /// AI choices and hash stream stay as they were (`game::vehicle_pads`).
+    pub flyer_bots: bool,
+    /// BF2 authored `EntityPath`s for the AI follower; setup only.
+    pub flyer_paths: Vec<crate::vehicle::flyer::FlyerPath>,
+    /// BF2 `SetGroundFlyerMap`: halves the follower's roll wobble.
+    pub ground_flyer_map: bool,
     /// Per vehicle CLASS, what the use input and the exit read (card VSEAT,
     /// `crate::vehicle::SeatSetup`); SETUP data, NOT hashed. A class past
     /// the end, or `None`, cannot be entered.
@@ -1364,6 +1376,12 @@ impl Sim {
             vehicle_pads: Vec::new(),
             building_turrets: Vec::new(),
             hover_params: Vec::new(),
+            flyer_params: Vec::new(),
+            flight_limits: super::flyers::FlightLimits::default(),
+            landing_regions: Vec::new(),
+            flyer_bots: false,
+            flyer_paths: Vec::new(),
+            ground_flyer_map: false,
             walker_params: Vec::new(),
             seat_setup: Vec::new(),
             blast_setup: Vec::new(),

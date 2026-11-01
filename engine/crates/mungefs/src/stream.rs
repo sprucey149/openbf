@@ -24,6 +24,24 @@
 use crate::soundbank::{info_pairs, sample_records};
 use crate::{fnv1a_lowercase, Chunk, UcfbError};
 
+/// A stream's or bank's `format` for 36-byte IMA ADPCM blocks of 64 frames
+/// (stereo: 72 bytes, the two channels' 4-byte words taking turns). The PC's
+/// streams call it 5.
+pub const FORMAT_IMA: u32 = 5;
+
+/// The Xbox's `format` for the very same blocks: on both Xbox discs every sample
+/// and stream record's frame count is exactly `size / 36 * 64`.
+const FORMAT_XBOX_ADPCM: u32 = 4;
+
+/// One name for one codec, so nothing past this reader cares which disc it was.
+pub(crate) fn normalized_format(format: u32) -> u32 {
+    if format == FORMAT_XBOX_ADPCM {
+        FORMAT_IMA
+    } else {
+        format
+    }
+}
+
 pub struct Segment {
     pub id_hash: u32,
     pub frequency: u32,
@@ -104,7 +122,7 @@ fn parse_stream<'a>(stream: &Chunk<'a>) -> Result<Stream<'a>, UcfbError> {
     let head = &pairs[..first_marker.unwrap_or(pairs.len())];
     let hget = |h: u32| head.iter().find(|(k, _)| *k == h).map(|(_, v)| *v);
     let name_hash = hget(h_name).ok_or_else(bad)?;
-    let format = hget(fnv1a_lowercase("format")).unwrap_or(1);
+    let format = normalized_format(hget(fnv1a_lowercase("format")).unwrap_or(1));
     let channels = hget(h_channels).unwrap_or(1);
     let substreams = hget(fnv1a_lowercase("numsubstreams")).unwrap_or(1);
     let interleave = hget(0x740F_DB0C).unwrap_or(0);

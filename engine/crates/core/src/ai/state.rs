@@ -777,6 +777,8 @@ pub struct RideState {
     /// Card VDROP: at a hover's pilot seat, this tick's sticks and the
     /// hover's driving state moved on (`hover_drive`), for `Sim::ride`.
     pub hover: Option<HoverOut>,
+    /// At a flyer's pilot seat (`flyer_drive`): this tick's sticks.
+    pub flyer: Option<FlyerOut>,
     /// Card TURR: the building turret closed to this bot until
     /// `closed_until` - one it left, or its walk did not reach (`man`).
     pub closed: Option<crate::vehicle::VehicleHandle>,
@@ -837,6 +839,15 @@ pub struct ManState {
 pub struct HoverOut {
     pub sticks: [f32; 3],
     pub ai: crate::vehicle::hover::HoverAi,
+}
+
+/// What `flyer_drive` hands `Sim::ride`: raw sticks, the takeoff toggle and
+/// the pilot's flight state moved on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FlyerOut {
+    pub sticks: [f32; 4],
+    pub takeoff: bool,
+    pub ai: crate::vehicle::flyer::FlyerAi,
 }
 
 impl NavTick {
@@ -1502,6 +1513,12 @@ impl RideState {
         if let Some(h) = self.hover {
             eat(&[7]);
             for x in h.sticks {
+                eat(&x.to_bits().to_le_bytes());
+            }
+        }
+        if let Some(f) = self.flyer {
+            eat(&[12, f.takeoff as u8]);
+            for x in f.sticks {
                 eat(&x.to_bits().to_le_bytes());
             }
         }

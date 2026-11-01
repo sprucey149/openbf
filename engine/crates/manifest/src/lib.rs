@@ -394,7 +394,7 @@ pub struct Manifest {
     /// glance). Defaulted so a manifest baked before this field still loads.
     #[serde(default)]
     pub transparent: Vec<String>,
-    /// Which source filled a texture's classic-plus TIER 2: (name, "pc").
+    /// Which source filled a texture's classic-plus TIER 2: (name, "pc" or "xbox").
     /// Only textures that HAVE a second tier are listed, so a BF1 bake — and
     /// any bake run without the PC install — writes an empty list. The base
     /// tier is not listed because there is nothing to say about it: every

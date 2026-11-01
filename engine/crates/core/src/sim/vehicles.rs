@@ -332,7 +332,10 @@ impl Sim {
         }
         // STCHG: successful seating begins a new AI charge tenure.
         self.units[u.index as usize].ai.charge_until = 0;
-        if ground && pilot && self.units[u.index as usize].controller == Controller::Ai {
+        // The flyer's pilot shares the pickup wait (re-driver-wait.md §2),
+        // behind the switch that keeps it off ground maps. It draws no VBAIL.
+        let waits = ground || (kind == VehicleKind::Flyer && self.flyer_bots);
+        if waits && pilot && self.units[u.index as usize].controller == Controller::Ai {
             let r = self.units[u.index as usize].ai.ride.get_or_insert_default();
             r.begin_pickup(vh, self.tick, kind, hover_ai);
         }

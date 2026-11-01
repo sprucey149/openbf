@@ -436,6 +436,40 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
         }
         cand.push((d2, (0, u64::from(h.index)), Foe::Unit(h), p));
     }
+    // A rider is seen by his craft's body (RE §5.1's bound radius; BF2 doubles
+    // a flyer target): for a flyer in the sky, and for a flyer pilot's eyes on
+    // any vehicle. Ground bots and ground vehicles keep the soldier's sight.
+    let pilot = u
+        .mount
+        .and_then(|m| sim.vehicle(m.vehicle))
+        .is_some_and(|v| v.kind == crate::vehicle::VehicleKind::Flyer);
+    for (_, v) in sim.alive_vehicles() {
+        let flyer = v.kind == crate::vehicle::VehicleKind::Flyer;
+        if (!flyer && !pilot) || v.is_empty() {
+            continue;
+        }
+        let radius = sim
+            .seat_setup
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+            .map_or(0.0, |s| s.radius);
+        let double = flyer && sim.ground_rules == crate::soldier::GroundRules::Bf2;
+        let reach = (20.0 * radius + 30.0) * tier.view_mult * if double { 2.0 } else { 1.0 };
+        for o in v.seats.iter().filter_map(|s| s.occupant) {
+            let Some(rider) = sim.unit(o).filter(|r| r.alive && r.team != u.team) else {
+                continue;
+            };
+            let at = rider.capsule().center();
+            let off = at - eye;
+            let d2 = off.dot(off);
+            if d2 < reach * reach
+                && in_cone(view, off, d2, sim.omni_radius)
+                && !cand.iter().any(|c| c.2 == Foe::Unit(o))
+            {
+                cand.push((d2, (0, u64::from(o.index)), Foe::Unit(o), at));
+            }
+        }
+    }
     let droid_reach = droid_view_distance(tier.view_mult);
     for d in &sim.droids {
         if d.team == u.team || !d.alive() || !droid_admitted(sim, u, d) {

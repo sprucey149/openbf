@@ -80,6 +80,23 @@
 //! are transposed at decode, so [`Terrain::lumi`] / [`Terrain::colr`] are
 //! [z][x] like [`Terrain::raw`].
 //!
+//! ## The Xbox `PCHS` (2026-11-01)
+//!
+//! `HGT8`, `HEXP`, `INFO`, `LTEX`, `SCAL`, `FOLG` and friends keep the PS2
+//! layout. `PCHS` does not: it holds `COMN` (the shared `IBUF` of a plain patch)
+//! and `LOWR`, no `COLR` or `ALPH`, and every `PTCH` draws from its own `VBUF`.
+//! Measured against the PS2 twins of BF1 GEO1 and HOT1 (see [`parse_xbox_patches`]):
+//!
+//! - `PTCH -> INFO` is `u8 k, u8 layer[k], i16 heightMin, i16 heightMax, u16
+//!   shift`: the same three numbers as the PS2's, and at most 3 layers where
+//!   the PS2 paints up to 5, listed in no fixed order.
+//! - `VBUF` is 81 vertices of 16 B (flags 0x58a2, BF2 0x5922), row = z: `u16 x, y, z` with the
+//!   top bit flipped from the PS2's `POSI`, a packed normal, a B G R A colour and
+//!   two weights. A cutter-replaced patch has an `IBUF` and its own vertices.
+//! - The two weights belong to `layer[1]` and `layer[2]`; `layer[0]` takes the
+//!   rest of 255. These are final blend weights, where the PS2 has "over" alphas
+//!   per ascending layer, so they are converted to the PS2's nibbles.
+//!
 //! ## `PCHS -> LOWR` is the FAR-LOD sheet, and it is the same footprint
 //!
 //! Sixteen of the 32 shipped terrains carry `PCHS -> LOWR`: a coarse
@@ -205,6 +222,196 @@ fn replacement_alpha(src: &[u8], mask: u16, count: usize) -> Vec<u8> {
 /// Swap the axes of an `n × n` grid: `out[a·n + b] = g[b·n + a]`.
 fn transpose<T: Copy>(g: &[T], n: usize) -> Vec<T> {
     (0..n * n).map(|i| g[(i % n) * n + i / n]).collect()
+}
+
+/// Bytes per Xbox terrain vertex: position, normal, colour, two weights.
+const XBOX_PATCH_STRIDE: usize = 16;
+
+/// The `VBUF` flag for the two layer weights. BF1 Xbox writes 0x58a2 and BF2
+/// 0x5922. The PC's `PTCH` looks alike but carries 0x5122 and a second float
+/// `VBUF`, with no weights: it is not this layout.
+const XBOX_PATCH_WEIGHTS: u32 = 0x0800;
+
+/// True when this `PCHS` holds the Xbox's per-patch vertex buffers.
+fn is_xbox_pchs(pchs: &Chunk<'_>) -> bool {
+    pchs.child(b"COMN").is_some()
+        && pchs
+            .children_tagged(b"PTCH")
+            .next()
+            .and_then(|p| p.child(b"VBUF"))
+            .is_some_and(|v| {
+                v.payload.len() >= 12 && le::u32_at(v.payload, 8) & XBOX_PATCH_WEIGHTS != 0
+            })
+}
+
+/// The Xbox `PCHS` in the fields the PS2's fills.
+struct XboxPatches {
+    colr: Vec<[u8; 3]>,
+    masks: Vec<u16>,
+    meshes: Vec<Option<PatchMesh>>,
+    alpha: Vec<Vec<u8>>,
+}
+
+/// One vertex's final layer weights to the PS2's per-ascending-layer "over"
+/// nibbles (`LAYER_ALPHA` / 128 in `bake::terrain_glb`, 14 steps): the lowest
+/// layer is opaque and each one above covers what is under it.
+fn weights_to_nibbles(list: &[u8], b0: u8, b1: u8, ascending: &[u8], out: &mut Vec<u8>) {
+    let mut w = [0u32; 16];
+    let total = 255u32;
+    let first = total
+        .saturating_sub(u32::from(b0))
+        .saturating_sub(u32::from(b1));
+    for (i, &layer) in list.iter().enumerate() {
+        w[layer as usize & 15] = match i {
+            0 => first,
+            1 => u32::from(b0),
+            _ => u32::from(b1),
+        };
+    }
+    let mut under = 0u32;
+    for (rank, &layer) in ascending.iter().enumerate() {
+        let own = w[layer as usize & 15];
+        under += own;
+        out.push(if rank == 0 || under == 0 {
+            if rank == 0 {
+                OPAQUE_NIBBLE
+            } else {
+                0
+            }
+        } else {
+            ((own * 14 + under / 2) / under).min(14) as u8
+        });
+    }
+}
+
+/// See "The Xbox `PCHS`" in the module header. `n` is the grid size, `edge` the
+/// render patch's edge in cells.
+fn parse_xbox_patches(pchs: &Chunk<'_>, n: usize, edge: usize) -> Result<XboxPatches, UcfbError> {
+    let bad = || UcfbError::Truncated(pchs.offset);
+    if edge == 0 || n == 0 || !n.is_multiple_of(edge) {
+        return Err(bad());
+    }
+    let side = n / edge;
+    let samples = (edge + 1) * (edge + 1);
+    let mut colr = vec![[128u8; 3]; n * n];
+    let mut masks = Vec::new();
+    let mut meshes = Vec::new();
+    let mut alpha = Vec::new();
+    for (p, patch) in pchs.children_tagged(b"PTCH").enumerate() {
+        // `k * samples` is allocated per patch below, from a few bytes of file.
+        if p >= side * side {
+            return Err(UcfbError::Malformed(format!(
+                "xbox terrain: more than {side} x {side} patches"
+            )));
+        }
+        let info = patch.child(b"INFO").ok_or_else(bad)?.payload;
+        let k = *info.first().ok_or_else(bad)? as usize;
+        if k > 16 {
+            return Err(UcfbError::Malformed(format!(
+                "xbox terrain: {k} layers on patch {p}"
+            )));
+        }
+        if info.len() < 1 + k + 6 {
+            return Err(bad());
+        }
+        let list = &info[1..1 + k];
+        let mut ascending = list.to_vec();
+        ascending.sort_unstable();
+        let mask = list.iter().fold(0u16, |m, &l| m | 1u16 << (l & 15));
+        let height_min = le::u16_at(info, 1 + k) as i16;
+        let shift = le::u16_at(info, 1 + k + 4);
+        masks.push(mask);
+
+        let vp = patch.child(b"VBUF").ok_or_else(bad)?.payload;
+        if vp.len() < 12 {
+            return Err(bad());
+        }
+        let count = le::u32_at(vp, 0) as usize;
+        let stride = le::u32_at(vp, 4) as usize;
+        if stride != XBOX_PATCH_STRIDE
+            || count
+                .checked_mul(stride)
+                .and_then(|b| b.checked_add(12))
+                .is_none_or(|b| b > vp.len())
+        {
+            return Err(UcfbError::Unsupported(format!(
+                "xbox terrain VBUF: {count} vertices of {stride} B"
+            )));
+        }
+        let vertex = |v: usize| &vp[12 + v * stride..12 + (v + 1) * stride];
+        let rgb = |v: &[u8]| [v[12], v[11], v[10]];
+        let mut nibbles = Vec::with_capacity(count * k);
+        // Per vertex first, then regrouped per layer like the PS2's.
+        for v in 0..count {
+            let vx = vertex(v);
+            weights_to_nibbles(list, vx[14], vx[15], &ascending, &mut nibbles);
+        }
+        let per_layer: Vec<u8> = (0..k)
+            .flat_map(|rank| {
+                let nib = &nibbles;
+                (0..count).map(move |v| nib[v * k + rank])
+            })
+            .collect();
+
+        if let Some(ibuf) = patch.child(b"IBUF") {
+            // A replacement mesh. Its strip restarts by repeated indices, so
+            // each triangle becomes its own PS2 strip to keep one reader.
+            let ip = ibuf.payload;
+            if ip.len() < 4 {
+                return Err(bad());
+            }
+            let icount = le::u32_at(ip, 0) as usize;
+            if ip.len() < icount.saturating_mul(2).saturating_add(4) {
+                return Err(bad());
+            }
+            let index = |i: usize| le::u16_at(ip, 4 + i * 2);
+            let mut strips = Vec::with_capacity(icount.saturating_mul(3));
+            for t in 0..icount.saturating_sub(2) {
+                let (a, b, c) = (index(t), index(t + 1), index(t + 2));
+                if a == b || b == c || a == c {
+                    continue;
+                }
+                let (a, b) = if t % 2 == 0 { (a, b) } else { (b, a) };
+                strips.extend([a | 0x8000, b | 0x8000, c]);
+            }
+            let positions = (0..count)
+                .map(|v| {
+                    let vx = vertex(v);
+                    std::array::from_fn(|i| le::u16_at(vx, i * 2) ^ 0x8000)
+                })
+                .collect();
+            meshes.push(Some(PatchMesh {
+                positions,
+                strips,
+                height_min,
+                shift,
+                colr: Some((0..count).map(|v| rgb(vertex(v))).collect()),
+                alpha: if k == 0 { Vec::new() } else { per_layer },
+            }));
+            alpha.push(vec![OPAQUE_NIBBLE; k * samples]);
+            continue;
+        }
+        if count != samples {
+            return Err(bad());
+        }
+        meshes.push(None);
+        let (px, pz) = (p % side, p / side);
+        for sz in 0..=edge {
+            for sx in 0..=edge {
+                let (gx, gz) = (px * edge + sx, pz * edge + sz);
+                if gx < n && gz < n {
+                    colr[gz * n + gx] = rgb(vertex(sz * (edge + 1) + sx));
+                }
+            }
+        }
+        alpha.push(if k == 0 { Vec::new() } else { per_layer });
+    }
+    Ok(XboxPatches {
+        colr,
+        masks,
+        meshes,
+        alpha,
+    })
 }
 
 pub struct TerrainInfo {
@@ -499,6 +706,13 @@ impl Terrain {
             .map(|c| c.payload.iter().copied().take(16).collect())
             .unwrap_or_default();
 
+        let patch_edge = u16::from_le_bytes([ip[18], ip[19]]) as usize;
+        let xbox = tern
+            .child(b"PCHS")
+            .filter(|pchs| is_xbox_pchs(pchs))
+            .map(|pchs| parse_xbox_patches(&pchs, n, patch_edge))
+            .transpose()?;
+
         // PCHS -> PTCH, one record per 8x8-cell RENDER patch, row-major.
         // `INFO` is 14 B: `u16 layerMask, u16 count, i16 heightMin,
         // i16 heightMax, u16 shift, u32 flag` (re-terrain-cutters.md §1.1).
@@ -506,7 +720,7 @@ impl Terrain {
         // replacement mesh the PS2 draws instead of the grid there.
         let mut patch_layer_masks = Vec::new();
         let mut patch_meshes = Vec::new();
-        if let Some(pchs) = tern.child(b"PCHS") {
+        if let Some(pchs) = tern.child(b"PCHS").filter(|_| xbox.is_none()) {
             for patch in pchs.children().flatten() {
                 if &patch.tag != b"PTCH" {
                     continue;
@@ -569,7 +783,6 @@ impl Terrain {
         }
 
         // PCHS -> ALPH, walked per PTCH in file order (module header).
-        let patch_edge = u16::from_le_bytes([ip[18], ip[19]]) as usize;
         let alph = tern.child(b"PCHS").and_then(|p| p.child(b"ALPH"));
         let patch_alpha = walk_alph(
             alph.as_ref().map(|a| a.payload).unwrap_or_default(),
@@ -577,6 +790,10 @@ impl Terrain {
             patch_edge,
         )
         .map_or_else(|| vec![Vec::new(); patch_layer_masks.len()], |(a, _)| a);
+        let (colr, patch_layer_masks, patch_meshes, patch_alpha) = match xbox {
+            Some(x) => (Some(x.colr), x.masks, x.meshes, x.alpha),
+            None => (colr, patch_layer_masks, patch_meshes, patch_alpha),
+        };
 
         // CUTS holds its own INFO (the cutter count) followed by one CUTR per
         // cutter; a map with no CUTS simply has none.
@@ -748,7 +965,68 @@ fn parse_lowres(lowr: &Chunk<'_>, half: f32) -> Option<LowResSheet> {
 
     let mut patches = Vec::new();
     if let Some(pchs) = lowr.child(b"PCHS") {
+        // The Xbox's `COMN -> IBUF` is the one strip every `LPTC`'s own 6-byte
+        // `VBUF` draws, and its `u16`s are the PS2's with the top bit flipped.
+        let shared: Option<Vec<[u32; 3]>> = pchs
+            .child(b"COMN")
+            .and_then(|c| c.child(b"IBUF"))
+            .filter(|i| i.payload.len() >= 4)
+            .and_then(|i| {
+                let count = le::u32_at(i.payload, 0) as usize;
+                (i.payload.len() >= count.saturating_mul(2).saturating_add(4)).then(|| {
+                    let index = |t: usize| u32::from(le::u16_at(i.payload, 4 + t * 2));
+                    (0..count.saturating_sub(2))
+                        .filter_map(|t| {
+                            let (a, b, c) = (index(t), index(t + 1), index(t + 2));
+                            if a == b || b == c || a == c {
+                                None
+                            } else if t % 2 == 0 {
+                                Some([a, b, c])
+                            } else {
+                                Some([b, a, c])
+                            }
+                        })
+                        .collect()
+                })
+            });
         for lptc in pchs.children_tagged(b"LPTC") {
+            if let (Some(tris), Some(vbuf)) = (&shared, lptc.child(b"VBUF")) {
+                let vp = vbuf.payload;
+                let count = if vp.len() >= 12 {
+                    le::u32_at(vp, 0) as usize
+                } else {
+                    0
+                };
+                if vp.len() < 12 || le::u32_at(vp, 4) != 6 || vp.len() < 12 + count * 6 {
+                    patches.push(LowResPatch {
+                        positions: Vec::new(),
+                        triangles: Vec::new(),
+                    });
+                    continue;
+                }
+                let positions: Vec<[f32; 3]> = (0..count)
+                    .map(|v| {
+                        let q = |i: usize| {
+                            f32::from(le::u16_at(vp, 12 + v * 6 + i * 2) ^ 0x8000) / 65536.0
+                        };
+                        [
+                            -half + q(0) * extent,
+                            y_min + q(1) * (y_max - y_min),
+                            -half + q(2) * extent,
+                        ]
+                    })
+                    .collect();
+                let triangles = tris
+                    .iter()
+                    .filter(|t| t.iter().all(|&i| (i as usize) < positions.len()))
+                    .copied()
+                    .collect();
+                patches.push(LowResPatch {
+                    positions,
+                    triangles,
+                });
+                continue;
+            }
             let (Some(posi), Some(strp)) = (lptc.child(b"POSI"), lptc.child(b"STRP")) else {
                 // No shipped LPTC is empty; one would simply draw nothing.
                 patches.push(LowResPatch {
@@ -1369,5 +1647,204 @@ mod tests {
         assert!(!inside(c3, [16.0, 4.7, -50.0]));
         // ... and no surface post is inside any cutter.
         assert!(!t.cutters.iter().any(|c| inside(c, [16.0, 4.7, -50.0])));
+    }
+}
+
+#[cfg(test)]
+mod xbox_tests {
+    use super::*;
+
+    /// Real data: BF1 GEO1 and HOT1's Xbox terrain keeps the PS2's heights and
+    /// layer paint, its lightmap and hue read in the same orientation, the
+    /// cutter patches ship the same vertices, and the far sheet the same land.
+    #[test]
+    fn xbox_terrain_matches_the_ps2() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../extracted");
+        for (xbox, ps2) in [
+            (
+                "xbox_bf1/geo/geo1.lvl",
+                "bf1/lvl/DATA/_LVL_PS2/GEO/GEO1.LVL",
+            ),
+            (
+                "xbox_bf1/hot/hot1.lvl",
+                "bf1/lvl/DATA/_LVL_PS2/HOT/HOT1.LVL",
+            ),
+        ] {
+            let (Ok(xb), Ok(pb)) = (
+                std::fs::read(format!("{root}/{xbox}")),
+                std::fs::read(format!("{root}/{ps2}")),
+            ) else {
+                eprintln!("SKIP: {xbox} not present");
+                return;
+            };
+            let parse = |buf: &[u8]| {
+                let c = crate::content_chunks(crate::open(buf).unwrap())
+                    .unwrap()
+                    .into_iter()
+                    .find(|c| &c.tag == b"tern")
+                    .unwrap();
+                Terrain::parse(&c).unwrap()
+            };
+            let (x, p) = (parse(&xb), parse(&pb));
+            // BF1 HOT1's heights really differ on the two discs; GEO1's do not.
+            let height_off = x.raw.iter().zip(&p.raw).filter(|(a, b)| a != b).count();
+            eprintln!("{xbox}: heights off {height_off}/{}", x.raw.len());
+            if xbox.contains("geo") {
+                assert_eq!(height_off, 0);
+            }
+            assert_eq!(x.patch_layer_masks.len(), p.patch_layer_masks.len());
+            assert_eq!(x.patch_meshes.len(), p.patch_meshes.len());
+
+            // Lightmap: Xbox and PS2 are the same painting, so the transposed
+            // read must correlate far better than the raw one.
+            let (xl, pl) = (x.lumi.as_ref().unwrap(), p.lumi.as_ref().unwrap());
+            let n = x.info.grid_size as usize;
+            let diff = |a: &[u8], b: &[u8]| -> f64 {
+                a.iter()
+                    .zip(b)
+                    .map(|(u, v)| f64::from(u.abs_diff(*v)))
+                    .sum::<f64>()
+                    / a.len() as f64
+            };
+            let pearson = |a: &[u8], b: &[u8]| -> f64 {
+                let m = |c: &[u8]| c.iter().map(|&v| f64::from(v)).sum::<f64>() / c.len() as f64;
+                let (ma, mb) = (m(a), m(b));
+                let (mut ab, mut aa, mut bb) = (0.0, 0.0, 0.0);
+                for (u, v) in a.iter().zip(b) {
+                    let (u, v) = (f64::from(*u) - ma, f64::from(*v) - mb);
+                    ab += u * v;
+                    aa += u * u;
+                    bb += v * v;
+                }
+                ab / (aa * bb).sqrt().max(1e-9)
+            };
+            let swapped = transpose(xl, n);
+            let (straight, across) = (pearson(xl, pl), pearson(&swapped, pl));
+            eprintln!(
+                "{xbox}: lumi r {straight:.3}, transposed {across:.3}, mean diff {:.1}",
+                diff(xl, pl)
+            );
+            assert!(straight > across, "{straight} vs {across}");
+
+            // Hue: per-vertex Xbox colour against the same PS2 COLR cell.
+            let (xc, pc) = (x.colr.as_ref().unwrap(), p.colr.as_ref().unwrap());
+            let green = |c: &[[u8; 3]]| c.iter().map(|v| v[1]).collect::<Vec<u8>>();
+            let right = pearson(&green(xc), &green(pc));
+            let wrong = pearson(&green(&transpose(xc, n)), &green(pc));
+            let own = pearson(&green(xc), xl);
+            eprintln!(
+                "{xbox}: colr r {right:.3}, transposed {wrong:.3}, against own lumi {own:.3}"
+            );
+            assert!(right > wrong, "{right} vs {wrong}");
+
+            // Layer paint: over every patch where both discs name the same
+            // layers, the nibbles agree closely (the Xbox's are re-derived).
+            let (mut same, mut near) = (0usize, 0usize);
+            for i in 0..x.patch_layer_masks.len() {
+                if x.patch_layer_masks[i] != p.patch_layer_masks[i]
+                    || x.patch_meshes[i].is_some()
+                    || p.patch_meshes[i].is_some()
+                {
+                    continue;
+                }
+                let (a, b) = (&x.patch_alpha[i], &p.patch_alpha[i]);
+                assert_eq!(a.len(), b.len(), "patch {i}");
+                for (u, v) in a.iter().zip(b) {
+                    same += 1;
+                    let v = if *v == 0xf { 0 } else { *v };
+                    near += usize::from(u.abs_diff(v) <= 2);
+                }
+            }
+            eprintln!("{xbox}: nibbles within 2 steps {near}/{same}");
+            assert!(near * 100 >= same * 80, "{near}/{same}");
+
+            // Cutter patches: the same vertices and triangle count, on the
+            // patches both discs agree are the same height range.
+            let (mut both, mut alike) = (0usize, 0usize);
+            for i in 0..x.patch_meshes.len() {
+                if let (Some(a), Some(b)) = (&x.patch_meshes[i], &p.patch_meshes[i]) {
+                    if a.height_min != b.height_min || a.shift != b.shift {
+                        continue;
+                    }
+                    both += 1;
+                    let tris = |s: &[u16]| crate::model::unstitch_strips(s).len();
+                    let (ta, tb) = (tris(&a.strips), tris(&b.strips));
+                    alike += usize::from(
+                        a.positions.len() == b.positions.len()
+                            && ta.abs_diff(tb) * 10 <= tb.max(10),
+                    );
+                }
+            }
+            eprintln!("{xbox}: cutter patches alike {alike}/{both}");
+            assert!(alike * 10 >= both * 8, "{alike}/{both}");
+
+            // Far sheet: same grid, and every patch covers the same land.
+            let (xs, ps) = (x.lowres.as_ref().unwrap(), p.lowres.as_ref().unwrap());
+            assert_eq!((xs.grid, xs.resolution), (ps.grid, ps.resolution));
+            assert_eq!(xs.patches.len(), ps.patches.len());
+            let y_mean = |s: &LowResSheet| {
+                let (mut sum, mut c) = (0.0f64, 0usize);
+                for v in s.patches.iter().flat_map(|p| &p.positions) {
+                    sum += f64::from(v[1]);
+                    c += 1;
+                }
+                sum / c.max(1) as f64
+            };
+            assert!((y_mean(xs) - y_mean(ps)).abs() < 2.0, "{xbox} sheet height");
+            assert!(xs.triangle_count() > 0);
+        }
+    }
+
+    /// One `PCHS` of `count` cutter patches, each listing `k` layers.
+    fn cutter_pchs(count: usize, k: u8) -> Vec<u8> {
+        let mut info = vec![k];
+        info.extend(vec![0u8; k as usize + 6]);
+        let mut vbuf = 0u32.to_le_bytes().to_vec();
+        vbuf.extend(16u32.to_le_bytes());
+        vbuf.extend(0x58a2u32.to_le_bytes());
+        let mut ptch = crate::build_chunk(b"INFO", &info);
+        ptch.extend(crate::build_chunk(b"VBUF", &vbuf));
+        ptch.extend(crate::build_chunk(b"IBUF", &0u32.to_le_bytes()));
+        let mut pchs = crate::build_chunk(b"COMN", &[]);
+        for _ in 0..count {
+            pchs.extend(crate::build_chunk(b"PTCH", &ptch));
+        }
+        crate::build_chunk(b"PCHS", &pchs)
+    }
+
+    #[test]
+    fn xbox_patches_are_bounded_by_the_grid() {
+        let parse = |buf: &[u8], n, edge| {
+            let c = crate::chunks(buf).next().unwrap().unwrap();
+            parse_xbox_patches(&c, n, edge).map(|x| x.masks.len())
+        };
+        let four = cutter_pchs(4, 1);
+        assert_eq!(parse(&four, 16, 8).unwrap(), 4);
+        assert!(matches!(
+            parse(&cutter_pchs(5, 1), 16, 8),
+            Err(UcfbError::Malformed(_))
+        ));
+        assert!(matches!(
+            parse(&cutter_pchs(1, 17), 16, 8),
+            Err(UcfbError::Malformed(_))
+        ));
+        assert!(parse(&four, 0, 8).is_err());
+        assert!(parse(&four, 16, 0).is_err());
+    }
+
+    #[test]
+    fn xbox_weights_become_over_nibbles() {
+        let mut out = Vec::new();
+        // Two layers listed as (0, 1): half and half.
+        weights_to_nibbles(&[0, 1], 128, 0, &[0, 1], &mut out);
+        assert_eq!(out, [OPAQUE_NIBBLE, 7]);
+        // Listed out of order: the listed-first layer takes what is left.
+        out.clear();
+        weights_to_nibbles(&[1, 0], 255, 0, &[0, 1], &mut out);
+        assert_eq!(out, [OPAQUE_NIBBLE, 0]);
+        // Three layers: all weight on the top one.
+        out.clear();
+        weights_to_nibbles(&[0, 1, 2], 0, 255, &[0, 1, 2], &mut out);
+        assert_eq!(out, [OPAQUE_NIBBLE, 0, 14]);
     }
 }

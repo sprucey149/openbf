@@ -100,10 +100,23 @@ pub struct MissionDef {
     /// `SetMaxPlayerFlyHeight(y)`, the last call: the soldiers' fly-height
     /// ceiling (card JETP, `analysis/re-jetpack.md` §5.3; BF2's rule on
     /// every map, so a BF1 script's `SetMaxFlyHeight` - the AI flyers' - is
-    /// not read). None = the engine's 200 (`core::soldier::DEFAULT_FLY_CEILING`).
-    /// A RON generated before this field (`scripts/gen_missions.py`) has none.
+    /// not the soldiers'). None = the engine's 200
+    /// (`core::soldier::DEFAULT_FLY_CEILING`). A RON generated before this
+    /// field (`scripts/gen_missions.py`) has none.
     #[serde(default)]
     pub max_player_fly_height: Option<f32>,
+    /// `SetMinPlayerFlyHeight(y)` (a human flyer's floor); None = -200.
+    #[serde(default)]
+    pub min_player_fly_height: Option<f32>,
+    /// `SetMaxFlyHeight(y)` / `SetMinFlyHeight(y)`, the AI flyers' band
+    /// (BF1 `DAT_005873b0` / `DAT_005873ac`); None = 200 / -200.
+    #[serde(default)]
+    pub max_fly_height: Option<f32>,
+    #[serde(default)]
+    pub min_fly_height: Option<f32>,
+    /// BF2 `SetGroundFlyerMap(1)`: halves the AI follower's roll wobble.
+    #[serde(default)]
+    pub ground_flyer_map: bool,
     /// The conquest command-post roster, in `CommandPost:New` order — the
     /// posts the mission actually hands to its `ObjectiveConquest`, which is
     /// NOT every post in the world layer (BF2 Hoth builds four and kills the

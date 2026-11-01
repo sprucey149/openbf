@@ -47,6 +47,7 @@ pub mod turret_rig;
 pub mod vehicle;
 pub mod walker;
 pub mod water_glb;
+pub mod xbox;
 pub mod xbox_icons;
 
 pub mod detail;

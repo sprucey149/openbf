@@ -1,0 +1,330 @@
+# Flyer pilots in the PS2 games
+
+2026-11-01, VFLY / SAIR / AIRC. This is an original description of the PS2
+executable and shipped data, not a decompiler excerpt. **Code-confirmed does
+not mean replay-validated:** this investigation has not sampled a live PS2
+flyer or compared a flight recording tick by tick.
+
+The games need different pilot controllers. BF1 computes throttle, strafe,
+yaw and pitch and lets its flyer physics move the vehicle. BF2's ordinary AI
+flight advances a Catmull–Rom curve and writes the vehicle's position and
+orientation directly. Feeding BF2 bots through a newly invented stick
+controller would not reproduce the original's trajectory.
+
+## Evidence and terminology
+
+Addresses are PS2 ELF virtual addresses. `B1` means `SWBFRONT.ELF`; `B2`
+means `SWBFRNT2.ELF`. The decompilation provides callers and control flow;
+ELF disassembly settles the constants and property layout. Names from the
+official mod-tools document
+`community_mods/gametoast_lua/doc/StarWarsBattlefrontII/documentation/FlyerSplineFollowing.txt`
+were matched to the PS2 property table by lowercase FNV-1a hash. That document
+also names the spline algorithm, but its numeric defaults are not authoritative:
+three roll defaults differ from the PS2 executable.
+
+Relevant existing work: `re-driver-wait.md` establishes the pilot's pickup
+wait and boarding claims; `re-hover-ai.md` and `re-walker-ai.md` establish the
+shared BF1 steering; `re-boundary.md` covers flight-boundary recovery.
+
+| Responsibility | BF1 address | BF2 address |
+| --- | --- | --- |
+| UnitFlyAgent constructor | `0x2466a8` | `0x2c80b0` |
+| UnitFlyAgent update | `0x246d80` | `0x2c87c8` |
+| Landing-hint search | `0x246ff0` | `0x2c8a50` |
+| Upward departure probe | `0x2470e0` | `0x2c90d8` |
+| Flyer entity's AI update | `0x1dd0d0` | `0x202880` |
+| BF1 movement goal / speed | `0x1dcbf0` | — |
+| Shared BF1 steering / aim | `0x233500` / `0x232b78` | — |
+| Ordinary spline advance | — | `0x2fccd0` |
+| Spline position / derivative | — | `0x539970` / `0x539b60` |
+| Roll / orientation | — | `0x2feed0` / `0x2ff1e8` |
+| Follower class defaults / setter | — | `0x300168` / `0x300230` |
+
+## Boarding, departure and landing
+
+The flyer creates a UnitFlyController when an AI takes the pilot seat. It
+participates in the shared pickup wait: BF1 starts a four-second window when
+the controller is created; BF2 queues a 4.001-second wait. Occupancy, live
+boarding claims and BF2's human-nearby hold can shorten or extend it. See
+`re-driver-wait.md` for the measured rules; an unconditional four-second
+departure timer is not equivalent.
+
+Both fly agents repeatedly check a ray **100 m upward** before departure.
+When blocked they choose a forward escape state; when clear they enter the
+travel state (B1 FUN_00246d80 state 3). BF1's escape builds a two-point path from the present position
+to **200 m forward and 1 m up**. Landing-hint queries run no more frequently
+than **every 3 s**. The query argument `0x50` has not been confirmed as a
+distance and must not be described as an 80 m radius. The chosen hint is
+reserved and refreshed while approaching. The agent waits for the flyer's
+physical state to report landed before entering its next state.
+
+BF1's `FlyGotoHelper` (`0x251460` through `0x2518d0`) accepts a planned
+destination, an explicit path, or a direct destination. While travelling it
+requests takeoff when the flyer is not already flying (state 2). The entity's
+takeoff request is `0x1dd340`; its landing request is `0x1dd418`. The flyer
+states observed in these readers are 0 landed, 1 taking off, 2 flying, 3
+landing. BF1's fly agent can choose a command post, retrying at most ten
+random candidates, with its travel point **20 m above** the post. The exact
+selection and transport ownership predicates still need an independent read
+before being used as a general mission planner.
+
+## BF1 flight controls
+
+`0x1dd0d0` skips normal steering when landed or landing. Otherwise
+`0x1dcbf0` produces the current 3D goal and a speed factor. The shared
+steering receives the class's MaxSpeed, StrafeSpeed, TurnRate and PitchRate.
+Its throttle/strafe pair is based on horizontal goal direction and the
+class's strafe capability, as documented for hovers. Flyer yaw differs in
+one detail: after flattening the world goal displacement, it transforms
+that displacement into the full body frame and normalizes all three local
+components; the hover normalizes only the horizontal local components.
+
+For local unit direction `l`, yaw uses `s = -l.x`; if the goal lies behind
+(`l.z < 0`), replace `s` with its signed unit value. Then
+`u = clamp(s * (4.5 - clamp(TurnRate, 1, 3)), -1, 1)` and yaw input is
+`u * abs(u)`. Pitch uses the goal in the aim frame, with
+`u = clamp(local_goal_y * (5 - clamp(PitchRate, 1, 3)), -1, 1)` and the same
+signed square. These are the original's shaped controls, not tuning chosen
+for the port. The pitch target retains its height.
+
+Additional speed shaping in `0x1dcbf0` includes:
+
+- Forward alignment multiplier `(max(dot(goal_direction, forward), 0.9) - 0.9) * 9.999998`.
+- A distance blend from **0.3 to 1.0**, between **one and three MaxSpeed**
+  units of goal distance. It is further blended against alignment with the
+  movement order's forward vector, using an alignment threshold **0.5**.
+- When this reduces the incoming speed factor, a **20 m/s / MaxSpeed**
+  normalized floor. The top-level reader also applies a **5 m/s / MaxSpeed**
+  floor and a floor from entity field `+0x408 / MaxSpeed`; the meaning of that
+  entity field is not established here.
+- Collision-goal caching and a **0.1 s** probe cadence, with a **1 s** expiry.
+  The altitude/obstacle helper `0x1dc700` needs a complete follow-up read.
+
+`0x235dc8` converts a requested speed to `clamp(speed / MaxSpeed, 0, 1)`.
+`0x235e00` converts that normalized speed factor to throttle around a
+class-dependent neutral point. With positive MinSpeed, neutral is **-1**;
+with non-positive MinSpeed and positive MidSpeed it is
+`MinSpeed / (MidSpeed - MinSpeed)`; otherwise, with positive MaxSpeed it is
+`-MidSpeed / (MaxSpeed - MidSpeed)`. The positive half interpolates neutral
+to +1; the negative half extends the original's other branch. The resulting
+throttle multiplies the shared forward and strafe factors before the four
+raw controls are written. Quantizing these controls through an i8 pad would
+lose original precision, just as it does for the existing hover AI.
+
+## BF2 spline movement
+
+The entity AI (`0x202880`) calls `0x2fccd0` with class speed, boost ratio,
+energy and the flyer's pose/velocity outputs. The follower writes the
+transform; its velocity output is `(new_position - old_position) / dt`.
+Normal human flyer force integration is not this path.
+
+The four control points `P0..P3` define a uniform Catmull–Rom segment from
+P1 to P2. In original mathematical notation:
+
+```
+A = -0.5*P0 + 1.5*P1 - 1.5*P2 + 0.5*P3
+B = P0 - 2.5*P1 + 2*P2 - 0.5*P3
+C = 0.5*(P2 - P0)
+position(t) = ((A*t + B)*t + C)*t + P1
+tangent(t) = (3*A*t + 2*B)*t + C
+```
+
+The ordinary update's ordering matters:
+
+1. Update the path/pursuit/avoidance state, then evaluate position and tangent
+   at the **old** parameter `t`.
+2. Compute `rate = min(1.05, base_speed * speed_factor / length(tangent))`.
+   A zero tangent uses rate 1 before the cap. Two maneuver flags multiply
+   base speed by **0.8**; the escape timer multiplies it by **1.5**.
+3. Evaluate the look-ahead tangent at
+   `clamp(t + rate * PathFollowerRollLookAhead, 0, 1)`, then increment
+   `t += rate * dt`. Despite the mod-tools prose calling look-ahead world
+   units, the PS2 code uses it as this parameter-rate multiplier.
+4. Orient the body along the current tangent. Compute roll from the change
+   in look-ahead heading. Apply the separately implemented avoidance and
+   docking corrections. A requested position jump over **15 m** is limited
+   to **10 m**, then write position and delta/dt velocity.
+5. Compute next tick's speed factor. Turn fraction is
+   `clamp(abs(heading_rate / pi), 0, 1)`; interpolate from 1 to
+   PathFollowerTurnSpeed with that fraction and multiply entity, path and
+   node speed factors. Converge with
+   `clamp(inverse_acceleration_time * dt, 0, 1)`.
+6. Handle boost energy crossings (**0.2** is the threshold to begin boost),
+   then advance the node/curve when `t >= 1`. Pursuit exit adds a **3.5 s**
+   maneuver timer. Curve shifting and branch choice are part of this update,
+   not an independent circular patrol.
+
+Roll normally derives a desired angle from heading rate, current speed
+factor and RollSpeedFactor, clamped to **±pi/2**. A trigonometric wobble is
+added before filtering; its phase includes low bits of the original object's
+address. Desired angle, acceleration, angular velocity and angle each carry
+state. The controller brakes within a tolerance scaled by angular speed,
+caps angular speed, then adds RollDampening convergence. When a path enables
+PathRoll it instead interpolates the authored node roll. An exact portable
+phase mapping for the address-based wobble remains unconfirmed.
+
+The authoritative PS2 class defaults are:
+
+| Property | Hash | Stored default / conversion |
+| --- | --- | --- |
+| PathFollowerSpeed | `91032dcb` | 1 |
+| PathFollowerTurnSpeed | `1a2fabca` | 0.5 |
+| PathFollowerAcceleration | `ab9db3f4` | 2 s, stored inverse 0.5; authored zero stores 0.0001 |
+| PathFollowerRollAcceleration | `2d976c37` | pi/2 rad/s²; authored degrees converted to radians |
+| PathFollowerRollLookAhead | `732ff7d1` | 1 |
+| PathFollowerRollTolerance | `93425352` | pi/8 rad; authored degrees converted to radians |
+| PathFollowerRollSpeed | `b1354466` | pi/2 rad/s; setter's unit conversion is not confirmed |
+| PathFollowerRollAccelerationLag | `60900c05` | 0.001 s, stored inverse 1000 |
+| PathFollowerRollTurnFactor | `acf747f3` | 5 |
+| PathFollowerRollSpeedFactor | `e217bc71` | 1 |
+| PathFollowerRollDampening | `4453dc0a` | 0.5 |
+| PathFollowerBranchPaths | `9f528aec` | 0 |
+| PathFollowerBranchRange | `9eececc5` | maximum finite float |
+| PathFollowerBranchMaxAngle | `886f9fe5` | cos(180°) = -1; setter takes degrees |
+| PathFollowerMinBranchDist | `e103ce94` | 300 m |
+| PathFollowerFlyerVsFlyer | `c5cf2a8d` | true |
+| PathFollowerClass | `ff158b18` | unrestricted |
+
+The PS2 setter at `0x300230` has explicit degree conversions for acceleration
+and tolerance, but not the RollSpeed hash. Do not silently apply the PC
+documentation's claimed degrees conversion to that third property.
+
+## Authored routes and combat
+
+The official path format requires names beginning `entitypath `. Its path
+Class/Class1..4 values constrain eligible vehicle classes; Class can include
+a concurrent-user limit. MaxEntities, Direction, SingleDirection, Frequency,
+Speed, BranchDifferent and EnableObject further affect selection. Node
+properties include Speed, BranchProbability, BranchPaths, Range, MaxAngle,
+BranchRegion, VarianceX/Y/Z and LandOnArrival. Branch regions are named
+`entitypathbranch NAME`. These names and meanings are document-confirmed;
+the complete PS2 branch scoring and occupancy implementation still needs
+transcription. Do not replace it with nearest-point selection and describe
+that as confirmed PS2 behavior.
+
+A further read locates that work precisely: `0x2fc980` decides whether to
+branch, `0x2fc550` resolves class/node overrides, and `0x2ff478` selects the
+endpoint. The selector checks compatible classes and concurrent-user limits
+(`0x2f9740`), enabled state, forced/single direction and exclusion of the
+current path/endpoint. Both ends can be candidates. `0x2f9498` scores the
+distance and alignment of the vehicle-to-endpoint direction with both the
+vehicle forward and the candidate's first segment. Each angle contributes
+`(dot + 1) * 0.5 + 0.0001` after the maximum-angle gate. The selector
+multiplies by **0.4** inside MinBranchDist, then by path Frequency and clamps
+the score to [0, 1]. It ranks candidates and draws among at most BranchPaths
+of the highest scores (zero chooses the first); collision rejection can
+retry up to **four** choices. A connection uses the existing position minus
+forward times **20 m**, the current position, the candidate endpoint and its
+next node as a Catmull–Rom segment. `0x2fff48` checks three straight chords
+at parameter thirds for an ordinary candidate, or two chords for a fallback.
+The precise Range field/squared-distance convention and the fallback order
+still need resolution before this becomes a faithful implementation.
+
+Pursuit is not merely pointing the nose at an enemy. `0x2fd930` builds a new
+curve using the present flight, target pose/velocity and a randomized
+**30 m** lateral/up offset, then invokes an obstacle-aware query. The target
+and replanning rules have not yet been fully transcribed. The original
+`PathFollowerFlyerVsFlyer` flag gates combat departures from authored paths.
+The special fly-agent helper `0x2c8b38` is consistent with the documented
+CircleATATFrequency behavior: a **0.25** default, **4.75 s** polling,
+**200 m** search, followed by the circle builder `0x2fe150`. It must not be
+mistaken for ordinary fighter attack selection.
+
+## What the port builds (2026-11-01)
+
+`core::ai::flyer_drive` and `flyer::spline_step`. Its module header is the list
+of invented policy; this section says what the evidence supports.
+
+Bots fly only where `Sim::flyer_bots` is set: ground maps leave it off to keep
+their AI choices and hash stream, and `OPENBF_FLYER_BOTS=1` turns it on for a
+test. The PS2 has no such switch, and its code has AI pilots (FUN_001de160), but
+no live sample here says how often they board on each map. The later space maps
+are meant to set it themselves.
+
+BF1, from the code: the upward probe and escape path, the random post 20 m up
+(FUN_00246718 draws any post for an ordinary pilot, whoever holds it), the
+altitude law (FUN_001dc700: five terrain samples at L, 0.7L and 0.5L with
+L = max(1.5 x speed, 1), the height kept 25 m over the highest, capped at
+SetMaxFlyHeight, relaxing to the goal's height on arrival), the sidestep
+(FUN_00235c08: max(30, 2 x MaxSpeed) along forward x up, probed each 0.1 s
+over MaxSpeed m ahead, dropped when passed or a second old), the speed share,
+and the stick law. FUN_00246d80 goes to state 2 on a nonzero ray result and
+state 4 otherwise; reading nonzero as a hit is consistent with the path it builds
+but was not traced into FUN_00161de8.
+
+One-seat fighters have no pickup wait: `re-driver-wait.md`'s window ends at
+once on a full vehicle, so only craft with a free seat hold for it.
+
+The stick law's pitch reads the stored aim, not the transform. FUN_00232b78 takes
+its pitch frame from the controllable's +0x110, which is entity +0x3b0, where
+FUN_001dbbd8 stores the forward with the visual pitch and roll taken out. Yaw reads
+the transform, tilt and all. The port's `flyer::untilted` is that frame. Sampled once
+a second on `bf1_kas1` with the mission's own ceiling, bots still reverse a saturated
+pitch stick often (40 sign flips in 575 samples, 49 in 528 before this frame was
+right), so they porpoise. Whether the PS2's do is unmeasured.
+
+BF2, from the code: takeoff by the flight states with no AI input (the AI
+update runs only in state 2, B2:117411-117417), the curve equations, rate cap,
+look-ahead, 15/10 m jump limit, speed factor, roll law and FUN_002fd930's
+pursuit shape; FUN_00300230's numbers are read from the class. `EntityPath`s are
+real on `bf2_hot1` (six paths, named `type_EntityPath Path N` by the bake) and
+the nine PS2 space levels; no other BF2 ground map's LVL holds the string, so
+bots there have nothing to fly and do not claim those craft. FUN_002feed0 reads
+`SetGroundFlyerMap` to halve the roll wobble from 2 rad to 1, and BF2's Hoth
+missions set it.
+
+Perception: a rider in a flyer is seen by the craft's body (§5.1's bound radius,
+doubled in BF2 for a flyer), and a flyer pilot sees any vehicle's riders by that
+vehicle's body. Ground bots looking at ground vehicles are unchanged.
+
+Not confirmed or not read: the follower's base speed argument (taken as
+MaxSpeed x PathFollowerSpeed); the order's forward vector in the speed share
+(taken as the goal direction); whether an escape path takes the altitude lift
+(the port's does not, or the hangar ceiling holds it); landing hints and their
+query (`0x50`), so bots never land; attack orders in both games; BF2 branching,
+Class, Frequency, Direction and node properties, which the current bake does not
+keep; contact for a BF2 follower, which takes none in the port.
+
+## Implementation boundary and remaining checks
+
+An initial faithful implementation can cover BF1's raw stick law and BF2's
+ordinary authored spline follower independently. It needs to preserve the
+path metadata and node metadata from the PS2 world instead of synthesizing
+patrol points. At the start of this investigation the CONFIG-path reader
+retained node transforms but discarded node/path metadata; fixing that is
+part of loading real flight behavior, not optional presentation work.
+
+Dispatch mounted flyer pilots before `ai::ride::drive` falls back to the
+hover path or requests exit. Reuse the existing pickup wait. Only space
+missions should gain new on-foot flyer boarding decisions in this sprint:
+enabling flyers in the existing ground vehicle selector would alter ground
+AI choices and random consumption. New state must be hashed only when
+active, so old ground-only replay state remains identical. These are port
+integration constraints, not claims about the PS2's boarding policy.
+
+Still unconfirmed: complete BF1 obstacle/height planning, both games' exact
+strategic target selection, BF2 branch scoring and path occupancy, full
+pursuit/avoidance/docking/landing, squadrons, and a portable reproduction of
+address-dependent roll phase. Each incomplete behavior must be named when
+implemented provisionally. Synthetic headless tests establish numerical
+and determinism properties; they cannot prove PS2 combat or trajectory
+equivalence. The remaining confirmation should record real PS2 flight
+pose, path handle/node, curve parameter, speed factor and roll state each
+tick, then replay these readers against that trace. Human play should check
+departure clearance, banked turns, chasing and firing, return to authored
+paths, and landings in a populated space battle.
+
+Reproducible ELF checks (read-only):
+
+```
+python3 scripts/re_check.py callers b1 FUN_001dd0d0
+python3 scripts/re_check.py callers b2 FUN_002fccd0
+python3 scripts/re_check.py word b2 0x625de8 45 --u32
+python3 scripts/tools/eedis2.py bf2 300168 300230
+python3 scripts/tools/eedis2.py bf2 2fcfb0 2fd090
+```
+
+The callers identify the BF1 controllable dispatch and BF2 entity AI; the
+45 words are the 15 property-table triples (hash, reader type, field offset).
+The constructor disassembly establishes the PS2 roll constants above, and
+the final disassembly establishes the 1.05 cap and look-ahead/advance order.

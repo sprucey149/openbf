@@ -14,6 +14,69 @@ use glam::Vec3;
 
 const DEG: f32 = std::f32::consts::PI / 180.0;
 
+#[test]
+fn flyer_pilot_looks_along_untilted_body_without_accumulating_stick_or_mouse_pitch() {
+    let (mut sim, pilot, h) = world(true);
+    let v = sim.vehicle_mut(h).unwrap();
+    v.kind = VehicleKind::Flyer;
+    v.flyer.tilt_pitch = 0.2;
+    v.flyer.tilt_roll = 0.3;
+    v.rot = crate::vehicle::hover::quat_z(0.3) * crate::vehicle::hover::quat_x(0.2);
+    assert!(sim.seat_unit(pilot, h, 0));
+    let pad = PadState {
+        ry: i16::MAX,
+        my: PadState::quantize_look(0.5),
+        ..PadState::default()
+    };
+    for _ in 0..10 {
+        sim.seat_gun(pilot.index as usize, &pad);
+    }
+    let v = sim.vehicle(h).unwrap();
+    let look = v.guns[0].as_ref().unwrap().look;
+    assert_eq!(look, (0.0, 0.2));
+    assert!((v.rot * crate::vehicle::gun::dir(look.0, look.1)).abs_diff_eq(Vec3::Z, 1e-6));
+    assert!(sim.look_preview(pilot, &pad).is_none());
+}
+
+#[test]
+fn flyer_pilot_and_gunner_fire_only_in_flight_outside_bf2_landing_regions() {
+    use crate::vehicle::flyer::{FlightPhase, FlyerParams};
+    for bf2 in [false, true] {
+        for in_region in [false, true] {
+            for phase in [
+                FlightPhase::Landed,
+                FlightPhase::Takeoff,
+                FlightPhase::Flying,
+                FlightPhase::Landing,
+            ] {
+                for seat in [0, 1] {
+                    let (mut sim, pilot, h) = world(true);
+                    sim.hover_params.clear();
+                    sim.flyer_params = vec![Some(FlyerParams {
+                        bf2,
+                        ..FlyerParams::default()
+                    })];
+                    let v = sim.vehicle_mut(h).unwrap();
+                    v.kind = VehicleKind::Flyer;
+                    v.flyer.phase = phase;
+                    if in_region {
+                        sim.landing_regions
+                            .push(crate::region::Region::sphere(Vec3::ZERO, 50.0));
+                    }
+                    assert!(sim.seat_unit(pilot, h, seat));
+                    sim.seat_gun(pilot.index as usize, &pad(buttons::FIRE));
+                    let fired = sim.events.iter().any(|e| matches!(e, Event::Shot { .. }));
+                    assert_eq!(
+                        fired,
+                        phase == FlightPhase::Flying && (!bf2 || !in_region),
+                        "bf2={bf2}, region={in_region}, phase={phase:?}, seat={seat}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 fn gun(fire: [f32; 3], pivot: [f32; 3], yaw: [f32; 2], pilot: bool) -> GunSetup {
     GunSetup {
         weapons: vec![GunWeapon {

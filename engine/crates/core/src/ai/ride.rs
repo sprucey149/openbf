@@ -140,7 +140,13 @@ fn claim_seat_policy(
     }
     let hover = sim.hover_params.get(class).is_some_and(Option::is_some);
     let walker = sim.walker_params.get(class).is_some_and(Option::is_some);
-    if !hover && !walker {
+    if !hover && !walker && !super::flyer_drive::can_fly(sim, v) {
+        return None;
+    }
+    // A flyer is boarded on the ground. The reach is in XZ, so without this a
+    // bot under a passing fighter would climb into it. (OURS for BF1; BF2's
+    // CanEnter refuses state 2, `Sim::enter_seat`.)
+    if v.kind == VehicleKind::Flyer && v.flyer.phase != crate::vehicle::flyer::FlightPhase::Landed {
         return None;
     }
     if v.seats.first().map(|s| s.kind) != Some(SeatKind::Pilot) {
@@ -332,7 +338,8 @@ fn routes_to(sim: &Sim, vh: VehicleHandle, cp: &crate::cp::CommandPost) -> bool 
     let Some(v) = sim.vehicle(vh) else {
         return false;
     };
-    if command(sim, vh) {
+    // FLYER has no planning-graph table: flyers do not route (nav.rs).
+    if command(sim, vh) || v.kind == VehicleKind::Flyer {
         return true;
     }
     let ty = sim
@@ -568,6 +575,7 @@ pub(super) fn settle(sim: &Sim, st: &mut AiState) {
     if let Some(r) = st.ride.as_mut() {
         r.sticks = None;
         r.hover = None;
+        r.flyer = None;
     }
     // (Card TURR: a turret closed to it, or its seat's clocks, keep it.)
     if st.ride.is_some_and(|r| {
@@ -684,6 +692,9 @@ pub(super) fn drive(
         .and_then(|p| p.as_ref())
     {
         return super::walker_drive::drive(sim, me, m, wp, st, nt);
+    }
+    if super::flyer_drive::can_fly(sim, v) {
+        return super::flyer_drive::drive(sim, me, m, st, nt);
     }
     let Some(hp) = sim
         .hover_params
@@ -816,8 +827,10 @@ pub(super) fn at_drop(
 pub(super) fn maintain(sim: &Sim, me: UnitHandle, st: &mut AiState) {
     if let Some(r) = st.ride.as_mut().filter(|r| {
         r.board.is_some_and(|vh| {
-            sim.vehicle(vh)
-                .is_some_and(|v| matches!(v.kind, VehicleKind::Hover | VehicleKind::Walker))
+            sim.vehicle(vh).is_some_and(|v| {
+                matches!(v.kind, VehicleKind::Hover | VehicleKind::Walker)
+                    || super::flyer_drive::can_fly(sim, v)
+            })
         })
     }) {
         r.maintenance = Some(super::state::BoardMaintenance {

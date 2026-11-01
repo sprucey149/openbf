@@ -105,10 +105,11 @@ pub fn mvs_segments(mvs: &[u8]) -> Result<Vec<Segment>> {
     }
     for s in &segs {
         let ok_hdr = mvs.get(s.start..s.start + 4) == Some(&[0, 0, 1, 0xba])
-            || mvs.get(s.start..s.start + 3) == Some(b"BIK");
+            || mvs.get(s.start..s.start + 3) == Some(b"BIK")
+            || is_xmv(mvs.get(s.start..).unwrap_or_default());
         if s.start + s.len > mvs.len() || !ok_hdr {
             bail!(
-                "segment {:08x} at {}: no MPEG or BIK header",
+                "segment {:08x} at {}: no MPEG, BIK or XMV header",
                 s.name,
                 s.start
             );
@@ -163,14 +164,26 @@ pub fn split_jpegs(stream: &[u8]) -> Vec<Vec<u8>> {
         .collect()
 }
 
-/// One MPEG segment → its frames as JPEGs (ffmpeg through pipes).
+/// An Xbox movie segment: an XMV, whose 4-byte magic sits 12 bytes in.
+fn is_xmv(segment: &[u8]) -> bool {
+    segment.get(12..16) == Some(b"xobX")
+}
+
+/// One movie segment → its frames as JPEGs (ffmpeg through pipes).
 fn transcode(mpeg: &[u8]) -> Result<Vec<Vec<u8>>> {
     let q = JPEG_QUALITY.to_string();
     let is_bik = mpeg.get(..3) == Some(b"BIK");
-    let fmt = if is_bik { "bink" } else { "mpeg" };
+    let is_xbox = is_xmv(mpeg);
+    let fmt = if is_bik {
+        "bink"
+    } else if is_xbox {
+        "xmv"
+    } else {
+        "mpeg"
+    };
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-v", "error", "-f", fmt, "-i", "pipe:0", "-an"]);
-    if is_bik {
+    if is_bik || is_xbox {
         let scale = format!("scale={}:{}", MOVIE_SIZE[0], MOVIE_SIZE[1]);
         cmd.args(["-vf", &scale]);
     }

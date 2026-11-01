@@ -30,6 +30,8 @@ pub fn decode_bank_sample(format: u32, raw: &[u8]) -> Vec<i16> {
         raw.chunks_exact(2)
             .map(|c| i16::from_le_bytes([c[0], c[1]]))
             .collect()
+    } else if format == mungefs::stream::FORMAT_IMA {
+        decode_ima(raw)
     } else {
         decode(raw)
     }
@@ -111,4 +113,127 @@ pub fn decode_ima(adpcm: &[u8]) -> Vec<i16> {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod xbox_tests {
+    use super::*;
+
+    /// The disc's own sample banks of one sound LVL.
+    fn read_xbox_sound(rel: &str) -> Option<Vec<u8>> {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../iso/");
+        let iso = format!("{root}Star Wars - Battlefront (USA, Europe).xiso.iso");
+        let file = std::fs::File::open(iso).ok()?;
+        let mut disc = mungefs::xdvdfs::Xdvdfs::open(std::io::BufReader::new(file)).ok()?;
+        let at = disc.find(rel)?;
+        let entry = disc.files[at].clone();
+        disc.read_file(&entry).ok()
+    }
+
+    fn pearson(a: &[f64], b: &[f64]) -> f64 {
+        let n = a.len().min(b.len());
+        let m = |s: &[f64]| s[..n].iter().sum::<f64>() / n.max(1) as f64;
+        let (ma, mb) = (m(a), m(b));
+        let (mut ab, mut aa, mut bb) = (0.0, 0.0, 0.0);
+        for i in 0..n {
+            let (u, v) = (a[i] - ma, b[i] - mb);
+            ab += u * v;
+            aa += u * u;
+            bb += v * v;
+        }
+        ab / (aa * bb).sqrt().max(1e-9)
+    }
+
+    /// RMS of 256-frame windows, which survives the two discs' different rates.
+    fn envelope(pcm: &[i16], rate: u32, base: u32) -> Vec<f64> {
+        let step = (256.0 * f64::from(rate) / f64::from(base)).max(1.0);
+        let mut out = Vec::new();
+        let mut at = 0.0;
+        while (at + step) as usize <= pcm.len() {
+            let win = &pcm[at as usize..(at + step) as usize];
+            let sum: f64 = win.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+            out.push((sum / win.len() as f64).sqrt());
+            at += step;
+        }
+        out
+    }
+
+    /// Real data: BF1 Geonosis's samples decode to the frame count the Xbox
+    /// bank declares, and the same id on the PS2 disc has the same loudness
+    /// over time. That is a codec check that needs no ears.
+    #[test]
+    fn xbox_samples_sound_like_their_ps2_twins() {
+        let Some(xbox) = read_xbox_sound("Data/_LVL_XBOX/Sound/geo.lvl") else {
+            eprintln!("SKIP: no Xbox BF1 disc");
+            return;
+        };
+        let ps2_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../extracted/bf1/sound/DATA/_LVL_PS2/SOUND/GEO.LVL"
+        );
+        let Ok(ps2) = std::fs::read(ps2_path) else {
+            eprintln!("SKIP: no PS2 BF1 sound tree");
+            return;
+        };
+        let xbanks = mungefs::soundbank::find_banks_deep(mungefs::open(&xbox).unwrap());
+        let pbanks = mungefs::soundbank::find_banks_deep(mungefs::open(&ps2).unwrap());
+        let (mut compared, mut alike, mut decoded) = (0usize, 0usize, 0usize);
+        for b in &xbanks {
+            assert_eq!(b.format, mungefs::stream::FORMAT_IMA);
+            for s in b.samples.iter().filter(|s| s.alias_of.is_none()) {
+                let raw = &b.data[s.offset..s.offset + s.size];
+                let pcm = decode_bank_sample(b.format, raw);
+                assert_eq!(pcm.len(), s.frames as usize, "{:08x}", s.id_hash);
+                decoded += 1;
+                let twin = pbanks
+                    .iter()
+                    .flat_map(|p| p.samples.iter().map(move |t| (p, t)))
+                    .find(|(_, t)| t.id_hash == s.id_hash && t.alias_of.is_none());
+                let Some((p, t)) = twin else {
+                    continue;
+                };
+                let other = decode_bank_sample(p.format, &p.data[t.offset..t.offset + t.size]);
+                let (ex, ep) = (
+                    envelope(&pcm, s.frequency, 22050),
+                    envelope(&other, t.frequency, 22050),
+                );
+                if ex.len().min(ep.len()) < 16 {
+                    continue;
+                }
+                compared += 1;
+                alike += usize::from(pearson(&ex, &ep) > 0.9);
+            }
+        }
+        eprintln!("decoded {decoded} samples; {alike}/{compared} twins alike");
+        assert!(decoded > 100, "{decoded}");
+        assert!(alike * 10 >= compared * 8, "{alike}/{compared}");
+    }
+
+    /// Real data: BF1 Geonosis's music stream reads as a two-channel IMA stream
+    /// whose segments fit the data, and its first block starts where it says.
+    #[test]
+    fn xbox_streams_parse_as_ima() {
+        let Some(xbox) = read_xbox_sound("Data/_LVL_XBOX/Sound/geo.lvl") else {
+            eprintln!("SKIP: no Xbox BF1 disc");
+            return;
+        };
+        let streams = mungefs::stream::find_streams(mungefs::open(&xbox).unwrap());
+        assert!(!streams.is_empty());
+        for s in &streams {
+            assert_eq!(s.format, mungefs::stream::FORMAT_IMA);
+            assert_eq!(s.channels, 2);
+            for g in &s.segments {
+                // The record's frame count spans every substream; a stream of
+                // several counts its padding too.
+                let bytes = g.size + if s.substreams > 1 { g.padding } else { 0 };
+                assert_eq!(
+                    (bytes / (36 * 2) * 64) as u32,
+                    g.frames,
+                    "{:08x}",
+                    g.id_hash
+                );
+                assert!(g.offset + g.size <= s.data.len(), "{:08x}", g.id_hash);
+            }
+        }
+    }
 }

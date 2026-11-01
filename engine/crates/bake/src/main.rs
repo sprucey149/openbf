@@ -5,7 +5,7 @@
 //! the PS2 base (see `bake::tier`). Omit it and the bake is PS2-only.
 //!
 //! Run `bake` with no arguments for the full usage table (tex-dump, pc-tex,
-//! map, common, classes, loadscreen, sounds, sound-names, global-sound, beep,
+//! xbox, xbox-prints, map, common, classes, loadscreen, sounds, sound-names, global-sound, beep,
 //! specular, omniproj, soldier, weapon, vehicle, effects, locl, fonts). scripts/rebake.sh runs all of them
 //! over the extracted discs; `extract-iso` makes those (scripts/pack.py).
 
@@ -72,6 +72,50 @@ fn extract_iso(iso: &str, out: &str) -> Result<()> {
     Ok(())
 }
 
+fn extract_xiso(iso: &str, out: &str) -> Result<()> {
+    let (wrote, kept, bytes) = bake::xbox::extract(Path::new(iso), Path::new(out))?;
+    println!(
+        "extract-xiso {iso}: {wrote} files written ({} MB), {kept} already there -> {out}",
+        bytes >> 20
+    );
+    Ok(())
+}
+
+/// `bake xbox <disc.iso|data root> <outdir> [--ps2 <data root>] [--maps a,b]
+/// [--allow-gameplay-drift]`.
+fn xbox(args: &[String]) -> Result<()> {
+    let mut options = bake::xbox::Options {
+        source: ci(&args[0]).into(),
+        out: args[1].clone().into(),
+        ps2: None,
+        only: None,
+        allow_gameplay_drift: false,
+    };
+    let mut rest = args[2..].iter();
+    while let Some(flag) = rest.next() {
+        match flag.as_str() {
+            "--ps2" => {
+                let v = rest.next().context("--ps2 needs a data root")?;
+                options.ps2 = Some(ci(v).into());
+            }
+            "--maps" => {
+                let v = rest.next().context("--maps needs a comma list")?;
+                options.only = Some(v.split(',').map(str::to_owned).collect());
+            }
+            "--allow-gameplay-drift" => options.allow_gameplay_drift = true,
+            other => bail!("bake xbox: unknown option {other:?}"),
+        }
+    }
+    let report = bake::xbox::bake_xbox(&options)?;
+    for m in &report.maps {
+        println!(
+            "xbox {}: gameplay from {}, drift {:?}, {} textures, {} with a larger copy",
+            m.key, m.gameplay, m.drift, m.textures, m.tier2
+        );
+    }
+    Ok(())
+}
+
 fn ci(s: &str) -> String {
     bake::resolve_ci(s)
 }
@@ -87,6 +131,19 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("extract-iso") if args.len() == 4 => extract_iso(&ci(&args[2]), &args[3]),
+        Some("extract-xiso") if args.len() == 4 => extract_xiso(&ci(&args[2]), &args[3]),
+        Some("xbox") if args.len() >= 4 => xbox(&args[2..]),
+        Some("xbox-prints") if args.len() >= 5 => {
+            let roots: Vec<std::path::PathBuf> = args[2..args.len() - 2]
+                .iter()
+                .map(|r| ci(r).into())
+                .collect();
+            bake::xbox::write_prints(
+                &roots,
+                Path::new(&args[args.len() - 2]),
+                Path::new(&args[args.len() - 1]),
+            )
+        }
         Some("heroes") if args.len() == 4 => {
             let p2 = ci(&args[2]);
             let result = bake::heroes::bake_heroes(Path::new(&p2), Path::new(&args[3]))?;
@@ -349,9 +406,9 @@ fn main() -> Result<()> {
             // ALSO got a `<name>.tier2.ktx2` — so this counts classic-plus
             // overrides written beside the PS2 pixels, not textures that
             // replaced them (`bake::tier`, manifest `texture_tiers`).
-            let tier2 = m.texture_tiers.iter().filter(|(_, t)| t == "pc").count();
+            let tier2 = m.texture_tiers.len();
             println!(
-                "baked map '{}': {} models, {} textures ({tier2} with a PC tier 2), \
+                "baked map '{}': {} models, {} textures ({tier2} with a tier 2), \
                  {} instances, {} regions -> {}",
                 m.map,
                 m.models.len(),
@@ -366,6 +423,10 @@ fn main() -> Result<()> {
             eprintln!(
                 "usage:\n\
                  \x20 bake extract-iso <disc.iso>  <outdir>       the disc's DATA/_LVL_PS2 tree, as files\n\
+                 \x20 bake extract-xiso <disc.iso> <outdir>       an Xbox disc's Data/_LVL_XBOX tree, shell movie only\n\
+                 \x20 bake xbox <disc.iso|root> <outdir> [--ps2 <root>] [--maps a,b] [--allow-gameplay-drift]\n\
+                 \x20                                               an Xbox disc's maps, keeping the PS2's gameplay\n\
+                 \x20 bake xbox-prints <ps2 root>... <work> <file>  the PS2 gameplay hashes `bake xbox` compares with\n\
                  \x20 bake map        <map.lvl>    <outdir> [pc.lvl]  models/textures/world manifest\n\
                  \x20 bake donor-hints <assets_baked>             BF2 cover hints onto the BF1 maps of bake::donor::DONORS\n\
                  \x20 bake common     <common.lvl> <outdir> [pc.lvl]  shared models/textures/classes\n\

@@ -219,7 +219,7 @@ pub fn probe_ray(pos: Vec3, vel: Vec3, goal: Vec3) -> Option<(Vec3, Vec3, f32)> 
 }
 
 /// FUN_002a54d8 for an EntityHover (§3): (throttle, strafe, turn, pitch).
-fn steer(k: &Class, m: &Body, o: &Order, goal: Option<Vec3>) -> [f32; 4] {
+pub(super) fn steer(k: &Class, m: &Body, o: &Order, goal: Option<Vec3>) -> [f32; 4] {
     let has_strafe = k.strafe_speed > EPS;
     let r = k.arrive();
     let [mut thr, mut st] = o.held;

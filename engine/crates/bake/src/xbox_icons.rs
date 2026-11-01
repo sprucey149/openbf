@@ -56,7 +56,7 @@ pub fn bake_xbox_icons(lvl_path: &str, outdir: &str) -> Result<usize> {
             other_console = true;
             continue;
         }
-        let t = mungefs::texture_xbox::parse(tex).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
+        let t = mungefs::texture::Texture::parse(tex).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
         std::fs::create_dir_all(&dir).with_context(|| dir.display().to_string())?;
         crate::detail::write_ktx2(&dir, &format!("{sheet}.ktx2"), &t)?;
         written += 1;
@@ -98,7 +98,7 @@ mod tests {
                 .iter()
                 .find(|c| &c.tag == b"tex_" && c.child_str(b"NAME") == Some(name))
                 .unwrap();
-            let rgba = mungefs::texture_xbox::parse(tex).unwrap().rgba8(0);
+            let rgba = mungefs::texture::Texture::parse(tex).unwrap().rgba8(0);
             let (mut sum, mut n) = ([0u32; 3], 0u32);
             for p in rgba.chunks_exact(4).filter(|p| p[3] > 128) {
                 for k in 0..3 {

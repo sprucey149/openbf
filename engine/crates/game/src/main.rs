@@ -125,6 +125,8 @@
 //!   OPENBF_WINDOW_SIZE=WxH        windowed: the first window size in
 //!                                 physical pixels (default 1280x720 logical)
 //!   OPENBF_BF1_WALKER_PACE=1      BF1 walkers on their own gait (vehicle_class::walker)
+//!   OPENBF_FLYER_BOTS=1           bots board and fly flyers on the ground maps
+//!                                 (default off: it changes those maps' hashes)
 //!   OPENBF_AUTOPILOT=1            dev mode, windowed: a scripted pad drives the
 //!                                 player (card HITCH; default off)
 //!   OPENBF_QUIT_AT=<seconds>      dev mode, windowed: quit when the battle

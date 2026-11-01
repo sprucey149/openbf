@@ -93,6 +93,7 @@ pub mod dfocus;
 mod draw;
 pub mod droideka;
 pub mod fix;
+pub mod flyer_drive;
 mod gunner;
 mod gunner_foot;
 pub mod hover_drive;

@@ -10,7 +10,7 @@ module's `//!` header is its spec.
 
 | crate | owns | depends on (workspace; external) |
 |---|---|---|
-| `mungefs` | the PS2 LVL (`ucfb`) and ISO9660 readers; the runtime never links it | flate2, thiserror |
+| `mungefs` | the LVL (`ucfb`), ISO9660 and XDVDFS readers; the runtime never links it | flate2, thiserror |
 | `bake` | the offline tool: LVL → GLB / KTX2 / OGG / RON in `engine/assets_baked/` | mungefs, manifest; glam, png, serde(_json), ron, anyhow |
 | `manifest` | the bake↔runtime schema, data only | serde |
 | `pak` | the game's read-only data: a directory, or the archive appended to the packed game (card PACK) | — |
@@ -44,11 +44,12 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 ## mungefs — disc formats (bake-only; each header holds the byte layout)
 - `mungefs/src/lib.rs` 315 — the `ucfb` chunk walker, FNV-1a tags · `Chunk`, `open`, `fnv1a_lowercase`
 - `mungefs/src/iso.rs` 213 — ISO9660 disc reader for `bake extract-iso` · `Iso`; extraction policy lives in `bake/src/main.rs`.
+- `mungefs/src/xdvdfs.rs` — Xbox XDVDFS disc reader for `bake extract-xiso` and `bake xbox` · `Xdvdfs`
+- `mungefs/src/texture_xbox.rs` — Xbox `tex_`, swizzle included, for maps, donors and the button icons · `Texture`, `is_xbox`
 - `mungefs/src/rle.rs` 147 — the PS2 RLE codec (`tex_`, `pal_`, `HGT8`, the terrain's `ALPH` walk) · `decode`, `decode_prefix`
 - `mungefs/src/config.rs` 252 — munged config trees (`path`, `lght`, `sky_`, `fx__` incl. particles, `hud_`, `ffx_`, `sanm`, `snd_` / `mus_`, foliage) · `parse_tree`
 - `mungefs/src/texture.rs` 329 — PS2 `tex_` + palette → RGBA8 · `Texture`
 - `mungefs/src/texture_pc.rs` 1074 — PC `tex_` (D3D9 surfaces) → RGBA8, the tier-2 source · `find_textures`
-- `mungefs/src/texture_xbox.rs` 219 — Xbox `tex_` (DXT, swizzled A8L8) → RGBA8, for the original Xbox button icons · `parse`, `is_xbox`
 - `mungefs/src/model.rs` 878 — `modl` → segments + material flags, the MTRL's specular fields and BF2 UV-scroll bytes · `Model`, `Segment`, `Segment::uv_scroll`
 - `mungefs/src/skel.rs` 408 — `skel` bind poses · `Skeleton`
 - `mungefs/src/anim.rs` 662 — `zaa_`/`zaf_` animation banks and rigs · `AnimBank`, `find_banks`
@@ -126,6 +127,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/hud_pc.rs` 191 — PC single-player HUD adaptation at bake time · `normalize`; source guard and evidence in `analysis/pc-import-visual-parity.md`.
 - `bake/src/xbox_icons.rs` 136 — the original Xbox pad's `icon_duke_*` sheets from the player's Xbox `common.lvl` · `bake_xbox_icons`, `ICONS`
 - `bake/src/loadscreen.rs` 181 — BF1 loading-screen LVLs (the zoom sequence) and BF2's still pools → KTX2 + RON · `bake_loadscreen`
+- `bake/src/xbox.rs` — `bake xbox` and `bake xbox-prints`: an Xbox disc's maps, and the PS2 gameplay hashes every bake from one is held to · `bake_xbox`, `print_map`, `write_prints`
 - `bake/src/donor.rs` 304 — Card COVR: a BF1 map's Cover hints from the BF2 version of the same map (lead_tmp botre xbox_pc note finding 1). BF2's Yavin Temple authors 973
 
 ## manifest — the schema
@@ -138,6 +140,12 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `manifest/src/tests.rs` 1415 — the round trip: what the bake writes, the runtime reads
 
 ## core — the sim (tick order: the header of `core/src/sim.rs`)
+
+- `core/src/vehicle/flyer.rs` 846 — PS2 BF1/BF2 flight states, speed, attitude, boost and landing restrictions, and BF2's AI curve follower; scoped fidelity in analysis/re-flyer.md · FlyerParams, FollowerParams, FlyerState, FlyerAi, FlightPhase, step, spline_step, curve_at, untilted.
+- `core/src/vehicle/flyer/tests.rs` 401 — flight equation, transition, boost, landing and parked-hash regressions.
+- `core/src/sim/flyers.rs` 418 — flight/world down rays, mission bands, provisional contact sweep, slide, staying over the terrain sheet and an empty craft's rest, the BF2 follower's dispatch and normal-pad integration tests · FlightLimits, Sim::tick_flyers.
+- `core/src/ai/flyer_drive.rs` 708 — a bot at a flyer's pilot seat: BF1's fly agent, altitude and stick law; BF2's path planner and pursuit curve; invented policy named in its header · can_fly, throttle_for, speed_share, stick_to, drive.
+- `core/src/ai/flyer_drive/tests.rs` 515 — boarding through takeoff and flight, the switch, replay, stick/speed/altitude laws and the follower's curves.
 - `core/src/lib.rs` 69 — module roots and fixed tick rate · `TICK_HZ`, `TICK_DT`
 - `core/src/sim.rs` 165 — simulation facade, public re-exports and shared test fixtures · `Sim`, `PadState`, `InputLog`, `Event`, `buttons`; tick order and part ownership are specified in its module header.
 - `core/src/sim/state.rs` 2085 — simulation state, counters, cheats, events, construction, queries and replay hash · `Sim`, `Event`, `NavStats`, `Cheats`, `DeathCause`, `Hazard`, `LETHAL_LANDING_SPEED`, `omni_radius_for`; door methods and hash referees have separate rows below.
@@ -316,6 +324,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/squad.rs` 1304 — BF1 squad orders, pending-call cancellation on actual player orders, tenure-bound mounted release delivery, pending acknowledgments and follow/hold/release execution, generation-bound ground-pilot PILE IN/EVERYONE OUT, own-search suppression and follower vehicle goals · `Order`, `Pending`, `BoardIssuer`, `Command`, `steer`; rules and replay regressions live here and in `analysis/re-squad-orders.md` (SQACK).
 
 ## game — the binary and its library
+
+- `game/src/vehicle_class/flyer.rs` 194 — flyer class defaults and property routing, including turret first refusal, destructible-chunk fallback and the path follower's numbers · FlyerClass.
 - `game/src/main/sim_trace.rs` 133 — SHASH headless CLI, input validation and fixture/baked conquest setup · `run`.
 - `game/src/main.rs` 581 — binary CLI and mode dispatch; flags and environment variables are specified in its module header · `main`, `ViewerArgs`, `BattleSetup`. The binary loads its parts with `#[path]` because the library owns `game/src/`.
 - `game/src/main/battle.rs` 1019 — battle construction and shared draw/HUD setup, including the installed-turret bounds/readout fixture · `make_walk`, `walk_draws`, `hud_model`.
@@ -527,6 +537,9 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `net/src/lib.rs` 10 — empty until the LAN phase
 
 ## Tests, examples, goldens, data
+
+- `game/examples/flyer_drive.rs` 143 — scripted pad flight on a real map with PS2 class numbers; deterministic headless replay.
+- `game/tests/flyer.rs` 73 — original PS2 class extraction and flight property-routing regressions.
 - `engine/ci.sh` runs workspace fmt, all-target clippy `-D warnings`, build, tests and doctests.
   It uses nextest's `ci` profile when installed, otherwise `cargo test`; both select
   `--lib --bins --tests --example arena`. Other examples are compile-checked by clippy

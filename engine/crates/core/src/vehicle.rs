@@ -35,6 +35,7 @@
 //! WALK). An empty `Sim::vehicles` costs the sim hash nothing
 //! (`Sim::hash`), so a pad-free sim hashes as it always did.
 
+pub mod flyer;
 pub mod gun;
 pub mod hover;
 pub mod walker;
@@ -187,6 +188,9 @@ pub struct Vehicle {
     /// The walker integrator's fields (card WALK, [`walker`]); hashed only
     /// for a [`VehicleKind::Walker`].
     pub walker: WalkerState,
+    /// Flight-only dynamic state; default parked state contributes no bytes
+    /// to the hash, preserving existing ground/parked scenarios.
+    pub flyer: flyer::FlyerState,
     /// The ring, in the PS2's order ([`is_ring`]).
     pub seats: Vec<Seat>,
     /// The ONE hull pool (§6).
@@ -263,6 +267,9 @@ impl Vehicle {
         self.hover.hash_into(eat);
         if self.kind == VehicleKind::Walker {
             self.walker.hash_into(eat);
+        }
+        if self.kind == VehicleKind::Flyer {
+            self.flyer.hash_into(eat);
         }
         eat(&[self.seats.len() as u8]);
         for s in &self.seats {
@@ -427,6 +434,7 @@ impl VehicleSpec {
             input: HoverInput::default(),
             hover: HoverState::default(),
             walker: WalkerState::default(),
+            flyer: flyer::FlyerState::default(),
             seats: self
                 .seats
                 .iter()

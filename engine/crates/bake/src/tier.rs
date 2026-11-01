@@ -89,7 +89,7 @@
 //! on it ([`Resolved::take_alpha_from`]) and is forced opaque whenever the
 //! base is.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use mungefs::texture::Texture;
 use mungefs::texture_pc;
 use std::path::Path;
@@ -201,6 +201,8 @@ pub enum Tier {
     Ps2,
     /// PC stock, taken only because it is strictly larger in both dimensions.
     Pc,
+    /// The Xbox disc's copy, by the same rule.
+    Xbox,
 }
 
 impl Tier {
@@ -208,6 +210,7 @@ impl Tier {
         match self {
             Tier::Ps2 => "ps2",
             Tier::Pc => "pc",
+            Tier::Xbox => "xbox",
         }
     }
 }
@@ -303,14 +306,89 @@ pub struct PcTextures {
     by_name: std::collections::HashMap<String, Resolved>,
 }
 
+/// The paths in a comma-joined donor list. A folder name can hold a comma, so a
+/// piece that is no file is joined with the next until it is one; what never
+/// becomes a file stays in the list, for the read to report.
+pub fn donor_paths(list: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut held = String::new();
+    for piece in list.split(',') {
+        if !held.is_empty() {
+            held.push(',');
+        }
+        held.push_str(piece);
+        if std::path::Path::new(&held).is_file() {
+            paths.push(std::mem::take(&mut held));
+        }
+    }
+    if !held.is_empty() {
+        paths.push(held);
+    }
+    paths
+}
+
 impl PcTextures {
-    /// Decode every usable 2D texture in a PC LVL. Cube maps and surfaces
-    /// whose mip chain does not decode cleanly are dropped here, so the
-    /// resolver never has to think about them.
-    pub fn load(lvl_path: &str) -> Result<PcTextures> {
-        let buf = std::fs::read(lvl_path)?;
-        let inner = mungefs::open(&buf).map_err(|e| anyhow::anyhow!("{lvl_path}: {e}"))?;
+    /// Decode every usable 2D texture of the donor LVLs: `lvl_paths` is one
+    /// path, or several joined by commas (the PC's copy, then the Xbox's; see
+    /// [`donor_paths`]), and the largest copy of each name wins, the earlier
+    /// donor on a tie. Cube maps
+    /// and surfaces whose mip chain does not decode cleanly are dropped here, so
+    /// the resolver never has to think about them.
+    pub fn load(lvl_paths: &str) -> Result<PcTextures> {
         let mut by_name = std::collections::HashMap::new();
+        for lvl_path in donor_paths(lvl_paths) {
+            let lvl_path = lvl_path.as_str();
+            let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_owned())?;
+            let inner = mungefs::open(&buf).map_err(|e| anyhow::anyhow!("{lvl_path}: {e}"))?;
+            // Within one LVL a repeated name replaces the earlier copy.
+            let mut own = std::collections::HashMap::new();
+            Self::load_pc(inner, &mut own);
+            Self::load_xbox(inner, &mut own).map_err(|e| anyhow::anyhow!("{lvl_path}: {e}"))?;
+            for (key, r) in own {
+                let area = |x: &Resolved| u64::from(x.width) * u64::from(x.height);
+                if by_name
+                    .get(&key)
+                    .is_none_or(|have: &Resolved| area(&r) > area(have))
+                {
+                    by_name.insert(key, r);
+                }
+            }
+        }
+        Ok(PcTextures { by_name })
+    }
+
+    /// The Xbox's plain surfaces, by the same rules as the PC's.
+    fn load_xbox(
+        inner: &[u8],
+        by_name: &mut std::collections::HashMap<String, Resolved>,
+    ) -> Result<(), mungefs::UcfbError> {
+        for c in mungefs::content_chunks(inner)? {
+            if &c.tag != b"tex_" || !mungefs::texture_xbox::is_xbox(&c) {
+                continue;
+            }
+            let Ok(t) = mungefs::texture_xbox::Texture::parse(&c) else {
+                continue;
+            };
+            if t.kind != mungefs::texture_xbox::KIND_PLAIN {
+                continue;
+            }
+            let Some(mips) = t.faces.into_iter().next() else {
+                continue;
+            };
+            by_name.insert(
+                t.name.to_ascii_lowercase(),
+                Resolved {
+                    width: t.width,
+                    height: t.height,
+                    mips,
+                    tier: Tier::Xbox,
+                },
+            );
+        }
+        Ok(())
+    }
+
+    fn load_pc(inner: &[u8], by_name: &mut std::collections::HashMap<String, Resolved>) {
         for t in texture_pc::find_textures(inner) {
             let Some(s) = t.best() else { continue };
             if s.is_cube() {
@@ -345,7 +423,6 @@ impl PcTextures {
                 },
             );
         }
-        Ok(PcTextures { by_name })
     }
 
     fn larger_than(&self, name: &str, w: u32, h: u32) -> Option<&Resolved> {
@@ -383,7 +460,7 @@ pub fn tier2(t: &Texture, pc: Option<&PcTextures>) -> Option<Resolved> {
         width: better.width,
         height: better.height,
         mips: better.mips.clone(),
-        tier: Tier::Pc,
+        tier: better.tier,
     })
 }
 
@@ -444,6 +521,60 @@ mod tests {
         let mut by_name = std::collections::HashMap::new();
         by_name.insert(name.to_string(), res(w, h, Tier::Pc));
         PcTextures { by_name }
+    }
+
+    /// Real data: BF2 Geonosis's Xbox disc fills tier 2 of the PS2 bake, and a
+    /// missing comma list entry is refused rather than skipped. BF1's map gains
+    /// nothing this way: its larger Xbox art sits on detail-compressed PS2 bases,
+    /// which exclusion 1 keeps.
+    #[test]
+    fn an_xbox_lvl_is_a_donor_too() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../extracted");
+        let xbox = format!("{root}/xbox_bf2/geo/geo1.lvl");
+        let ps2 = format!("{root}/bf2/lvl/DATA/_LVL_PS2/GEO/GEO1.LVL");
+        let (Ok(_), Ok(buf)) = (std::fs::metadata(&xbox), std::fs::read(&ps2)) else {
+            eprintln!("SKIP: no BF2 Geonosis");
+            return;
+        };
+        let donors = PcTextures::load(&xbox).unwrap();
+        let tex = mungefs::content_chunks(mungefs::open(&buf).unwrap())
+            .unwrap()
+            .into_iter()
+            .filter(|c| &c.tag == b"tex_")
+            .filter_map(|c| Texture::parse(&c).ok())
+            .collect::<Vec<_>>();
+        let filled: Vec<_> = tex
+            .iter()
+            .filter_map(|t| tier2(t, Some(&donors)).map(|r| (t, r)))
+            .collect();
+        eprintln!("{} of {} textures gain a tier 2", filled.len(), tex.len());
+        assert!(filled.len() > 5, "{}", filled.len());
+        for (t, r) in &filled {
+            assert_eq!(r.tier, Tier::Xbox);
+            assert!(r.width > t.info.width && r.height > t.info.height);
+            assert_eq!(r.mips[0].len(), (r.width * r.height * 4) as usize);
+        }
+        assert!(PcTextures::load(&format!("{xbox},{root}/no/such.lvl")).is_err());
+    }
+
+    #[test]
+    fn a_donor_list_survives_commas_in_a_folder_name() {
+        let dir = std::env::temp_dir().join(format!("tier_donors_{}", std::process::id()));
+        let folder = dir.join("Battlefront (USA, Europe)");
+        std::fs::create_dir_all(&folder).unwrap();
+        let (a, b) = (folder.join("a.lvl"), dir.join("b.lvl"));
+        std::fs::write(&a, b"x").unwrap();
+        std::fs::write(&b, b"x").unwrap();
+        let (a, b) = (a.display().to_string(), b.display().to_string());
+        assert_eq!(donor_paths(&a), std::slice::from_ref(&a));
+        assert_eq!(donor_paths(&format!("{a},{b}")), [a.clone(), b.clone()]);
+        assert_eq!(donor_paths(&format!("{b},{a}")), [b.clone(), a.clone()]);
+        assert_eq!(donor_paths(""), Vec::<String>::new());
+        // A missing entry is not skipped: the read fails on it.
+        let missing = format!("{b},{}/nope.lvl", dir.display());
+        assert_eq!(donor_paths(&missing)[0], b);
+        assert!(PcTextures::load(&missing).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

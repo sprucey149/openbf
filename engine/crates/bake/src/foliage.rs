@@ -196,6 +196,49 @@ pub fn grass_atlas(elf: &[u8], game: &str, num_parts: i32) -> Result<Vec<[[f32; 
         .collect())
 }
 
+/// The same two tables as numbers (`scripts/gameplay_foliage.py` writes them
+/// from the PS2 executables): what a disc with no such executable bakes from.
+const SHIPPED_TABLES: &str = include_str!("../../manifest/data/gameplay/foliage-v1.json");
+
+/// One game's row of [`SHIPPED_TABLES`].
+fn shipped_row(game: &str) -> Result<serde_json::Value> {
+    let all: serde_json::Value = serde_json::from_str(SHIPPED_TABLES)?;
+    all["tables"]
+        .as_array()
+        .and_then(|t| t.iter().find(|r| r["game"] == game).cloned())
+        .ok_or_else(|| anyhow::anyhow!("no foliage table for {game}"))
+}
+
+/// [`rng_table`] from the shipped numbers, under the same checksum.
+pub fn shipped_rng_table(game: &str) -> Result<[f32; 256]> {
+    let row = shipped_row(game)?;
+    let values = row["placement_values"]
+        .as_array()
+        .filter(|v| v.len() == 256)
+        .ok_or_else(|| anyhow::anyhow!("{game}: the shipped table is not 256 values"))?;
+    let table: [f32; 256] = std::array::from_fn(|k| values[k].as_f64().unwrap_or(f64::NAN) as f32);
+    let bytes: Vec<u8> = table.iter().flat_map(|v| v.to_le_bytes()).collect();
+    if fnv_bytes(&bytes) != TABLE_FNV {
+        bail!("{game}: the shipped table fails the executable's checksum");
+    }
+    Ok(table)
+}
+
+/// [`grass_atlas`] from the shipped numbers.
+pub fn shipped_grass_atlas(game: &str, num_parts: i32) -> Result<Vec<[[f32; 2]; 4]>> {
+    let row = shipped_row(game)?;
+    let key = match num_parts {
+        1 | 3 | 4 => num_parts.to_string(),
+        _ => "default".to_owned(),
+    };
+    let rows: Vec<[[f32; 2]; 4]> =
+        serde_json::from_value(row["atlas_uv_by_num_parts"][key].clone())?;
+    if rows.is_empty() {
+        bail!("{game}: no shipped grass atlas for NumParts {num_parts}");
+    }
+    Ok(rows)
+}
+
 /// A `grasspatch` class's manifest row from its ODF properties
 /// (`(fnv hash, value)` in PROP order, a later one overriding an earlier as
 /// the setter B1 `FUN_001adcd8` does), defaults from the constructor B1
@@ -591,14 +634,16 @@ pub struct Inputs<'a> {
 pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
     let elf = match elf_for(i.lvl_path, i.game).map(std::fs::read) {
         Some(Ok(b)) => Some(b),
-        _ => {
-            eprintln!(
-                "foliage: no {} ELF beside {} — no FOLG placement, no grass atlas",
-                i.game, i.lvl_path
-            );
-            None
-        }
+        _ => None,
     };
+    // An Xbox disc ships no PS2 executable, and needs its numbers just the same.
+    let shipped = elf.is_none() && crate::xbox::lvl_is_xbox(i.lvl_path).unwrap_or(false);
+    if elf.is_none() && !shipped {
+        eprintln!(
+            "foliage: no {} ELF beside {} — no FOLG placement, no grass atlas",
+            i.game, i.lvl_path
+        );
+    }
     let empty = FoliageFile {
         layers: std::array::from_fn(|_| FoliageLayer::empty()),
         paths: Vec::new(),
@@ -610,6 +655,7 @@ pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
         let (dim, cell) = grid(i.game, t);
         let table = match &elf {
             Some(b) => Some(rng_table(b, i.game)?),
+            None if shipped => Some(shipped_rng_table(i.game)?),
             None => None,
         };
         let mask = if mask.dim == dim {
@@ -641,10 +687,13 @@ pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
     let path_props = path_props(file, i.paths, i.classes);
     // A class without its atlas draws nothing, so no ELF → no grass.
     let mut grass = Vec::new();
-    if let Some(elf) = &elf {
+    if elf.is_some() || shipped {
         for (name, props) in i.grass {
             let mut g = grass_class(name, props);
-            g.atlas = grass_atlas(elf, i.game, g.num_parts)?;
+            g.atlas = match &elf {
+                Some(elf) => grass_atlas(elf, i.game, g.num_parts)?,
+                None => shipped_grass_atlas(i.game, g.num_parts)?,
+            };
             grass.push(g);
         }
     }
@@ -664,3 +713,33 @@ pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod shipped_tests {
+    use super::*;
+
+    /// Real data: the shipped numbers are the executables' numbers, bit for bit.
+    #[test]
+    fn the_shipped_tables_are_the_executables_tables() {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../extracted");
+        for (game, elf) in [("bf1", "bf1/SWBFRONT.ELF"), ("bf2", "bf2/SWBFRNT2.ELF")] {
+            assert!(shipped_rng_table(game).is_ok());
+            let Ok(elf) = std::fs::read(format!("{root}/{elf}")) else {
+                eprintln!("SKIP: no {game} executable");
+                continue;
+            };
+            let bits = |t: [f32; 256]| t.map(f32::to_bits);
+            assert_eq!(
+                bits(shipped_rng_table(game).unwrap()),
+                bits(rng_table(&elf, game).unwrap())
+            );
+            for parts in [1, 3, 4, 2] {
+                assert_eq!(
+                    shipped_grass_atlas(game, parts).unwrap(),
+                    grass_atlas(&elf, game, parts).unwrap(),
+                    "{game} NumParts {parts}"
+                );
+            }
+        }
+    }
+}

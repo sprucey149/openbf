@@ -427,17 +427,20 @@ class PackTests(unittest.TestCase):
             texture_dir.mkdir(parents=True)
             manifest = root / 'map/manifest.ron'
             manifest.write_text('(source_game: "bf2", textures: ["lava", "missing", "bracket]"], '
-                                'texture_tiers: [("lava", "pc"), ("missing", "pc"), ("odd", "unknown")], '
+                                'texture_tiers: [("lava", "pc"), ("missing", "pc"), ("odd", "unknown"), '
+                                '("bracket]", "xbox")], '
                                 'texture_tier2: [("lava", "lava.tier2.ktx2"), ("missing", "missing.tier2.ktx2"), '
-                                '("odd", "odd.tier2.ktx2")])')
+                                '("odd", "odd.tier2.ktx2"), ("bracket]", "bracket].tier2.ktx2")])')
             (texture_dir / 'lava.ktx2').touch()
             (texture_dir / 'bracket].ktx2').touch()
             (texture_dir / 'lava.tier2.ktx2').touch()
             (texture_dir / 'odd.tier2.ktx2').touch()
+            (texture_dir / 'bracket].tier2.ktx2').touch()
             row, = pack.map_texture_sources(root)
             self.assertEqual(row['base_textures'], 2)
             self.assertEqual(row['missing_base_textures'], ['missing'])
             self.assertEqual(row['pc_alternatives'], ['lava'])
+            self.assertEqual(row['xbox_alternatives'], ['bracket]'])
             self.assertEqual(row['missing_alternatives'], ['missing'])
             self.assertEqual(row['unrecognized_tiers'], ['unknown'])
             manifest.write_text('(source_game: "unrecognized", textures: [])')

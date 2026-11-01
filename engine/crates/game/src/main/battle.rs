@@ -353,6 +353,8 @@ pub(super) fn make_walk_with_counts(
         let a = layout.apply_mission(m);
         walk.sim.death_regions = a.death_regions.clone();
         walk.sim.fly_ceiling = a.fly_ceiling;
+        walk.sim.flight_limits = a.flight_limits;
+        walk.sim.ground_flyer_map = m.ground_flyer_map;
         let blocked = m.apply_arc_blocks(walk.sim.nav.as_mut());
         if blocked != 0 {
             println!("mission: route groups {blocked:#b} blocked (plnp)");

@@ -27,8 +27,10 @@
 //! [H] and untested on data.
 
 mod aim;
+mod flyer;
 mod walker;
 pub use aim::AimerSpec;
+pub use flyer::FlyerClass;
 pub use walker::{WalkerClass, WALKER_BASES};
 
 use crate::classdb::{fnv1a_lowercase, ClassDb, ClassDef};

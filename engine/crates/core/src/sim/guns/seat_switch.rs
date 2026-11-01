@@ -93,9 +93,13 @@ impl Sim {
         ride.pickup = None;
         ride.sticks = None;
         ride.hover = None;
+        ride.flyer = None;
         ride.man = None;
         ride.use_req = false;
-        if pilot && matches!(kind, VehicleKind::Hover | VehicleKind::Walker) {
+        if pilot
+            && (matches!(kind, VehicleKind::Hover | VehicleKind::Walker)
+                || (kind == VehicleKind::Flyer && self.flyer_bots))
+        {
             ride.begin_pickup(vehicle, self.tick, kind, hover_ai);
         }
     }

@@ -568,6 +568,29 @@ pub fn install(
                 .map(|w| w.params(walkers.get(&c.to_ascii_lowercase())))
         })
         .collect();
+    sim.flyer_params = b
+        .classes
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            vehicle_class::FlyerClass::from_db(&db, c, game == "bf2")
+                .map(|f| f.params(landed[i].unwrap_or(0.0)))
+        })
+        .collect();
+    // BF2's AI flyers follow the map's authored paths (re-flyer-ai.md). The
+    // bake keeps their names and nodes; their properties are not baked yet.
+    sim.flyer_paths = m
+        .paths
+        .iter()
+        .filter(|p| game == "bf2" && p.name.to_ascii_lowercase().contains("entitypath"))
+        .map(|p| core::vehicle::flyer::FlyerPath {
+            nodes: p.nodes.iter().map(|(at, _)| Vec3::from(*at)).collect(),
+        })
+        .collect();
+    // Bots stay off flyers on the ground maps: flying them changes their AI
+    // choices and hash stream. OPENBF_FLYER_BOTS=1 turns them on for a test
+    // (the later space maps set Sim::flyer_bots themselves).
+    sim.flyer_bots = std::env::var_os("OPENBF_FLYER_BOTS").is_some_and(|v| v == "1");
     // What the use input and the exit read (card VSEAT).
     b.seats = b
         .classes

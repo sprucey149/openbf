@@ -126,6 +126,8 @@ pub struct MissionApplied {
     /// The soldiers' fly-height ceiling for `Sim::fly_ceiling` (card JETP):
     /// the mission's `SetMaxPlayerFlyHeight`, else the engine's 200.
     pub fly_ceiling: f32,
+    /// The four `Set*FlyHeight` calls, for `Sim::flight_limits`.
+    pub flight_limits: core::sim::FlightLimits,
 }
 
 /// Build the sim's planning graph (`core::nav`) from a baked map.
@@ -486,6 +488,16 @@ impl MapLayout {
             fly_ceiling: m
                 .max_player_fly_height
                 .unwrap_or(core::soldier::DEFAULT_FLY_CEILING),
+            flight_limits: core::sim::FlightLimits {
+                player: [
+                    m.min_player_fly_height.unwrap_or(-200.0),
+                    m.max_player_fly_height.unwrap_or(200.0),
+                ],
+                ai: [
+                    m.min_fly_height.unwrap_or(-200.0),
+                    m.max_fly_height.unwrap_or(200.0),
+                ],
+            },
         }
     }
 }

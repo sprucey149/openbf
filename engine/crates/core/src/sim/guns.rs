@@ -270,11 +270,16 @@ impl Sim {
         let rx = PadState::axis(p.rx);
         let ry = PadState::axis(p.ry);
         let walker = g.pilot && self.vehicles[vi].kind == VehicleKind::Walker;
+        let flyer = g.pilot && self.vehicles[vi].kind == VehicleKind::Flyer;
         if let Some(t) = g.turn {
             (st.look, st.rate) = t.step(st.look, st.rate, (rx, ry), dt);
         } else if walker {
             let w = &self.vehicles[vi].walker;
             st.look = (w.aim_yaw, w.aim_pitch);
+        } else if flyer {
+            // The pilot looks along the untilted craft frame, not a second
+            // independently accumulated pitch (B1 FUN_001dbbd8, B2 FUN_00209758).
+            st.look = (0.0, self.vehicles[vi].flyer.tilt_pitch);
         } else {
             st.look.0 = if g.pilot {
                 0.0
@@ -283,7 +288,7 @@ impl Sim {
             };
             st.look.1 = (st.look.1 + ry * a.pitch_rate * dt).clamp(a.pitch[0], a.pitch[1]);
         }
-        if p.has_look() && !walker {
+        if p.has_look() && !walker && !flyer {
             st.look = super::look::seat_look(&g, st.look, p.look(), st.zoom);
         }
 
@@ -369,6 +374,18 @@ impl Sim {
             st.target
                 .is_some_and(|t| st.contacts.iter().flatten().any(|c| c.handle == t))
         };
+        // Both PS2 flyer updates clear pilot AND mounted-turret triggers
+        // outside Flying; BF2 also clears them in a landing region
+        // (B1:86443–86482, B2:118975–119007).
+        let vehicle = &self.vehicles[vi];
+        let flight_blocked = vehicle.kind == VehicleKind::Flyer
+            && (vehicle.flyer.phase != crate::vehicle::flyer::FlightPhase::Flying
+                || (self
+                    .flyer_params
+                    .get(vehicle.class as usize)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|p| p.bf2)
+                    && self.landing_regions.iter().any(|r| r.contains(vehicle.pos))));
         let mut shots = Vec::new();
         for (k, w) in g.weapons.iter().enumerate() {
             let held = match k {
@@ -384,8 +401,8 @@ impl Sim {
                 ws.spread_mult = m;
             }
             let input = FireInput {
-                held,
-                blocked: false,
+                held: held && !flight_blocked,
+                blocked: flight_blocked,
                 infinite_ammo: w.infinite || infinite_cheat,
                 no_reload: w.infinite || no_reload_cheat,
                 ai_dispersion: None,

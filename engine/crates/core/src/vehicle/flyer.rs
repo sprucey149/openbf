@@ -1,0 +1,846 @@
+//! Headless flyer motion, from the PS2 updates FUN_001d9180 (BF1) and
+//! FUN_00202d08 (BF2). See analysis/re-flyer.md for source identities,
+//! equations and the outstanding collision/live-comparison work.
+//!
+//! This kernel owns flight state and motion. The caller supplies the down
+//! ray, height band and landing-region membership, then handles contacts.
+//! There is no terrain-following hover spring and no artificial pitch cap.
+
+use super::hover::{quat_x, quat_z};
+use super::Vehicle;
+use crate::fmath;
+use glam::{Quat, Vec3};
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlyerParams {
+    pub bf2: bool,
+    pub acceleration: f32,
+    pub min_speed: f32,
+    pub mid_speed: f32,
+    pub max_speed: f32,
+    pub strafe_speed: f32,
+    pub pitch_rate: f32,
+    pub turn_rate: f32,
+    pub pitch_filter: f32,
+    /// BF2 PitchFilterDecel, a rate slew bound rather than exponential drag.
+    pub pitch_damp: f32,
+    pub turn_filter: f32,
+    pub turn_damp: f32,
+    pub roll_rate: f32,
+    pub roll_filter: f32,
+    pub thrust_pitch_angle: f32,
+    pub strafe_roll_angle: f32,
+    pub bank_angle: f32,
+    pub bank_filter: f32,
+    pub level_filter: f32,
+    pub level_damp: f32,
+    pub takeoff_height: f32,
+    pub takeoff_time: f32,
+    pub takeoff_speed: f32,
+    pub landing_time: f32,
+    pub landing_speed: f32,
+    pub landed_height: f32,
+    pub boost_speed: f32,
+    pub boost_acceleration: f32,
+    pub energy_max: f32,
+    pub energy_auto_restore: f32,
+    pub energy_boost_drain: f32,
+    pub velocity_filter: f32,
+    pub collision_threshold: [f32; 3],
+    pub collision_scale: [f32; 3],
+    /// BF2 AI: the path follower's class numbers (FUN_00300168).
+    pub follower: FollowerParams,
+}
+
+/// BF2 FUN_00300168's defaults; authored through the setter FUN_00300230.
+/// See analysis/re-flyer-ai.md for hashes and unit conversions.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FollowerParams {
+    pub speed: f32,
+    pub turn_speed: f32,
+    /// Stored inverse of PathFollowerAcceleration (s).
+    pub inv_acceleration: f32,
+    pub roll_acceleration: f32,
+    pub roll_look_ahead: f32,
+    pub roll_tolerance: f32,
+    pub roll_speed: f32,
+    /// Stored inverse of PathFollowerRollAccelerationLag (s).
+    pub roll_lag_inv: f32,
+    pub roll_turn_factor: f32,
+    pub roll_speed_factor: f32,
+    pub roll_dampening: f32,
+    pub min_branch_dist: f32,
+    pub flyer_vs_flyer: bool,
+}
+
+impl Default for FollowerParams {
+    fn default() -> Self {
+        Self {
+            speed: 1.0,
+            turn_speed: 0.5,
+            inv_acceleration: 0.5,
+            roll_acceleration: core::f32::consts::FRAC_PI_2,
+            roll_look_ahead: 1.0,
+            roll_tolerance: core::f32::consts::FRAC_PI_8,
+            roll_speed: core::f32::consts::FRAC_PI_2,
+            roll_lag_inv: 1000.0,
+            roll_turn_factor: 5.0,
+            roll_speed_factor: 1.0,
+            roll_dampening: 0.5,
+            min_branch_dist: 300.0,
+            flyer_vs_flyer: true,
+        }
+    }
+}
+
+impl Default for FlyerParams {
+    /// BF1 FUN_001dead8, class +1778..17e4. ODF rates/angles are radians.
+    fn default() -> Self {
+        Self {
+            bf2: false,
+            acceleration: 5.0,
+            min_speed: 10.0,
+            mid_speed: 20.0,
+            max_speed: 30.0,
+            strafe_speed: 0.0,
+            pitch_rate: 1.0,
+            turn_rate: 2.0,
+            pitch_filter: 10.0,
+            pitch_damp: 10.0,
+            turn_filter: 10.0,
+            turn_damp: 10.0,
+            roll_rate: 0.0,
+            roll_filter: 0.0,
+            thrust_pitch_angle: 0.0,
+            strafe_roll_angle: 0.0,
+            bank_angle: 0.5,
+            bank_filter: 2.0,
+            level_filter: 3.0,
+            level_damp: 3.0,
+            takeoff_height: 5.0,
+            takeoff_time: 5.0,
+            takeoff_speed: 3.0,
+            landing_time: 5.0,
+            landing_speed: 3.0,
+            landed_height: 0.0,
+            boost_speed: 0.0,
+            boost_acceleration: 0.0,
+            energy_max: 100.0,
+            energy_auto_restore: 0.0,
+            energy_boost_drain: 0.0,
+            velocity_filter: 0.0,
+            collision_threshold: [7.5, 2.5, 0.0],
+            collision_scale: [1.0, 0.0, 0.0],
+            follower: FollowerParams::default(),
+        }
+    }
+}
+
+impl FlyerParams {
+    /// BF2 FUN_0020f098, class +82c..89c and +e04..e34.
+    pub fn bf2() -> Self {
+        Self {
+            bf2: true,
+            roll_rate: 3.15,
+            roll_filter: 4.0,
+            level_damp: 5.0,
+            energy_boost_drain: 1.0,
+            velocity_filter: 8.0,
+            ..Self::default()
+        }
+    }
+
+    /// BF2 FUN_00202c50/88/c0: these caps apply in a landing region,
+    /// including a space hangar, not to every BF2 or atmospheric flyer.
+    pub fn speeds(&self, in_landing_region: bool) -> [f32; 3] {
+        if self.bf2 && in_landing_region {
+            [
+                (self.min_speed * 0.2).min(10.0),
+                self.mid_speed.min(20.0),
+                self.max_speed.min(60.0),
+            ]
+        } else {
+            [self.min_speed, self.mid_speed, self.max_speed]
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FlightPhase {
+    #[default]
+    Landed,
+    Takeoff,
+    Flying,
+    Landing,
+    /// Abandoning a moving flyer enters this too; it is not synonymous
+    /// with destruction. An occupied, living flyer can recover to Takeoff.
+    Falling,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FlyerState {
+    pub phase: FlightPhase,
+    pub lift: f32,
+    pub strafe_speed: f32,
+    pub omega: Vec3,
+    pub tilt_pitch: f32,
+    pub tilt_roll: f32,
+    pub roll_input: f32,
+    pub energy: f32,
+    pub drained: bool,
+    pub boosting: bool,
+    pub jump_was_down: bool,
+    pub level_time: f32,
+    /// Defer authored energy initialization until the first takeoff, so
+    /// an untouched parked flyer keeps its historical hash stream.
+    pub initialized: bool,
+    /// The AI pilot's flight state (`ai::flyer_drive`). Default unless a bot
+    /// is flying it, so it adds no bytes to any other flyer's hash.
+    pub ai: FlyerAi,
+}
+
+/// One authored `EntityPath`, in node order. Its Class, Direction, Frequency
+/// and node properties are not in the current bakes (analysis/re-flyer-ai.md).
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlyerPath {
+    pub nodes: Vec<Vec3>,
+}
+
+/// The BF1 UnitFlyAgent states the port keeps (FUN_00246d80).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FlyAgent {
+    /// Before the first upward probe.
+    #[default]
+    Start,
+    /// State 2: the 100 m upward ray is blocked; 200 m forward, 1 m up.
+    Escape,
+    /// State 4: to a point over a command post.
+    Travel,
+}
+
+/// A BF2 follower's place on an authored path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PathCursor {
+    pub path: u16,
+    /// The node the curve's P2 stands on.
+    pub node: u16,
+    pub reverse: bool,
+}
+
+/// What an AI pilot keeps between ticks. BF1 fields drive the sticks; BF2
+/// fields drive [`spline_step`], which writes the pose as the PS2 does.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FlyerAi {
+    pub agent: FlyAgent,
+    pub goal: Option<Vec3>,
+    /// FUN_001dcbf0's cached obstacle goal and where it was made.
+    pub avoid: Option<[Vec3; 2]>,
+    /// The next tick FUN_00235c08 may probe (0.1 s cadence); the cached goal
+    /// expires 1 s after this.
+    pub probe_at: u64,
+    /// OURS: an attack run is broken off until this tick.
+    pub break_until: u64,
+    /// OURS: the tick a takeoff began, to give up under a roof.
+    pub takeoff_at: u64,
+    /// OURS: where the craft last moved from, and the tick it did.
+    pub anchor: Vec3,
+    pub anchor_at: u64,
+    /// OURS: a wedged craft keeps its way out until this tick, even under an
+    /// open sky, where the upward probe would drop it at once.
+    pub wedged_until: u64,
+    /// The Catmull-Rom P0..P3 of the current BF2 segment.
+    pub curve: Option<[Vec3; 4]>,
+    pub t: f32,
+    /// Follower +0x60; 0 until the first update, which starts it at 1.
+    pub factor: f32,
+    pub cursor: Option<PathCursor>,
+    /// A pursuit curve (flag +0xfd: speed x 0.8).
+    pub pursuit: bool,
+    /// Follower +0xf8: the 3.5 s after a pursuit (speed x 1.5).
+    pub escape: f32,
+    pub heading: Option<f32>,
+    /// FUN_002feed0: +0x6c filtered goal, +0x70 angle, +0x74 acceleration,
+    /// +0x78 rate.
+    pub roll: [f32; 4],
+}
+
+impl FlyerAi {
+    pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        if *self == Self::default() {
+            return;
+        }
+        eat(b"FAI");
+        eat(&[self.agent as u8, self.pursuit as u8]);
+        for x in self.anchor.to_array() {
+            eat(&x.to_bits().to_le_bytes());
+        }
+        for tick in [
+            self.probe_at,
+            self.break_until,
+            self.takeoff_at,
+            self.anchor_at,
+            self.wedged_until,
+        ] {
+            eat(&tick.to_le_bytes());
+        }
+        let vec = |v: Option<Vec3>, eat: &mut dyn FnMut(&[u8])| match v {
+            Some(v) => {
+                eat(&[1]);
+                for x in v.to_array() {
+                    eat(&x.to_bits().to_le_bytes());
+                }
+            }
+            None => eat(&[0]),
+        };
+        vec(self.goal, eat);
+        for k in 0..2 {
+            vec(self.avoid.map(|a| a[k]), eat);
+        }
+        for k in 0..4 {
+            vec(self.curve.map(|c| c[k]), eat);
+        }
+        vec(self.heading.map(Vec3::splat), eat);
+        if let Some(c) = self.cursor {
+            eat(&c.path.to_le_bytes());
+            eat(&c.node.to_le_bytes());
+            eat(&[c.reverse as u8]);
+        }
+        for x in [self.t, self.factor, self.escape] {
+            eat(&x.to_bits().to_le_bytes());
+        }
+        for x in self.roll {
+            eat(&x.to_bits().to_le_bytes());
+        }
+    }
+}
+
+impl Default for FlyerState {
+    fn default() -> Self {
+        Self {
+            phase: FlightPhase::Landed,
+            lift: 0.0,
+            strafe_speed: 0.0,
+            omega: Vec3::ZERO,
+            tilt_pitch: 0.0,
+            tilt_roll: 0.0,
+            roll_input: 0.0,
+            energy: 100.0,
+            drained: false,
+            boosting: false,
+            jump_was_down: false,
+            level_time: 0.0,
+            initialized: false,
+            ai: FlyerAi::default(),
+        }
+    }
+}
+
+impl FlyerState {
+    /// A pad's untouched flyer adds no bytes to the old ground-map hash.
+    pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        if *self == Self::default() {
+            return;
+        }
+        eat(b"FLY");
+        eat(&[
+            self.phase as u8,
+            self.drained as u8,
+            self.boosting as u8,
+            self.jump_was_down as u8,
+            self.initialized as u8,
+        ]);
+        for value in [
+            self.lift,
+            self.strafe_speed,
+            self.omega.x,
+            self.omega.y,
+            self.omega.z,
+            self.tilt_pitch,
+            self.tilt_roll,
+            self.roll_input,
+            self.energy,
+            self.level_time,
+        ] {
+            eat(&value.to_bits().to_le_bytes());
+        }
+        self.ai.hash_into(eat);
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct LandingSurface {
+    pub height: f32,
+    pub normal: Vec3,
+    /// False for the PS2's excluded moving/flagged landing surfaces.
+    pub can_land: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct FlyerEnvironment {
+    /// A ray down 1024 m, ignoring the flyer's own body. No hit is a
+    /// 1024 m clearance; it does not invent a floor at world y=0.
+    pub ground: Option<LandingSurface>,
+    pub min_height: f32,
+    pub max_height: f32,
+    pub in_landing_region: bool,
+    /// BF2 maps which register landing regions permit the toggle only in
+    /// one. Maps without any registered region retain unrestricted landing.
+    pub require_landing_region: bool,
+}
+
+impl Default for FlyerEnvironment {
+    fn default() -> Self {
+        Self {
+            ground: None,
+            min_height: -200.0,
+            max_height: 200.0,
+            in_landing_region: false,
+            require_landing_region: false,
+        }
+    }
+}
+
+/// The flight frame under the visual tilt: what the pilot's aim follows
+/// (B1 FUN_001dbbd8 stores its forward at entity +0x3b0, the aim FUN_00232b78
+/// reads; analysis/re-flyer.md).
+pub fn untilted(v: &Vehicle) -> Quat {
+    v.rot * quat_x(-v.flyer.tilt_pitch) * quat_z(-v.flyer.tilt_roll)
+}
+
+fn approach(current: f32, target: f32, delta: f32) -> f32 {
+    current + (target - current).clamp(-delta.max(0.0), delta.max(0.0))
+}
+
+fn filtered(current: f32, target: f32, rate: f32, dt: f32) -> f32 {
+    current + (target - current) * (rate * dt).clamp(0.0, 1.0)
+}
+
+fn angular_slew(current: f32, target: f32, filter: f32, decel: f32, dt: f32) -> f32 {
+    let accelerating = current == 0.0 || (target * current >= 0.0 && target.abs() > current.abs());
+    approach(
+        current,
+        target,
+        if accelerating { filter } else { decel } * dt,
+    )
+}
+
+/// State machine and free-flight integration. `v.input` uses the same
+/// pad convention as hover: pitch and turn write negative local x/y rates.
+/// The contact response runs separately; a sweep is not original hull parity.
+pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
+    if !v.alive || dt <= 0.0 {
+        return;
+    }
+    let occupied = !v.is_empty();
+    let input = v.input;
+    let s = &mut v.flyer;
+    let toggle = input.jump && !s.jump_was_down;
+    s.jump_was_down = input.jump;
+    let mut frame = v.rot * quat_x(-s.tilt_pitch) * quat_z(-s.tilt_roll);
+    let clearance = env.ground.map_or(1024.0, |g| v.pos.y - g.height);
+    let normal = env.ground.map_or(Vec3::Y, |g| g.normal);
+    let current_speed = v.vel.dot(v.rot * Vec3::Z);
+    // BF2's energy helper permits the tick which drains past zero, then
+    // recovers at 20 (or the smaller authored maximum).
+    // The original blocks recovery during stunts, not ordinary boost.
+    // Stunts remain unimplemented; below the normal speed ceiling a latched
+    // boost can therefore recover energy before this tick's drain.
+    if p.bf2 && s.initialized && current_speed <= p.max_speed + 0.0001 {
+        s.energy = (s.energy + p.energy_auto_restore * dt).clamp(0.0, p.energy_max);
+        if s.energy >= 20.0_f32.min(p.energy_max) {
+            s.drained = false;
+        }
+    }
+
+    if matches!(s.phase, FlightPhase::Takeoff | FlightPhase::Flying) && !occupied {
+        s.phase = FlightPhase::Falling;
+    } else if s.phase == FlightPhase::Falling && occupied {
+        s.phase = FlightPhase::Takeoff;
+    }
+    match s.phase {
+        FlightPhase::Landed => {
+            s.lift = 0.0;
+            if toggle && occupied {
+                s.phase = FlightPhase::Takeoff;
+                if !s.initialized {
+                    s.energy = p.energy_max;
+                    if p.bf2 {
+                        s.level_time = 1.0;
+                    }
+                    s.initialized = true;
+                }
+            }
+        }
+        FlightPhase::Takeoff => {
+            if toggle && s.lift > 0.75 {
+                s.phase = FlightPhase::Landing;
+            } else if clearance > p.landed_height + p.takeoff_height {
+                s.lift = (s.lift + dt / p.takeoff_time.max(dt)).min(1.0);
+                if s.lift >= 1.0 {
+                    s.phase = FlightPhase::Flying;
+                    if p.bf2 {
+                        s.roll_input = 0.0;
+                    }
+                }
+            }
+        }
+        FlightPhase::Flying => {
+            s.lift = 1.0;
+            if toggle && (!p.bf2 || !env.require_landing_region || env.in_landing_region) {
+                s.phase = FlightPhase::Landing;
+            }
+        }
+        FlightPhase::Landing => {
+            let cancel_at = if p.bf2 { 0.05 } else { 0.25 };
+            if toggle && s.lift < cancel_at {
+                s.phase = FlightPhase::Takeoff;
+            } else {
+                s.lift = (s.lift - dt / p.landing_time.max(dt)).max(0.0);
+                if clearance < p.landed_height && (frame * Vec3::Y).dot(normal) > 0.9375 {
+                    if env.ground.is_some_and(|g| g.can_land) {
+                        s.phase = FlightPhase::Landed;
+                    } else {
+                        s.phase = FlightPhase::Takeoff;
+                    }
+                }
+            }
+        }
+        FlightPhase::Falling => s.lift = (s.lift - dt * 0.2).max(0.0),
+    }
+    if s.phase == FlightPhase::Landed {
+        v.vel = Vec3::ZERO;
+        s.omega = Vec3::ZERO;
+        if s.tilt_pitch != 0.0 || s.tilt_roll != 0.0 {
+            v.rot = frame;
+        }
+        s.tilt_pitch = 0.0;
+        s.tilt_roll = 0.0;
+        s.boosting = false;
+        return;
+    }
+
+    let [min, mid, max] = p.speeds(env.in_landing_region);
+    let throttle = input.throttle.clamp(-1.0, 1.0);
+    let target_speed = if throttle < 0.0 {
+        mid - throttle * (min - mid)
+    } else {
+        mid + throttle * (max - mid)
+    };
+    let boost_requested = p.bf2
+        && p.boost_speed > 0.0
+        && s.phase == FlightPhase::Flying
+        && (input.boost || s.boosting)
+        && throttle >= 0.2
+        && current_speed >= p.min_speed * 0.3;
+    s.boosting = boost_requested && (!s.drained || p.energy_boost_drain <= 0.0);
+    if s.boosting {
+        s.energy -= p.energy_boost_drain * dt;
+        if s.energy < 0.0 {
+            s.energy = 0.0;
+            s.drained = true;
+        }
+    }
+    let acceleration = if s.boosting || (p.bf2 && current_speed > max) {
+        p.boost_acceleration
+    } else {
+        p.acceleration
+    };
+    let target_speed = if s.boosting {
+        p.boost_speed
+    } else {
+        target_speed
+    };
+    let speed = if target_speed < current_speed && p.bf2 && env.in_landing_region {
+        approach(current_speed, target_speed, acceleration * dt * 3.0)
+    } else {
+        approach(current_speed, target_speed, acceleration * dt)
+    };
+    if !p.bf2 {
+        s.strafe_speed = approach(
+            s.strafe_speed,
+            input.strafe.clamp(-1.0, 1.0) * p.strafe_speed,
+            p.acceleration * dt,
+        );
+    }
+
+    if p.bf2 && s.phase == FlightPhase::Flying {
+        let roll = if env.in_landing_region || input.strafe.abs() < 0.3 {
+            0.0
+        } else {
+            (input.strafe - 0.3 * input.strafe.signum()) / 0.7
+        };
+        s.roll_input = filtered(s.roll_input, roll, p.roll_filter, dt);
+        frame *= quat_z(s.roll_input * p.roll_rate * dt);
+        if roll != 0.0 {
+            s.level_time = 0.0;
+        } else if s.level_time != 0.0 && s.level_time < 0.8 {
+            s.level_time = if input.pitch.abs() > 0.1 || input.turn.abs() > 0.1 {
+                0.01
+            } else {
+                (s.level_time + dt).min(1.0)
+            };
+        }
+        if env.in_landing_region {
+            s.level_time = 0.8;
+        }
+    }
+    let forward = frame * Vec3::Z;
+    let right = frame * Vec3::X;
+    let up = frame * Vec3::Y;
+    let mut pitch = input.pitch.clamp(-1.0, 1.0);
+    // Both updates bend the pitch back before the authored height band.
+    if s.phase == FlightPhase::Flying && v.vel.y != 0.0 && input.human {
+        let (height, away) = if v.vel.y < 0.0 {
+            (env.min_height, Vec3::Y)
+        } else {
+            (env.max_height, Vec3::NEG_Y)
+        };
+        let proximity = ((height - v.pos.y) * 0.5 / v.vel.y).clamp(0.0, 1.0);
+        let toward = away.dot(forward);
+        if proximity < 1.0 && toward * v.vel.dot(forward) <= 0.0 {
+            let correction = if away.dot(up) > 0.0 { -toward } else { toward };
+            let correction =
+                (correction / (p.pitch_rate * dt).max(f32::MIN_POSITIVE)).clamp(-1.0, 1.0);
+            pitch = correction + (pitch - correction) * proximity * proximity;
+        }
+    }
+    let mut pitch_rate = p.pitch_rate;
+    let mut turn_rate = p.turn_rate;
+    if p.bf2 {
+        // BF2 blends the smaller rate into each full-axis rate over .7..1.
+        let shared = pitch_rate.min(turn_rate);
+        pitch_rate = shared + (pitch_rate - shared) * ((pitch.abs() - 0.7) / 0.3).clamp(0.0, 1.0);
+        turn_rate =
+            shared + (turn_rate - shared) * ((input.turn.abs() - 0.7) / 0.3).clamp(0.0, 1.0);
+        if p.boost_speed > max && current_speed > max {
+            let boost = ((current_speed - max) / (p.boost_speed - max)).clamp(0.0, 1.0);
+            pitch_rate *= 1.0 - 0.3 * boost;
+            turn_rate *= 1.0 - 0.3 * boost;
+        }
+    }
+    let pitch_target = -pitch * pitch_rate;
+    let turn_target = -input.turn.clamp(-1.0, 1.0) * turn_rate;
+    let cruise_velocity = forward * speed - right * s.strafe_speed;
+    match s.phase {
+        FlightPhase::Flying => {
+            if p.bf2 {
+                s.omega.x = angular_slew(s.omega.x, pitch_target, p.pitch_filter, p.pitch_damp, dt);
+                s.omega.y = angular_slew(s.omega.y, turn_target, p.turn_filter, p.turn_damp, dt);
+                s.omega.z = if s.level_time >= 0.8 {
+                    s.roll_input = 0.0;
+                    -p.level_filter * right.y
+                } else {
+                    0.0
+                };
+                let blend = (p.velocity_filter * dt).clamp(0.0, 1.0);
+                let target = v.rot * Vec3::Z * speed;
+                v.vel = v.vel * (1.0 - blend) + target * blend;
+                let forward_speed = v.vel.dot(v.rot * Vec3::Z);
+                if forward_speed > 0.0 && forward_speed != speed {
+                    v.vel *= speed / forward_speed;
+                }
+            } else {
+                s.omega.x = filtered(s.omega.x, pitch_target, p.pitch_filter, dt);
+                s.omega.y = filtered(s.omega.y, turn_target, p.turn_filter, dt);
+                s.omega.z = -p.level_filter * right.y;
+                v.vel = cruise_velocity;
+            }
+        }
+        FlightPhase::Takeoff | FlightPhase::Landing => {
+            let height_factor = (clearance / p.takeoff_height.max(f32::MIN_POSITIVE)).min(1.0);
+            let level = if p.bf2 { p.level_damp } else { p.level_filter };
+            let pitch_level = s.omega.x * (1.0 - level * (1.0 - s.lift) * dt).max(0.0)
+                + level * forward.dot(normal) * 0.5 * (1.0 - s.lift);
+            s.omega.x = filtered(pitch_level, pitch_target * s.lift, p.pitch_filter, dt);
+            s.omega.y = filtered(s.omega.y, turn_target * height_factor, p.turn_filter, dt);
+            s.omega.z = -level * right.dot(normal);
+            let vertical = if s.phase == FlightPhase::Takeoff {
+                p.takeoff_speed
+            } else {
+                -p.landing_speed
+            };
+            let vertical = Vec3::Y * vertical * (height_factor * 0.875 + 0.125);
+            v.vel = vertical + (cruise_velocity - vertical) * s.lift;
+        }
+        FlightPhase::Falling => {
+            // The original's uncontrolled fall also adds global-RNG tumble
+            // and class-dependent death timers. Those are not transcribed;
+            // this deterministic gravity/velocity component is a scoped slice.
+            let response = p.level_filter * (s.lift * 0.75 + 0.25);
+            v.vel += (cruise_velocity - v.vel) * (response * dt).clamp(0.0, 1.0);
+            v.vel.y -= 9.8 * (1.0 - s.lift) * dt;
+            s.omega *= (1.0 - p.level_filter * dt * 0.25).max(0.0);
+        }
+        FlightPhase::Landed => unreachable!(),
+    }
+    let local_velocity = frame.conjugate() * v.vel;
+    // BF1 uses MaxSpeed; BF2 uses max(MaxSpeed, BoostSpeed) even outside
+    // boost. Takeoff alone also divides by TurnRate (B1:85954;
+    // B2:117113,118231,118641,118758).
+    let bank_speed = if p.bf2 {
+        p.max_speed.max(p.boost_speed)
+    } else {
+        p.max_speed
+    };
+    let bank_divisor = if s.phase == FlightPhase::Takeoff {
+        bank_speed * p.turn_rate
+    } else {
+        bank_speed
+    };
+    let bank_acceleration = s.omega.cross(local_velocity) / bank_divisor.max(f32::MIN_POSITIVE);
+    let pitch_tilt = throttle * p.thrust_pitch_angle * s.lift + bank_acceleration.y * p.bank_angle;
+    let roll_tilt =
+        input.strafe * p.strafe_roll_angle * s.lift - bank_acceleration.x * p.bank_angle;
+    s.tilt_pitch += (pitch_tilt - s.tilt_pitch) * p.bank_filter * dt;
+    s.tilt_roll += (roll_tilt - s.tilt_roll) * p.bank_filter * dt;
+    let angular_speed = s.omega.length();
+    if angular_speed > 0.0001 {
+        let (sin, cos) = fmath::sin_cos(angular_speed * dt * 0.5);
+        let axis = s.omega * (sin / angular_speed);
+        frame *= Quat::from_xyzw(axis.x, axis.y, axis.z, cos);
+    }
+    v.pos += v.vel * dt;
+    if p.bf2 {
+        // Not `clamp`: a mission may set one end past the other's default,
+        // and PS2's two tests do not panic. Its upper test goes first.
+        v.pos.y = v.pos.y.max(env.min_height - 0.2).min(env.max_height + 0.2);
+    }
+    v.rot = (frame * quat_z(s.tilt_roll) * quat_x(s.tilt_pitch)).normalize();
+}
+
+/// The uniform Catmull-Rom segment P1..P2 (FUN_00539970 / FUN_00539b60):
+/// position and tangent at `t`.
+pub fn curve_at(p: &[Vec3; 4], t: f32) -> (Vec3, Vec3) {
+    let a = p[0] * -0.5 + p[1] * 1.5 - p[2] * 1.5 + p[3] * 0.5;
+    let b = p[0] - p[1] * 2.5 + p[2] * 2.0 - p[3] * 0.5;
+    let c = (p[2] - p[0]) * 0.5;
+    (
+        ((a * t + b) * t + c) * t + p[1],
+        (a * 3.0 * t + b * 2.0) * t + c,
+    )
+}
+
+const WOBBLE_BF2: f32 = 2.0;
+const WOBBLE_GROUND_MAP: f32 = 1.0;
+
+/// FUN_002feed0's roll. `rate` is the heading's rate, negative to the right in
+/// the port's frame, so the goal's sign banks into the turn. `phase` stands
+/// in for the follower's address bits, which have no portable value.
+fn roll_step(
+    s: &mut [f32; 4],
+    f: &FollowerParams,
+    input: (f32, f32),
+    phase: f32,
+    wobble: f32,
+    dt: f32,
+) {
+    let (rate, factor) = input;
+    let half_pi = core::f32::consts::FRAC_PI_2;
+    let goal = (-rate * factor * f.roll_speed_factor).clamp(-half_pi, half_pi)
+        + wobble
+            * fmath::sin_cos(phase * 1.17).0
+            * fmath::sin_cos(phase * 2.33).1
+            * fmath::sin_cos(phase * 0.43).0;
+    s[0] += (goal - s[0]) * (f.roll_turn_factor * dt).clamp(0.0, 1.0);
+    let error = s[0] - s[1];
+    let tolerance = f.roll_tolerance * (s[3].abs() / f.roll_speed.max(f32::MIN_POSITIVE) + 1.0);
+    let target = if error.abs() < tolerance {
+        -f.roll_acceleration * if s[3] < 0.0 { -1.0 } else { 1.0 }
+    } else {
+        f.roll_acceleration * if error < 0.0 { -1.0 } else { 1.0 }
+    };
+    s[2] += (target - s[2]) * (f.roll_lag_inv * dt).clamp(0.0, 1.0);
+    s[3] = (s[3] + s[2] * dt).clamp(-f.roll_speed, f.roll_speed);
+    s[1] += s[3] * dt;
+    s[1] += (goal - s[1]) * (f.roll_dampening * dt).clamp(0.0, 1.0);
+}
+
+/// One tick of BF2's ordinary AI flight (FUN_002fccd0, called from the flying
+/// state): evaluate the old parameter, advance, write the pose and velocity.
+/// `v.flyer.ai.curve` must be set. The caller plans the next curve when `t`
+/// reaches 1; `t` holds there meanwhile. UNCONFIRMED: the base speed is taken
+/// as MaxSpeed x PathFollowerSpeed (the argument's source is not transcribed);
+/// boost, avoidance and docking corrections are not built.
+pub fn spline_step(v: &mut Vehicle, p: &FlyerParams, ground_map: bool, time: f32, dt: f32) {
+    let f = p.follower;
+    let tick_phase = (v.gen & 0xf) as f32;
+    let s = &mut v.flyer;
+    s.jump_was_down = v.input.jump;
+    s.lift = 1.0;
+    s.omega = Vec3::ZERO;
+    s.tilt_pitch = 0.0;
+    s.tilt_roll = 0.0;
+    let ai = &mut s.ai;
+    let Some(curve) = ai.curve else { return };
+    if ai.factor == 0.0 {
+        ai.factor = 1.0;
+    }
+    let (position, tangent) = curve_at(&curve, ai.t);
+    let mut base = p.max_speed * f.speed;
+    if ai.pursuit {
+        base *= 0.8;
+    }
+    if ai.escape > 0.0 {
+        base *= 1.5;
+        ai.escape -= dt;
+    }
+    let length = tangent.length();
+    let rate = if length == 0.0 {
+        1.0
+    } else {
+        (base * ai.factor / length).min(1.05)
+    };
+    let (_, ahead) = curve_at(&curve, (ai.t + rate * f.roll_look_ahead).clamp(0.0, 1.0));
+    ai.t = (ai.t + rate * dt).min(1.0);
+    let heading = fmath::atan2(ahead.x, ahead.z);
+    let mut turn = heading - ai.heading.unwrap_or(heading);
+    let pi = core::f32::consts::PI;
+    if turn > pi {
+        turn -= 2.0 * pi;
+    } else if turn < -pi {
+        turn += 2.0 * pi;
+    }
+    ai.heading = Some(heading);
+    let heading_rate = turn / dt;
+    let wobble = if ground_map {
+        WOBBLE_GROUND_MAP
+    } else {
+        WOBBLE_BF2
+    };
+    roll_step(
+        &mut ai.roll,
+        &f,
+        (heading_rate, ai.factor),
+        time + tick_phase,
+        wobble,
+        dt,
+    );
+    // Step 5: next tick's speed factor.
+    let fraction = (heading_rate / pi).abs().clamp(0.0, 1.0);
+    let wanted = 1.0 + (f.turn_speed - 1.0) * fraction;
+    ai.factor += (wanted - ai.factor) * (f.inv_acceleration * dt).clamp(0.0, 1.0);
+    // Step 4: a jump over 15 m is limited to 10 m.
+    let delta = position - v.pos;
+    let distance = delta.length();
+    let moved = if distance > 15.0 {
+        delta * (10.0 / distance)
+    } else {
+        delta
+    };
+    v.pos += moved;
+    v.vel = moved / dt;
+    let forward = if length > 0.0 {
+        tangent / length
+    } else {
+        v.rot * Vec3::Z
+    };
+    let right = Vec3::Y.cross(forward).try_normalize().unwrap_or(Vec3::X);
+    let up = forward.cross(right);
+    let frame = Quat::from_mat3(&glam::Mat3::from_cols(right, up, forward));
+    v.rot = (frame * quat_z(ai.roll[1])).normalize();
+}
+
+#[cfg(test)]
+mod tests;

@@ -1,0 +1,194 @@
+//! PS2 flyer BODY properties. Rates and angles are already radians; turret
+//! sections must not override the pilot's flight controls. See re-flyer.md.
+
+use super::{fill, float, h, section_scope, walker, Scope, FLYER_BASES};
+use crate::classdb::ClassDb;
+use core::vehicle::flyer::FlyerParams;
+
+/// How FUN_00300230 stores an authored follower number.
+#[derive(Clone, Copy)]
+enum Convert {
+    Plain,
+    /// Stored as 1/x; an authored zero stores 0.0001 (re-flyer-ai.md).
+    Inverse,
+    Degrees,
+}
+
+impl Convert {
+    fn apply(self, v: f32) -> f32 {
+        match self {
+            Convert::Plain => v,
+            Convert::Inverse if v == 0.0 => 0.0001,
+            Convert::Inverse => 1.0 / v,
+            Convert::Degrees => v.to_radians(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlyerClass {
+    motion: FlyerParams,
+}
+
+impl FlyerClass {
+    pub fn from_db(db: &ClassDb, class: &str, bf2: bool) -> Option<Self> {
+        if !FLYER_BASES.contains(&db.engine_base(class)?) {
+            return None;
+        }
+        let mut c = Self {
+            motion: if bf2 {
+                FlyerParams::bf2()
+            } else {
+                FlyerParams::default()
+            },
+        };
+        for def in db.chain(class).into_iter().rev() {
+            let mut scope = Scope::Body;
+            for (key, value) in &def.props {
+                if *key == h("FLYERSECTION") {
+                    scope = section_scope(value);
+                } else if !matches!(scope, Scope::Turret(_)) || !walker::turret_claims(*key) {
+                    // The flyer setter handles flight keys before its base
+                    // destructible setter sees CHUNKSECTION. A chunk does not
+                    // close BODY or reset the selected mounted turret. Only
+                    // properties the turret claims are intercepted (B2:124864).
+                    c.set(*key, value);
+                }
+            }
+        }
+        Some(c)
+    }
+
+    /// The model-bound-derived rest height is resolved by the same reader
+    /// that positions the pad spawn, including GeometryName/property order.
+    pub fn params(&self, landed_height: f32) -> FlyerParams {
+        FlyerParams {
+            landed_height,
+            ..self.motion.clone()
+        }
+    }
+
+    fn set(&mut self, key: u32, value: &str) {
+        let p = &mut self.motion;
+        if key == h("Acceleration") {
+            if let Some(number) = float(value).filter(|v| v.is_finite()) {
+                p.acceleration = number;
+            }
+            return;
+        }
+        let scalars = [
+            ("Acceleraton", &mut p.acceleration),
+            ("MinSpeed", &mut p.min_speed),
+            ("MidSpeed", &mut p.mid_speed),
+            ("MaxSpeed", &mut p.max_speed),
+            ("StrafeSpeed", &mut p.strafe_speed),
+            ("PitchRate", &mut p.pitch_rate),
+            ("TurnRate", &mut p.turn_rate),
+            ("PitchFilter", &mut p.pitch_filter),
+            ("PitchFilterDecel", &mut p.pitch_damp),
+            ("TurnFilter", &mut p.turn_filter),
+            ("TurnFilterDecel", &mut p.turn_damp),
+            ("RollRate", &mut p.roll_rate),
+            ("RollFilter", &mut p.roll_filter),
+            ("ThrustPitchAngle", &mut p.thrust_pitch_angle),
+            ("StrafeRollAngle", &mut p.strafe_roll_angle),
+            ("BankAngle", &mut p.bank_angle),
+            ("BankFilter", &mut p.bank_filter),
+            ("LevelFilter", &mut p.level_filter),
+            ("LevelFilterLanding", &mut p.level_damp),
+            ("TakeoffHeight", &mut p.takeoff_height),
+            ("TakeoffTime", &mut p.takeoff_time),
+            ("TakeoffSpeed", &mut p.takeoff_speed),
+            ("LandingTime", &mut p.landing_time),
+            ("LandingSpeed", &mut p.landing_speed),
+            ("LandedHeight", &mut p.landed_height),
+            ("BoostSpeed", &mut p.boost_speed),
+            ("BoostAcceleration", &mut p.boost_acceleration),
+            ("EnergyBar", &mut p.energy_max),
+            ("EnergyAutoRestore", &mut p.energy_auto_restore),
+            ("EnergyBoostDrain", &mut p.energy_boost_drain),
+            ("VelocityFilter", &mut p.velocity_filter),
+        ];
+        for (name, slot) in scalars {
+            if key == h(name) {
+                if let Some(number) =
+                    float(value).filter(|v| v.is_finite() && (name != "EnergyBar" || *v >= 0.0))
+                {
+                    *slot = number;
+                }
+                return;
+            }
+        }
+        // The path follower's setter FUN_00300230 (re-flyer-ai.md's table).
+        let f = &mut p.follower;
+        let number = float(value).filter(|v| v.is_finite());
+        for (name, slot, convert) in [
+            ("PathFollowerSpeed", &mut f.speed, Convert::Plain),
+            ("PathFollowerTurnSpeed", &mut f.turn_speed, Convert::Plain),
+            (
+                "PathFollowerAcceleration",
+                &mut f.inv_acceleration,
+                Convert::Inverse,
+            ),
+            (
+                "PathFollowerRollAcceleration",
+                &mut f.roll_acceleration,
+                Convert::Degrees,
+            ),
+            (
+                "PathFollowerRollLookAhead",
+                &mut f.roll_look_ahead,
+                Convert::Plain,
+            ),
+            (
+                "PathFollowerRollTolerance",
+                &mut f.roll_tolerance,
+                Convert::Degrees,
+            ),
+            ("PathFollowerRollSpeed", &mut f.roll_speed, Convert::Plain),
+            (
+                "PathFollowerRollAccelerationLag",
+                &mut f.roll_lag_inv,
+                Convert::Inverse,
+            ),
+            (
+                "PathFollowerRollTurnFactor",
+                &mut f.roll_turn_factor,
+                Convert::Plain,
+            ),
+            (
+                "PathFollowerRollSpeedFactor",
+                &mut f.roll_speed_factor,
+                Convert::Plain,
+            ),
+            (
+                "PathFollowerRollDampening",
+                &mut f.roll_dampening,
+                Convert::Plain,
+            ),
+            (
+                "PathFollowerMinBranchDist",
+                &mut f.min_branch_dist,
+                Convert::Plain,
+            ),
+        ] {
+            if key == h(name) {
+                if let Some(number) = number {
+                    *slot = convert.apply(number);
+                }
+                return;
+            }
+        }
+        if key == h("PathFollowerFlyerVsFlyer") {
+            if let Some(number) = number {
+                f.flyer_vs_flyer = number != 0.0;
+            }
+            return;
+        }
+        if key == h("CollisionThreshold") {
+            fill(&mut p.collision_threshold, value);
+        } else if key == h("CollisionScale") {
+            fill(&mut p.collision_scale, value);
+        }
+    }
+}

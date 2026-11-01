@@ -795,6 +795,7 @@ impl Sim {
         self.clear_driverless();
         self.tick_hovers(dt);
         self.tick_walkers(dt);
+        self.tick_flyers(dt);
         self.sync_hulls();
         self.carry_riders();
 

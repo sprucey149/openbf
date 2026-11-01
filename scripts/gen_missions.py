@@ -963,6 +963,8 @@ def facts_from_calls(seq):
          "mus_amb": [], "mus_vic": [], "mus_def": [], "sound": [],
          "shots": [], "ai_view": None, "ai_aggr": {}, "ai_snipe": None,
          "ai_capture": {}, "ai_damage": [], "fly": None,
+         "fly_ai_max": None, "fly_ai_min": None, "fly_min": None,
+         "ground_flyer_map": False,
          "bird_count": 0, "bird_types": {}, "heroes": {}, "class_load_order": []}
 
     def ti(v):
@@ -1022,10 +1024,19 @@ def facts_from_calls(seq):
             d["death_regions"].append(a[0])
         # The soldiers' fly-height ceiling (card JETP, analysis/re-jetpack.md
         # 5.3): BF2's SetMaxPlayerFlyHeight (B2:32250), the last call wins.
-        # SetMaxFlyHeight is the AI flyers' and is not read.
+        # SetMaxFlyHeight is the AI flyers' (analysis/re-flyer.md).
         elif c.name == "SetMaxPlayerFlyHeight" and a and \
                 isinstance(a[0], float):
             d["fly"] = a[0]
+        elif c.name == "SetMinPlayerFlyHeight" and a and \
+                isinstance(a[0], float):
+            d["fly_min"] = a[0]
+        elif c.name == "SetMaxFlyHeight" and a and isinstance(a[0], float):
+            d["fly_ai_max"] = a[0]
+        elif c.name == "SetMinFlyHeight" and a and isinstance(a[0], float):
+            d["fly_ai_min"] = a[0]
+        elif c.name == "SetGroundFlyerMap" and a and isinstance(a[0], float):
+            d["ground_flyer_map"] = a[0] != 0.0
         elif c.name == "ScriptCB_SetNumBots" and a and ti(a[0]) is not None:
             d["numbots"] = ti(a[0])
         elif c.name == "SetProperty" and len(a) >= 3 and \
@@ -1197,6 +1208,10 @@ def build(key, game, planet, era, pc_stem, ps2_name):
             m.prov.append("SetAIDamageThreshold(%r, %s) is not carried"
                           % (name, v))
     m.fly = (ps2 or {}).get("fly")
+    m.fly_min = (ps2 or {}).get("fly_min")
+    m.fly_ai_max = (ps2 or {}).get("fly_ai_max")
+    m.fly_ai_min = (ps2 or {}).get("fly_ai_min")
+    m.ground_flyer_map = (ps2 or {}).get("ground_flyer_map", False)
     m.strings = set(consts(f, str)) if f is not None else set()
     m.arc_blocks = arc_calls50(f) if f is not None and game == "bf2" else []
     m.barriers = barrier_calls50(f) if f is not None and game == "bf2" else []
@@ -1385,6 +1400,15 @@ def ron(m):
         L.append("    // SetMaxPlayerFlyHeight: the soldiers' fly-height "
                  "ceiling (world y).")
         L.append("    max_player_fly_height: Some(%s)," % fmtf(m.fly))
+    if m.fly_min is not None:
+        L.append("    min_player_fly_height: Some(%s)," % fmtf(m.fly_min))
+    if m.fly_ai_max is not None:
+        L.append("    // SetMaxFlyHeight / SetMinFlyHeight: the AI flyers' band.")
+        L.append("    max_fly_height: Some(%s)," % fmtf(m.fly_ai_max))
+    if m.fly_ai_min is not None:
+        L.append("    min_fly_height: Some(%s)," % fmtf(m.fly_ai_min))
+    if m.ground_flyer_map:
+        L.append("    ground_flyer_map: true,")
     if m.birds:
         L.append("    birds: [%s]," % ", ".join('(%s, "%s")' % (fmtf(size), name) for size, name in m.birds))
     if m.sound:

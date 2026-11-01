@@ -77,6 +77,9 @@ pub(super) fn mouse_drive(
     }
     let turn = (v.input.turn + dy / MOUSE_STEER).clamp(-1.0, 1.0);
     v.input.turn = turn;
+    if v.kind == VehicleKind::Flyer {
+        v.input.pitch = (v.input.pitch + dp / MOUSE_STEER).clamp(-1.0, 1.0);
+    }
     full || turn * turn + v.input.pitch * v.input.pitch >= 0.9
 }
 
@@ -128,6 +131,11 @@ impl Sim {
         let vehicle = m.vehicle.index as usize;
         let seat = usize::from(m.seat);
         let v = self.vehicles.get(vehicle)?;
+        if g.pilot && v.kind == VehicleKind::Flyer {
+            // Mouse input drives the craft's angular motion, not an
+            // independent seat look. Its rendered pose supplies that view.
+            return None;
+        }
         if g.pilot && v.kind == VehicleKind::Walker {
             let p = self.walker_params.get(v.class as usize)?.as_ref()?;
             return Some(LookPreview::Seat {
