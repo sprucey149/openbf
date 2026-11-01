@@ -154,6 +154,7 @@ pub enum LightPath {
     /// colour is the model's colour word, a factor on that light, not on
     /// the texel (`game::spawn_preview::colour_unit`).
     Iface = 9,
+    /// PC geometry with baked vertex lighting; only dynamic local lights are added.
     VertexLit = 10,
 }
 
@@ -218,7 +219,8 @@ pub struct DrawCmd {
     pub fade: Option<Fade>,
     /// The model sphere this draw gathers BF2's local lights for (card BPNT,
     /// `crate::point_light`), or `None` for a draw that takes none — every
-    /// draw but a placed world model's.
+    /// draw but a placed world model's. `Lit` and `Character` take all local
+    /// lights; `Prelit`, `PrelitAdd` and PC `VertexLit` skip static lights.
     pub lit: Option<LitSphere>,
 }
 

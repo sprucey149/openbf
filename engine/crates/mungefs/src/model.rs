@@ -360,7 +360,7 @@ fn parse_pc_geometry(
                     (w1, skin.payload[base + 3]),
                     (w2, skin.payload[base + 4]),
                 ];
-                pairs.sort_by(|a, b| b.0.cmp(&a.0));
+                pairs.sort_by_key(|p| std::cmp::Reverse(p.0));
                 bind.push([pairs[0].1 << 2, pairs[1].1 << 2, pairs[2].1 << 2, 0]);
                 wght.push([pairs[0].0, pairs[1].0, pairs[2].0, 0]);
             }

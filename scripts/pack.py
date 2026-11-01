@@ -32,7 +32,10 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
+
+from console_input import require_console_bf2, require_ps2_bf1_reference, pc_game
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENGINE = os.path.join(ROOT, "engine")
@@ -49,6 +52,12 @@ LUA = {
     "bf2": {"mission": "MISSION.LVL", "common": "COMMON.LVL", "shell": "SHELL.LVL",
             "ingame": "INGAME.LVL", "inshell": "INSHELL.LVL"},
 }
+
+
+def check_packed_size(path):
+    """Windows cannot launch a PE executable whose complete appended pack reaches 4 GiB."""
+    if WINDOWS and os.path.getsize(path) >= 2**32:
+        sys.exit("pack: packed executable reaches Windows' 4 GiB limit; reduce the selected asset set or texture sizes and pack again")
 
 
 def step(msg):
@@ -89,13 +98,7 @@ def ci_path(base, rel):
 
 
 def classify_lvl_pc(path):
-    if not os.path.isdir(path) or not os.path.isfile(ci_path(path, "CORE.LVL")):
-        return None
-    if os.path.isfile(ci_path(path, "INGAME.LVL")):
-        return "bf2"
-    if os.path.isfile(ci_path(path, "COMMON/ENG/COMMON.LVL")):
-        return "bf1"
-    return None
+    return pc_game(path)
 
 
 def find_pc_lvl_dirs(search_root):
@@ -140,10 +143,8 @@ def resolve_pc_roots(pc_dir, pc1, pc2):
     return roots
 
 
-def lvl_root(game, pc_roots=None):
+def lvl_root(game):
     """The disc's _LVL_PS2 directory: the dev layout's, else where extract-iso puts it."""
-    if pc_roots and game in pc_roots:
-        return pc_roots[game]
     return os.path.join(EXTRACTED, game, "lvl", "DATA", "_LVL_PS2")
 
 
@@ -153,17 +154,19 @@ def need(tool, why):
 
 
 # What a bake / the missions are made by: when any of it changes, the output is stale and is made again.
-BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh",
+BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py",
                "engine/crates/bake/src/effect_names.txt", "engine/Cargo.toml", "engine/Cargo.lock")
-MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py")
+MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py")
 # Kept in extracted/ (local, ignored by git): engine/missions/ is tracked in the dev tree.
 BAKE_STAMP = os.path.join(EXTRACTED, "bake_inputs.sha256")
 MISSION_STAMP = os.path.join(EXTRACTED, "mission_inputs.sha256")
 
 
-def inputs_hash(paths):
+def inputs_hash(paths, source_paths=None):
     """One sha256 over the source files under `paths` (line endings folded, so a CRLF checkout hashes the same)."""
     h = hashlib.sha256()
+    if source_paths:
+        h.update(json.dumps(source_paths, sort_keys=True).encode())
     for p in paths:
         full = os.path.join(ROOT, p)
         files = [full] if os.path.isfile(full) else sorted(
@@ -176,11 +179,11 @@ def inputs_hash(paths):
     return h.hexdigest()
 
 
-def stale(stamp, paths):
+def stale(stamp, paths, source_paths=None):
     """Why the output at `stamp` must be made again, or None when it is current."""
     if not os.path.isfile(stamp):
         return "made before pack.py recorded what made it"
-    return None if open(stamp).read().strip() == inputs_hash(paths) else "its source changed since it was made"
+    return None if Path(stamp).read_text(encoding="utf-8").strip() == inputs_hash(paths, source_paths) else "its source changed since it was made"
 
 
 def find_bash():
@@ -317,11 +320,9 @@ def source_report(root, baked, missions, images, extracted_used=(), images_used=
     selected = set()
     for game, image in images.items():
         if game in pc_roots:
-            used = game in extracted_used
-            note(pc_roots[game], f'{game} PC data', used,
-                 'read directly from _LVL_PC by mission generation or bake this run' if used else
+            note(pc_roots[game], f'{game} PC visual input', full_bake,
+                 'passed to texture-tier bake this run; console data supplies gameplay and shared UI' if full_bake else
                  'not read this run; cached bake and missions packed')
-            continue
         selected.add(Path(image).resolve())
         used = game in images_used
         note(image, f'{game} requested PS2 image', used,
@@ -329,7 +330,7 @@ def source_report(root, baked, missions, images, extracted_used=(), images_used=
         tree = root / 'extracted' / game
         used = game in extracted_used
         note(tree, f'{game} extracted PS2 data', used,
-             'read by mission generation or bake this run' if used else 'not read this run; cached bake and missions packed')
+             'read for the console Lua cache, mission generation or bake this run' if used else 'not read this run; cached bake and missions packed')
     iso = root / 'iso'
     if iso.is_dir():
         for path in sorted(p for p in iso.iterdir() if p.is_file()):
@@ -339,10 +340,10 @@ def source_report(root, baked, missions, images, extracted_used=(), images_used=
     pc = root / 'PC_swbf2_exe' / 'Star Wars Battlefront II Classic/GameData/data/_lvl_pc'
     recipe = (root / 'scripts/rebake.sh').read_text(encoding='utf-8')
     match = re.search(r'^BF2_MAPS="([^"]*)"', recipe, re.M)
-    known_pc = {'ingame.lvl', 'side/rep.lvl', 'side/cis.lvl', 'tat/tat2.lvl'}
+    known_pc = {'side/rep.lvl', 'side/cis.lvl', 'tat/tat2.lvl'}
     if match:
         known_pc.update(token.lower() + '.lvl' for token in match[1].split())
-    read_pc = sorted(str(pc / name) for name in known_pc if full_bake and (pc / name).is_file())
+    read_pc = sorted(str(pc / name) for name in known_pc if full_bake and not pc_roots and (pc / name).is_file())
     note(pc, 'optional BF2 PC texture directory', bool(read_pc),
          'existing libraries passed to the supported PC texture reader' if read_pc else
          'no PC libraries read this run (missing optional input or cached bake)')
@@ -385,6 +386,20 @@ def write_source_report(out, report):
     return path
 
 
+
+def console_lua_root():
+    """A content-keyed console-only cache cannot inherit old PC mission scripts."""
+    digest = hashlib.sha256(inputs_hash(MISSION_INPUTS).encode())
+    for game, libraries in LUA.items():
+        for group, library in libraries.items():
+            source = ci_path(lvl_root(game), library)
+            digest.update((game + "/" + group).encode())
+            with open(source, "rb") as data:
+                for block in iter(lambda: data.read(1 << 20), b""):
+                    digest.update(block)
+    return os.path.join(EXTRACTED, "console_lua", digest.hexdigest())
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--iso1", default=os.path.join(ROOT, "iso", "SWBF1.iso"), help="Star Wars: Battlefront (PS2) disc image")
@@ -395,7 +410,12 @@ def main():
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
     a = ap.parse_args()
-    pc_roots = resolve_pc_roots(a.pc_dir, a.pc1, a.pc2)
+    pc_roots = resolve_pc_roots(a.pc_dir, a.pc1 or os.environ.get("PC1"), a.pc2 or os.environ.get("PC2"))
+    try:
+        require_console_bf2(bool(pc_roots), lvl_root("bf2"), a.iso2)
+        require_ps2_bf1_reference("bf1" in pc_roots, lvl_root("bf1"), a.iso1)
+    except ValueError as error:
+        sys.exit("pack: " + str(error))
     out = os.path.abspath(a.out)
     images_used, extracted_used = set(), set()
     full_bake = False
@@ -410,24 +430,30 @@ def main():
     step("2/6 the discs")
     for g, iso in (("bf1", a.iso1), ("bf2", a.iso2)):
         if g in pc_roots:
-            print(f"   {g}: using PC directory ({pc_roots[g]})")
-            continue
+            print(f"   {g}: using PC assets ({pc_roots[g]})")
+            # Console extraction remains the source of gameplay and the shared UI.
         if os.path.isfile(ci_path(lvl_root(g), "CORE.LVL")):
             print(f"   {g}: already extracted ({lvl_root(g)})")
             continue
         if not os.path.isfile(iso):
-            sys.exit(f"pack: no disc image at {iso} (pass --iso1 / --iso2 or --pc-dir / --pc1 / --pc2)")
+            sys.exit(f"pack: no disc image at {iso} (pass --iso1 / --iso2; PC assets also require a console BF2 disc)")
         run([bake, "extract-iso", iso, os.path.join(EXTRACTED, g, "lvl")])
         images_used.add(g)
 
     step("3/6 the Lua scripts")
+    lua_root = console_lua_root()
+    extracted_used.update(LUA)  # those source LVLs were read to key the console cache
     for g, lvls in LUA.items():
         for sub, lvl in lvls.items():
-            d = os.path.join(EXTRACTED, g, "lua", sub)
-            if os.path.isdir(d) and os.listdir(d):
+            d = os.path.join(lua_root, g, sub)
+            if os.path.isfile(os.path.join(d, ".complete")):
                 continue
-            run([sys.executable, "-I", os.path.join(ROOT, "scripts", "extract_lua.py"),
-                 ci_path(lvl_root(g, pc_roots), lvl), "--out", d])
+            os.makedirs(os.path.dirname(d), exist_ok=True)
+            with tempfile.TemporaryDirectory(prefix="console-lua-", dir=os.path.dirname(d)) as scratch:
+                run([sys.executable, "-I", os.path.join(ROOT, "scripts", "extract_lua.py"),
+                     ci_path(lvl_root(g), lvl), "--out", scratch])
+                Path(scratch, ".complete").touch()
+                os.replace(scratch, d)
             extracted_used.add(g)
 
     step("4/6 the missions")
@@ -435,29 +461,30 @@ def main():
     tracked = subprocess.run(["git", "-C", ROOT, "ls-files", "--", "engine/missions"], capture_output=True,
                              text=True).stdout.strip()
     have = glob.glob(os.path.join(MISSIONS, "*.ron"))
-    why = stale(MISSION_STAMP, MISSION_INPUTS) if have and not tracked else None
-    if have and (tracked or (not a.rebake and why is None)):
+    why = stale(MISSION_STAMP, MISSION_INPUTS, {"console_lua": lua_root}) if have and not tracked else None
+    if have and (tracked or (not pc_roots and not a.rebake and why is None)):
         print(f"   already there ({MISSIONS})")
     else:
         if why:
             print(f"   making the missions again: {why}")
-        run([sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"), "--ps2-only", "--out", MISSIONS])
+        run([sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"), "--ps2-only", "--lua-root", lua_root, "--out", MISSIONS])
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(MISSION_STAMP, "w") as fh:
-            fh.write(inputs_hash(MISSION_INPUTS) + "\n")
+            fh.write(inputs_hash(MISSION_INPUTS, {"console_lua": lua_root}) + "\n")
 
     step("5/6 the bake")
     bash = find_bash()
-    bake_env = None
+    bake_env = dict(os.environ)
+    bake_env["BF2_CONSOLE_ISO"] = os.path.abspath(a.iso2).replace("\\", "/")
+    bake_env["OPENBF_CONSOLE_LUA_ROOT"] = lua_root.replace("\\", "/")
     if pc_roots:
-        bake_env = dict(os.environ)
         if "bf1" in pc_roots:
             bake_env["PC1"] = pc_roots["bf1"].replace("\\", "/")
         if "bf2" in pc_roots:
             bake_env["PC2"] = pc_roots["bf2"].replace("\\", "/")
     baked = os.path.isfile(os.path.join(BAKED, "classes", "bf1_all.ron"))
-    why = stale(BAKE_STAMP, BAKE_INPUTS) if baked else None
+    why = stale(BAKE_STAMP, BAKE_INPUTS, pc_roots) if baked else None
     if a.rebake or not baked or why:
         if why and not a.rebake:
             print(f"   baking again: the bake in {BAKED} was {why}")
@@ -467,7 +494,7 @@ def main():
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(BAKE_STAMP, "w") as fh:
-            fh.write(inputs_hash(BAKE_INPUTS) + "\n")
+            fh.write(inputs_hash(BAKE_INPUTS, pc_roots) + "\n")
     else:
         print(f"   already baked ({BAKED}); --rebake bakes again")
         n = len(missing_music())
@@ -499,6 +526,7 @@ def main():
     new = out + ".new"
     try:
         run([tmp, "--write-pack", new, f"assets_baked={BAKED}", f"missions={MISSIONS}"])
+        check_packed_size(new)
         try:
             os.replace(new, out)
         except PermissionError:

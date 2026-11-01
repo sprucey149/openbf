@@ -1,6 +1,6 @@
 # PC import visual parity, 2026-11-01
 
-Scope: improve PC-primary imports against the existing PS2 import, starting with
+Scope: improve PC geometry imports against the existing PS2 import, starting with
 BF1 Bespin Cloud City.
 
 PC geometry now retains its platform identity after parsing. Its prelit material
@@ -15,7 +15,10 @@ one-player layout. Its single-player layout is adapted to the existing PS2 coord
 panel, health/energy/hero/vehicle bars, target readout, reticle, minimap, team
 icons and counters. Text uses smaller PC font assets with adjusted sizing.
 The PC font artwork remains different. PS2 layouts and multiplayer layouts are
-not normalized. This does not substitute PS2 assets into a PC-only installation.
+not normalized. This describes the low-level importer experiment; the supported
+pack/rebake pipeline requires a console BF2 disc and takes menus, shell and HUD
+from its console data, including fonts, rather than this PC approximation.
+PC-only builds are refused.
 
 ## Evidence
 
@@ -26,7 +29,9 @@ Local artifacts are under `engine/artifacts/` and are not public deliverables:
 - `pc-hud-before.png`, `pc-hud-after.png`, `ps2-hud-reference.png`: HUD comparison.
 - Left-wall sample rectangle `(40,190)-(260,315)`: PC mean RGB brightness
   253.9 before, 155.9 after, PS2 139.5; near-white clipping 97.7% before,
-  0% after and on PS2. Different source art still affects the final appearance.
+  0% after and on PS2. The corrected PC sample is still 16.4 brightness units
+  (11.8%) above the PS2 sample. Different source art affects the result; the
+  VertexLit path is retained, but this is not full lighting calibration.
 - PS2 Bespin render before/after: identical PNG bytes.
 - Bakes using the saved previous bake executable versus the changed executable:
   BF1 PS2 BES2 197 files, BF2 PS2 COR1 182 files, BF2 PS2 INGAME/common 326
@@ -60,3 +65,17 @@ workspace doc tests passed, rustfmt passed, and the GPU lighting referee passed.
 The reviewed bakes retain all 705 sampled PS2 files and all 326 PC common/HUD
 files byte for byte. The combined local playtest checkout remains separate
 from the PR commit.
+
+## Integration limits
+
+PC data is an optional visual source. Builds require a console BF2 source; the
+menus, shell, HUD sheets, layouts and fonts come from that console data. The
+PC HUD adaptation described above is historical importer evidence, not the
+supported build pipeline. PC data alone cannot supply the console interface.
+
+Keep the PC-only `VertexLit` dispatch. The reported wall sample remains brighter
+than PS2: 155.9 versus 139.5 mean RGB (about 11.8%). The path excludes static
+lighting already baked into vertex colours and adds dynamic point lights; it
+does not establish parity for dynamic directional lights, all PC material flag
+combinations, instance tints or all maps. No full calibration was attempted at
+integration. The PS2 material dispatch and shader paths stay unchanged.

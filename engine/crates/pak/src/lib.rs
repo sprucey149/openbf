@@ -15,6 +15,9 @@
 //! index:  u32 count, then per entry: u16 path length, path (UTF-8, '/'-separated, "<name>/<rel>"), u64 offset, u64 length
 //! footer: b"OPENBFPK", u64 pack start, u64 index offset, u64 index length      (32 bytes, the file's last)
 //! ```
+//! Length bit 63 marks compression; bit 62 selects zstd (otherwise legacy raw Deflate). The body begins with a
+//! u32 uncompressed length. Unflagged entries retain the original layout and remain directly seekable.
+//!
 //! Offsets are from the start of the file. The pack start is where the executable proper ends, so re-packing a packed
 //! binary copies only the executable.
 
@@ -27,6 +30,9 @@ use std::sync::{Mutex, OnceLock};
 const MAGIC: &[u8; 8] = b"OPENBFPK";
 const FOOTER: u64 = 32;
 const COMPRESSED_FLAG: u64 = 1 << 63;
+const ZSTD_FLAG: u64 = 1 << 62;
+const LENGTH_MASK: u64 = !(COMPRESSED_FLAG | ZSTD_FLAG);
+const WINDOWS_EXE_LIMIT: u64 = 1 << 32;
 
 /// An archive: the open file and its index (path -> offset, length).
 pub struct Archive {
@@ -74,8 +80,11 @@ impl Archive {
             let off = take_u64(&mut r)?;
             let raw_n = take_u64(&mut r)?;
             let compressed = (raw_n & COMPRESSED_FLAG) != 0;
-            let n = raw_n & !COMPRESSED_FLAG;
-            if (compressed && n < 5) || off < start || off.checked_add(n).is_none_or(|end| end > at)
+            let n = raw_n & LENGTH_MASK;
+            if (raw_n & ZSTD_FLAG != 0 && !compressed)
+                || (compressed && n < 5)
+                || off < start
+                || off.checked_add(n).is_none_or(|end| end > at)
             {
                 return Err(bad("entry outside the pack"));
             }
@@ -140,7 +149,7 @@ impl Archive {
 
     fn read(&self, off: u64, raw_len: u64) -> io::Result<Vec<u8>> {
         let compressed = (raw_len & COMPRESSED_FLAG) != 0;
-        let stored = raw_len & !COMPRESSED_FLAG;
+        let stored = raw_len & LENGTH_MASK;
         let len = usize::try_from(stored).map_err(|_| bad("entry too large for this platform"))?;
         let mut buf = vec![0u8; len];
         read_exact_at(&self.file, &mut buf, off)?;
@@ -151,8 +160,54 @@ impl Archive {
             return Err(bad("compressed entry truncated"));
         }
         let expected = u32::from_le_bytes(buf[..4].try_into().unwrap()) as usize;
-        let mut out = Vec::with_capacity(expected);
-        flate2::read::DeflateDecoder::new(&buf[4..]).read_to_end(&mut out)?;
+        // Do not reserve from the advertised length: a corrupt header must not allocate gigabytes.
+        // Read at most one byte past it, so a bad stream cannot expand without a bound either.
+        let mut out = Vec::new();
+        if raw_len & ZSTD_FLAG != 0 {
+            let mut decoder = zstd::stream::read::Decoder::with_buffer(&buf[4..])?.single_frame();
+            decoder.window_log_max(27)?;
+            decoder
+                .by_ref()
+                .take(expected as u64 + 1)
+                .read_to_end(&mut out)?;
+            if !decoder.finish().is_empty() {
+                return Err(bad("trailing compressed data"));
+            }
+        } else {
+            // Legacy Deflate packs remain readable. Require the end marker as well as the length;
+            // Read's EOF alone also accepts a truncated raw Deflate stream.
+            let mut decoder = flate2::Decompress::new(false);
+            let mut block = [0u8; 65536];
+            loop {
+                let before_in = decoder.total_in();
+                let before_out = decoder.total_out();
+                let room = expected
+                    .saturating_sub(out.len())
+                    .saturating_add(1)
+                    .min(block.len());
+                let status = decoder
+                    .decompress(
+                        &buf[4 + before_in as usize..],
+                        &mut block[..room],
+                        flate2::FlushDecompress::None,
+                    )
+                    .map_err(|e| bad(&format!("invalid Deflate stream: {e}")))?;
+                let written = (decoder.total_out() - before_out) as usize;
+                out.extend_from_slice(&block[..written]);
+                if out.len() > expected {
+                    break;
+                }
+                if status == flate2::Status::StreamEnd {
+                    if decoder.total_in() as usize != buf.len() - 4 {
+                        return Err(bad("trailing compressed data"));
+                    }
+                    break;
+                }
+                if decoder.total_in() == before_in && written == 0 {
+                    return Err(bad("truncated Deflate stream"));
+                }
+            }
+        }
         if out.len() != expected {
             return Err(bad("decompressed length mismatch"));
         }
@@ -167,11 +222,32 @@ pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::
         Some(a) => a.start(),
         None => std::fs::metadata(exe)?.len(),
     };
+    let limit = if cfg!(windows)
+        || exe
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+    {
+        Some(WINDOWS_EXE_LIMIT)
+    } else {
+        None
+    };
+    let count = u32::try_from(entries.len()).map_err(|_| bad("too many archive entries"))?;
+    let index_len = entries.iter().try_fold(4u64, |len, (name, _)| {
+        len.checked_add(18 + name.len() as u64)
+            .ok_or_else(|| bad("index too large"))
+    })?;
+    check_pack_size(keep, index_len, limit)?;
+    // An error must not leave a partial executable at the requested output path.
+    let mut partial = PartialPack {
+        path: out,
+        remove: false,
+    };
     let mut w = io::BufWriter::new(File::create(out)?);
+    partial.remove = true;
     io::copy(&mut File::open(exe)?.take(keep), &mut w)?;
     let mut pos = keep;
     let mut index = Vec::new();
-    index.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+    index.extend_from_slice(&count.to_le_bytes());
     // Identical files are stored once (a planet's music sits under each of its maps): (length, hash) -> the first
     // such file and its offset, confirmed byte for byte before it is shared.
     let mut seen: std::collections::HashMap<(u64, u64), Vec<(&Path, usize)>> =
@@ -227,12 +303,22 @@ pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::
             let off = pos;
             let raw_n = match compressed {
                 Some(buf) => {
-                    w.write_all(&buf)?;
                     let clen = buf.len() as u64;
+                    check_pack_size(
+                        pos.checked_add(clen).ok_or_else(|| bad("pack too large"))?,
+                        index_len,
+                        limit,
+                    )?;
+                    w.write_all(&buf)?;
                     pos += clen;
-                    clen | COMPRESSED_FLAG
+                    clen | COMPRESSED_FLAG | ZSTD_FLAG
                 }
                 None => {
+                    check_pack_size(
+                        pos.checked_add(ulen).ok_or_else(|| bad("pack too large"))?,
+                        index_len,
+                        limit,
+                    )?;
                     let n = io::copy(&mut File::open(usrc)?, &mut w)?;
                     if n != ulen {
                         return Err(bad(&format!("{} changed while packing", usrc.display())));
@@ -262,7 +348,21 @@ pub fn write_pack(exe: &Path, out: &Path, entries: &[(String, PathBuf)]) -> io::
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(out, std::fs::Permissions::from_mode(0o755))?;
     }
+    partial.remove = false;
     Ok(())
+}
+
+struct PartialPack<'a> {
+    path: &'a Path,
+    remove: bool,
+}
+
+impl Drop for PartialPack<'_> {
+    fn drop(&mut self) {
+        if self.remove {
+            let _ = std::fs::remove_file(self.path);
+        }
+    }
 }
 
 /// Every file under `dir` (followed through links), as ("<name>/<rel>", path on disk), sorted by archive path.
@@ -562,14 +662,23 @@ fn maybe_compress(name: &str, src: &Path, raw_len: u64) -> io::Result<Option<Vec
     }
     let mut out = Vec::with_capacity(raw.len());
     out.extend_from_slice(&(raw.len() as u32).to_le_bytes());
-    let mut enc = flate2::write::DeflateEncoder::new(&mut out, flate2::Compression::fast());
-    enc.write_all(&raw)?;
-    enc.finish()?;
+    zstd::stream::copy_encode(raw.as_slice(), &mut out, 3)?;
     if (out.len() as u64) + 64 < raw_len {
         Ok(Some(out))
     } else {
         Ok(None)
     }
+}
+
+fn check_pack_size(bodies_end: u64, index_len: u64, limit: Option<u64>) -> io::Result<()> {
+    let total = bodies_end
+        .checked_add(index_len)
+        .and_then(|n| n.checked_add(FOOTER))
+        .ok_or_else(|| bad("pack too large"))?;
+    if limit.is_some_and(|limit| total >= limit) {
+        return Err(bad("packed executable would reach Windows' 4 GiB limit; reduce the selected asset set or texture sizes and pack again"));
+    }
+    Ok(())
 }
 
 // ---------- helpers ----------

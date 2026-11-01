@@ -236,7 +236,9 @@ pub fn bake_global_sound(
             segments: segs,
             format: s.format,
             substreams: s.substreams,
-            interleave: s.interleave,
+            // Only IMA streams use this field. Omitting it on PS2 retains
+            // the pre-PC streams.ron/global.ron bytes.
+            interleave: if s.format == 5 { s.interleave } else { 0 },
         });
     }
     if opts.limit > 0 {
@@ -455,6 +457,9 @@ mod tests {
         let index: GlobalSoundRon =
             ron::from_str(&std::fs::read_to_string(out.join("global.ron")).unwrap()).unwrap();
         assert_eq!(index.files, r.files);
+        assert!(!std::fs::read_to_string(out.join("global.ron"))
+            .unwrap()
+            .contains("interleave:"));
         let _ = std::fs::remove_dir_all(&out);
     }
 

@@ -256,6 +256,157 @@ fn compressible_entries_shrink_and_round_trip_identically() {
     let a = Archive::open(&d.join("p")).unwrap().unwrap();
     let (off, len) = a.get("assets_baked/m/textures/t.ktx2").unwrap();
     assert_ne!(len & COMPRESSED_FLAG, 0);
+    assert_ne!(len & ZSTD_FLAG, 0);
     assert_eq!(a.read(off, len).unwrap(), raw);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn incompressible_entries_stay_raw() {
+    let d = scratch("incompressible");
+    let mut state = 0x1234_5678u32;
+    let raw: Vec<u8> = (0..4096)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as u8
+        })
+        .collect();
+    std::fs::write(d.join("random.ktx2"), &raw).unwrap();
+    assert!(
+        maybe_compress("random.ktx2", &d.join("random.ktx2"), raw.len() as u64)
+            .unwrap()
+            .is_none()
+    );
+    std::fs::write(d.join("exe"), b"exe").unwrap();
+    write_pack(
+        &d.join("exe"),
+        &d.join("p"),
+        &[("random.ktx2".to_string(), d.join("random.ktx2"))],
+    )
+    .unwrap();
+    let archive = Archive::open(&d.join("p")).unwrap().unwrap();
+    let (off, len) = archive.get("random.ktx2").unwrap();
+    assert_eq!(len, raw.len() as u64);
+    assert_eq!(archive.read(off, len).unwrap(), raw);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+fn fixture_archive(d: &Path, body: &[u8], flags: u64) -> Archive {
+    let mut bytes = body.to_vec();
+    let at = bytes.len() as u64;
+    let mut index = 1u32.to_le_bytes().to_vec();
+    index.extend(1u16.to_le_bytes());
+    index.push(b'a');
+    index.extend(0u64.to_le_bytes());
+    index.extend((at | flags).to_le_bytes());
+    bytes.extend(&index);
+    bytes.extend(MAGIC);
+    bytes.extend(0u64.to_le_bytes());
+    bytes.extend(at.to_le_bytes());
+    bytes.extend((index.len() as u64).to_le_bytes());
+    let path = d.join("fixture");
+    std::fs::write(&path, bytes).unwrap();
+    Archive::open(&path).unwrap().unwrap()
+}
+
+#[test]
+fn uncompressed_and_legacy_deflate_archives_remain_readable() {
+    let d = scratch("legacy");
+    let raw = vec![b'a'; 200_000];
+    let old = fixture_archive(&d, &raw, 0);
+    let (off, len) = old.get("a").unwrap();
+    assert_eq!(old.read(off, len).unwrap(), raw);
+    let mut body = (raw.len() as u32).to_le_bytes().to_vec();
+    let mut encoder = flate2::write::DeflateEncoder::new(&mut body, flate2::Compression::fast());
+    encoder.write_all(&raw).unwrap();
+    encoder.finish().unwrap();
+    let old = fixture_archive(&d, &body, COMPRESSED_FLAG);
+    let (off, len) = old.get("a").unwrap();
+    assert_eq!(old.read(off, len).unwrap(), raw);
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn malformed_compressed_bodies_are_bounded_and_rejected() {
+    let d = scratch("compressed_bad");
+    for zstd in [false, true] {
+        let raw = vec![42; 200_000];
+        let mut body = (raw.len() as u32).to_le_bytes().to_vec();
+        if zstd {
+            zstd::stream::copy_encode(raw.as_slice(), &mut body, 3).unwrap();
+        } else {
+            let mut encoder =
+                flate2::write::DeflateEncoder::new(&mut body, flate2::Compression::fast());
+            encoder.write_all(&raw).unwrap();
+            encoder.finish().unwrap();
+        }
+        let flags = COMPRESSED_FLAG | if zstd { ZSTD_FLAG } else { 0 };
+        for end in 5..body.len() {
+            let archive = fixture_archive(&d, &body[..end], flags);
+            let (off, len) = archive.get("a").unwrap();
+            assert!(
+                archive.read(off, len).is_err(),
+                "accepted truncated body {end}, zstd={zstd}"
+            );
+        }
+        let mut trailing = body.clone();
+        trailing.push(0);
+        let archive = fixture_archive(&d, &trailing, flags);
+        let (off, len) = archive.get("a").unwrap();
+        assert!(
+            archive.read(off, len).is_err(),
+            "accepted trailing byte, zstd={zstd}"
+        );
+        // Declared-size bombs do not reserve the advertised 4 GiB before reading a tiny stream.
+        let tiny = vec![7];
+        let mut huge = u32::MAX.to_le_bytes().to_vec();
+        if zstd {
+            zstd::stream::copy_encode(tiny.as_slice(), &mut huge, 3).unwrap();
+        } else {
+            let mut encoder =
+                flate2::write::DeflateEncoder::new(&mut huge, flate2::Compression::fast());
+            encoder.write_all(&tiny).unwrap();
+            encoder.finish().unwrap();
+        }
+        let archive = fixture_archive(&d, &huge, flags);
+        let (off, len) = archive.get("a").unwrap();
+        assert!(archive.read(off, len).is_err());
+        body[..4].copy_from_slice(&0u32.to_le_bytes());
+        let archive = fixture_archive(&d, &body, flags);
+        let (off, len) = archive.get("a").unwrap();
+        assert!(
+            archive.read(off, len).is_err(),
+            "expanded beyond advertised size, zstd={zstd}"
+        );
+    }
+    let _ = std::fs::remove_dir_all(d);
+}
+
+#[test]
+fn windows_executable_size_includes_index_and_footer() {
+    assert!(check_pack_size(WINDOWS_EXE_LIMIT - 37, 4, Some(WINDOWS_EXE_LIMIT)).is_ok());
+    assert!(
+        check_pack_size(WINDOWS_EXE_LIMIT - 36, 4, Some(WINDOWS_EXE_LIMIT))
+            .unwrap_err()
+            .to_string()
+            .contains("4 GiB")
+    );
+    assert!(check_pack_size(u64::MAX, 4, None).is_err());
+    let d = scratch("exe_limit");
+    // Sparse source: the guard must refuse before copying even one byte or replacing an existing output.
+    let exe = d.join("large.exe");
+    File::create(&exe)
+        .unwrap()
+        .set_len(WINDOWS_EXE_LIMIT - 36)
+        .unwrap();
+    let out = d.join("output");
+    std::fs::write(&out, b"keep previous output").unwrap();
+    assert!(write_pack(&exe, &out, &[])
+        .unwrap_err()
+        .to_string()
+        .contains("4 GiB"));
+    assert_eq!(std::fs::read(&out).unwrap(), b"keep previous output");
     let _ = std::fs::remove_dir_all(d);
 }

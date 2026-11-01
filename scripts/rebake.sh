@@ -61,13 +61,7 @@ ci() {
 }
 
 is_pc_lvl_dir() {
-  local d="$1" want="$2"
-  [ -d "$d" ] && [ -f "$(ci "$d" CORE.LVL)" ] || return 1
-  case "$want" in
-    bf2) [ -f "$(ci "$d" INGAME.LVL)" ] ;;
-    bf1) [ -f "$(ci "$d" COMMON/ENG/COMMON.LVL)" ] ;;
-    *) return 1 ;;
-  esac
+  python3 "$ROOT/scripts/console_input.py" --pc "$2" "$1"
 }
 
 find_pc_lvl() {
@@ -90,11 +84,27 @@ if [ -n "$CLI_PC_DIR" ]; then
   [ -n "${PC2:-}" ] || PC2="$(find_pc_lvl "$CLI_PC_DIR" bf2 || true)"
 fi
 
+if [ -n "$CLI_PC_DIR" ] && [ -z "${PC1:-}${PC2:-}" ]; then
+  echo "rebake: no recognized BF1/BF2 PC data under $CLI_PC_DIR" >&2; exit 2
+fi
+for game in 1 2; do
+  var="PC$game"; input="${!var:-}"
+  if [ -n "$input" ] && ! is_pc_lvl_dir "$input" "bf$game"; then
+    echo "rebake: $input is not a recognized BF$game PC install" >&2; exit 2
+  fi
+done
+
 E="$ROOT/extracted"
-B1="${PC1:-$E/bf1/lvl/DATA/_LVL_PS2}"
-B2="${PC2:-$E/bf2/lvl/DATA/_LVL_PS2}"
-S1="${PC1:-$E/bf1/sound/DATA/_LVL_PS2}"
-S2="${PC2:-$E/bf2/sound/DATA/_LVL_PS2}"
+# Console BF2 exclusively supplies the shared menus, shell and HUD. PC assets
+# can replace map/side art, but cannot supply those console-only assets.
+UI2="$E/bf2/lvl/DATA/_LVL_PS2"
+if [ -n "$CLI_PC_DIR${PC1:-}${PC2:-}" ]; then
+  python3 "$ROOT/scripts/console_input.py" "$UI2"
+fi
+B1="$E/bf1/lvl/DATA/_LVL_PS2"
+B2="$E/bf2/lvl/DATA/_LVL_PS2"
+S1="$E/bf1/sound/DATA/_LVL_PS2"
+S2="$E/bf2/sound/DATA/_LVL_PS2"
 # scripts/pack.py extracts each disc whole into lvl/ (bake extract-iso): the
 # sound LVLs are then beside the rest.
 [ -d "$S1" ] || S1="$B1"
@@ -105,26 +115,38 @@ OUT="${REBAKE_OUT:-$ROOT/engine/assets_baked}"
 # LARGER than the PS2 one adds an optional tier; the PS2 base is preserved
 # (bake::tier; the maintainer's chain is
 # Harrisonfog HD > PC stock where larger > our upscale > PS2 original).
-# BF1 is unaffected — there is no PC copy of BF1. The install is gitignored
+# Explicit --pc1 also adds BF1 map texture tiers. The install is gitignored
 # and optional: without it every bake is PS2-only, which is a real difference
 # in output, so the script SAYS which way it ran rather than deciding quietly.
 PC="$ROOT/PC_swbf2_exe/Star Wars Battlefront II Classic/GameData/data/_lvl_pc"
 if [ -n "${PC1:-}${PC2:-}" ]; then
-  echo "PC primary sources: BF1=$B1 BF2=$B2"
-  PC=""
+  if [ -n "${PC1:-}" ]; then
+    python3 - "$ROOT/scripts" "$B1" <<'PYREF'
+import sys
+sys.path.insert(0, sys.argv[1])
+from console_input import require_ps2_bf1_reference
+try:
+    require_ps2_bf1_reference(True, sys.argv[2])
+except ValueError as error:
+    sys.exit("rebake: " + str(error))
+PYREF
+  fi
+  echo "PC visual sources: BF1=${PC1:-absent} BF2=${PC2:-absent}; PS2 gameplay reference retained"
+  PC="${PC2:-}"
 elif [ -d "$PC" ]; then
+  python3 "$ROOT/scripts/console_input.py" "$UI2"
   echo "PC stock textures: $PC (BF2 maps get the larger PC texture where there is one)"
 else
   echo "PC stock textures: NOT PRESENT — baking PS2-only"
   PC=""
 fi
-# The PC's own SIDE LVLs, for the soldier/weapon bake (BF2 only — there is no
-# PC copy of BF1). Empty when the install is absent, and each is checked
+# The PC's own SIDE LVLs, for the soldier/weapon texture tiers (BF2 only).
+# Empty when the install is absent, and each is checked
 # individually so a partial install degrades to PS2 rather than failing.
 PCSIDE_REP=""; PCSIDE_CIS=""
 if [ -n "$PC" ]; then
-  [ -f "$PC/side/rep.lvl" ] && PCSIDE_REP="$PC/side/rep.lvl"
-  [ -f "$PC/side/cis.lvl" ] && PCSIDE_CIS="$PC/side/cis.lvl"
+  [ -f "$(ci "$PC" side/rep.lvl)" ] && PCSIDE_REP="$(ci "$PC" side/rep.lvl)"
+  [ -f "$(ci "$PC" side/cis.lvl)" ] && PCSIDE_CIS="$(ci "$PC" side/cis.lvl)"
 fi
 # Set PC_ARG to the PC LVL for a BF2 map, or to nothing. An ARRAY, because
 # the install path contains spaces ("Star Wars Battlefront II Classic").
@@ -132,7 +154,7 @@ PC_ARG=()
 pc_arg() {  # <planet dir> <map name>, both lowercase
   PC_ARG=()
   [ -n "$PC" ] || return 0
-  local f="$PC/$1/$2.lvl"
+  local f="$(ci "$PC" "$1/$2.lvl")"
   [ -f "$f" ] && PC_ARG=("$f")
   return 0
 }
@@ -165,7 +187,9 @@ BF2_MAPS="${OPENBF_BF2_MAPS:-$BF2_MAPS}"
 if want tat1; then
   echo "== TAT1 (BF1) =="
   clean "$OUT/tat1/models" "$OUT/tat1/textures" "$OUT/tat1/collision" "$OUT/tat1/nav"
-  "$BAKE" map "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/tat1"
+  PC_ARG=()
+  [ -n "${PC1:-}" ] && [ -f "$(ci "$PC1" TAT/TAT1.LVL)" ] && PC_ARG=("$(ci "$PC1" TAT/TAT1.LVL)")
+  "$BAKE" map "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/tat1" "${PC_ARG[@]}"
 fi
 if want tat2; then
   echo "== TAT2 (BF2) =="
@@ -176,22 +200,22 @@ fi
 if want common; then
   echo "== common assets =="
   clean "$OUT/common_bf1/models" "$OUT/common_bf1/textures" "$OUT/common_bf1/collision" \
-        "$OUT/common_bf2/models" "$OUT/common_bf2/textures" "$OUT/common_bf2/collision"
+        "$OUT/common_bf2/models" "$OUT/common_bf2/textures" "$OUT/common_bf2/collision" \
+        "$OUT/common_bf1/fonts" "$OUT/common_bf1/locl" \
+        "$OUT/common_bf2/fonts" "$OUT/common_bf2/hud" "$OUT/common_bf2/locl"
   "$BAKE" common "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/common_bf1"
-  PC_ARG=()
-  [ -n "$PC" ] && [ -f "$PC/ingame.lvl" ] && PC_ARG=("$PC/ingame.lvl")
-  "$BAKE" common "$(ci "$B2" INGAME.LVL)" "$OUT/common_bf2" "${PC_ARG[@]}"
+  "$BAKE" common "$(ci "$UI2" INGAME.LVL)" "$OUT/common_bf2"
   # The specular pass's lookup table, from each game's own CORE.LVL (the
   # texels are identical on both discs; analysis/re-specular-pass.md §5).
   "$BAKE" specular "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
-  "$BAKE" specular "$(ci "$B2" CORE.LVL)" "$OUT/common_bf2"
+  "$BAKE" specular "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
   # BF2's terrain light pass texture (card FXBL, analysis/re-bolt.md §5.3):
   # BF1 draws no light on its terrain (§5.1).
-  "$BAKE" omniproj "$(ci "$B2" CORE.LVL)" "$OUT/common_bf2"
+  "$BAKE" omniproj "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
   # Each game's English text table (card EVMSG, analysis/re-event-messages.md):
   # the HUD's event lines, team, post and soldier names.
   "$BAKE" locl "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
-  "$BAKE" locl "$(ci "$B2" CORE.LVL)" "$OUT/common_bf2"
+  "$BAKE" locl "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
   # BF1's own bitmap fonts (card SQHUD: the squad cross's labels are BF1's
   # gamefont_tiny), prefixed so they sit beside BF2's in one name space.
   "$BAKE" fonts "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1" bf1_
@@ -202,14 +226,16 @@ if want common; then
   # image (a dev tree's extracted discs leave MOVIES/ out).
   # A worktree links extracted/ but not iso/: the disc image is then the main
   # checkout's (git's common dir sits in it).
-  MVS="$(ci "$B2" MOVIES/SHELL.MVS)"
-  [ -f "$MVS" ] || MVS="$ROOT/iso/SWBF2.iso"
+  UI_SOUND2="$E/bf2/sound/DATA/_LVL_PS2"
+  [ -d "$UI_SOUND2" ] || UI_SOUND2="$UI2"
+  MVS="$(ci "$UI2" MOVIES/SHELL.MVS)"
+  [ -f "$MVS" ] || MVS="${BF2_CONSOLE_ISO:-$ROOT/iso/SWBF2.iso}"
   if [ ! -f "$MVS" ]; then
     MAIN_ROOT="$(dirname "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)")"
     MVS="$MAIN_ROOT/iso/SWBF2.iso"
   fi
   clean "$OUT/common_bf2/shell"
-  "$BAKE" shell "$(ci "$B2" SHELL.LVL)" "$MVS" "$(ci "$S2" SOUND/SHELL.LVL)" "$(ci "$B2" CORE.LVL)" "$OUT/common_bf2"
+  "$BAKE" shell "$(ci "$UI2" SHELL.LVL)" "$MVS" "$(ci "$UI_SOUND2" SOUND/SHELL.LVL)" "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
 fi
 if want side; then
   echo "== soldiers + weapons + vehicles =="
@@ -378,7 +404,10 @@ if want sounds; then
   # Needs the baked classes, so it runs after them; harmless if they are
   # missing (the dictionary just gets smaller).
   echo "== sound names =="
-  "$BAKE" sound-names "$OUT/classes" "$E/bf1/lua,$E/bf2/lua" \
+  LUA_ROOT="${OPENBF_CONSOLE_LUA_ROOT:-}"
+  LUA_PATHS="$E/bf1/lua,$E/bf2/lua"
+  [ -n "$LUA_ROOT" ] && LUA_PATHS="$LUA_ROOT/bf1,$LUA_ROOT/bf2"
+  "$BAKE" sound-names "$OUT/classes" "$LUA_PATHS" \
     $(ls -d "$OUT"/*/sounds 2>/dev/null | xargs -r -n1 dirname)
 fi
 if want global-sound; then
@@ -405,7 +434,7 @@ if want load; then
   echo "== load screens =="
   "$BAKE" loadscreen "$(ci "$B1" LOAD/TAT1.LVL)"   "$OUT/tat1"
   "$BAKE" loadscreen "$(ci "$B2" LOAD/TAT2.LVL)"   "$OUT/tat2"
-  "$BAKE" loadscreen "$(ci "$B2" LOAD/COMMON.LVL)" "$OUT/common_bf2"
+  "$BAKE" loadscreen "$(ci "$UI2" LOAD/COMMON.LVL)" "$OUT/common_bf2"
 fi
 
 if want maps; then
@@ -413,7 +442,9 @@ if want maps; then
   for p in $BF1_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf1_$n"
     clean "$d/models" "$d/textures" "$d/collision" "$d/nav"
-    "$BAKE" map "$(ci "$B1" "$p.LVL")" "$d"
+    PC_ARG=()
+    [ -n "${PC1:-}" ] && [ -f "$(ci "$PC1" "$p.LVL")" ] && PC_ARG=("$(ci "$PC1" "$p.LVL")")
+    "$BAKE" map "$(ci "$B1" "$p.LVL")" "$d" "${PC_ARG[@]}"
     LF="$(ci "$B1" "LOAD/$(basename "$p").LVL")"
     [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"
   done
