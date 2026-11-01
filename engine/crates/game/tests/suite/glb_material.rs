@@ -19,6 +19,7 @@ fn seg(texture: &str, flags: u32) -> Segment {
         vertex_count: 3,
         index_count: 3,
         bf2_material: true,
+        pc_geometry: false,
         material_flags: flags,
         render_type: RenderType::Bf2(0),
         spec_power: 0,

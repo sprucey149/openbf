@@ -351,7 +351,7 @@ impl Renderer {
             for (i, d) in draws.iter().enumerate() {
                 let prelit = match d.light {
                     LightPath::Lit | LightPath::Character => false,
-                    LightPath::Prelit | LightPath::PrelitAdd => true,
+                    LightPath::Prelit | LightPath::PrelitAdd | LightPath::VertexLit => true,
                     _ => continue,
                 };
                 let (Some(s), true) = (d.lit, keep[i]) else {

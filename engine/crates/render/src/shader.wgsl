@@ -185,7 +185,7 @@ const AFFINE_NEAR: f32 = 0.1;
 
 fn affine_w(clip: vec4<f32>, light: u32) -> f32 {
     let path = light & 0xffu;
-    if !AFFINE_COLOUR || (light & AFFINE_BIT) == 0u || (path > LIGHT_UNLIT_ADD && path != LIGHT_CHARACTER) {
+    if !AFFINE_COLOUR || (light & AFFINE_BIT) == 0u || (path > LIGHT_UNLIT_ADD && path != LIGHT_CHARACTER && path != LIGHT_VERTEX_LIT) {
         return 0.0;
     }
     return max(max(clip.w, AFFINE_NEAR), max(abs(clip.x) * globals.guard_x, abs(clip.y) * globals.guard_y));
@@ -459,6 +459,7 @@ const LIGHT_CHARACTER: u32 = 6u;
 const LIGHT_GLOW: u32 = 7u;
 const LIGHT_UNSCALED: u32 = 8u;
 const LIGHT_IFACE: u32 = 9u;
+const LIGHT_VERTEX_LIT: u32 = 10u;
 // `render::IFACE_AMBIENT`.
 const IFACE_AMBIENT: f32 = 0.5;
 
@@ -528,6 +529,9 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
         }
         case LIGHT_UNLIT: {
             rgb = base.rgb * detail;
+        }
+        case LIGHT_VERTEX_LIT: {
+            rgb = gs_lit(tex, linear_to_srgb(in.color.rgb) + in.point);
         }
         case LIGHT_UNLIT_ADD: {
             rgb = tex * (vec3<f32>(1.0) + in.color.rgb);

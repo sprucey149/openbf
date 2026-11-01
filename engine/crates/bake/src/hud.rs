@@ -145,6 +145,11 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
     let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
     let content = mungefs::content_chunks(inner).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
+    let pc = content.iter().filter(|c| &c.tag == b"modl").any(|model| {
+        model
+            .children_tagged(b"segm")
+            .any(|segment| mungefs::model::is_pc_geometry(&segment))
+    });
     let mut layouts = Vec::new();
     for c in content.iter().filter(|c| &c.tag == b"hud_") {
         let l = mungefs::hud::parse(c).map_err(|e| anyhow!("hud_ 0x{:X}: {e}", c.offset))?;
@@ -152,10 +157,12 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
             .file_name()
             .ok_or_else(|| anyhow!("hud_ 0x{:X}: no FileInfo name", c.offset))?
             .to_owned();
-        layouts.push(HudLayout {
+        let mut layout = HudLayout {
             name,
             nodes: l.nodes.iter().map(node).collect(),
-        });
+        };
+        crate::hud_pc::normalize(&mut layout, pc);
+        layouts.push(layout);
     }
     if layouts.is_empty() {
         return Ok(None);

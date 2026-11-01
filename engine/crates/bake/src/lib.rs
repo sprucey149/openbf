@@ -25,6 +25,7 @@ pub mod gltf_bin;
 pub mod hardpoints;
 pub mod heroes;
 pub mod hud;
+mod hud_pc;
 pub mod ktx2w;
 pub mod leafpatch;
 pub mod lighting;

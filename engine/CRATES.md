@@ -121,6 +121,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/ogg.rs` 281 — Vorbis with a reproducible serial · `encode_mono`
 - `bake/src/beep.rs` 111 — the BF1 loading beep · `bake_beep`
 - `bake/src/hud.rs` 375 — common HUD layouts, fonts, sheets and localised text bake · `bake_hud`, `bake_fonts`, `bake_locl`; `bake_common` integration and spawn-screen resources in the module/API docs (`analysis/re-hud.md`).
+- `bake/src/hud_pc.rs` 191 — PC single-player HUD adaptation at bake time · `normalize`; source guard and evidence in `analysis/pc-import-visual-parity.md`.
 - `bake/src/loadscreen.rs` 181 — BF1 loading-screen LVLs (the zoom sequence) and BF2's still pools → KTX2 + RON · `bake_loadscreen`
 - `bake/src/donor.rs` 304 — Card COVR: a BF1 map's Cover hints from the BF2 version of the same map (lead_tmp botre xbox_pc note finding 1). BF2's Yavin Temple authors 973
 

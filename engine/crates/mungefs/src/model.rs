@@ -90,6 +90,7 @@ pub struct Segment {
     pub index_count: u32,
     /// MTRL is 25 B in BF2 munges (4 B in BF1) — the cheapest source-game tell.
     pub bf2_material: bool,
+    pub pc_geometry: bool,
     /// First u32 of MTRL: the material flags word, same field in both games.
     /// Bit 0x02 marks a cutout ("hardedged") material whose texture alpha is a
     /// mask; bit 0x04 marks a transparent one. MEASURED over all 10,060
@@ -378,15 +379,17 @@ fn parse_pc_geometry(
     })
 }
 
+pub fn is_pc_geometry(segm: &Chunk<'_>) -> bool {
+    segm.child(b"VBUF").is_some() || segm.child(b"VDAT").is_some() || segm.child(b"IBUF").is_some()
+}
+
 fn parse_segment(segm: &Chunk<'_>, vbox: &Aabb) -> Result<Segment, UcfbError> {
     let bad = || UcfbError::Truncated(segm.offset);
     let info = segm.child(b"INFO").ok_or_else(bad)?.payload;
     if info.len() < 8 {
         return Err(bad());
     }
-    let is_pc = segm.child(b"VBUF").is_some()
-        || segm.child(b"VDAT").is_some()
-        || segm.child(b"IBUF").is_some();
+    let is_pc = is_pc_geometry(segm);
     let (vertex_count, index_count, prim_type) = if is_pc && info.len() >= 12 {
         (
             le::u32_at(info, 4),
@@ -506,6 +509,7 @@ fn parse_segment(segm: &Chunk<'_>, vbox: &Aabb) -> Result<Segment, UcfbError> {
             vertex_count,
             index_count: pc.index_count,
             bf2_material,
+            pc_geometry: true,
             material_flags,
             render_type,
             spec_power,
@@ -605,6 +609,7 @@ fn parse_segment(segm: &Chunk<'_>, vbox: &Aabb) -> Result<Segment, UcfbError> {
     Ok(Segment {
         vertex_count,
         bf2_material,
+        pc_geometry: false,
         material_flags,
         render_type,
         spec_power,
@@ -722,6 +727,7 @@ mod tests {
             bf1.extend(w.to_le_bytes());
         }
         let s = one_segment(&bf1, b"Specmap\0");
+        assert!(!s.pc_geometry);
         assert_eq!((s.spec_power, s.spec_color), (15, 0xffc9d0));
 
         let mut bf2 = vec![0u8; 25];
@@ -945,6 +951,7 @@ mod tests {
         let c = crate::chunks(&bytes).next().unwrap().unwrap();
         let m = Model::parse(&c).unwrap();
         assert_eq!(m.name, "test_pc");
+        assert!(m.segments[0].pc_geometry);
         assert_eq!(m.segments.len(), 1);
         let s = &m.segments[0];
         assert_eq!(s.vertex_count, 3);

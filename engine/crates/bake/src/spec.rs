@@ -181,6 +181,7 @@ mod tests {
             vertex_count: 0,
             index_count: 0,
             bf2_material: bf2,
+            pc_geometry: false,
             material_flags: flags,
             render_type: RenderType::Absent,
             spec_power: power,
