@@ -13,6 +13,7 @@ pub struct Descriptor {
     pub blend_in: f32,
     pub blend_out: f32,
     pub looping: Option<bool>,
+    pub final_frame: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -50,6 +51,9 @@ fn descriptor(field: &ComboField) -> Descriptor {
     for property in &field.children {
         match property.keyword {
             K::Loop => {
+                descriptor.final_frame = property
+                    .text(0)
+                    .is_some_and(|s| s.eq_ignore_ascii_case("FinalFrame"));
                 descriptor.looping = Some(
                     property.number(0) != Some(0.0)
                         && !property

@@ -49,6 +49,7 @@ pub(super) fn animation<'a>(
 #[derive(Clone, Default)]
 pub(super) struct CastClock {
     seen: Option<u64>,
+    firing: Option<usize>,
     active: Option<(usize, f32)>,
     legs: Legs,
 }
@@ -79,6 +80,15 @@ pub(super) struct Frame<'a> {
 }
 
 impl CastClock {
+    pub fn firing(&mut self, tick: u64, weapon: Option<usize>) {
+        if let Some(weapon) = weapon.filter(|w| self.firing != Some(*w)) {
+            self.clear();
+            self.seen = None;
+            self.start(tick, weapon);
+        }
+        self.firing = weapon;
+    }
+
     pub fn start(&mut self, tick: u64, weapon: usize) {
         if self.seen != Some(tick) {
             self.seen = Some(tick);
@@ -105,6 +115,7 @@ impl CastClock {
         class: &ClassAnim,
         weapon: &str,
         animation: &str,
+        holding: bool,
     ) -> Option<(usize, f32)> {
         let (source, age) = self.active?;
         let bank = class.bank_of(weapon);
@@ -116,8 +127,8 @@ impl CastClock {
             })
             .map(|clip| clip.frames.saturating_sub(1) as f32 / 30.0)
             .reduce(f32::max)?;
-        if age <= end {
-            Some((source, age))
+        if age <= end || holding && class.custom.upper(animation).final_frame {
+            Some((source, age.min(end)))
         } else {
             self.clear();
             None
@@ -181,7 +192,10 @@ impl CastClock {
         let seconds = if channel {
             seconds
         } else {
-            self.pose(clips, class, &primary.name, name)?.1
+            let holding = active.0 == self.weapon()?
+                && active.2.fire_cmd > 0
+                && active.2.state == core::weapon::FireState::Firing;
+            self.pose(clips, class, &primary.name, name, holding)?.1
         };
         let saber = primary.saber.as_ref()?;
         let root = saber
@@ -239,15 +253,62 @@ mod tests {
         clock.start(4, 7);
         clock.start(5, 7);
         assert_eq!(
-            clock.pose(&clips, &class, "anything", "push"),
+            clock.pose(&clips, &class, "anything", "push", false),
             Some((7, 0.5))
         );
         clock.advance(1.0 / 30.0);
-        assert!(clock.pose(&clips, &class, "anything", "push").is_none());
+        assert!(clock
+            .pose(&clips, &class, "anything", "push", false)
+            .is_none());
         clock.start(6, 7);
         assert_eq!(
-            clock.pose(&clips, &class, "anything", "push"),
+            clock.pose(&clips, &class, "anything", "push", false),
             Some((7, 0.0))
+        );
+    }
+
+    #[test]
+    fn final_frame_cast_holds_without_restarting_and_releases() {
+        use manifest::combo::{ComboDef, ComboField, ComboKeyword as K, ComboValue as V};
+        let mut class = ClassAnim {
+            family: "human".into(),
+            ..Default::default()
+        };
+        class.custom.register(&ComboDef {
+            name_hash: 1,
+            fields: vec![ComboField {
+                keyword: K::Animation,
+                args: vec![V::Text("cast".into())],
+                scoped: true,
+                children: vec![ComboField {
+                    keyword: K::Loop,
+                    args: vec![V::Text("FinalFrame".into())],
+                    scoped: false,
+                    children: vec![],
+                }],
+            }],
+        });
+        let clips = [Clip {
+            name: "human_rifle_cast_full".into(),
+            fps: 30.0,
+            frames: 31,
+            tracks: vec![],
+        }];
+        let mut clock = CastClock::default();
+        clock.start(1, 2);
+        for tick in 2..200 {
+            clock.advance(1.0 / 30.0);
+            clock.start(tick, 2);
+            let (_, age) = clock.pose(&clips, &class, "weapon", "cast", true).unwrap();
+            assert!((age - ((tick - 1) as f32 / 30.0).min(1.0)).abs() < 0.0001);
+        }
+        assert!(clock
+            .pose(&clips, &class, "weapon", "cast", false)
+            .is_none());
+        clock.start(200, 2);
+        assert_eq!(
+            clock.pose(&clips, &class, "weapon", "cast", true),
+            Some((2, 0.0))
         );
     }
 }

@@ -261,6 +261,21 @@ fn named_offhand_pose_keeps_running_legs_and_applies_joined_legs() {
     assert_eq!(missing.0[ARM].translation, joined.0[ARM].translation);
 }
 
+#[test]
+fn choking_pose_repeats_the_authored_period_and_keeps_moving() {
+    let clips = [clip(9, "human_choking", 16, false)];
+    let skeleton = skel();
+    let mut animator = Animator::new();
+    let mut samples = Vec::new();
+    for time in [0.25, 1.25, 3.25, 3.3] {
+        assert!(animator.status_pose(&clips, &skeleton, "human", time));
+        samples.push(animator.kept_pose(&skeleton).0[ARM].translation);
+    }
+    assert_eq!(samples[0], samples[1]);
+    assert_eq!(samples[0], samples[2]);
+    assert_ne!(samples[2], samples[3]);
+}
+
 impl Run {
     fn new(rig: Rig) -> Self {
         Self {
@@ -397,6 +412,20 @@ fn baked_soldier_weapon_sets_keep_moving_during_sprint() {
                 let phase = a.lower_phase();
                 a.step(rig, &asset.clips, &asset.skeleton, &i, DT);
                 assert_ne!(a.lower_phase(), phase, "{game} {class} {}", slot.weapon);
+                if game == "bf2" {
+                    let clip = a.lower_clip().unwrap();
+                    let speed = rig.clip_speed(clip).map_or(11.5, |v| v[1].abs());
+                    let speed = if speed > 0.0 { speed } else { 11.5 };
+                    let expected = (phase
+                        + DT * i.speed() / speed * 30.0
+                            / asset.clips[clip].frames.saturating_sub(1).max(1) as f32)
+                        .rem_euclid(1.0);
+                    assert!(
+                        (a.lower_phase() - expected).abs() < 0.0001,
+                        "{class}: {} != {expected}",
+                        a.lower_phase()
+                    );
+                }
                 rows += 1;
             }
         }

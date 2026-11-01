@@ -223,13 +223,16 @@ impl Sim {
                     if victim.mount.is_none()
                         && victim.droideka.is_none()
                         && (victim.choked.is_some()
-                            || matches!(
+                            || !matches!(
                                 victim.soldier.stance,
-                                crate::soldier::Stance::Stand | crate::soldier::Stance::Crouch
+                                crate::soldier::Stance::Jump
+                                    | crate::soldier::Stance::Fall
+                                    | crate::soldier::Stance::Dead
                             ))
                     {
                         victim.choked.get_or_insert_with(Default::default).left = 0.5;
-                        victim.soldier.yaw = crate::fmath::atan2(direction.x, direction.z);
+                        victim.soldier.stance = crate::soldier::Stance::Stand;
+                        victim.soldier.yaw = crate::fmath::atan2(-direction.x, -direction.z);
                     }
                 }
             }

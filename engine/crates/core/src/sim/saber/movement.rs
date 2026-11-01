@@ -49,6 +49,48 @@ impl Sim {
 mod tests {
     use super::*;
 
+    #[test]
+    fn authored_attack_controls_translation_on_both_disc_maps() {
+        use crate::sim::saber::tests::{field, program, saber, text};
+        use manifest::combo::{ComboKeyword as K, ComboValue as V};
+        for rules in [
+            crate::soldier::GroundRules::Bf1,
+            crate::soldier::GroundRules::Bf2,
+        ] {
+            for (lx, ly) in [(i16::MAX, 0), (-i16::MAX, 0), (0, -i16::MAX)] {
+                let mut sim = Sim::empty(93);
+                sim.heightfield = Some(crate::sim::tests::flat_ground());
+                sim.ground_rules = rules;
+                sim.weapon_classes[0] = saber(program(vec![
+                    field(K::Animation, vec![text("swing")], vec![]),
+                    field(
+                        K::AnimatedMove,
+                        vec![],
+                        vec![field(K::VelocityZ, vec![V::Number(6.0)], vec![])],
+                    ),
+                ]));
+                let h = sim
+                    .spawn(&crate::unit::UnitSpec::player(0, Vec3::ZERO))
+                    .unwrap();
+                for tick in 0..30 {
+                    sim.step(&[PadState {
+                        buttons: if tick == 0 { buttons::FIRE } else { 0 },
+                        lx: if tick > 5 { lx } else { 0 },
+                        ly: if tick > 5 { ly } else { 0 },
+                        ..Default::default()
+                    }]);
+                }
+                let u = sim.unit(h).unwrap();
+                assert!(u.soldier.pos.z < -5.0, "{rules:?}: {:?}", u.soldier.pos);
+                assert!(
+                    u.soldier.pos.x.abs() < 0.001,
+                    "{rules:?}: {:?}",
+                    u.soldier.pos
+                );
+            }
+        }
+    }
+
     fn gravity(factor: f32, target: Option<f32>) -> Gravity {
         Gravity {
             factor,

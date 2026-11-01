@@ -30,15 +30,23 @@ impl Animator {
         seconds: f32,
     ) -> bool {
         let own = format!("{family}_choking");
-        let Some(clip) = clips.iter().find(|c| {
-            [own.as_str(), "human_choking"].iter().any(|name| {
-                c.name.eq_ignore_ascii_case(name)
-                    || c.name.eq_ignore_ascii_case(&format!("{name}_full"))
+        // BF1 soldier assets lack authored `human_choking` clips because BF1 had no
+        // playable heroes or Force powers. Fall back to airborne struggling (`flail`)
+        // so victims kick and struggle in the hold rather than freezing motionless.
+        let clip = clips
+            .iter()
+            .find(|c| {
+                [own.as_str(), "human_choking"].iter().any(|name| {
+                    c.name.eq_ignore_ascii_case(name)
+                        || c.name.eq_ignore_ascii_case(&format!("{name}_full"))
+                })
             })
-        }) else {
+            .or_else(|| clips.iter().find(|c| c.name.contains("flail")));
+        let Some(clip) = clip else {
             return false;
         };
-        self.kept = Some(clip.sample(skel, seconds * 30.0, false));
+        let period = clip.frames.saturating_sub(1).max(1) as f32;
+        self.kept = Some(clip.sample(skel, (seconds * 30.0).rem_euclid(period), false));
         self.combo_override = true;
         self.combo_aim = false;
         true

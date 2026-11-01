@@ -1501,6 +1501,10 @@ impl Animator {
         // A movement clip plays at the speed over its root speed (both
         // players: B1:142668 / 142704, B2:202353).
         let walk = match (mv, low) {
+            (_, Some(l)) if body == Body::Special(Special::Sprint) && rig.game == Game::Bf2 => {
+                let speed = rig.clip_speed(l.clip).map_or(11.5, |v| v[1].abs());
+                i.speed() / if speed > 0.0 { speed } else { 11.5 }
+            }
             (Some(m), Some(l)) if m.moving() => rig
                 .root_speed(l.clip, m)
                 .map_or(1.0, |v| move_rate(i.speed() / scale, v)),

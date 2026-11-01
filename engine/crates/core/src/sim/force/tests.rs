@@ -1,6 +1,6 @@
 use super::*;
 use crate::hero_weapon::{Emitter, MeleeState, SaberClass};
-use crate::sim::tests::flat_ground;
+use crate::sim::{tests::flat_ground, PadState};
 use crate::unit::UnitSpec;
 use crate::weapon::{HealthType, OrdnanceClass, WeaponClass};
 
@@ -346,4 +346,100 @@ fn a_force_push_throws_a_soldier_and_only_hurts_a_droideka() {
         sim.unit(deka).unwrap().health.cur < 300.0,
         "it is still hit"
     );
+}
+
+#[test]
+fn force_push_uses_native_lift_falloff_and_bf2_reactions_on_both_maps() {
+    for rules in [
+        crate::soldier::GroundRules::Bf1,
+        crate::soldier::GroundRules::Bf2,
+    ] {
+        let (mut sim, _) = scene(emitter());
+        sim.ground_rules = rules;
+        sim.weapon_classes[0].force.as_mut().unwrap().push = 15.0;
+        sim.weapon_classes[0].force.as_mut().unwrap().max_targets = 4;
+        let targets: Vec<_> = [3.0, 8.0, 14.0, 19.0, 19.5]
+            .into_iter()
+            .map(|z| victim(&mut sim, z, 0.0))
+            .collect();
+        for h in &targets {
+            sim.unit_mut(*h).unwrap().soldier.grounded = true;
+        }
+        sim.fire_force(0, 0, 1.0);
+        let from = sim.units[0].muzzle();
+        for (k, h) in targets.iter().take(4).enumerate() {
+            let s = &sim.unit(*h).unwrap().soldier;
+            assert_eq!(s.stance, crate::soldier::Stance::Thrown);
+            assert!(s.vel.y > 3.0);
+            let delta = s.pos + Vec3::Y - from;
+            let length = delta.length();
+            let strength = if k < 2 {
+                15.0
+            } else {
+                15.0 * (40.0 - (length - 1.462_635 * 0.5)) / 30.0
+            };
+            let expected = strength * -delta.z / length;
+            assert!(
+                (-s.vel.z - expected).abs() < 0.001,
+                "{rules:?} {k}: {:?}",
+                s.vel
+            );
+        }
+        assert_eq!(sim.unit(targets[4]).unwrap().soldier.vel, Vec3::ZERO);
+    }
+}
+
+#[test]
+fn force_pull_replaces_momentum_and_scales_from_beyond_the_target() {
+    for rules in [
+        crate::soldier::GroundRules::Bf1,
+        crate::soldier::GroundRules::Bf2,
+    ] {
+        let (mut sim, _) = scene(emitter());
+        sim.ground_rules = rules;
+        sim.weapon_classes[0].force.as_mut().unwrap().push = -35.0;
+        let h = victim(&mut sim, 6.0, 0.0);
+        let s = &mut sim.unit_mut(h).unwrap().soldier;
+        s.grounded = true;
+        s.vel = Vec3::new(9.0, 0.0, -12.0);
+        sim.fire_force(0, 0, 1.0);
+        let s = &sim.unit(h).unwrap().soldier;
+        assert_eq!(s.stance, crate::soldier::Stance::Thrown);
+        assert_eq!(s.vel.x, 0.0);
+        assert!((s.vel.z - 10.706_005).abs() < 0.001, "{:?}", s.vel);
+        assert!((s.vel.y - 7.198_039).abs() < 0.001, "{:?}", s.vel);
+    }
+}
+
+#[test]
+fn force_flight_and_recovery_keep_bf2_dynamics_on_both_maps() {
+    for strength in [15.0, -35.0] {
+        let mut paths = Vec::new();
+        for rules in [
+            crate::soldier::GroundRules::Bf1,
+            crate::soldier::GroundRules::Bf2,
+        ] {
+            let (mut sim, _) = scene(emitter());
+            sim.ground_rules = rules;
+            sim.weapon_classes[0].force.as_mut().unwrap().push = strength;
+            let h = victim(&mut sim, 6.0, 0.0);
+            sim.unit_mut(h).unwrap().soldier.pos.y = 0.0;
+            sim.fire_force(0, 0, 1.0);
+            let mut path = Vec::new();
+            for _ in 0..120 {
+                sim.step(&[PadState::default(), PadState::default()]);
+                let s = &sim.unit(h).unwrap().soldier;
+                path.push((s.pos, s.vel, s.stance));
+            }
+            assert_eq!(path.last().unwrap().2, crate::soldier::Stance::Stand);
+            let distance = (path.last().unwrap().0.z + 6.0).abs();
+            assert!((3.0..25.0).contains(&distance), "{strength}: {distance}");
+            paths.push(path);
+        }
+        for (a, b) in paths[0].iter().zip(&paths[1]) {
+            assert!(a.0.distance(b.0) < 0.001, "{strength}: {a:?} / {b:?}");
+            assert!(a.1.distance(b.1) < 0.001);
+            assert_eq!(a.2, b.2);
+        }
+    }
 }

@@ -23,6 +23,8 @@ fn actual_hero_force_looks_follow_the_referenced_ordnance_chain() {
         Some("com_sfx_lightning")
     );
     assert_eq!(state.looks[0].intensity, 0.15);
+    assert_eq!(state.looks[0].minimum_bolts, 5);
+    assert_eq!(state.looks[0].bolt_spread, 0.4);
     assert_eq!(
         state.looks[1].emission.as_deref(),
         Some("com_sfx_weap_flamethrower_ord")

@@ -510,6 +510,15 @@ impl SoldierVisuals {
         // thrown again.
         for (v, u) in self.units.iter_mut().zip(&walk.sim.units) {
             let (wc, _, state) = u.active_weapon();
+            let emitter = (u.alive
+                && u.mount.is_none()
+                && state.state == core::weapon::FireState::Firing
+                && walk.sim.weapon_classes[wc]
+                    .force
+                    .as_ref()
+                    .is_some_and(|p| matches!(p.kind, core::hero_weapon::ForceKind::Emitter(_))))
+            .then_some(wc);
+            v.cast.firing(walk.sim.tick, emitter);
             let firing = u.alive
                 && u.mount.is_none()
                 && state.state == core::weapon::FireState::Firing
@@ -878,14 +887,15 @@ impl SoldierVisuals {
                         frame.legs,
                     );
                 }
-                if let Some(choked) = u.choked {
-                    v.animator.status_pose(
-                        &sa.asset.clips,
-                        &sa.asset.skeleton,
-                        &class.family,
-                        choked.age,
-                    );
-                }
+            }
+            if let Some(choked) = u.choked {
+                let family = anim.map_or("human", |a| &a.family);
+                v.animator.status_pose(
+                    &sa.asset.clips,
+                    &sa.asset.skeleton,
+                    family,
+                    choked.age,
+                );
             }
         }
         v.cast.advance(dt);
@@ -1213,6 +1223,19 @@ impl SoldierVisuals {
                 .and_then(|m| self.walker_fire_frame(walk, m))
             {
                 out[i] = Some(frame.w_axis.truncate());
+            }
+        }
+        out
+    }
+
+    pub fn force_points(&self, walk: &WalkSim) -> Vec<Option<Vec3>> {
+        let mut out = vec![None; walk.sim.units.len()];
+        for (i, sa, model, palette) in self.posed(walk) {
+            if let Some(hand) = sa.asset.skeleton.index_of("bone_l_hand") {
+                out[i] = Some(
+                    (model * palette[hand] * sa.asset.skeleton.global_bind[hand])
+                        .transform_point3(Vec3::ZERO),
+                );
             }
         }
         out

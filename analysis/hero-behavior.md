@@ -85,6 +85,13 @@ not accepted as evidence. Its format was checked against the official PCSX2
    loop/final-frame metadata. Their blend clocks advance in display seconds,
    independently of locomotion playback rate. Damage, blade contacts and combo
    transitions continue to read the fixed-step clocks.
+6. Choke victim animation on BF1 maps / models: BF1 soldier assets lack authored
+   human_choking clips because the original game had no playable heroes or Force
+   powers. When heroes are enabled on BF1 maps, Animator::status_pose falls back
+   to the baked lail clip (human_rifle_thrown_flail), giving victims active
+   struggling and kicking animation in the hold instead of freezing motionless.
+   In the simulation, victims snap to Stand and turn to face the caster (-direction),
+   and running/prone targets are properly caught in the hold.
 
 ## Production evidence and reproducibility
 
@@ -145,3 +152,116 @@ not independent PS2 equivalence. No first-use asset-loading optimization is
 claimed. The retained class-picker loading stalls are separate.
 
 Distribution refresh and final check results are recorded below after completion.
+
+## Follow-up: hero combos, sustained Force powers and sprint (1930789)
+
+The maintainer's six follow-up reports remain part of this hero-behavior work item:
+Aayla's uneven saber combo, repeated held cast wind-ups, Force lightning resembling
+an Arc Caster shot, a frozen choke victim, incorrect Force push reactions, and hero
+sprint animation/movement/camera fidelity. The checkout was clean on
+`codex/bf2-hero-behavior` at `193078918b7e` when this investigation began.
+
+### Evidence boundaries
+
+`engine/artifacts/hero-behavior/phase2/baseline-last.json` preserves the mutable
+distribution snapshot before further runs. Its blackbox digest is beside it.
+It is schema 13, **b5ca5cb90ce5+dirty**, compiled 2026-11-01 14:29:26 UTC,
+checkout `193078918b7e`, BF2 `tat2`, seed 200, human unit 0. It is evidence from
+the preceding executable, not an execution of clean 1930789. Recent frame times
+are mostly steady (75 FPS, mean 13.3 ms, p99 15 ms, maximum 18.1 ms); initial
+loading stalls do not explain the persistent posed-frame repetitions below.
+
+The local PS2 disc closure and `SWBFRNT2.ELF-decomp.c` were checked against the
+existing saber/layer/combo/jet/hero-flow research before extending it. Sprint
+rate evidence in `re-sprint-clip.md` is existing audited work, not a new finding
+from this session. Fresh PCSX2 evidence uses the maintainer's Mos Eisley Hero
+Assault state 10: the preserved EE memory identifies Aayla's actor at 0x1cd3c10,
+class 0x19b7170, animator 0x1bfc8a0, initially
+(18.701675, -0.0199005, -82.365723). A PINE forward/sprint command intervention
+recorded native mode-0 sprint updates. Input was intermittently overwritten by
+the original controller update, so this is not an uninterrupted speed/rate
+measurement and is not used to calibrate constants. A discarded AI actor-warp
+attempt supplied no usable Force observation. State 10 was restored and the VM
+paused; no save states or native gameplay constants were changed.
+
+Fresh, matched PS2 held-lightning, push, choke and combo videos were **not**
+completed. The executable/disc audit and port captures below establish concrete
+defects and their corrections, not full visual parity with those original-game
+actions. That comparison and the maintainer's windowed playtest remain open.
+
+### Causes and corrections
+
+| Report | Production cause and correction |
+| --- | --- |
+| Uneven main saber combos | The prior interpolation existed, but `Fx::advance_frame` called `SoldierVisuals::update` before applying the render blend. The windowed game therefore still sampled melee clocks at 30 Hz. It now applies the presentation pose before advancing visuals and reading effect attachments, then restores the simulation. The shared path covers all heroes, including authored full-body attacks; no blanket locomotion override or melee damage-clock change is made. |
+| Held casts replay the whole animation | `CastClock` expired after the clip and a later Ability event started it again. Custom `Loop("FinalFrame")` metadata was collapsed into ordinary non-looping metadata. It now retains the authored last frame while that weapon is firing and held, then clears on release. The caster starts from the weapon's firing transition, including its wind-up, rather than waiting for the first emitted shot. Choke's existing held-channel behavior stays separate. |
+| Force lightning looks like one Arc Caster shot | PS2 really does reference the same `com_sfx_lightning` asset, but Force authors intensity 0.15, five minimum bolts and angular spread 0.4. The port read spread from 0xce532e64 (an unrelated field at native class+0x10c); native parser 0x3156e0 maps **0xdd09f94e** to the spread at +0xcc. Five bolts consequently overlapped on one line. The correct property now fans the bolts out. First links follow the posed casting hand, and child-strand seeds refresh per display frame without consuming sim RNG. The Arc Caster path is unchanged. |
+| Choke victim freezes | `Animator::status_pose` always sampled a non-looping clip, clamping to its last frame. It now repeats the authored BF2 `(frames-1)/30` period, and the victim's presentation age interpolates between ticks and restores exactly. Damage, target hold, lift and release gameplay are unchanged. |
+| Force push distance/count/reactions | The emitter applied a flat normalized horizontal/radial shove through the map's knock rules. Native emitter 0x315f78 calls soldier vtable+0x90 (0x238b80) with inner radius `range*0.5`, outer radius `range*2`, and the authored push strength; 0x268fe0 subtracts half the scaled body radius for falloff, and 0x238b80 adds 0.6 up before BF2 knock dispatch. The positive Force push now uses that path's geometry, falloff and BF2 thrown/tumble selection on either disc's maps. Its authored cone, LOS, relations and four-target cap are retained and exercised with five candidates. Ordinary blast push deviations, saber knock and negative Force pull are unchanged. |
+| Hero sprint feels wrong | The game ignored inherited `ControlSpeed sprint` rows. Jedi used 1.5 forward instead of their authored 2.5; Vader, Yoda and Grievous also have their own rows. Sprint forward/strafe factors now load by stance through the class chain, preserving the approved turn factor. BF2 sprint playback uses planar speed divided by the lower sprint clip's root speed, without locomotion easing or root-scale division (0x27caf0 case 0). Hero camera sections also load from their class chain: common Jedi stand is eye 2.0/back 5.2, sprint eye 1.8/back 4.0. The old infantry stand back 3.2 reversed the camera change. Infantry camera settings and the player's FOV option remain intact. |
+
+All authored non-1.5 sprint rows in the retained class bake belong to Jedi/hero
+classes. No hero health, weapon damage, unlock, offer, Force drain or target-count
+balance values are changed.
+
+### Port evidence and checks
+
+`hero_behavior` now captures the production `Fx::advance_frame` path. Its explicit
+`before-order` option reconstructs the old 1930789 animate-before-blend order
+inside the current diagnostic executable; it is **not** footage from a separate
+clean baseline binary. The comparable Aayla 75 FPS held-combo sequences show
+40 identical successive posed meshes during active attacks in that control,
+and zero after the shared clock-consumer correction. Their simulation hashes
+match. Frame sequences, JSON traces and MP4s are under
+`engine/artifacts/hero-behavior/phase2/`.
+
+The Force captures use stationary clone dummies with 3000 HP and infinite caster
+stamina on flat diagnostic ground, explicitly recorded in their headers. They
+show held lightning, a continuously animated lifted choke victim, and four
+thrown victims from five push candidates. They are pose/effect diagnostics,
+not claims about normal-match damage or stamina balance. The selected map
+supplies assets; the capture does not install that map's collision geometry.
+
+Regression coverage includes the actual picker, assets, fixed-step sim and live
+frame consumer for Anakin, Obi-Wan, Maul, Aayla and Dooku at 60/75/120 FPS, with
+matching sim hashes. A gameplay-driven held-lightning case checks firing wind-up,
+retained final-frame pose, and release. Existing real Bespin ceiling/infantry/jet
+checks pass. Sprint rate checks cover every baked soldier/weapon set, and roster
+tests exercise inherited hero movement/camera constants and ordinary infantry
+defaults. Positive push tests cover lift, falloff, four-of-five targets and BF2
+reactions on BF1/BF2 ground rules. Choke-loop and interpolated-age restoration
+checks run through the animation and render-blend consumers.
+
+Final validation for this follow-up:
+
+- Core library: 1650 passed, 2 existing ignored.
+- Game library: 665 passed, 8 existing ignored, including the added live firing
+  transition/wind-up checks and 60/75/120 FPS determinism checks.
+- Roster integration group: 42 passed, including the inherited hero sprint and
+  camera checks. The extended melee/choke render-clock restoration check passes.
+- `cargo fmt --all --check` and `git diff --check` pass. Clippy for core/game and
+  all targets passes with `-D warnings -A clippy::let-and-return`; that exception
+  is the existing `force_can_target` return-local lint, not a newly allowed lint.
+- Release `game` and `hero_behavior` were rebuilt. No asset format or bake
+  interpretation changed, so no assets required rebaking. The current complete
+  `engine/assets_baked` and `engine/missions` were packed using release
+  `game.exe --write-pack` to `dist/openbf.hero-behavior.tmp.exe`.
+- The staged executable successfully loaded embedded BF2 Mos Eisley from the
+  dist working directory with `--map assets_baked/tat2 --headless --scene-report`:
+  2708 draws, 727 instances, zero untextured/dangling draws. After that success it
+  replaced **`E:/Projects/openbf/dist/openbf.exe`**. The installed pack contains
+  24,574 files and is 2,908,633,842 bytes. Its build is **193078918b7e+dirty**.
+  The SHA-256 record and pack/smoke logs are in the phase2 artifact folder.
+- `dist/openbf_data` was preserved. The current maintainer `last.json` still has
+  the same SHA-256 as `phase2/baseline-last.json`. No commit, push or PR operation
+  was performed; changes remain on `codex/bf2-hero-behavior` for playtesting.
+
+Local clips:
+[Aayla old-order control / production, 75 FPS](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/aayla-render-order-comparison.mp4),
+[Aayla sprint](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/aayla-sprint.mp4),
+[Dooku lightning](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/dooku-lightning.mp4),
+[Dooku choke](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/dooku-choke.mp4),
+[Obi-Wan push](E:/Projects/openbf/engine/artifacts/hero-behavior/phase2/obiwan-push.mp4).
+
+The requested maintainer playtest and full matched PS2 visual comparisons remain
+the fidelity acceptance gap; passing these checks is not a claim of final parity.

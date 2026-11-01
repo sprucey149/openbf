@@ -52,6 +52,7 @@ pub struct UnitPose {
     pub yaw: f32,
     pub pitch: f32,
     pub melee: Option<(u32, bool, f32)>,
+    pub choked: Option<f32>,
 }
 
 /// One vehicle's drawn pose.
@@ -112,6 +113,7 @@ impl Pose {
             pos: u.soldier.pos,
             yaw: u.soldier.yaw,
             pitch: u.soldier.pitch,
+            choked: u.choked.map(|c| c.age),
             melee: u.weapon.melee.as_ref().and_then(|m| {
                 m.pose().map(|(name, time, _)| {
                     (
@@ -178,6 +180,9 @@ impl Pose {
             u.soldier.pos = p.pos;
             u.soldier.yaw = p.yaw;
             u.soldier.pitch = p.pitch;
+            if let (Some(choked), Some(age)) = (&mut u.choked, p.choked) {
+                choked.age = age;
+            }
             if let (Some(m), Some((_, block, time))) = (&mut u.weapon.melee, p.melee) {
                 if block {
                     m.block_animation_time = time;
@@ -282,6 +287,13 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
         o.pos = mix3(p.pos, c.pos, t);
         o.yaw = lerp_angle(p.yaw, c.yaw, t);
         o.pitch = mix(p.pitch, c.pitch, t);
+        if let Some(age) = &mut o.choked {
+            let start = p
+                .choked
+                .filter(|old| old <= age)
+                .unwrap_or((*age - core::TICK_DT).max(0.0));
+            *age = mix(start, *age, t);
+        }
         if let Some((key, block, time)) = &mut o.melee {
             let start = p
                 .melee
@@ -589,7 +601,12 @@ mod tests {
                 animation: Some("stand_attack1a".into()),
                 ..Default::default()
             });
+            walk.sim.units[index].choked = Some(core::hero_weapon::Choked {
+                left: 5.0,
+                age: 0.0,
+            });
             let mut prev = Pose::capture(&walk);
+            walk.sim.units[index].choked.as_mut().unwrap().age = core::TICK_DT;
             walk.sim.units[index]
                 .weapon
                 .melee
@@ -612,6 +629,7 @@ mod tests {
                     .unwrap()
                     .1;
                 assert!((time - fraction * core::TICK_DT).abs() < 1e-7);
+                assert!((walk.sim.units[index].choked.unwrap().age - time).abs() < 1e-7);
                 cur.write(&mut walk);
                 assert_eq!(walk.sim.hash(), original_hash);
             }

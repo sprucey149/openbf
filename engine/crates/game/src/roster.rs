@@ -1749,6 +1749,17 @@ pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
 pub fn soldier_constants(db: &ClassDb, class: &str) -> SoldierConstants {
     let mut c = SoldierConstants::from_props(&ClassSrc { db, class });
     jet_class_data(db, class, &mut c);
+    if let Some(row) = db.chain(class).into_iter().find_map(|def| {
+        def.props
+            .iter()
+            .rev()
+            .filter(|p| p.0 == crate::classdb::fnv1a_lowercase("ControlSpeed"))
+            .filter_map(|p| SoldierConstants::control_row(&p.1))
+            .find(|(name, _)| name.eq_ignore_ascii_case("sprint"))
+            .map(|(_, row)| row)
+    }) {
+        c.sprint_control = [row[0], row[1]];
+    }
     c.saber = db.weapon_slots(class).iter().any(|s| {
         s.channel == 0
             && db
@@ -1756,6 +1767,26 @@ pub fn soldier_constants(db: &ClassDb, class: &str) -> SoldierConstants {
                 .and_then(|w| db.engine_base(w))
                 .is_some_and(|b| b.eq_ignore_ascii_case("melee"))
     });
+    if c.saber {
+        for def in db.chain(class).into_iter().rev() {
+            for (key, section) in crate::droideka::camera_sections(db, &def.name) {
+                if let Some(index) = [
+                    "STAND",
+                    "STANDZOOM",
+                    "CROUCH",
+                    "CROUCHZOOM",
+                    "PRONE",
+                    "PRONEZOOM",
+                    "SPRINT",
+                ]
+                .iter()
+                .position(|name| crate::classdb::fnv1a_lowercase(name) == key)
+                {
+                    c.hero_cameras[index] = Some(section);
+                }
+            }
+        }
+    }
     c
 }
 

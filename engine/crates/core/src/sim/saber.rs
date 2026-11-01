@@ -243,6 +243,7 @@ impl Sim {
             return;
         }
         if let Some(state) = &self.units[i].weapon.melee {
+            constants.saber = true;
             if let Some(rate) = state.restore_rate {
                 constants.energy_restore = rate;
                 constants.energy_restore_idle = rate;

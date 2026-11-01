@@ -52,7 +52,7 @@ impl Look {
                         out.minimum_bolts = (v as usize).min(64);
                     }
                 }
-                0xce53_2e64 => {
+                0xdd09_f94e => {
                     if let Ok(v) = value.parse::<f32>() {
                         if v.is_finite() {
                             out.bolt_spread = v;
@@ -76,6 +76,7 @@ struct Bolt {
     strength: f32,
     phase: f32,
     seeds: [u32; 2],
+    children_seed: u32,
 }
 
 #[derive(Default, Debug)]
@@ -147,6 +148,7 @@ impl State {
             strength,
             phase: 0.0,
             seeds,
+            children_seed: rng.seed(),
         });
     }
 
@@ -154,6 +156,7 @@ impl State {
         let rng = self.rng.get_or_insert(Lcg(0x4c49_4748));
         for bolt in &mut self.bolts {
             bolt.left -= dt;
+            bolt.children_seed = rng.seed();
             bolt.phase += bolt.def.interpolation_speed.unwrap_or(10.0) * dt;
             // Native 0x4594f0 advances at most one seed pair per update.
             if bolt.phase > 1.0 {
@@ -206,7 +209,7 @@ impl State {
                 let count = ((count as f32 * bolt.strength) as usize).clamp(1, 64);
                 // [ours] Child seeds stay stable within the same drawn frame;
                 // the original draws from its session RNG each render call.
-                let mut seed = Lcg(bolt.seeds[0].wrapping_add(bolt.seeds[1]));
+                let mut seed = Lcg(bolt.children_seed);
                 let mut child_color = bolt.def.child_color.unwrap_or([255.0; 4]).map(byte);
                 child_color[3] = byte(f32::from(child_color[3]) * fade);
                 for _ in 0..count {
@@ -276,6 +279,19 @@ fn bolt_endpoint(sim: &Sim, owner: UnitHandle, from: Vec3, direction: Vec3, rang
 }
 
 impl Fx {
+    pub(super) fn set_force_origins(&mut self, points: &[Option<Vec3>]) {
+        for bolt in &mut self.force.bolts {
+            if let Some(point) = bolt
+                .owner
+                .and_then(|h| points.get(h.index as usize))
+                .copied()
+                .flatten()
+            {
+                bolt.from = point;
+            }
+        }
+    }
+
     pub(super) fn follow_force(&mut self, sim: &Sim) {
         let mut state = std::mem::take(&mut self.force);
         // A first bolt follows its caster's weapon frame, later chain links
