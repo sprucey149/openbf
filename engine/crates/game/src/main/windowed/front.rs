@@ -105,6 +105,7 @@ fn action_name(bits: u32, walk: (i8, i8)) -> String {
         (b::ACTION, "Action"),
         (b::SWITCH_WEAPON, "Next weapon"),
         (b::SWITCH_SECONDARY, "Secondary weapon"),
+        (b::VIEW_TOGGLE, "Viewpoint"),
         (b::SQUAD_MOVE_OUT, "Squad move"),
         (b::SQUAD_HOLD, "Squad hold"),
         (b::SQUAD_AT_EASE, "Squad at ease"),
@@ -636,6 +637,7 @@ impl App {
                 music_volume: settings.music_volume,
                 mouse_sensitivity: settings.mouse_sensitivity,
                 invert_y: settings.invert_y,
+                first_person: settings.viewpoint.is_first(),
                 cursor,
                 in_shell: Some(
                     front.menus.options.rows[front.menus.options.focus]
@@ -800,7 +802,10 @@ impl App {
         }
         for action in setting_clicked {
             // A pointer click sounds as its pad press (only toggles click).
-            if action == ui::menu::MenuAction::ToggleInvertY {
+            if matches!(
+                action,
+                ui::menu::MenuAction::ToggleInvertY | ui::menu::MenuAction::ToggleViewpoint
+            ) {
                 front.cue(MenuSound::Accept);
             }
             self.apply_shell_setting(&mut front, action);
@@ -863,6 +868,7 @@ impl App {
                 )
             }
             MenuAction::ToggleInvertY => s.invert_y = !s.invert_y,
+            MenuAction::ToggleViewpoint => s.viewpoint = s.viewpoint.toggled(),
         }
         self.kbm.follow(&self.profile.settings);
         if let Err(e) = self.profile.save() {

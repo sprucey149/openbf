@@ -880,3 +880,39 @@ fn a_modelled_shell_draws_no_placeholder_box() {
     assert_eq!(r.bolt_draws().len(), 1);
     assert_eq!(crate::bolt_vis::missiles_in_flight(&r).len(), 1);
 }
+
+#[test]
+fn first_person_arms_and_eye_view_gating() {
+    let mut walk = WalkSim::new(1, Vec3::ZERO, None);
+    assert!(!walk.first_person());
+    assert!(!walk.in_eye_view());
+    assert!(!walk.shows_first_person_arms());
+    assert!(!walk.player_body_hidden());
+
+    walk.sim.units[walk.player.index as usize].first_person = true;
+    assert!(walk.first_person());
+    assert!(walk.in_eye_view());
+    assert!(walk.shows_first_person_arms());
+    assert!(walk.player_body_hidden());
+
+    walk.sim.units[walk.player.index as usize].zoom = Some(core::unit::Zoom {
+        step: 0,
+        value: 2.0,
+        divisor: 2.0,
+        scope: false,
+    });
+    assert!(walk.in_eye_view());
+    assert!(!walk.shows_first_person_arms());
+
+    walk.sim.units[walk.player.index as usize].zoom = None;
+    walk.backdrop = crate::spawn_backdrop::Backdrop::new(
+        vec![crate::spawn_backdrop::CameraShot {
+            rot: glam::Quat::IDENTITY,
+            pos: glam::Vec3::ZERO,
+        }],
+        crate::spawn_backdrop::LCG_RESEED,
+    );
+    assert!(!walk.in_eye_view());
+    assert!(!walk.shows_first_person_arms());
+    assert!(!walk.player_body_hidden());
+}

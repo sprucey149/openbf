@@ -111,6 +111,17 @@ impl Bindings {
         true
     }
 
+    pub fn with_new_actions(mut self) -> Bindings {
+        for (trigger, bind) in Self::pc_default().table {
+            let known = self.table.iter().any(|(_, b)| *b == bind);
+            let free = !self.table.iter().any(|(t, _)| *t == trigger);
+            if !known && free {
+                self.table.push((trigger, bind));
+            }
+        }
+        self
+    }
+
     pub fn remap(&mut self, index: usize, trigger: Trigger) -> bool {
         if index >= self.table.len() || trigger == Trigger::Key(KeyCode::Escape) {
             return false;
@@ -169,6 +180,7 @@ impl Bindings {
                 ),
                 (Key(K::Tab), Bind::bits(b::SPAWN_CLASS_PREV)),
                 (Key(K::KeyG), Bind::bits(b::SWITCH_SECONDARY)),
+                (Key(K::KeyV), Bind::bits(b::VIEW_TOGGLE)),
                 (
                     Key(K::ArrowUp),
                     Bind::bits(b::SQUAD_MOVE_OUT | b::SPAWN_POST_UP),

@@ -242,6 +242,7 @@ if want side; then
   clean "$OUT/side_bf1/soldiers" "$OUT/side_bf1/weapons" "$OUT/side_bf1/textures" \
         "$OUT/side_bf2/soldiers" "$OUT/side_bf2/weapons" "$OUT/side_bf2/textures" \
         "$OUT/side_bf1/vehicles" "$OUT/side_bf2/vehicles" \
+        "$OUT/side_bf1/fpm" "$OUT/side_bf2/fpm" \
         "$OUT/side_bf1/effects" "$OUT/side_bf2/effects" \
         "$OUT/side_bf1/droid_chunks" "$OUT/side_bf2/droid_chunks" \
         "$OUT/droid_effects" "$OUT/classes/droid_chunks.ron"
@@ -307,6 +308,31 @@ if want side; then
   "$BAKE" weapon  "$A1"              com_weap_inf_torpedo,com_weap_inf_grenadethermal,com_weap_inf_grenadethermal_ord,com_weap_inf_landmine,com_weap_inf_landmine_placed,com_weap_inf_seismic_mine "$OUT/side_bf1"
   "$BAKE" weapon  "$B2/INGAME.LVL"   com_weap_inf_torpedo,com_weap_inf_grenadethermal,com_weap_inf_grenadethermal_ord,com_weap_inf_landmine,com_weap_inf_landmine_placed,com_weap_inf_seismic_mine,com_weap_inf_detpack,com_weap_missile "$OUT/side_bf2"
   "$BAKE" weapon  "$B2/INGAME.LVL,$B2/SIDE/REP.LVL" com_weap_inf_dropturret "$OUT/side_bf2"
+  # First person (card FPA): every FPM LVL's arm model (the soldier class's
+  # `FirstPerson` key; cockpit models carry no hp_camera and are skipped) with
+  # the 11-column clip table's clips, and every `HighResGeometry` weapon.
+  shopt -s nocaseglob nullglob
+  FPM1=("$B1"/FPM/*/*.LVL)
+  FPM2=("$B2"/FPM/*/*.LVL)
+  shopt -u nocaseglob nullglob
+  "$BAKE" fpm "$A1" "$OUT/side_bf1" "${FPM1[@]}"
+  "$BAKE" fpm "$B2/INGAME.LVL" "$OUT/side_bf2" "${FPM2[@]}"
+  W1ST=fusioncutter,launcher,pistol,rifle,sniperrifle
+  for g in 1 2; do
+    eval "G=\$B$g"
+    for s in all imp rep cis; do
+      x="$W1ST"
+      [ "$s" = all ] && x="$x,bowcaster,seeker"
+      [ "$s" = rep ] && [ "$g" = 1 ] && x="$x,landmine"
+      [ "$s" = rep ] && [ "$g" = 2 ] && x="$x,chaingun"
+      pc=""
+      [ "$g" = 2 ] && [ "$s" = rep ] && pc="${PCSIDE_REP:-}"
+      [ "$g" = 2 ] && [ "$s" = cis ] && pc="${PCSIDE_CIS:-}"
+      "$BAKE" weapon "$G/SIDE/$(echo "$s" | tr a-z A-Z).LVL" "$(echo "$x" | sed "s/[^,]*/${s}_1st_weap_inf_&/g")" "$OUT/side_bf$g" ${pc:+"$pc"}
+    done
+  done
+  "$BAKE" weapon  "$A1"            com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf1"
+  "$BAKE" weapon  "$B2/INGAME.LVL" com_1st_weap_inf_grenadethermal,com_1st_weap_inf_torpedo,com_1st_weap_inf_landmine "$OUT/side_bf2"
   # Every vehicle class of the four sides (card VBAKE): models (every LOD),
   # destruction chunks, collision, textures -> side_<game>/vehicles/<side>/.
   for s in all cis imp rep; do

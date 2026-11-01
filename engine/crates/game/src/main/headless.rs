@@ -145,9 +145,14 @@ impl ReplayFrame {
         walk_draws(self.cube, walk, &mut draws, self.models);
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
         draws.extend(self.deka_vis.draws(r, &walk.sim));
-        let skinned = self.vis.draws(walk);
+        let mut skinned = self.vis.draws(walk);
         draws.extend(self.vis.weapon_draws(walk));
         draws.extend(self.vis.cloth_draws(r, walk));
+        if !v.cam_set {
+            let (arms, gun) = self.vis.first_person_draws(walk, &cam);
+            skinned.extend(arms);
+            draws.extend(gun);
+        }
         draws.extend(self.fx.draws(self.quad, self.sprite, &cam));
         self.holos.advance(walk);
         game::point_light::submit(r, gpu, walk, &mut self.bolts, cam.position, &self.holos);

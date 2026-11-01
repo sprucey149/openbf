@@ -76,6 +76,8 @@ pub mod buttons {
     /// The current hero offer; mapped separately from movement/navigation.
     pub const HERO_ACCEPT: u32 = 1 << 24;
     pub const HERO_DECLINE: u32 = 1 << 25;
+    pub const FIRST_PERSON: u32 = 1 << 26;
+    pub const VIEW_TOGGLE: u32 = 1 << 27;
 }
 
 pub const LOOK_UNIT: f32 = 1.0 / 65536.0;
@@ -686,7 +688,7 @@ impl Sim {
                     AimTarget::Unit(_) => crate::unit::HUMAN_SHOT_LAG,
                     AimTarget::Vehicle(_) | AimTarget::Turret(_) | AimTarget::Droid(_) => 0.0,
                 };
-            let from = if p.scoped() {
+            let from = if p.scope_path() {
                 p.scope_point(self.ground_rules)
             } else {
                 p.fire_point()

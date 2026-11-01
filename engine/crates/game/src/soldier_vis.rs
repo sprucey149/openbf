@@ -179,27 +179,28 @@ pub struct DrawPlan {
 /// A class's other slots and the hand model each draws (`None` = none).
 pub type HeldDraws = Vec<(u8, Option<usize>)>;
 
+pub(super) fn intern_name(names: &mut Vec<String>, name: Option<&str>) -> Option<usize> {
+    let name = name?;
+    Some(names.iter().position(|x| x == name).unwrap_or_else(|| {
+        names.push(name.to_owned());
+        names.len() - 1
+    }))
+}
+
 impl DrawPlan {
     pub fn of(teams: &[TeamTemplate; 2]) -> Self {
-        fn slot(names: &mut Vec<String>, name: Option<&str>) -> Option<usize> {
-            let name = name?;
-            Some(names.iter().position(|x| x == name).unwrap_or_else(|| {
-                names.push(name.to_owned());
-                names.len() - 1
-            }))
-        }
         let mut plan = Self::default();
         for (i, t) in teams.iter().enumerate() {
             for c in &t.classes {
                 let draw = ClassDraw {
-                    body: slot(&mut plan.bodies, c.geometry.as_deref()),
-                    weapon: slot(&mut plan.weapons, c.weapon_geometry.as_deref()),
+                    body: intern_name(&mut plan.bodies, c.geometry.as_deref()),
+                    weapon: intern_name(&mut plan.weapons, c.weapon_geometry.as_deref()),
                 };
                 plan.per_class[i].push(draw);
                 let held = c
                     .held_models
                     .iter()
-                    .map(|(s, g)| (*s, slot(&mut plan.weapons, g.as_deref())))
+                    .map(|(s, g)| (*s, intern_name(&mut plan.weapons, g.as_deref())))
                     .collect();
                 plan.held[i].push(held);
             }
@@ -627,6 +628,7 @@ pub struct SoldierVisuals {
     hover_nine: Vec<Option<HoverClock>>,
     /// Reused across generations; respawning resets CPU state, not GPU buffers.
     cloth_meshes: std::collections::HashMap<(usize, usize, usize), render::MeshHandle>,
+    pub fp: first_person::FirstPersonVisuals,
 }
 
 /// A hover's [`tp::HoverNine`] and the vehicle and tick it was stepped for.
@@ -688,6 +690,7 @@ fn model_of(s: &core::soldier::Soldier) -> Mat4 {
 
 mod cast;
 mod cloth;
+pub mod first_person;
 mod grenade;
 use grenade::drawn;
 mod runtime;

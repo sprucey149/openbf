@@ -69,15 +69,7 @@ fn team(classes: &[(&str, Option<&str>, Option<&str>)]) -> TeamTemplate {
             label: (*name).into(),
             geometry: geometry.map(str::to_owned),
             weapon_geometry: weapon.map(str::to_owned),
-            weapon_hud: Default::default(),
-            held_hud: Vec::new(),
-            droideka_shield: None,
-            held_models: Vec::new(),
-            foley_class: 0,
-            cries: Default::default(),
-            anim: Default::default(),
-            skins: Default::default(),
-            jet_look: Default::default(),
+            ..Default::default()
         })
         .collect();
     t

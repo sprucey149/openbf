@@ -81,6 +81,8 @@ pub struct ClassRoster {
     pub geometry: Option<String>,
     /// Primary weapon class `GeometryName` (drawn at `hp_weapons`), if any.
     pub weapon_geometry: Option<String>,
+    pub first_person: Option<String>,
+    pub first_person_weapon: crate::first_person::FpWeapon,
     /// The primary weapon in the HUD's weapon slot ([`weapon_hud`]).
     pub weapon_hud: crate::walk::WeaponHud,
     /// The hash of the class's `FoleyFXClass` (card FOLY), 0 without one.
@@ -136,6 +138,7 @@ pub struct HeldSlot {
     /// The model drawn at `hp_weapons` while this slot is in hand
     /// ([`weapon_model`], card WHELD), if any.
     pub geometry: Option<String>,
+    pub first_person: crate::first_person::FpWeapon,
 }
 
 /// Every soldier class a faction fields this round, in MISSION order.
@@ -585,6 +588,38 @@ pub fn weapon_model(db: &ClassDb, weapon: &str) -> Option<String> {
         .or_else(|| mine.and_then(|_| db.prop(weapon, "OffhandGeometryName")))
         .or_else(|| mine.and_then(|n| db.prop(n.trim(), "GeometryName")))
         .map(|g| g.trim().to_owned())
+}
+
+pub fn first_person_model(db: &ClassDb, class: &str) -> Option<String> {
+    let model = db.prop(class, "FirstPerson")?.rsplit(';').next()?.trim();
+    (!model.is_empty()).then(|| model.to_ascii_lowercase())
+}
+
+pub fn first_person_weapon(
+    db: &ClassDb,
+    weapon: &str,
+    offhand: bool,
+) -> crate::first_person::FpWeapon {
+    let geometry = db
+        .prop(weapon, "HighResGeometry")
+        .map(|g| g.trim().to_ascii_lowercase())
+        .filter(|g| !g.is_empty());
+    let bank = db
+        .prop(weapon, "AnimationBank")
+        .and_then(|v| v.split_whitespace().next().map(str::to_ascii_lowercase));
+    let row = if db.is_bf2() {
+        let base = bank
+            .as_deref()
+            .map(|b| b.split_once('_').map_or(b, |(_, tail)| tail));
+        crate::first_person::bf2_row(offhand, base)
+    } else {
+        let set = bank
+            .as_deref()
+            .and_then(manifest::anim_sets::bf1::weapon_set)
+            .unwrap_or(0);
+        crate::first_person::bf1_row(set)
+    };
+    crate::first_person::FpWeapon { geometry, row }
 }
 
 /// A soldier class's skins (card USKN, `analysis/re-soldier-skeleton-skins.md`
@@ -1283,6 +1318,7 @@ pub fn held_slots(db: &ClassDb, soldier: &str, primary: u8) -> Vec<HeldSlot> {
                 clips: s.ammo.unwrap_or(0),
                 hud: weapon_hud(db, &name),
                 geometry: weapon_model(db, &name),
+                first_person: first_person_weapon(db, &name, weapon.offhand_weapon),
                 weapon,
             })
         })
@@ -1948,6 +1984,8 @@ impl ClassRoster {
                 consts.aim_size = *v;
             }
         }
+        let first_person_weapon =
+            first_person_weapon(weapon_db, &weapon_name, weapon.offhand_weapon);
         Ok(ClassRoster {
             class: class.to_owned(),
             label,
@@ -1972,6 +2010,8 @@ impl ClassRoster {
                 .map(|g| g.trim().to_owned())
                 .filter(|_| !walker_droid),
             weapon_geometry: weapon_geometry(db, class),
+            first_person: first_person_model(db, class).filter(|_| !walker_droid),
+            first_person_weapon,
             weapon_hud: weapon_hud(weapon_db, &weapon_name),
             foley_class: db
                 .prop_hash(class, crate::foley::FOLEY_FX_CLASS)

@@ -214,7 +214,7 @@ pub fn drawn_start(spawn: Vec3, dir: Vec3, end: Vec3, on_foot: bool, fire: Optio
 }
 
 pub fn drawn_from_the_gun(u: &core::unit::Unit) -> bool {
-    u.mount.is_none() && !u.scoped()
+    u.mount.is_none() && !u.eye_view()
 }
 
 /// The tick's struck impacts (`Event::Impact`: one per bolt that struck a
@@ -491,9 +491,8 @@ impl BoltVis {
                 None => {
                     let dir = b.vel.normalize_or_zero();
                     let foot = sim.unit(b.owner).is_some_and(|u| {
-                        drawn_from_the_gun(u)
-                            || (u.mount.is_some() && self.fire_point(b.owner.index).is_some())
-                    }) && !sim.is_item_gun(b.weapon_class);
+                        self.uses_drawn_muzzle(sim, u, b.owner.index, b.weapon_class)
+                    });
                     let point = shots
                         .for_bolt(bolt_index)
                         .and_then(|s| s.muzzle(walk))
@@ -647,9 +646,7 @@ impl BoltVis {
                 shot.origin,
                 shot.dir,
                 p,
-                (drawn_from_the_gun(u)
-                    || (u.mount.is_some() && self.fire_point(shot.unit.index).is_some()))
-                    && !sim.is_item_gun(class),
+                self.uses_drawn_muzzle(sim, u, shot.unit.index, class),
                 shot.muzzle(walk).or(self.fire_point(shot.unit.index)),
             );
             self.remnants.push(Remnant {
@@ -664,6 +661,18 @@ impl BoltVis {
                 prev: start,
             });
         }
+    }
+
+    fn uses_drawn_muzzle(
+        &self,
+        sim: &core::sim::Sim,
+        u: &core::unit::Unit,
+        unit_index: u32,
+        weapon_class: usize,
+    ) -> bool {
+        (drawn_from_the_gun(u)
+            || ((u.mount.is_some() || u.eye_view()) && self.fire_point(unit_index).is_some()))
+            && !sim.is_item_gun(weapon_class)
     }
 
     /// Upload the glow and every bolt sheet `walk`'s weapons can fire (card

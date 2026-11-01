@@ -32,6 +32,7 @@ pub use environment::{
 pub mod anim_sets;
 pub mod cloth;
 pub mod combo;
+pub mod fpm;
 pub mod hud;
 pub mod shell;
 

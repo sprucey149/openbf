@@ -422,7 +422,7 @@ pub fn texture_flags(m: &mungefs::model::Model) -> std::collections::HashMap<Str
 /// (`crate::spec::pass_textures`, queue DSHN). Only the texture bake sees the
 /// extra bit: the GLB materials' modes still come from `texture_flags` alone
 /// (`crate::alpha::legacy_per_texture_or`).
-fn bake_flags(m: &mungefs::model::Model) -> std::collections::HashMap<String, u32> {
+pub(crate) fn bake_flags(m: &mungefs::model::Model) -> std::collections::HashMap<String, u32> {
     let mut flags = texture_flags(m);
     for t in crate::spec::pass_textures([m]) {
         *flags.entry(t).or_default() |= crate::detail::ALPHA_IS_MEANINGFUL;

@@ -1391,7 +1391,7 @@ fn the_zoomed_camera_is_the_ps2s() {
         println!("{rules:?}: scope eye {eye}, tilt {tilt:.3}");
         let want = match rules {
             GroundRules::Bf1 => Vec3::new(0.060, 1.604, 0.057),
-            GroundRules::Bf2 => Vec3::new(-0.060, 1.724, 0.349),
+            GroundRules::Bf2 => Vec3::new(-0.060, 1.742, 0.599),
         };
         assert!(near(eye, want), "{eye}");
         assert!(tilt.abs() < 1e-3);
@@ -1401,6 +1401,70 @@ fn the_zoomed_camera_is_the_ps2s() {
         assert_eq!((o, fwd), (u.scope_point(rules), u.aim_frame().0));
         assert!((s.aim_hit(0) - (o + fwd * SCOPE_AIM_LENGTH)).length() < 1e-3);
     }
+}
+
+#[test]
+fn the_first_person_eye_and_aim_are_the_ps2s() {
+    for rules in [GroundRules::Bf1, GroundRules::Bf2] {
+        let mut s = zoom_sim(rules);
+        s.units[0].soldier.yaw = 0.7;
+        s.units[0].soldier.pitch = f32::to_radians(-4.01);
+        s.step(&[pad(buttons::FIRST_PERSON)]);
+        let u = &s.units[0];
+        assert!(u.first_person_view() && u.eye_view() && !u.scope_path());
+        let d = u.aim_frame().0;
+        let cam = u.ideal_camera(rules, 1);
+        assert!(cam.position.distance(u.shoulder_pivot() - d * 0.3) < 1e-5);
+        assert_eq!(cam.forward, d);
+        assert_eq!(u.aim_ray(rules, 1), (u.fire_point(), d));
+        let (o, _) = s.human_shot(0);
+        assert_eq!(o, u.fire_point());
+
+        s.step(&[pad(buttons::FIRST_PERSON | buttons::ZOOM)]);
+        let u = &s.units[0];
+        assert!(u.zoom.is_some() && !u.scoped() && u.scope_path());
+        let d = u.aim_frame().0;
+        let (eye, back) = match rules {
+            GroundRules::Bf1 => (u.fire_point(), 0.3),
+            GroundRules::Bf2 => (u.shoulder_pivot(), 0.6),
+        };
+        let cam = u.ideal_camera(rules, 1);
+        assert!(cam.position.distance(eye - d * back) < 1e-5);
+        let (o, (fwd, ..)) = s.human_shot(0);
+        assert_eq!((o, fwd), (u.scope_point(rules), d));
+
+        s.step(&[pad(0)]);
+        let u = &s.units[0];
+        assert!(!u.first_person && !u.eye_view());
+    }
+}
+
+#[test]
+fn a_thrown_or_dead_soldier_leaves_first_person() {
+    use crate::soldier::Stance;
+    let mut s = zoom_sim(GroundRules::Bf2);
+    s.step(&[pad(buttons::FIRST_PERSON)]);
+    for stance in [Stance::Thrown, Stance::Tumble, Stance::GetUp, Stance::Dead] {
+        s.units[0].soldier.stance = stance;
+        assert!(s.units[0].first_person && !s.units[0].first_person_view());
+    }
+    s.units[0].soldier.stance = Stance::Stand;
+    assert!(s.units[0].first_person_view());
+    s.units[0].alive = false;
+    assert!(!s.units[0].first_person_view());
+}
+
+#[test]
+fn a_bot_never_takes_first_person_and_third_person_hashes_as_before() {
+    let mut a = zoom_sim(GroundRules::Bf1);
+    let mut b = zoom_sim(GroundRules::Bf1);
+    a.step(&[pad(0)]);
+    b.step(&[pad(0)]);
+    assert_eq!(a.hash(), b.hash());
+    b.step(&[pad(buttons::FIRST_PERSON)]);
+    a.step(&[pad(0)]);
+    assert_ne!(a.hash(), b.hash());
+    assert!(b.units.iter().skip(1).all(|u| !u.first_person));
 }
 
 /// A round nobody zooms in hashes as it did: the zoom enters the hash

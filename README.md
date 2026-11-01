@@ -80,6 +80,7 @@ are in Options and in the pause menu.
 | Use (enter or leave a vehicle) | E |
 | Next / previous weapon | Q or the wheel |
 | Switch secondary weapon | G |
+| First / third person (also "Viewpoint" in Options and the pause menu) | V |
 | Squad orders | F1 follow, F2 hold, F3 at ease, F4 move out (or the arrow keys, as the D-pad) |
 | Spawn screen | W A S D or arrows to pick a post, Q / Tab or the wheel for the class, Space or Enter to spawn, Backspace back |
 | Menus | arrows, Enter, Esc or Backspace |

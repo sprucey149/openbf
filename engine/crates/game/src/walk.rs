@@ -81,6 +81,9 @@ pub fn chase_fov_y() -> f32 {
 /// targets by exp(-25 dt) per update (`re-zoom.md` §5).
 pub const ZOOM_EASE_RATE: f32 = 25.0;
 
+/// The PS2's vertical tangent scale (`0.7666` = `tan(FOV / 2)` multiplier, `re-zoom.md` §5).
+pub const PS2_FOV_TAN_SCALE: f32 = 0.7666;
+
 const CAMERA_MOVE_TENSION: f32 = 15.0;
 const VIEW_SETTLE_EPSILON: f32 = 1e-4;
 
@@ -216,20 +219,25 @@ pub fn droid_camera(
     (target, Camera { position, ..cam })
 }
 
+/// Construct a camera at `position` looking along `forward` with zero tilt.
+pub fn look_camera(position: Vec3, forward: Vec3, fov_y: f32) -> Camera {
+    let flat = forward.with_y(0.0).length();
+    Camera {
+        position,
+        yaw: core::fmath::atan2(-forward.x, -forward.z),
+        pitch: core::fmath::atan2(forward.y, flat),
+        fov_y,
+        ..Camera::default()
+    }
+}
+
 /// A zoomed building turret's view (card VTURZ, `analysis/re-turret-draw.md`
 /// 4 [O]; B1 `FUN_00225988`, B2 `FUN_0026fdf8`): at the eye point
 /// (`EyePointOffset` on the aim frame, `SeatLook::scope_eye`), looking along
 /// the look, no pull-in and no floor (the PS2's look-along frame has
 /// neither).
 pub fn turret_scope_camera(look: &core::sim::SeatLook, fov_y: f32) -> Camera {
-    let d = look.view;
-    Camera {
-        position: look.scope_eye,
-        yaw: core::fmath::atan2(-d.x, -d.z),
-        pitch: core::fmath::atan2(d.y, d.with_y(0.0).length()),
-        fov_y,
-        ..Camera::default()
-    }
+    look_camera(look.scope_eye, look.view, fov_y)
 }
 
 /// The FOV option's range (profile `Settings::fov_scale`, the pause menu):
@@ -283,7 +291,7 @@ pub struct DroidHud {
 /// One class's VISUAL side, index-aligned with `Sim::classes[team]` (the
 /// sim's own copy carries the constants; this carries what to draw and what
 /// to call it).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ClassVisual {
     /// ODF class name (`all_inf_marksman`).
     pub name: String,
@@ -304,6 +312,9 @@ pub struct ClassVisual {
     /// `(slot, GeometryName)`, `None` = drawn as nothing. A slot not listed
     /// draws the primary's `weapon_geometry`.
     pub held_models: Vec<(u8, Option<String>)>,
+    pub first_person: Option<String>,
+    pub first_person_weapon: crate::first_person::FpWeapon,
+    pub first_person_held: Vec<(u8, crate::first_person::FpWeapon)>,
     /// The hash of the class's `FoleyFXClass` (card FOLY, `crate::foley`):
     /// which row of the map's foley table its steps play; 0 = none.
     pub foley_class: u32,
@@ -396,6 +407,9 @@ impl ClassVisual {
             held_hud: Vec::new(),
             droideka_shield: c.droideka_shield.clone(),
             held_models: Vec::new(),
+            first_person: c.first_person.clone(),
+            first_person_weapon: c.first_person_weapon.clone(),
+            first_person_held: Vec::new(),
             foley_class: c.foley_class,
             cries: c.cries.clone(),
             anim: c.anim.clone(),
@@ -488,17 +502,7 @@ impl TeamTemplate {
             classes: vec![ClassVisual {
                 name: "trooper".into(),
                 label: "Trooper".into(),
-                geometry: None,
-                weapon_geometry: None,
-                weapon_hud: WeaponHud::default(),
-                held_hud: Vec::new(),
-                droideka_shield: None,
-                held_models: Vec::new(),
-                foley_class: 0,
-                cries: Default::default(),
-                anim: Default::default(),
-                skins: Default::default(),
-                jet_look: Default::default(),
+                ..ClassVisual::default()
             }],
         }
     }
@@ -1177,7 +1181,8 @@ impl WalkSim {
             }
         };
         self.zoom_s = ease(self.zoom_s, zoom.map_or(1.0, |z| z.value));
-        self.zoom_fov_mix = ease(self.zoom_fov_mix, if zoom.is_some() { 1.0 } else { 0.0 });
+        let first = zoom.is_some() || self.first_person();
+        self.zoom_fov_mix = ease(self.zoom_fov_mix, if first { 1.0 } else { 0.0 });
         self.cam_place = self.next_cam_place();
         self.step_cam_pull();
         // The squad's answers to this tick's orders join the voice queue;
@@ -1271,6 +1276,9 @@ impl WalkSim {
         }
         let me = &self.sim.units[self.player.index as usize];
         let ideal = me.ideal_camera(self.sim.ground_rules, self.sim.views());
+        if me.eye_view() {
+            return (self.eye_camera(&ideal), None);
+        }
         let (center, position) = self.drawn_eye(me, &ideal);
         // A wall pulls the camera in toward the PS2's 1.5 m point: it keeps
         // its view (pitch and yaw, the look along his aim) and never drops
@@ -1288,6 +1296,35 @@ impl WalkSim {
             ..Camera::default()
         };
         (cam, Some(track))
+    }
+
+    pub fn eye_camera(&self, eye: &core::unit::IdealCamera) -> Camera {
+        look_camera(eye.position, eye.forward, self.fov_y())
+    }
+
+    pub fn first_person(&self) -> bool {
+        self.sim
+            .unit(self.player)
+            .is_some_and(|u| u.first_person_view())
+    }
+
+    /// Is the player's view looking from the soldier's eye (first person or
+    /// scope) rather than an external camera (scenic shot, backdrop, guided
+    /// missile, remote droid, or vehicle seat)?
+    pub fn in_eye_view(&self) -> bool {
+        if self.round_end.as_ref().is_some_and(|r| r.shot.is_some())
+            || self.backdrop.is_some()
+            || self.sim.controlled_guided(self.player).is_some()
+            || self.sim.controlled_droid(self.player).is_some()
+        {
+            return false;
+        }
+        self.sim.unit(self.player).is_some_and(|u| u.eye_view())
+    }
+
+    /// Are first-person arms and gun drawn in the player's view?
+    pub fn shows_first_person_arms(&self) -> bool {
+        self.in_eye_view() && self.sim.unit(self.player).is_some_and(|u| u.zoom.is_none())
     }
 
     /// One tick of the camera collision's stored fraction
@@ -1315,7 +1352,7 @@ impl WalkSim {
 
     fn drawn_eye(&self, me: &core::unit::Unit, ideal: &core::unit::IdealCamera) -> (Vec3, Vec3) {
         let sec = me.section();
-        let Some((eye_y, offset)) = self.cam_place.filter(|_| !me.scoped()) else {
+        let Some((eye_y, offset)) = self.cam_place.filter(|_| !me.eye_view()) else {
             return (ideal.center, ideal.position);
         };
         if (eye_y, offset) == (sec.eye_y, sec.offset) {
@@ -1332,7 +1369,7 @@ impl WalkSim {
 
     fn next_cam_place(&self) -> Option<(f32, Vec3)> {
         let me = self.sim.unit(self.player)?;
-        if self.backdrop.is_some() || me.mount.is_some() || me.scoped() {
+        if self.backdrop.is_some() || me.mount.is_some() || me.eye_view() {
             return None;
         }
         let sec = me.section();
@@ -1541,7 +1578,7 @@ impl WalkSim {
         let k = self.fov_scale.clamp(FOV_SCALE_RANGE.0, FOV_SCALE_RANGE.1);
         let mut fov = self.walker_fovs().map_or_else(chase_fov_y, |(third, _)| {
             let (s, c) = core::fmath::sin_cos(third.to_radians() * 0.5);
-            2.0 * core::fmath::atan2(0.7666 * s / c, 1.0)
+            2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0)
         });
         if self.zoom_s != 1.0 || self.zoom_fov_mix != 0.0 {
             let (third, first) = self.zoom_fovs();
@@ -1629,7 +1666,7 @@ impl WalkSim {
     /// Is the player's own body left out of the draw (the scope view,
     /// `re-zoom.md` §5)?
     pub fn player_body_hidden(&self) -> bool {
-        self.sim.unit(self.player).is_some_and(|u| u.scoped()) || self.camera_in_body()
+        self.in_eye_view() || self.camera_in_body()
     }
 
     /// Has the world pulled the chase camera into the soldier

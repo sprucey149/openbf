@@ -144,6 +144,21 @@ fn every_bit_the_pad_presses_has_a_key_or_button() {
 }
 
 #[test]
+fn a_saved_layout_from_before_the_viewpoint_key_keeps_its_remaps() {
+    let mut saved = Bindings::pc_default();
+    saved.table.retain(|(_, b)| b.bits != buttons::VIEW_TOGGLE);
+    assert!(saved.remap(0, Trigger::Key(KeyCode::KeyI)));
+    assert!(!saved.is_valid());
+    let upgraded = saved.clone().with_new_actions();
+    assert!(upgraded.is_valid());
+    assert_eq!(upgraded.table[0].0, Trigger::Key(KeyCode::KeyI));
+    assert!(upgraded.table.contains(&(
+        Trigger::Key(KeyCode::KeyV),
+        Bind::bits(buttons::VIEW_TOGGLE)
+    )));
+}
+
+#[test]
 fn a_controller_alone_passes_through_untouched() {
     let mut k = Kbm::default();
     let pad = PadState {

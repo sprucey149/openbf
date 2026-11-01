@@ -174,14 +174,14 @@ pub struct Zoom {
     pub scope: bool,
 }
 
-/// The scope view's eye stands this far behind the scope point along the aim
-/// (§5: B1 `DAT_005178b4`; BF2 0.6 while zoomed).
-pub fn scope_eye_back(rules: GroundRules) -> f32 {
+pub fn eye_back(rules: GroundRules, zoomed: bool) -> f32 {
     match rules {
-        GroundRules::Bf1 => 0.3,
-        GroundRules::Bf2 => 0.6,
+        GroundRules::Bf2 if zoomed => 0.6,
+        _ => 0.3,
     }
 }
+
+const BF1_PRONE_EYE_LEFT: f32 = -0.12;
 
 /// The fire point's two tables by stance (§10.2 step 2, the same numbers in
 /// both games): T0 in the body's frame (x to the soldier's LEFT, y up, z
@@ -371,6 +371,7 @@ pub struct Unit {
     /// always. HASHED only when `Some`, so a round nobody zooms in hashes as
     /// it did.
     pub zoom: Option<Zoom>,
+    pub first_person: bool,
     pub droideka: Option<Box<crate::droideka::Droideka>>,
 }
 
@@ -476,6 +477,25 @@ impl Unit {
         self.zoom.is_some_and(|z| z.scope)
     }
 
+    pub fn first_person_view(&self) -> bool {
+        self.first_person
+            && self.alive
+            && self.mount.is_none()
+            && self.droideka.is_none()
+            && !matches!(
+                self.soldier.stance,
+                Stance::Thrown | Stance::Tumble | Stance::GetUp | Stance::Dead
+            )
+    }
+
+    pub fn eye_view(&self) -> bool {
+        self.scoped() || self.first_person_view()
+    }
+
+    pub fn scope_path(&self) -> bool {
+        self.zoom.is_some() && (self.scoped() || self.first_person_view())
+    }
+
     pub fn look_scale(&self) -> f32 {
         self.zoom.map_or(1.0, |z| 1.0 / z.value.max(1.0))
     }
@@ -487,11 +507,29 @@ impl Unit {
         match rules {
             GroundRules::Bf1 => self.fire_point(),
             GroundRules::Bf2 => {
-                let (t0, t2) = fire_point_tables(self.soldier.stance);
-                let (d, right, _) = self.aim_frame();
-                let ahead = Vec3::new(right.z, 0.0, -right.x);
-                self.soldier.pos + Vec3::Y * t0.y + ahead * t0.z - right * t0.x + d * t2.z
+                let (_, t2) = fire_point_tables(self.soldier.stance);
+                self.shoulder_pivot() + self.aim_frame().0 * t2.z
             }
+        }
+    }
+
+    pub fn shoulder_pivot(&self) -> Vec3 {
+        let (t0, _) = fire_point_tables(self.soldier.stance);
+        let (_, right, _) = self.aim_frame();
+        let ahead = Vec3::new(right.z, 0.0, -right.x);
+        self.soldier.pos + Vec3::Y * t0.y + ahead * t0.z - right * t0.x
+    }
+
+    pub fn eye_point(&self, rules: GroundRules) -> Vec3 {
+        match rules {
+            GroundRules::Bf1 if self.scope_path() => {
+                if self.soldier.stance == Stance::Prone {
+                    self.shoulder_pivot() - self.aim_frame().1 * BF1_PRONE_EYE_LEFT
+                } else {
+                    self.fire_point()
+                }
+            }
+            _ => self.shoulder_pivot(),
         }
     }
 
@@ -499,12 +537,12 @@ impl Unit {
     /// down by the section's tilt, standing at the track centre plus the
     /// section's offset in that frame. `views` is the number of views drawn
     /// (split screen takes [`SPLIT_TILT`] of the tilt). In the scope view
-    /// (`re-zoom.md` §5) it is the eye [`scope_eye_back`] behind the scope
-    /// point, looking along the aim with no tilt.
+    /// (`re-zoom.md` §5) and in first person it is the eye [`eye_back`]
+    /// behind [`Unit::eye_point`], looking along the aim with no tilt.
     pub fn ideal_camera(&self, rules: GroundRules, views: usize) -> IdealCamera {
         let (d, right, up) = self.aim_frame();
-        if self.scoped() {
-            let position = self.scope_point(rules) - d * scope_eye_back(rules);
+        if self.eye_view() {
+            let position = self.eye_point(rules) - d * eye_back(rules, self.zoom.is_some());
             return IdealCamera {
                 position,
                 forward: d,
@@ -534,8 +572,11 @@ impl Unit {
     /// point (step 7).
     pub fn aim_ray(&self, rules: GroundRules, views: usize) -> (Vec3, Vec3) {
         let d = self.aim_frame().0;
-        if self.scoped() {
+        if self.scope_path() {
             return (self.scope_point(rules), d);
+        }
+        if self.first_person_view() {
+            return (self.fire_point(), d);
         }
         let cam = self.ideal_camera(rules, views);
         (cam.position + d * (cam.center - cam.position).dot(d), d)
@@ -678,6 +719,9 @@ impl Unit {
             eat(&[0x5a, z.step, z.scope as u8]);
             eat(&z.value.to_bits().to_le_bytes());
             eat(&z.divisor.to_bits().to_le_bytes());
+        }
+        if self.first_person {
+            eat(b"FP");
         }
         // Card DPRX: nothing at all for a unit that is not a proxy.
         if let Some(p) = &self.proxy_human {
@@ -1293,6 +1337,7 @@ impl UnitSpec {
             buffs: crate::sim::Buffs::default(),
             cloak: crate::cloak::CloakState::default(),
             zoom: None,
+            first_person: false,
             droideka: self.droideka.as_ref().map(|c| {
                 let order = if self.is_player() {
                     crate::droideka::Order::Deploy

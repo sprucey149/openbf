@@ -41,6 +41,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 mod output;
+pub(crate) use output::bake_flags;
 pub use output::{
     bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, texture_flags,
     weapon_nodes, BakedWeapon,
@@ -105,6 +106,10 @@ pub fn to_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel> {
     if !m.bone_space {
         bail!("{} is not a bone-space (skinned) model", m.name);
     }
+    rigid_or_skinned_model(m, skel)
+}
+
+pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel> {
     let mut segments = Vec::new();
     for (k, seg) in m.segments.iter().enumerate() {
         if seg.triangles.is_empty() {

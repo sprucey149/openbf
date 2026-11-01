@@ -480,16 +480,7 @@ fn a_seated_rider_is_drawn_on_his_vehicle() {
             name: "rider".into(),
             label: "rider".into(),
             geometry: Some(soldier.into()),
-            weapon_geometry: None,
-            weapon_hud: Default::default(),
-            held_hud: Vec::new(),
-            droideka_shield: None,
-            held_models: Vec::new(),
-            foley_class: 0,
-            cries: Default::default(),
-            anim: Default::default(),
-            skins: Default::default(),
-            jet_look: Default::default(),
+            ..Default::default()
         }];
         let mut walk = game::walk::WalkSim::with_teams(sim, None, Vec3::ZERO, [t.clone(), t], None);
         walk.vehicle_seats = build.seats.clone();

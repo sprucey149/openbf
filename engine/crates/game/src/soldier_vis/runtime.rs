@@ -148,6 +148,13 @@ impl SoldierVisuals {
         let flash = FlashModel::load(r, assets_dir, game);
         let mut s = Self::assemble(plan, teams, bodies, weapons, flash);
         s.bf2 = game.eq_ignore_ascii_case("bf2");
+        s.fp = super::first_person::FirstPersonVisuals::load(
+            Some(&mut *r),
+            assets_dir,
+            game,
+            teams,
+            &mut cache,
+        );
         if s.bf2 {
             s.load_sabers(Some(&mut *r), assets_dir, teams);
         }
@@ -251,6 +258,9 @@ impl SoldierVisuals {
             .collect();
         let mut s = Self::assemble(plan, teams, bodies, weapons, None);
         s.bf2 = game.eq_ignore_ascii_case("bf2");
+        s.fp = super::first_person::FirstPersonVisuals::load(
+            None, assets_dir, game, teams, &mut cache,
+        );
         if s.bf2 {
             s.load_sabers(None, assets_dir, teams);
         }
@@ -311,6 +321,7 @@ impl SoldierVisuals {
             walker_rigs: Vec::new(),
             hover_nine: Vec::new(),
             cloth_meshes: HashMap::new(),
+            fp: Default::default(),
         }
     }
 
@@ -740,6 +751,7 @@ impl SoldierVisuals {
         }
         self.step_cloths(walk, dt);
         self.step_saber_trails(walk, dt);
+        self.fp.update(walk, dt, self.bf2, &self.units);
     }
 
     /// One unit's animator on foot (not in a seat that shows him).
@@ -1220,6 +1232,9 @@ impl SoldierVisuals {
             {
                 out[i] = Some(frame.w_axis.truncate());
             }
+        }
+        if let Some((i, p)) = self.fp.muzzle(walk, self.bf2) {
+            out[i] = Some(p);
         }
         out
     }

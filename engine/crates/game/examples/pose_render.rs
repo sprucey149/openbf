@@ -429,16 +429,7 @@ fn body_team(body: &str) -> game::walk::TeamTemplate {
         name: body.into(),
         label: body.into(),
         geometry: Some(body.into()),
-        weapon_geometry: None,
-        weapon_hud: Default::default(),
-        held_hud: Vec::new(),
-        droideka_shield: None,
-        held_models: Vec::new(),
-        foley_class: 0,
-        cries: Default::default(),
-        anim: Default::default(),
-        skins: Default::default(),
-        jet_look: Default::default(),
+        ..Default::default()
     }];
     team
 }

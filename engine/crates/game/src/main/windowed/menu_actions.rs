@@ -30,6 +30,9 @@ pub(super) fn persist_setting(
             )
         }
         MenuAction::ToggleInvertY => profile.settings.invert_y = !profile.settings.invert_y,
+        MenuAction::ToggleViewpoint => {
+            profile.settings.viewpoint = profile.settings.viewpoint.toggled()
+        }
         _ => return,
     }
     if let Err(e) = profile.save() {

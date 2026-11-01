@@ -419,6 +419,7 @@ struct App {
     front: Option<FrontShell>,
     /// One click of L3 sprints (`input::SprintLatch`).
     sprint_latch: input::SprintLatch,
+    view_toggle: game::viewpoint::ViewToggle,
     /// `OPENBF_AUTOPILOT=1` in dev mode: [`autopilot_pad`] drives the player.
     autopilot: bool,
     /// `OPENBF_QUIT_AT=<s>` in dev mode: the game quits (as the window's
@@ -631,6 +632,7 @@ impl App {
             kbm,
             front: None,
             sprint_latch: input::SprintLatch::default(),
+            view_toggle: game::viewpoint::ViewToggle::default(),
             autopilot: false,
             quit_at: None,
             cheats,
@@ -1458,6 +1460,14 @@ impl winit::application::ApplicationHandler for App {
                         };
                         self.sprint_latch.apply(pad, on_foot, sprinting)
                     };
+                    if self.view_toggle.pressed(&pad) {
+                        let s = &mut self.profile.settings;
+                        s.viewpoint = s.viewpoint.toggled();
+                        if let Err(e) = self.profile.save() {
+                            eprintln!("profile autosave failed: {e:#}");
+                        }
+                    }
+                    let pad = self.profile.settings.viewpoint.stamp(pad);
                     let paused = self.paused;
                     let (walk, cube) = self.walk.as_mut().unwrap();
                     // A FIRE press fires where the reticle was drawn.
@@ -1490,6 +1500,7 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             invert_y: self.profile.settings.invert_y,
+                            first_person: self.profile.settings.viewpoint.is_first(),
                             cursor: self.pause_menu.cursor,
                             respawn_confirm: self.pause_menu.confirm,
                             // The disc's key; English fallback is §7's label.
@@ -1593,6 +1604,7 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             invert_y: self.profile.settings.invert_y,
+                            first_person: self.profile.settings.viewpoint.is_first(),
                             ..model
                         });
                     } else {
@@ -1983,6 +1995,11 @@ impl winit::application::ApplicationHandler for App {
                         None => gpu.draws.clone(),
                     };
                     draws.append(&mut extra);
+                    if let (Some(vis), Some((walk, _))) = (self.soldier_vis.as_ref(), &self.walk) {
+                        let (arms, gun) = vis.first_person_draws(walk, &camera);
+                        skinned.extend(arms);
+                        draws.extend(gun);
+                    }
                     // The PS2's spawn screens (the HUD pass's, card SSELB):
                     // the soldier standing in the camera shot.
                     let page = spawn

@@ -155,16 +155,7 @@ fn a_moving_jets_effect_rides_the_drawn_body_every_frame() {
         name: "jet".into(),
         label: "jet".into(),
         geometry: Some(geometry.into()),
-        weapon_geometry: None,
-        weapon_hud: Default::default(),
-        held_hud: Vec::new(),
-        droideka_shield: None,
-        held_models: Vec::new(),
-        foley_class: 0,
-        cries: Default::default(),
-        anim: Default::default(),
-        skins: Default::default(),
-        jet_look: Default::default(),
+        ..Default::default()
     }];
     let mut vis = SoldierVisuals::load_cpu(&root, "bf2", &[t.clone(), t]);
     let mut fx = Fx::with_library(lib);

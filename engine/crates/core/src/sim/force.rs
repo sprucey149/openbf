@@ -59,14 +59,13 @@ impl Sim {
         if owner == target || !self.hero_body_active(target) {
             return false;
         }
-        let relation = if caster.team == victim.team {
+        // Perception gates the AI's choice to aim/fire. A physical cone or
+        // choke ray can still meet a bystander absent from its contacts.
+        if caster.team == victim.team {
             power.affect_friends
         } else {
             power.affect_enemies
-        };
-        // Perception gates the AI's choice to aim/fire. A physical cone or
-        // choke ray can still meet a bystander absent from its contacts.
-        relation
+        }
     }
 
     pub(super) fn hero_damage(

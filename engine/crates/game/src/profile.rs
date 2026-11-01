@@ -22,13 +22,17 @@ fn one() -> f32 {
 
 // Keep a syntactically valid RON field intact until its typed parse completes:
 // one malformed custom layout must not discard the rest of the profile.
-fn bindings_or_default<'de, D, T>(deserializer: D, valid: fn(&T) -> bool) -> Result<T, D::Error>
+fn bindings_or_default<'de, D, T>(
+    deserializer: D,
+    upgrade: fn(T) -> T,
+    valid: fn(&T) -> bool,
+) -> Result<T, D::Error>
 where
     D: serde::Deserializer<'de>,
     T: serde::de::DeserializeOwned + Default,
 {
     let raw = Box::<ron::value::RawValue>::deserialize(deserializer)?;
-    match ron::from_str::<T>(raw.get_ron()) {
+    match ron::from_str::<T>(raw.get_ron()).map(upgrade) {
         Ok(bindings) if valid(&bindings) => Ok(bindings),
         _ => {
             eprintln!("profile: invalid control bindings; restoring their defaults");
@@ -41,14 +45,22 @@ fn keyboard_bindings<'de, D>(deserializer: D) -> Result<crate::kbm::Bindings, D:
 where
     D: serde::Deserializer<'de>,
 {
-    bindings_or_default(deserializer, crate::kbm::Bindings::is_valid)
+    bindings_or_default(
+        deserializer,
+        crate::kbm::Bindings::with_new_actions,
+        crate::kbm::Bindings::is_valid,
+    )
 }
 
 fn controller_bindings<'de, D>(deserializer: D) -> Result<input::Mapping, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    bindings_or_default(deserializer, input::Mapping::is_valid)
+    bindings_or_default(
+        deserializer,
+        std::convert::identity,
+        input::Mapping::is_valid,
+    )
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,6 +93,8 @@ pub struct Settings {
     pub mouse_sensitivity: f32,
     #[serde(default)]
     pub invert_y: bool,
+    #[serde(default)]
+    pub viewpoint: crate::viewpoint::Viewpoint,
     #[serde(default, deserialize_with = "keyboard_bindings")]
     pub keyboard_bindings: crate::kbm::Bindings,
     #[serde(default, deserialize_with = "controller_bindings")]
@@ -106,6 +120,7 @@ impl Default for Settings {
             music_volume: 1.0,
             mouse_sensitivity: 1.0,
             invert_y: false,
+            viewpoint: crate::viewpoint::Viewpoint::default(),
             keyboard_bindings: crate::kbm::Bindings::default(),
             controller_bindings: input::Mapping::default(),
             team_size_pct: 100,

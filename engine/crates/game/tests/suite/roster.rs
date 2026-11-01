@@ -1064,21 +1064,7 @@ fn battle_classes_hold_their_own_weapon_model() {
             t.classes = r
                 .classes
                 .iter()
-                .map(|c| game::walk::ClassVisual {
-                    name: c.class.clone(),
-                    label: c.label.clone(),
-                    geometry: c.geometry.clone(),
-                    weapon_geometry: c.weapon_geometry.clone(),
-                    weapon_hud: c.weapon_hud.clone(),
-                    held_hud: Vec::new(),
-                    droideka_shield: None,
-                    held_models: Vec::new(),
-                    foley_class: c.foley_class,
-                    cries: c.cries.clone(),
-                    anim: c.anim.clone(),
-                    skins: c.skins.clone(),
-                    jet_look: c.jet_look.clone(),
-                })
+                .map(game::walk::ClassVisual::from_roster)
                 .collect();
             t
         });

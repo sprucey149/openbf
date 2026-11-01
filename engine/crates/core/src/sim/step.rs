@@ -559,6 +559,7 @@ impl Sim {
             if !self.units[i].alive || self.units[i].mount.is_some() {
                 // Death and a seat end the zoom (`re-zoom.md` §4).
                 self.units[i].zoom = None;
+                self.units[i].first_person = false;
             }
             // Card KNOCK (re-knockback §3): a dead unit's body still moves -
             // the death block first, then the soldier's own update with no
@@ -624,6 +625,9 @@ impl Sim {
                     // The zoom press and its cancels, then the turn: zoomed,
                     // the yaw and pitch rates are divided by the weapon's
                     // turn divisor (`re-zoom.md` §4, §6).
+                    self.units[i].first_person =
+                        matches!(self.units[i].controller, Controller::Player { .. })
+                            && pad_i.pressed(buttons::FIRST_PERSON);
                     self.tick_zoom(i, pad_i);
                     if let Some(z) = self.units[i].zoom {
                         consts.max_turn_speed /= z.divisor;
@@ -1131,7 +1135,7 @@ impl Sim {
         let (a, d) = u.aim_ray(self.ground_rules, self.views());
         // The scope view casts no ray (§10.2 step 7): the point 200 m along
         // the aim.
-        if u.scoped() {
+        if u.scope_path() {
             return a + d * SCOPE_AIM_LENGTH;
         }
         let sec = u.section();
@@ -1272,7 +1276,7 @@ impl Sim {
     pub(super) fn human_shot(&self, i: usize) -> (Vec3, (Vec3, Vec3, Vec3)) {
         let u = &self.units[i];
         // The scope view: from the scope point along the aim itself.
-        if u.scoped() {
+        if u.scope_path() {
             return (u.scope_point(self.ground_rules), u.aim_frame());
         }
         let f = u.droideka_muzzle().unwrap_or_else(|| u.fire_point());
