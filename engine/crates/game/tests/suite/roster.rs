@@ -11,6 +11,56 @@ use std::sync::OnceLock;
 
 type Gcl16ClassRow<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
 
+#[test]
+fn hero_sprint_reads_authored_speed_and_camera_sections() {
+    let root = game::assets::baked_root();
+    if !root.join("classes/bf2_rep.ron").is_file() {
+        return;
+    }
+    let db =
+        game::roster::load_classdb(&root.join("classes"), "bf2", &["all", "imp", "rep", "cis"])
+            .unwrap();
+    for hero in [
+        "rep_hero_aalya",
+        "cis_hero_countdooku",
+        "rep_hero_obiwan",
+        "imp_hero_emperor",
+    ] {
+        let c = game::roster::soldier_constants(&db, hero);
+        assert_eq!(c.sprint_control, [2.5, 0.5]);
+        assert_eq!(c.sprint_accelerate_time, 0.35);
+        let standing = c.hero_cameras[0].unwrap();
+        let sprint = c.hero_cameras[6].unwrap();
+        assert_eq!((standing.eye_y, standing.offset.z), (2.0, 5.2));
+        assert_eq!((sprint.eye_y, sprint.offset.z), (1.8, 4.0));
+        let mut soldier = core::soldier::Soldier::new(glam::Vec3::ZERO);
+        let pad = core::sim::PadState {
+            ly: i16::MAX,
+            buttons: core::sim::buttons::SPRINT,
+            ..Default::default()
+        };
+        for _ in 0..60 {
+            let y = soldier.pos.y;
+            soldier.step(core::TICK_DT, &pad, &c, core::soldier::GroundRules::Bf2);
+            soldier.resolve_ground(
+                core::TICK_DT,
+                0.0,
+                glam::Vec3::Y,
+                y,
+                core::soldier::GroundRules::Bf2,
+            );
+        }
+        assert_eq!(soldier.stance, core::soldier::Stance::Sprint);
+        assert!((-soldier.vel.z - c.max_speed * 2.5).abs() < 0.001);
+    }
+    for game in ["bf1", "bf2"] {
+        let db = game::roster::load_classdb(&root.join("classes"), game, &["all"]).unwrap();
+        let c = game::roster::soldier_constants(&db, "all_inf_soldier");
+        assert_eq!(c.sprint_control, [1.5, 0.5]);
+        assert!(c.hero_cameras.iter().all(Option::is_none));
+    }
+}
+
 /// Asset-free class RONs exercise the same load path as baked classes.
 fn gcl16_db(rows: &[Gcl16ClassRow<'_>]) -> game::classdb::ClassDb {
     use game::classdb::{fnv1a_lowercase, ClassDb, ClassDef};

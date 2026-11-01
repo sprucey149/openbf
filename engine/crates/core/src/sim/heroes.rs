@@ -404,6 +404,12 @@ impl Sim {
                             self.spawn_choice[usize::from(slot)] = 0;
                         }
                     }
+                    if let Some((_, original)) = self.test_rosters[team] {
+                        if heroes.classes[team] != original {
+                            heroes.classes[team] = original;
+                            continue;
+                        }
+                    }
                 } else {
                     state.spawned = hero_now;
                 }

@@ -182,7 +182,23 @@ impl DroidekaVisuals {
         assets_dir: &Path,
         walk: &crate::walk::WalkSim,
     ) -> Self {
-        let game = scene.manifest.source_game.to_ascii_lowercase();
+        Self::load_teams(
+            r,
+            scene,
+            assets_dir,
+            &walk.teams,
+            &scene.manifest.source_game,
+        )
+    }
+
+    fn load_teams(
+        r: &mut Renderer,
+        scene: &Scene,
+        assets_dir: &Path,
+        teams: &[crate::walk::TeamTemplate; 2],
+        game: &str,
+    ) -> Self {
+        let game = game.to_ascii_lowercase();
         let cull = far_cull(&scene.manifest.lighting).map(|c| c.world);
         let mut out = Self {
             cull,
@@ -223,7 +239,7 @@ impl DroidekaVisuals {
         let mut loaded: HashMap<String, Option<usize>> = HashMap::new();
         let mut textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>> =
             HashMap::new();
-        for (t, team) in walk.teams.iter().enumerate() {
+        for (t, team) in teams.iter().enumerate() {
             out.by_class[t] = team
                 .classes
                 .iter()
@@ -251,6 +267,33 @@ impl DroidekaVisuals {
                 .collect();
         }
         out
+    }
+
+    pub fn append_test_class(
+        &mut self,
+        r: &mut Renderer,
+        scene: &Scene,
+        root: &Path,
+        walk: &crate::walk::WalkSim,
+        request: &crate::walk::ClassAssetRequest,
+    ) {
+        let crate::walk::ClassAssetRequest { team, class, game } = *request;
+        self.by_class[team].resize(class, None);
+        if walk.sim.classes[team][class].droideka.is_none() {
+            self.by_class[team].push(None);
+            return;
+        }
+        let teams = request.templates(walk);
+        let mut added = Self::load_teams(r, scene, root, &teams, game);
+        let offset = self.models.len();
+        self.by_class[team].push(added.by_class[team].pop().flatten().map(|k| k + offset));
+        self.models.extend(added.models);
+        self.aims.extend(added.aims);
+        if self.bubble_texture.is_none() {
+            self.bubble_texture = added.bubble_texture;
+            self.bubble_spec = added.bubble_spec;
+            self.bubble_color = added.bubble_color;
+        }
     }
 
     pub fn draws(&mut self, r: &mut Renderer, sim: &core::sim::Sim) -> Vec<DrawCmd> {

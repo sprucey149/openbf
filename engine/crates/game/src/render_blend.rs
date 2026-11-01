@@ -51,6 +51,8 @@ pub struct UnitPose {
     pub pos: Vec3,
     pub yaw: f32,
     pub pitch: f32,
+    pub melee: Option<(u32, bool, f32)>,
+    pub choked: Option<f32>,
 }
 
 /// One vehicle's drawn pose.
@@ -111,6 +113,16 @@ impl Pose {
             pos: u.soldier.pos,
             yaw: u.soldier.yaw,
             pitch: u.soldier.pitch,
+            choked: u.choked.map(|c| c.age),
+            melee: u.weapon.melee.as_ref().and_then(|m| {
+                m.pose().map(|(name, time, _)| {
+                    (
+                        core::hero_weapon::sound_hash(name),
+                        m.block_animation.is_some(),
+                        time,
+                    )
+                })
+            }),
         }));
         self.vehicles.clear();
         self.vehicles.extend(walk.sim.vehicles.iter().map(|v| {
@@ -168,6 +180,16 @@ impl Pose {
             u.soldier.pos = p.pos;
             u.soldier.yaw = p.yaw;
             u.soldier.pitch = p.pitch;
+            if let (Some(choked), Some(age)) = (&mut u.choked, p.choked) {
+                choked.age = age;
+            }
+            if let (Some(m), Some((_, block, time))) = (&mut u.weapon.melee, p.melee) {
+                if block {
+                    m.block_animation_time = time;
+                } else {
+                    m.runtime.time = time;
+                }
+            }
         }
         for (v, p) in walk.sim.vehicles.iter_mut().zip(&self.vehicles) {
             v.pos = p.pos;
@@ -265,6 +287,20 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
         o.pos = mix3(p.pos, c.pos, t);
         o.yaw = lerp_angle(p.yaw, c.yaw, t);
         o.pitch = mix(p.pitch, c.pitch, t);
+        if let Some(age) = &mut o.choked {
+            let start = p
+                .choked
+                .filter(|old| old <= age)
+                .unwrap_or((*age - core::TICK_DT).max(0.0));
+            *age = mix(start, *age, t);
+        }
+        if let Some((key, block, time)) = &mut o.melee {
+            let start = p
+                .melee
+                .filter(|old| old.0 == *key && old.1 == *block && old.2 <= *time)
+                .map_or((*time - core::TICK_DT).max(0.0), |old| old.2);
+            *time = mix(start, *time, t);
+        }
     }
     for (o, p) in out.vehicles.iter_mut().zip(&prev.vehicles) {
         if !vehicle_blendable(p, o) {
@@ -554,6 +590,52 @@ mod tests {
     fn me(w: &mut WalkSim) -> &mut core::soldier::Soldier {
         let i = w.player.index as usize;
         &mut w.sim.units[i].soldier
+    }
+
+    #[test]
+    fn saber_clock_blends_at_display_rates_and_restores_the_simulation() {
+        for fps in [60, 75, 120] {
+            let mut walk = walk();
+            let index = walk.player.index as usize;
+            walk.sim.units[index].weapon.melee = Some(core::hero_weapon::MeleeState {
+                animation: Some("stand_attack1a".into()),
+                ..Default::default()
+            });
+            walk.sim.units[index].choked = Some(core::hero_weapon::Choked {
+                left: 5.0,
+                age: 0.0,
+            });
+            let mut prev = Pose::capture(&walk);
+            walk.sim.units[index].choked.as_mut().unwrap().age = core::TICK_DT;
+            walk.sim.units[index]
+                .weapon
+                .melee
+                .as_mut()
+                .unwrap()
+                .runtime
+                .time = core::TICK_DT;
+            let cur = Pose::capture(&walk);
+            let original_hash = walk.sim.hash();
+            for frame in 0..fps / 30 {
+                let fraction = frame as f32 * 30.0 / fps as f32;
+                let shown = blend(&prev, &cur, fraction);
+                shown.write(&mut walk);
+                let time = walk.sim.units[index]
+                    .weapon
+                    .melee
+                    .as_ref()
+                    .unwrap()
+                    .pose()
+                    .unwrap()
+                    .1;
+                assert!((time - fraction * core::TICK_DT).abs() < 1e-7);
+                assert!((walk.sim.units[index].choked.unwrap().age - time).abs() < 1e-7);
+                cur.write(&mut walk);
+                assert_eq!(walk.sim.hash(), original_hash);
+            }
+            prev.units[0].gen += 1;
+            assert_eq!(blend(&prev, &cur, 0.5).units[0].melee, cur.units[0].melee);
+        }
     }
 
     struct NoProps;

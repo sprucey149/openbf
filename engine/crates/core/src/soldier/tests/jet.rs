@@ -2,6 +2,35 @@
 //! numbers (§6 [D], dt = 1/30). The classes are the disc's (§2.2).
 use super::*;
 
+#[test]
+fn second_jump_captures_direction_and_native_restart_gate() {
+    let c = jedi();
+    for (stick, direction) in [
+        ((0.0, 0.0), 0),
+        ((1.0, 0.0), 1),
+        ((-1.0, 0.0), 2),
+        ((0.0, -1.0), 3),
+        ((0.0, 1.0), 4),
+    ] {
+        let mut s = Soldier::new(Vec3::ZERO);
+        assert_eq!(s.jump_animation, None);
+        s.stance = Stance::Jump;
+        assert!(s.jet_on(&c, stick));
+        assert_eq!(s.jump_animation, Some(direction));
+        let first = s.jump_animation_serial;
+        s.energy = c.energy_bar;
+        assert!(s.jet_on(&c, stick));
+        assert_eq!(s.jump_animation_serial, first + u32::from(direction < 2));
+        s.energy = c.energy_bar;
+        s.time_in_stance = 0.6;
+        assert!(s.jet_on(&c, stick));
+        assert_eq!(
+            s.jump_animation_serial,
+            first + u32::from(direction < 2) + 1
+        );
+    }
+}
+
 const FWD: i16 = 32767;
 
 /// BF2 `imp_inf_dark_trooper` (the rebel trial class's run and jump).

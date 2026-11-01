@@ -536,7 +536,7 @@ impl MatchLog {
         self.written = true;
         self.follow(sim);
         self.settle_team(sim);
-        let cheats: Vec<&str> = sim
+        let mut cheats: Vec<&str> = sim
             .cheats
             .entries()
             .iter()
@@ -544,6 +544,9 @@ impl MatchLog {
             .filter(|(_, on)| *on)
             .map(|((id, _, _), _)| *id)
             .collect();
+        if sim.test_rosters.iter().any(Option::is_some) {
+            cheats.push("class_picker");
+        }
         let tickets: Vec<u32> = sim.battle.teams.iter().map(|t| t.tickets()).collect();
         let footer = serde_json::json!({
             "kind": "end",
@@ -577,6 +580,12 @@ impl MatchLog {
                 None
             }
         }
+    }
+
+    pub fn extend_class_names(&mut self, walk: &WalkSim) {
+        let names = crate::blackbox::names_of(walk);
+        self.names.classes = names.classes;
+        self.names.weapons = names.weapons;
     }
 
     pub fn written(&self) -> bool {
@@ -622,6 +631,7 @@ mod tests {
         sim.tick = 11;
         log.tick(sim, &PadState::default());
         sim.cheats.infinite_ammo = false;
+        sim.test_rosters[0] = Some((1, None));
         let path = log.write(sim, "quit").expect("written");
         assert!(log.write(sim, "quit").is_none(), "once");
         let text = std::fs::read_to_string(&path).unwrap();
@@ -635,7 +645,7 @@ mod tests {
         assert_eq!(lines[2][11], 32767);
         let end = lines.last().unwrap();
         assert_eq!(end["kind"], "end");
-        assert_eq!(end["cheats"], serde_json::json!(["ammo"]));
+        assert_eq!(end["cheats"], serde_json::json!(["ammo", "class_picker"]));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

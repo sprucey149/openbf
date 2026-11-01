@@ -133,6 +133,7 @@
 //! This file keeps the step and ground constants, the parry conversions every
 //! part uses, and the test fixtures the parts' tests share.
 
+mod ceilings;
 mod rays;
 mod shape;
 mod walls;

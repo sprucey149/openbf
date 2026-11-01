@@ -87,13 +87,22 @@ impl Fx {
         dt: f32,
     ) {
         if let Some(vis) = vis {
+            let restore = !walk.blend.applied();
+            if restore {
+                crate::render_blend::blend_in_looking(walk, look);
+            }
             vis.update(walk, dt);
-            // The body is drawn blended between ticks (card RINT) and posed
-            // at this frame's clock: the repair pulses and the jets ride that
-            // body, not the tick's.
-            let (muzzles, jets, burns) = vis.as_drawn(walk, look, |v, w| {
-                (v.fire_points(w), v.jet_frames(w), v.burn_frames(w))
-            });
+            let (muzzles, jets, burns) = (
+                vis.fire_points(walk),
+                vis.jet_frames(walk),
+                vis.burn_frames(walk),
+            );
+            if self.force_bolts() > 0 {
+                self.set_force_origins(&vis.force_points(walk));
+            }
+            if restore {
+                walk.blend_out();
+            }
             self.set_repair_origins(&muzzles);
             self.set_jet_frames(jets);
             self.set_burn_frames(burns);

@@ -373,6 +373,18 @@ impl Cries {
 pub const LOW_HEALTH_THRESHOLD: f32 = 0.3;
 
 impl ClassVisual {
+    pub fn from_roster_with_held(c: &crate::roster::ClassRoster) -> Self {
+        Self {
+            held_hud: c.held.iter().map(|h| (h.slot, h.hud.clone())).collect(),
+            held_models: c
+                .held
+                .iter()
+                .map(|h| (h.slot, h.geometry.clone()))
+                .collect(),
+            ..Self::from_roster(c)
+        }
+    }
+
     /// Base roster projection. Callers add the held HUD/model entries they use.
     pub fn from_roster(c: &crate::roster::ClassRoster) -> Self {
         Self {
@@ -594,7 +606,28 @@ struct Track {
     sights: [Vec3; 2],
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct ClassAssetRequest {
+    pub team: usize,
+    pub class: usize,
+    pub game: &'static str,
+}
+
+impl ClassAssetRequest {
+    pub fn templates(&self, walk: &WalkSim) -> [TeamTemplate; 2] {
+        std::array::from_fn(|team| TeamTemplate {
+            classes: if team == self.team {
+                vec![walk.teams[team].classes[self.class].clone()]
+            } else {
+                Vec::new()
+            },
+            ..walk.teams[team].clone()
+        })
+    }
+}
+
 pub struct WalkSim {
+    pub class_picker: Option<crate::class_picker::ClassPicker>,
     pub sim: Sim,
     pub conquest_defaults: Option<crate::conquest_defaults::Defaults>,
     pub team_size_pct: u32,
@@ -771,6 +804,7 @@ impl WalkSim {
             human_teams: None,
             pending_class_kills: Default::default(),
             respawn_requested: false,
+            class_picker: None,
             camera_blockers: CameraBlockers::default(),
             vehicle_geometry: Vec::new(),
             vehicle_seats: Vec::new(),

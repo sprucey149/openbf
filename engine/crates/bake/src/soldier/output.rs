@@ -42,6 +42,8 @@ pub const BORROWED_THROW: &[&str] = &[
     "human_rifle_stand_shoot_secondary2_full",
 ];
 
+const BORROWED_BF2_STATUS: &[&str] = &["human_choking"];
+
 /// Bake one soldier model (+ textures) from a SIDE LVL.
 pub fn bake_soldier(lvl_path: &str, model: &str, outdir: &str) -> Result<BakedSoldier> {
     bake_soldier_anims(lvl_path, model, None, outdir, None)
@@ -282,7 +284,11 @@ pub fn bake_soldier_anims(
             .filter(|b| b.name.starts_with("human"))
             .collect();
         let mut borrowed = Vec::new();
-        for name in lent {
+        for name in lent.iter().chain(if sanm.is_none() {
+            BORROWED_BF2_STATUS
+        } else {
+            &[]
+        }) {
             if wanted.iter().any(|w| w.0 == *name) || lender_human.is_empty() {
                 continue;
             }

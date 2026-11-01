@@ -11,11 +11,15 @@ use std::{collections::BTreeMap, path::Path};
 pub struct Descriptor {
     pub aim: AimKind,
     pub blend_in: f32,
+    pub blend_out: f32,
+    pub looping: Option<bool>,
+    pub final_frame: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Descriptors {
     layers: BTreeMap<String, [Option<Descriptor>; 2]>,
+    transitions: BTreeMap<String, [Vec<(String, f32)>; 2]>,
 }
 
 fn layer(name: &str) -> (String, Option<usize>) {
@@ -46,6 +50,17 @@ fn descriptor(field: &ComboField) -> Descriptor {
     // AimType strings do not overwrite a prior recognized value.
     for property in &field.children {
         match property.keyword {
+            K::Loop => {
+                descriptor.final_frame = property
+                    .text(0)
+                    .is_some_and(|s| s.eq_ignore_ascii_case("FinalFrame"));
+                descriptor.looping = Some(
+                    property.number(0) != Some(0.0)
+                        && !property
+                            .text(0)
+                            .is_some_and(|s| s.eq_ignore_ascii_case("FinalFrame")),
+                )
+            }
             K::AimType => {
                 if let Some(name) = property.text(0) {
                     if name.eq_ignore_ascii_case("Torso") {
@@ -61,7 +76,7 @@ fn descriptor(field: &ComboField) -> Descriptor {
                     }
                 }
             }
-            K::BlendInTime => {
+            K::BlendInTime | K::BlendOutTime => {
                 if let Some(mut seconds) = property.number(0) {
                     if property
                         .text(1)
@@ -72,7 +87,12 @@ fn descriptor(field: &ComboField) -> Descriptor {
                     // 279bcc..279bf0: multiply100, clamp0..255, CVT, storebyte.
                     // 27f458 decodes that byte with the ELF's literal0.01.
                     let packed = ee_mul(seconds, 100.0).clamp(0.0, 255.0) as u8;
-                    descriptor.blend_in = ee_mul(f32::from(packed), 0.01);
+                    let seconds = ee_mul(f32::from(packed), 0.01);
+                    if property.keyword == K::BlendInTime {
+                        descriptor.blend_in = seconds;
+                    } else {
+                        descriptor.blend_out = seconds;
+                    }
                 }
             }
             // BlendTimeIn is a distinct, unrecognized key in279780; it is
@@ -91,6 +111,20 @@ impl Descriptors {
             .unwrap_or_default()
     }
 
+    pub fn lower(&self, name: &str) -> Descriptor {
+        self.layers
+            .get(&layer(name).0)
+            .and_then(|l| l[1])
+            .unwrap_or_default()
+    }
+
+    pub fn blend_to(&self, from: &str, to: &str, upper: bool) -> Option<f32> {
+        self.transitions.get(&layer(from).0)?[usize::from(!upper)]
+            .iter()
+            .find(|(name, _)| layer(name).0 == layer(to).0)
+            .map(|(_, time)| *time)
+    }
+
     fn field(&mut self, field: &ComboField) {
         if matches!(
             field.keyword,
@@ -100,15 +134,39 @@ impl Descriptors {
             if let Some(name) = field.text(0) {
                 let (name, which) = layer(name);
                 let descriptor = descriptor(field);
+                let transitions: Vec<_> = field
+                    .children
+                    .iter()
+                    .filter(|f| f.keyword == K::BlendTimeTo)
+                    .filter_map(|f| {
+                        Some((
+                            f.text(0)?.to_ascii_lowercase(),
+                            ee_mul(
+                                (ee_mul(f.number(1)?, 100.0).clamp(0.0, 255.0) as u8) as f32,
+                                0.01,
+                            ),
+                        ))
+                    })
+                    .collect();
+                let blends = self.transitions.entry(name.clone()).or_default();
                 let pair = self.layers.entry(name).or_default();
                 match which {
                     Some(i) => {
+                        if pair[i].is_none() {
+                            blends[i] = transitions;
+                        }
                         pair[i].get_or_insert(descriptor);
                     }
                     None => {
+                        if pair[0].is_none() {
+                            blends[0] = transitions.clone();
+                        }
                         pair[0].get_or_insert(descriptor);
                         // Bare scopes copy to the lower descriptor with AimType cleared.
                         let upper = pair[0].unwrap();
+                        if pair[1].is_none() {
+                            blends[1] = blends[0].clone();
+                        }
                         pair[1].get_or_insert(Descriptor {
                             aim: AimKind::None,
                             ..upper

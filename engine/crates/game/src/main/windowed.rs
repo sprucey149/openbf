@@ -1419,8 +1419,11 @@ impl winit::application::ApplicationHandler for App {
                     0
                 };
                 if self.walk.is_some() && edges & 64 != 0 {
-                    self.paused = !self.paused;
+                    if !self.pause_menu.class_picker {
+                        self.paused = !self.paused;
+                    }
                     self.pause_menu.confirm = false;
+                    self.pause_menu.class_picker = false;
                     self.pause_menu.cursor = 0;
                     // Start opens the pause menu with the accept click
                     // (menuref "In battle").
@@ -1467,6 +1470,9 @@ impl winit::application::ApplicationHandler for App {
                             sl.stop_loops();
                         }
                         let model = ui::menu::MenuModel {
+                            class_picker_available: walk.class_picker.is_some()
+                                && game::class_picker::ClassPicker::available(walk),
+                            class_choices: self.pause_menu.class_picker_model(walk),
                             cheats: walk.sim.cheats.entries().to_vec(),
                             assist_intensity: walk.sim.assist_intensity,
                             team_size_pct: walk.team_size_pct,
@@ -1510,10 +1516,10 @@ impl winit::application::ApplicationHandler for App {
                             confirm: edges & 16 != 0,
                             back: edges & 32 != 0,
                         };
-                        // Left/Right are the Morse letter and word keys: the
-                        // rows never see them, outside the Respawn popup
-                        // (the sliders step in the shell's Options).
-                        let rows_input = game::pause::rows_input(input, model.respawn_confirm);
+                        let rows_input = game::pause::rows_input(
+                            input,
+                            model.respawn_confirm || model.class_choices.is_some(),
+                        );
                         let (cursor, actions) = ui::menu::navigate(&model, rows_input);
                         let click = game::pause::pause_sound(
                             model.respawn_confirm,
@@ -1527,7 +1533,10 @@ impl winit::application::ApplicationHandler for App {
                         }
                         // The PS2 matcher runs beside the menu on the same
                         // edges (the cursor wiggle while typing is authentic).
-                        if let Some(line) = self.cheats.feed(input, &mut walk.sim) {
+                        if let Some(line) = (!self.pause_menu.class_picker)
+                            .then(|| self.cheats.feed(input, &mut walk.sim))
+                            .flatten()
+                        {
                             if let Some(sl) = self.sounds.as_mut() {
                                 sl.rate_mul = self.cheats.sfx_rate();
                                 sl.play_2d(
@@ -1564,6 +1573,7 @@ impl winit::application::ApplicationHandler for App {
                             self.quit_clicked = true;
                         }
                         menu = Some(ui::menu::MenuModel {
+                            class_choices: self.pause_menu.class_picker_model(walk),
                             cursor: self.pause_menu.cursor,
                             respawn_confirm: self.pause_menu.confirm,
                             cheats: walk.sim.cheats.entries().to_vec(),
@@ -1774,6 +1784,43 @@ impl winit::application::ApplicationHandler for App {
                     // the camera, units and vehicles drawn at the display's
                     // rate. Restored below, before anything else reads it.
                     game::render_blend::blend_in_looking(walk, &look);
+                    let pending = walk
+                        .class_picker
+                        .as_mut()
+                        .map(|p| std::mem::take(&mut p.pending_assets))
+                        .unwrap_or_default();
+                    for request in pending {
+                        self.feed.extend_class_names(walk);
+                        if let Some(bb) = self.blackbox.as_mut() {
+                            bb.extend_class_names(walk);
+                        }
+                        if let Some(log) = self.matchlog.as_mut() {
+                            log.extend_class_names(walk);
+                        }
+                        if let Some(picker) = walk.class_picker.as_ref() {
+                            self.fx.extend_test_classes(
+                                &self.assets_dir,
+                                &picker.scene.dir,
+                                request.game,
+                                walk,
+                            );
+                        }
+                        if let (Some(r), Some(scene)) = (
+                            self.renderer.as_mut(),
+                            walk.class_picker.as_ref().map(|p| &p.scene),
+                        ) {
+                            if let Some(vis) = self.soldier_vis.as_mut() {
+                                vis.append_test_class(r, &self.assets_dir, walk, &request);
+                            }
+                            self.deka_vis.append_test_class(
+                                r,
+                                scene,
+                                &self.assets_dir,
+                                walk,
+                                &request,
+                            );
+                        }
+                    }
                     let models = self
                         .soldier_vis
                         .as_ref()

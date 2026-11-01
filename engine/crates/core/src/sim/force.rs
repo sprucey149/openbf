@@ -306,12 +306,7 @@ impl Sim {
                                 });
                             }
                             if power.push != 0.0 {
-                                let away = (candidate.centre - from).normalize_or_zero();
-                                self.hero_knock(
-                                    target,
-                                    away * power.push.signum(),
-                                    power.push.abs(),
-                                );
+                                self.force_push(target, from, power.range, power.push);
                             }
                         }
                     }
@@ -355,6 +350,43 @@ impl Sim {
                 damage -= emitter.jump_deduction;
             }
             hits += 1;
+        }
+    }
+
+    fn force_push(&mut self, target: UnitHandle, from: Vec3, range: f32, strength: f32) {
+        let Some(u) = self.unit(target) else { return };
+        if u.mount.is_some() || u.droideka.is_some() || u.soldier.stance.knocked() {
+            return;
+        }
+        let (lift, radius) = super::blast::soldier_blast_sphere(u.soldier.stance);
+        let centre = u.soldier.pos + Vec3::Y * lift;
+        let (origin, inner, outer) = if strength > 0.0 {
+            (from, range * 0.5, range * 2.0)
+        } else {
+            (
+                from + (centre - from).normalize_or_zero() * (range * 1.1),
+                0.0,
+                range * 1.1,
+            )
+        };
+        let delta = centre - origin;
+        let length = delta.length();
+        if length <= 0.0001 {
+            return;
+        }
+        let distance = length - radius * u.consts.collision_scale * 0.5;
+        let falloff = if distance < inner {
+            1.0
+        } else {
+            ((outer - distance) / (outer - inner)).clamp(0.0, 1.0)
+        };
+        if falloff > 0.0 {
+            let draw = self.lcg.unit();
+            self.units[target.index as usize].soldier.force_knock(
+                delta / length + Vec3::Y * 0.6,
+                strength.abs() * falloff,
+                draw,
+            );
         }
     }
 

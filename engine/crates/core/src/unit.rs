@@ -458,7 +458,17 @@ impl Unit {
             .as_deref()
             .zip(self.droideka_class())
             .and_then(|(d, c)| c.camera_section(d.form(), self.zoom.is_some()));
-        own.unwrap_or_else(|| camera_section(self.soldier.stance, self.zoom.is_some()))
+        let index = match (self.soldier.stance, self.zoom.is_some()) {
+            (Stance::Crouch, false) => 2,
+            (Stance::Crouch, true) => 3,
+            (Stance::Prone, false) => 4,
+            (Stance::Prone, true) => 5,
+            (_, true) => 1,
+            (Stance::Sprint, false) => 6,
+            _ => 0,
+        };
+        own.or(self.consts.hero_cameras[index])
+            .unwrap_or_else(|| camera_section(self.soldier.stance, self.zoom.is_some()))
     }
 
     /// Is the view the scope's (zoomed on a `ZoomFirstPerson` weapon)?

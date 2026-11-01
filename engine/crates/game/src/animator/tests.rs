@@ -196,6 +196,32 @@ fn input(speed: f32) -> AnimInput {
 
 const DT: f32 = 1.0 / 60.0;
 
+#[test]
+fn custom_actions_release_legs_until_next_action_and_keep_authored_full_body_moves() {
+    let mut r = Run::new(rig_bf2());
+    r.clips.push(clip(9, "human_rifle_swing_full", 31, false));
+    r.rig.root.push(Some([0.0, 0.0]));
+    let class = ClassAnim {
+        family: "human".into(),
+        ..Default::default()
+    };
+    for (speed, force, wants_custom) in [
+        (0.0, false, true),
+        (7.0, false, false),
+        (0.0, false, false),
+        (7.0, true, true),
+    ] {
+        r.a.combo_pose(&r.clips, &class, "saber", "swing", 0.2, false, force);
+        r.a.step(&r.rig, &r.clips, &r.skel, &input(speed), DT);
+        assert_eq!(r.a.upper_clip(), Some(9));
+        assert_eq!(r.a.lower_clip() == Some(9), wants_custom);
+    }
+    r.a.clear_combo_pose();
+    r.a.step(&r.rig, &r.clips, &r.skel, &input(7.0), DT);
+    assert_eq!(r.a.lower_clip(), Some(RUN));
+    assert_ne!(r.a.upper_clip(), Some(9));
+}
+
 struct Run {
     rig: Rig,
     clips: Vec<Clip>,
@@ -233,6 +259,21 @@ fn named_offhand_pose_keeps_running_legs_and_applies_joined_legs() {
     let missing = r.a.pose(&r.skel);
     assert_eq!(missing.0[LEG].translation, joined.0[LEG].translation);
     assert_eq!(missing.0[ARM].translation, joined.0[ARM].translation);
+}
+
+#[test]
+fn choking_pose_repeats_the_authored_period_and_keeps_moving() {
+    let clips = [clip(9, "human_choking", 16, false)];
+    let skeleton = skel();
+    let mut animator = Animator::new();
+    let mut samples = Vec::new();
+    for time in [0.25, 1.25, 3.25, 3.3] {
+        assert!(animator.status_pose(&clips, &skeleton, "human", time));
+        samples.push(animator.kept_pose(&skeleton).0[ARM].translation);
+    }
+    assert_eq!(samples[0], samples[1]);
+    assert_eq!(samples[0], samples[2]);
+    assert_ne!(samples[2], samples[3]);
 }
 
 impl Run {
@@ -371,6 +412,20 @@ fn baked_soldier_weapon_sets_keep_moving_during_sprint() {
                 let phase = a.lower_phase();
                 a.step(rig, &asset.clips, &asset.skeleton, &i, DT);
                 assert_ne!(a.lower_phase(), phase, "{game} {class} {}", slot.weapon);
+                if game == "bf2" {
+                    let clip = a.lower_clip().unwrap();
+                    let speed = rig.clip_speed(clip).map_or(11.5, |v| v[1].abs());
+                    let speed = if speed > 0.0 { speed } else { 11.5 };
+                    let expected = (phase
+                        + DT * i.speed() / speed * 30.0
+                            / asset.clips[clip].frames.saturating_sub(1).max(1) as f32)
+                        .rem_euclid(1.0);
+                    assert!(
+                        (a.lower_phase() - expected).abs() < 0.0001,
+                        "{class}: {} != {expected}",
+                        a.lower_phase()
+                    );
+                }
                 rows += 1;
             }
         }

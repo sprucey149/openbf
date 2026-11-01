@@ -147,6 +147,8 @@ pub struct SoldierConstants {
     /// factors and the turn factor of both jet stances (ctor default
     /// 0.3 / 0.3 / 1.0; the game layer reads the class chain's row).
     pub jet_control: [f32; 3],
+    pub sprint_control: [f32; 2],
+    pub hero_cameras: [Option<crate::unit::CameraSection>; 7],
     /// A channel-0 weapon is a lightsaber (B2 s+0x4e0 bit 0x10000, §3.3): a
     /// class that does not hover double-jumps instead of jetting.
     pub saber: bool,
@@ -192,6 +194,8 @@ impl Default for SoldierConstants {
             jet_fuel_min_border: 0.1,
             jet_energy_drain: 0.0,
             jet_control: CONTROL_SPEED[6],
+            sprint_control: [CONTROL_SPEED[3][0], CONTROL_SPEED[3][1]],
+            hero_cameras: [None; 7],
             saber: false,
         }
     }
@@ -431,6 +435,7 @@ pub struct Soldier {
     /// The draw a throw's landing compares with [`KNOCK_TUMBLE_DRAW`] (card
     /// KNOCK; the PS2 draws its LCG at the landing, the port at the push).
     pub knock_draw: f32,
+    knock_rules: GroundRules,
     /// The get-up's lock also holds the trigger (§2: the PS2 clears the
     /// trigger bytes while S+0xc0c runs).
     pub fire_lock: bool,
@@ -438,6 +443,8 @@ pub struct Soldier {
     /// [`Soldier::spawn_fuel`], recharged outside the jet stances, spent by
     /// a jet's start and its seconds (re-jetpack.md §5.1).
     pub fuel: f32,
+    pub jump_animation: Option<u8>,
+    pub jump_animation_serial: u32,
     /// The previous tick's pad word — the EDGE source for every contextual
     /// button, and (Phase D) for the squad commands `Sim::step` phase 0b reads.
     /// NOT hashed: it is a copy of a pad the input log already determines, so a
@@ -691,8 +698,11 @@ impl Soldier {
             floor_overlap: FLOOR_CONTACT_GAP,
             kept_flat: false,
             knock_draw: 0.0,
+            knock_rules: KNOCK_RULES,
             fire_lock: false,
             fuel: 0.0,
+            jump_animation: None,
+            jump_animation_serial: 0,
             prev_buttons: 0,
         }
     }
@@ -779,6 +789,9 @@ impl Soldier {
         }
         self.stance = s;
         self.time_in_stance = 0.0;
+        if !s.knocked() {
+            self.knock_rules = KNOCK_RULES;
+        }
     }
 
     /// Merged jump eligibility (JUNI): BF2's floor-loss window on every map.
@@ -1110,7 +1123,10 @@ impl Soldier {
         }
 
         // ── Movement ──────────────────────────────────────────────────────
-        let ctl = self.stance.control();
+        let mut ctl = self.stance.control();
+        if self.stance == Stance::Sprint {
+            ctl[..2].copy_from_slice(&c.sprint_control);
+        }
         let (sy, cy) = fmath::sin_cos(self.yaw);
         let fwd_axis = Vec2::new(-sy, -cy);
         let right_axis = Vec2::new(cy, -sy);
@@ -1133,7 +1149,7 @@ impl Soldier {
         let mut target_strafe = strafe_in * c.max_strafe_speed * ctl[1];
         // Native cases 0..3 blend desired locomotion before acceleration.
         // Roll and the jet states keep their own movers.
-        if rules == GroundRules::Bf2
+        if (rules == GroundRules::Bf2 || c.saber)
             && matches!(
                 self.stance,
                 Stance::Stand | Stance::Crouch | Stance::Prone | Stance::Sprint
@@ -1166,7 +1182,7 @@ impl Soldier {
             .normalize_or(Vec3::new(fwd_axis.x, 0.0, fwd_axis.y));
         let t2 = t1.cross(n).normalize_or(r3);
         if self.grounded {
-            if bf1 {
+            if bf1 && !(self.stance.knocked() && self.knock_rules == GroundRules::Bf2) {
                 // The in-plane part of (0, -0.4*Acceleraton*dt, 0).
                 let g = -0.4 * c.acceleration * dt;
                 self.vel += Vec3::new(0.0, g, 0.0) - n * (g * n.y);
@@ -1181,9 +1197,17 @@ impl Soldier {
             // no gravity while the floor bit is still set: the update after
             // the push moves him straight off it (§2 [M]).
             let grounded = self.grounded;
-            self.air_steer(dt, fwd_in, strafe_in, (t1, t2), c, KNOCK_RULES, grounded);
+            self.air_steer(
+                dt,
+                fwd_in,
+                strafe_in,
+                (t1, t2),
+                c,
+                self.knock_rules,
+                grounded,
+            );
             if !grounded {
-                self.vel.y -= KNOCK_RULES.thrown_gravity() * dt;
+                self.vel.y -= self.knock_rules.thrown_gravity() * dt;
             }
             self.pos += self.vel * dt;
             self.fly_ceiling(dt, env.ceiling);
@@ -1202,7 +1226,7 @@ impl Soldier {
             return;
         }
         if matches!(self.stance, Stance::Tumble | Stance::GetUp | Stance::Dead) {
-            self.knock_slide(dt, (t1, t2), n, c, KNOCK_RULES);
+            self.knock_slide(dt, (t1, t2), n, c, self.knock_rules);
             self.prev_buttons = pad.buttons;
             return;
         }
@@ -1408,6 +1432,14 @@ impl Soldier {
         }
     }
 
+    pub fn force_knock(&mut self, dir: Vec3, scale: f32, draw: f32) {
+        self.vel = Vec3::ZERO;
+        self.knock(dir, scale, GroundRules::Bf2, draw);
+        if self.stance.knocked() {
+            self.knock_rules = GroundRules::Bf2;
+        }
+    }
+
     /// A death's kick: [`DEATH_KICK`] m/s along `dir` (§3).
     pub fn kick(&mut self, dir: Vec3) {
         self.vel += dir.normalize_or_zero() * DEATH_KICK;
@@ -1429,6 +1461,7 @@ impl Soldier {
     /// records the deliberate BF1 deviations. The ground mover runs first;
     /// the first air update skips gravity. Class constants remain unchanged.
     fn take_off(&mut self, c: &SoldierConstants) {
+        self.jump_animation = None;
         let (sy, cy) = fmath::sin_cos(self.yaw);
         let fwd_axis = Vec2::new(-sy, -cy);
         self.vel.y += c.jump_vy;
@@ -1480,6 +1513,20 @@ impl Soldier {
             .normalize();
         self.vel += dir * c.jet_jump;
         if c.saber && !c.jet_hover {
+            let direction = if fwd_in * fwd_in + strafe_in * strafe_in < 0.0625 {
+                0
+            } else if fwd_in > strafe_in.abs() {
+                1
+            } else if -fwd_in > strafe_in.abs() {
+                2
+            } else if strafe_in < 0.0 {
+                3
+            } else {
+                4
+            };
+            let restart = self.jump_animation != Some(direction)
+                || direction < 2
+                || (self.stance == Stance::Jump && self.time_in_stance >= 0.5);
             // The Jedi's double jump: the kick's horizontal part is thrown
             // away for the stick's run speeds, and the rise is the jump's
             // again, or 1.5 times it (B2:162553-162600).
@@ -1492,7 +1539,14 @@ impl Soldier {
             let vy = self.vel.y;
             self.vel = f * (fwd_in * run) + r * (strafe_in * c.max_strafe_speed);
             self.vel.y = if vy < 0.5 * j { vy + j } else { 1.5 * j };
+            let age = self.time_in_stance;
             self.set_stance(Stance::Jump);
+            self.jump_animation = Some(direction);
+            if restart {
+                self.jump_animation_serial = self.jump_animation_serial.wrapping_add(1);
+            } else {
+                self.time_in_stance = age;
+            }
         } else {
             self.set_stance(if c.jet_hover {
                 Stance::Hover
@@ -1809,6 +1863,14 @@ impl Soldier {
         if self.fuel != 0.0 {
             eat(b"SOLDIER_FUEL");
             eat(&self.fuel.to_bits().to_le_bytes());
+        }
+        if self.jump_animation_serial != 0 {
+            eat(b"HERO_JUMP");
+            eat(&[self.jump_animation.unwrap_or(u8::MAX)]);
+            eat(&self.jump_animation_serial.to_le_bytes());
+        }
+        if self.knock_rules != KNOCK_RULES {
+            eat(b"FORCE_KNOCK");
         }
     }
 }

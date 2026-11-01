@@ -693,6 +693,7 @@ pub struct Sim {
     /// the state. Empty (the `Sim::empty` default) = no class system: every
     /// spawn comes from the caller's own `UnitSpec`, exactly as before.
     pub classes: [Vec<crate::unit::UnitClass>; 2],
+    pub test_rosters: [Option<(usize, Option<u8>)>; 2],
     /// BF2 mission hero classes and offer lifecycle; absent on other content.
     pub heroes: Option<super::heroes::Heroes>,
     /// Per player SLOT, the class index that slot's NEXT respawn takes
@@ -1345,6 +1346,7 @@ impl Sim {
             doors: Vec::new(),
             weapon_classes: vec![WeaponClass::bf1_rifle()],
             classes: [Vec::new(), Vec::new()],
+            test_rosters: [None; 2],
             heroes: None,
             spawn_choice: Vec::new(),
             spawn_post_choice: Vec::new(),
@@ -1806,6 +1808,13 @@ impl Sim {
         }
         if let Some(heroes) = &self.heroes {
             heroes.hash_into(&mut eat);
+        }
+        for (team, roster) in self.test_rosters.iter().enumerate() {
+            if let Some((len, hero)) = roster {
+                eat(b"TEST_CLASSES");
+                eat(&[team as u8, hero.unwrap_or(u8::MAX)]);
+                eat(&(*len as u32).to_le_bytes());
+            }
         }
         for u in &self.units {
             u.hash_into(&mut eat);

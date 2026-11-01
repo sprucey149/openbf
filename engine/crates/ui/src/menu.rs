@@ -10,7 +10,16 @@
 use egui::{Align2, Color32, RichText, Vec2};
 
 #[derive(Debug, Clone, Default)]
+pub struct ClassPickerModel {
+    pub tabs: Vec<String>,
+    pub tab: usize,
+    pub choices: Vec<(usize, String)>,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct MenuModel {
+    pub class_picker_available: bool,
+    pub class_choices: Option<ClassPickerModel>,
     /// Cheat registry rows: (id, label, enabled).
     pub cheats: Vec<(&'static str, &'static str, bool)>,
     pub assist_intensity: f32,
@@ -44,6 +53,10 @@ pub struct MenuModel {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MenuAction {
+    OpenClassPicker,
+    CloseClassPicker,
+    SelectClass(usize),
+    SetClassTab(usize),
     Resume,
     RequestRespawn,
     CancelRespawn,
@@ -61,6 +74,77 @@ pub enum MenuAction {
 }
 
 pub const MOUSE_SENSITIVITY_RANGE: (f32, f32) = (0.1, 5.0);
+
+#[cfg(test)]
+mod class_picker_tests {
+    use super::*;
+
+    #[test]
+    fn class_picker_navigation_and_back_stay_inside_pause() {
+        let model = MenuModel {
+            class_picker_available: true,
+            cursor: 1,
+            ..Default::default()
+        };
+        let enter = MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        assert_eq!(navigate(&model, enter).1, vec![MenuAction::OpenClassPicker]);
+        let picker = MenuModel {
+            class_choices: Some(ClassPickerModel {
+                tabs: vec!["BF1".into(), "BF2".into()],
+                tab: 0,
+                choices: vec![(3, "Trooper".into()), (9, "Hero".into())],
+            }),
+            cursor: 2,
+            ..model
+        };
+        assert_eq!(navigate(&picker, enter).1, vec![MenuAction::SelectClass(9)]);
+        assert_eq!(
+            navigate(
+                &picker,
+                MenuInput {
+                    left: true,
+                    ..Default::default()
+                }
+            )
+            .1,
+            vec![MenuAction::SetClassTab(1)]
+        );
+        assert_eq!(
+            navigate(
+                &picker,
+                MenuInput {
+                    right: true,
+                    ..Default::default()
+                }
+            )
+            .1,
+            vec![MenuAction::SetClassTab(1)]
+        );
+        let back = MenuInput {
+            back: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            navigate(&picker, back).1,
+            vec![MenuAction::CloseClassPicker]
+        );
+        assert_eq!(
+            navigate(
+                &picker,
+                MenuInput {
+                    down: true,
+                    ..Default::default()
+                }
+            )
+            .0,
+            0
+        );
+        assert!(!rows(&MenuModel::default()).contains(&Row::ClassPicker));
+    }
+}
 
 /// Draw editable bindings and capture/conflict feedback. Navigation is owned by the caller.
 pub fn draw_controls(
@@ -132,6 +216,9 @@ pub struct MenuInput {
 /// Rows in cursor order.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Row {
+    ClassPicker,
+    ClassBack,
+    ClassChoice(usize),
     Resume,
     Respawn,
     No,
@@ -148,10 +235,18 @@ pub enum Row {
 }
 
 pub fn rows(m: &MenuModel) -> Vec<Row> {
+    if let Some(choices) = &m.class_choices {
+        return std::iter::once(Row::ClassBack)
+            .chain(choices.choices.iter().map(|(id, _)| Row::ClassChoice(*id)))
+            .collect();
+    }
     if m.respawn_confirm {
         return vec![Row::No, Row::Yes];
     }
     let mut v = vec![Row::Resume];
+    if m.class_picker_available && m.in_shell.is_none() {
+        v.push(Row::ClassPicker);
+    }
     v.extend((0..m.cheats.len()).map(Row::Cheat));
     v.push(Row::Assist);
     if !m.team_size_off || m.in_shell.is_some() {
@@ -204,12 +299,25 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     let mut cursor = m.cursor.min(n - 1);
     let mut actions = Vec::new();
     if input.back {
-        actions.push(if m.respawn_confirm {
+        actions.push(if m.class_choices.is_some() {
+            MenuAction::CloseClassPicker
+        } else if m.respawn_confirm {
             MenuAction::CancelRespawn
         } else {
             MenuAction::Resume
         });
         return (cursor, actions);
+    }
+    if let Some(picker) = &m.class_choices {
+        let n = picker.tabs.len();
+        if n > 0 && (input.left || input.right) {
+            let tab = if input.right {
+                (picker.tab + 1) % n
+            } else {
+                (picker.tab + n - 1) % n
+            };
+            return (0, vec![MenuAction::SetClassTab(tab)]);
+        }
     }
     if input.up {
         cursor = (cursor + n - 1) % n;
@@ -221,6 +329,9 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
         cursor = 1 - cursor;
     }
     match rows[cursor] {
+        Row::ClassPicker if input.confirm => actions.push(MenuAction::OpenClassPicker),
+        Row::ClassBack if input.confirm => actions.push(MenuAction::CloseClassPicker),
+        Row::ClassChoice(i) if input.confirm => actions.push(MenuAction::SelectClass(i)),
         Row::Respawn if input.confirm => actions.push(MenuAction::RequestRespawn),
         Row::No if input.confirm => actions.push(MenuAction::CancelRespawn),
         Row::Yes if input.confirm => actions.push(MenuAction::Respawn),
@@ -323,6 +434,17 @@ fn row_label(
 /// Draw the menu; pointer clicks produce actions too.
 pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
     let mut actions = Vec::new();
+    let cursor_changed = ctx.data_mut(|data| {
+        let id = egui::Id::new("pause_last_cursor");
+        let state = (
+            m.class_choices.as_ref().map(|p| p.tab),
+            m.respawn_confirm,
+            m.cursor,
+        );
+        let changed = data.get_temp::<(Option<usize>, bool, usize)>(id) != Some(state);
+        data.insert_temp(id, state);
+        changed
+    });
     egui::Area::new(egui::Id::new("pause_menu"))
         .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
         .show(ctx, |ui| {
@@ -333,7 +455,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            RichText::new(m.in_shell.as_deref().unwrap_or("PAUSED"))
+                            RichText::new(if m.class_choices.is_some() { "CHANGE CLASS / HERO" } else { m.in_shell.as_deref().unwrap_or("PAUSED") })
                                 .size(28.0)
                                 .color(Color32::WHITE)
                                 .strong(),
@@ -346,89 +468,117 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     if m.respawn_confirm {
                         ui.label("Do you really wish to kill your current player?");
                     }
-                    let rows = rows(m);
-                    for (i, row) in rows.iter().enumerate() {
-                        let sel = (i == m.cursor).then_some(1.0);
-                        let clicked = match row {
-                            Row::Respawn => row_label(
-                                ui,
-                                sel,
-                                m.respawn_label.clone().unwrap_or_else(|| "Respawn".into()),
-                                None,
-                            ),
-                            Row::No => row_label(ui, sel, "No".into(), None),
-                            Row::Yes => row_label(ui, sel, "Yes".into(), None),
-                            Row::Resume => {
-                                let back = if m.in_shell.is_some() {
-                                    "Back"
-                                } else {
-                                    "Resume"
-                                };
-                                row_label(ui, sel, back.into(), None)
-                            }
-                            Row::Cheat(k) => {
-                                let (_, label, on) = m.cheats[*k];
-                                row_label(
-                                    ui,
-                                    sel,
-                                    format!("Cheat: {label}"),
-                                    Some(if on { "ON".into() } else { "off".into() }),
-                                )
-                            }
-                            Row::Assist => row_label(
-                                ui,
-                                sel,
-                                "Aim assist intensity  ◀ ▶".into(),
-                                Some(format!("{:.1}", m.assist_intensity)),
-                            ),
-                            Row::AiCap | Row::Reinforcements => {
-                                let (label, value) = population_row(m, *row).unwrap();
-                                row_label(ui, sel, label.into(), Some(value))
-                            }
-                            Row::Fov => row_label(
-                                ui,
-                                sel,
-                                "Field of view  ◀ ▶".into(),
-                                Some(format!("{:.2}× ({:.0}°)", m.fov_scale, m.fov_deg)),
-                            ),
-                            Row::Music => row_label(
-                                ui,
-                                sel,
-                                "Music volume  ◀ ▶".into(),
-                                Some(if m.music_volume <= 0.0 {
-                                    "off".into()
-                                } else {
-                                    format!("{:.0}%", m.music_volume * 100.0)
-                                }),
-                            ),
-                            Row::MouseSensitivity => row_label(
-                                ui,
-                                sel,
-                                "Mouse sensitivity  ◀ ▶".into(),
-                                Some(format!("{:.1}", m.mouse_sensitivity)),
-                            ),
-                            Row::InvertY => row_label(
-                                ui,
-                                sel,
-                                "Invert mouse Y".into(),
-                                Some(if m.invert_y { "ON".into() } else { "off".into() }),
-                            ),
-                            Row::Quit => row_label(ui, sel, "Quit to desktop".into(), None),
-                        };
-                        // Native navigation owns Enter/Space; egui owns pointer clicks.
-                        if clicked.clicked_by(egui::PointerButton::Primary) {
-                            match row {
-                                Row::Respawn => actions.push(MenuAction::RequestRespawn),
-                                Row::No => actions.push(MenuAction::CancelRespawn),
-                                Row::Yes => actions.push(MenuAction::Respawn),
-                                Row::Resume => actions.push(MenuAction::Resume),
-                                Row::Cheat(k) => actions.push(MenuAction::ToggleCheat(*k)),
-                                Row::InvertY => actions.push(MenuAction::ToggleInvertY),
-                                Row::Quit => actions.push(MenuAction::Quit),
-                                _ => {}
-                            }
-                        }
+                    if m.class_choices.is_some() {
+                        ui.label("Testing: switch in place with full health and equipment. Team stays the same.");
+                        ui.label("Your next normal spawn returns to the battle roster.");
                     }
+                    if let Some(picker) = &m.class_choices {
+                        ui.set_max_width(760.0);
+                        ui.horizontal_wrapped(|ui| {
+                            for (tab, label) in picker.tabs.iter().enumerate() {
+                                if ui.selectable_label(tab == picker.tab, label).clicked_by(egui::PointerButton::Primary) {
+                                    actions.push(MenuAction::SetClassTab(tab));
+                                }
+                            }
+                        });
+                        if picker.choices.is_empty() { ui.label("No supported characters are available in this tab."); }
+                    }
+                    let rows = rows(m);
+                    egui::ScrollArea::vertical()
+                        .id_salt(("pause_rows", m.class_choices.as_ref().map(|p| p.tab)))
+                        .max_height((ctx.content_rect().height() - 220.0).max(100.0))
+                        .show(ui, |ui| {
+                            for (i, row) in rows.iter().enumerate() {
+                                let sel = (i == m.cursor).then_some(1.0);
+                                let clicked = match row {
+                                    Row::ClassPicker => row_label(ui, sel, "Change class / hero (testing)".into(), None),
+                                    Row::ClassBack => row_label(ui, sel, "Back".into(), None),
+                                    Row::ClassChoice(k) => row_label(ui, sel, m.class_choices.as_ref().unwrap().choices.iter().find(|(id, _)| id == k).unwrap().1.clone(), None),
+                                    Row::Respawn => row_label(
+                                        ui,
+                                        sel,
+                                        m.respawn_label.clone().unwrap_or_else(|| "Respawn".into()),
+                                        None,
+                                    ),
+                                    Row::No => row_label(ui, sel, "No".into(), None),
+                                    Row::Yes => row_label(ui, sel, "Yes".into(), None),
+                                    Row::Resume => {
+                                        let back = if m.in_shell.is_some() {
+                                            "Back"
+                                        } else {
+                                            "Resume"
+                                        };
+                                        row_label(ui, sel, back.into(), None)
+                                    }
+                                    Row::Cheat(k) => {
+                                        let (_, label, on) = m.cheats[*k];
+                                        row_label(
+                                            ui,
+                                            sel,
+                                            format!("Cheat: {label}"),
+                                            Some(if on { "ON".into() } else { "off".into() }),
+                                        )
+                                    }
+                                    Row::Assist => row_label(
+                                        ui,
+                                        sel,
+                                        "Aim assist intensity  ◀ ▶".into(),
+                                        Some(format!("{:.1}", m.assist_intensity)),
+                                    ),
+                                    Row::AiCap | Row::Reinforcements => {
+                                        let (label, value) = population_row(m, *row).unwrap();
+                                        row_label(ui, sel, label.into(), Some(value))
+                                    }
+                                    Row::Fov => row_label(
+                                        ui,
+                                        sel,
+                                        "Field of view  ◀ ▶".into(),
+                                        Some(format!("{:.2}× ({:.0}°)", m.fov_scale, m.fov_deg)),
+                                    ),
+                                    Row::Music => row_label(
+                                        ui,
+                                        sel,
+                                        "Music volume  ◀ ▶".into(),
+                                        Some(if m.music_volume <= 0.0 {
+                                            "off".into()
+                                        } else {
+                                            format!("{:.0}%", m.music_volume * 100.0)
+                                        }),
+                                    ),
+                                    Row::MouseSensitivity => row_label(
+                                        ui,
+                                        sel,
+                                        "Mouse sensitivity  ◀ ▶".into(),
+                                        Some(format!("{:.1}", m.mouse_sensitivity)),
+                                    ),
+                                    Row::InvertY => row_label(
+                                        ui,
+                                        sel,
+                                        "Invert mouse Y".into(),
+                                        Some(if m.invert_y { "ON".into() } else { "off".into() }),
+                                    ),
+                                    Row::Quit => row_label(ui, sel, "Quit to desktop".into(), None),
+                                };
+                                if clicked.clicked_by(egui::PointerButton::Primary) {
+                                    match row {
+                                        Row::ClassPicker => actions.push(MenuAction::OpenClassPicker),
+                                        Row::ClassBack => actions.push(MenuAction::CloseClassPicker),
+                                        Row::ClassChoice(k) => actions.push(MenuAction::SelectClass(*k)),
+                                        Row::Respawn => actions.push(MenuAction::RequestRespawn),
+                                        Row::No => actions.push(MenuAction::CancelRespawn),
+                                        Row::Yes => actions.push(MenuAction::Respawn),
+                                        Row::Resume => actions.push(MenuAction::Resume),
+                                        Row::Cheat(k) => actions.push(MenuAction::ToggleCheat(*k)),
+                                        Row::InvertY => actions.push(MenuAction::ToggleInvertY),
+                                        Row::Quit => actions.push(MenuAction::Quit),
+                                        _ => {}
+                                    }
+                                }
+                                if cursor_changed && i == m.cursor {
+                                    clicked.scroll_to_me(Some(egui::Align::Center));
+                                }
+                            }
+                        });
                     // Room is kept for the help so the centered menu does not
                     // jump as the cursor reaches those rows.
                     if rows.contains(&Row::Reinforcements) {
@@ -443,7 +593,11 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     ui.add_space(8.0);
                     ui.label(
                         RichText::new(
-                            "D-pad / arrows move · ✕ / Enter select · ◀▶ adjust · ○ / Start / Esc resume",
+                            if m.class_choices.is_some() {
+                                "Up/Down choose · Left/Right tabs · Enter select · Esc back"
+                            } else {
+                                "D-pad / arrows move · ✕ / Enter select · ◀▶ adjust · ○ / Start / Esc resume"
+                            },
                         )
                             .size(12.0)
                             .color(Color32::GRAY),
@@ -613,6 +767,8 @@ mod tests {
 
     fn model() -> MenuModel {
         MenuModel {
+            class_picker_available: false,
+            class_choices: None,
             cheats: vec![
                 ("invincible", "Invincibility", false),
                 ("ammo", "Infinite ammo", true),
