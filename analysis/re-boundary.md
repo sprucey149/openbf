@@ -75,6 +75,10 @@ named script, [M] measured on the PS2 (PCSX2 RAM), [H] not confirmed. Tools, inp
 | BF2 | YAV1 | boundary1: 9 | yes | 141,543 |
 | BF2 | COR1 DAG1 DEA1 MUS1 MYG1 NAB2 TAN1 UTA1 | none: a `bnd_` chunk with an empty Boundary scope | - | - |
 
+  Not in this table, read off the LVLs for issue #59 (2026-11-01): BF1 TAT2 names `boundary1`, BF2 TAT3 has no `bnd_`
+  chunk. Every name above came out the same. `game::map_boundary` holds the result. Its test agrees with all 404 rows of
+  `points/*.result.json` that read inside or outside (`remote_droids::the_boundary_reads_as_the_ps2_read_it` keeps 14).
+
   Every shape is wound clockwise in (x right, z up), the side the test admits. D2 [D]: every conquest post and every
   node of every post's SpawnPath lies inside on the 30 maps in the table (one BF2 KAS2 object,
   `baserush`, outside: another mode's).

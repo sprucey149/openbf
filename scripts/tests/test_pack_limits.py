@@ -15,6 +15,16 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import pack
 
 
+class ScratchBake(unittest.TestCase):
+    def test_it_still_finds_the_lines_it_rewrites_in_rebake(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = dict(os.environ, OUT=str(Path(d) / "out"), BAKE=shutil.which("true"), OPENBF_INPUTS_CHOSEN="1")
+            run = subprocess.run(["bash", str(ROOT / "scripts" / "scratch_bake.sh"), "no-such-group"], env=env,
+                                 capture_output=True, text=True, timeout=120)
+        self.assertNotIn("no longer has the four expected lines", run.stderr)
+        self.assertIn("scratch_bake:", run.stdout)
+
+
 class InstallAndSummary(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
@@ -37,6 +47,12 @@ class InstallAndSummary(unittest.TestCase):
         self.write(self.out, b"small executable with no footer" * 4)
         self.write(self.pak)
         self.write(self.new, b"x" * 32 + pack.PACK_MAGIC + b"\0" * 24)
+        self.assertFalse(pack.install_pack(self.new, self.new_pak, self.out, self.pak))
+        self.assertFalse(os.path.exists(self.pak))
+
+    def test_a_one_file_build_ignores_an_archive_left_by_a_killed_run(self):
+        self.write(self.new, b"x" * 32 + pack.PACK_MAGIC + b"\0" * 24)
+        self.write(self.new_pak, b"half an archive")
         self.assertFalse(pack.install_pack(self.new, self.new_pak, self.out, self.pak))
         self.assertFalse(os.path.exists(self.pak))
 

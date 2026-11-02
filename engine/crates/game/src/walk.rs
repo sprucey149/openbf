@@ -127,11 +127,14 @@ pub fn ps2_reticle_y(source_game: &str) -> f32 {
     )
 }
 
-/// A seat's third-person camera (card VSEAT) as `(target, camera)`.
+/// A seat's third-person camera (card VSEAT) as `(pull point, camera)`.
 /// PROVISIONAL — the PS2's vehicle camera is untraced; this reads the seat's
 /// props the way [`WalkSim::camera`] reads the soldier's CAMERASECTION: the
-/// target is `TrackCenter` in the vehicle's HEADING frame (x right, y up, z
-/// forward; default 0 2 0), the camera `TrackOffset.z` behind it along the
+/// pull point is the section's [`CAMERA_PULL_Y`] above the vehicle, because
+/// `TrackCenter` can be under the ground (`cis_tread_snailtank`'s is 12 m
+/// below its origin). The track centre is `TrackCenter` in the vehicle's HEADING
+/// frame (x right, y up, z forward; default 0 2 0), the camera
+/// `TrackOffset.z` behind it along the
 /// view, `.y` above and `.x` right (default 0 1 8), pitched down by
 /// `TiltValue` degrees. The heading ignores the hover's pitch and roll so
 /// the view does not rock with the springs. `ThirdPersonFOV` is not applied
@@ -158,9 +161,9 @@ pub fn vehicle_camera(
         fov_y,
         ..Camera::default()
     };
-    let target = v.pos + right * c[0] + Vec3::Y * c[1] + fwd * c[2];
-    let position = target - cam.forward() * o[2] + Vec3::Y * o[1] + cam.right() * o[0];
-    (target, Camera { position, ..cam })
+    let center = v.pos + right * c[0] + Vec3::Y * c[1] + fwd * c[2];
+    let position = center - cam.forward() * o[2] + Vec3::Y * o[1] + cam.right() * o[0];
+    (v.pos + Vec3::Y * CAMERA_PULL_Y, Camera { position, ..cam })
 }
 
 /// A flown guided rocket's camera (card GUIDED): the class's track centre
@@ -1489,6 +1492,7 @@ impl WalkSim {
         };
         let (target, cam) = self
             .walker_seat_camera(v, seat, look)
+            .or_else(|| self.turret_seat_camera(v, seat))
             .unwrap_or_else(|| vehicle_camera(v, seat, look, self.fov_y()));
         // A building turret's camera passes its own building, as its aim
         // ray does (`Sim::aim_point`); a rider's, his own vehicle's hull.
@@ -1500,6 +1504,46 @@ impl WalkSim {
             Some(m.vehicle),
         );
         Some((Camera { position, ..cam }, Some(track)))
+    }
+
+    /// A building turret gunner's unzoomed camera as `(pull point, camera)`
+    /// (`analysis/re-turret-draw.md` 4 [V]): `TrackCenter` and `TrackOffset` on
+    /// the aim frame at the turret node, where the zoomed eye stands too
+    /// ([`core::vehicle::gun::GunSetup::scope_eye`]); a class with no turret
+    /// node has it at the building's origin. Hung on the origin instead,
+    /// `tur_bldg_geoturret`'s centre (0, 0, -2) lay under the sheet where the
+    /// ground rises behind the turret (card SEATCAM). The pull point is the
+    /// section's fixed (0, [`CAMERA_PULL_Y`], 0) on the same frame.
+    fn turret_seat_camera(
+        &self,
+        v: &core::vehicle::Vehicle,
+        seat: Option<&crate::vehicle_class::SeatSpec>,
+    ) -> Option<(Vec3, Camera)> {
+        if v.kind != core::vehicle::VehicleKind::Turret {
+            return None;
+        }
+        let (seat, l) = (seat?, self.sim.seat_look(self.player)?);
+        let [x, y, z] = core::vehicle::gun::frame(l.look);
+        let pivot = if l.gun.framed {
+            l.gun.pivot
+        } else {
+            Vec3::ZERO
+        };
+        let frame = Mat4::from_rotation_translation(v.rot, v.pos)
+            * Mat4::from_cols(
+                x.extend(0.0),
+                y.extend(0.0),
+                z.extend(0.0),
+                pivot.extend(1.0),
+            );
+        let (_, cam) = walker_view::camera_on_frame(
+            frame,
+            Vec3::from(seat.track_center.unwrap_or([0.0, 2.0, 0.0])),
+            Vec3::from(seat.track_offset.unwrap_or([0.0, 1.0, 8.0])),
+            seat.tilt_value.unwrap_or(0.0),
+            self.fov_y(),
+        );
+        Some((frame.transform_point3(Vec3::Y * CAMERA_PULL_Y), cam))
     }
 
     /// Pull a camera wanted at `desired` looking at `target` in along the

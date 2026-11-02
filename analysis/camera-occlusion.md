@@ -56,7 +56,8 @@ common pieces, in engines and shipped games since the PS3 era:
   The PS2 ghosts the trooper instead (`re-muzzle-flash.md` §7).
 - Unchanged: the gallery sheets' fixed framing (`CameraBlockers::pull_in` still stops at props: it draws nothing
   see-through), the PS2's in-at-once / out-at-0.75-per-second easing, the terrain sheet (pulled short of it, kept 0.3 m
-  off it on the side the camera is on), the seat and droid cameras' own targets.
+  off it on the side the camera is on), the droid camera's own target. A seat camera's track runs from the section's
+  (0, 1.5, 0) on its frame (card SEATCAM; a walker's still from its `TrackCenter`).
 
 The healing case: the player stands with his back against a health droid, the camera behind him in or behind the
 droid. The camera stays at its normal place (3.2 m back, 2.57 m up at the spawn pitch), looking where he aims, and
@@ -83,7 +84,7 @@ stance (stand, crouch, prone, sprint and the zoom sections, which were already a
 `ps2_fov_y` and `ps2_soldier_fovs`. The tilt moves the aim ray and the reticle with it (BF1 maps now draw the
 reticle on BF2's line 153.35 of 480, and the aim origin is 2.354 m up), as on BF2. The seat cameras take the chase
 FOV (card VSEAT), so BF1's vehicles widen with it; their placement is each seat's own and did not show the problem.
-Not changed: the scope view (`scope_eye_back`: BF1 0.3 m, BF2 0.6 m), the per-class camera sections of card CAMS
+Not changed: the scope view (`eye_back`: BF1 0.3 m, BF2 0.6 m), the per-class camera sections of card CAMS
 (not read by the port), split screen's 0.4 tilt factor.
 
 ## 4. Provisional numbers and checks

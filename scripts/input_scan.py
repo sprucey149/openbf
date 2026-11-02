@@ -15,8 +15,8 @@ The choice, per game:
     things still builds; the summary says what was refused. A game left with no usable source stops the build, and
     the message says what to add.
 
-Each SUPPORTED switch below is the one line that turns on an input whose reader is not there yet. The recognition,
-the choice, pack.py's and rebake.sh's use of it and the test matrix are all in place behind it.
+Each SUPPORTED switch below is the one line that turns on an input a build does not take yet. The recognition, the
+choice, pack.py's and rebake.sh's use of it and the test matrix are all in place behind it.
 """
 import argparse
 import json
@@ -29,9 +29,11 @@ import sys
 
 import console_input as content
 
-# True once `bake extract-xiso` and the Xbox texture reader are on this branch. pack.py then extracts each chosen Xbox
-# disc with XBOX_EXTRACT (`bake extract-xiso <disc> <dir>` writes <dir>/Data/_LVL_XBOX/...), and rebake.sh passes those
-# LVLs to the bake's donor argument, comma-joined after any PC LVL.
+# The readers are in (`bake extract-xiso`, `bake xbox`), but this stays False until rebake.sh applies the gameplay check
+# `bake xbox` makes: a disc with no PS2 copy would otherwise bake its own numbers and shapes without a refusal
+# (analysis/xbox-input.md). When True, pack.py extracts each chosen Xbox disc with XBOX_EXTRACT (`bake extract-xiso <disc>
+# <dir>` writes <dir>/Data/_LVL_XBOX/...), and rebake.sh passes those LVLs to the bake's donor argument, comma-joined
+# after any PC LVL.
 XBOX_SUPPORTED = False
 XBOX_EXTRACT = "extract-xiso"
 # True once a bake step reads Kit Fisto and Asajj Ventress out of the DLC folder (OPENBF_DLC_DIR). Nothing else in the

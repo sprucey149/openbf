@@ -422,7 +422,12 @@ impl Ctx<'_> {
         if n == 0 {
             return;
         }
+        // A turned bar turns about its rect's corner: `refire_rightbit`, the one
+        // the layout turns, is the left bit mirrored by a Position of the rect's
+        // width, and on the PS2 the two meet at 6 o'clock (`re-heat-hud.md` 1, 6).
         let (ox, oy) = e.rect.origin();
+        let turn = trs(Vec3::ZERO, e.rot, Vec3::ONE);
+        let m = &(*m * turn.inverse() * Mat4::from_translation(Vec3::new(ox, oy, 0.0)) * turn);
         let (sx, sy) = seg.rect.origin();
         let own = self.hud.drawn(i);
         let col = color(
@@ -440,14 +445,14 @@ impl Ctx<'_> {
                 let th = start + span * f;
                 let (sn, cs) = th.sin_cos();
                 Mat4::from_translation(Vec3::new(
-                    ox + e.rect.w * 0.5 * (1.0 + sn),
-                    oy + e.rect.h * 0.5 * (1.0 - cs),
+                    e.rect.w * 0.5 * (1.0 + sn),
+                    e.rect.h * 0.5 * (1.0 - cs),
                     0.0,
                 )) * Mat4::from_rotation_z(th)
             } else {
                 Mat4::from_translation(Vec3::new(
-                    ox + (e.rect.w.trunc() / n as f32) * k as f32,
-                    oy,
+                    (e.rect.w.trunc() / n as f32) * k as f32,
+                    0.0,
                     0.0,
                 ))
             };

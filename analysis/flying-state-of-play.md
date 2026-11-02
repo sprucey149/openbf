@@ -7,7 +7,9 @@
 Steps 1 and 2 below are built for the headless sim. A human can fly every flyer
 on the ground maps with the pad; bots do so only with `OPENBF_FLYER_BOTS=1`,
 because they would otherwise change the ground maps' hashes. Steps 3 and 4 are
-not started. See `re-flyer.md` and `re-flyer-ai.md` for what is confirmed, and
+not started. Landing regions are not installed from the missions yet, so their
+rules never apply in a real round (`re-flyer.md`). See `re-flyer.md` and
+`re-flyer-ai.md` for what is confirmed, and
 the "What exists" list below for the state before this work.
 
 ## What exists

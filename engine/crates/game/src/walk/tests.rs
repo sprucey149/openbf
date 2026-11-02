@@ -327,6 +327,34 @@ fn camera_stays_on_the_soldiers_side_of_the_terrain() {
     );
 }
 
+/// A seat's camera keeps the same rule from under uncut terrain: its pull point
+/// rides the vehicle, so a vehicle in BF2 GEO1's hangar films from inside it.
+#[test]
+fn seat_camera_under_the_sheet_stays_under_it() {
+    let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    let h = w.sim.spawn_vehicle(&core::vehicle::VehicleSpec {
+        kind: core::vehicle::VehicleKind::Hover,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::new(0.0, -8.0, 0.0),
+        yaw: 0.0,
+        max_health: 100.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![core::vehicle::SeatKind::Pilot],
+    });
+    let player = w.player;
+    assert!(w.sim.seat_unit(player, h, 0));
+    // The default camera wants 3 m over the vehicle: short of the sheet here...
+    let y = w.camera().position.y;
+    assert!(y <= -CAMERA_TERRAIN_GAP, "under the sheet: {y}");
+    // ...and through it here, where the sheet pulls it in short.
+    w.sim.vehicle_mut(h).unwrap().pos.y = -2.0;
+    let y = w.camera().position.y;
+    assert!(y <= -CAMERA_TERRAIN_GAP, "and never through it: {y}");
+}
+
 #[test]
 fn accumulator_steps_at_thirty_hz() {
     let mut w = WalkSim::new(1, Vec3::ZERO, None);

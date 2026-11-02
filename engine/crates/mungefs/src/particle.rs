@@ -535,7 +535,7 @@ impl Emitter {
                 key::NO_REGISTER_STEP => e.no_register_step = true,
                 key::WORLD_ALIGNED => e.world_aligned = true,
                 key::PARTICLE_EMITTER => e.sibling = Some(Box::new(Emitter::parse(k))),
-                // Only a one-argument record is taken (B1 `iStack_30c == 1`).
+                // Only a one-argument record is taken (B1 checks its argument count).
                 key::SOUND_NAME if k.values.len() == 1 => {
                     e.sound_name = k.str_arg(0).map(str::to_owned);
                 }

@@ -267,14 +267,29 @@ fn missions_dir() -> &'static Path {
     Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"))
 }
 
-fn mission_files() -> Vec<std::path::PathBuf> {
+/// The baked missions, sorted. `None`, with a SKIP line, when this tree has no
+/// mission bake at all: a clone holding the discs but not yet baked, or an empty
+/// data link. A bake that has missions but too few, or lacks a named one, still
+/// fails in its test: that is a stale bake.
+fn mission_files() -> Option<Vec<std::path::PathBuf>> {
     let mut files: Vec<_> = std::fs::read_dir(missions_dir())
-        .expect("missions dir")
+        .into_iter()
+        .flatten()
         .map(|e| e.expect("dir entry").path())
         .filter(|p| p.extension().is_some_and(|e| e == "ron"))
         .collect();
+    if files.is_empty() {
+        eprintln!("SKIP: no baked missions in {}", missions_dir().display());
+        return None;
+    }
     files.sort();
-    files
+    Some(files)
+}
+
+/// One baked mission by file name; `None` as for `mission_files`.
+fn mission(file: &str) -> Option<MissionDef> {
+    mission_files()?;
+    Some(MissionDef::load(&missions_dir().join(file)).expect(file))
 }
 
 /// Every faction, for the tests that want one disc's WHOLE class db rather
@@ -432,7 +447,9 @@ fn fill_classes_keep_the_v0_fixtures() {
 #[test]
 fn tat1_alliance_roster_is_the_missions_mix() {
     let Some(dir) = classes_dir() else { return };
-    let m = MissionDef::load(&missions_dir().join("tat1_con.ron")).expect("tat1_con");
+    let Some(m) = mission("tat1_con.ron") else {
+        return;
+    };
     // tat1i's teams are (imp, all) in MISSION order.
     assert_eq!(m.factions(), ["imp".to_string(), "all".to_string()]);
     let ([imp, all], _) =
@@ -479,7 +496,9 @@ fn tat1_alliance_roster_is_the_missions_mix() {
 fn kam1_clone_wars_rosters_carry_slot_order_min_and_max() {
     let Some(dir) = classes_dir() else { return };
     // `kam1c_con` is the clone-wars era of BF2 Kamino.
-    let m = MissionDef::load(&missions_dir().join("bf2_kam1_con_cw.ron")).expect("kam1_con_cw");
+    let Some(m) = mission("bf2_kam1_con_cw.ron") else {
+        return;
+    };
     assert_eq!(m.factions(), ["cis".to_string(), "rep".to_string()]);
     let ([cis, rep], _) =
         FactionRoster::pair(&dir, "bf2", ["cis", "rep"], Some(&m)).expect("kam1 rosters");
@@ -800,7 +819,9 @@ fn the_rocket_launchers_carry_their_impact_explosion() {
 #[test]
 fn a_bf2_gcw_mission_resolves_against_its_own_disc() {
     let Some(dir) = classes_dir() else { return };
-    let m = MissionDef::load(&missions_dir().join("tat2_con.ron")).expect("tat2_con");
+    let Some(m) = mission("tat2_con.ron") else {
+        return;
+    };
     assert_eq!(m.source_game, "bf2");
     assert_eq!(m.factions(), ["imp".to_string(), "all".to_string()]);
     let bf2 = game::roster::load_classdb(&dir, "bf2", &["imp", "all"]).expect("bf2 db");
@@ -836,7 +857,9 @@ fn a_bf2_gcw_mission_resolves_against_its_own_disc() {
 #[test]
 fn a_mission_mix_without_its_fill_class_falls_back_whole() {
     let Some(dir) = classes_dir() else { return };
-    let m = MissionDef::load(&missions_dir().join("tat2_con.ron")).expect("tat2_con");
+    let Some(m) = mission("tat2_con.ron") else {
+        return;
+    };
     let bf1 = game::roster::load_classdb(&dir, "bf1", &FOUR).expect("bf1 db");
 
     // The Alliance: not one of its six BF2 classes is in the BF1 db.
@@ -866,7 +889,9 @@ fn a_mission_mix_without_its_fill_class_falls_back_whole() {
     assert!(skipped.len() < imp.len(), "not every class failed to build");
 
     // A mix that KEEPS its fill class stays the mission's, short or not.
-    let t1 = MissionDef::load(&missions_dir().join("tat1_con.ron")).expect("tat1_con");
+    let Some(t1) = mission("tat1_con.ron") else {
+        return;
+    };
     let (r, _) = FactionRoster::build(&bf1, "bf1", "all", &t1.teams[1].classes).expect("tat1 all");
     assert_eq!(r.fill_class().class, "all_inf_soldierdesert");
 }
@@ -876,7 +901,9 @@ fn a_mission_mix_without_its_fill_class_falls_back_whole() {
 #[test]
 fn pair_returns_its_warnings_rather_than_printing_them() {
     let Some(dir) = classes_dir() else { return };
-    let t2 = MissionDef::load(&missions_dir().join("tat2_con.ron")).expect("tat2_con");
+    let Some(t2) = mission("tat2_con.ron") else {
+        return;
+    };
 
     // The mission on its own map: nothing to say.
     let (_, quiet) =
@@ -904,7 +931,9 @@ fn pair_returns_its_warnings_rather_than_printing_them() {
 #[test]
 fn every_mission_mix_resolves_against_its_maps_own_disc() {
     let Some(dir) = classes_dir() else { return };
-    let files = mission_files();
+    let Some(files) = mission_files() else {
+        return;
+    };
     assert!(files.len() >= 32, "expected a mission per baked map");
 
     let mut dbs: Vec<(String, game::classdb::ClassDb)> = Vec::new();
@@ -992,7 +1021,9 @@ fn every_mission_class_model_is_in_its_maps_own_side_bake() {
     let native = |faction: &str| game::roster::faction_game(faction).expect("known faction");
     let has = |g: &str, geom: &str| baked.join(format!("side_{g}/soldiers/{geom}.glb")).exists();
 
-    let files = mission_files();
+    let Some(files) = mission_files() else {
+        return;
+    };
     let mut dbs: Vec<(String, game::classdb::ClassDb)> = Vec::new();
     let (mut slots, mut on_map, mut on_native) = (0usize, 0usize, 0usize);
     let mut missing: Vec<String> = Vec::new();
@@ -1043,7 +1074,9 @@ fn every_mission_class_model_is_in_its_maps_own_side_bake() {
 #[test]
 fn battle_classes_hold_their_own_weapon_model() {
     let Some(dir) = classes_dir() else { return };
-    let files = mission_files();
+    let Some(files) = mission_files() else {
+        return;
+    };
     // Per game: (classes, drawn with another gun now, with another gun under
     // the per-body cache).
     let mut tally = [("bf1", 0usize, 0usize, 0usize), ("bf2", 0, 0, 0)];
@@ -1139,7 +1172,9 @@ fn every_held_slots_hand_model_is_baked() {
         eprintln!("SKIP: the side bake predates card WHELD (run scripts/rebake.sh side)");
         return;
     }
-    let files = mission_files();
+    let Some(files) = mission_files() else {
+        return;
+    };
     let mut fielded: Vec<(String, String)> = Vec::new();
     let mut add = |game: &str, class: &str| {
         let k = (game.to_owned(), class.to_ascii_lowercase());
@@ -1642,6 +1677,8 @@ fn census_rows(text: &str) -> Vec<(String, Vec<game::classdb::WeaponSlot>)> {
 #[test]
 fn weapon_slots_match_the_disc_census() {
     let Some(dir) = classes_dir() else { return };
+    // The census half needs only the discs; the fielded half needs the missions.
+    let missions = mission_files();
     let lower = |mut s: Vec<game::classdb::WeaponSlot>| {
         for x in &mut s {
             x.weapon = x.weapon.to_ascii_lowercase();
@@ -1673,12 +1710,8 @@ fn weapon_slots_match_the_disc_census() {
         );
 
         let mut seen: Vec<String> = Vec::new();
-        for e in std::fs::read_dir(missions_dir()).expect("missions dir") {
-            let path = e.expect("dir entry").path();
-            if path.extension().is_none_or(|x| x != "ron") {
-                continue;
-            }
-            let m = MissionDef::load(&path).expect("mission");
+        for path in missions.iter().flatten() {
+            let m = MissionDef::load(path).expect("mission");
             if m.source_game != game {
                 continue;
             }
@@ -1719,7 +1752,9 @@ fn weapon_slots_match_the_disc_census() {
         }
         fielded += seen.len();
     }
-    assert!(fielded >= 40, "{fielded} fielded classes");
+    if missions.is_some() {
+        assert!(fielded >= 40, "{fielded} fielded classes");
+    }
 }
 
 /// Card GREN: the thermal detonator out of the baked class db is the PS2's

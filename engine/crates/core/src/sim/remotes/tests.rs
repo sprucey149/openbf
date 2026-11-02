@@ -1175,3 +1175,143 @@ fn a_droid_under_the_reticle_leaves_the_aim_assist_alone() {
         }
     }
 }
+
+/// A map's whole terrain: 100 m square round the origin.
+fn small_ground() -> crate::heightfield::Heightfield {
+    crate::heightfield::Heightfield {
+        size: 2,
+        unit: 100.0,
+        offset_x: 50.0,
+        offset_z: 50.0,
+        heights: vec![0.0; 4],
+    }
+}
+
+/// Issue #59: with no boundary, as on BF1 YAV1 or BF2 MYG1, a droid flown at the
+/// edge stops at the end of the terrain sheet and slides along it.
+#[test]
+fn a_droid_cannot_fly_off_the_end_of_the_terrain() {
+    for bf2 in [false, true] {
+        let (mut sim, _, _) = setup(bf2);
+        sim.heightfield = Some(small_ground());
+        launch(&mut sim);
+        sim.droids[0].yaw = -0.4;
+        let pad = PadState {
+            lx: i16::MAX,
+            ..FORWARD
+        };
+        let (mut far, mut slid) = (0.0f32, 0.0f32);
+        for _ in 0..(30.0 / TICK_DT) as usize {
+            sim.step(&[pad]);
+            let p = sim.droids[0].pos;
+            far = far.max(p.x.abs()).max(p.z.abs());
+            slid = slid.max(sim.droids[0].vel.length());
+        }
+        assert!(far <= 50.0, "bf2={bf2}: {far} m from the centre");
+        assert!(slid > 1.0, "bf2={bf2}: it flew");
+        assert!(sim.droids[0].alive(), "bf2={bf2}: only stopped");
+    }
+}
+
+fn square(half: f32) -> crate::boundary::Boundary {
+    let mut b = crate::boundary::Boundary::default();
+    b.add_shape(&[[-half, -half], [-half, half], [half, half], [half, -half]]);
+    b
+}
+
+/// Issue #59, the PS2's rule (`analysis/re-boundary.md` M2): flown past the
+/// boundary the droid dies on the update the countdown goes negative, 10.0 s
+/// out in BF1 and 6.5 s in BF2, so it gets no farther than that flight.
+#[test]
+fn a_droid_past_the_boundary_dies_when_the_countdown_ends() {
+    for (bf2, rules, updates) in [
+        (false, crate::soldier::GroundRules::Bf1, 300),
+        (true, crate::soldier::GroundRules::Bf2, 196),
+    ] {
+        let (mut sim, _, _) = setup(bf2);
+        sim.ground_rules = rules;
+        sim.boundary = square(20.0);
+        launch(&mut sim);
+        let (mut out, mut far) = (0, 0.0f32);
+        let events = loop {
+            sim.step(&[FORWARD]);
+            let Some(d) = sim.droids.first() else {
+                break sim.events.clone();
+            };
+            far = far.max(d.pos.z.abs());
+            out += usize::from(d.leaving.is_some());
+            assert!(out < 400, "bf2={bf2}: never died");
+        };
+        assert_eq!(gone(&events), [DroidEnd::Destroyed], "bf2={bf2}");
+        assert_eq!(out + 1, updates, "bf2={bf2}: updates outside");
+        let reach = 20.0 + 9.0 * updates as f32 * TICK_DT + 1.0;
+        assert!(far < reach, "bf2={bf2}: {far} m out");
+    }
+}
+
+#[test]
+fn coming_back_inside_clears_the_countdown_and_inside_it_never_starts() {
+    let (mut sim, _, _) = setup(true);
+    sim.boundary = square(20.0);
+    launch(&mut sim);
+    run(&mut sim, PadState::default(), 5.0);
+    assert_eq!(sim.droids[0].leaving, None, "hovering inside");
+    sim.droids[0].pos.z = -30.0;
+    let before = sim.hash();
+    sim.droids[0].leaving = Some(1.0);
+    assert_ne!(sim.hash(), before, "the countdown is sim state");
+    sim.droids[0].leaving = None;
+    run(&mut sim, PadState::default(), 5.0);
+    let left = sim.droids[0].leaving.expect("outside");
+    assert!((1.4..1.6).contains(&left), "{left} s left");
+    sim.droids[0].pos.z = 0.0;
+    run(&mut sim, PadState::default(), 0.1);
+    assert_eq!(sim.droids[0].leaving, None, "back inside");
+    sim.droids[0].pos.z = -30.0;
+    run(&mut sim, PadState::default(), 5.0);
+    assert!(
+        !sim.droids.is_empty(),
+        "the next excursion starts from 6.5 s"
+    );
+}
+
+#[test]
+fn the_invincibility_cheat_spares_the_players_droid_at_the_boundary() {
+    let (mut sim, _, _) = setup(true);
+    sim.boundary = square(20.0);
+    sim.cheats.invincible = true;
+    launch(&mut sim);
+    sim.droids[0].pos.z = -30.0;
+    run(&mut sim, PadState::default(), 7.0);
+    assert!(!sim.droids.is_empty());
+}
+
+/// Where no ground lies under it (past the floors of BF2 MYG1 or UTA1, which have
+/// no terrain and no boundary) the stick has nothing to drive against: the droid
+/// falls and is destroyed at the world's floor, not far from where it left. It
+/// used to take `NO_GROUND` for ground and fly on 300 m under the map.
+#[test]
+fn a_droid_with_no_ground_under_it_falls_out_of_the_map() {
+    let drift = |pad: PadState| {
+        let (mut sim, owner, _) = setup(true);
+        sim.heightfield = None;
+        launch(&mut sim);
+        let start = sim.droids[0].pos;
+        let feet = sim.unit(owner).unwrap().soldier.pos;
+        let (mut drift, mut events) = (0.0f32, Vec::new());
+        for _ in 0..(30.0 / TICK_DT) as usize {
+            sim.step(&[pad]);
+            events.extend(sim.events.iter().cloned());
+            // The owner stands on something; only the droid is out over nothing.
+            let u = sim.unit_mut(owner).unwrap();
+            (u.soldier.pos, u.soldier.vel) = (feet, Vec3::ZERO);
+            if let Some(d) = sim.droids.first() {
+                drift = drift.max(d.pos.with_y(0.0).distance(start.with_y(0.0)));
+            }
+        }
+        assert_eq!(gone(&events), [DroidEnd::Destroyed]);
+        drift
+    };
+    let (driven, coasting) = (drift(FORWARD), drift(PadState::default()));
+    assert!((driven - coasting).abs() < 0.01, "{driven} / {coasting} m");
+}

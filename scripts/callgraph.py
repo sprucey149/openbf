@@ -176,7 +176,7 @@ def scan_elf_data_pointers(elf_path, census_addrs):
     32-bit LE ELF for 4-byte words whose value equals a census function
     start address. These are vtable slots / callback tables / function
     pointers in initialized data — the call targets that indirect calls
-    ('(**(code **)...)' in the decomp) reach but that never appear as a
+    (through a function pointer in the decomp) reach but that never appear as a
     textual FUN_ reference. Returns set of function addrs found in data.
     """
     import struct

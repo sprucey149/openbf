@@ -357,7 +357,7 @@ impl Sim {
             d.pitch += PadState::axis(pad.ry) * pitch_rate * dt;
             (d.yaw, d.pitch) = d.mouse_turned(c, pad.look(), look);
             let (floor, normal) = self.ground_point_under_n(d.pos, d.pos.y);
-            let ground = (floor > crate::sticky::WORLD_FLOOR).then_some((d.pos.y - floor, normal));
+            let ground = (floor > crate::collision::NO_GROUND).then_some((d.pos.y - floor, normal));
             d.fly(
                 c,
                 dt,
@@ -372,6 +372,15 @@ impl Sim {
             } else {
                 Some(DroidEnd::Destroyed)
             };
+            // The cheat spares a human's own, as the boundary's kill does (T1).
+            let time = crate::boundary::leaving_time(self.ground_rules);
+            let outside = self.boundary.outside(d.pos.x, d.pos.z);
+            if d.tick_leaving(outside, time, dt)
+                && end.is_none()
+                && !(self.cheats.invincible && controller != Controller::Ai)
+            {
+                end = Some(DroidEnd::Destroyed);
+            }
             let press = pad.pressed(buttons::SECONDARY_FIRE)
                 && d.prev_buttons & buttons::SECONDARY_FIRE == 0;
             if let Some(t) = d.charge {
@@ -474,6 +483,16 @@ impl Sim {
 
     fn droid_walls(&self, d: &mut Droid) {
         if let Some(hf) = &self.heightfield {
+            // [ours] Issue #59: the sheet's end stops a droid. The PS2 has no such
+            // rule, and on a map with no boundary its droid flies on past the
+            // terrain until its energy runs out.
+            let (x, z) = hf.clamp_xz(d.pos.x, d.pos.z);
+            if x != d.pos.x {
+                (d.pos.x, d.vel.x) = (x, 0.0);
+            }
+            if z != d.pos.z {
+                (d.pos.z, d.vel.z) = (z, 0.0);
+            }
             let t = hf.height_at(d.pos.x, d.pos.z) + RADIUS;
             if d.pos.y < t && !self.collision.is_cut(d.pos) {
                 d.pos.y = t;

@@ -324,6 +324,7 @@ fn a_remote_droid_is_flown_through_and_struck_but_his_own_is_not() {
             prev_buttons: 0,
             blaster: crate::weapon::WeaponState::with_clips(&sim.weapon_classes[1], false, 0),
             charge: None,
+            leaving: None,
         });
         let health = sim.droids[0].health;
         sim.heightfield = None;

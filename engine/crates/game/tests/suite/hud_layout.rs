@@ -921,3 +921,115 @@ fn census_weapons_shown_with_another_weapons_hud_model() {
         println!("{game}: {old_off} rows off under the old rule, {now_off} now");
     }
 }
+
+fn gauge_model(ring: f32, refire: f32, overheated: bool) -> ui::hud::HudModel {
+    ui::hud::HudModel {
+        gauge: ui::hud::HudGauge {
+            ring,
+            refire,
+            overheated,
+        },
+        ..hot1_post_a()
+    }
+}
+
+/// The lit segments the layout's segmented bar shows for its value, as
+/// `hud_draw::segmented` draws them: k of n while k / n < value.
+fn lit(hud: &ui::hud_tree::Hud, name: &str) -> usize {
+    let e = &hud.elems[hud.find(name).unwrap_or_else(|| panic!("no {name}"))];
+    (0..e.segments)
+        .take_while(|k| (*k as f32 / e.segments as f32) < e.value - 1.0e-4)
+        .count()
+}
+
+/// Issue #78 on BF2's own layout (`analysis/re-heat-hud.md` 1, 2): the 30-segment
+/// ring lights with the value, cold lighting none, and its colour runs by the
+/// layout's own table from yellow to orange. Overheated, the line comes up and
+/// the two 3-segment red bits show `refire`, and clear when the weapon does.
+#[test]
+fn the_heat_ring_and_its_overheat_signs_follow_the_gauge() {
+    let common = baked().join("common_bf2/hud");
+    if !common.join("1playerhud.ron").is_file() {
+        eprintln!("SKIP: no baked BF2 HUD");
+        return;
+    }
+    let read = |f: &str| -> manifest::hud::HudLayout {
+        ron::from_str(&std::fs::read_to_string(common.join(f)).unwrap()).unwrap()
+    };
+    let mut hud = ui::hud_tree::Hud::new(&read("1playerhud.ron"), &read("hudtransforms.ron"));
+    let at = |hud: &mut ui::hud_tree::Hud, ring, refire, overheated| {
+        ui::hud::feed(hud, &gauge_model(ring, refire, overheated), &|_| false);
+        hud.advance(0.05);
+    };
+    let ring = "player1weapon1heatbar";
+    let i = hud.find(ring).expect("the ring");
+    assert_eq!(hud.elems[i].segments, 30);
+    for (value, want, color) in [
+        (0.0, 0, [239.0, 255.0, 41.0]),
+        (0.5, 15, [239.0, 174.0, 41.0]),
+        (1.0, 30, [239.0, 106.0, 41.0]),
+    ] {
+        at(&mut hud, value, 0.0, false);
+        assert_eq!(lit(&hud, ring), want, "ring at {value}");
+        assert_eq!(hud.elems[i].color, color, "colour at {value}");
+    }
+    let line = hud.find("player1weapon1overheat").expect("the line");
+    let bits = "player1weapon1refire_leftbit";
+    assert_eq!(hud.elems[line].fader.state, 0, "off before it overheats");
+    at(&mut hud, 1.0, 0.75, true);
+    assert_ne!(hud.elems[line].fader.state, 0, "on while overheated");
+    assert_eq!(lit(&hud, bits), 3, "1 - 0.25 / 1.0 of three");
+    at(&mut hud, 0.5, 0.5, true);
+    assert_eq!(lit(&hud, bits), 2, "1 - 0.25 / 0.5 of three");
+    at(&mut hud, 0.2, 0.0, false);
+    assert_eq!(lit(&hud, bits), 0, "cleared");
+    for _ in 0..60 {
+        at(&mut hud, 0.1, 0.0, false);
+    }
+    assert_eq!(hud.elems[line].fader.state, 0, "the line has faded");
+}
+
+/// The two red bits grow from 6 o'clock outward both ways, one the other's mirror
+/// image round the reticle (`re-heat-hud.md` 1, 6), and the line reads "OVERHEATED!".
+#[test]
+fn the_refire_bits_meet_under_the_reticle_and_the_line_shows() {
+    let Some(mut v) = view([640, 480]) else {
+        return;
+    };
+    let hot = gauge_model(1.0, 0.75, true);
+    v.update(&hot, 0.3, [640, 480]);
+    let left = v.bounds("player1weapon1refire_leftbit").expect("left");
+    let right = v.bounds("player1weapon1refire_rightbit").expect("right");
+    println!("left {left:?} right {right:?}");
+    near("the left bit's near end", left[2], 320.0, 8.0);
+    near("the mirror's near end", right[0], 640.0 - left[2], 1.0);
+    near("the mirror's far end", right[2], 640.0 - left[0], 1.0);
+    near("the same height", right[1], left[1], 1.0);
+    assert!(v.bounds("player1weapon1overheat").is_some(), "the line");
+}
+
+/// A cold or absent gauge draws nothing round the reticle, so the golden frames do
+/// not move: the ring's own box stays empty until a value lights it.
+#[test]
+fn the_ring_draws_only_when_lit() {
+    let Some(mut v) = view([640, 480]) else {
+        return;
+    };
+    let ring = "player1weapon1heatbar";
+    v.update(&hot1_post_a(), 1.0, [640, 480]);
+    assert_eq!(v.bounds(ring), None, "cold");
+    v.update(&gauge_model(0.5, 0.0, false), 1.0, [640, 480]);
+    let b = v.bounds(ring).expect("half hot");
+    println!("half hot: {b:?}");
+    let (w, h) = (b[2] - b[0], b[3] - b[1]);
+    assert!(w > 20.0 && h > 20.0, "a ring round the reticle: {b:?}");
+    v.update(
+        &ui::hud::HudModel {
+            weapon: None,
+            ..gauge_model(0.5, 0.0, false)
+        },
+        1.0,
+        [640, 480],
+    );
+    assert_eq!(v.bounds(ring), None, "no weapon, no ring");
+}

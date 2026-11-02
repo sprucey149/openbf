@@ -4,6 +4,12 @@ Status 2026-11-01. Both Xbox discs now read through `mungefs` and bake. What tha
 does and does not give a build is below; all counts are measured on the local
 trimmed discs.
 
+`scripts/pack.py` does not take them yet: `XBOX_SUPPORTED` in `scripts/input_scan.py`
+is false, so a build reports an Xbox disc as recognized and not read. `rebake.sh`
+has no gameplay check of its own, which only `bake xbox` makes, and an Xbox disc
+standing alone would bake its drift without a refusal. The commands under "Calling
+it" work by hand.
+
 ## Readers, and how each was proved
 
 | Format | Where | Check on real data |

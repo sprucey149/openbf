@@ -99,8 +99,8 @@ pub struct Hint {
 pub struct Barrier {
     pub name: String,
     /// AS STORED. The loaders NEGATE the translation's z when they build the
-    /// world-space barrier (BF1 `FUN_00177828`, BF2 `FUN_00178ae8`:
-    /// `fStack_f8 = -fStack_f8`) and the disc agrees — barriers only fit the
+    /// world-space barrier (BF1 `FUN_00177828`, BF2 `FUN_00178ae8`
+    /// negate its z) and the disc agrees — barriers only fit the
     /// instances with z flipped. Callers that want a world position must do
     /// the flip; `bake::map` does.
     pub transform: Transform,

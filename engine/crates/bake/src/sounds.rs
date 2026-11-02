@@ -716,7 +716,7 @@ mod tests {
     #[test]
     fn every_shipped_sounds_ron_re_serializes_byte_identically() {
         let root = Path::new(crate::BAKED_ROOT);
-        if !root.exists() {
+        if !crate::baked_root_has_data() {
             eprintln!("SKIP: assets_baked not present");
             return;
         }

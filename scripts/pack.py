@@ -85,7 +85,8 @@ def install_pack(new, new_pak, out, pak):
     One-file builds drop only an archive the previous --out relied on; another build's stays.
     Returns True when the build is an executable plus the archive.
     """
-    split = os.path.exists(new_pak)
+    # A run killed mid-write leaves new_pak behind and a one-file build never touches it: ask the executable.
+    split = os.path.exists(new_pak) and not carries_pack(new)
     relied_on_pak = os.path.exists(pak) and os.path.exists(out) and not carries_pack(out)
     try:
         if split:

@@ -4,7 +4,7 @@ title: The weapon heat gauge on the HUD: a weapon that heats (the pistol, the se
 milestone: M3
 value: 4
 phase: build
-status: blocked
+status: done
 deps:
 files: engine/crates/ui/src/hud.rs, engine/crates/ui/src/hud_tree.rs, engine/crates/ui/src/hud_draw.rs, engine/crates/game/src/hud_feed.rs, engine/crates/game/src/main/battle.rs
 declares:
@@ -67,3 +67,6 @@ clip ring); BHUD3 listed it among many - this card takes it out of BHUD3 so it d
 Do: 1. RE: BF1's element (re-hud*.md, the HUD tree / code), and when each game shows it (heat > 0 only? the overheat
 line?). 2. Build for every heat weapon the sim models (soldier weapons and seat guns; BRSTU's heat model), the overheat
 state as on the PS2. WHUM owns the overheat sound.
+
+## Result (issue #78, 2026-11-01)
+Built on foot and in seats, with the charge on the ring: `analysis/re-heat-hud.md` 7.1. Tests: `game/tests/suite/hud_layout.rs` (ring 0 / 15 / 30 segments, colour, line, bits on BF2's layout), `weapon_gauge.rs` (sim to gauge: pistol, charge, turret and vehicle gun, both games). The port's frames from `examples/hud_capture.rs` (`HUD_HEAT`, `HUD_REFIRE`) were looked at beside the PS2's `lead_tmp/ovht/ps2/bf2_pistol/` overheated and cooling frames (`re-heat-hud.md` 7.1); no strip was saved, and BF1's frames were not compared.

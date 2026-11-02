@@ -43,7 +43,8 @@ fn ktx2_size(path: &Path) -> (u32, u32) {
 #[test]
 fn the_tier2_files_and_the_manifest_lists_agree() {
     let assets = baked_root();
-    if !assets.is_dir() {
+    // Absent or an empty data link. Anything in it is a bake, held to the count below.
+    if !std::fs::read_dir(&assets).is_ok_and(|mut d| d.next().is_some()) {
         eprintln!("SKIP: no assets_baked");
         return;
     }

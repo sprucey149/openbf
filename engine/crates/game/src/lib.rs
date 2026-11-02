@@ -35,6 +35,7 @@ pub mod hud_feed;
 pub mod input_icons;
 pub mod kbm;
 pub mod layout;
+pub mod map_boundary;
 pub mod matchlog;
 pub mod minimap;
 pub mod mission;

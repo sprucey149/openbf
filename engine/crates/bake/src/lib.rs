@@ -160,3 +160,11 @@ pub fn resolve_ci(path: &str) -> String {
 /// FOR THE LEAD: that dependency edge is the reason for the duplication.
 #[cfg(test)]
 pub(crate) const BAKED_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets_baked");
+
+/// Whether `BAKED_ROOT` holds a bake. False when it is absent or an empty data
+/// link, where a data-gated test skips; anything in it counts as a bake, so a
+/// test's own "only N found" count still catches a stale one.
+#[cfg(test)]
+pub(crate) fn baked_root_has_data() -> bool {
+    std::fs::read_dir(BAKED_ROOT).is_ok_and(|mut d| d.next().is_some())
+}

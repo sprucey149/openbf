@@ -523,6 +523,7 @@ pub(super) fn hud_model(
     let slot = me.spec.player_slot.map_or(0, usize::from);
     // On foot the soldier's rows; flying, the droid's.
     let [weapon, weapon2] = game::hud_feed::weapon_rows(walk);
+    let gauge = game::hud_feed::weapon_gauge(walk);
     let reticle =
         (on_foot || droid.is_some() || guided.is_some() || game::hud_feed::armed_seat(walk)).then(
             || {
@@ -562,6 +563,7 @@ pub(super) fn hud_model(
         energy_max,
         weapon,
         weapon2,
+        gauge,
         reticle,
         // The reticle's pick by name and health (card HTGT).
         target: on_foot.then(|| feed.target(&walk.sim, slot)).flatten(),

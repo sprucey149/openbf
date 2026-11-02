@@ -75,6 +75,18 @@ fn map_local_and_all_side_databases_preserve_the_equipment_census() {
     }
 }
 
+/// The guided-flight tests read one launcher out of the BF2 class bake. A class
+/// bake without that launcher still fails in `guided_walk`: that is a stale bake.
+fn bf2_classes_baked() -> bool {
+    let baked = game::assets::baked_root()
+        .join("classes/bf2_all.ron")
+        .exists();
+    if !baked {
+        eprintln!("SKIP: no BF2 class bake");
+    }
+    baked
+}
+
 fn guided_walk() -> game::walk::WalkSim {
     let root = game::assets::baked_root();
     let db = load_classdb(&root.join("classes"), "bf2", &["all"]).unwrap();
@@ -110,6 +122,9 @@ fn guided_walk() -> game::walk::WalkSim {
 
 #[test]
 fn guided_turning_uses_display_interpolation_with_mouse_and_controller_input() {
+    if !bf2_classes_baked() {
+        return;
+    }
     for hz in [60, 75, 144] {
         for mouse in [false, true] {
             let mut walk = guided_walk();
@@ -162,6 +177,9 @@ fn guided_turning_uses_display_interpolation_with_mouse_and_controller_input() {
 
 #[test]
 fn guided_camera_and_interpolation_restore_the_sim_exactly() {
+    if !bf2_classes_baked() {
+        return;
+    }
     let mut walk = guided_walk();
     let initial = walk.camera();
     assert_eq!(initial.position, Vec3::new(0.0, 13.0, -17.0));

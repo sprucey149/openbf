@@ -32,6 +32,12 @@ overlap, writes the float at flyer+`0x668`, and sets bit 5 at +`0x660`
 refreshed (B2:116574–116580). These are hangar/landing caps, not generic
 BF2 speed caps and not a distinction between atmospheric and space physics.
 
+**Not installed yet.** The sim implements these rules against
+`Sim::landing_regions`, but only tests fill that list: `scripts/gen_missions.py`
+does not read `AddLandingRegion`, and no mission loader sets the list. BF2's
+mission scripts do make the call. So in a real round the landing-region speed
+caps and the gun block never apply, and a BF2 flyer may land anywhere.
+
 ## State and speed laws
 
 State 0 is landed, 1 takeoff, 2 flying, 3 landing, 4 uncontrolled falling.

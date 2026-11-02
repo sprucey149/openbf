@@ -51,6 +51,21 @@ impl Heightfield {
         (ix, iz, fx * inv - ix as f32, fz * inv - iz as f32)
     }
 
+    /// (x, z) held on the sheet's rectangle; unchanged when already on it.
+    pub fn clamp_xz(&self, x: f32, z: f32) -> (f32, f32) {
+        let max = (self.size - 1) as f32 * self.unit;
+        let hold = |v: f32, offset: f32| {
+            if v + offset < 0.0 {
+                -offset
+            } else if v + offset > max {
+                max - offset
+            } else {
+                v
+            }
+        };
+        (hold(x, self.offset_x), hold(z, self.offset_z))
+    }
+
     /// The unit up-facing normal of the triangle [`Heightfield::height_at`]
     /// lerps on at (x, z) — BF1 FUN_00473e08, which picks the triangle by the
     /// same z-row parity split (analysis/re-foliage.md §6: the terrain foliage

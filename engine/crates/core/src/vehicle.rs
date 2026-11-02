@@ -482,7 +482,7 @@ pub fn impact_damage(
 }
 
 /// The descriptor a collision deals its damage through: all seven HealthType
-/// scales 1.0 (the loop over `auStack_94`, B1:100006-100014), so a hull takes
+/// scales 1.0 (a loop over a stack table, B1:100006-100014), so a hull takes
 /// the raw amount whatever its HealthType. `shield_scale` 1.0 [H] (no vehicle
 /// ships a shield, §6).
 pub fn collision_desc(damage: f32) -> crate::weapon::DamageDesc {

@@ -1376,6 +1376,17 @@ impl WeaponState {
         self.reload_timer > 0.0
     }
 
+    /// A charge weapon's charge while the trigger is held, 0..1; `None` when it
+    /// is not charging (BF2 weapon state 3, `FUN_0032ee30`; the HUD reads it).
+    pub fn charging(&self, c: &WeaponClass) -> Option<f32> {
+        let holding = c.max_pressed_time > 0.0
+            && self.state == FireState::Idle
+            && self.active
+            && !self.reloading()
+            && self.fire_cmd > 0;
+        holding.then(|| (self.refire_accum / c.max_pressed_time).clamp(0.0, 1.0))
+    }
+
     /// Effective half-angles at fire time (vtbl+0x44 / +0x40).
     pub fn pitch_spread(&self, c: &WeaponClass) -> f32 {
         self.spread.max(0.0) + self.posture_base + c.pitch_spread

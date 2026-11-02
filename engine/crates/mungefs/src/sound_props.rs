@@ -111,7 +111,7 @@ fn f(node: &ConfigNode) -> Option<f32> {
 }
 
 /// A take entry's lock: the PS2 reads the interval and its deviation only
-/// from an entry of exactly four values (B1 `FUN_0046af20`: `lVar4 == 4`).
+/// from an entry of exactly four values (B1 `FUN_0046af20`).
 fn take_lock(node: &ConfigNode) -> (f32, f32) {
     if node.values.len() == 4 {
         (node.f32(2).unwrap_or(0.0), node.f32(3).unwrap_or(0.0))

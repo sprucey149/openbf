@@ -32,7 +32,7 @@
 //!   and a second row made perpendicular to it (FUN_001ac6f8, 0x20bba4-
 //!   0x20bc28 — which entity's row is forward is unresolved [H]); the port's
 //!   is world up and the body's heading, PROVISIONAL. When the exit is a
-//!   seat change (param_2), an AI in a type-2 seat is moved into the one
+//!   seat change (its second argument), an AI in a type-2 seat is moved into the one
 //!   left (B1:120689-120718) — VAI's. BF2's best-height pick among the
 //!   candidates is [H] and not modelled. A building turret (card VTURB)
 //!   skips the path test: its origin sits inside its own collision mesh,

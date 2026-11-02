@@ -44,7 +44,7 @@ use render::DrawCmd;
 pub const STATION_BASE: &str = "powerupstation";
 
 /// The serving swing's amplitude (rad) of an `ActiveRotateNode`
-/// (B1 235944: `fVar24 * 0.15`, §6).
+/// (B1 235944, §6).
 pub const ARM_SWING: f32 = 0.15;
 
 pub use core::sim::StationMotion as StationAnimState;

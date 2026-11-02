@@ -509,6 +509,8 @@ impl Scene {
         let (world, doors) = self.collision_and_doors();
         sim.collision = world;
         sim.doors = doors;
+        let key = self.dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        sim.boundary = crate::map_boundary::boundary(key, &self.manifest.paths);
     }
 
     /// Install the water level and WMAP wet cells together for every sim loader.

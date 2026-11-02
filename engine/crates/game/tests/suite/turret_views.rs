@@ -512,6 +512,83 @@ fn the_zoomed_eye_is_where_the_ps2s_camera_stood() {
     );
 }
 
+type ThirdPersonRow = (&'static str, [f32; 3], (f32, f32), [f32; 3], [f32; 3]);
+
+/// The unzoomed camera on the PS2's settled RAM rows, the same captures as
+/// [`PS2_ZOOM_ROWS`]: `(map, turret, look, camera, forward)`. BF1 NAB1's
+/// `1_rest` and `a_settle`, BF2 MYG1's `1_rest` and `6_after`. The rows taken
+/// mid-turn are left out: the PS2's camera had not caught up with them.
+const PS2_THIRD_PERSON_ROWS: [ThirdPersonRow; 4] = [
+    (
+        "bf1_nab1",
+        [37.165, -99.076, 195.742],
+        (0.0, 0.0),
+        [37.7152, -96.9471, 199.1485],
+        [-0.1588, -0.0872, -0.9834],
+    ),
+    (
+        "bf1_nab1",
+        [37.165, -99.076, 195.742],
+        (0.44958, -0.691101),
+        [37.9106, -95.2362, 196.8094],
+        [-0.4078, -0.7021, -0.5838],
+    ),
+    (
+        "bf2_myg1",
+        [-118.159, 0.0, 302.01],
+        (1.200001, -0.349066),
+        [-118.5744, 5.1776, 303.1233],
+        [-0.4523, -0.342, -0.8237],
+    ),
+    (
+        "bf2_myg1",
+        [-118.159, 0.0, 302.01],
+        (0.641852, -0.015732),
+        [-119.1935, 4.6388, 304.383],
+        [0.056, -0.0157, -0.9983],
+    ),
+];
+
+/// Issue #71: `TrackCenter` and `TrackOffset` on the aim frame at the turret node
+/// put the third-person camera where the PS2's stood, in both games.
+/// Mutation: the turret back on `vehicle_camera` -> off by metres.
+#[test]
+fn the_third_person_camera_is_where_the_ps2s_camera_stood() {
+    for (map, at, look, eye, fwd) in PS2_THIRD_PERSON_ROWS {
+        let Some(mut w) = world(map, ["rep", "cis"]) else {
+            eprintln!("SKIP {map}: not baked");
+            continue;
+        };
+        let at = Vec3::from(at);
+        let h = w
+            .walk
+            .sim
+            .alive_vehicles()
+            .filter(|(_, v)| v.kind == core::vehicle::VehicleKind::Turret)
+            .min_by(|a, b| a.1.pos.distance(at).total_cmp(&b.1.pos.distance(at)))
+            .map(|(h, _)| h)
+            .expect("a turret");
+        let ci = w.walk.sim.vehicle(h).unwrap().class as usize;
+        let seat = w.walk.sim.seat_setup[ci]
+            .as_ref()
+            .and_then(|s| s.guns.iter().position(Option::is_some))
+            .expect("a gunner seat");
+        let player = w.walk.player;
+        assert!(w.walk.sim.seat_unit(player, h, seat as u8));
+        w.walk.step_tick(&[PadState::default()]);
+        w.walk.sim.vehicle_mut(h).unwrap().guns[seat]
+            .as_mut()
+            .unwrap()
+            .look = look;
+        let cam = w.walk.camera();
+        let off = cam.position.distance(Vec3::from(eye));
+        let ang = cam.forward().angle_between(Vec3::from(fwd)).to_degrees();
+        println!("{map} look {look:?}: {off:.4} m, {ang:.3} deg from the PS2's camera");
+        assert!(off < 0.01, "{map}: {off} m from the PS2's camera");
+        assert!(ang < 0.1, "{map}: {ang} deg off the PS2's forward");
+    }
+}
+
 /// Check the returned commands, including the transforms that distinguish
 /// two buildings sharing a mesh, against the scene with only `hidden` removed.
 fn assert_view_draws(

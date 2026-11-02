@@ -292,7 +292,7 @@ struct Model<'a> {
     inv: &'a Inventory,
     reg: &'a Registry,
     rec: HashMap<(usize, usize), Vec<Slot>>,
-    /// The set being built is a root set (`uStack_34c`): the lookups it
+    /// The set being built is a root set (a local flag of the PS2 function): the lookups it
     /// starts on its ancestors' records use ITS answer.
     ctx_root: bool,
 }

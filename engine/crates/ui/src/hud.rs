@@ -38,6 +38,21 @@ pub struct HudWeapon {
     pub clip_fraction: f32,
 }
 
+/// The heat ring and its overheat signs around the reticle
+/// (`analysis/re-heat-hud.md` 1, 2). The model carries them for the first row's
+/// weapon, as BF2's layout has the ring for weapon 1 alone.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct HudGauge {
+    /// What the ring shows, 0..1: an unlimited weapon's heat, a counted weapon's
+    /// charge while the trigger is held, else 0.
+    pub ring: f32,
+    /// The two red bits under the reticle while overheated, 0..1, shrinking to
+    /// nothing at the mark where the weapon clears.
+    pub refire: f32,
+    /// Either row's weapon is locked: the "OVERHEATED!" line.
+    pub overheated: bool,
+}
+
 /// One event line for the message box (`player1.message` after its
 /// `player1.message.color`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -142,6 +157,7 @@ pub struct HudModel {
     /// The secondary channel's current weapon — the grenade row (card GREN);
     /// `None` = the row is off.
     pub weapon2: Option<HudWeapon>,
+    pub gauge: HudGauge,
     /// The reticle: `None` hides it; else the relation of what the crosshair
     /// picks (−1 enemy, 1 friend, 0 nothing) — `Sim::reticle_pick`. A
     /// [`HudModel::target`] colours it instead.
@@ -401,6 +417,23 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
             &format!("player1.team{slot}.bleedRate"),
             EventValue::Number(period),
         );
+    }
+
+    // Sent every frame, as the PS2's publisher sends them unconditionally
+    // (`re-heat-hud.md` 2): the line holds and fades on the last send, and the
+    // ring's colour transform follows each value.
+    if alive && m.weapon.is_some() {
+        let g = &m.gauge;
+        let (ring, refire) = (g.ring.clamp(0.0, 1.0), g.refire.clamp(0.0, 1.0));
+        hud.send("player1.weapon1.heat", EventValue::Number(ring), has_mesh);
+        hud.send(
+            "player1.weapon1.refire",
+            EventValue::Number(refire),
+            has_mesh,
+        );
+        if g.overheated {
+            hud.send("player1.weaponsOverheat", EventValue::None, has_mesh);
+        }
     }
 
     // The reticle sits where the aim ray goes on screen (card AIMA).
@@ -828,6 +861,7 @@ mod tests {
 
     fn model() -> HudModel {
         HudModel {
+            gauge: Default::default(),
             team_names: ["rep".into(), "cis".into()],
             tickets: [150, 143],
             bleed: [0.0; 2],

@@ -73,7 +73,7 @@ pub struct Door {
     /// the renderer moves.
     pub instance: usize,
     /// The instance's world position, where its sounds play (the disc plays
-    /// them at the entity, `piVar13 + 0x54`).
+    /// them at the entity, its field at +0x54).
     pub origin: Vec3,
     /// The ODF's `OpenSound` / `CloseSound`.
     pub open_sound: Option<String>,

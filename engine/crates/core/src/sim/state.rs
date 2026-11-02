@@ -780,8 +780,11 @@ pub struct Sim {
     pub walker_params: Vec<Option<crate::vehicle::walker::WalkerParams>>,
     /// PS2 flyer class parameters; absent for other vehicle kinds. Setup only.
     pub flyer_params: Vec<Option<crate::vehicle::flyer::FlyerParams>>,
-    /// Mission flight bands and AddLandingRegion volumes, setup only.
+    /// Mission flight bands, setup only.
     pub flight_limits: super::flyers::FlightLimits,
+    /// `AddLandingRegion` volumes, setup only. Nothing fills this outside tests
+    /// yet (`scripts/gen_missions.py` does not read the call), so every map runs
+    /// as one with no landing regions (`analysis/re-flyer.md`).
     pub landing_regions: Vec<Region>,
     /// Do bots board and fly flyers? Setup only. Off on ground maps, so their
     /// AI choices and hash stream stay as they were (`game::vehicle_pads`).
@@ -923,6 +926,8 @@ pub struct Sim {
     /// floor under water.
     pub water_level: Option<f32>,
     pub water_mask: Option<crate::water::WetMask>,
+    /// The map's boundary shapes; set once when the map loads, so not hashed.
+    pub boundary: crate::boundary::Boundary,
     /// Card HOLD: the grenades lying on the ground ([`Hazard`]). SIM STATE —
     /// hashed, when there are any, so a round with none hashes as before.
     pub hazards: Vec<Hazard>,
@@ -1433,6 +1438,7 @@ impl Sim {
             fly_ceiling: crate::soldier::DEFAULT_FLY_CEILING,
             water_level: None,
             water_mask: None,
+            boundary: Default::default(),
             hazards: Vec::new(),
             last_warning_id: 0,
             kill_floor: None,

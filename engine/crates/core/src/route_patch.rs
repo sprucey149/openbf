@@ -5,8 +5,8 @@
 //! hops re-read for DR3): a `plnp` names up to eight blockable GROUPS of arcs
 //! (fnv1a of the arc names) and ships one XOR patch per blocked-group bitmask,
 //! record 0 being "all open" (`hubCount` zero bytes). The planning object keeps
-//! the current mask at +0x2c; its constructor `FUN_002ead18` zeroes it
-//! (`puVar1[0xb] = 0`), so every map starts on the table as authored. The
+//! the current mask at +0x2c; its constructor `FUN_002ead18` zeroes it,
+//! so every map starts on the table as authored. The
 //! three Lua verbs mask the group bits in (`FUN_002ebe28`, `|`), out
 //! (`FUN_002ebea8`, `& ~`) or toggle them (`FUN_002ebda8`, `^`); a name's
 //! group is the first group whose hash list holds it (`FUN_002ebcc0`), an

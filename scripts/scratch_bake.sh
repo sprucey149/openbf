@@ -58,7 +58,7 @@ trap 'rm -f "$GEN"' EXIT
 awk -v root="$ROOT" -v out="$out_abs" -v bake="${BAKE:-}" '
   $0 == "ROOT=\"$(cd \"$(dirname \"${BASH_SOURCE[0]}\")/..\" && { pwd -W 2>/dev/null || pwd; })\"" {
     print "ROOT=\"" root "\""; n_root++; next }
-  $0 == "OUT=\"$ROOT/engine/assets_baked\"" {
+  $0 == "OUT=\"${REBAKE_OUT:-$ROOT/engine/assets_baked}\"" {
     print "OUT=\"" out "\""; n_out++; next }
   $0 == "BAKE=\"${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/bake\"" {
     print (bake == "" ? $0 : "BAKE=\"" bake "\"")

@@ -44,6 +44,7 @@ mod rocket_weakspot;
 mod roster;
 mod route_patch;
 mod sbd;
+mod seat_camera;
 mod shell_layout;
 mod skinned_glb;
 mod skirt_climb;
@@ -72,6 +73,7 @@ mod water_floor;
 mod water_fx;
 mod water_look;
 mod weapon_classdb;
+mod weapon_gauge;
 mod weather_ps2;
 
 mod aim_hits;

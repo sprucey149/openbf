@@ -16,6 +16,8 @@
 //! counted weapon held before it (what a switch leaves behind).
 //! Card BMAP's: the minimap is drawn from the golden camera, or from
 //! `HUD_MAP_EYE="x,z,heading degrees"` (re-hud-map's eye and θ).
+//! Issue #78's: `HUD_HEAT=0.5` lights the ring, `HUD_REFIRE=0.75` overheats the
+//! weapon, with the line and the red bits.
 
 use anyhow::{anyhow, Context, Result};
 use game::viewer::{camera_from, upload_scene, GOLDEN_CAM};
@@ -73,6 +75,14 @@ fn main() -> Result<()> {
                 clip_fraction: 1.0,
                 bf2,
             }),
+        gauge: {
+            let num = |k: &str| std::env::var(k).ok().and_then(|v| v.parse::<f32>().ok());
+            ui::hud::HudGauge {
+                ring: num("HUD_HEAT").unwrap_or(0.0),
+                refire: num("HUD_REFIRE").unwrap_or(0.0),
+                overheated: num("HUD_REFIRE").is_some(),
+            }
+        },
         reticle: Some(0),
         // `HUD_GAME=bf1` puts the reticle at BF1's height.
         reticle_y: game::walk::ps2_reticle_y(
@@ -118,6 +128,10 @@ fn main() -> Result<()> {
     // Past the weapon rows' fades.
     if std::env::var_os("HUD_FIRST").is_some() {
         hud.update(&model, 1.0, [w, h]);
+    }
+    // The first update's long settle outlasts the overheat line: send it again.
+    if std::env::var_os("HUD_REFIRE").is_some() {
+        hud.update(&model, 0.3, [w, h]);
     }
     let lines: Vec<ui::hud::HudMessage> = std::env::var("HUD_LINE")
         .unwrap_or_default()

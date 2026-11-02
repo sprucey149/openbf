@@ -139,6 +139,7 @@ fn the_blade_cuts_an_enemys_remote_droid_but_not_his_own() {
             prev_buttons: 0,
             blaster,
             charge: None,
+            leaving: None,
         });
         sim.saber_inputs(&mut [PadState {
             buttons: buttons::FIRE,

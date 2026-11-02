@@ -48,7 +48,7 @@ class Annotate(unittest.TestCase):
 
     def test_pointer_form(self):
         # Ghidra prints RollIn (0x1ce8c2e1) as an address: B1 line 32629 of the
-        # real corpus reads `apuStack_9c[0] == &DAT_1ce8c2e1`.
+        # real corpus compares a stack array element with `&DAT_1ce8c2e1`.
         table, _ = ann.name_table(['RollIn', 'GeometryName'])
         text = 'a == &DAT_1ce8c2e1 && b == &UNK_1ce8c2e1\n'
         result, counts = ann.annotate(text, table)

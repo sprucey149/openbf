@@ -56,7 +56,7 @@ pub const CAMERA_RADIUS: f32 = 0.35;
 /// would only wall the view off, so it goes and the view is his aim's.
 pub const BODY_HIDE_DIST: f32 = 1.2;
 /// The rate a pulled-in camera returns at (track fraction per second) and
-/// the rise it waits for (B1 `FUN_0019fd70`: `param_2 * 0.75`, `+ 0.15`).
+/// the rise it waits for (B1 `FUN_0019fd70`: 0.75 and 0.15).
 pub const PULL_RETURN_RATE: f32 = 0.75;
 pub const PULL_RETURN_STEP: f32 = 0.15;
 /// A map instance whose model is at most this wide (m, the larger of its two

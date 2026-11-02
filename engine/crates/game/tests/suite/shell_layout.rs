@@ -36,7 +36,11 @@ const PX_Y: f32 = 480.0 / 448.0;
 #[test]
 fn the_stacks_sit_where_the_ps2_draws_them() {
     let Some(font) = font() else {
-        panic!("bake common first: no gamefont_large in the BF2 common bake");
+        if !game::assets::baked_root().join("common_bf2").is_dir() {
+            eprintln!("SKIP: no BF2 common bake");
+            return;
+        }
+        panic!("stale common bake: no gamefont_large in the BF2 common bake");
     };
     let main = stack(
         "Main Menu",

@@ -153,6 +153,20 @@ read every update, five frames each; (6) a census of heat weapons on both discs'
 - Not this card: the charge on the ring (counted charge weapons) and the state-4 refire bits (BHUD3's); the reticle
   and weapon panel in seats (new card VSHUD) - OVHT's seat half rides on it.
 
+## 7.1 What the port does (issue #78, 2026-11-01)
+- `game::hud_feed::weapon_gauge` reads the sim's state, on foot, in a droid and in any seat; `ui::hud::feed` sends
+  section 7's three events every frame. A counted charge weapon fills the same ring while held, as section 2 reads
+  (`WeaponState::charging`); this goes past OVHT's on-foot slice and takes the charge half from BHUD3's.
+- `hud_draw::segmented` turns a bar about its rect's corner. Turned about its centre, as it drew before, the layout's
+  `refire_rightbit` stood one rect-width to the right of the reticle rather than meeting the left bit at 6 o'clock.
+- BF1 maps show BF1's heat and charge on BF2's ring (section 7). BF1's own panel bar is not drawn.
+- The bake holds the layout on the BF2 disc only; `tests/suite/hud_layout.rs` and `tests/suite/weapon_gauge.rs` test
+  it. Compared with the PS2's frames by eye and by the red bits' bounds (`lead_tmp/ovht/ps2/bf2_pistol/rep0_over.png`,
+  `rep0_cool2.png` beside `hud_capture` at the same heat): the lit arc starts and runs the same way, the colours match
+  and the bits sit centred under the reticle in both. The two frames do not share a scale, so this is not a pixel match.
+- Not built: a counted weapon's single-shot `refire` (state 4, BHUD3's); the ring on `weapon2`, which BF2's layout does
+  not have, so a charge on the secondary channel (the detpack) shows nothing, as there.
+
 ## 8. Checks run and the verification (`checks/`)
 1. `re_check fn` on 64 cited lines (`checks/fn.txt`, `word_callers.txt`): each sits in the function named (e.g.
    *(decompiler detail omitted)*, *(decompiler detail omitted)*, *(decompiler detail omitted)*).

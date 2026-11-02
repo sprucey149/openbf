@@ -49,7 +49,7 @@ pub const PROP_ANIMATIONTRIGGER: u32 = 0x1D56_B73B;
 pub const PROP_OPENSOUND: u32 = 0x323F_7450;
 pub const PROP_CLOSESOUND: u32 = 0x4FCF_4562;
 
-/// The disc's cap on trigger pairs (`FUN_001ec5d0`: `while (iVar3 < 3)`).
+/// The disc's cap on trigger pairs (`FUN_001ec5d0` loops over three).
 pub const MAX_TRIGGERS: usize = 3;
 
 /// A door class's ODF lines, kept from its `entc` until the walk has seen

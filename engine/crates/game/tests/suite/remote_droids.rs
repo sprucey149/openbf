@@ -238,7 +238,7 @@ fn one_tap_calls_the_destruct_three_seconds_later() {
 }
 
 /// A walk with one class on both teams, its HUD rows as the battle builds them.
-fn walk_of(roster: &ClassRoster) -> game::walk::WalkSim {
+pub(super) fn walk_of(roster: &ClassRoster) -> game::walk::WalkSim {
     let mut sim = Sim::empty(42);
     let class = roster.register(&mut sim, &mut Vec::new());
     let mut visual = game::walk::ClassVisual::from_roster(roster);
@@ -331,5 +331,216 @@ fn the_weapon_rows_show_the_droids_blaster_and_destruct_while_it_flies() {
         let back = game::hud_feed::weapon_rows(&walk);
         assert_eq!(back[0], on_foot[0], "{game} {name}");
         assert!(back[1].is_some(), "{game} {name}");
+    }
+}
+
+/// Issue #59 on the real maps: the shapes the disc's `bnd_` chunks name all come
+/// out of the bake and hold what the discs put in them (`re-boundary.md` D2:
+/// every conquest post on the maps that have a boundary), BF2 HOT1's walk state's
+/// outside point reads outside, and BF2 MYG1 has no boundary.
+#[test]
+fn every_maps_boundary_comes_out_of_its_bake_round_its_posts() {
+    let root = game::assets::baked_root();
+    let maps = game::assets::discover_maps(&root);
+    if maps.is_empty() {
+        eprintln!("SKIP: no baked maps");
+        return;
+    }
+    let (mut with, mut posts) = (0, 0);
+    for (key, _, dir) in &maps {
+        let scene = game::assets::load_scene(dir).expect("scene");
+        let names = game::map_boundary::shape_names(key);
+        let paths = &scene.manifest.paths;
+        for name in names {
+            assert!(
+                paths.iter().any(|p| p.name.eq_ignore_ascii_case(name)),
+                "{key}: no path {name}"
+            );
+        }
+        let b = game::map_boundary::boundary(key, paths);
+        if names.is_empty() {
+            assert!(!b.outside(1e5, 1e5), "{key}: no boundary, never outside");
+            continue;
+        }
+        with += 1;
+        assert!(b.outside(1e5, 1e5), "{key}: nothing is outside");
+        for cp in game::layout::MapLayout::from_manifest(&scene.manifest).cps {
+            // BF2 KAS2's `baserush` belongs to another mode (D2).
+            if cp.name.eq_ignore_ascii_case("baserush") {
+                continue;
+            }
+            assert!(
+                !b.outside(cp.pos.x, cp.pos.z),
+                "{key}: {} at {}",
+                cp.name,
+                cp.pos
+            );
+            posts += 1;
+        }
+    }
+    println!("{with} maps with a boundary, {posts} posts inside");
+    assert!(with >= 20, "{with} maps with a boundary");
+    if let Ok(hoth) = game::assets::load_scene(&root.join("bf2_hot1")) {
+        let b = game::map_boundary::boundary("bf2_hot1", &hoth.manifest.paths);
+        assert!(b.outside(295.43, 190.01), "the PS2 trial's outside point");
+    }
+}
+
+/// Points the PS2's own test read, one on each side of an edge where the map has
+/// a boundary (`lead_tmp/bndy/points`, `re-boundary.md` M1): `(map, x, z, outside)`.
+/// All 404 rows of those captures agreed when this test was added.
+const PS2_POINTS: [(&str, f32, f32, bool); 14] = [
+    ("bf1_hot1", -524.75, 310.28, false),
+    ("bf1_hot1", -530.21, 312.78, true),
+    ("bf1_kam1", 303.94, 70.43, false),
+    ("bf1_kam1", 309.64, 68.56, true),
+    ("bf1_nab1", -78.22, 265.72, false),
+    ("bf1_nab1", -82.44, 269.99, true),
+    ("bf2_hot1", 290.1, 187.25, false),
+    ("bf2_hot1", 295.43, 190.01, true),
+    ("tat1", 166.17, 301.17, false),
+    ("tat1", 171.92, 302.88, true),
+    ("bf1_yav2", 286.97, 101.98, false),
+    ("bf2_myg1", 213.79, 187.03, false),
+    ("bf2_uta1", 215.76, 271.36, false),
+    ("bf2_uta1", 69.12, 448.05, false),
+];
+
+#[test]
+fn the_boundary_reads_as_the_ps2_read_it() {
+    for (map, x, z, outside) in PS2_POINTS {
+        let Ok(scene) = game::assets::load_scene(&game::assets::baked_root().join(map)) else {
+            eprintln!("SKIP: {map} is not baked");
+            continue;
+        };
+        let b = game::map_boundary::boundary(map, &scene.manifest.paths);
+        assert_eq!(b.outside(x, z), outside, "{map} at ({x}, {z})");
+    }
+}
+
+/// `Scene::install_collision`, which every sim loader calls, hands the shapes on.
+#[test]
+fn a_loaded_map_hands_its_boundary_to_the_sim() {
+    let dir = game::assets::baked_root().join("bf2_hot1");
+    let Ok(scene) = game::assets::load_scene(&dir) else {
+        eprintln!("SKIP: bf2_hot1 is not baked");
+        return;
+    };
+    let mut sim = Sim::empty(1);
+    scene.install_collision(&mut sim);
+    assert!(sim.boundary.outside(295.43, 190.01));
+}
+
+/// Issue #59, flown for real on every baked map: launched a few metres inside the
+/// map's edge and flown straight out, on a map's own collision and terrain. Past a
+/// boundary the countdown takes the droid; with none it stops at the sheet's end.
+/// Where a wall or a hill stops it first, it never leaves at all.
+#[test]
+fn a_droid_flown_at_every_maps_edge_cannot_leave_it() {
+    let root = game::assets::baked_root();
+    let Ok(db) = load_classdb(&root.join("classes"), "bf2", &["all"]) else {
+        eprintln!("SKIP: no BF2 class bake");
+        return;
+    };
+    let mut names: Vec<String> = db.names().map(str::to_owned).collect();
+    names.sort();
+    let (roster, slot) = names
+        .iter()
+        .filter(|n| game::roster::is_soldier_chain(&db, n))
+        .find_map(|n| {
+            let r = ClassRoster::build(&db, n, 1, None).ok()?;
+            let slot = r.held.iter().find(|h| h.weapon.remote.is_some())?.slot;
+            Some((r, slot))
+        })
+        .expect("a class with a remote droid");
+    let (mut killed, mut stopped, mut ran) = (0, 0, 0);
+    for (key, game, dir) in game::assets::discover_maps(&root) {
+        let scene = game::assets::load_scene(&dir).expect("scene");
+        let Some(hf) = scene.heightfield() else {
+            println!("{key}: no terrain");
+            continue;
+        };
+        ran += 1;
+        let mut sim = Sim::empty(42);
+        sim.ground_rules = core::soldier::GroundRules::for_game(&game);
+        scene.install_collision(&mut sim);
+        let class = roster.register(&mut sim, &mut Vec::new());
+        let posts = game::layout::MapLayout::from_manifest(&scene.manifest).cps;
+        let home = posts.first().map_or(Vec3::ZERO, |c| c.pos);
+        sim.heightfield = Some(hf);
+        let owner = sim
+            .spawn(&class.spec(0, home, 0.0, Controller::Player { slot: 0 }, 0, 0))
+            .unwrap();
+        let u = &mut sim.units[owner.index as usize];
+        for h in &mut u.held {
+            h.state.active = h.slot == slot;
+        }
+        u.cur1 = Some(u.held.iter().position(|h| h.slot == slot).unwrap() as u8);
+        let pad = |buttons: u32, ly: i16| PadState {
+            buttons,
+            ly,
+            ..Default::default()
+        };
+        sim.step(&[pad(buttons::SECONDARY_FIRE, 0)]);
+        for _ in 0..30 {
+            if !sim.droids.is_empty() {
+                break;
+            }
+            sim.step(&[pad(0, 0)]);
+        }
+        assert_eq!(sim.droids.len(), 1, "{key}: launched");
+
+        // The way out: from the post along +x until the map ends, back 5 m.
+        let hold = |sim: &Sim, p: Vec3| {
+            let (x, z) = sim.heightfield.as_ref().unwrap().clamp_xz(p.x, p.z);
+            x == p.x && z == p.z && !sim.boundary.outside(p.x, p.z)
+        };
+        let mut edge = home;
+        while hold(&sim, edge + Vec3::X) {
+            edge += Vec3::X;
+        }
+        let start = edge - Vec3::X * 5.0;
+        let d = &mut sim.droids[0];
+        d.pos = Vec3::new(
+            start.x,
+            sim.heightfield
+                .as_ref()
+                .unwrap()
+                .height_at(start.x, start.z)
+                + 3.0,
+            start.z,
+        );
+        d.vel = Vec3::ZERO;
+        // Heading +x (the droid's forward is -sin yaw, -cos yaw).
+        d.yaw = -std::f32::consts::FRAC_PI_2;
+        let time = core::boundary::leaving_time(sim.ground_rules);
+        let (mut end, mut out, mut left) = (None, 0.0f32, false);
+        for _ in 0..((time + 8.0) * core::TICK_HZ as f32) as usize {
+            sim.step(&[pad(0, i16::MAX)]);
+            end = end.or(sim.events.iter().find_map(|e| match e {
+                Event::DroidGone { end, .. } => Some(*end),
+                _ => None,
+            }));
+            let Some(d) = sim.droids.first() else { break };
+            let (x, z) = sim.heightfield.as_ref().unwrap().clamp_xz(d.pos.x, d.pos.z);
+            assert_eq!((x, z), (d.pos.x, d.pos.z), "{key}: off the sheet");
+            if d.leaving.is_some() {
+                left = true;
+                out += core::TICK_DT;
+            }
+        }
+        assert!(out <= time + 0.1, "{key}: {out} s outside");
+        match end {
+            Some(DroidEnd::Destroyed) => {
+                assert!(left, "{key}: destroyed inside");
+                killed += 1;
+            }
+            None => stopped += 1,
+            other => panic!("{key}: {other:?}"),
+        }
+    }
+    println!("{ran} maps: {killed} killed past the boundary, {stopped} held inside");
+    if ran > 0 {
+        assert!(killed >= 5, "{killed} of {ran} reached the countdown");
     }
 }

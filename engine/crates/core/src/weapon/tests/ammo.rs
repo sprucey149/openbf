@@ -113,3 +113,24 @@ fn a_five_clip_rifle_fires_275_rounds_and_then_requires_resupply() {
     assert!(!w.start_reload(&c));
     assert!(run(&mut w, &c, DT30, 30 * 5, true).is_empty());
 }
+
+/// Issue #78: the ring shows a charge only while the weapon can charge. A reload
+/// keeps the port's state Idle, where the PS2 has left its charging state 3.
+#[test]
+fn a_reloading_charge_weapon_reports_no_charge() {
+    let c = WeaponClass {
+        max_pressed_time: 1.0,
+        rounds_per_clip: 1,
+        reload_time: 2.0,
+        ..WeaponClass::bf1_rifle()
+    };
+    let mut w = WeaponState::with_clips(&c, true, 3);
+    w.clip = 0;
+    let (mut lcg, mut shots) = (GameLcg::new(1), Vec::new());
+    assert!(w.start_reload(&c));
+    for _ in 0..15 {
+        w.update(DT30, &c, fi(true, false), &mut lcg, &mut shots);
+    }
+    assert!(w.reloading());
+    assert_eq!(w.charging(&c), None);
+}

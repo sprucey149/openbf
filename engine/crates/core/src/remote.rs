@@ -306,6 +306,8 @@ pub struct Droid {
     pub prev_buttons: u32,
     pub blaster: WeaponState,
     pub charge: Option<f32>,
+    /// The boundary countdown's seconds left; `None` inside the map.
+    pub leaving: Option<f32>,
 }
 
 impl Droid {
@@ -339,6 +341,7 @@ impl Droid {
             prev_buttons: 0,
             blaster: WeaponState::with_clips(&remote.blaster, human, 0),
             charge: None,
+            leaving: None,
         }
     }
 
@@ -403,6 +406,15 @@ impl Droid {
         self.pos += self.vel * dt;
     }
 
+    /// One update of the boundary countdown (`analysis/re-boundary.md` T1, T2;
+    /// that their third entity is the droid is [H]): `time` is set and spent in
+    /// the first outside update, and the droid dies in the one that takes it
+    /// below 0. Coming back inside clears it. True on the update it dies.
+    pub fn tick_leaving(&mut self, outside: bool, time: f32, dt: f32) -> bool {
+        self.leaving = outside.then(|| self.leaving.unwrap_or(time) - dt);
+        self.leaving.is_some_and(|t| t < 0.0)
+    }
+
     /// Seconds of its [`LIFETIME`] left.
     pub fn time_left(&self) -> f32 {
         (LIFETIME - self.age).max(0.0)
@@ -435,6 +447,10 @@ impl Droid {
             self.charge.unwrap_or(-1.0),
         ] {
             eat(&v.to_bits().to_le_bytes());
+        }
+        // Only while outside, so a flight inside the map hashes as it always has.
+        if let Some(t) = self.leaving {
+            eat(&t.to_bits().to_le_bytes());
         }
         eat(&self.prev_buttons.to_le_bytes());
         self.blaster.hash_into(eat);
