@@ -224,7 +224,7 @@ impl DroidekaVisuals {
         .map_err(|e| eprintln!("droideka shield: {e:#}"))
         .ok();
         // The disc's shared `specular` table (`bake specular`), BF2's on both.
-        out.bubble_spec = std::fs::read(assets_dir.join("common_bf2/specular.ktx2"))
+        out.bubble_spec = pak::read(assets_dir.join("common_bf2/specular.ktx2"))
             .map_err(anyhow::Error::from)
             .and_then(|b| crate::assets::load_ktx2(&b))
             .and_then(|t| upload_cpu_texture(r, &t, "droideka_shield_specular"))

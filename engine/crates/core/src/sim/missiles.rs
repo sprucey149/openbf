@@ -56,6 +56,11 @@ impl Sim {
         match t {
             MissileTarget::Unit(h) => self.unit(h).map(|u| u.aim_point()),
             MissileTarget::Vehicle(h) => self.aim_candidate(AimTarget::Vehicle(h)).map(|c| c.aim),
+            MissileTarget::Turret(id) => self
+                .turrets
+                .iter()
+                .find(|t| t.id == id && t.alive())
+                .map(|t| t.centre()),
         }
     }
 
@@ -118,8 +123,8 @@ impl Sim {
                     .and_then(|t| match t {
                         AimTarget::Unit(h) => Some(MissileTarget::Unit(h)),
                         AimTarget::Vehicle(h) => Some(MissileTarget::Vehicle(h)),
-                        // No launcher lock on an auto turret or a remote droid.
-                        AimTarget::Turret(_) | AimTarget::Droid(_) => None,
+                        AimTarget::Turret(id) => Some(MissileTarget::Turret(id)),
+                        AimTarget::Droid(_) => None,
                     }),
                 _ => ai_target.and_then(|f| f.unit()).map(MissileTarget::Unit),
             };

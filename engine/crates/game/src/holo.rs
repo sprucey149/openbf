@@ -28,9 +28,8 @@
 //! with no battle ([`still_draws`]) shows every post steady at its starting
 //! owner, seen by team 1.
 //!
-//! PROVISIONAL / not built: the flare seen along the beam's axis (card
-//! LFLR), the icon material's UV animation, the direction of the icon's
-//! turn ([H]), END1's and HOT1's holograms on a building that is not the
+//! The axial flare and authored scan-line scroll follow §16.
+//! PROVISIONAL / not built: the direction of the icon's turn ([H]), END1's and HOT1's holograms on a building that is not the
 //! post's own (they stand at the post).
 
 use std::collections::HashMap;
@@ -57,6 +56,8 @@ pub struct HoloClass {
     pub base_width: f32,
     pub beam_intensity: f32,
     pub image_intensity: f32,
+    /// `HoloFlareIntensity`, class +0x84 → beam +0x194 (BF2).
+    pub flare_intensity: f32,
     /// `HoloRotateRate` × 2π, rad/s.
     pub rotate: f32,
     pub pop_rate: f32,
@@ -74,6 +75,7 @@ pub const CONTROLZONE: HoloClass = HoloClass {
     base_width: 1.0,
     beam_intensity: 1.0,
     image_intensity: 0.5,
+    flare_intensity: 1.0,
     rotate: 0.2 * std::f32::consts::TAU,
     pop_rate: 0.01,
     flicker_rate: 0.01,
@@ -117,6 +119,8 @@ impl Lcg {
 pub struct Holo {
     /// +0xb4: the turn's clock (angle = spin × `rotate`).
     pub spin: f32,
+    /// Continuous visual time, unaffected by the icon's random turn jumps.
+    pub clock: f32,
     /// +0xb8, +0xc0: seconds since the last pop / dip.
     pub pop_clock: f32,
     pub flicker_clock: f32,
@@ -140,6 +144,7 @@ impl Holo {
     pub fn steady(team: Option<u8>) -> Self {
         Holo {
             spin: 0.0,
+            clock: 0.0,
             pop_clock: 0.0,
             flicker_clock: 0.0,
             pop: 1.0,
@@ -169,6 +174,7 @@ impl Holo {
     pub fn update(&mut self, dt: f32, c: &HoloClass, rng: &mut Lcg) {
         self.pop_clock += dt;
         self.spin += dt;
+        self.clock += dt;
         self.flicker_clock += dt;
         self.fade_clock += dt;
         self.pop += (1.0 - self.pop) * (dt + dt).min(0.8);
@@ -220,7 +226,13 @@ pub fn switched_on(cp: &core::cp::CommandPost, c: &HoloClass) -> bool {
 }
 
 /// A model's triangles per sheet, in model space.
-type Parts = Vec<(Option<TextureHandle>, Vec<(Vec3, [f32; 2])>)>;
+type Parts = Vec<IconPart>;
+
+struct IconPart {
+    texture: Option<TextureHandle>,
+    tris: Vec<(Vec3, [f32; 2])>,
+    scroll: [f32; 2],
+}
 
 /// What the holograms draw with: the four sides' icons and each post's
 /// `hp_hologram` height by post name.
@@ -228,7 +240,7 @@ type Parts = Vec<(Option<TextureHandle>, Vec<(Vec3, [f32; 2])>)>;
 pub struct HoloArt {
     pub bf1: bool,
     /// By faction key (all | imp | rep | cis).
-    pub icons: HashMap<&'static str, Parts>,
+    icons: HashMap<&'static str, Parts>,
     pub heights: HashMap<String, f32>,
 }
 
@@ -293,7 +305,7 @@ impl HoloArt {
                 }
             };
             let mut parts = Parts::new();
-            for (start, count, material, _, _) in &cpu.submeshes {
+            for (i, (start, count, material, _, _)) in cpu.submeshes.iter().enumerate() {
                 let tex = crate::viewer::upload_texture_file(
                     r,
                     &common.join("textures"),
@@ -313,7 +325,11 @@ impl HoloArt {
                         )
                     })
                     .collect();
-                parts.push((tex, tris));
+                parts.push(IconPart {
+                    texture: tex,
+                    tris,
+                    scroll: cpu.uv_scroll(i),
+                });
             }
             art.icons.insert(faction, parts);
         }
@@ -358,8 +374,111 @@ pub fn icon_alpha(h: &Holo, c: &HoloClass, origin: Vec3, camera: &Camera) -> Opt
     Some((255.0 * k * fade) as u8)
 }
 
-/// One hologram's draws for a viewer on team `viewer`: the beam, then the
-/// owner's icon.
+/// Keep UVs bounded without changing their wrap/repeat phase.
+fn scroll_uv(uv: [f32; 2], rate: [f32; 2], clock: f32) -> [f32; 2] {
+    [
+        uv[0] + (rate[0] * clock).fract(),
+        uv[1] + (rate[1] * clock).fract(),
+    ]
+}
+
+/// The axial flare's radius and alpha before the untextured GS colour scale.
+/// BF2 `FUN_00469628`: g < 0, A g^8 HoloFlareIntensity; radius advances
+/// halfway from the mean start radius to the mean end radius at g = -1.
+fn flare_parameters(h: &Holo, c: &HoloClass, origin: Vec3, eye: Vec3) -> Option<(f32, u8)> {
+    let v = origin - eye;
+    let d2 = v.length_squared();
+    if v.y >= 0.0 || d2 >= c.visible * c.visible || h.intensity <= 0.0 {
+        return None;
+    }
+    let r0 = c.base_width * 0.5;
+    let r1 = c.size * 0.4 * h.fade * h.pop;
+    let g = v.y / d2.sqrt().max(r0);
+    let g2 = g * g;
+    let g4 = g2 * g2;
+    let g8 = g4 * g4;
+    let alpha = (255.0 * h.intensity * c.beam_intensity * g8 * c.flare_intensity).round() as u8;
+    (alpha > 0).then_some((r0 + g8 * (r1 - r0) * 0.5, alpha))
+}
+
+/// Procedural, depth-tested flare: the native two three-point fans and
+/// seven-sector soft ring (`FUN_00468238`, `FUN_00468a28`). The PS2's
+/// readback occlusion is replaced by ordinary per-fragment depth testing.
+fn flare_draw(
+    h: &Holo,
+    c: &HoloClass,
+    origin: Vec3,
+    rgb: [u8; 3],
+    camera: &Camera,
+) -> Option<ParticleDraw> {
+    let (radius, alpha) = flare_parameters(h, c, origin, camera.position)?;
+    let delta = origin - camera.position;
+    let depth = delta.dot(camera.forward());
+    if depth <= camera.near {
+        return None;
+    }
+    let right = camera.right();
+    let up = right.cross(camera.forward());
+    let angle = radius * std::f32::consts::FRAC_PI_3
+        + (delta.dot(right) + 2.0 * delta.dot(up)) * std::f32::consts::PI / depth;
+    // LensFlare is untextured: GS RGB bytes are half-strength, while its
+    // alpha byte is normalized on the GS's 0..128 scale by the particle path.
+    let color = |a| {
+        [
+            rgb[0].div_ceil(2),
+            rgb[1].div_ceil(2),
+            rgb[2].div_ceil(2),
+            a,
+        ]
+    };
+    let at = |x, y, a| (origin + right * x + up * y, [0.0; 2], color(a));
+    let on_ring = |t: f32, x: f32, y: f32, a| {
+        let (sin, cos) = core::fmath::sin_cos(t);
+        at(cos * x, sin * y, a)
+    };
+    let mut tris = Vec::with_capacity(81);
+    for (rx, ry, phase) in [
+        (2.0, 4.0, angle),
+        (7.0, 2.0, std::f32::consts::FRAC_PI_3 - angle),
+    ] {
+        for i in 0..3 {
+            let a = phase + i as f32 * std::f32::consts::TAU / 3.0;
+            let b = a + std::f32::consts::TAU / 3.0;
+            tris.extend([
+                at(0.0, 0.0, alpha),
+                on_ring(a, rx * radius, ry * radius, 0),
+                on_ring(b, rx * radius, ry * radius, 0),
+            ]);
+        }
+    }
+    for i in 0..7 {
+        let a = angle + i as f32 * std::f32::consts::TAU / 7.0;
+        let b = a + std::f32::consts::TAU / 7.0;
+        let inner = |t: f32| on_ring(t, radius, radius, alpha / 2);
+        let outer = |t: f32| on_ring(t, radius * 4.0, radius * 4.0, 0);
+        tris.extend([
+            at(0.0, 0.0, alpha),
+            inner(a),
+            inner(b),
+            inner(a),
+            outer(a),
+            outer(b),
+            inner(a),
+            outer(b),
+            inner(b),
+        ]);
+    }
+    Some(ParticleDraw {
+        shape: ParticleShape::UntexturedShaded { tris },
+        key: origin,
+        color: color(alpha),
+        texture: None,
+        additive: true,
+    })
+}
+
+/// One hologram's draws for a viewer on team `viewer`: beam, axial flare,
+/// and the owner's icon.
 #[allow(clippy::too_many_arguments)]
 pub fn holo_draws(
     art: &HoloArt,
@@ -395,6 +514,9 @@ pub fn holo_draws(
         texture: None,
         additive: true,
     });
+    if let Some(flare) = flare_draw(h, c, origin, rgb, camera) {
+        out.push(flare);
+    }
     let icon = h
         .team
         .and(faction)
@@ -403,17 +525,24 @@ pub fn holo_draws(
         return;
     };
     let m = icon_matrix(h, c, origin);
-    out.extend(parts.iter().map(|(tex, tris)| {
+    out.extend(parts.iter().map(|part| {
+        let scroll = scroll_uv([0.0; 2], part.scroll, h.clock);
         ParticleDraw {
             shape: ParticleShape::Mesh {
-                tris: tris
+                tris: part
+                    .tris
                     .iter()
-                    .map(|(p, uv)| (m.transform_point3(*p), *uv))
+                    .map(|(p, uv)| {
+                        (
+                            m.transform_point3(*p),
+                            [uv[0] + scroll[0], uv[1] + scroll[1]],
+                        )
+                    })
                     .collect(),
             },
             key: origin + Vec3::Y * c.height,
             color: rgba(alpha),
-            texture: *tex,
+            texture: part.texture,
             additive: false,
         }
     }));
@@ -550,7 +679,14 @@ mod tests {
             (Vec3::new(0.0, 0.0, 0.1), [0.0, 1.0]),
         ];
         let mut a = HoloArt::default();
-        a.icons.insert("rep", vec![(None, tri)]);
+        a.icons.insert(
+            "rep",
+            vec![IconPart {
+                texture: None,
+                tris: tri,
+                scroll: [0.0; 2],
+            }],
+        );
         a
     }
 
@@ -589,6 +725,202 @@ mod tests {
         assert_eq!(draws_for(&bf1, Some(1), 0)[0].color, [200, 100, 100, 255]);
         // The icon takes the same colour at half the alpha.
         assert_eq!(draws_for(&a, Some(0), 1)[1].color, [200, 100, 100, 127]);
+    }
+
+    #[test]
+    fn axial_flare_uses_class_factor_and_eighth_power() {
+        let h = Holo::steady(Some(0));
+        let c = HoloClass {
+            flare_intensity: 0.5,
+            ..CONTROLZONE
+        };
+        assert_eq!(
+            flare_parameters(&h, &c, Vec3::ZERO, Vec3::Y * 10.0),
+            Some((0.75, 128))
+        );
+        // Eye direction (0, 4, 3): g = -0.8, g^8 = 0.16777216.
+        let (radius, alpha) =
+            flare_parameters(&h, &c, Vec3::ZERO, Vec3::new(0.0, 4.0, 3.0)).unwrap();
+        assert!((radius - (0.5 + 0.25 * 0.8_f32.powi(8))).abs() < 1e-6);
+        assert_eq!(alpha, (255.0 * 0.5 * 0.8_f32.powi(8)).round() as u8);
+        assert!(flare_parameters(&h, &c, Vec3::ZERO, Vec3::X * 10.0).is_none());
+        assert!(flare_parameters(&h, &c, Vec3::ZERO, -Vec3::Y * 10.0).is_none());
+        assert!(flare_parameters(&h, &c, Vec3::ZERO, Vec3::Y * 201.0).is_none());
+        assert!(flare_parameters(
+            &h,
+            &HoloClass {
+                flare_intensity: 0.0,
+                ..c
+            },
+            Vec3::ZERO,
+            Vec3::Y
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn above_post_draws_one_flare_and_side_draws_none() {
+        let h = Holo::steady(None);
+        let art = HoloArt::default();
+        for (eye, pitch, want) in [
+            (Vec3::Y * 10.0, -std::f32::consts::FRAC_PI_2, 1),
+            (Vec3::Z * 10.0, 0.0, 0),
+        ] {
+            let camera = Camera {
+                position: eye,
+                pitch,
+                ..Camera::default()
+            };
+            let mut out = Vec::new();
+            holo_draws(&art, &h, Vec3::ZERO, None, 0, &camera, &mut out);
+            let flares: Vec<_> = out
+                .iter()
+                .filter(|d| matches!(d.shape, ParticleShape::UntexturedShaded { .. }))
+                .collect();
+            assert_eq!(flares.len(), want);
+            if let Some(d) = flares.first() {
+                assert_eq!(d.color, [96, 96, 96, 255]);
+                assert!(d.additive && d.texture.is_none());
+                let ParticleShape::UntexturedShaded { tris } = &d.shape else {
+                    unreachable!()
+                };
+                assert_eq!(tris.len(), 81);
+                assert!(tris.iter().any(|v| v.2[3] == 0));
+            }
+        }
+    }
+
+    #[test]
+    fn icon_scroll_uses_continuous_clock_not_random_turn() {
+        let mut a = art();
+        a.icons.get_mut("rep").unwrap()[0].scroll = [-1.0 / 255.0, 0.0];
+        let h = Holo {
+            clock: 127.5,
+            spin: 21.0,
+            ..Holo::steady(Some(0))
+        };
+        let mut out = Vec::new();
+        holo_draws(
+            &a,
+            &h,
+            Vec3::new(10.0, 2.0, -30.0),
+            Some("rep"),
+            0,
+            &cam(),
+            &mut out,
+        );
+        let ParticleShape::Mesh { tris } = &out.last().unwrap().shape else {
+            panic!("icon");
+        };
+        assert_eq!(tris[0].1, [-0.5, 0.0]);
+        assert_eq!(scroll_uv([0.25, 0.75], [0.0, -1.0], 10.5), [0.25, 0.25]);
+        let c = HoloClass {
+            pop_rate: 100.0,
+            ..CONTROLZONE
+        };
+        let mut h = h;
+        h.update(STEP, &c, &mut Lcg(0));
+        assert_eq!(h.clock, 127.5 + STEP);
+    }
+
+    #[test]
+    #[ignore = "requires a headless GPU adapter"]
+    fn flare_reaches_the_headless_frame() {
+        let mut renderer = Renderer::new_headless(64, 64).expect("headless GPU");
+        let camera = Camera {
+            position: Vec3::Y * 10.0,
+            pitch: -std::f32::consts::FRAC_PI_2,
+            ..Camera::default()
+        };
+        let mut draws = Vec::new();
+        holo_draws(
+            &HoloArt::default(),
+            &Holo::steady(None),
+            Vec3::ZERO,
+            None,
+            0,
+            &camera,
+            &mut draws,
+        );
+        renderer.set_particles(draws);
+        renderer.render(&camera, &[], [0.0, 0.0, 0.0, 1.0]).unwrap();
+        let (rgba, w, _) = renderer.capture_rgba().unwrap();
+        if let Ok(path) = std::env::var("OPENBF_HOLO_CAPTURE") {
+            image::save_buffer(path, &rgba, w, 64, image::ColorType::Rgba8).unwrap();
+        }
+        let center = ((32 * w + 32) * 4) as usize;
+        assert!(
+            rgba[center] > 120,
+            "axial flare center: {:?}",
+            &rgba[center..center + 4]
+        );
+        assert_eq!(&rgba[0..3], &[0, 0, 0], "flare does not wash the frame");
+    }
+
+    #[test]
+    #[ignore = "requires original BF1 COMMON and BF2 INGAME data"]
+    fn native_icon_scroll_survives_bake_and_runtime_load() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let tmp = std::env::temp_dir().join(format!("openbf-holo-{}.glb", std::process::id()));
+        for (game, path, rates) in [
+            (
+                "bf1",
+                "extracted/bf1/lvl/DATA/_LVL_PS2/COMMON/ENG/COMMON.LVL",
+                [[0.0, -0.9921875], [-0.0078125, -0.9921875]],
+            ),
+            (
+                "bf2",
+                "extracted/bf2/lvl/DATA/_LVL_PS2/INGAME.LVL",
+                [[0.0, 0.0], [-1.0 / 255.0, 0.0]],
+            ),
+        ] {
+            let bytes = std::fs::read(root.join(path)).expect("original LVL required");
+            let chunks = mungefs::content_chunks(mungefs::open(&bytes).unwrap()).unwrap();
+            let class = chunks
+                .iter()
+                .find(|c| c.tag == *b"entc" && c.child_str(b"TYPE") == Some("com_holo_controlzone"))
+                .expect("native hologram class");
+            let factor = class
+                .children_tagged(b"PROP")
+                .find(|p| {
+                    p.payload
+                        .starts_with(&mungefs::fnv1a_lowercase("HoloFlareIntensity").to_le_bytes())
+                })
+                .expect("authored flare factor");
+            assert_eq!(&factor.payload[4..], b"1.0\0");
+            assert_eq!(CONTROLZONE.flare_intensity, 1.0);
+            for (_, side) in SIDES {
+                let name = format!("com_icon_{side}");
+                let chunk = chunks
+                    .iter()
+                    .find(|c| {
+                        c.tag == *b"modl"
+                            && c.child_str(b"NAME")
+                                .is_some_and(|n| n.eq_ignore_ascii_case(&name))
+                    })
+                    .expect("native icon");
+                let model = mungefs::model::Model::parse(chunk).unwrap();
+                let count = if side == "republic" { 2 } else { 1 };
+                assert_eq!(model.segments.len(), count, "{game} {name}");
+                for (segment, want) in model.segments.iter().zip(rates) {
+                    assert_eq!(
+                        segment.uv_scroll().unwrap_or_default(),
+                        want,
+                        "{game} {name}"
+                    );
+                }
+                let alphas = bake::alpha::AlphaTable::new(&[]).model(&model);
+                let bytes = bake::glb::model_to_glb(&model, &alphas, false).unwrap();
+                std::fs::write(&tmp, bytes).unwrap();
+                let cpu = crate::assets::load_glb(&tmp).unwrap();
+                assert_eq!(
+                    cpu.scroll,
+                    rates[..count],
+                    "{game} {name}: baked/runtime rates"
+                );
+            }
+        }
+        std::fs::remove_file(tmp).unwrap();
     }
 
     /// The beam stands on the hologram's point, 3.5 m, 0.5 → 1.0 m, additive

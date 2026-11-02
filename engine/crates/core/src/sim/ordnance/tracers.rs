@@ -22,8 +22,8 @@ impl Sim {
     /// The bolt is the secondary class's own: its Velocity and LifeSpan, its
     /// damage and its laser look. A tracer's press ray stop is dropped - the
     /// round is a drawn line, so it flies its whole reach even through a wall
-    /// the primary stopped on - and [`Hit::None`] lets [`Sim::sweep_bolts`]
-    /// meet soldiers and hulls on the way.
+    /// the primary stopped on - and [`Sim::sweep_bolts`] skips its visual-only collision. Explosive
+    /// secondaries still meet bodies even when their direct damage is zero.
     pub(in crate::sim) fn fire_secondary(
         &mut self,
         who: Shooter,
@@ -55,7 +55,7 @@ impl Sim {
             HullFilter::Static,
         );
         bolt.charge = charge;
-        if ord.is_tracer() {
+        if ord.is_tracer() && ord.explosion.is_none() {
             bolt.hit = Hit::None;
             bolt.remaining = ord.life_span;
             bolt.end = origin + dir * (ord.velocity * ord.life_span);
@@ -238,5 +238,74 @@ mod tests {
             vec![gun, round]
         );
         assert_eq!(s.bolts[1].remaining, s.bolts[0].remaining.min(0.05));
+    }
+    #[test]
+    fn visual_tracer_passes_a_body_without_reporting_a_hit() {
+        let (mut s, h, _, tracer) = scene(1, 0.0);
+        let victim = s
+            .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -3.0)))
+            .unwrap();
+        let origin = s.unit(h).unwrap().muzzle();
+        let dir = (s.unit(victim).unwrap().aim_point() - origin).normalize();
+        let round = Bolt::fire(
+            origin,
+            dir,
+            200.0,
+            0.05,
+            Shooter {
+                owner: h,
+                team: 0,
+                weapon_class: tracer,
+                is_player: true,
+            },
+            None,
+            None,
+            &s.collision,
+            HullFilter::All,
+        );
+        s.bolts.push(round);
+        s.fly_bolts(crate::TICK_DT);
+        assert_eq!(s.nav_stats.bolt_hits, 0);
+        assert!(s.unit(victim).unwrap().last_hit.is_none());
+        assert_eq!(s.bolts[0].hit, Hit::None);
+    }
+
+    #[test]
+    fn zero_direct_damage_explosive_still_collides() {
+        let (mut s, h, gun, tracer) = scene(1, 0.0);
+        let blast = crate::weapon::ExplosionClass {
+            damage: 100.0,
+            damage_inner: 1.0,
+            damage_outer: 4.0,
+            ..Default::default()
+        };
+        s.weapon_classes[tracer].ordnance.explosion = Some(blast.clone());
+        s.weapon_classes[gun]
+            .secondary
+            .as_mut()
+            .unwrap()
+            .ordnance
+            .explosion = Some(blast);
+        let victim = s
+            .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -3.0)))
+            .unwrap();
+        let origin = s.unit(h).unwrap().muzzle();
+        let dir = (s.unit(victim).unwrap().aim_point() - origin).normalize();
+        s.fire_secondary(
+            Shooter {
+                owner: h,
+                team: 0,
+                weapon_class: gun,
+                is_player: true,
+            },
+            gun,
+            1,
+            origin,
+            dir,
+            1.0,
+        );
+        s.fly_bolts(crate::TICK_DT);
+        assert!(s.bolts.is_empty());
+        assert!(s.unit(victim).unwrap().health.cur < s.unit(victim).unwrap().health.max);
     }
 }

@@ -464,3 +464,63 @@ top's radius (529168–529188) — a flare seen only looking back along the beam
 geometry); the sign of the icon's turn; END1's and HOT1's holograms on a building that is not the post; the port's
 additive draws blend in linear light, the PS2 adds bytes: BF1's half-bright column reads about 60 % of the PS2's on
 a dark wall (Kashyyyk +60 against +82, Endor +46 against +72).
+
+## 16. Command-post axial flare and scan lines (HOLOF / issue #68, 2026-11-01)
+
+[V] The factor is **HoloFlareIntensity**, lower-case FNV-1a `0x4cecac28`.
+BF2's class setter `FUN_00219148` selects that hash and reads a float into
+class `+0x84` (export line 130398). The constructor `FUN_00216948` copies
+that field to beam `+0x194` (129206–129207). Raw EE words independently
+confirm the hash at `0x219210` / `0x219214`, the branch to `0x2193fc`, and
+the setter's `+132` destination at `0x21940c`. BF1's twin setter is
+`FUN_001e8768`, hash `0x4cecac28` to class `+0x68` (95717–95718).
+Both discs' `com_holo_controlzone` explicitly author **1.0**: BF1
+COMMON/ENG/COMMON.LVL entc at `0x33c3bc`; BF2 INGAME.LVL entc at `0x2d1a6c`.
+The class default of zero is therefore not the command post's value.
+
+[V] Re-read BF2 `FUN_00469628` (529168–529196): with `v = base − eye`,
+`g = dot(v, axis) / max(length(v), start_radius)`, the positive-g side has
+zero flare alpha; for negative g, alpha is `A × g^8 × HoloFlareIntensity`.
+Radius is `r0 + g^8 × (r1 − r0) / 2`, **not** an interpolation all the way
+to r1. A steady command post therefore reaches radius 0.75 m directly
+above it (r0 0.5 m, r1 1 m). `A` includes the hologram intensity and
+HoloBeamIntensity. The flare uses the same viewer-relation RGB as the beam.
+The LensFlare geometry (`FUN_00468238`, `FUN_00468a28`) has two three-point
+fans of extents (2R,4R), (7R,2R), and a seven-sector ring with alpha A at
+its centre, A/2 at R, zero at 4R; the untextured RGB is half strength.
+
+[V] **The scan-line texture does animate, with different authored rates.**
+All four faction icon models were checked from each disc. In BF2 their
+MTRL mode is `0x01000000`; `FUN_0058e730` loads bytes 16/17 into the UV
+animation, and `FUN_0058e930` (723206–723209) applies negative time times
+those bytes divided by 255. Alliance, Imperial, CIS and Republic segment 0
+have bytes (0,0), hence stationary UVs. Republic segment 1 has (1,0), hence
+**(-1/255, 0) UV/s**. The Republic MTRL words are `0x01000002` and
+`0x01000004`, in INGAME.LVL model at `0x23b96c`.
+
+BF1 uses `ps2ScrollSegment`: MTRL bit `0x400`, with two float rates in
+slots +4/+8 (loader `FUN_004aacd8`, 568288–568299; draw
+`FUN_004b0c48`, 572620–572645, negative time). All four icons have first
+segment rates **(0, -0.9921875) UV/s**. Republic's second segment has
+**(-0.0078125, -0.9921875) UV/s**. Its native words are `0x416` / `0x414`
+and RTYP `Scroll`, in COMMON/ENG/COMMON.LVL model at `0x2bfc78`.
+The port now preserves those float rates through the bake and applies
+per-material scroll on the icon's continuous visual clock. Random spin
+jumps do not jump the scan-line phase. This also repairs the shared BF1
+scroll material reader; its specular-material path is unchanged.
+
+Implementation: `game::holo` adds one shaded additive particle for the
+flare and uses the existing particle depth/blend path. It does not add a
+new GPU pass or simulation state. **Named rendering deviation:** the
+PS2's asynchronous visibility readback is replaced by per-fragment depth
+testing; soft partial-occlusion parity is not claimed. The extents and
+intensity are checked headlessly; a new paired PS2 capture was not taken.
+
+Reproduce the address ownership checks from the repository root:
+`python3 scripts/re_check.py fn b2 130398 129207 529190 723208` and
+`python3 scripts/re_check.py fn b1 95718 568288 572634`.
+The `holo::tests::native_icon_scroll_survives_bake_and_runtime_load` test
+checks all eight native icon models, both class factors, and generated
+GLB/runtime rates; missing discs fail rather than silently pass.
+This supersedes §15.7's flare/UV open items. The remaining §15.7 items
+remain separate.

@@ -156,7 +156,7 @@ pub(super) fn aim(
                 .is_some_and(|(q, o)| to(q).dot(s.barrel) >= cos_tol && turned(q, o));
         let range = (c - s.muzzle).length();
         let ready = held.is_some_and(|c| perception::fireable(&c, sim.tick, tier.reaction_ticks));
-        ready && on && range <= wc.ordnance.max_range()
+        ready && on && range <= wc.shot_range()
     });
     if wc.max_pressed_time > 0.0 {
         if centre.is_some() {

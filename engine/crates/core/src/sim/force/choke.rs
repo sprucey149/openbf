@@ -215,7 +215,7 @@ impl Sim {
                 let direction = (self.unit(target).unwrap().soldier.pos
                     - self.units[i].soldier.pos)
                     .normalize_or_zero();
-                self.hero_damage(i, target, desc, direction);
+                self.force_damage(i, target, desc, direction);
                 if self.unit(target).is_some() {
                     let victim = &mut self.units[target.index as usize];
                     // Like a knock, the hold is soldier state: a droideka only

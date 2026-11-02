@@ -198,3 +198,28 @@ fn choke_hurts_a_droideka_without_a_soldiers_hold() {
     assert!(u.health.cur < before);
     assert!(u.choked.is_none());
 }
+
+#[test]
+fn choke_damage_uses_the_same_raised_shield_phase() {
+    let (mut sim, owner) = choke();
+    let y = sim.units[0].muzzle().y - 1.0;
+    let target = sim
+        .spawn(&crate::unit::UnitSpec {
+            droideka: Some(std::sync::Arc::new(Default::default())),
+            ..crate::unit::UnitSpec::trooper(1, Vec3::new(0.0, y, -4.0))
+        })
+        .unwrap();
+    sim.unit_mut(target)
+        .unwrap()
+        .droideka
+        .as_mut()
+        .unwrap()
+        .shield
+        .on = true;
+    let before = sim.unit(target).unwrap().health.cur;
+    sim.force_input(owner.index as usize, None, true, false);
+    let u = sim.unit(target).unwrap();
+    assert_eq!(u.health.cur, before);
+    assert!(u.droideka.as_ref().unwrap().shield.points < 3000.0);
+    assert!(u.choked.is_none());
+}

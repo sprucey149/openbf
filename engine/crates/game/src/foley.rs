@@ -21,6 +21,8 @@
 //!   row has the slot (BF1's rows), for every soldier. `BodyFall` waits for a
 //!   thrown-soldier state. Nothing for the weapons' `*_mvt_*` keys (§5).
 
+mod droideka;
+
 use crate::walk::WalkSim;
 use core::soldier::{GroundRules, Stance};
 use glam::{Mat4, Vec3};
@@ -413,6 +415,7 @@ pub struct Foley {
     pub table: Table,
     pub who: Who,
     tracks: Vec<Track>,
+    droidekas: droideka::Feet,
 }
 
 fn walking(s: Stance) -> bool {
@@ -425,22 +428,31 @@ impl Foley {
             table,
             who: WHO,
             tracks: Vec::new(),
+            droidekas: droideka::Feet::default(),
         }
     }
 
     /// The battle's foley, when the map has a table for it.
     pub fn load(map_dir: &Path, walk: &WalkSim) -> Option<Foley> {
-        Table::load(map_dir, &battle_levels(map_dir, walk)).map(Foley::new)
+        let table = Table::load(map_dir, &battle_levels(map_dir, walk));
+        let droidekas = droideka::Feet::load(map_dir, walk);
+        if table.is_none() && droidekas.is_empty() {
+            return None;
+        }
+        let mut foley = Foley::new(table.unwrap_or_default());
+        foley.droidekas = droidekas;
+        Some(foley)
     }
 
     /// The tick the sim just stepped: `play` for each sound it starts.
     pub fn tick(&mut self, walk: &WalkSim, view: &View, mut play: impl FnMut(Sound)) {
+        self.droidekas.tick(walk, view, self.who, &mut play);
         let sim = &walk.sim;
         self.tracks.resize(sim.units.len(), Track::default());
         let bf1 = sim.ground_rules == GroundRules::Bf1;
         for (i, u) in sim.units.iter().enumerate() {
             let t = &mut self.tracks[i];
-            if !u.alive || u.mount.is_some() {
+            if !u.alive || u.mount.is_some() || u.droideka.is_some() {
                 t.live = false;
                 continue;
             }

@@ -61,6 +61,7 @@ struct Skin {
 pub(super) struct ClassVis {
     parts: Vec<Part>,
     skin: Option<Skin>,
+    shadows: Vec<(render::ShadowMesh, Option<usize>)>,
 }
 
 impl ClassVis {
@@ -99,6 +100,9 @@ impl ClassVis {
 #[derive(Default)]
 pub struct VehicleVisuals {
     classes: Vec<Option<ClassVis>>,
+    bf1_shadows: bool,
+    shadows_on: bool,
+    shadow_triangles: Vec<[f32; 3]>,
     /// Per `Sim::vehicles` slot: the class its dynamic meshes were made for
     /// and one mesh per part (card WSKN).
     posed: std::collections::HashMap<usize, (u32, Vec<MeshHandle>)>,
@@ -283,6 +287,16 @@ pub fn find_texture(
 }
 
 impl VehicleVisuals {
+    /// A measuring switch (`--bench-toggle shadows`): a BF2 map stays without.
+    pub fn set_shadows(&mut self, on: bool) {
+        self.shadows_on = on;
+    }
+
+    /// World-space shadow triangles the last [`Self::draws`] submitted.
+    pub fn shadow_triangles(&self) -> usize {
+        self.shadow_triangles.len() / 3
+    }
+
     /// Upload each class's model; `geometry[class]` is its `GeometryName`.
     /// Call after [`super::upload_scene`] (the renderer then holds the
     /// map's sun, which a specular pass is resolved under). A class whose
@@ -298,6 +312,9 @@ impl VehicleVisuals {
         let cull = far_cull(&scene.manifest.lighting).map(|c| c.world);
         let mut out = Self {
             classes: Vec::new(),
+            bf1_shadows: game == "bf1",
+            shadows_on: true,
+            shadow_triangles: Vec::new(),
             posed: Default::default(),
             cull,
             spec_cull: spec_cull(scene, cull),
@@ -341,8 +358,9 @@ impl VehicleVisuals {
         faded: &[(core::vehicle::VehicleHandle, f32)],
     ) -> Vec<DrawCmd> {
         let mut out = Vec::new();
+        self.shadow_triangles.clear();
         for (slot, v) in sim.vehicles.iter().enumerate().filter(|(_, v)| v.alive) {
-            let Some(Some(class)) = self.classes.get(v.class as usize) else {
+            let Some(Some(class)) = self.classes.get_mut(v.class as usize) else {
                 continue;
             };
             let walker = v.kind == core::vehicle::VehicleKind::Walker;
@@ -350,14 +368,17 @@ impl VehicleVisuals {
                 .iter()
                 .find(|(h, _)| h.index as usize == slot && h.gen == v.gen)
                 .map(|&(_, o)| render::Fade::see_through(visibility_opacity(walker, o)));
-            let posed = match (&class.skin, walker) {
-                (Some(skin), true) => {
-                    let scale = sim
-                        .walker_params
-                        .get(v.class as usize)
-                        .and_then(Option::as_ref)
-                        .map_or(1.0, |p| p.root_scale);
-                    match pose_meshes(r, &mut self.posed, slot, v, class, skin, scale) {
+            let palette = class.skin.as_ref().filter(|_| walker).map(|sk| {
+                let scale = sim
+                    .walker_params
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .map_or(1.0, |p| p.root_scale);
+                sk.rig.aimed_palette(v, scale)
+            });
+            let posed = match (&class.skin, &palette) {
+                (Some(skin), Some(palette)) => {
+                    match pose_skinned(r, &mut self.posed, slot, v.class, class, skin, palette) {
                         Ok(m) => Some(m),
                         Err(e) => {
                             eprintln!("vehicles: posing walker {slot}: {e:#}");
@@ -375,6 +396,61 @@ impl VehicleVisuals {
                 v.rot
             };
             let m = Mat4::from_rotation_translation(rot, v.pos);
+            if self.bf1_shadows
+                && self.shadows_on
+                && v.kind != core::vehicle::VehicleKind::Turret
+                && !class.shadows.is_empty()
+            {
+                let sun = r.lighting.sun_dir.normalize_or_zero();
+                let length = if v.kind == core::vehicle::VehicleKind::Flyer {
+                    500.0
+                } else {
+                    150.0
+                };
+                let sphere = sim
+                    .blast_setup
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref);
+                let radius = sphere.map_or(0.0, |s| s.sphere_radius);
+                let centre = sphere.map_or(v.pos, |s| m.transform_point3(s.sphere_centre));
+                let origin = if walker {
+                    let leg_radius = sim
+                        .walker_params
+                        .get(v.class as usize)
+                        .and_then(Option::as_ref)
+                        .and_then(|p| p.building.iter().find(|b| b.foot))
+                        .map_or(radius, |b| b.radius);
+                    let d = if sun.y < -0.5 {
+                        leg_radius / (2.0 * sun.y.abs())
+                    } else {
+                        leg_radius
+                    };
+                    centre - sun * d + glam::Vec3::Y * (radius - d)
+                } else {
+                    centre + glam::Vec3::Y * radius
+                };
+                let length = sim
+                    .heightfield
+                    .as_ref()
+                    .and_then(|h| {
+                        core::collision::ray_terrain_ps2(
+                            h,
+                            &sim.collision.cutters,
+                            origin,
+                            origin + sun * length,
+                        )
+                    })
+                    .map_or(length, |f| length * f);
+                for (shadow, bone) in &mut class.shadows {
+                    let node = palette
+                        .as_ref()
+                        .filter(|_| posed.is_some())
+                        .and_then(|p| bone.and_then(|b| p.get(b)))
+                        .copied()
+                        .unwrap_or(Mat4::IDENTITY);
+                    shadow.append_volume(m * node, sun * length, &mut self.shadow_triangles);
+                }
+            }
             class.draws(
                 &mut out,
                 posed.as_deref(),
@@ -383,31 +459,10 @@ impl VehicleVisuals {
                 fade,
             );
         }
+        r.set_shadow_triangles(&self.shadow_triangles);
         out.extend(self.items.draws(r, sim));
         out
     }
-}
-
-/// Skin walker `v` (in `Sim::vehicles` slot `slot`) into its dynamic
-/// meshes, one per part of its class, made on first use; returns them.
-fn pose_meshes(
-    r: &mut Renderer,
-    posed: &mut std::collections::HashMap<usize, (u32, Vec<MeshHandle>)>,
-    slot: usize,
-    v: &core::vehicle::Vehicle,
-    class: &ClassVis,
-    sk: &Skin,
-    root_scale: f32,
-) -> Result<Vec<MeshHandle>> {
-    pose_skinned(
-        r,
-        posed,
-        slot,
-        v.class,
-        class,
-        sk,
-        &sk.rig.aimed_palette(v, root_scale),
-    )
 }
 
 pub(super) fn pose_class<K: Copy + PartialEq>(
@@ -577,7 +632,44 @@ fn upload_class(
             (&owned, Some(i))
         }
     };
-    upload_parts(r, scene, sides, textures, cpu, home, rig, joints).map(Some)
+    let shadow_path = match find_model(&scene.manifest, sides, geometry) {
+        Some(ModelSource::Map(model)) => {
+            Some(scene.dir.join("shadows").join(format!("{model}.ron")))
+        }
+        Some(ModelSource::Side(i, model)) => {
+            Some(sides.dir(i).join("shadows").join(format!("{model}.ron")))
+        }
+        None => None,
+    };
+    let mut visual = upload_parts(r, scene, sides, textures, cpu, home, rig, joints)?;
+    if scene.manifest.source_game.eq_ignore_ascii_case("bf1") {
+        if let Some(path) = shadow_path.filter(|p| pak::is_file(p)) {
+            let load = || -> Result<Vec<(render::ShadowMesh, Option<usize>)>> {
+                let pieces: Vec<manifest::shadow::ShadowPiece> =
+                    ron::from_str(&pak::read_to_string(&path)?)?;
+                pieces
+                    .into_iter()
+                    .map(|piece| {
+                        let mesh = render::ShadowMesh::new(&piece.positions, &piece.faces)
+                            .map_err(anyhow::Error::msg)?;
+                        let bone = visual
+                            .skin
+                            .as_ref()
+                            .and_then(|s| s.rig.skeleton.index_of(&piece.node));
+                        Ok((mesh, bone))
+                    })
+                    .collect()
+            };
+            match load() {
+                Ok(shadows) => visual.shadows = shadows,
+                Err(e) => eprintln!(
+                    "vehicle shadows: {}: {e:#} — drawing the vehicle without its shadow",
+                    path.display()
+                ),
+            }
+        }
+    }
+    Ok(Some(visual))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -622,7 +714,11 @@ pub(super) fn upload_parts(
         colors: cpu.colors.clone(),
         joints,
     });
-    Ok(ClassVis { parts, skin })
+    Ok(ClassVis {
+        parts,
+        skin,
+        shadows: Vec::new(),
+    })
 }
 
 /// One submesh's vertices (first-use order) and its triangles over them.
@@ -717,5 +813,111 @@ mod close_walker_tests {
         );
         assert_eq!(super::visibility_opacity(true, 1.0), 1.0);
         assert_eq!(super::visibility_opacity(false, 0.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::*;
+
+    /// Requires the isolated shadow bake overlay described in the issue-66 report.
+    #[test]
+    #[ignore = "requires BF1 NAB1 assets and an isolated shadow sidecar overlay"]
+    fn real_xwing_shadows_are_submitted_only_on_bf1() {
+        use core::vehicle::{VehicleKind, VehicleSpec};
+        use glam::Vec3;
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let assets = root.join("engine/artifacts/lead_tmp/shadows/assets");
+        let (mut scene, _) =
+            crate::assets::load_battle_scene(&root.join("engine/assets_baked/bf1_nab1"), "con")
+                .unwrap();
+        let mut r = Renderer::new_headless(256, 192).unwrap();
+        let mut sim = core::sim::Sim::empty(1);
+        sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos: Vec3::new(0., 3., 0.),
+            yaw: 0.,
+            max_health: 1000.,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: Vec::new(),
+        });
+        let initial_hash = sim.hash();
+        let geometry = [Some("all_fly_xwing".into())];
+        for game in ["bf1", "bf2"] {
+            scene.manifest.source_game = game.into();
+            let mut vis = VehicleVisuals::load(&mut r, &scene, &assets, &geometry);
+            let class = vis.classes[0]
+                .as_ref()
+                .expect("real X-wing model must load");
+            assert!(!class.parts.is_empty());
+            assert_eq!(class.shadows.len(), if game == "bf1" { 9 } else { 0 });
+            let draws = vis.draws(&mut r, &sim, &[]);
+            assert!(!draws.is_empty());
+            assert_eq!(vis.shadow_triangles.is_empty(), game == "bf2");
+            let plane = r
+                .add_mesh(&MeshData {
+                    positions: &[
+                        [-60., 0., -60.],
+                        [60., 0., -60.],
+                        [60., 0., 60.],
+                        [-60., 0., 60.],
+                    ],
+                    normals: &[[0., 1., 0.]; 4],
+                    uvs: &[[0.; 2]; 4],
+                    colors: None,
+                    indices: &[0, 2, 1, 0, 3, 2],
+                })
+                .unwrap();
+            let mut draws = draws;
+            draws.push(
+                DrawCmd::flat(plane, [0.5, 0.5, 0.5, 1.], Mat4::IDENTITY)
+                    .with_light(LightPath::Unlit),
+            );
+            let camera = crate::viewer::look_at(Vec3::new(18., 18., 25.), Vec3::new(0., 0., 0.));
+            r.render(&camera, &draws, [0.1, 0.1, 0.1, 1.]).unwrap();
+            let (with, w, h) = r.capture_rgba().unwrap();
+            r.set_shadow_triangles(&[]);
+            r.render(&camera, &draws, [0.1, 0.1, 0.1, 1.]).unwrap();
+            let (without, _, _) = r.capture_rgba().unwrap();
+            let changed = with
+                .chunks_exact(4)
+                .zip(without.chunks_exact(4))
+                .filter(|(a, b)| a[..3] != b[..3])
+                .count();
+            let ground = with
+                .chunks_exact(4)
+                .zip(without.chunks_exact(4))
+                .filter(|(a, b)| {
+                    a[..3] != b[..3] && b[0] == b[1] && b[1] == b[2] && (185..=190).contains(&b[0])
+                })
+                .count();
+            println!("{game}: real X-wing changed {changed} pixels, {ground} on the plane");
+            if game == "bf1" {
+                assert!(
+                    ground > 100,
+                    "real caster must shade the plane, got {ground}"
+                );
+            } else {
+                assert_eq!(changed, 0);
+            }
+            let out = root.join("engine/artifacts/lead_tmp/shadows");
+            image::save_buffer(
+                out.join(format!("{game}-xwing.png")),
+                &with,
+                w,
+                h,
+                image::ColorType::Rgba8,
+            )
+            .unwrap();
+            assert_eq!(
+                sim.hash(),
+                initial_hash,
+                "rendering must not mutate simulation"
+            );
+        }
     }
 }

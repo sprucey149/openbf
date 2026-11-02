@@ -169,8 +169,7 @@ pub fn hittable(
         let muzzle = v.pos + v.rot * g.muzzle(gun::angles(local));
         let d = (p - muzzle).length();
         let reach = wc
-            .ordnance
-            .max_range()
+            .shot_range()
             .min(perception::view_distance(o.soldier.stance, view));
         if d <= reach {
             let theirs = o.mount.map(|m| {

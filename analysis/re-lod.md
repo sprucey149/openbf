@@ -196,3 +196,100 @@ the `DAT_005ff0fa` low forcing — folded into §5). The 7 absence / twin claims
 writers, `GeometryLowRes` built once per ELF and re-softskin §7 wrong, the chooser / traversal / soldier-record twins)
 went to two separate verifiers: both SUPPORTED all 7, none overturned. Extras taken: BF2's walker caps (§4.2), the
 third record-builder callers (§5), BF2's hi model offset (§5).
+
+## 11. Soldier implementation re-check (2026-11-01, issue #69)
+
+Re-read the soldier record builders and both choosers against the local PS2
+executables/decompilation. BF1 `0x001a9180` takes the high model's `+0xa8`
+count; `0x004790e0` gives queue 0 a 10,000 high budget. The count is the
+model's total strip indices, **not** decoded vertices (see re-softskin §4).
+BF2 `0x001b4f98` charges 2,000 per soldier; `0x00563bb0` gives queue 2
+8,000. `0x005ace40` applies the 208,000 density divisor. Direct ELF reads at
+`0x0060c854` and `0x0060c858` still give 1.0 and 5.0. Far walkers
+`0x004c62b0` / `0x005b0330` cap the soldier queue at ten; BF2 also tests
+`radius² / (view_depth + radius)² >= 25 / 208000` before drawing the low mesh.
+
+The pre-change port has **no soldier distance cull**: `SoldierVisuals::posed`
+selects lifecycle/cloak/seat eligibility and submits the full body; the renderer
+expressly excludes skinned draws from its world AABB cull. Soldiers therefore
+remain full detail beyond the map's near range, until the projection far plane
+clips them. This corrects the issue's uncertainty about the existing cull.
+
+The new bake takes `GeometryLowRes` through the class inheritance chain and
+writes a `<high>.low.glb` companion, with joint indices and bind positions
+normalized to the high skeleton. The renderer reuses the high animator and
+palette. `<high>.lod.ron` carries the authored sphere and strip count. No model
+loads, name lookups, bone remapping or fresh selection-scratch allocation occur
+per frame after warm-up. Missing/incompatible companions preserve the previous
+unlimited full-detail submission and require a targeted soldier rebake.
+
+Saber-bearing classes retain their existing full-detail submission alongside
+their independent blade/hilt/trail passes; this slice leaves that hero rendering
+scope unchanged. Specialized droidekas already use a separate renderer.
+
+Both visual tiers use the PS2 budgets for ordinary soldiers; no larger default budget is inferred from
+hardware names. Selection is per camera, with the viewport's own soldier kept
+high. BF1 uses its depth/off-axis heap key; BF2 uses projected sphere size,
+including side/near clipping attenuation. Far candidates begin at
+`depth + radius >= NearSceneRange[1] * zoom`; at most ten nearest candidates
+are eligible (both native heaps rank `depth - 3 * radius`), and `depth < FarSceneRange` is required. The far range of zero
+has no far layer. Near bodies remain eligible while
+`depth - radius <= NearSceneRange[2] * zoom`.
+
+**Remaining difference:** this implementation selects whole bodies in the
+near/far transition. It does not add the world renderer's per-fragment b..c
+dither to the skinned pipeline. The far queue is still charged for the bodies
+in that transition, so it cannot draw an additional ten beyond those already
+counted. Saber-bearing classes stay outside this rule (above).
+
+## 12. Soldier picks against PS2 save states (2026-11-01, issue #69)
+
+Sixteen existing save states (ten BF1, six BF2; crowded spawns) give each state's own
+soldier queue from RAM: sphere, strip count, record flags, the camera, and the map's
+scene ranges. No new capture was taken. Run through the port's chooser
+(`ps2_state_queues_through_the_chooser`), **392 of 393 bodies** agree with a separate
+replay of the PS2 rules on the same rows (BF1 from the `FUN_004c1ef0` replay, BF2 from
+the §5 rule plus its 8,000 budget). The one difference is a body clipped at the frustum,
+whose key the port attenuates and the replay does not.
+
+That check found two errors the unit tests could not:
+- **BF1's heap key had both signs wrong.** It preferred off-axis and smaller bodies. The
+  native key, `FUN_004c5808`, is `-depth - off_axis/2 + radius`, largest first.
+- **The draw sphere is 1.0 m past the model's authored one.** RAM against the bake, matched by
+  strip count, is exactly +1.000 on all 15 BF1 classes with a unique count. BF2 charges a flat
+  2,000, so there the match is by radius: 9 of 11 distinct RAM radii are a baked radius plus 1.0.
+  Five BF1 counts and two BF2 radii match no baked class and were not traced. At BF2's rules the
+  margin moves a full-detail body from about 12 m to about 23 m and the size cull from about 114 m
+  to about 205 m.
+
+What the state frames can and cannot show: the frames fit the picks where a body is on open
+ground (BF2 Yavin 1's landing zone has no soldier at the bodies picked hidden past its 100 m
+range with FarSceneRange 0). At these distances a low body is too few pixels to tell from a
+high one by eye, so the frames do not separately prove which mesh is on screen; the mesh choice
+rests on the RAM picks.
+
+## 13. What the low models cost and save (2026-11-01, issue #69)
+
+`--bench-toggle soldier-lod`: the same frozen battle, full detail against the PS2 rule in
+alternating blocks, release build at 1280x720, three runs on each GPU, medians. A BF2 map where
+the shadow switch does nothing is the noise control (`re-vehicle-shadow.md` §9): within 0.02 ms
+on the RTX, and -0.33 to 0 ms on the Intel. Frame is whole-frame wall clock; list is the CPU
+building the frame's draw lists.
+
+| map, bots, view | GPU | skinned draws | frame change | list ms |
+|---|---|---|---|---|
+| BF1 NAB1, 120, overview | RTX 4000 Ada | 557 → 21 | -1.7 ms | 1.30 → 0.54 |
+| | Intel RPL-S | | -3.9 ms | 1.35 → 0.65 |
+| BF1 NAB1, 120, player eye | RTX 4000 Ada | 557 → 1 | -1.6 ms | 1.32 → 0.54 |
+| | Intel RPL-S | | -3.6 ms | 1.32 → 0.55 |
+| BF2 NAB2, 120, player eye | RTX 4000 Ada | 558 → 45 | -1.2 ms | 0.90 → 0.39 |
+| | Intel RPL-S | | -4.5 ms | 1.42 → 0.74 |
+| BF1 NAB1, 16, overview | RTX 4000 Ada | 66 → 24 | -0.13 ms | 0.37 → 0.29 |
+| | Intel RPL-S | | -0.45 ms | 0.41 → 0.34 |
+| BF2 NAB2, 16, player eye | RTX 4000 Ada | 69 → 6 | -0.28 ms | 0.16 → 0.09 |
+| | Intel RPL-S | | -0.57 ms | 0.23 → 0.14 |
+
+Most of the gain is hidden bodies rather than cheaper ones: past the near scene the rule draws
+at most ten. Those numbers do not include a window's presentation or vsync. No larger default
+budget was chosen: at the PS2's budget the gain above is already free, and every build should
+show the same bodies.

@@ -29,6 +29,8 @@ pub use environment::{
     ManifestWaterConfig, ManifestWetMask, ManifestWind,
 };
 
+pub mod shadow;
+
 pub mod anim_sets;
 pub mod cloth;
 pub mod combo;
@@ -1115,6 +1117,16 @@ pub struct SoldierSkins {
     /// Every override texture a class on this model names, lowercase,
     /// baked beside the model's own under `textures/`.
     pub overrides: Vec<String>,
+}
+
+/// Presentation-only soldier LOD companion (`<model>.lod.ron`). The low GLB
+/// shares the high model's joint order and bind space; it carries no animation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SoldierLod {
+    pub geometry: String,
+    /// PS2 model+0xa8: total strip indices, not the decoded vertex count.
+    pub high_count: u32,
+    pub sphere: [f32; 4],
 }
 
 /// One munged gameplay class: its name, the chunk it came from, its BASE and

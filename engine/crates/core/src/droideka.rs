@@ -114,6 +114,8 @@ pub enum Cue {
     ShieldOn,
     ShieldOff,
     Jump,
+    /// A grounded ball jump was refused by the separate movement energy pool.
+    EnergyRefused,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -152,6 +154,7 @@ pub struct Report {
     pub weapons_on: bool,
     pub shield: Option<bool>,
     pub jumped: bool,
+    pub energy_refused: bool,
     pub water_damage: f32,
     pub walk_step: f32,
 }
@@ -164,7 +167,11 @@ impl Report {
             .shield
             .map(|on| if on { Cue::ShieldOn } else { Cue::ShieldOff });
         let jump = self.jumped.then_some(Cue::Jump);
-        fold.into_iter().chain(unfold).chain(shield).chain(jump)
+        fold.into_iter()
+            .chain(unfold)
+            .chain(shield)
+            .chain(jump)
+            .chain(self.energy_refused.then_some(Cue::EnergyRefused))
     }
 }
 

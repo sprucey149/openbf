@@ -156,3 +156,101 @@ fn the_bubble_colour_is_the_disc_config_per_game() {
     assert_eq!(bubble_color("bf1"), [96, 160, 192, 192]);
     assert_eq!(bubble_color("BF2"), [96, 160, 192, 255]);
 }
+
+/// Issue #85: the rim against the one clean PS2 frame of a raised shield (BF1
+/// Yavin Temple, `cp2_viaduct_viaduct_spawn`; its RAM has the droideka's shield on).
+/// The frame's rim, fitted to a 33.3 px circle in 640x480 and measured over the
+/// arc free of its specular highlight, as green added over the background.
+#[test]
+#[ignore = "requires a headless GPU adapter"]
+fn the_rim_matches_the_ps2_frame() {
+    const R_PX: f32 = 33.3;
+    const PS2_GREEN: [(f32, f32); 9] = [
+        (0.94, 46.3),
+        (0.91, 43.0),
+        (0.88, 37.7),
+        (0.85, 31.8),
+        (0.82, 27.8),
+        (0.79, 24.8),
+        (0.76, 22.3),
+        (0.73, 19.1),
+        (0.70, 17.5),
+    ];
+    let mut s = core::sim::Sim::empty(5);
+    let class = std::sync::Arc::new(DroidekaClass::default());
+    let spec = core::unit::UnitSpec {
+        droideka: Some(class.clone()),
+        ..core::unit::UnitSpec::trooper(1, Vec3::ZERO)
+    };
+    let h = s.spawn(&spec).unwrap();
+    s.units[h.index as usize]
+        .droideka
+        .as_mut()
+        .unwrap()
+        .shield
+        .on = true;
+    let mut vis = DroidekaVisuals {
+        bubble_color: bubble_color("bf1"),
+        ..DroidekaVisuals::default()
+    };
+    let centre = s.units[h.index as usize].droideka_point(class.shield.sphere.center);
+    let tan_half_v = 0.34131f32;
+    let cam = Camera {
+        position: centre + Vec3::Z * (class.shield.sphere.radius * 240.0 / (R_PX * tan_half_v)),
+        fov_y: 2.0 * tan_half_v.atan(),
+        ..Camera::default()
+    };
+    let mut r = render::Renderer::new_headless(640, 480).expect("headless GPU");
+    vis.bubble_texture = upload_cpu_texture(
+        &mut r,
+        &crate::assets::CpuTexture {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+            extra_mips: Vec::new(),
+            detail: None,
+        },
+        "droideka_shield",
+    )
+    .ok();
+    assert!(vis.bubble_texture.is_some());
+    r.set_particles(vis.bubbles(&s, &cam, Vec3::NEG_Y));
+    r.render(&cam, &[], [0.0145, 0.0194, 0.0091, 1.0]).unwrap();
+    let (rgba, w, _) = r.capture_rgba().unwrap();
+    if let Ok(path) = std::env::var("OPENBF_BUBBLE_CAPTURE") {
+        image::save_buffer(path, &rgba, w, 480, image::ColorType::Rgba8).unwrap();
+    }
+    let channel = |fraction: f32, c: usize| {
+        let mut sum = 0.0;
+        for d in 0..720 {
+            let a = (d as f32 * 0.5).to_radians();
+            let x = 320.0 + R_PX * fraction * a.cos();
+            let y = 240.0 + R_PX * fraction * a.sin();
+            let at = (y.round() as usize * w as usize + x.round() as usize) * 4;
+            sum += f32::from(rgba[at + c]);
+        }
+        sum / 720.0
+    };
+    let background = [channel(1.2, 0), channel(1.2, 1), channel(1.2, 2)];
+    let peak = |c: usize| {
+        (0..40)
+            .map(|i| channel(0.8 + i as f32 * 0.005, c) - background[c])
+            .fold(0.0, f32::max)
+    };
+    let (peak_r, peak_g, peak_b) = (peak(0), peak(1), peak(2));
+    eprintln!("peak add {peak_r:.1} {peak_g:.1} {peak_b:.1}, the frame's 28.8 49.9 58.6");
+    assert!((peak_r - 28.8).abs() < 4.0, "red {peak_r}");
+    assert!((peak_g - 49.9).abs() < 4.0, "green {peak_g}");
+    assert!((peak_b - 58.6).abs() < 4.0, "blue {peak_b}");
+    for (fraction, want) in PS2_GREEN {
+        let got = channel(fraction, 1) - background[1];
+        eprintln!("{fraction:.2}R green add {got:.1}, the frame's {want}");
+        assert!(
+            (got - want).abs() < 7.0,
+            "{fraction}R: {got} against {want}"
+        );
+    }
+    // The inside of the rim fades; past the rim is clean background.
+    assert!(channel(0.5, 1) - background[1] < 15.0);
+    assert_eq!(channel(1.1, 1), background[1]);
+}

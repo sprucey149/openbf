@@ -190,6 +190,75 @@ impl Sections {
     }
 }
 
+/// `--bench-toggle`: one feature off and on in alternating blocks of frames in
+/// the same process on the same frozen battle, so whatever else loads the machine
+/// loads both sides alike. Only the feature differs between the two columns.
+pub struct Toggle {
+    pub name: &'static str,
+    /// CPU building the frame's lists, then the whole frame, by [off, on].
+    pub build: [Samples; 2],
+    pub frame: [Samples; 2],
+    pub gpu: [Sections; 2],
+    pub draw_calls: [u32; 2],
+    pub skinned: [usize; 2],
+    pub shadow_triangles: [usize; 2],
+}
+
+impl Toggle {
+    /// Frames per side before switching, and those dropped after each switch
+    /// so one side's buffer growth is not billed to the other.
+    pub const BLOCK: u32 = 20;
+    pub const SETTLE: u32 = 2;
+
+    pub fn new(name: &'static str) -> Self {
+        Toggle {
+            name,
+            build: Default::default(),
+            frame: Default::default(),
+            gpu: Default::default(),
+            draw_calls: [0; 2],
+            skinned: [0; 2],
+            shadow_triangles: [0; 2],
+        }
+    }
+
+    pub fn is_on(frame: u32) -> bool {
+        (frame / Self::BLOCK) % 2 == 1
+    }
+
+    pub fn settled(frame: u32) -> bool {
+        frame % Self::BLOCK >= Self::SETTLE
+    }
+
+    pub fn print(&self) {
+        println!("--- {} off/on, alternating ---", self.name);
+        for (side, label) in ["off", "on "].iter().enumerate() {
+            println!(
+                "  {label}  frame p50 {:7.3} p95 {:7.3} mean {:7.3} ms ({} frames)   lists p50 {:6.3} ms   \
+                 {} draw calls, {} skinned, {} shadow tris",
+                self.frame[side].pct(0.50),
+                self.frame[side].pct(0.95),
+                self.frame[side].mean(),
+                self.frame[side].len(),
+                self.build[side].pct(0.50),
+                self.draw_calls[side],
+                self.skinned[side],
+                self.shadow_triangles[side],
+            );
+            let (rows, frames) = self.gpu[side].means();
+            if frames > 0 {
+                let rows: Vec<String> = rows.iter().map(|(l, ms)| format!("{l} {ms:.3}")).collect();
+                println!("       gpu ms: {}", rows.join(", "));
+            }
+        }
+        println!(
+            "  difference (on - off): frame p50 {:+.3} ms, lists p50 {:+.3} ms",
+            self.frame[1].pct(0.50) - self.frame[0].pct(0.50),
+            self.build[1].pct(0.50) - self.build[0].pct(0.50),
+        );
+    }
+}
+
 /// The fixed-tick budget one `Sim::step` has to fit inside (30 Hz, audit A5).
 const TICK_BUDGET_MS: f64 = 1000.0 / 30.0;
 

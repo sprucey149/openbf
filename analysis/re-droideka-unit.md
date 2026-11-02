@@ -245,3 +245,31 @@ python3 scripts/tools/eedis2.py bf1 294080 2940d8     # the shield's fire predic
 ```
 The two stored CSVs were taken with BF2's velocity read at E+0x550; the real field is E+0x490 (verifier; the script
 is fixed since) - no BF2 number above uses that column.
+
+## 9. Remaining player feedback, chunks and feet (issue #85, 2026-11-01)
+
+BF2's rolling boost stays unbound: the maintainer's rule (2026-10-30) is no sprint in ball or walking
+form, so the integrator's boost is reached by no button. `re-droideka.md` §4 has the disc's multiplier 2,
+forward-stick threshold 0.9 and 30/s energy drain, should that ever change.
+The main stamina bar remains shield charge. A refused grounded ball jump
+now emits an explicit movement-energy message for its player; this is a named UI addition. The
+native final jump may exhaust a positive pool: refusal still tests `depleted`, not `energy < cost`.
+The aimed-at unit's existing shield HUD field now shows charge while its sphere is raised.
+
+Droideka `CHUNKSECTION` geometry was omitted from the side vehicle bake. Both CIS classes already
+author five sections (chunk1, chunk3 twice, chunk4, chunk5); include their models, collision and
+hardpoints through the existing vehicle path. The duplicated chunk3 is native, not a missing chunk2.
+
+Foot contact [V]: BF2 `FUN_001f3b90`, decomp lines 105563–105640, looks up the three animation CRCs
+`f63b8713`, `c3ca09f4`, `758bc3c3` (`bone_l_leg2`, `bone_r_leg2`, `bone_b_leg2`) and reads matrix Y
+at +0x34. Each strict downward crossing from above 0.48 to below 0.48 starts the class sound at
++0xe40/+0xe48/+0xe50. Setter hashes `21f56ed0`, `937ceaa5`, `12b23362` select those three slots
+(decomp 112659, 112933, 112589); both native CIS class records name `cis_inf_droideka_step` there.
+The port caches three model-space bone heights per baked clip frame at load, then interpolates
+three floats at the simulation clip time. It suppresses humanoid footsteps for droidekas and
+resets contact history for death, handle reuse, rolling and leaving draw/earshot eligibility.
+
+Named presentation approximation: interpolating cached scalar heights is not evaluating the native
+live blended skeleton; fractional-frame contact times can differ. The native alternate timer branch,
+surface-extra sounds and leg hydraulic creak are not claimed here. Native foot contacts and class
+sounds are checked against both games' baked rigs, without a new audio-device or live capture run.

@@ -102,7 +102,10 @@ impl SoldierVisuals {
     /// character lighting/material as its replaced skinned GLB part.
     pub fn cloth_draws(&mut self, r: &mut Renderer, walk: &WalkSim) -> Vec<render::DrawCmd> {
         let mut packets = Vec::new();
-        for (i, sa, model, palette) in self.posed(walk) {
+        for (i, sa, model, palette) in self.posed_for(walk, true) {
+            if self.lod_view.choice(i) == super::lod::Choice::Low {
+                continue;
+            }
             let u = &walk.sim.units[i];
             let ai = self.asset_index(u.team, u.spec.class).unwrap();
             let globals: Vec<_> = palette

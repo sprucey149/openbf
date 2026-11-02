@@ -263,6 +263,7 @@ pub(super) fn bake_content(
     let alpha_table = crate::alpha::AlphaTable::new(&all_textures);
     // Card TBIND (`crate::bind_pose`): a model with a `skel` is written in
     // its bind pose, so a turret's head and gun sit on their bones.
+    let shadow_skels = crate::hardpoints::Skeletons::of(&expanded);
     let bind_pose = crate::bind_pose::BindPose::of(&expanded);
     let mut posed: Vec<String> = Vec::new();
     // Card VTURD (`crate::turret_rig`): an armed building's model is written
@@ -424,6 +425,7 @@ pub(super) fn bake_content(
                 if layer_loses("modl", c.offset, &m.name, dup, &mut layer_skips) {
                     continue;
                 }
+                crate::shadow::write_model(c, out, &shadow_skels)?;
                 match bind_pose.pose(&m) {
                     Ok(Some(p)) => {
                         posed.push(p.name.clone());

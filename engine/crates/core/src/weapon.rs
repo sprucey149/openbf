@@ -103,7 +103,7 @@ mod fatray;
 mod ordnance;
 mod repair;
 #[cfg(test)]
-mod test_props;
+pub(crate) mod test_props;
 pub use ability::Ability;
 pub use beam::BeamClass;
 pub use dispenser::Dispenser;
@@ -496,6 +496,15 @@ impl Default for WeaponClass {
 }
 
 impl WeaponClass {
+    /// Reach of an actual shot. Cone weapons query ConeLength, not the
+    /// otherwise unused projectile velocity and lifespan (PS2 emitter create).
+    pub fn shot_range(&self) -> f32 {
+        self.emitter
+            .as_ref()
+            .filter(|e| e.is_cone())
+            .map_or_else(|| self.ordnance.max_range(), |e| e.cone_length)
+    }
+
     /// The stage a charge reaches: the PS2 steps on while the charge is over
     /// the next stage's threshold (B2 `FUN_00327168`). 0 is the root.
     pub fn stage_for(&self, charge: f32) -> usize {
@@ -1753,6 +1762,10 @@ impl WeaponState {
                     eat(&[1]);
                     eat(&h.index.to_le_bytes());
                     eat(&h.gen.to_le_bytes());
+                }
+                crate::missile::MissileTarget::Turret(id) => {
+                    eat(&[2]);
+                    eat(&id.to_le_bytes());
                 }
             }
             eat(&self.lock_held.to_bits().to_le_bytes());

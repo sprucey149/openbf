@@ -292,19 +292,29 @@ fn bake_droidekas(
             eprintln!("droideka {}: no GeometryName — skipped", e.name);
             continue;
         };
-        let Some(lods) = ix.lods(geometry) else {
+        let Some(_) = ix.lods(geometry) else {
             eprintln!(
                 "droideka {}: geometry {geometry} not in this LVL — skipped",
                 e.name
             );
             continue;
         };
-        if !geometries
-            .iter()
-            .any(|k| k.name.eq_ignore_ascii_case(geometry))
-        {
+        // Droidekas use the same authored CHUNKSECTION geometry as vehicles.
+        for name in std::iter::once(geometry).chain(
+            e.props
+                .iter()
+                .filter(|p| p.key_hash == PROP_CHUNK_GEOMETRY)
+                .map(|p| p.value.as_str()),
+        ) {
+            if geometries.iter().any(|g| g.name.eq_ignore_ascii_case(name)) {
+                continue;
+            }
+            let Some(lods) = ix.lods(name) else {
+                eprintln!("droideka {}: chunk geometry {name} not in this LVL", e.name);
+                continue;
+            };
             geometries.push(ManifestGeometry {
-                name: geometry.to_owned(),
+                name: name.to_owned(),
                 model: preferred_lod(&lods).to_owned(),
                 lods,
                 far: None,
@@ -423,9 +433,18 @@ pub fn bake_vehicles(
         vehicles
             .iter()
             .any(|v| v.chunks.iter().any(|c| c.eq_ignore_ascii_case(&g.name)))
-            || droidekas
+            || ix
+                .classes
                 .iter()
-                .any(|d: &manifest::ManifestDroideka| d.geometry.eq_ignore_ascii_case(&g.name))
+                .filter(|e| crate::droideka::is_droideka_base(&e.base))
+                .any(|e| {
+                    e.geometry_name()
+                        .is_some_and(|n| n.eq_ignore_ascii_case(&g.name))
+                        || e.props.iter().any(|p| {
+                            p.key_hash == PROP_CHUNK_GEOMETRY
+                                && p.value.eq_ignore_ascii_case(&g.name)
+                        })
+                })
     }) {
         if let Some(s) = skels.find(&g.name) {
             g.hardpoints = crate::hardpoints::of(s);
@@ -444,6 +463,17 @@ pub fn bake_vehicles(
             let (m, bones) = ix.model_space(name, &g.name)?;
             to_write.push(m);
             joints.push(bones);
+        }
+    }
+
+    // The authored closed volumes, beside the vehicle models they belong to. The
+    // Xbox and PC give soldiers and weapons shadow meshes too; only these draw one.
+    for c in chunks.iter().filter(|c| &c.tag == b"modl") {
+        let vehicle = c
+            .child_str(b"NAME")
+            .is_some_and(|n| to_write.iter().any(|m| m.name.eq_ignore_ascii_case(n)));
+        if vehicle {
+            crate::shadow::write_model(c, out, &skels)?;
         }
     }
     let wanted: Vec<String> = to_write
@@ -555,6 +585,52 @@ pub fn bake_vehicles(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires native CIS side LVLs; writes a scratch side bake"]
+    fn both_native_droidekas_bake_the_authored_death_chunks() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for game in ["bf1", "bf2"] {
+            let input = root.join(format!("extracted/{game}/lvl/DATA/_LVL_PS2/SIDE/CIS.LVL"));
+            let bytes = std::fs::read(&input).unwrap();
+            let root_chunk = mungefs::open(&bytes).unwrap();
+            let chunks = mungefs::content_chunks(root_chunk).unwrap();
+            let ix = index(&chunks).unwrap();
+            let class = ix
+                .classes
+                .iter()
+                .find(|c| c.name == "cis_inf_droideka")
+                .unwrap();
+            let names: Vec<_> = class
+                .props
+                .iter()
+                .filter(|p| p.key_hash == PROP_CHUNK_GEOMETRY)
+                .map(|p| p.value.clone())
+                .collect();
+            assert!(!names.is_empty());
+            let out = root.join(format!("engine/artifacts/lead_tmp/droideka85/{game}"));
+            let baked =
+                bake_vehicles(input.to_str().unwrap(), out.to_str().unwrap(), None).unwrap();
+            for name in &names {
+                let g = baked
+                    .geometries
+                    .iter()
+                    .find(|g| g.name.eq_ignore_ascii_case(name))
+                    .unwrap_or_else(|| panic!("{game}: missing {name}"));
+                assert!(!g.lods.is_empty());
+                for (_, model) in &g.lods {
+                    let bytes =
+                        std::fs::read(out.join("models").join(format!("{model}.glb"))).unwrap();
+                    let gltf = gltf::Gltf::from_slice(&bytes).unwrap();
+                    assert!(gltf.meshes().next().is_some());
+                }
+            }
+            eprintln!(
+                "{game}: {} authored chunk sections baked: {names:?}",
+                names.len()
+            );
+        }
+    }
 
     // RKHULT: exact synthetic axes make the two composition orders differ.
     // Expectations below are worked out by following the prim's axes, then

@@ -269,6 +269,14 @@ def find_bash():
     sys.exit("pack: Git for Windows' bash.exe was not found (install Git for Windows, https://git-scm.com)")
 
 
+def missing_shadows():
+    """BF1 vehicle shadows are written beside each side's models. None at all means a bake from before them."""
+    sides = glob.glob(os.path.join(BAKED, "side_bf1", "vehicles", "*", "vehicles.ron"))
+    if sides and not glob.glob(os.path.join(BAKED, "side_bf1", "vehicles", "*", "shadows", "*.ron")):
+        return sides
+    return []
+
+
 def missing_music():
     """Music bodies a stream index names but the bake has not written (an assets_baked from before card PACK)."""
     out = []
@@ -606,9 +614,17 @@ def main():
             run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "sounds", "global-sound"],
                 **({"env": bake_env} if bake_env else {}))
             extracted_used.update(("bf1", "bf2"))
+        if missing_shadows():
+            print("   no BF1 vehicle shadows in this bake: rebaking the sides")
+            need("ffmpeg", "the bake encodes speech and effects to OGG")
+            run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "side"], **({"env": bake_env} if bake_env else {}))
+            extracted_used.update(("bf1", "bf2"))
     left = missing_music()
     if left:
         sys.exit(f"pack: {len(left)} music streams still missing after the bake, e.g. {left[0]}")
+    left = missing_shadows()
+    if left:
+        sys.exit(f"pack: the BF1 sides were baked without vehicle shadows, e.g. {left[0]}")
 
     step("6/6 pack")
     os.makedirs(os.path.dirname(out), exist_ok=True)

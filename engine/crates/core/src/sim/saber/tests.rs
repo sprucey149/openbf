@@ -412,3 +412,66 @@ fn the_look_preview_draws_the_turn_a_human_takes_through_a_locked_combo_state() 
         assert_ne!(sim.unit(player).unwrap().soldier.yaw, start, "lock {lock}");
     }
 }
+
+#[test]
+fn a_reflected_missile_retains_its_native_flight_state_without_a_lock() {
+    let (mut sim, defender, owner) = scene();
+    let ord = &mut sim.weapon_classes[1].ordnance;
+    ord.kind = crate::weapon::OrdKind::Missile;
+    ord.missile = Some(crate::missile::MissileClass::default());
+    let bolt = impact(&sim, defender, owner, Vec3::Z);
+    sim.resolve_bolt(&bolt);
+    let reflected = sim.bolts.last().unwrap();
+    assert_eq!(reflected.owner, defender);
+    assert!(reflected.missile.is_some());
+    assert!(reflected.missile.unwrap().target.is_none());
+    assert!(sim.beams.is_empty());
+}
+
+#[test]
+fn a_held_beam_pays_the_native_deflect_cost_each_contact_tick() {
+    let (mut sim, defender, owner) = scene();
+    sim.weapon_classes[1].ordnance.kind = crate::weapon::OrdKind::Beam;
+    sim.weapon_classes[1].ordnance.beam = Some(crate::weapon::BeamClass {
+        range: 20.0,
+        life: 0.15,
+        pierce: false,
+        impact: None,
+    });
+    let bolt = impact(&sim, defender, owner, Vec3::Z);
+    let health = sim.unit(defender).unwrap().health.cur;
+    for _ in 0..3 {
+        sim.resolve_bolt(&bolt);
+    }
+    assert_eq!(sim.unit(defender).unwrap().health.cur, health);
+    assert_eq!(sim.unit(defender).unwrap().soldier.energy, 92.5);
+    assert!(sim.beams.is_empty());
+}
+
+#[test]
+fn a_fat_ray_block_spares_the_defender_but_the_ray_reaches_the_next_body() {
+    let (mut sim, defender, owner) = scene();
+    sim.weapon_classes[1].ordnance.fat_ray = Some(crate::weapon::FatRayClass {
+        max_damage: 100.0,
+        min_damage: 10.0,
+        damage_deduction: 5.0,
+        radius: 1.0,
+    });
+    let behind = sim
+        .spawn(&UnitSpec::trooper(0, Vec3::new(0.0, 0.0, 1.0)))
+        .unwrap();
+    let before = sim.unit(defender).unwrap().health.cur;
+    let mut ray = impact(&sim, defender, owner, Vec3::Z);
+    ray.pos = Vec3::new(0.0, 1.4, -2.0);
+    ray.vel = Vec3::Z * 100.0;
+    ray.hit = Hit::None;
+    sim.bolts.push(ray);
+    sim.sweep_fat_rays(crate::TICK_DT);
+    assert_eq!(sim.unit(defender).unwrap().health.cur, before);
+    assert_eq!(sim.unit(defender).unwrap().soldier.energy, 97.5);
+    assert_eq!(sim.unit(behind).unwrap().health.cur, 205.0);
+    assert!(
+        sim.bolts.len() > 1,
+        "accepted block creates reflected ordnance"
+    );
+}

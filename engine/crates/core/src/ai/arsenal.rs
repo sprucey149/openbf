@@ -357,7 +357,7 @@ pub(super) fn choose<'a>(cands: impl Iterator<Item = Cand<'a>>, ask: &Ask) -> Op
             let fallback = if c.class.force.is_some() || c.class.saber_throw.is_some() {
                 max
             } else {
-                max.max(c.class.ordnance.max_range())
+                max.max(c.class.shot_range())
             };
             !in_range && ask.d2 < fallback * fallback && by_rule
         };
@@ -429,7 +429,7 @@ pub(super) fn sidearm(
     // would stand silent from 24 m.
     let keep = RIFLE_BACK
         .min(pistol.class.ai_range[2])
-        .min(pistol.class.ordnance.max_range());
+        .min(pistol.class.shot_range());
     // Never drawn past that reach either: a BF1 rifle's MinRange (20-32 m)
     // is wider than a pistol's, and the rifle fires there (the trigger asks
     // no MinRange).

@@ -228,13 +228,13 @@ BF2_MAPS="${OPENBF_BF2_MAPS:-$BF2_MAPS}"
 
 if want tat1; then
   echo "== TAT1 (BF1) =="
-  clean "$OUT/tat1/models" "$OUT/tat1/textures" "$OUT/tat1/collision" "$OUT/tat1/nav"
+  clean "$OUT/tat1/models" "$OUT/tat1/textures" "$OUT/tat1/collision" "$OUT/tat1/nav" "$OUT/tat1/shadows"
   map_donors bf1 TAT/TAT1.LVL
   "$BAKE" map "$(ci "$B1" TAT/TAT1.LVL)" "$OUT/tat1" "${PC_ARG[@]}"
 fi
 if want tat2; then
   echo "== TAT2 (BF2) =="
-  clean "$OUT/tat2/models" "$OUT/tat2/textures" "$OUT/tat2/collision" "$OUT/tat2/nav"
+  clean "$OUT/tat2/models" "$OUT/tat2/textures" "$OUT/tat2/collision" "$OUT/tat2/nav" "$OUT/tat2/shadows"
   map_donors bf2 tat/tat2.lvl
   "$BAKE" map "$(ci "$B2" TAT/TAT2.LVL)" "$OUT/tat2" "${PC_ARG[@]}"
 fi
@@ -530,7 +530,7 @@ if want maps; then
   echo "== other ground maps =="
   for p in $BF1_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf1_$n"
-    clean "$d/models" "$d/textures" "$d/collision" "$d/nav"
+    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows"
     map_donors bf1 "$p.LVL"
     "$BAKE" map "$(ci "$B1" "$p.LVL")" "$d" "${PC_ARG[@]}"
     LF="$(ci "$B1" "LOAD/$(basename "$p").LVL")"
@@ -539,7 +539,7 @@ if want maps; then
   for p in $BF2_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); d="$OUT/bf2_$n"
     planet=$(dirname "$p" | tr 'A-Z' 'a-z')
-    clean "$d/models" "$d/textures" "$d/collision" "$d/nav"
+    clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows"
     map_donors bf2 "$planet/$n.lvl"
     "$BAKE" map "$(ci "$B2" "$p.LVL")" "$d" "${PC_ARG[@]}"
     LF="$(ci "$B2" "LOAD/$(basename "$p").LVL")"

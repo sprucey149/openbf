@@ -72,8 +72,31 @@ impl Sim {
         &mut self,
         i: usize,
         target: UnitHandle,
+        desc: DamageDesc,
+        direction: glam::Vec3,
+    ) {
+        self.hero_damage_phases(i, target, desc, direction, false);
+    }
+
+    /// Area damage passes both native shield and health flags. Physical blade
+    /// body contacts keep their separate shield-sphere collision rule.
+    fn force_damage(
+        &mut self,
+        i: usize,
+        target: UnitHandle,
+        desc: DamageDesc,
+        direction: glam::Vec3,
+    ) {
+        self.hero_damage_phases(i, target, desc, direction, true);
+    }
+
+    fn hero_damage_phases(
+        &mut self,
+        i: usize,
+        target: UnitHandle,
         mut desc: DamageDesc,
         direction: glam::Vec3,
+        shield: bool,
     ) {
         let Some(victim) = self.unit(target) else {
             return;
@@ -94,12 +117,15 @@ impl Sim {
         // The area-effect weapon supplies its own damage, retaining health
         // type and friendly-fire handling through the common descriptor.
         desc.damage = desc.damage.max(0.0);
-        let damage = self.unit_mut(target).unwrap().health.take_damage(
-            &desc,
-            multiplier,
-            friendly,
-            friendly_fire,
-        );
+        let victim = self.unit_mut(target).unwrap();
+        let take = |health: &mut crate::weapon::Health| {
+            health.take_damage(&desc, multiplier, friendly, friendly_fire)
+        };
+        let damage = if shield {
+            victim.lend_droideka_shield(take)
+        } else {
+            take(&mut victim.health)
+        };
         if !self.units[target.index as usize].health.alive() {
             if let Some(body) = seated_body {
                 let soldier = &mut self.units[target.index as usize].soldier;
@@ -283,7 +309,7 @@ impl Sim {
                 match candidate.target {
                     EmitterTarget::Unit(target) => {
                         if damage > 0.0 {
-                            self.hero_damage(i, target, desc, incoming);
+                            self.force_damage(i, target, desc, incoming);
                         }
                         if self.unit(target).is_some() {
                             let victim = &mut self.units[target.index as usize];

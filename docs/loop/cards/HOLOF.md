@@ -1,11 +1,11 @@
 ---
 id: HOLOF
-title: The command post hologram's own flare (seen looking back down the beam: alpha A g^8 x the class's flare factor, size growing toward the top's radius) and the icon sheet's scan-line UV animation; the port draws neither
+title: Command-post axial flare and authored scan-line animation
 milestone: M1
 value: 2
 phase: build
-status: todo
-deps: LFLR
+status: done
+deps:
 files: engine/crates/game/src/holo.rs
 declares:
 needs:
@@ -15,13 +15,32 @@ resume:
 created: 2026-10-22
 ---
 ## Why
-Left from CPHOL and LFLR. analysis/re-point-lights.md 15.6 (B2 FUN_00469628 529168-529188): for g < 0 the beam's +0x124 alpha = A g^8 x volume +0x194, radius +0x120 = mean start + g^8 (mean end - mean start)/2 - a flare seen only looking back along the beam (from above a post, looking down). Card LFLR built the same rule for EntityLight cones (game/src/entity_glow.rs flare(), render::Flare); the hologram's +0x194 value (which class key, HoloFlareIntensity?) is not read. 15.7: the icon sheet com_icon_controlzone is white with horizontal scan lines in its alpha (163-255); whether its UVs scroll is not read.
+The command-post beam was missing its axial flare, and its icon ignored
+authored scan-line UV scroll. These are presentation-only gaps left by CPHOL.
 
 ## Evidence
-re-point-lights 15.6, 15.7, 16. The reusable code: entity_glow::flare (the g^8 rule) and render::Flare.
+`analysis/re-point-lights.md` §16 identifies HoloFlareIntensity, verifies
+the native radius/alpha rule and reads every faction icon's material rates.
+BF2 `FUN_00219148` sets class +0x84 from hash 0x4cecac28;
+`FUN_00216948` copies it to the beam +0x194 read by `FUN_00469628`.
 
 ## Acceptance
 - A unit test: a post seen from above (g < 0) draws one Flare with alpha A g^8 x the factor read from the class; from the side none (mutation-checked).
 - The factor's key named from FUN_002172a8 / the holo class setter with re_check fn lines, or [H] with a RAM read of +0x194 on one BF2 save state.
 - The scan-line animation: read the icon material's flags (MTRL) and the draw; build it or record that the PS2 does not scroll it.
 - Goldens move only where a post is seen from above (likely none).
+
+## Sprint implementation (2026-11-01)
+
+The flare and per-material UV scroll are implemented. `HoloFlareIntensity`
+(hash 0x4cecac28) is 1.0 on both discs; the fully axial radius is 0.75 m.
+All eight native icon models were read: BF1 has float scroll rates; BF2's
+Republic second segment scrolls and the other faction segments are static.
+See `analysis/re-point-lights.md` §16 for the rechecked evidence.
+
+The earlier reference to `entity_glow::flare` / `render::Flare` does not
+exist at this source base; the hologram uses a procedural untextured
+particle through the existing draw pipeline. Issue #68 is complete under
+the sprint's scoped acceptance. The historical mutation, all-map golden
+and paired original-game comparison remain unperformed, as recorded in
+`reports/20261101_SPRINT_68.md`.

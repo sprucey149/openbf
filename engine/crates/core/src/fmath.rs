@@ -363,6 +363,16 @@ mod tests {
             "skin.rs",
             "rotation: self.rotation.slerp(other.rotation, t),",
         ),
+        // Kit Fisto's tentacle sway: a pose nothing reads back.
+        ("skin.rs", "let x = reach * (t * 3.1 + phase).sin();"),
+        (
+            "skin.rs",
+            "let y = reach * 0.6 * (t * 1.9 + phase * 1.3).sin();",
+        ),
+        (
+            "skin.rs",
+            "bone.rotation *= Quat::from_euler(glam::EulerRot::XYZ, x, y, 0.0);",
+        ),
         (
             "soldier_vis.rs",
             "Mat4::from_translation(s.pos) * Mat4::from_rotation_y(s.yaw + std::f32::consts::PI)",
@@ -533,6 +543,9 @@ mod tests {
             // (glyphs, ribbons, a missile's model matrix); no draw is read back.
             "bolt_vis.rs",
             "fx/force.rs",
+            // Which soldiers draw and at what detail: a per-frame draw list; the
+            // simulation keeps every soldier and never reads the choice.
+            "soldier_vis/lod.rs",
             // The soldier animator poses what the sim decided; it holds no
             // `Sim` and nothing reads a pose back (card ANIML).
             "animator.rs",

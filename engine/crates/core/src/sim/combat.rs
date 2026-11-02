@@ -72,7 +72,8 @@ impl Sim {
             .collect();
         let (world, bolts, classes) = (&self.collision, &mut self.bolts, &self.weapon_classes);
         for b in bolts.iter_mut() {
-            if classes[b.weapon_class].ordnance.fat_ray.is_some() {
+            let ord = &classes[b.weapon_class].ordnance;
+            if ord.fat_ray.is_some() || (ord.is_tracer() && ord.explosion.is_none()) {
                 continue;
             }
             let step = dt.min(b.remaining.max(0.0));
@@ -248,9 +249,17 @@ impl Sim {
         let friendly = victim.team == b.team;
         let ff = self.friendly_fire_scale;
         let mult = self.buff_scale(Some(b.owner), h) * scale;
+        // Native fat-ray TakeDamage uses flags -1 (shield and health);
+        // a bolt that hits the body from inside the bubble keeps flags 2.
+        let area = self.weapon_classes[b.weapon_class]
+            .ordnance
+            .fat_ray
+            .is_some();
         let v = self.unit_mut(h)?;
         let damage = if spared {
             0.0
+        } else if area {
+            v.lend_droideka_shield(|health| health.take_damage(desc, mult, friendly, ff))
         } else {
             v.health.take_damage(desc, mult, friendly, ff)
         };

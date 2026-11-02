@@ -1866,6 +1866,11 @@ impl winit::application::ApplicationHandler for App {
                         extra.extend(self.deka_vis.draws(r, &walk.sim));
                     }
                     if let Some(vis) = self.soldier_vis.as_mut() {
+                        let aspect = self.renderer.as_ref().map_or(16.0 / 9.0, |r| {
+                            let (w, h) = r.size();
+                            w as f32 / h as f32
+                        });
+                        vis.prepare_view(walk, &walk.camera(), aspect);
                         skinned = vis.draws(walk);
                         extra.extend(vis.weapon_draws(walk));
                         if let Some(r) = self.renderer.as_mut() {

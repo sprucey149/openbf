@@ -568,6 +568,11 @@ impl BoltVis {
     fn walker_tracers(&mut self, walk: &WalkSim, shots: &Shots, struck: &mut Struck) {
         for shot in &shots.events {
             let class = shot.class;
+            // Geometry owns the shot's draw, including walker cannons that
+            // also author a tracer. Match the ordinary bolt path's priority.
+            if walk.sim.weapon_classes[class].ordnance.geometry.is_some() {
+                continue;
+            }
             let Some(style) =
                 crate::walker_shots::style(walk, class).filter(|s| s.tracer.is_some())
             else {
@@ -1790,6 +1795,35 @@ mod tests {
         let mut vis = BoltVis::default();
         vis.update(&walk, core::TICK_DT);
         assert!(vis.tracked.is_empty());
+    }
+
+    #[test]
+    fn a_modelled_walker_round_does_not_also_draw_its_tracer() {
+        let mut walk = WalkSim::new(42, Vec3::ZERO, None);
+        let (mut w, mut b) = missile_round(5);
+        w.ordnance.geometry = Some("com_weap_inf_grenadethermal_ord".into());
+        let class = walk.sim.add_weapon_class(w);
+        b.weapon_class = class;
+        walk.walker_shot_styles.insert(
+            class,
+            crate::walker_shots::Style {
+                tracer: Some(core::laser::LaserLook::default()),
+                fire_sound: None,
+                frequency: 1,
+            },
+        );
+        walk.sim.events.push(Event::Shot {
+            unit: b.owner,
+            weapon_class: class as u32,
+            origin: b.pos,
+            dir: b.vel.normalize(),
+        });
+        walk.sim.bolts.push(b);
+        let mut vis = BoltVis::default();
+        vis.update(&walk, core::TICK_DT);
+        assert_eq!(missiles_in_flight(&walk).len(), 1);
+        assert!(vis.tracked.is_empty());
+        assert_eq!(vis.remnant_count(), 0);
     }
 
     #[test]

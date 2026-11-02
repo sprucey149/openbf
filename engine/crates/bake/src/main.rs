@@ -227,6 +227,11 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
+        Some("shadows") if args.len() == 4 => {
+            let count = bake::shadow::bake(Path::new(&ci(&args[2])), Path::new(&args[3]))?;
+            println!("baked {count} BF1 shadow models -> {}", args[3]);
+            Ok(())
+        }
         Some("vehicle") if args.len() == 4 || args.len() == 5 => {
             let pc = args.get(4).map(|s| ci(s));
             let v = bake::vehicle::bake_vehicles(&ci(&args[2]), &args[3], pc.as_deref())?;
@@ -473,6 +478,7 @@ fn main() -> Result<()> {
                  \x20 bake fpm        <anim.lvl> <outdir> <fpm.lvl>...\n\
                  \x20 bake droid-chunks <bf1-cis.lvl> <bf2-cis.lvl> <bf1-common.lvl> <outroot> [pc-cis.lvl]\n\
                  \x20 bake vehicle    <side.lvl> <outdir> [pc.lvl]     every vehicle class: models, chunks, collision\n\
+                 \x20 bake shadows    <file.lvl> <outdir>            BF1 shadow sidecars only\n\
                  \x20 bake effects    <side.lvl> <outdir> bf1|bf2   fx__ particle effects + their textures/models\n\
                  \nscripts/rebake.sh runs all of these over the extracted discs."
             );

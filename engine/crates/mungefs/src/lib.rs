@@ -5,6 +5,8 @@
 //! Tags are either 4 ASCII chars ("tex_", "NAME", ...) or the FNV-1a-32 hash
 //! of a lowercased name (same scheme as the PC games).
 
+pub mod shadow;
+
 pub mod anim;
 pub mod cloth;
 pub mod coll;

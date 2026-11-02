@@ -600,3 +600,28 @@ fn the_engine_runs_while_folding_and_rolling_only() {
         assert_eq!(d.engine_on(), on, "state {state}");
     }
 }
+
+#[test]
+fn refused_ball_jump_explains_energy_but_not_airtime() {
+    let mut r = Rig::rolling();
+    r.d.energy = 0.0;
+    r.d.depleted = true;
+    let jump = Input {
+        jump: true,
+        ..human()
+    };
+    let report = r.tick(&jump);
+    assert!(!report.jumped);
+    assert_eq!(report.cues().collect::<Vec<_>>(), vec![Cue::EnergyRefused]);
+    r.d.air = BALL_JUMP_WINDOW;
+    let report = r.tick(&jump);
+    assert!(!report.energy_refused, "airtime is not an energy refusal");
+    r.d.air = 0.0;
+    r.d.depleted = false;
+    r.d.energy = 1.0;
+    let report = r.tick(&jump);
+    assert!(
+        report.jumped && !report.energy_refused,
+        "native payment allows the final jump to exhaust the pool"
+    );
+}

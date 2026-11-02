@@ -145,6 +145,9 @@ impl ReplayFrame {
         walk_draws(self.cube, walk, &mut draws, self.models);
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
         draws.extend(self.deka_vis.draws(r, &walk.sim));
+        let (width, height) = r.size();
+        self.vis
+            .prepare_view(walk, &cam, width as f32 / height as f32);
         let mut skinned = self.vis.draws(walk);
         draws.extend(self.vis.weapon_draws(walk));
         draws.extend(self.vis.cloth_draws(r, walk));
@@ -535,6 +538,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
     // (a 96-joint palette per draw) is the part most likely to cost.
     let mut frame = game::bench::Samples::default();
     let mut gpu_sections = game::bench::Sections::default();
+    let mut toggle = v.bench_toggle.map(game::bench::Toggle::new);
     let mut battle_draws = 0usize;
     let mut skinned_draws = 0usize;
     if v.bench_frames > 0 {
@@ -549,6 +553,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         walk_draws(cube, &walk, &mut draws, models);
         draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
         draws.extend(deka_vis.draws(&mut r, &walk.sim));
+        vis.prepare_view(&walk, &cam, v.size.0 as f32 / v.size.1 as f32);
         let skinned = vis.draws(&walk);
         draws.extend(vis.cloth_draws(&mut r, &walk));
         battle_draws = draws.len();
@@ -560,9 +565,55 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
             .map_err(|e| anyhow!("render: {e}"))?;
         r.wait_idle().map_err(|e| anyhow!("wait: {e}"))?;
         for k in 0..v.bench_frames {
+            if let Some(toggle) = toggle.as_mut() {
+                // The whole per-frame list, as a played frame builds it.
+                let on = game::bench::Toggle::is_on(k);
+                let side = usize::from(on);
+                match toggle.name {
+                    "shadows" => vehicle_vis.set_shadows(on),
+                    _ => vis.set_soldier_lod(on),
+                }
+                let t = Instant::now();
+                let clock = game::water_anim::clock(k as f64 / 60.0);
+                gpu.animate_water(&mut r, clock, cam.position)?;
+                let mut draws = gpu.draws.clone();
+                walk_draws(cube, &walk, &mut draws, models);
+                draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
+                draws.extend(deka_vis.draws(&mut r, &walk.sim));
+                vis.prepare_view(&walk, &cam, v.size.0 as f32 / v.size.1 as f32);
+                let skinned = vis.draws(&walk);
+                draws.extend(vis.weapon_draws(&walk));
+                draws.extend(vis.cloth_draws(&mut r, &walk));
+                let build = t.elapsed();
+                r.render_frame(&cam, &draws, &skinned, gpu.clear, None)
+                    .map_err(|e| anyhow!("render: {e}"))?;
+                r.wait_idle().map_err(|e| anyhow!("wait: {e}"))?;
+                let whole = t.elapsed();
+                // The last frame of each side's first block, for looking at.
+                if let (Some(out), true) = (
+                    v.capture_frame.as_ref(),
+                    k + 1 == game::bench::Toggle::BLOCK * (side as u32 + 1),
+                ) {
+                    let (rgba, w, h) = r.capture_rgba().map_err(|e| anyhow!("capture: {e}"))?;
+                    let out = out.with_extension(format!("{}.png", ["off", "on"][side]));
+                    image::save_buffer(out, &rgba, w, h, image::ColorType::Rgba8)?;
+                }
+                if game::bench::Toggle::settled(k) {
+                    toggle.build[side].push(build);
+                    toggle.frame[side].push(whole);
+                    toggle.gpu[side].add(r.gpu_sections());
+                    toggle.draw_calls[side] = r.frame_stats().draw_calls;
+                    toggle.skinned[side] = skinned.len();
+                    toggle.shadow_triangles[side] = vehicle_vis.shadow_triangles();
+                }
+                continue;
+            }
             let t = Instant::now();
             let clock = game::water_anim::clock(k as f64 / 60.0);
             gpu.animate_water(&mut r, clock, cam.position)?;
+            // A shadow submission lasts one frame: without this the bench would
+            // time the first frame's volumes and none after it.
+            vehicle_vis.draws(&mut r, &walk.sim, &[]);
             // A fixed eye keeps the same cells, so only the water's own
             // draws change: copy them over rather than re-cloning the list.
             if let Some(w) = gpu.water_motion.as_ref().map(|m| m.draw_range()) {
@@ -606,6 +657,18 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         gpu: gpu_sections,
     };
     report.print();
+    if let Some(toggle) = &toggle {
+        let alive = || walk.sim.vehicles.iter().filter(|v| v.alive);
+        println!(
+            "vehicles alive {}, first non-turret at {:?}, camera at {}",
+            alive().count(),
+            alive()
+                .find(|v| v.kind != core::vehicle::VehicleKind::Turret)
+                .map(|v| v.pos),
+            bench_camera(v, &scene, &walk).position
+        );
+        toggle.print();
+    }
     if let Some(p) = &v.bench_csv {
         let fresh = !p.exists();
         let mut out = if fresh {

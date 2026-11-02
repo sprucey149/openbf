@@ -181,6 +181,7 @@ impl Renderer {
         let (width, height) = self.size();
         let guard = crate::affine::guard(width as f32 / height as f32);
         let view_proj = camera.view_proj(width as f32 / height as f32);
+        self.shadows.prepare(&self.device, &self.queue, view_proj);
         let frustum = frustum::Frustum::from_view_proj(&view_proj);
         let globals = Globals {
             view_proj: view_proj.to_cols_array_2d(),
@@ -758,6 +759,21 @@ impl Renderer {
                         }
                     }
                     mark(&mut timer, &mut pass, "soldiers spec");
+                    // BF1 bucket 6: all opaque geometry is down, water is not.
+                    if !self.shadows.is_empty() {
+                        drop(pass);
+                        draw_calls +=
+                            self.shadows
+                                .draw(&mut encoder, frame_texture, &view, &self.depth_view);
+                        pass = continue_pass(
+                            &mut encoder,
+                            &view,
+                            &self.depth_view,
+                            "after vehicle shadows",
+                        );
+                        mark(&mut timer, &mut pass, "vehicle shadows");
+                        pass.set_bind_group(0, &self.globals_bg, &[]);
+                    }
                     // Back to the world's instances for the water runs.
                     pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                     bound_layer = None;
@@ -1025,6 +1041,7 @@ impl Renderer {
             t.resolve(&mut encoder);
         }
         self.queue.submit([encoder.finish()]);
+        self.shadows.clear();
         if let Some(mut t) = timer {
             t.submitted();
             self.gpu_timer = Some(t);

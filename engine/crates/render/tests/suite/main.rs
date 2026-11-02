@@ -19,3 +19,5 @@ mod sky_shell;
 mod specular;
 mod uv_scroll;
 mod water_pass;
+
+mod shadow;

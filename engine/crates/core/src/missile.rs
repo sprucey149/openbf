@@ -116,19 +116,20 @@ impl MissileClass {
 pub enum MissileTarget {
     Unit(UnitHandle),
     Vehicle(VehicleHandle),
+    Turret(u64),
 }
 
 impl MissileTarget {
     pub fn unit(self) -> Option<UnitHandle> {
         match self {
             MissileTarget::Unit(h) => Some(h),
-            MissileTarget::Vehicle(_) => None,
+            MissileTarget::Vehicle(_) | MissileTarget::Turret(_) => None,
         }
     }
 
     pub fn vehicle(self) -> Option<VehicleHandle> {
         match self {
-            MissileTarget::Unit(_) => None,
+            MissileTarget::Unit(_) | MissileTarget::Turret(_) => None,
             MissileTarget::Vehicle(h) => Some(h),
         }
     }

@@ -212,3 +212,82 @@ the rebuild + the empty slot.
 - Which pass after bucket 6 lowers the displayed ratio from 0.625 to 0.585 (glow / composite).
 - Whether any draw outside the four vehicle paths sets flag 0x10000 (a text search found none).
 - BF1 split screen: FUN_004a8890 case 6 points each view's bucket 6 at FBP 0x180 when DAT_00522b4c == 0 - read, not run.
+
+
+## 11. Issue #66 implementation and independent recheck (2026-11-01)
+
+[V] Re-read ELF BF1 `0x522b6c = 0x30`, BF2 vtable slot `0x6500dc = 0x593090`,
+and all three instructions at `0x593090` (stack adjustment, return, stack restore).
+Rechecked the containing functions and the terrain-length calls at B1 lines
+84629 (`0x1d8620`, 500) and 128556 (`0x217278`, 150). These independently support
+the brightness and game gate; they do not repeat the historical RAM/PCSX2 captures.
+
+The fresh real-model test also exposed a detail in B1 `0x4acb20`: the face-normal
+loop keeps its **last** cross product if none meets the (1e-5, 1e6) squared-length
+window. It does not reject the face. The X-wing's tiny gear faces require this
+fallback, which the new renderer preserves.
+
+The reader now validates `shdw` counts, indices, finite positions, reciprocal twins,
+edge endpoints and closing face loops. The bake writes BF1 `shadows/<model>.ron`
+sidecars beside map and side models. Positions enter bind model space once; a
+walker's existing joint-global × inverse-bind palette moves its shadow pieces with
+its drawn body. Other vehicles use their visible model's existing bind pose.
+No authored meshes or sidecars ship in the source repository.
+
+The renderer uses `Depth24PlusStencil8`, capped z-fail at every distance, and a
+single ×0.625 multiply through the target's non-sRGB view after opaque models and
+soldiers, before water/translucency. This accepts the proposed z-fail deviation.
+The volume shader implements depth clamp per fragment: it retains projected x/y/w,
+places raster z inside the clip interval, then writes the clamped original z/w
+through `frag_depth`. This preserves the far cap without an optional device feature.
+Vertex-only z clamping was rejected by the 500 m extrusion / 40 m far-plane test
+because it warps the side faces' interpolated depths. Shader depth writes can cost
+early-depth efficiency; that runtime cost is not yet measured.
+The no-display-view surface fallback uses a gamma-2.2 approximation; the headless
+path is exact in display values. Adjacency and normals are prepared at load;
+transformed points, face flags and GPU vertex capacity are reused across frames.
+BF2 submits no triangles. Shadow submissions expire after each rendered frame.
+
+Terrain clipping uses the existing terrain-only PS2 segment helper, with the
+500/150 factors. The walker start uses its available authored foot collision sphere
+radius (falls back to the overall sphere if no foot sphere exists), and the overall
+sphere centre/radius. That foot-sphere selection still needs a native per-walker
+identity comparison; the PS2's exact selected primitive is not a new sim field.
+
+Changing the depth format can move depth ties/edges in any reference image, including
+BF2 images even though BF2 casts no volume. BF1 captures containing vehicles also
+intentionally gain shadows (notably NAB1 X-wing/AAT and YAV2 walkers). No reference
+image should be rebaselined without viewing and attributing its changed pixels.
+
+## 9. Other versions, and what the shadows cost (2026-11-01, issue #66)
+
+The Xbox and PC BF1 LVLs keep the same closed half-edge mesh inside `shdw/CSHD/DATA`
+(`INFO`, `SHDV`, `SHDI`), named by `BNAM`, beside a `GSHD` drawing mesh. The bake reads both
+layouts. Checked over every LVL: Xbox 302 rigid pieces and PC 943, all closed. Their points
+are a few cm from the PS2's (a re-export), and the TIE bomber has one where the PS2 has none.
+Walkers on those versions are a single `BMAP` piece skinned across bones with no per-vertex bone
+in the closed mesh, so a build whose BF1 comes from there has **no walker shadows**. Soldiers
+and weapons also carry meshes there; only vehicle models are written, and a shadow that cannot
+be read leaves its model without one rather than failing the build.
+
+PS2 census: 25 of 33 BF1 vehicle classes have a volume. Tauntaun, landspeeder, Fed lander,
+TIE bomber, gunship, Jedi fighter, AT-TE and kaadu author none, so they cast none.
+
+Cost, `--bench-toggle shadows`: the same frozen battle with shadows off and on in alternating
+blocks, release build at 1280x720, three runs on each GPU, medians. A BF2 map, where the switch
+does nothing, is the control: its frame difference stayed within 0.02 ms on the RTX and ran from
+-0.33 to 0 ms on the Intel.
+
+| view | GPU | volume tris | shadow pass | list ms added | frame change |
+|---|---|---|---|---|---|
+| BF1 NAB1, 32 vehicles, overview | RTX 4000 Ada | 5,384 | 0.014 ms | +0.10 | +0.21 ms |
+| | Intel RPL-S | | 0.062 ms | +0.12 | +0.45 ms |
+| BF1 NAB1, at an AT-ST and speeder bikes (3.6 % of screen shaded) | RTX 4000 Ada | 5,380 | 0.049 ms | +0.06 | +0.21 ms |
+| | Intel RPL-S | | 0.264 ms | +0.06 | +0.44 ms |
+| BF1 YAV2, 10 vehicles, at a walker | RTX 4000 Ada | 2,418 | 0.027 ms | +0.03 | +0.10 ms |
+| | Intel RPL-S | | 0.104 ms | +0.03 | +0.22 ms |
+
+Shaded pixels on real maps read 0.624 and 0.628 of their unshaded value (median), against the
+0.625 rule. The cost of `Depth24PlusStencil8` against the old depth format on frames with no
+shadow was not measured. Volumes are not culled to the view, so the list cost follows the
+vehicles alive on the map, not those on screen.

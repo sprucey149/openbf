@@ -57,6 +57,7 @@ impl Droideka {
             return;
         }
         if !self.pay_energy(c.energy_cost_jump) {
+            report.energy_refused = true;
             return;
         }
         self.air = BALL_JUMP_WINDOW;

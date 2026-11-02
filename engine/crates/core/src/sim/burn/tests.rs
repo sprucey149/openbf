@@ -185,3 +185,45 @@ fn a_bots_cone_spares_a_human_teammate_and_still_draws_its_arc() {
     assert!(s.unit(human).unwrap().burn.is_none());
     assert!(s.events.iter().any(|e| matches!(e, Event::Emitter { .. })));
 }
+
+#[test]
+fn an_emitter_uses_shield_then_health_and_never_ignites_a_droideka() {
+    for (raised, points, scale, expected_health, expected_shield) in [
+        (false, 100.0, 1.0, 285.0, 100.0),
+        (true, 100.0, 2.0, 300.0, 70.0),
+        (true, 10.0, 2.0, 290.0, 0.0),
+        (true, 100.0, 0.0, 285.0, 100.0),
+    ] {
+        let mut s = Sim::empty(3);
+        let shooter = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+        let target = s
+            .spawn(&UnitSpec {
+                droideka: Some(std::sync::Arc::new(Default::default())),
+                ..UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -3.0))
+            })
+            .unwrap();
+        let shield = &mut s
+            .unit_mut(target)
+            .unwrap()
+            .droideka
+            .as_mut()
+            .unwrap()
+            .shield;
+        shield.on = raised;
+        shield.points = points;
+        let class = add(&mut s, flamethrower(true, 5.0, 50.0));
+        s.weapon_classes[class].ordnance.shield_scale = scale;
+        s.fire_emitter(shooter.index as usize, class, 1.0);
+        let u = s.unit(target).unwrap();
+        assert_eq!(
+            u.health.cur, expected_health,
+            "raised={raised}, points={points}, scale={scale}"
+        );
+        assert_eq!(u.droideka.as_ref().unwrap().shield.points, expected_shield);
+        assert!(u.burn.is_none());
+        assert_eq!(
+            u.health.shield, 0.0,
+            "borrowed shield cannot be charged twice"
+        );
+    }
+}

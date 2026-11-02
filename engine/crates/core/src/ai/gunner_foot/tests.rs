@@ -1587,3 +1587,39 @@ fn a_bot_lobs_a_mortar_shell_over_a_wall() {
         "the shell came down on the enemy behind the wall: {hurt} damage"
     );
 }
+
+#[test]
+fn a_cone_bot_holds_fire_outside_the_cone_length() {
+    let _style = crate::ai::tests::all_stand();
+    use crate::sim::{Event, Sim};
+    use crate::unit::{Controller, UnitSpec};
+    use crate::weapon::{test_props::List, EmitterOrdnance};
+    for (distance, should_fire) in [(8.0, true), (13.0, false)] {
+        let mut s = Sim::empty(5);
+        s.cheats.infinite_ammo = true;
+        s.weapon_classes[0].emitter = Some(EmitterOrdnance::from_props(
+            &List(&[(2_470_609_998, "10"), (2_750_430_025, "50")]),
+            true,
+        ));
+        let shooter = s
+            .spawn(&UnitSpec {
+                controller: Controller::Ai,
+                ..UnitSpec::trooper(0, Vec3::ZERO)
+            })
+            .unwrap();
+        let target = s
+            .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -distance)))
+            .unwrap();
+        let mut shots = 0;
+        for _ in 0..300 {
+            s.step(&[PadState::default()]);
+            s.unit_mut(target).unwrap().health.cur = 300.0;
+            shots += s
+                .events
+                .iter()
+                .filter(|e| matches!(e, Event::Shot { unit, .. } if *unit == shooter))
+                .count();
+        }
+        assert_eq!(shots > 0, should_fire, "distance={distance}, shots={shots}");
+    }
+}

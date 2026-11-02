@@ -520,10 +520,9 @@ impl Health {
         if friendly {
             dmg *= friendly_fire_scale;
         }
-        if self.shield > 0.0 {
-            // Shield phase: shield absorbs dmg × ShieldScale; the unabsorbed
-            // remainder carries into the health phase (carry rule [H] —
-            // soldiers ship without shields, so this only matters later).
+        if self.shield > 0.0 && desc.shield_scale > 0.0 && dmg > 0.0 {
+            // BF2 FUN_001dfb38: shield phase first, only for positive
+            // shield-scaled damage. Excess reaches health with its type scale.
             let s = dmg * desc.shield_scale;
             if s <= self.shield {
                 self.shield -= s;

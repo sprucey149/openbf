@@ -365,19 +365,19 @@ pub(super) fn run(
                 // own gate: the aim on its arc is the whole change (issue
                 // #29); the gate is the hand weapon's, unchanged.
                 Armed::Hand | Armed::Lobbed(_) if hand.is_some() => {
-                    range <= wc.ordnance.max_range() && !st.arm.spare
+                    range <= wc.shot_range() && !st.arm.spare
                 }
                 Armed::Hand if wc.saber.is_some() => range < wc.ai_range[2] && !st.arm.spare,
                 // A cone cannot honour the token's harmless miss by offsetting
                 // the aim point, so a barred bot holds its fire.
                 Armed::Hand if wc.emitter.as_ref().is_some_and(|e| e.is_cone()) => {
-                    range <= wc.ordnance.max_range()
+                    range <= wc.shot_range()
                         && range < wc.ai_range[2]
                         && !st.arm.spare
                         && barred.is_none()
                 }
                 Armed::Hand | Armed::Lobbed(_) => {
-                    range <= wc.ordnance.max_range() && range < wc.ai_range[2] && !st.arm.spare
+                    range <= wc.shot_range() && range < wc.ai_range[2] && !st.arm.spare
                 }
                 Armed::Draw(_) => false,
                 Armed::Thrown(gc, live) => {

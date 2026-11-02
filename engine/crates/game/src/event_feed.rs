@@ -665,6 +665,18 @@ impl EventFeed {
                 self.ambush.push(edge);
             }
             match *e {
+                Event::Droideka {
+                    unit,
+                    cue: core::droideka::Cue::EnergyRefused,
+                    ..
+                } if unit == viewer => {
+                    // Ours: explain the hidden movement pool without replacing the shield bar.
+                    self.say(
+                        "Roll energy depleted — wait for recharge".to_owned(),
+                        message_color::OWN,
+                        tick,
+                    );
+                }
                 Event::Shot { unit, .. } if unit == viewer => {
                     self.battle.shots = self.battle.shots.saturating_add(1);
                 }
@@ -955,8 +967,7 @@ impl EventFeed {
     /// name (`entity.<side>.<rest>`, as the spawn screen names it), health /
     /// max health, the relation the pick carries. The sim's sides are both
     /// armies, so no soldier is a team-0 target; an empty vehicle or an
-    /// unowned building turret is (card HTGT). The sim has no shields, and
-    /// the classes' `HideHealthBar` drop (§2: two BF2 classes) is not ported.
+    /// unowned building turret is (card HTGT). The classes' `HideHealthBar` drop (§2: two BF2 classes) is not ported.
     pub fn target(&self, sim: &Sim, slot: usize) -> Option<HudTarget> {
         let Some((t, relation)) = sim.reticle_pick.get(slot).copied().flatten() else {
             return self
@@ -983,7 +994,11 @@ impl EventFeed {
                     health_fraction: fraction(&u.health),
                     relation,
                     team0: false,
-                    shield: None,
+                    shield: u.droideka.as_ref().filter(|d| d.shield.on).and_then(|d| {
+                        let max = u.droideka_class()?.shield.max;
+                        (max > 0.0)
+                            .then(|| ("Shield".to_owned(), (d.shield.points / max).clamp(0.0, 1.0)))
+                    }),
                 })
             }
             AimTarget::Vehicle(h) => {
@@ -1329,6 +1344,55 @@ mod tests {
             text: text.into(),
             color,
         }
+    }
+
+    #[test]
+    fn droideka_target_shield_and_hidden_energy_feedback() {
+        let mut s = scene();
+        let h = s.rebels[0];
+        let u = &mut s.sim.units[h.index as usize];
+        let c = std::sync::Arc::new(core::droideka::DroidekaClass::default());
+        u.droideka = Some(Box::new(core::droideka::Droideka::new(
+            &c,
+            core::droideka::Order::Deploy,
+        )));
+        u.spec.droideka = Some(c);
+        let d = u.droideka.as_mut().unwrap();
+        d.shield.on = true;
+        d.shield.points = 750.0;
+        s.sim.reticle_pick = vec![Some((AimTarget::Unit(h), -1))];
+        assert_eq!(
+            s.feed.target(&s.sim, 0).unwrap().shield,
+            Some(("Shield".into(), 0.25))
+        );
+        s.sim.units[h.index as usize]
+            .droideka
+            .as_mut()
+            .unwrap()
+            .shield
+            .on = false;
+        assert_eq!(s.feed.target(&s.sim, 0).unwrap().shield, None);
+        s.sim.events = vec![Event::Droideka {
+            unit: h,
+            pos: Vec3::ZERO,
+            cue: core::droideka::Cue::EnergyRefused,
+        }];
+        s.feed.tick(&s.sim, s.me);
+        assert!(s.feed.take().is_empty(), "another player's pool is private");
+        s.sim.tick += 1;
+        s.sim.events = vec![Event::Droideka {
+            unit: s.me,
+            pos: Vec3::ZERO,
+            cue: core::droideka::Cue::EnergyRefused,
+        }];
+        s.feed.tick(&s.sim, s.me);
+        assert_eq!(
+            s.feed.take(),
+            vec![line(
+                "Roll energy depleted — wait for recharge",
+                message_color::OWN
+            )]
+        );
     }
 
     /// Card HTGT (`re-target-hud.md` §3-4): the reticle's pick by its

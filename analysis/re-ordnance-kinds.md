@@ -516,3 +516,70 @@ supported.
   (WaverRate 0.2, WaverTurn 0.015 on the disc) would exercise it (AUDIT).
 - The BF1 crouch / prone target heights (0.6 / 0.2) and another BF2 class offset: the homing rows hold standing
   targets only (AUDIT).
+
+## Issue #90 follow-up verification (2026-11-01)
+
+[V] Reopened BF2 `FUN_00311d00` by address (historical corpus line numbers
+have shifted). Every beam update invokes the victim's `+0xdc` deflection slot
+before applying damage scaled by `dt / LifeSpan`. An accepted block exits
+that update's ray loop; there is no once-per-held-beam block-energy latch.
+The port therefore keeps one block payment per contact tick. The fixture uses
+2.5 energy/contact and three contacts, leaving 92.5 of 100; those are fixture
+values, not a newly inferred universal weapon cost.
+
+[V] `FUN_00314568` builds a fresh full-charge reflection packet with no target
+and invokes the ordnance class factory (`+0x10`). Reflected missiles must
+recreate their missile flight state (speed ramp/waver), without inheriting the
+incoming lock. The port restores that state without creating another held beam.
+
+[V] The emitter query `FUN_00315f78` and BF1 `FUN_00278208` use `ConeLength`;
+a projectile's velocity-times-lifetime is not a cone's reach. AI firing and
+weapon reach checks now share `WeaponClass::shot_range`.
+
+[D] Pure visual secondary rounds bypass dynamic contact only with zero direct
+damage **and no impact explosion**. A zero-direct-damage explosive still
+collides. This fixes hit accounting, bot hit notification and saber billing.
+
+[D] The BF2 REP class database's `rep_weap_walk_oneman_atst_cannon_ord`
+inherits the mortar and names `com_weap_inf_grenadethermal_ord` as geometry.
+The walker tracer path previously submitted a second draw despite the ordinary
+bolt path preferring geometry. Both paths now apply that same geometry priority.
+Auto-turret launcher locks use the turret's unique ID and live centre; both the
+held lock and missile flight state hash that ID with a distinct target tag.
+
+## Issue #87 — saber, burn and area shield rules (2026-11-01)
+
+[V] The following functions were reopened by address, rather than relying on
+historical line numbers. BF2 `FUN_00315f78` calls the target's `+0xdc` deflection
+slot before cone damage, burn and push. Saber blocking of emitters is native.
+BF1's older emitter lacks that hook; the port retains its existing BF2 block
+rule on both games' maps, consistent with the unified gameplay policy.
+
+[V] BF2 `FUN_00317f20` calls the same slot for every fat-ray victim. Acceptance
+skips that victim's damage, **not** the remainder of the ray: the per-victim
+falloff deduction runs on either branch and traversal continues. The port now
+invokes deflection at the victim and retains the original ray. Making the saber
+terminate the entire fat ray would be a deviation, not a fidelity fix.
+
+[V] Droidekas do not burn. Before calling `FUN_00236e28`, `FUN_00315f78`
+requires the exact entity type returned at `+0xc` to equal `DAT_00689828`
+(soldier, returned by `FUN_00256398`). The droideka's main vtable is `0x61bc50`;
+ELF word `0x61bc5c` is `0x001ffa38`, whose instructions return `DAT_00689300`,
+not the soldier ID. Existing no-burn handling is retained. This is not inferred
+from the visual absence of fire.
+
+[V] Emitters and fat rays call `FUN_001e0900` with flags `-1`; the native health
+routine `FUN_001dfb38` applies bit 0's shield phase, then bit 1's health phase.
+Friendly-fire and attacker scaling precede shield subtraction; positive damage
+× ShieldScale reduces the active shield. Overflow divided by ShieldScale is
+removed from incoming damage before the health-type scale. ShieldScale=0 skips
+the shield phase; it does not discard health damage. `FUN_0032d198`, the
+area-effect/Choke damage path, likewise calls the damage slot with flags `-1`
+and all scales 1. The port routes cone, fat-ray and Force area damage through
+the existing shield-lending helper, also used by explosions. Physical bolt and
+blade body contacts keep their separate collision/shield rules.
+
+Recheck commands: `python3 scripts/re_check.py word b2 0x61bc5c 1 --u32`;
+`python3 scripts/tools/eedis2.py bf2 1ffa38 1ffa58`. Test coverage includes
+raised/lowered/depleted shields, a zero shield scale, burning exclusion, emitter
+and choke damage, and a blocked fat ray reaching a second body.

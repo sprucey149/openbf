@@ -83,6 +83,8 @@ mod particles;
 mod pipelines;
 mod point_light;
 mod resources;
+mod shadow;
+pub use shadow::ShadowMesh;
 mod sky;
 mod specular;
 mod stars;
@@ -243,6 +245,7 @@ pub struct Renderer {
     /// Color format of the render target (surface or headless texture).
     format: wgpu::TextureFormat,
     depth_view: wgpu::TextureView,
+    shadows: shadow::ShadowState,
     pipeline: wgpu::RenderPipeline,
     /// The opaque pipeline through `fs_mask`: the same depth state and the
     /// same instanced sort, plus the shader's MASK test (`MASK_CUTOFF`).

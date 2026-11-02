@@ -25,6 +25,21 @@ class ScratchBake(unittest.TestCase):
         self.assertIn("scratch_bake:", run.stdout)
 
 
+class ShadowSidecars(unittest.TestCase):
+    def test_a_bake_without_any_bf1_shadow_is_called_out(self):
+        with tempfile.TemporaryDirectory() as d:
+            side = Path(d) / "side_bf1" / "vehicles" / "all"
+            side.mkdir(parents=True)
+            kept, pack.BAKED = pack.BAKED, d
+            self.addCleanup(setattr, pack, "BAKED", kept)
+            self.assertEqual(pack.missing_shadows(), [], "no side baked yet is not a missing shadow")
+            (side / "vehicles.ron").write_text("()")
+            self.assertEqual(pack.missing_shadows(), [str(side / "vehicles.ron")])
+            (side / "shadows").mkdir()
+            (side / "shadows" / "all_fly_xwing.ron").write_text("[]")
+            self.assertEqual(pack.missing_shadows(), [])
+
+
 class InstallAndSummary(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

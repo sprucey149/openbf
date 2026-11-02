@@ -98,6 +98,12 @@ pub enum ParticleShape {
     Shaded {
         tris: Vec<(Vec3, [f32; 2], [u8; 4])>,
     },
+    /// Procedural untextured geometry with per-vertex alpha, such as a
+    /// hologram's axial flare. Unlike a textured effect missing its sheet,
+    /// this deliberately uses the renderer's white fallback texture.
+    UntexturedShaded {
+        tris: Vec<(Vec3, [f32; 2], [u8; 4])>,
+    },
     /// One weather cell's rain streaks (card WTHR, `analysis/re-weather.md`
     /// §3.1, §3.4): the PS2 draws each as ONE untextured GS line, a pixel of
     /// its 512-wide frame, Gouraud from the head's alpha to 0 at the tail.
@@ -220,7 +226,7 @@ fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera
         | ParticleShape::CutoutMesh { tris } => {
             out.extend(tris.iter().map(|(p, uv)| vtx(*p, *uv, color)));
         }
-        ParticleShape::Shaded { tris } => {
+        ParticleShape::Shaded { tris } | ParticleShape::UntexturedShaded { tris } => {
             out.extend(tris.iter().map(|(p, uv, c)| vtx(*p, *uv, c.map(gs_unit))));
         }
         ParticleShape::Streaks { lines, rgb, width } => {
@@ -395,6 +401,7 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
                         ParticleShape::Streaks { .. }
                             | ParticleShape::Beam(_)
                             | ParticleShape::Trail { .. }
+                            | ParticleShape::UntexturedShaded { .. }
                     )
                 {
                     let first = out.vertices.len() as u32;
@@ -600,6 +607,25 @@ mod tests {
             assert_eq!(a.color, c.map(gs_unit));
         }
         assert_eq!(v[1].color, [0.25, 0.25, 0.25, 0.5]);
+    }
+
+    #[test]
+    fn procedural_shaded_geometry_draws_without_a_sheet() {
+        let tris = vec![(Vec3::new(0.0, 0.0, -3.0), [0.0; 2], [128; 4]); 3];
+        let mut d = draw(
+            ParticleShape::UntexturedShaded { tris: tris.clone() },
+            Vec3::ZERO,
+        );
+        d.texture = None;
+        let frame = build(&[], &[d.clone()], &Camera::default());
+        assert_eq!(frame.vertices.len(), 3);
+        assert_eq!(frame.runs[0].texture, None);
+        assert!(frame.runs[0].glow);
+        d.shape = ParticleShape::Shaded { tris };
+        assert!(
+            build(&[], &[d], &Camera::default()).vertices.is_empty(),
+            "missing authored sheets still skip textured effects"
+        );
     }
 
     #[test]

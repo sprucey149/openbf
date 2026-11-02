@@ -40,6 +40,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use std::path::Path;
 
+mod lod;
 mod output;
 pub(crate) use output::bake_flags;
 pub use output::{

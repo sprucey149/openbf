@@ -81,6 +81,9 @@ pub fn with_spec(base: SkinnedDrawCmd, spec: PartSpec) -> Vec<SkinnedDrawCmd> {
 }
 
 pub struct SoldierAsset {
+    /// Authored low mesh, normalized to this skeleton at bake time.
+    pub low: Option<Box<SoldierAsset>>,
+    pub lod: Option<manifest::SoldierLod>,
     pub asset: SkinnedAsset,
     /// Per skinned submesh: mesh, texture, the pass its GLB material asks
     /// for — `Opaque`, or `Blend` for a segment the disc composites
@@ -595,6 +598,9 @@ fn rider_now<'a>(
 /// (`scripts/rebake.sh`) makes it stop.
 #[derive(Default)]
 pub struct SoldierVisuals {
+    /// Reused per-camera selection scratch; never read by the simulation.
+    lod_view: lod::View,
+    low_skins: [Vec<Vec<Option<TextureHandle>>>; 2],
     pub assets: Vec<SoldierAsset>,
     pub weapons: Vec<WeaponAsset>,
     sabers: [Vec<Option<saber::SaberVisual>>; 2],
@@ -692,6 +698,7 @@ mod cast;
 mod cloth;
 pub mod first_person;
 mod grenade;
+pub mod lod;
 use grenade::drawn;
 mod runtime;
 mod saber;

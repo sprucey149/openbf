@@ -397,7 +397,12 @@ pub fn bake_soldier_anims(
         &out.join("soldiers").join(format!("{}.skins.ron", m.name)),
         &file,
     )?;
-    let textures = bake_textures_flagged(inner, &wanted, &flags, out, pc.as_ref())?;
+    let mut textures = bake_textures_flagged(inner, &wanted, &flags, out, pc.as_ref())?;
+    for texture in super::lod::bake_or_skip(inner, &buf, &m, &skel, out, pc.as_ref()) {
+        if !textures.contains(&texture) {
+            textures.push(texture);
+        }
+    }
     for (tex, _) in &skins.overrides {
         if !textures.contains(tex) {
             eprintln!(

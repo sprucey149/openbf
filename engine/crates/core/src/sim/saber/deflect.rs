@@ -198,6 +198,12 @@ impl Sim {
         );
         reflected.gravity = bolt.gravity;
         reflected.charge = 1.0;
+        // The native class factory recreates missile steering, with no target
+        // in the reflection packet (BF2 FUN_00314568). Do not launch a held
+        // beam here: a reflection is one outgoing contact, not a new emitter.
+        if let Some(mc) = ord.missile {
+            reflected.as_missile(ord, &mc, None, &mut self.lcg);
+        }
         self.bolts.push(reflected);
         self.unit_mut(target)
             .unwrap()

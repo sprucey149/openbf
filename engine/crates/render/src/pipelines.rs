@@ -604,6 +604,15 @@ impl Renderer {
         let gpu_timer = crate::gpu_timer::GpuTimer::new(&device, &queue);
 
         Ok(Self {
+            shadows: crate::shadow::ShadowState::new(
+                &device,
+                format,
+                match &target {
+                    Target::Window { config, .. } => config.view_formats.first().copied(),
+                    Target::Headless { .. } => Some(format.remove_srgb_suffix()),
+                },
+            ),
+
             format,
             device: Arc::new(device),
             queue: Arc::new(queue),
@@ -704,7 +713,7 @@ pub(crate) const FRAME_WRITES: wgpu::ColorWrites = wgpu::ColorWrites::COLOR;
 /// was a separate 40-line `RenderPipelineDescriptor` differing in at most four
 /// of those fields; the rest (one color target at the target format with
 /// [`FRAME_WRITES`], a `TriangleList` with **no culling** because baked map
-/// geometry has mixed winding, optional `Depth32Float` with default stencil
+/// geometry has mixed winding, optional `Depth24PlusStencil8` with default stencil
 /// and bias, no multisampling) is identical on purpose and is written
 /// once here. A new pass is [`PipelineDesc::world`] plus the fields it moves.
 ///
@@ -722,7 +731,7 @@ pub(crate) struct PipelineDesc<'a> {
     /// `None` = opaque write; `Some(..)` = composited.
     pub(crate) blend: Option<wgpu::BlendState>,
     pub(crate) depth_write: bool,
-    /// `None` disables the depth attachment; otherwise use Depth32Float.
+    /// `None` disables the depth attachment; otherwise use Depth24PlusStencil8.
     pub(crate) depth_compare: Option<wgpu::CompareFunction>,
 }
 
@@ -784,7 +793,7 @@ impl<'a> PipelineDesc<'a> {
                 depth_stencil: self
                     .depth_compare
                     .map(|depth_compare| wgpu::DepthStencilState {
-                        format: wgpu::TextureFormat::Depth32Float,
+                        format: crate::device::DEPTH_FORMAT,
                         depth_write_enabled: self.depth_write,
                         depth_compare,
                         stencil: wgpu::StencilState::default(),

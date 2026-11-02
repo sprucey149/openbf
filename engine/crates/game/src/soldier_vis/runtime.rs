@@ -47,6 +47,7 @@ impl SoldierVisuals {
         self.held[team].append(&mut added.held[team]);
         self.anim[team].append(&mut added.anim[team]);
         self.skins[team].append(&mut added.skins[team]);
+        self.low_skins[team].append(&mut added.low_skins[team]);
         self.sabers[team].resize_with(class, || None);
         self.sabers[team].push(added.sabers[team].pop().flatten());
         let mut cache = HashMap::new();
@@ -84,6 +85,8 @@ impl SoldierVisuals {
         walk: &WalkSim,
     ) -> Self {
         let mut vis = Self::load(r, assets_dir, &scene.manifest.source_game, &walk.teams);
+        vis.lod_view.near = scene.manifest.lighting.near_scene_range;
+        vis.lod_view.far = scene.manifest.lighting.far_scene_range;
         let mut cache = HashMap::new();
         let mut models = HashMap::new();
         vis.grenades = walk
@@ -163,6 +166,7 @@ impl SoldierVisuals {
         let side = assets_dir.join(format!("side_{game}"));
         for (team, t) in teams.iter().enumerate() {
             let mut rows = Vec::new();
+            let mut low_rows = Vec::new();
             for (k, c) in t.classes.iter().enumerate() {
                 let body = s.per_class[team].get(k).and_then(|d| d.body);
                 let groups = body.map_or(&[][..], |b| s.assets[b].groups.as_slice());
@@ -173,6 +177,18 @@ impl SoldierVisuals {
                         Self::texture(r, &side, Some(tex), [0.0; 2], &mut cache)
                     })
                     .collect();
+                let low_groups = body
+                    .and_then(|b| s.assets[b].low.as_ref())
+                    .map_or(&[][..], |a| a.groups.as_slice());
+                low_rows.push(
+                    low_groups
+                        .iter()
+                        .map(|g| {
+                            let tex = c.skins.of_group(g.as_deref()?)?;
+                            Self::texture(r, &side, Some(tex), [0.0; 2], &mut cache)
+                        })
+                        .collect(),
+                );
                 rows.push(if row.iter().any(Option::is_some) {
                     row
                 } else {
@@ -180,6 +196,7 @@ impl SoldierVisuals {
                 });
             }
             s.skins[team] = rows;
+            s.low_skins[team] = low_rows;
         }
         s
     }
@@ -304,6 +321,8 @@ impl SoldierVisuals {
             }
         }
         Self {
+            lod_view: Default::default(),
+            low_skins: Default::default(),
             assets,
             weapons,
             sabers: [Vec::new(), Vec::new()],
@@ -353,8 +372,8 @@ impl SoldierVisuals {
 
     /// One skinned soldier model, or `None` if it is not baked. Without a
     /// renderer it has no meshes.
-    fn load_body(
-        r: Option<&mut Renderer>,
+    pub(super) fn load_body(
+        mut r: Option<&mut Renderer>,
         assets_dir: &Path,
         game: &str,
         geometry: &str,
@@ -375,7 +394,7 @@ impl SoldierVisuals {
         };
         let mut meshes = Vec::new();
         let mut groups = Vec::new();
-        if let Some(r) = r {
+        if let Some(r) = r.as_deref_mut() {
             match crate::viewer::upload_skinned(r, &asset.mesh) {
                 Ok(parts) => {
                     // The model's override groups; a model baked before
@@ -399,8 +418,16 @@ impl SoldierVisuals {
             }
         }
         let hp_weapons = asset.skeleton.index_of("hp_weapons");
-        let rig = Self::load_rig(&side, geometry, &asset);
-        let cloths = Self::load_cloths(&side, geometry, &asset);
+        let is_low = geometry.ends_with(".low");
+        let rig = (!is_low)
+            .then(|| Self::load_rig(&side, geometry, &asset))
+            .flatten();
+        let cloths = if is_low {
+            Vec::new()
+        } else {
+            Self::load_cloths(&side, geometry, &asset)
+        };
+        let (lod, low) = Self::load_low(r, assets_dir, game, geometry, &asset, cache);
         println!(
             "soldier {geometry}: {} bones, {} clips, {} parts",
             asset.skeleton.len(),
@@ -408,6 +435,8 @@ impl SoldierVisuals {
             meshes.len()
         );
         Some(SoldierAsset {
+            low,
+            lod,
             asset,
             meshes,
             rig,
@@ -918,9 +947,19 @@ impl SoldierVisuals {
 
     /// Units to draw this frame: (unit index, asset, model matrix, palette).
     pub(super) fn posed(&self, walk: &WalkSim) -> Vec<(usize, &SoldierAsset, Mat4, Vec<Mat4>)> {
+        self.posed_for(walk, false)
+    }
+
+    pub(super) fn posed_for(
+        &self,
+        walk: &WalkSim,
+        view: bool,
+    ) -> Vec<(usize, &SoldierAsset, Mat4, Vec<Mat4>)> {
         let mut out = Vec::new();
         for (i, u) in walk.sim.units.iter().enumerate() {
-            if u.droideka.is_some() {
+            if u.droideka.is_some()
+                || (view && self.lod_view.choice(i) == super::lod::Choice::Hidden)
+            {
                 continue;
             }
             let Some(sa) = self.asset_for(u.team, u.spec.class) else {
@@ -1066,7 +1105,7 @@ impl SoldierVisuals {
     /// `unit × palette[hp] × bind_global[hp]` (palette = global × inverse bind).
     pub fn weapon_draws(&self, walk: &WalkSim) -> Vec<render::DrawCmd> {
         let mut out = self.saber_hilts(walk);
-        for (i, sa, model, palette) in self.posed(walk) {
+        for (i, sa, model, palette) in self.posed_for(walk, true) {
             let Some(hp) = sa.hp_weapons else { continue };
             let u = &walk.sim.units[i];
             // A seated gunner holds no hand weapon (B1:114261-114266,
@@ -1331,16 +1370,22 @@ impl SoldierVisuals {
     /// Soldier models face +Z; sim yaw 0 faces −Z, hence the extra π.
     pub fn draws(&self, walk: &WalkSim) -> Vec<SkinnedDrawCmd> {
         let mut out = Vec::new();
-        for (i, sa, model, palette) in self.posed(walk) {
+        for (i, sa, model, palette) in self.posed_for(walk, true) {
             let u = &walk.sim.units[i];
             let live_cloth =
                 self.units[i].cloth_states.len() == sa.cloths.len() && !sa.cloths.is_empty();
+            let low = self.lod_view.choice(i) == super::lod::Choice::Low;
+            let body = if low {
+                sa.low.as_deref().unwrap_or(sa)
+            } else {
+                sa
+            };
             self.body_draws(
-                sa,
+                body,
                 (u.team, u.spec.class),
                 model,
                 &palette,
-                live_cloth,
+                live_cloth && !low,
                 &mut out,
             );
         }
@@ -1358,7 +1403,9 @@ impl SoldierVisuals {
         live_cloth: bool,
         out: &mut Vec<SkinnedDrawCmd>,
     ) {
-        let row = &self.skins[usize::from(team.min(1))];
+        let low = sa.asset.name.ends_with("_low1") || sa.asset.name.ends_with(".low");
+        let rows = if low { &self.low_skins } else { &self.skins };
+        let row = &rows[usize::from(team.min(1))];
         let skin = row
             .get(usize::from(class).min(row.len().saturating_sub(1)))
             .map_or(&[][..], Vec::as_slice);

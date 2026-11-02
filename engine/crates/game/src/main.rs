@@ -57,6 +57,8 @@
 //!     --bench-ticks <n>           sim ticks to time (default 900)
 //!     --bench-csv <file>          append the bench row to a CSV
 //!     --bench-player-cam          bench from the player's eye, not the overview
+//!     --bench-toggle <what>       `shadows` or `soldier-lod`: time that feature off
+//!                                 and on in alternating blocks of the same frames
 //!   --write-pack <out> [--pak <file>] [--split-at <bytes>] <name>=<dir>...
 //!                                 copy this executable to <out> with each
 //!                                 <dir> appended as the archive's <name>/;
@@ -229,6 +231,8 @@ struct ViewerArgs {
     /// one camera where frustum culling can never help — measuring culling
     /// from it would be measuring nothing.
     bench_player_cam: bool,
+    /// `--bench-toggle`: compare one feature off and on (`game::bench::Toggle`).
+    bench_toggle: Option<&'static str>,
 }
 
 fn main() -> Result<()> {
@@ -335,6 +339,7 @@ fn main() -> Result<()> {
                 no_cull: false,
                 scene_report: false,
                 bench_player_cam: false,
+                bench_toggle: None,
                 ai: None,
                 ai_cap: None,
                 tickets: 250,
@@ -452,6 +457,14 @@ fn main() -> Result<()> {
                     "--bench" => v.bench = true,
                     "--no-cull" => v.no_cull = true,
                     "--bench-player-cam" => v.bench_player_cam = true,
+                    "--bench-toggle" => {
+                        v.bench_toggle =
+                            Some(match it.next().context("--bench-toggle <what>")?.as_str() {
+                                "shadows" => "shadows",
+                                "soldier-lod" => "soldier-lod",
+                                other => bail!("--bench-toggle: unknown feature {other:?}"),
+                            })
+                    }
                     "--bench-frames" => {
                         v.bench_frames = it.next().context("--bench-frames <n>")?.parse()?
                     }
@@ -465,8 +478,8 @@ fn main() -> Result<()> {
                     other => bail!("unknown viewer flag: {other}"),
                 }
             }
-            if v.capture_frame.is_some() && !v.headless {
-                bail!("--capture-frame requires --headless");
+            if v.capture_frame.is_some() && !v.headless && v.bench_toggle.is_none() {
+                bail!("--capture-frame requires --headless or --bench-toggle");
             }
             if v.bench {
                 run_bench(&v)

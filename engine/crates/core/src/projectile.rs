@@ -244,6 +244,10 @@ impl Bolt {
                     eat(&h.index.to_le_bytes());
                     eat(&h.gen.to_le_bytes());
                 }
+                Some(crate::missile::MissileTarget::Turret(id)) => {
+                    eat(&[3]);
+                    eat(&id.to_le_bytes());
+                }
             }
         }
         if let Some(damage) = self.fat {

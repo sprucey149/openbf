@@ -69,6 +69,8 @@ fn scene(edges: usize, hidden_edges: u8) -> (WalkSim, SoldierVisuals) {
     });
     let mut visuals = SoldierVisuals::default();
     visuals.assets.push(SoldierAsset {
+        low: None,
+        lod: None,
         asset: SkinnedAsset {
             name: "visibility_control".into(),
             skeleton: crate::skin::Skeleton::new(

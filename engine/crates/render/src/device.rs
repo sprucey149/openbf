@@ -354,14 +354,16 @@ fn pick_adapter(instance: &wgpu::Instance, want: &str) -> Result<wgpu::Adapter, 
     }
 }
 
-/// Depth32Float depth target, matching the pipeline's depth-stencil state.
+pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24PlusStencil8;
+
+/// Depth24PlusStencil8 depth target, matching the pipeline's depth-stencil state.
 /// From an earlier wgpu project's renderer/mod.rs `create_depth_texture` (binding usage dropped).
 pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> wgpu::TextureView {
     let texture = crate::resources::texture_2d(
         device,
         "depth",
         [width, height],
-        wgpu::TextureFormat::Depth32Float,
+        DEPTH_FORMAT,
         wgpu::TextureUsages::RENDER_ATTACHMENT,
         &[],
     );

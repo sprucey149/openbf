@@ -949,6 +949,20 @@ mod tests {
         assert_eq!((bf1.uv_anim, bf1.uv_scroll()), ([0, 0], None));
     }
 
+    #[test]
+    fn bf1_scroll_material_preserves_its_float_rates() {
+        let mut band = Vec::new();
+        band.extend(0x414u32.to_le_bytes());
+        band.extend(0.0078125f32.to_le_bytes());
+        band.extend(0.9921875f32.to_le_bytes());
+        assert_eq!(
+            one_segment(&band, b"Scroll\0").uv_scroll(),
+            Some([-0.0078125, -0.9921875])
+        );
+        band[0..4].copy_from_slice(&0x30u32.to_le_bytes());
+        assert_eq!(one_segment(&band, b"Specmap\0").uv_scroll(), None);
+    }
+
     /// RTYP's two on-disc encodings, pinned as raw bytes: BF1 writes a
     /// NUL-terminated string beside a 4-byte MTRL, BF2 a u32 beside a 25-byte
     /// one. Byte layouts taken from the disc (`segm` payloads on KAM1.LVL;
@@ -1227,8 +1241,20 @@ impl Segment {
     }
 
     pub fn uv_scroll(&self) -> Option<[f32; 2]> {
-        (self.bf2_material && self.material_flags & 0x0100_0000 != 0 && self.uv_anim != [0, 0])
-            .then(|| self.uv_anim.map(|b| -f32::from(b) / 255.0))
+        if self.bf2_material {
+            (self.material_flags & 0x0100_0000 != 0 && self.uv_anim != [0, 0])
+                .then(|| self.uv_anim.map(|b| -f32::from(b) / 255.0))
+        } else if self.material_flags & 0x430 == 0x410 {
+            // BF1 ps2ScrollSegment reuses the two MTRL float slots that
+            // specular materials interpret as their power/colour words.
+            let rate = [
+                -f32::from_bits(self.spec_power),
+                -f32::from_bits(self.spec_color),
+            ];
+            (rate != [0.0; 2] && rate.iter().all(|v| v.is_finite())).then_some(rate)
+        } else {
+            None
+        }
     }
 }
 

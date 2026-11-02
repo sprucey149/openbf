@@ -54,7 +54,16 @@ impl Sim {
     }
 
     fn fat_ray_strike(&mut self, s: Strike) {
-        let b = self.bolts[s.bolt].clone();
+        let mut b = self.bolts[s.bolt].clone();
+        let Some(victim) = self.unit(s.victim) else {
+            return;
+        };
+        b.pos = victim.aim_point();
+        // BF2 FUN_00317f20: acceptance skips this victim's damage, while
+        // the original wide ray and its deduction continue to later victims.
+        if self.deflect_bolt(s.victim, &b) {
+            return;
+        }
         let desc = DamageDesc {
             damage: s.damage,
             scales: [1.0; 7],

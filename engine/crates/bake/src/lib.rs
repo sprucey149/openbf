@@ -1,6 +1,8 @@
 //! Bake library: PS2 LVL → open formats (glTF/KTX2/RON). The `bake` binary is
 //! a thin CLI over this.
 
+pub mod shadow;
+
 pub mod adpcm;
 pub mod alpha;
 pub mod anim_sets;

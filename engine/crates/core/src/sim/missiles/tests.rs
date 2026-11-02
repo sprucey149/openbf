@@ -492,3 +492,41 @@ fn a_missile_locked_onto_a_vehicle_homes_on_its_aim_sphere_centre() {
     let off = dir.angle_between((aim - b.pos).normalize());
     assert!(off < 0.1, "homes on {} not {}: {off} rad", aim, vpos);
 }
+
+#[test]
+fn launcher_locks_a_turret_hashes_its_id_and_drops_a_destroyed_target() {
+    let (mut s, me, owner, _) = scene(50.0);
+    let class = crate::autoturret::TurretClass::new(
+        &crate::weapon::test_props::List(&[]),
+        WeaponClass::bf1_rifle(),
+    );
+    s.turrets.push(crate::autoturret::Turret::new(
+        19,
+        owner,
+        1,
+        0,
+        &class,
+        Vec3::new(0.0, 1.0, -10.0),
+        Vec3::ZERO,
+        0.0,
+    ));
+    s.magnet[0] = Some(AimTarget::Turret(19));
+    s.tick_locks(TICK_DT);
+    s.tick_locks(TICK_DT);
+    assert_eq!(
+        s.unit(me).unwrap().weapon.lock_target,
+        Some(MissileTarget::Turret(19))
+    );
+    assert_eq!(s.unit(me).unwrap().weapon.lock_held, TICK_DT);
+    assert_eq!(
+        s.missile_aim(MissileTarget::Turret(19)),
+        Some(s.turrets[0].centre())
+    );
+    let before = s.hash();
+    s.unit_mut(me).unwrap().weapon.lock_target = Some(MissileTarget::Turret(20));
+    assert_ne!(s.hash(), before);
+    s.turrets[0].health = 0.0;
+    s.tick_locks(TICK_DT);
+    assert_eq!(s.unit(me).unwrap().weapon.lock_target, None);
+    assert_eq!(s.missile_aim(MissileTarget::Turret(19)), None);
+}

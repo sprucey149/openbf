@@ -443,3 +443,27 @@ fn force_flight_and_recovery_keep_bf2_dynamics_on_both_maps() {
         }
     }
 }
+
+#[test]
+fn force_emitter_damage_is_paid_by_a_raised_droideka_shield() {
+    let (mut sim, player) = scene(emitter());
+    let y = sim.units[0].muzzle().y - 1.0;
+    let target = sim
+        .spawn(&UnitSpec {
+            droideka: Some(std::sync::Arc::new(Default::default())),
+            ..UnitSpec::trooper(1, Vec3::new(0.0, y, -4.0))
+        })
+        .unwrap();
+    sim.unit_mut(target)
+        .unwrap()
+        .droideka
+        .as_mut()
+        .unwrap()
+        .shield
+        .on = true;
+    let before = sim.unit(target).unwrap().health.cur;
+    sim.fire_force(player.index as usize, 0, 1.0);
+    let u = sim.unit(target).unwrap();
+    assert_eq!(u.health.cur, before);
+    assert_eq!(u.droideka.as_ref().unwrap().shield.points, 2910.0);
+}

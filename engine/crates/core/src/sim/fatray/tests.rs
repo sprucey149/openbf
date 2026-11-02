@@ -122,3 +122,47 @@ fn the_damage_never_falls_under_its_floor_and_the_shooter_is_passed() {
         s.unit(owner).unwrap().health.max
     );
 }
+
+#[test]
+fn a_fat_ray_charges_the_raised_shield_and_continues_past_it() {
+    let (mut s, class, owner) = scene();
+    let target = s
+        .spawn(&UnitSpec {
+            droideka: Some(std::sync::Arc::new(Default::default())),
+            ..UnitSpec::trooper(1, Vec3::new(1.0, 0.0, 0.0))
+        })
+        .unwrap();
+    s.unit_mut(target)
+        .unwrap()
+        .droideka
+        .as_mut()
+        .unwrap()
+        .shield
+        .on = true;
+    let before = s.unit(target).unwrap().health.cur;
+    let shield = s
+        .unit(target)
+        .unwrap()
+        .droideka
+        .as_ref()
+        .unwrap()
+        .shield
+        .points;
+    let beyond = s
+        .spawn(&UnitSpec::trooper(1, Vec3::new(9.0, 0.0, 0.0)))
+        .unwrap();
+    fire(&mut s, class, owner, 0.0);
+    run(&mut s, 4);
+    assert_eq!(s.unit(target).unwrap().health.cur, before);
+    assert!(
+        s.unit(target)
+            .unwrap()
+            .droideka
+            .as_ref()
+            .unwrap()
+            .shield
+            .points
+            < shield
+    );
+    assert!(s.unit(beyond).unwrap().health.cur < 300.0);
+}

@@ -126,7 +126,9 @@ impl Sim {
                         self.ignite(h, unit, class);
                         let mult = self.buff_scale(Some(unit), h);
                         let Some(v) = self.unit_mut(h) else { continue };
-                        let damage = v.health.take_damage(&desc, mult, friendly, ff);
+                        let damage = v.lend_droideka_shield(|health| {
+                            health.take_damage(&desc, mult, friendly, ff)
+                        });
                         if self
                             .units
                             .get(unit.index as usize)
