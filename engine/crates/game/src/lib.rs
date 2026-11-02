@@ -17,6 +17,7 @@ pub mod cloth;
 pub mod collision_layers;
 pub mod conquest_defaults;
 pub mod dev;
+pub mod dlc;
 pub mod droideka;
 pub mod engine_sound;
 pub mod event_feed;

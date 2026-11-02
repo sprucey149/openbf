@@ -85,30 +85,6 @@ def geometry_platform(path):
     return None
 
 
-def entity_classes(path):
-    """Every entity class an LVL defines (`entc` `TYPE`, directly or inside `lvl_`), lowercased."""
-    names = set()
-    try:
-        path = Path(path)
-        if path.stat().st_size > 128 << 20:
-            return names
-        blob = memoryview(path.read_bytes())
-        if len(blob) < 8 or blob[:4] != b"ucfb":
-            return names
-        pending = [blob[8:8 + struct.unpack_from("<I", blob, 4)[0]]]
-        while pending:
-            for tag, body in chunks(pending.pop()):
-                if tag == b"lvl_" and len(body) >= 8:
-                    pending.append(body[8:])
-                elif tag == b"entc":
-                    for child, value in chunks(body):
-                        if child == b"TYPE":
-                            names.add(bytes(value).split(b"\0", 1)[0].decode("latin-1").lower())
-    except (OSError, ValueError, struct.error):
-        pass
-    return names
-
-
 def is_ps2_lvl(path):
     return geometry_platform(path) == "ps2"
 

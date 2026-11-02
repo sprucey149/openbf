@@ -108,6 +108,9 @@
 //!                                 summary (--bench-frames 0 = sim only)
 //!   OPENBF_BENCH_TOTAL_PER_SIDE=<any>  with OPENBF_BENCH_DETAIL: --ai <n>
 //!                                 counts the human, n soldiers a side in all
+//!   OPENBF_BENCH_TARGET_TICKS=<n,n..>  with OPENBF_BENCH_DETAIL: these one-based
+//!                                 ticks run under `targeted_tick`, for callgrind's
+//!                                 --toggle-collect (same work, another symbol)
 //!   OPENBF_BENCH_FOREST_EYE=<any>  with OPENBF_BENCH_DETAIL: look at the
 //!                                 first falling-leaf emitter, not the overview
 //!   OPENBF_TERRAIN_LIGHT_GROUPS=0  with OPENBF_BENCH_DETAIL, diagnostic: the

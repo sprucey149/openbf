@@ -2,8 +2,8 @@
 //! The parent owns model/rig conversion and the existing regression tests.
 
 use super::{
-    clip_to_tracks, find_clip, find_soldier, model_skins, pose_rig, to_skinned_model, BakedSoldier,
-    ClipMeta, SoldierAnims, SEAT_CLIPS, SOLDIER_CLIPS,
+    clip_to_tracks, find_clip, find_soldier, model_skins, pose_rig, rigid_or_skinned_model,
+    BakedSoldier, ClipMeta, SoldierAnims, SEAT_CLIPS, SOLDIER_CLIPS,
 };
 use crate::anim_sets;
 use crate::skin_glb::{skinned_to_glb, Clip};
@@ -71,7 +71,10 @@ pub fn bake_soldier_anims(
     let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let (m, mut skel) = find_soldier(inner, model)?;
-    let mut sm = to_skinned_model(&m, &skel)?;
+    crate::dlc_attachment::canonical_bind(inner, &mut skel)?;
+    // Some addon soldiers store skinned vertices in model space (INFO[0]=0).
+    // The converter already handles both spaces and validates bone bindings.
+    let mut sm = rigid_or_skinned_model(&m, &skel)?;
     // BF2's cloth, rest shape pinned to its bones (card CLOTH; the step is
     // CLOTH2). A sheet only a cloth draws is opaque unless the class says
     // Transparent.
@@ -89,6 +92,9 @@ pub fn bake_soldier_anims(
     }
     let cloth_names: Vec<String> = cloths.iter().map(|c| c.name.clone()).collect();
     sm.segments.extend(cloths.into_iter().map(|c| c.segment));
+    // Keep the source body's cloth part indices stable. The separately
+    // attached tentacles are appended after those parts, never between them.
+    crate::dlc_attachment::append_fisto_tentacles(inner, &mut sm)?;
     let out = Path::new(outdir);
     std::fs::create_dir_all(out.join("soldiers"))?;
     std::fs::create_dir_all(out.join("textures"))?;
@@ -147,6 +153,16 @@ pub fn bake_soldier_anims(
                 let mut classes = anim_sets::bf2::side_classes(&abuf)?;
                 for side in &sides {
                     classes.extend(anim_sets::bf2::side_classes(side)?);
+                }
+                // A requested addon/native side need not be one of the four
+                // retail factions. Preserve first-wins retail registration.
+                for class in anim_sets::bf2::side_classes(&buf)? {
+                    if !classes
+                        .iter()
+                        .any(|c| c.kind == class.kind && c.name == class.name)
+                    {
+                        classes.push(class);
+                    }
                 }
                 let mut reg = anim_sets::bf2::Registry::shipped();
                 let soldiers = reg.register(&classes);

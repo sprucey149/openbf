@@ -720,6 +720,27 @@ impl CollisionWorld {
                     seen(body);
                 }
             }
+            Some(r) if r.x0 == r.x1 && r.z0 == r.z1 => {
+                // A cell and `everywhere` are disjoint ascending lists. A
+                // point query (notably ground rays) can merge them directly
+                // instead of copying, sorting and deduplicating a scratch list.
+                let cell = r.z0 * self.grid.nx + r.x0;
+                let mut local = &self.grid.cells
+                    [self.grid.starts[cell] as usize..self.grid.starts[cell + 1] as usize];
+                let mut everywhere = self.grid.everywhere.as_slice();
+                while let (Some(&a), Some(&b)) = (local.first(), everywhere.first()) {
+                    if a < b {
+                        seen(&self.bodies[a as usize]);
+                        local = &local[1..];
+                    } else {
+                        seen(&self.bodies[b as usize]);
+                        everywhere = &everywhere[1..];
+                    }
+                }
+                for &i in local.iter().chain(everywhere) {
+                    seen(&self.bodies[i as usize]);
+                }
+            }
             Some(r) => {
                 let mut ids = BROADPHASE_SCRATCH.with(|s| s.take());
                 ids.clear();
@@ -1004,6 +1025,50 @@ mod tests {
             sorted.dedup();
             assert_eq!(seen, sorted, "at ({x}, {z})");
         }
+    }
+
+    /// Point queries must preserve the full gather/sort order even when
+    /// map-spanning bodies are interleaved with the bodies filed in cells.
+    #[test]
+    fn single_cell_queries_match_gathered_candidates() {
+        let huge = || {
+            Body::new(
+                Mat4::IDENTITY,
+                Shape::Box {
+                    half: Vec3::new(10_000.0, 1.0, 10_000.0),
+                },
+            )
+        };
+        let mut bodies = scattered(200);
+        bodies.insert(37, huge());
+        bodies.insert(101, huge());
+        let w = CollisionWorld::new(bodies, Vec::new());
+        assert!(w.grid.everywhere.contains(&37));
+        assert!(w.grid.everywhere.contains(&101));
+        let index = |b: &Body| {
+            (b as *const Body as usize - w.bodies.as_ptr() as usize) / std::mem::size_of::<Body>()
+        };
+        let mut local_hits = 0;
+        for (x, z) in [(0.0, 0.0), (-90.0, 40.0), (150.0, -150.0), (1e5, 1e5)] {
+            let r = w.grid.cells_for(w.generation, x, x, z, z).unwrap();
+            let mut expected = Vec::new();
+            w.grid.gather(r, &mut expected);
+            expected.sort_unstable();
+            expected.dedup();
+            local_hits += expected.len() - w.grid.everywhere.len();
+            let mut actual = Vec::new();
+            w.visit_xz(x, x, z, z, HullFilter::Static, |b| {
+                actual.push(index(b) as u32);
+                // A callback may make another query on the same thread.
+                let mut nested = Vec::new();
+                w.visit_xz(x, x, z, z, HullFilter::Static, |b| {
+                    nested.push(index(b) as u32);
+                });
+                assert_eq!(nested, expected);
+            });
+            assert_eq!(actual, expected, "at ({x}, {z})");
+        }
+        assert!(local_hits > 0, "exercise both merged lists");
     }
 
     /// A fixture can still push after construction — and then the grid is

@@ -1150,3 +1150,71 @@ fn voicep_bank_census() {
     assert!(rows > 0, "empty census is not evidence");
     println!("VOICEP census input rows {rows}; inventory completeness requires separate review");
 }
+
+#[test]
+fn dlc_sounds_join_the_core_bank_only_with_their_bake_and_never_over_retail() {
+    let root = std::env::temp_dir().join(format!("openbf_dlc_sounds_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let bank = |dir: &str, sample: &str, names: &[&str]| {
+        let dir = root.join(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let props: Vec<String> = names
+            .iter()
+            .map(|name| {
+                format!(
+                    "(name_hash:{},kind:0,gain:1.0,pitch:1.0,min_distance:1.0,max_distance:2.0,\
+                     rolloff:1.0,priority:0.5,looping:false,samples:[(7,1.0)],layers:[])",
+                    fnv1a_lowercase(name)
+                )
+            })
+            .collect();
+        std::fs::write(
+            dir.join("sounds.ron"),
+            format!(
+                "(source:\"x\",banks:[],samples:[(7,\"{sample}\")],props:[{}])",
+                props.join(",")
+            ),
+        )
+        .unwrap();
+    };
+    bank("core_bf2/sounds", "retail.wav", &["shared_name"]);
+    bank(
+        "side_bf2/dlc_sounds",
+        "dlc.wav",
+        &["shared_name", "fisto_bubble"],
+    );
+    let mut core = Bank::load(&root.join("core_bf2/sounds")).unwrap();
+    core.import_dlc_sounds(&root);
+    assert!(!core.props.contains_key(&fnv1a_lowercase("fisto_bubble")));
+    std::fs::write(root.join("side_bf2/dlc_heroes.ron"), "()").unwrap();
+    core.import_dlc_sounds(&root);
+    let bubble = &core.props[&fnv1a_lowercase("fisto_bubble")];
+    let path = core.sample_path(bubble.samples[0].0).unwrap();
+    assert!(path.ends_with("dlc.wav"), "{}", path.display());
+    let shared = &core.props[&fnv1a_lowercase("shared_name")];
+    let path = core.sample_path(shared.samples[0].0).unwrap();
+    assert!(path.ends_with("retail.wav"), "{}", path.display());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// Fisto's bubble sounds reach a real battle's library, by the map bank's path
+/// through the resident bank, and each resolves to a file on disk.
+#[test]
+#[ignore = "requires OPENBF_DLC_TEST_ROOT with bf2_myg1 and core_bf2 sounds beside the DLC bake"]
+fn real_dlc_bubble_sounds_start_in_a_battle() {
+    let root = std::path::PathBuf::from(
+        std::env::var_os("OPENBF_DLC_TEST_ROOT").expect("DLC test overlay"),
+    );
+    let lib = SoundLib::load(&root.join("bf2_myg1")).expect("map bank");
+    for name in [
+        "hero_weap_energyBall_throw",
+        "hero_weap_energyBall_stdy",
+        "hero_weap_energyBall_explo",
+    ] {
+        let (prop, in_core) = lib.find_named(name).expect(name);
+        assert!(in_core, "{name}: the resident bank's");
+        let core = lib.core.as_ref().expect("resident bank");
+        let path = core.sample_path(prop.samples[0].0).expect(name);
+        assert!(pak::is_file(&path), "{}", path.display());
+    }
+}

@@ -33,6 +33,23 @@ fn measured_tick(walk: &mut WalkSim, pad: &[core::sim::PadState]) {
     walk.step_tick(pad);
 }
 
+/// Listed ticks take this frame, so `valgrind --tool=callgrind
+/// --toggle-collect='*targeted_tick*'` profiles one slow tick of a repeatable
+/// run: same work as `measured_tick`, only a different symbol.
+#[inline(never)]
+fn targeted_tick(walk: &mut WalkSim, pad: &[core::sim::PadState]) {
+    // Differs from `measured_tick`, or LLVM folds the two into one symbol.
+    std::hint::black_box(0u32);
+    walk.step_tick(pad);
+}
+
+/// `OPENBF_BENCH_TARGET_TICKS=995,2216`: one-based ticks for [`targeted_tick`].
+fn target_ticks() -> Vec<u32> {
+    std::env::var("OPENBF_BENCH_TARGET_TICKS")
+        .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
+        .unwrap_or_default()
+}
+
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
@@ -71,10 +88,15 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
     let mut ticks = Vec::with_capacity(v.bench_ticks as usize);
     let mut hashes = Vec::new();
     let mut cameras = Vec::new();
+    let targets = target_ticks();
     for k in 0..v.bench_ticks {
         let t = Instant::now();
         let cpu = cpu_ms();
-        measured_tick(&mut walk, &pad);
+        if targets.contains(&(k + 1)) {
+            targeted_tick(&mut walk, &pad);
+        } else {
+            measured_tick(&mut walk, &pad);
+        }
         let cpu = cpu.zip(cpu_ms()).map(|(a, b)| b - a);
         let wall = ms(t);
         ticks.push(json!({"tick": k + 1, "wall_ms": wall, "cpu_ms": cpu}));
@@ -98,6 +120,12 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         "native_alive": walk.sim.units.iter().filter(|u| u.alive && u.team >= 2).count(),
         "vehicles_alive": walk.sim.vehicles.iter().filter(|v| v.alive).count(),
         "initial_hash": initial_hash, "sim_hash": sim_hash, "tick_hashes": hashes,
+        // Navigation caches are derived inputs and omitted from Sim::hash.
+        // Keep their float bits too so setup optimizations can prove parity.
+        "nav_floors": walk.sim.nav_floors.iter().map(|y| y.to_bits()).collect::<Vec<_>>(),
+        "nav_unwalkable": walk.sim.nav_unwalkable,
+        "nav_trapped": walk.sim.nav_trapped,
+        "kill_floor": walk.sim.kill_floor.map(f32::to_bits),
         "camera_samples": cameras,
         "load_ms": load_ms, "setup_ms": setup_ms, "ticks": ticks,
         "leaf_groups": scene.manifest.leaf.len(),

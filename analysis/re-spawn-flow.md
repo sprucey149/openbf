@@ -9,7 +9,7 @@ Tags: [V] read (lines cited), [L] measured live on the PS2 (file cited), [D] der
 are `[O]`. The verifier's verdicts are in §10. Offline means the PS2's "network byte" is 0 (`DAT_00600548`, or
 `DAT_00600549` when `DAT_0060054f` is set; 0 in every state of this card); online-only branches are named, not built.
 
-![the PS2 flow](../engine/artifacts/lead_tmp/ssel/ps2_flow_sheet.png) - `engine/artifacts/lead_tmp/ssel/ps2_flow_sheet.png`
+the PS2 flow - `engine/artifacts/lead_tmp/ssel/ps2_flow_sheet.png`
 (BF2 Hoth, Instant Action, Conquest: the side select with each button highlighted, the spawn map and the class screen at
 the level start, the spawn, the death camera, the respawn screens, the pause menu's Respawn).
 

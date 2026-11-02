@@ -318,6 +318,14 @@ impl Library {
         if factions.contains(&"cis") {
             dirs.push(assets_dir.join("droid_effects"));
         }
+        // [ours] The optional DLC heroes' effects, after every retail layer: a
+        // shared name stays retail's, and retail's variant caches are unmoved.
+        if game == "bf2"
+            && factions.iter().any(|f| matches!(*f, "rep" | "cis"))
+            && crate::dlc::installed(assets_dir)
+        {
+            dirs.push(assets_dir.join("side_bf2/effects/dlc"));
+        }
         let mut sets = Vec::new();
         for d in &dirs {
             if let Some(set) = Self::read_set(d) {

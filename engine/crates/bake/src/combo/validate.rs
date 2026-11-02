@@ -52,7 +52,14 @@ pub(super) fn arguments(field: &ComboField) -> Result<()> {
             text(field, 0)?;
             strings(field, 1)?;
         }
-        K::OffhandAnimation | K::SyncType | K::Button => {
+        K::OffhandAnimation => {
+            text(field, 0)?;
+            text(field, 1)?;
+            // The DLC Ventress throw record contains eleven finite numeric
+            // trailing slots after its clip/channel strings. Preserve those
+            // raw slots; the animator consumes only the first two arguments.
+        }
+        K::SyncType | K::Button => {
             text(field, 0)?;
             text(field, 1)?;
             strings(field, 2)?;
@@ -153,4 +160,29 @@ pub(super) fn arguments(field: &ComboField) -> Result<()> {
         | K::EnergyCost => scalar(field)?,
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dlc_offhand_trailing_slots_do_not_hide_required_clip_and_channel() {
+        let mut field = ComboField {
+            keyword: K::OffhandAnimation,
+            args: vec![
+                ComboValue::Text("stand_throw".into()),
+                ComboValue::Text("FIRE2".into()),
+                ComboValue::Number(-0.0066241594),
+            ],
+            scoped: false,
+            children: vec![],
+        };
+        assert!(arguments(&field).is_ok());
+        field.args[0] = ComboValue::Number(1.0);
+        assert!(arguments(&field).is_err());
+        field.args[0] = ComboValue::Text("stand_throw".into());
+        field.args[1] = ComboValue::Text(String::new());
+        assert!(arguments(&field).is_err());
+    }
 }

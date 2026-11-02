@@ -28,6 +28,6 @@ mission death drain reaches the unconditional repair with bleed zero. The legal
 three-ticket player-plus-two-AI death-region regression needs one despawn after
 the extra drain and none in its control; both battle and actual unit census agree.
 The 32-case CP matrix covers both teams, all tiers and human/handicap settings.
-See [re-bleed-reachability.md](../../../../analysis/re-bleed-reachability.md).
+See [re-bleed-reachability.md](../../../analysis/re-bleed-reachability.md).
 Runtime code is unchanged; comments now describe both responsibilities. The
 keep-with-test acceptance is complete; the deletion/cleanup alternative was not taken.

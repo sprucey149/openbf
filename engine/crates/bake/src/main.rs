@@ -130,6 +130,26 @@ fn ci_csv(s: &str) -> String {
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("dlc-heroes") if args.len() == 5 || args.len() == 6 => {
+            let pc = args.get(5).map(|s| ci(s));
+            let result = bake::dlc::bake(
+                Path::new(&ci(&args[2])),
+                Path::new(&ci(&args[3])),
+                Path::new(&args[4]),
+                pc.as_deref().map(Path::new),
+            )?;
+            println!("baked {} optional DLC heroes", result.heroes.len());
+            Ok(())
+        }
+        Some("dlc-sounds") if args.len() == 5 => {
+            let sounds = bake::dlc::bake_sounds(
+                Path::new(&ci(&args[2])),
+                Path::new(&ci(&args[3])),
+                Path::new(&args[4]),
+            )?;
+            println!("baked {sounds} DLC hero sounds");
+            Ok(())
+        }
         Some("extract-iso") if args.len() == 4 => extract_iso(&ci(&args[2]), &args[3]),
         Some("extract-xiso") if args.len() == 4 => extract_xiso(&ci(&args[2]), &args[3]),
         Some("xbox") if args.len() >= 4 => xbox(&args[2..]),
@@ -446,6 +466,8 @@ fn main() -> Result<()> {
                  \x20 bake pc-tex     <file.lvl|-> <outdir>       PC-format textures to KTX2\n\
                  \x20 bake soldier    <side.lvl> <model[,model]> <outdir> [anim.lvl] [pc.lvl]\n\
                  \x20 bake heroes     <BF2 DATA/_LVL_PS2> <side_bf2 outdir>\n\
+                 \x20 bake dlc-heroes <detected side.lvl> <PS2 ingame.lvl> <asset root> [pc side.lvl]\n\
+                 \x20 bake dlc-sounds <hero sound.lvl> <CORE.LVL> <asset root>\n\
                  \x20 bake combos     <side.lvl> <out.ron>\n\
                  \x20 bake weapon     <side.lvl[,lvl]> <model[,model]> <outdir> [pc.lvl]\n\
                  \x20 bake fpm        <anim.lvl> <outdir> <fpm.lvl>...\n\

@@ -147,7 +147,7 @@ class InputPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'scripts').mkdir()
-            for name in ('rebake.sh', 'console_input.py', 'input_scan.py'):
+            for name in ('rebake.sh', 'console_input.py', 'input_scan.py', 'dlc_inputs.py'):
                 shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
             (root / 'engine').mkdir()
             console = root / 'extracted/bf2/lvl/DATA/_LVL_PS2'

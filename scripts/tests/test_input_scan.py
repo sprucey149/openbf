@@ -160,13 +160,14 @@ def addon_script():
     return ucfb(chunk(b'scr_', chunk(b'NAME', b'addme\0') + chunk(b'INFO', b'\0')))
 
 
-def dlc_folder(root, heroes=('dlc_hero_fisto', 'dlc_hero_ventress')):
+def dlc_folder(root, heroes=('dlc_hero_fisto', 'dlc_hero_ventress'), geometry=b'VBUF'):
     """The layout that really ships: an addon script over a PC-format _LVL_PC with its own core.lvl."""
     write(root / 'addme.script', addon_script())
     data = root / 'data/_LVL_PC'
     write(data / 'core.lvl', ucfb())
     # Named so that nothing about the name helps.
-    level = chunk(b'lvl_', bytes(8) + b''.join(entity(hero) for hero in heroes))
+    model = chunk(b'modl', chunk(b'segm', chunk(geometry, bytes(4))))
+    level = chunk(b'lvl_', bytes(8) + b''.join(entity(hero) for hero in heroes) + model)
     write(data / 'SIDE/x.lvl', ucfb(chunk(b'tex_', chunk(b'INFO', bytes(4))), level))
     return root
 
@@ -205,6 +206,19 @@ class Recognition(unittest.TestCase):
     def test_the_partition_offsets_are_the_real_ones(self):
         # The test above takes its offsets from the scanner, so it cannot notice one going missing.
         self.assertEqual(scan.XBOX_PARTITIONS, (0, 0x18300000, 0xFD90000, 0x2080000))
+
+    def test_an_xbox_node_with_only_its_left_child_absent_as_0xffff_is_an_entry(self):
+        """Only both words at 0xFFFF are padding, as mungefs::xdvdfs reads it: the two readers must list the same."""
+        table = bytearray(xdvdfs_table([('default.xbe', 400, 4, False), ('ingame.lvl', 400, 4, False)]))
+        struct.pack_into('<H', table, 0, 0xFFFF)
+        path = self.root / 'odd.iso'
+        with path.open('wb') as out:
+            out.seek(32 * 2048)
+            out.write(b'MICROSOFT*XBOX*MEDIA' + struct.pack('<II', 300, len(table)))
+            out.seek(300 * 2048)
+            out.write(table)
+            out.truncate(401 * 2048)
+        self.assertEqual(scan.xdvdfs_files(str(path)), (0, {'default.xbe', 'ingame.lvl'}))
 
     def test_hostile_xbox_directories_end(self):
         good = xbox_image(self.root / 'good.iso', 'bf2').read_bytes()
@@ -277,12 +291,48 @@ class Recognition(unittest.TestCase):
         self.assertEqual(row_for(plan, one_hero)['kind'], 'addon')
         self.assertEqual(row_for(plan, update)['kind'], 'addon')
         self.assertEqual(plan['dlc']['path'], str(dlc))
+        self.assertTrue(plan['dlc']['used'])
+        self.assertEqual(row_for(plan, dlc)['status'], 'would be used')  # no discs in this folder
         self.assertEqual(scan.content.pc_game(dlc / 'data/_LVL_PC'), None)
+
+    def test_a_dlc_folder_with_no_geometry_of_a_known_format_is_not_dlc(self):
+        addon = dlc_folder(self.root / 'a', geometry=b'XXXX')
+        self.assertEqual(row_for(plan_of(self.root), addon)['kind'], 'addon')
+
+    def test_ps2_dlc_is_the_heroes_and_a_pc_copy_lends_its_textures(self):
+        pc = dlc_folder(self.root / 'a-pc')
+        ps2 = dlc_folder(self.root / 'b-ps2', geometry=b'_PS2')
+        plan = plan_of(self.root)
+        self.assertEqual((plan['dlc']['path'], plan['dlc']['donor']), (str(ps2), str(pc)))
+        self.assertEqual({row_for(plan, path)['status'] for path in (pc, ps2)}, {'would be used'})  # no discs here
+        env = scan.bake_env(plan)
+        self.assertEqual((env['OPENBF_DLC_DIR'], env['OPENBF_DLC_DONOR']), (str(ps2), str(pc)))
+
+    def test_a_second_pc_dlc_is_only_a_spare(self):
+        first, second = dlc_folder(self.root / 'a'), dlc_folder(self.root / 'b')
+        plan = plan_of(self.root)
+        self.assertEqual((plan['dlc']['path'], plan['dlc']['donor']), (str(first), None))
+        self.assertEqual(row_for(plan, second)['status'], 'unused')
+        self.assertNotIn('OPENBF_DLC_DONOR', scan.bake_env(plan))
+
+    def test_the_switch_off_reads_no_dlc(self):
+        plan = plan_of(dlc_folder(self.root / 'a').parent, dlc_supported=False)
+        self.assertFalse(plan['dlc']['used'])
+        self.assertEqual(row_for(plan, self.root / 'a')['status'], 'not supported yet')
+        self.assertNotIn('OPENBF_DLC_DIR', scan.bake_env(plan))
 
     def test_dlc_without_its_script_is_still_dlc(self):
         data = dlc_folder(self.root / 'a') / 'data/_LVL_PC'
         (self.root / 'a/addme.script').unlink()
         self.assertEqual(row_for(plan_of(self.root), data)['kind'], 'dlc')
+
+    def test_a_folder_holding_only_the_heroes_side_file_is_still_dlc(self):
+        data = dlc_folder(self.root / 'a') / 'data/_LVL_PC'
+        (self.root / 'a/addme.script').unlink()
+        (data / 'core.lvl').unlink()
+        plan = plan_of(self.root)
+        self.assertEqual(row_for(plan, self.root / 'a')['kind'], 'dlc')
+        self.assertTrue(plan['dlc']['used'])
 
     def test_aspyr_style_64_bit_folder_is_refused_even_with_pc_shaped_data(self):
         aspyr = pc_install(self.root / 'Classic', 'bf2')
@@ -411,9 +461,10 @@ class Matrix(unittest.TestCase):
                     if 'xbox' in sources and not xbox_on:
                         self.assertEqual(row_for(plan, root / f'{game}-b')['status'], 'not supported yet')
                 self.assertEqual(plan['dlc']['present'], dlc)
-                self.assertFalse(plan['dlc']['used'])
+                self.assertEqual(plan['dlc']['used'], dlc)
+                self.assertEqual('OPENBF_DLC_DIR' in scan.bake_env(plan), dlc)
                 if dlc:
-                    self.assertEqual(row_for(plan, root / 'dlc')['status'], 'not supported yet')
+                    self.assertIn(row_for(plan, root / 'dlc')['status'], ('used', 'would be used'))
                 if unknown:
                     self.assertEqual(row_for(plan, root / 'mystery.bin')['status'], 'refused')
         self.assertEqual(count, 4 * 7 * 2 * 2 * 2)
@@ -574,7 +625,7 @@ class Pack(unittest.TestCase):
         self.assertIsNone(code)
         for line in (f"BF1 gameplay: PS2 disc {self.iso / 'a'}", f"BF2 gameplay: PS2 disc {self.iso / 'b'}",
                      f"BF2 texture donors: PC install {self.iso / 'e/GameData/Data/_LVL_PC'}",
-                     f"DLC: {self.iso / 'd'} (recognized; not supported yet)",
+                     f"DLC: {self.iso / 'd'} (Kit Fisto and Asajj Ventress used)",
                      f"not supported yet: {self.iso / 'c'} - Xbox Star Wars: Battlefront II disc (trimmed); recognized, not read"):
             self.assertIn(line, printed)
         self.assertEqual(self.out.with_name('game.inputs.txt').read_text().strip(), printed[:printed.index('Input summary')].strip())
@@ -641,7 +692,7 @@ class Pack(unittest.TestCase):
         self.assertEqual(report['input_scan']['games']['bf2']['gameplay']['kind'], 'ps2-disc')
 
     def test_a_stale_environment_cannot_add_to_the_scans_choice(self):
-        stale = {name: '/stale' for name in ('XB1', 'XB2', 'OPENBF_BF1_TREE', 'OPENBF_BF2_TREE', 'OPENBF_DLC_DIR')}
+        stale = {name: '/stale' for name in ('XB1', 'XB2', 'OPENBF_BF1_TREE', 'OPENBF_BF2_TREE', 'OPENBF_DLC_DIR', 'OPENBF_DLC_DONOR')}
         with mock.patch.dict(os.environ, stale):
             _, env, ps2, _ = self.full_run(False)
         self.assertFalse(set(stale) & set(env), env)
@@ -671,7 +722,7 @@ class RebakeCase(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = root = Path(directory.name)
         (root / 'scripts').mkdir()
-        for name in ('rebake.sh', 'console_input.py', 'input_scan.py'):
+        for name in ('rebake.sh', 'console_input.py', 'input_scan.py', 'dlc_inputs.py', 'bake_dlc.py'):
             shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
         (root / 'engine').mkdir()
         target = root / 'target/release'
@@ -687,7 +738,7 @@ class RebakeCase(unittest.TestCase):
         self.env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
                         CARGO_TARGET_DIR=str(target.parent), BAKE_LOG=str(self.log), REBAKE_OUT=str(root / 'out'),
                         OPENBF_BF1_MAPS='BES/BES1', OPENBF_BF2_MAPS='MUS/MUS1')
-        for name in ('PC1', 'PC2', 'XB1', 'XB2', 'BF2_CONSOLE_ISO', 'OPENBF_INPUTS_CHOSEN'):
+        for name in ('PC1', 'PC2', 'XB1', 'XB2', 'BF2_CONSOLE_ISO', 'OPENBF_INPUTS_CHOSEN', 'OPENBF_DLC_DIR', 'OPENBF_DLC_DONOR'):
             self.env.pop(name, None)
 
     def rebake(self, *groups, **env):
@@ -696,13 +747,113 @@ class RebakeCase(unittest.TestCase):
         result = subprocess.run(['bash', str(self.root / 'scripts/rebake.sh'), *groups], env={**self.env, **env},
                                 capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        return result, self.log.read_text().splitlines()
+        return result, self.log.read_text().splitlines() if self.log.exists() else []
 
     def donors(self, tree_root):
         write(tree_root / 'bes/bes1.lvl')
         write(tree_root / 'mus/mus1.lvl')
         for side in ('all', 'imp', 'rep', 'cis'):
             write(tree_root / f'side/{side}.lvl')
+
+
+class RebakeDlc(RebakeCase):
+    STALE = ('side_bf2/dlc_heroes.ron', 'classes/bf2_dlc.ron', 'side_bf2/dlc_sounds/sounds.ron', 'side_bf2/effects/dlc/effects.ron')
+
+    def stale(self):
+        for name in self.STALE:
+            write(self.root / 'out' / name, b'an earlier bake')
+
+    def heroes(self, calls):
+        return [line for line in calls if line.startswith('dlc-heroes ')]
+
+    def test_the_scans_folder_is_baked_into_the_real_output_with_the_game_reference(self):
+        dlc = dlc_folder(self.root / 'iso/renamed')
+        _, calls = self.rebake('dlc')
+        self.assertEqual(len(self.heroes(calls)), 1, calls)
+        line = self.heroes(calls)[0].split()
+        self.assertEqual(line[2:], [str(self.root / 'extracted/bf2/lvl/DATA/_LVL_PS2/INGAME.LVL'), str((self.root / 'out').resolve())])
+        self.assertTrue(dlc.is_dir())
+
+    def test_under_pack_the_environment_is_the_choice(self):
+        dlc_folder(self.root / 'iso/not-chosen')
+        chosen = dlc_folder(self.root / 'elsewhere', geometry=b'_PS2')
+        _, calls = self.rebake('dlc', OPENBF_INPUTS_CHOSEN='1', OPENBF_DLC_DIR=str(chosen))
+        self.assertEqual(len(self.heroes(calls)), 1)
+        _, calls = self.rebake('dlc', OPENBF_INPUTS_CHOSEN='1')
+        self.assertEqual(self.heroes(calls), [])
+
+    def test_a_pc_copy_arrives_as_a_second_source(self):
+        ps2, pc = dlc_folder(self.root / 'a', geometry=b'_PS2'), dlc_folder(self.root / 'b')
+        _, calls = self.rebake('dlc', OPENBF_INPUTS_CHOSEN='1', OPENBF_DLC_DIR=str(ps2), OPENBF_DLC_DONOR=str(pc))
+        self.assertEqual(len(self.heroes(calls)[0].split()), 5, calls)  # the side, reference, output and donor LVL
+
+    def test_side_runs_it_after_clearing_what_it_stands_on(self):
+        dlc_folder(self.root / 'iso/a')
+        _, calls = self.rebake('side')
+        self.assertTrue(self.heroes(calls))
+        self.assertLess(max(index for index, line in enumerate(calls) if line.startswith(('soldier ', 'vehicle '))),
+                        calls.index(self.heroes(calls)[0]))
+
+    def test_no_folder_takes_an_earlier_bakes_enabling_files_away(self):
+        for group in ('dlc', 'side'):
+            self.stale()
+            _, calls = self.rebake(group)
+            self.assertEqual(self.heroes(calls), [])
+            for name in self.STALE:
+                self.assertFalse((self.root / 'out' / name).exists(), (group, name))
+
+    def test_other_groups_leave_the_heroes_alone(self):
+        dlc_folder(self.root / 'iso/a')
+        self.stale()
+        _, calls = self.rebake('beep')
+        self.assertEqual(self.heroes(calls), [])
+        self.assertTrue((self.root / 'out' / self.STALE[0]).exists())
+
+    def test_a_linked_output_is_refused(self):
+        dlc_folder(self.root / 'iso/a')
+        (self.root / 'shared').mkdir()
+        (self.root / 'linked').symlink_to(self.root / 'shared')
+        result = subprocess.run(['bash', str(self.root / 'scripts/rebake.sh'), 'dlc'], capture_output=True, text=True,
+                                env={**self.env, 'REBAKE_OUT': str(self.root / 'linked')}, timeout=60)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('REBAKE_OUT', result.stderr)
+
+    def test_a_linked_output_loses_nothing_when_refused(self):
+        """The link's target is someone else's bake: refusing it must not first delete their heroes, DLC folder or not."""
+        (self.root / 'linked').symlink_to(self.root / 'shared', target_is_directory=True)
+        for name in self.STALE:
+            write(self.root / 'shared' / name, b'a shared bake')
+        for folder in (False, True):
+            if folder:
+                dlc_folder(self.root / 'iso/a')
+            result = subprocess.run(['bash', str(self.root / 'scripts/rebake.sh'), 'dlc'], capture_output=True, text=True,
+                                    env={**self.env, 'REBAKE_OUT': str(self.root / 'linked')}, timeout=60)
+            self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+            for name in self.STALE:
+                self.assertTrue((self.root / 'shared' / name).exists(), f'{name}, folder={folder}')
+
+    def test_a_folder_is_refused_over_a_link_before_any_group_runs(self):
+        dlc_folder(self.root / 'iso/a')
+        (self.root / 'linked').symlink_to(self.root / 'shared', target_is_directory=True)
+        write(self.root / 'shared/side_bf1/soldiers/kept.glb', b'a shared bake')
+        result = subprocess.run(['bash', str(self.root / 'scripts/rebake.sh')], capture_output=True, text=True,
+                                env={**self.env, 'REBAKE_OUT': str(self.root / 'linked')}, timeout=60)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertFalse(self.log.exists(), 'no bake ran')
+        self.assertTrue((self.root / 'shared/side_bf1/soldiers/kept.glb').exists())
+
+    def test_side_over_a_link_without_a_folder_still_clears_the_heroes_it_deletes(self):
+        (self.root / 'linked').symlink_to(self.root / 'shared', target_is_directory=True)
+        write(self.root / 'shared' / self.STALE[0], b'an earlier bake')
+        self.rebake('side', REBAKE_OUT=str(self.root / 'linked'))
+        self.assertFalse((self.root / 'shared' / self.STALE[0]).exists())
+
+    def test_a_link_above_the_output_is_not_the_outputs_own(self):
+        dlc_folder(self.root / 'iso/a')
+        (self.root / 'real/below').mkdir(parents=True)
+        (self.root / 'above').symlink_to(self.root / 'real')
+        _, calls = self.rebake('dlc', REBAKE_OUT=str(self.root / 'above/below'))
+        self.assertEqual(self.heroes(calls)[0].split()[3], str((self.root / 'real/below').resolve()))
 
 
 class Rebake(RebakeCase):
@@ -862,7 +1013,7 @@ class ReviewFindings(unittest.TestCase):
     def run_scan_tool(self, *arguments, **env):
         tool = self.top / 'checkout/scripts'
         tool.mkdir(parents=True, exist_ok=True)
-        for name in ('input_scan.py', 'console_input.py'):
+        for name in ('input_scan.py', 'console_input.py', 'dlc_inputs.py'):
             shutil.copyfile(ROOT / 'scripts' / name, tool / name)
         return subprocess.run([sys.executable, str(tool / 'input_scan.py'), *arguments], capture_output=True, timeout=30,
                               env={**os.environ, **env})

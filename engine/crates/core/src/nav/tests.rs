@@ -956,3 +956,184 @@ mod regressions {
         sim.level_at(Vec3::ZERO);
     }
 }
+
+/// The corner search's culling changes no answer: legs across a crowded field
+/// of rails, some long and some short, walk exactly the same corners with every
+/// barrier tested.
+#[test]
+fn culling_a_corner_search_changes_no_corner() {
+    let mut seed = 0x9e37_79b9u32;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as f32 / u32::MAX as f32
+    };
+    let mut barriers = Vec::new();
+    for _ in 0..300 {
+        let c = Vec2::new(next() * 400.0 - 200.0, next() * 400.0 - 200.0);
+        barriers.push(rail(c, next() * 3.0, 1.0 + next() * 15.0, 0.5 + next()));
+    }
+    let g = barrier_graph(barriers);
+    let mut detours = 0;
+    for k in 0..400 {
+        let a = Vec2::new(next() * 400.0 - 200.0, next() * 400.0 - 200.0);
+        let reach = if k % 2 == 0 { 30.0 } else { 300.0 };
+        let b = a + Vec2::new(next() - 0.5, next() - 0.5) * reach;
+        for radius in [0.4, 1.0] {
+            let culled = g.detour_culled(a, b, radius, SOLDIER, true);
+            let full = g.detour_culled(a, b, radius, SOLDIER, false);
+            let bits = |p: &Option<Vec<Vec2>>| {
+                p.as_ref().map(|p| {
+                    p.iter()
+                        .map(|c| [c.x.to_bits(), c.y.to_bits()])
+                        .collect::<Vec<_>>()
+                })
+            };
+            assert_eq!(bits(&culled), bits(&full), "{a} -> {b} at {radius}");
+            detours += usize::from(culled.as_ref().is_some_and(|p| !p.is_empty()));
+        }
+    }
+    assert!(detours > 50, "corners walked: {detours}");
+}
+
+/// The box check in front of `barrier_stop` changes no answer: every barrier's
+/// own test, over random legs, gives the same bits.
+#[test]
+fn barrier_stop_answers_what_every_barrier_says() {
+    let mut seed = 0x51ed_270bu32;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as f32 / u32::MAX as f32
+    };
+    let mut barriers = Vec::new();
+    for _ in 0..200 {
+        let c = Vec2::new(next() * 200.0 - 100.0, next() * 200.0 - 100.0);
+        barriers.push(rail(
+            c,
+            next() * 6.3,
+            0.2 + next() * 12.0,
+            0.2 + next() * 2.0,
+        ));
+    }
+    let g = barrier_graph(barriers);
+    let mut stopped = 0;
+    for _ in 0..4000 {
+        let a = Vec2::new(next() * 220.0 - 110.0, next() * 220.0 - 110.0);
+        let b = a + Vec2::new(next() - 0.5, next() - 0.5) * 60.0;
+        let every = g
+            .barriers
+            .iter()
+            .filter(|br| br.blocks(SOLDIER))
+            .filter_map(|br| br.entry_t(a, b))
+            .fold(1.0f32, f32::min);
+        let t = g.barrier_stop(a, b, SOLDIER);
+        assert_eq!(t.to_bits(), every.to_bits(), "{a} -> {b}");
+        stopped += usize::from(t < 1.0);
+    }
+    assert!(stopped > 100, "legs stopped: {stopped}");
+}
+
+/// Bits of a corner search's answer.
+fn corner_bits(p: &Option<Vec<Vec2>>) -> Option<Vec<[u32; 2]>> {
+    p.as_ref()
+        .map(|p| p.iter().map(|c| [c.x.to_bits(), c.y.to_bits()]).collect())
+}
+
+/// The cull's band allows for a barrier's reach: a long rail whose CENTRE lies
+/// far outside the band still closes the cheaper way round the wall.
+#[test]
+fn a_rail_centred_outside_the_band_still_turns_the_search() {
+    let front = wall(0.5, -5.0, 3.0, 0.25);
+    // Along X, x -121 to -1: under the wall's cheaper corner, its centre 61 m
+    // off a leg whose band is 25 m.
+    let far = wall(-61.0, -7.0, 60.0, 0.25);
+    let (a, b) = (Vec2::ZERO, Vec2::new(0.0, -10.0));
+    let open = barrier_graph(vec![front])
+        .detour(a, b, 0.4, SOLDIER)
+        .unwrap();
+    assert!(open[0].x < 0.0, "the left is cheaper: {open:?}");
+    let g = barrier_graph(vec![front, far]);
+    let culled = g.detour_culled(a, b, 0.4, SOLDIER, true);
+    assert_eq!(
+        corner_bits(&culled),
+        corner_bits(&g.detour_culled(a, b, 0.4, SOLDIER, false))
+    );
+    let culled = culled.unwrap();
+    assert!(culled[0].x > 0.0, "the rail closes the left: {culled:?}");
+    assert!(path_is_clear(&g, a, &culled, b, 0.4));
+}
+
+/// Two barriers a segment meets at the same `t`: the lowest index is the
+/// answer, though the cull walks them by the X of their centres.
+#[test]
+fn of_equal_crossings_the_lowest_index_is_nearest() {
+    let g = barrier_graph(vec![
+        wall(2.0, -5.0, 3.0, 0.25),
+        wall(-2.0, -5.0, 3.0, 0.25),
+    ]);
+    let (a, b) = (Vec2::ZERO, Vec2::new(0.0, -10.0));
+    let mut cand: Vec<DetourCand> = (0..2u16)
+        .map(|index| DetourCand {
+            centre: g.barriers[index as usize].centre,
+            reach: 10.0,
+            index,
+        })
+        .collect();
+    cand.sort_unstable_by(|p, q| p.centre.x.total_cmp(&q.centre.x));
+    assert_eq!(cand[0].index, 1, "the walk meets the higher index first");
+    let mut s = DetourSearch {
+        g: &g,
+        cand,
+        max_reach: 10.0,
+        radius: 0.4,
+        goal: b,
+        perp: Vec2::X,
+        band: 25.0,
+        nodes: Vec::new(),
+        open: Vec::new(),
+        visited: Vec::new(),
+        tests: 0,
+    };
+    assert_eq!(s.nearest_crossed(a, b), Some(0));
+}
+
+/// A leg that is not finite is not culled: every barrier answers it, near or
+/// far, as before there was a cull. `Vec2::min` would otherwise drop a NaN end.
+#[test]
+fn a_leg_that_is_not_finite_is_answered_by_every_barrier() {
+    let g = barrier_graph(
+        (0..50)
+            .map(|k| rail(Vec2::new(k as f32 * 4.0 - 100.0, 0.0), 0.3, 1.0, 1.0))
+            .collect(),
+    );
+    for (a, b) in [
+        (Vec2::NAN, Vec2::ZERO),
+        // ...the goal outside any band a barrier could reach.
+        (Vec2::NAN, Vec2::new(500.0, 0.0)),
+        (Vec2::ZERO, Vec2::NAN),
+        (Vec2::new(f32::NAN, 0.0), Vec2::new(5.0, 90.0)),
+        (Vec2::new(0.0, -5.0), Vec2::new(f32::NAN, 5.0)),
+        (Vec2::splat(f32::INFINITY), Vec2::ZERO),
+        (Vec2::ZERO, Vec2::new(0.0, f32::NEG_INFINITY)),
+    ] {
+        let every = g
+            .barriers
+            .iter()
+            .filter(|br| br.blocks(SOLDIER))
+            .filter_map(|br| br.entry_t(a, b))
+            .fold(1.0f32, f32::min);
+        assert_eq!(
+            g.barrier_stop(a, b, SOLDIER).to_bits(),
+            every.to_bits(),
+            "{a} -> {b}"
+        );
+        assert_eq!(
+            corner_bits(&g.detour_culled(a, b, 0.4, SOLDIER, true)),
+            corner_bits(&g.detour_culled(a, b, 0.4, SOLDIER, false)),
+            "{a} -> {b}"
+        );
+    }
+}

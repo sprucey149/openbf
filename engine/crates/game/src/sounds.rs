@@ -290,7 +290,32 @@ impl Bank {
         let Some(source) = Bank::load(&root.join(format!("{game}_geo1/sounds"))) else {
             return;
         };
-        let mut pending: Vec<_> = names.iter().map(|name| fnv1a_lowercase(name)).collect();
+        self.import_props(
+            &source,
+            names.iter().map(|name| fnv1a_lowercase(name)).collect(),
+        );
+    }
+
+    /// [ours] The optional DLC heroes' sounds, from their selective bake. Absent
+    /// that bake this changes nothing; a retail property of the same name wins.
+    fn import_dlc_sounds(&mut self, root: &Path) {
+        if !crate::dlc::installed(root) {
+            return;
+        }
+        let Some(source) = Bank::load(&root.join("side_bf2/dlc_sounds")) else {
+            return;
+        };
+        let mut names: Vec<_> = source
+            .props
+            .keys()
+            .copied()
+            .filter(|hash| !self.props.contains_key(hash))
+            .collect();
+        names.sort_unstable();
+        self.import_props(&source, names);
+    }
+
+    fn import_props(&mut self, source: &Bank, mut pending: Vec<u32>) {
         let mut imported = Vec::new();
         while let Some(hash) = pending.pop() {
             if imported.contains(&hash) {
@@ -784,6 +809,9 @@ impl SoundLib {
                 let mut core = Bank::load(&root.join(format!("core_{game}")).join("sounds"));
                 if let Some(core) = &mut core {
                     core.import_sbd_sounds(root, &game);
+                    if game == "bf2" {
+                        core.import_dlc_sounds(root);
+                    }
                 }
                 let dir = root.join("audio").join(format!("global_{game}"));
                 let g = read_index(&dir.join("global.ron"));

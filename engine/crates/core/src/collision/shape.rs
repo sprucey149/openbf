@@ -10,6 +10,8 @@ use crate::vehicle::VehicleHandle;
 use glam::{Mat3, Mat4, Quat, Vec3, Vec4};
 use std::sync::Arc;
 
+mod mesh_ray;
+
 /// Vertical capsule: segment from `base + r·Y` to `base + (h − r)·Y`, radius `r`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Capsule {
@@ -307,7 +309,7 @@ impl Shape {
     ) -> Option<parry3d::query::RayIntersection> {
         use parry3d::query::RayCast;
         match self {
-            Shape::Mesh(m) => m.cast_local_ray_and_get_normal(ray, max_len, false),
+            Shape::Mesh(m) => mesh_ray::cast(m, ray, max_len),
             Shape::Sphere { radius } => parry3d::shape::Ball::new(*radius)
                 .cast_local_ray_and_get_normal(ray, max_len, false),
             Shape::Cylinder {

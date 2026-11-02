@@ -90,6 +90,10 @@ fn field(node: ConfigNode) -> Result<ComboField> {
         .iter()
         .find(|(name, _)| mungefs::fnv1a_lowercase(name) == node.hash)
         .map(|(_, key)| *key)
+        // The community DLC spells two block-animation blend fields
+        // "BendTimeTo". Normalize that specific spelling; all other unknown
+        // hashes still fail rather than silently discarding combo fields.
+        .or_else(|| (node.hash == mungefs::fnv1a_lowercase("BendTimeTo")).then_some(K::BlendTimeTo))
         .ok_or_else(|| anyhow!("unknown combo keyword 0x{:08x}", node.hash))?;
     let args = (0..node.values.len())
         .map(|i| match node.str_arg(i) {
@@ -437,6 +441,22 @@ pub fn resolve_animation_clips(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dlc_block_blend_typo_has_one_explicit_alias() {
+        let mut node = ConfigNode {
+            hash: mungefs::fnv1a_lowercase("BendTimeTo"),
+            values: vec![8, 0],
+            strings: vec![Some("stand_block_front1".into()), None],
+            string: Some("stand_block_front1".into()),
+            children: vec![],
+        };
+        let parsed = field(node.clone()).unwrap();
+        assert_eq!(parsed.keyword, K::BlendTimeTo);
+        assert_eq!(parsed.number(1), Some(0.0));
+        node.hash = mungefs::fnv1a_lowercase("OtherTimeTo");
+        assert!(field(node).is_err());
+    }
 
     fn chunk(tag: &[u8; 4], p: &[u8]) -> Vec<u8> {
         let mut out = tag.to_vec();

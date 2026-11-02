@@ -13,7 +13,7 @@
 set -euo pipefail
 
 # land.py reads this line too (it refuses a card whose `rebake=` names another).
-REBAKE_GROUPS="tat1 tat2 maps common side classes sounds global-sound load beep"
+REBAKE_GROUPS="tat1 tat2 maps common side dlc classes sounds global-sound load beep"
 CLI_PC_DIR=""
 WANT_GROUPS=()
 while [ $# -gt 0 ]; do
@@ -64,6 +64,7 @@ ci() {
 # Run by hand, the scan supplies what the command line left out. Its SCAN_* are
 # empty for anything not chosen. Under pack.py the choice arrives in the environment.
 SCAN_PC1=""; SCAN_PC2=""; SCAN_XB1=""; SCAN_XB2=""; SCAN_BF2_CONSOLE_ISO=""
+SCAN_OPENBF_DLC_DIR=""; SCAN_OPENBF_DLC_DONOR=""
 if [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
   SCAN="$(python3 "$ROOT/scripts/input_scan.py" --root "$ROOT" --shell | tr -d '\r')" || exit 2
   eval "$SCAN"
@@ -74,6 +75,8 @@ fi
 BF2_CONSOLE_ISO="${BF2_CONSOLE_ISO:-$SCAN_BF2_CONSOLE_ISO}"
 # Xbox texture donors: the trees `bake extract-xiso` wrote. Empty until pack.py chooses an Xbox disc.
 XB1="${XB1:-$SCAN_XB1}"; XB2="${XB2:-$SCAN_XB2}"
+# The optional DLC heroes' folder, and a second copy's larger textures. Empty without them.
+OPENBF_DLC_DIR="${OPENBF_DLC_DIR:-$SCAN_OPENBF_DLC_DIR}"; OPENBF_DLC_DONOR="${OPENBF_DLC_DONOR:-$SCAN_OPENBF_DLC_DONOR}"
 
 is_pc_lvl_dir() {
   python3 "$ROOT/scripts/console_input.py" --pc "$2" "$1"
@@ -207,6 +210,12 @@ want() {
 # Each bake owns a few subdirectories; clear those (and only those) so a
 # renamed or dropped output cannot linger as a stale file.
 clean() { local t; for t in "$@"; do rm -rf "$t"; done; }
+
+# The heroes' bake refuses a link, so say so before any group runs, and before `clean` below deletes through it what
+# another tree's bake holds. A link with no folder to bake is still fine for `side`, which must clear the heroes it deletes.
+if [ -L "$OUT" ] && { want side || want dlc; } && { [ -n "$OPENBF_DLC_DIR" ] || ! want side; }; then
+  echo "rebake: $OUT is a link to other assets; set REBAKE_OUT to a folder of your own" >&2; exit 2
+fi
 
 # Every other ground map, baked to assets_baked/<game>_<lvl> (the LVL name,
 # not the world name inside it: BF1 and BF2 both ship "hoth", "yavin1", ...).
@@ -405,6 +414,20 @@ if want side; then
     s=$(printf '%s' "${base%.*}" | tr 'A-Z' 'a-z')
     "$BAKE" effects "$f" "$OUT/side_bf2/effects/$s" bf2
   done
+fi
+# Kit Fisto and Asajj Ventress, when the scan found them (scripts/DLC.md). With `side`: it just cleared their bodies and
+# weapons, and a completion marker must never be left standing over deleted files. Without a folder, nothing enables them.
+if want side || want dlc; then
+  clean "$OUT/side_bf2/dlc_heroes.ron" "$OUT/classes/bf2_dlc.ron" "$OUT/side_bf2/dlc_sounds" "$OUT/side_bf2/effects/dlc"
+  if [ -n "$OPENBF_DLC_DIR" ]; then
+    echo "== DLC heroes =="
+    mkdir -p "$OUT"
+    # Its real path: the bake refuses to write through a link, and a link above the checkout (/home on some Linux
+    # systems) is not one it needs to worry about.
+    DLC_OUT="$(cd "$OUT" && { pwd -W 2>/dev/null || pwd -P; })"
+    python3 "$ROOT/scripts/bake_dlc.py" --source "$OPENBF_DLC_DIR" ${OPENBF_DLC_DONOR:+--source "$OPENBF_DLC_DONOR"} \
+      --ingame "$(ci "$B2" INGAME.LVL)" --out "$DLC_OUT" --bake "$BAKE"
+  fi
 fi
 if want classes; then
   echo "== entity/weapon classes =="

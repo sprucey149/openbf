@@ -540,11 +540,40 @@ struct DetourNode {
     parent: u16,
 }
 
+/// Rounding allowance of [`DetourSearch`]'s culling, in metres: far above the
+/// float dust of map coordinates, so that it can only keep a barrier too many.
+const DETOUR_CULL_SLACK: f32 = 0.05;
+
+/// The box a culled segment `a -> b` lies in, with [`DETOUR_CULL_SLACK`]. A leg
+/// that is not finite gets the whole plane: `Vec2::min` would drop a NaN end, and
+/// every barrier's own test answers such a leg (with 0, usually), near or far.
+fn cull_box(a: Vec2, b: Vec2) -> (Vec2, Vec2) {
+    if !(a.is_finite() && b.is_finite()) {
+        return (Vec2::NEG_INFINITY, Vec2::INFINITY);
+    }
+    (
+        a.min(b) - Vec2::splat(DETOUR_CULL_SLACK),
+        a.max(b) + Vec2::splat(DETOUR_CULL_SLACK),
+    )
+}
+
+/// One barrier a corner search may meet.
+#[derive(Clone, Copy)]
+struct DetourCand {
+    centre: Vec2,
+    /// The barrier's rectangle grown by the leg's radius lies in this circle.
+    reach: f32,
+    index: u16,
+}
+
 /// A running corner search ([`NavGraph::detour`]).
 struct DetourSearch<'a> {
     g: &'a NavGraph,
-    /// The barriers that stop the walker and hold neither end of the leg.
-    cand: Vec<u16>,
+    /// The barriers that stop the walker and hold neither end of the leg, and
+    /// can be reached from inside the search's band, by the X of their centres.
+    cand: Vec<DetourCand>,
+    /// The largest `reach` of `cand`.
+    max_reach: f32,
     radius: f32,
     goal: Vec2,
     /// The leg's perpendicular and the band's half-width.
@@ -569,16 +598,29 @@ impl DetourSearch<'_> {
     fn nearest_crossed(&mut self, a: Vec2, b: Vec2) -> Option<usize> {
         self.tests += 1;
         let mut hit: Option<(f32, usize)> = None;
-        for &i in &self.cand {
-            let br = &self.g.barriers[i as usize];
-            // (The grown rectangle lies inside this circle.)
-            let reach = br.bound_radius() + self.radius * std::f32::consts::SQRT_2;
-            if dist_to_segment(br.centre, a, b) > reach {
+        // A barrier's circle clear of the segment's box is clear of the
+        // segment: most of the map, for far less than the distance below.
+        let (lo, hi) = cull_box(a, b);
+        let first = self
+            .cand
+            .partition_point(|c| c.centre.x < lo.x - self.max_reach);
+        for c in &self.cand[first..] {
+            if c.centre.x > hi.x + self.max_reach {
+                break;
+            }
+            if c.centre.x + c.reach < lo.x
+                || c.centre.x - c.reach > hi.x
+                || c.centre.y + c.reach < lo.y
+                || c.centre.y - c.reach > hi.y
+                || dist_to_segment(c.centre, a, b) > c.reach
+            {
                 continue;
             }
-            if let Some(t) = br.cross_t_r(a, b, self.radius) {
-                if hit.is_none_or(|(h, _)| t < h) {
-                    hit = Some((t, i as usize));
+            let i = c.index as usize;
+            if let Some(t) = self.g.barriers[i].cross_t_r(a, b, self.radius) {
+                // Nearest; of equals the lowest index (`cand` is not in that order).
+                if hit.is_none_or(|(h, j)| t < h || (t == h && i < j)) {
+                    hit = Some((t, i));
                 }
             }
         }
@@ -1303,8 +1345,20 @@ impl NavGraph {
     /// does not count (card BNDS, `Sim::level_at`).
     pub fn barrier_stop(&self, a: Vec2, b: Vec2, ty: usize) -> f32 {
         let mut t = 1.0f32;
+        // A rectangle's corners are its half sizes along two unit axes from
+        // its centre, so no part of it lies further along X or Z than their
+        // sum: clear of the segment's box, it is clear of the segment.
+        let (lo, hi) = cull_box(a, b);
         for br in &self.barriers {
             if !br.blocks(ty) {
+                continue;
+            }
+            let bound = br.half.x.abs() + br.half.y.abs();
+            if br.centre.x + bound < lo.x
+                || br.centre.x - bound > hi.x
+                || br.centre.y + bound < lo.y
+                || br.centre.y - bound > hi.y
+            {
                 continue;
             }
             if let Some(e) = br.entry_t(a, b) {
@@ -1356,6 +1410,19 @@ impl NavGraph {
     /// work is capped by [`DETOUR_MAX_TESTS`]. The answer is a pure function
     /// of the graph and the two points.
     pub fn detour(&self, a: Vec2, b: Vec2, radius: f32, ty: usize) -> Option<Vec<Vec2>> {
+        self.detour_culled(a, b, radius, ty, true)
+    }
+
+    /// [`Self::detour`], `cull`ing the barriers it cannot meet (only a test
+    /// turns that off, to prove it changes no answer).
+    fn detour_culled(
+        &self,
+        a: Vec2,
+        b: Vec2,
+        radius: f32,
+        ty: usize,
+        cull: bool,
+    ) -> Option<Vec<Vec2>> {
         let ignore = self.leg_ignores(a, b, radius, ty);
         if self.first_crossed(a, b, radius, ty, &ignore).is_none() {
             return Some(Vec::new()); // the straight leg is clear
@@ -1369,16 +1436,39 @@ impl NavGraph {
         } else {
             Vec2::X
         };
-        let cand = (0..self.barriers.len() as u16)
+        let band = len.max(DETOUR_BAND_MIN);
+        // Every segment tried joins points inside the band, so a barrier whose
+        // circle lies wholly outside it cannot be crossed. (A leg that is not
+        // finite has no band to speak of: see `cull_box`.)
+        let finite = a.is_finite() && b.is_finite();
+        let mut cand: Vec<DetourCand> = (0..self.barriers.len() as u16)
             .filter(|i| self.barriers[*i as usize].blocks(ty) && !ignore.contains(i))
+            .map(|index| {
+                let br = &self.barriers[index as usize];
+                DetourCand {
+                    centre: br.centre,
+                    reach: if cull {
+                        br.bound_radius() + radius * std::f32::consts::SQRT_2
+                    } else {
+                        f32::INFINITY
+                    },
+                    index,
+                }
+            })
+            .filter(|c| {
+                !finite || perp.dot(c.centre - b).abs() <= band + c.reach + DETOUR_CULL_SLACK
+            })
             .collect();
+        cand.sort_unstable_by(|p, q| p.centre.x.total_cmp(&q.centre.x));
+        let max_reach = cand.iter().fold(0.0, |m: f32, c| m.max(c.reach));
         let mut s = DetourSearch {
             g: self,
             cand,
+            max_reach,
             radius,
             goal: b,
             perp,
-            band: len.max(DETOUR_BAND_MIN),
+            band,
             nodes: vec![DetourNode {
                 p: a,
                 g: 0.0,

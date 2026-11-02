@@ -1,7 +1,7 @@
 # OPUS DESIGN (loop lane 2, 2026-10-03, card BOTD) - [O] UNAUDITED; no build card is taken before the maintainer has read it (historical proposal baseline; see status note below)
 # The bot design: what the best AI soldier for this game is
 
-**Status note (2026-10-23 cleanup).** This 2026-10-03 proposal uses main e336f2e as its code baseline and includes later dated amendments. Its original read-before-build hold was released: [FGHT](../engine/artifacts/loop/cards/FGHT.md) records the maintainer’s “BOTD read, go” on 2026-10-05 and BOTD done. Historical hold/build-order wording below describes the original proposal. Consult [CRATES](../engine/CRATES.md) and the owning cards for current implementation and acceptance; this note does not declare every proposal complete.
+**Status note (2026-10-23 cleanup).** This 2026-10-03 proposal uses main e336f2e as its code baseline and includes later dated amendments. Its original read-before-build hold was released: [FGHT](../docs/loop/cards/FGHT.md) records the maintainer’s “BOTD read, go” on 2026-10-05 and BOTD done. Historical hold/build-order wording below describes the original proposal. Consult [CRATES](../engine/CRATES.md) and the owning cards for current implementation and acceptance; this note does not declare every proposal complete.
 
 **What this is.** the maintainer, 2026-10-02: "are we just implementing so many bandaid fixes to a fundamentally flawed bot
 algorithm ... think more about high level what the best ai bot looks like for this game". This note is that: one

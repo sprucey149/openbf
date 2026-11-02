@@ -50,5 +50,29 @@ fn native_saber_glow_has_its_own_alpha_and_wider_ribbon() {
     assert_eq!(rng.get(), 1196435762, "two native LCG advances per glow");
 }
 
+/// The heroes' classes are their own file, so the draw needs them as well as
+/// the roster: without them they fight with nothing in their hands.
+#[test]
+#[ignore = "requires OPENBF_DLC_TEST_ROOT selective DLC bake"]
+fn real_dlc_heroes_draw_their_blades_and_hilts() {
+    let root = std::path::PathBuf::from(
+        std::env::var_os("OPENBF_DLC_TEST_ROOT").expect("DLC test overlay"),
+    );
+    let mut team = crate::walk::TeamTemplate::default_trooper();
+    team.classes = ["dlc_hero_fisto", "dlc_hero_ventress"]
+        .map(|name| crate::walk::ClassVisual {
+            name: name.into(),
+            label: name.into(),
+            ..Default::default()
+        })
+        .into();
+    let vis = SoldierVisuals::load_cpu(&root, "bf2", &[team.clone(), team]);
+    for class in 0..2 {
+        let visual = vis.saber_visual(0, class).expect("a saber visual");
+        assert!(!visual.bindings.is_empty(), "hero {class}: an edge");
+        assert!(!visual.hilts.is_empty(), "hero {class}: a hilt");
+    }
+}
+
 mod flight;
 mod visibility;

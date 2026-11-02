@@ -115,11 +115,38 @@ pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel
         if seg.triangles.is_empty() {
             continue;
         }
-        let (positions, normals, bones) =
-            mungefs::model::to_model_space(m, seg, skel).map_err(|e| anyhow!("{e}"))?;
-        if bones.iter().any(|&b| b > 255) {
-            bail!("{}: more than 256 bones", m.name);
-        }
+        let multiple = !m.bone_space
+            && seg.bone.is_none()
+            && seg.wght.iter().any(|w| w[1..].iter().any(|&w| w != 0));
+        let (positions, normals, joints, weights) = if multiple {
+            skel.bind_matrices().map_err(|e| anyhow!("{e}"))?;
+            let mut joints = Vec::with_capacity(seg.positions.len());
+            let mut weights = Vec::with_capacity(seg.positions.len());
+            for v in 0..seg.positions.len() {
+                let bind = seg
+                    .bind
+                    .get(v)
+                    .context("missing model-space skin binding")?;
+                let weight = seg.wght.get(v).context("missing model-space skin weight")?;
+                let (joint, weight) =
+                    model_space_influences(&seg.bmap, *bind, *weight, skel.bones.len())
+                        .with_context(|| format!("{} segment {k} vertex {v}", m.name))?;
+                joints.push(joint);
+                weights.push(weight);
+            }
+            (seg.positions.clone(), seg.normals.clone(), joints, weights)
+        } else {
+            // Preserve the existing rigid and bone-space conversion byte for
+            // byte. Retail models use one influence per vertex.
+            let (positions, normals, bones) =
+                mungefs::model::to_model_space(m, seg, skel).map_err(|e| anyhow!("{e}"))?;
+            if bones.iter().any(|&b| b > 255) {
+                bail!("{}: more than 256 bones", m.name);
+            }
+            let joints = bones.iter().map(|&b| [b as u8, 0, 0, 0]).collect();
+            let weights = vec![[1.0, 0.0, 0.0, 0.0]; bones.len()];
+            (positions, normals, joints, weights)
+        };
         let texture = crate::alpha::segment_texture(seg)
             .unwrap_or_default()
             .to_string();
@@ -129,8 +156,8 @@ pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel
             positions,
             normals,
             uvs: seg.uvs.clone(),
-            joints: bones.iter().map(|&b| [b as u8, 0, 0, 0]).collect(),
-            weights: vec![[1.0, 0.0, 0.0, 0.0]; bones.len()],
+            joints,
+            weights,
             triangles: seg.triangles.clone(),
             texture,
             blend,
@@ -143,6 +170,37 @@ pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel
         bones: bones_of(skel),
         segments,
     })
+}
+
+/// Model-space addon skins already hold the common rest position, so all
+/// authored influences can use standard GLB skinning. BIND stores VU slots
+/// times four; inactive slots may contain padding and must never be indexed.
+fn model_space_influences(
+    bmap: &[u8],
+    bind: [u8; 4],
+    raw: [u8; 4],
+    bone_count: usize,
+) -> Result<([u8; 4], [f32; 4])> {
+    let sum: u16 = raw.iter().map(|&w| u16::from(w)).sum();
+    if sum == 0 {
+        bail!("model-space skin has zero total weight");
+    }
+    let mut joints = [0; 4];
+    let mut weights = [0.0; 4];
+    for i in 0..4 {
+        if raw[i] == 0 {
+            continue;
+        }
+        let bone = *bmap
+            .get(usize::from(bind[i] >> 2))
+            .context("skin slot outside BMAP")?;
+        if usize::from(bone) >= bone_count {
+            bail!("skin bone {bone} outside skeleton");
+        }
+        joints[i] = bone;
+        weights[i] = f32::from(raw[i]) / f32::from(sum);
+    }
+    Ok((joints, weights))
 }
 
 /// `MTRL` bits that change how a 0x04 segment composites on one disc or the
@@ -596,6 +654,107 @@ pub fn class_skin(classes: &[manifest::ClassDef], name: &str) -> ClassSkin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn model_space_blends_preserve_all_active_bones_and_normalize_weights() {
+        let (joints, weights) =
+            model_space_influences(&[7, 3], [4, 0, 252, 252], [128, 64, 0, 0], 8).unwrap();
+        assert_eq!(joints, [3, 7, 0, 0]);
+        assert_eq!(weights, [2.0 / 3.0, 1.0 / 3.0, 0.0, 0.0]);
+        // Moving only the second joint moves the vertex by its authored share.
+        assert!((weights[1] * 6.0 - 2.0).abs() < 1e-6);
+        let (joints, weights) =
+            model_space_influences(&[7, 3], [252, 4, 252, 252], [0, 64, 0, 0], 8).unwrap();
+        assert_eq!(joints, [0, 3, 0, 0]);
+        assert_eq!(weights, [0.0, 1.0, 0.0, 0.0]);
+        assert!(model_space_influences(&[7], [4, 0, 0, 0], [255, 0, 0, 0], 8).is_err());
+        assert!(model_space_influences(&[7], [0; 4], [255, 0, 0, 0], 7).is_err());
+        assert!(model_space_influences(&[7], [0; 4], [0; 4], 8).is_err());
+    }
+
+    #[test]
+    fn model_space_softskin_reaches_glb_and_bone_space_stays_rigid() {
+        use mungefs::model::{Aabb, RenderType, Segment};
+        use mungefs::skel::SkelBone;
+        let skel = Skeleton {
+            name: "softskin".into(),
+            bones: (0..2)
+                .map(|i| SkelBone {
+                    name: format!("bone{i}"),
+                    crc: crc32_lower(&format!("bone{i}")),
+                    parent: None,
+                    rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    t: [0.0; 3],
+                })
+                .collect(),
+        };
+        let bounds = Aabb {
+            min: [0.0; 3],
+            max: [1.0; 3],
+        };
+        let mut model = Model {
+            name: "softskin".into(),
+            bone_space: false,
+            vertex_box: bounds,
+            vis_box: bounds,
+            face_count: 1,
+            sphere: None,
+            segments: vec![Segment {
+                vertex_count: 3,
+                index_count: 3,
+                bf2_material: true,
+                pc_geometry: false,
+                material_flags: 1,
+                render_type: RenderType::Bf2(0),
+                spec_power: 0,
+                spec_color: 0,
+                uv_anim: [0; 2],
+                textures: vec![],
+                bone: None,
+                group: None,
+                bmap: vec![0, 1],
+                bind: vec![[0, 4, 252, 252], [252, 4, 252, 252], [0, 252, 252, 252]],
+                wght: vec![[192, 64, 0, 0], [0, 255, 0, 0], [255, 0, 0, 0]],
+                positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                normals: vec![[0.0, 0.0, 1.0]; 3],
+                uvs: vec![[0.0; 2]; 3],
+                colors: None,
+                triangles: vec![[0, 1, 2]],
+            }],
+        };
+        let skin = rigid_or_skinned_model(&model, &skel).unwrap();
+        assert_eq!(skin.segments[0].positions, model.segments[0].positions);
+        assert_eq!(
+            skin.segments[0].joints,
+            [[0, 1, 0, 0], [0, 1, 0, 0], [0; 4]]
+        );
+        assert_eq!(
+            skin.segments[0].weights,
+            [
+                [0.75, 0.25, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0]
+            ]
+        );
+        let blob = skinned_to_glb(&skin, &[]).unwrap();
+        let doc = gltf::Gltf::from_slice(&blob).unwrap();
+        let primitive = doc.meshes().next().unwrap().primitives().next().unwrap();
+        let reader = primitive.reader(|_| doc.blob.as_deref());
+        assert_eq!(
+            reader.read_weights(0).unwrap().into_f32().next().unwrap(),
+            [0.75, 0.25, 0.0, 0.0]
+        );
+        assert_eq!(
+            reader.read_joints(0).unwrap().into_u16().next().unwrap(),
+            [0, 1, 0, 0]
+        );
+        // Bone-space models retain the former primary-influence conversion.
+        model.bone_space = true;
+        model.segments[0].bind[1][0] = 4;
+        let legacy = rigid_or_skinned_model(&model, &skel).unwrap();
+        assert_eq!(legacy.segments[0].joints, [[0; 4], [1, 0, 0, 0], [0; 4]]);
+        assert_eq!(legacy.segments[0].weights, [[1.0, 0.0, 0.0, 0.0]; 3]);
+    }
 
     /// The two states a skinned segment can take, read off its `MTRL` word
     /// alone, and the words the skinned path refuses. The first two rows are

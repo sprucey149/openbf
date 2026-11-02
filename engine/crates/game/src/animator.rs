@@ -1170,6 +1170,8 @@ struct Action {
 
 #[derive(Debug, Clone, Default)]
 pub struct Animator {
+    /// Seconds of play, for presentation with no clip of its own.
+    age: f32,
     upper: Player,
     lower: Player,
     /// The kept pose; `None` until the first update (which snaps).
@@ -1280,6 +1282,7 @@ impl Animator {
     /// One update: pick the two clips, advance them by `dt` and write them
     /// into the kept pose.
     pub fn step(&mut self, rig: &Rig, clips: &[Clip], skel: &Skeleton, i: &AnimInput, dt: f32) {
+        self.age += dt;
         self.combo_override = false;
         self.combo_aim = false;
         self.seat = None;
@@ -1630,6 +1633,7 @@ impl Animator {
         nine: Option<crate::viewer::turret_pose::NinePose>,
         dt: f32,
     ) {
+        self.age += dt;
         let Some(c) = clips.get(clip) else { return };
         let t = self.seat.map_or(0.0, |t| t + dt * 30.0);
         self.seat = Some(t);
@@ -1656,6 +1660,12 @@ impl Animator {
     /// The kept pose with the root twisted and the torso or the head turned
     /// onto the aim (a seated soldier's: the seat's pose as it is).
     pub fn pose(&self, skel: &Skeleton) -> Pose {
+        let mut pose = self.clip_pose(skel);
+        skel.sway(&mut pose, self.age);
+        pose
+    }
+
+    fn clip_pose(&self, skel: &Skeleton) -> Pose {
         let mut pose = self.kept_pose(skel);
         if self.seated() {
             return pose;

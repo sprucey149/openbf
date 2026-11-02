@@ -74,11 +74,19 @@ pub fn append(
     } else {
         m.teams.iter().position(|t| t.faction == roster.faction)? + 1
     };
-    let name = &m
+    let authored = &m
         .heroes
         .iter()
         .find(|(t, _)| usize::from(*t) == source_team)?
         .1;
+    let dlc = match crate::dlc::hero(classes_dir, m, &roster.faction) {
+        Ok(hero) => hero,
+        Err(error) => {
+            eprintln!("DLC heroes: {error:#}");
+            None
+        }
+    };
+    let name = dlc.unwrap_or(authored);
     if roster
         .classes
         .iter()
@@ -87,7 +95,7 @@ pub fn append(
         return None;
     }
     let source_faction = name.split('_').next().unwrap_or(&roster.faction);
-    let db =
+    let mut db =
         match crate::roster::load_classdb(classes_dir, "bf2", &[&roster.faction, source_faction]) {
             Ok(db) => db,
             Err(e) => {
@@ -95,13 +103,30 @@ pub fn append(
                 return None;
             }
         };
+    if dlc.is_some() {
+        if let Err(error) = db.load(&classes_dir.join(crate::dlc::CLASSES)) {
+            eprintln!("hero {name}: {error:#}");
+            return None;
+        }
+    }
     let Some(name) = db.resolve(name) else {
         eprintln!("hero {name}: class not baked");
         return None;
     };
     match ClassRoster::build(&db, name, 0, Some(1)) {
         Ok(mut class) => {
-            class.anim.custom = match crate::animator::custom::for_hero(classes_dir, m, name) {
+            if let Some(label) = dlc.and_then(crate::dlc::label) {
+                class.label = label.to_owned();
+            }
+            let descriptors = if dlc.is_some() {
+                class.geometry.as_deref().map_or_else(
+                    || Err(anyhow::anyhow!("{name}: no DLC geometry")),
+                    |geometry| crate::dlc::animations(classes_dir, geometry),
+                )
+            } else {
+                crate::animator::custom::for_hero(classes_dir, m, name)
+            };
+            class.anim.custom = match descriptors {
                 Ok(descriptors) => descriptors,
                 Err(error) => {
                     eprintln!("hero {name}: custom animations: {error:#}");

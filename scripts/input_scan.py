@@ -9,7 +9,7 @@ folders, and the Xbox DLC folder. Anything else is named and refused, not guesse
 
 The choice, per game:
   - gameplay and shared UI: the PS2 data whenever it is present. Numbers and shapes the sim reads never change with
-    what else went in.
+    what else went in, except that the optional DLC heroes take the Republic and CIS hero slots (scripts/DLC.md).
   - look: every other copy is a texture donor. bake::tier keeps the largest same-art copy of each texture.
   - each game needs one source, and any PC input also needs a console BF2 disc. A folder that holds other, unusable
     things still builds; the summary says what was refused. A game left with no usable source stops the build, and
@@ -28,6 +28,7 @@ import subprocess
 import sys
 
 import console_input as content
+import dlc_inputs
 
 # The readers are in (`bake extract-xiso`, `bake xbox`), but this stays False until rebake.sh applies the gameplay check
 # `bake xbox` makes: a disc with no PS2 copy would otherwise bake its own numbers and shapes without a refusal
@@ -36,9 +37,9 @@ import console_input as content
 # after any PC LVL.
 XBOX_SUPPORTED = False
 XBOX_EXTRACT = "extract-xiso"
-# True once a bake step reads Kit Fisto and Asajj Ventress out of the DLC folder (OPENBF_DLC_DIR). Nothing else in the
-# DLC is used, whatever it holds.
-DLC_SUPPORTED = False
+# scripts/bake_dlc.py reads Kit Fisto and Asajj Ventress out of the DLC folder (OPENBF_DLC_DIR, and OPENBF_DLC_DONOR for
+# a second copy's larger textures). Nothing else in the DLC is used, whatever it holds.
+DLC_SUPPORTED = True
 # True once BF1 gameplay can come from a table instead of a PS2 disc, so a PC BF1 install can be BF1's only source.
 PC_PRIMARY_SUPPORTED = False
 
@@ -59,7 +60,6 @@ REMASTER = "a 64-bit game folder, as Aspyr's Classic Collection is; only the ori
 UNKNOWN_FILE = "an unknown format; not read"
 LARGE = 64 << 20  # a file this big and unrecognized is somebody's game data, not a stray note
 MAX_DEPTH = 12
-MAX_CLASS_BYTES = 512 << 20
 LEVELS_ABOVE = 3  # GameData/Data/_LVL_PC: how far above its data a game folder's program sits
 
 
@@ -102,10 +102,10 @@ def xdvdfs_files(path):
                         continue
                     seen.add(at)
                     left, right, child_sector, child_size, attributes, name_size = struct.unpack_from("<HHIIBB", table, at)
-                    if left == 0xFFFF:  # the padding at the end of a sector
+                    if left == 0xFFFF and right == 0xFFFF:  # the padding at the end of a sector, as the bake reads it
                         continue
                     name = table[at + 14:at + 14 + name_size].decode("latin-1").lower()
-                    todo += [word * 4 for word in (left, right) if word]
+                    todo += [word * 4 for word in (left, right) if word and word != 0xFFFF]
                     if attributes & 0x10:
                         stack.append((prefix + name + "/", child_sector, child_size))
                     else:
@@ -189,26 +189,11 @@ def tree_platform(directory):
     return None
 
 
-def has_dlc_heroes(directory):
-    """Both DLC heroes defined by LVLs under here; found by their classes, whatever the files are called."""
-    found, budget = set(), MAX_CLASS_BYTES
-    for here, directories, names in os.walk(directory):
-        directories.sort()  # the budget below must end the same way on every filesystem
-        for name in sorted(names):
-            target = Path(here) / name
-            if read_head(target, 4) != b"ucfb":
-                continue
-            try:
-                budget -= target.stat().st_size
-            except OSError:
-                continue
-            if budget < 0:
-                return False
-            for class_name in content.entity_classes(target):
-                found.update(hero for hero in ("fisto", "ventress") if hero in class_name)
-            if len(found) == 2:
-                return True
-    return False
+def dlc_platform(directory):
+    """The format of the two DLC heroes' side LVL under here, or None: known by its classes and geometry, whatever the
+    files are called. The side the bake prefers when the folder holds both."""
+    platforms = {source.platform for source in dlc_inputs.detect_dlc(directory)}
+    return "ps2" if "ps2" in platforms else platforms.pop() if platforms else None
 
 
 def read_head(path, size):
@@ -267,8 +252,9 @@ def classify_readable_dir(directory, root):
         return refused(directory, f"an extracted Xbox {TITLE[game]} folder; add the disc image instead", game)
     addon = is_addon_script(content.ci_path(directory, "addme.script"))
     if addon or read_head(content.ci_path(directory, "CORE.LVL"), 4) == b"ucfb":
-        if has_dlc_heroes(directory):
-            return entry(directory, "dlc", "BF2 DLC folder holding Kit Fisto and Asajj Ventress", "bf2")
+        platform = dlc_platform(directory)
+        if platform:
+            return dict(entry(directory, "dlc", "BF2 DLC folder holding Kit Fisto and Asajj Ventress", "bf2"), platform=platform)
         if addon:
             return entry(directory, "addon", "a BF2 addon folder without the DLC heroes; not used", "bf2", "ignored")
         return refused(directory, "game data in no format this build reads (for example Aspyr's Classic Collection)")
@@ -325,7 +311,10 @@ def scan_root(root):
     for top in sorted(path for path in root.iterdir() if path.is_dir()):
         if top in named or any(top in path.parents for path in named):
             continue
-        if any(files for _, _, files in os.walk(top)):
+        platform = dlc_platform(top)  # the heroes' side file alone is still them, whatever the folder lacks or is called
+        if platform:
+            kept.append(dict(entry(top, "dlc", "BF2 DLC folder holding Kit Fisto and Asajj Ventress", "bf2"), platform=platform))
+        elif any(files for _, _, files in os.walk(top)):
             kept.append(refused(top, "a folder holding nothing this build recognizes (for example Aspyr's Classic Collection)"))
     return kept, strays
 
@@ -451,16 +440,21 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
         if not console or console["kind"] == "pc-install" or not console["verified"]:
             refusals.append(console_needed_message(xbox_on, where))
 
-    dlc = dict(present=False, path=None, used=False)
-    for index, row in enumerate(of_kind("dlc", "bf2")):
-        if index:
-            row.update(status="unused", reason=row["reason"] + f"; another copy is in use ({dlc['path']})")
-            continue
-        dlc.update(present=True, path=row["path"], used=dlc_on)
-        if dlc_on:
-            row.update(status="used", reason=row["reason"] + "; only those two heroes are taken")
+    dlc = dict(present=False, path=None, donor=None, used=False)
+    # PS2 geometry first, as everywhere; a PC copy beside it can still lend the heroes its larger textures.
+    copies = sorted(of_kind("dlc", "bf2"), key=lambda row: row.get("platform") != "ps2")
+    for index, row in enumerate(copies):
+        if not index:
+            dlc.update(present=True, path=row["path"], used=dlc_on)
+            if dlc_on:
+                row.update(status="used", reason=row["reason"] + "; only those two heroes are taken")
+            else:
+                row.update(status="not supported yet", reason=row["reason"] + "; recognized, not read")
+        elif dlc_on and not dlc["donor"] and copies[0].get("platform") == "ps2" and row.get("platform") == "pc":
+            dlc["donor"] = row["path"]
+            row.update(status="used", reason=row["reason"] + "; the two heroes' larger textures")
         else:
-            row.update(status="not supported yet", reason=row["reason"] + "; recognized, not read")
+            row.update(status="unused", reason=row["reason"] + f"; another copy is in use ({dlc['path']})")
 
     if refusals:
         for row in found:
@@ -544,6 +538,8 @@ def bake_env(plan):
             env["BF2_CONSOLE_ISO"] = gameplay["path"]
     if plan["dlc"]["used"]:
         env["OPENBF_DLC_DIR"] = plan["dlc"]["path"]
+        if plan["dlc"]["donor"]:
+            env["OPENBF_DLC_DONOR"] = plan["dlc"]["donor"]
     return {name: value.replace("\\", "/") for name, value in env.items()}
 
 

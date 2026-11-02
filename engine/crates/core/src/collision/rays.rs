@@ -347,16 +347,31 @@ impl CollisionWorld {
                 return;
             }
             let reach = (body.aabb.max - body.aabb.min).length() + 1.0;
-            let odd = |d: &&Vec3| crossings(body, p, d.normalize(), reach) % 2 == 1;
-            if ENCLOSE_UP.iter().filter(odd).count() >= 2
-                && ENCLOSE_SIDE.iter().filter(odd).count() >= ENCLOSE_SIDE_MIN
-            {
+            let odd = |d: &Vec3| crossings(body, p, d.normalize(), reach) % 2 == 1;
+            if at_least(&ENCLOSE_UP, 2, odd) && at_least(&ENCLOSE_SIDE, ENCLOSE_SIDE_MIN, odd) {
                 found = Some(body as *const Body);
             }
         });
         let hit = found?;
         self.bodies().iter().position(|b| std::ptr::eq(b, hit))
     }
+}
+
+/// Do `min` or more of `dirs` pass `test`? Stops at the first ray that settles it.
+fn at_least(dirs: &[Vec3], min: usize, test: impl Fn(&Vec3) -> bool) -> bool {
+    let mut passed = 0;
+    for (k, d) in dirs.iter().enumerate() {
+        if test(d) {
+            passed += 1;
+        }
+        if passed >= min {
+            return true;
+        }
+        if passed + (dirs.len() - k - 1) < min {
+            return false;
+        }
+    }
+    false
 }
 
 /// How many of `body`'s faces the segment `p + dir·[0, reach]` passes
@@ -1114,6 +1129,20 @@ mod tests {
         );
         // Target faster than the bolt, running away: unreachable.
         assert!(lead_point(Vec3::NEG_Z * 10.0, Vec3::NEG_Z * 100.0, 80.0).is_none());
+    }
+
+    #[test]
+    fn stopping_early_counts_the_rays_as_counting_them_all_does() {
+        for (dirs, min) in [(&ENCLOSE_UP[..], 2), (&ENCLOSE_SIDE[..], ENCLOSE_SIDE_MIN)] {
+            for mask in 0u32..1 << dirs.len() {
+                let test = |d: &Vec3| {
+                    let k = dirs.iter().position(|o| o == d).unwrap();
+                    mask >> k & 1 == 1
+                };
+                let all = dirs.iter().filter(|d| test(d)).count() >= min;
+                assert_eq!(at_least(dirs, min, test), all, "{mask:b}");
+            }
+        }
     }
 
     /// Card VMESH: a point inside a closed box mesh, and inside one open

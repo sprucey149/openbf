@@ -307,6 +307,23 @@ pub(super) fn pick(
     rd: &mut Round,
     nt: &mut NavTick,
 ) -> (Vec3, SteerPick) {
+    // Every heading tried below sweeps from this one pose.
+    sim.collision
+        .remembering_start_contacts(|| pick_heading(sim, u, want, low, aim, slide, side, rd, nt))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn pick_heading(
+    sim: &Sim,
+    u: &crate::unit::Unit,
+    want: Vec3,
+    low: f32,
+    aim: Vec3,
+    slide: &mut i8,
+    side: i8,
+    rd: &mut Round,
+    nt: &mut NavTick,
+) -> (Vec3, SteerPick) {
     let pos = u.soldier.pos;
     let dist = nav::xz_dist(pos, aim);
     // A commitment, and the nearest the walk has been, are for one aim

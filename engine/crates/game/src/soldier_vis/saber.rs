@@ -100,13 +100,17 @@ impl SoldierVisuals {
                 }
             }
         }
-        let db = match crate::roster::load_classdb(&root.join("classes"), "bf2", &factions) {
+        let classes = root.join("classes");
+        let mut db = match crate::roster::load_classdb(&classes, "bf2", &factions) {
             Ok(db) => db,
             Err(error) => {
                 eprintln!("saber classes: {error:#}");
                 return;
             }
         };
+        if let Err(error) = crate::dlc::load_classes(&classes, &mut db) {
+            eprintln!("saber classes: {error:#}");
+        }
         let mut cache = HashMap::new();
         let side = root.join("side_bf2");
         for (team, template) in teams.iter().enumerate() {

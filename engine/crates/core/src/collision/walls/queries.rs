@@ -1095,9 +1095,12 @@ fn xz_unit(n: Vec3) -> Option<Vec3> {
 /// The normal returned is the one the comparison was made with — the START
 /// contact's in the first regime, the END contact's in the second — and it
 /// points out of the body, at the mover (`push_out`'s `normal2`).
+///
+/// `end` is asked only in the second regime: a capsule deep in a dense mesh
+/// otherwise pays an EPA for an end contact that cannot change the answer.
 fn deepened_by_step(
     start: Option<parry3d::query::Contact>,
-    end: Option<parry3d::query::Contact>,
+    end: impl FnOnce() -> Option<parry3d::query::Contact>,
     dir: Vec3,
     dist: f32,
 ) -> Option<(f32, Vec3)> {
@@ -1108,10 +1111,80 @@ fn deepened_by_step(
         let n = out(start?);
         (pen0 - dist * dir.dot(n), n)
     } else {
-        let c = end?;
+        let c = end()?;
         ((-c.dist).max(0.0), out(c))
     };
     (pen1 > pen0 + SWEEP_CONTACT_DIST).then_some((pen1, n))
+}
+
+/// One contact's inputs, by exact bits: the capsule's half height, radius and
+/// centre (`Capsule::to_parry` makes it Y-aligned and places it by a pure
+/// translation), the triangle, and the body's pose. A contact is a pure function
+/// of these, so an entry cannot go stale whatever moves in the world.
+pub(super) type StartContactKey = ([u32; 5], [u32; 9], [u32; 7]);
+
+/// A bot's steering pick asks a dozen sweeps from the one pose, one per heading.
+/// The start contact of a triangle is the same for all of them, and from inside
+/// a dense mesh each is an EPA. Kept only inside
+/// [`CollisionWorld::remembering_start_contacts`] (the navigation flood asks
+/// each pose once and must not pay for this) and only when penetrating (the
+/// others are cheap). Only ever looked up: nothing iterates it.
+#[derive(Default)]
+pub(super) struct StartContacts {
+    pub(super) on: bool,
+    pub(super) deep: std::collections::HashMap<StartContactKey, parry3d::query::Contact>,
+}
+
+thread_local! {
+    pub(super) static START_CONTACTS: std::cell::RefCell<StartContacts> = std::cell::RefCell::default();
+}
+
+fn f32_bits<const N: usize>(v: [f32; N]) -> [u32; N] {
+    v.map(f32::to_bits)
+}
+
+impl CollisionWorld {
+    /// Run `f`, whose mesh sweeps share the start contacts they compute.
+    /// Changes no answer, only how often parry is asked.
+    pub fn remembering_start_contacts<R>(&self, f: impl FnOnce() -> R) -> R {
+        START_CONTACTS.with_borrow_mut(|memo| memo.on = true);
+        let r = f();
+        START_CONTACTS.with_borrow_mut(|memo| {
+            memo.on = false;
+            memo.deep.clear();
+        });
+        r
+    }
+}
+
+/// `contact` of a capsule with a mesh triangle at a sweep's start pose: see
+/// [`StartContacts`].
+fn start_contact(
+    shape: &parry3d::shape::Capsule,
+    iso: &Isometry,
+    body: &Body,
+    tri: &parry3d::shape::Triangle,
+    contact: impl FnOnce() -> Option<parry3d::query::Contact>,
+) -> Option<parry3d::query::Contact> {
+    START_CONTACTS.with_borrow_mut(|memo| {
+        let t = iso.translation.vector;
+        let (b, q) = (body.iso.translation.vector, body.iso.rotation);
+        let key: StartContactKey = (
+            f32_bits([t.x, t.y, t.z, shape.half_height(), shape.radius]),
+            f32_bits([
+                tri.a.x, tri.a.y, tri.a.z, tri.b.x, tri.b.y, tri.b.z, tri.c.x, tri.c.y, tri.c.z,
+            ]),
+            f32_bits([b.x, b.y, b.z, q.i, q.j, q.k, q.w]),
+        );
+        if let Some(c) = memo.deep.get(&key) {
+            return Some(*c);
+        }
+        let c = contact();
+        if let Some(c) = c.filter(|c| c.dist < 0.0) {
+            memo.deep.insert(key, c);
+        }
+        c
+    })
 }
 
 /// Test (b) of [`CollisionWorld::wall_sweep`] for one body: the XZ push normal
@@ -1153,6 +1226,7 @@ fn penetration_block(
             use parry3d::bounding_volume::BoundingVolume;
             let local_start = local_query_aabb(start_box, body);
             let local_end = local_query_aabb(end_box, body);
+            let remember = START_CONTACTS.with_borrow(|memo| memo.on);
             let mut best: Option<(f32, Vec3)> = None;
             for i in mesh.bvh().intersect_aabb(&local_query_aabb(swept, body)) {
                 let tri = mesh.triangle(i);
@@ -1168,9 +1242,15 @@ fn penetration_block(
                 };
                 let s = box_of
                     .intersects(&local_start)
-                    .then(|| at(start_iso))
+                    .then(|| {
+                        if remember {
+                            start_contact(shape, start_iso, body, &tri, || at(start_iso))
+                        } else {
+                            at(start_iso)
+                        }
+                    })
                     .flatten();
-                let e = box_of.intersects(&local_end).then(|| at(end_iso)).flatten();
+                let e = || box_of.intersects(&local_end).then(|| at(end_iso)).flatten();
                 let Some((pen1, n)) = deepened_by_step(s, e, dir, dist) else {
                     continue;
                 };
@@ -1195,7 +1275,7 @@ fn penetration_block(
                 .overlaps(&start_box)
                 .then(|| at(start_iso))
                 .flatten();
-            let e = body.aabb.overlaps(&end_box).then(|| at(end_iso)).flatten();
+            let e = || body.aabb.overlaps(&end_box).then(|| at(end_iso)).flatten();
             let (_, n) = deepened_by_step(s, e, dir, dist)?;
             if n.y <= -WALKABLE_MIN_NY {
                 // An overhang. `push_out` now pushes its horizontal part (card

@@ -181,7 +181,16 @@ pub fn ribbon_sides(points: &[(Vec3, f32, f32)], eye: Vec3, cam_up: Vec3) -> Vec
 }
 
 /// The triangles of one particle for this view.
-pub fn particle_vertices(d: &ParticleDraw, camera: &Camera) -> Vec<GrassVertex> {
+#[cfg(test)]
+fn particle_vertices(d: &ParticleDraw, camera: &Camera) -> Vec<GrassVertex> {
+    let mut out = Vec::new();
+    append_particle_vertices(&mut out, d, camera);
+    out
+}
+
+/// Append directly to the frame buffer: dense weather otherwise allocates and
+/// copies a six-vertex temporary for every flake on every frame.
+fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera: &Camera) {
     let right = camera.right();
     let up = right.cross(camera.forward()).normalize_or_zero();
     let color = [
@@ -190,14 +199,13 @@ pub fn particle_vertices(d: &ParticleDraw, camera: &Camera) -> Vec<GrassVertex> 
         gs_unit(d.color[2]),
         gs_unit(d.color[3]),
     ];
-    let mut out = Vec::new();
     match &d.shape {
         ParticleShape::Sprite {
             pos,
             half,
             angle,
             uv,
-        } => sprite(&mut out, *pos, (*half, *angle), *uv, (right, up), color),
+        } => sprite(out, *pos, (*half, *angle), *uv, (right, up), color),
         ParticleShape::Quad { pos, a, b } | ParticleShape::CutoutQuad { pos, a, b } => {
             let v = [
                 vtx(*pos - *a + *b, [0.0, 0.0], color),
@@ -236,7 +244,7 @@ pub fn particle_vertices(d: &ParticleDraw, camera: &Camera) -> Vec<GrassVertex> 
                 out.extend([a, b, c, c, b, e]);
             }
         }
-        ParticleShape::Beam(b) => out = crate::light_beam::vertices(b, d.color, camera),
+        ParticleShape::Beam(b) => out.extend(crate::light_beam::vertices(b, d.color, camera)),
         ParticleShape::Ribbon { points } => {
             let sides = ribbon_sides(points, camera.position, up);
             for i in 1..points.len() {
@@ -276,17 +284,58 @@ pub fn particle_vertices(d: &ParticleDraw, camera: &Camera) -> Vec<GrassVertex> 
             );
         }
         ParticleShape::Trail { sections, length } => {
-            out = trail::vertices(sections, *length, camera)
+            out.extend(trail::vertices(sections, *length, camera));
         }
     }
-    out
 }
 
 /// One thing to draw in the shared list: a bolt (its two ribbons) or a
 /// particle.
+#[derive(Clone, Copy)]
 enum Item<'a> {
     Bolt(&'a BoltDraw),
     Particle(&'a ParticleDraw),
+}
+
+/// Exactly `items.sort_by(|a, b| b.0.total_cmp(&a.0))`, stable and for every
+/// float, in linear time: dense weather sorts thousands of items a frame, and
+/// this comparison sort was the largest single CPU cost of a Hoth frame.
+fn sort_far_first<T: Copy>(items: &mut Vec<(f32, T)>) {
+    const BITS: u32 = 11;
+    const PASSES: u32 = 3;
+    const BUCKETS: usize = 1 << BITS;
+    // Below this the three bucket tables cost more than the sort.
+    if items.len() < 256 {
+        items.sort_by(|a, b| b.0.total_cmp(&a.0));
+        return;
+    }
+    // `f32::total_cmp`'s order as a u32, then reversed: ascending is far first.
+    let key = |d: f32| {
+        let b = d.to_bits() as i32;
+        let total = b ^ (((b >> 31) as u32) >> 1) as i32;
+        !((total as u32) ^ 0x8000_0000)
+    };
+    let digit = |d: f32, pass: u32| (key(d) >> (pass * BITS)) as usize & (BUCKETS - 1);
+    let mut counts = [[0u32; BUCKETS]; PASSES as usize];
+    for item in items.iter() {
+        for pass in 0..PASSES {
+            counts[pass as usize][digit(item.0, pass)] += 1;
+        }
+    }
+    let mut spare = items.clone();
+    for pass in 0..PASSES {
+        let mut at = 0u32;
+        for count in &mut counts[pass as usize] {
+            at += std::mem::replace(count, at);
+        }
+        let starts = &mut counts[pass as usize];
+        for item in items.iter() {
+            let slot = &mut starts[digit(item.0, pass)];
+            spare[*slot as usize] = *item;
+            *slot += 1;
+        }
+        std::mem::swap(items, &mut spare);
+    }
 }
 
 /// The view's bolts and particles, farthest first, merged into runs.
@@ -302,15 +351,13 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
         )
         .collect();
     // Stable: equal keys keep their order (spawn order within an effect).
-    items.sort_by(|a, b| b.0.total_cmp(&a.0));
+    sort_far_first(&mut items);
     let mut out = BoltFrame::default();
-    let push = |out: &mut BoltFrame, verts: Vec<GrassVertex>, tex, additive, solid, cutout| {
-        if verts.is_empty() {
+    let push = |out: &mut BoltFrame, first, tex, additive, solid, cutout| {
+        let end = out.vertices.len() as u32;
+        if first == end {
             return;
         }
-        let first = out.vertices.len() as u32;
-        out.vertices.extend(verts);
-        let end = out.vertices.len() as u32;
         match out.runs.last_mut() {
             Some(r)
                 if r.texture == tex
@@ -334,7 +381,9 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
         match item {
             Item::Bolt(b) => {
                 for (verts, tex, glow) in crate::bolt::bolt_vertices(b, camera) {
-                    push(&mut out, verts, tex, glow, false, false);
+                    let first = out.vertices.len() as u32;
+                    out.vertices.extend(verts);
+                    push(&mut out, first, tex, glow, false, false);
                 }
             }
             Item::Particle(p) => {
@@ -348,9 +397,11 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
                             | ParticleShape::Trail { .. }
                     )
                 {
+                    let first = out.vertices.len() as u32;
+                    append_particle_vertices(&mut out.vertices, p, camera);
                     push(
                         &mut out,
-                        particle_vertices(p, camera),
+                        first,
                         p.texture,
                         p.additive,
                         !p.additive && matches!(p.shape, ParticleShape::SolidMesh { .. }),
@@ -549,6 +600,88 @@ mod tests {
             assert_eq!(a.color, c.map(gs_unit));
         }
         assert_eq!(v[1].color, [0.25, 0.25, 0.25, 0.5]);
+    }
+
+    #[test]
+    fn a_beam_appends_without_replacing_preceding_particle_vertices() {
+        let cam = Camera::default();
+        let far = draw(
+            ParticleShape::Quad {
+                pos: Vec3::new(0.0, 0.0, -10.0),
+                a: Vec3::X,
+                b: Vec3::Y,
+            },
+            Vec3::new(0.0, 0.0, -10.0),
+        );
+        let mut beam = draw(
+            ParticleShape::Beam(crate::light_beam::Beam {
+                base: Vec3::new(0.0, 0.0, -5.0),
+                axis: Vec3::Y,
+                length: 3.0,
+                r0: 1.0,
+                r1: 0.5,
+                soft: 0.2,
+                visible: 100.0,
+                view: None,
+                gs_rgb: 1.0,
+                top: 0.25,
+                cross: None,
+            }),
+            Vec3::new(0.0, 0.0, -5.0),
+        );
+        beam.texture = None;
+        let frame = build(&[], &[far, beam], &cam);
+        assert_eq!(frame.runs.len(), 2);
+        assert_eq!(frame.runs[0].vertices, 0..6);
+        assert_eq!(frame.vertices[0].position, [-1.0, 1.0, -10.0]);
+        assert_eq!(frame.runs[1].vertices.start, 6);
+        assert!(frame.runs[1].vertices.end > 6);
+        assert_eq!(frame.runs[1].vertices.end as usize, frame.vertices.len());
+    }
+
+    /// The linear sort orders every float and every tie as the stable
+    /// comparison sort does: signed zeros, infinities and NaNs of both signs.
+    #[test]
+    fn the_far_first_sort_is_the_stable_total_order_sort() {
+        let mut seed = 0x1234_5678u32;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            seed
+        };
+        let special = [
+            0.0,
+            -0.0,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::NAN,
+            -f32::NAN,
+            f32::MIN_POSITIVE,
+            1e-42,
+            1.0,
+            4.0,
+        ];
+        for n in [0, 3, 255, 256, 257, 5000] {
+            let mut items: Vec<(f32, u32)> = (0..n)
+                .map(|i| {
+                    let r = next();
+                    let d = match r % 4 {
+                        0 => special[(r >> 8) as usize % special.len()],
+                        1 => f32::from_bits(r),
+                        2 => (r >> 20) as f32,
+                        _ => (r as f32 / u32::MAX as f32) * 40_000.0,
+                    };
+                    (d, i)
+                })
+                .collect();
+            let mut expected = items.clone();
+            expected.sort_by(|a, b| b.0.total_cmp(&a.0));
+            sort_far_first(&mut items);
+            let bits =
+                |v: &[(f32, u32)]| v.iter().map(|(d, i)| (d.to_bits(), *i)).collect::<Vec<_>>();
+            assert_eq!(bits(&items), bits(&expected), "{n} items");
+        }
     }
 
     /// Far first; equal keys keep their order; a run of one sheet and blend

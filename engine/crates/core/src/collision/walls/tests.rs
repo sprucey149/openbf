@@ -1162,3 +1162,109 @@ fn a_ceiling_contact_pushes_only_its_horizontal_part() {
     // Flat under the box: 0.2 m deep, straight down, no push.
     assert!(world.push_out(&cap(2.0)).length() < 1e-4);
 }
+
+/// Remembering a pick's start contacts changes no answer: from inside a dense
+/// mesh, on every heading and on the second asking, each sweep returns the same
+/// bits as with nothing remembered.
+#[test]
+fn remembered_start_contacts_answer_the_same_bits() {
+    let mut tris = Vec::new();
+    for k in 0..24 {
+        let (a0, a1) = (k as f32 * 0.2618, (k + 1) as f32 * 0.2618);
+        for j in 0..6 {
+            let (y0, y1) = (j as f32 * 0.4, (j + 1) as f32 * 0.4);
+            let p = |a: f32, y: f32| Vec3::new(0.3 * a.cos(), y, 0.3 * a.sin());
+            tris.push([p(a0, y0), p(a1, y0), p(a1, y1)]);
+            tris.push([p(a0, y0), p(a1, y1), p(a0, y1)]);
+        }
+    }
+    let world = world_from_triangles(tris);
+    let cap = Capsule {
+        base: Vec3::new(0.05, 0.1, 0.02),
+        height: 1.8,
+        radius: 0.4,
+    };
+    let headings: Vec<Vec3> = (0..16)
+        .map(|k| {
+            let a = k as f32 * std::f32::consts::FRAC_PI_8;
+            Vec3::new(a.cos(), 0.0, a.sin())
+        })
+        .collect();
+    let bits = |r: Option<(f32, Vec3, &crate::collision::Body)>| {
+        r.map(|(t, n, _)| [t.to_bits(), n.x.to_bits(), n.y.to_bits(), n.z.to_bits()])
+    };
+    let plain: Vec<_> = headings
+        .iter()
+        .map(|d| bits(world.wall_sweep_small(&cap, *d, 1.0, f32::INFINITY)))
+        .collect();
+    assert!(plain.iter().any(Option::is_some), "a block to compare");
+    for _ in 0..2 {
+        let remembered = world.remembering_start_contacts(|| {
+            let mut out = Vec::new();
+            for d in headings.iter().chain(&headings) {
+                out.push(bits(world.wall_sweep_small(&cap, *d, 1.0, f32::INFINITY)));
+            }
+            out
+        });
+        assert_eq!(remembered[..16], plain[..]);
+        assert_eq!(remembered[16..], plain[..]);
+    }
+}
+
+/// The key of a remembered contact holds the capsule's place and the body's:
+/// inside one scope, another pose or the same mesh placed elsewhere gets its own
+/// answer. And nothing outlives the scope.
+#[test]
+fn remembered_start_contacts_do_not_alias_poses_or_bodies() {
+    let mut tris = Vec::new();
+    for k in 0..24 {
+        let (a0, a1) = (k as f32 * 0.2618, (k + 1) as f32 * 0.2618);
+        for j in 0..6 {
+            let (y0, y1) = (j as f32 * 0.4, (j + 1) as f32 * 0.4);
+            let p = |a: f32, y: f32| Vec3::new(0.3 * a.cos(), y, 0.3 * a.sin());
+            tris.push([p(a0, y0), p(a1, y0), p(a1, y1)]);
+            tris.push([p(a0, y0), p(a1, y1), p(a0, y1)]);
+        }
+    }
+    let placed = |x: f32, z: f32| {
+        CollisionWorld::new(
+            vec![mesh_body_at(
+                &tris,
+                Mat4::from_translation(Vec3::new(x, 0.0, z)),
+            )],
+            Vec::new(),
+        )
+    };
+    let worlds = [placed(0.0, 0.0), placed(0.13, -0.07), placed(-0.11, 0.09)];
+    let caps = [(0.05, 0.02), (0.21, -0.04), (-0.09, 0.17)].map(|(x, z)| Capsule {
+        base: Vec3::new(x, 0.1, z),
+        height: 1.8,
+        radius: 0.4,
+    });
+    let sweeps = |out: &mut Vec<_>| {
+        for world in &worlds {
+            for cap in &caps {
+                for k in 0..16 {
+                    let a = k as f32 * std::f32::consts::FRAC_PI_8;
+                    let d = Vec3::new(a.cos(), 0.0, a.sin());
+                    let hit = world.wall_sweep_small(cap, d, 1.0, f32::INFINITY);
+                    out.push(hit.map(|(t, n, _)| {
+                        [t.to_bits(), n.x.to_bits(), n.y.to_bits(), n.z.to_bits()]
+                    }));
+                }
+            }
+        }
+    };
+    let held = || super::queries::START_CONTACTS.with_borrow(|m| (m.on, m.deep.len()));
+    let mut plain = Vec::new();
+    sweeps(&mut plain);
+    assert!(plain.iter().flatten().count() > 20, "blocks to compare");
+    let mut remembered = Vec::new();
+    worlds[0].remembering_start_contacts(|| {
+        sweeps(&mut remembered);
+        let (on, held) = held();
+        assert!(on && held > 0, "the scope remembers");
+    });
+    assert_eq!(remembered, plain);
+    assert_eq!(held(), (false, 0));
+}

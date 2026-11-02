@@ -213,7 +213,7 @@ def need(tool, why):
 
 # What a bake / the missions are made by: when any of it changes, the output is stale and is made again.
 BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py", "scripts/input_scan.py",
-               "engine/crates/bake/src/effect_names.txt", "engine/Cargo.toml", "engine/Cargo.lock")
+               "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "engine/crates/bake/src/effect_names.txt", "engine/Cargo.toml", "engine/Cargo.lock")
 MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py")
 # Kept in extracted/ (local, ignored by git): engine/missions/ is tracked in the dev tree.
 BAKE_STAMP = os.path.join(EXTRACTED, "bake_inputs.sha256")
@@ -518,6 +518,8 @@ def main():
         bake_inputs["xbox_" + g] = image
     if plan["dlc"]["used"]:
         bake_inputs["dlc"] = plan["dlc"]["path"]
+        if plan["dlc"]["donor"]:
+            bake_inputs["dlc_donor"] = plan["dlc"]["donor"]
     images_used, extracted_used = set(), set()
     full_bake = False
     need("cargo", "the Rust toolchain, https://rustup.rs")
@@ -578,7 +580,7 @@ def main():
     step("5/6 the bake")
     bash = find_bash()
     bake_env = dict(os.environ)
-    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR"):
+    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR"):
         bake_env.pop(name, None)  # the scan's choice is the whole story
     bake_env.update(input_scan.bake_env(plan))
     bake_env["OPENBF_INPUTS_CHOSEN"] = "1"  # rebake.sh need not scan again

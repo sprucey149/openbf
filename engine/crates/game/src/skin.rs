@@ -16,7 +16,22 @@ pub struct Skeleton {
     pub global_bind: Vec<Mat4>,
     /// Inverse of `global_bind` (model space → bone space).
     pub inverse_bind: Vec<Mat4>,
+    /// The tentacle joints [`Skeleton::sway`] moves; empty on every other body.
+    sway: Vec<SwayJoint>,
 }
+
+/// [ours] One tentacle joint: its chain and its place along it. No source has a
+/// clip for Kit Fisto's tentacles, so they get a small presentation-only sway.
+#[derive(Debug, Clone, Copy)]
+struct SwayJoint {
+    bone: usize,
+    chain: u32,
+    link: u32,
+}
+
+const SWAY_PREFIX: &str = "tentacle_bone_string_";
+/// Radians at each link out from the head; three links to a chain.
+const SWAY_REACH: [f32; 3] = [0.05, 0.09, 0.14];
 
 impl Skeleton {
     pub fn new(names: Vec<String>, parents: Vec<Option<usize>>, local_bind: Vec<Mat4>) -> Self {
@@ -24,7 +39,21 @@ impl Skeleton {
         assert_eq!(names.len(), local_bind.len());
         let global_bind = globals(&parents, &local_bind);
         let inverse_bind = global_bind.iter().map(Mat4::inverse).collect();
+        let sway = names
+            .iter()
+            .enumerate()
+            .filter_map(|(bone, name)| {
+                let number: u32 = name.strip_prefix(SWAY_PREFIX)?.parse().ok()?;
+                let index = number.checked_sub(1)?;
+                Some(SwayJoint {
+                    bone,
+                    chain: index / 3,
+                    link: index % 3,
+                })
+            })
+            .collect();
         Self {
+            sway,
             names,
             parents,
             local_bind,
@@ -35,6 +64,22 @@ impl Skeleton {
 
     pub fn len(&self) -> usize {
         self.names.len()
+    }
+
+    /// Lay the tentacles' sway over a pose, `t` seconds into this soldier's
+    /// life. Two slow, unrelated waves per chain, later links trailing the first,
+    /// so the chains drift apart instead of nodding together.
+    pub fn sway(&self, pose: &mut Pose, t: f32) {
+        for joint in &self.sway {
+            let Some(bone) = pose.0.get_mut(joint.bone) else {
+                continue;
+            };
+            let phase = joint.chain as f32 * 1.7 + joint.link as f32 * 0.6;
+            let reach = SWAY_REACH[joint.link.min(2) as usize];
+            let x = reach * (t * 3.1 + phase).sin();
+            let y = reach * 0.6 * (t * 1.9 + phase * 1.3).sin();
+            bone.rotation *= Quat::from_euler(glam::EulerRot::XYZ, x, y, 0.0);
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -219,6 +264,41 @@ impl Clip {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_bodys_tentacle_joints_sway_and_their_tips_most() {
+        let names = [
+            "bone_head",
+            "tentacle_bone_string_1",
+            "tentacle_bone_string_3",
+        ];
+        let skel = Skeleton::new(
+            names.iter().map(|n| (*n).to_owned()).collect(),
+            vec![None, Some(0), Some(1)],
+            vec![Mat4::IDENTITY; 3],
+        );
+        let angle = |pose: &Pose, i: usize| pose.0[i].rotation.to_axis_angle().1;
+        let mut peak = [0.0f32; 3];
+        for frame in 0..200 {
+            let mut pose = Pose::bind(&skel);
+            skel.sway(&mut pose, frame as f32 * 0.05);
+            for (bone, peak) in peak.iter_mut().enumerate() {
+                *peak = peak.max(angle(&pose, bone));
+            }
+        }
+        assert_eq!(peak[0], 0.0, "the head is the clip's");
+        assert!(peak[1] > 0.0 && peak[2] > peak[1], "{peak:?}");
+        assert!(peak[2] < 0.3, "a small sway: {peak:?}");
+
+        let retail = Skeleton::new(
+            vec!["bone_head".into(), "bone_string_1".into()],
+            vec![None, Some(0)],
+            vec![Mat4::IDENTITY; 2],
+        );
+        let mut pose = Pose::bind(&retail);
+        retail.sway(&mut pose, 1.0);
+        assert!(pose.0.iter().all(|b| b.rotation == Quat::IDENTITY));
+    }
+
     use super::*;
     use std::f32::consts::FRAC_PI_2;
 
