@@ -630,7 +630,7 @@ from the trace.
   lock_on_range, ordnance speed/gravity, fire_held, armed} — directly
   testable against §7 vectors and PCSX2 traces.
 - Cite constants as: 0.5/0.75/1.0 + clamps ← FUN_0025fea8; range/falloff ←
-  FUN_0025fea8 + class+0xd4 ← FUN_002864f0(0x7f012f70); acquisition ← §3
+  FUN_0025fea8 + class+0xd4 ← … acquisition ← §3
   (FUN_0025e098 + FUN_00241b98, 16.0, π/4); lead solver ← FUN_0026d3f0.
 - **Acquisition (card AIMF, 2026-09-28), what the port needs from §3:**
   1. A per-weapon-class `lock_on_angle` (rad), `extreme_range` (the ODF's
@@ -782,7 +782,7 @@ callers` and a `jal` / data-word scan agree (2 each). A dead soldier is skipped 
      player who is not local gets 20 m without a ray (B2:157418, 157442-157448). The flags are 0 and the count 1 in
      every BF2 state read (offline): the ray runs every frame. `_549` is set by ScriptCB_SetAmHost's helpers and by
      two session-object functions, one of them in a decomp hole (store at 0x40bc24) [verifier].
-6. **The aimer**: FUN_0026cdf0(O+0xa50, F, normalize(H − F)) (B1:115764-115788, 0x204e48-0x204eb4); B2 FUN_003018b8
+6. **The aimer**: … B2 FUN_003018b8
    (E+0x580, …) (B2:157460-157475). The setter stores the position at aimer+0x80 and +0x90 (B2 +0x80 and +0xa0), the
    direction at +0x50 and a "set from outside" flag (+0x2c; B2 byte +0x29) (B1:191127-191154); the aimer's own update
    returns at once while that flag is set (FUN_0026d748, B1:191808-191810), and FUN_0026cdf0's four callers are all in
@@ -921,7 +921,10 @@ FUN_001b6800, B2 FUN_001ce9f0) and six more functions that pass their own class'
 FUN_001d1fe8, FUN_001dbbd8, FUN_001eba60, FUN_0021b3a0 and the MountedTurret's FUN_00223850; B2 FUN_001ee668,
 FUN_001f99d0, FUN_00209758, FUN_0021ca80, FUN_00261208, FUN_0026cea0). [H] those are the vehicles' and turrets' aim
 updates, tilting their cameras the same way; their bodies were not read here (the port's seat camera is PROVISIONAL,
-FEEL_NOTES VSEAT).
+FEEL_NOTES VSEAT). Their collision origin is read (issue #71, `walk::vehicle_pull_height`): every controllable's camera
+goes through the same FUN_001b58f0 / FUN_001cef68, from its own section's +0x30 on the frame it passes. The class setters
+write that point on `GeometryName`: 0.9 of the model's vis box top for a hover or flyer, 0.8 for a walker. A droid's is
+(0, 0.15, 0) from its constructor, and a MountedTurret keeps the 1.5.
 
 ### 10.8 What the port does today, and what a build needs
 Today (`game/src/walk.rs` `WalkSim::camera`, `core/src/sim/step.rs`, `core/src/unit.rs`, `ui/src/hud.rs`): the camera

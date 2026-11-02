@@ -2545,7 +2545,7 @@ Summary in PLAN.md's Log under the 2026-09-01 entries. Verbatim below.
   → `analysis/re-ai-difficulty.md` §9; §8 items 1, 4, 8 struck). (1) **The AI
   view cone is a 77.5° half-angle [V] in both games**: `FUN_00539ed0` fills
   the BSS sin/cos table (2048 pairs, 2π/2048), `FUN_00539ff8` is its cosine,
-  `DAT_00697e38 = cos(1.35263 rad = 77.5°) = 0.21644`; the test is `d² < 100`
+  `… the test is `d² < 100`
   (10 m omni) else `dot > 0 && d²·c² < dot²`. BF1 has the same cone with NO
   10 m omni and a scan radius clamped 75..350 m. The Phase C design's [D]
   becomes [V]; 12.5° is ruled out. (2) **The level-3-only multiplier is the

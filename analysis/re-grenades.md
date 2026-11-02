@@ -649,23 +649,7 @@ position (+0x28), dir = normalise(second - first), origin = first - 0.1 dir, len
 origin + dir x length x f, f the fraction the collision world returns (`FUN_00161c60` 1585 -> `FUN_00163078`
 2587-2683). With mask bit 0x80 the world asks the terrain object (world+0xd0; vtable 0x61ed80, installed by
 `FUN_002568a8` 173211, registered by `FUN_001619f8` 1428) through slot +0x5c = `FUN_00256b58` (ELF word at 0x61eddc):
-```
-FUN_00256b58 (173311): f = FUN_0055fb38(0.1, 3.0, start, end); on f < 1 the normal = FUN_0055f2b0 at the hit's x, z
-FUN_0055fb38 (695628): |dx| < 0.001 and |dz| < 0.001 (a vertical ray, end lower):
-                           h = height(start); start under it -> 1.0; else the EXACT (h - y0) / (y1 - y0)
-                       else flag = start not under the terrain; FUN_0055f940(0.1, 3.0, start, end, &flag)
-FUN_0055f940 (695535): dx^2 + dz^2 > 3.0^2: split at the midpoint, first half (f x 0.5) else second (f x 0.5 + 0.5)
-                       else: the END under the terrain and the flag set -> FUN_0055f818(0.1, start, end)
-                             (end not under: flag = 1, 1.0; the flag is shared through the recursion)
-FUN_0055f818 (695446): lo = start, hi = end, f = 0, h = 0.5
-                       loop: |lo - hi|^2 <= 0.1^2 -> stop            (3-D)
-                             mid = (lo + hi) / 2; e = height(mid.x, mid.z) - mid.y
-                             e > 0.1 -> hi = mid
-                             e >= -0.1 -> stop
-                             else f += h; lo = mid
-                             h *= 0.5
-                       return f + h
-```
+*(decompiler excerpt omitted from the public copy)*
 So a ray that is not vertical is cut at the FIRST MIDPOINT of a bisection that lies within 0.1 m of the terrain's
 height, not at the crossing: a 1.058 m ray whose crossing is at 0.988 returns 0.75 (its midpoint at 0.75 is 0.080 m
 over the ground) and the grenade bounces from 0.18 m up; another returns 0.5 with the midpoint 0.006 m UNDER the
@@ -695,7 +679,7 @@ bodies after the terrain (model floors: not measured here); the down limit of th
 - The port's sweep now takes this terrain ray (`core::collision::ray_terrain_ps2`) on every map; bolts and the camera
   keep the exact crossing.
 - [V] The sweep's length is |second - first| + 0.2 FROM THE PULLED-BACK ORIGIN (B2 `FUN_00320de8` 313836-313919: the
-  origin is first - 0.1 dir and `FUN_00161c60` gets `a local + 0.2`), so the ray ends 0.1 m past the new position. The
+  origin is first - 0.1 dir and `FUN_00161c60` gets *(decompiler detail omitted)*), so the ray ends 0.1 m past the new position. The
   port ran it 0.2 m past (+0.3): that was §13.2's "port's own sweep" difference — one more contact on the level throw.
 - [M] The PS2 soldier's position is 0.020 m UNDER the terrain in all 15 throws (feet y -0.02 on terrain y 0: the kept
   2 cm of penetration, re-soldier-ground), and the launch point is 1.8183 over THAT; the port's feet stand on the

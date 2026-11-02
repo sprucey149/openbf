@@ -15,6 +15,7 @@ use game::viewer::{camera_from, upload_scene, GOLDEN_CAM};
 fn hud() -> ui::hud::HudModel {
     ui::hud::HudModel {
         gauge: Default::default(),
+        leaving: None,
         team_names: ["all".into(), "imp".into()],
         tickets: [147, 152],
         bleed: [0.0; 2],

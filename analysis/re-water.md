@@ -318,7 +318,7 @@ on it and builds the mesh **twice**:
 The 4th parameter is a grid STRIDE: inside `FUN_0048a6c8` the row index advances *(decompiler detail omitted)*
 (550687) and the column index *(decompiler detail omitted)* (550739), so stride 1 walks every point and stride
 `DAT_005648f0` every `LODDecimation`-th. `DAT_005648f0` is `LODDecimation`: it defaults to 2 (538252
-`DAT_005648f0 = 2;`), is overwritten from the `fx__` config at 538965, and is the divisor that makes the FLAT
+*(decompiler detail omitted)*), is overwritten from the `fx__` config at 538965, and is the divisor that makes the FLAT
 path's far grid at 550243. Both KAM1s author `OceanEnable(1)`, `PatchDivisions(16, 16)` and `LODDecimation(2)`
 (read off both discs with `lead_tmp/s17/re/fxwater.py`), so the pair is a 17×17-vertex mesh and a 9×9 one.
 Corroboration from a third place: `FUN_00489998`'s OCEAN branch sizes the shared packet for **both** meshes —
@@ -382,7 +382,7 @@ the clearest single piece of evidence:
 not). The ocean's loop is that loop with `a local` replaced by the stride-1 handle outright and the `CPAT`
 either/or dropped — so `FUN_0039cdc8` is the no-mesh fallback in both, not a second mesh, and on an ocean map
 it is unreachable anyway (`FUN_0048ac90` rewrites `DAT_005649c0` every frame). Note the decompiler drops the
-argument in the `CPAT` arm too (`FUN_0039b488(a local);` 551359, where the handle is `tile[+0x24]`) — the same
+argument in the `CPAT` arm too (`…` 551359, where the handle is `tile[+0x24]`) — the same
 Ghidra failure as the ocean's, which is why §3b reads the bytes rather than the C. **[V] [O]**
 
 **(c) The ocean's two passes are two RANGES, not two resolutions.** Both renderers take the same argument from
@@ -431,7 +431,7 @@ second, unidentified key `0xa015e2ff` writes **2** (538971/538974); the dispatch
 ocean) is unaffected, but "OceanEnable" is an incomplete label for the global. (3) **BF2's dispatcher carries a
 guard BF1 does not** — its ocean arm is `else if (DAT_0060beea != '\0')` where BF1's is a bare `else`, so the
 twins are structurally equal at every hop that matters here but not literally identical. (4) **`LODDecimation`
-is CLAMPED, not validated**: `if (DAT_005648e0 < DAT_005648f0) DAT_005648f0 = DAT_005648e0;` (538836, 538885)
+is CLAMPED, not validated**: `if (DAT_005648e0 < DAT_005648f0) …` (538836, 538885)
 caps it to the *unscaled* `PatchDivisions` — where the port instead REJECTS a `LODDecimation` that does not
 divide `PatchDivisions`. Moot once the port stops using the field, and recorded so the build can delete that
 check knowingly. (5) **None of the `fx__` key names is a string in either ELF** (`grep -aob "cean"` → 0 hits

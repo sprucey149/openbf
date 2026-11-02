@@ -36,7 +36,7 @@ mover. dt = the frame time. Tags as in `re-walker.md`; [O] = load-bearing and ve
 
 - **Class ids** are globals filled at static init with a name hash (`FUN_005393c0(0x689960, "EntityWalker")`, B2:184898),
   so `re_check.py writers` shows none. Each entity vtable holds its id getter at slot +0xc and a name getter at +0x10:
-  DAT_00689960 = EntityWalker (0x61f85c → 0x2675a8; "EntityWalker" at 0x61f1c8), DAT_006894f8 = EntityHover,
+  … "EntityWalker" at 0x61f1c8), DAT_006894f8 = EntityHover,
   DAT_00689300 = EntityDroideka, DAT_00689368 = EntityFlyer, DAT_0068c8f8 = MountedTurret, DAT_00689828 = EntitySoldier,
   DAT_00688f88 = EntityCarrier, DAT_00698110 = UnitController. (This also names `re-walker.md` §9's three [H] ids: C1
   ignores an EntityCarrier, C4 wants an EntitySoldier, C7's bit-6 damage wants an EntityFlyer.)
@@ -61,24 +61,7 @@ Reached only through the thunk FUN_00267038 (B2:184659), slot +0xcc of the walke
 CommandWalker's 0x62bc50. A per-entity task (vtable 0x61fa00, update FUN_001eab08) calls that slot; where it is filed is
 not found [H], but the order within a frame is measured (§10): **the mover sets the goal, the AI writes the sticks from
 the body matrix of the tick before, then the locomotion turns the body.**
-```
-A2  ai = FUN_002b6ad0(E+0x324); if FUN_002bbf00(dt, ai+0x430) == 0 or E+0x324 == 0: return     0x262274-0x26229c
-        (FUN_002bbf00 serves the mover's leave / seat-change requests; 0 = the unit left)
-A3  if E+0x170 < E+0x174·0.2 and (ai+0x5a0 & 3) == 0: FUN_002a95a8(E); return                  0x2622a0-0x2622f0  (§8)
-A5  yield = FUN_004240f8() < E+0x51c + 7.5;  E+0x2190 bit value 4 = yield                      0x2622f4-0x262338  (§8)
-A7  goal = yield ? {valid, M.pos, M.pos, M.fwd, 0, −1.0, 1.0} : copy of mv+0x20 (0x50 bytes)   0x262344-0x2623f0
-    aim  = copy of mv+0x70;  FUN_002bb1b0(dt, mv, aim)   (the trigger: fire buttons, tap logic) 0x2623f4-0x262418
-A8  if K+0xe18 bit 0 and normalize(goal.pos − M.pos)·M.fwd > 0.8660254:      (3-component; NOT gated on goal.valid)
-        FUN_002a54d8(dt, MaxSpeed, 0.4·MaxSpeed, MaxTurnSpeed, MaxPitchSpeed, ctl, goal, aim, &a, &b, &c, &d)
-            a, b, c, d preloaded with E+0x2dc, E+0x2e0, E+0x2e4, E+0x2e8
-        E+0x2dc = max(a, 0);   E+0x2e0 = −b                                                     0x26241c-0x262568
-        FUN_002a50c0(dt, MaxYawSpeed, MaxPitchSpeed, ctl, goal, aim, &c, &d, 1);  E+0x2e4 = c;  E+0x2e8 = d
-A9  else:
-        FUN_002a54d8(dt, MaxSpeed, 0, MaxTurnSpeed, 0, ctl, goal, aim, &a, &x, &b, &y)          0x26258c-0x2625e0
-            a = E+0x2dc, b = E+0x2e0; x, y are dead slots — the steering's TURN output is b
-        FUN_002a50c0(dt, MaxYawSpeed, MaxPitchSpeed, ctl, goal, aim, &c, &d, 1)
-        E+0x2dc = a;  E+0x2e0 = b;  E+0x2e4 = c;  E+0x2e8 = d                                   0x2625e4-0x26262c
-```
+*(decompiler excerpt omitted from the public copy)*
 K+0x748 MaxSpeed, K+0x75c MaxTurnSpeed (setter hash 0x5433f589, B2:183316), K+0x760 MaxYawSpeed, K+0x76c MaxPitchSpeed.
 - **K+0xe18 bit 0** (hash 0x55bc9af9, name not cracked) is tested nowhere else in the ELF (0x262420; the derive copies
   it at 0x263b6c). Default 0. On the discs it is authored by five BF2 classes only: imp_walk_atst (+_jungle, _snow),
@@ -91,26 +74,7 @@ K+0x748 MaxSpeed, K+0x75c MaxTurnSpeed (setter hash 0x5433f589, B2:183316), K+0x
 
 `(dt, fwdSpeed, strafeSpeed, turnRate, pitchRate, ctl, goal, aim, &throttle, &strafe, &turn, &pitch)`. Seven callers:
 the walker's two, the hover's FUN_00220528, and FUN_001f02e0, FUN_001fa4b0, FUN_0020b840, FUN_00249f80.
-```
-B1  hasStrafe = strafeSpeed > 0.0001
-B2  goal.valid == 0: throttle and strafe untouched; noGoal = 1; slowing = 1 → tail
-B3  d = goal.pos − M.pos, d.y = 0;  R = FUN_002a63e0(ctl);  inside = d.x² + d.z² < R²
-    slowing = inside and no active path follower (FUN_002ba8d8(mv) == 0)                        0x2a5590-0x2a5664
-B4  R: soldier / droid 0.5, hover class+0x670 · 0.5, every other kind 4.0 — a walker: 4.0 m     0x2a63e0-0x2a6484
-B6  throttle = 0, strafe = 0, noGoal = 1 when:  |d.x|, |d.z| < 0.0001;   or slowing and EntityWalker;
-        or slowing and EntityHover and !hasStrafe;   or d² < 0.04 and EntityDroideka            0x2a565c-0x2a576c
-B7  dir = normalize(d);  F = M.fwd flattened, unit;  cross = F × dir;  dot = F·dir
-    scale = slowing ? clamp(|d|/R, 0, 1) : 1          (a walker never reaches it: slowing stops it) 0x2a5770-0x2a58b4
-B8  hasStrafe:  a = dot/fwdSpeed;  b = −cross.y/strafeSpeed                                     0x2a58b8-0x2a5964
-        |b| < |a|:  strafe = (b/|a|)·scale;  throttle = a ≤ 0 ? −scale : scale
-        else:       throttle = (a/|b|)·scale;  strafe = b ≤ 0 ? −scale : scale
-B9  !hasStrafe: throttle = clamp(dot, 0, 1)·scale;  strafe = 0                                  0x2a5968-0x2a59e8
-        if !inside and EntityWalker and dot < cos 5°: throttle = 0
-            (FUN_00539ff8(0.0872665) = the engine's table cosine, ≈ 0.9961935)
-B10 tail: useAim = hasStrafe   (an EntityHover: slowing and hasStrafe, else bit 5 of mv+0xa8)   0x2a59ec-0x2a5afc
-        useAim or noGoal:  FUN_002a50c0(dt, turnRate, pitchRate, ctl, goal, aim, &turn, &pitch, 0)   (turn toward the AIM)
-        else:              FUN_002a45a0(dt, turnRate, pitchRate, ctl, &goal.pos, &turn, &pitch, droideka-flag)
-```
+*(decompiler excerpt omitted from the public copy)*
 cross.y = dir·X (X = up × fwd), so b > 0 when the goal lies toward −X.
 
 ## 4. A stick toward a point — FUN_002a45a0 (B2:225893-226210; 0x2a45a0-0x2a4cc8) [O]
@@ -149,7 +113,7 @@ with no target and the turn toward the target with one.
 
 - The move order is set by the mover's steering FUN_002f1d80 (B2:281390, BF1's FUN_0026aba8 twin) and by "stand"
   FUN_002ba810 (the unit's own position; bit 5 of mv+0xa8).
-- **Look-ahead.** For an EntityWalker the point is FUN_002a5fa8(**20.0**, m+0x10, m+0x20, M.pos) (B2:281244-281250); a
+- **Look-ahead.** For an EntityWalker the point is … a
   hover passes |velocity| (B2:281227-281243). FUN_002a5fa8(d, a, b, pos) (0x2a5fa8-0x2a60e4): with A, B = the segment's
   ends at the unit's height and u its direction, L = u·(pos − A) + d + 0.2; the point is A + u·L, or B once L passes the
   segment's end. RAM: both tauntauns' goals sat 19.476 m ahead = 20.2 less one tick's 0.724 m.
@@ -182,7 +146,7 @@ Port terms: s = n·right (right = fwd × up; s > 0 = the goal is to the right), 
   State 6 is entered by order type 2 (FUN_002ce648, soldier-only as far as traced) and by two messages in FUN_002cff60,
   one of them only for hover / walker with a clear ray 10 m ahead. **Which game situations send those is not traced [H].**
 - **Yield** [O]. FUN_0025c2b0 stamps E+0x51c = the mission time when the walker touches a class-8 body and
-  FUN_002a8c30(self, other) is true (B2:177324-177337); only the ctor (−100.0) and that site store it. FUN_002a8c30
+  … only the ctor (−100.0) and that site store it. FUN_002a8c30
   (0x2a8c30-0x2a8e88): the other is a walker or hover; false if self's radius > 3× the other's, true if the other's >
   3× self's; else both must be moving, and it is true iff (−n)·ds < n·do (n from self to other; ds, do the unit
   velocities) — the one running into the other's back yields. For 7.5 s the AI's goal is its own position: it stops and

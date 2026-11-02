@@ -1249,6 +1249,26 @@ fn a_droid_past_the_boundary_dies_when_the_countdown_ends() {
     }
 }
 
+/// The boundary tests what a member controls (`re-boundary.md` T2b): handed back
+/// outside, the countdown clears and the droid is left where it is.
+#[test]
+fn a_droid_handed_back_outside_is_not_counted_down() {
+    let (mut sim, _, _) = setup(true);
+    sim.boundary = square(20.0);
+    launch(&mut sim);
+    sim.droids[0].pos.z = -30.0;
+    run(&mut sim, PadState::default(), 1.0);
+    assert!(sim.droids[0].leaving.is_some(), "flown outside");
+    sim.droids[0].controlled = false;
+    run(&mut sim, PadState::default(), 8.0);
+    assert_eq!(sim.droids[0].leaving, None, "handed back");
+    assert!(sim.droids[0].alive());
+    sim.droids[0].controlled = true;
+    run(&mut sim, PadState::default(), 0.1);
+    let left = sim.droids[0].leaving.expect("flown again");
+    assert!(left > 6.0, "a new excursion: {left} s left");
+}
+
 #[test]
 fn coming_back_inside_clears_the_countdown_and_inside_it_never_starts() {
     let (mut sim, _, _) = setup(true);
@@ -1287,21 +1307,21 @@ fn the_invincibility_cheat_spares_the_players_droid_at_the_boundary() {
 }
 
 /// Where no ground lies under it (past the floors of BF2 MYG1 or UTA1, which have
-/// no terrain and no boundary) the stick has nothing to drive against: the droid
-/// falls and is destroyed at the world's floor, not far from where it left. It
-/// used to take `NO_GROUND` for ground and fly on 300 m under the map.
+/// no terrain and no boundary) the stick has nothing to drive against, and the droid
+/// is destroyed soon after, with no long fall. The PS2's goes on to y -500.
 #[test]
-fn a_droid_with_no_ground_under_it_falls_out_of_the_map() {
+fn a_droid_with_no_ground_under_it_is_soon_destroyed() {
     let drift = |pad: PadState| {
         let (mut sim, owner, _) = setup(true);
         sim.heightfield = None;
         launch(&mut sim);
         let start = sim.droids[0].pos;
         let feet = sim.unit(owner).unwrap().soldier.pos;
-        let (mut drift, mut events) = (0.0f32, Vec::new());
+        let (mut drift, mut events, mut alive) = (0.0f32, Vec::new(), 0usize);
         for _ in 0..(30.0 / TICK_DT) as usize {
             sim.step(&[pad]);
             events.extend(sim.events.iter().cloned());
+            alive += sim.droids.len();
             // The owner stands on something; only the droid is out over nothing.
             let u = sim.unit_mut(owner).unwrap();
             (u.soldier.pos, u.soldier.vel) = (feet, Vec3::ZERO);
@@ -1310,6 +1330,9 @@ fn a_droid_with_no_ground_under_it_falls_out_of_the_map() {
             }
         }
         assert_eq!(gone(&events), [DroidEnd::Destroyed]);
+        let secs = alive as f32 * TICK_DT;
+        let limit = crate::remote::ADRIFT_LIMIT;
+        assert!((secs - limit).abs() < 0.1, "it fell for {secs} s");
         drift
     };
     let (driven, coasting) = (drift(FORWARD), drift(PadState::default()));

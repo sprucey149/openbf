@@ -56,7 +56,7 @@ Scratch, tools, frames and sheets: `engine/artifacts/lead_tmp/re/terl/`. Convent
 ## 1. BF2's base pass (EE) [V][O]
 
 1. **The draw.** FUN_00571bd0 (B2 706418) runs per visible patch:
-   - builds a light set `FUN_00599040(box,4,1,1,0)` (706665) and calls `FUN_0056f208` (706666);
+   - builds a light set `…
    - FUN_00599040 has no other caller but FUN_005719f0 (706394), itself a terrain pass.
 2. **Per layer** (FUN_0056f208, 16 chains per patch):
    - The "lit" branch is taken only when the layer is the patch's top painted layer (+0x48) AND the set has a +0x94 light
@@ -128,7 +128,7 @@ Scratch, tools, frames and sheets: `engine/artifacts/lead_tmp/re/terl/`. Convent
     chain: no light set, no colour, no descriptor (548017–548081).
   - **BF1 has no lit branch on the terrain.**
 - **Baked into the chain.** The descriptor and colour are put in when a patch is built, by FUN_004852e0:
-  - `FUN_0039c1a8(ctx, 0x69c2e0, 0x54a5a0 ×3)` (547928, command 0x404);
+  - `…
   - `FUN_0039c4f8(ctx, 0x80808080, 0,0,0)` (547929, command 0x438; ELF 0x48554c `lui a1,0x8080 … ori a1,a1,0x8080`).
   - 0x69c2e0 = {0x100044, 0, 0x50000, 0x58}: FUN_00488bb8 549875, its only store; ELF 0x488bf4.
   - 0x54a5a0 = {0x300, 0, 0x30000, 0}.

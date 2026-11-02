@@ -198,7 +198,7 @@ GEO1's white-hot bunker strips are GLOW's self-lit MTRL 0x10 segments (`re-glow.
 
 - Callers include FUN_0057cf60 712783 and FUN_003c3520 420216.
 - **Gates** (715289–715290), each checked by the verifier for default and writers:
-  - DAT_0060c238 = 1 (ELF, no writer);
+  - …
   - the set holds an omni or a spot (asm 0x57fef0);
   - DAT_0060c250 < 2 (the view count; ELF 1) or DAT_0060c2ca == 0 (ELF 0; split-screen writers only).
 - **Filling the slots.** It sets VU flag 0x20 (715293) and fills up to 4 slots with the omnis' +0x64 records {packed

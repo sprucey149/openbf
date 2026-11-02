@@ -117,7 +117,7 @@ drawn bone hangs unwritten below a written node.
   FUN_002a2ef8 (B1:230833), runs in this order:
   - returns without drawing when its own slot-+0x30 test of E+0x558 fails (B1:128427-128430), or when any
     MountedTurret's test of T+0x2c8 fails (B1:128432-128443);
-  - each own aimer `FUN_0026ce10(A, frame, table, 1)` (B1:128485);
+  - each own aimer `…
   - each MountedTurret `FUN_002255b0` (B1:128496), which copies T+0x320 into whatever the turret node's entry points
     at (B1:138447-138482), then refreshes the turret's aimers (B1:138487-138495);
   - the model with the table (B1:128592-128593).

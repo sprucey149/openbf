@@ -64,7 +64,7 @@ independent verifier (section 10).
    distance". Keys (instance `FUN_0035bf08` 347490, class `FUN_0035c200` 347630; B2 `FUN_00441b48` 502399):
    `Sound` 0x0e0d9594 and `SoundStream` 0x2e93ef4c -> the name, `MinDistance` -> +4, `MaxDistance` -> +0xc AND +8.
 4. **[V] Start** `[O]`: B1 `FUN_0035bff8` (347528) calls slot +0x38 of every entity of the list; its only caller is
-   the battle-start function `FUN_0033e590` (328148), a few lines after `DAT_00519084 = 0` (328143; the game-over
+   the battle-start function `FUN_0033e590` (328148), a few lines after `… the game-over
    flag). B2 `FUN_00441948` (502297) <- `FUN_004241b0` (482059, after `DAT_00600b3c = 0` 482054).
 5. **[V] Static entity** (vtable 0x5474b8): start `FUN_0035ceb8` (348189): resolve the name and play it on the
    entity's handle at its position. Update `FUN_0035cf10` (348202): the handle update (a looping sound out of range

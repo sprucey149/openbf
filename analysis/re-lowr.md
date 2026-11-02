@@ -80,7 +80,7 @@ them (the strip restarts). So a port that masks with `& 0x7fff` and unstitches o
 data, and any reader that expects 0x4000 to mark alternate vertices will find none. [V] **UV generated**, no colour, no normal: `uv = ((x·k) & 0xffff) | ((z·k) << 16)`, `k = (extent/65536) · S58 ·
 2048 · (1/gu) / gridSize` (546211–546212; B2:703506–703507), S58 = obj+0x58 = `DAT_0069c2c8` = key 0x6d9b436e
 = **`TextureScale`** (preimage by hash), default 1.0 (269942; reset 545861/545886). Packet
-`FUN_00398928(pkt, n, verts, 0, uvs, 0, 0)` (546240; B2:703534). [V]  Disc: every LPTC has POSI+STRP (0 empty);
+`…
 per map 2 326–21 337 vertices, 4 458–42 970 indices; POSI u16 x,y,z min (0, 0, 255|511) max (65534|65535, ·, 65535).
 Dequantisation: the renderer sets the VU box to the SHEET box (549503; B2:706855). The VU maps u16/65536 over the
 box [D]: the PTCH path's box is padded by 1.0000153 = 65536/65535 (546004 `DAT_00522a18`), which only makes sense
@@ -117,7 +117,7 @@ and, per tile with bit 3 set, an `LPTC` through `FUN_00488f20` (538764–538767;
 consumer": INFO 6 f32 / POSI / STRP plus a 17×17 LCG table = the water tile's wave phases [D]). Its config
 `FUN_004763d0` (538852, called 369276) takes the water keys `Tile` 0x713a7cc9, `Velocity` 0x32741c32,
 `PatchDivisions` 0x9036eb, `WindSpeed`, `WindDirection`, `MainTexture`, `FoamTexture`, `LODDecimation`, `OceanEnable`
-(538912–538988, all by hash) and **`DisableLowRes` = 0xa01d9243 → `DAT_005229c4 = 0`** (538960–538961; default 1 at
+(538912–538988, all by hash) and **`DisableLowRes` = 0xa01d9243 → `… default 1 at
 538254; ELF 0x5229c4 = 01). `FUN_0048b9c0` (551182) scrolls its UVs (551367–551368) and, for the far call, takes the
 frustum `(NearSceneRange[1], 0.9·FarSceneRange)` (551290–551294; `DAT_00522a7c` = 0.9 in the ELF, `DAT_00677668` =
 `FarSceneRange` set from key 0x1192b7b 271104 → 540946). So BF1's far scene = the sheet (to MaxDistance) + the water's
@@ -127,7 +127,7 @@ low-res pass (to 0.9·FarSceneRange) + far-layer models; the heightfield ends at
 (`FUN_002e2888` 269917, built once at 269895) keeps +0xf4 (MaxDistance) across maps: a map whose scope omits
 `MaxDistance` inherits the previous map's authored value if any [D — same family as re-fog §8; not measured]. [V]
 **Corrected 2026-09-23 (cleanse): contradicted by the ELF.** 269885-269895 is `FUN_002e2810`, which allocates a
-FRESH 0x108 object (`FUN_004b31a0(0x108)`) and constructs it (`FUN_002e2888`); the `sky_` key dispatcher
+FRESH 0x108 object (`… the `sky_` key dispatcher
 `FUN_002e44d8` calls it at ~271240 whenever key 0xaf8bb8ce (`Enable`) has bit 0 set (as `re-fog.md` ~:65-66
 says). So a map that authors `Enable(1)` gets a new sky object and inherits nothing. [V — lines read by the
 lead; `[O]`].
@@ -144,7 +144,7 @@ Loader `FUN_0056bbf0` (B2:703226): reset `FUN_0056bb88` 703297 (703210–703221 
 `LPTC` 703440; POSI 703476–703481; STRP 703483–703486; UV 703506–703507 with `DAT_00661494` = 1/gu (694959) and
 `DAT_006613fc` = gridSize (694904); packet 703534; *(decompiler detail omitted)* (703295). [V]
 Driver `FUN_00571bd0` (706418; sky tick 426024 `FUN_0056b9a0(0x20000)` → 703098): under `(flags & 0x20000)` (706497),
-`if (DAT_0060c1c8 == 0 && FUN_0055db48() == 0) { FUN_00572458(obj); return; }` (706498–706501) — `DAT_0060c1c8` is a
+*(decompiler detail omitted)* (706498–706501) — `DAT_0060c1c8` is a
 debug variable (registered 707249), `FUN_0055db48` returns `DAT_0060bedd` = sky +0x2854 (694474–694488; written only
 0 at 416042). Otherwise (debug) the heightfield is drawn in the far scene to +0x50 (706502–706508). **So BF2's far
 terrain is the sheet alone** [V]. Renderer `FUN_00572458` (706715): gate 706768 (same), `FUN_005805b8` (706769–706771)

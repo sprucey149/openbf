@@ -139,7 +139,7 @@ Weapon class reader B1 `FUN_002864f0`, B2 `FUN_00328fb0` (the key is fnv1a-32 of
      (115353-115356);
   6. K+0x54 == 1 (the press) -> flag = toggle(weapon, flag), O+0xbf0 = 0 (115364-115367);
   7. class `ZoomRate` != 0 -> continuous zoom with the axis K+0x60 (115370-115371).
-- **BF2 `FUN_0023ead8(dt, E)`** (B2:156841-156913) [V]: 1 as BF1 (E+0x330, 156852); the weapon is E+0x7c0[the
+- **BF2 `… the weapon is E+0x7c0[the
   signed 4-bit field at bits 16-19 of E+0x7e0]; **the weapon's virtual at vtable +0x5c true -> flag 0** (156856-156861);
   (the view toggle on K2+0x58, 156864-156867;) `ZoomMax` <= 1.0 -> 0 (156880, 156908); channel bits 20-21 of E+0x7e0
   zero and weapon state 4, reloading -> 0, return (156881-156884); `(E+0x2c4 & 3) == 3` -> toggle (156891-156894);

@@ -205,7 +205,7 @@ Entity fields (BF1): velocity v +0x5f0, angular velocity ω +0x600 (x, yaw, z), 
    (B1:97668-97684) — on a BF1 speeder bike the stick's X turns. After the drive the aim angles clamp to the class limits
    (+0x17b8/+0x17bc yaw, PitchLimits pitch; B1:97725-97738).
 10. **Contact** (FUN_001ee708): a hull contact removes v's normal component and adds a horizontal-only rebound (y zeroed)
-    of DAT_00517810 = 0.1 (`re_check word`: f32 0.1; no text writers) when the normal speed < 0 and entity+0xac bit 3
+    of … no text writers) when the normal speed < 0 and entity+0xac bit 3
     is set (B1:100124-100151); a spring sphere's contact is ignored within that point's BodySpringLength
     (B1:100116-100121); impact damage (FUN_001ee3e0, header B1:99903): threshold t = CT0 + CT1·(n·up) + CT2·(n·fwd),
     damage = (s + t)²·(CS0 + CS1·(n·up) + CS2·(n·fwd)) when s < −t (B1:99947-99954), times a factor from the other body
@@ -354,7 +354,7 @@ Entity fields (BF1): velocity v +0x5f0, angular velocity ω +0x600 (x, yaw, z), 
   - [V] ρ = R + (DAT_00533090 − 0.15)·1.2 (0x20ba08-0x20ba6c; the decomp's folded `+ 0.6840001`, B1:120495): R is
     the sphere radius FUN_001645a0 returns for the entity the seat hangs on; DAT_00533090 = f32 0.72, no writer in
     the text (3 hits, all reads), the first of a {0.72, 0.45, 0.80} table [H: a soldier radius per stance].
-  - [V] Up ray: direction DAT_0066ef00 = (0, 1, 0) (B1:505277-505283), y += 5t − 0.1 (0x3dcccccd); down ray −up,
+  - [V] Up ray: direction … down ray −up,
     taken only when t < 1.0 (y −= 10t), then break. All 9 failing leaves the frame's origin (row 3, the position).
   - [V]/[H] The frame (FUN_001ac6f8, 0x20bba4-0x20bc28): row 1 = the entity's normalised +0x10 row (its UP — the
     candidates' y = 1 rides it), row 0 = up × b, row 2 = b made perpendicular to up, row 3 = position; b = the +0x20

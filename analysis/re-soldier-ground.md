@@ -54,7 +54,7 @@ Evidence: `engine/artifacts/lead_tmp/sthop/evidence/` (`fn_b1.txt`, `fn_b2.txt`,
 | ground normal N | s+0x960 | s+0x4b0 |
 | velocity / feet | s+0xa20 / s+0x230 | s+0x550 / s+0x150 |
 | axes | T1 = (s+0x200) × N, T2 = (s+0x220) × N, not normalised (119116–119119; 0x209cdc–0x209ce8) | T1 = (s+0x120) × N, T2 = N × T1, normalised when N.y < 0.99 (163010–163030; 0x248158–0x248164, 0.99 at 0x24813c) |
-| grounded only | removes the into-N part of v (119155); adds the in-plane part of (0, −0.4·Acceleraton·dt, 0) (119124–119150, 0.4 = DAT_005178a8) | removes the into-N part of v (162984–163000); the per-axis clamp window shifted by 18·dt·(−T1.y, −T2.y) (DAT_005fd0ac = 1.0); an uphill target is scaled by 1 − (uphill part)²/\|target\|² (163059–163066) |
+| grounded only | removes the into-N part of v (119155); adds the in-plane part of (0, −0.4·Acceleraton·dt, 0) (119124–119150, 0.4 = DAT_005178a8) | removes the into-N part of v (162984–163000); the per-axis clamp window shifted by 18·dt·(−T1.y, −T2.y) (… an uphill target is scaled by 1 − (uphill part)²/\|target\|² (163059–163066) |
 | slope scaling of the stick | both inputs × \|N.y\| (119113/119115; abs.s + mul.s at 0x209cbc–0x209cd4) | — |
 | acceleration | Acceleraton × 1.2; ×0.2 when not grounded; ×0.01 when N.y < 0.75 (119223–119232; stance 7: ×0.3) | Acceleration (× the caller's factor); ×0.1 when grounded and N.y < 0.7 (163053–163054); **no reduction when airborne** |
 | braking | only when grounded and N.y > 0.75, scaled by the caller's brake (119196–119212) | — |
@@ -103,7 +103,7 @@ the mover's +0x1c.
 For a contact on the soldier's **`coll_body_lower`**:
 
 - the body is BF1 class+0x1e80 per posture, BF2 class+0x1248 = fnv `0x9458fb2e`;
-- **normal.y > 0.6** (BF1 DAT_0051788c = 0x3f19999a; BF2 literal) with **approach dot(v, n) < 0.1** is a **floor**
+- **normal.y > 0.6** (BF1 … BF2 literal) with **approach dot(v, n) < 0.1** is a **floor**
   (BF1 114813, 114838; BF2 156134, 156159);
 - it sets the bit and N = n unless N is already as flat (BF1 114839–114846; BF2 156161–156166).
 

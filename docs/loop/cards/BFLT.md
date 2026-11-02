@@ -24,7 +24,7 @@ BF2 TAT2 (the port's `tat2`) authors it too (threshold 150).
 ## Evidence
 - `analysis/re-glow.md` §3 ([O], verifier SUPPORTED/PARTLY): keys (B1 FUN_002e29e0, BF2 FUN_003bcd50), the pass (B1
   FUN_0049fe60, BF2 FUN_00585890): downsample 2:1, subtract T, a sub-pixel blur, add I/128 of it; per-map values §3.2.
-- On the PS2 (SW, patched DAT_00522b5c = 0): TAT1 frame luma 144.5 on / 119.5 off; KAS2 72.1 / 65.7; BF2 TAT2 154.9 /
+- On the PS2 (SW, patched … KAS2 72.1 / 65.7; BF2 TAT2 154.9 /
   150.5; the model out = min(255, v + I/128·up2(max(0, box2(v) − T))) predicts the on-frame from the off-frame within
   mean |d| 1.6–3.9 (`lead_tmp/re/glow/ps2exp/simfilter.py`, sheets `ps2exp/sheets/bf1_tat1__nofilter.png`).
 - Applied offline to the port's 09-29 walk frames: TAT1 median dluma −12.8 → −0.1 (24 pairs); KAM1 −6.8 → +1.3; NAB2

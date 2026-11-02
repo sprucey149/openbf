@@ -121,7 +121,7 @@ Consequences [D]:
 | drop | it is the excluded post (never used by the Conquest goal) | 273766 |
 | drop | its value ≤ 0 | 273769-273772 |
 | drop | the member has a controller, a planning graph exists and `FUN_002ebf70(graph, controller, post position)` ≠ 1 | 273788-273808 |
-| weight | `FUN_002e87b8(post, team)`: relation toward the owner > 0 → `Value_DEF[faction]` (post+0xf8+4f); < 0 → `Value_ATK[faction]` (post+0xd8+4f); none → (ATK + DEF) × 0.5 | 273863-273930 |
+| weight | `… none → (ATK + DEF) × 0.5 | 273863-273930 |
 | draw | r uniform in [0, sum of weights); the first candidate, in list order, at which r ≤ the running sum | 273686-273698 |
 
 - **Pass 1** (only when pass 0 yields nothing): every scheduled post through the same drops — the team's own posts,

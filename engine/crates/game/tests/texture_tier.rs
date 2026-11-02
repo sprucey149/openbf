@@ -278,9 +278,11 @@ fn side_material_names(side: &Path, overrides: bool) -> std::collections::BTreeS
 /// gates on (`viewer::upload_texture_file` returns `None` — an untextured soldier — when
 /// `<name>.ktx2` is missing, whatever the tier).
 ///
-/// BF2 only: `scripts/rebake.sh`'s `side_donors` passes the PC side LVL of
-/// `all`/`imp`/`rep`/`cis`. No PC copy of BF1 exists here, so `side_bf1` must
-/// carry no override at all.
+/// How many overrides there are depends on which discs went in and on how old
+/// the bake is, so the counts below are floors: a bake with more donors has
+/// more, and the older bake's two sides without donors have none. The donors
+/// themselves are wired up in `scripts/rebake.sh`'s `side_donors`, which
+/// `bake/tests/suite/side_steps.rs` holds to its list.
 #[test]
 fn the_side_tier2_files_are_textures_the_soldier_path_asks_for() {
     let assets = baked_root();
@@ -344,45 +346,51 @@ fn the_side_tier2_files_are_textures_the_soldier_path_asks_for() {
             "missing cutter sheet {cutter}"
         );
     }
-    // The ALL and IMP sides' PC donors (largest copy wins) bring this to 53 and
-    // the class-skin count below to 11, measured on a whole `rebake.sh side`.
-    assert_eq!(
-        stems.len() - skin_stems,
-        53,
-        "side_bf2 tier-2 stems: {stems:?}"
+    // REP and CIS's PC donors alone gave 25 and 6 (measured on the bake of
+    // 2026-10-30). ALL and IMP's bring those to 53 and 11 (largest copy wins,
+    // measured on a whole `rebake.sh side` with a PC install and no Xbox disc).
+    // An ALL or IMP override marks the newer bake, which is then held to its
+    // own floor, so it cannot quietly lose the donors of another side.
+    let (own_floor, skin_floor) = if stems
+        .iter()
+        .any(|s| s.starts_with("all_") || s.starts_with("imp_"))
+    {
+        (53, 11)
+    } else {
+        (25, 6)
+    };
+    assert!(
+        stems.len() - skin_stems >= own_floor,
+        "side_bf2 has {} tier-2 stems, under {own_floor}: {stems:?}",
+        stems.len() - skin_stems
     );
     if !skins.is_empty() {
-        assert_eq!(
-            skin_stems, 11,
-            "side_bf2 class-skin tier-2 stems: {stems:?}"
+        assert!(
+            skin_stems >= skin_floor,
+            "side_bf2 has {skin_stems} class-skin tier-2 stems, under {skin_floor}: {stems:?}"
         );
     }
-
-    let names = side_material_names(&side, true);
-    for stem in &stems {
-        assert!(
-            names.contains(stem),
-            "{stem}.tier2.ktx2 is baked but no soldier or weapon GLB names it \
-             — nothing would ever load it"
-        );
-        assert!(
-            side.join("textures").join(format!("{stem}.ktx2")).is_file(),
-            "{stem} has a tier 2 but no PS2 base — upload_texture_file would \
-             return None and the mesh would draw untextured"
-        );
-    }
-    eprintln!(
-        "side_bf2: {} tier-2 overrides, all named by one of {} GLB materials",
-        stems.len(),
-        names.len()
-    );
 
     let bf1 = assets.join("side_bf1");
-    if bf1.join("textures").is_dir() {
-        assert!(
-            tier2_stems(&bf1.join("textures")).is_empty(),
-            "side_bf1 has a tier 2 — there is no PC copy of BF1 \
-             (scripts/rebake.sh:33-34)"
+    for (key, dir) in [("side_bf2", &side), ("side_bf1", &bf1)] {
+        let stems = tier2_stems(&dir.join("textures"));
+        let names = side_material_names(dir, true);
+        for stem in &stems {
+            assert!(
+                names.contains(stem),
+                "{key}: {stem}.tier2.ktx2 is baked but no soldier or weapon GLB names it \
+                 — nothing would ever load it"
+            );
+            assert!(
+                dir.join("textures").join(format!("{stem}.ktx2")).is_file(),
+                "{key}: {stem} has a tier 2 but no PS2 base — upload_texture_file would \
+                 return None and the mesh would draw untextured"
+            );
+        }
+        eprintln!(
+            "{key}: {} tier-2 overrides, all named by one of {} GLB materials",
+            stems.len(),
+            names.len()
         );
     }
 }

@@ -126,9 +126,9 @@ inst+0x124 / +0x164.
    then, if fade < 1, all four bytes × fade (truncated) (B1:202302).
 3. `FUN_004af910` / `FUN_005941b8` (box H ± 2(len + 3w)): the 16-bit vertex quantisation frame (+ BF1's near/far bucket);
    its result is not tested — no cull, no fade (asm 0x27c858–0x27c868; B2 0x31b6b0).
-4. **Core**: `FUN_004afac0(LaserTexture, 0)` / `FUN_00594270(tex, 0, 0)`; mode 4 (size w, point H); mode 5 (size w·0.5, point
+4. **Core**: `… mode 5 (size w·0.5, point
    H − dir·Lc); colour BF1 (255,255,255,(int)(fade·255)) (B1:202335–202353), BF2 (inst+0x44 RGB, (int)(+0x47·fade)) (309975).
-5. **Glow**: `FUN_004afac0(0x716bd81a "lightglow", 1)`; mode 4 (2w, H); mode 5 (2w·0.8, H − dir·Lg); colour G
+5. **Glow**: `… colour G
    (B1:202355–202367; B2:310006–310019, where G is also × inst+0x44/255).
 6. Both passes run whenever Lc, Lg ≥ 0 — always.
 

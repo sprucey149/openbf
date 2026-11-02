@@ -164,7 +164,7 @@ third branch are swapped in that section; the claim it rests on (all three reach
 ## 4. BF1 — the twin, opened (§5 self-check 3)
 
 - **[V][O] The same class label:** `soldier` at VA `0x005271a8` (`extracted/bf1/SWBFRONT.ELF`), registered
-  at lines 15579–15581 (`FUN_004b31a0(0x1e90)`, *(decompiler detail omitted)*, `FUN_0020d238(…)`);
+  at lines 15579–15581 (`…
   `FUN_0020d238` installs `&DAT_00532b20` at +0x1c (line 121778); the ELF word at VA `0x00532b30` (class
   vtable +0x10) is `0x002109e8`, and `FUN_002109e8` allocates `0xcc0` bytes and calls the instance
   constructor `FUN_001ff1e8` (line 123690).

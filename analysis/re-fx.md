@@ -255,7 +255,7 @@ Offsets: T = template, S = Spawner (T+0x7c), I = emitter instance, N = emitter-p
   wide**, textured (0,0)–(1,1). [D] An authored rotation in degrees turns the sprite 0.5652° per degree and snaps back
   180° every 318.47 units.
 - [V][O] **6.2 size′ = size × sizeMul, sizeMul = 1 + 0.2·clamp(lod, 1, 3)** (`FUN_002b8750` 245836–245846;
-  DAT_00518494 = 0.2, no writers) — every non-GEOMETRY particle is drawn at 1.2–1.6× its size; lod is §6.8's.
+  … lod is §6.8's.
 - [V][O] **6.3 ANIMATED** (BF1) is a **fixed 4×4 atlas**: u = (f & 3)/4, v = ((f >> 2) & 3)/4 (VU 0x7b9–0x7c6);
   FrameSize is never read (no load of T+0x1e4 in B1 240000–250000). BF1's one ANIMATED emitter (`a_sparks3`, 256²,
   FrameSize 4, 16 frames) is such a grid. BF2 reads FrameSize in texels — §8.
@@ -300,7 +300,7 @@ it up at spawn (H) in the effect table (B1 0x647d88, B2 0x71fc88). Full table: A
   water, 0x1000 shield → `ImpactEffectShieldSmall` / `Large` by target size < 16 (both setters write +0xfc — a PS2
   bug — so the ctor defaults `com_sfx_shieldimpact_sm/_xl` stand) (B2 304647–304744). Unauthored: B1 Terrain =
   'dirtspray', Water = 'watersplash_ord' (ctor 198246–198248).
-- [V][O] **Explosions** (B1 `FUN_002701a0` 193756–193807): visible if within **60 m** (`FUN_0019fc10(60.0, …)`); in
+- [V][O] **Explosions** (B1 `FUN_002701a0` 193756–193807): visible if within **60 m** (`… in
   water (pos.y ≤ water + 0.3, and DamageRadiusOuter +0x58 > 0) → `WaterEffect` + a ripple; else the explosion
   class's **`Effect`** at the blast matrix (193807); beyond 60 m only the effect's SoundName plays. BF2
   `FUN_0030c8f8` picks one of up to five `Effect` rows at random (AGENT_C 13).
@@ -406,7 +406,7 @@ per-particle draw `FUN_00377cc0`, cull/fade `FUN_0037a090`, state records `FUN_0
    object. `Looping` (0x7593992d) in B1: `FUN_003572e8` and `FUN_0046bc28` only (not the particle parser).
    `SetParticleLODBias`: only BF2 MISSION.LVL's pol1*/spa* scripts carry the string.
 3. **twin** — §8 (the helper's per-claim table in `AGENT_D_bf2twin.md`, lines re-run through `fn b2`).
-4. **word** — 'WhiteSmoke' @0x53f480; DAT_00518494 = 0.2, DAT_00518490 = 0.0; the keep table 0x518408 = {1111, 1110,
+4. **word** — 'WhiteSmoke' @0x53f480; … the keep table 0x518408 = {1111, 1110,
    1010, 1000}, the fade table 0x518448 = {0001, 0100, 0010, 0000}; 0.00314 = `lui 0x3b4d / ori 0xc875` at
    0x4b026c/0x4b0270; B2 0x5fea68 = 16.0; the GS records' immediates (`ori a1, a1, 0x4044 / 0x44 / 0x4048 / 0x48 / 0x40 /
    0x154`, `ori v0, v0, 0x1001` after `lui 0x5`, `addiu a3, zero, 88`); the ctor's `lui at, 0x4120 / 0x4248 / 0x40a0`;
@@ -489,7 +489,7 @@ BF1 KAS1 (`bf1_kas1`) showed three effects missing from the port: no splash wher
 - The wet test `FUN_004768f0` then sets in-water = pos.y ≤ h + 0.3 (193540).
 - Within 60 m and in water, with `DamageRadius` / `DamageRadiusOuter` (+0x58, one field) > 0, it runs:
   - a ripple `FUN_00478478`;
-  - `FUN_0037c920(+0x98 WaterEffect)` (193566);
+  - `…
   - `FUN_001a8740` (the spray pool, gated by `DAT_00517464`, which is 0 live).
 - In that branch there is no land `Effect` and no decal, light or effect sound (+0x90's sound plays only beyond 60 m, 193554).
 - With +0x58 ≤ 0 in water, nothing visual is spawned.

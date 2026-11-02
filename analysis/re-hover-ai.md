@@ -63,40 +63,7 @@ active path follower (`*(*(mv+0x1c)+0x10)`, 0 = none). Tags: [V] read at the cit
 
 Reached only through the thunk FUN_00224768 (B2:138369), slot +0xcc of the hover controllable vtable 0x61ca80 (word
 0x61cb4c) and of the commandhover family's (word 0x62b7e4).
-```
-H1  ai = FUN_002b6ad0(E+0x324); mv = ai+0x430
-    if FUN_002bbf00(dt, mv) == 0 or E+0x324 == 0: return                          0x220560-0x220588  B2:135597
-H2  if E+0x170 < E+0x174 · 0.2 and (ai+0x5a0 & 3) == 0: FUN_002a95a8(E); return   0x22058c-0x2205dc  B2:135604-135608
-        (the bail-out, re-walker-ai.md §8; the sticks are left as they were)
-H3  goal = copy of mv+0x20 (FUN_00224ed0);  k = 1.0                               0x2205e0-0x2205ec  B2:135612
-H4  the obstacle probe, when goal.valid and class(E+8)+0x330 != 0x10 (AISizeType HUGE):   0x2205f0-0x220900  B2:135614-135758
-        L = 1.5 · |E+0x4c0|   (the velocity: the entity's slot +0x4c returns it)  0x22060c-0x220670
-        if L > 5.0:
-            dir  = normalize(goal.pos.x − M.pos.x, 0.0001, goal.pos.z − M.pos.z)
-            side = (−dir.z, 0, dir.x)
-            t = FUN_00161c60(L, M.pos + (0, 1, 0), dir, …, &n, ignore {E, a second entity}, 2, 0x43b, 1)   0x220824
-            if t < 1.0:                                                           (a hit; n = its normal)
-                goal.pos += side · (L · 0.25)    if n·side > 0                    0x22083c-0x2208a4
-                goal.pos −= side · (L · 0.25)    otherwise                        0x2208a8-0x2208d8
-                goal.valid = 1;  k = 0.5                                          0x2208dc-0x220900
-H5  thr, str, trn, pit = E+0x2dc, +0x2e0, +0x2e4, +0x2e8                          0x220904-0x220934
-    aim = copy of mv+0x70 (FUN_001f2570);  FUN_002bb1b0(dt, mv, aim)   (the trigger)   B2:135766-135767
-    FUN_002a54d8(dt, K+0x670, K+0x678, K+0x680, K+0x688, ctl, goal, aim, &thr, &str, &trn, &pit)   0x220948-0x220978  B2:135769
-    E+0x2e0 = str                                                                 0x220980-0x220984  B2:135772
-H6  if K+0xe75 and mv+0xa8 bit 4 and |trn| > 0.0001:                              0x220988-0x220a14  B2:135773-135793
-        thr = thr >= 0 ? max(thr, 0.5) : min(thr, −0.5)
-H7  thr = thr · k                                                                 0x220a1c           B2:135796
-H8  state = E+0x584:                                                              0x220a18-0x220bb4  B2:135797-135859
-      0: if FUN_002ba940(mv) and missionTime > E+0x5a4 + 15.0: state = 1; E+0x590 = M.fwd
-      1: if E+0x590 · M.fwd < 0: state = 2; E+0x5a0 = missionTime
-         thr = −1.0; trn = 0.5
-      2: if missionTime > E+0x5a0 + 3.0: state = 0; E+0x5a4 = missionTime;
-             post an order of type 1 to the controller's own queue (FUN_002b6258(…, 1, …); queue vtable slot +0x30)
-         thr = 1.0; trn = 0.5
-      (the three tests run in this order in one call: 0 → 1 and 1 → 2 take effect in the same tick)
-H9  if |thr| < 0.1: trn = trn · 0.6                                               0x220bb8-0x220bf4  B2:135860-135863
-H10 E+0x2dc = thr; E+0x2e4 = trn; E+0x2e8 = pit                                   0x220bf8-0x220c18  B2:135864-135866
-```
+*(decompiler excerpt omitted from the public copy)*
 - **The probe's ray** [V] the arguments; [D] what it tests: mask 0x43b = the object layers 1, 2, 8, 0x10, 0x20, 0x400
   of `re-collision-layers.md` (soldiers 2, vehicles 8, buildings and props 0x10, riders 0x20) and NOT the terrain's
   0x80; the last argument 1 restricts a hit object to its ordnance bodies. It starts 1 m above the body's origin and

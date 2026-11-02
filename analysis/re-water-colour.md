@@ -89,7 +89,7 @@ VU[144..166] = the 23 qwords `FUN_0048c4f0` builds at 0x754a30 and uploads with 
   with SCS = `SpeckleCoordShift` (0x6ee80757 → DAT_00564988/5649a0, 550380); q2 VU[146] = (ĥx·10 − eye.x, −eye.y,
   ĥz·10 − eye.z, l̂.z); q3 = 0.
 - **The 10** is DAT_00564984, stored only by the reset `FUN_00489798` line 550211 (0x41200000) — one store, one load in
-  the ELF (verifier); BF2 DAT_0066168c = 0x41200000 at `FUN_00573b78` 707563; 10.0 in every state read.
+  the ELF (verifier); BF2 … 10.0 in every state read.
 - q4 VU[148] = `SpecularColor`/255 (551604–551608 from DAT_0069c358..35b; key 0x1e4aaf7 → 550359; BF2 0x76c138, 707709
   → 709047). q5 VU[149] = `SpeckleAmbientColor`/255 + 65536 (0xba5f7683 → DAT_0069c368, 550399); q6 VU[150] =
   `SpeckleSpecularColor`/255 (0xa6b274b0 → DAT_0069c360, 550395). Reset defaults (`FUN_00489798` 550214–550226):
@@ -99,7 +99,7 @@ VU[144..166] = the 23 qwords `FUN_0048c4f0` builds at 0x754a30 and uploads with 
 
 ### 1.5 The colour LUT and the vertex index (claims 5–7, SUPPORTED)
 - `FUN_0048d068` (header 551904): entry i ≤ 5 = Border + (Min − Border)·i/5; **i > 5 = Min + (Max − Min)·(i − 5)/5, so
-  entry 10 = Max and entry 15 = 2·Max − Min**; stored value/255 + 65536. DAT_00522a74 = 5 (ELF; never stored). BF2
+  entry 10 = Max and entry 15 = 2·Max − Min**; stored value/255 + 65536. … never stored). BF2
   `FUN_00577858` identical, DAT_0060c1f4 = 5. RAM (BF1 YAV1, Border 160 / Min 32 / Max 128), GS R column:
   80 67 54 41 28 16 25 35 44 54 64 73 83 93 102 112.
 - Each template vertex's word is `phase << 8 | (5 + r % 11)` (`FUN_00489f50` 550499–550500); the remainder is DIVU

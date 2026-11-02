@@ -1,6 +1,7 @@
-//! Issue #78: the HUD's ring and overheat signs read what the sim tracks, on foot
-//! and in a seat, in both games (`analysis/re-heat-hud.md`). The drawing is
-//! `hud_layout::the_heat_ring_and_its_overheat_signs_follow_the_gauge`.
+//! Issue #78: the HUD's heat and charge read what the sim tracks, on foot and in a
+//! seat: BF2's ring and signs, BF1's own bar (`analysis/re-heat-hud.md`). The drawing
+//! is `hud_layout::the_heat_ring_and_its_overheat_signs_follow_the_gauge` and
+//! `hud_layout::bf1s_bar_replaces_the_rings_and_follows_the_gauge`.
 
 use super::remote_droids::walk_of;
 use super::seat_camera::{map, missions_of};
@@ -36,6 +37,22 @@ fn class_where(game: &str, test: impl Fn(&ClassRoster) -> bool) -> Option<ClassR
     })
 }
 
+/// How hot or charged the first row reads, on whichever a game shows, and whether
+/// it reads locked. A BF1 map never has BF2's ring, signs or line.
+fn reading(walk: &game::walk::WalkSim) -> (f32, bool) {
+    let g = game::hud_feed::weapon_gauge(walk);
+    if walk.sim.ground_rules != core::soldier::GroundRules::Bf1 {
+        assert_eq!(g.panel, [None; 2], "BF2 has no bars");
+        return (g.ring, g.overheated);
+    }
+    assert_eq!((g.ring, g.refire, g.overheated), (0.0, 0.0, false));
+    match g.panel[0] {
+        Some(b) if b.color == [100, 200, 100] => (b.fill, false),
+        Some(b) => (1.0 - b.fill, b.color == [200, 100, 100]),
+        None => (0.0, false),
+    }
+}
+
 /// Fire until the weapon overheats, then let go until it clears. A pistol, which
 /// fires once a press, is tapped as the PS2 trials did: 3 updates on, 5 off.
 fn overheat(walk: &mut game::walk::WalkSim, what: &str, tap: bool) {
@@ -47,32 +64,33 @@ fn overheat(walk: &mut game::walk::WalkSim, what: &str, tap: bool) {
             PadState::default()
         };
         walk.step_tick(&[pad]);
-        let g = game::hud_feed::weapon_gauge(walk);
-        peak = peak.max(g.ring);
-        if g.overheated {
-            hot = Some(g);
+        let (value, locked) = reading(walk);
+        peak = peak.max(value);
+        if locked {
+            hot = Some(value);
             break;
         }
     }
     let hot = hot.unwrap_or_else(|| panic!("{what}: never overheated (peak {peak})"));
-    assert!(hot.ring > 0.9, "{what}: ring {} at the lock", hot.ring);
+    assert!(hot > 0.9, "{what}: {hot} at the lock");
+    let bf1 = walk.sim.ground_rules == core::soldier::GroundRules::Bf1;
+    let refire = game::hud_feed::weapon_gauge(walk).refire;
     assert!(
-        hot.refire > 0.0 && hot.refire < 1.0,
-        "{what}: refire {}",
-        hot.refire
+        bf1 || (refire > 0.0 && refire < 1.0),
+        "{what}: refire {refire}"
     );
     let mut cleared = None;
     for _ in 0..(30.0 / core::TICK_DT) as usize {
         walk.step_tick(&[PadState::default()]);
-        let g = game::hud_feed::weapon_gauge(walk);
-        if !g.overheated {
-            cleared = Some(g);
+        let (value, locked) = reading(walk);
+        if !locked {
+            cleared = Some(value);
             break;
         }
     }
-    let g = cleared.unwrap_or_else(|| panic!("{what}: never cleared"));
-    assert_eq!(g.refire, 0.0, "{what}");
-    assert!(g.ring > 0.0 && g.ring < hot.ring, "{what}: ring {}", g.ring);
+    let value = cleared.unwrap_or_else(|| panic!("{what}: never cleared"));
+    assert_eq!(game::hud_feed::weapon_gauge(walk).refire, 0.0, "{what}");
+    assert!(value > 0.0 && value < hot, "{what}: {value}");
 }
 
 #[test]
@@ -105,11 +123,7 @@ fn a_soldiers_hot_weapon_fills_the_ring_and_locks_in_both_games() {
         let held = &walk.sim.weapon_classes[me.weapon_class];
         assert!(hot(held), "{game} {}: holds {}", roster.class, held.name);
         println!("{game}: {} holds {}", roster.class, held.name);
-        assert_eq!(
-            game::hud_feed::weapon_gauge(&walk).ring,
-            0.0,
-            "{game}: cold"
-        );
+        assert_eq!(reading(&walk).0, 0.0, "{game}: cold");
         overheat(&mut walk, game, true);
     }
 }
@@ -132,20 +146,16 @@ fn a_held_charge_weapon_fills_the_ring_and_empties_on_release() {
         for _ in 0..ticks {
             walk.step_tick(&[FIRE]);
         }
-        let half = game::hud_feed::weapon_gauge(&walk).ring;
+        let half = reading(&walk).0;
         assert!((half - 0.5).abs() < 0.1, "{game}: half way: {half}");
         for _ in 0..ticks * 3 {
             walk.step_tick(&[FIRE]);
         }
-        let full = game::hud_feed::weapon_gauge(&walk).ring;
+        let full = reading(&walk).0;
         assert_eq!(full, 1.0, "{game}: held past MaxPressedTime");
         walk.step_tick(&[PadState::default()]);
         walk.step_tick(&[PadState::default()]);
-        assert_eq!(
-            game::hud_feed::weapon_gauge(&walk).ring,
-            0.0,
-            "{game}: released"
-        );
+        assert_eq!(reading(&walk).0, 0.0, "{game}: released");
     }
 }
 
@@ -222,11 +232,7 @@ fn a_seats_hot_gun_fills_the_ring_and_locks_in_both_games() {
             }
             let what = format!("{key} {} seat {seat}", m.build.classes[class]);
             println!("{what}");
-            assert_eq!(
-                game::hud_feed::weapon_gauge(&m.walk).ring,
-                0.0,
-                "{what}: cold"
-            );
+            assert_eq!(reading(&m.walk).0, 0.0, "{what}: cold");
             overheat(&mut m.walk, &what, false);
             m.walk.sim.unseat_unit(player);
             kinds.insert(want);

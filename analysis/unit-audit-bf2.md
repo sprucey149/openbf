@@ -392,7 +392,7 @@ rifle, the assault droid's launcher) → UWPN.
 | clone commander | 400 | 6.0 / 4.5 |
 | Wookiees | 800 | 6.0 / 4.5 |
 
-  All have turn 5.0, Acceleration 70, JumpHeight 1.78. The setter stores JumpHeight h as a jump velocity, `FUN_0052bc10(2h·18)` (170972–170976);
+  All have turn 5.0, Acceleration 70, JumpHeight 1.78. The setter stores JumpHeight h as a jump velocity, `…
   RAM holds 8.005 = sqrt(36 × 1.78), so the call is a square root [D]. The port's jump velocity is 8.0.
 - **ControlSpeed: GAP** [V; verifier V5].
   - The setter parses `ControlSpeed = <stance> f f f` (172005–172053, format '%s %f %f %f' at ELF 0x61e8b8).

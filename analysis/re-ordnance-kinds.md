@@ -194,7 +194,7 @@ then the bullet core (move, life) — no gravity anywhere
 ```
 Cites [V]: B1 ramp and turn B1:202941-202947; target check B1:202955-202963; aim and desired B1:202965-202979; axis,
 sqrt (`FUN_00435b30` = sqrtf), clamp and rotation (`FUN_00446050` = Rodrigues from the table sincos) B1:202982-203013;
-waver B1:203015-203108 (up = DAT_0066ef00 = (0, 1, 0), set by `FUN_00445fa8`); bullet core B1:203144. B2: ramp
+waver B1:203015-203108 (up = … bullet core B1:203144. B2: ramp
 B2:312658-312663, target check B2:312665-312672, aim B2:312676-312683, steering B2:312842-312872, waver
 B2:312881-312984, speed B2:312985-312988, velocity B2:312990-313005, core B2:313031 (lead re-opened the ramp, target,
 speed and velocity lines).

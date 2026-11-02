@@ -553,6 +553,16 @@ impl EventFeed {
         self.texts.weapon_name(class)
     }
 
+    /// The boundary's warning in the map's game's words (`re-boundary.md` T4).
+    pub fn leaving_text(&self) -> String {
+        const KEY: &str = "game.tooltips.leaving_battlefield";
+        let text = self
+            .texts
+            .map_text(KEY)
+            .or_else(|| self.texts.bf2_text(KEY));
+        text.map_or_else(|| "LEAVING BATTLEFIELD".to_owned(), |t| t.trim().to_owned())
+    }
+
     /// The two teams' names as the lines print them.
     pub fn team_names(&self) -> [&str; 2] {
         [&self.teams[0].0, &self.teams[1].0]

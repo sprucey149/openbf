@@ -162,6 +162,7 @@ fn hud_model(dead: bool) -> ui::hud::HudModel {
         weapon: None,
         weapon2: None,
         gauge: Default::default(),
+        leaving: None,
         reticle: None,
         target: None,
         reticle_y: 0.5,

@@ -12,7 +12,7 @@ And the two sheets are a 2D D-pad command menu on the PS2, not world markers.
 
 ## 1. Load-bearing citations
 1. **Squad menu group (BF1)**: ctor `FUN_002d81c8` B:264004–264069 (vtable 0x540b40; cross bitmap `FUN_004bba50` at +0x90 sized
-   64×64 by `FUN_004b5e28(64,64,…)`, four text `FUN_004ba288` + bitmap pairs at +0x130/+0x1f0 + i·0x150 sized 32×32); loader
+   64×64 by `… loader
    `FUN_002d84a0` B:264101–264130 (binds `squad_cmd_cross` to +0x90, `squad_cmd_highlight` to the four, positions from
    `DAT_00518888`); select `FUN_002d8698` B:264180–264204 (selected alpha 0xff, others 0x7f, timer +0x120 = 1.0, visible);
    fade `FUN_002d8628` B:264134–264147 (timer −= dt·`DAT_00518844`=0.5/s, group alpha byte = timer·255, hidden at 0).

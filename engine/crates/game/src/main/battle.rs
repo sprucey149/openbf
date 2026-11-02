@@ -410,6 +410,11 @@ pub(super) fn make_walk_with_counts(
                 walk.vehicle_weapon_hud = p.weapon_hud;
                 walk.walker_shot_styles = p.walker_shot_styles;
                 walk.load_walker_views(&scene.manifest, scene.dir.parent().unwrap_or(&scene.dir));
+                walk.load_vehicle_tops(
+                    &scene.manifest,
+                    &scene.dir,
+                    scene.dir.parent().unwrap_or(&scene.dir),
+                );
                 walk.vehicle_riders = p.riders;
                 walk.vehicle_engines = p.engines;
                 walk.vehicle_labels = p.labels;
@@ -524,6 +529,9 @@ pub(super) fn hud_model(
     // On foot the soldier's rows; flying, the droid's.
     let [weapon, weapon2] = game::hud_feed::weapon_rows(walk);
     let gauge = game::hud_feed::weapon_gauge(walk);
+    let leaving = droid
+        .is_some_and(|(d, _)| d.leaving.is_some())
+        .then(|| feed.leaving_text());
     let reticle =
         (on_foot || droid.is_some() || guided.is_some() || game::hud_feed::armed_seat(walk)).then(
             || {
@@ -564,6 +572,7 @@ pub(super) fn hud_model(
         weapon,
         weapon2,
         gauge,
+        leaving,
         reticle,
         // The reticle's pick by name and health (card HTGT).
         target: on_foot.then(|| feed.target(&walk.sim, slot)).flatten(),
@@ -788,6 +797,7 @@ mod tests {
             light: Vec::new(),
             scroll: Vec::new(),
             sphere: None,
+            vis_top: None,
         });
         let setup = BattleSetup {
             seed: 42,

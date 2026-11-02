@@ -54,7 +54,7 @@ the player's own post attacked), rows + frames + RAM; (6) the five `re_check.py`
   (B2:408171-408181) and stores the handles at 0x6a94bc..0x6a94d0 (+0x31c for player 2).
 - [V][O] No code sends them [receipt:2472aa51]. The legs, each attacked by two verifiers:
   (i) the decomp names the handle slots only in `FUN_003b0aa8` and in the release `FUN_003b1d50`
-  (B2:409266-409305, `FUN_003b00e0(handle, 3)`); every reference to the table in `.text` forms exactly its base
+  (B2:409266-409305, `… every reference to the table in `.text` forms exactly its base
   0x6a91f8 (51 sites) and the only loads at the six slots' displacements off it are those two functions;
   (ii) the six format strings are named only at B2:408171-408181 [receipt:98110821];
   (iii) an event is sent by building a value object with one of `FUN_003b0480` .. `FUN_003b0500` (the handle is

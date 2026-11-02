@@ -56,8 +56,12 @@ common pieces, in engines and shipped games since the PS3 era:
   The PS2 ghosts the trooper instead (`re-muzzle-flash.md` §7).
 - Unchanged: the gallery sheets' fixed framing (`CameraBlockers::pull_in` still stops at props: it draws nothing
   see-through), the PS2's in-at-once / out-at-0.75-per-second easing, the terrain sheet (pulled short of it, kept 0.3 m
-  off it on the side the camera is on), the droid camera's own target. A seat camera's track runs from the section's
-  (0, 1.5, 0) on its frame (card SEATCAM; a walker's still from its `TrackCenter`).
+  off it on the side the camera is on), the droid camera's own target. A seat camera's track runs from the section's point on
+  its frame, as on the PS2: 0.9 of the model's vis box top over a hover or flyer, 0.8 over a walker (written when the
+  class reads `GeometryName`), and the fixed (0, 1.5, 0) for a gunner's own turret and a building turret
+  (`walk::vehicle_pull_height`, issue #71). [ours] A pilot's point stops short of any wall or terrain between it and the fixed point, so a tall model's point cannot
+  put the camera past a hangar's sheet or a wall beside a banked flyer (`WalkSim::pull_point_on_own_side`). The droid camera's own target is still the port's: the PS2's droid section
+  has (0, 0.15, 0), B1 `FUN_001cb208`, B2 `FUN_001f0cf8`.
 
 The healing case: the player stands with his back against a health droid, the camera behind him in or behind the
 droid. The camera stays at its normal place (3.2 m back, 2.57 m up at the spawn pitch), looking where he aims, and

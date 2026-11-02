@@ -26,6 +26,7 @@ impl Renderer {
         target: Target,
         format: wgpu::TextureFormat,
         adapter_info: wgpu::AdapterInfo,
+        gpu_turn: crate::device::GpuTurn,
     ) -> Result<Self, RenderError> {
         // Bind group layouts: group 0 = globals uniform, group 1 = texture+sampler.
         // Shape from Hangar pipeline_m.rs `BindGroupLayouts`.
@@ -676,6 +677,7 @@ impl Renderer {
             time: 0.0,
             water_time: 0.0,
             adapter_info,
+            _gpu_turn: gpu_turn,
         })
     }
 }

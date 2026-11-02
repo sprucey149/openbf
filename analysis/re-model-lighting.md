@@ -100,7 +100,7 @@ darken, so BF2 lands above 1.
 - **`Static()` = light word 0, bit 8.** Set by FUN_00596978 (728642 → 728564; cleared at 728561).
 - **GlobalLights** (FUN_00596380):
   - Top and Bottom go to DAT_0060c6e8 + 0x50 / + 0x60, divided by 255 (728273, 728276).
-  - Light1 becomes DAT_0060c6e0 with fade DAT_0060c6f0 = 1.0 (728305–728306); Light2 becomes DAT_0060c6e4 with fade
+  - Light1 becomes DAT_0060c6e0 with fade … Light2 becomes DAT_0060c6e4 with fade
     DAT_0060c6f4 = 1.0 (728299–728300). Both fades are zeroed first (728288–728289) and have no other writer.
 - **Prelit model = any segment with 0x200.** The `modl` loader FUN_0057de00 sets model + 0x48 |= 1 (713705–713718).
 - **Per model and frame.** The draw FUN_0057cf60 builds the set with FUN_00597e98(…, model + 0x48 & 1, …) and uploads it

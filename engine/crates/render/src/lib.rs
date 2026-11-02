@@ -399,6 +399,9 @@ pub struct Renderer {
     /// Which GPU this renderer actually got. Reported by `--bench`, because a
     /// timing number without the adapter beside it means nothing.
     adapter_info: wgpu::AdapterInfo,
+    /// Held until every field above has dropped its share of the device, so
+    /// this field stays last.
+    _gpu_turn: device::GpuTurn,
 }
 
 /// Wrap period for [`Renderer::time`], in seconds. See that field for why

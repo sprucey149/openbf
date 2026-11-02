@@ -1,8 +1,5 @@
 //! Headless GPU smoke test. Ignored by default — needs a real adapter.
-//! Run with `scripts/gpu_tests.sh`, or by hand with
-//! `cargo test -p render -- --ignored --test-threads=1` — SERIALISED: the
-//! harness's parallel threads each create a wgpu device and that SIGSEGVs on
-//! the Intel iGPU driver (measured 2 of 3 runs).
+//! Run with `scripts/gpu_tests.sh`.
 
 use glam::Mat4;
 use render::{Camera, DrawCmd, MeshData};

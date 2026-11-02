@@ -25,7 +25,7 @@ All addresses are the Ghidra `FUN_00xxxxxx` names in the decomp files; line numb
 
 | Addr / global | Finding |
 |---|---|
-| `FUN_00341978` (main, line 329408) | `AddIntcHandler(2, 0x341ca0)` and `AddIntcHandler(3, 0x341ca0)` — INTC causes 2/3 = VBLANK start/end. Main loop: `do { FUN_00173778(); } while (…)`. Default argv0 `"frontline.elf"`. |
+| `FUN_00341978` (main, line 329408) | `AddIntcHandler(2, 0x341ca0)` and `AddIntcHandler(3, 0x341ca0)` — INTC causes 2/3 = VBLANK start/end. Main loop: *(decompiler detail omitted)*. Default argv0 `"frontline.elf"`. |
 | `FUN_00341ca0` (line 329525) | VBlank interrupt handler (`SYNC(0); EI();`). On cause 2 (vblank start, 59.94 Hz): `DAT_005190c4++` (frame counter), `DAT_005190cc++` (audio-tick counter). |
 | `FUN_00341e70` (line 329591) | **VSync wait**: `while (DAT_005190c4 - DAT_005190c8 < DAT_005190c0) SleepThread();` — blocks until `DAT_005190c0` vblanks elapsed. |
 | `DAT_005190c0` | Swap interval. Set to **2** in `FUN_002fdd40` (line 286937) and `FUN_002fdf70` (line 286965, replay teardown). Set to 1 or a config value (`DAT_005e9aa0`) only under the record/replay flags (`DAT_00518be4/be8`); set to 0 temporarily around line 253563 (loading). Retail gameplay = 2 → **29.97 fps cap**. |
@@ -42,7 +42,7 @@ All addresses are the Ghidra `FUN_00xxxxxx` names in the decomp files; line numb
 
 | Addr / global | Finding |
 |---|---|
-| main (line ~483430) | `AddIntcHandler(2/3, 0x427cd0)`; loop `do { FUN_00174a70(); } while(…)`; default argv0 `"Battlefront2.elf"`. |
+| main (line ~483430) | `AddIntcHandler(2/3, 0x427cd0)`; loop *(decompiler detail omitted)*; default argv0 `"Battlefront2.elf"`. |
 | `FUN_00427cd0` (line 483616) | VBlank handler: cause 2 → `DAT_00600b68++` (frame), `DAT_00600b70++` (audio). |
 | `FUN_00427e68` (line 483679) | VSync wait: sleep until `DAT_00600b68 - DAT_00600b6c >= DAT_00600b64`. |
 | `DAT_00600b64` | Swap interval. Default **2** (`FUN_003d5a90` line 432602; replay teardown `FUN_003d5cc0` line 432635). 0 during loading (line 382469); 1 or config `DAT_006d8660` only under record/replay flags (`DAT_00600548/549`). |

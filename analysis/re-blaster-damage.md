@@ -204,16 +204,7 @@ see re-stance-roll §3.4.
    spreadMag(pitch) = vtbl+0x44 = max(state,0) + postureBase + PitchSpread;
    spreadMag(yaw) = vtbl+0x40 = same with YawSpread (radians).
    Global: BF1 DAT_0066eed0, BF2 DAT_0073d870 (same LCG as stance/tumble rolls).
-4. Direction: `local = (sin(yaw)·cos(pitch), −sin(pitch), cos(yaw)·cos(pitch))`
-   rotated by the muzzle frame.
-5. Spawn packet: {muzzle pos, dir, charge fraction (weapon+0x140), owner
-   velocity/body fields, weaponClass, magnet target weapon+0x128 (validated
-   against +0x12c id) and aim-point hint +0x130}. Net split: offline/host →
-   real ordnance via weapon vtbl+0xc4 (BF1) → FUN_002762a0...; client →
-   visual-only FUN_00306820(class+0x5c ordnance, packet); host also sends a
-   net message (FUN_00287af8).
-6. View kick: if KickStrength ≠ 0:
-   `soldier.vcall294+0x74(KickStrength, ShotDelay × (1/class+0x228 + 2.0))`
+4. Direction: `local = (sin(yaw)·cos(pitch), −sin(pitch), cos(yaw)·cos(pitch))*(decompiler detail omitted)*soldier.vcall294+0x74(KickStrength, ShotDelay × (1/class+0x228 + 2.0))`
    (class+0x228 default 2.0 → duration 2.5×ShotDelay; key hash 0x069ad4d0,
    name uncracked). RecoilLength/Strength Light/Heavy are pad RUMBLE
    parameters (BF2 runs them via FUN_0043d948 timers in FUN_0032e200). [V]

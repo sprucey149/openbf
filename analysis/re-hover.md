@@ -592,7 +592,7 @@ Scripts and outputs are in `engine/artifacts/lead_tmp/hhul/`:
 | **pass: the vehicle list** (B1 layer 4, B2 layer 8) vs buildings + terrain | FUN_00163008: list +0x40 → FUN_00163240(mask 5), FUN_00163658(mask 8) (B1:2692-2693) | FUN_00163450: if DAT_005f87a0 == 0 (.data 0, no store in the ELF) → FUN_00163810(0xd), FUN_00163d08(+0x40, 0x10), FUN_00163d08(+0x54, 0x10) (B2:2785-2788) |
 | each sub-step: the terrain, then each candidate | terrain slot +0x18 (B1:3327), candidate via the mover's slot +0x18 (B1:3352) | terrain slot +0x58 (B2:3764), candidate via the mover's slot +0x2c (B2:3796) |
 | terrain collide | FUN_00212530 (word 0x533108) | FUN_00256a18 (word 0x61edd8) |
-| its gate | DAT_005229a8 = `TerrainEnable` (.data 1; 0 only on KAM1 / BES1, re-terrain-enable) (B1:124902) | DAT_0060bed4 (.data 0; set to 1 by the terrain loader FUN_0055db58 on its INFO chunk, B2:694898) (B2:173277) |
+| its gate | … 0 only on KAM1 / BES1, re-terrain-enable) (B1:124902) | DAT_0060bed4 (.data 0; set to 1 by the terrain loader FUN_0055db58 on its INFO chunk, B2:694898) (B2:173277) |
 | the mover's **terrain subset** | layer 0x40 (B1:124905-124907) | layer 0x80 → +0x120 (B2:173280-173282) |
 | pair each body with terrain body 0 | FUN_00167b40 (B1:124909) | FUN_00168288 (B2:173285) |
 | loop: per-body narrowphase → the mover's response → drop the pair | FUN_00167910 → slot +0x1c → FUN_00167ed0 (B1:124919-124925) | FUN_00168088 → slot +0x20 → FUN_001686a8 (B2:173295-173301) |

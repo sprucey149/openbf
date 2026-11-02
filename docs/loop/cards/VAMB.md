@@ -17,7 +17,7 @@ defer: post-alpha
 tries: 1
 ---
 ## Why
-BF1's light-set builder FUN_00493cf0 gives a NON-static model with a shadow volume (model +0xb8, the modl loader FUN_00497150 stores the shdw chunk there) DAT_0069c580 = SkyInfo VehicleAmbientColor (analysis/re-model-lighting.md §12, [O]). CAMB (landed) gave soldiers and held weapons CharacterAmbientColor; vehicles still take AmbientColor.
+BF1's light-set builder FUN_00493cf0 gives a NON-static model with a shadow volume (model +0xb8, the modl loader FUN_00497150 stores the shdw chunk there) … vehicles still take AmbientColor.
 ## Evidence
 re-model-lighting §12; mungefs::sky parses VehicleAmbientColor but bake::lighting drops it. No PS2 frame yet (the GEO1 0x69c580 patch had no vehicle in view).
 ## Build

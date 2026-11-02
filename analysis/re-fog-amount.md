@@ -57,7 +57,7 @@ Tags: [V] read at the cited line / measured, [D] derived, [H] hypothesis; load-b
 ## §2 The fog pass binds a texture named `fogspread` (both games)
 | hop | B1 | B2 |
 |---|---|---|
-| name → hash | `FUN_00444b88(&h, 0x558d98)` 549414 (`FUN_00488268`, the sheet); `FUN_00444b88(.., 0x55e348)` 594788 → `DAT_007015c0` 594789 (`FUN_004d0a08`, the model fog); `FUN_00444b88(.., 0x558e20)` 551406 (`FUN_0048b9c0`, far water) and 551045 (`FUN_0048b280`, the ocean: hash passed as the THIRD name, 551047) | `FUN_005393c0(&h, 0x64fc88)` 706800 (`FUN_00572458`, the sheet) |
+| name → hash | `… `FUN_00444b88(.., 0x558e20)` 551406 (`FUN_0048b9c0`, far water) and 551045 (`FUN_0048b280`, the ocean: hash passed as the THIRD name, 551047) | `FUN_005393c0(&h, 0x64fc88)` 706800 (`FUN_00572458`, the sheet) |
 | hash = FNV-1a over `byte \| 0x20` | `FUN_00444b30` 504365–504380 (basis 0x811c9dc5, prime 0x1000193) | `FUN_00539308` (same body) |
 | bind (sheet texture, fogspread, 0, 0) | `FUN_0049eb90` 549415 → `FUN_0049e4b8(9, …)` 562850; model 594618; far water `FUN_0049ec00` 551407 → mode 10 | `FUN_00585310` 706801 → `FUN_00584cb8(8, …)` 718227 |
 | each of the 4 names looked up as a TEXTURE | `FUN_0049e4b8` (562574): per name `FUN_0049e480` (per-mode cache) and `FUN_00444998(0x6ef408, 0x800, name)`, the global texture table that the segment draw also uses (`FUN_004cf6f0` 594267) for its texture; then `FUN_0049c5c8(…, tex, …)`, the TEX0 builder | `FUN_00584cb8`: `FUN_00539150(0x7c59d8, 0x800, name)` |

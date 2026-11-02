@@ -150,7 +150,7 @@ impact, mine, building and vehicle death — `re_check.py callers`, §9):
 **Splash** (B1 FUN_00221600, the vt+0x80 of 22 of the 23 damageable BF1 vtables, §9; B2 FUN_002690d0, 27 of 28):
 `centre = the object's collision sphere` (entity+0x110 or its copy in the cell table `*(+0x100) + 0x40 + 16·(+0x104)`),
 `f = falloff(|centre − pos|, Inner, Outer, obj)`, and if `f > 0` the desc's damage word is multiplied by f
-(B1:135656) and TakeDamage runs (B1 `FUN_001bc8e0(obj+8, desc, −1)` B1:135657 → FUN_001bc190(1.0, …); B2
+(B1:135656) and TakeDamage runs (B1 `… B2
 `FUN_001e0900(obj+0x170, …)`).
 **Falloff** (B1 FUN_00221530, B2 FUN_00268fe0):
 ```
@@ -343,7 +343,7 @@ corpse; riders inside the hull vanish with the vehicle.
    alive bit, calls slot +0xc of every **MountedTurret** seat (E+0x650.., count byte E+0x670, B1:96783-96791) and every
    **PassengerSlot** seat (E+0x640.., count byte class+0x2674, B1:96795-96803), then **FUN_0023ac68 on the driver's own
    seat** (E+0x2a0, B1:96806). The two seat kinds' slot +0xc (vtables 0x534310 / 0x534728, words 0x53431c = 0x2268a0
-   and 0x534734 = 0x2283c8) end in FUN_0023ac68(seat) too (B1:136981, 140007); it is the base Controllable's slot +0xc
+   and 0x534734 = 0x2283c8) end in … it is the base Controllable's slot +0xc
    (vtable 0x535f50, word 0x535f5c). The walker's (FUN_00217040, B1:128246-128336) and the flyer's (FUN_001d8398,
    B1:84349-84426) death functions run the same loops: **every vehicle kind**.
 3. **FUN_0023ac68(seat)**, a seat whose pilot kind seat+0xf0 is 2 (a soldier in a vehicle seat), offline

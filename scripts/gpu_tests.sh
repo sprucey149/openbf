@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Run every GPU-bound referee: the ignored `render` tests and the golden
-# check. SERIALISED — each test creates its own wgpu device and the harness's
-# parallel threads make that SIGSEGV on the Intel iGPU driver (2 of 3 runs
-# measured 2026-09-01). `OPENBF_ADAPTER=igpu|dgpu` picks the GPU.
+# check, one test at a time. `OPENBF_ADAPTER=igpu|dgpu` picks the GPU. Each
+# renderer also takes its turn at the GPU in code (render::device::GpuTurn).
 #
 #   scripts/gpu_tests.sh            # render GPU tests + goldens --check
 #   scripts/gpu_tests.sh --render   # only the render crate's GPU tests

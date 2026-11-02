@@ -1,4 +1,4 @@
-# LEAD VERIFICATION (Fable lead, 2026-09-03, session 12): re-read before acceptance — BF2 `FUN_00580500` 715498–715535 (`near < far` → the fog rows and `DAT_007c5764 = 1`, nothing else), the draw gate 723618–723636 (`(flags & 0x20020) == 0x20000` && `FUN_00589870` && `FUN_005805b8`), the FogColor store 416910–416930 (*(decompiler detail omitted)*) → `FUN_005804b0` 715474; BF1: the hash census (`0x23b1fce` at 270546 only, inside the LowResTerrain scope; `0xcf49a8d4` / `0xfaaa0e17` / `0xd6c706f2` absent from the BF1 decomp), the alpha stretch 270621–270623, the segment gate 594586–594594 (`(flags & 0x20) == 0` && `FUN_004a8090`), `Enable` 271237–271245 (bit 0 → `FUN_002e2810`); `fogspread` appears 12 times in each stringrefs file; no `= 0x3d` A+D write in the BF2 renderer range; the raw HOT1 sky_ records on both discs and BF1 KAS2/KAM1 dumped with the agent's `skydump.py` match §5/§6. Tags and text below are the RE agent's.
+# LEAD VERIFICATION (Fable lead, 2026-09-03, session 12): re-read before acceptance — BF2 `FUN_00580500` 715498–715535 (`near < far` → the fog rows and `… BF1: the hash census (`0x23b1fce` at 270546 only, inside the LowResTerrain scope; `0xcf49a8d4` / `0xfaaa0e17` / `0xd6c706f2` absent from the BF1 decomp), the alpha stretch 270621–270623, the segment gate 594586–594594 (`(flags & 0x20) == 0` && `FUN_004a8090`), `Enable` 271237–271245 (bit 0 → `FUN_002e2810`); `fogspread` appears 12 times in each stringrefs file; no `= 0x3d` A+D write in the BF2 renderer range; the raw HOT1 sky_ records on both discs and BF1 KAS2/KAM1 dumped with the agent's `skydump.py` match §5/§6. Tags and text below are the RE agent's.
 
 # RE: what ENABLES fog on the PS2, with which numbers, on which draws (BF1 + BF2)
 
@@ -21,7 +21,7 @@ directory), PLAN, HANDOFF, analysis/ touched; no cargo. Tags: [V] verified in de
    and the amount is that texture's alpha, not f. The GS lerps the stored 8-bit values. The PS2's frames put the port's
    linear-light fog ~20 levels too red on BF1 KAS2.
 2. **BF2 rule:** fog ON iff `SkyInfo.FogRange(near, far)` is authored with **`near < far`** (`FUN_00580500` 715503 sets
-   `DAT_007c5764 = 1`; nothing else does). Colour = `SkyInfo.FogColor` RGB, **4th component ignored**. No placeholder
+   `… nothing else does). Colour = `SkyInfo.FogColor` RGB, **4th component ignored**. No placeholder
    filter is needed: black is legal (KAM1, TAT3), `0..0` is off (GEO1, KAS2, POL1). Applies to **far-scene draws only**
    (world models, terrain, low-res terrain in layer 0x20000, i.e. beyond `NearSceneRange[2]`); **never** to near-scene
    draws and **never** to sky shells / the base dome (flag 0x20 excludes them). Maps with `FarSceneRange(0)` (END1,
@@ -124,7 +124,7 @@ the matrix getter `FUN_00589c60` (706811, 708486, 708889, 723666) are the comple
 | BF2 site | what | gate |
 |---|---|---|
 | `FUN_0058ed70` 723621–723677 (model segment draw, RedModel vtable slot 3 `FUN_0057cf60` → 712870/712920/712952) | adds `fogspread` as program slot 1/2, mode 9 (723634) | **`(flags & 0x20020) == 0x20000`** (far-scene layer AND not sky) && `DAT_0060c2c7` (`FUN_00589870`) && **`DAT_007c5764`** (`FUN_005805b8` 723622) |
-| `FUN_00575fd8` 708590 (terrain) far pass *(decompiler detail omitted)* 708405–708460, and the animated layer 708831–708860 | `FUN_00585380` = `FUN_00584cb8(9, layer, fogspread)` | far pass only (`FUN_005755b0` 708251 calls it with `((flags>>17)^1)&1`); no fog-flag test (zero rows) |
+| `FUN_00575fd8` 708590 (terrain) far pass *(decompiler detail omitted)* 708405–708460, and the animated layer 708831–708860 | `FUN_00585380` = `… no fog-flag test (zero rows) |
 | `FUN_00575670` 708279 (alternate terrain path, `DAT_00661490`) | same | same |
 | `FUN_00572458` 706715 (**low-res terrain**, object `0x76c010`: +0x50 = `DAT_0076c060` MaxDistance, +0x54 = `DAT_0076c064` texture; driver `FUN_00571bd0` 706418 from `FUN_0056b9a0` 703098) | `FUN_005849f0` mode 8 plain (706772–706795) or `FUN_00585310` = mode 8 + fogspread (706800–706852) | drawn only when `(flags & 0x20000)` (706497–706499); fogspread only when `FUN_005805b8()` (706771) |
 | `FUN_0045ae80` 519989 (520075/520170/520313) | weather/lightning effect: saves, brightens, restores the fog colour | — |

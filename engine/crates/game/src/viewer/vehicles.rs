@@ -22,7 +22,7 @@ use super::look::far_cull;
 use super::scene::{draw_in, spec_cull};
 use super::upload::{upload_cpu_texture, upload_submeshes, upload_texture_file};
 use super::walker_pose::{skin, WalkerRig};
-use crate::assets::{load_glb_joints, load_skinned_glb, CpuMesh, Scene};
+use crate::assets::{load_glb, load_glb_joints, load_skinned_glb, CpuMesh, Scene};
 use anyhow::Result;
 use glam::Mat4;
 use render::{
@@ -508,6 +508,31 @@ pub fn walker_rigs(
                         .unwrap_or_default(),
                 ),
             ))
+        })
+        .collect()
+}
+
+/// The top of each class's model, for its camera's pull point
+/// ([`crate::walk::vehicle_pull_height`]), parallel to `geometry`: the vis box's top,
+/// or on a bake older than it the highest vertex, which can stand several metres
+/// lower. `None`: a class with no model.
+pub fn model_tops(
+    manifest: &manifest::Manifest,
+    map_dir: &Path,
+    assets_dir: &Path,
+    geometry: &[Option<String>],
+) -> Vec<Option<f32>> {
+    let sides = VehicleSides::load(assets_dir, &manifest.source_game.to_ascii_lowercase());
+    geometry
+        .iter()
+        .map(|g| {
+            let (dir, model) = match find_model(manifest, &sides, g.as_deref()?)? {
+                ModelSource::Map(model) => (map_dir, model),
+                ModelSource::Side(i, model) => (sides.dir(i), model),
+            };
+            let mesh = load_glb(&dir.join("models").join(format!("{model}.glb"))).ok()?;
+            mesh.vis_top
+                .or_else(|| mesh.positions.iter().map(|p| p[1]).reduce(f32::max))
         })
         .collect()
 }

@@ -86,7 +86,7 @@ The frame read from the SW state's VRAM before the composite (`maskonly_nosoft`,
 - Parser FUN_00455f30: Enable 0xaf8bb8ce, DownSizeFactor 0x7e6c7187, GlowFactor 0xac9eee97, NumBloomPasses 0xd4ef5803
   (int), MaxTotalWeight 0xeafd07ed, GlowThreshold 0xb12c9b1f; a later key overrides an earlier one.
 - Enable → FUN_00456098: registers the pass (FUN_00451678, while DAT_00601284 = 1 in a level) and sets the scale 0.5.
-  **Split screen forces it off** (FUN_00563f78() > 1, 516709–516712); the reflection render turns it off around itself
+  **Split screen forces it off** (… the reflection render turns it off around itself
   (FUN_00386480, 382827).
 - The disc (`hdr_census.py`; RAM confirms on 7 maps): Enable(1) on COR1 DEA1 FEL1 GEO1 HOT1 KAM1 KAS2 MUS1 MYG1 NAB2 POL1
   TAN1 UTA1 (+ the space maps); **not** on DAG1 END1 TAT2 YAV1. Authored values:
@@ -155,7 +155,7 @@ and the bloom switch together (frame luma: both on 99.7, no glow 82.8, no bloom 
 | BF2 | COR1 MUS1 (GAL1) | 0 | — | — |
 (TEST.LVL: Threshold 90, Intensity 40.)
 
-### 3.3 Measured (patched DAT_00522b5c / DAT_0060c2c9 = 0; `simfilter.py`) [V]
+### 3.3 Measured (patched DAT_00522b5c / … `simfilter.py`) [V]
 | state | frame luma on / off | model (from the off frame) mean\|model − on\| | reload noise |
 |---|---|---|---|
 | BF1 TAT1 cp3_cp2 | 144.5 / 119.5 | 2.7 (+2 bias) | 0.4 |
@@ -184,7 +184,7 @@ from B1; BF1's 0x10 is "two floats follow", `re-material-flags.md` §2) and no s
 blending), waits 8 s, saves; the saved state's `GS.bin` (VRAM at byte 425) holds the frame (TBP 0x1000, 512×448) with its
 alpha, read by `gsmem.py`. Variants: noglow (0x58f354 → always skip the override), nounsc (0x58f118 `andi 0x14` → 0),
 nobloom (GlowThreshold 4.0), none; maskonly (0x46661c `jal FUN_0058b9a8` → nop: the true half-scale frame + the raw mask);
-_tNN thresholds; alphaonly / colouronly (the override's halves); _nosoft (DAT_0060c2dc = 0); nofilter.
+_tNN thresholds; alphaonly / colouronly (the override's halves); _nosoft (… nofilter.
 - Two controls per state; COR1, MUS1 and POL1 moved between loads (droid text, embers, a drifting camera) — POL1's
   skylight left the view, so POL1 and UTA1 are **not measured** here.
 - **HW Basic** (the reference library's renderer) matches SW here: MYG1 ctl mean |d| 1.9 (luma 101.2 vs 99.7), TAT1

@@ -17,7 +17,9 @@
 //! Card BMAP's: the minimap is drawn from the golden camera, or from
 //! `HUD_MAP_EYE="x,z,heading degrees"` (re-hud-map's eye and θ).
 //! Issue #78's: `HUD_HEAT=0.5` lights the ring, `HUD_REFIRE=0.75` overheats the
-//! weapon, with the line and the red bits.
+//! weapon, with the line and the red bits. `HUD_BF1_HEAT=0.5` shows BF1's bar in
+//! the first row instead, `HUD_BF1_HEAT2=0.5` in the second, `HUD_BF1_HOT=1` red.
+//! Issue #59's: `HUD_LEAVING="LEAVING BATTLEFIELD"` shows the boundary's warning.
 
 use anyhow::{anyhow, Context, Result};
 use game::viewer::{camera_from, upload_scene, GOLDEN_CAM};
@@ -81,8 +83,15 @@ fn main() -> Result<()> {
                 ring: num("HUD_HEAT").unwrap_or(0.0),
                 refire: num("HUD_REFIRE").unwrap_or(0.0),
                 overheated: num("HUD_REFIRE").is_some(),
+                panel: [
+                    num("HUD_BF1_HEAT").map(|heat| {
+                        ui::hud::HudPanelBar::heat(heat, std::env::var_os("HUD_BF1_HOT").is_some())
+                    }),
+                    num("HUD_BF1_HEAT2").map(|heat| ui::hud::HudPanelBar::heat(heat, false)),
+                ],
             }
         },
+        leaving: std::env::var("HUD_LEAVING").ok(),
         reticle: Some(0),
         // `HUD_GAME=bf1` puts the reticle at BF1's height.
         reticle_y: game::walk::ps2_reticle_y(

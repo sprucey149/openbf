@@ -30,7 +30,7 @@ the PS2's 55.2 / 57.4 (two frames; the PS2's droid wears the orange engineer ski
 
 1. **The three ambient words.** `FUN_00493298` (the `AmbientColor` setter) writes `_DAT_0069c570` always and
    `_DAT_0069c578` / `_DAT_0069c580` only while `DAT_00522a88` / `DAT_00522a8c` are 0 (B1 555604-555611).
-   `FUN_00493328` (`CharacterAmbientColor`) sets `DAT_00522a88 = 1` and `_DAT_0069c578` (555620-555628);
+   `FUN_00493328` (`CharacterAmbientColor`) sets `…
    `FUN_00493378` (`VehicleAmbientColor`) the same for 0x8c / 0x580. The light-set builder `FUN_00493cf0` takes 0x578
    for non-static draws without a shadow volume - soldiers (556042-556043; `re-model-lighting.md` §12, whose GEO1
    knock-out turned the soldier black).

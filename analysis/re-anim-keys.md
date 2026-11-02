@@ -41,7 +41,7 @@ Reference decoder + scratch scripts:
 ### 1.1 Global anim registry (both `zaa_` and `zaf_` register here)
 `zaa_` loader `FUN_004be900`, `zaf_` loader `FUN_004bec78`: on `NAME` they
 CRC the string (`FUN_00444b88`→`FUN_00444bb8`) and look it up in the global
-hash table at `0x6ff2d8` (`FUN_00444998(tbl, 0x800, crc)` → 1024 buckets);
+hash table at `0x6ff2d8` (`…
 if absent they allocate a **0x20-byte entry** (`FUN_004be8b0`) and insert it
 (`FUN_004449f8`). So the `zaa_` bank and the `zaf_` rig that share a NAME
 (e.g. `human_animation_0`) land in the **same** entry:

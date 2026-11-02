@@ -228,8 +228,9 @@ pub struct VoiceDef {
     /// No BF1 Clone Wars script calls it.
     #[serde(default)]
     pub low_reinforcements: Vec<(u8, u8, String, f32, bool)>,
-    /// `SetOutOfBoundsVoiceOver(team, line)`. Carried, not played: the port
-    /// has no map boundary yet (card BNDY).
+    /// `SetOutOfBoundsVoiceOver(team, line)`: said to a team's player when his
+    /// droid leaves the boundary (`Commander::leaving`); soldiers and vehicles are
+    /// card BNDY.
     #[serde(default)]
     pub out_of_bounds: Vec<(u8, String)>,
 }

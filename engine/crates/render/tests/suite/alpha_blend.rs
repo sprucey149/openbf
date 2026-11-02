@@ -11,8 +11,7 @@
 //!   * Blend — src-alpha compositing, depth writes off, sorted far to near.
 //!
 //! Ignored by default — needs a real adapter. Run them through
-//! `scripts/gpu_tests.sh` (serialised); a bare `cargo test -p render --
-//! --ignored` SIGSEGVs on the iGPU.
+//! `scripts/gpu_tests.sh`.
 
 use glam::Mat4;
 use render::{Camera, DrawCmd, DrawLayer};

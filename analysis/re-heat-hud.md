@@ -148,8 +148,7 @@ read every update, five frames each; (6) a census of heat weapons on both discs'
 - Build (card OVHT): each frame send `player1.weapon1.heat` = clamp(heat, 0, 1) for an unlimited weapon (the port's
   `infinite_ammo()`), else 0; `player1.weapon1.refire` = 1 - clamp(threshold / heat) while overheated, else 0; and
   `player1.weaponsOverheat` while overheated - the PS2's every-frame sends, so the line holds 0.1 s and fades 1 s
-  after the clear. BF1 maps get the same BF2 ring from BF1's heat (PLAN's one HUD); BF1's panel bar is not drawn - a
-  named deviation by PLAN.
+  after the clear. Superseded for BF1 by 7.1: BF1 maps draw BF1's bar.
 - Not this card: the charge on the ring (counted charge weapons) and the state-4 refire bits (BHUD3's); the reticle
   and weapon panel in seats (new card VSHUD) - OVHT's seat half rides on it.
 
@@ -159,7 +158,10 @@ read every update, five frames each; (6) a census of heat weapons on both discs'
   (`WeaponState::charging`); this goes past OVHT's on-foot slice and takes the charge half from BHUD3's.
 - `hud_draw::segmented` turns a bar about its rect's corner. Turned about its centre, as it drew before, the layout's
   `refire_rightbit` stood one rect-width to the right of the reticle rather than meeting the left bit at 6 o'clock.
-- BF1 maps show BF1's heat and charge on BF2's ring (section 7). BF1's own panel bar is not drawn.
+- BF1 maps draw BF1's own bar (section 4) in each weapon row, in the place of the count, and none of BF2's ring, red
+  bits or line: full and blue when cold, width 1 - heat, red while overheated, green with a charge. The sheet, UVs and
+  each slot's size are the PS2's. `ui::hud::add_bf1_panel_bars` adds the two elements to BF2's layout, since BF1 has no
+  layout to read. [ours] the place on BF2's panel, and that the bar is straight: the PS2 BF1's panel is tilted.
 - The bake holds the layout on the BF2 disc only; `tests/suite/hud_layout.rs` and `tests/suite/weapon_gauge.rs` test
   it. Compared with the PS2's frames by eye and by the red bits' bounds (`lead_tmp/ovht/ps2/bf2_pistol/rep0_over.png`,
   `rep0_cool2.png` beside `hud_capture` at the same heat): the lit arc starts and runs the same way, the colours match

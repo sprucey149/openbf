@@ -200,7 +200,7 @@ come from `FUN_00234c00`, which compares the class's name hash
 `FUN_0023b870` = unit+0x78 == 0, then `FUN_002509b0(this, 1)`).
 `FUN_002509b0` polls the controller for a path result (`FUN_0024f1a0` →
 `FUN_00263858` / `FUN_00263860`; a result is handed to the mover with
-`FUN_0023b4f8(unit, path, 1, 0)`); a NULL result sets this+0x20 = 1 and
+`… a NULL result sets this+0x20 = 1 and
 drops the ConnectivityGraphFollower (state 7 = failed); otherwise it
 advances the follower (`FUN_00267540`, the chooser walk of the last
 entry), takes the next waypoint `FUN_00267538(f, 7)`, and if
@@ -212,7 +212,7 @@ carries a random y offset up to ±radius, which only the XZ arrival test
 below makes harmless. Then `FUN_0026c0d0(r, unit, from, to, mask, 1,
 f+0x50)`: if `unit+0x28c < 11` and `FUN_00268f68` finds NO barrier on
 the straight leg, a two-point AIPath {to, from} goes straight to the
-mover (`FUN_00263790(unit, path, 1)`); otherwise a PathRequest (0x50 B:
+mover (`… otherwise a PathRequest (0x50 B:
 +0x20 from, +0x30 to, +0x40 r, +0x44 mask, +0x48 age) is queued on
 `DAT_00518288`. **The planner** `FUN_0026c400(1.0)` (two calls from the AI
 tick `FUN_0025d988`) sets a budget `DAT_00518298 = 10` fine segment tests
@@ -254,7 +254,7 @@ handed to the mover. Stats `DAT_00518040` (clear steps) /
 
 **BF2, same shape [V].** Pools and grid in `FUN_002ee388` (PathNode
 0x699528 × 1024, barrier 0x6994d8 × 512 block, grid `DAT_005fe8ec` =
-`FUN_001b2780(16.0, ±DAT_005f9088)`); loader `FUN_00178ae8` →
+`… loader `FUN_00178ae8` →
 `FUN_002ee588`. Follower ctor `FUN_002eca30` (locates both ends),
 advance `FUN_002ed2d0`, waypoint re-roll `FUN_002ed3d8` (100 draws of
 `FUN_002ea128`, h = 4 for kind 3 via `FUN_002ed4b8`), reachability
@@ -2821,7 +2821,7 @@ Measured both ways:
   until its bit is cleared; HOT1's snow ignores both.
 - The port with COL0 + the PS2 rules at the same poses: MYG1 floor 52 → 31 (PS2 28); TAN1 frame 137 → 109 (PS2 103, its
   12–13 % clipping gone); COR1 floor 92 → 43 with Light2 (PS2 46).
-BF1: the same VU paths; 0x40 segments get a black-ambient set (DAT_0069c440 = 0 in RAM); its light scale already matches
+BF1: the same VU paths; 0x40 segments get a black-ambient set (… its light scale already matches
 the port; F15 (Theed's columns) is the sun direction (queue SUND): 97 → 59 with the PS2's vector, PS2 57.
 Every load-bearing claim is `[O]` (one foreground Opus verifier: 29 SUPPORTED, 2 PARTLY — folded in, 0 NOT SUPPORTED).
 Ported: nothing yet. The builds are queue **LITEB** (models), **TERL** (terrain RE + build) and **FOGN** (BF2's

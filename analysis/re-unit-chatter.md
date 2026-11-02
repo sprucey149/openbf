@@ -233,7 +233,7 @@ So `rep1_inf_chatter_AcquiredTarget_VOUnitNum83` is the clone's line for a targe
    own class's `VORadius`; none -> nothing (271886-271947);
 2. the speaker must be within its class's `VORadius` of the subject (271950-271963);
 3. a speaker whose team holds the subject's as an enemy (`FUN_002692b0` < 0) goes on with chance 31 in 101
-   (`FUN_002a3f08(0, 100)` < 31; `slti 31` at 0x2e638c); event 0xb always (271964-271979);
+   (`…
 4. the speaker needs a controller; an AI's must be at detail level 3 or 4 (+0x560; `slti 3` at 0x2e6414) - the
    levels that think every 1.0 and 0.25 s (`FUN_002b6fe8` 238942-238946) - unless the unit is of class
    `DAT_00689368` (271980-272003);

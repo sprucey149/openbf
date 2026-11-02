@@ -117,7 +117,7 @@ Mean RGB over x 0..110, 4 rows, by flat-sea distance at y = −8 (the real surfa
 
 ### 2.2 The far pass [V]
 `FUN_00575670` (708275), far branch *(decompiler detail omitted)* (708400; called from the sky draw through `FUN_00560540(0x20000)`,
-426026): range `[FUN_00565120(), FUN_00565140()·0.8]` = [NearSceneRange b, 0.8·FarSceneRange] (708401–708404); tiles
+426026): range `[… tiles
 counted by `FUN_00561b58` (708405; `DAT_0066164c` reset 696830, +1 per tile 696895); with ≥ 1 tile it binds three
 programs and a record {0x144, TEST 0x50010} whose colour is the fog colour `FUN_005804d0` × the HDR scale
 (708435–708451), and a texture named "fogspread" (0x64fd60; 708410–708412). BF1's twin is re-water.md §1 (551039, 551047).

@@ -39,6 +39,17 @@ impl WalkSim {
         self.walker_rigs = crate::viewer::walker_rigs(manifest, root, &self.vehicle_geometry);
     }
 
+    /// Read each vehicle class's model top, once [`Self::vehicle_geometry`] is set.
+    pub fn load_vehicle_tops(
+        &mut self,
+        manifest: &manifest::Manifest,
+        map_dir: &std::path::Path,
+        root: &std::path::Path,
+    ) {
+        self.vehicle_tops =
+            crate::viewer::model_tops(manifest, map_dir, root, &self.vehicle_geometry);
+    }
+
     pub(super) fn walker_fovs(&self) -> Option<(f32, f32)> {
         let mount = self.sim.unit(self.player)?.mount?;
         let v = self.sim.vehicle(mount.vehicle)?;
@@ -95,13 +106,22 @@ impl WalkSim {
                     -look.1,
                 )
         };
-        Some(camera_on_frame(
+        let (_, cam) = camera_on_frame(
             frame,
             Vec3::from(seat.track_center.unwrap_or([0.0, 2.0, 0.0])),
             Vec3::from(seat.track_offset.unwrap_or([0.0, 1.0, 8.0])),
             seat.tilt_value.unwrap_or(0.0),
             self.fov_y(),
-        ))
+        );
+        // The pilot's pull point by the walker's model, a gunner's his own
+        // turret's fixed point, each on the frame the camera hangs on.
+        let height = if mount.seat == 0 {
+            let top = self.vehicle_tops.get(v.class as usize).copied().flatten();
+            super::vehicle_pull_height(v.kind, top)
+        } else {
+            super::CAMERA_PULL_Y
+        };
+        Some((frame.transform_point3(Vec3::Y * height), cam))
     }
 }
 

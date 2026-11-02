@@ -24,7 +24,7 @@ named script, [M] measured on the PS2 (PCSX2 RAM), [H] not confirmed. Tools, inp
 ## 1. The data - where the shapes come from
 
 - C1 [V][O] The level loaders hand the chunk `bnd_` (0x5f646e62) to the boundary reader: B1 FUN_00175d00 ->
-  `FUN_002954a8(DAT_00518314, chunk)` (B1:17346-17347); B2 FUN_00177058 -> `FUN_0034c3b0(DAT_005feca8, chunk)`
+  `… B2 FUN_00177058 -> `FUN_0034c3b0(DAT_005feca8, chunk)`
   (B2:18380-18381).
 - C2 [V][O] FUN_002954a8 (B1:220441-220495) / FUN_0034c3b0 (B2:343324-343372): for a statement hashed 0x54eacca7
   (FNV("boundary")) each child statement hashed -0x7b78b2ca (= 0x84874d36, FNV("path")) calls the push
@@ -136,6 +136,11 @@ named script, [M] measured on the PS2 (PCSX2 RAM), [H] not confirmed. Tools, inp
   same over +0x148 / +0x14c / +0x150; timer record+0x184 = 6.5 (0x40d00000), or 2.1667 (0x400aaaab) when one of the
   entities is a flyer (DAT_00689368, flyer = entity - 0x270) whose class (+0x700) has bit 1 of +0x1208 (4); below 0 ->
   each entity still counted is killed through its health object (FUN_001df050(1.0, ...), 1). No sound here (T5).
+- T2b [V] The third slot (issue #59; closes section 7's first row for it): the record's +0x150 / the member's +0xbc is
+  written by one setter (B1 `FUN_00296e80`, B2 `FUN_0034ef98`), set when a pilot of type 3 (a remote) takes over and
+  cleared when control goes back (B2 `FUN_0024c560` B2:166192, `FUN_0024c778` B2:166225, `FUN_003dc908` for pilot
+  type 3 B2:436502-436504; B1:120766, 120781). So a droid is tested only while someone flies it. Left flying, or
+  handed back outside, it is not, and its owner's timer clears.
 - M2 [M] Death trials (`bnd_live.py --death`: held at the first outside point, health NOT pinned, one row per game
   update): BF1 NAB1, TAT1, KAM1: the first outside update reads 9.9666 (= 10.0 - one update's dt, 0.0333 s), the player
   dies at the update the timer goes below 0 (-0.0099), 299 updates later = 9.98 s after the first outside row (10.0 s
@@ -218,8 +223,8 @@ named script, [M] measured on the PS2 (PCSX2 RAM), [H] not confirmed. Tools, inp
 
 ## 7. Stayed [H]
 
-- Which entities +0xb8 / +0xbc (BF1) and +0x14c / +0x150 (BF2) are (driven vehicle, remote) - read as "the soldier and
-  what he controls"; the BF1 code kills a driven vehicle with its driver.
+- That +0xb8 / +0x14c is the driven vehicle: read as "the soldier and what he drives"; the BF1 code kills a driven
+  vehicle with its driver. +0xbc / +0x150 is the remote (T2b).
 - The fly-height pilot gate (+0x330 / +0x324) and whether the ceiling countdown is reachable in play (card VFLY).
 - FUN_002faf90's manoeuvre; the vehicle decay readers (T6).
 - BF1's path-list insert order (no BF1 map has a duplicate boundary name).

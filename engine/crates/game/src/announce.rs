@@ -27,6 +27,31 @@ fn line_for(name: &str, faction: &str) -> Option<String> {
     Some(format!("{faction}_{rest}"))
 }
 
+/// What `listener`'s commander says when he leaves the boundary: the script's
+/// `SetOutOfBoundsVoiceOver` for the team of his army (`re-boundary.md` T1b). An army
+/// the mission does not have takes the line of its slot, in its own commander's name.
+/// A script that sets none says nothing, as some BF1 scripts do.
+pub fn leaving_line(
+    voice: &VoiceDef,
+    mission_factions: [&str; 2],
+    factions: [&str; 2],
+    listener: usize,
+) -> Option<String> {
+    let side = *factions.get(listener)?;
+    faction_index(side)?;
+    let line_of = |team: usize| {
+        voice
+            .out_of_bounds
+            .iter()
+            .find(|(t, _)| usize::from(*t) == team + 1)
+            .map(|(_, line)| line.clone())
+    };
+    match mission_factions.iter().position(|f| *f == side) {
+        Some(team) => line_of(team),
+        None => line_of(listener).map(|_| format!("{side}leaving")),
+    }
+}
+
 /// The mission's setters as the rules read them, for the two armies that are
 /// really in the battle (card ANNC2). A script's lines are keyed by its own
 /// team numbers (Lua team n is `mission_factions[n - 1]`), but the shell can
@@ -174,6 +199,10 @@ pub struct Commander {
     gating: bool,
     /// Card UVO2: a BF2 battle's unit voice (`crate::vo`); None on BF1.
     pub vo: Option<crate::vo::Vo>,
+    /// The player's line for leaving the boundary, set for the battle.
+    leaving_line: Option<String>,
+    /// The player's flown droid was outside at the last [`Commander::leaving`].
+    was_leaving: bool,
 }
 
 /// One unit's combat call (card UCALL): its class's property for it (None:
@@ -211,6 +240,8 @@ impl Commander {
             calls_asked: Vec::new(),
             gating: false,
             vo: None,
+            leaving_line: None,
+            was_leaving: false,
         }
     }
 
@@ -245,6 +276,12 @@ impl Commander {
             c.script_bleed = Some(ScriptBleed::new(script_rates(sim)));
             c.vo = Some(crate::vo::Vo::new(0x5d0_u32 ^ sim.tick as u32));
         }
+        c.leaving_line = leaving_line(
+            &mission.voice,
+            mission_factions,
+            factions,
+            usize::from(walk.player_team()),
+        );
         c
     }
 
@@ -328,6 +365,30 @@ impl Commander {
             self.queue.ask(l.clone());
         }
         asked
+    }
+
+    /// Say the player's leaving line when his flown droid starts a countdown: once an
+    /// excursion, to him alone (`re-boundary.md` T1, T5). Returns it when asked. Once
+    /// per stepped tick (`WalkSim::step_tick`).
+    pub fn leaving(&mut self, sim: &Sim, player: UnitHandle) -> Option<Line> {
+        let now = sim
+            .controlled_droid(player)
+            .is_some_and(|d| d.leaving.is_some());
+        self.leaving_now(now)
+    }
+
+    fn leaving_now(&mut self, now: bool) -> Option<Line> {
+        let started = now && !self.was_leaving;
+        self.was_leaving = now;
+        // Crossing the line again and again queues it once: the queue does not
+        // read the line's `PlayInterval`, which keeps the PS2's from repeating.
+        let name = self
+            .leaving_line
+            .as_deref()
+            .filter(|n| started && !self.queue.waiting(n))?;
+        let line = Line::commander(name);
+        self.queue.ask(line.clone());
+        Some(line)
     }
 
     /// The combat calls of the tick the sim just stepped (card UCALL,
@@ -554,6 +615,65 @@ fn vo_body(sim: &Sim, u: &core::unit::Unit, unit_type: u8) -> crate::vo::Body {
         yaw: u.soldier.yaw,
         kind,
         unit_type: if seat.is_some() { 0 } else { unit_type },
+    }
+}
+
+#[cfg(test)]
+mod leaving_tests {
+    use super::*;
+
+    fn voice() -> VoiceDef {
+        VoiceDef {
+            out_of_bounds: vec![(2, "Allleaving".into()), (1, "Impleaving".into())],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_leaving_line_is_the_one_the_script_gives_the_listeners_army() {
+        let v = voice();
+        let line = |f, l| leaving_line(&v, ["imp", "all"], f, l);
+        assert_eq!(line(["imp", "all"], 0).as_deref(), Some("Impleaving"));
+        assert_eq!(line(["imp", "all"], 1).as_deref(), Some("Allleaving"));
+        // The shell can seat the armies either way round.
+        assert_eq!(line(["all", "imp"], 0).as_deref(), Some("Allleaving"));
+        // An army the mission lacks takes its slot's, in its commander's name.
+        assert_eq!(line(["rep", "all"], 0).as_deref(), Some("repleaving"));
+    }
+
+    #[test]
+    fn the_line_is_asked_once_an_excursion() {
+        let lines = BattleLines::default();
+        let mut c = Commander::new(lines, ["imp", "all"], 0, Vec::new(), Vec::new());
+        assert_eq!(c.leaving_now(true), None, "a script with no line");
+        c.leaving_now(false);
+        c.leaving_line = Some("Impleaving".into());
+        let said = [true, true, true, false, false].map(|now| c.leaving_now(now).is_some());
+        assert_eq!(said, [true, false, false, false, false]);
+        c.queue.step(0.0, |_| Some(1.0));
+        assert!(c.leaving_now(true).is_some(), "the next excursion");
+        let line = c.leaving_now(false);
+        assert_eq!(line, None);
+    }
+
+    #[test]
+    fn crossing_the_edge_again_and_again_queues_the_line_once() {
+        let lines = BattleLines::default();
+        let mut c = Commander::new(lines, ["imp", "all"], 0, Vec::new(), Vec::new());
+        c.leaving_line = Some("Impleaving".into());
+        let said = [true, false, true, false, true].map(|now| c.leaving_now(now).is_some());
+        assert_eq!(said, [true, false, false, false, false]);
+        // It has started, so the next crossing may say it again.
+        c.queue.step(0.0, |_| Some(1.0));
+        c.leaving_now(false);
+        assert!(c.leaving_now(true).is_some());
+    }
+
+    #[test]
+    fn a_script_with_no_line_says_nothing() {
+        let v = VoiceDef::default();
+        assert_eq!(leaving_line(&v, ["imp", "all"], ["imp", "all"], 0), None);
+        assert_eq!(leaving_line(&v, ["imp", "all"], ["rep", "all"], 0), None);
     }
 }
 

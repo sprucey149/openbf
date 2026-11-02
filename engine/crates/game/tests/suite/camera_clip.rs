@@ -417,6 +417,148 @@ fn a_wall_behind_the_player_pulls_the_camera_in_keeping_height_and_pitch() {
     }
 }
 
+/// Issue #71: a wall behind a vehicle pulls its camera in toward the PS2's pull point
+/// on the vehicle (`walk::vehicle_pull_height`), and the camera never ends behind the
+/// wall or further out than it wants to be.
+#[test]
+fn a_wall_behind_a_vehicle_pulls_its_camera_in_toward_the_pull_point() {
+    let Some((mut walk, scene)) = battle("bf1_nab1") else {
+        return;
+    };
+    let top = 2.5;
+    let height = game::walk::vehicle_pull_height(core::vehicle::VehicleKind::Hover, Some(top));
+    walk.vehicle_tops = vec![Some(top); 1];
+    let h = walk.sim.spawn_vehicle(&core::vehicle::VehicleSpec {
+        kind: core::vehicle::VehicleKind::Hover,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+        max_health: 100.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![core::vehicle::SeatKind::Pilot],
+    });
+    let player = walk.player;
+    assert!(walk.sim.seat_unit(player, h, 0));
+    let ii = instance(&scene, "nab1_prop_ruins1");
+    let c = Vec3::from(scene.manifest.instances[ii].translation);
+    let floor = walk
+        .sim
+        .heightfield
+        .as_ref()
+        .map_or(c.y, |h| h.height_at(c.x, c.z));
+    let solid = tris(&scene, ii, None);
+    let (mut checked, mut pulled) = (0, 0);
+    for k in 0..12 {
+        let out = bearing(k);
+        let reach = solid
+            .iter()
+            .flatten()
+            .map(|p| (*p - c).dot(out))
+            .fold(0.0f32, f32::max);
+        for d in [1.0f32, 2.0, 4.0, 6.0] {
+            for yaw in 0..8 {
+                let pos = Vec3::new(c.x, floor, c.z) + out * (reach + d);
+                let v = walk.sim.vehicle_mut(h).unwrap();
+                v.pos = pos;
+                v.rot = glam::Quat::from_rotation_y(yaw as f32 * std::f32::consts::FRAC_PI_4);
+                let origin = pos + v.rot * (Vec3::Y * height);
+                let v = walk.sim.vehicle(h).unwrap();
+                let (_, want) = game::walk::vehicle_camera(v, None, None, 1.0, Vec3::Y * height);
+                walk.cam_pull = 1.0;
+                let e = walk.camera().position;
+                if clearance(origin, &solid) < CAMERA_RADIUS {
+                    continue;
+                }
+                checked += 1;
+                let at = format!("bearing {k}, {d} m out, yaw {yaw}: camera {e:.2?}");
+                assert!(!crosses(origin, e, &solid), "{at}: behind the wall");
+                let (got, whole) = (e.distance(origin), want.position.distance(origin));
+                assert!(got <= whole + 0.35, "{at}: {got} of {whole}");
+                pulled += usize::from(got < whole - 0.05);
+            }
+        }
+    }
+    eprintln!("{checked} placements, {pulled} pulled in");
+    assert!(checked > 100 && pulled > 20, "{checked} / {pulled}");
+}
+
+/// A flyer banked beside a wall leans its tall model's pull point at the wall. The
+/// camera stays on the flyer's side of it.
+#[test]
+fn a_flyer_banked_beside_a_wall_keeps_its_camera_on_its_side() {
+    let Some((mut walk, scene)) = battle("bf1_nab1") else {
+        return;
+    };
+    walk.vehicle_tops = vec![Some(8.0); 1];
+    let h = walk.sim.spawn_vehicle(&core::vehicle::VehicleSpec {
+        kind: core::vehicle::VehicleKind::Flyer,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+        max_health: 100.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![core::vehicle::SeatKind::Pilot],
+    });
+    let player = walk.player;
+    assert!(walk.sim.seat_unit(player, h, 0));
+    let ii = instance(&scene, "nab1_prop_ruins1");
+    let c = Vec3::from(scene.manifest.instances[ii].translation);
+    let floor = walk
+        .sim
+        .heightfield
+        .as_ref()
+        .map_or(c.y, |h| h.height_at(c.x, c.z));
+    let solid = tris(&scene, ii, None);
+    let (mut checked, mut wrong) = (0, Vec::new());
+    for k in 0..12 {
+        let out = bearing(k);
+        let reach = solid
+            .iter()
+            .flatten()
+            .map(|p| (*p - c).dot(out))
+            .fold(0.0f32, f32::max);
+        for d in [1.0f32, 2.0, 4.0] {
+            for yaw in 0..8 {
+                for roll in [-1.2f32, -0.8, 0.8, 1.2] {
+                    let pos = Vec3::new(c.x, floor + 2.0, c.z) + out * (reach + d);
+                    let turn =
+                        glam::Quat::from_rotation_y(yaw as f32 * std::f32::consts::FRAC_PI_4);
+                    let v = walk.sim.vehicle_mut(h).unwrap();
+                    v.pos = pos;
+                    v.rot = turn * glam::Quat::from_rotation_z(roll);
+                    let low = pos + v.rot * (Vec3::Y * game::walk::CAMERA_PULL_Y);
+                    if clearance(low, &solid) < CAMERA_RADIUS {
+                        continue;
+                    }
+                    walk.cam_pull = 1.0;
+                    let e = walk.camera().position;
+                    checked += 1;
+                    if crosses(low, e, &solid) {
+                        wrong.push(format!(
+                            "bearing {k}, {d} m, yaw {yaw}, roll {roll}: {e:.2?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(checked > 100, "{checked}");
+    // The rule point's stop is a straight sweep and so is the camera's from there, so
+    // around a jagged edge the two can bend past a piece the line from the hull meets.
+    // Without the stop this is 74 of 1152.
+    assert!(
+        wrong.len() * 100 <= checked,
+        "{} of {checked}: {wrong:#?}",
+        wrong.len()
+    );
+}
+
 /// A gun emplacement (2.6 m across, a prop) between the camera and the
 /// player: it never pulls the camera in, and is drawn see-through whenever
 /// it stands in the camera's sight of his eye or body.

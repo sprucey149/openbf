@@ -372,13 +372,19 @@ impl Sim {
             } else {
                 Some(DroidEnd::Destroyed)
             };
-            // The cheat spares a human's own, as the boundary's kill does (T1).
+            // The PS2 tests what a member controls: the droid is in that slot from
+            // hand-over to hand-back (`re-boundary.md` T2b), so one left flying is
+            // not tested. The cheat spares a human's own, as the boundary's kill
+            // does (T1).
             let time = crate::boundary::leaving_time(self.ground_rules);
-            let outside = self.boundary.outside(d.pos.x, d.pos.z);
+            let outside = d.controlled && self.boundary.outside(d.pos.x, d.pos.z);
             if d.tick_leaving(outside, time, dt)
                 && end.is_none()
                 && !(self.cheats.invincible && controller != Controller::Ai)
             {
+                end = Some(DroidEnd::Destroyed);
+            }
+            if d.tick_adrift(floor <= crate::collision::NO_GROUND, dt) && end.is_none() {
                 end = Some(DroidEnd::Destroyed);
             }
             let press = pad.pressed(buttons::SECONDARY_FIRE)

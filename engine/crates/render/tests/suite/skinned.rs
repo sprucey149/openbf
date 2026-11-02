@@ -5,9 +5,7 @@
 //! `vs_skinned` math end to end. Then the two skinned passes, OPAQUE and
 //! BLEND, that neither alpha-tests (queue SKA), and where they fall among the
 //! world's draws: every opaque draw first, then one blend pass (queue SKO).
-//! Ignored by default — needs a real adapter (`scripts/gpu_tests.sh`, or
-//! `cargo test -p render -- --ignored --test-threads=1`; see gpu_smoke.rs for
-//! why it must be serialised).
+//! Ignored by default — needs a real adapter (`scripts/gpu_tests.sh`).
 
 use glam::{Mat4, Vec3};
 use render::{Camera, DrawCmd, DrawLayer, SkinnedDrawCmd, SkinnedMeshData};

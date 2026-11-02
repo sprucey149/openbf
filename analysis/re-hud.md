@@ -141,7 +141,7 @@ REQN). No BF1 LVL carries a `hud_` chunk (census of every `extracted/bf1/lvl/**/
 TextFont (0x90ae147f) by name; `Text("key")` localises the key (`FUN_005ac980`) else prints it raw; EventText (0x7e1311a8)
 / EventNumber (0x3fc8df9e) feed it; TextAlignment (0xc2200723) = horizontal {Left, Right, Center} (0x5ff9c8) + vertical
 {Top, Bottom, Center, Baseline} (0x5ff9d8); TextStyle (0x15746cb3) {Normal, Shadow, Selected} (0x5ff9e8); TextBox
-(0x5bace35b) = w, h × the screen size (DAT_005ff860 = (float)DAT_007d5f70, D:396716); TextBreak (0x37d0f255) table
+(0x5bace35b) = w, h × the screen size (… TextBreak (0x37d0f255) table
 0x5ff9b0 {None, Word, No Reformat, Word Reformat}; TextScale (0x133c15dc); TextCharacterSpacing (0xf30abeaa);
 NumberToTime (0xce8ad9c0, e.g. `"%m:%02s"`); FloatFormat (0xd9e54312).
 - [V] A Text without TextFont draws in **`gamefont_tiny`**: the Text ctor (D:405704) sets its text object's font to

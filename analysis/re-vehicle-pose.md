@@ -110,7 +110,7 @@ tank's fin-posed `dummyroot`, is harmless because the clip holds `dummyroot` at 
   0)`, B1:96410; A+0x100, and it inserts a pointer to its node matrix A+0xc0, B1:191047-191055); writes the
   FinAnimation palette into it (B1:96482) and the skeleton's bind for every other node (FUN_004969d0, B1:96487).
   BF2 FUN_00219918: E+0x17e0 to FUN_0026bf88 (B2:130748; T+0x280, B2:187898; a pointer to T+0x200 inserted,
-  B2:188092-188098) and to FUN_00301588(.., E+0x120, E+0x17e0, 0) (B2:130837); palette B2:130947; bind B2:130952.
+  B2:188092-188098) and to … palette B2:130947; bind B2:130952.
 - [V] **No reset** [receipt:14ce016e] [receipt:450bf128]: keys and count are written only in the constructors
   (B1:96286-96289, B2:130708). An entry is re-pointed or overwritten by its writers and otherwise keeps its matrix.
 - [V] **The two games write differently**: BF1 writes IN PLACE - the turret tick (B1:137641-137672) and the fin

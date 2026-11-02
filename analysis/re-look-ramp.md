@@ -91,7 +91,7 @@ O+0x3c0 is K+0x120: K's vtable 0x532be0 carries the offset word 0xfffffd60 (-0x2
 (0x210c60, FUN_00210ca0 B1:123857).
 
 **BF2 FUN_00247fa8** (11 calls from the soldier update FUN_00240bf8): with E+0x330 >= 0 and no mouse: rate = C2+0x758 +
-(FUN_00238068(E) - C2+0x758) x E+0x360 (B2:162907-162920); else FUN_00238068(E); / the weapon's +0xc8 when zoomed
+(… / the weapon's +0xc8 when zoomed
 (B2:162921-162926, a human with a weapon in hand only); returns -stick x rate (B2:162927). **No sensitivity factor.**
 FUN_00238068 = C2+0x754 for a human, C2+0x754 x 4.0 for a bot (B2:151844-151851; 0x3c014080 at 0x23807c, the multiply
 in the return's delay slot 0x23808c). A human under the mouse flag takes FUN_00238068 flat (B2:162912-162913).

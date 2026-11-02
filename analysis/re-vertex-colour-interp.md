@@ -44,7 +44,7 @@ band — in a port prototype takes COR1's floor from 103/92/68 to 70/63/48 (PS2 
   0x7d6160 (712763, 712787).
 - **A draw with 0x10 is UNLIT** — not "lit by the last uploaded set", as the card read it.
   - `DAT_007c5768` (the light packet) is written by `FUN_0057fd90`'s last statement (715405), zeroed by
-    `FUN_0058b140(0)` at the end of `FUN_0057cf60` (712968, its only caller) and by `FUN_00580b08` (715845); the ELF
+    `… the ELF
     has three stores (0x5803cc, 0x580c68, 0x58b148).
   - `FUN_0058ed70` reads it (723394). With flag 0x10, with it 0, or with MTRL bit 0 clear, it clears bit 0x4000 in
     the copy of the segment's prim word it puts in the pass record (723489–723492), and it calls the light packet

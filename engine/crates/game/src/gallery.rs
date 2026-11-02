@@ -1197,6 +1197,7 @@ mod tests {
                 light: Vec::new(),
                 scroll: Vec::new(),
                 sphere: None,
+                vis_top: None,
             }),
             water: None,
             lowres: None,

@@ -127,12 +127,29 @@ pub fn ps2_reticle_y(source_game: &str) -> f32 {
     )
 }
 
+/// How high over a vehicle's origin, in its own frame, the pilot's camera is pulled
+/// in toward, from the top of its model: the PS2 replaces the camera section's fixed
+/// point when it reads a class's `GeometryName`, with 0.9 of the vis box's top on a
+/// hover and a flyer and 0.8 on a walker (hover B1 `FUN_001f0648` B1:101919, B2
+/// `FUN_002223a0` B2:137376; flyer B1 `FUN_001df3f0` B1:89841, B2 `FUN_0020fd58`
+/// B2:125118; walker B1 `FUN_0021d980` B1:134004, B2 `FUN_00263f68` B2:183946). A
+/// building turret and a class with no model keep the fixed point.
+pub fn vehicle_pull_height(kind: core::vehicle::VehicleKind, top: Option<f32>) -> f32 {
+    use core::vehicle::VehicleKind::{Flyer, Hover, Turret, Walker};
+    match (kind, top) {
+        (Hover | Flyer, Some(top)) => top * 0.9,
+        (Walker, Some(top)) => top * 0.8,
+        (Turret, _) | (_, None) => CAMERA_PULL_Y,
+    }
+}
+
 /// A seat's third-person camera (card VSEAT) as `(pull point, camera)`.
-/// PROVISIONAL — the PS2's vehicle camera is untraced; this reads the seat's
-/// props the way [`WalkSim::camera`] reads the soldier's CAMERASECTION: the
-/// pull point is the section's [`CAMERA_PULL_Y`] above the vehicle, because
-/// `TrackCenter` can be under the ground (`cis_tread_snailtank`'s is 12 m
-/// below its origin). The track centre is `TrackCenter` in the vehicle's HEADING
+/// PROVISIONAL — the PS2's camera frame for a vehicle is not ported, only its pull
+/// point: `origin` on the vehicle, as the PS2's camera update takes its collision
+/// origin from the section's point on the frame (`FUN_001b58f0`, `FUN_001cef68`),
+/// which [`WalkSim::seat_pull_origin`] gives. The rest reads the seat's props the way
+/// [`WalkSim::camera`] reads the soldier's CAMERASECTION: the track centre is
+/// `TrackCenter` in the vehicle's HEADING
 /// frame (x right, y up, z forward; default 0 2 0), the camera
 /// `TrackOffset.z` behind it along the
 /// view, `.y` above and `.x` right (default 0 1 8), pitched down by
@@ -147,6 +164,7 @@ pub fn vehicle_camera(
     seat: Option<&crate::vehicle_class::SeatSpec>,
     look: Option<(f32, f32)>,
     fov_y: f32,
+    origin: Vec3,
 ) -> (Vec3, Camera) {
     let (look_yaw, look_pitch) = look.unwrap_or((0.0, 0.0));
     let f = v.rot * core::vehicle::gun::dir(look_yaw, 0.0);
@@ -163,7 +181,7 @@ pub fn vehicle_camera(
     };
     let center = v.pos + right * c[0] + Vec3::Y * c[1] + fwd * c[2];
     let position = center - cam.forward() * o[2] + Vec3::Y * o[1] + cam.right() * o[0];
-    (v.pos + Vec3::Y * CAMERA_PULL_Y, Camera { position, ..cam })
+    (v.pos + v.rot * origin, Camera { position, ..cam })
 }
 
 /// A flown guided rocket's camera (card GUIDED): the class's track centre
@@ -665,6 +683,9 @@ pub struct WalkSim {
     /// `Vehicle::class` (visual only): set with the pads
     /// (`crate::vehicle_pads::PadBuild::seats`), read by [`vehicle_camera`].
     pub vehicle_seats: Vec<Vec<crate::vehicle_class::SeatSpec>>,
+    /// Each vehicle class's model top, by `Vehicle::class`
+    /// ([`crate::viewer::model_tops`]), for [`vehicle_pull_height`].
+    pub vehicle_tops: Vec<Option<f32>>,
     pub walker_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
     pub vehicle_weapon_hud: Vec<Vec<Vec<WeaponHud>>>,
@@ -820,6 +841,7 @@ impl WalkSim {
             camera_blockers: CameraBlockers::default(),
             vehicle_geometry: Vec::new(),
             vehicle_seats: Vec::new(),
+            vehicle_tops: Vec::new(),
             walker_rigs: Vec::new(),
             vehicle_weapon_hud: Vec::new(),
             walker_shot_styles: Default::default(),
@@ -1198,6 +1220,7 @@ impl WalkSim {
         // (`Commander::gate_calls`).
         if let Some(v) = self.voice.as_mut() {
             v.orders(&self.sim, self.player);
+            v.leaving(&self.sim, self.player);
             v.calls(&self.sim, &self.teams);
         }
     }
@@ -1493,7 +1516,15 @@ impl WalkSim {
         let (target, cam) = self
             .walker_seat_camera(v, seat, look)
             .or_else(|| self.turret_seat_camera(v, seat))
-            .unwrap_or_else(|| vehicle_camera(v, seat, look, self.fov_y()));
+            .unwrap_or_else(|| {
+                let origin = self.seat_pull_origin(v, m.seat);
+                vehicle_camera(v, seat, look, self.fov_y(), origin)
+            });
+        let target = if m.seat == 0 && v.kind != core::vehicle::VehicleKind::Turret {
+            self.pull_point_on_own_side(v, target)
+        } else {
+            target
+        };
         // A building turret's camera passes its own building, as its aim
         // ray does (`Sim::aim_point`); a rider's, his own vehicle's hull.
         let (position, track) = self.settle_camera(
@@ -1504,6 +1535,44 @@ impl WalkSim {
             Some(m.vehicle),
         );
         Some((Camera { position, ..cam }, Some(track)))
+    }
+
+    /// `[ours]` A pilot's pull point, stopped short of any wall or terrain between it and
+    /// the section's fixed point on the vehicle. A tall model's point stands metres off
+    /// the hull, so without this it passes a hangar's sheet or, banked, a wall beside
+    /// the flyer, and the camera settles on the far side of them.
+    fn pull_point_on_own_side(&self, v: &core::vehicle::Vehicle, point: Vec3) -> Vec3 {
+        let base = v.pos + v.rot * (Vec3::Y * CAMERA_PULL_Y);
+        let f = self
+            .camera_blockers
+            .fraction(base, point, v.instance, |i| self.station_pose(i));
+        let end = base + (point - base) * f;
+        let Some(h) = &self.sim.heightfield else {
+            return end;
+        };
+        let (dir, len) = ((end - base).normalize_or_zero(), (end - base).length());
+        let cutters = &self.sim.collision.cutters;
+        match core::collision::ray_heightfield(h, cutters, base, dir, len, 0.25) {
+            Some(t) => base + dir * (t - CAMERA_TERRAIN_GAP).max(0.0),
+            None => end,
+        }
+    }
+
+    /// The point a seat's camera is pulled in toward, in the vehicle's frame: the
+    /// pilot's by [`vehicle_pull_height`], and a gunner's the fixed point of his own
+    /// turret's section, which no class writes (BF2 `FUN_00270540`, BF1
+    /// `FUN_00225cd8`), on his gun's pivot.
+    pub(crate) fn seat_pull_origin(&self, v: &core::vehicle::Vehicle, seat: u8) -> Vec3 {
+        if seat == 0 {
+            let top = self.vehicle_tops.get(v.class as usize).copied().flatten();
+            return Vec3::Y * vehicle_pull_height(v.kind, top);
+        }
+        let pivot = self
+            .sim
+            .seat_look(self.player)
+            .filter(|l| l.gun.framed)
+            .map_or(Vec3::ZERO, |l| l.gun.pivot);
+        pivot + Vec3::Y * CAMERA_PULL_Y
     }
 
     /// A building turret gunner's unzoomed camera as `(pull point, camera)`

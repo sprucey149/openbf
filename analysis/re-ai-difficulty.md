@@ -44,7 +44,7 @@ Notation: `skill` is the 1..20 integer described in §2; `t = (skill-1)/19`; `le
 | `FUN_002a4030` | AI system init at mission start: calls `FUN_002a28e0`, sets knob defaults (§3) | V |
 | `FUN_002a28e0` | `DAT_00697e30` = level (profile+0x3c, or `DAT_0069bc80` in netplay via `DAT_00600548/DAT_0060054f/DAT_00600549`); zeroes the `SetAIDifficulty` tables; auto-balance on | V |
 | `FUN_002a29c8` | returns `DAT_00697e30` (level 1..3) | V |
-| `FUN_002a8300(team)` | true iff `team` is THE human team (single-player, or both split-screen humans on it); false in netplay | V |
+| `… false in netplay | V |
 | `FUN_002a29d8(unit_or_flag, clamp)` | **skill** = base[level] + `SetAIDifficulty` delta[level] + auto-balance delta (+ goal query, always 0: `FUN_002f7cb8` is a stub), max(1), min(20) when `clamp` | V |
 | `FUN_002a2bb8` / `FUN_002a2bf8` / `FUN_002a2c38` | `t=(skill-1)/19`; linear lerp; cubic lerp (`t³`) | V |
 | `FUN_002a2c80` … `FUN_002a32e8` | the skill-parameter getters (§4.1 table) | V |
@@ -177,7 +177,7 @@ mission-start reset) is only ever written 0.
 | binding | BF2 target (writer) | BF2 default | BF2 consumer | BF1 target | BF1 default | BF1 consumer |
 |---|---|---|---|---|---|---|
 | `SetTeamAggressiveness(team, v)` | `team+0x90` (`FUN_0036fb20`) | 1.0 (team ctor `FUN_0036d468`, line 366720) | not located (no float read of team+0x90 found in the AI region) | `team+0x94` (`FUN_002ae948`) | 1.0 (team ctor `FUN_002acf40`, line 238271) | `FUN_00238090`: aggressiveness × weaponclass+0x60, capped 50, in the weapon-choice score `FUN_002380a8` |
-| `SetStationaryWaitTime(s)` | `DAT_00697e40` | 10.0 (`FUN_002a4030`); `SetStayInTurrets` 0018d550 writes 10000 | `FUN_002cd2e0`: a stationary unit (speed 0) idle longer than the wait is kicked (`FUN_002baa20(ai+0x430)`) | `DAT_005873a4` | 10.0 (line 147429); `SetStayInTurrets` → 10000 | line 166816, same shape |
+| `SetStationaryWaitTime(s)` | `DAT_00697e40` | 10.0 (`FUN_002a4030`); `SetStayInTurrets` 0018d550 writes 10000 | `FUN_002cd2e0`: a stationary unit (speed 0) idle longer than the wait is kicked (`… `SetStayInTurrets` → 10000 | line 166816, same shape |
 | `SetAttackerSnipeRange(r)` / `SetDefenderSnipeRange(r)` | **stubs** (0018d540/0018d548 `return 0`) | — | — | `DAT_0058773c` / `DAT_00587740` (int) | 140 / 140 (0x8c, lines 157580/157578) | `FUN_002579e0`: `range*0.5` as the snipe-hint query radius, picked by the team's role byte (`team+DAT_00587744+0x88`); 70 when neither applies |
 | `SetAIVehicleNotifyRadius(r)` | `DAT_00698454` (`FUN_002e3440`) | 50.0 (line 269370) | `FUN_002e2e38`: spatial query radius (`FUN_001aef10(r, pos, …, 0x1e, …)`) for the units told about a vehicle | `DAT_00587778` (`FUN_002422e8`) | 50.0 (line 158908) | line 159159, same shape |
 | `SetAIViewMultiplier(m)` | clamp [0.1,1.0] → `DAT_005fe71c` (`FUN_002e37c0`) | 1.0 (.data) | `FUN_002e3910` view distance (§5.1) | — | — | — |
@@ -209,7 +209,7 @@ OBSERVER's team skill (`FUN_002ae010`, `FUN_002ae7b8`, `FUN_002ae4d0`).
 | `FUN_002a2c90(u)` | `lerp(0, 1)` | `FUN_002bac98` | burst length = min + U(0,max−min)·t, ≥ 2 (min/max = weapon class vtbl+0x34/+0x38) |
 | `FUN_002a2cb8(u)` | `lerp(0.1, 0.9)` | `FUN_002bac98` | inter-burst pause = (1.6 − v) × weaponclass+0x21c (`FUN_0032b0d8`) → 1.5× … 0.7× |
 | `FUN_002a2cf0(u)` | `lerp(0.1, 0.9)` | `FUN_002baf70` | single-shot tap: press one frame, release, re-arm after U(0.2·max(0,1−v), 2·max(0,1−v)) s (corrected 2026-09-30, `re-round-stalls.md` §2 C4) |
-| `FUN_002a2d28` / `FUN_002a2d40(u)` | 0.15 / `lerp(0, 1)` | `FUN_002baac0`, `FUN_002aa368` | charge weapons: release at charge U(0.15·C, t·C); expected-damage evaluation of a charge stage |
+| `FUN_002a2d28` / `… expected-damage evaluation of a charge stage |
 | `FUN_002a2d68(u)` [clamp] | `lerp(0, 1)` | `FUN_002ab288` | chance to use the grenade class against the current target = t (rolled once per 3 s window, always for droideka targets) |
 | `FUN_002a2d90()` | `lerp(0, 0.7)` | `FUN_002b94a0` | threat-score facing floor = max(0, 2v−1) (§5.2) |
 | `FUN_002a2f70(0)` | `lerp(2.0, 0)` | `FUN_002a89b8` | proximity-alert period + U(0,0.3) s (BF1 tiers U(1.1,2.1)/U(0.6,1.3)/U(0,0.8)) |

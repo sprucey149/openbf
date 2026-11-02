@@ -45,7 +45,7 @@ RAM or disc; [D] derived; [H] hypothesis. E = an entity, K = its class, T = a Mo
 
 1.1 **The body's matrix.** BF2 `FUN_00160160` (B2:121-218): with a pose table (argument 3 != 0) and a non-zero parent
     hash at body+0x48 (MIPS 0x160180 `lw a2, 72(s0)` - the hash Ghidra drops from the call), the matrix is
-    `FUN_00539150(table + 8, 0x100, hash)` (the table lookup) applied to the body's XFRM rows (B2:147-190); with no
+    `… with no
     table, a zero hash or a failed lookup, the XFRM alone (B2:141-145, 192-217). `FUN_00160258` (B2:221-283) then
     applies the entity's world matrix (B2:241). BF1 `FUN_00160160` (B1:121-220) is the same, the hash at body+0x44
     (MIPS 0x160180 `lw a2, 68(s0)`), lookup `FUN_00444998` (B1:147).

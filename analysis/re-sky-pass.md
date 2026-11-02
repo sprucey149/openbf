@@ -201,7 +201,7 @@ and adds its own. The far-scene near (80 m) is a cull/blend distance only.
   `{0x80180, 0x300001a0}` (567109–567110, own Z) or, when `DAT_00522ac0 != 0` (gate 567119; ELF 0x522ac0 = 0x01),
   `{0x800000000a080180, 0x30000100}` (567111–567114) = 16-bit far colour
   at FBP 0x180 sharing BF1's main Z at ZBP 0x100. Named node `FUN_0049e220(0x3de761c8,0,0)` at 565467; own-Z clear
-  `FUN_0049aa68(ctx, 0x6eed60)` only when `DAT_00522ac0 == 0` (565567–565568); composite sprite with TEST 0x33001 at
+  `… composite sprite with TEST 0x33001 at
   561641. So BF1 has the same structure. [V for the sites; D that the frame order matches BF2 — not walked]
   **CORRECTED 2026-09-29 (card REFL, `analysis/re-sky-reflect.md` §3 [O]):** the TEST 0x33001 sprite at 561641 is
   `FUN_0049c400`, a full-screen tint in bucket 0xd. BF1's far-over-near composite is `FUN_004a7098`, in bucket 10

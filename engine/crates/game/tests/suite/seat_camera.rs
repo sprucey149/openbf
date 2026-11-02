@@ -12,9 +12,10 @@
 //! - `cis_tread_snailtank` authors `TrackCenter` (0, -12, 1), 12 m below its
 //!   origin, with `TrackOffset` (0, 16.5, 14) lifting the camera back out.
 //!
-//! The pull point is now the section's fixed (0, 1.5, 0), the PS2's camera
-//! collision origin (`analysis/re-aim-assist.md` 10.6). Under uncut terrain a
-//! seat camera stays under it, as BF2 GEO1's hangar needs:
+//! The pull point is now the PS2's camera collision origin on the vehicle
+//! (`analysis/re-aim-assist.md` 10.6): `walk::vehicle_pull_height` for the pilot, the
+//! section's fixed (0, 1.5, 0) for a gunner and a building turret. Under uncut
+//! terrain a seat camera stays under it, as BF2 GEO1's hangar needs:
 //! `walk::tests::seat_camera_under_the_sheet_stays_under_it`.
 
 use core::sim::Sim;
@@ -51,6 +52,7 @@ pub(super) fn map(dir: &std::path::Path, factions: &[String; 2]) -> Option<Map> 
     walk.vehicle_seats = build.seats.clone();
     walk.vehicle_geometry = build.geometry.clone();
     walk.load_walker_views(&scene.manifest, &root);
+    walk.load_vehicle_tops(&scene.manifest, dir, &root);
     Some(Map { walk, build })
 }
 

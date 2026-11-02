@@ -88,7 +88,7 @@ outside the terrain on BF1.
 - **Lookup**: B1 `FUN_00344d98` 331498–331514: `b = buf[z·(D>>1) + (x>>1)]`, even x → high nibble; bounds 0..D−1
   else 0; D = `DAT_006270c8`. B2 `FUN_0042b0c0` 485891–485909: `buf[(z·D + x) >> 1]` (same for even D), D =
   `DAT_00700cd8`.
-- **Grid** — BF1: `FUN_00343b08` stores `DAT_006270c8 = 512` and the cell `DAT_006270cc = 16.0` (330628–330630; ELF:
+- **Grid** — BF1: `FUN_00343b08` stores `… ELF:
   `lui at,0x4180 / swc1 $f1,0x70cc(s0)` at 0x343b28–0x343b60, `addiu v0,zero,512` at 0x343b5c); these are their only
   writers (text search + `widescan.py`: 1 store each, `checks.txt`). BF2: `FUN_00429640` sets the same defaults
   (484643–484645), then the `prp_` loader `FUN_0042b1a8` overrides them when a FOLG was loaded: cell `DAT_00700cdc =

@@ -111,7 +111,7 @@ Examples: BF1 `rep_weap_inf_rifle` R 0.6, L 0.025, (80, 80, 255); `all_weap_inf_
   (319410–319414), called by the ordnance base ctor `FUN_0030eef8` (301502).
 - The only other writer of the B1 end time is `FUN_00284148` (208268: now − 1.0, a reset); the instance ctor never
   initialises it (verifier C9).
-- **now** = B1 `FUN_0033e4f0` = the game clock `0x56dcc8` in seconds (DAT_0061b1f0 = &DAT_0056dcc8, 328136); B2
+- **now** = B1 `FUN_0033e4f0` = the game clock `0x56dcc8` in seconds (… B2
   `FUN_004240f8` (the clock 0x66ae90 via DAT_006fe398, ticks of 1/9000 s). It advances once per frame before the one
   `Update` (`analysis/a5-tickrate.md`), so the fire and the render of the same frame read the same now.
 - **RAM** (`ramflash2.py`, `playerweap.py`, `sheet*.py`): in states saved while firing, the player's weapon reads

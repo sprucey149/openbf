@@ -69,7 +69,7 @@ bytes, [D] derived (arithmetic or naming inferred from use), [H] hypothesis.
 ## §1 The class
 
 **Classlabel → constructor.** BF1 `FUN_00172ab0` registers the label table: B1:15588-15590
-`FUN_00444b88(&h,"walkerdroid"@0x5271c0); FUN_001d31d8(alloc(0x28f0), h)` → the class
+*(decompiler detail omitted)* → the class
 object is 0x28f0 bytes, ctor `FUN_001d31d8` (B1:80941), class vtable `DAT_0052ff00`
 (B1:80961). Siblings in the same table: soldier→`FUN_00213dd8`, droid→`FUN_001cb208`,
 walker→`FUN_0021cca8`, flyer→`FUN_001dead8` [V]. BF2 `FUN_00173d10`: B2:16400-16401

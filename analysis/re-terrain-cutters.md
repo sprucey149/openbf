@@ -81,11 +81,11 @@ open (§5); the port draws the world with `cull_mode: None` (render/src/lib.rs:1
 1.3 **HEXP `cutterMask`** (byte 1 of the 8-B record) is consulted only by the sim's point test (§1.4), never by the
 builder (above). Flag set ≠ mask set: BF1 HOT1 flag−hexp = {621}, hexp−flag = {459, 495, 558} (s13, census re-run). [V]
 1.4 **Cutters on the ELF.** Loader `FUN_004726b8` B1:536568: `CUTS` 0x53545543 (536853) `INFO` u32 count →
-`DAT_005229ac = (count ≥ 11)` (536858–536864: the ≥ 11 path uses an untraced spatial structure, 538059–538066);
+`…
 `CUTR` 0x52545543 (536867): `INFO` = u32 planeCount → +0x30, then f32 r → `.w` and +0x20, f32 cx cy cz → +0x10
 (536883–536909); `PLNS` 0x534e4c50 → planeCount × f32[4] (536927–536937). Point test `FUN_00474d98` B1:537988:
 HEXP byte-1 quadrant gate 538028–538034 (`bit = (x>>3)&1 | (z>>2)&2`), then per cutter `FUN_00474c20(r, p, c)` =
-`|p − c|² < r²` (537901–537921) and `FUN_00474bb0(p, planes, n)` = `0.0 < n·p + d → not inside` (537883–537896);
+`|p − c|² < r²` (537901–537921) and `…
 height wrapper `FUN_00473db0` returns −300.0 when cut (537211–537228); BF2 `FUN_0055f258` 695207–695225. [V]
 Port deltas: `collision.rs:679` tests `< 0.0` (ELF: `≤ 0`), and the port has no HEXP quadrant gate — both edge-only.
 

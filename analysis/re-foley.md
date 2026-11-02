@@ -201,7 +201,7 @@ B1 `FUN_00205538(soldier, pose, matrix)` 116118-116421, called once from the sol
     B1 116214-116217, 116316-116319;
   - else, if the flag is set and the foot ROSE by more than 0.01 m: clear the flag, and **if the previous height was
     below 0.17 m (BF2: the class's `MinFootHeight`) start the footstep** - B1 116224-116226 (left,
-    `FUN_00205000(0, soldier, 0, ...)`), 116331-116333 (right, `... 1 ...`); B2 157922-157925, 158029-158032.
+    `… B2 157922-157925, 158029-158032.
   So the sound comes when a foot that came down lifts off again, once per foot per stride, and the position is the
   foot bone's. The thresholds are per CALL (the PS2 draws at 30 Hz: 0.01 m per call = 0.3 m/s).
 - Also at that moment, not sounds: a `decal_soldier_footprint` decal for either foot (B1 116281-116282 and
@@ -211,7 +211,7 @@ B1 `FUN_00205538(soldier, pose, matrix)` 116118-116421, called once from the sol
 
 ### 4.2 The step from distance [V]
 
-B1 `FUN_002051a0(dt, soldier)` 115939-116067, called every soldier update (`FUN_00205cc8` 116839); B2
+B1 `… B2
 `FUN_0023f9e0` 157584-157726 (`FUN_00240bf8` 159533).
 
 - Gates, in order (B1): on the ground (115940); **not (has an animator and is not first person)** (115975-115977;

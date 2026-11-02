@@ -9,8 +9,7 @@
 //! is fogged by its own distance rather than the world's.
 //!
 //! Ignored by default — needs a real adapter. Run them through
-//! `scripts/gpu_tests.sh` (serialised); a bare `cargo test -p render --
-//! --ignored` SIGSEGVs on the iGPU.
+//! `scripts/gpu_tests.sh`.
 
 use glam::Mat4;
 use render::{Camera, DrawCmd, Fog, Lighting};

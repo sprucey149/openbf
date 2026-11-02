@@ -181,7 +181,7 @@ sea-terrain would show the -8 m ocean through it.
 **Addendum (KOC's RE, 2026-09-28, lane 2, [O]) — the [H] above is answered, and it is moot: the PS2 draws no terrain on
 BF1 KAM1 at all.** See `analysis/re-terrain-enable.md`.
 - BF1 KAM1 and BES1 author `DomeInfo { TerrainEnable(0) }` (fnv 0xae291b6d). BF1's DomeInfo parser `FUN_002e29e0`
-  turns it into `DAT_005229a8 = 0` (B1 270354–270356; ELF 0x2e2c24–0x2e2d3c).
+  turns it into `… ELF 0x2e2c24–0x2e2d3c).
 - Every terrain draw tests that flag first (`FUN_00487ad8` 549130; the far-scene call, `FUN_002f2308` 280296), and the
   height query answers −1000 (`FUN_00473710`).
 - The PS2's RAM holds 0 on these two maps only. Patched save states at F9's pose: the sea is the ocean draw alone, over

@@ -12,6 +12,12 @@ pub const RADIUS: f32 = 0.35;
 /// [ours] Every droid lasts 90 s from launch, both games, all maps (the PS2:
 /// BF1 40 s of health drain, BF2 about 58.8 s of energy drain).
 pub const LIFETIME: f32 = 90.0;
+/// [ours] A droid with nothing at all under it is destroyed after this many seconds.
+/// The PS2 lets it fall to y -500 in both games (B1 `FUN_001c9398` B1:73674, B2
+/// `FUN_001ee668` B2:101534), a fall of 10 s or more with the player watching on a map
+/// with no terrain and no boundary. Falling this long it has dropped 11 m.
+pub const ADRIFT_LIMIT: f32 = 1.5;
+
 pub const GRAVITY: f32 = 9.8;
 pub const PROBE: f32 = 10.0;
 // [ours] The bots' droid rules (card DROIDAI, `analysis/re-remote-droid.md`
@@ -306,8 +312,11 @@ pub struct Droid {
     pub prev_buttons: u32,
     pub blaster: WeaponState,
     pub charge: Option<f32>,
-    /// The boundary countdown's seconds left; `None` inside the map.
+    /// The boundary countdown's seconds left; `None` inside the map, or while no
+    /// one flies it.
     pub leaving: Option<f32>,
+    /// Seconds with nothing at all under it ([`ADRIFT_LIMIT`]).
+    pub adrift: f32,
 }
 
 impl Droid {
@@ -342,6 +351,7 @@ impl Droid {
             blaster: WeaponState::with_clips(&remote.blaster, human, 0),
             charge: None,
             leaving: None,
+            adrift: 0.0,
         }
     }
 
@@ -406,13 +416,20 @@ impl Droid {
         self.pos += self.vel * dt;
     }
 
-    /// One update of the boundary countdown (`analysis/re-boundary.md` T1, T2;
-    /// that their third entity is the droid is [H]): `time` is set and spent in
-    /// the first outside update, and the droid dies in the one that takes it
-    /// below 0. Coming back inside clears it. True on the update it dies.
+    /// One update of the boundary countdown (`analysis/re-boundary.md` T1, T2, T2b):
+    /// `time` is set and spent in the first outside update, and the droid dies in the
+    /// one that takes it below 0. Coming back inside or handing control back clears
+    /// it. True on the update it dies.
     pub fn tick_leaving(&mut self, outside: bool, time: f32, dt: f32) -> bool {
         self.leaving = outside.then(|| self.leaving.unwrap_or(time) - dt);
         self.leaving.is_some_and(|t| t < 0.0)
+    }
+
+    /// [ours] One update with or without ground under it. True on the update it has
+    /// been over nothing for [`ADRIFT_LIMIT`].
+    pub fn tick_adrift(&mut self, over_nothing: bool, dt: f32) -> bool {
+        self.adrift = if over_nothing { self.adrift + dt } else { 0.0 };
+        self.adrift >= ADRIFT_LIMIT
     }
 
     /// Seconds of its [`LIFETIME`] left.
@@ -448,9 +465,13 @@ impl Droid {
         ] {
             eat(&v.to_bits().to_le_bytes());
         }
-        // Only while outside, so a flight inside the map hashes as it always has.
+        // Only while outside or adrift, so a flight inside the map over ground
+        // hashes as it always has.
         if let Some(t) = self.leaving {
             eat(&t.to_bits().to_le_bytes());
+        }
+        if self.adrift > 0.0 {
+            eat(&self.adrift.to_bits().to_le_bytes());
         }
         eat(&self.prev_buttons.to_le_bytes());
         self.blaster.hash_into(eat);

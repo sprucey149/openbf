@@ -192,6 +192,9 @@ pub struct CpuMesh {
     /// wrote it on the mesh (`extras.sphere`, `bake::glb::model_sphere`,
     /// card BPNT); `None` on every other GLB.
     pub sphere: Option<[f32; 4]>,
+    /// The top of the model's vis box, model space (`extras.vis_top`); `None` from
+    /// a bake older than it.
+    pub vis_top: Option<f32>,
 }
 
 /// One submesh's specular second pass as the bake wrote it

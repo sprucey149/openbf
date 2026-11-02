@@ -111,7 +111,7 @@ tagged `shdw`, `SHDI`, `CLTH` or `bnd_`:
   switches the rebuild. The Intensity goes to DAT_007c5758, which nothing reads [receipt:3dc255e4]. BF1's darkening (2's
   [H]) is black, x 0.625 inside any volume, with no per-map key; the knock-out's count != 0 region is 5.2 % of the frame
   (ratio 0.585), not the 9.5 % / 0.63 of the darker-by-4-levels mask.
-- `ScriptCB_DisableFlyerShadows` (ten BF2 space-map scripts call it) writes DAT_005f908c = 0 (24422; FUN_00174b28 sets 1,
+- `ScriptCB_DisableFlyerShadows` (ten BF2 space-map scripts call it) writes … FUN_00174b28 sets 1,
   16761), and nothing reads DAT_005f908c [receipt:fccf2693] (widescan bf2 0x5f908c: the two stores only).
 
 ## 4. `CLTH` - BF2 cloth [V][D][O]

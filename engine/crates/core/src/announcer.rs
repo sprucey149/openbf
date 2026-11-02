@@ -197,6 +197,11 @@ impl VoiceQueue {
         }
     }
 
+    /// A line of this name is waiting to start.
+    pub fn waiting(&self, name: &str) -> bool {
+        self.pending.iter().any(|l| l.name == name)
+    }
+
     /// One frame: the playing line runs down by `dt`; when the voice is idle
     /// the head of the queue starts. `start` plays the line and returns its
     /// length in seconds, or None when there is no take to play (the next

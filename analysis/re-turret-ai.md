@@ -96,14 +96,7 @@ and 2.3 (the look, the range band). Section 8 has the build.
 ### 2.2 What the seat's AI writes each frame [V][O]
 - **C7.** The MountedTurret's AI input is `FUN_0026fbd0(dt, T)` (B2:190784-190812), slot +0xcc of vtable 0x620050
   (thunk `FUN_002713f8`, data word 0x62011c):
-  ```
-  ai = *(T+0xc4);  if FUN_002bbf00(dt, ai+0x430) == 0 or ai == 0: return      (serve the mover's seat requests)
-  aim = copy of ai+0x4a0 (the mover's aim order, mv+0x70)
-  FUN_002bb1b0(dt, ai+0x430, aim)                                             (the fire controller, section 7)
-  turn = FUN_002f5a18(C);  pitch = FUN_002f5a48(C)
-  FUN_002a50c0(dt, K+0x834, K+0x83c, C, ai+0x450 (the move order), aim, &turn, &pitch, 0)
-  T+0x84 = turn;  T+0x88 = pitch
-  ```
+*(decompiler excerpt omitted from the public copy)*
 - **C8.** K+0x834 is `MaxTurnSpeed` (hash 0x5433f589, B2:191751-191755) and K+0x83c `MaxPitchSpeed` (0xb5534be0,
   B2:191464, 191505-191507); the class constructor `FUN_00270540` defaults them to 2.0 and 0.5 (B2:191385-191386).
 - `FUN_002a50c0` / `FUN_002a45a0` are `re-walker-ai.md` 5 / 4 [O there]: the aim point is the target's lead point

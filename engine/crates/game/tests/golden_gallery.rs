@@ -12,21 +12,13 @@
 //!   UPDATE_GOLDENS=1 cargo test -p game --test golden_gallery -- --ignored
 //! `scripts/goldens.sh` does the whole set in one go.
 
-use std::sync::Mutex;
-
 mod common;
 use common::{check_golden, committed_goldens, force_ps2_tier, goldens_dir};
-
-/// Both tests build their own wgpu devices; running them at the same time
-/// segfaults inside the driver, so they take turns. (cargo runs test binaries
-/// sequentially but the tests INSIDE one binary in parallel.)
-static GPU: Mutex<()> = Mutex::new(());
 
 #[test]
 #[ignore = "requires a GPU adapter + baked assets_baked"]
 fn every_baked_map_matches_its_golden() {
     force_ps2_tier();
-    let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
     let assets = game::assets::baked_root();
     let maps = game::assets::discover_maps(&assets);
     // Bug T1 for the 32 map goldens: an empty `maps` used to print SKIP and
@@ -111,7 +103,6 @@ fn load_screens_match_their_goldens() {
 #[ignore = "requires a GPU adapter + baked assets_baked"]
 fn every_baked_unit_matches_its_golden() {
     force_ps2_tier();
-    let _gpu = GPU.lock().unwrap_or_else(|e| e.into_inner());
     let assets = game::assets::baked_root();
     let units = game::gallery::discover_units(&assets);
     // Bug T1: an absent `assets_baked/side_*/soldiers` used to return early

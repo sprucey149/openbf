@@ -32,7 +32,7 @@ pairs refit), `tools/b2pieces.py` (shadow pieces and their draw slot in a state'
 | len (how far) | class factor x the terrain hit fraction of a ray from the vehicle along the sun: flyers 500 m, hovers / walkers / droidekas 150 m [V][O] | - |
 | near | the model's view depth < 30 m + its sphere radius: z-fail with caps; else z-pass without caps [V][D][O] | - |
 | darkening | every pixel inside any volume (count != 0, mod 256) is multiplied by **0.625** (black at 48/128), in the frame buffer, after the opaque buckets and before water / far scene / translucents [V][M][O] | the same pass is built at load (TA0 0x30) and never called [receipt:02bc10f8] [V][O] |
-| per map | a constant: DAT_00522b6c = 0x30, written only at init [receipt:3476da75]; SunInfo `ShadowColor`'s setter is an empty function [V] | `Effect("Shadow") Intensity` is stored and never read [receipt:3dc255e4] [V][O] |
+| per map | a constant: … SunInfo `ShadowColor`'s setter is an empty function [V] | `Effect("Shadow") Intensity` is stored and never read [receipt:3dc255e4] [V][O] |
 
 So the card's BF2 half (Intensity per map, off in split screen) has nothing to build: `re-chunk-census.md` 3 read the
 gate right but the draw behind it is a stub (correction in 10).
@@ -63,10 +63,10 @@ Per piece per draw, FUN_004ad760 hands FUN_004ae680 the node's matrix and the li
   half-edges' byte 7 (569770-569802).
 - Silhouette: the half-edge pairs (2k, 2k+1) whose two faces differ; FUN_004ad5c0 walks each closed silhouette loop
   (569829) into a list of {vertex, loop-start flag}, closing it by repeating the first vertex.
-- Caps: DAT_00522ecc = 1 (ELF; no writer [receipt:d7704603]) selects the faces with n . L_local > 0 - the faces turned AWAY from the sun
+- Caps: … no writer [receipt:d7704603]) selects the faces with n . L_local > 0 - the faces turned AWAY from the sun
   (569886-569915).
 - FUN_004adbc8 (570452-570590): per silhouette point two vertices, P and P + L_local * len, as a triangle strip per loop
-  (16-bit positions in a 1024 m box: (v + 512) * 65535/1024, DAT_00522ed4 = 512.0; 0x8000 on a loop's first pair =
+  (16-bit positions in a 1024 m box: (v + 512) * 65535/1024, … 0x8000 on a loop's first pair =
   the strip restart). Only when `near` (570593) the two caps follow: the selected faces at their place (DAT_00522ef8)
   and the same faces moved by L_local * len (DAT_00522efc), each as a strip (both flags ELF 1, no writer [receipt:d7704603]).
 - Every piece of the model is drawn each time (the list off the container, 570065).
@@ -90,7 +90,7 @@ Per piece per draw, FUN_004ad760 hands FUN_004ae680 the node's matrix and the li
 
 ## 4. Counting: bucket 6 and the count buffer [V][O]
 
-- All volumes go to render bucket 6 (FUN_0049e280 = FUN_0049ee68(.., 6, ..); 4 calls in the decomp, 4 jal words in the
+- All volumes go to render bucket 6 (FUN_0049e280 = … 4 calls in the decomp, 4 jal words in the
   ELF: the two set-up branches, the tail, the draw). Buckets run 0..0x14 in order (`re-sky-reflect.md` 3): 6 comes
   after 3 (terrain) and 5 (opaque models) and before 8 (near water), 9-10 (the far target) and 0xd (translucents).
 - **Set-up, each frame** (FUN_004a57e0 from FUN_0049b9a8, 565298-565317, DAT_00522b4c = 0: ELF 0, its stores the init

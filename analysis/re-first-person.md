@@ -70,7 +70,7 @@ B1 `FUN_00204748`: K+0x100 = M·T0 for every unit (T0 at `DAT_005862f0` by postu
 - BF1: O+0xc4c set by `FUN_00209758` on the change to state 5 (thrown) while in first person; cleared in state 0
   once the busy timer is out. While set, the camera takes the chase section and the body is drawn.
 - BF2: E+0x4e0 |= 0x8000 on the change to state 9 or 10 in first person (and the FPM model is reset,
-  `FUN_001c1538(.., 0)`); its clear was not found in this pass.
+  `… its clear was not found in this pass.
 
 ## 5. What is drawn [V]
 

@@ -90,7 +90,7 @@ team, `+0x8c` selected post, `+0x98` class. The member (stride 0x1a4, pool `DAT_
   replaced by 0; where heroes are on offer, `FUN_0039a888`, the first hero class - `B2:392315-392358`); and picks a new
   camera shot (`FUN_001b9d00`, `B2:392548-392553`, §1.1).
 - [L] Every screen change happens on the update after the key (`t7_*/rows.csv`: X at 186.1615 -> state 2 at 186.2616).
-- [V] The whole input block is skipped while `FUN_00432178(0x719c00)` is non-zero ([H] the pause menu: re-ambience-music §6.2 reads BF1's twin so);
+- [V] The whole input block is skipped while `…
   X and Triangle are edge-latched (`SD+0x30`, `SD+0x31`).
 
 ### 1.1 The backdrop: the mission's camera shots [V][L]
@@ -343,7 +343,7 @@ C7 / C12 narrowed (folded in below).
   reads that bit as the hero flag; the test is at `B2:159458`). `FUN_002379f0` does the same with `E+0x330`, skipped
   when bit 4 of `E+0x228` is set (`B2:151772-151780`). `FUN_001ce0d8` is a thunk to
   `FUN_001d0a48` (`B2:77402`), which, when the player index has a viewport (`FUN_003d6dd8 >= 0`), calls
-  `FUN_001ba658(camera manager, unit, viewport, killer)` (`B2:79771`; always offline, online under further flags); that one, only while the viewport's current camera is its player camera (`B2:63666`), initialises the
+  `… that one, only while the viewport's current camera is its player camera (`B2:63666`), initialises the
   viewport's death camera from the player camera's matrix and makes it current (`B2:63668`). Callers: `FUN_001ce0d8` 6
   jal words [receipt:602956ad], `FUN_001ba658` 1 [receipt:09081883], `FUN_001bc5f8` 2 [receipt:6b7e0f71] (the other is
   the unit destructor, below).

@@ -173,39 +173,7 @@ the walker's slot order (`vt.py b2 0x62bf64`). A whole-ELF data-word scan finds 
 
 ## 3. The input — FUN_0025f4a0(dt, E) (B2:179422-180199) [O]
 
-```
-I1  if FUN_003d7a20(E, &dt) != 0: return 1                        B2:179473-179476  (0 offline, re-hover T1)
-I2  (net, seats, AI claim, weapon/turret bookkeeping)              B2:179477-179655
-I3  water: if not dead and FUN_005613c8(GetPosition, &h) (over water):     B2:179657-179697
-        if h < pos.y + radius: timer E+0x226c = WaterDamageInterval (K+0xe60)
-        else: timer -= dt; if timer < 0: deal WaterDamageAmount (K+0xe64) through FUN_001e0900
-                                   (no reset on that path: once submerged past the interval, every tick) [V: 0x25fa70-0x25fb64 store only the decrement and the reset]
-    not over water: timer = K+0xe60
-I4  seat / turret switching, the custom-stance buttons (only when K+0x675 > 0 and K+0x2e4 == 1)   B2:179700-179861
-I5  vtable +0x128 (FUN_0025cfe0, weapon), +0x12c (FUN_0025d1b0, weapon)                        B2:179863-179864
-I6  mouse = FUN_003eef38(driver) (0 offline, re-hover §11.5);  z = dt, or dt / seatweapon[+200] while zoomed   B2:179865-179871
-I7  (mouse = a profile bit: set only by FUN_003f3e58 from the port type, default 0, or by the network reader FUN_003eba10)
-    !mouse: AI → pitchRate = MaxPitchSpeed (K+0x76c), yawRate = MaxYawSpeed (K+0x760)
-            human → pitchRate = MaxPitchSpeed; yawRate = MaxPitchSpeed + (MaxYawSpeed − MaxPitchSpeed)·E[+0x360]   B2:179872-179881
-    mouse: both = MaxYawSpeed                                                                  B2:179883-179885
-I8  aimPitch += pitch·pitchRate·z                                                              B2:179889
-I9  dead (E+0x2190 & 2): death camera / effects, return — everything below needs the walker alive   B2:179890-179987
-I10 fwd = throttle, overridden by the body pitch a = E+0x514:                                  B2:179990-180006
-        a < −0.25 → −1;  −0.25 ≤ a < −0.18 → min(throttle, 0)
-        a > 0.25 → +1;   0.18 < a ≤ 0.25 → max(throttle, 0)
-    (a > 0 pitches the move direction down, §6: past 0.25 half-angle the walker is forced downhill; between 0.18 and
-     0.25 it may not walk uphill.  One-pair walkers never change a, so this never fires on an AT-ST.)
-I11 turnSpeed = ForwardTurnSpeed; LOCOMOTION(dt, fwd, strafe, turn, E, &turnSpeed)             B2:180008-180010  (§4)
-I12 engine sound, footstep sounds                                                              B2:180011-180138
-I13 yaw-rate ease near the limits:                                                             B2:180139-180174
-        hh = 2·atan2(h.s, h.c); max' = YawMax + hh; min' = YawMin + hh
-        fMax = (turn ≥ 0 or max' ≤ 0) ? 1 : clamp((max' − aimYaw)⁺ / max', 0, 1)
-        fMin = (turn ≤ 0 or min' ≥ 0) ? 1 : clamp((aimYaw − min')⁺ / −min', 0, 1)
-        f = min(fMin, fMax);  if turnSpeed < yawRate: yawRate = f·yawRate + (1 − f)·turnSpeed
-I14 aimYaw −= turn·yawRate·z                                                                   B2:180175
-I15 aimPitch = clamp(aimPitch, PitchLimits K+0x770, K+0x774)                                   B2:180176-180182
-I16 fall: if !(E+0x2190 & 0x82) and v.y < 0: pos.y += v.y·dt  (SetPosition)                   B2:180183-180196
-```
+*(decompiler excerpt omitted from the public copy)*
 No 30·dt factor here: the walker's aim rates are rad/s (compare the hover's I8).
 
 ## 4. The locomotion — FUN_0025d5e0(dt, fwd, strafe, turn, E, turnSpeed*) (B2:178022-178723) [O]
@@ -227,21 +195,7 @@ K+0xe10 is tan(the in-place angle) (§11). The rewrite gives a sideways stick a 
 the walker walks where the stick points instead of stepping in place (§4.6).
 
 ### 4.2 Speed and turn speed; boost and energy (B2:178131-178233; 0x25d7ac-0x25da30)
-```
-*turnSpeed = StoppedTurnSpeed (K+0x778);  speed = MaxSpeed (K+0x748)                        B2:178131-178132
-if E+0x2190 & 0x40 (supported): E+0x21e4 = 0; jumping bit cleared   else: E+0x21e4 += dt      B2:178133-178139
-if !stance and (E+0x2b4 & 3) == 3: controllable slot +0xac → the jump (§7)                     B2:178140-178145
-if jumping:                                                                                    B2:178219-178233
-    E+0x2280 = 0; E+0x2190 &= ~0x1f00;  speed = v·E.fwd;  *turnSpeed = BoostTurnSpeed (K+0x780); boost latch off
-else:
-    boost when MaxSpeed < BoostSpeed and !stance and E+0x2200 == 1 and p2 > 0 and p2² + p3² > 0.81 and
-        (human: boost button E+0x2bc bit 0, or already latched) or (AI: E+0x324 ≠ 0 and FUN_002b6ad0()+0x4d0 == 3)
-        and FUN_001e2010(EnergyBoostDrain·dt, energy) succeeds:
-            speed = BoostSpeed (K+0x74c); *turnSpeed = BoostTurnSpeed; latch on                     B2:178150-178188
-    otherwise: latch off; regen FUN_001e1fc0(f·EnergyAutoRestore·dt, energy), f = 1 or 1.5 [DAT_005feda0]
-            with the driver's perk (FUN_00360018(·, 6));
-            *turnSpeed = 0 if stance, ForwardTurnSpeed (K+0x77c) if walking                         B2:178206-178218
-```
+*(decompiler excerpt omitted from the public copy)*
 The latch is E+0x2274 bit 0 = bit 32 of the u64 at E+0x2270; only the ctor and this function store it. So once a human's
 boost button starts a boost, the boost keeps itself on, button released, for as long as the stick, walk direction and
 energy conditions hold.
@@ -353,20 +307,7 @@ D  stance: dt' = 4·dt   (DAT_005fd244)                                         
 covers 5.0 m/s. Boosting it runs ×1.47 and covers 10 m/s. Below |stick| ≈ 0.68 the clip floors at ×0.5, 3.4 m/s.
 
 ### 4.9 Advance, root motion, clip changes (B2:178561-178715; 0x25e2b8-0x25e634)
-```
-rem = the clip's time left (+ K+0xe04 when E+0x21e8 == 3, death)
-if rem ≤ dt':                                                                         B2:178561-178640
-    advance the player and each leg pair's player by rem
-    not jumping: d = root z displacement (FUN_002a0b30 → FUN_00532858 on layer 0)·RS; moved += d; FUN_00260918(d, E)
-    0 < E+0x21e8 < 3 (turnl/turnr): h ← h·(cos φ + i sin φ), φ = E+0x2188·rem / clip duration
-    dt' −= rem;  clear the custom bits
-    next action: dead → 6; walking → 2 (E+0x2200 == 1), 3 (== 2), else 0; not walking → 0
-advance the player (and the leg pairs') by dt'; playing reversed, by at most the time left to the start   B2:178643-178675
-not jumping: d = root z displacement·RS; FUN_00260918(d, E);                                     B2:178676-178684
-             v.x = (moved + d)/dt·E.fwd.x;  v.z = (moved + d)/dt·E.fwd.z     (v.y untouched)
-leg offset: E+0x21e8 in 1..2 → h rotated by E+0x2188·dt'/duration;  3..10 → FUN_0025ecd8   B2:178688-178703
-    FUN_0025ecd8 (B2:178987-179007): h.c += h.s²·0.1; h.s −= h.c·h.s·0.1; renormalise → h shrinks ~10 % a tick
-```
+*(decompiler excerpt omitted from the public copy)*
 FUN_00260918(d, E) (B2:180214-180376; 0x260918-0x260b90) moves the body along the LEGS' forward, pitched by the body pitch:
 ```
 p = 2·E+0x514 (0 when DAT_005fd234 ≠ 0 — never: .data byte 0, only two loads in the ELF)
@@ -451,17 +392,7 @@ The pair object keeps its own anim player (+0x18) for the `_leftup` / `_rightup`
 summed z at setup (FUN_002a1750, B2:223802): the pair's forward offset.
 
 **Per pair**, FUN_002a2028(a = E+0x514, P, M = E+0x120, feet = the two foot prims' model-space positions) (B2:224163-224259):
-```
-L = LegRayHitLength (K+0xe38)
-base.y = M.pos.y − sin(2a)·P[0]
-for each foot i: origin = (M.pos with base.y) + M.right·foot_i.x + M.fwd·foot_i.z + (0, L, 0)
-    t = ray(2L, origin, (0,−1,0), mask 0x90)  (FUN_00161c60; terrain 0x80 + buildings 0x10)
-    h_i = (1 − 2t)·L       (ground height above base; −L when nothing is hit)          B2:224231-224233
-P+0x128 = h_0 − h_1
-P+0x120 += (clamp(−0.6·(h_0 − h_1), −1, 1) − P+0x120)·0.4   (DAT_005fdf5c = 0.6; the leftup/rightup blend)   B2:224238-224243
-support S (P+0x124): roll flag off (K+0x78c == 0): S = min(h); if max(h) > L/2: S += (max − min)·min((max − L/2)/(0.4L), 1)
-                     roll flag on: S = (h_0 + h_1)/2                                     B2:224244-224257
-```
+*(decompiler excerpt omitted from the public copy)*
 **The body** (FUN_00260ba0):
 ```
 maxS = max over pairs of S (start −1);  avgD = mean of P+0x128                           B2:180416-180458
@@ -665,7 +596,7 @@ E+0x2350; dead E+0x22d0.
 
 ### 13.1 Functions and frame order [V]
 - The activate B1 FUN_0021c9a0 registers the object at E+0x540 with key 0 and the task at E+0x23b0 with key −15, in
-  list 2 (B1:132531-132532). The key-0 object's update is `FUN_00219ed8(obj − 0x540)`, **the input** (B1:134424); the
+  list 2 (B1:132531-132532). The key-0 object's update is `… the
   task runs FUN_0021b3a0, which calls **the legs** FUN_0021ae90 (B1:131552).
 - The input calls **the locomotion** FUN_00218fa0 through entity vtable slot +0x110 (word 0x533c28).
 - **The contact** FUN_00217d50 is the physics object's callback (`FUN_00217d50(obj − 0x100)`, B1:134649; vtable word

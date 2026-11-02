@@ -106,7 +106,7 @@ with `health` -> Gain (0.1, 2) (0.3, 2) (0.4, 1.5) (0.5, 1) (0.85, 0) (1, 0) - s
    x= graph(value) (524173-524177); `direct != 0` -> multiplier[target] x= value (524181-524182). So several graphs on
    one target multiply.
 3. **[V] Per sound update** (`FUN_00448ed8`, only when dt > 0, 507492; `FUN_00461508(dt)` 507529 -> every player:
-   `FUN_00461220(dt, player)` 524322): first the layer starts (`FUN_0045c700`, 524208); then, when the player is
+   `… then, when the player is
    playing (524209), for every layer voice: gain = clamp(property gain (P+0x14) x multiplier[Gain], 0, 1)
    (524220-524225), pitch = max(0.1, property pitch (P+0x10) x multiplier[Pitch]) (524226-524233), and the other
    fields the same way (524234-524296: reverb gain, pan in -1..1, min <= mute <= max distance, rolloff, roll-in).

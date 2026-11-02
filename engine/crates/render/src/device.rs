@@ -12,15 +12,71 @@ use crate::{
     MeshData, MeshHandle, RenderError, Renderer, SkinnedMeshData, SkinnedMeshHandle, Target,
     TextureDesc, TextureHandle,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread::ThreadId;
 
 /// Format used for the headless render target (and thus PNG captures).
 pub const HEADLESS_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+/// Whose turn it is to use Vulkan in this process, and how many renderers that
+/// thread holds.
+static GPU_TURN: (Mutex<Option<(ThreadId, u32)>>, Condvar) = (Mutex::new(None), Condvar::new());
+
+/// A renderer's turn at the GPU, from before its Vulkan instance is created to
+/// after its device is dropped.
+///
+/// The Vulkan loader walks its lists of instances and devices with no lock, so
+/// one thread making or dropping a renderer crashes another thread that is
+/// naming an object or listing extensions (`loader_get_icd_and_device` and
+/// `terminator_EnumerateInstanceExtensionProperties`). A device making objects
+/// is enough to be hit, so taking turns only to create one would not help: the
+/// turn lasts as long as the renderer. The test harness runs tests on parallel
+/// threads, so this is what keeps a test binary from needing `--test-threads=1`.
+///
+/// The thread holding a turn may make more renderers. Another thread waits, so
+/// a renderer must not wait on another thread that is making one.
+pub(crate) struct GpuTurn(());
+
+impl GpuTurn {
+    pub(crate) fn take() -> Self {
+        let (holder, free) = &GPU_TURN;
+        let me = std::thread::current().id();
+        let mut held = holder.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            match &mut *held {
+                None => {
+                    *held = Some((me, 1));
+                    return Self(());
+                }
+                Some((owner, count)) if *owner == me => {
+                    *count += 1;
+                    return Self(());
+                }
+                Some(_) => held = free.wait(held).unwrap_or_else(|e| e.into_inner()),
+            }
+        }
+    }
+}
+
+impl Drop for GpuTurn {
+    fn drop(&mut self) {
+        let (holder, free) = &GPU_TURN;
+        let mut held = holder.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, count)) = &mut *held {
+            *count -= 1;
+            if *count == 0 {
+                *held = None;
+                free.notify_all();
+            }
+        }
+    }
+}
 
 impl Renderer {
     /// Windowed renderer. The surface takes its own `Arc` on the window, so the
     /// caller keeps ownership of theirs for event handling.
     pub fn new_windowed(window: Arc<winit::window::Window>) -> Result<Self, RenderError> {
+        let turn = GpuTurn::take();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -90,6 +146,7 @@ impl Renderer {
             Target::Window { surface, config },
             format,
             info,
+            turn,
         )
     }
 
@@ -97,6 +154,7 @@ impl Renderer {
     /// needed (adapter requested with `compatible_surface: None`).
     pub fn new_headless(width: u32, height: u32) -> Result<Self, RenderError> {
         assert!(width > 0 && height > 0, "headless target must be non-empty");
+        let turn = GpuTurn::take();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
@@ -126,6 +184,7 @@ impl Renderer {
             },
             HEADLESS_FORMAT,
             info,
+            turn,
         )
     }
 
@@ -325,6 +384,29 @@ fn pick_alpha_mode(modes: &[wgpu::CompositeAlphaMode]) -> wgpu::CompositeAlphaMo
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_one_thread_holds_a_gpu_turn_and_that_thread_may_take_another() {
+        use super::GpuTurn;
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static HOLDERS: AtomicU32 = AtomicU32::new(0);
+        std::thread::scope(|s| {
+            for _ in 0..8 {
+                s.spawn(|| {
+                    for _ in 0..50 {
+                        let first = GpuTurn::take();
+                        assert_eq!(HOLDERS.fetch_add(1, Ordering::SeqCst), 0);
+                        // Its own second turn does not wait on itself.
+                        let second = GpuTurn::take();
+                        drop(first);
+                        std::thread::yield_now();
+                        assert_eq!(HOLDERS.fetch_sub(1, Ordering::SeqCst), 1);
+                        drop(second);
+                    }
+                });
+            }
+        });
+    }
+
     use super::*;
     use wgpu::CompositeAlphaMode::{Auto, Inherit, Opaque, PostMultiplied, PreMultiplied};
 

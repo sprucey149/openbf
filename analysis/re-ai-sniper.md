@@ -89,7 +89,7 @@ use), **[H]** hypothesis. Written for HOLD 19(g) and 19(e) (`HANDOFF-OPUS.md`), 
 **The consumer** `FUN_002ae7b8(growth, tracker)` (B2:233282–233321) [V]:
 - B2:233299 `a local = 1.5;` — the floor when the tracker has NO target (`*argument 2 == 0`, words 0x2ae7f4/f8
   `lui $at,0x3fc0; mtc1 $at,$f1` before `beqz $a0` at 0x2ae7fc).
-- B2:233314 `a local = (float)FUN_002a2df8(a local);` — words 0x2ae854 `jal 0x2a2df8`, 0x2ae85c `mov.s $f1,$f0`:
+- B2:233314 `a local = (float)…` — words 0x2ae854 `jal 0x2a2df8`, 0x2ae85c `mov.s $f1,$f0`:
   the result is taken from `$f0` as a float; there is no `mtc1`/`cvt.s.w` of `$v0`.
 - B2:233317–233320: `if (floor <= err) err = min(err, 2.0) else err = floor` — words 0x2ae86c
   `c.ole.s $f1,$f0`, 0x2ae874 `bc1f`, 0x2ae878 `mov.s $f2,$f1`, 0x2ae87c `460300a9` = `min.s $f2,$f0,$f3`
@@ -156,7 +156,7 @@ BF1 `FUN_002889e8` (B1:211230–211317). *(decompiler detail omitted)* = the wea
 | 2 | AI shooter: fire point's owner index < 0 | B2:323342 `*(firepoint(+0x6c)+0xc0) < 0` | B1:211250 `*(firepoint(+0x68)+0xe8) < 0` |
 | 3 | `TriggerSingle` set | B2:323343 `(class+0x1e0 >> 0x32) & 1` | B1:211251 `class+0xcc != 0` |
 | 4 | `ZoomMax ≥ 6.0` (inclusive: `6.0 <= zoom`) | B2:323346 `6.0 <= class+0xb4` | B1:211254 `6.0 <= class+0x7c` |
-| 5 | a current target | B2:323347–323359: `FUN_002b6ad0(firepoint+0xb4)` = the owner entity, RTTI-checked (B2:238694–238705) and `FUN_002bbce0(entity+0x430)` = the AI object's target `+0xe0`, validated by id `+0xe4` against `target+0x230` (B2:242540–242552); both non-null | B1:211255–211260: `FUN_0023d320(firepoint)` = target `+0x188` validated by `+0x18c` (B1:155455–155467) |
+| 5 | a current target | B2:323347–323359: `… both non-null | B1:211255–211260: `FUN_0023d320(firepoint)` = target `+0x188` validated by `+0x18c` (B1:155455–155467) |
 
 The meaning of condition 2 ("index < 0 = no human owner") is BD §2's reading of the weapon-instance ctor
 (spread state −SpreadThreshold when `firepoint+0xc0 ≥ 0`, else 0) [D]; the sign test itself is [V].

@@ -70,7 +70,7 @@ va − 0x160000 + 0x1000. Key hashes are fnv1a-32 over the lower-cased name.
      549275, `FUN_00485928` 549279), the DTLX detail pass `FUN_00486e30` (549301), `FUN_00487908` (549315) and the far
      branch `FUN_00488268` (549319).
 2. **The far-scene call.** `FUN_002f2308` calls the terrain only under the same test:
-   `if (DAT_005229a8 != 0) FUN_00481300(0x20000);` (280296–280297), where `FUN_00481300` is
+   *(decompiler detail omitted)* (280296–280297), where `FUN_00481300` is
    *(decompiler detail omitted)* (545762).
 3. **Gameplay.**
    - The height query `FUN_00473710` (34 call sites) takes −1000.0 for every sampled corner when the flag is 0 (537066,

@@ -77,7 +77,7 @@ FUN_00200e68, **FUN_002009a0**, **FUN_002008b0** (`vt+0x88`, the apply).
 3. d = sphere centre - blast (x, y, z); if |d| > 1e-4 and f = FUN_00221530(|d|, Inner, Outer, S) > 0:
    `vt+0x88(Push x f, S, normalize(d) + (0, 0.6, 0))` (0x3f19999a into the y word; not renormalised).
 **FUN_002008b0** (B1:112535-112572; [V-instr] 0x2008b0-0x200998): S+0xa20 += dir x scale (xyz). Then, on the new
-velocity: `v.y > 2.0` -> FUN_00209738 = FUN_00209758(S, 5); else `v.x^2 + v.z^2 > DAT_00517874^2` (`VMUL.xz`; ELF 2.0,
+velocity: `v.y > 2.0` -> FUN_00209738 = … else `v.x^2 + v.z^2 > DAT_00517874^2` (`VMUL.xz`; ELF 2.0,
 no writer) -> FUN_00209758(S, 8). On the thrown branch a human's soldier in a one-player game also gets S+0xbfe |= 0x10
 and FUN_00448110(class+0x1de8, class+0x1df0, -1.0, ..) (B1:112556-112561; a sound or camera cue, not read [H]).
 **FUN_00209758** (the state setter, B1:118842-118921) refuses when the current state is the new one or is **3**: a
@@ -176,7 +176,7 @@ FUN_002388b8), same LCG pattern (DAT_0073d870).
   ground `v . floor normal > 3.0` -> **thrown (9)**, else `|v|^2 > 64` (3-D) -> **tumble (10)**, else scale > 2 -> a
   0.5 flinch (a sprinter is stopped). From a PushDeadOnly blast only the dead reach it.
 - **Death kick** FUN_002395a8: +5.0 (a literal) along the direction, and a human's soldier below health -100 also
-  gets FUN_002f7c90(0.15, 0.08, 0.4) (a shake or rumble [H]); mounted (0x11 / 0x12): the x 9 throw. Called from the
+  gets … mounted (0x11 / 0x12): the x 9 throw. Called from the
   splash, the direct hit FUN_00238e20 (B2:152580-152613), the death callback FUN_002379f0 (rider layer 0x20, the
   zero vector) and three sites in FUN_00315f78 (zero vector; not read).
 - **States** (FUN_00240bf8): thrown 9 lands like BF1's (36 / 9 / 0.3, B2:160614-160653) but flies with the air

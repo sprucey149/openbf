@@ -264,11 +264,13 @@ pub fn load_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
         light: vec![],
         scroll: vec![],
         sphere: None,
+        vis_top: None,
     };
     for m in doc.meshes() {
         #[derive(serde::Deserialize)]
         struct MeshExtras {
             sphere: Option<[f32; 4]>,
+            vis_top: Option<f32>,
         }
         if let Some(e) = m
             .extras()
@@ -276,6 +278,7 @@ pub fn load_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
             .and_then(|raw| serde_json::from_str::<MeshExtras>(raw.get()).ok())
         {
             mesh.sphere = e.sphere.or(mesh.sphere);
+            mesh.vis_top = e.vis_top.or(mesh.vis_top);
         }
         for prim in m.primitives() {
             let reader = prim.reader(|b| buffers.get(b.index()).map(|d| &d.0[..]));

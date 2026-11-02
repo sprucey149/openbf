@@ -355,6 +355,82 @@ fn seat_camera_under_the_sheet_stays_under_it() {
     assert!(y <= -CAMERA_TERRAIN_GAP, "and never through it: {y}");
 }
 
+/// The PS2 sets a vehicle's camera origin from its model's vis box when it reads
+/// `GeometryName`: 0.9 of its top on a hover and a flyer, 0.8 on a walker. A building
+/// turret and a class with no model keep the section's 1.5 m.
+#[test]
+fn a_vehicles_pull_point_follows_its_model_as_on_the_ps2() {
+    use core::vehicle::VehicleKind::{Flyer, Hover, Turret, Walker};
+    assert_eq!(vehicle_pull_height(Hover, Some(10.0)), 9.0);
+    assert_eq!(vehicle_pull_height(Flyer, Some(10.0)), 9.0);
+    assert_eq!(vehicle_pull_height(Walker, Some(10.0)), 8.0);
+    assert_eq!(vehicle_pull_height(Turret, Some(10.0)), CAMERA_PULL_Y);
+    for kind in [Hover, Flyer, Walker] {
+        assert_eq!(vehicle_pull_height(kind, None), CAMERA_PULL_Y);
+    }
+}
+
+/// A tall model's pull point can stand past the sheet from the vehicle: over it from a
+/// hangar, or under it from a flyer banked at the ground. The camera stays on the
+/// vehicle's side.
+#[test]
+fn a_tall_models_pull_point_keeps_the_camera_on_the_vehicles_side_of_the_sheet() {
+    let spawn = |w: &mut WalkSim, pos: Vec3| {
+        let h = w.sim.spawn_vehicle(&core::vehicle::VehicleSpec {
+            kind: core::vehicle::VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![core::vehicle::SeatKind::Pilot],
+        });
+        w.vehicle_tops = vec![Some(10.0)];
+        let player = w.player;
+        assert!(w.sim.seat_unit(player, h, 0));
+        h
+    };
+    let mut hangar = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    spawn(&mut hangar, Vec3::new(0.0, -8.0, 0.0));
+    let y = hangar.camera().position.y;
+    assert!(y <= -CAMERA_TERRAIN_GAP, "from under the sheet: {y}");
+
+    let mut low = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    let h = spawn(&mut low, Vec3::new(0.0, 3.0, 0.0));
+    low.sim.vehicle_mut(h).unwrap().rot = glam::Quat::from_rotation_z(2.0);
+    let y = low.camera().position.y;
+    assert!(y >= CAMERA_TERRAIN_GAP, "from over the sheet: {y}");
+}
+
+/// The pull point rides the vehicle in its own frame, as the PS2's section point
+/// does on its matrix. A camera on a banked flyer pulls toward the flyer's up.
+#[test]
+fn a_seat_camera_pulls_toward_the_point_in_the_vehicles_own_frame() {
+    let mut w = WalkSim::new(1, Vec3::ZERO, None);
+    let h = w.sim.spawn_vehicle(&core::vehicle::VehicleSpec {
+        kind: core::vehicle::VehicleKind::Flyer,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::new(3.0, 50.0, 4.0),
+        yaw: 0.0,
+        max_health: 100.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![core::vehicle::SeatKind::Pilot],
+    });
+    w.vehicle_tops = vec![Some(5.0)];
+    let v = w.sim.vehicle_mut(h).unwrap();
+    v.rot = glam::Quat::from_rotation_z(0.5);
+    let v = w.sim.vehicle(h).unwrap();
+    let (origin, _) = vehicle_camera(v, None, None, 1.0, w.seat_pull_origin(v, 0));
+    let want = v.pos + glam::Quat::from_rotation_z(0.5) * (Vec3::Y * 4.5);
+    assert!(origin.distance(want) < 1e-4, "{origin} / {want}");
+}
+
 #[test]
 fn accumulator_steps_at_thirty_hz() {
     let mut w = WalkSim::new(1, Vec3::ZERO, None);

@@ -214,67 +214,7 @@ Retail: BF1 `all_inf_lukeskywalker(snow)`, `imp_inf_darthvader`, `cis_inf_countd
 
 Per CP, once per frame, `Tick(dt)` (BF1 `FUN_0029f0d8`, BF2 `FUN_00357440`):
 
-```
-owner      = ownerEntity.team                  # 0 = neutral
-T          = class.CaptureTime ;  N = class.NeutralizeTime
-count[0..7] = 0 ; capTeam = 0 ; playersIn = 0
-
-# 1. unit scan  (candidates = entities within bounding radius of CaptureRegion,
-#    kept iff CaptureRegion.contains(entity.origin); max 64)
-for e in candidates:
-    if not e.alive: continue                                  # BF1 ent+0xac bit3, BF2 ent+0x228 bit3
-    s = e.GetSoldier(); if s is None: continue                # vtbl+0x68 / +0x78
-    if e.team != e.displayedTeam: continue
-    a = teams[e.team].captureAffiliation ; if a == 0: continue
-    [BF2] if s.controller is AI and not (cp.aiMask >> e.team & 1): continue   # AICanCaptureCP
-    [BF2, networked only] if human joined < DAT_005fcbdc s ago: doesn't count
-    if s.class.CapturePosts == 0: (record player as "inside, not counted"); continue
-    capTeam = a if capTeam == 0 else (capTeam if capTeam == a else -1)       # -1 = contested
-    count[a] += 1 ; playersIn |= playerBits(e)
-
-w(n) = sum(0.5**i for i in range(n))            # 1, 1.5, 1.75, 1.875 …
-
-# 2. neutral CP
-if owner == 0:
-    if capTeam > 0:
-        speed = w(count[capTeam])
-        if cp.chargeTeam == capTeam: cp.capture += speed*dt
-        else:
-            cp.capture -= speed*dt                                  # drain previous team first
-            if cp.capture <= 0: cp.capture = -cp.capture ; cp.chargeTeam = capTeam
-        play ChargeSound (param = ramp*(capture/T) + (1-ramp))
-        if T < cp.capture:                                          # CAPTURED
-            cp.capture = T
-            ownerEntity.SetTeam(capTeam) ; ownerEntity.displayedTeam = capTeam
-            Event(4 "captured", creditPlayer, teams[capTeam], cp)   # HUD game.infomsg.captured + VO entry 0
-            award every counted unit (BF1 FUN_002a6320(member,1); BF2 FUN_00363a30(member,1,longestPresent))
-    elif capTeam == -1: play DisputeSound (meter frozen)
-    else: stop sounds (meter frozen; NO decay)
-    holoOff = (cp.capture >= T - HoloTurnOnTime)
-
-# 3. owned CP
-else:
-    if capTeam not in (0, owner):                                   # enemy alone, or contested
-        firstFrameContested = (cp.neutral == 0 and capTeam == -1)
-        speed = Σ over teams t != owner of the running geometric series over count[t]
-                (weights continue across teams: 1, .5, .25 … in team order)
-        cp.neutral += speed*dt ; play DischargeSound (param = ramp*(1-neutral/N)+(1-ramp))
-        if firstFrameContested: Event(6, teams[owner], cp)          # VO entry 2 only
-        elif N <= cp.neutral:                                       # NEUTRALIZED
-            Event(5 "lost", creditPlayer, teams[owner], cp)         # HUD game.infomsg.lost + VO entry 1
-            cp.neutral = N ; cp.capture = 0 ; cp.chargeTeam = max(capTeam, 0)
-            ownerEntity.SetTeam(0) ; displayedTeam = 0
-        holoOff = (cp.neutral >= N - HoloTurnOnTime)
-    else:                                                           # nobody, or only owner inside
-        if cp.neutral > 0:
-            BF1: if capTeam == owner and cp.neutral != N: Event(7 "saved") ; cp.neutral = 0   (instant)
-            BF2: cp.neutral -= w(count[owner])*dt, floor 0 (holds when empty);
-                 when it reaches 0 with owner inside: play ChargeSound, Event(7 "saved")
-
-# 4. holo: image = class.HoloImageGeometry[teams[owner].faction], colour = owner; off during
-#    the last HoloTurnOnTime seconds of a capture/neutralize (so the new one "turns on" at the flip)
-# 5. ambient: VO entry 4 ("Info") of the owner's faction, positioned at the CP, while alive
-```
+*(decompiler excerpt omitted from the public copy)*
 
 Notes [V]: the capture meter of a neutral CP never decays; it keeps its charging-team tag, so a
 returning team continues where it left off and a different team must drain it first. On an owned

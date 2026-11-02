@@ -365,6 +365,7 @@ fn every_mission_line_has_a_take() {
         let mut names = std::collections::BTreeSet::new();
         names.extend(mission.voice.bleeding.iter().map(|b| b.2.clone()));
         names.extend(mission.voice.low_reinforcements.iter().map(|b| b.2.clone()));
+        names.extend(mission.voice.out_of_bounds.iter().map(|b| b.1.clone()));
         for c in &layout.cps {
             for (l, s, e, line) in c.vo.iter() {
                 let heard = matches!(

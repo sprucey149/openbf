@@ -145,28 +145,7 @@ model table `0x69c678`), `Offset` +0x28 (270146–270149, sets +0x30 = 1), `Move
 
 ## 3. Per-frame placement — BF2 `FUN_003cb918` (425708–426030) [V]
 
-```
-cam   = FUN_00582c60()                      // DAT_0060c240, the active camera      425783
-S     = *(float*)(cam + 0x140)              // camera distance scale, == 1.0        425784
-saved = FUN_00589e48(); FUN_00589e38(0)     // DAT_0060c2a8 := 0 during the sky     425785–425786
-for each shell i (stride 0x400) with model at +0x40:                                425818–425823
-    pos = cam.position (cam + 0x60)                                                  425825–425826
-    if (shell+0x4c == 1)                                                             425827
-        pos.y = cam.y + ((sky+0x2840 + Offset) - cam.y) * (1.0 - MovementScale) * S  425830–425837
-    if (Reflect)  draw model at pos + (0, 0.1, 0), colour sky+0x34, flags 0x2000031 then 0x20031   425839–425855
-    M = identity                                                                     425856–425871
-    if (DAT_005ffd78)                                                                425872
-        M = Rotation(RotationSpeed * time * DAT_00661318 * 2π, axis)   FUN_0053ab30   425873–425876
-        M = M * Scale(S, S, S)                                          FUN_0053b0a8   425877
-    M.row3 = (pos, 1)                                                                425880–425883
-    hard-point effects: place at M * hp, kill when behind the camera                 425884–425995
-    i == 0: draw(model, M, 0, &sky+0x2855, 0x20031, 0) + Stars                       425997–426005
-    else  : draw(model, M, 0, DAT_0076c200, 0x20031, 0)                              426007–426010
-    FUN_00595020(0,0,0)                                                              426011
-FUN_005849f0(0,0,0); FUN_005899a8(); FUN_00560540(0x20000);                          426017–426026
-FUN_005b06b8(DAT_0060c888, 0x60000, 0)      // flush sky + far-scene layers           426027
-FUN_00589e38(saved)                                                                  426029
-```
+*(decompiler excerpt omitted from the public copy)*
 
 `FUN_0053b0a8` (669795) multiplies each matrix row by diag(sx, sy, sz, 1) — a pure scale [V].
 `FUN_0053ab30` (669375) builds an axis-angle rotation from `cos/sin` (`FUN_0053a070`) [V].
@@ -218,10 +197,10 @@ flags, colour, …)` per segment.
 `FUN_0058ed70` (723257): with `f` = segment+0x18 material flags and `c` = colour:
 - early out if `c.a == 0` (723386);
 - `translucent = (c.a != 0xff) || (f & 4) || (flags & 0x800000)` (723411);
-- bucket (`a local`): 0x20000 → 8, or 9 if translucent and `(flags & 0x20) == 0` (723436–723438);
-- GS ALPHA (`a local`): translucent → 0x44 (Cs·As + Cd·(1−As)); `f & 0x40` or 0x800000 → 0x48
+- bucket (*(decompiler detail omitted)*): 0x20000 → 8, or 9 if translucent and `(flags & 0x20) == 0` (723436–723438);
+- GS ALPHA (*(decompiler detail omitted)*): translucent → 0x44 (Cs·As + Cd·(1−As)); `f & 0x40` or 0x800000 → 0x48
   (additive); `f & 8` → 0x64 with FIX = alpha/2 (723450–723460);
-- GS TEST (`a local`): translucent → 0x51001 (ATE, ATST NEVER, AFAIL FB_ONLY: no Z write);
+- GS TEST (*(decompiler detail omitted)*): translucent → 0x51001 (ATE, ATST NEVER, AFAIL FB_ONLY: no Z write);
   `f & 2` → 0x5000b (ATST GEQUAL, AREF = `DAT_0060c64c` << 4 = 0x60); else 0x50000 (ZTE,
   ZTST GEQUAL) (723465–723480, AREF at 723553 / 723598);
 - 0x10 clears the lighting bit 0x4000 in the prim word (723477–723480).
@@ -258,7 +237,7 @@ at [0x21]/[0x20] and builds the planes with `FUN_0057b850`'s half-extents, plus 
 [V]. `DAT_0074601c` / `DAT_00746020` / `DAT_00746024` default 72 / 120 / 2000 (698058–698061)
 and are set by the sky_ keys: `NearSceneRange(a, b, c)` → `FUN_003be0e0` → `FUN_00564f50`
 (698725): `DAT_00746018 = a` (clamped by a Z-precision formula), `DAT_0074601c = b` (unless
-the debug override `DAT_0060c120`), `DAT_00746020 = c`, then `FUN_0058ae10(a, b, c)`;
+the debug override `DAT_0060c120`), `…
 `FarSceneRange(d)` → `FUN_003be100` → `FUN_00565070` (698760): `DAT_00746024 = d`, far-scene
 enable = d > 0 [V]. MUS1 authors `NearSceneRange(0.5, 80, 110)`, `FarSceneRange(2000)` (raw
 sky_ at 0x563f1) [V]. So the sky is flushed with the far scene, range [80, 2000] on MUS1,

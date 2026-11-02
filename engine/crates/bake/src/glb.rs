@@ -201,10 +201,13 @@ fn write_model(
     }
 
     let mut mesh = json!({"name": m.name, "primitives": primitives});
+    // The vis box's top: a vehicle's camera pulls in toward a point scaled from it
+    // (`game::walk::vehicle_pull_height`), and it can stand far above the vertices.
+    mesh["extras"] = json!({ "vis_top": m.vis_box.max[1] });
     // Card BPNT: a world model's sphere, which the PS2 gathers its local
     // lights by (`model_sphere`).
     if sphere {
-        mesh["extras"] = json!({ "sphere": model_sphere(m) });
+        mesh["extras"]["sphere"] = json!(model_sphere(m));
     }
     crate::gltf_bin::rigid_glb(bin, mesh, &m.name, Some(json!(materials)))
 }
@@ -561,6 +564,28 @@ mod tests {
             colors: col0.then(|| vec![[0x40, 0x80, 0xff, 0x80]; 3]),
             ..seg("t", flags)
         }
+    }
+
+    /// Issue #71: the camera's pull point reads the vis box's top, which no vertex need
+    /// reach, off the mesh's extras.
+    #[test]
+    fn the_vis_box_top_is_written_on_the_mesh() {
+        let mut m = model(vec![seg("t", 0)]);
+        m.vis_box.max[1] = 7.5;
+        let alpha = SegmentAlpha {
+            texture: "t".into(),
+            mode: AlphaMode::Opaque,
+            rule: Rule::Mask,
+            flags: 0,
+            rtyp: RenderType::Bf1("Normal".into()),
+            stats: None,
+        };
+        let glb = model_to_glb(&m, &[alpha], false).unwrap();
+        let doc = gltf::Gltf::from_slice(&glb).unwrap();
+        let mesh = doc.meshes().next().unwrap();
+        let extras: serde_json::Value =
+            serde_json::from_str(mesh.extras().as_ref().unwrap().get()).unwrap();
+        assert_eq!(extras["vis_top"], 7.5);
     }
 
     #[test]

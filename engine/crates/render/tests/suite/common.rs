@@ -7,10 +7,9 @@
 //! a view-spanning textured quad, and a pixel read out of the readback buffer.
 //! One copy of each lives here so the fixtures cannot drift apart.
 //!
-//! The referees stay SERIALISED (`scripts/gpu_tests.sh`, `--test-threads=1`):
 //! [`headless`] is the same constructor call every test already made, not a
-//! shared device, and parallel wgpu devices SIGSEGV on the Intel iGPU driver
-//! (measured 2 of 3 runs, `analysis/PLAN_LOG_2026.md`).
+//! shared device. Each renderer holds a turn at the GPU for its whole life
+//! (`gpu_turns`), so these tests wait for each other whatever the thread count.
 
 use render::{
     MeshData, MeshHandle, Renderer, SamplerMode, SkinnedMeshData, SkinnedMeshHandle, TextureDesc,

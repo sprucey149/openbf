@@ -56,5 +56,6 @@ pub use upload::{
     upload_unit_cube, SkinnedPart, SubmeshPart, DETAIL_UV_SCALE,
 };
 pub use vehicles::{
-    find_model, find_texture, walker_rigs, ModelSource, TexSource, VehicleSides, VehicleVisuals,
+    find_model, find_texture, model_tops, walker_rigs, ModelSource, TexSource, VehicleSides,
+    VehicleVisuals,
 };
