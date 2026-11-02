@@ -24,6 +24,22 @@ use serde_json::json;
 
 use crate::gltf_bin::{flat3, min_max3, Bin};
 
+enum VertexLighting<'a> {
+    Off,
+    Model,
+    Programs(&'a [LightPath]),
+}
+
+impl<'a> From<bool> for VertexLighting<'a> {
+    fn from(enabled: bool) -> Self {
+        if enabled {
+            Self::Model
+        } else {
+            Self::Off
+        }
+    }
+}
+
 /// Serialize one Model (all segments as primitives of one mesh) to GLB bytes.
 /// `alphas` is the ALPHA RULE v2 verdict per segment, aligned with
 /// `m.segments` (`crate::alpha::AlphaTable::model`). Each segment's specular
@@ -37,11 +53,19 @@ pub fn model_to_glb(
     alphas: &[crate::alpha::SegmentAlpha],
     vertex_light: bool,
 ) -> Result<Vec<u8>> {
-    write_model(m, alphas, vertex_light, false, None, false, vertex_light)
+    write_model(
+        m,
+        alphas,
+        vertex_light.into(),
+        false,
+        None,
+        false,
+        vertex_light,
+    )
 }
 
 pub fn station_model_to_glb(m: &Model, alphas: &[crate::alpha::SegmentAlpha]) -> Result<Vec<u8>> {
-    write_model(m, alphas, false, false, None, false, true)
+    write_model(m, alphas, false.into(), false, None, false, true)
 }
 
 /// [`model_to_glb`] for a HUD mesh (card BHUD2): each segment's COL0 goes out
@@ -50,7 +74,7 @@ pub fn station_model_to_glb(m: &Model, alphas: &[crate::alpha::SegmentAlpha]) ->
 /// (`render::hud`). The weapon backdrops are shaped by it: grey at 83/128
 /// fading to alpha 0 along the pill.
 pub fn hud_model_to_glb(m: &Model, alphas: &[crate::alpha::SegmentAlpha]) -> Result<Vec<u8>> {
-    write_model(m, alphas, false, false, None, true, false)
+    write_model(m, alphas, false.into(), false, None, true, false)
 }
 
 /// [`model_to_glb`] for a map bake's world model, `vertex_light` on, on a map
@@ -62,7 +86,31 @@ pub fn world_model_to_glb(
     alphas: &[crate::alpha::SegmentAlpha],
     hdr: bool,
 ) -> Result<Vec<u8>> {
-    write_model(m, alphas, true, hdr, None, false, true)
+    write_model(m, alphas, true.into(), hdr, None, false, true)
+}
+
+/// A reassembled world model whose segments keep the lighting programs
+/// evaluated in their original model contexts. BF2's prelit bit is model-wide;
+/// joining meshes must not turn a donor's ordinary lit segment into prelit.
+pub(crate) fn world_model_to_glb_programs(
+    m: &Model,
+    alphas: &[crate::alpha::SegmentAlpha],
+    hdr: bool,
+    programs: &[LightPath],
+) -> Result<Vec<u8>> {
+    anyhow::ensure!(
+        programs.len() == m.segments.len(),
+        "world lighting programs must align with segments"
+    );
+    write_model(
+        m,
+        alphas,
+        VertexLighting::Programs(programs),
+        hdr,
+        None,
+        false,
+        true,
+    )
 }
 
 /// [`model_to_glb`], plus — when `joints` is given, one list per segment of
@@ -77,18 +125,31 @@ pub fn model_to_glb_joints(
     vertex_light: bool,
     joints: Option<&[Vec<usize>]>,
 ) -> Result<Vec<u8>> {
-    write_model(m, alphas, vertex_light, false, joints, false, vertex_light)
+    write_model(
+        m,
+        alphas,
+        vertex_light.into(),
+        false,
+        joints,
+        false,
+        vertex_light,
+    )
 }
 
 fn write_model(
     m: &Model,
     alphas: &[crate::alpha::SegmentAlpha],
-    vertex_light: bool,
+    lighting: VertexLighting<'_>,
     hdr: bool,
     joints: Option<&[Vec<usize>]>,
     hud_colors: bool,
     sphere: bool,
 ) -> Result<Vec<u8>> {
+    let vertex_light = !matches!(lighting, VertexLighting::Off);
+    let programs = match lighting {
+        VertexLighting::Programs(programs) => Some(programs),
+        _ => None,
+    };
     let mut bin = Bin::default();
     let mut primitives = Vec::new();
     let mut materials = Vec::new();
@@ -147,7 +208,8 @@ fn write_model(
             None
         };
         if vertex_light {
-            let path = glow.unwrap_or_else(|| light_path(m, seg));
+            let path = glow
+                .unwrap_or_else(|| programs.map_or_else(|| light_path(m, seg), |paths| paths[si]));
             mat["extras"]["light"] = json!(path.as_str());
         }
         if a.mode == crate::alpha::AlphaMode::Mask {
@@ -702,6 +764,31 @@ mod tests {
 
     /// A map bake writes COLOR_0 on the segments that carry COL0 and the path
     /// on every material; a non-map bake writes neither.
+    #[test]
+    fn explicit_programs_preserve_a_joined_models_original_lighting_context() {
+        let m = model(vec![bf2(0x201, true), bf2(0x01, true)]);
+        assert_eq!(light_path(&m, &m.segments[1]), LightPath::Prelit);
+        let alphas = crate::alpha::AlphaTable::new(&[]).model(&m);
+        let bytes = world_model_to_glb_programs(
+            &m,
+            &alphas,
+            false,
+            &[LightPath::PrelitAdd, LightPath::Lit],
+        )
+        .unwrap();
+        let doc = gltf::Gltf::from_slice(&bytes).unwrap();
+        let paths: Vec<String> = doc
+            .materials()
+            .map(|mat| {
+                let extra: serde_json::Value =
+                    serde_json::from_str(mat.extras().as_ref().unwrap().get()).unwrap();
+                extra["light"].as_str().unwrap().to_owned()
+            })
+            .collect();
+        assert_eq!(paths, ["prelit_add", "lit"]);
+        assert!(world_model_to_glb_programs(&m, &alphas, false, &[LightPath::Lit]).is_err());
+    }
+
     #[test]
     fn vertex_light_writes_color_0_and_the_path() {
         let m = model(vec![bf2(0x201, true), bf2(0x01, false)]);

@@ -31,7 +31,7 @@ fn main() -> Result<()> {
         return Err(anyhow!("no BF2 hero models selected"));
     }
     let mut written = BTreeSet::new();
-    for (key, body, weapon, set) in game::gallery::discover_units(root) {
+    for (key, body, weapon, set) in game::gallery::discover_units(root)? {
         let Some(model) = body.file_stem().and_then(|n| n.to_str()) else {
             continue;
         };

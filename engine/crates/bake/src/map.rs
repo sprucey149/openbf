@@ -21,6 +21,7 @@ use std::path::Path;
 
 mod collision_standin;
 mod content;
+mod render_reassembly;
 mod render_recovery;
 
 use content::bake_content;

@@ -27,11 +27,19 @@ colors from the donor's old surface. No render mesh or texture is included in th
 reference files. Related retained composites are cropped to their corrected PS2 visibility boxes so they do not draw the removed
 pieces again. The smaller pieces can look coarser: some domed caps become simple cylinders, and projected textures can stretch.
 
-Map availability does not establish complete artwork/collision alignment. The recovered structures resolve to models and keep
-PS2 collision and navigation unchanged, but existing donor models still have measured surface discrepancies. Other seeds, modes,
-eras and live play remain unchecked here.
+Three recovered pieces need both their mesh and independent live primitives: Cloud City's chamber and chamber shaft, and
+Rhen Var Harbor's `rhn1_bldg_fortress_05`. Recovery verifies that their owning classes have no collision-layer overrides and
+their primitive masks are zero before retaining that union. Eight measured stand-in types also deform generated boundary
+vertices into the numeric art envelope instead of clipping whole wall faces away. Degenerate and exact duplicate triangles
+are removed on those eight corrected pieces; displaced surfaces are retained. These instructions change only locally generated
+replacement artwork, never the collision or an existing donor render model.
 
-All maps are now included from the accepted sources. Xbox BF2 Jabba's Palace uses a local textured stand-in for
+Map availability does not establish complete artwork/collision alignment. The recovered structures resolve to models and keep
+PS2 collision and navigation unchanged, but existing donor models still have measured surface discrepancies. The
+broader automated checks below do not replace live play or a running-original comparison.
+
+All 34 ground maps are now included from the accepted sources. The six experimental space maps require explicit
+opt-in. Xbox BF2 Jabba's Palace uses a local textured stand-in for
 `tat3_prop_cz1droid_parts`, confirmed absent from all 185 disc LVLs including the sound banks. Its donor-only water cell
 is removed by a fingerprinted correction; four complete rounds matched every tick across two seeds and both eras.
 The counts below record the original unresolved placements, before shared-resource lookup and recovery.
@@ -42,7 +50,8 @@ The counts below record the original unresolved placements, before shared-resour
 | Xbox BF2 | bf2_tat3 | 1 |
 | PC BF1 | bf1_bes2, bf1_rhn1, bf1_rhn2 | 58, 93, 12 |
 
-PC BF1 Kashyyyk Islands keeps its 16 `kas1_mist` instances without a model: going by the name they are mist, not solid, which has not been looked at.
+PC BF1 Kashyyyk Islands keeps its 16 `kas1_mist` instances without a model: going by the name they are mist, not
+solid, which has not been looked at.
 
 ## Bytes per source
 
@@ -59,9 +68,10 @@ collision plus navigation, skeleton and animation files, which no build reads an
 ## Per map
 
 "Heights" counts height rows one cell past the line at most. "Fills" counts rectangles of ground the 512 m aim ray can read beyond that.
-"Instructions" is the bytes of that map's own lists; shared side and common lists are extra. "Round" compares every tick of one full round
-with the PS2's: seed 42, Normal, Conquest, default era. It says nothing about other seeds, modes or eras. "No model" counts instances
-with no render model.
+"Instructions" is the bytes of that map's own lists; shared side and common lists are extra. "Round" records the
+earlier comparison of every tick of one full round
+with the PS2-source build: seed 42, Normal, Conquest, default era. The wider checks below are separate. "No model"
+records original unresolved instances before shared-resource lookup and recovery; it is not the current count.
 
 | BF1 map | Xbox heights | fills | instructions | round | no model | PC heights | fills | instructions | round | no model |
 |---|---:|---:|---:|---|---:|---:|---:|---:|---|---:|
@@ -114,13 +124,40 @@ any bake reader consumes it, without changing the PS2 path. The generator handle
 With a fresh Xbox Jabba map bake and the retained source-specific common/side assets and missions, every tick matched the PS2-source
 build through four complete Normal Conquest rounds: Galactic Civil War seeds 42 and 7 (10,937 and 10,280 ticks), and Clone Wars seeds
 42 and 7 (11,282 and 10,284 ticks). These are automated source comparisons, not a comparison with a running PS2 or a live play check.
-The missing droid-parts render prop is a separate problem; restoring water parity does not resolve that artwork.
+The separate droid-parts render prop is now recovered with a lower-detail local textured stand-in.
+
+## Jabba render-piece reassembly
+
+Xbox BF2 splits the torture room and its pipes across extra props whose original placements exactly coincide with the
+unsuffixed models. Canonical world replacement removed those placements although their artwork was present in the LVL.
+The bake now rejoins those verified source segments into the two canonical render models, rejecting changed bindings,
+missing pieces or different placements. Collision and simulation placements are unchanged. Each segment keeps the lighting
+program evaluated in its original model context: a naive merge changes BF2's model-wide prelit decision.
+
+A 256-sample collision-to-render check over the Conquest scene reduced the maximum excess distance above the PS2 reference
+from 3.93 m to 0.00065 m for the room and from 2.32 m to 0.0361 m for the pipes. The grate's missing faces live in the room
+piece on Xbox: its per-object mismatch remains, while the scene-union excess falls from 2.81 m to 0.00025 m. These are sampled
+measurements, not a continuous surface proof. Matching headless room views were inspected on PS2, Xbox and the PC BF1 plus
+Xbox BF2 input set; the restored floor, ceiling and wall have visible textures. A controlled PS2 bake stayed byte-identical,
+and the Xbox bake changed only the two reassembled model GLBs. Other maps and modes still need their own alignment checks.
 
 ## Still open
 
-- **Other seeds, modes and eras.** Apart from the Jabba rerun above, each map ran one seed and one era. Baked collision and navigation files are byte-identical to the PS2's on every map, which covers more than one round can, but class definitions and world identities still differ in fields the rounds did not read, so no source is declared multiplayer-equal.
-- **Space maps.** Space stays behind `OPENBF_BAKE_SPACE=1` and `OPENBF_SPACE=1`. On Xbox BF2 all six bake and match the PS2 at every one of 36,000 ticks on one seed, but no round reached a winner in that time, so an ending is not compared.
-- **The look.** A corrected collision mesh can differ from the donor's render model of the same name. Nobody has looked at this in a window.
-- **Non-root animation.** Other bones keep the donor's pose. Rounds match, but a pose read in a case those rounds did not reach would differ.
-- **PC BF1 side models.** `rep_fly_vtrans` and `all_fly_kwing` have no model on PC; no BF1 mission or map uses them. Four speederbike wreck chunks are also missing there, so that wreck shows fewer pieces.
+- **Unexercised simulation inputs.** Fresh independent PS2, Xbox and PC BF1/Xbox BF2 builds matched full simulation
+  state hashes for 1,800 ticks in each of 67 authored missions at seeds 7 and 103: 402 source/scenario runs, covering
+  Conquest and experimental Space Assault, and both eras where authored. Their logs contain no class, vehicle-pad or
+  common-asset fallback. These bounded traces do not establish complete round endings or equality of inputs they never
+  exercise. Class definitions and world identities still differ in fields the traces did not read, so no source is
+  declared multiplayer-equal.
+- **Space maps.** Space stays behind `OPENBF_BAKE_SPACE=1` and `OPENBF_SPACE=1`. On Xbox BF2 all six bake and match
+  the PS2 at every one of 36,000 ticks on one seed, but no round reached a winner in that time, so an ending is not
+  compared.
+- **The look.** A placed-object gate compares corrected collision with placed render bounds and sampled triangle
+  surfaces, including the PS2 artwork residual as a control. Fresh all-map checks still fail on existing donor-art
+  discrepancies and unmeasured inputs. Headless captures of the recovered maps have been viewed; projected stand-in
+  textures and some shapes remain coarse. No live game window was checked.
+- **Non-root animation.** Other bones keep the donor's pose. Rounds match, but a pose read in a case those rounds did
+  not reach would differ.
+- **PC BF1 side models.** `rep_fly_vtrans` and `all_fly_kwing` have no model on PC; no BF1 mission or map uses them.
+  Four speederbike wreck chunks are also missing there, so that wreck shows fewer pieces.
 - **Foliage counts.** Six maps' grass counts differ from the PS2's on non-PS2 sources, which the build reports as a warning. Rounds match.

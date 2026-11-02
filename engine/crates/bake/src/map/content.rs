@@ -727,6 +727,25 @@ pub(super) fn bake_content(
     }
     if kind == Content::Map {
         if let Some(original) = original.as_deref() {
+            let render_worlds: Vec<_> = worlds
+                .iter()
+                .chain(mode_layers.iter().flat_map(|layer| &layer.group))
+                .collect();
+            for assembled in
+                super::render_reassembly::models(original, &render_worlds, &parsed_models)?
+            {
+                let model = assembled.model;
+                let alphas = alpha_table.model(&model);
+                alpha_usage.record_model(&model, &alphas);
+                let glb = crate::glb::world_model_to_glb_programs(
+                    &model,
+                    &alphas,
+                    hdr.is_some(),
+                    &assembled.lighting,
+                )?;
+                std::fs::write(out.join("models").join(format!("{}.glb", model.name)), glb)?;
+                parsed_models.insert(model.name.to_ascii_lowercase(), model);
+            }
             for model in
                 super::render_recovery::pieces(original, &expanded, &worlds, &parsed_models)?
             {

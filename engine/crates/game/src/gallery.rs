@@ -1076,34 +1076,38 @@ pub fn model_class(db: &crate::classdb::ClassDb, game: &str, model: &str) -> Opt
         .map(str::to_owned)
 }
 
-/// Baked soldier GLBs under `assets_dir`, as (key, model path, weapon path,
-/// animation set). The weapon is the one the game draws: [`model_class`]'s
-/// primary weapon's geometry ([`crate::roster::weapon_geometry`]), or none
-/// when that weapon has no model or its GLB is not baked; the set is that
-/// class's with that weapon in hand.
-pub fn discover_units(
-    assets_dir: &Path,
-) -> Vec<(
+/// One unit sheet: (key, model path, optional weapon path, animation set).
+pub type UnitAsset = (
     String,
     std::path::PathBuf,
     Option<std::path::PathBuf>,
     UnitSet,
-)> {
+);
+
+/// Baked soldier GLBs under `assets_dir`, as (key, model path, weapon path,
+/// animation set). The weapon is the one the game draws: [`model_class`]'s
+/// primary weapon's geometry ([`crate::roster::weapon_geometry`]), or none
+/// when that weapon has no model or its GLB is not baked; the set is that
+/// class's with that weapon in hand. Missing class mappings and invalid
+/// installed DLC class data are errors rather than generic rifle sheets.
+pub fn discover_units(assets_dir: &Path) -> Result<Vec<UnitAsset>> {
     let mut out = Vec::new();
     for game in ["bf1", "bf2"] {
         let side = assets_dir.join(format!("side_{game}"));
         let Ok(rd) = pak::read_dir(side.join("soldiers")) else {
             continue;
         };
-        let db = crate::roster::load_classdb(
-            &assets_dir.join("classes"),
-            game,
-            &crate::roster::FACTION_ORDER,
-        )
-        .unwrap_or_else(|e| {
-            eprintln!("unit gallery: {e:#}");
-            crate::classdb::ClassDb::default()
-        });
+        let classes = assets_dir.join("classes");
+        let mut db = crate::roster::load_classdb(&classes, game, &crate::roster::FACTION_ORDER)
+            .with_context(|| format!("{game} unit gallery classes"))?;
+        if game == "bf2" {
+            crate::dlc::load_classes(&classes, &mut db).with_context(|| {
+                format!(
+                    "BF2 unit gallery DLC classes {}",
+                    classes.join(crate::dlc::CLASSES).display()
+                )
+            })?;
+        }
         let mut names: Vec<String> = rd
             .into_iter()
             .filter_map(|p| {
@@ -1115,21 +1119,16 @@ pub fn discover_units(
             .collect();
         names.sort();
         for n in names {
-            let class = model_class(&db, game, &n);
-            let weapon = class
-                .as_deref()
-                .and_then(|c| crate::roster::weapon_geometry(&db, c))
+            let class = model_class(&db, game, &n)
+                .ok_or_else(|| anyhow!("{game} unit gallery: no soldier class for {n}"))?;
+            let weapon = crate::roster::weapon_geometry(&db, &class)
                 .map(|g| side.join("weapons").join(format!("{g}.glb")))
                 .filter(|p| pak::exists(p));
-            let set = class
-                .as_deref()
-                .and_then(|c| {
-                    let anim = crate::roster::class_anim(&db, c, &db.weapon_slots(c));
-                    let (primary, _) = crate::roster::primary_weapon(&db, c)?;
-                    Some(UnitSet {
-                        bank: anim.bank_of(&primary).to_owned(),
-                        family: anim.family,
-                    })
+            let anim = crate::roster::class_anim(&db, &class, &db.weapon_slots(&class));
+            let set = crate::roster::primary_weapon(&db, &class)
+                .map(|(primary, _)| UnitSet {
+                    bank: anim.bank_of(&primary).to_owned(),
+                    family: anim.family,
                 })
                 .unwrap_or_default();
             out.push((
@@ -1140,30 +1139,17 @@ pub fn discover_units(
             ));
         }
     }
-    out
+    Ok(out)
 }
+
+#[cfg(test)]
+mod unit_discovery_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::assets::CpuMesh;
     use std::collections::HashMap;
-
-    #[test]
-    fn unit_discovery_keeps_the_actor_and_skips_its_low_companion() {
-        let root =
-            std::env::temp_dir().join(format!("openbf-gallery-units-{}", std::process::id()));
-        let soldiers = root.join("side_bf1/soldiers");
-        std::fs::create_dir_all(&soldiers).unwrap();
-        std::fs::write(soldiers.join("trooper.glb"), []).unwrap();
-        std::fs::write(soldiers.join("trooper.low.glb"), []).unwrap();
-        let units = discover_units(&root);
-        std::fs::remove_dir_all(root).unwrap();
-        let keys: Vec<_> = units.iter().map(|(key, ..)| key.as_str()).collect();
-        assert!(keys.contains(&"bf1_trooper"));
-        assert!(!keys.contains(&"bf1_trooper.low"));
-        assert_eq!(keys.len(), 1);
-    }
 
     /// A scene with a FLAT heightfield at y = 0 and instances spanning 200 m
     /// in X and Z about the origin — enough for `overview_bounds` and

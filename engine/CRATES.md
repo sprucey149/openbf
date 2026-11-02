@@ -87,17 +87,18 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/gameplay/rebuild.rs` 577 — rebuild corrected class chunks from the table · `chunk`
 - `bake/src/gameplay/terrain.rs` 160 — terrain heights applied after decoding, inside the play polygon · `apply_terrain`
 - `bake/src/gameplay/tests.rs` 447 — the gameplay table's tests.
-- `bake/src/map.rs` 904 — map/common public entry points, input-reduction helpers, manifest re-exports and regression tests · `bake_map`, `bake_common`; calls the private content baker.
-- `bake/src/map/content.rs` 1402 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
+- `bake/src/map.rs` 905 — map/common public entry points, input-reduction helpers, manifest re-exports and regression tests · `bake_map`, `bake_common`; calls the private content baker.
+- `bake/src/map/content.rs` 1421 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
+- `bake/src/map/render_reassembly.rs` 437 — rejoin verified donor-only Jabba room/pipe props into canonical render models without changing simulation placements or collision · `models`
 - `bake/src/map/render_recovery.rs` 615 — exact shared-LVL presentation lookup and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
-- `bake/src/map/collision_standin.rs` 400 — lower-detail missing-model stand-ins from corrected collision shapes and own-copy material/UV projection · `fit`; called only for measured absent model types.
+- `bake/src/map/collision_standin.rs` 719 — lower-detail missing-model stand-ins from corrected collision shapes and own-copy material/UV projection · `fit`; called only for measured absent model types.
 - `bake/src/side_classes.rs` 66 — pull BF2 SIDE/TUR.LVL classes placed by a map but absent from its LVL · `side_classes_lvl`, `pull_side_classes`; joined by `bake/src/map/content.rs`.
 - `bake/src/shell.rs` 373 — BF2 shell logo, menu movie packs and music bake · `bake_shell`, `mvs_segments`, `movie_segments`, `read_movie`; ISO fallback and transcode/output rules in the module header (`analysis/re-bf2-shell.md` §1, §4).
 - `bake/src/alpha.rs` 1403 — PROVISIONAL per-draw ALPHA RULE v2 and BF1/BF2 ELF overrides · `verdict`, `census_verdict`, `bf1_elf_verdict`, `bf2_elf_verdict`, `Bf1Class`, `disc_alpha_tests`, `keep_alpha`; rule, sky exception and census switch in the module header (`analysis/re-material-flags.md`).
 - `bake/src/spec.rs` 237 — PROVISIONAL specular-pass bake and shared CORE textures/table · `spec_pass`, `SpecPass`, `pass_textures`, `bake_table`, `bake_core_texture`; alpha retention and pass rules in the module/API docs (`analysis/re-specular-pass.md`, [O]).
 - `bake/src/tier.rs` 1047 — texture tiers: PS2, or a larger same-art donor · `Tier`, `tier2`, `same_art`
 - `bake/src/detail.rs` 183 — `<name>_dtl` detail maps · `write_detail_for`, `ALPHA_TEST`
-- `bake/src/glb.rs` 765 — model GLB writer and per-primitive material/lighting metadata · `model_to_glb`, `world_model_to_glb`, `LightPath`, `light_path`, `glow_path`; alpha and COL0/VU1 rules in the module/API docs.
+- `bake/src/glb.rs` 852 — model GLB writer and per-primitive material/lighting metadata · `model_to_glb`, `world_model_to_glb`, `LightPath`, `light_path`, `glow_path`; alpha and COL0/VU1 rules in the module/API docs.
 - `bake/src/far_lowd.rs` 146 — far-scene LOWD geometry extension (UTA1 cliffs) · `extension`; selection rules and runtime routing in the module header (`analysis/re-far-lowd.md`).
 - `bake/src/gltf_bin.rs` 129 — the shared GLB BIN builder · `Bin`
 - `bake/src/skin_glb.rs` 273 — skinned GLB: skeleton, skin, clips (or a skeleton and clips alone) · `skinned_to_glb`
@@ -502,7 +503,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/hud_feed.rs` 836 — BF2 HUD art loading and per-frame `ui::hud_tree` / `ui::hud_draw` → `render::hud` wiring, including weapon model/icon fallbacks · `HudView`; module/API docs own BF1 row keys and material-alpha rules.
 - `game/src/input_icons.rs` 607 — the Button prompts setting, the device Auto follows and the shipped SVG icons (`game/assets/input_icons/README.md`: sources, licences) · `IconChoice`, `DeviceTracker`, `icons`, `rasterize`
 - `game/src/minimap.rs` 1039 — map/class minimap configuration and per-frame battle/spawn-map feeds, including command walkers; mission-resolved still feeds and asset-free caller regressions for captures/goldens · `MapStatic`, `ClassIcon`, `bounds_of`, `still`, `spawn_still`; module/API docs and `analysis/re-hud-map.md` §8.
-- `game/src/gallery.rs` 1407 — headless map/unit/walkabout sheets with floor placement and class-specific held weapons · `map_sheet`, `vantage_camera`, `model_class`; `soldier_spot` owns grounding and `step_water` pins water per eye for goldens.
+- `game/src/gallery.rs` 1412 — headless map/unit/walkabout sheets with floor placement and class-specific held weapons, including installed DLC classes · `map_sheet`, `vantage_camera`, `model_class`, `discover_units`; `soldier_spot` owns grounding and `step_water` pins water per eye for goldens.
+- `game/src/gallery/unit_discovery_tests.rs` 127 — unit-gallery class/weapon/animation discovery regressions; broken installed DLC class data fails the gallery instead of selecting generic rifle poses.
 - `game/src/bench.rs` 583 — `--bench` per adapter · `Report`; `--bench-toggle`: one feature off and on in alternating blocks · `Toggle`; `OPENBF_FRAMEAB`'s paired prices · `price`.
 - `game/src/frame_profile.rs` 902 — windowed frame timing, GPU-object census, dev hitch record/black-box integration and `OPENBF_FRAME_PROFILE=<csv>` output · `FrameProfile`, `Record`, `Hitches`, `FrameRow`; module header owns switches, thresholds, warmup and CSV fields.
 - `game/src/dyn_res.rs` 240 — the Low Power Resolution setting's controller: steps the world's size down when frames run long and probes back up · `DynRes`, `STEPS`.

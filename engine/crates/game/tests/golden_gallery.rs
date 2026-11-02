@@ -104,7 +104,7 @@ fn load_screens_match_their_goldens() {
 fn every_baked_unit_matches_its_golden() {
     force_ps2_tier();
     let assets = game::assets::baked_root();
-    let units = game::gallery::discover_units(&assets);
+    let units = game::gallery::discover_units(&assets).expect("unit gallery class metadata");
     // Bug T1: an absent `assets_baked/side_*/soldiers` used to return early
     // (and a half-baked one to check half the set) with `goldens.sh --check`
     // exiting 0 all the same. Every COMMITTED golden must be rendered — a
