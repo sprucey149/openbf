@@ -32,25 +32,32 @@ python3 scripts/pack.py
   It will not build with only one of them.
 - **A console copy of BF2.** PC BF2 does not contain everything the game needs, such as the menus
   and HUD it uses, so it can only be an add-on to a console BF2, never your only BF2.
-- **Mix and match.** The aim is that consoles can be mixed freely, for example PS2 BF1 with Xbox BF2,
-  and that you get the same game whichever you use: only texture and asset sizes change.
+- **Mix and match.** Console copies can be mixed freely, for example PS2 BF1 with Xbox BF2,
+  and the goal is the same game whichever you use: only texture and asset sizes change.
   The Status note below says how much of this works today.
 - **For best results, add PC and Xbox copies.** The build keeps the largest copy of each texture, as long as
   it is the same painting. The PC copy is the largest much more often: about 680 textures across
   the two games, against 12 where the Xbox copy is larger. Those are mostly on BF2 Geonosis, such as a sky at
   1024x256 against the PC's 512x128.
 
-> **Status: Xbox discs are not used yet.** A build today needs PS2 discs of both games. Xbox discs are
-> recognized but not read. Next to a PS2 disc of the same game, an Xbox disc is ignored and the build
-> carries on. Without that PS2 disc, the build stops and says so. PC BF1 can't be your only BF1 yet either.
+> **Status: Xbox discs and a PC BF1 install now work without a PS2 disc.** Either Xbox disc can stand in for that game's PS2 disc, and
+> PC BF1 can be your only BF1. Earlier automated comparisons matched the PS2 at every tick of one full round on each included ground map
+> (one seed, Normal, Conquest, default era). Other seeds, modes and eras have not been compared, and nobody has played
+> these builds in a window yet. Corrected collision has not yet been checked against every source's artwork.
+>
+> Some maps are currently left out while missing render models are investigated. The build tells you which. Add the PS2 disc
+> of that game to get them back:
+> - Xbox BF1: Rhen Var Harbor and Rhen Var Citadel
+> - Xbox BF2: Tatooine Jabba's Palace
+> - PC BF1: Bespin Cloud City, Rhen Var Harbor and Rhen Var Citadel
 
 | You supply | What you get today |
 |---|---|
 | PS2 BF1 + PS2 BF2 | Builds, with the PS2 textures |
-| PS2 BF1 + PS2 BF2 + PC BF1 and/or PC BF2 | Builds, the same game with larger PC textures where they exist |
-| Any working set above + the DLC folder | Builds, with Kit Fisto and Asajj Ventress added (see below) |
-| Xbox BF1 and/or Xbox BF2, without a PS2 disc of that game | Refused for now (planned) |
-| PC BF1 without a console BF1 | Refused for now |
+| PS2 BF1 + PS2 BF2 + any Xbox or PC copies | Builds, with larger textures where the artwork matches |
+| Xbox BF1 and/or Xbox BF2, in place of that game's PS2 disc | Builds, leaving out the maps above |
+| PC BF1, in place of a console BF1, with a console BF2 | Builds, leaving out the maps above |
+| Any working set above + the DLC folder | Builds, with Kit Fisto and Asajj Ventress available in Hero Options (see below) |
 | PC BF2 without a console BF2 | Refused |
 | Only one of the two games | Refused |
 
@@ -103,8 +110,8 @@ iso/
 ```
 
 Leaving the rest of the pack beside it is fine, for example `iso/ADDON_XBOX/DLC_XBOX/`: only these two heroes
-are used, and none of the pack's maps or other content. They take the Republic and CIS hero slots on BF2 battles
-that have those heroes. These are the community's adapted versions of the heroes rather than the Xbox originals,
+are used, and none of the pack's maps or other content. Turn on **DLC Heroes** in Instant Action's Hero Options to use them in the Republic and CIS hero slots on BF2 battles
+that have those heroes. The option starts off. These are the community's adapted versions of the heroes rather than the Xbox originals,
 and they have no voice lines of their own. Thanks to the pack's authors: its heroes are by Gogie and Ryan Hank,
 assembled by iamashaymin, with Xbox map conversions by SleepKiller. Without the folder, the game builds unchanged.
 Adding or removing it bakes everything again on the next run.
