@@ -248,10 +248,19 @@ is fixed since) - no BF2 number above uses that column.
 
 ## 9. Remaining player feedback, chunks and feet (issue #85, 2026-11-01)
 
-BF2's rolling boost stays unbound: the maintainer's rule (2026-10-30) is no sprint in ball or walking
-form, so the integrator's boost is reached by no button. `re-droideka.md` §4 has the disc's multiplier 2,
-forward-stick threshold 0.9 and 30/s energy drain, should that ever change.
-The main stamina bar remains shield charge. A refused grounded ball jump
+The ball sprint (the maintainer, 2026-11-01, a deliberate port choice replacing the 2026-10-30 "no sprint" rule):
+a player's droideka sprints in ball form only, and BF2's rolling boost IS that sprint, so there is one mechanic.
+From the disc (`re-droideka.md` §4): multiplier 2, forward stick over 0.9, the slower boost turn, `EnergyDrainSprint`.
+OURS: it spends the one stamina bar, the shield's charge, not the hidden jump pool, at the class's share of the bar
+(`EnergyDrainSprint` / `EnergyBar`: 30 %/s, 900 points/s, 3.3 s from full; its recharge is `AddShieldOff`, paused
+while sprinting); the button is held like a soldier's, not latched as on the disc; a bar that reaches empty, by sprint
+or by the shield, locks the sprint until it is back at the soldier's recover share (25 %, 750 points, 2.5 s). These
+values are PROVISIONAL: a maintainer's timed full-bar ball sprint and empty-to-next-sprint in live play replace them.
+Transitions cannot refill anything: the one pool and the lockout carry through a fold and an unfold unchanged, only
+ordinary recharge moves them. Unrolling ends the sprint on the press; a sprint button held through a fold starts once
+the ball is formed, if the bar allows. A bar spent to empty and unrolled gives the shield only what recharged. Bots
+never sprint and their hashes do not move. Measured in the sim, not on a disc: 24 m/s, 79 m per full bar. The ball
+jump keeps its separate hidden pool. A refused grounded ball jump
 now emits an explicit movement-energy message for its player; this is a named UI addition. The
 native final jump may exhaust a positive pool: refusal still tests `depleted`, not `energy < cost`.
 The aimed-at unit's existing shield HUD field now shows charge while its sphere is raised.

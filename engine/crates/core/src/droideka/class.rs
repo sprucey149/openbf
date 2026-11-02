@@ -273,6 +273,31 @@ impl DroidekaClass {
         self.ball_move_speed * self.ball_speed_scale / self.ball_radius
     }
 
+    /// Points of the shared bar a sprinting ball spends a second. The share of
+    /// the bar is the class's own, `EnergyDrainSprint` / `EnergyBar`; spending it
+    /// from the shield's bar is OURS (the maintainer, 2026-11-01). BF2: 900/s, a
+    /// full bar in 3.3 s. PROVISIONAL, measure: the maintainer's timed full-bar
+    /// ball sprint in live play.
+    pub fn ball_sprint_drain(&self) -> f32 {
+        self.share_of_bar(self.energy_drain_boost)
+    }
+
+    /// The bar a spent ball needs before it sprints again: the soldier's recover
+    /// threshold as a share (BF2: 750 points, 2.5 s). OURS and PROVISIONAL,
+    /// measure: the maintainer's timed wait from an empty bar to the next sprint
+    /// in live play.
+    pub fn ball_sprint_recover(&self) -> f32 {
+        self.share_of_bar(super::ENERGY_RECOVER)
+    }
+
+    fn share_of_bar(&self, energy: f32) -> f32 {
+        if self.energy_bar > 0.0 {
+            self.shield.max * energy / self.energy_bar
+        } else {
+            0.0
+        }
+    }
+
     pub fn ball_sphere(&self) -> Sphere {
         Sphere {
             center: Vec3::new(0.0, self.ball_radius + 0.1, -0.2),

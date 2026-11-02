@@ -8,24 +8,32 @@ use crate::fmath;
 
 impl Droideka {
     pub(super) fn tick_energy(&mut self, dt: f32, input: &Input, c: &DroidekaClass) {
-        if self.boosting {
-            self.energy -= c.energy_drain_boost * dt;
-            if self.energy <= 0.0 {
-                self.energy = 0.0;
-                self.depleted = true;
-                self.boosting = false;
-            }
+        let idle = input.fwd == 0.0 && input.strafe == 0.0 && input.turn == 0.0;
+        let rate = if idle {
+            c.energy_restore_idle
         } else {
-            let idle = input.fwd == 0.0 && input.strafe == 0.0 && input.turn == 0.0;
-            let rate = if idle {
-                c.energy_restore_idle
-            } else {
-                c.energy_restore
-            };
-            self.energy = (self.energy + rate * dt).min(c.energy_bar);
-        }
+            c.energy_restore
+        };
+        self.energy = (self.energy + rate * dt).min(c.energy_bar);
         if self.depleted && self.energy >= ENERGY_RECOVER {
             self.depleted = false;
+        }
+    }
+
+    /// The ball's sprint spends the one bar the shield uses. The disc's boost
+    /// spent the hidden jump pool; the bar is the maintainer's port rule.
+    pub(super) fn tick_sprint(&mut self, dt: f32, input: &Input, c: &DroidekaClass) {
+        if self.boosting && !input.free_sprint {
+            self.shield.points = (self.shield.points - c.ball_sprint_drain() * dt).max(0.0);
+        }
+        if !input.human {
+            return;
+        }
+        if self.shield.points <= 0.0 {
+            self.sprint_spent = true;
+            self.boosting = false;
+        } else if self.sprint_spent && self.shield.points >= c.ball_sprint_recover() {
+            self.sprint_spent = false;
         }
     }
 
@@ -45,7 +53,7 @@ impl Droideka {
     }
 
     fn boost_on(&mut self) -> bool {
-        if self.state != ROLLING || self.depleted {
+        if self.state != ROLLING || self.sprint_spent || self.shield.points <= 0.0 {
             return false;
         }
         self.boosting = true;
@@ -113,7 +121,7 @@ impl Droideka {
             self.boosting = false;
             self.jump(c, body, report);
             accel = 0.0;
-        } else if fwd > BALL_BOOST_STICK && (input.boost || self.boosting) && self.boost_on() {
+        } else if fwd > BALL_BOOST_STICK && input.boost && self.boost_on() {
             accel = fwd * c.ball_acceleration * c.ball_boost_scale;
         } else {
             self.boosting = false;

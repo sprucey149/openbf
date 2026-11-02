@@ -96,7 +96,8 @@ impl Unit {
     }
 
     /// What the stamina bar reads, (value, full). The maintainer: "The
-    /// droideka stamina bar is how much shield is left."
+    /// droideka stamina bar is how much shield is left." It is one pool: the
+    /// shield standing, the sprint as a ball (`Droideka::tick_sprint`).
     pub fn stamina_bar(&self) -> (f32, f32) {
         match (&self.droideka, self.droideka_class()) {
             (Some(d), Some(c)) => (d.shield.points, c.shield.max),
@@ -154,10 +155,12 @@ impl Sim {
             fold: edge(buttons::ROLL_STANCE),
             shield: edge(buttons::SECONDARY_FIRE),
             jump: edge(buttons::JUMP),
-            // The maintainer: no sprint in ball or walking form. The discs'
-            // ball boost stays in the integrator, but no button reaches it.
-            boost: false,
+            // The maintainer (2026-11-01): a player's droideka sprints in ball
+            // form only. Bots do not sprint. Held like a soldier's, where the
+            // disc latches: OURS, measure: the maintainer's live ball sprint.
+            boost: human && pad.pressed(buttons::SPRINT),
             human,
+            free_sprint: u.is_player && self.cheats.infinite_stamina,
             cramped,
         })
     }

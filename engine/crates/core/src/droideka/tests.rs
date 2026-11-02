@@ -228,7 +228,7 @@ fn a_human_turning_the_ball_leans_as_if_rolling_forward() {
 }
 
 #[test]
-fn boost_doubles_the_top_speed_and_spends_energy() {
+fn boost_doubles_the_top_speed_and_spends_the_shared_bar_not_the_jump_pool() {
     let mut r = Rig::rolling();
     let boost = Input {
         fwd: 1.0,
@@ -240,15 +240,21 @@ fn boost_doubles_the_top_speed_and_spends_energy() {
     }
     assert!(r.d.boosting);
     assert!(r.d.omega > r.c.ball_omega_cap());
+    assert_eq!(
+        r.d.energy, r.c.energy_bar,
+        "the jump pool is not the sprint's"
+    );
+    let want = r.c.shield.max - r.c.ball_sprint_drain() * 30.0 * TICK_DT;
     assert!(
-        (r.d.energy - (100.0 - 30.0 * 30.0 * TICK_DT)).abs() < 0.5,
+        (r.d.shield.points - want).abs() < 40.0,
         "{}",
-        r.d.energy
+        r.d.shield.points
     );
     for _ in 0..90 {
         r.tick(&boost);
     }
-    assert!(!r.d.boosting && r.d.depleted && r.d.energy < ENERGY_RECOVER);
+    assert!(!r.d.boosting && r.d.sprint_spent && !r.d.depleted);
+    assert!(r.d.shield.points < r.c.ball_sprint_recover());
     let walk = Input {
         fwd: 0.5,
         boost: true,
@@ -391,38 +397,38 @@ fn the_shield_toggles_drains_refills_and_drops_in_the_ball() {
     let c = ShieldClass::default();
     let mut s = Shield::full(&c);
     assert!(!s.on);
-    assert_eq!(s.tick(TICK_DT, true, false, &c), Some(true));
+    assert_eq!(s.tick(TICK_DT, true, false, true, &c), Some(true));
     assert_eq!(
         s.points, 3000.0,
         "a full BF2 shield does not drain until hit"
     );
     s.absorb(80.0, 1.0);
     for _ in 0..30 {
-        s.tick(TICK_DT, false, false, &c);
+        s.tick(TICK_DT, false, false, true, &c);
     }
     assert!((s.points - (2920.0 - 100.0)).abs() < 0.05, "{}", s.points);
-    assert_eq!(s.tick(TICK_DT, true, false, &c), Some(false));
+    assert_eq!(s.tick(TICK_DT, true, false, true, &c), Some(false));
     for _ in 0..30 {
-        s.tick(TICK_DT, false, false, &c);
+        s.tick(TICK_DT, false, false, true, &c);
     }
     assert!((s.points - 3000.0).abs() < 0.05 || s.points > 2810.0);
-    s.tick(TICK_DT, true, false, &c);
+    s.tick(TICK_DT, true, false, true, &c);
     assert!(s.on);
-    assert_eq!(s.tick(TICK_DT, false, true, &c), Some(false));
+    assert_eq!(s.tick(TICK_DT, false, true, true, &c), Some(false));
     assert_eq!(
-        s.tick(TICK_DT, true, true, &c),
+        s.tick(TICK_DT, true, true, true, &c),
         None,
         "no raise while transforming"
     );
     s.on = true;
     s.points = 0.0;
-    assert_eq!(s.tick(TICK_DT, false, false, &c), Some(false));
+    assert_eq!(s.tick(TICK_DT, false, false, true, &c), Some(false));
     let bf1 = ShieldClass {
         drains_full: true,
         ..c.clone()
     };
     let mut full = Shield::full(&bf1);
-    full.tick(TICK_DT, true, false, &bf1);
+    full.tick(TICK_DT, true, false, true, &bf1);
     assert!(full.points < 3000.0);
 }
 

@@ -153,6 +153,35 @@ fn the_side_bakes_carry_each_droideka_with_its_hardpoints() {
     }
 }
 
+/// The sprint's numbers from each disc's own table.
+#[test]
+fn the_ball_sprint_reads_the_class_tables() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets_baked/classes");
+    for game in ["bf1", "bf2"] {
+        let file = root.join(format!("{game}_cis.ron"));
+        if !file.exists() {
+            return;
+        }
+        let mut db = crate::classdb::ClassDb::default();
+        db.load(&file).unwrap();
+        let c = droideka_class(&db, &db, "cis_inf_droideka");
+        println!(
+            "{game}: bar {} drain {} boost x{} shield {} off {} on {} -> {}/s, {} recover",
+            c.energy_bar,
+            c.energy_drain_boost,
+            c.ball_boost_scale,
+            c.shield.max,
+            c.shield.rate_off,
+            c.shield.rate_on,
+            c.ball_sprint_drain(),
+            c.ball_sprint_recover()
+        );
+        assert!(c.ball_sprint_drain() > 0.0);
+        assert!(c.ball_sprint_drain() > c.shield.rate_off, "it must empty");
+        assert!(c.ball_sprint_recover() > 0.0 && c.ball_sprint_recover() < c.shield.max);
+    }
+}
+
 #[test]
 fn the_shield_hum_fades_as_the_shield_wears() {
     assert_eq!(shield_gain(3000.0, 3000.0), 1.0);

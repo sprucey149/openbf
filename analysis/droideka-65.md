@@ -60,7 +60,7 @@ PROVISIONAL [H] or OURS, each named so it can be replaced when read:
 - From the sim and draw stages: recover order deploys (RE: walk out of a stuck spot); the AI clears SPRINT and
   ACTION; the legs offset is not drawn; ball spin drives the roll clip time; the ball lean is a model rotation;
   ordnance prims are bind-pose spheres; BF1's untagged prims follow one rule; droideka voices are exempt; the walk
-  uses the human yaw and mouse turn; the player spawns deployed; the main bar shows shield charge; issue #85 adds a refusal message for the ball jump's separate energy; the disc's sprint-button ball boost is fed by no button (the maintainer, 2026-10-30: no sprint in either form); the barrels alternate [H];
+  uses the human yaw and mouse turn; the player spawns deployed; the main bar shows shield charge; issue #85 adds a refusal message for the ball jump's separate energy; a player's ball sprints on the held sprint button and spends the shield's bar, standing never sprints, bots never sprint (the maintainer, 2026-11-01; `re-droideka-unit.md` section 9); the barrels alternate [H];
   explosions spend the shield first [H] (RE section 8); the ball snaps to the floor; no crash damage.
 - RE section 8 items stay open: explosion damage flags, aimer alternation, BF1's fold button, the evade dodge-roll,
   first-person `droidekafp`.

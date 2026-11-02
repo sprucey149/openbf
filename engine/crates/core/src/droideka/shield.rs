@@ -76,6 +76,7 @@ impl Shield {
         dt: f32,
         press: bool,
         forced_off: bool,
+        recharge: bool,
         c: &ShieldClass,
     ) -> Option<bool> {
         let was = self.on;
@@ -84,7 +85,11 @@ impl Shield {
         } else if press {
             self.on = !self.on;
         }
-        let rate = if self.on { c.rate_on } else { c.rate_off };
+        let rate = match (self.on, recharge) {
+            (true, _) => c.rate_on,
+            (false, true) => c.rate_off,
+            (false, false) => 0.0,
+        };
         if c.drains_full || self.points < c.max {
             self.points = (self.points + dt * rate).clamp(0.0, c.max);
         }

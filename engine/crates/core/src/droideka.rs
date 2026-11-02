@@ -133,8 +133,11 @@ pub struct Input {
     pub fold: bool,
     pub shield: bool,
     pub jump: bool,
+    /// The sprint button held: a ball's sprint, nothing on its feet.
     pub boost: bool,
     pub human: bool,
+    /// The stamina cheat: a ball's sprint costs the bar nothing.
+    pub free_sprint: bool,
     pub cramped: bool,
 }
 
@@ -185,6 +188,9 @@ pub struct Droideka {
     pub spin: [f32; 2],
     pub lean: f32,
     pub boosting: bool,
+    /// The bar ran empty: no sprint until it is back over the recover share.
+    /// A player's only: a bot never sprints and never sets it.
+    pub sprint_spent: bool,
     pub energy: f32,
     pub depleted: bool,
     pub air: f32,
@@ -207,6 +213,7 @@ impl Droideka {
             spin: [1.0, 0.0],
             lean: 0.0,
             boosting: false,
+            sprint_spent: false,
             energy: c.energy_bar,
             depleted: false,
             air: 0.0,
@@ -257,6 +264,8 @@ impl Droideka {
             body.vel = Vec3::ZERO;
             self.legs = 0.0;
             self.lean = 0.0;
+            // Leaving the ball ends its sprint: standing form never sprints.
+            self.boosting = false;
         }
         let next = TRANSITIONS[usize::from(self.state)][usize::from(ev)];
         self.enter(next, c, report);
@@ -325,10 +334,17 @@ impl Droideka {
         } else if self.walk_state() && self.order == Order::Roll {
             self.raise(EV_ROLL, c, body, &mut report);
         }
-        if let Some(on) = self
-            .shield
-            .tick(dt, input.shield, self.in_transform(), &c.shield)
-        {
+        // Before the shield's recharge: a bar a hit emptied counts as empty.
+        if input.human && self.shield.points <= 0.0 {
+            self.sprint_spent = true;
+        }
+        if let Some(on) = self.shield.tick(
+            dt,
+            input.shield,
+            self.in_transform(),
+            !self.boosting,
+            &c.shield,
+        ) {
             report.shield = Some(on);
         }
         if self.state == ROLLING {
@@ -337,6 +353,7 @@ impl Droideka {
             self.walk(dt, input, c, body, &mut report);
         }
         self.tick_energy(dt, input, c);
+        self.tick_sprint(dt, input, c);
         let (sy, cy) = fmath::sin_cos(body.yaw);
         if self.state == ROLLING {
             let v = self.omega * c.ball_radius / c.ball_speed_scale;
@@ -391,7 +408,8 @@ impl Droideka {
             0xde,
             self.state,
             self.dir,
-            self.boosting as u8,
+            // One byte, so a unit that never sprints hashes as it always did.
+            self.boosting as u8 | (self.sprint_spent as u8) << 1,
             self.depleted as u8,
             self.shield.on as u8,
             self.order as u8,
