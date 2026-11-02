@@ -40,24 +40,19 @@ python3 scripts/pack.py
   the two games, against 12 where the Xbox copy is larger. Those are mostly on BF2 Geonosis, such as a sky at
   1024x256 against the PC's 512x128.
 
-> **Status: Xbox discs and a PC BF1 install now work without a PS2 disc.** Either Xbox disc can stand in for that game's PS2 disc, and
-> PC BF1 can be your only BF1. Earlier automated comparisons matched the PS2 at every tick of one full round on each included ground map
-> (one seed, Normal, Conquest, default era). Other seeds, modes and eras have not been compared, and nobody has played
-> these builds in a window yet. Corrected collision has not yet been checked against every source's artwork.
+> **Status: PS2 discs, Xbox discs and a PC BF1 install are supported.** Either Xbox disc can replace that game's PS2 disc, and PC BF1 can supply BF1 beside a console BF2. All maps are included.
 >
-> Some maps are currently left out while missing render models are investigated. The build tells you which. Add the PS2 disc
-> of that game to get them back:
-> - Xbox BF1: Rhen Var Harbor and Rhen Var Citadel
-> - Xbox BF2: Tatooine Jabba's Palace
-> - PC BF1: Bespin Cloud City, Rhen Var Harbor and Rhen Var Citadel
+> Xbox and PC copies assemble some buildings differently. Rhen Var, PC Cloud City and one Xbox Jabba's Palace prop use shared resources or locally built, textured stand-ins. These can look coarser, and projected textures can stretch. No game meshes or textures are shipped here.
+>
+> Automated source comparisons use a build made from PS2 discs as their reference. They do not establish that every simulation input is identical: the artwork/collision gate still finds disagreements in existing donor models. Live play and a running-original PS2 comparison remain unchecked.
 
 | You supply | What you get today |
 |---|---|
 | PS2 BF1 + PS2 BF2 | Builds, with the PS2 textures |
 | PS2 BF1 + PS2 BF2 + any Xbox or PC copies | Builds, with larger textures where the artwork matches |
-| Xbox BF1 and/or Xbox BF2, in place of that game's PS2 disc | Builds, leaving out the maps above |
-| PC BF1, in place of a console BF1, with a console BF2 | Builds, leaving out the maps above |
-| Any working set above + the DLC folder | Builds, with Kit Fisto and Asajj Ventress available in Hero Options (see below) |
+| Xbox BF1 and/or Xbox BF2 in place of that game's PS2 disc | Builds, including all maps, with the artwork caveats above |
+| PC BF1 with a console BF2 | Builds, including all maps, with the artwork caveats above |
+| Any working set above + the DLC folder | Builds, with Kit Fisto and Asajj Ventress available in Hero Options |
 | PC BF2 without a console BF2 | Refused |
 | Only one of the two games | Refused |
 
