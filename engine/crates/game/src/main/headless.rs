@@ -1010,7 +1010,7 @@ fn scene_report(scene: &game::assets::Scene, gpu: &SceneGpu, map: &std::path::Pa
         "side_{}/fpm",
         scene.manifest.source_game.to_ascii_lowercase()
     ));
-    let arms = std::fs::read_dir(&fpm).map_or(0, |dir| dir.flatten().count());
+    let arms = pak::read_dir(&fpm).map_or(0, |entries| entries.len());
     println!(
         "  first-person models: {arms}{}",
         if arms == 0 {

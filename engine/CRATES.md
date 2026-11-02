@@ -87,8 +87,10 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/gameplay/rebuild.rs` 577 — rebuild corrected class chunks from the table · `chunk`
 - `bake/src/gameplay/terrain.rs` 160 — terrain heights applied after decoding, inside the play polygon · `apply_terrain`
 - `bake/src/gameplay/tests.rs` 447 — the gameplay table's tests.
-- `bake/src/map.rs` 902 — map/common public entry points, input-reduction helpers, manifest re-exports and regression tests · `bake_map`, `bake_common`; calls the private content baker.
-- `bake/src/map/content.rs` 1377 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
+- `bake/src/map.rs` 904 — map/common public entry points, input-reduction helpers, manifest re-exports and regression tests · `bake_map`, `bake_common`; calls the private content baker.
+- `bake/src/map/content.rs` 1402 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
+- `bake/src/map/render_recovery.rs` 615 — exact shared-LVL presentation lookup and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
+- `bake/src/map/collision_standin.rs` 400 — lower-detail missing-model stand-ins from corrected collision shapes and own-copy material/UV projection · `fit`; called only for measured absent model types.
 - `bake/src/side_classes.rs` 66 — pull BF2 SIDE/TUR.LVL classes placed by a map but absent from its LVL · `side_classes_lvl`, `pull_side_classes`; joined by `bake/src/map/content.rs`.
 - `bake/src/shell.rs` 373 — BF2 shell logo, menu movie packs and music bake · `bake_shell`, `mvs_segments`, `movie_segments`, `read_movie`; ISO fallback and transcode/output rules in the module header (`analysis/re-bf2-shell.md` §1, §4).
 - `bake/src/alpha.rs` 1403 — PROVISIONAL per-draw ALPHA RULE v2 and BF1/BF2 ELF overrides · `verdict`, `census_verdict`, `bf1_elf_verdict`, `bf2_elf_verdict`, `Bf1Class`, `disc_alpha_tests`, `keep_alpha`; rule, sky exception and census switch in the module header (`analysis/re-material-flags.md`).

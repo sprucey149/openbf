@@ -234,6 +234,12 @@ pub(super) fn bake_content(
     }
     let top_level = expanded.len();
     expanded.extend(layer_chunks);
+    let shared_render = if original.is_some() && kind == Content::Map {
+        super::render_recovery::shared(lvl_path, &expanded)?
+    } else {
+        Vec::new()
+    };
+    expanded.extend(mungefs::content_chunks(&shared_render).map_err(|e| anyhow!("{e}"))?);
     if expanded.len() > top_level {
         eprintln!(
             "lvl_ layers: {wrappers} wrapper(s) contributed {} content chunk(s)",
@@ -718,6 +724,25 @@ pub(super) fn bake_content(
             posed.len(),
             posed.join(" ")
         );
+    }
+    if kind == Content::Map {
+        if let Some(original) = original.as_deref() {
+            for model in
+                super::render_recovery::pieces(original, &expanded, &worlds, &parsed_models)?
+            {
+                let alphas = alpha_table.model(&model);
+                alpha_usage.record_model(&model, &alphas);
+                let glb = crate::glb::world_model_to_glb(&model, &alphas, hdr.is_some())?;
+                std::fs::write(out.join("models").join(format!("{}.glb", model.name)), glb)?;
+                if !models
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(&model.name))
+                {
+                    models.push(model.name.clone());
+                }
+                parsed_models.insert(model.name.to_ascii_lowercase(), model);
+            }
+        }
     }
     // The far scene's LOWD extension (`crate::far_lowd`, card UTAS): what a
     // geometry's LOWD draws beyond its LOD0, as one more model.

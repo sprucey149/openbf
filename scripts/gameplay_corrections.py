@@ -559,6 +559,10 @@ def generate(reference_root, donor_root, out, program_out, *, reference_census=N
                 if target != existing:
                     row.setdefault("sky", []).append(target)
             elif tag == b"tern" and other:
+                # WATR feeds swimming, drowning and the tactical-position
+                # table even on a terrain stub with no heightfield.
+                if geometry.child(payload, b"WATR") is None and geometry.child(other[2], b"WATR") is not None:
+                    row.setdefault("remove_water", []).append(loc)
                 target, summary = terrain_record(loc, payload, other[2], polygon)
                 report["maps"][file] = summary
                 if target:

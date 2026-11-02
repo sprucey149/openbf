@@ -241,7 +241,7 @@ fn vo_dictionary() -> std::collections::HashMap<u32, String> {
 
 /// The layout reads every VO property the bake holds: on every baked map,
 /// with every layer merged, the posts' tables hold as many lines as the
-/// capture posts carry `VO_*` properties, and none names a side outside the
+/// capture and spawn-only CTF posts carry `VO_*` properties, and none names a side outside the
 /// four commander factions; the ones on other instances are listed. `ANNC_DUMP=<file>` writes one
 /// `map<TAB>instance<TAB>property<TAB>line` row per entry, for the comparison
 /// with the disc (`lead_tmp/annc/check_posts.py`).
@@ -281,9 +281,19 @@ fn every_baked_post_reads_its_whole_vo_table() {
                     dict[&p.0]
                 );
             }
-            if i.props
+            // Spawn-only CTF posts also become layout posts. KAS2's two
+            // TDM spawn posts carry 24 lines without a capture region.
+            let spawn_post = i.class.eq_ignore_ascii_case("com_bldg_controlzone_ctf")
+                && [
+                    game::layout::PROP_SPAWN_PATH,
+                    game::layout::PROP_CONTROL_REGION,
+                ]
                 .iter()
-                .any(|p| p.0 == game::layout::PROP_CAPTURE_REGION)
+                .all(|key| i.props.iter().any(|p| p.0 == *key));
+            if spawn_post
+                || i.props
+                    .iter()
+                    .any(|p| p.0 == game::layout::PROP_CAPTURE_REGION)
             {
                 on_posts += n;
             } else if n > 0 {
@@ -309,8 +319,8 @@ fn every_baked_post_reads_its_whole_vo_table() {
         maps.len()
     );
     // VO properties on an instance with no capture region: a post that is
-    // destroyed, not captured (BF1 Endor's bunker panel), or a spawn-only one
-    // of another mode. The port models neither.
+    // destroyed, not captured (BF1 Endor's bunker panel), or an instance
+    // without the paths/regions needed for a layout post.
     // BF1 has no modes: its strays are the destroyable posts, listed.
     println!(
         "{} more lines on {} instances that are no capture post",

@@ -321,10 +321,10 @@ pub struct CollisionGeom {
     pub prims: Vec<ManifestPrim>,
 }
 
-/// Which of `m`'s layers [`Scene::apply_mode_layer`] merges for `mode`
-/// ("con", "ctf", ...) — the selection alone, for callers holding just a
-/// manifest (the vehicle-pad census).
-pub fn mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
+/// Find a layer whose authored world names explicitly identify `mode`.
+/// Unlike [`mode_layer_index`], this never substitutes a generic design layer.
+/// Diagnostics use it to distinguish a measured mode from fallback content.
+pub fn authored_mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
     // A BF2 map's `lvl_` sublevels each hold one or more worlds, and the
     // mode is spelled in a WORLD name, not reliably in the first one: the
     // bake names a layer after `worlds[0]`, so Mygeeto's conquest layer
@@ -344,10 +344,6 @@ pub fn mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
         "ass" => vec!["obj", "obj_spawn", "ass_spawn", "swing_obj", "swingassault"],
         other => vec![other],
     };
-    // Layers named for a DIFFERENT mode must never be picked as fallback.
-    const MODE_WORDS: [&str; 9] = [
-        "con", "conquest", "ctf", "1flag", "1ctf", "hunt", "tdm", "eli", "assault",
-    ];
     let map = m.map.clone();
     let matches_alias = |l: &ManifestLayer| {
         l.worlds.iter().chain(std::iter::once(&l.name)).any(|w| {
@@ -357,7 +353,17 @@ pub fn mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
             })
         })
     };
-    m.layers.iter().position(matches_alias).or_else(|| {
+    m.layers.iter().position(matches_alias)
+}
+
+/// Which layer a battle merges, including maps whose Conquest posts live in
+/// a generic design layer. Existing callers retain that fallback behavior.
+pub fn mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
+    authored_mode_layer_index(m, mode).or_else(|| {
+        // Layers named for a DIFFERENT mode must never be picked as fallback.
+        const MODE_WORDS: [&str; 9] = [
+            "con", "conquest", "ctf", "1flag", "1ctf", "hunt", "tdm", "eli", "assault",
+        ];
         // No layer names this mode (Felucia and Mustafar have no conquest
         // sublevel at all): fall back to the biggest layer that is not
         // named for another mode — in practice the map's `_design` pass,
@@ -1552,6 +1558,25 @@ mod tests {
             );
             assert_eq!(sim.water_under(origin), wet.then_some(authored.height));
         }
+    }
+
+    #[test]
+    fn authored_modes_are_distinct_from_design_fallbacks() {
+        let m: Manifest = ron::from_str(
+            r#"(
+            map: "cor1", source_game: "bf2", terrain_name: None, sky_name: None,
+            terrain_glb: None, models: [], textures: [], classes: [], geometries: [],
+            regions: [], instances: [], layers: [
+                (name: "cor1_design", worlds: ["cor1_design"], regions: [], instances: []),
+                (name: "cor1_soundregions", worlds: ["cor1_soundregions", "cor1_hunt"],
+                 regions: [], instances: []),
+            ])"#,
+        )
+        .unwrap();
+        assert_eq!(authored_mode_layer_index(&m, "hunt"), Some(1));
+        assert_eq!(authored_mode_layer_index(&m, "con"), None);
+        assert_eq!(authored_mode_layer_index(&m, "nonexistent"), None);
+        assert_eq!(mode_layer_index(&m, "con"), Some(0));
     }
 
     /// Every space map's Assault layer, as its script and its worlds spell it, and

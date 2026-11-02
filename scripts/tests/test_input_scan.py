@@ -547,15 +547,17 @@ class Messages(unittest.TestCase):
         for path in folder.glob('*.json'):
             self.assertNotIn('private_file', path.read_text(), path.name)
 
-    def test_a_source_alone_leaves_out_the_maps_it_cannot_draw(self):
-        iso = xbox_image(self.root / 'x1', 'bf1')
+    def test_sources_keep_the_maps_with_recovered_structures(self):
+        xbox_image(self.root / 'x1', 'bf1')
         xbox_image(self.root / 'x2', 'bf2')
         plan = scan.scan([self.root], extracted=str(self.root / 'none'), xbox_supported=True)
         env = scan.bake_env(plan)
         self.assertEqual(plan['refusals'], [])
-        self.assertEqual(env['OPENBF_BF1_WITHHELD'], ' '.join(scan.WITHHELD_MAPS['xbox', 'bf1']))
-        self.assertEqual(env['OPENBF_BF2_WITHHELD'], ' '.join(scan.WITHHELD_MAPS['xbox', 'bf2']))
-        self.assertTrue(any('maps left out' in line and 'RHN/RHN1' in line for line in scan.summary_lines(plan)), iso)
+        self.assertNotIn('OPENBF_BF1_WITHHELD', env)
+        self.assertNotIn('OPENBF_BF2_WITHHELD', env)
+        self.assertEqual(scan.withheld_maps('bf2', {'kind': 'xbox-disc'}), ())
+        self.assertFalse(any('maps left out' in line and 'RHN/RHN1' in line for line in scan.summary_lines(plan)))
+        self.assertEqual(scan.withheld_maps('bf1', {'kind': 'pc-install'}), ())
 
     def test_the_ps2_disc_keeps_every_map(self):
         iso_image(self.root / 'a', 'bf1')

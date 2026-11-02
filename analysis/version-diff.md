@@ -18,14 +18,14 @@ are generated from, plus the hashes of the input LVLs and the tools. The
 | Direct mission declarations | **Yes**, for what the static reader can see. Branches, helpers and `ScriptPostLoad` stay `NM`. | Reference declarations in `ps2-v1`; complete effective missions remain NM. |
 | Foliage placement lookup and grass atlas | **Yes.** | Reference numbers in `foliage-v1.json`; consumer equivalence needs a bake comparison. |
 | Placements, regions, hints, barriers | **Yes.** Transforms and flags are numbers. | Measured below; correction coverage is separate from this raw census. |
-| Paths and planning graphs | Fingerprints detect differences; full navigation topology remains outside the public table approval. | Compared whole below, including dynamic patches; private correction coverage is separate. |
+| Paths and planning graphs | The existing fingerprinted correction instruction tables are approved (2026-11-02). | Compared whole below, including dynamic patches; correction coverage is separate. |
 | Collision primitives (boxes, spheres, cylinders) | **Yes.** Each is a kind, three sizes and a transform. | Measured below; correction coverage is separate from this raw census. |
 | One whole collision mesh shifted | **Yes**, a verified rigid offset. Renamed nodes are re-paired before this measurement. | Counts and offsets below; a shifted vertex set alone is not proof of matching polygon surfaces. |
 | Terrain cutter planes | **Mostly.** A few numbers per cutter fix the simulated hole. The drawn clipped patch still comes from the donor. | Differs on BF1 Hoth and Rhen Var 1, BF2 Polis Massa; absolute correction records are required. |
 | Font metrics, layout coordinates, clip lengths | **Yes.** | Not in the table. |
-| **Terrain heights inside playable bounds** | **Yes, by maintainer approval on 2026-11-01.** Absolute target heights may correct every in-bounds sample, including terrain under objects. Other outside-bound changes are not approved for export. The one exception is a row one grid cell past the line, which sets the height of ground inside it; that is a reading of the approval for playable areas, not a separate approval, and awaits the maintainer's confirmation. | Measured below; corrections must preserve the PS2 height query throughout playable cells. |
-| **Collision meshes** | **No**, apart from independently verified rigid shifts. | Measured below. |
-| Animation tracks and root-motion curves | **No.** A length or endpoint can be tabulated, the path between cannot. BF2 has 0 changed root-motion curves; BF1 has 2 against Xbox and 3 against PC. | Measured below. |
+| **Terrain heights inside playable bounds** | **Yes.** The existing height rows and outside-bound height fills are approved for publication (2026-11-02). | Measured below; corrections must preserve the PS2 height query throughout playable cells. |
+| **Collision meshes** | The existing collision correction programs are approved for publication (2026-11-02). | Measured below. |
+| Animation tracks and root-motion curves | The existing animation and skeleton correction programs are approved for publication (2026-11-02). A duration or endpoint alone cannot reproduce a curve. | Measured below. |
 | Whole assets one edition lacks (meshes, maps, clips) | **No.** | Counted below. |
 | Art, audio, movies, fonts, localized text | **No**, and the repo must not hold them. | See the dependency audit. |
 
@@ -216,11 +216,10 @@ flat wall was merely retessellated.
 <!-- /generated -->
 
 Most of the largest gaps are capital ships in space maps and buildings on Tatooine, Rhen Var and Naboo 2. Which of them
-a soldier can touch was not measured. A public number table cannot supply changed polygon surfaces. BF2's
+a soldier can touch was not measured. Counts and fingerprints alone cannot supply changed polygon surfaces; the approved correction programs are a separate path. BF2's
 `rep_hover_barcspeeder` is within 1 mm of a 1 m y translation on Xbox and PC, but adding that offset does not recover
 the exact PS2 float32 polygon fingerprint. It is not counted as an exact whole-mesh shift. Candidate shifts are
-counted only when the full translated polygon fingerprint matches; equal vertex sets alone are insufficient. Whole meshes, vertex lists and polygon patches remain
-private-only; their export is refused.
+counted only when the full translated polygon fingerprint matches; equal vertex sets alone are insufficient. Standalone meshes and other asset payloads remain refused. The existing collision correction instruction tables, including written coordinates and polygon instructions, were approved on 2026-11-02.
 
 ## Builds with no PS2 disc for that game
 
@@ -246,14 +245,11 @@ Same shapes per map, if a build took all ground and collision from the other edi
 and `com_item_healthrecharge_dst`. Primitive, placement, path and planning differences are not counted
 against a map, because a table could carry those; a map with other paths does not match until one does.
 
-The correction path has two distinct content rules. Names, class/mission/world/primitive/cutter values and
-fingerprints are permitted numerical records. Absolute terrain-height corrections are additionally approved only
-inside playable bounds, including terrain under objects; checking just exposed vertices leaves different simulation
-queries. A playable edge cell can interpolate a neighbour outside a polygon, so parity checks must cover the whole
-query, not merely count changed in-polygon vertices. Collision corrections inside playable areas are approved in public,
-preferably as instructions over the player's own files. The instruction tables also hold absolute coordinates not limited
-to playable areas, some written animation tracks, and height fills up to 512 m past the line. Those go past the approval
-and await the maintainer's decision before any public export (`analysis/source-gates.md`).
+The maintainer approved publication of the existing correction tables on 2026-11-02, including collision
+coordinates, animation tracks, skeleton bones and height fills beyond the playable line. They remain instructions
+over the player's own fingerprinted files. This does not authorize other game assets or remove the export's scrub
+and data refusals. Parity checks must cover complete simulation queries, including outside samples read by a ray
+originating inside the playable bounds, rather than merely counting changed in-polygon vertices.
 
 A known-source fingerprint gate must reject an unknown revision before applying the records, and all correction
 categories must apply together. A passing terrain/collision census is still weaker than a canonical hash of everything

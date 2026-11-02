@@ -13,12 +13,30 @@ Nothing outside the public code and the player's own files is read. Each correct
 file, and the bake refuses a file whose fingerprint or rebuilt result differs from the table's, so `rebake.sh` needs no gameplay
 check of its own: a drifted file stops the bake.
 
-## Maps left out
+## Recovered structures and map availability
 
-`WITHHELD_MAPS` leaves a map out of a build whose gameplay source has no render model for some of its solid buildings. Those rounds
-match the PS2's, but the buildings would stand there invisible. The PS2 disc of that game brings them back.
+BF1's Cloud City and Rhen Var maps are now included from every accepted BF1 source. A full inventory of the 142 Xbox BF1 and
+147 PC BF1 LVLs found that those versions assemble several buildings differently from the PS2. The named PS2 pieces are absent,
+but their larger source structures exist. Exact resources from another LVL are pulled first: both versions have Rhen Var's broken
+corner in RHN1 rather than RHN2, and PC has a basebrick in RHN2 rather than RHN1.
 
-| Source | Maps left out | Instances with no model |
+The remaining pieces use lower-detail stand-ins built locally from the corrected collision shapes, with materials and texture
+coordinates projected from that copy's placed artwork. The new surfaces use the map's lighting instead of unrelated baked shadow
+colors from the donor's old surface. No render mesh or texture is included in the repository.
+`render-bounds-v1.json` contains only measured numeric crop envelopes; `render_recovery_bounds.py` reproduces them from the player's
+reference files. Related retained composites are cropped to their corrected PS2 visibility boxes so they do not draw the removed
+pieces again. The smaller pieces can look coarser: some domed caps become simple cylinders, and projected textures can stretch.
+
+Map availability does not establish complete artwork/collision alignment. The recovered structures resolve to models and keep
+PS2 collision and navigation unchanged, but existing donor models still have measured surface discrepancies. Other seeds, modes,
+eras and live play remain unchecked here.
+
+All maps are now included from the accepted sources. Xbox BF2 Jabba's Palace uses a local textured stand-in for
+`tat3_prop_cz1droid_parts`, confirmed absent from all 185 disc LVLs including the sound banks. Its donor-only water cell
+is removed by a fingerprinted correction; four complete rounds matched every tick across two seeds and both eras.
+The counts below record the original unresolved placements, before shared-resource lookup and recovery.
+
+| Source | Maps needing recovery | Originally unresolved instances |
 |---|---|---|
 | Xbox BF1 | bf1_rhn1, bf1_rhn2 | 39, 6 |
 | Xbox BF2 | bf2_tat3 | 1 |
@@ -32,7 +50,7 @@ PC BF1 Kashyyyk Islands keeps its 16 `kas1_mist` instances without a model: goin
 |---|---:|---:|
 | bf1-pc | 1,938,038 | 515,828 |
 | bf1-xbox | 1,332,492 | 317,793 |
-| bf2-xbox | 1,060,552 | 407,605 |
+| bf2-xbox | 1,060,608 | 407,605 |
 | bf2-pc | 1,899,665 | 585,269 |
 
 The table includes names, classes, world records, height rows and height fills. These tables replace 2.6 MB of unique private
@@ -80,14 +98,27 @@ with no render model.
 | bf2_nab2 | 0 | 0 | 0 | match, 12,374 ticks |  |
 | bf2_pol1 | 0 | 0 | 1,593 | match, 13,708 ticks |  |
 | bf2_tan1 | 0 | 0 | 1,034 | match, 11,899 ticks |  |
-| bf2_tat3 | 0 | 0 | 117,095 | differs at tick 1091 | 1 |
+| bf2_tat3 | 0 | 0 | 117,151 | match, 10,937 ticks | 1 |
 | bf2_uta1 | 0 | 0 | 19,477 | match, 14,171 ticks |  |
 | bf2_yav1 | 76 | 853 | 3,210 | match, 12,651 ticks |  |
 | tat2 | 0 | 0 | 21,382 | match, 12,208 ticks |  |
 
+## Jabba source-water correction
+
+Xbox BF2 Jabba's Palace stores a single water cell at Y = -10.5 in its terrain stub; the PS2 stub has no water.
+The collision and navigation bake files matched, but that extra water removed 21 tactical positions before the round began.
+At tick 1091 unit 0 first chose a different position, producing the first hash mismatch. Removing only the donor water restored
+all 1,520 tactical positions and that tick's hash. A fingerprinted `remove_water` locator now strips that donor-only WATR before
+any bake reader consumes it, without changing the PS2 path. The generator handles dry terrain stubs as well as heightfields.
+
+With a fresh Xbox Jabba map bake and the retained source-specific common/side assets and missions, every tick matched the PS2-source
+build through four complete Normal Conquest rounds: Galactic Civil War seeds 42 and 7 (10,937 and 10,280 ticks), and Clone Wars seeds
+42 and 7 (11,282 and 10,284 ticks). These are automated source comparisons, not a comparison with a running PS2 or a live play check.
+The missing droid-parts render prop is a separate problem; restoring water parity does not resolve that artwork.
+
 ## Still open
 
-- **Other seeds, modes and eras.** Each map ran one seed and one era. Baked collision and navigation files are byte-identical to the PS2's on every map, which covers more than one round can, but class definitions and world identities still differ in fields the rounds did not read, so no source is declared multiplayer-equal.
+- **Other seeds, modes and eras.** Apart from the Jabba rerun above, each map ran one seed and one era. Baked collision and navigation files are byte-identical to the PS2's on every map, which covers more than one round can, but class definitions and world identities still differ in fields the rounds did not read, so no source is declared multiplayer-equal.
 - **Space maps.** Space stays behind `OPENBF_BAKE_SPACE=1` and `OPENBF_SPACE=1`. On Xbox BF2 all six bake and match the PS2 at every one of 36,000 ticks on one seed, but no round reached a winner in that time, so an ending is not compared.
 - **The look.** A corrected collision mesh can differ from the donor's render model of the same name. Nobody has looked at this in a window.
 - **Non-root animation.** Other bones keep the donor's pose. Rounds match, but a pose read in a case those rounds did not reach would differ.

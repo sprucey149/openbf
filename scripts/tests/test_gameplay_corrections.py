@@ -44,6 +44,28 @@ def correction():
 
 
 class CorrectionTests(unittest.TestCase):
+    def test_water_is_corrected_on_a_dry_reference_terrain_stub(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            ref, donor = root / 'ref', root / 'donor'
+            ref.mkdir(); donor.mkdir()
+            stub = chunk(b'NAME', b'ground\0')
+            reference = chunk(b'ucfb', chunk(b'tern', stub))
+            original = chunk(b'ucfb', chunk(b'tern', stub + chunk(b'WATR', b'donor water')))
+            (ref / 'map.lvl').write_bytes(reference)
+            (donor / 'map.lvl').write_bytes(original)
+            metadata = {'schema': 1, 'source': {'game': 'bf2', 'platform': 'ps2'},
+                        'files': [{'name': 'map.lvl', 'sha256': c.digest(reference)}], 'entities': [], 'missions': []}
+            other = copy.deepcopy(metadata)
+            other['source']['platform'] = 'xbox'
+            other['files'][0]['sha256'] = c.digest(original)
+            c.generate(ref, donor, root / 'table.json', root / 'programs.json', reference_census=metadata, donor_census=other)
+            public = json.loads((root / 'table.json').read_bytes())
+            self.assertEqual(public['files'][0]['remove_water'], [{'scope': [], 'name': 'ground', 'ordinal': 0}])
+            self.assertNotIn('terrain', public['files'][0])
+            self.assertEqual(export.generated_data_problems(
+                'engine/crates/manifest/data/gameplay/corrections-v1/bf2-xbox.json', c.encoded(public)), [])
+
     def test_only_absolute_height_values_inside_boundary_are_emitted(self):
         loc = {'scope': [], 'name': 'ground', 'ordinal': 0}
         polygon = [[(-8, -8), (8, -8), (8, 8), (-8, 8)]]
@@ -165,6 +187,16 @@ class CorrectionTests(unittest.TestCase):
 
 class ExportCorrectionTests(unittest.TestCase):
     path = 'engine/crates/manifest/data/gameplay/corrections-v1/bf1-pc.json'
+
+    def test_water_removal_only_accepts_resource_locators(self):
+        data = correction()
+        row = data['files'][0]
+        row['remove_water'] = [{'scope': [], 'name': 'ground', 'ordinal': 0}]
+        self.assertEqual(export.generated_data_problems(self.path, c.encoded(data)), [])
+        row['remove_water'][0]['payload'] = [0] * 300
+        self.assertTrue(any('water removal locator' in p for p in export.generated_data_problems(self.path, c.encoded(data))))
+        row['remove_water'] = None
+        self.assertTrue(any('water removal list' in p for p in export.generated_data_problems(self.path, c.encoded(data))))
 
     def test_approved_in_bounds_heights_can_exceed_old_numeric_block_limit(self):
         self.assertEqual(export.generated_data_problems(self.path, c.encoded(correction())), [])

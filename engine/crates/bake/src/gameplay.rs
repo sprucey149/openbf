@@ -192,6 +192,8 @@ pub(super) struct File {
     #[serde(default)]
     terrain: Vec<Terrain>,
     #[serde(default)]
+    remove_water: Vec<Locator>,
+    #[serde(default)]
     sky: Vec<Sky>,
     #[serde(default)]
     models: Vec<ModelBounds>,

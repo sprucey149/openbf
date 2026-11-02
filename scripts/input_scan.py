@@ -42,11 +42,10 @@ XBOX_EXTRACT = "extract-xiso"
 DLC_SUPPORTED = True
 # A PC BF1 install can be BF1's only source with nothing beyond the public code and the player's own files.
 PC_PRIMARY_SUPPORTED = True
-# Maps a source cannot build alone: solid buildings the PS2 has and that source's files have no model for, so they would
-# stand there invisible. Bring the PS2 disc of that game to play them. analysis/source-gates.md says which and why.
-WITHHELD_MAPS = {("xbox", "bf1"): ("RHN/RHN1", "RHN/RHN2"),
-                 ("xbox", "bf2"): ("TAT/TAT3",),
-                 ("pc", "bf1"): ("BES/BES2", "RHN/RHN1", "RHN/RHN2")}
+# Differently partitioned structures are drawn from exact shared resources
+# or lower-detail, own-copy textured stand-ins. All maps are now included;
+# their availability does not establish complete render/collision alignment.
+WITHHELD_MAPS = {}
 
 GAMES = ("bf1", "bf2")
 SHORT = {"bf1": "BF1", "bf2": "BF2"}

@@ -1109,6 +1109,9 @@ pub fn discover_units(
             .filter_map(|p| {
                 (p.extension()? == "glb").then(|| p.file_stem()?.to_str().map(str::to_owned))?
             })
+            // A .low GLB is driven by its actor's animation rig and class
+            // skins in battle. It has neither an independent rig nor class.
+            .filter(|name| !name.ends_with(".low"))
             .collect();
         names.sort();
         for n in names {
@@ -1145,6 +1148,22 @@ mod tests {
     use super::*;
     use crate::assets::CpuMesh;
     use std::collections::HashMap;
+
+    #[test]
+    fn unit_discovery_keeps_the_actor_and_skips_its_low_companion() {
+        let root =
+            std::env::temp_dir().join(format!("openbf-gallery-units-{}", std::process::id()));
+        let soldiers = root.join("side_bf1/soldiers");
+        std::fs::create_dir_all(&soldiers).unwrap();
+        std::fs::write(soldiers.join("trooper.glb"), []).unwrap();
+        std::fs::write(soldiers.join("trooper.low.glb"), []).unwrap();
+        let units = discover_units(&root);
+        std::fs::remove_dir_all(root).unwrap();
+        let keys: Vec<_> = units.iter().map(|(key, ..)| key.as_str()).collect();
+        assert!(keys.contains(&"bf1_trooper"));
+        assert!(!keys.contains(&"bf1_trooper.low"));
+        assert_eq!(keys.len(), 1);
+    }
 
     /// A scene with a FLAT heightfield at y = 0 and instances spanning 200 m
     /// in X and Z about the origin — enough for `overview_bounds` and

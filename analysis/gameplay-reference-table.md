@@ -108,32 +108,26 @@ python3 scripts/gameplay_foliage.py --bf1 SWBFRONT.ELF --bf2 SWBFRNT2.ELF --outp
 The full list, with the terrain and collision measurements and the options for a
 build with no PS2 disc, is in [version-diff.md](version-diff.md).
 
-Collision triangle meshes, navigation topology, skinned bind geometry, hit geometry
-and complete animation tracks remain asset geometry. Encoding them as lists of
-numbers would still ship those assets, which is outside this table's content rule.
-The maintainer approved **only terrain height corrections inside playable bounds**
-on 2026-11-01. This permits neither a whole heightfield nor outside-boundary
-samples, polygon patches, vertices or meshes. Counts, bounds and fingerprints can detect a discrepancy but cannot
-reconstruct the shape. Do not silently use donor collision or interpolate a missing
-root-motion track to satisfy an equality claim.
+The maintainer approved publication of the existing correction instruction tables on
+2026-11-02, including collision coordinates, animation tracks, skeleton bones and
+terrain height fills. The tables operate on the player's fingerprinted files;
+this approval does not permit adding meshes, textures, audio, script bytecode or
+localized text to the repository. The export's scrub and other data refusals remain.
 
-Animation names, durations and endpoint displacement can be tabulated. They cannot
-reproduce intermediate movement, contact timing or pose-dependent hit shapes when
-those tracks differ. Mission populations and object identities do not supply missing
-map meshes. Content in only one edition needs its actual assets or an authored
-substitute.
+Names, durations and endpoint displacements alone cannot reproduce intermediate
+movement or pose-dependent hit shapes. Apply and validate the complete correction
+program before claiming equivalence. A model missing from an edition still needs
+an equivalent in that player's files or a substitute derived from those files.
 
 Fonts, HUD artwork, controller icons, shell backgrounds, movies, sounds and localized
 prose also need source assets or newly authored replacements. Tables can specify
 layout coordinates and name mappings, but cannot make differing art identical. See
 the dependency inventory for measured missing names.
 
-The current input policy requires a console BF2 disc with any PC input and refuses
-PC-only builds. `scripts/pack.py` accepts only a PS2 BF2 disc for that today, and PC
-BF1 may use its fingerprinted corrections and locally generated geometry without
-a PS2 BF1 disc once their complete bake checks pass. The Xbox input switch stays
-closed until its readers land. Allowing an Xbox BF2 disc later satisfies the
-ownership rule; it does **not** establish geometry equivalence.
+The current input policy requires a PS2 or Xbox BF2 disc with any PC input and
+refuses PC-only builds. Xbox can supply either game, and PC BF1 can supply BF1.
+The current map exclusions and measured limits are in [source-gates.md](source-gates.md).
+Source acceptance does not itself establish geometry equivalence.
 
 ## Absolute correction revision
 

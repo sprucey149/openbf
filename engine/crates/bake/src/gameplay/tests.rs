@@ -120,6 +120,41 @@ fn absolute_corrections_apply_together_before_all_readers() {
 }
 
 #[test]
+fn donor_only_water_is_removed_before_readers_without_changing_other_terrain() {
+    let (table, mut file, _) = fixture();
+    let ground = flat_terrain();
+    let source = first(&ground);
+    let wet = wrap(&chunk(
+        b"tern",
+        &[source.payload, chunk(b"WATR", b"donor water").as_slice()].concat(),
+    ));
+    file.classes.clear();
+    file.world.clear();
+    file.primitives.clear();
+    file.sky.clear();
+    file.remove_water = vec![Locator {
+        scope: Vec::new(),
+        name: "ground".into(),
+        ordinal: 0,
+    }];
+    let rebuilt = rebuild::apply(&wet, &table, &file).unwrap();
+    let terrain = first(mungefs::open(&rebuilt).unwrap());
+    assert!(terrain.child(b"WATR").is_none());
+    assert_eq!(
+        terrain.child(b"HGT8").unwrap().payload,
+        source.child(b"HGT8").unwrap().payload
+    );
+    // A simultaneous cutter correction must survive removal of WATR.
+    assert!(terrain.child(b"CUTS").is_some());
+    file.terrain.clear();
+    let rebuilt = rebuild::apply(&wet, &table, &file).unwrap();
+    assert_eq!(rebuilt, wrap(&ground));
+    assert!(rebuild::apply(&wrap(&ground), &table, &file).is_err());
+    file.remove_water[0].name = "absent".into();
+    assert!(rebuild::apply(&wet, &table, &file).is_err());
+}
+
+#[test]
 fn height_rejection_is_atomic_and_bounds_include_edges() {
     let (_, mut file, _) = fixture();
     let raw = flat_terrain();

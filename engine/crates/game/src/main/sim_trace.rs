@@ -1,6 +1,8 @@
 //! SHASH headless trace CLI: fixture by default, or the existing battle
 //! builder on a baked conquest map (16 AI/team, the default difficulty (Normal), 250
-//! tickets, default factions, no mission overrides). No renderer or device.
+//! tickets, default factions). `--mode` selects the map layer; `--mission` loads
+//! an explicit baked mission for mode/era comparisons. `--state-hashes` also
+//! prints the complete Sim::hash after every tick. No renderer or device.
 //! InputLog frame 0 produces record tick 1. A log must have 1..=16 complete
 //! slots and at least the requested frames; additional frames are ignored.
 
@@ -19,6 +21,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         .parse()
         .context("tick count")?;
     let (mut input, mut seed, mut map, mut full) = (None, None, None, false);
+    let (mut mode, mut mission_file) = ("con".to_owned(), None);
+    let mut state_hashes = false;
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--input" => input = Some(PathBuf::from(it.next().context("--input <inputlog.ron>")?)),
@@ -31,8 +35,35 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 )
             }
             "--map" => map = Some(PathBuf::from(it.next().context("--map <baked-dir>")?)),
+            "--mode" => mode = it.next().context("--mode <name>")?.to_owned(),
+            "--mission" => {
+                mission_file = Some(PathBuf::from(it.next().context("--mission <file.ron>")?));
+            }
+            "--state-hashes" => state_hashes = true,
             "--trace-full" => full = true,
             other => bail!("unknown sim-trace flag: {other}"),
+        }
+    }
+    if map.is_none() && (mode != "con" || mission_file.is_some()) {
+        bail!("--mode and --mission require --map");
+    }
+    if let Some(path) = &mission_file {
+        if path == &out
+            || std::fs::canonicalize(path)
+                .ok()
+                .zip(std::fs::canonicalize(&out).ok())
+                .is_some_and(|(input, output)| input == output)
+        {
+            bail!("trace output aliases the mission file");
+        }
+    }
+    let mission = mission_file
+        .as_ref()
+        .map(|path| game::mission::MissionDef::load(path))
+        .transpose()?;
+    if let Some(mission) = &mission {
+        if mission.mode != mode {
+            bail!("mission mode {} differs from --mode {mode}", mission.mode);
         }
     }
     let log: Option<InputLog> = input
@@ -68,9 +99,29 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     }
     let seed = seed.or_else(|| log.as_ref().map(|l| l.seed)).unwrap_or(42);
     let (mut sim, name) = if let Some(map) = map {
-        let (scene, load) = game::assets::load_battle_scene(&map, "con")?;
+        // Normal battles may use a generic design fallback. A non-Conquest
+        // parity trace must prove the requested mode actually exists first.
+        if mode != "con" {
+            let manifest: game::assets::Manifest =
+                ron::from_str(&pak::read_to_string(map.join("manifest.ron"))?)?;
+            if game::assets::authored_mode_layer_index(&manifest, &mode).is_none() {
+                bail!("map has no authored world layer for mode {mode}");
+            }
+        }
+        let (scene, load) = game::assets::load_battle_scene(&map, &mode)?;
         if let Some((path, Err(error))) = load.common {
             bail!("common assets at {} unreadable: {error:#}", path.display());
+        }
+        if let Some(mission) = &mission {
+            if !map
+                .file_name()
+                .is_some_and(|key| mission.map.eq_ignore_ascii_case(&key.to_string_lossy()))
+                || !mission
+                    .source_game
+                    .eq_ignore_ascii_case(&scene.manifest.source_game)
+            {
+                bail!("mission does not describe this map and game");
+            }
         }
         let setup = BattleSetup {
             seed,
@@ -91,8 +142,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))
                 .join("classes"),
-            mission: None,
-            mission_file: None,
+            mission,
+            mission_file: mission_file.as_ref().map(|p| p.display().to_string()),
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
@@ -127,6 +178,9 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         };
         sim.step(pads);
         writer.write_tick(&sim)?;
+        if state_hashes {
+            println!("state {} {:016x}", sim.tick, sim.hash());
+        }
     }
     writer.finish()?;
     println!("trace: {ticks} ticks -> {}", out.display());

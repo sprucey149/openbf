@@ -443,7 +443,38 @@ impl<'a> Rebuild<'a> {
         }
         replace!(world, b"wrld", "world", |t| world(t, Some(c)));
         replace!(primitives, b"prim", "prim", primitives);
-        replace!(terrain, b"tern", "terrain", |t| terrain(t, c));
+        if &c.tag == b"tern" {
+            let mut replacement = None;
+            for (i, t) in self.file.terrain.iter().enumerate() {
+                if self.matches(&t.at, at) {
+                    self.applied.insert(("terrain", i));
+                    replacement = Some(terrain(t, c)?);
+                }
+            }
+            for (i, target) in self.file.remove_water.iter().enumerate() {
+                if self.matches(target, at) {
+                    let bytes = replacement
+                        .take()
+                        .unwrap_or_else(|| chunk(b"tern", c.payload));
+                    let source = mungefs::chunks(&bytes).next().unwrap()?;
+                    if source.child(b"WATR").is_none() {
+                        bail!("water removal target has no water");
+                    }
+                    let mut body = Vec::new();
+                    for child in source.children() {
+                        let child = child?;
+                        if &child.tag != b"WATR" {
+                            body.extend(chunk(&child.tag, child.payload));
+                        }
+                    }
+                    replacement = Some(chunk(b"tern", &body));
+                    self.applied.insert(("water", i));
+                }
+            }
+            if replacement.is_some() {
+                return Ok(replacement);
+            }
+        }
         replace!(sky, b"sky_", "sky", |t: &Sky| Ok::<_, anyhow::Error>(
             chunk(b"sky_", &config(&t.nodes)?)
         ));
@@ -571,6 +602,11 @@ pub(super) fn apply(bytes: &[u8], table: &Table, file: &File) -> Result<Vec<u8>>
     for (i, _) in file.models.iter().enumerate() {
         if !rebuild.applied.contains(&("model", i)) {
             bail!("model bounds correction target is absent from the source");
+        }
+    }
+    for (i, _) in file.remove_water.iter().enumerate() {
+        if !rebuild.applied.contains(&("water", i)) {
+            bail!("water removal target is absent from the source");
         }
     }
     Ok(chunk(b"ucfb", &body))

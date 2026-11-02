@@ -172,10 +172,9 @@ reader support is not gameplay equality. The UI/fonts/localization/movie invento
 PC BF1, so those particular PC BF1 dependencies remain **NM**.
 
 The maintainer's 2026-11-01 rule permits BF1 PC or Xbox without a BF1 PS2 disc only after the complete applicable
-corrections exist. Any PC input still needs a PS2 or Xbox BF2 disc for menus and missing data. Approved public
-corrections cover playable areas. The instruction tables' absolute coordinates, written animation tracks and height
-fills past the line go further and await the maintainer's decision before any public export; a successful bounded
-validation does not confer that permission.
+corrections exist. Any PC input still needs a PS2 or Xbox BF2 disc for menus and missing data. On 2026-11-02 the maintainer approved publication of the existing correction tables, including absolute collision
+coordinates, animation tracks, skeleton bones and height fills. Validation of source equivalence remains separate
+from that publication approval.
 
 The practical split is: canonical names/numbers can establish the gameplay
 configuration; canonical shapes and animation behavior still require validated

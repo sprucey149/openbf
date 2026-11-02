@@ -279,7 +279,7 @@ impl World {
 
 fn spawn_probe(world: &mut World, out: &mut String) {
     let key = world.key.clone();
-    let posts: Vec<(usize, String, Vec<(Vec3, f32)>)> = world
+    let posts: Vec<_> = world
         .w
         .sim
         .cps
@@ -1023,7 +1023,9 @@ impl Lcg {
 }
 
 /// Cell a spot is counted in.
-fn cell(p: Vec3) -> (i32, i32, i32) {
+type Cell = (i32, i32, i32);
+
+fn cell(p: Vec3) -> Cell {
     (
         (p.x / 6.0).floor() as i32,
         (p.y / 6.0).floor() as i32,
@@ -1032,7 +1034,7 @@ fn cell(p: Vec3) -> (i32, i32, i32) {
 }
 
 #[derive(Default)]
-struct Spots(std::collections::BTreeMap<(&'static str, (i32, i32, i32)), (u32, Vec3)>);
+struct Spots(std::collections::BTreeMap<(&'static str, Cell), (u32, Vec3)>);
 impl Spots {
     fn add(&mut self, what: &'static str, p: Vec3) {
         let e = self.0.entry((what, cell(p))).or_insert((0, p));
@@ -1430,7 +1432,7 @@ fn bots_probe(world: &mut World, out: &mut String) {
                 }
             }
         }
-        if t % 15 == 0 {
+        if t.is_multiple_of(15) {
             contact.resize(world.w.sim.cps.len(), [0, 0]);
             aimed.resize(world.w.sim.cps.len(), [0, 0]);
             for i in 0..world.w.sim.units.len() {
@@ -1479,7 +1481,7 @@ fn bots_probe(world: &mut World, out: &mut String) {
                 last_seat[i] = Some((c, t));
             }
         }
-        if t % 15 == 0 {
+        if t.is_multiple_of(15) {
             seated.resize(world.w.sim.units.len(), false);
             sites.resize(world.w.sim.units.len(), None);
             for (i, u) in world.w.sim.units.iter().enumerate() {

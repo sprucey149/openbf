@@ -19,7 +19,9 @@
 use anyhow::{anyhow, Result};
 use std::path::Path;
 
+mod collision_standin;
 mod content;
+mod render_recovery;
 
 use content::bake_content;
 

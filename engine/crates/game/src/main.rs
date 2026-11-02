@@ -5,6 +5,7 @@
 //!   --aim-replay <out-dir>      scripted target/cone/friend/range/wall referee (no GPU)
 //!   --sim-hash <ticks>            run N ticks (idle input), print state hash
 //!   --sim-trace <out> <ticks> [--input <log.ron>] [--seed S] [--map <baked-dir>]
+//!     [--mode <name>] [--mission <file.ron>] [--state-hashes]
 //!     --trace-full               include quantized tuples (64 MiB cap)
 //!   --replay <log.ron>            run an input log, print final hash
 //!   (no args) | --shell           BF2-style instant-action shell (windowed)

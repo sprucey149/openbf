@@ -23,6 +23,10 @@ Groups:
          --bake-groups (the card's declared groups) on a diff that touches the bake code bakes EVERY group and FAILS on
          a difference in a group that is not declared, naming the file and the group (card BAKEG: a crate shared by
          several groups left `side` stale behind a `rebake=maps`)
+  alignment  sampled placed-art/corrected-collision comparison against independent PS2 bakes; requires
+         --alignment-reference ASSETS and --alignment-case NAME=ASSETS (repeat for each source). Reports every
+         base/layer placement, bounds and surface residuals; missing inputs/offenders FAIL. This is an explicit
+         developer gate, not part of a normal player build.
   map    scripts/size_report.sh --check-map
   parity scripts/parity.py gate (card PARITY): the port re-rendered at every stored PCSX2 pose (~950 pairs, 32 maps), each
          map's mean 16x16 block error vs main HEAD's (cached per sha in loop/parity/main/); a map past +0.5 FAILS unless
@@ -81,13 +85,13 @@ one row `gpu ADAPTER LOST`, no group runs, SUMMARY.md's first line says so, exit
 no golden is not checked; vulkaninfo missing or failing = cannot tell = not checked. --adapter-any / OPENBF_ADAPTER_ANY=1
 skips the check.
 """
-import argparse, datetime, glob, hashlib, json, math, os, re, subprocess, sys, tomllib
+import argparse, datetime, glob, hashlib, json, math, os, re, shlex, subprocess, sys, tomllib
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 GATES_TOML = os.path.join(REPO, "engine/artifacts/loop/gates.toml")
 LOCK = os.path.join(REPO, "engine/artifacts/loop/ci.lock")
 GPU_LOCK = os.path.join(REPO, "engine/artifacts/loop/gpu.lock")
-ALL = ["ci", "gpu", "parity", "sim", "sweep", "arena", "leak", "bake", "map", "protect", "fidelity"]
+ALL = ["ci", "gpu", "parity", "sim", "sweep", "arena", "leak", "bake", "map", "protect", "fidelity", "alignment"]
 
 
 GOLDEN_ADAPTER = "NVIDIA"  # a substring of the goldens' adapter's vulkaninfo deviceName
@@ -180,6 +184,8 @@ class Gates:
         s.fidelity_both = bool(getattr(a, "fidelity_both", False))
         fa = getattr(a, "fidelity_allow", None)
         s.fidelity_allow = None if fa is None else {x for x in re.split(r"[,\s]+", fa) if x}
+        s.alignment_reference = getattr(a, "alignment_reference", None)
+        s.alignment_cases = getattr(a, "alignment_cases", None) or []
         s.moved_goldens = []
         os.makedirs(s.out, exist_ok=True)
 
@@ -189,6 +195,40 @@ class Gates:
 
     def p(s, *x):
         return os.path.join(s.out, *x)
+
+    def g_alignment(s):
+        reference = getattr(s, "alignment_reference", None)
+        cases = getattr(s, "alignment_cases", None) or []
+        if not reference or not cases:
+            s.row("alignment", "render_collision_check.py", 2, "reference and source bakes required",
+                  "--alignment-reference ASSETS --alignment-case NAME=ASSETS", "FAIL")
+            return
+        cmd = [sys.executable, os.path.join(s.tree, "scripts/render_collision_check.py"),
+               "--reference", reference, "--out", s.p("alignment.json"), "--table", s.p("alignment.csv")]
+        for case in cases:
+            cmd += ["--case", case]
+        if os.path.isfile(s.p("alignment.json")):
+            os.remove(s.p("alignment.json"))
+        rc = sh(shlex.join(cmd), s.tree, s.env, s.p("alignment.log"))
+        value, valid, clean = "missing alignment report", False, False
+        try:
+            from render_collision_check import report_problems
+            with open(s.p("alignment.json")) as receipt:
+                report = json.load(receipt)
+            problems = report_problems(report, reference, cases)
+            if problems:
+                value = "invalid report: " + "; ".join(problems[:3])
+            else:
+                valid = True
+                offenders = sum(row["counts"].get("offender", 0) for row in report["maps"])
+                missing = sum(row["counts"].get("unmeasured", 0) for row in report["maps"])
+                extras = sum(row["extra_source_placements"] for row in report["maps"])
+                clean = not (offenders or missing or extras or any(row.get("error") for row in report["maps"]))
+                value = f"{len(report['maps'])} source/maps, {offenders} offending placements, {missing} unmeasured, {extras} extra"
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            value = "invalid/missing alignment report: " + str(exc)
+        s.row("alignment", shlex.join(cmd), rc, value, "complete report; 0 offenders; 0 unmeasured; 0 extras",
+              "PASS" if rc == 0 and valid and clean else "FAIL")
 
     def build_release(s, *examples):
         """The release `game` binary plus only the named examples (card WEARX, SSD wear): `--examples` linked all ~27 of
@@ -1314,7 +1354,7 @@ def alive(pid, needle=""):
 # means use card declarations; an explicit empty string means allow no movements.
 RUN_OPTIONS = dict(tree=None, target=None, bake_groups=[], keep_goldens=False, parity_allow="", golden_groups="auto",
                    base="main", leak_plan="always", fidelity_allow=None, fidelity_dir="", fidelity_confirm_dir="",
-                   fidelity_both=False)
+                   fidelity_both=False, alignment_reference="", alignment_cases=[])
 
 
 def effective_options(a):
@@ -1434,6 +1474,9 @@ def main():
     ap.add_argument("--target")
     ap.add_argument("--groups", nargs="+", choices=ALL)
     ap.add_argument("--auto", action="store_true")
+    ap.add_argument("--alignment-reference", help="independent PS2 assets for the explicit alignment gate")
+    ap.add_argument("--alignment-case", dest="alignment_cases", action="append", metavar="NAME=ASSETS",
+                    help="source bake for the alignment gate; repeat for each source")
     ap.add_argument("--base", default="main")
     ap.add_argument("--bake-groups", nargs="*")
     ap.add_argument("--keep-goldens", action="store_true", help="leave regenerated goldens in the tree (a landing commits them)")
