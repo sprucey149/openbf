@@ -93,11 +93,8 @@ pub struct ClassRoster {
     pub anim: crate::animator::ClassAnim,
     /// The class's override textures ([`class_skins`], card USKN).
     pub skins: ClassSkins,
-    /// `JetJump > 0` — a jump/jet pack (BF1 dark trooper 21.0, BF2 jettrooper
-    /// 5.0). The planning graph's flag only: it keeps `Arc::JET_JUMP` routes
-    /// off a jetless soldier (`core::unit::UnitSpec::jet`). The jet physics
-    /// (card JETP) run off `consts`; bots do not jet yet, and limiting this
-    /// flag to `SoldierConstants::has_jet` (the Jedi out) is card JETP2's.
+    /// Rechargeable jet fuel (`SoldierConstants::has_jet`): permits
+    /// `Arc::JET_JUMP` routes. A Jedi double jump does not grant jet routes.
     pub jet: bool,
     /// The jet's effect and engine sounds ([`jet_look`], card JETP2).
     pub jet_look: JetLook,
@@ -1986,6 +1983,7 @@ impl ClassRoster {
         }
         let first_person_weapon =
             first_person_weapon(weapon_db, &weapon_name, weapon.offhand_weapon);
+        let jet = consts.has_jet();
         Ok(ClassRoster {
             class: class.to_owned(),
             label,
@@ -2017,7 +2015,7 @@ impl ClassRoster {
                 .prop_hash(class, crate::foley::FOLEY_FX_CLASS)
                 .map_or(0, |v| crate::classdb::fnv1a_lowercase(v.trim())),
             cries: cries(db, class),
-            jet: db.prop_f32(class, "JetJump").is_some_and(|j| j > 0.0),
+            jet,
             jet_look: if walker_droid {
                 engine_block(db, class)
             } else {

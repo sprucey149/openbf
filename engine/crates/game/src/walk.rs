@@ -712,6 +712,8 @@ pub struct WalkSim {
     /// its first-person one (1), the zoomed view's.
     pub zoom_fov_mix: f32,
     pub cam_place: Option<(f32, Vec3)>,
+    /// How far the chase camera lags a jetting soldier ([`core::unit::jet_camera_lag`]).
+    pub cam_jet_lag: Vec3,
     /// The camera collision's stored track fraction (B1 `FUN_0019fd70`,
     /// [`crate::camera_collide::ease_pull`]): stepped each tick, it lets a
     /// pulled-in camera return slowly. Visual only.
@@ -852,6 +854,7 @@ impl WalkSim {
             zoom_s: 1.0,
             zoom_fov_mix: 0.0,
             cam_place: None,
+            cam_jet_lag: Vec3::ZERO,
             cam_pull: 1.0,
             cam_pull_track: None,
             fov_scale: 1.0,
@@ -1214,6 +1217,7 @@ impl WalkSim {
         let first = zoom.is_some() || self.first_person();
         self.zoom_fov_mix = ease(self.zoom_fov_mix, if first { 1.0 } else { 0.0 });
         self.cam_place = self.next_cam_place();
+        self.cam_jet_lag = self.next_cam_jet_lag();
         self.step_cam_pull();
         // The squad's answers to this tick's orders join the voice queue;
         // the units' combat calls wait for the sound bank's gates
@@ -1311,6 +1315,7 @@ impl WalkSim {
             return (self.eye_camera(&ideal), None);
         }
         let (center, position) = self.drawn_eye(me, &ideal);
+        let position = position - self.cam_jet_lag;
         // A wall pulls the camera in toward the PS2's 1.5 m point: it keeps
         // its view (pitch and yaw, the look along his aim) and never drops
         // under that height to the floor at his feet (playtest 2026-10-28).
@@ -1396,6 +1401,17 @@ impl WalkSim {
             ideal.center + lift,
             ideal.position + lift + right * d.x + ideal.up * d.y - ideal.forward * d.z,
         )
+    }
+
+    fn next_cam_jet_lag(&self) -> Vec3 {
+        let Some(me) = self.sim.units.get(self.player.index as usize) else {
+            return Vec3::ZERO;
+        };
+        if self.backdrop.is_some() || me.mount.is_some() || me.eye_view() {
+            return Vec3::ZERO;
+        }
+        let vel = me.soldier.stance.jetting().then_some(me.soldier.vel);
+        core::unit::jet_camera_lag(self.cam_jet_lag, vel)
     }
 
     fn next_cam_place(&self) -> Option<(f32, Vec3)> {

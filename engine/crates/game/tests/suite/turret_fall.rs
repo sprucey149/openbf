@@ -558,3 +558,184 @@ fn a_destroyed_turret_with_no_engineer_stays_down() {
         assert!(standing(&w, i).is_none());
     }
 }
+
+fn build_case(map: &'static str, cw: bool) -> Case {
+    Case {
+        map,
+        factions: if cw { ["rep", "cis"] } else { ["all", "imp"] },
+        class: "tur_bldg_laser",
+        fall: TurretFall::Pad,
+        model: "com_prop_buildzone",
+        engineer: if cw {
+            "rep_inf_ep3_engineer"
+        } else {
+            "all_inf_engineer"
+        },
+        cutter: if cw {
+            "rep_weap_inf_fusioncutter"
+        } else {
+            "all_weap_inf_fusioncutter"
+        },
+        heal: 100.0,
+        build: 50.0,
+    }
+}
+
+#[test]
+fn initial_bf2_pads_build_through_cutter_on_real_maps_in_both_eras() {
+    for map in ["bf2_yav1", "bf2_nab2"] {
+        for cw in [true, false] {
+            let c = build_case(map, cw);
+            let mut w = world(&c).expect("real PS2 map data required");
+            let i = first(&w, &c);
+            let t = &w.sim.building_turrets[i];
+            assert_eq!(t.down, Some(0.0), "{map} cw={cw}: starts unbuilt");
+            assert_eq!(t.spec.max_health, 800.0);
+            assert!(standing(&w, i).is_none(), "no live/aliased vehicle handle");
+            assert!(!t.standing_parts.is_empty(), "intact collision retained");
+            assert_eq!(bodies(&w, i).0, 0, "pad has no authored collision");
+            let old = t.handle;
+            let side = reach(&mut w, i);
+            assert_eq!(w.sim.building_turrets[i].down, Some(50.0));
+            let mut shots = vec![w.sim.tick];
+            for _ in 0..10 * core::TICK_HZ {
+                let gain = cut(&mut w, i, side);
+                if gain > 0.0 {
+                    assert_eq!(gain, 50.0);
+                    shots.push(w.sim.tick);
+                }
+                if w.sim.building_turrets[i].down.is_none() {
+                    break;
+                }
+            }
+            assert_eq!(shots.len(), 16, "{map} cw={cw}: sixteen cutter shots");
+            assert!(shots.windows(2).all(|p| p[1] - p[0] == 15));
+            assert_eq!(shots[15] - shots[0], 225, "7.5 s from first to last");
+            let h = standing(&w, i).expect("built at full health");
+            assert_ne!(h, old, "fresh generation, no stale handle aliases");
+            assert_eq!(w.sim.vehicle(h).unwrap().health.cur, 800.0);
+            assert_eq!(
+                bodies(&w, i).0,
+                w.sim.building_turrets[i].standing_parts.len()
+            );
+            assert_eq!(
+                w.sim.collision.turret(w.sim.building_turrets[i].instance),
+                Some(h)
+            );
+            w.sim.destroy_vehicle(h, None);
+            assert_eq!(w.sim.building_turrets[i].down, Some(0.0));
+            println!(
+                "{map} cw={cw}: initial pad, 16 pulses/225 ticks, rebuilt collision, back to pad"
+            );
+        }
+    }
+}
+
+#[test]
+fn engineers_build_initial_pads_one_at_a_time_in_both_eras() {
+    for cw in [true, false] {
+        let c = build_case("bf2_yav1", cw);
+        let mut w = world(&c).expect("real PS2 map data required");
+        let i = first(&w, &c);
+        // Make the selected nearby pad the only outstanding repair objective.
+        for j in 0..w.sim.building_turrets.len() {
+            if j != i {
+                w.sim.repair_building(j as u16, f32::MAX);
+            }
+        }
+        let _a = engineer(&mut w, &c, i, 8.0, 0);
+        let _b = engineer(&mut w, &c, i, 9.0, 8);
+        let mut saw_claim = false;
+        for _ in 0..40 * core::TICK_HZ {
+            w.sim.step(&[PadState::default()]);
+            let claims = fixers(&w, i).len();
+            // Claims chosen in one think settle by index on the next think.
+            if w.sim.tick.is_multiple_of(core::TICK_HZ as u64) {
+                assert!(claims <= 1);
+            }
+            saw_claim |= claims == 1;
+            if standing(&w, i).is_some() {
+                break;
+            }
+        }
+        assert!(saw_claim, "cw={cw}: engineer claimed the initial pad");
+        assert!(standing(&w, i).is_some(), "cw={cw}: engineer built it");
+    }
+}
+
+#[test]
+fn real_build_hologram_draws_above_the_pad_and_stops_when_built() {
+    let c = build_case("bf2_yav1", true);
+    let w = world(&c).expect("real PS2 map data required");
+    let i = first(&w, &c);
+    let pos = w.sim.building_turrets[i].spec.pos;
+    let mut renderer = render::Renderer::new_headless(256, 256).expect("headless GPU");
+    let art = game::holo::HoloArt::load(&mut renderer, &w.scene);
+    assert!(!art
+        .icons
+        .get("build")
+        .expect("original turret hologram model")
+        .is_empty());
+    let mut walk = game::walk::WalkSim::new(1, Vec3::ZERO, None);
+    walk.sim = w.sim;
+    walk.player = w.me;
+    let mut holos = game::holo::Holos::default();
+    holos.advance(&walk);
+    walk.sim.tick += 90;
+    holos.advance(&walk);
+    let camera = render::Camera {
+        position: pos + Vec3::new(0.0, 1.5, 5.0),
+        pitch: -0.15,
+        ..Default::default()
+    };
+    let draws = holos.draws(&art, &walk, &camera);
+    assert!(!draws.is_empty());
+    let icons: Vec<_> = draws
+        .iter()
+        .filter(|d| matches!(d.shape, render::ParticleShape::Mesh { .. }))
+        .cloned()
+        .collect();
+    assert!(!icons.is_empty(), "original icon triangles submitted");
+    renderer.set_particles(icons);
+    renderer
+        .render(&camera, &[], [0.02, 0.02, 0.02, 1.0])
+        .unwrap();
+    let (icon_rgba, _, _) = renderer.capture_rgba().unwrap();
+    let icon_green = icon_rgba
+        .chunks_exact(4)
+        .filter(|p| i16::from(p[1]) - i16::from(p[0]) > 20 && p[1] > p[2])
+        .count();
+    assert!(
+        icon_green > 10,
+        "turret icon itself reached the frame: {icon_green} pixels"
+    );
+    renderer.set_particles(draws);
+    renderer
+        .render(&camera, &[], [0.02, 0.02, 0.02, 1.0])
+        .unwrap();
+    let (rgba, width, height) = renderer.capture_rgba().unwrap();
+    let green = rgba
+        .chunks_exact(4)
+        .filter(|p| i16::from(p[1]) - i16::from(p[0]) > 20 && p[1] > p[2])
+        .count();
+    assert!(
+        green > 40,
+        "green beam and turret icon reached frame: {green} pixels"
+    );
+    if let Some(dir) = std::env::var_os("OPENBF_BUILD_CAPTURE") {
+        let dir = std::path::PathBuf::from(dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("build-hologram.png"),
+            render::encode_png(&rgba, width, height).unwrap(),
+        )
+        .unwrap();
+    }
+    for j in 0..walk.sim.building_turrets.len() {
+        walk.sim.repair_building(j as u16, f32::MAX);
+    }
+    assert!(
+        holos.draws(&art, &walk, &camera).is_empty(),
+        "built turrets show no holograms"
+    );
+}

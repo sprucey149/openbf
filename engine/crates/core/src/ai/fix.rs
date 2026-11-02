@@ -28,7 +28,7 @@
 //! priority, so bot engineers aren't just running around everywhere healing
 //! rather than battling and fighting and being strategic"): with no broken
 //! turret in reach, a fixer also takes a damaged friendly or neutral vehicle
-//! or droid (the PS2's search takes any friendly thing lacking health,
+//! or droid, or a landed portable turret (the PS2's search takes any friendly thing lacking health,
 //! `re-build-zones.md` §3), but only when it knows of no enemy at all, stands
 //! in no post that is not safely its team's, and the target is within
 //! [`AID_REACH`] (not the PS2's 75 m: a bot never walks off for it). A seen
@@ -70,6 +70,8 @@ pub enum FixTarget {
     Station(u16),
     /// A vehicle (issue #35).
     Vehicle(VehicleHandle),
+    /// A live portable turret, by non-reused identity (issue #91).
+    Portable(u64),
 }
 
 impl FixTarget {
@@ -80,6 +82,10 @@ impl FixTarget {
             FixTarget::Station(s) => {
                 eat(b"S");
                 eat(&s.to_le_bytes());
+            }
+            FixTarget::Portable(id) => {
+                eat(b"P");
+                eat(&id.to_le_bytes());
             }
             FixTarget::Vehicle(v) => {
                 eat(b"V");
@@ -153,6 +159,14 @@ fn need_of(sim: &Sim, u: &Unit, class: usize, t: FixTarget) -> Option<f32> {
     let ours = |team: Option<u8>| team.is_none_or(|x| x == u.team);
     match t {
         FixTarget::Turret(i) => need(sim, u, class, usize::from(i)),
+        FixTarget::Portable(id) => {
+            let t = sim
+                .live_turret(id)
+                .filter(|t| t.landed && t.team == u.team)?;
+            let c = sim.turret_class(t)?;
+            (repair.health[c.health_type as usize] > 0.0 && t.health < c.body.max_health)
+                .then_some(t.health)
+        }
         FixTarget::Station(i) => {
             let s = sim.stations.get(usize::from(i))?;
             (ours(s.team)
@@ -186,6 +200,9 @@ fn sphere_of(sim: &Sim, t: FixTarget) -> Option<(Vec3, f32)> {
             .get(usize::from(i))
             .map(|s| (s.sphere_centre, s.sphere_radius)),
         FixTarget::Vehicle(vh) => sim.vehicle_sphere(vh),
+        FixTarget::Portable(id) => sim
+            .live_turret(id)
+            .map(|t| (t.centre(), crate::autoturret::RADIUS)),
     }
 }
 
@@ -301,8 +318,11 @@ pub(super) fn upkeep(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
     for i in 0..sim.building_turrets.len() {
         consider(&mut best, FixTarget::Turret(i as u16), FIX_REACH);
     }
-    // Issue #35: vehicles and droids only with no turret to fix, and idle.
+    // Nearby aid only with no placed turret to fix, and idle (issues #35/#91).
     if best.is_none() && aid_ok(sim, u, st) {
+        for t in &sim.turrets {
+            consider(&mut best, FixTarget::Portable(t.id), AID_REACH);
+        }
         for i in 0..sim.stations.len() {
             consider(&mut best, FixTarget::Station(i as u16), AID_REACH);
         }

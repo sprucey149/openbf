@@ -66,6 +66,7 @@ pub struct BuildingTurret {
     /// Its prims on the nodes its gun moves (card TCOL), `None` when it has
     /// none.
     pub posed: Option<PosedParts>,
+    pub self_pilots: Vec<super::self_turrets::SelfPilot>,
 }
 
 /// A building turret's collision prims that hang on a node its gunner seat
@@ -152,10 +153,27 @@ impl Sim {
             standing_parts,
             down: None,
             posed: None,
+            self_pilots: Vec::new(),
         };
         t.handle = self.stand_turret(&t);
         self.building_turrets.push(t);
         self.building_turrets[self.building_turrets.len() - 1].handle
+    }
+
+    /// Initial BF2 build pad: retain the standing spec/rig but remove its
+    /// empty vehicle without a death, explosion or regeneration. The old
+    /// handle is invalidated by remove_vehicle and cannot alias a reused slot.
+    pub fn start_building_unbuilt(&mut self, instance: u32) {
+        let Some(t) = self
+            .building_turrets
+            .iter()
+            .find(|t| t.instance == instance)
+        else {
+            return;
+        };
+        let h = t.handle;
+        self.remove_vehicle(h);
+        self.fell_building_turret(h);
     }
 
     fn stand_turret(&mut self, t: &BuildingTurret) -> VehicleHandle {
@@ -217,6 +235,9 @@ impl Sim {
         let t = &mut self.building_turrets[i];
         t.handle = h;
         t.down = None;
+        for p in &mut t.self_pilots {
+            *p = super::self_turrets::SelfPilot::new(p.seat);
+        }
         self.file_posed(i);
     }
 

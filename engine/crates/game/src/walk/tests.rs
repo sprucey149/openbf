@@ -51,6 +51,39 @@ fn sprint_camera_eases_in_and_out_in_both_games() {
     }
 }
 
+/// A jet's camera lag is the PS2's ease: it settles at the measured 0.0514 s of his
+/// velocity (`analysis/re-jetpack.md` §16) and ending the jet at speed does not jump.
+#[test]
+fn jet_camera_settles_at_the_measured_lag_and_never_jumps() {
+    let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    w.sim.ground_rules = core::soldier::GroundRules::Bf2;
+    run_ticks(&mut w, PadState::default(), 30);
+    let i = w.player.index as usize;
+    let vel = Vec3::new(10.5, 0.0, 0.0);
+    let offset = |w: &WalkSim| {
+        let me = &w.sim.units[i];
+        let ideal = me.ideal_camera(w.sim.ground_rules, w.sim.views());
+        ideal.position - w.camera().position
+    };
+    assert!(offset(&w).length() < 1e-4, "no lag on foot");
+    let mut last = offset(&w);
+    for _ in 0..30 {
+        w.sim.units[i].soldier.stance = Stance::Hover;
+        w.sim.units[i].soldier.vel = vel;
+        w.cam_jet_lag = w.next_cam_jet_lag();
+        assert!((offset(&w) - last).length() < 0.25, "the camera jumped");
+        last = offset(&w);
+    }
+    assert!((last.x - 0.54).abs() < 0.01, "settled at {last}");
+    w.sim.units[i].soldier.stance = Stance::Fall;
+    for _ in 0..30 {
+        w.cam_jet_lag = w.next_cam_jet_lag();
+        assert!((offset(&w) - last).length() < 0.25, "the camera jumped");
+        last = offset(&w);
+    }
+    assert!(last.length() < 1e-3, "the lag dies away, left {last}");
+}
+
 /// The five value rows, and the "everything else is Locals" rule that the
 /// built-in trooper (faction "team") falls into.
 #[test]

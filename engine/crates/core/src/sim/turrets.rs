@@ -21,6 +21,56 @@ const SUPPORT_RISE: f32 = 0.2;
 const SUPPORT_GAP: f32 = 0.1;
 
 impl Sim {
+    /// Soldier contact with the authored `p_-so_sphere` (radius 0.25 on
+    /// boneroot, mask 17: soldiers + ordnance; re-portable-turret §10).
+    /// As with world walls, resolve horizontally in half-radius substeps
+    /// and leave vertical motion to the ground pass. A flying dispenser
+    /// skips soldier contacts (BF2 FUN_0022d5b0); only landed shells block.
+    pub(super) fn push_turrets(&mut self, i: usize, from: crate::collision::Capsule) {
+        if !self.turrets.iter().any(|t| t.alive() && t.landed) {
+            return;
+        }
+        let to = self.units[i].capsule();
+        let delta = to.base - from.base;
+        let steps = (delta.length() / (to.radius * 0.5)).ceil().max(1.0) as usize;
+        let mut push = Vec3::ZERO;
+        for step in 0..steps {
+            let mut at = from.base + delta * ((step + 1) as f32 / steps as f32) + push;
+            for t in self.turrets.iter().filter(|t| t.alive() && t.landed) {
+                let centre = t.centre();
+                let r = to.radius.min(to.height * 0.5);
+                let lo = at.y + r;
+                let hi = lo + (to.height - 2.0 * r).max(0.0);
+                let y = centre.y.clamp(lo, hi);
+                let dy = centre.y - y;
+                let radius = r + crate::autoturret::RADIUS;
+                if dy.abs() >= radius {
+                    continue;
+                }
+                let reach = (radius * radius - dy * dy).sqrt();
+                let away = (at - centre).with_y(0.0);
+                let len = away.length();
+                if len < reach {
+                    let normal = away.try_normalize().unwrap_or_else(|| {
+                        (from.base - centre)
+                            .with_y(0.0)
+                            .try_normalize()
+                            .unwrap_or(Vec3::X)
+                    });
+                    let correction = normal * (reach - len);
+                    at += correction;
+                    push += correction;
+                }
+            }
+        }
+        self.units[i].soldier.pos += push;
+        self.units[i].wall_push += push;
+        if let Some(normal) = push.try_normalize() {
+            let vel = &mut self.units[i].soldier.vel;
+            *vel -= normal * vel.dot(normal).min(0.0);
+        }
+    }
+
     pub fn turret_of(&self, h: UnitHandle, weapon: usize) -> Option<&Turret> {
         self.turrets
             .iter()

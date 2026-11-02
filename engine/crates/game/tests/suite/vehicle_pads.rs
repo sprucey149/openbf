@@ -423,8 +423,8 @@ fn tat1_pad_vehicles_are_solid() {
 /// Card VTUR2: every BF2 `tur_*` instance a conquest world places (classes
 /// from SIDE/TUR.LVL) spawns as a turret, and its class row in the map's
 /// manifest names geometry the map bake wrote — except a buildable one
-/// (`manifest::BUILD_ZONE_PROP`), which starts unbuilt: no turret, its row
-/// naming `com_prop_buildzone`. Counts per map are printed. A bake from
+/// (`manifest::BUILD_ZONE_PROP`), which starts as a registered unbuilt pad.
+/// Counts per map are printed. A bake from
 /// before VTUR2 (no `classes/bf2_tur.ron`) skips.
 #[test]
 fn every_placed_tur_class_spawns_a_turret_with_its_model() {
@@ -458,7 +458,7 @@ fn every_placed_tur_class_spawns_a_turret_with_its_model() {
             .filter(|i| tur(&i.class) && zone(&i.class).is_some())
             .inspect(|i| assert_eq!(zone(&i.class), Some("com_prop_buildzone"), "{key}"))
             .count();
-        let placed = m.instances.iter().filter(|i| tur(&i.class)).count() - unbuilt;
+        let placed = m.instances.iter().filter(|i| tur(&i.class)).count();
         let Ok(mission) = MissionDef::load(&missions_dir().join(format!("{key}_con.ron"))) else {
             continue;
         };
@@ -469,7 +469,19 @@ fn every_placed_tur_class_spawns_a_turret_with_its_model() {
             .map(|t| b.classes[t.spec.class as usize].as_str())
             .filter(|c| tur(c))
             .collect();
-        assert_eq!(spawned.len(), placed, "{key}: tur_ instances vs turrets");
+        assert_eq!(
+            spawned.len(),
+            placed,
+            "{key}: tur_ instances vs turret definitions"
+        );
+        assert_eq!(
+            b.turrets
+                .iter()
+                .filter(|t| t.unbuilt && tur(&b.classes[t.spec.class as usize]))
+                .count(),
+            unbuilt,
+            "{key}: initial pad definitions"
+        );
         for c in spawned.iter().collect::<BTreeSet<_>>() {
             let g = m
                 .classes
@@ -482,8 +494,8 @@ fn every_placed_tur_class_spawns_a_turret_with_its_model() {
                 "{key} {c}: no model {g}"
             );
         }
-        if placed + unbuilt > 0 {
-            census.push(format!("{key} {placed} (+{unbuilt} unbuilt)"));
+        if placed > 0 {
+            census.push(format!("{key} {placed} total ({unbuilt} unbuilt)"));
         }
     }
     eprintln!("tur_ turrets per conquest map: {}", census.join(", "));

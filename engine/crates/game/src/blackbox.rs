@@ -919,7 +919,7 @@ impl Ring {
                         DeathCause::UnderMap => Ev::UnderMap,
                         DeathCause::Lost => Ev::Lost,
                         DeathCause::Stalled => Ev::Recycle,
-                        DeathCause::Water => Ev::Water,
+                        DeathCause::Water | DeathCause::DamageRegion => Ev::Water,
                     },
                     unit.index as i32,
                     -1,

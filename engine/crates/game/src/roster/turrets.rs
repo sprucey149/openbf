@@ -22,6 +22,14 @@ pub(super) fn turret_weapon(
         .and_then(|g| db.resolve(g.trim()))
         .with_context(|| format!("{name}: no WeaponName"))?;
     let mut item = TurretClass::new(&src, weapon_from_db(db, gun_name)?);
+    item.damage_effects = crate::vehicle_class::damage_effects(db, &name)
+        .into_iter()
+        .map(|e| core::autoturret::DamageEffect {
+            start: e.start,
+            stop: e.stop,
+            effect: e.effect,
+        })
+        .collect();
     item.explosion = src
         .prop("ExplosionName")
         .and_then(|n| explosion_class(db, n.trim()));

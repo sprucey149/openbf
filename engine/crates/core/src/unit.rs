@@ -122,8 +122,8 @@ pub fn camera_section(stance: Stance, zoomed: bool) -> CameraSection {
 /// stance's ZOOM section: over the right shoulder, the same in both games
 /// (`analysis/re-zoom.md` §5). Sprint is a section of its own on BF2; BF1 has no sprint, so
 /// its sprint section is OURS (the maintainer, 2026-10-04, FEEL_NOTES): the stand
-/// section moved back by BF2's own step, 0.8 m, so a sprint shows. Jump, roll
-/// and fall keep the stand section, the jets take the sprint's (PROVISIONAL).
+/// section moved back by BF2's own step, 0.8 m, so a sprint shows. Jump, roll,
+/// fall and the jets keep the stand section.
 pub fn ps2_camera_section(rules: GroundRules, stance: Stance, zoomed: bool) -> CameraSection {
     let bf1 = rules == GroundRules::Bf1;
     if zoomed {
@@ -146,11 +146,11 @@ pub fn ps2_camera_section(rules: GroundRules, stance: Stance, zoomed: bool) -> C
             if bf1 { 5.0 } else { 10.0 },
         ),
         Stance::Prone => (0.5, 0.0, 3.0, 5.0),
-        // The jets (card JETP), OURS and PROVISIONAL: the sprint's section,
-        // so the camera stands back while he flies at 10-12 m/s and the
-        // ground under him shows. The PS2's own jet section is not read.
-        Stance::Sprint | Stance::Jet | Stance::Hover if !bf1 => (1.8, 0.0, 4.0, 10.0),
-        Stance::Sprint | Stance::Jet | Stance::Hover => (1.8, 0.0, 4.3, 5.0),
+        // The jets keep the stand's section: measured live, a hovering jet trooper's
+        // camera sits where it stood, and only trails his speed ([`jet_camera_lag`],
+        // `analysis/re-jetpack.md` §16).
+        Stance::Sprint if !bf1 => (1.8, 0.0, 4.0, 10.0),
+        Stance::Sprint => (1.8, 0.0, 4.3, 5.0),
         _ if bf1 => (1.8, 0.0, 3.5, 5.0),
         _ => (1.8, 0.0, 3.2, 10.0),
     };
@@ -159,6 +159,17 @@ pub fn ps2_camera_section(rules: GroundRules, stance: Stance, zoomed: bool) -> C
         offset: Vec3::new(0.0, y, z),
         tilt: f32::to_radians(deg),
     }
+}
+
+/// One game update of the chase camera's lag behind a jetting soldier, `vel` his
+/// velocity while he jets and `None` once he does not. On the PS2 the camera eases at
+/// 15 per second, run once per 30 Hz update, so the lag settles at 0.0514 s of his
+/// velocity on all three axes (measured live: 0.54 m at 10.5 m/s, 1.83 m at 35.9 m/s;
+/// `analysis/re-jetpack.md` §16). Being an ease, it grows and dies away over a few
+/// updates, so starting or ending a jet at speed does not jump the camera.
+pub fn jet_camera_lag(lag: Vec3, vel: Option<Vec3>) -> Vec3 {
+    const EASE: f32 = 0.606_530_66; // e^-0.5: 15 per second over one 30 Hz update
+    (lag + vel.unwrap_or(Vec3::ZERO) * crate::TICK_DT) * EASE
 }
 
 /// A human's zoom (`analysis/re-zoom.md` §3-§4): the PS2's zoom flag with

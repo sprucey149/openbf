@@ -78,7 +78,8 @@ pub fn mission_side_files(game: &str, map: &str) -> &'static [&'static str] {
         (
             "bf2",
             "bf2_cor1" | "bf2_end1" | "bf2_geo1" | "bf2_hot1" | "bf2_kam1" | "bf2_kas2"
-            | "bf2_myg1" | "bf2_nab2" | "bf2_pol1" | "tat2" | "bf2_yav1",
+            | "bf2_myg1" | "bf2_nab2" | "bf2_pol1" | "tat2" | "bf2_yav1" | "bf2_fel1" | "bf2_mus1"
+            | "bf2_uta1",
         ) => &["bf2_tur.ron"],
         _ => &[],
     }
@@ -155,6 +156,8 @@ pub struct PadBuild {
 #[derive(Clone, Debug)]
 pub struct TurretDef {
     pub name: String,
+    /// BF2 authored UnbuiltGeometryName: a repairable pad at battle start.
+    pub unbuilt: bool,
     /// The instance's index in the manifest (its bodies' `Body::instance`).
     pub instance: u32,
     pub spec: VehicleSpec,
@@ -162,6 +165,8 @@ pub struct TurretDef {
     /// What it falls to and that look's geometry
     /// ([`crate::turret_fall::fall_look`], card TBLD).
     pub fall: (core::sim::TurretFall, Option<String>),
+    /// BF2 authored self-piloted seats; never boardable by soldiers.
+    pub self_seats: Vec<u8>,
 }
 
 /// A building turret's acquisition sphere (card HTGT, `Vehicle::aim_sphere`):
@@ -342,8 +347,8 @@ pub fn build(
 /// with at least one gunner seat — BF2 POL1's three shields are armed
 /// buildings with none — at the instance, sharing `out`'s class table with
 /// no viewer geometry. With `unbuilt_zones` (BF2) a buildable turret (a
-/// `manifest::BUILD_ZONE_PROP`: `tur_bldg_laser` and kin) is not spawned —
-/// it starts unbuilt. BF1's `com_weap_gunturret` authors the prop too, and
+/// `manifest::BUILD_ZONE_PROP`: `tur_bldg_laser` and kin) starts as a
+/// repairable pad. BF1's `com_weap_gunturret` authors the prop too, and
 /// whether it starts built is open (card BZONE1), so BF1 keeps spawning it.
 pub fn add_turrets(
     out: &mut PadBuild,
@@ -355,11 +360,7 @@ pub fn add_turrets(
         let Some(name) = db.resolve(&inst.class).map(str::to_owned) else {
             continue;
         };
-        // A buildable turret stands unbuilt at battle start: the world
-        // draws its build zone (`manifest::BUILD_ZONE_PROP`, card VTUR2).
-        if !vehicle_class::is_turret(db, &name)
-            || (unbuilt_zones && db.prop_hash(&name, manifest::BUILD_ZONE_PROP).is_some())
-        {
+        if !vehicle_class::is_turret(db, &name) {
             continue;
         }
         let index = out
@@ -374,17 +375,33 @@ pub fn add_turrets(
             continue;
         }
         let fall = crate::turret_fall::fall_look(db, &name);
+        let unbuilt = unbuilt_zones && db.prop_hash(&name, manifest::BUILD_ZONE_PROP).is_some();
         if index == out.classes.len() {
-            out.classes.push(name);
+            out.classes.push(name.clone());
             out.geometry.push(None);
         }
         spec.pos = Vec3::from(inst.translation);
         spec.yaw = yaw_of(&inst.rotation);
         spec.home_team = port_team(inst);
+        let self_seats: Vec<u8> = if db.is_bf2() {
+            vehicle_class::seats(db, &name)
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.pilot_type == vehicle_class::PilotType::SelfPilot)
+                .map(|(i, _)| i as u8)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if !self_seats.is_empty() {
+            spec.neutral_when_empty = false;
+        }
         out.turrets.push(TurretDef {
             name: inst.name.clone(),
+            unbuilt,
             instance: ii as u32,
             fall,
+            self_seats,
             rot: instance_rot(&inst.rotation).unwrap_or(core::vehicle::hover::quat_y(-spec.yaw)),
             spec,
         });
@@ -538,8 +555,12 @@ pub fn install(
             None => Vec::new(),
         };
         sim.add_building_turret(t.spec.clone(), t.rot, sphere, t.instance, (t.fall.0, parts));
+        sim.set_building_self_pilots(t.instance, &t.self_seats);
         if let Some(posed) = posed_parts(sim, m, &common, &db, t, class) {
             sim.set_turret_posed(t.instance, posed);
+        }
+        if t.unbuilt {
+            sim.start_building_unbuilt(t.instance);
         }
     }
     // The hover numbers per class (card HOVR): `Sim::tick_hovers` moves
@@ -1433,12 +1454,12 @@ mod tests {
         assert!(v.pilot_seat().is_none());
         assert!(v.rot.angle_between(t.rot) < 1e-4, "yaw and matrix agree");
 
-        // Card VTUR2: a buildable turret starts unbuilt on BF2 (no turret);
-        // BF1 keeps spawning it.
-        for (zones, n) in [(true, 0), (false, 1)] {
+        // Both games retain a repair target; only BF2 starts down.
+        for zones in [true, false] {
             let mut out = PadBuild::default();
             add_turrets(&mut out, &[inst("t_buildable", "0")], &db, zones);
-            assert_eq!(out.turrets.len(), n, "unbuilt_zones {zones}");
+            assert_eq!(out.turrets.len(), 1, "unbuilt_zones {zones}");
+            assert_eq!(out.turrets[0].unbuilt, zones);
         }
     }
 

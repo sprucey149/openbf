@@ -167,7 +167,7 @@ impl Sim {
 
     /// Make every seat's gun state of vehicle `vi` from its class's setup
     /// (each gun at rest, each weapon full), once.
-    fn arm(&mut self, vi: usize) {
+    pub(super) fn arm(&mut self, vi: usize) {
         if !self.vehicles[vi].guns.is_empty() {
             return;
         }
@@ -247,6 +247,38 @@ impl Sim {
         let Some(g) = self.seat_gun_setup(h) else {
             return;
         };
+        let bot_aim = (ai && g.turn.is_some())
+            .then(|| {
+                self.units[i]
+                    .ai
+                    .ride
+                    .and_then(|r| r.man)
+                    .and_then(|m| m.aim)
+            })
+            .flatten();
+        self.drive_seat_gun(m, g, p, Some(i), bot_aim);
+    }
+
+    /// Shared mounted weapon path: an occupied seat or a self-piloted building.
+    /// An autonomous gun has no soldier and credits no fabricated player.
+    pub(super) fn drive_seat_gun(
+        &mut self,
+        m: crate::vehicle::Mount,
+        g: GunSetup,
+        p: &PadState,
+        driver: Option<usize>,
+        bot_aim: Option<Vec3>,
+    ) {
+        let h = driver.map_or(
+            UnitHandle {
+                index: u32::MAX,
+                // A distinct non-unit source per building, so simultaneous
+                // self guns do not collapse into one fire sound.
+                gen: m.vehicle.index,
+            },
+            |i| self.handle(i),
+        );
+        let ai = driver.is_some_and(|i| self.units[i].controller == Controller::Ai);
         let vi = m.vehicle.index as usize;
         self.arm(vi);
         let seat = usize::from(m.seat);
@@ -295,15 +327,6 @@ impl Sim {
         // The camera ray and the aimer (zoomed, from the zoomed eye). A bot
         // in a building turret hands its aimer its own aim point instead
         // (`ai::ManState::aim`, the PS2's AI seat).
-        let bot_aim = (ai && g.turn.is_some())
-            .then(|| {
-                self.units[i]
-                    .ai
-                    .ride
-                    .and_then(|r| r.man)
-                    .and_then(|m| m.aim)
-            })
-            .flatten();
         let target = bot_aim.unwrap_or_else(|| {
             let eye = pos + rot * g.ray_eye(st.look, st.zoom.is_some());
             self.aim_point(
@@ -364,13 +387,18 @@ impl Sim {
         let fwd = (rot * gun::dir(st.aim.0, st.aim.1)).normalize();
         let right = fwd.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
         let up = right.cross(fwd).normalize();
-        let is_player = self.units[i].is_player;
-        let team = self.units[i].team;
-        let (infinite_cheat, no_reload_cheat) = self.ammo_cheats(i);
+        let is_player = driver.is_some_and(|i| self.units[i].is_player);
+        let team = driver.map_or(self.vehicles[vi].team.unwrap_or(u8::MAX), |i| {
+            self.units[i].team
+        });
+        let (infinite_cheat, no_reload_cheat) =
+            driver.map_or((false, false), |i| self.ammo_cheats(i));
         // On foot's D9 spread multiplier and the fairness record (step 4).
-        let ai_spread_mult = ai.then(|| self.skill_of(&self.units[i]).spread_mult);
+        let ai_spread_mult = driver
+            .filter(|_| ai)
+            .map(|i| self.skill_of(&self.units[i]).spread_mult);
         let perceived = !ai || {
-            let st = &self.units[i].ai;
+            let st = &self.units[driver.unwrap()].ai;
             st.target
                 .is_some_and(|t| st.contacts.iter().flatten().any(|c| c.handle == t))
         };
@@ -412,7 +440,9 @@ impl Sim {
             if shots.is_empty() {
                 continue;
             }
-            self.units[i].last_shot_tick = self.tick;
+            if let Some(i) = driver {
+                self.units[i].last_shot_tick = self.tick;
+            }
             let who = Shooter {
                 owner: h,
                 team,
@@ -470,7 +500,7 @@ impl Sim {
                     if held {
                         debug_assert!(
                             perceived,
-                            "AI rider {i} fired at an unperceived target at tick {}",
+                            "AI rider {driver:?} fired at an unperceived target at tick {}",
                             self.tick
                         );
                         if !perceived {

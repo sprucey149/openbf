@@ -546,9 +546,9 @@ impl Elem {
             pos: Vec3::ZERO,
             rot: Vec3::ZERO,
             scale: Vec3::ONE,
-            // [H] the ctor's z default is not read; the data only ever uses
-            // an unset z as "in front" (a count over its shadow at z 188).
-            z_order: 0,
+            // BF2 FUN_005a30b0 / FUN_005a3178: render +0x48 byte = 0x80.
+            // Unordered frames sit behind explicit foreground bars.
+            z_order: 128,
             alpha: 1.0,
             propagate_alpha: false,
             additive: false,

@@ -179,3 +179,72 @@ fn two_engineers_do_not_both_claim_one_vehicle() {
     }
     assert!(both <= TICK_HZ as usize);
 }
+
+#[test]
+fn engineer_walks_to_portable_turret_and_releases_claim_on_repair_or_expiry() {
+    let (mut sim, bots, vh) = world(2, 8.0);
+    sim.vehicle_mut(vh).unwrap().health.cur = 1000.0;
+    let mut item = crate::autoturret::TurretClass::new(
+        &crate::remote::tests::Props(&[("MaxHealth", "50"), ("Lifetime", "60")]),
+        WeaponClass::default(),
+    );
+    item.gun.ai_range = [0.0; 3];
+    let mut weapon = WeaponClass::default();
+    weapon.turret = Some(Box::new(crate::weapon::Dispenser::new(
+        &mut WeaponClass::default(),
+        &crate::remote::tests::Props(&[]),
+        true,
+        item,
+    )));
+    let weapon = sim.add_weapon_class(weapon);
+    let class = sim.weapon_classes[weapon]
+        .turret
+        .as_ref()
+        .unwrap()
+        .item
+        .clone();
+    let mut turret = crate::autoturret::Turret::new(
+        77,
+        bots[0],
+        0,
+        weapon,
+        &class,
+        Vec3::Y * crate::autoturret::CENTRE,
+        Vec3::ZERO,
+        0.0,
+    );
+    turret.land(Vec3::ZERO, Vec3::Y);
+    turret.health = 10.0;
+    sim.turrets.push(turret);
+    assert_eq!(pick(&sim, bots[0], false), Some(FixTarget::Portable(77)));
+    assert_eq!(pick(&sim, bots[0], true), None, "aid yields to combat");
+    sim.units[bots[0].index as usize].ai.fix.cur = Some(FixClaim {
+        target: FixTarget::Portable(77),
+        since: 0,
+        best: 10.0,
+        progress_at: 0,
+    });
+    assert_eq!(pick(&sim, bots[1], false), None, "one engineer per turret");
+    for _ in 0..20 * TICK_HZ {
+        sim.step(&[]);
+        if sim.turrets[0].health == 50.0 {
+            break;
+        }
+    }
+    assert_eq!(
+        sim.turrets[0].health, 50.0,
+        "engineer walked over and fired cutter"
+    );
+    for _ in 0..TICK_HZ {
+        sim.step(&[]);
+    }
+    assert!(sim.unit(bots[0]).unwrap().ai.fix.cur.is_none());
+    sim.turrets[0].health = 10.0;
+    assert_eq!(pick(&sim, bots[0], false), Some(FixTarget::Portable(77)));
+    sim.turrets.clear();
+    assert_eq!(
+        pick(&sim, bots[0], false),
+        None,
+        "expired identity is never reused"
+    );
+}

@@ -290,7 +290,7 @@ impl Builder<'_> {
             }
         }
         if sim
-            .water_under(Vec3::new(x, f, z))
+            .still_water_under(Vec3::new(x, f, z))
             .is_some_and(|w| f < w - 0.2)
         {
             return None;

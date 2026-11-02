@@ -57,6 +57,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let mut nt = NavTick::default();
     st.walk = WalkAsk::default();
     let Some(u) = sim.unit(me) else {
+        st.jet.flight = None;
         return (PadState::default(), nt);
     };
     super::ride::settle(sim, st);
@@ -287,6 +288,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
 
     // Card VAI: a seated bot's think is its seat's (`ride::drive`).
     if let Some(m) = u.mount {
+        st.jet.flight = None;
         st.stall = None; // a rider is not on the walker's watch (card RCYC)
         st.mv = MoverState::default();
         st.behaviour = Behaviour::Ride;
@@ -625,6 +627,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
                         None => {
                             st.steer = SteerPick::Idle;
                             st.behaviour = Behaviour::None;
+                            st.jet.cancel(u.soldier.stance);
                             return (pad, nt);
                         }
                     },
@@ -637,6 +640,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let Some(gun) = gunner_foot::run(sim, &tk, st, &aim, &mut pad, &mut nt) else {
         st.steer = SteerPick::Idle;
         st.behaviour = Behaviour::None;
+        st.jet.cancel(u.soldier.stance);
         return (pad, nt);
     };
     // Card FFLN: a friend in the line of fire. The shot waits (the gunner), and a

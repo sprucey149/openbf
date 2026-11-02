@@ -610,6 +610,8 @@ pub enum DeathCause {
     /// A BF2 hero's time drain exhausted its health without a credited attacker.
     HeroExhausted,
     Water,
+    /// Worn down inside an authored damage region (Mustafar's lava).
+    DamageRegion,
 }
 
 impl DeathCause {
@@ -621,7 +623,7 @@ impl DeathCause {
     pub fn cheat_spares(self) -> bool {
         matches!(
             self,
-            DeathCause::Fall | DeathCause::Blast | DeathCause::Water
+            DeathCause::Fall | DeathCause::Blast | DeathCause::Water | DeathCause::DamageRegion
         )
     }
 }
@@ -914,6 +916,9 @@ pub struct Sim {
     /// `game::layout::MapLayout::apply_mission`. An INPUT like the
     /// heightfield: set once and not part of [`Sim::hash`].
     pub death_regions: Vec<Region>,
+    /// The map's authored damage volumes; set once when the map loads, so
+    /// not hashed.
+    pub damage_regions: Vec<super::DamageRegion>,
     /// The soldiers' fly-height ceiling, world y (card JETP,
     /// `analysis/re-jetpack.md` §5.3): the mission's `SetMaxPlayerFlyHeight`
     /// (`game::mission::MissionDef::max_player_fly_height`), else
@@ -926,6 +931,9 @@ pub struct Sim {
     /// floor under water.
     pub water_level: Option<f32>,
     pub water_mask: Option<crate::water::WetMask>,
+    /// Flat-water oscillation, a load-time input. Ocean mode and BF2's
+    /// OscillationEnable(0) keep the query at the authored layer height.
+    pub water_oscillates: bool,
     /// The map's boundary shapes; set once when the map loads, so not hashed.
     pub boundary: crate::boundary::Boundary,
     /// Card HOLD: the grenades lying on the ground ([`Hazard`]). SIM STATE —
@@ -1457,8 +1465,10 @@ impl Sim {
             ai_alive_cap: 16,
             team_combatants: None,
             death_regions: Vec::new(),
+            damage_regions: Vec::new(),
             fly_ceiling: crate::soldier::DEFAULT_FLY_CEILING,
             water_level: None,
+            water_oscillates: false,
             water_mask: None,
             boundary: Default::default(),
             hazards: Vec::new(),
@@ -1647,13 +1657,31 @@ impl Sim {
 
     pub fn water_plane(&self) -> Option<crate::water::Plane<'_>> {
         self.water_level.map(|level| crate::water::Plane {
-            level,
+            level: level
+                + if self.water_oscillates {
+                    crate::water::bob(self.tick as f32 * crate::TICK_DT)
+                } else {
+                    0.0
+                },
             mask: self.water_mask.as_ref(),
         })
     }
 
     pub fn water_under(&self, p: Vec3) -> Option<f32> {
         self.water_plane().and_then(|w| w.under(p))
+    }
+
+    /// The authored layer height over a wet cell, without the bob. The port's
+    /// own bot rules read this (hold spots, ring points): they are no PS2 rule,
+    /// and a spot should not be refused on one tick and taken on the next.
+    pub fn still_water_under(&self, p: Vec3) -> Option<f32> {
+        self.water_level.and_then(|level| {
+            crate::water::Plane {
+                level,
+                mask: self.water_mask.as_ref(),
+            }
+            .under(p)
+        })
     }
 
     /// [`Sim::ground_under`] as ONE ray, with no foot ring: what is under
@@ -2094,6 +2122,9 @@ impl Sim {
         }
         // A fallen building turret's health: nothing while none is down.
         for (i, t) in self.building_turrets.iter().enumerate() {
+            for p in &t.self_pilots {
+                p.hash_into(&mut eat);
+            }
             if let Some(health) = t.down {
                 eat(&(i as u32).to_le_bytes());
                 eat(&health.to_bits().to_le_bytes());

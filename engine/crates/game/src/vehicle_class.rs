@@ -866,14 +866,17 @@ impl DamageEffect {
 /// holding an effect, the rest are dropped. The pointer is a global the
 /// PS2 never resets between classes; here it starts empty per class, which
 /// differs only for a class whose first damage prop is not a Start (none
-/// on the discs, [H]). BODY scope, over the BASE chain root first.
+/// on the discs, [H]). BODY scope (portable turrets also author these after
+/// TURRET1), over the BASE chain root first.
 pub fn damage_effects(db: &ClassDb, class: &str) -> Vec<DamageEffect> {
     // An empty `effect` is the PS2's null effect: the slot is still free.
     let mut slots: Vec<DamageEffect> = Vec::new();
     let mut cur: Option<usize> = None;
+    // Portable turrets author these building properties after TURRET1.
+    let portable = db.engine_base(class) == Some("portableturret");
     for def in db.chain(class).into_iter().rev() {
         for (scope, k, v) in scoped(def) {
-            if scope != Scope::Body {
+            if scope != Scope::Body && !portable {
                 continue;
             }
             if k == h("DamageStartPercent") {

@@ -367,6 +367,12 @@
 //! sim: the round's result and hash are the same with it on.
 //! `BLACKBOX_TIMING=1` prints what it cost per tick and per write.
 //!
+//! ## Jet census — `JET_CENSUS`
+//! `JET_CENSUS=1` (issue #72) prints one `jets <key>:` line: the bot jet classes'
+//! hops and their spacing, hover attacks, each jet-only route link by direction
+//! (started / arrived / died / gave up) and how those soldiers died to the world
+//! (`JetCensus`).
+//!
 //! ## Droid census — `DROID_CENSUS`
 //! `DROID_CENSUS=1` (card DROIDAI) prints one `droids <key>:` line: the bots'
 //! remote droid launches per carrier-minute, the share made with the body
@@ -974,6 +980,117 @@ impl Fire {
     }
 }
 
+/// `JET_CENSUS` (env, issue #72): what the bots do with their jets.
+#[derive(Default)]
+struct JetCensus {
+    since_last: std::collections::HashMap<u32, u64>,
+    was_flying: std::collections::HashMap<u32, u64>,
+    open: std::collections::HashMap<u32, (u16, u16, glam::Vec3, u64)>,
+    hop_gaps: Vec<u64>,
+    hops: u64,
+    attacks: u64,
+    /// (from hub, to hub) -> started, arrived, died, gave up.
+    links: std::collections::BTreeMap<(u16, u16), [u64; 4]>,
+    env_deaths: std::collections::BTreeMap<String, u64>,
+    units: std::collections::HashSet<u32>,
+}
+
+impl JetCensus {
+    const GIVE_UP: u64 = 30 * core::TICK_HZ as u64;
+
+    fn observe(&mut self, sim: &core::sim::Sim) {
+        for (h, u) in sim.alive_units() {
+            if u.is_player || u.controller != core::unit::Controller::Ai || !u.consts.has_jet() {
+                continue;
+            }
+            self.units.insert(h.index);
+            let Some(f) = u.ai.jet.flight else {
+                self.was_flying.remove(&h.index);
+                continue;
+            };
+            if self.was_flying.insert(h.index, f.since) == Some(f.since) {
+                continue;
+            }
+            if f.route {
+                let arc = u.ai.route.and_then(|r| {
+                    let arc = sim.nav.as_ref()?.arcs.get(r.via_arc? as usize).copied()?;
+                    let from = if arc.a == r.next_hub { arc.b } else { arc.a };
+                    Some((from, r.next_hub))
+                });
+                if let Some((from, to)) = arc {
+                    self.links.entry((from, to)).or_default()[0] += 1;
+                    self.open.insert(h.index, (from, to, f.goal, sim.tick));
+                }
+            } else if f.height.is_some() {
+                self.attacks += 1;
+            } else {
+                self.hops += 1;
+                if let Some(last) = self.since_last.get(&h.index) {
+                    self.hop_gaps.push(sim.tick - last);
+                }
+            }
+            self.since_last.insert(h.index, sim.tick);
+        }
+        let mut done = Vec::new();
+        for (&i, &(from, to, goal, since)) in &self.open {
+            let u = &sim.units[i as usize];
+            let outcome = if !u.alive {
+                Some(2)
+            } else if core::nav::xz_dist(u.soldier.pos, goal) < 3.0
+                && u.soldier.pos.y >= goal.y - 0.5
+            {
+                Some(1)
+            } else if sim.tick > since + Self::GIVE_UP {
+                Some(3)
+            } else {
+                None
+            };
+            if let Some(o) = outcome {
+                self.links.entry((from, to)).or_default()[o] += 1;
+                done.push(i);
+            }
+        }
+        for i in done {
+            self.open.remove(&i);
+        }
+        for ev in &sim.events {
+            if let core::sim::Event::EnvDeath { unit, cause } = ev {
+                if self.units.contains(&unit.index) {
+                    *self.env_deaths.entry(format!("{cause:?}")).or_default() += 1;
+                }
+            }
+        }
+    }
+
+    fn line(&self, key: &str) -> String {
+        let secs = |t: u64| t as f32 / core::TICK_HZ as f32;
+        let gaps = if self.hop_gaps.is_empty() {
+            "-".to_string()
+        } else {
+            let n = self.hop_gaps.len() as u64;
+            format!(
+                "{:.1}/{:.1}/{:.1}s",
+                secs(*self.hop_gaps.iter().min().unwrap()),
+                secs(self.hop_gaps.iter().sum::<u64>() / n),
+                secs(*self.hop_gaps.iter().max().unwrap())
+            )
+        };
+        let links = self
+            .links
+            .iter()
+            .map(|((a, b), n)| format!("{a}->{b}={}/{}/{}/{}", n[0], n[1], n[2], n[3]))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(
+            "jets {key}: units {} hops {} gap min/mean/max {gaps} attacks {} links [started/arrived/died/gave up] {links} env {:?}\n",
+            self.units.len(),
+            self.hops,
+            self.attacks,
+            self.env_deaths
+        )
+    }
+}
+
 /// `DROID_CENSUS` (env, card DROIDAI): what the bots do with their remote
 /// droids. Per map, one `droids <key>:` line:
 /// - `carrier-min`: minutes of bots alive on foot holding a remote weapon;
@@ -1537,7 +1654,7 @@ impl Deaths {
                     match cause {
                         DeathCause::Suicide => 9,
                         DeathCause::HeroExhausted => 10,
-                        DeathCause::DeathRegion | DeathCause::Water => 1,
+                        DeathCause::DeathRegion | DeathCause::Water | DeathCause::DamageRegion => 1,
                         DeathCause::Fall => 2,
                         DeathCause::VehicleDestroyed => 3,
                         DeathCause::Blast => 4,
@@ -4225,6 +4342,7 @@ fn run_map(
     // BF1 maps have no 10 m omni in the AI's view cone (RE §9.1).
     sim.omni_radius = core::sim::omni_radius_for(&scene.manifest.source_game);
     scene.install_water(&mut sim);
+    scene.install_damage_regions(&mut sim);
     sim.ground_rules = core::soldier::GroundRules::for_game(&scene.manifest.source_game);
     sim.item_pool = game::roster::item_pool(&scene.manifest.source_game, &scene.manifest.map);
     let defaults = game::conquest_defaults::for_map(key, cfg().era_cw).unwrap_or(
@@ -4505,6 +4623,7 @@ fn run_map(
     let mut shots = std::env::var_os("SWEEP_SHOTS").map(|_| Shots::default());
     let mut snipe = std::env::var_os("SNIPE_CENSUS").map(|_| SnipeCensus::default());
     let mut droid_census = std::env::var_os("DROID_CENSUS").map(|_| DroidCensus::default());
+    let mut jet_census = std::env::var_os("JET_CENSUS").map(|_| JetCensus::default());
     // `ANIM_CENSUS` (card ANIML): the soldiers' animators run beside the
     // round, without a renderer, and are counted.
     let mut anim = std::env::var_os("ANIM_CENSUS").map(|_| {
@@ -4910,6 +5029,9 @@ fn run_map(
         }
         if let Some(d) = droid_census.as_mut() {
             d.observe(&w.sim);
+        }
+        if let Some(j) = jet_census.as_mut() {
+            j.observe(&w.sim);
         }
         if let Some((vis, c, h)) = anim.as_mut() {
             vis.update_with(&w, core::TICK_DT, Some(c));
@@ -5556,6 +5678,9 @@ fn run_map(
     }
     if let Some(d) = &droid_census {
         census.push_str(&d.line(key));
+    }
+    if let Some(j) = &jet_census {
+        census.push_str(&j.line(key));
     }
     if let Some((_, c, h)) = &anim {
         census.push_str(&c.report(key));

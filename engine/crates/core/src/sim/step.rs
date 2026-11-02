@@ -651,10 +651,11 @@ impl Sim {
                     stepped = Some(self.units[i].soldier.grounded);
                     let rules = self.ground_rules;
                     let look = self.units[i].look_scale();
-                    // The jet's taps are a human's (card JETP; bots: JETP2).
+                    // Human taps and the AI mover have separate jet commands.
                     let env = crate::soldier::AirEnv {
                         ceiling: self.fly_ceiling,
                         human: self.units[i].is_player,
+                        bot_jet: self.units[i].ai.jet.command(),
                     };
                     self.saber_gravity(i);
                     self.units[i]
@@ -743,6 +744,7 @@ impl Sim {
                 // DESIGN" decision 2). Motion is exactly what it was.
                 self.units[i].wall_push = push;
             }
+            self.push_turrets(i, from);
             // 3a'. The floor under the NEW feet, where the wall pass left them
             // (card STHOP, analysis/re-soldier-ground.md §3: the PS2 finds the
             // contact after the move; resolving before the wall pass judged a
@@ -846,6 +848,8 @@ impl Sim {
             }
         }
 
+        self.tick_soldier_water();
+        self.tick_damage_regions();
         self.saber_hits();
         // 4. Weapons → bolts.
         let mut shots = Vec::new();
@@ -875,6 +879,19 @@ impl Sim {
                 self.seat_gun(i, &p);
                 continue;
             }
+            // Both channels lose their triggers below the fire point, including
+            // a latched salvo or charge. Seat guns keep their own rules.
+            let submerged = self.water_blocks_fire(i);
+            let mut p = p;
+            if submerged {
+                p.buttons &= !(buttons::FIRE | buttons::SECONDARY_FIRE);
+                // WeaponState's blocked gate prevents a new cycle, but an
+                // already latched salvo can still emit. Discard those shots.
+                self.units[i].weapon.salvo_counter = 0;
+                for w in &mut self.units[i].held {
+                    w.state.salvo_counter = 0;
+                }
+            }
             let move_mag = PadState::axis(p.ly).abs().max(PadState::axis(p.lx).abs());
             let stance_idx = match self.units[i].soldier.stance {
                 Stance::Stand => 0,
@@ -892,7 +909,8 @@ impl Sim {
             // 0x532980 to 0x207980, which zeroes both channels' trigger
             // bytes; B2 FUN_00240bf8 cases 4 / 8 / 9 likewise. (The fall
             // state is not blocked here yet.)
-            let blocked = matches!(self.units[i].soldier.stance, Stance::Roll | Stance::Jump)
+            let blocked = submerged
+                || matches!(self.units[i].soldier.stance, Stance::Roll | Stance::Jump)
                 || self.units[i].soldier.no_fire()
                 || self.units[i].choked.is_some()
                 || self.units[i].droideka.as_ref().is_some_and(|d| d.no_fire());
@@ -1056,6 +1074,7 @@ impl Sim {
         self.tick_mines(dt);
         self.tick_droids(dt, &droid_pads);
         self.tick_turrets(dt);
+        self.tick_self_turrets();
         self.tick_guided(&guided_pads, dt);
 
         // 5c. The pickups (PWUP): flight, life, the touch.

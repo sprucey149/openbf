@@ -767,8 +767,7 @@ and C+0x198, BF2 E+0x150 — then released; no health pin):
   waterline), 73 % and 0.82 at the bazaar's 0.32 m; a pass wants ≥ 90 % and 0.3–0.95 at all five.
 - **The walkabout's reference soldier** stands at `max(terrain, the post's y)` (`gallery::ground_stand`): 0.59 m
   over the bazaar floor. It should stand on the floor the sim gives.
-- **Sim (card WDRN):** the 3 s / 30-per-second drowning on the aim origin and the dead triggers under the fire point.
-  PROVISIONAL until built: the crouched aim origin.
+- **Sim (card WDRN, implemented 2026-11-01):** §9.5 records the drowning and trigger rules. The crouched and prone aim origins remain provisional pending measurement.
 - **Effects (note on card FXP5):** the ripple ring behind a moving wader and the splash on a fall into water.
 
 ### 9.4 Checks run
@@ -784,3 +783,35 @@ and C+0x198, BF2 E+0x150 — then released; no health pin):
 - **Stayed [H] / open:** how a bot treats deep water (nothing in this block is AI); the ripple renderer past its
   radius line; why the KAS2 (384, 256) soldier died; the crouched and prone aim origins; whether a first-person
   view under water changes anything (not looked at).
+
+### 9.5 Soldier water rules in the port (2026-11-01, issue #70)
+
+The existing WMAP mask now shares a fixed-tick layer-height query with the PS2's
+6 cm, 1.8849558 rad/s bob. Both ocean modes suppress the bob; BF2 also honors
+`OscillationEnable(0)`. The phase starts at the port's round tick zero and has not
+been aligned to a PS2 capture. The same bobbed plane now stops bolts, grenades and
+missiles and sets a droideka's depth, as the PS2's one query and crossing do (`re-fx.md`
+§15). The bots' hold-spot and ring-point checks are the port's own rule and stay at
+the layer height, so a spot does not come and go with the bob. Older manifests without WMAP retain the existing
+whole-plane fallback; current water-map bakes carry the mask.
+
+A living soldier on foot takes 30 damage at 90 submerged 30 Hz updates, then
+every 30 updates. Surfacing below the stance eye or leaving a wet cell restores
+the 90-update breath timer. Integer ticks preserve exact three/one-second waits
+instead of adding a tick through float subtraction. Standing eye height is
+1.80 m; crouch/prone use the existing 1.30/0.50 m camera heights provisionally.
+Water damage uses the damage record's unit multipliers and shield scale, respects
+the invincibility cheat, and deaths carry the existing environment-water cause.
+Mounted riders and droidekas retain their separate rules; droidekas already have
+a class-authored water-damage path. Movement and bot path selection are unchanged.
+
+The fire-point comparison uses the existing stance/pitch transform: at standing
+spawn pitch −0.07, its height is 1.583 m. Both triggers are masked and queued
+salvos are cancelled while submerged. This also prevents emitter shots, whose
+cone query is reached only after a weapon cycle produces a shot. Previously
+launched projectiles retain their own collision and life rules.
+
+`core/tests/drowning.rs` replays the measured death intervals, shallow/dry
+controls, surfacing and bob resets, both triggers, queued salvos, stance/pitch
+heights, unchanged wading movement, invincibility and deterministic breath state.
+No fresh PCSX2 capture or deep-water AI avoidance rule is claimed.

@@ -287,3 +287,35 @@ fn a_prim_on_the_aimer_node_turns_with_the_gun() {
         .truncate()
         .abs_diff_eq(want, 1e-4));
 }
+
+#[test]
+fn initial_unbuilt_state_has_no_death_and_keeps_handles_and_collision_separate() {
+    let (mut sim, _) = world(true, TurretFall::Pad);
+    let old = sim.building_turrets[0].handle;
+    let parts = sim.building_turrets[0].standing_parts.len();
+    sim.events.clear();
+    sim.start_building_unbuilt(INSTANCE);
+    assert!(
+        sim.events.is_empty(),
+        "construction is not a death/explosion"
+    );
+    assert_eq!(sim.building_turrets[0].down, Some(0.0));
+    assert!(sim.vehicle(old).is_none());
+    assert_eq!(sim.building_turrets[0].repair_kind(), HealthType::Building3);
+    let other = sim.spawn_vehicle(&sim.building_turrets[0].spec.clone());
+    assert_eq!(other.index, old.index, "exercise actual pool-slot reuse");
+    assert_ne!(other.gen, old.gen);
+    assert!(
+        sim.vehicle(old).is_none(),
+        "down handle cannot alias the new occupant"
+    );
+    assert_eq!(sim.repair_building(0, 299.0), 299.0);
+    assert_eq!(sim.building_turrets[0].down, Some(299.0));
+    sim.repair_building(0, 1.0);
+    let built = sim.building_turrets[0].handle;
+    assert_ne!(built, other);
+    assert!(sim.vehicle(built).unwrap().alive);
+    assert!(sim.vehicle(other).unwrap().alive);
+    assert_eq!(sim.building_turrets[0].standing_parts.len(), parts);
+    assert_eq!(sim.collision.turret(INSTANCE), Some(built));
+}

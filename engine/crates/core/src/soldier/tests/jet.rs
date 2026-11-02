@@ -510,6 +510,7 @@ fn the_fly_height_ceiling_pulls_down_within_five_metres() {
     let env = AirEnv {
         ceiling: 20.0,
         human: true,
+        bot_jet: None,
     };
     let mut s = hover(&c, 0.0, (FWD, 0), 0);
     s.pos.y = 10.0;
@@ -622,4 +623,56 @@ fn control_rows_parse() {
         Some(("jet", [1.5, 1.25, 1.25]))
     );
     assert_eq!(SoldierConstants::control_row("jet 1.5"), None);
+}
+
+/// The BF2 jet trooper's hover, measured live on the PS2 (one row per game update,
+/// `analysis/re-jetpack.md` §16): feet, velocity and fuel at updates since the jet
+/// started. Tap, 12 updates, tap; the stick goes on 14 updates into the hover.
+#[test]
+fn the_hover_replays_the_ps2_capture() {
+    let c = jet_trooper();
+    let run = |ly: i16, lx: i16, pitch: f32| {
+        let mut s = Soldier::new(Vec3::ZERO);
+        s.fuel = 1.0;
+        s.pitch = pitch;
+        tick_over(&mut s, &pad(0, 0, true), &c, 0.0, human());
+        for _ in 0..11 {
+            tick_over(&mut s, &pad(0, 0, false), &c, -100.0, human());
+        }
+        tick_over(&mut s, &pad(0, 0, true), &c, -100.0, human());
+        assert_eq!(s.stance, Stance::Hover);
+        let start = s.pos.y;
+        let mut rows = vec![(s.vel, s.pos.y - start, s.fuel)];
+        for k in 1..=90 {
+            let (y, x) = if k >= 14 { (ly, lx) } else { (0, 0) };
+            tick_over(&mut s, &pad(y, x, false), &c, -100.0, human());
+            rows.push((s.vel, s.pos.y - start, s.fuel));
+        }
+        rows
+    };
+    let near = |got: f32, want: f32, what: &str| {
+        assert!((got - want).abs() <= 0.02, "{what}: {got}, PS2 {want}");
+    };
+    // Stick released at spawn pitch: up, axis y, the rise, and the fuel.
+    let none = run(0, 0, -0.07);
+    for (k, vy, rise, fuel) in [
+        (0, 6.257, 0.0, 0.75),
+        (5, 4.48, 0.86, 0.723),
+        (10, 3.21, 1.47, 0.697),
+        (20, 1.65, 2.23, 0.643),
+        (45, 0.31, 2.87, 0.51),
+        (90, 0.02, 3.01, 0.27),
+    ] {
+        near(none[k].0.y, vy, "vy");
+        near(none[k].1, rise, "rise");
+        near(none[k].2, fuel, "fuel");
+    }
+    // Held stick: the speeds it settles at. Forward and back settle the issue's old
+    // question (7.875 m/s, not 6.6): MaxSpeed and MaxStrafeSpeed by the jet row.
+    near(run(FWD, 0, -0.07)[60].0.z, -10.5, "forward");
+    near(run(-FWD, 0, -0.07)[60].0.z, 7.88, "back");
+    near(run(0, -FWD, -0.07)[60].0.x, -6.56, "strafe");
+    let up = run(FWD, 0, 0.429);
+    near(up[60].0.y, 7.8, "climb");
+    near(up[60].0.z, -7.03, "climb forward");
 }

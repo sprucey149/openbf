@@ -160,13 +160,12 @@ com_bldg_inf_autoturret com_weap_inf_dropturret`), so its band scrolls too.
 - [H] The turret outlives its owner; nothing in §3 tests the owner.
 - Repair: settled in section 10.
 - OURS: the think interval (0.5 s), holding the trigger while the gun's `ShotDelay` / salvo pace it, the aim as
-  world-frame yaw / pitch, the hit sphere as the shell's bind-pose sphere.
-- [D] The landing puts the origin on the contact point; the entity's collision primitive was not read. The reference
-  screenshot shows the sphere well clear of the ground, which fits.
+  world-frame yaw / pitch. The hit and soldier-contact sphere is the authored prim (§10).
+- [D] The landing puts the origin on the contact point. The authored primitive was subsequently read (§10).
 - [H] Whether the cluster count holds the target itself (the port's `is_group`: more than 4 counting him).
 - Not modelled: the aimer pitch pose (the model is drawn rigid), the band's unlit draw (weapon parts are drawn with the
   character light), `OverrideTexture` as a general mechanism, the ambient / activate / collision sounds, the third kill
-  of §3 (now section 10), soldiers colliding with it.
+  of §3 (now section 10). Soldier collision and damage effects are implemented in §11.
 
 ## 10. Destroying it (the maintainer, 2026-10-30) [O]
 
@@ -220,7 +219,31 @@ armed classes in conquest layers are manned.
 - `Event::TurretHit` carries the plain hit flash.
 - `Foe::Turret(id)`, `AimRequest::Turret`: the scan, weapon choice and fire, as `Foe::Droid`. `[ours]`: the aim error's
   size term is the droid's 0.17; a weak-weapon rule of 22.1 steps 5-6 is left out (no held weapon reaches it).
-- The cutter mends a standing friend's turret. `[ours]`: bots do not go to one (`ai::fix` is for placed turrets; it lives 60 s).
+- The cutter mends a standing friend's turret. Bot engineers now include a damaged landed portable turret in their nearby aid search (20 m, one engineer per target), yielding to combat as they do for vehicle/droid aid (issue #91).
 - **Same gap, same fix:** a remote droid's sphere is on the aim ray too. Its reticle readout stays unported (a fast
   flyer would change the magnet's feel; follow-up).
 - Not ported: soldiers colliding with the sphere (mask `s`), the class's damage effects (sparks under 50, smoke under 30).
+
+## 11. Portable collision, effects and engineer aid (2026-11-01)
+
+The soldier wall pass now includes the shell's authored sphere (§10), with the
+same horizontal resolution convention as world walls. It sweeps in half-capsule-radius
+steps, blocks either team while landed and alive, and removes the into-contact velocity.
+A prone soldier fits under the shell. The flying item's own contact still skips soldier
+and ordnance types: re-read BF2 `FUN_0022d5b0` (current decomp lines 144445 onward),
+which excludes contact types 2 and 8 before the bounce/land branch.
+
+The class's `DamageStartPercent`, `DamageStopPercent` and `DamageEffect` slots now
+reach the visual effect pass, including portable-turret properties authored after
+`TURRET1`. BF2 `com_bldg_inf_autoturret`: `com_sfx_vehiclespark` at 50–30% and
+`com_sfx_smokeplume` at 30–0%. The named smoke attach point `hp_smoke_1` is absent
+from the original model's five-node skeleton (§7); both effects therefore use the
+entity frame. That fallback is provisional, not a new live PS2 observation.
+Each health-band emitter is held once per turret identity, follows its frame,
+and stops emitting on repair, death, expiry or replacement; emitted particles finish.
+
+Engineer aid uses the existing repair amount by health type: BF2 `FUN_00346fa0`
+lines 339869–339873 reads the target's low three type bits and the health-amount table.
+The search/priority remains the port's nearby aid policy (20 m, no known enemy),
+not a claim of matching the PS2's 75 m search. A single engineer claims each portable
+identity; full health, death and expiry retire the claim. No wreck or rebuild is added.

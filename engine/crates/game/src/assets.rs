@@ -451,11 +451,11 @@ impl Scene {
     /// The manifest's class row, case-insensitively — the render-geometry
     /// link AND the class's collision-layer properties, which
     /// [`Scene::collision_world`] needs together. On BF2 a class with a
-    /// `build_zone` (the buildable turrets, card VTUR2) resolves to that
-    /// zone's row: the world draws and collides with the pad the PS2 shows
-    /// until the turret is built, or with nothing when the zone class is not
-    /// loaded. BF1 (whose `com_weap_gunturret` authors one too) is open —
-    /// card BZONE1 — and keeps the class's own row.
+    /// `build_zone` resolves to that zone's row except for armed buildings:
+    /// their intact model/rig/collision must be available for building them.
+    /// The sim's BuildingTurret state selects the pad while down. Other
+    /// unbuilt props keep the static zone substitution (card VTUR2).
+    /// BF1 keeps the class's own row (card BZONE1).
     pub fn resolve_class(&self, class: &str) -> Option<&ManifestClass> {
         let find = |n: &str| {
             self.manifest
@@ -465,7 +465,14 @@ impl Scene {
         };
         let c = find(class)?;
         match &c.build_zone {
-            Some(zone) if self.manifest.source_game.eq_ignore_ascii_case("bf2") => find(zone),
+            Some(zone)
+                if self.manifest.source_game.eq_ignore_ascii_case("bf2")
+                    && !crate::vehicle_class::TURRET_BASES
+                        .iter()
+                        .any(|b| c.base.eq_ignore_ascii_case(b)) =>
+            {
+                find(zone)
+            }
             _ => Some(c),
         }
     }
@@ -516,11 +523,32 @@ impl Scene {
         sim.boundary = crate::map_boundary::boundary(key, &self.manifest.paths);
     }
 
+    /// Install the map's authored damage regions (a region name's `damage` prefix).
+    pub fn install_damage_regions(&self, sim: &mut core::sim::Sim) {
+        sim.damage_regions = self
+            .manifest
+            .regions
+            .iter()
+            .filter_map(|r| {
+                let volume =
+                    core::region::Region::from_rows(&r.shape, r.rotation, r.translation, r.size)?;
+                core::sim::DamageRegion::parse(&r.name, volume)
+            })
+            .collect();
+    }
+
     /// Install the water level and WMAP wet cells together for every sim loader.
     /// Older manifests without a mask retain the whole-plane fallback. A scene
-    /// without water clears both inputs; render-only scenes need not call this.
+    /// without water clears all water inputs; render-only scenes need not call this.
     pub fn install_water(&self, sim: &mut core::sim::Sim) {
         sim.water_level = self.manifest.water.as_ref().map(|w| w.height);
+        sim.water_oscillates = self.manifest.water.as_ref().is_some_and(|w| {
+            w.config.as_ref().is_none_or(|c| {
+                !c.ocean
+                    && (self.manifest.source_game.eq_ignore_ascii_case("bf1")
+                        || c.oscillation_enable)
+            })
+        });
         sim.water_mask = self
             .manifest
             .water
@@ -1374,6 +1402,35 @@ mod tests {
         scene.install_water(&mut sim);
         assert!(sim.water_level.is_none() && sim.water_mask.is_none());
         assert!(sim.water_plane().is_none());
+    }
+
+    #[test]
+    fn installed_water_bob_obeys_both_ps2_ocean_and_oscillation_flags() {
+        let mut scene = scene("None");
+        for (game, ocean, oscillates, expected) in [
+            ("bf1", false, false, true),
+            ("bf1", true, true, false),
+            ("bf2", false, true, true),
+            ("bf2", false, false, false),
+            ("bf2", true, true, false),
+        ] {
+            scene.manifest.source_game = game.into();
+            scene.manifest.water = Some(ron::from_str(&format!(
+                "(glb: \"water.glb\", height: 2.0, config: Some((ocean: {ocean}, oscillation_enable: {oscillates})))"
+            )).unwrap());
+            let mut sim = core::sim::Sim::empty(1);
+            scene.install_water(&mut sim);
+            assert_eq!(
+                sim.water_oscillates, expected,
+                "{game}, {ocean}, {oscillates}"
+            );
+            sim.tick = 25; // quarter period: +6 cm
+            let height = sim.water_under(glam::Vec3::ZERO).unwrap();
+            assert!((height - if expected { 2.06 } else { 2.0 }).abs() < 0.00001);
+            scene.manifest.water = None;
+            scene.install_water(&mut sim);
+            assert!(!sim.water_oscillates);
+        }
     }
 
     #[test]

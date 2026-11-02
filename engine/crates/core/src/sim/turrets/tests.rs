@@ -475,3 +475,108 @@ fn it_drops_a_building_turret_whose_gunner_it_killed() {
     let events = run(&mut sim, 5.0);
     assert_eq!(shots(&events, g), 0, "no shot at the empty turret");
 }
+
+#[test]
+fn portable_shell_blocks_standing_soldier_but_not_a_prone_soldier() {
+    let (mut sim, owner, weapon) = setup();
+    let class = sim.weapon_classes[weapon]
+        .turret
+        .as_ref()
+        .unwrap()
+        .item
+        .clone();
+    let mut t = Turret::new(
+        500,
+        owner,
+        0,
+        weapon,
+        &class,
+        Vec3::Y * crate::autoturret::CENTRE,
+        Vec3::ZERO,
+        0.0,
+    );
+    t.land(Vec3::ZERO, Vec3::Y);
+    sim.turrets.push(t);
+    let i = owner.index as usize;
+    let start = Vec3::new(0.0, 0.0, 2.0);
+    sim.units[i].soldier.pos = start;
+    let from = sim.units[i].capsule();
+    sim.units[i].soldier.pos = -Vec3::Z * 2.0;
+    sim.units[i].soldier.vel = -Vec3::Z * 10.0;
+    sim.push_turrets(i, from);
+    assert!(
+        sim.units[i].soldier.pos.z > 0.25,
+        "swept contact does not tunnel"
+    );
+    assert_eq!(sim.units[i].soldier.vel.z, 0.0);
+    sim.units[i].soldier.stance = crate::soldier::Stance::Prone;
+    sim.units[i].soldier.pos = start;
+    let from = sim.units[i].capsule();
+    sim.units[i].soldier.pos = -Vec3::Z * 2.0;
+    sim.push_turrets(i, from);
+    assert!(
+        (sim.units[i].soldier.pos.z + 2.0).abs() < 1e-5,
+        "prone fits under shell"
+    );
+    sim.units[i].soldier.stance = crate::soldier::Stance::Stand;
+    sim.units[i].soldier.pos = start;
+    let from = sim.units[i].capsule();
+    sim.units[i].soldier.pos = -Vec3::Z * 2.0;
+    sim.turrets[0].health = 0.0;
+    sim.push_turrets(i, from);
+    assert_eq!(
+        sim.units[i].soldier.pos.z, -2.0,
+        "destroyed shell does not block"
+    );
+}
+
+#[test]
+fn player_walk_is_stopped_by_portable_shell_until_it_dies() {
+    let (mut sim, owner, weapon) = setup();
+    // Isolate collision retirement from the death explosion's knockback.
+    sim.weapon_classes[weapon]
+        .turret
+        .as_mut()
+        .unwrap()
+        .item
+        .explosion = None;
+    let class = sim.weapon_classes[weapon]
+        .turret
+        .as_ref()
+        .unwrap()
+        .item
+        .clone();
+    let mut turret = Turret::new(
+        500,
+        owner,
+        0,
+        weapon,
+        &class,
+        Vec3::Y * crate::autoturret::CENTRE,
+        Vec3::ZERO,
+        0.0,
+    );
+    turret.land(Vec3::ZERO, Vec3::Y);
+    sim.turrets.push(turret);
+    sim.unit_mut(owner).unwrap().soldier.pos = Vec3::Z * 2.0;
+    let pad = PadState {
+        ly: PadState::quantize(1.0),
+        ..Default::default()
+    };
+    for _ in 0..crate::TICK_HZ {
+        sim.step(&[pad]);
+    }
+    assert!(
+        (0.25..1.0).contains(&sim.unit(owner).unwrap().soldier.pos.z),
+        "walk reached shell and wall pass stopped it: {:?}",
+        sim.unit(owner).unwrap().soldier.pos
+    );
+    sim.turrets[0].health = 0.0;
+    for _ in 0..crate::TICK_HZ {
+        sim.step(&[pad]);
+    }
+    assert!(
+        sim.unit(owner).unwrap().soldier.pos.z < -0.5,
+        "dead sphere does not linger"
+    );
+}

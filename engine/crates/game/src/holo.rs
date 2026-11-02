@@ -32,6 +32,8 @@
 //! PROVISIONAL / not built: the direction of the icon's turn ([H]), END1's and HOT1's holograms on a building that is not the
 //! post's own (they stand at the post).
 
+mod build;
+
 use std::collections::HashMap;
 
 use glam::{Mat4, Vec3};
@@ -228,7 +230,7 @@ pub fn switched_on(cp: &core::cp::CommandPost, c: &HoloClass) -> bool {
 /// A model's triangles per sheet, in model space.
 type Parts = Vec<IconPart>;
 
-struct IconPart {
+pub struct IconPart {
     texture: Option<TextureHandle>,
     tris: Vec<(Vec3, [f32; 2])>,
     scroll: [f32; 2],
@@ -240,7 +242,7 @@ struct IconPart {
 pub struct HoloArt {
     pub bf1: bool,
     /// By faction key (all | imp | rep | cis).
-    icons: HashMap<&'static str, Parts>,
+    pub icons: HashMap<&'static str, Parts>,
     pub heights: HashMap<String, f32>,
 }
 
@@ -295,8 +297,17 @@ impl HoloArt {
         let Some(common) = scene.dir.parent().map(|d| d.join(format!("common_{game}"))) else {
             return art;
         };
-        for (faction, side) in SIDES {
-            let glb = common.join("models").join(format!("com_icon_{side}.glb"));
+        for (faction, side) in SIDES.into_iter().chain([("build", "turret")]) {
+            let rel = format!("models/com_icon_{side}.glb");
+            let source = if faction == "build" && pak::exists(scene.dir.join(&rel)) {
+                &scene.dir
+            } else {
+                &common
+            };
+            let glb = source.join(&rel);
+            if faction == "build" && !pak::exists(&glb) {
+                continue;
+            }
             let cpu = match crate::assets::load_glb(&glb) {
                 Ok(c) => c,
                 Err(e) => {
@@ -306,15 +317,19 @@ impl HoloArt {
             };
             let mut parts = Parts::new();
             for (i, (start, count, material, _, _)) in cpu.submeshes.iter().enumerate() {
-                let tex = crate::viewer::upload_texture_file(
-                    r,
-                    &common.join("textures"),
-                    &material.to_ascii_lowercase(),
-                )
-                .unwrap_or_else(|e| {
-                    eprintln!("hologram icon com_icon_{side}: {e:#}");
-                    None
-                });
+                // Map-local build icons use the common hologram sheet.
+                let sheet = material.to_ascii_lowercase();
+                let texture_dir =
+                    if pak::exists(source.join("textures").join(format!("{sheet}.ktx2"))) {
+                        source.join("textures")
+                    } else {
+                        common.join("textures")
+                    };
+                let tex = crate::viewer::upload_texture_file(r, &texture_dir, &sheet)
+                    .unwrap_or_else(|e| {
+                        eprintln!("hologram icon com_icon_{side}: {e:#}");
+                        None
+                    });
                 let tris = cpu.indices[*start as usize..(*start + *count) as usize]
                     .iter()
                     .map(|&i| {
@@ -489,11 +504,28 @@ pub fn holo_draws(
     camera: &Camera,
     out: &mut Vec<ParticleDraw>,
 ) {
-    let c = &CONTROLZONE;
+    let rgb = relation_rgb(Relation::of(h.team, viewer), art.bf1);
+    let icon = h
+        .team
+        .and(faction)
+        .and_then(|f| art.icons.get(f.to_ascii_lowercase().as_str()));
+    draw_holo(&CONTROLZONE, h, origin, icon, art.bf1, rgb, camera, out);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_holo(
+    c: &HoloClass,
+    h: &Holo,
+    origin: Vec3,
+    icon: Option<&Parts>,
+    bf1: bool,
+    rgb: [u8; 3],
+    camera: &Camera,
+    out: &mut Vec<ParticleDraw>,
+) {
     if h.intensity <= 0.0 {
         return;
     }
-    let rgb = relation_rgb(Relation::of(h.team, viewer), art.bf1);
     let rgba = |a: u8| [rgb[0], rgb[1], rgb[2], a];
     out.push(ParticleDraw {
         shape: ParticleShape::Beam(Beam {
@@ -505,7 +537,7 @@ pub fn holo_draws(
             soft: (0.2 * c.height).min(1.0),
             visible: c.visible,
             view: None,
-            gs_rgb: if art.bf1 { 0.5 } else { 1.0 },
+            gs_rgb: if bf1 { 0.5 } else { 1.0 },
             top: render::BEAM_TOP_ALPHA,
             cross: None,
         }),
@@ -517,10 +549,6 @@ pub fn holo_draws(
     if let Some(flare) = flare_draw(h, c, origin, rgb, camera) {
         out.push(flare);
     }
-    let icon = h
-        .team
-        .and(faction)
-        .and_then(|f| art.icons.get(f.to_ascii_lowercase().as_str()));
     let (Some(parts), Some(alpha)) = (icon, icon_alpha(h, c, origin, camera)) else {
         return;
     };
@@ -551,17 +579,21 @@ pub fn holo_draws(
 /// A battle's holograms, one per post in the sim's order.
 pub struct Holos {
     pub list: Vec<Holo>,
+    builds: Vec<Holo>,
     /// The sim time the states stand at, seconds.
     clock: f64,
     rng: Lcg,
+    build_rng: Lcg,
 }
 
 impl Default for Holos {
     fn default() -> Self {
         Holos {
             list: Vec::new(),
+            builds: Vec::new(),
             clock: 0.0,
             rng: Lcg(0x0bf2_c0de),
+            build_rng: Lcg(0x0bf2_b17d),
         }
     }
 }
@@ -572,9 +604,18 @@ impl Holos {
     pub fn advance(&mut self, walk: &WalkSim) {
         let cps = &walk.sim.cps;
         let now = walk.sim.tick as f64 * f64::from(core::TICK_DT);
-        if self.list.len() != cps.len() || now < self.clock {
+        if self.list.len() != cps.len()
+            || self.builds.len() != walk.sim.building_turrets.len()
+            || now < self.clock
+        {
             *self = Holos {
                 list: cps.iter().map(|cp| Holo::steady(cp.owner)).collect(),
+                builds: walk
+                    .sim
+                    .building_turrets
+                    .iter()
+                    .map(build::initial)
+                    .collect(),
                 clock: now,
                 ..Holos::default()
             };
@@ -583,6 +624,10 @@ impl Holos {
             self.clock += f64::from(STEP);
             for (h, cp) in self.list.iter_mut().zip(cps) {
                 step(h, cp, &CONTROLZONE, &mut self.rng);
+            }
+            for (h, t) in self.builds.iter_mut().zip(&walk.sim.building_turrets) {
+                h.switch(build::unbuilt(t), &build::BUILD);
+                h.update(STEP, &build::BUILD, &mut self.build_rng);
             }
         }
     }
@@ -604,6 +649,7 @@ impl Holos {
             let origin = art.origin(&cp.def.name, cp.def.pos);
             holo_draws(art, h, origin, faction, viewer, camera, &mut out);
         }
+        build::draws(&self.builds, art, walk, camera, &mut out);
         out
     }
 }

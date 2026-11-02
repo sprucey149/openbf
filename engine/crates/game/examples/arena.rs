@@ -615,6 +615,7 @@ fn run_map(key: &str, path: &Path, ticks: u64, seed: u32, tiers: [Difficulty; 2]
     set_tiers(&mut sim, tiers);
     sim.omni_radius = core::sim::omni_radius_for(&scene.manifest.source_game);
     scene.install_water(&mut sim);
+    scene.install_damage_regions(&mut sim);
     sim.ground_rules = core::soldier::GroundRules::for_game(&scene.manifest.source_game);
     sim.item_pool = game::roster::item_pool(&scene.manifest.source_game, &scene.manifest.map);
     if let Some(m) = &mission {

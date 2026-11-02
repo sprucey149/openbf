@@ -441,6 +441,8 @@ pub struct AiState {
     /// destination and the arrived latch, the held heading, the Recover
     /// ladder. Hashed only when not the default, after `stall`.
     pub mv: MoverState,
+    /// Jet scheduler and the committed flight; absent for jetless classes.
+    pub jet: super::jet::JetState,
     /// DIAGNOSTIC ONLY (card MOVR) — never hashed, never read by a rule: what
     /// the bot is doing this tick ([`Behaviour`]).
     pub behaviour: Behaviour,
@@ -1584,6 +1586,7 @@ impl Default for AiState {
             strafe_side: 0,
             stall: None,
             mv: MoverState::default(),
+            jet: super::jet::JetState::default(),
             behaviour: Behaviour::None,
             why: super::why::WhyLog::default(),
             arcm: super::arcm::ArcmState::default(),
@@ -1616,6 +1619,7 @@ impl AiState {
             melee.hash_into(eat);
         }
         self.items.hash_into(eat);
+        self.jet.hash_into(eat);
         eat(&self.target_cp.unwrap_or(u32::MAX).to_le_bytes());
         match self.target {
             Some(crate::perception::Foe::Unit(e)) => {

@@ -26,6 +26,7 @@ fn model() -> ui::hud::HudModel {
         hp_max: 300.0,
         energy: 64.0,
         energy_max: 100.0,
+        jet: None,
         hero: false,
         hero_offer: None,
         weapon: Some(ui::hud::HudWeapon {
@@ -378,4 +379,75 @@ fn droid_hud_picture() {
         let png = render::encode_png_rgb(&rgba, w, h).expect("png");
         std::fs::write(out.join(format!("{map}.png")), png).unwrap();
     }
+}
+
+/// Issue #72: render the real BF2 jet bar offscreen; no golden is changed.
+#[test]
+#[ignore = "requires GPU and the baked BF2 HUD"]
+fn jet_fuel_bar_draws_and_disables_offscreen() {
+    common::force_ps2_tier();
+    let mut r = render::Renderer::new_headless(640, 480).unwrap();
+    let mut hud = game::hud_feed::HudView::for_renderer(&game::assets::baked_root(), &r).unwrap();
+    let mut m = ui::hud::HudModel {
+        jet: Some((1.0, 0.24)),
+        ..model()
+    };
+    let out = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../artifacts/lead_tmp/sprint_jet"
+    ));
+    std::fs::create_dir_all(out).unwrap();
+    hud.update(
+        &ui::hud::HudModel {
+            jet: None,
+            ..m.clone()
+        },
+        0.0,
+        [640, 480],
+    );
+    let mut shots = Vec::new();
+    for (label, jet) in [
+        ("full", Some((1.0, 0.24))),
+        ("low", Some((0.12, 0.24))),
+        ("off", None),
+    ] {
+        m.jet = jet;
+        hud.update(&m, 0.0, [640, 480]);
+        for _ in 0..if jet.is_some() { 2 } else { 20 } {
+            hud.update(&m, 0.1, [640, 480]);
+        }
+        eprintln!(
+            "{label} fill {:?} threshold {:?}",
+            hud.bounds("player1jetpack_fill"),
+            hud.bounds("player1jetpack_threshold")
+        );
+        r.render_with_overlay(
+            &camera_from(GOLDEN_CAM),
+            &[],
+            [0.03, 0.03, 0.03, 1.0],
+            Some(&mut |dev, q, enc, view, size| hud.paint(dev, q, enc, view, size)),
+        )
+        .unwrap();
+        let (rgba, w, h) = r.capture_rgba().unwrap();
+        std::fs::write(
+            out.join(format!("jet_{label}.png")),
+            render::encode_png(&rgba, w, h).unwrap(),
+        )
+        .unwrap();
+        shots.push(rgba);
+    }
+    let changed = |a: &[u8], b: &[u8]| {
+        a.chunks_exact(4)
+            .zip(b.chunks_exact(4))
+            .filter(|(a, b)| a != b)
+            .count()
+    };
+    assert!(
+        changed(&shots[0], &shots[1]) > 100,
+        "full and low fuel must draw differently"
+    );
+    assert!(
+        changed(&shots[1], &shots[2]) > 100,
+        "disable must remove the bar"
+    );
 }

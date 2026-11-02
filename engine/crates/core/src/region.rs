@@ -115,6 +115,26 @@ impl Region {
         }
     }
 
+    /// Does a sphere touch the region? BF2's gather for objects in a region
+    /// (`FUN_00536f10`, `analysis/re-kill-floor.md`): strict, like [`Self::contains`].
+    pub fn touches_sphere(&self, c: Vec3, r: f32) -> bool {
+        match self.shape {
+            Shape::Sphere => (c - self.center).length_squared() < (self.w + r) * (self.w + r),
+            Shape::Box => {
+                let l = self.to_local(c);
+                let out = (l.abs() - self.size).max(Vec3::ZERO);
+                out.length_squared() < r * r
+            }
+            Shape::Cylinder => {
+                let l = self.to_local(c);
+                let radial = (l.x * l.x + l.z * l.z).sqrt() - self.size.x;
+                let axial = l.y.abs() - self.size.y;
+                let (a, b) = (radial.max(0.0), axial.max(0.0));
+                a * a + b * b < r * r
+            }
+        }
+    }
+
     /// Nominal footprint radius (placement/AI heuristics).
     pub fn radius(&self) -> f32 {
         match self.shape {

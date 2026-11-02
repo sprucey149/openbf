@@ -399,6 +399,7 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                     core::sim::DeathCause::Lost => "lost",
                     core::sim::DeathCause::Stalled => "stalled",
                     core::sim::DeathCause::Water => "water",
+                    core::sim::DeathCause::DamageRegion => "damage_region",
                 };
                 format!("{tick},envdeath,{},,{what}\n", unit.index)
             }

@@ -2,6 +2,7 @@ use super::*;
 
 mod jet;
 mod resupply;
+mod turret;
 
 /// One finite white particle, with no motion, child, sound or asset lookup.
 pub(super) fn one_shot_emitter() -> FxEmitter {

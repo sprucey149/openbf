@@ -586,6 +586,10 @@ impl Sim {
         killer: Option<UnitHandle>,
         cause: DeathCause,
     ) {
+        // A placed self-piloted gun has no soldier to credit. Its distinct
+        // shot identity is retained on Hit/Shot, but never a player Kill:
+        // HUD and round statistics require an actual unit for that event.
+        let killer = killer.filter(|k| k.index != u32::MAX);
         let v = &self.units[h.index as usize];
         let (victim_team, victim_is_player) = (v.team, v.is_player);
         let respawn_at = self.tick + (self.respawn_delay * TICK_HZ as f32) as u64;
@@ -1402,6 +1406,16 @@ mod tests {
         assert_eq!(spawn(&s, Vec3::new(-1.0, -1.0, -1.0)).hit, Hit::Water);
         assert_eq!(s.water_under(Vec3::new(5.0, -3.0, -5.0)), None);
         assert_eq!(s.water_under(Vec3::new(-5.0, -3.0, -5.0)), Some(-2.0));
+        // The bob lifts what bolts and soldiers meet, not the bots' own rule.
+        let tick = s.tick;
+        s.water_oscillates = true;
+        s.tick = 25; // quarter period: +6 cm
+        let wet = Vec3::new(-5.0, -3.0, -5.0);
+        assert!((s.water_under(wet).unwrap() - -1.94).abs() < 0.00001);
+        assert_eq!(s.still_water_under(wet), Some(-2.0));
+        assert_eq!(s.still_water_under(Vec3::new(5.0, -3.0, -5.0)), None);
+        s.water_oscillates = false;
+        s.tick = tick;
         s.water_mask = None;
         s.heightfield = Some(flat_ground());
         assert_eq!(spawn(&s, down).hit, Hit::Terrain);

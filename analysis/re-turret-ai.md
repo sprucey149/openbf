@@ -396,3 +396,26 @@ MountedTurret vtable; `live_an.py`, `live_decode.py`, `ram_turrets.py` print wha
   (C17); everything listed under "Open for card FAMB" (5); that the two weapon functions of C12 act on an object
   they have just spawned. Not measured: a bot-manned turret's trigger on the PS2 (the SAIR captures hold seated
   gunners' rows; their weapon is a cannon, so bursts are expected), and the hover stick law's rate term on a turret.
+
+## 10. Placed self-piloted buildings in the port (2026-11-01, issue #91)
+
+BF2 placed building seats with `PilotType self` now own a stationary controller in
+`core/src/sim/self_turrets.rs`; they retain the instance's team with no soldier in
+any seat. Their gun state, posed building, ordnance, shot events and weapon sounds
+use the ordinary mounted-gun path. Destruction stops the controller; rebuilding
+starts a fresh one. Ordinary soldier-operated seats keep their existing path.
+BF1's self-piloted fambaa sections are not assigned this BF2 controller.
+
+The controller uses the range/mask checks, 100 m tracking range, range + 10 m
+fight retention, 22.5-degree firing cone, hover-shaped turn stick, and ±30-degree
+idle look every 18 thinks above. Unlimited-ammo guns burst on heat through the
+same PS2 heat/start/stop and skill-dependent Barrage rules as soldier gunners.
+It checks visibility past its own building and vetoes shots through friendly
+soldiers. The human's existing one-second spawn protection also applies.
+
+Remaining approximations: the controller thinks every 0.5 s, and aims at the
+visible target's centre rather than reproducing the complete PS2 perception,
+threat scoring and target-error history. These are provisional port policy;
+this implementation is not a new PS2 live measurement or timing-parity claim.
+The named ground auto classes have one non-charged cannon each; charged self
+weapons and other entity families are outside this implementation.

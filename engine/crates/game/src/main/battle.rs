@@ -275,6 +275,7 @@ pub(super) fn make_walk_with_counts(
     // BF1 has no 10 m omni in the view cone (RE §9.1); BF2 does.
     sim.omni_radius = core::sim::omni_radius_for(&scene.manifest.source_game);
     scene.install_water(&mut sim);
+    scene.install_damage_regions(&mut sim);
     sim.ground_rules = core::soldier::GroundRules::for_game(&scene.manifest.source_game);
     sim.item_pool = game::roster::item_pool(&scene.manifest.source_game, &scene.manifest.map);
     sim.cheats = b.cheats;
@@ -569,6 +570,8 @@ pub(super) fn hud_model(
         }),
         energy,
         energy_max,
+        jet: (on_foot && me.consts.has_jet())
+            .then_some((me.soldier.fuel, me.consts.jet_fuel_min_border)),
         weapon,
         weapon2,
         gauge,

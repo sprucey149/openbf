@@ -291,8 +291,19 @@ pub struct AirEnv {
     /// A human's soldier: the jump button's taps in the air start and end a
     /// jet, and the jets turn by the class's jet row (B2:160704-160706). The
     /// PS2's bots do not press; they call the jet themselves (re-jetpack.md
-    /// §3.1 "Bots"), which the port does not build yet (card JETP2).
+    /// §3.1 "Bots"), through `bot_jet`.
     pub human: bool,
+    /// The bot mover's separate jet command; never supplied by a player pad.
+    pub bot_jet: Option<BotJet>,
+}
+
+/// The AI mover calls the jet slot after a jump, supplies its kick vector,
+/// and steers a hover toward a wanted height (BF2 FUN_00249f80).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BotJet {
+    pub kick: Vec3,
+    pub height: Option<f32>,
+    pub stop: bool,
 }
 
 impl Default for AirEnv {
@@ -300,6 +311,7 @@ impl Default for AirEnv {
         Self {
             ceiling: DEFAULT_FLY_CEILING,
             human: true,
+            bot_jet: None,
         }
     }
 }
@@ -443,6 +455,9 @@ pub struct Soldier {
     /// [`Soldier::spawn_fuel`], recharged outside the jet stances, spent by
     /// a jet's start and its seconds (re-jetpack.md §5.1).
     pub fuel: f32,
+    /// Fixed ticks until drowning damage: 3 s on entry, then 1 s per hit.
+    /// PS2 soldier update, re-water §9.2; reset on surfacing or a dry cell.
+    pub drown_in: u32,
     pub jump_animation: Option<u8>,
     pub jump_animation_serial: u32,
     /// The previous tick's pad word — the EDGE source for every contextual
@@ -701,9 +716,25 @@ impl Soldier {
             knock_rules: KNOCK_RULES,
             fire_lock: false,
             fuel: 0.0,
+            drown_in: 3 * crate::TICK_HZ,
             jump_animation: None,
             jump_animation_serial: 0,
             prev_buttons: 0,
+        }
+    }
+
+    /// One fixed update of the PS2's 3 s breath / 1 s damage timer.
+    /// Integer ticks avoid rounding a 3 s wait into an extra update at 30 Hz.
+    pub fn step_water(&mut self, submerged: bool) -> bool {
+        if !submerged {
+            self.drown_in = 3 * crate::TICK_HZ;
+            false
+        } else if self.drown_in > 1 {
+            self.drown_in -= 1;
+            false
+        } else {
+            self.drown_in = crate::TICK_HZ;
+            true
         }
     }
 
@@ -1231,8 +1262,28 @@ impl Soldier {
             return;
         }
         if self.stance.jetting() {
-            let tap = env.human && jump_edge;
-            self.step_jet(dt, (fwd_in, strafe_in), tap, aim0, c, env.ceiling);
+            let tap =
+                (env.human && jump_edge) || (!env.human && env.bot_jet.is_some_and(|j| j.stop));
+            let mut jet_aim = aim0;
+            let mut jet_stick = (fwd_in, strafe_in);
+            if !env.human && self.stance == Stance::Hover {
+                if let Some(height) = env.bot_jet.and_then(|j| j.height) {
+                    // FUN_00249f80: body pitch correction, separate from the
+                    // weapon aim. The PS2 caps the correction at 30 * dt.
+                    jet_aim.1 = (0.35 * (height - self.pos.y)).clamp(-30.0 * dt, 30.0 * dt);
+                    // The port stores weapon aim separately from the bot's
+                    // flight axis. Turn that axis along requested travel so
+                    // height correction also works sideways or backwards.
+                    let (sy, cy) = fmath::sin_cos(aim0.0);
+                    let direction =
+                        Vec3::new(-sy, 0.0, -cy) * fwd_in + Vec3::new(cy, 0.0, -sy) * strafe_in;
+                    if direction.length_squared() > 0.0 {
+                        jet_aim.0 = fmath::atan2(-direction.x, -direction.z);
+                        jet_stick = (direction.length().min(1.0), 0.0);
+                    }
+                }
+            }
+            self.step_jet(dt, jet_stick, tap, jet_aim, c, env.ceiling);
             self.prev_buttons = pad.buttons;
             return;
         }
@@ -1258,6 +1309,10 @@ impl Soldier {
             self.fly_ceiling(dt, env.ceiling);
             if env.human && jump_edge {
                 self.jet_on(c, (fwd_in, strafe_in));
+            } else if !env.human && self.stance == Stance::Jump && self.lock_timer <= 0.0 {
+                if let Some(jet) = env.bot_jet.filter(|j| !j.stop) {
+                    self.jet_on_with_direction(c, (fwd_in, strafe_in), Some(jet.kick));
+                }
             }
             self.prev_buttons = pad.buttons;
             return;
@@ -1506,6 +1561,15 @@ impl Soldier {
     /// rows. A sabre class that does not hover double-jumps (§3.3); else the
     /// hover or the jump-jet. `stick` = (fwd, strafe), right positive.
     pub fn jet_on(&mut self, c: &SoldierConstants, stick: (f32, f32)) -> bool {
+        self.jet_on_with_direction(c, stick, None)
+    }
+
+    fn jet_on_with_direction(
+        &mut self,
+        c: &SoldierConstants,
+        stick: (f32, f32),
+        direction: Option<Vec3>,
+    ) -> bool {
         if self.fuel < c.jet_fuel_min_border || !self.pay_energy(c.jet_energy_drain) {
             return false;
         }
@@ -1518,6 +1582,11 @@ impl Soldier {
             + f * fwd_in.max(JET_KICK_BACK)
             + Vec3::Y * JET_KICK_LIFT)
             .normalize();
+        // The PS2 uses the controller vector without normalising it. Zero
+        // means use the ordinary kick (FUN_002476a0, 0x247814–0x247848).
+        let dir = direction
+            .filter(|d| d.length_squared() > 0.0)
+            .unwrap_or(dir);
         self.vel += dir * c.jet_jump;
         if c.saber && !c.jet_hover {
             let direction = if fwd_in * fwd_in + strafe_in * strafe_in < 0.0625 {
@@ -1864,6 +1933,10 @@ impl Soldier {
         if latches != 0 {
             eat(b"SOLDIER_LATCH");
             eat(&[latches]);
+        }
+        if self.drown_in != 3 * crate::TICK_HZ {
+            eat(b"DROWNING");
+            eat(&self.drown_in.to_le_bytes());
         }
         // Jet fuel (card JETP), when there is any: a class with no jet keeps
         // 0 and hashes as before. The jet state is the stance, above.

@@ -111,7 +111,9 @@ REQN). No BF1 LVL carries a `hud_` chunk (census of every `extracted/bf1/lvl/**/
   its parent group [D: the frame check in §3 only adds up that way].
 - **Z-order** [V][O]: `FUN_005a3368` re-links the element into its scene list before the first node whose z ≤ its own, so the
   list runs from high z to low; the scene draw `FUN_005a3d40` walks it from the head → **255 is drawn first (back), 0
-  last (front)**. The data agrees: `player1health_fill` ZOrder 2 over `player1health_empty` ZOrder 3.
+  last (front)**. Default is **128**, stored at render +0x48 by `FUN_005a30b0` / `FUN_005a3178`
+  (B2:737260–737261 and 737300–737301); the prior default-zero hypothesis covered the jet fuel fill with its
+  opaque frame. The data agrees: `player1health_fill` ZOrder 2 over `player1health_empty` ZOrder 3.
 - **Fader** [V][O] (`FUN_003afca8` D:406942 ctor: all times 0 but Hold = 0x7f7fffff; advance `FUN_003afe18` D:407029; alpha
   `FUN_003afe90` D:407072; show `FUN_003afd18` D:406970; hide `FUN_003afda0` D:407005): states 0 hidden (α 0) → 1 in (α =
   t/FadeIn) → 2 hold (α 1, FadeHoldTime, default forever) → 3 sustain (α 1, FadeSustainTime) → 4 out (α = 1 − t/FadeOut)

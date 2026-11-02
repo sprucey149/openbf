@@ -55,6 +55,7 @@ mod props;
 mod repair;
 pub mod ripple;
 mod trail;
+mod turret;
 
 use crate::walk::WalkSim;
 use core::impact::{ExplosionLook, Surface, SPLASH_LIFT, WATER_BLAST_DEPTH};
@@ -396,6 +397,7 @@ pub struct LiveEffect {
     buff: Option<(UnitHandle, usize)>,
     /// The jet soldier whose `JetEffect` this is (card JETP2, `fx/jet.rs`).
     jet: Option<UnitHandle>,
+    turret: Option<(u64, usize)>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
 }
@@ -437,6 +439,7 @@ impl LiveEffect {
             repair: None,
             buff: None,
             jet: None,
+            turret: None,
             burn: None,
             float: None,
         };
@@ -1085,6 +1088,7 @@ impl Fx {
     pub fn ingest_sim(&mut self, sim: &Sim) {
         use core::sim::Event;
         self.tick = sim.tick;
+        self.follow_turrets(sim);
         // A link lives the record's FadeTime (18 ticks); its clock is the
         // sim tick, so a pause freezes it (card UORDE, `arc.rs`).
         self.arcs.retain(|a| a.alive(sim.tick));

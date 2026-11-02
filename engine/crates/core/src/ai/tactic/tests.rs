@@ -690,6 +690,33 @@ fn a_hint_in_a_barriers_margin_is_pushed_out() {
     );
 }
 
+/// Issue #70: a hold spot's dry test is the port's own rule and reads the layer
+/// height, so ground at its 0.2 m limit is not refused for the bob's phase.
+#[test]
+fn the_water_bob_does_not_refuse_a_hold_spot() {
+    let (mut sim, _) = super::super::tests::l_sim();
+    sim.water_level = Some(0.18);
+    sim.water_oscillates = true;
+    sim.tick = 25; // quarter period: +6 cm, so the bobbed plane is 0.24
+    let g = sim.nav.clone().expect("graph");
+    let at = Vec2::new(g.hubs[0].pos.x, g.hubs[0].pos.z);
+    let y = g.hubs[0].pos.y;
+    let mut b = Builder {
+        sim: &sim,
+        g: &g,
+        rays: 0,
+    };
+    let f = b.stand(at.x, at.y, y).expect("dry at the layer height");
+    assert!(sim.water_under(Vec3::new(at.x, f, at.y)).unwrap() - 0.2 > f);
+    sim.water_level = Some(0.25);
+    let mut b = Builder {
+        sim: &sim,
+        g: &g,
+        rays: 0,
+    };
+    assert!(b.stand(at.x, at.y, y).is_none(), "wet at the layer height");
+}
+
 /// The mover's "arrived" counts only near the position held: a bot whose
 /// walk ended 4 m short of it (the outcome of its walk to the one before)
 /// is still on its way; at it, it is there.

@@ -1,5 +1,5 @@
 //! The water MOVES (queue item OC): Kamino's FFT ocean and the flat-water
-//! bob. Render-side only — the sim never reads the water height.
+//! bob. The sim separately queries the layer plus flat-water bob at fixed ticks.
 //!
 //! ## What is the PS2's (`analysis/re-water.md`, [V] unless marked)
 //!

@@ -1140,7 +1140,7 @@ fn salvo_heat(wc: &WeaponClass) -> (f32, f32) {
 
 /// The PS2's start test (state 2): n shots' heat, whole salvos, capped at
 /// 0.99, under what is left of the meter.
-fn heat_fits(wc: &WeaponClass, n: u8, heat: f32) -> bool {
+pub(crate) fn heat_fits(wc: &WeaponClass, n: u8, heat: f32) -> bool {
     let (h, s) = salvo_heat(wc);
     let mut cost = (f32::from(n) / s).ceil() * h;
     if cost > 1.0 {
@@ -1151,7 +1151,7 @@ fn heat_fits(wc: &WeaponClass, n: u8, heat: f32) -> bool {
 
 /// The PS2's end test (state 3): the heat is within one salvo (capped at
 /// 0.99) and 0.0001 of full.
-fn heat_spent(wc: &WeaponClass, heat: f32) -> bool {
+pub(crate) fn heat_spent(wc: &WeaponClass, heat: f32) -> bool {
     let (mut h, _) = salvo_heat(wc);
     if h >= 1.0 {
         h = 0.99;
@@ -1241,7 +1241,7 @@ pub(super) fn tap(
 /// trunc(min + U[0, max − min)·t))`, t the skill's - 3 at the lowest level
 /// and 3..5 at the highest for the class defaults 3 / 6. BF1
 /// (`FUN_0023c9c8`): a uniform integer of min..=max, no skill term.
-fn burst_len(
+pub(crate) fn burst_len(
     rules: crate::soldier::GroundRules,
     wc: &crate::weapon::WeaponClass,
     me: UnitHandle,
@@ -1263,7 +1263,7 @@ fn burst_len(
 
 /// D11: ticks of the inter-burst pause with `wc`: BF2 `(1.5 − 0.8·t) ×
 /// BarrageDelay` (`FUN_002bac98`, state 2), BF1 the delay flat.
-fn pause_ticks(
+pub(crate) fn pause_ticks(
     rules: crate::soldier::GroundRules,
     wc: &crate::weapon::WeaponClass,
     skill: &crate::skill::Skill,

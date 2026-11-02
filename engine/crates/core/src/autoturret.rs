@@ -16,7 +16,7 @@ use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 /// `boneroot` height above the origin (`re-portable-turret.md` §7, skeleton).
 pub const CENTRE: f32 = 1.056;
-/// The shell's bind-pose sphere (§7); using it as the hit sphere is OURS (§9).
+/// The authored `p_-so_sphere` on boneroot, mask 17 (§10: soldier + ordnance).
 pub const RADIUS: f32 = 0.25;
 /// `aimer_x` offset from the centre along the yaw (§7, skeleton).
 pub const AIMER: f32 = 0.234;
@@ -93,6 +93,21 @@ impl TurretBody {
     }
 }
 
+/// Visual health-band effect from the portable turret's authored class.
+/// Its PS2 model has no `hp_smoke_1`, so both effects use the entity origin.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DamageEffect {
+    pub start: f32,
+    pub stop: f32,
+    pub effect: String,
+}
+
+impl DamageEffect {
+    pub fn active(&self, fraction: f32) -> bool {
+        fraction <= self.start && fraction > self.stop
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TurretClass {
     pub body: TurretBody,
@@ -101,6 +116,8 @@ pub struct TurretClass {
     pub geometry: Option<String>,
     pub gun: Box<WeaponClass>,
     pub gun_index: usize,
+    /// Presentation only, excluded from simulation hashing.
+    pub damage_effects: Vec<DamageEffect>,
 }
 
 impl TurretClass {
@@ -115,6 +132,7 @@ impl TurretClass {
             geometry: name(src, "GeometryName"),
             gun: Box::new(gun),
             gun_index: usize::MAX,
+            damage_effects: Vec::new(),
         }
     }
 

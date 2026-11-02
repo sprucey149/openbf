@@ -297,7 +297,7 @@ fn ring_point(sim: &Sim, tk: &Tick, target: Vec3) -> Option<Vec3> {
             let q = Vec3::new(q.x, y, q.z);
             let ok = (y - pos.y).abs() <= rise
                 && !sim.level_at(q).is_off()
-                && sim.water_under(q).is_none_or(|w| y >= w - 0.2)
+                && sim.still_water_under(q).is_none_or(|w| y >= w - 0.2)
                 && sim.nav.as_ref().is_none_or(|g| {
                     !g.barriers
                         .iter()

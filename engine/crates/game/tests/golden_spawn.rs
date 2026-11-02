@@ -25,6 +25,7 @@ fn hud() -> ui::hud::HudModel {
         hero_offer: None,
         energy: 100.0,
         energy_max: 100.0,
+        jet: None,
         weapon: None,
         weapon2: None,
         reticle: None,

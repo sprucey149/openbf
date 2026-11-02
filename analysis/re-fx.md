@@ -567,7 +567,7 @@ B1 line numbers; check each with `python scripts/re_check.py fn b1 <line>`.
 - Regressions: `core water::tests`, `sim::combat::tests::water_stops_bolts_and_names_the_surface` (dry cell), `game fx::ripple::tests`, `fx::tests::water_hits_leave_ripples_and_their_splashes_ride_the_bob`, `render particles::tests::shaded_triangles_carry_their_own_vertex_bytes`, and `game/tests/suite/water_fx.rs` `kas1_carries_its_wmap_mask_and_a_ripple_reaches_the_frame` (4014 wet cells, a ripple on the GPU).
 
 Not matched:
-- The sim's water plane stays at the level. The PS2's collision plane bobs by ±6 cm.
+- (Matched since issue #70: the sim's water plane bobs by the PS2's ±6 cm, for bolts, grenades, droidekas and soldiers; `FUN_00476c10` tests the crossing at level + bob. The port's own bot rules stay at the layer height.)
 - Wader ripples (kind 1, `FUN_00478778`), `FUN_00216b30` and the grenade-base ripple (the port has no grenade base).
 - The frustum test (the port draws every ripple in the pool) and fog on the ring.
 - BF2 was not measured.

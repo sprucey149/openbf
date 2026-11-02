@@ -214,6 +214,8 @@ pub struct HudModel {
     /// Sprint stamina 0..energy_max.
     pub energy: f32,
     pub energy_max: f32,
+    /// Rechargeable jet fuel and its activation border; None disables the bar.
+    pub jet: Option<(f32, f32)>,
     /// The weapon in hand; `None` hides the weapon group (dead, or riding).
     pub weapon: Option<HudWeapon>,
     /// The secondary channel's current weapon — the grenade row (card GREN);
@@ -355,6 +357,20 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         put(
             "player1.energyFraction",
             EventValue::Number(e.clamp(0.0, 1.0)),
+        );
+    }
+
+    if let Some((fuel, border)) = m.jet.filter(|_| alive) {
+        let fuel = fuel.clamp(0.0, 1.0);
+        put("player1.jetFuelThreshold", EventValue::Number(border));
+        put("player1.jetFuelFraction", EventValue::Number(fuel));
+        put(
+            "player1.jetFuelWarning",
+            EventValue::Number(if border > 0.0 && fuel <= border {
+                1.0 - fuel / border
+            } else {
+                0.0
+            }),
         );
     }
 
@@ -610,6 +626,17 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
             }
         }
     };
+    hide(
+        hud,
+        "hud.gate.jet",
+        alive && m.jet.is_some(),
+        &["player1.jetDisable"],
+        &[
+            "player1.jetFuelFraction",
+            "player1.jetFuelThreshold",
+            "player1.jetFuelWarning",
+        ],
+    );
     hide(
         hud,
         "hud.gate.hero_offer",
@@ -979,6 +1006,7 @@ mod tests {
             hero_offer: None,
             energy: 55.0,
             energy_max: 100.0,
+            jet: None,
             weapon: None,
             weapon2: None,
             reticle: Some(0),
@@ -1258,5 +1286,46 @@ mod tests {
             RETICLE_COLORS,
             [[200, 100, 100], [255, 255, 255], [1, 86, 213]]
         );
+    }
+}
+
+#[cfg(test)]
+mod jet_tests {
+    use super::*;
+    #[test]
+    fn jet_fuel_events_warn_at_the_border_and_disable_on_death_or_class_change() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let mut model = HudModel {
+            jet: Some((0.12, 0.24)),
+            ..Default::default()
+        };
+        feed(&mut hud, &model, &|_| false);
+        assert_eq!(
+            hud.last("player1.jetFuelFraction"),
+            Some(&EventValue::Number(0.12))
+        );
+        assert_eq!(
+            hud.last("player1.jetFuelThreshold"),
+            Some(&EventValue::Number(0.24))
+        );
+        assert_eq!(
+            hud.last("player1.jetFuelWarning"),
+            Some(&EventValue::Number(0.5))
+        );
+        for (fuel, border) in [(0.24, 0.24), (1.0, 0.24), (0.0, 0.0)] {
+            model.jet = Some((fuel, border));
+            feed(&mut hud, &model, &|_| false);
+            assert_eq!(
+                hud.last("player1.jetFuelWarning"),
+                Some(&EventValue::Number(0.0))
+            );
+        }
+        model.dead = true;
+        feed(&mut hud, &model, &|_| false);
+        assert_eq!(hud.last("player1.jetFuelFraction"), None);
+        model.dead = false;
+        model.jet = None;
+        feed(&mut hud, &model, &|_| false);
+        assert_eq!(hud.last("player1.jetFuelFraction"), None);
     }
 }

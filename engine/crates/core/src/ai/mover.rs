@@ -99,6 +99,12 @@ pub(super) fn run(
 ) -> Moved {
     let Tick { me, u, .. } = *tk;
     let pos = u.soldier.pos;
+    if super::jet::run(sim, tk, st, mv, pad) {
+        return Moved {
+            walk: Walk::Following,
+            at_post: false,
+        };
+    }
     let MoveRequest {
         goal,
         post,

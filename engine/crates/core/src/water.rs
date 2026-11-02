@@ -4,6 +4,13 @@
 
 use glam::Vec3;
 
+/// PS2 flat-water LAYR lift: 6 cm, 0.3 turns/s (both water update functions,
+/// re-water §2 / re-water-flags §7). The fixed sim clock starts at phase 0;
+/// synchronizing that phase to a captured PS2 mission clock remains unmeasured.
+pub fn bob(seconds: f32) -> f32 {
+    0.06 * crate::fmath::sin_cos(1.884_955_8 * seconds).0
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct WetMask {
     grid: u32,

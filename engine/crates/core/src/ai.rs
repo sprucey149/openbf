@@ -98,6 +98,7 @@ mod gunner;
 mod gunner_foot;
 pub mod hover_drive;
 mod items;
+pub mod jet;
 pub mod man;
 mod melee;
 mod mover;
@@ -127,6 +128,7 @@ pub use draw::{
     SALT_NEED_GUNNER, SALT_REACT, SALT_STANCE, SALT_TAP,
 };
 pub use gunner_foot::yaw_toward;
+pub(crate) use gunner_foot::{burst_len, heat_fits, heat_spent, pause_ticks};
 pub(crate) use gunner_foot::{friend_near_blast, item_line_blocked, release_blasts_own_side};
 pub use route::{first_leg, floor_walked};
 pub use state::{

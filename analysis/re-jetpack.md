@@ -5,7 +5,7 @@ troopers, Geonosians, Jango / Boba, Vader / the Emperor), BF2's Jedi double jump
 bar, effects and sounds, the bots' use. Read with `re-stance-roll.md` (stance machines, 4.3a-4.3d the jump and air
 movers), `re-soldier-ai.md` 4.7 (bots) and `unit-audit-bf1.md` / `unit-audit-bf2.md` 3.6 (class values).
 
-> **Status: UNAUDITED, no live PS2 run.** Every [V] is a decomp line checked with `re_check.py fn` and, where the
+> **Status: UNAUDITED; section 16 holds the live PS2 runs, everything before it is code reading.** Every [V] is a decomp line checked with `re_check.py fn` and, where the
 > number matters, the ELF instruction words; [D] is arithmetic or a reading of a field's meaning; [H] is a guess. No
 > PCSX2 trial was taken for this note and no independent verifier has re-read it yet (RULES "run the verifier on RE
 > claims BEFORE writing docs" - owed: build plan step 9). The feel numbers in 6 are [D] from the formulas;
@@ -309,8 +309,8 @@ Kick directions: no stick = straight up x JetJump; full forward = (up 0.740, for
   Tap again: falls (stance 8, the jump's 2.1 m/s^2 stick). Fuel 1.0 -> 0.5 -> 0.0: two leaps from full, one from
   spawn (0.5 >= 0.49), then 0.49 / 0.075 = 6.5 s to the next.
 - **BF2 jet trooper.** Kick +5 m/s up (3.7 up / 3.4 forward with the stick). Hover: no gravity; with the stick
-  released all speed dies by e^-2t (86 % gone in 1 s). Full stick: 10.5 m/s along the aim (7 x 1.5), backing 6.6 m/s
-  (5.25 x 1.25), strafe 6.6 m/s; the speed along D moves at most 30 x dt = 1.0 m/s per update. Level aim climbs:
+  released all speed dies by e^-2t (86 % gone in 1 s). Full stick: 10.5 m/s along the aim (7 x 1.5), backing 7.875 m/s
+  (5.25 x 1.5; corrected from the caller B2:160710–160717), strafe 6.6 m/s; the speed along D moves at most 30 x dt = 1.0 m/s per update. Level aim climbs:
   D.y = 0.16 / 1.0127 -> +1.66 m/s at full forward; aim 4.6 deg down flies level. Turn x 1.25 (players). Fuel:
   start costs 0.25, 0.16 / s -> 4.7 s from full, 1.6 s from the spawn's 0.5; empty to the border 0.24 in 2.0 s,
   to full 8.3 s.
@@ -538,8 +538,8 @@ jet (the dark trooper's leap, the jet trooper's / Jango's / Boba's / Vader's hov
 press ends a jet into a fall (a Jedi's third press jumps again while the energy bar holds). In the hover the left
 stick flies along the view (aim 4.6 deg down for level flight; level aim climbs gently), back and sideways; the
 right stick turns at 1.25 x (the jet row). Releasing the stick lets the hover coast to a stop. Landing ends it. The
-third-person camera takes the sprint's section while jetting (OURS, PROVISIONAL: stands back 4.0 m on BF2 maps,
-4.3 m on BF1, so the ground under him shows; the PS2's own jet section is not read).
+third-person camera keeps the stand's section and trails his speed, as measured in section 16 (it took the sprint's
+section until 2026-11-01).
 
 ### The feel as built (dt 1/30; tests `core/src/soldier/tests/jet.rs`, `core/src/sim/step/tests/jet.rs`)
 
@@ -616,3 +616,135 @@ KAS banks' records and sounds, both games), `fx/tests/jet.rs` (both games' four 
 riding him, stopped at the end and at a death; the drawn bone moves it), `soldier_vis/tests.rs`
 (`a_jet_rides_the_drawn_ribcage`). Pictures: `engine/artifacts/lead_tmp/jetfx/` (BF2 GEO1 ep2 jet trooper, BF2 KAS2
 dark trooper, BF1 GEO1 jet trooper; from behind and the side; the scratch tool `jet_still.rs.txt` beside them).
+
+## 15. Bot commands and fuel HUD (issue #72, 2026-11-01)
+
+`core::ai::jet` now schedules rechargeable classes, and hands the soldier a
+separate bot command through `AirEnv`; player jump taps are unchanged. A
+request first jumps, then starts the jet on a later unlocked Jump update.
+The controller kick replaces the ordinary kick without normalization, as at
+BF2 `0x247814–0x247848`. The scheduler takes integer 6–12 s hop and 3–8 s
+non-hover hint intervals from `FUN_002d9890` / `FUN_002d99c0`. Hover attacks
+require the current retained contact at least 20 m away and enough fuel for distance /
+MaxSpeed (`FUN_002dc0b8`, which fetches the current target without a fresh visibility
+test); the attack's wanted height is target +10 m
+(`FUN_002dc448`, B2:265350–265381). The hover's flight axis uses the 0.35
+height correction capped at 30 × dt from `FUN_00249f80`. These functions were
+re-read in the decomp for this implementation; this is not a new live capture.
+
+The integration with the port's own AI is [ours]: deterministic per-unit
+hashed draws, an initially delayed first hop, a committed flight destination,
+no ground ledge veto while in that flight, a 3 m attack end radius (route
+arrival needs the ordinary arrival radius and feet above the endpoint), and cancellation
+for boarding, tool use and off-map recovery. JetJump hints activate inside
+their authored radius (ordinary route arrival slack when absent); their
+endpoint/direction semantics remain a fidelity follow-up. The height
+correction changes the hover's flight axis without redirecting its weapon's
+aim. The flight axis follows requested travel, including sideways/backward movement.
+Jet links use a surface projection below the higher authored hub (Mustafar has
+y=0 endpoint hubs); arrival tests the destination floor height. The isolated
+Mustafar nav/collision test reaches all four endpoints, but the reverse trips
+finish by walking after fuel expires. Full mission lava/hazard traversal is
+still unvalidated; the isolated fixture does not establish that acceptance. The ground collision and
+fly-height ceiling continue to run. The new scheduler and flight fields are
+hashed; classes without rechargeable fuel carry no additional hash bytes.
+The roster's route flag now uses `SoldierConstants::has_jet`, excluding a
+fuel-less Jedi double jump.
+
+The BF2 HUD publishes `jetFuelFraction`, `jetFuelThreshold`, `jetFuelWarning`
+and `jetDisable` through its authored `player1jetpackbar` tree. A living
+on-foot class with rechargeable fuel sees it; a death, a seat, a remote view
+or a fuel-less class disables it. Warning is `1 - fuel / border` at or below
+a positive border and zero above it. Disable is sent on the falling edge and
+forgets fuel/threshold events so a class with identical fuel values restores the bar.
+The offscreen check exposed an old HUD default-depth hypothesis: PS2
+`FUN_005a30b0` / `FUN_005a3178` initializes render +0x48 to 128, not zero.
+Using that default keeps the opaque jet frame behind its fill at ZOrder 38.
+
+The backing-speed discrepancy in §6 was a numerical summary error:
+`FUN_00240bf8` B2:160710–160717 selects MaxStrafeSpeed for negative forward
+input, then multiplies it by the **forward** jet control factor, not the
+strafe factor. That is 5.25 × 1.5 = 7.875 m/s for the BF2 jet trooper, agreeing
+with §4.2 and the existing simulation. No physics constant changed here.
+A per-update PS2 capture is still required to call this live-verified.
+
+Remaining original-game acceptance is explicit: per-update motion/fuel
+captures, sound voice-table capture, the effect attach bone, the jet camera,
+Geonosian asset/engine coverage and independent RE verification. This slice
+does not turn those open checks into passes.
+
+## 16. Live PS2 runs and Mustafar's hazards (issue #72, 2026-11-01) [M]
+
+**How.** A software PCSX2 session on a no-AI battle's side-select state, one row per game update (`dt` 1/30): feet,
+velocity, fuel, stance, camera. BF2 `bf2_geo1_ai0_one_sideselect`, BF1 `bf1_geo1_units1_one_sideselect`. The menu keeps
+BF2's jet trooper behind points in this state, so the player spawned as the first class and his class pointer was
+written to the loaded jet trooper's before the trials; the fuel was written to 1.0 before each. Jump at t = 0.3, second
+tap at 0.7, stick from 1.2, a tap at 4.6. The class's values read from RAM are section 2.2's: BF2 5 / 8 / 30, recharge
+0.12, cost 0.16, initial 0.25, border 0.24; BF1 5 / 8, recharge 0.1, cost 0.2, initial 0.25, border 0.24.
+
+**BF2 hover against `Soldier::step_looking`** (`the_hover_replays_the_ps2_capture`). Updates since the jet started:
+
+| update | vy | rise m | fuel |
+|---|---|---|---|
+| 0 | 6.257 | 0 | 0.750 |
+| 5 | 4.48 | 0.86 | 0.723 |
+| 10 | 3.21 | 1.47 | 0.697 |
+| 20 | 1.65 | 2.23 | 0.643 |
+| 45 | 0.31 | 2.87 | 0.510 |
+| 90 | 0.02 | 3.01 | 0.270 |
+
+The port gives the same to 0.02 in each, and the settled speeds: forward 10.5, back 7.88 (section 4.2's formula; this
+settles the 7.9 against 6.6 of section 6), strafe 6.56, and with the aim raised about 28 deg (camera -11.5 to +17.1;
+the port's test takes +24.6 from spawn's -4) climb 7.8 with 7.03 forward. Fuel falls
+0.16 a second in the hover and rises 0.12 a second on the ground. The empty tank ends the hover at the border's end
+(fuel 0.019 at 5.34 s, on the ground by 6.67 s).
+
+**BF1 hover** (section 11 item 2 answered). Net drain 0.1 a second through the hover, so recharge runs in it. Settled:
+forward and back 12.97, strafe 9.0 (2 x MaxSpeed and 2 x MaxStrafeSpeed, section 4.1); at this aim forward sinks 0.9
+m/s and back climbs 0.9, and he holds height at rest. The port flies BF1 maps on BF2's rules (9.75 forward on a BF1 jet trooper), its named deviation of
+section 13: this measures the size of that choice and does not change it.
+
+**The default class's jump-jet** (BF2, JetJump 7, JetPush 14, JetAcceleration 20, stance 6, given fuel by the same write)
+climbs at 8.26, tops out near 2.6 s and reaches 35.9 m/s forward by 4 s. No shipped class flies with those values; it is
+the camera's fast case below.
+
+**The camera (issue #72's named deviation, settled).** There is no jet section. At rest in the hover the camera sits
+exactly where it stood (BF2 clone trooper 3.2 m back at -14 deg, jet trooper and BF1 3.5 m at -11.5 deg). Moving, it
+trails on all three axes by 0.0514 x velocity: 0.54 m at 10.5 m/s, -0.41 at 7.88 back, 0.34 at 6.56 strafe, 1.83 at
+35.9. That is an ease of 15 a second run once per 30 Hz update (e^-0.5 / (1 - e^-0.5) / 30). The port's jets now
+keep the stand section and take that ease (`core::unit::jet_camera_lag`, `WalkSim::camera_track`), which also dies away after a jet ends.
+- **Not ported:** the same trail shows on foot (a landing at 25 m/s, stance 0: 4.42 m back, easing to 3.105 by the
+  time he stops). The port's on-foot camera has no trail. Changing that moves every soldier's camera and is left for
+  a playtest.
+- **Not ported:** the jet trooper's class-specific 3.5 m stand camera. The port has one default camera for every class.
+
+**Mustafar's hazards.** The mission adds no death region. Its hazards are the map's nine `damage` regions, which nothing
+in the port read: a bot could stand in lava. BF2 `FUN_0035c8e0` makes one from each region named `damage...` (the
+key table at 0x5fed50, keys matched by prefix, missing scales 0); `FUN_0035c578` runs every update, hitting each living
+object the region gathers for `rate x dt`, scaled by health type, with no owner. The gather is the bounding-sphere
+touch of `re-kill-floor.md`. Measured at 400 health, teleported above each and released:
+
+| where | region | PS2 | port |
+|---|---|---|---|
+| steam, (-54.24, 111.41) | rate 1, person 50 | -1.667 per update | same (`mustafars_regions_hurt_as_on_the_ps2`) |
+| pit, (-58.78, 152.53) | rate 900, person 100 | -3000 in one update | dead at once |
+| lava, (100, 80) | rate 1000, person 200 | -6667 in one update (health -6267) | dead at once |
+| first hit, falling | box top 75.51, and 67.47 | feet 0.43-0.67 m over the top | sphere 1.0 up, radius 1.46: 0.46 |
+
+Only BF2 FEL1 (20, 30 a second), MUS1 and POL1 (60 a second) author any, and no BF1 map. A building scale is authored
+nowhere, so buildings are not tested. `core::sim::DamageRegion`.
+
+**The jet links.** Hubs 24 and 25 are leaves, each joined only by its jet arc to the deck (26 and 27). The route tables give
+those arcs weight only for a bot bound for that leaf, so a conquest round has no reason to fly them: `JET_CENSUS` over
+five seeds on BF2 MUS1 shows no bot starting one. Sent there by hand, in the real conquest scene with the lava on and
+the mission's 90 m ceiling, a jet trooper crosses all four directions alive
+(`mustafar_jet_connections_arrive_alive_through_the_mission_hazards`). The PS2 stands at those hubs at 58.46, 55.51,
+58.46 and 55.45; the port at 58.48, 55.54, 58.48 and 55.49. Whether the PS2's bots ever pick a leaf as a goal is not read.
+
+**Rounds** (`JET_CENSUS=1`, seeds 1-4 and 42, 18,000 ticks; jump-jet bots do not hover-attack, so MUS1's ep3 jet trooper has
+none). BF2 GEO1: 13-16 jet units, 37-115 hops, 7-19 hover attacks. BF1 GEO1: 11-16 units, 36-88 hops, 1-8 attacks. MUS1:
+7-10 units, 34-49 hops. Minimum gap between a bot's flights 6.0 s, as drawn; means run 9-31 s because a hop needs an idle
+grounded moment with fuel, and the count includes the gaps between lives.
+
+**Still open.** The jet sound voices and the effect's attach bone (no capture). The Geonosians: both GEO1 missions field
+them as locals, nothing in the game spawns a mission's locals team yet, and their classes are not baked.

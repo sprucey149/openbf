@@ -330,3 +330,35 @@ changes the vehicle's team. BF1's cutter has no such branch.
 BF1 classes take the PS2 class-table default for their kind: hover 3 s, walker 12 s, flyer 4 s). Command walkers and
 command hovers are never sliced. After a slice only the slicer may board for 3 s (ours, `SLICE_RESERVE`) instead of
 the PS2's 5 s lock on everyone. Bots do not slice. Ejected riders leave through the ordinary exit.
+
+## 12. Initial BF2 pads and the build hologram (2026-11-01, issue #79)
+
+BF2 armed buildings with `UnbuiltGeometryName` now register as repairable pads
+at zero health. Previously the scene drew their pads but the runtime skipped
+these turret definitions, so neither a cutter nor an engineer could build them.
+The intact class geometry, collision and posed gun rig remain available; initial
+construction removes the empty vehicle without a death effect, and full-health
+repair restores a fresh vehicle and the intact body bindings. No regeneration
+is added. BF1's initial spawning remains unchanged; its fallen pads can use the
+same build hologram.
+
+The existing engineer objective handles these initial pads as it already handles
+fallen turrets. Real PS2 Yavin and Naboo data, in Clone Wars and Galactic Civil
+War, exercise the 800-health pool and sixteen +50 cutter pulses at 0.5 s spacing
+(225 simulation ticks, 7.5 s, between first and last). The one-builder claim
+policy remains the existing port policy, including deterministic resolution of
+simultaneously chosen claims on the next think.
+
+The view draws the original `com_icon_turret` over a green beam, using
+`com_holo_turret`'s 0.75 m height, size 1, 0.3 beam intensity, 0.5 icon intensity,
+35 m visibility, 0.2 turns/s, 2 s fade and 0.4–0.8 flicker. A separate cosmetic
+random stream preserves the command posts' flicker. The model comes from the map
+bake and its sheet can come from the common bake. Per screen, only a living,
+unmounted soldier carrying a repair weapon in either channel sees build
+holograms; partial health keeps them on, full health hides them, and a fall to
+an unbuilt pad enables them again. A destroyed-model wreck has none.
+
+The build hologram uses the building origin; the unnamed node mentioned in
+section 1 is still untraced. The shared hologram implementation supplies its
+existing beam-base width and pop behavior. These scoped headless tests do not
+claim a fresh original-game paired capture or acceptance of every map.

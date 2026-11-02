@@ -667,6 +667,42 @@ fn a_circler_with_no_ring_point_walks_at_a_target_out_of_reach() {
     assert!(shots > 0, "and fired");
 }
 
+/// Issue #70: the 6 cm water bob is what bolts and soldiers meet. A bot's
+/// ring-point rule is the port's own and reads the layer height, so ground
+/// sitting right at its 0.2 m limit is not taken and refused with the phase.
+#[test]
+fn the_water_bob_does_not_move_a_bots_ring_points() {
+    let points = |oscillates: bool| {
+        let (mut sim, bots, _) = fight_scene(1, 0.0);
+        let h = bots[0];
+        let class = sim.unit(h).expect("bot").weapon_class;
+        sim.weapon_classes[class].ai_range = [0.0, 30.0, 60.0];
+        sim.water_level = Some(0.2);
+        sim.water_oscillates = oscillates;
+        (1..=64u64)
+            .map(|tick| {
+                sim.tick = 17 * tick;
+                let u = sim.unit(h).expect("alive");
+                let tk = Tick {
+                    me: h,
+                    u,
+                    eye: u.muzzle(),
+                    wc: &sim.weapon_classes[u.weapon_class],
+                    tier: sim.difficulty.tier(),
+                    skill: sim.difficulty.skill_at(u.skill),
+                };
+                ring_point(&sim, &tk, Vec3::new(0.0, 0.0, -45.0))
+            })
+            .collect::<Vec<Option<Vec3>>>()
+    };
+    let still = points(false);
+    assert!(
+        still.iter().flatten().count() >= 8,
+        "ring points at the limit: {still:?}"
+    );
+    assert_eq!(points(true), still);
+}
+
 /// Card FGHTA: with a nav graph a ring point is taken INSIDE a hub — the
 /// one nearest the drawn point, within 10 m of it (`RING_SNAP`) — and
 /// never in a hub that lies more than 2 m farther from the target than
