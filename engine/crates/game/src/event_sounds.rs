@@ -49,10 +49,88 @@ pub fn listener(walk: &WalkSim) -> Listener {
 
 /// `play(name, pos)` for each sound this tick's events start, heard from
 /// `ears`.
-pub fn each(walk: &WalkSim, ears: Vec3, mut play: impl FnMut(&str, Vec3)) {
-    let wc_of = |h: core::unit::UnitHandle| {
-        &walk.sim.weapon_classes[walk.sim.units[h.index as usize].weapon_class]
-    };
+pub fn each(walk: &WalkSim, ears: Vec3, play: impl FnMut(&str, Vec3)) {
+    each_with(walk, ears, true, play);
+}
+
+/// [`each`] without what starts on a human's weapon handle ([`weapon_asks`]):
+/// the mixer's path, which has to hold those voices to cut them.
+pub fn each_off_handle(walk: &WalkSim, ears: Vec3, play: impl FnMut(&str, Vec3)) {
+    each_with(walk, ears, false, play);
+}
+
+/// The weapon that fired starts a sound once per trigger pull, not per bolt
+/// (card SNDX, re-weapon-sounds.md 7.7): a shot after the pull's first starts
+/// it again only on a class with a `SalvoDelay`. Salvos without a delay all
+/// leave in one update, so "the pull's first" is this tick's first of the
+/// unit's weapon, which `fired` keeps.
+fn shot_sound<'a>(
+    walk: &'a WalkSim,
+    fired: &mut Vec<(core::unit::UnitHandle, u32)>,
+    unit: core::unit::UnitHandle,
+    weapon_class: u32,
+) -> Option<&'a str> {
+    let wc = &walk.sim.weapon_classes[weapon_class as usize];
+    let first = !fired.contains(&(unit, weapon_class));
+    if first {
+        fired.push((unit, weapon_class));
+    }
+    wc.fire_sound
+        .as_deref()
+        .filter(|_| fire_sound_starts(first, wc))
+}
+
+fn human(walk: &WalkSim, unit: core::unit::UnitHandle) -> bool {
+    walk.sim.unit(unit).is_some_and(|u| u.is_player)
+}
+
+/// This tick's starts on a human's weapon handle (B1 +0xf4, B2 +0xd8), in
+/// event order: its `FireEmptySound` and its `FireSound`. The empty click
+/// stops what the handle still sounds (`FUN_00355768` 1 -> `FUN_00355968`;
+/// re-weapon-sounds.md 7.3), so a pistol's 1 s tail cannot hide it, and one
+/// handle holds one click however fast the trigger is mashed.
+pub fn weapon_asks(walk: &WalkSim, mut ask: impl FnMut(crate::sounds::WeaponAsk)) {
+    let hash = crate::classdb::fnv1a_lowercase;
+    let mut fired = Vec::new();
+    for e in &walk.sim.events {
+        match *e {
+            Event::FireEmpty {
+                unit,
+                weapon_class,
+                pos,
+            } => {
+                if let Some(n) = &walk.sim.weapon_classes[weapon_class as usize].empty_sound {
+                    ask(crate::sounds::WeaponAsk {
+                        unit: unit.index,
+                        weapon_class,
+                        hash: hash(n),
+                        pos,
+                        click: true,
+                    });
+                }
+            }
+            Event::Shot {
+                unit,
+                weapon_class,
+                origin,
+                ..
+            } if human(walk, unit) => {
+                if let Some(n) = shot_sound(walk, &mut fired, unit, weapon_class) {
+                    ask(crate::sounds::WeaponAsk {
+                        unit: unit.index,
+                        weapon_class,
+                        hash: hash(n),
+                        pos: origin,
+                        click: false,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&str, Vec3)) {
     // A selected weapon's `WeaponChangeSound`, at its unit (card WSND,
     // re-weapon-sounds.md §7.1: every unit, no owner test).
     let equip = |class: usize, pos: Vec3, play: &mut dyn FnMut(&str, Vec3)| {
@@ -274,34 +352,23 @@ pub fn each(walk: &WalkSim, ears: Vec3, mut play: impl FnMut(&str, Vec3)) {
                 spawned(&walk.sim.units[unit.index as usize], &mut play);
             }
             // Pushed for a human only (§7.3).
-            Event::FireEmpty { unit } => {
-                if let Some(n) = &wc_of(*unit).empty_sound {
-                    play(n, walk.sim.units[unit.index as usize].soldier.pos);
+            Event::FireEmpty {
+                weapon_class, pos, ..
+            } if handles => {
+                if let Some(n) = &walk.sim.weapon_classes[*weapon_class as usize].empty_sound {
+                    play(n, *pos);
                 }
             }
             // The weapon that fired: a rider's shot is the seat gun's
-            // `FireSound` (card VSND, re-vehicle-sounds.md 0.9). Once per
-            // trigger pull, not per bolt (card SNDX, re-weapon-sounds.md
-            // 7.7): a shot after the pull's first starts it again only on a
-            // class with a `SalvoDelay` - a shotgun's 8 pellets are one
-            // sound. Salvos without a delay all leave in one update, so
-            // "the pull's first" is this tick's first of the unit's weapon.
+            // `FireSound` (card VSND, re-vehicle-sounds.md 0.9), a shotgun's
+            // 8 pellets are one sound ([`shot_sound`]).
             Event::Shot {
                 unit,
                 weapon_class,
                 origin,
                 ..
-            } => {
-                let wc = &walk.sim.weapon_classes[*weapon_class as usize];
-                let first = !fired.contains(&(*unit, *weapon_class));
-                if first {
-                    fired.push((*unit, *weapon_class));
-                }
-                if let Some(n) = wc
-                    .fire_sound
-                    .as_ref()
-                    .filter(|_| fire_sound_starts(first, wc))
-                {
+            } if handles || !human(walk, *unit) => {
+                if let Some(n) = shot_sound(walk, &mut fired, *unit, *weapon_class) {
                     play(n, *origin);
                 }
             }
@@ -1059,7 +1126,11 @@ mod tick_tests {
                 unit,
                 weapon_class: quiet,
             },
-            Event::FireEmpty { unit },
+            Event::FireEmpty {
+                unit,
+                weapon_class: walk.sim.units[unit.index as usize].weapon_class as u32,
+                pos: walk.sim.units[unit.index as usize].soldier.pos,
+            },
         ];
         let mut got = Vec::new();
         each(&walk, Vec3::ZERO, |n, pos| got.push((n.to_owned(), pos)));
@@ -1074,6 +1145,84 @@ mod tick_tests {
         for (g, w) in got.iter().zip(want) {
             assert_eq!((g.0.as_str(), g.1), w);
         }
+    }
+
+    /// The empty click is the take of the weapon that refused, at the place
+    /// the event names, on the handle a human's shots share: a class with no
+    /// `FireEmptySound` is silent, and a bot's shot stays off the handles.
+    #[test]
+    fn a_click_asks_its_weapons_own_take_on_the_shooters_handle() {
+        use crate::sounds::WeaponAsk;
+        use core::weapon::WeaponClass;
+        let mut walk = WalkSim::new(42, Vec3::ZERO, None);
+        let class = |walk: &mut WalkSim, empty: Option<&str>, fire: &str| {
+            let mut w = WeaponClass::bf1_rifle();
+            w.empty_sound = empty.map(str::to_owned);
+            w.fire_sound = Some(fire.into());
+            walk.sim.add_weapon_class(w) as u32
+        };
+        let ammo = class(&mut walk, Some("com_weap_inf_ammo_empty"), "a_fire");
+        let weapon = class(&mut walk, Some("com_weap_inf_weapon_empty"), "b_fire");
+        let silent = class(&mut walk, None, "c_fire");
+        let unit = walk.player;
+        let at = Vec3::new(1.0, 2.0, 3.0);
+        let click = |weapon_class| Event::FireEmpty {
+            unit,
+            weapon_class,
+            pos: at,
+        };
+        let shot = |unit, weapon_class| Event::Shot {
+            unit,
+            weapon_class,
+            origin: at,
+            dir: Vec3::NEG_Z,
+        };
+        walk.sim.events = vec![
+            click(ammo),
+            click(weapon),
+            click(silent),
+            shot(unit, silent),
+        ];
+        let mut asks = Vec::new();
+        weapon_asks(&walk, |a| asks.push(a));
+        let h = crate::classdb::fnv1a_lowercase;
+        let ask = |weapon_class, hash, click| WeaponAsk {
+            unit: unit.index,
+            weapon_class,
+            hash,
+            pos: at,
+            click,
+        };
+        assert_eq!(
+            asks,
+            [
+                ask(ammo, h("com_weap_inf_ammo_empty"), true),
+                ask(weapon, h("com_weap_inf_weapon_empty"), true),
+                ask(silent, h("c_fire"), false),
+            ]
+        );
+        let mut off = Vec::new();
+        each_off_handle(&walk, Vec3::ZERO, |n, _| off.push(n.to_owned()));
+        assert!(off.is_empty(), "{off:?}");
+        let mut all = Vec::new();
+        each(&walk, Vec3::ZERO, |n, pos| all.push((n.to_owned(), pos)));
+        assert_eq!(
+            all,
+            [
+                ("com_weap_inf_ammo_empty".to_owned(), at),
+                ("com_weap_inf_weapon_empty".to_owned(), at),
+                ("c_fire".to_owned(), at),
+            ]
+        );
+
+        walk.sim.units[unit.index as usize].is_player = false;
+        walk.sim.events = vec![shot(unit, silent)];
+        let mut asks = Vec::new();
+        weapon_asks(&walk, |a| asks.push(a));
+        assert!(asks.is_empty(), "{asks:?}");
+        let mut off = Vec::new();
+        each_off_handle(&walk, Vec3::ZERO, |n, _| off.push(n.to_owned()));
+        assert_eq!(off, ["c_fire"]);
     }
 
     /// Card VSND: a shot plays the `FireSound` of the weapon that fired -

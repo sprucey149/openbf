@@ -60,23 +60,6 @@ pub const TRANSITIONS: [[u8; 8]; STATES] = [
     [0, 0, 0, 0, 0, 0, 4, 0],
 ];
 
-pub const CLIP_NAMES: [Option<&str>; STATES] = [
-    Some("idle"),
-    Some("turnl"),
-    Some("turnr"),
-    Some("death01"),
-    None,
-    Some("idle_to_leftfoot"),
-    None,
-    Some("walk_leftfoot_rightfoot"),
-    Some("walk_rightfoot_leftfoot"),
-    Some("leftfoot_to_idle"),
-    Some("rightfoot_to_idle"),
-    Some("fold"),
-    Some("roll"),
-    Some("unfold"),
-];
-
 pub const CLIP_FRAMES: [u16; STATES] = [46, 9, 9, 81, 0, 17, 0, 17, 17, 24, 24, 31, 11, 101];
 
 pub const CLIP_HZ: f32 = 30.0;

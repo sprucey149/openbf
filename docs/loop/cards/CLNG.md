@@ -20,7 +20,4 @@ The cleanse rotation's `game` area (LAST_CLEANSE). Scope: `engine/crates/game` s
 
 ## Evidence
 
-## Acceptance
-Every gate PASS with nothing declared (behaviour-neutral: sweep, arena, sim hash, leak unmoved); `size_report.sh --check-map` exit 0 with 0 stale counts; `size_report.sh --strict` exit 0.
-
 ## Notes

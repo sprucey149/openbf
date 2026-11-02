@@ -30,12 +30,6 @@ walkers (its hover only reshuffles the round), and main has the fault: a crew is
   (main seeds 11, 29, 112, 126, 179, 219, 222, 280, 281, 326, 333, 422, 463, 465, 478; spots (158, 44), (-51, 18), (50, 124)).
 - Binaries: bin/main3 (main e85c91d), bin/fix3 (HJAM on e85c91d): reproduce with bin/fix3 60000 3 bf1_geo1.
 
-## Acceptance
-- Seed 3 and seed 184 on HJAM's binary (bin/fix3 plus this fix) end with an outcome; the cause traced first (why the
-  walkers wedge, and whether the PS2's pilot of a stuck command walker gets out - re-hover-ai / re-walker notes first).
-- BF1 Geonosis seeds 1-480: wedged crews (6000+ ticks without progress) at or under half of main's 16; rounds without an
-  outcome 0, with HJAM's change on.
-- 24 seeds x 32 maps not worse paired by seed; a test that fails without the fix.
 ## Outcome (2026-10-16 02:20, lane 1, LANDED 5e25eac)
 - Cause traced: the walkers were not wedged. The round was held by the CAPTURE rule: the port counted a seated rider in a
   post's region (vehicle 15's pilot in cp2 kept it contested); the PS2 does not (BF1 RAM, 73 / 73 post rows with a seated

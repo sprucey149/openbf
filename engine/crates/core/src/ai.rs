@@ -111,6 +111,7 @@ mod state;
 mod steer;
 pub mod tactic;
 pub mod team;
+pub(crate) mod think_memo;
 pub mod tokn;
 pub mod unseen;
 pub mod wake;

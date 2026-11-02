@@ -2,7 +2,7 @@
 //! Shared state, lookup, loop voices, mixing and rules remain in the parent sounds module.
 use super::{
     attenuation, decode_noted, ears_3d, mixer_pair, side, Cry, Handed, Listener, LoopRequest,
-    LoopSource, Refused, SoundLib, Start, Timer, CHATTER_KEY_MAX, LAYER_TIMERS,
+    LoopSource, Refused, SoundLib, Start, Timer, WeaponAsk, CHATTER_KEY_MAX, LAYER_TIMERS,
 };
 use crate::classdb::fnv1a_lowercase;
 use anyhow::{Context, Result};
@@ -469,6 +469,78 @@ impl SoundLib {
         );
         self.played += 1;
         shot
+    }
+
+    /// A tick's starts on a human's weapon handles (B1 +0xf4, B2 +0xd8), each
+    /// with the handle that holds it, if one does. A click stops everything
+    /// still sounding on its handle first, the last shot's tail and the click
+    /// before it, and only when it starts (`FUN_00355768` asks its gate
+    /// first). A `soundlayered` property holds no handle (`FUN_00355768` kind
+    /// 2, `FUN_0045ca08`), so it starts and nothing can cut it. A shot does
+    /// not cut the shots before it, though the PS2's does: that would change
+    /// how every gun sounds.
+    /// PROVISIONAL (ours), measure: the PS2's and the port's player fire
+    /// sounds compared by ear with one voice per handle.
+    pub fn weapon_voices(
+        &mut self,
+        asks: &[WeaponAsk],
+        ears: Vec3,
+    ) -> Vec<(Option<(u32, u32)>, Start)> {
+        let now = self.now;
+        self.weapon_handles.retain(|_, v| {
+            v.retain(|c| c.ends > now);
+            !v.is_empty()
+        });
+        let mut out: Vec<(Option<(u32, u32)>, Start)> = Vec::new();
+        for a in asks {
+            let key = (a.unit, a.weapon_class);
+            let held = self.find(a.hash).is_some_and(|(p, _)| p.layers.is_empty());
+            let mut starts = Vec::new();
+            self.start(a.hash, a.pos, ears, &mut starts);
+            if a.click && !starts.is_empty() {
+                self.weapon_handles.remove(&key);
+                // This tick's earlier starts on the handle are never heard.
+                out.retain(|(k, _)| *k != Some(key));
+            }
+            for s in starts {
+                if held {
+                    let pitch = (s.pitch * self.rate_mul).max(0.05);
+                    let secs = self.decoded(&s.path).map_or(0.0, |d| d.duration_secs());
+                    self.weapon_handles.entry(key).or_default().push(Cry {
+                        ends: now + secs / pitch,
+                        shot: None,
+                    });
+                }
+                out.push((held.then_some(key), s));
+            }
+        }
+        out
+    }
+
+    /// How many voices a human's weapon handle sounds now.
+    pub fn weapon_handle_voices(&self, unit: u32, weapon_class: u32) -> usize {
+        self.weapon_handles
+            .get(&(unit, weapon_class))
+            .map_or(0, |v| v.iter().filter(|c| c.ends > self.now).count())
+    }
+
+    /// [`SoundLib::weapon_voices`] through the mixer: a click's cut stops the
+    /// sounding takes.
+    pub fn play_weapon_voices(
+        &mut self,
+        audio: &mut audio::Audio,
+        asks: &[WeaponAsk],
+        listener: &Listener,
+    ) {
+        for (key, s) in self.weapon_voices(asks, listener.pos) {
+            let shot = self.mix_shot(audio, &s, listener);
+            let voice = key
+                .and_then(|k| self.weapon_handles.get_mut(&k))
+                .and_then(|v| v.iter_mut().find(|c| c.shot.is_none()));
+            if let Some(c) = voice {
+                c.shot = shot;
+            }
+        }
     }
 
     /// A tick's station ambient asks (card PWST, re-ambience-music §5.2):

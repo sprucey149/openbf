@@ -15,7 +15,7 @@
 #   - cargo target dirs under /tmp                — the /tmp user quota breaks the shell
 # DENIED ONLY IN LOOP SESSIONS (OPENBF_LOOP=1, set by scripts/autoloop.sh). Since 2026-09-14 the loop IS
 # the lead (the maintainer): its sessions land branches, rebake and regenerate goldens themselves
-# (engine/artifacts/briefs/OPUS_LOOP_PROMPT.md §3), so only these stay:
+# (engine/artifacts/briefs/v1/OPUS_LOOP_PROMPT.md §3), so only these stay:
 #   - a git merge without --ff-only               — main only ever fast-forwards
 #   - git checkout main / git switch main          — main stays checked out at the repo root
 #   - a shell WRITE to PLAN.md, HANDOFF-OPUS.md or analysis/ (a redirect targeting them, cp/mv/rm/sed -i/tee

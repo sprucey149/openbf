@@ -1760,10 +1760,8 @@ fn weapon_slots_match_the_disc_census() {
 /// Card GREN: the thermal detonator out of the baked class db is the PS2's
 /// (`analysis/re-grenades.md` §3.1, §4.2, §9 — the RAM rows): the cycle, the
 /// throw, the `Stick*` mask, the gravity, the fuse and the explosion; BF1's
-/// crack grenade sticks to vehicles and buildings. A BF1 class keeps its own
-/// cycle, speed, gravity and blast and is THROWN as BF2 throws (card GRNP,
-/// `Thrown::BF1_THROWS_AS_BF2`): the hand, BF2's wind-up, rest rule, fuse and
-/// stick mask.
+/// crack grenade sticks to vehicles and buildings. Each game keeps its own
+/// numbers, BF1's among them its 0.3 s wind-up, fire point, rest rule and fuse.
 #[test]
 fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
     let Some(dir) = classes_dir() else { return };
@@ -1773,9 +1771,9 @@ fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
             "bf1",
             "imp_weap_inf_thermaldetonator",
             1.4,
-            0.51,
-            0.6,
-            0x7fff_ffd8u32,
+            0.3,
+            0.9,
+            0x7fff_ff80u32,
             320.0,
         ),
         (
@@ -1798,13 +1796,18 @@ fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
         assert_eq!((w.rounds_per_clip, w.reload_time), (1, 0.01), "{game}");
         let t = w.thrown.expect("grenade keys");
         assert_eq!((t.shot_elevate, t.hide_on_fire), (0.21, true), "{game}");
-        assert_eq!(t.hand, Some(core::weapon::Thrown::BF2_HAND), "{game}");
+        let bf2 = game == "bf2";
+        assert_eq!(
+            t.hand,
+            bf2.then_some(core::weapon::Thrown::BF2_HAND),
+            "{game}: BF2 throws from the hand, BF1 from the fire point"
+        );
         let o = &w.ordnance;
         assert_eq!((o.velocity, o.life_span), (25.0, fuse), "{game}");
         let s = o.sticky.as_ref().expect("sticky");
         assert_eq!(s.gravity, -12.25, "{game}");
         assert_eq!(s.stick_mask, mask, "{game}: mask {:#x}", s.stick_mask);
-        assert!(s.bf2, "{game}: BF2's rest rule");
+        assert_eq!(s.bf2, bf2, "{game}: its own rest rule");
         let x = s.explosion.as_ref().expect("ExplosionExpire");
         assert_eq!(
             (x.damage, x.damage_inner, x.damage_outer),
@@ -1819,8 +1822,8 @@ fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
     let mask = crack.ordnance.sticky.unwrap().stick_mask;
     assert_eq!(
         mask & 0x8000_007f,
-        stick::VEHICLE | stick::BUILDING | stick::BUILDING_DEAD | stick::BUILDING_UNBUILT,
-        "the crack grenade (its own mask and BF2's thermal's): {mask:#x}"
+        stick::VEHICLE | stick::BUILDING | stick::BUILDING_DEAD,
+        "the crack grenade's own mask: {mask:#x}"
     );
     // A rifle is not thrown; a dispenser is not this card's.
     for w in ["imp_weap_inf_rifle", "imp_weap_inf_mine_dispenser"] {
@@ -1828,6 +1831,49 @@ fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
             .unwrap()
             .is_none());
     }
+}
+
+/// The maintainer's rule (2026-11-01): every class any BF1 mission fields
+/// throws BF1's own grenade by BF1's own numbers, and each row reads BF2's
+/// grenade HUD.
+#[test]
+fn every_class_a_bf1_mission_fields_throws_bf1s_grenade_under_bf2s_hud() {
+    let Some(dir) = classes_dir() else { return };
+    let db = load_classdb_all(&dir, "bf1");
+    let missions = game::assets::baked_root()
+        .parent()
+        .unwrap()
+        .join("missions");
+    let Ok(files) = std::fs::read_dir(missions) else {
+        return;
+    };
+    let mut classes = std::collections::BTreeSet::new();
+    for file in files {
+        let mission = MissionDef::load(&file.unwrap().path()).unwrap();
+        if mission.source_game == "bf1" {
+            classes.extend(mission.teams.into_iter().flat_map(|t| t.classes));
+        }
+    }
+    assert!(classes.len() > 30, "{classes:?}");
+    let mut grenades = 0;
+    for (class, ..) in &classes {
+        let roster = ClassRoster::build(&db, class, 0, None).unwrap();
+        for h in &roster.held {
+            let Some(t) = h.weapon.thrown.filter(|_| !h.weapon.dispenses()) else {
+                continue;
+            };
+            let what = format!("{class} {}", h.weapon.name);
+            grenades += 1;
+            assert_eq!(h.channel, 1, "{what}");
+            assert_eq!(t.hand, None, "{what}");
+            assert_eq!(h.weapon.initial_salvo_delay, 0.3, "{what}");
+            assert!(!h.weapon.offhand_weapon, "{what}");
+            assert!(!h.weapon.ordnance.sticky.as_ref().unwrap().bf2, "{what}");
+            assert_eq!(h.hud.key, game::roster::BF2_GRENADE_HUD_KEY, "{what}");
+            assert!(!h.hud.bf2, "{what}");
+        }
+    }
+    assert!(grenades > 25, "{grenades}");
 }
 
 /// Card GREN: what each fielded class holds besides its primary — the

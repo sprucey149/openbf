@@ -26,19 +26,3 @@ stepping: its feet never plant and its turn steps are invisible.
   pitch/roll quaternions go on bone 0x16e27226.
 - The VBAKE note (card VWLK, bake/src/vehicle.rs module doc): each walker model has a same-named skel.
   rep_walk_atte carries MTRL 0x07 / 0x10003 (the 0x02 alpha test) that bake::soldier::segment_blends refuses.
-
-## Acceptance
-- bake: the skinned GLB (skel + weights) for the walker-family classes, with their banks' clips. The alpha-test
-  pass is decided for rep_walk_atte (record the call).
-- game: the walker is drawn skinned from WALK's anim state (clip index, direction, time; interpolated), with:
-  - the leftup/rightup layer blend;
-  - §10's root yaw and the pitch/roll bone.
-- Viewed in the vehicle gallery and in a walkabout sheet with a walking AT-ST, whose feet plant and whose idle turn
-  steps show.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — walkers drawn with moving legs (HOT1's AT-AT / AT-ST). Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
-
-## Planner note (2026-09-30 13:30)
-Value 4 → 5: M2's top card. HOT1 is a showcase map, and an AT-AT / AT-ST that slides rigid in its bind pose is the most
-visible vehicle defect left in a 5-minute alpha video. WALK is done, so nothing blocks it.

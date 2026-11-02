@@ -53,28 +53,6 @@ The maintainer's rule of 2026-10-11: the fix was good and it brought up a bug th
   (t +0.9). By part of the rule (`wf/K2/`): the 0.3 carries everything; the range factor and the clamp move nothing
   resolved between bots.
 
-## What to do
-1. After CLSE2 (it changes the radius under the vector): re-take both tables on that main with the observer
-   (`lead_tmp/clse/tools/observer_patch.py`; `lead_tmp/audit-clse/tools/sw.sh`, `contact_spells.py`).
-2. The PS2's far bins are thin (34 and 14 credited falls): two or three more captures a map with
-   `lead_tmp/clse/tools/run_w.sh`, the player parked away from the fights as before.
-3. Split the bins beyond 20 m per weapon on both sides: firing share, shots a second, hp and falls per shot, and the
-   share of that aimer time in a fight (the PS2's `hst`, the port's `beh`). Candidates, each behind its own switch in
-   ONE binary (null = main byte for byte): the fire discipline far off (the PS2's rifle fires 1.5 times a second
-   there, the port's 2.3); a PS2 bot with a far target mostly walks on (its aim order is up outside a fight) and
-   shoots on the move (median 3.5 m/s; the port's stand) - the weapon's moving spread and 17.2's perpendicular draw
-   at full speed; the sniper rifles' share of the port's far aimer time (18 % on Kamino); CLSE2's own terms.
-4. Build the named cause if it is a PS2 rule in `analysis/` (else RE it first). Do NOT cure it by weakening the
-   0.3: with the 0.3 off kills a minute fall below the parent's and team kills rise to 2.7 %.
-
-## Acceptance
-- A table PS2 | port per weapon for 20-30 m and beyond 30 m (firing share, shots a second, hp per shot, share in a
-  fight) on Kamino and Polis Massa, in the report; the cause named with its share of the 2.2-3.2 x.
-- Then a landed build with: damage per aimer-second beyond 30 m at 0.67-1.5 x the PS2's on both maps (today 2.30 and
-  3.17) with no bin under 30 m farther from the PS2 than on its parent; deaths with an enemy inside 10 m on the 17
-  BF2 maps at 30 % or more (`contact_spells.py`; today 25.6, before CLSE 30.3; Kamino 27 or more); contact20 not below
-  its parent's; 256 of 256 rounds; team kills not above its parent's share. Or the numbers that say why not.
-
 ## Measured 2026-10-12 (lane 2; report `reports/20261012_1620_card_CLSE4.md`; `analysis/re-soldier-ai.md` 20, docs 5fbbbd4)
 Evidence: `engine/artifacts/lead_tmp/clse4/` (README.md). Three PS2 captures a map (CLSE's + two new), 8 port seeds
 on main 7d206bc with the observer (null = main byte for byte).
@@ -102,23 +80,6 @@ on main 7d206bc with the observer (null = main byte for byte).
   33.6 -> 30.5, 112 of 112 (the range test alone: contact -0.50, t -2.0).
 - **What the two rules do NOT reach** (card CLSE5): the 30 % bar (28.5), Polis Massa's ratio, and the bins inside
   20 m fall further under the PS2 (Kamino 0-10 m x 0.68 -> 0.55) because both rules cut fire at every range.
-
-## Build (this card, next session) - the two rules, per class, both games
-1. `weapon.rs`: `WeaponClass` gains the three Barrage keys (hashes 0x1aa5ec35 / 0x04bae44b / 0xffcc84b2, defaults
-   3 / 6 / 2.0) read in `from_props`; `gunner_foot.rs`: `burst_len` / `pause_ticks` take the class and the game's
-   rules (BF2's draw and skill pause, BF1's inclusive draw and flat pause), the pause counted from the burst's last
-   shot; a seat's weapon the same (flyers then keep their authored 0.5 s). `core/src/ai.rs`'s three placeholders go
-   (RLOOP lists ai.rs: leave the constants if its branch is parked, and say so).
-2. `gunner_foot.rs` `in_reach` for `Armed::Hand`: strictly under `wc.ai_range[2]` as well (3-D eye to the target's
-   aim point). Not built here: the x 2 at a snipe stand, the meter gate.
-3. Tests, each mutation-checked: a rifle bot's bursts are 3..5 at the top level and 3 at the lowest with the pause
-   (1.5 - 0.8 s) x 2.0 s; a BF1 bot's are 3..6 with 2.0 s; a class that writes the keys uses them through the baked
-   class db (`com_weap_veh_fly_chaingun` 10 / 20 / 0.5); a pistol bot at 23 m fires and at 25 m does not.
-4. Re-run `clse4/tools/sw.sh` + `wsplit2_port.py` / `wtable.py` / `contact_spells.py` on the branch binary.
-**Acceptance of the build:** the tests; Kamino beyond 30 m at 0.67-1.5 x the PS2's (prototype 1.24); deaths with an
-enemy inside 10 m on the 17 BF2 maps not under main's (prototype +2.2 points) and contact20 not under main's, per-seed
-paired; 256 of 256 rounds; the rifle's burst lengths and pauses on Kamino beside the PS2's (`bursts.py`). The bars it
-does not reach (30 %, Polis Massa, the near bins) are card CLSE5's, with the numbers above.
 
 ## Notes
 - 2026-10-12 audit CLSE (lane 2; report `reports/20261012_1104_audit_CLSE.md`). Filed. `deps: CLSE2` because that

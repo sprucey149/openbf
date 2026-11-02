@@ -1759,6 +1759,8 @@ mod tests {
     mod get_out_tests;
     #[path = "human_wait_tests.rs"]
     mod human_wait_tests;
+    #[path = "order_scene.rs"]
+    mod order_scene;
     #[path = "order_wait_tests.rs"]
     mod order_wait_tests;
     #[path = "pile_in_tests.rs"]

@@ -18,10 +18,6 @@ public_issue: https://github.com/sprucey149/openbf/issues/19
 ## Why
 The maintainer (INBOX 2026-10-21 17:50 item 4b). One number per class, per class not per side.
 
-## Acceptance
-- A test: kills as a class in a headless match raise that class's count, and the count survives a profile save / load;
-  an old profile without the field loads with zeros.
-
 ## Implementation (2026-10-27)
 - The user authorized proceeding with the issue's stated scope in this session. #13/#14 implementation is already integrated by PR #21 and 202b57e; Settings, bindings and controls UI are unchanged.
 - `Career::class_kills` is a defaulted RON map keyed by the roster's existing lowercase authored class name, independent of a battle's team/class indices. An absent entry means zero. All roster soldier classes accumulate counts, so recording requires no new unlock classification, alias rules or thresholds.

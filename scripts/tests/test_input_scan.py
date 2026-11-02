@@ -5,6 +5,7 @@ import itertools
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -423,7 +424,7 @@ class Matrix(unittest.TestCase):
                 root = Path(temp) / 'iso'
                 root.mkdir()
                 self.build(root, bf1, bf2, dlc, unknown)
-                plan = scan.scan([root], extracted=str(Path(temp) / 'extracted'), xbox_supported=xbox_on)
+                plan = scan.scan([root], extracted=str(Path(temp) / 'extracted'), xbox_supported=xbox_on, pc_primary=False)
                 sources1, sources2 = set(bf1.split('+')), set(bf2.split('+'))
                 console1 = 'ps2' in sources1 or ('xbox' in sources1 and xbox_on)
                 console2 = 'ps2' in sources2 or ('xbox' in sources2 and xbox_on)
@@ -469,6 +470,28 @@ class Matrix(unittest.TestCase):
                     self.assertEqual(row_for(plan, root / 'mystery.bin')['status'], 'refused')
         self.assertEqual(count, 4 * 7 * 2 * 2 * 2)
 
+    def test_every_combination_once_pc_bf1_can_stand_alone(self):
+        """What the switch would accept, so turning it on is not the first time this runs."""
+        for bf1, bf2, xbox_on in itertools.product(self.BF1, self.BF2, (False, True)):
+            with self.subTest(bf1=bf1, bf2=bf2, xbox=xbox_on), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp) / 'iso'
+                root.mkdir()
+                self.build(root, bf1, bf2, False, False)
+                plan = scan.scan([root], extracted=str(Path(temp) / 'extracted'), xbox_supported=xbox_on, pc_primary=True)
+                sources1, sources2 = set(bf1.split('+')), set(bf2.split('+'))
+                console2 = 'ps2' in sources2 or ('xbox' in sources2 and xbox_on)
+                primary1 = 'ps2' in sources1 or ('xbox' in sources1 and xbox_on) or 'pc' in sources1
+                self.assertEqual(not plan['refusals'], console2 and primary1, plan['refusals'])
+                if plan['refusals']:
+                    continue
+                kind = plan['games']['bf1']['gameplay']['kind']
+                self.assertEqual(kind, 'ps2-disc' if 'ps2' in sources1 else 'xbox-disc' if 'xbox' in sources1 and xbox_on else 'pc-install')
+                self.assertEqual(plan['games']['bf2']['gameplay']['kind'], 'ps2-disc' if 'ps2' in sources2 else 'xbox-disc')
+                env = scan.bake_env(plan)
+                self.assertEqual('OPENBF_BF1_TREE' in env, kind != 'ps2-disc')
+                # A PC install is the data or a donor, never both.
+                self.assertEqual('PC1' in env, 'pc' in sources1 and kind != 'pc-install')
+
 
 class Messages(unittest.TestCase):
     """The exact words a person acts on."""
@@ -479,6 +502,9 @@ class Messages(unittest.TestCase):
         self.root.mkdir()
 
     def refusals(self, **options):
+        # These read the refusal texts of each switch position, whichever way the switches are set today.
+        options.setdefault('xbox_supported', False)
+        options.setdefault('pc_primary', False)
         return scan.scan([self.root], **options)['refusals']
 
     def test_nothing_at_all(self):
@@ -515,6 +541,29 @@ class Messages(unittest.TestCase):
             f'BF1: found the PC install {pc}, but PC BF1 assets currently also need the BF1 PS2 gameplay reference: the '
             f'PC mission, class and collision data cannot replace it. Add a PS2 BF1 disc image to {self.root}.'])
         self.assertEqual(self.refusals(pc_primary=True), [])
+
+    def test_no_correction_table_names_a_private_file(self):
+        folder = Path(scan.__file__).parent.parent / 'engine/crates/manifest/data/gameplay/corrections-v1'
+        for path in folder.glob('*.json'):
+            self.assertNotIn('private_file', path.read_text(), path.name)
+
+    def test_a_source_alone_leaves_out_the_maps_it_cannot_draw(self):
+        iso = xbox_image(self.root / 'x1', 'bf1')
+        xbox_image(self.root / 'x2', 'bf2')
+        plan = scan.scan([self.root], extracted=str(self.root / 'none'), xbox_supported=True)
+        env = scan.bake_env(plan)
+        self.assertEqual(plan['refusals'], [])
+        self.assertEqual(env['OPENBF_BF1_WITHHELD'], ' '.join(scan.WITHHELD_MAPS['xbox', 'bf1']))
+        self.assertEqual(env['OPENBF_BF2_WITHHELD'], ' '.join(scan.WITHHELD_MAPS['xbox', 'bf2']))
+        self.assertTrue(any('maps left out' in line and 'RHN/RHN1' in line for line in scan.summary_lines(plan)), iso)
+
+    def test_the_ps2_disc_keeps_every_map(self):
+        iso_image(self.root / 'a', 'bf1')
+        iso_image(self.root / 'b', 'bf2')
+        xbox_image(self.root / 'x', 'bf1')
+        plan = scan.scan([self.root], extracted=str(self.root / 'none'), xbox_supported=True)
+        self.assertFalse([name for name in scan.bake_env(plan) if name.endswith('_WITHHELD')])
+        self.assertFalse([line for line in scan.summary_lines(plan) if 'maps left out' in line])
 
     def test_pc_primary_never_stands_in_for_the_console_bf2(self):
         iso_image(self.root / 'a', 'bf1')
@@ -621,18 +670,21 @@ class Pack(unittest.TestCase):
         xbox_image(self.iso / 'c', 'bf2')
         dlc_folder(self.iso / 'd')
         pc_install(self.iso / 'e', 'bf2')
-        code, printed = self.scan_only()
+        with mock.patch.object(scan, 'XBOX_SUPPORTED', False):
+            code, printed = self.scan_only()
         self.assertIsNone(code)
         for line in (f"BF1 gameplay: PS2 disc {self.iso / 'a'}", f"BF2 gameplay: PS2 disc {self.iso / 'b'}",
                      f"BF2 texture donors: PC install {self.iso / 'e/GameData/Data/_LVL_PC'}",
-                     f"DLC: {self.iso / 'd'} (Kit Fisto and Asajj Ventress used)",
+                     f"DLC: {self.iso / 'd'} (Kit Fisto and Asajj Ventress used, off until the DLC Heroes row in Hero Options is turned on)",
                      f"not supported yet: {self.iso / 'c'} - Xbox Star Wars: Battlefront II disc (trimmed); recognized, not read"):
             self.assertIn(line, printed)
         self.assertEqual(self.out.with_name('game.inputs.txt').read_text().strip(), printed[:printed.index('Input summary')].strip())
 
-    def full_run(self, xbox_on, xbox_only=False):
+    def full_run(self, xbox_on, xbox_only=False, before=None):
         """pack.main end to end with the tools stubbed: what it runs and what it tells rebake.sh."""
         root = self.top
+        if before:
+            before(root)
         engine = root / 'engine'
         baked, missions = engine / 'assets_baked', engine / 'missions'
         missions.mkdir(parents=True)
@@ -657,6 +709,7 @@ class Pack(unittest.TestCase):
                 tree(Path(command[3]) / 'DATA/_LVL_PS2', game, 'ps2')
                 for library in pack.LUA[game].values():
                     write(pack.ci_path(Path(command[3]) / 'DATA/_LVL_PS2', library), b'x')
+                write(Path(command[3]) / pack.GAME_ELF[game], b'elf')
             if command[1:2] == [scan.XBOX_EXTRACT]:
                 tree(Path(command[3]) / 'Data/_LVL_XBOX', 'bf2', 'xbox')
                 for library in pack.LUA['bf2'].values():
@@ -674,11 +727,65 @@ class Pack(unittest.TestCase):
                 mock.patch.object(pack, 'run', side_effect=run), mock.patch.object(pack, 'find_bash', return_value='bash'), \
                 mock.patch.object(pack, 'stale', return_value=None), mock.patch.object(pack, 'inputs_hash', return_value='hash'), \
                 mock.patch.object(pack, 'missing_music', return_value=[]), mock.patch.object(pack.shutil, 'which', return_value=None), \
-                mock.patch.object(pack.subprocess, 'run', return_value=mock.Mock(stdout='tracked')), \
+                mock.patch.object(pack.subprocess, 'run', side_effect=self.tool), \
                 mock.patch.object(scan, 'XBOX_SUPPORTED', xbox_on), mock.patch.object(pack.os, 'environ', dict(os.environ)), \
                 contextlib.redirect_stdout(io.StringIO()):
             pack.main()
         return calls, envs[-1], ps2, xbox
+
+    def tool(self, command, **kwargs):
+        """git and the foliage check, as pack.py runs them directly."""
+        self.foliage_checks = getattr(self, 'foliage_checks', [])
+        if 'check-foliage' in command:
+            self.foliage_checks.append(command)
+        return mock.Mock(stdout=getattr(self, 'tool_output', 'tracked'), stderr=getattr(self, 'tool_error', ''),
+                         returncode=getattr(self, 'tool_code', 0))
+
+    def old_extraction(self, root, elf=False):
+        """A tree extracted before the executable came along, or with it."""
+        for game in pack.LUA:
+            data = root / 'extracted' / game / 'lvl/DATA/_LVL_PS2'
+            tree(data, game, 'ps2')
+            for library in pack.LUA[game].values():
+                write(pack.ci_path(data, library), b'x')
+            if elf:
+                write(data.parent.parent / pack.GAME_ELF[game], b'elf')
+
+    def test_an_extraction_without_the_executable_is_finished_from_the_disc(self):
+        calls, _, _, _ = self.full_run(False, before=self.old_extraction)
+        self.assertEqual(sorted(Path(call[3]).parent.name for call in calls if call[1:2] == ['extract-iso']), ['bf1', 'bf2'])
+        for game in pack.LUA:
+            self.assertTrue((self.top / 'extracted' / game / 'lvl' / pack.GAME_ELF[game]).is_file())
+
+    def test_a_whole_extraction_is_left_alone(self):
+        calls, _, _, _ = self.full_run(False, before=lambda root: self.old_extraction(root, elf=True))
+        self.assertFalse([call for call in calls if call[1:2] == ['extract-iso']])
+
+    def test_every_build_checks_its_foliage_and_lost_foliage_stops_it(self):
+        self.full_run(False)
+        self.assertEqual(len(self.foliage_checks), 1)
+        self.assertNotIn('--warn', self.foliage_checks[0])
+        self.tool_code, self.tool_error = 1, '14 map(s) lost their terrain foliage.'
+        with self.assertRaises(SystemExit) as stop:
+            self.top = self.top / 'again'
+            self.top.mkdir()
+            self.iso = self.top / 'iso'
+            self.iso.mkdir()
+            self.full_run(False)
+        self.assertIn('lost their terrain foliage', str(stop.exception))
+
+    def test_a_tree_that_is_not_the_ps2s_turns_lost_foliage_into_a_summary_warning(self):
+        self.tool_output = 'foliage: 0 instances\nWARNING: foliage lost on bf2_mus1: foliage_grass 0 of 1\n'
+        self.full_run(True, xbox_only=True)
+        self.assertIn('--warn', self.foliage_checks[0])
+        report = json.loads(Path(str(self.out) + '.sources.json').read_text())
+        self.assertEqual(report['warnings'], ['foliage lost on bf2_mus1: foliage_grass 0 of 1'])
+
+    def test_a_game_on_a_ps2_tree_beside_one_that_is_not_still_owes_its_foliage(self):
+        plan = dict(games=dict(bf1=dict(gameplay=dict(kind='ps2-disc')), bf2=dict(gameplay=dict(kind='xbox-disc'))))
+        with mock.patch.object(pack.subprocess, 'run', side_effect=self.tool), contextlib.redirect_stdout(io.StringIO()):
+            pack.check_foliage('bake', plan)
+        self.assertEqual(self.foliage_checks[0], ['bake', 'check-foliage', pack.BAKED, '--warn', 'bf2'])
 
     def test_xbox_stays_unread_until_the_switch(self):
         calls, env, ps2, xbox = self.full_run(False)
@@ -717,11 +824,13 @@ class Pack(unittest.TestCase):
 
 class RebakeCase(unittest.TestCase):
     """The real rebake.sh with a stub bake and cargo: which arguments each bake gets."""
+    ROOT_NAME = ''
+
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.root = root = Path(directory.name)
-        (root / 'scripts').mkdir()
+        self.root = root = Path(directory.name) / self.ROOT_NAME
+        (root / 'scripts').mkdir(parents=True)
         for name in ('rebake.sh', 'console_input.py', 'input_scan.py', 'dlc_inputs.py', 'bake_dlc.py'):
             shutil.copyfile(ROOT / 'scripts' / name, root / 'scripts' / name)
         (root / 'engine').mkdir()
@@ -754,6 +863,27 @@ class RebakeCase(unittest.TestCase):
         write(tree_root / 'mus/mus1.lvl')
         for side in ('all', 'imp', 'rep', 'cis'):
             write(tree_root / f'side/{side}.lvl')
+
+
+class RebakeWithheld(RebakeCase):
+    def test_a_left_out_map_is_not_baked_and_an_earlier_copy_goes(self):
+        stale = self.root / 'out/bf1_bes2/manifest.ron'
+        write(stale)
+        kept = self.root / 'out/bf1_bes1/manifest.ron'
+        write(kept)
+        _, calls = self.rebake('maps', OPENBF_BF1_MAPS='BES/BES1 BES/BES2', OPENBF_BF1_WITHHELD='BES/BES2')
+        self.assertFalse(stale.exists())
+        self.assertTrue(any(' ' + str(self.root / 'out/bf1_bes1') in call for call in calls), calls)
+        self.assertFalse([call for call in calls if 'bes2' in call.lower()])
+
+    def test_a_link_to_other_assets_keeps_its_maps(self):
+        other = self.root / 'other'
+        stale = other / 'bf1_bes2/manifest.ron'
+        write(stale)
+        self.env['REBAKE_OUT'] = str(self.root / 'link')
+        (self.root / 'link').symlink_to(other)
+        self.rebake('maps', OPENBF_BF1_MAPS='BES/BES1', OPENBF_BF1_WITHHELD='BES/BES2')
+        self.assertTrue(stale.exists())
 
 
 class RebakeDlc(RebakeCase):
@@ -1058,6 +1188,19 @@ class ReviewFindingsRebake(RebakeCase):
         _, calls = self.rebake('maps')
         self.assertTrue([line for line in calls if line.endswith(f'{lvl}/mus/mus1.lvl')], calls)
 
+    def test_pc_bf1_primary_reaches_the_real_bake_recipe(self):
+        install = self.root / 'PC_swbf1_exe/Classic'
+        lvl = tree(install / 'GameData/Data/_LVL_PC', 'bf1', 'pc')
+        windows_program(install / 'Battlefront.exe')
+        self.donors(lvl)
+        shutil.rmtree(self.root / 'extracted/bf1')
+        # The scan's gate is off (test_pc_primary_stays_off_...): this is the recipe once it is on.
+        _, calls = self.rebake('maps', OPENBF_INPUTS_CHOSEN='1', OPENBF_BF1_TREE=str(lvl))
+        bf1 = [line for line in calls if line.startswith('map ') and 'BES1' in line.upper()]
+        self.assertEqual(len(bf1), 1)
+        self.assertIn(str(lvl), bf1[0])
+        self.assertNotIn('_LVL_PS2/BES', bf1[0])
+
     def test_first_person_weapons_take_their_sides_donors(self):
         lvl = self.default_install()
         xbox1 = self.root / 'extracted/xbox/bf1/Data/_LVL_XBOX'
@@ -1082,6 +1225,109 @@ class ReviewFindingsRebake(RebakeCase):
         self.assertFalse(self.log.exists() and [line for line in self.log.read_text().splitlines() if line.startswith('shell ')])
 
 
+class RebakeOnAnyMachine(RebakeCase):
+    ROOT_NAME = 'a checkout (with spaces)'
+
+    def run_group(self, *groups, **env):
+        return self.rebake(*groups, **env)
+
+    def test_a_folder_with_spaces_keeps_each_sound_folder_one_argument(self):
+        for name in ('tat1', 'bf2_mus1'):
+            (self.root / 'out' / name / 'sounds').mkdir(parents=True)
+        bake = self.root / 'target/release/bake'
+        bake.write_text('#!/bin/sh\nif [ "$1" = sound-names ]; then for a; do printf "%s\\n" "$a"; done > "$BAKE_LOG.args"; fi\n')
+        self.run_group('sounds')
+        out = self.root / 'out'
+        self.assertEqual(Path(str(self.log) + '.args').read_text().splitlines()[3:], [str(out / 'bf2_mus1'), str(out / 'tat1')])
+
+    def store_stand_in(self):
+        """A `python3` that runs nothing, as the Store's alias on a fresh Windows."""
+        stub = self.root / 'bin/python3'
+        stub.write_text('#!/bin/sh\necho "Python was not found; run without arguments to install from the Microsoft Store" >&2\nexit 9009\n')
+        stub.chmod(0o755)
+
+    def test_the_python_pack_passes_is_the_one_it_runs(self):
+        self.store_stand_in()
+        pc = pc_install(self.root / 'mine pc', 'bf1')
+        _, calls = self.run_group('tat1', OPENBF_INPUTS_CHOSEN='1', OPENBF_PYTHON=sys.executable, PC1=str(pc))
+        self.assertTrue([line for line in calls if line.startswith('map ')], calls)
+
+    def test_by_hand_a_python_that_runs_nothing_is_passed_over(self):
+        self.store_stand_in()
+        real = self.root / 'bin/python'
+        real.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+        real.chmod(0o755)
+        result, _ = self.run_group('tat1')
+        self.assertIn('Gameplay data: BF1=PS2 BF2=PS2', result.stdout)
+
+    def test_a_tree_with_lowercase_names_reaches_the_first_person_bake(self):
+        lower = self.root / 'lowercase'
+        write(lower / 'core.lvl')
+        write(lower / 'fpm/all/alltroop.lvl')
+        write(lower / 'common/eng/common.lvl')
+        result, calls = self.run_group('side', OPENBF_BF1_TREE=str(lower))
+        fpm = [line for line in calls if line.startswith('fpm ')]
+        self.assertIn(str(lower / 'fpm/all/alltroop.lvl'), fpm[0], fpm)
+        self.assertIn(f'Gameplay data: BF1={lower} BF2=PS2', result.stdout)
+
+    def test_a_python_2_is_not_taken_for_python_3(self):
+        self.store_stand_in()
+        old = self.root / 'bin/python'
+        old.write_text('#!/bin/sh\ncase "$2" in *version_info*) exit 1 ;; esac\nexit 0\n')
+        old.chmod(0o755)
+        env = {**self.env, 'PATH': str(self.root / 'bin') + os.pathsep + '/bin_none'}
+        bash = shutil.which('bash')
+        result = subprocess.run([bash, str(self.root / 'scripts/rebake.sh'), 'tat1'], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+        self.assertIn('no Python 3 found', result.stderr)
+
+    def test_every_lvl_of_a_lowercase_tree_reaches_the_bake(self):
+        """The bake opens the path it is given, and on Linux FPM/ is not fpm/: one literal path stops the whole build."""
+        bf1, bf2 = self.root / 'lower1', self.root / 'lower2'
+        for root in (bf1, bf2):
+            for name in ('core.lvl', 'ingame.lvl', 'shell.lvl', 'common/eng/common.lvl', 'fpm/all/alltroop.lvl',
+                         *(f'side/{side}.lvl' for side in ('all', 'imp', 'rep', 'cis', 'gun', 'des', 'ewk', 'gam', 'geo', 'tur', 'wok'))):
+                write(root / name)
+        bake = self.root / 'target/release/bake'
+        bake.write_text("""#!/bin/sh
+for arg in "$@"; do
+  old_ifs=$IFS; IFS=,
+  for one in $arg; do
+    case "$one" in
+      *.lvl|*.LVL) [ -e "$one" ] || printf '%s\\n' "$one" >> "$BAKE_LOG.missing" ;;
+    esac
+  done
+  IFS=$old_ifs
+done
+for one in "$BF1_ANIMS" "$BF2_ANIMS"; do
+  [ -z "$one" ] || [ -e "$one" ] || printf '%s\\n' "$one" >> "$BAKE_LOG.missing"
+done
+printf '%s\\n' "$*" >> "$BAKE_LOG"
+""")
+        _, calls = self.run_group('side', OPENBF_BF1_TREE=str(bf1), OPENBF_BF2_TREE=str(bf2))
+        self.assertTrue([line for line in calls if line.startswith('soldier ')], calls)
+        self.assertTrue([line for line in calls if line.startswith('fpm ')], calls)
+        missing = Path(str(self.log) + '.missing')
+        self.assertEqual(sorted(set(missing.read_text().splitlines())) if missing.exists() else [], [])
+
+    def test_the_summary_names_the_donors_it_read(self):
+        xbox = self.root / 'xbox'
+        xbox.mkdir()
+        result, _ = self.run_group('tat1', OPENBF_INPUTS_CHOSEN='1', XB2=str(xbox))
+        self.assertIn(f'Xbox BF2={xbox}', result.stdout)
+        self.assertNotIn('PS2-only', result.stdout)
+
+    def test_nothing_in_it_needs_a_newer_bash_or_gnu_tools(self):
+        """macOS ships bash 3.2 and BSD tools. Bash before 4.4 calls an empty array unbound under `set -u`."""
+        text = (ROOT / 'scripts/rebake.sh').read_text()
+        unguarded = [line for line in text.splitlines()
+                     if re.search(r'"\$\{\w+\[@\]\}"', re.sub(r'\$\{(\w+)\[@\]\+"\$\{\1\[@\]\}"\}', '', line))]
+        self.assertEqual(unguarded, [])
+        for needs_more in ('mapfile', 'readarray', 'declare -A', 'xargs -r', 'readlink -f', 'sed -i', 'sha256sum', 'paste -sd,)'):
+            self.assertNotIn(needs_more, text)
+        self.assertIsNone(re.search(r'\$\{\w+(,,|\^\^)\}', text))
+
+
 class ReviewFindingsReport(unittest.TestCase):
     def test_the_report_never_claims_an_install_the_plan_did_not_choose(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1090,12 +1336,88 @@ class ReviewFindingsReport(unittest.TestCase):
             pc = root / 'PC_swbf2_exe/Star Wars Battlefront II Classic/GameData/data/_lvl_pc'
             write(pc / 'side/rep.lvl')
             plan = dict(found=[], games={})
-            report = pack.source_report(root, root / 'baked', root / 'missions', {'bf1': None, 'bf2': None},
-                                        full_bake=True, pc_roots={}, plan=plan)
-            self.assertEqual(report['pc_libraries_read'], [])
-            row = next(row for row in report['inputs'] if row['path'] == str(pc))
-            self.assertEqual(row['status'], 'unused')
+            report = pack.source_report(root, root / 'baked', root / 'missions', {'bf1': None, 'bf2': None}, plan,
+                                        rebaked='all', pc_roots={})
+            self.assertFalse([row for row in report['inputs'] if row['path'] == str(pc)])
+
+    def test_a_donor_read_from_elsewhere_is_not_called_unused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write(root / 'scripts/rebake.sh', b'')
+            write(root / 'PC_swbf2_exe/Star Wars Battlefront II Classic/GameData/data/_lvl_pc/side/rep.lvl')
+            write(root / 'extracted/xbox_bf2/common.lvl')
+            pc, xbox = root / 'mine/bf2', root / 'mine/xbox.iso'
+            write(pc / 'side/rep.lvl')
+            write(xbox)
+            plan = dict(games={}, found=[
+                dict(path=str(pc), kind='pc-install', game='bf2', status='used', reason='texture donor'),
+                dict(path=str(xbox), kind='xbox-disc', game='bf2', status='used', reason='texture donor')])
+            report = pack.source_report(root, root / 'baked', root / 'missions', {'bf1': None, 'bf2': None}, plan,
+                                        rebaked='all', pc_roots={'bf2': str(pc)})
+            rows = report['inputs']
+            self.assertEqual([row['status'] for row in rows if row['path'] == str(pc)], ['used'])
+            self.assertEqual([row['status'] for row in rows if row['path'] == str(xbox)], ['used'])
+            self.assertFalse([row for row in rows if 'optional' in row['label']])
+
+    def report_for(self, root, rebaked, gameplay=None):
+        pc = root / 'pc'
+        pc.mkdir(exist_ok=True)
+        games = {'bf1': dict(gameplay=dict(kind='ps2-disc', path=str(root / 'a.iso'))), 'bf2': dict(gameplay=gameplay or dict(kind='ps2-disc', path=str(root / 'b.iso')))}
+        images = {'bf1': root / 'a.iso', 'bf2': None if gameplay else root / 'b.iso'}
+        return pack.source_report(root, root / 'baked', root / 'missions', images, dict(games=games, found=[]),
+                                  ('bf1', 'bf2'), (), rebaked, pc_roots={'bf1': str(pc)})
+
+    def test_a_donor_behind_a_cached_bake_is_in_the_build_and_says_so(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rows = {row['label']: row for row in self.report_for(Path(directory), None)['inputs']}
+            self.assertEqual(rows['bf1 PC visual input']['status'], 'cached')
+            self.assertIn('made with it', rows['bf1 PC visual input']['reason'])
+
+    def test_a_partial_rebake_says_what_it_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sides = {row['label']: row for row in self.report_for(root, ['side'])['inputs']}['bf1 PC visual input']
+            self.assertEqual(sides['status'], 'used')
+            self.assertIn('earlier run', sides['reason'])
+            sounds = {row['label']: row for row in self.report_for(root, ['sounds', 'global-sound'])['inputs']}['bf1 PC visual input']
+            self.assertEqual(sounds['status'], 'cached')
+
+    def test_gameplay_data_that_is_not_the_ps2s_is_not_called_ps2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = root / 'baked/bf2_mus1/manifest.ron'
+            write(manifest, b'(source_game: "bf2", textures: [], texture_tiers: [], texture_tier2: [])')
+            xbox = root / 'xbox/Data/_LVL_XBOX'
+            report = self.report_for(root, 'all', dict(kind='xbox-disc', path=str(root / 'x.iso'), tree=str(xbox)))
+            labels = {row['label']: row['path'] for row in report['inputs']}
+            self.assertEqual(labels['bf2 Xbox gameplay data'], str(xbox))
+            self.assertNotIn('bf2 extracted PS2 data', labels)
+            self.assertIn('bf1 extracted PS2 data', labels)
+            self.assertEqual(report['maps'][0]['base_source'], 'bf2 Xbox')
+
+    def test_gameplay_data_behind_a_cached_bake_says_cached(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            xbox = dict(kind='xbox-disc', path=str(root / 'x.iso'), tree=str(root / 'xbox'))
+            games = {'bf2': dict(gameplay=xbox)}
+            for used, status in (((), 'cached'), (('bf2',), 'used')):
+                report = pack.source_report(root, root / 'baked', root / 'missions', {'bf2': None}, dict(games=games, found=[]), used)
+                row = next(row for row in report['inputs'] if row['label'] == 'bf2 Xbox gameplay data')
+                self.assertEqual(row['status'], status, row)
+
+    def test_a_checkout_without_git_still_finds_its_missions_generated(self):
+        with mock.patch.object(pack.subprocess, 'run', side_effect=FileNotFoundError('git')):
+            self.assertEqual(pack.git_tracked_missions(), '')
 
 
 if __name__ == '__main__':
     unittest.main()
+
+class CorrectionMissionSelection(unittest.TestCase):
+    def test_pc_primary_pins_both_correction_table_and_source(self):
+        plan = {'games': {'bf1': {'gameplay': {'kind': 'pc-install', 'path': '/chosen/base'}},
+                          'bf2': {'gameplay': {'kind': 'ps2-disc', 'path': '/chosen/disc'}}}}
+        args = pack.gameplay_correction_args(plan)
+        self.assertEqual(args[-2:], ['--gameplay-source', 'bf1=/chosen/base'])
+        self.assertTrue(args[1].endswith('/corrections-v1/bf1-pc.json'))
+        self.assertEqual(args.count('--gameplay-reference'), 1)

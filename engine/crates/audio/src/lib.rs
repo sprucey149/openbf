@@ -111,7 +111,7 @@ impl SoundData {
 }
 
 /// Decode a WAV/OGG off disk WITHOUT opening the mixer — the same decoder
-/// [`Audio::load_sound`] uses. A headless box (CI: no output device, so
+/// playback uses. A headless box (CI: no output device, so
 /// [`Audio::new`] is None) can still check what a baked file holds. Without
 /// the backend feature this is the silent no-op the rest of the API is.
 pub fn decode(path: &Path) -> anyhow::Result<SoundData> {
@@ -187,11 +187,6 @@ impl Audio {
             let _ = (path, rate, volume_db);
             Ok(LoopHandle {})
         }
-    }
-
-    /// Decoded sound ready to play (kira keeps samples in memory).
-    pub fn load_sound(&mut self, path: &Path) -> anyhow::Result<SoundData> {
-        decode(path)
     }
 
     /// Fire-and-forget playback: `volume_db` (0 = unity), `rate` (pitch

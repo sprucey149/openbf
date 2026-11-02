@@ -62,6 +62,8 @@ mod pickups;
 mod population;
 mod remotes;
 mod repair;
+#[cfg(test)]
+mod rider_health_tests;
 mod round;
 mod saber;
 mod saber_throw;

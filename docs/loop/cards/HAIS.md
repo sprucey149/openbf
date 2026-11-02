@@ -26,24 +26,6 @@ what is left is FUN_00220528's own part (it edits the goal and halves the thrott
 analysis/re-walker-ai.md sections 3-4 ([O]). lead_tmp/wai/wai_sample.py + wai_check.py replay a transcription against
 live PS2 RAM tick by tick (walkers: 7504 of 7504 ticks); the same sampler takes a hover with its vtable pair.
 
-## Acceptance
-- RE (max effort, the discipline): FUN_00220528 transcribed; a live capture of AI hovers on two maps (BF2 + BF1 twin
-  opened) replayed with >= 99 % of the driving ticks equal on throttle, strafe and turn.
-- The build is card VDROP's (planner 2026-10-02: it depends on this card): the hover driver writes those sticks; hover
-  boards / metres driven per map in round_to_outcome do not fall, 8 seeds no finish count drops. Close this card by
-  writing the doc, the replay numbers and the PS2's speeder-bike loss count onto VDROP.
-
-## Planner note (2026-10-02 04:30)
-Value 3 -> 4, `alpha: yes`: VDROP (4, alpha) now depends on this card. VDROP's step 2 ("build the PS2's hover
-stick") and this card's "then build" were the same work written twice; this card is the RE alone (max effort, the
-discipline, the live replay) and the build is VDROP's. While the AI hovers are being captured, also count on Endor
-(BF2 END1; BF1 END1 if the session allows) how many speeder bikes are lost with a rider aboard per minute of battle:
-that is the PS2 side of VDROP's acceptance 1. Reverse: `loopctl.py set HAIS value=3 alpha=` and `set VDROP deps=WAI`.
-
-- Planner 2026-10-02 09:30: `files:` emptied while this card is `phase: re` (it listed `core/src/ai/ride.rs`, which
-  would have made WAI2 and VBAIL ineligible while the RE runs; an RE writes `analysis/` only). VDROP is the build and
-  lists the file.
-
 ## Closed 2026-10-03 (lane 2, report `reports/20261003_0245_card_HAIS.md`)
 `analysis/re-hover-ai.md` (docs commit b073094; verifier 49 SUPPORTED / 0 / 0). Acceptance as run:
 - FUN_00220528 transcribed (probe, MovingTurnOnly floor, unstick manoeuvre, x0.6, bail-out) and its BF1 twin

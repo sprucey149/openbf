@@ -20,22 +20,3 @@ time. The main known cause: a session waits on background gates and dies with th
 iteration 18; memory notes "long gates run detached" and "interrupted land phase 1"). land.py already keeps
 `lead_tmp/<branch>/land/state.json`, but only at the end of phase 1. A death mid-phase leaves "merged + rebaked, no
 state", which a fresh session must repair by hand.
-
-## Do
-- land.py and gates.py write their state after EVERY step: phase, step, the outputs so far, the child pids, and the MAIN
-  claim holder.
-- `land.py <ID> --detach` starts itself with setsid/nohup and returns at once.
-- `land.py <ID> --status` prints the state in one line, with the process alive or dead.
-- `land.py <ID> --resume` continues from the first unfinished step (a finished gate is not re-run).
-- The same for `gates.py --detach/--status/--resume`, keyed by `--out`.
-- A step whose pid is dead and whose output is incomplete is re-run; a complete one is kept.
-- The loop prompt's build/land wording ("run land.py detached, poll `--status` with a budget") goes to STATUS as a
-  proposed prompt line, for the maintainer to paste.
-
-## Acceptance
-- `land.py --self-test` covers these cases:
-  - a phase 1 killed after the merge, before the gates, resumes at the gates;
-  - one killed mid-gpu-gate re-runs only that gate;
-  - a finished phase 1 is not re-run.
-- A real landing done with `--detach` + `--status`, with the transcript in the report.
-- Every gate PASS, nothing declared.

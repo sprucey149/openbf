@@ -36,18 +36,6 @@ Dune Sea the "yes" answer alone is 12 of 32 lines a minute, on Naboo the Gungans
   need-gunner 1.0-3.5, yes NAB1 2.0 / 1.0, TAT1 12.0 / 12.25; Gungan takes NAB1 16.0 / 18.5. The pending queue
   stands at its cap of 4.
 
-## Acceptance
-- Tests, mutation-checked: an AI in a vehicle seat with a free gun asks `needgunner` (chance 0.3 a try) and each AI
-  on foot within 30 m that boards asks `yes`; a unit at full health whose class has threshold 1.1 asks its
-  `LowHealthSound` again when its line has ended and never while it sounds; a class with the default threshold is
-  silent above 30 % health.
-- The right voice through the BAKED class db: the `ai_` keys of every class fielded on NAB1, TAT1, YAV2 (the
-  Wookiee's `wok_...`), and the three Gungan classes' heartbeat on NAB1.
-- The census (headless `SOUND_LOG`, 8 seeds, NAB1 and TAT1, the player parked as in the captures): the rows above
-  per event within 30 % where the PS2 reads 5 or more, and the voice slot's lines a minute in all (PS2 32) with
-  cards UCALL and this one both on.
-- The mixer: no `OVERLOAD` line these lines cause in a 10-minute round; `scripts/tools/mix.py` under full scale.
-
 ## Notes
 - The AI's orders are behaviour as well as sound (bots board the caller's vehicle): `re-squad-orders.md` 4.4, 5 and
   9b ("Not built: the AI's own orders"). If the boarding half is too big for one session, land the lines on the

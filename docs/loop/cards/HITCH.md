@@ -46,13 +46,6 @@ map, 3 min each, on this machine's RTX and its Intel iGPU.
 Likely: make everything a map can show at load time behind the loading screen; spread an AI burst over ticks; stop creating
 GPU objects inside the frame. One commit per cause, each with its before / after.
 
-## Acceptance
-- The recorder's summary line on NAB2, GEO1, KAS2 (3 min each, RTX): before and after pasted; after = **0 frames over 25 ms
-  past the first 5 s of the battle** on the RTX, and the iGPU's hitches per minute named (budget: under 1).
-- Each removed cause has its own row (frames over 25 ms it accounted for, before -> after).
-- Sim hash unchanged (`game --sim-hash 100`, sim_gates) unless a spread AI burst is declared `sim`.
-- The hitch line goes into `loop/PERF.md` (create it with this line if PERF has not) and STATUS `## Performance`.
-
 ## Results (2026-10-20, branch hitch 3f1b36c; report `reports/20261020_2000_card_HITCH.md`)
 Part 1 built: the frame record (dev mode; `OPENBF_FRAME_RECORD=0` off) in `game/src/frame_profile.rs`, the black box's
 `hitches` (schema 6), `blackbox_read` FRAMES / `--frames`, the summary line at the battle's end. Per frame: phases,

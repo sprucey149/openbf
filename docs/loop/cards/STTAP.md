@@ -34,17 +34,6 @@ officers and engineers stand in standoffs that never resolve.
   - **BF1:** `FUN_0023cd40` → `FUN_0023cc20`, a fixed cadence on the trigger byte: 1 → 2 → −1 → −2 → 1, one fresh press
     every 4 controller calls. Snipers also get `FUN_0023c698`'s U(2, 3) s cooldown.
 
-## Acceptance
-- Unit tests at a static target in range:
-  - a BF2 sniper-rifle bot fires one shot per 2–3 s;
-  - a BF2 rocket bot at skill 1 fires ≥ 5 shots in 10 s;
-  - a BF1 single-shot bot fires on a 4-call cadence;
-  - an automatic rifle's test is unchanged.
-- The `SHOTS` census (port it from the scratch `round_to_outcome`): the median single-shot class ≥ 5 shots per life on
-  seed 42 (was 3.0). Count trigger pulls, or exclude the multi-bolt weapons.
-- GEO1 seed 42's standoff resolves: a kill within 60 s of the lock.
-- No map's 8-seed finish count drops (SWPN).
-
 ## Notes
 - Where the AI's trigger state lives, and whether it is hashed, is the builder's call: it is sim state.
 - Say in the commit that the bleed and HOLD_RANGE are unchanged.

@@ -31,10 +31,11 @@ DEPS = tomllib.load(open(os.path.join(HERE, "..", "engine/goldens/deps.toml"), "
 
 # ---- can_move_golden --------------------------------------------------------------------------------------------
 for f, want in [
-    ("engine/crates/core/src/ai/steer.rs", False), ("engine/crates/input/src/lib.rs", False),
-    # core is skipped by part, not whole (card GSKIP): the sim and the AI cannot move a golden, what a golden stands on can
-    ("engine/crates/core/src/sim/state.rs", False), ("engine/crates/core/src/sim.rs", False),
-    ("engine/crates/core/src/ai.rs", False), ("engine/crates/core/src/squad.rs", False),
+    ("engine/crates/input/src/lib.rs", False),
+    # `core` is not skipped, only its tests and examples: the HUD golden runs a sim (the flown droid's picture)
+    ("engine/crates/core/src/ai/steer.rs", True), ("engine/crates/core/src/sim/state.rs", True),
+    ("engine/crates/core/src/sim.rs", True), ("engine/crates/core/src/ai.rs", True),
+    ("engine/crates/core/src/squad.rs", True),
     ("engine/crates/core/tests/battle_outcome.rs", False), ("engine/crates/core/examples/ttk_trace.rs", False),
     ("engine/crates/core/src/collision/rays.rs", True), ("engine/crates/core/src/collision.rs", True),
     ("engine/crates/core/src/heightfield.rs", True), ("engine/crates/core/src/door.rs", True),
@@ -86,17 +87,18 @@ gates.full_due.__defaults__ = (mark,)        # full_due(tree, every, mark=<this>
 open(mark, "w").write(git("rev-parse", "HEAD") + "\n")   # a full regeneration "just happened"
 
 git("checkout", "-q", "-b", "docs")
-commit("analysis/re-new.md"); commit("engine/crates/core/src/ai/steer.rs"); commit("PLAN.md")
+commit("analysis/re-new.md"); commit("engine/crates/input/src/lib.rs"); commit("PLAN.md")
 g, why = gates.plan_goldens(repo, "base")
-check("docs + core only -> no golden group", g == [], f"{g} {why}")
+check("docs + input only -> no golden group", g == [], f"{g} {why}")
 
 for f in ["engine/crates/core/src/collision/rays.rs", "engine/crates/core/src/heightfield.rs"]:
     git("checkout", "-q", "-b", "core_" + os.path.basename(f), "base")
     commit(f)
     g, why = gates.plan_goldens(repo, "base")
     check(f"only {f} -> every group", g == gates.GOLDEN_GROUPS, f"{g} {why}")
-for f in ["engine/crates/core/src/ai/steer.rs", "engine/crates/core/src/sim/state.rs"]:
-    git("checkout", "-q", "-b", "core_" + os.path.basename(f), "base")
+for crate in ["input", "audio"]:
+    f = f"engine/crates/{crate}/src/lib.rs"
+    git("checkout", "-q", "-b", "skipped_" + crate, "base")
     commit(f)
     g, why = gates.plan_goldens(repo, "base")
     check(f"only {f} -> no golden group", g == [], f"{g} {why}")
@@ -173,7 +175,7 @@ check("skipped_but_linked: today's rule skips nothing the goldens link (collisio
       gates.skipped_but_linked(dict.fromkeys(["collision", "heightfield", "door", "fmath", "region", "announcer", "vehicle"], 1), DEPS) == [])
 check("skipped_but_linked: the old whole-crate skip is caught",
       gates.skipped_but_linked(got, {"skip": ["engine/crates/core/"]}) == ["collision", "door", "fmath", "heightfield"])
-check("skipped_but_linked: a golden that came to link the sim is caught", gates.skipped_but_linked({"sim": 3, "door": 1}, DEPS) == ["sim"])
+check("skipped_but_linked: a golden that came to link the sim is caught", gates.skipped_but_linked({"sim": 3, "door": 1}, {"skip": ["engine/crates/core/src/sim"]}) == ["sim"])
 check("skipped_but_linked: a skipped FILE of a module directory counts",
       gates.skipped_but_linked({"vehicle": 1}, {"skip": ["engine/crates/core/src/vehicle.rs"]}) == ["vehicle"])
 core_src = os.path.join(repo, gates.CORE_SRC)
@@ -253,11 +255,22 @@ for f, want in [
     ("tat1/sounds/sounds.ron", "sounds"), ("core_bf1/sounds/sounds.ron", "sounds"),
     ("side_bf2/vehicles/rep/collision/rep_fly_vwing.glb", "side"), ("classes/bf1_all.ron", "classes"),
     ("audio/global_bf2/1.ogg", "global-sound"), ("audio/ui_load_lp.ogg", "beep"), ("a_new_dir/x.ron", None),
+    ("classes/bf2_dlc.ron", "dlc"), ("side_bf2/dlc_heroes.ron", "dlc"), ("side_bf2/dlc_sounds/a.ogg", "dlc"),
+    ("side_bf2/effects/dlc/a.ron", "dlc"),
+    # what `dlc_output::install` writes among the retail files; the names sit in a real bake's side_bf2/dlc_heroes.ron
+    ("side_bf2/soldiers/rep_inf_kitfisto.glb", "dlc"), ("side_bf2/soldiers/cis_inf_asajjventress.low.skins.ron", "dlc"),
+    ("side_bf2/textures/dlch_rep_inf_kitfisto.ktx2", "dlc"), ("side_bf2/weapons/fisto_l_fist.nodes.ron", "dlc"),
+    ("side_bf2/weapons/cis_inf_weap_starblade.glb", "dlc"), ("side_bf2/weapons/temp_saber.glb", "dlc"),
+    ("side_bf2/weapons/bubblev3.glb", "dlc"),
+    ("side_bf2/soldiers/rep_inf_ep3anakin.glb", "side"), ("side_bf2/textures/rep_inf_ep3anakin.ktx2", "side"),
+    ("side_bf2/weapons/temp_saber_x.glb", "side"), ("side_bf1/soldiers/rep_inf_kitfisto.glb", "side"),
 ]:
     check(f"bake_group_of {f} == {want}", gates.bake_group_of(f) == want, str(gates.bake_group_of(f)))
+_, _, _, stray_ = gates.bake_verdict("SAME=1 DIFF=1 ONLY_IN_A=0 ONLY_IN_B=0\nDIFF side_bf2/soldiers/rep_inf_kitfisto.glb\n", ["dlc"], True, 2)
+check("a dlc card moving a hero's body strays nowhere", stray_ == [], str(stray_))
 m_ = __import__("re").search(r'^REBAKE_GROUPS="([^"]*)"', open(os.path.join(HERE, "rebake.sh")).read(), __import__("re").M)
 table = {gates.bake_group_of(f) for f in ["tat1/a", "tat2/a", "bf1_x/a", "common_bf1/a", "side_bf1/a", "classes/a",
-                                          "x/sounds/a", "audio/global_bf1/a", "tat1/load/a", "audio/a"]}
+                                          "x/sounds/a", "audio/global_bf1/a", "tat1/load/a", "audio/a", "classes/bf2_dlc.ron"]}
 check("bake_group_of covers exactly rebake.sh's groups", m_ and table == set(m_.group(1).split()), f"{sorted(table)}")
 
 VWING = "side_bf2/vehicles/rep/collision/rep_fly_vwing.glb"

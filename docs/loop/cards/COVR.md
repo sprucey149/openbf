@@ -68,14 +68,6 @@ engine/assets_baked`).
 D22 (`analysis/bot-design.md` 9): the PS2's BF1 Yavin Temple has 51 Cover hints; ours has BF2's on the same graph
 as well.
 
-## Acceptance
-`bake::donor::tests` (2): hints are added moved and renamed, one deep in a barrier, two off the graph, one on the
-target's own and a Snipe hint are not, one at a barrier's edge is, a second run gives the same manifest and the
-same counts; a donor on another graph is refused. `game::suite::all_maps_load::every_baked_nav_block_is_self_consistent`
-counts the disc's hints without the donated ones and allows donated ones only on a `DONORS` target (passes on the
-regenerated copy). Mutations (each fails a test): the barrier test skipped, the push
-margin 0, the graph check dropped, the second run's strip of its own hints dropped, the offset not applied.
-
 ## Open
 - BF1 Bespin Platforms (BES2) and Rhen Var Harbor (RHN1): NOT imported - their BF2 versions are a fan conversion
   of the Xbox DLC (`ADDON_XBOX`). Before a `DONORS` row: in game, load each donated hint as a marker on the BF1 map

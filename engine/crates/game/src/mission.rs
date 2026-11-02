@@ -117,6 +117,10 @@ pub struct MissionDef {
     /// BF2 `SetGroundFlyerMap(1)`: halves the AI follower's roll wobble.
     #[serde(default)]
     pub ground_flyer_map: bool,
+    /// `AddLandingRegion(name)`: where a flyer may land, slows, and holds its fire
+    /// (`analysis/re-flyer.md`). Only the space scripts call it.
+    #[serde(default)]
+    pub landing_regions: Vec<String>,
     /// The conquest command-post roster, in `CommandPost:New` order — the
     /// posts the mission actually hands to its `ObjectiveConquest`, which is
     /// NOT every post in the world layer (BF2 Hoth builds four and kills the

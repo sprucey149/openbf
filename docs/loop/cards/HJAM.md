@@ -31,21 +31,6 @@ stall watch recycles its driver at tick 4693-4788. The drivers do not ask the av
   and `stuck 60` at ticks 405-495 at (-158, 313); `bb/b/` (the rule, tick 900): the trail going nowhere.
 - Not checked: whether main's own Endor recycles at (-160, 296) (2 in 32 rounds) are drivers too.
 
-## Acceptance
-- The circling traced tick by tick on one seed (the driver's goal point against its turn circle, or what it hits), the
-  cause named with its file and line.
-- With the fix and card OBSV's rule on: BF1 Endor's recycles over seeds 9-80 at or under main's 37 (`lead_tmp/obsv/tools/sw.sh`,
-  MAPS=bf1_end1 SEEDS=9-80), none of them a driver in the opening; 24 seeds x 32 maps not worse, paired by seed.
-- A test that fails without the fix.
-- No `deps:` on OBSV on purpose (OBSV is blocked on its landing, and its landing may be made to wait for this card): the
-  jam is reproduced with OBSV's branch `obsv` 10143ae, or with `lead_tmp/obsv/bin/k9` and `OBSV=17` (seed 15, BF1 Endor,
-  `BLACKBOX_AT=900`).
-- 2026-10-12 17:05 planner: **value 4 -> 5, effort high.** Card OBSV (bots go round parked vehicles: hull contact
-  14,462 -> 7,293 s per 256 rounds) now WAITS for this card (`deps:`): its one real cost is this driver, and a bike
-  circling at the Rebel spawn for 2.5 minutes in a quarter of BF1 Endor's rounds is what the maintainer would report first. The
-  baseline was re-taken on main 5fbbbd4 (`lead_tmp/fidelity_rebase_20261012d/`): `recycled@bf1_end1` 3 / 5.
-  Undo: `loopctl.py set HJAM value=4`, `loopctl.py set OBSV deps=OBST,OBSF,OBST2 status=blocked`.
-
 ## Measured 2026-10-13 (lane 2; evidence `engine/artifacts/lead_tmp/hjam/README.md`, report `reports/20261013_0925_card_HJAM.md`)
 Re-measured on main 5f8f569 with OBSV's commit on top: BF1 Endor seeds 9-80, recycles 31 (main) and 69, 21 of them unit 5
 at (-180, 324), ticks 4693-4788. The card's reading was half right. Seed 15, unit 5, every tick (`tr/on.err`):

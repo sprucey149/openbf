@@ -235,11 +235,11 @@ mistaken for ordinary fighter attack selection.
 `core::ai::flyer_drive` and `flyer::spline_step`. Its module header is the list
 of invented policy; this section says what the evidence supports.
 
-Bots fly only where `Sim::flyer_bots` is set: ground maps leave it off to keep
-their AI choices and hash stream, and `OPENBF_FLYER_BOTS=1` turns it on for a
-test. The PS2 has no such switch, and its code has AI pilots (FUN_001de160), but
-no live sample here says how often they board on each map. The later space maps
-are meant to set it themselves.
+Bots fly by default since 2026-11-01 (`OPENBF_FLYER_BOTS=0` keeps them on the ground
+for a run measuring the ground war alone). The PS2 has no such switch, and its code has
+AI pilots (FUN_001de160), but no live sample here says how often they board on each
+map. It moves the hashes of the maps with flyers a bot can fly: at 900 ticks, seed 42,
+bf1_bes1, bf1_geo1, bf1_hot1, bf1_kas1, bf1_nab1, bf2_hot1 and tat1. The other 27 match.
 
 BF1, from the code: the upward probe and escape path, the random post 20 m up
 (FUN_00246718 draws any post for an ordinary pilot, whoever holds it), the
@@ -258,10 +258,35 @@ once on a full vehicle, so only craft with a free seat hold for it.
 The stick law's pitch reads the stored aim, not the transform. FUN_00232b78 takes
 its pitch frame from the controllable's +0x110, which is entity +0x3b0, where
 FUN_001dbbd8 stores the forward with the visual pitch and roll taken out. Yaw reads
-the transform, tilt and all. The port's `flyer::untilted` is that frame. Sampled once
-a second on `bf1_kas1` with the mission's own ceiling, bots still reverse a saturated
-pitch stick often (40 sign flips in 575 samples, 49 in 528 before this frame was
-right), so they porpoise. Whether the PS2's do is unmeasured.
+the transform, tilt and all. The port's `flyer::untilted` is that frame.
+
+**The port's pitch is not the PS2's law (OURS, 2026-11-01).** With that law bots
+porpoised. A trace of `bf1_kas1` at 5 Hz found three causes. The law takes the goal's
+height in the nose's own frame, which reads near zero or the wrong way while a goal
+abeam or behind is turned to, so a raised nose went on climbing through the turn, and
+at the class's 1 rad/s a turn lasts seconds. The altitude law asks for its whole rise
+over a look-ahead of 1.5 s, so a slow craft or one a few metres low aimed at the ceiling. And
+the port's own attack run dived at targets under the nose. So the stick's pitch error
+is now the goal's elevation less the nose's, the altitude law takes at most about 20
+degrees (about 45 within 8 m of the ground ahead), the stick slews at 2.5 full
+deflections a second, and an attack run holds for 2 s, takes at most about 20 degrees
+and breaks off by flat distance. Whether the PS2's bots porpoise is unmeasured, and these
+laws may not be how it avoids it.
+
+| 5400 ticks, seed 7, regenerated missions | saturated pitch flips a minute | mean \|vy\| | clearance | world deaths |
+|---|---|---|---|---|
+| `bf1_kas1`, before | 11.6 | 6.2 | 0..114 | 0 |
+| `bf1_kas1`, after | 4.6 | 2.1 | 2.5..48 | 0 |
+| `tat1`, before | 20.8 | 9.2 | 0..177 | 0 |
+| `tat1`, after | 8.4 | 3.8 | 4..52 | 0 |
+| `bf1_geo1`, before | 22.0 | 5.2 | 0..154 | 0 |
+| `bf1_geo1`, after | 14.7 | 3.0 | 9..62 | 0 |
+
+Across seeds 7, 11 and 23 after the change: `bf1_kas1` 3.8..5.2 flips a minute with up
+to 2 world deaths, `tat1` 8.4..11.0 with up to 2, `bf1_bes1` up to 8 world deaths in 31
+sorties (seed 11), no craft died at the map's edge. Bay exits: on `bf1_bes1` three craft
+sat wedged in their bays for 180 s of a 3 minute round; a pilot now leaves after three
+tries at a way out. This is a census, not a look: no one has watched them fly.
 
 BF2, from the code: takeoff by the flight states with no AI input (the AI
 update runs only in state 2, B2:117411-117417), the curve equations, rate cap,
@@ -320,8 +345,8 @@ Reproducible ELF checks (read-only):
 python3 scripts/re_check.py callers b1 FUN_001dd0d0
 python3 scripts/re_check.py callers b2 FUN_002fccd0
 python3 scripts/re_check.py word b2 0x625de8 45 --u32
-python3 scripts/tools/eedis2.py bf2 300168 300230
-python3 scripts/tools/eedis2.py bf2 2fcfb0 2fd090
+python3 scripts/tools/eedis.py bf2 300168 300230
+python3 scripts/tools/eedis.py bf2 2fcfb0 2fd090
 ```
 
 The callers identify the BF1 controllable dispatch and BF2 entity AI; the

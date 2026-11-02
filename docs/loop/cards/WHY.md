@@ -44,10 +44,3 @@ tick 4000) shows unit 8: `FAIL round_spent arc 150 in recover` every 2 s, `FAIL 
   `NavStats::fails` per code. The census prints `census <map>: failed walks N [wall .. recycled ..]`.
 - Black box schema 9: `why` per unit slot (its log as at its last frame); `blackbox_read --unit <id>` prints it,
   and a troubled bot's line carries its last four.
-
-## Acceptance
-`ai::why::tests`: the ring keeps the newest 8 oldest first; the failed-walk block is contiguous; a failed window
-is classified by the books; a bot penned in a room logs its first post (`goal_changed`), each failed window with
-the mover's code and the leg's arc, Recover entered on the same tick for that code, and the census counts the same
-windows. Mutations: without the Recover arm of `why::log`, without `fail_arc`, and with slide mapped to `no_gain`,
-a test fails each time.

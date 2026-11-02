@@ -30,6 +30,12 @@
 //!   camera inside it). They stay solid for the sim — this module is visual
 //!   only. A droid (`powerupstation`) is tested at the pose it is drawn at.
 //!   Soldiers neither pull nor fade.
+//! - A DOOR is tested where it is drawn: each submesh its clip moves rides the
+//!   sim door's `open` (`core::door`, `SceneGpu::pose_doors`' rule), its frame
+//!   stays put. Testing the shut model collapsed the camera into the trooper
+//!   in every open doorway. PROVISIONAL `[O]`: the clip moves the door's bodies
+//!   out of the doorway on the PS2 (`analysis/re-bf2-doors.md` §3), but its
+//!   camera rays' mask against a door body was not traced.
 //! - A soldier's track runs from the PS2's own origin, 1.5 m above his feet
 //!   (`walk::CAMERA_PULL_Y`), to the ideal camera; the pulled-in camera
 //!   keeps the ideal's view (its pitch and yaw, the look along his aim), so
@@ -39,8 +45,9 @@
 
 use crate::assets::Scene;
 use core::collision::{CollisionWorld, HullFilter, Layers};
+use core::door::Door;
 use core::vehicle::VehicleHandle;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -75,6 +82,9 @@ pub const SIGHT_RADIUS: f32 = 0.15;
 /// The sight lines stop this short of the player's points (m): a prop past
 /// them, or touching one, is not in the way.
 pub const SIGHT_END_GAP: f32 = 0.3;
+/// How far a door part's broad-phase box is grown past its clip's frames (m):
+/// a swinging door's corner bows out between two frames, a few cm at most.
+const DOOR_ARC_MARGIN: f32 = 0.1;
 
 /// The PS2's stored track fraction one update on (B1 `FUN_0019fd70`): a
 /// smaller `raw` at once; a larger one only when it is 1.0 or more than
@@ -336,10 +346,18 @@ pub fn sweep_sphere_tri(
     best
 }
 
+/// One door submesh's ride: the instance's placement and its bone's
+/// model-space clip (`ManifestDoorPart::motion`; frame 0 is the door shut).
+#[derive(Debug)]
+struct DoorRide {
+    place: Mat4,
+    frames: Arc<Vec<(Quat, Vec3)>>,
+}
+
 #[derive(Debug)]
 struct Blocker {
     /// The instance's world box; a droid's is the box of every turn about
-    /// its +Y.
+    /// its +Y, a door part's the box of its whole clip.
     world: Aabb,
     /// World -> model, so one segment test serves every instance of a model.
     inv: Mat4,
@@ -351,7 +369,10 @@ struct Blocker {
     instance: u32,
     /// A droid: drawn at the pose `CameraBlockers::fraction`'s `live` gives.
     moves: bool,
+    /// A door's moving submesh: drawn at its sim door's `open`.
+    door: Option<DoorRide>,
     /// At most [`PROP_MAX_FOOTPRINT`] across: drawn see-through, never pulls.
+    /// A door's parts all take the whole model's answer.
     prop: bool,
 }
 
@@ -366,8 +387,8 @@ impl CameraBlockers {
     /// One blocker per drawable instance in the scene (terrain excluded —
     /// `camera()` already floors against the heightfield).
     pub fn from_scene(scene: &Scene) -> Self {
-        let chunked = std::env::var("OPENBF_CAMERA_CHUNKS").as_deref() != Ok("0");
         let mut meshes: HashMap<String, Arc<TriMesh>> = HashMap::new();
+        let mut door_parts: HashMap<(String, String), Vec<DoorPart>> = HashMap::new();
         let mut blockers = Vec::new();
         for (ii, inst) in scene.manifest.instances.iter().enumerate() {
             let Some(model) = scene.resolve_model(&inst.class) else {
@@ -393,11 +414,7 @@ impl CameraBlockers {
                     .flatten()
                     .copied()
                     .collect();
-                let chunks = if chunked {
-                    triangle_chunks(&positions, &indices)
-                } else {
-                    Vec::new()
-                };
+                let chunks = triangle_chunks(&positions, &indices);
                 meshes.insert(
                     model.to_owned(),
                     Arc::new(TriMesh {
@@ -417,7 +434,26 @@ impl CameraBlockers {
                 c.base
                     .eq_ignore_ascii_case(crate::viewer::stations::STATION_BASE)
             });
-            blockers.push(Blocker::new(mesh, m, ii as u32, moves));
+            let rig = scene
+                .resolve_class(&inst.class)
+                .and_then(|c| c.door.as_ref())
+                .filter(|d| !d.parts.is_empty());
+            let Some(rig) = rig else {
+                blockers.push(Blocker::new(mesh, m, ii as u32, moves));
+                continue;
+            };
+            let prop = Blocker::new(mesh.clone(), m, ii as u32, false).prop;
+            let parts = door_parts
+                .entry((model.to_owned(), inst.class.clone()))
+                .or_insert_with(|| split_door(&scene.meshes[model], &mesh, rig));
+            for (part, frames) in parts.iter() {
+                let mut b = match frames {
+                    Some(frames) => Blocker::door_part(part.clone(), m, ii as u32, frames.clone()),
+                    None => Blocker::new(part.clone(), m, ii as u32, false),
+                };
+                b.prop = prop;
+                blockers.push(b);
+            }
         }
         Self { blockers }
     }
@@ -430,22 +466,25 @@ impl CameraBlockers {
     /// static geometry by `CAMERA_RADIUS`, props included: the gallery's
     /// framing, which draws nothing see-through.
     pub fn pull_in(&self, target: Vec3, desired: Vec3) -> Vec3 {
-        target + (desired - target) * self.fraction_of(target, desired, None, |_| None, true)
+        target + (desired - target) * self.fraction_of(target, desired, None, |_| None, &[], true)
     }
 
     /// The fraction (0..=1) of the track `target -> desired` a sphere of
     /// [`CAMERA_RADIUS`] travels before it touches a big model's drawn
     /// triangle (props never pull, [`Self::see_through`]). `skip` is passed
     /// through (a building turret's own building); `live` gives a droid's
-    /// drawn pose by its manifest instance (None: its placed one).
+    /// drawn pose by its manifest instance (None: its placed one); `doors`
+    /// are the sim's, whose `open` poses each door's moving parts (a door
+    /// not among them stands shut).
     pub fn fraction(
         &self,
         target: Vec3,
         desired: Vec3,
         skip: Option<u32>,
         live: impl Fn(u32) -> Option<Mat4>,
+        doors: &[Door],
     ) -> f32 {
-        self.fraction_of(target, desired, skip, live, false)
+        self.fraction_of(target, desired, skip, live, doors, false)
     }
 
     fn fraction_of(
@@ -454,6 +493,7 @@ impl CameraBlockers {
         desired: Vec3,
         skip: Option<u32>,
         live: impl Fn(u32) -> Option<Mat4>,
+        doors: &[Door],
         props: bool,
     ) -> f32 {
         let delta = desired - target;
@@ -470,7 +510,7 @@ impl CameraBlockers {
             {
                 continue;
             }
-            if let Some(hit) = b.sweep(b.pose_inv(&live), target, dir, t, CAMERA_RADIUS) {
+            if let Some(hit) = b.sweep(b.pose_inv(&live, doors), target, dir, t, CAMERA_RADIUS) {
                 t = t.min(hit);
             }
         }
@@ -482,23 +522,30 @@ impl CameraBlockers {
     /// (hidden) when the camera is inside one's box grown by
     /// [`CAMERA_RADIUS`], else at [`SEE_THROUGH_OPACITY`] when a sphere of
     /// [`SIGHT_RADIUS`] swept from the camera to within [`SIGHT_END_GAP`] of
-    /// a sight point touches it. `skip` and `live` as [`Self::fraction`].
+    /// a sight point touches it. `skip`, `live` and `doors` as
+    /// [`Self::fraction`]. An instance is listed once, at its lowest opacity
+    /// (a door's parts are one instance, drawn alike).
     pub fn see_through(
         &self,
         eye: Vec3,
         sights: &[Vec3],
         skip: Option<u32>,
         live: impl Fn(u32) -> Option<Mat4>,
+        doors: &[Door],
     ) -> Vec<(u32, f32)> {
-        let mut out = Vec::new();
+        let mut out: Vec<(u32, f32)> = Vec::new();
+        let mut list = |ii: u32, opacity: f32| match out.iter_mut().find(|(i, _)| *i == ii) {
+            Some(listed) => listed.1 = listed.1.min(opacity),
+            None => out.push((ii, opacity)),
+        };
         for b in self.blockers.iter().filter(|b| b.prop) {
             if Some(b.instance) == skip {
                 continue;
             }
-            let pose = b.moves.then(|| live(b.instance)).flatten();
+            let pose = b.live_pose(&live, doors);
             let near = pose.map_or(b.world, |m| Aabb::transformed(b.mesh.local, m));
             if near.grown(CAMERA_RADIUS).contains(eye) {
-                out.push((b.instance, 0.0));
+                list(b.instance, 0.0);
                 continue;
             }
             let inv = pose.map_or(b.inv, |m| m.inverse());
@@ -513,9 +560,38 @@ impl CameraBlockers {
                     && b.sweep(inv, eye, dir, len, SIGHT_RADIUS).is_some()
             });
             if blocks {
-                out.push((b.instance, SEE_THROUGH_OPACITY));
+                list(b.instance, SEE_THROUGH_OPACITY);
             }
         }
+        out
+    }
+
+    /// Diagnostics: every big blocker the track `target -> desired` meets,
+    /// as (manifest instance, metres along the track), nearest first. Doors
+    /// as [`Self::fraction`]; droids at their placed poses.
+    pub fn track_hits(&self, target: Vec3, desired: Vec3, doors: &[Door]) -> Vec<(u32, f32)> {
+        let delta = desired - target;
+        let len = delta.length();
+        if len < 1e-4 {
+            return Vec::new();
+        }
+        let dir = delta / len;
+        let mut out: Vec<(u32, f32)> = self
+            .blockers
+            .iter()
+            .filter(|b| !b.prop && b.world.hits(target, dir, len, CAMERA_RADIUS))
+            .filter_map(|b| {
+                b.sweep(
+                    b.pose_inv(&|_| None, doors),
+                    target,
+                    dir,
+                    len,
+                    CAMERA_RADIUS,
+                )
+                .map(|t| (b.instance, t))
+            })
+            .collect();
+        out.sort_by(|a, b| a.1.total_cmp(&b.1));
         out
     }
 
@@ -529,9 +605,21 @@ impl CameraBlockers {
 }
 
 impl Blocker {
-    /// World -> model at the pose `live` gives a droid, else the placed one.
-    fn pose_inv(&self, live: &impl Fn(u32) -> Option<Mat4>) -> Mat4 {
-        match self.moves.then(|| live(self.instance)).flatten() {
+    /// Model -> world where this is drawn now, if not at its placed pose:
+    /// the pose `live` gives a droid, a door part's at its door's `open`.
+    fn live_pose(&self, live: &impl Fn(u32) -> Option<Mat4>, doors: &[Door]) -> Option<Mat4> {
+        if let Some(ride) = &self.door {
+            let door = doors
+                .iter()
+                .find(|d| d.instance == self.instance as usize)?;
+            return Some(ride.place * core::door::sample(&ride.frames, door.open));
+        }
+        self.moves.then(|| live(self.instance)).flatten()
+    }
+
+    /// World -> model at [`Self::live_pose`], else the placed pose.
+    fn pose_inv(&self, live: &impl Fn(u32) -> Option<Mat4>, doors: &[Door]) -> Mat4 {
+        match self.live_pose(live, doors) {
             Some(pose) => pose.inverse(),
             None => self.inv,
         }
@@ -633,9 +721,92 @@ impl Blocker {
             mesh,
             instance,
             moves,
+            door: None,
             prop: footprint <= PROP_MAX_FOOTPRINT,
         }
     }
+
+    /// A door's moving submesh, placed by `m`, riding `frames`. Its broad
+    /// phase is the box of the whole clip, grown a little for the arc between
+    /// two frames of a swinging door.
+    fn door_part(
+        mesh: Arc<TriMesh>,
+        m: Mat4,
+        instance: u32,
+        frames: Arc<Vec<(Quat, Vec3)>>,
+    ) -> Blocker {
+        let mut b = Blocker::new(mesh, m, instance, false);
+        for &(q, t) in frames.iter() {
+            let at = Aabb::transformed(b.mesh.local, m * Mat4::from_rotation_translation(q, t));
+            b.world.add(at.min);
+            b.world.add(at.max);
+        }
+        b.world = b.world.grown(DOOR_ARC_MARGIN);
+        b.door = Some(DoorRide { place: m, frames });
+        b
+    }
+}
+
+/// One piece of a door model: its triangles and, if the clip moves it, its
+/// bone's track.
+type DoorPart = (Arc<TriMesh>, Option<Arc<Vec<(Quat, Vec3)>>>);
+
+/// A door model cut along the submeshes its clip moves
+/// ([`crate::viewer::SceneGpu::pose_doors`]' parts): each moving submesh on
+/// its own, and everything else (the frame) together. Only the triangles
+/// `whole` kept are used.
+fn split_door(
+    cpu: &crate::assets::CpuMesh,
+    whole: &TriMesh,
+    rig: &manifest::ManifestDoor,
+) -> Vec<DoorPart> {
+    let positions = &whole.positions;
+    let cut = |indices: Vec<u32>| {
+        let mut local = Aabb::empty();
+        for &i in &indices {
+            local.add(positions[i as usize]);
+        }
+        let chunks = triangle_chunks(positions, &indices);
+        Arc::new(TriMesh {
+            positions: positions.clone(),
+            indices,
+            local,
+            chunks,
+        })
+    };
+    let tris = |start: usize, count: usize| -> Vec<u32> {
+        cpu.indices[start.min(cpu.indices.len())..(start + count).min(cpu.indices.len())]
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .filter(|tri| tri.iter().all(|&i| (i as usize) < positions.len()))
+            .flatten()
+            .copied()
+            .collect()
+    };
+    let mut still = Vec::new();
+    let mut out: Vec<DoorPart> = Vec::new();
+    for (k, &(start, count, ..)) in cpu.submeshes.iter().enumerate() {
+        let indices = tris(start as usize, count as usize);
+        if indices.is_empty() {
+            continue;
+        }
+        match rig.parts.iter().find(|p| p.submesh as usize == k) {
+            Some(part) if !part.motion.is_empty() => {
+                let frames = part
+                    .motion
+                    .iter()
+                    .map(|(q, t)| (Quat::from_array(*q), Vec3::from(*t)))
+                    .collect();
+                out.push((cut(indices), Some(Arc::new(frames))));
+            }
+            _ => still.extend(indices),
+        }
+    }
+    if !still.is_empty() {
+        out.push((cut(still), None));
+    }
+    out
 }
 
 fn camera_meets_hull(body: &core::collision::Body, eye: Vec3) -> bool {
@@ -793,6 +964,43 @@ mod tests {
         mesh(positions, indices)
     }
 
+    /// Both games' snowspeeder pilots author `TrackOffset` 0 0 0 (`TrackCenter`
+    /// 0 4 -6 BF2, 0 3 -8 BF1). The track does not start at the centre, so that
+    /// has a length to shorten: it runs from the model's pull point, and a bay's
+    /// wall behind the craft brings the camera in.
+    #[test]
+    fn a_pilot_seat_with_no_track_offset_still_pulls_in() {
+        use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+        let mut w = crate::walk::WalkSim::new(1, Vec3::ZERO, None);
+        let h = w.sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        let mut seat = crate::vehicle_class::SeatSpec::new(SeatKind::Pilot);
+        seat.track_center = Some([0.0, 4.0, -6.0]);
+        seat.track_offset = Some([0.0, 0.0, 0.0]);
+        w.vehicle_seats = vec![vec![seat]];
+        w.vehicle_tops = vec![Some(2.0)];
+        let player = w.player;
+        assert!(w.sim.seat_unit(player, h, 0));
+        let open = w.camera().position;
+        assert!((open - Vec3::new(0.0, 4.0, -6.0)).length() < 1e-3, "{open}");
+        w.camera_blockers = wall();
+        let pulled = w.camera().position;
+        assert!(
+            pulled.z > -2.0 && pulled.z < 0.0 && pulled.y > 1.8 && pulled.y < 4.0,
+            "the slab at z -2 stands behind the craft: {pulled}"
+        );
+    }
+
     #[test]
     fn camera_stops_short_of_a_wall() {
         let got = wall().pull_in(Vec3::ZERO, Vec3::new(0.0, 0.0, -4.0));
@@ -892,31 +1100,34 @@ mod tests {
         let (player, cam) = (Vec3::ZERO, Vec3::new(0.0, 0.0, -6.0));
         let none = |_| None;
         assert_eq!(
-            b.fraction(player, cam, None, none),
+            b.fraction(player, cam, None, none, &[]),
             1.0,
             "a prop never pulls"
         );
         // The gallery's framing still stops at it.
         assert!(b.pull_in(player, cam).z > -3.0);
         assert_eq!(
-            b.see_through(cam, &[player], None, none),
+            b.see_through(cam, &[player], None, none, &[]),
             vec![(7, SEE_THROUGH_OPACITY)]
         );
         // The camera inside the post's box: hidden.
         let inside = Vec3::new(0.2, 1.0, -3.0);
-        assert_eq!(b.see_through(inside, &[player], None, none), vec![(7, 0.0)]);
+        assert_eq!(
+            b.see_through(inside, &[player], None, none, &[]),
+            vec![(7, 0.0)]
+        );
         // Beside the sight line: whole.
         let aside = Vec3::new(3.0, 0.0, -6.0);
         assert!(b
-            .see_through(aside, &[Vec3::new(3.0, 0.0, 0.0)], None, none)
+            .see_through(aside, &[Vec3::new(3.0, 0.0, 0.0)], None, none, &[])
             .is_empty());
         // Past the player (0.2 m beyond his sight point): whole.
         let lean = one(post(0.0, -0.2), Mat4::IDENTITY, false);
         assert!(lean
-            .see_through(Vec3::new(0.0, 0.0, 6.0), &[player], None, none)
+            .see_through(Vec3::new(0.0, 0.0, 6.0), &[player], None, none, &[])
             .is_empty());
         // A skipped instance (a gunner's own building) is left alone.
-        assert!(b.see_through(cam, &[player], Some(7), none).is_empty());
+        assert!(b.see_through(cam, &[player], Some(7), none, &[]).is_empty());
     }
 
     fn post_clearance(m: &TriMesh, p: Vec3) -> f32 {
@@ -955,19 +1166,19 @@ mod tests {
         let turned = Mat4::from_rotation_y(std::f32::consts::FRAC_PI_2);
         let live = |i: u32| (i == 7).then_some(turned);
         let to_x = Vec3::new(-4.0, 0.0, 0.0);
-        let f = b.fraction(Vec3::ZERO, to_x, None, live);
+        let f = b.fraction(Vec3::ZERO, to_x, None, live, &[]);
         assert!((f * 4.0 - (2.0 - CAMERA_RADIUS)).abs() < 1e-3, "{f}");
         let to_z = Vec3::new(0.0, 0.0, -4.0);
-        assert_eq!(b.fraction(Vec3::ZERO, to_z, None, live), 1.0);
+        assert_eq!(b.fraction(Vec3::ZERO, to_z, None, live, &[]), 1.0);
         // No live pose: the placed one.
-        assert!(b.fraction(Vec3::ZERO, to_z, None, |_| None) < 1.0);
+        assert!(b.fraction(Vec3::ZERO, to_z, None, |_| None, &[]) < 1.0);
     }
 
     #[test]
     fn a_skipped_instance_does_not_block() {
         let to = Vec3::new(0.0, 0.0, -4.0);
-        assert_eq!(wall().fraction(Vec3::ZERO, to, Some(7), |_| None), 1.0);
-        assert!(wall().fraction(Vec3::ZERO, to, Some(8), |_| None) < 1.0);
+        assert_eq!(wall().fraction(Vec3::ZERO, to, Some(7), |_| None, &[]), 1.0);
+        assert!(wall().fraction(Vec3::ZERO, to, Some(8), |_| None, &[]) < 1.0);
     }
 
     /// A model scaled by its instance: the sphere keeps its world radius.
@@ -1067,5 +1278,159 @@ mod tests {
             }
         }
         assert!(hits > 100 && misses > 100, "{hits} hits / {misses} misses");
+    }
+
+    /// A door 10 m wide and 8 m tall, in the plane z = -2: submesh 0 is a leaf
+    /// that rises 8 m over 3 frames, submesh 1 a lintel above it that stays.
+    fn door_model(leaf_top: f32) -> (crate::assets::CpuMesh, manifest::ManifestDoor) {
+        let q = |y0: f32, y1: f32| {
+            [
+                [-5.0, y0, -2.0],
+                [5.0, y0, -2.0],
+                [5.0, y1, -2.0],
+                [-5.0, y1, -2.0],
+            ]
+        };
+        let mut positions = q(-4.0, leaf_top).to_vec();
+        positions.extend(q(leaf_top, leaf_top + 1.0));
+        let indices = vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+        let cpu = crate::assets::CpuMesh {
+            positions,
+            normals: Vec::new(),
+            uvs: Vec::new(),
+            colors: Vec::new(),
+            indices,
+            submeshes: vec![
+                (0, 6, "leaf".into(), render::DrawLayer::Opaque, 0),
+                (6, 6, "lintel".into(), render::DrawLayer::Opaque, 0),
+            ],
+            spec: Vec::new(),
+            light: Vec::new(),
+            scroll: Vec::new(),
+            sphere: None,
+            vis_top: None,
+        };
+        let rig = manifest::ManifestDoor {
+            triggers: Vec::new(),
+            frames: 3,
+            prims: Vec::new(),
+            open_sound: None,
+            close_sound: None,
+            parts: vec![manifest::ManifestDoorPart {
+                submesh: 0,
+                bone: "leaf".into(),
+                motion: vec![
+                    ([0.0, 0.0, 0.0, 1.0], [0.0, 0.0, 0.0]),
+                    ([0.0, 0.0, 0.0, 1.0], [0.0, 4.0, 0.0]),
+                    ([0.0, 0.0, 0.0, 1.0], [0.0, 8.0, 0.0]),
+                ],
+            }],
+        };
+        (cpu, rig)
+    }
+
+    fn door_blockers(place: Mat4) -> CameraBlockers {
+        let (cpu, rig) = door_model(4.0);
+        let positions = cpu.positions.iter().copied().map(Vec3::from).collect();
+        let whole = mesh(positions, cpu.indices.clone());
+        let blockers = split_door(&cpu, &whole, &rig)
+            .into_iter()
+            .map(|(part, frames)| match frames {
+                Some(frames) => Blocker::door_part(part, place, 7, frames),
+                None => Blocker::new(part, place, 7, false),
+            })
+            .collect();
+        CameraBlockers { blockers }
+    }
+
+    fn open_at(open: f32) -> [Door; 1] {
+        [Door {
+            instance: 7,
+            open,
+            ..Door::default()
+        }]
+    }
+
+    /// The report: "even walking through doors puts the camera in the
+    /// trooper". A shut door pulls the camera, an open one does not, one part
+    /// open only where its leaf has really gone, and its lintel always.
+    #[test]
+    fn a_door_pulls_the_camera_only_where_its_leaf_is_now() {
+        let b = door_blockers(Mat4::IDENTITY);
+        let (from, to) = (Vec3::ZERO, Vec3::new(0.0, 0.0, -4.0));
+        let none = |_: u32| None;
+        let stopped = (2.0 - CAMERA_RADIUS) / 4.0;
+        for open in [0.0, 0.25] {
+            let f = b.fraction(from, to, None, none, &open_at(open));
+            assert!((f - stopped).abs() < 1e-3, "{open}: {f}");
+        }
+        assert_eq!(b.fraction(from, to, None, none, &open_at(1.0)), 1.0);
+        // A track at the lintel's height, leaf shut and well below it, stops
+        // at the part the clip does not move.
+        let up = Vec3::Y * 4.5;
+        let f = b.fraction(from + up, to + up, None, none, &open_at(0.0));
+        assert!((f - stopped).abs() < 1e-3, "{f}");
+        // No sim twin (`OPENBF_DOORS_SOLID`): drawn shut, and tested shut.
+        assert!(b.fraction(from, to, None, none, &[]) < 1.0);
+        // Another instance's door moves nothing here.
+        let other = [Door {
+            instance: 8,
+            open: 1.0,
+            ..Door::default()
+        }];
+        assert!(b.fraction(from, to, None, none, &other) < 1.0);
+        // The diagnostics agree with the rule.
+        assert!(b.track_hits(from, to, &open_at(1.0)).is_empty());
+        assert_eq!(b.track_hits(from, to, &open_at(0.0)).len(), 1);
+    }
+
+    /// The motion is the model's: the instance's turn carries it. A leaf that
+    /// has moved into the track's way blocks it (the broad phase covers the
+    /// whole clip, not just the shut pose).
+    #[test]
+    fn a_door_leaf_blocks_where_the_clip_has_put_it() {
+        let turn = Mat4::from_translation(Vec3::new(30.0, 0.0, 0.0)) * Mat4::from_rotation_y(1.0);
+        let b = door_blockers(turn);
+        let none = |_: u32| None;
+        let (from, to) = (
+            turn.transform_point3(Vec3::new(0.0, 9.0, 0.0)),
+            turn.transform_point3(Vec3::new(0.0, 9.0, -4.0)),
+        );
+        // At 9 m: over the lintel (4..5 m) and the shut leaf (-4..4 m).
+        assert_eq!(b.fraction(from, to, None, none, &open_at(0.0)), 1.0);
+        // The leaf rose 8 m to 4..12 m: it is there now.
+        let f = b.fraction(from, to, None, none, &open_at(1.0));
+        assert!((f * 4.0 - (2.0 - CAMERA_RADIUS)).abs() < 1e-3, "{f}");
+    }
+
+    /// A small door is a prop as a whole (parts never decide), and it is
+    /// listed once however many of its parts are in the way.
+    #[test]
+    fn a_door_prop_is_listed_once_at_its_lowest_opacity() {
+        let (cpu, rig) = door_model(0.5);
+        let positions: Vec<Vec3> = cpu
+            .positions
+            .iter()
+            .map(|p| Vec3::from(*p) * Vec3::new(0.2, 1.0, 1.0))
+            .collect();
+        let whole = mesh(positions, cpu.indices.clone());
+        let blockers: Vec<Blocker> = split_door(&cpu, &whole, &rig)
+            .into_iter()
+            .map(|(part, frames)| match frames {
+                Some(frames) => Blocker::door_part(part, Mat4::IDENTITY, 7, frames),
+                None => Blocker::new(part, Mat4::IDENTITY, 7, false),
+            })
+            .collect();
+        assert!(blockers.iter().all(|b| b.prop));
+        let b = CameraBlockers { blockers };
+        let shut = open_at(0.0);
+        let got = b.see_through(
+            Vec3::new(0.0, 0.25, -4.0),
+            &[Vec3::new(0.0, 0.25, 0.0), Vec3::new(0.0, 1.0, 0.0)],
+            None,
+            |_| None,
+            &shut,
+        );
+        assert_eq!(got, vec![(7, SEE_THROUGH_OPACITY)]);
     }
 }

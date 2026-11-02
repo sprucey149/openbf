@@ -580,6 +580,6 @@ the existing shield-lending helper, also used by explosions. Physical bolt and
 blade body contacts keep their separate collision/shield rules.
 
 Recheck commands: `python3 scripts/re_check.py word b2 0x61bc5c 1 --u32`;
-`python3 scripts/tools/eedis2.py bf2 1ffa38 1ffa58`. Test coverage includes
+`python3 scripts/tools/eedis.py bf2 1ffa38 1ffa58`. Test coverage includes
 raised/lowered/depleted shields, a zero shield scale, burning exclusion, emitter
 and choke damage, and a blocked fat ray reaching a second body.

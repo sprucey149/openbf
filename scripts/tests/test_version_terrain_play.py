@@ -88,6 +88,17 @@ class GridTests(unittest.TestCase):
         self.assertFalse(play.painted(masks, 16, 2, 2))
 
 
+class CoverTests(unittest.TestCase):
+    def test_rotation_uses_the_columns_of_instance_matrix(self):
+        cover = play.Cover({}, Path("."))
+        # Same column-major 90-degree yaw as game::math::instance_matrix.
+        # Local x=2..4,z=0..1 lands at world x=10..11,z=16..18.
+        cover.place({"rotation": [[0, 0, -1], [0, 1, 0], [1, 0, 0]],
+                     "translation": [10, 0, 20]}, [2, -1, 0], [4, 1, 1])
+        self.assertTrue(cover.covers(10.5, 17, 0))
+        self.assertFalse(cover.covers(9.5, 23, 0))
+
+
 class AnalyseTests(unittest.TestCase):
     def manifest(self, cutters=()):
         grid = play.Grid(row(n=32))

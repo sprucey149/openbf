@@ -29,20 +29,6 @@ outer radius4m for both release and friend_in_blast. This is openbf's existing
 safety policy (RKSLF/RKEX; gunner_foot::BLAST_CLEAR), not a new PS2 rule.
 Retain the parent policy and every original RKSLA requirement.
 
-## Scope
-Add permanent tests only for the existing clearance, both aim-time and
-release-time paths. Use independent fixed distances inside the damage radius,
-in the one-metre safety annulus and safely outside it. Include both sides,
-enemy, dead, mounted-friendly and nonexplosive controls where applicable;
-mount through successful entry, not an inconsistent hand-written Mount.
-Connect release to real Sim::step with a due salvo and assert the actual
-Shot owner, ammo, hold counter and unchanged friendly health. A helper test
-alone does not prove the tick calls it. Cover both source rules. Preserve
-RKPRF's immediate-press/human exemption and the retained latched/charge scene.
-Do not change runtime policy, offset geometry, hash pins or thresholds.
-RKSLA keeps surface normals, target-kind coverage, bounded charges and all
-original audit-kit/multi-map acceptance; this slice claims no credit for them.
-
 ## Acceptance (run and paste)
 - All new cases execute on current source with exact existing sim/trace pins.
   At radius4m, a live friendly on foot at4.5m holds in each policy;5.5m and

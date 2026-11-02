@@ -24,11 +24,6 @@ The maintainer, 2026-10-07: "At the end of the round I noticed a platform that n
 - KAM1's manifest has 33 `tur_*` instances (y 51.4 - 79.4; six at 51-53 m on the low decks, the rest at 69-79). A turret stands where its instance's translation says; nothing in the port moves it to a stand's hardpoint. `tur_bldg_chaingun_roof` instances (`help`, `ambush`, `...roof10`) are roof turrets.
 - Related: TBLD (build pads become turrets), VTURD (a turret's gun turns, damage shows), TURR (bots man turrets).
 
-## Acceptance
-1. The platform is found: for each of KAM1's 33 turret instances a PCSX2 frame beside the port's (same spot, same bearing) and a note per instance: turret present / on its stand / at its stand's base / missing. The list is the finding; the maintainer's spot is one row.
-2. For each defect the cause is read (the instance's own parent or hardpoint in the world data, the class's skeleton node, the pad rule in `vehicle_pads::add_turrets`) and fixed so the turret stands where the PS2's does; the same census run on the other BF2 maps with turrets.
-3. A test: every turret instance's gun is within 0.5 m of the stand model's turret node where the stand has one.
-
 ## Notes
 Filed 2026-10-07 by Claude in chat from the maintainer's playtest (BF2 Kamino, F9 at tick 10701, build 6f6160b; snapshot `playtest/prev1.json`). His words are quoted; nothing here is measured unless it says so. A question for the maintainer in STATUS: which post / which side of the map, or press F9 standing next to the platform (the snapshot's `focus.point` is the look point).
 - 2026-10-07 11:30 (the maintainer, second F9, via Claude): "it's platforms like these. There should be turrets on all these platforms, and grenades if thrown correctly fall through the floor." Screenshot `playtest/playtest_20261007/5_kam1_platform_no_turret.png`, snapshot `playtest/playtest_20261007/f9_kam1_t3481.json` (BF2 KAM1, tick 3481, build 6f6160b): he stands at (103.1, 52.4, 75.0) on a large low deck (y 52.4), rail ring with lit strips, a floor grid, two raised blocks on the near rail, rain. This is a DIFFERENT place from the first F9 (-125.6, 70.2, 151.0, a high deck at y 70), so it is a kind of platform, not one spot.

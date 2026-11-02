@@ -48,32 +48,6 @@ way and which map body it is", "a snapshot belongs to the commit in its header")
   26 reversals), #17 (16.9 / 1.3) and #6 (66.2 / 15.3) went nowhere.
 - `tools/compare.py`: 14 trails of dead units across 5 snapshots (1-4 each), ending up to 13.0 s before `trail_tick`.
 
-## What to build (dev scaffolding: keep it in blackbox.rs / unit_probe.rs / blackbox_read.rs, core diagnostic-only)
-1. Ask `way_ahead` along what the steering was asked this tick: the direction and floor passed to `steer_dir`.
-   Keep them as a NON-hashed per-unit diagnostic: the audit's `AiState::{dbg_want, dbg_low}`, or a `NavTick` field
-   that step.rs stores per unit. Report `open` / no body when the bot did not walk. Prove it neutral by the sweep's
-   stdout.
-2. Put the hold in the row: the goal, the spot, seconds left, the strafe side. Also the lost bot's return point and
-   the boarding target's position.
-3. Stamp the build: embed the commit and its dirty flag at compile time (a `build.rs`), keep the checkout's HEAD
-   beside it, and have the digest print both plus `build_time`, with a warning line when they differ. If `build.rs`
-   is too costly, at least warn when `build_time` is older than the named commit's own time.
-4. TROUBLE: run the going-nowhere test (with the reversal count) over every unit's trail, not only the focus unit's.
-5. A trail carries its last tick, or a dead unit's trail is left out. Fix the legend and the digest's "ends" line.
-   Snapshots with schema 1 (the maintainer's files) must still read.
-6. Root `CLAUDE.md`: line 32 "Off unless `OPENBF_DEV=1`" (dev mode is on by default since 20990b1), and the
-   header sentence ("+dirty = built from an edited tree") rewritten to describe the build commit.
-
-## Acceptance
-- `stops.py` on the observer's CSVs (same 4 runs) shows >= 97 % of blocked rows naming the steering's own stop and
-  body in EVERY state (holding, boarding, lost-return, leg; today 38 / 38 / 44 / 98 %), and 0 stops on bots whose
-  steering was not asked (today 712 of 7,034).
-- The sweep's stdout and hashes are byte-identical (3 maps x 9000 ticks).
-- `win/B` again (`drive.sh` B: the shared binary, built before the checkout's HEAD): the header names the binary's own
-  commit and the digest prints the warning.
-- `blackbox_read lead_tmp/jitr/snapshot_20261002_kam1_f9.json` lists #30, #17 and #6 as going nowhere.
-- `compare.py` (1 cm) finds no dead unit's trail presented as ending at `trail_tick`.
-
 ## Notes
 - Deps JITR: it reworks the holders this card exposes; take the hold fields from what JITR lands.
 - Fine as it is: the kill's weapon is the killer's held one. That is wrong only for a mounted killer or the human's

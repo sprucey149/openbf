@@ -324,23 +324,20 @@ impl Renderer {
             let (lo, hi) = frustum::transformed_aabb(&d.model, m.bounds.0, m.bounds.1);
             Some((lo, hi, frustum::distance_range(lo, hi, eye)))
         };
+        // Foliage past its fade: on a forest map, most of the instances.
+        let shows = |d: &DrawCmd| {
+            ab.foliage_unfiltered
+                || d.fade.is_none_or(|fade| {
+                    let at = glam::Vec2::new(d.model.w_axis.x - eye.x, d.model.w_axis.z - eye.z);
+                    fade.shows(at.length())
+                })
+        };
         let visible = |d: &DrawCmd, b: Option<WorldBox>, f: &frustum::Frustum| {
             let Some((lo, hi, (near, far))) = b else {
                 return true;
             };
             let (cull, cull_near) = crate::draw::instance_cull(d);
-            // Foliage past its fade: on a forest map, most of the instances.
-            let shows = || {
-                ab.foliage_unfiltered
-                    || d.fade.is_none_or(|fade| {
-                        let at =
-                            glam::Vec2::new(d.model.w_axis.x - eye.x, d.model.w_axis.z - eye.z);
-                        fade.shows(at.length())
-                    })
-            };
-            shows()
-                && f.intersects_aabb(lo, hi)
-                && !crate::draw::all_discarded(cull, cull_near, near, far)
+            f.intersects_aabb(lo, hi) && !crate::draw::all_discarded(cull, cull_near, near, far)
         };
         // The far scene's switch (card LOD) drops the side of a geometry
         // not drawn from this eye, with or without culling: its model and
@@ -350,6 +347,19 @@ impl Renderer {
         let mut keep = Vec::with_capacity(draws.len());
         let mut sorts: Vec<DrawSort> = Vec::with_capacity(draws.len());
         for d in draws {
+            // Past its switch or its fade (on a forest map, most of the
+            // instances) a draw needs no box, and nothing reads its sort.
+            if self.cull
+                && (!switched(d) || (self.meshes.get(d.mesh.0 as usize).is_some() && !shows(d)))
+            {
+                culled += 1;
+                keep.push(false);
+                sorts.push(DrawSort {
+                    near: None,
+                    may_discard: false,
+                });
+                continue;
+            }
             let b = boxed(d, &self.meshes);
             let mut v = switched(d);
             if self.cull {
@@ -457,8 +467,15 @@ impl Renderer {
             // Only the joints a draw has: a slot's stride leaves room for
             // every joint a mesh could use, and those past its palette are
             // never read (checked above).
-            let mut palettes = std::mem::take(&mut self.palette_upload);
-            palettes.resize(skinned.len() * PALETTE_STRIDE, 0);
+            let size = (skinned.len() * PALETTE_STRIDE) as wgpu::BufferAddress;
+            let mut palettes = self
+                .queue
+                .write_buffer_with(
+                    &self.palette_buf,
+                    0,
+                    wgpu::BufferSize::new(size).expect("skinned is not empty"),
+                )
+                .expect("the palette buffer holds every skinned draw");
             for (i, d) in skinned.iter().enumerate() {
                 for (j, m) in d.palette.iter().enumerate() {
                     let at = i * PALETTE_STRIDE + j * 64;
@@ -466,8 +483,7 @@ impl Renderer {
                         .copy_from_slice(bytemuck::bytes_of(&m.to_cols_array_2d()));
                 }
             }
-            self.queue.write_buffer(&self.palette_buf, 0, &palettes);
-            self.palette_upload = palettes;
+            drop(palettes);
             let inst: Vec<Instance> = skinned
                 .iter()
                 .map(|d| Instance {
@@ -1483,27 +1499,30 @@ fn sort_runs(
     draws: &[DrawCmd],
     sorts: &[DrawSort],
 ) -> Vec<usize> {
-    let mut keyed: Vec<_> = kept
+    let mut keyed: Vec<(u128, u32)> = kept
         .map(|i| {
             let (key, place) = runs_key(&draws[i], sorts[i]);
-            (key, place, i)
+            (packed_key(key, place), i as u32)
         })
         .collect();
-    keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+    keyed.sort_unstable();
     // Each run ranks by its nearest instance, which the sort just put first.
-    let mut runs = Vec::new();
+    let mut runs: Vec<(u128, std::ops::Range<usize>)> = Vec::new();
     let mut at = 0;
     while at < keyed.len() {
-        let key = keyed[at].0;
-        let end = at + keyed[at..].iter().take_while(|k| k.0 == key).count();
-        let (layer, lowd, fixed, mesh, texture, band, may_discard) = key;
-        let rank = if fixed == 0 {
-            near_bucket(keyed[at].1)
+        let key = keyed[at].0 >> 32;
+        let end = at + keyed[at..].iter().take_while(|k| k.0 >> 32 == key).count();
+        let rank = if key >> KEY_FIXED & 1 == 0 {
+            near_bucket(f32::from_bits(from_total_order(keyed[at].0 as u32)))
         } else {
             0
         };
+        // Layer, LOWD and fixed, then the rank, then the rest of the key.
+        let rest = KEY_FIXED;
+        let head = key >> rest;
+        let tail = key & ((1u128 << rest) - 1);
         runs.push((
-            (layer, lowd, fixed, rank, mesh, texture, band, may_discard),
+            (head << (32 + rest)) | (u128::from(rank) << rest) | tail,
             at..end,
         ));
         at = end;
@@ -1511,8 +1530,46 @@ fn sort_runs(
     runs.sort_unstable_by_key(|r| r.0);
     runs.into_iter()
         .flat_map(|(_, r)| r)
-        .map(|k| keyed[k].2)
+        .map(|k| keyed[k].1 as usize)
         .collect()
+}
+
+/// Where the fixed bit sits in a packed key's run part ([`packed_key`]).
+const KEY_FIXED: u32 = 73;
+
+/// A run key and a draw's place as one integer that sorts as the pair does:
+/// layer 6 bits, LOWD, fixed, mesh, texture, band 8 bits, may discard, place.
+/// The sort is most of a frame's own work and compares these many times over.
+fn packed_key(key: RunKey, place: f32) -> u128 {
+    let (layer, lowd, fixed, mesh, texture, band, may_discard) = key;
+    debug_assert!(layer < 64);
+    u128::from(layer) << 107
+        | u128::from(lowd) << 106
+        | u128::from(fixed) << 105
+        | u128::from(mesh) << 73
+        | u128::from(texture) << 41
+        | u128::from(band.min(255)) << 33
+        | u128::from(may_discard) << 32
+        | u128::from(total_order(place))
+}
+
+/// `f32::total_cmp`'s order as an unsigned integer.
+fn total_order(f: f32) -> u32 {
+    let bits = f.to_bits();
+    if bits >> 31 == 0 {
+        bits | 1 << 31
+    } else {
+        !bits
+    }
+}
+
+/// The float [`total_order`] was given, by its bits.
+fn from_total_order(order: u32) -> u32 {
+    if order >> 31 == 1 {
+        order & !(1 << 31)
+    } else {
+        !order
+    }
 }
 
 /// The layer's place in [`draw_key`].
@@ -1728,6 +1785,30 @@ mod tests {
             runs_key(&draws[0], sorts[0]).0,
             runs_key(&draws[1], sorts[1]).0
         );
+    }
+
+    #[test]
+    fn a_packed_key_sorts_as_the_key_and_place_do() {
+        let places = [-1.0f32, -0.0, 0.0, 1e-30, 1.0, 512.0, f32::INFINITY];
+        for &f in &places {
+            assert_eq!(from_total_order(total_order(f)), f.to_bits());
+            for &g in &places {
+                assert_eq!(total_order(f).cmp(&total_order(g)), f.total_cmp(&g));
+            }
+        }
+        let keys: [RunKey; 8] = [
+            (0, 0, 0, 0, 0, 0, false),
+            (0, 0, 0, 0, 0, 0, true),
+            (0, 0, 0, 0, 0, 1, false),
+            (0, 0, 0, 0, u32::MAX, 0, false),
+            (0, 0, 0, u32::MAX, 0, 0, false),
+            (0, 0, 1, 0, 0, 0, false),
+            (0, 1, 0, 0, 0, 0, false),
+            (6, 0, 0, 0, 0, 0, false),
+        ];
+        for w in keys.windows(2) {
+            assert!(packed_key(w[0], 512.0) < packed_key(w[1], -1.0));
+        }
     }
 
     /// Near-first order: runs and the instances in them go nearest first, a

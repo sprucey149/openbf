@@ -22,10 +22,6 @@ The maintainer, 2026-10-04: "Have bullet tight spacing stay tight for like anoth
 ## Evidence
 - The port's spread is the PS2's rule (`core/src/weapon.rs`: `spread_per_shot`, `spread_threshold`, `spread_limit`; a human starts at -SpreadThreshold). So this is ours, on purpose.
 
-## Acceptance
-- Held fire stays at its tight spread 1-2 s longer than today for the player and the bots, then opens as before; the PS2's values stay in the data for a revert.
-- Written in FEEL_NOTES as a named deviation with the numbers before and after per weapon class; sweep and arena move as declared.
-
 ## Notes
 Filed 2026-10-04 by Claude in chat from the maintainer's playtest (build 1bde70c, main 4e51e84). The maintainer's own words are quoted; nothing here is measured unless it says so.
 - 2026-10-06 planner: value 4 -> 5. Why: it is the maintainer's own playtest ask of 2026-10-04 and still open after 23 sessions; of that note's cards HUDW, ANIM, ANNC2, ERAM, ZOOM (RE) and WADE (RE) have run, this one and GRNP had not been reached (at value 4 the M3 fours go by ID and this stood 13th). Two things for the builder: (1) `declares:` is empty - fill it (`sweep; arena; sim` as measured) before the gates; (2) the bots take the deviation too, so paste the sweep's kills / min per map before and after: BOTM's kill-rate bar is read against the PS2's column (card BOTV), and a tighter bot burst moves it. Undo: `loopctl.py set SPRD value=4`.

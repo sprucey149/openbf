@@ -34,22 +34,6 @@ the port's ground query. `analysis/re-kamino.md` §4 ([O]).
 - Not defects: the rail (0.57 m) IS walked over on the PS2 (feet 78.42 → 79.11, `out/rail_0.csv`), and the hull is
   then walked GLUED at 34° — STHOP's reference trace.
 
-## Do (after STHOP's build — one ground rule, not two)
-1. The PS2's foot is read: the sphere `coll_body_lower`, r 0.57 at (0, 0.57, 0.15), floor when n.y > 0.6
-   (`analysis/re-soldier-ground.md`, STHOP [O]). Read its §§ on the contact before building; no new RE expected.
-2. Build on STHOP's ground follow: the floor under the feet comes from a foot as wide as the PS2's (the sphere's
-   contact, or a ring of rays at its radius — say which and why), and the ray continues past a non-walkable face of the
-   same body.
-3. Commit the census as `examples/floor_census.rs` (+ CRATES.md row) so the acceptance can be measured by anyone.
-
-## Acceptance
-- Census `holes` = 0 on both Kaminos and no soldier ends under a drawn floor: the walk probe
-  (`tools/kamr_walk.rs bf2_kam1 -197.35,52.0,69.5 -197.35,64.0`, and standing still on (−197.35, 58.17)) never reads
-  `ground_under` < 69 there.
-- Census on all 32 maps: `holes` total ≤ 10 % of today's (bf2_hot1 203, bf1_bes1 189, bf2_kam1 126 … at 1 m cells).
-- Sweep over 8 seeds: finishes not below main's; BF2 KAM1 environment deaths not above main's; sim hash re-pinned only
-  with the lead's rule (a new ground rule moves every replay — declare it).
-
 ## Notes
 - Census leads NOT followed (other maps): BF2 MUS1 — `mus1_bldg_conference`'s collision floor 0.5–0.8 m over the drawn
   `mus1_bldg_world_1` surface on 15,160 m²; BF1/BF2 END1 — ~709,000 m² of reachable heightfield outside the drawn

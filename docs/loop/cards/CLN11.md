@@ -24,9 +24,4 @@ Found so far: CRATES.md 24 stale line counts (VERIFIED, size_report --check-map)
 ## Evidence
 `engine/artifacts/lead_tmp/cln11/` (ci0.log: ci green on the untouched branch, the cleanse's precondition).
 
-## Acceptance
-- `size_report.sh --check-map` 0 stale counts, `--strict` exit 0, `analysis_index.py --check` exit 0.
-- Every gate PASS, nothing declared (sim hashes and the seed-42 sweep equal main's).
-- Each finding fixed, declined with a reason, or carried to a card (the report lists them).
-
 ## Notes

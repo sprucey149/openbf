@@ -25,20 +25,6 @@ sweep_s*.txt`, team 0 - team 1 wins): bf2_kam1 16-0, bf2_dag1 16-0, bf1_rhn2 16-
 design (Hoth, Geonosis); a port fault that starves one side (a route, a spawn pen, a class, a vehicle) would make every
 battle the maintainer plays one-sided. No card measured win share before; BOTM / BOTV do not.
 
-## Do (measure; no code)
-1. Per map from the 16 seeds: winner, ticket margin, how the loser ran out (bleed by posts vs kills), kills per team,
-   posts held over time. `analysis/re-tickets-spawn.md` + the mission lua: each side's tickets, unit counts, bleed rule.
-2. The PS2 column on the worst showcase map (uta1) and on bf2_kam1: bots-only rounds (BF2: memory
-   `bf2-no-ai-battle-by-conquest-option` in reverse - AI on, player parked; `ps2live.py` / `padscript.py`;
-   `PCSX2_FORCE_SW=1` while the RTX is lost): winner, tickets at the end, posts held. 2+ rounds each.
-3. Sort each lopsided map: DESIGN (the PS2 is lopsided the same way) or PORT (name the fault on one side with a
-   black-box snapshot `BLACKBOX_AT` on the losing team: stuck units, a dead spawn, a post it never takes).
-4. File one build card per PORT fault (value by map; showcase first); notes on existing cards where one owns it.
-
-## Acceptance
-- A table in this card: map | port t0-t1 (16 seeds) | margin | loser's end (bleed / wipe) | PS2 rounds | DESIGN / PORT.
-- uta1 and kam1 each have a PS2 result from 2+ rounds and a named cause (a mission number or a traced port fault).
-
 ## Notes
 - planner 2026-10-22 00:10: KA137 also saw 2 of 24 KAM1 rounds recycle a bot at (-185, 68, 31), cp1, leg 100 -> 103, steer `slide`, floor_dy -128 (`lead_tmp/ka137/main24r/s2.err`, `s16.err`) - check whether it is on the losing side.
 

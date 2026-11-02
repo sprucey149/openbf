@@ -22,9 +22,3 @@ Only map-local vehicle models are baked; every SIDE vehicle (speeder bikes, figh
 `analysis/re-vehicles.md` §1 (the classes per map), §6 (CHUNKSECTION: up to 9 chunk models per class), §10 item 3 (the
 side bake writes soldiers and weapons only; skinned walkers meet `bake::soldier::segment_blends`' refusal of the 0x02 bit
 and of a 0x04 word with 0x08/0x40/0x80 — `rep_walk_atte` carries 0x02, PLAN HOLD 1 note).
-
-## Acceptance
-`bake side` also writes each vehicle class's GeometryName model (+ LOWD), its chunk models and its collision bodies
-(`coll` + `prim`, with the class's layer lists) for both games' four sides — REBAKE side; hovers and flyers rigid;
-walkers skinned with their skeletons (the blend-bit pass decided and documented, or walkers deferred to VWLK's build);
-a gallery sheet of every baked vehicle viewed before landing; cmp_bake shows only the new files.

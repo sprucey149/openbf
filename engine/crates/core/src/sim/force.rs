@@ -432,6 +432,10 @@ impl Sim {
                 continue;
             }
             self.units[i].burn = Some(burn);
+            // A burn caught on foot does not reach him inside a hull.
+            if self.units[i].mount.is_some() && !self.hero_body_active(i) {
+                continue;
+            }
             let victim = self.handle(i);
             let friendly = self.units[i].team == burn.team;
             let owner_is_player = self

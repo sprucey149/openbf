@@ -131,8 +131,6 @@ pub mod message_color {
     pub const ENEMY: [u8; 3] = [200, 100, 100];
     /// Nobody's (team index 0: a death with no killer).
     pub const NEUTRAL: [u8; 3] = [192, 192, 192];
-    /// Squad orders and medals (`DAT_0076c240`).
-    pub const CYAN: [u8; 3] = [32, 223, 223];
     /// Bonuses and the mission's `ShowMessageText` (`DAT_0076c250`).
     pub const YELLOW: [u8; 3] = [223, 223, 32];
 }

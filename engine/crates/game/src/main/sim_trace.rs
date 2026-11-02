@@ -95,6 +95,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             mission_file: None,
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
+            dlc_heroes: false,
         };
         let walk = super::battle::make_walk(&scene, &setup);
         (

@@ -469,6 +469,37 @@ fn the_kill_floor_kills_through_the_cheat() {
     )));
 }
 
+/// A hover tank driven off BF2 Mygeeto's deck fell for good (census `drive`:
+/// y -1156 and still going), alive, so its pad never made another. Out there
+/// the fall ends at the kill floor.
+#[test]
+fn a_craft_past_the_kill_floor_is_destroyed() {
+    use crate::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    use crate::weapon::HealthType;
+    let mut s = decks();
+    let floor = s.kill_floor.expect("a kill floor");
+    let h = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Hover,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: Vec3::new(-30.0, floor + 2.0, 0.0),
+        yaw: 0.0,
+        max_health: 500.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    assert!(s.vehicle(h).is_some(), "it starts above the floor");
+    s.vehicle_mut(h).expect("the craft").pos.y = floor - 1.0;
+    s.step(&[]);
+    assert!(s.vehicle(h).is_none(), "the kill floor took the craft");
+    assert!(s
+        .events
+        .iter()
+        .any(|e| matches!(e, crate::sim::Event::VehicleDestroyed { .. })));
+}
+
 /// Start checks belong to one resolution: enclosing a previously open hub
 /// makes it a pen, which must not be mistaken for a walled outgoing arc.
 #[test]
@@ -582,4 +613,34 @@ fn arc_start_checks_belong_to_the_hub_they_leave() {
     assert_eq!(starts, [Some(true), None]);
     assert!(!s.arc_walled(0, 1, &mut starts), "a pen is not judged");
     assert_eq!(starts, [Some(true), Some(false)]);
+}
+
+/// A map's posts walk the level once, after the last: what stands on them is
+/// what a walk after every post leaves, floors, spawn seats and flanks alike.
+#[test]
+fn walking_the_level_once_after_the_last_post_changes_nothing() {
+    let posts = || {
+        [
+            sphere_cp("cp2", Vec3::new(41.0, 16.0, 1.0), 6.0, false),
+            sphere_cp("cp3", Vec3::new(20.0, 13.0, 0.0), 6.0, false),
+        ]
+    };
+    let derived = |s: &Sim| {
+        format!(
+            "{:?} {:?} {:?} {:?} {:?} {:?}",
+            s.nav_floors, s.nav_unwalkable, s.nav_trapped, s.kill_floor, s.spawn_seats, s.flank
+        )
+    };
+    let mut each = decks();
+    for p in posts() {
+        each.add_cp(p, Some(1));
+    }
+    let mut once = decks();
+    for p in posts() {
+        once.add_cp_unresolved(p, Some(1));
+    }
+    once.resolve_posts();
+    assert_eq!(derived(&each), derived(&once));
+    once.resolve_posts();
+    assert_eq!(derived(&each), derived(&once), "the walk starts over");
 }

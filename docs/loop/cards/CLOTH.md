@@ -63,11 +63,6 @@ Expected moves: rebake=side; goldens = the unit stills of models that wear a clo
 Measure the baked skirt texels' luma (sheet v 0.64-1.0, u 0-0.30) before fixing acceptance (2)'s 170 threshold.
 The step itself is card CLOTH2.
 
-## Acceptance
-(1) mungefs parses all 58 disc CLTH chunks (vertex / triangle counts per chunk in a test, e.g. imp_inf_snowtrooper_skirt 54
-vertices). (2) The port's unit still of bf2 imp_inf_snowtrooper (the two-tier-soldier sheet) shows the skirt: in the hip box
-of the standing pose, white-ish texels (luma > 170) cover over half the box where today they cover under 10 %. (3) A PS2 |
-port pair of a Hoth snowtrooper at one pose, viewed.
 ## Built (2026-10-16, branch cloth 257ae94 + 47b9724)
 - (1) `mungefs/tests/cloth_disc.rs`: 58 / 58 CLTH chunks parse to the last byte; per-chunk N / F / T for six of them
   against clth.py (skirt 54 / 18 / 80, 4 cylinders). Mutation: strings padded to 4 -> FAILED; restored -> ok.

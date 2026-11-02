@@ -273,3 +273,57 @@ the only committed copy. Their Log entries are now one-line pointers back here.
   (ALPHA RULE v2 landed since and routes OPAQUE / MASK / BLEND per draw; this
   classifier is the remaining refinement for flagged textures whose alpha is
   noise, and it is still unbuilt.)
+
+
+## Milestones, the full text of 2026-09-25 to 2026-09-30
+Moved from PLAN.md on 2026-11-02; PLAN.md has the short current form, and its scope line wins.
+DONE: P0 audits, P1 bake, P2 viewer, P3 soldier, P4 combat, P5 vertical slice, P6 shell, P6.5 infantry AI A–D, P9's two
+spine changes (N-pad `Sim::step`, libm-backed `core::fmath`). The loop measures every milestone below on
+`engine/artifacts/loop/STATUS.md`'s scoreboard; cards (`engine/artifacts/loop/cards/`) carry a `milestone:`.
+
+**First — M-ALPHA, the public alpha (the maintainer, 2026-09-29; defined by the planner 2026-09-30).** the maintainer shows the game in
+public (a GitHub repo and a video) once it reads as a real game, not once every lighting detail matches. *Done when* a
+full conquest round with drivable vehicles plays on six showcase maps and looks and sounds like a game in a 5-minute
+video. The checklist: real effects (muzzle flash, bolts, impacts, explosions), the real BF2 HUD, gameplay audio,
+grenades and pickups, class select on spawn, no soldier or AI out of bounds, no missing walls or sky, no droid chrome.
+The showcase maps are BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1 and BF2 HOT1. They were
+picked for recognisable settings, ground vehicles, a finished sweep and few open cards naming them. Hoth is the
+exception on the last count, kept for the video.
+- Cards carry `alpha: yes`.
+- What the alpha does not need carries `defer: post-alpha` and waits, without being deleted: heroes, the real shell,
+  LAN, campaign, Galactic Conquest, splitscreen, and pure lighting-parity work off the showcase maps.
+- *Measured by* STATUS's M-ALPHA scoreboard and the PARITY score on the showcase maps.
+- M1–M3 below continue through their alpha cards first.
+
+**Active, interleaved by value (the maintainer, 2026-09-25):**
+- **M1 Looks right** — every map reads like the PS2 in character (colour, water, sky/fog, lighting, foliage, missing or extra
+  objects), under the modern-port rules of `engine/artifacts/pcsx2/ref/COMPARISON_RULES.md`. *Done when* every
+  high-confidence finding in `engine/artifacts/pcsx2/ref/FINDINGS.md` is fixed (its PCSX2 pair re-rendered and reading like
+  the PS2) or ruled expected, and the PCSX2 library covers every map. *Measured by* open M1 cards and open findings.
+- **M2 Vehicles** (old P7 + P6.5 E) — ground vehicles, then flyers, faithful per map, with vehicle AI. *Done when* every
+  vehicle class each map ships spawns, is drivable/flyable by the player and by AI with its weapons, turrets and enter/exit,
+  and a PCSX2 spot check per class reads right. *Measured by* vehicle classes spawned / drivable / AI-driven per map.
+
+**Next, in order:**
+- **M3 Plays right** — a full conquest round on every map ends by tickets, no unit stuck (the stuck census empty), the round
+  sweep `finished 32/32`; PCSX2 gameplay spot checks. *Measured by* the sweep footer and the census.
+- **M4 Heroes, space, awards** (old P8): Space Assault faithful first; heroes killable (BF2 conquest hero health, time/damage drain and healing
+  on kills); awards/medals; class meta-unlock.
+- **M5 Campaign, Galactic Conquest, splitscreen, polish, Win/Linux/macOS builds** (old P10) — the shell and menus
+  (card BSHL) ship a **Multiplayer** entry in BF2's main-menu slot, greyed out and unselectable, behind an `enabled` flag in
+  data (the maintainer, 2026-09-30). **Splitscreen is here, before PACK, and is not held** (the maintainer, 2026-09-30 evening; card SSCR):
+  local play on one machine — one sim, N cameras, N input devices, no netcode. It starts only after the alpha cards and
+  M1–M3's open cards are done; the loop works it out without asking the maintainer. How the shell reaches it is SSCR's call (the
+  greyed-out Multiplayer entry is LAN's).
+- **M6 PACK, only on the maintainer's go-ahead when the core game is done (card PACK):** one self-contained game file (every baked
+  asset inside, no DLLs or helper files) and one Python script that takes the two ISOs, bakes, compiles and emits that
+  file. Dev builds keep the assets separate. PACK does not wait for multiplayer, and its design leaves room for it: adding
+  netcode later must not force a redesign of the single-file build or the bake script (the maintainer, 2026-09-30).
+- **M7 Multiplayer — LAN only, the LAST milestone, HELD until the maintainer says it is ready (the maintainer, 2026-09-30; splitscreen moved
+  to M5 the same evening).** 16-player LAN lockstep on the spine already built. Until then every LAN / network /
+  lockstep / lobby card carries `needs: maintainer — multiplayer hold` and the `net` crate stays the stub it is. The
+  determinism spine stays healthy meanwhile (replay hashes, `fmath`, the sweep's byte-compare) — no netcode is written.
+- Post-1.0 (old P11): new modes, space/CTF reworks, campaign extension, GC economy tuning.
+
+**Always on — M0 Health:** ci green; referees that test what they say; files ≤ 1,500 lines (`scripts/size_report.sh`);
+disk hygiene; the auditor's error rate low.

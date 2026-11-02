@@ -29,16 +29,6 @@ SPAWNS 8-9 m from it: the command walker is a spawn post (card CWSP). Bots come 
 | `imp_walk_atst_snow` | both HOT1 | CLAIMED, never reached: 9-12 claims a round end `giveup_20s` | the bot slides on a wall at (18.6,-1.0,16.6), 17.3-18.2 m from the walker at (32.6,-2.7,27.4), reach 8.0 m; the other at (56.2,7.2): 16.6 m |
 | `all_walk_tauntaun` | BF1 HOT1 | boarded, but 3/8 at 20-50 s (PS2 5/8, 7/8, 7/8 at 20/30/40 s) | rides 158-203 m, the drop hub is 85.9 m from cp6 (PS2: 282-711 m, ending 4.5-41 m from cp6) |
 
-## Acceptance (build)
-1. A claimer reaches its walker: `DROP:giveup_20s` on the snow AT-ST 0 on 4 seeds (now 9-12 a round); sweep line
-   `imp_walk_atst_snow` piloted on BF1 HOT1 >= 1/2 at 40 s (PS2 2/2) and on BF2 HOT1 1/1 at 120 s (PS2 1/1).
-2. BF2 GEO1 `rep_walk_atte` 1/1 at 60 s and 180 s (PS2 1/1, z 326 -> 197 by 140 s); BF1 GEO1 >= 1/2 at 60 s (PS2 2/2).
-3. BF1 HOT1 tauntauns: >= 6/8 at 30 s (PS2 7/8), metres per ride >= 280 (PS2 282-711).
-4. 8 seeds x 32 maps beside a null variant on the same base: no map's finish count drops; `veh` deaths per class
-   (killed / unowned) reported. The AT-ATs are CWSP's (nobody spawns near them); do not count them here.
-Keep the census as the check: `lead_tmp/wai2/census.patch` (scratch, on 22eddb0) adds the `claim census:` lines and
-`walkers at 20/30/40/50 s` to `round_to_outcome`; land its counters as `NavStats` fields under ROUND_VERBOSE.
-
 ## Build notes
 - Order: (a) walk to the claimed vehicle over the nav graph, or claim only what a straight walk reaches; (b) `BOARD_SEEK`
   40 -> 75 m (PS2 >= 71 m; FEEL_NOTES); (c) the command walker's route (`routes_to` / `post_hub` for its `AISizeType`:
@@ -57,27 +47,6 @@ Card WAI (2026-10-02) put bots in walkers' pilot seats. Its sweep line (`walkers
   both `imp_walk_atat`; BF1 HOT1's two snow AT-STs and two AT-ATs; BF2 GEO1's `rep_walk_atte` (0/1) and BF1 GEO1's two.
   Not looked at: whether the claim fails on the team, the seat, the 40 m seek range, the route or `RIDE_GAIN`.
 - **The PS2 aims 20.2 m ahead along the leg** (re-walker-ai.md section 6); the port steers straight at the node.
-
-## Acceptance (the original; 1 is done, 2 is replaced by "Acceptance (build)" above)
-1. Measure: for each never-boarded class, which of `claim`'s tests refuses it (a per-reason count in
-   `round_to_outcome`, one line per map), and on the PS2 whether a bot pilots the AT-AT / AT-TE (`lead_tmp/sqveh/sv_live.py`).
-2. Then build what the measurement shows; the sweep line within 1 walker of the PS2 per class at 60 s on BF1 HOT1 and
-   BF2 HOT1; 8 seeds, no map's finish count drops.
-
-## Planner note (2026-10-02 04:30)
-Value 4 -> 5. M2 had no value-5 card once WAI landed, and this is the vehicle gap a player meets first on a showcase
-map: on BF2 HOT1 no bot boards an AT-AT or the snow AT-ST on any of WAI's four seeds, where the PS2's AT-ST is piloted
-at 60 s (`reports/20261001_2340_card_WAI.md`, `reports/20261002_0335_card_WAI.md`). Whether a PS2 bot pilots an AT-AT or
-an AT-TE is NOT measured: that is acceptance 1, before any build. The runnable check the vehicle rule asks for is the
-sweep line `walkers: ai_piloted at 60 s ...` (ROUND_VERBOSE=1). The 8-seed table for main 22eddb0 is
-`lead_tmp/lvlf/rb_fix/seeds.md` (253 / 256); re-run it on your own base before judging, with a null variant beside the
-change (AIRC's `sw_null`: 2 rounds of 256 is noise). Reverse: `loopctl.py set WAI2 value=4`.
-
-- Planner 2026-10-02 09:30: `deps: WAI,STARC`. This card's `files:` gained `core/src/ai/route.rs` at its measure pass,
-  which STARC (the maintainer's `first: 6`) also edits; the picker refuses a card whose files overlap one in progress, so WAI2
-  taken first would have held the maintainer's order for its whole build. STARC is next in line once STTAP's landing frees
-  `ai/brain.rs`. CWSP (no shared file with the numbered cards) is M2's value-5 card meanwhile.
-  Reverse: `loopctl.py set WAI2 deps=WAI`.
 
 ## Note from STEND (2026-10-02, `lead_tmp/stend/README.md`) - a spider walker walks into a post's ramp and leaves its pilot inside the platform
 - BF1 GEO1 seed 42: a bot pilots a `cis_walk_spider` at cp14 (123, -59.6, 7) and cp13 (1, -58.8, -3), posts on slabs 2.4-3.7 m over the terrain with one ramp. The walker follows the terrain INTO the ramp (body origin at (120.7, -60.88, 3.7), the ramp's surface there is -59.9), stops, and the bot leaves it: `Sim::exit_point`'s candidates start inside the platform's shell, the 5 m ray up meets the slab from underneath, and the bot is put on the terrain under the post, walled in (`TRACE_UNIT=27,16280,16470 round_to_outcome 16500 42 bf1_geo1`, the `rides` lines).

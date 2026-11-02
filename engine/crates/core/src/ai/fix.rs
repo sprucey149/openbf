@@ -383,12 +383,16 @@ pub(super) fn serve(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<PadState>
     let (_, centre, radius) = stand(sim, u, c.target)?;
     let wc = &sim.weapon_classes[class];
     let eye = u.muzzle();
-    let mut flat = centre - eye;
-    flat.y = 0.0;
-    if flat.length() > wc.lock_on_range + radius - 0.25 {
+    // The cutter's own limits (`Sim::repair_candidate`): the reach is 3D and
+    // the terrain may not rise before the target's radius. A target far below
+    // his eye, like Kashyyyk's sunk pad, needs him closer than its flat distance.
+    let to = centre - eye;
+    let dir = to.normalize_or_zero();
+    if to.length() > wc.lock_on_range + radius - 0.25
+        || !crate::perception::los_terrain(sim, eye, centre - dir * radius)
+    {
         return None;
     }
-    let dir = (centre - eye).normalize_or_zero();
     let dt = crate::TICK_DT;
     let want_yaw = super::gunner_foot::yaw_toward(dir);
     let want_pitch = fmath::asin(dir.y.clamp(-1.0, 1.0));

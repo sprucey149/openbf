@@ -21,13 +21,6 @@ Card GRFL landed the grenade fix, its test and the census (game/examples/ordnanc
 - engine/artifacts/lead_tmp/grfl/build/GATE_PROPOSAL.md: the g_ordnance function (never executed) and the [ordnance] row.
 - Measured on 296fa0c's tree, three runs byte-identical, 30 s on 16 threads under the 8 G cap: ordnance: maps 32  floors 389228  gaps 6500  runs 1556912  through 7260  accepted 7260  new 0. The parent's ray through the same binary: through 127017 accepted 13407 new 113610.
 
-## Acceptance
-- gates.py --groups leak on main prints an ordnance row PASS with that footer; with the sweep fix reverted in a scratch worktree the row is FAIL (new 113610).
-- land.py's row readers take the new row name (a dry run).
-- Optional: trace the 45 SO runs of the accepted list (a body with an ordnance layer crossed; 11 on dag1_prop_grandtree_2, 6 on uta1_bldg_lizardpen) and remove their lines.
-
-- 2026-10-09 12:45 planner. **Waits on the maintainer with BSPN (STATUS question 33).** `oracle=baselines,guards` on this card is never read: the guard and the protect gate read `git show HEAD:<card>` and no card is in git. A planner is exempt from the hook but a planner does not build, and a build session's branch that edits `scripts/gates.py` fails the protect gate for the same reason. The proposal stays at `lead_tmp/grfl/build/GATE_PROPOSAL.md`. Undo: `loopctl.py set GRFG needs=`.
-
 ## Note (cleanse 14, 2026-10-09) - land.py's fidelity re-baseline is wider than the declaration
 For the planner, with this card's gate wiring (same files, same channel). `scripts/land.py` `rebaseline()` reads the card's
 `fidelity=` tokens and calls `gates.fidelity_rebaseline(only=...)` with `only = None` when any token is `all` or starts with

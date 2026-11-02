@@ -25,21 +25,6 @@ and when the PS2 spawns it.
 → impacts → explosion, with where each effect lives); B1 impact selector `FUN_00276810` (197939–198038), explosion
 `FUN_002701a0` (193756–193807).
 
-## Acceptance
-- `Event::BoltExpired` (or a new event) carries the ordnance class and the struck surface: soldier → ImpactEffectSoft,
-  vehicle → Rigid, building/world model → Static, terrain → Terrain, water → ImpactEffectWater, shield → Shield;
-  unauthored BF1 Terrain/Water fall back to `dirtspray` / `watersplash_ord` (the ctor's); the effect spawns at the hit
-  with world axes (attached to a struck vehicle). Every showcase infantry bolt then reads `ord_explosion` (BF1) /
-  `com_sfx_ord_exp` (BF2).
-- Explosions spawn the explosion class's `Effect` (BF2: one of up to five at random) or `WaterEffect` at/below
-  water + 0.3 m. The PS2's 60 m visibility cut is a PS2 budget — modern: spawn at any range (FEEL_NOTES line).
-- `TrailEffect` rides grenades/missiles; vehicle `DamageEffect` stages, `ChunkTrailEffect` / `ChunkSmokeEffect`,
-  `ThrustEffect`, `WakeEffect`, `StompEffect` where the port has the matching event (list what is left as a card).
-- Effect names absent from the running game's disc spawn nothing (BF2's inherited BF1 names, re-fx §7).
-- PCSX2 pairs (muzzle-side view, a ground impact, a grenade blast) on one BF1 and one BF2 showcase map, viewed; the
-  §9 frames are the PS2 side.
-- Gates: sim hashes unmoved (the new event fields are outputs); no golden move unless one frames combat (declare).
-
 ## Note (2026-09-30, FXB RE, `analysis/re-bolt.md` §5.1)
 BF1's impact explosions also carry a `LightFlash` (explosion class LightColor / LightRadius / LightDuration: an omni
 light at the blast, colour fading linearly to black over the duration, lighting MODELS only — BF1's terrain light pass
@@ -53,8 +38,3 @@ with world axes (PROVISIONAL for non-rifle ordnance) — replace that route. Che
 (*(decompiler detail omitted)* of B1 `FUN_00276810`, spawn at 198038): spawned exactly on NAB1's terrain the port's flash loses its lower half
 to the ground (depth tested, `lead_tmp/fxp2/cap/sheet_port_nab1_impact.png`) while the PS2's flash reads whole
 (`lead_tmp/fxp/ps2cap/crop_nab1_impact.png`) — an offset along the normal or the bolt is likely.
-
-## Scope (2026-09-30, lane 1 resume)
-This card lands the struck-bolt route (Event::Impact → ImpactEffect Soft/Rigid/Static/Terrain, the ordnance's
-ExplosionName Effect 0.2 m back along the bolt, a destroyed vehicle's Effect; FEEL_NOTES line for the 60 m cut).
-Water / Shield emitters, TrailEffect, the vehicles' own effects and the PCSX2 pairs moved to **FXP5**.

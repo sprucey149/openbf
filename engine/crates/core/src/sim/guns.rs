@@ -289,7 +289,8 @@ impl Sim {
             .iter()
             .filter_map(|s| s.occupant)
             .collect();
-        let Some(mut st) = self.vehicles[vi].guns.get(seat).cloned().flatten() else {
+        // Out of its slot while it is driven, and back at the end.
+        let Some(mut st) = self.vehicles[vi].guns.get_mut(seat).and_then(Option::take) else {
             return;
         };
 

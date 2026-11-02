@@ -29,19 +29,6 @@ monotonic by tier" under For the maintainer (OFFG, STTAP) and nobody owns it. Pl
 `hits` reads `no` in every one of them (hit rate easy 0.12-0.15, the other three 0.18-0.24 in no fixed order).
 The order flips with each landing, so one seed cannot say whether the tiers differ at all above `easy`.
 
-## What to do
-1. On main, `arena 9000 <seed> tat2 all` for seeds 1-8 (the gate's own example; no code change; a known binary, so no
-   memory cap needed). Per tier: mean and spread of kills / min, hit rate, time to first kill.
-2. Say which neighbouring tiers are apart by more than the seed spread and which are not.
-
-## Acceptance
-- A table in the report and on this card: per tier, the 8-seed mean and min-max of kills / min and hit rate.
-- A verdict per neighbouring pair (easy < normal, normal < hard, hard < elite): apart / inside the noise.
-- If a pair is inside the noise or reversed in the means: one build card (value 4) naming the `Skill` fields that
-  should separate them, with the PS2's values where `analysis/` has them; else close this card and add one line to
-  `FEEL_NOTES.md`. Either way propose whether the gate's `monotonic:` line should be an 8-seed mean (a note on the
-  report; gate-script edits are their own card).
-
 ## Notes
 - No `files:`: a measurement with the gate's binary. Do not tune a tier in this card.
 

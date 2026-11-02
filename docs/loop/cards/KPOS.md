@@ -32,10 +32,6 @@ displaced instance, so this is either a different set of objects, the near scene
   which are visible in the maintainer's frames. A rotation/scale/parenting rule (bone-parented props, `AttachOdf`, instance flip flags) is the
   likely class.
 
-## Acceptance
-A table of every BF2 KAM1 instance whose transform differs between port and PS2 (zero after the fix, apart from listed authored
-exceptions), and BF2 KAM1 mean block error <= 15 at the landing.
-
 ## Notes
 Filed 2026-09-30 22:50 from the maintainer's third BF2 Kamino play session (three frames, `lead_tmp/playtest_0930/kam1_bf2_2230_*.png`); a claim in Why/Evidence marked as reading of the image is Claude's, not measured.
 

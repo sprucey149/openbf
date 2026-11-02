@@ -281,6 +281,17 @@ fn untextured_routing_skips_the_disc_s_own_gaps_and_greys_only_our_misses() {
         Untextured::Dangling
     );
     assert_eq!(route_untextured(Some("noIcon")), Untextured::Dangling);
+    assert_eq!(
+        route_untextured(Some("tat_propCZ1_parts_head")),
+        Untextured::Dangling
+    );
+
+    // A far model's missing reduced copy is looked up as the full sheet.
+    assert_eq!(
+        lowrez_source("com_item_healthrecharge_lowrez"),
+        Some("com_item_healthrecharge")
+    );
+    assert_eq!(lowrez_source("com_item_healthrecharge"), None);
 
     // Anything else that fails to resolve is OUR bug: grey and counted.
     assert_eq!(

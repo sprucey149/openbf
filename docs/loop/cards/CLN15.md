@@ -19,6 +19,4 @@ created: 2026-10-20
 
 ## Evidence
 
-## Acceptance
-
 ## Notes

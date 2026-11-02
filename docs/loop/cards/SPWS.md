@@ -23,7 +23,3 @@ Every unit spawns on the same tick, so every unit's equip sound and first footst
   `OVERLOAD -58.97s tick 1: 39 starts, sum 13.58: com_weap_inf_equip_med x11 (4.10), com_weap_inf_equip_sm x13 (4.92), com_weap_inf_equip_lg x6 (1.80), rep_inf_trooper_walk_metal_left x9 (2.76) - nearest 2 m`
 - `python3 scripts/tools/mix.py <that file> engine/assets_baked`: peak 1.59 x full scale, 84 frames over it, all in second 0 (`lead_tmp/sndb/win/prev1_mix.wav`).
 - Unknown: whether the PS2 plays an equip sound on a spawn at all (it may only on a weapon SWITCH), and whether a soldier that has not moved steps.
-
-## Acceptance
-- The PS2's rule cited from `analysis/` or measured (ps2live sound-start sampler, memory note topic-ps2-live-samplers): which sounds a spawn starts.
-- The port's tick 1 on the same scene (`win_run.sh` with a null ALSA device, see report `20261007_0205_card_SNDB.md`): no OVERLOAD line at the first tick unless the PS2 starts the same sounds; the count before / after in the card.- 2026-10-07 (SNDB session): the digest's one-take column for that tick: `one take at most x13 (sum 4.92)` - the 13 `com_weap_inf_equip_sm` starts are ONE take file, so they add up sample for sample (each start's own pitch draw aside), the same mechanism as SNDX's 8 stacked shotgun fires.

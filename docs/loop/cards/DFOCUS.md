@@ -71,18 +71,6 @@ Elite shadow 53/30/13/4 -> 49/30/12/9, lone 48/30/14/8 -> 39/27/17/17. Hits a ru
 100 -> 113 (lone); Elite 69 -> 70, 107 -> 129. Before, Elite was TOKN-off: with the cap of 7 and focus it is not easier
 than that in either proxy, but in the shadow proxy it is only level (+2 %, noise); the lone proxy shows the gain.
 
-## Acceptance
-`ai::dfocus::tests` (9): only Hard and Elite focus, up to 5 / 7 of 8 bots that see him; heard or told is not enough,
-sight is; no focus in the spawn grace; the reach on foot and the scope's longer one; a launcher focuses a human in a
-tank within 90 m, a rifleman never, a bot with only heavy weapons no soldier; a capturer and a threatened post's
-defender keep their job (a quiet post's defender may focus); a focuser keeps him for the memory, pushes within 25 m,
-then lets go; two humans, one focuser each, seen-first then nearest; the fellows' bearings; in play (real perception)
-a Hard bot turns from a nearer soldier to the human it sees, a Normal one does not, nor a Hard one through a wall.
-`ai::tokn::tests` updated for Elite 7. Mutations (each fails a test): sight not required, reach not asked, the post
-job not kept, no grace, Normal focuses, no focus step in the think, no memory, a bot focusing two humans, vehicle
-weapons not asked, the scope no longer. Not covered by a test: the push walk in play and the Tactician's spread in
-play (the closures are read; `fellows` is tested).
-
 ## Open
 - Starting values to tune by play: reaches 45 / 120 / 90 m, memory 3 s, push 25 m, grace 3 s, spread 30 degrees,
   Elite hold 2 s and miss 0.7 m.

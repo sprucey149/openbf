@@ -166,7 +166,7 @@ NumberToTime (0xce8ad9c0, e.g. `"%m:%02s"`); FloatFormat (0xd9e54312).
   (0x4b426ca0, `FUN_003a99e8` D:403231) = per-mesh-name Position/Rotation/Scale that REPLACE the element's own transform
   when that mesh is shown (`FUN_003a9db0`); +0x60 default 0.01 (0x3c23d70a).
 - [V] Draw `FUN_0059fe60` (vtable 0x650970 = `21RedModel3DElement`, slot +0x40): `FUN_0059fdb0` negates the matrix's Y
-  row and multiplies its TRANSLATION row by 0.01 × (DAT_0060c774 ? DAT_0060c7b8 = 1.24 : 1) (eedis2: `VMULx.xyz` at
+  row and multiplies its TRANSLATION row by 0.01 × (DAT_0060c774 ? DAT_0060c7b8 = 1.24 : 1) (eedis: `VMULx.xyz` at
   0x59fddc on row 1 and at 0x59fe14 on row 3), then renders the model with that matrix.
 - [V] Scene draw `FUN_005a3d40` D:737783 with `FUN_005a3bf0`: DAT_007d6208 = √3 (`FUN_0052bc10(3.0)`), 620c = √3·2/3,
   6210 = √3/2 (`FUN_005a45d0` D:738186–738188); W, H = 512, 448 (DAT_007d5f70/74, RAM); plane depth D = W/1.1547

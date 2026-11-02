@@ -6,8 +6,7 @@
 //! `segm` materials (`engine/artifacts/texture_census/`). HOLD 10(g) — what
 //! the PS2 actually does with a material's alpha — is read out of the ELF at
 //! the CPU-visible level (`analysis/re-material-flags.md`); the census rule
-//! stands for BF2 and for the BF1 words the overrides below do not cover
-//! until that document's §0 item 7 (the ELF rule per game and class, with a
+//! stands for the BF1 and BF2 words the overrides below do not cover until that document's §0 item 7 (the ELF rule per game and class, with a
 //! PCSX2 capture for its §8) is built. Do not tune the thresholds here
 //! without the lead.
 //!
@@ -39,6 +38,13 @@
 //! Normal word with neither 0x02 nor 0x04 (OPAQUE, no test) or a Scroll word
 //! with 0x04 (BLEND), the ELF wins — [`bf1_elf_verdict`]; the GLB's
 //! `extras.rule` says `"elf"` there. PCSX2 walkabout pairs settled both.
+//!
+//! **BF2 override (sprint, 2026-11-01):** BF2's draw is the same on the point
+//! that matters: a word with neither 0x02 nor 0x04 gets TEST 0x50000, no test
+//! and no blend (`re-material-flags.md` §0.3 and §2's BF2 table [V]). The
+//! census's class-D clause cut those draws out anyway, which took most of
+//! Dagobah's cave wall (`dag1_prop_cave_C`, 0x10201, 53 % of its texels at
+//! alpha 0) and showed the sky through it. See [`bf2_elf_verdict`].
 //!
 //! The stats are taken from the DECODED PS2 texture, never from the PC tier:
 //! where a PC file replaced the pixels its alpha is a different channel
@@ -126,6 +132,14 @@ pub fn bf1_elf_verdict(flags: u32) -> Option<AlphaMode> {
         Bf1Class::Scroll if flags & crate::detail::TRANSPARENT != 0 => Some(AlphaMode::Blend),
         _ => None,
     }
+}
+
+/// What BF2's ELF draws where it contradicts the census (see the module doc):
+/// a word with neither 0x02 nor 0x04 is OPAQUE with no test. The texture's
+/// alpha reaches only the frame buffer's alpha. Words with either bit stay the
+/// census's, and BF2 has one segment class, so nothing else decides this.
+pub fn bf2_elf_verdict(flags: u32) -> Option<AlphaMode> {
+    (flags & crate::detail::ALPHA_IS_MEANINGFUL == 0).then_some(AlphaMode::Opaque)
 }
 
 /// Whether the disc alpha-tests this draw — the rule's `mod` term never
@@ -282,8 +296,8 @@ pub enum Rule {
     Mask,
     /// The segment names no texture, or one this LVL does not carry.
     None,
-    /// BF1's ELF segment rule overrode the census (card ELFR,
-    /// [`bf1_elf_verdict`]).
+    /// The ELF's segment rule overrode the census ([`bf1_elf_verdict`], card
+    /// ELFR; [`bf2_elf_verdict`]).
     Elf,
 }
 
@@ -317,7 +331,7 @@ pub struct SegmentAlpha {
 
 /// The verdict the bake writes: ALPHA RULE v2, with BF1's ELF segment rule
 /// overriding it where the two disagree (card ELFR) unless
-/// [`bf1_elf_rule_enabled`] is off.
+/// [`bf1_elf_rule_enabled`] is off, and BF2's always.
 pub fn verdict(flags: u32, rtyp: &RenderType, stats: Option<&AlphaStats>) -> (AlphaMode, Rule) {
     verdict_with(flags, rtyp, stats, bf1_elf_rule_enabled())
 }
@@ -332,14 +346,16 @@ pub fn verdict_with(
     bf1_elf: bool,
 ) -> (AlphaMode, Rule) {
     let census = census_verdict(flags, rtyp, stats);
-    if bf1_elf && stats.is_some() && matches!(rtyp, RenderType::Bf1(_)) {
-        if let Some(mode) = bf1_elf_verdict(flags) {
-            if mode != census.0 {
-                return (mode, Rule::Elf);
-            }
-        }
+    let elf = match rtyp {
+        _ if stats.is_none() => None,
+        RenderType::Bf1(_) if bf1_elf => bf1_elf_verdict(flags),
+        RenderType::Bf2(_) => bf2_elf_verdict(flags),
+        _ => None,
+    };
+    match elf {
+        Some(mode) if mode != census.0 => (mode, Rule::Elf),
+        _ => census,
     }
-    census
 }
 
 /// ALPHA RULE v2 as a pure function. `stats` is `None` for a segment naming
@@ -382,7 +398,8 @@ pub fn census_verdict(
     // 3. No modulation: 0x02 is the disc's own cutout bit; 0x04 is a cutout
     //    only when the histogram is bimodal; an unflagged texture is a cutout
     //    only on the sharp class-D signature (banners, grate, rope, deck
-    //    edge, Jawa junk), and only if a texel passes the world's test —
+    //    edge, Jawa junk; BF2 and BF1's Normal class overrule this in
+    //    [`verdict_with`]), and only if a texel passes the world's test —
     //    below `ALPHA_TEST` that MASK would draw nothing, where the disc
     //    draws the word opaque (queue R1U). Below the test a 0x04 word has
     //    nothing to cut out either, so it takes the disc's reading of the bit
@@ -984,11 +1001,15 @@ mod tests {
             verdict(0x1, &bf1("Normal"), Some(&stats(0.715, 0.285, 116))),
             (AlphaMode::Opaque, Rule::Mask)
         );
-        // The door's class-D stats with a texel past the test: still a
-        // cutout, as before.
+        // The door's class-D stats with a texel past the test: the census
+        // still calls it a cutout, and BF2's ELF rule draws it solid.
+        assert_eq!(
+            census_verdict(0x1_0001, &bf2, Some(&stats(0.021, 0.979, 200))),
+            (AlphaMode::Mask, Rule::Mask)
+        );
         assert_eq!(
             verdict(0x1_0001, &bf2, Some(&stats(0.021, 0.979, 200))),
-            (AlphaMode::Mask, Rule::Mask)
+            (AlphaMode::Opaque, Rule::Elf)
         );
         // A word that asks for its alpha stays rule 1's: 0x05 at 92 (the
         // Falcon's shadow) and 0x03 at 115 (`myg1_mountains`).
@@ -1050,6 +1071,23 @@ mod tests {
             verdict_with(0x1, &normal, Some(&thatch), true),
             (AlphaMode::Opaque, Rule::Elf)
         );
+        // BF2 Dagobah's cave wall: 0x10201, 53 % of the texels at alpha 0. The
+        // census cuts it out and the sky shows through; the ELF draws it solid.
+        let wall = stats(0.035, 0.528, 255);
+        let bf2 = RenderType::Bf2(0);
+        assert_eq!(
+            census_verdict(0x10201, &bf2, Some(&wall)),
+            (AlphaMode::Mask, Rule::Mask)
+        );
+        assert_eq!(
+            verdict_with(0x10201, &bf2, Some(&wall), false),
+            (AlphaMode::Opaque, Rule::Elf)
+        );
+        // The same texture on the cave's 0x10203 roots stays a cutout.
+        assert_eq!(
+            verdict_with(0x10203, &bf2, Some(&wall), true),
+            (AlphaMode::Mask, Rule::Mask)
+        );
         // 0x200 outranks 0x400 in the class dispatch: 0x602 is Normal, so
         // its 0x02 is tested.
         assert_eq!(Bf1Class::of(0x602), Bf1Class::Normal);
@@ -1074,7 +1112,7 @@ mod tests {
             (AlphaMode::Blend, Rule::Modulation)
         );
         // Not ruled here: the leaves' 0x07 MASK, `kam_crate`'s 0x05 body,
-        // Scroll without 0x04, Specular, BF2, and a segment with no texture.
+        // Scroll without 0x04, Specular, and a segment with no texture.
         let leaves = stats(0.2, 0.4, 255);
         assert_eq!(
             verdict_with(0x07, &normal, Some(&leaves), true),
@@ -1094,7 +1132,7 @@ mod tests {
         );
         assert_eq!(
             verdict_with(0x1_0001, &RenderType::Bf2(0), Some(&thatch), true),
-            (AlphaMode::Mask, Rule::Mask)
+            (AlphaMode::Opaque, Rule::Elf)
         );
         assert_eq!(
             verdict_with(0x1, &normal, None, true),

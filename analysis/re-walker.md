@@ -61,7 +61,7 @@ left open which of FUN_0025d5e0's two clock branches a player's walker takes, th
 four are answered here (§0).**
 
 **Method.** The lead read every function below in the B2 decomp and settled the branch trees, operands and constants in the
-disassembly (`scripts/tools/eedis2.py`; dumps `lead_tmp/vwlk/dis_*.txt`). Float literals came from the code
+disassembly (`scripts/tools/eedis.py`; dumps `lead_tmp/vwlk/dis_*.txt`). Float literals came from the code
 bytes (`lead_tmp/hvre/floatlits.py`), .data words from `re_check.py word`, and stores from `widescan.py`. Three checks
 against the discs and the PS2 itself:
 - the walker clips' root motion decoded from the side LVLs with the repo's own `mungefs::anim` (`lead_tmp/vwlk/animspeed`);

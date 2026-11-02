@@ -797,7 +797,7 @@ mod tests {
         }
     }
 
-    /// The pre-P9 logs on disk (`artifacts/p3_walk/*.ron`) carry no `slots`
+    /// The pre-P9 logs (`game/tests/data/replays/`) carry no `slots`
     /// field: they load as one slot and replay to exactly the hash the same
     /// log with `slots: 1` gives.
     #[test]

@@ -33,14 +33,6 @@ turned onto the aim line; otherwise only his neck and head look that way.
   (absolute, children re-derived from the ribcage); BF2 by 0.125 / 0.375 / 0.5 (cumulative). Head: BF1 neck 2/8,
   head 5/8; BF2 neck 0.25, head 0.375.
 
-## Acceptance
-1. Unit tests: alert and aim pitch +0.5 rad -> the hp_weapons bone's forward axis is within 0.02 rad of the aim line;
-   not alert -> the ribcage is unturned and the head carries 5/8 (BF1) / 0.625 (BF2) of the angle; pitch 1.5 rad is
-   clamped to 1.0996; the alert timer runs 2.5 s then fades over 0.5 s. Mutation check on the clamp.
-2. A picture pair against the PS2: a soldier firing at a target well above him (PCSX2 README; ps2live.py aims), port
-   beside PS2, in the report; goldens that move are declared and viewed.
-3. FEEL_NOTES.md gets one line for the alert rule the port uses where the PS2's two soldier flags are unread
-   (analysis 10: PROVISIONAL - alert while firing or holding a target).
 ## Note from ANIML (landed 644695a, 2026-10-05)
 - The two players are in `game/src/animator.rs`: `Rig::body_slots` is where the alert rows go (BF1 `alert[weapon][id]`,
   BF2 block + 3); `Animator::step` owns the action and would own the alert timer; `soldier_vis` builds `AnimInput`.

@@ -8,8 +8,7 @@
 //! The menus' clicks (`analysis/re-bf2-menus.md` §4.1) are asked for by
 //! `ui::shell_ps2` and, for the pages of the port's own, here; all of them go
 //! through `ShellMenus::cues` (the select click's 0.1 s limit) and play from
-//! the CORE.LVL bank (`SoundLib::load_shell`). `OPENBF_SHELL_SOUNDS=1` logs
-//! each start to stderr (a run without a sound device logs them too).
+//! the CORE.LVL bank (`SoundLib::load_shell`).
 
 use super::{App, Camera};
 use ui::shell_feel::MenuSound;
@@ -48,8 +47,6 @@ pub(super) struct FrontShell {
     music_replay: bool,
     /// A page of the port's own covered the screen last frame.
     was_covered: bool,
-    /// `OPENBF_SHELL_SOUNDS=1`: log every click and take started.
-    log_sounds: bool,
 }
 
 struct Controls {
@@ -191,7 +188,6 @@ impl FrontShell {
             repeat: Default::default(),
             music_replay: false,
             was_covered: false,
-            log_sounds: std::env::var("OPENBF_SHELL_SOUNDS").is_ok_and(|v| v == "1"),
         }
     }
 
@@ -217,21 +213,7 @@ impl FrontShell {
         sl.tick(dt, glam::Vec3::ZERO, &mut Vec::new());
         let mut audio = audio;
         for s in cues {
-            let starts = sl.play_2d(audio.as_deref_mut(), s.name());
-            if self.log_sounds {
-                let clock = self.menus.clock;
-                match starts.first() {
-                    Some(st) => eprintln!(
-                        "shell sound t={clock:.3} {} gain {:.3} bus {:.2} pitch {:.2} take {}",
-                        s.name(),
-                        st.gain,
-                        st.bus,
-                        st.pitch,
-                        st.path.display()
-                    ),
-                    None => eprintln!("shell sound t={clock:.3} {} refused", s.name()),
-                }
-            }
+            sl.play_2d(audio.as_deref_mut(), s.name());
         }
     }
 }
@@ -737,15 +719,6 @@ impl App {
                         .ok();
                 }
             }
-            if let (Some(k), true) = (due, front.log_sounds) {
-                eprintln!(
-                    "shell music t={:.3} take {} of {} ({:.1} s) gain {gain:.3}",
-                    front.menus.clock,
-                    k + 1,
-                    takes.len(),
-                    secs[k]
-                );
-            }
         }
         front.menus.covered = front.ia_open || front.settings.is_some() || front.controls.is_some();
         let movie_name = front.menus.movie();
@@ -1008,6 +981,7 @@ mod tests {
             mission_file: None,
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
+            dlc_heroes: false,
         };
         let mut app = App::new(
             Default::default(),

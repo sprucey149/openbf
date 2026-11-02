@@ -24,9 +24,3 @@ Card VDROP built the rule for hovers and left it off. With it on (8 seeds, `lead
 ## Evidence
 `lead_tmp/vdrop/sw_near/seeds.md`, `sw_law3/seeds.md`; `python3 lead_tmp/vdrop/hov.py <dir> [map]`;
 `lead_tmp/wai/build/cmp.py <a>/seeds.md <b>/seeds.md`. Neither Hoth has a hover class: nothing to gain there.
-
-## Acceptance
-1. BF2 POL1: find where the 22 fall (HOVER_LOSS_LOG=1 and SWEEP_DEATHS=1 with the const on) and fix the exit point
-   or the drop hub's test; floor deaths 0 in 8 seeds.
-2. tat1: `veh` deaths rise by at most 5 a round over 8 seeds against the const off.
-3. Then `HOVER_NEAREST = true`: no map's finish count drops, no map's `veh` deaths rise by more than 5 a round.

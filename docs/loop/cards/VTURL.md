@@ -36,11 +36,3 @@ seat look (`core/src/vehicle/gun.rs`) visible, and it is not the PS2's:
 `analysis/re-turret-draw.md` 2.2, 2.3; the PS2's rows `lead_tmp/vturd/ps2/*_rows.bin` (yaw, pitch, the stick's rate
 and the aimer's own yaw / pitch per game update: a ready referee for the law); the trace above
 (`game/tests/turret_pose.rs`'s world, pads `ly` full + `rx` full).
-
-## Acceptance
-- A test: a seat with `YawLimits -180 180` turned by a held stick passes 180 degrees and keeps turning, and the aimer's
-  yaw never differs from the look's by more than its limits allow (mutation: the clamp at the seam -> fails).
-- The look's rate against the PS2's rows for the same stick (the Naboo gun turret, the Mygeeto gun, the Hoth dish):
-  degrees a second within 10 %.
-- `--sim-hash` and the sweep move only where a seat gun is manned: declared.- 2026-10-15 planner: value 4 -> 5, `alpha: yes` (VTURD's report asked): it is in the maintainer's own ask (the turret turns with his aim) and he
-  sees it within a minute on Hoth's dish or any gun turret. Undo: `lead_tmp/planner_1015/VTURL.before.md`.

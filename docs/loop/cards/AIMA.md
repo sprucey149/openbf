@@ -33,39 +33,6 @@ aim, its reticle is on the window centre and its shot leaves 1.425 m up along th
   0.5 mm), `bolts.py`, `probe_live.py` + `live/*.json` (44 single shots at 7 pitches per game), `stored_reticle.py`,
   `frames/ps2_reticle_sheet.png` and `frames/ps2_live_pitch_sheet.png` (the PS2 side of the frame pair).
 
-## Do (build) - section 10.8 is the list
-1. `core`: a camera section per game and stance on the soldier class (eye / centre height, TrackOffset, tilt): BF1
-   stand (1.8, (0,0,3.5), 5), crouch (1.3, (0,0.15,3.5), 5), prone (0.5, (0,0,3.0), 5); BF2 stand (1.8, (0,0,3.2), 10),
-   crouch (1.3, (0,0.15,3.0), 10), prone (0.5, (0,0,3.0), 5), sprint (1.8, (0,0,4.0), 10). Two functions on a unit: the
-   ideal camera (eye, frame) and the aim ray (A, d), by §10.2 step 4. More than one view (split screen): tilt x 0.4.
-2. `core/src/sim/step.rs`, a human on foot only: H = the first hit of the ray from A + d*(TrackOffset.z + 2) over 60 m
-   (other units' capsules, vehicle hulls, the ordnance layer, the terrain), else its far end; the bolt leaves the fire
-   point F (§10.2 step 2's stance table) toward H; the spread as today. Bots are not touched here (card FPNT).
-3. `core/src/sim/input.rs`: the acquisition's pos = A (drop the 2.104 m constant).
-4. `game/src/walk.rs`: `WalkSim::camera` = that ideal camera, then `settle_camera` as today. BF1 maps take BF1's table
-   (this is CAMS's 3.5 m; CAMS keeps the per-class exceptions).
-5. `ui/src/hud.rs`: `reticule.position` = (0.5, the projection of A + 1024*d through the drawn camera).
-6. A human's spawn pitch -0.07 rad (PS2: every soldier's; bots' is FPNT's).
-7. FEEL_NOTES: replace BHUD2's "Reticle on the window centre" line; CRATES.md / module headers for the files touched.
-
-## Acceptance (run each, paste the output into the report)
-- **The PS2's numbers, a core test**: standing on a flat floor at pitch -0.0700 rad - BF1 table: A is 2.1043 +- 0.002 m
-  above the feet, the ideal camera's pitch -9.011 +- 0.01 deg, F is 1.5828 +- 0.002 m up, 0.060 m right, 0.2424 m ahead.
-  BF2 table: A 2.3543 m, camera -14.011 deg, the same F.
-- **The wall test** (flat floor, a wall across the aim, BF1 table, the spread off): wall 20 m out - the bolt's line
-  passes within 0.05 m of the point where the reticle's ray meets the wall. Wall 80 m out - H is the ray's end (65.5 m
-  from A) and the bolt meets the wall less than 0.15 m above the ray's point. Wall 5 m from the feet (inside the ray's
-  5.5 m start) - H is the ray's end and the bolt meets the wall 0.45-0.55 m BELOW the ray's point (the PS2's blind
-  spot; its F is 0.507 m under the ray). At the default pitch no bolt meets the floor within 5 m of the feet. At the
-  steepest aim (-0.8 rad) on a flat floor the bolt lands 1.50-1.57 m ahead of the feet (the rule gives 1.53 m with BF1's
-  table and 1.54 m with BF2's; the PS2 live, on rising ground: 1.43 m BF1, 1.51 m BF2).
-- **The reticle**: at the PS2's 4:3 frame and vertical FOV the reticle's anchor is at y = 178.5 +- 0.5 of 480 on a BF1
-  map and 153.35 +- 0.5 on a BF2 map; at 16:9 the same fraction of the height (`game/tests/hud_layout.rs`).
-- **The frame pair**: a port frame at the NAB1 spawn pose and one at the HOT1 spawn pose beside
-  `lead_tmp/aima/frames/ps2_reticle_sheet.png`, the reticle on the same row (`lead_tmp/aima/pairs/`).
-- **Gates**: `sim` is declared (replays with a human firing); `goldens=tat1_hud.png` (the reticle moves up); the sweep
-  and both arenas PASS unchanged - no human fires in them: paste their rows.
-
 ## Notes
 - The rule is the same for both games; only the class data differs. PitchLimits (-0.8, 1.1) and prone +-0.4 are
   already the port's.
@@ -91,29 +58,6 @@ third-person camera that looks down at the player's back aims into the ground.
   (the 480-line frame's centre is 240, so the reticle is 62 px above it). `analysis/re-aim-assist.md` section 3.7 has the
   pick loop and the reticle colours.
 - AIMF landed the PS2's filtered cone acquisition (`Sim::reticle_pick`).
-
-## Do
-1. **RE (bounded, section 5 discipline): where does a soldier's shot leave, on each game?** The aim direction the weapon
-   fires along (camera ray vs the muzzle/aim point; a pitch offset; the PlayerController's aim target), the camera's own
-   pitch limits and its look-at offset from the soldier, and where on screen that ray lands (the reticle). Both BF1 and
-   BF2 (they may differ). Confirm with PCSX2 frames or RAM: fire at a wall at a known distance from a known camera and
-   read where the hit lands against the view centre, at two pitches and two ranges (parallax: the offset is an angle
-   or a point - they differ with distance; say which).
-2. **Sim**: make the port's shot leave along that ray (the sim side first - AI shots are unchanged unless the PS2's bots
-   use the same rule), keep the magnet / cone acquisition centred on that ray, not on the view centre. Declare the
-   sim and parity moves; goldens that move are viewed before commit.
-3. **HUD**: draw the reticle where that ray meets the screen (this moves BHUD2's reticle up; RETC owns its colours,
-   texture and size - coordinate: if RETC has landed, move its offset; if not, put the offset in one named constant it
-   will reuse). Mind the Hor+ anchor (COMPARISON_RULES) so the offset is an angle, not a fixed pixel row.
-4. Check the camera collision and the third-person look-down limits against the PS2's (can the player look down as far as
-   the PS2's camera allows without the shot hitting the player's own feet?).
-
-## Acceptance
-- The RE note (`analysis/re-aim-assist.md` new section) with `[O]`/`[V]` marks, the angle or point and its source (decomp
-  address + a PCSX2 measurement for each game).
-- A test: a shot fired from the default camera at a wall at 5, 20, 80 m lands where the PS2's rule puts it, equal to the
-  measurement within its tolerance; a shot at the default pitch does not go into the floor within 5 m.
-- A port frame beside a PS2 frame with the reticle at the same screen height (`lead_tmp/aima/`).
 
 ## Notes
 - Related: RETC (reticle look), AIMF (acquisition), BHUD2 (HUD tree). Decoration vs sim: the sim change moves hashes

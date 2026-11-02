@@ -24,12 +24,6 @@ Cause (read in the code): a bot is seated the moment it is within `ai::ride::boa
 ## Evidence
 `core/src/ai/ride.rs` `board_reach`; `core/src/sim/seats.rs` ENTER_REACH / the player's aim-ray entry test; `core/src/ai.rs` BOARD_SLACK (card WAI2); `analysis/re-soldier-ai.md` 7.5; `core/src/ai/man.rs` (card TURR: bots man building turrets).
 
-## Acceptance
-1. Measurement (in the card or `engine/artifacts/tbrd/README.md`): the board distances before, per turret class (building turret, vehicle turret, walkers): median / p95 / max, to the hull and to the origin.
-2. Building turrets (VehicleKind::Turret) lose BOARD_SLACK at least (the PS2's radius + 5 m); then the maintainer's ask - 'something reasonable' - is applied as a NAMED DEVIATION (D-number in analysis/bot-design.md) if the measurement shows bots still arrive that close: a bot boards only when it has walked up to the turret (a target of about 1.5-2.5 m from the hull edge). Walkers and cars keep what card WAI2 needs.
-3. TURR's turret census still shows bots boarding on KAM1 / MYG1 / KAS2 (ai_boards, seated time) within the card's tolerance; if a lower reach makes bots fail to arrive (hull slide), the claim's give-up / the node radius is fixed here, not worked around.
-4. Sweep / arena baselines move only as declared; sim hashes with turret bots move (declared `sim`).
-
 ## Notes
 
 - 2026-10-20 (build, lane 1): the card's premise was off - the PS2's board agent is NOT radius + 5 m: B2 FUN_002c42d8 enters at the two body spheres + 1.5 m (lui 0x3fc0 at 0x2c4564), B1 FUN_00244848 + 0.5 m (lui 0x3f00 at 0x244a4c), 3-D (re-soldier-ai 7.2 / 7.5). Built for building turrets; walkers / hovers keep WAI2's. Measured (`engine/artifacts/tbrd/README.md`, 8 seeds x 32 maps): turret boards xz median 9.92 -> 4.26 m (BF1) / 9.90 -> 5.29 (BF2); boards from over 2 m above / below the gun BF1 BES2 190/320 -> 0, RHN1 191 -> 0, NAB1 212 -> 0. BF2 KAM1 / MYG1 / KAS2 boarded 394/104/27 -> 391/98/35. OURS (D19): a bot under / over a turret (inside its XZ reach, centre > 2 m off) gives the claim up at once. Landed 9f19c5a.

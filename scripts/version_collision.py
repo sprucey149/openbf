@@ -71,12 +71,14 @@ def meshes(source):
             key = (file, tuple(scope), row["name"], row["node"])
             index = counts[key]
             counts[key] += 1
-            out[key + (index,)] = (row["surface_sha256"], points)
+            polys = [list(struct.unpack_from("<" + "H" * leaf[0], leaf, 7))
+                     for t, leaf in geometry.chunks(geometry.child(payload, b"TREE")) if t == b"LEAF"]
+            out[key + (index,)] = (row["surface_sha256"], points, polys)
     return out
 
 
 def compare(left, right):
-    a, b = meshes(left), meshes(right)
+    a, b, renamed = geometry.pair_collision_indexes(meshes(left), meshes(right))
     matched = sorted(a.keys() & b.keys())
     changed = [k for k in matched if a[k][0] != b[k][0]]
     bands = Counter()
@@ -91,11 +93,13 @@ def compare(left, right):
             by_file[key[0]] += 1
             largest.append([key[0], key[2], round(gap, 3)])
             offset = rigid_offset(a[key][1], b[key][1])
-            if offset:
+            if offset and geometry.surface_digest(
+                    [tuple(p[i] + offset[i] for i in range(3)) for p in a[key][1]], a[key][2]) == b[key][0]:
                 translated.append([key[0], key[2], [round(v, 3) for v in offset]])
     return {
         "schema": 1,
         "matched_meshes": len(matched),
+        "renamed_nodes": renamed,
         "different_surfaces": len(changed),
         "nearest_vertex_gap_bands": {label: bands[label] for label in [b[0] for b in BANDS] + ["over_5m"]},
         "whole_mesh_translations": translated,

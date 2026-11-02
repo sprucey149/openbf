@@ -18,6 +18,23 @@ fn both_games_resolve_the_cutters_loop_to_an_audible_take() {
 }
 
 #[test]
+fn both_games_resolve_the_empty_clicks_to_an_audible_take() {
+    let root = crate::assets::baked_root();
+    for map in ["bf1_nab1", "bf2_kam1"] {
+        if !root.join(map).join("sounds/sounds.ron").is_file() {
+            eprintln!("SKIP: {map} sounds are not baked");
+            continue;
+        }
+        let mut lib = SoundLib::load(&root.join(map)).expect("baked map sound bank");
+        for name in ["com_weap_inf_ammo_empty", "com_weap_inf_weapon_empty"] {
+            let take = lib.prepare_voice(name).expect(name);
+            assert!(take.path.is_file(), "{map}: {}", take.path.display());
+            assert!(take.secs > 0.0 && take.gain > 0.0, "{map} {name}");
+        }
+    }
+}
+
+#[test]
 fn attenuation_and_pan_shapes() {
     // The rifle fire's CORE template on BF1: 5 - 400 m, rolloff 6.
     let mut p = SoundProp {
@@ -334,6 +351,7 @@ fn lib() -> SoundLib {
         loops: HashMap::new(),
         ambient: HashMap::new(),
         cries: HashMap::new(),
+        weapon_handles: HashMap::new(),
         station_voices: HashMap::new(),
         hero_voices: HashMap::new(),
         hero_blades: Vec::new(),
@@ -790,6 +808,107 @@ fn a_unit_has_one_voice_for_its_cries() {
     let got = l.cries(&[(9, hurt, pos), (10, death, pos)], ears);
     assert_eq!(got.iter().map(|g| g.0).collect::<Vec<_>>(), vec![9, 10]);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The windowed path's mixer: each voice on the handle keeps the shot that
+/// cuts it, so a click's cut reaches the sounding take.
+#[test]
+#[ignore = "requires an explicitly configured audio output, e.g. null ALSA"]
+fn weapon_voices_hold_their_mixer_shots_through_a_click() {
+    let dir = std::env::temp_dir().join(format!("openbf-empty-mix-{}", std::process::id()));
+    let mut l = lib();
+    l.map.dir = dir.clone();
+    for i in [1, 2] {
+        one_second_wav(&dir.join(format!("b/{i}.wav")));
+    }
+    let mut audio = audio::Audio::new().expect("configured output required; never skip");
+    let listener = Listener {
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+    };
+    let ask = |name: &str, click| WeaponAsk {
+        unit: 1,
+        weapon_class: 5,
+        hash: fnv1a_lowercase(name),
+        pos: Vec3::new(10.0, 0.0, 0.0),
+        click,
+    };
+    let held = |l: &SoundLib| {
+        let v = &l.weapon_handles[&(1, 5)];
+        (v.len(), v.iter().filter(|c| c.shot.is_some()).count())
+    };
+    l.play_weapon_voices(&mut audio, &[ask("exp_high", false)], &listener);
+    assert_eq!(held(&l), (1, 1));
+    l.play_weapon_voices(&mut audio, &[ask("exp_high", false)], &listener);
+    assert_eq!(held(&l), (2, 2));
+    l.play_weapon_voices(&mut audio, &[ask("exp_low", true)], &listener);
+    assert_eq!(held(&l), (1, 1), "the click alone is left on the handle");
+    assert_eq!(l.played, 3);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_click_cuts_its_weapons_handle_and_mashing_keeps_one_voice() {
+    let dir = std::env::temp_dir().join(format!("openbf-empty-{}", std::process::id()));
+    let mut l = lib();
+    l.map.dir = dir.clone();
+    for i in [1, 2, 7, 8] {
+        one_second_wav(&dir.join(format!("b/{i}.wav")));
+    }
+    let ears = Vec3::ZERO;
+    let ask = |unit, weapon_class, name: &str, click| WeaponAsk {
+        unit,
+        weapon_class,
+        hash: fnv1a_lowercase(name),
+        pos: Vec3::new(10.0, 0.0, 0.0),
+        click,
+    };
+    let starts = |v: &[(Option<(u32, u32)>, Start)]| v.len();
+    let fire = ask(1, 5, "exp_high", false);
+    let click = ask(1, 5, "exp_low", true);
+
+    // Shots do not cut each other, and another handle's tail is its own.
+    assert_eq!(starts(&l.weapon_voices(&[fire, fire], ears)), 2);
+    assert_eq!(l.weapon_handle_voices(1, 5), 2);
+    assert_eq!(
+        starts(&l.weapon_voices(&[ask(2, 5, "exp_high", false)], ears)),
+        1
+    );
+
+    // A click stops the handle's tail, and only that handle's.
+    assert_eq!(starts(&l.weapon_voices(&[click], ears)), 1);
+    assert_eq!(l.weapon_handle_voices(1, 5), 1);
+    assert_eq!(l.weapon_handle_voices(2, 5), 1);
+
+    // Mashed for a tick at a time: the handle never holds two clicks.
+    let mut sink = Vec::new();
+    for _ in 0..30 {
+        l.weapon_voices(&[click], ears);
+        assert_eq!(l.weapon_handle_voices(1, 5), 1);
+        l.tick(1.0 / 30.0, ears, &mut sink);
+    }
+
+    // A tick's own earlier start on the handle is never heard.
+    let got = l.weapon_voices(&[fire, click], ears);
+    assert_eq!(got.len(), 1, "the shot before the click is dropped");
+    assert_eq!(l.weapon_handle_voices(1, 5), 1);
+
+    // A click its gate refuses starts nothing and so cuts nothing.
+    let refused = ask(1, 5, "call_never", true);
+    assert_eq!(starts(&l.weapon_voices(&[refused], ears)), 0);
+    assert_eq!(l.weapon_handle_voices(1, 5), 1);
+
+    // A finished take leaves nothing on the handle, and a layered sound
+    // holds no handle to cut.
+    for _ in 0..40 {
+        l.tick(1.0 / 30.0, ears, &mut sink);
+    }
+    assert!(l.weapon_voices(&[], ears).is_empty());
+    assert_eq!(l.weapon_handle_voices(1, 5), 0);
+    let got = l.weapon_voices(&[ask(1, 5, "com_weap_obj_med_exp", false)], ears);
+    assert!(got.iter().all(|(k, _)| k.is_none()), "layered: no handle");
+    assert_eq!(l.weapon_handle_voices(1, 5), 0);
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Card PWST: a station's `AmbientSound` holds ONE handle (re-ambience-

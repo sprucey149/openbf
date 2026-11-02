@@ -24,12 +24,6 @@ the native radius/alpha rule and reads every faction icon's material rates.
 BF2 `FUN_00219148` sets class +0x84 from hash 0x4cecac28;
 `FUN_00216948` copies it to the beam +0x194 read by `FUN_00469628`.
 
-## Acceptance
-- A unit test: a post seen from above (g < 0) draws one Flare with alpha A g^8 x the factor read from the class; from the side none (mutation-checked).
-- The factor's key named from FUN_002172a8 / the holo class setter with re_check fn lines, or [H] with a RAM read of +0x194 on one BF2 save state.
-- The scan-line animation: read the icon material's flags (MTRL) and the draw; build it or record that the PS2 does not scroll it.
-- Goldens move only where a post is seen from above (likely none).
-
 ## Sprint implementation (2026-11-01)
 
 The flare and per-material UV scroll are implemented. `HoloFlareIntensity`

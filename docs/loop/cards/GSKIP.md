@@ -38,27 +38,6 @@ of these draws"), but `core` code decides golden pixels in at least four places.
 - The safety net (every 10th crate landing regenerates everything) would show the move up to nine landings late, on
   another card's landing, which then has to explain a golden it did not move.
 
-## Do
-1. Prove the dependency: in a scratch worktree add 1.0 to `ray_down`'s returned height, run `scripts/goldens.sh gallery
-   walkabout` there (overlay dir — memory: lane picture outputs need redirecting) and list which goldens move. Then the same
-   for `Heightfield::normal_at` (e.g. always +Y).
-2. Replace the blanket `engine/crates/core/` skip by what step 1 shows: either move the draw-feeding files under `always`
-   (`core/src/collision/`, `core/src/collision.rs`, `core/src/heightfield.rs`, `core/src/door.rs`,
-   `core/src/vehicle/walker*`, plus anything step 1 finds), or skip only the core subtrees that provably cannot draw
-   (`core/src/ai/`, `core/src/sim/`, `battle.rs`, `squad.rs`, `weapon.rs`, tests). Prefer the second: a new core file is
-   then NOT skipped by default.
-3. `scripts/gates_selftest.py`: cases for both directions. README §"Which goldens a change regenerates" updated.
-
-## Acceptance
-- `python3 scripts/gates_selftest.py` passes with new cases: a diff of only `engine/crates/core/src/collision/rays.rs` →
-  every golden group runs; only `engine/crates/core/src/heightfield.rs` → runs; only `engine/crates/core/src/ai/steer.rs`
-  → skipped; only `engine/crates/core/src/soldier.rs` → skipped (or runs, if step 1 shows a path — say which).
-- Step 1's mutation result pasted in the report: the list of goldens the +1.0 m `ray_down` moved (expected: the six
-  stub-terrain map sheets and `walkabout_stats.ron`; if NONE moves, close this card as "rule sound" with that output).
-- The history check of the README re-run with the new rule: still 0 golden-moving commits skipped; report the new skip
-  share of the other commits (55 % today).
-- `land.py --self-test` PASS. Every gate PASS, nothing declared.
-
 ## Notes
 - memory `land-runs-mains-gates-script`: land.py runs main's `gates.py`, so this lands as its own card before the
   cards that rely on it; if `gates.py` itself needs no edit (deps.toml + selftest only), say so.

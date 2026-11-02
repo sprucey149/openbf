@@ -13,6 +13,7 @@ png.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ron.workspace = true
+sha2 = "0.10"
 
 [dev-dependencies]
 gltf.workspace = true

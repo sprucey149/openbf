@@ -21,12 +21,6 @@ livebr branch in its temporary repository, but the child loopctl target sweep
 inherits OPENBF_REPO and reads another repository's branches. The same fixture
 without that override is the control. No actual repository data was deleted.
 
-## Scope
-Clear inherited repository selection in both fixture subprocesses so loopctl
-defaults to the fixture checkout. Preserve real dry-run and deletion behavior,
-the complete expected candidate list, live-process/recency/branch protections,
-test assertions, approval controls and ordinary gates.
-
 ## Acceptance
 1. Exact parent fails with OPENBF_REPO selecting the real repository; control
    with it unset passes. Candidate self-test exits 0 with it unset, selecting

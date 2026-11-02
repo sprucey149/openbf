@@ -163,3 +163,43 @@ fn bf1_stormtrooper_uses_disc_ammo_and_exhausts_it_by_firing() {
     assert_eq!(pistol.state.spare, SPARE_INFINITE);
     assert_eq!(pistol.state.rounds(&sim.weapon_classes[pistol.class]), None);
 }
+
+/// Overheat click: each game's pistols name their own `FireEmptySound`, which
+/// the class loader keeps. A hand weapon the disc gives no click stays without
+/// one. `sounds::tests` resolves the two takes in each map's sound bank.
+#[test]
+fn both_games_pistols_click_with_their_own_take() {
+    let classes = game::assets::baked_root().join("classes");
+    let ammo = "com_weap_inf_ammo_empty";
+    let weapon = "com_weap_inf_weapon_empty";
+    let cases = [
+        (
+            "bf1",
+            [
+                ("rep_weap_inf_pistol", Some(ammo)),
+                ("imp_weap_inf_pistol", Some(weapon)),
+                ("rep_weap_inf_commando_pistol", None),
+            ],
+        ),
+        (
+            "bf2",
+            [
+                ("rep_weap_inf_pistol", Some(ammo)),
+                ("imp_weap_inf_pistol", Some(weapon)),
+                ("rep_weap_inf_remotedroid_blaster", None),
+            ],
+        ),
+    ];
+    for (game_id, weapons) in cases {
+        let Ok(db) = game::roster::load_classdb(&classes, game_id, &["all", "imp", "rep", "cis"])
+        else {
+            eprintln!("SKIP: {game_id} classes are not baked");
+            continue;
+        };
+        for (name, want) in weapons {
+            let w = game::roster::weapon_from_db(&db, name).expect(name);
+            assert_eq!(w.empty_sound.as_deref(), want, "{game_id} {name}");
+            assert!(w.heat_per_shot > 0.0, "{game_id} {name}: a heat weapon");
+        }
+    }
+}

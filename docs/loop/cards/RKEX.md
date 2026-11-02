@@ -23,10 +23,4 @@ Read in the code: the rocket's ordnance class (BF2 `rep_weap_inf_rocket_launcher
 ## Evidence
 `core/src/projectile.rs` (`Bolt::spawn`, one ray at launch), `core/src/sim/combat.rs` `resolve_bolt`, `core/src/sim/blast.rs` (radius damage that exists for vehicle wrecks and thrown grenades), card UORD (the other ordnance kinds; RE for flight), card GREN (`analysis/re-grenades.md`: the explosion rule for thrown ordnance), card FXP (explosion effects).
 
-## Acceptance
-1. A reproduction table: per target (ground, wall, vehicle, soldier) and range, where the rocket's bolt ends and what happens; the cause of 'passes through' named (or ruled out).
-2. A landed `missile`-kind bolt runs its class's explosion (ExplosionName): radius damage with the PS2's falloff via the existing blast path, the explosion's effect and sound; pinned by tests (a rocket at a wall damages a soldier beside it; none outside the radius); the placeholder prism ends at the impact point.
-3. Rockets at vehicles damage as the PS2's (HVYW's bots fire them at vehicles); the sweep / arena baselines move only as declared.
-4. The model: the rocket draws as com_weap_missile if the model is baked (a separate slice if the bake is needed); UORD keeps the rest (guidance, gravity shells, emitters).
-
 ## Notes

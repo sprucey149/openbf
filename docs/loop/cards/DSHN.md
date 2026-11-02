@@ -32,14 +32,6 @@ battle, so the player sees this constantly.
     Render the SBD before and after CAMB to see whether it got shinier then or was always this way.
   - Prior art: `lead_tmp/spec-side/` and `lead_tmp/two-tier-soldier/` hold earlier SBD sheets (before/after renders).
 
-## Acceptance
-- A PS2 | port pair per droid class — battle, assault, pilot, assassin droid, SBD, droideka (the droideka once DEKA fields
-  it; the gallery body until then), in both games — in the same lighting, where the highlights read like the PS2's.
-- Measured by HIGH-PERCENTILE luma (p95 and p99) on the droid's own pixels, not only the mean colour, so a "too shiny"
-  render cannot pass a mean-colour check. Record PS2 vs port per class, before and after.
-- Non-droid soldiers whose specular the RE confirms keep it (check a stormtrooper and a clone: no regression).
-- Every golden the change moves is declared and viewed.
-
 ## Notes
 - RE at max effort (the RE discipline + the foreground verifier); then phase=build with files/declares.
 - To capture a droid in the same lighting: `plant-a-soldier-with-a-scratch-example` (port) and the PCSX2 RAM hold

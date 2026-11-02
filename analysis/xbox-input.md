@@ -4,11 +4,10 @@ Status 2026-11-01. Both Xbox discs now read through `mungefs` and bake. What tha
 does and does not give a build is below; all counts are measured on the local
 trimmed discs.
 
-`scripts/pack.py` does not take them yet: `XBOX_SUPPORTED` in `scripts/input_scan.py`
-is false, so a build reports an Xbox disc as recognized and not read. `rebake.sh`
-has no gameplay check of its own, which only `bake xbox` makes, and an Xbox disc
-standing alone would bake its drift without a refusal. The commands under "Calling
-it" work by hand.
+`scripts/pack.py` takes them: `XBOX_SUPPORTED` in `scripts/input_scan.py` is true. A disc standing alone bakes through
+the public instruction tables in `manifest/data/gameplay/corrections-v1/`, which turn its files into the PS2's numbers and
+shapes, and a changed file refuses the bake. `analysis/source-gates.md` has the proof per map and the maps left out. The
+drift table below is what the disc holds before those corrections.
 
 ## Readers, and how each was proved
 
@@ -37,9 +36,8 @@ Xbox tree is refused outright, and any other tree whose prints or class files
 differ, such as a PC install, is refused like a drifting map. Tier 2 gains 37 BF1 and 344 BF2 textures. BF1 gains little here, because its larger Xbox art sits on
 detail-compressed PS2 bases, which the tier rules keep.
 
-**Alone.** The map bakes from the Xbox LVL, with its larger art and its own
-numbers and shapes. This breaks the gameplay rule on most maps, and no table of
-numbers can repair a differing shape:
+**Alone, without corrections (`bake xbox`).** The map bakes from the Xbox LVL, with its larger art and its own
+numbers and shapes. This breaks the gameplay rule on most maps:
 
 | Section | BF1 maps drifting (of 16) | BF2 maps drifting (of 18) |
 |---|---:|---:|
@@ -60,7 +58,8 @@ are the same triangles reindexed, 95 are different shapes, and 39 exist on one d
 only. So `bake xbox` refuses such a map unless told `--allow-gameplay-drift`.
 
 The sections are hashes, shipped in `manifest/data/gameplay/ps2-prints-v1.json` and
-made by `bake xbox-prints` from the PS2 discs. They hold no meshes, art, audio or
+made by `bake xbox-prints` from the PS2 discs, plus each map's foliage as plain counts
+(`bake check-foliage` holds any baked tree to those). They hold no meshes, art, audio or
 text. A hash detects a difference and cannot supply the missing value. They are also
 not everything the sim reads: the door and turret rigs in the manifest's classes and
 the model GLBs `game::stations` measures are not hashed, because they also hold what

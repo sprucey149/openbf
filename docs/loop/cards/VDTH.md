@@ -19,9 +19,6 @@ VDMG (e7ed805) removes a dead vehicle and emits Event::VehicleDestroyed, but not
 ## Evidence
 analysis/re-vehicles.md §6: the hover tick spawns ExplosionName at 0 health (B1:97306) and throws the chunks (FUN_001e2630, B1:97314; the launch law B1:91931-92121, bounciness 0.6 / stickiness 0.7 defaults B1:93002-93007). The explosion's damage vs distance is NOT RE'd: re-blaster-damage.md §6 only guesses the TakeDamage multiplier is a radius fraction [H]. Disc: imp_walk_atst_exp 50 damage radius 20; imp_hover_speederbike_exp 20 / 10 (expc classes). Chunk lifetime [H]; ChunkTerrainCollisions, ChunkOmega, ChunkTrailEffect are authored.
 
-## Acceptance
-RE (max effort, verifier): the explosion class's damage function (the multiplier's shape, inner/outer radius, LOS or not, team rules, VehicleScale on the victims) in both games; the chunk launch and body; the lifetime. Then build: core applies the blast on VehicleDestroyed (and for any future ordnance explosion) with unit tests; game draws the chunks from the baked CHUNKSECTION models (VBAKE). Nothing moves until a vehicle spawns.
-
 ## Notes (RE done 2026-09-28, lane 2 — analysis/re-vehicle-death.md, [O], verifier 23 SUPPORTED / 4 PARTLY folded / 0 NOT)
 - Build from §8 there. The blast is one function for every explosion: gather ≤ 20 in a box of half-side
   max(DamageRadiusOuter, PushRadiusOuter); LOS blocked only by buildings/terrain; f = 1 inside Inner, linear to 0 at

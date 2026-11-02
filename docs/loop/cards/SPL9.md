@@ -17,6 +17,3 @@ created: 2026-09-29
 
 ## Why
 Found by the scripts cleanse 2026-09-29 (card CLNS): `scripts/size_report.sh --check-map` lists game/src/assets.rs at 1,514 lines; no SPL card and no waiver name it (SPL7 has the four core/bake files, SPL8 viewer/scene.rs).
-
-## Acceptance
-A pure move per engine/artifacts/briefs/SPLIT_RECIPE.md (every gate PASS, nothing declared), or a waiver line with the reason.

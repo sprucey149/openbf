@@ -1,4 +1,5 @@
-use crate::{roster::ClassRoster, walk::WalkSim};
+use crate::{classdb::ClassDb, roster::ClassRoster, walk::WalkSim};
+use core::weapon::{Thrown, WeaponClass};
 use std::path::{Path, PathBuf};
 mod playable;
 
@@ -13,6 +14,54 @@ pub const TABS: [&str; 9] = [
     "BF2 CIS",
     "BF2 Heroes",
 ];
+
+/// The BF1 class whose thermal count a BF2 class takes on a BF1 map: each
+/// side's plain thermal carrier. `[ours]`: BF1 has no row for a BF2 class.
+const BF1_THERMAL_COUNT: [(&str, &str); 4] = [
+    ("all", "all_inf_vanguard"),
+    ("imp", "imp_inf_shock_trooper"),
+    ("rep", "rep_inf_arc_trooper"),
+    ("cis", "cis_inf_assault"),
+];
+
+fn is_hand_grenade(weapon: &WeaponClass, channel: u8) -> bool {
+    channel == 1 && weapon.thrown.is_some() && !weapon.dispenses()
+}
+
+/// A BF2 class on a BF1 map throws its side's BF1 thermal detonator, at BF1's
+/// count. Its first-person row stays: the arms are the class's own.
+fn throw_bf1_grenades(class: &mut ClassRoster, bf1: &ClassDb) {
+    let side = class.class.split('_').next().unwrap_or_default();
+    let thermal = format!("{side}_weap_inf_thermaldetonator");
+    let Ok(Some(weapon)) = crate::roster::thrown_weapon_from_db(bf1, &thermal) else {
+        return;
+    };
+    let clips = BF1_THERMAL_COUNT
+        .iter()
+        .find(|(s, _)| *s == side)
+        .and_then(|(_, carrier)| {
+            bf1.weapon_slots(carrier)
+                .into_iter()
+                .find(|slot| slot.weapon.eq_ignore_ascii_case(&thermal))
+        })
+        .and_then(|slot| slot.ammo);
+    for held in &mut class.held {
+        if is_hand_grenade(&held.weapon, held.channel) {
+            held.weapon = weapon.clone();
+            held.hud = crate::roster::weapon_hud(bf1, &thermal);
+            held.clips = clips.unwrap_or(held.clips);
+        }
+    }
+}
+
+/// A BF1 class on a BF2 map throws as BF2 throws.
+fn throw_as_bf2(class: &mut ClassRoster) {
+    for held in &mut class.held {
+        if is_hand_grenade(&held.weapon, held.channel) {
+            Thrown::throw_as_bf2(&mut held.weapon);
+        }
+    }
+}
 
 pub struct Choice {
     pub tab: usize,
@@ -58,6 +107,8 @@ impl ClassPicker {
             return;
         }
         self.loaded = true;
+        let map = self.scene.manifest.source_game.to_ascii_lowercase();
+        let mut bf1_db = None;
         for game in ["bf1", "bf2"] {
             let db = match crate::roster::load_classdb(
                 &self.root,
@@ -80,6 +131,11 @@ impl ClassPicker {
             for &name in names {
                 match ClassRoster::build(&db, name, 0, Some(0)) {
                     Ok(mut class) => {
+                        match (map.as_str(), game, bf1_db.as_ref()) {
+                            ("bf1", "bf2", Some(bf1)) => throw_bf1_grenades(&mut class, bf1),
+                            ("bf2", "bf1", _) => throw_as_bf2(&mut class),
+                            _ => {}
+                        }
                         let key = class.geometry.clone().unwrap_or_default();
                         if !*ready
                             .entry(key)
@@ -111,6 +167,9 @@ impl ClassPicker {
                     }
                     Err(error) => eprintln!("class picker {game}/{name}: {error:#}"),
                 }
+            }
+            if game == "bf1" {
+                bf1_db = Some(db);
             }
         }
         self.choices.sort_by(|a, b| a.label.cmp(&b.label));

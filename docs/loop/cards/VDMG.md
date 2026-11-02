@@ -23,9 +23,3 @@ up to 10 visual damage slots (DamageStart/StopPercent, DamageEffect, DamageAttac
 effect while health is between Stop and Start); at 0 health the `ExplosionName` class detonates and the chunks fly in
 the same tick, no wreck; the hover's impact damage (§3.2 item 10); no self-repair on the discs. [H] there: occupants
 killed or ejected, chunk lifetime — resolve or take a PROVISIONAL default and say so.
-
-## Acceptance
-`Hit::Target(Target::Vehicle(h))` through VPRE's enum; vehicle health through the existing `Health` / `HealthType`
-table; collision damage; death spawns the explosion (damage with the explosion falloff) and chunk bodies; damage-effect
-bands as render state; unit tests on a speeder bike (600 HP) and an AT-ST (6000); declared `sim` moves only where
-vehicles exist.

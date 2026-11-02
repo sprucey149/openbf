@@ -422,7 +422,7 @@ SWPN, the 8-seed sweep, keeps its card. This session's scratch census and its 9-
   154853 / 154881;
 - `callers` for `FUN_002baf70` (1), `FUN_002bb1b0` (7) and `FUN_0023cc20` (1);
 - `word` at 0x2bb00c / 0x2bb010 and 0x2a2cf0–0x2a2cfc;
-- `eedis2` over 0x2baff4–0x2bb040 and 0x2a2cf0–0x2a2d10.
+- `eedis` over 0x2baff4–0x2bb040 and 0x2a2cf0–0x2a2d10.
 
 **Twin, BF1.** `FUN_0023cd40` → `FUN_0023cc20` → `FUN_0023c698`. The verifier found it; I re-read it.
 

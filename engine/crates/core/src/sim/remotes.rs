@@ -403,19 +403,33 @@ impl Sim {
             }
             let fire = pad.pressed(buttons::FIRE) && end.is_none();
             let mut shots = Vec::new();
+            let input = FireInput {
+                held: fire,
+                blocked: false,
+                infinite_ammo: false,
+                no_reload: false,
+                ai_dispersion: None,
+            };
             d.blaster.update(
                 dt,
                 &self.weapon_classes[blaster],
-                FireInput {
-                    held: fire,
-                    blocked: false,
-                    infinite_ammo: false,
-                    no_reload: false,
-                    ai_dispersion: None,
-                },
+                input,
                 &mut self.lcg,
                 &mut shots,
             );
+            // BF1's droid blaster authors a click. PROVISIONAL [D], measure:
+            // a PS2 log of a press on a human's overheated droid blaster (the
+            // droid's own player index was not read).
+            if is_player
+                && d.blaster
+                    .press_clicks(&self.weapon_classes[blaster], input, !shots.is_empty())
+            {
+                self.events.push(Event::FireEmpty {
+                    unit: d.owner,
+                    weapon_class: blaster as u32,
+                    pos: d.pos,
+                });
+            }
             if !shots.is_empty() {
                 let who = Shooter {
                     owner: self.item_owner(d.owner, d.team),

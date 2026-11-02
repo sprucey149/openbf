@@ -45,30 +45,6 @@ takes the hologram alone. LFLR keeps the flares, the cones and the EntityLight f
 - **In the bake already:** `engine/assets_baked/common_bf1/models/com_icon_{alliance,imperial,republic,cis}.glb`
   and `textures/com_icon_controlzone.ktx2` (checked by `find`, planner 2026-10-12). BF2's common bake: check first.
 
-## Build
-1. `loopctl.py start CPHOL`. Open questions first, 30 minutes at most, RE discipline for what is new: (a) BF1's
-   hologram draw (`re_check.py callers` of BF1's LightBeam twin; the twin open, not an assumption); (b) the beam's base
-   width word 0x1de206a6 and the stage order (re-point-lights 12, both [H]); (c) are BF2's `com_icon_*` baked.
-2. The beam: a procedural cone mesh drawn additive after the opaque world, depth-tested, no depth write, in the
-   relation colour of the LOCAL player's team (splitscreen: per view - the colour is the viewer's, not the world's).
-3. The icon: the owner's `com_icon_*` model, unlit, alpha 0.5 x I, turning; none while the post is neutral.
-4. I: the 2 s fade down and up across a capture (`cp.rs` events), and the flicker dips; feed the same I to the
-   post's light in `point_light::command_post` (it is PROVISIONAL steady there) or note why not.
-5. The large post's bone height (1.363 m) if step 1 confirms it for the draw.
-6. `declares:` goldens = every golden with a post in view: run the branch gates first and write the list from them.
-
-## Acceptance (run and paste)
-- **The maintainer's picture pair, BF2 Kamino:** his own post BLUE, an enemy post RED, a neutral post GREY with no icon, and the
-  colour changing across a capture (three frames: before, mid fade, after) - beside the PS2's frame of the same posts
-  (a PCSX2 capture from a Kamino walk state; `COMPARISON_RULES.md`).
-- DEA1 `cp3_cp3` b000 box (210,60,330,400) moves from (35,37,43) toward the PS2's (94,68,74), within about 15 levels.
-- UTA1 cp2 b180: the neutral post's white column is there; an owned post shows the turning icon.
-- Tests: the relation colour per viewer team (own / enemy / neutral; the same post is blue for one splitscreen view
-  and red for the other); no icon on a neutral post; I over a capture (0 at the flip, back to 1 after 2 s); the
-  icon's angle after 5 s = one turn. Mutation-check each.
-- `scripts/parity.py`: no map up by more than 0.5; the declared goldens move and nothing else; sim hash unchanged.
-- One BF1 frame pair (a friendly BF1 post) once step 1 says what BF1 draws.
-
 ## Notes
 - 2026-10-12 23:40 (planner): filed from the maintainer's INBOX note. **B1LL is NOT folded in:** it is BF1's omni LIGHT on
   every model draw (a bake change, 19 goldens, the 4th-power point weight) - a different renderer path and a

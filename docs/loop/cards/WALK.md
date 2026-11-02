@@ -22,21 +22,6 @@ analysis/re-walker.md ([O]; verifier 44 SUPPORTED / 4 PARTLY folded / 0 NOT; liv
 §2 frame order, §3 input, §4 locomotion (clip clock, turn tree, clip state machine, root motion), §6 legs, §8 wall
 probes, §9 contact, §11 class conversions + ctor defaults + the disc census, §14 build notes and test numbers.
 
-## Acceptance
-- bake: per walker class, the 11-entry clip table of its AnimationName bank (frames, duration = (frames-1)/30, the loop
-  flag, track 0's root z per frame; re-walker §5) in the side vehicle bake.
-- game::vehicle_class: the walker props with §11's conversions, ctor defaults, base chain and section routing; a test
-  pins §11's census values for the AT-ST, the one-man AT-ST and the tauntaun.
-- core::vehicle::walker: params + state + step in §2's order: §3 I7-I16, all of §4, §6, §8 (terrain probes), §9 on the
-  port's CollisionWorld contacts; root motion interpolated (the drawn-walker case, §5).
-- Unit tests with §14.6's numbers (AT-ST): 5.0 m/s at full stick (clip x0.7346); 10.0 boosting for 4.0 s from 80
-  energy, then 2.2 s to recover; the x0.5 floor below |stick| 0.681; <= 1.0 rad/s yaw (0.6 boosting); the turn-step
-  thresholds; the one-pair lift (origin within 0.1 m under the foot ground); the 29.4 m/s^2 fall.
-- A human drives an AT-ST (the hover's pad mapping; the camera from the aim yaw/pitch); bots that already board
-  walkers (VAI) now move them.
-- FEEL_NOTES: the BF1-disc walkers under BF2's clock (re-walker §13's table: the BF1 tauntaun 21.75 -> 10.88 m/s).
-Rigid model only (the bind pose moves with the entity) until WSKN.
-
 ## Notes
 - The AI steering (FUN_002a54d8) is not transcribed: bots keep the port's driver path (VAI / VTAI) writing
   throttle / strafe / turn into the walker input.

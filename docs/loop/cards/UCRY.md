@@ -40,21 +40,6 @@ by far and need no voice queue (`analysis/re-unit-chatter.md` 2.7, 3.6, 5 `[O]`)
   MYG1 20.8 / 0.5, 83.8 / 31.8. Death NAB1 27.0 / 0.8, 33.0 / 10.8; TAT1 16.5 / 5.0, 34.8 / 8.8; UTA1 18.8 / 0,
   35.8 / 11.8; MYG1 9.3 / 0.8, 26.5 / 10.5.
 
-## Acceptance
-- Rule tests, each mutation-checked: a surviving hit over 2 % of the health left asks hurt once; one of 2 % or less,
-  a shield-swallowed one and a zero-damage one ask nothing; the killing hit asks death and no hurt; a second hurt
-  on one unit stops the first (one voice per unit) and death stops a sounding hurt.
-- The right voice: a test through the BAKED class db that every class the six showcase maps field resolves
-  `HurtSound` / `DeathSound` to its own property and that the property has a take in that map's bank (CIS death =
-  `droid_death`; the Gungans on NAB1).
-- A census with the landed `SOUND_LOG` (headless, 8 seeds, the player parked at the capture's post, then beside a
-  front-line team-mate): hurt cries per qualifying hit 0.85 +- 0.03 over 500 hits or more, death cries per kill
-  1.0; and the per-minute rows above printed beside the port's with the port's hits and kills a minute - within
-  30 % where the PS2 reads 5 or more, a miss named as the port's hit rate or the card's own, with the numbers.
-- The mixer (card SNDB's rule): a 10-minute round with a sound device writes no `OVERLOAD` line these cries cause
-  (the black box digest) and `python3 scripts/tools/mix.py <snapshot> engine/assets_baked` peaks
-  under full scale.
-
 ## Notes
 - The maintainer's order puts the combat calls (card UCALL) first; this slice is the cheapest and shares no bake change with
   it - whichever the picker reaches first.

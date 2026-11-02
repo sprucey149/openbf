@@ -531,10 +531,23 @@ impl Ctx<'_> {
             }
         }
         let last = y0 + row_h * shown.min(rows.len()) as f32;
+        self.more_arrows(s, cx, [y0, last], top > 0, top + shown < rows.len());
+    }
+
+    /// A list's scroll arrows: above the rows from `[top, bottom]` when rows are
+    /// hidden up there, below them when rows are hidden down there.
+    fn more_arrows(
+        &mut self,
+        s: &crate::hud_draw::Screen,
+        cx: f32,
+        [top, bottom]: [f32; 2],
+        above: bool,
+        below: bool,
+    ) {
         let [a0, a1, ah] = ARROW;
         let style = ([255.0; 3], 1.0);
-        if top > 0 {
-            let r = [y0 - ah, y0];
+        if above {
+            let r = [top - ah, top];
             self.tinted(
                 s,
                 [cx + a0, r[0], cx + a1, r[1]],
@@ -550,8 +563,8 @@ impl Ctx<'_> {
                 style,
             );
         }
-        if top + shown < rows.len() {
-            let r = [last, last + ah];
+        if below {
+            let r = [bottom, bottom + ah];
             self.tinted(
                 s,
                 [cx + a0, r[0], cx + a1, r[1]],
@@ -785,6 +798,10 @@ impl Ctx<'_> {
                 }
             }
         }
+        // [ours] Only the Hero page, with the DLC row, holds more than fit.
+        let last = y0 + OPTION_ROW * OPTION_ROWS as f32;
+        let (above, below) = (cur.top > 0, cur.top + OPTION_ROWS < rows.len());
+        self.more_arrows(&s, cx, [y0, last], above, below);
         let info = OPTION_INFO;
         let grey = ([128.0; 3], 0.5);
         self.tinted(&s, info, [0.0, 0.0, 1.0, 1.0], "white_rect", grey);

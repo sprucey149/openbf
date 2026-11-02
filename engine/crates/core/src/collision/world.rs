@@ -12,6 +12,7 @@
 
 use super::shape::{Aabb, Body, Cutter, HullPart};
 use crate::vehicle::VehicleHandle;
+use glam::Vec3;
 
 /// Cell edge of [`BodyGrid`], in metres. Not a PS2 number: the PS2's own
 /// broad phase is not RE'd (nothing in `analysis/` describes it), and this
@@ -35,6 +36,11 @@ const BROADPHASE_MAX_CELLS_PER_BODY: usize = 64;
 /// Cap on the grid's side in cells, so a body parked 10^6 m out cannot ask
 /// for a gigantic index; the cell grows instead. 128 x 128 = 16,384 cells.
 const BROADPHASE_MAX_SIDE: usize = 128;
+/// How far past a segment [`CollisionWorld::visit_segment`] reads (m): far more
+/// than the rounding of a point on a line this long, or of the slab test.
+const SEGMENT_MARGIN: f32 = 1.0;
+/// The longest segment it walks cell by cell (m).
+const SEGMENT_MAX_WALK: f32 = 100_000.0;
 
 thread_local! {
     /// Scratch for [`CollisionWorld::visit_xz`]: the candidate list, reused so
@@ -268,10 +274,60 @@ impl BodyGrid {
     fn gather(&self, r: CellRange, out: &mut Vec<u32>) {
         out.extend_from_slice(&self.everywhere);
         for z in r.z0..=r.z1 {
-            let row = z * self.nx;
-            let a = self.starts[row + r.x0] as usize;
-            let b = self.starts[row + r.x1 + 1] as usize;
-            out.extend_from_slice(&self.cells[a..b]);
+            self.gather_row(z, r.x0, r.x1, out);
+        }
+    }
+
+    fn gather_row(&self, z: usize, x0: usize, x1: usize, out: &mut Vec<u32>) {
+        let row = z * self.nx;
+        let a = self.starts[row + x0] as usize;
+        let b = self.starts[row + x1 + 1] as usize;
+        out.extend_from_slice(&self.cells[a..b]);
+    }
+
+    /// [`Self::gather`] for the segment `from`..`to` inside `r`: in each row of
+    /// `r`, only the span of cells the segment crosses in that row, widened by
+    /// [`SEGMENT_MARGIN`]. A coordinate off the grid clamps to its edge cell,
+    /// exactly as [`cell_of`] clamps a body's, so the first and last rows also
+    /// answer for everything beyond them.
+    fn gather_segment(&self, r: CellRange, from: Vec3, to: Vec3, out: &mut Vec<u32>) {
+        out.extend_from_slice(&self.everywhere);
+        let (dx, dz) = (to.x - from.x, to.z - from.z);
+        let cell = 1.0 / self.inv_cell;
+        for z in r.z0..=r.z1 {
+            let low = if z == 0 {
+                f32::NEG_INFINITY
+            } else {
+                self.min_z + z as f32 * cell - SEGMENT_MARGIN
+            };
+            let high = if z + 1 == self.nz {
+                f32::INFINITY
+            } else {
+                self.min_z + (z + 1) as f32 * cell + SEGMENT_MARGIN
+            };
+            // Where the segment is at this row's two edges.
+            let (mut t0, mut t1) = if dz == 0.0 {
+                (0.0, 1.0)
+            } else {
+                let (a, b) = ((low - from.z) / dz, (high - from.z) / dz);
+                (a.min(b), a.max(b))
+            };
+            t0 = t0.clamp(0.0, 1.0);
+            t1 = t1.clamp(0.0, 1.0);
+            let (xa, xb) = (from.x + dx * t0, from.x + dx * t1);
+            let x0 = cell_of(
+                xa.min(xb) - SEGMENT_MARGIN,
+                self.min_x,
+                self.inv_cell,
+                self.nx,
+            );
+            let x1 = cell_of(
+                xa.max(xb) + SEGMENT_MARGIN,
+                self.min_x,
+                self.inv_cell,
+                self.nx,
+            );
+            self.gather_row(z, x0.max(r.x0), x1.min(r.x1), out);
         }
     }
 }
@@ -628,28 +684,36 @@ impl CollisionWorld {
                 return;
             }
         }
-        let bodies: Vec<Body> = parts
-            .iter()
-            .map(|p| {
-                let mut b = Body::placed(pose * p.local, p.shape.clone(), p.layers, p.closed);
-                b.owner = Some(owner);
-                b.hit_mult = p.hit_mult;
-                b
-            })
-            .collect();
-        let hull = || Hull {
-            owner,
-            bodies,
-            pose,
-            parts: parts.to_vec(),
+        let place = |p: &HullPart| {
+            let mut b = Body::placed(pose * p.local, p.shape.clone(), p.layers, p.closed);
+            b.owner = Some(owner);
+            b.hit_mult = p.hit_mult;
+            b
         };
         match slot {
             Ok(k) if parts.is_empty() => {
                 self.hulls.remove(k);
             }
-            Ok(k) => self.hulls[k] = hull(),
+            // A moving vehicle comes here every tick: its lists are kept.
+            Ok(k) => {
+                let h = &mut self.hulls[k];
+                h.owner = owner;
+                h.pose = pose;
+                h.bodies.clear();
+                h.bodies.extend(parts.iter().map(place));
+                h.parts.clear();
+                h.parts.extend_from_slice(parts);
+            }
             Err(_) if parts.is_empty() => {}
-            Err(k) => self.hulls.insert(k, hull()),
+            Err(k) => self.hulls.insert(
+                k,
+                Hull {
+                    owner,
+                    bodies: parts.iter().map(place).collect(),
+                    pose,
+                    parts: parts.to_vec(),
+                },
+            ),
         }
     }
 
@@ -698,7 +762,68 @@ impl CollisionWorld {
         min_z: f32,
         max_z: f32,
         hulls: HullFilter,
+        f: impl FnMut(&'a Body),
+    ) {
+        let cells = self
+            .grid
+            .cells_for(self.generation, min_x, max_x, min_z, max_z);
+        self.visit_cells(
+            cells,
+            [min_x, max_x, min_z, max_z],
+            hulls,
+            f,
+            |grid, r, out| grid.gather(r, out),
+        );
+    }
+
+    /// [`Self::visit_xz`] for the segment `from + dir * [0, len]`: only the cells
+    /// the segment crosses, not every cell of its bounding box. A long diagonal
+    /// line of sight's box is most of the map, and copying and sorting that
+    /// list was a fifth of a tick on Mygeeto. Still a superset of the bodies
+    /// whose AABB the segment meets: such a body is filed under the cell of
+    /// the meeting point, and the walk widens by [`SEGMENT_MARGIN`] on both
+    /// axes. It offers bodies the segment misses too, so `f` keeps its own
+    /// slab test.
+    pub(super) fn visit_segment<'a>(
+        &'a self,
+        from: Vec3,
+        dir: Vec3,
+        len: f32,
+        hulls: HullFilter,
+        f: impl FnMut(&'a Body),
+    ) {
+        let to = from + dir * len;
+        let m = SEGMENT_MARGIN;
+        let (min_x, max_x) = (from.x.min(to.x) - m, from.x.max(to.x) + m);
+        let (min_z, max_z) = (from.z.min(to.z) - m, from.z.max(to.z) + m);
+        let cells = self
+            .grid
+            .cells_for(self.generation, min_x, max_x, min_z, max_z);
+        // Past this length the walk's own rounding nears the margin, and the
+        // box it would have read is the whole map anyway.
+        let walkable = (to - from).length_squared() < SEGMENT_MAX_WALK * SEGMENT_MAX_WALK;
+        self.visit_cells(
+            cells,
+            [min_x, max_x, min_z, max_z],
+            hulls,
+            f,
+            |grid, r, out| {
+                if walkable {
+                    grid.gather_segment(r, from, to, out)
+                } else {
+                    grid.gather(r, out)
+                }
+            },
+        );
+    }
+
+    fn visit_cells<'a>(
+        &'a self,
+        cells: Option<CellRange>,
+        [min_x, max_x, min_z, max_z]: [f32; 4],
+        hulls: HullFilter,
         mut f: impl FnMut(&'a Body),
+        gather: impl FnOnce(&BodyGrid, CellRange, &mut Vec<u32>),
     ) {
         let mut seen = |body: &'a Body| {
             if hulls.admits(body.owner) {
@@ -709,10 +834,7 @@ impl CollisionWorld {
             hulls,
             HullFilter::Hulls | HullFilter::HullsExcept(_) | HullFilter::Only(_)
         );
-        match self
-            .grid
-            .cells_for(self.generation, min_x, max_x, min_z, max_z)
-        {
+        match cells {
             // A hull query visits no map body: skip the grid.
             _ if hulls_only => {}
             None => {
@@ -744,7 +866,7 @@ impl CollisionWorld {
             Some(r) => {
                 let mut ids = BROADPHASE_SCRATCH.with(|s| s.take());
                 ids.clear();
-                self.grid.gather(r, &mut ids);
+                gather(&self.grid, r, &mut ids);
                 ids.sort_unstable();
                 ids.dedup();
                 for &i in &ids {
@@ -1141,5 +1263,111 @@ mod tests {
         let mut nan_seen = 0usize;
         w.visit_xz(f32::NAN, 1.0, 0.0, 1.0, HullFilter::All, |_| nan_seen += 1);
         assert_eq!(nan_seen, 64);
+    }
+
+    /// The cells a segment walks hold every body whose box it meets, in the
+    /// same order as reading its whole bounding box, on rays of every slant.
+    #[test]
+    fn a_segment_is_offered_every_body_its_bounding_box_would_offer_that_it_meets() {
+        let w = CollisionWorld::new(scattered(600), Vec::new());
+        let mut seed = 0x1234_5679u32;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let (mut read, mut boxed) = (0usize, 0usize);
+        for k in 0..4000 {
+            let span = if k % 3 == 0 { 2000.0 } else { 500.0 };
+            let at = |n: f32| (n - 0.5) * span;
+            let from = Vec3::new(at(next()), 5.0 * next(), at(next()));
+            let mut to = Vec3::new(at(next()), 5.0 * next(), at(next()));
+            // Along the axes too, and almost along them.
+            match k % 7 {
+                0 => to.x = from.x,
+                1 => to.z = from.z,
+                2 => to.x = from.x + 1e-4,
+                3 => to.z = from.z + 1e-4,
+                _ => {}
+            }
+            let (d, len) = ((to - from).normalize(), (to - from).length());
+            let mut seg = Aabb::empty();
+            seg.add(from);
+            seg.add(to);
+            let mut all = Vec::new();
+            w.visit_xz(
+                seg.min.x,
+                seg.max.x,
+                seg.min.z,
+                seg.max.z,
+                HullFilter::All,
+                |b| {
+                    all.push(b as *const Body);
+                    boxed += 1;
+                },
+            );
+            let mut walked = Vec::new();
+            w.visit_segment(from, d, len, HullFilter::All, |b| {
+                walked.push(b as *const Body);
+                read += 1;
+            });
+            let order = |v: &Vec<*const Body>| v.windows(2).all(|p| p[0] < p[1]);
+            assert!(order(&walked), "not ascending at ray {k}");
+            for b in &all {
+                // SAFETY: a pointer to a body of the live world, just taken.
+                let body = unsafe { &**b };
+                if body.aabb.hits_ray(from, d, len) {
+                    assert!(walked.contains(b), "ray {k} lost a body its line meets");
+                }
+            }
+        }
+        assert!(read * 2 < boxed, "the walk read {read} of {boxed}");
+    }
+
+    /// A ray that stops looking past its best hit, and a line of sight that
+    /// stops at its first, answer as casting every body the whole way does.
+    #[test]
+    fn a_shortened_ray_answers_as_the_whole_ray_does() {
+        let w = CollisionWorld::new(scattered(600), Vec::new());
+        let mut seed = 0x0bad_cafeu32;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 17;
+            seed ^= seed << 5;
+            (seed >> 8) as f32 / (1u32 << 24) as f32
+        };
+        let mut hits = 0;
+        for _ in 0..4000 {
+            let at = |n: f32| (n - 0.5) * 300.0;
+            let from = Vec3::new(at(next()), 8.0 * next(), at(next()));
+            let to = Vec3::new(at(next()), 8.0 * next(), at(next()));
+            let (d, len) = ((to - from).normalize(), (to - from).length());
+            let mut whole: Option<(f32, [f32; 3])> = None;
+            for b in &w.bodies {
+                if !b.layers.contains(Layers::ORDNANCE) {
+                    continue;
+                }
+                let o = b.to_local.transform_point3(from);
+                let v = b.to_local.transform_vector3(d);
+                let ray = parry3d::query::Ray::new(
+                    crate::collision::point(o),
+                    crate::collision::vector(v),
+                );
+                if let Some(h) = b.shape.cast_local(&ray, len) {
+                    if whole.is_none_or(|(t, _)| h.time_of_impact < t) {
+                        whole = Some((h.time_of_impact, [h.normal.x, h.normal.y, h.normal.z]));
+                    }
+                }
+            }
+            let got = w.ray_with(from, d, len, Layers::ORDNANCE, HullFilter::All);
+            assert_eq!(got.map(|h| h.t.to_bits()), whole.map(|h| h.0.to_bits()));
+            assert_eq!(
+                w.ray_blocked(from, d, len, Layers::ORDNANCE, HullFilter::All, [None; 2]),
+                whole.is_some()
+            );
+            hits += usize::from(whole.is_some());
+        }
+        assert!(hits > 500, "only {hits} rays hit anything");
     }
 }

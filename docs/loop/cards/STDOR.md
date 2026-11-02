@@ -32,13 +32,6 @@ The bake (`bake/src/door.rs`) applies the bone's model-space delta to prims whos
 - **PS2** (live RAM, 420 s, `lead_tmp/stall/ps2/bf2_dea1_soldiers.csv`, `dea1_doors.py`): soldiers cross blast door 2
   21 times and door 0 18 times, all through the centre band (|along| < 4.3 m).
 
-## Acceptance
-- `stall_probe doorcheck` on the 5 BF2 door maps: no INWARD body.
-- Every non-DEA1 door's baked rig is byte-identical.
-- The walk probe crosses blast door 2's centre with the door open.
-- The DEA1 knot cluster is gone on 8 seeds.
-- The drawn blast door, viewed shut and open, matches a PS2 frame of an open blast door. PCSX2: `bf2_dea1_ai16_gcw_sideselect.p2s`.
-
 ## Notes
 - [H]: which composition the engine applies (bone-relative XFRM, or a bind-relative delta) and whether the drawn
   segments need it too.

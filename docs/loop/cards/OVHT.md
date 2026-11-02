@@ -39,28 +39,6 @@ RE done 2026-10-22 (`analysis/re-heat-hud.md`, [O], workflow-verified; live PS2 
 - The port's sim already keeps `WeaponState::heat` / `overheated` (same numbers as the PS2 on the pistol, per update);
   the HUD feed sends none of the three events.
 
-## Do (the on-foot slice)
-1. `ui::hud`: `HudWeapon` gets `heat` (0..1 as the PS2 sends it), `refire` and `overheated`; `feed` sends
-   `player1.weapon1.heat` (Number) and `player1.weapon1.refire` (Number) every frame while weapon 1 is shown, and
-   `player1.weaponsOverheat` every frame while overheated (the PS2's every-frame sends: the line holds 0.1 s and fades
-   1 s after the clear). Check how `hud_tree` treats a repeated enable before relying on it (the clip ring's feed).
-2. `game::main::battle::hud_model`: fill them from `me.weapon` + its class: heat = `infinite_ammo()` ? clamp(heat) : 0;
-   refire = overheated ? 1 - clamp(heat_threshold / heat) : 0. Weapon 2 (the grenade row) sends 0.
-3. Both games through the same path (BF1 maps: BF1's heat on BF2's ring).
-4. Tests (ui): lit segments at heat 0 / 0.5 / 1.0 (0 / 15 / 30), the colour at 0 and 1 against the NumberColor table,
-   the line on while overheated and off after its fade, refire bits 2 per side at heat 0.5 with threshold 0.25;
-   mutation-check each (drop the every-frame send, swap the infinite test, invert the overheat gate).
-Not here: the charge on the ring for counted charge weapons and the state-4 refire bits (note on BHUD3); the seat guns'
-ring - the reticle is not shown off foot in the port at all (card VSHUD); WHUM owns the overheat sound.
-
-## Acceptance
-- A picture strip per game: cold, half hot, overheated, cooling - with the sim's heat value beside each frame; the
-  PS2's frame beside it (PCSX2, the same weapon): PS2 frames are ready in `engine/artifacts/lead_tmp/ovht/ps2/
-  bf2_pistol/rep0_{half,over,cool1,cool2,cold}.png` (rows in `rep0.csv`, `tools/ringarc.py` measures the lit arc) and
-  `bf1_pistol/` (BF1's own bar, for reference). Take the port's frames with the same tap script (R1 3 updates on, 5 off).
-- A ui test: the ring's lit segments against heat (0, 0.5, 1.0) and the overheat flag; mutation-checked.
-- Golden: the HUD golden it moves, declared (a cold weapon lights no segment: likely none - prove it with the gates).
-
 ## Original text (2026-10-21)
 `analysis/re-hud.md` already has BF2's heat ring (30 x `white` segments over -150..150 deg, rgb (239,255,41), beside the
 clip ring); BHUD3 listed it among many - this card takes it out of BHUD3 so it does not wait on the rest.

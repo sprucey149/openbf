@@ -195,6 +195,9 @@ pub struct FlyerState {
     /// Defer authored energy initialization until the first takeoff, so
     /// an untouched parked flyer keeps its historical hash stream.
     pub initialized: bool,
+    /// Seconds left of the countdown outside the map's boundary (`Sim::tick_flyers`,
+    /// `re-boundary.md`), `None` inside. The PS2 keeps it on the crew's team member.
+    pub leaving: Option<f32>,
     /// The AI pilot's flight state (`ai::flyer_drive`). Default unless a bot
     /// is flying it, so it adds no bytes to any other flyer's hash.
     pub ai: FlyerAi,
@@ -242,6 +245,9 @@ pub struct FlyerAi {
     pub probe_at: u64,
     /// OURS: an attack run is broken off until this tick.
     pub break_until: u64,
+    /// OURS: the point an attack run flies at, and the tick its target was last seen.
+    pub run: Option<Vec3>,
+    pub run_seen: u64,
     /// OURS: the tick a takeoff began, to give up under a roof.
     pub takeoff_at: u64,
     /// OURS: where the craft last moved from, and the tick it did.
@@ -250,6 +256,8 @@ pub struct FlyerAi {
     /// OURS: a wedged craft keeps its way out until this tick, even under an
     /// open sky, where the upward probe would drop it at once.
     pub wedged_until: u64,
+    /// OURS: ways out tried since it last travelled.
+    pub wedges: u8,
     /// The Catmull-Rom P0..P3 of the current BF2 segment.
     pub curve: Option<[Vec3; 4]>,
     pub t: f32,
@@ -272,13 +280,14 @@ impl FlyerAi {
             return;
         }
         eat(b"FAI");
-        eat(&[self.agent as u8, self.pursuit as u8]);
+        eat(&[self.agent as u8, self.pursuit as u8, self.wedges]);
         for x in self.anchor.to_array() {
             eat(&x.to_bits().to_le_bytes());
         }
         for tick in [
             self.probe_at,
             self.break_until,
+            self.run_seen,
             self.takeoff_at,
             self.anchor_at,
             self.wedged_until,
@@ -295,6 +304,7 @@ impl FlyerAi {
             None => eat(&[0]),
         };
         vec(self.goal, eat);
+        vec(self.run, eat);
         for k in 0..2 {
             vec(self.avoid.map(|a| a[k]), eat);
         }
@@ -332,6 +342,7 @@ impl Default for FlyerState {
             jump_was_down: false,
             level_time: 0.0,
             initialized: false,
+            leaving: None,
             ai: FlyerAi::default(),
         }
     }
@@ -364,6 +375,9 @@ impl FlyerState {
             self.level_time,
         ] {
             eat(&value.to_bits().to_le_bytes());
+        }
+        if let Some(t) = self.leaving {
+            eat(&t.to_bits().to_le_bytes());
         }
         self.ai.hash_into(eat);
     }
@@ -424,6 +438,28 @@ fn angular_slew(current: f32, target: f32, filter: f32, decel: f32, dt: f32) -> 
         target,
         if accelerating { filter } else { decel } * dt,
     )
+}
+
+/// OURS: the least clearance `FlightPhase::Landing` touches down under. The
+/// contact sweep leaves a craft's origin 1 cm off the surface it stops at.
+pub const TOUCHDOWN_MIN: f32 = 0.02;
+/// OURS: how far over a pad's floor to stand an origin whose class says less
+/// than [`REST_FLOOR`].
+pub const REST_LIFT: f32 = 0.02;
+pub const REST_FLOOR: f32 = 0.005;
+
+/// How far over the pad's floor a flyer's origin stands. `LandedHeight` is the
+/// PS2's number, and a model whose vis box starts over its origin makes it
+/// negative: BF1's TIE bomber is -0.0115. The PS2's clearance ray starts at the
+/// body's sphere centre (`re-flyer.md`, B1:85703), but the port's rays start at
+/// the origin, so an origin under the deck sees no deck below it and takes the
+/// deck over it for a ceiling: the craft never left the deck's underside.
+pub fn rest_height(landed_height: f32) -> f32 {
+    if landed_height < REST_FLOOR {
+        REST_LIFT
+    } else {
+        landed_height
+    }
 }
 
 /// State machine and free-flight integration. `v.input` uses the same
@@ -498,7 +534,11 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
                 s.phase = FlightPhase::Takeoff;
             } else {
                 s.lift = (s.lift - dt / p.landing_time.max(dt)).max(0.0);
-                if clearance < p.landed_height && (frame * Vec3::Y).dot(normal) > 0.9375 {
+                // OURS: the sweep stops an origin 1 cm off the surface, so a class
+                // whose number is smaller than that must still be able to touch down.
+                if clearance < p.landed_height.max(TOUCHDOWN_MIN)
+                    && (frame * Vec3::Y).dot(normal) > 0.9375
+                {
                     if env.ground.is_some_and(|g| g.can_land) {
                         s.phase = FlightPhase::Landed;
                     } else {

@@ -367,7 +367,7 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             Event::WeaponSelect { unit, weapon_class } => {
                 format!("{tick},weapon_select,{},{weapon_class},\n", unit.index)
             }
-            Event::FireEmpty { unit } => format!("{tick},fire_empty,{},,\n", unit.index),
+            Event::FireEmpty { unit, .. } => format!("{tick},fire_empty,{},,\n", unit.index),
             Event::StickyContact { water, .. } => {
                 format!("{tick},grenade_contact,,,{}\n", *water as u8)
             }
@@ -671,16 +671,6 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         );
         toggle.print();
     }
-    if let Some(p) = &v.bench_csv {
-        let fresh = !p.exists();
-        let mut out = if fresh {
-            String::from(game::bench::Report::CSV_HEADER)
-        } else {
-            std::fs::read_to_string(p)?
-        };
-        out.push_str(&report.csv_row());
-        std::fs::write(p, out)?;
-    }
     Ok(())
 }
 
@@ -704,11 +694,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         return scene_report(&scene, &gpu, &v.map);
     }
 
-    let ride_log = match &v.ride_script {
-        Some(out) => Some(ride_script(&scene, v, out)?),
-        None => None,
-    };
-    if let Some(log_path) = ride_log.as_ref().or(v.walk_replay.as_ref()) {
+    if let Some(log_path) = v.walk_replay.as_ref() {
         let log: InputLog =
             ron::from_str(&std::fs::read_to_string(log_path)?).context("parse walk log")?;
         let cube = upload_unit_cube(&mut r)?;
@@ -788,9 +774,12 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
             feed,
         };
         gpu.step_stations(&walk.sim);
+        let mut scripted_view = game::viewpoint::ScriptedView::default();
         for (tick, pads) in log.frames().enumerate() {
             game::heroes::scores(&mut walk.sim, &frame.feed);
-            walk.step_tick(pads);
+            let mut pads = pads.to_vec();
+            pads[0] = scripted_view.apply(pads[0]);
+            walk.step_tick(&pads);
             gpu.step_stations(&walk.sim);
             frame.fx.ingest_posed(&walk, Some(&frame.vis));
             let effect_sounds = frame.fx.take_sounds();
@@ -1015,6 +1004,21 @@ fn scene_report(scene: &game::assets::Scene, gpu: &SceneGpu, map: &std::path::Pa
         "  terrain chunks dropped (texture in another LVL): {}",
         gpu.terrain_dropped
     );
+    // A bake older than the first-person models has none: V then gives an eye
+    // view with no arms or gun, and nothing on the screen says why.
+    let fpm = map.parent().unwrap_or(map).join(format!(
+        "side_{}/fpm",
+        scene.manifest.source_game.to_ascii_lowercase()
+    ));
+    let arms = std::fs::read_dir(&fpm).map_or(0, |dir| dir.flatten().count());
+    println!(
+        "  first-person models: {arms}{}",
+        if arms == 0 {
+            " (rebake the side group, or no arms draw)"
+        } else {
+            ""
+        }
+    );
     Ok(())
 }
 
@@ -1065,29 +1069,6 @@ fn capture_orbit(
         o.radius
     );
     Ok(())
-}
-
-/// `--ride-script <out>` (card VSEAT): run `game::ride::script` on a fresh
-/// battle, write its log to `out`, print what happened; the caller replays
-/// the log as `--walk-replay` does.
-fn ride_script(
-    scene: &game::assets::Scene,
-    v: &ViewerArgs,
-    out: &std::path::Path,
-) -> Result<std::path::PathBuf> {
-    let mut walk = make_walk(scene, &BattleSetup::from_args(v, v.seed)?);
-    let ride = game::ride::script(&mut walk, v.seed);
-    println!(
-        "ride: {} ticks; entered {:?}; drove {:.1} m; exited {:?}; sim hash {:016x}",
-        ride.log.ticks.len(),
-        ride.entered,
-        ride.driven_m,
-        ride.exited,
-        walk.sim.hash()
-    );
-    std::fs::write(out, ron::to_string(&ride.log)?)?;
-    anyhow::ensure!(ride.exited.is_some(), "the ride did not complete");
-    Ok(out.to_path_buf())
 }
 
 /// AIMG's scripted, asset-free acquisition replay. Geometry follows the

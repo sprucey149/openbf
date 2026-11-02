@@ -362,3 +362,32 @@ The build hologram uses the building origin; the unnamed node mentioned in
 section 1 is still untraced. The shared hologram implementation supplies its
 existing beam-base width and pop behavior. These scoped headless tests do not
 claim a fresh original-game paired capture or acceptance of every map.
+
+## 13. What gates a player's build (issue #79 report, Coruscant, 2026-11-01)
+
+A pad is team 0 [L, section 1], so a cutter takes it as neutral whichever side holds the nearby post: the
+construction and death functions read no team and no post [V: `FUN_001e2d40`, `FUN_001e3638`], and the shot's relation
+test (`FUN_00346fa0`, section 11) sits on the vehicle branch. What gates it is the acquisition of section 2: 4 m plus
+the target's radius, inside the cone, a clear line, energy for the pulse. Whether the PS2 shows a refusal message for a
+missed target was not read [H: none]; the port shows none, and a held target shows its health.
+
+The report came from a build of 745938ba, made before section 12 landed (7912871d). Run at that commit from the
+report's spot (-51.8, 7.0, -12.1, heading from the match log) with the trigger held for 10 s: 0 building turrets for
+Coruscant's 11 `tur_bldg_laser` pads, no cutter target, 0 repairs, energy unspent. The wrench is on the pad's own
+texture (`construction create`, model `com_prop_buildzone`), so that build showed it with nothing behind it. The
+same run on the merged tree: 16 shots of +50 and a turret, for either side, with the nearest post just taken by the
+Republic, and from any look between -1.2 and +0.6 rad. Which post's capture he saw is not in the match log.
+
+Coruscant's `tur_bldg_laser13` (82.7, 7.0, -113.2) hangs over the far edge of the library's floor, from z -110. It is
+built from the floor's edge (under 4 m); a soldier who walks onto the pad falls. That comes from the map's
+collision; the PS2 run of that spot is not checked.
+
+Kashyyyk's `com_weap_gunturret10` (`tur_bldg_beam`, 128.5, -1.0, 110.0) stands 2 m under the terrain (1.09 there),
+its sphere's centre under the ground and its top above. The port's cutter ray ran to the centre, so no player could
+build it and a bot pulled the trigger out of reach until it gave up, again and again. The acquisition's ray stops the
+target's radius short of its centre [V: `re-aim-assist.md` 3.3, read at BF1's lines, with BF2's twin loop in 3.9]; the
+magnet's ray already did. `Sim::repair_candidate` now does too, for every cutter target, and a bot walks on until that
+ray and the 3D reach allow the shot. On the PS2 a bot's shot takes no range at all (section 2). Not checked: a pad's
+own bounds on the PS2 (kind 6 takes a collision prim, re-aim-assist 3.6, where the port uses the standing turret's
+sphere), so whether a PS2 player reaches this pad, and that one spot in play. Every building turret on the nine BF2
+ground maps that have any (`pad_build_input.rs`) builds through this walk-up run.

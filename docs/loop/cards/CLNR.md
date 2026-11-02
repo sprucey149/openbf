@@ -19,7 +19,4 @@ The cleanse rotation's `render` area (LAST_CLEANSE). Scope: `engine/crates/rende
 
 ## Evidence
 
-## Acceptance
-Every gate PASS with nothing declared (behaviour-neutral: goldens, parity, sweep, arena, sim hash, leak unmoved); `size_report.sh --check-map` exit 0 with 0 stale counts; `size_report.sh --strict` exit 0.
-
 ## Notes

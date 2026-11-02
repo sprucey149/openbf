@@ -23,11 +23,6 @@ The maintainer's playtest 2026-10-28: "when I got in a geonosis turret, the came
 - The class (`assets_baked/classes/bf2_tur.ron`): props "0.0 2.5 0.0", "0.0 0.0 -2.0", "0.0 3.6 2.0" (hash names to resolve: TrackCenter / EyePointOffset / TrackOffset).
 - `WalkSim::settle_camera` keeps a camera on the side of the sheet it is on (deliberate, for GEO1's hangar under uncut terrain), so a seat camera that starts under the sheet stays there. Lead: the seat's camera numbers do not reach `vehicle_camera` for this building turret (zeros), placing the camera at the origin's height.
 
-## Acceptance
-- Root cause named with the numbers (which seat row reaches `vehicle_camera`, what it holds).
-- A test over every baked building turret and vehicle seat of both games: the settled seat camera is above the terrain sheet where the turret stands on it.
-- GEO1's hangar case (camera under the sheet on purpose) still holds.
-
 ## Result
 - Names by hash: `EyePointOffset` 0 2.5 0, `TrackCenter` 0 0 -2, `TrackOffset` 0 3.6 2 (the card's lead guessed the first two the other way round), `TiltValue` 5. The numbers do reach `vehicle_camera`; it hung them on the building's origin, so the pull point was 2 m behind the origin at its height, under the sheet. `settle_camera` then held the camera there, 0.30 m under.
 - Building turrets now take `TrackCenter` / `TrackOffset` on the aim frame at the turret node (`re-turret-draw.md` 4 [V]). `tur_bldg_geoturret` at the playtest's spot: camera 4.42 m over the base. No third-person RAM row of this turret was found; other turrets have them, and the camera stands within 1 cm of the PS2's on settled rows of BF1 NAB1 and BF2 MYG1 (`turret_views::the_third_person_camera_is_where_the_ps2s_camera_stood`).

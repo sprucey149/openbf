@@ -28,13 +28,6 @@ the port reads 12-15 luma below the PS2 across the whole map, not at one post. A
 - The 09-29 port frames in `pcsx2/ref/tat1/walk/port/` predate NIBL/LEAF; re-render at main first (memory: re-render stale
   defect pictures first).
 
-## Acceptance
-- A per-surface table for TAT1's 29 pairs (and TAT2's): dluma split by terrain / buildings / sky / other, using the port's
-  own depth or an object-id render as the mask; the surface that carries most of the -15 named.
-- The cause carded (an existing card re-valued: SUND/LSUM/SBLT/INTL, or a new build/re card with a parity target:
-  TAT1 median dluma within +-5 of the PS2 without any other showcase map's parity block error rising > 0.5) — or the
-  card closed with the reason if the gap is something the port rightly improves on (COMPARISON_RULES).
-
 ## Notes
 - Planner 2026-09-30 08:30: opened from the PARITY scoreboard (the first planner to rank by it). Measure only: no code.
 

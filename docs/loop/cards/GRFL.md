@@ -27,13 +27,6 @@ The maintainer, 2026-10-07: "when I would throw grenades on here, the grenades w
 - **What is left under fix 3 is authored, not a sweep fault** (2,436 floors: 1,800 on a soldier-only body, 611 a throw off a deck's edge that then crosses one): Polis Massa 6,141 = the tops of `com_inv_col_*` invisible walls (`OrdnanceCollision = none`, unreachable "floors" the census takes on a map whose hub heights are not its floors); Kamino 937 = throws off `kam_bldg_mushplatform1` / `interior_right_entry` that cross the platform's soldier-only skirt prim at y 61.4; `com_weap_gunturret` tops, `fel1_bldg_bladder`, Ewok fences. The static check (no ordnance face within 0.4 m under a soldier floor) flags 6,500 floors, the same bodies plus deck edges a foot ring holds.
 - NOT measured: what the PS2's mesh ray does behind its origin (one-sided, by its result: grenades rest on PS2 decks) - re-grenades 13.2 left "the bodies after the terrain" unread. No PCSX2 drop was made.
 
-## Acceptance (the build)
-- `Sim::sweep_sticky`'s BODY ray starts at the previous position (length = step + `SWEEP_EXTRA` - `SWEEP_BACK`: the PS2's end point); the terrain, water and soldier tests keep the PS2's pulled-back ray. PROVISIONAL / a named deviation in the module header and `re-grenades.md` 13: the PS2's ray is pulled back and its mesh test is unread.
-- A core test that FAILS on main: a grenade thrown down at 48 deg onto a level mesh floor (a two-triangle sheet, both windings) rests on it; mutation-checked.
-- The census committed as `game/examples/ordnance_census.rs` (from `lead_tmp/grfl/tools/grfl_census.rs`, the `GRFL_*` debug names tidied, the 16-thread cap kept) with an accepted list like `leak_census_accepted.txt` (the soldier-only bodies above, each with its reason) and a gate in `gates.toml`: footer `through` = the accepted count, `new 0`; it runs under the leak gate's skip rule (`engine/goldens/leak_deps.toml`). Paste the before / after footer: 127,017 -> about 7,260, Kamino 8,473 -> 937 (all on the skirt prim), the maintainer's deck 0 of 4.
-- Declared: `sweep; arena` (bots throw grenades: GRAI's 8,116 throws in 8 seeds x 32 maps; a grenade that rests on a deck now kills there) - read the sweep's `teamfire` line and grenade kills before / after.
-- Optional, not a bar: one PCSX2 throw at a Kamino deck (`ps2live`-style sampler, the sticky's position per update) to read whether the PS2's first ray after a bounce meets the deck; and the soldier-only skirt prim on the PS2.
-
 ## Original card text (2026-10-07)
 
 ### Why

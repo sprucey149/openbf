@@ -44,19 +44,6 @@ the real rifle the same 210 ticks take the bar 1.0 -> 0.967. The readout reads h
 - Rifle scale: `lead_tmp/audit-htgt/runA.log` (hook as the builder ran it: 0.98 / 0.90 / 0.82 / 0.73 / 0.67) vs
   `runB.log` (HTGT_REAL=1: 0.998 / 0.99 / 0.982 / 0.973 / 0.967); "HTGT scales before [1,1,1,0.1,0.1,0.1,0.1]".
 
-## Acceptance
-1. Re-run `lead_tmp/audit-htgt/tools/mut_one.sh <ID>` on the branch (point `WT` in muts.py at the branch worktree,
-   or re-make the patterns): M13, M11 (or M12: the name must come from a walk the battle setup builds), M02, M05, M04
-   and M03 each FAIL at least one test; paste the MUTRESULT lines. M01, M09, M10 may stay (say why if they do).
-   Test ideas: `install` on a fixture world with one armed building -> its vehicle's `aim_sphere` is Some and the
-   acquisition picks it from 15 m with a radius-0 blast sphere; a feed built through `EventFeed::for_walk` from a walk
-   with `vehicle_classes` names the picked vehicle; `hash()` of Unit(i,g) vs Vehicle(i,g) vs none all differ; a
-   turret turned 90 deg with an off-centre aim sphere is picked where its building is, not where the unturned sphere
-   would be; a vehicle moving across the line of sight pulls the assist ahead of it; a weapon with TargetVehicle but
-   not TargetBuilding magnets the hover and not the turret.
-2. The HTGT card's acceptance line and the report say the IFT-X numbers were taken with the rifle's vehicle scale
-   forced to 1.0 (or re-take them with a launcher, as acceptance 3 of HTGT asked: a rocket into a picked vehicle).
-
 ## Notes
 - Behaviour-neutral (tests only, plus any small seam a test needs): every gate should read identical; declare nothing.
 - The pick itself held in the audit's census (`lead_tmp/audit-htgt/census3/`, `census_summary.txt`, hook

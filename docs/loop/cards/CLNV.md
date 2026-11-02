@@ -24,9 +24,3 @@ Cleanse 15, area core (diff 177140d..0487827: 32 files, 4,747 added lines). Find
 4. unit.rs's "every field is hashed" test edits 5 of the 12 hashed floats.
 5. Ten port-own constants say OURS without the ledger's keyword PROVISIONAL.
 6. CRATES.md: 21 stale line counts.
-
-## Acceptance
-- `loopctl.py self-test` PASS with two new cases; the second FAILS on a copy without the `needs` clause.
-- `size_report.sh --strict` exit 0; `--check-map` 0 stale counts.
-- The widened hash test fails when `vel.x` is left out of `AimBlock::hash_into`.
-- Every gate PASS, nothing declared (sim hashes and the seed-42 sweep equal main's).

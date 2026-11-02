@@ -1,5 +1,5 @@
 use super::*;
-use crate::collision::{Body, HullPart, Shape};
+use crate::collision::{Body, HullPart, Layers, Shape};
 use crate::sim::{buttons, PadState, Station, StationClass};
 use crate::unit::{SlotSpec, UnitHandle, UnitSpec};
 use crate::weapon::{DamageDesc, OrdnanceClass, Repair};
@@ -201,6 +201,45 @@ fn partial_rebuilds_stay_wrecks_and_identical_inputs_keep_identical_hashes() {
         hashes
     };
     assert_eq!(run(), run());
+}
+
+/// The cutter's click: a press its energy cannot pay, on either channel,
+/// once, with or without a target; a press it can pay is silent.
+#[test]
+fn a_press_the_cutters_energy_cannot_pay_clicks_once() {
+    let clicks = |sim: &Sim| {
+        sim.events
+            .iter()
+            .filter(|e| matches!(e, Event::FireEmpty { .. }))
+            .count()
+    };
+    for (bf2, secondary) in [(false, false), (false, true), (true, false), (true, true)] {
+        let (mut sim, owner) = fixture(bf2, secondary);
+        sim.step(&[fire(secondary)]);
+        assert_eq!(clicks(&sim), 0, "paid press, bf2 {bf2}, ch1 {secondary}");
+        sim.step(&[PadState::default()]);
+
+        sim.unit_mut(owner).unwrap().soldier.energy = 0.0;
+        let mut n = 0;
+        for _ in 0..3 {
+            sim.step(&[fire(secondary)]);
+            n += clicks(&sim);
+        }
+        assert_eq!(n, 1, "unpaid press, bf2 {bf2}, ch1 {secondary}");
+
+        sim.step(&[PadState::default()]);
+        sim.unit_mut(owner).unwrap().is_player = false;
+        sim.unit_mut(owner).unwrap().soldier.energy = 0.0;
+        sim.step(&[fire(secondary)]);
+        assert_eq!(clicks(&sim), 0, "a bot does not click");
+
+        // The stamina cheat pays every pulse, so nothing is refused.
+        let (mut sim, owner) = fixture(bf2, secondary);
+        sim.cheats.infinite_stamina = true;
+        sim.unit_mut(owner).unwrap().soldier.energy = 0.0;
+        sim.step(&[fire(secondary)]);
+        assert_eq!(clicks(&sim), 0, "cheat, bf2 {bf2}, ch1 {secondary}");
+    }
 }
 
 #[test]
@@ -449,4 +488,35 @@ fn audit_paid_slice_pulses_emit_zero_healing_feedback() {
         assert_eq!(sim.vehicle(vh).unwrap().slice, 0.5);
         assert!(sim.events.is_empty(), "unpaid pulse emits no action");
     }
+}
+
+/// The acquisition's ray stops the target's radius short of its centre
+/// (`re-aim-assist.md` 3.3): what lies inside that radius hides nothing, what
+/// lies before it does.
+#[test]
+fn a_wall_inside_the_targets_radius_does_not_hide_it_and_one_before_it_does() {
+    for (z, blocked) in [(0.6, false), (1.6, true)] {
+        let (mut sim, _) = fixture(true, false);
+        sim.stations[0].health.cur = 1.0;
+        sim.collision.push_body(Body::new(
+            Mat4::from_translation(Vec3::new(0.0, 1.0, z)),
+            Shape::Box {
+                half: Vec3::new(2.0, 2.0, 0.1),
+            },
+        ));
+        sim.step(&[fire(false)]);
+        assert_eq!(sim.stations[0].health.cur == 1.0, blocked, "wall at z {z}");
+    }
+}
+
+/// A target whose centre is under the terrain, the top of its sphere above:
+/// the terrain only blocks when it rises before the sphere.
+#[test]
+fn a_target_sunk_under_the_terrain_takes_the_cutter_from_above_it() {
+    let (mut sim, _) = fixture(true, false);
+    sim.stations[0].health.cur = 1.0;
+    sim.stations[0].sphere_centre = Vec3::new(0.0, -0.5, 0.0);
+    sim.stations[0].sphere_radius = 2.5;
+    sim.step(&[fire(false)]);
+    assert!(sim.stations[0].health.cur > 1.0, "sunk target taken");
 }

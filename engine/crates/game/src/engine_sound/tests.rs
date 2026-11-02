@@ -164,6 +164,7 @@ fn graphs_on_one_target_multiply() {
 
 fn motion(piloted: bool, forward: f32, throttle: f32) -> Motion {
     Motion {
+        phase: None,
         piloted,
         forward,
         speed: forward.abs(),
@@ -365,6 +366,7 @@ fn the_ps2s_multipliers_replay_through_the_baked_records() {
                 health: num(c_health),
                 timer: (num(c_timer) - 1.0 / 30.0).max(0.0),
                 turning_off: flags & 0x10 != 0,
+                wind: Wind::None,
             };
             let (g, p) = factors(l, &i);
             rows[*k] += 1;
@@ -404,6 +406,7 @@ fn utapaus_baked_walker_record_reads_the_rams_factors() {
         health: 1.0,
         timer: 50.0,
         turning_off: false,
+        wind: Wind::None,
     };
     let got = all(&rec.layers, &i);
     for (g, w) in got.iter().zip([0.7, 1.0, 1.0]) {
@@ -632,4 +635,88 @@ fn baked_jet_classes_name_baked_sounds() {
         }
     }
     println!("{rows} jet classes checked");
+}
+
+/// A snowspeeder's take-off and landing: its loop runs on with no pilot in the air, the
+/// time graphs follow the wind, and only a landed craft runs down.
+#[test]
+fn a_flyer_winds_up_at_takeoff_and_stops_only_when_landed() {
+    let drive = Drive::Flyer {
+        max_speed: 50.0,
+        acceleration: 25.0,
+    };
+    let g = |parameter: &str, points: Points| EngineGraph {
+        parameter: parameter.into(),
+        target: "Gain".into(),
+        points: points.to_vec(),
+    };
+    let up: Points = &[(0.0, 0.25), (1.0, 1.0)];
+    let down: Points = &[(0.0, 1.0), (1.0, 0.5)];
+    let layers = vec![EngineLayer {
+        sound: 0,
+        delay: 0.0,
+        deviation: 0.0,
+        graphs: vec![g("winduptime", up), g("winddowntime", down)],
+    }];
+    let mut e = Instance::default();
+    let mut step = |piloted: bool, speed: f32, phase: FlightPhase| {
+        let m = Motion {
+            piloted,
+            speed,
+            health: 1.0,
+            phase: Some(phase),
+            ..Motion::default()
+        };
+        e.update(0.1, drive, 3.0, &m, &layers, || 0.5);
+        (e.on, e.wind, e.wind_began, e.inputs, e.turning_off)
+    };
+    let (on, wind, began, ..) = step(true, 0.0, FlightPhase::Landed);
+    assert!(on && wind == Wind::None && !began);
+    let (.., began, i, _) = step(true, 0.0, FlightPhase::Takeoff);
+    assert!(began && i.wind == Wind::Up && i.timer == 0.0);
+    assert_eq!(factors(&layers[0], &i).0, 0.25);
+    let (.., began, _, _) = step(true, 0.0, FlightPhase::Takeoff);
+    assert!(!began);
+    // In flight: no pilot and the loop runs; the speed reads against MaxSpeed.
+    let (on, .., i, off) = step(false, 25.0, FlightPhase::Flying);
+    assert!(on && !off && i.wind == Wind::Up);
+    assert_eq!(i.speed, 0.5);
+    assert!((i.acceleration - 0.5 / 0.1 / 25.0).abs() < 1e-5);
+    let (.., began, i, _) = step(true, 25.0, FlightPhase::Landing);
+    assert!(began && i.wind == Wind::Down);
+    assert_eq!(factors(&layers[0], &i).0, 1.0);
+    let (.., off) = step(false, 0.0, FlightPhase::Landed);
+    assert!(off, "a landed craft with no pilot runs down");
+}
+
+/// The baked Hoth snowspeeder: its class names a loop record the battle resolves, and
+/// its takeoff and landing are sounds the battle can play. Data-gated like the replay.
+#[test]
+fn hoths_baked_snowspeeder_has_its_loop_and_its_wind_shots() {
+    let root = std::env::var_os("VSND_BAKED")
+        .map_or_else(crate::assets::baked_root, std::path::PathBuf::from);
+    let Some(lib) = crate::sounds::SoundLib::load(&root.join("bf1_hot1")) else {
+        eprintln!("SKIP: bf1_hot1 not baked");
+        return;
+    };
+    let rec = lib
+        .engine(
+            fnv1a_lowercase("all_fly_snowspeeder_engine_parameterized"),
+            &[
+                fnv1a_lowercase("hot"),
+                fnv1a_lowercase("hot1cw"),
+                fnv1a_lowercase("hot1gcw"),
+            ],
+        )
+        .expect("the loop's record");
+    assert!(!rec.layers.is_empty());
+    let params: Vec<&str> = rec
+        .layers
+        .iter()
+        .flat_map(|l| l.graphs.iter().map(|g| g.parameter.as_str()))
+        .collect();
+    eprintln!("{} layers, graphs {params:?}", rec.layers.len());
+    for name in ["all_fly_snowspeeder_takeoff", "all_fly_snowspeeder_land"] {
+        assert!(lib.has(name), "{name}");
+    }
 }

@@ -26,12 +26,3 @@ BF1 COMMON 4-bit textures (94 of 104 BF2 INGAME) markedly smoother (roughness ra
 rougher; the controls — 8-bit (35 + 25) and 32-bit (5) textures — get rougher (median 1.53 / 1.43), 0 smoother.
 Visual: `engine/artifacts/lead_tmp/fxb/nibble_sheet.png` (hud_target_flag_onscreen, hud_player_captured_flag, the
 laser textures and lightglow: bake vs pairs swapped).
-
-## Acceptance
-- unpack_4bit low nibble first; its unit test (`nibble_order_high_first`) rewritten with the PS2 order and a data
-  test: a known asymmetric 4-bit texture (e.g. BF2 hud_target_flag_onscreen) decodes clean.
-- Rebake textures (all groups that carry textures); re-run nibble.py on the new bake: the 4-bit set no longer gets
-  smoother when swapped.
-- VIEW every golden sheet land.py lists (the moves are texel-level); spot-check a PCSX2 close-up pair of a 4-bit
-  texture (a HUD icon or a wall) against the port.
-- Check nothing else decodes PSMT4 on its own (fonts, HUD, loadscreens).

@@ -28,6 +28,95 @@ fn cpu_ms() -> Option<f64> {
     None
 }
 
+/// This thread's user-mode instructions, the one count another job on the
+/// machine does not move. On a hybrid CPU it only runs on the cores of the PMU
+/// the kernel chose, so pin the run to the performance cores.
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+struct InstrCounter(Option<std::ffi::c_int>);
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+impl InstrCounter {
+    fn new() -> Self {
+        unsafe extern "C" {
+            fn syscall(n: std::ffi::c_long, ...) -> std::ffi::c_long;
+        }
+        // perf_event_attr, ABI size 120: type 0 (hardware), size, config 1
+        // (instructions), then flags at word 5: exclude_kernel | exclude_hv.
+        let mut attr = [0u64; 15];
+        attr[0] = 120 << 32;
+        attr[1] = 1;
+        attr[5] = (1 << 5) | (1 << 6);
+        // SAFETY: perf_event_open (298 on x86-64) reads that many bytes from
+        // `attr`; pid 0, cpu -1 is this thread on any CPU, no group, no flags.
+        let fd = unsafe { syscall(298, attr.as_ptr(), 0i32, -1i32, -1i32, 0u64) };
+        Self((fd >= 0).then_some(fd as std::ffi::c_int))
+    }
+
+    fn read(&self) -> Option<u64> {
+        unsafe extern "C" {
+            fn read(fd: std::ffi::c_int, buf: *mut u64, count: usize) -> isize;
+        }
+        let mut value = 0u64;
+        // SAFETY: a counter fd with no read_format writes one u64.
+        (unsafe { read(self.0?, &mut value, 8) } == 8).then_some(value)
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+struct InstrCounter;
+
+#[cfg(not(all(target_os = "linux", target_arch = "x86_64")))]
+impl InstrCounter {
+    fn new() -> Self {
+        Self
+    }
+
+    fn read(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// One moment's counters. `since` gives a stretch's thread CPU ms, instructions
+/// and allocations, each `null` where this build or platform has none.
+struct Mark {
+    cpu: Option<f64>,
+    instr: Option<u64>,
+    alloc: Option<(u64, u64)>,
+}
+
+impl Mark {
+    fn now(c: &InstrCounter) -> Self {
+        Self {
+            cpu: cpu_ms(),
+            instr: c.read(),
+            alloc: game::alloc_count::so_far(),
+        }
+    }
+
+    fn since(&self, c: &InstrCounter) -> serde_json::Value {
+        let (cpu, instr, alloc) = (cpu_ms(), c.read(), game::alloc_count::so_far());
+        let alloc = self.alloc.zip(alloc);
+        json!({
+            "cpu_ms": self.cpu.zip(cpu).map(|(a, b)| b - a),
+            "instr": self.instr.zip(instr).map(|(a, b)| b - a),
+            "allocs": alloc.map(|(a, b)| b.0 - a.0),
+            "alloc_bytes": alloc.map(|(a, b)| b.1 - a.1),
+        })
+    }
+}
+
+/// Peak and current resident kilobytes of this process, Linux only.
+fn memory_kb() -> serde_json::Value {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let field = |name: &str| {
+        status
+            .lines()
+            .find_map(|l| l.strip_prefix(name))
+            .and_then(|v| v.trim().trim_end_matches(" kB").parse::<u64>().ok())
+    };
+    json!({"peak": field("VmHWM:"), "now": field("VmRSS:")})
+}
+
 #[inline(never)]
 fn measured_tick(walk: &mut WalkSim, pad: &[core::sim::PadState]) {
     walk.step_tick(pad);
@@ -113,15 +202,17 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
     let mut hashes = Vec::new();
     let mut cameras = Vec::new();
     let targets = target_ticks();
+    let counter = InstrCounter::new();
+    let memory_after_setup = memory_kb();
     for k in 0..v.bench_ticks {
         let t = Instant::now();
-        let cpu = cpu_ms();
+        let mark = Mark::now(&counter);
         if targets.contains(&(k + 1)) {
             targeted_tick(&mut walk, &pad);
         } else {
             measured_tick(&mut walk, &pad);
         }
-        let cpu = cpu.zip(cpu_ms()).map(|(a, b)| b - a);
+        let spent = mark.since(&counter);
         let wall = ms(t);
         let mut cost = game::frame_profile::TickCosts::default();
         cost.add(&walk.sim.tick_cost, |u| {
@@ -129,7 +220,9 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         });
         slowest.keep(k + 1, wall, &cost);
         ticks.push(json!({
-            "tick": k + 1, "wall_ms": wall, "cpu_ms": cpu, "cost": serde_json::to_value(&cost)?,
+            "tick": k + 1, "wall_ms": wall, "cpu_ms": spent["cpu_ms"], "instr": spent["instr"],
+            "allocs": spent["allocs"], "alloc_bytes": spent["alloc_bytes"],
+            "cost": serde_json::to_value(&cost)?,
         }));
         if (k + 1) % 30 == 0 || k + 1 == v.bench_ticks {
             hashes.push(json!([k + 1, format!("{:016x}", walk.sim.hash())]));
@@ -145,7 +238,7 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
     }
     let sim_hash = format!("{:016x}", walk.sim.hash());
     let mut report = json!({
-        "schema": 2, "map": v.map, "seed": v.seed, "size": [v.size.0, v.size.1],
+        "schema": 3, "map": v.map, "seed": v.seed, "size": [v.size.0, v.size.1],
         "ai": v.ai, "initial_alive": initial_alive, "alive_after_sim": alive(&walk),
         "total_per_side": total,
         "native_alive": walk.sim.units.iter().filter(|u| u.alive && u.team >= 2).count(),
@@ -159,12 +252,14 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         "kill_floor": walk.sim.kill_floor.map(f32::to_bits),
         "camera_samples": cameras,
         "load_ms": load_ms, "setup_ms": setup_ms, "ticks": ticks,
+        "memory_after_setup_kb": memory_after_setup, "memory_after_ticks_kb": memory_kb(),
         "leaf_groups": scene.manifest.leaf.len(),
         "falling_leaves": scene.manifest.leaf.iter().map(|l| u32::from(l.falling_count)).sum::<u32>(),
     });
     if v.bench_frames > 0 {
         render(v, &scene, &setup, &mut walk, &mut report)?;
     }
+    report["memory_end_kb"] = memory_kb();
     std::fs::write(output, serde_json::to_vec(&report)?)?;
     slowest.print();
     println!("detailed bench {}: sim hash {sim_hash}", output.display());
@@ -192,9 +287,6 @@ fn render(
     let t = Instant::now();
     let mut r = Renderer::new_headless(v.size.0, v.size.1).map_err(|e| anyhow!("{e}"))?;
     r.cull = !v.no_cull;
-    if std::env::var("OPENBF_TERRAIN_LIGHT_GROUPS").as_deref() == Ok("0") {
-        r.set_terrain_light_grouping(false);
-    }
     report["device_ms"] = json!(ms(t));
     report["adapter"] = json!(format!("{:?}", r.adapter_info()));
     let t = Instant::now();
@@ -241,6 +333,7 @@ fn render(
     gpu.step_stations(&walk.sim);
     frame.vis.update(walk, core::TICK_DT);
     report["upload_ms"] = json!(ms(t));
+    report["memory_after_upload_kb"] = memory_kb();
     report["load_objects"] = made();
     report["load_objects_dropped"] = json!(render::made::dropped());
     let mut frames = Vec::with_capacity(v.bench_frames as usize);
@@ -248,24 +341,7 @@ fn render(
     // replay renderer, including its effects, forest, lights and HUD.
     let mut view = v.clone();
     if !v.cam_set && !v.bench_player_cam {
-        let mut cam = super::bench_camera(v, scene, walk);
-        if std::env::var_os("OPENBF_BENCH_FOREST_EYE").is_some() {
-            let ground = scene.heightfield();
-            let objects = game::viewer::leaf::objects(
-                &scene.manifest,
-                &game::viewer::foliage::records(scene),
-                ground.as_ref(),
-            );
-            let object = objects
-                .iter()
-                .find(|o| scene.manifest.leaf[o.class as usize].falling_count > 0)
-                .context("forest benchmark requires a baked falling-leaf emitter")?;
-            let at = object.matrix.w_axis.truncate();
-            let y = ground.as_ref().map_or(at.y, |g| g.height_at(at.x, at.z));
-            cam.position = glam::Vec3::new(at.x + 4.0, y + 2.0, at.z + 7.0);
-            cam.yaw = 20f32.to_radians();
-            cam.pitch = -12f32.to_radians();
-        }
+        let cam = super::bench_camera(v, scene, walk);
         view.cam = (
             cam.position.x,
             cam.position.y,
@@ -281,19 +357,28 @@ fn render(
             v, &mut r, &mut gpu, walk, &mut frame, &view, &states, report,
         );
     }
+    let counter = InstrCounter::new();
     for k in 0..=v.bench_frames {
         let t = Instant::now();
+        let mark = Mark::now(&counter);
         if k % 2 == 0 {
             step_world(v, &mut gpu, walk, &mut frame);
         }
+        let update = mark.since(&counter);
         let update_ms = ms(t);
         let render_start = Instant::now();
+        let mark = Mark::now(&counter);
         frame.render(&mut r, &mut gpu, walk, &view, 1.0 / 60.0)?;
+        // Up to here the CPU built and submitted the frame; the rest is waiting.
+        let submit = mark.since(&counter);
+        let submit_ms = ms(render_start);
         r.wait_idle().map_err(|e| anyhow!("{e}"))?;
         let render_ms = ms(render_start);
         let wall = ms(t);
+        r.collect_gpu_timing();
         let stats = r.frame_stats();
         frames.push(json!({"frame": k, "wall_ms": wall, "render_ms": render_ms,
+            "submit_ms": submit_ms, "submit": submit, "update": update,
             "update_ms": update_ms, "draw_calls": stats.draw_calls,
             "culled": stats.culled, "submitted": stats.submitted, "objects": made(),
             "gpu_ms": r.gpu_sections(), "alive": alive(walk)}));

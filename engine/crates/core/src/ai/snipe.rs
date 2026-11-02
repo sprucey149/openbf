@@ -346,7 +346,12 @@ pub fn lane(sim: &Sim, u: &Unit, p: Vec3) -> (f32, f32) {
             continue;
         }
         let to = q + Vec3::Y;
-        if perception::los_terrain(sim, eye, to) && perception::los_world(sim, eye, to) {
+        // A team's snipers weigh the same spots against the same ground: a
+        // map's opening tick, when they all pick at once, spent most of its
+        // time here.
+        if super::think_memo::lane(eye, to, || {
+            perception::los_terrain(sim, eye, to) && perception::los_world(sim, eye, to)
+        }) {
             score += d / sight;
             len = len.max(d);
         }

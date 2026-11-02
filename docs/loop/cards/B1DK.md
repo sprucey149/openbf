@@ -17,49 +17,6 @@ alpha: yes
 defer: 
 ---
 
-## Build (written by this card's RE pass, 2026-10-05; `analysis/re-kamino-decks.md`) - this section is the card now
-**The RE's answer.** No single term lights these floors: five things separate the port's deck from the PS2's (the
-doc's §0). The largest, the light sum's colour space with the ambient floor, is card **LSUM** (first). BF1's local
-lights are card **B1LL** (after this one). This card builds the two that are Kamino's own:
-
-1. **BF2: an EntityLight on a hardpoint the carrier's skeleton lacks is created at the carrier's ORIGIN** (§5; B2
-   `FUN_001d4db8` / `FUN_00451e58`; RAM 13 of 13 lights). Each `kam_bldg_bunker1` carries two `kamlight`
-   (181,172,163) and one `kamlight_blue` (2,50,100), r 20, not Static, half a metre from the centre vertex of its
-   deck's fan; `kam_bldg_pod2` one. `bake::entity_light::attach` skips them (`continue` on a missing bone; a class
-   with no skeleton too). On a BF2 map place them at (0,0,0) of the carrier instead. Also POL1 (`pol_prop_cavern`: two
-   Static (188,234,255) r 8) and DEA1 (`dea1_bldg_beam_generator`: one r 24, StrobeRandom - steady here like every
-   EntityLight, card LFLR). BF1's rule is the opposite (a missing bone keeps nothing): do not apply the origin rule
-   to BF1.
-2. **BF1's sun-coloured specular pass** (§7): `SpecPass::rgb_under` multiplies the sun colour by 255/128 but its three
-   callers (`viewer/scene.rs`, `soldier_vis.rs`, `viewer/vehicles.rs`) hand it the LINEAR colour; the GS gets the
-   SunInfo bytes raw. Encode before the multiply. Kamino: (0.105,0.181,0.281) -> (0.508,0.664,0.820).
-
-**Evidence** (`engine/artifacts/lead_tmp/b1dk/`): `origin_ram.py` (6 of 6 carriers, 13 lights at their origins), `attach_census.sh` (which maps
-change), `skel.py`; PS2 knock-outs `ps2/frames/k2__*.png`, `k2w__*.png` (no model point lights: the deck 4.5 m from
-the post falls from 124/119/127 to 55/60/65; the three origin lights are worth 21-25 of that); prototype renders
-`park/origin_gsum1/`, `var/k2w/`, `var1/`; sheet `sheet_prototype.png` (PS2 | main | prototype).
-
-**Acceptance (run and paste; all on top of LSUM).**
-- `PXC_LIGHTS=1 pose_render` on bf2_kam1 lists ten r-20 lights at the places `lead_tmp/bpnt/lights.py` prints for
-  `ref/states/bf2_kam1_walk_cp2_cp3_b000.p2s` (three at (-60.95, 60.31, 303.49), ...); bf2_pol1 two at (-17, 23, -20);
-  bf2_dea1 one at (-105.0, 49.98, -107.93). A bake test: a class whose model lacks the hardpoint still gets its light,
-  at the origin, on BF2 and not on BF1.
-- BF2 deck: `walk/cp2_cp3_b090` box (430,278,627,346) within 12 levels per channel of the PS2's 75/81/87 (main
-  39/43/46; prototype 64/71/77 - 67/73/78), and `walk/cp2_cp3_b000` box (430,360,627,470) within 8 of 72/78/86. The
-  turned pose `lead_tmp/b1dk/ps2/frames/k2w__ctl.png` (pose in `k2w__ctl.pose.json`), box (430,278,627,336), within
-  15 of 97/102/110 (prototype 86/91/99).
-- BF1 deck: the box (450,330,640,470) at `walk/cp0_cp2` and `walk/cp4_cp4` x b000/b090/b180/b270 within 14 levels per
-  channel of the PS2's (the original card's 12 is met with the sum's form 2 and missed by 2 at bearing 270 with form
-  1; prototype table in the doc's §4.2). The deck must change with the bearing: b270 at least 10 over b090.
-- `scripts/parity.py`: bf1_kam1 <= 13.7 and bf2_kam1 <= 11.9 (LSUM alone: 14.48 / 12.28; main 19.29 / 16.71).
-  The original card's "bf1_kam1 down by >= 2, bf2_kam1 down by >= 0.66" is met by LSUM already.
-
-**Not this card.** The BF2 mid-floor box (256,278,627,346) of the old acceptance holds the PS2's own soldier (x
-270-370, lit near-white): use the soldier-free box above. BF2's bearing-270 highlight (PS2 157/163/171, prototype
-107/114/122) is the specular pass plus the HDR bloom it triggers: card GLOWB.
-
-The text below is the card as the RE pass found it.
-
 ## Why
 BF1 Kamino is the worst map of the parity board (26.62) and its floors are the largest term after the sky (KSKY) and
 the sea (KSEA): the landing-pad decks read 1.5–2 × darker than the PS2's, uniformly over RGB, at every bearing.
@@ -79,17 +36,6 @@ From KAMR's pass, `analysis/re-kamino.md` §5.
 Which term lights BF1's decks: the Specmap second pass (does the port draw it on BF1 at all — `rgb: null`), a BF1
 local-light path (the `Light` classes, `SetAttached…`/world lights in BF1's world file), or the DomeInfo filter
 (BRGT). One PS2 knock-out per candidate on a `bf1_kam1_walk_*` state settles it.
-
-## Acceptance
-- RE: the term named, [V]/[O], with a patched-state frame that removes it on the PS2.
-- Built (same card or a build card): the deck box at the four bearings of cp0_cp2 and cp4_cp4 within ±12 levels per
-  channel of the PS2's; `parity.py` bf1_kam1 down by ≥ 2.
-
-## Planner note (2026-10-02 04:30)
-`alpha: yes` -> `defer: post-alpha`, value 4 kept. PLAN §Milestones: "pure lighting-parity work off the showcase maps"
-waits for the alpha, and BF1 Kamino is not one of the six. The maintainer's seven Kamino cards of 09-30 (KRMP, KGRY, KPOS, KSTK,
-GRND, KSKY, KSEAL) are all closed; this was never one of them. After KSKY the map scores 19.3 on the parity board (27.0
-before, KSKY's report); its worst post cp4_cp4 is 19.5, fifth on the board. Reverse: `loopctl.py set B1DK defer= alpha=yes`.
 
 ## Note from card BPRL's RE (2026-10-03, lane 3)
 The title's "BF2's matched once BPNT landed its local lights" does not hold. BF2 Kamino's deck is dark like BF1's: at

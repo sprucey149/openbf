@@ -37,11 +37,6 @@ XZ on another floor counts as arrived, and its next legs walk under or beside th
 - The last resort is a PROVISIONAL recycle: a bot with no route and no progress for 3 min is despawned and respawned,
   with no ticket cost. Record it in FEEL_NOTES; reversible.
 
-## Acceptance
-- On 8 seeds × 32 maps, no no-progress episode > 3,000 ticks with the unit > 3 m off its leg hub's floor.
-- POL1 finishes ≥ 7 of 8.
-- KAM1 finishes ≥ 7 of 8, with STFAL.
-
 ## Notes
 AQD (BF1's 3-D locate, value 2) overlaps. Fold it in or close it.
 
@@ -138,15 +133,6 @@ BF1 YAV1 (108, -63, -138) is this card's hub-17 spot: with RCYC, YAV1 ends 8/8 b
   (`b1geo1_s3.txt`: tickets 1/73, the last clone at (-2.7, -62.1, -1.5) under ten droids at y -58.7) and seed 4 in the
   build before it; BF2 GEO1 seed 6 in the first build (`geo1_s6.txt`). Main's units stand on that floor as well
   (seed 3 at tick 8000: two at y -58.7), so the trap is the map's, not a hull's.
-
-## Planner note (2026-10-02 04:30) - the baseline to measure against
-The 8-seed table for main 22eddb0 (after BOWL, WAI, AIRC, LVLF) is `lead_tmp/lvlf/rb_fix/seeds.md`: 253 / 256 rounds
-at 60,000 ticks, 488 recycles at 203 spots (71 on 2+ seeds), `lost` 41. The three maps at 7/8: BF1 GEO1 (in WAI's run
-the last clone stood on the terrain under cp13's raised floor: this card's class), BF2 KAM1 (median finish tick 41,680;
-OFFG), BF2 YAV1 (in AIRC's run a 1 v 1 with one bot recycled 16 times at hub 18; STEND). Re-run `sweep_seeds.py` on
-your own base before judging - main moves - and run a null variant beside the change: AIRC's `sw_null` showed that 2
-rounds of 256 is inside the instrument's noise, and three landings (RCYC, WAI, AIRC) each waived "no map's finish
-count drops" on that reading.
 
 ## Build note (2026-10-02, branch `stlvl`, `lead_tmp/stlvl/`, report `reports/20261002_0700_card_STLVL.md`)
 Measured first (main fb216e6, 8 seeds x 120,000 ticks): 495 recycles; the RCYC table's `floor_dy` reads a ROOF over

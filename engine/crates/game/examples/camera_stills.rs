@@ -239,6 +239,7 @@ fn main() -> Result<()> {
                         ideal.position,
                         Some(ii as u32),
                         |_| None,
+                        &walk.sim.doors,
                     ) >= 1.0;
                     let p = ideal.position;
                     let inside = p.cmpge(bx.0).all() && p.cmple(bx.1).all();

@@ -43,22 +43,6 @@ PLAN's locked feature set: "Era mix-and-match: traditional matchups by default, 
 - No side selector either: the player's army always takes the script's team 1 slot (`walk.rs`: the player is a
   team-0 unit), so "the Republic on Utapau" means the Republic at the CIS's posts.
 
-## Acceptance
-1. A unit test over every map and every pair of the four armies: when a mission of the map has exactly that pair
-   (either order), the battle loads that mission; otherwise the map's default mission, as today. Count pasted
-   (expected: 25 maps x the CW pair in both orders now load `_con_cw.ron`).
-2. Which slot the player's army takes when the pair is a mission's own: ITS team's in that mission (the Republic
-   starts at the Republic's posts, with the Republic's counts). Default taken here, reversible - say so in the
-   report's Decisions. A cross-era pair keeps today's rule.
-3. `audit_annc` through the shell's choice (give the probe the same resolver): BF1 KAS2 Republic against CIS asks no
-   `_im` line (today 1 a round), BF2 YAV1 Republic against CIS asks no bleeding line (today 15), and the lines of the
-   six `mix_rep_cis` rounds equal the `_con_cw` rounds' of the same seed.
-4. The black box header names the mission file, so a snapshot says which script ran.
-5. The two disc slips (BF2 Kamino / Mustafar CW, CIS low lines swapped): keep them as the disc has them, and list
-   them in STATUS "Calls you may want to reverse" - or fix them as a named deviation and say which you did.
-`declares:` nothing in the sim for a headless round (the gates name their missions); goldens only if a shell
-golden shows the mission.
-
 ## Notes
 - ANNC3 (music by the listener's faction) reads the same script team numbers: land this first or together, the
   music calls differ per era on every map.

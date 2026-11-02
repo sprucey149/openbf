@@ -24,19 +24,6 @@ The maintainer, 2026-10-02: "1166 tests are a lot. Do they run every time code c
 - 62 test binaries, 245 s of test run time, run ONE AFTER ANOTHER by `cargo test`. `tests/announcer_ps2.rs` 92.8 s (4 tests), `tests/battle_replay.rs` 64.8 s (1 test), `tests/all_maps_load.rs` 17.6 s, `event_messages` 13.3 s, `global_sound` 8.4 s. The ~1,100 unit tests together take under 20 s - their NUMBER is not the cost.
 - The 43 ignored tests are the GPU tests (`requires a GPU adapter`), run by the gpu gate on the NVIDIA box - not dead.
 
-## What to do
-1. **Parallel binaries**: `cargo nextest` (or an equivalent runner) so the 62 binaries run side by side; the counts gate (`[ci] passed/failed/ignored`) must read the same totals (adapt `gates.py`'s parser). Expected: test time bounded by the slowest binary (~93 s) instead of the sum (245 s). Check no test depends on running alone (shared temp dirs, the bake, ports).
-2. **Why are the two slow ones slow?** announcer_ps2 replays a battle in real seconds? battle_replay runs a full round twice? Cut the work without losing what they prove (fewer ticks, a smaller map, release-mode test profile for heavy integration tests `[profile.test] opt-level` for the sim crates).
-3. **Tier by dependency, like goldens** - only if 1-2 leave ci over ~4 min: heavy integration tests listed in a deps file (the crates / paths that can change their result), skipped by `gates.py --auto` when none changed, and ALWAYS run on a cleanse, an audit and once every N landings (as goldens' full regeneration does). Unit tests and clippy always run - they are cheap and catch the most.
-4. **Tests that no longer earn their place** - a LIST for the cleanse, not deletions in this card: tests that duplicate a gate (a round that the sweep already runs), tests pinning a PROVISIONAL constant whose rule is being replaced (most of `core/src/ai`'s tests will go with BOTD's redesign - leave those to it), tests of removed features, near-duplicate tests. Each with one line why. Deleting is the cleanse's job, with the count change DECLARED.
-
-## Acceptance
-- ci wall time before / after on the same tree (3 runs each), the count totals equal, and the top-10 slowest binaries before / after.
-- If tiering is built: a test that a deps file skips is proven to run when its deps change (a mutation check), and the full set runs at cleanse / audit / every N landings.
-- The keep / delete list in the report.
-
-- Planner 2026-10-02 17:45: left `blocked` with `needs:`. The maintainer's chat session (pid 235607, alive 5 h 53 min at 17:45) owns it in `openbf-wt/tstx`; that session sets `status` back when it lands or hands back. The four empty loop picks were loopctl's resume step ignoring `needs:` - LRES case 3.
-
 ## Result (Claude chat session, 2026-10-02, branch tstx 5731440; evidence `lead_tmp/tstx/`)
 - Same tree, warm target, under `ci.lock`: `cargo test --workspace` 267 s; `cargo nextest run` 53 s (wall = the slowest test,
   battle_replay 51 s); + `[profile.dev.package."*"]` and `[profile.dev.package.core]` opt-level 2: 12 s (slowest test

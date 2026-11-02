@@ -47,11 +47,6 @@ a pale blue-white plate, further from the PS2's dark teal (17,30,33) than the ol
 ## Original QUEUE.md entry (verbatim, 2026-09-25)
 KOC. [TODO — ADDED 2026-09-25 (lane 1) by PXC batch 2 (FINDINGS F9); **[RE] FIRST**; FREE; its build touches the terrain draw — coordinate with KTEX's follow-on] **BF1 Kamino's sea: dark teal under white foam crests on the PS2, a flat textureless light-slate plate in the port — the port's "sea" is the map's y = 0 terrain drawn OPAQUE with the foam sheet** [RE] — evidence `engine/artifacts/pcsx2/ref/bf1_kam1/pairs/cp0_cp2_beta1_{v2_water,v3_water,v4_down,v5_down}.png` (`_v4_down` box (250,40,630,200): PS2 (17,30,33) spread 16.2 vs port (76,87,96) spread 1.0). `analysis/re-water-alpha.md` §5: the heightfield sits at y = 0 over all 1,618 wet cells, 8 m above the ocean plane at −8, textured with `kam1_water` (LTEX layer 0) and drawn opaque — "[H], unread: whether the PS2's terrain pass takes LTEX layer 0's texture alpha at all — if it did, BF1 Kamino's sea-terrain would show the −8 m ocean through it". The PS2 frames look like that case. RE (§5): the terrain pass's TEX0 TCC / ALPHA / TEST state for layer 0 (BF1 `FUN_00481608` and the patch packer, `re-terrain-heights.md` §9), the sheet's alpha (0..218, mean 62.2 per §5); then why the port's plate is textureless (tiling or mip — spread 1.0). GATE: a dated addendum to `re-water-alpha.md` §5 (§5 header, [O], verifier) naming the term with its bytes + a build entry with the four pairs to beat. Files: `analysis/re-water-alpha.md`, `analysis/RE_LOG.md`, scratch `engine/artifacts/lead_tmp/re/koc/`.
 
-## Planner note (2026-09-26)
-TALPH (now value 5) checks first whether the terrain ALPH skip rule (TERL §6: a triangle is skipped when any weight is
-0xf or all three are 0) removes this y = 0 sea terrain on the PS2. If it does, TALPH's build fixes KOC; take KOC's own
-RE only after TALPH's answer.
-
 ## TALPH's answer (2026-09-28, lane 2): NO — KOC's own RE stands; dep on TALPH dropped
 - All 1024 of BF1 KAM1's PTCH masks are 0x1 (kam1_water only), and its tern `ALPH` chunk is empty (0 bytes).
 - So every weight is the builder's 0xee (opaque), no triangle is skipped, and the PS2 draws the whole y = 0 sea terrain

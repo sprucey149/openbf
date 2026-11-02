@@ -21,14 +21,6 @@ s read from RAM; other measurements want the same. Some scripted-pad trials alre
 `lead_tmp/rolls/ps2`, the walk and stand probes): read `engine/artifacts/pcsx2/README.md` and those first and build on
 what works rather than beside it.
 
-## Do
-- One documented entry point (`engine/artifacts/pcsx2/`): a pad script (buttons, stick values, durations in game
-  updates or ms), RAM reads sampled each update, screenshots on demand, all under the PCSX2 session's isolation rules.
-
-## Acceptance
-- A demo run recorded in the card: BF2 on foot, full right stick for 2 s, the player's yaw from RAM every update, the
-  turn rate in deg / s; repeated 3 times, the spread printed. The README section written.
-
 ## Result (2026-10-21, lane 2) - DONE
 `engine/artifacts/pcsx2/padscript.py` (README section "A scripted pad action with RAM rows every update"). Pad script
 steps timed by the game clock (`KEY:2s|60u|150ms`, down/up, wait, shot, mark), one CSV row per game update (u from the

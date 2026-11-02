@@ -6,11 +6,8 @@
 //!   texture with no window/display required (Vulkan compute-style adapter
 //!   request), read back via [`Renderer::capture_rgba`] for PNG goldens.
 //!
-//! Adapted from the maintainer's existing wgpu-27-generation code (cited per item):
-//! - device/adapter/surface setup: `an earlier project's source`
-//! - camera math: `an earlier project's source` (see `camera.rs`)
-//! - mesh/pipeline/bind-group shape: `an earlier project's source`
-//! - 256-byte-padded readback: `an earlier project's source` `read_pixels`
+//! The device and surface setup, camera math, mesh and pipeline shape and 256-byte-padded readback
+//! are adapted from earlier wgpu-27-generation projects.
 //!
 //! Coordinate convention: Y-up, right-handed, -Z forward — documented in [`camera`].
 //!
@@ -350,8 +347,6 @@ pub struct Renderer {
     palette_bg: wgpu::BindGroup,
     /// Skinned draws the palette/instance buffers can hold.
     palette_capacity: usize,
-    /// The frame's palettes on their way to `palette_buf`, kept between frames.
-    palette_upload: Vec<u8>,
     skinned_instance_buf: wgpu::Buffer,
     /// The specular second pass ([`DrawLayer::Spec`], `specular.rs`): its
     /// additive pipeline, the layout of its group 3, the per-frame

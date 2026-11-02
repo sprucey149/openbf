@@ -34,18 +34,6 @@ The PS2's orders are NOT the port's (§9 of the doc is the side-by-side table). 
   for BF1's.
 - PS2 logs to compare with: `engine/artifacts/lead_tmp/sqack/scenes/SUMMARY.txt` (+ `events.csv` / `pos.csv` per scene).
 
-## Acceptance (build) — a check to RUN and paste
-A port scene test per PS2 scene (F3, F5, H3, M3, A3 of the doc's §6: N AI teammates on a 5 m ring, the order, 10 s):
-1. receivers = the AI teammates within 30 m (45 m for MOVE OUT / AT EASE), 3-D — same count as the PS2 scene;
-2. FOLLOW: exactly 2 followers of 3 and of 5 receivers; 10 s later each stands <= 4.3 m from a still leader, and
-   trails >= 5 m behind a walking one (PS2: 1.3-3.8 m; 5-12 m);
-3. HOLD: every receiver; displacement <= 0.3 m over 10 s (PS2 0.1-0.3 m); released 10 +- 1 s after the leader passes
-   20 m (PS2 9.5-9.8 s);
-4. MOVE OUT and AT EASE: the ordered units back in their own goal within 0.5 s (PS2 0.03-0.2 s);
-5. lines by name: the player's at the press tick; first answer <= 0.5 s after the press on an idle voice (PS2
-   0.07-0.30 s), 2-3 answers for 3-5 takers, none sharing a take inside its lock;
-6. no world marker; no order text with a unit count (SQMK draws the HUD cross).
-
 ## Original RE brief — What to find (decomp, RAM, PCSX2 — what the PS2 does)
 - **The player's line:** per command (Follow, Hold, Disperse, All clear) which line the player's character says, which
   voice set (faction, class), when, any animation. The port plays a streamed take on BF1 maps (`game/src/main/windowed.rs`

@@ -24,12 +24,3 @@ all — a map bake keeps only a class's geometry and collision (`ManifestClass`)
 FLYERSECTION seat ring: BODY = pilot, TURRET1..8 = gunner sections, PassengerSlots ≤ 4; PilotType none/self/vehicle/
 remote(/vehicleself) = 0..3(4), default 2 in BF2), §10 item 2. `bake classes` already parses any LVL
 (`bake/src/classes.rs`).
-
-## Acceptance
-The map bake writes `<map>/classes.ron` (entc/wpnc/ordc/expc of the map LVL, the side-classes format) — REBAKE maps;
-`game::classdb` loads it beside the side DBs; `HoverClass::from(&ClassDb, name)` returning every §3.1 field with the PS2
-ctor default when absent (incl. up to 6 spring points with their per-point factors); a `SeatSpec` list from the section
-props in ring order. Unit tests: the skiff (SetAltitude 1.0, GravityScale 4.0, three spring points, ForwardSpeed 16,
-Traction 30, a BODY pilot seat + TURRET1..3 gunner seats with `com_weap_bldg_gunturret`) and `imp_hover_speederbike`
-(StrafeSpeed 0, three spring points, one pilot seat with a weapon). Every gate PASS except the declared rebake (manifest
-unchanged elsewhere).

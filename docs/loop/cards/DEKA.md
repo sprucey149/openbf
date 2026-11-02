@@ -31,12 +31,6 @@ Blasters, Shield Emitter (`lead_tmp/unit-audit/pcsx2/cis_classes_sheet.png`; pla
   `com_inf_droid_exp`; model `cis_walk_droideka` with its own `zaa_` bank.
 - `analysis/re-droideka.md`: the ball form and jump, both games (PLAN §Movement & feel: BF2's ball jump everywhere).
 
-## Acceptance
-- RE ([O]) what re-droideka.md leaves open: the deploy / roll state machine and its speeds, the shield (duration,
-  health, recharge), the repeater, the collision, the AI's use (when it rolls, deploys, shields).
-- Split into build cards: a unit kind in `core`, the draw with its own clips, the roster accepting it; sim / sweep /
-  goldens declared.
-
 ## Notes
 - BF2's CW missions name it too (UAUD2). PLAN's "the BUILD stays HELD (P7-class)" predates M2 being active - the
   planner lifts or keeps the hold.
@@ -55,15 +49,6 @@ Blasters, Shield Emitter (`lead_tmp/unit-audit/pcsx2/cis_classes_sheet.png`; pla
   - 0x648b20 = 0x8000000168 (Cs + Cd).
   They are read by `FUN_003879a8` / `FUN_00388ee8` (callers `FUN_0037bb18` / `FUN_0037c268`, vtable 0x549428). Read
   them when the shield's look is built (`lead_tmp/audit-dshn/`).
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — droidekas in every BF1 Clone Wars battle (NAB1, TAT1, YAV2 CW). Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
-
-- Note from AMBM's RE (2026-10-03, `analysis/re-ambience-music.md` 5): the FX-7 station asks `AmbientSound`
-  (`droid_fx7_idle_chatter`, `PlayProbability` 0.05) whenever its handle is idle and plays `PowerupSound` per unit
-  served; the recon droid loops `AmbientSound` + `Ambient2Sound` from spawn to kill; the droideka's `ShieldSound`
-  (`droid_fx7_hum`, BF1 only) loops while the shield is up with gain x (1 - (1 - shield / max)^2), `ShieldOffSound`
-  when it drops.
 
 ## Result (RE, 2026-10-03, lane 3) - closed, split into DEKU / DEKS / DEKD / DEKF
 `analysis/re-droideka-unit.md` [O] (commit 28f1f90; verifier 37 claims: 28 SUPPORTED, 9 PARTLY folded in, 0 NOT).

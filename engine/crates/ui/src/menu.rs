@@ -164,12 +164,6 @@ pub fn draw_controls(
     message: Option<&str>,
 ) -> Option<usize> {
     let mut selected = None;
-    let cursor_id = egui::Id::new("controls_last_cursor");
-    let changed = ctx.data_mut(|data| {
-        let changed = data.get_temp::<usize>(cursor_id) != Some(cursor);
-        data.insert_temp(cursor_id, cursor);
-        changed
-    });
     egui::Area::new(egui::Id::new("controls_menu"))
         .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
         .show(ctx, |ui| {
@@ -186,26 +180,26 @@ pub fn draw_controls(
                     if let Some(message) = message {
                         ui.label(message);
                     }
-                    egui::ScrollArea::vertical()
-                        .max_height(500.0)
-                        .show(ui, |ui| {
-                            for (i, (name, value)) in labels.iter().enumerate() {
-                                if row_label(
-                                    ui,
-                                    // The list cursor box is solid (menuref §9.1.9).
-                                    (i == cursor).then_some(1.0),
-                                    name.clone(),
-                                    Some(value.clone()),
-                                )
-                                .clicked_by(egui::PointerButton::Primary)
-                                {
-                                    selected = Some(i);
-                                }
-                                if changed && i == cursor {
-                                    ui.scroll_to_cursor(Some(egui::Align::Center));
-                                }
+                    let room = ctx.content_rect().height() - PANEL_MARGINS - ui.min_rect().height();
+                    let gap = ui.spacing().item_spacing.y;
+                    let list =
+                        RowList::for_frame(ctx, (None, false), cursor, labels.len(), room, gap);
+                    let shown = list.area(None, gap).show(ui, |ui| {
+                        for (i, (name, value)) in labels.iter().enumerate() {
+                            if row_label(
+                                ui,
+                                // The list cursor box is solid (menuref §9.1.9).
+                                (i == cursor).then_some(1.0),
+                                name.clone(),
+                                Some(value.clone()),
+                            )
+                            .clicked_by(egui::PointerButton::Primary)
+                            {
+                                selected = Some(i);
                             }
-                        });
+                        }
+                    });
+                    list.remember(ctx, &shown, gap);
                 });
         });
     selected
@@ -406,8 +400,8 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
         Row::LowPowerResolution if input.confirm || input.left || input.right => {
             actions.push(MenuAction::ToggleLowPowerResolution)
         }
-        // Cross steps on too: a paused frame's Left / Right are the Morse
-        // keys (`game::pause::rows_input`), so a pad needs another way round.
+        // Cross steps on too, beside the left stick and A / D: a paused D-pad's
+        // Left / Right are the Morse keys (`game::pause::rows_input`).
         Row::InputIcons if input.confirm || input.left || input.right => {
             actions.push(MenuAction::CycleInputIcons(if input.left { -1 } else { 1 }))
         }
@@ -462,20 +456,140 @@ fn row_label(
         .union(row.response.interact(egui::Sense::click()))
 }
 
+/// The height the panel's frame and the window's edge take from the row list.
+const PANEL_MARGINS: f32 = 60.0;
+/// The space under the rows for the footer line.
+const FOOTER_ROOM: f32 = 30.0;
+/// The space under the rows kept for the help: see [`row_help`].
+const HELP_ROOM: f32 = 70.0;
+
+/// The pause menu's scrolling rows, in whole rows: a list too long for the
+/// window shows only rows that fit, so none is ever cut at its edge. The cursor
+/// sits as near the middle as the list allows, and a mouse wheel's or the bar's
+/// scroll settles on a row when it stops.
+struct RowList {
+    /// A row's height and the gap under it, measured from the last frame.
+    pitch: f32,
+    rows: usize,
+    shown: usize,
+    /// Set when the list moves this frame.
+    offset: Option<f32>,
+}
+
+impl RowList {
+    /// A first guess at [`Self::pitch`], for the first frame: 18-point text,
+    /// a row's margins and the gap.
+    const FIRST_PITCH: f32 = 36.0;
+    /// How long a scroll must rest (seconds) before the list settles on a row:
+    /// a slow trackpad's small steps add up instead of each being undone.
+    const SETTLE_AFTER: f64 = 0.25;
+
+    fn pitch_id() -> egui::Id {
+        egui::Id::new("pause_rows_pitch")
+    }
+
+    fn state_id() -> egui::Id {
+        egui::Id::new("pause_rows_state")
+    }
+
+    fn offset_id() -> egui::Id {
+        egui::Id::new("pause_rows_offset")
+    }
+
+    fn scrolled_id() -> egui::Id {
+        egui::Id::new("pause_rows_scrolled")
+    }
+
+    /// `room` is the height free for the list; at least one row shows.
+    fn for_frame(
+        ctx: &egui::Context,
+        page: (Option<usize>, bool),
+        cursor: usize,
+        rows: usize,
+        room: f32,
+        gap: f32,
+    ) -> Self {
+        let pitch = ctx
+            .data(|d| d.get_temp::<f32>(Self::pitch_id()))
+            .unwrap_or(Self::FIRST_PITCH);
+        let shown = (((room + gap) / pitch).floor() as usize).clamp(1, rows.max(1));
+        let state = (page.0, page.1, cursor, shown);
+        let moved = ctx.data_mut(|d| {
+            let changed = d.get_temp(Self::state_id()) != Some(state);
+            d.insert_temp(Self::state_id(), state);
+            changed
+        });
+        let offset = if moved {
+            Some(first_row(cursor, shown, rows) as f32 * pitch)
+        } else {
+            let (busy, now) = ctx.input(|i| {
+                (
+                    i.smooth_scroll_delta != Vec2::ZERO || i.pointer.any_down(),
+                    i.time,
+                )
+            });
+            if busy {
+                ctx.data_mut(|d| d.insert_temp(Self::scrolled_id(), now));
+            }
+            let rested = ctx
+                .data(|d| d.get_temp::<f64>(Self::scrolled_id()))
+                .is_none_or(|at| now - at >= Self::SETTLE_AFTER);
+            ctx.data(|d| d.get_temp::<f32>(Self::offset_id()))
+                .map(|at| (at / pitch).round() * pitch)
+                .filter(|_| !busy && rested)
+        };
+        Self {
+            pitch,
+            rows,
+            shown,
+            offset,
+        }
+    }
+
+    fn area(&self, tab: Option<usize>, gap: f32) -> egui::ScrollArea {
+        // At least the whole rows too: a panel's first size is egui's default
+        // area (400 points), and a list asked only for "at most" stays inside it.
+        let height = self.shown as f32 * self.pitch - gap;
+        let area = egui::ScrollArea::vertical()
+            .id_salt(("pause_rows", tab))
+            .max_height(height)
+            .min_scrolled_height(height);
+        match self.offset {
+            Some(at) => area.vertical_scroll_offset(at),
+            None => area,
+        }
+    }
+
+    /// What the next frame needs from this one's list.
+    fn remember<R>(
+        &self,
+        ctx: &egui::Context,
+        out: &egui::scroll_area::ScrollAreaOutput<R>,
+        gap: f32,
+    ) {
+        ctx.data_mut(|d| {
+            d.insert_temp(Self::offset_id(), out.state.offset.y);
+            if self.rows > 0 {
+                d.insert_temp(
+                    Self::pitch_id(),
+                    (out.content_size.y + gap) / self.rows as f32,
+                );
+            }
+        });
+    }
+}
+
+/// The first row of a list of `rows` showing `shown`, with `cursor` as near the
+/// middle as the ends allow.
+fn first_row(cursor: usize, shown: usize, rows: usize) -> usize {
+    cursor
+        .saturating_sub(shown / 2)
+        .min(rows.saturating_sub(shown))
+}
+
 /// Draw the menu; pointer clicks produce actions too.
 pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
     let mut actions = Vec::new();
-    let cursor_changed = ctx.data_mut(|data| {
-        let id = egui::Id::new("pause_last_cursor");
-        let state = (
-            m.class_choices.as_ref().map(|p| p.tab),
-            m.respawn_confirm,
-            m.cursor,
-        );
-        let changed = data.get_temp::<(Option<usize>, bool, usize)>(id) != Some(state);
-        data.insert_temp(id, state);
-        changed
-    });
     egui::Area::new(egui::Id::new("pause_menu"))
         .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
         .show(ctx, |ui| {
@@ -515,9 +629,23 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                         if picker.choices.is_empty() { ui.label("No supported characters are available in this tab."); }
                     }
                     let rows = rows(m);
-                    egui::ScrollArea::vertical()
-                        .id_salt(("pause_rows", m.class_choices.as_ref().map(|p| p.tab)))
-                        .max_height((ctx.content_rect().height() - 220.0).max(100.0))
+                    let has_help = rows.contains(&Row::Reinforcements) || rows.contains(&Row::InputIcons);
+                    let room = ctx.content_rect().height()
+                        - PANEL_MARGINS
+                        - ui.min_rect().height()
+                        - FOOTER_ROOM
+                        - if has_help { HELP_ROOM } else { 0.0 };
+                    let gap = ui.spacing().item_spacing.y;
+                    let list = RowList::for_frame(
+                        ctx,
+                        (m.class_choices.as_ref().map(|p| p.tab), m.respawn_confirm),
+                        m.cursor,
+                        rows.len(),
+                        room,
+                        gap,
+                    );
+                    let shown = list
+                        .area(m.class_choices.as_ref().map(|p| p.tab), gap)
                         .show(ui, |ui| {
                             for (i, row) in rows.iter().enumerate() {
                                 let sel = (i == m.cursor).then_some(1.0);
@@ -641,14 +769,12 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                         _ => {}
                                     }
                                 }
-                                if cursor_changed && i == m.cursor {
-                                    clicked.scroll_to_me(Some(egui::Align::Center));
-                                }
                             }
                         });
+                    list.remember(ctx, &shown, gap);
                     // Room is kept for the help so the centered menu does not
                     // jump as the cursor reaches those rows.
-                    if rows.contains(&Row::Reinforcements) || rows.contains(&Row::InputIcons) {
+                    if has_help {
                         ui.add_space(6.0);
                         ui.scope(|ui| {
                             ui.set_min_height(60.0);
@@ -662,7 +788,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                         RichText::new(if m.class_choices.is_some() {
                             "Up/Down choose · Left/Right tabs · Enter select · Esc back".to_owned()
                         } else {
-                            m.icons.menu_footer()
+                            m.icons.menu_footer(m.in_shell.is_none())
                         })
                             .size(12.0)
                             .color(Color32::GRAY),
@@ -885,6 +1011,158 @@ mod tests {
         assert_eq!(press(&m, right), vec![MenuAction::CycleInputIcons(1)]);
         m.in_shell = Some("Game Options".into());
         assert!(at(&m).is_some());
+    }
+
+    /// The text a settled frame of the menu shows: (what it cuts, what it shows
+    /// whole, the shown text's bounds).
+    fn settled_text(m: &MenuModel, size: [f32; 2]) -> (Vec<String>, Vec<String>, egui::Rect) {
+        let ctx = egui::Context::default();
+        let mut first = m.clone();
+        first.cursor = 0;
+        let mut out = None;
+        // The cursor moves there as a player's does.
+        for frame in 0..8 {
+            let shown = if frame < 3 { &first } else { m };
+            out = Some(menu_frame(&ctx, shown, size, Vec::new()));
+        }
+        text_of(out.unwrap())
+    }
+
+    /// One frame of the menu; `events` are what the player did in it.
+    fn menu_frame(
+        ctx: &egui::Context,
+        m: &MenuModel,
+        size: [f32; 2],
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(size[0], size[1]),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                draw_menu(ctx, m);
+            },
+        )
+    }
+
+    /// A frame's text: (what it cuts, what it shows whole, the shown text's bounds).
+    fn text_of(out: egui::FullOutput) -> (Vec<String>, Vec<String>, egui::Rect) {
+        let (mut cut, mut whole) = (Vec::new(), Vec::new());
+        let mut bounds = egui::Rect::NOTHING;
+        for c in out.shapes {
+            if let egui::Shape::Text(t) = &c.shape {
+                let rect = t.visual_bounding_rect();
+                if !rect.intersects(c.clip_rect) {
+                    continue;
+                }
+                bounds = bounds.union(rect.intersect(c.clip_rect));
+                let list = if c.clip_rect.contains_rect(rect.shrink(1.0)) {
+                    &mut whole
+                } else {
+                    &mut cut
+                };
+                list.push(t.galley.text().to_owned());
+            }
+        }
+        (cut, whole, bounds)
+    }
+
+    /// Any list length in any window: no row is shown cut, the cursor's row is
+    /// shown whole, and the panel and its help stay on the window.
+    #[test]
+    fn the_pause_rows_show_whole_at_any_window() {
+        const CHEATS: [(&str, &str, bool); 12] = [("c", "A cheat", false); 12];
+        let mut m = model();
+        m.population_note = [
+            "Average match: 28 a side\nSmallest map: 12 a side".to_owned(),
+            "Average match: 200 reinforcements\nSmallest map: 120".to_owned(),
+        ];
+        for cheats in [0, 2, 6, 12] {
+            m.cheats = CHEATS[..cheats].to_vec();
+            for picker in [false, true] {
+                m.class_picker_available = picker;
+                for h in [
+                    400.0, 480.0, 540.0, 600.0, 720.0, 768.0, 805.0, 900.0, 1080.0,
+                ] {
+                    for (cursor, row) in rows(&m).into_iter().enumerate() {
+                        m.cursor = cursor;
+                        let (cut, whole, bounds) = settled_text(&m, [1280.0, h]);
+                        let at = format!("{cheats} cheats, {h} high, on {row:?}");
+                        assert!(cut.is_empty(), "{at}: {cut:?} cut");
+                        assert!(
+                            bounds.top() >= 0.0 && bounds.bottom() <= h,
+                            "{at}: {bounds:?}"
+                        );
+                        let label = match row {
+                            Row::Respawn => Some("Respawn"),
+                            Row::InputIcons => Some("Button prompts  ◀ ▶"),
+                            Row::Quit => Some("Quit to desktop"),
+                            _ => None,
+                        };
+                        if let Some(label) = label {
+                            assert!(whole.iter().any(|t| t == label), "{at}: {whole:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A mouse wheel's notch moves the list and a slow trackpad's small steps
+    /// add up; either way it comes to rest on a whole row.
+    #[test]
+    fn a_scrolled_list_moves_and_settles_on_a_row() {
+        let wheel = |unit, delta| egui::Event::MouseWheel {
+            unit,
+            delta: egui::vec2(0.0, delta),
+            modifiers: egui::Modifiers::NONE,
+        };
+        let notch = wheel(egui::MouseWheelUnit::Line, -1.0);
+        let step = wheel(egui::MouseWheelUnit::Point, -2.0);
+        let size = [1280.0, 480.0];
+        let m = model();
+        for (name, event, every, frames) in [("wheel", notch, 1000, 1), ("trackpad", step, 3, 120)]
+        {
+            let ctx = egui::Context::default();
+            for _ in 0..4 {
+                menu_frame(&ctx, &m, size, Vec::new());
+            }
+            let over = egui::Event::PointerMoved(egui::pos2(640.0, 240.0));
+            menu_frame(&ctx, &m, size, vec![over]);
+            let before = text_of(menu_frame(&ctx, &m, size, Vec::new())).1;
+            for frame in 0..frames {
+                let events = if frame % every == 0 {
+                    vec![event.clone()]
+                } else {
+                    Vec::new()
+                };
+                menu_frame(&ctx, &m, size, events);
+            }
+            for _ in 0..120 {
+                menu_frame(&ctx, &m, size, Vec::new());
+            }
+            let (cut, whole, _) = text_of(menu_frame(&ctx, &m, size, Vec::new()));
+            assert_ne!(before, whole, "{name}: the list did not move");
+            assert!(cut.is_empty(), "{name}: {cut:?} cut");
+        }
+    }
+
+    /// A tall window shows the whole list, with nothing left to scroll.
+    #[test]
+    fn a_tall_window_shows_every_pause_row() {
+        let mut m = model();
+        m.cursor = rows(&m).iter().position(|r| *r == Row::InputIcons).unwrap();
+        for h in [805.0, 1080.0] {
+            let (_, whole, _) = settled_text(&m, [1920.0, h]);
+            for label in ["Resume", "Respawn", "Quit to desktop"] {
+                assert!(whole.iter().any(|t| t == label), "{h}: {label}");
+            }
+        }
     }
 
     /// The row says what it is for, in both menus.

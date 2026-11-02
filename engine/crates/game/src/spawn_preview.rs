@@ -30,9 +30,17 @@
 //! [`SLOTS`], [`SLIDE_RATE`]). The PS2 sets the places in its UI scene; the
 //! port maps that scene into the camera's frame by a perspective fitted to
 //! the PS2's Hoth frame ([`lineup_at`]).
+//!
+//! `[ours]` The PS2's line-up runs behind the class panel at its own 4:3
+//! (`s4_class`: the soldiers at places 3 and 4 show dimly through the box,
+//! the front one's elbow under its edge). The port slides the whole group
+//! clear of the panel and, when even that is too narrow, scales it
+//! ([`lineup_fit`]). The panel is centre-anchored and the view is Hor+, so
+//! the overlap was the same at every aspect: a wide window only left the
+//! room on the left unused.
 
 use crate::animator::Animator;
-use crate::soldier_vis::SoldierVisuals;
+use crate::soldier_vis::{Outline, SoldierVisuals};
 use glam::{Mat4, Vec3};
 use render::{Camera, DrawCmd, SkinnedDrawCmd};
 use ui::spawn_draw::SpawnPage;
@@ -112,6 +120,10 @@ pub const SLOT_COLOURS: [[u8; 4]; 6] = [
     [0xb4, 0xb4, 0xb4, 0xff],
     [0, 0, 0, 1],
 ];
+
+/// Below this alpha a soldier is unseen at the back: the port draws its
+/// soldiers opaque [H].
+const SEEN_ALPHA: f32 = 0.5;
 
 /// A slide's progress per second: `SD+0x3c += dt * 3`, done at 1
 /// (B2:394131-394135), so the ring turns one place in a third of a second.
@@ -216,6 +228,141 @@ pub fn ring_at(j: usize, from: usize, pick: usize, n: usize, t: f32) -> f32 {
 /// (9.4 m at full size), stands within a metre and a quarter.
 pub const LINEUP_SHRINK: f32 = 0.12;
 
+/// `[ours]` How far a droideka seems to reach from its feet, in metres at full
+/// size, left and right on screen: its own model has no
+/// [`SoldierVisuals::still_outline`]. The class screen's real pixels on every
+/// baked map: 1.49 left, 0.80 right.
+const DROIDEKA_REACH: [f32; 2] = [1.5, 0.85];
+
+/// `[ours]` The gap kept to the class panel and to the window's left edge, in
+/// the shell's screen units.
+const FIT_MARGIN: f32 = 6.0;
+
+/// A soldier's cloth and hair past his outline.
+const OUTLINE_GROWTH: f32 = 1.05;
+
+/// Places along the ring the group's bounds are sampled at: a slide passes
+/// between the ring's stops.
+const RING_SAMPLES: usize = 60;
+
+/// How the line-up is moved on screen for a window: see [`lineup_fit`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LineupFit {
+    /// The move across the screen, in tangents (x / depth).
+    shift: f32,
+    /// The scale on screen, 1 unless the room is narrower than the group.
+    pub scale: f32,
+    /// The height the scale keeps: the front soldier's feet.
+    feet: f32,
+}
+
+/// The class panel's left edge in screen tangents, for a camera of `tan_v`:
+/// the panel is centre-anchored in the 4:3 box of the window's height, so
+/// this does not depend on the aspect.
+fn panel_left(tan_v: f32) -> f32 {
+    (ui::spawn_draw::CLASS_BOX[0] / 256.0 - 1.0) * (4.0 / 3.0) * tan_v
+}
+
+/// `[ours]` The line-up's move for a window of `aspect` under a camera of
+/// half-height tangent `tan_v` (the shot's, or the play camera's on the pause
+/// class change): its right edge a margin from the panel, scaled down only as
+/// much as its left edge needs to stay on the window. `outline` is the team's
+/// widest ([`Outline`]) with every class at every place: every class passes
+/// every seen place, so it holds for any pick and through a slide, and the group
+/// does not jump between picks.
+pub fn lineup_fit(aspect: f32, tan_v: f32, outline: &Outline) -> LineupFit {
+    let places: Vec<Vec3> = (0..RING_SAMPLES)
+        .map(|k| lineup_at(6.0 * k as f32 / RING_SAMPLES as f32))
+        .filter(|(_, colour)| colour[3] >= SEEN_ALPHA)
+        .map(|(at, _)| at)
+        .collect();
+    let points: Vec<[f32; 2]> = outline.points().collect();
+    let (left, right) = (
+        -aspect * tan_v + FIT_MARGIN / 256.0 * (4.0 / 3.0) * tan_v,
+        panel_left(tan_v) - FIT_MARGIN / 256.0 * (4.0 / 3.0) * tan_v,
+    );
+    let front = lineup_at(2.0).0;
+    let fit_of = |shift, scale| LineupFit {
+        shift,
+        scale,
+        feet: front.y / front.z,
+    };
+    let span = |fit: &LineupFit| {
+        let mut out = (f32::MAX, f32::MIN);
+        for &at in &places {
+            let feet = fit.feet(at);
+            for [x, z] in &points {
+                let depth = (feet.z - z * fit.scale).max(feet.z * 0.25);
+                let seen = (feet.x + x * fit.scale) / depth;
+                out = (out.0.min(seen), out.1.max(seen));
+            }
+        }
+        out
+    };
+    // The move that puts the group's right edge on the panel's margin; its edge
+    // only moves right as the group does.
+    let against_panel = |scale| {
+        let (mut low, mut high) = (-8.0, 8.0);
+        for _ in 0..20 {
+            let mid: f32 = (low + high) * 0.5;
+            if span(&fit_of(mid, scale)).1 < right {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        fit_of(low, scale)
+    };
+    let whole = against_panel(1.0);
+    if span(&whole).0 >= left {
+        return whole;
+    }
+    let (mut fits, mut wide) = (0.1, 1.0);
+    for _ in 0..12 {
+        let mid: f32 = (fits + wide) * 0.5;
+        if span(&against_panel(mid)).0 >= left {
+            fits = mid;
+        } else {
+            wide = mid;
+        }
+    }
+    against_panel(fits)
+}
+
+impl LineupFit {
+    /// The feet of a soldier standing at `at`, moved: the same depth, so the
+    /// back of the group stays as near the eye as [`LINEUP_SHRINK`] put it.
+    pub fn feet(&self, at: Vec3) -> Vec3 {
+        let x = self.shift + self.scale * at.x / at.z;
+        let y = self.feet + self.scale * (at.y / at.z - self.feet);
+        Vec3::new(x * at.z, y * at.z, at.z)
+    }
+
+    /// The model matrix of a line-up soldier whose place is `at`.
+    pub fn place(&self, cam: &Camera, at: Vec3, yaw: f32) -> Mat4 {
+        place_at(cam, self.feet(at), yaw, LINEUP_SHRINK) * Mat4::from_scale(Vec3::splat(self.scale))
+    }
+}
+
+/// The widest of `classes`, grown a little for what is not in it.
+fn team_outline(vis: &SoldierVisuals, team: u8, classes: &[u8]) -> Outline {
+    let mut wide = Outline::default();
+    for &class in classes {
+        match vis.still_outline(team, class) {
+            Some(one) => wide.merge(&one),
+            None => {
+                wide.add(Vec3::new(-DROIDEKA_REACH[0], 0.0, 0.0));
+                wide.add(Vec3::new(DROIDEKA_REACH[1], 0.0, 0.0));
+            }
+        }
+    }
+    let mut grown = Outline::default();
+    for [x, z] in wide.points() {
+        grown.add(Vec3::new(x * OUTLINE_GROWTH, 0.0, z * OUTLINE_GROWTH));
+    }
+    grown
+}
+
 /// The model matrix of a soldier whose feet stand at `at` in `cam`'s frame
 /// (right, up, ahead; full size) turned `yaw` from facing the camera, drawn
 /// at [`SHRINK`] about the eye. The soldier models face +Z.
@@ -249,6 +396,14 @@ pub struct Preview {
     /// The line-up's team and front class, and the slide: (from, t).
     lineup: Option<(u8, usize)>,
     slide: Option<(usize, f32)>,
+    /// The window's aspect, as [`Self::draws_live`]'s renderer says it; 4:3 for
+    /// the entries with no renderer.
+    aspect: Option<f32>,
+    /// The widest of the classes shown.
+    outline: Option<(Vec<u8>, Outline)>,
+    /// The line-up's move under the window's aspect and the camera's tangent
+    /// ([`lineup_fit`]).
+    fit: Option<(f32, f32, LineupFit)>,
 }
 
 #[derive(Default)]
@@ -300,6 +455,8 @@ impl Preview {
         dt: f32,
         mut specialized: impl FnMut(&mut render::Renderer, u8, u8, Mat4, f32) -> Option<Vec<DrawCmd>>,
     ) -> (Vec<SkinnedDrawCmd>, Vec<DrawCmd>) {
+        let (w, h) = r.size();
+        self.aspect = Some(w as f32 / h.max(1) as f32);
         self.compose(Some(r), vis, page, cam, dt, |r, team, class, model, dt| {
             r.and_then(|r| specialized(r, team, class, model, dt))
         })
@@ -344,6 +501,7 @@ impl Preview {
                 cloth_meshes,
                 shown: who,
                 lineup: line.map(|(team, class, _)| (team, class)),
+                aspect: self.aspect,
                 ..Default::default()
             };
         }
@@ -384,14 +542,27 @@ impl Preview {
             }
             self.animators.resize_with(n, Animator::default);
             self.cloths.resize_with(n, PreviewCloth::default);
+            let (sin, cos) = core::fmath::sin_cos(cam.fov_y * 0.5);
+            let (aspect, tan_v) = (self.aspect.unwrap_or(4.0 / 3.0), sin / cos);
+            if self.outline.as_ref().is_none_or(|(of, _)| of != classes) {
+                self.outline = Some((classes.to_vec(), team_outline(vis, team, classes)));
+                self.fit = None;
+            }
+            let fit = match self.fit {
+                Some((a, t, fit)) if a == aspect && t == tan_v => fit,
+                _ => {
+                    let outline = self.outline.as_ref().map(|(_, o)| *o).unwrap_or_default();
+                    let fit = lineup_fit(aspect, tan_v, &outline);
+                    self.fit = Some((aspect, tan_v, fit));
+                    fit
+                }
+            };
             for (j, &class) in classes.iter().enumerate() {
                 let (at, colour) = lineup_at(ring_at(j, from, pick, n, t));
-                // Unseen at the back: drawn while at least half opaque
-                // (the port draws its soldiers opaque) [H].
-                if colour[3] < 0.5 {
+                if colour[3] < SEEN_ALPHA {
                     continue;
                 }
-                let model = place_at(cam, at, SOLDIER_YAW, LINEUP_SHRINK);
+                let model = fit.place(cam, at, SOLDIER_YAW);
                 // A refused class's colour word is (0, 0, 0, 0xff): black
                 // (`FUN_0039a980`, B2:394368-394383).
                 let tint = if refused >> j & 1 != 0 {
@@ -656,6 +827,73 @@ mod tests {
         assert_eq!(ring_at(0, 3, 0, 6, 0.5), 2.0);
         // Half way to place 5 a soldier is half seen; at 5 unseen.
         assert!(lineup_at(4.5).1[3] > 0.5 && lineup_at(5.0).1[3] < 0.01);
+    }
+
+    fn outline(points: &[[f32; 2]]) -> Outline {
+        let mut out = Outline::default();
+        for [x, z] in points {
+            out.add(Vec3::new(*x, 0.0, *z));
+        }
+        out
+    }
+
+    /// Every outline at every ring place, any pick, through a slide: no point
+    /// crosses the panel or the window's left edge, the front soldier stays the
+    /// nearest, a muzzle toward the viewer counts, and a wide window does not
+    /// shrink an infantry team. A droideka's reach costs its team some size even
+    /// at 16:9, and most at 4:3.
+    #[test]
+    fn the_group_clears_the_panel_at_any_aspect() {
+        let launcher = outline(&[[-0.3, -0.3], [-0.5, 1.1], [0.4, 0.0]]);
+        let droideka = outline(&[[-DROIDEKA_REACH[0], 0.0], [DROIDEKA_REACH[1], 0.0]]);
+        let small = outline(&[[-0.4, 0.0], [0.4, 0.0]]);
+        for tan_v in [TAN_V, 0.7] {
+            for aspect in [4.0 / 3.0, 16.0 / 9.0, 3149.0 / 1610.0, 21.0 / 9.0, 1.0] {
+                let panel = panel_left(tan_v);
+                let front = lineup_at(2.0).0.z;
+                for shape in [&launcher, &droideka, &small] {
+                    let fit = lineup_fit(aspect, tan_v, shape);
+                    for k in 0..600 {
+                        let (at, colour) = lineup_at(k as f32 / 100.0);
+                        if colour[3] < SEEN_ALPHA {
+                            continue;
+                        }
+                        let feet = fit.feet(at);
+                        assert_eq!(feet.z, at.z, "the depth stays");
+                        for [x, z] in shape.points() {
+                            let seen = (feet.x + x * fit.scale) / (feet.z - z * fit.scale);
+                            assert!(seen < panel, "{aspect} {tan_v} {k}: {seen} {panel}");
+                            assert!(seen > -aspect * tan_v, "{aspect} {tan_v} {k}: {seen}");
+                        }
+                        assert!(at.z >= front - 1e-3, "place 2 is the nearest");
+                    }
+                }
+                if aspect >= 16.0 / 9.0 && tan_v == TAN_V {
+                    assert_eq!(lineup_fit(aspect, tan_v, &launcher).scale, 1.0, "{aspect}");
+                }
+            }
+        }
+        assert!(lineup_fit(4.0 / 3.0, TAN_V, &launcher).scale > 0.7);
+        let droideka = outline(&[[-DROIDEKA_REACH[0], 0.0], [DROIDEKA_REACH[1], 0.0]]);
+        let (narrow, wide, wider) = (
+            lineup_fit(4.0 / 3.0, TAN_V, &droideka).scale,
+            lineup_fit(16.0 / 9.0, TAN_V, &droideka).scale,
+            lineup_fit(1.96, TAN_V, &droideka).scale,
+        );
+        assert!((0.6..0.75).contains(&narrow), "{narrow}");
+        assert!((0.85..1.0).contains(&wide), "{wide}");
+        assert_eq!(wider, 1.0);
+    }
+
+    /// The fit only moves a group left of the panel it would otherwise go behind.
+    #[test]
+    fn the_ps2_places_cross_the_panel_unmoved() {
+        let shape = outline(&[[-0.4, 0.0], [0.4, 0.0]]);
+        let (at, _) = lineup_at(4.0);
+        let unmoved = (at.x + 0.4) / at.z;
+        assert!(unmoved > panel_left(TAN_V), "{unmoved}");
+        let moved = lineup_fit(16.0 / 9.0, TAN_V, &shape).feet(at);
+        assert!((moved.x + 0.4) / moved.z < panel_left(TAN_V));
     }
 
     /// The line-up stands where the PS2's Hoth frame has it: the dark

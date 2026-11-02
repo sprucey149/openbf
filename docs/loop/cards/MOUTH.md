@@ -107,23 +107,6 @@ that BUILD.** The other stalls on Kamino (the pod room's door, hub 46's pod) are
    BF2 Utapau 21.5, BF1 Bespin 21.4, BF1 Endor 11.7, BF2 Hoth 10.9 (one leg, 39), BF2 Tantive IV 9.5, BF2 Coruscant
    9.3, Mos Eisley (tat2) 9.0. NOT done: the free width per arc end against the hub's radius (acceptance 2's first half).
 
-## BUILD (the next step - this card, `phase: build`)
-`loopctl.py start MOUTH`; apply `lead_tmp/mouth/mouth_proto_m1.patch` without its switch and without bit 2:
-`route::leg_point` projects on (the last corner passed, else `Route::from`) -> waypoint; `off_arc_line` (the stuck
-re-plan) and the arrival plane stay on `Route::from`. Module header + the `Route::from` doc say whose rule it is.
-- **Acceptance (run and paste):** (a) a test in `ai/route/tests.rs`: a leg with one corner behind it aims along
-  corner -> waypoint, and it FAILS with the line put back; (b) `walk/tools/snap.sh` Kamino + `tools/pstall.py --only
-  "85>49,49>85,21>36,36>21"`: the card's stalls on the four walkway legs at most 3 (main 28-32); (c) BF1 Bespin, 8
-  rounds, `SWEEP_DEATHS=1`: floor deaths at most 20 (main 44-46); (d) the maintainer's scene (`obst2/tools/scene_seeds.sh` -
-  its `cd` points at a removed worktree, harmless) no worse than main's; (e) 24 seeds x 32 maps null against the
-  change (`bot-ab-all-maps` memory): recycles, lost, floor deaths, rounds finished not worse; (f) **BF1 Kamino
-  traced first** (`tools/table.py` on it, then `tools/trace.py` on its worst leg): cured, or named and left with the
-  numbers. Then the gates and `land.py`.
-- **After it (acceptance 5 of the original):** the stall rate per map into `scripts/bot_quality.py` / `[fidelity]`
-  (direction down) - `tools/pstall.py`'s rule over `BOT_SAMPLES` needs the leg's waypoint in the 4 Hz row; a card
-  that asks for a new gate lands the instrument and files the wiring (RULES).
-- BESR: re-measure its bars after this lands (its legs `58->59`, `51->61` are this defect; `35->4`, `101->62` are not).
-
 ## Why (the original card, 2026-10-11)
 The maintainer, 2026-10-11 (chat): "Lots of bots when crossing the walkways between adjacent platforms, they will miss the walkway
 and go to the side of it, try running at the side for a few seconds, then go back a few feet then correctly go over the
@@ -170,27 +153,6 @@ BESR's unit 14: "STOP Barrier at 1.00 m, then STOP Wall ... 9 s later it is LOST
 
 The PS2 does this less: bots inside a soldier barrier KAM1 0.80 % against the port's 2.19 % (OBST2's report). Nobody has
 taken the PS2's rate of THIS stall.
-
-## Acceptance
-1. **The PS2's number.** The same stall from PS2 captures of BF2 Kamino and BF1 Bespin (`ps2live` unit samples: position,
-   leg / state where RAM gives it; a kinematic form of the detector if `stop` cannot be read - say which), at least 60
-   bot-minutes a map, beside the port's on the same legs. If the PS2 stalls at a mouth too, its rate is the bar; if it
-   does not, the bar is under 1 stall per 20 bot-minutes on both maps.
-2. **A census, all 32 maps**: per arc, the width of free floor across the arc's line at each end (rails, walls, rims,
-   barriers) against the hub's radius there; the "narrow mouth" arcs listed, and the stall table per map.
-3. **The cause, traced**: 5 stalls on Kamino `85->49` and 5 on Bespin `122->7` (`blackbox_read --unit`), each with the
-   hub point drawn, the first aim point and what the line to it crossed; and the same crossing on the PS2 (what its bot
-   does there: FUN_002ed2d0 / FUN_002ea128's point, the leg's first step, the barrier step).
-4. **The rule, built or put to the maintainer**: the PS2's own, if 3 finds one; else ours, named as a deviation - a bot enters a
-   leg narrower than its hub through the leg's mouth (candidates: the hub point drawn inside the next arc's free width;
-   a first aim point at the mouth when the line from the feet to the leg crosses a rail / wall / rim; never a straight
-   walk at a point the floor does not lead to). Judge it by the stall table AND the sweep, the scene's reversals, a
-   teammate within 1.5 m (HUBP's bar: at most 12 % on Kamino) and deaths off the floor - HUBP measured "a barrier test
-   along the unit's line" and "a walk by the hub's centre" by numbers that cannot see a stall, so they are open again.
-5. **A standing number**: the stall rate per map joins `scripts/bot_quality.py` / gates.toml `[fidelity]` (direction
-   down) so no later card brings it back, and the maintainer's Kamino scene (`scene_seeds.sh`) prints it beside the reversals.
-6. BESR's bars on Bespin (deaths under the floor at most 147 in 8 seeds, no recycle spot on `35->4`, `101->62`, `25->2`),
-   after BSPN: this card is BESR's cure or it says why not.
 
 ## Notes
 - `files:` is EMPTY on purpose while this card is `measure` (2026-10-11): listing route.rs / mover.rs / avoid.rs / nav.rs held it out of the picker behind OBST2's parked branch for a whole run. The build half (MOUTH2, or this card re-phased) lists them: `engine/crates/core/src/ai/{route,mover,avoid}.rs`, `engine/crates/core/src/nav.rs`.

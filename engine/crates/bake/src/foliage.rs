@@ -11,7 +11,8 @@
 //! `.data` (BF1 va 0x5453c8, BF2 0x636ac8 — the same 1024 bytes). It is read
 //! from the EXTRACTED ELF at bake time, found beside the disc's `lvl/` tree,
 //! so no ELF byte goes into git; [`TABLE_FNV`] pins which bytes were read.
-//! No ELF → no FOLG instances (the path props still bake), with a warning.
+//! Non-PS2 donors use the reviewed numeric table when no ELF is present.
+//! A PS2 input without its ELF retains the original no-FOLG warning path.
 //!
 //! **EE arithmetic.** The EE's FPU rounds every `add.s`/`mul.s` toward zero,
 //! and its adder first drops the smaller operand's bits past one guard bit;
@@ -32,7 +33,7 @@
 //! PS2's pool cap (§5 — the port draws every instance inside its distance),
 //! the BF2 split-screen cut (§10), sounds, collision (§11, queue FOLGC).
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use manifest::foliage_bin::Record;
 use manifest::{
     FoliageKind, ManifestClass, ManifestFoliage, ManifestFoliageMesh, ManifestGrassClass,
@@ -98,14 +99,22 @@ fn fnv_bytes(b: &[u8]) -> u32 {
     })
 }
 
+/// Each game's executable, at the root of its disc.
+const ELF_BF1: &str = "SWBFRONT.ELF";
+const ELF_BF2: &str = "SWBFRNT2.ELF";
+
+/// Is this disc path a game's executable? `bake extract-iso` writes it beside the
+/// tree, where [`elf_for`] finds it.
+pub fn is_game_elf(disc_path: &str) -> bool {
+    [ELF_BF1, ELF_BF2]
+        .iter()
+        .any(|n| disc_path.eq_ignore_ascii_case(n))
+}
+
 /// The ELF beside a disc's `lvl/` tree: the first ancestor of `lvl_path`
 /// holding the game's executable.
 pub fn elf_for(lvl_path: &str, game: &str) -> Option<PathBuf> {
-    let name = if game == "bf2" {
-        "SWBFRNT2.ELF"
-    } else {
-        "SWBFRONT.ELF"
-    };
+    let name = if game == "bf2" { ELF_BF2 } else { ELF_BF1 };
     Path::new(lvl_path)
         .ancestors()
         .map(|d| d.join(name))
@@ -629,18 +638,38 @@ pub struct Inputs<'a> {
     pub grass: &'a [(String, Vec<(u32, String)>)],
 }
 
+/// Does this executable hold both tables at the addresses [`rng_table`] and
+/// [`grass_atlas`] read, each checked against its hash?
+fn holds_the_tables(elf: &[u8], game: &str) -> Result<()> {
+    rng_table(elf, game)?;
+    grass_atlas(elf, game, 1)?;
+    Ok(())
+}
+
 /// Place, tint and write `foliage.bin`, and bake the grass classes; `None`
 /// when nothing is placed and the LVL ships no grass class.
 pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
-    let elf = match elf_for(i.lvl_path, i.game).map(std::fs::read) {
-        Some(Ok(b)) => Some(b),
-        _ => None,
-    };
-    // An Xbox disc ships no PS2 executable, and needs its numbers just the same.
-    let shipped = elf.is_none() && crate::xbox::lvl_is_xbox(i.lvl_path).unwrap_or(false);
-    if elf.is_none() && !shipped {
+    let elf = elf_for(i.lvl_path, i.game)
+        .map(|path| std::fs::read(&path).with_context(|| format!("foliage: {}", path.display())))
+        .transpose()?
+        // `extract-iso` copies whatever the disc calls its executable: another
+        // release may hold these tables elsewhere, and the numbers do not change.
+        .filter(|elf| match holds_the_tables(elf, i.game) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!(
+                    "foliage: the {} ELF above {} is not the one read here ({error:#})",
+                    i.game, i.lvl_path
+                );
+                false
+            }
+        });
+    // No executable, as on an Xbox disc or a tree copied without it: the same numbers
+    // ship with the source, proved equal by `the_shipped_tables_are_the_executables_tables`.
+    let shipped = elf.is_none();
+    if shipped && !crate::xbox::lvl_is_xbox(i.lvl_path).unwrap_or(false) {
         eprintln!(
-            "foliage: no {} ELF beside {} — no FOLG placement, no grass atlas",
+            "foliage: no usable {} ELF above {}: using the numbers shipped with the source",
             i.game, i.lvl_path
         );
     }
@@ -654,9 +683,8 @@ pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
     if let (Some(t), Some(mask), Some(_)) = (i.terrain, i.mask, i.file) {
         let (dim, cell) = grid(i.game, t);
         let table = match &elf {
-            Some(b) => Some(rng_table(b, i.game)?),
-            None if shipped => Some(shipped_rng_table(i.game)?),
-            None => None,
+            Some(b) => rng_table(b, i.game)?,
+            None => shipped_rng_table(i.game)?,
         };
         let mask = if mask.dim == dim {
             Some(mask)
@@ -667,7 +695,7 @@ pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
             );
             None
         };
-        if let (Some(table), Some(mask), Some(lumi)) = (table, mask, Lumi::of(t)) {
+        if let (Some(mask), Some(lumi)) = (mask, Lumi::of(t)) {
             for p in place(mask, file, cell, &table) {
                 let (row, cv) = &rows[p.mesh as usize];
                 if row.name.is_none() {
@@ -685,17 +713,14 @@ pub fn bake(out: &Path, i: &Inputs<'_>) -> Result<Option<ManifestFoliage>> {
         }
     }
     let path_props = path_props(file, i.paths, i.classes);
-    // A class without its atlas draws nothing, so no ELF → no grass.
     let mut grass = Vec::new();
-    if elf.is_some() || shipped {
-        for (name, props) in i.grass {
-            let mut g = grass_class(name, props);
-            g.atlas = match &elf {
-                Some(elf) => grass_atlas(elf, i.game, g.num_parts)?,
-                None => shipped_grass_atlas(i.game, g.num_parts)?,
-            };
-            grass.push(g);
-        }
+    for (name, props) in i.grass {
+        let mut g = grass_class(name, props);
+        g.atlas = match &elf {
+            Some(elf) => grass_atlas(elf, i.game, g.num_parts)?,
+            None => shipped_grass_atlas(i.game, g.num_parts)?,
+        };
+        grass.push(g);
     }
     if records.is_empty() && path_props.is_empty() && grass.is_empty() {
         return Ok(None);

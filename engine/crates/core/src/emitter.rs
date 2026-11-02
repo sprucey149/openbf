@@ -250,11 +250,11 @@ fn team_ok(e: &EmitterOrdnance, team: u8, target: Option<u8>) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod fixtures {
     use super::*;
     use crate::weapon::DEG;
 
-    fn bf1() -> EmitterOrdnance {
+    pub(crate) fn bf1() -> EmitterOrdnance {
         EmitterOrdnance {
             cone_length: 30.0,
             cone_angle: 50.0 * DEG,
@@ -276,7 +276,7 @@ mod tests {
         }
     }
 
-    fn bf2() -> EmitterOrdnance {
+    pub(crate) fn bf2() -> EmitterOrdnance {
         EmitterOrdnance {
             cone_length: 30.0,
             cone_angle: 50.0 * DEG,
@@ -299,7 +299,7 @@ mod tests {
     }
 
     /// `com_weap_inf_flamethrower_ord`: Damage 5, MaxDamage 15, L 10, 45°.
-    fn flame() -> EmitterOrdnance {
+    pub(crate) fn flame() -> EmitterOrdnance {
         EmitterOrdnance {
             cone_length: 10.0,
             cone_angle: 45.0 * DEG,
@@ -320,6 +320,12 @@ mod tests {
             burn: Default::default(),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fixtures::{bf1, bf2, flame};
+    use super::*;
 
     fn origin() -> Vec3 {
         Vec3::new(0.0, 1.46, 0.0)

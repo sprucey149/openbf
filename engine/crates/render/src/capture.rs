@@ -13,8 +13,7 @@ impl Renderer {
     /// (sRGB-encoded bytes — exactly what a PNG expects). Returns
     /// `(rgba, width, height)`. Errors on a windowed renderer.
     ///
-    /// Adapted from an earlier wgpu project's golden-image readback
-    /// (`an earlier project's source` `read_pixels`): texture->buffer
+    /// Adapted from an earlier project's golden-image readback: texture->buffer
     /// copies need `bytes_per_row` aligned to 256, so rows are padded GPU-side
     /// and stripped here; `map_async` only requests, `poll(Wait)` blocks.
     pub fn capture_rgba(&self) -> Result<(Vec<u8>, u32, u32), RenderError> {

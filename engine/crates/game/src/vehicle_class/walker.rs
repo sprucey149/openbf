@@ -22,8 +22,7 @@
 //! handling, and BF2's code with BF1's data is neither game (a walking AT-ST
 //! turns 3.4°/s), so a class read from a BF1 db takes BF2's body values:
 //! [`bf1_body`]'s rows are set over its own after the chain. Everything else
-//! stays BF1's. `OPENBF_BF1_WALKER_PACE=1` is the other way: BF1's own gait
-//! under BF2's handling, no boost ([`WalkerClass::gait`]).
+//! stays BF1's.
 //!
 //! A `commandwalker` class also carries its post's spawn points (card CWSP,
 //! `analysis/re-command-walker-post.md` §4 [O]; the post's class setter B2
@@ -171,8 +170,7 @@ pub struct WalkerClass {
     motion: WalkerParams,
     /// `Some(rate)`: MaxSpeed is the class's BF1 gait, the walk clip's
     /// z·rate·30/N (re-walker §13.6; `rate` = TEMP_AnimationSpeed), taken
-    /// from the bake in [`WalkerClass::params`] — the kaadu always, every
-    /// BF1-disc walker under `OPENBF_BF1_WALKER_PACE=1`.
+    /// from the bake in [`WalkerClass::params`] — the kaadu.
     pub gait: Option<f32>,
     /// `AnimationName`: the bank the anim table's clips come from.
     pub animation: Option<String>,
@@ -326,12 +324,6 @@ fn bf1_body(class: &str) -> Option<(Vec<(&'static str, &'static str)>, f32)> {
     Some((v, rate))
 }
 
-/// `OPENBF_BF1_WALKER_PACE=1`: BF1-disc walkers keep BF1's pace under
-/// BF2's handling (re-walker §13.9, "the other way"). Default off.
-fn bf1_pace() -> bool {
-    std::env::var("OPENBF_BF1_WALKER_PACE").is_ok_and(|v| v == "1")
-}
-
 impl WalkerClass {
     /// `class`'s walker numbers, or `None` if the db lacks it or its BASE
     /// chain does not end at a [`WALKER_BASES`] engine class. A BF1 db's
@@ -340,24 +332,20 @@ impl WalkerClass {
         let mut c = Self::authored(db, class)?;
         let kaadu = class.eq_ignore_ascii_case("gun_walk_kaadu");
         if !db.is_bf2() || kaadu {
-            c.take_bf2_body(class, bf1_pace());
+            c.take_bf2_body(class);
         }
         Some(c)
     }
 
-    /// [`bf1_body`]'s rows set over the class's own; with `pace`, BF1's
-    /// gait and no boost.
-    fn take_bf2_body(&mut self, class: &str, pace: bool) {
+    /// [`bf1_body`]'s rows set over the class's own; the kaadu keeps BF1's gait.
+    fn take_bf2_body(&mut self, class: &str) {
         let Some((rows, rate)) = bf1_body(class) else {
             return;
         };
         for (k, v) in rows {
             self.set(key(k), v);
         }
-        if pace {
-            self.motion.boost_speed = 0.0;
-        }
-        if pace || class.eq_ignore_ascii_case("gun_walk_kaadu") {
+        if class.eq_ignore_ascii_case("gun_walk_kaadu") {
             self.gait = Some(rate);
         }
     }
@@ -805,23 +793,6 @@ mod tests {
                 ours.motion.flags & flags::NO_CAMERA_TURN,
                 0,
                 "{class}: bit 2"
-            );
-            // The other way: BF1's pace, no boost, the handling unchanged.
-            let mut pace = WalkerClass::authored(&b1, class).expect(class);
-            pace.take_bf2_body(class, true);
-            let rate = if ["imp_walk_atat", "rep_walk_atte"].contains(&class) {
-                1.5
-            } else {
-                1.0
-            };
-            assert_eq!(
-                (pace.gait, pace.motion.boost_speed),
-                (Some(rate), 0.0),
-                "{class}"
-            );
-            assert_eq!(
-                pace.motion.forward_turn_speed,
-                theirs.motion.forward_turn_speed
             );
         }
         let tt = WalkerClass::from_db(&b2, "all_walk_tauntaun").expect("tauntaun");

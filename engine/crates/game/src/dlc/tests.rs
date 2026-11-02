@@ -250,7 +250,7 @@ fn first_difference<T: std::fmt::Debug + PartialEq>(name: &str, a: &[T], b: &[T]
 fn real_dlc_heroes_append_on_every_map_their_sides_fight_on() {
     let root = PathBuf::from(std::env::var_os("OPENBF_DLC_TEST_ROOT").expect("DLC test overlay"));
     let missions = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"));
-    let mut fielded = 0;
+    let (mut fielded, mut authored) = (0, 0);
     for entry in std::fs::read_dir(missions).unwrap() {
         let path = entry.unwrap().path();
         let Ok(m) = MissionDef::load(&path) else {
@@ -263,9 +263,21 @@ fn real_dlc_heroes_append_on_every_map_their_sides_fight_on() {
         let (mut pair, _) =
             crate::roster::FactionRoster::pair(&root.join("classes"), "bf2", factions, Some(&m))
                 .unwrap();
+        let (mut own, _) =
+            crate::roster::FactionRoster::pair(&root.join("classes"), "bf2", factions, Some(&m))
+                .unwrap();
         for (team, roster) in pair.iter_mut().enumerate() {
             let before = roster.classes.len();
-            let Some(index) = crate::heroes::append(roster, &root.join("classes"), Some(&m), team)
+            // The session's default: the map's own hero, bake or no bake.
+            if let Some(index) =
+                crate::heroes::append(&mut own[team], &root.join("classes"), Some(&m), team)
+            {
+                let class = &own[team].classes[usize::from(index)].class;
+                assert!(!class.starts_with("dlc_"), "{}: {class}", path.display());
+                authored += 1;
+            }
+            let Some(index) =
+                crate::heroes::append_with(roster, &root.join("classes"), Some(&m), team, true)
             else {
                 continue;
             };
@@ -283,8 +295,9 @@ fn real_dlc_heroes_append_on_every_map_their_sides_fight_on() {
             }
         }
     }
-    eprintln!("DLC heroes fielded in {fielded} hero slots");
+    eprintln!("DLC heroes fielded in {fielded} hero slots; the maps' own in {authored}");
     assert!(fielded >= 30, "only {fielded} Republic and CIS hero slots");
+    assert!(authored >= fielded, "only {authored} authored hero slots");
 }
 
 /// The optional bake's effect layer, read last, and only with its marker.
@@ -357,7 +370,8 @@ fn real_dlc_heroes_use_the_existing_offer_spawn_and_health_rules() {
     let mut selected = [None; 2];
     for (team, roster) in rosters.iter_mut().enumerate() {
         let ordinary: Vec<_> = roster.classes.iter().map(|c| c.class.clone()).collect();
-        selected[team] = crate::heroes::append(roster, &root.join("classes"), Some(&m), team);
+        selected[team] =
+            crate::heroes::append_with(roster, &root.join("classes"), Some(&m), team, true);
         let hero = &roster.classes[usize::from(selected[team].expect("DLC hero append"))];
         assert_eq!(hero.class, HEROES[team].1);
         assert_eq!(Some(hero.label.as_str()), label(&hero.class));
@@ -454,8 +468,13 @@ fn absent_dlc_matches_authored_hero_sim_hashes() {
         authored.anim.custom =
             crate::animator::custom::for_hero(&root.join("classes"), &m, name).unwrap();
         reference[team].classes.push(authored);
-        selected[team] =
-            crate::heroes::append(&mut current[team], &root.join("classes"), Some(&m), team);
+        selected[team] = crate::heroes::append_with(
+            &mut current[team],
+            &root.join("classes"),
+            Some(&m),
+            team,
+            true,
+        );
         assert_eq!(
             selected[team],
             Some((reference[team].classes.len() - 1) as u8)
@@ -483,6 +502,39 @@ fn absent_dlc_matches_authored_hero_sim_hashes() {
     );
 }
 
+/// The row at its default: a build holding the bake plays the map's own hero, hash
+/// for hash, as a build without the bake does.
+#[test]
+#[ignore = "requires OPENBF_DLC_TEST_ROOT and OPENBF_DLC_TEST_BASE_ROOT"]
+fn the_row_off_matches_a_build_without_the_bake_hash_for_hash() {
+    let installed =
+        PathBuf::from(std::env::var_os("OPENBF_DLC_TEST_ROOT").expect("DLC test overlay"));
+    let absent =
+        PathBuf::from(std::env::var_os("OPENBF_DLC_TEST_BASE_ROOT").expect("retail test assets"));
+    assert!(installed.join("side_bf2/dlc_heroes.ron").exists());
+    assert!(!absent.join("side_bf2/dlc_heroes.ron").exists());
+    let m = mygeeto();
+    let [mut on_bake, mut plain] = [&installed, &absent].map(|root| {
+        let mut rosters = rosters(root, &m);
+        let mut selected = [None; 2];
+        for (team, roster) in rosters.iter_mut().enumerate() {
+            selected[team] =
+                crate::heroes::append_with(roster, &root.join("classes"), Some(&m), team, false);
+            let hero = &roster.classes[usize::from(selected[team].expect("authored hero"))];
+            assert!(!hero.class.starts_with("dlc_"), "{}", hero.class);
+        }
+        let mut sim = register(&rosters, selected);
+        spawn_scored_players(&mut sim);
+        sim
+    });
+    for tick in 0..120 {
+        assert_eq!(on_bake.hash(), plain.hash(), "row Off tick {tick}");
+        let pad = battle_pad(tick);
+        on_bake.step(&[pad, pad]);
+        plain.step(&[pad, pad]);
+    }
+}
+
 #[test]
 #[ignore = "requires OPENBF_DLC_TEST_ROOT and OPENBF_DLC_TEST_PC_ROOT baked source overlays"]
 fn ps2_and_pc_dlc_sources_have_identical_hero_sim_hashes() {
@@ -493,8 +545,13 @@ fn ps2_and_pc_dlc_sources_have_identical_hero_sim_hashes() {
         let mut rosters = rosters(&root, &mission);
         let mut selected = [None; 2];
         for (team, roster) in rosters.iter_mut().enumerate() {
-            selected[team] =
-                crate::heroes::append(roster, &root.join("classes"), Some(&mission), team);
+            selected[team] = crate::heroes::append_with(
+                roster,
+                &root.join("classes"),
+                Some(&mission),
+                team,
+                true,
+            );
             assert!(selected[team].is_some(), "{} team {team}", root.display());
         }
         let mut sim = register(&rosters, selected);

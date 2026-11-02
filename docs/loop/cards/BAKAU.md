@@ -20,9 +20,5 @@ The TALPH gate run (`lead_tmp/talph/gates2/SUMMARY.md`) showed ~5,840 DIFF lines
 ## Evidence
 `reports/20260928_1235_resume_TALPH.md` (Gates); `lead_tmp/talph/gates2/`.
 
-## Acceptance
-- Bake the audio group twice from main into two scratch overlay dirs (absolute paths; memory: scratch bakes need an overlay dir) and `cmp` them: DIFF = 0 → the shared audio bake is stale (rebake it under ci.lock and record); DIFF > 0 → name the non-deterministic step (encoder threads, timestamps, dither seed) and make it deterministic in a cleanup card.
-- Afterwards a full-bake gate on main shows DIFF=0 for audio.
-
 ## Notes
 Measure only; no engine change in this card.

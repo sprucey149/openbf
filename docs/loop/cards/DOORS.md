@@ -38,29 +38,6 @@ they would have passed on the first try." Deviating from the PS2 is approved whe
   for the defenders at cp5. Which door he means is not pinned - find it from the post he had just taken in that file's
   events, or reproduce with a headless round and `BLACKBOX_ON=stuck`.
 
-## What to do (measure first - the maintainer's order)
-1. A door census on main: for every door entity on the 5 BF2 door maps, passes, stalls (`mouth/tools/pstall.py`'s
-   rule) and REVERSALS within 6 m of the door per 20 bot-minutes, 8 seeds; the same for BF2 Kamino from the PS2
-   captures already on disk (`lead_tmp/mouth/ps2/bf2_kam1_m{1,2,3}_units.csv`) where the door has enough passes. Print
-   each door's three worst unit-lives' share (RULES: one looping bot can be most of a site).
-2. One stall traced tick by tick at the worst two doors: where the bot enters the trigger sphere, the leaf's parameter
-   at contact, what the steering does next (black box: `--unit`, the STOP body's name).
-3. The three rules, each behind a switch in ONE binary (null = main byte for byte), stacked:
-   (a) a leg that crosses a door's opening gets two walk points on the opening's centre line (one each side), so it is
-   entered square-on; (b) a bot whose way is shut by a door LEAF that is closed or opening stands (or keeps the last
-   metre) for up to 2 s - no blocked pick, no turn, no recover; (c) `ai/stall.rs`'s progress window and RLOOP's /
-   MOUTH's stuck counts do not run during that wait.
-4. Re-phase to build with the winners, or build here if one session holds it.
-
-## Acceptance
-- The census table (step 1) on main and on the branch: reversals within 6 m of a door and door stalls per 20
-  bot-minutes, per map; BF2 Kamino's worst door at most 10 stalls per 100 passes (the PS2's pod room door: 4).
-- A scene test: a bot sent through a sliding door from a side approach passes on the first try with no reversal; one
-  test per rule (a)-(c), each mutation-checked (the wait must END: a door that never opens is a wall after 2 s).
-- 24 seeds x 32 maps paired by seed: rounds 768 / 768, recycles, lost and floor deaths not worse; the maintainer's Kamino scene
-  (`scene_seeds.sh`) not worse - run it on the FIRST variant that shows a gain.
-- Rules (b) and (c) are ours, not the PS2's: named deviations in the code and one line each in FEEL_NOTES.md.
-
 ## Notes
 - 2026-10-12 16:58 planner: filed from the maintainer's note. `phase: measure` with empty `files:` (the build will touch
   `core/src/ai/route.rs`, `ai/steer.rs` or `ai/avoid.rs`, `ai/stall.rs`, perhaps `door.rs` for "is this leaf moving";

@@ -26,21 +26,8 @@ edge count over the whole mesh) every time - a hull part's mesh never changes. p
 `hash_one<(u32,u32)>` 13 %, `with_layers` 12 %, rehash 5 %, `[i64;3]` hash 2 %. (Planner checked the call chain on main
 d79666c, 2026-10-21; also check what `p.shape.clone()` copies - a mesh by value would be a second per-tick cost.)
 
-## Do
-1. Compute `closed` once where the shape is made (the hull part / baked mesh): a `Body::with_layers_closed(.., closed)`, or
-   `closed` carried on the shape; `set_hull` and `move_body` (doors, every move) reuse it. Avoid per-tick mesh clones.
-2. Then the rest of the flat list, in order, each measured before and after: parry ray casts 7 %, `height_at` 2 %, std
-   SipHash anywhere in `core` (a fixed fast hasher; determinism: no result may depend on a map's iteration order).
-   Root causes first, threads last (INBOX standing note, 10-20).
-
 ## Tools (the maintainer, 10-21)
 `perf record -F 499 -o <file> -- <bin>` + `perf report --no-children --sort symbol --stdio` (flat; `--call-graph dwarf`
 FAILS here); callers by `valgrind --tool=callgrind` (~50x slower) + `callgrind_annotate --tree=caller --inclusive=yes`.
 Copy the binary first, run under the memory cap + `timeout`; wall clock is void under the loop's load - use instruction
 counts and shares.
-
-## Acceptance
-- simhash and every sim / sweep / arena row unchanged (behaviour-neutral: `declares:` stays empty).
-- Before / after pasted for BF2 KAS2, BF1 NAB2 and GEO1 (16 v 16, 1,500 ticks): callgrind total sim instructions and
-  `set_hull`'s inclusive share (target: set_hull under 3 %), plus sim ms / tick on a quiet machine (load < 8) or interleaved A B A B.
-- A unit test: a hull part's `closed` equals `watertight(mesh)` of the same mesh (built once), mutation-checked.

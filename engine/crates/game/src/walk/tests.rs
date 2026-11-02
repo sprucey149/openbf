@@ -609,6 +609,7 @@ fn post(name: &str, team: u8, pos: Vec3, spawn_path: Option<&str>) -> CommandPos
         value_atk: [crate::layout::VALUE_DEFAULT; 5],
         value_def: [crate::layout::VALUE_DEFAULT; 5],
         major: false,
+        space: false,
         vo: Default::default(),
     }
 }
@@ -663,6 +664,39 @@ fn a_player_seated_on_team_1_starts_at_its_own_post() {
     let (team, pos) = start(0);
     assert_eq!(team, 0);
     assert_ne!(pos, own);
+}
+
+/// A space hangar's post spawns its team and never changes hands, however long an
+/// enemy stands in it; an ordinary post falls.
+#[test]
+fn a_space_hangars_post_cannot_be_taken() {
+    let owner_after = |space: bool| {
+        let t = TeamTemplate::default_trooper();
+        let mut w =
+            WalkSim::with_teams_seat(Sim::empty(1), None, Vec3::ZERO, [t.clone(), t], None, 0);
+        w.sim.collision = island_world();
+        let mut layout = rescue_layout();
+        layout.cps.iter_mut().for_each(|c| c.space = space);
+        w.setup_conquest(&layout, [0, 0], true);
+        let cp = w
+            .sim
+            .cps
+            .iter_mut()
+            .find(|c| c.owner.is_some())
+            .expect("a held post");
+        let held = cp.owner;
+        let enemy = usize::from(held.unwrap() == 0);
+        let mut inside = [0u32; 4];
+        inside[enemy] = 8;
+        for _ in 0..10_000 {
+            cp.update(1.0, &inside);
+        }
+        (held, cp.owner)
+    };
+    let (held, after) = owner_after(true);
+    assert_eq!(held, after);
+    let (held, after) = owner_after(false);
+    assert_ne!(held, after);
 }
 
 /// `game --map` with no mission, no `--ai` and no `--spawn`: the player

@@ -23,6 +23,21 @@ class CensusTests(unittest.TestCase):
         self.assertEqual([x[0] for x in rows], [[31], [42], []])
         self.assertEqual([x[1] for x in rows], [b'entc'] * 3)
 
+    def test_addon_mission_tree_does_not_hide_the_base_install(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for path in ("GameData/Data/_LVL_PC/mission.lvl", "GameData/AddOn/tat3/Data/_lvl_pc/mission.lvl"):
+                file = root / path
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(b"base" if "AddOn" not in path else b"addon")
+            rows = list(v.input_files(root))
+            self.assertEqual(rows, [("mission.lvl", b"base")])
+
+    def test_binary_dynamic_planning_is_a_resource_inside_a_sublevel(self):
+        data = chunk(b"ucfb", chunk(b"lvl_", chunk(struct.pack("<I", 31), chunk(b"plnp", b"\x01\x02\x03\x04"))))
+        rows = list(v.walk_resources(data))
+        self.assertEqual([(row[0], row[1], row[2]) for row in rows], [([31], b"plnp", b"\x01\x02\x03\x04")])
+
     def test_truncated_size_rejected(self):
         with self.assertRaises(ValueError):
             list(v.iter_chunks(b'ucfb' + struct.pack('<I', 100) + b'abc'))

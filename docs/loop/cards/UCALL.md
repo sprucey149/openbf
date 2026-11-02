@@ -44,20 +44,6 @@ them (`analysis/re-unit-chatter.md` 1, 2, 5 `[O]`).
   team-mate): gate passes - acquired NAB1 7.75 / 7.5, TAT1 5.0 / 5.25; heard 5.5 / 5.5, 3.75 / 3.75; flee 5.25 /
   4.0, 3.25 / 2.5. Lines started: acquired 3.5-4.5, heard 2-3.75, flee 1.75-2.75.
 
-## Acceptance
-- Tests, each mutation-checked: a bot that takes a target asks `acquired`; a live grenade with two bots within
-  7.5 m makes ONE `flee` request a second from the first of them and none from a human's soldier; a second request
-  of one property inside its interval is silent and a refused probability roll still spends the interval; a
-  locked take silences the request (BF1 rule); a speaker beyond the property's far distance is not started.
-- The right voice: a test through the BAKED class db that every class the three BF1 showcase maps field resolves
-  the three keys to its own faction's property (the Gungans' `gungan_chatter_*`, the CIS, the Republic).
-- No `..._hide`, `..._approach` or `..._predamage` request in an 8-seed `SOUND_LOG` census.
-- The census (headless `SOUND_LOG`, 8 seeds, NAB1 and TAT1, the player parked as in the captures): gate passes and
-  lines per minute per event beside the PS2 rows above, within 30 % where the PS2 reads 5 or more; chatter enters
-  through `core::announcer::VoiceQueue::ask`, a commander line still plays ahead of it.
-- The mixer: a 10-minute round with a sound device writes no `OVERLOAD` line these lines cause;
-  `scripts/tools/mix.py` on its snapshot peaks under full scale.
-
 ## Notes
 - The take lock is a bake change (`rebake` of the sound groups): the segment's third and fourth values
   (`lead_tmp/sqack/segs.py`, `lead_tmp/usnd/tools/sndcensus.py`). SQACK's hand-written 1 s / 2 s locks for the

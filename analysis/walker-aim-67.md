@@ -2,7 +2,7 @@
 
 
 
-Implementation on the walker-aim branch, based on `79275f6`; worktree `E:/Projects/openbf-walker-aim`. Source stays separate from droidekas (#65). No push or PR is authorized.
+Implementation on the walker-aim branch, based on `79275f6`; worktree: the walker-aim checkout. Source stays separate from droidekas (#65). No push or PR is authorized.
 
 
 
@@ -26,7 +26,7 @@ This is already wrong in the baked walk clip, independently of the absent aim ov
 
 
 
-`game/examples/walker_trace.rs` reproduces the source-bank inspection. `walker_rebake` rebakes walker skin GLBs only and preserves original skins in its specified backup directory. The regular `bake vehicles` path applies the same fix.
+The one-off `walker_trace` and `walker_rebake` examples that inspected the source bank and rebaked skins alone were removed in the sprint's code cleanse (in git history before `sprint/org-code`). The regular `bake vehicles` path applies the same fix.
 
 
 
@@ -70,7 +70,7 @@ Existing original-game evidence is re-walker-nodes' recorded PS2 node-table fits
 
 
 
-Artifacts are local only under `E:/Projects/openbf/engine/artifacts/walker67/`; copyrighted geometry and captures are not committed or uploaded.
+Artifacts are local only under `engine/artifacts/walker67/`; copyrighted geometry and captures are not committed or uploaded.
 
 
 
@@ -110,11 +110,11 @@ Final check results and distribution receipt are appended at handoff.
 
 
 
-Release game rebuilt successfully, then its existing `--write-pack` command packed the current `E:/Projects/openbf/engine/assets_baked` and `engine/missions` into `dist/openbf-walker67-ready.exe`. The staged result was checked before replacement: 23,997 entries, 2,755,787,212 bytes; every path and source size matched; all walker skin and mission payloads (77 files) matched byte-for-byte. Executable prefix matched the release game exactly, SHA256 `caf84ad08c28ac945deb4894b6bb41ea4bb998562ed0c498cd9aa06910defdf7`.
+Release game rebuilt successfully, then its existing `--write-pack` command packed the current `engine/assets_baked` and `engine/missions` into `dist/openbf-walker67-ready.exe`. The staged result was checked before replacement: 23,997 entries, 2,755,787,212 bytes; every path and source size matched; all walker skin and mission payloads (77 files) matched byte-for-byte. Executable prefix matched the release game exactly, SHA256 `caf84ad08c28ac945deb4894b6bb41ea4bb998562ed0c498cd9aa06910defdf7`.
 
 
 
-Installed successfully as `E:/Projects/openbf/dist/openbf.exe`. No staged executable remains. `dist/openbf_data` profile/playtest paths, lengths and modification times were unchanged across replacement. Receipt: `E:/Projects/openbf/engine/artifacts/walker67/pack-receipt.json`.
+Installed successfully as `dist/openbf.exe`. No staged executable remains. `dist/openbf_data` profile/playtest paths, lengths and modification times were unchanged across replacement. Receipt: `engine/artifacts/walker67/pack-receipt.json`.
 
 
 
@@ -138,7 +138,7 @@ The animation issue is separate: render_blend interpolated the vehicle position/
 
 
 
-`walker_visibility` captures the original bounding-box policy and corrected policy at identical close-camera poses; images and logs are in `close-followup/captures/`. Tests cover empty space between legs, sphere-AABB corners, genuine obstruction, camera-inside-foot visibility, fractional-frame leg vertex movement, angle seams, forward/backward clock wrap, clip changes, rider and muzzle attachment during interpolation, and exact tick/hash restoration. This corrects 30 Hz visual stepping; it does not claim to eliminate the independent GPU/frame-time spikes recorded by the snapshot.
+`walker_visibility` (removed in the sprint's code cleanse; in git history) captured the original bounding-box policy and corrected policy at identical close-camera poses; images and logs are in `close-followup/captures/`. Tests cover empty space between legs, sphere-AABB corners, genuine obstruction, camera-inside-foot visibility, fractional-frame leg vertex movement, angle seams, forward/backward clock wrap, clip changes, rider and muzzle attachment during interpolation, and exact tick/hash restoration. This corrects 30 Hz visual stepping; it does not claim to eliminate the independent GPU/frame-time spikes recorded by the snapshot.
 
 
 
@@ -158,7 +158,7 @@ Final follow-up checks and distribution receipt are recorded below.
 
 - Rebuilt release and packed current assets_baked/missions into a temporary executable, verified archive paths/sizes, its release executable prefix and all 77 walker-skin/mission payloads. Runtime-only follow-up: no additional baked asset change was needed; the previous AT-TE asset repair remains packed.
 
-- Replaced `E:/Projects/openbf/dist/openbf.exe` successfully; profile/playtest file metadata was unchanged. 23,997 embedded files, 2,755,800,524 bytes. Prefix SHA256: `36f9e699e227ecf17cb14b60e7953fa936d7e226ff1bc8efbba30b2f877c1f08`. Receipt: `engine/artifacts/walker67/close-followup/pack-receipt.json`. No staged executable remains.
+- Replaced `dist/openbf.exe` successfully; profile/playtest file metadata was unchanged. 23,997 embedded files, 2,755,800,524 bytes. Prefix SHA256: `36f9e699e227ecf17cb14b60e7953fa936d7e226ff1bc8efbba30b2f877c1f08`. Receipt: `engine/artifacts/walker67/close-followup/pack-receipt.json`. No staged executable remains.
 
 - Droideka worktree source was not changed; its touched paths do not overlap these follow-up implementation files. Maintainer checkout source remains clean. No commit, push or PR was made.
 
@@ -215,9 +215,9 @@ Final check counts and distribution receipt follow below.
 
 Release was rebuilt successfully from the isolated walker branch and copied to `controls-followup/game-unpacked.exe` before packing, protecting the selected build from later shared-target activity. Its `--write-pack` command packed the current main-checkout `engine/assets_baked` and `engine/missions` into a temporary executable. The current source tree contains 24,003 packed files; all paths and sizes match, the executable prefix is byte-identical to this release build, and all 79 walker-skin/mission payloads were checked byte-for-byte. Packed size: 2,757,977,797 bytes. Prefix SHA256: `782ab3b9347b015a783564cdd09655f2d5b9e603ed8bb7ba2054f569a26e03f4`.
 
-Replaced `E:/Projects/openbf/dist/openbf.exe` successfully only after those checks. `dist/openbf_data` profile/playtest file lengths and modification times are unchanged. No staged executable remains. Receipt: `E:/Projects/openbf/engine/artifacts/walker67/controls-followup/pack-receipt.json`.
+Replaced `dist/openbf.exe` successfully only after those checks. `dist/openbf_data` profile/playtest file lengths and modification times are unchanged. No staged executable remains. Receipt: `engine/artifacts/walker67/controls-followup/pack-receipt.json`.
 
-Source remains uncommitted on the walker-aim branch in `E:/Projects/openbf-walker-aim`. Droideka #65 remains in its own worktree/branch and is not included in this executable's source. Current shared baked assets were packed as requested. No push or PR was made. This handoff fixes the demonstrated riding controls and camera origin; it does not close the unperformed original-game acceptance or the provisional camera/aiming gaps listed above.
+Source remains uncommitted on the walker-aim branch in the walker-aim checkout. Droideka #65 remains in its own worktree/branch and is not included in this executable's source. Current shared baked assets were packed as requested. No push or PR was made. This handoff fixes the demonstrated riding controls and camera origin; it does not close the unperformed original-game acceptance or the provisional camera/aiming gaps listed above.
 
 ## Seat camera, tracers, crosshair and gun sounds follow-up, 2026-10-29
 
@@ -257,7 +257,7 @@ Final pack receipt follows below.
 
 ### Distribution
 
-Release was rebuilt from the merged tree (`d8881a86c058`, not dirty) and its existing `--write-pack` command packed the current `engine/assets_baked` and `engine/missions` into a staged executable. The archive holds 24,003 paths over 14,216 stored bodies (1,470 bodies are shared by identical content), 2,758,181,061 bytes. Every path and size matches the source trees, every entry's bytes were compared against its source file (3,626,550,572 entry bytes because shared bodies are read once per path), and the executable prefix is byte-identical to the release build: SHA256 `f5a5c4e5b24767d2550ec97d0c2890716352619f45a025b57ab5f173f11b1f0c`. The staged file was then installed as `E:/Projects/openbf/dist/openbf.exe`; the installed file's whole-file SHA256 is `5ad6fc5d0fa6917b9780d4f725fa79baaf1889118eef27f57538658350a5c930`, identical to the staged copy, and `dist/openbf_data` profile/playtest file lengths and modification times are unchanged. The staged executable was removed. Receipt: `engine/artifacts/walker67/merged-pack/pack-receipt.json`.
+Release was rebuilt from the merged tree (`d8881a86c058`, not dirty) and its existing `--write-pack` command packed the current `engine/assets_baked` and `engine/missions` into a staged executable. The archive holds 24,003 paths over 14,216 stored bodies (1,470 bodies are shared by identical content), 2,758,181,061 bytes. Every path and size matches the source trees, every entry's bytes were compared against its source file (3,626,550,572 entry bytes because shared bodies are read once per path), and the executable prefix is byte-identical to the release build: SHA256 `f5a5c4e5b24767d2550ec97d0c2890716352619f45a025b57ab5f173f11b1f0c`. The staged file was then installed as `dist/openbf.exe`; the installed file's whole-file SHA256 is `5ad6fc5d0fa6917b9780d4f725fa79baaf1889118eef27f57538658350a5c930`, identical to the staged copy, and `dist/openbf_data` profile/playtest file lengths and modification times are unchanged. The staged executable was removed. Receipt: `engine/artifacts/walker67/merged-pack/pack-receipt.json`.
 
 The installed executable was then run headless from `dist` against its own archive (`--sim-trace engine/artifacts/walker67/merged-pack/smoke.trace 60 --map assets_baked/bf2_geo1 --seed 158`): it loaded the map and class data, fielded both factions (the droideka class included), 7 posts and 10 vehicle pads, and stepped 60 ticks. That proves the packed data mounts and the merged walker and droideka code run together from the single file.
 
@@ -271,28 +271,28 @@ The gunner camera used the turret node's walk-animated parent as its anchor and 
 
 Checks: actual-asset walker control tests 3 passed, walker pose tests 10 passed, rider suite 5 passed, game all-target Clippy passed, release build succeeded and `git diff --check` passed. No new code comments were added. The remaining original-game camera-motion comparison is unperformed.
 
-Release packing completed and verified 24,003 current assets/missions, the executable prefix, and 79 walker/mission payloads. The first replacement attempt received Windows error 32; a retry succeeded and updated `E:/Projects/openbf/dist/openbf.exe`. The verified stage was consumed, and `dist/openbf_data` profile/playtest metadata was unchanged. Receipt: `E:/Projects/openbf/engine/artifacts/walker67/camera-shake/pack-receipt.json`.
+Release packing completed and verified 24,003 current assets/missions, the executable prefix, and 79 walker/mission payloads. The first replacement attempt received Windows error 32; a retry succeeded and updated `dist/openbf.exe`. The verified stage was consumed, and `dist/openbf_data` profile/playtest metadata was unchanged. Receipt: `engine/artifacts/walker67/camera-shake/pack-receipt.json`.
 
 ## Video follow-up: cannon moving in the gunner view
 
-The maintainer's 2.17 s recording `C:/Users/velox/Videos/openbf-shaking-camera.mp4` shows the main cannon moving against the fixed crosshair. The newest black box is BF2 GEO1 seed 165, tick 1981, vehicle 12 seat 1, build `a71b44d04c82+dirty`, built 2026-10-30 03:21:08 UTC, confirming it is the executable from the previous fix. Mean frame time was 13.3 ms, p99 14.9 ms. A contact sheet and the snapshot are under `engine/artifacts/walker67/shake-video/`.
+The maintainer's 2.17 s recording `openbf-shaking-camera.mp4` shows the main cannon moving against the fixed crosshair. The newest black box is BF2 GEO1 seed 165, tick 1981, vehicle 12 seat 1, build `a71b44d04c82+dirty`, built 2026-10-30 03:21:08 UTC, confirming it is the executable from the previous fix. Mean frame time was 13.3 ms, p99 14.9 ms. A contact sheet and the snapshot are under `engine/artifacts/walker67/shake-video/`.
 
 The previous stabilization test only asserted that the camera stayed fixed relative to the vehicle. That omitted how the animated cannon moves in the camera view. The camera now follows the posed turret node's position, while deriving its orientation from the stable mount reference and the gunner's look. The updated Geonosis regression varies walk animation and checks that the camera-to-mount offset remains fixed, the camera does not inherit mount roll, and mouse aim still changes the view. This is a visual change; it does not change simulation or the drawn turret/rider pose.
 
 This corrects the demonstrated relative motion in the prior build. It has not yet been verified by a new human recording or a matched original-game moving-camera capture.
 
-Checks: actual Geonosis controls 3 passed, walker nodes 10 passed, game all-target Clippy passed, release rebuilt and packed. Archive paths and source sizes matched, its executable prefix matched the release, and 79 walker/mission files matched byte-for-byte. After a transient Windows sharing error, replacement succeeded: `E:/Projects/openbf/dist/openbf.exe` is updated and `dist/openbf_data` metadata was unchanged. Receipt: `engine/artifacts/walker67/shake-video/pack-receipt.json`. A fresh manual playtest has not yet verified the result.
+Checks: actual Geonosis controls 3 passed, walker nodes 10 passed, game all-target Clippy passed, release rebuilt and packed. Archive paths and source sizes matched, its executable prefix matched the release, and 79 walker/mission files matched byte-for-byte. After a transient Windows sharing error, replacement succeeded: `dist/openbf.exe` is updated and `dist/openbf_data` metadata was unchanged. Receipt: `engine/artifacts/walker67/shake-video/pack-receipt.json`. A fresh manual playtest has not yet verified the result.
 
 ## AI-driven side-to-side shaking, 2026-10-30
 
 The maintainer reports the preceding build still shakes side-to-side. The newest snapshot is BF2 GEO1 seed 166, tick 908, build `a71b44d04c82+dirty`, built 2026-10-30 03:35:54 UTC: vehicle 12 rear gun seat 2 with AI pilot unit 9. Human mouse/stick inputs are zero while the camera alternates between yaw 3.13 and 3.14 and its x position alternates about 0.06 m every tick. Mean frame time 13.3 ms; p99 15.3 ms. Snapshot/digest: `engine/artifacts/walker67/shake-repro/`.
 
-`walker_jitter` creates the actual Geonosis AT-TE, AI pilot and human rear gunner and records 600 steps. It reproduces the cause: the AI-driven vehicle's body yaw alternates by 0.008667 radians every tick, while the gunner's local look remains fixed. This body yaw feeds the camera, and the camera offset amplifies it. The earlier fixes addressed the animated mount and did not address this oscillation.
+`walker_jitter` (removed in the sprint's code cleanse; in git history) created the actual Geonosis AT-TE, AI pilot and human rear gunner and records 600 steps. It reproduces the cause: the AI-driven vehicle's body yaw alternates by 0.008667 radians every tick, while the gunner's local look remains fixed. This body yaw feeds the camera, and the camera offset amplifies it. The earlier fixes addressed the animated mount and did not address this oscillation.
 
 The visual interpolation layer now filters the drawn rotation of an AI-driven walker while the player rides a gunner seat, using the same filtered rotation for camera, vehicle and posed attachments. Filtering is confined to the temporary drawn pose; it is restored before simulation advances. A new 600-step Geonosis test observes the raw oscillation, checks the displayed rotation's tick changes are under 15% of it, and verifies the simulation hash is restored exactly each frame. In the reproduced last 150 ticks the camera yaw step averages 0.008667 radians before and 0.000465 after, a 94.6% reduction. Driver and on-foot views keep their existing paths. Continuous intentional AI turns are visually eased by the filter, a presentation tradeoff; mouse gunner look remains separate.
 
 Checks: four Geonosis control tests including the AI-pilot case passed, render-blend unit tests passed, and game all-target Clippy passed. The numerical reproduction is not a new manual video or original-game comparison.
 
-The release was rebuilt and packed with the current assets and missions. Verified 24,003 paths/sizes, the executable prefix and 79 walker/mission payloads; the replacement succeeded after a transient Windows sharing error. `E:/Projects/openbf/dist/openbf.exe` was updated; `dist/openbf_data` metadata was unchanged. Receipt: `engine/artifacts/walker67/shake-repro/pack-receipt.json`.
+The release was rebuilt and packed with the current assets and missions. Verified 24,003 paths/sizes, the executable prefix and 79 walker/mission payloads; the replacement succeeded after a transient Windows sharing error. `dist/openbf.exe` was updated; `dist/openbf_data` metadata was unchanged. Receipt: `engine/artifacts/walker67/shake-repro/pack-receipt.json`.
 
 The maintainer confirmed on 2026-10-30 that the installed build works. The heading-filter follow-up was reviewed and rebased onto `55fb5a3` before the requested commit; the filter logic was consolidated and one extra per-frame pose clone removed.

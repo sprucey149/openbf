@@ -23,8 +23,5 @@ The cleanse rotation's `scripts/artifacts tooling` area (LAST_CLEANSE): the loop
 - loopctl `alive("0")` is True, so a pid-less claim dir was held forever.
 - re_check.py crashed from a worktree (the corpora are gitignored). sim_gates.sh lost a missing-hash failure through `| tee`.
 
-## Acceptance
-Every gate PASS with nothing declared; `land.py --self-test` and `loopctl.py self-test` PASS.
-
 ## Notes
 Cards opened: SPL9 (game/src/assets.rs 1,514 lines), GRDC (claude_guard.sh -C bypass, needs the maintainer).

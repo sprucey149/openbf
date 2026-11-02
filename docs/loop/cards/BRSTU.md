@@ -58,33 +58,6 @@ kills on a rule the PS2 does not have. A player at a turret beside a bot's, or f
   the seat path fires a single-shot gun by a held trigger, with no tap; the seat has no `MaxRange` test (a seat
   gun without the key: 120 m on the PS2).
 
-## What to do
-0. Count the slots by the PS2's test: every roster soldier's hand slots (`roster::held_slots`) and every seat
-   gun (`GunWeapon::infinite`), unlimited or counted, single or not, with `HeatPerShot` - a scratch test, minutes.
-   Name the classes the rule touches on the six showcase maps before building (RULES: list the slots first).
-1. `fire_discipline`: for a weapon with unlimited rounds (the slot's reserve, or `RoundsPerClip` under 1) the
-   burst is not counted in shots. It starts when the pause has passed and n shots' heat fits
-   (`ceil(n / ShotsPerSalvo) x ShotsPerSalvo x HeatPerShot < 1 - heat`, the cost capped at 0.99) and ends when
-   `heat >= 1 - one salvo's heat - 0.0001`, or when the bot stops wanting to fire; then the class's pause from
-   that tick. With `HeatPerShot` 0 it lasts as long as the want. The seat path needs the gun's heat
-   (`GunState::weapons`). A counted weapon keeps CLSE4's rule.
-2. The seat's trigger by class: a single-shot seat gun is tapped (`gunner_foot::tap`), `TriggerSingle` defaults
-   by the class root (ON unless a cannon kind) - with the census of step 0 saying what that touches.
-3. Tests, each mutation-checked: a bot at a turret with a heat gun fires until its heat is one shot short of full
-   and never overheats; a gun with no heat fires for as long as it has a target; a counted seat weapon still
-   stops after n; the pause after a heat burst is the class's; mutation GN1 fails.
-4. Sweep (8 seeds x 32 maps) with `tools/mounted.py` beside the standard rows; the fidelity group before landing.
-
-## Acceptance
-- The tests of step 3 (each mutation of the rule fails one; GN1 fails).
-- A mounted bot's firing runs on the port beside the PS2's: the share lasting 1.0 s or more and 2.5 s or more
-  from the port's 4 Hz rows (the PS2: 72 % and 43 %; today's port to be printed first), and no overheat lock-out
-  of a bot's seat gun in 8 seeds of the showcase maps.
-- Mounted shots per mounted-bot-second with a target above main's 0.135 on every vehicle map and mounted kills on
-  the BF1-rule maps at or above the 74.5 per 100 minutes they had before CLSE4; 256 of 256 rounds; deaths with an
-  enemy inside 10 m and contact20 not under main's (per-seed paired); team kills not above main's share. Or the
-  numbers that say why not.
-
 ## Notes
 - 2026-10-13 audit CLSE4 (lane 1). Filed at value 4 (a PARTLY audit's card). The count of n for a seat is older
   than CLSE4 (card VTAI's bursts were 2-5 with a 0.35-0.75 s pause); CLSE4 made it bite. `files:` overlap card

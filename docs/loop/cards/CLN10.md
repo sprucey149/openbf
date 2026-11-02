@@ -21,9 +21,6 @@ analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backl
 `scripts/sim_gates.sh` — gate-script edits have been classifier-denied before (gpu_tests.sh); if denied, leave that half
 for the maintainer in the report.
 
-## Acceptance
-Behaviour-neutral: every gate PASS, the sim hashes unmoved.
-
 ## Note (cleanse CLNR, 2026-10-02) - three more small leftovers, outside the render area
 - `ui/src/hud.rs` `TEAM_COLORS` (used by the egui lines and `spawn.rs`) has no doc: say where the two colours come from, or label them PROVISIONAL.
 - `ui/src/hud_draw.rs` `anchor_shift`: the 1/3 and 2/3 thresholds are tagged `[ours]` only; PROVISIONAL is the ledger keyword.

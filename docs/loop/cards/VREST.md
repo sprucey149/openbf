@@ -31,14 +31,6 @@ springs, and the port's fault there is the hover step's order — card HSTEP.
 - No PS2 frame shows a parked gunship. By the numbers its belly hangs about 1.5 m over the ground on the PS2 (origin
   4.15 m up, mesh floor −2.66 m): take a PCSX2 picture before anyone judges that by eye.
 
-## Acceptance (run these, paste the output)
-1. Unit test: the class reader's LandedHeight for every flyer class of both discs equals §2's table (gunship 4.1502,
-   xwing 1.7786, ywing 1.3286, snowspeeder 0.5, jedifighter 1.1, tiebomber −0.0115, BF2 gunships 3.3434 ...).
-2. The referee: `vrest_census.rs` (10 s) + `join.py --port <out>` — **Flyer: 53 of 54 within 2 cm** (today 21), the
-   54th `laat3` at +0.249 (the foliage rock, FOLGC); the Hover and Walker rows unchanged from the same binary's
-   before-run.
-3. A picture pair at one pose: PS2 | port at a parked X-wing (gear on the ground) and at GEO1's gunship.
-
 ## Why (the RE card's, 2026-09-28)
 VDRAW (2026-09-28) draws every pad vehicle at its sim transform. Hovers settle at SetAltitude (HOVR) and walkers' models start at y 0, but a flyer or treaded's origin is above its model's floor: rep_la_at_gunship ymin -2.66 m, all_fly_kwing -1.96, all_fly_xwing -1.78, all_fly_ywing -1.33, imp_fly_trooptrans -1.38, rep_fly_jedifighter -0.74, cis_tread_hailfire -2.06, cis_hover_mtt -0.82 (GLB bounds, side_bf1). Port picture: engine/artifacts/lead_tmp/vdraw/geo1_v2.png (the LAAT half under the sand).
 
@@ -46,12 +38,6 @@ VDRAW (2026-09-28) draws every pad vehicle at its sim transform. Hovers settle a
 - core::sim::vehicles tick_vehicle_pads: height = ground_under (PROVISIONAL, VPAD).
 - The PS2's landed flyer: re-vehicles §4.2 state 0 (landed), touchdown normal·up > 0.9375 — VFLY transcribes it; the rest height likely comes from the class's landing collision (p_ spheres / LandedHeight-style prop) — find it.
 - Check: a PS2 RAM snapshot of a parked flyer (ps2live.py or a ref/states .p2s) — entity y minus terrain y at its xz.
-
-## Acceptance (the RE card's; its first line is met by the RE doc)
-- The rest height of a parked flyer and a treaded vehicle per the PS2 (RE, [O]) — then a build step in VPAD's spawn (a declared sim move) or fold into VFLY's build card.
-- A port picture at a parked LAAT / X-wing: its gear on the ground.
-**Planner (2026-09-28):** value 3 → 4. VDRAW made the sunk flyers visible on every BF1/BF2 flyer map (GEO1's LAAT half
-under the sand). It may resolve inside VFLY; whichever runs first records the rest height for the other.
 
 ## Note (PXWA, 2026-09-29, lane 2): BF1 rest heights from PS2 RAM (1-unit battle, pads parked)
 `lead_tmp/pxwa/veh/<map>_table.md` (the PS2 entity matrix vs the port's VPAD spawn, all 15 BF1 maps, 213 vehicles; xz within
@@ -63,9 +49,6 @@ snowspeeders +0.495 (4),
 player at a post and every pad parked: `engine/artifacts/pcsx2/ref/states/<map>_walk_cp*_b000.p2s`.
 
 - VHULL (2026-09-29): hulls now follow the sunk pose, so a sunk hull is a low wall. BF1 KAS2 pins a bot against a row of 3 AATs whose hulls sit 2.6 m under the ground (report reports/20260929_2109_card_VHULL.md). Resting the lowest body on the ground fixes both the drawing and the collision.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — parked vehicles sunk into the ground on showcase maps. Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
 
 ## Planner 2026-10-07 08:55 - value 4 -> 5
 M2 has had no landing since 10-03 and four M2 research passes finished this morning. While lane 1 holds the bot files

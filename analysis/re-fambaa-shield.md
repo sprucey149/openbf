@@ -237,7 +237,7 @@ Gungans' friend - at the same two pads.
 - `re_check.py fn` on every cited line (the readers' and the lead's); `absent` receipts [receipt:2bfa41c9] (mission
   scripts), [receipt:87f083b8] (BF1 LVLs naming fambaa), [receipt:80c246cd] (layer 0x800 insert),
   [receipt:2bde4f59] (`RestDir`), [receipt:c25c930a] (ShotDelay: the 5 setters, no data word); `word` 0x53c9f4 = FLT_MAX;
-  the predicate hole 0x294080 disassembled (`scripts/tools/eedis2.py`).
+  the predicate hole 0x294080 disassembled (`scripts/tools/eedis.py`).
 - Live tools (`lead_tmp/famb/tools/`): `ents.py`, `findturret.py`, `turret.py` (states); `sample.py`, `knock.py`,
   `reserve.py`, `cross.py`, `trial.py`, `view.py` (a live session named `famb`); disc tools `pads.py`, `missions.py`,
   `cpvals.py`, `calls.py`, `luiscan.py`, `words.py`.

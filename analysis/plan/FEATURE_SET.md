@@ -1,6 +1,20 @@
-<!-- Moved verbatim from PLAN.md (original lines shown in the pointer table) on 2026-10-08. PLAN.md lines 30-332: LOCKED FEATURE SET (the maintainer's decisions). -->
+## LOCKED FEATURE SET (maintainer's decisions, from 2026-08-30)
 
-## LOCKED FEATURE SET (the maintainer, 2026-08-30)
+Current scope is Instant Action, including flying vehicles, space battles and space maps. Items for other modes, splitscreen
+and LAN are decisions for later work, not current tasks.
+
+### Standing decisions (2026-11-01; these win over any older entry below)
+- **Same game on every source.** The PS2 is the gameplay reference. Every build plays the same inside the playable bounds
+  whatever discs went in, for future multiplayer. Other versions change only the size and look of textures and assets;
+  numbers and shapes the sim reads never change. Public correction tables of gameplay numbers and names are approved,
+  preferring instructions on the player's own files. The repo holds no meshes, art, audio, script bytecode or localized text.
+- **Inputs.** One source per game, identified by content, with unknown formats refused clearly. Any PC input needs a PS2 or Xbox
+  BF2 disc too. From the DLC only Kit Fisto and Asajj Ventress are taken. Where versions overlap, compare them and take the
+  best, or write something better than all of them.
+- **HUD.** BF2's on every map, with the heat ring around the centre reticle.
+- **Grenades.** BF1 maps throw BF1 grenades, by BF1's numbers, with BF2's grenade HUD (`analysis/re-grenades.md`).
+- **Health.** Vehicle and unit health are separate.
+- **Droidekas** sprint only as a ball, on the shared bar.
 
 ### Movement & feel
 - **(the maintainer, 2026-09-03) Aim assist is NEVER off by default, at any difficulty.**
@@ -23,7 +37,7 @@
   vehicle/entity work). The RE for each such difference cites both ELFs.
 - **(the maintainer, 2026-10-27) One gameplay, both games.** The blanket form of the rule above:
   gameplay is the same on every map of both games — weapon damage, class health and
-  stamina, jumping, rolling/dodging, grenade throwing, blast push. Where the discs differ,
+  stamina, jumping, rolling/dodging, blast push. (Grenades are the exception: see Standing decisions.) Where the discs differ,
   one number wins (the better game, per the 2026-10-25 rule) and is recorded next to both
   games' values. Sounds, voices, rosters and per-class ammo counts may still differ.
   Grenades throw on the press, as on the PS2 (the hold-to-charge throw is to be checked
@@ -50,8 +64,8 @@
   Both discs' values and the source tests are recorded in `analysis/sbd-weapons.md`.
   SBD sounds follow the map's source game: BF1 on BF1 maps, BF2 on BF2 maps.
   This presentation choice does not change the shared gameplay numbers.
-- Weapon balance: **fresh rebalance pass**. Baked ODF stats are the starting point, then a
-  tuning pass (documented per weapon, PS2 values kept in data for reference/revert).
+- Weapon balance: a rebalance pass was planned (documented per weapon, PS2 values kept in data
+  for reference/revert). Not current scope: the PS2's numbers stand as the gameplay reference.
 - Awards & medals: **KEEP (BF2 system)** — grind-to-permanent-unlock stays. Settings
   toggle on/off; "all awards this session" cheat.
 - Classes: **hybrid unlock**. In-battle: BF2-style score unlock for special classes, every
@@ -242,8 +256,8 @@
   pack's meshes, if ever used, replace render geometry only, never collision or
   placement. GATE for every classic-plus change: `--sim-hash` and the replays
   byte-identical with the tier switched either way. Creative liberties on
-  textures (units included) are allowed later — personal project, never shared
-  — but only on the visual tier, decided case by case.
+  textures (units included) are allowed later, but only on the visual tier,
+  decided case by case.
   **(the maintainer, 2026-09-03, refinements):** the switch lives in the PAUSE menu's
   graphics settings, flipped mid-level without reloading — so both tiers are
   resident (or hot-swappable) at runtime and a mid-round flip is a pure
@@ -323,14 +337,32 @@ INVENTORY.md for pack-by-pack verdicts/credits). PS2 bake stays gameplay truth
   is MIT.
 
 ### Platform & meta
-- Input: **controller only** (KB/M dropped entirely); PS2 default mapping, full remap;
-  on-screen keyboard for text entry.
-  - REVERSED 2026-10-25 (the maintainer, accepting the public repo's pull request #1): keyboard + mouse is supported as a
+- Input: **controller first**; PS2 default mapping, full remap; on-screen keyboard for text entry.
+  - Keyboard + mouse (2026-10-25, the public repo's pull request #1) is supported as a
     deliberate deviation. Controller play is unchanged. The mouse aims by angle (`PadState::mx`/`my`,
     `core/src/sim/look.rs`), under pointer lock, without aim assist; the bindings are one table in `game/src/kbm.rs`.
     Sensitivity and invert-Y are profile settings.
-- Splitscreen co-op: **KEEP** (roadmap: M5, before PACK; local — one sim, N cameras, N input devices, no netcode; NOT
-  part of the multiplayer hold, the loop builds it without asking — the maintainer, 2026-09-30 evening; card SSCR).
+  - The keyboard + mouse rules (moved from `AGENTS.md`, 2026-11-02):
+    Keyboard and mouse play is a deliberate deviation from the PS2's controller-only input. Controller play, bots and
+    controller-only replays must stay bit-identical. The rules:
+    - The mouse reaches the sim as `PadState::mx`/`my`: angles in `LOOK_UNIT` (1/65536 rad), applied once, on the
+      first tick of a frame. They are not rates: no `max_turn_speed` cap and no stance turn factor (except Tumble,
+      GetUp and Dead), and zoom divides them by its magnification. The pitch limits, the prone clamp and the seat aimer
+      limits still hold. Both fields default to 0 and are left out of logs when 0, so old logs and snapshots load.
+    - `buttons::MOUSE_AIM` marks a pad aimed by the mouse; aim assist never acts on it. Moving the right stick clears it.
+    - Hovers and flyers: the mouse yaw becomes the turn stick, full deflection at
+      `MOUSE_STEER` rad per tick. Flyers use their own flight model and also turn mouse pitch into the pitch stick.
+      Walkers: the mouse aims directly, held inside the walker's yaw limits beside its legs
+      (`walker_aim`); the drawn aim keeps its heading while the legs turn the hull. Seats and building turrets: the look
+      turns by the angle.
+    - Between ticks the view draws the mouse look not yet consumed (`Sim::look_preview`, `render_blend::blend_in_looking`),
+      so the drawn view is where the next tick's aim lands. A controller on foot gets the same (2026-10-29): the view
+      draws the frame's share of the turn the next tick's look step takes under the held stick, the aim assist included,
+      and a FIRE press carries that share (`PadState::fire_lag`) so its tick fires part way into the turn, where it was drawn.
+    - Bindings are one table (`game/src/kbm.rs`, `Bindings::pc_default`). Pointer lock follows the battle: it is taken on a
+      click, and freed on pause, in the shell and spawn screens, on focus loss and on exit.
+- Splitscreen co-op: **KEEP** for later (M5, before PACK; local — one sim, N cameras, N input devices, no netcode; NOT
+  part of the multiplayer hold; card SSCR). Not current scope.
 - LAN: client-server UDP, **cap 16**, bots server-side. Internet matchmaking: DROP. Held until the maintainer says (M7).
 - Saves/profiles: modern format; awards/unlock progression persists per profile.
 

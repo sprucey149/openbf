@@ -21,46 +21,6 @@ alpha: yes
 holds all its class slots, fires the secondary channel with its own trigger and throws a grenade that bounces, comes to
 rest and only then counts its fuse. The port holds one primary (`roster.rs` 309-323) and has no ordnance but the bolt.
 
-## What to build (re-grenades sections in brackets)
-1. **Slots** [§2.1, §2.2]: per class, up to 8 slots {weapon class, ammo in clips (< 1 = infinite), channel}; BF2 = copy the
-   parent then apply PROPs in order (`WEAPONSECTION n`, `WeaponName`, `WeaponAmmo`, `WeaponChannel`, the numbered keys) —
-   UAUD2's section model; BF1 = the numbered keys. The unit holds every slot's weapon state; cur[channel] = the first
-   slot of that channel.
-2. **Channels** [§2.3, §2.4]: FIRE drives channel 0, SECONDARY_FIRE channel 1; one active channel (channel 1 wins; a
-   firing / charging secondary keeps it; the other trigger is swallowed); SWITCH_WEAPON steps channel 0's slot, a new
-   input steps channel 1's (wrap, instant, not while a channel is active). BF2 award slots (`MedalsTypeToUnlock` != -1)
-   stay out of the cycle (no medal bits yet).
-3. **Ammo** [§2.5]: clips; a grenade is a 1-round clip, reload 0.01 s from the reserve; the HUD count = clip + reserve.
-4. **The grenade weapon** [§3]: `TriggerSingle` (fresh press); wind-up `InitialSalvoDelay`; cycle + `ShotDelay`; hidden
-   while firing when `HideOnFire`; launch speed = the ordnance `Velocity`; a human's direction = normalise(aim + (0,
-   `ShotElevate`, 0)); BF1 from the fire point, BF2 from the class's hand offset (PROVISIONAL constant (0, 1.8183,
-   0.7433) m in the soldier's frame until the bake samples the throw clip).
-5. **The sticky** [§4]: gravity = `Gravity` x -9.8 added before the move; one swept ray per tick (0.1 back, +0.2 long),
-   owner ignored; the contact order (water, stick by mask bit, bounce); the bounce constants 0.37 / 1.15 x 1.37 / the
-   0.1 push-off — NOT the disc's `Rebound` / `Friction`; rest after 4 floor bounces (BF1, n.y > 0.7) or 4 bounces
-   slower than 1 m/s (BF2); `LifeSpan` counts from rest / stick / water; then `Sim::explode` with the ordnance's
-   `ExplosionExpire` class, the thrower credited. Draw: PROVISIONAL (the ordnance model if baked, else the bolt box).
-Not in this card: the AI's use (GRAI), mines / detpacks / time bombs (MINE), the recon droid, missile / shell primaries
-(UORD), the `grenade` ordnance BASE (one Gungan class).
-
-## Acceptance (run and paste into the report)
-- **Replay test** (`cargo test -p core sticky_ps2`), the PS2's own rows (`lead_tmp/gren/bf1_throw_a.json` throw 1,
-  `bf2_throw_a.json`; put the few numbers in the test, not the file):
-  - launch: aim (-0.1205, -0.0622, 0.9908) -> velocity (-2.9858, 3.6617, 24.5495) +- 1e-3; BF2 aim (0.0064, 0.1857,
-    -0.9826) -> (0.1513, 9.3390, -23.1896);
-  - bounce: v (-2.986, -14.323, 24.549) on normal (-0.134, 0.991, 0.022) -> (-1.493, 4.644, 4.484) +- 0.02;
-  - BF1 on a flat floor: four counted bounces then rest, explosion `LifeSpan` 0.9 s after rest (+- one tick); BF2: the
-    first bounces with speed^2 after >= 1 do not count, rest after 4 that do, explosion 0.6 s after rest;
-  - a grenade thrown onto a vehicle sticks in BF2 (mask bit 3) and bounces off in BF1 (thermal); a crack grenade sticks
-    in BF1.
-- **Cycle test**: press -> release at 0.30 s (BF1) / the first tick >= 0.51 s (BF2); a second press is ignored until
-  1.70 / 1.81 s; ammo 4 -> 3; a held trigger throws once.
-- **Census** (a test over the baked class db, the numbers from `lead_tmp/gren/slots_b1.txt` / `slots_b2.txt`): every
-  fielded class of every mission RON resolves the disc's slot list (weapon, ammo, channel per slot); paste the count
-  and the 18 numbered-key BF2 classes' rows.
-- Gates: `sim` declared (new unit state is hashed); sweep / arena / goldens unmoved — bots do not throw until GRAI.
-- FEEL_NOTES: the secondary-fire and the two switch bindings (pad + keyboard).
-
 ## Notes
 - Original card (2026-09-28, planner): "the maintainer (INBOX 2026-09-28 (d)): grenades, mines and detpacks have no card. The
   roster models one primary per class (the BF2 SBD lists four weapons); the AI has `Skill::grenade_chance` RESERVED with
@@ -85,20 +45,6 @@ Not in this card: the AI's use (GRAI), mines / detpacks / time bombs (MINE), the
   `lead_tmp/gren/probe1.py <session>` (BF1) / `probe2.py` (BF2) on a SW `pcsx2_session.py` session (no gate lock), then
   `analyze1.py <json>`; states `ref/states/bf1_nab1_walk_cp1_cp2_b000.p2s` (spawn map: K, K) and
   `bf2_hot1_walk_cp1_cp6_b000.p2s`.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — grenades are on the alpha list. Value 3 → 4. Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
-
-- Fable 2026-10-01: when a thrown grenade first touches down, call `Sim::add_hazard(pos, fuse_ticks)` - the bots' reaction to it is built and tested (card HOLD, `core/src/ai/brain.rs` `hazard_flee`).
-
-## Planner note (2026-10-02 09:30)
-Value 4 -> 5. "Grenades and pickups" is a line of M-ALPHA's own checklist (PLAN, Milestones), this card has been
-build-ready since 2026-09-30 with the PS2's rows as its acceptance, and GRAI and MINE wait on it; in two days of
-value-5 cards it was never reached. Nothing else changed. It shares `sim/step.rs` with JARC and SQACK, so the three
-run one at a time. Bigger than one session is expected: finish step 1 (slots + the census test), commit, `resume:`.
-Reverse: `loopctl.py set GREN value=4`.
-
-- SNDC census 2026-10-02 (`analysis/audio-census.md`): the thrown grenade's sounds on the PS2 - `com_weap_throw` / `com_weap_throw_fire` (FireSound), `com_weap_inf_grenade_bounce` / `com_weap_mine_land` (CollisionOtherSound; 36 starts in 105 s on NAB1, 89 on UTA1), then the explosion class's SoundProperty (`com_weap_thermaldetonator_exp` 29 / 42). The port plays none of the three; the explosion and layered-sound half is card WSND, the bounce start belongs with the bounce this card builds (an event for it is enough).
 
 ## Built (2026-10-02, lane 2, branch `gren`; report `reports/20261002_1600_card_GREN.md`)
 Acceptance, run:

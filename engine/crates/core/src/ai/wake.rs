@@ -74,7 +74,7 @@ fn new_in_sight(sim: &Sim, me: UnitHandle, u: &Unit, st: &AiState) -> bool {
     let tier = sim.unit_tier(u);
     let eye = u.muzzle();
     let view = u.aim_frame().0;
-    let mut near = Vec::new();
+    let mut near = crate::ai::team::NearList::new();
     sim.units_within(eye, SIGHT, &mut near);
     near.iter().any(|&i| {
         let (h, o) = (sim.handle(i as usize), &sim.units[i as usize]);

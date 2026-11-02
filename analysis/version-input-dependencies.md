@@ -1,12 +1,14 @@
 # Inputs that a platform-neutral build still needs
 
-Measured 2026-11-01 against the five editions in [version-diff.md](version-diff.md).
+Measured 2026-11-01 against the original five editions in [version-diff.md](version-diff.md).
 This is a source dependency audit, plus a targeted UI/content inventory. It does
 **not** establish equal gameplay from different editions. Code references were
 rechecked against `main` after the PC readers of
 [PR #94](https://github.com/sprucey149/openbf/pull/94) were merged. That merge also
-made the policy stricter than the PR: PC assets now require a PS2 disc of the game
-for gameplay and for BF2's shell and HUD (`scripts/console_input.py`).
+made the policy stricter than the PR at that checkpoint: PS2 supplied gameplay
+and BF2 shell/HUD data. The 2026-11-01 correction path can bake fingerprinted PC BF1
+gameplay from public instruction tables, and its input gate is on, leaving out the maps it cannot
+draw (`analysis/source-gates.md`); the console BF2 dependency remains.
 
 Three different problems must remain separate: an asset name is absent from a
 particular container; an equivalent asset exists in a different encoding or
@@ -88,12 +90,12 @@ unknown checksums, non-MIPS or non-ELF32 little-endian input, truncated headers 
 out-of-range segments. Six focused rejection/address-resolution tests pass.
 
 Neither Xbox nor PC ships these PS2 executable files. Whether corresponding
-XBE/PE tables are identical is **NM**. Today `elf_for` searches ancestors by the
-PS2 executable name; if absent, the bake warns and omits FOLG placement and grass
-atlases, while path props can still bake. **This artifact is not wired into that
-reader yet.** To remove this dependency, supply the versioned table to `bake`
-and compare the resulting foliage instances/atlases with the existing ELF path.
-The same canonical numbers and EE arithmetic must be used for every donor.
+XBE/PE tables are identical is **NM**. `elf_for` still uses the original executable
+when present. A non-PS2 source without that ELF now loads the validated numeric
+artifact through `bake::foliage::numbers`, preserving the same EE arithmetic.
+Focused checks compare the numeric table against both actual PS2 executables.
+The PS2 source path retains its previous behavior, including its warning and
+omission when the ELF is absent, to preserve existing PS2 bake bytes.
 
 ELF-derived rules already transcribed into source are not missing input files:
 BF1 animation fallback rows and bank order (`bake/src/anim_sets/bf1.rs`), BF2's
@@ -160,20 +162,24 @@ entry points; it does not claim to enumerate every historical RE reference.
   whole painting under the base name. Do not label those as absent gameplay
   content or copy an incomplete base image as an equivalent texture.
 
-## PC BF1: inferred, never measured here
+## PC BF1: gameplay census measured; UI inventory remains open
 
-There is no PC BF1 corpus in this measurement. All its counts and platform
-comparisons remain **NM**. PR #94 reads PC BF1 and BF2 installs, and `scripts/pack.py`
-accepts PC BF1 assets only alongside the BF1 PS2 disc. LightVelox's
-[visual-parity notes](pc-import-visual-parity.md) report BF1 Bespin rendering and
-33 PC map bakes. Those are contributor observations; they were **not reproduced** by
-this audit. They support testing PC BF1 through the census tool, not filling its
-measured cells or asserting that its fonts, scripts, collision or animation data
-match PS2.
+The supplied Steam Classic 2004 BF1 install now passes the base-game census with 147 UCFB LVLs, 1,519 class
+records and 44 mission records. Its AddOn folder is excluded before selecting the base LVL tree, so bundled Tatooine
+3 content does not masquerade as retail base data. All PS2–PC and Xbox–PC BF1 gameplay census cells are measured in
+[version-diff.md](version-diff.md). The raw source has material terrain, collision, class and sky-range differences;
+reader support is not gameplay equality. The UI/fonts/localization/movie inventory above has not been repeated for
+PC BF1, so those particular PC BF1 dependencies remain **NM**.
+
+The maintainer's 2026-11-01 rule permits BF1 PC or Xbox without a BF1 PS2 disc only after the complete applicable
+corrections exist. Any PC input still needs a PS2 or Xbox BF2 disc for menus and missing data. Approved public
+corrections cover playable areas. The instruction tables' absolute coordinates, written animation tracks and height
+fills past the line go further and await the maintainer's decision before any public export; a successful bounded
+validation does not confer that permission.
 
 The practical split is: canonical names/numbers can establish the gameplay
 configuration; canonical shapes and animation behavior still require validated
 inputs; textures/models/audio/fonts/movies remain donor or replacement assets.
-The new reference tables do not by themselves enable an Xbox- or PC-primary
+The reference tables alone do not establish a validated Xbox- or PC-primary
 build, and PC-only builds remain outside the product input policy. The options for a
 build with no PS2 disc are in [version-diff.md](version-diff.md).

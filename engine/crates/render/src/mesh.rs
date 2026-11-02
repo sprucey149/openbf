@@ -1,7 +1,6 @@
 //! CPU mesh description + GPU mesh buffers.
 //!
-//! Vertex/buffer layout adapted from an earlier wgpu project's renderer
-//! (`an earlier project's source`: `MeshVertex::desc()`
+//! Vertex/buffer layout adapted from an earlier project's renderer (`MeshVertex::desc()`
 //! and `GpuMesh::upload` via `create_buffer_init`), extended with uv + unorm8 color
 //! (terrain lightmap rides in as vertex color) and per-instance model matrices.
 

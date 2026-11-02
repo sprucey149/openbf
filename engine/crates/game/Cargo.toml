@@ -32,6 +32,10 @@ wgpu.workspace = true
 # The shell movie's frames (card BSHLA): already in the tree through `image`.
 zune-jpeg = "0.5"
 
+[features]
+# Count every heap allocation, for `--bench` runs that report it (`game::alloc_count`).
+alloc-count = []
+
 [[bin]]
 name = "game"
 path = "src/main.rs"

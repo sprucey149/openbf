@@ -135,12 +135,17 @@ impl Sim {
                 continue;
             }
             self.units[i].buffs.tick(dt);
+            let sealed = self.units[i].mount.is_some() && !self.hero_body_active(i);
             let u = &mut self.units[i];
-            if u.buffs.regeneration.0 > 0.0 {
+            // Inside a hull his health is what he boarded with, either way.
+            if !sealed && u.buffs.regeneration.0 > 0.0 {
                 u.health.cur = (u.health.cur + u.buffs.regeneration.1 * dt).min(u.health.max);
             }
             if u.buffs.poison.0 <= 0.0 {
                 u.buffs.poisoned_by = None;
+                continue;
+            }
+            if sealed {
                 continue;
             }
             let attacker = u.buffs.poisoned_by;

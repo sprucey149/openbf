@@ -675,7 +675,7 @@ impl RiderHang {
 }
 
 impl SeatSpec {
-    fn new(kind: SeatKind) -> Self {
+    pub(crate) fn new(kind: SeatKind) -> Self {
         Self {
             kind,
             pilot_type: PilotType::DEFAULT,

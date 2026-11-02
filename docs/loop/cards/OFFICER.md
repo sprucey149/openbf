@@ -21,7 +21,7 @@ Implementation preserves fourteen officer class entries and adds parsed radius/t
 
 Thirteen core tests and two data-gated integration tests are added. The maintainer's explicit Astra instruction says not to validate outputs and to ask the maintainer to validate to save usage; accordingly no tests, Clippy, render/playtest validation or packed-build smoke checks were run. Release compilation and packing are still required by the local playtest-build instruction. This card remains in progress until the tests and original-game comparison are accepted. The checkout does not contain `engine/artifacts/loop/STATUS.md`.
 
-Release compilation succeeded. Packed all 23,923 current asset/mission files into a temporary executable, then replaced `E:/Projects/openbf/dist/openbf.exe` after packing succeeded. `dist/openbf_data` and its profile/playtest files were preserved. No baked inputs changed, so no rebake was required. Logs: `engine/artifacts/lead_tmp/officer-abilities-release.log`, `officer-abilities-pack.log`. The installed output has not been validated.
+Release compilation succeeded. Packed all 23,923 current asset/mission files into a temporary executable, then replaced `dist/openbf.exe` after packing succeeded. `dist/openbf_data` and its profile/playtest files were preserved. No baked inputs changed, so no rebake was required. Logs: `engine/artifacts/lead_tmp/officer-abilities-release.log`, `officer-abilities-pack.log`. The installed output has not been validated.
 
 ## Cleanup and commit request
 

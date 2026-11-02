@@ -148,7 +148,7 @@ def patch_masks(tern):
     for tag, patch in geometry.chunks(pchs):
         if tag == b"PTCH":
             info = geometry.child(patch, b"INFO", b"")
-            masks.append(struct.unpack_from("<H", info)[0] if len(info) >= 14 else 0)
+            masks.append(struct.unpack_from("<H", info)[0] if len(info) >= 8 else 0)
     return masks
 
 
@@ -261,7 +261,7 @@ class Cover:
     def place(self, inst, low, high):
         corners = [[(low, high)[(k >> i) & 1][i] for i in range(3)] for k in range(8)]
         rows, t = inst["rotation"], inst["translation"]
-        world = [[sum(rows[r][c] * p[c] for c in range(3)) + t[r] for r in range(3)] for p in corners]
+        world = [[sum(rows[c][r] * p[c] for c in range(3)) + t[r] for r in range(3)] for p in corners]
         box = tuple(min(p[i] for p in world) for i in range(3)) + tuple(max(p[i] for p in world) for i in range(3))
         if box[3] - box[0] > self.LARGEST or box[5] - box[2] > self.LARGEST:
             return

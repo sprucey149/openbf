@@ -7,7 +7,7 @@ many speeder bikes do the PS2's own bots lose on Endor (card VDROP's acceptance 
 law is replayed tick by tick against PS2 RAM in both games (§10).
 
 **Method.** Each function was read in the B2 decomp and settled in the disassembly
-(`scripts/tools/eedis2.py`; dumps `lead_tmp/hais/dis_*.txt`, `lead_tmp/wai/dis_b2_*.txt`). Four live PCSX2
+(`scripts/tools/eedis.py`; dumps `lead_tmp/hais/dis_*.txt`, `lead_tmp/wai/dis_b2_*.txt`). Four live PCSX2
 runs (software renderer, booted from the Instant Action menus so every hover is sampled from the level's first tick,
 the player left on the team screen: every soldier a bot) logged each hover every game tick with its AI's orders beside
 the sticks (`lead_tmp/hais/hai_sample.py`, BF1 `hai_sample1.py`); `hai_check.py` / `hai_check1.py` replay the

@@ -68,16 +68,6 @@ The PS2 has **no snap**. What keeps a soldier on a ramp:
 - Beyond the spec: `ai::steer::steep_ahead`, the swept floor probe (`ground_under_n(.., from_y)`), `WEDGE_MAX_DY`;
   leak census moved and was declared (push 781 -> 923, tunnel 1441 -> 1641, float 67 -> 193, runs in all -923).
 
-## Acceptance
-- [done] The RE answer with the snap rule and a PCSX2 trace of a soldier on a KAM1 ramp.
-- Built: the probe walk `sthop_probe walk bf2_kam1 -46.708 60.4 287.820 -23.0 269.4 60 1` is grounded on ≥ 20 of the
-  24 ramp ticks and never in Fall (the PS2: 20 of 24; the prototype: 22).
-- Sweep seeds 1–8: rounds finished ≥ main's − 2, maps ≥ 7/8 not below main's, world deaths ≤ 60 % of main's on the
-  same base (prototype: 56 %).
-- Carried from STFAL: KAM1 environment deaths ≤ 5 % of deaths — with STLVL (the prototype alone: 324 of 345 deaths,
-  kills 57 → 21 over 8 seeds, and no-progress at the end rises 74 → 196).
-- Carried from STFAL: BF1 BES1's falls on the PS2 (`ps2live.py`) beside the port's.
-
 ## Not in this card
 - **The sphere foot.** The PS2's feet ride +0.02…+0.22 m on slopes, roll over crests and bridge collision cracks; the
   port's point foot drops one tick through the crack at KAM1 (−44.6, 286.3). A sphere-cast foot is a later

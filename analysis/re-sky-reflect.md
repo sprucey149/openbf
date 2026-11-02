@@ -2,7 +2,7 @@
 # `Reflect` sky shells: the PS2 draws every Reflect shell twice more, mirrored under the eye — the sky under BF1 Kashyyyk's water (card REFL)
 
 Card REFL, lane 2. Corpora: `analysis/SWBFRONT.ELF-decomp.c` (B1), `analysis/SWBFRNT2.ELF-decomp.c` (B2), the two ELFs
-(disassembly `scripts/tools/eedis2.py`), every `.LVL` on both discs, PS2 RAM from kept save states, and
+(disassembly `scripts/tools/eedis.py`), every `.LVL` on both discs, PS2 RAM from kept save states, and
 PCSX2 frames with patched code and data (`engine/artifacts/lead_tmp/re/refl/ps2exp/`). Scratch and every script:
 `engine/artifacts/lead_tmp/re/refl/`. Checks verbatim: `refl/checks.txt`. Verifier: `refl/verify/VERDICTS.md`.
 Tags: [V] read or measured (cited), [D] derived (from what), [H] hypothesis. Load-bearing claims carry [O].

@@ -136,6 +136,7 @@ pub fn bake(lvl: &Path, ingame: &Path, out: &Path, pc: Option<&Path>) -> Result<
     let staging = crate::dlc_output::Staging::new()?;
     let side = staging.path();
     let pc_path = pc.map(|p| p.to_string_lossy());
+    crate::gameplay::exempt_addon(lvl);
     let bytes = std::fs::read(lvl).with_context(|| lvl.display().to_string())?;
     let all = crate::classes::read_classes(
         &bytes,

@@ -45,37 +45,12 @@ built unless he says otherwise.
 - The roll's direction is in the sim for every unit already: `Soldier::vel` against the facing. `soldier_vis.rs`
   (about line 598) has `horiz` and the aim frame for each unit, player and `ai` alike, where it fills `AnimInput`.
 
-## What to build (re-roll-picture.md 7)
-1. `AnimInput::travel`: atan2(horiz . left, horiz . forward), radians, positive = the unit's left; under 0.3 m/s keep
-   the last value. Filled in `soldier_vis.rs` for every unit. No `core` edit.
-2. `Animator::twist`: each update `twist += (target - twist) * (1 - 0.75^(30 dt))` (the PS2's 0.25 an update at 30
-   updates a second; BF2's own form is min(1, 7.5 dt)). Target = `travel` while the body is `Special::Roll`, else 0
-   (card ANIMM later supplies the walking soldier's strafe twist - the same field on the PS2).
-3. After the two players are applied, turn the kept pose's `DummyRoot` about +Y by the twist: BF2 maps SET the
-   rotation; BF1 maps multiply the clip's by twist x the legs' blend weight. Check the sign with a test (a left roll
-   puts the dive's head on the unit's left).
-4. `engine/CRATES.md` lines for the files touched; FEEL_NOTES is not needed (the PS2's numbers).
-
 ## Collisions
 - ANIMM (4, todo) has the same two files and builds the strafe twist on the same field: whichever lands second
   rebases; the note is on its card. No `core/src/soldier.rs` edit here (BF1BK's file).
 - The port has ONE roll for both games' maps (BF2's, any direction within 120 degrees of ahead - the maintainer's locked
   choice), so the BF2 rule (target = the travel angle) is used on BF1 maps too; for a pure side roll it equals BF1's
   90 degrees.
-
-## Acceptance
-- A picture strip per direction (forward / left / right / forward-left; the back roll does not exist on the PS2) for
-  the player AND a bot, on one BF1 and one BF2 map, the port's beside `lead_tmp/rolls/sheet_ps2_*.png` (the port's by
-  `game --headless --walk-replay` with `--capture-series`, or a planted soldier).
-- A measured line per direction: the angle between the roll's travel direction and the body's turn (travel - twist)
-  per update, the port's beside the PS2's rows: within 15 degrees from the roll's 9th update on (PS2: BF2 at most 1.4,
-  BF1 12.1) and within 2 at its end; a forward roll within 1 degree of 0; after the roll the twist is under 10 degrees
-  within 0.5 s.
-- Tests: a roll with the unit's velocity to its left / right / forward-left turns `DummyRoot` to that side by the
-  eased rule, for a player unit and for an `ai` unit through `soldier_vis`'s input; a forward roll does not turn it;
-  mutations (target always 0; the sign flipped; no easing) each fail one.
-- `declares:` empty: visual only, no clip or bake change; if a golden shows a unit mid-roll the gates will say so -
-  name it then.
 
 ## Notes
 - planner 2026-10-12 19:15: filed from the maintainer's note at value 5, alpha, M1 (a look). No deps. Lane 2 takes it by the dry run.

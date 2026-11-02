@@ -304,7 +304,7 @@ fn pull_side_models(
         {
             continue;
         }
-        let bytes = std::fs::read(&path)?;
+        let bytes = crate::gameplay::read(&path)?;
         let Ok(inner) = mungefs::open(&bytes) else {
             continue;
         };

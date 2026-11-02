@@ -25,6 +25,7 @@ pub mod far_lowd;
 pub mod foley;
 pub mod foliage;
 pub mod fpm;
+pub mod gameplay;
 pub mod glb;
 pub mod global_sound;
 pub mod gltf_bin;

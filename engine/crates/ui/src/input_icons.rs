@@ -201,13 +201,20 @@ impl Icons {
     }
 
     /// The pause and settings menus' footer: how those menus are worked.
-    pub fn menu_footer(&self) -> String {
+    /// In battle a paused D-pad and arrows' Left / Right type the cheat code, so
+    /// a value steps by the left stick or A / D (`game::pause::rows_input`).
+    pub fn menu_footer(&self, in_battle: bool) -> String {
+        let adjust = match (self.set, in_battle) {
+            (_, false) => "◀▶",
+            (IconSet::KeyboardMouse, true) => "A / D",
+            (_, true) => "Left stick / A / D",
+        };
         match self.set {
             IconSet::KeyboardMouse => {
-                "Arrows move · Enter select · ◀▶ adjust · Esc resume".to_owned()
+                format!("Arrows move · Enter select · {adjust} adjust · Esc resume")
             }
             set => format!(
-                "D-pad / arrows move · {} / Enter select · ◀▶ adjust · {} / {} / Esc resume",
+                "D-pad / arrows move · {} / Enter select · {adjust} adjust · {} / {} / Esc resume",
                 pad_name(set, PadButton::South),
                 pad_name(set, PadButton::East),
                 pad_name(set, PadButton::Start),
@@ -524,7 +531,11 @@ mod tests {
             let font = egui::FontId::proportional(12.0);
             for set in ALL_SETS {
                 let icons = Icons::of(set);
-                let mut lines = vec![icons.menu_footer(), icons.class_keys()];
+                let mut lines = vec![
+                    icons.menu_footer(false),
+                    icons.menu_footer(true),
+                    icons.class_keys(),
+                ];
                 lines.extend(Prompt::ALL.map(|p| icons.symbol(p).to_owned()));
                 for line in lines {
                     assert!(
@@ -540,14 +551,18 @@ mod tests {
     #[test]
     fn the_default_footer_stands() {
         assert_eq!(
-            Icons::default().menu_footer(),
+            Icons::default().menu_footer(false),
             "D-pad / arrows move · Cross / Enter select · ◀▶ adjust · Circle / Start / Esc resume"
         );
+        assert_eq!(
+            Icons::default().menu_footer(true),
+            "D-pad / arrows move · Cross / Enter select · Left stick / A / D adjust · Circle / Start / Esc resume"
+        );
         assert!(Icons::of(IconSet::XboxOne)
-            .menu_footer()
+            .menu_footer(false)
             .contains("A / Enter"));
         assert!(Icons::of(IconSet::KeyboardMouse)
-            .menu_footer()
+            .menu_footer(false)
             .starts_with("Arrows"));
     }
 }

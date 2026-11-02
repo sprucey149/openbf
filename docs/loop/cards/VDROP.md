@@ -31,38 +31,6 @@ Without the rule no hover is boarded on BF1 HOT1 or BF2 HOT1 (no post's hub is o
   AI FUN_00220528 calls the same steering FUN_002a54d8 with the hover yaw of re-walker-ai.md section 4, which is not the
   port's `steer_to`).
 
-## Acceptance (re-based 2026-10-03 by card HAIS on the PS2's own numbers; the 2026-10-02 text is kept below)
-The PS2 side is measured (`analysis/re-hover-ai.md` §11, one 5.00 min AI battle each, every soldier a bot):
-
-| speeder bikes, Endor | PS2 BF1 END1 | PS2 BF2 END1 | port, seed 42 (main's binary of 2026-10-03 00:33) |
-|---|---|---|---|
-| rides | 54 | 19 | – |
-| lost with a rider | 16 (3.2 a minute) | 4 (0.8 a minute) | – |
-| … by crashing | **15 (3.0 a minute, 0.28 a ride)** | **0** | – |
-| all bike losses (empty ones too) | 18 (3.6 a minute) | 7 (1.4 a minute) | BF1 0 killed / 29 unowned in 419 s (4.2 a minute); BF2 2 / 40 in 376 s (6.4 a minute) |
-
-BF1 Endor's crashes are the PS2's own: its bike does 40 m/s with no strafe and takes (normal speed)² of collision
-damage against 600 health; BF2's does 28 m/s, strafes, and takes 0.1 × (speed − 4)² against 80. The AI law is the same.
-1. Measure the port's side the same way first: crashes with a rider per ride and per minute, BF1 END1 and BF2 END1,
-   8 seeds (the round's `vehicles destroyed` line splits killed / unowned but not rider / empty: add that split).
-2. Build the PS2's hover driver (`re-hover-ai.md` §12: the stick pair or cos(error), turn = u·|u|, R = ForwardSpeed / 2,
-   the goal |v| + 0.2 m ahead on the leg, the obstacle probe, the unstick manoeuvre with BF1's 4 s / BF2's 15 s
-   cooldown). Checks to paste:
-   - a core test: the driver reproduces `lead_tmp/hais/ps2_rows.csv` (347 PS2 rows, every branch, inputs and the four
-     sticks; embed the numbers) to 2e-3;
-   - **BF2 END1**: crashes with a rider at most 1 a round over 8 seeds (PS2: 0 in 5 minutes);
-   - **BF1 END1**: crashes with a rider per ride at or under the PS2's 0.28 and not under half of it — the default
-     taken is to MATCH the PS2 here, not to beat it (Question for the maintainer in `reports/20261003_0245_card_HAIS.md`).
-3. Then pass `nearest = true` for hovers: BF2 HOT1 and BF1 HOT1 show hover boards > 0, and no map's `veh` deaths rise
-   by more than 5 a round; 8 seeds, no map's finish count drops.
-
-### The 2026-10-02 acceptance (superseded: its step 2 asked for fewer BF1 crashes than the PS2 itself has)
-1. Measure first: crashes with a rider per ride on BF1 END1 and BF2 END1, port against one PS2 AI battle.
-2. Build the PS2's hover stick (re-walker-ai.md section 4 'Yaw, hover') or the fix the measurement points at; BF1 END1's
-   unowned speeder-bike losses with a rider fall under 5 a round over 8 seeds.
-3. Then pass `nearest = true` for hovers: BF2 HOT1 and BF1 HOT1 show hover boards > 0, and no map's `veh` deaths rise
-   by more than 5 a round; 8 seeds, no map's finish count drops.
-
 ## HAIS note (2026-10-03, `analysis/re-hover-ai.md`, docs commit b073094, verifier 49 / 0 / 0)
 - The hover AI `FUN_00220528` (BF1 `FUN_001eedc0`) is transcribed and replayed tick by tick against PS2 RAM: BF2
   Endor 22617 of 22621 ticks equal on throttle, strafe and turn, Kashyyyk 15815 of 15832, Geonosis 6491 of 6492; BF1
@@ -76,13 +44,6 @@ damage against 600 health; BF2's does 28 m/s, strafes, and takes 0.1 × (speed �
 - Found on the way, not traced: an EMPTY bike at rest loses a tenth of its health a second until it is gone (both
   games: 60 hp a second of 600, 8 of 80) — the PS2's 2 / 3 empty losses are that, and the port's "unowned" count
   should be read against it.
-
-## Planner note (2026-10-02 04:30)
-`deps: WAI,HAIS`. Step 2 above is the build half of HAIS, which carried it too; HAIS is now the RE alone (the hover
-AI FUN_00220528 transcribed and replayed against live AI hovers, plus the PS2's speeder-bike losses on Endor for step
-1) and this card is the build. The runnable check the vehicle rule asks for: `vehicles destroyed (killed / unowned)`
-per class under ROUND_VERBOSE=1. Baseline on main 22eddb0 (`lead_tmp/lvlf/rb_fix/seeds.md`, 8 seeds): `veh` deaths
-bf1_end1 193, bf2_end1 39. Reverse: `loopctl.py set VDROP deps=WAI`.
 
 ## Planner 2026-10-03 03:35 - value 4 -> 5
 M2 had no value-5 card. This is M2's largest measured gap (BF2 END1: 40 bikes lost a round in the port, the PS2's bots

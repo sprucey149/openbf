@@ -43,17 +43,20 @@ impl Sim {
             dir: aim,
         });
 
-        // The gather: alive soldiers (riders included; BF1's mask has no
-        // vehicles) then alive hulls (BF2). The body point is 1 m above an
-        // entity's origin, the PS2's "body + 1 m".
+        // The gather: alive soldiers (riders in exposed seats included; BF1's
+        // mask has no vehicles) then alive hulls (BF2). The body point is 1 m
+        // above an entity's origin, the PS2's "body + 1 m".
         let mut targets = Vec::new();
         let mut victims = Vec::new();
         for (h, u) in self.alive_units() {
             if h.index as usize == i {
                 continue;
             }
+            let Some(body) = self.hero_body_prims(h.index as usize) else {
+                continue;
+            };
             targets.push(Candidate {
-                pos: u.soldier.pos + Vec3::Y,
+                pos: body.pos + Vec3::Y,
                 team: Some(u.team),
                 vehicle: false,
             });
@@ -217,72 +220,7 @@ mod tests {
     use crate::weapon::{EmitterOrdnance, HealthType, OrdnanceClass, ShotSpec, WeaponClass, DEG};
     use glam::Mat4;
 
-    fn bf1() -> EmitterOrdnance {
-        EmitterOrdnance {
-            cone_length: 30.0,
-            cone_angle: 50.0 * DEG,
-            max_targets: 4,
-            jump_deduction: 75.0,
-            damage_threshold: 75.0,
-            max_jump_distance: 20.0,
-            first_radius: 0.6,
-            push: 0.0,
-            lightning: Some("arccaster_lightning".into()),
-            bolts: 1,
-            affect_friends: true,
-            affect_enemies: true,
-            hit_all: false,
-            radius: 0.0,
-            bf2: false,
-            effect: None,
-            burn: Default::default(),
-        }
-    }
-
-    fn bf2() -> EmitterOrdnance {
-        EmitterOrdnance {
-            cone_length: 30.0,
-            cone_angle: 50.0 * DEG,
-            max_targets: 5,
-            jump_deduction: 5.0,
-            damage_threshold: 300.0,
-            max_jump_distance: 20.0,
-            first_radius: 1.2,
-            push: 3.0,
-            lightning: Some("com_sfx_lightning".into()),
-            bolts: 1,
-            affect_friends: true,
-            affect_enemies: true,
-            hit_all: false,
-            radius: 0.0,
-            bf2: true,
-            effect: None,
-            burn: Default::default(),
-        }
-    }
-
-    /// `com_weap_inf_flamethrower_ord`: Damage 5, MaxDamage 15, hit-all.
-    fn flame() -> EmitterOrdnance {
-        EmitterOrdnance {
-            cone_length: 10.0,
-            cone_angle: 45.0 * DEG,
-            max_targets: 10,
-            jump_deduction: 0.0,
-            damage_threshold: 0.0,
-            max_jump_distance: 0.0,
-            first_radius: 2.0,
-            push: 0.0,
-            lightning: Some("com_sfx_flamethrower".into()),
-            bolts: 1,
-            affect_friends: true,
-            affect_enemies: true,
-            hit_all: true,
-            radius: 0.0,
-            bf2: true,
-            effect: None,
-            burn: Default::default(),
-        }
-    }
+    use crate::emitter::fixtures::{bf1, bf2, flame};
 
     fn sim_with(em: EmitterOrdnance, ord: OrdnanceClass) -> (Sim, usize) {
         let mut s = Sim::empty(7);
@@ -498,6 +436,21 @@ mod tests {
         let unit = shooter(&mut s, Vec3::ZERO);
         s.fire_emitter(unit.index as usize, class, 1.0);
         assert!(emitter_links(&s).is_empty());
+    }
+
+    /// The rider in a hull has no body for the cone to find; the hull does.
+    #[test]
+    fn a_cone_finds_a_rider_only_in_an_exposed_seat() {
+        for exposed in [false, true] {
+            let (mut s, class) = sim_with(bf1(), arc_ord());
+            let unit = shooter(&mut s, Vec3::ZERO);
+            let rider = s
+                .spawn(&UnitSpec::trooper(1, Vec3::new(6.0, 0.0, 0.0)))
+                .unwrap();
+            crate::sim::hero_bodies::seat_fixture(&mut s, rider, exposed);
+            s.fire_emitter(unit.index as usize, class, 1.0);
+            assert_eq!(s.unit(rider).unwrap().health.cur < 300.0, exposed);
+        }
     }
 
     /// BF1 has no team test: an ally in the cone is zapped too.

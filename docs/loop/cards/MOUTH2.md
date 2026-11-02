@@ -81,12 +81,6 @@ the PS2 2 in 51 = 4), hub 46 256 in 468 (55; the PS2 10 in 206 = 5). The card's 
   ask (3) holds for a 1.33 s door, and is open for the Death Star's 5 s blast doors (a wait of up to 2.7 s against a
   3 s stuck window). What is left for DOORS: Tantive IV's 257 and Mustafar's 83 door stalls (not a leaf, untraced).
 
-## Acceptance
-1. Five stalls traced at each site (`blackbox_read --unit` or `tools/trace.py`) beside five PS2 passes of the same legs with their follower nodes: what the port's bot aims at and what the line to it meets; what the PS2's nodes are there.
-2. The cause named per site - the PS2's own rule where the port lacks it (check `analysis/re-soldier-ai.md` 2 first), else ours as a named deviation - behind a switch in one binary, null = main frame for frame.
-3. `tools/site.py` on 8 seeds x 3 min: the door and hub 46 each at most 10 stalls per 100 passes (the PS2: 4 and 5; main 47 and 50); the maintainer's Kamino scene (trails over 6 reversals) not worse; 24 seeds x 32 maps: recycles, lost, floor deaths, rounds finished not worse.
-4. Built and landed, or split into build cards with the numbers.
-
 ## Notes
 - Depends on MOUTH (the walkway rule lands first; both touch `ai/route.rs`). `files:` empty while this is `measure`.
 - The same kit on any other map: `tools/table.py` names the worst leg per map (BF2 Geonosis `9->13`: 97 stalls; BF2 Coruscant `65->64`; Mos Eisley `170->199`); those are not this card - a note for the planner.

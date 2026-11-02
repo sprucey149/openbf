@@ -16,7 +16,3 @@ created: 2026-09-30
 
 ## Why
 Found landing LDET with the new land.py (report reports/20260930_0105_card_LDET.md): `land.py LDET --commit --detach` exited at once with 'MAIN is held by a live session' — MAIN was held by the same lane pid (6991) that asked, and the pre-LDET state.json had no main_holder; the refusal went only to land.log, so `--status` kept saying 'phase 1 finished'. A phase 2 that dies on a legacy state would also read as 'finished by the pre-LDET land.py', not DEAD.
-
-## Acceptance
-- take_main accepts a MAIN already held by the asking pid; a refusal (SystemExit with a message) is written to state.json and `--status` shows it (exit 6); phase 2 drops the legacy flag; --self-test covers the first two.
-- Landed with `land.py LDET2 --detach` and `--commit --detach` (both phases), transcript in the report. Every gate PASS, nothing declared.

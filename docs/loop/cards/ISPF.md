@@ -21,18 +21,6 @@ Card ISPD's table (engine/artifacts/ispd/README.md, 2026-10-20): on this machine
 ## Evidence
 engine/artifacts/ispd/win/bf1_nab1_2880x1920_{idle,nofilter}/frames.csv (OPENBF_GPU_TIMING=1 sections: filter 33.72 ms; knocked out the GPU sum drops 47.5 -> 13.8 ms, every other section within 0.05). filter.rs header: the port's box is centred on each pixel at native resolution (analysis/re-glow.md §3 [O] is the PS2 rule: box2 to 256x224, threshold, blur, add I/128).
 
-## Plan
-1. Read the frame copy through a NON-sRGB view (create the copy texture with view_formats [format.remove_srgb_suffix()]): textureLoad then returns the display bytes the shader now rebuilds with pow - the same values to float rounding.
-2. Make the box separable: pass 1 averages n texels along x into an Rgba16Float (display units) target, pass 2 averages n along y and applies threshold + gain over the frame, as fs_filter does now. 2n loads instead of n^2.
-3. Keep box_side and the threshold rule untouched - the picture is the PS2's rule as today.
-
-## Acceptance
-- The ISPD table's filter section on bf1_nab1 at 2880x1920 (artifacts/ispd/win1.sh bf1_nab1 2880x1920 90 <tag> --cheat god, then table.py): from 33.7 ms to <= 6 ms, and at 1920x1080 from 5.4 to <= 1.5 ms; paste both rows.
-- The BF1 / TAT goldens and parity: unchanged or within rounding (declare and VIEW the ones that move; a move above 1 LSB at a threshold edge is investigated, not accepted).
-- The unit test the_box_is_one_ps2_half_pixel still holds; add one that the two-pass box equals the n x n box on a fixture (a GPU referee in render/tests).
-- planner 2026-10-20 05:20: `alpha: yes` added so the slice that unblocks ISPD (the maintainer's `first: 2`) goes first at value 5;
-  BSHLA and the M3 fives otherwise sorted ahead of it. Undo: `loopctl.py set ISPF alpha=`.
-
 ## Result (build 2026-10-20, branch ispf 39272db + 3e9c732)
 - Built: a row pass (n texels along x, through a non-sRGB view of the copy = display bytes, no pow) into an
   Rgb10a2Unorm target, then the column pass with threshold + gain; both passes take two texels per linear sample

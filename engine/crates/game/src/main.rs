@@ -34,10 +34,6 @@
 //!     --capture-frame <out.png>   headless-render one frame to PNG
 //!     --hud                       headless: paint the HUD onto captures (walk mode)
 //!     --walk-replay <log.ron>     headless walk: step an input log
-//!     --ride-script <out.ron>     headless walk: script a ride (walk to the
-//!                                 nearest boardable vehicle, enter, drive
-//!                                 200 m, exit — game::ride), write its log,
-//!                                 then replay it as --walk-replay does
 //!     SQUAD_TRACE (env)           with --walk-replay: every 100 ticks, the
 //!                                 units under a squad order, their distance
 //!                                 from the player and the order (brief D14)
@@ -55,7 +51,6 @@
 //!                                 (OPENBF_ADAPTER below picks the GPU)
 //!     --bench-frames <n>          frames to time (default 240)
 //!     --bench-ticks <n>           sim ticks to time (default 900)
-//!     --bench-csv <file>          append the bench row to a CSV
 //!     --bench-player-cam          bench from the player's eye, not the overview
 //!     --bench-toggle <what>       `shadows` or `soldier-lod`: time that feature off
 //!                                 and on in alternating blocks of the same frames
@@ -95,19 +90,13 @@
 //!   OPENBF_PLNP_MISSION=0         skip the mission's start-of-round `plnp`
 //!                                 route blocks (default on — queue DR3B)
 //!   OPENBF_WATER_TIME=<seconds>   pin the water's clock (captures)
-//!   OPENBF_WATER_RIPPLE=1         the stand-in flat-water ripple (default off)
-//!   OPENBF_WATER_SPECKLE=0        no speckle layer on the water (default on)
-//!   OPENBF_NO_FILTER=1            no DomeInfo frame filter (default: drawn)
-//!   OPENBF_SPEC=0                 no specular second pass (default on)
-//!   OPENBF_SPEC_MIRROR=0          the consistent specular light instead of
-//!                                 the disc's mirrored one (default on)
-//!   OPENBF_TERRAIN_LIGHTS=0       no BF2 terrain light pass (default on)
-//!   OPENBF_CAMERA_CHUNKS=0        diagnostic: test the chase camera against
-//!                                 every triangle of a blocker, no batch bounds
-//!                                 (default on; same contacts, slower)
 //!   OPENBF_BENCH_DETAIL=<out.json>  with --bench: raw per-tick CPU and
 //!                                 per-frame rows to that file instead of the
-//!                                 summary (--bench-frames 0 = sim only)
+//!                                 summary (--bench-frames 0 = sim only). Each row
+//!                                 has thread CPU, user instructions (pin to the
+//!                                 performance cores) and, in a `--features
+//!                                 alloc-count` build, allocations;
+//!                                 scripts/perf_matrix.py runs it over every map
 //!   OPENBF_FRAMEAB=<state,state..>  with OPENBF_BENCH_DETAIL and
 //!                                 OPENBF_GPU_TIMING=1: draw each world step once
 //!                                 per state and print each state's price
@@ -120,11 +109,6 @@
 //!   OPENBF_BENCH_TARGET_TICKS=<n,n..>  with OPENBF_BENCH_DETAIL: these one-based
 //!                                 ticks run under `targeted_tick`, for callgrind's
 //!                                 --toggle-collect (same work, another symbol)
-//!   OPENBF_BENCH_FOREST_EYE=<any>  with OPENBF_BENCH_DETAIL: look at the
-//!                                 first falling-leaf emitter, not the overview
-//!   OPENBF_TERRAIN_LIGHT_GROUPS=0  with OPENBF_BENCH_DETAIL, diagnostic: the
-//!                                 terrain light pass searches every rectangle,
-//!                                 no group bounds (same pixels, slower)
 //!   OPENBF_PROFILE=<file>         the profile file (default
 //!                                 openbf_data/profile.ron beside the game)
 //!   OPENBF_ADAPTER=igpu|dgpu|<name>  the GPU (default: high performance)
@@ -136,9 +120,10 @@
 //!   OPENBF_NO_VSYNC=1             windowed: present without vsync
 //!   OPENBF_WINDOW_SIZE=WxH        windowed: the first window size in
 //!                                 physical pixels (default 1280x720 logical)
-//!   OPENBF_BF1_WALKER_PACE=1      BF1 walkers on their own gait (vehicle_class::walker)
-//!   OPENBF_FLYER_BOTS=1           bots board and fly flyers on the ground maps
-//!                                 (default off: it changes those maps' hashes)
+//!   OPENBF_FLYER_BOTS=0           bots stay out of flyers, for a run measuring a
+//!                                 map's ground war alone (default: they fly)
+//!   OPENBF_SPACE=1                Instant Action opens the Space Assault rows, which
+//!                                 need a space bake and missions and cannot be won yet
 //!   OPENBF_AUTOPILOT=1            dev mode, windowed: a scripted pad drives the
 //!                                 player (card HITCH; default off)
 //!   OPENBF_QUIT_AT=<seconds>      dev mode, windowed: quit when the battle
@@ -147,13 +132,10 @@
 //!                                 game::frame_profile)
 //!   OPENBF_LOD=0|ps2              far-scene LOWD switch: 0 = off, ps2 = the
 //!                                 PS2's distance (default classic-plus; card LOD)
-//!   OPENBF_NO_BLOOM=<any>         no bloom pass (default: the map's HDR bloom)
 //!   OPENBF_RENDER_BLEND=0         windowed: draw ticks, no blend between them
 //!                                 (default on; game::render_blend)
 //!   OPENBF_MATCHLOG=0             no match log in dev mode (default on;
 //!                                 game::matchlog)
-//!   OPENBF_SHELL_SOUNDS=1         log each shell click and take to stderr
-//!                                 (default off)
 //!   MUSIC_LOG=<team>              headless: log the music manager's changes
 //!                                 for that team; OPENBF_SOUND_ROOT=<dir> reads
 //!                                 a scratch bake's `<map>/sounds`
@@ -212,7 +194,6 @@ struct ViewerArgs {
     classes: Option<PathBuf>,
     mission: Option<PathBuf>,
     walk_replay: Option<PathBuf>,
-    ride_script: Option<PathBuf>,
     capture_series: Option<(u64, PathBuf)>,
     /// `--capture-orbit <frames>,<dir>`: headless, one PNG per frame of a
     /// full circle around the map, framed by the same `overview_camera`
@@ -225,7 +206,6 @@ struct ViewerArgs {
     bench: bool,
     bench_frames: u32,
     bench_ticks: u32,
-    bench_csv: Option<PathBuf>,
     /// `--no-cull`: submit every draw, so culling's effect can be measured on
     /// the same scene rather than argued about.
     no_cull: bool,
@@ -342,7 +322,6 @@ fn main() -> Result<()> {
                 bench: false,
                 bench_frames: 240,
                 bench_ticks: 900,
-                bench_csv: None,
                 no_cull: false,
                 scene_report: false,
                 bench_player_cam: false,
@@ -361,7 +340,6 @@ fn main() -> Result<()> {
                 classes: None,
                 mission: None,
                 walk_replay: None,
-                ride_script: None,
                 capture_series: None,
                 capture_orbit: None,
                 cam: GOLDEN_CAM,
@@ -426,10 +404,6 @@ fn main() -> Result<()> {
                         v.walk_replay =
                             Some(PathBuf::from(it.next().context("--walk-replay <log.ron>")?));
                     }
-                    "--ride-script" => {
-                        v.ride_script =
-                            Some(PathBuf::from(it.next().context("--ride-script <out.ron>")?));
-                    }
                     "--capture-series" => {
                         let arg = it.next().context("--capture-series <n>,<dir>")?;
                         let (n, dir) = arg.split_once(',').context("--capture-series <n>,<dir>")?;
@@ -477,9 +451,6 @@ fn main() -> Result<()> {
                     }
                     "--bench-ticks" => {
                         v.bench_ticks = it.next().context("--bench-ticks <n>")?.parse()?
-                    }
-                    "--bench-csv" => {
-                        v.bench_csv = Some(PathBuf::from(it.next().context("--bench-csv <f>")?))
                     }
                     "--size" => v.size = parse_size(it.next().context("--size WxH")?)?,
                     other => bail!("unknown viewer flag: {other}"),
@@ -574,6 +545,9 @@ struct BattleSetup {
     /// The session's hero rules (`game::heroes::rules`); `None` = Heroes
     /// Off, no hero installed. The CLI takes the retail defaults.
     heroes: Option<core::sim::heroes::HeroRules>,
+    /// The shell's "DLC Heroes" row: the DLC heroes for the map's own
+    /// (`game::heroes::append_with`). The CLI keeps the map's own.
+    dlc_heroes: bool,
 }
 
 /// A path's last component as text.
@@ -620,6 +594,7 @@ impl BattleSetup {
             mission_file: v.mission.as_deref().and_then(file_name),
             player_team: u8::from(own_seat),
             heroes: Some(core::sim::heroes::HeroRules::default()),
+            dlc_heroes: false,
             classes_dir: v.classes.clone().unwrap_or_else(|| {
                 v.map
                     .parent()

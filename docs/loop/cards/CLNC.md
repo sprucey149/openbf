@@ -16,6 +16,3 @@ created: 2026-09-30
 ---
 ## Why
 The cleanse rotation's `core` area (LAST_CLEANSE). Scope: core since the last core cleanse (68b5fbd, 2026-09-17), the critical read on the diff since d748ac2.
-
-## Acceptance
-Every gate PASS with nothing declared (behaviour-neutral: sweep, arena, sim hash, leak unmoved); `size_report.sh --check-map` 0 stale; `size_report.sh --strict` exit 0.

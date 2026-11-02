@@ -34,23 +34,6 @@ in the first minute).
 - Replayed against PS2 RAM: 7504 ticks (spider, AT-ST, tauntaun), both sticks and the yaw step equal on every one.
 - Tools and data: `lead_tmp/wai/` (`wai_sample.py`, `wai_check.py`, `ps2_rows.csv`, `live_*.csv`).
 
-## Acceptance (the build runs these and pastes them into its report)
-1. `cargo test -p core`: the stick function reproduces all 145 rows of `lead_tmp/wai/ps2_rows.csv` to 2e-3 (embed the
-   rows in the test; assets stay out of git — these are numbers, not assets).
-2. Core tests on flat ground, a bot in the pilot seat, the goal 45° to one side at 150 m:
-   - BF2 AT-ST class (bit 0, e08 / e0c = tan 87° / 88°) and a BF1-disc class (no flags, e08 = e0c = 0): the walker turns
-     TOWARD the goal's side, the heading error falls under 1° and the ground speed settles at MaxSpeed's 5.0 ± 0.1 m/s;
-   - BF2 spider class (no bit 0): the error settles in 4-6.5° (PS2 median 5.31°), the throttle toggles between 0 and
-     ≥ 0.996, mean root speed 3.3-3.9 m/s (PS2 3.63).
-3. `round_to_outcome`, one line per map: walkers boarded by bots at 60 s / 180 s and metres driven per piloted walker.
-   PS2 (`reports/20261001_2340_card_WAI.md`): BF2 HOT1 2 of 2 at 60 s, 1 of 2 at 120 s, 2 of 2 at 177 s; BF2 GEO1 both
-   spiders 61-161 s; BF1 NAB1 1-2 of 3 kaadus between 36 and 60 s, 1 of 2 at 90 s, 0 of 1 at 120 s, no kaadu left at
-   150-248 s; BF1 HOT1 every
-   tauntaun at 40-60 s. The port within 1 walker of those at 60 s on BF2 HOT1 and BF1 NAB1. Path: the PS2 AT-ST covered
-   118 m in its best 30 s, a ridden kaadu 445 m. `lead_tmp/audit-kaad/port_bf1_nab1_con*.txt`'s run shows ≥ 1 walker
-   boarding.
-4. 8 seeds: no map's finish count drops; `veh` world deaths per map before and after.
-
 ## Not in this card (re-walker-ai.md §8, §11.5)
 Boost (which game situations set speed mode 3 is [H]); the 7.5 s yield after touching another vehicle (the port has no
 walker-vehicle contact); the 20 % bail-out (card VBAIL, hover and walker together).
@@ -62,9 +45,6 @@ walker-vehicle contact); the 20 % bail-out (card VBAIL, hover and walker togethe
   negative on BF2 classes for |p3|/|p2| < 19: a bot pad that steers like a hover's would turn the walker the wrong way.
 - Acceptance: RE FUN_002a54d8 (what stick values the PS2's AI writes for a walker, and the boost mode 3); build:
   claim_seat admits walker pilots; the driver pad per the RE; the sweep shows walker pilots and their distance.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — bots driving walkers (HOT1, NAB1). Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
 
 ## KAAD audit note (2026-09-30, `reports/20260930_0645_audit_KAAD.md`)
 - **The PS2's bots ride the NAB1 kaadus.** [measured, PS2 RAM]
@@ -78,23 +58,6 @@ walker-vehicle contact); the 20 % bail-out (card VBAIL, hover and walker togethe
 - The kaadu belongs in this card's acceptance beside the AT-ST, tauntaun and spider.
 
 - Planner 2026-09-30 21:45: `deps` + GSKIP. This card's diff lies under `engine/crates/core/`, which the selective gates skip for goldens, yet core feeds golden pixels (the gallery vantage's `ray_down` on COR1 / DEA1 / MYG1 / TAN1 / UTA1 / BF2 KAM1, the heightfield under grass and foliage, the walker pose). GSKIP corrects the rule first; `land.py` has no flag to force every group.
-
-## Planner note (2026-10-01 22:00) - value 4 -> 5, and the check the build must run
-- **Why 5:** M2 had no value-5 card, and the maintainer's seven `first:` cards (all M3, all on `ai/brain.rs`, so one at a time)
-  leave the other lane free. Of the open M2 cards this is the one a player sees first: on both Hoths (BF2 HOT1 is a
-  showcase map) and on NAB1 every walker stands empty unless the player takes it, while the PS2's bots ride them
-  (KAAD audit above, PS2 RAM). `files:` do not touch the `first:` cards' files.
-- **The runnable check (the vehicle referee, the maintainer 2026-09-30: audits found a problem in 6 of 7 vehicle landings).**
-  Before the build lands, paste into the report:
-  1. PS2 side, measured in the RE session: on BF1 NAB1 and one Hoth, how many walkers carry an AI pilot at 60 s and at
-     180 s of an AI battle (`lead_tmp/sqveh/sv_live.py` reads the seats; `ps2-ai-battle-sampler` memory for BF2), and
-     one piloted walker's path (distance over 30 s, the sign of its turn toward a goal off to one side).
-  2. Port side: a `round_to_outcome` line per map - walkers boarded by AI at 60 s / 180 s, distance per piloted
-     walker - within 1 walker of the PS2's count on those two maps, and a core unit test: a bot pad with the goal 45
-     degrees to the left turns the walker LEFT on a BF2 class and a BF1 class (the e08 / e0c sign trap above).
-  3. 8 seeds: no map's finish count drops; `veh` world deaths per map before and after.
-  If the RE session cannot get the PS2 numbers in 1, the card is `todo` with `resume:` naming what blocked it - not
-  `parked` (the picker reads `parked` as a branch waiting to land; card LRES).
 
 ## Result (2026-10-02, landed bbdd58c; report `reports/20261002_0335_card_WAI.md`)
 - Acceptance 1 PASS (145 / 145 rows, worst 3.45e-6). 2 PASS (AT-ST and BF1 class 0.000 deg at 5.000 m/s; spider median

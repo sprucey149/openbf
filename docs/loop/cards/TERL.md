@@ -45,17 +45,6 @@ FEL1 / END1 / KAS2's ground. This is queue LITE's §5 (`analysis/re-model-lighti
 - **[D]** The port with the terrain lit by its lightmap alone: 242 -> 229 (PS2 214), clipping 33 % -> 11 % (PS2 0.2 %)
   (`lead_tmp/re/lite/sheets/lite_bf2_hot1_v2.png`).
 
-## Acceptance
-**RE (max effort, the discipline).**
-1. The terrain's VU program. Which per-vertex colour it uses (PCHS COLR 5-bit vs LUMI), its scale (does the HDR 0.5 reach
-   it?), and the ~7 % residual at HOT1.
-2. What the +0x94 light is.
-3. BF1's terrain path (BF1 HOT1 clips 40-60 % in the port, 0 % on the PS2; its authored ambient is white).
-4. A BF1 patched-state pair to settle 3.
-
-**Build.** The terrain lit as the PS2 does. The declared moves are every map golden with terrain (`rebake=maps` if the
-lightmap encoding changes).
-
 ## Notes
 - FEL1's ground boxes are foliage-covered (F22). The foliage responds to the non-Static sun and to the ambient, and it is
   FOLG's path.

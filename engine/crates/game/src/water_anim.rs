@@ -117,11 +117,9 @@
 //!   ocean-mode `DAT_00564900` (the field's minimum height, §2 539732–539744)
 //!   does to a tile's placement, is not in `analysis/`. The surface here is
 //!   `LAYR.height + h(x, t)`.
-//! - **The per-vertex ripple on flat water** ([`ripple`], behind
-//!   `OPENBF_WATER_RIPPLE=1`, default OFF). The PS2 gives every flat-water
-//!   vertex a random phase nibble and animates it on VU1 (§3 [V words, D
-//!   use]); the microcode is unread (HOLD FOR FABLE 21), so this stand-in
-//!   borrows the bob's height and rate and is not tuned to look right.
+//! - **The per-vertex ripple on flat water** is not drawn. The PS2 gives every
+//!   flat-water vertex a random phase nibble and animates it on VU1 (§3 [V
+//!   words, D use]); the microcode is unread (HOLD FOR FABLE 21).
 //! - **The foam's start — a deliberate deviation.** The disc clears ONE byte
 //!   of its `(N+1)·(M+1)`-byte map (`FUN_004266d8(map, 0, 1)` 539465; ELF
 //!   `004776ec: addiu a2,zero,1`), so the rest starts as heap garbage and
@@ -196,17 +194,6 @@ pub fn flat_lift(oscillates: bool, t: f32) -> f32 {
     }
 }
 
-/// PROVISIONAL (module header): the stand-in ripple's height — the bob's
-/// own, not tuned, and off unless `OPENBF_WATER_RIPPLE=1`.
-pub const RIPPLE_AMPLITUDE: f32 = BOB_AMPLITUDE;
-
-/// PROVISIONAL stand-in for the PS2's per-vertex phase nibble: vertex `i`'s
-/// lift at `t`, its phase one of 16 steps picked by a hash of its index.
-pub fn ripple(i: usize, t: f32) -> f32 {
-    let nibble = (splitmix64(i as u64) & 0xf) as f32;
-    RIPPLE_AMPLITUDE * (BOB_RATE * t + TAU * nibble / 16.0).sin()
-}
-
 /// The water's clock: `OPENBF_WATER_TIME` when it is set, else
 /// `renderer_time`.
 pub fn clock(renderer_time: f64) -> f64 {
@@ -225,12 +212,6 @@ fn pinned_time() -> Option<f64> {
             }
         }
     })
-}
-
-/// `OPENBF_WATER_RIPPLE=1` turns the PROVISIONAL ripple on. Default OFF.
-pub fn ripple_enabled() -> bool {
-    static ON: OnceLock<bool> = OnceLock::new();
-    *ON.get_or_init(|| std::env::var("OPENBF_WATER_RIPPLE").is_ok_and(|v| v == "1"))
 }
 
 /// A complex number — as much of one as the ocean needs.
@@ -825,12 +806,10 @@ enum Kind {
     /// An ocean this module could not lay out; it keeps its still mesh.
     Still,
     /// Flat water: the bob (where it [`oscillates`]) on each draw's model
-    /// matrix (`base` is the matrix `upload_scene` gave it) and, when
-    /// enabled, the ripple.
+    /// matrix (`base` is the matrix `upload_scene` gave it).
     Flat {
         base: Vec<Mat4>,
         bobs: bool,
-        ripple: Option<Box<Ripple>>,
     },
     Ocean(Box<OceanDraw>),
 }
@@ -884,10 +863,6 @@ impl WaterMotion {
             _ => Kind::Flat {
                 base: draws[range.clone()].iter().map(|d| d.model).collect(),
                 bobs: oscillates(cfg),
-                ripple: ripple_enabled()
-                    .then(|| Ripple::new(mesh))
-                    .flatten()
-                    .map(Box::new),
             },
         };
         WaterMotion { range, kind }
@@ -906,10 +881,7 @@ impl WaterMotion {
     ) -> Result<()> {
         match &mut self.kind {
             Kind::Still => {}
-            Kind::Flat { base, bobs, ripple } => {
-                if let Some(rp) = ripple {
-                    rp.step(r, &mut draws[self.range.clone()], t as f32)?;
-                }
+            Kind::Flat { base, bobs } => {
                 let lift = Mat4::from_translation(Vec3::new(0.0, flat_lift(*bobs, t as f32), 0.0));
                 for (d, m) in draws[self.range.clone()].iter_mut().zip(base.iter()) {
                     d.model = lift * *m;
@@ -1099,63 +1071,6 @@ impl OceanDraw {
                 .map(|d| d.texture != base_texture)
                 .collect(),
         })
-    }
-}
-
-/// The ripple's own copy of the flat water mesh.
-struct Ripple {
-    positions: Vec<[f32; 3]>,
-    normals: Vec<[f32; 3]>,
-    uvs: Vec<[f32; 2]>,
-    colors: Vec<[u8; 4]>,
-    indices: Vec<u32>,
-    mesh: Option<MeshHandle>,
-}
-
-impl Ripple {
-    /// `None` (and a line saying so) for a water mesh of more than one
-    /// submesh, which the bake never writes.
-    fn new(mesh: &CpuMesh) -> Option<Ripple> {
-        if mesh.submeshes.len() != 1 {
-            eprintln!(
-                "water: no ripple — the water mesh has {} submeshes",
-                mesh.submeshes.len()
-            );
-            return None;
-        }
-        Some(Ripple {
-            positions: mesh.positions.clone(),
-            normals: mesh.normals.clone(),
-            uvs: mesh.uvs.clone(),
-            colors: mesh.colors.clone(),
-            indices: mesh.indices.clone(),
-            mesh: None,
-        })
-    }
-
-    fn step(&mut self, r: &mut Renderer, draws: &mut [DrawCmd], t: f32) -> Result<()> {
-        let verts: Vec<Vertex> = self
-            .positions
-            .iter()
-            .enumerate()
-            .map(|(i, p)| Vertex {
-                position: [p[0], p[1] + ripple(i, t), p[2]],
-                normal: self.normals[i],
-                uv: self.uvs[i],
-                color: self.colors.get(i).copied().unwrap_or([255; 4]),
-            })
-            .collect();
-        match self.mesh {
-            Some(h) => r.update_vertices(h, &verts)?,
-            None => {
-                let h = upload_dynamic(r, &verts, &self.indices)?;
-                for d in draws.iter_mut() {
-                    d.mesh = h;
-                }
-                self.mesh = Some(h);
-            }
-        }
-        Ok(())
     }
 }
 

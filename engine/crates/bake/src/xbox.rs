@@ -12,7 +12,7 @@
 //!
 //! Either way its gameplay sections are hashed and compared with [`PRINTS`], the
 //! PS2's hashes shipped in the repo (hashes of names and numbers, no meshes, art
-//! or audio). A map that differs in any section, or any map when a side's class
+//! or audio), with its foliage as plain counts. A map that differs in any section, or any map when a side's class
 //! numbers differ, is **refused** unless `--allow-gameplay-drift`, because a
 //! numbers table cannot rebuild a differing collision mesh or heightfield. So a
 //! tree handed to `--ps2` has to earn the name: a PC tree or a different revision
@@ -189,12 +189,14 @@ fn hash_ron<T: Serialize>(value: &T) -> Result<u64> {
 /// `game::stations` measures, both of which also hold what only draws.
 pub fn print_map(lvl: &str, out: &Path, m: &Manifest) -> Result<BTreeMap<String, u64>> {
     let mut sections = BTreeMap::new();
-    let buf = std::fs::read(lvl).with_context(|| lvl.to_string())?;
+    // Print what the bake read: on a corrected source that is not the raw file.
+    let buf = crate::gameplay::read(lvl).with_context(|| lvl.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{lvl}: {e}"))?;
     let mut heights = FNV64_BASIS;
     for c in mungefs::chunks(inner).flatten() {
         if &c.tag == b"tern" && !mungefs::terrain::Terrain::is_stub(&c) {
-            let t = mungefs::terrain::Terrain::parse(&c).map_err(|e| anyhow!("{lvl}: {e}"))?;
+            let mut t = mungefs::terrain::Terrain::parse(&c).map_err(|e| anyhow!("{lvl}: {e}"))?;
+            crate::gameplay::apply_terrain(lvl, &mut t)?;
             fnv64(&mut heights, &t.info.grid_unit.to_le_bytes());
             fnv64(&mut heights, &t.info.height_scale.to_le_bytes());
             fnv64(&mut heights, &t.info.grid_size.to_le_bytes());
@@ -236,11 +238,129 @@ pub fn print_map(lvl: &str, out: &Path, m: &Manifest) -> Result<BTreeMap<String,
     }
     sections.insert("nav".to_owned(), nav);
 
+    sections.extend(foliage_sections(m));
+
     let mut classes = FNV64_BASIS;
     let map_classes = out.join(crate::map::MAP_CLASSES_FILE);
     fnv64(&mut classes, &std::fs::read(&map_classes)?);
     sections.insert("classes".to_owned(), classes);
     Ok(sections)
+}
+
+/// A map's foliage as plain counts, not a hash: it only draws, but a build that lost
+/// it is plainly not the same map (no ELF once cost every disc build its 94,486
+/// instances, and a control bake from the same extraction lost them too). Counts, so
+/// a check can name what went missing, and so libm's last bit on another OS cannot
+/// fail a good build.
+fn foliage_sections(m: &Manifest) -> [(String, u64); 3] {
+    let (count, props, grass) = m
+        .foliage
+        .as_ref()
+        .map_or((0, 0, 0), |f| (f.count, f.path_props.len(), f.grass.len()));
+    [
+        (SECTION_INSTANCES.to_owned(), u64::from(count)),
+        (SECTION_PATH_PROPS.to_owned(), props as u64),
+        (SECTION_GRASS.to_owned(), grass as u64),
+    ]
+}
+
+const SECTION_INSTANCES: &str = "foliage_instances";
+const SECTION_PATH_PROPS: &str = "foliage_path_props";
+const SECTION_GRASS: &str = "foliage_grass";
+
+/// What [`check_foliage`] found across a baked tree.
+#[derive(Debug, Default, PartialEq)]
+pub struct FoliageReport {
+    pub maps: usize,
+    pub instances: u64,
+    pub grass: u64,
+    /// Maps missing a kind of foliage the PS2's print holds.
+    pub lost: Vec<String>,
+    /// The same, on a game whose gameplay is not the PS2's, which owes no such counts.
+    pub excused: Vec<String>,
+    /// Maps holding every kind, in other amounts.
+    pub differ: Vec<String>,
+}
+
+impl FoliageReport {
+    pub fn summary(&self) -> String {
+        format!(
+            "foliage: {} instances and {} grass classes on {} maps, {} lost, {} differing",
+            self.instances,
+            self.grass,
+            self.maps,
+            self.lost.len() + self.excused.len(),
+            self.differ.len()
+        )
+    }
+}
+
+/// Compare one map's counts with the PS2's print, adding to `report`.
+fn check_map_foliage(
+    key: &str,
+    got: &[(String, u64); 3],
+    want: &BTreeMap<String, u64>,
+    excused: bool,
+    report: &mut FoliageReport,
+) {
+    let describe = |rows: &[&(String, u64)]| {
+        rows.iter()
+            .map(|(name, have)| format!("{name} {have} of {}", want.get(name).unwrap_or(&0)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let wanted = |name: &String| want.get(name).copied().unwrap_or(0);
+    let lost: Vec<_> = got
+        .iter()
+        .filter(|(name, have)| *have == 0 && wanted(name) > 0)
+        .collect();
+    let differ: Vec<_> = got
+        .iter()
+        .filter(|(name, have)| *have != wanted(name))
+        .collect();
+    if !lost.is_empty() {
+        let line = format!("{key}: {}", describe(&lost));
+        if excused {
+            report.excused.push(line);
+        } else {
+            report.lost.push(line);
+        }
+    } else if !differ.is_empty() {
+        report.differ.push(format!("{key}: {}", describe(&differ)));
+    }
+}
+
+/// Every baked map's foliage against the PS2's print. A map not in this tree is not
+/// a fault: a partial bake says so itself. `bake xbox` holds its maps to the same
+/// counts through [`print_map`]; this reaches a tree any bake wrote, including a
+/// cached one, and needs no second bake to compare with: two bakes of one bad
+/// extraction agree with each other. `excuse` names the games (`bf1`, `bf2`) that do
+/// not bake from a PS2 tree: what they lost is reported apart, and fails nothing.
+pub fn check_foliage(tree: &Path, excuse: &[String]) -> Result<FoliageReport> {
+    let prints = shipped_prints()?;
+    let mut report = FoliageReport::default();
+    let excused = |game: &str| excuse.iter().any(|g| g == game);
+    let maps = BF1_MAPS
+        .iter()
+        .map(|m| (m, "bf1"))
+        .chain(BF2_MAPS.iter().map(|m| (m, "bf2")));
+    for ((key, _), game) in maps {
+        let path = tree.join(key).join("manifest.ron");
+        if !path.is_file() {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).with_context(|| path.display().to_string())?;
+        let m: Manifest = ron::from_str(&text).with_context(|| path.display().to_string())?;
+        let got = foliage_sections(&m);
+        report.maps += 1;
+        report.instances += got[0].1;
+        report.grass += got[2].1;
+        let want = prints
+            .get(*key)
+            .ok_or_else(|| anyhow!("{key}: no PS2 print"))?;
+        check_map_foliage(key, &got, want, excused(game), &mut report);
+    }
+    Ok(report)
 }
 
 /// The PS2's prints, as shipped.
@@ -528,6 +648,52 @@ mod tests {
         assert_eq!(drift(&got, &want), ["b", "c", "d"]);
     }
 
+    fn counts(instances: u64, props: u64, grass: u64) -> [(String, u64); 3] {
+        [
+            (SECTION_INSTANCES.to_owned(), instances),
+            (SECTION_PATH_PROPS.to_owned(), props),
+            (SECTION_GRASS.to_owned(), grass),
+        ]
+    }
+
+    /// The shape of the disc-build bug: path props survive, placement and grass do
+    /// not, and two such bakes agree with each other. Only the print can tell.
+    #[test]
+    fn a_map_that_lost_its_foliage_is_named() {
+        let want: BTreeMap<_, _> = counts(41725, 12, 2).into_iter().collect();
+        let mut report = FoliageReport::default();
+        check_map_foliage("bf1_nab1", &counts(0, 12, 0), &want, false, &mut report);
+        assert_eq!(
+            report.lost,
+            ["bf1_nab1: foliage_instances 0 of 41725, foliage_grass 0 of 2"]
+        );
+        assert!(report.differ.is_empty());
+    }
+
+    /// One game from an Xbox disc excuses that game alone: the PS2 game beside it is
+    /// still held to its counts.
+    #[test]
+    fn an_excused_game_is_reported_apart_and_the_other_still_fails() {
+        let want: BTreeMap<_, _> = counts(41725, 12, 2).into_iter().collect();
+        let mut report = FoliageReport::default();
+        check_map_foliage("bf2_kas2", &counts(0, 12, 0), &want, true, &mut report);
+        assert!(report.lost.is_empty());
+        assert_eq!(report.excused.len(), 1);
+        check_map_foliage("bf1_nab1", &counts(0, 12, 0), &want, false, &mut report);
+        assert_eq!(report.lost.len(), 1);
+        assert!(report.summary().contains("2 lost"), "{}", report.summary());
+    }
+
+    #[test]
+    fn a_map_without_foliage_on_the_ps2_loses_nothing() {
+        let want: BTreeMap<_, _> = counts(0, 0, 0).into_iter().collect();
+        let mut report = FoliageReport::default();
+        check_map_foliage("tat1", &counts(0, 0, 0), &want, false, &mut report);
+        check_map_foliage("tat2", &counts(5, 0, 0), &want, false, &mut report);
+        assert!(report.lost.is_empty());
+        assert_eq!(report.differ, ["tat2: foliage_instances 5 of 0"]);
+    }
+
     #[test]
     fn the_shipped_prints_cover_every_map() {
         let prints = shipped_prints().unwrap();
@@ -540,6 +706,9 @@ mod tests {
                 "classes",
                 "water",
                 "game",
+                SECTION_INSTANCES,
+                SECTION_PATH_PROPS,
+                SECTION_GRASS,
             ] {
                 assert!(sections.contains_key(name), "{key}: {name}");
             }
@@ -616,20 +785,8 @@ mod tests {
         let m = &alone.maps[0];
         assert_eq!(m.gameplay, "xbox");
         assert!(m.baked);
-        assert!(!m.drift.is_empty(), "the discs differ here");
-
-        let refused = bake_xbox(&Options {
-            source: root.join("xbox_bf2"),
-            out: out.clone(),
-            ps2: None,
-            only: Some(vec!["bf2_geo1".to_owned()]),
-            allow_gameplay_drift: false,
-        });
-        assert!(refused.is_err());
-        assert!(!out.join("bf2_geo1").exists(), "a refused map is removed");
-        let report: Report =
-            ron::from_str(&std::fs::read_to_string(out.join(REPORT_FILE)).unwrap()).unwrap();
-        assert!(!report.maps[0].baked);
+        // The fingerprinted correction set brings this disc's map to the PS2's prints.
+        assert!(m.drift.is_empty(), "{:?}", m.drift);
         std::fs::remove_dir_all(&out).ok();
     }
 

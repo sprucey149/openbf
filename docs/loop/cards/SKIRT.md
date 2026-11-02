@@ -48,20 +48,6 @@ PS2's 14 climbs (the band up to about 1.2 m high) and misses 8. And the bots are
 the 228 stalls push at the band from a stand at its foot, 60 slide along it because `steer::steep_ahead` calls it a
 wall, 38 are bots on the dais walking at a point through its rail (card DAIS, not this card).
 
-## What to build (re-soldier-ground 7.6; prototyped in `lead_tmp/skirt/scratch.patch`, switches in its README)
-Each rule behind an env switch in ONE binary first, null = parent byte for byte, then stack and clean (RULES):
-1. `Soldier::resolve_ground`, the PS2's three rules, both games (BF1 with its own constants; no BF1 trace, PROVISIONAL):
-   (a) **the flattest normal**: on the tick a floor steeper than last tick's N is first met, N stays the old floor's
-   (BF2 B2:156159-156166; the PS2 gets that update on 8 of 18 run-ups, the port takes it every time - a named
-   deviation, FEEL_NOTES); (b) **the dead zone**: |v.x|, |v.z| under 0.1 -> 0 after a floor contact
-   (B2:156366-156373); (c) **the overlap**: a soldier field, 0.02 n.y on touch-down, x n.y^2 a tick, less the tick's
-   move off the face; with none left and a move off the face over 1e-5 m the contact is lost for that tick - only on
-   floors under the climb limit (B2:156394-156397 + the one-sided removal B2:156327-156341). Hash both new fields.
-2. `collision::walls`: the ledge rule asked at the floor under the axis (MOUTH2's scratch bit 32).
-3. `ai::steer::steep_ahead`: a too-steep band with a floor that holds above it, within the rise the soldier's speed
-   carries (the body takes 1.5 m of 48 degrees at 7 m/s head on), is no wall. The prototype's `hold_above` (1.5 m up,
-   2.4 m on) opens too little: 31 `steep slide` stalls left of 60. No probe at all is NOT acceptable (below).
-
 ## Evidence (`engine/artifacts/lead_tmp/skirt/`, README.md)
 - The 24 walks, PS2 beside port: `tools/table.py k0 k3 k8 k11 k11m32` - main makes 6 of the PS2's 14 climbs; rules
   (b)+(c) 12; rule (a) alone 14; all three 14 (and 4-5 climbs the PS2 does not make, all from a stand near the foot).
@@ -70,25 +56,6 @@ Each rule behind an env switch in ONE binary first, null = parent byte for byte,
   ledge + no probe **20 / 378 / 0**; with `hold_above` instead of no probe 29-35. The body rules alone, probe on: 49-53.
 - No probe at all: tat1 + bf1_geo1 + bf2_geo1, 8 seeds, recycles 9 -> 26 (BF1 Geonosis 0 -> 10); `hold_above`: 12.
 - The riser line `r179` (x -17.9): main's feet stop at 60.65, with the ledge bit 61.80-61.83, the PS2 61.84.
-
-## Acceptance (run each, paste the output)
-1. **The walk table** (`lead_tmp/skirt/tools/walks.sh` + `table.py`, the branch's `skirt_walk` built as a scratch
-   example): all 14 of the PS2's climbs (main 6), none of `r182` / `obl` / `bot41` / `nhalf` / `footN`; on the 13
-   run-up climbs the port's time is 0.5-1.25 x the PS2's; `r179`'s highest feet 61.7-61.9 (the PS2 61.84, main 60.65).
-2. **Tests on the baked Kamino collision** (committed; fail on main): from (-15.0, 112.6) heading -Z the soldier's
-   feet pass y 62.0 within 1.2 s of stick (the PS2 0.97 s, main never: a 1.48 m band); from (-15.0, 110.5) not within
-   2 s (the PS2 never). Unit tests, each with its mutation: one tick of the old N on meeting a steeper floor and
-   6.29 +- 0.05 m/s onto a 0.6665 face from 7.0 head on; the dead zone; the floor lost on the tick after the
-   horizontal speed falls under 0.1 with v.y positive on a floor under the limit, and never on one at or over it;
-   BF1's constants through the same code.
-3. **Hub 46** (`skirt/tools/snapv2.sh`-style, `mouth/tools/site.py`, 8 seeds x 3 min): at most 25 stalls per 100
-   passes (main 52, prototype 20, the PS2 5), `steep slide` 0 (main 60) and `open fwd` at the foot at most 25 (main
-   94); the maintainer's scene (`skirt/tools/scene.sh`) at most 3 trails over 6 reversals (main 3, prototype 0). The rest of
-   the way to the PS2's 5 is card DAIS.
-4. **All maps**, 24 seeds x 32: rounds finished, recycles, floor deaths and lost not worse; tat1, bf1_geo1 and
-   bf2_geo1 recycles not above main's (9 in 8 seeds) - TAT1 (-137, 95) and Geonosis's buttress are what the probe
-   was built for. `mouth/tools/table.py` over all 32 maps before / after (the ledge rule is on every map).
-5. The leak census with no new site; the sim hash moves (declared).
 
 ## Notes
 - The mid-climb loss of the floor (the sign of a 1e-3 m/s residue decides it, re-soldier-ground 7.2) and the
@@ -129,20 +96,6 @@ the skirt; the port's cannot** - bot or player. For the player it is an invisibl
      and gets over the skirt's corner; head on he rises 0.94 of 1.3 m and slides back (x 0.1 hold).
 - Hub 46's stalls by variant: main 256, door rule 216-228, + bit 32 193, + bits 32 and 2 142 (35 per 100). The maintainer's
   scene, trails over 6 reversals: 5 / 3-5 / 6 / 10 of about 410 - no variant cures it, the probe off makes it worse.
-
-## Acceptance
-1. **The PS2's rule, read live**: BF2 Kamino, 0 AI (the Conquest option), the player walked up the north skirt at
-   x -17.5 from a stand 2 m off, every update sampled (`lead_tmp/sthop/ramp_bf2.py`: feet S+0x150, v S+0x550, N
-   S+0x4b0, flags S+0xa74) - N.y on the band, the speed, grounded or not; the port's soldier on the same walk tick
-   by tick beside it. Then the decomp for what the trace shows (RE discipline, one verifier).
-2. The cause named and built: the port's soldier - player and bot - walks up that band from a stand 2 m off and is at
-   y 62.0 within +-20 % of the PS2's time (1.0 s), a test on the baked map's own collision; the ledge rule's height
-   (fault 2) with a test of its own and the leak census with no new site.
-3. The steering's steep probe no longer stops a bot at a face its body can walk up (fault 1), measured both ways.
-4. `mouth/tools/site.py` "hub46:-15.3,102.1,20", 8 seeds x 3 min: at most 10 stalls per 100 passes (main after
-   MOUTH2 52, the PS2 5); the maintainer's scene (`obst2/tools/scene_seeds.sh`) at most 3 trails over 6 reversals; 24 seeds x
-   32 maps: rounds finished, recycles, floor deaths and lost not worse; TAT1 (-137, 95) and GEO1 (-72, 268) - the
-   faces STHOP's probe was built for - still not pressed on for a round.
 
 ## Notes
 - Depends on MOUTH2 only for the numbers' base. `files:` is a first guess (`sim/step.rs` and `ai/steer.rs` likely).

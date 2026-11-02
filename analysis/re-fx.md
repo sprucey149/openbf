@@ -13,7 +13,7 @@ RAM), `brute_xyz.py` (the key cracks), `ps2cap/` (PCSX2 frames of real impacts),
 `analysis/SWBFRONT.ELF-decomp.c`, B2 = `analysis/SWBFRNT2.ELF-decomp.c`.
 Tags: **[V]** read at the cited lines (the lead re-read every [V] a helper reported that this document relies on);
 **[D]** derived; **[H]** hypothesis (PROVISIONAL in code); **[O]** load-bearing for the build; "RAM" = read in the
-PS2's memory from a save state; "asm" = checked in the instruction bytes (`scripts/tools/eedis2.py`,
+PS2's memory from a save state; "asm" = checked in the instruction bytes (`scripts/tools/eedis.py`,
 `scripts/tools/vu1dis.py`).
 
 ## 0. TL;DR — what the port needs

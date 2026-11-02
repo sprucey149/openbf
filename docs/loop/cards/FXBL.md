@@ -36,14 +36,6 @@ laser class's LightColor in live RAM removes it (frame-mean pink 1.9 -> -0.2), z
 - BF1: bolts make NO light (fields dead, BF1's terrain light pass gated off) — nothing to do there.
 - Models: BF2 models take the same lights (§5.4) — that is BPNT's path; not this card.
 
-## Acceptance
-- The port draws the §5.3 pass for BF2 bolt lights (render-only: the light list is derived from Sim::bolts each frame;
-  --sim-hash unchanged); BF1 draws none.
-- Bake com_sfx_omniproj (or the exact texture) into common_bf2.
-- Pairs: the HOT1 FXP spawn pose firing pitched down (`lead_tmp/fxb/ps2cap/bf2_hot1_ctl_*.png` / `_fire.mp4`): the
-  port's ground pink statistics (vidstat.py) within the PS2's ctl/ctl2 spread; a still with one bolt light at a known
-  position reproduces washcheck.py's predicted map (corr >= 0.9).
-- TDYN (CP lights) then reuses the same pass.
 ## Build notes (2026-09-30, lane 1)
 - Built: `LaserLook` light keys (LightColor/EndLightColor setter, LightRadius, the ctor gate, the End fade);
   `BoltVis::omni_lights` (in flight: midpoint of the last step; reach update: midpoint of the last step; hit

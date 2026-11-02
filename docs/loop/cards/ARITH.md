@@ -21,14 +21,6 @@ Research rec. 7 (Lewis; ida-pro-mcp ships `int_convert` for this reason): struct
 ## Evidence
 - `scripts/re_check.py` already does check 1 (`fn`), 2 (`absent`), 4 (`word`: ELF bytes at a VA with the offset formula `off = va - 0x160000 + 0x1000`), 5 (`writers`) - none of it does arithmetic on constants a session has read off a listing. Decompile text shows addresses as `DAT_0073d870`, `0x532D20`, `iVar + 0x228`, and MIPS pairs as `lui v0,0x73` / `addiu v0,v0,-0x2790` (signed low half: the classic mistake).
 
-## Do
-`scripts/re_calc.py` (stdlib python, no dependencies, one small file; every operation prints its formula so the output pastes into an RE doc as evidence):
-1. `re_calc.py int <n>...` - any of 0x.., decimal, -dec, binary, `f32:1.5`, `bits:0x3f800000`: prints u32, s32, u16/s16 halves, hex, f32 reinterpretation, and f64 if two words given.
-2. `re_calc.py off <base> <+off|-off>... ` - base + chain of constants; and `re_calc.py ptrchain 0x522AC8 +0x0 ...` prints the expression only (reading RAM is not its job).
-3. `re_calc.py hilo <lui_imm> <lo>` - the full address from a `lui`/`addiu` (signed lo, add) or `lui`/`ori` (unsigned lo, or) pair, printing BOTH and saying which one the opcode picks; a `--elf` option reads the two instructions at a VA from the ELF (using `re_check.py word`'s offset formula) and decodes them itself (lui, addiu, ori, lw, lh, lb, sw, sh, sb, ld, sd, lwc1, swc1, lq/sq field offsets), printing the resolved address and the access width.
-4. `re_calc.py va2off b1|b2 <va>` and back, using the same formula as `re_check.py word` (import its constant, do not copy it).
-5. `re_calc.py struct <size|-> name:off:type ...` - checks a field list: overlaps, gaps, alignment, the implied size.
-
 ## Acceptance
 - `scripts/re_calc_selftest.sh` (wired into `scripts/gates_selftest.py`): >= 20 cases including `lui 0x73 / addiu -0x2790` = 0x72D870 (signed borrow), a `lui 0x73`/`ori` unsigned case, a negative offset, an f32 round trip (0x3f800000 = 1.0), `va2off` both ways on a known VA from `re_check.py word`'s docstring, and one decoded instruction pair from the real BF1 ELF at the LCG's address `0x66eed0` (BF1 `DAT_0066eed0`, `analysis/re-blaster-damage.md`) pasted with its output.
 - LOOP_PROMPT's RE section gets ONE line: any address, offset or lui/addiu result written into an RE doc comes from `re_calc.py` (output pasted), not from the model.

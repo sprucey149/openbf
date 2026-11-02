@@ -16,10 +16,3 @@ created: 2026-10-02
 ---
 ## Why
 Card GREN (landed d4886ba, 2026-10-02) built the class slots with the PS2's ammo rule (analysis/re-grenades.md 2.5 [V, M]: B1 FUN_002838d8 - reserve clips = class ammo - 1, endless when the class value is below 1; RAM: a BF1 stormtrooper's rifle ammo 5 = reserve 4.0 + clip 1.0, its pistol endless) for every HELD slot (`WeaponState::with_clips`), and left the weapon in the hands on the old rule (`WeaponState::new`: N spare clips, 0 = no reserve) so that landing moved no sweep number. So the HUD shows 350 for the Rebel rifle (WeaponAmmo 6, 50 a clip) where the PS2 shows 300, and a primary authored with ammo 0 (BF1 clone pilot's arc caster, BF2 officer's chaingun, every sabre) has one clip and no reload.
-
-## What to build
-`UnitSpec::build` uses `WeaponState::with_clips` for the primary too (`spare_clips` becomes the class's clips); drop the PROVISIONAL note on `with_clips`.
-
-## Acceptance (run and paste)
-- A test over the baked class db: all_inf_soldier spawns with clip 50 + reserve 250 (HUD 300), imp_inf_storm_trooper 50 + 200, a class whose primary has WeaponAmmo 0 has an endless reserve (its HUD count is the infinite sign).
-- The 32-map sweep: finished 32/32 kept; list which rows move and by how much (bots that ran dry sooner or never) - declared `sim; sweep; arena`.

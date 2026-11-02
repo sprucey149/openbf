@@ -22,30 +22,6 @@ The maintainer, 2026-10-04: "Compare grenade throw distance with the original ps
 ## Evidence
 - GREN (done) built the throw from the disc's keys (release 0.30 s BF1 / 0.51 s BF2, ShotElevate 0.21). Nobody has set a PS2 throw beside the port's.
 
-## Acceptance
-Measured 2026-10-06 (`analysis/re-grenades.md` §13, commit 66e15a9; rows `lead_tmp/grnp/ps2/out/tat2_a_throws.json`,
-table `tat2_a_compare.txt`). PS2 BF2 Mos Eisley / the port, same feet, aim yaw and aim pitch:
-
-| aim pitch | rest m from the feet, PS2 / port | rest s, PS2 / port | blast s, PS2 / port |
-|---|---|---|---|
-| -26.3 | 12.81 / 13.73 | 1.467 / 1.267 | 2.067 / 1.867 |
-| -13.9 | 22.98 / 24.15 | 1.967 / 1.800 | 2.567 / 2.400 |
-| 0.5 standing and running | 35.49 / 36.57 | 2.467 / 2.233 | 3.067 / 2.833 |
-| 29.1 standing and running | 51.90 / 52.02 | 4.200 / 4.000 | 4.800 / 4.600 |
-| 59.6 | 40.60 / 40.59 | 5.933 / 5.700 | 6.533 / 6.300 |
-| 63.6 (PS2 limit; port 63.0) | 36.41 / 37.12 | 6.033 / 5.867 | 6.633 / 6.467 |
-
-Launch point, launch velocity and the flight to the first contact are already the PS2's (4 decimals / 2 mm); a
-running thrower adds no speed in either; the fuse is 18 updates in both; the stick on a vehicle takes the same updates.
-
-The build is done when:
-- a core test flies `Sticky` over a level heightfield from the first row of each of the 7 distinct PS2 throws
-  (a committed fixture lifted from the json) and every row is within 2 mm of the PS2's, the rest tick equal — it fails
-  on main today (rest 4-7 ticks early, up to 1.17 m long), and fails again with the bisection switched off (mutation);
-- `tools/compare.py` re-taken with the branch's `grnp_throw`: rest within 0.05 m and the same rest update in all 15;
-- a BF1 map's thermal detonator, thrown level on level ground, rests where BF2's does (35.49 m, 2.467 s, blast 3.067 s)
-  from BF2's launch point 16 ticks after the press — the port's `bf1_nab2` gives 34.10 m / 1.867 s / 2.767 s today.
-
 ## Notes
 Filed 2026-10-04 by Claude in chat from the maintainer's playtest (build 1bde70c, main 4e51e84). The maintainer's own words are quoted; nothing here is measured unless it says so.
 - 2026-10-06 planner: value 4 -> 5, for the same reason as SPRD (the maintainer's own ask of 2026-10-04, not reached at value 4). A PCSX2 measure: `ps2live.py` / the scripted-pad probes (memory note "PS2 live samplers and pad probes": ordnance rows) give the grenade's position per game update; card GRAI (the AI's grenade, after FGHT) reads this card's table for its low-arc solution, so say on GRAI what changed. Undo: `loopctl.py set GRNP value=4`.

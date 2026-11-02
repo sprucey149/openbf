@@ -24,12 +24,6 @@ The maintainer, 2026-10-04: "The rocket launcher when I was playing as the repub
 - The PS2 plays a looping, doppler-shifted hum on a rocket in flight (`com_weap_inf_ord_hum_rocket`, re-weapon-sounds.md 5); the port plays none (card WHUM). So the port's rocket is missing a sound, not adding one.
 - Mix level in that battle after SNDX: peak 1.52 x full scale, 0.023 % of the frames over it (`scripts/tools/mix.py`) - no headroom problem at 130-250 m; unmeasured at the ear.
 
-## Acceptance
-- In dev mode the black box keeps the last 60 s of sound starts the mixer was handed (tick, property name, take file, gain, pitch, metres from the listener, how many voices were playing) in its own ring, not in the 2,048-row event ring, and writes them with the snapshot; `blackbox_read` prints the last 10 s and a line for every tick whose summed gain is over 1.0 ("N starts, sum G: names").
-- A test: a scripted tick with 8 starts of one name at the ear is listed as an overload line by the digest.
-- Root `CLAUDE.md`'s black box section says: when the maintainer reports a noise, read the sound rows first.
-- `scripts/tools/mix.py` renders the snapshot's last 60 s to a WAV from those rows (the same row shape as `SOUND_LOG`'s `take`).
-
 ## Notes
 Filed 2026-10-06 by the SNDX session. Tools: `engine/artifacts/lead_tmp/sndx/` (bank_census.py, vs_ffmpeg.py, mix.py), `scripts/sound_bake_check.py`.
 A quick check the maintainer can do without any of this: `ffplay engine/assets_baked/bf2_kam1/sounds/59951779/643bbc70.wav` is the CIS rocket's fire take exactly as the disc holds it.

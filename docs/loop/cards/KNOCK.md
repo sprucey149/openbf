@@ -36,26 +36,6 @@ In the port a blast only damages, and a dead unit freezes where it stood.
   `push_inner`, `push_outer`; `Stance` has no thrown state; `sim/step.rs` skips a dead unit; `game/src/soldier_vis.rs`
   draws a corpse where the unit died.
 
-## Acceptance (run these, paste the output)
-1. **The impulse** (core test, PS2 row `bf1_hot1_knock.json` trial 2, P): a standing soldier whose feet are 2.01 m from
-   a thermal detonator's blast on level ground (Push 10, PushRadius 4.5 - 4.5) gets dv = (9.13, 10.01, 0.76) ± 0.02
-   for the row's geometry; the same soldier 7.5 m away gets 0; one in the tumble state gets 0.
-2. **The flight** (core test, the same row): the blast's tick sets the velocity; the next tick moves him with no
-   gravity (the ground flag is still set), then 44 ticks at g 13.5 (vy falling 0.45 a tick, the horizontal 9.16 m/s
-   unchanged), on the ground at tick 46, tumbling at tick 47; the tumble at 8.4 m/s² to under 4 m/s, the get-up at
-   16.8 m/s² to rest, the lock 1.9333 s; at rest 18.7 ± 0.3 m from the start 2.4 ± 0.1 s after the blast. No fire and
-   no move while locked.
-3. **The dead** (core tests): a bolt kill gives the body 5.0 m/s along the shot; a soldier a blast kills is thrown and
-   his death (state, item drop) comes after the landing (BF1 2.5 - 3.6 s on the PS2; BF2 from the get-up, 1.5 - 1.8 s);
-   a corpse 0.9 s old 2.35 m from a blast gets push + kick (-14.91, 7.22, 0.00) ± 0.05 (row C1) and is gone at 4.0 s.
-4. **BF2** (core test): a living soldier inside a thermal detonator's radius takes the damage and 0.00 m/s; a class
-   with PushDeadOnly 0 throws him (row `bf2_hot1flag_knock.json`, P: (-4.80, 8.71, -8.34)).
-5. **Mutation check**: break each of the five rules (the 0.6, g 13.5, the 5 m/s, PushDeadOnly, the skipped states) and
-   name the test that fails.
-6. **The sweep** on main and on the branch, 8 seeds x 32 maps: recycles, deaths under the floor (thrown bodies can
-   leave a level: say where, per map) and the finish counts, with the paired difference by seed; FEEL_NOTES lines for
-   the kick and the lock.
-
 ## Not in this card
 - Droid soldiers' ChunkFrequency roll and the chunk death: card DCHK. Until it lands a BF1 droid is pushed every
   time - a named, temporary deviation (the PS2 skips the push 6 times in 10).

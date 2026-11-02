@@ -35,25 +35,6 @@ centre (`brain.rs` `arrived_at_post`, `CORNER_ARRIVE`).
   189 -> 5, all stalls 5.39 % -> 4.74 %; rounds finished inside 10 min 195 -> 190 of 256 (seed 6: 25 -> 20). So not the
   radius: the PS2's rule.
 
-## What to do
-1. An attacker's and a defender-at-the-post's last-leg aim point is a point drawn in the post's capture region (per
-   unit and per arrival, from the unit's own stream; the region's shape is in `cp.def.capture`), on a floor a soldier
-   can stand on (reject a point whose capsule the wall pass pushes, or with no floor within a step of the bot's
-   level; a few tries, then the nearest standable point toward the bot). A defender with a Cover / Snipe hint keeps it.
-2. Arrived = inside the capture region and at that point (`CORNER_ARRIVE`), on its floor (STEND's `off_floor` stays).
-3. Check what the commander / HOLD / the 5 s rule read from "arrived" before changing it (grep `arrived_at_post`).
-4. Re-run OBST's census (apply `lead_tmp/obst/tools/obst_census.patch` to a scratch tree, or land the `OBST_CSV`
-   observer with this card - it is 150 lines in `round_to_outcome.rs`).
-
-## Acceptance
-- Unit tests (`brain.rs`), mutation-checked: a bot sent to capture a post with a solid cylinder of radius 1.3 m at its
-  centre arrives and stands (stick released) within 10 s; one sent to a post whose centre is 3 m up on a block, with a
-  capture region reaching the floor, arrives on the floor; the drawn point is never inside a body.
-- `OBST_CSV` census, 8 seeds x 10 min (`lead_tmp/obst/tools/census.py`): `post` windows on a post's own body
-  (`com_*`) 740 -> under 40; BF2 KAM1's depot 189 -> under 10; all `post` windows 3,426 -> under 2,000. Paste the lines.
-- No map's 8-seed finish count drops (`scripts/sweep_seeds.py`, baseline re-run on main first); capture times do not
-  rise (posts taken per round, from the sweep's lines). Declared sweep / sim / arena moves; goldens unchanged.
-
 ## Result (build, 2026-10-02, branch `parr` 8f6ba88; A/B on one base: main 4c1460d + the observer vs the branch)
 Main moved under the card: CONT (4c1460d) landed first and the 7b64fcd numbers above are not today's base (the
 commander's 5 s rule takes a capturer off the post, so the long plinth / depot windows were mostly gone already).

@@ -58,25 +58,6 @@ rider gets off inside the trunk) - this card takes them; ETREE keeps its own tre
 - `rto_br9/bf1_end1_s91_t6900.json`: the AT-ST case tick by tick (unit 14 boards at 5835, sits 17.5 s in a walker that does
   not move, is put out at (-110.6, -3.7, 247.8) inside, `STOP wall body 481` from then on).
 
-## What to build (each step measured before the next; RULES 2)
-1. **An all-maps census first**: an observer row for every `exit_vehicle` whose point has a BACK face straight overhead (the
-   ray the function already casts) - map, vehicle class, body name. Endor's boulder and trees are the known three; 8 seeds x 32.
-2. **The way in.** Trace the tick the bike crosses the wall (the hover's hull contacts against a mesh at 23 m/s: a step longer
-   than the hull is thick?) and the walker's step into the edge, and close it where it is cheap (a swept contact, or the
-   hover's centre against the static world). Drive the PS2's own bike at this boulder first (ps2live, ten minutes): does it stop.
-3. **The exit.** No candidate, and no fallback, inside a closed body: reject a point with a back face overhead, and when all
-   nine fail look further out along the way the vehicle came (its last position outside) before taking the centre. Named OURS
-   (the PS2's FUN_0020b918 has no such test: `analysis/re-vehicles.md` 5).
-4. **The safety net.** A unit on foot with a back face overhead for N s is `lost` (the lost bot's return point, then the
-   recycle) whatever it is doing - `capture` included; and a bot does not board a vehicle it has no line to.
-
-## Acceptance
-- Scene tests, each mutation-checked: a rider of a vehicle whose centre is inside a closed box gets out OUTSIDE it; a bike
-  driven at a closed mesh at 25 m/s stays outside; a bot placed inside a closed body is lost within N s while capturing.
-- `tools/endbq.sh <binary> <name> 1-288` + `tools/inboulder.py`, with card HVYW's branch rebased on the fix (or HVYW landed):
-  0 stays inside the boulder (main 20, branch 111); recycles within 5 m of its box at or under main's 8; no round over 2.
-- 8 seeds x 32 maps 256 / 256, recycles not over main's; the census of step 1 at 0 exits inside a body on every map.
-
 ## Notes
 - 2026-10-13 07:09 planner (lane 2): **milestone M3 -> M2** (the way in, the exit and the boarding are vehicle code) and **`deps: VTURD` for
   ORDER only** (the maintainer's turret ask goes first on lane 1; by dry run lane 2 takes this card as its first build). Undo: `loopctl.py set

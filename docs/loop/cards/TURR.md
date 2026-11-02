@@ -19,19 +19,6 @@ alpha: yes
 ## Why
 The maintainer's annoyance 1 (2026-10-02): "If there is an empty turret, they'll get in the turret and rarely leave unless they're being shot at or die ... the last few bots to kill are hiding somewhere sitting in a turret ... there should be more purpose." The PS2's rule and why it camps: `analysis/re-soldier-ai.md` 7, 10a (boarded with a target in an arc; left after 10 s with no remembered threat; an enemy turret 100-180 m away resets the clock; 15 of 32 seated spells on Kamino over 60 s). The port's bots never board a stand-alone turret (0 % seat time on Kamino and Polis Massa against 9.4 % and 18.0 %). Design: `analysis/bot-design.md` 6.1 (D11).
 
-## What to build
-1. A turret seat is a position of kind Seat in the table (card TPOS); the Team board (card TEAM) offers the role Gunner to the nearest free bot within 50 m when the **purpose test** passes: (attack) an enemy the team knows of inside a weapon arc AND inside the weapon's range AND with a clear line from the muzzle; or (defence) the turret is within 40 m of a post the team owns that has an enemy or neutral post as a neighbour on the route graph, and an enemy was seen within 60 m of that post in the last 30 s. Capacity: 1 a turret, 2 a post.
-2. Behaviour **Man**: board (a walk with an outcome; an unreachable seat is closed to that bot for 60 s), then `gunner.rs`.
-3. **Five exits:** (1) 10 s with no target the turret can HIT (arc, range, line clear) - only a hittable target resets the clock; (2) 45 s seated with no shot in the last 20 s; (3) hit from outside every arc, or the turret under 30 % health; (4) the endgame (10 tickets or fewer, or 3 or fewer alive): out and hunt; (5) the purpose test failed for 10 s. Then that turret is closed to the bot for 20 s.
-4. A turret fights a turret only inside its weapon's range.
-5. Census line per map: seat share, seated spells over 60 s, shots per seated minute.
-
-## Acceptance (run and paste)
-- One headless scene test per exit (five) and one for the unreachable seat; each mutation-checked.
-- **B8:** BF2 KAM1 seat share 3-10 % (PS2 9.4 %); no seated spell over 60 s without a shot in its last 20 s; none seated in the endgame (8 seeds).
-- BF2 COR1: the outside turret the maintainer named is not manned while no enemy is within its range and no front-line post is near (census line with the turret's name; find it from the map's turret list and say which).
-- Sweep 8 seeds x 32 maps: 256 / 256; kills a minute within the seed noise. Declared: `sim; sweep; arena`.
-
 ## Notes
 - Cut from `analysis/bot-design.md` (card BOTD, 2026-10-03). Waits for the maintainer's read (deps BOTD). In BOTV's deps.
 - Endor's scripts set `SetStayInTurrets` (SAIR 7.1): bots board with no target there. Not copied; the defence clause covers a turret beside an owned post.

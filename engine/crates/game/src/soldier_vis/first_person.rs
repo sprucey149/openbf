@@ -290,10 +290,6 @@ impl FirstPersonVisuals {
     }
 }
 
-pub fn shows_arms(u: &core::unit::Unit) -> bool {
-    u.first_person_view() && u.zoom.is_none()
-}
-
 impl SoldierVisuals {
     pub fn first_person_draws(
         &self,

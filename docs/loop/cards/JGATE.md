@@ -44,18 +44,6 @@ a jump overdraw it; the port refuses whenever energy < cost.
 - Mutations (`lead_tmp/audit-jarc/mutations.txt`): M8 (JumpHeight not read) and M12 (BF2's side component x the
   forward factor) pass all 36 soldier / step / lost-jump tests.
 
-## Acceptance
-Unit tests in `core::soldier`, the PS2's classes, each failing with its rule removed (say which mutation):
-1. Stand and sprint, `grounded` false for 1-8 ticks, then JUMP: a take-off with vy = the mover's vy + the jump
-   velocity (BF2: 7.527 from +0.122, the row above); at 9 ticks and more, no jump. BF1: only when 5 s in the stance.
-2. Crouch + JUMP: no take-off in either game; BF2 stands up when 0.5 s in the crouch, nothing before.
-3. BF1: JUMP within 0.5 s of entering the stand stance does nothing.
-4. BF2 with the stick diagonal and the jump on one tick from a stand: take-off 3.035 m/s forward, 2.335 m/s aside
-   (`bf2_stand_diagl_pre.csv`); fails under M12.
-5. `from_props`: JumpHeight 1.78 -> 8.005 m/s, 3.5 -> 11.225 m/s; no key -> 8.0; fails under M8.
-Then: the ground tally re-run on the 12 maps (0 presses dropped inside the window), 8 seeds against a null run
-beside the change, the leak census per class, one FEEL_NOTES line. Declares sim; sweep; arena; leak.
-
 ## Notes
 - BF1's roll on Cross with a pure strafe and BF2's AI jump branch stay out (PLAN, locked; JARC's notes).
 - A bot presses JUMP only in `brain::lost_jump`, which already asks `grounded`: the window changes the player's jump.

@@ -27,12 +27,6 @@ side always wins would be seen in the maintainer's first battles; it may also be
 - PS2 sampler: `lead_tmp/wins/ps2/wins_ps2.py` (bots-only rounds; BF1's no-AI patch is not wanted here - BF1 rounds need
   the player parked, memory 'PS2 samples without the player think slowly': note it beside the numbers).
 
-## Acceptance
-- Two PS2 rounds per map (bots only) with winner, margin and posts held per team, beside the port's 16-seed row, in a
-  table on this card; each map sorted PORT (the PS2's winner differs or its margin is under half the port's) or DESIGN.
-- A PORT map: one traced port case (black box `BLACKBOX_AT` on `round_to_outcome`, the losing team's unit) named on a
-  new card with the spot, the unit fields and the two win shares; WINS's rule: posts first (RULES 'Sort a one-sided win share').
-
 ## Notes
 - No GPU needed (PCSX2 SW renderer; the sweep binary is CPU only). Filed by the planner 2026-10-22 03:20 from WINS's
   UNSORTED rows.

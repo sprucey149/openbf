@@ -27,16 +27,6 @@ both need the switch rule. Soldiers' `_low1` LOD rides the same question.
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 20 and 3; `analysis/re-vu1-cull.md` §4 (two-station capture note); `FUN_00592c38`'s distance compare at
 D:712968 may be it; `ManifestGeometry.lods` baked, `mungefs::entity` picks the best model; PLAN §Optimisation backlog B2.
 
-## Acceptance
-RE part DONE 2026-10-16 (`analysis/re-lod.md` [O], PCSX2 two-station + threshold checks). BUILD bars:
-1. `python3 engine/artifacts/lead_tmp/re/lod/tools/accept.py <port render>` PASSES at BF1 NAB1 station A (render command in
-   its docstring): dark crown share in both treeline boxes >= 45 % (PS2 57.8 / 57.4 %; port at f7f19c6 18.5 / 15.0 % = FAIL;
-   the PS2 with its LOWD slot knocked to LOD0 23.0 / 13.2 %; the PS2's own control frame passes 57.5 / 57.4 %).
-2. A unit test of the per-fragment pick (model nearer than the threshold, LOWD past it, threshold in [b, c], nothing past
-   FarSceneRange, no LOWD on a FarSceneRange(0) map), mutation-checked.
-3. BF2 UTA1 `cp4_con_cp2_b000` (UTAS's pair) shows the far wall as before (or better) with `bake::far_lowd` retired or kept.
-4. The goldens that move are predicted from data first (instances with a LOWD past b in each golden's view), declared, viewed.
-
 ## Notes
 - 2026-10-19 (the maintainer's order, `first: 1`): the first speed item for weak hardware (Surface Pro 8, Intel Iris Xe). Far-draw cost is the likeliest big win after this; ISPD (`first: 2`) measures the rest on this machine's iGPU. Mind the file overlap: ISPD's slices wait for this card.
 - 2026-09-29 (UTAS, lane 2): most of the rule is now read — `analysis/re-far-lowd.md` §2 [O]. NEAR scene: not a distance,
@@ -65,6 +55,3 @@ RE part DONE 2026-10-16 (`analysis/re-lod.md` [O], PCSX2 two-station + threshold
   Build = the far rule; the budgets, the 5-px cull, BF2's near density switch, `_low1` and the no-LOWD cut past c are named
   deviations (STATUS questions). F61 (BF2 NAB2 has no far scene) may be the near density switch [H]: render that pose with
   the switch on as the build's side check.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — BF1 NAB1's 'dead forest' past ~120 m is the missing far LOD (LEAF's RE §10, PXWA's worst case); NAB1 is a showcase map. Value 2 → 4. Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).

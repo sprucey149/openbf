@@ -8,7 +8,7 @@ status: todo
 deps: TCMP
 files:
 declares:
-needs:
+needs: maintainer - later scope, PLAN.md: Instant Action only for now
 effort:
 branch:
 resume:

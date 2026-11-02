@@ -39,15 +39,5 @@ fix does not touch them: the push in both is wall-like and is applied.
 - [H] The PS2 tests the soldier SWEPT from its previous position C+0x198 to C+0x228. A RAM teleport that leaves
   C+0x198 behind free-falls through the world (`lead_tmp/jwal/ps2exp/out/tele_diag.txt`).
 
-## Acceptance
-- M3: name the triangle and the contact that points inward (a trace with the triangle index, depth and normal), then
-  fix it: no push may move the axis to the far side of a face it has not crossed.
-- M2: a swept horizontal move, or sub-steps when a tick's XZ step exceeds half the radius. The existing
-  `wall_sweep` cast is the natural tool. A BF2 sprint-jump must not cross a mesh sheet (a core test at 17.55 m/s),
-  and the cost must stay in the sweep's budget.
-- The census's `push` count falls to an explained residue; its accepted line re-points from JWAL to this card
-  (JWAL's landing already does that).
-- Declare leak / sweep / arena / sim.
-
 ## Notes
 - Do this after JWAL: it changes the same `push_out`, and JWAL's velocity slide shrinks M2's pressed-jump case.

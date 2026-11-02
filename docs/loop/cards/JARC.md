@@ -56,22 +56,6 @@ reach, and it is the feel of every jump.
   BF1 KAS2 GCW, the stormtrooper, MaxSpeed 6.5).
 - The port: `core/src/soldier.rs:364–383` (the jump), `:454–457` (gravity before the position).
 
-## Acceptance (AUDIT AIRC, 2026-10-02 — replaces the 2026-09-29 list and the planner's 04:30 list below)
-Unit tests in `core::soldier` on a level floor, the PS2's classes (BF2 Acceleration 70, MaxSpeed 7.0 / 5.25, jump
-velocity 8.005, factors 1.3 / 1.0; BF1 70, 6.5 / 4.5, 8.0), each against the PS2's rows
-(`lead_tmp/audit-airc/ps2/out/`, `replay.py <out> bf2|bf2_s2|bf1 <trial> -v`):
-1. No stick: 28 moving updates and an apex of 1.861 m (BF2) / 1.912 m (BF1), within 0.02 m.
-2. Stick forward one tick after the jump press: travel 0.935 m (BF2) / 1.213 m (BF1), within 0.03 m.
-3. Stick forward ON the jump tick, from rest: take-off 3.04 m/s and 3.75 m (BF2); 4.81 m/s and 4.59 m (BF1), within 0.1 m.
-4. A backward running jump: BF2 takes off at −5.25 m/s (no boost), BF1 at −8.50 m/s; a forward one at 9.10 / 8.50.
-5. BF2: a jump with vy −1.07 before it takes off at 6.94 m/s (the ADD; `bf2_run_release_2.csv` rows 18-19).
-6. `sim::step`'s `no_jump_passes_a_ledge_taller_than_its_reach` still passes (the airborne step-up, AIRC's trap below).
-7. The rim probe (`lead_tmp/fable2/tools/rim_probe.rs.txt bf2_kam1`): the two y 68.6 stops read OVER again
-   (`lead_tmp/audit-airc/rim/pre_bf2_kam1.txt` has them OVER, `main_bf2_kam1.txt` not).
-Then 8 seeds against a null variant run beside the change, the leak census per class, one FEEL_NOTES line.
-BF1's jump with a pure strafe is a side roll on the PS2 (stance 10 / 11); the port keeps BF2's roll button on both
-games (PLAN, locked) — out of scope here.
-
 ## Notes
 - JWAL's ledge fix is independent of this, but its band limits move with the apex: a higher jump reaches ledges
   0.26 m taller.
@@ -90,23 +74,6 @@ games (PLAN, locked) — out of scope here.
     `no_jump_passes_a_ledge_taller_than_its_reach` fails: a falling soldier's ground probe starts `STEP_HEIGHT` over
     his feet, so he lands on a 2.25 m ledge — and the PS2 does not (JWAL: the 2.26 m lobe top is never reached, feet
     0.35 m short). The apex fix needs the airborne step-up bounded with it.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — the jump arc, on camera. Value 3 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
-
-## Planner note (2026-10-02 04:30)
-Value 3 -> 4; `files:` and `declares:` filled. AIRC (the maintainer's own rule, landed 8c34344) left the port's jump at 25
-airborne updates to the PS2's 27 and BF2's apex at 1.57-1.60 m against 1.861 m: a standing jump with the stick held
-travels 0.810 m on BF2 (PS2 0.935) and 1.127 m on BF1 (PS2 1.214), and two KAM1 rail stops that a standing jump
-cleared at 1.65 m are no longer cleared (`reports/20261002_0355_card_AIRC.md`). Acceptance, in order:
-1. The second BF1 class (splits "+2.0" from "x1.3077"); BF2 is measured (AIRC's note above).
-2. The take-off tick without gravity AND the airborne step-up bounded with it, so that
-   `no_jump_passes_a_ledge_taller_than_its_reach` still passes (the trap in AIRC's note).
-3. Unit tests: apex 1.912 m (BF1) and 1.861 m (BF2) within 0.02 m; AIRC's two travel tests within 0.03 m of the PS2's.
-4. The rim probe (`lead_tmp/airc/rim/`): the two y 68.6 stops read OVER again.
-5. 8 seeds against a null variant run beside the change (AIRC's `sw_null`: 2 rounds of 256 is noise); the leak census
-   per class before `--commit` (jumps carry further).
-Reverse: `loopctl.py set JARC value=3`.
 
 ## AUDIT AIRC note (2026-10-02) — for the builder
 - The Acceptance above replaces the planner's 04:30 list (its step 1, a second BF1 class, is answered by the code:

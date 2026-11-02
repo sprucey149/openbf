@@ -23,13 +23,6 @@ TBIND gave the map bake bake::bind_pose: a bone_space 0 model's BNAM segment is 
 - side_bf2 imp_fly_trooptrans: the landing-gear primitives sit at the origin (-0.39..0.4); bone_l_landinggear2 is at (4.02, -0.39, 0).
 - The same pattern holds for all_fly_kwing, cis_hover_mtt, imp_fly_tiebomber and all_weap_inf_autoturret (ALL.LVL), and for the map-local copies TAT1 all_hover_skiff and NAB2 rep_hover_gian_speeder.
 
-## Acceptance
-- vehicle.rs's model_space goes through bake::bind_pose's rule for non-bone-space models (reuse BindPose, or share its per-segment step), so a vehicle is placed by the same rule as the map bake.
-- side GLB bounds: the hovernaut's turret_front_barrel primitive at y about 5.3-5.8; the trooptrans's bone_l_landinggear2 primitive near x 4.
-- rebake=side; declare the vehicle goldens and parity rows that move.
-- The walkers' skin GLBs (WSKN) are unchanged.
-- Planner 2026-09-30 21:45: value 4 -> 5. M2 had no value-5 card after TBIND landed; this is TBIND's rule on the vehicle bake (TAT1's skiff guns and rudders are on a showcase map), with numeric bounds as its check — paste them in the report (the acceptance referee).
-
 ## Landed 2026-09-30 (881c108; report reports/20260930_2225_resume_VBIND.md)
 - Shared bake after the landing: hovernaut front barrel y 5.41..5.69 (z 1.07..4.18), trooptrans gear foot x 3.02..3.81, y -2.2..-1.74; Hailfire wheels x ±2.53..4.65, y 0.06..7.87. 11 side GLBs DIFF, every other file SAME; no golden moved.
 - Not touched, correctly: all_hover_skiff / bes_fly_cloudcar are map-baked (TBIND already poses them); rep_hover_gian_speeder and all_weap_inf_autoturret have no baked model.

@@ -42,20 +42,6 @@ screen is BSHLB; the BF2 loading screen LDBF2.
 - Widescreen: the movie pillarboxed (4:3, letterboxed art inside the 448 lines), the stacks at the centre (Hor+), text
   and pieces scaled by display height / 448.
 
-## Acceptance (each RUN and pasted)
-1. Pixel geometry against the PS2 frames (`engine/artifacts/lead_tmp/re/bshl/ref_frames/`, 1 PS2 unit = 1.25 px at
-   640x480): the port drawn at 640x480 puts the main menu's bar edges at x 143.75..501.25 px (+/- 2 px), the
-   Singleplayer and Options bars' LEFT edge at 43 px (+/- 2) and their right edges at 479.5 / 420 px (+/- 2), the
-   main menu's row pitch at 34.25 px (+/- 0.5). Measured rule to build from (re-bf2-shell §3.2 [M]): labels 1.087 x the
-   font advances across, bar = 1.087 x the widest label's advance sum + 134.2 units, left-justified bars start at x
-   34.4 units; the Lua's left-justify formula does NOT reproduce the frames (§3.2 [H]) - do not build from it.
-2. A unit test: the main menu has Multiplayer present with `enabled == false`, drawn dimmed, and a Down from
-   Singleplayer focuses Options (and Up from Options focuses Singleplayer); mutation: enable it and see the test fail.
-3. A bake test: the menu loops decode (segment 0 frame 0 and frame 300 checksums), 512x448, and the shell music
-   stream is present.
-4. Goldens of the four screens (`groups.shell`), VIEWED beside the PCSX2 frames (`title_pressstart.png`,
-   `main_menu.png`, `singleplayer.png`, `options_top.png`) in one sheet before land.py commits them.
-
 ## Notes
 - Sounds: UISN owns the clicks; the template's defaults are accept `shell_menu_accept`, back `shell_menu_cancel`, exit
   `shell_menu_exit`, focus move `shell_select_change` (re-bf2-shell §3.2).

@@ -74,7 +74,7 @@ pub fn bake_heroes(disc: &Path, out: &Path) -> Result<HeroBake> {
         .collect();
     let mut inputs = Vec::new();
     for path in sides.iter().map(|s| &s.1).chain([&ingame]) {
-        let data = std::fs::read(path).with_context(|| path.display().to_string())?;
+        let data = crate::gameplay::read(path).with_context(|| path.display().to_string())?;
         inputs.push((path, data));
     }
     let mut classes = Vec::new();

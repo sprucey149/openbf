@@ -247,7 +247,7 @@ pub fn baked_combos_from_lvl(buf: &[u8]) -> Result<ComboSet> {
 }
 
 pub fn bake_combos(lvl_path: &str, out_ron: &str) -> Result<ComboSet> {
-    let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_owned())?;
+    let buf = crate::gameplay::read(lvl_path).with_context(|| lvl_path.to_owned())?;
     let combos = baked_combos_from_lvl(&buf).with_context(|| lvl_path.to_owned())?;
     crate::write_ron(Path::new(out_ron), &combos)?;
     Ok(combos)

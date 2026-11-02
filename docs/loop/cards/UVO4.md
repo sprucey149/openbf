@@ -24,6 +24,3 @@ Card UVO2's census beside a front-line team-mate (`lead_tmp/uvo2/census/tab_figh
 4. HeadshotKill (event 9): the port reports no head hit; [H] in the RE whether it needs one.
 5. The Wookiee's `wok2_inf_chatter_*` properties are in the GCW banks but their stream segments are not baked (`game/tests/suite/unit_vo.rs` NO_TAKE_YET).
 6. The black box names VO lines by hash (the bank's names table lacks them): add the class lines' sound names to the names the snapshot resolves.
-
-## Acceptance
-- The fight census (UVO2's run.sh + tab.py with `VO_FOLLOW=20` and `vo_follow.patch`): VO lines a minute within 30 % of the PS2's on UTA1 and MYG1 (at least 5.8 / 7.7), or each remaining gap named with its own number.

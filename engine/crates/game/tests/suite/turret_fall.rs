@@ -665,7 +665,13 @@ fn engineers_build_initial_pads_one_at_a_time_in_both_eras() {
 
 #[test]
 fn real_build_hologram_draws_above_the_pad_and_stops_when_built() {
-    let c = build_case("bf2_yav1", true);
+    for map in ["bf2_yav1", "bf2_cor1"] {
+        build_hologram_on(map);
+    }
+}
+
+fn build_hologram_on(map: &'static str) {
+    let c = build_case(map, true);
     let w = world(&c).expect("real PS2 map data required");
     let i = first(&w, &c);
     let pos = w.sim.building_turrets[i].spec.pos;

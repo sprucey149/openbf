@@ -21,11 +21,6 @@ The HOVR audit (2026-09-28, PARTLY) found the transcription of BF2's integrator 
 4. **re-hover §6.10's BoostSpeed turn scale** (B2:134384-134397): when BoostSpeed > 0 and |v| > ForwardSpeed, the target is multiplied by 1 - clamp((|v| - FS)/(BS - FS), 0, 1)*(1 - K+0xf78) (ctor 0.5). This applies whether or not the vehicle is boosting, e.g. full throttle plus strafe. BoostSpeed is 17-40 on all 138 live BF2 hovers in RAM. HOVR left it out as 'boost'.
 ## Evidence
 reports/20260928_1100_audit_HOVR.md; lead_tmp/audit-hovr/: pad_census.txt (216 pad vehicles, 5 flagged), ram_vs_port.txt, hovers.jsonl (ramscan.py: 138 hovers / 30 BF2 states), verify/VERDICTS.md (Opus verifier: 20 SUPPORTED, 4 PARTLY), examples/*.rs (scratch examples: audit_pad_census, audit_hover_ram, audit_hover_probe; copy them into game/examples to rerun).
-## Acceptance
-- The pad census (examples/audit_pad_census.rs: every pad's hover class, 10 s, no input) flags 0 of 216 for drift > 2 m or rise > 3 m. POL1 hangerdockcon's AAT and combat speeder stay on the hangar floor; the TAT1 skiff's spawn rise is <= 2 m.
-- audit_hover_ram: at least 45 of the 47 quiet parked PS2 hovers (|w| < 0.1, no input) settle inside the port's bob band, the POL1 hangar AAT included. Class match stays 138/138.
-- Unit tests pin §6.19 (SetAltitude 0, no spring contact: g = 0 after the drive) and the BoostSpeed turn scale (a hand number).
-- The HOVR tests still pass. Declared: sweep.
 ## Notes
 - The PROVISIONAL terrain model may stay a plane, but a sphere must actually meet the surface: count it only when |signed distance| < r, and never when the centre is more than r below. Sample the cut where the soldier's ground probe does.
 - Whether the contact pass runs before the drive or between the drive and the springs is still [H]. RAM: E+0x1cf0 = 0 on 509/509 springs at every snapshot, so the contacts that feed a spring tick run earlier in the same frame. A fast-hover pose test leans 'drive -> contacts -> springs' (34/34 vs 27/34 in the jitter range) but is confounded. The port's drive -> springs -> contacts is equivalent to 'contacts -> drive -> springs' as a sequence, and one tick late against the other order.

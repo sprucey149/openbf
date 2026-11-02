@@ -24,17 +24,3 @@ camera → aimer → seat), §8 (armedbuilding = the same sections, no pilot sea
 pitch ±45°, yaw ±30°, PitchRate 1.0, YawRate 2.0 rad/s; rate-limited toward the 512 m camera ray's hit, clamped to the
 limits; BF1 magnetism runs in any seat whose weapon has LockOnRange > 0; BF2's lock-on is one mechanism on foot and in
 every vehicle kind — its button and acquisition loop not yet located).
-
-## Acceptance
-Gunner seats enterable by §5's rules; each seat's weapon fires from its FirePointName through the existing weapon code;
-aimers per §9; building turrets become seat-only vehicles spawned from their map instances; the in-vehicle aim call
-taken and recorded (PLAN §Vehicles & space: the maintainer's "likely" BF2 lock-on for vehicles/flyers — take it as the reversible
-default, FEEL_NOTES + STATUS "Calls you may want to reverse"); tests per seat kind.
-
-**Note (planner 2026-09-28):** raised 4 -> 5 so M2 interleaves with the new M1 value-5 cards (M2 done-criterion: drivable with its weapons and turrets). The maintainer's 09-28 coverage note asked for building turrets (NAB1 ships `com_weap_gunturret` instances; PLAN §Vehicles item (5)): they are THIS card's scope (seat-only vehicles, re-vehicles §8) — do not drop them; split them into their own card if the session runs long.
-
-**Note (VAI 2026-09-29):** VAI's bots board pilot seats and drive (`core::ai::ride`), but fire nothing — VAI left the
-AI's side of the seat weapons to this card: once a seat has a weapon, `ride::drive` (the pilot) and a gunner seat's
-think (today `drive` returns an idle pad for any non-pilot seat) must aim and press FIRE through the same perception /
-fairness rules as on foot (`brain::think`'s fire block), and a bot may then also claim gunner seats (`ride::claim`
-takes the pilot seat only).

@@ -347,7 +347,7 @@ I-pairing rule.
 None of this section went through the verifier.
 
 - **The spot's test against a model** (§5's "vtable +0x1c" = 0x59c3a8; the decomp has no function there, read from the
-  asm with `scripts/tools/eedis2.py bf2 0x59c3a8 0x59c570`) [V asm].
+  asm with `scripts/tools/eedis.py bf2 0x59c3a8 0x59c570`) [V asm].
   - Inputs: the model's sphere (c, R); the spot's apex V (+0x80) and axis D (+0x70); +0x54 and +0x5c, two trig values
     of half the OUTER cone (FUN_0059bff8, 731913–731924), whose product is used as the sine [D]; the `Bidirectional`
     byte +0xd1.

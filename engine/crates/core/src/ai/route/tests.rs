@@ -1156,3 +1156,36 @@ fn a_soldier_takes_the_stairs_between_their_rails() {
     let way = soldier_way(&g, a, b).expect("a way up");
     up_the_flight(&g, a, b, &way);
 }
+
+/// BF2's arc flag 2 (RE_LOG "BF2 arc flags"): the leg starts with a jump. One jump for
+/// the arc, however long it takes to walk, and none on a plain arc.
+#[test]
+fn a_jump_arc_starts_with_one_jump_and_a_plain_arc_has_none() {
+    for (flags, want) in [(0, 0), (Arc::JUMP, 1)] {
+        let (mut sim, me) = l_sim();
+        let g = sim.nav.take().expect("graph");
+        let mut arcs = g.arcs;
+        for arc in &mut arcs {
+            arc.flags = flags;
+        }
+        sim.nav =
+            Some(NavGraph::new(g.hubs, arcs, RouteTable::empty(3), vec![], vec![]).expect("graph"));
+        let (mut jumps, mut was, mut leg) = (0, false, None);
+        for _ in 0..300 {
+            sim.step(&[PadState::default()]);
+            let u = sim.unit(me).expect("alive");
+            let via = u.ai.route.and_then(|r| r.via_arc);
+            if via.is_some() && leg.is_none() {
+                leg = via;
+            }
+            if via != leg {
+                break;
+            }
+            let now = u.soldier.stance == crate::soldier::Stance::Jump;
+            jumps += i32::from(now && !was);
+            was = now;
+        }
+        assert!(leg.is_some(), "the bot walked an arc");
+        assert_eq!(jumps, want, "flags {flags}");
+    }
+}

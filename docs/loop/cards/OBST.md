@@ -25,26 +25,6 @@ lot of bots rather than walk around it just walk straight forward into it. Can w
 instead of just walking into walls? They have a destination, but they are aware of waypoints and walls and vehicles and
 turrets and things and other bots on their way and can go around obstacles."
 
-## What to do
-1. **Reproduce and name the cause first** (it decides the fix). Find the map and spot from the screenshot's room (a round
-   raised console with a window panel, a post beside it; ask the maintainer via STATUS only if the map cannot be found by looking at
-   the posts' neighbourhoods in `gallery`), put a bot at it and print per tick: its leg, its goal, `SteerPick`, the wall
-   sweep's hit (`wall_ahead` / `barrier_ahead` / `steep_ahead` / `ramp_clear`) and whether the goal is the post's own
-   centre (a bot told to stand ON the post's centre when the post sits on a solid plinth would push into it forever -
-   check the arrival radius and the target point against the post's collision). The census already has "slide" and
-   "walking in place": list the top 20 spots per map with the prop/mesh under them (name the collision body).
-2. **Which obstacles does the steering see?** Static world collision, props with collision bodies (round consoles, crates),
-   doors, turrets and parked vehicles (`Sim` vehicles/turrets), other soldiers (the separation pass). Write down which of
-   these `steer.rs` sweeps and which it does not. A body the sweep does not see is a defect.
-3. **Then the rule** (ours, PROVISIONAL unless RE finds the PS2's own; the PS2's steering FUN_002a54d8 / FUN_002a45a0 in
-   `analysis/re-walker-ai.md` and the soldier's per-step corner re-aim in BOWL's notes are the first place to look):
-   when the straight line to the next waypoint is blocked by a convex obstacle, the bot picks the side with the shorter
-   detour (consistent per obstacle, so it does not flip), walks around it keeping a body width of clearance, and returns
-   to the line. Same for a vehicle, a turret or a friendly standing in the way: step around, do not push. Keep it cheap
-   (a few capsule sweeps per bot per tick, none allocating - core is 0-alloc in the hot loop).
-4. Do not build more than step 1-2 show. If the waypoint graph itself routes through the obstacle (a leg whose line
-   crosses a solid), fix the graph's use (route/hub choice) rather than adding avoidance on top.
-
 ## Measured (2026-10-02, lane 2, main 7b64fcd) - steps 1 and 2 are done; this is what the build is for
 Evidence and tools: `engine/artifacts/lead_tmp/obst/` (README.md; `all/census.txt`, `all/spots.md` = the 20 top spots
 of every map with the body's name, `all/bodylegs.txt`, `all/episodes.txt`; the instrument is
@@ -95,23 +75,6 @@ of every map with the body's name, `all/bodylegs.txt`, `all/episodes.txt`; the i
   stands within 1.2 m ahead in 3.4 % of walking samples, speed there 4.9 against 5.7 m/s.
 - So no body is invisible. What is missing is range and memory: the bot learns of a body 1 m before it, takes the
   tangent, and drops the side the moment the straight way opens, so on anything wider than a few metres it paces.
-
-## What to build (this card, after PARR)
-One rule in `steer.rs`, ours and PROVISIONAL (the PS2 has no sweep at all: barriers, a contact push and stuck timers):
-a bot that meets a body keeps going round it on ONE side until it is nearer its aim point than where it first met the
-body (the slide side is not cleared by one open tick), and flips side only at a dead end, once. Look further than 1 m
-for the first contact so a small prop is passed without touching it. Vehicles ride the same rule (hulls are in the
-sweep). Soldiers: leave to the separation pass unless the tests below show a stall.
-
-## Acceptance
-- A bot test: a bot sent past a round block, a crate, a parked vehicle, a turret and a standing friend reaches its goal
-  without a wall slide of more than 1 s at any of them (unit tests in `steer.rs` / `brain.rs`); and one past a 20 m
-  wall across its line reaches the goal without changing side (mutation-check each test).
-- `OBST_CSV` census, 8 seeds x 10 min (`lead_tmp/obst/tools/census.py`): body-class stalled windows 4,416 -> under
-  2,200; the three legs named above each under a quarter of their count; contact time on bodies under 3 m (1.38 % of
-  walking time) halved. Paste the before / after lines.
-- No map's 8-seed finish count drops (`scripts/sweep_seeds.py`, re-run the baseline on main first); RCYC's recycles do
-  not rise. Declared sweep moves; goldens unchanged.
 
 ## Notes
 - Related and already landed: OFFG (ramps were walls), BOWL (rim rails), STLVL (levels), STARC (walking in place at the

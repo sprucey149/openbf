@@ -1,4 +1,5 @@
 //! Game library: asset loading + viewer wiring. The binary is the CLI.
+pub mod alloc_count;
 pub mod ambience;
 pub mod animator;
 pub mod announce;
@@ -47,7 +48,6 @@ pub mod point_light;
 pub mod profile;
 pub mod render_blend;
 mod repair_feedback;
-pub mod ride;
 pub mod roster;
 pub mod round_end;
 pub mod round_stats;
@@ -73,5 +73,6 @@ pub mod vo;
 pub mod walk;
 pub mod water_anim;
 pub mod weather;
+pub mod world_fingerprint;
 
 pub mod walker_shots;

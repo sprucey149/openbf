@@ -171,6 +171,42 @@ fn restock(sim: &mut Sim, owner: UnitHandle, weapon: usize) {
     u.held[k].state.spare += 1;
 }
 
+/// A flown droid's overheated blaster clicks at the droid, for its human.
+#[test]
+fn a_press_on_a_flown_droids_overheated_blaster_clicks_at_the_droid() {
+    let (mut sim, owner, _) = setup(false);
+    launch(&mut sim);
+    press(&mut sim, 0);
+    let clicks = |sim: &Sim| {
+        sim.events
+            .iter()
+            .filter_map(|e| match e {
+                Event::FireEmpty { unit, pos, .. } => Some((*unit, *pos)),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    press(&mut sim, buttons::FIRE);
+    assert!(clicks(&sim).is_empty(), "a cool blaster fires");
+    press(&mut sim, 0);
+    run(&mut sim, PadState::default(), 0.5);
+    sim.droids[0].blaster.heat = 2.0;
+    press(&mut sim, 0);
+    assert!(sim.droids[0].blaster.overheated);
+    press(&mut sim, buttons::FIRE);
+    let at = sim.droids[0].pos;
+    assert_eq!(clicks(&sim), vec![(owner, at)]);
+    press(&mut sim, buttons::FIRE);
+    assert!(clicks(&sim).is_empty(), "held: one click per press");
+
+    // The same press on a droid whose owner is not a human is silent.
+    press(&mut sim, 0);
+    sim.unit_mut(owner).unwrap().is_player = false;
+    press(&mut sim, buttons::FIRE);
+    assert!(sim.droids[0].blaster.overheated);
+    assert!(clicks(&sim).is_empty(), "a bot does not click");
+}
+
 #[test]
 fn every_droid_times_out_quietly_at_90_s_and_hands_control_back() {
     for bf2 in [false, true] {

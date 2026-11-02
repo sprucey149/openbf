@@ -22,12 +22,17 @@
 //!   the run-down ends ([`JetShot`]) - on every jet's end: a tap, empty
 //!   fuel, a landing, a death.
 //!
+//! - A flyer feeds the same component (§3.4, §4): |v| / `MaxSpeed`, that speed's
+//!   change over `Acceleraton`, on with a pilot and off only once landed. Takeoff and
+//!   landing switch its time graphs to wind-up and wind-down and play `TakeoffSound`
+//!   and `LandSound` ([`JetShot`]).
+//!
 //! Not here (card VSN2): the vehicles' `TurnOnSound` / `TurnOffSound`, walker
-//! steps, the turret whir, collision. Flyers feed the same component on the
-//! PS2 (§4) and are not fed here.
+//! steps, the turret whir, collision, a flyer's `BoostSound` and cockpit chatter.
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::walk::WalkSim;
+use core::vehicle::flyer::FlightPhase;
 use core::vehicle::{Vehicle, VehicleKind};
 use glam::Vec3;
 use manifest::{EngineLayer, EngineSound};
@@ -70,6 +75,8 @@ pub struct Inputs {
     /// The run-down: `turnofftime` graphs read the timer and `turnontime`
     /// graphs 1.0; otherwise the other way round (B1 `FUN_00365bc0`).
     pub turning_off: bool,
+    /// A flyer's `winduptime` or `winddowntime` takes the timer instead.
+    pub wind: Wind,
 }
 
 /// One layer's (gain factor, pitch factor): the product of its graphs per
@@ -84,8 +91,10 @@ pub fn factors(layer: &EngineLayer, i: &Inputs) -> (f32, f32) {
             "acceleration" => graph(&g.points, i.acceleration),
             "health" => graph(&g.points, i.health),
             "proximity" => graph(&g.points, 1.0),
-            "turnontime" if !i.turning_off => graph(&g.points, i.timer),
+            "turnontime" if !i.turning_off && i.wind == Wind::None => graph(&g.points, i.timer),
             "turnofftime" if i.turning_off => graph(&g.points, i.timer),
+            "winduptime" if !i.turning_off && i.wind == Wind::Up => graph(&g.points, i.timer),
+            "winddowntime" if !i.turning_off && i.wind == Wind::Down => graph(&g.points, i.timer),
             _ => 1.0,
         };
         match g.target.as_str() {
@@ -105,6 +114,19 @@ pub enum Drive {
     Hover { forward: f32, reverse: f32 },
     /// |velocity| in m/s; `previous - speed / dt`.
     Walker,
+    /// |velocity| / `MaxSpeed`; that speed's change per second / `Acceleraton`
+    /// (B1 `FUN_001d9180` B1:86624-86640).
+    Flyer { max_speed: f32, acceleration: f32 },
+}
+
+/// Which of the time graphs a flyer's timer feeds since its last takeoff or
+/// landing (§3.4): set at the takeoff, kept for the whole flight.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Wind {
+    #[default]
+    None,
+    Up,
+    Down,
 }
 
 /// A vehicle class's engine keys.
@@ -114,6 +136,10 @@ pub struct EngineClass {
     pub record: String,
     /// `TurnOffTime`, seconds of run-down after the pilot leaves.
     pub turn_off_time: f32,
+    /// A flyer's `TakeoffSound` (or `WindUpSound`, the same slot).
+    pub takeoff: Option<String>,
+    /// A flyer's `LandSound` (or `WindDownSound`, the same slot).
+    pub land: Option<String>,
 }
 
 impl EngineClass {
@@ -124,11 +150,19 @@ impl EngineClass {
             return None;
         }
         let time = db.prop(class, "TurnOffTime");
+        let sound = |keys: [&str; 2]| {
+            keys.iter()
+                .filter_map(|k| db.prop(class, k))
+                .map(|v| v.split_whitespace().next().unwrap_or("").to_owned())
+                .find(|v| !v.is_empty())
+        };
         Some(EngineClass {
             record,
             turn_off_time: time
                 .and_then(|t| t.trim().parse().ok())
                 .unwrap_or(TURN_OFF_TIME),
+            takeoff: sound(["TakeoffSound", "WindUpSound"]),
+            land: sound(["LandSound", "WindDownSound"]),
         })
     }
 }
@@ -145,6 +179,8 @@ pub struct Motion {
     pub throttle: f32,
     /// Health / max health.
     pub health: f32,
+    /// A flyer's flight state.
+    pub phase: Option<FlightPhase>,
 }
 
 impl Motion {
@@ -159,6 +195,7 @@ impl Motion {
             } else {
                 1.0
             },
+            phase: (v.kind == VehicleKind::Flyer).then_some(v.flyer.phase),
         }
     }
 }
@@ -178,6 +215,11 @@ pub struct Instance {
     /// Seconds since the play request, and each layer's voice playing.
     elapsed: f32,
     pub started: Vec<bool>,
+    /// A flyer's time graphs, and the flight state it was last seen in.
+    pub wind: Wind,
+    phase: Option<FlightPhase>,
+    /// A takeoff or a landing began in the last update.
+    pub wind_began: bool,
 }
 
 impl Instance {
@@ -193,10 +235,15 @@ impl Instance {
         mut r: impl FnMut() -> f32,
     ) {
         self.started.resize(layers.len(), false);
+        self.wind_began = false;
+        // A flyer starts its engine for any state but landed (B1:85415-85432) and
+        // stops it only there (B1:86590-86608).
+        let flying = m.phase.is_some_and(|p| p != FlightPhase::Landed);
+        let piloted = m.piloted || flying;
         // No pilot: the run-down starts, and ends at `TurnOffTime` (B1
         // `FUN_00366318`). A pilot with the engine off or running down:
         // on, the timer from 0, and one update at rest (`FUN_003660b8`).
-        if !m.piloted && self.on {
+        if !piloted && self.on {
             if !self.turning_off {
                 self.turning_off = true;
                 self.timer = 0.0;
@@ -204,7 +251,7 @@ impl Instance {
             if turn_off_time <= self.timer {
                 self.stop();
             }
-        } else if m.piloted && (!self.on || self.turning_off) {
+        } else if piloted && (!self.on || self.turning_off) {
             if !self.on {
                 self.elapsed = 0.0;
             }
@@ -224,16 +271,43 @@ impl Instance {
             // The original's operator-precedence slip, kept by BF2 (§4):
             // moving, it reads a gain graph at its left end.
             Drive::Walker => (m.speed, self.previous - m.speed / dt),
+            Drive::Flyer {
+                max_speed,
+                acceleration,
+            } => {
+                let speed = m.speed / if max_speed == 0.0 { 1.0 } else { max_speed };
+                let per = if acceleration == 0.0 {
+                    1.0
+                } else {
+                    acceleration
+                };
+                (speed, (speed - self.previous) / dt / per)
+            }
         };
         if !self.on {
+            self.phase = m.phase;
             return;
         }
+        // Into takeoff or landing the timer starts over on the wind's graphs
+        // (B1 `FUN_003661b0`, `FUN_00366228`, both only while on).
+        if m.phase != self.phase {
+            let wind = match m.phase {
+                Some(FlightPhase::Takeoff) => Some(Wind::Up),
+                Some(FlightPhase::Landing) => Some(Wind::Down),
+                _ => None,
+            };
+            if let Some(wind) = wind {
+                (self.wind, self.timer, self.wind_began) = (wind, 0.0, true);
+            }
+        }
+        self.phase = m.phase;
         self.inputs = Inputs {
             speed,
             acceleration,
             health: m.health,
             timer: self.timer,
             turning_off: self.turning_off,
+            wind: self.wind,
         };
         self.previous = speed;
         self.timer += dt;
@@ -251,6 +325,7 @@ impl Instance {
     pub fn stop(&mut self) {
         self.on = false;
         self.turning_off = false;
+        self.wind = Wind::None;
         self.started.iter_mut().for_each(|s| *s = false);
     }
 }
@@ -332,6 +407,13 @@ impl EngineSounds {
                     _ => continue,
                 },
                 VehicleKind::Walker => Drive::Walker,
+                VehicleKind::Flyer => match walk.sim.flyer_params.get(class) {
+                    Some(Some(p)) => Drive::Flyer {
+                        max_speed: p.max_speed,
+                        acceleration: p.acceleration,
+                    },
+                    _ => continue,
+                },
                 _ => continue,
             };
             let (Some(rec), true) = (record(hash, &self.levels), v.alive) else {
@@ -356,6 +438,20 @@ impl EngineSounds {
                     (*seed >> 8) as f32 / 16_777_216.0
                 },
             );
+            if e.1.wind_began {
+                let (kind, name) = match e.1.wind {
+                    Wind::Up => (JetShotKind::Takeoff, &ec.takeoff),
+                    _ => (JetShotKind::Land, &ec.land),
+                };
+                if let Some(name) = name {
+                    self.shots.push(JetShot {
+                        unit: i,
+                        kind,
+                        name: name.clone(),
+                        pos: v.pos,
+                    });
+                }
+            }
             count.piloted += usize::from(m.piloted);
             count.on += usize::from(e.1.on);
             count.turning_off += usize::from(e.1.on && e.1.turning_off);
@@ -534,9 +630,12 @@ pub enum JetShotKind {
     TurnOn,
     TurningOff,
     TurnOff,
+    /// A flyer's: `unit` is then the vehicle's index.
+    Takeoff,
+    Land,
 }
 
-/// A jet's one-shot: the sound property's name, at the soldier.
+/// A jet's or a flyer's one-shot: the sound property's name, at the soldier or the craft.
 #[derive(Clone, Debug, PartialEq)]
 pub struct JetShot {
     pub unit: u32,

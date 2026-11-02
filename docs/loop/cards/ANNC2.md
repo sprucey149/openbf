@@ -52,24 +52,6 @@ Filed by the audit of ANNC (2026-10-02, PARTLY; `reports/20261002_0135_audit_ANN
   BF1 discs have no such script: BF1's engine gates its rate on alive < tickets every update (B1 238700-238702), which
   is what the port does — leave BF1 maps as they are.
 
-## Acceptance
-1. `factions`: a unit test — mission teams (cis, rep), walk factions [rep, cis], listener team 0: own bleed asks
-   `rep_off_com_report_us_overwhelmed`, the enemy's `rep_off_com_report_enemy_losing`, own low `rep_off_defeat_im`,
-   the enemy's low `rep_off_victory_im`. A faction the mission does not have (era mix) asks the line with the
-   listener's prefix when the map's sound library holds it, else nothing. Probe: `audit_annc 90000 42 keep 1` on
-   `bf2_uta1_con_cw.ron` and `bf2_myg1_con.ron` — 0 lines with another faction's prefix (today 3 of 14 and 9 of 15).
-2. `last_stand_rate`: a unit test of the script's rate — set at an owner change to the unclamped rule; with
-   alive >= tickets it reads 0 after 3.0 s (+- 1 tick) and stays 0 until the next owner change; with alive < tickets
-   it stays. BF2 maps only.
-3. PS2 pair (the referee): the scene of `live1.csv` (UTA1 CW as CIS, team 2's tickets held at 3): at each of the
-   five events `cis_off_com_report_enemy_losing` is asked in the event's frame and the rate reads 0 again 3.0 +- 0.1 s
-   later; the three events with CIS on 2-3 posts ask no bleeding line.
-4. Census, pasted into the report: the probe (`lead_tmp/audit-annc/audit_annc.rs`, copy it into
-   `crates/game/examples/`) over the 31 BF2 missions — bleeding lines asked = the PS2 rule's (0 missing, 0 extra;
-   today 133 against 210); the 26 BF1 missions unchanged (152 bleeding lines).
-`declares:` nothing if the rate lives in `game` (presentation; the HUD model reads it there); `sim` if it moves into
-`core::Sim` and its hash.
-
 ## Notes
 - Not built by ANNC and on no other open card — do them here or split: (a) BF1's no-post line (B1 `FUN_002ad830`
   238807-238824: when team 1 holds no post, the low-reinforcement line `[listener][team 1]` is asked again on the

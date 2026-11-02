@@ -19,9 +19,6 @@ tries: 1
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 8 (17B's observation).
 
-## Acceptance
-Reachable (keep, with the test that reaches it) or not (delete behind a cleanup, every gate PASS).
-
 ## Finding (2026-10-24)
 Keep the loop: fixed-step CP bleed preserves the live ceiling, but an extra
 mission death drain reaches the unconditional repair with bleed zero. The legal

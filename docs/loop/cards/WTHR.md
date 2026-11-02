@@ -43,21 +43,6 @@ scores them against the state's screenshot; `--export` writes a test vector), `f
 `regions.py`, `census.py`. Vectors: `lead_tmp/wthr/vectors/bf2_kam1_cp1_cp6_b000.json` (a rain-shadow view, 27 cells),
 `bf2_mus1_cp0_cp5_b000.json` (a plain view, 28 cells).
 
-## Acceptance (run and paste each)
-1. Unit tests on the two vectors: from the vector's camera, regions and particle array the port's cell walk gives
-   the same cell set with each alpha within 1e-3, the same far / fade start / dpx and the same streak vector
-   (the vectors are the Python model's output, itself scored against the PS2 frames).
-2. Unit tests of the rules with PS2 numbers: the wind's RAM row (from (1.2584, 0, 0.6926), target (1.1839, 0,
-   0.6062), clock 0.8667 -> (1.1938, 0, 0.6177)); the streak colour byte rule (216, 220, 228) -> (91, 94, 101);
-   the flake edge (0.015 -> 0.0332 m, 0.03 -> 0.0774 m); the splash interval (spread 8, rate 7, a 12.7 x 11 m box
-   -> 23.5 a second); the region overlap tests of kinds 5 and 7 and kind 2's centre test.
-3. The frame test (a scratch example or a test): the port's weather layer rendered at the pose of
-   `bf2_kam1_walk_cp5_cp5_b000` with that state's particles, wind and time offset -4/60 s injected, scored against
-   the state's screenshot as `predict.py` does: correlation >= 0.40 (the Python model: 0.53; a shuffled particle
-   array <= 0.02 - run that control too). At the two indoor poses (`cp0_cp1`, `cp3_cp2`): 0 streak pixels.
-4. Pictures for the maintainer: BF2 KAM1 and BF2 HOT1 / MYG1 at one walk pose each beside the PS2 frame.
-Each rule broken should fail one test (mutation-check at least: tile 4 m, no rain shadow, the fade on flakes).
-
 ## Build notes (decisions taken in the RE; reversible)
 - Viewer-side, not sim state: its own LCG stream, frame dt; the sim hash must not move (`declares:` has no sim).
 - Streak width: the PS2's line is 1 pixel of 512; draw a streak 1/512 of the frame's width (>= 1 px) so the look
@@ -80,27 +65,11 @@ WTHR. [TODO — ADDED 2026-09-25 (lane 1) by PXC batch 2 (FINDINGS F11); **[RE] 
 - The RE may run; the BUILD waits on the maintainer: PLAN's LOCKED FEATURE SET has no weather, and adding it is his call (STATUS
   For the maintainer). Do not set this card to phase=build until INBOX answers.
 
-## Planner note (2026-09-26)
-The maintainer answered (INBOX 2026-09-25): weather is in scope. The earlier "build waits on the maintainer" note is void — RE, then build as
-any other card. Value 2 → 3 (visible on both Kaminos).
-
 ## Note (PXWA, 2026-09-29, lane 2): BF1 Rhen Var snows
 The PCSX2 walkabout shows falling snow on BF1 RHN1 (and flakes on RHN2) at every post; the port draws none. RHN1.LVL
 authors `Precipitation` / `fx_snow` / `rhn1_snow_01` (disc strings). Frames: `engine/artifacts/pcsx2/ref/bf1_rhn1/walk/
 pairs/cp0_cp2__sheet.png`, `cp4_cp5__sheet.png`. The snow may also be part of RHN1's near haze (FARC note).
 - 2026-09-29 (PXWB, FINDINGS F56/F60): BF2 too — heavy rain at every outdoor KAM1 post (`pcsx2/ref/bf2_kam1/walk/pairs/cp1_cp6__sheet.png`), falling snow on HOT1 (`bf2_hot1/walk/pairs/cp4_cp7__sheet.png` b090/b270), ash on MYG1 (`bf2_myg1/walk/pairs/cp0_cp4_con__sheet.png`).
-
-## Planner note (2026-09-30, M-ALPHA)
-`defer: post-alpha` — not needed for the alpha's six showcase maps or its checklist. Value 3 (kept).
-
-`acceptance: needed` (planner 2026-09-30): no measurable acceptance yet (a parity delta, a leak-census count, a sim replay hash or a pixel test). Write one before the card is picked.
-
-- Planner 2026-09-30 17:30: Raised 3 → 4: the maintainer plays Kamino (INBOX 11:10) and KAMR (M1 5) is its bring-up; KAMR's geometry and sea fixes do not wait for weather, but the rain and lightning are the next visible Kamino gap after them.
-
-## Acceptance (planner 2026-09-30 17:30)
-- RE: each map's `Precipitation` / weather block (particle type, density, fall speed, streak length, colour, wind) and the lightning rule (interval, flash, bolt draw), per game, [V]/[O] with the verifier.
-- Built: at the PXWB walk poses of BF2 KAM1, HOT1 (snow), MYG1 (ash) and BF1 RHN1 (snow), a pixel test on a sky/air box: the count of precipitation pixels (a high-pass mask over consecutive frames) within ±30 % of the PS2 pair's, median over the four bearings; fall speed within ±15 % measured over consecutive frames; a unit test pins the lightning interval rule.
-- Alpha: yes, and no longer post-alpha — HOT1's snow and MYG1's ash fall on two showcase maps (PXWB F56/F60).
 
 ## Note (KAMR RE, 2026-09-30, lane 3): the Lightning effect is read — use it
 `analysis/re-kamino.md` §1: the disc block (BF1 KAM1, BF1 YAV2, BF2 KAM1: Lightning + LightningBolt("skybolt") +

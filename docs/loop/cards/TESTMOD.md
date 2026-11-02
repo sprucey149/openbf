@@ -32,15 +32,6 @@ The module contains the existing
 A source search of engine/ and scripts/ finds no code reference to feed_tests
 other than that declaration. See reports/20261025_0540_card_RIDERSTATE.md.
 
-## Scope
-Rename only that private test module to the scanner's existing accepted `tests`
-spelling. Retain its entire test body, production code and test discovery.
-Do not generalize the scanner or add a file/directory/drawing exemption. No new
-test is needed for a module rename: the failing referee and existing replay
-regression are the discriminating checks. Preserve fmath.rs, BANNED, DRAW_CALLS,
-PRESENTATION, ci.sh, all gate configuration and runtime/hash pins byte for byte.
-This does not reopen GCL16, RIDERSTATE, CLN6 or CLN9 acceptance.
-
 ## Acceptance
 1. Reproduce the exact referee failure on the unmodified parent, then require
    exit 0 after the module rename, with 1 executed test. Preserve both logs.

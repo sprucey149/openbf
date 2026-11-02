@@ -339,6 +339,9 @@ pub fn mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
     let aliases: Vec<&str> = match mode {
         "con" => vec!["con", "conquest", "cp-conquest"],
         "ctf" => vec!["ctf", "1flag", "1ctf", "ctfcp"],
+        // Space Assault's layer, as the six scripts and worlds spell it: `spa6_obj_hangar`
+        // with `spa6_obj_spawn`, `spa3_swing_obj`, `spa8_ass_spawn`, `spa1_swingassault`.
+        "ass" => vec!["obj", "obj_spawn", "ass_spawn", "swing_obj", "swingassault"],
         other => vec![other],
     };
     // Layers named for a DIFFERENT mode must never be picked as fallback.
@@ -424,19 +427,48 @@ impl Scene {
         if !(unit.is_finite() && unit > 0.0 && p0.iter().all(|c| c.is_finite())) {
             return None;
         }
-        Some(core::heightfield::Heightfield {
-            size,
-            unit,
-            offset_x: -p0[0],
-            offset_z: -p0[2],
-            // The grid ONLY: anything after `size²` is a shipped PTCH
-            // replacement mesh, which is render geometry (see
-            // `terrain_grid_size`). The sim's ground stays the heightfield
-            // plus `is_cut_by`, exactly as before.
-            heights: t.positions[..(size * size) as usize]
+        // Only the leading size² grid participates; appended PTCH replacement
+        // vertices remain render geometry.
+        // The donor may draw more terrain than the PS2 reference. Keep that
+        // mesh intact, but use the reference's centered query frame: adding a
+        // larger grid offset rounds float32 cell fractions differently even
+        // at ordinary in-bounds spawn points.
+        let query_size = self.manifest.terrain_query_size.unwrap_or(size) as usize;
+        let render_size = size as usize;
+        if query_size < 2
+            || query_size > render_size
+            || !(render_size - query_size).is_multiple_of(2)
+        {
+            return None;
+        }
+        let start = (render_size - query_size) / 2;
+        let first = t.positions[start * render_size + start];
+        if self.manifest.terrain_query_size.is_some()
+            && (first[0] != -(query_size as f32 / 2.0) * unit
+                || first[2] != -(query_size as f32 / 2.0 - 1.0) * unit)
+        {
+            return None;
+        }
+        let heights = if start == 0 {
+            t.positions[..query_size * query_size]
                 .iter()
                 .map(|p| p[1])
-                .collect(),
+                .collect()
+        } else {
+            (start..start + query_size)
+                .flat_map(|z| {
+                    t.positions[z * render_size + start..z * render_size + start + query_size]
+                        .iter()
+                        .map(|p| p[1])
+                })
+                .collect()
+        };
+        Some(core::heightfield::Heightfield {
+            size: query_size as u32,
+            unit,
+            offset_x: -first[0],
+            offset_z: -first[2],
+            heights,
         })
     }
 
@@ -1331,6 +1363,64 @@ mod tests {
         assert_eq!(terrain_grid_size(&pos[..n + 2]), None);
     }
 
+    #[test]
+    fn canonical_terrain_query_frame_preserves_float32_interpolation() {
+        let terrain = |n: usize| {
+            let unit = 4.0;
+            let half = n as f32 * unit / 2.0;
+            CpuMesh {
+                positions: (0..n)
+                    .flat_map(|z| {
+                        (0..n).map(move |x| {
+                            let wx = x as f32 * unit - half;
+                            [wx, wx, z as f32 * unit - (half - unit)]
+                        })
+                    })
+                    .collect(),
+                normals: vec![],
+                uvs: vec![],
+                colors: vec![],
+                indices: vec![],
+                submeshes: vec![],
+                spec: vec![],
+                light: vec![],
+                scroll: vec![],
+                sphere: None,
+                vis_top: None,
+            }
+        };
+        let mut reference = scene("None");
+        reference.terrain = Some(terrain(128));
+        let canonical = reference.heightfield().unwrap();
+        let mut donor = scene("None");
+        donor.terrain = Some(terrain(256));
+        let uncorrected = donor.heightfield().unwrap();
+        let point = (106.14756, 104.78419);
+        assert_ne!(
+            canonical.height_at(point.0, point.1).to_bits(),
+            uncorrected.height_at(point.0, point.1).to_bits()
+        );
+        donor.manifest.terrain_query_size = Some(128);
+        let corrected = donor.heightfield().unwrap();
+        assert_eq!(corrected.size, canonical.size);
+        assert_eq!(
+            (corrected.offset_x, corrected.offset_z),
+            (canonical.offset_x, canonical.offset_z)
+        );
+        assert_eq!(corrected.heights, canonical.heights);
+        for (x, z) in [point, (-14.554941, -124.45938), (-300.0, 300.0)] {
+            assert_eq!(
+                corrected.height_at(x, z).to_bits(),
+                canonical.height_at(x, z).to_bits()
+            );
+        }
+        assert_eq!(donor.terrain.as_ref().unwrap().positions.len(), 256 * 256);
+        for invalid in [0, 1, 127, 257] {
+            donor.manifest.terrain_query_size = Some(invalid);
+            assert!(donor.heightfield().is_none());
+        }
+    }
+
     /// A manifest with a base graph and one conquest layer. `plan` names the
     /// layer's own sidecar when it ships one, so the test can tell which graph
     /// survived the merge.
@@ -1461,6 +1551,63 @@ mod tests {
                 wet.then_some(2.0)
             );
             assert_eq!(sim.water_under(origin), wet.then_some(authored.height));
+        }
+    }
+
+    /// Every space map's Assault layer, as its script and its worlds spell it, and
+    /// never its CTF or one-flag layer.
+    #[test]
+    fn space_assault_picks_each_maps_objective_layer() {
+        for (worlds, want) in [
+            (
+                vec![
+                    vec!["spa6_ctf_spawn", "spa6_ctf_flags"],
+                    vec!["spa6_obj_hangar", "spa6_obj_spawn"],
+                ],
+                1,
+            ),
+            (
+                vec![
+                    vec!["spa3_2_flag_ctf"],
+                    vec!["spa3_swing_obj", "spa3_cisfrigate"],
+                ],
+                1,
+            ),
+            (
+                vec![
+                    vec!["spa8_ctf_spawn"],
+                    vec!["spa8_ass_paths", "spa8_ass_spawn"],
+                ],
+                1,
+            ),
+            (
+                vec![
+                    vec!["spa1_transports"],
+                    vec!["spa1_swingassault", "spa1_mp_flyers"],
+                    vec!["spa1_ctf"],
+                ],
+                1,
+            ),
+        ] {
+            let layers: Vec<String> = worlds
+                .iter()
+                .map(|w| {
+                    let names: Vec<String> = w.iter().map(|n| format!("{n:?}")).collect();
+                    format!(
+                        r#"(name: {:?}, worlds: [{}], regions: [], instances: [])"#,
+                        w[0],
+                        names.join(",")
+                    )
+                })
+                .collect();
+            let m: Manifest = ron::from_str(&format!(
+                r#"(map: "s", source_game: "bf2", terrain_name: None, sky_name: None,
+                    terrain_glb: None, models: [], textures: [], classes: [], geometries: [],
+                    regions: [], instances: [], layers: [{}])"#,
+                layers.join(",")
+            ))
+            .unwrap();
+            assert_eq!(mode_layer_index(&m, "ass"), Some(want), "{worlds:?}");
         }
     }
 

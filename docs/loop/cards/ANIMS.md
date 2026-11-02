@@ -35,14 +35,3 @@ every droid stand, walk and fire as riflemen. This card bakes what the PS2 plays
 - The two resolvers are re-implemented and checked against PS2 memory: engine/artifacts/lead_tmp/anim/sets_bf1.py
   (979 of 979 slots) and sets_bf2.py (665,176 of 665,176 slots over 176 battle states, 38 sets); sanm.py decodes the
   chunk (258 of 258 live records equal it). Port those two files; do not re-derive the rules.
-
-## Acceptance
-1. A bake test resolves BF1's six tables from the disc and equals the key sets_bf1.py writes (--json): 979 of 979
-   slots (clip name and frame count). Mutation check: drop the fallback table, see it fail.
-2. A bake test resolves the BF2 sets of the six showcase maps' sides (families, classes and sets as their class ODFs
-   register them, analysis 6.2) and equals sets_bf2.py's model for a UTA1, a MYG1 and a HOT1 state: 0 slots differ.
-3. mungefs reads the sanm chunk: 192 scopes; stand_shoot_upper = Torso 0.02 / 0.02, stand_runforward_lower = Loop,
-   sync forward, 0.15 / 0.15, BlendTimeTo(standalert_runforward, 0).
-4. Every baked soldier carries its sets' clips and the two bone masks (BF1 13 upper bones; BF2 all but root, pelvis,
-   legs); paste the per-side clip counts before / after into the report. The animator may still play the rifle set:
-   no golden may move (ANIML moves them).

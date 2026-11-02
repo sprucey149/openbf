@@ -30,22 +30,6 @@ ejected [H]. PROVISIONAL (ours): every rider dies'). The player who shoots a tan
   112 against main's 116 / 111 / 115; world_death_pct 1.48 / 1.41 / 1.47 - the whole rise is riders.
 - The blast of the wreck already carries the PILOT as its attacker (re-vehicle-death 4 [O]); who is credited with the riders is unread.
 
-## What to do
-1. RE (the discipline; both games): the seat object's vtable +0xc at the vehicle's death (B1:96789 and BF2's twin) - is the occupant
-   killed or ejected, with what damage owner; where the kill is counted (the destroyer's score, the team's reinforcement count).
-   One live check on PCSX2: destroy a manned vehicle and read the score rows before and after (`ps2live.py`).
-2. Build what it says: the riders' deaths as kills by the destroyer (an `Event::Kill` with the weapon that took the hull), or the
-   ejection; a vehicle nobody destroyed (a fall, a collision) keeps the world death.
-3. The gate: `world_death_pct` then counts what it was written for (falls, regions, floors, lost and stalled bots); the planner re-takes
-   the baseline.
-
-## Acceptance
-- The RE section in `analysis/re-vehicle-death.md` with one verifier, and the live rows.
-- A test: a manned hover destroyed by an enemy's rocket - the rider's death is a kill of that enemy (the RE says: killed, not ejected);
-  the same hover destroyed by a collision is a world death. A two-rider hover: two kills, the driver's last.
-- 8 seeds x 32 maps, main beside the branch: world deaths by cause (`wcause.py`), 256 / 256 rounds, kills a minute within the seed
-  noise.
-
 ## Notes
 - 2026-10-13 lane 1 (HVYW): filed from the fidelity gate's reading of HVYW. HVYW's own change is not in this path (it fires the
   rockets; `destroy_vehicle` is untouched).

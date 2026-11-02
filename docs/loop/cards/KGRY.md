@@ -30,11 +30,6 @@ drawn model or a sky-layer piece, not a cloud. KAMR's RE ruled out: map models w
   list recorded (`pose_render`/a debug draw-id pass) and name the draw by its model/segment; then read why it is grey (default
   material, a missing sheet drawn as flat colour, a far-scene piece with no texture) and why it is there.
 
-## Acceptance
-A named model/draw for the grey polygon, its cause, and a fix card (or the fix in this card's build phase) — after which a
-render at the pose of `kam1_bf2_2230_invisible_rails.png` shows no flat grey polygon in the sky (pixel test: the sky band has no
-region of constant (170-190, 170-190, 170-190) bigger than 200 px). Compare the PS2 pair for the same view if one exists.
-
 ## Notes
 Filed 2026-09-30 22:50 from the maintainer's third BF2 Kamino play session (three frames, `lead_tmp/playtest_0930/kam1_bf2_2230_*.png`); a claim in Why/Evidence marked as reading of the image is Claude's, not measured.
 

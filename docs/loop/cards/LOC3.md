@@ -50,19 +50,6 @@ fixture; `goals_vs_ram.py`, `posts_vs_ps2.py`, `start_vs_ps2.py` score the port 
 `observer_af03b6c.patch`). The baked graph equals the PS2's RAM graph on 32 of 32 maps (`tools/goals_pts.py`).
 RE_LOG: the planning-graph entry's "Audit 2026-10-03" addendum.
 
-## Acceptance
-1. A test over the fixture (soldier and vehicle filters): `locate` gives the PS2's stored kind (hub / corridor /
-   nearest arc) and, where one is stored, a hub or arc whose ends hold the PS2's destination, for 1,004 of 1,004
-   distinct objects (today's XZ reading: 726 by `variants.py`; the port's code at 921 soldier goals: 849). Mutation-check it:
-   XZ for one step must fail.
-2. Posts: 185 of 185 on the PS2's hub or an end of its goal arc (today 183), `posts_vs_ps2.py`.
-3. The level rule, decided by measurement, three variants over 32 seeds x 32 maps with `tools/perseed.py`: (a)
-   today, (b) the PS2's locate with the level rule, (c) the PS2's locate without it. Keep (c) unless a map gets
-   worse by |t| >= 3 on recycles per round, round length or lost unit-seconds; what stays of the level rule is
-   written down as a NAMED deviation with its numbers (`analysis/bot-design.md`'s list), and the two doc comments
-   are corrected either way.
-4. Sweep finishes >= 1,023 of 1,024 over 32 seeds, total recycles <= 927 (main at af03b6c).
-
 ## Notes
 - Behind BOTD like every bot build card (the maintainer's note of 2026-10-03 00:20): it moves every bot's path.
 - The end choice needs a route that ends on an ARC (the PS2's path keeps `[3]` the end it reaches and `[4]` the

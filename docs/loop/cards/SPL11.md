@@ -21,9 +21,6 @@ Filed by cleanse CLNG (2026-10-02): `scripts/size_report.sh --strict` exited 1 o
 
 ## Evidence
 
-## Acceptance
-A pure move (`engine/artifacts/briefs/SPLIT_RECIPE.md`): every gate PASS with nothing declared (sim hashes, sweep, arena, leak identical); `size_report.sh --strict` exit 0 with the brain.rs waiver line deleted; `--check-map` 0 stale.
-
 ## Notes
 
 ## Planner 2026-10-02 17:45 - waits for BOTD

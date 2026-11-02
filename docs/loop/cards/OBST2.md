@@ -36,37 +36,6 @@ Card OBST (landed e9ce6db, 2026-10-07) built the part of `analysis/bot-design.md
 - A penned bot gives its post up 10 s later than under MOVR (the going-round allowance), and its six failed windows need no longer be in a row (`a_blocked_walk_fails_recovers_and_gives_its_post_up`).
 - B2 still missed: KAM1 stay path 3.5 m (bar 3.0), KAS2 13.4 m / 2.42 reversals (bars 3.0 / 0.72).
 
-## Acceptance
-- **This landing (item 5 only, 2026-10-09; LANDED as 600fac7 + 996313a, every gate PASS, nothing moved):** a headless snapshot of the new binary
-  (`BLACKBOX_AT=4000 round_to_outcome 4000 42 bf2_kam1`) read by `blackbox_read` prints `does <behaviour>` on every
-  bot's line and `ROUND side -1, nearest 32.5 m, allowance 0.5 of 10 s` on a bot going round a body; the sweep rows
-  of that run are byte-equal to main's (`lead_tmp/obst2/bb/`: `cmp new_kam1.txt base_kam1.txt`); the legend test
-  (`blackbox::tests`) holds both new keys. RAN, pasted in the report.
-- **The landing of 7dfb448 (item 1's cause, 2026-10-09 evening; RAN, pasted in the report):** the 24-seed table
-  (recycles 202 -> 160, the bar "not over main's"; rounds 768 / 768), `inbarr2.py` on the four maps (2.75 -> 1.46 %),
-  the OBST census (stalled windows 1.05 -> 0.70 %, the bar 1.13), the maintainer's scene on the cleaned and on the rebased
-  binary, the fidelity gate (0 worse, 14 better), five new tests each failing under its mutation (the old search,
-  the bare-rectangle pick, the placed-rectangle pick, one corner only, no continuation / always a new search).
-  B10 itself is NOT met (KAM1 1.98 for 0.80, POL1 1.87 for 0.32, DEA1 1.86 for 1.16, KAS2 0.32 for 0.26).
-- **Branch `obst2` 45c40cf (item 4's first half + item 3's scene test, 2026-10-09 night; ci green, NOT gated and NOT
-  landed - STOP was seen; every check below RAN on the branch binary `bin/c3`, base main 7dfb448):** per tick on the
-  four B13 maps, one run at a time, 6 seeds (`tools/perf.sh` + `perf_sum.py`, `perf/final_j1`, `perf/final3k_j1`):
-  0.239 -> 0.181 ms over whole rounds (x 0.76, per-seed sd 0.09), 0.269 -> 0.191 over the first 3,000 ticks (x 0.71,
-  sd 0.035); main against its own copy x 1.001 (12 seeds) and x 0.994 (4). 24 seeds x 32 maps (`ab/m7`+`m7_b`,
-  `ab/r1`+`r1_b`): rounds 768 / 768 both, recycles 160 -> 157, kills 176,921 -> 176,373, floor 142 -> 159, region
-  52 -> 54, lost 59 -> 56. Stalled windows 1,840 of 230,566 -> 1,919 of 233,358 (0.80 -> 0.82 %, the bar 1.13).
-  In a barrier, 8 seeds: 1.56 -> 1.36 % on the four maps (KAM1 2.11 -> 1.42, POL1 1.99 -> 2.24, DEA1 2.01 -> 1.58,
-  KAS2 0.32 -> 0.35). The maintainer's scene 0 of 409 and 1 of 392 (main 5 of 421 and 2 of 379). Seven mutations of the three
-  cost tests and two of the corridor test fail them. B13 is NOT met (0.181 for 0.123; the steering's share was not
-  re-profiled on this binary).
-- B10 with the barrier rule: bot time inside a soldier barrier at most the PS2's on KAM1, POL1, DEA1, KAS2 (`inbarr.py` on BOT_SAMPLES); stalled windows not over OBST's 1.13 % (`lead_tmp/obst/tools/run.sh`).
-- B13: CPU for the four maps above at most half of 14.3 s; the steering under 25 % of the stack samples.
-- The corridor scene test, mutation-checked. (On branch `obst2`: `eight_bots_each_way_pass_in_a_three_metre_corridor` -
-  it PASSES on main's steering, so it is a referee for whatever item 3 builds, not a bar that item has to clear.)
-- 24 seeds x 32 maps: rounds 768 / 768, recycles not over 169 (`lead_tmp/obst/tools/sw.sh`, SEEDS=9-24 added to 1-8).
-
-- AUDIT OBST 2026-10-07 (PARTLY; `lead_tmp/audit-obst/README.md`, card OBSR has the three map findings). For this card: (1) rule 4 (the early turn) has no measurable effect on stalled windows on the landed code - without it 1.18 % against 1.25 % (3,065 / 3,124 windows; by seed four up, four down, paired t -0.43); `avoid.rs`'s header gives ONE configuration two numbers ("+ 3 1.26 %" and "without 4 1.43 %") - correct the header when this card touches it. Its gain is contact: a crate and a 1.8 m box are never touched in 252 placements each (the parent 198 / 216). (2) The cost (B13) is not resolved by the four-map run: user CPU 13.58 s / 55,238 ticks (parent) against 15.87 s / 59,687 (landing) and 15.19 s / 62,697 (main), 0.234 / 0.255 / 0.232 ms a tick - the builds play different rounds, so "14.3 s against 14.3 s" cannot be read finer than +-10 %; measure B13 per tick over many seeds (`tools/perf_run.sh`). (3) "A parked hull": of 252 placements (36 yaws x 7 offsets) of the test's 2.4 x 4.8 m box 44 cost over 1 s of blocked picks and 64 change side (a box's first corner is taken for a dead end, card OBSR 4) - the footprint rule of item 2 should be held to all placements, not one. (4) A standing friend is walked THROUGH: 2-3 ticks lost, the friend shoved 0.2-1.0 m (`tests/land_e9ce6db.txt`).
-
 ## Session 2026-10-09 (lane 2) - item 5 landed; item 1 (barriers) built, measured, NOT landed
 Everything is in `engine/artifacts/lead_tmp/obst2/` (README.md there: tools, patches, tables). Base = main eec32d1.
 **Baselines re-taken on main (the card's numbers were OBST's):** 24 seeds x 32 maps: rounds 768 / 768, recycles 198

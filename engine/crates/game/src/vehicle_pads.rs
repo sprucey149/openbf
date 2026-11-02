@@ -608,10 +608,9 @@ pub fn install(
             nodes: p.nodes.iter().map(|(at, _)| Vec3::from(*at)).collect(),
         })
         .collect();
-    // Bots stay off flyers on the ground maps: flying them changes their AI
-    // choices and hash stream. OPENBF_FLYER_BOTS=1 turns them on for a test
-    // (the later space maps set Sim::flyer_bots themselves).
-    sim.flyer_bots = std::env::var_os("OPENBF_FLYER_BOTS").is_some_and(|v| v == "1");
+    // Bots fly (`core::ai::flyer_drive`). OPENBF_FLYER_BOTS=0 keeps them on the ground,
+    // for a run measuring a map's ground war alone.
+    sim.flyer_bots = std::env::var_os("OPENBF_FLYER_BOTS").is_none_or(|v| v != "0");
     // What the use input and the exit read (card VSEAT).
     b.seats = b
         .classes

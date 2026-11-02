@@ -27,27 +27,6 @@ message on the PS2; the port shows a placeholder box ("X killed Y" for every dea
   kill line takes the victim's team colour.
 - BF1 shows "<TEAM> CAPTURED THE <POST>" / "<TEAM> LOST THE <POST>"; BF2 shows no post line (its Locl still holds both).
 
-## Do (port decisions are in the RE doc §7 — reversible)
-- Bake: the English `Locl` table of each CORE.LVL → `common*/locl/english.ron` ([hash → text]; `mungefs::locl`).
-- `ui::hud`: MultiLineText (queue, admit, expire by DisplayTime, fade, scroll; EventText + EventColor) and the
-  `player1stats` group's events (`statistic.points/.kills`, the Delta texts, `.changed`).
-- `game::hud_feed`: sim events → lines: types 0–3 under the PS2 gate; the hero lines; post captured / lost on EVERY map
-  (BF2's own unused strings 0xdd279cfc / 0xae1ec790 — the maintainer's ask; the BF2 PS2 shows none, one switch reverses it);
-  per-viewer colour from BF2's table. AI names from Locl `common.sides.<side>.firstnames/lastnames` (PROVISIONAL rule).
-- Leave the slots: squad orders (SQMK / SQACK, cyan) and awards (AWDM, cyan / yellow) are lines of this element.
-- Retire `windowed.rs`'s feed box.
-
-## Acceptance (run and paste)
-- Unit test, MultiLineText at 30 Hz: a line queued at t = 0 is fully shown from 0.5 s, starts fading at 3.5 s, is gone
-  at 4.0 s, each within ±2 frames (PS2 RAM 0.534 / 2.969 / 0.534); a fifth line while four are up is dropped; when the
-  top line goes the others move up one line.
-- Unit test, the gate: AI kills AI → no line; AI kills the human → "<name> killed Player 1" in the viewer's own-team
-  colour (1,86,213); the human kills an ordinary AI → no line and a `statistic.changed` with kills "+1"; a human
-  suicide → "Player 1 killed himself"; a post capture → "<team> captured the <post>" in the capturing team's colour.
-- A 640×480 4:3 port render holding the line "Ben Pulastra killed Player 1" against
-  `engine/artifacts/pcsx2/ref/evmsg/bf2_hot1_kill_line.png`: the text box within ±4 px of x 49–359, y 90–98.
-- `--sim-hash` unchanged; no sweep or arena move (the feed reads events, it makes none).
-
 ## Notes
 - ANNC RE 2026-09-30 (`analysis/re-announcer.md`): BF1's event consumer `FUN_00307a00`, BF2's twin `FUN_003e0320`; events 4 and 5 also ask for the post's voice line. "Leaving the battlefield" is card BNDY.
 - Not this card: the tooltip bar (card TIPS: "This CP is now controlled by your team." is a tooltip), split-screen layouts (`2playerhud` … have their own `playerN.message` elements — with the split-screen card).

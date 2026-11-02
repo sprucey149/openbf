@@ -51,6 +51,14 @@ pointer scans): `engine/artifacts/lead_tmp/s12/re/mtrl_scratch/`.
    and settle (a)/(b) with a PCSX2 capture** — §6 gives the exact GS state per named check; the census's
    thresholds encode the eye, the ELF encodes the disc, and they disagree on precisely the cases the lead flagged.
 
+**Applied to BF2 2026-11-01 (`bake::alpha::bf2_elf_verdict`), point 6(b):** a BF2 word with neither 0x02 nor 0x04 draws
+OPAQUE, no test. The census had cut those draws out on 15 BF2 maps (153 baked files change; collision and manifests do
+not) and in BF2's common bake (`hud_lightsaber`, `hud_force_saberthrow` and both holocron models). The HUD composites
+`hud_*` art by sheet alpha whatever the word, so those sheets keep it (`bake::map::content`'s `hud_named`). Checked against existing PCSX2 walkabout frames, not a new capture: `bf2_yav1/walk/pairs/cp4_bazaar` (the obelisk
+is plain stone, F47), `bf2_dea1/walk/pairs/cp2_cp5` b090 (the red console is whole). No PS2 frame exists inside DAG1's
+cave, whose wall (`dag1_prop_cave_C`, 0x10201) was the report; its result is the ELF rule plus port renders. BF2 words
+with 0x04 stay the census's (card ELFR2, unchanged).
+
 ## §1 Q1 — is `FUN_0058ed70` reached for world models? [V]
 
 - `RedModel` vtable `DAT_0064feb0`: slot 3 (+0xc) = `FUN_0057cf60` (`elfrd.py bf2 64feb0 6` → `0064febc: 0057cf60`).

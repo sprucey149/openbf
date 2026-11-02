@@ -1207,11 +1207,22 @@ def changed_files(tree, base):
     return r.stdout.split()
 
 
+# What the DLC bake writes among the retail files: its heroes' bodies, its renamed textures, and the weapons a real bake
+# lists in side_bf2/dlc_heroes.ron. The dot keeps a longer retail name out.
+DLC_PREFIXES = ("side_bf2/dlc_sounds/", "side_bf2/effects/dlc/", "side_bf2/textures/dlch_",
+                *(f"side_bf2/soldiers/{name}." for name in ("rep_inf_kitfisto", "cis_inf_asajjventress")),
+                *(f"side_bf2/weapons/{name}." for name in ("bubblev3", "cis_inf_weap_sabre_b_chain", "cis_inf_weap_sabre_f_chain",
+                                                           "cis_inf_weap_starblade", "fisto_l_fist", "fisto_l_foot", "fisto_r_fist",
+                                                           "temp_saber")))
+
+
 def bake_group_of(path):
     """The scripts/rebake.sh group that writes a baked file, from its path under assets_baked; None when no rule fits
     (gates_selftest.py holds the table against rebake.sh's group list)."""
     parts = path.split("/")
     top, sub = parts[0], parts[1] if len(parts) > 1 else ""
+    if path in ("classes/bf2_dlc.ron", "side_bf2/dlc_heroes.ron") or path.startswith(DLC_PREFIXES):
+        return "dlc"
     if sub == "sounds":  # every map dir's bank and core_bf*/sounds
         return "sounds"
     if top in ("tat1", "tat2"):

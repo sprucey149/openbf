@@ -637,7 +637,7 @@ pub(crate) fn friend_near_blast(sim: &Sim, team: u8, at: Vec3, r: f32) -> bool {
     if r <= 0.0 {
         return false;
     }
-    let mut near: Vec<u32> = Vec::new();
+    let mut near = crate::ai::team::NearList::new();
     sim.units_within(at, r + BLAST_CLEAR, &mut near);
     near.iter().any(|&i| {
         let o = &sim.units[i as usize];
@@ -678,7 +678,7 @@ fn friend_on_line(
         }
         Some(_) => f32::INFINITY,
     };
-    let mut near: Vec<u32> = Vec::new();
+    let mut near = crate::ai::team::NearList::new();
     sim.units_within(eye, bound, &mut near);
     for &i in &near {
         let (h, o) = (sim.handle(i as usize), &sim.units[i as usize]);
@@ -732,7 +732,7 @@ fn friend_in_blast(
         return None;
     }
     let (_, right, _) = u.aim_frame();
-    let mut near: Vec<u32> = Vec::new();
+    let mut near = crate::ai::team::NearList::new();
     sim.units_within(at, r + BLAST_CLEAR, &mut near);
     let mut best: Option<(f32, i8)> = None;
     for &i in &near {
@@ -794,7 +794,7 @@ pub(crate) fn release_blasts_own_side(sim: &Sim, i: usize) -> bool {
         return false;
     }
     let at = b.end - fwd * crate::weapon::EXPLOSION_OFFSET;
-    let mut near: Vec<u32> = Vec::new();
+    let mut near = crate::ai::team::NearList::new();
     sim.units_within(at, r + BLAST_CLEAR, &mut near);
     near.iter().any(|&j| {
         let o = &sim.units[j as usize];

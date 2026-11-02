@@ -31,14 +31,6 @@ BF2 TAT2 (the port's `tat2`) authors it too (threshold 150).
   −5.9 → −0.6; KAS2 −7.7 → −3.7; threshold-150 maps move ≤ 3; NAB1 −7.3 → +10.5 and BES2 −1.0 → +8.8 overshoot (their
   bright areas are already too bright in the port — re-measure after landing and card the cause if it stays).
 
-## Acceptance
-- The pass exists per map with the disc's Filter/Threshold/Intensity (HOT1: Intensity 0 → none; BF2 only TAT2), after the
-  3D scene and before the HUD, in display (gamma) units at native resolution.
-- PARITY: TAT1 median dluma within ±5 of the PS2 (TATL's target); no showcase map's mean block error rises > 0.5 (declare
-  `parity=` for NAB1/BES2 if they move and say why).
-- A pixel check: the port's TAT1 frame with the pass vs the PS2 frame at 3 poses, and the pass's own output vs the model
-  (the formula above) within 2 levels.
-
 ## Notes
 - Softness (every map, a 47 % blur-lerp) is SD softening — not part of this card (COMPARISON_RULES).
 - The PS2 truncates the blur offsets to 1/16-px integers (sub-pixel): the port's low-pass only needs to match a 2×2 box

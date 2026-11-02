@@ -1,8 +1,8 @@
 //! The map boundary's point test (`analysis/re-boundary.md` 2 [O]): the shapes
-//! a map's `bnd_` chunk names, BF1 `FUN_002956d8`, BF2 `FUN_0034c550`. Only the
-//! remote droid reads it so far (issue #59, `Sim::tick_droids`), with the warning
-//! the HUD and the commander give while it counts down; the soldiers' and vehicles'
-//! rule is card BNDY.
+//! a map's `bnd_` chunk names, BF1 `FUN_002956d8`, BF2 `FUN_0034c550`. The remote
+//! droid (issue #59, `Sim::tick_droids`) and flyers (`Sim::tick_flyers`) read it, with
+//! the warning the HUD and the commander give while it counts down; the rule for
+//! soldiers on foot and ground vehicles is card BNDY.
 
 use crate::soldier::GroundRules;
 

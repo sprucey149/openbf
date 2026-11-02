@@ -22,12 +22,13 @@ import sys
 import extract_lua
 import gen_missions
 import version_geometry
+import version_sky
 
 NAME = re.compile(r"^[A-Za-z0-9_./\\:<>+@*?=;|-]+$")
 NUM = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$")
 CLASS_TAGS = {b"entc", b"wpnc", b"ordc", b"expc"}
 CONTENT_TAGS = CLASS_TAGS | {b"modl", b"skel", b"coll", b"gmod", b"tex_", b"wrld", b"tern", b"zaa_", b"zaf_", b"scr_", b"font", b"plan", b"path", b"prim"}
-ALL_RESOURCE_TAGS = CONTENT_TAGS | {b"PATH", b"lght", b"Locl", b"mcfg", b"fx__", b"snd_", b"anim", b"bnd_", b"shdw", b"CLTH", b"comb"}
+ALL_RESOURCE_TAGS = CONTENT_TAGS | {b"PATH", b"lght", b"Locl", b"mcfg", b"fx__", b"snd_", b"anim", b"bnd_", b"shdw", b"CLTH", b"comb", b"sky_", b"plnp"}
 MAX_FILE = 2 << 30
 
 
@@ -231,7 +232,9 @@ def input_files(path, only=None):
         candidates = sorted(p for p in path.rglob("*") if p.is_file() and p.suffix.lower() == ".lvl")
         # An install may contain addons. Census the base LVL tree only; each
         # addon must be scanned separately so it cannot masquerade as retail.
-        roots = {p.parent for p in candidates if p.name.lower() == "mission.lvl" and p.parent.name.lower() in ("_lvl_pc", "_lvl_ps2", "_lvl_xbox")}
+        roots = {p.parent for p in candidates if p.name.lower() == "mission.lvl"
+                 and p.parent.name.lower() in ("_lvl_pc", "_lvl_ps2", "_lvl_xbox")
+                 and "addon" not in [part.lower() for part in p.relative_to(path).parts]}
         if len(roots) > 1:
             raise ValueError("multiple base LVL trees: choose one install/disc")
         root = next(iter(roots), path)
@@ -351,7 +354,7 @@ def mission_facts(body):
 
 
 def scan(path, geometry=True):
-    out = {"schema": 1, "source": {}, "files": [], "entities": [], "missions": [], "content": [], "errors": [], "unmeasured": ["mission_dynamic_execution", "geometry", "animation_root_motion"]}
+    out = {"schema": 1, "source": {}, "files": [], "entities": [], "missions": [], "skies": [], "content": [], "errors": [], "unmeasured": ["mission_dynamic_execution", "geometry", "animation_root_motion"]}
     texture_formats, lua_versions = collections.Counter(), set()
     geometry_files = set()
     for file, buf in input_files(path):
@@ -361,10 +364,17 @@ def scan(path, geometry=True):
             continue
         ordinals = collections.Counter()
         for scope, tag, payload, offset in walk_resources(buf):
+            if tag == b"sky_":
+                row = version_sky.parse(payload)
+                key = (tuple(scope), tag, row["name"])
+                ordinal = ordinals[key]
+                ordinals[key] += 1
+                out["skies"].append({"file": file, "scope": scope, "ordinal": ordinal, **row})
+                continue
+            if tag in {b"coll", b"prim", b"wrld", b"tern", b"zaa_", b"plan", b"plnp", b"path", b"PATH"}:
+                geometry_files.add(file)
             if tag not in CONTENT_TAGS:
                 continue
-            if tag in {b"coll", b"prim", b"wrld", b"tern", b"zaa_"}:
-                geometry_files.add(file)
             children = list(iter_chunks(payload))
             fields = {t: p for t, p, _ in children}
             raw_name = fields.get(b"TYPE", fields.get(b"NAME", b""))
@@ -417,7 +427,7 @@ def scan(path, geometry=True):
                 continue
             ordinals = collections.Counter()
             for scope, tag, payload, offset in walk_resources(buf):
-                if tag not in {b"coll", b"prim", b"wrld", b"tern", b"zaa_", b"plan", b"path", b"PATH"}:
+                if tag not in {b"coll", b"prim", b"wrld", b"tern", b"zaa_", b"plan", b"plnp", b"path", b"PATH"}:
                     continue
                 try:
                     parsed = version_geometry.parse_resource(tag, payload, out["source"]["game"])
@@ -531,6 +541,17 @@ def compare(left, right):
     for category in ("entities", "missions", "content"):
         for side in ("left_only", "right_only"):
             result[category][side + "_count"] = len(result[category][side])
+    if "skies" in left and "skies" in right:
+        indexes = [{(r["file"], tuple(r["scope"]), r["name"], r["ordinal"]): r for r in d["skies"]}
+                   for d in (left, right)]
+        a, b = indexes
+        common = sorted(a.keys() & b.keys())
+        differences = [{"identity": key, "left": {f: a[key][f] for f in ("sky_info", "low_res_terrain")},
+                        "right": {f: b[key][f] for f in ("sky_info", "low_res_terrain")}}
+                       for key in common if any(a[key][f] != b[key][f] for f in ("sky_info", "low_res_terrain"))]
+        result["skies"] = {"compared": len(common), "changed": len(differences),
+                           "left_only_count": len(a.keys() - b.keys()), "right_only_count": len(b.keys() - a.keys()),
+                           "differences": differences}
     if "geometry" in left and "geometry" in right:
         result["geometry"] = version_geometry.compare_geometry(left["geometry"], right["geometry"])
     return result

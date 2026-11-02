@@ -15,10 +15,6 @@ created: 2026-09-28
 ---
 Found by KOC's gates (engine/artifacts/lead_tmp/koc/gates/cmp_bake.txt: 5345 audio/global_bf2, 488 audio/global_bf1, plus the maps' sounds/*.ogg; strings shows Lavc62.28.102 in assets_baked, .103 in the scratch). Not a code change: rebake the audio groups (and let the next maps rebake refresh the per-map oggs), then check that a full scratch bake gives DIFF=0. Behaviour-neutral: the audio is byte-identical apart from the encoder tag.
 
-## Acceptance (planner 2026-09-30, the maintainer's INBOX 2026-09-29 item 5: value 2 → 5)
-- A full scratch bake against the shared bake gives `ONLY_IN_A=0 ONLY_IN_B=0 DIFF=0`, with SAME = the file count (memory: a zero result can hide an empty bake), or the gate excludes exactly the encoder-tag bytes of `.ogg` files and still DIFFs their audio payload (say which and why).
-- The next landing's bake gate reads no `.ogg` DIFF. Behaviour-neutral: every other gate PASS, nothing declared except the audio rebake itself.
-
 ## Closed 2026-09-30 (lane 2): already done by VTUR — measured, no rebake needed
 - Shared bake: all 5865 `.ogg` carry `Lavc62.28.103`, 0 carry `.102` (grep over engine/assets_baked). VTUR's landing
   (reports/20260929_0340_card_VTUR.md) declared `sounds,global-sound` for exactly this; audio dirs dated 2026-09-29 02:42.

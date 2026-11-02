@@ -51,7 +51,7 @@ scans for the virtual slots and constants; cracked every load-bearing property h
 the victims' collision spheres out of PS2 RAM (`engine/artifacts/pcsx2/ref/states/bf1_*.p2s`, EE RAM) and the
 `modl SPHR` chunks off the disc. Tools in `engine/artifacts/lead_tmp/re/vdth/`: `expc.py` (the discs' `expc`/`entc`
 classes with named props), `setter2.py`, `vt.py` (vtables by slot), `sphere_ram.py` / `soldier_w.py` / `veh_w.py`
-(RAM), `modlinfo.py`, `census.py` (§7); disassembly by `scripts/tools/eedis2.py`. Check output:
+(RAM), `modlinfo.py`, `census.py` (§7); disassembly by `scripts/tools/eedis.py`. Check output:
 `lead_tmp/re/vdth/checks.txt` (§9).
 **Conventions.** B1 = `analysis/SWBFRONT.ELF-decomp.c`, B2 = `analysis/SWBFRNT2.ELF-decomp.c` (line numbers); ELF VA
 → file offset = VA − 0x160000 + 0x1000. [V] read in the decomp; [V-instr] read in the disassembly; [V-RAM] measured

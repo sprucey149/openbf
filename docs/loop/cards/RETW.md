@@ -27,24 +27,8 @@ Card LVLF (2026-10-02) refereed every 'lost' death with the real soldier: after 
 - BF2 MYG1 1: (-25, 0.0, -44) under a y 4.0 walkway; 57 m flat to hub 114. BF1 YAV2 1: (25, -47.0, -36), 1 m under hub floors at -46.0, 2.9 m from ground the test calls on.
 - Tried in LVLF and dropped (8-seed runs `lead_tmp/lvlf/v1`, `v2`; code `lead_tmp/lvlf/tools/bounds_v2_return_walk.rs.txt`): `return_point` preferring hubs a STRAIGHT floor walk from the feet reaches, without and with a chest-high wall ray. KAM1's pod deaths went 2 -> 39 and 34 (the straight line at the 'reachable' hub 55 runs into the pod's wall; main's hub 54 is the door), UTA1 21 -> 12 and 10, DEA1 7 -> 10 and 7. A straight line is not enough: the walk needs a path.
 
-## What to do
-1. A bounded floor flood from the feet (the classifier's: `lead_tmp/lvlf/tools/lvlf_obs.rs` `flood`, 0.75 m cells, 0.6 m climb, a chest ray between cells) to the first hub on its own floor, run ONCE when a lost spell is confirmed and kept in `LostState` as waypoints; the return walk follows them. No path: today's hub cycle.
-2. STLVL first (it removes the UTA1 / MYG1 entries at their source) and OFFG (the same walk-back idea for off-graph bots): build this on what they leave.
-
-## Acceptance
-- `lvlf_probe classify` over 8 seeds x 32 maps x 60,000 ticks with `LVLF_LOG=1` (apply `lead_tmp/lvlf/tools/lvlf_obs.patch`, copy `lvlf_probe.rs.txt` into `crates/game/examples/`): FALSE (HUB + ON) lost deaths 34 -> 0; the ones left are STUCK / NOPATH and listed.
-- No map's 8-seed finish count drops (`scripts/sweep_seeds.py`, main re-run first); a unit test: a bot under a deck with a level hub round a corner walks to it.
-
 ## Notes
 - LVLF 2026-10-02: `resolve_nav_floors` still takes UTA1's bad spawn node (-46.0, 0.0, 225.2) as an anchor at the sinkhole's floor (-74.8), so the map's kill floor sits 15 m under THAT. Harmless today (the fall kills); fix it with the anchors if this card touches them.
-
-## Planner note (2026-10-02 09:30)
-Value 4 -> 3, and measure first. STLVL landed (9f5582e) and took the source this card named: `lost` deaths over 8
-seeds x 32 maps went 45 -> 10 (seeds 1-8) and 39 -> 14 (seeds 9-16), BF2 UTA1 31 -> 0 and 22 -> 6
-(`reports/20261002_0700_card_STLVL.md`, `lead_tmp/stlvl/c1_s1_8/seeds.md`). This card's 34 FALSE lost deaths were
-counted before that. First step now: `lvlf_probe classify` on main as in the Acceptance; if 5 or fewer FALSE (HUB + ON)
-deaths are left over 8 seeds, close the card with the table; otherwise build for what is left and rewrite the bar to
-that count -> 0. Reverse: `loopctl.py set RETW value=4`.
 
 ## Planner 2026-10-02 17:45 - waits for BOTD
 This card changes the soldier brain (`core/src/ai`) that the bot programme is about to redesign (the maintainer, 2026-10-02: "are we just implementing so many bandaid fixes to a fundamentally flawed bot algorithm"; BOTD: no rewrite before he has read the design). Held so no lane builds on the old brain meanwhile; BOTD adopts, rewrites or closes it when it cuts its build cards. Undo: remove BOTD from `deps:`.

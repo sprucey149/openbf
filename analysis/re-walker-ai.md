@@ -6,7 +6,7 @@
 the boost mode 3. All three are answered here, and the answer is checked tick by tick against PS2 RAM (§10).
 
 **Method.** Every function below was read in the B2 decomp and settled in the disassembly
-(`scripts/tools/eedis2.py`; dumps `lead_tmp/wai/dis_b2_*.txt`). Class ids were named from the vtables' own
+(`scripts/tools/eedis.py`; dumps `lead_tmp/wai/dis_b2_*.txt`). Class ids were named from the vtables' own
 getters (§1). Two live PCSX2 runs (software renderer) sampled every AI walker each game tick with the AI's move order
 beside the sticks (`lead_tmp/wai/wai_sample.py`), and `wai_check.py` replays the transcription against them.
 
@@ -228,7 +228,7 @@ Outputs in `engine/artifacts/lead_tmp/wai/`: `check1_lines.txt`, `checks.txt`, `
   python3 scripts/tools/refs.py b2 0x267038   # data ['0x61f72c', '0x62bd1c']
   python3 scripts/re_check.py callers b2 FUN_002ba7e0        # 2: FUN_002ba810, FUN_002f1d80
   python3 scripts/re_check.py callers b2 FUN_002b7e50        # 1: B2:238827 in FUN_002b6c20
-  python3 scripts/tools/eedis2.py bf2 0x262248 0x262668
+  python3 scripts/tools/eedis.py bf2 0x262248 0x262668
   cd engine/artifacts/lead_tmp/wai && S=../../pcsx2/ref/states
   python3 wai_check.py live_geo1.csv $S/bf2_geo1_cp1_cp7_postA_spawn.p2s
       ticks replayed 2996: throttle equal 2996 (100.0 %), strafe equal 2996 (100.0 %), both 2996 (100.0 %)   (×2)

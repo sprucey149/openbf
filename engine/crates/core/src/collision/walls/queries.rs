@@ -165,9 +165,7 @@ fn mesh_contact<S: parry3d::shape::Shape>(
     let mut best_wall: Option<parry3d::query::Contact> = None;
     for i in mesh.bvh().intersect_aabb(&query) {
         let tri = mesh.triangle(i);
-        let c = parry3d::query::contact(cap_iso, cap_shape, &body.iso, &tri, 0.0)
-            .ok()
-            .flatten();
+        let c = triangle_contact(cap_iso, cap_shape, &body.iso, &tri);
         let Some(c) = c else { continue };
         if start.is_some_and(|s| pushes_past(body, &tri, &c, s)) {
             continue;
@@ -325,9 +323,7 @@ fn ledge_contact(
                 {
                     continue;
                 }
-                let c = parry3d::query::contact(fiso, fshape, &body.iso, &tri, 0.0)
-                    .ok()
-                    .flatten();
+                let c = triangle_contact(fiso, fshape, &body.iso, &tri);
                 let Some(c) = c.filter(wall) else { continue };
                 if start.is_some_and(|s| pushes_past(body, &tri, &c, s)) {
                     continue; // card WPSH, as in `mesh_contact`
@@ -1136,6 +1132,54 @@ pub(super) struct StartContacts {
 }
 
 thread_local! {
+    static EPA_BUFFERS: std::cell::RefCell<parry3d::query::epa::EPA> =
+        std::cell::RefCell::new(parry3d::query::epa::EPA::new());
+}
+
+/// `parry3d::query::contact(iso, shape, tri_iso, tri, 0.0)`, without its
+/// allocations. A shape inside a mesh triangle falls back to EPA, and parry
+/// makes a new EPA, with empty lists, for every triangle: on BF2 Kashyyyk that
+/// was over half of a tick's allocations. These are parry 0.22.1's own steps
+/// (`contact_support_map_support_map_with_params`) with one EPA kept per
+/// thread; `closest_points` resets it first, so it holds nothing between calls.
+/// A ball, or a shape with no support map, takes parry's own path.
+pub(super) fn triangle_contact(
+    iso: &Isometry,
+    shape: &dyn parry3d::shape::Shape,
+    tri_iso: &Isometry,
+    tri: &parry3d::shape::Triangle,
+) -> Option<parry3d::query::Contact> {
+    use parry3d::query::gjk::{self, CSOPoint, GJKResult, VoronoiSimplex};
+    let support = shape.as_support_map().filter(|_| {
+        shape.as_ball().is_none() && shape.as_shape::<parry3d::shape::HalfSpace>().is_none()
+    });
+    let Some(support) = support else {
+        return parry3d::query::contact(iso, shape, tri_iso, tri, 0.0)
+            .ok()
+            .flatten();
+    };
+    let pos12 = iso.inv_mul(tri_iso);
+    let dir = parry3d::na::Unit::try_new(pos12.translation.vector, parry3d::math::DEFAULT_EPSILON)
+        .unwrap_or_else(parry3d::math::Vector::x_axis);
+    let mut simplex = VoronoiSimplex::new();
+    simplex.reset(CSOPoint::from_shapes(&pos12, support, tri, &dir));
+    let closest = match gjk::closest_points(&pos12, support, tri, 0.0, true, &mut simplex) {
+        GJKResult::Intersection => {
+            EPA_BUFFERS.with_borrow_mut(|epa| epa.closest_points(&pos12, support, tri, &simplex))
+        }
+        GJKResult::ClosestPoints(a, b, n) => Some((a, b, n)),
+        _ => None,
+    };
+    let (point1, point2_1, normal1) = closest?;
+    let dist = (point2_1 - point1).dot(&normal1);
+    let point2 = pos12.inverse_transform_point(&point2_1);
+    let normal2 = pos12.inverse_transform_unit_vector(&-normal1);
+    let mut c = parry3d::query::Contact::new(point1, point2, normal1, normal2, dist);
+    c.transform_by_mut(iso, tri_iso);
+    Some(c)
+}
+
+thread_local! {
     pub(super) static START_CONTACTS: std::cell::RefCell<StartContacts> = std::cell::RefCell::default();
 }
 
@@ -1235,11 +1279,7 @@ fn penetration_block(
                     continue; // a floor TRIANGLE is not a wall
                 }
                 let box_of = tri.local_aabb();
-                let at = |iso: &Isometry| {
-                    parry3d::query::contact(iso, shape, &body.iso, &tri, 0.0)
-                        .ok()
-                        .flatten()
-                };
+                let at = |iso: &Isometry| triangle_contact(iso, shape, &body.iso, &tri);
                 let s = box_of
                     .intersects(&local_start)
                     .then(|| {

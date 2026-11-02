@@ -32,14 +32,6 @@ Keep the previous tick's drawn state (unit and vehicle transforms, the camera, a
 sim never reads the blend: it is presentation only. The player's own camera turn keeps its input latency (the look input
 applied at the display's rate if the PS2-measured feel allows; FEEL_NOTES line either way).
 
-## Acceptance
-- Sim hash unchanged (`game --sim-hash 100`, `scripts/sim_gates.sh`): nothing in core changes.
-- A unit test: at accum = TICK/2 a unit's drawn position is the midpoint of its two ticks; a respawned unit is drawn at its
-  new spot with no blend (mutation-checked).
-- HITCH's recorder on a 144 Hz no-vsync windowed run (KAS2, 1 min, camera following a running soldier): the frames whose
-  drawn camera position did not move while the player moved go from ~ (1 - 30/fps) of frames to 0; pasted before / after.
-- Goldens unchanged (they render one tick, blend 1.0) or declared.
-
 ## Notes
 Opened by the planner 2026-10-20 17:50 on the maintainer's approval; waits on HITCH (deps) so its recorder can measure it.
 ## Landed 2026-10-21 17:55 (982999c, lane 1; report `reports/20261021_1756_card_RINT.md`)

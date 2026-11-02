@@ -22,10 +22,5 @@ first: 5
 ## Evidence
 `ui/src/spawn.rs` (the spawn screen: class row real, post cursor UI-side); card SPSEL (the spawn POST in the sim, the PS2's spawn-map pick); card BMAP2 (the spawn screen's map view); card CFOVM (the PS2 camera FOV in the spawn-select and death cameras); card UISN (the screens' sounds); `analysis/re-ambience-music.md` §6 (the PS2 spawn-screen state machine, already read). The in-game unit select (the rotating trooper line-up) is likely close to the same on PC and PS2 - verify against a PCSX2 capture before reusing a layout. PC-derived layouts are NOT the PS2's: the front-end shell differs between the platforms.
 
-## Acceptance
-1. `analysis/re-spawn-flow.md` [O]: the PS2's screen order, what each screen shows and which inputs move it, the side-select options (side 1 / side 2 / random / spectate?), what the death screen is, with PCSX2 captures cited; absence claims carry receipts per RULES.
-2. Build (own cards): a side-select screen at level start, post pick that reaches the sim (with SPSEL), class pick with the unit line-up, the respawn flow; each pinned by a test on the sim's choice and a golden of the screen.
-3. Replays reproduce: the choices ride the input log like the class choice does.
-
 ## Notes
 - planner 2026-10-19 16:25: the death camera belongs here too (what the PS2 shows between a death and the spawn screen: does it follow the body, turn to the killer, how long) - measure it in the same PCSX2 captures; card CFOVM is its FOV. The maintainer (INBOX 10-19 (a)): the in-game unit select (the rotating trooper line-up, framed by the map's camera shots) is probably the same on PS2 and PC, so its layout may follow the PC game's, checked against a PCSX2 capture; the shell is not (BSHL).

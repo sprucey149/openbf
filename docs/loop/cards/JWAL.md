@@ -47,14 +47,6 @@ shouldn't will ruin the game."
     and try the same jump. If the PS2 leaks too, close it anyway (the maintainer's call) and record the deviation in the RE doc
     and FEEL_NOTES.
 
-## Acceptance
-- A short RE (max effort, verifier in the foreground) that names the mechanism with a reproduction: the exact
-  position, heading, speed and tick at which the port's soldier enters. Then phase=build.
-- The KAS2 platform stops the jump-in; a regression test replays the maintainer's jump (walk, sprint, sprint-jump; several
-  headings round the wall) and asserts the soldier stays outside.
-- AI can't enter through the same gap: a nav route must not treat it as a shortcut (check the hub graph near it).
-- If the mechanism is general (e.g. tunnelling), the fix covers every map; LEAK's census is the check.
-
 ## Notes
 - Pairs with LEAK (the 32-map census). LEAK is the instrument; this card is the known case and its fix. If LEAK is
   built first, KAS2 is its positive control.

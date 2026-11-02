@@ -22,12 +22,6 @@ BFLT ports the PS2's frame filter faithfully (its own output within 2 levels of 
 - `lead_tmp/bflt/parity/{on,off}/scores.csv` (BFLT branch, scratch bake, filter on vs OPENBF_NO_FILTER=1; the off run = main's scores exactly): NAB1 dluma −4.8 → +9.8 (block 17.14 → 16.40), BES2 −2.3 → +6.4, RHN1 −0.7 → +3.9 (block +0.71), KAM1 −6.1 → +0.6 (block +0.66).
 - `lead_tmp/bflt/parity/sheet_bf1_kam1.png` (PS2 | off | on): the port's KAM1 storm sky is far brighter than the PS2's before the filter.
 
-## Acceptance
-- A per-surface dluma split (sky / terrain / models) for NAB1, BES2, RHN1, KAM1 at main after BFLT; the surface carrying the overshoot named and its cause carded (or closed with the reason), no showcase map's block error rising > 0.5.
-## Planner note (2026-09-30 13:30)
-Value 3 → 4 and `alpha: yes`: NAB1 is a showcase map and is now the worst of the six on parity (block 16.40, dluma
-+10.6 at 7dfe311; `loop/parity/summary.md`).
-
 ## Result (2026-10-03, main 6bc2437; report `reports/20261003_0425_card_BRGT.md`; data `lead_tmp/brgt/`)
 Instrument: a scratch `surf_render` (pose_render + `SURF_KEEP`) labels every port pixel sky / terrain / water / model; its
 filtered frames score exactly as main's parity (954 pairs, max difference 0.0005). The PS2 frame with the filter undone

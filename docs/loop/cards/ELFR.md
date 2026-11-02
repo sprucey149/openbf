@@ -35,15 +35,6 @@ with no test; Scroll class (0x400) — 0x02 ignored, 0x04 BLEND; §0.6 (b) and �
   opaque green in the port); BF1 GEO1's Techno Union wreck (`geo_bldg_technounion_hull`, a `geo_bldg_wrecked_02` segment
   with flags 0x1 MASKed by the port): the PS2's lattice is solid dark grating, the port's full of see-through holes
   (`bf1_geo1/walk/pairs/cp3_cp10__sheet.png` b000/b090/b180).
-## Acceptance
-- Behind a bake flag, then default on: BF1 world segments take the ELF rule (§0.4) instead of the census where they
-  disagree — at least flag-0x1 Normal segments OPAQUE (no test) and Scroll|0x04 segments BLEND. BF2 unchanged unless its
-  own §0.3 rule is ported with a PCSX2 check.
-- Re-render the three pairs above (`port.py <map>/walk <spot>`, `pairs.py`, `walk_sheet.py`): the City Hall walls reach
-  the floor, no clear-black between the bamboo, the holo panels see-through. VIEW them; list every golden the changed
-  materials touch (a census of BF1 materials whose verdict changes, per map) and declare exactly those + `rebake=maps`.
-- Watch §0.6's other rows: (a) `kam_crate` 0x05 blend, (c)/(d) are separate; do not regress the leaves/bamboo 0x07 MASK.
-
 ## Notes
 - Created 2026-09-29 by PXWA (lane 2). The RE is done ([V] in re-material-flags.md); this card is build.
 - YAV1's bazaar fountain `yav_waterfall_02` (0x414, BLEND in the port) still reads as a bright near-opaque sheet where the

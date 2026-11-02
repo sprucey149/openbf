@@ -714,8 +714,10 @@ impl Terrain {
             .transpose()?;
 
         // PCHS -> PTCH, one record per 8x8-cell RENDER patch, row-major.
-        // `INFO` is 14 B: `u16 layerMask, u16 count, i16 heightMin,
+        // PS2 `INFO` is 14 B: `u16 layerMask, u16 count, i16 heightMin,
         // i16 heightMax, u16 shift, u32 flag` (re-terrain-cutters.md §1.1).
+        // PC/Xbox records can stop after 8 or 10 B; their layer mask is
+        // still valid. Only the full PS2 form carries the replacement flag.
         // A non-zero flag means the record also carries POSI/STRP — the
         // replacement mesh the PS2 draws instead of the grid there.
         let mut patch_layer_masks = Vec::new();
@@ -725,13 +727,13 @@ impl Terrain {
                 if &patch.tag != b"PTCH" {
                     continue;
                 }
-                let info = patch.child(b"INFO").filter(|i| i.payload.len() >= 14);
+                let info = patch.child(b"INFO").filter(|i| i.payload.len() >= 8);
                 let u16_at =
                     |i: &Chunk<'_>, o: usize| u16::from_le_bytes([i.payload[o], i.payload[o + 1]]);
                 let m = info.as_ref().map(|i| u16_at(i, 0)).unwrap_or(0);
                 patch_layer_masks.push(m);
                 let mesh = info.as_ref().and_then(|i| {
-                    let flag = u32::from_le_bytes(i.payload[10..14].try_into().unwrap());
+                    let flag = u32::from_le_bytes(i.payload.get(10..14)?.try_into().unwrap());
                     if flag == 0 {
                         return None;
                     }
@@ -1303,7 +1305,17 @@ mod tests {
                 &if p == 1 {
                     flagged.clone()
                 } else {
-                    build_chunk(b"INFO", &ptch_info(0, 8, 0))
+                    {
+                        let mut short = ptch_info(0, 8, 0);
+                        // Console PC/Xbox patches omit the PS2 replacement
+                        // flag (and sometimes the shift), retaining the mask.
+                        if p == 0 {
+                            short.truncate(8);
+                        } else if p == 2 {
+                            short.truncate(10);
+                        }
+                        build_chunk(b"INFO", &short)
+                    }
                 },
             ));
         }
@@ -1318,6 +1330,7 @@ mod tests {
         let t = Terrain::parse(&c).expect("parses");
 
         assert_eq!(t.patch_grid(), Some((2, 8)));
+        assert_eq!(t.patch_layer_masks, vec![1, 1, 1, 1]);
         assert_eq!(t.patch_meshes.len(), 4);
         assert!(t.patch_meshes[0].is_none() && t.patch_meshes[2].is_none());
         let pm = t.patch_meshes[1].as_ref().expect("patch 1 is flagged");

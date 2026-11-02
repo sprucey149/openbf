@@ -49,26 +49,6 @@ vehicle types. All six fail on parent and pass with the diagnostic; from
 start1, diagnostic first drive452 at expiry or302 after boarding, with
 zero held stick and under0.017m travel through tick301.
 
-## Scope
-Add only the BF2 human-dependent runtime hold to the already integrated
-WAIT4 initial-window state. Initialize the 15s bound once from the first
-seated think, and test the human hold before seat-full completion. After
-the human ceases to qualify, retain the existing initial-window/full-seat
-behavior. Completion stays permanent for that pilot tenure: an approaching
-human cannot restart an already completed wait. Resolve current human
-handles from the player slots every update; never cache a dead generation.
-Support both existing ground-driver dispatches; leave turrets and human
-pilots alone. Preserve bailout priority, gunner aiming, route/progress/stuck
-allowances, existing gunner-claim holds, event cadence and RNG sequence.
-
-GUNWT still owns live-claim freshness, interruption orders, BF1 call/reissue,
-answers and boarding. GUNWH keeps its original dependency on GUNWT and all
-original Acceptance, including real scenes and the BF2 boarding/stall census.
-This separate source slice earns none of those requirements. WAIT4 remains
-incomplete until its own real-content checks pass; its source checkpoint is
-an available implementation prerequisite, not a passing acceptance receipt.
-Do not broaden this into the event0x27/no-line path or flyer work.
-
 ## Acceptance (run and paste)
 1. Actual Sim::step with natural AI boarding, BF2 hover and walker: repeat
    all eight failing parent scenes above and the36 controls. A qualifying

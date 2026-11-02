@@ -54,18 +54,6 @@ Every bot defect so far was found by the maintainer playing (bowl, walls, tweaki
   not a new card. Unchanged gaps: an enemy within 20 m (KAM1 2.2 %, DEA1 2.7 % vs 15-19 %), BF2 seats 0 %, 20 s spells.
 - Note: only 11 of 16 rounds finished inside 16500 ticks; the tables cover the first 540 s either way.
 
-## What to build
-1. Per map, from `unit_probe` rows (the black box's row = `UNIT_SAMPLES`): per bot per 10 s window at 4 Hz -
-   **reversals**, **path / net** ratio, share of time stationary / walking / running; **pair spacing** (share of unit-time with a teammate within 1.5 m and within 3 m); **team-kill share** and friend hits; **wall contact** (slide / blocked share - already there); **side flips** of the slide; **goal churn** (objective or move-goal changes per minute); **contact** (enemy within 20 m / 60 m; CONT has it); **fire discipline** (shots / s while moving vs standing, hit rate).
-2. **The PS2's numbers for the same list**, from live RAM (`lead_tmp/stall/ps2/bf2_kam1_soldiers.csv` has 30,013 positions over 420 s at its own rate - check the rate carries reversals at 4 Hz; capture again at 30 Hz if not; add BF1 KAS2 from `lead_tmp/kas2ai`, and two more maps). Kills by team for the team-kill share need the kill events (EVMSG's sites, or hp + last-hit in RAM).
-2b. **Map use** (the maintainer's annoyance 2 and 3, BOTD): a heat map per map of unit-time and of kills by 10 m cell and by hub, the share of hubs / connections never visited, the top-3 cells' share of kills (hotspots), time in turrets per bot and turret-time with no target, and bots alive + not moving + not fighting for 20 s or more - PS2 beside the port.
-3. One table per map in `seeds.md` and a short `analysis/bot-quality.md`: PS2 | port | ratio, worst five first.
-4. Propose gate lines (not a gate yet: BOTD decides the bars, some of them better than the PS2 by the maintainer's wish).
-
-## Acceptance
-- The table for 4 maps with both columns, the instrument checked on a hand-made case (a bot made to oscillate reads the reversals it was given), the capture rate stated.
-- The numbers re-taken on the maintainer's snapshot scene (`lead_tmp/jitr/`): #30 reads ~26 reversals.
-
 ## The bot programme (the maintainer, 2026-10-02) - five cards, read together
 `JITR` (stop the tweaking now) -> `FFLN` (teammates in the line of fire) -> `BOTM` (bot-quality numbers, PS2 beside the port) -> `SAIR` (RE the PS2 foot soldier's own AI) -> `BOTD` (the design: what the best bot for this game is, then the build cards). `OBST` (walking into props) belongs to the same family.
 The maintainer: "If the bots suck, the whole game is worthless so we NEED to get this right." He agrees to RE the PS2 soldier AI FIRST, then keep what is good and DELIBERATELY do better where the originals annoy (the originals' bots are not perfect; better difficulty levels, more awareness). The port's soldier brain today is ~9,200 lines (`core/src/ai`, `commander.rs`) of rules added one symptom at a time (hold, shuffle, strafe, dodge, slide, fan, stuck, stall, lost, recycle), most of them OURS/PROVISIONAL: no RE note exists for the soldier's second-to-second movement and combat.

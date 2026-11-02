@@ -487,6 +487,7 @@ def animation_registry_digest():
 
 PARSERS = {
     b"plan": ("routes", route(b"plan")),
+    b"plnp": ("routes", route(b"plnp")),
     b"path": ("routes", route(b"path")),
     b"PATH": ("routes", route(b"PATH")),
     b"coll": ("collision", collision),
@@ -569,6 +570,29 @@ def indexed_rows(rows, category):
     return out
 
 
+
+def pair_collision_indexes(left, right):
+    """Re-pair unique renamed collision nodes within the same file/scope/mesh.
+
+    Node labels are munge metadata, and differ between console/PC exports.
+    Exact identities win first. Only an unambiguous remaining one-to-one pair
+    may ignore that label; repeated meshes never get paired by file order.
+    Returns re-keyed copies plus (reference identity, donor identity) receipts.
+    """
+    a, b = dict(left), dict(right)
+    groups = {}
+    for side, keys in enumerate((a.keys() - b.keys(), b.keys() - a.keys())):
+        for key in keys:
+            groups.setdefault(key[:3], [[], []])[side].append(key)
+    renamed = []
+    for aa, bb in groups.values():
+        if len(aa) == len(bb) == 1:
+            x, y = aa[0], bb[0]
+            b[x] = b.pop(y)
+            renamed.append((x, y))
+    return a, b, sorted(renamed)
+
+
 def compare_geometry(left, right):
     """Compare category -> rows maps produced by parse_resource.
 
@@ -580,6 +604,9 @@ def compare_geometry(left, right):
     for category, fields in COMPARE_FIELDS.items():
         a = indexed_rows(left.get(category, []), category)
         b = indexed_rows(right.get(category, []), category)
+        renamed = []
+        if category == "collision":
+            a, b, renamed = pair_collision_indexes(a, b)
         keys = sorted(a.keys() & b.keys())
         differences = []
         counts = Counter()
@@ -605,6 +632,7 @@ def compare_geometry(left, right):
         }
         if category == "collision":
             result[category]["surface_changes"] = collision_changes(a, b, keys)
+            result[category]["renamed_nodes"] = renamed
         if category == "world":
             result[category]["by_kind"] = {
                 kind: {

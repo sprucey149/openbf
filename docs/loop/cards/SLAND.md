@@ -45,13 +45,6 @@ That decides how many of KAM1's / DEA1's / BES1's drops kill, and what a player'
 - A PCSX2 drop table without god mode: `lead_tmp/sthop/ramp_bf2.py --airtest` holds and releases the player; add
   heights 6 / 10 / 16 m and read the health E+0x170 before and after.
 
-## Acceptance
-- The law [V] in both games, with the constants' ELF words and the classes' ODF values.
-- The PS2 drop table (3 heights) within 5 % of the law.
-- Built: the port's landing deals that damage (the Fall death = health ≤ 0), `LETHAL_LANDING_SPEED` gone.
-- The sweep's fall deaths per map reported before and after.
-- Declares at build: sim; sweep; arena.
-
 ## Notes
 - **Steep faces.** For a contact with 0 ≤ n.y ≤ 0.6 the PS2 pushes the soldier out along the TRUE normal (it lifts
   him) and removes only horizontal velocity (BF1 114813–114830; BF2 156134–156396). The port's wall pass pushes

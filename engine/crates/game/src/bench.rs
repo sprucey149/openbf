@@ -404,7 +404,7 @@ impl Toggle {
 const TICK_BUDGET_MS: f64 = 1000.0 / 30.0;
 
 impl Report {
-    /// Human-readable block. Machine-readable is `csv_row`/`CSV_HEADER`.
+    /// Human-readable block.
     pub fn print(&self) {
         let mb = |b: u64| b as f64 / (1024.0 * 1024.0);
         println!("\n── bench: {} ──────────────────────────────", self.map);
@@ -474,39 +474,6 @@ impl Report {
                 parts.join(", ")
             );
         }
-    }
-
-    pub const CSV_HEADER: &'static str =
-        "map,adapter,width,height,scene_load_ms,gpu_upload_ms,meshes,draws,instances,\
-         triangles,terrain_triangles,textures,texture_mb,battle_draws,skinned_draws,\
-         units_alive,draw_calls,culled,tick_mean_ms,tick_p99_ms,frame_mean_ms,frame_p99_ms\n";
-
-    pub fn csv_row(&self) -> String {
-        format!(
-            "{},{},{},{},{:.2},{:.2},{},{},{},{},{},{},{:.2},{},{},{},{},{},{:.4},{:.4},{:.3},{:.3}\n",
-            self.map,
-            self.adapter.replace(',', " "),
-            self.size.0,
-            self.size.1,
-            self.scene_load.as_secs_f64() * 1000.0,
-            self.gpu_upload.as_secs_f64() * 1000.0,
-            self.stats.meshes,
-            self.stats.draws,
-            self.stats.instances,
-            self.stats.triangles,
-            self.stats.terrain_triangles,
-            self.stats.textures,
-            self.stats.texture_bytes as f64 / (1024.0 * 1024.0),
-            self.stats.battle_draws,
-            self.stats.skinned_draws,
-            self.units_alive,
-            self.frame_stats.draw_calls,
-            self.frame_stats.culled,
-            self.tick.mean(),
-            self.tick.pct(0.99),
-            self.frame.mean(),
-            self.frame.pct(0.99),
-        )
     }
 }
 

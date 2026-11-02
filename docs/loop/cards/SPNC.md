@@ -23,14 +23,6 @@ show the same way. The maintainer, 2026-10-11: bots must not stand for minutes a
 ## Evidence
 - Card DAGS's trace (`lead_tmp/dags/`), card BSPN's refused landing (`loop/reports/20261011_1643_land_BSPN.md`).
 
-## Acceptance
-- A tool (an example or a test, kept) that for every spawn node of every post on the 32 baked maps reports: the node's floor
-  height, the hub its first leg takes for each goal post, that hub's walking level, and whether `walk_floor` from the node
-  reaches it. The table per map; the nodes that fail, listed with post and position.
-- Run on main BEFORE DAGS's rule and after it: the after column is the acceptance of DAGS's rule on every map (0 failing nodes, or
-  each one left explained - a node the PS2 also strands is a finding for the maintainer, with a capture).
-- A census line in the gates (the count of failing nodes, new 0) if the run is under a minute.
-
 ## Notes
 - Depends on DAGS so it measures the rule that card lands; the BEFORE column can be taken from main at once.
 - 2026-10-12 card MOUTH (measure): **a spot for the census, BF1 Bespin Platforms (-21.1, 98.7, -187.6)** (unit 8's spawn,

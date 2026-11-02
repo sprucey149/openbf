@@ -37,19 +37,6 @@ included (NAB1 / TAT1 speeders, UTA1 / MYG1 fighter tanks).
   Files: `lead_tmp/vrest/port_census_{old,new}_{10s,40s}.txt`, `trace_hailfire_{old,new}.txt`,
   `ram_vs_port_{old,new}.txt`.
 
-## Acceptance (run each on the branch AND on its parent with the same tools; paste both)
-1. `lead_tmp/vrest/examples/vrest_census.rs` 40 s + `join.py --port <out>`: Hover row within 2 cm on at least 90 of 114
-   (today 31), within 5 cm on at least 110 (today 71); the four hailfire pads within 1 cm (today 9–13 cm off).
-2. `VREST_TRACE=hailfire VREST_DENSE=1,1201 vrest_census 40 bf1_geo1`: the swing of `cp5hailfire1` in seconds 20–40
-   under 3 cm (today 14.1 cm) and its tilt under 0.005 (today 0.084).
-3. HOVR's referee `lead_tmp/audit-hovr/examples/audit_hover_ram.rs`: mean |port mean y − PS2 y| over the 47 quiet
-   hovers at most 0.8 cm (today 1.32) and the port's mean bob band at most 5 cm (today 16.0). Its "inside the band"
-   count falls 47 → 45 only because the band shrinks: report the distance to the band instead (45 within 1 cm).
-4. `audit_pad_census.rs`: 0 of 216 pads pop or drift (HHUL's number holds).
-5. The pinned hover unit tests: every expectation the reorder moves is re-derived by hand (`re-hover.md` §9's way)
-   and listed in the report, not re-pinned from the new output.
-6. The sweep's hover-loss line (`hovers lost`) is no worse over 8 seeds on the maps with bot-driven hovers.
-
 ## Notes
 - The two parked rows still over 5 cm after the reorder are not this card's: BF2 FEL1's pad `snail31` (a combat
   speeder, +0.35 m) and one BF1 NAB1 fighter tank (+0.09 m).

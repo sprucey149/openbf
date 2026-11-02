@@ -57,24 +57,6 @@ itself uses is not established"): it is established now.
 - Why no check saw it: ANNC2's census and `every_mission_line_has_a_take` test line NAMES; the name is right and the
   take exists.
 
-## Acceptance
-1. The battle's library is its mission's own sub-level: the mission RON carries the script's sound sub-level
-   (`scripts/gen_missions.py`, the `ReadDataFile("sound\\<lvl>.lvl;<sub>")` string), the bake keeps each record's
-   sub-level, and `SoundLib` resolves a name in that sub-level first. Engines and foley already pick by sub-level
-   (`foley::sublevels`): one rule for all three.
-2. `audit_takes files` per mission (move the probe to `game/examples/`): BF1 KAS2 GCW gives the gcw_vo segments
-   above, KAS2 CW the cw_vo ones. Pasted.
-3. A test over every BF1 mission RON: each commander line the battle can ask for (the mission's lines and its posts'
-   tables, for the mission's two armies) resolves to a take of the mission's own era stream. 0 off (today: 6 names in
-   each of the 12 GCW missions on two-era planets).
-4. The census against the game's loader: 0 names whose audio is another sub-level's, both games (today BF1 256 over
-   16 of 28 sub-levels).
-5. An army the mission does not have (the port's era mix, ANNC2) must still find its lines: a name the mission's
-   sub-level does not define falls through to the planet's other sub-levels - say how many names per mission resolve
-   that way, and that none of the mission's own do.
-6. `merge_props`'s PROVISIONAL note is replaced by the rule and this card's evidence.
-`declares:` `rebake=sounds` (every map's `sounds.ron` gains the sub-level); no sim, no goldens.
-
 ## Notes
 - The maintainer will hear this at once: every post event of a default battle on 11 of the 15 BF1 maps.
 - The `--mission` flag and the tests that build a `SoundLib` from the map directory alone need the sub-level too.

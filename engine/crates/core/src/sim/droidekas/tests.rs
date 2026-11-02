@@ -817,3 +817,42 @@ fn a_soldiers_stamina_bar_is_his_energy() {
     let u = s.unit(h).unwrap();
     assert_eq!(u.stamina_bar(), (37.0, u.consts.energy_bar));
 }
+
+/// The press edge reads the droideka's own previous buttons: a droideka never
+/// runs the soldier's step, so the soldier's stay at 0 and a held trigger would
+/// read as a press every tick.
+#[test]
+fn a_held_trigger_on_an_empty_slot_clicks_once_for_a_human_droideka() {
+    use crate::unit::SlotSpec;
+    use crate::weapon::WeaponClass;
+    let mut s = sim();
+    let gun = s.add_weapon_class(WeaponClass::bf1_rifle());
+    let spare = s.add_weapon_class(WeaponClass::bf1_rifle());
+    let slot = |slot, channel, weapon_class| SlotSpec {
+        slot,
+        channel,
+        weapon_class,
+        clips: 0,
+    };
+    let h = s
+        .spawn(&deka(UnitSpec {
+            slots: Arc::new([slot(1, 0, gun), slot(2, 1, spare)]),
+            ..UnitSpec::player(0, Vec3::ZERO)
+        }))
+        .unwrap();
+    let i = h.index as usize;
+    let k = s.units[i].cur1.unwrap() as usize;
+    s.units[i].held[k].state.clip = 0;
+    s.units[i].held[k].state.spare = 0;
+    s.step(&[pad(0, 0.0)]);
+    let mut clicks = 0;
+    for _ in 0..10 {
+        s.step(&[pad(buttons::SECONDARY_FIRE, 0.0)]);
+        clicks += s
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::FireEmpty { .. }))
+            .count();
+    }
+    assert_eq!(clicks, 1);
+}

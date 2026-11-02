@@ -51,6 +51,11 @@
 //! Shared `common_<game>` props are merged so their collision is in the world
 //! exactly as in the game.
 //!
+//! `SWEEP_ASSET_DIR` selects an isolated baked asset root; `SWEEP_MISSION_DIR`
+//! selects its matching missions. These permit cross-source comparisons without
+//! replacing the development bake. `SWEEP_HASH_EVERY=N` emits read-only state
+//! checkpoints every N ticks for comparisons of the complete round.
+//!
 //! ## Parallel (Phase A.3)
 //! Each map's sim is single-threaded and independent of every other map's, so
 //! the maps run on WORKER THREADS: `SWEEP_THREADS` of them if that env var
@@ -386,8 +391,8 @@
 //! Run settings, all optional (stderr only: stdout is unchanged with them):
 //! - `SWEEP_TEAMS=<t0>:<t1>` sets each team's tier (`Sim::team_difficulty`);
 //! - `SWEEP_ERA=cw` reads `missions/<key>_con_cw.ron` where there is one;
-//! - `SWEEP_FLYER_TRACE=1` adds a per-second line per ridden flyer, with
-//!   `OPENBF_FLYER_BOTS=1`, to the flyer census row;
+//! - `SWEEP_FLYER_TRACE=1` adds a per-second line per ridden flyer (`=<n>`, one every n
+//!   ticks) to the flyer census row;
 //! - `SWEEP_MISSION_DIR=<dir>` reads the missions from another folder (the
 //!   faction-swap copies of a balance run);
 //! - `SWEEP_PROXY=<team>:<average|good>[,skill=N][,reaction=TICKS]
@@ -617,10 +622,24 @@ fn mission_path(key: &str) -> std::path::PathBuf {
         std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"))
     });
     let cw = dir.join(format!("{key}_con_cw.ron"));
+    let con = dir.join(format!("{key}_con.ron"));
     if c.era_cw && cw.exists() {
         cw
+    } else if con.exists() {
+        con
     } else {
-        dir.join(format!("{key}_con.ron"))
+        // A space map has only its Space Assault.
+        dir.join(format!("{key}_ass.ron"))
+    }
+}
+
+/// The mode of [`mission_path`]'s file, by its name.
+fn mission_mode(key: &str) -> &'static str {
+    let path = mission_path(key);
+    if path.to_string_lossy().ends_with("_ass.ron") {
+        "ass"
+    } else {
+        "con"
     }
 }
 
@@ -4166,7 +4185,7 @@ fn stuck_census(
     out
 }
 
-/// `OPENBF_FLYER_BOTS=1`: what bots did in flyers (`core::ai::flyer_drive`).
+/// What bots did in flyers (`core::ai::flyer_drive`), unless `OPENBF_FLYER_BOTS=0`.
 #[derive(Default)]
 struct FlyerCensus {
     was: Vec<(core::vehicle::flyer::FlightPhase, bool, bool)>,
@@ -4181,15 +4200,42 @@ struct FlyerCensus {
     top: f32,
     falls: u32,
     deaths: u32,
+    /// Of the deaths: no killer (the world or the map's edge), and of those the ones
+    /// counting down outside the boundary on the tick before.
+    deaths_world: u32,
+    deaths_edge: u32,
+    was_leaving: Vec<bool>,
+    /// Ticks a craft was counting down outside the boundary.
+    leaving: u64,
+    /// Sign changes of a saturated pitch stick while flying, the porpoising count,
+    /// and each craft's last saturated sign.
+    pitch_flips: u32,
+    pitch_sign: Vec<f32>,
+    /// Summed |vertical speed| while flying, m/s x ticks.
+    climb_sum: f64,
+    /// Ticks flying with less than 2 m/s, a craft stalled or wedged.
+    slow: u64,
     shots: u32,
     kills: u32,
 }
 
 impl FlyerCensus {
     fn observe(&mut self, sim: &core::sim::Sim) {
+        self.observe_flights(sim);
+        // After the events: read for the next tick's deaths.
+        self.was_leaving.clear();
+        self.was_leaving
+            .extend(sim.vehicles.iter().map(|v| v.flyer.leaving.is_some()));
+    }
+
+    fn observe_flights(&mut self, sim: &core::sim::Sim) {
         use core::vehicle::flyer::FlightPhase;
         use core::vehicle::VehicleKind;
-        let trace = std::env::var_os("SWEEP_FLYER_TRACE").is_some();
+        // `SWEEP_FLYER_TRACE=<n>`: a line every n ticks (1 means every second).
+        let trace = std::env::var("SWEEP_FLYER_TRACE")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(|n| if n <= 1 { 30 } else { n });
         self.was
             .resize(sim.vehicles.len(), (FlightPhase::Landed, false, true));
         for (i, v) in sim.vehicles.iter().enumerate() {
@@ -4204,26 +4250,38 @@ impl FlyerCensus {
             self.falls +=
                 u32::from(phase != FlightPhase::Falling && v.flyer.phase == FlightPhase::Falling);
             self.deaths += u32::from(alive && !v.alive);
-            if trace && !v.is_empty() && sim.tick.is_multiple_of(30) {
+            if !v.is_empty() && trace.is_some_and(|n| sim.tick.is_multiple_of(n)) {
                 let over = sim
                     .heightfield
                     .as_ref()
                     .map_or(0.0, |h| v.pos.y - h.height_at(v.pos.x, v.pos.z));
                 eprintln!(
-                    "flyer {i} t{} {:?} {:?} pos {:.0},{:.1},{:.0} over {over:.1} v {:.1} in thr {:.2} turn {:.2} pitch {:.2} goal {:?} hp {:.0}",
-                    sim.tick / 30,
+                    "flyer {i} t{} {:?} {:?} pos {:.0},{:.1},{:.0} over {over:.1} v {:.1} vy {:.1} in thr {:.2} turn {:.2} pitch {:.2} goal {:?} hp {:.0}",
+                    sim.tick as f32 / 30.0,
                     v.flyer.phase,
                     v.flyer.ai.agent,
                     v.pos.x,
                     v.pos.y,
                     v.pos.z,
                     v.vel.length(),
+                    v.vel.y,
                     v.input.throttle,
                     v.input.turn,
                     v.input.pitch,
                     v.flyer.ai.goal.map(|g| (g.x as i32, g.y as i32, g.z as i32)),
                     v.health.cur,
                 );
+            }
+            self.pitch_sign.resize(sim.vehicles.len(), 0.0);
+            if v.alive && !v.is_empty() && v.flyer.phase == FlightPhase::Flying {
+                if v.input.pitch.abs() >= 0.9 {
+                    let sign = v.input.pitch.signum();
+                    self.pitch_flips += u32::from(self.pitch_sign[i] == -sign);
+                    self.pitch_sign[i] = sign;
+                }
+                self.climb_sum += f64::from(v.vel.y.abs());
+                self.slow += u64::from(v.vel.length() < 2.0);
+                self.leaving += u64::from(v.flyer.leaving.is_some());
             }
             if v.alive && v.flyer.phase == FlightPhase::Flying {
                 self.air_ticks += 1;
@@ -4255,14 +4313,29 @@ impl FlyerCensus {
                 core::sim::Event::Kill { shooter, .. } => {
                     self.kills += u32::from(in_flyer(shooter));
                 }
+                core::sim::Event::VehicleDestroyed {
+                    vehicle,
+                    killer: None,
+                    ..
+                } => {
+                    let flyer = sim
+                        .vehicles
+                        .get(vehicle.index as usize)
+                        .is_some_and(|v| v.kind == VehicleKind::Flyer);
+                    self.deaths_world += u32::from(flyer);
+                    self.deaths_edge += u32::from(
+                        flyer && self.was_leaving.get(vehicle.index as usize) == Some(&true),
+                    );
+                }
                 _ => {}
             }
         }
     }
 
     fn line(&self, key: &str) -> String {
+        let minutes = (self.air_ticks as f32 / core::TICK_HZ as f32 / 60.0).max(1e-3);
         format!(
-            "flyers {key}: boarded {} took-off {} airborne {:.0} s clearance {:.1}..{:.1} m buried {} ticks worst {:?} top {:.1} m/s falls {} deaths {} shots {} kills {}",
+            "flyers {key}: boarded {} took-off {} airborne {:.0} s clearance {:.1}..{:.1} m buried {} ticks worst {:?} top {:.1} m/s falls {} deaths {} (world {} edge {}) outside {:.0} s pitch flips/min {:.1} mean |vy| {:.1} slow {:.0} s shots {} kills {}",
             self.boarded,
             self.took_off,
             self.air_ticks as f32 / core::TICK_HZ as f32,
@@ -4273,6 +4346,12 @@ impl FlyerCensus {
             self.top,
             self.falls,
             self.deaths,
+            self.deaths_world,
+            self.deaths_edge,
+            self.leaving as f32 / core::TICK_HZ as f32,
+            self.pitch_flips as f32 / minutes,
+            self.climb_sum / self.air_ticks.max(1) as f64,
+            self.slow as f32 / core::TICK_HZ as f32,
             self.shots,
             self.kills,
         )
@@ -4304,7 +4383,7 @@ fn run_map(
     };
     // BF2 maps keep their command posts in a mode sublevel; without this
     // every BF2 map reports zero posts and stalls for the wrong reason.
-    scene.apply_mode_layer("con");
+    scene.apply_mode_layer(mission_mode(key));
     // Shared props (command-post models, crates, turrets) carry their own
     // collision; without them the sweep runs a world the game never has.
     let common_dir = path
@@ -4500,6 +4579,7 @@ fn run_map(
         w.sim.death_regions = a.death_regions.clone();
         w.sim.fly_ceiling = a.fly_ceiling;
         w.sim.flight_limits = a.flight_limits;
+        w.sim.landing_regions = a.landing_regions.clone();
         w.sim.ground_flyer_map = mission.as_ref().is_some_and(|m| m.ground_flyer_map);
     }
     w.add_posts(&layout);
@@ -4738,6 +4818,10 @@ fn run_map(
     let mut exit_floor = [0u32; 2];
     let mut exit_other = [0u32; 2];
     let timing = std::env::var_os("SWEEP_TIMING").is_some();
+    let hash_every = std::env::var("SWEEP_HASH_EVERY")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0);
     let mut tick_us = Vec::new();
     let mut flyer_census = FlyerCensus::default();
     while t < max_ticks && w.sim.outcome.is_none() {
@@ -4750,6 +4834,9 @@ fn run_map(
             tick_us.push(started.elapsed().as_micros() as u64);
         }
         t += 1;
+        if hash_every.is_some_and(|n| t.is_multiple_of(n)) {
+            outln!(out, "    checkpoint {key} {t} {:016x}", w.sim.hash());
+        }
         if let Some((i, tally)) = proxy.as_mut() {
             tally.tick(&w.sim, Some((*i, "proxy")));
         }
@@ -5937,8 +6024,10 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
 }
 
 fn main() {
-    let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets_baked"));
-    let maps = game::assets::discover_maps(dir);
+    let dir = std::env::var_os("SWEEP_ASSET_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(game::assets::baked_root);
+    let maps = game::assets::discover_maps(&dir);
     if maps.is_empty() {
         eprintln!(
             "no baked maps under {} — run scripts/rebake.sh",

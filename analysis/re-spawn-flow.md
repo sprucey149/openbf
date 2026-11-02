@@ -247,8 +247,9 @@ SUPPORTED, C5 PARTLY: see the [M] line below).
   against 57 / 66). The colour word acts as byte / 255 on the light: byte / 128 clips him white under every sign
   (p50 105-121 against 61). Side p50/95/99 port 67/97/109, PS2 61/93/102 (before: the map's lights, 65/123/130).
   `lead_tmp/sselb/tools/light_score.py`, renders in `lead_tmp/sselb/s7/`.
-- Port: `render::LightPath::Iface` (`IFACE_AMBIENT`, `IFACE_DIR_CAMERA`), `game/src/spawn_preview.rs`. Not built: the
-  refused classes' black (the port has no unlocks).
+- Port: `render::LightPath::Iface` (`IFACE_AMBIENT`, `IFACE_DIR_CAMERA`), `game/src/spawn_preview.rs`. The refused classes'
+  black is built (§4.3): on a BF1 map the same black marks the specials the port locks (`game/src/unlocks.rs`, card
+  UNLK1), though BF1 itself has no unlocks.
 
 ### 4.3 Which class the game refuses (OPUS RE 2026-10-21, card SSELB slice 8) - [O] UNAUDITED
 

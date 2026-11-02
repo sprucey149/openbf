@@ -2,8 +2,9 @@
 //! rebuilding and fallen building turrets. Follows `analysis/re-build-zones.md`
 //! (card TBLD).
 
+use super::input::buttons;
 use super::{Event, Sim};
-use crate::collision::{HullFilter, Layers};
+use crate::collision::HullFilter;
 use crate::projectile::Target;
 use crate::unit::{Controller, Unit};
 use crate::vehicle::{VehicleHandle, VehicleKind, SLICE_RESERVE};
@@ -26,6 +27,25 @@ impl Sim {
             return false;
         }
         let target = self.repair_target(i, class);
+        // The cutter's empty click: the PS2's repair weapon runs the base
+        // update (B1 `FUN_002928b8` -> `FUN_00284318`), so its overheated
+        // state clicks a press with or without a target; the port keeps its
+        // heat on the soldier's energy, so a press the energy cannot pay is
+        // the refused one.
+        // PROVISIONAL [D], measure: a PS2 log of a human's press on a cutter
+        // past its heat, in both games.
+        let button = if held_slot.is_some() {
+            buttons::SECONDARY_FIRE
+        } else {
+            buttons::FIRE
+        };
+        let cost = wc.heat_per_shot * u.consts.energy_bar;
+        let click = held
+            && !blocked
+            && u.is_player
+            && u.soldier.energy < cost
+            && !self.cheats.infinite_stamina
+            && self.pressed_now(i, button);
         let u = &mut self.units[i];
         let state = match held_slot {
             Some(k) => &mut u.held[k].state,
@@ -35,6 +55,9 @@ impl Sim {
             if let Some(target) = target {
                 self.fire_repair(i, class, target);
             }
+        }
+        if click {
+            self.push_fire_empty(i, class);
         }
         true
     }
@@ -74,19 +97,12 @@ impl Sim {
         if score < 0.0 {
             return None;
         }
-        if !crate::perception::los_terrain(self, from, centre)
-            || self
-                .collision
-                .ray_past(
-                    from,
-                    dir,
-                    (dist - 0.01).max(0.0),
-                    Layers::ORDNANCE,
-                    hulls,
-                    [instance, None],
-                )
-                .is_some()
-        {
+        // The LOS ray stops r short of the centre, on the shooter's side
+        // (`re-aim-assist.md` 3.3, 3.6), the same ray as the magnet's: a pad
+        // sunk under the terrain, Kashyyyk's `com_weap_gunturret10`, still
+        // takes the cutter from the ground above it.
+        let end = centre - dir * radius;
+        if !crate::perception::los_seat(self, from, end, hulls, [instance, None]) {
             return None;
         }
         Some(score)

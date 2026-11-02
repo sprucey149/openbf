@@ -67,18 +67,6 @@ Numbers on the landing's code: 32 maps x 8 seeds, a per-tick observer, a switch 
   - M33: a Tactician's bot steps out of a friend's line.
   The agents' smallest killing scenes are in `wf/results.json` (`missing_scene`).
 
-## Acceptance
-- The audit's observer (re-apply `patches/landsw.patch`'s `AuditTpos` to a scratch build; 32 maps x 8 seeds) must read:
-  - lapsed / held <= 2 % (landed 20.1 %);
-  - pairs of held positions within 2 m <= 700 pair-ticks (landed 52,596);
-  - covered-COVER time over 3 s past its swap <= 0.1 % (landed 11.4 %);
-  - no position kept more than one think past its second hit, checked by a test AND by the observer.
-- A test that fails under each surviving mutation above (or a written argument that it is equivalent), run through
-  `mk_mut.py` / `mut_run.sh` from `lead_tmp/audit-tpos/tools`, plus a test of a hidden bot whose target leaves its
-  sight: the reservation stays, the swap comes on time, the leave tests run.
-- Kills a minute within the seed noise against main (three 8-seed blocks), 256/256 rounds on both blocks, the maintainer's
-  Kamino scene 0 over 6. Declared: `sim; sweep; arena`.
-
 ## Notes
 - The PS2 is not stricter everywhere. A normal end (cover state 100) or an invalid re-score frees the hint AT ONCE
   (`FUN_002adf50`, stamp -10). Only the 5-12 s swap and an outer abort leave it reserved 2 s. The port's FREE_AFTER on

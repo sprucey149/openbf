@@ -30,20 +30,6 @@ kills at the PS2's rate from further away. The maintainer plays Kamino; a fight 
   order does, for how long and where the bot resumes is [H] - not opened.
 - The port's brain: an enemy inside `HOLD_RANGE` makes the bot take a position; outside it the bot walks on and fires.
 
-## What to do
-1. RE (the discipline, verifier included): BF2's fight order - `FUN_002c3730` (message -> order), `FUN_002c31e0`,
-   `FUN_002c4c80` (the fight behaviour): does the bot move toward its target, to what range, when does it give the
-   target up, where does the capture order resume; the type-0 order after damage (`FUN_002c28e8`); BF1's twin.
-2. Measure on the PS2 (`lead_tmp/cont/cont_ps2.py` already logs order type, behaviour state and position at 4 Hz):
-   distance to the fight target at the order's start and end, its duration, the bot's displacement during it.
-   The same from the port (`UNIT_SAMPLES`).
-3. Build what the RE finds in `core/src/ai/brain.rs`; referee: `contact20` in round_to_outcome's `shares` line.
-
-## Acceptance
-- BF2 KAM1, 8 seeds, `shares`: nearest enemy within 20 m >= 12 % of alive unit-seconds (PS2 17.0 % and 24.9 % in two
-  runs; the port 3.0 %), kills / min 15-20 (PS2 17.3; the port 17.3).
-- BF2 POL1: within 20 m >= 28 % (PS2 31.9 %; the port 23.1 %).
-- No map's finish count drops over 8 seeds (a drop is re-run over 24 more seeds).
 ## Planner 2026-10-02 17:45 - re-phased to build, behind SAIR and BOTD
 - Its RE (What to do 1-2) is folded into SAIR (section "Folded in from FGHT"): SAIR's item 3 is the same question, and the maintainer's order puts the PS2 soldier RE (SAIR) and the design (BOTD) before any further brain build. Step 3 (build in `brain.rs`) would build on the brain BOTD is about to redesign.
 - BOTD either adopts this card as one of its build cards (rewrite What to do from the design; keep the Acceptance numbers) or closes it as replaced. It is in BOTV's deps, so PERF / UCNT wait for it.

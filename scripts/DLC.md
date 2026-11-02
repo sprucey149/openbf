@@ -23,18 +23,19 @@ iso/
 ```
 
 Then build as usual. `python3 scripts/input_scan.py` prints what it found and
-says `Kit Fisto and Asajj Ventress used`. Adding or removing the folder makes the
-next `scripts/pack.py` bake everything again.
+says `Kit Fisto and Asajj Ventress used`, off until the row below is turned on. Adding or removing the folder makes
+the next `scripts/pack.py` bake everything again.
 
 A disc that was rebuilt to hold the DLC is refused, as any modified disc is.
 
 ## In the game
 
-On every BF2 battle with a Republic or CIS hero, Kit Fisto is the Republic's and
-Asajj Ventress the CIS's. A battle has one hero per team, so they stand in for the
-map's usual Republic or CIS hero whenever the bake holds them. Alliance and Empire battles
-keep their own heroes. BF1 maps have none. The usual hero options, score offer,
-acceptance, health drain and death rules apply.
+With the bake in place, Hero Options in Instant Action gain a `DLC Heroes` row. It stays
+`Off` until you change it, and every map keeps its usual hero. `On` then gives every BF2
+battle with a Republic or CIS hero Kit Fisto for the Republic and Asajj Ventress for the
+CIS. A battle has one hero per team, so for that session they stand in for the map's usual
+Republic or CIS hero. Alliance and Empire battles keep their own heroes. BF1 maps have
+none. The usual hero options, score offer, acceptance, health drain and death rules apply.
 
 What the heroes do never depends on which copy of the DLC went in: the PS2 and
 PC formats give the same combat, checked hash for hash. A build with them is not

@@ -277,44 +277,28 @@ class PackTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / 'scripts').mkdir()
-            (root / 'scripts/rebake.sh').write_text('BF2_MAPS="MUS/MUS1"\n')
             (root / 'iso').mkdir()
             images = {g: root / 'iso' / (g + '.iso') for g in ('bf1', 'bf2')}
             for image in images.values():
                 image.touch()
-            (root / 'iso/unknown.bin').write_bytes(b'unsupported')
+            unknown = root / 'iso/unknown.bin'
+            unknown.write_bytes(b'unsupported')
             baked, missions = root / 'baked', root / 'missions'
             baked.mkdir()
             missions.mkdir()
-            report = pack.source_report(root, baked, missions, images, ['bf1'], ['bf1'])
+            plan = dict(games={}, found=[dict(path=str(unknown), kind='unknown', status='refused', reason='not a disc')])
+            report = pack.source_report(root, baked, missions, images, plan, ['bf1'], ['bf1'])
             rows = {r['label']: r for r in report['inputs']}
             self.assertEqual(rows['bf1 requested PS2 image']['status'], 'used')
-            self.assertEqual(rows['bf2 requested PS2 image']['status'], 'unused')
-            self.assertEqual(rows['bf2 extracted PS2 data']['status'], 'unused')
-            self.assertEqual(rows['other source file']['status'], 'not recognized')
-            self.assertFalse(rows['optional BF2 PC texture directory']['present'])
-            xbox_row = 'optional Xbox BF2 extracted data'
-            self.assertIn('draws its own', rows[xbox_row]['reason'])
-            # A cached bake packs the disc's icons from an earlier run: say so.
-            (baked / 'common_bf2/textures').mkdir(parents=True)
-            (baked / 'common_bf2/textures/icon_duke_a.ktx2').touch()
-            cached = pack.source_report(root, baked, missions, images)
-            reason = next(r['reason'] for r in cached['inputs'] if r['label'] == xbox_row)
-            self.assertIn('earlier run', reason)
-            self.assertNotIn('draws its own', reason)
-            pc = root / 'PC_swbf2_exe/Star Wars Battlefront II Classic/GameData/data/_lvl_pc'
-            (pc / 'mus').mkdir(parents=True)
-            (pc / 'mus/mus1.lvl').touch()
-            (pc / 'unsupported.lvl').touch()
-            self.assertEqual(pack.source_report(root, baked, missions, images)['pc_libraries_read'], [])
-            report = pack.source_report(root, baked, missions, images, full_bake=True)
-            self.assertEqual(report['pc_libraries_read'], [str(pc / 'mus/mus1.lvl')])
+            self.assertEqual(rows['bf2 requested PS2 image']['status'], 'cached')
+            self.assertEqual(rows['bf2 extracted PS2 data']['status'], 'cached')
+            self.assertEqual(rows['found: unknown']['status'], 'refused')
             output = io.StringIO()
             with contextlib.redirect_stdout(output):
                 path = pack.write_source_report(root / 'game', report)
             self.assertEqual(__import__('json').loads(Path(path).read_text()), report)
             self.assertFalse(Path(path + '.new').exists())
-            self.assertIn('not recognized', output.getvalue())
+            self.assertIn('not a disc', output.getvalue())
 
     def test_pack_records_successful_steps_and_writes_beside_output(self):
         for rebake in (False, True):
@@ -357,7 +341,7 @@ class PackTests(unittest.TestCase):
                         mock.patch.object(pack, 'inputs_hash', return_value='hash'), \
                         mock.patch.object(pack, 'missing_music', return_value=[]), \
                         mock.patch.object(pack.shutil, 'which', return_value=None), \
-                        mock.patch.object(pack.subprocess, 'run', return_value=mock.Mock(stdout='tracked')), \
+                        mock.patch.object(pack.subprocess, 'run', return_value=mock.Mock(stdout='tracked', returncode=0)), \
                         contextlib.redirect_stdout(io.StringIO()):
                     pack.main()
                 report = __import__('json').loads(Path(str(out) + '.sources.json').read_text())
@@ -493,6 +477,26 @@ class AnalysisIndexTests(unittest.TestCase):
             result=subprocess.run(command+['--check'],check=True,capture_output=True)
             self.assertEqual(result.stdout,before)
             self.assertEqual(path.read_bytes(),before)
+
+
+    def test_other_notes_never_show_private_text(self):
+        script=Path(__file__).resolve().parents[1] / 'analysis_index.py'
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp);(root/'analysis/plan').mkdir(parents=True)
+            (root/'analysis/re-fixture.md').write_text('# Fixture\n\nSummary.\n')
+            (root/'analysis/public-note.md').write_text('# Public title\n\nBody.\n')
+            (root/'analysis/plan/mixed.md').write_text('\n# Shown heading\n')
+            (root/'analysis/all-private.md').write_text('\n')
+            subprocess.run([sys.executable,str(script),'--root',str(root)],check=True,capture_output=True)
+            index=(root/'analysis/INDEX.md').read_text()
+            self.assertIn('[public-note.md](public-note.md)',index)
+            self.assertIn('Public title',index)
+            self.assertIn('[plan/mixed.md](plan/mixed.md)',index)
+            self.assertIn('Shown heading',index)
+            self.assertNotIn('Hidden heading',index)
+            self.assertNotIn('Secret ledger',index)
+            self.assertNotIn('all-private.md',index)
+            self.assertEqual(index.count('re-fixture.md'),2)  # its one row: link text and target, nothing under Other notes
 
 
 class ScannerProjectionTests(unittest.TestCase):

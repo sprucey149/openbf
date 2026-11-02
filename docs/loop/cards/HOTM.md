@@ -34,15 +34,6 @@ team-mate about twice as much of their time since MOUTH landed (273a441). MOUTH'
 - MOUTH's knob binary splits its two rules: `lead_tmp/mouth/build/` (`rto_knobs2`: `MOUTH=1`, `HOPWIN=1` on 4ca302f;
   null = main; use `env VAR=1 cmd` behind `timeout` / `xargs`).
 
-## Acceptance
-1. Which rule: Hoth, 16 seeds, the four knob variants - the value per variant, the null equal to 4ca302f's row above.
-2. Where and what: the legs / spots that hold the added mate-seconds (the 4 Hz samples), and one traced case (a headless
-   snapshot, `blackbox_read --near`): a file of bots on one line past a corner, a jam at a mouth (P-stalls and `noprog`
-   at the spot say which), or vehicle crews.
-3. Then either a fix that brings Hoth to at most 7.5 over 16 seeds with MOUTH's gains kept (BF2 Kamino's four walkway
-   legs 0 stalls, BF1 Bespin's deaths under the floor at most 12 in 8 rounds), or the finding "harmless" with the trace
-   that shows why. The planner re-takes the baseline after a fix.
-
 ## Notes
 - The baseline now holds main's own value (12.87 on seeds 1-8, 7.72 on 9-16), so the gate does not refuse other cards on
   it; this card is what brings it down.

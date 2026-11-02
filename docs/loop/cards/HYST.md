@@ -75,17 +75,6 @@ D21 (`analysis/bot-design.md` 9): the PS2's BF2 bot thinks at the next step on a
 (`re-ai-think-rate.md` 4), BF1 never; ours wakes on any hit, near miss or new enemy in sight. The PS2's timer takes
 "another qualifying hint"; ours keeps the held one unless another is 15 % better. The PS2 has no closing rule.
 
-## Acceptance
-Tests: `tactic::tests::the_position_held_is_kept_unless_another_beats_it_by_the_margin`,
-`cover_reached_by_running_at_the_enemy_is_not_taken`; `wake::tests` (a hit wakes at once but not inside the gap; a
-near miss 1 m off wakes, 5 m off or a friend's does not; a new enemy at 15 m in front wakes, at 30 m or behind or
-already known does not; the segment distance); `why::tests::the_change_codes_are_indexed_by_their_value`. Two old
-tests changed with the rules: the REACT "stay" comparison ignores `last_contact` (the woken think saw its enemy
-again), and two Tactician geometries were moved so the closing rule does not apply to them
-(`a_cover_hint_covers_only_on_the_bots_side_of_the_target`, `the_band_is_grown_at_its_inner_edge`).
-Mutations (each fails a test): the margin check skipped; `SWITCH_MARGIN` 0; the closing filter off;
-`CLOSING_SHARE` 0; the hit bit, the near-miss bit, the "already known" test dropped; the gap removed.
-
 ## Open
 - The near-miss wake fires about 3.5 times as often as the hit wake; it is bounded by the gap, and the per-think
   draws (the circle stop's chance per think, BF1's tracked error) now run a little more often under fire.

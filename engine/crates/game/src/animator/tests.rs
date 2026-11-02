@@ -186,7 +186,6 @@ fn input(speed: f32) -> AnimInput {
         set: 0,
         fired: false,
         throw: None,
-        throw_windup: 0.0,
         reloading: false,
         reload_time: 0.0,
         alert: false,

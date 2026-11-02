@@ -23,31 +23,3 @@ today:
    over it.
 Expected cost: about +(cost omitted)/day at current rates. The maintainer starts it with `LANE=3 scripts/autoloop.sh`. The loop never
 launches autoloop.sh. deps LDOC only because both edit loopctl.py.
-
-## Do (in this order; stop after the experiment if it fails)
-1. **Experiment first.** On one savestate, boot the software renderer (`Renderer = 13`) and HW, from a private
-   `XDG_CONFIG_HOME` ini copy.
-   - Time both sessions.
-   - Compare the frames (target ≤ 4 levels; PXC batch 2's control found water and haze within 4).
-   - Record CPU use (32 threads, 62 GB).
-   - Write the result into the PCSX2 README.
-2. **Per-session config.** The launchers copy the ini into a per-session `XDG_CONFIG_HOME`, as they already do for
-   `XDG_CACHE_HOME`. A RAM-only mode picks the software renderer.
-3. **Locks.**
-   - `gpu.lock`: GPU renders and HW PCSX2.
-   - `ci.lock`: cargo and gates.
-   - `pcsx2.lock`: a small cap on concurrent emulators (a counting lock: N slot dirs).
-   - The scripts take the right one. The prompt wording goes to STATUS as a proposed line.
-4. `LANE_PREF[3] = ["re", "audit", "capture", "measure"]`; `pick()` lets lane 3 take the periodic audit.
-
-## Acceptance
-- The experiment's numbers are in the README (time HW vs SW, max level difference, CPU %).
-- Two PCSX2 sessions run at once with different renderers and neither touches `~/.config/PCSX2`: diff before/after.
-- `loopctl.py self-test` covers the lane 3 preference.
-- Every gate PASS, nothing declared.
-- STATUS tells the maintainer the lane is ready.
-
-## Planner note (2026-09-30 05:00)
-Value 4 → 5. Untagged at 4 it sat behind ~33 alpha value-4 cards (the picker takes alpha first at equal value), yet
-30 of the 50 open alpha cards are RE, and a third lane that prefers re/audit/capture is the direct lever on that queue.
-It becomes eligible when LDOC lands (both edit loopctl.py). Reverse: `loopctl.py set LANE3 value=4`.

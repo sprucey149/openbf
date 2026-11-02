@@ -25,7 +25,3 @@ Rows: engine/artifacts/ispd/win/bf2_{kam1,geo1}_2880x1920_{idle,lod,lodoff}/fram
 1. The 41 extra draw calls are LOWD meshes now drawn where the model alone was drawn before, both rasterised across the dithered band (each pixel keeps one, both pay the raster and the fragment cost up to the discard).
 2. A LOWD that covers a large part of the screen (a far shell) drawn with no depth benefit.
 (The far_cull discard predates LOD, so early-depth loss alone is not new.)
-
-## Acceptance
-- Name the extra draws (instances, meshes, screen coverage) on KAM1 from the cp spawn view with a census - a scratch print of the LOD-sided draws per frame.
-- A fix or a measured reason why not: the KAM1 2880x1920 row back within 1 ms GPU of OPENBF_LOD=0 with the switch on, and LOD's own acceptance (its GPU referee render/tests/suite/lod_switch.rs and goldens) still holding.

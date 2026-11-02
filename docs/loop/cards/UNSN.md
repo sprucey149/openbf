@@ -62,16 +62,6 @@ the black box's `Relocate` event row (`v` = where it stood), the headless events
 ## Deviation
 D23 (`analysis/bot-design.md` 9): the PS2 moves no stuck bot; ours is moved where no human sees it, else recycled.
 
-## Acceptance
-`ai::unseen::tests` (5): a penned bot no human sees is moved to hub 1 (the far end of its failing leg), alive, no
-death, a fresh walk, its log row and the census say `relocated`, and it walks on to its post; a human 10 m away
-looking away (line over the pen's wall) keeps the recycle; at 30 m, looking away it is moved, looking at the pen
-it is recycled; a human by hub 1 sends it to hub 2; the sight test (near any way, far only ahead, never through a
-wall, nobody without a human). `ai::stall::tests`' two recycle tests now have a team-mate human watching (the
-recycle is what a watched bot gets). Mutations (each fails a test): nobody ever seen (6 tests), the 15 m rule
-dropped (3), the view cone dropped (3), the spot's own sight test dropped (1). Not caught: the camera eye dropped
-(no test puts a wall between the eye and the camera's line).
-
 ## Open
 - The four Yavin hub-18 recycles and the Hoth / Geonosis ones: legs longer than `REACH`; a spot on the arc itself
   (past what stopped the bot) would cover them, or the arcs need a map fix.

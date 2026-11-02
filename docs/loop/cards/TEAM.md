@@ -20,19 +20,6 @@ domain: ai
 ## Why
 The maintainer, 2026-10-02: bots "all standing next to each other", shooting each other; "awareness of friends". `analysis/bot-design.md` 4.3 (the Team board), 4.1 (the unit grid). The PS2 has no team sense at all (SAIR 6). A teammate within 1.5 m: 8.7-17.9 % of a port bot's time against the PS2's 2.0-9.3 % (`lead_tmp/botm/post_jitr/seeds.md`).
 
-## What to build (`ai/team.rs`)
-1. **The unit grid:** 8 m cells, units sorted by cell each tick by a counting sort into buffers sized at load; "who is within r of p". `friend_in_line`, `spot_free`'s successor (reservations), the hunt-target loop and `perception::scan`'s candidate loop read it instead of walking every unit.
-2. **Roles inside a post's group**, per team once a second in unit-index order, kept at least 20 s (bot-design.md 4.3): Assault (default), Overwatch (scout classes with a free Snipe hint), Cover (while a friend captures: up to 2 others take guard positions facing the approach). Flank is card FLNK's and Gunner card TURR's: this card builds the board they plug into.
-3. **Fire lanes:** each friend's line of fire feeds the Tactician's "outside a friend's line" filter.
-4. **Contacts passed on:** a contact a friend within 20 m holds becomes "heard" for the bot - walked toward and aimed at, never fired at unseen (by tier: bot-design.md section 7).
-
-## Acceptance (run and paste)
-- A test: the grid's "within r" equals the brute-force loop on 1,000 random scenes (positions, radii); the sim hash of a 6-a-side replay is unchanged by the grid alone (land the grid first if needed).
-- **B3:** a teammate within 1.5 m <= the PS2's on KAM1, POL1, DEA1, KAS2 (8 seeds). **B4:** team kills of kills <= 3 % on every map.
-- Role counts printed per map (cover, overwatch); a test that no capacity is exceeded.
-- ms a tick at 33 units not up (bot-design.md M2's method: `lead_tmp/botd/tools/sample.sh`, `prof_keys.py`).
-- Sweep 8 seeds x 32 maps: 256 / 256. Declared: `sim; sweep; arena`.
-
 ## Notes
 - Cut from `analysis/bot-design.md` (card BOTD, 2026-10-03). Waits for the maintainer's read (deps BOTD). In BOTV's deps.
 - Not in it: a squad leader, formations, plans. Five roles at most.

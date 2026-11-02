@@ -34,29 +34,6 @@ approved (his 16:00 note).
 - `arsenal::choose` scores by each weapon's `ai_range` band (line 161): whether a scoped rifle's min range hands over
   to the pistol at 15-25 m today is NOT checked - step 1.
 
-## What to build
-1. **Census first, on main** (8 seeds x 32 maps, an observer in a scratch example): per sniper-class life - seconds at
-   a Snipe hint, lane length there (the farthest enemy-side hub in sight), shots and hits by range band, the weapon in
-   hand by enemy distance (rifle / pistol inside 15 m, 15-25 m, beyond 40 m), distance to the nearest enemy at death.
-2. **The spot:** score every Snipe hint (then high ground: hubs above the mean floor with a view) the bot's route
-   can reach within a walk budget by its lane - how many enemy-side hubs / posts it sees, weighted by distance - and
-   send the sniper to the best free one (ONE sniper per spot: `behave::spot_free`, as card DEFS does for defenders).
-   This is TEAM's Overwatch role (card TEAM, bot design 4.3) pulled forward: build it so TEAM's board can call it.
-3. **Hold and relocate:** it holds while an enemy has been in the lane in the last 20 s; then it picks the next spot,
-   the one just left excluded. No crouch-forever: the PS2's 60-120 s statue is what the maintainer does not want (bot design
-   D13 stays; CLSE5 measures its cost).
-4. **The pistol:** an enemy inside the rifle's min range, or within 25 m and closing, makes the pistol the weapon in
-   hand; back to the rifle past 40 m. Fix the `ai_range` band or the choice's rule, whichever step 1 shows is wrong.
-5. Each rule behind a switch in ONE binary, null = main byte for byte.
-
-## Acceptance
-- Scene tests, each mutation-checked: the sniper picks the long-lane hint over a nearer short-lane one; two snipers
-  take two spots; it leaves after 20 quiet seconds and not before; pistol in hand at 15 m, rifle again past 40 m.
-- The census, main beside the branch: share of a sniper's life at a chosen spot, median lane length, shots by range
-  band (most beyond 30 m), pistol share inside 15 m (the bar: over 80 %).
-- 8 seeds x 32 maps 256 / 256; kills a minute and where deaths happen (`contact_spells.py`) reported; a fidelity move
-  goes to the planner as an approval (the maintainer's yes is the note).
-
 ## Notes
 - 2026-10-12 16:58 planner: filed from the maintainer's note. `deps: CLSE4` because CLSE4's build puts the trigger's `MaxRange`
   test and the PS2's burst keys into `gunner_foot.rs` and re-takes the far-fire table this card is judged beside; it

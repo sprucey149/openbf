@@ -4,6 +4,5 @@
 # 2,000 lines that is not named here, and the default report marks a waived file over
 # 1,500. A queued split is a reason; so is "no seam yields two parts of 400+ lines"
 # (queue SPL7). Delete a file's line when its split lands — the report flags a stale one.
-game/src/blackbox.rs dev scaffolding kept as ONE module so it can be deleted whole when the game is playable (card BLKB; root AGENTS.md "Playtest black box"); a split would spread it
-core/src/commander.rs queued split: card SPL7 (1,618 when filed, 2,508 at cleanse 15)
+game/src/blackbox.rs dev scaffolding kept as ONE module so it can be deleted whole when the game is playable (card BLKB; analysis/dev-tools.md "Playtest black box"); a split would spread it
 game/src/main/windowed.rs queued split: card SPL8 (2,075 at cleanse 21)

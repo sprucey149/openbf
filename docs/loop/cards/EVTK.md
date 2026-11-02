@@ -26,18 +26,6 @@ on a faster display more often; a frame that steps 2 ticks loses the first tick'
 headless paths step tick by tick, so no golden or gate sees it. SQMK fixed the message box only (`game::event_feed`
 gates on the tick).
 
-## Do
-- Consume events per stepped tick: `WalkSim::advance` takes a per-tick hook (or returns the ticks it ran and the frame
-  loops), so fx / sounds / voice see every tick exactly once — 0 ticks = nothing new, 2 ticks = both.
-- Expect the windowed game to look and sound thinner afterwards (it was doubled): compare a hit effect and a rifle shot
-  with the headless capture and a PCSX2 frame before calling any density or loudness 'too low'.
-
-## Acceptance
-- First MEASURE the claim: a test (or a counter under OPENBF_DEV) that drives the windowed frame path with dt = 1/60 s over
-  N ticks containing K Impact / Shot events and counts effect spawns and sound starts — K each, not 2K (and not < K at
-  dt = 1/15 s). If the count is already K, close the card with the number.
-- Every gate PASS, nothing declared (the headless paths are unchanged).
-
 ## Result (2026-10-02, build, branch evtk 0b99471)
 MEASURED, the claim holds. `cargo test -p game --lib event_sounds` (`game/src/event_sounds.rs`,
 `a_ticks_events_start_their_sounds_and_effects_once`): a soldier firing at the ground for 8 s = 240 ticks, 40 shots,
@@ -51,9 +39,3 @@ MEASURED, the claim holds. `cargo test -p game --lib event_sounds` (`game/src/ev
 The test drives the same functions the window calls (`WalkSim::advance_with`, `Fx::ingest`, `BoltVis::track`,
 `event_sounds::each`), not the winit `App` itself: the 20 lines of glue in `main/windowed.rs` are read, not run.
 Gates: every gate PASS, goldens unchanged, ci 1099 / 0 / 43 (+1 = the new test).
-
-## Planner note (2026-10-02 04:30)
-Value 4 -> 5. The maintainer plays the windowed game: if the reading above holds, every shot, hit sound and impact effect he
-hears and sees there starts twice at 60 Hz, and a 2-tick frame drops a tick's events. The first acceptance line is a
-count and settles it cheaply. Shares `main/windowed.rs` with SQMK (landing now) and EVMSG, so the picker runs the three
-one at a time. Reverse: `loopctl.py set EVTK value=4`.

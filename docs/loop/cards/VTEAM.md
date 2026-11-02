@@ -47,21 +47,6 @@ its pad's side. Two small VENT gaps ride along. Nothing spawns a vehicle yet, so
   - The seat keeps the dead handle `(0, gen 1)` and `is_empty()` stays false.
   - After the slot is reused (gen 2), the new unit cannot take that seat.
 
-## Acceptance
-- **Two team fields.** `Vehicle` carries the live team (`team: Option<u8>`, None = PS2 team 0) and the pad's `home_team`.
-  - `seat_unit` sets `team` to the entrant's for every seat kind.
-  - `unseat_unit`, including via the death and despawn paths, sets `team = None` when the last rider leaves, unless the
-    class keeps its team. That is `VehicleSpec` bool `neutral_when_empty`: false for the command* bases, true otherwise.
-  - A pad spawn of an empty ordinary vehicle leaves `team = None`.
-  - `vehicle_team` returns `team`.
-  - Tests for every row of §7.1's table.
-- **HealthType from the class.** `VehicleSpec.health_type` comes from the class ODF (default Vehicle). A
-  vehicle_class test reads Animal for the BF1 tauntaun.
-- **Despawns unseat.** `shed_ai` and `vacate_player_slot` call `unseat_unit`. The audit patch's two cases become
-  assertions.
-- **Hash.** The new fields are hashed. An empty `Sim.vehicles` still costs nothing (`--sim-hash 100` pinned); every gate
-  PASS, nothing declared.
-
 ## Notes
 - **B1/B2 differences** (no BF1 vehicle is affected):
   - B1 counts a PilotType-1 ("self") seat as occupied. Its seat ctor sets pilot = self.
@@ -69,7 +54,3 @@ its pad's side. Two small VENT gaps ride along. Nothing spawns a vehicle yet, so
   - The only BF1 class with a "self" PilotType is `imp_droid_probe`, a droid.
 - **Home-team pad record.** B1 keeps the pad team per CLASS, B2 per vehicle. The port keeps it per vehicle (`home_team`),
   which covers both. Say so in the module header.
-
-## Planner note (2026-09-26)
-Value 4 → 5: VSEAT (the first drivable vehicle, 5) waits on this card and HOVR; VTEAM is eligible now, so it runs
-alongside HVRE.

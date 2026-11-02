@@ -45,23 +45,6 @@ draws no rider at all (`game/src/soldier_vis.rs`: "A rider is hidden"). Split fr
   behind the dish, hands on the grips), `lead_tmp/vturd/sheet_ps2_cases.png` (the gunner's back in the Naboo gun
   turret's own view; the laser tower with nobody).
 
-## Acceptance
-- A test through the BAKED class db of the six showcase maps and of every map with a turret: a seated unit is drawn
-  if and only if the seat is taken and its class has a pose key (and, BF2 rules, `IsPilotExposed` is not 0); the
-  list of drawn / hidden / no-soldier classes printed per map equals `lead_tmp/vturd/census2_bf1.txt` /
-  `census2_bf2.txt` (6 / 1 / 2 and 15 / 7 / 47 over the discs). Mutation: draw every rider -> the laser tower's row
-  fails.
-- A test: the drawn gunner's root is at `hardpoint x posed node x instance` within 1 cm at three yaws 90 degrees
-  apart (turret-node seat) and at two pitches (aimer-node seat); checked against the PS2 rows
-  `lead_tmp/vturd/ps2/hot1_dish_rows.bin`, `nab1_gty_rows.bin`, `myg1_lg_rows.bin` (the gunner's matrix is in
-  every row). Mutation: left at the building's origin -> fails.
-- A test: the nine-pose numbers from (yaw, pitch, stick, limits) equal the PS2's formula on a table of cases
-  (level, both pitch ends, both yaw ends, a full-circle turret with the stick held).
-- Pictures, PS2 beside the port: BF2 Hoth dish turret manned by a bot from outside (beside
-  `sheet_hot1_bots2_dish_zoom.png`), BF1 Naboo gun turret from the seat camera, BF2 Hoth laser tower manned (nobody).
-- The seat clips baked for every side (`human_minigun_9pose`, `human_dishcannon_9pose`, `human_drive`): 9 / 9 / 1
-  frames in the bake's own listing.
-
 ## Notes
 - The vehicle seats use the same function on the PS2 (hover pilots, bike riders, walker pilots: `PilotAnimation`
   / `Pilot9Pose` / `AnimatedPilotPosition`); this card is the building turrets, the vehicles a later card.

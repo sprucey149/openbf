@@ -38,16 +38,6 @@ attribute. The scanner passes1/1, the whole core library846/846, and
 `cargo test -p game --lib event_sounds -- --nocapture` passes16/16.
 This is evidence for the repair, not a committed implementation or acceptance.
 
-## Scope
-Use the established module/file convention; preserve every test body, caller
-fixture and assertion, and all production bytes before the first test module.
-Update the module-map paths/counts and future validation selectors if needed.
-No new test is needed for test-module plumbing: the existing scanner and all16
-regressions are the checks. Preserve fmath.rs, BANNED, DRAW_CALLS, PRESENTATION,
-ci.sh, gate configuration, protected paths and all runtime/hash pins exactly.
-Do not generalize the scanner or add an exemption. This does not reopen the
-previous TESTMOD replay repair or alter HITSND/GSND acceptance.
-
 ## Acceptance
 1. Reproduce the parent scanner assertion with one executed test, then require
    its pass after the layout correction. Restoring only the old module layout

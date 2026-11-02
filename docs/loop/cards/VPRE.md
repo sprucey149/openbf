@@ -22,7 +22,3 @@ in `CollisionWorld`. Two pieces need no RE and change no behaviour, so they can 
 - `core/src/collision/world.rs:286` `pub bodies: Vec<Body>` while the broadphase's staleness stamp is only `bodies.len()`:
   an in-place edit keeps a stale grid (analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 1; cleanse 2026-09-17 C1).
 - `Hit::Unit` has 4 uses in `crates/` (grep 2026-09-25).
-
-## Acceptance
-`bodies` private behind methods that bump a generation stamp the broadphase checks; `Hit::Target(Target::Unit(h))` with only
-the Unit arm; every gate PASS, nothing declared (a cleanup).

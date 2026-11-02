@@ -19,6 +19,3 @@ owner: CLEANSE 1107940
 The cleanse rotation's manifest area (LAST_CLEANSE). Scope: engine/crates/manifest since a0807e9.
 
 ## Evidence
-
-## Acceptance
-Every gate PASS with nothing declared (behaviour-neutral: bake byte-identical, goldens, sweep, sim hash unmoved); size_report.sh --check-map exit 0 with 0 stale counts.

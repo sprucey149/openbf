@@ -138,6 +138,10 @@ impl TurretRigs {
         self.station_models.contains(&name.to_ascii_lowercase())
     }
 
+    pub(crate) fn has_model(&self, name: &str) -> bool {
+        self.models.contains(&name.to_ascii_lowercase())
+    }
+
     /// A turret class's model with every soft segment cut into one segment
     /// per node. `Ok(None)` for any other model and for one that needs no
     /// cut; `Err` names a model that cannot be cut (a triangle across nodes,

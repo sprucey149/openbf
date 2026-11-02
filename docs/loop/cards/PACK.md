@@ -26,19 +26,6 @@ The earlier design (exe-relative asset paths, then append an archive + footer to
 ## Evidence
 The maintainer 2026-09-01; spec in `analysis/PLAN_LOG_2026.md` Part 2 §NEWLY OPUS-SAFE 2026-09-01 #6; analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 5.
 
-## Acceptance
-`game` runs from one file on the maintainer's machine; nothing packed is committed.
-
-## Planner note (2026-09-30, M-ALPHA)
-`defer: post-alpha` — not needed for the alpha's six showcase maps or its checklist. Value 1 (kept).
-
-## Planner note (2026-09-30 13:30) — multiplayer after PACK (the maintainer, INBOX 2026-09-30 10:05)
-PLAN §Milestones: every other milestone → **M6 PACK** → M7 Multiplayer (LAN + splitscreen, held until the maintainer says).
-PACK keeps its own `needs:` (the maintainer's go-ahead when the core game is done) and does NOT wait for multiplayer. Design
-constraint: the packaged build ships the greyed-out Multiplayer menu entry (BSHL), and adding netcode later must not
-force a redesign of the single-file build or the bake script (e.g. keep the packed archive + footer format independent
-of which crates are linked; a later `net` crate is just more code in the same binary).
-
 ## Note (planner 2026-10-03 07:15, from AMBM's landing 1bde70c)
 The battle's music is not baked: the runtime streams each take's ADPCM out of the game's own SOUND LVLs, found under
 the repo's unpacked disc tree (the environment variable `OPENBF_EXTRACTED` moves it; no file: no music, one line on

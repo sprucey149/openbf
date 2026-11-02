@@ -359,7 +359,7 @@ independent verifier (section 10).
 - `re_check.py writers`: `DAT_0051944c` 1, `DAT_00519444` 2 (both 0), `DAT_00515ce4` 1, B2 `DAT_0066133c` 7.
 - `re_check.py word`: 0x547278 `" %s %f"`, 0x51944c 0, 0x516ec4 10.0, the vtables 0x5474b8 / 0x5475f8 / 0x638b20 /
   0x638b40; hashes with `foly/h.py`.
-- Instructions (`scripts/tools/eedis2.py`): `FUN_002b1280` whole; the readers' and the verifier's for the post's
+- Instructions (`scripts/tools/eedis.py`): `FUN_002b1280` whole; the readers' and the verifier's for the post's
   pitch, `BuildingSound`, the BF1 accept latch.
 - Twins opened for every BF2 claim (regions, entities, the state rule, the Music parser / update, battle end, the
   post, the prop, the spawn screen); the two games differ in: the music state rule, `MaxPlaybackTime`, the stream

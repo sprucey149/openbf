@@ -441,3 +441,67 @@ fn path_props_step_along_the_path() {
         .iter()
         .all(|i| i.translation[0] > 0.0 && i.rotation.iter().flatten().all(|v| v.is_finite())));
 }
+
+/// A tree with no executable above it still gets its grass, from the shipped
+/// numbers: a disc build must not lose its foliage to a missing file.
+#[test]
+fn a_tree_without_the_executable_keeps_its_foliage() {
+    let dir = std::env::temp_dir().join(format!("openbf-foliage-noelf-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let lvl = dir.join("NOPE.LVL").to_string_lossy().into_owned();
+    assert!(elf_for(&lvl, "bf1").is_none());
+    let grass = [("patch".to_owned(), Vec::new())];
+    let got = bake(
+        &dir,
+        &Inputs {
+            lvl_path: &lvl,
+            game: "bf1",
+            terrain: None,
+            mask: None,
+            file: None,
+            models: &[],
+            classes: &[],
+            paths: &[],
+            grass: &grass,
+        },
+    )
+    .unwrap()
+    .expect("the grass class is baked");
+    assert_eq!(got.grass.len(), 1);
+    assert!(!got.grass[0].atlas.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// An executable that does not hold the tables (another release's, or a damaged
+/// copy) is no reason to stop a bake or lose its foliage: the shipped numbers are
+/// the same numbers.
+#[test]
+fn an_executable_without_the_tables_falls_back_to_the_shipped_numbers() {
+    let dir = std::env::temp_dir().join(format!("openbf-foliage-badelf-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let lvl = dir.join("NOPE.LVL").to_string_lossy().into_owned();
+    std::fs::write(dir.join(ELF_BF1), b"not an executable").unwrap();
+    assert!(elf_for(&lvl, "bf1").is_some());
+    let grass = [("patch".to_owned(), Vec::new())];
+    let got = bake(
+        &dir,
+        &Inputs {
+            lvl_path: &lvl,
+            game: "bf1",
+            terrain: None,
+            mask: None,
+            file: None,
+            models: &[],
+            classes: &[],
+            paths: &[],
+            grass: &grass,
+        },
+    )
+    .unwrap()
+    .expect("the grass class is baked");
+    assert_eq!(
+        got.grass[0].atlas,
+        shipped_grass_atlas("bf1", got.grass[0].num_parts).unwrap()
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

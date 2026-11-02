@@ -513,3 +513,140 @@ fn the_connection_prefers_the_end_ahead_and_keeps_the_node_order() {
     assert_eq!(curve[3], s.flyer_paths[0].nodes[1]);
     assert_eq!(curve[0], v.pos - Vec3::Z * CONNECT_BEHIND);
 }
+
+/// `bf1_kas1`'s porpoising: a raised nose turning to a goal behind it at its own
+/// height. In the nose's own frame that goal reads above, and the nose kept climbing.
+#[test]
+fn a_raised_nose_comes_down_whatever_the_goals_bearing() {
+    let p = xwing(false);
+    let aim_dir = Vec3::new(0.0, 0.4, 0.9165);
+    let body = Body {
+        pos: Vec3::ZERO,
+        left: Vec3::X,
+        fwd: Vec3::Z,
+        vel: Vec3::Z,
+        aim_origin: Vec3::ZERO,
+        aim_dir,
+    };
+    for goal in [
+        Vec3::new(0.0, 0.0, 200.0),
+        Vec3::new(200.0, 0.0, 0.0),
+        Vec3::new(0.0, 0.0, -200.0),
+    ] {
+        let (_, pitch) = stick_to(&p, &body, goal);
+        assert_eq!(pitch, -1.0, "{goal}");
+    }
+}
+
+/// Height comes at the steady slope, or the steep one with the ground close.
+#[test]
+fn the_altitude_law_climbs_no_steeper_than_its_slope() {
+    let (s, _, _) = world(false, true);
+    let mut v = s.vehicles[0].clone();
+    v.vel = Vec3::Z * 50.0;
+    let h = VehicleHandle {
+        index: 0,
+        gen: v.gen,
+    };
+    let p = xwing(false);
+    let goal = Vec3::new(0.0, 500.0, 100.0);
+    v.pos = Vec3::new(0.0, 30.0, 0.0);
+    let (cruise, _) = lift_goal(&s, &v, h, &p, goal);
+    assert!(
+        (cruise.y - (30.0 + 100.0 * CLIMB_SLOPE)).abs() < 0.01,
+        "{cruise}"
+    );
+    v.pos = Vec3::new(0.0, GROUND_DANGER - 1.0, 0.0);
+    let (low, _) = lift_goal(&s, &v, h, &p, goal);
+    assert!(
+        (low.y - (GROUND_DANGER - 1.0 + 100.0 * CLIMB_SLOPE_LOW)).abs() < 0.01,
+        "{low}"
+    );
+}
+
+/// The stick moves at the hand's rate, from where it was, whatever the law asks.
+#[test]
+fn a_bot_pilots_pitch_stick_slews() {
+    let (mut s, _, _) = world(false, true);
+    s.tick = 10;
+    let handle = VehicleHandle {
+        index: 0,
+        gen: s.vehicles[0].gen,
+    };
+    let me = UnitHandle {
+        index: 0,
+        gen: s.units[0].gen,
+    };
+    s.vehicles[0].flyer.phase = FlightPhase::Flying;
+    s.vehicles[0].pos = Vec3::new(0.0, 100.0, 0.0);
+    let mut v = s.vehicles[0].clone();
+    let p = xwing(false);
+    let mut ai = FlyerAi {
+        agent: FlyAgent::Travel,
+        goal: Some(Vec3::new(0.0, 1000.0, 400.0)),
+        anchor: v.pos,
+        anchor_at: s.tick,
+        ..FlyerAi::default()
+    };
+    let step = PITCH_SLEW * crate::TICK_DT;
+    let [.., first] = bf1_sticks(&s, me, &v, handle, &p, &mut ai, None);
+    assert!((first - step).abs() < 1e-5, "{first}");
+    v.input.pitch = -1.0;
+    let [.., second] = bf1_sticks(&s, me, &v, handle, &p, &mut ai, None);
+    assert!((second - (step - 1.0)).abs() < 1e-5, "{second}");
+}
+
+/// A sighting holds for [`ATTACK_HOLD`], the run keeps its slope, and a target under
+/// the nose ends it instead of diving at it.
+#[test]
+fn an_attack_run_holds_its_sighting_and_never_dives_at_the_nose() {
+    let (mut s, _, _) = world(false, true);
+    s.tick = 100;
+    let mut v = s.vehicles[0].clone();
+    v.pos = Vec3::new(0.0, 100.0, 0.0);
+    let mut ai = FlyerAi::default();
+    let far = Vec3::new(0.0, 0.0, 200.0);
+    let goal = attack_goal(&s, &v, &mut ai, Some(far)).expect("a run");
+    assert!(
+        (goal.y - (100.0 - 200.0 * ATTACK_SLOPE)).abs() < 0.01,
+        "{goal}"
+    );
+    s.tick += ATTACK_HOLD - 1;
+    assert!(attack_goal(&s, &v, &mut ai, None).is_some());
+    s.tick += 1;
+    assert_eq!(attack_goal(&s, &v, &mut ai, None), None);
+    assert_eq!(ai.run, None);
+
+    let under = Vec3::new(1.0, 0.0, 1.0);
+    assert_eq!(attack_goal(&s, &v, &mut ai, Some(under)), None);
+    assert_eq!(ai.break_until, s.tick + ATTACK_BREAK);
+}
+
+/// [`WEDGED_GIVEUP`] ways out and the pilot leaves; one fewer and he stays.
+#[test]
+fn a_pilot_leaves_a_craft_wedged_too_many_times() {
+    for (wedges, leaves) in [(WEDGED_GIVEUP - 1, false), (WEDGED_GIVEUP, true)] {
+        let (mut s, b, v) = world(false, true);
+        assert!(s.seat_unit(b, v, 0));
+        let at = Vec3::new(12.0, 50.0, 0.0);
+        let c = s.vehicle_mut(v).unwrap();
+        c.pos = at;
+        c.flyer.phase = FlightPhase::Flying;
+        c.flyer.ai = FlyerAi {
+            agent: FlyAgent::Escape,
+            goal: Some(at + Vec3::Z * ESCAPE_FORWARD),
+            anchor: at,
+            wedged_until: 1000,
+            wedges,
+            ..FlyerAi::default()
+        };
+        for _ in 0..5 {
+            s.step(&[]);
+        }
+        assert_eq!(
+            s.unit(b).unwrap().mount.is_none(),
+            leaves,
+            "{wedges} ways out"
+        );
+    }
+}

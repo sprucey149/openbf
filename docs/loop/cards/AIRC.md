@@ -38,26 +38,6 @@ with the stick held is braked toward 0.27 m/s.
   "pressed against the wall with W held, vx reads 0.0000"), was measured AGAINST A WALL. Nobody has measured a
   standing jump with the stick forward on open floor.
 
-## What to do
-1. **Measure the PS2 on open floor, both games** (the ps2live / PCSX2 tooling the wall traces used): from a stand, jump
-   and hold the stick forward; from a run, jump and release the stick; from a run, jump and hold back. Record the
-   horizontal speed per frame. That settles target-vs-acceleration and the numbers.
-2. **Build what it shows.** If the PS2 moves forward from a standing jump, match it (and correct re-stance-roll.md). If
-   it really does not, build the maintainer's rule anyway as a feel choice (FEEL_NOTES.md): the stick steers the air velocity
-   toward full `MaxSpeed` / `MaxStrafeSpeed` at an air acceleration of your choosing (start at the 2.1 m/s2 above),
-   and a jump taken at a run keeps its speed when the stick is let go. Same rule for the player and for bots.
-3. **Bots use it.** `brain::lost_jump` makes a bot back up for a run-up before a low wall (`LOST_JUMP_SPEED` 3 m/s,
-   `LOST_RUNUP`). With air control a bot at a kerb or low wall jumps from where it stands and holds the stick at it.
-   Keep the run-up only where the measured air travel cannot clear the obstacle.
-
-## Acceptance
-- A test: from rest, jump with the stick forward - the soldier lands at least the measured PS2 distance ahead (or 0.6 m
-  if the rule is ours); a running jump with the stick released lands where it does today, within 5 %.
-- The maintainer's rail case (`lead_tmp/fable2/tools/kamr_walk.rs.txt`, the y 60.3 platform's rim): a STANDING jump at the rail
-  with the stick forward gets over it.
-- A bot test: a lost bot at a 0.5 m kerb gets over it without a run-up.
-- The 8-seed sweep: no map's finish count drops. Sim hashes move (declared).
-
 ## Notes
 - Do BOWL (`first: 1`) first: with the rail no longer a one-way valve for bots, air control over rails cannot put more
   of them on the hulls.

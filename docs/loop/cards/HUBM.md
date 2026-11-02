@@ -55,28 +55,6 @@ and of every unit in the open dune sea, so `commander::plan`'s reach test reads 
   and kills / min 17.3 -> 12.4 (the extra ones at card LLEG's walled cp7 spot, (-84, 264)); BF1 HOT1 recycled 2 -> 13;
   riders killed in destroyed vehicles 771 -> 1018 (BF1 YAV1 33 -> 149).
 
-## What to do
-1. `NavGraph::locate_on`: WAI2's `serves` test for EVERY mover, the soldier included (drop `m.ty != SOLDIER`), and
-   its comment cites the PS2 functions instead of PROVISIONAL; the last step likewise (check BF1 `FUN_00266840` and
-   BF2's twin first: nearest allowed arc, not nearest hub). Everything that reads a hub from a position goes through
-   it (`hub_for`, `ai::start_hub`, `Sim::add_cp`, the walker / vehicle lookups) - list the callers and say which
-   mover each passes. Re-take the prototype's numbers on the base of the day (they are on 449f006, before WAI2).
-2. Re-measure, then decide `commander.rs`'s two port guards on the new base: the reach drop on a BF1 map (the PS2's
-   BF1 draw has none) and `Hunt` as a result of the draw (`re-conquest-goal.md` section 8 item 4 kept Hunt for the
-   endgame only; CONT's build added it for TAT1).
-3. Tests for the four commander rules no test holds (audit CONT's mutation check, `mut/results.txt`): BF1's exclusion
-   after the 5 s test, the passenger rule, the reach drop in `plan`'s offer, the no-route redraw.
-
-## Acceptance
-- A `nav.rs` test: a point inside only a hub with no arc for the mover is located on the arc corridor or the nearest
-  usable hub, never in that hub; mutation-checked (the test fails with the filter removed).
-- On the 32 baked maps, 0 conquest posts whose `nav_hub` has no soldier arc (today 2: TAT1 cp7 and cp2), as a test
-  or a census line pasted into the report.
-- 8 seeds x 32 maps: 256 / 256; TAT1 hunting <= 3 % of on-foot unit-seconds (today 52.2 %), TAT1 recycled <= 40
-  (today 111), TAT1 kills / min >= 28 (today 24.2); BF2 KAM1 post -> Hunt -> post blips <= 5 (today 56); no map loses
-  a finish; BF2 GEO1 and BF1 HOT1's recycles re-run over 24 more seeds and reported with their spots.
-- The four commander tests of step 3, each failing under its mutation.
-
 ## Notes
 - Filed by audit CONT, 2026-10-02 (`reports/20261002_2300_audit_CONT.md`). No dep on BOTD was set: this is a parity
   defect in where a unit IS on the graph, not a steering rule - but it moves routes on 15 maps, so the planner may
@@ -92,34 +70,6 @@ and of every unit in the open dune sea, so `commander::plan`'s reach test reads 
   prototype, on a showcase map; it is not a steering or brain rule. BOTD's draft (`lead_tmp/botd/bot-design.md`
   section 12) lists it as step 0, "not held". HUBP and LLEG wait for BOTD, so this lands before both. Re-take BOTM's
   TAT1 row after it lands (BOTD's bars were written on the pre-HUBM base). Undo: `loopctl.py set HUBM deps=BOTD`.
-
-## Build (2026-10-03, lane 2; report `reports/20261003_0045_card_HUBM.md`; evidence `engine/artifacts/lead_tmp/hubm/`)
-- **What changed** (`core/src/nav.rs` `locate_on`): the hub filter for every mover (no soldier exception); the last
-  step is the nearer end of the nearest arc the mover may use, by the distance left outside its corridor (BF1
-  `FUN_00266840` B1:185997-186031 with `FUN_00265eb8`; BF2 `FUN_002ebb48` B2:276127-276193 - both read this session,
-  not put to a verifier). A type with no arc anywhere keeps the nearest hub (OURS). Callers, all through `locate_on`:
-  `hub_for` / `hub_for_on` - `Sim::add_cp` (`sim/round.rs:30`, SOLDIER), `sim/bounds.rs:208` (SOLDIER with a jet),
-  `ai::start_hub` (`ai/route.rs:122`, the unit's own mover; used by `brain.rs`, `squad.rs`, `commander::plan`),
-  `unit_probe` / `round_to_outcome` / `leak_census` (read-only).
-- **Numbers** (base 230693e against the branch, 8 seeds x 32 maps, `sw_base` / `sw_new`, `audit-cont/tools/rows.py`):
-  finished 255 -> 256 of 256 (BF1 YAV2 7 -> 8); TAT1 recycled 141 -> 3, kills / min 18.1 -> 32.2, a target change per
-  28 -> 97 s; total recycled 347 -> 215; vehicle deaths 932 -> 1026. Observer (`obs_base` / `obs_new`,
-  `port_changes.py`): TAT1 hunting 42.5 -> 0.6 % of on-foot unit-seconds; BF2 KAM1 blips 79 -> 0, a change per
-  447 -> 568 s. Posts on a hub no soldier arc leaves (`post_hub_census.py` on the `AUDIT_REACH` printout): 2 -> 0 of 185.
-- **The maps that rose, 24 more seeds (9-32, `more_base` / `more_new`)**: BF1 HOT1 recycled 19 -> 17; BF2 GEO1
-  179 -> 149 (top spots (-84, 264) 55 -> 34, (-72, 264) 25 -> 28: card LLEG's cp7 spot, both sides); BF2 HOT1 54 -> 65
-  (the spot (-264, -12 .. 0): 13 -> 30). The 8-seed rises (GEO1 42 -> 56, BF1 HOT1 16 -> 19) were noise; BF2 HOT1's is
-  not shown to be. One GEO1 round of the 24 (seed 32) did not finish on the branch (3 v 3 alive, y -63: a hidden
-  survivor), 24 / 24 on the base.
-- **Step 2, the two port guards: both kept.** The draw's Hunt is 0.6 % (TAT1) and 1.0 % (KAM1, the endgame) of
-  on-foot time now, so removing it has nothing to win that was measured; the reach drop on a BF1 map is held by the
-  new test. Undo either: the two lines the mutations m15 / m16 name (`lead_tmp/hubm/mut/results.txt`).
-- **Step 3**: four tests in `commander.rs`, each failing under its mutation (m10, m13, m15, m16); the nav test fails
-  with the filter removed and with the soldier exception put back (n1, n2).
-- **Left, found on the way** (no card opened): step 2 of the PS2's locate takes the containing arc with the SMALLEST
-  `rA + rB` (both games), the port the first in arc order; BF2's nearest-arc step also skips arcs with `flags & 1`.
-  `analysis/RE_LOG.md`'s planning-graph entry still describes locate without the hub test. BOTM's TAT1 row and BOTD's
-  bars are on the pre-HUBM base.
 
 ## Audit 2026-10-03 (lane 3, `reports/20261003_0250_audit_HUBM.md`): OK -> card LOC3 for what is left
 Re-derived before this card's Build section or the report was read. Held: every landed number (clean rebuilds of

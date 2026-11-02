@@ -33,11 +33,6 @@ weapon (`load_one` 216-250) and `weapon_draws` draws `sa.weapon` (386-395).
 | all_inf_vanguardsnow | all_weap_inf_rifle | all_weap_inf_launcher | hot1, rhn1, rhn2 |
 The PS2's class-select screens show each of these classes with its own gun (`lead_tmp/unit-audit/pcsx2/*_sheet.png`).
 
-## Acceptance
-- The body cache and the weapon are separate (a weapon keyed by its own geometry, per class); a test that two classes
-  sharing a body with different primaries draw different weapon meshes; BF2's twins checked (UAUD2).
-- A battle frame viewed; any moved golden declared and viewed.
-
 ## Notes
 - UGAL fixes the unit GALLERY's weapon guess; this is the battle's own path. Both should use the roster's
   `weapon_geometry`.
@@ -47,16 +42,6 @@ The PS2's class-select screens show each of these classes with its own gun (`lea
   `imp_inf_rocketeer_snow`, `imp_inf_sniper_snow` draw rifles; `all_inf_rocketeer_fleet` (dea1, tan1) and
   `all_inf_sniper_fleet` (dea1, tan1: rifle; kam1: launcher); geo1's `rep_inf_ep2_sniper` draws the rifle.
   Measured with `lead_tmp/unit-audit/uaud2_roster.rs` -> `port_roster_bf2.txt` (MISMATCH lines).
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — each class holding its own gun is on camera in every battle. Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
-
-## Planner note (2026-10-02 04:30)
-Value 4 -> 5. M1's only value-5 card (SQMK) is landing; this one is a build with a known cause in one file, and a
-class holding another class's gun is on screen in every BF1 Clone Wars battle (showcase NAB1 among them) and on BF1
-Hoth. Acceptance as written above; in the report paste the count of MISMATCH lines from the roster check that wrote
-`lead_tmp/unit-audit/port_roster_bf1.txt`, before and after (after: 0), and the same count over BF2's missions.
-Reverse: `loopctl.py set UWPN value=4`.
 
 ## Landed (2026-10-02, 2e54da7) — report `reports/20261002_1445_card_UWPN.md`
 Bodies and hand weapons are cached apart (`soldier_vis::DrawPlan`). Acceptance run: `roster::battle_classes_hold_their_own_weapon_model`

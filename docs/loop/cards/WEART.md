@@ -17,10 +17,3 @@ alpha: yes
 ---
 ## Why
 Card WEARC (landed eb331e7, 2026-10-16) stopped ci linking examples: one warm ci.sh after a core edit 1.76 -> 1.14 GB written (cgroup io.stat, report reports/20261016_0014_card_WEARC.md). What remains is mostly test-binary links: 77 test executables, 5.92 GB apparent in debug/deps after one ci run (largest: game lib tests 153 MB, golden_hud 132 MB, golden_spawn 131 MB, skinned_glb 130 MB, battle_replay 130 MB).
-## Do
-1. Measure on today's main with WEARC's instrument (lead_tmp/wearc/measure.sh: a systemd-run scope, io.stat wbytes after sync -f).
-2. Fold game/tests/*.rs into one integration binary (tests/all/main.rs with mod lines, the common Rust pattern) or a few grouped ones; keep the golden tests in binaries gates.py finds by name (gates.py GOLDEN_TESTS globs debug/deps/<name>-*): if they move, the gates.py edit needs the maintainer's [approvals.WEART] oracle = guards - otherwise leave the golden_* files as they are.
-## Acceptance
-- ci.sh: the same pass / fail / skipped counts as main (1553 / 0 / 46 on eb331e7), pasted.
-- Bytes written per warm ci.sh run (after a core edit) before and after, and the debug/deps executable total, in the report.
-- gates.py --auto on the branch: gpu (goldens) PASS - it still finds every golden test binary.

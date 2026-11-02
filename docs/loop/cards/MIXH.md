@@ -29,19 +29,6 @@ which the port does not apply (+4 dB more). PS2 front-line fights recorded off P
   law in RAM, 739/888 BF1 and 549/659 BF2 within 1 %), `tools/ps2render.py` (PS2 starts under each law), `tools/plateaus.py`
   + `ps2/f_*.raw` (the PS2 captures), `ps2/run_audio.sh` (PCSX2 output capture recipe), `tools/buses.py` (disc bus tree).
 
-## Acceptance
-- Rule tests (game): a 3-D one-shot of gain g at level l hands the mixer per-ear gains L = g l (1 - p), R = g l p with
-  p = 0.5 + 0.5 dot(dir, right): centred 0.5 g l each, hard right (g l, 0); the same for looping 3-D voices (engine
-  layers); a 2-D sound keeps full gain both ears; BF2 `soundfx` properties x 0.63, BF1 x 1.0, by the BAKED bus.
-  Mutation-check them.
-- The own-shot reference: BF1 Naboo blaster at gain 0.7012, level 0.8603, centred -> 0.3016 per ear (the PS2's save state
-  `lead_tmp/mixh/ps2/shot1.p2s`, register 0x134d).
-- SOUND_LOG `take` rows carry per-ear gains; `scripts/tools/mix.py` renders stereo. UCRY's 5 fight logs re-run on the
-  branch (`lead_tmp/ucry/census/run.sh`, cries removed): per-ear frames over full scale <= 0.03 % on each (the PS2-law
-  render of the PS2's own fights reads <= 0.02 %, before this card the port read 0.03-0.43 % mono). Paste the table.
-- A lone shot's level is the PS2's (above), so no pumping question arises; a master limiter only if a log still fails,
-  and then a lone shot must pass through it unchanged.
-
 ## Notes
 - Build spec (RE 2): kira carries the PS2's per-ear pair exactly: volume = g l sqrt(p^2 + (1-p)^2) / sqrt 2, panning =
   2m - 1, m = p^2 / (p^2 + (1-p)^2). Replace `game::sounds::pan_for`'s x 0.7 and every 3-D play site (one-shots `mix`,
@@ -64,10 +51,3 @@ peak UTA1 s4 3.52 x full scale (0.40 % of frames over), UTA1 s3 2.22 (0.05 %), N
 snapshot (null ALSA device) peaks 0.96 without cries, 1.02 for one frame with them; TAT1's post reads 2.35 with or
 without. The worst ticks are pellet impacts: 14 `imp_weap_ord_exp` starts in one tick (a shotgun's pellets each
 start the impact, card SNDX collapsed only the fire sound). The maintainer hears this as crackle (SNDX's "static").
-
-## Acceptance
-- First the PS2's own answer (one PCSX2 audio capture beside a front-line fight, or the SPU2 mixing rule + the
-  sound manager's voice cap read from the ELF): does a stack of starts saturate, steal, or duck?
-- Then the port: `mix.py` over the same 5 fight logs (UCRY branch) peaks under full scale, or the limiter's output
-  model does, with what it does to a lone shot's level (no audible pumping: a single shot's level unchanged).
-- Re-measure UCRY's mixer acceptance on main after this lands.

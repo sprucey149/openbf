@@ -35,13 +35,6 @@ at any speed but the clip's own), has no strafing pose (a side-stepping soldier 
   turnright clip plays, below -0.7069 (BF1 crouch -1.1781; prone +-0.4712) turnleft.
 - The FOLY build (footsteps) keeps its own clip id and phase: make it read the animator's, or show both agree.
 
-## Acceptance
-1. A table test of the chooser against the rule: BF1 alert soldier, left strafe at 4.4 m/s -> runbackward, right
-   strafe at 4.5 m/s -> walkforward (re-foley 8.2's live rows); forward 5.2 m/s -> walk, 5.6 -> run, back to 5.2 ->
-   run; BF2 by the speed mode. Mutation check on the alert window.
-2. Feet do not slide: over a headless walk at three speeds per stance, |root speed x rate - soldier speed| under 5 %
-   of the speed; paste the table (before: the constant rate's error).
-3. FEEL_NOTES.md: one line saying RUN_SPEED 4.5 is gone and what replaced it.
 ## Note from ANIML (landed 644695a, 2026-10-05)
 - `animator::body` is the PROVISIONAL movement choice (RUN_SPEED 4.5, idle under 0.3 m/s, forward by the facing) and
   `Move::ids` maps it to each game's ids; `Player::advance` plays at the plain dt (the rate rule goes there);

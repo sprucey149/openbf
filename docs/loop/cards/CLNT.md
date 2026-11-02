@@ -15,6 +15,3 @@ created: 2026-09-30
 ---
 ## Why
 The cleanse rotation's `scripts/artifacts tooling` area (LAST_CLEANSE), scoped to the 1,610 lines changed in scripts/ since the last scripts cleanse CLNS (90c5dc9).
-
-## Acceptance
-Every gate PASS with nothing declared; `land.py --self-test` and `loopctl.py self-test` PASS; `size_report.sh --check-map` 0 stale.

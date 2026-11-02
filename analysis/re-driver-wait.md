@@ -3,7 +3,7 @@
 # RE: the AI driver waits for a gunner - UnitWaitSecondaryAgent, the need-gunner call's two sources, the answerers' boarding (BF1 + BF2, card GUNWT)
 
 Card GUNWT, lane 2. Corpora: B1 = `analysis/SWBFRONT.ELF-decomp.c`, B2 = `analysis/SWBFRNT2.ELF-decomp.c`; ELF bytes
-read with `scripts/tools/eedis2.py`; live structures read out of 396 BF1 and 179 BF2
+read with `scripts/tools/eedis.py`; live structures read out of 396 BF1 and 179 BF2
 PCSX2 save states (`engine/artifacts/pcsx2/ref/states/` and every other `.p2s` under `engine/artifacts/`). Tags: [V]
 read in the decomp / disassembly (lines cited), [M] measured in PS2 RAM, [D] derived, [H] not confirmed; `[O]` = the
 load-bearing claims. Tools, outputs, claims and verdicts: `engine/artifacts/lead_tmp/gunwt/` (`tools/`, `ram/`, `wf/`).
@@ -206,5 +206,5 @@ python3 engine/artifacts/lead_tmp/gunwt/tools/agents.py                       # 
 xargs -a engine/artifacts/lead_tmp/gunwt/ram/all_states.txt python3 engine/artifacts/lead_tmp/gunwt/tools/agentram.py
 xargs -a engine/artifacts/lead_tmp/gunwt/ram/all_states.txt python3 engine/artifacts/lead_tmp/gunwt/tools/issuergate.py
 python3 engine/artifacts/lead_tmp/gunwt/tools/bf2human.py
-python3 scripts/tools/eedis2.py bf1 0x24d020 0x24d238   # enter + update
+python3 scripts/tools/eedis.py bf1 0x24d020 0x24d238   # enter + update
 ```

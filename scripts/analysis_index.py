@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate analysis/INDEX.md from the front of every analysis/re-*.md.
+"""Generate analysis/INDEX.md from the front of every analysis/re-*.md, then list the other notes by title.
 
 Usage: python3 scripts/analysis_index.py [--check] [--root DIR]
   --check     print the index to stdout, write nothing
@@ -27,6 +27,7 @@ AREAS = [  # (area, filename keywords)
     ("Modes / rules", ["conquest", "tickets", "time-limit", "spawn"]),
     ("Assets / formats", ["bank", "format", "lvl", "bake"]),
 ]
+PRIVATE_BLOCK = re.compile(r"", re.S)
 STATUS = ["PROVISIONAL", "UNAUDITED", "AUDITED", "SUPERSEDED", "STALE", "OPEN", "HYPOTHESIS"]
 
 
@@ -99,6 +100,18 @@ def main():
                 out.append(f"  - status: {', '.join(stat)}")
             for s in sup:
                 out.append(f"  - supersedes: {s}")
+        out.append("")
+    others = [p for p in sorted(glob.glob(os.path.join(AN, "*.md")) + glob.glob(os.path.join(AN, "plan", "*.md")))
+              if not os.path.basename(p).startswith("re-") and os.path.basename(p) != "INDEX.md"]
+    if others:  # the notes that are not re-*: plans, audits, logs and state-of-play notes
+        out += ["## Other notes", ""]
+        for p in others:
+            text = open(p, encoding="utf-8", errors="replace").read()
+            public = PRIVATE_BLOCK.sub("", text)  # the export drops these blocks, and a note with nothing else
+            if not public.strip():
+                continue
+            rel = os.path.relpath(p, AN).replace(os.sep, "/")
+            out.append(f"- **[{rel}]({rel})** ({text.count(chr(10)) + 1} lines) - {summarize(public)[0]}")
         out.append("")
     text = "\n".join(out)
     if "--check" in args:

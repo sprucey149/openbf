@@ -39,7 +39,7 @@ where pos += v·dt runs, the strafe carve term, entity[0xf0] / +0x360, the B2 co
 **All five are answered here (§0).**
 
 **Method.** The lead read every function below in the B2 decomp, line by line. The disassembly settled what the decomp
-hides (`scripts/tools/eedis2.py`): VU0 broadcast components, cross-product operand order, call arguments,
+hides (`scripts/tools/eedis.py`): VU0 broadcast components, cross-product operand order, call arguments,
 the slew branch. Float literals were read from the code bytes (`lead_tmp/hvre/floatlits.py`); .data constants and
 vtable words with `re_check.py word`. Hops, in order:
 - the thunks FUN_00224de0 / FUN_002245d0 → tick FUN_0021ca80 → spring FUN_0021f5d0 → FUN_005613c8;

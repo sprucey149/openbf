@@ -8,7 +8,7 @@ status: todo
 deps:
 files: engine/crates/game/src/main/windowed.rs,engine/crates/game/src/main/battle.rs,engine/crates/input/src/lib.rs,engine/crates/render/src/frame.rs,engine/crates/ui/src/hud.rs,engine/crates/core/src/sim.rs
 declares:
-needs:
+needs: maintainer - later scope, PLAN.md: Instant Action only for now
 effort:
 branch:
 resume:
@@ -17,7 +17,7 @@ defer: post-alpha
 ---
 ## Why
 The maintainer's INBOX 2026-09-30: **splitscreen is NOT part of the multiplayer hold.** The hold is LAN / network / lockstep /
-lobby only. Splitscreen comes BEFORE PACK, and the loop may work it out and build it without asking him — no `needs:`.
+lobby only. Splitscreen comes BEFORE PACK, and the loop may work it out and build it without asking him — no `needs:`. (Superseded 2026-11-02: the scope is Instant Action, so this card now waits on the header's `needs:`.)
 It is a much later task: start it only after the alpha cards and M1–M3's open cards are done (so value 1 +
 `defer: post-alpha`: the picker takes it only when nothing above is eligible). PLAN §Milestones: M5.
 
@@ -51,5 +51,5 @@ crate stays the stub it is; PACK's design note (room for netcode later) stands.
 - No `net` crate change (`git diff --stat` shows none).
 
 ## Notes
-- Planner 2026-09-30 21:45: filed as the maintainer asked. NO `needs:` line. XDET (cross-OS determinism, LAN) stays held.- From GLOW / BFLT (status_20260930_1330.md): the PS2 drops glow, bloom and the frame filter with two players (a fill-rate limit). Default for this card: keep them on in every view (a hardware limit we improve on); one line in FEEL_NOTES when built.
+- Planner 2026-09-30 21:45: filed as the maintainer asked. NO `needs:` line (then; see Why). XDET (cross-OS determinism, LAN) stays held.- From GLOW / BFLT (status_20260930_1330.md): the PS2 drops glow, bloom and the frame filter with two players (a fill-rate limit). Default for this card: keep them on in every view (a hardware limit we improve on); one line in FEEL_NOTES when built.
 - 2026-10-13 06:42 (lane 2, card CPBAR's RE; re-capture-display.md 3 and 4): with more than one viewport the PS2 scales the capture icon's group by 0.75 about its anchor (B2:377740, B1:249192; read, not seen - one pad). The PS2's ELF registers HUD events for two players and builds two capture displays; BF2's 3 / 4-viewport layout (`4playerhud`) carries a ring the PS2 never feeds.

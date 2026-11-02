@@ -26,18 +26,6 @@ parked vehicle or a turret as any other body - a hull over 3 m wide is gone roun
   cost a bot over 1 s of sliding on main fe043b4.
 - `engine/artifacts/lead_tmp/obst2/README.md` (the tools), `lead_tmp/obst/ab/final/` (the body census).
 
-## Acceptance
-1. Re-measured first on today's main (RULES 2): the 252 placements (how many cost over 1 s) and the contact seconds per
-   body class over 8 seeds x 32 maps (OBST's census) - the top five classes named.
-2. The rule - a parked vehicle's and a turret's footprint as a rectangle passed by its corners on the committed side -
-   behind a switch in one binary, null = main byte for byte.
-3. Bars: 0 of 252 placements over 1 s; `com_weap_gunturret`'s contact time halved; 24 seeds x 32 maps: rounds, recycles,
-   lost and floor deaths not worse (paired per seed); the maintainer's Kamino scene not worse; the cost per tick on the four B13
-   maps not up (`lead_tmp/obst2/tools/perf.sh`, JOBS=1, a null twin beside it).
-4. A test per rule that fails under its mutation.
-5. Side item (OBST2's resume 5): `collision/shape.rs`'s cylinder test gets misses, grazes, starts inside and short rays,
-   judged by an inside-test oracle (`lead_tmp/obst2/land_1012_refused/raychk-scratch`).
-
 ## Notes
 - Not this card, and where each went: B13's cost bar (0.187 ms a tick for the bar 0.123) is on PERF; velocity-space
   avoidance of soldiers (design item 3) is not built - the corridor scene passes on main, so it is a looks question;

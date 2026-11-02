@@ -11,7 +11,7 @@ Steps, each skipped when its output is already there (so a second run only
 recompiles and re-packs):
   0. scan the inputs and choose                 -> <output>.inputs.txt, <output>.inputs.json
   1. build the `bake` tool and the `game` binary (cargo, release)
-  2. extract each disc's DATA/_LVL_PS2 tree     -> extracted/bf{1,2}/lvl/  (bake extract-iso)
+  2. extract each disc's DATA/_LVL_PS2 tree and executable -> extracted/bf{1,2}/lvl/  (bake extract-iso)
   3. extract the Lua scripts of the LVLs        -> extracted/bf{1,2}/lua/  (extract_lua.py)
   4. build the missions from the disc's own bytecode -> engine/missions/   (gen_missions.py --ps2-only)
   5. bake every asset                           -> engine/assets_baked/    (rebake.sh)
@@ -28,8 +28,10 @@ The result plays from anywhere. It holds the games' own content, so it is for
 your machine only: never upload or share it. Needs
 cargo, python3, bash and ffmpeg (the bake encodes speech to OGG); `strip` is
 used when present. Tested on Linux and Windows (card WIN: Git for Windows' bash
-runs the bake; the output is dist/openbf.exe). FAT32 cannot hold a file of 4 GiB
-or more: --out needs a folder on another filesystem for a build that large.
+runs the bake; the output is dist/openbf.exe). Nobody has tried macOS yet: the
+scripts are written to run under its older bash and tools, and that is all. FAT32
+cannot hold a file of 4 GiB or more: --out needs a folder on another filesystem
+for a build that large.
 """
 
 import argparse
@@ -52,7 +54,8 @@ ENGINE = os.path.join(ROOT, "engine")
 EXTRACTED = os.path.join(ROOT, "extracted")
 BAKED = os.path.join(ENGINE, "assets_baked")
 MISSIONS = os.path.join(ENGINE, "missions")
-TARGET = os.environ.get("CARGO_TARGET_DIR") or os.path.join(ENGINE, "target")
+# cargo runs in engine/ and reads a relative CARGO_TARGET_DIR from there; this script can run from anywhere.
+TARGET = os.path.join(ENGINE, os.environ.get("CARGO_TARGET_DIR") or "target")
 WINDOWS = os.name == "nt"
 EXE = ".exe" if WINDOWS else ""
 
@@ -63,6 +66,9 @@ LUA = {
             "ingame": "INGAME.LVL", "inshell": "INSHELL.LVL"},
 }
 
+
+# Above each game's tree: bake::foliage reads its placement and grass tables out of it.
+GAME_ELF = {"bf1": "SWBFRONT.ELF", "bf2": "SWBFRNT2.ELF"}
 
 PAK_NAME = "openbf.pak"
 FAT32_LIMIT = 2**32
@@ -206,6 +212,12 @@ def lvl_root(game):
     return GAMEPLAY_TREES.get(game) or os.path.join(EXTRACTED, game, "lvl", "DATA", "_LVL_PS2")
 
 
+def disc_executable(game):
+    """The executable bake::foliage::elf_for finds for this game's tree, or None."""
+    tree = Path(lvl_root(game))
+    return next((str(folder / GAME_ELF[game]) for folder in [tree, *tree.parents] if (folder / GAME_ELF[game]).is_file()), None)
+
+
 def need(tool, why):
     if shutil.which(tool) is None:
         sys.exit(f"pack: `{tool}` is not on PATH ({why})")
@@ -213,8 +225,9 @@ def need(tool, why):
 
 # What a bake / the missions are made by: when any of it changes, the output is stale and is made again.
 BAKE_INPUTS = ("engine/crates/bake", "engine/crates/mungefs", "engine/crates/manifest", "scripts/rebake.sh", "scripts/console_input.py", "scripts/input_scan.py",
-               "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "engine/crates/bake/src/effect_names.txt", "engine/Cargo.toml", "engine/Cargo.lock")
-MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py")
+               "scripts/bake_dlc.py", "scripts/dlc_inputs.py", "engine/crates/bake/src/effect_names.txt", "engine/crates/manifest/data/gameplay", "engine/Cargo.toml", "engine/Cargo.lock")
+MISSION_INPUTS = ("scripts/gen_missions.py", "scripts/extract_lua.py", "scripts/pack.py", "scripts/console_input.py", "scripts/input_scan.py",
+                  "scripts/gameplay_missions.py", "engine/crates/manifest/data/gameplay/corrections-v1")
 # Kept in extracted/ (local, ignored by git): engine/missions/ is tracked in the dev tree.
 BAKE_STAMP = os.path.join(EXTRACTED, "bake_inputs.sha256")
 MISSION_STAMP = os.path.join(EXTRACTED, "mission_inputs.sha256")
@@ -229,7 +242,7 @@ def inputs_hash(paths, source_paths=None):
         full = os.path.join(ROOT, p)
         files = [full] if os.path.isfile(full) else sorted(
             os.path.join(d, f) for d, _, fs in os.walk(full) for f in fs
-            if f.endswith((".rs", ".toml")) and os.sep + "tests" not in d[len(full):])
+            if f.endswith((".rs", ".toml", ".json")) and os.sep + "tests" not in d[len(full):])
         for f in files:
             h.update(os.path.relpath(f, ROOT).replace(os.sep, "/").encode())
             with open(f, "rb") as source:
@@ -267,6 +280,14 @@ def find_bash():
         if os.path.isfile(b):
             return b
     sys.exit("pack: Git for Windows' bash.exe was not found (install Git for Windows, https://git-scm.com)")
+
+
+def git_tracked_missions():
+    """Tracked missions, or nothing for a checkout with no git around it (a source archive, say)."""
+    try:
+        return subprocess.run(["git", "-C", ROOT, "ls-files", "--", "engine/missions"], capture_output=True, text=True).stdout.strip()
+    except OSError:
+        return ""
 
 
 def missing_shadows():
@@ -324,8 +345,10 @@ def ron_array(text, key, required=False):
     raise ValueError(f"unterminated {key} array")
 
 
-def map_texture_sources(baked):
-    """Stored map-local provenance, not a claim about files read this run."""
+def map_texture_sources(baked, base_labels=None):
+    """Stored map-local provenance, not a claim about files read this run. `base_labels` names the format of each game's
+    gameplay data, where it is not the PS2's."""
+    base_labels = base_labels or {}
     maps = []
     pair = r'\(\s*(' + RON_STRING + r')\s*,\s*(' + RON_STRING + r')\s*,?\s*\)'
     for manifest in sorted(Path(baked).glob('*/manifest.ron')):
@@ -359,7 +382,7 @@ def map_texture_sources(baked):
             textures = manifest.parent / 'textures'
             tier_names = {name for name, _ in tiers}
             present = {name for name, filename in files.items() if (textures / filename).is_file()}
-            row.update(source_game=game, base_source=f"{game} PS2",
+            row.update(source_game=game, base_source=f"{game} {base_labels.get(game, 'PS2')}",
                        base_textures=sum((textures / f'{n}.ktx2').is_file() for n in set(names)),
                        missing_base_textures=sorted(n for n in set(names) if not (textures / f'{n}.ktx2').is_file()),
                        pc_alternatives=sorted({n for n, source in tiers if source == 'pc' and n in present}),
@@ -374,66 +397,53 @@ def map_texture_sources(baked):
     return maps
 
 
-def source_report(root, baked, missions, images, extracted_used=(), images_used=(), full_bake=False, pc_roots=None, plan=None):
-    """Only successful pack steps establish which inputs were consumed."""
+def source_report(root, baked, missions, images, plan, extracted_used=(), images_used=(), rebaked=None, pc_roots=None, warnings=()):
+    """Only successful pack steps establish which inputs were consumed. `rebaked` is what the bake did this run: None
+    for nothing, "all", or a list of groups. "cached" means an input of the bake packed, not read this run: the bake's
+    stamp holds its path, so a bake made without it would have been made again."""
     root = Path(root)
     inputs = []
     pc_roots = pc_roots or {}
+    pc_read = rebaked == "all" or "side" in (rebaked or ())
 
-    def note(path, label, used, reason):
+    def note(path, label, status, reason):
         inputs.append(dict(path=str(Path(path).absolute()), label=label,
-                           present=Path(path).exists(), status='used' if used else 'unused', reason=reason))
+                           present=Path(path).exists(), status=status, reason=reason))
 
     selected = set()
+    gameplay_labels = {"xbox-disc": "Xbox", "pc-install": "PC"}
+    base_labels = {}
     for game, image in images.items():
         if game in pc_roots:
-            note(pc_roots[game], f'{game} PC visual input', full_bake,
-                 'passed to texture-tier bake this run; console data supplies gameplay and shared UI' if full_bake else
-                 'not read this run; cached bake and missions packed')
+            note(pc_roots[game], f'{game} PC visual input', 'used' if pc_read else 'cached',
+                 'passed to texture-tier bake this run; console data supplies gameplay and shared UI' if rebaked == "all" else
+                 'passed to the soldier, weapon and vehicle bake this run; the rest of the bake is from an earlier run' if pc_read else
+                 'not read this run; the cached bake packed was made with it')
         if image:
             selected.add(Path(image).resolve())
             used = game in images_used
-            note(image, f'{game} requested PS2 image', used,
+            note(image, f'{game} requested PS2 image', 'used' if used else 'cached',
                  'extracted successfully this run' if used else 'not read or verified this run; cached extraction used')
-        tree = root / 'extracted' / game
+        gameplay = (plan.get('games', {}).get(game) or {}).get('gameplay') or {}
+        platform = gameplay_labels.get(gameplay.get('kind'))
+        if platform:
+            base_labels[game] = platform
+            note(gameplay.get('tree') or gameplay['path'], f'{game} {platform} gameplay data', 'used' if game in extracted_used else 'cached',
+                 'read for the console Lua cache, mission generation or bake this run' if game in extracted_used else
+                 'not read this run; the cached bake packed was made with it')
+            continue
         used = game in extracted_used
-        note(tree, f'{game} extracted PS2 data', used,
+        note(root / 'extracted' / game, f'{game} extracted PS2 data', 'used' if used else 'cached',
              'read for the console Lua cache, mission generation or bake this run' if used else 'not read this run; cached bake and missions packed')
-    iso = root / 'iso'
-    if plan:
-        chosen = {Path(path).resolve() for path in pc_roots.values()} | selected
-        for row in plan['found']:
-            if Path(row['path']).resolve() not in chosen:
-                inputs.append(dict(path=row['path'], label=f"found: {row['kind']}", present=True,
-                                   status=row['status'], reason=row['reason']))
-    elif iso.is_dir():
-        for path in sorted(p for p in iso.iterdir() if p.is_file()):
-            if path.resolve() not in selected:
-                inputs.append(dict(path=str(path.absolute()), label='other source file', present=True,
-                                   status='not recognized', reason='no supported reader selected; file was not read'))
-    pc = root / 'PC_swbf2_exe' / 'Star Wars Battlefront II Classic/GameData/data/_lvl_pc'
-    recipe = (root / 'scripts/rebake.sh').read_text(encoding='utf-8')
-    match = re.search(r'^BF2_MAPS="([^"]*)"', recipe, re.M)
-    known_pc = {'side/rep.lvl', 'side/cis.lvl', 'tat/tat2.lvl'}
-    if match:
-        known_pc.update(token.lower() + '.lvl' for token in match[1].split())
-    # With a scan the bake reads only what it chose, and what it chose is listed above.
-    read_pc = sorted(str(pc / name) for name in known_pc if full_bake and not pc_roots and not plan and (pc / name).is_file())
-    if not any(Path(path).resolve() == pc.resolve() for path in pc_roots.values()):
-        note(pc, 'optional BF2 PC texture directory', bool(read_pc),
-             'existing libraries passed to the supported PC texture reader' if read_pc else
-             'no PC libraries read this run (missing optional input or cached bake)')
-    xbox = root / 'extracted' / 'xbox_bf2'
-    xbox_read = full_bake and not plan and any(p.name.lower() == 'common.lvl' for p in xbox.glob('*'))
-    xbox_cached = any((Path(baked) / 'common_bf2' / 'textures').glob('icon_duke_*.ktx2'))
-    note(xbox, 'optional Xbox BF2 extracted data', xbox_read,
-         'common.lvl read for the original Xbox button icons only' if xbox_read else
-         'not read this run; the bake packed holds Xbox button icons from a chosen disc or an earlier run' if xbox_cached else
-         'not read this run (missing optional input or cached bake); the game draws its own Xbox icons')
-    note(baked, 'baked game assets', True, 'packed into the game; stored provenance listed separately')
-    note(missions, 'mission data', True, 'packed into the game')
-    return dict(schema=1, inputs=inputs, pc_libraries_read=read_pc, maps=map_texture_sources(baked),
-                input_scan=plan,
+    chosen = {Path(path).resolve() for path in pc_roots.values()} | selected
+    for row in plan['found']:
+        if Path(row['path']).resolve() not in chosen:
+            inputs.append(dict(path=row['path'], label=f"found: {row['kind']}", present=True,
+                               status=row['status'], reason=row['reason']))
+    note(baked, 'baked game assets', 'used', 'packed into the game; stored provenance listed separately')
+    note(missions, 'mission data', 'used', 'packed into the game')
+    return dict(schema=1, inputs=inputs, maps=map_texture_sources(baked, base_labels),
+                input_scan=plan, warnings=list(warnings),
                 limits='Map-local base and alternative textures only. Shared/side model bakes do not retain per-texture source metadata. Other formats are not claimed as read.')
 
 
@@ -466,9 +476,27 @@ def write_source_report(out, report):
             if row['unrecognized_tiers']:
                 print(f"    unrecognized provenance tags: {row['unrecognized_tiers']!r}")
     print(report['limits'])
+    for line in report.get('warnings', ()):
+        print(f'WARNING: {line}')
     print(f'Source report: {path}')
     return path
 
+
+
+def check_foliage(bake, plan):
+    """Stop a build that lost its foliage, cached bake or not. A game with no PS2 gameplay data does not owe the PS2's counts,
+    so what it lost becomes a warning in the summary; the other game is still held to them. Returns the warnings, for the
+    source report."""
+    command = [bake, "check-foliage", BAKED]
+    for game, chosen in sorted(plan["games"].items()):
+        if (chosen["gameplay"] or {}).get("kind") not in ("ps2-disc", "ps2-extracted"):
+            command += ["--warn", game]
+    print("   $ " + " ".join(command), flush=True)
+    result = subprocess.run(command, capture_output=True, text=True)
+    print(result.stdout, end="")
+    if result.returncode:
+        sys.exit(f"pack: {result.stderr.strip()}")
+    return [line[len("WARNING: "):] for line in result.stdout.splitlines() if line.startswith("WARNING: ")]
 
 
 def console_lua_root():
@@ -483,6 +511,19 @@ def console_lua_root():
                     digest.update(block)
     return os.path.join(EXTRACTED, "console_lua", digest.hexdigest())
 
+
+
+def gameplay_correction_args(plan):
+    """Mission corrections use the same chosen source and exact fingerprint as the bake."""
+    args = []
+    for game, chosen in plan["games"].items():
+        source = chosen["gameplay"] or {}
+        kind = source.get("kind")
+        platform = {"pc-install": "pc", "xbox-disc": "xbox"}.get(kind)
+        if platform:
+            table = os.path.join(ROOT, "engine", "crates", "manifest", "data", "gameplay", "corrections-v1", f"{game}-{platform}.json")
+            args += ["--gameplay-reference", table, "--gameplay-source", f"{game}={source.get('tree') or source['path']}"]
+    return args
 
 def main():
     input_scan.tolerant_stdout()
@@ -522,6 +563,7 @@ def main():
         elif chosen["gameplay"]["kind"] == "pc-install":
             GAMEPLAY_TREES[g] = chosen["gameplay"]["path"]
     bake_inputs = dict(pc_roots)
+    bake_inputs["gameplay_trees"] = dict(GAMEPLAY_TREES)
     for g, image, _ in input_scan.discs_to_extract(plan):
         bake_inputs["xbox_" + g] = image
     if plan["dlc"]["used"]:
@@ -529,7 +571,7 @@ def main():
         if plan["dlc"]["donor"]:
             bake_inputs["dlc_donor"] = plan["dlc"]["donor"]
     images_used, extracted_used = set(), set()
-    full_bake = False
+    rebaked = None
     need("cargo", "the Rust toolchain, https://rustup.rs")
 
     step("1/6 build bake + game (release)")
@@ -539,12 +581,15 @@ def main():
     step("2/6 the discs")
     for g, image in images.items():
         if g in pc_roots:
-            print(f"   {g}: using PC assets ({pc_roots[g]})")
+            print(f"   {g}: larger textures from the PC install ({pc_roots[g]})")
             # Console extraction remains the source of gameplay and the shared UI.
         if g in GAMEPLAY_TREES:
             continue
-        if os.path.isfile(ci_path(lvl_root(g), "CORE.LVL")):
+        # An extraction from before the executable came along is finished by running it again: only that file is written.
+        if os.path.isfile(ci_path(lvl_root(g), "CORE.LVL")) and (disc_executable(g) or not image):
             print(f"   {g}: already extracted ({lvl_root(g)})")
+            if not disc_executable(g):
+                print(f"   {g}: no {GAME_ELF[g]} above it and no disc to take it from: foliage uses the numbers shipped with the source")
             continue
         run([bake, "extract-iso", image, os.path.join(EXTRACTED, g, "lvl")])
         images_used.add(g)
@@ -570,20 +615,23 @@ def main():
 
     step("4/6 the missions")
     # A checkout that tracks the missions in git (the dev tree) keeps its own; only a generated set goes stale.
-    tracked = subprocess.run(["git", "-C", ROOT, "ls-files", "--", "engine/missions"], capture_output=True,
-                             text=True).stdout.strip()
+    tracked = git_tracked_missions()
     have = glob.glob(os.path.join(MISSIONS, "*.ron"))
-    why = stale(MISSION_STAMP, MISSION_INPUTS, {"console_lua": lua_root}) if have and not tracked else None
+    correction_args = gameplay_correction_args(plan)
+    mission_env = dict(os.environ)
+    for name in ("OPENBF_GAMEPLAY_CORRECTIONS", "OPENBF_GAMEPLAY_SOURCE_BF1", "OPENBF_GAMEPLAY_SOURCE_BF2"):
+        mission_env.pop(name, None)
+    why = stale(MISSION_STAMP, MISSION_INPUTS, {"console_lua": lua_root, "corrections": correction_args}) if have and not tracked else None
     if have and (tracked or (not pc_roots and not a.rebake and why is None)):
         print(f"   already there ({MISSIONS})")
     else:
         if why:
             print(f"   making the missions again: {why}")
-        run([sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"), "--ps2-only", "--lua-root", lua_root, "--out", MISSIONS])
+        run([sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"), "--ps2-only", "--lua-root", lua_root, "--out", MISSIONS] + correction_args, env=mission_env)
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(MISSION_STAMP, "w") as fh:
-            fh.write(inputs_hash(MISSION_INPUTS, {"console_lua": lua_root}) + "\n")
+            fh.write(inputs_hash(MISSION_INPUTS, {"console_lua": lua_root, "corrections": correction_args}) + "\n")
 
     step("5/6 the bake")
     bash = find_bash()
@@ -592,6 +640,7 @@ def main():
         bake_env.pop(name, None)  # the scan's choice is the whole story
     bake_env.update(input_scan.bake_env(plan))
     bake_env["OPENBF_INPUTS_CHOSEN"] = "1"  # rebake.sh need not scan again
+    bake_env["OPENBF_PYTHON"] = sys.executable.replace("\\", "/")  # `python3` is not there on every Windows install
     bake_env["OPENBF_CONSOLE_LUA_ROOT"] = lua_root.replace("\\", "/")
     baked = os.path.isfile(os.path.join(BAKED, "classes", "bf1_all.ron"))
     why = stale(BAKE_STAMP, BAKE_INPUTS, bake_inputs) if baked else None
@@ -600,7 +649,7 @@ def main():
             print(f"   baking again: the bake in {BAKED} was {why}")
         need("ffmpeg", "the bake encodes speech and effects to OGG")
         run([bash, os.path.join(ROOT, "scripts", "rebake.sh")], **({"env": bake_env} if bake_env else {}))
-        full_bake = True
+        rebaked = "all"
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(BAKE_STAMP, "w") as fh:
@@ -614,17 +663,21 @@ def main():
             run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "sounds", "global-sound"],
                 **({"env": bake_env} if bake_env else {}))
             extracted_used.update(("bf1", "bf2"))
+            rebaked = ["sounds", "global-sound"]
         if missing_shadows():
             print("   no BF1 vehicle shadows in this bake: rebaking the sides")
             need("ffmpeg", "the bake encodes speech and effects to OGG")
             run([bash, os.path.join(ROOT, "scripts", "rebake.sh"), "side"], **({"env": bake_env} if bake_env else {}))
             extracted_used.update(("bf1", "bf2"))
+            rebaked = (rebaked or []) + ["side"]
     left = missing_music()
     if left:
         sys.exit(f"pack: {len(left)} music streams still missing after the bake, e.g. {left[0]}")
     left = missing_shadows()
     if left:
         sys.exit(f"pack: the BF1 sides were baked without vehicle shadows, e.g. {left[0]}")
+
+    warnings = check_foliage(bake, plan)
 
     step("6/6 pack")
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -655,8 +708,8 @@ def main():
     print()
     print("\n".join(pack_summary(out, pak, split)))
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
-    report = source_report(ROOT, BAKED, MISSIONS, images,
-                           extracted_used, images_used, full_bake, pc_roots=pc_roots, plan=plan)
+    report = source_report(ROOT, BAKED, MISSIONS, images, plan, extracted_used, images_used, rebaked,
+                           pc_roots=pc_roots, warnings=warnings)
     write_source_report(out, report)
 
 

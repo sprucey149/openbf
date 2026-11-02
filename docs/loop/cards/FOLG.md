@@ -39,20 +39,6 @@ created: 2026-09-25 (from QUEUE.md)
 ## Original QUEUE.md entry (verbatim, 2026-09-25)
 FOLG. [TODO — **NOTE 2026-09-25 (PXC batch 3, FINDINGS F29): more bare ground — BF1 END1 and BF2 END1 (a fern carpet on the PS2, flat turf in the port; neither Endor authors a leafpatch, so this is FOLG's half), BF1 NAB1 tall grass (`engine/artifacts/pcsx2/ref/bf1_nab1/pairs/cp1_cp2_postA_spawn.png`). The leafy tree crowns (BF2 YAV1, BF1 YAV2, NAB1, DAG1's canopy) are NOT terrain foliage — they are the `leafpatch` class, queued as LEAF.** ADDED 2026-09-25 (lane 1) by PXC batch 2 (FINDINGS F22, with F14, F17, F23); **[RE] FIRST**; FREE; the build is a new system (bake + render) with its own [REBAKE]/[GOLDENS]] **The terrain's foliage: the PS2 carpets the ground with ferns and grass (BF2 Dagobah and Felucia; BF1 KAS1, KAS2's high ground, YAV1), the port draws bare terrain — it parses no `FOLG`** [RE] — evidence `engine/artifacts/pcsx2/ref/bf2_fel1/pairs/cp3_cp3_1_postA_spawn.png` (box (0,250,640,480): PS2 (45,50,32) spread 32.5 vs port (91,98,49) 18.7), `…/bf2_dag1/pairs/cp4_cp3_postA_{v3,v3_up}.png` (ground spread 22.6 vs 7.9; the pitched-up top half (40,50,60) vs (75,90,106) — a canopy), `…/bf1_kas1/pairs/cp2_cp2_eastharbor_*.png`, `…/bf1_kas2/pairs/cp3_cp3_cityhall_out*.png`, `…/bf1_yav1/pairs/cp2_viaduct_viaduct_spawn.png`. The port: 0 hits for `FOLG` under `engine/crates` (`mungefs/src/terrain.rs` reads 20 other tags); DAG1 skips no foliage class (`PXC_SKIPPED`). The disc: `analysis/re-terrain-heights.md` §8 — BF1's `FOLG` is 512×512 at 4 bits a cell, read by `FUN_00344d98` (decomp 331498, a nibble lookup); BF2's seven FOLG chunks are 2–8 KB (the batch-2 verifier's census), so BF2 may ride another path. RE (§5): the callers of `FUN_00344d98` and what a nibble selects (a foliage type → which model / texture, the map's foliage definitions), density, draw distance, fade, wind; BF2's twin OPENED (check 3); the Dagobah canopy — foliage, or tree-leaf cutouts lost to the MASK cutoff (queue AT)? GATE: `analysis/re-foliage.md` (§5 header, [O], verifier) + a build entry with its file and golden lists. Files: `analysis/re-foliage.md` (new), a pointer in `analysis/re-terrain-heights.md`, `analysis/RE_LOG.md`, scratch `engine/artifacts/lead_tmp/re/folg/`.
 
-## Planner note (2026-09-26) — the maintainer's INBOX: raise to 5 (done), and BF1 Kashyyyk's "extra trees that are not walls"
-- **The extra trees are not LEAF's or SKIPC's [D]; this card's [H].** BF1 KAS1 / KAS2 place no leafpatch (FINDINGS F24's
-  census) and skip no tree instance. But BF1 KAS2's `classes.ron` has `kas_prop_treebill` (BASE prop, a baked model
-  `kas_prop_treebill.glb` with the textures `yav_prop_treebillboard_03` + `yav_prop_bush1`) that the world file places
-  **zero** times, and grass classes `BASE grasspatch` (KAS2 `kas_prop_grass_tall`; KAS1 `kas_prop_grass`,
-  `kas_prop_reeds`) that it also places zero times. So something else plants them — FOLG's nibble table is the likely
-  consumer (a nibble → a foliage class, grasspatch OR a model prop). Confirm in the RE, and the build must draw BOTH
-  kinds (sprite grass patches and model props such as the tree billboards).
-- **`grasspatch` is a class, like LEAF's `leafpatch`:** BASE grasspatch classes on 14 maps (BF1 END1 KAS1 KAS2 NAB1
-  NAB2 YAV1 YAV2 GEO1, BF2 DAG1 END1 GEO1 KAS2 NAB2 YAV1). Some ARE placed as world instances and skipped today (BF1
-  YAV1 `yav_prop_grass(_tall)`, NAB1, YAV2 — SKIPC's list), so one grasspatch renderer serves FOLG and SKIPC's grass.
-  Share the sprite-cluster draw with LEAF if the RE shows the same renderable.
-- **The maintainer's rule:** walk-through detail is decoration — no collision unless the PS2 gives it one.
-
 ## RE result (2026-09-26, lane 2) — the planner's [H] answered
 - **Confirmed, with a split:** KAS2's grass is planted by the FOLG layers (`prp_` layer 0 = GrassPatch
   `kas_prop_grass_tall`; KAS1 = `kas_prop_grass` + `kas_prop_reeds`), but the **tree billboards come from the `prp_`

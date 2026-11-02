@@ -9,7 +9,8 @@ folders, and the Xbox DLC folder. Anything else is named and refused, not guesse
 
 The choice, per game:
   - gameplay and shared UI: the PS2 data whenever it is present. Numbers and shapes the sim reads never change with
-    what else went in, except that the optional DLC heroes take the Republic and CIS hero slots (scripts/DLC.md).
+    what else went in. The optional DLC heroes are the one exception, and only once a player turns on the DLC Heroes row
+    in Hero Options (scripts/DLC.md).
   - look: every other copy is a texture donor. bake::tier keeps the largest same-art copy of each texture.
   - each game needs one source, and any PC input also needs a console BF2 disc. A folder that holds other, unusable
     things still builds; the summary says what was refused. A game left with no usable source stops the build, and
@@ -30,18 +31,22 @@ import sys
 import console_input as content
 import dlc_inputs
 
-# The readers are in (`bake extract-xiso`, `bake xbox`), but this stays False until rebake.sh applies the gameplay check
-# `bake xbox` makes: a disc with no PS2 copy would otherwise bake its own numbers and shapes without a refusal
-# (analysis/xbox-input.md). When True, pack.py extracts each chosen Xbox disc with XBOX_EXTRACT (`bake extract-xiso <disc>
-# <dir>` writes <dir>/Data/_LVL_XBOX/...), and rebake.sh passes those LVLs to the bake's donor argument, comma-joined
-# after any PC LVL.
-XBOX_SUPPORTED = False
+# An Xbox disc bakes to the PS2's game from what a clone ships: public instruction tables over the disc's own files, each
+# file fingerprinted so that a changed one refuses the bake (analysis/source-gates.md has the proof per map). pack.py
+# extracts each chosen Xbox disc with XBOX_EXTRACT (`bake extract-xiso <disc> <dir>` writes <dir>/Data/_LVL_XBOX/...), and
+# rebake.sh passes those LVLs to the bake's donor argument, comma-joined after any PC LVL.
+XBOX_SUPPORTED = True
 XBOX_EXTRACT = "extract-xiso"
 # scripts/bake_dlc.py reads Kit Fisto and Asajj Ventress out of the DLC folder (OPENBF_DLC_DIR, and OPENBF_DLC_DONOR for
 # a second copy's larger textures). Nothing else in the DLC is used, whatever it holds.
 DLC_SUPPORTED = True
-# True once BF1 gameplay can come from a table instead of a PS2 disc, so a PC BF1 install can be BF1's only source.
-PC_PRIMARY_SUPPORTED = False
+# A PC BF1 install can be BF1's only source with nothing beyond the public code and the player's own files.
+PC_PRIMARY_SUPPORTED = True
+# Maps a source cannot build alone: solid buildings the PS2 has and that source's files have no model for, so they would
+# stand there invisible. Bring the PS2 disc of that game to play them. analysis/source-gates.md says which and why.
+WITHHELD_MAPS = {("xbox", "bf1"): ("RHN/RHN1", "RHN/RHN2"),
+                 ("xbox", "bf2"): ("TAT/TAT3",),
+                 ("pc", "bf1"): ("BES/BES2", "RHN/RHN1", "RHN/RHN2")}
 
 GAMES = ("bf1", "bf2")
 SHORT = {"bf1": "BF1", "bf2": "BF2"}
@@ -256,7 +261,7 @@ def classify_readable_dir(directory, root):
         if platform:
             return dict(entry(directory, "dlc", "BF2 DLC folder holding Kit Fisto and Asajj Ventress", "bf2"), platform=platform)
         if addon:
-            return entry(directory, "addon", "a BF2 addon folder without the DLC heroes; not used", "bf2", "ignored")
+            return entry(directory, "addon", "an addon folder without the DLC heroes; not used", None, "ignored")
         return refused(directory, "game data in no format this build reads (for example Aspyr's Classic Collection)")
     return None
 
@@ -331,7 +336,7 @@ def default_roots(root):
                 roots = [Path(result.stdout.strip()).parent / "iso"]
         except OSError:
             pass
-    return roots + [root / "PC_swbf2_exe"]
+    return roots + [root / "PC_swbf1_exe", root / "PC_swbf2_exe"]
 
 
 def extracted_trees(extracted):
@@ -409,7 +414,7 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
                             f"{gameplay['path']} does not hold it. Add {add_message(game, xbox_on, pc_on)} to {where}.")
         for row in pc:
             if gameplay and gameplay["kind"] == "pc-install" and row["path"] == gameplay["path"]:
-                row.update(status="used", reason=row["reason"] + "; supplies gameplay (no console copy)")
+                row.update(status="used", reason=row["reason"] + "; supplies assets with fingerprinted PS2 gameplay corrections")
             elif not any(item["kind"] == "pc-install" for item in visual):
                 row.update(status="used", reason=row["reason"] + "; texture donor")
                 visual.append(dict(kind="pc-install", path=row["path"]))
@@ -518,6 +523,11 @@ def scan(roots, discs=None, pc_roots=None, extracted=None, named_root=None, **op
     return make_plan(found, trees, strays, roots, errors, extracted=extracted, **options)
 
 
+def withheld_maps(game, gameplay):
+    platform = {"xbox-disc": "xbox", "pc-install": "pc"}.get((gameplay or {}).get("kind"))
+    return WITHHELD_MAPS.get((platform, game), ())
+
+
 def bake_env(plan):
     """What the bake is told. Empty for anything not chosen, so the bake's default is the PS2-only one."""
     env = {}
@@ -529,6 +539,8 @@ def bake_env(plan):
             env[f"OPENBF_BF{number}_TREE"] = gameplay["tree"]
         elif gameplay.get("kind") == "pc-install":
             env[f"OPENBF_BF{number}_TREE"] = gameplay["path"]
+        if withheld_maps(game, gameplay):
+            env[f"OPENBF_BF{number}_WITHHELD"] = " ".join(withheld_maps(game, gameplay))
         for donor in chosen["visual"]:
             if donor["kind"] == "pc-install":
                 env[f"PC{number}"] = donor["path"]
@@ -566,9 +578,12 @@ def summary_lines(plan):
             lines.append(f"  {SHORT[game]} gameplay: NONE")
         donors = ", ".join(f"{label[item['kind']]} {item['path']}" for item in chosen["visual"]) or "none"
         lines.append(f"  {SHORT[game]} texture donors: {donors}")
+        if withheld_maps(game, gameplay):
+            lines.append(f"  {SHORT[game]} maps left out, because this source has no model for some of their solid buildings "
+                         f"(add a PS2 {SHORT[game]} disc to play them): {', '.join(withheld_maps(game, gameplay))}")
     dlc = plan["dlc"]
     if dlc["present"]:
-        lines.append(f"  DLC: {dlc['path']} ({'Kit Fisto and Asajj Ventress used' if dlc['used'] else 'recognized; not supported yet'})")
+        lines.append(f"  DLC: {dlc['path']} ({'Kit Fisto and Asajj Ventress used, off until the DLC Heroes row in Hero Options is turned on' if dlc['used'] else 'recognized; not supported yet'})")
     else:
         lines.append("  DLC: absent (optional)")
     lines.append("Everything found:")

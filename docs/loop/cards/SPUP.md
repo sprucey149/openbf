@@ -25,11 +25,6 @@ The maintainer, 2026-10-05: "it seems I can't start sprinting while walking uphi
 - The same would explain his 2026-10-04 report (card BLKS): no sprint as the BF1 stormtrooper on KAS2's beach slope, fine on Kamino's flat decks.
 - `input::SprintLatch` waits 1.5 s for the sim to start the sprint and then drops the click, so on a long slope one click does nothing at all.
 
-## Acceptance
-- PS2 trials (BF2, PCSX2): L3 pressed while running up two ramps of known slope (Kamino's and a steeper terrain one) and on the flat - does the sprint start, and at what speed word. The rule is written into re-stance-roll.md.
-- If the PS2 starts it: the port's comparison is made the PS2's. If the PS2 does not either: the maintainer's word stands (a named deviation, FEEL_NOTES) - the port compares against the speed the slope allows, so a sprint starts on any slope a soldier can run up.
-- A sim test: stick forward + SPRINT up 10, 20 and 30 degree slopes enters the sprint within 1 s on each game's rules; the sweep is unmoved (bots do not sprint).
-
 ## Notes
 Filed 2026-10-05 by Claude in chat. Related: BLKS (the black box's sprint fields), CSPD.
 

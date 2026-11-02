@@ -12,7 +12,7 @@ fields and timers in PS2 RAM), `probe_bf1.py` / `probe2.py` (PCSX2: natural fire
 `verify/CLAIMS.md` + `VERDICTS.md`. B1 = `analysis/SWBFRONT.ELF-decomp.c`, B2 = `analysis/SWBFRNT2.ELF-decomp.c`.
 Tags: **[V]** read at the cited lines (and re-read by the verifier); **[D]** derived; **[H]** hypothesis (PROVISIONAL in
 code); **[O]** load-bearing for the build; "RAM" = read in PS2 save states; "asm" = checked in the instruction bytes
-(`scripts/tools/eedis2.py`); "PCSX2" = seen on the PS2 itself.
+(`scripts/tools/eedis.py`); "PCSX2" = seen on the PS2 itself.
 
 ## 0. TL;DR — what the port needs
 

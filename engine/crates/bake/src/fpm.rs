@@ -82,6 +82,7 @@ pub fn bake_fpm_with_bank(
     fpm_lvl: &str,
     bank: &mungefs::anim::AnimBank<'_>,
     outdir: &str,
+    donors: Option<&crate::tier::PcTextures>,
 ) -> Result<Option<BakedFpm>> {
     let buf = std::fs::read(fpm_lvl).with_context(|| fpm_lvl.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
@@ -128,7 +129,7 @@ pub fn bake_fpm_with_bank(
         .map(|s| s.texture.to_ascii_lowercase())
         .filter(|t| !t.is_empty())
         .collect();
-    let textures = bake_textures_flagged(inner, &wanted, &bake_flags(&m), out, None)?;
+    let textures = bake_textures_flagged(inner, &wanted, &bake_flags(&m), out, donors)?;
     Ok(Some(BakedFpm {
         name: m.name.clone(),
         bones: skel.bones.len(),
@@ -138,21 +139,28 @@ pub fn bake_fpm_with_bank(
     }))
 }
 
-pub fn bake_fpm(fpm_lvl: &str, anim_lvl: &str, outdir: &str) -> Result<Option<BakedFpm>> {
-    let abuf = std::fs::read(anim_lvl).with_context(|| anim_lvl.to_string())?;
-    let ainner = mungefs::open(&abuf).map_err(|e| anyhow!("{e}"))?;
-    let banks = mungefs::anim::find_banks(ainner).map_err(|e| anyhow!("{e}"))?;
-    let bank = banks
+/// Each donor tree's copy of an FPM LVL, comma-joined for [`crate::tier::PcTextures`]:
+/// the same path under `FPM/`, in any case. `None` when no tree holds one.
+fn fpm_donors(fpm_lvl: &str, donor_roots: &[String]) -> Option<String> {
+    let lower = fpm_lvl.replace('\\', "/").to_ascii_lowercase();
+    let rel = &fpm_lvl[lower.rfind("/fpm/")? + 1..];
+    let found: Vec<String> = donor_roots
         .iter()
-        .find(|b| {
-            b.name.eq_ignore_ascii_case(manifest::fpm::BF1_BANK)
-                || b.name.eq_ignore_ascii_case(manifest::fpm::BF2_BANK)
-        })
-        .ok_or_else(|| anyhow!("{anim_lvl}: no first-person animation bank"))?;
-    bake_fpm_with_bank(fpm_lvl, bank, outdir)
+        .map(|root| crate::join_ci(Path::new(root), rel))
+        .filter(|path| path.is_file())
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    (!found.is_empty()).then(|| found.join(","))
 }
 
-pub fn bake_fpms(fpm_lvls: &[String], anim_lvl: &str, outdir: &str) -> Result<()> {
+/// Bake every FPM LVL. `donor_roots` are the other copies' data roots: an LVL's copy
+/// under the same relative path offers its larger arm textures to tier 2.
+pub fn bake_fpms(
+    fpm_lvls: &[String],
+    anim_lvl: &str,
+    outdir: &str,
+    donor_roots: &[String],
+) -> Result<()> {
     let abuf = std::fs::read(anim_lvl).with_context(|| anim_lvl.to_string())?;
     let ainner = mungefs::open(&abuf).map_err(|e| anyhow!("{e}"))?;
     let banks = mungefs::anim::find_banks(ainner).map_err(|e| anyhow!("{e}"))?;
@@ -164,7 +172,10 @@ pub fn bake_fpms(fpm_lvls: &[String], anim_lvl: &str, outdir: &str) -> Result<()
         })
         .ok_or_else(|| anyhow!("{anim_lvl}: no first-person animation bank"))?;
     for lvl in fpm_lvls {
-        match bake_fpm_with_bank(lvl, bank, outdir)? {
+        let donors = fpm_donors(lvl, donor_roots)
+            .map(|list| crate::tier::PcTextures::load(&list))
+            .transpose()?;
+        match bake_fpm_with_bank(lvl, bank, outdir, donors.as_ref())? {
             Some(b) => println!(
                 "baked first-person arms {}: {} bones, {} clips (missing {:?}), textures {:?} -> {}/fpm",
                 b.name, b.bones, b.clips, b.missing, b.textures, outdir

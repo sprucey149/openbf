@@ -15,8 +15,8 @@ pub fn bake(bf1: &str, bf2: &str, common: &str, out: &Path, pc_cis: Option<&str>
     let pc_cis_resolved = pc_cis.map(crate::resolve_ci);
     let common = common_resolved.as_str();
     let pc_cis = pc_cis_resolved.as_deref();
-    let b1 = std::fs::read(&bf1_resolved)?;
-    let b2 = std::fs::read(&bf2_resolved)?;
+    let b1 = crate::gameplay::read(&bf1_resolved)?;
+    let b2 = crate::gameplay::read(&bf2_resolved)?;
     let c1 = mungefs::content_chunks(mungefs::open(&b1)?)?;
     let c2 = mungefs::content_chunks(mungefs::open(&b2)?)?;
     let classes = crate::classes::read_classes(
@@ -194,7 +194,7 @@ pub fn bake(bf1: &str, bf2: &str, common: &str, out: &Path, pc_cis: Option<&str>
         }
     }
     // The BF1 explosion and chunk trail retain BF1's particle rules and sheets.
-    let bytes = std::fs::read(common)?;
+    let bytes = crate::gameplay::read(common)?;
     let inner = mungefs::open(&bytes)?;
     let chunks = mungefs::content_chunks(inner)?;
     let mut fx = crate::effects::Collected::from_chunks(chunks.iter())?;

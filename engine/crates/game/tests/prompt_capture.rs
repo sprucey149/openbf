@@ -1,6 +1,6 @@
 //! Each button-prompt set in the screens that draw it, for a person to look at:
 //! the shell's help lines, the spawn screens, a stats page's Done, and the
-//! pause and shell settings over the Button prompts row, at two window sizes.
+//! pause and shell settings over the Button prompts row, at 4:3, 16:9 and 21:9.
 //!
 //! Ignored by default: it needs a GPU adapter and the BF2 common bake. It writes
 //! PNGs and compares nothing.
@@ -194,11 +194,11 @@ fn capture_every_set() {
             IconChoice::KeyboardMouse,
         ),
     ];
-    for size in [[1280, 720], [1920, 1080]] {
+    for size in [[640, 480], [1280, 720], [1920, 1080], [1680, 720]] {
         for (name, set, choice) in sets {
             let icons = Icons::of(set);
             let save = |screen: &str, img: image::RgbaImage| {
-                img.save(out.join(format!("{name}_{}_{screen}.png", size[1])))
+                img.save(out.join(format!("{name}_{}x{}_{screen}.png", size[0], size[1])))
                     .expect("write");
             };
             save(

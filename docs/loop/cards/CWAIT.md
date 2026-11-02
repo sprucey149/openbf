@@ -50,34 +50,6 @@ This deliberately incomplete diagnostic has no freshness/identity coverage
 and is not a production implementation or an acceptance receipt.
 The inline skiff/AT-ST scenes are port fixtures; BF1-rule AT-ST is port-only.
 
-## Scope
-Complete only the maintained-claim portion of the existing ground pickup
-wait. Keep the WAIT4 initial clocks and HWAIT human precedence; test live
-same-team on-foot AI boarding claims after that initial window, with a
-three-second freshness clock maintained through actual valid boarding work.
-Keep `since` as the original claim/give-up/ordering clock; refreshing it would
-silently prevent the existing30s give-up and change claim precedence.
-Keep vehicle and unit generations safe; do not keep a wait alive from stale,
-dead, mounted, wrong-team or ineligible records. Specify the lifetime and
-invalidation of the port's existing claim explicitly in the implementation.
-
-Replace the legacy GUNNER_WAIT age cutoff and driver-specific hold path for
-this purpose. Both hover and walker must wait before route/progress work,
-without spending stuck allowance or losing gunner aiming. Full occupancy
-completes the wait immediately unless HWAIT's human hold applies. Completion
-does not restart on a later claim/vacancy; a genuine new pilot tenure resets
-it. Retain existing boarding search, arbitration, seat capacity, routes,
-BOARD_GIVEUP/BLOCK and class policy. No call, reply, order-interruption,
-flyer, moving-vehicle threshold or new claim-allocation policy is added.
-GUNWT retains all of those and its full original acceptance.
-
-Use deterministic ticks. Hash each added future-affecting field only in the
-appropriate active state, preserving absent/idle serialization and current
-sim/trace pins. Clear/reset through all relevant existing board, unseat,
-takeover, death, removal, reuse and local-state write-back paths. Review all
-writers, including followers and turret claims, without expanding their
-behavior. Update module headers and CRATES rows for changed/new files.
-
 ## Acceptance (run and paste)
 1. Reproduce the eight scenes above on current main: four intended failures,
    four departure controls. Candidate: natural claims persist across8s;

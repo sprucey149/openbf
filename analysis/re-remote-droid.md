@@ -104,13 +104,13 @@ h - a = LiftDamp 9.8 dt / (LiftSpring + 9.8 / (9a)): 0.092 m at 30 Hz for BF1 (1
   `FUN_0028b9d0` (B1:213069) explodes the class's ExplosionClass (0xca0c1378 -> class+0x204, if any) at the droid and
   kills the droid; +0x80 charge start `FUN_0028b7a8` (B1:212962: timer +0xd0 = 0, limit +0xd4 = class+0x200 =
   `MaxPressedTime`, 0x2819ffa0 in the setter `FUN_0028bcd8`); +0x84 accumulation `FUN_0028b868` (B1:212988).
-- The predicates (not in the decompile; `python scripts/tools/eedis2.py bf1 0x0028bb08 0x0028bbb8`): charge +0xa4 at
+- The predicates (not in the decompile; `python scripts/tools/eedis.py bf1 0x0028bb08 0x0028bbb8`): charge +0xa4 at
   0x28bb08 — idle: the trigger byte == 1 (a fresh press); charging: timer < limit, the trigger NOT read; fire +0xa8 at
   0x28bb50 — charging and limit <= timer. Through the base state machine `FUN_00284318` (B1:208134; state 4 = charge:
   fire predicate -> fire, else charge predicate -> accumulate, else end) one press runs the countdown to the end and
   fires the destruct at `MaxPressedTime`, held or not; it cannot be cancelled. [V]
 - BF2 the same: instance vtable 0x628690, charge start +0xb4 `FUN_00332740` (B2:313782: timer +0xbc = 0, limit +0xc0 =
-  class+0x260), accumulation +0xb8 `FUN_003327f8` (B2:313808); predicates `python scripts/tools/eedis2.py bf2 0x00332f38
+  class+0x260), accumulation +0xb8 `FUN_003327f8` (B2:313808); predicates `python scripts/tools/eedis.py bf2 0x00332f38
   0x00332ff0`: charge 0x332f38 — idle: trigger bits 0-1 == 3 (pressed), charging: timer < limit; fire 0x332f88 —
   state 3 (BF2's charge) and limit <= timer. [V]
 - Salvo setter `FUN_002725a0` (B1:194686): [0] 0x3186fbfe yaw (deg -> rad, disc 0); [1] 0x8339fb35 pitch (disc 70°,

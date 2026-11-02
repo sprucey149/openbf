@@ -38,7 +38,9 @@ common pieces, in engines and shipped games since the PS3 era:
 - **Big world geometry pulls the camera in.** A map instance whose model is more than `PROP_MAX_FOOTPRINT` = 4 m
   across (the larger of its two horizontal extents at its instance scale) is swept with a 0.35 m sphere along the
   track, as before (walls, buildings, rocks, doors, the terrain sheet). Measured on BF1 NAB1 / YAV2 and BF2 KAS2 /
-  NAB2: walls (4.5 m and up), doors, buildings, rocks over 4 m and bunkers stay solid.
+  NAB2: walls (4.5 m and up), doors, buildings, rocks over 4 m and bunkers stay solid. A door is tested where it is
+  drawn: the submeshes its clip moves ride the sim door's `open`, so an open doorway is clear and a shut door still pulls
+  (BF2 Death Star, 2026-11-01: testing the shut model put the camera in the trooper in every doorway).
 - **Small props and every vehicle never pull it.** Health / ammo / vehicle droids (1.4-1.9 m), gun emplacements
   (2.4-3.1 m), columns, lamps, small trees and every vehicle hull are drawn see-through while they stand in the
   camera's sight of the player: a sphere of 0.15 m swept from the camera toward his eye point and his middle (1.0 m),

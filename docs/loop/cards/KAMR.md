@@ -52,21 +52,6 @@ of the five worst posts. Alpha: the showcase maps do not cover Kamino, and the m
 - **Also in the frames (fold in or card if real):** a short white diagonal streak at the left of `kam1_play_5` near
   (830,270) — an FXB laser ribbon or a stray draw? (The teal squad markers and the doubled "Follow me" line are SQMK.)
 
-## Do (research first)
-1. A **draw-versus-collision floor census** tool, KAM1 first, then all 32 maps: over a grid of the walkable soldier
-   collision, flag every point with no drawn surface within a few cm under the feet, and every drawn floor-like
-   surface with no collision under it.
-2. List every visible difference per post (24 walk views + spawns, both games' KAM1) with a named cause in a new
-   `analysis/re-kamino.md` (or a section of an existing doc).
-3. Split into build cards, one commit-sized cause each (sea edge, far pieces, floors, placements); FARC and WTHR
-   sequence with it, but the geometry and sea fixes do not wait for weather or lighting.
-
-## Acceptance
-- BF2 KAM1 mean block error ≤ 15 (from 22.5) and BF1 KAM1 ≤ 15 (from 26.6), `parity.py` at the landing.
-- No hard sea edge and no floating far-scene pieces at the PXWB poses and the `--cam-overview` view (a pixel test on the
-  horizon band: no step in the water colour past the foam disc beyond the PS2 pair's own).
-- The floor census clean on KAM1 (0 walkable points with no drawn floor, 0 drawn floors with no collision, after the
-  authored exceptions are listed).
 ## Outcome (RE, 2026-09-30, lane 3) — `analysis/re-kamino.md` ([O], verifier 21 supported / 1 partly / 0 not)
 Split into build cards; this card is closed. Report `reports/20260930_1930_card_KAMR.md`.
 - **KSKY** (5): the sky dome x 0.6 (`Effect("Lightning")` SkyDomeDarkenFactor; RAM 153). Prototype parity

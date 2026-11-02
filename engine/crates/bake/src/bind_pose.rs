@@ -57,6 +57,7 @@ const IDENTITY: RowMat4 = [
 /// bake's flattened walk (top level first; first of a name wins).
 pub struct BindPose {
     skels: crate::hardpoints::Skeletons,
+    render_skels: Vec<crate::hardpoints::Skeletons>,
     /// Lower-cased geometry/LOD names whose prims use the bind pose.
     prim_geoms: HashSet<String>,
 }
@@ -82,13 +83,34 @@ impl BindPose {
                 prim_geoms.extend(g.lods.iter().map(|l| l.model.to_ascii_lowercase()));
             }
         }
-        BindPose { skels, prim_geoms }
+        BindPose {
+            skels,
+            render_skels: Vec::new(),
+            prim_geoms,
+        }
+    }
+
+    /// Original donor bones decode its render vertices. These bytes must come
+    /// from gameplay::read_with_original, which verifies the same source revision.
+    pub(crate) fn add_render_source(&mut self, original: &[u8]) -> Result<(), String> {
+        let inner = mungefs::open(original).map_err(|e| e.to_string())?;
+        let chunks = mungefs::content_chunks(inner).map_err(|e| e.to_string())?;
+        self.render_skels
+            .push(crate::hardpoints::Skeletons::of(&chunks));
+        Ok(())
+    }
+
+    fn render_skel(&self, model: &str) -> Option<&Skeleton> {
+        self.render_skels
+            .iter()
+            .find_map(|s| s.find_model(model, false))
+            .or_else(|| self.skels.find_model(model, false))
     }
 
     /// The model in its bind pose, or `None` when that moves nothing (no
     /// skeleton, every bound bone at the identity).
     pub fn pose(&self, m: &Model) -> Result<Option<Model>, String> {
-        let Some(skel) = self.skels.find_model(&m.name, false) else {
+        let Some(skel) = self.render_skel(&m.name) else {
             return Ok(None);
         };
         if m.bone_space {
@@ -105,6 +127,32 @@ impl BindPose {
         pose_bnam(m, skel)
     }
 
+    /// Turret/station parts are posed with donor bones, then attach by name to
+    /// the canonical gameplay rig. Other rigid models do not consume BMAP again.
+    pub(crate) fn canonical_model_nodes(&self, m: &mut Model) -> Result<(), String> {
+        if self.render_skels.is_empty() {
+            return Ok(());
+        }
+        let Some(source) = self.render_skel(&m.name) else {
+            return Ok(());
+        };
+        let Some(target) = self.skels.find_model(&m.name, false) else {
+            return Ok(());
+        };
+        for segment in &mut m.segments {
+            let mut indices: Vec<_> = segment.bmap.iter().map(|&n| usize::from(n)).collect();
+            remap_bone_indices(source, target, &mut indices)?;
+            segment.bmap = indices
+                .into_iter()
+                .map(|n| {
+                    u8::try_from(n)
+                        .map_err(|_| format!("{}: canonical node exceeds BMAP range", m.name))
+                })
+                .collect::<Result<_, _>>()?;
+        }
+        Ok(())
+    }
+
     /// A door or vehicle geometry's collision prims in model space at bind:
     /// each `XFRM` through its `PRNT` bone's bind matrix (STDOR / RKHUL).
     /// This includes map-local vehicles (RKHULT), using the side bake's rule
@@ -117,6 +165,48 @@ impl BindPose {
             prims_at_bind(skel, prims);
         }
     }
+}
+
+/// Resolve donor vertex bindings into a canonical rig. Extra detail bones stay
+/// at their donor bind position and inherit their nearest canonical ancestor's
+/// motion through the canonical inverse bind; they never become physics nodes.
+pub(crate) fn remap_bone_indices(
+    source: &Skeleton,
+    target: &Skeleton,
+    indices: &mut [usize],
+) -> Result<(), String> {
+    let mapped = indices
+        .iter()
+        .map(|&index| {
+            let mut node = Some(index);
+            for _ in 0..=source.bones.len() {
+                let Some(current) = node else {
+                    break;
+                };
+                let bone = source
+                    .bones
+                    .get(current)
+                    .ok_or_else(|| format!("{}: donor bone {current} out of range", source.name))?;
+                if let Some(found) = target.index_of(&bone.name) {
+                    return Ok(found);
+                }
+                node = bone.parent;
+            }
+            // Only a renamed root gets here: the walk above ended at the donor's root. Both rigs hang from one root
+            // bone, so it binds to the canonical one (BF2 Xbox space turrets call theirs `rootnode`).
+            match target.bones.iter().position(|b| b.parent.is_none()) {
+                Some(root) if target.bones.iter().filter(|b| b.parent.is_none()).count() == 1 => {
+                    Ok(root)
+                }
+                _ => Err(format!(
+                    "{}: donor bone {index} has no canonical node or ancestor",
+                    source.name
+                )),
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    indices.copy_from_slice(&mapped);
+    Ok(())
 }
 
 /// Collision prims in model space at `skel`'s bind pose: each prim's `XFRM`
@@ -176,6 +266,70 @@ pub fn pose_bnam(m: &Model, skel: &Skeleton) -> Result<Option<Model>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_renamed_root_binds_to_the_only_canonical_root() {
+        let bone = |name: &str, parent| mungefs::skel::SkelBone {
+            name: name.into(),
+            crc: mungefs::anim::crc32_lower(name),
+            parent,
+            rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            t: [0.0; 3],
+        };
+        let source = Skeleton {
+            name: "turret".into(),
+            bones: vec![
+                bone("rootnode", None),
+                bone("base", Some(0)),
+                bone("aim", Some(1)),
+            ],
+        };
+        let mut target = Skeleton {
+            name: "turret".into(),
+            bones: vec![bone("base_ps2", None), bone("aim", Some(0))],
+        };
+        let mut indices = [0, 1, 2];
+        remap_bone_indices(&source, &target, &mut indices).unwrap();
+        assert_eq!(indices, [0, 0, 1]);
+        // With two roots there is no telling which one it means.
+        target.bones.push(bone("other", None));
+        let mut indices = [0];
+        assert!(remap_bone_indices(&source, &target, &mut indices).is_err());
+    }
+
+    #[test]
+    fn donor_map_pose_keeps_render_binding_separate_from_collision_binding() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let path = crate::join_ci(
+            &root,
+            "PC_swbf1_exe/Star Wars Battlefront (Classic 2004)/GameData/Data/_LVL_PC/SIDE/cis.lvl",
+        );
+        if !path.is_file() {
+            return;
+        }
+        let (corrected, original) = crate::gameplay::read_with_original(&path).unwrap();
+        let original = original.expect("the supplied PC source must exercise donor binding");
+        let a = mungefs::content_chunks(mungefs::open(&corrected).unwrap()).unwrap();
+        let b = mungefs::content_chunks(mungefs::open(&original).unwrap()).unwrap();
+        let m = model(&a, "cis_tread_hailfire");
+        let mut posed = BindPose::of(&a);
+        assert!(posed.pose(&m).is_err());
+        let mut collision = prims_of(&a, "cis_tread_hailfire");
+        posed.rest_prims("cis_tread_hailfire", &mut collision);
+        posed.add_render_source(&original).unwrap();
+        let actual = posed.pose(&m).unwrap().unwrap();
+        let expected = BindPose::of(&b)
+            .pose(&model(&b, "cis_tread_hailfire"))
+            .unwrap()
+            .unwrap();
+        for (x, y) in actual.segments.iter().zip(&expected.segments) {
+            assert_eq!(x.positions, y.positions);
+            assert_eq!(x.normals, y.normals);
+        }
+        let mut after = prims_of(&a, "cis_tread_hailfire");
+        posed.rest_prims("cis_tread_hailfire", &mut after);
+        assert_eq!(after, collision);
+    }
 
     /// RKHULT: run class/LOD selection from serialized chunks without disc data.
     #[test]

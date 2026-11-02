@@ -35,12 +35,6 @@ alpha: yes
 ## Original QUEUE.md entry (verbatim, 2026-09-25)
 SKIPC. [TODO — ADDED 2026-09-25 (lane 1) by PXC batch 2 (FINDINGS F12); **[RE] FIRST**; FREE] **Instances the port skips as "no drawable model" that the PS2 draws: the command-post console (`com_bldg_controlzone`, every map), BF1 Theed's planter shrubs and vines (`nab_prop_flowers` ×53, `nab2_prop_vine1/2` ×40), BF1 Yavin's grass (`yav_prop_grass_tall` ×10, `yav_prop_grass` ×4)** [RE] — evidence `engine/artifacts/pcsx2/ref/bf1_yav1/pairs/cp5_bazaar_fountain_spawn.png` (the console and its green holo on the PS2, the bare octagonal base in the port), `…/bf1_nab2/pairs/cp4_cp4_rotunda_{v3,v4_up,v5_up}.png` (hedges and trees on the PS2, empty planters and bare facades in the port). The port: `game/src/viewer/scene.rs` 593–595 (`upload_scene` skips an instance whose `resolve_model` is None); the lists via `PXC_SKIPPED=1` are in FINDINGS F12 (NAB2 226 instances, YAV1 102, KAM1 70). The 2026-09-01 census's "all no drawable model — emitters, spawns, sound markers, turrets" (`analysis/PLAN_LOG_2026.md` 2435–2438) does not hold for these. RE (§5): per skipped class, why `resolve_model` finds nothing (the ODF's geometry key, a model in a LVL the map bake does not pull — common / side / ingame — or a class label the manifest drops), and which of the rest (mist, god rays, turrets, recharge droids, `com_inv_col_*`) the PS2 draws; the console's holo is an effect (`HoloOdf com_holo_controlzone`, `analysis/re-cp-capture.md` 189). GATE: a table class → where its model lives → drawn on the PS2 (frame) → why the port skips it, in a dated `analysis/` §, + a build entry ([REBAKE], [GOLDENS]). Files: `analysis/re-skipped-classes.md` (new), `analysis/RE_LOG.md`, scratch `engine/artifacts/lead_tmp/re/skipc/`.
 
-## Planner note (2026-09-26)
-The skipped grass and flowers here (`yav_prop_grass(_tall)`, `nab_prop_flowers`, NAB1's `nab1_prop_grass_tall`) are
-`BASE grasspatch` classes: a sprite-grass class on 14 maps, which FOLG's foliage map very likely plants too (see FOLG's
-planner note). Build ONE grasspatch renderer (FOLG's build, or here if FOLG has not landed), not two. The CP console and
-the vines stay this card's own questions.
-
 ## Note from FOLG's RE (2026-09-26, lane 2)
 - `nab_prop_flowers` (BF1/BF2 NAB2 x53), `yav_prop_grass_tall` (BF1 YAV1 x10) and `yav_prop_grass` (x4) are
   `grasspatch` classes (BASE grasspatch; `nab_prop_flowers` uses the rectangle property 0x35a4393b = 2.8 x 2.8 — a
@@ -60,11 +54,6 @@ NAB2 post (`bf1_nab2/walk/pairs/cp5_cp5__sheet.png` b090). Of this card's classe
 - 2026-09-29 (PXWB part 2, FINDINGS F55/F56): more BF2 recharge / GNK droids at DAG1 cp3, END1 cp5 and cp6, FEL1 cp2-1, HOT1 cp6; DEA1 cp5's command-post console holo (a bright blue-white beam, `pcsx2/ref/bf2_dea1/walk/pairs/cp2_cp5__sheet.png` b090).
 - 2026-09-29 (PXWB, FINDINGS F60/F61): KAS2 cp3con (b270), MUS1 cp4 (b180), NAB2 cp5 (`pcsx2/ref/bf2_nab2/walk/pairs/cp2_cp5__sheet.png` b000, the ammo droid) — the droids stand beside nearly every BF2 post too.
 - 2026-09-29 (PXWB part 4, FINDINGS F64): BF2 POL1 cp2con (`pcsx2/ref/bf2_pol1/walk/pairs/cp0_cp2con__sheet.png` b000 the recharge droid, b180 a power droid) and BF2 COR1 cp4 (`bf2_cor1/walk/pairs/cp4_cp4__sheet.png` b000, the health droid — "THIS DROID WILL HEAL YOU WHEN YOU STAND NEAR IT") and cp6 (`cp5_cp6__sheet.png` b000 the recharge droid, b180 a GNK power droid): the droids stand beside every BF2 map's posts on the PS2.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — the command-post console and the recharge droids stand at every post on every map. Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
-
-- Planner 2026-10-01 22:00 (from VBIND's landing report, a note not a card): `rep_hover_gian_speeder` and `all_weap_inf_autoturret` have NO baked model at all (classes only) - add them to this card's census of things the PS2 draws and the port does not.
 
 ## RE result (2026-10-15, lane 2) - `analysis/re-skipped-classes.md` [O] (204c929); phase -> build, card STLC folded in
 - **A battle on main efa2d56 draws the console, the three recharge droids and the gun turrets** (the COMMON bake is

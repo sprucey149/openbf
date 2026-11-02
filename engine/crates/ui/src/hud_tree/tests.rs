@@ -173,6 +173,37 @@ fn a_message_line_fades_in_holds_and_fades_out_on_the_ps2s_clock() {
     assert_eq!(lines(&hud).state, LineState::Idle);
 }
 
+/// A message that wraps past the box's free lines is never cut off: its last
+/// lines wait for room and all of it shows, in order.
+#[test]
+fn a_wrapped_message_is_never_cut_off() {
+    let mut hud = message_hud();
+    let ml = hud
+        .elems
+        .iter_mut()
+        .find_map(|e| e.lines.as_deref_mut())
+        .unwrap();
+    ml.add(vec!["one".into(), "two".into(), "three".into()]);
+    ml.add(vec!["Ben Pulastra killed".into(), "Player 1".into()]);
+    assert_eq!(ml.pending.len(), 5, "both messages whole");
+    // The box is over-full now: the next is dropped, as with no free line.
+    ml.add(vec!["dropped".into()]);
+    assert_eq!(ml.pending.len(), 5);
+    let mut seen = Vec::new();
+    for _ in 0..600 {
+        hud.advance(1.0 / 30.0);
+        for l in &lines(&hud).shown {
+            if !seen.contains(&l.text) {
+                seen.push(l.text.clone());
+            }
+        }
+    }
+    assert_eq!(
+        seen,
+        ["one", "two", "three", "Ben Pulastra killed", "Player 1"]
+    );
+}
+
 /// Four lines fill the box, a fifth message is dropped; when the top
 /// line goes the others move up one line, in order.
 #[test]
@@ -248,10 +279,11 @@ fn a_long_message_breaks_at_words() {
         pending,
         ["Rebels captured the", "Collection Plant (Lower", "level)"]
     );
-    // One line free of four: a three-line message keeps its first.
+    // One line free of four: the second message still comes whole, its last
+    // lines waiting for room (`MultiLine::add`).
     say(&mut hud, &["word"; 15].join(" "), [1, 86, 213]);
     let ml = lines(&hud);
-    assert_eq!(ml.pending.len(), 4);
+    assert_eq!(ml.pending.len(), 6);
     assert_eq!(ml.pending[3].0, "word word word word word");
 }
 

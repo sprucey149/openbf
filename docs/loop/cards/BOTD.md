@@ -46,10 +46,6 @@ The maintainer, 2026-10-02: "are we just implementing so many bandaid fixes to a
 `analysis/bot-design.md`: the layer diagram and each layer's inputs / outputs / owner; the behaviour list with entry / exit / dwell; SAIR's table with a verdict per row (match / deviate + why); the tiers; BOTM's bars (which numbers must equal the PS2's, which must beat it); what of today's `core/src/ai` is kept, moved, deleted; the build order as cards (each landable alone, the sweep green at each step: mover first, then avoidance, then positions, then team sense, then tiers); risks (determinism, 0-alloc, 64 bots at 30 Hz - a budget per layer).
 A summary for the maintainer in STATUS with the decisions that are his (the deviations list, the tiers' feel).
 
-## Acceptance
-- The note; the maintainer's read recorded (INBOX) before any build card from it is taken; the build cards opened with deps.
-- No engine code in this card.
-
 ## The bot programme (the maintainer, 2026-10-02) - five cards, read together
 `JITR` (stop the tweaking now) -> `FFLN` (teammates in the line of fire) -> `BOTM` (bot-quality numbers, PS2 beside the port) -> `SAIR` (RE the PS2 foot soldier's own AI) -> `BOTD` (the design: what the best bot for this game is, then the build cards). `OBST` (walking into props) belongs to the same family.
 The maintainer: "If the bots suck, the whole game is worthless so we NEED to get this right." He agrees to RE the PS2 soldier AI FIRST, then keep what is good and DELIBERATELY do better where the originals annoy (the originals' bots are not perfect; better difficulty levels, more awareness). The port's soldier brain today is ~9,200 lines (`core/src/ai`, `commander.rs`) of rules added one symptom at a time (hold, shuffle, strafe, dodge, slide, fan, stuck, stall, lost, recycle), most of them OURS/PROVISIONAL: no RE note exists for the soldier's second-to-second movement and combat.

@@ -35,14 +35,6 @@ turret turn; this card is the camera. Value 5, alpha: his ask, seen in the first
 - Check first, before building anything for the third-person half: does the port's turret camera already turn with
   the gun since VTURD? If yes, that half is a test only.
 
-## Acceptance
-- A test: the gunner's third-person camera yaw/pitch follow the seat's look (a turn of the stick moves both).
-- A test: with the gunner zoomed (R3, `ZoomMax` > 1) the turret building's draws are absent from HIS view and present
-  in a second (splitscreen) view; unzoomed present in both; a weapon switch or leaving the seat ends the zoom.
-- A picture pair beside the PS2's zoomed frame (`sheet_ps2_cases.png`), BF1 Naboo and BF2 Mygeeto, and one unzoomed
-  third-person pair.
-- Mutation-check each new test (break the rule, see it fail).
-
 ## Notes
 - VTURL (the turn law at 180 degrees) is in the same viewer files; whichever lands second rebases.
 - The wreck half stays on VTURX (deps TBLD).

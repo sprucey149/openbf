@@ -21,45 +21,6 @@ alpha: yes
 per unit, or at once against a group of enemies, and is thrown on the exact low-arc ballistic solution. The port's bot
 fires its one primary; `Skill::grenade_chance` (`core/src/ai/draw.rs` 32, `skill.rs` 231) has no consumer.
 
-## What to build
-1. **The weapon choice** (§7.1; B1 `FUN_002387b0`, B2 `FUN_002ab590`), per target evaluation, slots in order: skip no
-   ammo; skip a weapon whose `Target*` mask lacks the target's kind; in range = `MinRange` < d < range; the first
-   in-range weapon is taken, a later one replaces it when it has "plenty" (> 20 rounds BF1, > 2 BF2) and the best has
-   not, or on a higher score at equal "plenty"; the out-of-range fallback. The SCORE (B1 `FUN_002380a8`, B2
-   `FUN_002aaba0` -> `FUN_002aa948`, an expected-damage figure) was not transcribed: read it first (one function,
-   bounded), else PROVISIONAL = ordnance damage x the target kind's scale.
-2. **The grenade test** (§7.2): BF1 — forced when (unit index mod 10) == (floor(t / 3) mod 10), or the target's group
-   stamp is fresh; BF2 — that window, or a droideka target, or the group test, AND the roll (unit index + floor(10 t))
-   mod 100 <= floor(100 x `grenade_chance`).
-3. **The group test**: BF1 — when an AI takes a soldier target, at most once per 5 s per target: >= 3 soldiers (the
-   target included) within 9 m of it and no friend of the AI there -> a stamp valid 5 s; BF2 — per unit, once a
-   second: more than 3 non-hostile soldiers and no hostile one within 9 m.
-4. **The switch**: instant; the bot's firing channel = the chosen slot's channel; the press is STTAP's single-shot tap.
-5. **The aim** (§7.3): the low-arc solution A = s^2 + g d.y; A -= sqrt(A^2 - g^2 |d|^2); t^2 = 2A / g^2; raise the aim
-   point by -g t^2 / 2 and lead by target velocity x t; no `ShotElevate` for a bot.
-Not in this card: the grenade WARNING's effect on bots (§7.4 — the PS2's handler is not traced; a note for a later RE).
-
-## Acceptance (run and paste into the report)
-- Unit tests: (a) the solver — s 25, g -12.25, a still target 16 m away and level: the launch elevation is 9.14 deg
-  (sin 2a = 12.25 x 16 / 625) and the simulated grenade's first contact is within 0.5 m of the target; no solution past
-  the range reports failure; (b) the window — unit index 3 forces a grenade only for t in [9, 12) of every 30 s (BF1,
-  no group); (c) the group stamp forces it outside the window with 3 enemies inside 9 m and not with a friend among
-  them; (d) BF2's roll at t = 0 never forces, at t = 1 forces on every tick of the window; (e) a thermal detonator is
-  never chosen against a vehicle target (mask), a crack grenade never against a soldier.
-- Census (extend the `SHOTS` census of `round_to_outcome`): grenades thrown per map over seeds 1-8 — > 0 on every map
-  whose rosters carry grenades; paste the table. No map's 8-seed finish count drops (`scripts/sweep_seeds.py` against a
-  main run of the same commit).
-- Gates: `sim; sweep; arena` declared and viewed.
-
-- Fable 2026-10-01: the RECEIVING side of the grenade warning is built (HOLD): `Sim::hazards` / `Sim::add_hazard(pos, fuse)` and the bots' run from one inside 7.5 m, by `skill::Tier::grenade` after `Tier::grenade_delay`. GREN's landing has to call `add_hazard`; nothing does today.
-
-- GREN landed 2026-10-02 (d4886ba): what the AI's grenade has to drive. A unit holds its class's other slots in
-  `Unit::held` (`core/src/unit.rs`), channel 1's current one at `Unit::cur1`; a throw is a fresh `SECONDARY_FIRE` press
-  on the unit's pad (`Sim::held_weapons`, `core/src/sim/ordnance.rs`) — the bot's pad can simply carry the bit. A bot's
-  throw uses its aim as it is (no `ShotElevate`, `Sim::launch`), so the ballistic solution (re-grenades §7.3) has to
-  be in the aim it writes. The grenade's range / target keys are on its `WeaponClass` (`thrown_weapon_from_db`).
-  The warning the thrown grenade raises is already wired (`Sim::add_hazard` at the first contact, moved to the rest).
-
 ## Planner 2026-10-02 17:45 - waits for BOTD
 This card changes the soldier brain (`core/src/ai`) that the bot programme is about to redesign (the maintainer, 2026-10-02: "are we just implementing so many bandaid fixes to a fundamentally flawed bot algorithm"; BOTD: no rewrite before he has read the design). Held so no lane builds on the old brain meanwhile; BOTD adopts, rewrites or closes it when it cuts its build cards. Undo: remove BOTD from `deps:`.
 

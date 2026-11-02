@@ -31,30 +31,6 @@ otherwise keeps to its rifle. Deviations from the PS2 that make bots play better
   targets) - read what the PS2 does with a vehicle target and the "too weak" rule FIRST; where it already has the
   rule, build the PS2's and name only the rest as ours.
 
-## What to build
-1. **Census first, on main:** rockets (and wrist rockets, and thermal detonators at vehicles) fired per map, split by
-   target: vehicle / group of 3+ within 9 m / single soldier / no target; vehicle kills by foot bots; seconds a
-   launcher is the weapon in hand. 8 seeds x 32 maps (an observer in a scratch example, `round_to_outcome`'s rows
-   untouched).
-2. **Vehicles:** a foot bot holding a launcher takes an enemy vehicle (hover, walker, turret with a crew) inside the
-   weapon's range with a clear line as a target and fires the launcher at it; a bot without a weapon that can hurt
-   that vehicle does not shoot at it (the "too weak" rule - per vehicle class by the damage table, not a guess).
-3. **Groups:** against soldiers the launcher is chosen only when 3 or more enemies stand within 9 m of the target
-   (the grenade's own group test, one function for both); otherwise the rifle. Never inside its own blast radius of
-   the shooter or a friend (GRAIA's friend rule).
-4. **The grenade vs a vehicle** only where the damage table says it hurts that class.
-5. Each rule behind a switch in ONE binary, null = main byte for byte (RULES: N rules are N hypotheses).
-
-## Acceptance
-- Scene tests, each mutation-checked: a rocket at a hover tank in range and line; a rocket at a 4-man group; NO rocket
-  at a lone soldier at 10 m (the rifle); no rocket at a vehicle the line to which is shut; a rifleman does not fire
-  at a walker he cannot hurt.
-- The census, main beside the branch: rockets per map by target kind; share at a single soldier under 10 %; vehicle
-  kills by foot bots per map (up from main's on the maps with vehicles - say the number).
-- 8 seeds x 32 maps 256 / 256; team kills not above main's (GRAIA's bar: at most 2.4 % of kills on any map); kills a
-  minute within the seed noise, or the move named and put to the planner as a fidelity approval (the maintainer's yes is the
-  note). Where deaths happen (RULES: `contact_spells.py`) not farther out.
-
 ## Notes
 - 2026-10-12 16:58 planner: filed from the maintainer's note. `deps: BOTD` only - it does not need TEAM. Rules 2-4 deviate from
   the PS2 only where the RE says so; name each in the code and in FEEL_NOTES.md.

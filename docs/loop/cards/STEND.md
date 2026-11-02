@@ -30,11 +30,6 @@ STALL C7 + C9 (`analysis/re-round-stalls.md` §2).
 - BES2's `stuck_max` reaches 9,060 from defenders on their spot;
 - YAV1 seed 5 has 42 units of both teams on cp5's centre with no targets.
 
-## Acceptance
-- On 8 seeds, after STFAL, STLVL and STTAP, no round ends NO OUTCOME with the losing side clamped at ≤ 3 alive.
-- BES2's `stuck_max` max < 3,000.
-- A commander test: a clamped enemy's last unit is hunted within 60 s.
-
 ## Notes
 - BF1's own stall exit is its exhaustion cull (900 s, then one AI per 15 s, re-tickets-spawn §2.6). The port does not
   run it, because PLAN plays every map under BF2's rules.

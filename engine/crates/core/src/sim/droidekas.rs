@@ -104,11 +104,6 @@ impl Unit {
             _ => (self.soldier.energy, self.consts.energy_bar),
         }
     }
-
-    pub fn droideka_eye(&self) -> Option<Vec3> {
-        let c = self.droideka_class()?;
-        Some(self.soldier.pos + c.eye)
-    }
 }
 
 /// Shared authored pitch clamp; droidekas never divide look by zoom.

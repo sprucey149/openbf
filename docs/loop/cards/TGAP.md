@@ -65,31 +65,6 @@ released, W held, the camera kept on the next hub; game-clock timed; `*_run.log`
   **the port's slab is shut BOTH ways** (the PS2's one). No port bot comes from that side: 0 samples on hub 77's
   side in 8 rounds (`obsr/spots/final/tat1`); every port bot at the apex stands on the rock's top (y 19.8-21.6).
 
-## What to do (build; rewritten 2026-10-09 - the old steps 1 and 2 are answered above)
-1. A load-time wall test beside the floor walk (`Sim::resolve_nav_floors`): an arc direction the floor walk calls
-   walkable is also walked as a soldier (a flood like `Sim::floor_reach` from the one hub's floor must reach the
-   other's disc), and marked unwalkable when it does not. Arc 89 is then dead 78 -> 77 (and 77 -> 78, shut in the
-   port), so the route table takes its second choice (2-100-101-102 / 2-54). Census every map's unwalkable list
-   before and after (BF2's doors are bodies at load; 86 of 7,832 arc directions today) and read every new entry.
-2. Hub 78's floor: the resolver takes the rock's top (20.56) over the terrain 0.6 m over the authored height - both
-   are real floors on the PS2; check `NAV_FLOORS` for other hubs resolved over an overhang only if step 1 leaves
-   traffic at the apex.
-3. Not for this card: the PS2's slab lets a soldier through from the west (a one-sided face). Making the port's
-   collision one-sided is a collision-model change with no player-visible gain here (no bot of either game was seen
-   to come from that side).
-
-## What to do (as filed 2026-10-07)
-1. The PS2 first (one session, `ps2live.py`'s `goto` over the hub graph, or a soldier dropped at hub 78): does a
-   soldier walk 78 -> 77? Where does it stand at hub 78 (y 17.8 on the terrain, or 20.6 on the rock)?
-2. If it passes: the port's collision or placement of the two rocks is wrong there - compare the instance transforms
-   and the `coll` mesh with the disc (`lead_tmp/starc/tools/colldump.py`), fix the bake (declares `rebake=maps`).
-3. If it does not (the PS2's own bots stick and its stuck timers move them on): a load-time wall test beside the
-   floor walk (`Sim::resolve_nav_floors`: a flood like `Sim::floor_reach` from one hub must reach the other) marks
-   the arc unwalkable, so the route table's second choice is taken. Census every map's `nf` list before and after
-   (BF2's doors are bodies at load).
-4. Hub 78's floor: the resolver takes a floor 3.4 m up over one 0.6 m up - check `NAV_FLOORS` for other hubs
-   resolved over an overhang.
-
 ## Built 2026-10-15 (lane 1, branch tgap 70f9d71; report `reports/20261015_2316_card_TGAP.md`)
 Traced on main d896ca4 first: 22 of 23 long lives at the slab spawned at ONE node, cp1 node 4 (-377.3, 20.7, 83.0),
 17 m off the footpath, whose first leg toward EVERY post was hub 85 -> 84 (spawn_node_census). The footpath 79 .. 86
@@ -100,20 +75,3 @@ into one, `level_hub` swaps a trapped start he does not stand in. Census `lead_t
 57 -> 72 dead directions, all 15 new ones walked 0 times by main's bots (32 maps x 3 rounds); 17 trapped hubs.
 Bars: seeds 9-16 at the gap 2,519 -> 0 unit-s, long lives 20 -> 0; seeds 9-40 recycles 90 -> 3. Fidelity: tat1
 recycled 17 -> 0, nothing worse. Test `game/tests/nav_walls.rs` (3 mutations each fail it).
-
-## Acceptance
-- Tatooine 1, seeds 9-16 (`lead_tmp/obsr/tools/spots.sh` + `spots.py`): unit-seconds within 14 m of (-427, 77) at
-  most 500 (main d9db73c 1,579), lives of 100 s or more at most 2 (12); `recycle tat1` over seeds 9-40 at most 15 (47).
-- The PS2 answer pasted into the report (positions crossing the apex, or none in N minutes of bots sent there).
-  DONE 2026-10-09: "PS2 measured" above.
-- A test that fails when the wall test is off: Tatooine 1's arc 89 is unwalkable from hub 78 on the baked map, and
-  the count of unwalkable arc directions per map is pinned (mutation-checked).
-- 2026-10-12 18:49 from CLSE4's landing (main a490579): bots live longer now and more of them walk into this arc - tat1 recycles
-  over 96 seeds 211 -> 266 (2.20 -> 2.77 a round, paired t +2.4), 199 and 256 of them within 12 m of (-426, 76), leg
-  78 -> 77 (`engine/artifacts/lead_tmp/clse4/out2/tat1_recycles.txt`, sweeps `clse4/sw/tat1_{m2,m2b,br,brb}`). The
-  fidelity gate let it pass (seeds 9-16 not worse than main's own). This card's fix takes all of it.
-
-- Planner 2026-10-12 19:30: the re-taken fidelity baseline (main bc10b82) holds this map's recycles at 20 / 24 on
-  seeds 1-8 / 9-16 (8 / 14 on main 5fbbbd4): CLSE4's slower fire feeds this arc, as its note above says (96 seeds:
-  211 -> 266, 199 and 256 of them at hubs 78 -> 77). The number to bring back is the OLD one: at most 8 / 14, and by
-  this card's own cure it should be near 0.

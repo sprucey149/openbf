@@ -434,6 +434,17 @@ struct Cry {
     shot: Option<audio::Shot>,
 }
 
+/// A start on a human's weapon handle ([`SoundLib::weapon_voices`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WeaponAsk {
+    pub unit: u32,
+    pub weapon_class: u32,
+    pub hash: u32,
+    pub pos: Vec3,
+    /// The empty click, which stops what the handle sounds.
+    pub click: bool,
+}
+
 /// A layer waiting for its delay (B1 `FUN_0045bc10` / `FUN_0045be28`).
 struct Timer {
     sound: u32,
@@ -568,6 +579,9 @@ pub struct SoundLib {
     /// Each unit's ONE voice for its hurt and death cries, by unit slot
     /// (card UCRY, [`SoundLib::cry`]).
     cries: HashMap<u32, Cry>,
+    /// What each human's weapon handle still sounds, by (unit slot, weapon
+    /// class): the voices the empty click stops ([`SoundLib::weapon_voices`]).
+    weapon_handles: HashMap<(u32, u32), Vec<Cry>>,
     /// Each station's ambient handle: sounding until this time on the
     /// library's clock, by station index (card PWST, [`SoundLib::station_ambient`]).
     station_voices: HashMap<u16, Cry>,
@@ -845,6 +859,7 @@ impl SoundLib {
             loops: HashMap::new(),
             ambient: HashMap::new(),
             cries: HashMap::new(),
+            weapon_handles: HashMap::new(),
             station_voices: HashMap::new(),
             hero_voices: HashMap::new(),
             hero_blades: Vec::new(),

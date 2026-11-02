@@ -23,16 +23,6 @@ The output the oracle exists for: "the first mismatch is tick 412, group units, 
 - Trace format from SHASH (`engine/artifacts/oracle/README.md`), PS2 traces from PSHASH. Prior art named in the research note: OpenTTD desync docs, ISP RAS Trace Matcher, ICML 2026 verifier-guided matching.
 - Port-side injection (c) needs a way to construct a `Sim` state from a unit list (spawn at pos/health/team) - the arena example (`game/examples/arena.rs`) already builds sims with placed units.
 
-## Do
-1. `fdiff.py A B [--tol field=eps ...] [--groups units,rng,...]`: reads headers (refuses mismatched quanta unless told), walks both traces; exact mode compares group hashes; on a mismatch re-reads `--full` tuples (or asks for them) and prints tick, group, unit id, field, both values, and the last matching tick. Exit code 0 = all matched, 1 = diverged, 2 = unusable input. Machine line: `fdiff: matched <n> of <m> ticks first_divergence tick <t> group <g> field <f>`.
-2. Tolerance mode compares the raw tuples with per-field eps.
-3. Sync mode: documented, may be a second card (FDIFF2) if it needs an engine injection API - split it rather than grow this one.
-
-## Acceptance
-- Self-test (`fdiff.py --self-test`, wired into `scripts/gates_selftest.py`): two synthetic traces with a divergence planted in one field of one unit at a known tick; the report names exactly that tick/unit/field; a no-divergence pair exits 0; mismatched headers exit 2.
-- Port-vs-port on real traces from SHASH: a one-line code change that moves one unit's speed (a scratch worktree edit, reverted) is reported at the right tick and field; paste the report.
-- If PSHASH has landed: one real port-vs-PS2 report pasted (whatever it says - the number is the baseline for FDGATE).
-
 ## Notes
 Python, stdlib only. No engine change in this card (sync mode that needs one is FDIFF2).
 

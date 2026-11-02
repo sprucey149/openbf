@@ -33,31 +33,6 @@ move and cannot be reached holds the round open for ever. BNDS (9440823) recycle
   door pushes them back and forth and resets the stuck window. `lead_tmp/endings/walk_in_place.py` (speed > 1 m/s, under
   1 m net in 10 s) reads 15 % of unit-seconds.
 
-## What to build
-1. **The test is NET progress, not the stuck window.** A bot with somewhere to go (a route leg, a hunt, a return walk)
-   that has not come 5 m nearer its leg waypoint, nor moved 5 m net, for RECYCLE_AFTER (start at 120 s) is recycled.
-   Never a bot that is where it wants to be: holding a position (HOLD), a defender on its spot, a bot fighting an enemy it
-   perceives, a rider, a bot with no objective. One mechanism with BNDS: extend `LostState` or sit beside it, your call.
-2. **Recycle = what BNDS already does** (despawn, respawn at an owned post) unless you measure a reason to differ. Whether
-   it costs a ticket is yours to decide and log in FEEL_NOTES.md: a ticket ends a 1 v 1 stall at once and matches `Lost`;
-   free does not charge a team for the port's defect. Say which you took and why.
-3. **The census — the part that makes it a safety net and not a crutch.** `round_to_outcome` counts every recycle (map,
-   seed, tick, team, position, leg from / to, hub and floor dy, steer) and `sweep_seeds.py` puts a `recycled` column and
-   the top spots (6 m cells) per map in seeds.md. Also port `walk_in_place.py`'s measure and the locus / slide shares
-   into the census (OFFG needs them): STUCK_CENSUS alone misses oscillating jams.
-4. **Every spot recycled on 2 or more seeds is a defect.** List them in the report and put each on the card that owns
-   it (STLVL, STARC, OFFG, STDOR) or a new one. The other stall cards carry "0 recycles on this card's maps" as
-   acceptance from now on.
-
-## Acceptance
-- Tests: a bot penned behind a wall with an objective outside is recycled once, after RECYCLE_AFTER, and respawns at an
-  owned post; a HOLD holder, a defender on its spot and a bot in a firefight for the same time are not; every new state
-  field is in the hash.
-- 8 seeds x 32 maps at 120,000 ticks (`--ticks 120000`; main: 245 / 256, `lead_tmp/endings/sweep120k`): BF1 YAV1 8/8;
-  no round ends NO OUTCOME with the loser at 3 alive or fewer; no map's finish count drops.
-- seeds.md carries the `recycled` column and spot list; the report names each repeated spot and its owner card.
-- Recycles per 8-seed sweep is reported as the number the later cards drive to 0.
-
 ## Notes
 - STLVL's design had this as its own last resort ("a bot with no route and no progress for 3 min"); it lives here now.
 - The PS2 sets a stuck flag (2 m in 3 s, re-round-stalls section 3); what its agents do with it is unread. This rule is

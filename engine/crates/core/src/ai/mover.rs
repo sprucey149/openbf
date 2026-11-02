@@ -81,6 +81,14 @@ pub(super) struct Moved {
     pub at_post: bool,
 }
 
+/// Is this arc one a soldier jumps at the start of? `Arc::JET_JUMP` is `ai::jet`'s.
+fn arc_jumps(sim: &Sim, arc: u16) -> bool {
+    sim.nav
+        .as_ref()
+        .and_then(|g| g.arcs.get(usize::from(arc)))
+        .is_some_and(|a| a.flags & crate::nav::Arc::JUMP != 0)
+}
+
 /// One tick of the mover: the move sticks, the stance, the roll and the jump
 /// for `mv`, then the progress books. Card MOVR (`analysis/bot-design.md`
 /// 4.7): a bot that has arrived STANDS (the latch and the deadband), the last
@@ -329,6 +337,26 @@ pub(super) fn run(
                         m = d;
                     }
                     st.lost = Some(l);
+                }
+                // A leg on an arc flagged to jump starts with a jump toward its
+                // far end (BF2 `FUN_002c0220`, `FUN_002f1778`, RE_LOG "BF2 arc
+                // flags"), and the stick stays on that line in the air.
+                let jump_arc = st
+                    .route
+                    .and_then(|r| r.via_arc)
+                    .filter(|&a| arc_jumps(sim, a));
+                if st.mv.jumped != jump_arc {
+                    match jump_arc {
+                        Some(_) if !u.soldier.grounded => {}
+                        Some(_) => {
+                            pad.buttons |= buttons::JUMP;
+                            st.mv.jumped = jump_arc;
+                            m = d;
+                        }
+                        None => st.mv.jumped = None,
+                    }
+                } else if jump_arc.is_some() && !u.soldier.grounded {
+                    m = d;
                 }
                 // The pad is built from the chosen WORLD direction in the
                 // soldier's own frame (`Soldier::step`: fwd_axis = (-sin yaw,

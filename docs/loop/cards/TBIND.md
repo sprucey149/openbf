@@ -40,16 +40,6 @@ their bone-relative coordinates put them, not where the PS2 draws them. HOT1 and
 - Placed bone-space models on the ground maps are essentially all turrets. BF1: GEO1's geoturret and END1's treesmash.
   BF2: the TUR models, plus TAT3's torturedroid (`bonespace.py`). Space maps have more.
 
-## Acceptance
-- The map bake places every segment at its bone's bind pose: bone-space vertices through `to_model_space`, and a
-  bone_space 0 segment by its BNAM bone's bind matrix.
-- Baked GLB bounds: the `hoth_bldg_hoth_turret` head at y ≈ 3.1–4.1, the `yav_bldg_watchtower` gun at y ≈ 15.2–15.9,
-  and no TUR model below y −0.05.
-- The two HOT1 pairs above: the mortar head on top and the dish on its pedestal, within a few px of the PS2's silhouette.
-- rebake=maps; declare the golden moves (bf2_hot1, bf2_kam1, bf2_kas2, bf2_myg1, bf2_geo1, bf1_geo1, tat2, bf2_yav1 as
-  they move).
-- First check that a bone_space 0 prop whose BNAM is an identity bone stays byte-identical (the door classes, door.rs).
-
 ## Notes
 - VTURD (turn the gun where it aims, destroyed geometry) builds on this; this card is its bind-pose first step.
 

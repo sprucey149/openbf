@@ -715,7 +715,6 @@ impl Renderer {
             palette_buf,
             palette_bg,
             palette_capacity,
-            palette_upload: Vec::new(),
             skinned_instance_buf,
             spec_pipeline,
             spec_skinned_pipeline,

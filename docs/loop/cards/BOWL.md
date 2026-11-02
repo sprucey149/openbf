@@ -52,29 +52,6 @@ buckets it by its drop under the hub's floor. "On the hull" = 0.3 m or more unde
 So V1 is the fix (about 99 % of hull time gone) and V2 adds nothing to it. With V1 the 10-minute tickets read
 109 / 80 and 124 / 99 against main's 125 / 126 and 129 / 113: more fighting.
 
-## What to build
-1. **V1 in `level_at`**: when the walk was stopped by a barrier short of the point (gap over ~0.3 m), the allowed drop
-   is a small RIM_DROP (0.75 m in the prototype: a kerb or a step, not a hull), not `BOUND_DROP`. The prototype is the
-   `BOWL_V1` hunk of `lead_tmp/bowl/bowl_probe_v1_v2.patch` (env-switched there; build it unconditional). Rooms behind
-   a wall's barrier are level with the stop and stay ON. Tune RIM_DROP by the sweep, not by eye.
-2. **The census**, so this cannot hide again: port the probe (`bowl_beyond` in the patch) into `round_to_outcome` as a
-   `rim` share per map (unit-seconds beyond a barrier from the 3 nearest hubs and 0.3 m or more under their floor) and
-   a `rim` column in `sweep_seeds.py`. Report it for all 32 maps: other maps may have the same hole.
-3. **What is left after V1** (do not guess, read the crossing log `BOWL cross` lines after the fix): the unit
-   separation pass pushes soldiers with no barrier or floor check (AUDIT of STFAL, card DPIT), HOLD positions and
-   shuffles drawn beyond a rim, bots that leave the deck airborne. Fix what the log shows is still putting bots on a
-   hull for more than a few seconds; card the rest.
-4. A unit test at a rim of this shape: the rail is a wall for a 20 degree approach and for a slide along it; a bot placed
-   3 m out on the hull is lost within two thinks and walks back.
-
-## Acceptance
-- BF2 KAM1, 8 seeds: `rim` share under 0.5 % of unit-seconds (main 13-18 % on seeds 1-2); no bot on a hull for 30 s.
-- The 8-seed x 32-map sweep: no map's finish count drops; `lost` deaths per map listed before / after (BF2 UTA1 and
-  BF1 HOT1 are the maps with the most; a rise there needs an explanation); BF2 KAM1 kills / min before and after.
-  My own 8-seed pair for V1 is in `lead_tmp/bowl/sw_base` and `sw_v1` (binary d800f1b + the patch, before RCYC landed).
-- `UNIT_SAMPLES`' level column and the census agree with the probe on the profile line above.
-- OFFG (`first: 3`) is measured AFTER this lands: part of its 47 % off-graph / 42 % slide is this defect.
-
 ## Notes
 - All of this is the port's own (PROVISIONAL). The PS2 never crosses a barrier at all (RE_LOG "Barriers are the PS2's
   Obstacles"); the edge rule exists because every barrier as a wall cost Hoth and Tatooine their rounds.

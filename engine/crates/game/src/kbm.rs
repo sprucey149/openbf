@@ -1,6 +1,6 @@
 //! Keyboard + mouse to `PadState`: the bindings table, held keys and latched
 //! taps, mouse look in `LOOK_UNIT`s, the merge with the controller, pointer lock
-//! and menu keys. OURS (public pull request #1); rules in `AGENTS.md`
+//! and menu keys. OURS (public pull request #1); rules in `analysis/plan/FEATURE_SET.md`, Platform & meta
 //! (Keyboard + mouse).
 
 use core::sim::{buttons, PadState, LOOK_UNIT};
@@ -23,6 +23,28 @@ pub const MENU_R1: u32 = 256;
 /// #50), and its menu edge bit.
 pub const KEY_SQUARE: u32 = 2048;
 pub const MENU_SQUARE: u32 = 512;
+/// `[ours]` A and D step a value on the pause menu, whose arrows are the cheat
+/// code's Morse keys (`game::pause::rows_input`).
+pub const KEY_ADJUST_LEFT: u32 = 4096;
+pub const KEY_ADJUST_RIGHT: u32 = 8192;
+/// The menu edge bits of a value step: those keys, or the left stick.
+pub const MENU_ADJUST_LEFT: u32 = 1024;
+pub const MENU_ADJUST_RIGHT: u32 = 2048;
+
+/// The arms the stick held last frame, for `input::stick_arms`' hysteresis. Left
+/// and Right come from the value-step bits, because the bare arm bits are the
+/// D-pad's and arrows' too: a held Morse key must not latch a half-tilted stick
+/// into a value step.
+pub fn stick_latch(prev_menu_buttons: u32) -> u32 {
+    let mut held = prev_menu_buttons & 3;
+    if prev_menu_buttons & MENU_ADJUST_LEFT != 0 {
+        held |= 4;
+    }
+    if prev_menu_buttons & MENU_ADJUST_RIGHT != 0 {
+        held |= 8;
+    }
+    held
+}
 
 pub fn menu_key(code: KeyCode) -> u32 {
     match code {
@@ -36,6 +58,8 @@ pub fn menu_key(code: KeyCode) -> u32 {
         KeyCode::PageUp => KEY_PAGE_UP,
         KeyCode::PageDown => KEY_PAGE_DOWN,
         KeyCode::Space => KEY_SQUARE,
+        KeyCode::KeyA => KEY_ADJUST_LEFT,
+        KeyCode::KeyD => KEY_ADJUST_RIGHT,
         _ => 0,
     }
 }
@@ -56,6 +80,12 @@ pub fn menu_bits(keys: u32, shell: bool) -> u32 {
     }
     if keys & KEY_SQUARE != 0 {
         bits |= MENU_SQUARE;
+    }
+    if keys & KEY_ADJUST_LEFT != 0 {
+        bits |= MENU_ADJUST_LEFT;
+    }
+    if keys & KEY_ADJUST_RIGHT != 0 {
+        bits |= MENU_ADJUST_RIGHT;
     }
     bits
 }

@@ -23,8 +23,3 @@ Card TURR (branch turr, 33016bf) has bots man building turrets. On three maps th
 ## What to find / build
 1. Why the recoilless aimer's barrel pitch stays ~0.35 rad over the camera line (the class's AimerPitchLimits / EyePointOffset / fire point, or the camera ray hitting the turret's own building body before the target - `aim_point` skips the vehicle's hull, not a map body). Read the class props and dump one tick's camera ray hit.
 2. Fix it where it lives (the seat gun if a human's shots miss too - check a human's hit there; else the bot's look), BF1 Geonosis' geoturret likewise (rest aim pitch 45 deg).
-
-## Acceptance (run and paste)
-- MYG1, KAS2, GEO1 seed 1-8: spells with a shot >= 50 % and hits on soldiers > 0 per round (TURR's `turrets:` line has hits / kills once TURR's census adds them).
-- A scene test: a bot seated in a recoilless-class turret fires within 5 s at a soldier 40 m in front, and its bolt passes within 1 m of him; mutation-checked.
-- Sweep 256/256.

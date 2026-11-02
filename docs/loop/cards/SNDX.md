@@ -24,10 +24,6 @@ The maintainer, 2026-10-04: "Some sounds at least in some maps are terrible stat
 - No sound check since FOLY has been heard by anyone (STATUS): every one is a name and a time in a log, so a wrongly decoded sample would pass.
 - A GUESS, not checked: those samples are baked with the wrong format, rate, channel count or loop point.
 
-## Acceptance
-- The sounds are named (the event log of a replay with a rocket fired at the player and a shotgun shot), each baked sample is compared with the PS2's own output for the same sound (waveform or spectrum, not a name), and the cause is read in the bake.
-- A check that would have caught it runs over every baked sound (e.g. a noise measure against the source), and its count is in the report.
-
 ## Notes
 Filed 2026-10-04 by Claude in chat from the maintainer's playtest (build 1bde70c, main 4e51e84). The maintainer's own words are quoted; nothing here is measured unless it says so.
 

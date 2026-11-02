@@ -216,6 +216,11 @@ Six `jal`s to the update exist in the ELF (0x1d1de4, 0x1db814, 0x1edbf8, 0x20738
   `EngineSound`: the turn-on and turn-off still run for an instance without a record (the sounds are on the handle,
   354177-354179, 354154-354156).
 
+- **The port's flyer** (`game::engine_sound`, `Drive::Flyer`, 2026-11-01): the row above; `TakeoffSound` and `LandSound`
+  play at the two state changes, and the time graphs follow the wind. The baked BF1 Hoth snowspeeder's three layers
+  author only `speed`, `acceleration`, `turnontime` and `turnofftime`, so it changes nothing else there. `strain`,
+  `BoostSound`, cockpit sounds and BF2's distance are not fed. Heard by nobody yet: no live window was opened.
+
 ## 5. BF2
 
 Read by a second reader (`AGENT_B2_ENGINE.md`); every line cited here was opened again.
@@ -415,7 +420,7 @@ Read by the second reader (`AGENT_STEPS_TURRET.md`); B1 `FUN_00216b30` was read 
 `fn_b1_agentB.txt` (48), `fn_b2.txt` (75 B2 lines), `callers_b1_engine.txt` (`re_check.py callers` of the 15 engine
 entry points), `words_refs_b1.txt` (`re_check.py word b1 0x547e00 11`: the 11 parameter hashes; `0x547e38` = `"%s %f
 %d"`, `0x547e48` = `"%f"`; `scripts/tools/refs.py b1`: update 6 jal, turn-on 7, turn-off 7, collision 5, stop 2, wind-up 2,
-wind-down 2 - the decomp's caller counts, no data word), `dis_b1_callsites.txt` (`eedis2.py`: the hover 0x1eda60-
+wind-down 2 - the decomp's caller counts, no data word), `dis_b1_callsites.txt` (`eedis.py`: the hover 0x1eda60-
 0x1edc08, the walker 0x21a930-0x21a9d0, the flyer, the droideka, the soldier). `re_check.py word b2 0x6392c0 12`:
 BF1's 11 words + 0xbb0169a2; `refs.py b2 0x44c650`: 6 jal; `0x44da60`: 5. Names: `foly/h.py` on every name in this
 note (the hash function of `re-sound-banks.md`). The verifier's own tools are in `vsnd/verify/` (`census.py`,

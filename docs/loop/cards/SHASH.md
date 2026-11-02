@@ -29,13 +29,6 @@ created: 2026-10-08
 - **Trace file** = a text header (`# openbf-trace 1`, map, seed, quanta, tick rate, field list) + one line per tick `t unitsH rngH scoreH postsH timersH`; optional `--trace-full` adds the raw tuples per tick for the differ to print the offending field's two values (cap the file; tests run 600 ticks).
 - **CLI**: `game --sim-trace <out> <ticks> [--input <inputlog>] [--seed S] [--map M]`; replay of the same InputLog + seed twice gives identical files.
 
-## Acceptance
-- A test: the same (map, seed, InputLog, 600 ticks) run twice writes byte-identical trace files, and changing one pad byte on tick 300 changes the trace first at tick 300 or 301 (paste the first differing line).
-- `game --sim-hash 100` / `600` and `gates.toml [sim]` are byte-identical before and after (the trace is read-only), pasted.
-- The record reads, not writes, sim state; tracing off costs nothing measurable (`sim_gates.sh` wall time within 2 %, pasted).
-- A short `engine/artifacts/oracle/README.md` section names the format (header, fields, quanta) for the PS2 reader to write the SAME format.
-- No `declares`: nothing in the sim moves.
-
 ## Notes
 Filed 2026-10-08 from the research note. Group order and the quanta are decided HERE; SHSRE/PSHASH/FDIFF conform. Does not need PCSX2 at all - ships and is useful (landing bisect) by itself.
 

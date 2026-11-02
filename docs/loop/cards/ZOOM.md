@@ -28,15 +28,6 @@ The maintainer, 2026-10-04: zoom is the right stick's click. The binding is in (
   - Turn: yaw and pitch rates and the aim assist's rate divided by the weapon's turn divisor (= the zoom value on every disc weapon).
   - Spread: unchanged on disc data (the `*AimSpread` column is 0.0 like the still column); pass the flag anyway.
 
-## Acceptance
-- [done] An [O] RE note: `analysis/re-zoom.md`.
-- Built: R3 zooms as the PS2 does. Checks to RUN and paste (each is a number the PS2 gave live):
-  1. sim test, press sequence from the BAKED classes: BF1 / BF2 rifle on, off; `all_weap_inf_sniperrifle` / BF2 `rep_weap_inf_sniper_rifle` 2.0, 8.0, off; a thermal detonator in hand: no zoom; a bot with the ZOOM bit forced: no zoom.
-  2. sim test, each cancel: reload of the primary, primary switch, secondary throw, roll, death; BF2 sprint; and a jump and a crouch keep it.
-  3. sim test: yaw and pitch rates zoomed = plain / divisor within 1e-5 (PS2: 2.497-2.499 for 2.5 on every update).
-  4. camera test: S after n ticks = z + (1 - z) exp(-25 n dt) (PS2 BF1 rows 1.8486, 2.2171, 2.3772); settled vertical FOV BF1 rifle 15.55 deg, BF2 24.24 deg; zoomed eye relative to the feet at aim pitch -4.01 deg = (right 0.400, up 2.216, back 2.769) with the camera 3.50 deg under the aim, on the first zoomed tick; marksman's scope eye (0.060, 1.604, 0.057), no tilt.
-  5. a picture pair: the port's shoulder zoom beside a PCSX2 frame (BF2 COR1 or BF1 NAB2; `lead_tmp/zoom/ps2/zoom_probe.py` reaches the state and presses R3).
-
 ## Notes
 Filed 2026-10-04 by Claude in chat from the maintainer's playtest (build 1bde70c, main 4e51e84). The maintainer's own words are quoted; nothing here is measured unless it says so.
 - 2026-10-05 planner: value 4 -> 5: a bound button (R3, the maintainer's own binding of 2026-10-04) that does nothing; a sniper cannot zoom. Undo: `loopctl.py set ZOOM value=4`.

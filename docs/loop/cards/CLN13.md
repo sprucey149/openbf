@@ -20,8 +20,3 @@ Cleanse 18, area bake (diff 920544c..ce8975d). Findings and their end states are
 
 ## Evidence
 `engine/artifacts/lead_tmp/cln13/`.
-
-## Acceptance
-- `size_report.sh --check-map` 0 stale counts, `--strict` exit 0, `analysis_index.py --check` exit 0.
-- Every gate PASS, nothing declared (bake gate SAME, goldens unchanged).
-- Each finding fixed, declined with a reason, or carried to a card.

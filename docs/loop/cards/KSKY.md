@@ -30,22 +30,6 @@ The largest single term of Kamino's parity error (bf1_kam1 26.6, bf2_kam1 22.5, 
 - Prototype (`lead_tmp/kamr/tools/dome_prototype.patch`, shell 0 × 0.6): parity bf1_kam1 26.62 → 21.80, bf2_kam1
   22.49 → 19.20; sky band PS2/port bf2 0.76 → 0.94, bf1 0.47 → 0.64.
 
-## Do
-1. `mungefs::fx`: parse `Effect("Lightning")` (all keys — WTHR needs the rest) and `LightningBolt`; manifest field
-   (`rebake=maps`; skipped when the map authors none, so the other 29 manifests do not move).
-2. `viewer::scene::upload_sky`: shell 0's colour × (1 − SkyDomeDarkenFactor) when the effect is enabled; the other shells
-   unchanged. The flashes (dome and fog colour to white, lights) are WTHR's — leave a hook, not an animation.
-3. `sky.ambient` has no PS2 reader (hash 0x1c9640eb is in neither ELF; white on all 32 maps): keep or drop, say which.
-
-## Acceptance
-- Pixel test at the stored walk poses: the top-left sky band (x 0..140, y 0..28, the views `lead_tmp/kamr/skyratio.py`
-  accepts) PS2/port median within 0.85..1.15 on bf2_kam1 (main: 0.76); bf1_kam1 reported (main 0.47; prototype 0.64 —
-  the rest is the open item in re-kamino §8, card it if it stays under 0.85).
-- `parity.py` against the landing's parent: bf2_kam1 down by ≥ 2.5 and bf1_kam1 by ≥ 4.0 (prototype −3.29 / −4.82 on
-  0994d9a; main 5c73167 reads 20.80 / 26.62 after BPNT); bf1_yav2 reported; no other map moves.
-- A unit test pins 255·(1 − 0.4) = 153 and that shell 1 (`kam1_city`) stays white.
-- Goldens: only the two Kamino map sheets and BF1 YAV2's move (viewed).
-
 ## Notes
 - Four reference states were saved mid-flash (dome 224 / 245 / 193 / 255): `bf2_kam1_cw_sideselect`,
   `bf1_kam1_cw_cis_spawnmap`, `bf1_kam1_cw_sideselect`, `bf1_kam1_walk_cp1_cp10_b000` — frames from them are not the

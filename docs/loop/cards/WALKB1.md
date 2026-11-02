@@ -57,30 +57,6 @@ BF2's class values.
 - Before: `lead_tmp/walkb1/port_bf1_<class>.txt` (8 classes). Targets of the same script on BF2's maps:
   `lead_tmp/walkb1/port_bf2_<class>.txt`.
 
-## Acceptance (run each on the branch AND on its parent; paste both)
-1. **`walker_drive` per BF1 class** (`<map> <class>`; its phases are fixed):
-   - `bf1_hot1 imp_walk_atst_snow` and `bf1_end1 imp_walk_atst_jungle`: "stick right" walks (≥ 2.5 m/s; parent 1.83 /
-     1.55) and turns ≥ 1.4 rad (parent 1.11, then held); "boost" ≥ 6.5 m/s with the energy drained (parent 4.35,
-     energy 100) and a walking yaw rate ≥ 0.5 rad/s (parent 0.060);
-   - `bf1_hot1 all_walk_tauntaun`: "throttle" ≥ 18.5 m/s (parent 10.23), "boost" ≥ 24 (parent 7.95), planted-foot slip
-     median < 1.5 m/s (parent 7.8);
-   - `bf1_nab1 gun_walk_kaadu`: "throttle" ≥ 18 m/s with a steady speed of 19.54 ± 0.3 (parent 10.47), "boost" no
-     faster than "throttle" + 0.5, slip median < 1.5 m/s (parent 8.7), "stick right" turns ≥ 1.4 rad (parent 0.34);
-   - `bf1_geo1 cis_walk_spider`: yaw max 0.4 rad/s in "stick right" and "boost" (parent 0.2 and 0.06);
-   - `bf1_geo1 rep_walk_atte`: yaw max 0.26 rad/s (parent 0.2; 0.007 walking); after "aim right" |aim| < 1.0 rad
-     (parent 8.28);
-   - `bf1_hot1 imp_walk_atat`: "throttle" 1.70 ± 0.1 (unchanged); every replay hash agrees.
-2. **A census test** in `vehicle_class/walker.rs` (data-gated on the baked class RONs): for the seven shared classes
-   the BF1-map `WalkerClass` equals BF2's on every body field (e0c excepted on the three); none of the eight BF1-map
-   classes keeps flag bit 2; the kaadu's MaxSpeed is its clip's z·30/N within 1e-3 and its flags are the tauntaun's.
-   Mutation-check it: with the override off the test fails.
-3. **A bot's spider on a BF1 map converges:** a unit test beside `ai/walker_drive/tests.rs` — the plain branch with
-   e0c = 0 holds a heading error under 2° while walking at a goal 30° off; with BF2's 88° it holds about 5° (the
-   existing BF2 expectation stays).
-4. **The sweep:** every round of the 32 maps finishes; the BF1 walker maps' rows (hot1, end1, geo1, nab1 and any other
-   with a walker pad) are the declared moves. Paste the 8-seed finish counts of those maps for parent and branch
-   (±3 of 8 is noise).
-
 ## Original text (the RE phase, 2026-09-29; kept. Its premises corrected by the RE: the AT-AT and AT-TE walk 2.22 and 2.80 m/s on BF1, not 1.48 and 1.86)
 ### Why (RE)
 The VWLK audit (2026-09-29, PARTLY) found two gaps in re-walker.md that WALK inherits on BF1 maps (HOT1/END1 AT-STs,
@@ -112,9 +88,6 @@ HOT1 tauntauns, GEO1 spiders, NAB1 kaadus, the AT-AT / AT-TE).
   - BF2's class values where both discs share the class (AT-ST, tauntaun, spider, AT-AT, AT-TE);
   - a BF1-gait clock for BF1-only classes (the kaadu: 19.54 m/s natively, 10.86 under BF2's clock).
 - Correct WALK's FEEL_NOTES line: the BF1 tauntaun was ~19.8 m/s on the PS2 (live 18.1), not 21.75.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — BF1 walkers' own gait (NAB1 AT-ST and kaadu, TAT1, YAV2). Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
 
 ## KAAD audit note (2026-09-30, `reports/20260930_0645_audit_KAAD.md`)
 - **On the PS2, unridden kaadus creep downhill. The port's stand still.** [measured]

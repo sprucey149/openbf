@@ -45,27 +45,6 @@ of 2026-10-01 14:40 asked for a kill-rate card: this is it. It is contact, not a
 - Top slide cells (10 m): (-180, 68, 30), (80, 51, 80), (40, 53, 130), (40, 51, 10), (-80, 67, 200), (-60, 60, 330); the
   15 largest hold 48 % of the slide time. Nearest-hubs 65, 41, 52, 38; hub 100.
 
-## What to do
-1. **Split the 47 % by cause first** (it decides the fix): bots that SPAWN off the graph, HOLD positions (a drawn point
-   in a hub, 4603e9e), BNDS's return walk, hubs whose radius or arc width leaves the deck uncovered, the last leg to a
-   post. `UNIT_SAMPLES` has locus, hub, steer, hold and objective per unit per second.
-2. **The PS2's own number is the target.** `lead_tmp/stall/ps2/bf2_kam1_soldiers.csv` holds 30,013 PS2 soldier positions
-   (420 s, 16 a side). Run them through the port's `NavGraph::locate`: that Nearest share is what the port should read.
-3. **Then the rule** (ours, PROVISIONAL): a bot at locus Nearest does not aim straight at a far hub or post across rails
-   and walls. It walks to the nearest hub or arc point it can reach by a clear walk on its level (`Sim::level_at`, the
-   BNDS floor walk, `steer::barrier_ahead`), then routes. A HOLD position is taken on a hub or arc floor. Fix what step 1
-   shows; do not build what it does not.
-4. Port the locus / slide / walk-in-place shares into `round_to_outcome`'s census if RCYC has not already.
-
-## Acceptance
-- BF2 KAM1, 8 seeds: Nearest share under 15 % (or within 5 points of the PS2's from step 2), slide share under 20 %,
-  kills / min 10 or more, 8/8 finished inside 60,000 ticks.
-- BF2 POL1's Nearest share (32 %) reported before and after.
-- No map's 8-seed finish count drops (`scripts/sweep_seeds.py`, baseline `lead_tmp/endings/sweep120k` is at 120,000
-  ticks; re-run main at 60,000 for the gate's own table). 0 recycles on KAM1 once RCYC has landed.
-- After it lands, re-run HOLD's table (`lead_tmp/fable2/README.md` Task 2): HOLD took KAM1 from 2/8 to 0/8 at 60,000
-  ticks. If KAM1 is still under 7/8 with holds on, card the hold rule (a holder whose team is behind on posts walks on).
-
 ## Notes
 - STARC (C5 / C6) is the same family on other maps: the POL1 radar door (18, 25, 84) is still the top walking-in-place
   spot on seed 1 (456 unit-s). If one rule covers both, close STARC's part and say so on its card.

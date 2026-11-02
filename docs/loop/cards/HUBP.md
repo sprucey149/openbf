@@ -35,15 +35,6 @@ and the table row "point in the hub"); behind BOTD only because it moves every b
   end (`FUN_002a5fa8`); arrival XZ 1.0 m (0.5 m last node) or the node's plane passed.
 - The draw must come from the port's per-unit hash (`ai/draw.rs`), not a shared LCG, to keep the round replayable.
 
-## Acceptance
-- `scripts/bot_quality.py` on 8 seeds: "a teammate within 1.5 m" on KAM1, POL1, DEA1, KAS2 moves at least half-way
-  from the port's value to the PS2's on every one of the four maps.
-- A unit test: 200 units routed over one arc draw waypoints whose XZ offsets from the hub centre span the hub's
-  radius (max over 0.8 r, none over r) and differ per unit; a waypoint inside a barrier is re-drawn. Mutation-checked.
-- Sweep 8 seeds x 32 maps: rounds finished 256 of 256; recycles and "walking in place" not up; kills / min within
-  seed noise; the hub-floor referee (`recycle_lv` / `FLOOR_GRID`) shows no new lost deaths (a point off the centre
-  can sit over a ledge: keep the port's floor resolution for the drawn XZ, and re-draw when there is no floor).
-
 ## Notes
 - Related PS2 facts for the same code, small: the arrival floor is 1.0 m (port 1.5), and the PS2's only avoidance
   of other units is the contact side-step (unit position + 5 m along the contact's perpendicular, side kept).

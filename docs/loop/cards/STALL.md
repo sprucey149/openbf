@@ -33,24 +33,6 @@ stuck, the sweep `finished 32/32`. The maintainer wants the real cause per map, 
 - JKAM (merged): KAM1 unit 24 pinned at (108.04, 52.25, 149.85), push (−0.27, 0.10) every tick at hub 88; climb legs
   hubs 90→88, 53→66 under JWAL's ledge rule (`lead_tmp/jwal/u24.txt`).
 
-## Plan (the maintainer's steps)
-1. **Instrument**: card SWPN (the 8-seed sweep). Until it lands, loop `round_to_outcome 60000 <seed> <map>` over seeds 1–8.
-2. **Classify every stuck unit per map** with a printed record: unit, team, position, goal, route, ticks stuck, wall
-   contacts at the stall, its last 200 ticks of path. Reuse `Sim::nav_stats`, `ROUND_VERBOSE`, `round_to_outcome`. Each
-   stall is one of: no route (hole/split in the nav/hub graph, a post the graph never reaches); a route blocked by a
-   wall/prop/door (collision); waiting on a vehicle or seat (VAI claim never released); goal oscillation; a post or
-   spawn in an enclosed spot / inside geometry; a rules stalemate (DEA1: 2 vs 16 alive with no capture or bleed).
-   Related: BPO, AQD, AIDS, WAI, SRAD, LEAK3. Write the cause table per map in `analysis/re-round-stalls.md`.
-3. **Compare with the PS2**: the same maps with AI in PCSX2 (BF2: OPTIONS → Conquest AI count; BF1: `ps2live.py`) for a
-   few minutes of battle; log whether the PS2's bots stall at the same places (ours or the game's own).
-4. **Fix each cause**: split into build cards, one commit-sized change per cause, each with a regression test (a replay
-   or a nav census).
-
-## Acceptance (the maintainer's)
-- The seed-42 sweep `finished 32/32`; every map finishes on at least 7 of 8 seeds; `stuck_max` < 10,000 ticks on every
-  map; the cause table shows no unexplained stall. Any map that still stalls is reported with its named cause.
-- This RE card closes when the cause table is written, verified and every cause has a build card with that acceptance.
-
 ## Outcome (lane 2, 2026-09-30 13:55–15:40, RE max)
 The cause table is `analysis/re-round-stalls.md` (verifier 17/2/0 of 19, folded in). Measured on main 027dad9 over 9 seeds
 × 32 maps, with a read-only stall-episode census (`lead_tmp/stall/`), and set beside live PCSX2 runs of BF2 KAM1, DEA1 and

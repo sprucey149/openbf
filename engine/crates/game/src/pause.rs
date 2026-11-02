@@ -119,14 +119,18 @@ pub fn apply_menu_action(
 
 /// The rows' share of a paused frame's edges: D-pad Left/Right are the
 /// Morse letter and word keys (card CHEAT2), so they never step a row;
-/// the Respawn popup keeps them. Up/Down move the cursor, as on the PS2.
-pub fn rows_input(input: ui::menu::MenuInput, respawn_confirm: bool) -> ui::menu::MenuInput {
-    if respawn_confirm {
-        return input;
-    }
+/// the left stick and the A and D keys do (`step_left`, `step_right`).
+/// The Respawn popup and the class picker keep the D-pad too. Up/Down move
+/// the cursor, as on the PS2.
+pub fn rows_input(
+    input: ui::menu::MenuInput,
+    step_left: bool,
+    step_right: bool,
+    respawn_confirm: bool,
+) -> ui::menu::MenuInput {
     ui::menu::MenuInput {
-        left: false,
-        right: false,
+        left: step_left || (respawn_confirm && input.left),
+        right: step_right || (respawn_confirm && input.right),
         ..input
     }
 }
@@ -167,6 +171,37 @@ mod tests {
     use super::*;
     use ui::menu::{MenuAction, MenuInput};
     use ui::shell_feel::MenuSound;
+
+    /// A paused D-pad types Morse and never steps a value; the stick or A / D
+    /// reach every slider, and the popup keeps the D-pad.
+    #[test]
+    fn a_paused_step_comes_from_the_stick_or_keys_not_the_morse_keys() {
+        let dpad = MenuInput {
+            left: true,
+            ..Default::default()
+        };
+        assert!(!rows_input(dpad, false, false, false).left);
+        assert!(rows_input(dpad, false, false, true).left);
+        let stepped = rows_input(MenuInput::default(), false, true, false);
+        assert!(stepped.right && !stepped.left);
+        let model = ui::menu::MenuModel {
+            music_volume: 0.5,
+            cursor: ui::menu::rows(&ui::menu::MenuModel::default())
+                .iter()
+                .position(|r| *r == ui::menu::Row::Music)
+                .unwrap(),
+            ..Default::default()
+        };
+        assert_eq!(
+            ui::menu::navigate(&model, stepped).1,
+            vec![MenuAction::SetMusic(0.6)]
+        );
+        assert!(
+            ui::menu::navigate(&model, rows_input(dpad, false, false, false))
+                .1
+                .is_empty()
+        );
+    }
 
     /// menuref "In battle": move select, Triangle exit, the popup's No and
     /// Triangle cancel, Cross accept; nothing when nothing happens.
@@ -224,7 +259,8 @@ mod tests {
                 right,
                 ..Default::default()
             };
-            let (cursor, actions) = ui::menu::navigate(&at_fov, rows_input(input, false));
+            let (cursor, actions) =
+                ui::menu::navigate(&at_fov, rows_input(input, false, false, false));
             assert_eq!((cursor, actions.len()), (fov, 0));
         }
         let up = rows_input(
@@ -232,6 +268,8 @@ mod tests {
                 up: true,
                 ..Default::default()
             },
+            false,
+            false,
             false,
         );
         assert_eq!(ui::menu::navigate(&at_fov, up).0, fov - 1);
@@ -244,6 +282,9 @@ mod tests {
             right: true,
             ..Default::default()
         };
-        assert_eq!(ui::menu::navigate(&popup, rows_input(right, true)).0, 1);
+        assert_eq!(
+            ui::menu::navigate(&popup, rows_input(right, false, false, true)).0,
+            1
+        );
     }
 }

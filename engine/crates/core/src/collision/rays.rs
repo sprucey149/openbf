@@ -19,6 +19,9 @@ use glam::Vec3;
 const RAY_DOWN_PASSES: usize = 4;
 const RAY_DOWN_SKIP: f32 = 0.01;
 const RAY_DOWN_SEEK: f32 = 0.5;
+/// How far past the best hit a body is still read (m), for the rounding between
+/// a box in world space, its mesh's own boxes and a hit in the body's space.
+const BOX_MARGIN: f32 = 0.01;
 
 /// Is `p` inside any of `cutters`? A point is inside one iff EVERY plane
 /// evaluates strictly < 0 (analysis/re-terrain-heights.md: the PS2 height query
@@ -84,7 +87,18 @@ impl CollisionWorld {
             if !body.layers.contains(Layers::SOLDIER) {
                 return;
             }
-            if !body.aabb.hits_ray(origin, Vec3::NEG_Y, max_len) {
+            // Only a hit nearer than the best can replace it, so look no
+            // farther, less a margin: a hit a rounding nearer than the best
+            // can lie in a box that rounds to just past it (BF2 Tatooine 3's
+            // hub 54, one bit of a floor).
+            let limit = best.map_or(max_len, |b| (b.0 + BOX_MARGIN).min(max_len));
+            let a = &body.aabb;
+            if origin.x < a.min.x
+                || origin.x > a.max.x
+                || origin.z < a.min.z
+                || origin.z > a.max.z
+                || !a.hits_ray(origin, Vec3::NEG_Y, limit)
+            {
                 return;
             }
             let d = body.to_local.transform_vector3(Vec3::NEG_Y);
@@ -95,7 +109,7 @@ impl CollisionWorld {
             // re-kamino.md §4.3). Capped: a ray inside a wall's thickness
             // would otherwise step down it face by face.
             let mut from = 0.0f32;
-            let mut reach = max_len;
+            let mut reach = limit;
             for pass in 0..RAY_DOWN_PASSES {
                 let o = body.to_local.transform_point3(origin - Vec3::Y * from);
                 let ray = parry3d::query::Ray::new(point(o), vector(d));
@@ -203,19 +217,22 @@ impl CollisionWorld {
         seg.add(origin);
         seg.add(origin + dir * max_t);
         let mut best: Option<(f32, &Body, Vec3)> = None;
-        self.visit_xz(seg.min.x, seg.max.x, seg.min.z, seg.max.z, hulls, |body| {
+        self.visit_segment(origin, dir, max_t, hulls, |body| {
             if !body.layers.contains(layers)
                 || (body.instance.is_some() && skip.contains(&body.instance))
             {
                 return;
             }
-            if !body.aabb.overlaps(&seg) || !body.aabb.hits_ray(origin, dir, max_t) {
+            // Only a nearer hit can replace the best, so look no farther,
+            // less a margin ([`Self::ray_down_with`]).
+            let reach = best.map_or(max_t, |b| (b.0 + BOX_MARGIN).min(max_t));
+            if !body.aabb.overlaps(&seg) || !body.aabb.hits_ray(origin, dir, reach) {
                 return;
             }
             let o = body.to_local.transform_point3(origin);
             let d = body.to_local.transform_vector3(dir);
             let ray = parry3d::query::Ray::new(point(o), vector(d));
-            let Some(hit) = counted_cast(body, &ray, max_t, origin) else {
+            let Some(hit) = counted_cast(body, &ray, reach, origin) else {
                 return;
             };
             if best.is_none_or(|(t, _, _)| hit.time_of_impact < t) {
@@ -237,6 +254,43 @@ impl CollisionWorld {
 }
 
 impl CollisionWorld {
+    /// Whether [`Self::ray_past`] would hit anything: the same bodies and the
+    /// same casts, but the first hit ends it. A line of sight has no use for
+    /// which body is nearest, and a blocked one is the common case.
+    pub fn ray_blocked(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_t: f32,
+        layers: Layers,
+        hulls: HullFilter,
+        skip: [Option<u32>; 2],
+    ) -> bool {
+        if max_t <= 0.0 {
+            return false;
+        }
+        super::cost::query();
+        let mut seg = Aabb::empty();
+        seg.add(origin);
+        seg.add(origin + dir * max_t);
+        let mut blocked = false;
+        self.visit_segment(origin, dir, max_t, hulls, |body| {
+            if blocked
+                || !body.layers.contains(layers)
+                || (body.instance.is_some() && skip.contains(&body.instance))
+                || !body.aabb.overlaps(&seg)
+                || !body.aabb.hits_ray(origin, dir, max_t)
+            {
+                return;
+            }
+            let o = body.to_local.transform_point3(origin);
+            let d = body.to_local.transform_vector3(dir);
+            let ray = parry3d::query::Ray::new(point(o), vector(d));
+            blocked = counted_cast(body, &ray, max_t, origin).is_some();
+        });
+        blocked
+    }
+
     /// PROVISIONAL (ours; the chase camera, `game::camera_collide`): how far
     /// a ball of `radius` moves from `origin` along `dir` (UNIT length)
     /// before it touches a body in `layers` that `hulls` admits, within

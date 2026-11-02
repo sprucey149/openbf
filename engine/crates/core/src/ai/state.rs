@@ -1018,6 +1018,8 @@ pub struct MoverState {
     pub heading: Vec3,
     /// Card OBST: the obstacle the bot is going round ([`Round`]).
     pub round: Round,
+    /// The `Arc::JUMP` arc this bot has jumped at the start of, while it walks it.
+    pub jumped: Option<u16>,
 }
 
 /// Card OBST (`ai/avoid.rs`): the obstacle a bot is going round. The SIDE is
@@ -1109,6 +1111,9 @@ impl MoverState {
             eat(&v.to_bits().to_le_bytes());
         }
         eat(&self.give_up.to_le_bytes());
+        if let Some(arc) = self.jumped {
+            eat(&arc.to_le_bytes());
+        }
         // Tag 7: the commitment round an obstacle (card OBST).
         let r = &self.round;
         if *r != Round::default() {

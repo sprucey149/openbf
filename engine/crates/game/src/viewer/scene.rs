@@ -10,7 +10,7 @@
 use super::camera::instance_matrix;
 use super::look::{
     apply_lighting, clear_color, far_cull, far_cull_from, lod_bands, lod_mode, lowres_enabled,
-    lowres_range, speckle_enabled, speckle_frames, speckle_look, water_look,
+    lowres_range, speckle_frames, speckle_look, water_look,
 };
 use super::upload::{
     compact_submesh, upload_cpu_texture_inner, upload_cpu_texture_scrolling, upload_submeshes,
@@ -357,32 +357,20 @@ pub(super) fn draw_in(
     }
 }
 
-/// Is the specular second pass drawn? On unless `OPENBF_SPEC=0` — the A/B
-/// switch for a look check, not a fidelity choice (queue SPEC).
-fn spec_enabled() -> bool {
-    std::env::var("OPENBF_SPEC").as_deref() != Ok("0")
-}
-
-/// The disc's mirrored specular light (`render::Renderer::spec_mirror`), on
-/// unless `OPENBF_SPEC_MIRROR=0`, which takes the consistent `d = L·R`.
-/// DECIDED by the SPEC RE (PLAN Log 2026-09-24): the disc's frame mix is the
-/// default; PROVISIONAL, `[O]` (`analysis/re-specular-pass.md` §4).
-fn spec_mirror_enabled() -> bool {
-    std::env::var("OPENBF_SPEC_MIRROR").as_deref() != Ok("0")
-}
-
 /// Install `game`'s specular lookup table: `common_<game>/specular.ktx2`
 /// under the baked tree `assets_dir` (`bake specular`), level 0 only — it is
-/// a lookup, never mipmapped. No table (a tree baked before queue SPEC, or
-/// `OPENBF_SPEC=0`) leaves the pass off, which the renderer does by skipping
-/// every [`DrawLayer::Spec`] draw. A map installs its own game's
+/// a lookup, never mipmapped. No table (a tree baked before queue SPEC) leaves
+/// the pass off, which the renderer does by skipping every [`DrawLayer::Spec`]
+/// draw. The disc's mirrored light is the default (`render::Renderer::spec_mirror`;
+/// DECIDED by the SPEC RE, PLAN Log 2026-09-24; PROVISIONAL, `[O]`,
+/// `analysis/re-specular-pass.md` §4). A map installs its own game's
 /// ([`upload_scene`]); the gallery's unit sheet, which has no map, the side's.
 pub fn install_spec_table(r: &mut Renderer, assets_dir: &Path, game: &str) -> Result<()> {
-    r.spec_mirror = spec_mirror_enabled();
+    r.spec_mirror = true;
     let path = assets_dir
         .join(format!("common_{game}"))
         .join("specular.ktx2");
-    let table = match Some(path).filter(|p| spec_enabled() && pak::is_file(p)) {
+    let table = match Some(path).filter(|p| pak::is_file(p)) {
         Some(p) => Some(crate::assets::load_ktx2(&pak::read(&p)?)?),
         None => None,
     };
@@ -392,11 +380,11 @@ pub fn install_spec_table(r: &mut Renderer, assets_dir: &Path, game: &str) -> Re
 
 /// Install BF2's terrain light texture, `common_bf2/com_sfx_omniproj.ktx2`
 /// (`bake omniproj`, card FXBL), level 0 only. BF1 (whose terrain draws no
-/// light, `analysis/re-bolt.md` §5.1), a tree baked before FXBL, or
-/// `OPENBF_TERRAIN_LIGHTS=0` installs none, and no light pass is drawn.
+/// light, `analysis/re-bolt.md` §5.1) or a tree baked before FXBL installs
+/// none, and no light pass is drawn.
 pub fn install_omniproj(r: &mut Renderer, assets_dir: &Path, game: &str) -> Result<()> {
     let path = assets_dir.join("common_bf2").join("com_sfx_omniproj.ktx2");
-    let on = game == "bf2" && std::env::var("OPENBF_TERRAIN_LIGHTS").as_deref() != Ok("0");
+    let on = game == "bf2";
     let tex = match Some(path).filter(|p| on && pak::is_file(p)) {
         Some(p) => Some(crate::assets::load_ktx2(&pak::read(&p)?)?),
         None => None,
@@ -440,8 +428,7 @@ struct BoundTexture {
 ///
 /// PROVISIONAL AND OURS as a list. The census
 /// (`engine/artifacts/briefs/untextured_list.csv`, read off the raw disc
-/// bytes) found exactly three names across all 32 maps, accounting for 8
-/// draws: `yav_prop_ivy` (6 draws, both YAV1s), `Cor1_bldg_flowers` (1, BF2
+/// bytes) found three names across 32 maps, accounting for 8 draws: `yav_prop_ivy` (6 draws, both YAV1s), `Cor1_bldg_flowers` (1, BF2
 /// COR1) and `noIcon` (1, the `geo_sky_explosions` sky shell). What the PS2
 /// actually put on screen for a dangling material is UNTRACED, so the draw is
 /// skipped rather than painted an invented colour.
@@ -450,7 +437,25 @@ struct BoundTexture {
 /// classic-plus question, not a fidelity one, and is not this list's job.
 ///
 /// Lowercase; matched case-insensitively, like [`get_texture`]'s own lookup.
-const DANGLING_ON_DISC: &[&str] = &["yav_prop_ivy", "cor1_bldg_flowers", "noicon"];
+///
+/// `tat_propcz1_parts_head` (1 draw, BF2 TAT3's droid parts), found after that
+/// census, is on no PS2, Xbox or PC copy either, and the model's other sheets do
+/// not hold its layout.
+const DANGLING_ON_DISC: &[&str] = &[
+    "yav_prop_ivy",
+    "cor1_bldg_flowers",
+    "noicon",
+    "tat_propcz1_parts_head",
+];
+
+/// The full-size texture a missing `_lowrez` names, for a far model that asks
+/// for a reduced copy no disc holds: `com_item_healthrecharge_lowrez` (a draw per
+/// station on 12 BF1 maps; BF2's copy of the same model, UV for UV, names the
+/// full sheet) and `hoth_hangar_platform_lowrez` (1 draw on either Hoth). The
+/// lookup is by name only, so this adds no sheet: `None` for any other name.
+fn lowrez_source(name: &str) -> Option<&str> {
+    name.strip_suffix("_lowrez")
+}
 
 /// Why a draw resolved no texture — which decides whether it is drawn.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -756,14 +761,11 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         // WATR cell side is read off the mesh's first lattice quad (the bake
         // emits the lattice cells before any `CPAT` patch). A frame the bake
         // did not ship drops the whole layer — 0 on the shipped maps.
-        let look_s = match speckle_enabled() {
-            true => mesh
-                .indices
-                .get(..6)
-                .and_then(|q| crate::water_anim::lattice_cells(&mesh.positions, q))
-                .and_then(|l| speckle_look(&scene.manifest.source_game, info, l.cell)),
-            false => None,
-        };
+        let look_s = mesh
+            .indices
+            .get(..6)
+            .and_then(|q| crate::water_anim::lattice_cells(&mesh.positions, q))
+            .and_then(|l| speckle_look(&scene.manifest.source_game, info, l.cell));
         let mut frames = Vec::new();
         if let Some(sp) = &look_s {
             for n in &sp.frames {
@@ -1621,7 +1623,11 @@ fn get_material_texture(
     if let Some(&h) = cache.get(&key) {
         return Ok(Some(h));
     }
-    let Some(t) = scene.textures.get(name) else {
+    let Some(t) = scene
+        .textures
+        .get(name)
+        .or_else(|| scene.textures.get(lowrez_source(name)?))
+    else {
         return Ok(None);
     };
     if test_dropped_texture(name) {

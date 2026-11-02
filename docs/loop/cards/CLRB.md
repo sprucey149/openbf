@@ -32,18 +32,6 @@ where the PS2 shows dark pixels. KASF (`analysis/re-fog.md` §9, [O]) proved it 
   call sites; BF2's `FUN_00581830` does the same (`re-sky-pass.md` §5.2: the far target clears to black). The fog colour's
   only readers are fog passes (re-fog §9.2).
 
-## Acceptance
-- The port's clear follows the PS2 (black), or a recorded decision says otherwise, with the pairs viewed.
-- The KAS2 goldens and the PXC pairs (`bf1_kas2` `cp0_cp2_beachhead_*`, `cp5_cp10_dock_one_*`, `cp4_cp11_dock_two_*`)
-  lose the red band.
-- Every other golden that moves is declared and viewed. The clear shows wherever nothing is drawn, so expect the maps
-  with uncovered pixels: the dome census's KAS1/KAS2/UTA1 below-horizon gaps, and any map whose world ends before the
-  dome's lowest ring.
-- Check `FOG_DENSITY_SCALE`'s doc: it argues the clear must equal the fog colour so full fog meets the horizon without a
-  seam. On the PS2, full fog meets its black far target, so a fogged map may show a seam where the port's world ends
-  (terrain at the 2000 m far plane). View those pairs against PCSX2 (e.g. BF1 HOT1, TAT1, BF2 HOT1) and update the doc.
-- `declares:` is the builder's to fill after the first goldens run.
-
 ## Notes
 - The band's full PS2 content is dark (black far target) plus, on KAS1/KAS2, the sky shells drawn MIRRORED below the
   horizon (card REFL, value 4). CLRB alone turns red into black, much closer to the PS2's (10,20,11); REFL fills it in.

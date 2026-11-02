@@ -329,13 +329,15 @@ impl Default for MultiLine {
 
 impl MultiLine {
     /// A message arrives, already wrapped into `lines`: with no free line it
-    /// is dropped whole; else as many of its lines as are free are queued in
-    /// the current colour.
+    /// is dropped whole; else all its lines are queued in the current colour.
+    /// `[ours]` The PS2 queues only as many lines as are free
+    /// (`re-event-messages.md` section 2), which cuts a message off mid-sentence
+    /// ("Ben Pulastra killed"); here the rest wait their turn for a line.
     pub fn add(&mut self, lines: Vec<String>) {
-        let free = self
-            .num_lines
-            .saturating_sub(self.pending.len() + self.shown.len());
-        for l in lines.into_iter().take(free) {
+        if self.pending.len() + self.shown.len() >= self.num_lines {
+            return;
+        }
+        for l in lines {
             self.pending.push_back((l, self.color));
         }
     }

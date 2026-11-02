@@ -90,7 +90,8 @@ def geometry_gate(left, right):
     table could carry those, so they do not fail a map, but such a map does not yet match.
     """
     a, b = left["geometry"], right["geometry"]
-    collision = [version_geometry.indexed_rows(g["collision"], "collision") for g in (a, b)]
+    collision = version_geometry.pair_collision_indexes(
+        *(version_geometry.indexed_rows(g["collision"], "collision") for g in (a, b)))[:2]
     terrain = [version_geometry.indexed_rows(g["terrain"], "terrain") for g in (a, b)]
     routes = [version_geometry.indexed_rows(g.get("routes", []), "routes") for g in (a, b)]
     different = collections.Counter(k[0] for k in collision[0].keys() & collision[1].keys()
@@ -150,7 +151,7 @@ def generate(paths, heights=(), shapes=(), terrain=()):
         comparison = version_census.compare(sources[left], sources[right])
         comparisons[pair] = comparison
         summary = {key: value for key, value in comparison.items() if not isinstance(value, dict)}
-        for category in ("entities", "properties", "missions", "mission_values", "mission_static_values", "content"):
+        for category in ("entities", "properties", "missions", "mission_values", "mission_static_values", "content", "skies"):
             if category in comparison:
                 summary[category] = stats(comparison[category])
         summary["entity_kinds"] = comparison.get("entity_kinds", {})
@@ -169,19 +170,75 @@ def generate(paths, heights=(), shapes=(), terrain=()):
             summary["geometry_gate"] = geometry_gate(sources[left], sources[right])
         summaries[pair] = summary
     scripts = ("version_census.py", "version_geometry.py", "gen_missions.py", "extract_lua.py", "version_report.py",
-               "version_heights.py", "version_collision.py", "version_terrain_play.py")
+               "version_heights.py", "version_collision.py", "version_terrain_play.py", "version_sky.py")
     return {"schema": 2,
             "tool_sha256": {name: digest(Path(__file__).with_name(name).read_bytes()) for name in scripts},
             "sources": receipts, "comparisons": summaries,
+            "sky_ranges": sky_ranges(sources),
             "height_samples": height_rows(json.loads(p.read_text()) for p in heights),
-            "collision_shapes": {p.stem: json.loads(p.read_text()) for p in shapes},
-            "terrain_play": {doc["game"]: doc["terrains"] for doc in (json.loads(p.read_text()) for p in terrain)},
+            "collision_shapes": {p.stem: compact_shapes(json.loads(p.read_text())) for p in shapes},
+            "terrain_play": {doc.get("comparison", doc["game"]): doc["terrains"] for doc in (json.loads(p.read_text()) for p in terrain)},
             "largest_numeric_differences": {game: numeric_groups(comparisons, game) for game in ("bf1", "bf2")}}
+
+
+
+def compact_shapes(doc):
+    """Detailed re-pair identities stay local; the receipt needs their count."""
+    return {key: value for key, value in doc.items() if key != "renamed_nodes"} | {
+        "renamed_nodes_count": len(doc.get("renamed_nodes", []))}
+
+
+def sky_ranges(sources):
+    """Pool the directly measured numeric ranges without duplicate mode layers."""
+    result = {}
+    for game in ("bf1", "bf2"):
+        pool, maps = [], {}
+        for platform in ("ps2", "xbox", "pc"):
+            for row in sources.get(f"{game}_{platform}", {}).get("skies", []):
+                if row["file"] == "spa/spa_sky.lvl":
+                    continue  # shared planet domes carry no playable-map ranges
+                values = {"sky_info": {k: v for k, v in row["sky_info"].items()
+                                       if k in ("fog_color", "fog_range", "near_scene_range", "far_scene_range")},
+                          "low_res_terrain": row["low_res_terrain"]}
+                if values not in pool:
+                    pool.append(values)
+                maps.setdefault(row["file"], {})[platform] = pool.index(values)
+        result[game] = {"pool": pool, "maps": [{"file": file, "sources": indexes}
+                                                for file, indexes in sorted(maps.items())]}
+    return result
+
+
+def sky_table(m):
+    def number(value):
+        return ",".join(f"{v:g}" for v in value) if isinstance(value, list) else f"{value:g}"
+
+    def cell(row):
+        info, low = row["sky_info"], row["low_res_terrain"]
+        out = [f"{label} {number(info[key])}" for key, label in (("near_scene_range", "N"), ("far_scene_range", "F"),
+                ("fog_range", "fog"), ("fog_color", "RGB")) if key in info]
+        out += [f"low {number(low.get('fog_near', 0))}..{number(low.get('fog_far', 0))}"] if low else []
+        return "; ".join(out) or "absent"
+
+    rows = ["| Game, map LVL | PS2 authored values | Xbox | PC |", "|---|---|---|---|"]
+    for game, group in sorted(m["sky_ranges"].items()):
+        for row in group["maps"]:
+            file, indexes = row["file"], row["sources"]
+            cells = []
+            for platform in ("ps2", "xbox", "pc"):
+                if platform not in indexes:
+                    cells.append("absent")
+                elif platform != "ps2" and indexes[platform] == indexes.get("ps2"):
+                    cells.append("identical to PS2")
+                else:
+                    cells.append(cell(group["pool"][indexes[platform]]))
+            rows.append(f"| {game.upper()} `{file}` | " + " | ".join(cells) + " |")
+    return rows
 
 
 # ---- the tables analysis/version-diff.md quotes; the doc's blocks are generated so they cannot drift ----
 
-PAIRS = ("bf1_ps2_vs_bf1_xbox", "bf2_ps2_vs_bf2_xbox", "bf2_ps2_vs_bf2_pc", "bf2_xbox_vs_bf2_pc")
+PAIRS = tuple(f"{game}_{left}_vs_{game}_{right}" for game in ("bf1", "bf2")
+              for left, right in (("ps2", "xbox"), ("ps2", "pc"), ("xbox", "pc")))
 PROPERTY_NAMES = ("MaxDistance", "LockOnRange", "OmniRadius", "DamageStartPercent", "RoundsPerClip", "NumParticles",
                   "MaxHealth", "Velocity", "Damage")
 
@@ -193,12 +250,11 @@ def ratio(row):
 def corpus_table(m):
     rows = ["| Corpus | UCFB LVLs | Class records | Mission records | Collision meshes | Skeletal clips | Candidate clip names |",
             "|---|---:|---:|---:|---:|---:|---:|"]
-    for key in ("bf1_ps2", "bf1_xbox", "bf2_ps2", "bf2_xbox", "bf2_pc"):
+    for key in ("bf1_ps2", "bf1_xbox", "bf1_pc", "bf2_ps2", "bf2_xbox", "bf2_pc"):
         s = m["sources"][key]
         errors = sum(e.get("error") == "not_ucfb" for e in s["errors"])
         rows.append(f"| {key.replace('_', ' ').upper()} | {s['lvl_files'] - errors} | {s['entities']} | {s['missions']} | "
                     f"{s['geometry']['collision']} | {s['geometry']['animations']} | {s['animation_names_resolved']} |")
-    rows.append("| BF1 PC | NM | NM | NM | NM | NM | NM |")
     return rows
 
 
@@ -236,6 +292,7 @@ def counts_table(m, game):
         ("Ordered property occurrence values", lambda p: ratio(comparisons[p]["properties"])),
         ("Direct mission declaration values", lambda p: ratio(comparisons[p]["mission_values"])),
         ("Effective mission execution", lambda p: "NM"),
+        ("Authored fog and sky ranges", lambda p: ratio(comparisons[p]["skies"])),
         ("Collision mesh records", lambda p: geom(p, "collision")),
         ("Collision meshes, same polygons in another order", lambda p: surfaces(p, "order_only")),
         ("Collision meshes, same vertices, other polygons", lambda p: surfaces(p, "same_vertices_other_polygons")),
@@ -274,7 +331,8 @@ def unmatched_table(m):
         ("Scoped content occurrences L/R", lambda v: f"{v['content']['left_only_count']}/{v['content']['right_only_count']}"),
         ("Unique content names L/R", lambda v: f"{v['content_name_sets']['left_only_count']}/{v['content_name_sets']['right_only_count']}"),
     ]
-    rows = ["| Population | BF1 PS2–Xbox | BF2 PS2–Xbox | BF2 PS2–PC | BF2 Xbox–PC |", "|---|---:|---:|---:|---:|"]
+    rows = ["| Population | BF1 PS2–Xbox | BF1 PS2–PC | BF1 Xbox–PC | BF2 PS2–Xbox | BF2 PS2–PC | BF2 Xbox–PC |",
+            "|---|---:|---:|---:|---:|---:|---:|"]
     for title, cell in table:
         rows.append(f"| {title} | " + " | ".join(cell(m["comparisons"][p]) for p in PAIRS) + " |")
     return rows
@@ -298,7 +356,7 @@ def gate_table(m):
     rows = ["| Pair | Maps | Same ground and collision surfaces, nothing missing | Of those, with other paths or planning | "
             "Side LVL meshes: other surfaces, missing | Other shared LVL meshes: other surfaces, missing |",
             "|---|---:|---|---|---:|---:|"]
-    for pair in ("bf1_ps2_vs_bf1_xbox", "bf2_ps2_vs_bf2_xbox", "bf2_ps2_vs_bf2_pc"):
+    for pair in (p for p in PAIRS if "_ps2_vs_" in p):
         gate = m["comparisons"][pair]["geometry_gate"]
         names = ", ".join(f"`{Path(n).stem}`" for n in gate["same_shapes"])
         routes = ", ".join(f"`{Path(n).stem}`" for n in gate["same_shapes_other_routes"]) or "none"
@@ -349,7 +407,8 @@ def collision_table(m):
 def doc_blocks(m):
     return {"corpus": corpus_table(m), "bf1": counts_table(m, "bf1"), "bf2": counts_table(m, "bf2"),
             "unmatched": unmatched_table(m), "largest-bf1": largest_table(m, "bf1"), "largest-bf2": largest_table(m, "bf2"),
-            "terrain": terrain_table(m), "collision": collision_table(m), "gate": gate_table(m)}
+            "terrain": terrain_table(m), "collision": collision_table(m), "gate": gate_table(m),
+            "sky": sky_table(m)}
 
 
 def render_doc(text, m):

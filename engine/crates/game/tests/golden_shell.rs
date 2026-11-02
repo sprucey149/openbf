@@ -301,3 +301,47 @@ fn ia_screens_match_golden() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// The DLC row makes the Hero page six rows, one more than fit: the page says so
+/// with the scroll arrow the lists use, and a five-row page draws none. `IA_OUT=<dir>`:
+/// also the frames.
+#[test]
+#[ignore = "requires a GPU adapter + the BF2 common bake with the IA sheets"]
+fn the_hero_page_with_the_dlc_row_shows_it_scrolls() {
+    common::force_ps2_tier();
+    let assets = game::assets::baked_root();
+    let missions = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"));
+    let base = game::shell_ia::instant_action(&assets, &missions, core::skill::Difficulty::Normal);
+    let page = |installed: bool, cursor: usize| {
+        let mut ia = base.clone();
+        ia.options.dlc_heroes_installed = installed;
+        ia.page = ui::shell::Page::Group(
+            ui::shell::Group::Hero,
+            ui::shell::ListCursor { at: 0, top: cursor },
+        );
+        let (rgba, w, h) = ia_screen(&ia, [1280, 720]);
+        if let Some(dir) = std::env::var_os("IA_OUT").map(std::path::PathBuf::from) {
+            image::RgbaImage::from_raw(w, h, rgba.clone())
+                .expect("frame")
+                .save(dir.join(format!("hero_{installed}_{cursor}.png")))
+                .expect("write");
+        }
+        rgba
+    };
+    // The same five rows are shown either way but for the row the DLC adds, so
+    // compare a page with itself scrolled: the arrow moves from below to above.
+    let (five, six, six_scrolled) = (page(false, 0), page(true, 0), page(true, 1));
+    let bottom_edge = |rgba: &[u8]| -> Vec<u8> {
+        // Across the middle of the window's bottom border, where the arrow's ink falls.
+        (440..840)
+            .flat_map(|x| (440..462).map(move |y| (x, y)))
+            .flat_map(|(x, y): (usize, usize)| rgba[(y * 1280 + x) * 4..][..3].to_vec())
+            .collect()
+    };
+    assert_eq!(
+        bottom_edge(&five),
+        bottom_edge(&six_scrolled),
+        "no arrow on five rows, nor at the end of six"
+    );
+    assert_ne!(bottom_edge(&five), bottom_edge(&six), "the arrow below");
+}

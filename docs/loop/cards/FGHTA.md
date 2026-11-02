@@ -53,31 +53,6 @@ fighters stand" was never set beside the port's:
   no chance pause 29.1 / 45.1 %, 13.12 % (255 of 256 rounds); every bot circles 34.5 / 35.2 %, 12.16 %; every bot
   stands 51.8 / 69.3 %, 9.55 % (the contact gain of card FGHT is the circlers' alone).
 
-## What to do
-1. A scoped weapon stands whenever its target is between MinRange and MaxRange (the PS2's scout rule by the port's
-   own predicate, `ai_distance_table()`; out of range it circles as today - a named deviation from "does not attack").
-2. `CIRCLE_STOP` as a RATE: the PS2's 1 in 12 per 0.4 s think = 0.21 a second for a bot near the player, drawn on the
-   port's think (about 1 in 14); the comment gives the PS2's number, the think rates and the conversion. One line in
-   `FEEL_NOTES.md`.
-3. Tests that each fail under its mutation: the band rule (a stander at 10 m and at 60 m of a [0, 24, 64] weapon
-   circles, at 30 m stands - with the draw, not the seam: let the seam force the STYLE only, not `anywhere`), the
-   stander share per difficulty over 200 unit indices (inside 0.5 +- 0.1, Easy 0.75 +- 0.1), the crouch third, a
-   pause of 57 ticks after an arrival, `FIGHT_BEYOND` (a target at MaxRange + 5 is fought, at + 15 is not), and a
-   circler on the `l_sim` graph whose ring point lies in a hub (`RING_SNAP`, `RING_BACK`).
-4. Not here: zig-zag and flank (card TCMP's evasive step; see its note), the PS2's attack modes against a walker,
-   hover or armed building (the port takes no fight position against any mounted enemy - `e.mount.is_none()`,
-   `behave.rs:485`; the PS2 does: mode 6 / 5 / 2, `FUN_002abee0` B2:231327-231404).
-
-## Acceptance
-- `python3 engine/artifacts/lead_tmp/audit-fght/tools/mutate.py <worktree>` (its strings brought up to date) prints
-  FAILED under every one of M1-M10 and under `RING_SNAP` 10 -> 0 (today 3 of 11), pasted into the report.
-- A unit test: a scoped rifle [8, 64, 128] with a target at 12, 20, 30 and 45 m is in `FightState::STAND` on 590+ of
-  600 ticks (today 0 at 12-30 m).
-- The maintainer's scene, `tools/scene.sh <binary> <out> bf2_kam1 -4.0,60.3,108.6` + `scene_space.py`, row `engage`: a teammate
-  within 3 m <= 33.5 % and still <= 51.4 % (main 6f6160b; re-take main's row first).
-- 8 seeds x 32 maps: 256 of 256 rounds finish; contact20 not under main's (10.65 % at 6f6160b), by `tools/c20.py`'s
-  per-seed paired t (a fall with t under -2 fails).
-
 ## Notes
 - The switch build needs no knob for item 2: `AUDIT_FGHT=16` is 1/12 a think in `observer_main_6f6160b.patch`.
 - The scenes' human is pushed by the bots (Polis Massa 8 m, Death Star 12 m; one Death Star round he falls and

@@ -43,11 +43,6 @@ SUND. [TODO — ADDED 2026-09-25 (lane 1) by WCOL's [RE] half (a side finding); 
 ## Notes
 - 2026-09-25 (LITE RE, `analysis/re-model-lighting.md` §6/§8): F15 is this card's case, measured. BF1 NAB2 Rotunda rendered with the PS2's own sun vector (RAM 0x69c590 = (-0.4967, -0.8192, 0.2868), light travel) puts the columns at 66/36/59 against the PS2's 59/43/57 (port today 104/83/97), `lead_tmp/re/lite/sheets/lite_bf1_nab2_v4_up_sund.png`. BF1's light SCALE already matches, so only the direction is wrong. LITEB also relights every map: land the two one after the other, not together.
 
-## Planner note (2026-09-26)
-Value 4 → 5: WCOLB, LITEB and TERL have landed, so SUND is eligible and is now the largest lighting error left on
-static models (BF1 NAB2 columns 104 vs the PS2's 59). Still lands ALONE (it relights every map); `look::ps2_light_vector`
-(WCOLB) becomes the identity after it.
-
 ## Audit note (2026-09-26, lane 2, `reports/20260926_1300_audit_SUND.md`)
 AUDIT OK: every load-bearing claim of `analysis/re-sun-direction.md` was re-derived (see the doc's banner).
 - An independent census (the audit's own knobs, block metric and mask) gives for this card's exact change:

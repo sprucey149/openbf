@@ -56,29 +56,6 @@ query radius (re-ai-difficulty 3): not built.
    is still defended). The PS2's draw has no such test, and its barred bots would stand on the post for nothing.
    In conquest only BF2 Naboo's locals are barred, and the port fields no locals: no change today.
 
-## Acceptance
-Tests (each mutation-checked: the rule broken, the test fails, the file restored):
-`perception::tests::the_missions_view_multiplier_shortens_every_bots_sight` (an enemy at 30 m seen, unseen at 0.35;
-at 20 m seen at Hard x 0.35, not at Normal; mutant: the think's tier without the multiplier),
-`commander::tests::a_less_aggressive_team_keeps_more_defenders` (mutants: `defend_share` ignoring the value; the
-plan not reading it), `commander::tests::a_post_barred_to_the_teams_bots_is_not_drawn_to_take`,
-`sim::round::tests::a_post_barred_to_a_teams_bots_does_not_count_them`,
-`ai::snipe::tests::the_snipe_suitability_distance_bounds_the_lane`,
-`mission::tests::the_missions_ai_settings_reach_the_sim` (mutant: Lua team = port team), and
-`mission::tests::shipped_missions_carry_their_ai_settings` (skips without missions).
-
-Sweep `round_to_outcome -- 60000 42`, `STUCK_CENSUS=200` (before = BSTK; `lead_tmp/botre/runs/MAIS/`): 34/34 finish
-both, stuck_max median 180 -> 180, sum 5640 -> 5640. Three maps moved (the sweep plays each map's `_con.ron`):
-
-| map | before | after |
-|---|---|---|
-| bf2_dag1 (view 0.35) | t0 wins 345 s, fight 46 % of foot-s, overwatch 179 s, contact within 20 m 11.7 % | t0 wins 480 s, fight 23 %, overwatch 0, contact20 25.1 % |
-| bf2_fel1 (view 0.65) | t1 wins 408 s, fight 39 %, overwatch 133 s, contact20 10.6 % | t0 wins 316 s, fight 38 %, overwatch 40 s, contact20 17.9 % |
-| bf2_end1 (Imperials 0.7) | t1 wins 525 s, guard 86 s | t1 wins 582 s, guard 348 s |
-
-On Dagobah a Normal bot's sight (17 m) is barely over a lane's nearest point (15 m), so snipers find no spot: the fog
-ends overwatch there.
-
 ## Regeneration
 The RON files are game data (gitignored; tracked on the local assets branch only). After this commit:
 `python3 scripts/gen_missions.py` (with `extracted/` and `community_mods/` present; `scripts/pack.py` runs it with

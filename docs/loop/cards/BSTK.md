@@ -52,11 +52,5 @@ Other deliberate holds, checked in the code (none needed a change):
 counted on the last resort's watch. The census line names the record setter's state (`foot` / `seated` /
 `droid`).
 
-## Acceptance
-`ai::mover::tests::a_bot_flying_its_droid_is_not_stuck`: on the L graph the bot on foot walks over 5 m in 8 s;
-with a controlled droid its body stands, its route's stuck run, `nav_stats.stuck_max` and its watch's ticks and
-fails all stay 0. Mutations: without the window's droid arm the test fails (stuck run > 0); without the watch's
-exemption it fails with watch ticks 240.
-
 ## Open
 Public #58 (bots stay in droids too long) is not touched here.

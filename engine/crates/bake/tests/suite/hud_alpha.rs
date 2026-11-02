@@ -62,3 +62,32 @@ fn squad_cmd_highlight_keeps_its_disc_alpha_through_the_common_bake() {
     );
     let _ = std::fs::remove_dir_all(&out);
 }
+
+/// BF2's ELF rule draws `hud_lightsaber`'s 0x10001 word OPAQUE, but the HUD
+/// composites its own art by the sheet's alpha: bake that alpha away and the
+/// hero's saber icon is a solid rectangle.
+#[test]
+fn hud_mesh_sheet_keeps_its_disc_alpha_when_its_word_draws_opaque() {
+    let lvl = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../extracted/bf2/lvl/DATA/_LVL_PS2/INGAME.LVL"
+    );
+    if !std::path::Path::new(lvl).exists() {
+        eprintln!("SKIP: extracted BF2 INGAME.LVL not present");
+        return;
+    }
+    let out = std::env::temp_dir().join(format!(
+        "openbf-bake-test-hud-mesh-alpha-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&out);
+    bake::map::bake_common(lvl, out.to_str().unwrap(), None).expect("bake ok");
+    let bytes = std::fs::read(out.join("textures/hud_herobar_saberhilt.ktx2")).unwrap();
+    let reader = ktx2::Reader::new(&bytes).expect("ktx2");
+    let level0 = reader.levels().next().expect("a level 0").data;
+    assert!(
+        alpha_zero(level0) > 0,
+        "the saber icon's transparent texels survive the bake"
+    );
+    let _ = std::fs::remove_dir_all(&out);
+}

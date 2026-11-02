@@ -22,11 +22,6 @@ first: 10
 ## Evidence
 `analysis/re-powerups.md` 7.3: the station uses the same give functions as a pickup (callers in `lead_tmp/pwup/check_absent.txt`); 5.3 / 5.4 hold the health and ammo give rules; the station's own reach, rate, team rule and cool-down are NOT read yet.
 
-## Acceptance
-1. RE (`analysis/re-powerups.md` new section or `re-powerup-station.md`, [O] with the verifier): the station's reach, what it gives per second (health, ammo, BF2 energy), which team it serves (its post's owner?), whether bots use it, its sound / effect; every number with a `re_check word` receipt or a PCSX2 RAM measurement (heal rate of a hurt player standing by one, BF1 and BF2).
-2. Census: the station instances on the six showcase maps (count per map, from the baked manifest).
-3. Build (own commit): a hurt soldier by a station heals at the PS2's measured rate within 10 %; a test pins reach and team; sweep / fidelity declared.
-
 ## Notes
 Take mechanisms and layouts from any outside material, never constants: every number comes from the PS2 corpus or a PCSX2 measurement.
 - 2026-10-20 (the maintainer): he plays with invincibility and infinite ammo, so he cannot tell whether the droids work: today they do NOT (drawn only). The PS2 droids also animate - they rotate round - and make noises / movements while healing and giving ammo; he wants all of it. Scope: the station's give (health, ammo, BF2 energy; reach, rate, team rule), its idle and active animation, its sounds and effects, the HUD feedback (the BF2 HUD's own); RE first (powerupstation FUN_002aa5d8 B1, FUN_00368898 B2).

@@ -29,25 +29,5 @@ word ("M3 or earlier"). Engine plumbing, not PS2 behaviour: write Rust directly.
 - The two `gilrs::Gilrs::new()` sites: `crates/game/src/main/windowed.rs:331` and `:790`; the pad → PadState map is
   `crates/input/src/lib.rs` (FIRE = `Button::RightTrigger2` at :44, aim `Axis::RightStickX` at :109).
 
-## Build
-1. One constructor in `input` (e.g. `input::open_gilrs()`) used by both sites: `GilrsBuilder::new().add_mappings(..)`
-   with (a) a bundled current SDL_GameControllerDB text (gilrs's own copy is the fallback; a vendored upstream copy is
-   fine — it is zlib-licensed community data, not a game asset) and (b) a small project-owned
-   `crates/input/pads.txt` for pads the DB lacks, starting with the line above. `SDL_GAMECONTROLLERCONFIG` must still
-   apply on top (check gilrs's precedence; env wins).
-2. Startup log per pad: name, GUID, mapping matched (source), and which of the port's axes/buttons resolved to a code.
-   A clear console + on-screen warning when `RightStickX/Y` or FIRE does not resolve — never a silently dead camera.
-3. Triggers: under the mapping, `RightTrigger2` is an analog axis. Make FIRE (and L2's action) work from either the
-   button or the axis with one threshold (0.5, PROVISIONAL, a FEEL_NOTES line). The PS2's L2/R2 are read as digital
-   buttons by both games — confirm with one `re_check.py` look at the pad read (pressure bytes unused) or record [H].
-4. Unit test: a fake mapping string for the G7 GUID resolves RightStickX/Y and X=307/Y=308 (gilrs's mapping parser, no
-   device needed); the existing input tests stay green.
-
-## Acceptance
-- The maintainer's pad, no env var: camera turns, face buttons match SDL's layout, R2 fires. The build session cannot hold the
-  pad: prove it with the unit test on the mapping + a startup log line from a run with no pad ("0 pads"), and write
-  the exact check for the maintainer in the report's For the maintainer (plug in, run, read the log line).
-- declares: none expected (no sim/golden change); `ci=+N`.
-
 ## Notes
 - The maintainer's workaround until this lands, from `engine/`: `SDL_GAMECONTROLLERCONFIG='<the line above>' ./target/release/game`.

@@ -21,18 +21,9 @@ water, explosions — are seen in every second of every battle. `engine/crates/g
 quads and its header says "HOLD FOR FABLE 4" (planner read line 6): that hold is stale; there is no Fable on openbf now,
 so it is the loop's own §5 RE.
 
-## Acceptance
-- RE ([O]): the `fx__` chunk format (emitters, particles, textures, blend) and which effect each weapon/ordnance/impact
-  names (ODF keys), for both games; `analysis/re-fx.md`.
-- mungefs parses it, the bake carries it, a build card draws it; muzzle/impact/explosion PCSX2 pairs viewed.
-- Remove the stale HOLD note from fx.rs's header.
-
 ## Notes
 - Created 2026-09-28 by the planner. FXC (census of the other unparsed chunks: `shdw`, `CLTH`, `bnd_`, `font`) keeps the
   rest; its `fx__` part moves here. VDTH's explosions should consume this.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — real effects are the alpha's first visible item; the 'hold for Fable' is void (no Fable on openbf). Value 4 → 5. Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
 
 ## Outcome (2026-09-30, RE session, lane 2)
 RE done: `analysis/re-fx.md` ([O], commit 515b024; one Opus verifier 34 SUPPORTED / 6 PARTLY folded in / 0 NOT

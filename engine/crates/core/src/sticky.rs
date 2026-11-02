@@ -4,9 +4,9 @@
 //! class's `Stick*` mask names, bounces off the rest with the code's own
 //! constants, comes to rest, and only THEN counts its `LifeSpan` down to its
 //! `ExplosionExpire` class. This file is the class and one instance's rules;
-//! the world sweep and the blast are `Sim`'s (`sim/ordnance.rs`). A BF1 map's
-//! grenade is thrown by BF2's rules (card GRNP,
-//! [`crate::weapon::Thrown::BF1_THROWS_AS_BF2`]): its class has `bf2` set.
+//! the world sweep and the blast are `Sim`'s (`sim/ordnance.rs`). A class's
+//! `bf2` follows its disc; a BF1 class fielded on a BF2 map is set to it by
+//! [`crate::weapon::Thrown::throw_as_bf2`].
 
 use crate::unit::UnitHandle;
 use crate::vehicle::VehicleHandle;

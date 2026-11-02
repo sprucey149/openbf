@@ -19,6 +19,3 @@ Found by card CPHOL (2026-10-13): the hologram now stands over nothing in the po
 
 ## Evidence
 - `engine/artifacts/lead_tmp/cphol/pair_bf1_end1_cp1.png` (PS2 left: the post under the green column; port right: the column alone), `w_b1kas.png`, `dea_cp3_pair1.png`, `kam_capture_sheet.png`.
-
-## Acceptance (run and paste)
-- The count of post instances with a drawn model per map, before and after (a census over the 32 maps' still scenes); `scripts/parity.py` per-map table (expected: down on the posts' frames, no map up by more than 0.5); the goldens that move declared from the branch gates.

@@ -434,3 +434,27 @@ fn legacy_viewpoint_migration_keeps_a_remap_onto_v_when_loading_a_profile() {
     input.press(*view_key, true);
     assert!(input.pad(PadState::default()).pressed(buttons::VIEW_TOGGLE));
 }
+
+/// A and D are value steps in every screen's bits, and nothing else's edge.
+#[test]
+fn a_and_d_are_the_menu_value_steps() {
+    let bits = |code| menu_bits(menu_key(code), false);
+    assert_eq!(bits(KeyCode::KeyA), MENU_ADJUST_LEFT);
+    assert_eq!(bits(KeyCode::KeyD), MENU_ADJUST_RIGHT);
+    // The arrows stay the arms the Morse matcher reads.
+    assert_eq!(
+        bits(KeyCode::ArrowLeft) & (MENU_ADJUST_LEFT | MENU_ADJUST_RIGHT),
+        0
+    );
+}
+
+/// A held D-pad or arrow does not latch a half-tilted stick into a value step,
+/// while a stick that is already stepping keeps its latch down to the release point.
+#[test]
+fn a_held_morse_key_never_latches_the_stick() {
+    let half_left = -(input::STICK_ARM_ON + input::STICK_ARM_OFF) / 2.0;
+    let arm = |prev| input::stick_arms(half_left, 0.0, stick_latch(prev));
+    assert_eq!(arm(4), 0, "the D-pad's Left alone");
+    assert_eq!(arm(4 | MENU_ADJUST_LEFT), 4, "the stick's own Left");
+    assert_eq!(input::stick_arms(0.0, half_left, stick_latch(2)), 2);
+}

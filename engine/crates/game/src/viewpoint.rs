@@ -49,9 +49,106 @@ impl ViewToggle {
     }
 }
 
+/// The window's toggle for a run that reads its pads from a log. The window
+/// turns `VIEW_TOGGLE` into `FIRST_PERSON` before the sim sees it, so a logged
+/// tap did nothing in a replay and the soldier stayed in third person.
+///
+/// A recorded log never holds the bit, and until a log taps it the pads pass
+/// through unchanged, so a log that holds `FIRST_PERSON` itself replays as before,
+/// and a tap on such a log turns from the view it is holding. Only `--walk-replay`
+/// runs this; `--replay` and `--sim-trace` step a log's bits as they are.
+#[derive(Debug, Default)]
+pub struct ScriptedView {
+    toggle: ViewToggle,
+    view: Option<Viewpoint>,
+}
+
+impl ScriptedView {
+    /// The pad of the player a log drives, as the window would hand it to the sim.
+    pub fn apply(&mut self, pad: PadState) -> PadState {
+        if self.toggle.pressed(&pad) {
+            let held = if pad.pressed(buttons::FIRST_PERSON) {
+                Viewpoint::First
+            } else {
+                Viewpoint::Third
+            };
+            self.view = Some(self.view.unwrap_or(held).toggled());
+        }
+        self.view.map_or(pad, |view| view.stamp(pad))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_logged_tap_changes_the_view_and_an_untapped_log_passes_through() {
+        let pad = |bits| PadState {
+            buttons: bits,
+            ..PadState::default()
+        };
+        let mut untapped = ScriptedView::default();
+        for bits in [0, buttons::FIRST_PERSON, buttons::FIRE, 0] {
+            assert_eq!(untapped.apply(pad(bits)).buttons, bits);
+        }
+        let mut tapped = ScriptedView::default();
+        let seen: Vec<u32> = [
+            0,
+            buttons::VIEW_TOGGLE,
+            buttons::VIEW_TOGGLE,
+            buttons::FIRE,
+            0,
+            buttons::VIEW_TOGGLE,
+            0,
+        ]
+        .iter()
+        .map(|&bits| tapped.apply(pad(bits)).buttons)
+        .collect();
+        assert_eq!(
+            seen,
+            [
+                0,
+                buttons::FIRST_PERSON,
+                buttons::FIRST_PERSON,
+                buttons::FIRE | buttons::FIRST_PERSON,
+                buttons::FIRST_PERSON,
+                0,
+                0
+            ]
+        );
+    }
+
+    #[test]
+    fn a_tap_on_a_log_holding_first_person_turns_to_third() {
+        let pad = |bits| PadState {
+            buttons: bits,
+            ..PadState::default()
+        };
+        let mut view = ScriptedView::default();
+        let seen: Vec<u32> = [
+            buttons::FIRST_PERSON,
+            buttons::FIRST_PERSON | buttons::VIEW_TOGGLE,
+            buttons::FIRST_PERSON,
+            0,
+            buttons::VIEW_TOGGLE,
+            0,
+        ]
+        .iter()
+        .map(|&bits| view.apply(pad(bits)).buttons)
+        .collect();
+        assert_eq!(
+            seen,
+            [
+                buttons::FIRST_PERSON,
+                0,
+                0,
+                0,
+                buttons::FIRST_PERSON,
+                buttons::FIRST_PERSON
+            ]
+        );
+    }
 
     #[test]
     fn the_viewpoint_rides_the_pad() {

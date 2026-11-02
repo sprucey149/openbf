@@ -201,7 +201,7 @@ pub struct Commander {
     pub vo: Option<crate::vo::Vo>,
     /// The player's line for leaving the boundary, set for the battle.
     leaving_line: Option<String>,
-    /// The player's flown droid was outside at the last [`Commander::leaving`].
+    /// The player's flown droid or flyer was outside at the last [`Commander::leaving`].
     was_leaving: bool,
 }
 
@@ -371,10 +371,7 @@ impl Commander {
     /// excursion, to him alone (`re-boundary.md` T1, T5). Returns it when asked. Once
     /// per stepped tick (`WalkSim::step_tick`).
     pub fn leaving(&mut self, sim: &Sim, player: UnitHandle) -> Option<Line> {
-        let now = sim
-            .controlled_droid(player)
-            .is_some_and(|d| d.leaving.is_some());
-        self.leaving_now(now)
+        self.leaving_now(sim.is_leaving(player))
     }
 
     fn leaving_now(&mut self, now: bool) -> Option<Line> {

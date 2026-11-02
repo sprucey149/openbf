@@ -71,8 +71,8 @@ Run these from the repository root. Each `fn` result identifies the enclosing
 function as well as the cited expression; the summaries after each command are
 its relevant output. Raw words are little-endian executable words, not fitted
 values. Both selector instruction ranges were also read with
-`scripts/tools/eedis2.py bf1 0x2ae260 0x2ae490` and
-`scripts/tools/eedis2.py bf2 0x36f198 0x36f508`.
+`scripts/tools/eedis.py bf1 0x2ae260 0x2ae490` and
+`scripts/tools/eedis.py bf2 0x36f198 0x36f508`.
 
 ```text
 python3 scripts/re_check.py fn b1 238955 238497 238503 239099 239126 222195 221863

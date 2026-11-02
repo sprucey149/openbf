@@ -25,33 +25,6 @@ Card OFFG (2026-10-02) fixed the bridges; BF2 Kamino now runs 13.8 kills / min a
 - `commander.rs`: an attack's base is value x 1 / (1 + hops) - THREAT_W x enemies within 30 m. Kamino has 130 hubs: bases are 0.1-1.0 and one defender (0.5) takes the post off the list.
 - The PS2's own planner is not RE'd (`commander.rs` module header). BF2's `lua/mission/objectiveconquest.luac` holds the strings AddAIGoal, Conquest, AIGoals, AIGoalWeight (strings only; the call's arguments are unread - `lead_tmp/audit-annc/dis50.py` reads a function's control flow) and the ELF registers AddAIGoal / DeleteAIGoal / ClearAIGoals: a bounded RE of the Conquest goal's post picker would replace guesses.
 
-## What to do (RE done 2026-10-02: `analysis/re-conquest-goal.md`, its section 8 is the change list)
-The PS2 has no team planner. Each bot draws ONE post that is not its team's, at random by the post's authored value,
-and keeps it; nothing in the draw looks at distance, enemies or crowding. Build that in `core/src/commander.rs`:
-1. One kept target per AI unit. A unit draws when it has none (after a spawn); BF2 maps also when its target is its own
-   team's with `value_def` 0, 5 s after it (re)arrives at a target its team holds, and on no route; BF1 maps when its
-   target becomes its own team's (every unit holding it, at once), 5 s after arriving at an own post (excluding it), and
-   the retake call (a post lost to neutral takes up to five AI units of the team within 60 m).
-2. The draw: posts not friendly to the team; BF2 drops value <= 0 and posts the unit cannot route to; weight BF2
-   `CpDef::value_for`, BF1 `value_atk` for the PS2's team 1 and `value_def` for its team 2 whoever owns the post; one
-   uniform number from the per-unit hash. Nothing drawn: BF2 own posts by `value_def`, then uniform; BF1 uniform.
-3. Delete hops, THREAT_W, crowding, the cap, hysteresis, per-plan noise, DEFEND_IDLE, garrisons, defenders-per-attacker
-   and the two biases. `Hunt` stays only for the endgame (card STEND).
-4. Port `contact.py`'s and `thrash.py`'s measures into round_to_outcome's `shares` line (`contact20`, `retarget`).
-5. If contact is still short: the next RE is the fight order (type 2) — how long it holds a bot and where it resumes
-   (doc section 5, [H]); the PS2's bots spend 20-28 % of their time in it and 16-19 % standing at hint nodes.
-
-## Acceptance
-- A unit test of the draw on Polis Massa's start (candidates worth 20 : 20 : 10 : 10): 10,000 draws within 3 points of
-  33.3 / 33.3 / 16.7 / 16.7 %; no draw of an own post while another candidate exists; BF1's rule (team 1 by ATK, team 2
-  by DEF, owner ignored) on a post set with unequal values. PS2: 21 / 27 / 17 / 14 of 79.
-- BF2 KAM1, 8 seeds, round_to_outcome `shares`: nearest enemy within 20 m >= 12 % of alive unit-seconds (PS2 17.0 %
-  and 24.9 % in two runs), kills / min >= 16 (PS2 17.3), in-life target changes on foot at most one per 150
-  unit-seconds (PS2 one per 323; the port today one per 9.6).
-- BF2 POL1: nearest enemy within 20 m >= 20 % (PS2 31.9 %), in-life target changes at most one per 150 unit-seconds
-  (PS2 one per 233), kills / min not under 16.0, recycled not over 30.
-- No map's finish count drops over 8 seeds; a drop is re-run over 24 more seeds (BF2 GEO1 swings 6/8-8/8 on its own).
-
 ## The card's first plan (before the RE; kept for the record)
 1. Bounded RE first (the RE discipline, verifier included): BF2's Conquest AI goal - how a bot picks its post and when it re-picks. If it is found in a session, build that; if not, step 2 with the PS2's contact numbers as referee.
 2. Ours (PROVISIONAL): keepers first (a unit that holds a still-valid objective keeps its place under the cap before any newcomer); the kept objective judged without the threat and crowd terms; the threat term relative (value x near / (1 + w x threat)) or gone. Variants as env knobs in a scratch worktree, 8 seeds x 32 maps each, same base.

@@ -32,11 +32,12 @@ overlap, writes the float at flyer+`0x668`, and sets bit 5 at +`0x660`
 refreshed (B2:116574–116580). These are hangar/landing caps, not generic
 BF2 speed caps and not a distinction between atmospheric and space physics.
 
-**Not installed yet.** The sim implements these rules against
-`Sim::landing_regions`, but only tests fill that list: `scripts/gen_missions.py`
-does not read `AddLandingRegion`, and no mission loader sets the list. BF2's
-mission scripts do make the call. So in a real round the landing-region speed
-caps and the gun block never apply, and a BF2 flyer may land anywhere.
+**Installed for space only (2026-11-01).** The sim implements these rules against
+`Sim::landing_regions`, filled from the mission's `landing_regions`, which
+`scripts/gen_missions.py` reads from `AddLandingRegion`. Only the space scripts make
+the call: the 61 ground missions come out the same with and without the reader. So on a
+ground map the speed caps and the gun block never apply and a BF2 flyer may land anywhere,
+and on a space map a flyer lands only in a region. Headless only.
 
 ## State and speed laws
 
@@ -137,7 +138,8 @@ Neither uses the ground hover model or a soldier's pitch clamp.
 Both updates bend pitch near the Lua height band. BF2 additionally clamps
 position to [minimum-.2, maximum+.2], using player limits for a human and
 AI limits otherwise (B2:119057–119066). Setting out-of-band flags and the
-boundary death timer are separate from that clamp; see `re-boundary.md`.
+boundary death timer are separate from that clamp; see `re-boundary.md`
+(`Sim::tick_flyers` builds them for a craft with a crew).
 
 ## Input and pilot aiming
 
@@ -150,6 +152,21 @@ fields at entity +`0x2dc`..`0x2e8`. The flyer reads those stored axes
 approximately .707 each is original controller behavior. The upstream
 sensitivity/remix helper `FUN_002b4598` is not fully transcribed; using
 raw axes would not resolve that gap.
+
+**The default sticks.** Each controllable's type picks one of five default
+function tables (BF2 `FUN_002b0548` B2:234720-234755 writes the section:
+0 soldier or droideka, 1 other vehicle, 2 flyer pilot, 3 and 4 the turret seats;
+tables at ELF 0x600e40, stride 0x50, copied by B2:493336-493354). Words 16..19
+are the two sticks' functions, read back by `FUN_004333a0`: 30 31 32 33 in every
+section but the flyer's, which holds 32 33 30 31 at 0x600ee0. So a flyer pilot's
+left stick does what a soldier's right stick does (pitch and turn), and the right
+stick throttle and roll. BF1's three tables (file offset 0x3ba190, stride 0x50, its
+reader `FUN_0034a7e8`, functions 18..21) hold the same swap in the third. Static
+reading only: [H] BF1's third section is the flyer's by analogy with BF2, its
+selector not opened. `input::flyer_sticks` applies it to the controller for a pilot
+in a flyer; the keyboard and mouse keep walk keys for throttle and roll and the
+mouse for pitch and turn. The PS2's options screen can change the table. The port has
+no such option yet.
 
 Pilot aim follows the **untilted aircraft forward**, not an independently
 accumulated pitch. BF1 `FUN_001dbbd8` and BF2 `FUN_00209758` remove the

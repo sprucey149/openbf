@@ -48,6 +48,18 @@ class GeometryTests(unittest.TestCase):
         self.assertNotEqual(base, g.surface_digest([a, b, (1.0, 1.0, 0.5), d], [[0, 1, 2], [0, 2, 3]]))
         self.assertEqual(renumbered, g.surface_digest([d, c, b, a], [[1, 2, 3], [3, 0, 1]]))
 
+    def test_renamed_collision_nodes_pair_only_within_unique_mesh_scope(self):
+        key = ("a.lvl", (1,), "wall", "ps2_node", 0)
+        renamed = ("a.lvl", (1,), "wall", "pc_node", 0)
+        a, b, pairs = g.pair_collision_indexes({key: 1}, {renamed: 2})
+        self.assertEqual((a, b, pairs), ({key: 1}, {key: 2}, [(key, renamed)]))
+        wrong_scope = ("a.lvl", (2,), "wall", "pc_node", 0)
+        self.assertEqual(g.pair_collision_indexes({key: 1}, {wrong_scope: 2})[2], [])
+        ambiguous = ("a.lvl", (1,), "wall", "pc_other", 0)
+        self.assertEqual(g.pair_collision_indexes({key: 1}, {renamed: 2, ambiguous: 3})[2], [])
+        # Keep exact node matches before trying a unique remainder.
+        self.assertEqual(g.pair_collision_indexes({key: 1}, {key: 2, renamed: 3})[2], [])
+
     def test_collision_changes_split_by_what_differs(self):
         def row(name, positions, surface, vertices, bounds=(0.0, 1.0)):
             return {"name": name, "positions_sha256": positions, "topology_sha256": "t", "surface_sha256": surface,

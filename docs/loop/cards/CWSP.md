@@ -57,24 +57,6 @@ one live BF2 spawn-screen session). What the build needs:
 - The opening wave: the PS2's walker exists before the first unit spawns; `setup_conquest` places the opening wave
   before any pad has spawned (doc section 10.3) — decide the order first.
 
-## Acceptance
-1. DONE — RE (above).
-2. Build, referee FIRST (write and run before the change; paste into the report):
-   a. a unit test in `core`: the RAM test vector above gives the six world points within 0.01 m; a dead walker and an
-      enemy team's walker contribute none; a walker rebuilt by its pad contributes again (mutation-check it);
-   b. a census line in `round_to_outcome` (units spawned per post, command walkers named): BF1 HOT1 >= 9 of the
-      opening Imperials within 10 m of an AT-AT (PS2 14 of 24), BF2 HOT1 >= 4 of 16 (PS2 6), BF2 GEO1 >= 1 Republic
-      spawn at the AT-TE in the first 60 s (PS2 2 of the opening wave + respawns);
-   c. reported, not gating (card WAI2 owns the boarding rule): the sweep line `imp_walk_atat` at 30 s, 60 s and 180 s
-      on both Hoths (PS2 2/2 at every sample to 240 s) and an AT-AT's path in its first 60 s against the PS2's
-      ((229,51) -> (140,70); (206,120) -> (149,113)). If BF2's AT-AT still fails the route test, say so on WAI2.
-3. 8 seeds x 32 maps beside a null variant: no map's finish count drops; BF1 / BF2 HOT1's win split reported before
-   and after (the Imperials gain two forward spawn posts).
-
-(The card's original acceptance, 2026-10-02 05:20: "1. RE ...; 2. Build: a census line ... BF1 HOT1 >= 9 ... BF2 HOT1
->= 4 of 16; the sweep line `imp_walk_atat` 2/2 at 30 s, 60 s and 180 s on both Hoths; an AT-AT's path in its first
-60 s within 30 m of the PS2's; 3. 8 seeds x 32 maps ..." — 2's last two checks moved to 2c because they need WAI2.)
-
 ## Build result (2026-10-02, commit 69ba267 on branch cwsp; report `reports/20261002_1156_card_CWSP.md`)
 - 2a RAN: `core` tests `the_ram_walker_gives_its_six_points` (RAM vector: six points within 0.01 m of the transform by the
   RAM rows, 0.015 m of the tool's printed points — the rows are RAM's to 3 decimals; never the enemy's) and

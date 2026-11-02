@@ -18,7 +18,8 @@ pub(super) fn bake_content(
         .map(crate::tier::PcTextures::load)
         .transpose()
         .with_context(|| format!("PC override LVL for {lvl_path}"))?;
-    let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
+    let (buf, original) =
+        crate::gameplay::read_with_original(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir);
     std::fs::create_dir_all(out.join("models"))?;
@@ -58,6 +59,11 @@ pub(super) fn bake_content(
     // §4.3; BF1 MTRL 0x84 and BF2 0x10044 would otherwise be rule 2's
     // OPAQUE).
     let mut flash_named: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // A `hud_*` mesh's sheets keep their disc alpha: the HUD composites its own
+    // art by that alpha whatever the material says (`analysis/re-hud-icons.md`
+    // §2; `game::hud_feed::load_mesh`). `hud_herobar_saberhilt` (0x10001) only
+    // kept its shape through a census MASK, which BF2's ELF rule now overrules.
+    let mut hud_named: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut textures = Vec::new();
     let mut transparent: Vec<String> = Vec::new();
     // One entry per texture that HAS a classic-plus override: which source
@@ -78,6 +84,7 @@ pub(super) fn bake_content(
     let mut base_plan: Option<mungefs::plan::Plan> = None;
     let mut base_plnp: Option<mungefs::plan::Plnp> = None;
     let mut terrain_glb = None;
+    let mut terrain_query_size = None;
     let mut terrain_parsed: Option<mungefs::terrain::Terrain> = None;
     // The far-LOD sheet is written AFTER the walk, not here: its texture and
     // its UV scale come from `sky_`, and `tern` precedes `sky_` in every one
@@ -126,12 +133,15 @@ pub(super) fn bake_content(
     // layer `lght` is dropped: BF2 ships one per sublevel, only the first
     // carries content, and the walk's `lght` arm has already taken it from the
     // top level.
-    let side_buf = match kind {
+    let side_source = match kind {
         Content::Map => crate::side_classes::side_classes_lvl(lvl_path)
-            .map(|p| std::fs::read(&p).with_context(|| p.display().to_string()))
+            .map(|p| {
+                crate::gameplay::read_with_original(&p).with_context(|| p.display().to_string())
+            })
             .transpose()?,
         Content::Common => None,
     };
+    let side_buf = side_source.as_ref().map(|(bytes, _)| bytes.as_slice());
     let mut expanded: Vec<mungefs::Chunk<'_>> = Vec::new();
     let mut layer_chunks: Vec<mungefs::Chunk<'_>> = Vec::new();
     let mut wrappers = 0usize;
@@ -191,7 +201,7 @@ pub(super) fn bake_content(
     // contest to the map's own), so their models, collision, skel nodes and
     // manifest rows bake like the map's. Their PROPs go to the side-classes
     // file `bf2_tur.ron` (`bake classes`), not to this map's classes.ron.
-    if let Some(side) = side_buf.as_deref() {
+    if let Some(side) = side_buf {
         let mut placed = std::collections::BTreeSet::new();
         let mut defined = std::collections::HashSet::new();
         for c in expanded.iter().chain(&layer_chunks) {
@@ -264,7 +274,16 @@ pub(super) fn bake_content(
     // Card TBIND (`crate::bind_pose`): a model with a `skel` is written in
     // its bind pose, so a turret's head and gun sit on their bones.
     let shadow_skels = crate::hardpoints::Skeletons::of(&expanded);
-    let bind_pose = crate::bind_pose::BindPose::of(&expanded);
+    let mut bind_pose = crate::bind_pose::BindPose::of(&expanded);
+    for original in original.as_deref().into_iter().chain(
+        side_source
+            .as_ref()
+            .and_then(|(_, source)| source.as_deref()),
+    ) {
+        bind_pose
+            .add_render_source(original)
+            .map_err(|e| anyhow!(e))?;
+    }
     let mut posed: Vec<String> = Vec::new();
     // Card VTURD (`crate::turret_rig`): an armed building's model is written
     // as one primitive per (segment, node), so its gun can turn.
@@ -434,6 +453,11 @@ pub(super) fn bake_content(
                     Ok(None) => {}
                     Err(e) => eprintln!("bind pose: {e} — {} stays as stored", m.name),
                 }
+                if turret_rigs.has_model(&m.name) {
+                    bind_pose
+                        .canonical_model_nodes(&mut m)
+                        .map_err(|e| anyhow!(e))?;
+                }
                 match turret_rigs.split(&m) {
                     Ok(Some(p)) => m = p,
                     Ok(None) => {}
@@ -451,6 +475,14 @@ pub(super) fn bake_content(
                 }
                 pass_named.extend(crate::spec::pass_textures([&m]));
                 flash_named.extend(crate::alpha::flash_textures(&m));
+                if m.name.to_ascii_lowercase().starts_with("hud_") {
+                    hud_named.extend(
+                        m.segments
+                            .iter()
+                            .filter_map(crate::alpha::segment_texture)
+                            .map(str::to_ascii_lowercase),
+                    );
+                }
                 glow_named.extend(crate::alpha::glow_textures(&m, hdr.is_some()));
                 let alphas = alpha_table.model(&m);
                 alpha_usage.record_model(&m, &alphas);
@@ -486,6 +518,7 @@ pub(super) fn bake_content(
                 } else {
                     let mut t = mungefs::terrain::Terrain::parse(c)
                         .map_err(|e| anyhow!("tern 0x{:X}: {e}", c.offset))?;
+                    terrain_query_size = crate::gameplay::apply_terrain(lvl_path, &mut t)?;
                     if terrain_cutters.is_empty() {
                         terrain_cutters = t
                             .cutters
@@ -969,6 +1002,7 @@ pub(super) fn bake_content(
             || grass_named.contains(&lower)
             || pass_named.contains(&lower)
             || flash_named.contains(&lower)
+            || hud_named.contains(&lower)
             || glow_named.contains(&lower)
             || fx_named.contains(&lower)
             || fx_model_named.contains(&lower)
@@ -1019,7 +1053,11 @@ pub(super) fn bake_content(
         // draw would cut out along a mask nobody authored and the tier flip
         // would change the silhouette).
         let mut r = crate::tier::Resolved::from_ps2(t);
-        let mut tier2 = crate::tier::tier2(t, pc.as_ref());
+        let usage = crate::tier::Usage {
+            sky: is_sky,
+            alpha_carried: needs_alpha,
+        };
+        let mut tier2 = crate::tier::tier2(t, pc.as_ref(), usage);
         let carries_alpha = || {
             r.mips
                 .iter()
@@ -1195,12 +1233,17 @@ pub(super) fn bake_content(
             nav,
         });
     }
-    let source_game = if bf2_models > 0 || (models.is_empty() && !layers.is_empty()) {
-        "bf2"
-    } else {
-        "bf1"
-    }
-    .to_string();
+    // PC BF1 uses the later model encoding too. The mission Lua generation
+    // identifies the game; a model's vertex encoding only identifies its codec.
+    let source_game = crate::gameplay::source_game(Path::new(lvl_path))?
+        .unwrap_or(
+            if bf2_models > 0 || (models.is_empty() && !layers.is_empty()) {
+                "bf2"
+            } else {
+                "bf1"
+            },
+        )
+        .to_string();
     let mut terrain_layers_glb = None;
     if let (Some(t), Some(fname)) = (&terrain_parsed, &terrain_glb) {
         let bf2 = source_game == "bf2";
@@ -1328,6 +1371,7 @@ pub(super) fn bake_content(
         lightning,
         precipitation,
         wind,
+        terrain_query_size,
     };
     Ok(manifest)
 }

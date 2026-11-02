@@ -40,18 +40,6 @@ whole body (select, lines 81-86: shoot and reload only when the soldier stands s
   sbdroid_stand_idle_emote over rifle_stand_idle_emote (engine/artifacts/lead_tmp/anim/ram_animators_bf1.csv,
   ram_animators_bf2.csv). PS2 frame of the droid's carry: engine/artifacts/lead_tmp/unit-audit/pcsx2/10_sbd_idle_crop.png.
 
-## Acceptance
-1. Unit tests on a synthetic rig with distinct clips per layer: running + a shot -> a leg bone samples the run clip
-   and an arm bone the shoot clip in the same pose; standing + a shot -> both the shoot clip; the action ends after
-   the clip's length; a second shot restarts it. Mutation check: collapse the two masks into one, see them fail.
-2. A headless census over one round on BF1 NAB1 and BF2 MYG1 (a dev env var or a scratch example): of the
-   soldier-ticks with a shot fired and a horizontal speed over 0.3 m/s, the share whose lower player holds a
-   movement clip and whose upper player holds an action clip - 100 %; and per weapon set the share of ticks whose
-   upper clip is the set's own (bazooka, pistol / tool, sbdroid, bdroid) - paste the table.
-3. Picture pairs against the PS2 (PCSX2 README + COMPARISON_RULES): the super battle droid idle (both forearms out)
-   and a launcher trooper idle, port beside PS2, in the report; the unit goldens that show them are declared and
-   viewed. Fill declares: with those goldens before the gates.
-
 ## Note from ANIMS (landed d582ff5, 2026-10-05)
 - The data is baked: `engine/assets_baked/side_bf{1,2}/soldiers/<model>.sets.ron` = `bake::anim_sets::SoldierSets`
   (move the type to `manifest` so `game` can read it): `upper_bones` / `lower_bones` by name; `clips` (name = the GLB

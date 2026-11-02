@@ -528,6 +528,11 @@ impl Sim {
     /// floor under it (BF2 Kamino's one-way jump 121 → 122 lands 8.6 m
     /// down).
     fn trace_floor(&self, from: Vec3, to: Vec2, jump: bool) -> Option<f32> {
+        crate::ai::think_memo::walk(from, to, jump, || self.walk_floor_line(from, to, jump))
+    }
+
+    /// [`Sim::trace_floor`], walked.
+    fn walk_floor_line(&self, from: Vec3, to: Vec2, jump: bool) -> Option<f32> {
         let start = Vec2::new(from.x, from.z);
         let len = (to - start).length();
         let steps = (len / TRACE_STEP).ceil().max(1.0) as u32;
@@ -858,6 +863,10 @@ impl Sim {
         let mut order = 0u32;
         let mut end = None;
         let mut cells = 0usize;
+        // The floor a column answers from one height: up to eight cells step
+        // onto it from the same floor, and only their walls differ.
+        let mut floors: std::collections::HashMap<(i32, i32, u32), Option<f32>> =
+            std::collections::HashMap::new();
         while let Some(std::cmp::Reverse((_, _, k))) = open.pop() {
             let (_, y, len) = seen[&k];
             let c = (k.0, k.1);
@@ -890,7 +899,10 @@ impl Sim {
                 if (Vec2::new(np.x, np.z) - p0).length() > RETURN_RANGE {
                     continue;
                 }
-                let Some(f) = self.return_cell(p, np) else {
+                let f = *floors
+                    .entry((n.0, n.1, y.to_bits()))
+                    .or_insert_with(|| self.return_floor(p, np));
+                let Some(f) = f.filter(|&f| self.return_clear(p, np, f)) else {
                     continue;
                 };
                 let nk = key(n, f);
@@ -940,11 +952,10 @@ impl Sim {
     }
 
     /// One step of [`Sim::return_path`]'s search from the cell at `p` (on
-    /// its floor) to the column at `n`: the floor there, when a soldier can
-    /// walk onto it — no wall at the chest from `p` to a soldier's radius
-    /// past `n`.
-    fn return_cell(&self, p: Vec3, n: Vec3) -> Option<f32> {
-        let f = self.return_floor(p, n)?;
+    /// its floor) to the column at `n`, whose floor is `f`
+    /// ([`Sim::return_floor`]): a soldier can walk onto it when no wall stands
+    /// at the chest from `p` to a soldier's radius past `n`.
+    fn return_clear(&self, p: Vec3, n: Vec3, f: f32) -> bool {
         let d = Vec3::new(n.x - p.x, 0.0, n.z - p.z);
         let len = d.length();
         let chest = Vec3::new(p.x, p.y.max(f) + RETURN_CHEST, p.z);
@@ -956,7 +967,6 @@ impl Sim {
                 Layers::SOLDIER,
             )
             .is_none()
-            .then_some(f)
     }
 
     /// The floor at the column `n` a step from `p` (on its floor), when a

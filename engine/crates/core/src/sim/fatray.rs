@@ -27,7 +27,10 @@ impl Sim {
                 if h == owner {
                     continue;
                 }
-                let p = u.aim_point();
+                let Some(body) = self.hero_body_prims(h.index as usize) else {
+                    continue;
+                };
+                let p = u.aim_point() + body.pos - u.soldier.pos;
                 let t = (p - from).dot(dir);
                 if t <= 0.0 || t >= len {
                     continue;

@@ -32,26 +32,6 @@ has no such pass.
 - Pictures: `engine/artifacts/pcsx2/ref/bf2_yav1/pairs/cp3_landingzone_post1_v2.png`,
   `lead_tmp/re/terl/sheets/bf2_nab2__cp4_cp6_postA_v1.png`.
 
-## Acceptance
-**RE:**
-- which runtime objects create omni lights (the CP class, ordnance / explosions, their ODF keys, colour, range and
-  lifetime);
-- what texture 0x36462699 is;
-- how the omni pass's UV projection is built (FUN_0056ee88).
-
-**Build** (a new card): the additive passes on the port's terrain for the port's own runtime lights, with a
-`--sim-hash`-neutral render-only change.
-
-- 2026-09-26 (SUND RE, `analysis/re-sun-direction.md` §2.1 / §5, [V]): the PS2 loads a `lght` Light's `Position` as
-  **(x, y, −z)** and its `Rotation` (a0..a3) as q = (x, y, z, w) = (−a3, a0, −a1, a2) (B2 FUN_00596978, EE
-  0x596c44 / 0x596c6c). That is the editor-to-game handedness flip.
-  - `mungefs::light` reads both raw. Any authored omni / spot light the port places must negate z, and must take its
-    axis from row 2 of that quaternion.
-  - SUND fixes the directional lights only.
-
-## Planner note (2026-09-30, M-ALPHA)
-`defer: post-alpha` — not needed for the alpha's six showcase maps or its checklist. Value 3 (kept).
-
 ## Note (2026-09-30, FXB RE, `analysis/re-bolt.md` §5.2–§5.3 [O])
 Most of this card's RE is answered there: texture 0x36462699 = `com_sfx_omniproj` (BF2 CORE.LVL, a 64×64 cos² blob);
 the projection `FUN_0056ee88` looks straight down from 5 m above the light through a 90° frustum (a disc of radius

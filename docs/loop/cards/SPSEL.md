@@ -21,10 +21,6 @@ domain: sim
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 3. PLAN §LOCKED FEATURE SET (classes per side).
 
-## Acceptance
-The player picks a class and a spawn post with the pad; the choice lives in `core` (hashed, replayable); the sim gates
-unchanged for the idle sweep player (or declared).
-
 ## Notes
 - UAUD1 (2026-09-29): the PS2's class-select names and equipment lists per class are in
   `engine/artifacts/lead_tmp/unit-audit/pcsx2/{cis,rep}_classes_sheet.png`, `end1_left_sheet.png`,
@@ -46,9 +42,6 @@ unchanged for the idle sweep player (or declared).
   eligible one. A command walker's post (AT-AT, AT-TE) is in the list like any other: live, one `Right` on BF2 Hoth's
   spawn map put the ring on an AT-AT and the player spawned beside it (`lead_tmp/cwsp/ps2/c2_spawnmap_sheet.png`).
   BF1 names the selection by the post's Label ("AT-AT"). Card CWSP adds the walker's entry to `spawn_model`.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — class select on spawn is on the alpha list. Value 3 → 4. Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
 
 ## Planner re-scope (2026-10-02 09:30) - what is left, with files and a runnable acceptance
 The old title ("the spawn screen still spawns ONE class per faction") is no longer true. Read in the tree at d3242d7:

@@ -19,21 +19,6 @@ alpha: yes
 ## Why
 The maintainer, 2026-10-02: "no positional sense in a fight - bots hold in the open or pinball". `analysis/bot-design.md` 4.1 (the position table), 4.6 (the Tactician), 5. The PS2 takes Cover hints by their arrow, with no ray (SAIR 4.6: 21 % of attack time on Kamino, 49 % on Polis Massa); 103 of 185 posts have no covered Cover hint within 30 m, and points at the barriers' edges give 154 of 185 posts five or more covered positions (bot-design.md M6). The PS2's own bots stand within a metre of a barrier a quarter of their time and inside one under 1.2 % (M3).
 
-## What to build (`ai/tactic.rs`; replaces card HOLD's rules)
-1. **The position table at map load** (pure function of the map, outside the hash, built with `fmath`): Cover and Snipe hints, 8 points 0.9 m outside each soldier barrier (edge middles, corners), each hub's centre + 8 points at 0.7 r, turret seats. Kept when standable (floor on its storey or the terrain, on the level, not in water, in no soldier barrier, head room). Per position: point, floor, kind, facing (+Z row), stance masks, nearest hub, two 16-bit sector masks (LOW cover: shut at 0.9 m within 3 m and a 30 m lane at 1.6 m; CORNER cover: a 1 m lean has the lane). The scratch census is the reference: `lead_tmp/botd/tools/cover_census.patch`, output `lead_tmp/botd/out/cover_census.txt`.
-2. **The Tactician** (bot-design.md 4.6): candidates = the 32 nearest within min(40 m, weapon range) on the storey; yes / no filters (reserved or within 2 m of a reserved one, hazard, a friend's line of fire, more than 15 m farther from the objective, outside the weapon's band grown 5 m); three tries (covered from the target; any; none = the PS2's 15 m band move); non-negative score (3 cover with a line, 2 near, 1 cover from other known enemies, 0.5 the bot's own bias); one confirming ray, the next two on a miss; kept while its conditions hold (no re-scoring).
-3. **Reservations:** asked in `think`, granted in the write-back in unit-index order; a stamp per position, free 2 s after the last (the PS2's hint rule, SAIR 3).
-4. **At the position, the PS2's cycle** (SAIR 4.6): hidden 2-4 s in the primary stance, firing 2-6 s in the secondary stance or from a lean step; another qualifying position after 5-12 s; a position hit twice or walked round is compromised.
-5. **Behaviours Capture, Guard, Overwatch** (bot-design.md 4.4) use it; the PS2's at-post wander (8-14 m every 20-30 s) goes to scored positions.
-6. **Deleted:** `hold_at_hub`, `start_hold`, `spot_free`, the shuffle, the strafe on a burst, the close hold, the step out of a friend's line, `HoldState`, the 20 `HOLD_*` constants; JITR's tests re-pointed.
-7. **Counter B12** in the `shares` line: fight time at a position with cover from the target.
-
-## Acceptance (run and paste)
-- The table's counts per map (standable, covered, by source) printed at load equal the census's within 5 % on the six showcase maps, and it is built in under 0.3 s a map (a test on bf2_myg1).
-- Unit tests, mutation-checked: a bot fighting a target across a crate takes the reserved position with cover from the target and a line to it; two bots never hold positions within 2 m; a position hit twice is left; no winner -> the band move.
-- **B12** >= 20 % at Normal on the six showcase maps (8 seeds); **B2** holds; a teammate within 1.5 m not up.
-- Sweep 8 seeds x 32 maps: 256 / 256; kills a minute within the seed noise or toward the PS2's (B6). Declared: `sim; sweep; arena`.
-
 ## Notes
 - Cut from `analysis/bot-design.md` (card BOTD, 2026-10-03). The maintainer confirmed decision 3 on 2026-10-03 ("BOTD read, go"; "not as statues": the shuffle and strafe chances give way to this cycle). In BOTV's deps.
 - 29 % of the authored Cover hints lie inside a soldier barrier (43 % inside one grown 0.3 m): they are not positions (`lead_tmp/botd/tools/hint_in_barr.py`).

@@ -119,10 +119,7 @@ B1 frustum culling are DONE. What is left, in value order:
 
 # PART B — AUTONOMOUS EXECUTION GUIDE
 
-The lead agent runs this project mostly on its own: it plans, spawns subagents, writes
-and tests all code, verifies every subagent's work, and advances one commit-sized step at
-a time. The maintainer is product owner and feel-arbiter, not typist. This section is the operating
-manual.
+Older working notes. `AGENTS.md` and `PLAN.md` hold the current rules.
 
 
 
@@ -155,30 +152,8 @@ manual.
 
 
 
-## Workspace layout (create under this sandbox)
-```
-swbf-ps2-decomp/
-  PLAN.md               # THE plan (this file)
-  iso/                  # SWBF1.iso, SWBF2.iso (local copies, gitignored)
-  extracted/ analysis/ scripts/ tools/ ghidra-proj/   # existing RE assets
-  analysis/RE_LOG.md    # running RE lab notebook (function addrs, findings)
-  engine/               # the Rust cargo workspace
-    Cargo.toml          # [workspace]
-    CRATES.md           # the crate/module map: every source file, what it owns (read before grepping)
-    crates/
-      mungefs/          # read PS2 LVL/ucfb containers (offline)
-      bake/             # bin: ISO/LVL -> glTF/KTX2/OGG/RON  (needs iso/, offline)
-      manifest/         # the bake <-> runtime schema, data only
-      core/             # sim: math, fixed-step loop, RNG, replay, gameplay
-      render/           # wgpu renderer (+ headless capture)
-      audio/ input/ ui/ net/       # net = LAN, later
-      game/             # bin: ties it together; flags below
-    assets_baked/       # gitignored, large
-    goldens/            # committed golden PNGs (maps/, units/, the UI sheets)
-    missions/           # the mission RONs scripts/gen_missions.py generates
-```
-
-
+## Workspace layout
+`engine/CRATES.md` is the live module map, and the crates are `mungefs`, `bake`, `manifest`, `core`, `render`, `audio`, `input`, `ui`, `net` and `game`.
 
 ## Testing & fidelity ladder (how the agent validates its own work)
 - **Tier 0 — every commit:** `cargo build`, `cargo clippy -- -D warnings`, `cargo fmt --check`.
@@ -215,8 +190,8 @@ swbf-ps2-decomp/
 3. Port to Rust; keep original constants in data with a comment citing the source address.
 4. Write a Tier-1 reference-trace test (expected values from the decomp; spot-check against
    PCSX2 per decision Q1).
-5. Record in `analysis/RE_LOG.md`: subsystem, source function addresses, findings,
-   open questions. Record the keep/drop/merge outcome in PLAN.md.
+5. Record in a note `analysis/re-<topic>.md`: subsystem, source function addresses, findings,
+   open questions. Record a keep/drop/merge decision in `analysis/plan/FEATURE_SET.md`.
 **Solve it right:** when community mods don't reveal a mechanic and fidelity matters, RE the
 decomp to find the real functions and constants. Hard, but it makes the product correct.
 
@@ -227,7 +202,7 @@ Study, don't blindly copy (watch licenses): LibSWBF2, swbf-unmunge, SWBF2Phoenix
 notes, and PC-port mods (ModDB, Steam Workshop, GameFront, Nexus, r/SWBF wikis) —
 especially graphics mods (classic-plus look) and Galactic Conquest mods (R1). **Adopt an
 idea only if it clearly improves gameplay; default to faithful.** Log both adopted ideas
-and rejected-as-bloat items in PLAN.md so decisions are traceable.
+and rejected-as-bloat items in `analysis/community-projects.md` so decisions are traceable.
 
 
 
@@ -245,11 +220,5 @@ and rejected-as-bloat items in PLAN.md so decisions are traceable.
   for unresolvable design forks, hard blockers, or guardrail questions.
 - **Q3 Build order → FINISH RE AUDITS FIRST.** Complete A2–A6 before engine gameplay code
   (P0 gates on it). Workspace scaffolding during P0 is fine.
-- **Q4 Git → LOCAL ONLY, revisit backup later.** `git init` locally, code-only commits,
-  everything sensitive gitignored; no remote push until the maintainer decides.
+- **Q4 Git.** Decided since: the source is public, and everything sensitive stays gitignored. Publication follows `AGENTS.md`.
 - (Codename: working name "**openbf**"; the maintainer may rename.)
-
-
-
-## Log
-Moved 2026-09-25 to `analysis/PLAN_LOG_2026.md` (verbatim). History now lives in git log and `engine/artifacts/loop/reports/`; decisions that change the plan are made here by the maintainer or the planner.

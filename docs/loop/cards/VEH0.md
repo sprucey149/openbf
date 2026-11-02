@@ -17,12 +17,6 @@ created: 2026-09-25 (restructure)
 ## Why
 M2 (P7 ground vehicles, then flyers) has never started; a port without vehicles is the biggest gap a player sees. PLAN §LOCKED FEATURE SET → Vehicles & space, §Phases P7 and P6.5 E (vehicle AI lands with P7).
 
-## Do
-RE survey (§RE discipline): the vehicle classes both games ship per map (ODFs on the disc), the entity/physics/driver/turret/enter-exit code paths in both decomps, what analysis/ already holds. Then split M2 into 5–10 build-sized cards (`loopctl.py new`), in order: one drivable ground vehicle on one map first.
-
-## Acceptance
-analysis/re-vehicles.md (hops, self-checks, [O] tags) + the M2 cards exist with evidence and acceptance.
-
 ## Notes (planner 2026-09-25)
 - The RE must answer PLAN §DESIGN SPECS "P7 DESIGN — entity shape"'s seven questions in its order: (1) hover/walker/flyer
   class props + the three integrators' PS2 addresses; (2) seats, enter/exit (BF2 `EnterVehicle`/`ExitVehicle`; BF1 has no

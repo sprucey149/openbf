@@ -48,20 +48,6 @@ post: the rule is built round the player (`analysis/re-unit-chatter.md` 3, 5 `[O
   11.0; AcquiredTarget 0.25 / 6.25, 0 / 8.25; FriendlyFire 0 / 1.25, 0 / 1.5; RepairStart 0 / 0.25, 0 / 0.5;
   Grenade 0 / 0.25; SC responses 0-0.5.
 
-## Acceptance
-- Tests, mutation-checked: a speaker 60 m from the player is silent and one 40 m away speaks; an enemy speaker
-  passes 31 in 101 over 2,000 draws; with no speaker named the subject's nearest team-mate within 50 m speaks; of
-  two matching entries the one with more matching conditions is chosen and an entry with a failing condition
-  never; a `...VO` request name and `MissileIncoming` are never asked; a human's fourth kill inside 4 s steps asks
-  KillingSpree4 from his own unit, an AI's does not.
-- The right voice through the BAKED class db: every class the three BF2 showcase maps field has its own entries
-  (a child with its parent's), and an AcquiredTarget against each fielded enemy class picks the entry whose
-  `VOUnitNum` is that class's `VOUnitType` when one exists.
-- The census (headless `SOUND_LOG`, 8 seeds, UTA1 and MYG1): the player parked at his post - at most 1 line a
-  minute; parked beside a front-line team-mate (the capture's follow rule: the team-mate nearest an enemy, every
-  20 s) - lines a minute and AcquiredTarget a minute within 30 % of the rows above.
-- The mixer: no `OVERLOAD` line these lines cause in a 10-minute round; `scripts/tools/mix.py` under full scale.
-
 ## Notes
 - [H] in the RE: whether HeadshotKill needs a headshot (build it on a head hit, PROVISIONAL); NotShootingCriticalHit's
   rule is read in part. HeadshotKill and the sprees are the "praise of the player" of card PRAISE: whichever card

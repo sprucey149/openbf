@@ -567,8 +567,8 @@ ReloadTime 1.25, MaxItems 4, ammo 4. Time bomb: ShotDelay 0.5, ReloadTime 3.0, M
 3. Twins: each B1 function above has its B2 function read, with the differences listed (variants, the rest rule, the
    launch point, the mine's contact, the grenade roll).
 4. Constants: the bounce's 0.1 / 1.15 / 1.37 / 0.37 / 0.7 are the `lui` / `ori` pairs at 0x27f7f0, 0x27f814,
-   0x27f828, 0x27f854, 0x27f8c4 (`eedis2.py bf1 0x27f7b0 0x27f988`); the two grenade predicates and BF2's fire entry
-   were read from the disassembly (`eedis2.py bf1 0x28ede0 0x28ee90`, `bf2 0x337660 0x3377d0`).
+   0x27f828, 0x27f854, 0x27f8c4 (`eedis.py bf1 0x27f7b0 0x27f988`); the two grenade predicates and BF2's fire entry
+   were read from the disassembly (`eedis.py bf1 0x28ede0 0x28ee90`, `bf2 0x337660 0x3377d0`).
 5. Flags: the sticky "timer starts later" flag — default 1 (constructors B1 204643, B2 314388), one writer (the
    setter, key 0x0d0cde2b), on no disc class, 1 in RAM. `TriggerSingle` — base default 1 (B1 209496), setter B1
    210357; RAM 1 on the grenade, 0 on the rifle.
@@ -691,9 +691,10 @@ bodies after the terrain (model floors: not measured here); the down limit of th
   with the PS2's count of contacts; the 15th differs only by the aim's upper limit (63.0 against 63.62 deg: 37.08 m
   against 36.41, the same updates). From each PS2 throw's own first row over level terrain the port is the PS2 row for
   row: 958 rows, worst 0.5 mm (`core/tests/data/grenade_ps2_bf2.txt`, test `sticky_ps2_bf2_throws_match_row_for_row`).
-- A BF1 map's thrown grenade takes BF2's throw rules (`Thrown::BF1_THROWS_AS_BF2`; the maintainer, 2026-10-04 — a named
-  deviation from the BF1 disc): the port's `bf1_nab2` thermal detonator thrown level rests at 35.49 m / 2.467 s, at
-  29.1 deg 51.90 m / 4.200 s — the PS2 BF2's numbers (before: 34.10 m / 1.867 s, 50.82 m / 3.800 s).
+- From 2026-10-04 to 2026-11-01 a BF1 map's grenade took BF2's throw rules. The maintainer reversed that on 2026-11-01:
+  a BF1 map throws BF1's grenade by BF1's numbers again (level, `bf1_nab2`: 34.10 m / 1.867 s; at 29.1 deg 50.82 m /
+  3.800 s, the figures measured before the deviation). Only a BF1 class picked on a BF2 map still takes BF2's rules
+  (`Thrown::throw_as_bf2`).
 
 ### 13.5 The bodies' ray is not pulled back - a named deviation (card GRFL, 2026-10-09, main b75d36b) [M], PROVISIONAL
 
@@ -713,3 +714,24 @@ bodies after the terrain (model floors: not measured here); the down limit of th
   127,017 of 1,556,912 pass a floor a soldier stands on with the pulled-back ray, 7,260 without it. Of those 7,215
   cross a soldier-only body (6,140 the tops of Polis Massa's invisible walls, 935 the Kamino platform's skirt prim)
   and 45 a body with an ordnance layer (not traced). The maintainer's deck (103.1, 52.4, 75.0): 2 of 4 before, 0 of 4 after.
+
+## Mines and detpacks (issue #43; merged from the contributor report `docs/loop/reports/20261028_MINE.md`, 2026-11-02)
+
+Disc census: BF1 10 classes / 5 explosive weapon kinds, BF2 43 classes / 12 kinds. This comparison is executable-and-disc data
+against the originals, not a live PCSX2 capture, and a visual and controller comparison is still outstanding.
+
+- BF1 Alliance landmine: dispenser `MaxItems=4`; `TriggerRadius=1`; arms when landed; enemy velocity dotted with its
+  displacement from the mine must be nonnegative. Trigger explosion damage 1750, inner/outer radii 4.5/6.5 m (BF1
+  `FUN_0028d958`, `FUN_001f8410`, disc landmine and explosion classes).
+- BF2 Alliance detpack: one live pack; charge limit 0.5 s, launch speed 2-10 m/s; the next fresh press triggers it. Pack
+  health 20, lifetime 60 s; trigger explosion damage 3000, radii 0.5/3.5 m; destroyed and expired classes do no damage (BF2
+  `FUN_003336a0`, `FUN_0022b170`, `FUN_0022bc58`, disc detpack and explosion classes).
+- `[O] UNAUDITED`: FNV(`ImmuneToMines`) is `0x62a8f10f`; BF2 soldier setter `FUN_00252bb0` writes class+`0x8d8`, which the mine
+  contact and update checks read. `python3 scripts/tools/eedis.py bf2 0x00253f58 0x00253f78` confirms the boolean parse and `sb`
+  at `0x00253f70`. HealthType `Mine` hashes to `0x7e89edb6` and is category 7 in BF2 `FUN_0026a340`; `FUN_0030fc88` initializes
+  all eight damage scales to 1. The port's ordinary health table has categories 0-6; placed items keep those when authored and
+  use the original category-7 multiplier 1 for `Mine`, not VehicleScale.
+- Port approximations, not measured PS2 parity: item collision is a PROVISIONAL 0.15 m sphere for hits and blast falloff; the
+  terrain contact snaps to the heightfield after the approximate terrain ray, with bounce clearance capped at 1 cm; BF1 release
+  uses the soldier fire-point approximation and BF2 the cached offhand offset; timer sounds use the bank's pitch, so the
+  original rising tick pitch is not reproduced.

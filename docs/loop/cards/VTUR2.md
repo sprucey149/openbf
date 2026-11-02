@@ -20,26 +20,5 @@ VTURB (2026-09-29) made every armed-building instance a seat-only vehicle, but B
 ## Evidence
 re-vehicles §8 (BF2 armedbuilding FUN_001e8860 → FUN_001e8948 → FUN_00270770; portableturret / defensegridturret are armedbuildingdynamic). BuildingSection hash in B2 FUN_001e8948 B2:97129. Report `engine/artifacts/loop/reports/20260929_*_card_VTURB.md`.
 
-## Acceptance
-`bake classes` (and the node bake, `bake/src/hardpoints.rs`) cover TUR.LVL; `turret_ride bf2_<map> <n> rep cis` enters, fires and exits a BF2 tur_bldg_laser; check PilotType (a `self` turret is VTAI's, not boardable); declare the sweep move (new entities on BF2 maps).
-
-- AUDIT VTURB (2026-09-29): the port's census spawns 0 turrets on all 16 baked BF2 maps. The conquest missions load
-  `SIDE\tur.lvl` with named classes:
-  - kam1c_con: tur_bldg_chaingun_roof, tur_weap_built_gunturret
-  - geo1c_con: tur_bldg_geoturret
-  - yav1c_con: tur_bldg_laser, tur_bldg_tower
-  - nab2g_con, cor1c_con, end1g_con: tur_bldg_laser
-  - kas2c_con: tur_bldg_beam, tur_bldg_recoilless_kas
-  - myg1c_con: tur_bldg_recoilless_lg
-  - tat2g_con: tur_bldg_tat_barge, tur_bldg_laser
-  - (strings of `extracted/bf2/lua/mission/*.luac`)
-- BF2 ODFs name `portableturret` (10 classes) and `defensegridturret` (3) as BASE. Both are engine labels in the B2 ELF
-  beside `armedbuildingdynamic`, which no ODF uses, so `vehicle_class::TURRET_BASES` must list the two disc names.
-  All 13 author PilotType self (VTAI's).
-
 ## Notes
 - 2026-09-29 (PXWB, lane 2; FINDINGS F52): the PS2 DRAWS these — BF2 HOT1's defence towers stand beside cp6 on the PS2 and are absent from the port's frame (`pcsx2/ref/bf2_hot1/walk/pairs/cp1_cp6__sheet.png` b180: `tur_bldg_hoth_lasermortar` turet11, 21.9 m at yaw 155; b270: turet12, 22.1 m at yaw 282; `cp2_cp3__sheet.png` b270 more on the plain). The bake has no model for any `tur_bldg_*` instance, so today they are invisible as well as unboardable.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — BF2 HOT1's building turrets. Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
-- Planner 2026-09-30 08:30: value 4 -> 5, so M2 has a value-5 card beside M1's effects chain (interleave). 0 of 333 BF2 building turrets spawn; showcase HOT1 and UTA1 carry them.

@@ -69,7 +69,8 @@
 //! capsule's centre, radius max(r, h/2)), the eye (the muzzle) and the
 //! vehicle's sphere centred on its origin; the rays' surfaces (the terrain
 //! sheet and the SOLDIER-layer bodies); a mounted soldier rides at the
-//! vehicle's origin, hidden, and neither moves, collides, aims nor fires.
+//! vehicle's origin and neither moves, collides, aims nor fires. Only a seat's
+//! `SeatSetup::body_active` gives him a body to be hit on, at the seat's frame.
 
 use super::input::{buttons, PadState};
 use super::state::Sim;

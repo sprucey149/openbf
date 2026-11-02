@@ -27,13 +27,6 @@ LITEB (COL0, prelit) and SUND (the BF1 sun term, prelit draws without the sun) a
 PS2's model light terms — something the PS2 applies per wall is still missing: a shadow in the walls' COL0 the port
 does not multiply, a light region (LREG), the SunInfo back light (BACKL), or the material flags.
 
-## Acceptance (RE first)
-- For two named walls (the cp4 overhang and the cp4 b270 upper band): the model, its segments' flags and COL0, and the
-  PS2's light set for that draw — which term makes the PS2 wall neutral where the port's is sun-orange. Settle it on
-  PCSX2 with a patched state if the reading is not decisive (`lead_tmp/re/lite/ps2exp/`: zero the BF1 sun 0x69c588
-  on `ref/states/bf1_bes2_walk_cp4_cp5_b000.p2s` and see whether the upper wall changes).
-- Then a build card or a fix, and the three pairs re-rendered (`port.py bf1_bes2/walk`) and viewed.
-
 ## Notes
 - Created 2026-09-29 by PXWA (lane 2). The states `ref/states/bf1_bes2_walk_cp*_b000.p2s` are kept (a 1-unit battle,
   every pad parked, the player held — reload one and it stands at the post).

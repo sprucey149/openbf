@@ -55,7 +55,7 @@ impl ClassProps for BakedClass {
 }
 
 pub fn bake_classes(lvl_path: &str, out_ron: &str) -> Result<Vec<BakedClass>> {
-    let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
+    let buf = crate::gameplay::read(lvl_path).with_context(|| lvl_path.to_string())?;
     let classes = read_classes(&buf, &CLASS_TAGS, MalformedClass::Strict)?;
     crate::write_ron(std::path::Path::new(out_ron), &classes)?;
     Ok(classes)

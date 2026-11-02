@@ -40,27 +40,6 @@ The AT-ST under BF1 rules is a port-only control, not a shipped BF1-class census
 `ride::gunner_coming` only holds an already claimed gunner seat; it cannot
 supply an initial window when nobody has claimed it.
 
-## Scope
-Implement only a new AI ground pilot's initial window. Hold locomotion while
-that window is live and a seat is empty; complete it on full occupancy or
-expiry. Afterwards ordinary driving and existing gunner-claim holding apply.
-Keep the existing GUNNER_WAIT/claim-age and claim-selection policy intact;
-GUNWT still owns their replacement, live-claim restamping, order interruption,
-BF1 call timing/reissue, answers and boarding behaviour. GUNWH still owns the
-BF2 human-facing 15-second extension. Do not add either feature here.
-
-Use simulation ticks and identity-safe state. Initialize/reset through actual
-successful seat lifecycle paths, including the ai_use_pass local write-back;
-never reuse a board claim's `since` clock as the boarding clock. The wait starts
-once per new pilot tenure, completes permanently for that tenure and resets
-on leaving/changing vehicle or ceasing to pilot. Preserve turret/human controls,
-low-health all-AI bailout, steering laws, existing gunner aiming and the random
-draw sequence. Waiting must not spend the driver's stuck/progress allowance.
-Hash every persistent wait field that changes future behaviour; keep absent
-state serialization and all existing pins unchanged. Do not edit gate/oracle
-code, protected data, baselines, goldens, thresholds or exemptions. Update
-module docs and CRATES rows for changed/new source files in the same checkpoint.
-
 ## Acceptance
 1. Real Sim::step natural-boarding fixtures for hover and walker, both source
    rules: with an empty second seat and no claim, zero locomotion sticks and

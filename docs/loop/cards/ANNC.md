@@ -36,35 +36,6 @@ sound handle for a 2-D stream line with the QUEUE flag. One voice slot, one line
 by key: a commander line goes ahead of pending chatter and never cuts a line off. "Cooldown" on the PS2 is: the 30 s
 repeat of the bleeding line (own team only), the one-per-battle low-reinforcement latch, and the queue.
 
-## Acceptance (build; rewritten by the RE session — the original is kept below)
-A unit test per rule in `core::announcer` (pure, no audio), each quoting `analysis/re-announcer.md`:
-1. `cp_lines`: BF2 map, listener CIS: Rep captures a post -> `cis_off_com_report_enemyCaptured_commandpost`; CIS
-   captures -> `cis_off_com_report_captured_commandpost`; a CIS post is neutralised -> `cis_off_com_report_lost_commandpost`;
-   a Rep post is neutralised -> nothing. The names come from the post's baked VO table, not from a rule in code.
-2. `bleed_line`: own bleed starts at t -> `..._us_overwhelmed` at t, t+30, t+60, none once it stops; the enemy's bleed
-   starts -> `..._enemy_losing` once and nothing at +30 s; the enemy's starts while the own team bleeds -> nothing.
-3. `low_reinforcements_once`: 150 tickets -> the line when tickets first reach <= 15; the other team reaching 15 later
-   says nothing; a mission with no such call (bf1 nab1 Clone Wars) says nothing.
-4. `voice_queue`: a commander line asked while a 2.0 s chatter line plays starts when that line ends (not cut, not
-   earlier); two commander lines play in the order asked; with 4 pending, a 5th commander line replaces the lowest.
-5. `gates`: nothing before the local player's first spawn; nothing asked for after the battle is over.
-PS2 pair (the referee): a scratch example replays the events of `re-announcer.md` §4 rows 7, 8-9, 11, 13 and 14 (BF2
-UTA1 Clone Wars as CIS) and logs (event, line name, onset): every name equals the PS2's, every onset is within ±0.5 s
-of the PS2's (one frame when the voice is idle, else the end of the playing line), the repeat at 30 ± 0.5 s.
-Data check, pasted into the report: the regenerated mission RONs carry the three setters' names for every mission
-(0 differences against `lead_tmp/annc/bf1_calls.txt` / `bf2_calls.txt`, quirks included: no low-reinforcement line in
-BF1 Clone Wars, `kam1c_con` / `mus1c_con` swapped), and every baked post's VO table equals `lead_tmp/annc/cpvo.py`'s.
-Out of this card: T6 leaving the battlefield (card BNDY), hero lines (card HERO), victory / defeat MUSIC and the
-ambient music thresholds (note on SNDC).
-Also in this landing: `core/src/battle.rs`'s module comment says BF1's bleed is "provably inert" — it is live
-(`re-announcer.md` §5); correct the comment (no behaviour change: PLAN plays BF2's bleed on every map).
-
-## Acceptance (original)
-- A table of every trigger with its PS2 evidence ([V]/[O], verifier run).
-- Built: a scripted scene per trigger in which the port plays the PS2's line (same sound name), onset within ±0.5 s of
-  the trigger as on the PS2, and the PS2's cooldown (a second trigger inside it plays nothing) — a unit test per rule.
-**Note (cleanse CLNC, 2026-09-30):** `core/src/battle.rs`'s "provably inert" comment is already corrected (8b42ba8) — drop that item from this landing.
-
 ## Build result (2026-09-30 22:30, lane 1) — branch `annc` 703b1db, ci green, NOT gated (STOP was up)
 Report `reports/20260930_2230_card_ANNC.md`. Acceptance 1-5: 5 unit tests pass. PS2 pair (UTA1 CW as CIS): 7 lines,
 every name equal, onsets 0.00 s vs the PS2's 0.03 s, the queued line 2.80 s vs 2.84 s, repeat 30.03 s vs 30.06 s.

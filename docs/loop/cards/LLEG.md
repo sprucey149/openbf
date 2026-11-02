@@ -44,11 +44,6 @@ largest recycle source left, and the only map that still loses a round in 8 seed
 - STARC's second half ("a last leg that starts where the capture centre is in reach": NAB1 ruins column, MYG1 spiral
   ruin) is this card's case: do it here and leave STARC the arc-line half.
 
-## Acceptance
-- `sweep_seeds.py --seeds 1-16 --ticks 120000`: BF2 GEO1 16 / 16, 0 recycles `last->9` / `last->18` / `last->16`
-  on 2+ seeds; BF1 GEO1 hub 43 and TAT1 hub 104 spots gone or explained.
-- No map's finish count drops (run a null variant beside it), the sweep's wall time no more than 10 % up.
-- A unit test: a post on a platform with one ramp on its far side; a bot at the foot of the near wall reaches it.
 ## Note from STARC (2026-10-02, landed c9d2776) - before building, dump the walls at each spot
 - STARC's POL1 radar door was a COLLISION defect (a doorway the bake filled: `lead_tmp/starc/README.md`), not routing;
   it is fixed in the bake and POL1's recycles went 41 -> 5 over 9 seeds. So for each spot this card owns, check first
@@ -113,9 +108,3 @@ the wrong hub (7 more posts changed hub at HUBM, BF1 GEO1 cp6 among them), and w
   12,999 -> 12,638 / 12,608 (-3 %). Patch and module: `lead_tmp/lleg/local_search_scratch.patch`, `local.rs.txt`
   (binaries `bin_k3`, switch `LLEG=1|3`); tools `census.sh`, `spots.py`, `tot.py`. Spots it did cure: BF2 DAG1's grand
   tree (96, -16) 90 -> 41, BF1 END1 (-112, 240) 22 -> 0. Left for the planner: land it only with a per-spot case.
-## Acceptance (as landed)
-- BF1 NAB1 stalled windows, 8 seeds x 10 min: 415 -> 13 (seeds 1-8), 379 -> 29 (seeds 9-16); recycles 12 -> 1 in 16
-  rounds of 120,000 ticks, 16 / 16 finish before and after, median finish 14,004 -> 12,025 ticks.
-- `sim::spawn::tests::a_spawn_node_inside_a_solid_body_spawns_on_top_of_it` (fails with the rule off) and
-  `a_spawn_node_with_a_way_out_keeps_its_floor` (a room with a door, a bare roof, a crate top).
-- `FLOOR_GRID=0,0,0,1,0 round_to_outcome 1 1 | grep "fg seat"`: two lines, NAB1 and MUS1.

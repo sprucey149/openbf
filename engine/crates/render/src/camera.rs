@@ -6,8 +6,8 @@
 //! - `pitch` rotates around the camera's right axis; positive pitch looks **up**.
 //! - Projection is `glam::Mat4::perspective_rh` (0..1 depth, wgpu clip space).
 //!
-//! Adapted from an earlier wgpu project's camera (`an earlier project's source`,
-//! `build_uniform`: `look_to_rh` + `perspective_rh`, view_proj = proj * view), simplified to a
+//! Adapted from an earlier project's camera (`build_uniform`: `look_to_rh` + `perspective_rh`,
+//! view_proj = proj * view), simplified to a
 //! yaw/pitch fly-cam — the viewer has no vehicle to follow.
 
 use glam::{Mat4, Vec3};

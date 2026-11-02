@@ -44,9 +44,13 @@ fn play_event_sounds(
     walk: &WalkSim,
 ) {
     let listener = game::event_sounds::listener(walk);
-    game::event_sounds::each(walk, listener.pos, |name, pos| {
+    game::event_sounds::each_off_handle(walk, listener.pos, |name, pos| {
         sl.play(audio, name, pos, &listener);
     });
+    // A human's shots and empty clicks, which share a weapon's handle.
+    let mut asks = Vec::new();
+    game::event_sounds::weapon_asks(walk, |a| asks.push(a));
+    sl.play_weapon_voices(audio, &asks, &listener);
     // The hurt and death cries, one voice per unit (card UCRY).
     let mut asks = Vec::new();
     game::event_sounds::cries(walk, |c| {
@@ -417,6 +421,8 @@ struct App {
     /// The bits pressed since the last frame read them: a tap that is let
     /// go inside one frame still counts.
     keys_tapped: u32,
+    /// A held value step repeats on the pause menu, as a held arrow in the shell.
+    pause_repeat: ui::shell_feel::HoldRepeat,
     /// The shell pointer: position, fresh motion and a waiting click.
     shell_pointer: ui::cursor::Pointer,
     kbm: game::kbm::Kbm,
@@ -636,6 +642,7 @@ impl App {
             icon_device: game::input_icons::DeviceTracker::default(),
             keys_held: 0,
             keys_tapped: 0,
+            pause_repeat: Default::default(),
             shell_pointer: ui::cursor::Pointer::default(),
             focused: true,
             kbm,
@@ -991,6 +998,7 @@ impl App {
             mission_file,
             player_team,
             heroes: game::heroes::rules(&self.session),
+            dlc_heroes: self.session.dlc_heroes,
         };
         // Release the renderer field borrow while installing the other App resources.
         let mut renderer = self.renderer.take().expect("loaded renderer");
@@ -1084,7 +1092,7 @@ impl App {
 
     /// Raw menu buttons this frame as edge bits: 1 up, 2 down, 4 left,
     /// 8 right, 16 confirm (Cross), 32 back (Circle), 64 Start, 128 L1,
-    /// 256 R1, 512 Square.
+    /// 256 R1, 512 Square, 1024 / 2048 a value step left / right.
     fn menu_edges(&mut self) -> u32 {
         let mut now = 0u32;
         if let Some(g) = &mut self.gilrs {
@@ -1130,11 +1138,19 @@ impl App {
                     now |= 32;
                 }
                 // The left stick presses the same arms as the D-pad.
-                now |= input::stick_arms(
+                let stick = input::stick_arms(
                     pad.value(gilrs::Axis::LeftStickX),
                     pad.value(gilrs::Axis::LeftStickY),
-                    self.prev_menu_buttons & 15,
+                    game::kbm::stick_latch(self.prev_menu_buttons),
                 );
+                now |= stick;
+                // The stick's Left / Right are the pause menu's value steps.
+                if stick & 4 != 0 {
+                    now |= game::kbm::MENU_ADJUST_LEFT;
+                }
+                if stick & 8 != 0 {
+                    now |= game::kbm::MENU_ADJUST_RIGHT;
+                }
             }
         }
         let shell = matches!(self.screen, Screen::Shell);
@@ -1206,6 +1222,7 @@ pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()
         mission_file: None,
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),
+        dlc_heroes: false,
     };
     let autopilot = game::dev::on() && std::env::var("OPENBF_AUTOPILOT").is_ok_and(|v| v == "1");
     let quit_at = quit_at();
@@ -1478,7 +1495,15 @@ impl winit::application::ApplicationHandler for App {
                             true => autopilot_pad(self.walk.as_ref().map_or(0, |w| w.0.sim.tick)),
                             false => {
                                 let pad = self.sample_pad();
-                                self.kbm.pad(pad)
+                                let flying = self
+                                    .walk
+                                    .as_ref()
+                                    .is_some_and(|(w, _)| w.player_pilots_flyer());
+                                self.kbm.pad(if flying {
+                                    input::flyer_sticks(pad)
+                                } else {
+                                    pad
+                                })
                             }
                         };
                         self.sprint_latch.apply(pad, on_foot, sprinting)
@@ -1545,16 +1570,24 @@ impl winit::application::ApplicationHandler for App {
                                 ),
                             }),
                         };
+                        const ADJUST: u32 =
+                            game::kbm::MENU_ADJUST_LEFT | game::kbm::MENU_ADJUST_RIGHT;
+                        let adjust = (edges
+                            | self.pause_repeat.step(self.prev_menu_buttons & ADJUST, dt))
+                            & ADJUST;
+                        // The D-pad's and arrows' presses: a step is not a Morse key.
                         let input = ui::menu::MenuInput {
                             up: edges & 1 != 0,
                             down: edges & 2 != 0,
-                            left: edges & 4 != 0,
-                            right: edges & 8 != 0,
+                            left: edges & 4 != 0 && edges & game::kbm::MENU_ADJUST_LEFT == 0,
+                            right: edges & 8 != 0 && edges & game::kbm::MENU_ADJUST_RIGHT == 0,
                             confirm: edges & 16 != 0,
                             back: edges & 32 != 0,
                         };
                         let rows_input = game::pause::rows_input(
                             input,
+                            adjust & game::kbm::MENU_ADJUST_LEFT != 0,
+                            adjust & game::kbm::MENU_ADJUST_RIGHT != 0,
                             model.respawn_confirm || model.class_choices.is_some(),
                         );
                         let (cursor, actions) = ui::menu::navigate(&model, rows_input);
@@ -2253,6 +2286,7 @@ mod tests {
             mission_file: None,
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
+            dlc_heroes: false,
         }
     }
 

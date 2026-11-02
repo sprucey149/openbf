@@ -1268,3 +1268,72 @@ fn remembered_start_contacts_do_not_alias_poses_or_bodies() {
     assert_eq!(remembered, plain);
     assert_eq!(held(), (false, 0));
 }
+
+/// [`super::queries::triangle_contact`] is parry's answer, bit for bit, for
+/// every kind of mover, at poses that touch, sink into and miss a triangle.
+#[test]
+fn a_triangle_contact_with_kept_buffers_answers_as_parry_does() {
+    use parry3d::shape::{Ball, Capsule as PCapsule, Cuboid, Cylinder, Shape as PShape, Triangle};
+    let movers: [Box<dyn PShape>; 4] = [
+        Box::new(PCapsule::new_y(0.5, 0.4)),
+        Box::new(Ball::new(0.6)),
+        Box::new(Cuboid::new(vector(Vec3::new(0.5, 0.8, 0.3)))),
+        Box::new(Cylinder::new(0.7, 0.4)),
+    ];
+    let mut seed = 0x5eed_1234u32;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+    };
+    let bits = |c: &parry3d::query::Contact| {
+        [
+            c.dist,
+            c.point1.x,
+            c.point1.y,
+            c.point1.z,
+            c.point2.x,
+            c.point2.y,
+            c.point2.z,
+            c.normal1.x,
+            c.normal1.y,
+            c.normal1.z,
+            c.normal2.x,
+            c.normal2.y,
+            c.normal2.z,
+        ]
+        .map(f32::to_bits)
+    };
+    let (mut deep, mut touching) = (0, 0);
+    for k in 0..20_000 {
+        let mut p = || parry3d::na::Point3::new(next() * 4.0, next() * 4.0, next() * 4.0);
+        let tri = Triangle::new(p(), p(), p());
+        let iso = |x: f32, y: f32, z: f32, a: f32| {
+            crate::collision::Isometry::new(
+                parry3d::na::Vector3::new(x, y, z),
+                parry3d::na::Vector3::new(a, a * 0.5, -a),
+            )
+        };
+        let mover = iso(next() * 3.0, next() * 3.0, next() * 3.0, next());
+        let body = iso(next() * 0.5, next() * 0.5, next() * 0.5, next());
+        let m = movers[k % movers.len()].as_ref();
+        let ours = super::queries::triangle_contact(&mover, m, &body, &tri);
+        let theirs = parry3d::query::contact(&mover, m, &body, &tri, 0.0)
+            .ok()
+            .flatten();
+        assert_eq!(
+            ours.as_ref().map(bits),
+            theirs.as_ref().map(bits),
+            "case {k}"
+        );
+        if let Some(c) = theirs {
+            touching += 1;
+            deep += usize::from(c.dist < -0.01);
+        }
+    }
+    assert!(
+        touching > 1000 && deep > 500,
+        "{touching} touching, {deep} deep"
+    );
+}

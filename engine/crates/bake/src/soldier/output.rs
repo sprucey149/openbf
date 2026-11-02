@@ -34,9 +34,9 @@ pub const BORROWED_PRONE: &[&str] = &[
 
 /// The BF2 throw clips a BF1 soldier borrows (`bake_soldier_anims`, card
 /// GTHRW): BF2's offhand throw (`shoot_secondary` underhand,
-/// `shoot_secondary2` overhand) is played on every map, a named deviation
-/// (BF1's own is `grenade_stand_shoot3` on the grenade's set,
-/// `analysis/re-grenade-throw-anim.md` §0).
+/// `shoot_secondary2` overhand), played only when the class picker fields him
+/// on a BF2 map. On a BF1 map he plays BF1's own, `grenade_stand_shoot3` on the
+/// grenade's set (`analysis/re-grenade-throw-anim.md` §0).
 pub const BORROWED_THROW: &[&str] = &[
     "human_rifle_stand_shoot_secondary_full",
     "human_rifle_stand_shoot_secondary2_full",
@@ -68,13 +68,21 @@ pub fn bake_soldier_anims(
         .as_deref()
         .map(crate::tier::PcTextures::load)
         .transpose()?;
-    let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
+    let (buf, original) =
+        crate::gameplay::read_with_original(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let (m, mut skel) = find_soldier(inner, model)?;
     crate::dlc_attachment::canonical_bind(inner, &mut skel)?;
     // Some addon soldiers store skinned vertices in model space (INFO[0]=0).
     // The converter already handles both spaces and validates bone bindings.
-    let mut sm = rigid_or_skinned_model(&m, &skel)?;
+    let mut sm = if let Some(original) = &original {
+        // A donor's stored vertex indices address its own node order.
+        let original_inner = mungefs::open(original).map_err(|e| anyhow!("{e}"))?;
+        let (_, donor_skel) = find_soldier(original_inner, model)?;
+        super::skinned_model_from_donor(&m, &skel, &donor_skel)?
+    } else {
+        rigid_or_skinned_model(&m, &skel)?
+    };
     // BF2's cloth, rest shape pinned to its bones (card CLOTH; the step is
     // CLOTH2). A sheet only a cloth draws is opaque unless the class says
     // Transparent.
@@ -103,7 +111,7 @@ pub fn bake_soldier_anims(
     let mut meta = SoldierAnims::default();
     if let Some(anim_path) = anim_lvl {
         let anim_resolved = crate::resolve_ci(anim_path);
-        let abuf = std::fs::read(&anim_resolved).with_context(|| anim_resolved.clone())?;
+        let abuf = crate::gameplay::read(&anim_resolved).with_context(|| anim_resolved.clone())?;
         let ainner = mungefs::open(&abuf).map_err(|e| anyhow!("{e}"))?;
         let sanm = mungefs::sanm::find_sanm(ainner).map_err(|e| anyhow!("{e}"))?;
         // BF2's sets take every soldier side's classes and banks (a level
@@ -112,10 +120,13 @@ pub fn bake_soldier_anims(
             Some(_) => ["ALL", "IMP", "REP", "CIS"]
                 .iter()
                 .filter_map(|s| {
-                    let parent = Path::new(lvl_path).parent()?;
-                    std::fs::read(crate::join_ci(parent, &format!("{s}.LVL"))).ok()
+                    Path::new(lvl_path)
+                        .parent()
+                        .map(|parent| crate::join_ci(parent, &format!("{s}.LVL")))
                 })
-                .collect(),
+                .filter(|path| path.is_file())
+                .map(crate::gameplay::read)
+                .collect::<Result<_>>()?,
             None => Vec::new(),
         };
         let mut banks = mungefs::anim::find_banks(ainner).map_err(|e| anyhow!("{e}"))?;
@@ -275,8 +286,8 @@ pub fn bake_soldier_anims(
         // BF2 has no prone clips (`missing`); BF1's rifle prone clips are
         // borrowed when `BF1_ANIMS` names BF1's COMMON.LVL (issue #40, one
         // gameplay: a BF2 soldier goes prone too). A BF1 soldier borrows
-        // BF2's throw when `BF2_ANIMS` names BF2's INGAME.LVL (card GTHRW,
-        // BF2's throw on every map). The two games' soldier bones share names.
+        // BF2's throw when `BF2_ANIMS` names BF2's INGAME.LVL (card GTHRW, for
+        // a BF2 map's class picker). The two games' soldier bones share names.
         let (lender, lent) = match &sanm {
             Some(_) => ("BF1_ANIMS", BORROWED_PRONE),
             None => ("BF2_ANIMS", BORROWED_THROW),
@@ -284,7 +295,7 @@ pub fn bake_soldier_anims(
         let lender_buf = match std::env::var_os(lender) {
             Some(p) => {
                 let resolved = crate::resolve_ci(&p.to_string_lossy());
-                Some(std::fs::read(&resolved).with_context(|| format!("{p:?}"))?)
+                Some(crate::gameplay::read(&resolved).with_context(|| format!("{p:?}"))?)
             }
             None => None,
         };
@@ -512,7 +523,11 @@ pub fn bake_textures_flagged(
         // along a mask nobody authored and the tier flip would change the
         // silhouette.
         let mut r = crate::tier::Resolved::from_ps2(t);
-        let mut tier2 = crate::tier::tier2(t, pc);
+        let usage = crate::tier::Usage {
+            sky: false,
+            alpha_carried: flags & crate::detail::ALPHA_IS_MEANINGFUL != 0,
+        };
+        let mut tier2 = crate::tier::tier2(t, pc, usage);
         if flags & crate::detail::ALPHA_IS_MEANINGFUL == 0 {
             r.make_opaque();
             if let Some(o) = tier2.as_mut() {
@@ -570,7 +585,7 @@ pub fn bake_weapon(
         .split(',')
         .map(|p| {
             let resolved = crate::resolve_ci(p);
-            std::fs::read(&resolved).with_context(|| p.to_string())
+            crate::gameplay::read(&resolved).with_context(|| p.to_string())
         })
         .collect::<Result<Vec<_>>>()?;
     let inners = bufs

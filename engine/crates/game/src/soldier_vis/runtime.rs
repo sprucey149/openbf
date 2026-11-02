@@ -29,6 +29,7 @@ impl SoldierVisuals {
         let crate::walk::ClassAssetRequest { team, class, game } = *request;
         let teams = request.templates(walk);
         let mut added = Self::load(r, root, game, &teams);
+        added.fit_throw_to_map(root, self.bf2);
         let bodies = self.assets.len();
         let weapons = self.weapons.len();
         for draw in &mut added.per_class[team] {
@@ -52,12 +53,19 @@ impl SoldierVisuals {
         self.sabers[team].push(added.sabers[team].pop().flatten());
         let mut cache = HashMap::new();
         for weapon in &walk.sim.weapon_classes[self.grenades.len()..] {
+            // A BF2 class on a BF1 map throws BF1's grenade: BF1's model.
+            let bf1_grenade = !self.bf2
+                && weapon
+                    .ordnance
+                    .sticky
+                    .as_ref()
+                    .is_some_and(|sticky| !sticky.bf2);
             let model = weapon.ordnance.geometry.as_deref().map(|name| {
                 let index = self.weapons.len();
                 self.weapons.push(Self::load_weapon(
                     Some(&mut *r),
                     root,
-                    game,
+                    if bf1_grenade { "bf1" } else { game },
                     name,
                     &mut cache,
                 ));
@@ -87,6 +95,10 @@ impl SoldierVisuals {
         let mut vis = Self::load(r, assets_dir, &scene.manifest.source_game, &walk.teams);
         vis.lod_view.near = scene.manifest.lighting.near_scene_range;
         vis.lod_view.far = scene.manifest.lighting.far_scene_range;
+        vis.own_model = std::array::from_fn(|t| {
+            let classes = &walk.sim.classes[t];
+            classes.iter().map(|c| c.droideka.is_some()).collect()
+        });
         let mut cache = HashMap::new();
         let mut models = HashMap::new();
         vis.grenades = walk
@@ -113,6 +125,11 @@ impl SoldierVisuals {
             crate::viewer::walker_rigs(&scene.manifest, assets_dir, &walk.vehicle_geometry)
         } else {
             walk.walker_rigs.clone()
+        });
+        vis.outlines = std::array::from_fn(|t| {
+            (0..walk.sim.classes[t].len())
+                .map(|c| vis.measure_outline(t as u8, c as u8))
+                .collect()
         });
         vis
     }
@@ -321,6 +338,8 @@ impl SoldierVisuals {
             }
         }
         Self {
+            own_model: Default::default(),
+            outlines: Default::default(),
             lod_view: Default::default(),
             low_skins: Default::default(),
             assets,
@@ -473,6 +492,7 @@ impl SoldierVisuals {
     ) -> WeaponAsset {
         let mut side = assets_dir.join(format!("side_{game}"));
         let mut parts = Vec::new();
+        let mut bounds = None;
         let mut wpath = side.join("weapons").join(format!("{wg}.glb"));
         let common = assets_dir.join(format!("common_{game}"));
         let shared = common.join("models").join(format!("{wg}.glb"));
@@ -484,6 +504,7 @@ impl SoldierVisuals {
             match crate::assets::load_glb(&wpath) {
                 Ok(cpu) => match crate::viewer::upload_submeshes(r, &cpu) {
                     Ok(up) => {
+                        bounds = super::position_bounds(&cpu.positions);
                         for (k, (mesh, mat, layer, _)) in up.into_iter().enumerate() {
                             let tex = Self::texture(r, &side, mat, cpu.uv_scroll(k), cache);
                             parts.push((mesh, tex, layer, part_spec(r, cpu.spec_pass(k))));
@@ -499,7 +520,11 @@ impl SoldierVisuals {
             .and_then(|text| ron::from_str(&text).ok())
             .unwrap_or_default();
         println!("weapon {wg}: {} parts", parts.len());
-        WeaponAsset { parts, nodes }
+        WeaponAsset {
+            parts,
+            nodes,
+            bounds,
+        }
     }
 
     /// What a unit's class draws: its own pair, or the team's first-class
@@ -854,7 +879,6 @@ impl SoldierVisuals {
                     && v.throwing.is_none()
                     && (v.repair_shot.take() == Some(wc) || fired.contains(&(i as u32)))),
             throw: pending_throw.filter(|_| !drop_shot),
-            throw_windup: v.throw_windup,
             reloading: weapon.reloading(),
             reload_time: class.map_or(0.0, |c| c.reload_time),
             // PROVISIONAL and ours (FEEL_NOTES; the PS2's two soldier
@@ -1228,26 +1252,6 @@ impl SoldierVisuals {
         out
     }
 
-    /// `read` (e.g. [`Self::jet_frames`], [`Self::fire_points`]) as this
-    /// frame draws: under the pose blended between the last two ticks with
-    /// the player's look preview (`render_blend::blend_in_looking`, card
-    /// RINT), the one the soldiers' draw lists read. The walk is left as it
-    /// came.
-    pub fn as_drawn<T>(
-        &self,
-        walk: &mut WalkSim,
-        look: &core::sim::PadState,
-        read: impl FnOnce(&Self, &WalkSim) -> T,
-    ) -> T {
-        if walk.blend.applied() {
-            return read(self, walk);
-        }
-        crate::render_blend::blend_in_looking(walk, look);
-        let out = read(self, walk);
-        walk.blend_out();
-        out
-    }
-
     /// Every drawn unit's weapon fire point in the world, by unit index:
     /// `hp_weapons` × the weapon in hand's `FirePointName` node (the `hp_weapons`
     /// origin when the weapon model has no such node, §4.1). `None` for a
@@ -1444,20 +1448,8 @@ impl SoldierVisuals {
         }
     }
 
-    /// A soldier of `team`'s class `class` standing at `model` with his
-    /// primary weapon in hand, outside the sim (the spawn screens' preview
-    /// and line-up, card SSELB): `animator` is his own, stepped `dt` on the
-    /// standing clip of the primary's set. `None` when the class has no
-    /// model. Returns his body's draws and the weapon's.
-    pub fn still_draws(
-        &self,
-        animator: &mut Animator,
-        team: u8,
-        class: u8,
-        model: Mat4,
-        dt: f32,
-    ) -> Option<(Vec<SkinnedDrawCmd>, Vec<render::DrawCmd>)> {
-        let sa = self.asset_for(team, class)?;
+    /// Steps `animator` `dt` on the standing clip of the class's primary's set.
+    fn still_step(&self, sa: &SoldierAsset, animator: &mut Animator, team: u8, class: u8, dt: f32) {
         if let Some(rig) = &sa.rig {
             let row = &self.anim[usize::from(team.min(1))];
             let anim = row.get(usize::from(class).min(row.len().saturating_sub(1)));
@@ -1477,7 +1469,6 @@ impl SoldierVisuals {
                 set: rig.weapon_set(anim.map_or("human", |a| &a.family), bank),
                 fired: false,
                 throw: None,
-                throw_windup: 0.0,
                 reloading: false,
                 reload_time: 0.0,
                 alert: false,
@@ -1485,6 +1476,80 @@ impl SoldierVisuals {
             };
             animator.step(rig, &sa.asset.clips, &sa.asset.skeleton, &input, dt);
         }
+    }
+
+    /// What the class's standing soldier covers seen from above, in metres from
+    /// his feet, body and weapon through his idle clip. `None` when the class
+    /// has no body here (a droideka's is its own model) or its weapon no bounds
+    /// (the screens' fit, `spawn_preview`).
+    pub fn still_outline(&self, team: u8, class: u8) -> Option<super::Outline> {
+        match self.outlines[usize::from(team.min(1))].get(usize::from(class)) {
+            Some(known) => *known,
+            None => self.measure_outline(team, class),
+        }
+    }
+
+    /// [`Self::still_outline`], walked through the idle clip: tens of
+    /// milliseconds for a team.
+    fn measure_outline(&self, team: u8, class: u8) -> Option<super::Outline> {
+        const IDLE_SAMPLES: usize = 24;
+        const IDLE_STEP: f32 = 0.25;
+        let own = &self.own_model[usize::from(team.min(1))];
+        if own.get(usize::from(class)).copied().unwrap_or(false) {
+            return None;
+        }
+        let sa = self.asset_for(team, class)?;
+        let m = &sa.asset.mesh;
+        let weapon = self
+            .class_draw(team, class)
+            .weapon
+            .and_then(|w| self.weapons.get(w));
+        let weapon_box = match (sa.hp_weapons, weapon) {
+            (Some(hp), Some(w)) => Some((hp, w.bounds?)),
+            _ => None,
+        };
+        let mut animator = Animator::default();
+        let mut outline = super::Outline::default();
+        for _ in 0..IDLE_SAMPLES {
+            self.still_step(sa, &mut animator, team, class, IDLE_STEP);
+            let palette = sa
+                .asset
+                .skeleton
+                .palette(&animator.pose(&sa.asset.skeleton).locals());
+            for (p, j) in m.positions.iter().zip(&m.joints) {
+                let bone = palette.get(usize::from(j[0]))?;
+                outline.add(bone.transform_point3(glam::Vec3::from(*p)));
+            }
+            if let Some((hp, (a, b))) = weapon_box {
+                let hand = palette[hp] * sa.asset.skeleton.global_bind[hp];
+                for k in 0..8 {
+                    let pick = |bit: usize, a: f32, b: f32| if k >> bit & 1 == 0 { a } else { b };
+                    outline.add(hand.transform_point3(glam::Vec3::new(
+                        pick(0, a.x, b.x),
+                        pick(1, a.y, b.y),
+                        pick(2, a.z, b.z),
+                    )));
+                }
+            }
+        }
+        Some(outline)
+    }
+
+    /// A soldier of `team`'s class `class` standing at `model` with his
+    /// primary weapon in hand, outside the sim (the spawn screens' preview
+    /// and line-up, card SSELB): `animator` is his own, stepped `dt` on the
+    /// standing clip of the primary's set. `None` when the class has no
+    /// model. Returns his body's draws and the weapon's.
+    pub fn still_draws(
+        &self,
+        animator: &mut Animator,
+        team: u8,
+        class: u8,
+        model: Mat4,
+        dt: f32,
+    ) -> Option<(Vec<SkinnedDrawCmd>, Vec<render::DrawCmd>)> {
+        let sa = self.asset_for(team, class)?;
+        self.still_step(sa, animator, team, class, dt);
         let palette: std::sync::Arc<[Mat4]> = sa
             .asset
             .skeleton

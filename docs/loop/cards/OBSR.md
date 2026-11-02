@@ -64,40 +64,6 @@ main (b870afc; 55f055d differs in the game crate only).
    heading there takes the four to 7 / 17 / 20 / 25 - on the maps it removes a third of the changes of side and moves
    no gate number (recycles 244 -> 280 over 32 seeds, not resolved; the yard 247 -> 364 ticks): a pointer, not a fix.
 
-## What to do
-Each behind a switch in one scratch binary, the null variant = main byte for byte; 32 seeds before believing a gain
-(of this audit's variants only no2, no3 and nolevel were resolved at 8 seeds).
-1. Tatooine's gap: keep rule 2, but do not let the turn carry a bot away from a point it was within a few metres
-   of - e.g. the other tangent (the parent's flip) before the inside corner when the aim point is nearer than the
-   turn's wall is long, or a second meeting of the same contact takes the other hand. LLEG's local floor search is
-   the other candidate (hub 77's point cannot be reached within the 1 m arrival, its radius is 0.6 m).
-2. Naboo's column: (a) the watch - while a commitment is live or the walk is in recovery, progress is NEW ground
-   (the endgame's rule, `stall::watch`), so a bot going round one body for two minutes is given up; (b) then why it
-   holds four bots at once (a straight leg from off the graph across the ruin: RETW / LLEG may own it - say so there).
-3. Bespin's rims: first try OBST's own unlanded `lead_tmp/obst/fix2_cumulative.patch` ("beside" = a step that way
-   is shut by anything: a drop, a steep floor, a rim barrier) against Bespin's floor deaths, which its table did
-   not show; else no window immunity for a commitment met at a `StopKind::Barrier` / a drop.
-4. Tests the parent fails: the 40 m wall; a placements bound for one box (changes of side, blocked picks);
-   a pillar-in-a-gap scene for 1 and a rim for 3 (mutation-checked; run each scene on 9cd9b52's rule too).
-5. The allowance (`Round::ticks`): once spent it never comes back in that life (it is zeroed only under
-   `ticks < ROUND_MAX`; its doc says "since a free walk last got nearer its waypoint") - 8.0 % of on-foot unit-ticks
-   (BF2 POL1 28 %, BF1 HOT1 27 %, BF2 HOT1 19 %), 39.5 % of failed windows; in it rule 1 is off and `recover` is not
-   reset, so the post is given up on every 6th failure of the LIFE (and `recover` is a u8 that saturates at 255,
-   not a multiple of 6: after that never). Resetting it as documented changes no headline (stalled 1.23 %, rounds
-   1,024 / 1,024, recycles 250) and bots change their target post 7 % less often (on-foot seconds per change 145.8
-   -> 156.6, t +4.5; parent 161.8) but breaks the penned bot's give-up test. Decide: the doc, or a reset on arrival /
-   a reached hub with the pen's give-up kept.
-
-## Acceptance
-- Tatooine 1, seeds 9-16: unit-seconds within 14 m of (-427, 77) at most 500 (parent 173, main 7,353), lives of
-  100 s or more at most 2 (22); `recycle tat1` over seeds 9-40 at most 15 (12 / 37).
-- Naboo Plains, seeds 1-8 x 540 s (`--botq`): lives of 200 s or more within 12 m of (-107, 61) at most 2 (2 / 15),
-  unit-seconds there at most 3,500 (3,423 / 7,188).
-- Bespin Platforms, seeds 9-40: `floor` deaths at most 1,100 (1,039 / 1,361) with its recycles at most 20 (47 / 6).
-- All 32 maps: stalled windows at most 1.30 % (`lead_tmp/audit-obst/tools/census_run.sh`; 1.25 %), lap windows at
-  most 22 per 1000 (`tools/laps.py`; 21.6), seeds 9-40 rounds at least 1,023 of 1,024 and recycles at most 270 (244).
-- The new tests fail on the parent's rule and under their own mutation; paste the three tables.
-
 ## Notes
 - Tools and every raw row: `engine/artifacts/lead_tmp/audit-obst/` (README.md). The scratch binary's switches
   (`tools/observer_patch.py`, e9ce6db): NO1 NO2 NO3 NO4 NOLEVEL TICKFIX CORNERFIX + `AUDIT_OBST_LOG`.

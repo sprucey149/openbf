@@ -43,35 +43,6 @@ sounds (217 steps); the player's own are the most constant sound of the game aft
   > 5.0 / 5.5; BF2 > 0.78 x MaxSpeed (0.71 to stay).
 - The weapon `*_mvt_*` keys: started by the code, no sample on either disc -> play nothing. Stop slots: never read.
 
-## Do (build; `analysis/re-foley.md` section 9 is the change list)
-1. **Bake**: `mungefs::foley` parses the `ffx_` chunks of each `lvl_` sub-level; `bake sounds` writes
-   `<map>/sounds/foley.ron` (sub-level -> groups -> rows: class hash -> slot property hashes; members the sub-level
-   does not define are dropped). Reference parser: `lead_tmp/foly/ffx_parse.py`, table `lead_tmp/foly/table_out.txt`.
-2. **`game::foley`**: one tracker per unit, stepped in the per-tick hook beside `event_sounds::each`:
-   the row (unit class `FoleyFXClass` through `base`, the battle's sub-level, the surface group), the movement
-   clip id by the PS2's rules and a phase advanced by distance / the clip's root travel (run forward 4.014 m per
-   cycle), a step at each foot's lift-off phase; a walk step at the start and at the stop; Jump / Land / Roll /
-   Squat / BodyFall and (BF1 rows) Stand / Prone on the stance changes. Sounds by property hash (`BodyFall`'s
-   names are not recovered).
-3. **Surface**: terrain / water / the prop under the feet (its class's `FoleyFXGroup`, prop hash 2714356677).
-   If the floor query is more than this session holds, land steps on `terrain_foley` + water first and write
-   `resume:` for the prop groups (UTA1's and MYG1's `terrain_foley` is already stone).
-4. **Who**: default to soldiers inside the camera's view (the PS2's rule); one constant for "all within 50 m".
-   Add the line to `engine/artifacts/loop/FEEL_NOTES.md`.
-5. Nothing for the weapon `*_mvt_*` keys.
-
-## Acceptance (run and paste)
-- Bake test: `foley.ron` of bf1_nab1 holds `nab1cw` = 4 groups x 3 rows (`cis_inf_droid`, `rep_inf_trooper`,
-  `wok_inf_soldier`), of bf2_uta1 `uta1cw` = 3 groups x 5 rows - the PS2's RAM (re-foley 8.3).
-- On the SOUND_LOG referee (`lead_tmp/sndc/port/sound_log.patch`, `pad120.ron`; the patch may land as a dev env
-  var): the player's forward run on bf1_nab1 logs `cis_inf_droid_run_grass_right` / `_left` alternating every
-  0.31 +- 0.03 s (PS2 0.311), on bf2_uta1 `cis_inf_droid_run_stone_*` every 0.28 +- 0.03 s (PS2 0.280); the jump
-  logs `..._jump_<surface>` then `..._land_<surface>`; BF1 strafe left logs run steps, strafe right walk steps.
-- Counts over the 105 s: the player's own steps within 2x of the PS2's 104 (NAB1) / 45 (UTA1); the other
-  soldiers' steps with the in-view default against the PS2's 107 / 15, and with "all within 50 m" for the record.
-- Unit tests with a mutation check: the surface rule (terrain, water, prop group, a group with no row keeps the
-  last), the gait rules of both games (the thresholds and BF1's two always-run directions).
-
 ## Original Do / Acceptance (2026-10-02, before the RE)
 RE: which foley group a soldier class uses and where the table is on the disc (the `ffx` data), how the surface is
 chosen (terrain texture, collision material), what starts a step (an animation event, a distance) and the walk / run

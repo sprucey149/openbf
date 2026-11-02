@@ -33,13 +33,3 @@ null on the PS2. The VWLK audit (2026-09-29) found this contradicted by the disc
   - the moving kaadu carries a team-2 soldier 2.0 m above its origin.
 - VPAD's other "absent" class, BF2 YAV1's `re_hover_barcspeeder`, is named only in YAV1.LVL (no side or mission loads
   it). That one stays absent.
-
-## Acceptance
-- The port's NAB1 class DB carries the missions' ReadDataFile side classes, at least SIDE\gun.lvl's gun_walk_kaadu.
-- VPAD's pads spawn it for the defenders in both eras.
-- The module doc and the census test drop (bf1_nab1, gun_walk_kaadu) from `absent`.
-- The kaadu stands on its pads until WALK moves it (its BF1 gait and turn: card WALKB1).
-- Declare `sweep`: new vehicles re-seed the hover jitter.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — BF1 NAB1 is a showcase map. Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).

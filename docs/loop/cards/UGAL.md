@@ -27,10 +27,6 @@ battle droid holding a rifle; it fires from its wrists. The cause is the UNIT GA
 - 52 unit goldens in `engine/goldens/units/`; every class whose weapon is not its side's rifle (droideka, magnaguard,
   snipers, engineers, heroes, …) is likely wrong the same way.
 
-## Acceptance
-- The gallery resolves each class's weapon through the roster path (one shared function, no second guess).
-- Every moved unit golden declared, VIEWED, and re-blessed via land.py; a list of which classes changed weapon and why.
-
 ## Notes
 - Created 2026-09-28 by the planner. Secondary slots (the SBD lists 4 weapons) are UAUD2 / GREN, not this card.
 - UAUD1 (2026-09-29): the BATTLE has its own weapon bug - UWPN (a class sharing a body model draws the first class's

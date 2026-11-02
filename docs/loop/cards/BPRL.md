@@ -36,24 +36,6 @@ are showcase maps. A second, separate fault: a render with no battle lights post
   `point_light::still_lights` never applies the mission (doc section 6). `walk/cp5_cp6_b090` whole frame: PS2
   24.2/32.3/41.8, port 21.8/40.2/67.8.
 
-## Acceptance (each one a check to RUN and paste)
-1. The blend (`render/src/shader.wgsl`): model draws' vertex colour (rgb) and the point sum as
-   persp(a wc) / persp(wc), wc = max(w, |x_view| / 5.093, |y_view| / 4.461, 0.1) - the guard in view angles so a
-   wider window keeps the PS2's - behind one const that switches it off. A named deviation from perspective shading.
-2. Referee test (new, CPU side): `gsraster.py`'s numbers as vectors - the weights for the pen's fan triangle
-   (vertex 132 under the eye) at the stored pose give the box means of doc section 4 within 0.5 level; mutation
-   check: wc = w fails it.
-3. `scripts/parity.py`: bf2_cor1 <= 6.0 (`walk/cp2_cp3` four bearings <= 4.0), no map up by more than 0.5 except
-   bf2_kam1 (declared: the post's pool had hidden a deck 1.8 x too dark, card B1DK), all-maps mean <= 10.65.
-4. Boxes within 5 levels of the prototype's: COR1 `cp2_cp3_b000` (0,340,640,470) 69.9/62.8/47.6; UTA1
-   `cp3_con_cp1_b000` card box B - R <= +5 (base +36, PS2 +7); MYG1 `cp4_cp5_con_b090` (416,384,627,470) >= 60;
-   TAN1 `cp0_cp6con_b270` wall (0,230,640,330) and TAT2 `cp3_cp1_b000` whole frame unchanged within 1 level.
-5. The stills: `still_lights` takes the posts of the map's conquest mission (roster, killed, owners) and
-   `pose_render` the viewer's team from the pose JSON (`team`): DEA1 `walk/cp5_cp6_b090` whole-frame blue within 10
-   of the PS2's 41.8 (today 67.8); bf2_dea1's parity better; HOT1 and KAM1 pairs re-scored with the PS2 player's team.
-6. Goldens: VIEW every sheet that moves and declare them by name; a golden that turns darker or brighter near the
-   camera on a big floor is the intent, anything else is not.
-
 ## Result (2026-10-03, landed b9c7939 + goldens f59f315; report `reports/20261003_0555_card_BPRL.md`)
 - 1 done; 2 referee 0.12 / 0.22 level (bar 0.5), mutation fails; 3 all maps 10.618, COR1 5.945 (cp2_cp3 2.46-3.53),
   KAM1 +0.655 declared, nothing else over +0.32; 4 COR1 69.9/62.8/47.6, UTA1 B - R +0.7, MYG1 66.0, TAN1 / TAT2

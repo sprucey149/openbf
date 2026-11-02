@@ -46,10 +46,6 @@ STALL C5 + C6 (`analysis/re-round-stalls.md` §2).
 - NAB1 (a showcase map), (−106, −108.5, 62.9), 7 seeds, into `nab1_prop_ruins_column2`;
 - MYG1 seed 6, 54,140 ticks, into `myg1_bldg_med_spiral_ruin2`.
 
-## Acceptance
-- On 8 seeds, the POL1 radar-door, GEO1 bunker, NAB1 ruins-column and MYG1 spiral-ruin clusters are gone.
-- NAB1's `stuck_max` median < 2,000 (was 2,400, max 6,540).
-
 ## Note from the maintainer's "rounds that do not end" pass (2026-10-01, main 4603e9e, `lead_tmp/endings/README.md`) — `first: 6`
 - POL1's radar door (18, 25, 84) is still the top walking-in-place spot on seed 1: 456 unit-seconds of team 1
   (`samples/bf2_pol1_s1.csv`). POL1 finishes 8/8 now, so it costs time, not rounds.

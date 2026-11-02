@@ -21,27 +21,11 @@ VTURB keeps the world's static building model for a turret (no viewer geometry),
 ## Evidence
 Classes author TurretNodeName / AimerNodeName / BarrelNodeName (BF1 com_weap_gunturret main_cylinder / turret_main; YAV1 tower cube_y / gun / barrel; HOT1 turret_y / turret_x / lgun). uta1_bldg_turret authors DestroyedGeometryName uta1_bldg_turret_destroyed. RE needed: how the PS2 poses those nodes (the aimer B1 FUN_0026e260 writes angles; which node takes yaw vs pitch) and what a dead armed building does (removed like a vehicle §6, or its destroyed geometry like a building).
 
-## Acceptance
-analysis note on the two questions; then a build that draws the turret's moving parts rigidly per node from GunState and the destroyed state; a golden or a turret_ride frame viewed.
-
-- AUDIT VTURB (2026-09-29, verifier SUPPORTED): a dead armed building comes back.
-  - `RespawnTime` is parsed into building class +0x162c (B1 FUN_001c0b10 B1:67411). The building ctor stores FLT_MAX
-    there (B1:67217); the armed-building ctor overrides it with 120.0 (FUN_001c4cd0 B1:70305).
-  - On destruction FUN_001bfb88 sets a rate = MaxHealth / RespawnTime (B1:66848-66853), so the building heals back
-    over RespawnTime [D, the rate's reader not traced].
-  - BF1 authors 30 s (geo_bldg_geoturret) and 50 s (yav_bldg_tower_turret); the rest take 120 s.
-  - The port's turret has no pad, so today a destroyed one never returns — build the regen with the destroyed state.
-- AUDIT VTURB: the aimer / barrel nodes the draw needs are the same ones VTURA fixes the fire point from (a barrel
-  with no FirePointName fires from its BarrelNodeName, FUN_0026e260 B1:192569/192606).
-
 ## Note (PXWA, 2026-09-29, lane 2)
 BF1 BES1's building turrets stand barrel-level on the PS2 and in the port's bind pose (fins up):
 `engine/artifacts/pcsx2/ref/bf1_bes1/walk/pairs/cp3_cp18__sheet.png` b270, `cp4_cp17__sheet.png` b180.
 BF1 HOT1's tower turrets (`hoth_bldg_hoth_turret` / `_dish_turret`) carry their gun heads on the PS2; the port draws
 the base only: `engine/artifacts/pcsx2/ref/bf1_hot1/walk/pairs/cp2_cp6__sheet.png` b180/b270.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — turret guns that turn where they aim (HOT1). Value 3 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
 
 ## Note (VTUR2, 2026-09-30, lane 1) — why the Hoth tower's head is missing
 The head is not missing; it is drawn at the tower's FOOT. `hoth_bldg_hoth_turret` (modl INFO bone_space 0) holds four

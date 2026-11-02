@@ -60,6 +60,7 @@ pub fn instant_action(
     let options = SessionOptions {
         difficulty: ia_level(difficulty),
         population_table: crate::conquest_defaults::TABLE,
+        dlc_heroes_installed: crate::dlc::installed(assets_dir),
         ..Default::default()
     };
     InstantAction::new(maps, texts, options)

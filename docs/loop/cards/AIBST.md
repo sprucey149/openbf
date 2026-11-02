@@ -20,11 +20,3 @@ Split off card STTAP (2026-10-02; cleanse CLNC's note there). `core/src/ai.rs`'s
 ## Evidence
 - `engine/crates/core/src/ai.rs` 404-419 (the constants and their comment).
 - BF2 `FUN_002bb1b0` sends a non-single weapon to `FUN_002bac98` (B2:242171); BF1 `FUN_0023cd40` to `FUN_0023c9c8`.
-
-## Acceptance
-- `analysis/re-ai-difficulty.md` names the ODF keys (or ctor defaults) behind the two burst bounds and the pause constant, with the ELF words (`re_check.py word`) and the disc values for the rifle, the blaster pistol and the repeater of each side.
-- Either the card goes to `phase=build` with a test that a rifle bot's burst lengths and pauses fall in the PS2's ranges, or it closes with the constants confirmed.
-
-- Planner 2026-10-02 09:30: `files:` emptied while this card is `phase: re` (`core/src/ai.rs`, `ai/brain.rs`,
-  `weapon.rs` would have held every `ai/brain.rs` card, the maintainer's numbered ones included, while the RE runs). The build
-  card it opens lists them.

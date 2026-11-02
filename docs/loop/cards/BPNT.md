@@ -31,16 +31,8 @@ light strips (`bf2_geo1/walk/pairs/cp4_cp4__sheet.png`).
   terrain's twin; GLOW owns the self-lit halos.
 - TAN1 has no point-light set: its pink wall is [H] a light region (LREG) or COL0.
 
-## Acceptance
-- RE: which light sets a map loads (per mode layer), the point-light record (position, colour, range, falloff, Static
-  bit), which models / soldiers / terrain take them, the falloff form (VU1), and TAN1's pink source.
-- Build: the port draws them; re-take the PXWB pairs above (the numbers within ~10 levels) and the goldens they move.
-
 ## Notes
 - 2026-09-29 (PXWB part 2, FINDINGS F55): DEA1 (a map with a point-light set) — a red glow column at cp3's console (`pcsx2/ref/bf2_dea1/walk/pairs/cp3_cp3__sheet.png` b000 (210,60,330,400) PS2 (94,68,74) vs port (35,37,43)).
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — BF2 UTA1's red lamp pools (a showcase map). Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
 
 ## Note (2026-09-30, FXB RE, `analysis/re-bolt.md` §5.4, from helper C; the model path is this card's)
 BF2 models (static and skinned) gather ≤ 4 omni lights by the same list and score (`FUN_00597e98` from `FUN_0057cf60`

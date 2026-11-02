@@ -22,10 +22,6 @@ sides, `Target` enum, hulls from `coll`/`prim`, seat routing by pad slot). Every
 PLAN.md §DESIGN SPECS, the P7 bullet (fields, hash order, AI dispatch on `Unit.mount`). VEH0's RE may amend fields
 (damage regions, seat kinds, spawn pads) — read `analysis/re-vehicles.md` first.
 
-## Acceptance
-`core::vehicle` with the decided fields, no vehicle spawned yet; an empty `Sim.vehicles` leaves `--sim-hash 100`, the
-replays and the sweep unchanged; unit tests for handle reuse and the hash append of a non-empty list.
-
 ## VEH0 amendments (2026-09-25, `analysis/re-vehicles.md` §5-§7, §11)
 - **Health:** ONE hull pool per vehicle (the PS2 has no damage regions — §6), so `health: Health` (HealthType::Vehicle)
   replaces PLAN's `Vec<RegionHealth>` and `Target::Vehicle(VehicleHandle)` carries no region.

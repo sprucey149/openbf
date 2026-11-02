@@ -152,6 +152,57 @@ pub struct WeaponAsset {
     /// where its `FirePointName` puts the muzzle flash. Empty when the bake
     /// predates them or the model has none.
     pub nodes: manifest::WeaponNodes,
+    /// The model's box, (least, most); `None` when no model was uploaded
+    /// (the screens' fit, [`SoldierVisuals::still_outline`]).
+    pub bounds: Option<(glam::Vec3, glam::Vec3)>,
+}
+
+/// What a screen soldier covers seen from above (x across the screen, z toward
+/// the viewer): his farthest point in each of 16 directions, enough to find his
+/// edge on screen from any place, where a muzzle toward the viewer looks wider
+/// the farther he stands from the middle.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Outline {
+    points: [Option<(f32, [f32; 2])>; 16],
+}
+
+impl Outline {
+    /// Keeps `at` where it is the farthest yet.
+    pub fn add(&mut self, at: glam::Vec3) {
+        self.add_point([at.x, at.z]);
+    }
+
+    fn add_point(&mut self, at: [f32; 2]) {
+        for (k, best) in self.points.iter_mut().enumerate() {
+            let (sin, cos) = core::fmath::sin_cos(k as f32 * std::f32::consts::TAU / 16.0);
+            let far = at[0] * cos + at[1] * sin;
+            if best.is_none_or(|(most, _)| far > most) {
+                *best = Some((far, at));
+            }
+        }
+    }
+
+    /// Both outlines' points kept as one.
+    pub fn merge(&mut self, other: &Self) {
+        other.points().for_each(|p| self.add_point(p));
+    }
+
+    /// The kept points.
+    pub fn points(&self) -> impl Iterator<Item = [f32; 2]> + '_ {
+        self.points.iter().flatten().map(|(_, at)| *at)
+    }
+}
+
+/// The box of `positions`; `None` when empty.
+fn position_bounds(positions: &[[f32; 3]]) -> Option<(glam::Vec3, glam::Vec3)> {
+    positions
+        .iter()
+        .map(|p| glam::Vec3::from(*p))
+        .fold(None, |b, p| {
+            Some(b.map_or((p, p), |(a, c): (glam::Vec3, glam::Vec3)| {
+                (a.min(p), c.max(p))
+            }))
+        })
 }
 
 /// What one class draws: its body and the gun in its hand, each an index
@@ -380,7 +431,6 @@ pub struct UnitVisual {
     /// a hero accept or a class change): nothing to draw until it respawns.
     gone: bool,
     pending_throw: Option<u8>,
-    throw_windup: f32,
     /// Card VTURG: a seated gunner's world matrix this frame; `None` when he
     /// is not drawn in a seat.
     seat_model: Option<Mat4>,
@@ -603,6 +653,12 @@ fn rider_now<'a>(
 /// (`scripts/rebake.sh`) makes it stop.
 #[derive(Default)]
 pub struct SoldierVisuals {
+    /// `own_model[team][class]`: the screens draw this class with a model of
+    /// its own, not `per_class`'s (a droideka).
+    own_model: [Vec<bool>; 2],
+    /// `outlines[team][class]`, measured at load: a class screen opens on every
+    /// death, and walking every idle clip then would stall its first frame.
+    outlines: [Vec<Option<Outline>>; 2],
     /// Reused per-camera selection scratch; never read by the simulation.
     lod_view: lod::View,
     low_skins: [Vec<Vec<Option<TextureHandle>>>; 2],

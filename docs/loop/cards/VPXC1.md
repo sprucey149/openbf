@@ -19,10 +19,6 @@ VDRAW's acceptance asked for one PCSX2 pair per game. BF2 is done exactly: the Y
 ## Evidence
 lead_tmp/vdraw/padview.py (pads in each reference frustum), lead_tmp/vdraw/{end1,rhn1,tat1_v3,geo1_spawn,geo1_v2}.png (the port's frames). The scratch renderer lead_tmp/vdraw/vdraw_pose.rs (copy into game/examples of a scratch worktree; VEH_AT places one vehicle at a RAM matrix).
 
-## Acceptance
-One BF1 state captured right after the battle starts (or with a pad in view before the bots reach it), the pose read, the port frame at that pose with vehicles: position and yaw line up. Pictures viewed.
-**Note (planner 2026-09-28):** PXWA (the BF1 PCSX2 walkabout, 0 AI so every pad stays parked) is to finish this card; whichever runs first closes the other's pad part.
-
 ## Done 2026-09-29 by PXWA (lane 2)
 - A BF1 battle with ONE unit per team (the IA menu state's `SetUnitCount` store patched to 1; 0 crashes the load), the
   bots held 300 m up from the side-select screen: every pad stays parked (`engine/artifacts/pcsx2/walk_bf1.py`).

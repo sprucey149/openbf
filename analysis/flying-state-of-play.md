@@ -5,12 +5,35 @@
 ## Where this stands (sprint/flying, 2026-11-01)
 
 Steps 1 and 2 below are built for the headless sim. A human can fly every flyer
-on the ground maps with the pad; bots do so only with `OPENBF_FLYER_BOTS=1`,
-because they would otherwise change the ground maps' hashes. Steps 3 and 4 are
-not started. Landing regions are not installed from the missions yet, so their
-rules never apply in a real round (`re-flyer.md`). See `re-flyer.md` and
+on the ground maps with the pad, and bots fly them by default (`re-flyer-ai.md`). Steps
+3 and 4 are not finished: see the section at the end. Landing regions reach the sim from the missions, and only the space
+scripts make the call, so their rules apply on no ground map (`re-flyer.md`). See `re-flyer.md` and
 `re-flyer-ai.md` for what is confirmed, and
 the "What exists" list below for the state before this work.
+
+## Space Assault (sprint/space, 2026-11-01): loads, flies, cannot end, so gated
+
+Behind `OPENBF_SPACE=1`, and only after `OPENBF_BAKE_SPACE=1 scripts/rebake.sh maps` (the default rebake still skips
+the six maps) and `scripts/gen_missions.py --space`, which writes a `<key>_ass.ron` for each of spa1, 3, 6, 7, 8 and 9,
+running the `_cmn` script before the `_ass` one as the disc does. Keep those missions out of the shared folder for now:
+several tests read every mission there and expect a ground map's roster and heroes. `mode_layer_index` picks the objective layer of each. A hangar's
+`com_bldg_controlzone_ctf`, which authors no capture region, is a post that spawns its team and cannot be taken. The
+scripts' `AddLandingRegion` now reach `Sim::landing_regions`, so their speed caps and gun block apply.
+
+Headless, all six maps, 5400 ticks, seed 7: both teams spawn in their hangars, and between 20 and 45 sorties fly the
+authored `EntityPath`s for 648 to 2746 airborne seconds in the round, with no panic. **Not built:**
+
+- Capital ships. Nothing can damage a critical system, and the port has no destructible world object to hang them on, so
+  `SpaceAssaultAddCriticalSystem`, `LinkedShields`, `LinkedDestroyables` and `LinkedTurrets` have no target. The
+  disc's point values are in `ObjectiveSpaceAssault.lua`'s template (18 a system, engines 3 to 18).
+- Scoring. The score limit is `SpaceAssaultGetScoreLimit` (`DAT_005fa898[...]`) and `AddSpaceAssaultDestroyPoints` calls
+  `FUN_003616f0(.., 0x20, ..)`; neither is transcribed, nor is what a kill is worth. Until they are, a round runs to its
+  time limit at best, and no one wins. That is the gate's reason.
+- Bot gunnery in space: 0 to 2 shots a round from BF2's path followers, and most sorties end with the pilot leaving
+  (14 to 32 falls a round). Bots do not attack ships. Marines and hangar assaults do not run.
+- The HUD's space elements, the spawn screen's look on these maps, and any human flight on them: no window was opened.
+- The space mission's `layers` fact reads the sky's `ReadDataFile('SPA\\spa_sky.lvl', 'myg')` second argument.
+  Only the mission's comment uses it.
 
 ## What exists
 
@@ -22,11 +45,8 @@ the "What exists" list below for the state before this work.
   The common pad/seat inputs alone do not make it fly.
 - Ground vehicle AI explicitly selects hovers and walkers. Soldier AI research
   (SAIR) and soldier air steering (AIRC) do not establish a pilot's behavior.
-- The Instant Action catalog already names the six PS2 space maps, but they
-  are disabled. The mission and launch pipeline serves ground battles. No runtime
-  Space Assault objective implementation was found in the initial source search.
-  Space mission layers, pilot rosters, ship objects and selection need tracing
-  through the real loader, not merely new menu labels.
+- The Instant Action catalog names the six PS2 space maps; see the section above
+  for what opening them gives. No runtime Space Assault objective exists.
 
 ## Missing, in implementation order
 

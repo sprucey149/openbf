@@ -6,6 +6,8 @@
 # What it measures — fixed-seed; walk/aim also require a capture adapter:
 #   1. walk_demo   407 ticks of a recorded input log on TAT1 -> sim hash
 #   2. aim_demo    120 ticks of the same rig                 -> sim hash
+#      The two logs are pad input only, tracked in
+#      engine/crates/game/tests/data/replays/ so a fresh worktree has them.
 #   3. --aim-replay 72 scripted ticks (targets, friend, range, wall)
 #   4. --sim-hash 600   600 ticks of the built-in fixture    -> sim hash
 # With BASE set it also byte-compares the per-tick `motion.csv` each replay
@@ -40,7 +42,7 @@ set -u
 
 case "${1:-}" in
   -h|--help)
-    sed -n '2,33p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '2,35p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
     exit 0
     ;;
 esac
@@ -59,7 +61,7 @@ rc=0
 replay() {  # <name> <input log>
   local name="$1" log="$2" e
   "$GAME" --map assets_baked/tat1 --headless --spawn -140,230 \
-          --walk-replay "artifacts/p3_walk/$log" \
+          --walk-replay "crates/game/tests/data/replays/$log" \
           --capture-series "100000,$OUT/motion/$name" > "$OUT/${name}_raw.txt" 2>&1
   e=$?
   if [ $e -ne 0 ]; then
@@ -82,8 +84,8 @@ else
   rc=1
 fi
 
-replay walk walk_demo.ron
-replay aim  aim_demo.ron
+replay walk walk_demo.txt
+replay aim  aim_demo.txt
 
 if "$GAME" --sim-hash 600 > "$OUT/sim_hash_raw.txt" 2>&1; then
   echo "sim hash after 600 ticks: $(tail -1 "$OUT/sim_hash_raw.txt")" | tee "$OUT/sim_hash.txt"

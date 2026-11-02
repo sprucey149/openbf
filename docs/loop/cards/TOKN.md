@@ -84,16 +84,6 @@ How it combines with the rest of the human-facing layers (`analysis/bot-design.m
 ## Deviation
 D24 (`analysis/bot-design.md` 9): on the PS2 every bot's shot at a human can hit; ours only a token holder's.
 
-## Acceptance
-`ai::tokn::tests` (7): the table is the user's and each tier is at least as hard as the one below; the two best
-placed of three shooters hold Normal's tokens and Elite deals none; a token is held for the hold, then passes to the
-waiting bot, a holder that turns away loses it at once and a lone holder keeps it; bot-vs-bot and a team mate are
-never governed; the near miss is the tier's width, a little high, and none for a holder; in play at Easy every hit on
-the human is a holder's and the others fire beside him; a bolt from a bot without a token passes the human (sweep)
-and one aimed into him at spawn does nothing, a holder's hurts. Mutations (each fails a test): the sweep's pass
-dropped, the impact gate dropped, no aim offset, no rotation, the target not asked, the best placed not first.
-Not covered by a test: the blast gate and the grenade swap (reviewed by reading).
-
 ## Update after the first play (2026-10-28, branch tokn2)
 - **The user's new table:** Easy 2, Normal 3, Hard 5, Elite off.
 - **No fire passes through a soldier any more** (the user: the game checks every bolt and blast). The sweep, the bolt

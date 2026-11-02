@@ -21,10 +21,6 @@ wrong shade" family and SUND's sun work.
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 10(b); `mungefs/src/sky.rs:121` ("Parsed, not yet …"). Read LITE's and SUND's answers first if they have run.
 
-## Acceptance
-RE (§5): does the PS2's lighting setup use the back light (BF1 `FUN_004b8e78` family / the VU lighting routines), with
-what falloff; [O] in `analysis/re-sky-lighting.md`; a build card with declares, or closed as unused.
-
 ## Notes
 - 2026-09-25 (LITE RE, `analysis/re-model-lighting.md` §6): at BF1 NAB2's Rotunda the port matched the PS2 (columns 59 vs 57) with the sun direction corrected and NO back light [D, one map]. BF1's 0x40 segments get a light set whose third 8-byte word is black (DAT_0069c440): read that set's layout before deciding whether the back light lives there.
 - 2026-09-26 (SUND RE, `analysis/re-sun-direction.md` §5 and §1, [O], verifier claim D1 SUPPORTED): **CLOSED AS UNUSED.**

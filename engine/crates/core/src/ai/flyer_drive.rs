@@ -13,7 +13,8 @@
 //! Both take off through the flight state machine and both clear their guns
 //! outside the flying state (`Sim::seat_gun`).
 //!
-//! OURS, PROVISIONAL, none of it read from the PS2:
+//! OURS, PROVISIONAL, none of it read from the PS2 (`re-flyer-ai.md` has the numbers
+//! each changed on real maps):
 //! - the draws hash tick and unit, not the PS2's `rand()`, because a think
 //!   reads the sim immutably;
 //! - BF1's attack run ([`attack_goal`]): the original's attack order is not
@@ -27,6 +28,9 @@
 //! - a wedged craft ([`clearest`]): the hover's 2 m in 3 s window, then the
 //!   longest of eight rays, since a hull's response is not read, held for
 //!   [`WEDGED_HOLD`] against the upward probe;
+//! - a pilot leaving a craft wedged [`WEDGED_GIVEUP`] times over;
+//! - the pitch stick's error ([`stick_to`]), its slew ([`PITCH_SLEW`]) and the altitude
+//!   law's slope limit ([`CLIMB_SLOPE`]): without them the bots porpoised;
 //! - the connection chords' fallback when all four candidates are blocked;
 //! - the obstacle top in the altitude sweep, hit point + the class radius.
 //!
@@ -81,8 +85,21 @@ pub const WEDGED_TICKS: u64 = (hover_drive::STUCK_STILL * crate::TICK_HZ as f32)
 pub const WEDGED_RAY: f32 = 200.0;
 /// OURS: how long a way out holds against the upward probe.
 pub const WEDGED_HOLD: u64 = 6 * crate::TICK_HZ as u64;
+/// OURS: how many ways out a craft tries before its pilot leaves it.
+pub const WEDGED_GIVEUP: u8 = 3;
 /// OURS: an attack run dips no lower than this over the ground ahead.
 pub const ATTACK_FLOOR: f32 = 10.0;
+/// OURS: the steepest slope the altitude law asks for in cruise (about 20 degrees),
+/// within [`GROUND_DANGER`] of the ground ahead (about 45), and that margin in metres.
+pub const CLIMB_SLOPE: f32 = 0.36;
+pub const CLIMB_SLOPE_LOW: f32 = 1.0;
+pub const GROUND_DANGER: f32 = 8.0;
+/// OURS: how fast a bot pilot's pitch stick moves, in full deflections a second.
+pub const PITCH_SLEW: f32 = 2.5;
+/// OURS: how long an attack run holds a target it no longer sees.
+pub const ATTACK_HOLD: u64 = 2 * crate::TICK_HZ as u64;
+/// OURS: an attack run's steepest climb or dive, rise over run (about 20 degrees).
+pub const ATTACK_SLOPE: f32 = 0.36;
 
 /// Can a bot fly this vehicle? BF2's bots follow authored paths, so a BF2 map
 /// without any has nothing for them to fly.
@@ -153,8 +170,8 @@ pub fn speed_share(to_goal: Vec3, forward: Vec3, p: &FlyerParams) -> f32 {
     share.max(normalized(SPEED_FLOOR, max))
 }
 
-/// BF1's flyer form of FUN_00232b78: yaw from the goal in the full body frame,
-/// pitch in the aim frame, each a signed square of a clamped gain.
+/// BF1's flyer form of FUN_00232b78: yaw from the goal in the full body frame, each
+/// axis a signed square of a clamped gain.
 pub fn stick_to(p: &FlyerParams, m: &Body, goal: Vec3) -> (f32, f32) {
     let up = m.fwd.cross(m.left);
     let flat = Vec3::new(goal.x - m.pos.x, 0.0, goal.z - m.pos.z);
@@ -165,13 +182,19 @@ pub fn stick_to(p: &FlyerParams, m: &Body, goal: Vec3) -> (f32, f32) {
         s = if s < 0.0 { -1.0 } else { 1.0 };
     }
     let turn = hover_drive::shaped(s, 4.5 - p.turn_rate.clamp(1.0, 3.0));
-    let right = Vec3::Y.cross(m.aim_dir).try_normalize().unwrap_or(Vec3::X);
-    let aim_up = m.aim_dir.cross(right);
+    // OURS: the pitch error is the goal's elevation against the nose's, whatever the
+    // goal's bearing. FUN_00232b78 takes the goal's height in the nose's own frame: the
+    // same dead ahead, but while a goal abeam or behind is being turned to it reads
+    // near zero, or the wrong way on a raised nose, which then keeps climbing or diving
+    // through the whole turn. That was `bf1_kas1`'s porpoising.
     let to = goal - m.aim_origin;
-    let aim = Vec3::new(to.dot(right), to.dot(aim_up), to.dot(m.aim_dir))
-        .try_normalize()
-        .unwrap_or(Vec3::Z);
-    let pitch = hover_drive::shaped(aim.y, 5.0 - p.pitch_rate.clamp(1.0, 3.0));
+    let wanted = crate::fmath::atan2(to.y, Vec3::new(to.x, 0.0, to.z).length());
+    let nose = crate::fmath::atan2(
+        m.aim_dir.y,
+        Vec3::new(m.aim_dir.x, 0.0, m.aim_dir.z).length(),
+    );
+    let error = crate::fmath::sin_cos(wanted - nose).0;
+    let pitch = hover_drive::shaped(error, 5.0 - p.pitch_rate.clamp(1.0, 3.0));
     (turn, pitch)
 }
 
@@ -256,6 +279,12 @@ fn lift_goal(
         out.y = lifted;
     }
     out.y = out.y.min(ceiling);
+    // OURS: the law above asks for its whole rise over the look-ahead L, so a slow
+    // craft or one a few metres low aims at the ceiling, overshoots by tens of metres,
+    // and dives back. Height is taken at a steady slope unless the ground is close.
+    let danger = pos.y < high + GROUND_DANGER;
+    let band = flat.max(reach) * if danger { CLIMB_SLOPE_LOW } else { CLIMB_SLOPE };
+    out.y = out.y.clamp(pos.y - band, pos.y + band);
     (out, slow)
 }
 
@@ -272,19 +301,35 @@ fn post_point(sim: &Sim, me: UnitHandle, salt: u32) -> Option<Vec3> {
 
 /// OURS: the goal of an attack run, or `None` to fly on. A run dips below the
 /// travel height, keeps [`ATTACK_FLOOR`] over the ground ahead, and ends at
-/// the reach the altitude law looks ahead, or the class's turning room.
-fn attack_goal(sim: &Sim, v: &Vehicle, ai: &mut FlyerAi, point: Vec3) -> Option<Vec3> {
+/// the reach the altitude law looks ahead, or the class's turning room. It holds
+/// its last sighting for [`ATTACK_HOLD`], and climbs or dives no steeper than
+/// [`ATTACK_SLOPE`]: a sight that came and went within a second, or a target right
+/// under the nose, otherwise threw the stick from stop to stop (`bf1_kas1`).
+fn attack_goal(sim: &Sim, v: &Vehicle, ai: &mut FlyerAi, seen: Option<Vec3>) -> Option<Vec3> {
     if sim.tick < ai.break_until {
+        ai.run = None;
         return None;
     }
+    if let Some(point) = seen {
+        ai.run = Some(point);
+        ai.run_seen = sim.tick;
+    } else if sim.tick >= ai.run_seen + ATTACK_HOLD {
+        ai.run = None;
+    }
+    let point = ai.run?;
     let reach = (v.vel.length() * 0.6).max(25.0);
-    if v.pos.distance(point) < reach {
+    let flat = Vec3::new(point.x - v.pos.x, 0.0, point.z - v.pos.z).length();
+    // Past the turning room, however far below: a target under the nose is a dive.
+    if flat < reach {
         ai.break_until = sim.tick + ATTACK_BREAK;
+        ai.run = None;
         return None;
     }
     let ahead = v.pos + v.rot * Vec3::Z * reach;
     let floor = ground(sim, ahead.x, ahead.z, sim.flight_limits.ai[0]) + ATTACK_FLOOR;
-    Some(Vec3::new(point.x, point.y.max(floor), point.z))
+    let band = flat * ATTACK_SLOPE;
+    let y = point.y.max(floor).clamp(v.pos.y - band, v.pos.y + band);
+    Some(Vec3::new(point.x, y, point.z))
 }
 
 /// FUN_00235c08: an obstacle within a second's flight ahead: a goal to the
@@ -407,6 +452,7 @@ fn bf1_sticks(
     } else if sim.tick >= ai.anchor_at + WEDGED_TICKS && v.flyer.phase == FlightPhase::Flying {
         ai.anchor_at = sim.tick;
         ai.wedged_until = sim.tick + WEDGED_HOLD;
+        ai.wedges = ai.wedges.saturating_add(1);
         let out = pos + clearest(sim, v, handle) * ESCAPE_FORWARD + Vec3::Y * ESCAPE_UP;
         ai.goal = Some(out);
         ai.agent = FlyAgent::Escape;
@@ -420,6 +466,7 @@ fn bf1_sticks(
         ai.goal = Some(pos + flat * ESCAPE_FORWARD + Vec3::Y * ESCAPE_UP);
     }
     if let Some(goal) = ai.goal.filter(|_| ai.agent == FlyAgent::Travel) {
+        ai.wedges = 0;
         let to = goal - pos;
         let flat = Vec3::new(to.x, 0.0, to.z);
         if to.length() <= arrive || (flat.length() <= arrive * 2.0 && flat.dot(forward) < 0.0) {
@@ -436,7 +483,7 @@ fn bf1_sticks(
     let (goal, slow) = if ai.agent == FlyAgent::Escape {
         (travel, None)
     } else {
-        let run = aim.and_then(|point| attack_goal(sim, v, ai, point));
+        let run = attack_goal(sim, v, ai, aim);
         let avoid = avoid_goal(sim, v, handle, p, ai);
         match (avoid, run) {
             (Some(side), _) => lift_goal(sim, v, handle, p, side),
@@ -456,6 +503,9 @@ fn bf1_sticks(
         aim_dir: crate::vehicle::flyer::untilted(v) * Vec3::Z,
     };
     let (turn, pitch) = stick_to(p, &body, goal);
+    // OURS: a hand on the stick. Stop to stop takes most of a second.
+    let slew = PITCH_SLEW * crate::TICK_DT;
+    let pitch = v.input.pitch + (pitch - v.input.pitch).clamp(-slew, slew);
     let k = Class {
         forward_speed: p.max_speed,
         strafe_speed: p.strafe_speed,
@@ -691,6 +741,10 @@ pub(super) fn drive(
             }
         }
         _ => out = bf1_sticks(sim, me, v, m.vehicle, p, &mut ai, aim),
+    }
+    // OURS: a craft that cannot find its way out of a bay gets its pilot out too.
+    if ai.wedges >= WEDGED_GIVEUP {
+        super::ride::request_exit(st);
     }
     let r: RideState = st.ride.unwrap_or_default();
     st.ride = Some(RideState {

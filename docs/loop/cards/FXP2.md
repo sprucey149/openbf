@@ -29,19 +29,6 @@ depth tested, never written, no fog; PARTICLE back-to-front; far fade 50/150/500
 20 %; density thinning), §8 (BF2 differences). PS2 frames of `ord_explosion` on grass:
 `engine/artifacts/lead_tmp/fxp/ps2cap/crop_nab1_impact.png`.
 
-## Acceptance
-- A unit test per §5 formula (bursts/budget, Reach/Scale/Accelerate/Move, colour Move clamp, ANIMATED frame wrap, the
-  sizeMul) against hand-computed PS2 values, and a data test that `ord_explosion` spawns exactly 2 + 1 particles and
-  dies after 0.2 s.
-- A render pass for particles: additive and normal blends, depth test on, depth write off, unfogged, PARTICLE sorted
-  back-to-front; BLUR drawn as a PROVISIONAL normal sprite (its pass is re-fx §11 [H]); vertex colour ×1 (no ×2).
-- The placeholder `Kind::Muzzle/Impact/Hit/Blast` quads keep working until FXP3 replaces their triggers (or are
-  routed to the nearest real effect — say which in the report); remove fx.rs's stale "HOLD FOR FABLE 4" note.
-- A capture: `ord_explosion` spawned on NAB1 grass at the §9 PS2 pose reads like `crop_nab1_impact.png` (a white
-  flash then yellow-orange sparks), viewed side by side.
-- Gates: nothing declared should move (no golden frames a live effect; if one does, declare it and say why);
-  sim hashes unmoved (visual only).
-
 ## Notes
 - The PS2 re-simulates particles from their burst history every frame; a stateful port that integrates the same
   closed forms at each particle's age is equivalent (re-fx §5.1).

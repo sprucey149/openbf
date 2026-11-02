@@ -296,7 +296,7 @@ plain property.
 | explosion `SoundProperty` | once per explosion, at the blast | nothing (`Fx::explode`, 3 call sites) | WSND |
 | effect `SoundName` | by the effect / the explosion | baked (`"... defer"`), not played | WSND |
 | `WeaponChangeSound` | select: spawn + switch, every unit | nothing | WSND |
-| `FireEmptySound` | human, trigger press, empty | key read, not played | WSND |
+| `FireEmptySound` | human, trigger press, empty; cuts its handle | both channels, the cutter and a flown droid's blaster: `WeaponState::press_clicks`, `SoundLib::weapon_voices` | WSND |
 | `ReloadSound` | every unit; BF1 +0.3 s | at once | WSND |
 | grenade contact | three keys | `CollisionOtherSound` (GREN) | - |
 | `OrdnanceSound` | looping voice on the bolt, doppler | key read, not played | WHUM |
@@ -308,7 +308,7 @@ plain property.
 `fn_b2.txt` (77 B2 lines), `callers_b2.txt`. `re_check.py callers b1 FUN_0045ca08` -> 2 (`FUN_00354fe0` 342712,
 `FUN_00355768` 343122); `FUN_0045cb58` -> 1 (`FUN_00448ed8` 507530); `FUN_002701a0` -> 17; `FUN_0045ac00` -> 3;
 `FUN_0044cf80` -> 2. `re_check.py writers b1 DAT_0066f150` -> 1 (508145, `= 0`). `constscan.py b1|b2 0xc77178c1` ->
-`raw 0 | lui 0 | imm16 lo 0`; control `b1 0x352a4db8` -> lui 0x286694. Disassembly (`scripts/tools/eedis2.py`):
+`raw 0 | lui 0 | imm16 lo 0`; control `b1 0x352a4db8` -> lui 0x286694. Disassembly (`scripts/tools/eedis.py`):
 0x45ca08-0x45cb58 (the delay test and the two paths), 0x45bd30-0x45bde0 (the fire time), 0x44cf80-0x44d098 (172.0,
 344.0), 0x2852f0-0x285378 and 0x285014-0x285060 (the charge clamps 0.2 / 0.4 and 0.2 / 4.0). The BF2 twins were
 found by a reader agent (`AGENT_B2.md`); every line of it cited here was opened again.

@@ -50,19 +50,17 @@ pub(crate) fn install(
     map_dir: &Path,
     build: &crate::vehicle_pads::PadBuild,
 ) {
-    sim.hero_rider_frames = manifest.source_game.eq_ignore_ascii_case("bf2").then(|| {
-        Arc::new(Frames {
-            riders: build.riders.clone(),
-            rigs: walker_rigs(
-                manifest,
-                map_dir.parent().unwrap_or(map_dir),
-                &build.geometry,
-            ),
-            root_scales: sim
-                .walker_params
-                .iter()
-                .map(|p| p.as_ref().map_or(1.0, |p| p.root_scale))
-                .collect(),
-        }) as Arc<dyn HeroRiderFrames>
-    });
+    sim.hero_rider_frames = Some(Arc::new(Frames {
+        riders: build.riders.clone(),
+        rigs: walker_rigs(
+            manifest,
+            map_dir.parent().unwrap_or(map_dir),
+            &build.geometry,
+        ),
+        root_scales: sim
+            .walker_params
+            .iter()
+            .map(|p| p.as_ref().map_or(1.0, |p| p.root_scale))
+            .collect(),
+    }));
 }

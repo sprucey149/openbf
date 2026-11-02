@@ -23,16 +23,6 @@ The maintainer's INBOX 2026-10-01 14:40, item 3 (repeated 17:15, not carded unti
 - `core/src/sim/bounds.rs` header: 'The terrain is always on it' - so 33 lost deaths on BF1 Hoth, a terrain map, are either a hole in that sentence or units inside / under buildings. Not looked at yet.
 - Not known: where each of these units stood. That is step 1.
 
-## What to do
-1. Measure: with SWEEP_DEATHS / UNIT_SAMPLES in `round_to_outcome`, list every `lost` death on UTA1, BF1 HOT1 and BF2 KAM1 over seeds 1-8 with its position, the floor under it, the nearest resolved hub floor, and what kind of ground it stood on (heightfield / a building body / under a deck). Class each: REALLY OFF (no walk back exists) or FALSE (a floor walk from the point reaches a hub: `lead_tmp/fable2/tools/hub_levels.rs.txt`, `kamr_walk.rs.txt`).
-2. Fix what step 1 shows in `Sim::level_at` (ours, PROVISIONAL) - do not build what it does not show. Run every new probe under the memory cap (INBOX 2026-10-01 17:15).
-3. If the FALSE share is 0, close the card with the table and say so on STLVL and STEND.
-
-## Acceptance
-- A table in the report: per map, `lost` deaths by class (REALLY OFF / FALSE) with the spots of every FALSE cluster.
-- After the fix, over the same 8 seeds: 0 `lost` deaths at a point from which a floor walk reaches a hub (re-run the step-1 classifier); the REALLY OFF ones listed with the card that owns each (STLVL / OFFG / KA137).
-- No map's 8-seed finish count drops (`scripts/sweep_seeds.py`, main re-run first as the baseline); a unit test in `bounds.rs` for each FALSE kind found.
-
 ## Notes
 - Planner 2026-10-01: value 5 and `alpha: yes` because UTA1 and HOT1 are showcase maps and three `first:` cards use the test, so the answer is worth most BEFORE they build. It cannot be numbered into the maintainer's order (his to change); it runs beside it on the other lane.
 - `files:` is `bounds.rs` only, on purpose: the `first:` cards all list `ai/brain.rs` and OFFG lists `round_to_outcome.rs`, and a shared file would keep one of the maintainer's cards waiting. Keep the step-1 observer a scratch example outside the tree (or env-gated lines that leave stdout identical), and if `round_to_outcome.rs` must change, land that as a last small commit once no `first:` card is in progress.

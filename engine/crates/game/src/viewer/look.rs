@@ -216,11 +216,6 @@ pub struct SpeckleLook {
     pub scroll: [f32; 2],
 }
 
-/// Is the speckle layer drawn at all: on unless `OPENBF_WATER_SPECKLE=0`.
-pub fn speckle_enabled() -> bool {
-    std::env::var("OPENBF_WATER_SPECKLE").as_deref() != Ok("0")
-}
-
 /// The PS2's speckle layer for one map, or `None` where it draws none (pure).
 ///
 /// **What is [V]** (`analysis/re-water.md` §1/§3, BF1 `FUN_0048b9c0`): a
@@ -678,11 +673,7 @@ pub fn apply_lighting(r: &mut Renderer, scene: &Scene) {
     r.lighting = render_lighting_from(&m.source_game, &m.lighting, m.water.as_ref());
     r.lighting.glow_gain = tune.map_or(1.0, |t| t.glow_gain);
     r.set_frame_filter(frame_filter_from(&m.lighting));
-    r.set_bloom(
-        m.hdr
-            .filter(|_| std::env::var_os("OPENBF_NO_BLOOM").is_none())
-            .map(|h| bloom_from(h, tune)),
-    );
+    r.set_bloom(m.hdr.map(|h| bloom_from(h, tune)));
 }
 
 /// [ours] A map whose authored look the maintainer asked to soften: factors
@@ -731,11 +722,7 @@ pub fn bloom_from(h: manifest::ManifestHdr, tune: Option<&LookTune>) -> render::
 /// The map's DomeInfo frame filter as the renderer takes it (card BFLT,
 /// `analysis/re-glow.md` §3 `[O]`): the bake keeps it only where the PS2
 /// draws it (`Filter` ≠ 0, `Intensity` ≥ 1), on both games.
-/// `OPENBF_NO_FILTER=1` turns it off for a before/after comparison.
 pub fn frame_filter_from(l: &manifest::ManifestLighting) -> Option<render::FrameFilter> {
-    if std::env::var("OPENBF_NO_FILTER").as_deref() == Ok("1") {
-        return None;
-    }
     l.filter.map(|f| render::FrameFilter {
         threshold: f.threshold,
         intensity: f.intensity,

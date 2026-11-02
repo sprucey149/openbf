@@ -31,10 +31,6 @@ SBD wrist rocket, 100 -> 250 over 0.5 s) one step less: its 3 m chest hit is 100
 400, not 360. The moved pins: `v5_bolt_flight_time_to_20m_target` (hit age 7 ticks, not 8) and
 `sbd::a_wrist_rocket_to_the_chest_on_coruscant_deals_its_hit_and_its_blast`, `sbd::sbd_fires_bolts_and_rockets_with_identical_gameplay_on_both_map_sets` (130 -> 120).
 
-## Acceptance
-`sim::combat::tests::a_pellet_landing_in_its_first_update_does_its_full_damage`: 65 body and 195 head at 3 m,
-48.3 at 100 m. Mutation (the old age rule) fails it with 48.33.
-
 ## Open
 The 10 m and 25 m PS2 readings (the steps past the first update) are not measured.
 

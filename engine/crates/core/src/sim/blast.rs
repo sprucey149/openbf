@@ -130,6 +130,7 @@ impl Sim {
             // A corpse's body is in the world too (card KNOCK, §3).
             if !(u.alive || u.body)
                 || source_vehicle.is_some_and(|v| u.mount.is_some_and(|m| m.vehicle == v))
+                || (u.alive && u.mount.is_some() && !self.hero_body_active(i))
             {
                 continue;
             }

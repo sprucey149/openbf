@@ -156,6 +156,61 @@ impl UnitGrid {
     }
 }
 
+thread_local! {
+    static NEAR_LISTS: std::cell::Cell<Vec<Vec<u32>>> =
+        const { std::cell::Cell::new(Vec::new()) };
+}
+
+/// A unit list for [`Sim::units_within`] whose buffer comes back for the next
+/// query: every think asks several times, and each asked the allocator first.
+/// A list per live query, so a query inside a query still has its own.
+pub struct NearList(Vec<u32>);
+
+impl NearList {
+    pub fn new() -> Self {
+        let mut lists = NEAR_LISTS.with(std::cell::Cell::take);
+        let list = lists.pop().unwrap_or_default();
+        NEAR_LISTS.with(|c| c.set(lists));
+        Self(list)
+    }
+}
+
+impl Default for NearList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for NearList {
+    fn drop(&mut self) {
+        let list = std::mem::take(&mut self.0);
+        let mut lists = NEAR_LISTS.with(std::cell::Cell::take);
+        lists.push(list);
+        NEAR_LISTS.with(|c| c.set(lists));
+    }
+}
+
+impl std::ops::Deref for NearList {
+    type Target = Vec<u32>;
+    fn deref(&self) -> &Vec<u32> {
+        &self.0
+    }
+}
+
+impl<'a> IntoIterator for &'a NearList {
+    type Item = &'a u32;
+    type IntoIter = std::slice::Iter<'a, u32>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl std::ops::DerefMut for NearList {
+    fn deref_mut(&mut self) -> &mut Vec<u32> {
+        &mut self.0
+    }
+}
+
 impl Sim {
     /// Every alive unit with its feet within `r` of `p` (XZ), in ascending
     /// index, into `out` — from the unit grid inside the think window, else
@@ -207,7 +262,7 @@ pub fn follow_ease(sim: &Sim, me: crate::unit::UnitHandle, dir: Vec3) -> f32 {
         return 1.0;
     }
     let pos = u.soldier.pos;
-    let mut near: Vec<u32> = Vec::new();
+    let mut near = NearList::new();
     sim.units_within(pos, FOLLOW_GAP, &mut near);
     let leads = near.iter().any(|&i| {
         let o = &sim.units[i as usize];

@@ -30,12 +30,6 @@ primary per class and its gallery guessed weapons (UGAL); nobody has checked the
 - BF1 sides on the disc: `ALL CIS DES EWK GAR GEO GUN IMP REP WOK` (`extracted/bf1/lvl/DATA/_LVL_PS2/SIDE/`).
   The special sides (GUN, EWK, WOK, GEO, DES, GAR) belong to TEAMS; this card audits the classes the IA maps load.
 
-## Acceptance
-- A per-class table (`analysis/unit-audit-bf1.md`, [O]-tagged where RE'd) with a verdict per column: matches / gap / unknown.
-- Every gap is a card (or a note on an existing one: GREN secondaries/grenades, PWUP pickups, ANIM animations, SIMK
-  movement constants, HERO heroes, TEAMS special rosters).
-- Split per side if one session cannot finish: commit what is done and write `resume:` (next side).
-
 ## Notes
 - Created 2026-09-28 by the planner. Build a census script (props per class from the side LVLs) and leave it in
   `engine/artifacts/lead_tmp/unit-audit/` so the other game's card reuses it. UGAL fixes the gallery first.

@@ -78,7 +78,7 @@ After:
   raised shield taking bolts with no body damage, the lowered shield passing them, a blast spending the shield
   first with no knockdown, burst death with no corpse and a whole respawn, water damage, replay hash determinism,
   and the three AI cases (stays rolled with a far enemy, deploys / shields / fires at a near one, rolls again after).
-- `game/examples/droideka_look.rs` on bf2_kam1_con_cw and bf1_nab1_con_cw: frames of a bot droideka deployed,
+- `game/examples/droideka_look.rs` (removed in the sprint's code cleanse; in git history) on bf2_kam1_con_cw and bf1_nab1_con_cw: frames of a bot droideka deployed,
   shielded, folding, folded, rolling, unfolding and bursting, and a player droideka walking and firing, shielding,
   folding, rolling about 11 m and unfolding, with the camera switching section (walk eye about 3.0 m over the feet,
   ball about 2.0 m).

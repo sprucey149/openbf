@@ -30,15 +30,6 @@ camera-facing quad and the tall-blade quad, the sine sway (phase += dt·0.8·(1 
 the distance (the `prp_` GrassPatch distance for a FOLG instance; the class MaxDistance, white, for a world object),
 the instance tint and terrain tilt (§6; a patch is never yawed or scaled).
 
-## Acceptance
-- The PS2/port pairs `bf2_dag1/pairs/cp4_cp3_postA_v3.png` (ground spread PS2 22.6 vs port 7.9 before), 
-  `bf2_fel1/pairs/cp3_cp3_1_postA_spawn.png` (box (0,250,640,480) PS2 (45,50,32) spread 32.5 vs port (91,98,49) 18.7
-  before), `bf1_kas1/pairs/cp2_cp2_eastharbor_spawn.png`, `bf1_nab1/pairs/cp1_cp2_postA_spawn.png` re-rendered read as
-  planted; say the before/after numbers.
-- A test pins one class's template statistics against the RAM templates in re-foliage §7 (radius ≤ RadiusFadeMax,
-  sizes ×1.1 / ×0.9, sink ≤ MinSize/2, the part counts per NumParts).
-- Goldens only where grass is in view (declare after the first render); sims unmoved; no collision.
-
 ## Notes
 - Blend: the fade multiplies the sprite alpha, so draw blended (sorted) with the texture's alpha; the exact GS state is
   [H] in the RE — match the pairs. The corner ↔ UV order is [H]; check one atlas sheet (end_fern, NumParts 3) by eye.

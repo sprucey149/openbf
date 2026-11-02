@@ -60,6 +60,7 @@ PS2_BF1 = os.path.join(ROOT, "extracted/bf1/lua/mission")
 PS2_BF2 = os.path.join(ROOT, "extracted/bf2/lua/mission")
 OUT_DIR = os.path.join(ROOT, "engine/missions")
 PS2_ONLY = False
+GAMEPLAY_REFERENCES = {}
 
 
 # ===========================================================  Lua 4.0 undump
@@ -917,6 +918,14 @@ MAPS = [
                                 "cw": ("uta1c_con", "uta1c_con")}),
     ("bf2_yav1", "bf2", "YAV", {"gcw": ("yav1g_con", "yav1g_con"),
                                 "cw": ("yav1c_con", "yav1c_con")}),
+    # Space Assault. `<key>_ass.ron`: the script holds the mode, and spa6..spa9 keep
+    # the map's setup in a `_cmn` script (`CMN_SCRIPTS`).
+    ("bf2_spa1", "bf2", "SPA", {"gcw": ("spa1g_ass", "spa1g_ass")}),
+    ("bf2_spa3", "bf2", "SPA", {"cw": ("spa3c_ass", "spa3c_ass")}),
+    ("bf2_spa6", "bf2", "SPA", {"cw": ("spa6c_ass", "spa6c_ass")}),
+    ("bf2_spa7", "bf2", "SPA", {"cw": ("spa7c_ass", "spa7c_ass")}),
+    ("bf2_spa8", "bf2", "SPA", {"gcw": ("spa8g_ass", "spa8g_ass")}),
+    ("bf2_spa9", "bf2", "SPA", {"gcw": ("spa9g_ass", "spa9g_ass")}),
 ]
 
 PRETTY = {
@@ -932,6 +941,8 @@ PRETTY = {
     "tat2": "Tatooine: Mos Eisley", "bf2_cor1": "Coruscant: Jedi Temple",
     "bf2_tat3": "Tatooine: Jabba's Palace",
     "bf2_dag1": "Dagobah: Swamp", "bf2_dea1": "Death Star: Interior",
+    "bf2_spa1": "Space Yavin", "bf2_spa3": "Space Kashyyyk", "bf2_spa6": "Space Mygeeto",
+    "bf2_spa7": "Space Felucia", "bf2_spa8": "Space Hoth", "bf2_spa9": "Space Tatooine",
     "bf2_end1": "Endor: Bunker", "bf2_fel1": "Felucia: Marshland",
     "bf2_geo1": "Geonosis: Dust Plains", "bf2_hot1": "Hoth: Echo Base",
     "bf2_kam1": "Kamino: Tipoca City", "bf2_kas2": "Kashyyyk: Docks",
@@ -1035,6 +1046,8 @@ def facts_from_calls(seq):
             d["fly_ai_max"] = a[0]
         elif c.name == "SetMinFlyHeight" and a and isinstance(a[0], float):
             d["fly_ai_min"] = a[0]
+        elif c.name == "AddLandingRegion" and a and isinstance(a[0], str):
+            d.setdefault("landing_regions", []).append(a[0])
         elif c.name == "SetGroundFlyerMap" and a and isinstance(a[0], float):
             d["ground_flyer_map"] = a[0] != 0.0
         elif c.name == "ScriptCB_SetNumBots" and a and ti(a[0]) is not None:
@@ -1145,6 +1158,15 @@ class Mission:
     pass
 
 
+# `reinforcements = -1` (every space script): no ticket count. The round ends on points.
+NO_TICKET_LIMIT = 999999
+
+
+def mission_mode(script):
+    """The mode a mission script runs: Space Assault's `_ass`, else Conquest."""
+    return "ass" if script.endswith("_ass") else "con"
+
+
 def build(key, game, planet, era, pc_stem, ps2_name):
     """PS2 bytecode is the source of truth; the PC .lua is the referee.
 
@@ -1164,20 +1186,42 @@ def build(key, game, planet, era, pc_stem, ps2_name):
         pc_dir = PC_BF1 if game == "bf1" else PC_BF2
         pc_path = os.path.join(pc_dir, planet, pc_stem + ".lua")
         m.pc = os.path.relpath(pc_path, ROOT)
-        with open(pc_path, "r", errors="replace") as fh:
+        with open(pc_path, "r", encoding="utf-8", errors="replace") as fh:
             src = fh.read()
     pc = scan_bf1(src) if game == "bf1" else scan_bf2(src)
 
     f = load_ps2(game, ps2_name)
-    m.checked = f is not None
+    has_ps2_source = f is not None
+    if f is None and game in GAMEPLAY_REFERENCES:
+        from gameplay_missions import SOURCE_SCRIPTS
+        body = SOURCE_SCRIPTS.get(game, {}).get(ps2_name.lower())
+        if body is not None:
+            f = undump40(body) if game == "bf1" else undump50(body)
+    m.checked = has_ps2_source
     if f is None:
         m.prov.append("every value (no PS2 script %s.luac to check against)"
                       % ps2_name)
         ps2 = None
         d = pc
     else:
-        ps2 = facts_from_calls(calls40(f) if game == "bf1" else calls50(f))
+        calls = calls40(f) if game == "bf1" else calls50(f)
+        # spa6..spa9: the map's setup is in `<map>_cmn`, run by `ScriptCB_DoFile`.
+        common = load_ps2(game, ps2_name.replace("_ass", "_cmn")) \
+            if ps2_name.endswith("_ass") else None
+        if common is not None:
+            calls = calls50(common) + calls
+        ps2 = facts_from_calls(calls)
         d = ps2
+    canonical = GAMEPLAY_REFERENCES.get(game, {}).get(ps2_name.lower())
+    if game in GAMEPLAY_REFERENCES:
+        if canonical is None:
+            raise ValueError(f"{game}/{ps2_name}: no canonical mission correction record")
+        from gameplay_missions import overlay
+        ps2 = overlay(ps2 if ps2 is not None else facts_from_calls([]), canonical,
+                      require_complete=not has_ps2_source, context=f"{game}/{ps2_name}")
+        d = ps2
+        if not has_ps2_source:
+            m.prov = ["PS2 declaration table; donor presentation; dynamic callbacks remain unmeasured"]
     m.d = d
     # The voice-over setters exist only in the bytecode scan (the PC scan
     # never read them); a mission with no PS2 script carries none.
@@ -1212,6 +1256,7 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m.fly_ai_max = (ps2 or {}).get("fly_ai_max")
     m.fly_ai_min = (ps2 or {}).get("fly_ai_min")
     m.ground_flyer_map = (ps2 or {}).get("ground_flyer_map", False)
+    m.landing_regions = (ps2 or {}).get("landing_regions", [])
     m.strings = set(consts(f, str)) if f is not None else set()
     m.arc_blocks = arc_calls50(f) if f is not None and game == "bf2" else []
     m.barriers = barrier_calls50(f) if f is not None and game == "bf2" else []
@@ -1333,8 +1378,10 @@ def f32_text(x):
 def ron(m):
     pretty = PRETTY.get(m.key, m.key)
     L = []
-    L.append("// %s %s — Conquest (%s). GENERATED by scripts/gen_missions.py:"
-             % ("BF1" if m.game == "bf1" else "BF2", pretty, ERA_NAME[m.era]))
+    L.append("// %s %s — %s (%s). GENERATED by scripts/gen_missions.py:"
+             % ("BF1" if m.game == "bf1" else "BF2", pretty,
+                "Space Assault" if mission_mode(m.ps2) == "ass" else "Conquest",
+                ERA_NAME[m.era]))
     L.append("// every value is read out of the PS2 mission bytecode (the")
     L.append("// target), with the PC mod-tools .lua of the same name as the")
     L.append("// readable referee (audit A6). Do not hand-edit — regenerate.")
@@ -1356,7 +1403,7 @@ def ron(m):
             L.append("//   - %s" % p)
     L.append("(")
     L.append('    map: "%s",' % m.key)
-    L.append('    mode: "con",')
+    L.append('    mode: "%s",' % mission_mode(m.ps2))
     L.append('    source_game: "%s",' % m.game)
     if m.heroes:
         L.append('    heroes: [%s],' % ", ".join(
@@ -1367,6 +1414,7 @@ def ron(m):
             for side, request in m.class_load_order))
     L.append("    teams: [")
     for (fac, units, tickets), cls in zip(m.teams, m.classes):
+        tickets = NO_TICKET_LIMIT if tickets < 0 else tickets
         if not cls:
             L.append('        (faction: "%s", units: %d, tickets: %d, '
                      'classes: []),' % (fac, units, tickets))
@@ -1409,6 +1457,10 @@ def ron(m):
         L.append("    min_fly_height: Some(%s)," % fmtf(m.fly_ai_min))
     if m.ground_flyer_map:
         L.append("    ground_flyer_map: true,")
+    if m.landing_regions:
+        L.append("    // AddLandingRegion: where a flyer lands, slows and holds its fire.")
+        L.append("    landing_regions: [%s]," % ", ".join(
+            '"%s"' % r for r in m.landing_regions))
     if m.birds:
         L.append("    birds: [%s]," % ", ".join('(%s, "%s")' % (fmtf(size), name) for size, name in m.birds))
     if m.sound:
@@ -1528,10 +1580,32 @@ def main():
                     help="the extracted Lua (DIR/bf1/mission, DIR/bf2/mission;"
                          " default extracted/<game>/lua/mission)")
     ap.add_argument("--out", metavar="DIR", help="default engine/missions")
+    ap.add_argument("--space", action="store_true",
+                    help="also write the six Space Assault missions, which only a"
+                         " space bake (OPENBF_BAKE_SPACE=1) and OPENBF_SPACE=1 use")
+    ap.add_argument("--gameplay-reference", action="append", default=[], metavar="TABLE",
+                    help="absolute PS2 mission declarations from a fingerprinted correction table; repeat per game")
+    ap.add_argument("--gameplay-source", action="append", default=[], metavar="GAME=SOURCE",
+                    help="source install/disc or MISSION.LVL whose fingerprint selects the correction table")
     ap.add_argument("--dump", nargs=2, metavar=("GAME", "SCRIPT"),
                     help="print a PS2 script's reconstructed call sequence")
     args = ap.parse_args()
-    global PS2_ONLY, PS2_BF1, PS2_BF2, OUT_DIR
+    global PS2_ONLY, PS2_BF1, PS2_BF2, OUT_DIR, GAMEPLAY_REFERENCES
+    # pack.py runs this with -I, which leaves the script's own folder off the path.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from gameplay_missions import load
+    references = args.gameplay_reference or [p for p in os.environ.get("OPENBF_GAMEPLAY_CORRECTIONS", "").split(os.pathsep) if p]
+    sources = {game: os.environ[f"OPENBF_GAMEPLAY_SOURCE_{game.upper()}"] for game in ("bf1", "bf2")
+               if os.environ.get(f"OPENBF_GAMEPLAY_SOURCE_{game.upper()}")}
+    for choice in args.gameplay_source:
+        game, separator, source = choice.partition("=")
+        if not separator or game not in ("bf1", "bf2") or not source:
+            ap.error("--gameplay-source must be bf1=SOURCE or bf2=SOURCE")
+        sources[game] = source
+    try:
+        GAMEPLAY_REFERENCES = load(references, sources)
+    except (ValueError, OSError, KeyError) as exc:
+        ap.error(str(exc))
     PS2_ONLY = args.ps2_only
     if args.lua_root:
         PS2_BF1 = os.path.join(args.lua_root, "bf1/mission")
@@ -1555,9 +1629,12 @@ def main():
             if era not in eras:
                 continue
             stem, ps2 = eras[era]
+            if mission_mode(stem) == "ass" and not args.space:
+                continue
             m = build(key, game, planet, era, stem, ps2)
-            suffix = "_con.ron" if era == "gcw" or "gcw" not in eras \
-                else "_con_cw.ron"
+            mode = mission_mode(stem)
+            suffix = "_%s.ron" % mode if era == "gcw" or "gcw" not in eras \
+                else "_%s_cw.ron" % mode
             out = os.path.join(OUT_DIR, key + suffix)
             if not args.check:
                 # UTF-8 on every OS: the header comments carry an em dash, and Windows' default (cp1252) wrote

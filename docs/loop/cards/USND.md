@@ -24,12 +24,6 @@ names are already in the per-map sound bakes (BF1 KAS2 `sounds/names.ron` holds 
 and reload sounds, the ordnance impact, door sounds and the faction's squad-order chatter
 (game/src/main/windowed.rs 18-113).
 
-## Acceptance
-- RE ([O]) per game: which event plays which property, the throttles (how often a unit speaks, distance, priority),
-  the per-class tac-chatter keys (the Wookiee smuggler answers in `wok_inf_...`, not the faction's `all_...`).
-- Build: the events in `core` (hurt, death, the AI's perception events), the play in `game::sounds`; a listening
-  check.
-
 ## Notes
 - UAUD2 (2026-09-29, analysis/unit-audit-bf2.md §3.5): BF2 moved the unit voice into `VOSound = <sound> <event>` lines: 162-211 per class
   for 41 of 49 fielded classes (32 events: SC_* squad commands + responses, *VO requests, AcquiredTarget, Grenade,
@@ -37,43 +31,6 @@ and reload sounds, the ordnance impact, door sounds and the faction's squad-orde
   Bothan spies / SBD / MagnaGuard none. Plus HurtSound / DeathSound (`droid_death` for the CIS) and the unnamed
   0x7241c3bb (`repmalechoke` ...). The port's squad chatter is silent on BF2 maps by design (windowed.rs 72-110); the
   BF2 command voice is the class's `SC_*` lines.
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — gameplay audio: hurt / death sounds and chatter. Value 3 → 4. Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
-
-- Planner 2026-09-30 17:30: SQACK (M3 5, alpha) researches the BF1 squad-order voice flow (the player's line, who acknowledges, which lines); the per-class squad-order voice here overlaps it — whichever runs first takes it and leaves a MERGED note on the other. Teammates' streak praise is PRAISE (M4).
-
-- ANNC RE 2026-09-30 (`analysis/re-announcer.md` §1): unit chatter and the commander's lines share ONE stream slot and its queue (one line at a time, at most 4 pending, descending key = level*(1-Bias) + Bias*Priority; chatter template 0xCFFF9324 has Bias 0 so its key is its 3-D level; a queued chatter line whose key falls to 0 — the speaker moved out of range — is dropped). ANNC builds the queue (`core::announcer`); chatter should enter through it. Live: `lead_tmp/annc/annc_live.py` names every chatter line a PCSX2 battle plays (BF1 NAB1: `cis_inf_com_chatter_acquired`, `_flee`, `_predamage`, `_heard`, `_tac_follow`, `_tac_yes`, `_tac_needgunner` in 75 s, back to back).
-
-- SQACK RE 2026-09-30 (`analysis/re-squad-orders.md` §2, §3, §5) — MERGED note, the squad-order voice is SQACK's: the 30 per-class ODF keys are `SC<Field|Driver|Passenger|Gunner><Action>Sound` (a human issuer's line, stream `cw_tac_vo` / `gcw_tac_vo`), their `AISC…` twins (an AI issuer's 3-D line on the voice stream) and `AISCResponseYesSirSound` (every taker's answer; `…NoSirSound` is never played). What is left for THIS card is the AI's own squad talk (§5): a trooper says `ai_<s>_…_tac_follow` (p 0.3) / `_moveout` (p 1.0) at two points of its agent, an AI in a vehicle seat `_needgunner` (p 0.3) and AI on foot within 30 m then board and answer `_yes`; each `ai_` command property inherits PlayInterval 20 +- 5 s (at most one per 15-25 s per line). Per-take lock (general, any chatter): a `segment(id, weight, interval, dev)` take cannot be drawn again for `interval` s and a locked draw silences the request — the s12 `*.snd.json` dropped these two values; `lead_tmp/sqack/segs.py <LVL> <substr>` prints them.
-- ANNC landed 2026-10-01 (feb04a8): the voice queue exists (`core::announcer::VoiceQueue`); unit chatter still bypasses
-  it, so a commander line can overlap chatter until this card routes chatter through `ask`.
-
-- SNDC census 2026-10-02 (`analysis/audio-census.md`): hurt / death voice is the most frequent unplayed near-player sound - PS2 starts in 105 s: NAB1 154 (`rep_inf_com_chatter_wound` 53, `cis_inf_com_chatter_wound` 40, `rep_inf_com_chatter_death` 24, `droid_death` 21, `gungan_hurt` / `gungan_die` 16), UTA1 270 (`cis_inf_com_chatter_wound` alone 178 in the first run). They are SAMPLE-bank 3-D sounds (the 78 one-shot voices), not voice-stream lines: they do not go through the voice queue. AI chatter on the voice stream: NAB1 62 line starts in 105 s (the Gungans' `gungan_chatter_*` most), UTA1 0-1. Chatter template 0xCFFF9324 distances 16 - 150 m need SNDT (CORE templates) first. Live instrument for the build's referee: `lead_tmp/sndc/snd_live.py` (every sound start by name) + the port's SOUND_LOG patch (`lead_tmp/sndc/port/sound_log.patch`).
-
-- FOLY RE (2026-10-02, `analysis/re-foley.md` 5, `[O]`): the weapons' movement foley (`JumpSound`, `LandSound`,
-  `RollSound`, `SquatSound`, `ProneSound`, `StandSound`, four step keys -> `*_weap_inf_*_mvt_*`) is DEAD DATA on the
-  PS2: the code starts the sound on every step and stance event (B1 `FUN_00284e50`, B2 `FUN_00326e50`) and no
-  sample bank on either disc holds any of their samples (0 of 1482 properties BF1, 0 of 494 BF2); none heard live.
-  Drop them from this card's scope. `LowHealthSound` sits in the soldier update right after the foley call (B1
-  `FUN_00205cc8` 116840-116861: below `LowHealthThreshold` x max health, default 0.3).
-
-- Note from VSND's RE (2026-10-03, `analysis/re-vehicle-sounds.md` 3-5): the soldier's jet pack and the droideka's
-  ball are the SAME engine component as a vehicle's - `EngineSound` (`rep_inf_Jetpack_engine_parameterized`, one
-  layer: `speed` -> Pitch (0, 0.9) (1, 1), `acceleration` -> Gain; `cis_walk_droideka_engine_parameterized`: `speed`
-  -> Pitch and Gain) plus `TurnOnSound` / `TurnOffSound` (`rep_weap_jetpack_turnon` / `_turnoff`,
-  `cis_droideka_fold` / `_unfold`). On while the soldier is in the jet state (B1 state 7) / the droideka rolls
-  (states 0xb, 0xc); speed = |velocity| in m/s (BF2 droideka: / BallMoveSpeed), acceleration `previous - speed / dt`.
-  PS2: 25 audible jet-pack layer starts in 105 s on NAB1. Card VSND builds the component for vehicles
-  (`game::engine_sound`): hang these two on it rather than writing a second one.
-
-- Note from VSND's build (2026-10-03, landed 79eac42): `game::engine_sound` runs the engine component for hovers and walkers only. The jet pack's and the droideka's feeds (re-vehicle-sounds.md 4: |velocity| m/s, `previous - speed / dt`, on in jet flight / the ball) need a `Drive` each and an instance per soldier; the records are already in `sounds.ron` `engines`.
-
-- Note from AMBM's RE (2026-10-03, `analysis/re-ambience-music.md` 5): the FX-7 station asks `AmbientSound`
-  (`droid_fx7_idle_chatter`, `PlayProbability` 0.05) whenever its handle is idle and plays `PowerupSound` per unit
-  served; the recon droid loops `AmbientSound` + `Ambient2Sound` from spawn to kill; the droideka's `ShieldSound`
-  (`droid_fx7_hum`, BF1 only) loops while the shield is up with gain x (1 - (1 - shield / max)^2), `ShieldOffSound`
-  when it drops.
 
 ## The maintainer, 2026-10-12 18:55 (INBOX, ask 3) - planner 2026-10-12 19:15: value 4 -> 5, this card is the UMBRELLA
 His wish (via chat): make the game lively - every line the units say to each other on the PS2, both games, the right

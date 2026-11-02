@@ -27,7 +27,7 @@ Then one foreground Opus verifier, given the claim list only (`talph/claims.md` 
 
 **Conventions.**
 - B2 = `analysis/SWBFRNT2.ELF-decomp.c`, B1 = `analysis/SWBFRONT.ELF-decomp.c`.
-- "Asm" = `scripts/tools/eedis2.py`; dumps are in `talph/ee_*.txt`.
+- "Asm" = `scripts/tools/eedis.py`; dumps are in `talph/ee_*.txt`.
 - **P** = the render-patch edge in cells: tern `INFO` i16 at +18, 8 on every shipped terrain. A patch has (P+1)² = 81
   vertices.
 - A **nibble** is one 4-bit weight. The **mask** is a `PTCH` `INFO`'s u16 at 0: bit k set = LTEX[k] painted in the patch.

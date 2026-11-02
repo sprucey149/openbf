@@ -59,6 +59,10 @@ pub const DEG: f32 = 0.017_453_294;
 /// Fire-cycle loop epsilon, 2^-15 (both games).
 pub const FIRE_EPS: f32 = 3.051_757_8e-5;
 
+/// How far into a fire state a press clicks: `1.0 < weapon+0xd0` (B1, 208526)
+/// / `+0xbc` (B2, 318218), the refire accumulator a shot's cycle starts at 0.
+const FIRE_STATE_CLICK_SECS: f32 = 1.0;
+
 /// Key/value access to a class's PROP list (game layer implements it over
 /// the baked ClassDb with BASE-chain inheritance). Uncracked BF2 keys are
 /// looked up by hash.
@@ -365,21 +369,18 @@ impl Thrown {
     /// GRNP: rest 0.05-0.2 m and 1-3 updates off; 14 of 15 exact with this).
     pub const BF2_HAND: (f32, f32) = (1.8183 - 0.02, 0.7433);
 
-    /// A BF1 map's thrown grenades take BF2's throw (the maintainer, 2026-10-04: the
-    /// throw, distance, sticks and bounces are "the ps2 bf2 grenade physics";
-    /// card GRNP, a named deviation from the BF1 disc). `false` puts BF1's
-    /// own throw back ([`Thrown::throw_as_bf2`] is then never called).
-    pub const BF1_THROWS_AS_BF2: bool = true;
     /// The BF2 thermal detonator's `InitialSalvoDelay` and its ordnance's
     /// `LifeSpan` (re-grenades §9; BF1's are 0.3 and 0.9).
     pub const BF2_WIND_UP: f32 = 0.51;
     pub const BF2_FUSE: f32 = 0.6;
 
-    /// Turn a BF1 thrown weapon into one thrown as BF2's thermal detonator
-    /// is: released from the hand after BF2's wind-up, at rest by BF2's
-    /// slow-bounce count, BF2's fuse from the rest, sticking to what BF2's
-    /// thermal sticks to (vehicles, buildings, unbuilt buildings) besides
-    /// its own mask. Its speed, gravity and elevation are the discs' own
+    /// Turn a BF1 thrown weapon into one thrown as BF2's thermal detonator,
+    /// for a BF1 class fielded on a BF2 map (the pause menu's class picker;
+    /// on a BF1 map every grenade throws by BF1's own numbers, the
+    /// maintainer's rule of 2026-11-01): released from the hand after BF2's
+    /// wind-up, at rest by BF2's slow-bounce count, BF2's fuse from the rest,
+    /// sticking to what BF2's thermal sticks to (vehicles, buildings, unbuilt
+    /// buildings) besides its own mask. Its speed, gravity and elevation are the discs' own
     /// (equal in both games); its damage, radius and ammo stay BF1's.
     pub fn throw_as_bf2(w: &mut WeaponClass) {
         use crate::sticky::stick;
@@ -1230,6 +1231,9 @@ pub struct WeaponState {
     /// Per-weapon fire command (soldier-written): >0 held counter, −1 on the
     /// release edge, 0 idle.
     pub fire_cmd: i32,
+    /// This update began in [`FireState::Idle`]. Only [`Self::press_clicks`]
+    /// reads it, after the update that wrote it, so it stays out of the hash.
+    began_idle: bool,
     pub remote_press: u8,
     pub force_channel: Option<crate::hero_weapon::ForceChannel>,
     pub saber_flight: Option<crate::hero_weapon::SaberFlight>,
@@ -1298,6 +1302,7 @@ impl WeaponState {
             heat: 0.0,
             overheated: false,
             fire_cmd: 0,
+            began_idle: true,
             remote_press: 0,
             force_channel: None,
             saber_flight: None,
@@ -1365,6 +1370,40 @@ impl WeaponState {
     /// The stage the trigger reached (0 the root; [`WeaponClass::stages`]).
     pub fn stage(&self) -> usize {
         usize::from(self.stage)
+    }
+
+    /// Whether this update's trigger press is one the weapon refuses, the
+    /// moment its `FireEmptySound` starts for a human. Asked after
+    /// [`Self::update`], with the shots it made: the PS2 runs the weapon's
+    /// state machine with the heat already updated, so the update a weapon
+    /// cools or finishes its reload on answers the press with a shot and no
+    /// click (B1 `FUN_00284318` 208434-208446, 208523-208526, 208575-208583,
+    /// 208598-208604; B2 `FUN_00326170` 318216-318222, 318285-318294;
+    /// `analysis/re-weapon-sounds.md` 7.3).
+    ///
+    /// The press edge is the only rate limit: holding gives one click, and
+    /// neither disc's click sound authors a `PlayInterval`. A weapon that has
+    /// just fired stays in its fire state until the cycle ends, so the update
+    /// after the overheating shot does not click: only the state the cycle
+    /// ends in does, or a fire state more than [`FIRE_STATE_CLICK_SECS`] in.
+    ///
+    /// Two port states have no PS2 fire state behind them. A weapon with
+    /// nothing left enters [`FireState::Firing`] here on a press with no shot,
+    /// where the PS2's waits in its no-ammunition state and clicks. A reload
+    /// started by its button runs inside the cycle here, and clicks as a
+    /// reload.
+    /// PROVISIONAL [D], measure: a PS2 log of a human's press between the
+    /// reload button and the end of the shot's cycle.
+    pub fn press_clicks(&self, c: &WeaponClass, input: FireInput, fired: bool) -> bool {
+        if self.fire_cmd != 1 || !self.active || input.blocked || fired {
+            return false;
+        }
+        let cannot_pay = !self.can_pay(c, input.infinite_ammo, input.no_reload);
+        match self.state {
+            FireState::Firing if self.began_idle => cannot_pay,
+            FireState::Firing => self.reloading() || self.refire_accum > FIRE_STATE_CLICK_SECS,
+            FireState::Idle => self.overheated || self.reloading() || cannot_pay,
+        }
     }
 
     /// FUN_00289150.
@@ -1523,6 +1562,7 @@ impl WeaponState {
         // in the fire cycle can ask for a spread; ours arrives with the pad.
         self.ai_dispersion = ai_dispersion;
         self.set_fire_input(fire_held);
+        self.began_idle = self.state == FireState::Idle;
 
         // Heat (BF1 weapon update): overheat at 1.0, recover, clear below threshold.
         if !self.overheated {

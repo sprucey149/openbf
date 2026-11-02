@@ -26,20 +26,6 @@ The maintainer, 2026-10-02 (BF2 Kamino, invincible, standing still on a platform
 - Trail table of that snapshot (path / net / reversals in 10 s): #30 46.1 / 3.1 / 26, #18 47.8 / 14.1 / 11, #19 43.1 / 15.4 / 8, #17 16.9 / 1.3 / 4.
 - Not isolated yet: WHICH of the three rules drives #30 (print the goal's writer per tick first; the fix follows what it shows).
 
-## What to do
-1. Reproduce headless: seed 60, BF2 KAM1, a human slot standing at (-4.0, 60.3, 108.6) (or `BLACKBOX_AT`), print per tick for the holders near it which rule wrote `h.goal` and the pad. Name the dominant writer.
-2. **One owner.** A holding bot's move goal has one writer per decision and a COMMIT time: a new goal is not taken until the last one is reached or a minimum time (order 1.5-3 s, by tier) has passed; the strafe-on-burst and the shuffle draw from one budget, not each from its own. The dodge keeps its 2 s cooldown and must actually respect it (`sidestep` pinned at 31).
-3. **Speed to fit the step.** A reposition of under ~3 m is walked (or done crouched in stance), not sprinted; arriving slows down. No 5-7 m/s pinball.
-4. **Slide side hysteresis**: once a slide side is picked at a prop it is kept until the obstacle is cleared or a minimum time passed (#18, #19). If OBST builds the detour first, do this part there and say so.
-5. **Spacing**: two holders do not take spots within ~2 m of each other (a taken spot is skipped) - the "all standing next to each other" half. Keep it small here; BOTD owns the full reservation.
-PS2 fidelity: these are OURS (PROVISIONAL) until SAIR says what the PS2 does; write each constant so SAIR's result can replace it.
-
-## Acceptance
-- The snapshot's scene re-run: no holder exceeds 6 reversals or 15 m of path per 10 s while its net is under 4 m; #18 / #19's kind of slide flip (side changes per 10 s) is at most 2.
-- BOTM's jitter numbers (if landed; else the same measure by hand over 8 seeds x KAM1, KAS2, HOT1): reversals per bot per 10 s and the path/net ratio for holders, before and after.
-- Kills per minute and rounds finished do not drop (8 seeds x 32 maps); the arena's tier ordering (kills rise with tier) holds.
-- Unit tests: a holder's goal is not replaced inside its commit time; a short step is not sprinted.
-
 ## The bot programme (the maintainer, 2026-10-02) - five cards, read together
 `JITR` (stop the tweaking now) -> `FFLN` (teammates in the line of fire) -> `BOTM` (bot-quality numbers, PS2 beside the port) -> `SAIR` (RE the PS2 foot soldier's own AI) -> `BOTD` (the design: what the best bot for this game is, then the build cards). `OBST` (walking into props) belongs to the same family.
 The maintainer: "If the bots suck, the whole game is worthless so we NEED to get this right." He agrees to RE the PS2 soldier AI FIRST, then keep what is good and DELIBERATELY do better where the originals annoy (the originals' bots are not perfect; better difficulty levels, more awareness). The port's soldier brain today is ~9,200 lines (`core/src/ai`, `commander.rs`) of rules added one symptom at a time (hold, shuffle, strafe, dodge, slide, fan, stuck, stall, lost, recycle), most of them OURS/PROVISIONAL: no RE note exists for the soldier's second-to-second movement and combat.

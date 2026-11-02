@@ -7,7 +7,7 @@
 //! reinforcement pool, or do `Battle::on_death`'s floor (`battle.rs:124`)
 //! and `cp::apply_bleed`'s gate (`cp.rs:288-297`, a rate only while
 //! `alive < tickets && tickets > 0`) already prevent it? The pool is the raw
-//! `f32` field `Sim::hash` eats (`core/src/sim/state.rs`), so a negative value would be
+//! `f32` field `Sim::hash` eats (`core/src/sim/state/hash.rs`), so a negative value would be
 //! a hashed state neither disc can hold — that is why it matters.
 //!
 //! The rule these tests hold the port to is `analysis/re-tickets-spawn.md`

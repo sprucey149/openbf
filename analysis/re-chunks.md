@@ -118,7 +118,7 @@ Addresses are BF2 (SWBFRNT2.ELF).
 
 `game::fx::chunks` runs §2–§6.
 - The bake writes chunk models' prims (vehicles.ron `collision`) and their skeleton hardpoints (`geometries[].hardpoints`).
-- `vehicle_chunks` (example) captures a pad vehicle's death on GEO1. The fighter tank shows its trails, its
+- `vehicle_chunks` (example, removed in the sprint's code cleanse; in git history) captured a pad vehicle's death on GEO1. The fighter tank shows its trails, its
   `dirtspray` bursts after its budget, and the `hp_smoke1` plume of the settled piece.
 
 **[ours]**

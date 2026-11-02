@@ -28,19 +28,3 @@ SNDC's census (`analysis/audio-census.md` section 0): every 3-D sound the port p
 - PS2 (live, 105 s each): 85 % (NAB1) and 94 % (UTA1) of the infantry fire the player hears starts beyond 50 m
   (median 153 m / 77 m). Port, UTA1, 120 s: the player hears 0 of 760 CIS shotgun shots and 11 of 540 Republic
   rifle shots (`lead_tmp/sndc/port/bf2_uta1_sounds.csv`, distance < baked max).
-
-## Do
-- `bake sounds` resolves `inherit` through the game's CORE.LVL bank as well (pass the CORE records in, or bake CORE
-  first and read its RON); gain, pitch, min / max distance, rolloff, priority, looping.
-- The 3-D level: the port's `attenuation` is PROVISIONAL (`game/src/sounds.rs` 189-199). Before trusting it at 400 m
-  read the PS2's level function (B1 `FUN_0044db38`, called at `FUN_004599e0` 518971) - one function, bounded; keep
-  PROVISIONAL if it does not settle.
-
-## Acceptance
-- A bake test pins, from the real discs: `rep_weap_inf_rifle_fire` on NAB = gain 0.7, 5 / 400 m, rolloff 6.0; on BF2
-  UTA rolloff 3.5; `com_weap_thermaldetonator_exp` keeps its own min 40 and gets max 450.
-- A census line in the report: over the 34 baked banks, properties whose `inherit` hash resolves in neither their own
-  LVL nor CORE (list them; expected 0).
-- The SOUND_LOG referee (`lead_tmp/sndc/port/sound_log.patch` + `pad120.ron`, see audio-census.md 1.2) on bf2_uta1:
-  `rep_weap_inf_rifle_fire` in range 540 of 540 (11 today), `cis_weap_inf_shotgun_fire` 760 of 760 (0 today).
-- declares: `rebake=sounds` (every map's `sounds.ron` moves; no golden, no sim).

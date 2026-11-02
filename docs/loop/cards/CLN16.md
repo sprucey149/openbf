@@ -20,6 +20,4 @@ owner: CLEANSE 6354
 
 ## Evidence
 
-## Acceptance
-
 ## Notes

@@ -38,33 +38,6 @@ the field alive at once, and a dead player respawns by himself when the 4.0 s ti
   run out (2 updates after it reads <= 0, §6.3); the post and the class are kept from the last life (§6.4).
 - No tickets left: the display does not open, no respawn (§1).
 
-## Do
-- `core::sim::input`: `SPAWN_ACCEPT` and `SPAWN_BACK` bits (edge-triggered, read only while the slot is not on the field,
-  as SPAWN_POST_* are); `input` crate: X / Triangle (keyboard: the menu accept / back keys) while dead or before the first
-  spawn. Side choice rides SPAWN_POST_UP / DOWN on the side screen (the PS2's Up / Down), or its own bits - builder's call.
-- `Sim`: per slot `spawn_stage` (Side / Map / Class / Accepted) and `side_choice` (team 1, team 2, Auto), both hashed
-  (compare two different SET values in the hash test - SPSEL's lesson). A slot is not on the field until it accepts the
-  class; Accept on the side sets the slot's team (Auto: the coin flip above). After a death: the 4.0 s timer, then stage
-  Map with the last post / class kept. The human's respawn skips `SpawnWaves::ready` (BF2 FUN_0034cea8 skips the wave
-  tests for a human, `B2:344186-344192`).
-- `game`: the battle starts with the player slot reserved and empty (no unit) when the mission allows a side choice;
-  `mission::pick` still picks the mission and the armies; `player_team` becomes the side the sim settles.
-- Headless referees (`round_to_outcome`, `arena`, the sweep): they already vacate the player slot
-  (`Sim::vacate_player_slot`); an un-accepted slot must look the same to them (no unit, no reinforcement spent, not
-  counted in `alive()`). Keep an auto-accept switch for tools that need a player on the field (the black box's play,
-  `--spawn`, the golden scenes).
-
-## Acceptance (each RUN and pasted into the report)
-1. A core test: a slot that never presses accept has no unit after 60 s and its team's reinforcements are untouched;
-   Down, Accept (team 2), Accept (post), Accept (class) puts it on the field on team 2 at the chosen post as the chosen
-   class within 4 ticks of the last Accept; Back on the class stage returns to the map stage.
-2. A core test: after a death the slot is not respawned before 4.0 s and not without the class Accept, and IS respawned
-   within 4 ticks of the Accept while its team's `SpawnWaves` says not ready (the human skips the wave).
-3. Auto Assign: over 32 seeds both teams occur (the coin flip); a mission flagged as "no side choice" opens on the map stage.
-4. An input-log replay test with the new bits reproduces the state hash; two different side choices hash differently.
-5. Gates: only declared moves (`sim`, plus any golden SSELB has not taken); sweep / arena / fidelity unchanged (the
-   referees' player slot is vacated already).
-
 ## Notes
 - State 4 (the class select opened while alive at a friendly post, `FUN_00397f00`) is not in scope: which button and which
   object open it is not read (re-spawn-flow §11).

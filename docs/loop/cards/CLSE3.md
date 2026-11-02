@@ -33,19 +33,6 @@ maps. After its landing (77f4c70) Kamino is at 0.75 x (53 hp against 71) and **P
   held ticks a round on Hoth alone), the bolt's start at the muzzle at arm's length, the aim tracker's lag (the
   aim sits a median 14-16 deg off inside 5 m).
 
-## What to do
-1. Re-take both tables on today's main (`lead_tmp/clse/tools/observer_patch.py` on a scratch worktree, `mini.sh`).
-2. Split the port's non-firing aimer time inside 10 m on Polis Massa by cause with the gunner's own gates (add
-   the friend-in-line flag and the tracker's off-angle to the observer), and its misses by what the bolt met
-   (a wall, a friend, nothing).
-3. Name the largest term; build it behind a switch if it is a PS2 rule already in `analysis/`, else RE it.
-   The weapon in hand is card GRAIA's.
-
-## Acceptance
-- A table of the port's aimer time inside 10 m on Polis Massa by cause, and of its rifle misses by what they
-  met, in the report; the cause named with its share.
-- Then a landed build with Polis Massa's inside-10 m figure at 0.67 x the PS2's 81 hp or more, 256 of 256
-  rounds, team kills not above main's share - or the numbers that say why it cannot be reached faithfully.
 ## Result (2026-10-22, measure; main 9193a4c; `lead_tmp/clse3/`, report `loop/reports/20261022_0720_card_CLSE3.md`)
 Polis Massa inside 10 m is now 22.0 hp per aimer-second against the PS2's 80.8 (0.27 x; Kamino 32.6 / 70.6 = 0.46 x). The cause
 tables are in the report. The largest term is not gunnery: the metric splits every fall over the victim's aimers and the port's

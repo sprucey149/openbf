@@ -175,9 +175,13 @@ impl EguiOverlay {
             )),
             ..Default::default()
         };
-        let warm = self.ctx.run(input(), &mut ui);
-        // Textures from the warm-up frame must still reach the GPU.
-        let mut textures = warm.textures_delta;
+        // Textures from the warm-up frames must still reach the GPU. More than one:
+        // a layout that measures on the frame before (the pause menu's rows) settles
+        // over a few, as it does in play within the first frames.
+        let mut textures = egui::TexturesDelta::default();
+        for _ in 0..3 {
+            textures.append(self.ctx.run(input(), &mut ui).textures_delta);
+        }
         let out = self.ctx.run(input(), &mut ui);
         textures.append(out.textures_delta);
         let prims = self.ctx.tessellate(out.shapes, out.pixels_per_point);

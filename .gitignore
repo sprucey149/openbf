@@ -16,3 +16,6 @@ engine/target/
 dist/
 
 /emulator
+
+# Written by the export (card PACK): data and build output stay local
+/error.log

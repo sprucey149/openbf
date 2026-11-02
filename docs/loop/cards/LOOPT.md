@@ -22,18 +22,6 @@ alpha: yes
 
 - **Audits stopped (found by the planner, 2026-10-15 19:15):** `lanes/lane3.pid` = 6448, written 2026-10-03 06:34 by a lane-3 launcher that exited on STOP at 07:36 that day. 6448 is now a THREAD of Discord's renderer (`/proc/6448/status`: Name ThreadPoolForeg, Tgid 6395). `os.kill(6448, 0)` succeeds for a thread id, so `alive()` says lane 3 lives, and step 3 (`lane == RESEARCH_LANE or not lane_alive(RESEARCH_LANE)`) leaves the audit to it: `sessions_since_audit` = 32, last audit 2026-10-13 05:48. The planner's move of the stale file was refused by the guard; the maintainer is asked in STATUS to delete it.
 
-## Do
-1. `loopctl.py next` step 2: skip a card whose `needs:` is non-empty (and the fidelity-blocked planner trigger stays as it is). Fixture in `self-test`.
-2. gates.py: before the gpu / goldens step, check the adapter the goldens baseline names (read where it is recorded; else the NVIDIA device by `vulkaninfo --summary` / the wgpu adapter the gpu test prints) is present. Absent: the gpu step reports `ADAPTER LOST` (not FAIL, not a golden move), the summary says so on its first line, and land.py phase 1 stops before rebasing with a one-line message; the card is left as it was (no block). Sim-only diffs (no golden step) are not affected. A switch to force the run for a deliberate adapter change.
-3. `loopctl.py worktrees` (list) / `--yes` (act): for every `openbf-wt/*` worktree list its HEAD, branch, the card it belongs to (by name stem), the card's status, live claims, `git status --porcelain` and size. Candidates: a detached `*-scratch` tree or a branch tree whose card is `done` and whose branch is merged into main; never a tree with commits not on main, a live claim, a card not done, or a running process with its cwd in it. With `--yes`: save `git -C <wt> diff HEAD` (tracked) and the list of untracked non-symlink files into `engine/artifacts/lead_tmp/worktree_sweep/<date>/<name>.patch` / `.untracked`, then remove the tree (rm -r + `git worktree prune`), delete its `<name>_target` dir, and print the GB freed (btrfs `du` exclusive before/after).
-
-4. `alive(pid)`: a pid is live only if `/proc/<pid>/status` has `Tgid` equal to it (a process, not a thread) - for a lane file, also that its cmdline is the autoloop launcher; the launcher removes its own `lanes/lane<N>.pid` on exit (trap). Fixture in `self-test`: a lane file holding a thread id of a live process is dead.
-
-## Acceptance
-- `loopctl.py self-test`: a parked card with `needs:` and a branch is not picked for land (mutation: drop the test -> the fixture fails).
-- gates.py with the adapter hidden (an env override that names a missing adapter) on a diff that touches a golden dep: `ADAPTER LOST` in SUMMARY.md, exit code distinct from a gate FAIL, no golden written; with the adapter present the step runs as today.
-- `self-test`: a lane file holding a live process's thread id (not its Tgid) counts as dead and the other lane takes the audit (mutation: plain `os.kill` -> fails).
-- `loopctl.py worktrees` dry run pasted in the report (every tree, candidate or the reason it is kept); `--yes` run once; the report gives the trees removed, the patches saved and the GB freed.
 ## Built 2026-10-15 20:20 (branch loopt 3913acb) - re-scoped
 - (1) step 2 skips `needs:`; (4) `alive()` checks Tgid, `lane_alive()` also the `autoloop.sh` cmdline; (3) `loopctl.py worktrees [--yes]`. Self-test PASS; mutations: drop the needs test -> "a parked card with a branch and needs: is not a landing" FAILS; drop the Tgid test -> "lane 3's file holds a live process's THREAD id" FAILS.
 - (2) moved to card LOOPA: the oracle guard refuses a builder's edit to scripts/gates.py / land.py ("guards"); it waits on `[approvals.LOOPA] oracle = "guards"`.

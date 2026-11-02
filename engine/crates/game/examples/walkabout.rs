@@ -27,6 +27,8 @@
 //! alpha 127..254), and a compositing viewer showed the set brighter than the
 //! engine drew it — defect reports C §0 and D (3). The goldens keep theirs.
 //!
+//! `OPENBF_ASSETS` names a bake other than `engine/assets_baked`.
+//!
 //! This is the set to LOOK at. The committed goldens
 //! (`engine/goldens/{maps,units}`) are the regression net that fails a test
 //! when one of these pictures would have changed.
@@ -149,7 +151,9 @@ fn write_map(out: &Path, key: &str, set: &WalkaboutSet) -> anyhow::Result<(usize
 
 fn main() -> anyhow::Result<()> {
     let want: Vec<String> = std::env::args().skip(1).collect();
-    let assets = game::assets::baked_root();
+    // `OPENBF_ASSETS` names a bake other than `engine/assets_baked`, as `hud_capture` takes it.
+    let assets =
+        std::env::var_os("OPENBF_ASSETS").map_or_else(game::assets::baked_root, PathBuf::from);
     let out = out_root();
     let maps: Vec<(String, String, PathBuf)> = game::assets::discover_maps(&assets)
         .into_iter()

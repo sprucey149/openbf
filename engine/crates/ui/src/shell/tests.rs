@@ -468,6 +468,36 @@ fn option_ranges_steps_and_defaults() {
     assert_eq!(o.rows(Group::Hero), [Opt::HeroesOnOff], "Heroes Off");
 }
 
+/// The DLC heroes are a choice: the row exists only with their bake, and until
+/// it is changed every map keeps its own hero.
+#[test]
+fn the_dlc_hero_row_is_an_option_and_the_maps_own_hero_is_the_default() {
+    let t = IaTexts::new(&|_, english| english.to_owned());
+    let flat = |pieces: Vec<Piece>| -> String {
+        pieces
+            .into_iter()
+            .map(|p| match p {
+                Piece::Text(s) => s,
+                Piece::Left => "<".into(),
+                Piece::Right => ">".into(),
+            })
+            .collect()
+    };
+    let mut o = SessionOptions::default();
+    assert!(!o.rows(Group::Hero).contains(&Opt::DlcHeroes), "no bake");
+    o.dlc_heroes_installed = true;
+    assert_eq!(o.rows(Group::Hero)[1], Opt::DlcHeroes, "in sight");
+    assert_eq!(o.rows(Group::Hero).len(), 6);
+    assert!(!o.dlc_heroes, "the map's own hero by default");
+    assert_eq!(flat(t.option(Opt::DlcHeroes, &o)), "DLC Heroes: < Off >");
+    o.adjust(Opt::DlcHeroes, 1, 1);
+    assert!(o.dlc_heroes);
+    assert_eq!(flat(t.option(Opt::DlcHeroes, &o)), "DLC Heroes: < On >");
+    assert!(!t.help(Opt::DlcHeroes).is_empty());
+    o.adjust(Opt::HeroesOnOff, 1, 1);
+    assert_eq!(o.rows(Group::Hero), [Opt::HeroesOnOff], "Heroes Off");
+}
+
 /// Supported modes use bounded percentages; unsupported modes keep raw counts.
 #[test]
 fn population_percent_and_unsupported_mode_counts_have_distinct_bounds() {

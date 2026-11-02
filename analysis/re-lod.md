@@ -173,9 +173,9 @@ $ re_check absent b2 0x0c16b31a 0x005acc68 --elf -> jal x4 in the BF2 ELF, no da
 $ re_check absent b1 0x0c130734 0x004c1cd0 --elf -> jal x4 in the BF1 ELF, no data word [receipt:7405044f]
 $ re_check absent b2 a490eba1 -> B1 FUN_0020f2e0 123451, B2 FUN_00252bb0 171132 [receipt:e26ec903]
 $ luiscan.py 0xa490eba1 -> b1 1 build 0x20f788/ori, b2 1 build 0x253438/ori (control 0x47c86b4a GeometryName: 19 / 25)
-$ eedis2 bf2 0x563bf4..0x563c4c: addiu t0 1000, ori t1 0x9c40, a1 30, a2 8000 ... lui a2 1 / ori 0x86a0, 20000 x3, a1 500
-$ eedis2 bf1 0x479148..: a2 10000, a1 30 ... ori a2 0x88b8 (35000), 20000 x2, a1 500
-$ eedis2 bf2 0x5ace54 lui at 0x36a1 (4.807692e-06) · 0x5ad160 lui at 0x484b / ori 0x2000 (208000.0)
+$ eedis bf2 0x563bf4..0x563c4c: addiu t0 1000, ori t1 0x9c40, a1 30, a2 8000 ... lui a2 1 / ori 0x86a0, 20000 x3, a1 500
+$ eedis bf1 0x479148..: a2 10000, a1 30 ... ori a2 0x88b8 (35000), 20000 x2, a1 500
+$ eedis bf2 0x5ace54 lui at 0x36a1 (4.807692e-06) · 0x5ad160 lui at 0x484b / ori 0x2000 (208000.0)
 ```
 PS2 runs: `ps2/run_nab1.log` (lod_walk1.py NAB1 A/B), `run_bes1.log`, `run_end1.log`, `run_hot1.log`, `run_myg1.log`,
 `run_myg1t.log`; RAM replays `tools/predict2.py` (BF2), `tools/budget1.py` (BF1, `budget1_bf1.txt`, 120 states).

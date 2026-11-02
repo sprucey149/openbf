@@ -524,6 +524,13 @@ pub struct Manifest {
     /// only the precipitation reads it. APPENDED, written only when set.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wind: Option<ManifestWind>,
+    /// Canonical centered terrain grid used by simulation queries when a donor
+    /// renders a larger sheet. The leading render grid remains intact; the
+    /// runtime takes this centered square and derives its own world offsets.
+    /// Float32 cell arithmetic depends on those offsets even where all shared
+    /// heights match. Absent on PS2 and same-size donors, preserving their RON.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain_query_size: Option<u32>,
 }
 
 /// One world's authored AI data, from `mungefs::plan` and `mungefs::world`.

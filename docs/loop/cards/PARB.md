@@ -21,8 +21,6 @@ Found by the CLNT cleanse (2026-09-30, inferred, a race): `cmd_gate` renders the
 ## Evidence
 scripts/parity.py `main_scores` (cache = PUB/main/<head>.csv) and `cmd_gate` (tree render, then main render in a second lock hold). land.py phase 1 ff-merges, then rebakes: a parity run in between scores the new sha over the old bake.
 
-## Acceptance
-The cache key carries a bake fingerprint (e.g. a stamp rebake.sh writes, or the hash of every map manifest.ron), and the gate renders both sides under one ci.lock hold; a test fixture where the fingerprint changes re-scores main instead of reusing the cache.
 ## Note (AUDIT VTUR2, 2026-09-30) — pose_render draws no common-bake prop
 `game/examples/pose_render.rs` loads the map scene and applies the conquest layer, but never merges `common_<game>`
 (`main/battle.rs:33` does). So every parity pair lacks what the game draws from common:

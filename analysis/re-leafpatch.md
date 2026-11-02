@@ -384,7 +384,7 @@ port draws LOD0 (bare `nab_prop_trees2brnch` cards) → NAB1's distant "dead for
 3. Twins: every B1 function above has its B2 twin opened (class ctor/setter, template, vine, object, draw, per-view
    buffer, quad, state init, wind, FOLG call, attach setter); callers of each (`checks.txt` §3).
 4. `word`: "leafpatch" ×2, "grass", "%s %f" ×2, the class/object vtables, both UV tables ×2 games, `DAT_005fc5e8` = 1,
-   `DAT_005ffc60` = 1.0; instruction constants by `eedis2.py` (1.5, 0.4, 0.1, 655.35, 0.3, 50, 0.2/0.1/0.7, 0.25/0.2/
+   `DAT_005ffc60` = 1.0; instruction constants by `eedis.py` (1.5, 0.4, 0.1, 655.35, 0.3, 50, 0.2/0.1/0.7, 0.25/0.2/
    0.8/0.5, the state-struct `sd`/`sw`/`sh`).
 5. `writers`: `DAT_00517848`, `DAT_0051784c`, `DAT_005d0010`, `DAT_00677660`/`664`, `DAT_005fd02c`, `DAT_005fc5e8`,
    `DAT_005ffc60`, `DAT_007c5754`, `DAT_006c13d8`.

@@ -263,17 +263,14 @@ impl Builder<'_> {
     fn clear(&mut self, from: Vec3, dir: Vec3, len: f32) -> bool {
         self.rays += 1;
         self.sim.terrain_ray(from, dir, len, 1.0).is_none()
-            && self
-                .sim
-                .collision
-                .ray_with(
-                    from,
-                    dir,
-                    len,
-                    crate::collision::Layers::ORDNANCE,
-                    crate::collision::HullFilter::Static,
-                )
-                .is_none()
+            && !self.sim.collision.ray_blocked(
+                from,
+                dir,
+                len,
+                crate::collision::Layers::ORDNANCE,
+                crate::collision::HullFilter::Static,
+                [None; 2],
+            )
     }
 
     /// The floor a soldier stands on at (x, z) on the storey of `y_ref`, when

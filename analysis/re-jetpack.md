@@ -50,7 +50,7 @@ BF1 c = s+0x958).
 | JetDuration (0x10e3903c) | **read by nothing** | **read by nothing** | - |
 
 BF2 defaults: `FUN_00250488` stores them with FPU registers the decomp drops; read from the instructions
-(`eedis2.py bf2 0x250488 0x250dc8`): 0x250c14 `swc1 $f0 2160(s2)` with $f0 = 0x40e00000 (7.0, set at 0x250bf0),
+(`eedis.py bf2 0x250488 0x250dc8`): 0x250c14 `swc1 $f0 2160(s2)` with $f0 = 0x40e00000 (7.0, set at 0x250bf0),
 0x250c3c `$f1 -> 2164` = 0x41600000 (14.0, 0x250bdc), 0x250c44 `$f25 -> 2168` = 0x41a00000 (20.0, 0x25089c),
 0x250c7c `$f27 -> 2176` = 0x3e4ccccd (0.2), 0x250c34 `$f31 -> 2184` = 0x3dcccccd (0.1), zero to 2172 / 2180 / 2188 /
 2192 (recharge, initial, drain, effect). c+0x778 is set to `(x & ...0056) | 0x46` (B2:169380): bits 1, 2 and 6 on

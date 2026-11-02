@@ -20,6 +20,3 @@ created: 2026-10-28
 - `scripts/parity.py:170`: `subprocess.run(["flock", GPU_LOCK, "bash", sh], ...)` - exclusive.
 - 2026-10-28 09:30: `lslocks` showed PCSX2 (session `menuref_ia2`) holding gpu.lock READ, parity's render flock waiting
   WRITE for 32 min under a parity gate that held ci.lock; two ci.sh runs queued behind it.
-
-## Acceptance
-`flock -s` there; a parity gate run beside an open HW PCSX2 session completes with the same scores.

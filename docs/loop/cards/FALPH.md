@@ -36,23 +36,6 @@ it was filed. DSHN keeps the disc gloss alpha on every sheet a specular-pass seg
 - The maintainer's numbers on the droid pixels: SBD alpha 255 → mean 31 (p10 0, p90 80); battle droid → mean 107.
 - The walkabout already writes RGB for this reason (`encode_png_rgb`, defect reports C §0 / D (3)).
 
-## Acceptance
-1. **The final output's alpha is 1.0** in the headless target AND the window: an alpha write mask or a final-pass
-   write, or RGB goldens plus the Opaque surface mode. The worker decides, and says why. A GPU test asserts that a
-   pass-sheet draw leaves alpha 255 in the captured frame.
-2. **Surface:** prefer `CompositeAlphaMode::Opaque` when `caps.alpha_modes` contains it; log the chosen mode at start.
-   Check it with a real windowed run on the maintainer's session, e.g. `game --map assets_baked/bf1_kas2`, and log which modes
-   the NVIDIA surface lists. If a windowed run is not possible from the loop, record the logged caps and put the
-   manual check in For the maintainer.
-3. **Goldens:** every golden's alpha plane reads 255, or the goldens are RGB. `compare_golden` still compares exactly
-   what it did (RGB), and a test pins that. Only goldens whose alpha plane was not all-255 may move: declare them
-   by name (no globs — the rule in `land-declares-no-globs`). View the moved ones composited over white AND over
-   black, not only flattened.
-4. **Readers:** list every pipeline and blend state that reads destination alpha, with file:line, in the report.
-   If any does, prove its output did not change.
-5. The gpu gate on a branch renders the SHARED bake; this change is render-only, so the golden moves show up on the
-   branch too.
-
 ## Notes
 - The maintainer can play now: the 18:26 bake has DSHN. If the droids look see-through in the window, that is item 2.
 - Its own card rather than a DSHN reopen: DSHN's colour result stands (the PS2 pairs and the audit reproduced it).

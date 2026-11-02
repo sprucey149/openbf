@@ -177,7 +177,7 @@ nearest port pad: all 360 match a distinct port pad within 0.02 m.
   0 times in the BF1 ELF, once in BF2's.
 - Twin: BF1's constructor, setter and post-load loop opened; its callers walked.
 - Flags by RAM, not by writers: the historical byte and the network bytes 0x600548 / 0x600549 are 0 in every kept state.
-- Disassembly: `scripts/tools/eedis2.py` (0x175af8, 0x424f60-0x425020, 0x33ef20-0x33efd0).
+- Disassembly: `scripts/tools/eedis.py` (0x175af8, 0x424f60-0x425020, 0x33ef20-0x33efd0).
 - Verifier (one Opus agent, claims and citations only; `engine/artifacts/lead_tmp/vpad2/verify/VERDICTS.md`): 42 claims,
   **40 SUPPORTED, 2 PARTLY, 0 NOT SUPPORTED**. The two, both corrected above: the ring-head wording (one of the three
   functions only writes it) and the decay, whose early exits and third 20 s case were missing. It re-read the RAM with

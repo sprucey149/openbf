@@ -22,11 +22,6 @@ The PS2 issues no terrain layer pass for a patch whose PTCH mask is 0 (`analysis
 ## Evidence
 `lead_tmp/re/talph/holes_*.png`, `topdown_*.png` (navy = mask-0, red = holes); `engine/artifacts/pcsx2/ref/FINDINGS.md` F16; census `lead_tmp/re/talph/census.txt`.
 
-## Acceptance
-- Drop the mask-0 patches and TALPH's LTEX[0] backstop from the terrain draw; the heightfield (sim, collision) is untouched.
-- Not before REFL draws the mirrored shells, or the lakes show the black clear colour (CLRB landed 2026-09-28).
-- The DTLX detail pass still covers mask-0 patches near the eye on the PS2 (TDTL's; §2.5).
-- BF1 KAS1 `cp2_cp2_eastharbor_v2/_v3` lake rows (100,150,600,235): PS2 (24,39,58) — the port today (57,54,51) shows the bed.
 ## Note (REFL RE, 2026-09-29, lane 2)
 REFL is RE-done: `analysis/re-sky-reflect.md` §3–§5 [O], build pending.
 - On the PS2 the near lake shows the MAIN-target mirrored copy (the 0x1000031 draw, bucket 3) through the Z-written
@@ -48,6 +43,3 @@ PS2 has dark mirrored water — `engine/artifacts/pcsx2/ref/bf1_kas1/walk/pairs/
   (108,116,137) sd 13), `cp6_cp5__sheet.png` b180/b270, `cp4_cp2__sheet.png` b180. RHN1's harbour plane
   (`bf1_rhn1/walk/pairs/cp2_cp7__sheet.png` b090/b180, `cp0_cp2__sheet.png` b180) looks the same — check whether RHN1 has
   mask-0 patches too. The most visible TMSK case on BF1 after KAS1's lake; the planner may want value 5.
-
-## Planner note (2026-09-30, M-ALPHA)
-`defer: post-alpha` — not needed for the alpha's six showcase maps or its checklist. Value 4 → 3 until the alpha (restore from `value_pre_alpha`).

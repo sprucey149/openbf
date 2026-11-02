@@ -33,13 +33,6 @@ then found the same fault as the whole of BF2 Hoth's doubled `mate_1p5_pct` (5.1
   `hotm/snap/M/bf2_hot1_s3.json` (tick 9000: 8 guards, 140 s). Over 48 seeds the gate's value splits: on guard
   1.83 -> 6.98, everything else 3.28 -> 3.33 (`hotm/out_split.md`).
 
-## Acceptance
-1. The maintainer's four rules (INBOX note), a headless scene test per rule, each mutation-checked; rules 2-4 are named
-   deviations from the PS2 (his yes is the note; the planner writes the gates.toml approval).
-2. Census line: defenders per post after a capture, share of team, seconds a defender stood.
-3. BF2 Hoth `mate_1p5_pct` at most 7.5 over 16 seeds (main 10.3; `hotm/tools/mate.py`), its guard part
-   (`hotm/tools/split.py`) at most 2.5; the sweep 256 / 256.
-
 ## Notes
 - Filed by card HOTM's session from the maintainer's INBOX note (the planner moves the note under Done).
 - Instruments: `hotm/tools/guards.py` (guard-s by post, guards at once in a box), `where.py`, `split.py`.

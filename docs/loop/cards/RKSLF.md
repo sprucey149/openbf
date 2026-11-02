@@ -19,9 +19,6 @@ alpha: yes
 ## Why
 Card RKEX makes a struck rocket detonate its ExplosionName / ExplosionImpact class (B1 FUN_00272d70 / B2 FUN_0030f550). On the branch rkex (1b04dfb) the fidelity gate refused teamkill_pct (all maps) 1.17 -> 1.84 %. Split of the 32-map botq kill events (engine/artifacts/lead_tmp/rkex/tk.py on fidelity_rebase_20261020b vs rkex/gates): self-kills 64 -> 360, team-mate kills 605 -> 723 (762 before RKEX's friend_in_blast).
 Trace (scratch prints, 3 BF1 maps x 3 seeds, lead_tmp/rkex/rkself*.txt, rkshot.txt): 18 self-kills, the blast 1.3-2.7 m from the shooter, 15 on a WORLD body (cover beside the muzzle), 2 a hull at point blank, 1 a soldier. Every exploding shot that landed within 5 m left on a tick with FIRE NOT pressed: the weapon's cycle releases it after the press (BF2 InitialSalvoDelay 0.25 s, SalvoCount 2; BF1 a tick later), so a press-time check (tried: the muzzle ray + the target range within the blast + the wind-up walk) changed nothing (18 -> 13).
-## Acceptance
-teamkill_pct over the fidelity sweep back within tolerance of main's 1.17 % with RKEX's explosion on (self-kills near main's 64); one scene test (a bot behind a wall corner with a launcher fires no rocket into the wall); the PS2 rule first: does the PS2's bot ever cancel a launched salvo (re-soldier-ai, the fire/salvo path) - if not, the fix is OURS (FEEL_NOTES line) and keyed on the shot's own release (a release check on the AI's latched shot), not the press.
-
 ## Notes
 Build it ON branch `rkex` (1b04dfb; RKEX is blocked on this very refusal, its worktree <repo parent>/openbf-wt/rkex): without RKEX no rocket explodes, so there is nothing to measure on main. Land the two together (RKEX's land after RKSLF's commits are on its branch), or merge RKSLF's commits into `rkex`. The scratch repro test of RKEX: lead_tmp/rkex/rkex_repro.rs.
 

@@ -38,7 +38,9 @@ impl Sim {
 
     /// Register a command post with its starting owner (0-based team, None =
     /// neutral). Returns its index.
-    pub fn add_cp(&mut self, def: CpDef, owner: Option<u8>) -> usize {
+    /// Add a post without [`Sim::resolve_posts`], which must follow before the
+    /// sim runs.
+    pub fn add_cp_unresolved(&mut self, def: CpDef, owner: Option<u8>) -> usize {
         let mut cp = CommandPost::new(def, owner);
         // Resolve the post's planning hub once: `locate` is O(hubs + arcs) and
         // a capture centre never moves. Requires `nav` to be set first —
@@ -48,11 +50,25 @@ impl Sim {
             .as_ref()
             .and_then(|g| g.hub_for(cp.def.capture.center, crate::nav::Mover::SOLDIER));
         self.cps.push(cp);
-        // The playable level is walked from the posts (`sim/bounds.rs`).
+        self.cps.len() - 1
+    }
+
+    /// Add a post and walk everything that stands on the posts again.
+    pub fn add_cp(&mut self, def: CpDef, owner: Option<u8>) -> usize {
+        let at = self.add_cp_unresolved(def, owner);
+        self.resolve_posts();
+        at
+    }
+
+    /// What stands on the posts, walked from all of them: the playable level
+    /// (`sim/bounds.rs`), the spawn seats and the flank table. Each of the
+    /// three starts over from the posts, so a whole map's posts need it once,
+    /// after the last ([`Sim::add_cp_unresolved`]): the walk is most of a
+    /// map's loading.
+    pub fn resolve_posts(&mut self) {
         self.resolve_nav_floors();
         self.resolve_spawn_seats();
         self.build_flank();
-        self.cps.len() - 1
     }
 
     /// Card FLNK: (re)build the flank table between the posts' hubs
@@ -125,8 +141,8 @@ impl Sim {
 
     /// Per team, the units that count inside post `ci`'s capture region
     /// ([`Self::counts_in_cp`]): what [`CommandPost::update`] is fed.
-    pub fn cp_inside(&self, ci: usize) -> Vec<u32> {
-        let mut inside = vec![0u32; self.battle.teams.len()];
+    pub fn cp_inside(&self, ci: usize) -> [u32; 2] {
+        let mut inside = [0u32; 2];
         for k in 0..self.units.len() {
             if self.counts_in_cp(k, ci) {
                 inside[self.units[k].team as usize] += 1;
@@ -332,7 +348,7 @@ mod tests {
             seats: vec![SeatKind::Pilot],
         });
         // On foot both count: the post is contested.
-        assert_eq!(s.cp_inside(0), vec![1, 1]);
+        assert_eq!(s.cp_inside(0), [1, 1]);
         assert!(s.seat_unit(rider, v, 0));
         let u = s.unit(rider).unwrap();
         assert!(
@@ -340,7 +356,7 @@ mod tests {
             "{:?}",
             u.soldier.pos
         );
-        assert_eq!(s.cp_inside(0), vec![1, 0], "the rider is not counted");
+        assert_eq!(s.cp_inside(0), [1, 0], "the rider is not counted");
         for _ in 0..(12 * 30) {
             s.step(&[]);
         }
@@ -368,11 +384,11 @@ mod tests {
         };
         s.spawn(&bot(0, Vec3::new(2.0, 0.0, -20.0))).unwrap();
         let b1 = s.spawn(&bot(1, Vec3::new(-2.0, 0.0, -20.0))).unwrap();
-        assert_eq!(s.cp_inside(0), vec![1, 1]);
+        assert_eq!(s.cp_inside(0), [1, 1]);
         s.cps[0].ai_capture_ban = 1 << 1;
-        assert_eq!(s.cp_inside(0), vec![1, 0], "team 1's bot is barred");
+        assert_eq!(s.cp_inside(0), [1, 0], "team 1's bot is barred");
         s.unit_mut(b1).unwrap().controller = Controller::Player { slot: 1 };
-        assert_eq!(s.cp_inside(0), vec![1, 1], "its human is not");
+        assert_eq!(s.cp_inside(0), [1, 1], "its human is not");
     }
 
     /// BF2 rule: a team at 0 tickets is defeated at once; AI never respawn

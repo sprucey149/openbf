@@ -72,17 +72,6 @@ round a body under its allowance (`final`).
 D20 (`analysis/bot-design.md` 9): the PS2 retries (BF2) or stalls on (BF1) a failed walk's arc and its stuck test
 is a clock; we remember the link per bot and per team and detect back-and-forth.
 
-## Acceptance
-`ai::arcm::tests` (10): three turns inside 5 s fire, a sway under 1 m does not, turns spread over 5 s or with new
-ground do not; a closed arc opens after 60 s and the oldest slot makes room; the team shuns an arc at the third bot
-in turn, not counting one bot twice; on a square graph a closed or a shunned arc is drawn round (and the other
-team keeps the table's way), on the L (no other way) it is kept; a bot drawn round keeps the way round at the next
-hub (it looped before); a window's first failure closes nothing and the second closes the arc; the detector's
-verdict fails the window at once with `oscillation` and closes the arc; a penned bot closes its arc and its team
-counts it. Mutations (each fails a test): the second-failure rule dropped or made "always", the hub-by-hub detour
-off, the same-bot check removed, the team's shun ignored, the 5 s span removed, the detector not wired into the
-window, the going-round exemption removed (`avoid::tests::a_long_wall_is_rounded_on_one_side_in_good_time`).
-
 ## Open
 BF1 Bespin 1's arc 150 stall (units near (-6, 99, -166), `round_spent` every 2 s, then `gave_up`) has no other way
 on the graph: memory cannot help it; it is a spot for card UNSN or a map annotation (modern.md A4).

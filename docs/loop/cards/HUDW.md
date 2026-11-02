@@ -24,10 +24,6 @@ The maintainer, 2026-10-04: "empire hud weapons has a weird blotch on it" and "p
 - `playtest/playtest_20261004/3_kam1_pistol_hud.png` (BF2 KAM1, Republic, pistol): a ring with the infinity sign drawn over the clip count (reads `oo46`), the grenade icon overlapping the top pill, the gun icon stretched across the panel and over the pills.
 - Not measured: which draw is the blob (draw-isolate it), and what the PS2 shows for the same weapons (PCSX2 frames).
 
-## Acceptance
-- Each defect is draw-isolated and named; a PS2 frame of the same weapon on the same map stands beside the port's (pixel boxes for the icon, the counts and the bars).
-- Both panels match the PS2's layout; the golden HUD groups move as declared.
-
 ## Findings and what was built (2026-10-05, lane 1; report reports/20261005_1215_card_HUDW.md)
 Each defect draw-isolated (renders `lead_tmp/hudw/pics/`, PS2 frames `lead_tmp/hudw/ps2/`, 640x480):
 1. **The blue blob (BF1 KAS2)** = row 2's icon sheet: the BF1 thermal detonator's `hud_com_grenade_icon` (32x32),

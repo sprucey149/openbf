@@ -32,8 +32,10 @@ cited as AL n) and `re-grenades.md` (the throw itself; cited as GR n). Scratch, 
 Measured live (section 5): BF1 3 of 3 throws and BF2 2 of 2 hold exactly these clips on these players at these
 updates; picture strips `lead_tmp/gthrw/ps2/bf1_throw_sheet.png`, `bf2_throw_sheet.png`.
 
-The port today: the throw exists (card GREN) but no clip is played - the animator starts an action only on a
-`Shot` event, and a throw raises `Throw`, at the release. Section 7 is the change list.
+The port as of 2026-11-01: each map's game throws its own column above, for every class on the map. A class picked from
+the other disc takes the map's throw: a BF2 soldier on a BF1 map plays BF1's clip, lent at load (`fit_throw_to_map`), with
+his side's BF1 thermal at the BF1 count; a BF1 soldier on a BF2 map plays the BF2 clips the bake lends him. The HUD is
+BF2's on every map. Section 7 is the build's original change list, as of 2026-10-22.
 
 ## 1. BF1, third person [V][M]
 
@@ -217,10 +219,8 @@ above (the BF1 grenade set and BF2's `shoot_secondary*` pairs are in each soldie
    port computes the active channel before the cycle, so check the update the `Firing` state ends. AUDIT (§10.1):
    the PS2 DOES play that reload clip while L1 is held past the fire state's end (or pressed again during the
    reload): channel 1 stays until the release + 1 update, at most the clip's 2.5 s. Port it, or name the deviation.
-5. Timing on BF1 maps: the port throws BF1 grenades by BF2's rules (`Thrown::BF1_THROWS_AS_BF2`, release 0.51 s);
-   BF1's clip releases at clip time 0.267 s. A decision for the build, to record in FEEL_NOTES: stretch the clip's
-   wind-up (0.267 s of clip over the port's 0.477 s) so the hand and the grenade part together, PROVISIONAL.
-   AUDIT (§10.3): the player's phase at the release is one update later than these figures (BF1 0.300 s, BF2
+5. Timing on BF1 maps: released at BF1's 0.3 s since 2026-11-01, with no stretch on the clip (the stretch and BF2's
+   0.51 s on BF1 maps are gone). AUDIT (§10.3): the player's phase at the release is one update later than these figures (BF1 0.300 s, BF2
    0.533 s); which phase the drawn pose uses is [H] - the difference is one frame.
 6. First person: card FPV (no first-person view exists).
 7. Census: the share of throws (`Event::Throw`) whose thrower's animator holds the throw clip at the release, per map

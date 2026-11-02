@@ -21,13 +21,3 @@ value-5 card open, every value-4 card joins the window, and capture ranks last (
 PXWB (M1 5, capture, open since 2026-09-28) have been passed over by every session since; once UAUD2 / UTAS are done,
 lane 2 would take the value-4 re cards (DEKA, FAMB, FARC, FOGC, FXP, LEAF, …) before them. The planner's value is
 meant to be the ranking ("Rank = value").
-
-## Build
-- Window = equal value only (`val(c) == best_val`); the lane preference still splits kinds between the two lanes.
-- Keep the file-overlap / live-claim rules as they are. A unit test (or a `--self-test`) over a fixture card set: lane 1
-  and lane 2 each pick a value-5 card before any value-4 one, and a lone value-5 capture card is picked by a lane when
-  it is the only value-5 left.
-
-## Acceptance
-- The fixture test; `loopctl.py check` 0 problems; behaviour-neutral for the game (every gate PASS, nothing declared).
-- Land it together with, or before, TGTC (both touch loopctl.py; they serialise by `files:`).

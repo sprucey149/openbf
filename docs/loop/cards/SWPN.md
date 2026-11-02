@@ -19,20 +19,6 @@ The maintainer (INBOX 2026-09-30 08:50, STALL step 1): the sweep reports one see
 seeds 1–8 showed KAM1's seed-42 win was the lucky run (7/8 NO OUTCOME), POL1 6 → 8 of 8, MUS1 1 → 2
 (`reports/20260929_2337_card_WTUN.md`, `lead_tmp/wtun/reseed/`). STALL's fixes are judged by the multi-seed numbers.
 
-## Plan
-- `scripts/sweep_seeds.py [--seeds 1-8] [--ticks 60000] [--maps …] --out <dir>`: runs the release
-  `examples/round_to_outcome` once per seed (in parallel, under `ci.lock`), keeps each seed's raw output, and writes
-  `seeds.md`: per map the finish count (n/8), the winner split, `stuck_max` min / median / max, and the footer
-  (maps finishing ≥ 7/8, maps with any stuck_max ≥ 10k). Optional `--baseline <dir>` prints per-map deltas.
-- Seed 42 stays the gate's byte-compare; `gates.py` is not changed here (a later card may add an opt-in `sweep8` group;
-  land.py runs main's gates.py — `land-runs-mains-gates-script`).
-- Write main's table as the first baseline: `lead_tmp/loop_baselines/<stamp>_SWPN/seeds.md`.
-
-## Acceptance
-- Seed 42 in the tool's run reproduces `sweep_main_1.txt` byte for byte for every map row (the instrument check).
-- Main's 8-seed table exists, with its wall time; the report pastes it. Behaviour-neutral: every gate PASS, nothing
-  declared (only a script and, if needed, a CLI flag on the example).
-
 ## Note from STALL (2026-09-30)
 STALL's scratch run gives SWPN a first baseline: main 027dad9, seeds 42 and 1–8, all 32 maps, 60,000 ticks.
 - **The files:** `lead_tmp/stall/all/sweep_s*.txt` and `eps_s*.err`.

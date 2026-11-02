@@ -38,27 +38,6 @@ bring-up as alpha (KAMR, value 5).
   segment or model, a LOD / `lowd` split). Neither is checked.
 - No PS2 frame of a ramp is cited anywhere: the 24 stored walk pairs stand at the posts.
 
-## Do
-1. Find the spots: from `kam1_play_11` the ramp descends from the deck in front of the player toward the platform with
-   the green post beam. `kamr_pose` / `--spawn` (memory `plant-a-soldier-with-a-scratch-example`) until a port frame
-   matches; note the world position and the instance (class, model, segment) that owns the rails.
-2. Run the census at 0.5 m on bf2_kam1 with `--png` and read the ramp cells: A or clean? That decides H1 / H2.
-3. H1: dump the walkway segment's material words (`lead_tmp/pxwb/mtrl2.py KAM1.LVL <substr>`; memory
-   `mtrl-words-and-baked-alpha`) and its baked alphaMode / texture alpha; name the rule that hides it (ADDM, ELFR2 and
-   BFC are the open cards on such rules — fold in or fix here). H2: find where the bake drops it.
-4. A PS2 frame at the same spot (memory `ps2-camera-anywhere-by-ram-hold`, BF2: E+0x150, zero E+0x550) → a PS2 | port
-   pair in `pcsx2/ref/bf2_kam1/`.
-5. Fix it; then every other ramp and spur on the map, and BF1 KAM1's.
-
-## Acceptance
-- The pair of step 4, re-rendered after the fix: the walkway box (the region between the rails) mean colour within 25
-  levels per channel of the PS2's, and no pixel row of the box showing the hull below (before: the hull).
-- A count: every instance of the ramp / spur class(es) on bf2_kam1 AND bf1_kam1 listed with "walkway drawn: yes" from a
-  top-down render or a per-instance draw census (before: 0 of N; after: N of N).
-- `floor_census bf2_kam1 bf1_kam1`: the ramp cells are not in class A (paste the two lines; the authored exceptions of
-  re-kamino §4.1 stay).
-- Goldens: `maps/bf2_kam1.png` / `maps/bf1_kam1.png` declared if the vantage sees a ramp; parity bf2_kam1 / bf1_kam1 not worse.
-
 ## Notes
 - Planner 2026-09-30 21:45: filed from the maintainer's 18:45 note. Phase `build` (a port defect hunt, the PS2's behaviour is not
   in question); if step 3 lands on an open rule card (ADDM / ELFR2 / BFC), build it here for Kamino's case and leave a

@@ -240,4 +240,12 @@ named script, [M] measured on the PS2 (PCSX2 RAM), [H] not confirmed. Tools, inp
 - Player: "Leaving Battlefield" (Locl 0x3a1fed50) centred, alpha spring of T4; the team's leaving line from the
   mission's `SetOutOfBoundsVoiceOver` (ANNC's `out_of_bounds` field) once per excursion, for the local human, with
   the `allleaving` / `repleaving` locks.
-- The flyer ceiling (T3b) and the guided rocket's 2.17 s (T3) wait for the flyer (card VFLY).
+- The guided rocket's 2.17 s (T3) waits for the guided rocket's flyer (card VFLY).
+- T3b's height test sits in the flying state's case of the update's state switch (B2:118249 `case 2`, up to B2:118673), so
+  a craft on the pad never sets the flag. That matters: `uta_fly_ride_gunship` pads stand at y 83 on BF2 UTA1 (ceiling 29.5),
+  46 to 61 on MYG1 (20) and up to 125 on KAM1 (102). [H] what a takeoff from those pads does on the PS2: the height clamp
+  (B2:119056-119066) would pull the craft down to the ceiling. No live trial.
+- Built for flyers (2026-11-01, `Sim::tick_flyers`): T1, T2 and T3b (flying state only) for a craft with a crew, the HUD line and the
+  commander's line through `Sim::is_leaving`. PROVISIONAL: one timer on the craft rather than one per crew member. Soldiers
+  on foot and ground vehicles still do not count, and a human who jumps out leaves the countdown behind, which the PS2's
+  soldier slot would not. The guided rocket's 2.17 s is not built here. Headless tests only.

@@ -143,8 +143,13 @@ fn team_templates(
             let templates = rosters.map(|mut r| {
                 // Heroes Off: no hero class at all (Session Options).
                 if b.heroes.is_some() {
-                    hero_classes[team] =
-                        game::heroes::append(&mut r, &b.classes_dir, b.mission.as_ref(), team);
+                    hero_classes[team] = game::heroes::append_with(
+                        &mut r,
+                        &b.classes_dir,
+                        b.mission.as_ref(),
+                        team,
+                        b.dlc_heroes,
+                    );
                 }
                 let mut table = Vec::new();
                 let mut visuals = Vec::new();
@@ -190,14 +195,10 @@ fn team_templates(
 /// the PS2 offers the side select ("can switch sides", re-spawn-flow §1), so
 /// the screens open on it; the side the player accepts is the player's team
 /// (`mission::pick`'s `player_team` only orders the armies). The CLI walk,
-/// the headless tools and the golden scenes keep the auto-accept spawn;
-/// `OPENBF_SPAWN_SCREENS=0` turns the screens off here too. The screens
-/// stand over the mission's camera shots until the first spawn (card SSELB,
+/// the headless tools and the golden scenes keep the auto-accept spawn. The
+/// screens stand over the mission's camera shots until the first spawn (card SSELB,
 /// `game::spawn_backdrop`).
 pub(super) fn open_spawn_screens(walk: &mut WalkSim, mission: Option<&game::mission::MissionDef>) {
-    if std::env::var("OPENBF_SPAWN_SCREENS").is_ok_and(|v| v == "0") {
-        return;
-    }
     if !walk.sim.open_spawn_screens(0, true) {
         eprintln!("spawn screens: slot 0 holds no live unit; the respawn stays automatic");
         return;
@@ -355,6 +356,7 @@ pub(super) fn make_walk_with_counts(
         walk.sim.death_regions = a.death_regions.clone();
         walk.sim.fly_ceiling = a.fly_ceiling;
         walk.sim.flight_limits = a.flight_limits;
+        walk.sim.landing_regions = a.landing_regions.clone();
         walk.sim.ground_flyer_map = m.ground_flyer_map;
         let blocked = m.apply_arc_blocks(walk.sim.nav.as_mut());
         if blocked != 0 {
@@ -530,8 +532,9 @@ pub(super) fn hud_model(
     // On foot the soldier's rows; flying, the droid's.
     let [weapon, weapon2] = game::hud_feed::weapon_rows(walk);
     let gauge = game::hud_feed::weapon_gauge(walk);
-    let leaving = droid
-        .is_some_and(|(d, _)| d.leaving.is_some())
+    let leaving = walk
+        .sim
+        .is_leaving(walk.player)
         .then(|| feed.leaving_text());
     let reticle =
         (on_foot || droid.is_some() || guided.is_some() || game::hud_feed::armed_seat(walk)).then(
@@ -822,6 +825,7 @@ mod tests {
             mission_file: None,
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
+            dlc_heroes: false,
         };
         let mut walk = make_walk(&scene, &setup);
         assert_eq!(walk.vehicle_classes, ["fixture_dish"]);
@@ -880,6 +884,7 @@ mod tests {
             mission_file: None,
             player_team: 1,
             heroes: Some(core::sim::heroes::HeroRules::default()),
+            dlc_heroes: false,
         };
         // Resolve missions independently of the bake location.
         setup.mission = Some(
@@ -1011,6 +1016,7 @@ mod tests {
                 mission_file: None,
                 player_team: 0,
                 heroes: game::heroes::rules(&session),
+                dlc_heroes: false,
             };
             walks.push(make_walk(&scene, &setup));
         }

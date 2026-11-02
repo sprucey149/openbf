@@ -19,27 +19,6 @@ The maintainer (INBOX 2026-09-28, value 5, M1): the walkabout (`engine/artifacts
 frame, and some maps look like they have gaping holes (UTA1 first). Only a PS2 comparison at every post finds them;
 eyeballing is not evidence.
 
-## Method (the maintainer's notes)
-- For every BF2 map and command post: the PS2 at the port walkabout's own stand, eye 1.7 m up, level pitch, bearings
-  0/90/180/270. Read each pose from the state (`pose.py`), render the port at it (`port.py`), build pairs (`pairs.py`).
-- **AI count 0.** BF2 IA has an AI-count option (OPTIONS on the playlist screen, beside LAUNCH/ADD/REMOVE); find it and
-  record the menu path in `pcsx2/README.md`. Check whether BF1 has one. With no bots the battle stays static and every
-  vehicle stays parked.
-- **Teleport, don't walk.** `ps2live.py`'s writable `Live` pokes RAM: set the player to each post's stand and the camera
-  yaw per bearing; read the pose back, never trust timed turns. `ps2live.py` is BF1-first: the BF2 player/camera addresses may need finding (pose.py
-  already reads BF2's camera at `DAT_0060c240`).
-- **Vehicles too:** a pair per pad (position and yaw from RAM vs VPAD/VDRAW's placement).
-- Output: `pcsx2/ref/<map>/walk/cp<k>_<post>_b<bearing>.png` + `.json`, pairs, a per-map index line in the walkabout
-  INDEX's style. Hold `ci.lock` per the README's Concurrency rule; batch so the other lane's gates are not starved.
-- **Start with the hole census outliers** (`engine/artifacts/lead_tmp/walkabout_holes.txt`: % of below-horizon pixels
-  that are exact clear-black; floor ~0.6 %): UTA1 cp4 con_cp2 (37.5/6.1/0.6/13.2 by bearing — UTAS owns the fix), TAN1
-  cp2 6.9 / cp3 3.9 / cp1 2.8 / cp0 2.2 (an interior: maybe legitimate space through windows — check), TAT2 cp4 6.0, GEO1
-  cp5 3.4, YAV1 temple 1.9. Then the rest, for non-black defects this test cannot see.
-
-## Acceptance
-- All BF2 maps and every post covered (or a recorded reason per post); every pair viewed; findings in
-  `pcsx2/ref/FINDINGS.md`; every gap carded, holes first. Multi-session: `resume:` names the next map.
-
 ## Notes
 - Created 2026-09-28 by the planner, split per game from the maintainer's one card. Read `pcsx2/README.md` and
   `ref/COMPARISON_RULES.md` first.

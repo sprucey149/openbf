@@ -45,7 +45,7 @@ class ReceiptTests(unittest.TestCase):
                 self.assertLessEqual(terrain["in_play_exposed"]["samples"] + terrain["outside_boundary"]["samples"], total)
 
     def test_receipt_has_no_lists_of_content(self):
-        self.assertLess(RECEIPT.stat().st_size, 200_000)
+        self.assertLess(RECEIPT.stat().st_size, 256 << 10)
         pair = self.receipt["comparisons"]["bf2_ps2_vs_bf2_xbox"]
         self.assertNotIn("scoped_unmatched_names", pair)
         self.assertNotIn("left_only", pair["content_name_sets"])

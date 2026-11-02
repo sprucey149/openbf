@@ -2,9 +2,8 @@
 //!
 //! The bake pipeline stores KTX2; the loader decodes to RGBA8 levels and hands them
 //! here — this crate deliberately knows nothing about KTX2. Sampler descriptor
-//! adapted from an earlier wgpu project's terrain sampler
-//! (`an earlier project's source`,
-//! `create_terrain_sampler`), with Repeat addressing because game textures tile.
+//! adapted from an earlier project's terrain sampler (`create_terrain_sampler`), with Repeat
+//! addressing because game textures tile.
 
 use crate::bindings;
 use crate::RenderError;

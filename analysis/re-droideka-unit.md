@@ -241,7 +241,7 @@ $T/deka_run.sh bf2 bf2_kas2_cw_rep_cp0_cp4con_post3_spawn.p2s 180 bf2_kas2
 python3 $T/deka_ana.py engine/artifacts/lead_tmp/deka/live/bf1_kas2.csv       # fold / unfold, ball speed ratio, shield slopes
 python3 $T/deka_prims.py extracted/bf1/lvl/DATA/_LVL_PS2/SIDE/CIS.LVL droideka
 python3 engine/artifacts/lead_tmp/veh0/entc.py extracted/bf1/lvl/DATA/_LVL_PS2/SIDE/CIS.LVL cis_weap_walk_droideka_shield
-python3 scripts/tools/eedis2.py bf1 294080 2940d8     # the shield's fire predicate
+python3 scripts/tools/eedis.py bf1 294080 2940d8     # the shield's fire predicate
 ```
 The two stored CSVs were taken with BF2's velocity read at E+0x550; the real field is E+0x490 (verifier; the script
 is fixed since) - no BF2 number above uses that column.

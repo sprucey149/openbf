@@ -30,17 +30,6 @@ AI-only cases. RKSLF owns the deliberate own-side blast-safety behavior;
 and a charge release. Immediate non-charge fire and a human's own trigger
 must be tested independently of those paths.
 
-## Scope
-Add focused real `Sim::step` fixtures to the existing step test module. Use
-an initially idle, active non-charge primary with TriggerSingle and zero
-InitialSalvoDelay, fire_cmd0 and salvo_counter0. The AI must actually produce
-a fresh FIRE input; assert the open-air shot so an idle tap gate cannot pass
-the safety assertion. Cover both source-rule sets and retain the existing
-latched/charge scene. Update the module map's owned line count if needed.
-No production edits, new safety rules, constants, event fields, hash pins,
-protected files, golden moves or baseline edits. This does not own RKSLA's
-surface-normal placement, long-held charges, margins or hull/rider changes.
-
 ## Acceptance
 - On current main, an AI at the near wall produces zero shots, zero health
   loss and a positive blast-hold count on the immediate firing step. The

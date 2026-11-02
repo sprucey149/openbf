@@ -25,6 +25,30 @@ class ScratchBake(unittest.TestCase):
         self.assertIn("scratch_bake:", run.stdout)
 
 
+class CmpBake(unittest.TestCase):
+    def test_a_map_that_lost_its_foliage_fails_though_no_shared_file_differs(self):
+        with tempfile.TemporaryDirectory() as folder:
+            a, b, fake = Path(folder, "a"), Path(folder, "b"), Path(folder, "bake")
+            for tree in (a, b):
+                (tree / "m").mkdir(parents=True)
+                (tree / "m/manifest.ron").write_text("same")
+            (b / "m/foliage.bin").write_text("placed")
+            fake.write_text("#!/bin/sh\nexit 0\n")
+            fake.chmod(0o755)
+            script = Path(__file__).resolve().parents[1] / "cmp_bake.sh"
+            env = dict(os.environ, BAKE=str(fake))
+            done = subprocess.run(["bash", str(script), str(a), str(b)], env=env, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 1, done.stdout)
+            self.assertIn("FOLIAGE_LOST m", done.stdout)
+            (a / "m/foliage.bin").write_text("placed")
+            done = subprocess.run(["bash", str(script), str(a), str(b)], env=env, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 0, done.stdout)
+            # Two trees that agree still fail when the PS2's counts say otherwise.
+            fake.write_text("#!/bin/sh\nexit 1\n")
+            done = subprocess.run(["bash", str(script), str(a), str(b)], env=env, capture_output=True, text=True)
+            self.assertEqual(done.returncode, 1, done.stdout)
+
+
 class ShadowSidecars(unittest.TestCase):
     def test_a_bake_without_any_bf1_shadow_is_called_out(self):
         with tempfile.TemporaryDirectory() as d:

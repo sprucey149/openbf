@@ -21,11 +21,6 @@ The LEAK census (game/examples/leak_census.rs, report reports/20260929_*_card_LE
 - A traced case: bf1_nab1, `LEAK_TRACE=-134.49,73.23,walk`: walking at 6.3 m/s, tick 2 the axis crosses a face with normal (0.77, 0.11, -0.63), push (0, 0) every tick.
 - core/src/collision/walls.rs push_out: per body ONE contact (mesh_contact keeps the deepest triangle), then `if n.y.abs() >= WALKABLE_MIN_NY { return; }` — the whole body is skipped [V, code]. That this is THE mechanism is [H].
 
-## Acceptance
-- Name the mechanism from a trace (which triangle, depth, normal, why no push).
-- Fix it for every map (the PS2's soldier-vs-world response is untraced; ours stays PROVISIONAL): tunnel count on the census drops to a small, explained residue; declare `leak` (and sweep/arena/sim, which will move).
-- A unit test with a two-triangle body reproducing the skip.
-
 ## Notes (JWAL's RE, 2026-09-29, lane 2 — analysis/re-soldier-walls.md)
 - This card's suspect is JWAL's M1, proven there to the tick. `push_out` skips a contact whose normal has
   |n.y| ≥ 0.5 as "a floor". The skipped contact is a ledge's rim, or a mesh body's deepest triangle when that is a

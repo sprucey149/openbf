@@ -201,7 +201,7 @@ fn pull(walk: &WalkSim) -> Vec3 {
 fn walls_clear(walk: &WalkSim) -> bool {
     let (want, _) = ideal(walk);
     walk.camera_blockers
-        .fraction(pull(walk), want, None, |_| None)
+        .fraction(pull(walk), want, None, |_| None, &walk.sim.doors)
         >= 1.0
 }
 

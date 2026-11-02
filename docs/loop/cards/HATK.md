@@ -22,10 +22,6 @@ first: 12
 ## Evidence
 `analysis/re-hud.md` §2 'World markers', `hud_target_*` textures (`re-hud-icons.md`); the sim's `last_hit` (the attacker) in `Unit`.
 
-## Acceptance
-1. `analysis/re-hud-attacker.md` [O] with PCSX2 captures: exactly what appears and where, for a hit from the front, side, behind and a far shot; BF1 vs BF2; or a receipted finding that it is not in a PS2 game (then the port may add one as a named modern option, the maintainer's call).
-2. Built on the HUD tree; a test pins the direction; a golden.
-
 ## Notes
 - 2026-10-21 RE done (lane 2, c83a7d0, `analysis/re-hud-attacker.md`; report `reports/20261021_1514_card_HATK.md`):
   acceptance 1 MET. It IS in both PS2 games, but not as the Target element's attacker icons (those are dead data):

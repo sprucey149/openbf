@@ -39,13 +39,6 @@ every tick, while the step-lifted probe reads clear (seed 5, run 20,520).
 - `ps2/bf2_kam1_*`.
 - KAS2: `TRACE_UNIT=7` seed 5 (`VEH` lines).
 
-## Acceptance
-- KAM1 over 8 seeds: environment deaths ≤ 5 % of deaths.
-- ≤ 1 % of KAM1 no-progress episodes open below the decks.
-- DEA1's pit deaths stay within ±50 % of the PS2's 3.0/min. Those falls are the game's own.
-- BES1 (33 % falls now): measure the PS2 with `ps2live.py`, and report before and after.
-- KAS2's Empire-spawn cluster (114.6, −0.3, 293) is gone on 8 seeds.
-
 ## Landed (2026-09-30, e09c854; report `reports/20260930_1705_card_STFAL.md`)
 Acceptance against 8 seeds (`lead_tmp/stfal/v4_32/`): KAS2's Empire-spawn cluster 18 → 3 episodes (seed 6 only) —
 nearly met. KAM1 env deaths 98.6 % → 96.0 % (5.14/min) and below-deck episodes 555/803 → 214/925 — NOT met; their

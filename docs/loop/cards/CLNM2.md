@@ -20,7 +20,4 @@ The cleanse rotation's `mungefs` area (LAST_CLEANSE). Scope: `engine/crates/mung
 
 ## Evidence
 
-## Acceptance
-Every gate PASS with nothing declared (behaviour-neutral: bake outputs byte-identical, goldens, sweep, sim hash unmoved); `size_report.sh --check-map` exit 0 with 0 stale counts; `size_report.sh --strict` exit 0.
-
 ## Notes

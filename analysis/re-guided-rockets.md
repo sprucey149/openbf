@@ -35,7 +35,7 @@ Two explosion bindings are distinct: e04f08c1 = `com_weap_veh_guided_rocket_exp`
 - The flying branch clamps forward speed toward the Min/Mid/Max throttle law, uses BoostAcceleration and BoostSpeed while boosting and triple deceleration while slowing. Its pitch and turn rates slew toward their commands by filter*dt; the actual branch near 00206400 corrects the old note's broad description as a first-order filter. The implementation uses a separate quaternion flight state and forward thrust, not the droid's gravity/lift spring.
 - `re-vehicle-death.md` pins health damage through the authored HealthType scale. The new rocket accepts bolts and blasts as a droid-scaled target; its own explosions credit the launching unit's generation and team through the existing blast path.
 
-Useful reproducible reads: `python scripts/re_check.py word b2 0x629ca8 36 --u32`; extract the named `FUN_00346100`, `FUN_00346480`, `FUN_00202d08` and `FUN_0020fd58` bodies from the local corpus; check the corresponding raw instructions with `scripts/tools/eedis2.py bf2 <start> <end>`. No decompiler source or disc asset is committed.
+Useful reproducible reads: `python scripts/re_check.py word b2 0x629ca8 36 --u32`; extract the named `FUN_00346100`, `FUN_00346480`, `FUN_00202d08` and `FUN_0020fd58` bodies from the local corpus; check the corresponding raw instructions with `scripts/tools/eedis.py bf2 <start> <end>`. No decompiler source or disc asset is committed.
 
 ## Port controls, implementation and acceptance limits
 

@@ -22,13 +22,6 @@ renderable, and the port draws it as a box (`game::walk::bolt_draws`). The PS2 f
 (`engine/artifacts/lead_tmp/fxp/ps2cap/sheet_hot1_fire.png`, `crop_nab1_impact.png`) show soft glowing bolt heads and,
 on BF2 HOT1, a large pink light wash on the snow around each bolt.
 
-## Acceptance
-- RE (§5 discipline, both games): the bolt class's ODF keys (LaserTexture, LaserGlowColor, LaserLength / Width, glow
-  texture, LightColor / LightRadius, …) — their setters and the draw (quad/streak geometry, blend, how the light is
-  applied to the world), the defaults; census of the showcase weapons' values.
-- `analysis/re-bolt.md`, then phase=build with files/declares; PCSX2 pairs of bolts in flight on one BF1 and one BF2
-  showcase map.
-
 ## Build acceptance (planner 2026-09-30 05:00; the RE acceptance above is met)
 - Unit tests: the LaserLength rule (a PROP order setting LaserLength after GlowLength resets it to 3L, BlurLength 15L,
   capped 128) and the §3.2 strip geometry (half-widths w, w/2, cap; glow 2w -> 1.6w; U 0 / 0.25 / 1) against

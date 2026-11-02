@@ -31,7 +31,7 @@
 # Tunables (env): MODEL (opus), MAX_TURNS (400), ITER_TIMEOUT (4h), PERM_MODE (auto), PROBE_INTERVAL (20m),
 # MAX_ITERS (0 = unbounded), CLAUDE_BIN (claude), EFFORT (empty = the job decides: re/capture/audit xhigh, planner high,
 # the rest medium — the 2026-09-24 effort A/B; set a level to force it for every session), LANES (1), LANE_STAGGER (180 s),
-# FABLE_MAX (0 — no Fable on this project), WORKFLOWS (1 — audit sessions and the `re` phase of card sessions get
+# WORKFLOWS (1 — audit sessions and the `re` phase of card sessions get
 # engine/artifacts/briefs/WORKFLOW_BLOCK.md appended: the maintainer's explicit opt-in to the Workflow tool for those jobs, 2026-10-07; set
 # WORKFLOWS=0 to turn it off), WF_EFFORT (medium — the effort of the workflow's agents, not of the session).
 set -uo pipefail
@@ -50,7 +50,6 @@ EFFORT_OVERRIDE="${EFFORT:-}"   # empty = the job decides (loopctl.py); set EFFO
 LANES="${LANES:-1}"
 LANE="${LANE:-}"
 LANE_STAGGER="${LANE_STAGGER:-180}"
-FABLE_MAX="${FABLE_MAX:-0}"
 WORKFLOWS="${WORKFLOWS:-1}"
 WF_EFFORT="${WF_EFFORT:-medium}"
 WF_BLOCK="$ROOT/engine/artifacts/briefs/WORKFLOW_BLOCK.md"
@@ -65,9 +64,7 @@ mkdir -p "$RUNS_DIR" "$LOCKS_DIR"
 # The project hook (scripts/claude_guard.sh) adds loop-only rules when this is set:
 # merges into main must be --ff-only, a worktree never checks out main, and
 # PLAN.md / HANDOFF-OPUS.md / analysis/ change only through the Edit/Write tools.
-# OPENBF_FABLE_MAX caps the Fable RE agents a session spawns — 0 since 2026-09-17, so a session
-# does its own RE under the prompt's §5 discipline (the prompt reads this variable).
-export OPENBF_LOOP=1 OPENBF_FABLE_MAX="$FABLE_MAX"
+export OPENBF_LOOP=1
 # Sessions open their own scopes (`systemd-run --user --scope`): the shim in scripts/loopbin keeps those in openbf.slice,
 # the slice scripts/start_loop.sh starts the loop in and scripts/loop_cpu.py keeps off the maintainer's fast cores (2026-10-11).
 case ":$PATH:" in *":$ROOT/scripts/loopbin:"*) ;; *) export PATH="$ROOT/scripts/loopbin:$PATH" ;; esac

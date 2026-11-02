@@ -1,9 +1,10 @@
-"""eedis.py <bf1|bf2> <va_start> <va_end> -- a small R5900 disassembler for the SPEC RE (lane 1, 2026-09-24): the MIPS ops
-that matter to FUN_00589ac0-class code (loads/stores incl. LQC2/SQC2, lui/ori/addiu, jal/jr/branches, FPU lwc1/swc1/mul.s)
-plus COP2 macro-mode VU0 instructions decoded with vu1dis.py's upper-op decoder, so the broadcast field (.x/.y/.z/.w) the
-Ghidra listing drops (`_vmulabc`) is printed. BF2 file off = va - 0x160000 + 0x1000; BF1 per its PT_LOAD (elfw.py ph)."""
-import os, struct, sys
+"""eedis.py <bf1|bf2> <va_start> <va_end> -- a small R5900 disassembler for RE reads: the integer and FPU ops, unaligned and
+likely forms included, plus COP2 macro-mode VU0 instructions decoded with vu1dis.py's upper-op decoder, so the broadcast field
+(.x/.y/.z/.w) the Ghidra listing drops (`_vmulabc`) is printed. VA to file offset goes through elfrd.py's PT_LOAD mapping;
+an address with no file bytes (BSS, or outside the ELF) is refused by name."""
+import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import elfrd
 import vu1dis
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..') + os.sep  # the repo root
@@ -12,22 +13,15 @@ R = ['zero', 'at', 'v0', 'v1', 'a0', 'a1', 'a2', 'a3', 't0', 't1', 't2', 't3', '
      's3', 's4', 's5', 's6', 's7', 't8', 't9', 'k0', 'k1', 'gp', 'sp', 'fp', 'ra']
 
 
-def segs(d):
-    phoff = struct.unpack_from('<I', d, 0x1c)[0]
-    phes, phn = struct.unpack_from('<HH', d, 0x2a)
-    out = []
-    for i in range(phn):
-        t, off, va, pa, fsz, msz, fl, al = struct.unpack_from('<IIIIIIII', d, phoff + i * phes)
-        if t == 1:
-            out.append((va, off, fsz))
-    return out
+UNALIGNED = {0x22: 'lwl', 0x26: 'lwr', 0x2a: 'swl', 0x2e: 'swr', 0x1a: 'ldl', 0x1b: 'ldr', 0x2c: 'sdl', 0x2d: 'sdr',
+             0x27: 'lwu', 0x37: 'ld', 0x3f: 'sd'}
 
 
-def off_of(sg, va):
-    for sva, off, fsz in sg:
-        if sva <= va < sva + fsz:
-            return off + va - sva
-    raise ValueError(hex(va))
+def word(elf, va):
+    """The instruction word at va. elfrd reads BSS as zeros, which would print as code, so only file bytes count."""
+    if any(sva <= va and va + 4 <= sva + fsz for sva, _, fsz, _ in elf.segs):
+        return elf.u32(va)
+    raise ValueError(f'{va:#x} has no file bytes in this ELF')
 
 
 def dis(w, va):
@@ -35,6 +29,24 @@ def dis(w, va):
     rs, rt, rd, sa, fn = (w >> 21) & 31, (w >> 16) & 31, (w >> 11) & 31, (w >> 6) & 31, w & 63
     imm = w & 0xffff
     simm = imm - 0x10000 if imm & 0x8000 else imm
+    if op in UNALIGNED:
+        return f'{UNALIGNED[op]} {R[rt]}, {simm}({R[rs]})'
+    if op in (0x16, 0x17):
+        return f'{"blezl" if op == 0x16 else "bgtzl"} {R[rs]}, {va + 4 + simm * 4:#x}'
+    if op == 0x11 and rs == 8:
+        return f'{["bc1f", "bc1t", "bc1fl", "bc1tl"][rt & 3]} {va + 4 + simm * 4:#x}'
+    if op == 0x11 and rs in (2, 6):
+        return f'{"cfc1" if rs == 2 else "ctc1"} {R[rt]}, $fcr{rd}'
+    if op == 0x12 and not (w >> 25 & 1) and rs == 8:
+        return f'bc2{["f", "t", "fl", "tl"][rt & 3]} {va + 4 + simm * 4:#x}'
+    if op == 0x12 and (w >> 25 & 1) and (w & 0x3f) in (0x38, 0x39):
+        return f'VCALLMS{"R" if (w & 0x3f) == 0x39 else ""} {((w >> 6) & 0x7fff) * 8:#x}'
+    if op == 0 and fn in (0x0c, 0x0d, 0x0f):
+        return {0x0c: 'syscall', 0x0d: 'break', 0x0f: 'sync'}[fn]
+    if op == 0 and fn in (0x14, 0x16, 0x17, 0x1a, 0x1b, 0x19, 0x11, 0x13, 0x2c, 0x2e, 0x01, 0x07, 0x3b, 0x3f, 0x28, 0x29):
+        n = {0x14: 'dsllv', 0x16: 'dsrlv', 0x17: 'dsrav', 0x1a: 'div', 0x1b: 'divu', 0x19: 'multu', 0x11: 'mthi',
+             0x13: 'mtlo', 0x2c: 'dadd', 0x2e: 'dsub', 0x07: 'srav', 0x3b: 'dsra', 0x3f: 'dsra32', 0x28: 'mfsa', 0x29: 'mtsa'}.get(fn, f'special?{fn:#x}')
+        return f'{n} {R[rd]}, {R[rs]}, {R[rt]}' if fn not in (0x3b, 0x3f) else f'{n} {R[rd]}, {R[rt]}, {sa}'
     if w == 0:
         return 'nop'
     if op == 0:
@@ -66,8 +78,8 @@ def dis(w, va):
         return f'{ii[op]} {R[rt]}, {R[rs]}, {v:#x}' if op in (0xc, 0xd, 0xe) else f'{ii[op]} {R[rt]}, {R[rs]}, {v}'
     if op == 0xf:
         return f'lui {R[rt]}, {imm:#x}'
-    mem = {0x20: 'lb', 0x21: 'lh', 0x23: 'lw', 0x24: 'lbu', 0x25: 'lhu', 0x28: 'sb', 0x29: 'sh', 0x2b: 'sw', 0x37: 'ld',
-           0x3f: 'sd', 0x1e: 'lq', 0x1f: 'sq', 0x31: 'lwc1', 0x39: 'swc1', 0x36: 'lqc2', 0x3e: 'sqc2'}
+    mem = {0x20: 'lb', 0x21: 'lh', 0x23: 'lw', 0x24: 'lbu', 0x25: 'lhu', 0x28: 'sb', 0x29: 'sh', 0x2b: 'sw',
+           0x1e: 'lq', 0x1f: 'sq', 0x31: 'lwc1', 0x39: 'swc1', 0x36: 'lqc2', 0x3e: 'sqc2'}
     if op in mem:
         n = mem[op]
         reg = f'$f{rt}' if n in ('lwc1', 'swc1') else (f'vf{rt}' if n in ('lqc2', 'sqc2') else R[rt])
@@ -105,9 +117,7 @@ def dis(w, va):
 if __name__ == '__main__':
     g = sys.argv[1]
     a, b = int(sys.argv[2], 16), int(sys.argv[3], 16)
-    d = open(P[g], 'rb').read()
-    sg = segs(d)
+    elf = elfrd.Elf(P[g])
     for va in range(a, b, 4):
-        o = off_of(sg, va)
-        w = struct.unpack_from('<I', d, o)[0]
-        print(f'{va:08x} (file {o:#x}): {w:08x}  {dis(w, va)}')
+        w = word(elf, va)
+        print(f'{va:08x}: {w:08x}  {dis(w, va)}')

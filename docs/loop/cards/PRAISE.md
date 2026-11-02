@@ -23,10 +23,6 @@ streak, in both PS2 games. Filed so it is not lost; belongs with USND's unit voi
 ## What to find
 Which events trigger it (streak counts, who is near, which class speaks, cooldowns) and the lines per faction.
 
-## Acceptance
-- RE: the trigger rule and line list per game ([V]/[O]).
-- Built: a scripted streak in which a teammate within the PS2's radius plays the PS2's line after the PS2's count, with
-  a unit test for the count and cooldown.
 ## Planner 2026-10-12 19:15 (the maintainer's INBOX 18:55, ask 3: "unit chatter, all of it ... the player-praise lines")
 No longer post-alpha: value 3 -> 4, `alpha: yes`, `deps: USND`. USND is the umbrella and its RE census reads this
 card's trigger with every other unit-voice event; this card is then the praise part of USND's fourth build slice

@@ -818,6 +818,29 @@ fn optional_target_properties_keep_inheritance_and_override_order() {
     assert_eq!(defaults.ai_target_kind, defaults.target_kind);
 }
 
+/// BF2 FUN_001dfb38 (B2:91346-91356) and BF1 FUN_001bc190 (B1:64364-64379):
+/// a shield is charged only for a positive shield-scaled hit, so a weapon whose
+/// ShieldScale is 0 leaves the shield and goes straight to health.
+#[test]
+fn a_shield_scale_of_0_leaves_the_shield_and_hurts_health() {
+    let mut h = Health::new(100.0, HealthType::Person);
+    h.shield = 50.0;
+    h.shield_max = 50.0;
+    let desc = DamageDesc {
+        damage: 30.0,
+        scales: [1.0; 7],
+        shield_scale: 0.0,
+    };
+    assert_eq!(h.take_damage(&desc, 1.0, false, 1.0), 30.0);
+    assert_eq!((h.cur, h.shield), (70.0, 50.0));
+    let charged = DamageDesc {
+        shield_scale: 1.0,
+        ..desc
+    };
+    assert_eq!(h.take_damage(&charged, 1.0, false, 1.0), 0.0);
+    assert_eq!((h.cur, h.shield), (70.0, 20.0));
+}
+
 /// Issue #29 (`analysis/re-weapon-charge.md` §4): an ordnance's charge points
 /// blend by the charge's place in its segment - BF2's Hoth dish turret
 /// (Damage 1000 / 1250 / 1500 / 3000 at 0 / 0.5 / 0.75 / 2.0) reaches 1800 at
@@ -945,4 +968,154 @@ fn give_sniper_assist_leaves_other_weapons_alone() {
         after.give_sniper_assist();
         assert_eq!(after, w, "{}", w.name);
     }
+}
+
+/// One update of a pressed-or-not trigger: whether it clicked, and its shots.
+fn press_update(w: &mut WeaponState, c: &WeaponClass, input: FireInput) -> (bool, usize) {
+    let mut shots = Vec::new();
+    w.update(DT30, c, input, &mut GameLcg::new(7), &mut shots);
+    (w.press_clicks(c, input, !shots.is_empty()), shots.len())
+}
+
+/// A rifle at 0.5 heat a shot, shot until it overheats and its cycle ends.
+fn overheated_rifle() -> (WeaponClass, WeaponState) {
+    let mut c = WeaponClass::bf1_rifle();
+    c.heat_per_shot = 0.5;
+    c.heat_recover_rate = 0.1;
+    c.heat_threshold = 0.3;
+    let mut w = WeaponState::new(&c, true, 6);
+    run(&mut w, &c, DT30, 20, true);
+    run(&mut w, &c, DT30, 12, false);
+    assert!(w.overheated && w.state == FireState::Idle);
+    (c, w)
+}
+
+/// §7.3: each press on an overheated weapon clicks once, however long it is
+/// held, and the press edge is the only limit on how often.
+#[test]
+fn an_overheated_weapon_clicks_each_press_once() {
+    let (c, mut w) = overheated_rifle();
+    for _ in 0..3 {
+        assert_eq!(press_update(&mut w, &c, fi(true, false)), (true, 0));
+        for _ in 0..14 {
+            assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 0));
+        }
+        assert_eq!(press_update(&mut w, &c, fi(false, false)), (false, 0));
+        assert_eq!(press_update(&mut w, &c, fi(false, false)), (false, 0));
+    }
+}
+
+/// A cool weapon's press fires, and a press that cannot fire for a reason of
+/// the soldier's, or on a weapon not selected, is no refusal of the weapon's.
+#[test]
+fn only_a_press_the_weapon_refuses_clicks() {
+    let mut c = WeaponClass::bf1_rifle();
+    c.heat_per_shot = 0.1;
+    let mut w = WeaponState::new(&c, true, 6);
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 1));
+
+    let (c, mut w) = overheated_rifle();
+    let blocked = FireInput {
+        blocked: true,
+        ..fi(true, false)
+    };
+    assert_eq!(press_update(&mut w, &c, blocked), (false, 0));
+
+    let (c, mut w) = overheated_rifle();
+    w.active = false;
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 0));
+}
+
+/// The PS2 stays in its fire state after the overheating shot (0.17 s on the
+/// pistol, measured live in both games), and a press there does not click.
+#[test]
+fn a_press_in_the_overheating_shots_cycle_does_not_click() {
+    let mut c = WeaponClass::bf1_rifle();
+    c.heat_per_shot = 1.0;
+    c.heat_recover_rate = 0.1;
+    c.heat_threshold = 0.3;
+    let mut w = WeaponState::new(&c, true, 6);
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 1));
+    assert_eq!(press_update(&mut w, &c, fi(false, false)), (false, 0));
+    assert_eq!(press_update(&mut w, &c, fi(false, false)), (false, 0));
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 0));
+    assert!(w.overheated && w.state == FireState::Firing);
+}
+
+/// The update the heat clears on answers the press with a shot, not a click:
+/// the heat is updated before the state machine reads it.
+#[test]
+fn the_press_a_weapon_cools_on_fires_without_a_click() {
+    let (c, mut w) = overheated_rifle();
+    w.heat = c.heat_threshold + 0.001;
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 1));
+    assert!(!w.overheated);
+}
+
+/// A press more than 1 s into a fire state clicks (`1.0 < weapon+0xd0`); one
+/// sooner does not, and the shot that ends a long refire does not.
+#[test]
+fn a_long_refire_clicks_only_past_one_second() {
+    let mut c = WeaponClass::bf1_rifle();
+    c.shot_delay = [2.0; 2];
+    let mut w = WeaponState::new(&c, true, 6);
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 1));
+    assert_eq!(press_update(&mut w, &c, fi(false, false)), (false, 0));
+    assert_eq!(press_update(&mut w, &c, fi(false, false)), (false, 0));
+    // Under a second in.
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 0));
+    run(&mut w, &c, DT30, 30, false);
+    // Past a second, inside the two-second refire.
+    assert!(w.state == FireState::Firing && w.refire_accum > 1.0);
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (true, 0));
+}
+
+/// The same refusal for an empty weapon and for one reloading. The empty
+/// weapon clicks every press, though each starts a cycle the port runs out.
+#[test]
+fn an_empty_and_a_reloading_weapon_click() {
+    let c = WeaponClass::bf1_rifle();
+    let mut w = WeaponState::new(&c, true, 0);
+    w.clip = 0;
+    w.spare = 0;
+    for _ in 0..3 {
+        assert_eq!(press_update(&mut w, &c, fi(true, false)), (true, 0));
+        assert_eq!(press_update(&mut w, &c, fi(false, false)), (false, 0));
+        run(&mut w, &c, DT30, 12, false);
+    }
+
+    let mut w = WeaponState::new(&c, true, 6);
+    w.clip = 1;
+    w.start_reload_as(&c, false);
+    assert!(w.reloading());
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (true, 0));
+}
+
+/// A press that fires a weapon's last round is not refused, though a cycle
+/// shorter than the update ends in the reload that shot started.
+#[test]
+fn the_press_that_empties_a_fast_weapon_does_not_click() {
+    let mut c = WeaponClass::bf1_rifle();
+    c.shot_delay = [0.0; 2];
+    c.trigger_single = true;
+    let mut w = WeaponState::new(&c, true, 6);
+    w.clip = c.ammo_per_shot;
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (false, 1));
+    assert!(w.reloading() && w.state == FireState::Idle);
+}
+
+/// A thrown weapon with nothing in the hand stays idle on a press and clicks.
+#[test]
+fn an_empty_thrown_weapon_stays_idle_and_clicks() {
+    let mut c = WeaponClass::bf1_rifle();
+    c.thrown = Some(Thrown {
+        shot_elevate: 0.21,
+        hide_on_fire: true,
+        hand: None,
+    });
+    let mut w = WeaponState::new(&c, true, 0);
+    w.clip = 0;
+    w.spare = 0;
+    assert_eq!(press_update(&mut w, &c, fi(true, false)), (true, 0));
+    assert_eq!(w.state, FireState::Idle);
 }

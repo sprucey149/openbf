@@ -33,24 +33,6 @@ The reading (mine, [H]): each presupposes a mover that does not snag - the PS2 h
 port's wall slide runs along a wall for seconds, and a 3 - 5 s clock or a 0.5 m radius leaves it there longer.
 Card OBST replaces that steering; these rules are to be measured again on top of it.
 
-## What to do (after OBST)
-1. Apply `engine/artifacts/lead_tmp/movr/movr_scratch_all_rules.patch` as a starting point (main 2b27875 + every
-   MOVR rule behind `MOVR_OFF` / `MOVR_VAR` bits; it holds `mover::progress`, `route::leg_point`, the radii and the
-   ladder's variants) - or rebuild the three rules from the table above; each behind its own switch in ONE scratch
-   binary, the null variant byte-identical to main first.
-2. `lead_tmp/movr/tools/mini.sh` (nine probe maps, 8 seeds, `--botq`) per rule, `bars.py` to read the bars; 24 seeds
-   on the four acceptance maps for the candidates; then all 32 maps.
-3. Land what passes; write what does not into `analysis/bot-design.md` 9 as a named deviation with its numbers.
-
-## Acceptance
-- Per rule taken: B1 and B2 (bot-design.md 10) on KAM1 / POL1 / DEA1 / KAS2 no worse than main's at 24 seeds, and the
-  8-seed x 32-map sweep 256 / 256 with recycles not up - `bars.py` rows for main and the branch pasted into the report.
-- Per rule not taken: its row in the report and a line in bot-design.md 9.
-- B2 itself (a staying bot's path at most max(3 m, 1.5 x PS2), reversals at most 2 x PS2) is still missed on KAM1
-  (5.7 m, 1.46), DEA1 (reversals 1.17) and KAS2 (14.0 m, 3.37) after MOVR: the split
-  (`lead_tmp/movr/tools/stayers.py`) puts 70 - 75 % of that path on bots sliding or running at a wall (OBST) and the
-  rest on holders' shuffles (TPOS).
-
 ## Notes
 - MOVR's report: `engine/artifacts/loop/reports/` (card MOVR, 2026-10-06) has every variant's table.
 - 2026-10-07 planner: **value 4 -> 5.** BOTV waits on this card, and BOTV is the gate the maintainer set in front of PERF and UCNT; at value 4 the picker reaches it only after every value-4 M2 and M1 card (dry run: not in the next 34 picks). Every other card BOTV waits on is 5. OBST landed (e9ce6db) and its follow-up OBSF is being built: measure on main after OBSF; if a card OBST2 (the barrier keep-out, vehicle footprints, soldiers in velocity space - named in e9ce6db's message) has landed by then, on that. MOVR's open point is yours too: give up after 3 or after 6 failed windows (9 maps x 8 seeds favour 6, 24 seeds x 4 maps favour 3). Undo: `loopctl.py set MOVR2 value=4`.

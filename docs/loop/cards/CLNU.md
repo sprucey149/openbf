@@ -22,8 +22,3 @@ Cleanse 14, area scripts / artifacts tooling (diff bb5d2c1..996313a). Findings, 
 3. analysis/INDEX.md is generated, and nothing regenerates it: on 996313a it is behind by 4 docs (re-soldier-ai.md 829 -> 981 lines, 22 functions missing). PLAN says grep it before any RE.
 4. analysis_index.py treats every unknown flag as 'write': `--help` rewrote the tracked index on main.
 5. CRATES.md: 24 stale line counts.
-
-## Acceptance
-- `loopctl.py self-test` and `cleanse_delete.sh --self-test` PASS with new cases: a dead target with a process inside is not listed by the dry run and survives `cleanse_delete.sh --yes`; a todo card's target without a branch is listed, one with a branch is kept; commit-docs of an re-*.md commits a regenerated INDEX.md with it.
-- `analysis_index.py --help` writes nothing and exits 0; an unknown flag exits 2; `--check` output equals the committed INDEX.md.
-- `size_report.sh --check-map`: 0 stale counts. Every gate PASS, nothing declared.

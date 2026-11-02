@@ -31,22 +31,5 @@ beside it so nothing is hidden.
   reproduces the gate's 13.06 exactly; seated 7.28, on foot 5.78 (boarding 0.88, within 12 m of a turret 1.50, elsewhere 3.40).
 - gates.toml `[fidelity.metrics.offgraph_pct]` tol_map_abs 8.5, tol_agg_abs 0.6, dir down.
 
-## What to build
-1. `Shares::observe`: the locus counts (H / A / N / none) and their denominator take AI and player units ON FOOT only
-   (no `mount`); a new `seated S %` field on the shares line = share of alive-unit samples in a vehicle or turret seat.
-   Keep the line's existing field order so `sweep_seeds.py` / `bot_quality.py` parse it unchanged (check both parsers;
-   add `seated` to sweep_seeds' parser only if a census wants it).
-2. The module header (`//! shares ...`) and the `Shares` doc say what is counted.
-
-## Acceptance
-- Main's binary and the branch over the 32 maps x 8 seeds (seeds 1-8): every map with no vehicle or turret ever mounted in
-  the round gives the SAME `locus` numbers to the printed digit (paste the diff of the 12+ such rows); every vehicle map's N
-  share moves only by removing riders (paste the per-map table main / branch / seated).
-- Scratch-apply the change onto branch `turr` and re-run its KAM1 8 seeds: offgraph@bf2_kam1 equals TURR's foot-only
-  counter (5.78 +- 0.01, `lead_tmp/turr/offg`).
-- One mutation: count riders again -> the KAM1-on-turr number goes back to 13.06.
-- After landing, the PLANNER re-takes the fidelity baseline (every vehicle map's value moves: declared `sweep`; the
-  fidelity rows that move go down = better, so the gate passes; say so in the report).
-
 ## Notes
 Unblocks TURR (deps). Not oracle-guarded: round_to_outcome.rs is the sweep binary, not gates.py.

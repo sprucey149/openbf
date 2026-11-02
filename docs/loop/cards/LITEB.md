@@ -33,32 +33,6 @@ All from `analysis/re-model-lighting.md`:
   - BF2 COR1 floor 92 -> 43 with Light2 (PS2 46).
   - Sheets: `lead_tmp/re/lite/sheets/lite_bf2_{cor1_spawn,myg1_spawn,tan1_v3}.png`.
 
-## Acceptance
-**Bake.**
-- `model_to_glb` writes COLOR_0 from `Segment::colors` (COL0/128, never above 1.0 on the discs, sRGB -> linear like every
-  gamma-space multiplier; a segment without COL0 gets none or white).
-- Each primitive gets extras for its VU path: lit (MTRL & 1), vc-lit (0x200 & 1 & COL0), prelit model (any 0x200 segment,
-  BF2) — and on BF1 flag 0x40 = the prelit set (PROVISIONAL, §6 [D]).
-- `bake::lighting` adds Light2 (direction, colour) and each light's Static bit to the manifest.
-- BF2 `Light.Color` goes through sRGB -> linear (today it is used raw).
-
-**Runtime.**
-- The world shader picks the path per draw:
-  - normal: tex x COL0 x (hemisphere + Light1 + Light2);
-  - prelit: tex x (COL0 [vc-lit only] + non-Static lights), no ambient;
-  - unlit (MTRL & 1 == 0): tex x COL0, no light.
-- Skinned soldiers and vehicles keep today's path (they carry no COL0; check).
-
-**Gates.**
-- ci EXIT 0 with tests pinned to §2's formulas.
-- `gates.py` shows only the declared moves: every lit map golden, so view each pair.
-- `rebake=maps`: every map group.
-- Re-render the PCSX2 pairs for BF2 MYG1, COR1, TAN1, HOT1 and BF1 NAB2 / KAS2 (`pcsx2/port.py`) and report §8's boxes.
-- No sim gate may move.
-
-**Order.** Land it ALONE. SUND also relights every map, so land one, then the other; do not stack them. SUND's corrected
-sun direction also matters for the prelit / non-Static split.
-
 ## Notes
 - Fold in the per-segment "unlit" case here only if it is small; GLOW owns the 0x10 glow segments (they skip BF2's HDR 0.5
   and come out doubled, §1).

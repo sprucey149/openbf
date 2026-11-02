@@ -89,6 +89,8 @@ pub struct CommandPostDef {
     /// `Value_DEF_<faction>`, same order and same default.
     pub value_def: [i32; 5],
     pub major: bool,
+    /// A space hangar's post: it spawns its team and is never taken.
+    pub space: bool,
     /// The post's `VO_<Listener>_<Subject><Event>` lines (card ANNC,
     /// analysis/re-announcer.md §2.1); empty on a post that authors none.
     pub vo: PostLines,
@@ -123,6 +125,8 @@ pub struct MissionApplied {
     pub death_regions: Vec<Region>,
     /// `AddDeathRegion` names the manifest has no region for.
     pub missing_death_regions: Vec<String>,
+    /// The mission's landing regions, the ones the map holds.
+    pub landing_regions: Vec<Region>,
     /// The soldiers' fly-height ceiling for `Sim::fly_ceiling` (card JETP):
     /// the mission's `SetMaxPlayerFlyHeight`, else the engine's 200.
     pub fly_ceiling: f32,
@@ -320,8 +324,17 @@ impl MapLayout {
         };
         let mut cps = Vec::new();
         for inst in &m.instances {
-            let Some(cap_name) = prop(&inst.props, PROP_CAPTURE_REGION) else {
-                continue; // not a command post
+            // A space hangar's post has no capture region: its control region is where
+            // it stands, and only its spawns matter.
+            let space_post = inst.class.eq_ignore_ascii_case("com_bldg_controlzone_ctf")
+                && prop(&inst.props, PROP_SPAWN_PATH).is_some();
+            let cap_name = match prop(&inst.props, PROP_CAPTURE_REGION) {
+                Some(name) => name,
+                None if space_post => match prop(&inst.props, PROP_CONTROL_REGION) {
+                    Some(name) => name,
+                    None => continue,
+                },
+                None => continue, // not a command post
             };
             cps.push(CommandPostDef {
                 name: inst.name.clone(),
@@ -356,6 +369,7 @@ impl MapLayout {
                 value_atk: faction_values(&inst.props, &PROP_VALUE_ATK),
                 value_def: faction_values(&inst.props, &PROP_VALUE_DEF),
                 major: inst.class.contains("major"),
+                space: space_post && prop(&inst.props, PROP_CAPTURE_REGION).is_none(),
                 vo: post_lines(&inst.props),
             });
         }
@@ -485,6 +499,11 @@ impl MapLayout {
             reassigned,
             death_regions,
             missing_death_regions,
+            landing_regions: m
+                .landing_regions
+                .iter()
+                .filter_map(|name| self.region(name))
+                .collect(),
             fly_ceiling: m
                 .max_player_fly_height
                 .unwrap_or(core::soldier::DEFAULT_FLY_CEILING),
@@ -499,6 +518,60 @@ impl MapLayout {
                 ],
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod space_tests {
+    use super::*;
+
+    /// A hangar's post authors a control region and a spawn path and no capture region.
+    /// Any other class with no capture region is not a post.
+    #[test]
+    fn a_space_hangars_post_is_a_post_that_cannot_be_taken() {
+        let ctl = crate::classdb::fnv1a_lowercase("ControlRegion");
+        let spawn = crate::classdb::fnv1a_lowercase("SpawnPath");
+        let m: Manifest = ron::from_str(&format!(
+            r#"(map: "s", source_game: "bf2", terrain_name: None, sky_name: None,
+                terrain_glb: None, models: [], textures: [], classes: [], geometries: [], regions: [
+                (shape: "sphere", name: "hangar", rotation: ((1,0,0),(0,1,0),(0,0,1)),
+                 translation: (1,2,3), size: (5,5,5), props: []),
+            ], instances: [
+                (class: "com_bldg_controlzone_ctf", name: "cp", rotation: ((1,0,0),(0,1,0),(0,0,1)),
+                 translation: (1,2,3), props: [({ctl}, "hangar"), ({spawn}, "hs")]),
+                (class: "spa_prop_console", name: "prop", rotation: ((1,0,0),(0,1,0),(0,0,1)),
+                 translation: (1,2,3), props: [({ctl}, "hangar"), ({spawn}, "hs")]),
+            ])"#
+        ))
+        .unwrap();
+        let layout = MapLayout::from_manifest(&m);
+        assert_eq!(layout.cps.len(), 1);
+        assert!(layout.cps[0].space);
+        assert!(layout.cps[0].capture.is_some());
+    }
+
+    /// A mission's landing regions reach the sim's list by name; a name the map lacks
+    /// falls out, and no other mission grows a list.
+    #[test]
+    fn landing_regions_come_through_the_mission() {
+        let m: Manifest = ron::from_str(
+            r#"(map: "s", source_game: "bf2", terrain_name: None, sky_name: None,
+                terrain_glb: None, models: [], textures: [], classes: [], geometries: [], regions: [
+                (shape: "sphere", name: "hangar", rotation: ((1,0,0),(0,1,0),(0,0,1)),
+                 translation: (1,2,3), size: (5,5,5), props: []),
+            ], instances: [])"#,
+        )
+        .unwrap();
+        let mut layout = MapLayout::from_manifest(&m);
+        let mission: MissionDef = ron::from_str(
+            r#"(map: "s", mode: "ass", source_game: "bf2", teams: [
+                (faction: "rep", units: 1, tickets: 1, classes: []),
+                (faction: "cis", units: 1, tickets: 1, classes: [])],
+                ai_alive_cap: 1, spawn_delay: 1.0, spawn_interval: 1.0, cps: [],
+                death_regions: [], landing_regions: ["hangar", "not_here"])"#,
+        )
+        .unwrap();
+        assert_eq!(layout.apply_mission(&mission).landing_regions.len(), 1);
     }
 }
 

@@ -20,8 +20,3 @@ Cleanse 17, area render+ui (diff b1cffcc..99a07bf). Findings and their end state
 
 ## Evidence
 `engine/artifacts/lead_tmp/cln12/`.
-
-## Acceptance
-- `size_report.sh --check-map` 0 stale counts, `--strict` exit 0, `analysis_index.py --check` exit 0.
-- Every gate PASS, nothing declared (goldens, sim hashes, sweep equal main).
-- Each finding fixed, declined with a reason, or carried to a card.

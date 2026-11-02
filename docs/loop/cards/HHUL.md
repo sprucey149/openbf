@@ -35,30 +35,6 @@ alpha: yes
      rule by r(1 − n.y) on slopes.
 - **The world side** (each building's VEHICLE subset, not the soldier subset) went to new card **VSUB**.
 
-## Build (RE result)
-1. `HoverParams::hull` becomes `Vec<HullPart { shape: sphere|box|cylinder, local pos + rot, terrain: bool, building: bool }>`.
-   - Fill it in `vehicle_class` (the ordered PROP replay: GeometryName resets both name lists; each spring adds itself;
-     `TerrainCollision` / `BuildingCollision` X adds X; `none` / `clear` empties that layer). Resolve the non-spring
-     names in `vehicle_pads::install` against the class geometry's baked prims (bake order; XFRM; PRNT identity,
-     PROVISIONAL as in VHULL).
-   - `contacts`: building parts query the world's bodies with the part's shape (parry box contact, PROVISIONAL for
-     FUN_0016bf10). Terrain parts use §13.5's per-kind rule (sphere; box and cylinder only if a class ever needs them).
-   - Both go through K7-K9 (no damage; K9 full push).
-2. `sim/vehicles.rs` `WorldContacts`: replace the PROVISIONAL terrain plane by §13.5's sphere rule, with the cut tested
-   at (c.x, h, c.z) as FUN_0055f258 does. Keep HCON's POL1 hangar case (it is outside the 2r window).
-3. Tests and module headers: the hand numbers; CRATES.md.
-
-## Acceptance (build)
-- **Unit tests:**
-  - §13.5 on a plane and a 30° slope: d, the window, depth = d·n.y (e.g. r 2, 30°: 0.268 m shallower than today).
-  - The class replay gives `p_cube1` (building only) on the two BF2 fighter tanks and an empty hull on the other 20
-    classes (`lead_tmp/hhul/census.py` = the RAM table).
-  - A fighter tank driven at a thin post between its front springs stops with the post on `p_cube1`'s face (z 2.52).
-- **PCSX2 RAM:** `audit_hover_ram` (lead_tmp/audit-hovr/examples; HCON's instrument) keeps ≥ 45/47 quiet parked hovers
-  inside the bob band. Report the count; the slope rule should not lower it.
-- **HCON's pad census** (`audit_pad_census`, 216 pads): 0 flagged.
-- **Declared: sweep.** Hover rest heights move on slopes, so hashes move; outcomes may move. Say which maps.
-
 ## Landed (2026-10-03, 80a8edc; report `reports/20261003_0625_card_HHUL.md`)
 - Unit tests: §13.5 by hand (30°, r 2: 0.268 shallower); the replay over 12 BF1 + 10 BF2 classes (`p_cube1`, building
   only, on the two BF2 fighter tanks); the tank stops at a thin post with the post 2.515 m ahead of its origin.
@@ -74,8 +50,3 @@ re-collision-layers §4-§6: the terrain object FUN_00212530 uses the moving obj
 1. Does FUN_00212530 (BF1) / its BF2 twin test the coll MESH body against the heightfield, or only prims (sphere/cylinder/box)? If only prims, which prim kinds?
 2. Are the AddSpringBody spheres bodies in the model's subsets (they are FUN_00168cd0 lookups, re-hover §4 S1) — do they meet terrain through the subset as well as the spring hook?
 3. The prims' shapes for the port: spheres exact; cylinders / boxes as what?
-## Acceptance (original, superseded by "Acceptance (build)" above)
-analysis/re-hover.md addendum [O] with the verifier; then phase=build: vehicle_class (or vehicle_pads::install, which has the manifest) fills HoverParams::hull from the model's prims in the vehicle frame; hover_drive: a tank driven into a wall stops at its hull; sweep outcomes unchanged (only hashes).
-
-## Planner note (2026-09-30, M-ALPHA)
-`alpha: yes` — drivable vehicles meeting walls. Value 4 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).

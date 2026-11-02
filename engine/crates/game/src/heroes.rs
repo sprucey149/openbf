@@ -64,6 +64,19 @@ pub fn append(
     mission: Option<&MissionDef>,
     team: usize,
 ) -> Option<u8> {
+    append_with(roster, classes_dir, mission, team, false)
+}
+
+/// [`append`], with the session's choice of the optional DLC heroes
+/// (`crate::dlc`): a team that fields a hero fields the map's own unless
+/// `dlc_heroes` asks for theirs.
+pub fn append_with(
+    roster: &mut FactionRoster,
+    classes_dir: &Path,
+    mission: Option<&MissionDef>,
+    team: usize,
+    dlc_heroes: bool,
+) -> Option<u8> {
     let m = mission.filter(|m| m.source_game.eq_ignore_ascii_case("bf2"))?;
     let source_team = if m
         .teams
@@ -80,7 +93,7 @@ pub fn append(
         .find(|(t, _)| usize::from(*t) == source_team)?
         .1;
     let dlc = match crate::dlc::hero(classes_dir, m, &roster.faction) {
-        Ok(hero) => hero,
+        Ok(hero) => hero.filter(|_| dlc_heroes),
         Err(error) => {
             eprintln!("DLC heroes: {error:#}");
             None
@@ -187,10 +200,8 @@ pub fn rules(session: &ui::shell::SessionOptions) -> Option<HeroRules> {
 
 /// One scoring authority for class unlocks, hero selection and round results.
 /// Runs before every tick of a battle that keeps a feed (the window, the
-/// headless replay). `WalkSim` owns no feed, so `--bench` and `--ride-script`
-/// step without one: their points stay 0, no Points unlock happens, and
-/// their recorded logs carry no hero input (a replay of such a log has the
-/// player scoring far below any unlock).
+/// headless replay). `WalkSim` owns no feed, so `--bench` steps without one:
+/// its points stay 0 and no Points unlock happens.
 pub fn scores(sim: &mut Sim, feed: &EventFeed) {
     if let Some(heroes) = &mut sim.heroes {
         heroes.points.clear();

@@ -258,23 +258,25 @@ impl Sim {
         self.unit_grid.build(&self.units);
         // The bot that took longest, and the rays it cast (the slow-frame log).
         let mut worst_think: Option<crate::sim::UnitCost> = None;
-        for (i, u) in self.units.iter().enumerate() {
-            if u.alive && u.controller == Controller::Ai {
-                let mut st = u.ai;
-                let think_t0 = std::time::Instant::now();
-                let queries_before = crate::collision::cost::queries();
-                let (p, nt) = ai::think(self, self.handle(i), &mut st);
-                let ms = think_t0.elapsed().as_secs_f32() * 1000.0;
-                if worst_think.is_none_or(|w| ms > w.ms) {
-                    worst_think = Some(crate::sim::UnitCost {
-                        unit: i as u32,
-                        ms,
-                        ray_queries: crate::collision::cost::queries() - queries_before,
-                    });
+        crate::ai::think_memo::during_thinks(|| {
+            for (i, u) in self.units.iter().enumerate() {
+                if u.alive && u.controller == Controller::Ai {
+                    let mut st = u.ai;
+                    let think_t0 = std::time::Instant::now();
+                    let queries_before = crate::collision::cost::queries();
+                    let (p, nt) = ai::think(self, self.handle(i), &mut st);
+                    let ms = think_t0.elapsed().as_secs_f32() * 1000.0;
+                    if worst_think.is_none_or(|w| ms > w.ms) {
+                        worst_think = Some(crate::sim::UnitCost {
+                            unit: i as u32,
+                            ms,
+                            ray_queries: crate::collision::cost::queries() - queries_before,
+                        });
+                    }
+                    ai_updates.push((i, u.gen, u.mount, st, p, nt));
                 }
-                ai_updates.push((i, u.gen, u.mount, st, p, nt));
             }
-        }
+        });
         self.unit_grid.clear();
         self.ai_wall_ms = ai_t0.elapsed().as_secs_f32() * 1000.0;
         self.tick_cost.worst_think = worst_think;
@@ -564,6 +566,22 @@ impl Sim {
             .map(|(i, _)| (i, (self.units[i].soldier.yaw, self.units[i].soldier.pitch)))
             .collect();
 
+        self.press_edges.clear();
+        self.press_edges
+            .extend(unit_pads.iter().enumerate().map(|(i, p)| {
+                let u = &self.units[i];
+                if u.is_player {
+                    // A droideka never runs the soldier's step: its own are the
+                    // previous buttons.
+                    let prev = u
+                        .droideka
+                        .as_ref()
+                        .map_or(u.soldier.prev_buttons(), |d| d.prev_buttons);
+                    p.buttons & !prev
+                } else {
+                    0
+                }
+            }));
         self.saber_inputs(&mut unit_pads);
         // 3. Movement.
         for (i, pad_i) in unit_pads.iter_mut().enumerate() {
@@ -830,9 +848,37 @@ impl Sim {
         if let Some(floor) = self.kill_floor {
             for i in 0..self.units.len() {
                 if self.units[i].alive && self.units[i].soldier.pos.y < floor {
+                    // Aboard a flyer he is in the air: the floor is a soldier's
+                    // and a fallen craft's, 15 m under the lowest post. On BF1
+                    // Bespin that is 24 m under the decks, and the mission lets
+                    // a pilot fly to y -200.
+                    let flying = self.units[i]
+                        .mount
+                        .and_then(|m| self.vehicle(m.vehicle))
+                        .is_some_and(|v| {
+                            v.kind == crate::vehicle::VehicleKind::Flyer && v.has_pilot()
+                        });
+                    if flying {
+                        continue;
+                    }
                     let h = self.handle(i);
                     self.kill_environment(h, DeathCause::KillFloor);
                 }
+            }
+            // A craft that went over the edge (BF2 Mygeeto's decks) would fall
+            // forever, alive, and its pad would never make another. A piloted
+            // flyer is flying, not falling; one with only a gunner aboard is
+            // falling. OURS (PROVISIONAL), as the kill floor is.
+            let fallen: Vec<_> = self
+                .alive_vehicles()
+                .filter(|(_, v)| {
+                    v.pos.y < floor
+                        && (v.kind != crate::vehicle::VehicleKind::Flyer || !v.has_pilot())
+                })
+                .map(|(h, _)| h)
+                .collect();
+            for h in fallen {
+                self.destroy_vehicle(h, None);
             }
         }
         if !self.death_regions.is_empty() {
@@ -991,21 +1037,18 @@ impl Sim {
                 u.weapon
                     .set_posture(wc, stance_idx, move_mag, u.zoom.is_some());
                 let was_reloading = u.weapon.reloading();
-                // What refuses a shot before this update's input.
-                let dry = was_reloading || u.weapon.overheated || u.weapon.out_of_ammo(wc);
                 if p.pressed(buttons::RELOAD) {
                     u.weapon.start_reload_as(wc, infinite_ammo);
                 }
                 u.weapon.update(dt, wc, input, &mut self.lcg, &mut shots);
-                // The empty click: a human's trigger press (the held counter
-                // at 1) on a weapon that cannot fire (PS2: the owner's
-                // player index >= 0, re-weapon-sounds.md §7.3).
-                fire_empty = dry && u.is_player && u.weapon.fire_cmd == 1;
+                // The empty click: a human's trigger press on a weapon that
+                // refuses it (PS2: the owner's player index >= 0,
+                // re-weapon-sounds.md §7.3).
+                fire_empty = u.is_player && u.weapon.press_clicks(wc, input, !shots.is_empty());
                 !was_reloading && u.weapon.reloading()
             };
             if fire_empty {
-                let h = self.handle(i);
-                self.events.push(Event::FireEmpty { unit: h });
+                self.push_fire_empty(i, wc_idx);
             }
             if reload_started {
                 let h = self.handle(i);

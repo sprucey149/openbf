@@ -31,13 +31,6 @@ stays"). For the two metrics that are SUMS over the seeds (`FID_SUM`: recycled, 
 - The other way matters as much: the gate must still catch a real rise. RLOOP's (a real cost): 46 against 30 and 58
   against 44 - worse on both blocks by more than 12, so it is still refused under the proposed rule.
 
-## Acceptance
-- `gates.py --self-test`: an all-map sum worse on block 1 and inside the tolerance on block 2 (against main's own
-  block-2 value) is dropped as noise and listed; worse on both is kept; no block-2 value = the failure stands.
-- Replayed on the two cases on disk without a new sweep (`--fidelity-dir`): OBSV's `lead_tmp/obsv/gates_fid` passes
-  with the noise line, RLOOP's `lead_tmp/rloop/gates_fid_rebased` is still refused on `recycled`.
-- Means (the other 16 all-map values) are NOT changed by this card.
-
 ## Notes
 - 2026-10-12 17:05 planner: filed with `needs: maintainer` - the gate script is a protected path (the oracle guard refuses a
   builder; GRFG's edit took the maintainer's approval) and loosening a referee is his call. STATUS question 37. On a yes: the

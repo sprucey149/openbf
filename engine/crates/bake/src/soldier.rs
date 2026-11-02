@@ -111,6 +111,23 @@ pub fn to_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel> {
 }
 
 pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel> {
+    model_from_rigs(m, skel, skel, false)
+}
+
+pub(crate) fn skinned_model_from_donor(
+    m: &Model,
+    canonical: &Skeleton,
+    donor: &Skeleton,
+) -> Result<SkinnedModel> {
+    model_from_rigs(m, canonical, donor, true)
+}
+
+fn model_from_rigs(
+    m: &Model,
+    canonical: &Skeleton,
+    donor: &Skeleton,
+    remap: bool,
+) -> Result<SkinnedModel> {
     let mut segments = Vec::new();
     for (k, seg) in m.segments.iter().enumerate() {
         if seg.triangles.is_empty() {
@@ -120,7 +137,7 @@ pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel
             && seg.bone.is_none()
             && seg.wght.iter().any(|w| w[1..].iter().any(|&w| w != 0));
         let (positions, normals, joints, weights) = if multiple {
-            skel.bind_matrices().map_err(|e| anyhow!("{e}"))?;
+            donor.bind_matrices().map_err(|e| anyhow!("{e}"))?;
             let mut joints = Vec::with_capacity(seg.positions.len());
             let mut weights = Vec::with_capacity(seg.positions.len());
             for v in 0..seg.positions.len() {
@@ -129,9 +146,18 @@ pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel
                     .get(v)
                     .context("missing model-space skin binding")?;
                 let weight = seg.wght.get(v).context("missing model-space skin weight")?;
-                let (joint, weight) =
-                    model_space_influences(&seg.bmap, *bind, *weight, skel.bones.len())
+                let (mut joint, weight) =
+                    model_space_influences(&seg.bmap, *bind, *weight, donor.bones.len())
                         .with_context(|| format!("{} segment {k} vertex {v}", m.name))?;
+                if remap {
+                    let mut indices = joint.map(usize::from);
+                    crate::bind_pose::remap_bone_indices(donor, canonical, &mut indices)
+                        .map_err(|e| anyhow!(e))?;
+                    if indices.iter().any(|&b| b > 255) {
+                        bail!("{}: more than 256 bones", m.name);
+                    }
+                    joint = indices.map(|b| b as u8);
+                }
                 joints.push(joint);
                 weights.push(weight);
             }
@@ -139,8 +165,12 @@ pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel
         } else {
             // Preserve the existing rigid and bone-space conversion byte for
             // byte. Retail models use one influence per vertex.
-            let (positions, normals, bones) =
-                mungefs::model::to_model_space(m, seg, skel).map_err(|e| anyhow!("{e}"))?;
+            let (positions, normals, mut bones) =
+                mungefs::model::to_model_space(m, seg, donor).map_err(|e| anyhow!("{e}"))?;
+            if remap {
+                crate::bind_pose::remap_bone_indices(donor, canonical, &mut bones)
+                    .map_err(|e| anyhow!(e))?;
+            }
             if bones.iter().any(|&b| b > 255) {
                 bail!("{}: more than 256 bones", m.name);
             }
@@ -168,7 +198,7 @@ pub fn rigid_or_skinned_model(m: &Model, skel: &Skeleton) -> Result<SkinnedModel
     }
     Ok(SkinnedModel {
         name: m.name.clone(),
-        bones: bones_of(skel),
+        bones: bones_of(canonical),
         segments,
     })
 }
@@ -655,6 +685,54 @@ pub fn class_skin(classes: &[manifest::ClassDef], name: &str) -> ClassSkin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn donor_soldier_vertices_keep_bind_pose_and_use_canonical_joint_names() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        let path = crate::join_ci(
+            &root,
+            "PC_swbf1_exe/Star Wars Battlefront (Classic 2004)/GameData/Data/_LVL_PC/SIDE/imp.lvl",
+        );
+        if !path.is_file() {
+            return;
+        }
+        let (corrected, original) = crate::gameplay::read_with_original(&path).unwrap();
+        let original = original.expect("the supplied PC source must exercise donor bone ordering");
+        let (m, canonical) =
+            find_soldier(mungefs::open(&corrected).unwrap(), "imp_inf_stormtrooper").unwrap();
+        let (donor_m, donor) =
+            find_soldier(mungefs::open(&original).unwrap(), "imp_inf_stormtrooper").unwrap();
+        let expected = to_skinned_model(&donor_m, &donor).unwrap();
+        let wrong_indices = to_skinned_model(&m, &canonical).unwrap();
+        assert!(wrong_indices
+            .segments
+            .iter()
+            .zip(&expected.segments)
+            .any(|(a, b)| a.positions != b.positions));
+        let actual = skinned_model_from_donor(&m, &canonical, &donor).unwrap();
+        assert_eq!(
+            actual
+                .bones
+                .iter()
+                .map(|b| b.name.as_str())
+                .collect::<Vec<_>>(),
+            canonical
+                .bones
+                .iter()
+                .map(|b| b.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        for (a, b) in actual.segments.iter().zip(&expected.segments) {
+            assert_eq!(a.positions, b.positions);
+            assert_eq!(a.normals, b.normals);
+            for (mapped, original) in a.joints.iter().zip(&b.joints) {
+                assert_eq!(
+                    canonical.bones[mapped[0] as usize].crc,
+                    donor.bones[original[0] as usize].crc
+                );
+            }
+        }
+    }
 
     #[test]
     fn model_space_blends_preserve_all_active_bones_and_normalize_weights() {

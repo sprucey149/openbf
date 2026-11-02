@@ -373,7 +373,7 @@ the rest of that band.
   - So 255,0,0 is not an unset-field convention. It is one map's explicit four-argument record, alpha included.
 
 ### 9.2 The ELF path [V][O]
-Checks 1–5 are pasted in `checks.txt`, and the disassembly is `eedis2.py`.
+Checks 1–5 are pasted in `checks.txt`, and the disassembly is `eedis.py`.
 - **BF1 builds the FogColor hash once.** The only `lui 0x023b … ori 0x1fce` in the BF1 text is at 0x2e3278/0x2e327c,
   inside `FUN_002e29e0` (B1:270546). That is the record loop of the `LowResTerrain` scope (0xddf0c29e, B1:270346).
   - The value is in no data word, and `re_check absent` finds 1 hit.

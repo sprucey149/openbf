@@ -15,26 +15,33 @@ use std::path::Path;
 
 /// Every file under the disc's `DATA/_LVL_PS2/` but its FMV (`MOVIES/`, 1-1.2
 /// GB a disc) to `<out>/DATA/_LVL_PS2/...` (card PACK: the user's own ISO is
-/// the only input) - save [`KEPT_MOVIES`], which the shell bake reads. A file
-/// already there at the same size is left alone, so a second run writes
-/// nothing.
+/// the only input) - save [`KEPT_MOVIES`], which the shell bake reads - and the
+/// game's executable to `<out>/`. A file already there at the same size is left
+/// alone, so a second run writes nothing.
 /// The movies the port plays: BF2's shell background (card BSHLA, 260 MB;
 /// `bake shell`).
 const KEPT_MOVIES: [&str; 1] = ["DATA/_LVL_PS2/MOVIES/SHELL.MVS"];
+
+/// The disc files `extract-iso` writes: the data tree, and the game's executable,
+/// which `bake::foliage::elf_for` looks for above the tree.
+fn extracted_from_disc(path: &str) -> bool {
+    bake::foliage::is_game_elf(path)
+        || (path.starts_with("DATA/_LVL_PS2/")
+            && (!path.starts_with("DATA/_LVL_PS2/MOVIES/")
+                || KEPT_MOVIES.iter().any(|m| path.eq_ignore_ascii_case(m))))
+}
 
 fn extract_iso(iso: &str, out: &str) -> Result<()> {
     let f = std::fs::File::open(iso).with_context(|| iso.to_string())?;
     let mut disc = mungefs::iso::Iso::open(std::io::BufReader::new(f))
         .map_err(|e| anyhow::anyhow!("{iso}: not an ISO9660 image ({e})"))?;
     let want: Vec<usize> = (0..disc.files.len())
-        .filter(|&i| {
-            let p = &disc.files[i].path;
-            p.starts_with("DATA/_LVL_PS2/")
-                && (!p.starts_with("DATA/_LVL_PS2/MOVIES/")
-                    || KEPT_MOVIES.iter().any(|m| p.eq_ignore_ascii_case(m)))
-        })
+        .filter(|&i| extracted_from_disc(&disc.files[i].path))
         .collect();
-    if want.is_empty() {
+    if !want
+        .iter()
+        .any(|&i| disc.files[i].path.starts_with("DATA/_LVL_PS2/"))
+    {
         bail!("{iso}: no DATA/_LVL_PS2 directory (not a PS2 Battlefront disc?)");
     }
     let (mut wrote, mut kept, mut bytes) = (0, 0, 0u64);
@@ -116,6 +123,44 @@ fn xbox(args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// `bake check-foliage <assets_baked> [--warn <bf1|bf2>]...`: fail a bake that lost its
+/// terrain foliage. `--warn` names a game whose gameplay is not the PS2's: what it lost
+/// is reported, and passes. The other game is still held to the counts.
+fn check_foliage(args: &[String]) -> Result<()> {
+    let excuse = foliage_excuses(&args[1..])?;
+    let report = bake::xbox::check_foliage(Path::new(&args[0]), &excuse)?;
+    println!("{}", report.summary());
+    for line in &report.differ {
+        println!("WARNING: foliage differs from the PS2's on {line}");
+    }
+    for line in &report.excused {
+        println!("WARNING: foliage lost on {line}");
+    }
+    for line in &report.lost {
+        println!("ERROR: foliage lost on {line}");
+    }
+    if !report.lost.is_empty() {
+        bail!(
+            "{} map(s) lost their terrain foliage. The bake could not place it: extract the disc again \
+             (`bake extract-iso`) and bake those maps again",
+            report.lost.len()
+        );
+    }
+    Ok(())
+}
+
+fn foliage_excuses(args: &[String]) -> Result<Vec<String>> {
+    let mut excuse = Vec::new();
+    let mut rest = args.iter();
+    while let Some(flag) = rest.next() {
+        match (flag.as_str(), rest.next().map(String::as_str)) {
+            ("--warn", Some(game @ ("bf1" | "bf2"))) => excuse.push(game.to_owned()),
+            _ => bail!("bake check-foliage: expected `--warn bf1` or `--warn bf2`, not {flag:?}"),
+        }
+    }
+    Ok(excuse)
+}
+
 fn ci(s: &str) -> String {
     bake::resolve_ci(s)
 }
@@ -153,6 +198,7 @@ fn main() -> Result<()> {
         Some("extract-iso") if args.len() == 4 => extract_iso(&ci(&args[2]), &args[3]),
         Some("extract-xiso") if args.len() == 4 => extract_xiso(&ci(&args[2]), &args[3]),
         Some("xbox") if args.len() >= 4 => xbox(&args[2..]),
+        Some("check-foliage") if args.len() >= 3 => check_foliage(&args[2..]),
         Some("xbox-prints") if args.len() >= 5 => {
             let roots: Vec<std::path::PathBuf> = args[2..args.len() - 2]
                 .iter()
@@ -212,8 +258,18 @@ fn main() -> Result<()> {
             )
         }
         Some("fpm") if args.len() >= 5 => {
-            let lvls: Vec<String> = args[4..].iter().map(|lvl| ci(lvl)).collect();
-            bake::fpm::bake_fpms(&lvls, &ci(&args[2]), &args[3])
+            // `--donor <root>`, each before the LVLs: another copy's data root.
+            let mut rest = args[4..].iter();
+            let mut donors = Vec::new();
+            let mut lvls = Vec::new();
+            while let Some(arg) = rest.next() {
+                if arg == "--donor" {
+                    donors.push(ci(rest.next().context("--donor needs a data root")?));
+                } else {
+                    lvls.push(ci(arg));
+                }
+            }
+            bake::fpm::bake_fpms(&lvls, &ci(&args[2]), &args[3], &donors)
         }
         Some("weapon") if args.len() == 5 || args.len() == 6 => {
             let lvl = ci_csv(&args[2]);
@@ -596,4 +652,39 @@ fn tex_dump(lvl_path: &str, outdir: &str) -> Result<()> {
     }
     println!("wrote {n} textures to {outdir}");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{extracted_from_disc, foliage_excuses};
+
+    #[test]
+    fn check_foliage_excuses_only_a_named_game() {
+        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(foliage_excuses(&[]).unwrap().is_empty());
+        assert_eq!(foliage_excuses(&args(&["--warn", "bf2"])).unwrap(), ["bf2"]);
+        assert!(foliage_excuses(&args(&["--warn"])).is_err());
+        assert!(foliage_excuses(&args(&["--warn", "all"])).is_err());
+    }
+
+    /// A disc build's foliage reads the executable: it must come out with the data.
+    #[test]
+    fn extract_iso_keeps_the_executable_and_leaves_the_rest_of_the_root() {
+        for keep in [
+            "SWBFRONT.ELF",
+            "SWBFRNT2.ELF",
+            "DATA/_LVL_PS2/CORE.LVL",
+            "DATA/_LVL_PS2/MOVIES/SHELL.MVS",
+        ] {
+            assert!(extracted_from_disc(keep), "{keep}");
+        }
+        for skip in [
+            "SYSTEM.CNF",
+            "NTGUI.ELF",
+            "DATA/SWBFRONT.ELF",
+            "DATA/_LVL_PS2/MOVIES/CRAWL.MVS",
+        ] {
+            assert!(!extracted_from_disc(skip), "{skip}");
+        }
+    }
 }

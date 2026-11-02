@@ -38,13 +38,6 @@ holds its speed, and the stick cannot bend a roll. Found by AUDIT AIRC (2026-10-
 - The port: `core/src/soldier.rs` `Stance::Roll` goes through the ground branch (`step_to` toward stick x cap x 0.02
   at Acceleration x 0.02), no drag.
 
-## Acceptance
-- Under `GroundRules::Bf2` the roll's velocity is BF2's mover: `v *= exp(-AIR_DRAG |v| dt)`, then
-  `+= stick x CONTROL_SPEED[5] x acceleration x dt` on each axis; gravity and the floor as today.
-- A unit test with the PS2's class: after 26 roll ticks the speed is 10.56 (held), 9.62 (released), 8.67 (back) within
-  0.05 m/s and the travel 8.78 / 8.41 / 8.03 m within 0.05 m; a sideways stick moves him 0.38 m aside within 0.03 m.
-- BF1 maps: the port keeps BF2's roll on both games (PLAN, locked) - say in the test which rule BF1 maps get.
-
 ## Notes
 - Shares `core/src/soldier.rs` with CSPD (the per-class ControlSpeed table) and JARC: the planner may batch.
 - Since AIRC the jump row's columns 1-2 multiply Acceleration: a hero's `jump 0.1 0.1` (CSPD's evidence) is 7 m/s2.

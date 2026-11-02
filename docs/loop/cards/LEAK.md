@@ -24,23 +24,6 @@ leak. The round sweep proves that rounds end, not that units stay out of closed 
 - The collision code: `engine/crates/core/src/collision.rs`, `collision/walls.rs` (`wall_sweep`), the soldier
   integrator in `core/src/soldier.rs` / `sim/`; the nav hub graph in `core/src/nav.rs`.
 
-## Acceptance
-- A headless example/binary (like `round_to_outcome`) that, per map, places soldier capsules at reachable walkable
-  spots near each wall face and edge and drives them at walk, sprint and jump (and sprint-jump) from several angles,
-  with the real soldier sim. It flags every end state that is:
-  - inside a closed volume (for example, a ray-parity test against the collision mesh);
-  - under a deck;
-  - off the walkable surface;
-  - at a place the AI nav graph can't reach on foot.
-  Also check the invisible barriers, the map-edge bounds, the doors and the kill volumes for gaps.
-- It reports counts per map, the way the round sweep does. A new gate in `gates.toml` fails when a new leak
-  appears. The baseline is a named list of accepted leaks, each with a reason.
-- A positive control: the census flags the maintainer's KAS2 platform jump-in on a tree without JWAL's fix. Prove it can see a
-  leak before its zero counts mean anything.
-- The end state: 0 unexplained leaks on all 32 maps, or a named list of accepted ones. Fixes for leak classes the
-  census finds beyond JWAL's become their own cards (or ride on JWAL when it is the same mechanism).
-- It runs in a few minutes (like the sweep), deterministic, under ci.lock.
-
 ## Notes
 - Build job, medium effort. The census is ours (engineering), so it needs no RE. Its verdicts about the PS2 go through
   JWAL or new cards.

@@ -191,17 +191,14 @@ pub fn los_seat(
 ) -> bool {
     los_terrain(sim, from, to)
         && match ray(from, to) {
-            Some((dir, len)) => sim
-                .collision
-                .ray_past(
-                    from,
-                    dir,
-                    len,
-                    crate::collision::Layers::ORDNANCE,
-                    hulls,
-                    buildings,
-                )
-                .is_none(),
+            Some((dir, len)) => !sim.collision.ray_blocked(
+                from,
+                dir,
+                len,
+                crate::collision::Layers::ORDNANCE,
+                hulls,
+                buildings,
+            ),
             None => true,
         }
 }
@@ -256,10 +253,14 @@ pub fn los_world(sim: &Sim, from: Vec3, to: Vec3) -> bool {
 /// [`los_world`] seeing only the hulls `hulls` admits.
 pub fn los_world_past(sim: &Sim, from: Vec3, to: Vec3, hulls: HullFilter) -> bool {
     match ray(from, to) {
-        Some((dir, len)) => sim
-            .collision
-            .ray_with(from, dir, len, crate::collision::Layers::ORDNANCE, hulls)
-            .is_none(),
+        Some((dir, len)) => !sim.collision.ray_blocked(
+            from,
+            dir,
+            len,
+            crate::collision::Layers::ORDNANCE,
+            hulls,
+            [None; 2],
+        ),
         None => true,
     }
 }
@@ -413,7 +414,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     //    Card TEAM: the candidates are the unit grid's within the farthest
     //    view distance (a standing body's), in unit-index order as before.
     let mut cand: Vec<(f32, (u8, u64), Foe, Vec3)> = Vec::new();
-    let mut near: Vec<u32> = Vec::new();
+    let mut near = crate::ai::team::NearList::new();
     sim.units_within(
         eye,
         sight(sim, u, Stance::Stand, &tier) + NEAR_MARGIN,
@@ -640,7 +641,7 @@ pub fn tell(sim: &Sim, me: UnitHandle, st: &mut AiState) -> u8 {
         return 0;
     };
     let feet = u.soldier.pos;
-    let mut near: Vec<u32> = Vec::new();
+    let mut near = crate::ai::team::NearList::new();
     sim.units_within(feet, TELL_RADIUS + NEAR_MARGIN, &mut near);
     let mut told = 0u8;
     for &i in &near {

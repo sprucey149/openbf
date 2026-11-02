@@ -76,16 +76,6 @@ of scope".
   re-fog §9 "no pose shows it"; FOGB says BF1 near models take no fog); (b) the white line on row 119 = the dome's bottom
   row, present with zero draws, where the PS2 is dark.
 
-## Acceptance
-- 0 red-dominant pixels (r > 30 and r > 2.5·max(g,b)) in BOTH panels of `bf1_kas2.png` and in every KAS2 PXC pair.
-- The band's content viewed against the PS2 (dark, then REFL's mirror); the white dome-bottom row explained and fixed.
-- The same red test swept over all 32 map goldens (both panels), and more generally any horizon gap drawing far heightfield
-  the PS2 culls — list the maps.
-- Per-map, not one global switch: rule far cull + LOWR on/off map by map with PCSX2 pairs (FARC owns the 18 maps with no
-  drawn sheet). Every other golden that moves is declared and viewed.
-- **Process (the maintainer):** measure the named defect by pixel test on EVERY declared golden panel, not only the RE poses — CLRB's
-  "0 red px over 21 poses" missed the golden's ground panel.
-
 ## Notes
 - Created 2026-09-28 by the planner from the maintainer's INBOX note. Related: FARC (value raised to 4), REFL, FOGB, KASF (done), CLRB (done).
 - Likely shape (the card decides): far cull + LOWR default-on where the map has a sheet, with a PS2-faithful far-scene fog.

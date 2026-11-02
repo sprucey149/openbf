@@ -150,8 +150,8 @@ anchors and are outside this leaf effect.
 
 ## Reproducing views
 
-From engine/: cargo run --release -p game --example forest_capture --
-<baked-map> <output-dir> [x,y,z,yaw,pitch]. It advances production leaf
+The `forest_capture` example (removed in the sprint's code cleanse; in git history) took
+<baked-map> <output-dir> [x,y,z,yaw,pitch]. It advanced production leaf
 presentation for 30.67 seconds (also saving the 20.67-second view), then captures the same world with and without
 forest particles. Non-emitting maps must have byte-identical RGBA buffers.
 Outputs contain original artwork and must remain local.

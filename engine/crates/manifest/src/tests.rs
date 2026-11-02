@@ -198,6 +198,7 @@ fn full_manifest() -> Manifest {
         terrain_name: Some("tat1".into()),
         sky_name: Some("tat1sky".into()),
         terrain_glb: Some("terrain_tat1.glb".into()),
+        terrain_query_size: Some(128),
         models: vec!["bldg_hut".into()],
         textures: vec!["sand".into()],
         transparent: vec!["glass".into()],
@@ -555,6 +556,16 @@ fn manifest_round_trips_with_every_field_populated() {
 }
 
 #[test]
+fn absent_terrain_query_frame_preserves_existing_manifest_bytes() {
+    let mut m = full_manifest();
+    m.terrain_query_size = None;
+    let text = to_ron(&m);
+    assert!(!text.contains("terrain_query_size"));
+    let parsed: Manifest = ron::from_str(&text).unwrap();
+    assert_eq!(parsed.terrain_query_size, None);
+}
+
+#[test]
 fn common_manifest_round_trips_with_every_field_populated() {
     let c = full_common();
     let text = to_ron(&c);
@@ -848,6 +859,7 @@ fn manifest_field_order_is_the_wire_format() {
             "lightning",
             "precipitation",
             "wind",
+            "terrain_query_size",
         ]
     );
 }

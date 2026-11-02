@@ -32,11 +32,6 @@ query falling through slits) and STLVL (level-aware arrival) may be related; STH
   units' positions and the planning-graph edge each is on; reproduce one with `ps2live`-style numbers: where the bot's feet y
   sit versus the walkway and the rail top.
 
-## Acceptance
-A cause per stuck cluster on BF2 KAM1, then build cards. Acceptance for the builds: KAM1 stuck_max not worse than the map's
-baseline in `loop/loop_baselines`, no census cluster whose members stand on a rail/wall-box top beside a walkway, and a render of
-the pose in `kam1_bf2_2230_ai_stuck_on_rail.png` with the bots on the walkway.
-
 ## Notes
 Filed 2026-09-30 22:50 from the maintainer's third BF2 Kamino play session (three frames, `lead_tmp/playtest_0930/kam1_bf2_2230_*.png`); a claim in Why/Evidence marked as reading of the image is Claude's, not measured.
 

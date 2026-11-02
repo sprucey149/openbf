@@ -31,17 +31,6 @@ wants the bot off the playable level, the recycle wants no progress on ONE plan,
   (`lead_tmp/fidelity_rebase_20261011/gates2/fidelity*/botq/bf2_dag1_s*.csv`). Card DAGS has the trace.
 - Card MOUTH's stalls (`lead_tmp/walk/`) are the short form of the same thing; its longest are 8-11.5 s.
 
-## Acceptance
-- A census first, 8 seeds x 32 maps on main: every spell where a foot bot stays inside a 2 m box for 20 s+ while its behaviour
-  alternates recover / travel (the 4 Hz samples' `beh` column) - how many, on which maps, how long. That table is the bar's "before".
-- The rule: N failed recoveries (N from the census: the first value no bot that later gets free reaches) with under 2 m of net
-  movement since the first -> the bot is lost and takes RETW's floor path back when RETW is on main, else is recycled (a respawn at
-  its post, counted as a recycle). Say which the PS2 does if SAIR's notes or a capture show it; else it is ours, a named deviation.
-- After: no such spell over 30 s on any map in 16 seeds; Dagobah's `stand20_pct` at or under 0.36 + 0.7 with card BSPN's spawn
-  rule on; recycles and deaths under the floor not up on any map; every round still finishes.
-- A unit test: a bot shut behind a barrier with two alternate plans is lost / recycled within the bound.
-- The spell count joins the fidelity numbers (direction down) so it cannot come back unseen.
-
 ## Notes
 - `files:` is empty on purpose (the AI files are held by OBST2's parked branch): the session lists what it touches.
 - Not this card: the first leg from a spawn (DAGS), a leg's mouth (MOUTH), the lost bot's path back (RETW).

@@ -72,6 +72,9 @@ struct Index {
     gmods: HashMap<String, mungefs::entity::GeomModel>,
     models: HashMap<String, Model>,
     skels: HashMap<String, mungefs::skel::Skeleton>,
+    /// Original donor node order: only the donor render mesh's BMAP/BNAM
+    /// addresses this table. Collision, hardpoints and physical rigs use skels.
+    render_skels: HashMap<String, mungefs::skel::Skeleton>,
     colls: HashMap<String, (mungefs::coll::CollisionMesh, usize)>,
     prims: HashMap<String, (mungefs::coll::Primitives, usize)>,
 }
@@ -82,6 +85,7 @@ fn index(chunks: &[mungefs::Chunk<'_>]) -> Result<Index> {
         gmods: HashMap::new(),
         models: HashMap::new(),
         skels: HashMap::new(),
+        render_skels: HashMap::new(),
         colls: HashMap::new(),
         prims: HashMap::new(),
     };
@@ -180,7 +184,7 @@ impl Index {
         let m = &self.models[&name.to_ascii_lowercase()];
         let mut out = m.clone();
         if !m.bone_space {
-            if let Some(skel) = self.skel_of(name, geometry) {
+            if let Some(skel) = self.render_skel_of(name, geometry) {
                 if let Some(p) = crate::bind_pose::pose_bnam(m, skel).map_err(|e| anyhow!(e))? {
                     out = p;
                 }
@@ -188,7 +192,7 @@ impl Index {
             return Ok((out, Vec::new()));
         }
         let skel = self
-            .skel_of(name, geometry)
+            .render_skel_of(name, geometry)
             .ok_or_else(|| anyhow!("{name}: bone-space model with no skel"))?;
         let mut bones = Vec::new();
         for seg in out.segments.iter_mut() {
@@ -224,6 +228,50 @@ impl Index {
         self.skels
             .get(&name.to_ascii_lowercase())
             .or_else(|| self.skels.get(&geometry.to_ascii_lowercase()))
+    }
+
+    fn render_skel_of(&self, name: &str, geometry: &str) -> Option<&mungefs::skel::Skeleton> {
+        self.render_skels
+            .get(&name.to_ascii_lowercase())
+            .or_else(|| self.render_skels.get(&geometry.to_ascii_lowercase()))
+            .or_else(|| self.skel_of(name, geometry))
+    }
+
+    fn use_render_skeletons(&mut self, original: &[u8]) -> Result<()> {
+        let inner = mungefs::open(original).map_err(|e| anyhow!("{e}"))?;
+        for chunk in mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))? {
+            if &chunk.tag == b"skel" {
+                let skel = mungefs::skel::parse_skel(&chunk).map_err(|e| anyhow!("{e}"))?;
+                self.render_skels
+                    .entry(skel.name.to_ascii_lowercase())
+                    .or_insert(skel);
+            }
+        }
+        Ok(())
+    }
+
+    /// A skinned render mesh must address the canonical rig GLB by bone name,
+    /// while its stored vertex indices are decoded through the donor rig.
+    fn canonical_joints(
+        &self,
+        name: &str,
+        geometry: &str,
+        joints: &mut [Vec<usize>],
+    ) -> Result<()> {
+        if self.render_skels.is_empty() {
+            return Ok(());
+        }
+        let donor = self
+            .render_skel_of(name, geometry)
+            .context("missing render skeleton")?;
+        let canonical = self
+            .skel_of(name, geometry)
+            .context("missing canonical skeleton")?;
+        for segment in joints {
+            crate::bind_pose::remap_bone_indices(donor, canonical, segment)
+                .map_err(|e| anyhow!(e))?;
+        }
+        Ok(())
     }
 }
 
@@ -343,10 +391,14 @@ pub fn bake_vehicles(
     pc_lvl: Option<&str>,
 ) -> Result<VehicleManifest> {
     let pc = pc_lvl.map(crate::tier::PcTextures::load).transpose()?;
-    let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
+    let (buf, original) =
+        crate::gameplay::read_with_original(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
-    let ix = index(&chunks)?;
+    let mut ix = index(&chunks)?;
+    if let Some(original) = &original {
+        ix.use_render_skeletons(original)?;
+    }
     let out = Path::new(outdir);
     for d in ["models", "collision", "textures", "walkers"] {
         std::fs::create_dir_all(out.join(d))?;
@@ -460,7 +512,10 @@ pub fn bake_vehicles(
             if to_write.iter().any(|m| m.name.eq_ignore_ascii_case(name)) {
                 continue;
             }
-            let (m, bones) = ix.model_space(name, &g.name)?;
+            let (m, mut bones) = ix.model_space(name, &g.name)?;
+            if skinned.contains(&m.name.to_ascii_lowercase()) {
+                ix.canonical_joints(name, &g.name, &mut bones)?;
+            }
             to_write.push(m);
             joints.push(bones);
         }
@@ -587,6 +642,48 @@ mod tests {
     use super::*;
 
     #[test]
+    fn donor_vertex_indices_use_original_rig_without_changing_physics() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+        for relative in [
+            "PC_swbf1_exe/Star Wars Battlefront (Classic 2004)/GameData/Data/_LVL_PC/SIDE/cis.lvl",
+            "PC_swbf2_exe/Star Wars Battlefront II Classic/GameData/data/_lvl_pc/SIDE/cis.lvl",
+        ] {
+            let path = crate::join_ci(&root, relative);
+            if !path.is_file() {
+                continue;
+            }
+            let (corrected, original) = crate::gameplay::read_with_original(&path).unwrap();
+            let original = original.expect("the supplied PC source must exercise the donor path");
+            let original_chunks =
+                mungefs::content_chunks(mungefs::open(&original).unwrap()).unwrap();
+            let corrected_chunks =
+                mungefs::content_chunks(mungefs::open(&corrected).unwrap()).unwrap();
+            let mut canonical = index(&corrected_chunks).unwrap();
+            let donor = index(&original_chunks).unwrap();
+            let geometry = "cis_tread_hailfire";
+            // This is the original defect: BMAP addresses donor nodes that the
+            // shorter reference skeleton does not contain.
+            assert!(canonical.model_space(geometry, geometry).is_err());
+            let physical = canonical
+                .rest_prims(&canonical.prims[geometry].0, geometry)
+                .0;
+            canonical.use_render_skeletons(&original).unwrap();
+            let (actual, _) = canonical.model_space(geometry, geometry).unwrap();
+            let (expected, _) = donor.model_space(geometry, geometry).unwrap();
+            for (a, b) in actual.segments.iter().zip(&expected.segments) {
+                assert_eq!(a.positions, b.positions);
+                assert_eq!(a.normals, b.normals);
+            }
+            assert_eq!(
+                canonical
+                    .rest_prims(&canonical.prims[geometry].0, geometry)
+                    .0,
+                physical
+            );
+        }
+    }
+
+    #[test]
     #[ignore = "requires native CIS side LVLs; writes a scratch side bake"]
     fn both_native_droidekas_bake_the_authored_death_chunks() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
@@ -630,6 +727,46 @@ mod tests {
                 names.len()
             );
         }
+    }
+
+    #[test]
+    fn skin_joints_resolve_donor_indices_by_name_into_canonical_rig() {
+        use mungefs::skel::{SkelBone, Skeleton};
+        let bone = |name: &str| SkelBone {
+            name: name.into(),
+            crc: mungefs::anim::crc32_lower(name),
+            parent: None,
+            rows: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            t: [0.0; 3],
+        };
+        let mut ix = index(&[]).unwrap();
+        ix.skels.insert(
+            "mesh".into(),
+            Skeleton {
+                name: "mesh".into(),
+                bones: vec![bone("root"), bone("arm")],
+            },
+        );
+        ix.render_skels.insert(
+            "mesh".into(),
+            Skeleton {
+                name: "mesh".into(),
+                bones: vec![bone("extra"), bone("Arm"), bone("Root")],
+            },
+        );
+        let mut joints = vec![vec![2, 1, 2]];
+        ix.canonical_joints("mesh", "mesh", &mut joints).unwrap();
+        assert_eq!(joints, [vec![0, 1, 0]]);
+        ix.render_skels.get_mut("mesh").unwrap().bones[0].parent = Some(1);
+        let mut detail = vec![vec![0]];
+        ix.canonical_joints("mesh", "mesh", &mut detail).unwrap();
+        assert_eq!(detail, [vec![1]]);
+        ix.render_skels.get_mut("mesh").unwrap().bones[0].parent = None;
+        assert!(ix
+            .canonical_joints("mesh", "mesh", &mut [vec![0]])
+            .unwrap_err()
+            .to_string()
+            .contains("no canonical node or ancestor"));
     }
 
     // RKHULT: exact synthetic axes make the two composition orders differ.
