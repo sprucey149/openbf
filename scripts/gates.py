@@ -23,7 +23,7 @@ Groups:
          --bake-groups (the card's declared groups) on a diff that touches the bake code bakes EVERY group and FAILS on
          a difference in a group that is not declared, naming the file and the group (card BAKEG: a crate shared by
          several groups left `side` stale behind a `rebake=maps`)
-  alignment  sampled placed-art/corrected-collision comparison against independent PS2 bakes; requires
+  alignment  continuous placed-art/corrected-collision certificates against independent PS2 bakes; requires
          --alignment-reference ASSETS and --alignment-case NAME=ASSETS (repeat for each source). Reports every
          base/layer placement, bounds and surface residuals; missing inputs/offenders FAIL. This is an explicit
          developer gate, not part of a normal player build.
@@ -223,8 +223,10 @@ class Gates:
                 offenders = sum(row["counts"].get("offender", 0) for row in report["maps"])
                 missing = sum(row["counts"].get("unmeasured", 0) for row in report["maps"])
                 extras = sum(row["extra_source_placements"] for row in report["maps"])
-                clean = not (offenders or missing or extras or any(row.get("error") for row in report["maps"]))
-                value = f"{len(report['maps'])} source/maps, {offenders} offending placements, {missing} unmeasured, {extras} extra"
+                incomplete = sum(row.get(name, {}).get('complete') is not True or row.get(name, {}).get('status') != 'pass'
+                                 for row in report['maps'] for name in ('terrain', 'attachment'))
+                clean = not (offenders or missing or extras or incomplete or any(row.get("error") for row in report["maps"]))
+                value = f"{len(report['maps'])} source/maps, {offenders} offending placements, {missing} unmeasured, {extras} extra, {incomplete} terrain/attachment gaps"
         except (OSError, ValueError, TypeError, KeyError) as exc:
             value = "invalid/missing alignment report: " + str(exc)
         s.row("alignment", shlex.join(cmd), rc, value, "complete report; 0 offenders; 0 unmeasured; 0 extras",

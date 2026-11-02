@@ -5,8 +5,10 @@
 //!
 //! Sixteen of the 32 shipped terrains carry a sheet. It is a coarse
 //! triangle-strip LOD of the terrain's OWN footprint — not an outside fill —
-//! so this bake is a transcription: the patches' triangles, one flat texture,
-//! no lightmap and no normals worth the name.
+//! so the PS2 bake is a transcription: the patches' triangles, one flat texture,
+//! no lightmap and no normals worth the name. Donor sheets retain their own
+//! texture but use the complete corrected terrain surface, avoiding LOD holes
+//! and a distant slope that differs from the ground the simulation reads.
 //!
 //! ## What is the PS2's here, and what is ours
 //!
@@ -78,15 +80,32 @@ pub fn lowres_to_glb(
     texture: Option<&str>,
     texture_scale: f32,
 ) -> Result<Option<Vec<u8>>> {
+    lowres_to_glb_with_surface(name, sheet, half, texture, texture_scale, None)
+}
+
+/// Donor distant terrain follows the same corrected surface as near terrain.
+/// The PS2 path passes None and retains its original coarse sheet byte for byte.
+pub fn lowres_to_glb_with_surface(
+    name: &str,
+    sheet: &LowResSheet,
+    half: f32,
+    texture: Option<&str>,
+    texture_scale: f32,
+    surface: Option<&crate::terrain_glb::AlignedSurface>,
+) -> Result<Option<Vec<u8>>> {
     let mut positions: Vec<[f32; 3]> = Vec::with_capacity(sheet.vertex_count());
     let mut indices: Vec<u32> = Vec::with_capacity(sheet.triangle_count() * 3);
-    for p in &sheet.patches {
-        // Each patch keeps its own vertices: they are the disc's, and two
-        // patches that meet share an edge in space but not in the file.
-        let base = positions.len() as u32;
-        positions.extend_from_slice(&p.positions);
-        for t in &p.triangles {
-            indices.extend_from_slice(&[base + t[0], base + t[1], base + t[2]]);
+    if let Some(surface) = surface {
+        (positions, indices) = surface.positions_indices();
+    } else {
+        for p in &sheet.patches {
+            // Each patch keeps its own vertices: they are the disc's, and two
+            // patches that meet share an edge in space but not in the file.
+            let base = positions.len() as u32;
+            positions.extend_from_slice(&p.positions);
+            for t in &p.triangles {
+                indices.extend_from_slice(&[base + t[0], base + t[1], base + t[2]]);
+            }
         }
     }
     if indices.is_empty() {

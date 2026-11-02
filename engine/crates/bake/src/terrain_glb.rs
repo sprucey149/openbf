@@ -15,6 +15,10 @@
 //! 1, and on the mask-0 patches the PS2 draws no layer on at all, the base
 //! LTEX[0] shows: a documented backstop (card TMSK).
 //!
+//! PS2 files use the original emitters below unchanged. Donor maps use
+//! [`AlignedSurface`]: the public corrected heights/cutters shape a separate
+//! render grid, while the first grid remains the simulation input.
+//!
 //! Both meshes split every quad the PS2's way ([`quad_triangles`]), so a
 //! layer triangle lies exactly on the base triangle under it.
 //!
@@ -50,6 +54,9 @@ fn gs_vertex_byte(c8: u8, bf2: bool) -> u8 {
         c5 << 3
     }
 }
+
+mod alignment;
+pub use alignment::Surface as AlignedSurface;
 
 use anyhow::Result;
 use mungefs::terrain::Terrain;

@@ -90,7 +90,7 @@ pub fn fade(mesh: &ManifestFoliageMesh) -> Option<render::Fade> {
 /// Every model instance of the scene's foliage that resolves to a loaded
 /// mesh, standing on the scene's terrain. Empty without a terrain.
 pub fn models<'a>(scene: &'a Scene, records: &[Record]) -> Vec<FoliageModel<'a>> {
-    let (Some(f), Some(ground)) = (&scene.manifest.foliage, scene.heightfield()) else {
+    let (Some(f), Some(ground)) = (&scene.manifest.foliage, scene.render_heightfield()) else {
         return Vec::new();
     };
     records

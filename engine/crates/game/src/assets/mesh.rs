@@ -265,8 +265,28 @@ pub fn load_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
         scroll: vec![],
         sphere: None,
         vis_top: None,
+        render_grid: None,
     };
     for m in doc.meshes() {
+        if let Some(raw) = m.extras() {
+            let value: serde_json::Value = serde_json::from_str(raw.get())?;
+            let offset = value.get("render_grid_offset");
+            let size = value.get("render_grid_size");
+            if offset.is_some() || size.is_some() {
+                let pair = offset
+                    .and_then(serde_json::Value::as_u64)
+                    .and_then(|offset| usize::try_from(offset).ok())
+                    .zip(
+                        size.and_then(serde_json::Value::as_u64)
+                            .and_then(|size| usize::try_from(size).ok()),
+                    )
+                    .ok_or_else(|| anyhow!("invalid render terrain grid metadata"))?;
+                if mesh.render_grid.is_some() || !mesh.positions.is_empty() {
+                    return Err(anyhow!("render terrain grid must belong to the first mesh"));
+                }
+                mesh.render_grid = Some(pair);
+            }
+        }
         #[derive(serde::Deserialize)]
         struct MeshExtras {
             sphere: Option<[f32; 4]>,
@@ -332,6 +352,9 @@ pub fn load_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
     }
     if !joints.is_empty() {
         joints.resize(mesh.positions.len(), [0; 4]);
+    }
+    if mesh.render_grid.is_some() && super::render_ground::from_mesh(&mesh).is_none() {
+        return Err(anyhow!("invalid render terrain grid"));
     }
     Ok((mesh, joints))
 }

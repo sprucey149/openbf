@@ -85,6 +85,7 @@ pub(super) fn bake_content(
     let mut base_plnp: Option<mungefs::plan::Plnp> = None;
     let mut terrain_glb = None;
     let mut terrain_query_size = None;
+    let mut terrain_render_heights = None;
     let mut terrain_parsed: Option<mungefs::terrain::Terrain> = None;
     // The far-LOD sheet is written AFTER the walk, not here: its texture and
     // its UV scale come from `sky_`, and `tern` precedes `sky_` in every one
@@ -281,6 +282,7 @@ pub(super) fn bake_content(
     // its bind pose, so a turret's head and gun sit on their bones.
     let shadow_skels = crate::hardpoints::Skeletons::of(&expanded);
     let mut bind_pose = crate::bind_pose::BindPose::of(&expanded);
+    let render_alignment = super::render_alignment::Alignment::of(original.as_deref())?;
     for original in original.as_deref().into_iter().chain(
         side_source
             .as_ref()
@@ -291,6 +293,9 @@ pub(super) fn bake_content(
             .map_err(|e| anyhow!(e))?;
     }
     let mut posed: Vec<String> = Vec::new();
+    let restore_door_halves = super::render_symmetry::enabled(original.as_deref())?;
+    let correct_column = super::render_column::enabled(original.as_deref())?;
+    let mut reflected_door_groups = std::collections::HashMap::new();
     // Card VTURD (`crate::turret_rig`): an armed building's model is written
     // as one primitive per (segment, node), so its gun can turn.
     let turret_rigs = crate::turret_rig::TurretRigs::of(&expanded);
@@ -450,7 +455,9 @@ pub(super) fn bake_content(
                 if layer_loses("modl", c.offset, &m.name, dup, &mut layer_skips) {
                     continue;
                 }
-                crate::shadow::write_model(c, out, &shadow_skels)?;
+                if crate::shadow::write_model(c, out, &shadow_skels)? > 0 {
+                    render_alignment.shadow(&m.name, out)?;
+                }
                 match bind_pose.pose(&m) {
                     Ok(Some(p)) => {
                         posed.push(p.name.clone());
@@ -458,6 +465,15 @@ pub(super) fn bake_content(
                     }
                     Ok(None) => {}
                     Err(e) => eprintln!("bind pose: {e} — {} stays as stored", m.name),
+                }
+                render_alignment.apply(&mut m)?;
+                if restore_door_halves {
+                    if let Some(count) = super::render_symmetry::model(&mut m)? {
+                        reflected_door_groups.insert(m.name.to_ascii_lowercase(), count);
+                    }
+                }
+                if correct_column {
+                    super::render_column::model(&mut m)?;
                 }
                 if turret_rigs.has_model(&m.name) {
                     bind_pose
@@ -525,6 +541,7 @@ pub(super) fn bake_content(
                     let mut t = mungefs::terrain::Terrain::parse(c)
                         .map_err(|e| anyhow!("tern 0x{:X}: {e}", c.offset))?;
                     terrain_query_size = crate::gameplay::apply_terrain(lvl_path, &mut t)?;
+                    terrain_render_heights = crate::gameplay::apply_render_heights(lvl_path, &t)?;
                     if terrain_cutters.is_empty() {
                         terrain_cutters = t
                             .cutters
@@ -807,11 +824,16 @@ pub(super) fn bake_content(
     // trigger spheres and the `open` clip's motion per prim (crate::door).
     for (name, rig) in crate::door::rigs(&expanded) {
         match rig {
-            Ok(d) => {
+            Ok(mut d) => {
                 if let Some(k) = classes
                     .iter_mut()
                     .find(|k| k.name.eq_ignore_ascii_case(&name))
                 {
+                    if let Some(count) = k.geometry.as_ref().and_then(|geometry| {
+                        reflected_door_groups.get(&geometry.to_ascii_lowercase())
+                    }) {
+                        super::render_symmetry::door_parts(&mut d, *count)?;
+                    }
                     k.door = Some(d);
                 }
             }
@@ -871,23 +893,6 @@ pub(super) fn bake_content(
         .as_ref()
         .and_then(|s| s.dome.as_ref())
         .and_then(|d| d.low_res_terrain.as_ref());
-    let lowres_glb = match lowres {
-        Some((ref name, ref sheet, half)) => crate::lowres_glb::lowres_to_glb(
-            name,
-            sheet,
-            half,
-            lrt.and_then(|l| l.texture.as_deref()),
-            lrt.and_then(|l| l.texture_scale)
-                .unwrap_or(crate::lowres_glb::DEFAULT_TEXTURE_SCALE),
-        )?
-        .map(|glb| -> Result<String> {
-            let fname = format!("lowres_{name}.glb");
-            std::fs::write(out.join(&fname), glb)?;
-            Ok(fname)
-        })
-        .transpose()?,
-        None => None,
-    };
     // D7: the sky path is out of scope for ALPHA RULE v2. `sky_models` are the
     // DOME shells (`ManifestSky.models`); `sky_textures` is every texture their
     // drawn segments name, plus the dome's own `DomeInfo.Texture`.
@@ -963,6 +968,17 @@ pub(super) fn bake_content(
             .map(|n| n.to_ascii_lowercase()),
         _ => None,
     };
+    // A public sky correction keeps the canonical name, while the player's
+    // donor may call that same far artwork something else. Preserve its native
+    // binding under the corrected name without changing gameplay metadata.
+    let far_texture_alias = super::texture_alias::far_alias(
+        original.as_deref(),
+        sheet_named.as_deref(),
+        &all_textures
+            .iter()
+            .map(|t| t.name.as_str())
+            .collect::<Vec<_>>(),
+    )?;
     // Queue FOLGG: the sheets this map's `grasspatch` classes name
     // (`Texture`, default "grass" — `crate::foliage::grass_class`) keep their
     // disc alpha too: every grass sprite is a cutout composited by it
@@ -1043,6 +1059,9 @@ pub(super) fn bake_content(
         let water_named = water_named_textures.contains(&lower);
         let consumer_named = water_named
             || sheet_named.as_deref() == Some(lower.as_str())
+            || far_texture_alias
+                .as_ref()
+                .is_some_and(|(_, native)| native.eq_ignore_ascii_case(&lower))
             || grass_named.contains(&lower)
             || pass_named.contains(&lower)
             || flash_named.contains(&lower)
@@ -1142,6 +1161,16 @@ pub(super) fn bake_content(
             transparent.push(t.name.clone());
         }
         textures.push(t.name.clone());
+    }
+    if let Some(alias) = &far_texture_alias {
+        super::texture_alias::install(
+            alias,
+            &tex_dir,
+            &mut textures,
+            &mut texture_tiers,
+            &mut texture_tier2,
+            &mut transparent,
+        )?;
     }
     alpha_report(layer_flag_moves, |n| {
         format!(
@@ -1288,12 +1317,44 @@ pub(super) fn bake_content(
             },
         )
         .to_string();
+    let aligned_surface = terrain_parsed
+        .as_ref()
+        .zip(terrain_render_heights.as_deref())
+        .map(|(t, heights)| {
+            crate::terrain_glb::AlignedSurface::build(t, source_game == "bf2", heights)
+        })
+        .transpose()?;
+    let lowres_glb = match lowres {
+        Some((ref name, ref sheet, half)) => crate::lowres_glb::lowres_to_glb_with_surface(
+            name,
+            sheet,
+            half,
+            lrt.and_then(|l| l.texture.as_deref()),
+            lrt.and_then(|l| l.texture_scale)
+                .unwrap_or(crate::lowres_glb::DEFAULT_TEXTURE_SCALE),
+            aligned_surface.as_ref(),
+        )?
+        .map(|glb| -> Result<String> {
+            let fname = format!("lowres_{name}.glb");
+            std::fs::write(out.join(&fname), glb)?;
+            Ok(fname)
+        })
+        .transpose()?,
+        None => None,
+    };
     let mut terrain_layers_glb = None;
     if let (Some(t), Some(fname)) = (&terrain_parsed, &terrain_glb) {
         let bf2 = source_game == "bf2";
-        let glb = crate::terrain_glb::terrain_to_glb(t, bf2)?;
+        let glb = match &aligned_surface {
+            Some(surface) => surface.base_glb(t)?,
+            None => crate::terrain_glb::terrain_to_glb(t, bf2)?,
+        };
         std::fs::write(out.join(fname), glb)?;
-        if let Some(glb) = crate::terrain_glb::terrain_layers_to_glb(t, bf2)? {
+        let layers = match &aligned_surface {
+            Some(surface) => surface.layers_glb(t, bf2)?,
+            None => crate::terrain_glb::terrain_layers_to_glb(t, bf2)?,
+        };
+        if let Some(glb) = layers {
             let fname = format!("terrain_layers_{}.glb", t.name);
             std::fs::write(out.join(&fname), glb)?;
             terrain_layers_glb = Some(fname);

@@ -480,3 +480,27 @@ fn public_kaadu_program_restores_exact_reference_root_motion() {
     );
     assert_eq!(root_motion(&read(&donor).unwrap()), target);
 }
+
+#[test]
+fn render_terrain_heights_allow_distant_grid_samples_without_changing_gameplay_heights() {
+    let (_, mut file, _) = fixture();
+    let raw = flat_terrain();
+    let ground = mungefs::terrain::Terrain::parse(&first(&raw)).unwrap();
+    let mut heights = vec![0.0; 256];
+    file.terrain[0].render_grid_size = Some(16);
+    file.terrain[0].render_height_fills = vec![[-8.0, -7.0, 2.0, 2.0, 3.0]];
+    terrain::apply_render(&file.terrain[0], &ground, &mut heights).unwrap();
+    assert_eq!(&heights[..2], &[3.0, 3.0]);
+    assert_eq!(&heights[16..18], &[3.0, 3.0]);
+    assert!(ground.raw.iter().all(|&v| v == 0));
+    let original = heights.clone();
+    file.terrain[0]
+        .render_height_fills
+        .push([7.0, 8.0, 2.0, 1.0, 1.0]);
+    assert!(terrain::apply_render(&file.terrain[0], &ground, &mut heights).is_err());
+    assert_eq!(heights, original);
+    file.terrain[0].render_height_fills =
+        vec![[-8.0, -7.0, 2.0, 2.0, 3.0], [-8.0, -7.0, 1.0, 1.0, 3.0]];
+    assert!(terrain::apply_render(&file.terrain[0], &ground, &mut heights).is_err());
+    assert_eq!(heights, original);
+}

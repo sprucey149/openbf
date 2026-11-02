@@ -1203,6 +1203,7 @@ mod tests {
                 scroll: Vec::new(),
                 sphere: None,
                 vis_top: None,
+                render_grid: None,
             }),
             water: None,
             lowres: None,

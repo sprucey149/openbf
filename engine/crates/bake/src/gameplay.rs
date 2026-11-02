@@ -17,7 +17,7 @@ mod terrain;
 #[cfg(test)]
 mod tests;
 
-pub use terrain::apply_terrain;
+pub use terrain::{apply_render_heights, apply_terrain};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Hash)]
 pub(super) struct Locator {
@@ -117,6 +117,10 @@ pub(super) struct Terrain {
     height_samples: Vec<[f32; 3]>,
     #[serde(default)]
     height_fills: Vec<[f32; 5]>,
+    #[serde(default)]
+    render_height_fills: Vec<[f32; 5]>,
+    #[serde(default)]
+    render_grid_size: Option<u32>,
     #[serde(default)]
     boundaries: Vec<Vec<[f32; 2]>>,
     cutters: Option<Vec<Cutter>>,

@@ -21,8 +21,12 @@ use std::path::Path;
 
 mod collision_standin;
 mod content;
+mod render_alignment;
+mod render_column;
 mod render_reassembly;
 mod render_recovery;
+mod render_symmetry;
+mod texture_alias;
 
 use content::bake_content;
 

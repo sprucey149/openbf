@@ -804,6 +804,7 @@ mod tests {
             scroll: Vec::new(),
             sphere: None,
             vis_top: None,
+            render_grid: None,
         });
         let setup = BattleSetup {
             seed: 42,

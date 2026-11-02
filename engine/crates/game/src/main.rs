@@ -142,6 +142,10 @@
 //!                                 a scratch bake's `<map>/sounds`
 //!   SQUAD_TRACE=<any>             with --walk-replay: the squad trace above
 //!                                 (set at all = on, even "0")
+//!   OPENBF_WALK_STATE_HASHES=1     with --walk-replay: print the complete sim
+//!                                 hash after every tick for capture comparisons
+//!   OPENBF_WALK_FEET_Y=<metres>    with --walk-replay: start at an explicit
+//!                                 floor height for indoor capture scripts
 
 // Split by queue SPL2 (2026-09-23, a pure move). This file keeps the CLI:
 // `main`, the flag parsers, and `ViewerArgs` and `BattleSetup`, which every

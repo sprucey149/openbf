@@ -1130,6 +1130,43 @@ mod tests {
         assert!(b.see_through(cam, &[player], Some(7), none, &[]).is_empty());
     }
 
+    /// A millimetre-scale art change can toggle an entire small prop's
+    /// visibility. The alignment gate cannot borrow that prop's resting art
+    /// as permanent coverage for a hole in a different, nonfading building.
+    #[test]
+    fn a_small_geometry_shift_can_hide_only_one_sources_model() {
+        let quad = |size| {
+            mesh(
+                vec![
+                    Vec3::ZERO,
+                    Vec3::new(size, 0., 0.),
+                    Vec3::new(size, 0., size),
+                    Vec3::new(0., 0., size),
+                ],
+                vec![0, 1, 2, 0, 2, 3],
+            )
+        };
+        let reference = one(quad(2.), Mat4::IDENTITY, false);
+        let source = one(
+            quad(2.),
+            Mat4::from_translation(Vec3::new(0., 0.005, 0.)),
+            false,
+        );
+        let big = one(quad(6.), Mat4::IDENTITY, false);
+        let eye = Vec3::new(1., CAMERA_RADIUS + 0.0025, 1.);
+        let sight = Vec3::new(1., 2., 1.);
+        assert!(reference
+            .see_through(eye, &[sight], None, |_| None, &[])
+            .is_empty());
+        assert_eq!(
+            source.see_through(eye, &[sight], None, |_| None, &[]),
+            vec![(7, 0.)]
+        );
+        assert!(big
+            .see_through(eye, &[sight], None, |_| None, &[])
+            .is_empty());
+    }
+
     fn post_clearance(m: &TriMesh, p: Vec3) -> f32 {
         m.indices
             .as_chunks::<3>()
@@ -1309,6 +1346,7 @@ mod tests {
             scroll: Vec::new(),
             sphere: None,
             vis_top: None,
+            render_grid: None,
         };
         let rig = manifest::ManifestDoor {
             triggers: Vec::new(),

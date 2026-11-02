@@ -247,7 +247,7 @@ pub fn build(
     }
     let class_of = |name: &str| index.get(&name.to_ascii_lowercase()).copied();
     let mut patches = Vec::new();
-    if let Some(ground) = scene.heightfield() {
+    if let Some(ground) = scene.render_heightfield() {
         let bf2 = scene.manifest.source_game == "bf2";
         for r in records {
             let Some(mesh) = f.meshes.get(r.mesh as usize) else {

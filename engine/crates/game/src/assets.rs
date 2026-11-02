@@ -2,6 +2,7 @@
 //! CPU-side scene data for the renderer. Runtime never touches LVL.
 
 mod mesh;
+mod render_ground;
 pub use mesh::{load_glb, load_glb_joints, load_skinned_glb, CpuSkinnedMesh, SkinnedAsset};
 
 use anyhow::{anyhow, Context, Result};
@@ -195,6 +196,9 @@ pub struct CpuMesh {
     /// The top of the model's vis box, model space (`extras.vis_top`); `None` from
     /// a bake older than it.
     pub vis_top: Option<f32>,
+    /// A corrected presentation grid after the unchanged simulation grid:
+    /// (first vertex, vertices per side). Absent on PS2 and older bakes.
+    pub render_grid: Option<(usize, usize)>,
 }
 
 /// One submesh's specular second pass as the bake wrote it
@@ -1393,6 +1397,7 @@ mod tests {
                 scroll: vec![],
                 sphere: None,
                 vis_top: None,
+                render_grid: None,
             }
         };
         let mut reference = scene("None");
