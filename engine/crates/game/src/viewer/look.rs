@@ -851,6 +851,7 @@ mod tests {
                     ..manifest::ManifestLighting::default()
                 },
                 Some(&manifest::ManifestSky {
+                    glow_masks_preserved: false,
                     texture: None,
                     models: Vec::new(),
                     ambient: [0.0; 3],

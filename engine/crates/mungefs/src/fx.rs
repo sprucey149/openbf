@@ -6,15 +6,7 @@
 //! Every LVL carries several `fx__` chunks (3–9 on the twelve water maps,
 //! measured) and each is a munged config tree ([`crate::config`]) of
 //! `Effect("<name>")` records — `ColorControl`, `Wind`, `Precipitation`,
-//! `Lightning`, `Water`, and more. **Only `Effect("Water")`,
-//! `Effect("HDR")`, `Effect("Lightning")` and its `LightningBolt`,
-//! `Effect("Precipitation")` and `Effect("Wind")` are decoded here**
-//! ([`LightningConfig`], card KSKY: the effect that darkens the sky dome
-//! between flashes).
-//! `Effect("Precipitation")` and `Effect("Wind")` are [`PrecipitationConfig`]
-//! and [`WindConfig`] (card WTHR, `analysis/re-weather.md`). Every other
-//! effect is unparsed (`ColorControl` is read by neither ELF); this module
-//! skips them without looking inside. The `fx__` chunks that hold
+//! `Lightning`, `Water`, and more. The `fx__` chunks that hold
 //! `ParticleEmitter` trees (impacts, explosions, trails) are
 //! [`crate::particle`]'s.
 //!
@@ -662,6 +654,43 @@ impl PrecipitationConfig {
             }
         }
         Ok(Some(p))
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FogCloudConfig {
+    pub enable: bool,
+    pub texture: Option<String>,
+    pub range: Option<[f32; 2]>,
+    pub color: Option<[f32; 4]>,
+    pub velocity: Option<[f32; 2]>,
+    pub rotation: Option<f32>,
+    pub height: Option<f32>,
+    pub particle_size: Option<f32>,
+    pub particle_density: Option<f32>,
+}
+
+impl FogCloudConfig {
+    pub fn parse(fx: &Chunk<'_>) -> Result<Option<Self>, UcfbError> {
+        let Some(node) = effect_named(fx, "fogcloud")? else {
+            return Ok(None);
+        };
+        let mut f = Self::default();
+        for c in &node.children {
+            match c.hash {
+                key::ENABLE => f.enable = c.f32(0).is_some_and(|v| v != 0.0),
+                key::TEXTURE => f.texture = non_empty(c.string.clone()),
+                key::RANGE => f.range = Some(c.floats_or_zero()),
+                key::COLOR => f.color = c.f4(),
+                key::VELOCITY => f.velocity = Some(c.floats_or_zero()),
+                key::ROTATION => f.rotation = c.f32(0),
+                0xd5bd_bb42 => f.height = c.f32(0),
+                key::PARTICLE_SIZE => f.particle_size = c.f32(0),
+                key::PARTICLE_DENSITY => f.particle_density = c.f32(0),
+                _ => {}
+            }
+        }
+        Ok(Some(f))
     }
 }
 

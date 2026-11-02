@@ -22,7 +22,7 @@ use crate::gpu_timer::GpuTimer;
 use crate::mesh::{self, GpuMesh, Instance};
 use crate::{
     Camera, DrawCmd, DrawLayer, DrawOrder, Globals, LightPath, RenderError, Renderer,
-    SkinnedDrawCmd, SkyMode, Target, TextureHandle, MAX_JOINTS, PALETTE_STRIDE,
+    SkinnedDrawCmd, Target, TextureHandle, MAX_JOINTS, PALETTE_STRIDE,
 };
 use glam::Mat4;
 
@@ -166,6 +166,7 @@ impl Renderer {
         overlay: Option<OverlayFn<'_>>,
     ) -> Result<(), RenderError> {
         let leaves = self.falling_draws(camera);
+        self.advance_sky();
         for d in skinned {
             let Some(mesh) = self.skinned_meshes.get(d.mesh.0 as usize) else {
                 return Err(RenderError::BadHandle(format!("skinned mesh {}", d.mesh.0)));
@@ -395,18 +396,38 @@ impl Renderer {
             .sky
             .iter()
             .map(|s| Instance {
-                model: Self::sky_model(s, camera.position, self.time).to_cols_array_2d(),
-                color: s.color,
+                model: Self::sky_model(s, camera.position, self.atmosphere_time(), self.water_time)
+                    .to_cols_array_2d(),
+                color: Self::sky_color(s),
                 // The sky is never distance-culled: on the PS2 it is drawn by
                 // the sky tick under draw flag 0x20, outside both scene
                 // ranges (`analysis/re-fog.md` 2.4 [V]).
                 cull: [mesh::NO_CULL; 2],
                 cull_near: [mesh::NO_CULL_NEAR; 2],
-                light: LightPath::Lit as u32,
+                light: s.emission.unwrap_or(LightPath::Lit) as u32,
                 fade: mesh::NO_FADE,
                 lights: [0; 4],
             })
             .collect();
+        let object_blend = |slot: usize| {
+            self.sky[slot].depth && Self::sky_mode(&self.sky[slot]) == crate::SkyMode::Blend
+        };
+        let mut sky_order: Vec<_> = (0..sky_base).filter(|&slot| !object_blend(slot)).collect();
+        let mut blended_sky: Vec<_> = (0..sky_base)
+            .filter(|&slot| object_blend(slot))
+            .map(|slot| {
+                let center = self
+                    .meshes
+                    .get(self.sky[slot].mesh.0 as usize)
+                    .map_or(glam::Vec3::ZERO, |m| (m.bounds.0 + m.bounds.1) * 0.5);
+                let point =
+                    glam::Mat4::from_cols_array_2d(&instances[slot].model).transform_point3(center);
+                (slot, point.distance_squared(camera.position))
+            })
+            .collect();
+        blended_sky.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let sky_solid_count = sky_order.len();
+        sky_order.extend(blended_sky.iter().map(|(slot, _)| *slot));
         // A model's primitives are submitted together and share its sphere:
         // one gather serves the run.
         let mut last: Option<(crate::LitSphere, bool, [u16; 4])> = None;
@@ -572,7 +593,21 @@ impl Renderer {
         if !leaves.is_empty() {
             particles.to_mut().extend(leaves);
         }
-        let bolts = crate::particles::build(&self.bolts.bolts, &particles, camera);
+        if let Some(cloud) = &self.particles.cloud {
+            particles
+                .to_mut()
+                .extend(cloud.draws(camera, self.atmosphere_time()));
+        }
+        let mut bolts = crate::particles::build(&[], &self.particles.sky, camera);
+        let sky_particle_runs = bolts.runs.len();
+        let mut world_particles = crate::particles::build(&self.bolts.bolts, &particles, camera);
+        let base = bolts.vertices.len() as u32;
+        for run in &mut world_particles.runs {
+            run.vertices.start += base;
+            run.vertices.end += base;
+        }
+        bolts.vertices.extend(world_particles.vertices);
+        bolts.runs.extend(world_particles.runs);
         if !bolts.runs.is_empty() {
             let vb = bytemuck::cast_slice(&bolts.vertices);
             let inst = [crate::bolt::identity_instance()];
@@ -724,16 +759,21 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            // Sky first: unlit shells around the camera, no depth at all. The
+            // Sky first: background domes and depth-tested object hulls. The
             // stars go after the base dome's shells (its mirror included) and
             // under the rest (a cloud deck covers them), as both ELFs order
             // the sky pass (`analysis/re-stars.md` §3).
             let star_slot = self.stars.slot.min(self.sky.len());
+            let mut sky_fx_drawn = false;
             if (sky_base > 0 || star_count > 0) && !ab.skips("sky") {
                 pass.set_bind_group(0, &self.globals_bg, &[]);
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
-                let mut bound: Option<SkyMode> = None;
-                for item in self.sky.iter().enumerate().map(Some).chain([None]) {
+                let mut bound = None;
+                for item in sky_order[..sky_solid_count]
+                    .iter()
+                    .map(|&slot| Some((slot, &self.sky[slot])))
+                    .chain([None])
+                {
                     if item.map_or(self.sky.len(), |(i, _)| i) == star_slot && star_count > 0 {
                         if let (Some((vbuf, _)), Some((ibuf, _))) =
                             (&self.stars.vertex_buf, &self.stars.instance_buf)
@@ -748,24 +788,44 @@ impl Renderer {
                             bound = None;
                         }
                     }
+                    if !sky_fx_drawn && item.is_none_or(|(_, shell)| shell.depth) {
+                        draw_calls += self.draw_particle_runs(
+                            &mut pass,
+                            &bolts.runs[..sky_particle_runs],
+                            false,
+                        );
+                        sky_fx_drawn = true;
+                        pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                        bound = None;
+                    }
                     let Some((slot, shell)) = item else {
                         break;
                     };
                     let Some(mesh) = self.meshes.get(shell.mesh.0 as usize) else {
                         continue;
                     };
-                    // Two pipelines, one per material mode; shells keep
-                    // their authored order (a cloud deck composites over the
-                    // dome, and an OPAQUE shell PAINTS over what is under
-                    // it), so switch rather than sort.
-                    if bound != Some(shell.mode) {
-                        pass.set_pipeline(&self.sky_pipelines[shell.mode.index()]);
-                        bound = Some(shell.mode);
+                    // Shells keep their authored order
+                    // (a cloud deck composites over the dome, and an OPAQUE shell
+                    // PAINTS over what is under it), so switch rather than sort.
+                    let pipeline_idx = (
+                        usize::from(shell.depth),
+                        usize::from(shell.lit),
+                        Self::sky_mode(shell).index(),
+                    );
+                    if bound != Some(pipeline_idx) {
+                        pass.set_pipeline(
+                            &self.sky_pipelines[pipeline_idx.0][pipeline_idx.1][pipeline_idx.2],
+                        );
+                        bound = Some(pipeline_idx);
                     }
                     pass.set_bind_group(1, self.tex_bg(shell.texture), &[]);
                     draw_mesh(&mut pass, mesh, slot as u32..slot as u32 + 1);
                     draw_calls += 1;
                 }
+            }
+            if !sky_fx_drawn {
+                draw_calls +=
+                    self.draw_particle_runs(&mut pass, &bolts.runs[..sky_particle_runs], false);
             }
             mark(&mut timer, &mut pass, "sky");
 
@@ -991,6 +1051,21 @@ impl Renderer {
             // kind to the other rebinds the pipeline and the instance buffer.
             let mut world_slot = blend_base;
             let mut bound_skinned: Option<bool> = None;
+            if !ab.skips("sky") {
+                pass.set_bind_group(0, &self.globals_bg, &[]);
+                pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                for &slot in &sky_order[sky_solid_count..] {
+                    let shell = &self.sky[slot];
+                    let Some(mesh) = self.meshes.get(shell.mesh.0 as usize) else {
+                        continue;
+                    };
+                    pass.set_pipeline(&self.sky_pipelines[1][usize::from(shell.lit)][1]);
+                    pass.set_bind_group(1, self.tex_bg(shell.texture), &[]);
+                    let inst = slot as u32;
+                    draw_mesh(&mut pass, mesh, inst..inst + 1);
+                    draw_calls += 1;
+                }
+            }
             for &b in blended.iter().filter(|_| !ab.skips("blend")) {
                 let skin = matches!(b, Blended::Skinned(_));
                 if bound_skinned != Some(skin) {
@@ -1030,7 +1105,8 @@ impl Renderer {
             // after the blend pass, far to near, each bolt's core (NORMAL)
             // then its glow (ADDITIVE), each particle by its blend.
             if self.particle_display.is_none() && !ab.skips("bolts+particles") {
-                draw_calls += self.draw_particle_runs(&mut pass, &bolts.runs, false);
+                draw_calls +=
+                    self.draw_particle_runs(&mut pass, &bolts.runs[sky_particle_runs..], false);
                 mark(&mut timer, &mut pass, "bolts+particles");
             }
         }
@@ -1064,7 +1140,8 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            draw_calls += self.draw_particle_runs(&mut pass, &bolts.runs, true);
+            draw_calls +=
+                self.draw_particle_runs(&mut pass, &bolts.runs[sky_particle_runs..], true);
             mark(&mut timer, &mut pass, "bolts+particles");
         }
         if bloom && !ab.skips("bloom") {
@@ -1092,6 +1169,19 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.globals_bg, &[]);
             pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+            if !ab.skips("sky") && self.sky.iter().any(|s| s.emission.is_some()) {
+                for &slot in &sky_order {
+                    let shell = &self.sky[slot];
+                    let Some(mesh) = self.meshes.get(shell.mesh.0 as usize) else {
+                        continue;
+                    };
+                    pass.set_pipeline(&self.bloom.gather.sky[Self::sky_mode(shell).index()]);
+                    pass.set_bind_group(1, self.tex_bg(shell.texture), &[]);
+                    let inst = slot as u32;
+                    draw_mesh(&mut pass, mesh, inst..inst + 1);
+                    draw_calls += 1;
+                }
+            }
             for (slot, &i) in order.iter().enumerate() {
                 let d = &draws[i];
                 if !matches!(d.light, LightPath::Glow | LightPath::Unscaled)

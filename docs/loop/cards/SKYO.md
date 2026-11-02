@@ -33,3 +33,7 @@ Either the PS2 places them elsewhere (the bearing is the unknown) or draws them 
 
 ## Planner note (2026-09-30, M-ALPHA)
 `defer: post-alpha` — not needed for the alpha's six showcase maps or its checklist. Value 1 (kept).
+
+- 2026-11-02: BF2 placement and motion implemented on `map-atmosphere`; see `analysis/re-bf2-geonosis-atmosphere.md`. Original Geonosis RAM confirms world-origin centers, 2/20/20/0 live craft, authored velocities and recycling. BF1 placement remains unverified; this does not close the full card.
+
+- 2026-11-02 player follow-up: all decorative fleet models now use material lighting and hull depth, with opaque parts before transparent parts. The original SkyObject path is 0x20001, distinct from dome 0x20031; the earlier claim that lit ships were a deviation is corrected. Shared presentation spawn RNG advances once per logical craft, independent of mesh segment count and simulation RNG. See the same analysis note for capital/gunship/fighter close-ups and tests.

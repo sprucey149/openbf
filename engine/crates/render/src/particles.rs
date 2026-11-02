@@ -46,6 +46,12 @@ mod trail;
 /// A particle's shape in world units (see the module doc).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParticleShape {
+    Cloud {
+        pos: Vec3,
+        half: f32,
+        angle: f32,
+        gain: f32,
+    },
     Sprite {
         pos: Vec3,
         /// Half the square's edge.
@@ -206,6 +212,22 @@ fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera
         gs_unit(d.color[3]),
     ];
     match &d.shape {
+        ParticleShape::Cloud {
+            pos,
+            half,
+            angle,
+            gain,
+        } => {
+            let color = [color[0] * gain, color[1] * gain, color[2] * gain, color[3]];
+            sprite(
+                out,
+                *pos,
+                (*half, *angle),
+                [0.0, 0.0, 1.0, 1.0],
+                (right, up),
+                color,
+            );
+        }
         ParticleShape::Sprite {
             pos,
             half,
@@ -429,9 +451,18 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
 #[derive(Default)]
 pub(crate) struct ParticleState {
     pub particles: Vec<ParticleDraw>,
+    pub cloud: Option<crate::FogCloud>,
+    pub sky: Vec<ParticleDraw>,
 }
 
 impl Renderer {
+    pub fn set_fog_cloud(&mut self, cloud: Option<crate::FogCloud>) {
+        self.particles.cloud = cloud;
+    }
+
+    pub fn set_sky_particles(&mut self, particles: Vec<ParticleDraw>) {
+        self.particles.sky = particles;
+    }
     /// Replace the particles drawn from the next frame on (none until this
     /// is called). Texture handles must be this renderer's.
     pub fn set_particles(&mut self, particles: Vec<ParticleDraw>) {

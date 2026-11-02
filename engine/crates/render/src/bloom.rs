@@ -32,6 +32,7 @@ impl Bloom {
 }
 
 pub(crate) struct Gather {
+    pub sky: [wgpu::RenderPipeline; 2],
     pub world: wgpu::RenderPipeline,
     pub mask: wgpu::RenderPipeline,
     pub blend: wgpu::RenderPipeline,

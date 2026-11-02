@@ -53,3 +53,6 @@ BF2's glare is the `Effect("HDR")` bloom (threshold on luma ≥ 2·GlowThreshold
 σ ≈ 7.8 % of the screen height at 5 passes) — card GLOW builds it. Three BF2 sky domes (GEO1, KAS2, MUS1) carry MTRL 0x10
 with an alpha glow mask on 2–15 % of their texels: those texels draw ×(1 + As/128) (up to ×3) and bloom — the likely
 source of BF2 KAS2's sun glare. BF1 has no HDR; its brighter skies are the DomeInfo Filter (card BFLT).
+
+## Local Geonosis follow-up (2026-11-02)
+BF2 sky material 0x10/0x14 handling and sky bloom gathering now exist on `map-atmosphere`; `geo_sky` retains its source glow mask (0..115) instead of alpha 255. This restores the bright authored sky glare in the Geonosis reference. The solution also consumes KAS2/MUS1 masks after rebaking. See `analysis/re-bf2-geonosis-atmosphere.md` for source attribution, captures, occlusion tests and remaining limits. This is existing implementation work: do not duplicate it. SUNG remains open for its other maps and original-game acceptance.

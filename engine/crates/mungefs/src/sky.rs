@@ -44,7 +44,7 @@
 //! This module parses what the bake consumes (and a few sun and light keys it
 //! records without a consumer, marked on their fields); every other top-level,
 //! `SkyInfo`, `SunInfo` and `DomeInfo` key lands in [`Sky::unknown`] with its
-//! values (a sky object's other keys and `SunInfo.Texture` are dropped),
+//! values,
 //! including the weather blocks
 //! (`RainInfo`, `PuffInfo`, `SplatInfo`, `FlatInfo`, `StarsInfo`, `WaterInfo`,
 //! `MirrorInfo`) and `SkyInfo`'s `Enable` (0xaf8bb8ce), which is a confirmed
@@ -171,6 +171,16 @@ pub struct DomeModel {
     /// the eye. Authored only on BF1 KAS1 and KAS2 / KAS2_H
     /// (`analysis/re-sky-reflect.md` §1 [V]).
     pub reflect: bool,
+    pub effects: Vec<DomeEffect>,
+    pub rotation: Option<[f32; 4]>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DomeEffect {
+    pub effect: String,
+    pub hardpoint: String,
+    pub parameter: Option<f32>,
+    pub max_delay: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -253,6 +263,12 @@ pub struct SkyObject {
     pub num_objects: Option<f32>,
     pub height: Option<[f32; 2]>,
     pub distance: Option<f32>,
+    pub velocity_x: Option<[f32; 2]>,
+    pub velocity_y: Option<[f32; 2]>,
+    pub velocity_z: Option<[f32; 2]>,
+    pub acceleration: Option<[f32; 3]>,
+    pub direction_factor: Option<f32>,
+    pub lifetime: Option<f32>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -334,6 +350,17 @@ fn parse_dome(node: &ConfigNode, unknown: &mut Vec<(u32, Vec<f32>)>) -> DomeInfo
                         key::OFFSET => m.offset = k.f32(0),
                         key::MOVEMENT_SCALE => m.movement_scale = k.f32(0),
                         key::REFLECT => m.reflect = true,
+                        0x6e6e_8d54 => {
+                            if let (Some(effect), Some(hardpoint)) = (k.str_arg(0), k.str_arg(1)) {
+                                m.effects.push(DomeEffect {
+                                    effect: effect.to_owned(),
+                                    hardpoint: hardpoint.to_owned(),
+                                    parameter: k.f32(2),
+                                    max_delay: k.f32(3),
+                                });
+                            }
+                        }
+                        0x3204_8fba => m.rotation = k.f4(),
                         h => unknown.push((h, k.floats())),
                     }
                 }
@@ -393,6 +420,12 @@ fn parse_object(node: &ConfigNode) -> SkyObject {
             key::NUM_OBJECTS => o.num_objects = c.f32(0),
             key::HEIGHT => o.height = Some(c.floats_or_zero()),
             key::DISTANCE => o.distance = c.f32(0),
+            0xb6c8_887e => o.velocity_x = Some(c.floats_or_zero()),
+            0xb7c8_8a11 => o.velocity_y = Some(c.floats_or_zero()),
+            0xb4c8_8558 => o.velocity_z = Some(c.floats_or_zero()),
+            0x2fa0_ba9d => o.acceleration = c.f3(),
+            0xc91c_0e2c => o.direction_factor = c.f32(0),
+            0x5212_abee => o.lifetime = c.f32(0),
             _ => {}
         }
     }

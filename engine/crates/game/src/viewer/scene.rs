@@ -1200,6 +1200,50 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     }
     let (sky, dome_shells) = upload_sky(r, scene, &mut textures, &mut census)?;
     r.set_sky(sky);
+    let fog_cloud = if let Some(config) = scene
+        .manifest
+        .fog_cloud
+        .as_ref()
+        .filter(|_| scene.manifest.source_game == "bf2")
+    {
+        let texture = match &config.texture {
+            Some(name) => get_texture(
+                r,
+                scene,
+                &mut textures,
+                &name.to_ascii_lowercase(),
+                render::WrapV::Repeat,
+            )?
+            .map(|t| t.handle),
+            None => None,
+        };
+        texture.map(|texture| {
+            let ground = scene.heightfield();
+            render::FogCloud {
+                texture,
+                range: config.range.unwrap_or([40.0, 90.0]),
+                color: config
+                    .color
+                    .unwrap_or([192.0, 192.0, 192.0, 160.0])
+                    .map(|c| c.clamp(0.0, 255.0) as u8),
+                velocity: config.velocity.unwrap_or([0.0; 2]),
+                rotation: config.rotation.unwrap_or(0.1),
+                height: config.height.unwrap_or(16.0),
+                size: config.particle_size.unwrap_or(28.0),
+                density: config.particle_density.unwrap_or(30.0).max(0.0) as u32,
+                display_gain: if scene.manifest.hdr.is_some() {
+                    2.0
+                } else {
+                    1.0
+                },
+                ground: Box::new(move |x, z| ground.as_ref().map_or(0.0, |g| g.height_at(x, z))),
+            }
+        })
+    } else {
+        None
+    };
+    r.set_fog_cloud(fog_cloud);
+    r.set_sky_particles(Vec::new());
     // Set on every upload, so a map without stars clears the last map's.
     r.set_stars(star_field(&scene.manifest), dome_shells);
     // The grass patches (queue FOLGG, `super::grass`): the FOLG records'
@@ -1335,6 +1379,16 @@ pub fn sky_wrap_v(v_min: f32, v_max: f32) -> render::WrapV {
     }
 }
 
+fn sky_emission(flags: u32, hdr: bool) -> Option<render::LightPath> {
+    if !hdr || flags & 0x10 == 0 {
+        None
+    } else if flags & 0x04 != 0 {
+        Some(render::LightPath::Unscaled)
+    } else {
+        Some(render::LightPath::Glow)
+    }
+}
+
 /// Build the map's sky shells: each `DomeModel` from the manifest, uploaded
 /// once and scaled so the FIRST shell (the dome) has `SKY_SHELL_RADIUS`. All
 /// shells share that scale so their authored proportions survive.
@@ -1435,14 +1489,28 @@ fn upload_sky(
                 // angle-invariant scale about the eye) — see
                 // `render::Placement::Dome` and
                 // `analysis/re-sky-dome-placement.md` §3/§4/§8.1.
-                placement: render::Placement::Dome {
-                    offset_y: m.offset,
-                    movement_scale: m.movement_scale,
-                },
+                placement: m.rotation.map_or(
+                    render::Placement::Dome {
+                        offset_y: m.offset,
+                        movement_scale: m.movement_scale,
+                    },
+                    |[speed, x, y, z]| render::Placement::SpinningDome {
+                        offset_y: m.offset,
+                        movement_scale: m.movement_scale,
+                        speed,
+                        axis: Vec3::new(x, y, z),
+                    },
+                ),
                 yaw: 0.0,
                 // No fog flag: the sky draw flag 0x20 excludes every shell
                 // from the fog pass in both ELFs (`analysis/re-fog.md` §2.4).
                 mode: render::SkyMode::from_flags(flags),
+                lit: false,
+                depth: false,
+                emission: sky_emission(
+                    flags,
+                    scene.manifest.hdr.is_some() && sky.glow_masks_preserved,
+                ),
             });
         }
         if m.reflect {
@@ -1489,26 +1557,6 @@ fn sky_shell_tint(
     }
 }
 
-/// The map's `SkyObject` flights — distant capital ships, which the discs
-/// author per map and whose geometry lives in a SIDE LVL rather than the
-/// map's own (see `bake::map::pull_side_models`). BF1 Tatooine 1 asks for
-/// two each of a Republic assault ship, a Federation lander, a Mon Calamari
-/// cruiser and an Imperial destroyer, at 350-500 m altitude and 2500 m out.
-///
-/// They are drawn as sky shells: camera-locked in XZ, so they hold their
-/// authored distance and cannot be flown to, and depth-free, so they sit
-/// behind everything. Unlike a dome they keep scale 1.0 — a capital ship
-/// 2.5 km away needs real perspective, not a dome's normalisation.
-///
-/// **The BEARING is ours and PROVISIONAL.** The discs author a count, an
-/// altitude band and a distance, but no azimuth, so something has to choose
-/// one. This spreads every ship on the map evenly around the compass (and
-/// spreads a flight of more than one across its altitude band), which is
-/// deterministic, keeps ships from overlapping, and gives every direction
-/// something to look at. Two authored fields are NOT consumed because their
-/// meaning is not decoded: `InDirectionFactor` (2.5 on BF1 TAT1) and an
-/// unnamed two-argument range, `0xb4c88558` (30, 50 on TAT1) — either could
-/// be the real bearing rule. See `analysis/RE_LOG.md`.
 fn upload_sky_objects(
     r: &mut Renderer,
     scene: &Scene,
@@ -1519,11 +1567,8 @@ fn upload_sky_objects(
     let Some(sky) = &scene.manifest.sky else {
         return Ok(Vec::new());
     };
-    let total: u32 = sky.objects.iter().map(|o| o.count).sum();
-    if total == 0 {
-        return Ok(Vec::new());
-    }
     let mut out = Vec::new();
+    let total: u32 = sky.objects.iter().map(|o| o.count).sum();
     let mut placed = 0u32;
     for o in &sky.objects {
         let Some(cpu) = scene.meshes.get(&o.geometry) else {
@@ -1531,16 +1576,34 @@ fn upload_sky_objects(
         };
         let parts = upload_submeshes(r, cpu)?;
         for k in 0..o.count {
-            let bearing = std::f32::consts::TAU * placed as f32 / total as f32;
+            let bearing = std::f32::consts::TAU * placed as f32 / total.max(1) as f32;
             placed += 1;
-            // One ship sits mid-band; a flight spreads across it.
-            let t = if o.count > 1 {
+            let fraction = if o.count > 1 {
                 k as f32 / (o.count - 1) as f32
             } else {
                 0.5
             };
-            let y = o.height[0] + (o.height[1] - o.height[0]) * t;
-            let offset = Vec3::new(bearing.sin() * o.distance, y, bearing.cos() * o.distance);
+            let offset = Vec3::new(
+                bearing.sin() * o.distance,
+                o.height[0] + (o.height[1] - o.height[0]) * fraction,
+                bearing.cos() * o.distance,
+            );
+            let seed = crate::classdb::fnv1a_lowercase(&o.geometry)
+                ^ crate::classdb::fnv1a_lowercase(&scene.manifest.map).rotate_left(11)
+                ^ (placed - 1).wrapping_mul(0x9e37_79b9);
+            let flight = render::SkyFlight::new(
+                o.height,
+                o.distance,
+                [
+                    o.velocity_x.unwrap_or([0.0; 2]),
+                    o.velocity_y.unwrap_or([0.0; 2]),
+                    o.velocity_z.unwrap_or([0.0; 2]),
+                ],
+                Vec3::from(o.acceleration.unwrap_or([0.0; 3])),
+                o.direction_factor.unwrap_or(3.0),
+                o.lifetime.unwrap_or(1000.0),
+                seed,
+            );
             for &(mesh, ref mat, _, flags) in &parts {
                 // NOT V-clamped, unlike a dome segment: a capital ship is an
                 // ordinary model that may legitimately tile its hull texture,
@@ -1568,15 +1631,23 @@ fn upload_sky_objects(
                     texture: tex.map(|b| b.handle),
                     color: ambient,
                     scale: 1.0,
-                    // Unchanged by the sky-placement build: a `SkyObject`'s
-                    // offset is the port's own (bearing + altitude below), so
-                    // it stays a fixed vector from the eye.
-                    placement: render::Placement::Object { offset },
-                    yaw: bearing,
+                    placement: if scene.manifest.source_game == "bf2" {
+                        render::Placement::Flight(flight)
+                    } else {
+                        render::Placement::Object { offset }
+                    },
+                    yaw: if scene.manifest.source_game == "bf2" {
+                        0.0
+                    } else {
+                        bearing
+                    },
                     // Routed off the raw MTRL word exactly like a dome
                     // shell: a `SkyObject` is a model like any other and the
                     // ELF's material rule is not specific to domes (RE §5).
                     mode: render::SkyMode::from_flags(flags),
+                    lit: flags & 1 != 0,
+                    depth: true,
+                    emission: None,
                 });
             }
         }

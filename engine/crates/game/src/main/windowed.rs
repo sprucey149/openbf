@@ -858,6 +858,9 @@ impl App {
         self.hud_view = load_hud_view(&dir, renderer);
         self.bolts = game::bolt_vis::BoltVis::new(&self.assets_dir, &scene.manifest.source_game);
         let setup = setup.unwrap_or(&self.setup);
+        renderer.set_sky_seed(
+            game::classdb::fnv1a_lowercase(&scene.manifest.map) ^ setup.seed.rotate_left(11),
+        );
         if let Some(mission) = setup.mission.as_ref() {
             if let Err(error) = game::forest::configure(renderer, scene, Some(mission)) {
                 eprintln!("forest: {error:#}");
@@ -1015,6 +1018,9 @@ impl App {
         self.gpu = Some(gpu);
         self.setup = setup;
         self.paused = false;
+        if let Some(r) = self.renderer.as_mut() {
+            r.atmosphere_time = Some(0.0);
+        }
         self.kbm.release_keys();
         self.outcome_reported = false;
         self.round_recorded = false;
@@ -1424,6 +1430,10 @@ impl winit::application::ApplicationHandler for App {
                 // its f32 precision in a long session — see Renderer::time.
                 if let Some(r) = self.renderer.as_mut() {
                     (r.time, r.water_time) = render::advance_clocks(r.time, r.water_time, dt);
+                    if matches!(self.screen, Screen::Battle) && !self.paused {
+                        let atmo = r.atmosphere_time.unwrap_or(0.0) + f64::from(dt);
+                        r.atmosphere_time = Some(atmo);
+                    }
                 }
 
                 self.sync_grab();

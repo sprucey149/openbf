@@ -128,6 +128,7 @@ impl ReplayFrame {
         // Replay presentation uses elapsed sim time, independent of capture cadence.
         r.time = (walk.sim.tick as f32 * core::TICK_DT) % render::TIME_WRAP;
         r.water_time = walk.sim.tick as f64 / f64::from(core::TICK_HZ);
+        r.atmosphere_time = Some(r.water_time);
         gpu.animate_water_live(r, cam.position)?;
         game::forest::submit_actors(r, &walk.sim);
         gpu.pose_doors(&walk.sim.doors);
@@ -1053,6 +1054,7 @@ fn capture_orbit(
         let cam = look_at(orbit_eye(o, a, lift), o.center);
         r.time = (k as f32 / 30.0) % render::TIME_WRAP;
         r.water_time = k as f64 / 30.0;
+        r.atmosphere_time = Some(r.water_time);
         gpu.animate_water_live(r, cam.position)?;
         r.render(&cam, &gpu.draws, gpu.clear)
             .map_err(|e| anyhow!("render: {e}"))?;

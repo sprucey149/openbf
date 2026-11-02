@@ -77,6 +77,7 @@ fn door_and_speckle_indices_follow_an_ocean_splice() {
 #[test]
 fn only_bf1_terrain_enable_zero_hides_the_terrain() {
     let sky = |e: Option<f32>| manifest::ManifestSky {
+        glow_masks_preserved: false,
         texture: None,
         models: Vec::new(),
         ambient: [1.0; 3],

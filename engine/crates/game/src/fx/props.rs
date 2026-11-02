@@ -59,7 +59,12 @@ pub(super) struct Attached {
 }
 
 impl Attached {
-    fn new(def: Arc<EffectDef>, frame: Frame, delay: Option<[f32; 2]>, seed: u32) -> Self {
+    pub(super) fn new(
+        def: Arc<EffectDef>,
+        frame: Frame,
+        delay: Option<[f32; 2]>,
+        seed: u32,
+    ) -> Self {
         let mut rng = Lcg(seed);
         let wait = delay
             .filter(|[lo, hi]| *lo >= 0.0 && *hi > 0.0)

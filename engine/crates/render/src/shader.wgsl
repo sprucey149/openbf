@@ -239,8 +239,7 @@ fn point_sum(p: vec3<f32>, normal: vec3<f32>, lights: vec4<u32>) -> vec3<f32> {
     return sum;
 }
 
-@vertex
-fn vs_main(in: VsIn) -> VsOut {
+fn mesh_vertex(in: VsIn) -> VsOut {
     let model = mat4x4<f32>(in.m0, in.m1, in.m2, in.m3);
     var out: VsOut;
     let world_pos = model * vec4<f32>(in.position, 1.0);
@@ -269,6 +268,18 @@ fn vs_main(in: VsIn) -> VsOut {
         out.color = vec4<f32>(out.color.rgb * out.wc, out.color.a);
         out.point = out.point * out.wc;
     }
+    return out;
+}
+
+@vertex
+fn vs_main(in: VsIn) -> VsOut {
+    return mesh_vertex(in);
+}
+
+@vertex
+fn vs_sky_bloom(in: VsIn) -> VsOut {
+    var out = mesh_vertex(in);
+    out.clip_pos.z = out.clip_pos.w;
     return out;
 }
 
@@ -809,7 +820,35 @@ fn fs_speckle(in: VsOut) -> @location(0) vec4<f32> {
 // CORRECTION 2, session 12).
 @fragment
 fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
-    return textureSample(t_color, s_color, in.uv) * in.color;
+    let texel = textureSample(t_color, s_color, in.uv);
+    let base = texel * in.color;
+    if in.light == LIGHT_GLOW || in.light == LIGHT_UNSCALED {
+        let gain = select(2.0, 1.0 + glow_as(texel.a, in.color.a) / 128.0, in.light == LIGHT_GLOW)
+            * globals.glow_gain;
+        let rgb = srgb_to_linear(min(linear_to_srgb(base.rgb) * gain, vec3<f32>(1.0)));
+        return vec4<f32>(rgb, select(base.a, 1.0, in.light == LIGHT_GLOW));
+    }
+    return base;
+}
+
+@fragment
+fn fs_sky_bloom(in: VsOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(t_color, s_color, in.uv);
+    let base = texel * in.color;
+    if in.light != LIGHT_GLOW && in.light != LIGHT_UNSCALED {
+        return vec4<f32>(vec3<f32>(0.0), base.a);
+    }
+    let gain = select(2.0, 1.0 + glow_as(texel.a, in.color.a) / 128.0, in.light == LIGHT_GLOW)
+        * globals.glow_gain;
+    let rgb = min(linear_to_srgb(base.rgb) * gain, vec3<f32>(2.0));
+    return vec4<f32>(rgb * 0.5, select(base.a, 1.0, in.light == LIGHT_GLOW));
+}
+
+// Sky objects use material lighting, with fog disabled around their draw
+// (`analysis/re-bf2-geonosis-atmosphere.md`).
+@fragment
+fn fs_sky_lit(in: VsOut) -> @location(0) vec4<f32> {
+    return shade_unfogged(in);
 }
 
 // SPECULAR draws (`render::DrawLayer::Spec`, queue SPEC): the second pass

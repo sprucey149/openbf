@@ -66,6 +66,7 @@ mod device;
 mod draw;
 mod falling;
 mod filter;
+mod fog_cloud;
 mod frame;
 mod frame_ab;
 mod frustum;
@@ -101,6 +102,7 @@ pub use draw::{
 };
 pub use falling::{ForestBirdType, LeafActor, LeafEmitter};
 pub use filter::{box_side, FrameFilter};
+pub use fog_cloud::FogCloud;
 pub use frame::{FrameStats, OverlayFn};
 pub use frame_ab::FrameAb;
 pub use grass::{sprite_quad, sway, GrassClass, GrassPatch, GrassSprite, ViewAxes};
@@ -114,7 +116,7 @@ pub use mesh::{
 };
 pub use particles::{ParticleDraw, ParticleShape};
 pub use point_light::{LitSphere, PointLight, SpotCone, MAX_POINT_LIGHTS};
-pub use sky::{mirror_squash, Placement, SkyMode, SkyShell, MIRROR_LIFT};
+pub use sky::{mirror_squash, Placement, SkyFlight, SkyMode, SkyShell, MIRROR_LIFT};
 pub use specular::spec_texcoord;
 pub use stars::{half_size as star_half_size, star_rgb, Star, StarField};
 pub use terrain_light::{
@@ -295,11 +297,12 @@ pub struct Renderer {
     fade_blend_pipeline: wgpu::RenderPipeline,
     fade_skinned_pipeline: wgpu::RenderPipeline,
     fade_skinned_blend_pipeline: wgpu::RenderPipeline,
-    /// Unlit, depth-free pass for the map's sky shells, indexed
-    /// `[SkyMode::index()]` — see [`SkyMode`] and `finish_init` (`pipelines.rs`).
-    sky_pipelines: [wgpu::RenderPipeline; 2],
+    /// Sky pipelines indexed by depth, material lighting and SkyMode:
+    /// domes paint the background; object hulls keep their depth.
+    sky_pipelines: [[[wgpu::RenderPipeline; 2]; 2]; 2],
     /// The map's sky shells, redrawn around the camera every frame.
     sky: Vec<SkyShell>,
+    sky_seed: u32,
     /// What the last frame actually submitted. Read by `--bench`: the number
     /// that moves when culling or batching changes is DRAW CALLS, not the
     /// length of the draw list.
@@ -422,6 +425,11 @@ pub struct Renderer {
     /// `TIME_WRAP` period; f64 keeps their phase continuous in long sessions.
     /// Default zero preserves still captures. The simulation never reads it.
     pub water_time: f64,
+    /// Atmosphere animation clock for capital ships, fog clouds and dome spin.
+    /// When `None`, defaults to `water_time` (e.g. in headless replays).
+    /// In windowed play, advanced only when the game is unpaused so pausing
+    /// freezes distant ships, fog clouds and dome rotation.
+    pub atmosphere_time: Option<f64>,
     /// Which GPU this renderer actually got. Reported by `--bench`, because a
     /// timing number without the adapter beside it means nothing.
     adapter_info: wgpu::AdapterInfo,
@@ -450,11 +458,18 @@ pub fn material_scroll_time(seconds: f64) -> f32 {
 }
 
 impl Renderer {
+    /// The current atmosphere animation clock: `atmosphere_time` if set,
+    /// otherwise `water_time`.
+    pub fn atmosphere_time(&self) -> f64 {
+        self.atmosphere_time.unwrap_or(self.water_time)
+    }
+
     /// Drop the map's look: everything drawn without a draw command (the
     /// sky, stars, grass, leaves, lights, effects, filter) and its lighting.
     /// A frame after this is the clear colour plus its draws, as before any
     /// map was loaded (the shell after a battle).
     pub fn clear_scene(&mut self) {
+        self.atmosphere_time = None;
         self.set_sky(Vec::new());
         self.set_stars(None, 0);
         self.set_grass(Vec::new(), Vec::new());
@@ -462,6 +477,8 @@ impl Renderer {
         self.set_point_lights(Vec::new());
         self.set_bolts(Vec::new());
         self.set_particles(Vec::new());
+        self.set_fog_cloud(None);
+        self.set_sky_particles(Vec::new());
         self.set_terrain_lights(Default::default());
         self.set_frame_filter(None);
         self.set_bloom(None);

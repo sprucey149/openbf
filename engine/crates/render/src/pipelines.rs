@@ -253,7 +253,7 @@ impl Renderer {
         }
         .build(&device, &shader, format);
 
-        // TWO sky pipelines: OPAQUE and BLEND.
+        // Sky materials: OPAQUE and BLEND.
         //
         // The MODE is the shell's own material's, not the pass's: the ELF
         // draws every model — sky shells included — with the GS state its
@@ -269,30 +269,33 @@ impl Renderer {
         // the sky is never fogged and one fragment entry point serves both
         // modes. See [`SkyShell`] for the port deviation this replaced.
         //
-        // Depth is the same in both and unchanged: NO test and NO write,
+        // Domes use no depth test or write,
         // so the shells paint the background first and every other draw lands
         // on top of them wherever the ~20 m dome mesh physically sits. The
         // ELF Z-writes an opaque shell at its far-scene range (RE §6 [H]) but
         // draws the sky first (task priority −9999, §1 [V]), so painting
         // first with depth off is the same picture for everything after.
-        let sky_pipeline = |label: &'static str, blend| {
+        let sky_pipeline = |depth, lit, blend: Option<wgpu::BlendState>| {
             PipelineDesc {
-                fs: "fs_sky",
+                fs: if lit { "fs_sky_lit" } else { "fs_sky" },
                 blend,
-                depth_write: false,
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                ..PipelineDesc::world(label, &pipeline_layout, &vb)
+                depth_write: depth && blend.is_none(),
+                depth_compare: Some(if depth {
+                    wgpu::CompareFunction::LessEqual
+                } else {
+                    wgpu::CompareFunction::Always
+                }),
+                ..PipelineDesc::world("sky pipeline", &pipeline_layout, &vb)
             }
             .build(&device, &shader, format)
         };
-        // Indexed [SkyMode::index()].
-        let sky_pipelines = [
-            sky_pipeline("sky pipeline (opaque)", None),
-            sky_pipeline(
-                "sky pipeline (blended)",
-                Some(wgpu::BlendState::ALPHA_BLENDING),
-            ),
-        ];
+        // Indexed by depth, material lighting and SkyMode::index().
+        let sky_pipelines = [false, true].map(|depth| {
+            [false, true].map(|lit| {
+                [None, Some(wgpu::BlendState::ALPHA_BLENDING)]
+                    .map(|blend| sky_pipeline(depth, lit, blend))
+            })
+        });
 
         // Skinned pipelines: the world's OPAQUE and BLEND passes exactly —
         // same fragment entry points, same state — through `vs_skinned`, with
@@ -612,6 +615,18 @@ impl Renderer {
             )
         };
         let gather = crate::bloom::Gather {
+            sky: [None, Some(wgpu::BlendState::ALPHA_BLENDING)].map(|blend| {
+                crate::bloom::gather(
+                    &device,
+                    &shader,
+                    PipelineDesc {
+                        vs: "vs_sky_bloom",
+                        blend,
+                        ..PipelineDesc::world("bloom sky", &pipeline_layout, &vb)
+                    },
+                    "fs_sky_bloom",
+                )
+            }),
             world: gather_world("fs_bloom", None),
             mask: gather_world("fs_bloom_mask", None),
             blend: gather_world("fs_bloom", Some(additive)),
@@ -701,6 +716,7 @@ impl Renderer {
             fade_skinned_blend_pipeline,
             sky_pipelines,
             sky: Vec::new(),
+            sky_seed: 0,
             frame_stats: FrameStats::default(),
             gpu_timer,
             acquire_ms: 0.0,
@@ -746,6 +762,7 @@ impl Renderer {
             lighting: Lighting::default(),
             time: 0.0,
             water_time: 0.0,
+            atmosphere_time: None,
             adapter_info,
             _gpu_turn: gpu_turn,
         })

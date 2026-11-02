@@ -40,6 +40,38 @@ fn water_config(buf: &[u8]) -> Option<WaterConfig> {
 const BF1: &str = "bf1/lvl/DATA/_LVL_PS2";
 const BF2: &str = "bf2/lvl/DATA/_LVL_PS2";
 
+#[test]
+fn bf2_geonosis_fog_cloud_reads_authored_parameters() {
+    let buf = require_data!(lvl(&format!("{BF2}/GEO/GEO1.LVL")), "BF2 GEO1.LVL");
+    let config = content_chunks(open(&buf).unwrap())
+        .unwrap()
+        .iter()
+        .filter(|c| &c.tag == b"fx__")
+        .find_map(|c| mungefs::fx::FogCloudConfig::parse(c).unwrap())
+        .unwrap();
+    assert!(config.enable);
+    assert_eq!(config.texture.as_deref(), Some("brownmist"));
+    assert_eq!(config.range, Some([90.0, 120.0]));
+    assert_eq!(config.color, Some([168.0, 172.0, 180.0, 128.0]));
+    assert_eq!(config.velocity, Some([5.0, 0.0]));
+    assert_eq!(config.rotation, Some(0.1));
+    assert_eq!(config.height, Some(16.0));
+    assert_eq!(config.particle_size, Some(28.0));
+    assert_eq!(config.particle_density, Some(100.0));
+}
+
+#[test]
+fn bf2_hoth_fog_cloud_is_disabled() {
+    let buf = require_data!(lvl(&format!("{BF2}/HOT/HOT1.LVL")), "BF2 HOT1.LVL");
+    let config = content_chunks(open(&buf).unwrap())
+        .unwrap()
+        .iter()
+        .filter(|c| &c.tag == b"fx__")
+        .find_map(|c| mungefs::fx::FogCloudConfig::parse(c).unwrap())
+        .unwrap();
+    assert!(!config.enable);
+}
+
 /// Kamino is the map the `fx__` config changes most: `LAYR` names
 /// `kam1_water`, which is the FOAM texture, and the surface is painted with
 /// `MainTexture` = `kam1_water_2` (`re-water.md` §3).

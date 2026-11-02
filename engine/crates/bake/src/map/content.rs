@@ -360,6 +360,7 @@ pub(super) fn bake_content(
     // nine maps and four), so every other map's manifest does not move.
     let mut precipitation = None;
     let mut wind = None;
+    let mut fog_cloud = None;
     for c in expanded.iter().filter(|c| &c.tag == b"fx__") {
         if precipitation.is_none() {
             precipitation = mungefs::fx::PrecipitationConfig::parse(c)
@@ -368,6 +369,10 @@ pub(super) fn bake_content(
         if wind.is_none() {
             wind = mungefs::fx::WindConfig::parse(c)
                 .map_err(|e| anyhow!("fx__ 0x{:X} Effect(\"Wind\"): {e}", c.offset))?;
+        }
+        if fog_cloud.is_none() {
+            fog_cloud = mungefs::fx::FogCloudConfig::parse(c)
+                .map_err(|e| anyhow!("fx__ 0x{:X} Effect(\"FogCloud\"): {e}", c.offset))?;
         }
     }
     let precipitation = precipitation
@@ -412,6 +417,22 @@ pub(super) fn bake_content(
             velocity_range: w.velocity_range,
             velocity_change_rate: w.velocity_change_rate,
         });
+    let fog_cloud = fog_cloud
+        .filter(|f| f.enable && kind == Content::Map)
+        .map(|f| manifest::ManifestFogCloud {
+            texture: f.texture,
+            range: f.range,
+            color: f.color,
+            velocity: f.velocity,
+            rotation: f.rotation,
+            height: f.height,
+            particle_size: f.particle_size,
+            particle_density: f.particle_density,
+        });
+    let fog_cloud_named = fog_cloud
+        .as_ref()
+        .and_then(|f| f.texture.as_ref())
+        .map(|s| s.to_ascii_lowercase());
     // The sheets a self-lit segment draws keep their alpha: the glow mask.
     let mut glow_named: std::collections::HashSet<String> = std::collections::HashSet::new();
 
@@ -856,9 +877,40 @@ pub(super) fn bake_content(
     // manifest: design D7 needs to know which models and which texture the sky
     // path uses before the KTX2s are written, and `models` is final by now
     // (the walk is over and `pull_side_models` has run).
-    let sky = crate::lighting::sky_from(sky_cfg.as_ref(), |g| {
+    let mut sky = crate::lighting::sky_from(sky_cfg.as_ref(), |g| {
         models.iter().find(|m| m.eq_ignore_ascii_case(g)).cloned()
     });
+    if let (Some(sky), Some(dome)) = (sky.as_mut(), sky_cfg.as_ref().and_then(|s| s.dome.as_ref()))
+    {
+        let skeletons = crate::hardpoints::Skeletons::of(&expanded);
+        let authored_models = dome.models.iter().filter(|m| {
+            models
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&m.geometry))
+        });
+        for (model, authored) in sky.models.iter_mut().zip(authored_models) {
+            let Some(skel) = skeletons.find(&authored.geometry) else {
+                continue;
+            };
+            let Ok(matrices) = skel.bind_matrices() else {
+                continue;
+            };
+            for effect in &authored.effects {
+                let Some(index) = skel.index_of(&effect.hardpoint) else {
+                    continue;
+                };
+                let matrix = matrices[index];
+                model.effects.push(manifest::ManifestSkyEffect {
+                    effect: effect.effect.clone(),
+                    hardpoint: effect.hardpoint.clone(),
+                    parameter: effect.parameter,
+                    max_delay: effect.max_delay,
+                    pos: [matrix[3][0], matrix[3][1], matrix[3][2]],
+                    axes: [0, 1, 2].map(|i| [matrix[i][0], matrix[i][1], matrix[i][2]]),
+                });
+            }
+        }
+    }
 
     // The far-LOD sheet, now that `sky_` has been walked: its texture is
     // `DomeInfo.LowResTerrain.Texture` and its UV scale that scope's
@@ -1050,7 +1102,8 @@ pub(super) fn bake_content(
             || glow_named.contains(&lower)
             || fx_named.contains(&lower)
             || fx_model_named.contains(&lower)
-            || precip_named.as_deref() == Some(lower.as_str());
+            || precip_named.as_deref() == Some(lower.as_str())
+            || fog_cloud_named.as_deref() == Some(lower.as_str());
         // The pre-v2 OR of the material flag word over every model that draws
         // this texture: top-level ones, and since design D3 the mode layers'
         // too. A texture NO model names keeps the old `unwrap_or` default.
@@ -1059,13 +1112,14 @@ pub(super) fn bake_content(
             (a, b) => a.unwrap_or(0) | b.unwrap_or(0),
         };
         let world_needs = alpha_usage.needs_alpha_outside(&lower, &sky_models);
-        let needs_alpha =
-            crate::alpha::keep_alpha(is_sky, old_or_flags, world_needs, unnamed, consumer_named);
+        let needs_alpha = glow_named.contains(&lower)
+            || crate::alpha::keep_alpha(is_sky, old_or_flags, world_needs, unnamed, consumer_named);
         if is_sky {
             // Design D3's carve-out check: would leaving the layer models out
             // of the pre-v2 OR — D7's exact input — have answered differently?
             let top_only = top_or_flags.unwrap_or(crate::detail::ALPHA_IS_MEANINGFUL);
-            if crate::alpha::keep_alpha(true, top_only, world_needs, unnamed, consumer_named)
+            if (glow_named.contains(&lower)
+                || crate::alpha::keep_alpha(true, top_only, world_needs, unnamed, consumer_named))
                 != needs_alpha
             {
                 layer_flag_moves.push(t.name.clone());
@@ -1416,6 +1470,7 @@ pub(super) fn bake_content(
         precipitation,
         wind,
         terrain_query_size,
+        fog_cloud,
     };
     Ok(manifest)
 }

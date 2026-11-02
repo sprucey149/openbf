@@ -54,6 +54,7 @@ mod jet;
 mod props;
 mod repair;
 pub mod ripple;
+mod sky;
 mod trail;
 mod turret;
 
@@ -697,6 +698,7 @@ pub struct Fx {
     /// The sim tick last ingested; the arcs' clock.
     tick: u64,
     force: force::State,
+    sky: Vec<sky::SkyEffect>,
 }
 
 impl std::fmt::Debug for Fx {
@@ -807,6 +809,10 @@ impl Fx {
             .library
             .as_ref()
             .map_or_else(Default::default, |lib| props::load(scene, lib));
+        self.sky = self
+            .library
+            .as_ref()
+            .map_or_else(Vec::new, |lib| sky::load(scene, lib));
     }
 
     pub fn library(&self) -> Option<&Library> {
@@ -1018,6 +1024,8 @@ impl Fx {
     /// muzzle flashes (`SoldierVisuals::flash_draws`).
     pub fn submit_with(&mut self, r: &mut Renderer, camera: &Camera, extra: Vec<ParticleDraw>) {
         let mut out = extra;
+        let mut sky_out = Vec::new();
+        let time = r.atmosphere_time();
         let lift = self.ride_the_water(crate::water_anim::clock(r.water_time) as f32);
         if let Some(lib) = &self.library {
             let mut assets = Lookup {
@@ -1041,6 +1049,9 @@ impl Fx {
                     effect.draws_with(camera.position, camera.forward(), &mut assets, &mut out);
                 }
             }
+            for effect in &self.sky {
+                effect.draws(camera, time, &mut assets, &mut sky_out);
+            }
             let sheet = assets.texture(ripple::TEXTURE);
             self.water.draws(camera.position, lift, sheet, &mut out);
             // The emitter shots' links: the class's `LightningEffect` arc
@@ -1057,6 +1068,7 @@ impl Fx {
             }));
         }
         r.set_particles(out);
+        r.set_sky_particles(sky_out);
     }
 
     /// Ingest the tick using the last drawn soldier pose for chunk launch bones.
@@ -1099,6 +1111,9 @@ impl Fx {
         for effect in &mut self.attached {
             effect.step(dt);
         }
+        for effect in &mut self.sky {
+            effect.update(dt);
+        }
     }
 
     /// Live placeholder puffs plus running particle effects.
@@ -1126,6 +1141,7 @@ impl Fx {
         self.beams.clear();
         self.arcs.clear();
         self.force.clear();
+        self.sky.clear();
     }
 
     /// Camera-facing quads for the live effects. `quad` is the unit quad from

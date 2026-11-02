@@ -8,6 +8,18 @@ use serde::{Deserialize, Serialize};
 use crate::Manifest;
 use crate::ManifestInstance;
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestFogCloud {
+    pub texture: Option<String>,
+    pub range: Option<[f32; 2]>,
+    pub color: Option<[f32; 4]>,
+    pub velocity: Option<[f32; 2]>,
+    pub rotation: Option<f32>,
+    pub height: Option<f32>,
+    pub particle_size: Option<f32>,
+    pub particle_density: Option<f32>,
+}
+
 /// The Precipitation effect's authored numbers
 /// (`mungefs::fx::PrecipitationConfig`; the ELF ctor's defaults where a map
 /// leaves a key out). `game::weather` runs it.
@@ -682,6 +694,21 @@ pub struct ManifestSkyModel {
     /// (`analysis/re-sky-reflect.md` §2, §5). Absent in pre-2026-09-29 bakes.
     #[serde(default)]
     pub reflect: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub effects: Vec<ManifestSkyEffect>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<[f32; 4]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestSkyEffect {
+    pub effect: String,
+    pub hardpoint: String,
+    pub parameter: Option<f32>,
+    pub pos: [f32; 3],
+    pub axes: [[f32; 3]; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_delay: Option<f32>,
 }
 
 /// One `sky_ SkyObject`: a flight of distant capital ships, drawn in the sky
@@ -691,12 +718,23 @@ pub struct ManifestSkyModel {
 pub struct ManifestSkyObject {
     /// `modl` name, copied into the map's own models by the bake.
     pub geometry: String,
-    /// How many of this ship to place. `NumObjects`, 1..=8.
     pub count: u32,
     /// `Height` — an authored altitude RANGE in metres.
     pub height: [f32; 2],
     /// `Distance` — metres from the viewer.
     pub distance: f32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity_x: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity_y: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub velocity_z: Option<[f32; 2]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceleration: Option<[f32; 3]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direction_factor: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifetime: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -744,6 +782,8 @@ pub struct ManifestSky {
     /// bakes.
     #[serde(default)]
     pub stars: Option<ManifestStars>,
+    #[serde(default)]
+    pub glow_masks_preserved: bool,
 }
 
 /// A map's star field as both games' loaders read it (BF1 `FUN_002e6a50`,

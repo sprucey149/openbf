@@ -1,0 +1,36 @@
+#[test]
+fn geonosis_sky_glow_keeps_the_disc_mask_without_changing_rgb() {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../extracted/bf2/lvl/DATA/_LVL_PS2/GEO/GEO1.LVL");
+    if !source.exists() {
+        eprintln!("SKIP: extracted BF2 Geonosis is absent");
+        return;
+    }
+    let bytes = std::fs::read(&source).unwrap();
+    let inner = mungefs::open(&bytes).unwrap();
+    let disc = mungefs::chunks(inner)
+        .flatten()
+        .filter(|c| &c.tag == b"tex_")
+        .filter_map(|c| mungefs::texture::Texture::parse(&c).ok())
+        .find(|t| t.name.eq_ignore_ascii_case("geo_sky"))
+        .unwrap()
+        .rgba8(0);
+    let range = disc
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .fold((255, 0), |(lo, hi), p| (lo.min(p[3]), hi.max(p[3])));
+    assert_eq!(range, (0, 115));
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let out = std::env::temp_dir().join(format!("openbf-sky-glow-{}-{stamp}", std::process::id()));
+    let baked = bake::map::bake_map(source.to_str().unwrap(), out.to_str().unwrap(), None).unwrap();
+    assert!(baked.hdr.is_some());
+    assert!(baked.sky.as_ref().unwrap().glow_masks_preserved);
+    let bytes = std::fs::read(out.join("textures/geo_sky.ktx2")).unwrap();
+    let reader = ktx2::Reader::new(&bytes).unwrap();
+    assert_eq!(reader.levels().next().unwrap().data, disc);
+    std::fs::remove_dir_all(out).unwrap();
+}

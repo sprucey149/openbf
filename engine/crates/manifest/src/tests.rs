@@ -304,6 +304,15 @@ fn full_manifest() -> Manifest {
                 offset: -12.0,
                 movement_scale: 1.0,
                 reflect: true,
+                effects: vec![ManifestSkyEffect {
+                    effect: "sky_fx".into(),
+                    hardpoint: "hp_sky".into(),
+                    parameter: Some(1.0),
+                    max_delay: Some(2.0),
+                    pos: [1.0, 2.0, 3.0],
+                    axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                }],
+                rotation: Some([0.003, 0.0, 1.0, 0.0]),
             }],
             ambient: [1.0, 1.0, 1.0],
             low_res_terrain: Some("tat1_lowres".into()),
@@ -313,10 +322,17 @@ fn full_manifest() -> Manifest {
                 count: 3,
                 height: [400.0, 900.0],
                 distance: 2500.0,
+                velocity_x: Some([1.0, 2.0]),
+                velocity_y: Some([-1.0, 1.0]),
+                velocity_z: Some([80.0, 120.0]),
+                acceleration: Some([0.0, 2.0, 0.0]),
+                direction_factor: Some(0.5),
+                lifetime: Some(80.0),
             }],
             terrain_enable: Some(0.0),
             reflection_color: Some([0.5, 0.5, 1.0]),
             stars: None,
+            glow_masks_preserved: true,
         }),
         water: Some(ManifestWater {
             glb: "water.glb".into(),
@@ -470,6 +486,16 @@ fn full_manifest() -> Manifest {
             velocity: [1.0, 0.3],
             velocity_range: 1.0,
             velocity_change_rate: 0.1,
+        }),
+        fog_cloud: Some(ManifestFogCloud {
+            texture: Some("brownmist".into()),
+            range: Some([90.0, 120.0]),
+            color: Some([168.0, 172.0, 180.0, 128.0]),
+            velocity: Some([5.0, 0.0]),
+            rotation: Some(0.1),
+            height: Some(16.0),
+            particle_size: Some(28.0),
+            particle_density: Some(100.0),
         }),
     }
 }
@@ -746,6 +772,7 @@ fn nested_types_missing_their_defaulted_fields_still_load() {
     assert!(sky.objects.is_empty());
     assert_eq!(sky.terrain_enable, None);
     assert_eq!(sky.reflection_color, None);
+    assert!(!sky.glow_masks_preserved);
     assert!(!sky.models[0].reflect);
     let water = m.water.as_ref().unwrap();
     assert_eq!(water.texture, None);
@@ -860,6 +887,7 @@ fn manifest_field_order_is_the_wire_format() {
             "precipitation",
             "wind",
             "terrain_query_size",
+            "fog_cloud",
         ]
     );
 }
