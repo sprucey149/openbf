@@ -93,7 +93,9 @@ impl App {
                 button: winit::event::MouseButton::Left,
                 state: winit::event::ElementState::Pressed,
                 ..
-            } if matches!(self.screen, Screen::Shell) => self.shell_pointer.click(),
+            } if matches!(self.screen, Screen::Shell) || !self.can_grab() => {
+                self.shell_pointer.click();
+            }
             WindowEvent::MouseWheel { delta, .. } if matches!(self.screen, Screen::Shell) => {
                 let dy = match delta {
                     winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
@@ -201,6 +203,28 @@ mod tests {
             phase: winit::event::TouchPhase::Moved,
         });
         assert_eq!(a.shell_pointer.take_wheel(), -1.0);
+    }
+
+    #[test]
+    fn spawn_screens_left_click_records_pointer_click() {
+        let mut a = app();
+        a.screen = Screen::Battle;
+        a.walk = Some((
+            game::walk::WalkSim::new(42, glam::Vec3::ZERO, None),
+            render::MeshHandle::default(),
+        ));
+        let walk = &mut a.walk.as_mut().unwrap().0;
+        walk.sim.spawn_stage[0] = core::sim::SpawnStage::Side;
+        walk.sim.units[walk.player.index as usize].alive = false;
+        assert!(!a.can_grab());
+
+        a.shell_pointer.moved_to([100.0, 100.0]);
+        a.mouse_window_event(&WindowEvent::MouseInput {
+            device_id: winit::event::DeviceId::dummy(),
+            state: winit::event::ElementState::Pressed,
+            button: winit::event::MouseButton::Left,
+        });
+        assert_eq!(a.shell_pointer.take_frame(), Some(([100.0, 100.0], true)));
     }
 
     #[test]
