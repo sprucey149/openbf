@@ -321,6 +321,13 @@ mod tests {
             ron::from_str("(assist_intensity: 0.7, input_icons: SteamDeck)").unwrap();
         assert_eq!(newer.input_icons, IconChoice::Auto);
         assert_eq!(newer.assist_intensity, 0.7);
+        // The removed dots set's names, should any profile or tool have saved them: Auto.
+        for gone in ["GenericPad", "Generic"] {
+            let old: Settings =
+                ron::from_str(&format!("(assist_intensity: 0.7, input_icons: {gone})")).unwrap();
+            assert_eq!(old.input_icons, IconChoice::Auto, "{gone}");
+            assert_eq!(old.assist_intensity, 0.7, "{gone}");
+        }
         // Any shape of value, and inside a whole profile as the game loads it.
         for value in ["Pad(1, \"x\")", "3", "[Ds4]", "\"Ds4\""] {
             let whole: Profile = ron::from_str(&format!(

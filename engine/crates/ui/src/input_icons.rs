@@ -30,8 +30,6 @@ pub enum IconSet {
     Ds5,
     XboxOriginal,
     XboxOne,
-    /// A pad the input library cannot name: its face buttons by position.
-    GenericPad,
 }
 
 /// A physical pad control, by position.
@@ -192,15 +190,12 @@ impl Icons {
         }
     }
 
-    /// [`Icons::text`] as the panels' prompt lines write it: a PlayStation
-    /// face button is its symbol.
+    /// [`Icons::text`] as the panels' prompt lines write it: PlayStation's Cross
+    /// is its letter. The other symbols have no glyph in the panels' font.
     pub fn symbol(&self, prompt: Prompt) -> &'static str {
         let playstation = matches!(self.set, IconSet::Ds2 | IconSet::Ds4 | IconSet::Ds5);
         match self.button(prompt) {
             Some(PadButton::South) if playstation => "X",
-            Some(PadButton::North) if playstation => "△",
-            Some(PadButton::East) if playstation => "○",
-            Some(PadButton::West) if playstation => "□",
             _ => self.text(prompt),
         }
     }
@@ -210,12 +205,6 @@ impl Icons {
         match self.set {
             IconSet::KeyboardMouse => {
                 "Arrows move · Enter select · ◀▶ adjust · Esc resume".to_owned()
-            }
-            IconSet::Ds2 | IconSet::Ds4 | IconSet::Ds5 => {
-                let start = pad_name(self.set, PadButton::Start);
-                format!(
-                    "D-pad / arrows move · ✕ / Enter select · ◀▶ adjust · ○ / {start} / Esc resume"
-                )
             }
             set => format!(
                 "D-pad / arrows move · {} / Enter select · ◀▶ adjust · {} / {} / Esc resume",
@@ -294,13 +283,6 @@ pub fn pad_sheet(set: IconSet, b: PadButton) -> &'static str {
             P::DPadLeft => "icon_duke_dpad_left",
             P::DPadRight => "icon_duke_dpad_right",
         },
-        IconSet::GenericPad => match b {
-            P::South => "icon_pad_south",
-            P::East => "icon_pad_east",
-            P::West => "icon_pad_west",
-            P::North => "icon_pad_north",
-            _ => xbox_one(b),
-        },
         // Reached only through a direct call: a keyboard has no pad buttons,
         // so its answer is the commonest layout.
         IconSet::XboxOne | IconSet::KeyboardMouse => xbox_one(b),
@@ -365,22 +347,6 @@ pub fn pad_name(set: IconSet, b: PadButton) -> &'static str {
         P::DPadRight => return "D-pad right",
         _ => {}
     }
-    if set == IconSet::GenericPad {
-        return match b {
-            P::South => "Bottom button",
-            P::East => "Right button",
-            P::West => "Left button",
-            P::North => "Top button",
-            P::L1 => "Left bumper",
-            P::R1 => "Right bumper",
-            P::L2 => "Left trigger",
-            P::R2 => "Right trigger",
-            P::L3 => "Left stick press",
-            P::R3 => "Right stick press",
-            P::Select => "Select",
-            _ => "Start",
-        };
-    }
     if playstation {
         return match b {
             P::South => "Cross",
@@ -428,14 +394,13 @@ pub fn pad_name(set: IconSet, b: PadButton) -> &'static str {
 }
 
 /// Every set, for the tests that check each has art.
-pub const ALL_SETS: [IconSet; 7] = [
+pub const ALL_SETS: [IconSet; 6] = [
     IconSet::KeyboardMouse,
     IconSet::Ds2,
     IconSet::Ds4,
     IconSet::Ds5,
     IconSet::XboxOriginal,
     IconSet::XboxOne,
-    IconSet::GenericPad,
 ];
 
 #[cfg(test)]
@@ -463,7 +428,6 @@ mod tests {
             (IconSet::Ds5, "icon_ps_cross", "icon_ps_triangle"),
             (IconSet::XboxOne, "icon_xbone_a", "icon_xbone_y"),
             (IconSet::XboxOriginal, "icon_duke_a", "icon_duke_y"),
-            (IconSet::GenericPad, "icon_pad_south", "icon_pad_north"),
         ] {
             let i = Icons::of(set);
             assert_eq!(i.sheet(Prompt::Accept), south, "{set:?}");
@@ -547,16 +511,37 @@ mod tests {
         );
         assert_eq!(Icons::of(IconSet::KeyboardMouse).class_keys(), "Q / Tab");
         assert_eq!(Icons::default().symbol(Prompt::SpawnAccept), "X");
-        assert_eq!(Icons::default().symbol(Prompt::SpawnBack), "△");
+        assert_eq!(Icons::default().symbol(Prompt::SpawnBack), "Triangle");
         assert_eq!(Icons::of(IconSet::XboxOne).symbol(Prompt::SpawnBack), "Y");
     }
 
-    /// The default footer is the one the menu has always shown.
+    /// Everything the egui panels write has a glyph: a missing one draws as an
+    /// empty box, which on a PlayStation footer read as Square.
+    #[test]
+    fn the_panels_text_has_glyphs() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            let font = egui::FontId::proportional(12.0);
+            for set in ALL_SETS {
+                let icons = Icons::of(set);
+                let mut lines = vec![icons.menu_footer(), icons.class_keys()];
+                lines.extend(Prompt::ALL.map(|p| icons.symbol(p).to_owned()));
+                for line in lines {
+                    assert!(
+                        ctx.fonts_mut(|f| f.has_glyphs(&font, &line)),
+                        "{set:?}: {line}"
+                    );
+                }
+            }
+        });
+    }
+
+    /// The footer names each pad's own buttons.
     #[test]
     fn the_default_footer_stands() {
         assert_eq!(
             Icons::default().menu_footer(),
-            "D-pad / arrows move · ✕ / Enter select · ◀▶ adjust · ○ / Start / Esc resume"
+            "D-pad / arrows move · Cross / Enter select · ◀▶ adjust · Circle / Start / Esc resume"
         );
         assert!(Icons::of(IconSet::XboxOne)
             .menu_footer()

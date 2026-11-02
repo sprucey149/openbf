@@ -444,13 +444,15 @@ pub enum PadFamily {
     Ds4,
     Ds5,
     XboxOriginal,
-    /// Xbox One, Series and 360: the same buttons, the XInput class.
+    /// Xbox One, Series and 360: the same buttons, the XInput class. Also any
+    /// pad nothing identifies, as most third-party pads copy this layout.
     XboxOne,
-    Generic,
 }
 
 const SONY: u16 = 0x054c;
 const MICROSOFT: u16 = 0x045e;
+/// GameSir's USB vendor ID: its G7 Pro is 3537:1022.
+const GAMESIR: u16 = 0x3537;
 const SONY_DS3: [u16; 1] = [0x0268];
 const SONY_DS4: [u16; 3] = [0x05c4, 0x09cc, 0x0ba0];
 const SONY_DS5: [u16; 2] = [0x0ce6, 0x0df2];
@@ -461,8 +463,8 @@ const MS_XINPUT: [u16; 14] = [
 ];
 
 /// [`PadFamily`] from what the OS reports: the USB IDs first, then the name,
-/// then a standard-layout pad neither identifies (Windows' XInput class).
-/// Anything else is [`PadFamily::Generic`]; a wrong guess only changes prompts.
+/// then what is left of a Sony ID. Anything else is [`PadFamily::XboxOne`], the
+/// layout most third-party pads copy; a wrong guess only changes prompts.
 pub fn family_of(name: &str, hw: Option<HwId>, kind: PadKind) -> PadFamily {
     match hw {
         Some((SONY, p)) if SONY_DS3.contains(&p) => return PadFamily::Ds2,
@@ -470,13 +472,22 @@ pub fn family_of(name: &str, hw: Option<HwId>, kind: PadKind) -> PadFamily {
         Some((SONY, p)) if SONY_DS5.contains(&p) => return PadFamily::Ds5,
         Some((MICROSOFT, p)) if MS_DUKE.contains(&p) => return PadFamily::XboxOriginal,
         Some((MICROSOFT, p)) if MS_XINPUT.contains(&p) => return PadFamily::XboxOne,
+        Some((GAMESIR, _)) => return PadFamily::XboxOne,
         _ => {}
     }
     let name = name.to_ascii_lowercase();
     let has = |words: &[&str]| words.iter().any(|w| name.contains(w));
-    if has(&["dualsense", "ps5"]) {
+    if has(&["gamesir"]) {
+        PadFamily::XboxOne
+    } else if has(&["dualsense", "ps5"]) {
         PadFamily::Ds5
-    } else if has(&["dualshock 4", "dualshock4", "ps4"]) {
+    } else if has(&[
+        "dualshock 4",
+        "dualshock4",
+        "ps4",
+        // The kernel's name for the first DS4 alone.
+        "sony computer entertainment",
+    ]) {
         PadFamily::Ds4
     } else if has(&[
         "dualshock",
@@ -493,6 +504,8 @@ pub fn family_of(name: &str, hw: Option<HwId>, kind: PadKind) -> PadFamily {
         "xbox 360",
         "x-box 360",
         "x-box one",
+        // The Linux xpad driver's name for a modern pad not in its table.
+        "generic x-box pad",
     ]) || has(&["xbox wireless", "xinput"])
     {
         PadFamily::XboxOne
@@ -503,10 +516,11 @@ pub fn family_of(name: &str, hw: Option<HwId>, kind: PadKind) -> PadFamily {
         } else {
             PadFamily::XboxOriginal
         }
-    } else if kind == PadKind::Unified {
-        PadFamily::XboxOne
+    } else if matches!(hw, Some((SONY, _))) {
+        // A Sony pad newer than the IDs above: still PlayStation symbols.
+        PadFamily::Ds4
     } else {
-        PadFamily::Generic
+        PadFamily::XboxOne
     }
 }
 
@@ -722,6 +736,14 @@ mod tests {
             ((0x045e, 0x02ea), F::XboxOne),
             ((0x045e, 0x0b12), F::XboxOne),
             ((0x045e, 0x028e), F::XboxOne),
+            // The maintainer's GameSir G7 Pro, and any other GameSir ID.
+            ((0x3537, 0x1022), F::XboxOne),
+            ((0x3537, 0x0001), F::XboxOne),
+            // A Sony ID not listed stays PlayStation.
+            ((0x054c, 0x0fff), F::Ds4),
+            // Vendors nothing names: the fallback.
+            ((0x2dc8, 0x3106), F::XboxOne),
+            ((0x057e, 0x2009), F::XboxOne),
         ] {
             assert_eq!(family_of("pad", Some(hw), Sdl), family, "{hw:04x?}");
         }
@@ -740,8 +762,17 @@ mod tests {
             ("Xbox Series X Controller", Sdl, F::XboxOne),
             ("Xbox Controller", Unified, F::XboxOne),
             ("Controller (GameSir G7 Pro)", Unified, F::XboxOne),
-            ("GameSir G7 Pro", Sdl, F::Generic),
-            ("Twin USB Joystick", Raw, F::Generic),
+            ("GameSir G7 Pro", Sdl, F::XboxOne),
+            ("GameSir-T4 PS4 mode", Raw, F::XboxOne),
+            ("Generic X-Box pad", Sdl, F::XboxOne),
+            (
+                "Sony Computer Entertainment Wireless Controller",
+                Sdl,
+                F::Ds4,
+            ),
+            ("Sony PLAYSTATION(R)3 Controller", Sdl, F::Ds2),
+            ("Twin USB Joystick", Raw, F::XboxOne),
+            ("", Raw, F::XboxOne),
         ] {
             assert_eq!(family_of(name, None, kind), family, "{name}");
         }

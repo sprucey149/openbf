@@ -259,6 +259,8 @@ pub struct HudView {
     /// Every drawable mesh by lower-cased name.
     mesh_files: HashMap<String, PathBuf>,
     textures: HashMap<String, Option<HudTexture>>,
+    /// The control prompts no bake supplied: each sheet at the sizes drawn.
+    drawn_icons: HashMap<String, Vec<(u32, Option<HudTexture>)>>,
     leaving: ui::hud::LeavingPulse,
     missing: HashSet<String>,
     verts: Vec<HudVertex>,
@@ -349,6 +351,16 @@ fn load_mesh(path: &Path) -> Result<HudMesh> {
         })
         .collect();
     Ok(HudMesh { parts })
+}
+
+/// How many window pixels high a batch's quads stand.
+fn batch_height(verts: &[HudVertex], indices: &[u32], first: u32, count: u32) -> f32 {
+    let (first, count) = (first as usize, count as usize);
+    let (lo, hi) = indices[first..first + count]
+        .iter()
+        .map(|i| verts[*i as usize].pos[1])
+        .fold((f32::MAX, f32::MIN), |(lo, hi), y| (lo.min(y), hi.max(y)));
+    (hi - lo).max(0.0)
 }
 
 impl HudView {
@@ -453,6 +465,7 @@ impl HudView {
             ],
             mesh_files,
             textures: HashMap::new(),
+            drawn_icons: HashMap::new(),
             leaving: Default::default(),
             missing: HashSet::new(),
             verts: Vec::new(),
@@ -718,6 +731,23 @@ impl HudView {
         for b in &self.batches {
             let texture = if b.texture == ui::shell_ps2::MOVIE_SHEET {
                 self.movie
+            } else if let Some(sizes) = self.drawn_icons.get_mut(&b.texture) {
+                let px = crate::input_icons::icon_px(batch_height(
+                    &self.verts,
+                    &self.indices,
+                    b.first,
+                    b.count,
+                ));
+                match sizes.iter().find(|(at, _)| *at == px) {
+                    Some((_, t)) => *t,
+                    None => {
+                        let t = crate::input_icons::rasterize(&b.texture, px).and_then(
+                            |(rgba, w, h)| pass.add_texture(device, queue, &rgba, w, h, false),
+                        );
+                        sizes.push((px, t));
+                        t
+                    }
+                }
             } else {
                 match self.textures.get(&b.texture) {
                     Some(t) => *t,
@@ -738,7 +768,7 @@ impl HudView {
                             Some((l, s)) => (Some(l), s),
                             None => (None, sheet),
                         };
-                        let t = self
+                        let baked = self
                             .texture_dirs
                             .iter()
                             .filter(|d| {
@@ -751,10 +781,18 @@ impl HudView {
                             .find(|p| pak::is_file(p))
                             .and_then(|p| pak::read(p).ok())
                             .and_then(|bytes| crate::assets::load_ktx2(&bytes).ok())
-                            .map(|t| (t.rgba, t.width, t.height))
-                            // A control prompt no bake supplied is drawn here,
-                            // once; the texture map keeps it from then on.
-                            .or_else(|| crate::input_icons::rasterize(sheet))
+                            .map(|t| (t.rgba, t.width, t.height));
+                        // A control prompt no bake supplied is drawn here, at
+                        // the size it shows; the next frame finds it above.
+                        let icon = baked.is_none() && crate::input_icons::has_art(&b.texture);
+                        let px = crate::input_icons::icon_px(batch_height(
+                            &self.verts,
+                            &self.indices,
+                            b.first,
+                            b.count,
+                        ));
+                        let t = baked
+                            .or_else(|| crate::input_icons::rasterize(sheet, px))
                             .and_then(|(mut rgba, width, height)| {
                                 if opaque {
                                     rgba.as_chunks_mut::<4>()
@@ -767,7 +805,11 @@ impl HudView {
                         if t.is_none() {
                             eprintln!("hud: no sheet {:?}; drawn untextured", b.texture);
                         }
-                        self.textures.insert(b.texture.clone(), t);
+                        if icon {
+                            self.drawn_icons.insert(b.texture.clone(), vec![(px, t)]);
+                        } else {
+                            self.textures.insert(b.texture.clone(), t);
+                        }
                         t
                     }
                 }

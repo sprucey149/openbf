@@ -40,7 +40,7 @@ pub struct MenuModel {
     pub mouse_sensitivity: f32,
     pub invert_y: bool,
     pub low_power_resolution: bool,
-    /// The Input icons row's value and the footer's names.
+    /// The Button prompts row's value and the footer's names.
     pub input_icons_label: &'static str,
     pub icons: crate::input_icons::Icons,
     pub first_person: bool,
@@ -76,7 +76,7 @@ pub enum MenuAction {
     SetMouseSensitivity(f32),
     ToggleInvertY,
     ToggleLowPowerResolution,
-    /// The Input icons row, a step on (+1) or back (-1) through its choices.
+    /// The Button prompts row, a step on (+1) or back (-1) through its choices.
     CycleInputIcons(i32),
     ToggleViewpoint,
     Quit,
@@ -293,7 +293,8 @@ pub fn population_row(m: &MenuModel, row: Row) -> Option<(&'static str, String)>
 
 /// The help under the rows for the focused row: Team size and
 /// Reinforcements say what an average match looks like at their values. In a
-/// battle a Reinforcements change applies from the next round.
+/// battle a Reinforcements change applies from the next round. Button prompts
+/// says what it is for.
 pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
     match row {
         Row::AiCap => Some(m.population_note[0].clone()),
@@ -302,6 +303,10 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
             m.population_note[1]
         )),
         Row::Reinforcements => Some(m.population_note[1].clone()),
+        Row::InputIcons => Some(
+            "Which button icons the game shows. Auto follows the controller you are using."
+                .to_owned(),
+        ),
         _ => None,
     }
 }
@@ -558,7 +563,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                     Row::InputIcons => row_label(
                                         ui,
                                         sel,
-                                        "Input icons  ◀ ▶".into(),
+                                        "Button prompts  ◀ ▶".into(),
                                         Some(m.input_icons_label.to_owned()),
                                     ),
                                     Row::Viewpoint => row_label(
@@ -643,7 +648,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                         });
                     // Room is kept for the help so the centered menu does not
                     // jump as the cursor reaches those rows.
-                    if rows.contains(&Row::Reinforcements) {
+                    if rows.contains(&Row::Reinforcements) || rows.contains(&Row::InputIcons) {
                         ui.add_space(6.0);
                         ui.scope(|ui| {
                             ui.set_min_height(60.0);
@@ -880,6 +885,16 @@ mod tests {
         assert_eq!(press(&m, right), vec![MenuAction::CycleInputIcons(1)]);
         m.in_shell = Some("Game Options".into());
         assert!(at(&m).is_some());
+    }
+
+    /// The row says what it is for, in both menus.
+    #[test]
+    fn the_button_prompts_row_explains_itself() {
+        let mut m = model();
+        let want = "Which button icons the game shows. Auto follows the controller you are using.";
+        assert_eq!(row_help(&m, Row::InputIcons).as_deref(), Some(want));
+        m.in_shell = Some("Game Options".into());
+        assert_eq!(row_help(&m, Row::InputIcons).as_deref(), Some(want));
     }
 
     #[test]

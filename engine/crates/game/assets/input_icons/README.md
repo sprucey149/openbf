@@ -1,10 +1,11 @@
-Input icons for the control prompts (`game::input_icons`, looked up through `ui::input_icons`). All of them are
+Button icons for the control prompts (`game::input_icons`, looked up through `ui::input_icons`). All of them are
 SVG text compiled into the game and rasterized the first time a prompt shows one. Nothing here comes from a game disc.
 
 ## `kenney/`
 
 From Kenney's Input Prompts, version 1.5A, the `Vector` folders of `PlayStation Series`, `Xbox Series` and
-`Keyboard & Mouse`. The SVG files are unmodified.
+`Keyboard & Mouse`. The SVG files are unmodified; when `game::input_icons` rasterizes them it backs their cut-out
+letters with a dark fill, so they read over any backdrop.
 
 - Author: Kenney (www.kenney.nl)
 - Source: https://kenney.nl/assets/input-prompts
@@ -24,4 +25,5 @@ Original art made for this project, under the project's own licence:
 - `duke_*`: the original Xbox pad's A, B, X, Y, White and Black buttons, shown when no Xbox disc was supplied. With an
   Xbox disc, `bake xbox-icons` writes that pad's icons from the player's own disc into the local bake; they never
   enter the repo.
-- `pad_*`: a pad the input library cannot name, its face buttons by position.
+
+A pad the input library cannot name shows the Xbox One set, the layout most third-party pads copy.
