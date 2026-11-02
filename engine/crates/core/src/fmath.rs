@@ -568,7 +568,7 @@ mod tests {
     const WALL_CLOCK_ALLOWED: &[(&str, &str)] = &[
         (
             "sim/step.rs",
-            "`ai_wall_ms`: diagnostic timing, never hashed or read by the sim",
+            "`ai_wall_ms`, `tick_cost`: diagnostic timing, never hashed or read by the sim",
         ),
         (
             "ai/tactic.rs",

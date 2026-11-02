@@ -190,6 +190,147 @@ impl Sections {
     }
 }
 
+/// One frame of a pricing round: a state's GPU sections, and the CPU the
+/// frame's `render_frame` took (thread CPU, ms; `None` off Linux).
+#[derive(Debug, Clone, Default)]
+pub struct PricedFrame {
+    pub sections: Vec<(String, f64)>,
+    pub cpu_ms: Option<f64>,
+    pub draw_calls: u32,
+}
+
+impl PricedFrame {
+    fn gpu(&self) -> f64 {
+        self.sections.iter().map(|s| s.1).sum()
+    }
+
+    fn section(&self, label: &str) -> f64 {
+        self.sections
+            .iter()
+            .filter(|s| s.0 == label)
+            .map(|s| s.1)
+            .sum()
+    }
+}
+
+/// A state against the first state of the same rounds: every difference is
+/// taken inside one round, between frames of one world a few ms apart, and the
+/// median and quartiles are over those paired differences.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Price {
+    pub state: String,
+    pub rounds: usize,
+    /// Median GPU ms of the frame in this state.
+    pub gpu_ms: f64,
+    pub delta_ms: f64,
+    pub delta_q1: f64,
+    pub delta_q3: f64,
+    /// Median paired difference in CPU ms, where measured.
+    pub cpu_delta_ms: Option<f64>,
+    pub draw_calls: u32,
+    /// (section, median paired difference), largest change first.
+    pub sections: Vec<(String, f64)>,
+}
+
+/// The rounds the first frames warm up: dropped from a price.
+const PRICE_WARMUP: usize = 5;
+
+fn nearest_rank(sorted: &[f64], q: f64) -> f64 {
+    if sorted.is_empty() {
+        return 0.0;
+    }
+    sorted[((q * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len()) - 1]
+}
+
+fn sorted(mut v: Vec<f64>) -> Vec<f64> {
+    v.sort_by(f64::total_cmp);
+    v
+}
+
+/// Price each state of `rounds[r][state]` against state 0 (`names[0]`). A
+/// frame the GPU timer did not read has no sections, and its round says
+/// nothing about that state.
+pub fn price(names: &[String], rounds: &[Vec<PricedFrame>]) -> Vec<Price> {
+    let rounds = rounds.get(PRICE_WARMUP..).unwrap_or_default();
+    names
+        .iter()
+        .enumerate()
+        .map(|(k, name)| {
+            let timed: Vec<(&PricedFrame, &PricedFrame)> = rounds
+                .iter()
+                .filter(|r| !r[0].sections.is_empty() && !r[k].sections.is_empty())
+                .map(|r| (&r[0], &r[k]))
+                .collect();
+            let deltas = sorted(timed.iter().map(|(b, s)| s.gpu() - b.gpu()).collect());
+            let cpu = sorted(
+                timed
+                    .iter()
+                    .filter_map(|(b, s)| Some(s.cpu_ms? - b.cpu_ms?))
+                    .collect(),
+            );
+            let mut labels: Vec<&str> = Vec::new();
+            for (b, s) in &timed {
+                for (label, _) in b.sections.iter().chain(&s.sections) {
+                    if !labels.contains(&label.as_str()) {
+                        labels.push(label);
+                    }
+                }
+            }
+            let mut sections: Vec<(String, f64)> = labels
+                .iter()
+                .map(|&l| {
+                    let d = sorted(
+                        timed
+                            .iter()
+                            .map(|(b, s)| s.section(l) - b.section(l))
+                            .collect(),
+                    );
+                    (l.to_string(), nearest_rank(&d, 0.5))
+                })
+                .collect();
+            sections.sort_by(|a, b| b.1.abs().total_cmp(&a.1.abs()));
+            Price {
+                state: name.clone(),
+                rounds: timed.len(),
+                gpu_ms: nearest_rank(&sorted(timed.iter().map(|(_, s)| s.gpu()).collect()), 0.5),
+                delta_ms: nearest_rank(&deltas, 0.5),
+                delta_q1: nearest_rank(&deltas, 0.25),
+                delta_q3: nearest_rank(&deltas, 0.75),
+                cpu_delta_ms: (!cpu.is_empty()).then(|| nearest_rank(&cpu, 0.5)),
+                draw_calls: timed.last().map_or(0, |(_, s)| s.draw_calls),
+                sections,
+            }
+        })
+        .collect()
+}
+
+/// The prices as a table, one state a line.
+pub fn print_prices(prices: &[Price]) {
+    println!("state                      rounds  gpu ms   delta [q1 q3]              cpu delta  calls  sections moved");
+    for p in prices {
+        let moved: Vec<String> = p
+            .sections
+            .iter()
+            .take(3)
+            .filter(|s| s.1.abs() >= 0.005)
+            .map(|s| format!("{} {:+.2}", s.0, s.1))
+            .collect();
+        println!(
+            "{:26} {:6} {:7.2} {:+7.2} [{:+6.2} {:+6.2}] {:>12} {:6}  {}",
+            p.state,
+            p.rounds,
+            p.gpu_ms,
+            p.delta_ms,
+            p.delta_q1,
+            p.delta_q3,
+            p.cpu_delta_ms
+                .map_or("-".to_string(), |c| format!("{c:+.2}")),
+            p.draw_calls,
+            moved.join(", ")
+        );
+    }
+}
+
 /// `--bench-toggle`: one feature off and on in alternating blocks of frames in
 /// the same process on the same frozen battle, so whatever else loads the machine
 /// loads both sides alike. Only the feature differs between the two columns.
@@ -405,6 +546,48 @@ mod tests {
         assert_eq!(s.mean(), 0.0);
         assert_eq!(s.pct(0.99), 0.0);
         assert_eq!(s.max(), 0.0);
+    }
+
+    /// A state is priced against the first state of each round: a round where
+    /// the whole machine ran slow moves both frames and not the price.
+    #[test]
+    fn a_price_is_the_median_of_the_differences_inside_each_round() {
+        let frame = |models: f64, sky: f64| PricedFrame {
+            sections: vec![("models".into(), models), ("sky".into(), sky)],
+            cpu_ms: Some(1.0),
+            draw_calls: 7,
+        };
+        let mut rounds = vec![vec![PricedFrame::default(); 2]; PRICE_WARMUP];
+        // Each round's base and state keep a 2 ms gap in the models while the
+        // machine swings by 40 ms; the mean of the state alone says nothing.
+        for slow in [0.0, 40.0, 0.0, 40.0, 0.0] {
+            rounds.push(vec![frame(5.0 + slow, 1.0), frame(3.0 + slow, 1.0)]);
+        }
+        let names = vec!["base".to_string(), "faster".to_string()];
+        let prices = price(&names, &rounds);
+        assert_eq!(prices[0].delta_ms, 0.0, "the base against itself");
+        let p = &prices[1];
+        assert_eq!(p.rounds, 5, "the warm-up rounds are dropped");
+        assert_eq!(p.delta_ms, -2.0);
+        assert_eq!((p.delta_q1, p.delta_q3), (-2.0, -2.0));
+        assert_eq!(p.cpu_delta_ms, Some(0.0));
+        assert_eq!(p.sections[0], ("models".to_string(), -2.0));
+        assert_eq!(p.draw_calls, 7);
+    }
+
+    /// A frame the timer did not read says nothing about that state.
+    #[test]
+    fn a_round_without_timing_is_left_out_of_a_price() {
+        let frame = |ms: f64| PricedFrame {
+            sections: vec![("sky".into(), ms)],
+            ..PricedFrame::default()
+        };
+        let mut rounds = vec![vec![PricedFrame::default(); 2]; PRICE_WARMUP];
+        rounds.push(vec![frame(2.0), PricedFrame::default()]);
+        rounds.push(vec![frame(2.0), frame(3.0)]);
+        let prices = price(&["a".to_string(), "b".to_string()], &rounds);
+        assert_eq!((prices[1].rounds, prices[1].delta_ms), (1, 1.0));
+        assert_eq!(prices[1].cpu_delta_ms, None);
     }
 
     /// A detail companion's pixels must be counted — they are real GPU bytes,

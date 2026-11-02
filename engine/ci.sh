@@ -9,6 +9,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 cargo fmt --all -- --check
+# A new provisional value must name the measurement that replaces it.
+python3 ../scripts/check_provisional.py --selftest
+if base="$(git merge-base origin/main HEAD 2>/dev/null)"; then
+  python3 ../scripts/check_provisional.py "$base"..HEAD
+fi
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace
 TEST_TARGETS=(--lib --bins --tests --example arena)

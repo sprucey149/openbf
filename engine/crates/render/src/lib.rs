@@ -70,6 +70,7 @@ mod draw;
 mod falling;
 mod filter;
 mod frame;
+mod frame_ab;
 mod frustum;
 mod gpu_timer;
 mod grass;
@@ -90,6 +91,7 @@ mod specular;
 mod stars;
 mod terrain_light;
 mod texture;
+mod world_scale;
 
 pub use bloom::Bloom;
 pub use bolt::{BoltDraw, RibbonVertex};
@@ -97,12 +99,13 @@ pub use camera::Camera;
 pub use capture::{encode_png, encode_png_rgb};
 pub use device::HEADLESS_FORMAT;
 pub use draw::{
-    fragment_kept, DrawCmd, DrawLayer, Fade, LightPath, LodSide, LodSwitch, SkinnedDrawCmd,
-    IFACE_AMBIENT, IFACE_DIR_CAMERA,
+    fragment_kept, DrawCmd, DrawLayer, DrawOrder, Fade, LightPath, LodSide, LodSwitch,
+    SkinnedDrawCmd, IFACE_AMBIENT, IFACE_DIR_CAMERA,
 };
 pub use falling::{ForestBirdType, LeafActor, LeafEmitter};
 pub use filter::{box_side, FrameFilter};
 pub use frame::{FrameStats, OverlayFn};
+pub use frame_ab::FrameAb;
 pub use grass::{sprite_quad, sway, GrassClass, GrassPatch, GrassSprite, ViewAxes};
 pub use leaf::{LeafClass, LeafObject, LeafSprite};
 pub use light_beam::{Beam, Cross, TOP_ALPHA as BEAM_TOP_ALPHA};
@@ -225,6 +228,21 @@ struct Globals {
     _pad11: f32,
 }
 
+/// The world's depth-writing pipelines with the shader's `CULLS` off, for a draw
+/// that cannot discard this frame (`draw::may_discard`). A shader that may
+/// discard writes depth only after it has shaded, so the next draw loses the
+/// early reject its pixels would have had.
+struct NoDiscard {
+    opaque: wgpu::RenderPipeline,
+    mask: wgpu::RenderPipeline,
+    fade: wgpu::RenderPipeline,
+    fade_mask: wgpu::RenderPipeline,
+    terrain_layer: wgpu::RenderPipeline,
+    water: wgpu::RenderPipeline,
+    skinned: wgpu::RenderPipeline,
+    fade_skinned: wgpu::RenderPipeline,
+}
+
 enum Target {
     Window {
         surface: wgpu::Surface<'static>,
@@ -266,6 +284,8 @@ pub struct Renderer {
     /// The terrain layers' pass ([`DrawLayer::TerrainLayer`]): src-alpha
     /// "over", `LessEqual`, no depth write, `fs_terrain_layer`.
     terrain_layer_pipeline: wgpu::RenderPipeline,
+    /// The depth-writing passes again without `far_cull`'s discards.
+    no_discard: NoDiscard,
     /// The five pipelines a map with a [`FarFade`] uses instead of
     /// `pipeline` / `mask_pipeline` / `blend_pipeline` / `skinned_pipeline` /
     /// `skinned_blend_pipeline`: the same state with the target BLENDED, so
@@ -297,6 +317,12 @@ pub struct Renderer {
     /// Frustum culling on/off. On by default; `--no-cull` in the bench turns
     /// it off so the two can be compared on the same scene.
     pub cull: bool,
+    /// How the next frame differs from the game's own (`frame_ab`, the
+    /// bench's pricing states).
+    pub frame_ab: FrameAb,
+    /// The fraction of the window the world draws at (`world_scale`).
+    world_scale_now: f32,
+    world_scale: world_scale::WorldScale,
     globals_buf: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,
     /// BF2's local lights (`point_light.rs`, card BPNT): the shader's table
@@ -324,6 +350,8 @@ pub struct Renderer {
     palette_bg: wgpu::BindGroup,
     /// Skinned draws the palette/instance buffers can hold.
     palette_capacity: usize,
+    /// The frame's palettes on their way to `palette_buf`, kept between frames.
+    palette_upload: Vec<u8>,
     skinned_instance_buf: wgpu::Buffer,
     /// The specular second pass ([`DrawLayer::Spec`], `specular.rs`): its
     /// additive pipeline, the layout of its group 3, the per-frame

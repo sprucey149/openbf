@@ -137,7 +137,7 @@ fn skinned_glb_round_trip() {
         texture: None,
         color: [0.0, 1.0, 0.0, 1.0],
         model,
-        palette: pal.clone(),
+        palette: pal.clone().into(),
         layer: uploaded[0].2,
         light: render::LightPath::Character,
         lit: None,

@@ -14,7 +14,7 @@ use anyhow::Result;
 use core::droideka::{Droideka, DroidekaClass, ROLLING};
 use core::vehicle::walker::WalkerState;
 use glam::{Mat4, Vec3};
-use render::{Camera, DrawCmd, MeshHandle, ParticleDraw, ParticleShape, Renderer, TextureHandle};
+use render::{Camera, DrawCmd, ParticleDraw, ParticleShape, Renderer, TextureHandle};
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -24,7 +24,9 @@ pub struct DroidekaVisuals {
     aims: Vec<GunAim>,
     preview: preview::Preview,
     by_class: [Vec<Option<usize>>; 2],
-    posed: HashMap<usize, ((u32, usize), Vec<MeshHandle>)>,
+    posed: HashMap<usize, super::vehicles::PosedMeshes<(u32, usize)>>,
+    /// The frame's eye, for how often a far droideka re-skins.
+    pub eye: Option<glam::Vec3>,
     cull: Option<f32>,
     spec_cull: Option<f32>,
     bubble_texture: Option<TextureHandle>,
@@ -318,13 +320,17 @@ impl DroidekaVisuals {
                 continue;
             };
             let model = &self.models[k];
-            let meshes = match pose_class(r, &mut self.posed, slot, (u.gen, k), model, &palette) {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("droideka {slot}: {e:#}");
-                    continue;
-                }
-            };
+            let due = self.eye.is_none_or(|eye| {
+                super::vehicles::skin_due(slot, sim.tick, u.soldier.pos.distance(eye))
+            });
+            let meshes =
+                match pose_class(r, &mut self.posed, slot, (u.gen, k), model, &palette, due) {
+                    Ok(m) => m,
+                    Err(e) => {
+                        eprintln!("droideka {slot}: {e:#}");
+                        continue;
+                    }
+                };
             let m = model_matrix(u.soldier.pos, u.soldier.yaw, d, c);
             model.draws(
                 &mut out,

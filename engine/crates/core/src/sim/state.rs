@@ -989,6 +989,9 @@ pub struct Sim {
     /// think) - the windowed game's frame recorder reads it. A measurement
     /// of the machine: never read by the sim, not hashed.
     pub ai_wall_ms: f32,
+    /// What the last [`Sim::step`] cost, for the slow-frame log. A measurement
+    /// like `ai_wall_ms`: never read by the sim, not hashed.
+    pub tick_cost: TickCost,
     /// Phase B: the two teams' objective plans (`core::commander`). SIM STATE
     /// — hashed, replay-exact, re-made one team per tick.
     pub commander: [crate::commander::TeamPlan; 2],
@@ -1004,6 +1007,25 @@ pub struct Sim {
     /// tier that focuses on him (`ai::dfocus`: his spawn grace). SIM STATE -
     /// hashed when not empty; empty with no human or below Hard.
     pub focus_born: Vec<crate::ai::dfocus::Born>,
+}
+
+/// What one [`Sim::step`] cost (the slow-frame log). A measurement of the
+/// machine: nothing in the sim reads it.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TickCost {
+    /// The bot whose think took longest.
+    pub worst_think: Option<UnitCost>,
+    /// Every ray the step cast.
+    pub rays: crate::collision::cost::RayCost,
+}
+
+/// One bot's think in a tick.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct UnitCost {
+    pub unit: u32,
+    pub ms: f32,
+    /// World ray queries it made.
+    pub ray_queries: u32,
 }
 
 /// What the follower had to fall back on this round — the numbers the sweep
@@ -1453,6 +1475,7 @@ impl Sim {
             flank: Default::default(),
             nav_stats: NavStats::default(),
             ai_wall_ms: 0.0,
+            tick_cost: TickCost::default(),
             commander: [
                 crate::commander::TeamPlan::new(0),
                 crate::commander::TeamPlan::new(1),

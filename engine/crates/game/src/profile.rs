@@ -102,6 +102,10 @@ pub struct Settings {
     pub mouse_sensitivity: f32,
     #[serde(default)]
     pub invert_y: bool,
+    /// Low Power Resolution: the world draws smaller when frames run long
+    /// (`game::dyn_res`), the HUD at full size. Off by default.
+    #[serde(default)]
+    pub low_power_resolution: bool,
     #[serde(default)]
     pub viewpoint: crate::viewpoint::Viewpoint,
     #[serde(default, deserialize_with = "keyboard_bindings")]
@@ -132,6 +136,7 @@ impl Default for Settings {
             music_volume: 1.0,
             mouse_sensitivity: 1.0,
             invert_y: false,
+            low_power_resolution: false,
             viewpoint: crate::viewpoint::Viewpoint::default(),
             keyboard_bindings: crate::kbm::Bindings::default(),
             controller_bindings: input::Mapping::default(),

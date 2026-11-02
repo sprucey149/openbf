@@ -682,6 +682,7 @@ impl SoldierVisuals {
             };
             let sa = &self.assets[ai];
             let v = &mut self.units[i];
+            v.palette = Default::default();
             if !u.alive {
                 v.dead_for += dt;
             }
@@ -946,7 +947,10 @@ impl SoldierVisuals {
     }
 
     /// Units to draw this frame: (unit index, asset, model matrix, palette).
-    pub(super) fn posed(&self, walk: &WalkSim) -> Vec<(usize, &SoldierAsset, Mat4, Vec<Mat4>)> {
+    pub(super) fn posed(
+        &self,
+        walk: &WalkSim,
+    ) -> Vec<(usize, &SoldierAsset, Mat4, std::sync::Arc<[Mat4]>)> {
         self.posed_for(walk, false)
     }
 
@@ -954,7 +958,7 @@ impl SoldierVisuals {
         &self,
         walk: &WalkSim,
         view: bool,
-    ) -> Vec<(usize, &SoldierAsset, Mat4, Vec<Mat4>)> {
+    ) -> Vec<(usize, &SoldierAsset, Mat4, std::sync::Arc<[Mat4]>)> {
         let mut out = Vec::new();
         for (i, u) in walk.sim.units.iter().enumerate() {
             if u.droideka.is_some()
@@ -995,8 +999,18 @@ impl SoldierVisuals {
                 }
                 (None, _) => model_of(&u.soldier),
             };
-            let pose = v.animator.pose(&sa.asset.skeleton);
-            let palette = sa.asset.skeleton.palette(&pose.locals());
+            let at = self.asset_index(u.team, u.spec.class).unwrap_or(0);
+            let compute = || -> std::sync::Arc<[Mat4]> {
+                let pose = v.animator.pose(&sa.asset.skeleton);
+                sa.asset.skeleton.palette(&pose.locals()).into()
+            };
+            let (posed_for, memo) = v.palette.get_or_init(|| (at, compute()));
+            // A class change within a tick, before the animator has seen it.
+            let palette = if *posed_for == at {
+                memo.clone()
+            } else {
+                compute()
+            };
             out.push((i, sa, model, palette));
         }
         out
@@ -1399,7 +1413,7 @@ impl SoldierVisuals {
         sa: &SoldierAsset,
         (team, class): (u8, u8),
         model: Mat4,
-        palette: &[Mat4],
+        palette: &std::sync::Arc<[Mat4]>,
         live_cloth: bool,
         out: &mut Vec<SkinnedDrawCmd>,
     ) {
@@ -1418,7 +1432,7 @@ impl SoldierVisuals {
                 texture: skin.get(k).copied().flatten().or(*tex),
                 color: [1.0; 4],
                 model,
-                palette: palette.to_vec(),
+                palette: palette.clone(),
                 layer: *layer,
                 light: render::LightPath::Character,
                 // BF2's local lights reach the soldier (card BPNT).
@@ -1471,10 +1485,11 @@ impl SoldierVisuals {
             };
             animator.step(rig, &sa.asset.clips, &sa.asset.skeleton, &input, dt);
         }
-        let palette = sa
+        let palette: std::sync::Arc<[Mat4]> = sa
             .asset
             .skeleton
-            .palette(&animator.pose(&sa.asset.skeleton).locals());
+            .palette(&animator.pose(&sa.asset.skeleton).locals())
+            .into();
         let mut body = Vec::new();
         self.body_draws(sa, (team, class), model, &palette, false, &mut body);
         let mut gun = Vec::new();

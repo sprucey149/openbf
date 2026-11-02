@@ -30,6 +30,9 @@ pub(super) fn persist_setting(
             )
         }
         MenuAction::ToggleInvertY => profile.settings.invert_y = !profile.settings.invert_y,
+        MenuAction::ToggleLowPowerResolution => {
+            profile.settings.low_power_resolution = !profile.settings.low_power_resolution
+        }
         MenuAction::CycleInputIcons(dir) => {
             profile.settings.input_icons = profile.settings.input_icons.cycled(dir)
         }

@@ -193,6 +193,7 @@ pub(crate) fn build(
     near: Option<(f32, f32)>,
     camera: &Camera,
     t: f32,
+    view: crate::grass::FoliageView<'_>,
 ) {
     let v = LeafAxes::of(camera);
     let mut vis: Vec<(f32, usize, f32)> = objects
@@ -200,8 +201,10 @@ pub(crate) fn build(
         .enumerate()
         .filter_map(|(i, o)| {
             let class = classes.get(o.class as usize)?;
-            let d = (o.matrix.w_axis.truncate() - camera.position).dot(v.look);
-            object_alpha(d, o.distance, class.bound, class.vine, near).map(|a| (d, i, a))
+            let at = o.matrix.w_axis.truncate();
+            let d = (at - camera.position).dot(v.look);
+            let alpha = object_alpha(d, o.distance, class.bound, class.vine, near)?;
+            view.may_show(at, class.bound).then_some((d, i, alpha))
         })
         .collect();
     if vis.is_empty() {

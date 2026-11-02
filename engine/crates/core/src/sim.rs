@@ -95,8 +95,9 @@ pub use round::scale_reinforcements;
 pub use seats::{ENTER_REACH, EXIT_RING};
 pub use spawn::{ClassAmmo, ClassRefusal, SideChoice, SpawnStage, SpawnWaves, CLASS_CHANGE_FACING};
 pub use state::{
-    omni_radius_for, Call, Cheats, DeathCause, Event, Hazard, MissionAi, NavStats, Sim, BLAST_AGE,
-    HAZARD_RADIUS, LETHAL_LANDING_SPEED, OUTCOME_DRAW, SNIPE_SUITABILITY_DEFAULT,
+    omni_radius_for, Call, Cheats, DeathCause, Event, Hazard, MissionAi, NavStats, Sim, TickCost,
+    UnitCost, BLAST_AGE, HAZARD_RADIUS, LETHAL_LANDING_SPEED, OUTCOME_DRAW,
+    SNIPE_SUITABILITY_DEFAULT,
 };
 pub use stations::{
     Station, StationAnim, StationClass, StationMotion, DELAY_DEFAULT as STATION_DELAY_DEFAULT,

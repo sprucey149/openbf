@@ -430,7 +430,7 @@ impl ReferenceSoldier {
                     texture: *texture,
                     color: [1.0; 4],
                     model,
-                    palette: self.palette.clone(),
+                    palette: self.palette.clone().into(),
                     layer: *layer,
                     light: render::LightPath::Character,
                     lit: Some(crate::point_light::soldier_sphere(
@@ -973,7 +973,7 @@ fn unit_sheet_inner(
                     texture: *tex,
                     color: [1.0; 4],
                     model,
-                    palette: palette.clone(),
+                    palette: palette.clone().into(),
                     layer: *layer,
                     light: render::LightPath::Character,
                     lit: None,

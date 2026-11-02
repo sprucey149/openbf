@@ -334,7 +334,7 @@ impl SoldierVisuals {
                 texture: *tex,
                 color: [1.0; 4],
                 model,
-                palette: state.palette.clone(),
+                palette: state.palette.clone().into(),
                 layer: *layer,
                 light: render::LightPath::Character,
                 lit: Some(crate::point_light::soldier_sphere(

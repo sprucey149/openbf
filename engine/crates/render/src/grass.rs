@@ -244,12 +244,38 @@ pub(crate) struct GrassFrame {
     pub runs: Vec<GrassRun>,
 }
 
+/// What a frame's grass and leaves are filtered by.
+#[derive(Clone, Copy)]
+pub(crate) struct FoliageView<'a> {
+    /// Patches wholly off screen are left out, when set. The PS2's own test is
+    /// only depth along the look axis, so without this a patch at the eye's side
+    /// still builds and draws.
+    pub frustum: Option<&'a crate::frustum::Frustum>,
+}
+
+impl FoliageView<'_> {
+    /// No filter: everything the depth test keeps, at its own distance.
+    #[cfg(test)]
+    pub(crate) const ALL: FoliageView<'static> = FoliageView { frustum: None };
+
+    /// Whether a patch at `at`, reaching `bound` from its origin, can show. The
+    /// margin is the template's: `bound` is measured from its box's centre, and
+    /// the origin may be off that by as much again.
+    pub(crate) fn may_show(&self, at: Vec3, bound: f32) -> bool {
+        self.frustum.is_none_or(|f| {
+            let r = Vec3::splat(bound * 2.0);
+            f.intersects_aabb(at - r, at + r)
+        })
+    }
+}
+
 /// Build the frame's grass for `camera` at `t` seconds.
 pub(crate) fn build(
     classes: &[GrassClass],
     patches: &[GrassPatch],
     camera: &Camera,
     t: f32,
+    view: FoliageView<'_>,
 ) -> GrassFrame {
     let v = ViewAxes::of(camera);
     // Visible patches with their depth and alpha.
@@ -258,8 +284,10 @@ pub(crate) fn build(
         .enumerate()
         .filter_map(|(i, p)| {
             let class = classes.get(p.class as usize)?;
-            let depth = (p.matrix.w_axis.truncate() - camera.position).dot(v.look);
-            patch_alpha(depth, p.distance, class.bound).map(|a| (depth, i, a))
+            let at = p.matrix.w_axis.truncate();
+            let depth = (at - camera.position).dot(v.look);
+            let alpha = patch_alpha(depth, p.distance, class.bound)?;
+            view.may_show(at, class.bound).then_some((depth, i, alpha))
         })
         .collect();
     let mut out = GrassFrame::default();
@@ -457,6 +485,36 @@ mod tests {
         assert!((sway(&s, t) - (t * 0.8 * 1.4).sin()).abs() < 1e-6);
     }
 
+    /// A patch at the eye's side passes the depth test but is off screen, so
+    /// the frustum drops it.
+    #[test]
+    fn the_frustum_drops_a_patch_out_at_the_side() {
+        let classes = vec![GrassClass {
+            texture: None,
+            sprites: Vec::new(),
+            tall_lean: 0.0,
+            still: false,
+            bound: 1.0,
+        }];
+        let at = |x: f32, z: f32| GrassPatch {
+            class: 0,
+            matrix: Mat4::from_translation(Vec3::new(x, 0.0, z)),
+            color: [1.0; 4],
+            distance: 100.0,
+        };
+        let patches = vec![at(0.0, -50.0), at(500.0, -50.0)];
+        let cam = Camera::default();
+        let drawn =
+            |view: FoliageView<'_>| build(&classes, &patches, &cam, 0.0, view).instances.len();
+        assert_eq!(drawn(FoliageView::ALL), 2);
+        let vp = cam.view_proj(1.0);
+        let frustum = crate::frustum::Frustum::from_view_proj(&vp);
+        let view = FoliageView {
+            frustum: Some(&frustum),
+        };
+        assert_eq!(drawn(view), 1, "the one out at the side is gone");
+    }
+
     /// Patches draw far to near; runs merge consecutive patches of a class.
     #[test]
     fn the_frame_draws_far_to_near_in_class_runs() {
@@ -476,7 +534,13 @@ mod tests {
             at(0, -60.0),
             at(0, 10.0),
         ];
-        let f = build(&classes, &patches, &Camera::default(), 0.0);
+        let f = build(
+            &classes,
+            &patches,
+            &Camera::default(),
+            0.0,
+            FoliageView::ALL,
+        );
         let z: Vec<f32> = f.instances.iter().map(|i| i.model[3][2]).collect();
         assert_eq!(
             z,

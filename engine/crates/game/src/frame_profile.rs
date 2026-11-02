@@ -9,7 +9,7 @@
 //! - the RECORD (card HITCH; dev mode, on by default like the black box -
 //!   `OPENBF_DEV=0` or `OPENBF_FRAME_RECORD=0` turns it off): the battle's
 //!   frame times as a histogram, every frame over [`HITCH_MS`] with its
-//!   breakdown (the newest [`SLOW_KEPT`]) and the [`WORST_KEPT`] longest
+//!   breakdown, its worst bot and its rays ([`TickCosts`]; the newest [`SLOW_KEPT`]) and the [`WORST_KEPT`] longest
 //!   past the first [`SETTLE_S`] seconds. The black box writes it into its
 //!   snapshot ([`Hitches`], F9 / quit / panic) and the game prints its
 //!   [`Hitches::summary`] line when the battle ends. Warm, it allocates only
@@ -62,6 +62,104 @@ pub struct MadeRow {
     pub ms: f32,
 }
 
+/// What a frame's sim ticks cost: the bot that took longest and every ray the
+/// ticks cast (`core::sim::TickCost`). Rays are counted, not timed, so two logs
+/// can be compared: a slow tick with few triangles spent its time elsewhere.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TickCosts {
+    /// The bot's class, and its index among the units.
+    pub worst_unit: String,
+    pub worst_unit_index: u32,
+    pub worst_unit_ms: f32,
+    /// World ray queries that bot's think made.
+    pub worst_unit_rays: u32,
+    pub ray_queries: u32,
+    pub mesh_casts: u32,
+    pub triangles: u32,
+    /// The dearest cast: its triangles, the map instance it was against, where
+    /// it started and how far it reached.
+    pub worst_cast_triangles: u32,
+    pub worst_cast_instance: Option<u32>,
+    pub worst_cast_from: [f32; 3],
+    pub worst_cast_range: f32,
+}
+
+impl TickCosts {
+    /// Add one tick. `name` names a unit, and runs only for the frame's new
+    /// worst bot past [`NAMED_THINK_MS`], so a quiet frame allocates nothing.
+    pub fn add(&mut self, c: &core::sim::TickCost, name: impl FnOnce(u32) -> String) {
+        if let Some(w) = c.worst_think.filter(|w| w.ms > self.worst_unit_ms) {
+            self.worst_unit_index = w.unit;
+            self.worst_unit_ms = w.ms;
+            self.worst_unit_rays = w.ray_queries;
+            self.worst_unit.clear();
+            if w.ms >= NAMED_THINK_MS {
+                self.worst_unit = name(w.unit);
+            }
+        }
+        self.ray_queries += c.rays.queries;
+        self.mesh_casts += c.rays.mesh_casts;
+        self.triangles += c.rays.triangles;
+        if let Some(w) = c
+            .rays
+            .worst
+            .filter(|w| w.triangles > self.worst_cast_triangles)
+        {
+            self.worst_cast_triangles = w.triangles;
+            self.worst_cast_instance = w.instance;
+            self.worst_cast_from = w.origin;
+            self.worst_cast_range = w.range;
+        }
+    }
+
+    /// `worst unit rep_inf_trooper #12 3.1 ms (40 rays), rays 900 (200 mesh,
+    /// 8000 tris), dearest cast 400 tris on instance 31 from (x, y, z) over 50 m`.
+    pub fn line(&self) -> String {
+        let mut parts = Vec::new();
+        if self.worst_unit_ms > 0.0 {
+            let who = match self.worst_unit.as_str() {
+                "" => format!("#{}", self.worst_unit_index),
+                name => format!("{name} #{}", self.worst_unit_index),
+            };
+            parts.push(format!(
+                "worst unit {who} {:.1} ms ({} rays)",
+                self.worst_unit_ms, self.worst_unit_rays
+            ));
+        }
+        if self.ray_queries > 0 || self.mesh_casts > 0 {
+            parts.push(format!(
+                "rays {} ({} mesh, {} tris)",
+                self.ray_queries, self.mesh_casts, self.triangles
+            ));
+        }
+        if self.worst_cast_triangles > 0 {
+            let on = self
+                .worst_cast_instance
+                .map_or("no instance".to_owned(), |i| format!("instance {i}"));
+            let [x, y, z] = self.worst_cast_from;
+            parts.push(format!(
+                "dearest cast {} tris on {on} from ({x:.0}, {y:.0}, {z:.0}) over {:.0} m",
+                self.worst_cast_triangles, self.worst_cast_range
+            ));
+        }
+        parts.join(", ")
+    }
+}
+
+/// A bot's think shorter than this is not worth its name in the log (ms).
+pub const NAMED_THINK_MS: f32 = 1.0;
+
+/// The class of unit `index` (`rep_inf_ep3_rifleman`), for [`TickCosts::add`].
+pub fn unit_name(walk: &crate::walk::WalkSim, index: u32) -> String {
+    let Some(u) = walk.sim.units.get(index as usize) else {
+        return String::new();
+    };
+    walk.teams
+        .get(usize::from(u.team))
+        .and_then(|t| t.classes.get(usize::from(u.spec.class)))
+        .map_or_else(String::new, |c| c.name.clone())
+}
+
 /// One frame's breakdown.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct FrameRow {
@@ -99,6 +197,9 @@ pub struct FrameRow {
     pub files: u32,
     #[serde(default)]
     pub file_bytes: u64,
+    /// What the frame's sim ticks cost.
+    #[serde(default)]
+    pub cost: TickCosts,
 }
 
 impl FrameRow {
@@ -136,6 +237,10 @@ impl FrameRow {
         }
         if self.files > 0 {
             s += &format!("  files {} ({} kB)", self.files, self.file_bytes / 1024);
+        }
+        let cost = self.cost.line();
+        if !cost.is_empty() {
+            s += &format!("  {cost}");
         }
         if !self.made.is_empty() {
             let bytes: u64 = self.made.iter().map(|m| m.bytes).sum();
@@ -403,6 +508,7 @@ pub struct FrameProfile {
     ticks: u32,
     ai_ms: f64,
     hook_ms: f64,
+    cost: TickCosts,
     /// The last frame, waiting for this one's start to know its length.
     pending: Option<(Instant, FrameRow)>,
     /// `pak::reads` at this frame's start.
@@ -470,6 +576,7 @@ impl FrameProfile {
             ticks: 0,
             ai_ms: 0.0,
             hook_ms: 0.0,
+            cost: TickCosts::default(),
             pending: None,
             reads: pak::reads(),
             sched: (0, 0),
@@ -525,6 +632,7 @@ impl FrameProfile {
         self.ticks = 0;
         self.ai_ms = 0.0;
         self.hook_ms = 0.0;
+        self.cost = TickCosts::default();
         self.reads = pak::reads();
         self.sched = sched;
     }
@@ -543,11 +651,19 @@ impl FrameProfile {
         self.drawn = Some((camera, player));
     }
 
-    /// One sim tick ran in this frame: its AI ms and its hook's.
-    pub fn tick(&mut self, ai_ms: f32, hook_ms: f64) {
+    /// One sim tick ran in this frame: its AI ms, its hook's and what it cost
+    /// (`name` names a bot for [`TickCosts::add`]).
+    pub fn tick(
+        &mut self,
+        ai_ms: f32,
+        hook_ms: f64,
+        cost: &core::sim::TickCost,
+        name: impl FnOnce(u32) -> String,
+    ) {
         self.ticks += 1;
         self.ai_ms += f64::from(ai_ms);
         self.hook_ms += hook_ms;
+        self.cost.add(cost, name);
     }
 
     /// The frame's work is done (`tick` = the sim's tick now): write the
@@ -624,6 +740,7 @@ impl FrameProfile {
                 queued_ms: 0.0,
                 files: (now.0 - self.reads.0) as u32,
                 file_bytes: now.1 - self.reads.1,
+                cost: std::mem::take(&mut self.cost),
             };
             self.pending = Some((self.start, row));
         }
@@ -691,6 +808,52 @@ mod tests {
             laps: vec![("render".into(), ms * 0.5), ("other".into(), ms * 0.5)],
             ..FrameRow::default()
         }
+    }
+
+    /// The log names the worst bot of the frame's ticks and adds up their rays.
+    #[test]
+    fn a_frames_ticks_add_up_and_the_worst_bot_is_named() {
+        use core::collision::cost::{RayCost, WorstCast};
+        use core::sim::{TickCost, UnitCost};
+        let tick = |unit, ms, tris| TickCost {
+            worst_think: Some(UnitCost {
+                unit,
+                ms,
+                ray_queries: 40,
+            }),
+            rays: RayCost {
+                queries: 100,
+                mesh_casts: 10,
+                triangles: tris,
+                worst: Some(WorstCast {
+                    triangles: tris,
+                    instance: Some(31),
+                    origin: [1.0, 2.0, 3.0],
+                    range: 50.0,
+                }),
+            },
+        };
+        let mut c = TickCosts::default();
+        c.add(&tick(3, 0.5, 20), |_| panic!("too short to name"));
+        c.add(&tick(12, 3.0, 400), |u| format!("trooper{u}"));
+        c.add(&tick(7, 2.0, 30), |_| panic!("not the worst"));
+        assert_eq!(c.ray_queries, 300);
+        assert_eq!(c.triangles, 450);
+        assert_eq!(
+            c.line(),
+            "worst unit trooper12 #12 3.0 ms (40 rays), rays 300 (30 mesh, 450 tris), \
+             dearest cast 400 tris on instance 31 from (1, 2, 3) over 50 m"
+        );
+        assert_eq!(TickCosts::default().line(), "");
+    }
+
+    /// An older snapshot without the new fields still reads.
+    #[test]
+    fn a_row_from_before_the_costs_still_reads() {
+        let mut old = serde_json::to_value(FrameRow::default()).unwrap();
+        old.as_object_mut().unwrap().remove("cost");
+        let row: FrameRow = serde_json::from_value(old).unwrap();
+        assert_eq!(row.cost, TickCosts::default());
     }
 
     #[test]

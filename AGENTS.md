@@ -137,3 +137,12 @@ Flat profile of a release binary: `perf record -F 499 -o <file> -- <bin>`, then 
 (~50x slower) and `callgrind_annotate --tree=caller --inclusive=yes`. Copy the binary first, run under the memory cap +
 `timeout`; wall clock is void while the loop loads the machine - quote instruction counts and shares. First finding: card
 HULLC (vehicle hulls re-welded every tick, 37.6 % of the sim on BF2 KAS2).
+
+To price a change to the frame, compare inside one run: `OPENBF_FRAMEAB=base,order:mesh,no:terrain OPENBF_GPU_TIMING=1
+OPENBF_BENCH_DETAIL=out.json game --map <dir> --bench ...` draws each world step once per state and prints each state's
+median difference from the first (`render::frame_ab`). Separate runs cannot do this while anything else uses the machine:
+another job moved the Intel GPU's timestamps by up to 4x between runs. The same bench lists the slowest ticks with their worst
+bot and ray counts.
+
+A new value labelled PROVISIONAL, OURS or INTERIM must say what measurement replaces it (`replace:`, `measure:` or `trace:`
+in its comment); `scripts/check_provisional.py` checks added lines, and `engine/ci.sh` runs it.

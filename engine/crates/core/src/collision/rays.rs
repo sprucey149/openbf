@@ -77,6 +77,7 @@ impl CollisionWorld {
         if max_len <= 0.0 {
             return None;
         }
+        super::cost::query();
         let mut best: Option<(f32, Vec3)> = None;
         // The ray goes straight down, so its XZ footprint is one point.
         self.visit_xz(origin.x, origin.x, origin.z, origin.z, hulls, |body| {
@@ -98,7 +99,7 @@ impl CollisionWorld {
             for pass in 0..RAY_DOWN_PASSES {
                 let o = body.to_local.transform_point3(origin - Vec3::Y * from);
                 let ray = parry3d::query::Ray::new(point(o), vector(d));
-                let Some(hit) = body.shape.cast_local(&ray, reach - from) else {
+                let Some(hit) = counted_cast(body, &ray, reach - from, origin) else {
                     return;
                 };
                 let t = from + hit.time_of_impact;
@@ -197,6 +198,7 @@ impl CollisionWorld {
         if max_t <= 0.0 {
             return None;
         }
+        super::cost::query();
         let mut seg = Aabb::empty();
         seg.add(origin);
         seg.add(origin + dir * max_t);
@@ -213,7 +215,7 @@ impl CollisionWorld {
             let o = body.to_local.transform_point3(origin);
             let d = body.to_local.transform_vector3(dir);
             let ray = parry3d::query::Ray::new(point(o), vector(d));
-            let Some(hit) = body.shape.cast_local(&ray, max_t) else {
+            let Some(hit) = counted_cast(body, &ray, max_t, origin) else {
                 return;
             };
             if best.is_none_or(|(t, _, _)| hit.time_of_impact < t) {
@@ -374,6 +376,18 @@ fn at_least(dirs: &[Vec3], min: usize, test: impl Fn(&Vec3) -> bool) -> bool {
     false
 }
 
+/// A cast against `body`, with the slow-frame log told whose it was.
+fn counted_cast(
+    body: &Body,
+    ray: &parry3d::query::Ray,
+    reach: f32,
+    origin: Vec3,
+) -> Option<parry3d::query::RayIntersection> {
+    let hit = body.shape.cast_local(ray, reach);
+    super::cost::mesh_cast_of(body.instance, origin.to_array(), reach);
+    hit
+}
+
 /// How many of `body`'s faces the segment `p + dir·[0, reach]` passes
 /// through, walking from one hit to the next (a guard of
 /// [`ENCLOSE_PASSES`]; past it the count is 0, an open answer).
@@ -383,7 +397,7 @@ fn crossings(body: &Body, p: Vec3, dir: Vec3, reach: f32) -> usize {
         let o = body.to_local.transform_point3(p + dir * from);
         let d = body.to_local.transform_vector3(dir);
         let ray = parry3d::query::Ray::new(point(o), vector(d));
-        match body.shape.cast_local(&ray, reach - from) {
+        match counted_cast(body, &ray, reach - from, p) {
             Some(h) => from += h.time_of_impact + 1e-3,
             None => return n,
         }

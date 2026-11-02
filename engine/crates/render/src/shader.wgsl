@@ -77,6 +77,11 @@ struct Globals {
     iface_dir: vec3<f32>, _pad11: f32,
 };
 
+// The twins in `render::NoDiscard` set this false: a draw whose bands and fade
+// cannot fire this frame (`render::draw::may_discard`) runs without `far_cull`'s
+// discards, so the GPU can write its depth before shading.
+override CULLS: bool = true;
+
 @group(0) @binding(0) var<uniform> globals: Globals;
 // BF2's local lights (`render::point_light`, card BPNT): the view's table.
 // Record 0 is "no light"; an instance names up to four records.
@@ -339,6 +344,9 @@ fn fs_main(raw: VsOut) -> @location(0) vec4<f32> {
 // scene's model / LOWD switch picks a whole draw on the CPU,
 // `render::LodSwitch`). `render::fragment_kept` is this test in Rust.
 fn far_cull(in: VsOut) {
+    if !CULLS {
+        return;
+    }
     let u = bayer4(in.clip_pos.xy);
     if in.view_dist > mix(in.cull.x, in.cull.y, u)
         || in.view_dist < mix(in.cull_near.x, in.cull_near.y, u) {

@@ -115,19 +115,24 @@ impl GpuTimer {
     /// Read every slot the GPU has finished, newest last, then start this
     /// frame: its first timestamp on `encoder`.
     pub(crate) fn begin(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder) {
-        let _ = device.poll(wgpu::PollType::Poll);
-        for k in 0..RING {
-            let i = (self.next + k) % RING;
-            if self.ring[i].state.load(Ordering::Acquire) == MAPPED {
-                self.read(i);
-            }
-        }
+        self.collect(device);
         self.labels.clear();
         self.pending =
             (self.ring[self.next].state.load(Ordering::Acquire) == IDLE).then_some(self.next);
         if self.pending.is_some() {
             encoder.write_timestamp(&self.set, 0);
             self.labels.push("start");
+        }
+    }
+
+    /// Read every slot the GPU has finished, newest last.
+    pub(crate) fn collect(&mut self, device: &wgpu::Device) {
+        let _ = device.poll(wgpu::PollType::Poll);
+        for k in 0..RING {
+            let i = (self.next + k) % RING;
+            if self.ring[i].state.load(Ordering::Acquire) == MAPPED {
+                self.read(i);
+            }
         }
     }
 

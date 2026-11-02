@@ -144,6 +144,7 @@ impl ReplayFrame {
         let mut draws = gpu.view_draws(&walk.sim, walk.player);
         walk_draws(self.cube, walk, &mut draws, self.models);
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
+        self.deka_vis.eye = Some(cam.position);
         draws.extend(self.deka_vis.draws(r, &walk.sim));
         let (width, height) = r.size();
         self.vis

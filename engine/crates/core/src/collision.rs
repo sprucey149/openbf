@@ -134,6 +134,7 @@
 //! part uses, and the test fixtures the parts' tests share.
 
 mod ceilings;
+pub mod cost;
 mod rays;
 mod shape;
 mod walls;

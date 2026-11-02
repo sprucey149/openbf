@@ -397,6 +397,10 @@ struct App {
     /// The frame record (dev mode, card HITCH) and `OPENBF_FRAME_PROFILE=<csv>`'s
     /// row of CPU / GPU ms per battle frame (`game::frame_profile`).
     frame_profile: Option<game::frame_profile::FrameProfile>,
+    /// Low Power Resolution's controller (`game::dyn_res`).
+    dyn_res: game::dyn_res::DynRes,
+    /// What it holds this battle's frames to, read from the display once.
+    dyn_res_budget_ms: Option<f32>,
     profile: game::profile::Profile,
     round_recorded: bool,
     /// Previous frame's menu-relevant buttons (edge detection).
@@ -611,6 +615,8 @@ impl App {
             pause_menu: game::pause::PauseMenu::default(),
             quit_clicked: false,
             frame_profile: None,
+            dyn_res: game::dyn_res::DynRes::default(),
+            dyn_res_budget_ms: None,
             profile,
             round_recorded: false,
             fx: game::fx::Fx::default(),
@@ -1517,6 +1523,7 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             invert_y: self.profile.settings.invert_y,
+                            low_power_resolution: self.profile.settings.low_power_resolution,
                             input_icons_label: self.profile.settings.input_icons.label(),
                             icons,
                             first_person: self.profile.settings.viewpoint.is_first(),
@@ -1623,6 +1630,7 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             invert_y: self.profile.settings.invert_y,
+                            low_power_resolution: self.profile.settings.low_power_resolution,
                             input_icons_label: self.profile.settings.input_icons.label(),
                             first_person: self.profile.settings.viewpoint.is_first(),
                             ..model
@@ -1691,7 +1699,9 @@ impl winit::application::ApplicationHandler for App {
                             }
                             if let Some(p) = self.frame_profile.as_mut() {
                                 let hook = hook_t0.elapsed().as_secs_f64() * 1000.0;
-                                p.tick(walk.sim.ai_wall_ms, hook);
+                                p.tick(walk.sim.ai_wall_ms, hook, &walk.sim.tick_cost, |u| {
+                                    game::frame_profile::unit_name(walk, u)
+                                });
                             }
                             tick_pad.clear_once();
                         });
@@ -1863,6 +1873,7 @@ impl winit::application::ApplicationHandler for App {
                     see = walk.camera_see_through();
                     if let Some(r) = self.renderer.as_mut() {
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
+                        self.deka_vis.eye = Some(walk.camera().position);
                         extra.extend(self.deka_vis.draws(r, &walk.sim));
                     }
                     if let Some(vis) = self.soldier_vis.as_mut() {
@@ -2159,6 +2170,26 @@ impl winit::application::ApplicationHandler for App {
                         let tick = self.walk.as_ref().map_or(0, |w| w.0.sim.tick);
                         p.end(f64::from(dt) * 1000.0, tick, r);
                     }
+                    // A battle only, and a fresh controller for each: a load
+                    // screen's long frames say nothing about the battle's.
+                    r.set_world_scale(
+                        if self.profile.settings.low_power_resolution && self.walk.is_some() {
+                            let window = &self.window;
+                            let budget = *self.dyn_res_budget_ms.get_or_insert_with(|| {
+                                game::dyn_res::display_budget_ms(
+                                    window
+                                        .as_ref()
+                                        .and_then(|w| w.current_monitor())
+                                        .and_then(|m| m.refresh_rate_millihertz()),
+                                )
+                            });
+                            self.dyn_res.frame(dt * 1000.0, budget)
+                        } else {
+                            self.dyn_res = game::dyn_res::DynRes::default();
+                            self.dyn_res_budget_ms = None;
+                            1.0
+                        },
+                    );
                     if let Err(e) = result {
                         eprintln!("render: {e}");
                         event_loop.exit();

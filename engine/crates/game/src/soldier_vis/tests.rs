@@ -331,6 +331,51 @@ fn the_weapon_in_hand_follows_the_switch_and_the_throw() {
     );
 }
 
+/// A frame asks for a soldier's palette many times and pays for it once; a step
+/// of the animator always shows, so what is drawn is what the animator says.
+#[test]
+fn a_palette_is_computed_once_a_tick_and_follows_the_animator() {
+    let root = crate::assets::baked_root();
+    let geometry = "rep_inf_trooper";
+    if !root
+        .join(format!("side_bf2/soldiers/{geometry}.glb"))
+        .exists()
+    {
+        eprintln!("skip: no bf2 {geometry} bake");
+        return;
+    }
+    let t = team(&[("trooper", Some(geometry), None)]);
+    let mut vis = SoldierVisuals::load_cpu(&root, "bf2", &[t.clone(), t]);
+    let mut walk = WalkSim::new(7, Vec3::ZERO, None);
+    let me = walk.player.index as usize;
+    let palette_of = |vis: &SoldierVisuals, walk: &WalkSim| {
+        vis.posed(walk)
+            .into_iter()
+            .find(|p| p.0 == me)
+            .expect("drawn")
+            .3
+    };
+    let mut moved = false;
+    let mut last: Option<std::sync::Arc<[Mat4]>> = None;
+    for _ in 0..30 {
+        walk.step_tick(&[core::sim::PadState {
+            ly: i16::MAX,
+            ..core::sim::PadState::default()
+        }]);
+        vis.update(&walk, core::TICK_DT);
+        let first = palette_of(&vis, &walk);
+        let again = palette_of(&vis, &walk);
+        assert!(std::sync::Arc::ptr_eq(&first, &again), "one per tick");
+        let v = &vis.units[me];
+        let skeleton = &vis.asset_for(0, 0).expect("a body").asset.skeleton;
+        let fresh = skeleton.palette(&v.animator.pose(skeleton).locals());
+        assert_eq!(&first[..], &fresh[..], "what the animator says now");
+        moved |= last.is_some_and(|l| l[..] != first[..]);
+        last = Some(first);
+    }
+    assert!(moved, "a walking soldier's pose moves");
+}
+
 /// Card ROLLS: a roll to a unit's side - the player's and a bot's, through
 /// the input this module fills from the sim - turns the DRAWN body so its
 /// dive points along the velocity, on a real soldier of each game.

@@ -108,6 +108,13 @@
 //!   OPENBF_BENCH_DETAIL=<out.json>  with --bench: raw per-tick CPU and
 //!                                 per-frame rows to that file instead of the
 //!                                 summary (--bench-frames 0 = sim only)
+//!   OPENBF_FRAMEAB=<state,state..>  with OPENBF_BENCH_DETAIL and
+//!                                 OPENBF_GPU_TIMING=1: draw each world step once
+//!                                 per state and print each state's price
+//!                                 against the first (`base`, `no:<section>`,
+//!                                 `order:<order>`, `discard:on`, `scale:<f>`,
+//!                                 `foliage:unfiltered`, joined by `~`;
+//!                                 render::frame_ab)
 //!   OPENBF_BENCH_TOTAL_PER_SIDE=<any>  with OPENBF_BENCH_DETAIL: --ai <n>
 //!                                 counts the human, n soldiers a side in all
 //!   OPENBF_BENCH_TARGET_TICKS=<n,n..>  with OPENBF_BENCH_DETAIL: these one-based

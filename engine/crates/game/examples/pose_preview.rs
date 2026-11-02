@@ -148,7 +148,7 @@ fn main() -> anyhow::Result<()> {
                     [0.85, 0.85, 0.9, 1.0]
                 },
                 model,
-                palette: palette.clone(),
+                palette: palette.clone().into(),
                 layer: *layer,
                 light: render::LightPath::Character,
                 lit: None,

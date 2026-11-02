@@ -39,6 +39,7 @@ pub struct MenuModel {
     pub music_volume: f32,
     pub mouse_sensitivity: f32,
     pub invert_y: bool,
+    pub low_power_resolution: bool,
     /// The Input icons row's value and the footer's names.
     pub input_icons_label: &'static str,
     pub icons: crate::input_icons::Icons,
@@ -74,6 +75,7 @@ pub enum MenuAction {
     SetMusic(f32),
     SetMouseSensitivity(f32),
     ToggleInvertY,
+    ToggleLowPowerResolution,
     /// The Input icons row, a step on (+1) or back (-1) through its choices.
     CycleInputIcons(i32),
     ToggleViewpoint,
@@ -239,6 +241,7 @@ pub enum Row {
     Music,
     MouseSensitivity,
     InvertY,
+    LowPowerResolution,
     InputIcons,
     Quit,
 }
@@ -266,6 +269,7 @@ pub fn rows(m: &MenuModel) -> Vec<Row> {
     v.push(Row::Music);
     v.push(Row::MouseSensitivity);
     v.push(Row::InvertY);
+    v.push(Row::LowPowerResolution);
     v.push(Row::InputIcons);
     v.push(Row::Viewpoint);
     if m.in_shell.is_none() {
@@ -393,6 +397,9 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
         }
         Row::InvertY if input.confirm || input.left || input.right => {
             actions.push(MenuAction::ToggleInvertY)
+        }
+        Row::LowPowerResolution if input.confirm || input.left || input.right => {
+            actions.push(MenuAction::ToggleLowPowerResolution)
         }
         // Cross steps on too: a paused frame's Left / Right are the Morse
         // keys (`game::pause::rows_input`), so a pad needs another way round.
@@ -595,6 +602,16 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                         "Invert mouse Y".into(),
                                         Some(if m.invert_y { "ON".into() } else { "off".into() }),
                                     ),
+                                    Row::LowPowerResolution => row_label(
+                                        ui,
+                                        sel,
+                                        "Low power resolution".into(),
+                                        Some(if m.low_power_resolution {
+                                            "ON".into()
+                                        } else {
+                                            "off".into()
+                                        }),
+                                    ),
                                     Row::Quit => row_label(ui, sel, "Quit to desktop".into(), None),
                                 };
                                 if clicked.clicked_by(egui::PointerButton::Primary) {
@@ -608,6 +625,9 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                         Row::Resume => actions.push(MenuAction::Resume),
                                         Row::Cheat(k) => actions.push(MenuAction::ToggleCheat(*k)),
                                         Row::InvertY => actions.push(MenuAction::ToggleInvertY),
+                                        Row::LowPowerResolution => {
+                                            actions.push(MenuAction::ToggleLowPowerResolution)
+                                        }
                                         Row::InputIcons => {
                                             actions.push(MenuAction::CycleInputIcons(1))
                                         }
@@ -823,6 +843,7 @@ mod tests {
             music_volume: 1.0,
             mouse_sensitivity: 1.0,
             invert_y: false,
+            low_power_resolution: false,
             input_icons_label: "Auto",
             icons: Default::default(),
             first_person: false,
@@ -915,6 +936,8 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(go(&m, confirm), vec![MenuAction::ToggleInvertY]);
+        m.cursor = at(&m, Row::LowPowerResolution);
+        assert_eq!(go(&m, confirm), vec![MenuAction::ToggleLowPowerResolution]);
         assert_eq!(rows(&m).last(), Some(&Row::Quit));
     }
 

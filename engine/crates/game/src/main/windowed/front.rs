@@ -646,6 +646,7 @@ impl App {
                 music_volume: settings.music_volume,
                 mouse_sensitivity: settings.mouse_sensitivity,
                 invert_y: settings.invert_y,
+                low_power_resolution: settings.low_power_resolution,
                 input_icons_label: settings.input_icons.label(),
                 icons,
                 first_person: settings.viewpoint.is_first(),
@@ -818,6 +819,7 @@ impl App {
             if matches!(
                 action,
                 ui::menu::MenuAction::ToggleInvertY
+                    | ui::menu::MenuAction::ToggleLowPowerResolution
                     | ui::menu::MenuAction::ToggleViewpoint
                     | ui::menu::MenuAction::CycleInputIcons(_)
             ) {
@@ -883,6 +885,9 @@ impl App {
                 )
             }
             MenuAction::ToggleInvertY => s.invert_y = !s.invert_y,
+            MenuAction::ToggleLowPowerResolution => {
+                s.low_power_resolution = !s.low_power_resolution
+            }
             MenuAction::CycleInputIcons(dir) => s.input_icons = s.input_icons.cycled(dir),
             MenuAction::ToggleViewpoint => s.viewpoint = s.viewpoint.toggled(),
         }

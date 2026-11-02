@@ -50,6 +50,29 @@ fn target_ticks() -> Vec<u32> {
         .unwrap_or_default()
 }
 
+/// The slowest ticks of a run, with what they cost.
+#[derive(Default)]
+struct SlowTicks(Vec<(u32, f64, game::frame_profile::TickCosts)>);
+
+impl SlowTicks {
+    const KEPT: usize = 5;
+
+    fn keep(&mut self, tick: u32, ms: f64, cost: &game::frame_profile::TickCosts) {
+        if self.0.len() == Self::KEPT && self.0.last().is_some_and(|t| t.1 >= ms) {
+            return;
+        }
+        self.0.push((tick, ms, cost.clone()));
+        self.0.sort_by(|a, b| b.1.total_cmp(&a.1));
+        self.0.truncate(Self::KEPT);
+    }
+
+    fn print(&self) {
+        for (tick, ms, cost) in &self.0 {
+            println!("slow tick {tick}: {ms:.1} ms, {}", cost.line());
+        }
+    }
+}
+
 fn ms(t: Instant) -> f64 {
     t.elapsed().as_secs_f64() * 1000.0
 }
@@ -86,6 +109,7 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
     let initial_hash = format!("{:016x}", walk.sim.hash());
     let pad = [core::sim::PadState::default()];
     let mut ticks = Vec::with_capacity(v.bench_ticks as usize);
+    let mut slowest = SlowTicks::default();
     let mut hashes = Vec::new();
     let mut cameras = Vec::new();
     let targets = target_ticks();
@@ -99,7 +123,14 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         }
         let cpu = cpu.zip(cpu_ms()).map(|(a, b)| b - a);
         let wall = ms(t);
-        ticks.push(json!({"tick": k + 1, "wall_ms": wall, "cpu_ms": cpu}));
+        let mut cost = game::frame_profile::TickCosts::default();
+        cost.add(&walk.sim.tick_cost, |u| {
+            game::frame_profile::unit_name(&walk, u)
+        });
+        slowest.keep(k + 1, wall, &cost);
+        ticks.push(json!({
+            "tick": k + 1, "wall_ms": wall, "cpu_ms": cpu, "cost": serde_json::to_value(&cost)?,
+        }));
         if (k + 1) % 30 == 0 || k + 1 == v.bench_ticks {
             hashes.push(json!([k + 1, format!("{:016x}", walk.sim.hash())]));
             let cam = walk.camera();
@@ -135,6 +166,7 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
         render(v, &scene, &setup, &mut walk, &mut report)?;
     }
     std::fs::write(output, serde_json::to_vec(&report)?)?;
+    slowest.print();
     println!("detailed bench {}: sim hash {sim_hash}", output.display());
     Ok(())
 }
@@ -244,25 +276,15 @@ fn render(
         view.cam_set = true;
     }
     report["camera"] = json!(view.cam);
+    if let Some(states) = pricing_states()? {
+        return price_states(
+            v, &mut r, &mut gpu, walk, &mut frame, &view, &states, report,
+        );
+    }
     for k in 0..=v.bench_frames {
         let t = Instant::now();
         if k % 2 == 0 {
-            measured_tick(walk, &[core::sim::PadState::default()]);
-            gpu.step_stations(&walk.sim);
-            frame.fx.ingest_posed(walk, Some(&frame.vis));
-            drop(frame.fx.take_sounds());
-            frame.vis.update(walk, core::TICK_DT);
-            let mut points = frame.vis.fire_points(walk);
-            frame.deka_vis.fire_points(&walk.sim, &mut points);
-            frame.fx.set_repair_origins(&points);
-            frame.bolts.set_fire_points(points);
-            frame.fx.set_jet_frames(frame.vis.jet_frames(walk));
-            frame.fx.update(core::TICK_DT);
-            if let Some(w) = frame.weather.as_mut() {
-                w.update(core::TICK_DT);
-            }
-            frame.bolts.update(walk, core::TICK_DT);
-            tick_event_feed(&mut frame.feed, &walk.sim, walk.player, v.hud);
+            step_world(v, &mut gpu, walk, &mut frame);
         }
         let update_ms = ms(t);
         let render_start = Instant::now();
@@ -284,6 +306,111 @@ fn render(
     }
     render::made::enable(false);
     Ok(())
+}
+
+/// `OPENBF_FRAMEAB=base,order:mesh,no:models`: price these states. The first
+/// is what the others are priced against.
+fn pricing_states() -> Result<Option<Vec<(String, render::FrameAb)>>> {
+    let Ok(list) = std::env::var("OPENBF_FRAMEAB") else {
+        return Ok(None);
+    };
+    let states = list
+        .split(',')
+        .map(|name| {
+            render::FrameAb::parse(name.trim())
+                .map(|ab| (name.trim().to_string(), ab))
+                .map_err(|e| anyhow!("OPENBF_FRAMEAB: {e}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(states))
+}
+
+/// Per-frame interleaved pricing (`render::frame_ab`): each round is one world
+/// step drawn once per state, in an order that rotates so no state always
+/// follows the same one. The states differ only in the renderer, and the sim
+/// steps as it does without them: `final_hash` must not move.
+/// `--capture-frame x.png` writes the last round's frames as `x.<state>.png`.
+#[allow(clippy::too_many_arguments)]
+fn price_states(
+    v: &ViewerArgs,
+    r: &mut Renderer,
+    gpu: &mut SceneGpu,
+    walk: &mut WalkSim,
+    frame: &mut ReplayFrame,
+    view: &ViewerArgs,
+    states: &[(String, render::FrameAb)],
+    report: &mut serde_json::Value,
+) -> Result<()> {
+    anyhow::ensure!(
+        r.gpu_timing_on(),
+        "OPENBF_FRAMEAB prices GPU time: run with OPENBF_GPU_TIMING=1 on an adapter with timestamps"
+    );
+    let names: Vec<String> = states.iter().map(|s| s.0.clone()).collect();
+    let mut rounds = Vec::with_capacity(v.bench_frames as usize);
+    for k in 0..=v.bench_frames {
+        if k % 2 == 0 {
+            step_world(v, gpu, walk, frame);
+        }
+        let mut round = vec![game::bench::PricedFrame::default(); states.len()];
+        for at in 0..states.len() {
+            let s = (at + k as usize) % states.len();
+            r.frame_ab = states[s].1;
+            let cpu = cpu_ms();
+            frame.render(r, gpu, walk, view, 1.0 / 60.0)?;
+            let cpu = cpu.zip(cpu_ms()).map(|(a, b)| b - a);
+            r.wait_idle().map_err(|e| anyhow!("{e}"))?;
+            r.collect_gpu_timing();
+            round[s] = game::bench::PricedFrame {
+                sections: r
+                    .gpu_sections()
+                    .iter()
+                    .map(|(l, ms)| (l.to_string(), *ms))
+                    .collect(),
+                cpu_ms: cpu,
+                draw_calls: r.frame_stats().draw_calls,
+            };
+            if let (Some(path), true) = (&v.capture_frame, k == v.bench_frames) {
+                let (rgba, w, h) = r.capture_rgba()?;
+                let path = path.with_extension(format!("{}.png", states[s].0.replace(':', "_")));
+                image::save_buffer(path, &rgba, w, h, image::ColorType::Rgba8)?;
+            }
+        }
+        rounds.push(round);
+    }
+    r.frame_ab = render::FrameAb::default();
+    let prices = game::bench::price(&names, &rounds);
+    game::bench::print_prices(&prices);
+    report["prices"] = json!(prices
+        .iter()
+        .map(|p| json!({
+            "state": p.state, "rounds": p.rounds, "gpu_ms": p.gpu_ms, "delta_ms": p.delta_ms,
+            "delta_q1": p.delta_q1, "delta_q3": p.delta_q3, "cpu_delta_ms": p.cpu_delta_ms,
+            "draw_calls": p.draw_calls, "sections": p.sections,
+        }))
+        .collect::<Vec<_>>());
+    report["final_hash"] = json!(format!("{:016x}", walk.sim.hash()));
+    render::made::enable(false);
+    Ok(())
+}
+
+/// One sim tick and everything the frames read from it, as a battle frame does.
+fn step_world(v: &ViewerArgs, gpu: &mut SceneGpu, walk: &mut WalkSim, frame: &mut ReplayFrame) {
+    measured_tick(walk, &[core::sim::PadState::default()]);
+    gpu.step_stations(&walk.sim);
+    frame.fx.ingest_posed(walk, Some(&frame.vis));
+    drop(frame.fx.take_sounds());
+    frame.vis.update(walk, core::TICK_DT);
+    let mut points = frame.vis.fire_points(walk);
+    frame.deka_vis.fire_points(&walk.sim, &mut points);
+    frame.fx.set_repair_origins(&points);
+    frame.bolts.set_fire_points(points);
+    frame.fx.set_jet_frames(frame.vis.jet_frames(walk));
+    frame.fx.update(core::TICK_DT);
+    if let Some(w) = frame.weather.as_mut() {
+        w.update(core::TICK_DT);
+    }
+    frame.bolts.update(walk, core::TICK_DT);
+    tick_event_feed(&mut frame.feed, &walk.sim, walk.player, v.hud);
 }
 
 fn made() -> serde_json::Value {

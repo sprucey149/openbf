@@ -335,6 +335,63 @@ impl Renderer {
         let fade_skinned_blend_pipeline =
             skinned("skinned fade blend pipeline", "fs_blend_fade", alpha, false);
 
+        let world_scale = crate::world_scale::WorldScale::new(&device, format);
+        // The same depth-writing passes without `far_cull`'s discards.
+        let no_cull: &[(&str, f64)] = &[("CULLS", 0.0)];
+        let clean = |desc: PipelineDesc<'_>| desc.build_with(&device, &shader, format, no_cull);
+        let no_discard = crate::NoDiscard {
+            opaque: clean(PipelineDesc::world(
+                "map pipeline, no discard",
+                &pipeline_layout,
+                &vb,
+            )),
+            mask: clean(PipelineDesc {
+                fs: "fs_mask",
+                ..PipelineDesc::world("map mask pipeline, no discard", &pipeline_layout, &vb)
+            }),
+            fade: clean(PipelineDesc {
+                fs: "fs_fade",
+                blend: alpha,
+                ..PipelineDesc::world("map fade pipeline, no discard", &pipeline_layout, &vb)
+            }),
+            fade_mask: clean(PipelineDesc {
+                fs: "fs_mask_fade",
+                blend: alpha,
+                ..PipelineDesc::world("map fade mask pipeline, no discard", &pipeline_layout, &vb)
+            }),
+            terrain_layer: clean(PipelineDesc {
+                fs: "fs_terrain_layer",
+                blend: alpha,
+                depth_write: false,
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                ..PipelineDesc::world(
+                    "map terrain layer pipeline, no discard",
+                    &pipeline_layout,
+                    &vb,
+                )
+            }),
+            water: clean(PipelineDesc {
+                fs: "fs_water",
+                blend: alpha,
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                ..PipelineDesc::world("map water pipeline, no discard", &pipeline_layout, &vb)
+            }),
+            skinned: clean(PipelineDesc {
+                vs: "vs_skinned",
+                ..PipelineDesc::world("skinned pipeline, no discard", &skinned_layout, &skinned_vb)
+            }),
+            fade_skinned: clean(PipelineDesc {
+                vs: "vs_skinned",
+                fs: "fs_fade",
+                blend: alpha,
+                ..PipelineDesc::world(
+                    "skinned fade pipeline, no discard",
+                    &skinned_layout,
+                    &skinned_vb,
+                )
+            }),
+        };
+
         // The SPECULAR pass (`specular.rs`): additive — One, One on colour,
         // the destination alpha kept — depth-tested `LessEqual` on its base
         // draw's own depth with no depth write
@@ -636,6 +693,7 @@ impl Renderer {
             speckle_pipeline,
             far_sheet_pipeline,
             terrain_layer_pipeline,
+            no_discard,
             fade_pipeline,
             fade_mask_pipeline,
             fade_blend_pipeline,
@@ -647,6 +705,9 @@ impl Renderer {
             gpu_timer,
             acquire_ms: 0.0,
             cull: true,
+            frame_ab: crate::FrameAb::default(),
+            world_scale_now: 1.0,
+            world_scale,
             skinned_pipeline,
             skinned_blend_pipeline,
             skinned_meshes: Vec::new(),
@@ -654,6 +715,7 @@ impl Renderer {
             palette_buf,
             palette_bg,
             palette_capacity,
+            palette_upload: Vec::new(),
             skinned_instance_buf,
             spec_pipeline,
             spec_skinned_pipeline,
@@ -763,6 +825,17 @@ impl<'a> PipelineDesc<'a> {
         shader: &wgpu::ShaderModule,
         format: wgpu::TextureFormat,
     ) -> wgpu::RenderPipeline {
+        self.build_with(device, shader, format, &[])
+    }
+
+    /// This pipeline with the fragment stage's override `constants`.
+    fn build_with(
+        &self,
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        format: wgpu::TextureFormat,
+        constants: &[(&str, f64)],
+    ) -> wgpu::RenderPipeline {
         crate::made::render_pipeline(
             device,
             &wgpu::RenderPipelineDescriptor {
@@ -782,7 +855,10 @@ impl<'a> PipelineDesc<'a> {
                         blend: self.blend,
                         write_mask: FRAME_WRITES,
                     })],
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants,
+                        ..Default::default()
+                    },
                 }),
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,

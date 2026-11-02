@@ -111,6 +111,7 @@ pub fn apply_menu_action(
         MenuAction::Quit
         | MenuAction::SetMouseSensitivity(_)
         | MenuAction::ToggleInvertY
+        | MenuAction::ToggleLowPowerResolution
         | MenuAction::CycleInputIcons(_)
         | MenuAction::ToggleViewpoint => {}
     }

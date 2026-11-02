@@ -7,25 +7,27 @@ use parry3d::shape::{FeatureId, TriMesh};
 
 pub(super) fn cast(mesh: &TriMesh, ray: &Ray, max_t: f32) -> Option<RayIntersection> {
     let bounds = RayBounds::new(ray);
-    mesh.bvh()
-        .find_best(
-            max_t,
-            |node, limit| bounds.cast(node, limit),
-            |triangle, limit| {
-                mesh.triangle(triangle)
-                    .cast_local_ray_and_get_normal(ray, limit, false)
-            },
-        )
-        .map(|(triangle, mut hit)| {
-            // Keep TriMesh's backface feature convention as well as its
-            // normal, even though the world currently only reads the latter.
-            hit.feature = if hit.feature == FeatureId::Face(1) {
-                FeatureId::Face(triangle + mesh.indices().len() as u32)
-            } else {
-                FeatureId::Face(triangle)
-            };
-            hit
-        })
+    let tested = std::cell::Cell::new(0u32);
+    let best = mesh.bvh().find_best(
+        max_t,
+        |node, limit| bounds.cast(node, limit),
+        |triangle, limit| {
+            tested.set(tested.get() + 1);
+            mesh.triangle(triangle)
+                .cast_local_ray_and_get_normal(ray, limit, false)
+        },
+    );
+    super::super::cost::mesh_cast(tested.get());
+    best.map(|(triangle, mut hit)| {
+        // Keep TriMesh's backface feature convention as well as its
+        // normal, even though the world currently only reads the latter.
+        hit.feature = if hit.feature == FeatureId::Face(1) {
+            FeatureId::Face(triangle + mesh.indices().len() as u32)
+        } else {
+            FeatureId::Face(triangle)
+        };
+        hit
+    })
 }
 
 struct RayBounds {

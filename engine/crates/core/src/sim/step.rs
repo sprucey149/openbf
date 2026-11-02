@@ -117,6 +117,8 @@ impl Sim {
     /// peer whose packet has not arrived).
     pub fn step(&mut self, pads: &[PadState]) {
         let dt = TICK_DT;
+        // The rays since the last step were not the sim's (the chase camera's).
+        crate::collision::cost::take();
         self.events.clear();
         self.shot_flights.clear();
         // The hulls where their vehicles are (card VHULL): a caller may have
@@ -254,15 +256,28 @@ impl Sim {
         // Card TEAM: the unit grid answers "who is near" for the thinks, which
         // read a sim no one moves until the write-back.
         self.unit_grid.build(&self.units);
+        // The bot that took longest, and the rays it cast (the slow-frame log).
+        let mut worst_think: Option<crate::sim::UnitCost> = None;
         for (i, u) in self.units.iter().enumerate() {
             if u.alive && u.controller == Controller::Ai {
                 let mut st = u.ai;
+                let think_t0 = std::time::Instant::now();
+                let queries_before = crate::collision::cost::queries();
                 let (p, nt) = ai::think(self, self.handle(i), &mut st);
+                let ms = think_t0.elapsed().as_secs_f32() * 1000.0;
+                if worst_think.is_none_or(|w| ms > w.ms) {
+                    worst_think = Some(crate::sim::UnitCost {
+                        unit: i as u32,
+                        ms,
+                        ray_queries: crate::collision::cost::queries() - queries_before,
+                    });
+                }
                 ai_updates.push((i, u.gen, u.mount, st, p, nt));
             }
         }
         self.unit_grid.clear();
         self.ai_wall_ms = ai_t0.elapsed().as_secs_f32() * 1000.0;
+        self.tick_cost.worst_think = worst_think;
         let mut recycled: Vec<(usize, DeathCause)> = Vec::new();
         // Card UNSN: the bots moved on unseen this tick, and where to.
         let mut relocated: Vec<(usize, Vec3)> = Vec::new();
@@ -1066,6 +1081,7 @@ impl Sim {
         // on BF2 the same rule asks the Grenade line, card UVO2:
         // `FUN_002a89b8` B2:229141 - its delay PROVISIONAL, BF1's).
         self.grenade_calls();
+        self.tick_cost.rays = crate::collision::cost::take();
         self.tick += 1;
     }
 }

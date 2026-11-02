@@ -105,7 +105,7 @@ pub struct VehicleVisuals {
     shadow_triangles: Vec<[f32; 3]>,
     /// Per `Sim::vehicles` slot: the class its dynamic meshes were made for
     /// and one mesh per part (card WSKN).
-    posed: std::collections::HashMap<usize, (u32, Vec<MeshHandle>)>,
+    posed: std::collections::HashMap<usize, PosedMeshes<u32>>,
     /// The world models' far cull and the specular pass's (`upload_scene`'s).
     cull: Option<f32>,
     spec_cull: Option<f32>,
@@ -465,31 +465,67 @@ impl VehicleVisuals {
     }
 }
 
+/// One CPU-skinned model's meshes: whom they were made for, and the palette
+/// their vertices hold, so a frame that changes nothing uploads nothing.
+pub(super) struct PosedMeshes<K> {
+    key: K,
+    meshes: Vec<MeshHandle>,
+    palette: Vec<Mat4>,
+}
+
+/// How often a CPU-skinned model's vertices follow its pose, in ticks, by its
+/// distance from the eye. Only the drawn vertices wait: what the sim and the
+/// effects read comes from the pose itself, which still moves every tick.
+/// PROVISIONAL, measure: frame CPU and a look at BF2 Geonosis's droidekas on a
+/// handheld; these distances were chosen on this PC's numbers alone.
+pub(super) fn skin_period(distance: f32) -> u64 {
+    match distance {
+        d if d <= 40.0 => 1,
+        d if d <= 120.0 => 2,
+        _ => 4,
+    }
+}
+
+/// Whether model `slot` re-skins this tick, the slots taking turns.
+pub(super) fn skin_due(slot: usize, tick: u64, distance: f32) -> bool {
+    (tick + slot as u64).is_multiple_of(skin_period(distance))
+}
+
 pub(super) fn pose_class<K: Copy + PartialEq>(
     r: &mut Renderer,
-    posed: &mut HashMap<usize, (K, Vec<MeshHandle>)>,
+    posed: &mut HashMap<usize, PosedMeshes<K>>,
     slot: usize,
     key: K,
     class: &ClassVis,
     palette: &[Mat4],
+    due: bool,
 ) -> Result<Vec<MeshHandle>> {
     let Some(sk) = &class.skin else {
         anyhow::bail!("not skinned");
     };
+    if !due {
+        if let Some(last) = posed.get(&slot).filter(|p| p.key == key) {
+            return Ok(last.meshes.clone());
+        }
+    }
     pose_skinned(r, posed, slot, key, class, sk, palette)
 }
 
 fn pose_skinned<K: Copy + PartialEq>(
     r: &mut Renderer,
-    posed: &mut HashMap<usize, (K, Vec<MeshHandle>)>,
+    posed: &mut HashMap<usize, PosedMeshes<K>>,
     slot: usize,
     key: K,
     class: &ClassVis,
     sk: &Skin,
     palette: &[Mat4],
 ) -> Result<Vec<MeshHandle>> {
+    let last = posed.get(&slot).filter(|p| p.key == key);
+    if let Some(last) = last.filter(|p| p.palette == palette) {
+        return Ok(last.meshes.clone());
+    }
+    let fresh = last.is_none();
     let (pos, nrm) = skin(palette, &sk.positions, &sk.normals, &sk.joints);
-    let fresh = posed.get(&slot).is_none_or(|(c, _)| *c != key);
     let mut handles = Vec::with_capacity(class.parts.len());
     for (k, p) in class.parts.iter().enumerate() {
         let Some((verts, indices)) = &p.skin else {
@@ -513,7 +549,7 @@ fn pose_skinned<K: Copy + PartialEq>(
                 .map_err(|e| anyhow::anyhow!("part {k}: {e}"))?;
             handles.push(h);
         } else {
-            let h = posed[&slot].1[k];
+            let h = posed[&slot].meshes[k];
             let vs: Vec<Vertex> = verts
                 .iter()
                 .map(|i| Vertex {
@@ -528,9 +564,14 @@ fn pose_skinned<K: Copy + PartialEq>(
             handles.push(h);
         }
     }
-    if fresh {
-        posed.insert(slot, (key, handles.clone()));
-    }
+    posed.insert(
+        slot,
+        PosedMeshes {
+            key,
+            meshes: handles.clone(),
+            palette: palette.to_vec(),
+        },
+    );
     Ok(handles)
 }
 
@@ -813,6 +854,25 @@ mod close_walker_tests {
         );
         assert_eq!(super::visibility_opacity(true, 1.0), 1.0);
         assert_eq!(super::visibility_opacity(false, 0.0), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod skin_rate_tests {
+    use super::*;
+
+    /// A near model re-skins every tick; a far one every few, and the slots
+    /// take turns so a crowd does not all fall on one tick.
+    #[test]
+    fn far_models_re_skin_less_often_and_in_turn() {
+        for tick in 0..8 {
+            assert!(skin_due(3, tick, 10.0), "near: every tick");
+        }
+        let due = |slot, d| (0..8).filter(|&t| skin_due(slot, t, d)).count();
+        assert_eq!(due(3, 80.0), 4);
+        assert_eq!(due(3, 500.0), 2);
+        let turn = |slot| (0..4).find(|&t| skin_due(slot, t, 500.0));
+        assert_ne!(turn(0), turn(1));
     }
 }
 

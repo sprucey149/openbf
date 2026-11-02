@@ -356,6 +356,11 @@ impl FlashModel {
 pub struct UnitVisual {
     pub gen: u32,
     pub animator: Animator,
+    /// The animator's palette since its last step, with the asset it was
+    /// posed for. A frame asks for it many times (the draws, the weapons, the
+    /// muzzle points, the jets and burns) and the answer only moves with a
+    /// tick: `SoldierVisuals::update_with` empties it.
+    palette: std::sync::OnceLock<(usize, std::sync::Arc<[Mat4]>)>,
     /// Seconds since the unit died (death clip holds its last frame).
     pub dead_for: f32,
     /// The sim tick of the unit's last shot: its muzzle flash's clock.

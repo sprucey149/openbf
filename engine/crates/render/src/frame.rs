@@ -1,7 +1,7 @@
 //! One frame: `Renderer::render_frame` (and its `render` and
 //! `render_with_overlay` shorthands) checks the draw lists, uploads the
 //! globals, frustum-culls, sorts the static draws into instanced runs
-//! (`draw_key`) and the blended ones — world and skinned together — far to
+//! (`draw_key`, `sort_runs`) and the blended ones — world and skinned together — far to
 //! near (`blend_order`), fills the instance and palette buffers (growing them
 //! on demand), then records the passes — the sky, the opaque / mask runs,
 //! the skinned opaque draws, the water runs over them (card WADE), the grass
@@ -21,8 +21,8 @@ use crate::frustum;
 use crate::gpu_timer::GpuTimer;
 use crate::mesh::{self, GpuMesh, Instance};
 use crate::{
-    Camera, DrawCmd, DrawLayer, Globals, LightPath, RenderError, Renderer, SkinnedDrawCmd, SkyMode,
-    Target, TextureHandle, MAX_JOINTS, PALETTE_STRIDE,
+    Camera, DrawCmd, DrawLayer, DrawOrder, Globals, LightPath, RenderError, Renderer,
+    SkinnedDrawCmd, SkyMode, Target, TextureHandle, MAX_JOINTS, PALETTE_STRIDE,
 };
 use glam::Mat4;
 
@@ -75,6 +75,31 @@ impl Renderer {
     /// otherwise, and until the first readback). A frame or two old.
     pub fn gpu_sections(&self) -> &[(&'static str, f64)] {
         self.gpu_timer.as_ref().map_or(&[], |t| t.last())
+    }
+
+    /// Whether this renderer's frames are timed (`OPENBF_GPU_TIMING=1`, on an
+    /// adapter with timestamp queries).
+    pub fn gpu_timing_on(&self) -> bool {
+        self.gpu_timer.is_some()
+    }
+
+    /// Draw the world at this fraction of the window (1 = the window's own size,
+    /// the default; see `world_scale`). The HUD stays at the window's size.
+    pub fn set_world_scale(&mut self, scale: f32) {
+        self.world_scale_now = scale.clamp(0.25, 1.0);
+    }
+
+    /// The fraction of the window the world draws at.
+    pub fn world_scale(&self) -> f32 {
+        self.world_scale_now
+    }
+
+    /// Read the timer's finished frames now, for a caller that waited for the
+    /// GPU and wants the frame it just drew from [`Self::gpu_sections`].
+    pub fn collect_gpu_timing(&mut self) {
+        if let Some(t) = &mut self.gpu_timer {
+            t.collect(&self.device);
+        }
     }
 
     /// CPU ms the last frame waited for the window's next image (vsync and
@@ -178,9 +203,16 @@ impl Renderer {
             }
         }
 
-        let (width, height) = self.size();
-        let guard = crate::affine::guard(width as f32 / height as f32);
-        let view_proj = camera.view_proj(width as f32 / height as f32);
+        let ab = self.frame_ab;
+        let (frame_width, frame_height) = self.size();
+        // The world's own size (`world_scale`); the projection keeps the frame's shape.
+        let (width, height) = crate::world_scale::scaled(
+            (frame_width, frame_height),
+            ab.world_scale.unwrap_or(self.world_scale_now),
+        );
+        let aspect = frame_width as f32 / frame_height as f32;
+        let guard = crate::affine::guard(aspect);
+        let view_proj = camera.view_proj(aspect);
         self.shadows.prepare(&self.device, &self.queue, view_proj);
         let frustum = frustum::Frustum::from_view_proj(&view_proj);
         let globals = Globals {
@@ -268,9 +300,9 @@ impl Renderer {
 
         // Opaque, masked and water draws sort by `draw_key` (layer, mesh,
         // texture) so identical ones collapse into instanced runs — free for
-        // the opaque and masked runs, which write depth and composite nothing;
-        // the water runs composite, so the key's layer rank and handle order
-        // carry their place. Blended draws CANNOT be reordered for batching:
+        // the opaque and masked runs, which write depth and composite nothing
+        // and go nearest first (`sort_runs`); the water runs composite, so the
+        // key's layer rank and handle order carry their place. Blended draws CANNOT be reordered for batching:
         // alpha compositing is order-dependent, so they go in their own list
         // sorted back-to-front by distance from the eye and are drawn one at a
         // time.
@@ -285,38 +317,59 @@ impl Renderer {
         // (`draw::all_discarded`, card LODP).
         let mut culled = 0u32;
         let eye = camera.position;
-        let visible = |d: &DrawCmd, f: &frustum::Frustum, meshes: &[GpuMesh]| -> bool {
-            let Some(m) = meshes.get(d.mesh.0 as usize) else {
+        // Each draw's world box: the frustum test, the distance bands and the
+        // near-first order below all read it, so a draw computes it once.
+        let boxed = |d: &DrawCmd, meshes: &[GpuMesh]| {
+            let m = meshes.get(d.mesh.0 as usize)?;
+            let (lo, hi) = frustum::transformed_aabb(&d.model, m.bounds.0, m.bounds.1);
+            Some((lo, hi, frustum::distance_range(lo, hi, eye)))
+        };
+        let visible = |d: &DrawCmd, b: Option<WorldBox>, f: &frustum::Frustum| {
+            let Some((lo, hi, (near, far))) = b else {
                 return true;
             };
-            let (lo, hi) = frustum::transformed_aabb(&d.model, m.bounds.0, m.bounds.1);
-            let (near, far) = frustum::distance_range(lo, hi, eye);
             let (cull, cull_near) = crate::draw::instance_cull(d);
-            f.intersects_aabb(lo, hi) && !crate::draw::all_discarded(cull, cull_near, near, far)
+            // Foliage past its fade: on a forest map, most of the instances.
+            let shows = || {
+                ab.foliage_unfiltered
+                    || d.fade.is_none_or(|fade| {
+                        let at =
+                            glam::Vec2::new(d.model.w_axis.x - eye.x, d.model.w_axis.z - eye.z);
+                        fade.shows(at.length())
+                    })
+            };
+            shows()
+                && f.intersects_aabb(lo, hi)
+                && !crate::draw::all_discarded(cull, cull_near, near, far)
         };
         // The far scene's switch (card LOD) drops the side of a geometry
         // not drawn from this eye, with or without culling: its model and
         // LOWD must never both draw.
         let switched = |d: &DrawCmd| d.lod.is_none_or(|l| l.drawn(eye));
-        let keep: Vec<bool> = if self.cull {
-            draws
-                .iter()
-                .map(|d| {
-                    let v = switched(d) && visible(d, &frustum, &self.meshes);
-                    if !v {
-                        culled += 1;
-                    }
-                    v
-                })
-                .collect()
-        } else {
-            draws.iter().map(switched).collect()
-        };
+        let far_begin = self.lighting.far_fade.map(|f| f.begin);
+        let mut keep = Vec::with_capacity(draws.len());
+        let mut sorts: Vec<DrawSort> = Vec::with_capacity(draws.len());
+        for d in draws {
+            let b = boxed(d, &self.meshes);
+            let mut v = switched(d);
+            if self.cull {
+                v = v && visible(d, b, &frustum);
+                culled += u32::from(!v);
+            }
+            keep.push(v);
+            let (near, far) = b.map_or((0.0, 0.0), |b| b.2);
+            sorts.push(DrawSort {
+                near: (v && ab.order == DrawOrder::Near && may_move(d, far, far_begin))
+                    .then(|| sort_distance(d, near, eye)),
+                may_discard: ab.discard || crate::draw::may_discard(d, near, far, eye),
+            });
+        }
 
-        let mut order: Vec<usize> = (0..draws.len())
-            .filter(|&i| keep[i] && draws[i].layer != DrawLayer::Blend)
-            .collect();
-        order.sort_by_key(|&i| draw_key(&draws[i]));
+        let mut order = sort_runs(
+            (0..draws.len()).filter(|&i| keep[i] && draws[i].layer != DrawLayer::Blend),
+            draws,
+            &sorts,
+        );
         // The blend pass holds the skinned blended draws too; the world ones'
         // instances follow the runs' in the pass's own order.
         let blended = blend_order(draws, &keep, skinned, camera.position);
@@ -401,7 +454,11 @@ impl Renderer {
                 self.skinned_instance_buf =
                     create_instance_buffer(&self.device, self.palette_capacity);
             }
-            let mut palettes = vec![0u8; skinned.len() * PALETTE_STRIDE];
+            // Only the joints a draw has: a slot's stride leaves room for
+            // every joint a mesh could use, and those past its palette are
+            // never read (checked above).
+            let mut palettes = std::mem::take(&mut self.palette_upload);
+            palettes.resize(skinned.len() * PALETTE_STRIDE, 0);
             for (i, d) in skinned.iter().enumerate() {
                 for (j, m) in d.palette.iter().enumerate() {
                     let at = i * PALETTE_STRIDE + j * 64;
@@ -410,6 +467,7 @@ impl Renderer {
                 }
             }
             self.queue.write_buffer(&self.palette_buf, 0, &palettes);
+            self.palette_upload = palettes;
             let inst: Vec<Instance> = skinned
                 .iter()
                 .map(|d| Instance {
@@ -451,8 +509,16 @@ impl Renderer {
         // The grass (`grass.rs`): this view's sprite buffers and the visible
         // patches, far to near, uploaded before the pass opens; then the
         // leaves (`leaf.rs`), which ride the same buffers and pipeline.
-        let mut grass =
-            crate::grass::build(&self.grass.classes, &self.grass.patches, camera, self.time);
+        let foliage = crate::grass::FoliageView {
+            frustum: (!ab.foliage_unfiltered).then_some(&frustum),
+        };
+        let mut grass = crate::grass::build(
+            &self.grass.classes,
+            &self.grass.patches,
+            camera,
+            self.time,
+            foliage,
+        );
         crate::leaf::build(
             &mut grass,
             &self.leaves.classes,
@@ -460,6 +526,7 @@ impl Renderer {
             self.leaves.near,
             camera,
             self.time,
+            foliage,
         );
         if !grass.runs.is_empty() {
             let vb = bytemuck::cast_slice(&grass.vertices);
@@ -594,6 +661,20 @@ impl Renderer {
             (None, Target::Headless { texture, .. }) => texture,
             (None, Target::Window { .. }) => unreachable!("a window frame was acquired"),
         };
+        // A scaled world draws in its own target, frame and depth, until the
+        // upscale below.
+        let world_target = ((width, height) != (frame_width, frame_height)).then(|| {
+            self.world_scale
+                .target(&self.device, self.format, [width, height])
+        });
+        let frame_view = view.clone();
+        let (frame_texture, view) = match &world_target {
+            Some(t) => (&t.texture, t.view.clone()),
+            None => (frame_texture, view),
+        };
+        let full_depth = world_target
+            .as_ref()
+            .map(|t| std::mem::replace(&mut self.depth_view, t.depth.clone()));
         {
             // Render pass shape from an earlier wgpu project's main.rs "Main Render Pass".
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -632,7 +713,7 @@ impl Renderer {
             // under the rest (a cloud deck covers them), as both ELFs order
             // the sky pass (`analysis/re-stars.md` §3).
             let star_slot = self.stars.slot.min(self.sky.len());
-            if sky_base > 0 || star_count > 0 {
+            if (sky_base > 0 || star_count > 0) && !ab.skips("sky") {
                 pass.set_bind_group(0, &self.globals_bg, &[]);
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                 let mut bound: Option<SkyMode> = None;
@@ -685,7 +766,7 @@ impl Renderer {
             // FarSheet → Spec → Water → Speckle (`draw_key`), the skinned
             // opaque draws between Spec and Water.
             let mut run_start = 0;
-            let mut bound_layer: Option<DrawLayer> = None;
+            let mut bound_layer: Option<(DrawLayer, bool)> = None;
             // The base terrain's runs (mesh, instances) for the terrain light
             // pass, which ends this pass once the terrain's layers are down
             // (before the first run past `TerrainLayer`) and resumes it.
@@ -729,11 +810,12 @@ impl Renderer {
                     if let Some(l) = section.take() {
                         mark(&mut timer, &mut pass, l);
                     }
-                    if !skin_opaque.is_empty() {
-                        pass.set_pipeline(if fade {
-                            &self.fade_skinned_pipeline
-                        } else {
-                            &self.skinned_pipeline
+                    if !skin_opaque.is_empty() && !ab.skips("soldiers") {
+                        pass.set_pipeline(match (fade, ab.discard) {
+                            (false, false) => &self.no_discard.skinned,
+                            (true, false) => &self.no_discard.fade_skinned,
+                            (false, true) => &self.skinned_pipeline,
+                            (true, true) => &self.fade_skinned_pipeline,
                         });
                         pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
                         for &i in &skin_opaque {
@@ -778,14 +860,24 @@ impl Renderer {
                     pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                     bound_layer = None;
                 }
-                let Some(key) = key else { break };
+                if key.is_none() {
+                    break;
+                }
                 let mut run_end = run_start + 1;
-                while run_end < blend_base && draw_key(&draws[order[run_end]]) == key {
+                let run_key = runs_key(&draws[order[run_start]], sorts[order[run_start]]).0;
+                while run_end < blend_base
+                    && runs_key(&draws[order[run_end]], sorts[order[run_end]]).0 == run_key
+                {
                     run_end += 1;
                 }
 
                 let d = &draws[order[run_start]];
+                let may_discard = sorts[order[run_start]].may_discard;
                 let run = run_section(d);
+                if ab.skips(run) {
+                    run_start = run_end;
+                    continue;
+                }
                 if section != Some(run) {
                     if let Some(l) = section.replace(run) {
                         mark(&mut timer, &mut pass, l);
@@ -808,14 +900,21 @@ impl Renderer {
                         run_start = run_end;
                         continue;
                     };
-                    if bound_layer != Some(DrawLayer::Spec) {
+                    if bound_layer.map(|b| b.0) != Some(DrawLayer::Spec) {
                         pass.set_pipeline(&self.spec_pipeline);
                         pass.set_bind_group(2, &self.palette_bg, &[0]);
                         pass.set_bind_group(3, spec_bg, &[]);
-                        bound_layer = Some(DrawLayer::Spec);
+                        bound_layer = Some((DrawLayer::Spec, may_discard));
                     }
-                } else if bound_layer != Some(d.layer) {
+                } else if bound_layer != Some((d.layer, may_discard)) {
+                    let clean = &self.no_discard;
                     pass.set_pipeline(match (d.layer, fade) {
+                        (DrawLayer::Water, _) if !may_discard => &clean.water,
+                        (DrawLayer::TerrainLayer, _) if !may_discard => &clean.terrain_layer,
+                        (DrawLayer::Mask, false) if !may_discard => &clean.mask,
+                        (DrawLayer::Mask, true) if !may_discard => &clean.fade_mask,
+                        (DrawLayer::Opaque, false) if !may_discard => &clean.opaque,
+                        (DrawLayer::Opaque, true) if !may_discard => &clean.fade,
                         // The water pass carries its own fade (see
                         // `water_pipeline`), so it takes the same pipeline
                         // either way.
@@ -833,7 +932,7 @@ impl Renderer {
                         (_, false) => &self.pipeline,
                         (_, true) => &self.fade_pipeline,
                     });
-                    bound_layer = Some(d.layer);
+                    bound_layer = Some((d.layer, may_discard));
                 }
                 pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
                 draw_mesh(
@@ -853,7 +952,7 @@ impl Renderer {
             // LEAF): after every opaque draw, before the blend pass, each run
             // one instanced draw of its class's sprite buffer.
             if let (false, Some((vbuf, _)), Some((ibuf, _))) = (
-                grass.runs.is_empty(),
+                grass.runs.is_empty() || ab.skips("grass"),
                 &self.grass.vertex_buf,
                 &self.grass.instance_buf,
             ) {
@@ -876,7 +975,7 @@ impl Renderer {
             // kind to the other rebinds the pipeline and the instance buffer.
             let mut world_slot = blend_base;
             let mut bound_skinned: Option<bool> = None;
-            for &b in &blended {
+            for &b in blended.iter().filter(|_| !ab.skips("blend")) {
                 let skin = matches!(b, Blended::Skinned(_));
                 if bound_skinned != Some(skin) {
                     pass.set_pipeline(match (skin, fade) {
@@ -914,12 +1013,15 @@ impl Renderer {
             // The laser bolts (card FXB) and the particles (card FXP2):
             // after the blend pass, far to near, each bolt's core (NORMAL)
             // then its glow (ADDITIVE), each particle by its blend.
-            if self.particle_display.is_none() {
+            if self.particle_display.is_none() && !ab.skips("bolts+particles") {
                 draw_calls += self.draw_particle_runs(&mut pass, &bolts.runs, false);
                 mark(&mut timer, &mut pass, "bolts+particles");
             }
         }
-        if let (Some(display), false) = (&self.particle_display, bolts.runs.is_empty()) {
+        if let (Some(display), false) = (
+            &self.particle_display,
+            bolts.runs.is_empty() || ab.skips("bolts+particles"),
+        ) {
             let display_view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
                 format: Some(display.format),
                 ..Default::default()
@@ -949,7 +1051,7 @@ impl Renderer {
             draw_calls += self.draw_particle_runs(&mut pass, &bolts.runs, true);
             mark(&mut timer, &mut pass, "bolts+particles");
         }
-        if bloom {
+        if bloom && !ab.skips("bloom") {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("bloom gather"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1014,10 +1116,20 @@ impl Renderer {
         }
         // The frame filter lifts the finished 3D frame, before the overlay
         // (the PS2 draws its HUD after it, `analysis/re-glow.md` §3.3).
-        if filter {
+        if filter && !ab.skips("filter") {
             draw_calls += self.filter_pass(&mut encoder, frame_texture, &view);
             if let Some(t) = &mut timer {
                 t.mark(&mut encoder, "filter");
+            }
+        }
+        if let Some(depth) = full_depth {
+            self.depth_view = depth;
+        }
+        if let Some(t) = &world_target {
+            self.world_scale.upscale(&mut encoder, t, &frame_view);
+            draw_calls += 1;
+            if let Some(t) = &mut timer {
+                t.mark(&mut encoder, "upscale");
             }
         }
         self.frame_stats = FrameStats {
@@ -1030,8 +1142,8 @@ impl Renderer {
                 &self.device,
                 &self.queue,
                 &mut encoder,
-                &view,
-                [width, height],
+                &frame_view,
+                [frame_width, frame_height],
             );
             if let Some(t) = &mut timer {
                 t.mark(&mut encoder, "hud");
@@ -1296,6 +1408,113 @@ fn skinned_go_before(next: Option<u32>) -> bool {
     next.is_none_or(|l| l >= draw_key_layer(DrawLayer::Water))
 }
 
+/// How far from `eye` a draw starts, for the near-first order. A model's
+/// primitives share one sphere (`DrawCmd::lit`), so they stay together and keep
+/// their mesh order whatever the eye does: two coplanar parts of one model
+/// resolve the same way every frame.
+fn sort_distance(d: &DrawCmd, near: f32, eye: glam::Vec3) -> f32 {
+    d.lit
+        .map_or(near, |s| (s.centre.distance(eye) - s.radius).max(0.0))
+}
+
+/// A run's place among the others: a quarter of a distance doubling, coarse
+/// enough that a run does not move for every step of the eye.
+fn near_bucket(near: f32) -> u32 {
+    (near.max(1.0).log2() * 4.0) as u32
+}
+
+/// Where a run splits: every three distance doublings. A run ranks by its
+/// nearest instance, so one mesh placed both at the eye and across the map
+/// would draw its far instances ahead of what hides them (BF2 Mygeeto from the
+/// spawn, +0.37 ms on the Intel GPU at 1080p unsplit). A finer split buys no
+/// more there and adds draw calls.
+fn split_band(near: f32) -> u32 {
+    near_bucket(near) / 12
+}
+
+/// Whether a draw may move for depth: Opaque and Mask write depth and composite
+/// nothing. The terrain's layers and the water composite in their key order,
+/// and the sheet and the adds gain nothing. On a map with a far fade an opaque
+/// draw composites too, where the fade has begun: the sky shows through it and
+/// what it covers must already be down. Only a draw wholly short of the fade
+/// (`far_begin`) is order-free; the rest keep their mesh order, after it.
+fn may_move(d: &DrawCmd, far: f32, far_begin: Option<f32>) -> bool {
+    matches!(d.layer, DrawLayer::Opaque | DrawLayer::Mask) && far_begin.is_none_or(|b| far < b)
+}
+
+/// A draw's world box and its near and far distance from the eye.
+type WorldBox = (glam::Vec3, glam::Vec3, (f32, f32));
+
+/// What a frame decided about one draw, for its place in the sort.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DrawSort {
+    /// How far it starts, for a draw that may move ([`may_move`]); `None`
+    /// keeps its mesh order.
+    near: Option<f32>,
+    /// Whether it needs the pipeline that can discard
+    /// ([`crate::draw::may_discard`]). Last in the key, so a run splits for it
+    /// only inside one (mesh, texture): the mesh order stands.
+    may_discard: bool,
+}
+
+/// [`runs_key`]'s key: layer, LOWD, whether the draw keeps its mesh order, mesh,
+/// texture, band, may discard.
+type RunKey = (u32, u32, u32, u32, u32, u32, bool);
+
+/// One draw's run: [`draw_key`], its place and its band. Draws with equal keys
+/// are one instanced draw call.
+fn runs_key(d: &DrawCmd, s: DrawSort) -> (RunKey, f32) {
+    let (layer, lowd, mesh, texture) = draw_key(d);
+    let fixed = u32::from(s.near.is_none());
+    let band = s.near.map_or(0, split_band);
+    (
+        (layer, lowd, fixed, mesh, texture, band, s.may_discard),
+        s.near.unwrap_or(0.0),
+    )
+}
+
+/// Sort the depth-tested draws into instanced runs: [`draw_key`] groups them,
+/// and within each opaque or masked layer the runs and each run's instances go
+/// nearest first, so what hides a later draw is already in the depth buffer
+/// when the later draw's pixels would shade. The frame's walk finds each run's
+/// end by [`runs_key`].
+fn sort_runs(
+    kept: impl Iterator<Item = usize>,
+    draws: &[DrawCmd],
+    sorts: &[DrawSort],
+) -> Vec<usize> {
+    let mut keyed: Vec<_> = kept
+        .map(|i| {
+            let (key, place) = runs_key(&draws[i], sorts[i]);
+            (key, place, i)
+        })
+        .collect();
+    keyed.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+    // Each run ranks by its nearest instance, which the sort just put first.
+    let mut runs = Vec::new();
+    let mut at = 0;
+    while at < keyed.len() {
+        let key = keyed[at].0;
+        let end = at + keyed[at..].iter().take_while(|k| k.0 == key).count();
+        let (layer, lowd, fixed, mesh, texture, band, may_discard) = key;
+        let rank = if fixed == 0 {
+            near_bucket(keyed[at].1)
+        } else {
+            0
+        };
+        runs.push((
+            (layer, lowd, fixed, rank, mesh, texture, band, may_discard),
+            at..end,
+        ));
+        at = end;
+    }
+    runs.sort_unstable_by_key(|r| r.0);
+    runs.into_iter()
+        .flat_map(|(_, r)| r)
+        .map(|k| keyed[k].2)
+        .collect()
+}
+
 /// The layer's place in [`draw_key`].
 fn draw_key_layer(layer: DrawLayer) -> u32 {
     match layer {
@@ -1389,7 +1608,7 @@ mod tests {
             texture: None,
             color: [1.0; 4],
             model: at(z),
-            palette: Vec::new(),
+            palette: Vec::new().into(),
             layer,
             light: LightPath::Character,
             lit: None,
@@ -1459,6 +1678,125 @@ mod tests {
         let masked = draw_key(&DrawCmd::textured_masked(m, t, Mat4::IDENTITY));
         assert!(model < lowd && plain < lowd && lowd < masked);
         assert_eq!(model, plain, "the model side batches as any draw");
+    }
+
+    /// A section the frame's walk names can be left out by name: a label
+    /// missing from `frame_ab`'s table could never be priced.
+    #[test]
+    fn every_run_section_can_be_left_out() {
+        let d = DrawCmd::textured(MeshHandle(0), TextureHandle(0), Mat4::IDENTITY);
+        for layer in [
+            DrawLayer::Opaque,
+            DrawLayer::Mask,
+            DrawLayer::TerrainLayer,
+            DrawLayer::FarSheet,
+            DrawLayer::Spec,
+            DrawLayer::Water,
+            DrawLayer::Speckle,
+            DrawLayer::Blend,
+        ] {
+            let d = DrawCmd { layer, ..d };
+            let section = run_section(&d);
+            let ab = crate::FrameAb::parse(&format!("no:{section}"));
+            assert!(ab.is_ok_and(|ab| ab.skips(section)), "{section}");
+        }
+    }
+
+    fn sorts_at(near: &[Option<f32>]) -> Vec<DrawSort> {
+        near.iter()
+            .map(|&near| DrawSort {
+                near,
+                may_discard: false,
+            })
+            .collect()
+    }
+
+    /// A draw that may discard takes its own run, with its own pipeline, but
+    /// stays beside its mesh: the mesh order between runs does not move.
+    #[test]
+    fn a_draw_that_may_discard_splits_its_run_inside_its_mesh() {
+        let t = TextureHandle(0);
+        let d = |mesh| DrawCmd::textured(MeshHandle(mesh), t, Mat4::IDENTITY);
+        let draws = [d(1), d(1), d(2)];
+        let at = |may_discard| DrawSort {
+            near: Some(5.0),
+            may_discard,
+        };
+        let sorts = [at(true), at(false), at(false)];
+        assert_eq!(sort_runs(0..3, &draws, &sorts), vec![1, 0, 2]);
+        assert_ne!(
+            runs_key(&draws[0], sorts[0]).0,
+            runs_key(&draws[1], sorts[1]).0
+        );
+    }
+
+    /// Near-first order: runs and the instances in them go nearest first, a
+    /// run keeps together, and within a bucket the mesh order stands.
+    #[test]
+    fn opaque_runs_and_their_instances_go_nearest_first() {
+        let t = TextureHandle(0);
+        let d = |mesh| DrawCmd::textured(MeshHandle(mesh), t, Mat4::IDENTITY);
+        let draws = [d(1), d(2), d(1), d(3), d(3)];
+        let near = sorts_at(&[Some(40.0), Some(100.0), Some(10.0), Some(10.5), Some(50.0)]);
+        let order = sort_runs(0..draws.len(), &draws, &near);
+        // Mesh 1 (10, 40) and mesh 3 (10.5, 50) tie on their bucket, so mesh
+        // order decides between them; mesh 2 starts farther.
+        assert_eq!(order, vec![2, 0, 3, 4, 1]);
+    }
+
+    /// One mesh at the eye and across the map splits, so its far instances
+    /// wait for what hides them.
+    #[test]
+    fn a_run_splits_across_three_distance_doublings() {
+        let t = TextureHandle(0);
+        let d = |mesh| DrawCmd::textured(MeshHandle(mesh), t, Mat4::IDENTITY);
+        let draws = [d(1), d(1), d(1), d(2)];
+        let near = sorts_at(&[Some(2.0), Some(3.0), Some(900.0), Some(30.0)]);
+        let order = sort_runs(0..draws.len(), &draws, &near);
+        assert_eq!(order, vec![0, 1, 3, 2], "mesh 2 between mesh 1's two runs");
+        let keys: Vec<_> = order
+            .iter()
+            .map(|&i| runs_key(&draws[i], near[i]).0)
+            .collect();
+        assert_eq!(keys[0], keys[1], "the near pair stays one instanced run");
+        assert_ne!(keys[1], keys[3], "the far instance is a run of its own");
+    }
+
+    /// A draw that composites keeps its key order, whatever its distance:
+    /// the terrain's layers paint over each other in mesh order and the water
+    /// over everything, and they stay after every opaque run.
+    #[test]
+    fn composited_layers_do_not_move_for_depth() {
+        let (m, t) = (MeshHandle(1), TextureHandle(0));
+        let layer = |mesh: u32| DrawCmd::terrain_layer(MeshHandle(mesh), t, Mat4::IDENTITY);
+        let draws = [
+            layer(9),
+            layer(3),
+            DrawCmd::water(m, t, [1.0; 4], Mat4::IDENTITY),
+            DrawCmd::textured(m, t, Mat4::IDENTITY),
+        ];
+        assert!(!may_move(&draws[0], 5.0, None));
+        assert!(!may_move(&draws[2], 5.0, None));
+        assert!(may_move(&draws[3], 5.0, None));
+        let near = sorts_at(&[None, None, None, Some(900.0)]);
+        assert_eq!(sort_runs(0..draws.len(), &draws, &near), vec![3, 1, 0, 2]);
+    }
+
+    /// On a fade map only a draw wholly short of the fade moves: past its
+    /// start an opaque draw composites over what is already down.
+    #[test]
+    fn a_draw_reaching_the_far_fade_keeps_its_mesh_order_after_the_rest() {
+        let t = TextureHandle(0);
+        let d = |mesh| DrawCmd::textured(MeshHandle(mesh), t, Mat4::IDENTITY);
+        assert!(may_move(&d(1), 149.0, Some(150.0)));
+        assert!(!may_move(&d(1), 150.0, Some(150.0)));
+        let draws = [d(1), d(2), d(9)];
+        let near = sorts_at(&[None, None, Some(300.0)]);
+        assert_eq!(
+            sort_runs(0..draws.len(), &draws, &near),
+            vec![2, 0, 1],
+            "the movable draw goes first even from farther"
+        );
     }
 
     /// The specular pass adds over its base, so it sorts after every opaque

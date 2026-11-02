@@ -6,7 +6,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Preview {
     clocks: HashMap<(u8, u8), f32>,
-    posed: HashMap<usize, ((u32, usize), Vec<MeshHandle>)>,
+    posed: HashMap<usize, crate::viewer::vehicles::PosedMeshes<(u32, usize)>>,
 }
 
 impl DroidekaVisuals {
@@ -42,7 +42,15 @@ impl DroidekaVisuals {
         d.clip_t = *clock;
         let palette = rig.palette(&walker_state(&d, c), 1.0);
         let slot = usize::from(team) * 256 + usize::from(class);
-        let meshes = match pose_class(r, &mut self.preview.posed, slot, (0, k), model, &palette) {
+        let meshes = match pose_class(
+            r,
+            &mut self.preview.posed,
+            slot,
+            (0, k),
+            model,
+            &palette,
+            true,
+        ) {
             Ok(meshes) => meshes,
             Err(e) => {
                 eprintln!("droideka preview {team}/{class}: {e:#}");

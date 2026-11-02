@@ -278,6 +278,27 @@ pub(crate) fn instance_cull(d: &DrawCmd) -> ([f32; 2], [f32; 2]) {
     ([far, far], [near, near])
 }
 
+/// The opaque and masked draws' order within their layer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DrawOrder {
+    /// By mesh and texture only: what a frame did before near-first, priced
+    /// against it by the bench (`frame_ab`).
+    Mesh,
+    /// Nearest first (`frame::sort_runs`).
+    #[default]
+    Near,
+}
+
+impl DrawOrder {
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        Some(match name {
+            "mesh" => Self::Mesh,
+            "near" => Self::Near,
+            _ => return None,
+        })
+    }
+}
+
 /// The shader's `far_cull` distance test (`shader.wgsl`), for the tests: is
 /// a fragment `dist` metres from the eye, at a pixel whose dither value is
 /// `u` (0..1), kept by these bands?
@@ -295,6 +316,22 @@ pub fn fragment_kept(cull: [f32; 2], cull_near: [f32; 2], dist: f32, u: f32) -> 
 /// not rasterised only to be discarded.
 pub fn all_discarded(cull: [f32; 2], cull_near: [f32; 2], near: f32, far: f32) -> bool {
     near > cull[0].max(cull[1]) || far < cull_near[0].min(cull_near[1])
+}
+
+/// Whether the shader's `far_cull` could discard a fragment of this draw, whose
+/// fragments all lie `near..=far` metres from `eye`. When it cannot, the draw
+/// takes a pipeline without the discards: the GPU can then write depth before
+/// shading, and what the draw hides is never shaded. The margin covers the
+/// shader's own rounding of a vertex's distance.
+pub(crate) fn may_discard(d: &DrawCmd, near: f32, far: f32, eye: glam::Vec3) -> bool {
+    let margin = 0.01 + far * 1.0e-3;
+    let (cull, cull_near) = instance_cull(d);
+    far + margin >= cull[0].min(cull[1])
+        || (cull_near[0].max(cull_near[1]) > 0.0 && near - margin <= cull_near[0].max(cull_near[1]))
+        || d.fade.is_some_and(|f| {
+            f.alpha(glam::Vec2::new(d.model.w_axis.x - eye.x, d.model.w_axis.z - eye.z).length())
+                < 1.0
+        })
 }
 
 /// The terrain foliage's per-instance fade (analysis/re-foliage.md §6, [O]):
@@ -318,6 +355,27 @@ pub struct Fade {
 }
 
 impl Fade {
+    /// The instance's alpha at horizontal distance `d`: the shader's
+    /// `fade_alpha`.
+    pub(crate) fn alpha(&self, d: f32) -> f32 {
+        if d > self.begin {
+            let span = (self.end - self.begin).max(1.0e-6);
+            return ((self.end - d) / span).clamp(0.0, 1.0) * self.opacity;
+        }
+        if self.near > 0.0 && d < self.near {
+            let r = (d / self.near).max(0.1);
+            return r * r * self.opacity;
+        }
+        self.opacity
+    }
+
+    /// Whether an instance `d` metres away shows at all: the shader screens its
+    /// alpha against a 4x4 Bayer matrix whose lowest threshold is 1/32, and an
+    /// alpha at or under that discards every pixel.
+    pub(crate) fn shows(&self, d: f32) -> bool {
+        self.alpha(d) > 1.0 / 32.0
+    }
+
     /// A constant `opacity` at every distance (no distance fade).
     pub fn see_through(opacity: f32) -> Fade {
         Fade {
@@ -478,7 +536,7 @@ pub struct SkinnedDrawCmd {
     pub texture: Option<TextureHandle>,
     pub color: [f32; 4],
     pub model: Mat4,
-    pub palette: Vec<Mat4>,
+    pub palette: std::sync::Arc<[Mat4]>,
     /// [`DrawLayer::Opaque`], [`DrawLayer::Blend`] or — a segment's second
     /// pass, [`SkinnedDrawCmd::specular`] — [`DrawLayer::Spec`]; the skinned
     /// path has no other pass, and `render_frame` refuses any other layer.
@@ -574,6 +632,78 @@ mod lod_tests {
             assert_ne!(m.drawn(eye), l.drawn(eye), "one side at {d} m");
             assert_eq!(m.drawn(eye), d < 150.0, "the model to {d} m");
         }
+    }
+
+    #[test]
+    fn a_draw_may_discard_only_when_a_band_or_fade_reaches_it() {
+        use crate::{MeshHandle, TextureHandle};
+        let eye = Vec3::ZERO;
+        let plain = DrawCmd::textured(MeshHandle(0), TextureHandle(0), Mat4::IDENTITY);
+        assert!(!may_discard(&plain, 0.0, 9000.0, eye), "no band, no fade");
+        // A far cull: only a draw reaching it.
+        let culled = plain.with_cull(Some(500.0));
+        assert!(!may_discard(&culled, 10.0, 400.0, eye));
+        assert!(may_discard(&culled, 10.0, 501.0, eye));
+        assert!(may_discard(&culled, 10.0, 499.9, eye), "the margin");
+        // A near edge: only a draw starting inside it.
+        let edged = plain.with_cull_near(Some(100.0));
+        assert!(!may_discard(&edged, 150.0, 400.0, eye));
+        assert!(may_discard(&edged, 50.0, 400.0, eye));
+        // A fade: judged by the instance's horizontal distance, as the shader.
+        let fade = Fade {
+            begin: 40.0,
+            end: 50.0,
+            near: 5.0,
+            opacity: 1.0,
+        };
+        let at = |x: f32| {
+            DrawCmd::textured(
+                MeshHandle(0),
+                TextureHandle(0),
+                Mat4::from_translation(Vec3::new(x, 900.0, 0.0)),
+            )
+            .with_fade(Some(fade))
+        };
+        assert!(!may_discard(&at(20.0), 0.0, 1.0, eye), "whole");
+        assert!(may_discard(&at(45.0), 0.0, 1.0, eye), "in the fade");
+        assert!(may_discard(&at(2.0), 0.0, 1.0, eye), "too near");
+        let ghost = plain.with_fade(Some(Fade::see_through(0.5)));
+        assert!(may_discard(&ghost, 0.0, 1.0, eye), "see-through");
+    }
+
+    /// The Rust fade is the shader's: this test holds the two to one formula
+    /// at the edges that decide a discard.
+    #[test]
+    fn the_fade_alpha_is_whole_only_between_its_edges() {
+        let f = Fade {
+            begin: 40.0,
+            end: 50.0,
+            near: 5.0,
+            opacity: 1.0,
+        };
+        assert_eq!(f.alpha(40.0), 1.0);
+        assert_eq!(f.alpha(5.0), 1.0);
+        assert!((f.alpha(45.0) - 0.5).abs() < 1e-6);
+        assert_eq!(f.alpha(50.0), 0.0);
+        assert!((f.alpha(2.5) - 0.25).abs() < 1e-6);
+    }
+
+    /// The lowest Bayer threshold: `(0 + 0.5) / 16`. An instance past its fade
+    /// has no pixel to draw and the frame drops it.
+    #[test]
+    fn an_instance_past_its_fade_does_not_show() {
+        let f = Fade {
+            begin: 40.0,
+            end: 50.0,
+            near: 0.0,
+            opacity: 1.0,
+        };
+        assert!(f.shows(40.0));
+        assert!(f.shows(49.0));
+        assert!(!f.shows(50.0) && !f.shows(900.0));
+        assert!(!Fade::see_through(0.0).shows(1.0), "hidden outright");
+        assert!(!Fade::see_through(1.0 / 32.0).shows(1.0));
+        assert!(Fade::see_through(0.04).shows(1.0));
     }
 
     /// Card LODP: a draw is dropped only when no fragment of its distance

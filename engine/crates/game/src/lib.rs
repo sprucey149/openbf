@@ -19,6 +19,7 @@ pub mod conquest_defaults;
 pub mod dev;
 pub mod dlc;
 pub mod droideka;
+pub mod dyn_res;
 pub mod engine_sound;
 pub mod event_feed;
 pub mod event_sounds;

@@ -242,7 +242,7 @@ fn skinned_base(
         texture: Some(texture),
         color: [1.0; 4],
         model: Mat4::IDENTITY,
-        palette: vec![palette],
+        palette: vec![palette].into(),
         layer: DrawLayer::Opaque,
         light: render::LightPath::Character,
         lit: None,

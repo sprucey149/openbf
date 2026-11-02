@@ -14,10 +14,10 @@ mod gpu_turns;
 mod light_path;
 mod lod_switch;
 mod particle_blend;
+mod shadow;
 mod skinned;
 mod sky_shell;
 mod specular;
 mod uv_scroll;
 mod water_pass;
-
-mod shadow;
+mod world_scale;
