@@ -44,7 +44,11 @@ python3 scripts/pack.py
 >
 > Xbox and PC copies assemble some buildings differently. Rhen Var, PC Cloud City and one Xbox Jabba's Palace prop use shared resources or locally built, textured stand-ins. These can look coarser, and projected textures can stretch. No game meshes or textures are shipped here.
 >
-> Fresh Linux builds were checked headlessly from PS2 and mixed sources, Xbox discs alone, and PC BF1 with Xbox BF2. Automated comparisons cover both eras and two game modes where authored. They do not establish that every simulation input is identical: the artwork/collision gate still finds disagreements in existing donor models. Some water and prop materials still fall back to plain colors. Live play and a running-original PS2 comparison remain unchecked.
+> Donor terrain now follows the PS2 ground heights and holes, including terrain seen beyond the play area. Focused repairs also align Rhen Var structures, a Death Star door and an Utapau column. PS2 map bakes remain unchanged.
+>
+> Continuous terrain checks pass on all 40 maps in the checked Xbox and PC sets. The broader artwork check still fails: other models and differing cutout or animated artwork remain unmeasured. Collision overlays and short scripted walks were checked for selected repairs. This does not establish full alignment or equality of every simulation input; see [#98](https://github.com/sprucey149/openbf/issues/98).
+>
+> Earlier Linux builds were checked headlessly from PS2 and mixed sources, Xbox discs alone, and PC BF1 with Xbox BF2. Fresh packages containing these repairs are still being checked. Some water and prop materials still fall back to plain colors. Live play and a running-original PS2 comparison remain unchecked.
 
 | You supply | What you get today |
 |---|---|
