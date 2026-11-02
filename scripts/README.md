@@ -21,7 +21,8 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 | `gameplay_table.py`, `gameplay_foliage.py`, `gameplay_corrections.py`, `gameplay_programs.py` | generate the PS2 reference numbers and the corrections applied to a player's own files |
 | `version_census.py`, `version_geometry.py`, `version_collision.py`, `version_heights.py`, `version_sky.py`, `version_terrain_play.py` | measure how editions differ: names and numbers, never assets |
 | `version_report.py`, `version_parity_check.py` | the measurement receipt, and seeded rounds across source combinations |
-| `render_collision_check.py` | gate every placed object's bounds and sampled render surfaces against corrected collision, relative to PS2 artwork; `gates.py --groups alignment` |
+| `render_collision_check.py`, `render_scene_surface.py` | require continuous surface certificates for every placed model, LOWD and far extension against PS2 artwork; unresolved coverage, opacity or LOD correspondence fails; `gates.py --groups alignment` |
+| `render_terrain_check.py`, `render_attachment_check.py` | the alignment gate's required terrain and moving-object receipts; absent or unmeasured inputs fail |
 | `data/` | the measurement receipt and the UI dependency list |
 
 ## Checks
