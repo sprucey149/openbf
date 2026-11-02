@@ -94,6 +94,13 @@ impl App {
                 state: winit::event::ElementState::Pressed,
                 ..
             } if matches!(self.screen, Screen::Shell) => self.shell_pointer.click(),
+            WindowEvent::MouseWheel { delta, .. } if matches!(self.screen, Screen::Shell) => {
+                let dy = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => (p.y / 32.0) as f32,
+                };
+                self.shell_pointer.wheel(dy);
+            }
             WindowEvent::Focused(focused) => {
                 self.focused = *focused;
                 if !focused {
@@ -183,6 +190,17 @@ mod tests {
         walk.sim.spawn_stage[0] = core::sim::SpawnStage::Accepted;
         walk.sim.units[walk.player.index as usize].alive = false;
         assert!(!a.can_grab(), "death and spawn screens");
+    }
+
+    #[test]
+    fn mouse_wheel_records_shell_scroll_activity() {
+        let mut a = app();
+        a.mouse_window_event(&WindowEvent::MouseWheel {
+            device_id: winit::event::DeviceId::dummy(),
+            delta: winit::event::MouseScrollDelta::LineDelta(0.0, -1.0),
+            phase: winit::event::TouchPhase::Moved,
+        });
+        assert_eq!(a.shell_pointer.take_wheel(), -1.0);
     }
 
     #[test]

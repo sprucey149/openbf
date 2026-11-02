@@ -327,6 +327,19 @@ impl ListCursor {
         }
         self.top = self.top.min(n.saturating_sub(shown));
     }
+    /// Scroll `top` by `delta` rows without moving `at`.
+    /// `delta` > 0 scrolls down (higher top, showing later items).
+    /// `delta` < 0 scrolls up (lower top, showing earlier items).
+    pub fn scroll(&mut self, total_rows: usize, shown: usize, delta: isize) -> bool {
+        let max_top = total_rows.saturating_sub(shown);
+        let new_top = (self.top as isize + delta).clamp(0, max_top as isize) as usize;
+        if new_top != self.top {
+            self.top = new_top;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// A list row as drawn.
@@ -367,6 +380,9 @@ pub enum PointerTarget {
     Playlist(usize),
     Overview(usize),
     Option(usize, bool),
+    ScrollLeft(isize),
+    ScrollRight(isize),
+    ScrollOption(isize),
 }
 
 /// What a press asks the game to do.
@@ -410,6 +426,86 @@ pub struct InstantAction {
 impl InstantAction {
     /// Put the mouse focus on a visible, enabled row. Keyboard/controller
     /// input still uses the same cursors and confirmation path.
+    /// Scroll the active or left list (Planet / Mode / Era) by `delta` rows.
+    pub fn scroll_left(&mut self, delta: isize) -> bool {
+        let (len, shown) = match self.state {
+            State::Mode => (self.mode_rows().len(), LIST_ROWS),
+            State::Era => (self.side_rows().len(), ERA_ROWS),
+            _ => (self.map_rows().len(), LIST_ROWS),
+        };
+        let moved = match self.state {
+            State::Mode => self.mode_list.scroll(len, shown, delta),
+            State::Era => self.era_list.scroll(len, shown, delta),
+            _ => self.map_list.scroll(len, shown, delta),
+        };
+        if moved {
+            self.click(MenuSound::Select);
+        }
+        moved
+    }
+
+    /// Scroll the playlist by `delta` rows.
+    pub fn scroll_right(&mut self, delta: isize) -> bool {
+        let moved = self.play_list.scroll(self.playlist.len() + 1, LIST_ROWS, delta);
+        if moved {
+            self.click(MenuSound::Select);
+        }
+        moved
+    }
+
+    /// Scroll the session options group list by `delta` rows.
+    pub fn scroll_option(&mut self, delta: isize) -> bool {
+        if let Page::Group(g, mut cur) = self.page {
+            let moved = cur.scroll(self.options.rows(g).len(), OPTION_ROWS, delta);
+            if moved {
+                self.page = Page::Group(g, cur);
+                self.click(MenuSound::Select);
+            }
+            moved
+        } else {
+            false
+        }
+    }
+
+    /// Scroll at a pointer location (window coordinates `point` in window `size`).
+    pub fn scroll_pointer(
+        &mut self,
+        point: Option<[f32; 2]>,
+        size: Option<[f32; 2]>,
+        delta: isize,
+    ) -> bool {
+        if delta == 0 {
+            return false;
+        }
+        match self.page {
+            Page::Missions => {
+                if let (Some(point), Some(size)) = (point, size) {
+                    if size[0] > 0.0 && size[1] > 0.0 {
+                        let box_w = 4.0 / 3.0 * size[1];
+                        let x = (point[0] - (size[0] - box_w) * 0.5) / (box_w / 512.0);
+                        if x >= crate::shell_ia::RIGHT_WINDOW[0]
+                            && x <= crate::shell_ia::RIGHT_WINDOW[2]
+                        {
+                            return self.scroll_right(delta);
+                        }
+                        if x >= crate::shell_ia::LEFT_WINDOW[0]
+                            && x <= crate::shell_ia::LEFT_WINDOW[2]
+                        {
+                            return self.scroll_left(delta);
+                        }
+                    }
+                }
+                if self.state == State::Playlist {
+                    self.scroll_right(delta)
+                } else {
+                    self.scroll_left(delta)
+                }
+            }
+            Page::Group(..) => self.scroll_option(delta),
+            _ => false,
+        }
+    }
+
     pub fn focus_pointer(&mut self, target: PointerTarget) -> bool {
         match target {
             PointerTarget::Command(k) if COMMANDS.get(k).is_some_and(|c| self.command_live(*c)) => {
@@ -458,6 +554,9 @@ impl InstantAction {
                 }
                 false
             }
+            PointerTarget::ScrollLeft(_)
+            | PointerTarget::ScrollRight(_)
+            | PointerTarget::ScrollOption(_) => true,
             _ => false,
         }
     }

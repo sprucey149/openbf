@@ -124,58 +124,78 @@ pub fn pointer_target(
                     }
                 }
             }
+            let play_rows = ia.play_rows();
+            let rx0 = RIGHT_WINDOW[0] + LIST_IN[0];
+            let rx1 = RIGHT_WINDOW[2] - LIST_IN[1];
+            let rcx = (rx0 + rx1) * 0.5;
+            let ry0 = RIGHT_WINDOW[1] + LIST_PAD;
+            let rlast = ry0 + ROW * LIST_ROWS.min(play_rows.len()) as f32;
+            if (rcx - 32.0..=rcx + 32.0).contains(&x) {
+                if ia.play_list.top > 0 && (ry0 - 16.0..=ry0).contains(&y) {
+                    return Some(crate::shell::PointerTarget::ScrollRight(-1));
+                }
+                if ia.play_list.top + LIST_ROWS < play_rows.len()
+                    && (rlast..=rlast + 16.0).contains(&y)
+                {
+                    return Some(crate::shell::PointerTarget::ScrollRight(1));
+                }
+            }
             if ia.state == State::Playlist {
-                let rows = ia.play_rows();
-                let x0 = RIGHT_WINDOW[0] + LIST_IN[0];
-                let x1 = RIGHT_WINDOW[2] - LIST_IN[1];
-                let y0 = RIGHT_WINDOW[1] + LIST_PAD;
-                let row = ((y - y0) / ROW).floor() as isize + ia.play_list.top as isize;
-                if x >= x0 && x <= x1 && y >= y0 && row >= 0 {
+                let row = ((y - ry0) / ROW).floor() as isize + ia.play_list.top as isize;
+                if x >= rx0 && x <= rx1 && y >= ry0 && row >= 0 {
                     let k = row as usize;
-                    if k < rows.len() && k < ia.play_list.top + LIST_ROWS {
+                    if k < play_rows.len() && k < ia.play_list.top + LIST_ROWS {
                         return Some(crate::shell::PointerTarget::Playlist(k));
                     }
                 }
+            }
+
+            let (rows, cur, row_h, pad, target) = match ia.state {
+                State::Mode => (
+                    ia.mode_rows(),
+                    ia.mode_list,
+                    ROW,
+                    LIST_PAD,
+                    crate::shell::PointerTarget::Mode(0),
+                ),
+                State::Era => (
+                    ia.side_rows(),
+                    ia.era_list,
+                    ERA_ROW,
+                    ERA_PAD,
+                    crate::shell::PointerTarget::Era(0),
+                ),
+                _ => (
+                    ia.map_rows(),
+                    ia.map_list,
+                    ROW,
+                    LIST_PAD,
+                    crate::shell::PointerTarget::Map(0),
+                ),
+            };
+            let shown = if ia.state == State::Era {
+                ERA_ROWS
             } else {
-                let (rows, cur, row_h, pad, target) = match ia.state {
-                    State::Map => (
-                        ia.map_rows(),
-                        ia.map_list,
-                        ROW,
-                        LIST_PAD,
-                        crate::shell::PointerTarget::Map(0),
-                    ),
-                    State::Mode => (
-                        ia.mode_rows(),
-                        ia.mode_list,
-                        ROW,
-                        LIST_PAD,
-                        crate::shell::PointerTarget::Mode(0),
-                    ),
-                    State::Era => (
-                        ia.side_rows(),
-                        ia.era_list,
-                        ERA_ROW,
-                        ERA_PAD,
-                        crate::shell::PointerTarget::Era(0),
-                    ),
-                    _ => return None,
-                };
-                let x0 = LEFT_WINDOW[0] + LIST_IN[0];
-                let x1 = LEFT_WINDOW[2] - LIST_IN[1];
-                let y0 = LEFT_WINDOW[1] + pad;
-                let row = ((y - y0) / row_h).floor() as isize + cur.top as isize;
-                if x >= x0 && x <= x1 && y >= y0 && row >= 0 {
+                LIST_ROWS
+            };
+            let lx0 = LEFT_WINDOW[0] + LIST_IN[0];
+            let lx1 = LEFT_WINDOW[2] - LIST_IN[1];
+            let lcx = (lx0 + lx1) * 0.5;
+            let ly0 = LEFT_WINDOW[1] + pad;
+            let llast = ly0 + row_h * shown.min(rows.len()) as f32;
+            if (lcx - 32.0..=lcx + 32.0).contains(&x) {
+                if cur.top > 0 && (ly0 - 16.0..=ly0).contains(&y) {
+                    return Some(crate::shell::PointerTarget::ScrollLeft(-1));
+                }
+                if cur.top + shown < rows.len() && (llast..=llast + 16.0).contains(&y) {
+                    return Some(crate::shell::PointerTarget::ScrollLeft(1));
+                }
+            }
+            if ia.state != State::Command {
+                let row = ((y - ly0) / row_h).floor() as isize + cur.top as isize;
+                if x >= lx0 && x <= lx1 && y >= ly0 && row >= 0 {
                     let k = row as usize;
-                    if k < rows.len()
-                        && k < cur.top
-                            + if ia.state == State::Era {
-                                ERA_ROWS
-                            } else {
-                                LIST_ROWS
-                            }
-                        && rows[k].enabled
-                    {
+                    if k < rows.len() && k < cur.top + shown && rows[k].enabled {
                         return Some(match target {
                             crate::shell::PointerTarget::Map(_) => {
                                 crate::shell::PointerTarget::Map(k)
@@ -215,11 +235,21 @@ pub fn pointer_target(
             None
         }
         Page::Group(g, cur) => {
-            let x0 = (OPTIONS_WINDOW[0] + OPTIONS_WINDOW[2]) * 0.5 - OPTION_LIST_W * 0.5;
-            let x1 = (OPTIONS_WINDOW[0] + OPTIONS_WINDOW[2]) * 0.5 + OPTION_LIST_W * 0.5;
+            let cx = (OPTIONS_WINDOW[0] + OPTIONS_WINDOW[2]) * 0.5;
+            let x0 = cx - OPTION_LIST_W * 0.5;
+            let x1 = cx + OPTION_LIST_W * 0.5;
             let y0 = OPTIONS_WINDOW[1] + OPTION_PAD;
-            let row = ((y - y0) / OPTION_ROW).floor() as isize + cur.top as isize;
             let rows = ia.options.rows(g);
+            let last = y0 + OPTION_ROW * OPTION_ROWS as f32;
+            if (cx - 32.0..=cx + 32.0).contains(&x) {
+                if cur.top > 0 && (y0 - 16.0..=y0).contains(&y) {
+                    return Some(crate::shell::PointerTarget::ScrollOption(-1));
+                }
+                if cur.top + OPTION_ROWS < rows.len() && (last..=last + 16.0).contains(&y) {
+                    return Some(crate::shell::PointerTarget::ScrollOption(1));
+                }
+            }
+            let row = ((y - y0) / OPTION_ROW).floor() as isize + cur.top as isize;
             if x >= x0 && x <= x1 && y >= y0 && row >= cur.top as isize {
                 let k = row as usize;
                 if k < rows.len() && k < cur.top + OPTION_ROWS {
@@ -831,6 +861,64 @@ impl Ctx<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mouse_hit_detects_scroll_arrows() {
+        use crate::shell::{Game, IaTexts, MapEntry, Mode, SessionOptions};
+        use manifest::hud::{HudFont, HudGlyph};
+        let maps: Vec<_> = (0..20)
+            .map(|i| MapEntry {
+                key: format!("test{i}"),
+                game: Game::Bf2,
+                code: "t",
+                label: format!("Test {i}"),
+                description: String::new(),
+                modes: [vec![Mode::Con], Vec::new()],
+                baked: true,
+                missions: vec![(Mode::Con, ["rep".into(), "cis".into()])],
+            })
+            .collect();
+        let mut ia = InstantAction::new(
+            maps,
+            IaTexts::new(&|_, e| e.to_owned()),
+            SessionOptions::default(),
+        );
+        let font = HudFont {
+            name: BUTTON_FONT.into(),
+            line_height: 15,
+            pages: vec!["page0".into()],
+            glyphs: (32u8..127)
+                .map(|code| HudGlyph {
+                    code: u16::from(code),
+                    page: 0,
+                    advance: 8,
+                    x0: 0,
+                    x1: 8,
+                    y0: 2,
+                    y1: 12,
+                    uv: [0.0, 0.1, 0.0, 0.1],
+                })
+                .collect(),
+        };
+        let cx = (LEFT_WINDOW[0] + LIST_IN[0] + LEFT_WINDOW[2] - LIST_IN[1]) * 0.5;
+        let y0 = LEFT_WINDOW[1] + LIST_PAD;
+        let last = y0 + ROW * LIST_ROWS as f32;
+        let to_screen = |mx: f32, my: f32| [mx * (640.0 / 512.0), my * (480.0 / 448.0)];
+
+        // At top: no up arrow, but down arrow is present
+        assert_eq!(ia.map_list.top, 0);
+        let hit_up = pointer_target(&ia, to_screen(cx, y0 - 8.0), [640.0, 480.0], &font);
+        assert_eq!(hit_up, None, "no up arrow when at top");
+
+        let hit_down = pointer_target(&ia, to_screen(cx, last + 8.0), [640.0, 480.0], &font);
+        assert_eq!(hit_down, Some(crate::shell::PointerTarget::ScrollLeft(1)), "down arrow is hit");
+
+        // Scroll down: now up arrow is present
+        ia.scroll_left(1);
+        assert_eq!(ia.map_list.top, 1);
+        let hit_up_scrolled = pointer_target(&ia, to_screen(cx, y0 - 8.0), [640.0, 480.0], &font);
+        assert_eq!(hit_up_scrolled, Some(crate::shell::PointerTarget::ScrollLeft(-1)), "up arrow is hit when scrolled");
+    }
 
     #[test]
     fn mouse_hit_selects_the_visible_instant_action_row() {
