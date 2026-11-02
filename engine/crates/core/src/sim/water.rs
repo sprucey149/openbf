@@ -22,7 +22,8 @@ impl Sim {
             // seated soldiers reset the breath timer instead of retaining it.
             let eligible = u.alive && u.mount.is_none() && u.droideka.is_none();
             // Standing origin is 1.80 m in both PS2 traces. PROVISIONAL for
-            // crouch/prone: the port's stance eye height until measured.
+            // crouch/prone: the port's stance eye height. measure: the aim origin
+            // of a crouched and a prone soldier in the same live PS2 water trace.
             let eye = u.soldier.pos.y + camera_section(u.soldier.stance, false).eye_y;
             let submerged = eligible && self.water_under(u.soldier.pos).is_some_and(|h| h >= eye);
             if !self.units[i].soldier.step_water(submerged) {

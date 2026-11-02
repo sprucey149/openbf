@@ -36,9 +36,9 @@ python3 scripts/pack.py
   and that you get the same game whichever you use: only texture and asset sizes change.
   The Status note below says how much of this works today.
 - **For best results, add PC and Xbox copies.** The build keeps the largest copy of each texture, as long as
-  it is the same painting. The PC copy is the largest much more often. The Xbox copy is larger on only a
-  few dozen map textures across the two games, such as a Geonosis sky in BF2, at 1024x256 against the
-  PC's 512x128.
+  it is the same painting. The PC copy is the largest much more often: about 680 textures across
+  the two games, against 12 where the Xbox copy is larger. Those are mostly on BF2 Geonosis, such as a sky at
+  1024x256 against the PC's 512x128.
 
 > **Status: Xbox discs are not used yet.** A build today needs PS2 discs of both games. Xbox discs are
 > recognized but not read. Next to a PS2 disc of the same game, an Xbox disc is ignored and the build

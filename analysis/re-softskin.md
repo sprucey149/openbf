@@ -275,7 +275,7 @@ else                                          // BMAP present
     draw(seg, World, M, bmapCount)
 ```
 `A[b]` = pose matrix for bone b (§8); missing bone → identity. BF2 identical
-(FUN_0057f158 / FUN_0057e780 / FUN_0057e8e8 branch on `*(char*)(model+0xac)` at decomp l.712934).
+(FUN_0057f158 / FUN_0057e780 / FUN_0057e8e8 branch on the model's byte at +0xac, decomp l.712934).
 
 ---
 

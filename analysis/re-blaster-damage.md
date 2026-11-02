@@ -176,7 +176,7 @@ per-tick tail: spread recovery + timers (vtbl update)
 
 ### 3.2 What gates a shot (fire-input predicate, BF1 FUN_00289150) [V]
 
-`cmd = *(char**)(weapon+0x70)` — per-weapon fire command byte written by the
+The weapon holds a pointer at +0x70 to a per-weapon fire command byte `cmd`, written by the
 soldier (fire held counter; −1 on release edge):
 
 - MaxPressedTime > 0 (charge weapon): fires when `*cmd == −1` (on RELEASE).

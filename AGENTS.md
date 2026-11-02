@@ -24,6 +24,8 @@ skipped original-game requirement does not make a task complete.
 Read `PLAN.md` next (short; its moved sections are pointed to inside, and `grep analysis/INDEX.md` before starting any RE), then `engine/artifacts/loop/STATUS.md`. The autoloop (cards in `engine/artifacts/loop/cards/`,
 `scripts/loopctl.py`) is how work lands; the maintainer steers it through `engine/artifacts/loop/INBOX.md`.
 
+In the public repository the cards are in `docs/loop/cards/`; `STATUS.md`, `INBOX.md`, the JOURNAL and `PERF.md` are not published.
+
 ## Playtest black box (dev tool, card BLKB)
 The maintainer now plays the port himself and reports bugs with a screenshot and a line. In dev mode (ON by default while the game is unfinished; `OPENBF_DEV=0` turns it off) the windowed game keeps
 the last 60 s of game time in memory and writes a snapshot of every unit's state (bots' goals, route legs, steer picks,
