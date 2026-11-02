@@ -109,9 +109,10 @@ pub fn weapon_rows(walk: &crate::walk::WalkSim) -> [Option<HudWeapon>; 2] {
     [primary, secondary]
 }
 
-/// What one weapon shows on BF2's ring (`analysis/re-heat-hud.md` 2, `FUN_003b3398`):
+/// What one weapon shows on the ring (`analysis/re-heat-hud.md` 2, `FUN_003b3398`):
 /// an unlimited weapon its heat, a counted one its charge while held. Only reads
-/// the sim's state.
+/// the sim's state. BF1 maps show BF1's heat on BF2's ring, as PLAN puts BF2's HUD
+/// on every map.
 pub fn gauge_of(c: &core::weapon::WeaponClass, s: &core::weapon::WeaponState) -> HudGauge {
     let ring = if c.infinite_ammo() {
         s.heat.clamp(0.0, 1.0)
@@ -127,65 +128,42 @@ pub fn gauge_of(c: &core::weapon::WeaponClass, s: &core::weapon::WeaponState) ->
         ring,
         refire,
         overheated: s.overheated,
-        panel: [None; 2],
-    }
-}
-
-/// What one weapon shows on BF1's bar (`analysis/re-heat-hud.md` 4,
-/// `FUN_002c0400`): a charge while it charges, else an unlimited weapon's heat. A
-/// counted weapon that is not charging has no bar.
-pub fn panel_bar_of(
-    c: &core::weapon::WeaponClass,
-    s: &core::weapon::WeaponState,
-) -> Option<ui::hud::HudPanelBar> {
-    match s.charging(c) {
-        Some(charge) => Some(ui::hud::HudPanelBar::charge(charge)),
-        None => c
-            .infinite_ammo()
-            .then(|| ui::hud::HudPanelBar::heat(s.heat, s.overheated)),
     }
 }
 
 /// The gauge for the rows [`weapon_rows`] shows: on foot the hands' weapon and
-/// the secondary channel's, flying a droid its blaster, in a seat its guns. A BF2
-/// map fills the ring and its signs from them, a BF1 map its own bars.
+/// the secondary channel's, flying a droid its blaster, in a seat its guns.
 pub fn weapon_gauge(walk: &crate::walk::WalkSim) -> HudGauge {
     let sim = &walk.sim;
     let me = &sim.units[walk.player.index as usize];
     if !me.alive || sim.controlled_guided(walk.player).is_some() {
         return HudGauge::default();
     }
-    let of = |class: usize, s| sim.weapon_classes.get(class).map(|c| (c, s));
-    let rows: [Option<(&core::weapon::WeaponClass, &core::weapon::WeaponState)>; 2] =
-        if let Some(m) = me.mount {
-            let v = sim.vehicle(m.vehicle);
-            let setup = v.and_then(|v| sim.seat_setup.get(v.class as usize)?.as_ref());
-            let gun = setup.and_then(|s| s.guns.get(usize::from(m.seat))?.as_ref());
-            let state = v.and_then(|v| v.guns.get(usize::from(m.seat))?.as_ref());
-            std::array::from_fn(|i| of(gun?.weapons.get(i)?.class, state?.weapons.get(i)?))
-        } else if let Some(d) = sim.controlled_droid(walk.player) {
-            let blaster = sim.weapon_classes[d.weapon_class]
-                .remote
-                .as_ref()
-                .map(|r| r.blaster_index);
-            [blaster.and_then(|b| of(b, &d.blaster)), None]
-        } else {
-            let held = me.cur1.and_then(|k| me.held.get(usize::from(k)));
-            [
-                of(me.weapon_class, &me.weapon),
-                held.and_then(|w| of(w.class, &w.state)),
-            ]
-        };
-    if sim.ground_rules == core::soldier::GroundRules::Bf1 {
-        return HudGauge {
-            panel: rows.map(|r| r.and_then(|(c, s)| panel_bar_of(c, s))),
-            ..HudGauge::default()
-        };
-    }
-    let gauges = rows.map(|r| r.map(|(c, s)| gauge_of(c, s)));
-    let first = gauges[0].unwrap_or_default();
+    let of = |class: usize, s: &core::weapon::WeaponState| {
+        sim.weapon_classes.get(class).map(|c| gauge_of(c, s))
+    };
+    let rows: [Option<HudGauge>; 2] = if let Some(m) = me.mount {
+        let v = sim.vehicle(m.vehicle);
+        let setup = v.and_then(|v| sim.seat_setup.get(v.class as usize)?.as_ref());
+        let gun = setup.and_then(|s| s.guns.get(usize::from(m.seat))?.as_ref());
+        let state = v.and_then(|v| v.guns.get(usize::from(m.seat))?.as_ref());
+        std::array::from_fn(|i| of(gun?.weapons.get(i)?.class, state?.weapons.get(i)?))
+    } else if let Some(d) = sim.controlled_droid(walk.player) {
+        let blaster = sim.weapon_classes[d.weapon_class]
+            .remote
+            .as_ref()
+            .map(|r| r.blaster_index);
+        [blaster.and_then(|b| of(b, &d.blaster)), None]
+    } else {
+        let held = me.cur1.and_then(|k| me.held.get(usize::from(k)));
+        [
+            of(me.weapon_class, &me.weapon),
+            held.and_then(|w| of(w.class, &w.state)),
+        ]
+    };
+    let first = rows[0].unwrap_or_default();
     HudGauge {
-        overheated: gauges.iter().flatten().any(|g| g.overheated),
+        overheated: rows.iter().flatten().any(|g| g.overheated),
         ..first
     }
 }
@@ -446,7 +424,6 @@ impl HudView {
             assets_dir.join("side_bf1/weapons"),
         ]);
         let mut layout = layout;
-        ui::hud::add_bf1_panel_bars(&mut layout);
         ui::hud::add_leaving_line(&mut layout);
         let mut hud = Hud::new(&layout, &transforms);
         hud.set_fonts(&art.fonts);

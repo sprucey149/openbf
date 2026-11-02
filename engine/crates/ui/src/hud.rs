@@ -51,111 +51,6 @@ pub struct HudGauge {
     pub refire: f32,
     /// Either row's weapon is locked: the "OVERHEATED!" line.
     pub overheated: bool,
-    /// BF1's bar in each weapon row, in the place of the count
-    /// (`re-heat-hud.md` 4). A BF1 map shows these and none of the above.
-    pub panel: [Option<HudPanelBar>; 2],
-}
-
-/// One weapon row's bar on a BF1 map: its fill and colour.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct HudPanelBar {
-    pub fill: f32,
-    pub color: [u8; 3],
-}
-
-impl HudPanelBar {
-    /// An unlimited weapon: full and blue when cold, shortening with its heat,
-    /// red while overheated.
-    pub fn heat(heat: f32, overheated: bool) -> Self {
-        Self {
-            fill: (1.0 - heat).clamp(0.0, 1.0),
-            color: if overheated {
-                [200, 100, 100]
-            } else {
-                [0, 152, 255]
-            },
-        }
-    }
-
-    /// A weapon charging, in green (`re-heat-hud.md` 4 reads the PS2's weapon
-    /// state 4 as its charge, which is not confirmed).
-    pub fn charge(charge: f32) -> Self {
-        Self {
-            fill: charge.clamp(0.0, 1.0),
-            color: [100, 200, 100],
-        }
-    }
-}
-
-/// Add BF1's weapon bars to BF2's layout, which has no element for them: BF1's
-/// HUD is code on the PS2, so these hold the numbers `re-heat-hud.md` 4 reads,
-/// the sheet `hud1` and each slot's size, on BF2's panel in place of its count.
-/// They stay off until [`feed`] sends a bar. No effect on a layout without the
-/// weapon group.
-pub fn add_bf1_panel_bars(layout: &mut manifest::hud::HudLayout) {
-    use manifest::hud::{HudArg, HudNode};
-    fn node(name: &str, args: Vec<HudArg>, children: Vec<HudNode>) -> HudNode {
-        HudNode {
-            name: name.to_owned(),
-            args,
-            children,
-        }
-    }
-    let (s, n) = (|v: &str| HudArg::Str(v.to_owned()), HudArg::Num);
-    // The PS2's sizes are pixels of its 512 x 448 HUD. (x, y): the top left of
-    // the row's count, past BF2's infinity ring.
-    let bar = |row: u32, w: f32, h: f32, x: f32, y: f32| {
-        let ev = |name: &str| format!("player1.weapon{row}.{name}");
-        node(
-            "barbitmap",
-            vec![s(&format!("player1weapon{row}panelbar"))],
-            vec![
-                node("Bitmap", vec![s(BF1_BAR_SHEET)], vec![]),
-                node("texcoords", BF1_BAR_UV.map(n).to_vec(), vec![]),
-                node(
-                    "bitmaprect",
-                    vec![
-                        n(w / 512.0),
-                        n(h / 448.0),
-                        s("Left"),
-                        s("Top"),
-                        s("Viewport"),
-                    ],
-                    vec![],
-                ),
-                node("Viewport", vec![n(1.0)], vec![]),
-                node("Position", vec![n(x), n(y), n(0.0), s("Viewport")], vec![]),
-                // Over the backdrop (8), under the weapon's model.
-                node("zorder", vec![n(7.0)], vec![]),
-                node("colorchangerate", vec![n(0.0)], vec![]),
-                node("eventvalue", vec![s(&ev("panelBar"))], vec![]),
-                node("eventenable", vec![s(&ev("panelBar"))], vec![]),
-                node("eventcolor", vec![s(&ev("panelBarColor"))], vec![]),
-                node("eventdisable", vec![s(&ev("disable"))], vec![]),
-                node("eventdisable", vec![s(&ev("panelBarOff"))], vec![]),
-            ],
-        )
-    };
-    fn group<'a>(nodes: &'a mut [HudNode], name: &str) -> Option<&'a mut HudNode> {
-        nodes.iter_mut().find_map(|c| {
-            let hit = c.name.eq_ignore_ascii_case("group")
-                && matches!(c.args.first(), Some(HudArg::Str(v)) if v.eq_ignore_ascii_case(name));
-            if hit {
-                Some(c)
-            } else {
-                group(&mut c.children, name)
-            }
-        })
-    }
-    if let Some(g) = group(
-        &mut layout.nodes,
-        "player1weaponinformation_lineupwithhealth",
-    ) {
-        g.children
-            .push(bar(1, 84.0, 13.0, BF1_BAR_AT[0][0], BF1_BAR_AT[0][1]));
-        g.children
-            .push(bar(2, 48.0, 12.0, BF1_BAR_AT[1][0], BF1_BAR_AT[1][1]));
-    }
 }
 
 /// The element of the "Leaving Battlefield" line ([`add_leaving_line`]).
@@ -219,12 +114,6 @@ impl LeavingPulse {
         Some(alpha.clamp(2.0, 255.0) / 255.0)
     }
 }
-
-/// The sheet of BF1's weapon bars, and where on it the PS2 reads the bar.
-const BF1_BAR_SHEET: &str = "hud1";
-const BF1_BAR_UV: [f32; 4] = [0.828125, 0.0390625, 0.171875, 0.140625];
-/// `[ours]` Where each bar sits on BF2's panel: the row's count slot.
-const BF1_BAR_AT: [[f32; 2]; 2] = [[0.062, 0.34], [0.062, 0.289]];
 
 /// One event line for the message box (`player1.message` after its
 /// `player1.message.color`).
@@ -507,7 +396,6 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
             continue;
         }
         let ev = |name: &str| format!("player1.weapon{row}.{name}");
-        let bar = m.gauge.panel[row - 1];
         // The mesh: the PS2's `.change` through the NameMesh table. `[ours]`
         // what its tree has no event for: a weapon with no model shows its
         // icon sheet, else nothing in the last one's place (the backdrop
@@ -537,33 +425,19 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
             Some(n) => put(&ev("totalAmmoBullets"), EventValue::Number(n as f32)),
             None => {
                 put(&ev("totalAmmoBullets"), EventValue::Number(INFINITE));
-                if bar.is_none() {
-                    put(&ev("ammoInfinite"), EventValue::None);
-                }
+                put(&ev("ammoInfinite"), EventValue::None);
             }
         }
         put(
             &ev("totalClipFraction"),
             EventValue::Number(w.clip_fraction.clamp(0.0, 1.0)),
         );
-        // `[ours]` a counted weapon takes the infinity ring away, and BF1's
-        // bar stands where it would be.
-        if hud.falls(
-            &format!("hud.gate.weapon{row}.infinite"),
-            w.total.is_none() && bar.is_none(),
-        ) {
+        // `[ours]` a counted weapon takes the infinity ring away.
+        if hud.falls(&format!("hud.gate.weapon{row}.infinite"), w.total.is_none()) {
             if let Some(i) = hud.find(&format!("player1weapon{row}ammoInfinite")) {
                 hud.elems[i].fader.hide();
             }
             hud.forget(&ev("ammoInfinite"));
-        }
-        // Sent every frame, as the ring is below.
-        if let Some(b) = bar {
-            hud.send(&ev("panelBar"), EventValue::Number(b.fill), has_mesh);
-            hud.send(&ev("panelBarColor"), EventValue::Color(b.color), has_mesh);
-        }
-        if hud.falls(&format!("hud.gate.weapon{row}.panelbar"), bar.is_some()) {
-            hud.send(&ev("panelBarOff"), EventValue::None, has_mesh);
         }
     }
 

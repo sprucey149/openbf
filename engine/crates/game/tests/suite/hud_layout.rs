@@ -928,7 +928,6 @@ fn gauge_model(ring: f32, refire: f32, overheated: bool) -> ui::hud::HudModel {
             ring,
             refire,
             overheated,
-            panel: [None; 2],
         },
         ..hot1_post_a()
     }
@@ -1033,44 +1032,6 @@ fn the_ring_draws_only_when_lit() {
         [640, 480],
     );
     assert_eq!(v.bounds(ring), None, "no weapon, no ring");
-}
-
-/// Issue #78 on a BF1 map (`re-heat-hud.md` 4): each row's bar stands in the count's
-/// place, its width and colour following the gauge, the infinity ring and BF2's ring
-/// off. A row with no bar shows neither it nor anything of a bar left from before.
-#[test]
-fn bf1s_bar_replaces_the_rings_and_follows_the_gauge() {
-    let Some(mut v) = view([640, 480]) else {
-        return;
-    };
-    let bar = "player1weapon1panelbar";
-    assert!(v.bounds(bar).is_none(), "off without a bar: BF2 draws none");
-    let model = |heat: f32, overheated: bool, total: Option<u32>| {
-        let mut m = hot1_post_a();
-        m.gauge.panel[0] = Some(ui::hud::HudPanelBar::heat(heat, overheated));
-        if let Some(w) = &mut m.weapon {
-            w.total = total;
-        }
-        m
-    };
-    let width = |v: &mut HudView, m: &ui::hud::HudModel| {
-        v.update(m, 0.5, [640, 480]);
-        let b = v.bounds(bar).expect("the bar");
-        b[2] - b[0]
-    };
-    let cold = width(&mut v, &model(0.0, false, None));
-    let half = width(&mut v, &model(0.5, false, None));
-    assert!(cold > 90.0, "84 units on a 512 wide HUD: {cold}");
-    assert!(((half / cold) - 0.5).abs() < 0.01, "{half} of {cold}");
-    assert!(v.bounds("player1weapon1ammoInfinite").is_none(), "no ring");
-    assert!(v.bounds("player1weapon1heatbar").is_none(), "no heat ring");
-    assert!(v.bounds("player1weapon1overheat").is_none(), "no line");
-    // Back to a row with no bar: it goes, and the infinity ring returns.
-    let mut plain = model(0.0, false, None);
-    plain.gauge.panel[0] = None;
-    v.update(&plain, 0.5, [640, 480]);
-    assert!(v.bounds(bar).is_none(), "gone with its weapon");
-    assert!(v.bounds("player1weapon1ammoInfinite").is_some());
 }
 
 /// Issue #59 (`re-boundary.md` T4): "Leaving Battlefield" comes up at the screen's
