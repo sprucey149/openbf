@@ -1,12 +1,12 @@
 # openbf
 
-An open-source Rust engine that plays the PlayStation 2 versions of
-Star Wars: Battlefront and Star Wars: Battlefront II.
+An open-source Rust engine that plays Star Wars: Battlefront and Star Wars: Battlefront II,
+built from your own copies of both games, with the PlayStation 2 versions as its gameplay reference.
 
 **Unofficial fan project.** Not affiliated with or endorsed by Lucasfilm, Disney,
 Electronic Arts, LucasArts or Pandemic Studios. This repository contains no game
-assets: you need your own PS2 discs of both games. Everything the game needs is
-extracted from your ISOs on your own machine.
+assets: you need your own copies of both games (see [What you need](#what-you-need)).
+Everything the game needs is extracted from your copies on your own machine.
 
 Work in progress: playable, but far from finished.
 
@@ -16,15 +16,100 @@ so contributors and automated agents do not duplicate work. See [CONTRIBUTING.md
 
 ## Building your copy
 
-One command turns your two disc images into one game file:
+One command turns your copies of the two games into one game file:
 
 ```bash
 git clone https://github.com/sprucey149/openbf.git
 cd openbf
-mkdir iso   # put your own disc images here: iso/SWBF1.iso and iso/SWBF2.iso
+mkdir iso   # put your own copies of both games here; see "What you need" below
 python3 scripts/pack.py
 ./dist/openbf
 ```
+
+### What you need
+
+- **Both games.** You need a copy of Battlefront (BF1) and a copy of Battlefront II (BF2).
+  It will not build with only one of them.
+- **A console copy of BF2.** PC BF2 does not contain everything the game needs, such as the menus
+  and HUD it uses, so it can only be an add-on to a console BF2, never your only BF2.
+- **Mix and match.** The aim is that consoles can be mixed freely, for example PS2 BF1 with Xbox BF2,
+  and that you get the same game whichever you use: only texture and asset sizes change.
+  The Status note below says how much of this works today.
+- **For best results, add PC and Xbox copies.** The build keeps the largest copy of each texture, as long as
+  it is the same painting. The PC copy is the largest much more often. The Xbox copy is larger on only a
+  few dozen map textures across the two games, such as a Geonosis sky in BF2, at 1024x256 against the
+  PC's 512x128.
+
+> **Status: Xbox discs are not used yet.** A build today needs PS2 discs of both games. Xbox discs are
+> recognized but not read. Next to a PS2 disc of the same game, an Xbox disc is ignored and the build
+> carries on. Without that PS2 disc, the build stops and says so. PC BF1 can't be your only BF1 yet either.
+
+| You supply | What you get today |
+|---|---|
+| PS2 BF1 + PS2 BF2 | Builds, with the PS2 textures |
+| PS2 BF1 + PS2 BF2 + PC BF1 and/or PC BF2 | Builds, the same game with larger PC textures where they exist |
+| Any working set above + the DLC folder | Builds, with Kit Fisto and Asajj Ventress added (see below) |
+| Xbox BF1 and/or Xbox BF2, without a PS2 disc of that game | Refused for now (planned) |
+| PC BF1 without a console BF1 | Refused for now |
+| PC BF2 without a console BF2 | Refused |
+| Only one of the two games | Refused |
+
+### Where to put your files
+
+Everything goes in `iso/`. File and folder names don't matter, because each input is recognized by what's
+inside it. One tree that works, with a PC install copied or symlinked in as a whole folder:
+
+```text
+iso/
+  SWBF1.iso                      a disc image, any name
+  SWBF2.iso                      a disc image, any name
+  My PC Battlefront/             any name
+    GameData/Data/_LVL_PC/       a PC BF1 install
+  My PC Battlefront II/          any name
+    GameData/data/_lvl_pc/       a PC BF2 install
+  DLC_XBOX/                      optional, see below
+```
+
+- **Disc images** must be plain dumps: a PS2 `.iso`, or an Xbox `.iso` including trimmed `.xiso` images and
+  full dumps. CHD, CSO, ZSO, zip, 7z, rar and gzip files are refused, so unpack them first. Raw
+  BIN dumps are refused too, so convert them to a 2048-byte `.iso`.
+- **Disc images must be the original discs.** A rebuilt or modified PS2 disc is refused, and so is a folder of
+  files extracted from a disc: add the disc image instead.
+- **PC copies** are the classic 2004 and 2005 releases, such as those from Steam or GOG. Aspyr's Classic
+  Collection is refused.
+- Something unusable doesn't stop a build as long as both games still have a source. The summary names what
+  was refused and why.
+
+To see what your folder adds up to without building anything, run `python3 scripts/input_scan.py`
+(`python scripts\input_scan.py` on Windows). It prints what it found, what it will use and what it refused, and
+what to add if something is missing.
+
+To use copies stored somewhere else, name them instead: `--iso1 <file>` and `--iso2 <file>` for BF1 and BF2 disc
+images, `--pc1 <folder>` and `--pc2 <folder>` for PC installs, and `--iso-dir <folder>` to scan another folder in
+place of `iso/`.
+
+### DLC heroes (optional)
+
+Kit Fisto and Asajj Ventress were Xbox downloadable content for BF2. The practical way to get them is the
+community pack [Xbox DLC and Title Update Content for PC](https://www.moddb.com/mods/xbox-dlc-content-for-pc/downloads/xbox-dlc-and-title-update-content-for-pc)
+on ModDB. Download it, unpack it, and put its `DLC_XBOX` folder anywhere in `iso/`:
+
+```text
+iso/
+  DLC_XBOX/
+    addme.script
+    data/_LVL_PC/SIDE/dlc.lvl
+    ...
+```
+
+Leaving the rest of the pack beside it is fine, for example `iso/ADDON_XBOX/DLC_XBOX/`: only these two heroes
+are used, and none of the pack's maps or other content. They take the Republic and CIS hero slots on BF2 battles
+that have those heroes. These are the community's adapted versions of the heroes rather than the Xbox originals,
+and they have no voice lines of their own. Thanks to the pack's authors: its heroes are by Gogie and Ryan Hank,
+assembled by iamashaymin, with Xbox map conversions by SleepKiller. Without the folder, the game builds unchanged.
+Adding or removing it bakes everything again on the next run.
+
+### What the build does
 
 `pack.py` extracts the discs, bakes the assets, builds the game, and packs everything into
 `dist/openbf` (about 3 GB). A build of about 3.9 GiB or more becomes a small `dist/openbf` plus `dist/openbf.pak`,
@@ -34,7 +119,7 @@ itself. Run the script again after pulling new code: it skips what is still curr
 and bakes again only when the code that bakes has changed (that can take a while).
 
 **`dist/openbf` and `dist/openbf.pak` contain the games' own content, so never upload or share them.**
-Everyone builds their own from their own discs.
+Everyone builds their own from their own copies of the games.
 
 Requirements on Linux:
 - Rust (https://rustup.rs), Python 3, bash, ffmpeg
@@ -59,8 +144,6 @@ python scripts\pack.py
 dist\openbf.exe
 ```
 Your profile and snapshots are saved in `openbf_data\` beside `openbf.exe`.
-
-Disc images: `--iso1 <path>` and `--iso2 <path>` point the script at images stored somewhere else.
 
 ## Controls
 
