@@ -136,7 +136,11 @@ mod tests {
         p.wheel(-2.0);
         assert_eq!(p.take_wheel(), -3.0);
         assert_eq!(p.take_wheel(), 0.0);
-        assert_eq!(p.take_frame(), None, "wheel delta does not trigger resting hover");
+        assert_eq!(
+            p.take_frame(),
+            None,
+            "wheel delta does not trigger resting hover"
+        );
         p.wheel(1.0);
         p.clear();
         assert_eq!(p.take_wheel(), 0.0);

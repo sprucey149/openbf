@@ -744,7 +744,11 @@ fn list_scrolling_moves_top_without_moving_focus() {
     assert_eq!((c.at, c.top), (0, 0));
 
     assert!(c.scroll(25, LIST_ROWS, 1));
-    assert_eq!((c.at, c.top), (0, 1), "scrolling down increments top without moving at");
+    assert_eq!(
+        (c.at, c.top),
+        (0, 1),
+        "scrolling down increments top without moving at"
+    );
 
     assert!(c.scroll(25, LIST_ROWS, 3));
     assert_eq!((c.at, c.top), (0, 4));
@@ -762,7 +766,11 @@ fn list_scrolling_moves_top_without_moving_focus() {
     let mut m = ia();
     assert_eq!((m.map_list.at, m.map_list.top), (0, 0));
     assert!(m.scroll_left(1));
-    assert_eq!((m.map_list.at, m.map_list.top), (0, 1), "scroll_left advances top without moving at");
+    assert_eq!(
+        (m.map_list.at, m.map_list.top),
+        (0, 1),
+        "scroll_left advances top without moving at"
+    );
     assert_eq!(m.take_clicks(), vec![MenuSound::Select]);
 
     // scroll_pointer over right window scrolls playlist
@@ -777,13 +785,19 @@ fn list_scrolling_moves_top_without_moving_focus() {
     let size = [640.0, 480.0];
     let pt_right = [400.0 * (640.0 / 512.0), 200.0];
     assert!(m.scroll_pointer(Some(pt_right), Some(size), 2));
-    assert_eq!(m.play_list.top, 2, "scroll_pointer over right window scrolls playlist");
+    assert_eq!(
+        m.play_list.top, 2,
+        "scroll_pointer over right window scrolls playlist"
+    );
     assert_eq!(m.map_list.top, 1, "left window untouched");
 
     // scroll_pointer over left window scrolls map list
     let pt_left = [100.0 * (640.0 / 512.0), 200.0];
     assert!(m.scroll_pointer(Some(pt_left), Some(size), -1));
-    assert_eq!(m.map_list.top, 0, "scroll_pointer over left window scrolls map list");
+    assert_eq!(
+        m.map_list.top, 0,
+        "scroll_pointer over left window scrolls map list"
+    );
     assert_eq!(m.map_list.at, 0, "focus unchanged without selecting");
 }
 

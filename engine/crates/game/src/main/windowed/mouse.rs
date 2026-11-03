@@ -93,7 +93,9 @@ impl App {
                 button: winit::event::MouseButton::Left,
                 state: winit::event::ElementState::Pressed,
                 ..
-            } if matches!(self.screen, Screen::Shell) || !self.can_grab() => {
+            } if matches!(self.screen, Screen::Shell)
+                || (self.in_battle() && !self.paused && !self.can_grab()) =>
+            {
                 self.shell_pointer.click();
             }
             WindowEvent::MouseWheel { delta, .. } if matches!(self.screen, Screen::Shell) => {
@@ -225,6 +227,15 @@ mod tests {
             button: winit::event::MouseButton::Left,
         });
         assert_eq!(a.shell_pointer.take_frame(), Some(([100.0, 100.0], true)));
+
+        // A click on the pause menu must not wait for the spawn screen or shell.
+        a.paused = true;
+        a.mouse_window_event(&WindowEvent::MouseInput {
+            device_id: winit::event::DeviceId::dummy(),
+            state: winit::event::ElementState::Pressed,
+            button: winit::event::MouseButton::Left,
+        });
+        assert_eq!(a.shell_pointer.take_frame(), None);
     }
 
     #[test]

@@ -191,7 +191,7 @@ pub fn pointer_target(
                     return Some(crate::shell::PointerTarget::ScrollLeft(1));
                 }
             }
-            if ia.state != State::Command {
+            if !matches!(ia.state, State::Command | State::Playlist) {
                 let row = ((y - ly0) / row_h).floor() as isize + cur.top as isize;
                 if x >= lx0 && x <= lx1 && y >= ly0 && row >= 0 {
                     let k = row as usize;
@@ -911,13 +911,29 @@ mod tests {
         assert_eq!(hit_up, None, "no up arrow when at top");
 
         let hit_down = pointer_target(&ia, to_screen(cx, last + 8.0), [640.0, 480.0], &font);
-        assert_eq!(hit_down, Some(crate::shell::PointerTarget::ScrollLeft(1)), "down arrow is hit");
+        assert_eq!(
+            hit_down,
+            Some(crate::shell::PointerTarget::ScrollLeft(1)),
+            "down arrow is hit"
+        );
 
         // Scroll down: now up arrow is present
         ia.scroll_left(1);
         assert_eq!(ia.map_list.top, 1);
         let hit_up_scrolled = pointer_target(&ia, to_screen(cx, y0 - 8.0), [640.0, 480.0], &font);
-        assert_eq!(hit_up_scrolled, Some(crate::shell::PointerTarget::ScrollLeft(-1)), "up arrow is hit when scrolled");
+        assert_eq!(
+            hit_up_scrolled,
+            Some(crate::shell::PointerTarget::ScrollLeft(-1)),
+            "up arrow is hit when scrolled"
+        );
+
+        // Editing the playlist: the map rows do not take the hover or click.
+        ia.state = State::Playlist;
+        let row = pointer_target(&ia, to_screen(cx, y0 + ROW * 0.5), [640.0, 480.0], &font);
+        assert_eq!(
+            row, None,
+            "the left rows are inert while the playlist has focus"
+        );
     }
 
     #[test]

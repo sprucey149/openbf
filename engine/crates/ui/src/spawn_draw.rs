@@ -615,18 +615,6 @@ pub fn side_row_at(point: [f32; 2], size: [f32; 2], row_count: usize) -> Option<
     None
 }
 
-/// Hit-test whether a window point lands in the 3-D soldier render area of the
-/// class selection screen (to the left of the details card and above help lines).
-pub fn class_render_area(point: [f32; 2], size: [f32; 2]) -> bool {
-    if point[0] < 0.0 || point[0] > size[0] || point[1] < 0.0 || point[1] > size[1] {
-        return false;
-    }
-    let s = screen_at(size, Anchor::Centre);
-    let right_boundary = s.map(Vec3::new(CLASS_BOX[0], 0.0, 0.0))[0];
-    let bottom_boundary = s.map(Vec3::new(0.0, 390.0, 0.0))[1];
-    point[0] < right_boundary && point[1] < bottom_boundary
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -947,39 +935,58 @@ mod tests {
     fn side_row_hit_test_identifies_team_rows_accurately() {
         let size = [640.0, 480.0];
         // Title row is at SIDE_STACK_TOP (k=0 in row layout, but not a team item).
-        let title_pt = window_point([(SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5, SIDE_STACK_TOP + 10.0], size);
-        assert_eq!(side_row_at(title_pt, size, 3), None, "title row is not clickable");
+        let title_pt = window_point(
+            [
+                (SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5,
+                SIDE_STACK_TOP + 10.0,
+            ],
+            size,
+        );
+        assert_eq!(
+            side_row_at(title_pt, size, 3),
+            None,
+            "title row is not clickable"
+        );
 
         // Row 0 = Team 1 (k=1 in row layout: SIDE_STACK_TOP + ROW_PITCH)
-        let team1_pt = window_point([(SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5, SIDE_STACK_TOP + ROW_PITCH + 10.0], size);
+        let team1_pt = window_point(
+            [
+                (SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5,
+                SIDE_STACK_TOP + ROW_PITCH + 10.0,
+            ],
+            size,
+        );
         assert_eq!(side_row_at(team1_pt, size, 3), Some(0), "row 0 hits team 1");
 
         // Row 1 = Team 2 (k=2 in row layout: SIDE_STACK_TOP + ROW_PITCH * 2)
-        let team2_pt = window_point([(SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5, SIDE_STACK_TOP + ROW_PITCH * 2.0 + 10.0], size);
+        let team2_pt = window_point(
+            [
+                (SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5,
+                SIDE_STACK_TOP + ROW_PITCH * 2.0 + 10.0,
+            ],
+            size,
+        );
         assert_eq!(side_row_at(team2_pt, size, 3), Some(1), "row 1 hits team 2");
 
         // Row 2 = Auto Assign (k=3: SIDE_STACK_TOP + ROW_PITCH * 3)
-        let auto_pt = window_point([(SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5, SIDE_STACK_TOP + ROW_PITCH * 3.0 + 10.0], size);
-        assert_eq!(side_row_at(auto_pt, size, 3), Some(2), "row 2 hits auto assign");
+        let auto_pt = window_point(
+            [
+                (SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5,
+                SIDE_STACK_TOP + ROW_PITCH * 3.0 + 10.0,
+            ],
+            size,
+        );
+        assert_eq!(
+            side_row_at(auto_pt, size, 3),
+            Some(2),
+            "row 2 hits auto assign"
+        );
 
         // Outside to left
-        let left_pt = window_point([SIDE_STACK_X[0] - 10.0, SIDE_STACK_TOP + ROW_PITCH + 10.0], size);
+        let left_pt = window_point(
+            [SIDE_STACK_X[0] - 10.0, SIDE_STACK_TOP + ROW_PITCH + 10.0],
+            size,
+        );
         assert_eq!(side_row_at(left_pt, size, 3), None);
-    }
-
-    #[test]
-    fn class_render_area_hit_test() {
-        let size = [640.0, 480.0];
-        // Soldier standing on the left: shell x ~ 100, y ~ 200
-        let soldier_pt = window_point([100.0, 200.0], size);
-        assert!(class_render_area(soldier_pt, size), "soldier area returns true");
-
-        // Inside class box: shell x ~ 300, y ~ 200
-        let card_pt = window_point([300.0, 200.0], size);
-        assert!(!class_render_area(card_pt, size), "class details box returns false");
-
-        // Help lines area at the bottom
-        let help_pt = window_point([100.0, 410.0], size);
-        assert!(!class_render_area(help_pt, size), "help area returns false");
     }
 }

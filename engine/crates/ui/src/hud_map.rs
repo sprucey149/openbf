@@ -732,7 +732,10 @@ mod tests {
         assert_eq!(hit_spawn_post(&map, &posts, p1_pt, size, 28.0), Some(1u32));
         // Hit within radius of post 2
         let p2_near = [p2_pt[0] + 10.0, p2_pt[1] - 5.0];
-        assert_eq!(hit_spawn_post(&map, &posts, p2_near, size, 28.0), Some(2u32));
+        assert_eq!(
+            hit_spawn_post(&map, &posts, p2_near, size, 28.0),
+            Some(2u32)
+        );
         // Far away from any post
         assert_eq!(hit_spawn_post(&map, &posts, [0.0, 0.0], size, 28.0), None);
     }

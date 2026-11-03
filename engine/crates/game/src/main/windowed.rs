@@ -359,13 +359,11 @@ impl SpawnClickTracker {
         const DOUBLE_CLICK_TIME: f32 = 0.45;
         const DOUBLE_CLICK_DIST: f32 = 25.0;
 
-        let is_double = self.last_target == Some(target)
-            && self.timer <= DOUBLE_CLICK_TIME
-            && {
-                let dx = pos[0] - self.last_pos[0];
-                let dy = pos[1] - self.last_pos[1];
-                (dx * dx + dy * dy) <= DOUBLE_CLICK_DIST * DOUBLE_CLICK_DIST
-            };
+        let is_double = self.last_target == Some(target) && self.timer <= DOUBLE_CLICK_TIME && {
+            let dx = pos[0] - self.last_pos[0];
+            let dy = pos[1] - self.last_pos[1];
+            (dx * dx + dy * dy) <= DOUBLE_CLICK_DIST * DOUBLE_CLICK_DIST
+        };
 
         if is_double {
             self.last_target = None;
@@ -784,9 +782,7 @@ impl App {
                     let map = minimap.spawn_model(walk, slot);
                     let team = walk.sim.unit(walk.player).map_or(0, |u| u.team);
                     let posts = walk.sim.player_spawn_posts(team);
-                    if let Some(post) =
-                        ui::hud_map::hit_spawn_post(&map, &posts, pos, size, 28.0)
-                    {
+                    if let Some(post) = ui::hud_map::hit_spawn_post(&map, &posts, pos, size, 28.0) {
                         let double = self
                             .spawn_clicks
                             .check_double_click(SpawnTarget::Post(post), pos);
@@ -2559,8 +2555,10 @@ mod tests {
         let size = [640.0, 480.0];
         // Team 1 row in window pixels
         let team1_pt = ui::spawn_draw::window_point(
-            [(ui::spawn_draw::SIDE_STACK_X[0] + ui::spawn_draw::SIDE_STACK_X[1]) * 0.5,
-             ui::spawn_draw::SIDE_STACK_TOP + ui::spawn_draw::ROW_PITCH + 10.0],
+            [
+                (ui::spawn_draw::SIDE_STACK_X[0] + ui::spawn_draw::SIDE_STACK_X[1]) * 0.5,
+                ui::spawn_draw::SIDE_STACK_TOP + ui::spawn_draw::ROW_PITCH + 10.0,
+            ],
             size,
         );
 
@@ -2568,13 +2566,22 @@ mod tests {
         a.shell_pointer.moved_to(team1_pt);
         a.shell_pointer.click();
         a.step_spawn_pointer(0.016);
-        assert_eq!(a.walk.as_ref().unwrap().0.sim.side_choice[0], core::sim::SideChoice::Team1);
-        assert_eq!(a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT, 0);
+        assert_eq!(
+            a.walk.as_ref().unwrap().0.sim.side_choice[0],
+            core::sim::SideChoice::Team1
+        );
+        assert_eq!(
+            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
+            0
+        );
 
         // Side select - Click 2 (within 0.1s): double click confirms Team 1
         a.shell_pointer.click();
         a.step_spawn_pointer(0.1);
-        assert_ne!(a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT, 0);
+        assert_ne!(
+            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
+            0
+        );
 
         // 2. Map stage
         let walk = &mut a.walk.as_mut().unwrap().0;
@@ -2602,7 +2609,11 @@ mod tests {
             north: 0.0,
             turn: 0.0,
             posts: std::collections::HashMap::new(),
-            soldiers: vec![game::minimap::ClassIcon { texture: None, scale: 1.0, view: [50.0; 4] }],
+            soldiers: vec![game::minimap::ClassIcon {
+                texture: None,
+                scale: 1.0,
+                view: [50.0; 4],
+            }],
             vehicles: Vec::new(),
             droids: std::collections::HashMap::new(),
         });
@@ -2615,14 +2626,21 @@ mod tests {
         a.shell_pointer.moved_to(cp1_pt);
         a.shell_pointer.click();
         a.step_spawn_pointer(0.016);
-        assert_eq!(a.walk.as_ref().unwrap().0.sim.spawn_post_choice[0], Some(core::unit::SpawnPost::Post(0)));
-        assert_eq!(a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT, 0);
+        assert_eq!(
+            a.walk.as_ref().unwrap().0.sim.spawn_post_choice[0],
+            Some(core::unit::SpawnPost::Post(0))
+        );
+        assert_eq!(
+            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
+            0
+        );
 
         // Map - Click 2 on CP1 (within 0.1s): double click confirms CP1
         a.shell_pointer.click();
         a.step_spawn_pointer(0.1);
-        assert_ne!(a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT, 0);
-
-
+        assert_ne!(
+            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
+            0
+        );
     }
 }

@@ -446,7 +446,9 @@ impl InstantAction {
 
     /// Scroll the playlist by `delta` rows.
     pub fn scroll_right(&mut self, delta: isize) -> bool {
-        let moved = self.play_list.scroll(self.playlist.len() + 1, LIST_ROWS, delta);
+        let moved = self
+            .play_list
+            .scroll(self.playlist.len() + 1, LIST_ROWS, delta);
         if moved {
             self.click(MenuSound::Select);
         }
@@ -483,13 +485,13 @@ impl InstantAction {
                     if size[0] > 0.0 && size[1] > 0.0 {
                         let box_w = 4.0 / 3.0 * size[1];
                         let x = (point[0] - (size[0] - box_w) * 0.5) / (box_w / 512.0);
-                        if x >= crate::shell_ia::RIGHT_WINDOW[0]
-                            && x <= crate::shell_ia::RIGHT_WINDOW[2]
+                        if (crate::shell_ia::RIGHT_WINDOW[0]..=crate::shell_ia::RIGHT_WINDOW[2])
+                            .contains(&x)
                         {
                             return self.scroll_right(delta);
                         }
-                        if x >= crate::shell_ia::LEFT_WINDOW[0]
-                            && x <= crate::shell_ia::LEFT_WINDOW[2]
+                        if (crate::shell_ia::LEFT_WINDOW[0]..=crate::shell_ia::LEFT_WINDOW[2])
+                            .contains(&x)
                         {
                             return self.scroll_left(delta);
                         }

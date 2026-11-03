@@ -513,7 +513,11 @@ impl App {
                 let size = self.renderer.as_ref().map(|r| r.size());
                 ia.scroll_pointer(point, size.map(|(w, h)| [w as f32, h as f32]), lines);
             }
-            let pointer = if wheel != 0.0 && !click { None } else { pointer };
+            let pointer = if wheel != 0.0 && !click {
+                None
+            } else {
+                pointer
+            };
             if let (Some((point, _)), Some((w, h))) =
                 (pointer, self.renderer.as_ref().map(|r| r.size()))
             {
