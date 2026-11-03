@@ -296,6 +296,7 @@ pub(super) fn bake_content(
     let render_conformation = super::render_conform::Conformation::of(original.as_deref())?;
     let render_entrance = super::render_entrance::Entrance::of(original.as_deref())?;
     let render_chamber = super::render_chamber::Chamber::of(original.as_deref())?;
+    let render_groups = super::render_groups::Groups::of(original.as_deref())?;
     for original in original.as_deref().into_iter().chain(
         side_source
             .as_ref()
@@ -472,6 +473,7 @@ pub(super) fn bake_content(
                 }
                 if crate::shadow::write_model(c, out, &shadow_skels)? > 0 {
                     render_alignment.shadow(&m.name, out)?;
+                    render_groups.shadow(&m, out)?;
                 }
                 match bind_pose.pose(&m) {
                     Ok(Some(p)) => {
@@ -482,6 +484,7 @@ pub(super) fn bake_content(
                     Err(e) => eprintln!("bind pose: {e} — {} stays as stored", m.name),
                 }
                 render_alignment.apply(&mut m)?;
+                render_groups.apply(&mut m)?;
                 if restore_door_halves {
                     if let Some(count) = super::render_symmetry::model(&mut m)? {
                         reflected_door_groups.insert(m.name.to_ascii_lowercase(), count);

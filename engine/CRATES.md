@@ -88,8 +88,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/gameplay/terrain.rs` 250 — simulation heights inside the play/query bounds, separate full drawing heights · `apply_terrain`, `apply_render_heights`
 - `bake/src/gameplay/tests.rs` 506 — the gameplay table's tests.
 - `bake/src/map.rs` 915 — map/common public entry points, input-reduction helpers, manifest re-exports and regression tests · `bake_map`, `bake_common`; calls the private content baker.
-- `bake/src/map/content.rs` 1566 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
+- `bake/src/map/content.rs` 1569 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
 - `bake/src/map/render_alignment.rs` 319 — fingerprinted donor-art transforms, end stretches and donor-vertex column caps; preserves PS2 outputs, gameplay headers and collision · `Alignment`
+- `bake/src/map/render_groups.rs` 327 — fingerprinted rigid return of displaced donor vertex groups (BF1 Hoth chamber, PC Rhen Var cathedral window) and of the donor shadow vertices outlining them; PS2 never selects a recipe · `Groups`
 - `bake/src/map/render_reassembly.rs` 613 — rejoin verified donor-only Jabba room/pipe, Polis Massa platform and capital-ship LOWD panels into canonical render models without changing simulation placements or collision · `models`
 - `bake/src/map/texture_alias.rs` 238 — bind native donor far artwork under the public corrected sky name, preserving both tiers and optional-file lifecycle · `far_alias`, `install`
 - `bake/src/map/render_recovery.rs` 621 — exact shared-LVL presentation lookup and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
