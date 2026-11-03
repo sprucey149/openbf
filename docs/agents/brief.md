@@ -6,7 +6,8 @@ bounded task, owned files, a source revision and concrete completion evidence.
 ## Shared rules
 
 Read AGENTS.md, PLAN.md and the relevant technical evidence before changing files.
-PS2 is the gameplay reference. Every source plays the same game, with BF2's HUD on
+openbf's gameplay rules are canonical; the original games are the evidence and deliberate
+differences are named. Every source plays the same game, with BF2's HUD on
 every map. Honor ownership, keep game data out of Git and stage files by name.
 Never work around a denied command. Keep automated runs headless. Run GPU tests
 through `scripts/gpu_tests.sh` with `--test-threads=1`.

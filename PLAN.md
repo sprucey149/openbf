@@ -24,7 +24,8 @@ The full text of every decision, with its numbers, is `analysis/plan/FEATURE_SET
 area; changing a decision is the maintainer's call. Citations such as `PLAN §Heroes`, `§Modes & rules` or `§Classic-plus
 assets` mean the section of that name there. The ones most often needed:
 
-- **Same game everywhere.** The PS2 is the gameplay reference. Every build plays the same inside the playable bounds,
+- **Same game everywhere.** openbf's gameplay rules are canonical: they started from the original games and name every
+  deliberate difference. Every build plays the same inside the playable bounds,
   whichever discs or versions went in, so multiplayer stays possible. Other versions change only the size and look of
   textures and assets. Public correction tables of gameplay numbers and names are approved, preferring instructions on
   the player's own files.
