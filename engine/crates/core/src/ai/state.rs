@@ -776,6 +776,9 @@ pub struct RideState {
     /// strafe p3) as the PS2's AI writes them — raw, for `Sim::ride` to hand
     /// to the walker past the pad (`walker_drive`). `None` anywhere else.
     pub sticks: Option<[f32; 2]>,
+    /// Walker throttle thinks since travelling two metres in XZ; survives replans.
+    /// Opened by walker driving; all live components are hashed.
+    pub walker_progress: Option<(Vec2, u16)>,
     /// Card VDROP: at a hover's pilot seat, this tick's sticks and the
     /// hover's driving state moved on (`hover_drive`), for `Sim::ride`.
     pub hover: Option<HoverOut>,
@@ -1427,6 +1430,7 @@ impl RideState {
             });
         }
         self.maintenance = None;
+        self.walker_progress = None;
         self.pickup = Some(PickupWait {
             vehicle,
             seated: tick,
@@ -1515,6 +1519,12 @@ impl RideState {
             for x in s {
                 eat(&x.to_bits().to_le_bytes());
             }
+        }
+        if let Some((anchor, ticks)) = self.walker_progress {
+            eat(b"WALKER_PROGRESS");
+            eat(&anchor.x.to_bits().to_le_bytes());
+            eat(&anchor.y.to_bits().to_le_bytes());
+            eat(&ticks.to_le_bytes());
         }
         // ...and a hover's (card VDROP); its `ai` is hashed on the vehicle.
         if let Some(h) = self.hover {

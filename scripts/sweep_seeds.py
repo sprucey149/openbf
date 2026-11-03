@@ -99,18 +99,14 @@ def lower_median(v):
     return v[(len(v) - 1) // 2] if v else None
 
 
-# round_to_outcome per-map detail lines, never map rows.
-DETAIL_TAGS = ("setup", "opening", "timing")
-
-
 def parse_stdout(path):
     """{map: dict(finished, winner, tick, stuck_max, line)} for every result row (map rows start in column 0).
 
-    Per-map detail lines (setup / opening / timing) are indented; older builds printed them in column 0, so
-    those tags are skipped too."""
+    Only scoreboard rows count. Diagnostics (including column-zero flyer rows)
+    must not masquerade as maps or hide a missing selected-map result."""
     rows = {}
     for line in open(path, errors="replace").read().splitlines():
-        if not line or line[0].isspace() or line.startswith("sweep:") or line.split()[0] in DETAIL_TAGS:
+        if not re.match(r"^\S+\s+(?:team [01] wins at tick \d+|no outcome\b)", line, re.I):
             continue
         key = line.split()[0]
         m = re.search(r"team (\d+) wins at tick (\d+)", line)
@@ -353,9 +349,8 @@ def check_42(out, check, subset):
     """Seed 42's stdout vs the gate baseline, row by row (only the run's maps when `subset`). Returns (ok, lines)."""
     got = open(os.path.join(out, "sweep_s42.txt")).read().splitlines()
     want = open(check).read().splitlines()
-    rows_g = {l.split()[0]: l for l in got if l and not l[0].isspace() and not l.startswith("sweep:")}
-    rows_w = {l.split()[0]: l for l in want if l and not l[0].isspace() and not l.startswith("sweep:")
-              and (not subset or l.split()[0] in rows_g)}
+    rows_g = {k: r["line"] for k, r in parse_stdout(os.path.join(out, "sweep_s42.txt")).items()}
+    rows_w = {k: r["line"] for k, r in parse_stdout(check).items() if not subset or k in rows_g}
     diff = [k for k in rows_w.keys() | rows_g.keys() if rows_w.get(k) != rows_g.get(k)]
     whole = (got == want) if not subset else not diff
     lines = [f"seed 42 vs `{check}`: {('byte-identical' if not subset else 'rows identical') if whole else 'DIFFERS'}; "
@@ -439,6 +434,8 @@ def main():
     ap.add_argument("--botq", action="store_true",
                     help="bot-quality samples (card BOTM): BOT_SAMPLES=<out>/botq for the first 540 s of every round, "
                          "and a table per map in seeds.md, the PS2's numbers beside the port's")
+    ap.add_argument("--no-botq-report", action="store_true",
+                    help="collect and validate bot samples without repeating their analysis in seeds.md")
     a = ap.parse_args()
     out = os.path.abspath(a.out)
     os.makedirs(out, exist_ok=True)
@@ -531,7 +528,7 @@ def main():
           "bots the last resort gave up, summed over the seeds."]
     L += ["", "## Recycles", ""] + recycle_section(stats)
     L += ["", "## Walking in place, off graph, sliding (shares of alive unit-seconds, over the seeds)", ""] + shares_section(stats)
-    if os.path.isdir(os.path.join(out, "botq")):
+    if os.path.isdir(os.path.join(out, "botq")) and not a.no_botq_report:
         import bot_quality
         L += ["", "## Bot quality (card BOTM; 4 Hz samples, 40 - 540 s of each round; `scripts/bot_quality.py`)", ""]
         L += bot_quality.seeds_section(os.path.join(out, "botq"))

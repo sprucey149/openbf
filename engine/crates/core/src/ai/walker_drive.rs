@@ -69,9 +69,10 @@ pub const COS_STRAFE: f32 = 0.866_025_4;
 pub const COS_WALK: f32 = 0.996_193_5;
 /// A8's strafe speed, × MaxSpeed (0x3ecccccd).
 pub const STRAFE_FACTOR: f32 = 0.4;
-/// Card WAI2: a command walker's pilot with no post (a hunter) leaves its
-/// seat at the end of its route once its team has this many units or fewer.
-/// OURS, PROVISIONAL (the PS2's pilot stays; its rounds end on tickets).
+/// A command walker leaves its route end even with a retained post order
+/// when its team has this many units or fewer, or either team has HOLD_ENDGAME
+/// tickets. OURS, PROVISIONAL; measure: PS2 last-crew/post-order endgames.
+/// The sampled PS2 pilots stay seated (re-walker-ai §13).
 pub const COMMAND_ENDGAME: usize = 6;
 /// B1 / B6's "nothing" (0x38d1b717).
 const EPS: f32 = 1.0e-4;
@@ -272,7 +273,12 @@ pub(super) fn drive(
         final_hop && (cp.def.capture.contains(pos) || nav::xz_dist(pos, cp.def.pos) <= reach)
     });
     let at_post = reached_post || dropped;
-    let stuck = st.route.is_some_and(|r| r.stuck_run >= DRIVE_STUCK_BAIL)
+    let no_progress = st
+        .ride
+        .and_then(|r| r.walker_progress)
+        .is_some_and(|(_, t)| t >= DRIVE_STUCK_BAIL);
+    let stuck = no_progress
+        || st.route.is_some_and(|r| r.stuck_run >= DRIVE_STUCK_BAIL)
         || (sim.nav.is_some() && st.route.is_none());
     let seen = st
         .target
@@ -291,19 +297,25 @@ pub(super) fn drive(
     };
     // Arrived in an armed walker with an enemy in sight: it stands and
     // fights from the seat, the body turning to its target (§3's tail).
-    // Card WAI2: a command walker's pilot stays at the end of its route (or
-    // where it stuck) whether it sees anyone or not (`ride::command`) — but a hunter of a
-    // team down to its last [`COMMAND_ENDGAME`] gets out and hunts on foot,
-    // so a round's last units still meet.
+    // OURS: retain the normal command-walker stop, but let the last crew
+    // walk from a drop hub to its Attack post or hunted enemy. A retained
+    // post order must not exempt it from the endgame escape.
+    // measure: PS2 command-walker crew orders at ticket/last-unit endgames.
     let team = sim.unit(me).map(|u| u.team);
     let endgame = sim
-        .units
+        .battle
+        .teams
         .iter()
-        .filter(|o| o.alive && Some(o.team) == team)
-        .count()
-        <= COMMAND_ENDGAME;
-    let command = super::ride::command(sim, m.vehicle) && (post.is_some() || !endgame);
-    let stays = command || (seen.is_some() && sim.seat_look(me).is_some());
+        .any(|t| t.tickets() <= super::HOLD_ENDGAME)
+        || sim
+            .units
+            .iter()
+            .filter(|o| o.alive && Some(o.team) == team)
+            .count()
+            <= COMMAND_ENDGAME;
+    let command_walker = super::ride::command(sim, m.vehicle);
+    let command = command_walker && !endgame;
+    let stays = command || (!command_walker && seen.is_some() && sim.seat_look(me).is_some());
     // re-driver-wait §§4/7: a later seated post set-out is a new source.
     // Only a witnessed physical post stop arms it; an early retarget, stuck
     // route, drop hub, ownership change or turning in place cannot do so.
@@ -332,6 +344,9 @@ pub(super) fn drive(
     // (A command walker's pilot does not bail out stuck either: it stands
     // where it got to — BF2 Geonosis's AT-TE stops 8.3 m from its last hub.)
     if (at_post && !stuck && stays) || (command && (at_post || stuck)) {
+        if let Some(r) = st.ride.as_mut() {
+            r.walker_progress = None;
+        }
         let (p2, p3) = sticks(crate::TICK_DT, &Class::of(wp), &body, None, false, seen);
         let r = st.ride.unwrap_or_default();
         st.ride = Some(RideState {
@@ -343,6 +358,12 @@ pub(super) fn drive(
     }
     let Some(gp) = goal.filter(|_| !at_post && !stuck) else {
         super::ride::request_exit(st);
+        if no_progress {
+            if let Some(r) = st.route.as_mut() {
+                // Preserve the existing abandoned-vehicle marker in ai_use_pass.
+                r.stuck_run = r.stuck_run.max(DRIVE_STUCK_BAIL);
+            }
+        }
         nt.stuck_run = st.route.map_or(0, |r| r.stuck_run);
         return (pad, nt);
     };
@@ -364,8 +385,25 @@ pub(super) fn drive(
     });
     st.steer = SteerPick::Fwd;
     super::gunner::aim(sim, me, st, &mut pad, look, None);
+    walker_progress(st, pos, p2 != 0.0);
     stuck_window(sim, me, st, pos, p2 != 0.0, false, &mut nt);
     (pad, nt)
+}
+
+/// OURS: a separate displacement clock survives route replans and their
+/// reference-distance resets. XZ ignores animation bob; less than two metres
+/// of jitter cannot restart it. Turning in place pauses the throttle clock.
+/// measure: PS2 walker obstacle dwell and legitimate low-speed route travel.
+fn walker_progress(st: &mut AiState, pos: Vec3, moving: bool) {
+    let ride = st.ride.get_or_insert_default();
+    let now = glam::Vec2::new(pos.x, pos.z);
+    let (anchor, ticks) = ride.walker_progress.get_or_insert((now, 0));
+    if now.distance_squared(*anchor) >= 4.0 {
+        *anchor = now;
+        *ticks = 0;
+    } else if moving {
+        *ticks = ticks.saturating_add(1);
+    }
 }
 
 #[cfg(test)]

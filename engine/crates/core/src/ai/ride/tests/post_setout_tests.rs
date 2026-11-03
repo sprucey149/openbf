@@ -1,6 +1,19 @@
 //! WGNXT natural post-stop and next-route witnesses.
 use super::*;
 use crate::sim::{Call, Event};
+// These witnesses measure ordinary post stops/departures, not last-crew
+// endgames. Keep distant, inert teammates beyond COMMAND_ENDGAME; the walker
+// driver's dedicated tests cover the small-team exit.
+fn ordinary_population(s: &mut Sim) {
+    for i in 0..crate::ai::walker_drive::COMMAND_ENDGAME {
+        s.spawn(&UnitSpec {
+            controller: Controller::Player { slot: 7 },
+            ..UnitSpec::trooper(0, Vec3::new(1500.0 + i as f32 * 3.0, 0.0, 1500.0))
+        })
+        .unwrap();
+    }
+}
+
 fn count(s: &Sim, h: UnitHandle, call: Call) -> usize {
     s.events
         .iter()
@@ -48,6 +61,7 @@ fn wgnxt_natural_post_departures() {
                         ))
                         .unwrap();
                     s.unit_mut(human).unwrap().soldier.yaw = std::f32::consts::PI;
+                    ordinary_population(&mut s);
                     let mut first_route = None;
                     let mut at_post_ticks = 0;
                     let mut restart = None;
@@ -171,6 +185,7 @@ fn post_world(second: bool) -> (Sim, UnitHandle, VehicleHandle, UnitHandle) {
     s.add_cp(def, Some(1));
     let human = s.spawn(&UnitSpec::player(0, pos + Vec3::X * 40.)).unwrap();
     s.unit_mut(human).unwrap().soldier.yaw = std::f32::consts::PI;
+    ordinary_population(&mut s);
     (s, p, v, human)
 }
 fn stopped_scene(second: bool) -> (Sim, UnitHandle, VehicleHandle, UnitHandle) {

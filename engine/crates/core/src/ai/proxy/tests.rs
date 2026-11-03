@@ -68,7 +68,7 @@ fn the_profile_ignores_the_tier() {
         assert!((t.view_mult - p.view_mult * sim.mission_ai.view_mult).abs() < 1e-6);
     }
     let (sim, a, _) = field(Difficulty::Elite);
-    assert_eq!(sim.skill_of(sim.unit(a).unwrap()).err_cap, 0.5, "a bot's");
+    assert_eq!(sim.skill_of(sim.unit(a).unwrap()).err_cap, 0.9, "a bot's");
 }
 
 /// A proxy that dies comes back a proxy.

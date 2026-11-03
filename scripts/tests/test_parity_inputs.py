@@ -103,6 +103,7 @@ class Sweep(unittest.TestCase):
             binary(7);self.assertEqual(run(),1);self.assertFalse(receipt.exists())
             binary();self.assertEqual(run(),0)
             self.assertEqual(run(['--botq']),1);self.assertFalse(receipt.exists())
+            self.assertEqual(run(['--botq','--no-botq-report']),1);self.assertFalse(receipt.exists())
             binary(rows=False);self.assertEqual(run(),1);self.assertFalse(receipt.exists())
     def test_parse_stdout_skips_round_detail_lines(self):
         # round_to_outcome prints setup / opening / timing detail per map; they are not map rows,
@@ -119,6 +120,23 @@ class Sweep(unittest.TestCase):
         self.assertEqual(sorted(rows), ['bf1_nab1', 'bf2_pol1'])
         self.assertTrue(rows['bf1_nab1']['finished']); self.assertEqual(rows['bf1_nab1']['tick'], 25000)
         self.assertFalse(rows['bf2_pol1']['finished'])
+    def test_flyer_diagnostics_do_not_become_map_results(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d)
+            (p / 'sweep_s1.txt').write_text(
+                'a team 0 wins at tick 123 stuck_max 2 hash 00\n'
+                'flyers a: boarded 49 took-off 49 airborne 7332 s\n'
+                'b NO OUTCOME in 9000 ticks stuck_max 3 hash 01\n'
+                'flyers b: boarded 0 took-off 0 airborne 0 s\n'
+                'sweep: finished 1/2  stuck_max median 2\n')
+            (p / 'sweep_s1.err').write_text('a done (1/2, 0 s)\nb done (2/2, 0 s)\n')
+            self.assertEqual(set(sweep.parse_stdout(str(p / 'sweep_s1.txt'))), {'a', 'b'})
+            self.assertEqual(len(sweep.completed_artifacts(d, 1, [], False)), 2)
+            # A missing genuine result still fails the selected-map inventory.
+            (p / 'sweep_s1.txt').write_text('flyers a: boarded 49\nsweep: finished 0/2  stuck_max median 2\n')
+            with self.assertRaises(ValueError):
+                sweep.completed_artifacts(d, 1, [], False)
+
     def test_default_inventory_and_botq(self):
         with tempfile.TemporaryDirectory() as d:
             p=pathlib.Path(d);(p/'sweep_s1.txt').write_text('a no outcome stuck_max 2\nsweep: finished 0/1  stuck_max median 2\n');(p/'sweep_s1.err').write_text('a done (1/1, 0 s)\n')

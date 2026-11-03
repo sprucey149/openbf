@@ -239,9 +239,9 @@ fn the_error_offset_is_bounded_and_re_drawn_once_per_think() {
         assert!((r(t).length() - 1.0).abs() < 1e-5, "unit vector");
     }
     // The Elite tier's cap overrides the level's, so the offset a
-    // skill-20 Elite bot can carry is 0.5 m and a Hard one 1.2 m.
+    // skill-20 Elite bot can carry is 0.9 m and a Hard one 1.2 m.
     use crate::skill::Difficulty;
-    assert_eq!(Difficulty::Elite.skill_at(20).err_cap, 0.5);
+    assert_eq!(Difficulty::Elite.skill_at(20).err_cap, 0.9);
     assert!((Difficulty::Hard.skill_at(20).err_cap - 1.2).abs() < 1e-6);
 }
 

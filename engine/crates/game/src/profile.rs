@@ -359,7 +359,7 @@ mod tests {
         assert_eq!(at("elite"), Difficulty::Elite);
         assert_eq!(at("legendary"), Difficulty::Elite);
         assert_eq!(at("normal").base_skill(), 17);
-        assert_eq!(at("elite").tier().err_cap, Some(0.5), "20+extras");
+        assert_eq!(at("elite").tier().err_cap, Some(0.9), "20+extras");
         let s = Settings {
             difficulty: Difficulty::Elite,
             ..Default::default()

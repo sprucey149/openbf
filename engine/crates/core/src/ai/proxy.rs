@@ -134,7 +134,7 @@ impl Strength {
 pub struct Profile {
     /// The aim skill (1..=20, the originals' scale): spread, dispersion, the
     /// aim tracker, the error cap, burst and pause ([`Skill::from_level`]),
-    /// WITHOUT a tier's override (Elite's 0.5 m cap is a bot's extra).
+    /// WITHOUT a tier's override (Elite's 0.9 m cap is a bot's extra).
     pub skill: u8,
     /// Ticks from first seeing an enemy to the first shot at it.
     pub reaction_ticks: u64,
