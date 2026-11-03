@@ -1088,7 +1088,7 @@ impl Fx {
         self.ingest_sim(&walk.sim);
         self.chunks.tick(walk, self.library.as_ref());
         self.follow_jets(&walk.sim, |u| {
-            walk.teams[usize::from(u.team).min(1)]
+            walk.team_template(u.team)
                 .class(u.spec.class)
                 .jet_look
                 .effect

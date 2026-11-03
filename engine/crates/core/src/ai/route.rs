@@ -228,7 +228,9 @@ pub(super) fn aim_last_leg(sim: &Sim, me: UnitHandle, st: &mut AiState, nt: &mut
         .then(|| {
             sim.alive_units()
                 .filter(|(_, o)| {
-                    o.team != u.team && o.mount.is_none() && region.contains(o.soldier.pos)
+                    sim.hostile(u.team, o.team)
+                        && o.mount.is_none()
+                        && region.contains(o.soldier.pos)
                 })
                 .map(|(_, o)| o.soldier.pos)
                 .min_by(|a, b| {

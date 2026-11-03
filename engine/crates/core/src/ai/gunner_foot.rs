@@ -641,7 +641,7 @@ pub(crate) fn friend_near_blast(sim: &Sim, team: u8, at: Vec3, r: f32) -> bool {
     sim.units_within(at, r + BLAST_CLEAR, &mut near);
     near.iter().any(|&i| {
         let o = &sim.units[i as usize];
-        o.team == team
+        sim.allied(team, o.team)
             && o.mount.is_none()
             && o.alive
             && o.capsule().center().distance(at) < r + BLAST_CLEAR
@@ -682,7 +682,7 @@ fn friend_on_line(
     sim.units_within(eye, bound, &mut near);
     for &i in &near {
         let (h, o) = (sim.handle(i as usize), &sim.units[i as usize]);
-        if Some(h) == me || o.team != team || o.mount.is_some() {
+        if Some(h) == me || !sim.allied(team, o.team) || o.mount.is_some() {
             continue;
         }
         let c = o.capsule();
@@ -737,7 +737,7 @@ fn friend_in_blast(
     let mut best: Option<(f32, i8)> = None;
     for &i in &near {
         let (h, o) = (sim.handle(i as usize), &sim.units[i as usize]);
-        if h == me || o.team != u.team || o.mount.is_some() || !o.alive {
+        if h == me || !sim.allied(u.team, o.team) || o.mount.is_some() || !o.alive {
             continue;
         }
         let off = o.capsule().center() - at;
@@ -799,7 +799,7 @@ pub(crate) fn release_blasts_own_side(sim: &Sim, i: usize) -> bool {
     near.iter().any(|&j| {
         let o = &sim.units[j as usize];
         o.alive
-            && o.team == u.team
+            && sim.allied(u.team, o.team)
             && (j as usize == i || o.mount.is_none())
             && (o.capsule().center() - at).length() < r + BLAST_CLEAR
     })

@@ -81,6 +81,7 @@ pub struct OrdnanceClass {
     pub missile: Option<crate::missile::MissileClass>,
     pub fat_ray: Option<super::FatRayClass>,
     pub beam: Option<super::BeamClass>,
+    pub tow: Option<crate::vehicle::tow::TowClass>,
 }
 
 impl Default for OrdnanceClass {
@@ -110,6 +111,7 @@ impl Default for OrdnanceClass {
             missile: None,
             fat_ray: None,
             beam: None,
+            tow: None,
         }
     }
 }

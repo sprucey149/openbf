@@ -34,7 +34,8 @@ pub fn flash_look(db: &ClassDb, weapon: &str) -> MuzzleFlashLook {
 /// chain's PROPs replayed parent first, each class's in file order, through
 /// the setters — `LaserLength` resets `GlowLength` / `BlurLength`, so the
 /// order is the value. `None` unless the chain ends at the engine's `bolt`
-/// or `laser` label.
+/// or `laser` label (or a beam). The root look stops at the first
+/// `NextCharge`; the renderer currently uses one look for all charges.
 pub fn laser_look(db: &ClassDb, ordnance: &str) -> Option<LaserLook> {
     let base = db.engine_base(ordnance)?;
     if !["bolt", "laser", "beam"]
@@ -43,7 +44,11 @@ pub fn laser_look(db: &ClassDb, ordnance: &str) -> Option<LaserLook> {
     {
         return None;
     }
-    Some(LaserLook::replay(chain_props(db, ordnance)))
+    Some(LaserLook::replay(
+        chain_props(db, ordnance)
+            .into_iter()
+            .take_while(|(hash, _)| *hash != super::weapon_db::NEXT_CHARGE),
+    ))
 }
 
 /// Engine labels whose setter chains into the bullet base that reads the

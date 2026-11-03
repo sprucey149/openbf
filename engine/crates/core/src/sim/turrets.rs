@@ -274,7 +274,7 @@ impl Sim {
         let units = self
             .alive_units()
             .filter(|(_, u)| {
-                u.team != t.team
+                self.hostile(t.team, u.team)
                     && u.mount.is_none()
                     && u.cloak.visible()
                     && kinds & (1 << u.kind()) != 0
@@ -283,7 +283,7 @@ impl Sim {
         let vehicles = self
             .alive_vehicles()
             .filter(|(_, v)| {
-                v.team.is_some_and(|team| team != t.team)
+                v.team.is_some_and(|team| self.hostile(t.team, team))
                     && kinds & (1 << HealthType::Vehicle as u32) != 0
             })
             .map(|(h, v)| (Aim::Vehicle(h), self.vehicle_blast_sphere(v).0));
@@ -305,11 +305,11 @@ impl Sim {
         match a {
             Aim::Unit(h) => self
                 .unit(h)
-                .filter(|u| u.team != team && u.mount.is_none() && u.cloak.visible())
+                .filter(|u| self.hostile(team, u.team) && u.mount.is_none() && u.cloak.visible())
                 .map(|u| u.capsule().center()),
             Aim::Vehicle(h) => self
                 .vehicle(h)
-                .filter(|v| v.team.is_some_and(|vt| vt != team))
+                .filter(|v| v.team.is_some_and(|vt| self.hostile(team, vt)))
                 .map(|v| self.vehicle_blast_sphere(v).0),
         }
     }

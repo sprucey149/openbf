@@ -16,6 +16,7 @@ const FORWARD: PadState = PadState {
     mx: 0,
     my: 0,
     fire_lag: 0,
+    pick: None,
 };
 
 fn setup(bf2: bool) -> (Sim, UnitHandle, usize) {

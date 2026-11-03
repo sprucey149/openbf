@@ -38,7 +38,14 @@ pub(in super::super) fn retarget(
             return;
         }
     }
-    let plan = &sim.commander[usize::from(u.team).min(1)];
+    if u.team >= 2 {
+        // PROVISIONAL, replace: trace the PS2 native Deathmatch and Conquest
+        // goal orders. The main-army commander owns neither team's members.
+        st.want_stance = 0;
+        retarget_hunt(sim, me, st, nearest_enemy, nt);
+        return;
+    }
+    let plan = &sim.commander[usize::from(u.team)];
     // [ours] A hunting unit goes where the fight is (`proxy::front`).
     let objective = super::super::proxy::front(sim, u).or(plan.of(me.index));
     match objective {
@@ -296,7 +303,7 @@ pub(super) fn retarget_phase_a(
     nt: &mut NavTick,
 ) {
     let Some(u) = sim.unit(me) else { return };
-    let mine = |c: &crate::cp::CommandPost| c.owner == Some(u.team);
+    let mine = |c: &crate::cp::CommandPost| c.owner.is_some_and(|owner| sim.allied(u.team, owner));
     let pos = u.soldier.pos;
     let nearest = |pred: &dyn Fn(&crate::cp::CommandPost) -> bool| {
         sim.cps

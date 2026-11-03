@@ -16,19 +16,14 @@ use ui::hud_tree::{Hud, Kind};
 /// The sniper scope's overlay for the local player (`ui::hud_scope`,
 /// `analysis/re-zoom.md` §8): up while he is alive on foot, zoomed on a
 /// `ZoomFirstPerson` weapon (`core::unit::Unit::scoped`), and the camera's
-/// zoom S is above 1.0. Each game's own `weapon_scope`: BF1's (COMMON.LVL)
-/// on a BF1 map, BF2's (INGAME.LVL) elsewhere — the same design, the two
-/// differing in small details and alpha.
+/// zoom S is above 1.0. BF2's `weapon_scope` (INGAME.LVL) on every map, BF1
+/// maps included: BF2's HUD everywhere (`analysis/plan/FEATURE_SET.md`).
 pub fn scope_view(walk: &crate::walk::WalkSim) -> Option<ui::hud_scope::ScopeView> {
     let me = walk.sim.unit(walk.player)?;
     if !(me.alive && me.mount.is_none() && me.scoped() && walk.zoom_s > 1.0) {
         return None;
     }
-    let sheet = match walk.sim.ground_rules {
-        core::soldier::GroundRules::Bf1 => format!("common_bf1/{}", ui::hud_scope::SHEET),
-        core::soldier::GroundRules::Bf2 => ui::hud_scope::SHEET.to_owned(),
-    };
-    Some(ui::hud_scope::ScopeView { sheet })
+    Some(ui::hud_scope::ScopeView)
 }
 
 /// The HUD's two weapon rows for the local player: on foot, the weapon in
@@ -703,6 +698,12 @@ impl HudView {
         ui::hud_map::window_point(&self.hud, world, clamp, [size[0] as f32, size[1] as f32])
     }
 
+    /// The layout's Map element `Scale`, which the spawn map page is drawn
+    /// at (`ui::hud_map::map_scale`).
+    pub fn spawn_map_scale(&self) -> Option<glam::Vec3> {
+        ui::hud_map::map_scale(&self.hud)
+    }
+
     /// Paint the last [`HudView::update`] (call from the overlay hook, before
     /// the egui overlay).
     pub fn paint(
@@ -763,7 +764,7 @@ impl HudView {
                             None => (sheet, false),
                         };
                         // `<layer>/<sheet>`: that common layer's own copy
-                        // (`ui::hud_scope::ScopeView::sheet`).
+                        // (`common_bf1/ig_victory_defeat`, `ui::hud`).
                         let (layer, sheet) = match sheet.split_once('/') {
                             Some((l, s)) => (Some(l), s),
                             None => (None, sheet),

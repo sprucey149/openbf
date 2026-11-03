@@ -296,7 +296,6 @@ fn render(
     let vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, assets, scene, walk);
     let mut frame = ReplayFrame {
         cube: upload_unit_cube(&mut r)?,
-        models: [vis.has_model(0), vis.has_model(1)],
         vis,
         vehicle_vis: game::viewer::VehicleVisuals::load(
             &mut r,

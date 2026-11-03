@@ -141,7 +141,10 @@ fn droideka_target_shield_and_hidden_energy_feedback() {
         cue: core::droideka::Cue::EnergyRefused,
     }];
     s.feed.tick(&s.sim, s.me);
-    assert!(s.feed.take().is_empty(), "another player's pool is private");
+    assert!(
+        s.feed.take().is_empty(),
+        "another player's refusal is his own"
+    );
     s.sim.tick += 1;
     s.sim.events = vec![Event::Droideka {
         unit: s.me,
@@ -152,7 +155,7 @@ fn droideka_target_shield_and_hidden_energy_feedback() {
     assert_eq!(
         s.feed.take(),
         vec![line(
-            "Roll energy depleted — wait for recharge",
+            "Shield charge spent — wait for recharge",
             message_color::OWN
         )]
     );

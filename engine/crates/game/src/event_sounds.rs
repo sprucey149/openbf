@@ -449,13 +449,16 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
             }
             // DRV: the door's ODF sounds on its trigger's edges, at the door
             // (`re-bf2-doors.md` §2 hop 5).
-            Event::DoorOpened { door } | Event::DoorClosed { door } => {
+            Event::DoorOpened { door }
+            | Event::DoorClosed { door }
+            | Event::DoorLocked { door } => {
                 let Some(d) = walk.sim.doors.get(*door as usize) else {
                     continue;
                 };
                 let name = match e {
                     Event::DoorOpened { .. } => &d.open_sound,
-                    _ => &d.close_sound,
+                    Event::DoorClosed { .. } => &d.close_sound,
+                    _ => &d.locked_sound,
                 };
                 if let Some(n) = name {
                     play(n, d.origin);
@@ -532,9 +535,7 @@ pub fn cries<'a>(walk: &'a WalkSim, mut cry: impl FnMut(Cry<'a>)) {
         let Some(u) = walk.sim.units.get(h.index as usize) else {
             return;
         };
-        let c = &walk.teams[usize::from(u.team).min(1)]
-            .class(u.spec.class)
-            .cries;
+        let c = &walk.team_template(u.team).class(u.spec.class).cries;
         let name = if death { &c.death } else { &c.hurt };
         cry(Cry {
             unit: h.index,
@@ -651,7 +652,7 @@ pub fn hero_sample_asks(walk: &WalkSim) -> Vec<(core::unit::UnitHandle, String, 
         if walk.sim.hero_class(u.team) != Some(u.spec.class) {
             continue;
         }
-        let class = walk.teams[usize::from(u.team).min(1)].class(u.spec.class);
+        let class = walk.team_template(u.team).class(u.spec.class);
         if u.alive && u.health.cur <= u.health.max * class.cries.low_threshold {
             if let Some(name) = &class.cries.low_health {
                 asks.push((handle, name.clone(), u.soldier.pos));

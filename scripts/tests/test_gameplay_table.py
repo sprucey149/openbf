@@ -152,11 +152,14 @@ class TableTests(unittest.TestCase):
             "death_regions": ["Death Region"], "posts": [], "killed": [], "layers": [],
             "cps": [["cp1", 1]], "ai_damage": [["cp1", 0.25]],
             "class_load_order": [["all", "soldier"]], "ai_capture": {"cp1/1": False},
+            "local_team_relations": [[3, 1, True], [2, 3, False]],
         }
         source["missions"][0]["facts"] = facts
         row = table.convert(source)[1]["mission.lvl"]["missions"][0]
         self.assertEqual(row["facts"], facts)
         self.assertEqual(row["unresolved_arguments"], "NM")
+        with self.assertRaisesRegex(ValueError, "invalid Lua team"):
+            table.mission_facts({"local_team_relations": [[0, 3, True]]})
 
     def test_invalid_input_never_creates_output(self):
         with tempfile.TemporaryDirectory() as root:

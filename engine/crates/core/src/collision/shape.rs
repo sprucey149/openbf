@@ -300,6 +300,11 @@ impl Shape {
         }
     }
 
+    pub(crate) fn ray_distance(&self, origin: Vec3, dir: Vec3, max_t: f32) -> Option<f32> {
+        let ray = parry3d::query::Ray::new(super::point(origin), vector(dir));
+        self.cast_local(&ray, max_t).map(|hit| hit.time_of_impact)
+    }
+
     /// Ray cast in SHAPE space. The ray parameter is preserved by the affine
     /// world→shape map, so the returned `time_of_impact` is a world distance.
     pub(super) fn cast_local(

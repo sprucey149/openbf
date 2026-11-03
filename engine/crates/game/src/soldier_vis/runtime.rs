@@ -2,7 +2,7 @@
 
 use super::{
     drawn, fire_point, held_or_primary, model_of, part_groups, part_spec, rider_now, seat_now,
-    with_spec, ClassDraw, DrawPlan, FlashModel, HoverClock, SeatClock, SoldierAsset,
+    with_spec, ClassDraw, DrawPlan, FlashModel, HoverClock, NativeDraw, SeatClock, SoldierAsset,
     SoldierVisuals, UnitVisual, WeaponAsset, CORPSE_SECS,
 };
 use crate::animator::{AnimInput, Animator, ClassAnim, Rig};
@@ -93,6 +93,9 @@ impl SoldierVisuals {
         walk: &WalkSim,
     ) -> Self {
         let mut vis = Self::load(r, assets_dir, &scene.manifest.source_game, &walk.teams);
+        for (&team, template) in &walk.native_teams {
+            vis.load_native_team(r, assets_dir, &scene.manifest.source_game, team, template);
+        }
         vis.lod_view.near = scene.manifest.lighting.near_scene_range;
         vis.lod_view.far = scene.manifest.lighting.far_scene_range;
         vis.own_model = std::array::from_fn(|t| {
@@ -109,10 +112,22 @@ impl SoldierVisuals {
                 let name = w.ordnance.geometry.as_deref()?;
                 Some(*models.entry(name).or_insert_with(|| {
                     let index = vis.weapons.len();
+                    let game = &scene.manifest.source_game;
+                    let native = format!("{game}/locals");
+                    let native_model = assets_dir
+                        .join(format!("side_{native}"))
+                        .join("weapons")
+                        .join(format!("{name}.glb"));
+                    let model_game = if !walk.native_teams.is_empty() && pak::is_file(&native_model)
+                    {
+                        &native
+                    } else {
+                        game
+                    };
                     vis.weapons.push(Self::load_weapon(
                         Some(&mut *r),
                         assets_dir,
-                        &scene.manifest.source_game,
+                        model_game,
                         name,
                         &mut cache,
                     ));
@@ -132,6 +147,43 @@ impl SoldierVisuals {
                 .collect()
         });
         vis
+    }
+
+    fn load_native_team(
+        &mut self,
+        r: &mut Renderer,
+        root: &Path,
+        game: &str,
+        team: u8,
+        template: &TeamTemplate,
+    ) {
+        let mut unused = template.clone();
+        unused.classes.clear();
+        let teams = [template.clone(), unused];
+        let mut added = Self::load_with_side(r, root, game, &teams, true);
+        let bodies = self.assets.len();
+        let weapons = self.weapons.len();
+        let mut per_class = std::mem::take(&mut added.per_class[0]);
+        let mut held = std::mem::take(&mut added.held[0]);
+        for draw in &mut per_class {
+            draw.body = draw.body.map(|i| i + bodies);
+            draw.weapon = draw.weapon.map(|i| i + weapons);
+        }
+        for (_, model) in held.iter_mut().flatten() {
+            *model = model.map(|i| i + weapons);
+        }
+        self.assets.extend(added.assets);
+        self.weapons.extend(added.weapons);
+        self.native.insert(
+            team,
+            NativeDraw {
+                per_class,
+                held,
+                anim: std::mem::take(&mut added.anim[0]),
+                skins: std::mem::take(&mut added.skins[0]),
+                low_skins: std::mem::take(&mut added.low_skins[0]),
+            },
+        );
     }
 
     /// Load every class model both teams name, from
@@ -154,33 +206,56 @@ impl SoldierVisuals {
         game: &str,
         teams: &[TeamTemplate; 2],
     ) -> Self {
+        Self::load_with_side(r, assets_dir, game, teams, false)
+    }
+
+    fn load_with_side(
+        r: &mut Renderer,
+        assets_dir: &Path,
+        game: &str,
+        teams: &[TeamTemplate; 2],
+        native: bool,
+    ) -> Self {
+        let side_game = if native {
+            format!("{game}/locals")
+        } else {
+            game.to_owned()
+        };
         let plan = DrawPlan::of(teams);
         let mut cache: HashMap<String, Option<TextureHandle>> = HashMap::new();
         let bodies = plan
             .bodies
             .iter()
-            .map(|geometry| Self::load_body(Some(&mut *r), assets_dir, game, geometry, &mut cache))
+            .map(|geometry| {
+                Self::load_body(Some(&mut *r), assets_dir, &side_game, geometry, &mut cache)
+            })
             .collect();
         let weapons: Vec<WeaponAsset> = plan
             .weapons
             .iter()
-            .map(|wg| Self::load_weapon(Some(&mut *r), assets_dir, game, wg, &mut cache))
+            .map(|wg| Self::load_weapon(Some(&mut *r), assets_dir, &side_game, wg, &mut cache))
             .collect();
-        let flash = FlashModel::load(r, assets_dir, game);
+        let flash = if native {
+            None
+        } else {
+            FlashModel::load(r, assets_dir, game)
+        };
         let mut s = Self::assemble(plan, teams, bodies, weapons, flash);
         s.bf2 = game.eq_ignore_ascii_case("bf2");
-        s.fp = super::first_person::FirstPersonVisuals::load(
-            Some(&mut *r),
-            assets_dir,
-            game,
-            teams,
-            &mut cache,
-        );
-        if s.bf2 {
-            s.load_sabers(Some(&mut *r), assets_dir, teams);
+        if !native {
+            s.fp = super::first_person::FirstPersonVisuals::load(
+                Some(&mut *r),
+                assets_dir,
+                game,
+                teams,
+                &mut cache,
+            );
+            if s.bf2 {
+                s.load_sabers(Some(&mut *r), assets_dir, teams);
+            }
         }
         // Each class's skins over its body's parts (card USKN).
-        let side = assets_dir.join(format!("side_{game}"));
+        let side = assets_dir.join(format!("side_{side_game}"));
         for (team, t) in teams.iter().enumerate() {
             let mut rows = Vec::new();
             let mut low_rows = Vec::new();
@@ -348,6 +423,7 @@ impl SoldierVisuals {
             saber_trails: Vec::new(),
             grenades: Vec::new(),
             per_class,
+            native: Default::default(),
             held: plan.held,
             anim: teams
                 .each_ref()
@@ -530,7 +606,12 @@ impl SoldierVisuals {
     /// What a unit's class draws: its own pair, or the team's first-class
     /// body fallback that `load` resolved for it.
     fn class_draw(&self, team: u8, class: u8) -> ClassDraw {
-        let row = &self.per_class[usize::from(team.min(1))];
+        let row = self
+            .native
+            .get(&team)
+            .map_or(&self.per_class[usize::from(team.min(1))], |side| {
+                &side.per_class
+            });
         let i = usize::from(class).min(row.len().saturating_sub(1));
         row.get(i).copied().unwrap_or_default()
     }
@@ -548,7 +629,10 @@ impl SoldierVisuals {
     /// The hand weapon a unit draws while its class slot `slot` is in hand,
     /// if that slot has a model ([`DrawPlan::weapon_in_slot`]).
     pub(super) fn weapon_for(&self, team: u8, class: u8, slot: u8) -> Option<&WeaponAsset> {
-        let row = &self.held[usize::from(team.min(1))];
+        let row = self
+            .native
+            .get(&team)
+            .map_or(&self.held[usize::from(team.min(1))], |side| &side.held);
         let i = usize::from(class).min(row.len().saturating_sub(1));
         let held = row.get(i).map_or(&[][..], Vec::as_slice);
         self.weapons.get(held_or_primary(
@@ -559,7 +643,11 @@ impl SoldierVisuals {
     }
 
     pub fn has_model(&self, team: u8) -> bool {
-        self.per_class[usize::from(team.min(1))]
+        self.native
+            .get(&team)
+            .map_or(&self.per_class[usize::from(team.min(1))], |side| {
+                &side.per_class
+            })
             .iter()
             .any(|c| c.body.is_some())
     }
@@ -769,7 +857,9 @@ impl SoldierVisuals {
                 let Some(rig) = &sa.rig else { continue };
                 Self::step_on_foot(
                     walk,
-                    &self.anim,
+                    self.native
+                        .get(&u.team)
+                        .map_or(&self.anim[usize::from(u.team.min(1))], |side| &side.anim),
                     i,
                     u,
                     sa,
@@ -814,7 +904,7 @@ impl SoldierVisuals {
     #[allow(clippy::too_many_arguments)]
     fn step_on_foot(
         walk: &WalkSim,
-        anim: &[Vec<ClassAnim>; 2],
+        team: &[ClassAnim],
         i: usize,
         u: &core::unit::Unit,
         sa: &SoldierAsset,
@@ -826,7 +916,6 @@ impl SoldierVisuals {
     ) {
         let (wc, _, weapon) = drawn(u, &walk.sim.weapon_classes, rig.throws_offhand());
         let class = walk.sim.weapon_classes.get(wc);
-        let team = &anim[usize::from(u.team.min(1))];
         let anim = team.get(usize::from(u.spec.class).min(team.len().saturating_sub(1)));
         let set = match v.set {
             Some((c, set)) if c == wc => set,
@@ -1423,7 +1512,16 @@ impl SoldierVisuals {
     ) {
         let low = sa.asset.name.ends_with("_low1") || sa.asset.name.ends_with(".low");
         let rows = if low { &self.low_skins } else { &self.skins };
-        let row = &rows[usize::from(team.min(1))];
+        let row = self
+            .native
+            .get(&team)
+            .map_or(&rows[usize::from(team.min(1))], |side| {
+                if low {
+                    &side.low_skins
+                } else {
+                    &side.skins
+                }
+            });
         let skin = row
             .get(usize::from(class).min(row.len().saturating_sub(1)))
             .map_or(&[][..], Vec::as_slice);

@@ -25,7 +25,9 @@ impl Sim {
     /// [`Self::door_opening`]'s test of one door: its clip not at its end
     /// and a living unit in one of its triggers.
     fn opening(&self, d: &crate::door::Door) -> bool {
-        d.open < 1.0 && d.occupied(self.units.iter().filter(|u| u.alive).map(|u| u.soldier.pos))
+        !d.locked
+            && d.open < 1.0
+            && d.occupied(self.units.iter().filter(|u| u.alive).map(|u| u.soldier.pos))
     }
 
     /// Card DOORS: does the vertical line through `p` pass through the box
@@ -69,9 +71,10 @@ impl Sim {
             }
             // The sound latch (DRV): an output, like every event.
             let door = i as u32;
-            match d.edge(occupied) {
+            match d.edge(occupied, dt) {
                 Some(crate::door::Edge::Opened) => self.events.push(Event::DoorOpened { door }),
                 Some(crate::door::Edge::Closed) => self.events.push(Event::DoorClosed { door }),
+                Some(crate::door::Edge::Locked) => self.events.push(Event::DoorLocked { door }),
                 None => {}
             }
         }

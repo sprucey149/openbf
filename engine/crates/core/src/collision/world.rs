@@ -431,6 +431,8 @@ pub struct CollisionWorld {
     /// grid: a query reads them all, after `bodies`, through its own AABB
     /// test.
     hulls: Vec<Hull>,
+    /// Falling walkers are building bodies until the death clip ends.
+    falling_walkers: Vec<Body>,
     stations: std::collections::BTreeMap<u32, u16>,
     /// The building turrets: a placed instance whose bodies are a live
     /// turret's building (`Sim::bind_building`).
@@ -476,6 +478,7 @@ impl CollisionWorld {
             grid,
             envelopes,
             hulls: Vec::new(),
+            falling_walkers: Vec::new(),
             stations: std::collections::BTreeMap::new(),
             turrets: std::collections::BTreeMap::new(),
         }
@@ -491,7 +494,16 @@ impl CollisionWorld {
     pub fn bodies_and_hulls(&self) -> impl Iterator<Item = &Body> {
         self.bodies
             .iter()
+            .chain(self.falling_walkers.iter())
             .chain(self.hulls.iter().flat_map(|h| h.bodies.iter()))
+    }
+
+    pub(crate) fn clear_falling_walkers(&mut self) {
+        self.falling_walkers.clear();
+    }
+
+    pub(crate) fn add_falling_walker(&mut self, bodies: Vec<Body>) {
+        self.falling_walkers.extend(bodies);
     }
 
     /// Associate a placed map instance with a live station index.
@@ -873,6 +885,15 @@ impl CollisionWorld {
                     seen(&self.bodies[i as usize]);
                 }
                 BROADPHASE_SCRATCH.with(|s| s.set(ids));
+            }
+        }
+        if !hulls_only {
+            for body in &self.falling_walkers {
+                let a = &body.aabb;
+                if a.max.x < min_x || a.min.x > max_x || a.max.z < min_z || a.min.z > max_z {
+                    continue;
+                }
+                seen(body);
             }
         }
         if hulls == HullFilter::Static {

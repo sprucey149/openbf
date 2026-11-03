@@ -279,6 +279,7 @@ def mission_facts(body):
         "ai_capture": {"AICanCaptureCP"}, "ai_damage": {"SetAIDamageThreshold"},
         "fly": {"SetMaxPlayerFlyHeight"}, "bird_count": {"SetNumBirdTypes"},
         "bird_types": {"SetBirdType"}, "heroes": {"SetHeroClass"}, "class_load_order": {"ReadDataFile"},
+        "local_team_relations": {"SetTeamAsFriend", "SetTeamAsEnemy"},
     }
     def unknown(value):
         if isinstance(value, gen_missions.Unknown):

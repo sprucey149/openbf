@@ -375,3 +375,125 @@ fn the_screens_are_hashed_and_replay() {
     assert_eq!((two.1, two.2), (1, true));
     assert_ne!(one.0, two.0, "two sides hash apart");
 }
+
+// ---- PR #102: the mouse picks come in the pad ---------------------------
+
+fn pick(p: crate::sim::ScreenPick) -> PadState {
+    PadState {
+        pick: Some(p),
+        ..PadState::default()
+    }
+}
+
+fn pick_accept(p: crate::sim::ScreenPick) -> PadState {
+    PadState {
+        pick: Some(p),
+        ..press(buttons::SPAWN_ACCEPT)
+    }
+}
+
+/// A side pick takes its row on the side screen; with the accept on the
+/// same pad (a double click) the accept reads the picked row. Off its
+/// screen a pick does nothing.
+#[test]
+fn a_side_pick_is_read_by_the_accept_on_its_own_pad() {
+    use crate::sim::ScreenPick;
+    let mut s = screens_sim(5, true);
+    s.step(&[pick(ScreenPick::Side(2))]);
+    assert_eq!(s.side_choice[0], SideChoice::Auto);
+    s.step(&[pick(ScreenPick::Post(0))]);
+    assert_eq!(s.side_choice[0], SideChoice::Auto, "a post is no side");
+    assert_eq!(s.spawn_post_choice[0], None, "no post off the map");
+    s.step(&[pick_accept(ScreenPick::Side(1))]);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Map);
+    assert_eq!(slot0(&s).team, 1, "the picked row's team");
+    // The map: a side row is ignored there, and so is the other team's post.
+    s.step(&[pick(ScreenPick::Side(0))]);
+    assert_eq!(s.side_choice[0], SideChoice::Team2);
+    let opened = s.spawn_post_choice[0];
+    s.step(&[pick(ScreenPick::Post(0))]);
+    assert_eq!(
+        s.spawn_post_choice[0], opened,
+        "team 1's post is not team 2's"
+    );
+    s.step(&[pick(ScreenPick::Post(3))]);
+    assert_eq!(s.spawn_post_choice[0], Some(SpawnPost::Post(3)));
+    // Double click on the map goes to the class screen with that post.
+    s.step(&[PadState::default()]);
+    s.step(&[pick_accept(ScreenPick::Post(3))]);
+    assert_eq!(s.spawn_stage[0], SpawnStage::Class);
+    assert_eq!(s.spawn_post_choice[0], Some(SpawnPost::Post(3)));
+    // The class screen ignores picks.
+    s.step(&[pick(ScreenPick::Post(2))]);
+    assert_eq!(s.spawn_post_choice[0], Some(SpawnPost::Post(3)));
+}
+
+/// The pick reaches only the slot whose pad carries it.
+#[test]
+fn a_pick_moves_only_its_own_slot() {
+    use crate::sim::ScreenPick;
+    let mut s = screens_sim(5, true);
+    s.spawn(&UnitSpec::player_in_slot(1, 0, Vec3::new(60.0, 0.0, 30.0)))
+        .unwrap();
+    assert!(s.open_spawn_screens(1, true));
+    s.step(&[PadState::default(), pick(ScreenPick::Side(1))]);
+    assert_eq!(s.side_choice[0], SideChoice::Team1);
+    assert_eq!(s.side_choice[1], SideChoice::Team2);
+}
+
+/// The lane's proof: a session of mouse picks recorded as an input log
+/// (the picks and the double clicks' accepts only, no D-pad), written to
+/// RON and read back, replays to the same hash on every tick, and spawns
+/// the player on the picked team at the picked post. Without its picks
+/// the same log ends elsewhere, so the picks are what the replay carries.
+#[test]
+fn a_recorded_mouse_pick_replays_to_the_same_hash() {
+    use crate::sim::ScreenPick;
+    let mut log = InputLog {
+        seed: 23,
+        slots: 1,
+        ticks: vec![PadState::default(); 60],
+    };
+    // Click team 2, double click it; click post 3, double click it;
+    // accept the class.
+    log.ticks[3] = pick(ScreenPick::Side(1));
+    log.ticks[9] = pick_accept(ScreenPick::Side(1));
+    log.ticks[15] = pick(ScreenPick::Post(3));
+    log.ticks[21] = pick_accept(ScreenPick::Post(3));
+    log.ticks[27] = press(buttons::SPAWN_ACCEPT);
+    let run = |log: &InputLog| {
+        let mut s = screens_sim(log.seed, true);
+        let mut hashes = Vec::new();
+        for pads in log.frames() {
+            s.step(pads);
+            hashes.push(s.hash());
+        }
+        (
+            hashes,
+            slot0(&s).team,
+            slot0(&s).alive,
+            slot0(&s).soldier.pos,
+        )
+    };
+    let live = run(&log);
+    let text = ron::to_string(&log).unwrap();
+    assert!(text.contains("pick:Some(Side(1))"), "{text}");
+    let back: InputLog = ron::from_str(&text).unwrap();
+    let replay = run(&back);
+    assert_eq!(replay.0, live.0, "every tick's hash");
+    assert_eq!((live.1, live.2), (1, true), "on the field for team 2");
+    assert!(
+        (live.3.x - -200.0).abs() < 10.0,
+        "at post 3 (x = -200): {:?}",
+        live.3
+    );
+    // Strip the picks: the accepts alone go to team 1.
+    let mut bare = log.clone();
+    bare.ticks.iter_mut().for_each(|p| p.pick = None);
+    let without = run(&bare);
+    assert_eq!(without.1, 0, "the accepts alone keep team 1");
+    assert_ne!(without.0.last(), live.0.last());
+    // A pad with no pick serializes as before.
+    let idle = ron::to_string(&PadState::default()).unwrap();
+    assert!(!idle.contains("pick"), "{idle}");
+}

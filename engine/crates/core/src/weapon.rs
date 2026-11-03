@@ -649,6 +649,7 @@ impl WeaponClass {
                 missile: None,
                 fat_ray: None,
                 beam: None,
+                tow: None,
                 impact: Some(crate::impact::ImpactLook {
                     soft: Some("ord_explosion".into()),
                     rigid: Some("ord_explosion".into()),
@@ -748,6 +749,7 @@ impl WeaponClass {
                 missile: None,
                 fat_ray: None,
                 beam: None,
+                tow: None,
                 impact: Some(crate::impact::ImpactLook {
                     soft: Some("com_sfx_ord_exp".into()),
                     rigid: Some("com_sfx_ord_exp".into()),

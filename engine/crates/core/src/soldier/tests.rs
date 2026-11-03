@@ -651,6 +651,7 @@ const JUMP: PadState = PadState {
     mx: 0,
     my: 0,
     fire_lag: 0,
+    pick: None,
 };
 
 /// One tick with the floor at y = 0, or with none under the feet.

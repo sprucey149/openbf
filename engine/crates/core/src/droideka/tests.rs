@@ -9,6 +9,7 @@ const ELF_TABLE: [u8; 112] = [
     12, 12, 12, 12, 12, 12, 4, 12, 13, 13, 12, 12, 12, 12, 4, 12, 0, 0, 0, 0, 0, 0, 4, 0,
 ];
 
+#[derive(Clone)]
 struct Rig {
     c: DroidekaClass,
     d: Droideka,
@@ -228,7 +229,7 @@ fn a_human_turning_the_ball_leans_as_if_rolling_forward() {
 }
 
 #[test]
-fn boost_doubles_the_top_speed_and_spends_the_shared_bar_not_the_jump_pool() {
+fn boost_doubles_the_top_speed_and_spends_the_shared_bar() {
     let mut r = Rig::rolling();
     let boost = Input {
         fwd: 1.0,
@@ -240,10 +241,6 @@ fn boost_doubles_the_top_speed_and_spends_the_shared_bar_not_the_jump_pool() {
     }
     assert!(r.d.boosting);
     assert!(r.d.omega > r.c.ball_omega_cap());
-    assert_eq!(
-        r.d.energy, r.c.energy_bar,
-        "the jump pool is not the sprint's"
-    );
     let want = r.c.shield.max - r.c.ball_sprint_drain() * 30.0 * TICK_DT;
     assert!(
         (r.d.shield.points - want).abs() < 40.0,
@@ -253,7 +250,7 @@ fn boost_doubles_the_top_speed_and_spends_the_shared_bar_not_the_jump_pool() {
     for _ in 0..90 {
         r.tick(&boost);
     }
-    assert!(!r.d.boosting && r.d.sprint_spent && !r.d.depleted);
+    assert!(!r.d.boosting && r.d.sprint_spent);
     assert!(r.d.shield.points < r.c.ball_sprint_recover());
     let walk = Input {
         fwd: 0.5,
@@ -274,7 +271,10 @@ fn the_ball_jump_reaches_its_height_once_per_landing() {
     };
     let rep = r.tick(&jump);
     assert!(rep.jumped);
-    assert!((r.d.energy - (100.0 - 30.0 + 15.0 * TICK_DT)).abs() < 1e-3);
+    assert_eq!(
+        r.d.shield.points,
+        r.c.shield.max - r.c.ball_jump_cost(false)
+    );
     let mut apex: f32 = 0.0;
     let again = r.tick(&jump);
     assert!(!again.jumped, "no second jump in the air");
@@ -608,10 +608,10 @@ fn the_engine_runs_while_folding_and_rolling_only() {
 }
 
 #[test]
-fn refused_ball_jump_explains_energy_but_not_airtime() {
+fn refused_ball_jump_explains_the_spent_bar_but_not_airtime() {
     let mut r = Rig::rolling();
-    r.d.energy = 0.0;
-    r.d.depleted = true;
+    r.d.shield.points = 0.0;
+    r.d.sprint_spent = true;
     let jump = Input {
         jump: true,
         ..human()
@@ -623,11 +623,174 @@ fn refused_ball_jump_explains_energy_but_not_airtime() {
     let report = r.tick(&jump);
     assert!(!report.energy_refused, "airtime is not an energy refusal");
     r.d.air = 0.0;
-    r.d.depleted = false;
-    r.d.energy = 1.0;
+    r.d.sprint_spent = false;
+    r.d.shield.points = 1.0;
     let report = r.tick(&jump);
     assert!(
         report.jumped && !report.energy_refused,
-        "native payment allows the final jump to exhaust the pool"
+        "the soldier's payment lets the last jump empty the bar"
     );
+    assert_eq!(r.d.shield.points, 0.0);
+    assert!(r.d.sprint_spent, "an emptied bar is spent");
+}
+
+/// Roll until the ball is down again after a jump.
+fn land(r: &mut Rig) {
+    r.ticks_until(&human(), 120, |d| d.air == 0.0);
+    r.tick(&human());
+}
+
+#[test]
+fn a_ball_jump_costs_the_class_share_of_the_shared_bar() {
+    let mut r = Rig::rolling();
+    // BF2's droideka: EnergyCostJump 30 of EnergyBar 100, of a 3000 shield.
+    assert_eq!(r.c.ball_jump_cost(false), 900.0);
+    assert_eq!(r.c.ball_jump_cost(true), 900.0, "no EnergyCostJumpSprint");
+    let jump = Input {
+        jump: true,
+        ..human()
+    };
+    let before = r.d.shield.points;
+    assert!(r.tick(&jump).jumped);
+    assert_eq!(r.d.shield.points, before - 900.0);
+    land(&mut r);
+    // A dearer sprinting cost, where a class authors one, is the one paid.
+    r.c.energy_cost_jump_sprint = 50.0;
+    let full = r.c.shield.max;
+    r.d.shield.points = full;
+    let sprint = Input {
+        fwd: 1.0,
+        boost: true,
+        ..human()
+    };
+    r.tick(&sprint);
+    assert!(r.d.boosting);
+    let at = r.d.shield.points;
+    assert!(
+        r.tick(&Input {
+            jump: true,
+            ..sprint
+        })
+        .jumped
+    );
+    assert_eq!(r.d.shield.points, at - 1500.0);
+    // The stamina cheat: free.
+    land(&mut r);
+    let at = r.d.shield.points;
+    let free = Input {
+        jump: true,
+        free_sprint: true,
+        ..human()
+    };
+    assert!(r.tick(&free).jumped);
+    assert!(r.d.shield.points >= at, "{} {at}", r.d.shield.points);
+}
+
+#[test]
+fn ball_jumps_are_refused_only_on_a_spent_bar_and_resume_at_the_recover_share() {
+    let mut r = Rig::rolling();
+    let jump = Input {
+        jump: true,
+        ..human()
+    };
+    let mut jumps = 0;
+    let refused = loop {
+        let report = r.tick(&jump);
+        if report.energy_refused {
+            break report;
+        }
+        assert!(report.jumped, "a bar that is not spent always jumps");
+        jumps += 1;
+        assert!(jumps < 10, "the bar never ran out");
+        land(&mut r);
+    };
+    assert!(jumps >= 3, "{jumps} jumps from a full bar");
+    assert!(!refused.jumped);
+    // The refusal follows the visible bar: spent and under the recover share.
+    assert!(r.d.sprint_spent);
+    let (bar, recover) = (r.d.shield.points, r.c.ball_sprint_recover());
+    assert!(bar < recover, "{bar} {recover}");
+    // Still refused while it refills, until the recover share.
+    while r.d.shield.points < recover - 1.0 {
+        assert!(r.tick(&jump).energy_refused, "{}", r.d.shield.points);
+    }
+    r.ticks_until(&human(), 30, |d| !d.sprint_spent);
+    assert!(r.tick(&jump).jumped);
+}
+
+#[test]
+fn ball_sprint_and_ball_jump_share_the_one_bar() {
+    // A sprint that empties the bar refuses the jump.
+    let mut r = Rig::rolling();
+    let sprint = Input {
+        fwd: 1.0,
+        boost: true,
+        ..human()
+    };
+    r.ticks_until(&sprint, 200, |d| d.sprint_spent);
+    let report = r.tick(&Input {
+        jump: true,
+        ..sprint
+    });
+    assert!(!report.jumped && report.energy_refused);
+    // A jump that empties the bar refuses the sprint.
+    let mut r = Rig::rolling();
+    r.d.shield.points = 100.0;
+    assert!(
+        r.tick(&Input {
+            jump: true,
+            ..human()
+        })
+        .jumped
+    );
+    assert!(r.d.sprint_spent && r.d.shield.points < r.c.ball_sprint_recover());
+    land(&mut r);
+    r.tick(&sprint);
+    assert!(!r.d.boosting, "no sprint on a bar a jump spent");
+    // And a sprint spends what a jump left.
+    let mut r = Rig::rolling();
+    assert!(
+        r.tick(&Input {
+            jump: true,
+            ..human()
+        })
+        .jumped
+    );
+    land(&mut r);
+    let left = r.d.shield.points;
+    assert!(left < r.c.shield.max);
+    r.tick(&sprint);
+    assert!(r.d.boosting && r.d.shield.points < left);
+}
+
+#[test]
+fn the_jump_button_leaves_a_standing_droidekas_shield_alone() {
+    let mut r = Rig::new(Order::Deploy);
+    let jump = Input {
+        jump: true,
+        ..human()
+    };
+    let full = r.c.shield.max;
+    for _ in 0..10 {
+        let report = r.tick(&jump);
+        assert!(!report.jumped && !report.energy_refused);
+    }
+    assert_eq!(r.d.shield.points, full);
+    // Raised, it drains at its own rate only (a full one holds); jumping
+    // changes nothing.
+    r.d.shield.points = full - 500.0;
+    r.tick(&Input {
+        shield: true,
+        ..human()
+    });
+    assert!(r.d.shield.on);
+    let mut plain = r.clone();
+    for _ in 0..10 {
+        r.tick(&jump);
+        plain.tick(&human());
+    }
+    assert!(r.d.shield.on);
+    assert_eq!(r.d.shield.points, plain.d.shield.points);
+    assert!(r.d.shield.points < full - 500.0);
+    assert!(!r.d.sprint_spent);
 }

@@ -2,34 +2,20 @@ use glam::Vec3;
 
 use super::{
     Body, Droideka, DroidekaClass, Input, Report, BALL_BOOST_STICK, BALL_JUMP_WINDOW,
-    BALL_LEAN_RATE, BALL_TURN_DEADZONE, BALL_TURN_MIN_FWD, ENERGY_RECOVER, ROLLING,
+    BALL_LEAN_RATE, BALL_TURN_DEADZONE, BALL_TURN_MIN_FWD, ROLLING,
 };
 use crate::fmath;
 
 impl Droideka {
-    pub(super) fn tick_energy(&mut self, dt: f32, input: &Input, c: &DroidekaClass) {
-        let idle = input.fwd == 0.0 && input.strafe == 0.0 && input.turn == 0.0;
-        let rate = if idle {
-            c.energy_restore_idle
-        } else {
-            c.energy_restore
-        };
-        self.energy = (self.energy + rate * dt).min(c.energy_bar);
-        if self.depleted && self.energy >= ENERGY_RECOVER {
-            self.depleted = false;
-        }
-    }
-
     /// The ball's sprint spends the one bar the shield uses. The disc's boost
-    /// spent the hidden jump pool; the bar is the maintainer's port rule.
+    /// spent the hidden jump pool; the bar is the maintainer's port rule. The
+    /// lockout's release is everyone's; only a player's empty bar sets it here
+    /// (a bot never sprints or jumps).
     pub(super) fn tick_sprint(&mut self, dt: f32, input: &Input, c: &DroidekaClass) {
         if self.boosting && !input.free_sprint {
             self.shield.points = (self.shield.points - c.ball_sprint_drain() * dt).max(0.0);
         }
-        if !input.human {
-            return;
-        }
-        if self.shield.points <= 0.0 {
+        if input.human && self.shield.points <= 0.0 {
             self.sprint_spent = true;
             self.boosting = false;
         } else if self.sprint_spent && self.shield.points >= c.ball_sprint_recover() {
@@ -37,17 +23,24 @@ impl Droideka {
         }
     }
 
-    fn pay_energy(&mut self, cost: f32) -> bool {
+    /// The soldier's jump payment (`crate::soldier::Soldier::pay_energy`) on
+    /// the shared bar, with [`Droideka::sprint_spent`] as its depleted latch:
+    /// a cost of 0 always passes, a spent bar refuses, and a bar that cannot
+    /// cover the cost is emptied and marked spent. OURS (the maintainer,
+    /// 2026-11-02): the disc spends a hidden pool of its own. PROVISIONAL,
+    /// measure: the maintainer's ball jumps from a full and a low bar in live
+    /// play.
+    fn pay_bar(&mut self, cost: f32) -> bool {
         if cost <= 0.0 {
             return true;
         }
-        if self.depleted {
+        if self.sprint_spent {
             return false;
         }
-        self.energy -= cost;
-        if self.energy < 0.0 {
-            self.energy = 0.0;
-            self.depleted = true;
+        self.shield.points -= cost;
+        if self.shield.points <= 0.0 {
+            self.shield.points = 0.0;
+            self.sprint_spent = true;
         }
         true
     }
@@ -60,11 +53,23 @@ impl Droideka {
         true
     }
 
-    fn jump(&mut self, c: &DroidekaClass, body: &mut Body, report: &mut Report) {
+    fn jump(
+        &mut self,
+        c: &DroidekaClass,
+        sprinting: bool,
+        input: &Input,
+        body: &mut Body,
+        report: &mut Report,
+    ) {
         if self.state != ROLLING || self.air >= BALL_JUMP_WINDOW {
             return;
         }
-        if !self.pay_energy(c.energy_cost_jump) {
+        let cost = if input.free_sprint {
+            0.0
+        } else {
+            c.ball_jump_cost(sprinting)
+        };
+        if !self.pay_bar(cost) {
             report.energy_refused = true;
             return;
         }
@@ -118,8 +123,9 @@ impl Droideka {
         self.lean = lean / (1.0 + lean * lean).sqrt();
         let accel;
         if input.jump {
+            let sprinting = self.boosting;
             self.boosting = false;
-            self.jump(c, body, report);
+            self.jump(c, sprinting, input, body, report);
             accel = 0.0;
         } else if fwd > BALL_BOOST_STICK && input.boost && self.boost_on() {
             accel = fwd * c.ball_acceleration * c.ball_boost_scale;

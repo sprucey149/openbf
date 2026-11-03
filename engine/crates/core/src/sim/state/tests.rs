@@ -52,6 +52,20 @@ fn a_unit_in_the_trigger_opens_the_door_and_the_door_is_hashed() {
             .filter(|e| matches!(e, Event::DoorOpened { door: 0 }))
             .count()
     };
+    let mut locked = make(Vec3::ZERO);
+    assert_eq!(near.hash(), locked.hash());
+    locked.doors[0].locked = true;
+    assert_ne!(near.hash(), locked.hash(), "lock affects future ticks");
+    assert!(!locked.door_opening(&locked.collision.bodies()[0]));
+    locked.step(&[PadState::default()]);
+    assert_eq!(locked.doors[0].open, 0.0);
+    assert_eq!(opened(&locked), 0);
+    assert!(locked.events.contains(&Event::DoorLocked { door: 0 }));
+    assert_eq!(locked.collision.bodies()[0].to_world.w_axis.y, 2.0);
+    locked.doors[0].locked = false;
+    locked.step(&[PadState::default()]);
+    assert!(locked.doors[0].open > 0.0);
+    assert_eq!(opened(&locked), 1);
     for i in 0..30 {
         near.step(&[PadState::default()]);
         far.step(&[PadState::default()]);

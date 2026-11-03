@@ -14,7 +14,7 @@ and LAN are decisions for later work, not current tasks.
 - **HUD.** BF2's on every map, with the heat ring around the centre reticle.
 - **Grenades.** BF1 maps throw BF1 grenades, by BF1's numbers, with BF2's grenade HUD (`analysis/re-grenades.md`).
 - **Health.** Vehicle and unit health are separate.
-- **Droidekas** sprint only as a ball, on the shared bar.
+- **Droidekas** sprint only as a ball, on the shared bar, and the ball jump spends that bar too.
 
 ### Movement & feel
 - **(the maintainer, 2026-09-03) Aim assist is NEVER off by default, at any difficulty.**
@@ -31,7 +31,8 @@ and LAN are decisions for later work, not current tasks.
   upward impulse is the PostCollision mirror bounce). The universal behaviour
   is therefore BF2's, with BF2's numbers: `BallJumpHeight` 1.27 m
   (v0 = √(2·9.8·1.27) = 4.99 m/s), `EnergyCostJump` 30 of `EnergyBar` 100
-  (restore 10/s, 15 idle), grounded for < 0.1 s only, no double jump, a
+  (restore 10/s, 15 idle; since 2026-11-02 the port takes that share from the
+  shield's bar instead, `analysis/re-droideka-unit.md` §9), grounded for < 0.1 s only, no double jump, a
   +25 % forward boost; a BF1-sourced droideka has no `BallJumpHeight`, so it
   takes 1.27 m as a PROVISIONAL default. The BUILD stays HELD (P7-class, the
   vehicle/entity work). The RE for each such difference cites both ELFs.
@@ -210,6 +211,7 @@ and LAN are decisions for later work, not current tasks.
   item has no BF2 art shows its BF1 icon inside the BF2 HUD (bake the BF1 HUD
   icon sheets alongside BF2's; the HUD looks the icon up by weapon class, BF2
   first, BF1 as the fallback). Nothing in a BF1 map uses BF1's HUD or menus.
+  The sniper scope is BF2's `weapon_scope` on every map (2026-11-02).
 - **(the maintainer, 2026-09-03) One voice set, one command set, everywhere.** Squad
   commands work on every map of both games; the spoken chatter for them is
   ONE universal set (BF1's tactical chatter baked as the universal lines,

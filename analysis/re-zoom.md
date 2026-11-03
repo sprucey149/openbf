@@ -328,7 +328,8 @@ person suspended" gate (the port has no thrown state); item 5 is card ZSCP. Befo
 `buttons::ZOOM` (R3) has no consumer; `WeaponClass` reads only `ZoomMax`; `aim_assist` takes a
 `zoom_factor` nobody sets; `Weapon::set_posture` takes a `zoomed` flag nobody sets; `camera_section(rules, stance)`
 has no zoom sections; the chase FOV is the measured unzoomed tan (BF1 0.34131, BF2 0.48838, card CFOVM's
-"writers unread" — they are section 5's); `weapon_scope.ktx2` is baked for both games.
+"writers unread" — they are section 5's); `weapon_scope.ktx2` is baked for both games. Since 2026-11-02 the port
+draws BF2's `weapon_scope` on every map, BF1 maps included (BF2's HUD everywhere), and bakes only BF2's copy.
 
 1. **Class data** (`core/src/weapon.rs`): `ZoomMin`, `ZoomRate`, the two divisors with the copy rule and the 0 ->
    1.0 rule, `ZoomFirstPerson`; the `*AimSpread` names for the third spread column.

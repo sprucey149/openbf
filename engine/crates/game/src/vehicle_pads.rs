@@ -738,7 +738,23 @@ pub fn install(
             Some(setup)
         })
         .collect();
-    crate::hero_riders::install(sim, m, map_dir, &b);
+    let tow_parts = b
+        .classes
+        .iter()
+        .map(|class| {
+            let rows = db.props_all(class, "TowCableCollision");
+            if rows.is_empty() {
+                return Vec::new();
+            }
+            class_collision(m, map_dir, &sides, class)
+                .and_then(|(dir, class, entry)| {
+                    let collision = crate::assets::load_collision_geom(dir, &entry).ok()?;
+                    crate::hero_riders::tow_parts(&rows, &collision, &class.collision)
+                })
+                .unwrap_or_default()
+        })
+        .collect();
+    crate::hero_riders::install(sim, m, map_dir, &b, tow_parts);
     for (class, setup) in sim
         .seat_setup
         .iter()

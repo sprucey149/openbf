@@ -124,6 +124,7 @@ impl Sim {
         // The hulls where their vehicles are (card VHULL): a caller may have
         // moved one, or installed a new world, since the last tick.
         self.sync_hulls();
+        self.sync_tow_falls();
         // Existing hero lives drain before this tick's replacements/spawns.
         self.tick_hero_health(dt);
         let hero_pads = self.step_heroes(pads);
@@ -161,9 +162,14 @@ impl Sim {
         for w in &mut self.waves {
             w.tick(dt);
         }
+        self.tick_native_waves(dt);
         for i in 0..self.units.len() {
             let u = &self.units[i];
             if u.alive || u.respawn_at.is_none_or(|t| t > self.tick) {
+                continue;
+            }
+            if u.team >= 2 {
+                self.respawn_native(i);
                 continue;
             }
             // A HUMAN waits for no spawn wave (BF2 `FUN_0034cea8` skips the
@@ -208,6 +214,8 @@ impl Sim {
             }
             self.respawn_slot(i);
         }
+
+        self.populate_native_teams();
 
         // 0b. SQUAD ORDERS (`squad`): one edge per player slot in slot order,
         //     then each unit whose think is due takes the order it was
@@ -1111,6 +1119,7 @@ impl Sim {
         self.fly_missiles(dt);
         self.fly_shells(dt);
         self.fly_bolts(dt);
+        self.fly_tow_cables(dt);
 
         // 5b. The thrown grenades (GREN).
         self.tick_stickies(dt);

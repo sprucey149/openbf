@@ -55,7 +55,8 @@ impl Sim {
             eat(&(self.vehicles.len() as u32).to_le_bytes());
             for v in &self.vehicles {
                 v.hash_into(&mut eat);
-                if self.hero_rider_frames.is_some() && v.kind == crate::vehicle::VehicleKind::Walker
+                if (self.hero_rider_frames.is_some() || self.tow_frames.is_some())
+                    && v.kind == crate::vehicle::VehicleKind::Walker
                 {
                     eat(b"RIDER_LAYERS");
                     for blend in v.walker.layer_blend {
@@ -63,6 +64,12 @@ impl Sim {
                     }
                 }
             }
+        }
+        for tow in &self.tow_cables {
+            tow.hash_into(&mut eat);
+        }
+        for fall in &self.tow_falls {
+            fall.hash_into(&mut eat);
         }
         // HASH: a live bolt carries its predictive hit and historical shooter.
         // Empty fixtures keep their pins; live-bolt replays need a sim re-baseline.
@@ -129,6 +136,7 @@ impl Sim {
             eat(&w.wave.to_le_bytes());
             eat(&w.next_slot.to_le_bytes());
         }
+        self.hash_native_teams(&mut eat);
         // The two commander plans (Phase B), each length-prefixed with `None`
         // as its own sentinel byte.
         for p in &self.commander {
@@ -252,6 +260,11 @@ impl Sim {
             eat(&(self.doors.len() as u32).to_le_bytes());
             for d in &self.doors {
                 eat(&d.open.to_bits().to_le_bytes());
+            }
+            if self.doors.iter().any(|d| d.locked) {
+                for d in &self.doors {
+                    eat(&[u8::from(d.locked)]);
+                }
             }
         }
         // The grenades on the ground (HOLD): nothing when there are none.

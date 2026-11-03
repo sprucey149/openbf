@@ -77,16 +77,19 @@ fn marker_draw(cube: MeshHandle, walk: &WalkSim) -> DrawCmd {
 
 /// Soldier marker + enemy boxes (magnet target highlighted red, health
 /// darkens the box) + in-flight bolts (team-tinted).
-pub fn walk_draws(cube: MeshHandle, walk: &WalkSim, draws: &mut Vec<DrawCmd>, models: [bool; 2]) {
+pub fn walk_draws(
+    cube: MeshHandle,
+    walk: &WalkSim,
+    draws: &mut Vec<DrawCmd>,
+    visuals: Option<&game::soldier_vis::SoldierVisuals>,
+) {
+    let has_model = |team| visuals.is_some_and(|v| v.has_model(team));
     let player_team = walk.sim.units[walk.player.index as usize].team;
-    if walk.player_on_foot()
-        && !walk.player_body_hidden()
-        && !models[usize::from(player_team.min(1))]
-    {
+    if walk.player_on_foot() && !walk.player_body_hidden() && !has_model(player_team) {
         draws.push(marker_draw(cube, walk));
     }
     for t in walk.target_draws() {
-        if models[usize::from(t.team.min(1))] {
+        if has_model(t.team) {
             continue; // drawn as an animated model instead
         }
         let base = if t.magnet {
@@ -358,6 +361,7 @@ pub(super) fn make_walk_with_counts(
         walk.sim.flight_limits = a.flight_limits;
         walk.sim.landing_regions = a.landing_regions.clone();
         walk.sim.ground_flyer_map = m.ground_flyer_map;
+        m.apply_door_locks(&mut walk.sim.doors, &scene.manifest);
         let blocked = m.apply_arc_blocks(walk.sim.nav.as_mut());
         if blocked != 0 {
             println!("mission: route groups {blocked:#b} blocked (plnp)");
@@ -430,6 +434,8 @@ pub(super) fn make_walk_with_counts(
         // The commander speaks the mission's lines over the posts and the
         // battle just set up.
         if let Some(m) = &b.mission {
+            let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
+            game::native_teams::install(&mut walk, &layout, &b.classes_dir, assets_dir, m);
             walk.sound_levels = m.sound_levels();
             walk.voice = Some(game::announce::Commander::for_battle(m, &layout, &walk));
             // ...and the music is the script's too, by the reinforcements

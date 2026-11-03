@@ -169,15 +169,13 @@ fn capture_hud() {
         frame(size, |v| settle(v, &ball), Panel::None)
             .save(out.join(format!("hud_droideka_ball_{label}.png")))
             .unwrap();
-        // The BF1 scope, to report on: its drawing is not this pass's to change.
+        // The scope, BF2's on every map: its drawing is not this pass's to change.
         let scoped = HudModel {
-            scope: Some(ui::hud_scope::ScopeView {
-                sheet: "common_bf1/weapon_scope".into(),
-            }),
+            scope: Some(ui::hud_scope::ScopeView),
             ..base()
         };
         frame(size, |v| v.update(&scoped, 0.0, size), Panel::None)
-            .save(out.join(format!("hud_scope_bf1_{label}.png")))
+            .save(out.join(format!("hud_scope_{label}.png")))
             .unwrap();
         let dead = HudModel {
             dead: true,

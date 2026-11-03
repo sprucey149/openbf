@@ -95,7 +95,6 @@ fn render_headless_hud(
 /// Resources shared by series captures and the always-rendered final replay frame.
 struct ReplayFrame {
     cube: render::MeshHandle,
-    models: [bool; 2],
     quad: render::MeshHandle,
     sprite: Option<render::TextureHandle>,
     icons: (Option<render::TextureHandle>, Option<render::TextureHandle>),
@@ -143,7 +142,7 @@ impl ReplayFrame {
         };
         gpu.see_through(&see.props);
         let mut draws = gpu.view_draws(&walk.sim, walk.player);
-        walk_draws(self.cube, walk, &mut draws, self.models);
+        walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
         self.deka_vis.eye = Some(cam.position);
         draws.extend(self.deka_vis.draws(r, &walk.sim));
@@ -437,6 +436,7 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             }
             Event::DoorOpened { door } => format!("{tick},door_opened,{door},,\n"),
             Event::DoorClosed { door } => format!("{tick},door_closed,{door},,\n"),
+            Event::DoorLocked { door } => format!("{tick},door_locked,{door},,\n"),
             // `a` is the item class; a taken item's `b` is the taker and its
             // value what it gave (1 health, 2 ammo, 4 energy).
             Event::ItemDropped { item, .. } => format!("{tick},item_dropped,{item},,\n"),
@@ -520,7 +520,6 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         .map(std::path::Path::to_path_buf)
         .unwrap_or_default();
     let mut vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
-    let models = [vis.has_model(0), vis.has_model(1)];
     let mut vehicle_vis =
         game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
     let mut deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
@@ -553,7 +552,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
         let mut draws = gpu.draws.clone();
-        walk_draws(cube, &walk, &mut draws, models);
+        walk_draws(cube, &walk, &mut draws, Some(&vis));
         draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
         draws.extend(deka_vis.draws(&mut r, &walk.sim));
         vis.prepare_view(&walk, &cam, v.size.0 as f32 / v.size.1 as f32);
@@ -580,7 +579,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
                 let clock = game::water_anim::clock(k as f64 / 60.0);
                 gpu.animate_water(&mut r, clock, cam.position)?;
                 let mut draws = gpu.draws.clone();
-                walk_draws(cube, &walk, &mut draws, models);
+                walk_draws(cube, &walk, &mut draws, Some(&vis));
                 draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
                 draws.extend(deka_vis.draws(&mut r, &walk.sim));
                 vis.prepare_view(&walk, &cam, v.size.0 as f32 / v.size.1 as f32);
@@ -720,7 +719,6 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
             .map(std::path::Path::to_path_buf)
             .unwrap_or_default();
         let vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
-        let models = [vis.has_model(0), vis.has_model(1)];
         let vehicle_vis =
             game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
         let deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
@@ -770,7 +768,6 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         });
         let mut frame = ReplayFrame {
             cube,
-            models,
             quad,
             sprite,
             icons,

@@ -379,8 +379,8 @@ stand-and-go. With it: that door 0 stalls in 157 passes; stalls beginning within
 **Open.** (1) What still stalls at Tantive IV's and Mustafar's doors is not a leaf (untraced). (2) The Death
 Star's blast doors take 5.0 s (151 frames, trigger r 16): a bot waits out up to 2.7 s of it at the leaf; the PS2's
 wait there is not sampled. (3) The conquest script locks Kamino's pod room doors 32 and 28 (§4); the two PS2
-captures hold 0 bot samples within 2 m of either and the port's 24 snapshots 0, so the missing lock (queue DR3)
-moves 0 bots there. — (1) is traced in §12.4 (card DOORS); (2) the port's own wait there is in §12.3.
+captures hold 0 bot samples within 2 m of either and the port's 24 snapshots 0, so the then-missing lock moved 0 bots in those samples. Startup locks and locked-door audio have since landed
+(public `40535bf`), with original-game audio comparison pending. — (1) is traced in §12.4 (card DOORS); (2) the port's own wait there is in §12.3.
 
 ## 12. Every door of the five door maps, censused (card DOORS, 2026-10-12) [L]
 

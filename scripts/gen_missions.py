@@ -555,25 +555,40 @@ def global_functions50(f):
     return top
 
 
-def startup_calls50(f, verbs):
+def startup_trace50(f):
     """Replay startup verb calls, following only zero-argument globals."""
     top = global_functions50(f)
     base = _rk_base(f)
-    out = []
 
     def run(name, depth):
         p = top.get(name)
         if p is None or depth > 4:
             return
         for c in calls50(p, base=base, recurse=False):
-            if c.name in verbs:
-                for arg in c.args:
-                    if isinstance(arg, str):
-                        out.append((arg, c.name == verbs[0]))
-            elif c.name in top and not c.args:
-                run(c.name, depth + 1)
+            if c.name in top and not c.args:
+                yield from run(c.name, depth + 1)
+            else:
+                yield c
 
-    run("ScriptPostLoad", 0)
+    return run("ScriptPostLoad", 0)
+
+
+def startup_calls50(f, verbs):
+    return [(arg, c.name == verbs[0]) for c in startup_trace50(f)
+            if c.name in verbs for arg in c.args if isinstance(arg, str)]
+
+
+def door_locks50(f):
+    """Literal startup IsLocked writes to named door instances."""
+    out = []
+    for c in startup_trace50(f):
+        if c.name != "SetProperty" or len(c.args) != 3:
+            continue
+        name, key, value = c.args
+        if not isinstance(name, str) or not isinstance(key, str) or key.lower() != "islocked":
+            continue
+        if value in (0.0, "0", 1.0, "1"):
+            out.append((name, value in (1.0, "1")))
     return out
 
 
@@ -976,7 +991,8 @@ def facts_from_calls(seq):
          "ai_capture": {}, "ai_damage": [], "fly": None,
          "fly_ai_max": None, "fly_ai_min": None, "fly_min": None,
          "ground_flyer_map": False,
-         "bird_count": 0, "bird_types": {}, "heroes": {}, "class_load_order": []}
+         "bird_count": 0, "bird_types": {}, "heroes": {}, "class_load_order": [],
+         "local_team_relations": []}
 
     def ti(v):
         return int(v) if isinstance(v, float) and v == int(v) else None
@@ -997,6 +1013,12 @@ def facts_from_calls(seq):
             t, n = ti(a[0]), ti(a[1])
             if t and n is not None:
                 d["units"][t] = n
+        elif c.name in ("SetTeamAsFriend", "SetTeamAsEnemy") and len(a) >= 2:
+            source, target = ti(a[0]), ti(a[1])
+            if source in range(1, 256) and target in range(1, 256) and \
+                    max(source, target) >= 3:
+                d["local_team_relations"].append(
+                    (source, target, c.name == "SetTeamAsFriend"))
         elif c.name == "SetReinforcementCount" and len(a) >= 2:
             t, n = ti(a[0]), ti(a[1])
             if t and n is not None:
@@ -1258,6 +1280,7 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m.ground_flyer_map = (ps2 or {}).get("ground_flyer_map", False)
     m.landing_regions = (ps2 or {}).get("landing_regions", [])
     m.strings = set(consts(f, str)) if f is not None else set()
+    m.door_locks = door_locks50(f) if f is not None and game == "bf2" else []
     m.arc_blocks = arc_calls50(f) if f is not None and game == "bf2" else []
     m.barriers = barrier_calls50(f) if f is not None and game == "bf2" else []
     m.death_drains = death_drains50(f) if f is not None and game == "bf2" \
@@ -1298,20 +1321,13 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     # "CIS_inf_rifleman").
     m.classes = [d["classes"].get(t, []) for t in (1, 2)]
 
-    # --- locals team (3+), when the mission fields one.  Some missions
-    # declare an empty team 3 and put the real locals on team 4 (BF1 hot1i:
-    # team 3 "Local" with no units, team 4 = one imp_droid_probe), so take
-    # the lowest team above the two mains that actually has a member pool.
-    m.locals = None
-    m.locals_team = None
-    for t in sorted(k for k in set(list(d["names"]) + list(d["units"])) if k >= 3):
-        if d["units"].get(t, 0) <= 0:
-            continue
-        cls = d["classes"].get(t, [])
-        m.locals_team = t
-        m.locals = (cls[0][0] if cls else str(d["names"].get(t, "locals")),
-                    d["units"][t])
-        break
+    # Keep every locals team with a member pool and its complete class mix.
+    # BF1 Hoth declares empty team 3 but fields an Imperial probe on team 4.
+    m.local_teams = [
+        (team, units, d["classes"].get(team, []))
+        for team, units in sorted(d["units"].items())
+        if team >= 3 and units > 0
+    ]
 
     # --- alive-AI cap.  Censused: no BF1 mission .lua and no BF2 *_con .lua
     # calls ScriptCB_SetNumBots, so BF1's cap is the member pool itself
@@ -1348,7 +1364,7 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m.missing = []
     for s in list(m.death_regions) + [c[0] for c in m.cps] + \
             list(m.posts) + list(m.killed) + \
-            ([m.locals[0]] if m.locals else []):
+            [name for _, _, classes in m.local_teams for name, _, _ in classes]:
         if m.checked and s not in m.strings:
             m.missing.append(s)
             m.prov.append("string %r is not in the PS2 %s constant table"
@@ -1476,6 +1492,11 @@ def ron(m):
         L.append("    arc_blocks: [%s],"
                  % ", ".join('("%s", %s)' % (n, "true" if b else "false")
                              for n, b in m.arc_blocks))
+    if m.door_locks:
+        L.append("    // ScriptPostLoad IsLocked writes, in order.")
+        L.append("    door_locks: [%s],"
+                 % ", ".join('("%s", %s)' % (n, "true" if b else "false")
+                             for n, b in m.door_locks))
     if m.barriers:
         L.append("    // ScriptPostLoad's Enable/DisableBarriers, in order "
                  "(true = enabled).")
@@ -1561,11 +1582,28 @@ def ron(m):
                      % ", ".join('("%s", %d)' % (n, t)
                                  for n, t in m.ai_no_capture))
         L.append("    ),")
-    if m.locals:
-        L.append("    // locals = (first AddUnitClass of team %d, its "
-                 "SetUnitCount)." % m.locals_team)
-    L.append("    locals: %s"
-             % ('Some(("%s", %d)),' % m.locals if m.locals else "None,"))
+    # Retain the legacy summary for readers that predate the full roster.
+    if m.local_teams:
+        team, units, classes = m.local_teams[0]
+        name = classes[0][0] if classes else m.d["names"].get(team, "locals")
+        L.append('    locals: Some(("%s", %d)),' % (name, units))
+    else:
+        L.append("    locals: None,")
+    if m.local_teams:
+        L.append("    local_teams: [")
+        for team, units, classes in m.local_teams:
+            L.append("        (team: %d, units: %d, classes: [" % (team, units))
+            for name, mn, mx in classes:
+                L.append('            ("%s", %d, %s),'
+                         % (name.lower(), mn,
+                            "None" if mx is None else "Some(%d)" % mx))
+            L.append("        ]),")
+        L.append("    ],")
+    if relations := m.d.get("local_team_relations"):
+        L.append("    local_team_relations: [%s],"
+                 % ", ".join("(%d, %d, %s)" % (source, target,
+                                               "true" if friendly else "false")
+                             for source, target, friendly in relations))
     L.append('    source: "%sPS2 %s.luac",' % ("PC %s; " % m.pc if m.pc else "", m.ps2))
     L.append(")")
     return "\n".join(L) + "\n"
@@ -1650,7 +1688,7 @@ def main():
               % (name, m.game, m.era, m.teams[0][0], m.teams[1][0],
                  m.teams[0][1], m.teams[1][1], m.teams[0][2], m.teams[1][2],
                  m.cap, m.attacking, len(m.cps), len(m.death_regions),
-                 m.locals[1] if m.locals else "-",
+                 sum(units for _, units, _ in m.local_teams) or "-",
                  "PROVISIONAL:%d" % len(m.prov) if m.prov else ""))
         for p in m.prov:
             print("      ! %s" % p)

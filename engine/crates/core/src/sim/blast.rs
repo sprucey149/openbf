@@ -388,7 +388,7 @@ impl Sim {
         }
         // Card DPRX: a proxy is a human victim; the cheat is a player's only.
         let (victim_team, victim_is_player, victim_cheats) = (v.team, v.is_human(), v.is_player);
-        let friendly = team == Some(victim_team);
+        let friendly = team.is_some_and(|team| self.allied(team, victim_team));
         if (victim_cheats && self.cheats.invincible)
             || (victim_is_player && friendly && !attacker_is_player)
         {

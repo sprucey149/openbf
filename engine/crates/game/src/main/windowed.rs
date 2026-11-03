@@ -715,18 +715,34 @@ impl App {
         }
     }
 
+    /// A click on the spawn screens: the pick goes into the next tick's pad
+    /// (`Kbm::set_pick`, the sim applies it, `PadState::pick`), and a double
+    /// click adds the screens' accept. The window writes no sim state.
     fn step_spawn_pointer(&mut self, dt: f32) {
+        let scale = self
+            .hud_view
+            .as_ref()
+            .and_then(game::hud_feed::HudView::spawn_map_scale);
+        self.step_spawn_pointer_at(dt, scale);
+    }
+
+    /// [`App::step_spawn_pointer`] with the spawn map drawn at the Map
+    /// element's `map_scale` (`None`: no HUD pass draws the map, so a click
+    /// there picks no post).
+    fn step_spawn_pointer_at(&mut self, dt: f32, map_scale: Option<glam::Vec3>) {
         self.spawn_clicks.step(dt);
         if self.paused {
             return;
         }
-        let Some((walk, _)) = self.walk.as_mut() else {
+        let Some((walk, _)) = self.walk.as_ref() else {
             return;
         };
-        let slot = walk
-            .sim
-            .unit(walk.player)
-            .map_or(0, |u| u.spec.player_slot.map_or(0, usize::from));
+        // The player's unit even while dead behind the screens, as the
+        // spawn page reads it (`Sim::unit` sees only a live one, which put
+        // every click on team 1's posts).
+        let me = walk.sim.units.get(walk.player.index as usize);
+        let slot = me.map_or(0, |u| u.spec.player_slot.map_or(0, usize::from));
+        let team = me.map_or(0, |u| u.team);
         let stage = walk.sim.spawn_stage.get(slot).copied().unwrap_or_default();
         if self.spawn_clicks.prev_stage != Some(stage) {
             self.spawn_clicks.prev_stage = Some(stage);
@@ -753,14 +769,8 @@ impl App {
                     let double = self
                         .spawn_clicks
                         .check_double_click(SpawnTarget::Side(row), pos);
-                    let choice = match row {
-                        0 => core::sim::SideChoice::Team1,
-                        1 => core::sim::SideChoice::Team2,
-                        _ => core::sim::SideChoice::Auto,
-                    };
-                    if let Some(c) = walk.sim.side_choice.get_mut(slot) {
-                        *c = choice;
-                    }
+                    self.kbm
+                        .set_pick(core::sim::ScreenPick::Side(row.min(2) as u8));
                     if double {
                         self.kbm.tap_bits(core::sim::buttons::SPAWN_ACCEPT);
                         if let Some(sl) = self.sounds.as_mut() {
@@ -778,17 +788,16 @@ impl App {
                 }
             }
             core::sim::SpawnStage::Map => {
-                if let Some(minimap) = &walk.minimap {
+                if let (Some(minimap), Some(scale)) = (&walk.minimap, map_scale) {
                     let map = minimap.spawn_model(walk, slot);
-                    let team = walk.sim.unit(walk.player).map_or(0, |u| u.team);
                     let posts = walk.sim.player_spawn_posts(team);
-                    if let Some(post) = ui::hud_map::hit_spawn_post(&map, &posts, pos, size, 28.0) {
+                    if let Some(post) =
+                        ui::hud_map::hit_spawn_post(&map, scale, &posts, pos, size, 28.0)
+                    {
                         let double = self
                             .spawn_clicks
                             .check_double_click(SpawnTarget::Post(post), pos);
-                        if slot < walk.sim.spawn_post_choice.len() {
-                            walk.sim.spawn_post_choice[slot] = Some(post);
-                        }
+                        self.kbm.set_pick(core::sim::ScreenPick::post(post));
                         if double {
                             self.kbm.tap_bits(core::sim::buttons::SPAWN_ACCEPT);
                             if let Some(sl) = self.sounds.as_mut() {
@@ -2052,11 +2061,7 @@ impl winit::application::ApplicationHandler for App {
                             );
                         }
                     }
-                    let models = self
-                        .soldier_vis
-                        .as_ref()
-                        .map_or([false; 2], |v| [v.has_model(0), v.has_model(1)]);
-                    walk_draws(*cube, walk, &mut extra, models);
+                    walk_draws(*cube, walk, &mut extra, self.soldier_vis.as_ref());
                     // The props and vehicles in the camera's way are drawn
                     // see-through (`game::camera_collide`).
                     see = walk.camera_see_through();
@@ -2540,8 +2545,13 @@ mod tests {
         assert!(!tracker.check_double_click(SpawnTarget::Side(2), pos));
     }
 
+    /// PR #102's clicks reach the sim only through the pad: a click leaves
+    /// the sim untouched and puts its pick in the next pad, a double click
+    /// adds the accept, and the stepped tick applies both. On the spawn map
+    /// the click is hit-tested at the Map element's Scale it is given.
     #[test]
-    fn step_spawn_pointer_handles_side_select_map_and_class_clicks() {
+    fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
+        use core::sim::{buttons::SPAWN_ACCEPT, PadState, ScreenPick, SideChoice, SpawnStage};
         let setup = setup(None);
         let mut a = App::new(
             Default::default(),
@@ -2553,69 +2563,30 @@ mod tests {
             Default::default(),
         );
         a.screen = Screen::Battle;
-        a.walk = Some((
-            game::walk::WalkSim::new(42, glam::Vec3::ZERO, None),
-            render::MeshHandle::default(),
-        ));
-        let walk = &mut a.walk.as_mut().unwrap().0;
-        walk.sim.spawn_stage[0] = core::sim::SpawnStage::Side;
-        walk.sim.side_choice.resize(1, core::sim::SideChoice::Auto);
-        walk.sim.units[walk.player.index as usize].alive = false;
-
-        let size = [640.0, 480.0];
-        // Team 1 row in window pixels
-        let team1_pt = ui::spawn_draw::window_point(
-            [
-                (ui::spawn_draw::SIDE_STACK_X[0] + ui::spawn_draw::SIDE_STACK_X[1]) * 0.5,
-                ui::spawn_draw::SIDE_STACK_TOP + ui::spawn_draw::ROW_PITCH + 10.0,
-            ],
-            size,
-        );
-
-        // 1. Side select - Click 1: selects Team 1
-        a.shell_pointer.moved_to(team1_pt);
-        a.shell_pointer.click();
-        a.step_spawn_pointer(0.016);
-        assert_eq!(
-            a.walk.as_ref().unwrap().0.sim.side_choice[0],
-            core::sim::SideChoice::Team1
-        );
-        assert_eq!(
-            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
-            0
-        );
-
-        // Side select - Click 2 (within 0.1s): double click confirms Team 1
-        a.shell_pointer.click();
-        a.step_spawn_pointer(0.1);
-        assert_ne!(
-            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
-            0
-        );
-
-        // 2. Map stage
-        let walk = &mut a.walk.as_mut().unwrap().0;
-        walk.sim.spawn_stage[0] = core::sim::SpawnStage::Map;
-        walk.sim.spawn_post_choice.resize(1, None);
-        walk.sim.add_cp(
-            core::cp::CpDef {
-                name: "CP1".into(),
-                pos: glam::Vec3::new(0.0, 0.0, 0.0),
-                capture: core::region::Region::sphere(glam::Vec3::ZERO, 10.0),
-                control: None,
-                value_bleed: 1,
-                value_atk: [1, 1],
-                value_def: [1, 1],
-                spawn_nodes: vec![(glam::Vec3::ZERO, 0.0)],
-                capture_time: 10.0,
-                neutralize_time: 10.0,
-            },
-            Some(0),
-        );
+        let mut walk = game::walk::WalkSim::new(42, glam::Vec3::ZERO, None);
+        for (x, team) in [(0.0, 0u8), (-200.0, 1), (-300.0, 1)] {
+            let pos = glam::Vec3::new(x, 0.0, 0.0);
+            walk.sim.add_cp(
+                core::cp::CpDef {
+                    name: format!("cp{x}"),
+                    pos,
+                    capture: core::region::Region::sphere(pos, 10.0),
+                    control: None,
+                    value_bleed: 1,
+                    value_atk: [1, 1],
+                    value_def: [1, 1],
+                    spawn_nodes: vec![(pos + glam::Vec3::Z, 0.0)],
+                    capture_time: 10.0,
+                    neutralize_time: 10.0,
+                },
+                Some(team),
+            );
+        }
+        assert!(walk.sim.open_spawn_screens(0, true));
         walk.minimap = Some(game::minimap::MapStatic {
             sheet_dir: PathBuf::new(),
             image: None,
-            bounds: Some(([0.0, 0.0], 200.0)),
+            bounds: Some(([0.0, 0.0], 400.0)),
             north: 0.0,
             turn: 0.0,
             posts: std::collections::HashMap::new(),
@@ -2627,30 +2598,96 @@ mod tests {
             vehicles: Vec::new(),
             droids: std::collections::HashMap::new(),
         });
-        a.kbm.consumed(&core::sim::PadState::default(), 1);
+        a.walk = Some((walk, render::MeshHandle::default()));
+        fn sim(a: &App) -> &core::sim::Sim {
+            &a.walk.as_ref().unwrap().0.sim
+        }
+        // One frame's pad through one tick, as the battle frame steps it.
+        let tick = |a: &mut App| {
+            let pad = a.kbm.pad(PadState::default());
+            a.walk.as_mut().unwrap().0.step_tick(&[pad]);
+            a.kbm.consumed(&pad, 1);
+            pad
+        };
+        let k = glam::Vec3::splat(0.6);
+        let scale = Some(k);
+        let size = [640.0, 480.0];
+        let row = |k: f32| {
+            ui::spawn_draw::window_point(
+                [
+                    (ui::spawn_draw::SIDE_STACK_X[0] + ui::spawn_draw::SIDE_STACK_X[1]) * 0.5,
+                    ui::spawn_draw::SIDE_STACK_TOP + k * ui::spawn_draw::ROW_PITCH + 10.0,
+                ],
+                size,
+            )
+        };
 
+        // Side: click team 2's row. The sim is untouched until the tick.
+        a.shell_pointer.moved_to(row(2.0));
+        a.shell_pointer.click();
+        a.step_spawn_pointer_at(0.016, scale);
+        assert_eq!(sim(&a).side_choice[0], SideChoice::Team1, "no direct write");
+        let pad = tick(&mut a);
+        assert_eq!(pad.pick, Some(ScreenPick::Side(1)));
+        assert_eq!(pad.buttons & SPAWN_ACCEPT, 0, "one click selects only");
+        assert_eq!(sim(&a).side_choice[0], SideChoice::Team2);
+        assert_eq!(a.kbm.pad(PadState::default()).pick, None, "taken once");
+        // Double click (the first click well after the last): the pick and
+        // the accept in one pad.
+        a.shell_pointer.click();
+        a.step_spawn_pointer_at(1.0, scale);
+        assert_eq!(a.kbm.pad(PadState::default()).buttons & SPAWN_ACCEPT, 0);
+        a.shell_pointer.click();
+        a.step_spawn_pointer_at(0.1, scale);
+        let pad = tick(&mut a);
+        assert_eq!(pad.pick, Some(ScreenPick::Side(1)));
+        assert_ne!(pad.buttons & SPAWN_ACCEPT, 0);
+        assert_eq!(sim(&a).spawn_stage[0], SpawnStage::Map);
+        let walk = &a.walk.as_ref().unwrap().0;
+        assert_eq!(walk.sim.units[walk.player.index as usize].team, 1);
+
+        // Map: it opens on team 2's first post (1, x = -200); its other
+        // post (2, x = -300) is clicked where the 0.6 Scale draws it.
+        tick(&mut a);
+        assert_eq!(
+            sim(&a).spawn_post_choice[0],
+            Some(core::unit::SpawnPost::Post(1))
+        );
+        let walk = &a.walk.as_ref().unwrap().0;
         let map = walk.minimap.as_ref().unwrap().spawn_model(walk, 0);
-        let cp1_pt = ui::hud_map::spawn_window_point(&map, [0.0, 0.0], true, size).unwrap();
-
-        // Map - Click 1 on CP1: selects CP1
-        a.shell_pointer.moved_to(cp1_pt);
+        let at = ui::hud_map::spawn_window_point(&map, k, [-300.0, 0.0], true, size).unwrap();
+        // No HUD pass, no map drawn: a click there picks nothing.
+        a.shell_pointer.moved_to(at);
         a.shell_pointer.click();
-        a.step_spawn_pointer(0.016);
-        assert_eq!(
-            a.walk.as_ref().unwrap().0.sim.spawn_post_choice[0],
-            Some(core::unit::SpawnPost::Post(0))
-        );
-        assert_eq!(
-            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
-            0
-        );
-
-        // Map - Click 2 on CP1 (within 0.1s): double click confirms CP1
+        a.step_spawn_pointer_at(0.5, None);
+        assert_eq!(a.kbm.pad(PadState::default()).pick, None);
         a.shell_pointer.click();
-        a.step_spawn_pointer(0.1);
-        assert_ne!(
-            a.kbm.pad(core::sim::PadState::default()).buttons & core::sim::buttons::SPAWN_ACCEPT,
-            0
+        a.step_spawn_pointer_at(1.0, scale);
+        assert_eq!(
+            sim(&a).spawn_post_choice[0],
+            Some(core::unit::SpawnPost::Post(1)),
+            "no direct write"
+        );
+        let pad = tick(&mut a);
+        assert_eq!(pad.pick, Some(ScreenPick::Post(2)));
+        assert_eq!(pad.buttons & SPAWN_ACCEPT, 0);
+        assert_eq!(
+            sim(&a).spawn_post_choice[0],
+            Some(core::unit::SpawnPost::Post(2))
+        );
+        // Double click on the map goes to the class screen.
+        a.shell_pointer.click();
+        a.step_spawn_pointer_at(1.0, scale);
+        assert_eq!(a.kbm.pad(PadState::default()).buttons & SPAWN_ACCEPT, 0);
+        a.shell_pointer.click();
+        a.step_spawn_pointer_at(0.1, scale);
+        let pad = tick(&mut a);
+        assert_eq!(pad.pick, Some(ScreenPick::Post(2)));
+        assert_ne!(pad.buttons & SPAWN_ACCEPT, 0);
+        assert_eq!(sim(&a).spawn_stage[0], SpawnStage::Class);
+        assert_eq!(
+            sim(&a).spawn_post_choice[0],
+            Some(core::unit::SpawnPost::Post(2))
         );
     }
 }

@@ -1,22 +1,129 @@
 //! Fingerprinted donor-only vehicle artwork instructions, after bind posing.
-//! The TIE nose fans move together; Hailfire rack casings are constructed
-//! from the donor missile envelope and keep the donor's textured end caps.
-//! Collision, skeletons, hardpoints, headers and PS2 output never change.
+//! The TIE nose fans move together. The Hailfire's quads take the PS2's
+//! diagonals and its crest loses two extra apexes; its −x missile pack turns
+//! back into the mirror of its +x pack, both packs sit on the PS2 hull's rack
+//! boxes, and each rack gets a casing: the pack's own minimum-area box,
+//! keeping the donor's textured end caps. Collision, skeletons, hardpoints,
+//! headers and PS2 output never change.
 
-use anyhow::{ensure, Result};
-use glam::Vec3;
+use anyhow::{bail, ensure, Result};
+use glam::{Vec2, Vec3};
 use mungefs::model::{Model, Segment};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 
 const BOMBER: &str = "02a5e205c37cde239eb563f05b8a9c7de1fe745d88e0456c2b40ce32f702b67a";
-const HAILFIRE: &[&str] = &[
-    "4bbf5501608e347bf8e9b11629f1e99d430e77df1fdbe7369071fcaa2a2f5fea",
-    "fd6be09b1b9cf300136ef553e4812f2a3e83a97829072c45ea958922e88b2956",
-    "e2ac2642593e5f14fe20a63c674157e0cf41f09133b9bd9a30911cc8dbb8bcd3",
+
+/// One Hailfire donor's top model and its index-only instructions. Triangle
+/// numbers count over all segments in order, in the donor as read.
+struct Donor {
+    hash: &'static str,
+    /// Triangle pairs whose shared diagonal is the other one on the PS2: the
+    /// same four welded vertices, split the PS2's way. Measured against each
+    /// game's own PS2 model (`claude-align/hailfire`): the largest folds are
+    /// the PC wheel rims (0.53 m between the diagonals, up to 8 cm off the
+    /// hull) and the Xbox BF2 crest behind the racks (4 cm).
+    quads: &'static [(u32, u32)],
+    /// `(triangle, apex corner, target corner)`: the donors raise each side
+    /// of the crest between the racks on an extra apex vertex the PS2 does
+    /// not have (3 cm proud of its flat faces). Every stream copy of the apex
+    /// moves onto the target corner, a neighbour on that triangle, and the
+    /// faces that close up are dropped: what is left is the PS2's fan.
+    apexes: &'static [(u32, u8, u8)],
+}
+
+const HAILFIRE: &[Donor] = &[
+    // BF1 PC, 6 segments.
+    Donor {
+        hash: "4bbf5501608e347bf8e9b11629f1e99d430e77df1fdbe7369071fcaa2a2f5fea",
+        quads: &[
+            (576, 577),
+            (578, 1108),
+            (618, 619),
+            (627, 628),
+            (666, 667),
+            (704, 705),
+            (774, 775),
+            (787, 788),
+            (809, 810),
+            (813, 814),
+            (823, 1115),
+            (849, 851),
+            (852, 853),
+            (872, 873),
+            (876, 877),
+            (900, 901),
+            (910, 911),
+            (926, 927),
+            (932, 1122),
+            (933, 934),
+            (936, 937),
+            (944, 1118),
+            (1068, 1069),
+            (1077, 1078),
+            (1136, 1137),
+            (1151, 1152),
+            (1164, 1165),
+            (1172, 1173),
+            (1200, 1201),
+            (1220, 1221),
+            (1226, 1227),
+            (1242, 1243),
+            (1246, 1247),
+            (1335, 1336),
+            (1337, 1338),
+            (1339, 1340),
+            (1341, 1342),
+            (1400, 1401),
+        ],
+        apexes: &[(685, 2, 0), (518, 2, 1)],
+    },
+    // BF1 Xbox, 41 segments.
+    Donor {
+        hash: "fd6be09b1b9cf300136ef553e4812f2a3e83a97829072c45ea958922e88b2956",
+        quads: &[(642, 643), (837, 838), (884, 885)],
+        apexes: &[(661, 1, 2), (685, 1, 2)],
+    },
+    // BF2 Xbox, 4 segments (the PC1 profile's BF2 side too).
+    Donor {
+        hash: "e2ac2642593e5f14fe20a63c674157e0cf41f09133b9bd9a30911cc8dbb8bcd3",
+        quads: &[
+            (504, 505),
+            (512, 513),
+            (532, 533),
+            (576, 577),
+            (667, 668),
+            (687, 688),
+            (689, 690),
+            (691, 692),
+            (808, 809),
+            (952, 953),
+            (966, 967),
+        ],
+        apexes: &[(564, 2, 1), (521, 2, 1)],
+    },
 ];
 
-pub(crate) struct Instructions(HashMap<String, bool>);
+/// The donors' −x missile pack is their +x pack mirrored and then turned
+/// +5.625° (1/64 of a turn) about the rack axis; the PS2's two rack hulls are
+/// mirror images. Turning the −x pack back about its own centre puts its tube
+/// grid on the PS2 hull's box (54.1° there, 59.6° before, 54.0° after).
+const PACK_TURN_DEG: f32 = -5.625;
+
+/// Then each pack (tubes and casing) moves onto its PS2 hull box, −x first:
+/// both sit 16–17 mm high, and the −x one 10 mm out, in all three donors
+/// (the mean of the four corner offsets between the turned pack's
+/// minimum-area box and the hull's box, the same to 0.1 mm per donor). The
+/// +x hull box is 17 mm wider than its pack; that ±9 mm stays.
+const PACK_SHIFT: [[f32; 2]; 2] = [[-0.0103, -0.0160], [0.0020, -0.0171]];
+
+#[derive(Clone, Copy)]
+enum Recipe {
+    Bomber,
+    Hailfire(&'static Donor),
+}
+
+pub(crate) struct Instructions(HashMap<String, Recipe>);
 impl Instructions {
     pub(crate) fn of(original: Option<&[u8]>) -> Result<Self> {
         let mut selected = HashMap::new();
@@ -35,18 +142,18 @@ impl Instructions {
                 }
                 let hash = format!("{:x}", Sha256::digest(c.payload));
                 if name.eq_ignore_ascii_case("imp_fly_tiebomber") && hash == BOMBER {
-                    selected.insert(name.to_ascii_lowercase(), false);
-                } else if name.eq_ignore_ascii_case("cis_tread_hailfire")
-                    && HAILFIRE.contains(&hash.as_str())
-                {
-                    selected.insert(name.to_ascii_lowercase(), true);
+                    selected.insert(name.to_ascii_lowercase(), Recipe::Bomber);
+                } else if name.eq_ignore_ascii_case("cis_tread_hailfire") {
+                    if let Some(donor) = HAILFIRE.iter().find(|d| d.hash == hash) {
+                        selected.insert(name.to_ascii_lowercase(), Recipe::Hailfire(donor));
+                    }
                 }
             }
         }
         Ok(Self(selected))
     }
     pub(crate) fn apply(&self, model: &mut Model) -> Result<()> {
-        let Some(&rack) = self.0.get(&model.name.to_ascii_lowercase()) else {
+        let Some(&recipe) = self.0.get(&model.name.to_ascii_lowercase()) else {
             return Ok(());
         };
         ensure!(
@@ -54,14 +161,112 @@ impl Instructions {
             "vehicle drawing instruction requires bind posing"
         );
         let mut result = model.clone();
-        if rack {
-            racks(&mut result)?;
-        } else {
-            nose(&mut result)?;
+        match recipe {
+            Recipe::Hailfire(donor) => {
+                let apexes = apexes(&result, donor.apexes)?;
+                diagonals(&mut result, donor.quads)?;
+                collapse(&mut result, &apexes)?;
+                racks(&mut result)?;
+            }
+            Recipe::Bomber => nose(&mut result)?,
         }
         *model = result;
         Ok(())
     }
+}
+
+/// The triangle-index locator shared by the index-only instructions.
+fn locate(model: &Model, t: u32) -> Result<(usize, usize)> {
+    let mut t = t as usize;
+    for (si, s) in model.segments.iter().enumerate() {
+        if t < s.triangles.len() {
+            return Ok((si, t));
+        }
+        t -= s.triangles.len();
+    }
+    bail!("changed Hailfire donor triangle count")
+}
+
+/// One resolved apex instruction: segment, apex position, target position.
+type Apex = (usize, [f32; 3], [f32; 3]);
+
+/// Each apex instruction as an [`Apex`],
+/// read before any triangle changes.
+fn apexes(model: &Model, list: &[(u32, u8, u8)]) -> Result<Vec<Apex>> {
+    list.iter()
+        .map(|&(t, a, b)| {
+            let (si, ti) = locate(model, t)?;
+            let s = &model.segments[si];
+            ensure!(a < 3 && b < 3 && a != b, "bad Hailfire apex instruction");
+            let tri = s.triangles[ti];
+            let (pa, pb) = (
+                s.positions[tri[a as usize] as usize],
+                s.positions[tri[b as usize] as usize],
+            );
+            ensure!(pa != pb, "changed Hailfire donor apex {t}");
+            Ok((si, pa, pb))
+        })
+        .collect()
+}
+
+/// Move every stream copy of each apex onto its target and drop the faces
+/// that close up. Each apex must lose at least one face and keep none that
+/// still reaches its old position.
+fn collapse(model: &mut Model, list: &[Apex]) -> Result<()> {
+    for &(si, apex, target) in list {
+        let s = &mut model.segments[si];
+        let mut moved = vec![false; s.positions.len()];
+        for (p, m) in s.positions.iter_mut().zip(&mut moved) {
+            if *p == apex {
+                *p = target;
+                *m = true;
+            }
+        }
+        ensure!(moved.contains(&true), "changed Hailfire donor apex");
+        let before = s.triangles.len();
+        let positions = &s.positions;
+        // Only faces on a moved copy can close up; any the donor already
+        // carries degenerate stay as they were.
+        s.triangles.retain(|t| {
+            let [a, b, c] = t.map(|i| positions[i as usize]);
+            !t.iter().any(|&i| moved[i as usize]) || (a != b && b != c && a != c)
+        });
+        ensure!(
+            s.triangles.len() < before,
+            "Hailfire donor apex closed no face"
+        );
+        s.index_count = (s.triangles.len() * 3) as u32;
+    }
+    Ok(())
+}
+
+/// Re-split each listed quad along its other diagonal. Both triangles must be
+/// in one segment and share an edge by stream index, so every corner keeps its
+/// own normal and UV; the winding stays the pair's.
+fn diagonals(model: &mut Model, quads: &[(u32, u32)]) -> Result<()> {
+    for &(a, b) in quads {
+        let (sa, ta) = locate(model, a)?;
+        let (sb, tb) = locate(model, b)?;
+        ensure!(sa == sb, "changed Hailfire donor quad {a}/{b}");
+        let s = &mut model.segments[sa];
+        let (x, y) = (s.triangles[ta], s.triangles[tb]);
+        // x = (p, q, c) with the shared edge p→q; y walks it q→p to d.
+        let Some(r) = (0..3).find(|&r| {
+            let (p, q) = (x[r], x[(r + 1) % 3]);
+            (0..3).any(|k| y[k] == q && y[(k + 1) % 3] == p)
+        }) else {
+            bail!("changed Hailfire donor quad {a}/{b}");
+        };
+        let (p, q, c) = (x[r], x[(r + 1) % 3], x[(r + 2) % 3]);
+        let Some(&d) = y.iter().find(|&&v| v != p && v != q) else {
+            bail!("degenerate Hailfire donor quad {a}/{b}");
+        };
+        ensure!(c != d, "degenerate Hailfire donor quad {a}/{b}");
+        // The loop is p, d, q, c; the new diagonal is d–c.
+        s.triangles[ta] = [p, d, c];
+        s.triangles[tb] = [d, q, c];
+    }
+    Ok(())
 }
 
 fn nose(model: &mut Model) -> Result<()> {
@@ -200,17 +405,152 @@ fn empty(source: &Segment) -> Segment {
     s.bone = None;
     s
 }
+fn tube_centre(p: &Part) -> Vec2 {
+    Vec2::new(p.lo.x + p.hi.x, p.lo.y + p.hi.y) * 0.5
+}
+
+/// Turn the −x pack's tubes (positions and normals) by [`PACK_TURN_DEG`] about
+/// the rack axis through the pack's XY box centre, require the turned grid to
+/// be the +x grid's mirror image to 2 mm, tube for tube, then move both packs
+/// by [`PACK_SHIFT`].
+fn turn_pack(model: &mut Model, parts: &mut [Part]) -> Result<()> {
+    let left: Vec<usize> = (0..parts.len())
+        .filter(|&i| parts[i].lo.x + parts[i].hi.x < 0.)
+        .collect();
+    ensure!(left.len() == 16, "changed Hailfire donor rack ownership");
+    let lo = left.iter().fold(Vec2::splat(f32::INFINITY), |a, &i| {
+        a.min(parts[i].lo.truncate())
+    });
+    let hi = left.iter().fold(Vec2::splat(f32::NEG_INFINITY), |a, &i| {
+        a.max(parts[i].hi.truncate())
+    });
+    let pivot = (lo + hi) * 0.5;
+    let rot = Vec2::from_angle(PACK_TURN_DEG.to_radians());
+    let mut moved: Vec<Vec<bool>> = model
+        .segments
+        .iter()
+        .map(|s| vec![false; s.positions.len()])
+        .collect();
+    for &i in &left {
+        let part = &mut parts[i];
+        let s = &mut model.segments[part.segment];
+        let mut lo = Vec3::splat(f32::INFINITY);
+        let mut hi = Vec3::splat(f32::NEG_INFINITY);
+        for &fi in &part.faces {
+            for v in s.triangles[fi] {
+                let v = v as usize;
+                if !moved[part.segment][v] {
+                    moved[part.segment][v] = true;
+                    let p = s.positions[v];
+                    let xy = pivot + rot.rotate(Vec2::new(p[0], p[1]) - pivot);
+                    s.positions[v] = [xy.x, xy.y, p[2]];
+                    if let Some(n) = s.normals.get_mut(v) {
+                        let r = rot.rotate(Vec2::new(n[0], n[1]));
+                        *n = [r.x, r.y, n[2]];
+                    }
+                }
+                let p = Vec3::from(s.positions[v]);
+                lo = lo.min(p);
+                hi = hi.max(p);
+            }
+        }
+        part.lo = lo;
+        part.hi = hi;
+    }
+    // A tube vertex shared with anything outside its tube would have moved
+    // that too: the donor's tubes are closed components, so none is.
+    let centres = |right: bool| -> Vec<Vec2> {
+        parts
+            .iter()
+            .filter(|p| (p.lo.x + p.hi.x > 0.) == right)
+            .map(|p| {
+                let c = tube_centre(p);
+                if right {
+                    Vec2::new(-c.x, c.y)
+                } else {
+                    c
+                }
+            })
+            .collect()
+    };
+    let (l, r) = (centres(false), centres(true));
+    let mean = |v: &[Vec2]| v.iter().copied().sum::<Vec2>() / v.len() as f32;
+    let (ml, mr) = (mean(&l), mean(&r));
+    for c in &l {
+        let near = r
+            .iter()
+            .map(|m| (*c - ml - (*m - mr)).length())
+            .fold(f32::INFINITY, f32::min);
+        ensure!(near < 0.002, "Hailfire donor packs are not mirror images");
+    }
+    for part in parts.iter_mut() {
+        let shift = PACK_SHIFT[usize::from(part.lo.x + part.hi.x > 0.)];
+        let s = &mut model.segments[part.segment];
+        let mut seen = vec![false; s.positions.len()];
+        for &fi in &part.faces {
+            for v in s.triangles[fi] {
+                if !std::mem::replace(&mut seen[v as usize], true) {
+                    let p = &mut s.positions[v as usize];
+                    p[0] += shift[0];
+                    p[1] += shift[1];
+                }
+            }
+        }
+        let d = Vec3::new(shift[0], shift[1], 0.);
+        part.lo += d;
+        part.hi += d;
+    }
+    Ok(())
+}
+
+/// The minimum-area rectangle around a convex ring (counter-clockwise), as a
+/// counter-clockwise ring of four corners.
+fn min_box(ring: &[[f32; 2]]) -> Vec<[f32; 2]> {
+    let pts: Vec<Vec2> = ring.iter().map(|&p| Vec2::from(p)).collect();
+    let mut best: Option<(f32, Vec2, f32, f32, f32, f32)> = None;
+    for i in 0..pts.len() {
+        let u = (pts[(i + 1) % pts.len()] - pts[i]).normalize_or_zero();
+        if u == Vec2::ZERO {
+            continue;
+        }
+        let v = u.perp();
+        let (mut a0, mut a1, mut b0, mut b1) = (
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        );
+        for p in &pts {
+            a0 = a0.min(p.dot(u));
+            a1 = a1.max(p.dot(u));
+            b0 = b0.min(p.dot(v));
+            b1 = b1.max(p.dot(v));
+        }
+        let area = (a1 - a0) * (b1 - b0);
+        if best.is_none_or(|b| area < b.0) {
+            best = Some((area, u, a0, a1, b0, b1));
+        }
+    }
+    let (_, u, a0, a1, b0, b1) = best.expect("a ring has an edge");
+    let v = u.perp();
+    [(a0, b0), (a1, b0), (a1, b1), (a0, b1)]
+        .into_iter()
+        .map(|(a, b)| (u * a + v * b).to_array())
+        .collect()
+}
+
 fn racks(model: &mut Model) -> Result<()> {
     ensure!(
         matches!(model.segments.len(), 4 | 6 | 41),
         "changed Hailfire donor segmentation"
     );
-    let parts = missiles(model);
+    let mut parts = missiles(model);
     ensure!(
         parts.len() == 32,
         "changed Hailfire donor missile components: {}",
         parts.len()
     );
+    turn_pack(model, &mut parts)?;
     let original = model.clone();
     for (si, s) in model.segments.iter_mut().enumerate() {
         let keep: Vec<_> = s
@@ -251,11 +591,16 @@ fn racks(model: &mut Model) -> Result<()> {
                 }
             }
         }
-        let ring = hull(points.iter().map(|p| [p[0], p[1]]).collect());
+        let envelope = hull(points.iter().map(|p| [p[0], p[1]]).collect());
         ensure!(
-            (6..=32).contains(&ring.len()),
+            (6..=32).contains(&envelope.len()),
             "changed Hailfire donor rack envelope"
         );
+        // The PS2 hull's rack is a box about the tube grid (1.24 × 1.18 m on
+        // −x against the pack's own 1.24 × 1.18 m), so the casing is the pack's
+        // minimum-area box rather than its convex envelope, whose cut corners
+        // left the hull's corners 6 cm bare.
+        let ring = min_box(&envelope);
         // Recess the fill behind the donor end caps by 2 mm to avoid z-fights.
         let back = points.iter().map(|p| p[2]).fold(f32::INFINITY, f32::min) + 0.002;
         let front = points
@@ -367,7 +712,10 @@ mod tests {
     }
     #[test]
     fn a_changed_channel_count_rejects_without_partial_vertex_edits() {
-        let instructions = Instructions(HashMap::from([("imp_fly_tiebomber".into(), false)]));
+        let instructions = Instructions(HashMap::from([(
+            "imp_fly_tiebomber".into(),
+            Recipe::Bomber,
+        )]));
         let mut model = bomber(73);
         let before = model.segments[1].positions.clone();
         assert!(instructions.apply(&mut model).is_err());
@@ -378,7 +726,10 @@ mod tests {
         let mut model = bomber(74);
         model.segments[1].positions[100][1] = 0.;
         let before = model.segments[1].positions.clone();
-        let instructions = Instructions(HashMap::from([("imp_fly_tiebomber".into(), false)]));
+        let instructions = Instructions(HashMap::from([(
+            "imp_fly_tiebomber".into(),
+            Recipe::Bomber,
+        )]));
         assert!(instructions.apply(&mut model).is_err());
         assert_eq!(model.segments[1].positions, before);
     }
@@ -388,9 +739,12 @@ mod tests {
         let before = model.clone();
         Instructions::of(None).unwrap().apply(&mut model).unwrap();
         assert_eq!(model.segments[1].positions, before.segments[1].positions);
-        Instructions(HashMap::from([("imp_fly_tiebomber".into(), false)]))
-            .apply(&mut model)
-            .unwrap();
+        Instructions(HashMap::from([(
+            "imp_fly_tiebomber".into(),
+            Recipe::Bomber,
+        )]))
+        .apply(&mut model)
+        .unwrap();
         assert_eq!(model.segments[0].positions, before.segments[0].positions);
         assert_eq!(
             &model.segments[1].positions[74..100],
@@ -428,5 +782,182 @@ mod tests {
         let model = chunk(b"modl", &name);
         let file = chunk(b"ucfb", &model);
         assert!(Instructions::of(Some(&file)).unwrap().0.is_empty());
+    }
+
+    fn quad_model(triangles: Vec<[u32; 3]>, positions: Vec<[f32; 3]>) -> Model {
+        let mut m = bomber(0);
+        m.name = "cis_tread_hailfire".into();
+        let n = positions.len();
+        let s = &mut m.segments[1];
+        s.vertex_count = n as u32;
+        s.positions = positions;
+        s.normals = vec![[0., 0., 1.]; n];
+        s.uvs = vec![[0., 0.]; n];
+        s.index_count = (triangles.len() * 3) as u32;
+        s.triangles = triangles;
+        m.segments[0].triangles = vec![[0, 1, 2]];
+        m
+    }
+    #[test]
+    fn a_listed_quad_takes_the_other_diagonal_with_its_winding() {
+        // Segment 0 holds triangle 0, so the quad is triangles 1 and 2.
+        let p = vec![[0., 0., 0.], [1., 0., 0.], [1., 1., 0.3], [0., 1., 0.]];
+        let mut m = quad_model(vec![[0, 1, 2], [0, 2, 3]], p);
+        diagonals(&mut m, &[(1, 2)]).unwrap();
+        let t = &m.segments[1].triangles;
+        let normal = |t: [u32; 3]| {
+            let v = t.map(|i| Vec3::from(m.segments[1].positions[i as usize]));
+            (v[1] - v[0]).cross(v[2] - v[0]).z
+        };
+        assert!(t.iter().all(|t| t.contains(&1) && t.contains(&3)), "{t:?}");
+        assert!(t.iter().all(|&t| normal(t) > 0.), "{t:?}");
+        // Triangles that share no edge are refused.
+        let mut m = quad_model(vec![[0, 1, 2], [3, 4, 5]], vec![[0.; 3]; 6]);
+        assert!(diagonals(&mut m, &[(1, 2)]).is_err());
+        // Pairs in different segments are refused.
+        let mut m = quad_model(vec![[0, 1, 2]], vec![[0.; 3]; 3]);
+        assert!(diagonals(&mut m, &[(0, 1)]).is_err());
+    }
+    #[test]
+    fn an_apex_closes_its_faces_onto_its_neighbour_and_keeps_old_degenerates() {
+        // A fan of four faces around apex 4, plus a face the donor already
+        // carries degenerate (vertices 5 and 6 coincide).
+        let p = vec![
+            [0., 0., 0.],
+            [1., 0., 0.],
+            [1., 1., 0.],
+            [0., 1., 0.],
+            [0.5, 0.5, 0.2],
+            [3., 3., 3.],
+            [3., 3., 3.],
+            [4., 3., 3.],
+            [0.5, 0.5, 0.2],
+        ];
+        let tris = vec![[0, 1, 4], [1, 2, 4], [2, 3, 8], [3, 0, 4], [5, 6, 7]];
+        let mut m = quad_model(tris, p);
+        // Triangle 1 (segment 1's first) has apex at corner 2, target vertex 0.
+        let a = apexes(&m, &[(1, 2, 0)]).unwrap();
+        collapse(&mut m, &a).unwrap();
+        let s = &m.segments[1];
+        assert_eq!(s.positions[4], [0., 0., 0.]);
+        assert_eq!(s.positions[8], [0., 0., 0.]);
+        assert_eq!(s.triangles, vec![[1, 2, 4], [2, 3, 8], [5, 6, 7]]);
+        assert_eq!(s.index_count, 9);
+    }
+    #[test]
+    fn the_casing_box_is_the_minimum_area_rectangle_counter_clockwise() {
+        let (c, s) = (0.6_f32.cos(), 0.6_f32.sin());
+        let ring: Vec<[f32; 2]> = [[0., 0.], [2., 0.], [2., 1.], [0., 1.]]
+            .iter()
+            .map(|p| [p[0] * c - p[1] * s + 5., p[0] * s + p[1] * c - 1.])
+            .collect();
+        let b = min_box(&ring);
+        assert_eq!(b.len(), 4);
+        let area = |r: &[[f32; 2]]| {
+            (0..r.len())
+                .map(|i| {
+                    let (a, b) = (r[i], r[(i + 1) % r.len()]);
+                    a[0] * b[1] - b[0] * a[1]
+                })
+                .sum::<f32>()
+                / 2.
+        };
+        assert!((area(&b) - 2.).abs() < 1e-4, "{b:?}");
+        for p in &ring {
+            assert!(b.iter().any(|q| (q[0] - p[0]).hypot(q[1] - p[1]) < 1e-4));
+        }
+        // A ring whose edges give boxes of different areas: a 4 × 1 bar with
+        // its corners cut at 45°. Only the bar's own sides give the 4 × 1 box;
+        // the cut edges give a 3.5 × 3.5 square's worth of area.
+        let bar: Vec<[f32; 2]> = [
+            [0., 0.2],
+            [0.2, 0.],
+            [3.8, 0.],
+            [4., 0.2],
+            [4., 0.8],
+            [3.8, 1.],
+            [0.2, 1.],
+            [0., 0.8],
+        ]
+        .iter()
+        .map(|p| [p[0] * c - p[1] * s, p[0] * s + p[1] * c])
+        .collect();
+        let b = min_box(&bar);
+        assert!((area(&b) - 4.).abs() < 1e-3, "{b:?}");
+    }
+
+    /// Two 4 × 4 tube grids for [`turn_pack`]: the +x pack at `angle`, and
+    /// the −x pack its mirror image turned by `left_turn` degrees. Each tube
+    /// is one 0.4 mm triangle in segment 1, long in z like the donor's.
+    fn packs(angle: f32, left_turn: f32) -> (Model, Vec<Part>) {
+        let mut tris = Vec::new();
+        let mut pos = Vec::new();
+        let mut parts = Vec::new();
+        let grid: Vec<Vec2> = (0..16)
+            .map(|i| Vec2::new((i % 4) as f32 - 1.5, (i / 4) as f32 - 1.5) * 0.29)
+            .collect();
+        for side in [1., -1.] {
+            let centre = Vec2::new(1.4 * side, 3.85);
+            let turn = Vec2::from_angle(if side > 0. {
+                angle.to_radians()
+            } else {
+                (-angle + left_turn).to_radians()
+            });
+            for g in &grid {
+                let g = if side > 0. { *g } else { Vec2::new(-g.x, g.y) };
+                let c = centre + turn.rotate(g);
+                let first = pos.len() as u32;
+                for (dx, dy, z) in [
+                    (-0.0002, -0.0002, -1.3),
+                    (0.0002, -0.0002, 1.3),
+                    (0., 0.0002, 0.),
+                ] {
+                    pos.push([c.x + dx, c.y + dy, z]);
+                }
+                tris.push([first, first + 1, first + 2]);
+                parts.push(Part {
+                    segment: 1,
+                    faces: vec![tris.len() - 1],
+                    lo: Vec3::new(c.x - 0.0002, c.y - 0.0002, -1.3),
+                    hi: Vec3::new(c.x + 0.0002, c.y + 0.0002, 1.3),
+                });
+            }
+        }
+        (quad_model(tris, pos), parts)
+    }
+    #[test]
+    fn the_minus_x_pack_turns_back_into_the_plus_x_packs_mirror_and_both_shift() {
+        let (mut m, mut parts) = packs(36., -PACK_TURN_DEG);
+        let before = m.segments[1].positions.clone();
+        turn_pack(&mut m, &mut parts).unwrap();
+        let after = &m.segments[1].positions;
+        // +x tubes only shift, by the +x offset.
+        for (a, b) in before.iter().zip(after).filter(|(a, _)| a[0] > 0.) {
+            assert!((b[0] - a[0] - PACK_SHIFT[1][0]).abs() < 1e-5);
+            assert!((b[1] - a[1] - PACK_SHIFT[1][1]).abs() < 1e-5);
+            assert_eq!(a[2], b[2]);
+        }
+        // Each −x tube, less its own shift, now mirrors a +x tube, less its
+        // shift, to under a millimetre: the turn was about the pack's centre.
+        let [[lx, ly], [rx, ry]] = PACK_SHIFT;
+        let shift = Vec2::new(lx + rx, ly - ry);
+        for l in parts.iter().filter(|p| p.lo.x < 0.) {
+            let c = tube_centre(l) - shift;
+            let near = parts
+                .iter()
+                .filter(|p| p.lo.x > 0.)
+                .map(|p| {
+                    let r = tube_centre(p);
+                    (Vec2::new(-r.x, r.y) - c).length()
+                })
+                .fold(f32::INFINITY, f32::min);
+            assert!(near < 0.001, "{near}");
+        }
+        // A −x pack that is already a mirror image, or turned the other way,
+        // fails the mirror check instead of being turned off the hull.
+        for turn in [0., PACK_TURN_DEG] {
+            let (mut m, mut parts) = packs(36., turn);
+            assert!(turn_pack(&mut m, &mut parts).is_err(), "{turn}");
+        }
     }
 }

@@ -159,11 +159,16 @@ impl WalkerRig {
         name: &str,
     ) -> Option<Mat4> {
         let n = self.skeleton.index_of(name)?;
+        Some(self.palette_for_sim(w, root_scale)[n] * self.skeleton.global_bind[n])
+    }
+
+    /// Map bind-space collision into the same deterministic pose as rider queries.
+    pub(crate) fn palette_for_sim(&self, w: &WalkerState, root_scale: f32) -> Vec<Mat4> {
         let mut locals = self.pose_sampled(w, true).locals();
         if let Some(r) = self.bone_root.filter(|_| root_scale != 1.0) {
             locals[r] *= Mat4::from_scale(Vec3::splat(root_scale));
         }
-        Some(self.skeleton.palette(&locals)[n] * self.skeleton.global_bind[n])
+        self.skeleton.palette(&locals)
     }
 
     pub fn with_seats(mut self, seats: Vec<crate::vehicle_class::SeatSpec>) -> Self {

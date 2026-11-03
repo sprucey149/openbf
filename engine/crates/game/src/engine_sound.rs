@@ -495,9 +495,7 @@ impl EngineSounds {
             } else {
                 1.0
             },
-            look: &walk.teams[usize::from(u.team).min(1)]
-                .class(u.spec.class)
-                .jet_look,
+            look: &walk.team_template(u.team).class(u.spec.class).jet_look,
         });
         self.tick_jets(soldiers, &record, out);
         count

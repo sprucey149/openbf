@@ -60,9 +60,10 @@ pub struct DroidekaClass {
     pub jump_vy: f32,
     pub jump_forward: f32,
     pub energy_bar: f32,
-    pub energy_restore: f32,
-    pub energy_restore_idle: f32,
     pub energy_cost_jump: f32,
+    /// `EnergyCostJumpSprint`, as the soldier reads it; no droideka authors
+    /// it, so it is `EnergyCostJump`'s value.
+    pub energy_cost_jump_sprint: f32,
     pub energy_drain_boost: f32,
     pub walk_water_height: f32,
     pub ball_water_height: f32,
@@ -126,9 +127,8 @@ impl Default for DroidekaClass {
             jump_vy: (2.0 * GRAVITY * 1.27f32).sqrt(),
             jump_forward: 1.25,
             energy_bar: 100.0,
-            energy_restore: 10.0,
-            energy_restore_idle: 15.0,
             energy_cost_jump: 30.0,
+            energy_cost_jump_sprint: 30.0,
             energy_drain_boost: 30.0,
             walk_water_height: 1.5,
             ball_water_height: 1.5,
@@ -184,9 +184,9 @@ impl DroidekaClass {
             jump_vy: pf(src, "BallJumpHeight").map_or(d.jump_vy, |h| (2.0 * GRAVITY * h).sqrt()),
             jump_forward: fh(HASH_BALL_JUMP_FORWARD, d.jump_forward),
             energy_bar: f("EnergyBar", d.energy_bar),
-            energy_restore: f("EnergyRestore", d.energy_restore),
-            energy_restore_idle: f("EnergyRestoreIdle", d.energy_restore_idle),
             energy_cost_jump: f("EnergyCostJump", d.energy_cost_jump),
+            energy_cost_jump_sprint: pf(src, "EnergyCostJumpSprint")
+                .unwrap_or_else(|| f("EnergyCostJump", d.energy_cost_jump)),
             energy_drain_boost: f("EnergyDrainSprint", d.energy_drain_boost),
             walk_water_height: fh(HASH_WALK_WATER_HEIGHT, d.walk_water_height),
             ball_water_height: f("BallWaterDamageHeight", d.ball_water_height),
@@ -282,7 +282,23 @@ impl DroidekaClass {
         self.share_of_bar(self.energy_drain_boost)
     }
 
-    /// The bar a spent ball needs before it sprints again: the soldier's recover
+    /// Points of the shared bar a ball jump spends: the soldier's jump rule
+    /// (`crate::soldier::Soldier::pay_jump`) at the class's own share of the
+    /// bar, `EnergyCostJump` / `EnergyBar`, the dearer `EnergyCostJumpSprint`
+    /// when sprinting (the ball's sprint stands for the soldier's "over
+    /// MaxSpeed"). BF2: 900 points, 30 % of a full bar. Spending it from the
+    /// shield's bar is OURS (the maintainer, 2026-11-02). PROVISIONAL, measure:
+    /// The maintainer's count of ball jumps on a full bar in live play.
+    pub fn ball_jump_cost(&self, sprinting: bool) -> f32 {
+        let cost = if sprinting {
+            self.energy_cost_jump.max(self.energy_cost_jump_sprint)
+        } else {
+            self.energy_cost_jump
+        };
+        self.share_of_bar(cost)
+    }
+
+    /// The bar a spent ball needs before it sprints or jumps again: the soldier's recover
     /// threshold as a share (BF2: 750 points, 2.5 s). OURS and PROVISIONAL,
     /// measure: the maintainer's timed wait from an empty bar to the next sprint
     /// in live play.

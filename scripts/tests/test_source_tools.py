@@ -88,6 +88,18 @@ class MissionTests(unittest.TestCase):
         self.assertEqual(missions.facts_from_calls(calls)['heroes'],
                          {1: 'all_hero_luke_jedi', 2: 'imp_hero_bobafett'})
 
+    def test_native_team_relations_keep_authored_directions_and_order(self):
+        calls = [missions.Call('SetTeamAsFriend', [3.0, 1.0]),
+                 missions.Call('SetTeamAsEnemy', [2.0, 3.0]),
+                 missions.Call('SetTeamAsEnemy', [1.0, 2.0]),
+                 missions.Call('SetTeamAsEnemy', [3.0, 1.0])]
+        with mock.patch.object(missions, 'PS2_ONLY', True), \
+                mock.patch.object(missions, 'load_ps2', return_value=missions.Proto()), \
+                mock.patch.object(missions, 'calls50', return_value=calls):
+            mission = missions.build('x', 'bf2', 'x', 'cw', 'x', 'x')
+        self.assertIn('local_team_relations: [(3, 1, true), (2, 3, false), (3, 1, false)]',
+                      missions.ron(mission))
+
     def test_side_class_load_order_keeps_all_requests_and_case(self):
         calls = [missions.Call('SetHeroClass', [2.0, 'fielded_second']),
                  missions.Call('ReadDataFile', [r'SIDE\REP.lvl', 'rep_HERO_aalya',

@@ -13,13 +13,13 @@
 //! Not yet consumed: `spawn_delay`/`spawn_interval` — the wave scheme IS
 //! implemented (core::sim::SpawnWaves) but seeded from
 //! SpawnWaves::mission_default() (10 s / 0.25 s) rather than from here and the member pool beyond the
-//! alive cap (units initially spawned = min(units, ai_alive_cap)) — and, of
-//! the second block of fields below, `attacking_team` and `locals`
-//! (HANDOFF HOLD 16). `cps` and `death_regions` ARE applied
+//! alive cap (units initially spawned = min(units, ai_alive_cap)). The
+//! `attacking_team` field is also carried as data. `cps` and `death_regions` are applied
 //! (`layout::apply_mission`, `main/battle.rs`'s walk setup), `voice` is the
 //! commander's lines (`crate::announce`), `era` selects the mission-specific
 //! minimap orientation, `ai` is the bots' settings ([`MissionDef::apply_ai`],
-//! card MAIS), and `source` is printed by the sweep.
+//! card MAIS), and `source` is printed by the sweep. The Ewok and Wookiee
+//! rosters and their directed relations are installed by [`crate::native_teams`].
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -53,6 +53,18 @@ pub struct SideClassLoad {
     pub request: String,
 }
 
+/// A native team outside the two main armies. Its reinforcements are unlimited
+/// (analysis/re-tickets-spawn.md §2.1).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct LocalTeamDef {
+    /// Authored Lua team number (3 or higher).
+    pub team: u8,
+    /// SetUnitCount, the team's member pool.
+    pub units: u32,
+    /// Authored class rows in script order, in the same format as TeamDef.
+    pub classes: Vec<(String, u32, Option<u32>)>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct MissionDef {
     pub map: String,
@@ -77,9 +89,8 @@ pub struct MissionDef {
 
     // --- Extracted 2026-09-01 from the mission Lua. `cps` and
     // `death_regions` are applied (`layout::apply_mission`); `era` selects
-    // minimap orientation. `attacking_team` and `locals` are not consumed (HANDOFF
-    // HOLD 16). All default so that any RON written before they existed still
-    // parses.
+    // minimap orientation. All default so that any RON written before they
+    // existed still parses.
     /// `"cw"` | `"gcw"` — which era's mission script this came from.
     #[serde(default)]
     pub era: Option<String>,
@@ -134,11 +145,19 @@ pub struct MissionDef {
     /// (Tantive `blastdoor`, Yavin `TempleBlastDoor`).
     #[serde(default)]
     pub killed: Vec<String>,
-    /// The locals team, when the mission fields one: (first unit class,
-    /// `SetUnitCount`). Locals are team 3 (occasionally 4) and get infinite
-    /// tickets from the engine (re-tickets-spawn.md §2.1).
+    /// Legacy first-class summary and member pool. It cannot identify the team
+    /// or describe the complete roster. New consumers should use `local_teams`.
     #[serde(default)]
     pub locals: Option<(String, u32)>,
+    /// Authored native teams. Older RON files may carry a legacy `locals`
+    /// summary, which omits team IDs and classes.
+    #[serde(default)]
+    pub local_teams: Vec<LocalTeamDef>,
+    /// Authored `SetTeamAsFriend` / `SetTeamAsEnemy` calls involving local teams,
+    /// in script order. Each row is (source Lua team, target Lua team, friendly).
+    /// Each call sets one direction.
+    #[serde(default)]
+    pub local_team_relations: Vec<(u8, u8, bool)>,
     /// `ScriptPostLoad`'s `BlockPlanningGraphArcs` (`true`) /
     /// `UnblockPlanningGraphArcs` (`false`) calls, in order, including those
     /// it makes through the script's own functions — the `plnp` groups the
@@ -151,6 +170,9 @@ pub struct MissionDef {
     /// the whole round (queue DR3B).
     #[serde(default)]
     pub arc_blocks: Vec<(String, bool)>,
+    /// Startup IsLocked writes, in mission call order.
+    #[serde(default)]
+    pub door_locks: Vec<(String, bool)>,
     /// `ScriptPostLoad`'s `EnableBarriers` (`true`) / `DisableBarriers`
     /// (`false`) calls, in order (card BNDS). Every `BARR` barrier loads
     /// enabled; these are the ones the mission opens before the first tick —
@@ -381,6 +403,20 @@ impl MissionDef {
         Ok(m)
     }
 
+    /// Apply startup lock overrides to the doors that exist in this mode layer.
+    pub fn apply_door_locks(&self, doors: &mut [core::door::Door], manifest: &manifest::Manifest) {
+        for (name, locked) in &self.door_locks {
+            for door in doors.iter_mut() {
+                if manifest.instances[door.instance]
+                    .name
+                    .eq_ignore_ascii_case(name)
+                {
+                    door.locked = *locked;
+                }
+            }
+        }
+    }
+
     /// Replay [`MissionDef::arc_blocks`] onto the map's planning graph unless
     /// `OPENBF_PLNP_MISSION=0`; returns the blocked-group mask it leaves (0
     /// when the flag is off, the map ships no `plnp`, or no call names one of
@@ -582,6 +618,34 @@ mod tests {
         assert!(at("rep_hero_obiwan") < at("cis_hero_darthmaul"));
         assert_eq!(cw.class_load_order[at("rep_hero_obiwan")].side, "rep");
         assert_eq!(cw.class_load_order[at("cis_hero_darthmaul")].side, "cis");
+    }
+
+    #[test]
+    fn local_teams_keep_the_script_team_and_full_roster() {
+        let base = r#"(map: "x", mode: "con", source_game: "bf2", teams: [],
+            ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25,"#;
+        let current: MissionDef = ron::from_str(&format!(
+            r#"{base} local_teams: [(team: 4, units: 3, classes: [
+                ("first", 2, None), ("second", 1, Some(2)),
+            ])], local_team_relations: [(4, 1, true), (2, 4, false)])"#
+        ))
+        .unwrap();
+        assert_eq!(
+            current.local_teams,
+            [LocalTeamDef {
+                team: 4,
+                units: 3,
+                classes: vec![("first".into(), 2, None), ("second".into(), 1, Some(2))],
+            }]
+        );
+
+        assert_eq!(current.local_team_relations, [(4, 1, true), (2, 4, false)]);
+
+        let legacy: MissionDef =
+            ron::from_str(&format!(r#"{base} locals: Some(("first", 3)))"#)).unwrap();
+        assert_eq!(legacy.locals, Some(("first".into(), 3)));
+        assert!(legacy.local_teams.is_empty());
+        assert!(legacy.local_team_relations.is_empty());
     }
 
     fn cp(name: &str) -> core::cp::CpDef {

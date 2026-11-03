@@ -366,6 +366,21 @@ if want side; then
   BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/CIS.LVL)" cis_inf_bdroid,cis_inf_magnaguard,cis_inf_sbdroid "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_CIS:+"$DS2_CIS"}
   BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/ALL.LVL)" all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_ALL:+"$DS2_ALL"}
   BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/IMP.LVL)" imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_IMP:+"$DS2_IMP"}
+  # Native bodies share texture names with playable sides, with different
+  # sheets. Keep their models and textures in a separate side directory.
+  bake_native_side() {
+    local game="$1" root="$2" side="$3" bodies="$4" weapons="$5" anim="$6" donor
+    local output="$OUT/side_${game}/locals"
+    donor="$(side_donors "$game" "$side")"
+    "$BAKE" soldier "$(ci "$root" "SIDE/$side.LVL")" "$bodies" "$output" "$anim" ${donor:+"$donor"}
+    "$BAKE" weapon "$(ci "$root" "SIDE/$side.LVL")" "$weapons" "$output" ${donor:+"$donor"}
+  }
+  clean "$OUT/side_bf1/locals" "$OUT/side_bf2/locals"
+  A2="$(ci "$B2" INGAME.LVL)"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear "$A1"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" wok wok_inf_wookie wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher "$A1"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear,ewk_weap_inf_fusioncutter "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" wok wok_inf_wookiewarrior wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher,wok_weap_inf_thermaldetonator "$A2"
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
   # its class references, including the campaign variants.
   BF1_ANIMS="$A1" "$BAKE" heroes "$B2" "$OUT/side_bf2"
@@ -490,6 +505,10 @@ if want classes; then
   "$BAKE" classes "$(ci "$B1" SIDE/CIS.LVL)"          "$OUT/classes/bf1_cis.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/ALL.LVL)"          "$OUT/classes/bf2_all.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/IMP.LVL)"          "$OUT/classes/bf2_imp.ron"
+  for side in ewk wok; do
+    "$BAKE" classes "$(ci "$B1" "SIDE/$side.LVL")" "$OUT/classes/bf1_$side.ron"
+    "$BAKE" classes "$(ci "$B2" "SIDE/$side.LVL")" "$OUT/classes/bf2_$side.ron"
+  done
   # A mission's extra side (game::vehicle_pads::mission_side_files).
   "$BAKE" classes "$(ci "$B1" SIDE/GUN.LVL)"          "$OUT/classes/bf1_gun.ron"
   # BF2's building turrets (card VTUR2): their PROPs; each map bake pulls the

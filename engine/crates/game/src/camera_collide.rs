@@ -1354,11 +1354,13 @@ mod tests {
             contact_surface: false,
         };
         let rig = manifest::ManifestDoor {
+            locked: false,
             triggers: Vec::new(),
             frames: 3,
             prims: Vec::new(),
             open_sound: None,
             close_sound: None,
+            locked_sound: None,
             parts: vec![manifest::ManifestDoorPart {
                 submesh: 0,
                 bone: "leaf".into(),

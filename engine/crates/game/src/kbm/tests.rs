@@ -458,3 +458,22 @@ fn a_held_morse_key_never_latches_the_stick() {
     assert_eq!(arm(4 | MENU_ADJUST_LEFT), 4, "the stick's own Left");
     assert_eq!(input::stick_arms(0.0, half_left, stick_latch(2)), 2);
 }
+
+/// A spawn-screen pick waits like a tap: kept through a frame that steps
+/// no tick, taken by the first tick that does, and dropped while paused.
+#[test]
+fn a_screen_pick_waits_for_a_tick_like_a_tap() {
+    use core::sim::ScreenPick;
+    let mut k = Kbm::default();
+    k.set_pick(ScreenPick::Side(2));
+    let pad = k.pad(PadState::default());
+    assert_eq!(pad.pick, Some(ScreenPick::Side(2)));
+    k.consumed(&pad, 0);
+    let pad = k.pad(PadState::default());
+    assert_eq!(pad.pick, Some(ScreenPick::Side(2)), "no tick: kept");
+    k.consumed(&pad, 1);
+    assert_eq!(k.pad(PadState::default()).pick, None, "taken");
+    k.set_pick(ScreenPick::Post(3));
+    k.drop_taps();
+    assert_eq!(k.pad(PadState::default()).pick, None, "paused: dropped");
+}

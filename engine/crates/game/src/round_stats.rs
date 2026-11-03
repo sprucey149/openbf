@@ -89,7 +89,7 @@ impl RoundStats {
         };
         let human = d.is_player;
         let hero = sim.hero_class(k.team) == Some(k.spec.class);
-        let same_team = k.team == d.team;
+        let same_team = sim.allied(k.team, d.team);
         self.died(v);
         let me = self.unit(s);
         if s == v {

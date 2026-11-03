@@ -38,6 +38,7 @@
 pub mod flyer;
 pub mod gun;
 pub mod hover;
+pub mod tow;
 pub mod walker;
 
 use crate::unit::UnitHandle;

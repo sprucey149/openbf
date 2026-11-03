@@ -48,6 +48,7 @@ pub const PROP_ANIMATIONTRIGGER: u32 = 0x1D56_B73B;
 /// class+0x360 / +0x368).
 pub const PROP_OPENSOUND: u32 = 0x323F_7450;
 pub const PROP_CLOSESOUND: u32 = 0x4FCF_4562;
+pub const PROP_LOCKEDSOUND: u32 = 0x027B_5CB2;
 
 /// The disc's cap on trigger pairs (`FUN_001ec5d0` loops over three).
 pub const MAX_TRIGGERS: usize = 3;
@@ -57,6 +58,7 @@ pub const MAX_TRIGGERS: usize = 3;
 #[derive(Debug, Clone, PartialEq)]
 pub struct DoorSpec {
     pub class: String,
+    pub locked: bool,
     /// `AnimationName` (the bank), `Animation` (the clip).
     pub bank: Option<String>,
     pub clip: Option<String>,
@@ -65,6 +67,7 @@ pub struct DoorSpec {
     /// `OpenSound`, `CloseSound`.
     pub open_sound: Option<String>,
     pub close_sound: Option<String>,
+    pub locked_sound: Option<String>,
 }
 
 impl DoorSpec {
@@ -89,11 +92,15 @@ impl DoorSpec {
             .collect();
         Some(DoorSpec {
             class: e.name.clone(),
+            locked: last(mungefs::fnv1a_lowercase("IsLocked"))
+                .and_then(|value| value.trim().parse::<i32>().ok())
+                .is_some_and(|value| value != 0),
             bank: last(PROP_ANIMATIONNAME),
             clip: last(PROP_ANIMATION),
             triggers,
             open_sound: last(PROP_OPENSOUND),
             close_sound: last(PROP_CLOSESOUND),
+            locked_sound: last(PROP_LOCKEDSOUND),
         })
     }
 }
@@ -268,12 +275,14 @@ pub fn rig(
         }
     }
     Ok(ManifestDoor {
+        locked: spec.locked,
         triggers,
         frames: clip.frames,
         prims: moving,
         parts,
         open_sound: spec.open_sound.clone(),
         close_sound: spec.close_sound.clone(),
+        locked_sound: spec.locked_sound.clone(),
     })
 }
 
@@ -440,6 +449,7 @@ mod tests {
         );
         assert_eq!(d.parts[0].motion, d.prims[0].motion);
         assert_eq!(d.open_sound.as_deref(), Some("door_open"));
+        assert_eq!(d.locked_sound.as_deref(), Some("vehicle_equip"));
         assert_eq!(d.close_sound.as_deref(), Some("door_close"));
     }
 
@@ -448,5 +458,6 @@ mod tests {
     fn the_sound_keys_are_their_names() {
         assert_eq!(mungefs::fnv1a_lowercase("OpenSound"), PROP_OPENSOUND);
         assert_eq!(mungefs::fnv1a_lowercase("CloseSound"), PROP_CLOSESOUND);
+        assert_eq!(mungefs::fnv1a_lowercase("LockedSound"), PROP_LOCKEDSOUND);
     }
 }
