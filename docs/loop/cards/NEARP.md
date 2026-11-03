@@ -1,20 +1,11 @@
 ---
 id: NEARP
 title: The port's near plane is 0.1 m in every view, the PS2's 0.5 m (zoom-scaled [H]): zoomed in BF2 Mygeeto's AA gun (tur_bldg_recoilless_lg1) the scope eye stands 0.26 m behind a face of myg1_bldg_rock_face1 and the screen goes flat grey / black where the PS2 shows the ground (audit VTURZ)
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/render/src/camera.rs,engine/crates/game/src/walk.rs
-declares:
-needs: environment restoration: restore zoomed/unzoomed BF1/BF2 states, audit-vturz grey/replay/census inputs, turret map bakes and GPU device
-effort:
-branch:
-resume: 2026-10-24 09:20 UTC: planner prerequisite census; no implementation. Restore this card's inputs in lead_tmp/planner_20261024_0913/queue_preflight.json, recheck original acceptance/current-main baseline, then loopctl start for isolated build. Full CI and required gates remain; reports/20261024_0913_planner.md.
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Audit VTURZ (2026-10-16, report `reports/20261016_0115_audit_VTURZ.md`): the landed turret zoom puts the camera exactly where the PS2's stands (124 of 124 zoomed RAM rows within 0.03 mm), but on BF2 Mygeeto - a showcase map - two zoomed looks of the AA gun at (-118.16, 0, 302.01) show a flat grey / black screen. The eye is 0.26 m behind a back face of `myg1_bldg_rock_face1` (-120.585, -0.646, 312.987); the port's near plane is 0.1 m (`render/src/camera.rs:39`) and every draw is two-sided (`pipelines.rs:707`), so the inside of the rock fills the view. The PS2's near plane is 0.5 m (`analysis/re-sky-pass.md:218`); `analysis/re-weather.md:146-151` reads near = camera +0x130 and a zoomed frustum from near x zoom [H for the projection]. The maintainer would see it within a minute in the AA gun.
 

@@ -1,19 +1,11 @@
 ---
 id: UNSN
 title: A stalled bot no human can see is moved on to a hub past its failing link instead of recycled
-milestone: M3
-value: 5
-phase: done
-status: done
-deps: COVR
-files: engine/crates/core/src/ai/unseen.rs; engine/crates/core/src/ai/unseen/tests.rs; engine/crates/core/src/ai/behave/brain.rs; engine/crates/core/src/ai/state.rs; engine/crates/core/src/ai/why.rs; engine/crates/core/src/ai/stall.rs; engine/crates/core/src/ai.rs; engine/crates/core/src/sim/state.rs; engine/crates/core/src/sim/step.rs; engine/crates/game/src/blackbox.rs; engine/crates/game/src/main/headless.rs; engine/crates/game/examples/round_to_outcome.rs; analysis/bot-design.md
-declares: sim
-needs:
-effort:
-branch: botup
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The last resort of card RCYC (`ai::stall`: 120 s without net progress, or 10 failed windows at one place with no
 floor walk out) kills the bot as `Stalled`, and its team pays a ticket for a defect of ours. The user approved

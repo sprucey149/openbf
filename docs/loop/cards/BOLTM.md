@@ -1,20 +1,10 @@
 ---
 id: BOLTM
 title: Mounted same-tick bolt lights match the fired weapon
-milestone: M1
-value: 4
-phase: build
-status: parked
-deps:
-files: engine/crates/game/src/bolt_vis.rs, engine/CRATES.md
-declares:
-needs: real HOT1/GEO1/FEL1 and eight-map paired content, GPU light views and complete acceptance gates
-effort:
-branch: boltm
-resume: Implemented66d6f9c; BOLTR97b0319 now also implements fired-class remnant lookup and replaces the historical rider-style pin. Both full real paired census/GPU/content acceptance remain pending; preserve correlation/decoy controls. reports/20261025_2149_planner.md
-created: 2026-10-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 A first-tick vehicle-gun bolt can put its terrain light on the reverse-flight

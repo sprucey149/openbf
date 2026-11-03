@@ -1,20 +1,10 @@
 ---
 id: STILLCP
 title: Still minimaps use the conquest mission's surviving posts and owners
-milestone: M1
-value: 2
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/minimap.rs, engine/CRATES.md
-declares: ci=+8
-needs: the maintainer approval to regenerate goldens/hot1_spawn_map.png (CP7 removal, PS2-correct); a DEA1 spawn-page review picture
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 A still minimap can show a command post the conquest mission removes, with

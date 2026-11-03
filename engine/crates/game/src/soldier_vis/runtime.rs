@@ -685,6 +685,15 @@ impl SoldierVisuals {
             v.saber_throwing = firing;
         }
         for (event, e) in walk.sim.events.iter().enumerate() {
+            if let core::sim::Event::Hit { victim, .. } = e {
+                if let Some(v) = self
+                    .units
+                    .get_mut(victim.index as usize)
+                    .filter(|v| v.gen == victim.gen)
+                {
+                    v.animator.note_hit(&walk.sim, event);
+                }
+            }
             if let core::sim::Event::Despawn { unit } = e {
                 if let Some(v) = self
                     .units
@@ -1226,6 +1235,15 @@ impl SoldierVisuals {
             .into_iter()
             .map(|(i, _, m, _)| (i, m))
             .collect()
+    }
+
+    /// Loaded in-flight model for a registered weapon class, for draw diagnostics.
+    pub fn ordnance_model(&self, class: usize) -> Option<&WeaponAsset> {
+        self.grenades
+            .get(class)
+            .copied()
+            .flatten()
+            .and_then(|i| self.weapons.get(i))
     }
 
     /// The hand weapon of every drawn unit, at the posed `hp_weapons` bone:

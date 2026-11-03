@@ -1,20 +1,11 @@
 ---
 id: RETC
 title: The BF2 reticle's colours and place against PS2 frames: BHUD2 draws it (white / BF1's RAM red and green, at the window centre); capture a PS2 frame over an enemy, a friend and nothing, and match the RGB and the offset
-milestone: M3
-value: 3
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: Restore BF2 HUD bake, map/mission, live reticle reader and PS2 states; measure enemy/friend/none RGB and remaining texture/size checks.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 6/6 exact named paths absent. Restore BF2 HUD bake, map/mission, live reticle reader and PS2 states; measure enemy/friend/none RGB and remaining texture/size checks. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-09-28
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The port's HUD (`ui::hud`) has no reticle at all, on any map. On the PS2 the reticle is always drawn. It turns red over an
 enemy and green over a friend out to the weapon's ExtremeRange (rifle 120 m), inside the acquisition cone. The colour

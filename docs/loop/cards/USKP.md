@@ -1,19 +1,11 @@
 ---
 id: USKP
 title: Class skins seen in a battle: a picture pair of the port's CIS droid skins (red / orange / camo / blue) and the sharpshooter / desert rebels against the PS2's frames - no golden shows a skinned class today (USKN landed the swap with census + unit tests only)
-milestone: M1
-value: 3
-phase: measure
-status: blocked
-deps:
-files: engine/crates/game/src/soldier_vis.rs
-declares:
-needs: Restore class/side bakes and original PS2 skin sheets with approved rendering support; make the original per-class battle picture pairs.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 6 exact named inputs absent. Restore class/side bakes and original PS2 skin sheets with approved rendering support; make the original per-class battle picture pairs. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-10-20
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 USKN (eb6ff83) draws a class's OverrideTexture / OverrideTexture2 on its model's MNAM group, proved by a disc census (32 classes, every texture baked) and unit tests. Its Acceptance 3 also asked for a picture pair against `lead_tmp/unit-audit/pcsx2_bf2/cis_droid_skins.png` and the BF1 class-select sheets; no golden draws a skinned class (the unit gallery draws each GLB's own textures), so the pair was not made.
 

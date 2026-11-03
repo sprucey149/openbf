@@ -841,6 +841,7 @@ impl Chunks {
         era: Era,
         eye: Vec3,
         forward: Vec3,
+        zoom: f32,
         assets: &mut dyn FxAssets,
         out: &mut Vec<render::ParticleDraw>,
     ) {
@@ -856,7 +857,7 @@ impl Chunks {
             .flat_map(|p| p.trails.iter().map(|(e, _)| e).chain(&p.smoke))
             .chain(&self.loose);
         for e in effects {
-            e.draws_with(eye, forward, assets, out);
+            e.draws_with(eye, forward, zoom, assets, out);
         }
     }
 

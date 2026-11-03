@@ -768,6 +768,25 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
         }
         None => true,
     };
+    if tree && hud.damage_flash > 0.0 {
+        ctx.quad(
+            usize::MAX,
+            &Mat4::IDENTITY,
+            &Screen {
+                origin: [0.0, 0.0],
+                scale: [1.0, 1.0],
+            },
+            &Quad {
+                rect: [0.0, 0.0, size[0], size[1]],
+                uv: [0.0, 0.0, 1.0, 1.0],
+                color: [1.0, 0.0, 0.0, hud.damage_flash],
+                texture: "white",
+                additive: false,
+                shadow: false,
+                boxed: false,
+            },
+        );
+    }
     // The sniper scope (`crate::hud_scope`): under the tree, so the target
     // readout and the reticle stay over it.
     if let Some(v) = hud.scope.as_ref().filter(|_| tree) {
@@ -1070,5 +1089,31 @@ mod tests {
         // At the end of the fall time the copy is gone.
         hud.advance(0.51);
         assert_eq!(draw(&hud, &HudArt::default(), size).verts.len(), 8);
+    }
+}
+
+#[cfg(test)]
+mod damage_flash_tests {
+    use super::*;
+    #[test]
+    fn damage_flash_covers_the_whole_viewport_with_normal_red_alpha() {
+        let layout = manifest::hud::HudLayout {
+            name: String::new(),
+            nodes: Vec::new(),
+        };
+        let mut hud = Hud::new(&layout, &layout);
+        hud.damage_flash = 0.5;
+        let frame = draw(&hud, &HudArt::default(), [1280.0, 720.0]);
+        assert_eq!(frame.verts.len(), 4);
+        assert_eq!(frame.indices.len(), 6);
+        assert_eq!(frame.verts[0].pos, [0.0, 0.0, 0.0]);
+        assert_eq!(frame.verts[2].pos, [1280.0, 720.0, 0.0]);
+        assert!(frame.verts.iter().all(|v| v.color == [1.0, 0.0, 0.0, 0.5]));
+        assert_eq!(frame.batches[0].texture, "white");
+        assert!(!frame.batches[0].additive);
+        hud.damage_flash = 0.0;
+        assert!(draw(&hud, &HudArt::default(), [1280.0, 720.0])
+            .verts
+            .is_empty());
     }
 }

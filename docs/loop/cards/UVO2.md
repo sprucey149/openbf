@@ -1,21 +1,11 @@
 ---
 id: UVO2
 title: BF2's unit voice, the VOSound lines (the maintainer's INBOX 2026-10-12 18:55, ask 3; BF2's half of USND): the class's 162-211 lines picked by event and context (who is above, behind, near; what kind of unit the target is), spoken only by a unit within 50 m of the event's subject - the player, when the caller names none - an enemy 31 times in 101, the nearest team-mate when no speaker is named; AcquiredTarget, FriendlyFire, Grenade, Repair, GivePowerup, the slaughter counters, and for the player's own kills HeadshotKill and the killing sprees; each line property once per 40 +- 20 s (the Rebels 80 +- 40); the PS2 says 8-12 lines a minute round a player in the fight and one in four minutes round one at his post; RE done 2026-10-13 (analysis/re-unit-chatter.md 3, 5)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: USND,UCALL
-files: engine/crates/game/src/vo.rs,engine/crates/game/src/classdb.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/announce.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/perception.rs
-declares:
-needs:
-effort:
-branch: uvo2
-resume: landed b74b508b 2026-10-16; audit 20261026_0741 INCOMPLETE / UNAUDITED; restore primary evidence and verified history before retry (private continuation below).
-created: 2026-10-13
-alpha: yes
-domain: audio
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-10-12 18:55, ask 3 (umbrella card USND; BF2's half of slices 1, 3 and 4): on BF2's maps the
 units' voice is the class's `VOSound` lines - 162 to 211 a class - and the port plays none. The PS2 says 8 to 12 a

@@ -1,19 +1,11 @@
 ---
 id: WHY
 title: A reason code on every bot behaviour change and every failed walk - kept per bot for the black box, counted per map by the census
-milestone: M3
-value: 4
-phase: done
-status: done
-deps: MAIS
-files: engine/crates/core/src/ai/why.rs; engine/crates/core/src/ai/behave/brain.rs; engine/crates/core/src/ai/mover.rs; engine/crates/core/src/ai/stall.rs; engine/crates/core/src/ai/state.rs; engine/crates/core/src/sim/state.rs; engine/crates/core/src/sim/step.rs; engine/crates/game/src/blackbox.rs; engine/crates/game/examples/blackbox_read.rs; engine/crates/game/examples/round_to_outcome.rs
-declares: sim
-needs:
-effort:
-branch: botup
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 `analysis/bot-design.md` 4.5 asks that every walk have an outcome, "Failed(why)", but the port recorded only the
 outcome. A stalled bot's cause was inferred afterwards from geometry (the census verdicts `body` / `post` / `spot` /

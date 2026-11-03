@@ -1,20 +1,12 @@
 ---
 id: ANIMX
 title: Soldier animation, what is still unread: the first-person rig and banks, the low-detail animator beyond the 10 full ones, seat and turret poses (clips named by CRC), the thrown / tumble / death picks, BF2's combo (melee) sets
-milestone: M1
-value: 2
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-05
-defer: post-alpha
+status: archived
+issue: 69
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #69](https://github.com/sprucey149/openbf/issues/69).
+
 ## Why
 Card ANIM answered the layers, the weapon sets and the action layer (analysis/re-soldier-anim-layers.md). Its section
 10 lists what was not opened; none of it blocks the build cards ANIMS, ANIML, ANIMA, ANIMM.

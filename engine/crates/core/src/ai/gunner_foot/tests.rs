@@ -1,6 +1,7 @@
 use super::*;
 use crate::ai::think;
 
+mod droideka;
 mod radius_rows;
 
 /// Card CLSE2: the radius formula against the PS2's own RAM - 80 rows

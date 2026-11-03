@@ -1,18 +1,10 @@
 ---
 id: VEH0
 title: Vehicles (P7): what the PS2 does and the build plan — the first M2 card
-milestone: M2
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: done 2026-09-25: analysis/re-vehicles.md [O] (verifier 38/42 SUPPORTED, 4 PARTLY folded); cards HVRE VCLS HOVR VSEAT VPAD VBAKE VDMG VTUR VAI VWLK VFLY AIMF; VENT amended
-created: 2026-09-25 (restructure)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 M2 (P7 ground vehicles, then flyers) has never started; a port without vehicles is the biggest gap a player sees. PLAN §LOCKED FEATURE SET → Vehicles & space, §Phases P7 and P6.5 E (vehicle AI lands with P7).

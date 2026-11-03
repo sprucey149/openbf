@@ -1,20 +1,10 @@
 ---
 id: SUNG
 title: The PS2's sun glare and horizon haze: a white bloom toward the sun (BF1 KAS2, BF2 KAS2) and BF2 KAS2's near-white horizon over the sea, where the port has neith
-milestone: M1
-value: 3
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25 (from QUEUE.md)
-defer: post-alpha
-acceptance: needed
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

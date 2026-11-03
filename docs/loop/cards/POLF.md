@@ -1,22 +1,10 @@
 ---
 id: POLF
 title: BF2 Polis Massa: PS2 soldiers stand 0.57 m above the port's terrain on 95 % of 15,719 terrain samples (on it on 4 %; BF2 HOT1 / GEO1 and BF1 HOT1 stand on it) - find what they stand on: a floor the bake drops, a terrain offset, or the PS2's own contact
-milestone: M1
-value: 3
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: Restore POL1 disc/bake, original sample tables, collision readers and PS2 state/camera evidence before measurement
-effort:
-branch:
-resume: 20261025_0427 UTC input hold: 0/26 minimum paths present; restore and verify inputs per engine/artifacts/loop/reports/20261025_0427_card_POLF.md, then trace one spot and reproduce the 15719-row denominator. Keep measure; no cause established.
-created: 2026-10-02
-defer: post-alpha
-domain: collision
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 On BF2 Polis Massa the PS2's soldiers stand about 0.57 m ABOVE the port's floor wherever that floor is the terrain:

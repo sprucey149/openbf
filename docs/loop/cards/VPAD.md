@@ -1,18 +1,10 @@
 ---
 id: VPAD
 title: Vehicle spawn pads: the class per team side (Atk = team 1, Def = team 2), following the CP's owner, SpawnTime respawn, one vehicle per pad (BF2 SpawnCount), the idle decay
-milestone: M2
-value: 4
-phase: build
-status: done
-deps: VENT,VCLS,VTEAM
-files: engine/crates/core/src/vehicle_pad.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/game/src/vehicle_pads.rs
-declares: sweep
-needs:
-branch: vpad
-resume: landed 896b924 2026-09-26; report reports/20260926_1414_build_VPAD.md; next HOVR moves the pad vehicles
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Vehicles come only from pads: 336 `com_item_vehicle_spawn` instances on 25 maps, 53 classes.

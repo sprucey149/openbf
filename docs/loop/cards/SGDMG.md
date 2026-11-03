@@ -1,19 +1,11 @@
 ---
 id: SGDMG
 title: A bolt that lands in its first update strikes at age 0 - BF2's shotgun pellet does its full 65 (head 195) up close, as PCSX2 shows, not the falloff's 48.3
-milestone: M3
-value: 5
-phase: done
-status: done
-deps:
-files: engine/crates/core/src/projectile.rs; engine/crates/core/src/sim/combat.rs; analysis/re-ordnance-kinds.md
-declares: sim
-needs:
-effort:
-branch: sgdmg
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 A playtest found the BF2 shotgun far weaker than on the PS2. The port billed every pellet as one update (1/30 s)
 old when it first struck, so the age falloff (65 -> 15 over 0.1 s) cut it to 48.3: a point-blank body shot did

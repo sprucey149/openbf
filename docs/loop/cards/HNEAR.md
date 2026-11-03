@@ -1,19 +1,11 @@
 ---
 id: HNEAR
 title: A hover rides to the hub nearest its post when its graph ends short (ai::HOVER_NEAREST, built by VDROP and off): BF2 POL1's riders get out over no floor and tat1's speeder bikes crash
-milestone: M2
-value: 3
-phase: build
-status: done
-deps: VDROP
-files: engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/hover_drive.rs
-declares: sim; sweep
-needs:
-effort:
-branch:
-resume: MERGED into VBAIL by the planner 2026-10-03 07:15 (the batch rule: both M2 value 3, both ai/ride.rs, both sim; sweep) - not built; its Why / Evidence / Acceptance are VBAIL's part 2
-created: 2026-10-03
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card VDROP built the rule for hovers and left it off. With it on (8 seeds, `lead_tmp/vdrop/sw_near` against
 `sw_law3`): rides 3753 -> 5366 (BF2 POL1's combat speeder 0 -> 304, BF1 NAB2 188 -> 348), crashes a ride unchanged

@@ -191,6 +191,9 @@ pub struct WeaponClass {
     pub ammo_per_shot: u32,
     pub reload_time: f32,
     pub trigger_single: bool,
+    /// BF2 HUD firing-cycle progress. FUN_00327e98 B2:319571 defaults
+    /// DisplayRefire on; FUN_00328fb0:320451-320456 loads the override.
+    pub display_refire: bool,
     /// `ZoomMax`, the scope's maximum magnification (BF2 class+0xb4 / BF1
     /// +0x7c). Used by human zoom and as the third gate of
     /// [`WeaponClass::ai_distance_table`]
@@ -432,6 +435,7 @@ impl Default for WeaponClass {
             ammo_per_shot: 1,
             reload_time: 0.01,
             trigger_single: false,
+            display_refire: true,
             zoom_max: 1.0,
             zoom_min: 1.0,
             zoom_rate: 0.0,
@@ -573,6 +577,7 @@ impl WeaponClass {
             ammo_per_shot: 1,
             reload_time: 1.5,
             trigger_single: false,
+            display_refire: true,
             // The DISC value (`re-ai-sniper.md` §3), not the class-ctor
             // default: this fixture is byte-verified against the ODF and
             // `fill_classes_keep_the_v0_fixtures` compares the two whole.
@@ -818,6 +823,9 @@ impl WeaponClass {
         }
         if let Some(v) = pf(src, "TriggerSingle") {
             w.trigger_single = v != 0.0;
+        }
+        if let Some(v) = pf(src, "DisplayRefire") {
+            w.display_refire = v != 0.0;
         }
         if let Some(v) = pf(src, "OffhandWeapon") {
             w.offhand_weapon = v != 0.0;

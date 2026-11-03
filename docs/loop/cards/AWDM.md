@@ -1,21 +1,12 @@
 ---
 id: AWDM
 title: Award messages and points pop-ups: what the PS2 shows when you earn an award or points, and where
-milestone: M4
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: primary PS2 corpora, CORE/INGAME data and EVMSG capture toolkit restored
-effort:
-branch:
-resume: 2026-10-24 RE held; restore inputs in reports/20261024_2332_card_AWDM.md, verify medal/bonus text and icon plus per-game timed frames before build; do not repeat unchanged preflight
-created: 2026-09-30
-defer: post-alpha
-tries: 1
+status: archived
+issue: 50
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #50](https://github.com/sprucey149/openbf/issues/50).
+
 ## Why
 The maintainer's INBOX 2026-09-30 11:40: filed now so it is not forgotten. What the PS2 shows when you earn an award or points, and
 where. Belongs with the awards system (M4). EVMSG leaves the slot for it.

@@ -1,20 +1,10 @@
 ---
 id: GREN
 title: Weapon slots and the thrown grenade, built: every class slot with its ammo and channel (BF2's section model), the two channels with one active, the secondary trigger + the two switch inputs, the grenade weapon's cycle (press, 0.30 / 0.51 s wind-up, 1.7 / 1.81 s) and the `sticky` ordnance (gravity, the 0.37 / 1.15 x 1.37 bounce, Stick* bits, rest, the fuse that starts at rest) exploding through Sim::explode
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/classdb.rs,engine/crates/game/src/roster.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/unit.rs,engine/crates/core/src/projectile.rs,engine/crates/core/src/sim/input.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/step.rs,engine/crates/game/src/main/battle.rs,engine/CRATES.md,engine/artifacts/loop/FEEL_NOTES.md
-declares: sim; sweep; arena
-needs:
-effort:
-branch: gren
-resume: landed d4886ba0 2026-10-02
-created: 2026-09-28
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 `analysis/re-grenades.md` (`[O]`, commit f0da5ad; verifier 36/6/0 of 42; two live PCSX2 runs). On the PS2 every soldier

@@ -6,8 +6,8 @@ baseline, the gate code) can make itself pass. Two enforcement points share this
 
   1. A Claude Code PreToolUse hook (Edit|Write|MultiEdit|NotebookEdit|Bash), wired from .claude/settings.json:
          python3 "$CLAUDE_PROJECT_DIR"/scripts/oracle_guard.py hook
-     reads the hook JSON on stdin and, in a LOOP session (OPENBF_LOOP=1) that is not exempt, DENIES a write to a protected
-     path with a message. It is a tripwire for an honest-but-hasty session, not a sandbox: see scripts/AUTOLOOP.md.
+     reads the hook JSON on stdin and, in an agent job (OPENBF_AGENT_JOB) that is not exempt, DENIES a write to a protected
+     path with a message. It is a tripwire for an honest-but-hasty session, not a sandbox: see docs/agents/README.md.
   2. scripts/gates.py group `protect`: `git diff <base>...HEAD` over the same paths; a build card that changed one without
      declaring it FAILS (declared -> MOVED). This catches what the hook cannot see (a script that writes, a rebase, a commit).
 
@@ -20,7 +20,7 @@ Protected classes (a path is matched by suffix, so a worktree under openbf-wt/ i
   psref      scripts/bot_quality_ps2.json  (the PS2's measured bot numbers)
   guards     scripts/gates.py, scripts/oracle_guard.py, scripts/claude_guard.sh, scripts/land.py, .claude/settings.json
 
-Who may write: OPENBF_ORACLE_EDIT=1 in the harness environment (set by the operator, or by land.py / loopctl around their own
+Who may write: OPENBF_ORACLE_EDIT=1 in the harness environment (set by the operator, or by the landing tool around its own
 writes — a variable typed inside a Bash command is NOT the harness environment and is itself refused); a session whose job
 is `planner` or `land`; a `capture`-phase card for class pcsx2 (capture cards add data); a card whose COMMITTED header says
 `declares: oracle=<classes|any>` (read from `git show HEAD:<card>` in the main checkout, so a session cannot declare for
@@ -34,7 +34,7 @@ CLI:  hook                      PreToolUse hook (stdin JSON)
 import json, os, re, shlex, subprocess, sys
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-CARDS = "engine/artifacts/loop/cards"
+CARDS = "engine/artifacts/loop/cards/private"
 DATA_EXT = r"(?:png|mp4|csv|json|log|p2s|sav|state|ron|gz|zst|bin|dump)"
 
 # (class, regex on a '/'-joined path; matched with re.search so any prefix — worktree or main — is fine)
@@ -82,8 +82,8 @@ def committed_card(card_id, root=ROOT):
 
 
 def approved(card_id, key, root=ROOT):
-    """A planner/the maintainer approval: gates.toml [approvals.<CARD>] <key> = "...". Cards are not in git, so a card header cannot carry
-    one; builders cannot edit gates.toml (the hook protects it), so a session cannot approve for itself."""
+    """A maintainer approval: gates.toml [approvals.<CARD>] <key> = "...".
+    Builders cannot edit gates.toml (the hook protects it), so a session cannot approve for itself."""
     try:
         import tomllib
         with open(os.path.join(root, "engine/artifacts/loop/gates.toml"), "rb") as f:
@@ -113,6 +113,9 @@ def oracle_declared(declares):
 
 def job_info(env=None):
     env = os.environ if env is None else env
+    if env.get("OPENBF_AGENT_JOB"):
+        lane = env.get("OPENBF_AGENT_LANE", "build")
+        return {"job": "land" if lane == "land" else "card", "card": env.get("OPENBF_CARD")}
     try:
         j = json.loads(env.get("OPENBF_JOB_JSON") or "{}")
     except ValueError:
@@ -130,7 +133,7 @@ def allowed_classes(env=None, root=ROOT):
         ok = set(ALL_CLASSES)
         if j.get("job") == "land":
             # A landing session gathers the evidence for an EXPOSED claim; it does not approve its own landing (the maintainer, 2026-10-11).
-            # land.py still re-baselines gates.toml as a script; the planner writes [approvals].
+            # Baseline changes require a separate explicit maintainer approval.
             ok.discard("baselines")
         return ok, f"job {j.get('job')}"
     ok = set()
@@ -138,7 +141,7 @@ def allowed_classes(env=None, root=ROOT):
         ok.add("pcsx2")
     cid = j.get("card")
     if cid:
-        ap = approved(cid, "oracle", root)   # gates.toml [approvals.<CARD>]: the only channel that works (cards are not in git)
+        ap = approved(cid, "oracle", root)   # gates.toml [approvals.<CARD>]: the only channel that works (declarations come from committed cards)
         ok |= oracle_declared(declares_of(committed_card(cid, root)) + (f"; oracle={ap}" if ap else ""))
     return ok, ""
 
@@ -161,7 +164,7 @@ def _tokens(seg):
 
 
 def bash_hits(cmd, cwd=None):
-    """[(class, token)] for each protected path a command WRITES (best effort, see AUTOLOOP.md for what it misses)."""
+    """[(class, token)] for each protected path a command WRITES (best effort, direct scripts and dynamic paths can escape this best-effort hook)."""
     hits = []
     if "OPENBF_ORACLE_EDIT" in cmd:
         hits.append(("guards", "OPENBF_ORACLE_EDIT (set by the operator, never inside a command)"))
@@ -228,7 +231,7 @@ def tool_hits(name, ti, cwd=None):
 def decide(d, env=None, root=ROOT):
     """(deny reason or None) for one hook payload."""
     env = os.environ if env is None else env
-    if env.get("OPENBF_LOOP") != "1" or env.get("OPENBF_ORACLE_GUARD") == "0":
+    if not (env.get("OPENBF_AGENT_JOB") or env.get("OPENBF_LOOP") == "1") or env.get("OPENBF_ORACLE_GUARD") == "0":
         return None
     hits = tool_hits(d.get("tool_name", ""), d.get("tool_input", {}) or {}, d.get("cwd"))
     if not hits:
@@ -280,7 +283,7 @@ def changed_by_class(tree, base):
 
 
 def card_declares_for(env=None, tree=None, root=ROOT):
-    """The declared-oracle classes of the card this gates run belongs to: OPENBF_JOB_JSON's card, else the card whose
+    """The declared-oracle classes of the card this gates run belongs to: OPENBF_CARD (or a legacy OPENBF_JOB_JSON card), else the card whose
     `branch:` is the tree's branch. Read from the COMMITTED card in the main checkout."""
     env = os.environ if env is None else env
     cid = job_info(env).get("card")
@@ -288,6 +291,8 @@ def card_declares_for(env=None, tree=None, root=ROOT):
         br = subprocess.run(["git", "-C", tree, "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True).stdout.strip()
         cdir = os.path.join(root, CARDS)
         for f in sorted(os.listdir(cdir)) if os.path.isdir(cdir) else []:
+            if not f.endswith(".md"):
+                continue
             txt = open(os.path.join(cdir, f), errors="replace").read(4000)
             m = re.search(r"^branch:[ \t]*(\S+)", txt, re.M)
             if m and m.group(1) == br:
@@ -310,6 +315,10 @@ def selftest():
         bad += not ok
         print(f"{'ok  ' if ok else 'FAIL'} {name}: {'DENY' if why else 'allow'}" + ("" if ok else f"  (wanted {'deny' if want_deny else 'allow'}) {why}"))
 
+    agent = {"OPENBF_AGENT_JOB": "guard-fixture", "OPENBF_CARD": "ZZZNOCARD", "OPENBF_AGENT_LANE": "build"}
+    case("agent build protects baseline", {"tool_name": "Write", "tool_input": {"file_path": ROOT + "/engine/artifacts/loop/gates.toml"}}, agent, True)
+    case("agent land protects baseline", {"tool_name": "Write", "tool_input": {"file_path": ROOT + "/engine/artifacts/loop/gates.toml"}}, dict(agent, OPENBF_AGENT_LANE="land"), True)
+    case("agent ordinary source allowed", {"tool_name": "Write", "tool_input": {"file_path": ROOT + "/scripts/example.py"}}, agent, False)
     loop = {"OPENBF_LOOP": "1", "OPENBF_JOB_JSON": json.dumps({"job": "card", "card": "ZZZNOCARD", "phase": "build"})}
     wt = os.path.join(os.path.dirname(ROOT), "openbf-wt", "obsr") + "/"
     E = lambda p: {"tool_name": "Edit", "tool_input": {"file_path": p, "old_string": "a", "new_string": "b"}}
@@ -368,7 +377,7 @@ def selftest():
             ok = bool(why) == want
             bad += not ok
             print(f"{'ok  ' if ok else 'FAIL'} {name}: {'DENY' if why else 'allow'}")
-    import tempfile   # approvals live in gates.toml [approvals.<CARD>] (cards are not in git, so a header cannot carry them)
+    import tempfile   # approvals live in gates.toml [approvals.<CARD>] (declarations come from committed cards, so a header cannot carry them)
     t = tempfile.mkdtemp()
     os.makedirs(os.path.join(t, "engine/artifacts/loop"))
     open(os.path.join(t, "engine/artifacts/loop/gates.toml"), "w").write('[approvals.AAA]\nfidelity = "recycled, x@m"\noracle = "baselines"\n')

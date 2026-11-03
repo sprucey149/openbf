@@ -8,9 +8,9 @@
 #
 # What it removes (and why it is safe):
 #   Tier A  engine/artifacts/lead_tmp/<name>_target  — dead cargo caches, by the SAME test the loop's own sweep uses
-#           (scripts/loopctl.py targets: a done/parked/blocked card's target, a *-scratch / *_pxc one, or a name with no
+#           (scripts/target_cleanup.py: a done/parked/blocked card's target, a *-scratch / *_pxc one, or a name with no
 #           card, branch or worktree; a live claim's or in-progress card's never, and never one a cargo build holds or a
-#           process runs in — the dry run of `loopctl.py targets` leaves those out). Rebuilt on demand (reflink seed).
+#           process runs in — the dry run of `target_cleanup.py` leaves those out). Rebuilt on demand (reflink seed).
 #   Tier B  scratch bakes and copies of LANDED branches: every bake tree at any depth under lead_tmp/<name>/ (found by
 #           the bake's own output files, bake_trees() below), the older literal names lead_tmp/<name>/{baked,bake,before,
 #           bake_before,bake_after,smoke,full_after,baked_after,c2_before,c2_after,goldens_committed,nd,base,spot1..6,…}, lead_tmp/roster_bake,
@@ -35,7 +35,7 @@ case "${1:-}" in
   -h|--help) sed -n '2,21p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
   --self-test)  # a --dry-run over a fixture repo: it must list exactly the bake trees of the dead branch (CLN4)
     T="$(mktemp -d)"; trap '/bin/rm -rf -- "$T"' EXIT
-    mkdir -p "$T/scripts" && cp "${BASH_SOURCE[0]}" "$T/scripts/cleanse_delete.sh" && cp "$ROOT/scripts/loopctl.py" "$T/scripts/"
+    mkdir -p "$T/scripts" && cp "${BASH_SOURCE[0]}" "$T/scripts/cleanse_delete.sh" && cp "$ROOT/scripts/target_cleanup.py" "$T/scripts/"
     git -C "$T" init -q && git -C "$T" -c user.name=t -c user.email=t@t commit -q --allow-empty -m t && git -C "$T" branch livebr
     L="$T/engine/artifacts/lead_tmp"; D="$L/deadbr"
     mk() { mkdir -p "$(dirname "$1")" && : > "$1"; }
@@ -61,7 +61,7 @@ case "${1:-}" in
     ln -s "$T/engine/assets_baked/common_bf1" "$D/land/bake_x/common_bf2"   # an overlay's link: --yes drops the LINK only
     find "$T" -exec touch -h -d '-1 day' {} +                      # the fixture is old, but for one fresh dir:
     mk "$L/fresh/smoke/x.log"                                      # not: a running session's scratch (a literal name, no card)
-    # loopctl's target sweep must inspect this fixture's branches, even when
+    # the target sweep must inspect this fixture's branches, even when
     # the caller selects another repository through its environment.
     got="$(env -u OPENBF_REPO -u OPENBF_LOOP_DIR -u OPENBF_LEAD_TMP bash "$T/scripts/cleanse_delete.sh" --dry-run | awk -F'\t' 'NF == 2 { sub(".*/lead_tmp/", "", $2); print $2 }' | sort)"
     want="$(printf '%s\n' deadbr/bake-z deadbr/bake_whatever deadbr/bake_y deadbr/land/bake_x deadbr_target donec/bake donec/pics/side_bf1 | sort)"
@@ -90,7 +90,13 @@ mapfile -t LIVE < <(live_names | sort -u)
 is_live() { local n; for n in "${LIVE[@]}"; do [ "$n" = "$1" ] && return 0; done; return 1; }
 # a card <NAME>.md that is not done: its work has not landed, so its lead_tmp/<name>/ is evidence, not a copy (cleanse 18:
 # lead_tmp/uskn/pics held side_bf1/soldiers beside the 34 pictures card USKN cites, and USKN, a todo card, has no branch)
-card_open() { local c="$ART/loop/cards/${1^^}.md"; [ -f "$c" ] && ! grep -q '^status: *done' "$c"; }
+card_open() {
+  local c
+  for c in "$ART/loop/cards/private/${1^^}.md" "$ART/loop/cards/archive/${1^^}.md" "$ART/loop/cards/${1^^}.md"; do
+    if [ -f "$c" ] && ! grep -q '^status: *done' "$c"; then return 0; fi
+  done
+  return 1
+}
 # a file in its top three levels changed in the last 3 hours: a session is working there (cleanse 19: a running audit's
 # lead_tmp/audit-flnk/smoke, a literal name with no branch, worktree or card of that name, was listed)
 recent() { [ -n "$(find "$1" -maxdepth 3 -newermt '-3 hours' -print -quit 2>/dev/null)" ]; }
@@ -117,8 +123,8 @@ bake_trees() {
 CANDS=()
 add() { [ -e "$1" ] && CANDS+=("$1"); return 0; }
 
-# Tier A — dead cargo target dirs: loopctl.py owns the test (one function for the loop's sweep and this script)
-while IFS=$'\t' read -r d _why; do add "$d"; done < <(python3 "$ROOT/scripts/loopctl.py" targets)
+# Tier A — dead cargo target dirs: target_cleanup.py protects active branches, cards and processes
+while IFS=$'\t' read -r d _why; do add "$d"; done < <(python3 "$ROOT/scripts/target_cleanup.py")
 # Tier B — scratch bakes of landed branches
 for d in "$LT"/*/; do
   name="$(basename "$d")"

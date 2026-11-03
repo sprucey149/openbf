@@ -1,21 +1,10 @@
 ---
 id: JUNI
 title: One jump for the merged game - BF1 maps jump with BF2's take-off and air steering (the maintainer, 2026-10-25: "jump physics the same across all bf1 and bf2 maps ... match the better performing game"); the vertical take-off already landed with pull request #2
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps:
-files: engine/crates/core/src/soldier.rs,engine/crates/core/src/soldier/tests.rs,engine/crates/core/src/soldier/tests/juni.rs,engine/crates/core/src/sim/step/tests/ramps.rs,engine/crates/core/src/ai/behave/position/tests.rs,engine/artifacts/loop/FEEL_NOTES.md
-declares: sim; sweep; arena; leak
-needs: paired content/gate and BF1-map feel acceptance
-effort:
-branch: main
-resume: Source622bc81 on main; BF2 jump laws unified, original Thrown/ground/classes preserved. 152/152 probes,8compiled mutants caught;986core/398game+2ignored/2arena-fixtures/fmt/Clippy/build pass. Protect PASS; map8inherited missing paths. Full Acceptance4 pending; reports/20261026_0619_card_JUNI.md.
-created: 2026-10-25
-alpha: yes
-domain: physics
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 The maintainer, 2026-10-25: "we should have jump physics the same across all bf1 and bf2 maps for our version. Remember that

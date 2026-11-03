@@ -1,19 +1,11 @@
 ---
 id: BSTK
 title: The stuck measure skips a bot flying its remote droid - its body stands on purpose, so stuck_max counts only real failures to move
-milestone: M3
-value: 3
-phase: done
-status: done
-deps:
-files: engine/crates/core/src/ai/mover.rs; engine/crates/game/examples/round_to_outcome.rs
-declares: sim
-needs:
-effort:
-branch: botup
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The remote droid (public pull request #57) lets a bot fly its droid: the droid takes the owner's pad
 (`Sim::droid_pads`), so the body stands still on purpose. The bot's think still ran its walk and deflected the

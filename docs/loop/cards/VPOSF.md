@@ -1,19 +1,12 @@
 ---
 id: VPOSF
 title: A flyer's posed nodes are drawn: the snowspeeder's FinAnimation flaps (turn axis + speed setpoint law) and tow-cable gun, the gunships' wing and ball turrets, the Y-wing's turret, the MAF's and K-wing's guns - by the PS2's node table (analysis/re-vehicle-pose.md 6)
-milestone: M2
-value: 3
-phase: re
-status: blocked
-deps:
-files: engine/crates/game/src/viewer/vehicles.rs
-declares:
-needs: Restore vposw flyer tables/replay, BF2 flyer states and side bakes; recheck the corrected flyer-table offsets and measure the port speed setpoint before build.
-effort:
-branch:
-resume: 2026-10-24 14:22 UTC: planner restoration hold; Restore vposw flyer tables/replay, BF2 flyer states and side bakes; recheck the corrected flyer-table offsets and measure the port speed setpoint before build. Original measurable acceptance retained. reports/20261024_1422_planner.md; lead_tmp/planner_20261024_1417/preflight.json.
-created: 2026-10-22
+status: archived
+issue: 97
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #97](https://github.com/sprucey149/openbf/issues/97).
+
 ## Why
 A flyer's posed nodes on the PS2 (`analysis/re-vehicle-pose.md` 6, card VPOSE's RE): its aimers and MountedTurrets
 write into the flyer's node table (BF1 E+0x1ce0, BF2 E+0x1940) and its draw reads it; the snowspeeder (BF2 HOT1) also

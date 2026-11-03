@@ -1,20 +1,12 @@
 ---
 id: DLCH
 title: The Xbox DLC heroes (Asajj Ventress, Kit Fisto) from a DLC folder the player owns, in PS2 or PC format (a modded disc is refused) - local use only, never in git, using their supplied melee programs
-milestone: M5
-value: 3
-phase: build
-status: parked
-deps: HERO
-files:
-declares:
-needs:
-effort:
-branch: sprint/dlc
-resume:
-created: 2026-10-21
-defer: post-alpha
+status: archived
+issue: 99
 ---
+
+Historical technical record. Recorded state before archival was `parked`. Current scope and ownership are on [issue #99](https://github.com/sprucey149/openbf/issues/99).
+
 ## Why
 INBOX 2026-10-21 19:30. `SWBF2_mod.iso` holds them in PS2 format under `DATA/_LVL_PS2/addon/223/SIDE/dlc.lvl`;
 `iso/ADDON_XBOX/DLC_XBOX/data/_LVL_PC/SIDE/dlc.lvl` holds a PC-format copy. Both are third-party repacks: local use only.

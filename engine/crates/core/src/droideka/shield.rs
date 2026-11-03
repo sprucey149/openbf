@@ -91,7 +91,10 @@ impl Shield {
             (false, false) => 0.0,
         };
         if c.drains_full || self.points < c.max {
-            self.points = (self.points + dt * rate).clamp(0.0, c.max);
+            // A ball payment may leave debt on this same bar. Shield drain
+            // stops at zero; recharge repays existing debt before filling it.
+            let floor = self.points.min(0.0);
+            self.points = (self.points + dt * rate).clamp(floor, c.max);
         }
         (was != self.on).then_some(self.on)
     }

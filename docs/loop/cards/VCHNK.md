@@ -1,20 +1,11 @@
 ---
 id: VCHNK
 title: A destroyed vehicle throws its CHUNKn bodies: the baked chunk models launched by re-vehicle-death §6.1, 40-kg cosmetic rigid bodies (gravity, ChunkBounciness/Stickiness, ChunkTerrainCollisions, settle), gone 3 s (BF1) / 8 s (BF2) after resting; the _exp class's NumChunks debris (5 s)
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps: VDTH
-files: engine/crates/game/src/fx/chunks.rs,engine/crates/game/src/viewer/vehicles.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/manifest/src/lib.rs,engine/crates/bake/src/vehicle.rs
-declares: rebake=side
-needs: environment restoration — BF1/BF2 SIDE LVLs and vehicle/map bakes, missions and approved GPU acceptance; see lead_tmp/vchnk_cloud/inputs.json
-effort:
-branch:
-resume: Restore and verify inputs in lead_tmp/vchnk_cloud/inputs.json; then loopctl start VCHNK in an isolated checkout. Inspect CHUNKSECTION properties, ChunkNodeName and prim origins before extending bake/parser; implement cosmetic launch/body/debris with launch/lifetime tests, side rebake, scripted destruction frame, CI and applicable gates. No implementation or landing yet.
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Split from VDTH (2026-09-29): VDTH landed the blast's area damage and a placeholder fireball; the chunks the PS2 throws at a vehicle's death (and the _exp class's debris) are still missing — a destroyed hull just flashes and is gone.
 

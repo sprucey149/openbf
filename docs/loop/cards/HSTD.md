@@ -1,19 +1,10 @@
 ---
 id: HSTD
 title: Two stand-ins for a human in the player's slot, for the difficulty tests: an AVERAGE player (knows the game, plays sensibly) and a STRONG one (hundreds of hours: knows the maps, uses cover, vehicles, squad orders and the level design) - both human: no sight through walls, no knowledge of where the enemy is beyond what a player sees and hears, human aim and reaction; calibrated on cheat-free playtest logs
-milestone: M3
-value: 4
-phase: build
-status: todo
-deps: BLKS
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-05
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 The maintainer, 2026-10-05: "You turn up the difficulty so the ai gets better so the user is more likely to die, how does that translate to making it harder to win games? If all ai is better including teammates, and the user just dies more, how does that make it harder to win a match? ... We need a good solution where victory is somewhat tied to user performance on any difficulty. Easier difficulties are a little more evenly split, while harder difficulties depend on the user playing well and thought needs to be incorporated for when multiple users are playing and they're on opposing teams." With equally good bots on both sides a battle is a coin flip the human tips; better bots only shrink the tip.

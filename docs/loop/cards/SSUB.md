@@ -1,19 +1,11 @@
 ---
 id: SSUB
 title: Sound properties by the battle's sub-level: a planet's SOUND LVL defines one property once per sub-level (nab1cw, nab1gcw, nab2cw, nab2gcw) and the port keeps the file's LAST audible one for every map and era
-milestone: M1
-value: 3
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/sounds.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/sounds.rs
-declares: rebake=sounds
-needs:
-effort:
-branch:
-resume: CLOSED 2026-10-06 by the planner: built by card SNDE (e45d75a) - see the note at the end of the card
-created: 2026-10-03
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 VSND's replay referee (2026-10-03, analysis/re-vehicle-sounds.md 10b): NAB's fighter tank engine record has other
 graphs in nab2gcw than in nab1cw, and the file's last definition gave 19,107 of 19,419 layer-ticks against 19,374

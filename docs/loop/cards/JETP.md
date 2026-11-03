@@ -1,21 +1,11 @@
 ---
 id: JETP
 title: Jet and jump packs, the physics - BF2's jet rules on every map (the jump-jet, the hover, fuel, the Jedi double jump, the fly-height ceiling) for human players; bots, effects, sounds, HUD and animation are JETP2
-milestone: M3
-value: 3
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/soldier.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/unit.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/mission.rs, engine/crates/game/src/layout.rs, scripts/gen_missions.py
-declares:
-needs:
-effort:
-branch: jetpack
-resume: built 2026-10-28 on branch jetpack (build plan steps 1-8 + the cheat; analysis/re-jetpack.md §13); the rest is card JETP2
-created: 2026-09-29
-defer:
-tries: 1
+status: archived
+issue: 72
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #72](https://github.com/sprucey149/openbf/issues/72).
 
 ## Why
 UAUD1 (analysis/unit-audit-bf1.md §3.6). The dark trooper fields on every BF1 GCW map and the jet trooper on every BF1 CW map; the BF1

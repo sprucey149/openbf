@@ -1,20 +1,10 @@
 ---
 id: TSTX
 title: The test suite's cost: 1,168 tests run on every landing (ci.sh: fmt, clippy, build, cargo test --workspace) in ~7.5 min, but 2 test binaries are 64 % of the test time (announcer_ps2 93 s, battle_replay 65 s) - run the binaries in parallel, tier the slow ones by what they depend on, and list tests that no longer earn their place
-milestone: M0
-value: 3
-phase: measure
-status: done
-deps:
-files: engine/ci.sh,scripts/gates.py,engine/crates/game/tests/announcer_ps2.rs,engine/crates/game/tests/battle_replay.rs,engine/goldens/deps.toml
-declares: rebake=side
-needs:
-effort:
-branch: tstx
-resume: landed 449f006b 2026-10-02
-created: 2026-10-02
-alpha: no
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02: "1166 tests are a lot. Do they run every time code changes are made? Similar to goldens, should this be modified so not all tests run every time - only tests that would realistically be changed? As this project gets bigger, are there tests that really aren't necessary anymore and we could delete?"

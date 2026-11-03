@@ -1,20 +1,10 @@
 ---
 id: FXC
 title: Chunks mungefs does not parse that the PS2 may draw: shdw (shadows), CLTH (cloth), bnd_, font — a census first (fx__ went to FXP, done)
-milestone: M1
-value: 4
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort: high
-branch:
-resume: closed: census in analysis/re-chunk-census.md (81dd465); cards VSHD, CLOTH; note on BNDY
-created: 2026-09-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 4. Only `Effect("Water")` is released (`analysis/re-water.md` §5). Vehicle `zaa_` banks belong to VEH0; `coll`

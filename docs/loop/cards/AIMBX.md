@@ -1,19 +1,11 @@
 ---
 id: AIMBX
 title: The acquisition box per soldier class: the port uses one RAM-measured box (r 1.416) for every unit; the PS2 reads each model's box at vtbl+0x38()+0x1c (seven shapes, r 1.387-1.704) — find which chunk it is (not the modl vis box: y max 2.0877 vs RAM 2.099) and carry it per class
-milestone: M3
-value: 2
-phase: re
-status: todo
-deps: AIMF
-files: engine/crates/core/src/unit.rs, game::roster, bake
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-28
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 AIMF (73632e1) landed the PS2 acquisition with `unit::AIM_BOX_MIN/MAX`, one BF1 soldier box read from RAM (`analysis/re-aim-assist.md` §3.6), PROVISIONAL for every class. Bigger classes (r up to 1.704) are easier to magnet on the PS2.
 

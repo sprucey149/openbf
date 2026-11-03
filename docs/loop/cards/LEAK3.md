@@ -1,20 +1,10 @@
 ---
 id: LEAK3
 title: The leak census misses walls a soldier meets, and its gate accepts any rise once a card declares leak (AUDIT of LEAK): sample every SOLDIER wall at body height along its extent (not one centroid per face; sphere belts; the live world's parked hulls), list every map x class count that rose and fail the ones a card did not scope, and let 'new' fire
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/examples/leak_census.rs,engine/crates/game/examples/leak_census_accepted.txt,scripts/gates.py,scripts/land.py
-declares: leak
-needs: cloud prerequisites: branch leak3, baked assets, missions and reference evidence absent
-effort:
-branch: leak3
-resume: (private workflow note omitted)
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 AUDIT of LEAK (2026-09-30, PARTLY). The census is deterministic, and a gross regression moves its bytes. But:

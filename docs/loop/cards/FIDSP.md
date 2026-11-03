@@ -1,20 +1,11 @@
 ---
 id: FIDSP
 title: Fidelity gate counts RLOOP's standing loops: a new metric loop20 (spells of 20 s+ inside a 2 m box in recover / travel, scripts/loop_spells.py over the botq samples the fidelity run already writes, summed per map, direction down) in gates.py's FID_BOTQ set, with its tolerances set from main's two seed blocks
-milestone: M0
-value: 4
-phase: build
-status: blocked
-deps:
-files: scripts/gates.py,scripts/loop_spells.py
-declares: oracle=guards
-needs: decision — the stall-off control raises loop20 only +1..+5 against main's six-block spread 8 (loop seconds x2.0..2.9, separated); choose a duration-weighted metric (loop seconds or loop30) or amend Acceptance 2, then write the row
-effort:
-branch: fidsp
-resume: (private workflow note omitted)
-created: 2026-10-15
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 RLOOP (landed 70bfa91 + a059815 + 70b9c47) took the standing loops from 117 to 27 spells of 20 s+ (16 seeds x 32 maps), the ones over 30 s 81 -> 2. Nothing in the gates watches that number: a later bot card could bring the two-minute stands back and pass every gate (`stuck_max_med` is a median of a different instrument). RLOOP's report asked the planner to wire `scripts/loop_spells.py` into the fidelity numbers; that is a gates.py change, so it is this card. Bots are the maintainer's top concern (root CLAUDE.md).
 

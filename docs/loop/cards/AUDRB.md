@@ -1,18 +1,11 @@
 ---
 id: AUDRB
 title: The shared bake's audio groups predate the 2026-09-20 ffmpeg upgrade: a full scratch bake DIFFs ~5.8k .ogg files (6 bytes each: the Lavc62.28.102 -> .103 vendor string), so every mungefs/bake landing's full-bake gate reads MOVED
-milestone: M0
-value: 5
-phase: cleanup
-status: done
-deps:
-files:
-declares: none — the audio was already rebaked by VTUR (rebake=sounds,global-sound, 2026-09-29 03:40)
-needs:
-branch:
-resume:
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 Found by KOC's gates (engine/artifacts/lead_tmp/koc/gates/cmp_bake.txt: 5345 audio/global_bf2, 488 audio/global_bf1, plus the maps' sounds/*.ogg; strings shows Lavc62.28.102 in assets_baked, .103 in the scratch). Not a code change: rebake the audio groups (and let the next maps rebake refresh the per-map oggs), then check that a full scratch bake gives DIFF=0. Behaviour-neutral: the audio is byte-identical apart from the encoder tag.
 
 ## Closed 2026-09-30 (lane 2): already done by VTUR — measured, no rebake needed

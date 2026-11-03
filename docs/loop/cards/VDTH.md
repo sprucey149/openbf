@@ -1,18 +1,11 @@
 ---
 id: VDTH
 title: A vehicle's death spectacle: the ExplosionName class's area damage (falloff, who it hits) and the CHUNKn bodies (launch, bounce, lifetime) — on VDMG's Event::VehicleDestroyed
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VDMG
-files: engine/crates/core/src/sim/blast.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/vehicle.rs,engine/crates/core/src/weapon.rs,engine/crates/mungefs/src/model.rs,engine/crates/manifest/src/lib.rs,engine/crates/bake/src/vehicle.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/src/classdb.rs,engine/crates/game/src/fx.rs
-declares: rebake=side; sim; sweep
-needs:
-branch: vdth
-resume: landed d501b2d1 2026-09-29
-created: 2026-09-26
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 VDMG (e7ed805) removes a dead vehicle and emits Event::VehicleDestroyed, but nothing detonates the _exp class or throws the chunks: a vehicle vanishes. The blast also damages what stands near it.
 

@@ -1,20 +1,11 @@
 ---
 id: LEAK2
 title: LEAK census, second pass: validate the closed class (ray parity; Endor reads 5-6k, mostly soldiers walking up to trees/rocks whose open meshes break parity), triage buried (under terrain, up to 114 runs) and float, add the checks LEAK left out (map-edge bounds with drives at the heightfield edge, BF2 door gaps, nav barriers, death-volume gaps), and name the crossed body per site
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps: LEAK
-files:
-declares: leak
-needs: cloud prerequisites: baked maps/classes/common, missions and audit-leak controls absent
-effort:
-branch:
-resume: Cloud checkpoint 2026-10-24 11:49 UTC: restore baked maps/classes/common and missions; reproduce KAS2 hut, Endor parity and NAB2 edge controls first, then isolated LEAK2 build and original acceptance. Evaluate existing collision/rays.rs enclosing (open-bottom caveat); coordinate LEAK3S sampler ownership. See engine/artifacts/loop/reports/20261024_1149_card_LEAK2.md; kit lead_tmp/leak2_cloud/.
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 LEAK landed the instrument with per-map counts pinned as a gate, and every class accepted by mechanism in game/examples/leak_census_accepted.txt. The crossing classes (push/tunnel/ceiling/floor) are proven by traces; closed/buried/float are not yet, and some checks the LEAK card asked for are not built.
 

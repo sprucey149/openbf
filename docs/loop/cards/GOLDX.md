@@ -1,19 +1,11 @@
 ---
 id: GOLDX
 title: More goldens, as groups: vehicles (each class in a fixed pose), a weapon / pickup sheet, the front-end menus beyond shell.png, a second vantage and a ground stand per map — each a goldens.sh group with its deps.toml table, so a change regenerates only what it can touch
-milestone: M0
-value: 3
-phase: build
-status: blocked
-deps: GSKIP
-files: scripts/goldens.sh,scripts/gates.py,engine/goldens/deps.toml,engine/goldens/README.md,engine/crates/game/tests/,engine/crates/game/src/gallery.rs
-declares:
-needs: maintainer — approve [approvals.GOLDX] oracle = "guards" before gates.py edits; restore local assets/missions, approved GPU and golden environment
-effort:
-branch:
-resume: 2026-10-24 07:50 UTC: planner guard preflight found no GOLDX approval. Obtain guards approval and restore art/GPU inputs before isolated build. Preserve original per-group deterministic renders, mutation-backed skips, coverage and viewed-golden acceptance. No new golden or approval written. engine/artifacts/loop/reports/20261024_0750_planner.md
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer's INBOX 2026-09-30 (speed-up round): expand the goldens beyond tat1 + the map / unit gallery, as GROUPS, so that a
 change regenerates only the groups it can touch. Today: 6 groups (`tat1 hud shell spawn gallery walkabout`), 90 PNGs, 74 MB.

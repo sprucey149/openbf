@@ -304,6 +304,10 @@ pub const SOLDIER_CLIPS: &[&str] = &[
     "human_rifle_stand_getupfront",
     "human_rifle_stand_getupback",
     "human_rifle_die",
+    "human_rifle_stand_hitfront",
+    "human_rifle_stand_hitback",
+    "human_rifle_stand_hitleft",
+    "human_rifle_stand_hitright",
     "human_rifle_stand_death_forward",
     "human_rifle_stand_death_backward",
     "human_rifle_stand_death_left",
@@ -1394,7 +1398,8 @@ mod tests {
         // The list and the eight seat clips first, in their order, then the
         // other clips of BF1's sets: 151 in the tables, 33 of them in the
         // list (`human_rifle_die` is in no table), none a seat clip.
-        assert_eq!(b.clips, 160);
+        // Four one-frame hit poses are also outside BF1's special table.
+        assert_eq!(b.clips, 164);
         let meta: SoldierAnims = ron::from_str(
             &std::fs::read_to_string(dir.join("soldiers/imp_inf_stormtrooper.anims.ron")).unwrap(),
         )
@@ -1408,6 +1413,9 @@ mod tests {
             assert_eq!(c.name, *name);
         }
         let get = |n: &str| meta.clips.iter().find(|c| c.name == n).unwrap().clone();
+        for direction in ["front", "back", "left", "right"] {
+            assert_eq!(get(&format!("human_rifle_stand_hit{direction}")).frames, 1);
+        }
         // The seat clips (cards VTURG, VRIDE): the turrets' 9, 9 and 1
         // frames, the riders' (re-vehicle-riders 4.2: `human_ride` 61), from
         // BF1's bank.
@@ -1436,7 +1444,7 @@ mod tests {
         );
         assert!((get("human_rifle_diveforward").root_motion[2] - 5.404).abs() < 0.01);
         let (doc, _, _) = gltf::import(dir.join("soldiers/imp_inf_stormtrooper.glb")).unwrap();
-        assert_eq!(doc.animations().count(), 160);
+        assert_eq!(doc.animations().count(), 164);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

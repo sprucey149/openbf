@@ -1,19 +1,10 @@
 ---
 id: FDIFF2
 title: State-sync oracle: inject a measured unit state at tick k and report matching ticks under a recorded pad
-milestone: M0
-value: 3
-phase: re
-status: todo
-deps: FDIFF,PSHASH
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-24
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 A selected-state trace cannot restore all future-affecting state. State-sync

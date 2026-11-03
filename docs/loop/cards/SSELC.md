@@ -1,19 +1,11 @@
 ---
 id: SSELC
 title: The PS2 death camera (BF2 FUN_001bc188): phase 1 eases in ~0.5 s to a view of the body from 6.22 m (the line from body + 0.8 m through a point fixed at the death 1 m back / 1.5 m up, 5 m past it); after an ENEMY kill, from 1.5 s, phase 2 moves onto the body and looks at the killer, following him; 6.0 m casts against the world; no FOV change; the spawn map opens over phase 1 again
-milestone: M5
-value: 4
-phase: build
-status: blocked
-deps: SSEL
-files: engine/crates/game/src/walk.rs, engine/crates/game/src/main/windowed.rs, engine/crates/ui/src/hud.rs
-declares:
-needs: environment — restore death-camera PS2 sheets/raw rows, BF2 corpus/ELF, Hoth/Kamino/common assets, missions and approved GPU
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: The reported 5 m versus <=1.2 m question must distinguish collision conditions: existing analysis/re-spawn-flow.md 6.5 says 5 m when unobstructed, while section 11 explicitly proposes the floor under the lower cast for the short phase-2 eye. Use the named captured scene for Acceptance 2 and a separate unobstructed cast control; do not turn the scene-specific bar into a universal free-space distance or alter it from an unmeasured fixture. Restore rows/ELF before re-derivation. Preserve the documented observation-lag alignment. reports/20261024_1151_planner.md
-created: 2026-10-20
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 What the PS2 shows between a death and the spawn screen (planner 2026-10-19 on card SSEL; the maintainer's "turn to the killer?").
 The port keeps the live chase camera on a dead player. The PS2 has a dedicated death camera, read in code and measured

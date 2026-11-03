@@ -1,20 +1,11 @@
 ---
 id: SQHUD
 title: The squad order's D-pad cross in the HUD: BF1's SquadCommandGroup (squad_cmd_cross 64x64 at the bottom right, the four order names, the chosen arm bright with its highlight, a 2 s fade) shown at the press, in place of the cyan text line
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: SQACK
-files: engine/crates/ui/src/hud.rs,engine/crates/ui/src/hud_draw.rs,engine/crates/ui/src/hud_squad.rs,engine/crates/ui/src/hud_tree.rs,engine/crates/game/src/event_feed.rs,engine/crates/game/src/hud_feed.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/tests/hud_layout.rs,engine/crates/game/tests/golden_hud.rs,engine/crates/core/src/squad.rs,engine/crates/core/src/sim/state.rs,engine/crates/bake/src/hud.rs,engine/crates/bake/src/main.rs,scripts/rebake.sh
-declares: goldens=tat1_hud.png; rebake=common
-needs:
-effort:
-branch: sqhud
-resume: landed 2a3aef45 2026-10-03
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 SQACK (landed 83ea41b, 2026-10-03) built the PS2's orders, lines and answers; the PS2's own feedback for the press is a
 small D-pad cross in the HUD, not a text line. The maintainer (INBOX 2026-09-30): squad orders the BF1 way. Today the port says

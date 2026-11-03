@@ -1,21 +1,11 @@
 ---
 id: JGATE
 title: The jump's gates as on the PS2: a press within 0.3 s of losing the floor still jumps (the port drops it - a moving soldier is off the floor on 1.0-5.7 % of ticks), Cross in a crouch stands up instead of leaping, BF1's stand jump waits 0.5 s in the stance; with the tests JARC's rules still lack (BF2's side factor, the JumpHeight read)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/soldier.rs
-declares: sim; sweep; arena; leak
-needs:
-effort:
-branch: jgate
-resume: landed 0cbe7b7d 2026-10-05
-created: 2026-10-03
-alpha: yes
-domain: physics
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 JARC made the jump's take-off the PS2's; AUDIT JARC (2026-10-03, PARTLY) read the caller JARC left unread and found
 three gates where the port still differs, on every map, for the player:

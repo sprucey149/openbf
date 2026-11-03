@@ -1,23 +1,11 @@
 ---
 id: VTHUL
 title: A building turret's hull pool is hit through its building: the turret instance's world bodies carry the turret vehicle as owner (CollisionWorld Body.owner, VHULL), so a bolt at the building damages the pool and the turret's own seat's bolts, aim ray and exit path skip it
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps: VHULL,TCOL
-files: engine/crates/game/src/assets.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/core/src/collision/world.rs,engine/crates/core/src/sim/seats.rs
-declares:
-needs: environment — TCOL part 1 must land and be independently checked against this card; HOT1 bake/mission and TCOL/HTGT repro inputs absent.
-effort:
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. TCOL owns this acceptance. Do not build a duplicate ownership implementation. After TCOL part 1, run every original ownership/damage/own-fire/exit/death bar before closing VTHUL. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-09-29
-defer: 
-value_pre_alpha: 4
-alpha: yes
-note: planner 2026-10-21 17:10: value 3 -> 4, alpha - HTGT's readout now shows a building turret's bar that shots never move (report 20261021_1620_card_HTGT.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Split from VHULL (its VTURB note). VTURB's turrets are VehicleKind::Turret vehicles whose pool (MaxHealth, HealthType building) nothing can hit: the building's collision is a world body with no link to the vehicle.
 

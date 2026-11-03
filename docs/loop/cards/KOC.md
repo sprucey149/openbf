@@ -1,18 +1,10 @@
 ---
 id: KOC
 title: BF1 Kamino's sea: dark teal under white foam crests on the PS2, a flat textureless light-slate plate in the port — the port's "sea" is the map's y = 0 terrain d
-milestone: M1
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/sky.rs,engine/crates/manifest/src/lib.rs,engine/crates/bake/src/lighting.rs,engine/crates/game/src/viewer/scene.rs
-declares: goldens=maps/bf1_kam1.png; rebake=maps
-needs:
-branch: koc
-resume: landed a66fd77 + goldens cf28b72; F9 pairs re-rendered on main: lead_tmp/koc/f9/
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance (rewritten 2026-09-28 by the RE, lane 2)
 - **Why.** BF1 Kamino's sea is a pale, textureless plate in the port where the PS2 shows dark teal water with white foam.

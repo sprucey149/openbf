@@ -1,18 +1,10 @@
 ---
 id: LDET
 title: No session dies waiting on a gate: land.py and gates.py run fully detached with a state file per landing (phase, step, outputs, pids), `--status` / `--resume` continue at the right step without re-running finished ones; sessions poll with a time budget
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: scripts/land.py,scripts/gates.py
-declares:
-needs:
-branch: ldet
-resume: landed a9e4dc3f 2026-09-30
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX note 2026-09-29 22:40 (approved loop improvements), item 5. 12 of 92 sessions since 09-26 were resumes after a session died (13%), each costing up to an hour of wall

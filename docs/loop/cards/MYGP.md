@@ -1,21 +1,11 @@
 ---
 id: MYGP
 title: BF2 Mygeeto: hover speeders get stuck on the slope of the pit at (-70, -1.5, 179) and their riders get out and fall into the death region - 35 such deaths in 96 rounds on main; trace three, check the PS2's hovers there, fix
-milestone: M2
-value: 4
-phase: measure
-status: blocked
-deps:
-files:
-declares: sim; sweep; arena
-needs: environment — restore MYGP map/mission, raw MOUTH evidence and PS2 capture inputs; exact paths in lead_tmp/mygp_20261024_0959/inventory.json
-effort:
-branch:
-resume: Restore Mygeeto/common BF2 bake, classes/vehicles, bf2_myg1_con.ron, mouth/build/worlddeaths.py plus raw BOT_SAMPLES, and PCSX2 README/session/ps2live with local BF2 disc/state. See reports/20261024_0959_card_MYGP.md and lead_tmp/mygp_20261024_0959/inventory.json. Then rebuild current main, trace three pit cases including riders/route/hover graph, capture PS2 vehicles for 600 s, remeasure 96 Mygeeto rounds and all-map recycles over 24 seeds before cause/fix.
-created: 2026-10-12
-alpha: yes
-domain: vehicle
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Found by MOUTH's build (2026-10-12) while it sorted a rise in death-region deaths: on BF2 Mygeeto, a showcase map, hover
 speeders get stuck on the slope of the pit at (-69.7, -1.5, 178.6) / (-80, 162); their two riders get out and fall into

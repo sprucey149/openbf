@@ -1,20 +1,11 @@
 ---
 id: CLSE
 title: Inside 10 m a PS2 bot's aimed weapon deals 65-90 hp a second, the port's 21-33 (beyond 20 m they are equal): split the port's close-range aiming time by firing, hit share, weapon and speed, the PS2's from SAIR's raw packets, name the cause and build it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: FGHT
-files: engine/crates/core/src/ai/gunner_foot.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch: clse
-resume: landed 77f4c70e 2026-10-09
-created: 2026-10-09
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card FGHT2's range measure (2026-10-09, `analysis/re-soldier-ai.md` 15.5): per second that a bot aims at a living
 enemy, the damage that enemy takes is, inside 10 m, **65-90 hp on the PS2 (four BF2 captures) against 21-33 on the

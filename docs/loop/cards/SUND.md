@@ -1,18 +1,10 @@
 ---
 id: SUND
 title: The sun on models: the PS2's own light vector (BF1 SunInfo.Angle formula, BF2 lght quaternion row 2), BF1's ((1+n·l)/2)^4 term, BF1 prelit draws without the sun — land alone
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: WCOLB
-files: engine/crates/mungefs/src/sky.rs,engine/crates/mungefs/src/light.rs,engine/crates/mungefs/tests/tat1_lvl.rs,engine/crates/bake/src/lighting.rs,engine/crates/game/src/viewer/look.rs,engine/crates/render/src/shader.wgsl,engine/crates/render/src/lighting.rs,engine/crates/render/src/lib.rs,engine/crates/render/src/frame.rs,engine/CRATES.md
-declares: goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_cor1.png,maps/bf2_dag1.png,maps/bf2_dea1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/bf2_yav1.png,maps/tat1.png,maps/tat2.png,tat1_overview.png,tat1_spawn.png,tat1_hud.png; rebake=tat1,tat2,maps
-needs:
-branch: sund
-resume: landed e328300 (+b708e85 goldens); report reports/20260926_1335_build_SUND.md; census BF1 64.1 % / BF2 71.3 % closer
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 - **Why.** The port lights every model from the wrong side: BF1's sun is rotated 35–76°, BF2's z-mirrored (up to

@@ -1,20 +1,10 @@
 ---
 id: SKIPC
 title: Instances the port skips as "no drawable model" that the PS2 draws: the command-post console (`com_bldg_controlzone`, every map), BF1 Theed's planter shrubs and
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/assets.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/examples/pose_render.rs,engine/crates/game/src/gallery.rs
-declares: goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_cor1.png,maps/bf2_dag1.png,maps/bf2_dea1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/bf2_yav1.png,maps/tat1.png,maps/tat2.png,walkabout_stats.ron; parity
-needs:
-effort:
-branch: skipc
-resume: landed 9b71b68d 2026-10-15
-created: 2026-09-25 (from QUEUE.md)
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 (Rewritten by the planner 2026-09-30; the original entry below keeps the detail.)

@@ -105,8 +105,9 @@ pub fn weapon_rows(walk: &crate::walk::WalkSim) -> [Option<HudWeapon>; 2] {
 }
 
 /// What one weapon shows on the ring (`analysis/re-heat-hud.md` 2, `FUN_003b3398`):
-/// an unlimited weapon its heat, a counted one its charge while held. Only reads
-/// the sim's state. BF1 maps show BF1's heat on BF2's ring, as PLAN puts BF2's HUD
+/// an unlimited weapon its heat, a counted one its charge while held. The refire
+/// bits show reload/firing progress or overheat recovery. Only reads the sim's
+/// state. BF1 maps show BF1's heat on BF2's ring, as PLAN puts BF2's HUD
 /// on every map.
 pub fn gauge_of(c: &core::weapon::WeaponClass, s: &core::weapon::WeaponState) -> HudGauge {
     let ring = if c.infinite_ammo() {
@@ -114,8 +115,19 @@ pub fn gauge_of(c: &core::weapon::WeaponClass, s: &core::weapon::WeaponState) ->
     } else {
         s.charging(c).unwrap_or(0.0)
     };
-    let refire = if s.overheated && s.heat > 0.0 {
+    // FUN_003b3398 B2:409971-409992 publishes remaining progress on
+    // the reticle's refire bits. Our reload timer counts down, whereas
+    // the firing accumulator counts up. Neither changes the heat/charge ring.
+    let refire = if c.infinite_ammo() && s.heat < c.heat_threshold {
+        // B2:410020-410025 suppresses refire below an unlimited gun's clear mark.
+        0.0
+    } else if s.overheated && s.heat > 0.0 {
         1.0 - (c.heat_threshold / s.heat).clamp(0.0, 1.0)
+    } else if s.reloading() && c.reload_time > 0.0 {
+        (s.reload_timer / c.reload_time).clamp(0.0, 1.0)
+    } else if c.display_refire && s.state == core::weapon::FireState::Firing && s.refire_time > 0.0
+    {
+        1.0 - (s.refire_accum / s.refire_time).clamp(0.0, 1.0)
     } else {
         0.0
     };

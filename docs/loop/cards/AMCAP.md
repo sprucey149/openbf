@@ -1,21 +1,10 @@
 ---
 id: AMCAP
 title: Use BF1's ammo reserve allowance consistently on every map
-milestone: M2
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/pickups.rs,engine/crates/core/src/sim/pickups/tests.rs,engine/artifacts/loop/FEEL_NOTES.md
-declares: sim; sweep; arena
-needs:
-effort:
-branch: main
-resume: Existing PR3 rule recorded as a named merged-game deviation; independent empty, partial and full magazine allowance checks cover primary and held weapons.
-created: 2026-10-26
-alpha: yes
-domain: weapons
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Rule and evidence
 

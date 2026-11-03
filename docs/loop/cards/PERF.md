@@ -1,21 +1,11 @@
 ---
 id: PERF
 title: Performance deep dive: profile the sim, the AI, the renderer and memory; find what bot count drops this machine below 60 fps and what a mid-class 2020 laptop could hold; then aggressively optimise (500 a side should be thinkable) - a standing PERF.md the maintainer's overnight summary reads from
-milestone: M0
-value: 5
-phase: measure
-status: todo
-deps: SAIR,BOTD,JITR,FFLN,OBST,BOTM,BOTV
-files: engine/crates/core/src/,engine/crates/game/src/,engine/crates/render/src/,engine/crates/game/examples/,engine/artifacts/loop/PERF.md,scripts/
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-02
-alpha: yes
-defer: post-alpha
+status: archived
+issue: 93
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #93](https://github.com/sprucey149/openbf/issues/93).
 
 ## ORDER (the maintainer, 2026-10-02 17:40) - HELD until the bot redesign is in
 "Run PERF after the AI redesign and before the card that tests how many can run at a time and still hit 60 fps and what the defaults per map should be. So the defaults decisions land after the profiling card is done, when the updated bots are already in."

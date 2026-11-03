@@ -1,21 +1,10 @@
 ---
 id: BOTM
 title: Bot-quality numbers in the sweep, the PS2's beside the port's: jitter (reversals, path / net), standing-next-to-each-other, team kills, wall contact, time in contact - so 'the bots look wrong' is a gate, not the maintainer's eye
-milestone: M3
-value: 5
-phase: measure
-status: done
-deps:
-files: engine/crates/game/examples/round_to_outcome.rs,engine/crates/game/src/unit_probe.rs,scripts/sweep_seeds.py,scripts/gates.py,scripts/bot_quality.py,scripts/bot_quality_ps2.json,analysis/bot-quality.md,engine/CRATES.md
-declares:
-needs:
-effort:
-branch: botm
-resume:
-created: 2026-10-02
-alpha: yes
-first: 3
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Every bot defect so far was found by the maintainer playing (bowl, walls, tweaking, team kills). The sweep proves rounds END; nothing measures whether a bot MOVES like a soldier. The PS2's own soldiers are the yardstick, and where the maintainer wants better than the PS2, BOTD sets the bar.

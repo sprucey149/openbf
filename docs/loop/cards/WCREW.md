@@ -1,20 +1,11 @@
 ---
 id: WCREW
 title: A command walker wedged with its crew holds a round open: BF1 Geonosis seed 3 never ends (7 Republic alive, all riders of three walkers that do not move, one inside cp2's capture region so the post stays contested; COMMAND_ENDGAME is 6) - on main a crew wedges at the same spot (50, 124) in seed 281, 16 of 480 rounds have a wedged crew
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/walker_drive.rs,engine/crates/core/src/ai/ride.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: wcrew
-resume:
-created: 2026-10-15
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Found by HJAM's land job (2026-10-15): the fidelity gate refused HJAM on finished_pct over all maps 100.00 -> 99.61 - BF1
 Geonosis seed 3 gives NO OUTCOME in 60000 ticks. All 7 Republic survivors ride three walkers that stopped moving (noprog

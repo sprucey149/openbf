@@ -1,22 +1,11 @@
 ---
 id: TEAMS
 title: Special teams survey: every special roster on both discs (Wampas, Ewoks, Gungans, Geonosians, Naboo guards, Wookiees, Jawas/Tuskens, BF2's hunt rosters, BF1's historical rosters) — classes, weapons, items, sounds, movement, which LVLs and missions load them; verify the BF1 _h vs IA diff
-milestone: M4
-value: 2
-phase: re
-status: blocked
-deps:
-files: analysis/survey-special-teams.md (new)
-declares:
-needs:
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-09-28
-defer: post-alpha
-public_issue: https://github.com/sprucey149/openbf/issues/22
-tries: 2
+status: archived
+issue: 22
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #22](https://github.com/sprucey149/openbf/issues/22).
 
 ## Why
 The maintainer (INBOX 2026-09-28, DECISION 2): special teams and modes become options, played the conquest way. Eventually the

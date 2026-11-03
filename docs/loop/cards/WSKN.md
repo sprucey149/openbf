@@ -1,19 +1,11 @@
 ---
 id: WSKN
 title: The walker drawn alive: the skinned walker GLB (VBAKE left walkers rigid) and its clips played from WALK's anim state — the idle/leftup/rightup layers, the legs' planted turn steps, the pitch/roll bone
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: WALK
-files: engine/crates/bake/src/vehicle.rs,engine/crates/bake/src/walker.rs,engine/crates/bake/src/glb.rs,engine/crates/bake/src/skin_glb.rs,engine/crates/game/src/viewer/vehicles.rs,engine/crates/game/src/viewer/walker_pose.rs,engine/crates/game/src/assets.rs,engine/crates/core/src/vehicle/walker.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/examples/walker_drive.rs
-declares: rebake=side; goldens=any; leak
-needs:
-branch: wskn
-resume:
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Walkers draw rigid in their skel bind pose (VBAKE). After WALK an AT-ST would slide across the ground without
 stepping: its feet never plant and its turn steps are invisible.

@@ -1,20 +1,12 @@
 ---
 id: WHULL
 title: A walker's hull follows its drawn pose: the PS2 hangs every collision prim on the walker's LIVE bone matrices (rewritten each update), the port bakes them at the bind - a parked spider's legs and feet sit 3.4-4.3 m from the drawn ones, rockets at its drawn legs pass through (10 of 16) while rockets into the empty air beside it explode; the AT-TE's main barrel 3.85 m off
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/vehicle/walker.rs, engine/crates/bake/src/walker.rs, engine/crates/manifest/src/lib.rs, engine/crates/game/src/vehicle_pads.rs
-declares: rebake=side; sim; sweep
-needs: environment — Restore both side vehicle and GEO1 bakes/missions, extracted discs and audit-rkhul readers/raw drawn-shot evidence.
-effort:
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Retake current-main drawn-point/bind-point shots and live-pose coverage before implementing hull posing. Retain 42/42,46/46,95 percent,spider4730,walk7/8,RKEX and full rebake/sim/sweep bars. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-10-22
-alpha: yes
+status: archived
+issue: 98
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #98](https://github.com/sprucey149/openbf/issues/98).
+
 ## Why
 AUDIT RKHUL (2026-10-22, landing a88147b, measured on the landing tree against main's shared bake): RKHUL puts each walker collision prim through its PRNT bone's BIND matrix, but the game draws a walker posed by its clips (game/src/viewer/vehicles.rs:334, `rig.palette(&v.walker, root_scale)`), and the PS2 hangs every prim on the walker's LIVE bone matrices:
 - PS2 [O] static read, two separate workflow readers + own re_check: the body matrix is XFRM x table[PRNT hash] (B2/B1 FUN_00160160, row vectors, XFRM first - the port's order). The BF2 walker's physics vtable 0x61f7f0 slot +0x4c (word 0x61f83c = 0x267438: `jr ra; addiu v0,a0,0x1d6c`) hands its ray / target queries the table at E+0x1d7c; the ctor FUN_00259970 (B2:175724) fills it with POINTERS to the skeleton instance's per-bone matrices (E+0x550+0x10+0x40 i), and FUN_00261208 (B2:180841) rewrites them every update through FUN_00533f20 -> FUN_00533d38. BF1: vtable 0x533a80 slot +0x44 (0x21fd10: `addiu v0,a0,0x1dc0`), table E+0x1ec0, rewritten by FUN_00440b38 in FUN_0021b3a0 (B1:131561). Not sampled in RAM. See analysis/re-walker.md 17.

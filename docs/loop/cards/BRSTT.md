@@ -1,21 +1,11 @@
 ---
 id: BRSTT
 title: BRSTU's heat bursts are refereed only on the gross cases (AUDIT BRSTU): 18 of 33 mutations survive every test, 11 on paths a battle reaches - a seat gun unlimited by one rule only (BF1 gun turret 27,509 shots), a two-weapon seat's heat, the 0.99 caps that keep BF1's speeder cannon, fighter-tank / spider lasers and AT-TE turret cannon firing, the weapon-kind reset, multi-shot salvos, on-foot heat waiting, a counted single-shot seat gun's tap
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps: BRSTU
-files: engine/crates/core/src/ai/man/tests.rs
-declares:
-needs: cloud prerequisites: branch brstt, baked assets, missions and reference evidence absent
-effort:
-branch: brstt
-resume: (private workflow note omitted)
-created: 2026-10-21
-alpha: yes
-domain: vehicle
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT BRSTU (2026-10-21, `engine/artifacts/lead_tmp/audit-brstu/EVIDENCE.md`, `audits.md`): the heat-burst rule is the PS2's and the
 code is right on every case checked, but its tests pin only the gross mutations. Of 33 audit mutations (`lead_tmp/audit-brstu/tools/mk_mut.py --list`,

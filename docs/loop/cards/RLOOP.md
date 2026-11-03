@@ -1,21 +1,11 @@
 ---
 id: RLOOP
 title: A bot that re-plans again and again without moving is ended, not left: on BF2 Dagobah two bots alternate recover (10 s) and travel (2 s) against one barrier for 150 s each (main 8ad30f4, seed 7) with `lost 0`, `level 0`, a `stuck` event every 6-12 s and nothing that stops it - after N failed recoveries with under 2 m of net movement the bot is lost (RETW's floor path back) or recycled
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: RETW
-files: engine/crates/core/src/ai.rs,engine/crates/core/src/ai/stall.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/sim/bounds.rs,engine/CRATES.md,scripts/loop_spells.py
-declares: sweep; arena; sim
-needs:
-effort:
-branch: rloop
-resume: LANDED 70b9c47 (+70bfa91, a059815) 2026-10-15 18:40: floor-walk give-up; report reports/20261015_1840_card_RLOOP.md. Open for the planner: wire scripts/loop_spells.py into fidelity; BF2 Kashyyyk pen (46,28,-109) is the one spot left over 30 s.
-created: 2026-10-11
-alpha: yes
-first: 3
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-11 (chat), of the Dagobah stand: "when bots die and respawn, they just stand there as is for a few minutes?" The
 cause of THAT spot is card DAGS (a first leg aimed at a hub 8 m below the spawn). This card is the safety net under every case

@@ -1,21 +1,11 @@
 ---
 id: GODR
 title: Godrays: the PS2 draws faint light shafts (BASE godray) wherever a map's FX file enables them and a godray class seeds rays - BF1 / BF2 Endor's 135 / 134 placed clusters (1,080 rays live in RAM on BF1 Endor), Yavin 1's cluster and leaf trees, Geonosis and Felucia's attached rays; the port has no godray code (analysis/re-skipped-classes.md 4)
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files: analysis/re-skipped-classes.md
-declares:
-needs: restore both PS2 corpora/ELFs and original SKIPC godray RAM/capture kit with paired poses/frames; real map bakes and rendering inputs before validation
-effort:
-branch:
-resume: 20261025_0352 input hold; 40 canonical/cited paths absent. Restore primary evidence before retry; engine/artifacts/loop/reports/20261025_0352_card_GODR.md and private continuation below. Draw and tree-attachment questions remain open; Acceptance unchanged.
-created: 2026-10-15
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The PS2 draws light shafts in Endor's forest (and on Yavin 1, Geonosis, Felucia); the port draws none. Found by card SKIPC's RE
 (2026-10-15): `analysis/re-skipped-classes.md` section 4 [O] has the class (B1 FUN_00370fc0 / FUN_00370d18, B2 FUN_00455760 /

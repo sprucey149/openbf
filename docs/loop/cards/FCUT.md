@@ -1,21 +1,10 @@
 ---
 id: FCUT
 title: The fusion cutter works: the repair weapon class in a soldier's hands - an amount per target type once per ShotDelay on the acquired target (BF2: pad +50, destroyed +50, damaged building +100, vehicle +200 every 0.5 s; BF1 +30 / +20 / +60 / +60) - and the green build hologram over an unbuilt pad, drawn only for a living player who carries a cutter
-milestone: M2
-value: 4
-phase: build
-status: todo
-deps: TBLD
-files: engine/crates/core/src/weapon.rs,engine/crates/core/src/sim/ordnance.rs,engine/crates/core/src/aim_assist.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/game/src/roster.rs,engine/crates/game/src/viewer/holo.rs (new),engine/crates/game/src/viewer/vehicles.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-03
-alpha: yes
-domain: vehicle
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 A pad becomes a turret only by a repair to full health (card TBLD's RE, `analysis/re-build-zones.md`). The tool is the

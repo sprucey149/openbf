@@ -1,18 +1,10 @@
 ---
 id: VHULL
 title: Parked hulls are solid: a spawned vehicle's coll/prim bodies join CollisionWorld at its transform — soldiers stop at it, bolts hit it (VDMG's hull pool goes live), AI rays see it; a declared sim/sweep move
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VDRAW
-files: core/src/sim/vehicles.rs,core/src/collision/world.rs,game/src/vehicle_pads.rs
-declares: sweep
-needs:
-branch: vhull
-resume: landed a8da834f 2026-09-29
-created: 2026-09-26
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 After VDRAW, a parked vehicle is visible but soldiers walk through it and bolts fly through it; VDMG's hull damage

@@ -1,18 +1,11 @@
 ---
 id: WTUN
 title: Soldiers walk through walls with no push (LEAK census class tunnel: 2k-12k runs per map): the soldier's axis crosses a SOLDIER-layer wall face while the wall pass pushes < 0.25 m — find why push_out lets it (suspect [H]: push_out keeps only each mesh body's DEEPEST triangle contact and drops the body when that contact's normal is sloped, |n.y| >= 0.5, so a wall in the same body gets no push), fix, and drive the census's tunnel count down
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: LEAK,JWAL
-files:
-declares: leak; sweep; arena; sim
-needs:
-branch: wtun
-resume: landed 96d61731 2026-09-29
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The LEAK census (game/examples/leak_census.rs, report reports/20260929_*_card_LEAK.md) drives a real soldier at every soldier-layer wall of all 32 maps. Class `tunnel`: between two ticks a point of the soldier's axis above the step (0.8/1.25/1.7 m) crossed a wall face (|n.y| < 0.5) while the wall pass pushed less than 0.25 m. The axis sits inside the 0.5 m capsule, so a legal move never crosses a face: every one is a soldier walking into a wall.
 

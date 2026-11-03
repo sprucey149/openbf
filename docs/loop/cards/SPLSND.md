@@ -1,20 +1,11 @@
 ---
 id: SPLSND
 title: Extract sound playback from sounds.rs into a private module while preserving lookup, mixing, APIs and every sound rule
-milestone: M0
-value: 1
-phase: cleanup
-status: parked
-deps:
-files: engine/crates/game/src/sounds.rs,engine/crates/game/src/sounds/playback.rs,scripts/size_waivers.txt
-declares:
-needs: real-bank/device scenes and original full gates
-effort:
-branch:
-resume: Implemented ad97323; pending original acceptance. Restore named inputs and run ordered checks in reports/20261026_1058_card_SPLSND.md; preserve parent and earlier validation debt.
-created: 2026-10-26
-tries: 1
+status: archived
+issue: 6
 ---
+
+Historical technical record. Recorded state before archival was `parked`. Current scope and ownership are on [issue #6](https://github.com/sprucey149/openbf/issues/6).
 
 ## Why and evidence
 At the source parent, SPL8's `sounds.rs` had 1,864 lines and combined

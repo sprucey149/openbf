@@ -1,20 +1,10 @@
 ---
 id: SNDC
 title: Gameplay audio census: which sounds the PS2 plays in a battle (weapons, impacts, explosions, vehicles, foley, voice, music, ambience, UI) against what the port plays — one table per game on a showcase map, a card per gap
-milestone: M1
-value: 5
-phase: measure
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX note 2026-09-29 22:40, item 1: M-ALPHA must "sound like a game". Only SNDP (value 1, sample edge cases)

@@ -1,19 +1,10 @@
 ---
 id: ENGR
 title: Engineer and pilot bots serve: repair vehicles, turrets and buildings and give health / ammo to the HUMAN within 75 m (never to an AI), lay mines at Mine hints, and the three one-line special-weapon rules (cloak with no threat, buff with 3 friends in range, auto-turret against a cluster) - the port's bots do none
-milestone: M3
-value: 3
-phase: build
-status: todo
-deps: BOTD,GRAI,TEAM,MINE,FCUT
-files: engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/commander.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: MINE dispenser/mine and FCUT repair are required before original four serving checks; restore cited captures/runtime data and retake on current main. reports/20261024_1151_planner.md
-created: 2026-10-02
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 On the PS2 a friendly engineer or pilot bot walks up to the player and drops health / ammo, repairs the vehicle or

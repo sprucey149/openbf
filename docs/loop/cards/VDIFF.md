@@ -1,20 +1,12 @@
 ---
 id: VDIFF
 title: What differs between the PS2, Xbox and PC versions of both games: class / weapon ODF values, mission values, collision, terrain and placed objects, animation clips, and what each version has alone - a table per game in analysis/version-diff.md, counts first, the 10 largest differences each
-milestone: M0
-value: 4
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: Restore named raw inputs in lead_tmp/vdiff/preflight.json and identify owned Xbox/PC BF1 retail sources; rerun preflight.py, then implement all six per-map/side comparisons and top-ten rankings. No parity measurement or acceptance earned; see reports/20261024_1130_card_VDIFF.md.
-created: 2026-10-21
-alpha: no
+status: archived
+issue: 98
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #98](https://github.com/sprucey149/openbf/issues/98).
+
 ## Why
 INBOX 2026-10-21 19:30 (the maintainer asked to know the differences). The maintainer's rule: one game under the hood, whatever discs the
 player owns - another version may change only the look. Before any non-PS2 base work we need to know whether the

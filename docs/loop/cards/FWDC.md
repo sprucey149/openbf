@@ -1,21 +1,11 @@
 ---
 id: FWDC
 title: BF1 Geonosis cp2's building is missing: rep_bldg_forwardcenter (BASE commandpost, model + skel + collision in side REP.LVL, loaded by the conquest script's ReadDataFile) is drawn and solid on the PS2 and has no model and no body in the port - bake the side-LVL buildings a mission names and merge them into the battle's scene (analysis/re-skipped-classes.md 5)
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/side_classes.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/assets.rs
-declares: rebake=side; sweep
-needs: Restore BF1 side/map/common LVLs, PS2 damage trial and paired poses, census kit, bakes/missions/goldens and GPU before retry.
-effort:
-branch:
-resume: 20261025_0339 pre-build hold: 0/22 named inputs present; resolve PS2 destructibility and exact visible golden panels before implementation; see engine/artifacts/loop/reports/20261025_0339_card_FWDC.md. No unchanged-input retry.
-created: 2026-10-15
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 BF1 Geonosis cp2 (the Republic's forward command center) is a large hull with a tower and a ramp on the PS2 and open desert in
 the port, in a battle too; bots and the player walk through where it stands. Found by card SKIPC's RE (2026-10-15),

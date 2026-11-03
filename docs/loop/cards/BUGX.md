@@ -1,19 +1,11 @@
 ---
 id: BUGX
 title: Bug checks, each a test whether or not it reproduces: (a) bots shoot corpses or heal / resupply dead bodies; (c) the hit-direction chevrons carry into the next life; (d) no respawn after a death in water or after Suicide
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps:
-files: engine/crates/ui/src/menu.rs, engine/crates/game/src/main/windowed.rs, engine/crates/game/src/main/windowed/front.rs, engine/crates/game/src/pause.rs, engine/crates/game/src/lib.rs, engine/crates/game/src/walk.rs, engine/crates/core/src/sim.rs, engine/crates/core/src/sim/input.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/combat.rs, engine/crates/game/src/main/headless.rs, engine/crates/game/src/blackbox.rs, engine/crates/game/examples/round_to_outcome.rs, engine/crates/game/tests/suite/bug_checks.rs, engine/crates/game/tests/suite/main.rs
-declares:
-needs: (private workflow note omitted)
-effort:
-branch: bugx-suicide-20261024
-resume: 20261025 local pass 3: Respawn slice validated headless on 6 real maps with mutation controls; fix_pass3.patch (disc key game.pause.suicide + stuck-command test) proven, not applied. Owed: live window steps, localized popup/Yes/No text, medic/ammo soldiers.
-created: 2026-10-21
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
+
 ## Why
 INBOX 2026-10-21 20:00 item 5 (an outside review's list; the PS2 corpus decides each). Item (b), a weapon that does no
 damage to the player, is folded into NODMG.

@@ -1,20 +1,10 @@
 ---
 id: AIMA
 title: The PS2's default shooting angle: the shot leaves above the camera axis (RETC measured the reticle ~5 degrees above the view centre), so the camera can look down without the bullets going into the ground - RE the aim ray, then match it in the sim and put the HUD reticle at that height
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/input.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/unit.rs,engine/crates/game/src/walk.rs,engine/crates/ui/src/hud.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/bolt_vis.rs
-declares: sim; arena; goldens=tat1_hud.png
-needs:
-effort:
-branch: aima
-resume: landed 24b8acd0 2026-10-02
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02: "the original ps2 games had the marker for where the bullet goes higher up, so the camera could be

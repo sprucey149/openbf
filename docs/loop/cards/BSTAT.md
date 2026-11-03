@@ -1,19 +1,12 @@
 ---
 id: BSTAT
 title: Bots' battle stats: RE what the PS2 keeps per bot during a round (kills, deaths, points, captures) for the end-of-round stats screens, and whether it is thrown away after the screens; build the port's per-bot tallies to match
-milestone: M3
-value: 3
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-28
+status: archived
+issue: 50
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #50](https://github.com/sprucey149/openbf/issues/50).
+
 ## Why
 The maintainer 2026-10-28: "We also need to track the stats of bots, because we have the stats screen now ... Check how the originals track bot stats though, I think it all just gets thrown away after the stats screens are finished being looked at." the maintainer is building the post-battle stats screens (issue #50).
 

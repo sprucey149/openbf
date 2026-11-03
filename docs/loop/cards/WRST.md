@@ -1,20 +1,11 @@
 ---
 id: WRST
 title: The super battle droid's wrist rocket: no soldier of the port holds it - a channel-1 weapon that is not thrown is dropped by roster::held_slots, so neither the player nor a bot can fire it (found by card HVYW, whose choice rule for it runs on a fixture only); build the secondary-channel missile for the player and the bots (the maintainer's INBOX 2026-10-12 16:20 names it)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: HVYW
-files: engine/crates/game/src/roster.rs,engine/crates/core/src/sim/ordnance.rs,engine/crates/core/src/ai/arsenal.rs,engine/crates/core/src/ai/gunner_foot.rs
-declares: sim; sweep; arena
-needs: restore real BF1/BF2 class/map/vehicle bakes and missions, HVYW census helper and primary channel-1 cannon evidence; approved gate device unavailable
-effort:
-branch:
-resume: Cloud checkpoint reports/20261024_0902_card_WRST.md; restore lead_tmp/wrst_20261024_0902/inventory.json inputs, recheck baked held slots and channel-1 cannon trigger/aim/HUD, baseline current main then isolated build with mutation scenes and paired 8x32 wrist census; no implementation or landing.
-created: 2026-10-13
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer's note of 2026-10-12 16:20 asks that a super battle droid fire its wrist rockets at vehicles and at groups. Card HVYW built the
 choice (a heavy weapon: at a vehicle, or at a crowd of 3 within 9 m, never at a lone man) and found the weapon is in nobody's hands.

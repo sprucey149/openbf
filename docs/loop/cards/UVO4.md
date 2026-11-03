@@ -1,19 +1,11 @@
 ---
 id: UVO4
 title: BF2's unit voice in the fight: the port says 0.63-0.64 of the PS2's VOSound lines a minute beside a front-line team-mate (UVO2's census) - friendly hits a fifth of the PS2's, no repair or SC trigger, riders as objects untyped, HeadshotKill, the Wookiee's unbaked wok2_ takes, the black box's hash names
-milestone: M3
-value: 3
-phase: measure
-status: done
-deps: UVO2
-files: engine/crates/game/src/vo.rs, engine/crates/game/src/announce.rs
-declares:
-needs:
-effort:
-branch:
-resume: 2026-10-16 planner: MERGED into UVO3 (batch: same files and census); its text is under UVO3's '## Merged: UVO4'.
-created: 2026-10-16
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card UVO2's census beside a front-line team-mate (`lead_tmp/uvo2/census/tab_fight.txt`, 8 seeds x 240 s, CW) reads 0.64 (UTA1) / 0.63 (MYG1) of the PS2's VO lines a minute (5.25 / 6.88 against 8.25 / 11.0): AcquiredTarget passes 0.78 / 0.69 of the PS2's, FriendlyFire 0.18 / 0.19 (0.22 / 0.28 against 1.25 / 1.5), and the PS2's RepairStart (0.25 / 0.5) and SC responses (0-0.5) have no port trigger. Each line property is held by its 40 +- 20 s gate, so the rate is the number of DISTINCT lines asked: more target kinds (turrets, hovers, walkers as objects) raise it.
 

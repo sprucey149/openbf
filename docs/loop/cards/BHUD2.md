@@ -1,21 +1,11 @@
 ---
 id: BHUD2
 title: The BF2 HUD, part 2 — draw it: a HUD interpreter over BHUD's baked tree (Group, Bitmap, BarBitmap, BarSegmented, Text, Model3D; fader, colour pulse, z-order, Shadow) with the PS2's own screen mapping and Hor+ anchors, fed from the sim — health, stamina, weapons + ammo (BF1 IconTexture fallback), reinforcements, the reticle; retires the egui placeholder
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BHUD
-files: engine/crates/ui/src/hud.rs, engine/crates/render/src/ (a HUD pass: textured quads + unlit meshes, no depth), engine/crates/game/src/main/battle.rs (hud_model feed), engine/crates/game/src/hud_feed.rs (new, if the feed outgrows battle.rs), engine/CRATES.md
-declares: goldens=tat1_hud.png,tat1_spawn.png; rebake=common
-needs:
-effort:
-branch: bhud2
-resume: landed ea3883c6 2026-10-02
-created: 2026-09-30
-alpha: yes
-domain: render
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 analysis/re-hud.md §2–§4 (card BHUD's RE): the PS2 draws every HUD element from the hud_ tree under one camera; the port's
 HUD (engine/goldens/tat1_hud.png) is an egui placeholder in neither BF2's layout nor its art.

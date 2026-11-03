@@ -1,20 +1,11 @@
 ---
 id: OBST2
 title: The rest of the bot design's avoidance after OBST: barriers as a keep-out walked by their corners every step, parked vehicles' and turrets' footprints, soldiers and moving vehicles in velocity space (8 bots each way through a 3 m corridor), the probe only off checked ground (cost halved, B13), the black box's unit row
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: OBST,OBSF
-files: engine/crates/core/src/ai/avoid.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/steer.rs,engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/nav.rs,engine/crates/core/src/collision/shape.rs,engine/crates/core/src/collision/walls.rs,engine/crates/core/src/sim/state.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch:
-resume: CLOSED by the planner 2026-10-12 14:22 after its third landing (7dfb448 the corner search, 600fac7 + 996313a the black box's row, fe043b4 + 03422f5 the cost cuts and the closed-form cylinder ray). What was left went: item 2 (footprints of parked vehicles and turrets) and the shape.rs test cases -> card OBSV; B13's cost bar (0.187 ms a tick for 0.123) -> a note on PERF; item 3 (velocity space) not built - the corridor scene passes on main, a looks question; B10's residue and variant h1 measured and not taken. Undo: loopctl.py set OBST2 status=todo. Binaries and tools: lead_tmp/obst2/README.md
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card OBST (landed e9ce6db, 2026-10-07) built the part of `analysis/bot-design.md` 4.7 that its census named: a bot goes round a body on ONE side (a commitment), turns an inside corner along the next wall, leaves the obstacle only when the free straight way ends nearer its aim point than the walk has been, and walks by a small body before it touches it (`core/src/ai/avoid.rs`). Stalled 10 s windows 2.44 % -> 1.13 %, a bot at a map body 2,832 -> 808, recycles 105 -> 64 over 256 rounds (report `loop/reports/20261007_*_card_OBST.md`). The design's other steps were NOT built, and three of its bars are not met.
 

@@ -1,20 +1,11 @@
 ---
 id: HVYA
 title: Audit HVYW follow-up: a flyer is attacked as the PS2's test says (a weapon that is not too weak at any speed, both games; BF2's state / 16 m/s only for a weak one), the vehicle choice's wiring from live state gets tests (9 of 13 audit mutations passed every test), and the PS2's explosive claim on MISSILES is read for a vehicle target
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: HVYW
-files: engine/crates/core/src/ai/arsenal.rs,engine/crates/core/src/ai/arsenal/tests.rs
-declares:
-needs: cloud prerequisites: branch hvya, baked assets, missions and reference evidence absent
-effort:
-branch: hvya
-resume: (private workflow note omitted)
-created: 2026-10-15
-alpha: yes
+status: archived
+issue: 97
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #97](https://github.com/sprucey149/openbf/issues/97).
 
 ## Why
 AUDIT HVYW (2026-10-15, `loop/audits.md`, PARTLY). Card HVYW's numbers all reproduce and its reading of the PS2's

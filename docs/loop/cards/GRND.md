@@ -1,20 +1,10 @@
 ---
 id: GRND
 title: The ground query is one ray: a soldier standing on a slit between collision floor pieces (KAM1's cloning rooms) falls 7.9 m onto the hidden soldier-only disc, and a steep face over a walkable one hides it - the PS2 soldier stands (drop test 69.272 vs 69.273)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: STHOP,GSKIP
-files: engine/crates/core/src/collision/rays.rs,engine/crates/core/src/sim/state.rs,engine/crates/game/examples/floor_census.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume: closed: built in 3c7b00c (foot ring + ray past a steep face); lead_tmp/grnd-fable/README.md. Left for a new card: the census as examples/floor_census.rs, the other 30 maps, the shallow 0.3-0.6 m holes
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's "invisible floors/platforms" on Kamino. The hidden collision under the map is the disc's own (a soldier-only

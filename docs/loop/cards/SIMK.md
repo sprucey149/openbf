@@ -1,19 +1,10 @@
 ---
 id: SIMK
 title: The sim constants still PROVISIONAL in `core` — sprint recovery, unit separation, spawn-slot bookkeeping, jump height, ammo/reload edge cases — and the A.1/A.2 constants re-read
-milestone: M3
-value: 2
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 5 and §Standing backlog 4 (briefed: `engine/artifacts/briefs/brief_a4_constants.md`, a five-sweep budget, never

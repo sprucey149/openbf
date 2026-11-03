@@ -1,19 +1,11 @@
 ---
 id: TAIM
 title: Bots in BF2's recoilless turrets (MYG1, KAS2) and BF1 Geonosis' geoturret never fire: the barrel never comes inside the gunner's 2-degree cone - the aimer's pitch sits ~0.35 rad above the line to the target (found by card TURR)
-milestone: M3
-value: 4
-phase: build
-status: done
-deps: TURR
-files: engine/crates/core/src/ai/gunner.rs, engine/crates/core/src/sim/guns.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume: MERGED into TURR 2026-10-16 (planner 1016b): built as TURR's step A on branch turr, because TURR holds until its gunners fire (Q56 default). Re-open (status=todo, deps=TURR) if the maintainer takes TURR's kill cost and it lands without the fix.
-created: 2026-10-16
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card TURR (branch turr, 33016bf) has bots man building turrets. On three maps they sit and never fire (seed 1, `ROUND_VERBOSE=1 round_to_outcome 36000 1 <map>`, the `turrets:` line): BF2 MYG1 21 spells, 0 with a shot; BF2 KAS2 8 spells, 0; BF1 GEO1 50 spells, 4 with a shot (0.2 bolts a seated minute). TURR's exit 2 (45 s seated, no shot in 20 s) puts them out, so the cost is bounded, but a gunner that never fires is the purposeless camping the maintainer named.
 

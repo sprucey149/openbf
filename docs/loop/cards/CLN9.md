@@ -1,21 +1,10 @@
 ---
 id: CLN9
 title: KAM1's ocean: the per-frame foam routing has no test, and the FFT runs on a wrapping clock
-milestone: M0
-value: 2
-phase: cleanup
-status: blocked
-deps:
-files: engine/crates/game/src/water_anim.rs, engine/crates/game/tests/suite/water_anim.rs, engine/crates/game/src/main/windowed.rs, engine/crates/game/src/main/headless.rs, engine/crates/game/src/viewer/scene.rs, engine/crates/game/examples/water_frames.rs, engine/crates/render/src/lib.rs, engine/crates/render/src/pipelines.rs
-declares:
-needs: main-green — current-main normal full gates after AIMG/HASH motion, sweep/arena and protect-approval debt; prior CLN6 failure already repaired, historical combined CI1932/53 passed
-effort:
-branch:
-resume: 20261024_2231 planner: retain complete CLN9-own local receipts and the surviving windowed-wiring mutation caveat; CLN6 fixture fix69ddd8f is committed and later combined CI1932/53 passed. Current-main full gates remain owed. Do not reapply fixes or close from historical receipts alone. See engine/artifacts/loop/reports/20261024_2231_planner.md.
-created: 2026-09-25 (from QUEUE.md)
-acceptance: CPU foam mesh routing mutation fails; ocean and foam clock continuity mutations fail; full CI +2 tests, unchanged time-zero goldens/GPU and sim replay/simhash/sweep gates pass
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why / Evidence / Acceptance
 Why: the base sea must keep its opaque mesh while foam uses the alpha-bearing copy; ocean phase must continue when the material clock wraps.

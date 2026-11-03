@@ -1,20 +1,11 @@
 ---
 id: BZONE1
 title: Buildable turrets on BF1: com_weap_gunturret authors the same build-zone + hologram props as BF2's unbuilt-at-start turrets (VTUR2) — does BF1 start them unbuilt? Find the zone key's ELF reader in both eras and a PS2 frame/RAM read of a BF1 gun turret at battle start
-milestone: M2
-value: 4
-phase: build
-status: todo
-deps: BLDR
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 VTUR2 found that BF2's buildable turrets start UNBUILT. The PS2 shows a flat `com_prop_buildzone` pad, not the
 turret, at BF2 COR1 / TAT2 / YAV1. Their `built` twins stand as turrets. The marker is entc PROP 0x97C931C5 =

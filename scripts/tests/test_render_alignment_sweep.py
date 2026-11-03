@@ -106,6 +106,31 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn('past its listed 0.900 m', problems[0])
 
+    def test_near_repair_limit_cannot_hide_below_the_general_ceiling(self):
+        witness = dict(geometry='fel1_bldg_bladder', state='model', scene_extra_m=.20,
+                       in_playable_boundary=True, below_all_ps2_terrain=False, world=[0, 0, 0])
+        report = dict(maps=[dict(source='xbox', map='bf2_fel1',
+                                objects=dict(witnesses=[witness], unknown=[]),
+                                terrain=dict(worst_excess_m=0.0))])
+        # A broad known exception must not mask a repaired near model either.
+        known = {('xbox', 'bf2_fel1', 'fel1_bldg_bladder'): (1., 'distant model')}
+        self.assertEqual(len(gate_problems(report, .25, known)), 1)
+        witness['scene_extra_m'] = .14
+        self.assertEqual(gate_problems(report, .25, known), [])
+        witness.update(state='lowd', scene_extra_m=.20)
+        self.assertEqual(gate_problems(report, .25, known), [])
+
+    def test_new_maps_allow_only_five_mm_growth_of_an_outstanding_row(self):
+        witness = dict(geometry='remaining', state='model', scene_extra_m=.504,
+                       in_playable_boundary=True, below_all_ps2_terrain=False, world=[0, 0, 0])
+        report = dict(maps=[dict(source='xbox', map='bf1_rhn2',
+                                objects=dict(witnesses=[witness], unknown=[]),
+                                terrain=dict(worst_excess_m=0.0))])
+        known = {('xbox', 'bf1_rhn2', 'remaining'): (.5, 'outstanding')}
+        self.assertEqual(gate_problems(report, .25, known), [])
+        witness['scene_extra_m'] = .506
+        self.assertEqual(len(gate_problems(report, .25, known)), 1)
+
     def test_gate_fails_an_unlisted_unmeasured_placement(self):
         report = dict(maps=[dict(source='pc1', map='bf1_bes2', objects=dict(witnesses=[], unknown=[
             dict(identity=[0, 1], name='listed', reason='source placement differs from PS2'),

@@ -1,21 +1,11 @@
 ---
 id: PRIMB
 title: Collision prims of non-door geometries rest in their PRNT bone's frame too: census every prim whose bone binds off the identity, then put them through the bind matrix (DEA1's trash compactor walls collide back to back while drawn 12-20 m apart)
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/bind_pose.rs,engine/crates/bake/src/map.rs,engine/crates/bake/src/vehicle.rs
-declares: rebake=maps; leak; sweep
-needs: restore both games map/side LVLs, DEA1 evidence and runtime validation inputs before retry
-effort:
-branch:
-resume: 20261025_0010 input hold; census unmeasured; existing door/vehicle bind handling retained; restore inputs then census ordinary props before broadening rest_prims; engine/artifacts/loop/reports/20261025_0010_card_PRIMB.md
-created: 2026-10-01
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 STDOR (2026-10-01) showed a door's PRNT prims are stored in their bone's frame, as BNAM segments are (TBIND), and put DOOR geometries' prims through the bind matrix (`BindPose::rest_prims`). Every other geometry's prims are still read as model space (`mungefs::coll`'s PROVISIONAL), so a prop whose bones bind off the identity collides where it is not drawn.
 

@@ -1,19 +1,11 @@
 ---
 id: RKHULT
 title: RKHUL's tests pin neither the prim rotation's ORDER (mutation passes all 161, moves 162 of 921 side prims) nor a chunk / non-bone-space prim (6 shipped prims); TAT1's map-local skiff keeps 5 prims at the identity rule (fins 4.0 m off); two stale comments
-milestone: M2
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/vehicle.rs, engine/crates/bake/src/bind_pose.rs, engine/crates/game/src/vehicle_class.rs, engine/crates/bake/src/map.rs
-declares: rebake=tat1; ci=+5
-needs: apply the proven real-data M4/N6 prim test (lead_tmp/cloudval/RKHULT/fix.patch, tests only); the maintainer's go-ahead for the tat1 rebake through gates (declares rebake=tat1; changes the skiff's collision); no PS2 RAM ref of the skiff's collision bodies yet
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-22
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT RKHUL (2026-10-22). The landing's rule is right (the PS2's XFRM x bone order, B2/B1 FUN_00160160; the bake equals the drawn skin GLB's bind x raw XFRM on 283 walker prims, worst 3.3e-6), but its tests pin less than the rule:
 - Mutation M4 (rotation composed in the order bind x XFRM instead of XFRM x bind, `bake::bind_pose::prims_at_bind`) passes all 161 bake tests and changes the rotation of 162 of 921 baked side prims (59 by more than 0.5 in a matrix entry; BF2 CIS p_cannonR, IMP p_wing_R, p_-so_cube8L/R, GUN p_tail, the AT-ST p_r_thigh). The walker test checks translations only; the door test's prims have identity rotations, where the order cannot show.

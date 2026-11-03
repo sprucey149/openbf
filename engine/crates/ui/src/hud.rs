@@ -279,6 +279,8 @@ pub struct HudModel {
     /// The edges the player's hits lit since the last frame (card HATK,
     /// `crate::hud_ambush::edge`); each restarts its chevron once.
     pub ambush: Vec<crate::hud_ambush::Edge>,
+    /// Full-screen local damage flash opacity, 0..1.
+    pub damage_flash: f32,
     /// The spawn screen drawn in the HUD's frame (card SSELB,
     /// `crate::spawn_draw`); `None` = none up.
     pub spawn: Option<crate::spawn_draw::SpawnPage>,
@@ -459,6 +461,7 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     hud.map = m.map.clone();
     hud.squad = m.squad.clone();
     hud.capture = m.capture;
+    hud.damage_flash = m.damage_flash;
     for &e in &m.ambush {
         hud.ambush.hit(e);
     }
@@ -993,6 +996,7 @@ mod tests {
 
     fn model() -> HudModel {
         HudModel {
+            damage_flash: 0.0,
             gauge: Default::default(),
             leaving: None,
             team_names: ["rep".into(), "cis".into()],

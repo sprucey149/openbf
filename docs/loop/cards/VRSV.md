@@ -1,20 +1,10 @@
 ---
 id: VRSV
 title: Bots keep a free vehicle for each human teammate near it (the maintainer, 2026-10-07): while a human is within a range of an unoccupied vehicle the bots leave one claimable vehicle per human alone, released when the human walks off or has stayed in range about 20 s without boarding
-milestone: M2
-value: 3
-phase: build
-status: todo
-deps: VSWP,TURR
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 The maintainer, 2026-10-07: "Maybe if there is an unoccupied vehicle(s) near the user, the bots will save 1 vehicle per teammate user in case the user wants to use it. There should be a range and a timer for this though, like if the user gets so far away, the last vehicle is up for grabs, or if the user is within the vehicle range for say like 20 seconds and hasn't jumped in, it is also up for grabs again."

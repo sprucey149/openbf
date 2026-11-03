@@ -1,20 +1,11 @@
 ---
 id: PARB
 title: parity.py: the gate can score the tree and main over different shared bakes — main's cache is keyed by sha only and rendered in a separate ci.lock hold, so a landing's rebake between the two renders (or a main_scores run between a landing's ff-merge and its rebake) crosses bakes and caches the old bake's scores under the new sha
-milestone: M0
-value: 2
-phase: build
-status: done
-deps:
-files: scripts/parity.py, scripts/tests/test_parity_bake.py, scripts/tests/test_parity_inputs.py
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-09-30
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Found by the CLNT cleanse (2026-09-30, inferred, a race): `cmd_gate` renders the tree, then `main_scores()` takes ci.lock again; `loop/parity/main/<sha>.csv` is keyed by main's sha alone.
 

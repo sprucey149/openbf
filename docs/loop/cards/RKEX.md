@@ -1,20 +1,10 @@
 ---
 id: RKEX
 title: A landed rocket explodes: the rocket launchers' ordnance (the jet trooper's, the torpedo launchers') fires like a plain bolt today - no ExplosionName blast, no splash damage, no explosion effect - and the maintainer saw rockets pass through the ground, vehicles and units; reproduce that, then build the explosion on impact
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/combat.rs, engine/crates/core/src/weapon.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: rkex
-resume: Landed with card RKSLF as main cc40b5d (RKEX bab9c23/1b04dfb rebased + RKSLF's two commits): teamkill_pct 0.89 / 0.94 % (seeds 1-8 / 9-16) vs main's 1.17 / 1.13.
-created: 2026-10-20
-first: 8
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 (the maintainer, 2026-10-20, playing the jet trooper) Rocket launchers 'don't have the explosion'; the rockets (drawn as the placeholder prism) 'travel through things like the ground, vehicles and units and don't explode'.

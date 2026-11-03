@@ -1,19 +1,11 @@
 ---
 id: RECHK
 title: Reliable hash absence scans: normalize Ghidra constant forms, find ELF code-built hashes and scan raw --src little-endian words with per-term controls
-milestone: M0
-value: 3
-phase: build
-status: done
-deps:
-files: scripts/re_check.py
-declares:
-needs:
-effort:
-branch: rechk
-resume: (private workflow note omitted)
-created: 2026-10-16
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Batch scope (planner 2026-10-24)
 RECHK and RCSRC are one bounded scanner/receipt change in scripts/re_check.py;
 all original checks remain below as two independent acceptance sets. Run each

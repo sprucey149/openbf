@@ -1,20 +1,10 @@
 ---
 id: WHELD
 title: The held weapon model follows the selected weapon: a soldier (the player and the bots) draws the weapon in its hands, not always its class's primary
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/soldier_vis.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/walk.rs, engine/crates/game/examples/round_to_outcome.rs, scripts/rebake.sh
-declares: rebake=side
-needs:
-effort:
-branch: wheld
-resume: LANDED e95a687
-created: 2026-10-19
-first: 3
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 (the maintainer, 2026-10-19) Switching weapons in the game changes how the soldier fires and behaves, but the soldier still holds the model of its class's primary: `game/src/soldier_vis.rs` `weapon_draws` (line ~1084) draws `weapon_for(team, class)`, the class's primary, for every soldier; only the animator follows the weapon in hand. The held model must follow the selected weapon, for the player and for the bots.

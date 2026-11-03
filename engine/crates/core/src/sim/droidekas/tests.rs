@@ -1,3 +1,5 @@
+mod aim;
+
 use std::sync::Arc;
 
 use glam::Vec3;
@@ -456,7 +458,7 @@ fn the_sprint_drains_the_bar_to_empty_stops_and_recovers() {
     let c = class();
     let dt = crate::TICK_DT;
     assert_eq!(c.ball_sprint_drain(), 900.0);
-    assert_eq!(c.ball_sprint_recover(), 750.0);
+    assert_eq!(c.ball_sprint_recover(), 600.0);
     s.step(&[pad(buttons::SPRINT, 1.0)]);
     let start = bar(&s, h).0;
     for _ in 0..30 {
@@ -477,7 +479,7 @@ fn the_sprint_drains_the_bar_to_empty_stops_and_recovers() {
     let d = deka_of(&s, h);
     assert!(!d.boosting && d.sprint_spent);
 
-    // Held: normal recovery at AddShieldOff, no sprint until 750, then again.
+    // Held: normal recovery at AddShieldOff, no sprint until 600, then again.
     let mut waited = 0u32;
     while deka_of(&s, h).sprint_spent {
         s.step(&[pad(buttons::SPRINT, 1.0)]);
@@ -487,7 +489,7 @@ fn the_sprint_drains_the_bar_to_empty_stops_and_recovers() {
         assert!(waited < 200, "never recovered");
     }
     let secs = waited as f32 * dt;
-    assert!((secs - 2.5).abs() < 0.1, "{secs}");
+    assert!((secs - 2.0).abs() < 0.1, "{secs}");
     s.step(&[pad(buttons::SPRINT, 1.0)]);
     assert!(deka_of(&s, h).boosting, "sprints again once recovered");
 
@@ -855,4 +857,25 @@ fn a_held_trigger_on_an_empty_slot_clicks_once_for_a_human_droideka() {
             .count();
     }
     assert_eq!(clicks, 1);
+}
+
+#[test]
+fn shield_debt_is_not_extra_damage_or_erased_by_health_lending() {
+    let mut s = sim();
+    let h = s.spawn(&deka(UnitSpec::player(0, Vec3::ZERO))).unwrap();
+    let u = s.unit_mut(h).unwrap();
+    let desc = crate::weapon::DamageDesc {
+        damage: 25.0,
+        scales: [1.0; 7],
+        shield_scale: 1.0,
+    };
+    for on in [false, true] {
+        u.droideka.as_mut().unwrap().shield = crate::droideka::Shield { points: -900.0, on };
+        let before = u.health.cur;
+        let taken = u.lend_droideka_shield(|health| health.take_damage(&desc, 1.0, false, 1.0));
+        assert_eq!(taken, 25.0);
+        assert_eq!(u.health.cur, before - 25.0);
+        assert_eq!(u.droideka.as_ref().unwrap().shield.points, -900.0);
+        assert_eq!(u.health.shield, 0.0);
+    }
 }

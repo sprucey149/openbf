@@ -1,4 +1,4 @@
-"""python3 -m unittest discover -s scripts/tests   (absence-claim receipts + metrics smoke test)"""
+"""python3 -m unittest discover -s scripts/tests   (absence-claim receipts)"""
 import json, os, subprocess, sys, tempfile, unittest
 
 S = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -6,7 +6,7 @@ sys.path.insert(0, S)
 LOOPDIR = tempfile.mkdtemp(prefix="absence_test_")
 os.environ["OPENBF_LOOP_DIR"] = LOOPDIR  # before the imports read it
 os.environ["OPENBF_LEAD_TMP"] = ""
-import loopctl, re_check  # noqa: E402
+import re_check  # noqa: E402
 
 
 class Absence(unittest.TestCase):
@@ -29,7 +29,7 @@ class Absence(unittest.TestCase):
         self.assertEqual((r["card"], r["terms"], r["version"]), ("CARD1", ["DAT_1", "nothere"], re_check.VERSION))
         self.assertEqual(r["sources"][0]["bytes"], 16)
         self.assertTrue(r["timestamp"])
-        self.assertTrue(loopctl.receipt_exists(rid))
+        self.assertTrue(re_check.receipt_exists(rid))
         # raw + elf scanning
         rec = re_check.search(["needle"], elf=True, quiet=True)
         self.assertEqual([s["hits"] for s in rec["sources"]], [2, 2])
@@ -41,7 +41,7 @@ class Absence(unittest.TestCase):
         open(doc, "w").write(
             f"# t\nNo class authors DAT_9.\n\nAbsent from both ELFs [receipt:{rid}].\n\n"
             f"Never authored anywhere.\n  see [receipt:deadbeef]\n\n```\nnone of the classes absent\n```\nfine text\n")
-        bad, rep = loopctl.check_absence(doc)
+        bad, rep = re_check.check_absence(doc)
         self.assertEqual(bad, 2, rep)  # line 2 (no tag) and line 6 (tag names no receipt); the fence and the cited line are fine
         self.assertIn(":2:", rep[0])
         self.assertIn("deadbeef", rep[1])
@@ -53,19 +53,10 @@ class Absence(unittest.TestCase):
         g("init", "-q", "-b", "main"); g("config", "user.email", "t@t"); g("config", "user.name", "t")
         g("add", "r.md"); g("commit", "-q", "-m", "i")
         open(doc, "a").write("new: absent everywhere.\n")
-        bad, rep = loopctl.check_absence(doc, "HEAD", self.d)
+        bad, rep = re_check.check_absence(doc, "HEAD", self.d)
         self.assertEqual(bad, 1)
         self.assertIn(":2:", rep[0])  # the committed claim on line 1 is not re-checked
 
-
-class Metrics(unittest.TestCase):
-    def test_runs(self):
-        os.makedirs(os.path.join(LOOPDIR, "runs"), exist_ok=True)
-        json.dump({"total_cost_usd": 2.5, "num_turns": 10}, open(os.path.join(LOOPDIR, "runs", "run_20261001_101010_lane1.json"), "w"))
-        rows, summ = loopctl.metrics()
-        d = {(s, k): v for s, k, v in rows}
-        self.assertEqual(d[("session_cost", "lane1/sessions")], 1)
-        self.assertEqual(d[("cost_per_day", "2026-10-01")], "2.50")
 
 
 if __name__ == "__main__":

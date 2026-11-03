@@ -1,19 +1,11 @@
 ---
 id: REMOTE
 title: The remote droid: the `remote` weapon throws a hovering `droid` the soldier flies (lift spring over the ground, stick to MaxSpeed), fires its blaster, holds 3 s for the destruct (BF1 orbital salvo, BF2 incinerator burst), runs down on its AddHealth / energy drain and hands control back
-milestone: M3
-value: 3
-phase: build
-status: parked
-deps: MINE
-files: engine/crates/core/src/remote.rs,engine/crates/core/src/remote/tests.rs,engine/crates/core/src/lib.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/projectile.rs,engine/crates/core/src/ai/abilities.rs,engine/crates/core/src/sim.rs,engine/crates/core/src/sim/remotes.rs,engine/crates/core/src/sim/remotes/tests.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/blast.rs,engine/crates/core/src/sim/mines.rs,engine/crates/core/src/sim/ordnance.rs,engine/crates/core/src/sim/repair.rs,engine/crates/game/src/roster.rs,engine/crates/game/src/roster/remotes.rs,engine/crates/game/src/soldier_vis/runtime.rs,engine/crates/game/src/walk.rs,engine/crates/game/src/walk/tests.rs,engine/crates/game/src/render_blend.rs,engine/crates/core/src/sim/look.rs,engine/crates/game/src/fx.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/tests/suite/remote_droids.rs,engine/crates/game/tests/suite/main.rs,engine/crates/game/tests/suite/roster.rs,engine/crates/game/tests/data/class_kits.txt
-declares: sim
-needs: review — local implementation and disc census available; a live PCSX2 comparison (flight feel, control hand-back button, destruct release rule) remains outstanding
-effort:
-branch: main
-resume: 2026-10-28 local implementation committed on main; see docs/loop/reports/20261028_REMOTE.md. No upstream landing or live PCSX2 capture.
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
+
 ## Why
 `analysis/re-remote-droid.md` (`[O]`), issue #44. BF1's marksmen, sharpshooters, scout troopers and sniper / assassin
 droids and BF2's officers and Wookiee warriors carry a remote droid in channel 1; the class kit dropped the slot (8 BF1

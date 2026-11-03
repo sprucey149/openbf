@@ -1,20 +1,10 @@
 ---
 id: HASH
 title: `Sim::hash` omits `assist` and most of `Bolt` — a hash-contract change (a declared sim re-baseline)
-milestone: M0
-value: 2
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/projectile.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/state/tests.rs, engine/crates/core/src/sim/state/tests/hash_bolts.rs
-declares: sim
-needs: sim-rebaseline — gates.toml [sim] aim bda439076b409d9f -> 5ed31ca5a3f0ae86 via the approved declares: sim landing (walk/hash600/hash100 unchanged, measured)
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-09-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 7 (B1). `--sim-hash 100` is pinned by a test in `core/src/sim/state.rs`.

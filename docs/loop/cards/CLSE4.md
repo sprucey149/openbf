@@ -1,21 +1,10 @@
 ---
 id: CLSE4
 title: After CLSE a BF2 bot dies FARTHER from its enemy, not nearer: deaths with an enemy inside 10 m 30 -> 25 % of all (Kamino 27 -> 18 against the PS2's 58), and beyond 30 m the port deals 2.2-3.2 x the PS2's damage per aimer-second (a rifle shot 13.3 hp against 9.0, fired 2.3 times a second against 1.5) - split the far fire against the PS2 by weapon, shots a second and damage per shot, name the cause, build it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: CLSE2,DEFS
-files: engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/ai/gunner.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch: clse4
-resume: landed a4905794 2026-10-12
-created: 2026-10-12
-alpha: yes
-domain: ai
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 AUDIT CLSE (2026-10-12, PARTLY). Card CLSE's rule is the PS2's own (re-derived, seen on the running PS2) and every

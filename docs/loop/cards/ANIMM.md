@@ -1,21 +1,11 @@
 ---
 id: ANIMM
 title: The legs match the ground: the PS2's movement clip choice (walk / run thresholds and BF2's speed mode), the playback rate that keeps feet from sliding, the strafe twist of the lower body, the turn on the spot
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: ANIML
-files: engine/crates/game/src/animator.rs,engine/crates/game/src/soldier_vis.rs
-declares:
-needs:
-effort:
-branch: animm
-resume: landed 8e8d33c2 2026-10-15
-created: 2026-10-05
-alpha: yes
-domain: render
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 game/src/animator.rs switches walk to run at a provisional 4.5 m/s, plays every clip at a constant rate (feet slide
 at any speed but the clip's own), has no strafing pose (a side-stepping soldier runs straight ahead) and no turn clip.

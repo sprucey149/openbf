@@ -42,7 +42,7 @@ for g in "${GROUPS_WANTED[@]}"; do
 done
 
 if [ "$CHECK" = 1 ]; then
-  cargo test -p game "${GPU_TESTS[@]}" -- --ignored
+  cargo test -p game "${GPU_TESTS[@]}" -- --ignored --test-threads=1
   exit $?
 fi
 
@@ -52,7 +52,7 @@ if [ "$CAPTURE_TAT1" = 1 ]; then
   cargo run -q -p game --release -- --map assets_baked/tat1 --headless \
     --capture-frame goldens/tat1_overview.png >/dev/null
 fi
-UPDATE_GOLDENS=1 cargo test -q -p game "${GPU_TESTS[@]}" -- --ignored
+UPDATE_GOLDENS=1 cargo test -q -p game "${GPU_TESTS[@]}" -- --ignored --test-threads=1
 
 echo
 echo "== changed goldens =="

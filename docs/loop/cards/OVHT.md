@@ -1,20 +1,11 @@
 ---
 id: OVHT
 title: The weapon heat gauge on the HUD: a weapon that heats (the pistol, the seat guns) shows heating and cooling on the centre icon so the player sees the overheat coming - the PS2's element, colours and thresholds, BF1 and BF2
-milestone: M3
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/ui/src/hud.rs, engine/crates/ui/src/hud_tree.rs, engine/crates/ui/src/hud_draw.rs, engine/crates/game/src/hud_feed.rs, engine/crates/game/src/main/battle.rs
-declares:
-needs: cloud prerequisites: OVHT captures/layout dump/tools, baked HUD/maps/missions and approved GPU unavailable
-effort:
-branch:
-resume: 2026-10-24 08:25 UTC: planner removed ANNC3 order-only dependency while its branch is absent/blocked; OVHT heat and ANNC3 bleed use distinct hud_model fields. Restore 27 inputs in reports/20261024_0814_card_OVHT.json; recheck live overlap, isolate build, implement on-foot re-heat-hud section 7 with repeated-send/caller mutations, both-game strips and full gates. Rebase/review battle.rs after either lands. No implementation or acceptance. See engine/artifacts/loop/reports/20261024_0825_planner.md.
-created: 2026-10-21
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Planner reconciliation (2026-10-24 08:25 UTC)
 Removed the ANNC3 dependency added during cloud preflight. Its only shared source
 is `main/battle.rs`: ANNC3 changes `HudModel.bleed`; OVHT fills the weapon models

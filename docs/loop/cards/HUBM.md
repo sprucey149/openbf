@@ -1,20 +1,11 @@
 ---
 id: HUBM
 title: A hub with no arc for the mover is not a hub: the PS2's locate skips it, the port's does not - TAT1's 525 m dune-sea hub is the hub of two posts and of every unit in the open, so bots hunt 52 % of the time there and 111 are recycled in 8 rounds
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/nav.rs,engine/crates/core/src/commander.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: hubm
-resume: landed af03b6c9 2026-10-03
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 On Tatooine Dune Sea (`tat1`, a showcase map) the port's bots are not on the Conquest goal half the time: **52.2 % of
 on-foot unit-seconds are `Hunt`** (main 449f006, 8 seeds), a target changes every 30 s (the PS2's bots: one per

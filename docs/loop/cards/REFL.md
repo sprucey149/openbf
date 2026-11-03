@@ -1,18 +1,10 @@
 ---
 id: REFL
 title: BF1 Kashyyyk's mirrored sky: draw each Reflect shell mirrored under the eye (Y x -(0.85+0.006 sin), +0.1 m, ReflectionColor) before the shell - the sky under the lake and below the horizon on KAS1/KAS2 (REDB's white row)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/sky.rs,engine/crates/manifest/src/lib.rs,engine/crates/manifest/src/tests.rs,engine/crates/bake/src/lighting.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/game/src/viewer/look.rs,engine/crates/render/src/sky.rs,engine/crates/render/src/frame.rs,engine/crates/render/src/lib.rs,engine/crates/render/tests/sky_shell.rs,engine/CRATES.md
-declares: goldens=maps/bf1_kas1.png,maps/bf1_kas2.png; rebake=maps
-needs:
-branch: refl
-resume: landed 158e048b 2026-09-29
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Note (REDB, 2026-09-29, lane 2) — the visible half is read; REFL now carries REDB's white-row acceptance
 `analysis/re-fog-amount.md` §7, [V code / D geometry]; the verifier's C8 is SUPPORTED down to the disassembly.

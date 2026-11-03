@@ -1,20 +1,11 @@
 ---
 id: UCNT
 title: Per-map unit defaults: units alive per team and reinforcements tuned by map size, so a big map (Hoth, Endor) is not mostly walking - a table for the maintainer (PS2 defaults, contact, kills / min, round length per map), then proposed defaults he can override in the menu
-milestone: M3
-value: 4
-phase: measure
-status: todo
-deps: BOTM,CONT,SAIR,BOTD,JITR,FFLN,OBST,PERF,BOTV
-files: engine/missions/,scripts/gen_missions.py,engine/crates/game/examples/round_to_outcome.rs,scripts/sweep_seeds.py
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-02
-alpha: yes
+status: archived
+issue: 93
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #93](https://github.com/sprucey149/openbf/issues/93).
 
 ## Why
 The maintainer, 2026-10-02: "a smaller map like Coruscant can feel like there is more action because you walk less, things are closer and so there is more fighting. Maps like Hoth or Endor are so big it feels like most of the time is just spent walking, which is more boring. Maybe there could be better per-map defaults to keep any map roughly the same length in time, and have sort of similar kills per minute - while noting that part of the fun of each map is that gameplay changes, so kills per minute shouldn't match on Coruscant and Hoth; the Hoth number could be increased a bit by looking at the default number of units on the field at a time. Overridable by the user too of course."

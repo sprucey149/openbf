@@ -1,20 +1,10 @@
 ---
 id: ETREE
 title: BF1 Endor: bots end up INSIDE the hollow tree end_prop_tree01 at (170, 0) and are recycled there - 5 recycles in 32 rounds on main 17ae28e (10 of 37 in 72), a bot inside the trunk for 120 s with the steering's stop at 0.00 m on the tree: find how they get in (a gap in the trunk's collision, a spawn, a push), then close it
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: (private workflow note omitted)
-effort:
-branch:
-resume: Restore baked bf1_end1/common_bf1/classes/vehicles, mission RONs and OBSV/HVYW/VMESH raw evidence; verify build stamps and class resolution, then clear needs and set todo phase measure. Reproduce on current main, dump the tree mesh at (170,0), trace one life across its boundary with tick/position/pick/mount and wall-push fields, and test dismount versus gap versus wall pass before any fix. Recount seeds 9-80 with STUCK_CENSUS=1 or SWEEP_DEATHS=1 (require census banner): 0 recycles within 6 m of (170,0), total no higher than 37; remeasure baseline because 17ae28e predates VMESH. See reports/20261024_0741_card_ETREE.md.
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Filed by card OBSV (2026-10-12). The Imperial bots that walk north from hub 0 to hub 54 pass this tree; some end up

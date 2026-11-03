@@ -1,20 +1,11 @@
 ---
 id: STHOP
 title: Soldiers walk along the floor's plane as the PS2's do: the grounded integrator follows the last contact's normal, contact is taken under the NEW feet within 2 cm, and stand falls after 1 s of airtime — not a level velocity, the OLD feet's floor, 0.05 m and a 0.5 m drop (KAM1 ramp: the port grounded 3 of 39 ticks, the PS2 20 of 24)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/soldier.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/state.rs
-declares: sim; sweep; arena; leak
-needs:
-effort:
-branch: sthop
-resume: landed eb90b565 2026-09-30
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## The RE answer (2026-09-30, `analysis/re-soldier-ground.md`, 9669e05; verifier 17/4/0 of 21)
 The PS2 has **no snap**. What keeps a soldier on a ramp:
 - **Plane-following.** While grounded, the integrator steers the velocity along the plane of the last floor contact

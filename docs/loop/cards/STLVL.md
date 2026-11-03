@@ -1,21 +1,11 @@
 ---
 id: STLVL
 title: A unit on another floor has not arrived: level-aware hub arrival, locate and re-plan on the XZ planning graphs (KAM1 rims, POL1 hangar ramps, TAT2 raised post, MUS1 59.4 level, GEO1 cave)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/brain.rs,engine/crates/core/src/nav.rs,engine/crates/game/src/layout.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: stlvl
-resume: landed 9f5582ed 2026-10-02
-created: 2026-09-30
-alpha: yes
-first: 4
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 STALL C2 (`analysis/re-round-stalls.md` §2 C2). The BF2 graphs author every hub at one height, and arrival and locate
 test XZ. `ai::route::hub_has_floor` accepts any floor under the hub at the unit's level. So a unit that reaches a hub's

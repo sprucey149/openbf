@@ -1,19 +1,11 @@
 ---
 id: VTURA
 title: Building turrets turn, fire and let go like the PS2's (VTURB audit): continuous yaw where the PS2 wraps (unauthored and ±180° YawLimits are the MountedTurret's, not the aimer's), the aimer turns the short way, a barrel with no FirePointName fires from its BarrelNodeName, the exit ray ignores only the building
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps: TCOL
-files: engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/core/src/vehicle/gun.rs,engine/crates/core/src/sim/guns.rs,engine/crates/core/src/sim/seats.rs
-declares:
-needs: environment — Restore HOT1/class/mission bake and turret audit/PS2 rows; TCOL body ownership must land for own-building-only exit acceptance.
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. VTURL already supplies building turn/aimer path. Recheck remaining BarrelNodeName fallback and exit path first, preserve original turn tests as regressions and turret_ride replay equality; no duplicate turn rewrite. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT of VTURB (2026-09-29, PARTLY): VTURB's building turrets spawn right, but they turn, fire and let the gunner out
 unlike the PS2. A player in BF1 HOT1's Hoth turret can aim only ±30° off its heading, where the PS2 turns it through

@@ -1,21 +1,11 @@
 ---
 id: ANIML
 title: A soldier's upper body follows the weapon in his hands and keeps shooting while he walks: two clip players and the PS2's bone masks in game::animator, the set of the weapon in hand, the shoot / charge / reload layer over the movement clip
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: ANIMS
-files: engine/crates/game/src/animator.rs,engine/crates/game/src/animator/,engine/crates/game/src/soldier_vis.rs,engine/crates/game/src/gallery.rs,engine/crates/game/src/roster.rs,engine/crates/manifest/src/anim_sets.rs,engine/CRATES.md
-declares: goldens=units/bf1_all_inf_trooperfleet.png,units/bf1_cis_inf_bdroid.png,units/bf1_cis_inf_sbdroid.png,units/bf1_imp_inf_shocktrooper.png,units/bf1_rep_inf_arctrooper.png,units/bf2_all_inf_vanguard.png,units/bf2_cis_inf_bdroid.png,units/bf2_cis_inf_magnaguard.png,units/bf2_cis_inf_sbdroid.png,units/bf2_imp_inf_atatcommander.png,units/bf2_imp_inf_shocktrooper.png,units/bf2_rep_inf_arctrooper.png,units/bf2_rep_inf_clonecommander.png,units/bf2_rep_inf_ep3heavytrooper.png
-needs:
-effort:
-branch: animl
-resume: landed 644695ac 2026-10-05
-created: 2026-10-05
-alpha: yes
-domain: render
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-04: "When walking and shooting, the units need to do the shooting motion while still walking forwards.
 Right now when walking it doesn't change animation to shooting." and "the sbd doesn't hold a gun so it sticks its arm

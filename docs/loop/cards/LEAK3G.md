@@ -1,19 +1,11 @@
 ---
 id: LEAK3G
 title: The leak gate judges each map x class (LEAK3's gate half): leak_moved_rows.txt, a declared leak=<map>:<class> scope, a leak_rise FAIL for every other rise - draft written and tested, needs the guards approval to apply
-milestone: M3
-value: 4
-phase: build
-status: todo
-deps: LEAK3
-files: scripts/gates.py, scripts/land.py
-declares:
-needs: maintainer — approve [approvals.LEAK3G] oracle = "guards" in gates.toml so a builder may edit scripts/gates.py + land.py (the planner may add it; draft and test ready in lead_tmp/leak3)
-effort:
-branch:
-resume:
-created: 2026-10-22
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 LEAK3's AUDIT (reports/20260930_0930_audit_LEAK.md): a declared `leak` re-baselines every count and nothing lists which map x class rose (JWAL +36 counts, WPSH 11, WTUN 41 unreported). LEAK3 part 1 (census pins, `new` can fire) landed without this half because scripts/gates.py and land.py are oracle-guarded for a builder (the hook refused the edit, 2026-10-22).
 

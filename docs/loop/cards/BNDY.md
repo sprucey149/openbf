@@ -1,20 +1,10 @@
 ---
 id: BNDY
 title: The map boundary: leaving the battlefield warns the player (HUD text + his team's 'leaving' line) and kills him after BF2's 6.5 s (BF1 10 s) - the port has no boundary at all; read the boundary data and the point test, then build it
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/map.rs, engine/crates/manifest/src/lib.rs, engine/crates/game/src/layout.rs, engine/crates/core/src/sim/boundary.rs (new), engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/announcer.rs, engine/crates/ui/src/hud.rs
-declares: rebake=maps; sim; sweep; arena
-needs: maintainer - restore local BNDY PS2 fixture/captures, disc corpus, baked maps/missions and approved GPU validation environment
-effort:
-branch:
-resume: Cloud preflight BLOCKED 2026-10-24 07:22 UTC; no implementation. Restore baked maps/common and missions, extracted BF1/BF2 corpus, lead_tmp/bndy points (404 PS2 rows), sheets/tools/states and fxc/tools/bnd.py, plus approved GPU/reference environment. Then follow analysis/re-boundary.md section 8 in two slices: A bake/first-name path resolution/half-plane test/timers and acceptance 1,2,4; B HUD spring/once-per-excursion VO locks and HOT1 timing pair. Keep flyer cases on VFLY. Start via loopctl after restoration; full CI, rebake and required gates before landing. Report 20261024_0722_card_BNDY.md.
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Filed by ANNC's RE (2026-09-30). On the PS2 a unit that leaves the map's boundary gets a HUD warning ("leaving the

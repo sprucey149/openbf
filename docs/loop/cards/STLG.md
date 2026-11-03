@@ -1,20 +1,11 @@
 ---
 id: STLG
 title: The stall at a leg's mouth as a standing number: card MOUTH's detector over the sweep's 4 Hz samples (the row needs the leg's waypoint), the rate per map in scripts/bot_quality.py and gates.toml [fidelity] (direction down), and the maintainer's Kamino scene prints it beside the reversals - so no later card brings the walkway miss back
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: MOUTH
-files: scripts/bot_quality.py, engine/crates/game/examples/round_to_outcome.rs, engine/crates/game/src/unit_probe.rs
-declares:
-needs: environment — restore MOUTH detector/raw evidence, scene script and baked maps/missions for unchanged-stdout, instrument and mutation checks
-effort:
-branch:
-resume: 2026-10-24 cloud preflight: no implementation; reports/20261024_0844_card_STLG.md and lead_tmp/stlg_20261024_0844/prerequisites.json. Probe already has from/next/wp/walk; BOT_SAMPLES omits them. Restore pstall.py and same-seed captures plus scene_seeds.sh/bakes; then isolated build, 32-map stdout cmp, 8-seed Kamino agreement within 15 percent and rule-1 mutation at least 1.5x; planner owns metric baseline wiring.
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card MOUTH (landed 2026-10-12, main 273a441) took BF2 Kamino's four walkway legs from 32 stalls in 8 x 3 min to 0 and
 BF1 Bespin's deaths under the floor from 46 to 7 - and no gate saw the defect before or would see it come back: the

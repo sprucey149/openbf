@@ -1,20 +1,10 @@
 ---
 id: VSWP
 title: Seats the way the maintainer wants them (his words 2026-10-07): a player entering a teammate's vehicle takes a FREE seat first and kicks a bot only when none is free, and the weapon-switch button swaps seats WITH the teammate bot in the target seat, so the vehicle never empties
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/sim/seats.rs,engine/crates/core/src/sim/guns.rs
-declares:
-needs: cloud prerequisites: branch vswp, baked assets, missions and reference evidence absent
-effort:
-branch: vswp
-resume: (private workflow note omitted)
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 The maintainer, 2026-10-07: "a user should always be able to get in a teammate bot occupied vehicle, not an enemy one though of course. Also some vehicles have multiple stations and the originals had a way of switching between the stations - I think it was just the weapon switch button. When this happens, just swap the teammate bot that was in the position you switched to with where you were so the vehicle doesn't empty by you switching stations. If a user takes a bot occupied vehicle and there isn't enough room, it just kicks out the bot."

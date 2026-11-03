@@ -86,11 +86,11 @@ impl Fx {
         look: &PadState,
         dt: f32,
     ) {
+        let restore = !walk.blend.applied();
+        if restore {
+            crate::render_blend::blend_in_looking(walk, look);
+        }
         if let Some(vis) = vis {
-            let restore = !walk.blend.applied();
-            if restore {
-                crate::render_blend::blend_in_looking(walk, look);
-            }
             vis.update(walk, dt);
             let (muzzles, jets, burns) = (
                 vis.fire_points(walk),
@@ -100,14 +100,21 @@ impl Fx {
             if self.force_bolts() > 0 {
                 self.set_force_origins(&vis.force_points(walk));
             }
-            if restore {
-                walk.blend_out();
-            }
             self.set_repair_origins(&muzzles);
             self.set_jet_frames(jets);
             self.set_burn_frames(burns);
         }
+        // Registered exhaust samples must be born at the same presentation
+        // position as the model, as well as the attached NoRegisterStep head.
+        // Otherwise each new tick leaves bright particles ahead of a blended model.
+        let saved = self.drawn_round_frames(&walk.sim);
+        if restore {
+            walk.blend_out();
+        }
         self.update(dt);
+        for (index, frame) in saved {
+            self.live[index].frame = frame;
+        }
     }
 
     /// Card JETP2: keep a jet effect on every soldier in a jet stance whose

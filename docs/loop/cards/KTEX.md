@@ -1,18 +1,10 @@
 ---
 id: KTEX
 title: BF1 KAS2's slope behind Dock Two is pale sand on the PS2 and flat dark grass in the port
-milestone: M1
-value: 3
-phase: re
-status: done
-deps:
-files:
-declares: marks: GOLDENS REBAKE
-needs:
-branch:
-resume: MERGED into TALPH (planner 2026-09-26) — same cause (the unblended layers); TALPH carries this card's poses as acceptance
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

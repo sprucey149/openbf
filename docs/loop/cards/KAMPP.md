@@ -1,22 +1,11 @@
 ---
 id: KAMPP
 title: BF2 Kamino: Imperial attackers ping-pong between hubs 46 and 44 at kam_bldg_pod2 (table 46->44, BFS 44->46 back on arc 36) and walk home - they spend ~10 unit-s a round at the Rebel posts, the Rebels hold them 95-100 % and win 16 of 16; the PS2's Imperials led 79-45 and 33-3 and won 34-1
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files:
-declares:
-needs: cloud prerequisites: baked KAM1, missions, PS2 corpus and WINS raw traces absent
-effort:
-branch:
-resume: Restore WINS/KAM1 evidence and data; start KAMPP in an isolated checkout, re-trace hubs 46/44 to 47 on current main, then implement root route fix and mutation-check its graph test. Repeat 16 seeds and all applicable gates. See reports/20261024_0713_planner.md.
-created: 2026-10-22
-defer:
-first: 2
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card WINS (2026-10-22): on main 3ae13d3 the Rebels win BF2 Kamino 16 of 16 seeds (fidelity baseline) and 8 of 8 (WINS
 re-run); the Imperials end on 0-1 tickets. On the PS2 the Imperials win: WINS's PS2 rounds (bots only, 16 a side) have

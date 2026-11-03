@@ -1,21 +1,11 @@
 ---
 id: DAGS
 title: BF2 Dagobah: team 0's bots stand in 'recover' for 20-140 s at (2.4..4.1, 4.5, -47.9) within seconds of spawning (already on main, 2 of 8 seeds; the PS2's spawn draw of card BSPN sends more bots there and its landing is refused on stand20_pct@bf2_dag1) - trace one case, name the spawn node / post and the cause, fix it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/route.rs engine/crates/core/src/ai/route/tests.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch: dags
-resume: landed 4ca302f2 2026-10-12
-created: 2026-10-11
-alpha: yes
-first: 2
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card BSPN (the maintainer's ask, approved by him 2026-10-11 for Bespin's falls) cannot land: the fidelity gate refuses stand20_pct@bf2_dag1 0.36 -> 1.08 on seeds 1-8 and 1.32 on the confirm seeds 9-16 (tolerance 0.7). The standing is not new - main has it at this same spot - the PS2's post-then-node draw only sends more bots to it.
 

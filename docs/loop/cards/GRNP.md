@@ -1,20 +1,10 @@
 ---
 id: GRNP
 title: The grenade's throw against PS2 BF2 (the maintainer, 2026-10-04: 'the port feels like it throws further'): measure distance, arc, bounce, roll and stick in PCSX2 and in the port from the same stance and pitch, then make the port's the PS2 BF2's
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sticky.rs,engine/crates/core/src/sim/ordnance.rs,engine/crates/core/src/collision/rays.rs,engine/crates/core/src/weapon.rs,engine/crates/game/src/roster.rs
-declares:
-needs:
-effort:
-branch: grnp
-resume: landed fdff50d9 2026-10-06
-created: 2026-10-04
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-04: "Compare grenade throw distance with the original ps2 games - the port feels like it is throwing grenades further than the original but maybe I'm wrong on that. I want grenade throw distance and physics to be approximately the same as the ps2 bf2 grenade physics in how it throws, distance, sticks, and bounces and such."

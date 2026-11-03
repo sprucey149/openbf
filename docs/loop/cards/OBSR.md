@@ -1,20 +1,10 @@
 ---
 id: OBSR
 title: OBST's wall-follow holds bots at three places the old steering let go: BF1 Tatooine's rock gap (showcase; 19 lives of 100 s+ in 8 rounds, the parent 1), BF1 Naboo's ruins column (showcase; stays of 200 s+ 2 -> 15, unseen by the recycle watch) and Bespin's rim barriers (deaths under the floor +31 %) - cure each by its named rule, with tests the parent's steering fails
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: OBST,OBSF
-files: engine/crates/core/src/ai/avoid.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/stall.rs,engine/crates/core/src/ai/state.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: obsr
-resume: landed d9db73c8 2026-10-07
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 From AUDIT OBST (2026-10-07, PARTLY). Card OBST (e9ce6db) halves the stalls over all maps and that holds (2.41 % ->

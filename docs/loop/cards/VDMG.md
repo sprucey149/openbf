@@ -1,18 +1,10 @@
 ---
 id: VDMG
 title: Vehicle damage and death: one hull pool through VehicleScale, collision damage, the damage-effect bands, death = the _exp class + chunks in the same tick (no wreck)
-milestone: M2
-value: 4
-phase: build
-status: done
-deps: VENT,VPRE
-files: engine/crates/core/src/vehicle.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/state.rs,engine/crates/game/src/vehicle_class.rs
-declares:
-needs:
-branch: vdmg
-resume: landed e7ed805 2026-09-26; the blast + chunks are VDTH; hulls join the bolt ray with HOVR/VSEAT; report reports/20260926_1225_build_VDMG.md
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Vehicles must take damage, burn and blow up like the PS2's.

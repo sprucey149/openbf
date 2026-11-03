@@ -176,6 +176,8 @@ impl Sim {
     pub(super) fn shot_frame(&self, i: usize) -> (Vec3, (Vec3, Vec3, Vec3)) {
         if matches!(self.units[i].controller, Controller::Player { .. }) {
             self.human_shot(i)
+        } else if let Some(frame) = self.bot_droideka_shot(i) {
+            frame
         } else {
             (
                 self.units[i]

@@ -1,18 +1,10 @@
 ---
 id: TERL
 title: The terrain's PS2 lighting: BF2 draws its lightmap with no ambient and no sun (both Hoths clip in the port); read the terrain VU path (form, scale) and BF1's terrain, then build
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/terrain_glb.rs,engine/crates/bake/src/map.rs,engine/crates/render/src/draw.rs,engine/crates/render/src/shader.wgsl,engine/crates/game/src/viewer/scene.rs,engine/CRATES.md
-declares: goldens=maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_dag1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kas2.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_yav1.png,maps/tat1.png,maps/tat2.png,tat1_overview.png,tat1_spawn.png,tat1_hud.png; rebake=tat1,tat2,maps
-needs:
-branch: terl
-resume: LANDED a9e54e0 + goldens 520c4cc (2026-09-26). Follow-ons: TALPH/KTEX (layers, Hoth residual), TDTL, TDYN, FOGN.
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The terrain is most of every outdoor frame, and the port lights it as LUMI x (ambient + sun.N.L). On the PS2, BF2's

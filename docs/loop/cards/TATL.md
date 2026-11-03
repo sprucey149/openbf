@@ -1,19 +1,10 @@
 ---
 id: TATL
 title: BF1 Tatooine (showcase TAT1, and TAT2) is 12-15 luma darker than the PS2: parity median dluma -15.1 on TAT1 (20 of 29 pairs below -10), -12.3 on TAT2, the largest systematic brightness gap on a showcase map — shaded walls read blue-grey where the PS2's are pink-lilac; attribute it by surface (terrain, buildings, sky, soldiers) and card the cause
-milestone: M1
-value: 4
-phase: measure
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: closed by BFLT (7dfe311): TAT1 median dluma -15.1 -> -0.1 (lead_tmp/bflt/parity); shaded-wall hue left, see BFLT report
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 TAT1 is an M-ALPHA showcase map, and PARITY (landed 144b2f0) says it is the darkest of all 32 maps against the PS2:

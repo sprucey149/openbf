@@ -1,19 +1,11 @@
 ---
 id: HCRAD
 title: A hover's detour corners at its own radius (PS2: corners r + 0.5 m out, r = half the X/Z diagonal of the class model's box - BF1 bike 2.44, BF2 bike 1.95, hailfire 6.39; the port plans every unit at the soldier's 1.0 m) - and why, with it, BF1 Endor's bikes keep the PS2's distance from barriers but crash half as often (0.13 a ride against the PS2's 0.28)
-milestone: M3
-value: 3
-phase: build
-status: todo
-deps: HCORN
-files: engine/crates/bake/src/vehicle.rs, engine/crates/game/src/vehicle_class.rs, engine/crates/core/src/vehicle/hover.rs, engine/crates/core/src/ai/route.rs
-declares: rebake; sim; sweep
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-21
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 Card HCORN's RE (`analysis/re-hover-corners.md` 1, 2, 5): the PS2 plans a hover's detour corners at the hover's OWN
 radius - corners r + 0.5 m outside both barrier edges, the leg tested at r, r = half the X/Z diagonal of the class

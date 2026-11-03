@@ -1,20 +1,11 @@
 ---
 id: HOTM
 title: BF2 Hoth after MOUTH: bots are within 1.5 m of a team-mate 10.3 pct of their time over 16 seeds (5.5 before, up in 11 of 16 seeds) - find which of MOUTH's two rules does it and where, then fix it or show it is harmless
-milestone: M3
-value: 5
-phase: measure
-status: done
-deps: MOUTH
-files:
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume: DONE 2026-10-12: the corner rule (MOUTH=1) - 48 seeds 5.11 -> 10.33, t +6.1; all of it is guards piled on two defend spots at post 1 (on guard 1.83 -> 7.05, the rest 3.28 -> 3.28); the pile is on main before MOUTH (defend_spot has no reservation); fix = card DEFS. Report reports/20261012_1622_card_HOTM.md, data lead_tmp/hotm
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Found by the planner's baseline re-take (2026-10-12 14:20): on BF2 Hoth, a showcase map, bots are within 1.5 m of a
 team-mate about twice as much of their time since MOUTH landed (273a441). MOUTH's landing gate called it noise - seeds

@@ -290,7 +290,12 @@ pub(super) fn run(
     };
     // Soldier: yaw -= rx·MaxTurnSpeed·dt ; pitch += ry·MaxPitchSpeed·dt.
     let rx = (-e_yaw / (u.consts.max_turn_speed * dt)).clamp(-1.0, 1.0);
-    let ry = (e_pitch / (u.consts.max_pitch_speed * dt)).clamp(-1.0, 1.0);
+    // Match the rate consumed by step_droideka / droideka_pitch (BF1
+    // FUN_001d1540, B1:79761-79801; BF2 FUN_001f8548, B2:109461-109467).
+    let pitch_speed = u
+        .droideka_class()
+        .map_or(u.consts.max_pitch_speed, |c| c.max_pitch_speed);
+    let ry = (e_pitch / (pitch_speed * dt)).clamp(-1.0, 1.0);
     pad.rx = PadState::quantize(rx);
     pad.ry = PadState::quantize(ry);
 

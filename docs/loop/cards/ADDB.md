@@ -1,19 +1,11 @@
 ---
 id: ADDB
 title: Additive draws blend in linear light where the PS2 adds bytes: BF1's half-bright hologram column reads about 60 % of the PS2's on a dark wall (Kashyyyk Docks cp3 +60 levels against +82, Endor cp2 +46 against +72), BF2's reads 115 % in red and 75 % in green and blue (Death Star cp3 +99 / +36 / +29 against +86 / +42 / +40) - the bolts' glow, the muzzle flash and the additive particles share the pipeline
-milestone: M1
-value: 3
-phase: measure
-status: blocked
-deps:
-files: engine/crates/render/src/bolt.wgsl,engine/crates/render/src/pipelines.rs
-declares:
-needs: Restore three-map bakes, PS2 frames and cphol box tool/render kit; measure the original boxes plus bolt/flash before changing blending.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 7 exact named inputs absent. Restore three-map bakes, PS2 frames and cphol box tool/render kit; measure the original boxes plus bolt/flash before changing blending. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-10-13
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Found by card CPHOL (2026-10-13). `render/src/bolt.wgsl` `fs_bolt_glow` turns the vertex colour to linear light and the (One, One) blend adds it to a linear target; the GS adds Cs x As to the frame's bytes. On a dark background the two differ by the curve: a half-bright source adds far less, a full one more in its strongest channel.
 

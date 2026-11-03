@@ -1,20 +1,10 @@
 ---
 id: GRFL
 title: Grenades fall through a deck a soldier stands on (the maintainer's playtest 2026-10-07, BF2 Kamino, on the platform where a turret is missing): the ordnance has its own collision layer and a soldier's floor can lack one - a grenade census over every floor a soldier can stand on, then fix each gap
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/ordnance.rs,engine/crates/game/examples/ordnance_census.rs,engine/crates/game/examples/ordnance_census_accepted.txt
-declares: sweep; arena
-needs:
-effort:
-branch: grfl
-resume: landed 296fa0c6 2026-10-09
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-07: "when I would throw grenades on here, the grenades would fall through the floor and disappear. I couldn't fall through the floor though." Two Kamino decks; "it's platforms like these."

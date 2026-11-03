@@ -1,20 +1,10 @@
 ---
 id: HUBP
 title: A bot walks at a random point of the next hub's sphere, drawn per unit per leg (the PS2's waypoint), not at the hub's centre: bots file through hub centres - a teammate within 1.5 m 12-22 % of the time against the PS2's 2-9 %
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,SPL11
-files: engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/draw.rs,engine/crates/core/src/nav.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: hubp
-resume: landed 408bc9c0 2026-10-06
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The one spread the PS2 gives its bots on a route is the waypoint: at every hub each unit draws its own point in the

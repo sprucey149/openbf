@@ -1,20 +1,10 @@
 ---
 id: KPOS
 title: BF2 Kamino: objects drawn in the wrong place all over the map (kam1_bf2_2230_wrong_positions.png) — find each and its cause against the PS2 walk pairs
-milestone: M1
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: closed: fixed in ec47e0b (door indices after the ocean splice); lead_tmp/kamdoor/README.md
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's BF2 Kamino play: "things rendered in the completely wrong positions all over the map". In the frame the domed pod at the

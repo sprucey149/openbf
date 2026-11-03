@@ -1,20 +1,11 @@
 ---
 id: VBAIL
 title: Two ride rules, one session and one gates run (VBAIL + HNEAR): (1) bot pilots leave a hover or walker under 20 % health when their draw says so (PS2: 26 of 101 controllers; FUN_002a95a8 tells every AI occupant to get out); (2) a hover rides to the hub nearest its post when its graph ends short (ai::HOVER_NEAREST, built by VDROP and off) - BF2 POL1's riders get out over no floor, tat1's bikes crash
-milestone: M2
-value: 3
-phase: build
-status: blocked
-deps: WAI,VDROP
-files: engine/crates/core/src/ai.rs, engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai/hover_drive.rs, engine/crates/core/src/ai/walker_drive.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep
-needs: Part 2 (HOVER_NEAREST flip) in its own commit with full gates; PS2 draw lifetime still provisional
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-01
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 On the PS2 an AI driver whose vehicle falls under 20 % health may abandon it: the walker AI FUN_00262248 (B2:181508-181515)
 and the hover AI FUN_00220528 (B2:135604-135610) both test health < 0.2 x max and (ai+0x5a0 & 3) == 0, then call

@@ -1,20 +1,10 @@
 ---
 id: BOLTSURF
 title: Same-tick bolt lights use the struck surface rather than terrain proximity
-milestone: M1
-value: 2
-phase: build
-status: blocked
-deps: BOLTM,BOLTR
-files: engine/crates/game/src/bolt_vis.rs, engine/CRATES.md
-declares: ci=+8
-needs: real BF2 HOT1/world-surface content, paired references, GPU and full acceptance gates
-effort:
-branch:
-resume: BOLTM66d6f9c implements mounted Impact class match; BOLTR97b0319 implements remnant fired-class style/eligibility/step with permanent controls. Both source checkpoints are present, full paired census/GPU/Acceptance5 remain pending. Preserve original restoration hold and every bar. reports/20261025_2149_planner.md
-created: 2026-10-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 A bolt that hits within its first tick can put its BF2 impact light on the wrong

@@ -1,20 +1,11 @@
 ---
 id: KAMR
 title: Kamino bring-up (BF2 and BF1 KAM1): the sea's hard edge and flat far plane, far-scene pieces floating or upside down, invisible floors, misplaced objects — the maintainer's play session; parity bf2_kam1 22.5, bf1_kam1 26.6 (the two worst maps)
-milestone: M1
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: closed: split into KSKY, KSEA, KSEAL, GRND (analysis/re-kamino.md)
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-09-30 11:10: he plays Kamino and sees "invisible floors/platforms, far image looking wrong, the sea
 nearby is wavy but then there's a hard cutoff and it looks flat and a different colour, things aren't rendering or

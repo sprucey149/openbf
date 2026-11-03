@@ -1,18 +1,10 @@
 ---
 id: JWAL
 title: Soldiers jump through solid walls (the maintainer's play session 2026-09-29): on BF1 KAS2 a jump at a round platform's bamboo side wall carries the soldier inside the hollow under the deck — find the mechanism (sweep tunnelling at jump speed, a seam or gap in the baked collision, or the PS2's own hole), close it, a replay test
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/collision/walls.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/collision/shape.rs,engine/crates/core/src/ai/steer.rs,engine/crates/game/tests/jwal_cityhall.rs,engine/crates/game/examples/leak_census_accepted.txt,engine/CRATES.md
-declares: sim; sweep; arena; leak
-needs:
-branch: jwal
-resume: landed 09b8c12a 2026-09-29
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's first play session (INBOX 2026-09-29, value 5, front of the queue). On BF1 Kashyyyk (KAS2), the round wooden

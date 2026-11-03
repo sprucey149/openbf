@@ -1,20 +1,10 @@
 ---
 id: RETRYCAP
 title: Cap attempts per card and route a stuck one elsewhere: a `tries` counter on the card (a session that ends without landing or closing it counts one), after 3 builds / 2 RE sessions the picker stops handing the card out, parks it with a `resume:` naming what each try found, and files a one-line Question for the maintainer or a planner re-cut
-milestone: M0
-value: 4
-phase: build
-status: done
-deps:
-files: scripts/loopctl.py,engine/artifacts/briefs/LOOP_PROMPT.md
-declares:
-needs:
-effort:
-branch: retrycap
-resume: (private workflow note omitted)
-created: 2026-10-08
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Current source has a consecutive unchanged-card guard: `MAX_NO_PROGRESS = 3`

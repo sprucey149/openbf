@@ -1,19 +1,11 @@
 ---
 id: DESTR
 title: Map objects that break or move when shot: BF2 DEA1's vent to the trash compactor and the panels that move floor panels, TAN1's turbine, and every other destructible or moving prop the PS2 missions name (census both games)
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: environment — DESTR two-disc RE requires missing primary corpora/ELFs, LVL/mission bytecode and PS2 evidence; 39 exact probes in lead_tmp/destr_cloud/preflight.json
-effort:
-branch:
-resume: Cloud RE 2026-10-24 12:27 UTC: restore and verify inputs in lead_tmp/destr_cloud/preflight.json, then both-disc class-to-mission census and DEA1/TAN1 chains with primary self-checks/verifier; finish showcase-first build spec before phase build. See reports/20261024_1227_card_DESTR.md and lead_tmp/destr_cloud/next_prompt.md. Acceptance unearned; no code or landing.
-created: 2026-10-21
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 INBOX 2026-10-21 20:00 item 3. FLNKB's "flank routes walk through the closed compactor" is the same object; PRIMB holds
 DEA1's compactor prims.

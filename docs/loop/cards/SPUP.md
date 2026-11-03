@@ -1,20 +1,10 @@
 ---
 id: SPUP
 title: A sprint cannot be started while running uphill (the maintainer's playtest 2026-10-05): the entry needs 0.9 x MaxSpeed and a ramp holds the run under it - find which speed the PS2 compares (along the slope or planar) and whether its soldier can start a sprint on the same ramps, then make it start uphill
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/soldier.rs, engine/crates/input/src/lib.rs
-declares: leak
-needs:
-effort:
-branch: spup
-resume: landed c1ae263f 2026-10-06
-created: 2026-10-05
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-05: "it seems I can't start sprinting while walking uphill? That's a bug that should be fixed as well."

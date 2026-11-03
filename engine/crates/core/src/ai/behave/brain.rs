@@ -61,7 +61,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         return (PadState::default(), nt);
     };
     super::ride::settle(sim, st);
-    let eye = u.muzzle();
+    let eye = u.ai_eye();
     let wc = &sim.weapon_classes[u.weapon_class];
 
     let tier = sim.unit_tier(u);
@@ -348,13 +348,12 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     // The on-hit reaction as a ROLL (below): the side, this tick only.
     let mut roll: i8 = 0;
 
-    // D11's DODGE-ON-HIT. The PS2's on-hit dodge is a re-plan of the
-    // movement, not a roll (RE §9.4), so ours is the side-step that already
-    // exists: the move target is offset `SIDESTEP_OFFSET` along the path
-    // perpendicular for `SIDESTEP_TICKS`. The coin is the skill's
-    // `lerp(0, 0.2)` and the cooldown is the RE's 2 s. The side ALTERNATES
-    // from the steering's remembered side, so two dodges in a row do not
-    // walk a unit into the same wall twice.
+    // OURS: soldier dodge on hit. FUN_0020a940 (B2:121236-121318)
+    // belongs to flyer/carrier vtables (0x61a94c/0x61c1cc/0x62b39c),
+    // not the soldier; its evasive re-plan does not establish this step.
+    // Keep the current skill coin, 2 s cooldown and alternating side-step.
+    // measure: PS2 soldier hit reactions in PCSX2 T5/T6 before replacing
+    // this openbf deviation (analysis/re-ai-difficulty.md §9.4).
     // Card REACT: a bot on a position (a hub's, a fight's) answers the hit
     // by its tier's row instead (`react`).
     if u.last_hit

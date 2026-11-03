@@ -1,21 +1,10 @@
 ---
 id: FARC
 title: What the PS2 draws past the far cull on the 18 maps with no drawn `LOWR` sheet, and the far WATER pass through KAS1/KAS2's sheet holes — `OPENBF_FAR_CULL`'s default waits on it
-milestone: M1
-value: 4
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: environment — Restore PCSX2 reference states/toolkit, map bake and REDB/REFL raw far-scene evidence.
-effort:
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Read later Kamino/REFL answers, measure remaining sheetless cases map by map, keep flags unchanged until evidence. Preserve dated verified per-case answer/build-or-keep-off acceptance. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-09-25
-defer: 
-value_pre_alpha: 4
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 `OPENBF_FAR_CULL` and `OPENBF_LOWRES` are OFF because on 18 maps (16 ship no `LOWR`; BF2 DAG1/NAB2 ship one with no texture)

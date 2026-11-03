@@ -1,22 +1,11 @@
 ---
 id: COLD
 title: Why `dea1_bldg_*_collision*` / `uta1_bldg_macy_collision*` are in the port's drawable list — a class flag the port does not read?
-milestone: M1
-value: 2
-phase: re
-status: blocked
-deps:
-files: analysis/re-collision-drawables.md (new)
-declares:
-needs: repair four-byte-aligned LVL inspection; actual segment visibility and original PS2 rule evidence
-effort:
-branch:
-resume: partial source/picture review retained; repair and independently control the failed LVL reader before resuming. Establish segment-specific visibility in both current render paths and the PS2 before a build proposal or invisible closure
-created: 2026-09-25
-defer: post-alpha
-public_issue: https://github.com/sprucey149/openbf/issues/10
-tries: 1
+status: archived
+issue: 98
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #98](https://github.com/sprucey149/openbf/issues/98).
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 11(b). Check the walkabout / PCSX2 pairs for DEA1 and UTA1 first: does the port draw them visibly?

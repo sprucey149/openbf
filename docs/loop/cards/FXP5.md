@@ -1,18 +1,11 @@
 ---
 id: FXP5
 title: Particle effects, part 5: the spawn hooks FXP3 left — water hits (bolts stop at the water line: ImpactEffectWater, the explosion's WaterEffect at/below water + 0.3 m), TrailEffect riding missiles/rockets (grenades wait for GREN), vehicle DamageEffect stages / ChunkTrail / ChunkSmoke / Thrust / Wake / Stomp, BF1 LightFlash handoff to BPNT; PCSX2 pairs
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: FXP3
-files: engine/crates/core/src/sim/combat.rs,engine/crates/core/src/projectile.rs,engine/crates/core/src/impact.rs,engine/crates/game/src/fx.rs
-declares:
-needs: environment — Restore NAB1/HOT1 effect/map bakes/missions and original FXP PS2 capture/weapon-chain kit.
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Retake water/trail/effect gaps on current main, preserve water+0.3 rule, viewed trail and PS2 pairs, event inventory and declared sim/sweep/arena moves for water stops. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 FXP3 landed the struck-bolt route (ImpactEffect Soft/Rigid/Static/Terrain by surface, the ordnance's ExplosionName Effect, destroyed vehicles' Effect). Its card's remaining acceptance moves here: nothing in the port emits Surface::Water or Surface::Shield, no round carries its TrailEffect, and vehicles spawn none of their own effects.
 

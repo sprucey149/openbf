@@ -1,19 +1,10 @@
 ---
 id: GHMCP
 title: Evaluate headless pyghidra-mcp (clearbluejar/pyghidra-mcp) on our ghidra-proj/ for RE sessions: persistent rename / type / comment write-back, xrefs and call graph as typed tools - and answer two enabling questions, do our ELFs carry .mdebug data for ghidra-emotionengine-reloaded's STABS analyzer, and does PCSX2 save-state import work - ending in a short report and a go / no-go
-milestone: M0
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore original Ghidra databases/toolchain, both ELFs and a retained state; copy/hash originals before the bounded six-part evaluation.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 7 exact named inputs absent. Restore original Ghidra databases/toolchain, both ELFs and a retained state; copy/hash originals before the bounded six-part evaluation. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-10-08
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Research rec. 7. RE is 52 % of spend (about (cost omitted) per session against $8 for an ordinary card); sessions grep a 20+ MB decompile text (`analysis/SWBFRONT.ELF-decomp.c`) and re-derive names every time because nothing they learn is written back into a Ghidra database (renames live in `analysis/re-*.md` prose). Typed Ghidra tools with persistent write-back could cut the grep cost and make names accumulate. The risk is real too: another moving part in the RE loop whose four-check discipline is measured, so this is an EVALUATION with a no-go allowed.

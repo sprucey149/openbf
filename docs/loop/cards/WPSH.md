@@ -1,18 +1,10 @@
 ---
 id: WPSH
 title: The wall pass pushes soldiers THROUGH walls (LEAK census class push): M2 — a tick's XZ step longer than the capsule radius crosses a zero-thickness coll mesh sheet and the push completes the crossing (BF2 sprint-jump 17.55 m/s = 0.585 m a tick passes a 4 m sheet in 46/51 timings); M3 — a mesh body's deepest contact points INTO the building (the census's own KAS2 control, the cp5 hut: 0.84 m push toward its axis at tick 20); a swept or sub-stepped horizontal move and no push toward the far side of an uncrossed face
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: JWAL
-files: engine/crates/core/src/collision/walls.rs,engine/crates/core/src/sim/step.rs,engine/crates/game/examples/leak_census.rs
-declares: leak; sweep; arena; sim
-needs:
-branch: wpsh
-resume: landed 2c026546 2026-09-29
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 JWAL's RE (`analysis/re-soldier-walls.md` §4, §4.1) found two ways the wall pass itself PUSHES a soldier through a

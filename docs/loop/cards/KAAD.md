@@ -1,19 +1,11 @@
 ---
 id: KAAD
 title: BF1 Naboo Plains fields kaadus: three NAB1 pads key gun_walk_kaadu for the defenders (ClassRepDef / ClassAllDef) and the PS2 spawns them (3 live in the IA states, one ridden) — the port calls the class absent (VPAD) because the missions load it from SIDE\gun.lvl
-milestone: M2
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/vehicle_pads.rs,engine/crates/game/tests/vehicle_pads.rs,engine/crates/game/src/classdb.rs,engine/crates/bake/src/vehicle.rs
-declares: rebake=side,classes,sounds; sweep
-needs:
-branch: kaad
-resume: landed 69e0ab84 2026-09-30
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Every BF1 Naboo Plains battle on the PS2 has kaadus on the defenders' pads. The port spawns none: VPAD's module doc
 (`game/src/vehicle_pads.rs:12-14`) and census test (`game/tests/vehicle_pads.rs:121-128`) assert that the class is

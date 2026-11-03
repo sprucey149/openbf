@@ -36,8 +36,16 @@ from world_fingerprint import glb_geometry, read_ron, safe_child
 METHOD = 'scene_composed_ordinary_float_samples'
 # The gate's maps: small enough to bake alone (`REBAKE_OUT=... scripts/rebake.sh common maps` with
 # OPENBF_BF1_MAPS/OPENBF_BF2_MAPS narrowed), and each holds repaired donor art that a regression would move.
-GATE_MAPS = ('bf1_bes2', 'bf1_hot1', 'bf2_pol1')
+GATE_MAPS = ('bf1_bes2', 'bf1_hot1', 'bf2_pol1', 'bf1_rhn2', 'bf2_fel1')
 GATE_CEILING_M = .25
+# Near-model limits retain the smaller repairs even when a map's distant PS2
+# model has a larger native residual. These apply before the general exceptions.
+GATE_NEAR_LIMITS = {
+    ('bf1_rhn2', 'rhn_bldg_ruin_13'): .01,
+    ('bf1_rhn2', 'rhn_bldg_wall_facade_pillar_h3a'): .01,
+    ('bf1_rhn2', 'rhn_bldg_look_out2'): .08,
+    ('bf2_fel1', 'fel1_bldg_bladder'): .15,
+}
 # (source, map, geometry) still above the ceiling: (its measured worst in metres, the reason). A listed row is never a
 # pass for anything else, and it fails again when it grows more than GATE_SLACK_M past its measured worst.
 GATE_KNOWN = {
@@ -65,8 +73,33 @@ GATE_KNOWN = {
     ('pc1', 'bf1_hot1', 'hoth_bldg_tunnel_exit'): (1.726, 'donor LOWD faces off collision'),
     ('pc1', 'bf1_hot1', 'hoth_prop_trench_short'): (0.550, 'donor trench faces off collision'),
     ('pc1', 'bf1_hot1', 'hoth_prop_trench_turrets'): (0.266, 'donor trench faces off collision'),
+    # Outstanding drawing and distant-model differences on the added maps.
+    # These are bounded regressions, not whole-model acceptance.
+    ('xbox', 'bf1_rhn2', 'com_item_healthrecharge'): (.615, 'donor health-droid distant stand-in differs from PS2 LOWD'),
+    ('pc1', 'bf1_rhn2', 'com_item_healthrecharge'): (.600, 'donor health-droid distant stand-in differs from PS2 LOWD'),
+    ('xbox', 'bf1_rhn2', 'rhn_bldg_look_out'): (.889, 'remaining near wall and upper debris mismatch'),
+    ('pc1', 'bf1_rhn2', 'rhn_bldg_look_out'): (.890, 'remaining near wall and upper debris mismatch'),
+    ('xbox', 'bf1_rhn2', 'rhn_bldg_ruin_14'): (.384, 'remaining donor wall shape mismatch'),
+    ('pc1', 'bf1_rhn2', 'rhn_bldg_ruin_14'): (.384, 'remaining donor wall shape mismatch'),
+    ('xbox', 'bf1_rhn2', 'rhn_bldg_ruin_rotunda'): (1.037, 'near wall mismatch and full donor art compared with PS2 LOWD'),
+    ('pc1', 'bf1_rhn2', 'rhn_bldg_ruin_rotunda'): (1.037, 'near wall mismatch and full donor art compared with PS2 LOWD'),
+    ('xbox', 'bf1_rhn2', 'rhn_bldg_ruin_rotunda_upper'): (1.260, 'full donor art compared with PS2 LOWD'),
+    ('pc1', 'bf1_rhn2', 'rhn_bldg_ruin_rotunda_upper'): (1.260, 'full donor art compared with PS2 LOWD'),
+    ('xbox', 'bf1_rhn2', 'rhn_bldg_statue_alcove'): (.461, 'full donor art compared with PS2 LOWD'),
+    ('pc1', 'bf1_rhn2', 'rhn_bldg_statue_alcove'): (.461, 'full donor art compared with PS2 LOWD'),
+    ('xbox', 'bf1_rhn2', 'rhn_bldg_look_out2'): (.400, 'full donor art compared with PS2 LOWD; near limit remains .080 m'),
+    ('pc1', 'bf1_rhn2', 'rhn_bldg_look_out2'): (.606, 'full donor art compared with PS2 LOWD; near limit remains .080 m'),
+    ('xbox', 'bf1_rhn2', 'rhn_bldg_wall_facade_pillar_l'): (.251, 'remaining distant-model drawing residual'),
+    ('pc1', 'bf1_rhn2', 'rhn_bldg_wall_facade_pillar_l'): (.251, 'remaining distant-model drawing residual'),
+    ('xbox', 'bf2_fel1', 'fel1_bldg_segmented'): (.692, 'unrepaired donor drawing residual'),
+    ('pc1', 'bf2_fel1', 'fel1_bldg_segmented'): (.692, 'unrepaired donor drawing residual'),
+    ('xbox', 'bf2_fel1', 'fel1_bldg_red_bush'): (.600, 'unrepaired donor drawing residual'),
+    ('pc1', 'bf2_fel1', 'fel1_bldg_red_bush'): (.600, 'unrepaired donor drawing residual'),
+    ('xbox', 'bf2_fel1', 'fel1_bldg_mtn_accessorytall'): (2.182, 'unrepaired donor drawing residual'),
+    ('pc1', 'bf2_fel1', 'fel1_bldg_mtn_accessorytall'): (2.182, 'unrepaired donor drawing residual'),
 }
 GATE_SLACK_M = .05
+GATE_MAP_SLACK_M = {'bf1_rhn2': .005, 'bf2_fel1': .005}
 # (source, map, placement name) the gate maps cannot measure, with the reason. Any other unmeasured placement fails.
 GATE_UNMEASURED = {
     ('pc1', 'bf1_bes2', 'building_tower20'): 'PC placement record lacks PS2 prop 4137097213 ("W")',
@@ -430,17 +463,24 @@ def gate_problems(report, ceiling, known, unmeasured=None, slack=GATE_SLACK_M):
         if objects.get('error'):
             problems.append(f"{row['source']} {row['map']} objects unmeasured: {objects['error']}")
             continue
-        worst = {}
+        worst, near_worst = {}, {}
         for w in objects.get('witnesses', []):
+            limit = GATE_NEAR_LIMITS.get((row['map'], w['geometry'])) if w.get('state') == 'model' else None
+            if (limit is not None and w['scene_extra_m'] > limit and w['in_playable_boundary']
+                    and not w.get('below_all_ps2_terrain') and w.get('instant_action', True)):
+                near_worst[w['geometry']] = max(near_worst.get(w['geometry'], 0), w['scene_extra_m'])
             if (w['scene_extra_m'] > ceiling and w['in_playable_boundary'] and not w.get('below_all_ps2_terrain')
                     and w.get('instant_action', True)):
                 if w['scene_extra_m'] > worst.get(w['geometry'], (0, None))[0]:
                     worst[w['geometry']] = (w['scene_extra_m'], w['world'])
+        for g, v in sorted(near_worst.items()):
+            problems.append(f"{row['source']} {row['map']} {g} near {v:.3f} m, "
+                            f"past its repaired {GATE_NEAR_LIMITS[(row['map'], g)]:.3f} m limit")
         for g, (v, at) in sorted(worst.items()):
             listed = known.get((row['source'], row['map'], g))
             if listed is None:
                 problems.append(f"{row['source']} {row['map']} {g} {v:.3f} m at {[round(x, 3) for x in at]}")
-            elif v > listed[0] + slack:
+            elif v > listed[0] + GATE_MAP_SLACK_M.get(row['map'], slack):
                 problems.append(f"{row['source']} {row['map']} {g} {v:.3f} m at {[round(x, 3) for x in at]}, "
                                 f"past its listed {listed[0]:.3f} m")
         # A placement or neighbour that could not be measured is not a pass: it would hide any gap it holds.
@@ -506,6 +546,8 @@ def main():
     args.out.parent.mkdir(parents=True, exist_ok=True)
     if args.gate:
         report['gate'] = dict(ceiling_m=GATE_CEILING_M, slack_m=GATE_SLACK_M,
+                              near_limits=[list(k) + [v] for k, v in GATE_NEAR_LIMITS.items()],
+                              map_slack_m=GATE_MAP_SLACK_M,
                               known=[list(k) + list(v) for k, v in GATE_KNOWN.items()],
                               unmeasured=[list(k) + [why] for k, why in GATE_UNMEASURED.items()],
                               problems=gate_problems(report, GATE_CEILING_M, GATE_KNOWN, GATE_UNMEASURED))

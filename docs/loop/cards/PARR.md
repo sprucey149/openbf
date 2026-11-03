@@ -1,20 +1,11 @@
 ---
 id: PARR
 title: A bot captures from inside the post's capture region, not on its centre: the last leg aims at a drawn standable point of the region (the PS2's rule) - BF1's posts have a solid plinth and BF2 Kamino cp0 sits 3 m up on the sample depot, so bots push on them (the maintainer's screenshot)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai/route.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: parr
-resume: landed 6305dd94 2026-10-02
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-02 (screenshot, card OBST): "This guy is just trying to run into this wall over and over. Is he trying to
 stand directly on top of the cp or something?" Yes. OBST's measurement (`engine/artifacts/lead_tmp/obst/README.md`,

@@ -1,21 +1,10 @@
 ---
 id: BLKF
 title: The black box tells the truth where the bot programme looks: ask the stop along the direction the steering really walks (holders, boarders, lost bots; today 38-44 % right vs 98 % on route legs, and 712 phantom stops on standing bots), put the hold goal / spot / strafe side in the row, stamp the BUILD's commit (the shared binary the maintainer ran now claims b1cffcc without GREN), flag going-nowhere trails in TROUBLE (the maintainer's stutterer #30 is missing), end a dead unit's trail at its death
-milestone: M0
-value: 5
-phase: build
-status: done
-deps: JITR
-files: engine/crates/game/src/blackbox.rs,engine/crates/game/src/unit_probe.rs,engine/crates/game/examples/blackbox_read.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai.rs,engine/crates/game/build.rs,engine/CRATES.md,CLAUDE.md
-declares:
-needs:
-effort:
-branch: blkf
-resume: landed 2306d05b 2026-10-03
-created: 2026-10-02
-domain: tooling
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 AUDIT BLKB (2026-10-02, PARTLY; `loop/audits.md`, evidence `engine/artifacts/lead_tmp/audit-blkb/`, README first).

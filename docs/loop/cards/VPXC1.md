@@ -1,18 +1,11 @@
 ---
 id: VPXC1
 title: BF1 parked-vehicle PCSX2 pair: a BF1 frame at a pad with its vehicle still parked (none of the 16 BF1 reference sets shows one — bots board them before the first frame), the port's VDRAW frame at the same pose
-milestone: M2
-value: 2
-phase: capture
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: closed 2026-09-29 by PXWA: pairs + RAM tables in lead_tmp/pxwa/veh/
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 VDRAW's acceptance asked for one PCSX2 pair per game. BF2 is done exactly: the YAV1 AAT at the HOVR audit's RAM matrix lines up with the PS2 frame (lead_tmp/vdraw/pair_yav1_aat.png). BF1's pad frames (END1, RHN1, TAT1 v3, GEO1 spawn/v2, NAB1 v3, HOT1) all show the pad EMPTY in the PS2 — its vehicle already taken — while the port (no vehicle AI yet, VAI) keeps them parked.
 

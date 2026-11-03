@@ -1,18 +1,10 @@
 ---
 id: PXSW
 title: The PCSX2 reference library was captured under HW Basic on llvmpipe, which drops the BF1 KAS2 dock lamps that SW and HW High draw (LANE3): re-grab a sample of the walkabout poses under --renderer sw, list every FINDINGS / card claim about a MISSING light, lamp, glow or emissive element that SW contradicts, and decide the library's renderer
-milestone: M1
-value: 4
-phase: capture
-status: blocked
-deps:
-files:
-declares:
-needs: environment — Restore PCSX2 toolkit/discs and old reference frames/states plus LANE3 renderer control kit.
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Recheck KAS2 lamps first under actual available renderer, then >=3 maps/game x >=4 poses old/newHW/SW controls and parity. Keep renderer provenance; no absent-GPU substitution for approved golden acceptance. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Every PS2 reference frame (PXC batches, PXWA/PXWB walkabouts, 748 walk views) was grabbed with the global ini: Renderer -1

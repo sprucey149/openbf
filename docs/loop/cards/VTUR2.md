@@ -1,19 +1,11 @@
 ---
 id: VTUR2
 title: BF2 building turrets: bake SIDE/TUR.LVL's classes (tur_bldg_laser, _tower, _chaingun_*, _recoilless_*, _hoth_*, _beam, _mortar, tur_weap_built_gunturret — 333 instances on BF2 maps) with their models and skel nodes, so vehicle_pads::add_turrets spawns them as VTURB turrets
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTURB
-files: engine/crates/bake/src/map.rs engine/crates/bake/src/side_classes.rs engine/crates/manifest/src/lib.rs engine/crates/game/src/assets.rs engine/crates/game/src/vehicle_pads.rs scripts/rebake.sh
-declares: goldens=maps/bf2_cor1.png,maps/bf2_end1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_yav1.png,maps/tat2.png; rebake=maps,classes,sounds; sweep; leak; arena
-needs:
-branch: vtur2
-resume: landed a1bf3e87 2026-09-30
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 VTURB (2026-09-29) made every armed-building instance a seat-only vehicle, but BF2's building turrets resolve to no class: `tur_*` classes live in `extracted/bf2/lvl/DATA/_LVL_PS2/SIDE/TUR.LVL`, which no class bake reads (`assets_baked/classes/bf2_*.ron` = all, cis, imp, ingame, rep). Instance counts (BF2 manifests): tur_bldg_laser 122, _tower 35, _chaingun_tripod 31, _recoilless_lg 26, _chaingun_roof 25, _hoth_dishturret 24, tur_weap_built_gunturret 27, _hoth_lasermortar 18, _beam 8, others ≤ 5.
 

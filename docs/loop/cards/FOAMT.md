@@ -1,22 +1,11 @@
 ---
 id: FOAMT
 title: The foam layer's `FoamTile(5,5)`: `mungefs::fx` parses it, the manifest drops it, so KAM1's foam keeps the base's Tile 4
-milestone: M1
-value: 2
-phase: re
-status: blocked
-deps:
-files: analysis/re-foam-tiling.md (new)
-declares:
-needs:
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-09-25
-defer: post-alpha
-public_issue: https://github.com/sprucey149/openbf/issues/18
-tries: 2
+status: archived
+issue: 18
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #18](https://github.com/sprucey149/openbf/issues/18).
 
 ## Why
 The foam copy of BF2 Kamino's sea tiles at the wrong rate.

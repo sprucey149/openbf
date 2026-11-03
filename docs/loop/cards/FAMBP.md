@@ -1,20 +1,12 @@
 ---
 id: FAMBP
 title: BF1 Naboo's fambaas as command posts outside the historical mission? In nab1c_h each fambaa is a mobile post for the Gungans (spawns at +-8 m, ValueBleed / Value_ATK / Value_DEF at the class default 100 against the map posts' 10): in conquest that would send ~87 % of the attackers' goal draws to the fambaas and stop the defenders bleeding while one lives - the maintainer decides
-milestone: M3
-value: 3
-phase: build
-status: todo
-deps: FAMB
-files:
-declares:
-needs: maintainer - In NAB1 conquest (CW and GCW), should the two fambaas also be command posts as in the historical mission - team 2 spawns at them, the attackers' AI goes for them about 87 % of the time, and team 2 cannot bleed from posts while one lives? Default taken: no, they are destructible buildings with the shield only
-effort:
-branch:
-resume:
-created: 2026-10-16
-alpha: yes
+status: archived
+issue: 82
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #82](https://github.com/sprucey149/openbf/issues/82).
+
 ## Why
 FAMB brings the fambaas into every NAB1 mode (the maintainer's DECISION 1) as destructible buildings with the shield, WITHOUT
 their post role. On the PS2 (historical `nab1c_h` only) a fambaa is also a command post for its team. Carried into

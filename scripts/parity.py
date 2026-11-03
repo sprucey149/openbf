@@ -5,7 +5,7 @@
   scripts/parity.py main                     # the main branch's scores (cached per sha + bake; rendered and published when missing)
   scripts/parity.py gate --tree T --target D --out DIR [--allow a,b] [--base CSV] [--threshold L]   # the gates.py `parity` gate
   scripts/parity.py compare <base.csv> <new.csv> [--maps a,b] [--allow a,b]
-  scripts/parity.py scoreboard               # one line from loop/parity/ (loopctl.py scoreboard prints it)
+  scripts/parity.py scoreboard               # one line from loop/parity/
 
 Poses: engine/artifacts/pcsx2/ref/<map>/*.json and ref/<map>/walk/*.json (grab.py / walk_bf*.py), each beside its PS2
 frame <spot>.png. A map without a bake (engine/assets_baked/<map>) is skipped and listed. `run` builds the tree's

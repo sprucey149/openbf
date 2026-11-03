@@ -1,21 +1,12 @@
 ---
 id: DEKS
 title: The droideka's shield: 3000 points, -100 /s up and +300 /s down, a press toggles, down while rolling; a 1.25 m sphere that takes a bolt's damage and passes none on; BF2's full shield does not drain
-milestone: M1
-value: 4
-phase: build
-status: todo
-deps: DEKU
-files: engine/crates/core/src/droideka.rs (new),engine/crates/core/src/droideka/shield.rs (new),engine/crates/core/src/weapon.rs,engine/crates/core/src/projectile.rs,engine/crates/core/src/sim/combat.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-03
-alpha: yes
-first: 14
+status: archived
+issue: 85
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #85](https://github.com/sprucey149/openbf/issues/85).
+
 ## Why
 `analysis/re-droideka-unit.md` sections 1-2 [O]: the shield is what makes a droideka a droideka - a second health pool with its own collision sphere. Not fielded yet (DEKF), so nothing is declared.
 

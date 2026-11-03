@@ -5,7 +5,7 @@ Usage: python3 scripts/analysis_index.py [--check] [--root DIR]
   --check     print the index to stdout, write nothing
   --root DIR  the checkout whose analysis/ to index (default: this script's own)
 Any other argument is refused (exit 2) and -h / --help prints this: nothing but a plain run writes the tracked file.
-`loopctl.py commit-docs` runs it and commits the index with any analysis/re-*.md; a landing that adds one does not
+Run it when committing analysis/re-*.md and include the updated index in that commit; a landing that adds one does not
 (the cleanse regenerates it, .claude/commands/cleanse.md pass 2).
 Per file: title, first summary line, ELF function addresses mentioned (FUN_xxxxxxxx), status keywords,
 'supersedes' mentions, line count. Grouped by area using filename keywords (first match wins).

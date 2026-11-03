@@ -1,20 +1,12 @@
 ---
 id: VSHD2
 title: Vehicle shadows drawn (BF1): stencil the sun-extruded shdw volumes of every BF1 vehicle after the opaque passes and multiply the stencilled pixels by 0.625 (black) - the PS2's look at the X-wing pose; never on BF2
-milestone: M1
-value: 4
-phase: build
-status: todo
-deps: VSHD
-files: engine/crates/render/src/shadow.rs (new), engine/crates/render/src/shadow.wgsl (new), engine/crates/render/src/frame.rs, engine/crates/render/src/device.rs, engine/crates/render/src/pipelines.rs, engine/crates/game/src/viewer/vehicles.rs, engine/crates/game/src/viewer/walker_pose.rs, engine/CRATES.md
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-16
-alpha: yes
+status: archived
+issue: 66
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #66](https://github.com/sprucey149/openbf/issues/66).
+
 ## Why
 BF1 darkens the ground (and anything opaque) inside every vehicle's sun-extruded shadow volume, x 0.625, black; the port
 draws no shadow at all. Measured on the PS2 (BF1 NAB1, the parked X-wing at VREST's pose): a band of ground in front of

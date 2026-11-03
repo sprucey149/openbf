@@ -1,20 +1,11 @@
 ---
 id: DEFS
 title: Defenders after a capture: one defender per spot, several spots per post, a cap by team share that falls while the post is quiet (the maintainer's INBOX 2026-10-12 16:00, deviations approved) - on BF2 Kamino 5 of 17 crouched on one Cover hint for 30 s; on BF2 Hoth 4-8 guards stand 1 m apart on two spots for 100+ s and it is the whole of the map's doubled mate_1p5 (card HOTM)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,MOUTH
-files: engine/crates/core/src/commander.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: defs
-resume: landed 2e129617 2026-10-12
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's playtest of BF2 Kamino conquest (INBOX 2026-10-12 16:00, ask 1; his words and wishes are there in full - read
 it first): after a capture too many of the team go to `defend` the post and all of them stand on ONE spot. Card HOTM

@@ -1,20 +1,10 @@
 ---
 id: ORAUTH
 title: Committed cards must not authorize their own oracle or fidelity changes
-milestone: M0
-value: 5
-phase: build
-status: blocked
-deps:
-files: scripts/oracle_guard.py, scripts/gates.py, scripts/tests/test_oracle_authority.py (new)
-declares:
-needs: maintainer — approve the scoped guard-tightening edit via [approvals.ORAUTH] oracle=guards; committed-card declarations are not that approval
-effort:
-branch:
-resume: 20261024_2231 planner: source review confirms committed oracle/fidelity declarations currently grant permission despite RULES; preserve explicit approvals until repaired. Build isolated-repo negative/positive/mutation fixtures after guards authorization; no automatic baseline or historical approval repair. See engine/artifacts/loop/reports/20261024_2231_planner.md.
-created: 2026-10-24
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 

@@ -1,22 +1,11 @@
 ---
 id: LANDG
 title: land.py reads a previous landing's golden list on a reused out dir: the 'reuse branch rows' path copies branch/ (with an older landing's goldens/QUANT.md) into main/ and phase 1 reports those goldens moved though gpu was skipped; phase 2 then fails 'nothing to commit' and --resume ignores a new --reject
-milestone: M0
-value: 5
-phase: build
-status: blocked
-deps:
-files: scripts/land.py
-declares:
-needs: maintainer — the oracle guard refuses a builder's edit of scripts/land.py (gate code): add [approvals.LANDG] oracle = "guards" to engine/artifacts/loop/gates.toml (the planner may, per its approvals comment), then the build spec on the card applies in one session
-effort:
-branch:
-resume: Build spec on the card (7 steps); blocked only on the guards approval
-created: 2026-10-21
-alpha: yes
-first: 
-note: planner 2026-10-21 17:10: HTGT's land dir (lead_tmp/htgt/land) still reads REFUSED after its phase 2 was finished by hand (report 20261021_1620_card_HTGT.md); the fix should leave a hand-finished landing re-runnable or clearable
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 SSELB slice 9 (2026-10-21 12:07): gates skipped goldens (deps.toml: no golden can move), yet phase 1 said '1 golden moved: hot1_spawn_class.png' - slice 8's move, from engine/artifacts/lead_tmp/sselb/land/branch/goldens/QUANT.md (11:15). land.py:343 copytree(branch -> main), :365 moved_list(main/goldens/QUANT.md). Phase 2 ran git commit on an unchanged file -> 'nothing to commit' -> REFUSED; --resume re-uses st['reject'] (land.py:395), so --reject cannot clear it. Every multi-slice card that lands twice from one out dir hits it.
 ## Do

@@ -1,18 +1,11 @@
 ---
 id: ADDM
 title: Additive model segments: the PS2 draws BF1 Normal 0x04|0x80 and BF2 0x04|0x40 segments ADDITIVE (GS 0x48, depth tested, no depth write); the port draws the 30 baked ones OPAQUE (17, their alpha dropped by ALPHA RULE v2 rule 2) or alpha-BLENDED (13) — DEA1's laser beams, FEL1's fel1_bldg_segmented, MUS1's droid concept, POL1's comm screens, KAM1/MYG1's carried CTF items
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: FXMF
-files: engine/crates/bake/src/alpha.rs, engine/crates/bake/src/glb.rs, engine/crates/game/src/assets.rs, engine/crates/game/src/viewer/upload.rs, engine/crates/render/src/draw.rs, engine/crates/render/src/frame.rs, engine/crates/render/src/pipelines.rs
-declares: rebake=common,side,maps,tat1,tat2; goldens=any
-needs: environment — Restore full bake, extracted disc inputs and DEA1/FEL1/MUS1/POL1 PS2 walkabout references/toolkit.
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Retake additive-material census on current data, preserve alpha/mode/depth tests and four-map pairs/parity. Implement world DrawLayer rather than treating particle Mesh as the static pass. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Found by FXMF (2026-09-30, `analysis/re-muzzle-flash.md` §4.3): the muzzle-flash model's segment is ADDITIVE on the PS2 and
 the bake stored its texture opaque. The GS rule is known [V]: `analysis/re-material-flags.md` §0.4/§2 — BF1 Normal class, mode

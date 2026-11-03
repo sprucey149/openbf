@@ -1,19 +1,11 @@
 ---
 id: NIBL
 title: The port's 4-bit textures are nibble-swapped: mungefs::texture::unpack_4bit takes the high nibble first, the PS2 (GS PSMT4) the low — every 4-bit texture in the bake has each pair of horizontal texels swapped (HUD icons zig-zagged; re-bolt §7): swap, rebake, view every golden
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/texture.rs
-declares: goldens=any; rebake=tat1,tat2,maps,common,side
-needs:
-branch: nibl
-resume:
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Found by FXB's RE (`analysis/re-bolt.md` §7). `unpack_4bit` pushes `b >> 4` then `b & 0x0F`; on the PS2 a 4-bit
 (PSMT4) texture keeps the LEFT texel in the LOW nibble. Every 4-bit texture the port bakes therefore has each

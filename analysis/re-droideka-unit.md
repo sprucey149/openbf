@@ -98,6 +98,25 @@ Spread keys `SpreadRecoverRate` 4.8, `SpreadThreshold` 2.0, `SpreadLimit` 6.0; r
 gives it two aimers (`hp_gun_1`, `NEXTAIMER`, `hp_gun_2`; aimer limits yaw +-40, pitch +-25) - the aimer objects were
 not opened [H: shots alternate between the two fire points]. No firing in states 0xb..0xd (5.1).
 
+### Bot shot parallax (issue #108)
+
+The body remains upright on a slope; pitch is measured from world level and
+clamped to the class limits (BF1 `FUN_001d1540`, B1:79905-79912,
+`FUN_001d1fe8`, B1:80030-80049; BF2 `FUN_001f8548`, B2:109617-109624).
+Deploying during a fight does not test slope or line of fire (BF1
+`FUN_001cf770`, B1:78076-78153; BF2 `FUN_001f6110`, B2:107194-107285).
+Keep that deployment behavior.
+
+The port now converges bot bolts from the gun hardpoint to the current aim
+line at the perceived contact's range, bounded by `AimerPitchLimits` and
+`AimerYawLimits`. It retains tracking error rather than pointing straight at
+the enemy's centre. Human shots retain their existing reticle convergence.
+This bot barrel rule is **PROVISIONAL**, trace: PCSX2 BF1/BF2 barrel spawn
+position and velocity on a ramp, including both `hp_gun_1/2`, alternation,
+convergence versus parallel fire and behavior beyond the pitch limit. The
+PS2 aimer-to-bolt path remains untraced; the synthetic ramp regression is
+port correctness evidence, not original-game acceptance.
+
 ## 4. Forms, clips and times [V][M][O]
 
 State names are the ELF's (table 0x517750 BF1): 0 Idle, 1 TurnLeft, 2 TurnRight, 3 Dying, 4 Dead, 5 IdleToLeft,

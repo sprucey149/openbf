@@ -1,22 +1,11 @@
 ---
 id: DPIT
 title: DEA1's pit falls are the PS2's own (3.0 / min, none under fire): its bots walk off the pit beside cp3's spawn node and run off the Tak bridge when its panel is down - the port has solid bridges and a floor probe, and 0 falls. Build the two script bridges, then decide the probe at the edges the PS2 leaves open
-milestone: M3
-value: 4
-phase: re
-status: blocked
-deps: STDOR
-files:
-declares:
-needs: restore DEA1 PS2 scripts, panel classes, bridge collision/animation data, fall traces and PCSX2 observation
-effort:
-branch:
-resume: 2026-10-24 RE prerequisite hold; report reports/20261024_2318_card_DPIT.md. Startup-only mission path checked; panel health/respawn, bridge motion/collision and on-arc reaction unverified. Keep floor probe at A/C/D (FEEL_NOTES). Restore named evidence before retry; phase and remaining Acceptance unchanged.
-created: 2026-10-01
-defer: post-alpha
-domain: ai
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT of STFAL (2026-10-01, PARTLY; `reports/20261001_1845_audit_STFAL.md`). STFAL's acceptance line 'DEA1's pit deaths
 stay within +-50 % of the PS2's 3.0 / min' was not met (3.62 -> 0.54 / min; main: 0) and was handed to STDOR with the reason

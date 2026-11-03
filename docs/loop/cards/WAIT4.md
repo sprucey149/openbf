@@ -1,20 +1,10 @@
 ---
 id: WAIT4
 title: A new AI ground driver gives empty seats their initial four-second pickup window
-milestone: M3
-value: 4
-phase: build
-status: done
-deps: UTALK
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai/hover_drive.rs, engine/crates/core/src/ai/walker_drive.rs, engine/crates/core/src/ai/walker_drive/tests.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/seats/tests.rs, engine/crates/core/src/sim/vehicles.rs
-declares: sim; sweep
-needs:
-effort:
-branch: wait4
-resume: Locally validated 2026-10-25 on real maps (see Local validation); no pending checks for this slice.
-created: 2026-10-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 A newly boarded bot drives away before another occupant can approach. Add the

@@ -1,20 +1,10 @@
 ---
 id: FGHTA
 title: The fight, from its audit: a sniper circles inside 36 m where the PS2's scout stands, the circle's pause chance is twice the PS2's per think (1 in 6 for 1 in 12), and 8 of the fight's 11 rules have no test that fails when they are broken - fix the two, pin the constants; the port's fighters still stand twice as long as the PS2's (49-58 % against 24-36 %)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: FGHT
-files: engine/crates/core/src/ai.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/mover.rs
-declares: sweep; arena; sim
-needs:
-effort: medium
-branch: fghta
-resume: landed b75d36bc 2026-10-09
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 From AUDIT FGHT (2026-10-07, PARTLY; `engine/artifacts/loop/audits.md`). Card FGHT (69f8c84) holds on every number it

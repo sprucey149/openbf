@@ -1,20 +1,11 @@
 ---
 id: HUBO
 title: On both Hoth maps half a bot's legs still walk at the hub's centre (BF2 HOT1, a showcase map: 52 %; BF1: 62 %; hubs of 16 m and more: 24 %): the floor walked from the bot's feet breaks 2-4 m out at a 1.3-2.5 m rise and the centre is taken - give those legs their point without stranding bots; plus HUBP's residue (the arrival plane on a rider's leg to a post, the barrier test without the unit's radius, three rules no test pins)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: MOVR
-files: engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/route/tests.rs
-declares: sim; sweep; arena
-needs: environment — restore audit-hubp claims/verifier/tools/raw runs, PS2 references, baked maps/common/classes/vehicles and missions for current-main baseline and full acceptance
-effort:
-branch:
-resume: Cloud preflight 2026-10-24: no implementation or doc lift; restore audit-hubp/CLAIMS.md C5-C7,C11 plus verify/VERDICTS.md first, verify citations and perform required analysis/re-soldier-ai.md section 2 doc commit; then current-main observer baseline and traced Hoth refusal before start HUBO. Run 4-seed census, 8x32 plus seeds 9-40 changed maps, mutation tests and full gates. See reports/20261024_0806_card_HUBO.md.
-created: 2026-10-06
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card HUBP (408bc9c) gives a bot its own point of the next hub - the PS2's waypoint - but takes the point only where
 the floor walked from the hub's centre AND from the bot's feet reaches it; after 8 refused tries it walks at the

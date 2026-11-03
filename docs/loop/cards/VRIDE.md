@@ -1,20 +1,11 @@
 ---
 id: VRIDE
 title: A vehicle's riders are drawn in their seats, as the PS2 draws them: a hover pilot, a speeder bike's rider, a walker's exposed pilot, a gunner on an open vehicle turret - the seat's pose key (PilotAnimation / Pilot9Pose / AnimatedPilotPosition), hung at its PilotPosition on the vehicle's posed node, in the seat clip, hidden on BF2 IsPilotExposed = 0; the port draws no rider at all (card VTURG built it for building turrets only)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTURG
-files: engine/crates/bake/src/soldier.rs,engine/crates/bake/src/hardpoints.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/soldier_vis.rs,engine/crates/game/src/viewer/turret_pose.rs,engine/crates/game/src/viewer/walker_pose.rs
-declares: rebake=side,maps,tat1
-needs:
-effort:
-branch: vride
-resume: landed b054f579 2026-10-15
-created: 2026-10-15
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Build done (2026-10-15 lane 2, branch vride cba07db + 41782eb) - waiting only for the dGPU to land
 Acceptance, each run (`cargo test -p game --test vehicle_rider` on the scratch overlay bake):
 - Census: every baked vehicle seat's verdict = the PS2 census (BF1 72 seats: pilots 13 drawn / 24 hidden / 5 none,

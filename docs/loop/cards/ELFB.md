@@ -1,22 +1,11 @@
 ---
 id: ELFB
 title: BF1's alpha test keeps the failed texels' colour (Normal 0x02: TEST 0x5100b, AFAIL FB_ONLY — colour written, no Z): KAS2's platform-hut bamboo shows clear-black gaps and GEO1's Techno Union wreck lattice see-through holes where the PS2 draws them solid dark (0x07 words the port MASKs)
-milestone: M1
-value: 3
-phase: re
-status: todo
-deps:
-files: engine/crates/render/src/shader.wgsl,engine/crates/bake/src/alpha.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-09-29
-defer: post-alpha
-value_pre_alpha: 4
-acceptance: needed
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 ELFR moved the 0x1 words to OPAQUE; the two remaining PXWA defects are 0x07 words: KAS2 `kas2_bldg_hut_walls` 0x7 (the bamboo
 curtain on `kas2_bldg_platform_roof` — exact (0,0,0) over 1.2–2.4 % of `bf1_kas2/walk cp1_cp5`/`cp2_cp4`, unchanged by ELFR, the

@@ -1,20 +1,11 @@
 ---
 id: LLEG
 title: A last leg finds the ramp or the doorway: a local floor search when the straight line at a post or a quarry sticks (BF2 GEO1's raised cp6 and walled cp7, BF1 GEO1 hub 43, TAT1's one-hub dune sea)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: STARC,PARR,BOTD,OBST
-files: engine/crates/core/src/sim/spawn.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/round.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sweep
-needs:
-effort:
-branch: lleg
-resume: landed c0794ebf 2026-10-07
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 A LAST leg is a straight line at the post (or at the quarry) from wherever the bot stands in the post's hub. Where
 the point is on a platform with one ramp, or inside a building with one doorway, the straight line meets a wall and

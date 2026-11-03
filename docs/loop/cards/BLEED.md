@@ -1,20 +1,10 @@
 ---
 id: BLEED
 title: Is `tick_bleed`'s AI-shed loop reachable from bleed at all? If not, every tick pays for a safety net
-milestone: M0
-value: 1
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: RE complete: keep unconditional repair. Legal mission-drain step test and 32-case CP clamp matrix pass; see analysis/re-bleed-reachability.md.
-created: 2026-09-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 8 (17B's observation).

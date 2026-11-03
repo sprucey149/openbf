@@ -1,19 +1,11 @@
 ---
 id: VWPNA
 title: Audit every turret and vehicle weapon on every map of both games: what it fires (bolt, rocket, shell, mortar, beam), how (salvo, charge, heat, refire), its ordnance's damage and blast, against the disc; the BF2 spider walker's gun is a BEAM (cis_weap_walk_spider_beam, base com_weap_veh_beam) and the port has no beam-firing code
-milestone: M2
-value: 4
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The maintainer's playtest 2026-10-28: "We need to check the weapons of all turrets and vehicles and make sure they're shooting the right thing in the right way and doing the correct damage. Turrets on different maps do different things and have different firing ammo with different damage and behaviors." Also: "Is the spider walker like some laser thing that it shoots in the originals?" - yes, a beam.
 

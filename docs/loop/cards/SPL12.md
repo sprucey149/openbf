@@ -1,20 +1,11 @@
 ---
 id: SPL12
 title: Split: core/src/sim/step.rs (1,767 lines, 990 of them its inline tests from line 775) - move the test module to core/src/sim/step/tests.rs; then core/src/sim/spawn.rs (1,561)
-milestone: M0
-value: 2
-phase: cleanup
-status: done
-deps:
-files: engine/crates/core/src/sim/spawn.rs, engine/crates/core/src/sim/spawn/runtime.rs, engine/crates/core/src/sim/spawn/tests.rs, engine/crates/core/src/sim/spawn/tests/screens.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-09
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Cleanse 14 (2026-10-09): both files are over the 1,500-line cap with neither a split card nor a line in scripts/size_waivers.txt. step.rs grew 1,385 -> 1,767 through card ZOOM (its tests). engine/artifacts/briefs/SPLIT_RECIPE.md: one file, one session, a pure move.
 

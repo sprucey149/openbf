@@ -1,20 +1,11 @@
 ---
 id: LFLR
 title: BF2's lamp glows that are not light: EntityLight lens flares (the red haze at UTA1's lamp heads), light cones (LightBeam: UTA1's lamp cones, DEA1/HOT1/KAM1 cones) and the EntityLights' own flicker; the port draws none (the command post's hologram went to card CPHOL, 2026-10-12)
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: BPNT,CPHOL
-files: engine/crates/bake/src/entity_light.rs, engine/crates/manifest/src/lib.rs, engine/crates/game/src/entity_glow.rs, engine/crates/render/src/lens_flare.rs, engine/crates/render/src/light_beam.rs, engine/crates/game/src/point_light.rs
-declares: ci; rebake=maps; goldens=maps/bf2_cor1.png,maps/bf2_dag1.png,maps/bf2_dea1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/bf2_yav1.png,hot1_spawn_class.png,hot1_spawn_map.png,hot1_spawn_side.png; parity=bf2_uta1,bf2_dea1
-needs: cloud prerequisites: branch lflr, baked assets, missions and reference evidence absent
-effort:
-branch: lflr
-resume: (private workflow note omitted)
-created: 2026-09-30
-alpha: yes
+status: archived
+issue: 68
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #68](https://github.com/sprucey149/openbf/issues/68).
 
 ## Why
 BPNT's RE (`analysis/re-point-lights.md` §10) split the card's "lamp glows" into light (BPNT) and three additive draws

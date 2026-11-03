@@ -1,21 +1,11 @@
 ---
 id: ANNC
 title: The commander's voice-overs: CP captured/lost, winning/losing, reinforcements low, won/lost, heroes, out of bounds — triggers, lines per faction and era, cooldown and priority
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/announcer.rs,engine/crates/core/src/lib.rs,engine/crates/game/src/announce.rs,engine/crates/game/src/lib.rs,engine/crates/game/src/layout.rs,engine/crates/game/src/mission.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/walk.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/tests/announcer_ps2.rs,scripts/gen_missions.py,engine/missions,engine/CRATES.md,analysis/re-announcer.md
-declares:
-needs:
-effort:
-branch: annc
-resume: landed feb04a84 2026-10-01
-created: 2026-09-30
-alpha: yes
-domain: behaviour
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-09-30 11:40: the team's commander speaks about what is going on — CP captures, winning or losing,
 heroes and so on. The port plays none of it.

@@ -1,20 +1,11 @@
 ---
 id: VSND
 title: Vehicle sounds 1: a seat gun's shot plays the GUN's FireSound (today the rider's rifle), and the engine loop - the soundparameterized record baked, 1-4 looping layers per piloted vehicle with gain and pitch from the PS2's graphs (speed, acceleration, health, turn-on / turn-off time)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/sound_props.rs,engine/crates/bake/src/sounds.rs,engine/crates/manifest/src/lib.rs,engine/crates/manifest/src/tests.rs,engine/crates/audio/src/lib.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/engine_sound.rs,engine/crates/game/src/engine_sound/tests.rs,engine/crates/game/src/lib.rs,engine/crates/game/src/foley.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/src/walk.rs,engine/crates/game/src/bolt_vis.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/src/main/battle.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/guns.rs,engine/CRATES.md
-declares: rebake=sounds
-needs:
-effort:
-branch: vsnd
-resume: landed 79eac425 2026-10-03
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 SNDC (`analysis/audio-census.md`): the port plays no vehicle sound at all. PS2, 105 s: NAB1 970 vehicle / turret
 weapon starts, 338 audible engine-layer starts, 88 kaadu steps, boarding and collision; UTA1 172 weapon starts, 232

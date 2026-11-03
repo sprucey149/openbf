@@ -1,21 +1,10 @@
 ---
 id: RKPRF
 title: Immediate rocket safety: regression tests for the non-charge press and human exemption
-milestone: M0
-value: 4
-phase: cleanup
-status: done
-deps: RKSLF
-files: engine/crates/core/src/sim/step/tests.rs, engine/CRATES.md
-declares:
-needs:
-effort:
-branch:
-resume: Source 95d0807 on main; core863/game367/fmt/Clippy pass, both independent mutants862pass/1intended failure, production bytes restored. Pending full CI/cleanup gates; Acceptance unchanged. reports/20261025_0923_card_RKPRF.md
-created: 2026-10-25
-alpha: yes
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 RKSLA's immediate-shot and human-exemption safety cases have no effective core

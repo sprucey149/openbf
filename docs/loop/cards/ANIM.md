@@ -1,20 +1,10 @@
 ---
 id: ANIM
 title: Soldier animation: upper-body blend layers, the droid anim banks, BF2 `_lower` clip naming, the first-person rig — `game::animator`'s table is PROVISIONAL
-milestone: M1
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: RE done 2026-10-05: analysis/re-soldier-anim-layers.md (35c93e6). Build split: ANIMS (bake the sets) -> ANIML (two players + action layer) -> ANIMA (alert, aim), ANIMM (movement, rate, twist); leftovers ANIMX.
-created: 2026-09-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 2 and 3: upper-body 16/17-track clips vs full-body; the `FUN_0022d828` / `FUN_00282f78` anim-set giants;

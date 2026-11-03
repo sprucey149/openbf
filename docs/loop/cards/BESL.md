@@ -1,18 +1,11 @@
 ---
 id: BESL
 title: BF1 Cloud City's covered walls and halls: the port lights them with the orange sunset sun (warm tan, e.g. (124,104,72)) where the PS2 keeps them neutral-navy (89,86,87) — the sun-facing towers agree, the shaded ones do not (PXWA walkabout pairs)
-milestone: M1
-value: 4
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: MERGED into INTL by the planner 2026-09-30 (the same indoor-light question; its text is on INTL).
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The PXWA walkabout (PCSX2 at the port's own post stands) shows BF1 Cloud City's covered walls and halls in cool
 neutral-navy shade on the PS2 and warm tan in the port. BES2's baked sun is a strong orange,

@@ -1,19 +1,10 @@
 ---
 id: FXP
 title: The real particle effects: muzzle flash, bolts and tracers, impacts on ground/walls/water, explosions — game::fx draws PROVISIONAL coloured quads (its 'HOLD FOR FABLE 4' is stale); RE the PS2's fx__ format and emitters, then build
-milestone: M1
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: RE done (analysis/re-fx.md, 515b024); split into FXP1 (parse+bake) -> FXP2 (runtime+draw) -> FXP3 (spawn hooks), plus FXMF (muzzle flash RE) and FXB (laser bolt RE)
-created: 2026-09-28
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer (INBOX 2026-09-28 (d)): the real particle effects — muzzle flash, bolts and tracers, impacts on ground, walls and

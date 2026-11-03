@@ -1,19 +1,11 @@
 ---
 id: LOC3B
 title: Units located as the PS2 locates them (3-D, no level rule), a route from an arc started by the PS2's rule and a goal arc kept as an arc: measured by LOC3 to cost the port 1,315 recycles against 838 and 12 maps worse over 32 seeds - run again once the mover cards have landed, and take Dagobah's gain (recycles per round 2.50 -> 0.25) if it holds
-milestone: M3
-value: 3
-phase: measure
-status: blocked
-deps: LOC3,MOVR,OBST,LLEG
-files: engine/crates/core/src/nav.rs,engine/crates/core/src/ai/route.rs
-declares: sim; sweep; arena
-needs: restoration - 32 baked maps/classes and conquest missions; LOC3 variant/AQD kit; DAGS raw PS2 and Utapau trace
-effort:
-branch:
-resume: Restore 80 preflight paths in lead_tmp/loc3b_cloud/preflight.json; follow next_prompt.md; trace UTA pen before implementing; A/C/start-only 32x32 paired measurement still owed
-created: 2026-10-06
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 LOC3 (2026-10-06) made `NavGraph::locate` the PS2's and uses it for posts. Where a UNIT stands (a route's start, a
 hunt's quarry, a boarding, an order's goal) it kept the port's XZ locate and level rule as `locate_unit_on` - named

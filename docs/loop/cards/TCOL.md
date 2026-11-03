@@ -1,21 +1,11 @@
 ---
 id: TCOL
 title: Building turrets and Laik cannons are whole bodies: bolts, rockets, blasts and grenades stop on the upper half and hurt it, the damage reaches the gunner by the PS2's rule, and a turret is destroyed (wreck, respawn or pad) if the PS2's is
-milestone: M2
-value: 5
-phase: build
-status: blocked
-deps: XBTEX
-files: engine/crates/game/src/assets.rs, engine/crates/core/src/collision/world.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/sim/ordnance.rs, engine/crates/core/src/sim/blast.rs, engine/crates/core/src/sim/seats.rs, engine/crates/game/src/viewer/turret_pose.rs
-declares: sim; sweep
-needs: cloud prerequisites: restore PS2 extracted/ and engine/assets_baked/ plus TCOL reference scratch; XBTEX must land first
-effort:
-branch:
-resume: Cloud preflight 2026-10-24: no implementation started. Missing assets_baked/, extracted/, iso/, lead_tmp/tcol/, and RKHUL repro; xbtex ref and de77a64 unavailable. See reports/20261024_0700_card_TCOL.md. Restore assets and evidence, verify/land XBTEX, clear needs and set todo; then start TCOL in an isolated worktree and write Acceptance 1 turret repro before source changes. Preserve TBLD scope and leave vehicle_pads.rs untouched.
-created: 2026-10-21
-alpha: yes
-first: 9
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer (INBOX 2026-10-21 18:40 item 2, BF2 Geonosis?): rockets, bullets and grenades pass through the UPPER half of a Laik
 cannon and hit its base; its health never drops; its gunner takes no damage. A building turret has no hull collision

@@ -1,20 +1,11 @@
 ---
 id: TIPS
 title: BF2's tooltip bar (the bottom hint line: 'This CP is now controlled by your team.', 'Stand near an enemy CP to capture it.', enter/exit vehicle, build a turret ...): the table at 0x5ff4ac, each tip's trigger, timing and repeat rule
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore both corpora, BF2 ELF, tooltip table resolver and captured bar; verify triggers/timers before a build split.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 6 exact named inputs absent. Restore both corpora, BF2 ELF, tooltip table resolver and captured bar; verify triggers/timers before a build split. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-09-30
-alpha: 
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 EVMSG's RE (`analysis/re-event-messages.md` §1, 2026-09-30): the only text BF2 shows when the player's team takes the
 post he stands on is a TOOLTIP — "This CP is now controlled by your team." (Locl 0x64bcc6d2) in the bottom bar

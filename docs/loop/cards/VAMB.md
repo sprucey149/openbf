@@ -1,21 +1,11 @@
 ---
 id: VAMB
 title: BF1 vehicles (non-static models with a shdw volume) are lit by SkyInfo VehicleAmbientColor — the port lights them with AmbientColor; bake the key and give those draws a per-draw ambient (CAMB's LightPath::Character pattern)
-milestone: M2
-value: 3
-phase: build
-status: blocked
-deps: CAMB
-files: engine/crates/bake/src/lighting.rs, engine/crates/manifest/src/lib.rs, engine/crates/render/src/shader.wgsl, engine/crates/game/src/viewer/vehicles.rs
-declares:
-needs: restore BF1 raw shdw census inputs and paired vehicle PS2 reference before retry
-effort:
-branch:
-resume: 20261025_0503 input hold 0/38; no source change; restore inputs and run census/vehicle comparison; see engine/artifacts/loop/reports/20261025_0503_card_VAMB.md
-created: 2026-09-28
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 BF1's light-set builder FUN_00493cf0 gives a NON-static model with a shadow volume (model +0xb8, the modl loader FUN_00497150 stores the shdw chunk there) … vehicles still take AmbientColor.
 ## Evidence

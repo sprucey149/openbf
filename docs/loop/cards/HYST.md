@@ -1,19 +1,11 @@
 ---
 id: HYST
 title: Position hysteresis (keep the held spot unless another is 15 % better, clamped score terms), no cover reached by running at the enemy, and a hit / near miss / new enemy in sight wakes a bot at once
-milestone: M3
-value: 5
-phase: done
-status: done
-deps: ARCM
-files: engine/crates/core/src/ai/tactic.rs; engine/crates/core/src/ai/tactic/tests.rs; engine/crates/core/src/ai/wake.rs; engine/crates/core/src/ai/wake/tests.rs; engine/crates/core/src/ai.rs; engine/crates/core/src/ai/behave/brain.rs; engine/crates/core/src/ai/behave/position/tests.rs; engine/crates/core/src/ai/state.rs; engine/crates/core/src/ai/why.rs; engine/crates/core/src/sim/state.rs; engine/crates/core/src/sim/step.rs; engine/crates/game/examples/round_to_outcome.rs; analysis/bot-design.md
-declares: sim
-needs:
-effort:
-branch: botup
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 `lead_tmp/botre/modern.md` B1-B3 (its recommendations 4 and 5): the Tactician's 5-12 s timer and the open
 position's 2 s ask for cover could swap between two near-equal positions (`analysis/bot-design.md` 4.6 scored each

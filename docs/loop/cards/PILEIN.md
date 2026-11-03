@@ -1,20 +1,10 @@
 ---
 id: PILEIN
 title: A ground-vehicle pilot's Right command orders nearby teammates to PILE IN, with the driver cross and need-gunner line
-milestone: M2
-value: 3
-phase: build
-status: parked
-deps: SQACK
-files: engine/crates/core/src/squad.rs,engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai/ride/tests/pile_in_tests.rs (new),engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/command.rs,engine/crates/core/src/ai/behave/brain.rs,engine/crates/core/src/sim/seats.rs,engine/crates/core/src/sim/state.rs,engine/crates/game/src/event_feed.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/tests/suite/squad_orders_ps2.rs,engine/crates/core/src/sim/vehicles.rs,engine/CRATES.md
-declares: sim; sweep
-needs: actual O1/OP4 content, voice/HUD and full unchanged acceptance gates
-effort:
-branch: main
-resume: (private workflow note omitted)
-created: 2026-10-26
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why and evidence
 SQVEH's follower boarding is implemented, but `squad_pass` still discards every

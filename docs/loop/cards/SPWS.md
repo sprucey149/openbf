@@ -1,19 +1,11 @@
 ---
 id: SPWS
 title: A battle's first tick starts 39 sounds at once: every soldier's weapon-equip sound and first step (BF2 Kamino, 16 a side, windowed: sum of gains 13.6, nearest 2 m; the offline mix peaks 1.59 x full scale) - measure what the PS2 starts at a spawn and gate the port's
-milestone: M1
-value: 3
-phase: measure
-status: done
-deps:
-files: engine/crates/game/src/event_sounds.rs, engine/crates/game/src/foley.rs
-declares:
-needs:
-effort:
-branch:
-resume: 2026-10-16 planner: MERGED into GSND (batch: same files, both value 3 audio); its text is under GSND's '## Merged: SPWS'.
-created: 2026-10-07
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Found by card SNDB's first real snapshot (2026-10-07): the black box's only OVERLOAD line in 59 s of BF2 Kamino was tick 1.
 Every unit spawns on the same tick, so every unit's equip sound and first footstep start on it. The maintainer hears it as a burst when a battle begins.

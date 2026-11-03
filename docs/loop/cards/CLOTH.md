@@ -1,20 +1,11 @@
 ---
 id: CLOTH
 title: BF2 cloth slice 1: Hoth snowtroopers' skirts, clone capes, hero capes and robes are CLTH meshes listed by their model's gmod (not by ClothODF) - parse CLTH and bake each wearer's cloth into its soldier GLB, pinned rigid to its bones, two-sided (the player's own snowtrooper on HOT1)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/cloth.rs (new), engine/crates/mungefs/src/lib.rs, engine/crates/mungefs/src/entity.rs, engine/crates/bake/src/soldier.rs, engine/CRATES.md
-declares: rebake=side; goldens=units/bf2_imp_inf_snowtrooper.png,units/bf2_rep_inf_arctrooper.png,units/bf2_rep_inf_clonecommander.png,units/bf2_rep_inf_ep3heavytrooper.png,units/bf2_rep_inf_ep3sniper.png
-needs:
-effort:
-branch: cloth
-resume:
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Filed by FXC's census (2026-10-16, `analysis/re-chunk-census.md` 4). BF2 hangs **cloth** - a separate textured mesh on a
 bone, with collision capsules on the legs - on the soldiers whose class names it with `ClothODF`. The port parses no

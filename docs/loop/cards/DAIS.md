@@ -1,20 +1,11 @@
 ---
 id: DAIS
 title: BF2 Kamino hub 46, after SKIRT: bots on the pod's dais walk at points through its rail (43 of the 87 stalls SKIRT's prototype leaves, 20 per 100 passes against the PS2's 5) - the PS2's bots cross the dais in a median 1.5 s and leave by its four corner ramps (134 of 146 visits): measure the port's visits beside them, trace one, then build the way out
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps: SKIRT
-files:
-declares: sim; sweep; arena
-needs: (private workflow note omitted)
-effort: high
-branch:
-resume: Restore local assets/missions and lead_tmp/skirt + mouth evidence (dais_ps2.py, site.py, scene.sh, PS2 CSVs, snapshots); verify current SKIRT source/base; clear needs and set todo phase measure only after input checks. Reproduce PS2 visits, measure fresh main visits/exits over seeds 60-67 x 3 min, then trace one present-main dais wall slide tick by tick before any remedy. See reports/20261024_0736_card_DAIS.md.
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer, 2026-10-11, of BF2 Kamino: bots "miss ... go to the side of it, try running at the side for a few seconds, then
 go back a few feet" - hub 46, the pod, the spot of his own scene. Card SKIRT's RE (2026-10-12,

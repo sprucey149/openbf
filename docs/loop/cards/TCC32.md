@@ -1,20 +1,10 @@
 ---
 id: TCC32
 title: Does a 32-bpp texture reach the GS with TCC=0 — i.e. is `re-material-flags.md` §2's "TEX0 TCC=1 for every texture in both games" too broad?
-milestone: M1
-value: 1
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25 (from QUEUE.md)
-defer: post-alpha
-acceptance: needed
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

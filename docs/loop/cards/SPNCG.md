@@ -1,19 +1,10 @@
 ---
 id: SPNCG
 title: Wire card SPNC's spawn-node census into the gates: a 'spawn' census line (spawn_node_census, 7 s for 32 maps) that fails on a NEW failing node not in spawn_node_census_accepted.txt, so a change to start_hub / level_hub / the floors / the bake that strands a spawn node is caught at the gate
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps: SPNC
-files: scripts/gates.py,engine/artifacts/loop/gates.toml
-declares:
-needs: maintainer — approve [approvals.SPNCG] oracle = "guards" before gates.py edits; local baked maps/missions and census inputs also need restoration
-effort:
-branch:
-resume: 2026-10-24 07:50 UTC: planner guard preflight: scripts/gates.py is guards-protected; only FIDSP has approval. Restore census inputs and obtain SPNCG guards approval, then implement original new-node/mutation acceptance in an isolated worktree. Builder supplies any new baseline rows for authorized planner/landing handling. No gate edit or threshold change. engine/artifacts/loop/reports/20261024_0750_planner.md
-created: 2026-10-15
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Card SPNC's acceptance asked for a census line in the gates if the run is under a minute; it is 7 s for 32 maps. RULES:

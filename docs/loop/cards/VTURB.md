@@ -1,18 +1,11 @@
 ---
 id: VTURB
 title: Building turrets as seat-only vehicles: every armedbuilding instance (BF1 com_weap_gunturret, BF2 tur_* and the armedbuildingdynamic turrets) spawned from the map's instances as a VehicleKind::Turret with its TURRETn gunner seats and guns (VTUR's machinery), enterable, never moving, its hull pool; drawn at its instance
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTUR
-files: engine/crates/game/src/vehicle_pads.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/classdb.rs,engine/crates/core/src/sim/seats.rs,engine/crates/game/examples/turret_ride.rs
-declares: sweep
-needs:
-branch: vturb
-resume:
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's 09-28 coverage note: NAB1 ships com_weap_gunturret instances and PLAN §Vehicles item (5) wants every building turret usable. Split from VTUR (2026-09-29) to keep that landing one commit-sized change.
 

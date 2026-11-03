@@ -1,21 +1,10 @@
 ---
 id: BNR
 title: Where a door's bone-bound geometry sits at REST: model space, or its bone's rest frame?
-milestone: M3
-value: 3
-phase: re
-status: done
-deps:
-files:
-declares: marks: GOLDENS REBAKE SWEEP
-needs:
-effort:
-branch:
-resume:
-created: 2026-09-25 (from QUEUE.md)
-defer: post-alpha
-acceptance: needed
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

@@ -1,20 +1,10 @@
 ---
 id: TESTEV
 title: Keep event-audio regressions discoverable while restoring the deterministic-math source scan
-milestone: M0
-value: 4
-phase: cleanup
-status: done
-deps:
-files: engine/crates/game/src/event_sounds.rs, engine/crates/game/src/event_sounds/contact_tests.rs, engine/crates/game/src/event_sounds/tests.rs (new)
-declares:
-needs:
-effort:
-branch: testev
-resume:
-created: 2026-10-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 HITSND's new trailing test-module declaration stops the core deterministic-math

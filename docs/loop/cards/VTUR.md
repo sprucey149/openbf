@@ -1,18 +1,10 @@
 ---
 id: VTUR
 title: Gunner seats and vehicle weapons: MountedTurret sections, aimers (rate-limited, clamped, aimed at the camera ray's hit), fire points; building turrets as seat-only vehicles; the in-vehicle aim/lock-on call
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VSEAT
-files: engine/crates/bake/src/hardpoints.rs,engine/crates/core/src/vehicle/gun.rs,engine/crates/core/src/sim/guns.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/walk.rs,engine/crates/manifest/src/lib.rs
-declares: rebake=tat1,tat2,common,side,maps,sounds,global-sound
-needs:
-branch: vtur
-resume: landed e69e73a 2026-09-29; building turrets -> VTURB, bot gunners -> VTAI, lock-on -> VLOCK
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Vehicle weapons and gunner seats (the skiff's three guns, the AT-ST's chin and head guns), and every building turret

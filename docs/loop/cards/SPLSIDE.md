@@ -1,20 +1,10 @@
 ---
 id: SPLSIDE
 title: Extract soldier and weapon bake output from model and animation conversion
-milestone: M0
-value: 2
-phase: cleanup
-status: parked
-deps:
-files: engine/crates/bake/src/soldier.rs,engine/crates/bake/src/soldier/output.rs
-declares:
-needs: (private workflow note omitted)
-effort:
-branch: main
-resume: Output extraction implemented on main; restore original content/GPU inputs and run the ordered validation checklist in the report. All full SPL14/SPLIT_RECIPE acceptance remains incomplete. See reports/20261026_0824_card_SPLSIDE.md.
-created: 2026-10-26
-domain: tooling
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why and exact scope
 SPL14 still names the 1,637-line soldier baker. Its contiguous disk-output

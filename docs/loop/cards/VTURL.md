@@ -1,20 +1,11 @@
 ---
 id: VTURL
 title: A building turret's turn law: a full-circle turret stops at 180 degrees and its gun swings round the long way (the look is clamped at the seam, the aimer walks back through 0 - seen now that card VTURD draws the gun), and the PS2's stick-to-rate law with the aimer's limits in the turret's aim frame replaces the port's PROVISIONAL seat look (re-turret-draw 2.2, 2.3)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTURD
-files: engine/crates/core/src/vehicle/gun.rs,engine/crates/core/src/sim/guns.rs,engine/crates/game/src/vehicle_pads.rs
-declares:
-needs:
-effort:
-branch: vturl
-resume:
-created: 2026-10-13
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card VTURD (2026-10-13) draws a building turret turned to its seat's `GunState`. That makes the port's PROVISIONAL
 seat look (`core/src/vehicle/gun.rs`) visible, and it is not the PS2's:

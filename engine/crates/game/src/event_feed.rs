@@ -405,6 +405,7 @@ pub struct EventFeed {
     /// The chevron edges the viewer's hits lit since the last
     /// [`EventFeed::take_ambush`] (card HATK).
     ambush: Vec<Edge>,
+    damage_flash: Option<(UnitHandle, u64, crate::hit_flash::Flash)>,
     /// The viewer's last marked critical hit: its tick and the
     /// victim's relation colour ([`EventFeed::hit_critical`]).
     critical: Option<(u64, [u8; 3])>,
@@ -458,6 +459,7 @@ impl EventFeed {
             texts,
             out: Vec::new(),
             ambush: Vec::new(),
+            damage_flash: None,
             critical: None,
             body: None,
             recent: Vec::new(),
@@ -689,6 +691,19 @@ impl EventFeed {
         self.round.tick(sim);
 
         for e in &sim.events {
+            if let Event::Hit {
+                victim,
+                damage,
+                health_left,
+                ..
+            } = *e
+            {
+                if victim == viewer {
+                    if let Some(flash) = crate::hit_flash::Flash::from_damage(damage, health_left) {
+                        self.damage_flash = Some((viewer, tick, flash));
+                    }
+                }
+            }
             if let Some(edge) = ambush_edge(sim, viewer, e) {
                 self.ambush.push(edge);
             }
@@ -985,6 +1000,15 @@ impl EventFeed {
         self.body
             .filter(|&at| tick.saturating_sub(at) < HIT_TIMER_TICKS)
             .map(|_| ui::hud::target_color::ENEMY)
+    }
+
+    /// Local damage overlay, on the simulation clock and scoped to this life.
+    pub fn damage_flash(&self, tick: u64, viewer: UnitHandle) -> f32 {
+        self.damage_flash
+            .filter(|(unit, _, _)| *unit == viewer)
+            .map_or(0.0, |(_, start, flash)| {
+                flash.alpha_at(tick.saturating_sub(start) as f32 / core::TICK_HZ as f32)
+            })
     }
 
     /// The chevron edges lit since the last call (`HudModel::ambush`).

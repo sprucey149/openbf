@@ -1,19 +1,10 @@
 ---
 id: RBKM
 title: A manifest schema change must rebake every manifest-writing group: rebake=maps skips tat1/tat2 (own groups), so REFL left their manifest.ron without reflect/reflection_color and land.py's maps-only bake gate could not see it — expand or refuse
-milestone: M0
-value: 4
-phase: measure
-status: blocked
-deps:
-files: scripts/land.py,scripts/gates.py
-declares:
-needs: cloud — restore local bake inputs and baseline receipts to verify main-side expanded bake comparison; implementation is already present, no gate-code edit planned
-effort:
-branch:
-resume: 2026-10-24 07:50 UTC: planner found REBAKE_EXPAND and parse_declares already expand maps to maps,tat1,tat2; land.py --self-test PASS. Restore bake data/baselines and verify one real main-side bake gate receives and compares all expanded groups. Do not rebuild the existing fix or request guards solely for it. No real rebake/landing run here. engine/artifacts/loop/reports/20261024_0750_planner.md
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 `engine/CRATES.md` says a new manifest field means rebaking every group that writes a manifest. `scripts/rebake.sh`'s

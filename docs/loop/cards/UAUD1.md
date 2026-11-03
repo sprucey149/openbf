@@ -1,18 +1,10 @@
 ---
 id: UAUD1
 title: Unit fidelity audit, BF1: every unit class on every BF1 map — weapon slots and what each draws, items/grenades, sounds, movement constants and animations, which map/era loads it — against the mission Lua + side LVL and a PCSX2 look; gaps become cards
-milestone: M1
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer (INBOX 2026-09-28, DECISION 3): audit every unit class on every map of both games; value 5, M1. The port models one

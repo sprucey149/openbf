@@ -1,20 +1,11 @@
 ---
 id: WEARY
 title: SSD wear: fewer, smaller test binaries (63 integration-test files under engine/crates/*/tests/ each link the whole engine into their own binary; game has 37) and stale lane targets
-milestone: M3
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/game/tests, engine/crates/render/tests, engine/crates/bake/tests, engine/crates/mungefs/tests, engine/CRATES.md, scripts/loopctl.py
-declares: none (behaviour-neutral: test files moved into one binary per crate; loopctl's target sweep)
-needs:
-effort:
-branch: weary
-resume:
-created: 2026-10-15
-first: 2
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-15: SSD wear is a big deal (see card WEARX for the numbers: ~78 GB/h written under the loop, cargo output nearly all of it). Every file under crates/*/tests/*.rs is its own test binary that links the crate and every dependency: game 37, bake 9, render 10, mungefs 6, core 1. debug/deps is 71 GB of the 121 GB debug target. Already done (46c6555): line-tables-only debug info, dev incremental off - which shrinks each binary; this card shrinks the count.
 

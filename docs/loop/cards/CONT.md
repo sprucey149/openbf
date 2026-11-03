@@ -1,20 +1,11 @@
 ---
 id: CONT
 title: Bots do not close with the enemy: on the PS2 a Kamino soldier has an enemy within 20 m 25 % of the time, in the port 2-5 %; a bot's objective changes every 10 s (71 % back to one it just left) and the commander's threat term sends attacks where no enemy stands
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/commander.rs,engine/crates/game/examples/round_to_outcome.rs,engine/crates/core/src/sim/state.rs,scripts/sweep_seeds.py
-declares: sim; sweep; arena
-needs:
-effort:
-branch: cont
-resume: landed 4c1460d5 2026-10-02
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card OFFG (2026-10-02) fixed the bridges; BF2 Kamino now runs 13.8 kills / min against the PS2's 17.3 and the gap that is left is contact. The maintainer plays Kamino; a fight that happens at 70 m with nobody closing is what he sees.
 

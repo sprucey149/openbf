@@ -1,21 +1,11 @@
 ---
 id: ANIMS
 title: Bake the PS2's soldier animation sets: per (skeleton, weapon set) the upper-body and lower-body clip of every animation id with frames, loop, root speed and blend time - BF1's nine AnimationBank sets and fallback table, BF2's (family, class) sets and the disc's sanm chunk
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/anim.rs,engine/crates/mungefs/src/sanm.rs,engine/crates/bake/src/soldier.rs,engine/crates/bake/src/anim_sets.rs,engine/CRATES.md
-declares: rebake=side
-needs:
-effort:
-branch: anims
-resume: landed d582ff52 2026-10-05
-created: 2026-10-05
-alpha: yes
-domain: render
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-04: "shooting, walking, and standing animation is not the exact same for every unit. It varies depending on
 weapon they're holding, so like where it sits on their shoulder ... the sbd doesn't hold a gun so it sticks its arm

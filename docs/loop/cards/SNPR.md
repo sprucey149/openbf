@@ -1,21 +1,11 @@
 ---
 id: SNPR
 title: Snipers with a purpose: a scoped-rifle bot picks the Snipe hint or high ground with the longest clear lane onto enemy ground, holds it while enemies are in the lane, relocates after 20 quiet seconds, and takes its pistol when an enemy is inside the rifle's min range or within 25 m and closing (the maintainer's INBOX 2026-10-12 16:20, ask 2; deviations approved)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,CLSE4
-files: engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/arsenal.rs,engine/crates/core/src/ai/arsenal/tests.rs,engine/crates/core/src/ai/snipe.rs,engine/crates/core/src/ai/snipe/tests.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai.rs,engine/CRATES.md
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: snpr
-resume: landed 66470010 2026-10-16 (6647001 = the perch fix found at landing); planner: remove [approvals.SNPR]; AUDIT INCOMPLETE / UNAUDITED 2026-10-25 — restore primary inputs/history, see reports/20261025_1139_audit_SNPR.md
-created: 2026-10-12
-alpha: yes
-domain: ai
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's wish (INBOX 2026-10-12 16:20, ask 2 - read it first; under `## Done` now): snipers with a purpose. A
 sniper-class bot (scoped rifle) picks a spot with a long clear lane, holds it while enemies are in the lane, fires at

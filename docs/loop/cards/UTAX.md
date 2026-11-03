@@ -1,22 +1,11 @@
 ---
 id: UTAX
 title: BF2 Utapau (showcase): the Rebels are trapped at their own base - bots attacking the far posts take a STRAIGHT fallback leg from hub 61/64 to hub 65, stop at a ledge drop at (-150, 14.4, 143), recover back to hubs 12/13 and repeat (111 unit-s a round, Imperials 7); Rebel first capture 101 s vs 28 s, posts held 1.4 vs 3.9, the Imperials win 16 of 16 - both PS2 rounds went to the Rebels (48-2, 28-0)
-milestone: M3
-value: 5
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/sim/bounds.rs, engine/crates/game/tests/suite/nav_walls.rs, engine/CRATES.md
-declares: sweep; arena; sim
-needs: cloud prerequisites: branch utax, baked assets, missions and reference evidence absent
-effort:
-branch: utax
-resume: (private workflow note omitted)
-created: 2026-10-22
-alpha: yes
-first: 1
-defer:
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card WINS (2026-10-22): on main 3ae13d3 the Imperials win BF2 Utapau (a showcase map) 16 of 16 seeds in the fidelity
 baseline and 8 of 8 in WINS's re-run; kills are even (78 / 76 per round), the Rebels lose ~73 tickets a round to the bleed

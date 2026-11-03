@@ -1,20 +1,10 @@
 ---
 id: PWUP
 title: Pickups, built: a dead soldier's drop (its class's table, one roll, the pool cap), the item on the ground (falls, lands, 31 s), the pickup by touch (health to the cap, +clips, either team, only when it gives something), drawn and heard; BF2's energy and offense / defense items
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/pickups.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/blast.rs,engine/crates/core/src/unit.rs,engine/crates/game/src/classdb.rs,engine/crates/game/src/roster.rs,engine/crates/game/src/viewer/pickups.rs,engine/crates/game/src/viewer/vehicles.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/fx.rs,engine/CRATES.md
-declares: sim; sweep; arena; leak
-needs:
-effort:
-branch: pwup
-resume: landed 6bc42904 2026-10-03
-created: 2026-09-28
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 `analysis/re-powerups.md` (`[O]`, commit 772d174; verifier 60 / 3 / 0 of 63; four live PS2 battles). On the PS2 a dead

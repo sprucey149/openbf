@@ -1,20 +1,11 @@
 ---
 id: AMBS
 title: Ambience: the world's soundstream regions, sound objects and prop loops - each map's ambience streams (looping 3-D at the region's centre, distances from the region's size), com_snd_amb_static objects (Mygeeto's neon, Tatooine's sandcrawler), props with SoundProperty (fires, vaporators) and effect sounds
-milestone: M1
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/ambience.rs, engine/crates/game/src/sounds.rs, engine/crates/game/src/event_sounds.rs, engine/crates/game/src/lib.rs, engine/crates/game/src/main/windowed.rs, engine/crates/game/src/main/headless.rs, engine/crates/game/tests/ambience_ps2.rs
-declares:
-needs:
-effort:
-branch: ambs
-resume: landed 408a8d35 2026-10-16
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The port's battle has no ambience. On the PS2 every map has one or more ambience streams all battle long and fixed
 loops on props and world objects (fires, vaporators, neon signs, control panels). RE: `analysis/re-ambience-music.md`

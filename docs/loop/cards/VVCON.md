@@ -1,19 +1,11 @@
 ---
 id: VVCON
 title: Vehicles against vehicles: the PS2 pairs vehicle hulls with each other (BF1's per-tick pass moves the vehicle list against layers 1|4, re-collision-layers 4) and a hull impact deals damage credited to the OTHER body's driver (B1 FUN_001ee3e0, re-vehicle-death 10.1 item 9); the port's vehicle contacts see only the map (HullFilter::Static, collision/world.rs: 'which the port does not model yet') - measure how often two port vehicles overlap, then RE the PS2's response and build it
-milestone: M2
-value: 3
-phase: measure
-status: blocked
-deps:
-files: engine/crates/core/src/collision/world.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/vehicle/hover.rs
-declares: sim; sweep; arena
-needs: Restore runtime maps/classes/missions for the 8x32 main overlap census; only then value and scope the PS2 contact response build.
-effort:
-branch:
-resume: 2026-10-24 14:22 UTC: planner restoration hold; Restore runtime maps/classes/missions for the 8x32 main overlap census; only then value and scope the PS2 contact response build. Original measurable acceptance retained. reports/20261024_1422_planner.md; lead_tmp/planner_20261024_1417/preflight.json.
-created: 2026-10-16
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The port's hovers and walkers take contacts only against the map's bodies (`HullFilter::Static` in `core/src/collision/world.rs`,
 whose comment says the PS2 pairs vehicles with each other and the port does not model it). On the PS2 two vehicles collide

@@ -1,20 +1,11 @@
 ---
 id: FLNKB
 title: Flank routes cross the arcs a mission blocks for the round: 6 of 10 on BF2 Kashyyyk (the wooden walls), 16 of 18 on Death Star (compactor, Connection115 / 146), 6 of 10 on Tantive IV (turbine) - leave blocked arcs out of the flank search (AUDIT FLNK)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/nav/flank.rs, engine/crates/core/src/nav/flank/tests.rs, engine/crates/core/src/route_patch.rs, engine/crates/core/src/sim/round.rs, engine/crates/game/tests/suite/route_patch.rs
-declares: sim; sweep; arena
-needs: cloud prerequisites: branch flnkb, baked assets, missions and reference evidence absent
-effort:
-branch: flnkb
-resume: (private workflow note omitted)
-created: 2026-10-20
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT FLNK (2026-10-20, PARTLY): flank routes cross arcs the mission closes to its AI for the whole round. In the port, ScriptPostLoad's BlockPlanningGraphArcs patches the route table (core::route_patch), and the port never unblocks (it destroys nothing). The flank search (nav/flank.rs flank_search) walks every soldier arc and never reads the patch, and neither does plan_leg's flank hop. The +35 % bound is measured against a main route the block has inflated. Death Star 27>32: main 847 m (135 m on the all-open table), flank 135 m, ratio 0.16; 10 of 18 Death Star routes are under 0.7 of their main route, against none under 0.87 on the other nine M5 maps.
 

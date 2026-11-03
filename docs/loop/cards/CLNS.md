@@ -1,18 +1,10 @@
 ---
 id: CLNS
 title: Cleanse scripts (2026-09-29): the loop/bake/gate tooling in scripts/ — stale docs, dead paths, script bugs; RBKM if it fits
-milestone: M0
-value: 2
-phase: cleanup
-status: done
-deps:
-files: scripts/rebake.sh,scripts/gates.py,scripts/land.py,scripts/loopctl.py,scripts/re_check.py,scripts/sim_gates.sh,engine/CRATES.md
-declares:
-needs:
-branch: clns
-resume: landed 90c5dc9d 2026-09-29
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The cleanse rotation's `scripts/artifacts tooling` area (LAST_CLEANSE): the loop's own gates and bookkeeping.

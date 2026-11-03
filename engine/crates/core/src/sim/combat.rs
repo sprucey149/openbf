@@ -339,7 +339,7 @@ impl Sim {
                     });
                 }
                 self.push_impact(b, Surface::Soldier, None);
-                if self.finish_unit_damage(
+                if self.finish_round_damage(
                     h,
                     Some(b.owner),
                     damage,
@@ -476,12 +476,14 @@ impl Sim {
                 self.bolt_explodes(b);
             }
             Hit::None => {
-                // A shell or a missile out of life bursts in the air with
-                // its ExplosionExpire (re-ordnance-kinds §4.3, §6).
-                if b.gravity > 0.0 || b.missile.is_some() {
-                    if let Some(e) = self.weapon_classes[b.weapon_class].ordnance.expire.clone() {
-                        self.explode(&e, b.pos, Some(b.owner), Some(b.team));
-                    }
+                // Base ordnance expiry applies to every flight family
+                // (B1 FUN_00272e98, B1:195363–195367; re-ordnance-kinds §3).
+                if let Some(e) = self.weapon_classes[b.weapon_class].ordnance.expire.clone() {
+                    self.explode(&e, b.pos, Some(b.owner), Some(b.team));
+                    self.events.push(Event::OrdnanceExpired {
+                        pos: b.pos,
+                        weapon_class: b.weapon_class as u32,
+                    });
                 }
                 self.events.push(Event::BoltExpired {
                     pos: b.end,
@@ -546,6 +548,24 @@ impl Sim {
         });
     }
 
+    /// Mark a round contact for the visual hit pose without changing damage
+    /// bookkeeping. The general damage path also handles non-round attacks.
+    pub(super) fn finish_round_damage(
+        &mut self,
+        victim: UnitHandle,
+        attacker: Option<UnitHandle>,
+        damage: f32,
+        age: f32,
+        dir: Vec3,
+    ) -> bool {
+        let at = self.events.len();
+        let killed = self.finish_unit_damage(victim, attacker, damage, age, dir);
+        if let Some(Event::Hit { direct_round, .. }) = self.events.get_mut(at) {
+            *direct_round = true;
+        }
+        killed
+    }
+
     pub(super) fn finish_unit_damage(
         &mut self,
         victim: UnitHandle,
@@ -562,6 +582,7 @@ impl Sim {
         if let Some(shooter) = attacker {
             u.last_hit = Some((shooter, self.tick));
             self.events.push(Event::Hit {
+                direct_round: false,
                 shooter,
                 victim,
                 damage,

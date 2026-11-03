@@ -1,20 +1,11 @@
 ---
 id: SSUN
 title: BF1 soldiers take 2.6-7x less sun in the port than on the PS2 when lit from overhead or in front (KAS2 SBD, ambient off: T90 17.3 vs 6.7, real sun 12.7 vs 3.7; back-lit equal) - plant the PS2's own bone pose first, then name the term
-milestone: M1
-value: 3
-phase: re
-status: todo
-deps: SBLT
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 After card SBLT's ambient fix the port's BF1 KAS2 super battle droid (no specular pass) should read ~43.8 against the
 PS2's 51.2. The rest is the sun: with the ambient off, the PS2 droid takes 2.6-7x more sun than the port's when the

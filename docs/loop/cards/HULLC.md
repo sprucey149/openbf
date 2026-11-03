@@ -1,21 +1,10 @@
 ---
 id: HULLC
 title: Vehicle hulls cost 37.6 % of the sim: CollisionWorld::set_hull rebuilds every hull part's Body each tick and Body::with_layers re-runs watertight(mesh) - a SipHash weld of the whole mesh - though a part's mesh never changes; compute closed once where the shape is made, then the rest of the flat profile (parry rays 7 %, height_at 2 %, SipHash in core)
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/collision/shape.rs, engine/crates/core/src/collision/world.rs
-declares:
-needs:
-effort:
-branch: hullc
-resume: step 2 landed 8882e856 2026-10-21 (terrain march probe; sim x0.84-0.95); left for the planner: parry AABB ray casts 6-8 %, Barrier::entry_t 7.3 % NAB2, level load 3-5x the 1500-tick sim
-created: 2026-10-21
-alpha: yes
-first: 3
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's profile (INBOX 2026-10-21; BF2 KAS2, 16 v 16, main of 10-20, callgrind 1,500 ticks): `CollisionWorld::set_hull`

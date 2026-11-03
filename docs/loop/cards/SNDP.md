@@ -1,19 +1,10 @@
 ---
 id: SNDP
 title: Sound: samples whose `frequency` is outside 4–48 kHz (1.8 % of every bank), and duplicate sound-property definitions (63 over 32 maps)
-milestone: M1
-value: 1
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 10(h) and 10(j); the port keeps the last audible definition (PROVISIONAL, `game::sounds::merge_props`).

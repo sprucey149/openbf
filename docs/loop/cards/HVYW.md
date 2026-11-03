@@ -1,20 +1,11 @@
 ---
 id: HVYW
 title: Heavy weapons with a purpose: a bot with a rocket launcher (and a super battle droid's wrist rocket) fires it at enemy VEHICLES in range and line and at GROUPS of 3+ within 9 m, and otherwise keeps to its rifle (the maintainer's INBOX 2026-10-12 16:20, ask 1; deviations approved) - today the weapon choice is for soldier targets only and a fight never takes a mounted target
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD
-files: engine/crates/core/src/ai/arsenal.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/perception.rs,engine/crates/core/src/weapon.rs,engine/crates/game/src/roster.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sweep; arena
-needs:
-effort: high
-branch: hvyw
-resume: landed 3fba385b 2026-10-15
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's wish (INBOX 2026-10-12 16:20, ask 1 - read it first; under `## Done` now): heavy weapons with a purpose. A bot
 with a rocket launcher, and a super battle droid with wrist rockets, fires them at VEHICLES and at GROUPS, and

@@ -1,21 +1,11 @@
 ---
 id: STARC
 title: Keep bots on the arc: walk back to the arc line before cutting to the next hub (POL1 radar door, GEO1 bunker), and a last leg that starts where the capture centre is in reach (NAB1 ruins column, MYG1 spiral ruin)
-milestone: M3
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/coll.rs,engine/crates/mungefs/src/coll_fan.rs,engine/crates/bake/src/map.rs
-declares: rebake=maps; sweep; leak
-needs:
-effort:
-branch: starc
-resume: landed c9d2776c 2026-10-02
-created: 2026-09-30
-alpha: yes
-first: 6
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Build session 2026-10-02 - what the radar door really was (read this first; the original text is below)
 - **Not a routing defect.** The bots at POL1 (18, 25, 84) stood in a pocket closed by a collision plane: the wall
   1.5 m behind `pol1_prop_door3` (`pol1_bldg_radar_main01`) has a doorway, and the bake filled it. On the disc the wall

@@ -1,20 +1,11 @@
 ---
 id: SLUMI
 title: Soldiers in light-map shadow: on maps with DomeInfo TerrainColorDarkening the PS2 draws a soldier at min(1.2 LUMI + 0.3, 1) of his colour (BF1 NAB1, TAT1, END1, TAT2; BF2 END1, KAS2) - the port draws every soldier at 1.0
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/soldier_vis.rs, engine/crates/bake/src/lighting.rs
-declares: rebake=maps (the flag in the manifests of the flagged maps); goldens=none expected (no golden draws a soldier on those maps; confirm)
-needs: Restore LUMI/sky map data, flag census, state and BF2 primary inputs; resolve BF2 enable flag and retain the within-3-level shadow ratio check.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 7/7 exact named paths absent. Restore LUMI/sky map data, flag census, state and BF2 primary inputs; resolve BF2 enable flag and retain the within-3-level shadow ratio check. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 On the PS2 a soldier standing in the terrain's light-map shadow is drawn darker: the soldier draw's colour is
 min(1.2 x LUMI + 0.3, 1) at his feet (LUMI = the terrain light map, bilinear, /255), on maps whose sky `DomeInfo` carries

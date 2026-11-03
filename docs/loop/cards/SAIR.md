@@ -1,21 +1,10 @@
 ---
 id: SAIR
 title: RE the PS2 foot soldier's own AI, both games: how it walks a connection, goes round barriers and other units, takes hint nodes, picks a target, fires, strafes, dodges, takes cover and treats teammates - the port's soldier brain is ours, not the PS2's
-milestone: M3
-value: 5
-phase: re
-status: done
-deps:
-files: analysis/
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-02
-alpha: yes
-first: 4
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 There is an RE note for the goal (re-conquest-goal), difficulty, snipers, walkers, squad orders, grenades - and none for the thing the maintainer watches: a soldier's second-to-second movement and combat. The port invented it. The maintainer, 2026-10-02: RE the originals first, then analyse where THEY are flawed and do better there.

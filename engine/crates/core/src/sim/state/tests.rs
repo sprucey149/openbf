@@ -605,3 +605,40 @@ fn a_human_proxy_counts_as_its_teams_human() {
     s.units[h.index as usize].proxy_human = Some(crate::ai::proxy::Strength::Good.profile());
     assert_eq!(s.humans_per_team(), [0, 1]);
 }
+
+#[test]
+fn shared_sprint_keeps_hero_energy_nonnegative_but_soldiers_take_debt() {
+    use crate::sim::buttons;
+    use crate::soldier::Stance;
+    for hero in [false, true] {
+        let mut sim = Sim::empty(42);
+        sim.heightfield = Some(flat_ground());
+        let h = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+        if hero {
+            sim.heroes = Some(crate::sim::heroes::Heroes::new([Some(0), None]));
+        }
+        assert_eq!(sim.is_hero(h), hero);
+        let u = sim.unit_mut(h).unwrap();
+        assert!(!u.consts.saber, "gun heroes must be isolated too");
+        u.soldier.stance = Stance::Sprint;
+        u.soldier.energy = 0.1;
+        u.soldier.vel = Vec3::NEG_Z * 13.5;
+        let sprint = PadState {
+            ly: 32767,
+            buttons: buttons::SPRINT,
+            ..Default::default()
+        };
+        sim.step(&[sprint]);
+        let u = sim.unit(h).unwrap();
+        assert!(u.soldier.energy_depleted);
+        if hero {
+            assert_eq!(u.soldier.energy, 0.0);
+            for _ in 0..180 {
+                sim.step(&[sprint]);
+                assert!(sim.unit(h).unwrap().soldier.energy >= 0.0);
+            }
+        } else {
+            assert!(u.soldier.energy < 0.0);
+        }
+    }
+}

@@ -1,19 +1,10 @@
 ---
 id: SPL8
 title: game/src/viewer/scene.rs (1,546 lines) and game/src/assets.rs (1,514) are over the 1,500 cap with no waiver — split them (SPLIT_RECIPE) or waive them in scripts/size_waivers.txt (merged: SPL9)
-milestone: M0
-value: 1
-phase: cleanup
-status: parked
-deps:
-files: engine/crates/game/src/assets.rs, engine/crates/game/src/main/windowed.rs, engine/crates/game/src/sounds.rs
-declares:
-needs: windowed.rs remainder and sound content/device/full gates; assets validation retained
-effort:
-branch: spl8-assets-20261024
-resume: Assets e3c323fc validation retained; SPLSND ad97323 implements sounds playback1328/549 with literal proof. Windowed stays with BUGX; all original gates and sound/content checks owed. reports/20261026_1058_card_SPLSND.md.
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 Cleanse 2026-09-29: `scripts/size_report.sh` lists `game/src/viewer/scene.rs` at 1,546 non-test lines; SPL7 names four

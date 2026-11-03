@@ -1,20 +1,10 @@
 ---
 id: SPRD
 title: Sustained fire stays tight 1-2 s longer before the spread opens, for the player and the bots (the maintainer, 2026-10-04; a NAMED DEVIATION - the port's spread rule is the PS2's)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/weapon.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: sprd
-resume: landed eece09f0 2026-10-06
-created: 2026-10-04
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-04: "Have bullet tight spacing stay tight for like another second or 2 before having it start increasing the spread wildly, like when a bot or user holds the fire button and the bullet spacing is tight then begins to spread more, have it stay tight a little while longer."

@@ -1,20 +1,11 @@
 ---
 id: LOOKR
 title: The right stick's turn ramps up as on the PS2: a held stick starts at 48 (BF1) / 65 (BF2) deg/s and climbs linearly to 309 / 286 deg/s over one second, pitch is flat - the port turns at one flat rate from the first tick (183 deg/s under the maintainer's look scale); RE what drives and resets the ramp, then build it
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/input/src/lib.rs, engine/crates/core/src/sim/input.rs, engine/crates/core/src/soldier.rs, engine/crates/core/src/soldier/tests.rs, engine/crates/core/src/aim_assist.rs, engine/crates/core/src/sim/seats.rs, engine/crates/game/src/roster.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume: Cloud preflight 2026-10-24: restore lead_tmp/lookr PS2 CSVs for both games (full,0.5,0.8,0.9,0.95,0.98), tools/rows.py and verifier/check receipts; baked assets, missions and approved GPU gate environment missing. No implementation or branch. See reports/20261024_0813_card_LOOKR.md; then requeue build spec 1-5, fixture replays and five mutations, CI and branch gates before landing.
-created: 2026-10-06
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The ZOOM RE session (INBOX 2026-10-06 10:45, find 1) measured, live on both PS2s, that a human's yaw rate is NOT flat:
 with the right stick held the turn starts slow and climbs for about a second. The port turns at

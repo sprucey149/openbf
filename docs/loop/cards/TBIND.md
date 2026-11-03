@@ -1,20 +1,10 @@
 ---
 id: TBIND
 title: TUR turret models draw their moving parts at the bone's bind pose: the map bake keeps bone-space vertices (no to_model_space) and bone-relative segments as stored — BF2 HOT1's 12 laser-mortar heads sit at the tower foot, its 12 dishes ~1 m low, YAV1's 7 watchtower guns at the foot (bones 14-15.5 m up), and every bone-space TUR model (KAM1's 21 gun turrets, KAS2/MYG1's 13 antiaircraft, GEO1's 3; BF1 GEO1's 10 geoturrets) in bone space
-milestone: M2
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/map.rs,engine/crates/bake/src/glb.rs
-declares: goldens=maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_myg1.png,maps/bf2_geo1.png,maps/bf1_geo1.png,maps/tat2.png,maps/bf2_yav1.png,maps/bf1_bes1.png,maps/bf1_end1.png,maps/bf1_hot1.png,maps/bf1_yav1.png,tat1_overview.png; rebake=maps,tat1,tat2,common
-needs:
-branch: tbind
-resume: landed 2d0eda2d 2026-09-30; report reports/20260930_1755_card_TBIND.md
-created: 2026-09-30
-alpha: yes
-domain: render
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 VTUR2 (a1bf3e8) pulls BF2's SIDE/TUR.LVL models into the map bakes. The map bake writes every segment's vertices as

@@ -1,19 +1,11 @@
 ---
 id: TIER
 title: Do the four AI tiers order by kills? arena_tat2's one seed flips with every AI landing (kills / min easy, normal, hard, elite: AIRC 18.0 23.4 26.2 28.6 yes; OFFG 16.0 25.6 26.6 24.4 no; STLVL 20.0 22.4 23.6 28.8 yes; STTAP 17.2 26.0 24.4 25.0 no) - measure 8 seeds per tier before anyone tunes a tier
-milestone: M3
-value: 5
-phase: measure
-status: done
-deps: CONT,BOTD,TPOS,GRAI
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-02
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The difficulty setting is the one AI knob the maintainer will turn with a controller, and the only thing that checks it is the
 arena gate's `monotonic:` line: one 9,000-tick run per tier on one seed. Two reports in a row put "kills are no longer

@@ -1,20 +1,10 @@
 ---
 id: SRAD
 title: Soldier collision to the PS2's (audit of JWAL, 2026-09-29): two 0.57 m spheres 0.15 m FORWARD of the feet (centres 0.57 and s*1.9-0.42), walls at n.y <= 0.6 (and upper-sphere n.y > 0) clip the velocity against the HORIZONTAL normal but push along the FULL normal (y - 0.02), pushes projected off the tick's earlier normals — the port's 0.5 capsule, WALKABLE_MIN_NY 0.5 and horizontal-only push differ; measure the PS2 step height on PCSX2 before touching STEP_HEIGHT
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: GSKIP
-files: engine/crates/core/src/collision/walls.rs,engine/crates/core/src/collision/shape.rs,engine/crates/core/src/collision.rs,engine/crates/core/src/unit.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/ai/steer.rs,engine/crates/game/examples/leak_census_accepted.txt
-declares: sim; sweep; arena; leak
-needs: environment — restore PCSX2 toolkit, BF1/BF2 discs and baked maps, JWAL raw probes/captures, approved GPU gates
-effort:
-branch:
-resume: 2026-10-24 09:18 UTC: restore lead_tmp/srad_20261024_0839/prerequisites.json before measurements; both PS2 games walk/run, BF2 also sprints, BF1-content port sprint tested separately under approved SPUP rule. Keep 0.2/0.3/0.45/0.6 m kerbs, backing/sloped-wall and zero-new-leak bars. reports/20261024_0913_planner.md.
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why (rewritten by the JWAL audit, 2026-09-29, `reports/20260929_2240_audit_JWAL.md`)
 The audit read the PS2 soldier's collision in both ELFs, and one Opus verifier re-read it (9/11 SUPPORTED; V3's push

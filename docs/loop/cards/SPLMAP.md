@@ -1,21 +1,11 @@
 ---
 id: SPLMAP
 title: Extract map and common bake orchestration behind the existing public entry points
-milestone: M0
-value: 2
-phase: cleanup
-status: parked
-deps:
-files: engine/crates/bake/src/map.rs,engine/crates/bake/src/map/content.rs (new)
-declares:
-needs: (private workflow note omitted)
-effort:
-branch: main
-resume: Source 712f636 on main; pure move/regeneration/proof controls and combined 177bake+22manifest/build/fmt/Clippy/docs pass; 80SKIP, map8missing paths. Full acceptance pending. reports/20261026_0758_card_SPLMAP.md
-created: 2026-10-26
-domain: tooling
-tries: 0
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
+
 ## Why and scope
 SPL7 still owns the 2,199-line map baker. Its existing `bake_content` function
 is the shared map/common orchestration; the parent owns public entry points,

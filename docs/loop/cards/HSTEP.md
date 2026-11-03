@@ -1,20 +1,10 @@
 ---
 id: HSTEP
 title: The hover's tick in the PS2's order: drive, then the contacts, then the spring tick - the port ticks its springs BEFORE its contacts (one tick late), so a parked hailfire or snail tank never comes to rest and every hover bobs about 3x the PS2's band
-milestone: M2
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/vehicle/hover.rs,engine/crates/core/src/vehicle/hover/tests.rs
-declares: sweep
-needs:
-effort:
-branch: hstep
-resume: landed 46fb02ad 2026-10-16
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 `core::vehicle::hover::step` runs drive → springs → contacts. Both PS2 games run **drive → collide pass → spring tick**

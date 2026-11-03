@@ -1,21 +1,11 @@
 ---
 id: HTAU
 title: BF1 Hoth's far tauntauns: two pads sit beside a trench the claimer cannot cross (2-12 claims given up a round) and the PS2 starts 5 rebels near the far pads where the port starts none - 6 of 8 tauntauns ridden at 30 s against the PS2's 7
-milestone: M2
-value: 3
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: Restore BF1 HOT1 bake/mission, WAI2 PS2 soldier CSV and claim census, raw disc/corpus and capture toolkit
-effort:
-branch:
-resume: 20261025_0445: measure input hold, 0/16 prerequisite paths; restore and verify inputs, then trace all give-ups on seeds42/1/2/3 and identify five rebel spawn paths; engine/artifacts/loop/reports/20261025_0445_card_HTAU.md
-created: 2026-10-02
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card WAI2 (a582462, 2026-10-02) left three BF1 Hoth items as notes on a closed card (its 'NOT met / open' 2, 3 and 5);
 this card is their record so they are not lost. BF1 HOT1 is not one of the six showcase maps: `defer: post-alpha`.

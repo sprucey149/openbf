@@ -1,18 +1,11 @@
 ---
 id: WALK
 title: The walker, built: BF2's walker integrator (re-walker §2-§9) — the clip clock and root motion, the camera-relative turn, the legs, the probes and contacts — AT-ST first; the rigid model moves with it until WSKN
-milestone: M2
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/vehicle/walker.rs,engine/crates/core/src/vehicle.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/seats.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/manifest/src/lib.rs,engine/crates/bake/src/vehicle.rs
-declares: rebake=side; sim; sweep
-needs:
-branch: walk
-resume: landed fcf8dac 2026-09-29; next: WSKN, WAI, WALKB1, WCLMB
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The AT-ST and 14 other walker-family classes spawn on pads (VPAD) but cannot move: the port has no walker integrator.
 BF2 walker handling (PLAN's ground lock) is now transcribed statement by statement.

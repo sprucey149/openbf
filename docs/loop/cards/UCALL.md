@@ -1,20 +1,11 @@
 ---
 id: UCALL
 title: BF1's combat calls (the maintainer's INBOX 2026-10-12 18:55, ask 3; first slice of USND): a bot says its class's acquired line when its tracker takes a target, the first bot within 7.5 m of a live grenade says the flee line (once a second), a bot turned by a heard enemy says the heard line - through the voice queue, thinned as on the PS2 by the property's interval (20 +- 5 s; the Rebels and the Empire 1 to 10 s) and by the take's own lock, which the bake must start to carry; hide / approach / predamage are dead keys and stay silent; RE done 2026-10-13 (analysis/re-unit-chatter.md 1, 2); refereed per event against the PS2's NAB1 and TAT1 rows
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: USND
-files: engine/crates/bake/src/sounds.rs,engine/crates/mungefs/src/sound_props.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/announce.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/perception.rs,engine/crates/core/src/ai/behave.rs
-declares: rebake=sounds
-needs:
-effort:
-branch: ucall
-resume: LANDED 99a07bf (report reports/20261016_0730_card_UCALL.md). Follow-ups for the planner: flee short on NAB1 (1.63 vs PS2 4.00/min: the port asks 4 flee requests a minute), take locks on the one-shot path, SQACK's hand locks from the bake
-created: 2026-10-13
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-10-12 18:55, ask 3 (umbrella card USND, slice 1 of his order): the calls units make in a fight.
 On the PS2's BF1 the voice slot is never quiet - 32 lines a minute wherever the player stands; the port says none of

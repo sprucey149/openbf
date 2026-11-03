@@ -1,19 +1,11 @@
 ---
 id: GRNC
 title: The floor census as a kept tool, and the holes GRND left: commit examples/floor_census.rs, run it on all 32 maps, and close or name the shallow 0.3-0.6 m rim and seam steps (bf2_kam1 139 points, bf1_kam1 304) and the three leads on other maps (MUS1 conference floor, END1 heightfield outside the drawn terrain, MYG1 platform cores)
-milestone: M3
-value: 3
-phase: measure
-status: blocked
-deps:
-files: engine/crates/game/examples/floor_census.rs (new),engine/crates/core/src/collision/rays.rs
-declares:
-needs: environment — restore census kit, 32 baked maps and PCSX2 render/drop-test inputs; see lead_tmp/grnc_cloud/preflight.json
-effort:
-branch:
-resume: Restore exact inputs in lead_tmp/grnc_cloud/preflight.json; reconcile historical 0.3 m A/B/ground-hole metrics with GRNC 0.05 m criterion; recover instrument traps, keep and validate floor_census.rs, census all 32 maps and render/classify every >0.3 m cluster on eight required maps. See reports/20261024_1238_card_GRNC.md and lead_tmp/grnc_cloud/next_prompt.md.
-created: 2026-10-01
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer's INBOX 2026-10-01 10:30: GRND (3c7b00c) is closed, and 'what is left (the census as an example, the other 30 maps, the shallow holes) wants a small new card'. This is it. A hole in the census is a place where a soldier stands on nothing drawn, or sinks through a drawn floor - the maintainer's 'invisible floors' class of defect, on maps nobody has looked at.
 

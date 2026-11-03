@@ -1,20 +1,10 @@
 ---
 id: PKHD
 title: loopctl's busy-files test: a parked card with needs: set holds no files - the planner sets such cards blocked by hand today (SNPR, HJAM) so the cards behind their files can run
-milestone: M0
-value: 3
-phase: build
-status: done
-deps:
-files: scripts/loopctl.py
-declares:
-needs:
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Planner 2026-10-16 04:35 (`reports/20261016_0435_planner.md` item 4): a parked card waiting on the maintainer (`needs:` set) still

@@ -1,20 +1,10 @@
 ---
 id: BPO
 title: A unit standing in a barrier's margin gets the PS2's push-out, not "ignore the barrier"
-milestone: M3
-value: 3
-phase: re
-status: todo
-deps:
-files:
-declares: marks: SWEEP
-needs:
-branch:
-resume:
-created: 2026-09-25 (from QUEUE.md)
-defer: post-alpha
-acceptance: needed
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

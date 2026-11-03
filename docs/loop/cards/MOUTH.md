@@ -1,21 +1,11 @@
 ---
 id: MOUTH
 title: Bots miss the mouth of a walkway, doorway or ramp, push at its side for seconds, back up and then cross (the maintainer's play, BF2 Kamino, 2026-10-11) - and the same stall is what puts bots over Bespin's rim: measure it per leg, take the PS2's rate, and make a bot enter a narrow leg through its mouth
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/route.rs, engine/crates/core/src/ai/route/tests.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai.rs
-declares: sweep; arena; sim
-needs:
-effort: high
-branch: mouth
-resume: landed d096ae70 2026-10-12 (273a441 the two rules + d096ae7 CRATES.md)
-created: 2026-10-11
-alpha: yes
-first: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## BUILT AND LANDED 2026-10-12 13:30 (lane 1; main 273a441 + d096ae7; report `loop/reports/20261012_1331_card_MOUTH.md`; outputs `lead_tmp/mouth/build/`)
 Two rules in `ai/route.rs`, three tests (each fails with its rule taken out):
 1. **The PS2's segment rule**: past a detour corner the leg point's line starts at that corner (`seg_from`).

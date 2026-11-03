@@ -159,3 +159,19 @@ fn sight_starts_a_droideka_fight_only_within_ten_metres() {
     let e = s.unit(foe).unwrap();
     assert!(takes_fight(&s, u, &idle, e, 40.0), "a hit starts one");
 }
+
+#[test]
+fn shield_debt_does_not_make_ai_raise_the_bubble() {
+    let (mut s, me, foe) = world();
+    for points in [0.0, -900.0] {
+        let d = s.units[me.index as usize].droideka.as_mut().unwrap();
+        d.shield.points = points;
+        d.shield.on = false;
+        let mut pad = PadState {
+            buttons: buttons::FIRE,
+            ..Default::default()
+        };
+        steer(&s, me, &fighting(foe), &mut pad);
+        assert_eq!(pad.buttons, buttons::FIRE);
+    }
+}

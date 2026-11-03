@@ -1,21 +1,10 @@
 ---
 id: KNOCK
 title: Explosions throw soldiers as the PS2's do: BF1 pushes every gathered soldier not thrown / tumbling / getting up / mounted by (normalize(d)+(0,0.6,0))·Push·f - thrown at g 13.5, a tumble, a get-up, a 1.93 s lock; a kill by a blast or a direct hit kicks the body 5 m/s, the blast-killed fly and die at the landing, corpses keep a moving body for 4 s; BF2 pushes only the dead unless the class authors PushDeadOnly 0 - today a blast only damages and a dead unit freezes
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: VDTH
-files: engine/crates/core/src/sim/blast.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/soldier.rs,engine/crates/core/src/soldier/tests.rs,engine/crates/core/src/unit.rs,engine/crates/core/src/weapon.rs,engine/crates/game/src/soldier_vis.rs,engine/crates/game/src/animator.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: knock
-resume: landed 4a41d85a 2026-10-21
-created: 2026-09-28
-alpha: yes
-first: 9
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why (build, rewritten 2026-10-07 after the RE: `analysis/re-knockback.md`)
 On the PS2 a grenade beside a BF1 soldier throws him 14 m through the air; he tumbles, gets up and is back in the

@@ -1,19 +1,11 @@
 ---
 id: SEAT
 title: How the PS2 seats a spawn: the floor a soldier appears on at a path node (a node inside a body, under its floor, over another floor) - read it and replace the port's three PROVISIONAL rules (SPAWN_LIFT, the level rule, LLEG's pen seat)
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps:
-files: engine/crates/core/src/sim/spawn.rs
-declares:
-needs: restore SEAT primary corpora/ELFs, PCSX2 live tools/states, LLEG raw evidence and map/mission inputs (seat_cloud/preflight.json)
-effort:
-branch:
-resume: BLOCKED 2026-10-24 13:00 UTC: 26 exact prerequisites/0 available; restore corpora/ELFs, PCSX2 kit, LLEG rows and maps/missions, then trace both spawn writers and measure MUS1 crate/roof. No RE acceptance. Report reports/20261024_1300_card_SEAT.md; continuation lead_tmp/seat_cloud/next_prompt.md.
-created: 2026-10-07
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The port seats a spawn by three rules of its own (`Sim::spawn_ground`, `resolve_spawn_seats`): the ground under the node, the ground 3 m over a node authored under its floor (TAT1, BF2 UTA1), and since LLEG (c0794eb) the lowest un-penned floor within 6 m over a node that lies inside a solid body. How the PS2 does it is not read.
 ## Evidence

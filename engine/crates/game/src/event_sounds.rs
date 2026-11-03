@@ -315,6 +315,13 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                     &mut play,
                 );
             }
+            Event::OrdnanceExpired { pos, weapon_class } => {
+                let x = walk.sim.weapon_classes[*weapon_class as usize]
+                    .ordnance
+                    .expire
+                    .as_ref();
+                boom(x.map(|x| &x.look), *pos, &mut play);
+            }
             Event::StickyBlast { pos, weapon_class } => {
                 let sticky = &walk.sim.weapon_classes[*weapon_class as usize]
                     .ordnance

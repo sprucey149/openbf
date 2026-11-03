@@ -1,18 +1,10 @@
 ---
 id: HVRE
 title: The hover integrator, transcribed: BF2's tick FUN_0021ca80, spring points FUN_0021f5d0, drive FUN_0021d8b8, contact and the position step — the physics of 21 vehicle classes
-milestone: M2
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Every hover and treaded class — 21 of the discs' 53 vehicle classes, all ground vehicles but the walkers — runs ONE

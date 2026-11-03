@@ -1,19 +1,10 @@
 ---
 id: TEXC
 title: Block-compressed textures (BC7 colour/alpha, BC5 normals) for the classic-plus tier, and the tier-2 policy: which HD textures ship in the maintainer's build, their mips, the normal-map path
-milestone: M1
-value: 2
-phase: build
-status: todo
-deps:
-files:
-declares: rebake=maps
-needs:
-branch:
-resume:
-created: 2026-09-26
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 The maintainer (INBOX 2026-09-25): "HD textures ship in my build"; the loop decides the classic-plus technical parts; the maintainer reviews

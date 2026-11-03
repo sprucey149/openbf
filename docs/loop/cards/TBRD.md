@@ -1,21 +1,10 @@
 ---
 id: TBRD
 title: Bots board a building turret only when they are right at it: today a bot boards from the turret's radius + 5 m + 2 m slack and appears in the seat from several metres away - bring that down to walking up to it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/man.rs
-declares: sweep
-needs:
-effort:
-branch: tbrd
-resume: landed 9f19c5a1 2026-10-20; audit incomplete 2026-10-24, see reports/20261024_2340_audit_TBRD.md and private continuation
-domain: vehicle
-created: 2026-10-20
-first: 7
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 (the maintainer, 2026-10-20, playing) Some bots are about 10 ft from a turret and 'teleport' into it. Asked: lower the maximum distance to something reasonable.

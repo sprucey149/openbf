@@ -274,6 +274,32 @@ impl Rig {
         }
     }
 
+    /// Last contact direction, kept by the visual animator even for a
+    /// killing hit. Missing directional clips fall back to forward death.
+    pub fn death_slots(
+        &self,
+        set: usize,
+        direction: hit::Direction,
+    ) -> (Option<Slot>, Option<Slot>) {
+        let slot = |name: &str, layer: usize| match self.game {
+            Game::Bf1 => {
+                let t = self.sets.bf1.as_ref()?;
+                let id = bf1::SPECIAL.iter().position(|n| *n == name)?;
+                let lower = self.slot1(*t.special.get(id)?);
+                if layer == 0 {
+                    self.slot1(*t.s.get(set)?.get(id)?).or(lower)
+                } else {
+                    lower
+                }
+            }
+            Game::Bf2 => self.slot2(set, bf2::simple_pair(name)?, layer),
+        };
+        let at = |layer| {
+            slot(direction.death_name(), layer).or_else(|| slot("stand_death_forward", layer))
+        };
+        (at(0), at(1))
+    }
+
     /// (upper, lower) clips of a body state with no action running; `alert`
     /// takes the alert rows where the set has them (§3.2, §7).
     pub fn body_slots(&self, set: usize, body: Body, alert: bool) -> (Option<Slot>, Option<Slot>) {

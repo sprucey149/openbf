@@ -1,20 +1,11 @@
 ---
 id: WHUM
 title: The bolt's flight hum and the weapon's looping sounds (charge, fire loop, overheat): looping voices that follow their source, with the PS2's doppler - the PS2 starts 147 hums in 105 s on Naboo, the port none
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: WSND
-files: engine/crates/audio/src/lib.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/bolt_vis.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/sim/state.rs
-declares:
-needs: environment restoration: restore bolt/weapon/sound bakes, NAB1 mission, sndc sound_log.patch/pad120 referee and bf1_nab1_run2.csv
-effort:
-branch:
-resume: 2026-10-24 09:20 UTC: planner prerequisite census; no implementation. Restore this card's inputs in lead_tmp/planner_20261024_0913/queue_preflight.json, recheck original acceptance/current-main baseline, then loopctl start for isolated build. Full CI and required gates remain; reports/20261024_0913_planner.md.
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The RE of card WSND (`analysis/re-weapon-sounds.md` sections 3, 5, 7; Docs 528fa6c): a bolt's `OrdnanceSound` and a
 weapon's `ChargeSound` / `FireLoopSound` / `OverheatSound` are sounds on a HANDLE - a voice that follows its source and

@@ -1,19 +1,10 @@
 ---
 id: TEAMD
 title: Special teams as options, played the conquest way (the maintainer 2026-09-28): the design for picking who fights on a map (any faction or special team) under conquest rules with no hunt score — data model, roster loading, AI class assumptions, VO fallbacks
-milestone: M4
-value: 1
-phase: re
-status: todo
-deps: TEAMS
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-28
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 The maintainer (INBOX 2026-09-28, DECISION 2): the design for special teams as options played the conquest way (command posts,

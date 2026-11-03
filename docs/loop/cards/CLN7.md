@@ -1,20 +1,10 @@
 ---
 id: CLN7
 title: Two game-side referees that do not test what they say
-milestone: M0
-value: 2
-phase: cleanup
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: MERGED into CLN6 by the planner 2026-10-06 14:00 (not built): its text is CLN6's part 2
-created: 2026-09-25 (from QUEUE.md)
-acceptance: 
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

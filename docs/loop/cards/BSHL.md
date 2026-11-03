@@ -1,21 +1,10 @@
 ---
 id: BSHL
 title: The BF2 shell and menus' real look (PLAN §Presentation): today's shell (goldens/shell.png) is a working placeholder — BF2's shell art, flow and fonts, content adapted to the port's features
-milestone: M5
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: done 2026-10-20: analysis/re-bf2-shell.md (767318c); split into build cards BSHLA (title + stacks + bake, value 5), BSHLB (IA screen, value 4), LDBF2 (BF2 loading screen, value 4)
-created: 2026-09-28
-defer: 
-first: 6
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 (2026-10-19, the maintainer, first: 6, no longer post-alpha: the community's top ask) The PS2 BF2 shell, captured from the PS2 DISC and PCSX2 - the PS2 front-end menus differ from the PC game's, so PC-derived layouts are leads only. The in-game unit-select screen (rotating trooper line-up) is probably close to the same on both and is SSEL's. Menu art, fonts, screen order, layout constants: read the disc's own compiled shell scripts (BF2's SHELL.LVL / SHELLPS2.LVL) first, then capture each screen in PCSX2 and match it pixel-measured (RULES: visual claims are pixel-measured).

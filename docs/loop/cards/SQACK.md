@@ -1,20 +1,11 @@
 ---
 id: SQACK
 title: Squad orders the BF1 way: the player's command line, which teammates acknowledge with which voice lines and when, and what each order makes them do — the PS2's, matched in the port
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: ANNC
-files: engine/crates/core/src/squad.rs,engine/crates/core/src/ai/command.rs,engine/crates/core/src/ai/brain.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/input.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/sounds.rs
-declares:
-needs:
-effort:
-branch: sqack
-resume: landed 83ea41b8 2026-10-03
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-09-30 11:40: squad orders the BF1 way — "your character gives a command, and the teammate players nearby
 you acknowledge what you said and then go do whatever it is you said." With the markers gone (SQMK), voice and

@@ -608,6 +608,7 @@ pub(super) fn hud_model(
         }),
         messages: feed.take(),
         ambush: feed.take_ambush(),
+        damage_flash: feed.damage_flash(walk.sim.tick, walk.player),
         // The sniper headshot's reticle mark (hitmark).
         hit_critical: feed.hit_critical(walk.sim.tick),
         // Every enemy body hit's plain flash (2026-10-29).

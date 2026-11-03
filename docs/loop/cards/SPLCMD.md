@@ -1,21 +1,10 @@
 ---
 id: SPLCMD
 title: Extract the commander regression module without changing runtime code or test identities
-milestone: M0
-value: 2
-phase: cleanup
-status: blocked
-deps:
-files: engine/crates/core/src/commander.rs,engine/crates/core/src/commander/tests.rs (new),engine/CRATES.md,scripts/size_waivers.txt
-declares:
-needs: planner — reconcile literal PURE MOVE with rustfmt reflow; original acceptance unchanged
-effort:
-branch:
-resume: Literal extraction drafted; rustfmt joins a 102-column inline assignment into a 98-column external-test line, while that reflow fails canonical proof (2 lost lines). Do not integrate until scope reconciles both mandatory gates. Report reports/20261026_0708_card_SPLCMD.md; content gates remain owed.
-created: 2026-10-26
-domain: tooling
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why and scope
 SPL7 still owns the remaining oversized files. Its commander file has 2,500

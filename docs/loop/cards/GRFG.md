@@ -1,19 +1,11 @@
 ---
 id: GRFG
 title: The ordnance census as a gate: gates.py runs ordnance_census with the leak group and compares its footer with a gates.toml [ordnance] row (new 0) - the builder was refused by the oracle guard, the planner commits it
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: scripts/gates.py
-declares: oracle=baselines,guards
-needs:
-effort:
-branch: grfg
-resume: landed d21b4119 2026-10-16
-created: 2026-10-09
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card GRFL landed the grenade fix, its test and the census (game/examples/ordnance_census.rs + ordnance_census_accepted.txt) on 296fa0c, but not the gate: the oracle guard refuses a builder's edit of the gate script and of the baseline file. Without the gate the 7,260 / new 0 footer is watched by nobody.
 

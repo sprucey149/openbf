@@ -1,21 +1,11 @@
 ---
 id: ELFR3
 title: BF1 Normal-class 0x04 words blend on the PS2 (re-material-flags §0.4 [V]) but the census bakes them OPAQUE or MASK: YAV1's free-standing temple holo panels (yav_bldg_controlroom_maps 0x4) and BES1/HOT1's command-centre holo maps (HOTH_bldg_command_center_maps 0x5) draw solid green where the PS2 sees through them
-milestone: M1
-value: 3
-phase: build
-status: done
-deps: ELFR
-files: bake/src/alpha.rs
-declares: rebake=maps; goldens=(census first)
-needs:
-effort:
-branch:
-resume: MERGED into ELFR2 (planner 2026-09-30 21:45): same file bake/src/alpha.rs, same census; ELFR2 carries this card's text and acceptance
-created: 2026-09-29
-defer: post-alpha
-value_pre_alpha: 4
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 ELFR (landed the Normal-without-bits OPAQUE and Scroll|0x04 BLEND overrides) found that the PXWA "temple holo panels" are NOT
 the Scroll `scanlines` material: the free-standing panels in `pcsx2/ref/bf1_yav1/walk/cp1_temple_b180` are

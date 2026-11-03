@@ -1,20 +1,10 @@
 ---
 id: SHSRE
 title: Where does the PS2 keep what SHASH hashes? Feasibility RE before PSHASH: for each field group (unit table with positions and health, game LCG, team tickets and scores, post owners and capture progress, round clock and respawn timers) the BF1 and BF2 RAM address or pointer chain, its type and its tick stamp - and the answer to "does the PS2 sim tick at a fixed rate we can sample at, and where is its frame counter?"
-milestone: M0
-value: 3
-phase: re
-status: blocked
-deps: SHASH
-files:
-declares:
-needs: references — restore SHSRE corpora/ELFs, PCSX2 reader/session tools and reload-separated states; see engine/artifacts/loop/reports/20261024_2043_card_SHSRE.md
-effort:
-branch:
-resume: 2026-10-24 20:43 UTC prerequisite hold; RE incomplete. engine/artifacts/loop/reports/20261024_2043_card_SHSRE.md records missing inputs, inherited A5 timing leads and the current SHASH field contract. Restore primary inputs, verify BF1 first, then BF2 only on BF1 go; do not repeat unchanged-input preflight.
-created: 2026-10-08
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 PSHASH reads these fields from a running PCSX2; if some group cannot be found, cheaply, the whole oracle is only partly possible and FDIFF must be scoped to what is. Do this before anyone writes the reader. The research note's warning: nobody public has done emulator-oracle diffing for a 3D game with agents, so assume nothing about stable addresses (BF1 AND BF2, per map load: pools may be heap-allocated and move).

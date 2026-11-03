@@ -1,19 +1,10 @@
 ---
 id: FXP3
 title: Particle effects, part 3: the spawn hooks — bolt impacts by surface (ImpactEffect Soft/Rigid/Static/Terrain/Water/Shield), explosion Effect/WaterEffect, TrailEffect, vehicle Damage/Chunk/Thrust/Wake/Stomp effects (re-fx §7); sim events carry the ordnance class and struck surface; PCSX2 pairs
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: FXP2
-files: engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/projectile.rs,engine/crates/game/src/fx.rs,engine/crates/game/src/walk.rs,engine/CRATES.md
-declares:
-needs:
-branch: fxp3
-resume: landed cdbf9438 2026-09-30
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 With FXP2 the port can run any PS2 effect; the game still has to spawn the right one. `analysis/re-fx.md` §7 ([O],

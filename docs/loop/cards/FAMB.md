@@ -1,20 +1,10 @@
 ---
 id: FAMB
 title: BF1 Naboo Plains always has the Gungan fambaa and its shield (the maintainer's decision 2026-09-28): the classes live only in NAB1_H.LVL — RE the shield (what it blocks, radius, generator) and bring the fambaa, shield and generator into the port's NAB1 in every mode
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/map.rs, engine/crates/game/src/vehicle_pads.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/shield.rs (new), engine/crates/core/src/projectile.rs, engine/crates/core/src/sim/combat.rs, engine/crates/core/src/sim/ordnance.rs
-declares: rebake=maps; sim; sweep; arena
-needs: environment restoration: restore NAB1_H.LVL/NAB1.LVL, both-era NAB1 bakes/missions and famb PS2 shield rows/frames
-effort:
-branch:
-resume: 2026-10-24 09:20 UTC: planner prerequisite census; no implementation. Restore this card's inputs in lead_tmp/planner_20261024_0913/queue_preflight.json, recheck original acceptance/current-main baseline, then loopctl start for isolated build. Full CI and required gates remain; reports/20261024_0913_planner.md.
-created: 2026-09-28
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 The maintainer (INBOX 2026-09-28, DECISION 1): **BF1 Naboo Plains always has the Gungan fambaa and its shield**, in every mode, as

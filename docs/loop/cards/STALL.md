@@ -1,19 +1,11 @@
 ---
 id: STALL
 title: Why BF2 KAM1, POL1, DEA1 and GEO1 never finish the round sweep, and the long stalls on BF1 KAS2 / NAB1 / BES2 and BF2 MUS1 — classify every stuck unit per map (no route / wall / vehicle wait / goal flip / enclosed post / rules stalemate), check the PS2's bots at the same spots, and fix each cause (the maintainer, INBOX 2026-09-30 08:50; JKAM merged here)
-milestone: M3
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: closed: cause table analysis/re-round-stalls.md (7b8e3b0); build cards STTAP STDOR STFAL STLVL STARC STEND
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer (INBOX 2026-09-30 08:50): M3's definition of done is a full conquest round on every map ending by tickets, no unit
 stuck, the sweep `finished 32/32`. The maintainer wants the real cause per map, AI logic or otherwise. Research first (lane 3 or 2).

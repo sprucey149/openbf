@@ -1,20 +1,11 @@
 ---
 id: HHUL
 title: Hover hull bodies meet the world: which of a hover model's bodies the PS2 tests against terrain and buildings (the class's TerrainCollision/BuildingCollision subsets, the coll mesh, the spring spheres) → HoverParams::hull, then K7-K9 on them
-milestone: M2
-value: 4
-phase: build
-status: done
-deps: HOVX
-files: engine/crates/core/src/vehicle/hover.rs,engine/crates/core/src/vehicle/hover/tests.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/collision/walls.rs,engine/crates/core/src/collision/shape.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/tests/vehicle_class.rs,engine/crates/game/examples/hover_drive.rs,engine/CRATES.md
-declares: sweep
-needs:
-effort:
-branch: hhul
-resume: landed 80a8edc6 2026-10-03
-created: 2026-09-28
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## RE result (2026-09-30, lane 3; analysis/re-hover.md §13 [O], verifier 15/2/0 of 17, all folded in)
 - **Only the spring spheres meet the terrain and buildings** on every shipped hover, in both eras. The coll mesh and
   every other primitive meet neither.

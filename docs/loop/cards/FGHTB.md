@@ -1,20 +1,11 @@
 ---
 id: FGHTB
 title: The fight's scout rule by the soldier's CLASS, from audit FGHTA: the PS2 stands a UnitType scout class with a rifle-animation weapon, the port any bot with a scoped rifle - BF1's assassin droid (UnitType trooper, the CIS sniper of 13 Clone Wars missions) stands where the PS2 draws; six subtle mutations pass every fight test (a doubled stop chance among them); on BF1 maps a stander stands anywhere in range
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: FGHTA
-files: engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai.rs,engine/crates/game/src/roster.rs
-declares: sweep; arena; sim
-needs: (private workflow note omitted)
-effort:
-branch:
-resume: Restore baked data for both games, mission RONs and audit-fghta/audit-fght scratch (census_bf1/2.txt, mk_mut.py, session_mut.py, scene_run.sh, c20.py). Clear needs/set todo phase build only after prerequisite verification. Reproduce current-main symptom; start isolated FGHTB worktree, build one switch binary with null hash equality, measure scout/rifle key and Snipe hints, then six subtle plus 14 original mutations and BF1 range rule. Require census 7+28 pairs, 256/256 rounds, paired contact/teamkill bars, Kamino engage bars and full gates. See reports/20261024_0747_card_FGHTB.md.
-created: 2026-10-09
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT FGHTA 2026-10-09: PARTLY (`engine/artifacts/loop/audits.md`; evidence `engine/artifacts/lead_tmp/audit-fghta/README.md`,
 `analysis/re-soldier-ai.md` 16, report `reports/20261009_1345_audit_FGHTA.md`). Card FGHTA (b75d36b) holds on every

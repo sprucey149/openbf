@@ -1,20 +1,11 @@
 ---
 id: DTHR
 title: Environmental death as the PS2's, built from re-kill-floor.md: landing damage (approach - threshold)^2 x scale instead of a kill at 25 m/s (was SLAND), BF2's death regions tested against the soldier's bounding sphere and on vehicles, and BF1's water-sink plane
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps:
-files:
-declares: sim; sweep; arena
-needs: (private workflow note omitted)
-effort:
-branch:
-resume: Restore PCSX2 tooling/README and local BF1/BF2 discs, ELFs/corpora, KAM1 live states and lead_tmp/sthop/ramp_bf2.py; verify inputs then clear needs and set todo phase measure. Measure uncheated 6/10/16 m BF2 health drops plus one BF1 height; read standing/crouched/prone BF2 KAM1 sphere s+0x20..0x2c; census BF1 water_sink_region maps/y and BF2 vehicle-reachable regions. Record raw evidence and independent verification before phase build; see reports/20261024_0738_card_DTHR.md.
-created: 2026-09-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why (rewritten by the planner 2026-10-01; the original card text and SLAND's are kept below)
 The maintainer's INBOX 2026-10-01 14:40 item 4 and 17:15: BF2's sphere-against-region death test and BF1's water-sink plane were
 still wanted and had no card. The RE this card first asked for is done: `analysis/re-kill-floor.md` ([O] UNAUDITED,

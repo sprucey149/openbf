@@ -33,6 +33,7 @@
 #         BASE=<dir with walk, aim, aim_targets motion.csv files> scripts/sim_gates.sh
 # Env:  ROOT   repo or worktree root      (default: this script's ..)
 #       TARGET cargo target dir           (default: $ROOT/engine/target)
+#       GAME   executable override (default: $TARGET/release/game)
 #       OUT    where to write the outputs (default: $TARGET/sim_gates)
 #       BASE   motion.csv tree to compare (default: unset — no compare)
 # Exit: 0 all four ran and (with BASE) every motion.csv matched; 1 otherwise.
@@ -51,7 +52,7 @@ ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 TARGET="${TARGET:-$ROOT/engine/target}"
 OUT="${OUT:-$TARGET/sim_gates}"
 BASE="${BASE:-}"
-GAME="$TARGET/release/game"
+GAME="${GAME:-$TARGET/release/game}"
 
 [ -x "$GAME" ] || { echo "sim_gates: no game binary at $GAME (cargo build --release -p game)" >&2; exit 1; }
 mkdir -p "$OUT/motion/aim_targets" "$OUT/motion/walk" "$OUT/motion/aim" || exit 1

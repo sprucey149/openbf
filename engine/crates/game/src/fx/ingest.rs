@@ -194,6 +194,15 @@ impl Fx {
                         self.explode(&explosion.look, *pos, sim.water_under(*pos));
                     }
                 }
+                Event::OrdnanceExpired { pos, weapon_class } => {
+                    if let Some(e) = sim
+                        .weapon_classes
+                        .get(*weapon_class as usize)
+                        .and_then(|w| w.ordnance.expire.as_ref())
+                    {
+                        self.explode(&e.look, *pos, sim.water_under(*pos));
+                    }
+                }
                 Event::StickyBlast { pos, weapon_class } => {
                     let look = sim
                         .weapon_classes

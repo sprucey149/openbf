@@ -1,19 +1,11 @@
 ---
 id: CHTAM
 title: The infinite-ammo cheat should still empty the clip and reload: the port's cheat never takes a round from the clip (weapon.rs `if !infinite_ammo { self.clip -= ... }`), so the rocket launcher (1-round clip) and the SBD wrist rocket fire at their raw refire rate with no reload; RE the PS2 cheat and match it
-milestone: M3
-value: 4
-phase: re
-status: todo
-deps:
-files: engine/crates/core/src/weapon.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/guns.rs,engine/crates/core/src/sim/ordnance.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The maintainer 2026-10-28: "you can just spam click rockets. In the originals there is a delay and the guy does a reloading animation ... the original infinite ammo cheat still counted through a magazine so reloading was still counted."
 

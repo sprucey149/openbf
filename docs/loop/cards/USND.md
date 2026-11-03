@@ -1,20 +1,10 @@
 ---
 id: USND
 title: Unit chatter, all of it (the maintainer's INBOX 2026-10-12 18:55, ask 3; the umbrella card): every line the PS2's units say - the combat calls (acquired, hide, approach, flee, pre-damage, heard), hurt and death cries, the AI's own squad talk and order answers, low health, post and kill calls, the praise of the player - in both games, in the right faction's voice, with the PS2's triggers, cooldowns and radius; on the disc and in the bake, never played by the port. RE census of every unit-voice event first, then build in slices, each refereed by lines per minute against a PCSX2 capture; chatter must not clip the mixer
-milestone: M3
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: RE done 2026-10-13: analysis/re-unit-chatter.md (docs 4d57f9c), report engine/artifacts/loop/reports/20261013_0815_card_USND.md. The build is four cards: UCALL (BF1 combat calls + the take lock), UCRY (hurt and death, both games), UTALK (BF1 AI squad talk + the natives' idle voice), UVO2 (BF2 VOSound)
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 UAUD1 (analysis/unit-audit-bf1.md §3.5). Every BF1 soldier class authors these sounds and the engine reads them (HurtSound / DeathSound in

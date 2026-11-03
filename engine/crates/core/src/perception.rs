@@ -378,7 +378,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     // Kashyyyk's recoilless turret, over its tower, and saw 180 of 913
     // enemies within 60 m where the muzzle saw 530.
     let (eye, view) = sim.seat_look(me).map_or_else(
-        || (u.muzzle(), u.aim_frame().0),
+        || (u.ai_eye(), u.aim_frame().0),
         |s| {
             (
                 if s.gun.turn.is_some() {
@@ -791,7 +791,7 @@ pub fn choose_target_with(
     let Some(u) = sim.unit(me) else {
         return false;
     };
-    let eye = u.muzzle();
+    let eye = u.ai_eye();
     let tick = sim.tick;
     let scale = view_distance(Stance::Stand, tier.view_mult);
     let score = |c: &Contact| -> f32 {

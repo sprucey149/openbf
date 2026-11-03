@@ -1,20 +1,11 @@
 ---
 id: FGHT
 title: Bots fight at range and do not close: an enemy within 20 m 3 % of the time on BF2 Kamino against the PS2's 17-25 % (the kill rate already matches) - RE the PS2's fight order (how far a bot moves at its target, how long, where it resumes) and build it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: SAIR,BOTD,MOVR
-files: engine/crates/core/src/ai.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/draw.rs,engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/stall.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/fmath.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/weapon/tests.rs,engine/crates/game/examples/round_to_outcome.rs,engine/CRATES.md,analysis/re-soldier-ai.md,analysis/RE_LOG.md
-declares: sweep; arena
-needs:
-effort: high
-branch: fght
-resume: landed 69f8c84c 2026-10-07
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card CONT (2026-10-02) built the PS2's Conquest goal: a bot keeps one target post (a change per 358 on-foot unit-seconds
 on BF2 Kamino, the PS2 323) and Kamino's kills / min is the PS2's (17.3). The bots still do not CLOSE: an enemy within

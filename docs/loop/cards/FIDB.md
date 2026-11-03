@@ -1,19 +1,11 @@
 ---
 id: FIDB
 title: land.py re-seeds the fidelity baseline when a landing makes a value BETTER past tolerance (split from FIDA: the planner's 2026-10-12 19:30 second ask) - today a gain leaves the old, lower baseline and the next card can give it back unseen (CLSE2B passed at 11.46 % contact20 while main stood at 12.73)
-milestone: M0
-value: 4
-phase: build
-status: todo
-deps:
-files: scripts/land.py
-declares: oracle=guards
-needs: maintainer — may land.py write a better-than-baseline landing's own fidelity rows as the new baseline at --commit (the planner's 2026-10-12 ask, STATUS question 37's second half)? On yes: [approvals.FIDB] oracle = guards
-effort:
-branch:
-resume:
-created: 2026-10-16
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 `land.py` re-seeds [fidelity] only for a declared or approved move. A landing that makes a value better leaves the old baseline;
 the next card may give the gain back unseen (CLSE2B, 2026-10-12 19:05: contact20 11.46 % passed against a stale 11.14 while main

@@ -1,20 +1,12 @@
 ---
 id: VREST
 title: Parked flyers stand at the PS2's height: the pad's spawn point + the class's LandedHeight (authored, else minus the model's vis-box min y) - today every flyer is low by exactly that (gunship 4.15 m, X-wing 1.78, Y-wing 1.33, jedi fighter 1.10, snowspeeder 0.50); the treaded half went to HSTEP
-milestone: M2
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/vehicle.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/core/src/vehicle.rs,engine/crates/core/src/vehicle_pad.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/game/tests/vehicle_pads.rs
-declares: rebake=side; sweep
-needs:
-effort:
-branch: vrest
-resume: landed 82fb7db4 2026-10-09
-created: 2026-09-28
-alpha: yes
+status: archived
+issue: 97
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #97](https://github.com/sprucey149/openbf/issues/97).
+
 ## Why (build, rewritten 2026-10-07 after the RE: `analysis/re-vehicle-rest.md`)
 Every parked flyer stands too low in the port by exactly its class's LandedHeight: gunship 4.15 m (BF1 GEO1, BES1,
 KAS1), X-wing 1.78 (BES1, KAS1, NAB1, TAT1), Y-wing 1.33, jedi fighter 1.10, snowspeeder 0.50 (both Hoths), geofighter

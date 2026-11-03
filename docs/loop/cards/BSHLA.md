@@ -1,20 +1,11 @@
 ---
 id: BSHLA
 title: The BF2 PS2 shell's title and stack menus (card BSHL's RE): bake the shell art, the movie's menu loops and the shell music; Press START, Main Menu (Singleplayer, Multiplayer dimmed + skipped by focus, Splitscreen dimmed, Options), Singleplayer and Options as the PS2's vertical-button stacks over the shell_main / shell_sub_left movie, pixel-matched to the PCSX2 frames
-milestone: M5
-value: 5
-phase: build
-status: done
-deps: BSHL
-files: engine/crates/bake/src/main.rs, engine/crates/bake/src/lib.rs, engine/crates/bake/src/shell.rs, engine/crates/ui/src/shell.rs, engine/crates/ui/src/menu.rs, engine/crates/game/src/assets.rs, engine/crates/game/src/main/windowed.rs, scripts/rebake.sh
-declares: goldens=shell_title.png,shell_main.png,shell_singleplayer.png,shell_options.png; rebake=common
-needs:
-effort:
-branch: bshla
-resume: landed f5c94429 2026-10-21
-created: 2026-10-20
-first: 6
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer (INBOX 2026-10-19 (a), BSHL `first: 6`): the BF2 PS2 shell is the community's top ask; today's shell
 (`goldens/shell.png`) is one egui list. `analysis/re-bf2-shell.md` (BSHL) has the PS2's screens, flow, palette, stack

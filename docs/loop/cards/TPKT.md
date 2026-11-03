@@ -1,20 +1,11 @@
 ---
 id: TPKT
 title: TAT1: bots are recycled in a pocket between roofs at (-138, 20, 102) - 14 recycles on 4 of 8 seeds after BOWL (main 1); TAT1's recycles 36 -> 72
-milestone: M3
-value: 3
-phase: measure
-status: blocked
-deps:
-files:
-declares: sweep; arena
-needs: Restore TAT1/Kamino bakes and missions plus spot tools/raw traces; retake both TAT1 pockets on current main before any remedy, and check hub 98 separately.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 7/7 exact named paths absent. Restore TAT1/Kamino bakes and missions plus spot tools/raw traces; retake both TAT1 pockets on current main before any remedy, and check hub 98 separately. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 After BOWL (2026-10-02) the 8-seed sweep recycles 14 bots at (-138, 18..21, 102) on TAT1 (seeds 1 4 6 8; main: 1 on seed 5), all team 0, Hunt, off the graph near hub 43 (floor_dy +1.5..2.0), sliding. A recycle is a bot the player sees give up and vanish. The level test reads the same there before and after BOWL (profiles in lead_tmp/bowl/README.md), so the pocket is an old trap that more bots now reach; every RIM_DROP <= 0.75 variant shows it, RIM_DROP 1.0 does not.
 

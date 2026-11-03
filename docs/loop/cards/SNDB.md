@@ -1,20 +1,11 @@
 ---
 id: SNDB
 title: The black box records the sounds: the last 60 s of sound starts (name, take, gain, pitch, distance) in the snapshot and the digest, with a line per overloaded tick - so the maintainer's next 'terrible noise' (the rocket fired at him, not reproduced by SNDX) is named by F9
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/blackbox.rs, engine/crates/game/src/sounds.rs, engine/crates/game/examples/blackbox_read.rs
-declares:
-needs:
-effort:
-branch: sndb
-resume: landed 55f055d5 2026-10-07
-created: 2026-10-06
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-04: "The rocket launcher when I was playing as the republic and the droid would shoot me with a rocket would do this sound. It was a terrible noise." Card SNDX found and fixed the shotgun's cause (8 stacked fire sounds) and could NOT reproduce the rocket's: nobody can name a sound the maintainer heard, because the black box holds every unit's state and no sound.
 

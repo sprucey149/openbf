@@ -1,21 +1,10 @@
 ---
 id: BRSTU
 title: A seat gun's burst is its heat, not n shots: the PS2 counts a burst's n as ROUNDS spent, and a weapon with unlimited rounds (every seat gun, the repeater, the chaingun) fires until its heat is one salvo short of full or the bot stops wanting to, then the class's pause - the port ends every seat burst after 3-5 shots and since CLSE4 pauses 1.65-2.0 s (mounted shots -13 %, mounted kills on BF1 maps -18 %)
-milestone: M2
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/gunner.rs,engine/crates/core/src/weapon.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch: brstu
-resume: landed cbf6f686 2026-10-21
-created: 2026-10-13
-alpha: yes
-domain: vehicle
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 AUDIT CLSE4 (2026-10-13, PARTLY; `analysis/re-soldier-ai.md` 23.2). Card CLSE4's two trigger rules are the PS2's and

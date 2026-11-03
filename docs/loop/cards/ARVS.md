@@ -1,20 +1,12 @@
 ---
 id: ARVS
 title: Arena head-to-head: tier X on one team against tier X-1 on the other (kill share, ticket margin, 24 seeds) - the arena today sets ONE tier for both teams, so its kills / min measures how deadly the fight is, not which tier wins (card TIER: Elite's extra movement when hit lowers BOTH sides' kills)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/examples/arena.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/skill.rs
-declares: arena
-needs:
-effort:
-branch: arvs
-resume: landed 59cce73a 2026-10-20
-created: 2026-10-19
-alpha: yes
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
+
 ## Why
 Card TIER (2026-10-19, report `loop/reports/20261019_1535_measure_TIER.md`): `arena` puts one `Sim::difficulty` on both teams. Above Normal the tiers do not separate on Tatooine 2 (24 seeds) and on the flat field Elite is BELOW Hard (kills / min 60.8 vs 77.5, hit rate 0.394 vs 0.465, 22 of 24 seeds), because Elite is harder to hit as well as a better shot: its REACT weights (moves more when hit), its view 1.5 and reaction 5 lower the OTHER side's hits too. A same-tier fight cannot show that Elite beats Hard; card TCMP's acceptance ("Easy < Normal < Hard <= Elite on kills a minute") is judged on this instrument.
 ## Notes

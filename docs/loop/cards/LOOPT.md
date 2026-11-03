@@ -1,20 +1,11 @@
 ---
 id: LOOPT
 title: Loop tooling for today's stalls: (1) the land picker skips a parked card with needs: set, as the resume step does; (2) gates.py / land.py stop at once with ADAPTER LOST when the adapter the goldens were rendered on is absent, instead of a run that moves every golden; (3) loopctl.py worktrees [--yes], the reviewed scratch-worktree sweep the maintainer approved (STATUS 49, INBOX 2026-10-15); (4) lane_alive() takes a reused THREAD id for a live lane, so no audit has been picked since 10-13 (32 sessions)
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: scripts/loopctl.py,scripts/AUTOLOOP.md
-declares:
-needs:
-effort:
-branch: loopt
-resume: landed 3913acb7 2026-10-15
-created: 2026-10-15
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 - 2026-10-15 19:05-19:07: the NVIDIA GPU fell off the bus at 18:26 (kernel NVRM fault; `nvidia-smi -L` "Unable to determine the device handle"; `vulkaninfo --summary` Intel RPL-S + llvmpipe only). SKIPC's land job set `needs: maintainer`; the picker's step 2 (`scripts/loopctl.py` ~387-393, land a parked card with a branch) does not test `needs:` (step 1 does, ~383), so the next lane re-took the same land two minutes later (reports `20261015_1906_land_SKIPC.md`, `20261015_1907_land_SKIPC.md`). Both SKIPC and VRIDE had to be set `blocked` by hand.
 - Nothing in gates.py / land.py checks the adapter: SKIPC's build gate rendered on the iGPU and moved 89 goldens (33 declared + 56 the diff cannot reach), VRIDE's the same; each session spent turns proving it was the adapter (`lead_tmp/vride/null_main`). RULES has the lesson three times over (lost adapter).

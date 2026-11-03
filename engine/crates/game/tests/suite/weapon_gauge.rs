@@ -241,3 +241,146 @@ fn a_seats_hot_gun_fills_the_ring_and_locks_in_both_games() {
         assert_eq!(kinds.len(), 4, "turret and vehicle, both games: {kinds:?}");
     }
 }
+
+#[test]
+fn ps2_reload_progress_uses_remaining_time_and_reaches_reticle_events() {
+    use core::weapon::{WeaponClass, WeaponState};
+    let c = WeaponClass {
+        rounds_per_clip: 10,
+        reload_time: 2.0,
+        ..Default::default()
+    };
+    let mut s = WeaponState::new(&c, true, 2);
+    s.clip = 0;
+    assert!(s.start_reload(&c));
+    for (remaining, expected) in [(2.0, 1.0), (1.0, 0.5), (0.5, 0.25), (0.0, 0.0)] {
+        s.reload_timer = remaining;
+        let g = game::hud_feed::gauge_of(&c, &s);
+        assert_eq!(g.refire, expected);
+        assert_eq!(
+            g.ring, 0.0,
+            "counted weapons keep the charge/heat channel separate"
+        );
+        assert!(!g.overheated);
+    }
+}
+
+#[test]
+fn ps2_reload_firing_progress_obeys_display_refire_and_timer_bounds() {
+    use core::weapon::{FireState, OrdnanceClass, PropSource, WeaponClass, WeaponState};
+    struct Props<'a>(&'a [(&'a str, &'a str)]);
+    impl PropSource for Props<'_> {
+        fn prop(&self, key: &str) -> Option<&str> {
+            self.0.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
+        }
+        fn prop_hash(&self, _: u32) -> Option<&str> {
+            None
+        }
+    }
+    for props in [
+        &[][..],
+        &[("DisplayRefire", "1")][..],
+        &[("DisplayRefire", "0")][..],
+    ] {
+        let mut c = WeaponClass::from_props("test", &Props(props), OrdnanceClass::default());
+        c.rounds_per_clip = 10;
+        let mut s = WeaponState::new(&c, true, 2);
+        s.state = FireState::Firing;
+        s.refire_time = 2.0;
+        let enabled = props != [("DisplayRefire", "0")];
+        for (elapsed, remaining) in [(-1.0, 1.0), (0.0, 1.0), (0.5, 0.75), (2.0, 0.0), (3.0, 0.0)] {
+            s.refire_accum = elapsed;
+            assert_eq!(
+                game::hud_feed::gauge_of(&c, &s).refire,
+                if enabled { remaining } else { 0.0 }
+            );
+        }
+        s.refire_time = 0.0;
+        assert_eq!(game::hud_feed::gauge_of(&c, &s).refire, 0.0);
+        s.state = FireState::Idle;
+        s.refire_time = 2.0;
+        s.refire_accum = 0.0;
+        assert_eq!(game::hud_feed::gauge_of(&c, &s).refire, 0.0);
+    }
+}
+
+#[test]
+fn ps2_reload_keeps_unlimited_heat_and_counted_charge_selection() {
+    use core::weapon::{FireState, WeaponClass, WeaponState};
+    let mut c = WeaponClass {
+        heat_threshold: 0.25,
+        ..Default::default()
+    };
+    let mut s = WeaponState::new(&c, true, 2);
+    s.state = FireState::Firing;
+    s.refire_time = 1.0;
+    s.refire_accum = 0.25;
+    s.heat = 0.1;
+    assert_eq!(
+        game::hud_feed::gauge_of(&c, &s).refire,
+        0.0,
+        "cold unlimited weapon suppresses refire"
+    );
+    s.heat = 1.0;
+    s.overheated = true;
+    assert_eq!(game::hud_feed::gauge_of(&c, &s).refire, 0.75);
+    c.rounds_per_clip = 10;
+    c.max_pressed_time = 2.0;
+    s.overheated = false;
+    s.state = FireState::Idle;
+    s.active = true;
+    s.fire_cmd = 1;
+    s.refire_accum = 1.0;
+    assert_eq!(game::hud_feed::gauge_of(&c, &s).ring, 0.5);
+    assert_eq!(game::hud_feed::gauge_of(&c, &s).refire, 0.0);
+}
+
+#[test]
+fn ps2_reload_publishes_to_bf2_reticle_bits_for_both_source_games() {
+    let common = game::assets::baked_root().join("common_bf2/hud");
+    if !common.join("1playerhud.ron").is_file() {
+        eprintln!("SKIP: no baked BF2 HUD");
+        return;
+    }
+    let read = |f: &str| -> manifest::hud::HudLayout {
+        ron::from_str(&std::fs::read_to_string(common.join(f)).unwrap()).unwrap()
+    };
+    let c = core::weapon::WeaponClass {
+        rounds_per_clip: 10,
+        reload_time: 2.0,
+        ..Default::default()
+    };
+    let mut s = core::weapon::WeaponState::new(&c, true, 2);
+    for bf2 in [false, true] {
+        let mut hud = ui::hud_tree::Hud::new(&read("1playerhud.ron"), &read("hudtransforms.ron"));
+        for (remaining, lit) in [(2.0, 3), (1.0, 2), (0.5, 1), (0.0, 0)] {
+            s.reload_timer = remaining;
+            let model = ui::hud::HudModel {
+                hp: 100.0,
+                hp_max: 100.0,
+                weapon: Some(ui::hud::HudWeapon {
+                    bf2,
+                    total: Some(20),
+                    ..Default::default()
+                }),
+                reticle: Some(0),
+                gauge: game::hud_feed::gauge_of(&c, &s),
+                ..Default::default()
+            };
+            ui::hud::feed(&mut hud, &model, &|_| false);
+            hud.advance(0.05);
+            for name in [
+                "player1weapon1refire_leftbit",
+                "player1weapon1refire_rightbit",
+            ] {
+                let e = &hud.elems[hud.find(name).unwrap()];
+                let count = (0..e.segments)
+                    .filter(|k| (*k as f32 / e.segments as f32) < e.value - 1e-4)
+                    .count();
+                assert_eq!(count, lit, "bf2={bf2}, remaining={remaining}, {name}");
+            }
+            let overheat = &hud.elems[hud.find("player1weapon1overheat").unwrap()];
+            assert_eq!(overheat.fader.state, 0);
+        }
+    }
+}

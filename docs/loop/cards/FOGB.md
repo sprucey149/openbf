@@ -1,21 +1,10 @@
 ---
 id: FOGB
 title: BF1's near models took no fog in the KAS2 patched-state control - identify the missing gate; planar fog depth is already implemented by REDB
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: Restore the FOGB primary inputs listed in reports/20261025_0307_card_FOGB.md before retry; identify the BF1 near-model gate with RE and an opaque-prop patched-state pair. Planar fog is already implemented by REDB; no duplicate shader change.
-created: 2026-09-28
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 `analysis/re-fog.md` §0.3 / §2.2 read BF1's segment draw `FUN_004d0108` as fogging every opaque model segment in BOTH

@@ -1,20 +1,10 @@
 ---
 id: WGMUL
 title: BF1 gunner-call receivers can concurrently approach the called ground vehicle within its live claim budget
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK,WAIT4,CWAIT
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/behave/brain.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/ai/ride/tests/call_board_tests.rs, engine/crates/core/src/ai/ride/tests/passenger_call_tests.rs, engine/crates/core/src/ai/ride/tests/claim_wait_tests.rs, engine/crates/core/src/ai/ride/tests/seat_call_tests.rs, engine/crates/core/src/ai/ride/tests/setout_call_tests.rs, engine/crates/core/src/ai.rs, engine/CRATES.md
-declares: sim; sweep
-needs: real-content acceptance and boarding regression gates
-effort:
-branch: main
-resume: Sourcec6a8878 on main;32/32 scenes,144 budget cases,105ride/970core/395game+2ignored/fmt/all-target Clippy/build;16caught mutants. Protect PASS; map8inherited missing paths/0unmapped/0stale. Full Acceptance1-5 and parent holds pending. reports/20261026_0430_card_WGMUL.md
-created: 2026-10-26
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why and evidence
 A BF1 ground pilot calls and both nearby on-foot answerers say Yes, but

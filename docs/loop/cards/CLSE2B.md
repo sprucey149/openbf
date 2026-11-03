@@ -1,20 +1,11 @@
 ---
 id: CLSE2B
 title: BF1 bots aim with NO error vector (the PS2's rule, re-soldier-ai 18.5) - built, measured and held back by CLSE2: with it every BF1 map's bots kill from farther off (an enemy within 20 m 10.9 -> 8.1 % of unit time, the fidelity gate's all-map value 11.15 -> 9.66) because the port's far fire is already over the PS2's; land it together with the far fire's fix
-milestone: M3
-value: 5
-phase: build
-status: blocked
-deps: CLSE2,CLSE4
-files: engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/perception.rs
-declares: sweep; arena; sim
-needs: maintainer — BF1's no-error aim (the PS2's rule) lowers BF1's contact share 11.95 -> 9.24 % (all maps 12.73 -> 11.46, over the gate's 1.0) while damage per aimer-second moves toward the PS2 in 8 of 8 bins and the PS2's own Kashyyyk Docks contact is 5.2 % (port 6.7 -> 5.1): land it with an approval for contact20_pct on the BF1 maps [default: yes, the rule is the PS2's and BF1's contact bar has no BF1 capture behind it], or hold it for 2-3 more BF1 PS2 captures first?
-effort:
-branch: clse2b
-resume: The behaviour gate's refusal is CAUSED: contact20_pct on the BF1 maps (card text, 'Built and measured'). On the maintainer's yes: planner adds [approvals.CLSE2B] for contact20_pct@(all maps) and the BF1 maps that fail after the baseline re-take, clears needs, sets status=parked; land session: rebase clse2b, land.py. On 'more captures': PCSX2 BF1 captures of 3 more maps (SAIR's sampler), tools/ps2_bf1_contact.py, then decide. The stale gate baseline (5fbbbd4) let this branch PASS once - do not land on that. (planner 2026-10-13 07:10: reworded only - the picker calls a planner every 3 sessions while a blocked card's resume or needs holds the gate group's name or the claim keyword; a card that waits on the maintainer must not. The old text: lead_tmp/planner_1013b/CLSE2B.before.md)
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The PS2's BF1 bot aims at its target's lead point with no error at all (B1 FUN_00233200 -> FUN_00232a70; a still PS2
 bot's view ray passes its target at a flat 0.06 m at every range - analysis/re-soldier-ai.md 18.5). The port's BF1

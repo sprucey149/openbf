@@ -1,20 +1,10 @@
 ---
 id: KGRY
 title: BF2 Kamino's flat grey ellipse floating in the sky (kam1_bf2_2230_invisible_rails.png, kam1_play_7): the RE could not find it at any stored pose
-milestone: M1
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: closed: fixed in ec47e0b (door indices after the ocean splice); lead_tmp/kamdoor/README.md
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's BF2 Kamino play (2026-09-30 ~22:30, on main after KSEA/VBIND): a large flat light-grey polygon floats in the sky above the

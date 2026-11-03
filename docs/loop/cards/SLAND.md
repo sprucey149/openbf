@@ -1,19 +1,10 @@
 ---
 id: SLAND
 title: Soldier landing damage is the PS2's law — (approach speed − CollisionThreshold)² × CollisionScale per class, from the collision response — not a kill at a PROVISIONAL 25 m/s (BF1 default threshold 10 + 3·(up·n): a flat landing hurts from 13 m/s, a ~4.7 m drop)
-milestone: M3
-value: 3
-phase: re
-status: done
-deps:
-files: engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/combat.rs,engine/crates/game/src/classdb.rs
-declares:
-needs:
-effort:
-branch:
-resume: MERGED into DTHR (planner 2026-10-01 22:00): same RE doc (re-kill-floor.md), same sim files, value 3 - one PS2 session and one build pay the gates once
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Found by STHOP's verifier (`analysis/re-soldier-ground.md` §4). The port kills a soldier outright when he lands at

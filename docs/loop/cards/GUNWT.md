@@ -1,20 +1,11 @@
 ---
 id: GUNWT
 title: BF1's AI driver waits in its seat for a gunner and the AI that answer board (UTALK's behaviour half): on the PS2 an AI in a vehicle seat with a free gun runs UnitWaitSecondaryAgent and calls 'need gunner' (chance 0.3) each time it enters the agent's state 2, and every friendly AI on foot within 30 m answers yes and gets a board goal for that vehicle (goal 5) - TAT1's yes answers are 12 of the voice slot's 32 lines a minute; the port's pilot drives off at once and its answerers carry on (UTALK census: yes 0.97 / min, need-gunner gate 1.00 against 4.25)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: UTALK,WAIT4,CWAIT,WPOKE,GBOARD,WGCAL,WGOUT,WGSEAT,WGORD,WGPAS,WGMUL,WGNXT
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/ai/hover_drive.rs, engine/crates/core/src/ai/walker_drive.rs, engine/crates/core/src/ai/behave.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/ai.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/squad.rs
-declares: sim; sweep
-needs: environment restoration — baked game data/missions plus UTALK census kit and GUNWT raw reference evidence
-effort:
-branch:
-resume: WGMULc6a8878 and WGNXT4adacdc implemented/full acceptance pending. WGNXT48/48 later-post scenes,12mutants,979core/398game+2ignored/fmt/Clippy; real fielded/gates remain owed. Combat/other reissues, velocity and original restoration/Acceptance remain. engine/artifacts/loop/reports/20261026_0520_card_WGNXT.md
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card UTALK (2026-10-16) landed BF1's AI squad lines on the port's own seat event: a bot that takes a pilot seat with a free gun calls once (chance 0.3) and the AI on foot within 30 m answer yes. The PS2's rate needs the PS2's behaviour: TAT1 yes lines 12.0 / min (port 0.97), need-gunner gate re-arms 4.25 (port 1.00); NAB1 2.0 / 2.75 (port 0.84 / 1.50). Census: `lead_tmp/utalk/census/tab_utalk.txt` (run.sh + tab.py, 8 seeds x 240 s, player parked).
 

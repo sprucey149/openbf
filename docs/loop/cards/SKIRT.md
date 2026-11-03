@@ -1,20 +1,10 @@
 ---
 id: SKIRT
 title: BF2 Kamino hub 46: the PS2's soldier takes the pod's skirt (48 degrees, 1.0-1.5 m high) on momentum and three rules of its contact code the port lacks - the port's body makes 6 of its 14 climbs and the steering keeps the bots off the band (52 stalls per 100 passes, the PS2 5): build the flattest-normal rule, the dead zone and the overlap, the ledge rule's height and a steep probe that opens for a short band (RE done: re-soldier-ground 7; prototype 20 per 100, the maintainer's scene 3 -> 0)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: MOUTH2
-files: engine/crates/core/src/soldier.rs,engine/crates/core/src/collision/walls.rs,engine/crates/core/src/ai/steer.rs,engine/crates/core/src/sim/state.rs
-declares: sim; sweep; arena; leak
-needs:
-effort: high
-branch: skirt
-resume: landed 2dccd5a7 2026-10-15
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Build result (2026-10-15, lane 1; branch `skirt` 2dccd5a on main 662e152; kit `lead_tmp/skirt/tools2`, README there)
 Built: (a) the flattest normal, (b) the dead zone, (c) the overlap's lift-off in `Soldier::resolve_ground` (both games),

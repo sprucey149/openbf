@@ -1,21 +1,10 @@
 ---
 id: GETOUT
 title: A ground pilot's Left command tells the AI seats of its vehicle EVERYONE OUT, with a 20-second autonomous-seat-search cooldown and driver feedback
-milestone: M2
-value: 3
-phase: build
-status: parked
-deps: SQACK
-files: engine/crates/core/src/squad.rs,engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai/ride/tests/get_out_tests.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/command.rs,engine/crates/core/src/ai/behave/brain.rs,engine/crates/core/src/sim/seats.rs,engine/crates/core/src/sim/seats/tests.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/game/src/event_feed.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/tests/suite/squad_orders_ps2.rs,engine/crates/core/src/ai/man.rs,engine/crates/core/src/ai/ride/tests/pile_in_tests.rs
-declares: sim; sweep
-needs: actual OP5/L15 and content/device/full gates
-effort:
-branch:
-resume: Implemented eb7a51e; pending original acceptance. Restore named inputs and run ordered checks in reports/20261026_1058_card_GETOUT.md; preserve parent and earlier validation debt.
-created: 2026-10-26
-alpha: yes
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why and evidence
 Before eb7a51e, SQVEH's implemented follower and pilot Right paths left pilot

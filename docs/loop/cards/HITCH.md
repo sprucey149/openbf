@@ -1,21 +1,11 @@
 ---
 id: HITCH
 title: Hitch hunt: the windowed game freezes or dives for a moment now and then while sound carries on (the maintainer, 10-20: BF1 NAB2, GEO1, BF2 KAS2) - a frame-time recorder in dev mode first (ticks run, AI, render CPU, present, GPU objects made per frame; frames over 25 ms into the black box), then the causes the numbers name, fixed at the root (load-time uploads, no GPU objects made in the frame, AI bursts spread)
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/frame_profile.rs, engine/crates/game/src/main/windowed.rs, engine/crates/game/src/walk.rs, engine/crates/game/src/blackbox.rs, engine/crates/game/src/viewer/, engine/crates/render/src/
-declares:
-needs:
-effort: high
-branch: hitch
-resume: landed 9e381b1e 2026-10-20
-created: 2026-10-20
-first: 1
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-20 playtest (INBOX 16:50 + his 17:05 standing word): the windowed game hitches - the picture freezes or dives
 for a moment now and then while the sound carries on (BF1 Naboo 2 and Geonosis, BF2 KAS2; most of the time fine). Sound

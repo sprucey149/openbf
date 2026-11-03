@@ -1,20 +1,10 @@
 ---
 id: UWPN
 title: The battle draws each class's own gun: SoldierVisuals caches one asset per body model, so a class sharing a model with an earlier class draws that class's weapon (BF1 sharpshooter holds a rifle, assassin and pilot droids hold the assault droid's launcher, snow shock/scout/vanguard hold rifles)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/soldier_vis.rs, engine/crates/game/tests/roster.rs, engine/CRATES.md
-declares:
-needs:
-effort:
-branch: uwpn
-resume: landed 2e54da7a 2026-10-02
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 UAUD1 (analysis/unit-audit-bf1.md §3.2), measured by running the game's own roster over the 26 BF1 mission RONs

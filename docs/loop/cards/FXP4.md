@@ -1,20 +1,12 @@
 ---
 id: FXP4
 title: Particle effects, part 4: GEOMETRY emitters draw their model (debris chunks: BF1 39 / BF2 212 emitters) and EMITTER emitters replay their child per parent particle (BF1 48 / BF2 85) — re-fx §5.10, §6.6; FXP2 draws every other type
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: FXP2
-files: engine/crates/game/src/fx.rs,engine/crates/game/src/fx/emitter.rs,engine/crates/game/src/fx/draw.rs,engine/crates/render/src/particles.rs
-declares: ci
-needs: cloud prerequisites: branch fxp4, baked assets, missions and reference evidence absent
-effort:
-branch: fxp4
-resume: (private workflow note omitted)
-created: 2026-09-30
-alpha: yes
+status: archived
+issue: 49
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #49](https://github.com/sprucey149/openbf/issues/49).
+
 ## Why
 FXP2 landed the emitter runtime and the PARTICLE/ANIMATED/BILLBOARD/SPARK/STREAK draws; GEOMETRY and EMITTER emitters
 are skipped (`game::fx::draw` module doc), so explosions lose their debris chunks and child trails.

@@ -1,18 +1,10 @@
 ---
 id: VENT
 title: The vehicle entity skeleton: `Sim.vehicles`, `VehicleHandle`, seats, `Unit.mount`, the hash append — PLAN's decided P7 shape, adjusted by VEH0
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VEH0
-files: engine/crates/core/src/vehicle.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/unit.rs,engine/crates/core/src/projectile.rs,engine/crates/core/src/sim/combat.rs
-declares:
-needs:
-branch: vent
-resume: landed ceb27c6 2026-09-25; report reports/20260925_2135_build_VENT.md
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The P7 entity shape is DECIDED (PLAN §DESIGN SPECS "P7 DESIGN — entity shape": a second entity kind, occupancy on both

@@ -1,20 +1,11 @@
 ---
 id: GSKIP
 title: The selective gates skip the golden step for any diff under engine/crates/core/, but core decides golden pixels: the gallery / walkabout vantage on the six stub-terrain maps is floored by core::collision ray_down, grass / foliage / leaves sit on core::heightfield, doors pose by core::door — GRND's whole file set would be skipped while it changes ray_down
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: engine/goldens/deps.toml,scripts/gates_selftest.py,scripts/gates.py,engine/goldens/README.md
-declares:
-needs:
-effort:
-branch: gskip
-resume: landed bc6a047c 2026-10-01
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX (2026-09-30, speed-up round): "the first landings after this are the real test — the planner should read
 their GATES_FOR_REPORT.md for anything odd (a wrong skip, a reused row that should have re-run) and card it value 5."

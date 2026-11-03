@@ -225,6 +225,7 @@ fn battle_stats_filter_non_player_and_non_enemy_damage_and_deduplicate_ticks() {
         dir: Vec3::NEG_Z,
     };
     let hit = |shooter, victim, damage| Event::Hit {
+        direct_round: true,
         shooter,
         victim,
         damage,

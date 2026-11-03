@@ -1,19 +1,11 @@
 ---
 id: DIFH
 title: Difficulty test harness and the first lever curves: a headless battle takes N stand-in humans per side and four levers (teammate shooting tier, the enemy's units on the field, reinforcements, the enemy's spawn-wave time); stage 1 = each lever alone on six maps with one human, win rate and ticket margin per step
-milestone: M3
-value: 4
-phase: measure
-status: todo
-deps: HSTD
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-05
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
 
 ## Why
 The maintainer, 2026-10-05: "You turn up the difficulty so the ai gets better so the user is more likely to die, how does that translate to making it harder to win games? If all ai is better including teammates, and the user just dies more, how does that make it harder to win a match? ... We need a good solution where victory is somewhat tied to user performance on any difficulty. Easier difficulties are a little more evenly split, while harder difficulties depend on the user playing well and thought needs to be incorporated for when multiple users are playing and they're on opposing teams." With equally good bots on both sides a battle is a coin flip the human tips; better bots only shrink the tip.

@@ -1,20 +1,11 @@
 ---
 id: SPL10
 title: walls.rs and manifest/src/lib.rs are both under the 1,500 cap now (10 and 1,291 lines) — only the original gates remain
-milestone: M0
-value: 2
-phase: cleanup
-status: todo
-deps: SPLENV
-files: engine/crates/core/src/collision/walls.rs,engine/crates/core/src/collision/walls/queries.rs,engine/crates/core/src/collision/walls/tests.rs,engine/crates/manifest/src/lib.rs,scripts/size_waivers.txt
-declares:
-needs:
-effort:
-branch:
-resume: SPLENV independently owns environment schema extraction; retain wall-slice local receipt and its 11-line literal-proof debt. Complete original gates and scratch bake DIFF=0 before closing.
-created: 2026-09-30
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 Cleanse CLNC (2026-09-30): `scripts/size_report.sh --strict` exited 1 on walls.rs (2,086; it grew through JWAL / WTUN / LEAK3 / WPSH / STHOP) and neither file was named by an SPL card. CLNC waived both in `scripts/size_waivers.txt` pointing here.
 

@@ -1,20 +1,11 @@
 ---
 id: BMAP
 title: The BF2 minimap and world markers: the Map element (the map's <world>_map masked by map_mask, FOV wedge, posts, targets, north pointer; small / large / spawn views) and the Target element (objective, flag, attacker, lock-on markers on / behind / off screen) — RE their placement and scale, then draw them in BHUD2's HUD
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BHUD2
-files: engine/crates/ui/src/hud_map.rs,engine/crates/ui/src/hud_draw.rs,engine/crates/ui/src/hud_tree.rs,engine/crates/ui/src/hud.rs,engine/crates/game/src/minimap.rs,engine/crates/game/src/hud_feed.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/walk.rs,engine/CRATES.md
-declares: goldens=tat1_hud.png
-needs:
-effort:
-branch: bmap
-resume: landed 4c8bc606 2026-10-03
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why (RE done 2026-09-30, `analysis/re-hud-map.md`, commit 027dad9)
 The PS2's minimap and world markers are now known and checked: heading-up, eye-centred, radius from the controlled
 class's MapViewMin/Max × MapSpeedMin/Max (soldiers ±50 m), the `<world>_map` image over the `mapbounds` square (else the

@@ -25,17 +25,20 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 | `render_contact_check.py`, `render_contact_proxy.py`, `render_contact_groups.py`, `render_query_frame.py` | alternative complete contact-surface proof within 1 cm, with identical active soldier/ordnance domains, complete primitive proxies, outward query-frame bounds and every matching placement; asymmetric or unsupported domains fail unresolved |
 | `render_terrain_check.py`, `render_attachment_check.py` | the alignment gate's required terrain and moving-object receipts; absent or unmeasured inputs fail |
 | `render_alignment_probe.py`, `alignment_known.py` | sampled ordinary-float PS2-residual comparisons and located open offenders; known entries remain measurable, and in-boundary samples do not establish whole-map reachability or acceptance |
-| `render_alignment_sweep.py` | every placed object, terrain and side vehicle of every map, composed with neighbours and terrain against PS2's own residual and ranked; `--gate` measures three small maps and fails on an unlisted in-boundary excess above 0.25 m, a listed one grown 5 cm past its measured worst, or an unlisted unmeasured placement; a sampled ranking, not acceptance |
+| `render_alignment_sweep.py` | every placed object, terrain and side vehicle of every map, composed with neighbours and terrain against PS2's own residual and ranked; `--gate` measures five maps, including Citadel and Felucia, with tighter repaired-near-model limits; unlisted in-boundary excess above 0.25 m and unlisted unmeasured placements fail, and bounded outstanding rows allow 5 mm growth on the two added maps (5 cm on the original three); a sampled regression check, not acceptance |
 | `render_input_stability.py` | record every GLB, RON, KTX2 and JSON input, optional sidecar presence and measuring source before and after; changes, missing files or a stale receipt fail |
 | `data/` | the measurement receipt and the UI dependency list |
+
+| `render_class_inputs.py`, `render_identity_baseline.py`, `render_recovery_bounds.py` | track placement inputs, identity baselines and conservative recovered surface bounds |
+| `render_skin_support.py`, `render_terrain_dependencies.py` | verify moving skin support and terrain proof dependencies |
 
 ## Checks
 
 The default build checks include `alignment`. Automatic checks require it when
 bake, simulation, manifest or rendering code changes, and landing retains that
 requirement. Give `gates.py` independent bakes using `--alignment-reference` and
-repeat `--alignment-case NAME=ASSETS` for every source being accepted. Legacy
-landing commands use `OPENBF_ALIGNMENT_REFERENCE` and shell-quoted
+repeat `--alignment-case NAME=ASSETS` for every source being accepted. Standalone
+gate commands can use `OPENBF_ALIGNMENT_REFERENCE` and shell-quoted
 `OPENBF_ALIGNMENT_CASES` with the same `NAME=ASSETS` entries. Missing roots fail.
 Keep the report outside those input folders. The gate checks their content and
 file metadata before and after measurement, and checks the current folders and
@@ -79,9 +82,12 @@ These read your own disc extract and your own Ghidra exports; nothing here ships
 
 ## Project workflow
 
+Reusable agent briefs and standing lane rules are in [docs/agents](../docs/agents/README.md).
+
 | script | what it does |
 |---|---|
-| `loopctl.py`, `land.py` | card bookkeeping and landing |
-| `heavy.sh`, `cleanse_delete.sh` | run a heavy job under the machine's job locks; delete regenerable bloat |
-| `start_loop.sh`, `autoloop.sh`, `loop_cpu.py`, `loopbin/`, `AUTOLOOP.md` | the older unattended loop |
+| `loopctl.py` | retain historical audit prerequisites and explicit reviewed resets |
+| `gate_policy.py` | shared gate declaration and landing-group policy |
+| `cards.py` | check, list, show and create issue-linked technical cards |
+| `heavy.sh`, `cleanse_delete.sh`, `target_cleanup.py` | run a heavy job under the machine's job locks; delete regenerable bloat |
 | `claude_guard.sh`, `oracle_guard.py` | agent hooks that refuse risky commands and writes to what the gates judge against |

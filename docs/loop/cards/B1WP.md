@@ -1,22 +1,11 @@
 ---
 id: B1WP
 title: BF1 Geonosis / Hoth: a live command walker is a held post (BF1's rule, re-command-walker-post 0.6 [O]) - the port's BF2 all-posts countdown ends all 16 rounds the moment the attacker's ONE fixed post falls (some at 77 s on 197/235 tickets); team 1 wins 16-0 on both
-milestone: M3
-value: 4
-phase: re
-status: blocked
-deps:
-files: engine/crates/core/src/cp.rs, engine/crates/core/src/sim/round.rs
-declares:
-needs: cloud prerequisites: BF1 GEO1/HOT1 assets, mission objects, PS2 corpus and live reference trials absent
-effort:
-branch:
-resume: the maintainer answered yes on 2026-10-22; no design approval remains. Restore data; verify live/dead walker post, respawn, advance/shield objectives against both PS2 missions, then phase build with exact file ownership and measured tests. See Acceptance and reports/20261024_0713_planner.md.
-created: 2026-10-22
-alpha: yes
-first: 3
-defer:
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card WINS (2026-10-22): BF1 Geonosis and BF1 Hoth go to team 1 in 16 of 16 seeds, and EVERY one of WINS's 16 re-run rounds
 ends by the port's 20 s all-posts countdown (`cp::tick_domination`), some at 77-200 s with both sides on 150-235 tickets

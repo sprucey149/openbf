@@ -1,20 +1,11 @@
 ---
 id: VTURG
 title: An open building turret shows its gunner (the maintainer's INBOX 2026-10-12 18:55, ask 1b / 1c): a soldier seated in a turret whose seat has a pose key (PilotAnimation / Pilot9Pose) is drawn in his own team and class skin at the seat's hardpoint carried by the posed turret or aimer node, in the seat clip human_<value> (nine frames blended by the turret's yaw and pitch fractions, or the one-frame drive pose), without his hand weapon; a seat with no pose key - Hoth's laser towers - draws nobody, as the PS2 (RE done 2026-10-13, analysis/re-turret-draw.md 3)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTURD
-files: engine/crates/bake/src/soldier.rs,engine/crates/game/src/animator.rs,engine/crates/game/src/soldier_vis.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/viewer/turret_pose.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/examples/pose_render.rs,engine/crates/game/tests/turret_gunner.rs
-declares: rebake=side
-needs:
-effort:
-branch: vturg
-resume: landed bc822ba2 2026-10-15
-created: 2026-10-13
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-10-12 18:55, ask 1 (b) and (c): "an OPEN turret shows its occupant: the seated soldier model in the
 seat's pose, his team and class skin, while someone is in the seat (player or bot); gone when the seat is empty" and

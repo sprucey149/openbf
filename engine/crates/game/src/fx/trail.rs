@@ -137,6 +137,44 @@ pub(super) fn along(vel: Vec3) -> Mat3 {
 }
 
 impl Fx {
+    /// Move attached heads to the render pose while retaining world-space
+    /// exhaust history. The caller restores these frames after submission.
+    pub(super) fn drawn_round_frames(&mut self, sim: &Sim) -> Vec<(usize, Frame)> {
+        if self.rounds.tick != Some(sim.tick) {
+            return Vec::new();
+        }
+        let frames: HashMap<_, _> = self
+            .rounds
+            .bolts
+            .iter()
+            .zip(&sim.bolts)
+            .filter(|((old, _), now)| {
+                old.owner == now.owner
+                    && old.weapon_class == now.weapon_class
+                    && old.visual_shot == now.visual_shot
+                    && sim.weapon_classes[now.weapon_class]
+                        .ordnance
+                        .geometry
+                        .is_some()
+            })
+            .map(|((old, id), now)| {
+                (
+                    Round::Bolt(crate::bolt_vis::key(old), *id),
+                    (now.pos, now.vel),
+                )
+            })
+            .collect();
+        let mut saved = Vec::new();
+        for (index, e) in self.live.iter_mut().enumerate() {
+            if let Some((pos, vel)) = e.round.and_then(|r| frames.get(&r)) {
+                saved.push((index, e.frame));
+                e.frame.pos = *pos;
+                e.frame.vel = *vel;
+            }
+        }
+        saved
+    }
+
     pub(super) fn follow_rounds(&mut self, sim: &Sim) {
         if self.rounds.tick == Some(sim.tick) {
             return;
@@ -335,6 +373,119 @@ mod tests {
                 eprintln!("tagged identical rounds preserve the second native trail after the first retires");
             }
         }
+    }
+
+    #[test]
+    fn drawn_trail_heads_follow_models_without_advancing_the_emitter() {
+        let root = crate::assets::baked_root();
+        let common = root.join("common_bf1");
+        if !common.join("effects.ron").exists() {
+            eprintln!("SKIP: common_bf1 effects are not baked");
+            return;
+        }
+        let mut fx = Fx::with_library(Library::load(&root, &common, "bf1", &[]));
+        let mut sim = Sim::empty(42);
+        let mut w = WeaponClass::bf1_rifle();
+        w.ordnance.geometry = Some("com_weap_missile".into());
+        w.ordnance.impact.as_mut().unwrap().trail = Some(crate::fx::BF1_IMPACT.into());
+        let class = sim.add_weapon_class(w);
+        sim.bolts.push(Bolt::fire(
+            Vec3::ZERO,
+            Vec3::Z,
+            100.0,
+            10.0,
+            core::projectile::Shooter {
+                owner: UnitHandle { index: 1, gen: 0 },
+                team: 0,
+                weapon_class: class,
+                is_player: true,
+            },
+            None,
+            None,
+            &sim.collision,
+            core::collision::HullFilter::Static,
+        ));
+        fx.follow_rounds(&sim);
+        assert_eq!(fx.live.len(), 1);
+        let frame = fx.live[0].frame;
+        let clock = fx.live[0].t;
+        sim.bolts[0].pos -= Vec3::Z * (50.0 * core::TICK_DT);
+        let saved = fx.drawn_round_frames(&sim);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(fx.live[0].frame.pos, sim.bolts[0].pos);
+        assert_eq!(fx.live[0].t, clock);
+        for (i, old) in saved {
+            fx.live[i].frame = old;
+        }
+        assert_eq!(fx.live[0].frame, frame);
+        sim.tick += 1;
+        assert!(
+            fx.drawn_round_frames(&sim).is_empty(),
+            "stale source tick must not attach"
+        );
+    }
+
+    #[test]
+    fn registered_exhaust_is_emitted_at_the_drawn_model_position() {
+        use super::super::{
+            emitter::{Era, Lcg},
+            EffectDef, LiveEffect,
+        };
+        let mut walk = crate::walk::WalkSim::new(42, Vec3::ZERO, None);
+        let mut w = WeaponClass::bf1_rifle();
+        w.ordnance.geometry = Some("com_weap_missile".into());
+        let class = walk.sim.add_weapon_class(w);
+        walk.sim.bolts.push(Bolt::fire(
+            Vec3::ZERO,
+            Vec3::Z,
+            100.0,
+            10.0,
+            core::projectile::Shooter {
+                owner: walk.player,
+                team: 0,
+                weapon_class: class,
+                is_player: true,
+            },
+            None,
+            None,
+            &walk.sim.collision,
+            core::collision::HullFilter::Static,
+        ));
+        let mut blend = std::mem::take(&mut walk.blend);
+        blend.on = true;
+        blend.before_tick(&walk);
+        walk.blend = blend;
+        walk.sim.bolts[0].pos = Vec3::Z * 10.0;
+        walk.sim.bolts[0].age += core::TICK_DT;
+        walk.advance(core::TICK_DT * 0.5, &[]);
+        let hash = walk.sim.hash();
+        let mut fx = Fx::default();
+        fx.follow_rounds(&walk.sim);
+        let id = fx.rounds.bolts[0].1;
+        let mut em = super::super::tests::one_shot_emitter();
+        em.start_delay = manifest::FxRange(0.001, 0.0);
+        let def = EffectDef::new(0, None, vec![em.clone()], Era::Bf2, &mut Lcg(42));
+        let mut effect = LiveEffect::new(
+            std::sync::Arc::new(def),
+            Frame::at(Vec3::Z * 10.0),
+            &mut Lcg(42),
+        );
+        effect.round = Some(Round::Bolt(crate::bolt_vis::key(&walk.sim.bolts[0]), id));
+        fx.live.push(effect);
+        fx.advance_frame(None, &mut walk, &core::sim::PadState::default(), 0.01);
+        let effect = &fx.live[0];
+        let particles =
+            effect.instances[0].particles(&em, Era::Bf2, effect.t, effect.frame, &[], |_| true);
+        assert!(!particles.is_empty());
+        assert!(particles
+            .iter()
+            .all(|p| p.pos.abs_diff_eq(Vec3::Z * 5.0, 1e-5)));
+        assert_eq!(
+            effect.frame.pos,
+            Vec3::Z * 10.0,
+            "tick emitter frame restored"
+        );
+        assert_eq!(walk.sim.hash(), hash, "emission must restore the tick pose");
     }
 
     /// A missile steers before it moves (`Sim::fly_missiles`), so its next

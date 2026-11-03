@@ -1,21 +1,11 @@
 ---
 id: WINS3
 title: Finish the WINS one-sided-map census after the named port repairs: seven remaining maps, 16 seeds each and PS2 bots-only evidence for every result above 12-4
-milestone: M3
-value: 5
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: cloud prerequisites: baked maps/missions, PS2 corpus and WINS/WINS2/MYGC raw evidence absent
-effort:
-branch:
-resume: After the named WINS repairs, start unresolved BF2 dag1, then BF1 rhn2/end1/kas1/yav1 one at a time; MYGC owns myg1 and WINS2 classified yav2. Restore raw evidence first. 16 seeds/map, >12-4 needs PS2 same-lean evidence. See reports/20261024_0713_planner.md.
-created: 2026-10-24
-first: 6
-alpha: yes
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
 
 ## Why
 The maintainer 2026-10-22: after UTAX, KAMPP, B1WP and LAPS, census the UNSORTED one-sided maps

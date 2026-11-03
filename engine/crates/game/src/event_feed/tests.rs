@@ -133,6 +133,16 @@ fn droideka_target_shield_and_hidden_energy_feedback() {
         .as_mut()
         .unwrap()
         .shield
+        .points = -900.0;
+    assert_eq!(
+        s.feed.target(&s.sim, 0).unwrap().shield,
+        Some(("Shield".into(), 0.0))
+    );
+    s.sim.units[h.index as usize]
+        .droideka
+        .as_mut()
+        .unwrap()
+        .shield
         .on = false;
     assert_eq!(s.feed.target(&s.sim, 0).unwrap().shield, None);
     s.sim.events = vec![Event::Droideka {
@@ -401,6 +411,7 @@ fn a_hit_on_the_player_lights_the_edge_toward_the_shooter() {
     let from = s.sim.units[rebel.index as usize].soldier.pos + Vec3::Y * 1.6;
     let to = s.sim.units[me.index as usize].soldier.pos + Vec3::Y * 1.0;
     let hit = |victim| Event::Hit {
+        direct_round: true,
         shooter: rebel,
         victim,
         damage: 10.0,
@@ -436,6 +447,7 @@ fn an_enemy_body_hit_lights_the_plain_flash() {
     let mut s = scene();
     let (me, mate, rebel) = (s.me, s.mate, s.rebels[0]);
     let hit = |shooter, victim, age| Event::Hit {
+        direct_round: true,
         shooter,
         victim,
         damage: 50.0,
@@ -477,6 +489,7 @@ fn a_sniper_headshot_lights_the_critical_mark() {
         weapon_class,
     };
     let body = Event::Hit {
+        direct_round: true,
         shooter: me,
         victim: rebel,
         damage: 50.0,
@@ -1031,4 +1044,49 @@ fn the_spawn_screens_read_the_table() {
         feed.text_by_hash(0xecf8_496f, "Unit Count: %d"),
         "Unit Count: %d"
     );
+}
+
+#[test]
+fn local_damage_flash_filters_rearms_expires_and_cannot_follow_another_life() {
+    let mut s = scene();
+    let (me, bot, attacker) = (s.me, s.mate, s.rebels[0]);
+    let hit = |victim, damage, health_left| Event::Hit {
+        direct_round: false,
+        shooter: attacker,
+        victim,
+        damage,
+        health_left,
+        age: core::sim::BLAST_AGE,
+        dir: Vec3::X,
+    };
+    happen(
+        &mut s,
+        &[
+            hit(bot, 20.0, 100.0),
+            hit(me, 2.0, 100.0),
+            hit(me, 100.0, 0.0),
+        ],
+    );
+    assert_eq!(s.feed.damage_flash(s.sim.tick, me), 0.0);
+    happen(&mut s, &[hit(me, 20.0, 100.0)]);
+    let start = s.sim.tick;
+    assert_eq!(s.feed.damage_flash(start, me), 128.0 / 255.0);
+    let before = s.sim.hash();
+    s.feed.tick(&s.sim, me);
+    assert_eq!(s.sim.hash(), before);
+    assert!((s.feed.damage_flash(start + 3, me) - (128.0 / 255.0) * (2.0 / 3.0)).abs() < 1e-6);
+    assert_eq!(s.feed.damage_flash(start + 9, me), 0.0);
+    assert_eq!(
+        s.feed.damage_flash(
+            start,
+            core::unit::UnitHandle {
+                gen: me.gen + 1,
+                ..me
+            }
+        ),
+        0.0
+    );
+    assert_eq!(s.feed.damage_flash(start, bot), 0.0);
+    happen(&mut s, &[hit(me, 10.0, 100.0)]);
+    assert_eq!(s.feed.damage_flash(s.sim.tick, me), 80.0 / 255.0);
 }

@@ -1,21 +1,11 @@
 ---
 id: TURRA
 title: TURR audit (PARTLY): exit 3 never fires in a battle (0 of 504 rounds: it reads the turret's hull hits and a building turret has no hull, while gunners hit from outside every arc stay seated); 18 of 52 audit mutations survive the scenes (one bot a turret, exit 2's 20 s, a turned turret's arc); the 20 s closure is not the PS2's cooldown; a Hoth lead on bolts fired past buildings
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: TURR,TCOL
-files: engine/crates/core/src/ai/man.rs, engine/crates/core/src/ai/man/tests.rs
-declares: sweep; sim
-needs: cloud prerequisites: TCOL parts 1/2 landed; restore audit-turr evidence/tools, baked maps/missions and PS2 primary inputs
-effort: high
-branch:
-resume: Cloud prerequisite checkpoint 2026-10-24 08:51 UTC: no implementation. TCOL parts 1/2 must land before exit-3 battle validation; dependency now explicit. Restore audit-turr evidence/mutations/tools, assets_baked and missions plus primary PS2 inputs. See reports/20261024_0851_card_TURRA.md and lead_tmp/turra_20261024_0849/inventory.json. Then remeasure current main, trace Hoth bolt fates first, start isolated TURRA, build and run original mutation/B8/24-seed acceptance and all gates.
-created: 2026-10-20
-domain: ai
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT 2026-10-20 of card TURR (PARTLY; evidence `engine/artifacts/lead_tmp/audit-turr/EVIDENCE.md`, builds and sweeps
 listed there). The landing's bars hold on 24 seeds (BF2 KAM1 seat share 6.94 %, no quiet long spell, nobody seated in

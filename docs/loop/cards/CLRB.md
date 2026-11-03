@@ -1,18 +1,10 @@
 ---
 id: CLRB
 title: The port clears the frame to the FOG colour, the PS2 clears to black (RGBAQ 0): BF1 KAS2's pure-red band below the horizon (every KAS2 golden, 4,514 px at Beach Head) is the port's clear colour showing through a gap it draws nothing in
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/viewer/look.rs
-declares: goldens=maps/bf1_kas2.png,maps/bf2_end1.png,maps/bf2_geo1.png,maps/bf2_nab2.png,maps/bf2_uta1.png,maps/bf2_yav1.png
-needs:
-branch: clrb
-resume: landed a2ba3407 2026-09-28
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The most glaring single-map defect: a pure (255,0,0) band under the forest backdrop in every BF1 KAS2 golden and PXC pair,

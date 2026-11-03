@@ -942,6 +942,7 @@ mod tests {
         ]);
         let mut vo = Vo::new(1);
         let hit = |shooter, victim, health_left| Event::Hit {
+            direct_round: true,
             shooter,
             victim,
             damage: 10.0,

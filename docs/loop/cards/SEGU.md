@@ -1,19 +1,10 @@
 ---
 id: SEGU
 title: Untextured and dangling segments: what the PS2 draws for a `segm` with empty `TNAM` slots (75 stubs on 8 maps) or a texture name with no `tex_` chunk
-milestone: M1
-value: 2
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 18: `yav_prop_ivy`, `Cor1_bldg_flowers`, `noIcon`; the port skips them (PROVISIONAL). Pulling `yav_prop_ivy` from

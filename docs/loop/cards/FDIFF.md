@@ -1,20 +1,10 @@
 ---
 id: FDIFF
 title: The first-divergence differ: compare two state traces (port vs port, or port vs PS2) and report the first tick and the first field that differ, with both values and the previous matching tick - plus a state-sync mode that re-seeds the port from the PS2 state at tick k and reports how many ticks it then stays within tolerance
-milestone: M0
-value: 3
-phase: build
-status: done
-deps: SHASH
-files: scripts/fdiff.py, scripts/tests/test_fdiff.py, scripts/gates_selftest.py, engine/artifacts/oracle/README.md
-declares:
-needs:
-effort:
-branch: fdiff
-resume:
-created: 2026-10-08
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The output the oracle exists for: "the first mismatch is tick 412, group units, unit 0x61d1, field x: PS2 13.31 vs port 13.44" is something an agent cannot argue with. It also turns a pass/fail into a graded number. HONEST EXPECTATION: the port is a reimplementation, not a bit-exact port; free-running from a shared start the two traces will diverge early (RNG draws in a different order, float paths). So the useful modes are (a) port-vs-port (landing bisect, works from day one), (b) port-vs-PS2 with TOLERANCE (a unit matches if within eps), and (c) STATE-SYNC: copy the PS2 state into the port at tick k and measure how long a single system (e.g. one soldier's motion under the same pad) stays within tolerance - the per-system version that actually finds bugs.

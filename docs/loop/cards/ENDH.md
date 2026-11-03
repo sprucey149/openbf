@@ -1,20 +1,11 @@
 ---
 id: ENDH
 title: Two last units hold in sight of each other and never kill: BF1 YAV2 seed 1 does not finish (tickets 1/1, both 'holding a position' 24 m apart, clear line, for 1000 s)
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps:
-files: engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/mover.rs
-declares:
-needs: (private workflow note omitted)
-effort:
-branch:
-resume: Restore local baked maps/common/classes/vehicles and engine/missions RONs for all 32 maps plus cited ENDH/JITR snapshots and raw runs; verify class resolution and build stamps, then clear needs and set todo phase measure. On current main reproduce BF1 YAV2 seed 1 at tick 30000, digest units 3/19, count their shots/hits over ticks 29001-30000 and identify ammo/range/held-fire/miss cause; compare seed 42 and BF2 GEO1 seed 32. See reports/20261024_0740_card_ENDH.md; preserve paired null and 8x32 acceptance before any build landing.
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card WAI2's 8-seed sweep (main a582462, `lead_tmp/wai2/sw_v7`, null `sw_null` 256/256) left one round unfinished: bf1_yav2 seed 1,
 NO OUTCOME at 60,000 ticks, tickets 1/1, alive 1/1, hash f1b0e56a10a2a5e5. Snapshot `lead_tmp/wai2/bb/bf1_yav2_s1.json` (tick 30,000):

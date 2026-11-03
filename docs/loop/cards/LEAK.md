@@ -1,18 +1,10 @@
 ---
 id: LEAK
 title: Collision leak census on all 32 maps (the maintainer 2026-09-29): a headless run fires soldier capsules at every reachable wall face and edge at walk, sprint and jump speeds and flags every end state inside a closed volume, under a deck, off the walkable surface or off the nav graph; per-map counts like the round sweep, and a gate that fails on a new leak
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/examples/leak_census.rs,engine/crates/game/examples/leak_census_accepted.txt,engine/CRATES.md,scripts/gates.py,scripts/land.py
-declares: none (a new example and the leak gate; nothing existing may move — the leak baseline is seeded into baseline_dir after landing)
-needs:
-branch: leak
-resume: landed 13c7843; leak baseline seeded into 20260929_0836_VTAI/leak_main_1.txt; next: JWAL, WTUN, VCOL, LEAK2
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer (INBOX 2026-09-29), after a soldier jumped through a KAS2 platform wall (card JWAL): audit every map for the same

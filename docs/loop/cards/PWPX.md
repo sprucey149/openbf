@@ -1,20 +1,11 @@
 ---
 id: PWPX
 title: Pickups against the PS2: a PCSX2 frame of an item beside the port's (size, look, BF2's 1 s fade, the shadow blob), and why the port's bots take 2-4x the PS2's pickups on NAB1 / HOT1 / MYG1
-milestone: M3
-value: 3
-phase: capture
-status: blocked
-deps:
-files: engine/crates/core/src/sim/pickups.rs,engine/crates/game/src/viewer/pickups.rs
-declares:
-needs: Restore pickup captures/item reader, rate-census patch, NAB1/HOT1/MYG1/UTA1 baked maps and missions; compare every item class and split moving/still pickup rates.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 9/9 exact named paths absent. Restore pickup captures/item reader, rate-census patch, NAB1/HOT1/MYG1/UTA1 baked maps and missions; compare every item class and split moving/still pickup rates. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 PWUP (landed 6bc4290, 2026-10-03) built pickups without two of its acceptance checks. (1) No PCSX2 frame of an item
 was set beside the port's: the port frames are `engine/artifacts/lead_tmp/pwup/e2e/{bf1_nab1,bf2_uta1}/walk_00030.png`

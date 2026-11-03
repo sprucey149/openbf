@@ -1,20 +1,11 @@
 ---
 id: HCORN
 title: A BF1 speeder bike that starts a leg within its 20 m node radius of the leg's first detour corner skips that corner at once and drives into the barrier it went round (card HJAM's corner reach; AUDIT HJAM 2026-10-16): BF1 Tatooine leg 54 -> 55, barrier267's NE corner (-148, 44) - 63 of 72 such starts die within 2 s against the rock at (-150, 37.8), 1 of 56 before HJAM; BF1 Endor legs 4 -> 14 and 34 -> 38 the same. RE what the PS2 does at such a corner first, then fix and test the driver's radius input
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: HJAM
-files: engine/crates/core/src/ai/route.rs, engine/crates/core/src/ai/hover_drive.rs, engine/crates/core/src/ai/hover_drive/tests.rs
-declares: sim; sweep
-needs: cloud prerequisites: branch hcorn, baked assets, missions and reference evidence absent
-effort:
-branch: hcorn
-resume: (private workflow note omitted)
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Build part 1 result (2026-10-21 23:28, lane 1; report `reports/20261021_2328_card_HCORN.md`)
 Branch hcorn 350860a: `route::advance_route` re-plans a hover driver's corner walk from `next.from`. Two tests in
 `hover_drive/tests.rs`; M5 (radius 0), M6 (radius x 0.5) fail both, M7 (rule off) fails the second (`lead_tmp/hcorn/mut/mut.txt`).

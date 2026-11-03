@@ -1,21 +1,11 @@
 ---
 id: JETP2
 title: Jets, the rest - bots that jet (hop, jump-jet hints, hover attack, route arcs), the jet effect and engine sounds, BF2's fuel bar on the HUD, the jetpack_hover animation; JETP built the physics for players
-milestone: M3
-value: 3
-phase: build
-status: todo
-deps: JETP
-files: engine/crates/core/src/ai/mover.rs, engine/crates/core/src/soldier.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/fx.rs, engine/crates/game/src/sounds.rs, engine/crates/ui/src/hud.rs, engine/crates/game/src/animator.rs
-declares:
-needs:
-effort:
-branch:
-resume: JETP landed the physics (branch jetpack, 2026-10-28); this card is build plan steps 9-13 of analysis/re-jetpack.md §12. Steps 11 (effect + sounds) and 13 (animation) built on branch jetfx (re-jetpack.md §14); left: 9 (verifier + captures), 10 (bots), 12 (HUD bar), the camera
-created: 2026-10-28
-defer:
-tries: 0
+status: archived
+issue: 72
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #72](https://github.com/sprucey149/openbf/issues/72).
 
 ## Why
 Card JETP built the jet physics on BF2's rules for every map (`analysis/re-jetpack.md` §13, the Port section):

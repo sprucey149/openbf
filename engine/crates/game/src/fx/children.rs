@@ -84,12 +84,14 @@ pub(super) fn frame_at(nodes: &[Node], time: f32) -> Frame {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw(
     effect: &LiveEffect,
     index: usize,
     era: Era,
     eye: Vec3,
     forward: Vec3,
+    zoom: f32,
     assets: &mut dyn FxAssets,
     out: &mut Vec<ParticleDraw>,
 ) {
@@ -121,6 +123,6 @@ pub(super) fn draw(
             child_inst.update_path(child_em, now, false, |time| frame_at(&nodes, time));
             child_inst.rgba = parent.rgba;
         }
-        child.draws_with(eye, forward, assets, out);
+        child.draws_with(eye, forward, zoom, assets, out);
     }
 }

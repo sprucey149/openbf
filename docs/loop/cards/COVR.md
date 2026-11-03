@@ -1,19 +1,11 @@
 ---
 id: COVR
 title: BF1 Yavin Temple takes BF2 Yavin Temple's Cover hints (same graph) - a bake donor step
-milestone: M3
-value: 4
-phase: done
-status: done
-deps: HYST
-files: engine/crates/bake/src/donor.rs; engine/crates/bake/src/lib.rs; engine/crates/bake/src/main.rs; engine/crates/game/tests/suite/all_maps_load.rs; scripts/rebake.sh; analysis/bot-design.md
-declares: rebake=maps
-needs:
-effort:
-branch: botup
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 `lead_tmp/botre/xbox_pc.md` finding 1: BF2's Yavin Temple authors 973 Cover hints on the same planning graph as BF1's
 Yavin Temple, which has 51 (24 of them standable in the port's position table). Cover-hint density is the gap the bot

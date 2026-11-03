@@ -1,21 +1,12 @@
 ---
 id: ARVSA
 title: The head-to-head's per-team tier is refereed by no test past the spawn skill (AUDIT ARVS): 18 non-equivalent mutations survive every test and the gate - the think's tier, Elite's err cap and the sniper lane each carry tat2's elite>hard verdict alone, the respawn skill moves normal>easy 0.716 -> 0.590, a kill credited to the victim's side REVERSES every pair - and the acceptance's mutation passed by construction
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: ARVS
-files: engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/spawn.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/combat.rs, engine/crates/core/src/ai/behave.rs, engine/crates/core/src/ai/gunner_foot.rs, engine/crates/core/src/ai/snipe.rs, engine/crates/core/src/ai/man.rs, engine/crates/game/examples/arena.rs
-declares:
-needs: cloud prerequisites: branch arvsa, baked assets, missions and reference evidence absent
-effort:
-branch: arvsa
-resume: (private workflow note omitted)
-created: 2026-10-20
-alpha: yes
-domain: tooling
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
+
 ## Why
 AUDIT ARVS (2026-10-20, `engine/artifacts/lead_tmp/audit-arvs/EVIDENCE.md`, `audits.md`): ARVS's arena head-to-head is the referee card TCMP is judged on, and its per-team tier reaches the bots only through readers no test exercises. The only ARVS test checks the accessors and the spawn skill; the gate runs `arena ... all` with the override unset, so it cannot see a reverted reader. Of 33 audit mutations (`lead_tmp/audit-arvs/tools/mk_mut.py --list`), 24 survive every test (core lib 727, the arena's 2):
 - verdict words move: R1 (behave.rs:97 think tier from the round), R6 (gunner_foot.rs:466 Elite's err cap), R8 (snipe.rs:301 lane sight) - each alone turns tat2's elite>hard `yes` into a coin flip; R24 (all readers but spawn) gives elite>hard exactly 0.500; A1 (a kill credited to the VICTIM's side) and A2 (orientations swapped) REVERSE every pair; A8 (share denominator +1) reverses flat elite>hard.

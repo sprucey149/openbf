@@ -1,20 +1,10 @@
 ---
 id: WGSEAT
 title: BF1 ground pilots attempt existing gunner calls regardless of vehicle gun-seat availability
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK,WAIT4,CWAIT
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/ai/ride/tests/wait_call_tests.rs, engine/crates/core/src/ai/ride/tests/setout_call_tests.rs, engine/crates/core/src/ai/ride/tests/call_board_tests.rs, engine/crates/core/src/ai/ride/tests/seat_call_tests.rs, engine/CRATES.md
-declares: sim; sweep
-needs: real-content acceptance and boarding regression gates
-effort:
-branch: main
-resume: Source8aae1b4 on main;64/64 actual-step scenes,81 ride/946 core/395 game+2ignored/fmt/Clippy/build pass;10 faulty variants caught. Restore inputs and finish full Acceptance1–5/gates; map has8inherited missing paths. reports/20261026_0030_card_WGSEAT.md
-created: 2026-10-26
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why and evidence
 The existing BF1 ground pilot call is gated on a free armed gun seat, and

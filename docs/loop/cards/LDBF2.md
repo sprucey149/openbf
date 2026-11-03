@@ -1,19 +1,11 @@
 ---
 id: LDBF2
 title: The BF2 PS2 loading screen for BF2 maps (card BSHL's RE): header (map / mode), the still, the Tips and Tricks box (level.common.tips.1..54) and the Loading dots, from LOAD.LVL's load config - today the port draws the still and one caption
-milestone: M5
-value: 4
-phase: build
-status: blocked
-deps: BSHL
-files: engine/crates/bake/src/loadscreen.rs, engine/crates/ui/src/loading.rs, engine/crates/game/src/assets.rs, engine/crates/game/src/main/windowed.rs
-declares: goldens=loadscreens_bf2.png; rebake=load
-needs: environment — restore Hoth reference frames, BF2 LOAD/CORE inputs, baked text/fonts/stills and approved GPU
-effort:
-branch:
-resume: 20261024_1135 cloud BLOCKED before drawing: 0/9 inputs, no Hoth frames/LOAD assets/baked text/fonts/GPU; restore and measure first; report reports/20261024_1135_card_LDBF2.md; next lead_tmp/ldbf2_cloud/next_prompt.md
-created: 2026-10-20
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The port's loading screen (`ui/src/loading.rs`) draws a BF2 map's still and one caption "<MAP>   n/N". The PS2 BF2
 loading screen has a header (map name top-left, mode top-right on black), the still, a centred translucent "Tips and

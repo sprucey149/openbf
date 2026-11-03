@@ -1,20 +1,10 @@
 ---
 id: FOFG
 title: The sweep's off-graph share (fidelity offgraph_pct) counts every alive unit where it sits, a turret gunner at its seat and a pilot in its vehicle: count units on foot only and print the seated share beside it - card TURR's KAM1 +8.65 was 7.28 seated gunners
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/examples/round_to_outcome.rs, scripts/sweep_seeds.py
-declares: sweep
-needs:
-effort:
-branch: fofg
-resume: landed b04d6f5b 2026-10-16
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The fidelity gate's `offgraph_pct` (scripts/gates.py: the `N` locus share of the sweep's `shares` line, written by

@@ -1,20 +1,10 @@
 ---
 id: CLNV
 title: Cleanse 15 (core): waivers for the two files over the strict size cap, CRATES.md counts, and whatever the review of the core diff 177140d..0487827 finds
-milestone: M0
-value: 3
-phase: cleanup
-status: done
-deps:
-files: engine/CRATES.md,scripts/size_waivers.txt,scripts/loopctl.py,engine/crates/core/src/ai.rs,engine/crates/core/src/ai/arsenal.rs,engine/crates/core/src/commander.rs,engine/crates/core/src/skill.rs,engine/crates/core/src/unit.rs
-declares:
-needs:
-effort:
-branch: clnv
-resume: landed 72e6d623 2026-10-13
-created: 2026-10-13
-owner: CLEANSE 1499707
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Cleanse 15, area core (diff 177140d..0487827: 32 files, 4,747 added lines). Findings fixed here, each VERIFIED by running or reading it:

@@ -1,21 +1,10 @@
 ---
 id: JGAT2
 title: The jump's gate counts and the energy bar as the PS2 has them (AUDIT JGATE): BF2's off-floor window is 10 updates (the port's 9 is BF1's), a short bar is OVERDRAWN to minus the dearest cost and un-depletes at EnergyMinSprint with no restore in the air (PS2 -21.3 and 85 updates of no sprint after an overdrawn sprint jump; the port 0.0 and 22), a landing's lock eats presses until L+12 in BF2 / L+20 in BF1 (port L+10 / L+16), and five rule parts still have no test
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/soldier.rs,engine/crates/core/src/soldier/tests.rs
-declares: sim; sweep; arena; leak
-needs: environment — restore audit-jgate evidence, PS2 references, baked assets and missions
-effort:
-branch:
-resume: 2026-10-24 08:04 UTC cloud preflight blocked; restore audit-jgate raw trials/verifier/mutations, PS2 references, baked assets and missions; reproduce current-main controls before isolated build. Report 20261024_0804_card_JGAT2.md
-created: 2026-10-05
-domain: physics
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 AUDIT JGATE (2026-10-05, PARTLY) held JGATE's rules and found three numbers in them that are not the PS2's, all in

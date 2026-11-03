@@ -1,21 +1,11 @@
 ---
 id: MTRIG
 title: Bots in turrets and tanks hold the trigger on 4.4 % of their seated time where the PS2's are in burst state 3 on 28.4 % (AUDIT BRSTU): since BRSTU the burst is armed 95 % of target time and the gunner's own aim / ready / range gate passes 11 % of it - measure the PS2's real seated trigger and want (FUN_002bb900 clears fire after the machine) and name the gap's cause; it also judges BRSTU's redraw-each-tick deviation
-milestone: M2
-value: 4
-phase: measure
-status: blocked
-deps: BRSTU
-files:
-declares:
-needs: environment restoration — audit-clse4 PS2 captures/readers; audit-brstu sfire tools/raw rows; PS2 corpora/ELFs; baked maps/classes/vehicles and missions (inventory lead_tmp/mtrig_20261024_0954/inventory.json)
-effort:
-branch:
-resume: 2026-10-24 cloud checkpoint: restore and verify inventory in lead_tmp/mtrig_20261024_0954/inventory.json; then measure six BF2 captures (BF1 mounted if present), post-FUN_002bb900 trigger and AI+0xa8 want shares/runs/drop rates against current-main sfire and aim/ready/range splits; trace >2x gaps and judge kept-n/redraw. Original acceptance unchanged. Report reports/20261024_0955_card_MTRIG.md.
-created: 2026-10-21
-alpha: yes
-domain: vehicle
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT BRSTU (2026-10-21, `engine/artifacts/lead_tmp/audit-brstu/EVIDENCE.md`): since BRSTU a seat's burst is armed (burst running, no pause)
 on 94.7 % of a mounted bot's target time, but the bot holds its trigger on only 4.4 % of BF2 mounted samples (5.9 % BF1): the gunner's own

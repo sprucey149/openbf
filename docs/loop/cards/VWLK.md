@@ -1,18 +1,10 @@
 ---
 id: VWLK
 title: The walker, transcribed: BF2 FUN_0025d5e0 root-motion locomotion (animation clock scaled to MaxSpeed/BoostSpeed), the legs, the jump — then a build card (AT-ST first)
-milestone: M2
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: RE done 2026-09-29: analysis/re-walker.md (f2bff29, eccfe52; verifier 44/4/0). Build split into WALK (integrator, M2 5) and WSKN (skinned walker, M2 4, deps WALK).
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 15 walker-family classes (AT-ST ×3 variants, spider walker, tauntaun, one-man AT-ST, AT-AT / AT-TE as mobile command

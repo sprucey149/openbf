@@ -1,20 +1,11 @@
 ---
 id: VTAT
 title: A bot gunner triggers its seat gun as the PS2 does: by the weapon, not by the seat - a charge cannon (Hoth's dish turret, never fired by a bot today) is charged and released, a TriggerSingle seat weapon is tapped, a cannon keeps its bursts (re-turret-ai 7)
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps: VTAI,STCHG
-files: engine/crates/core/src/ai/gunner.rs,engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/sim/guns.rs
-declares: sim; sweep; arena
-needs: environment — Restore HOT1 map/class/seat weapon bakes, missions and VTAT/BRSTU census/PS2 inputs.
-effort:
-branch:
-resume: Charge-seat caller repair split to STCHG after both-rule real-step zero-shot failures and diagnostic15/9shots; keep original HOT1/census restoration hold and every Acceptance/default/held-path item. reports/20261025_0940_planner.md
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why (build; rewritten 2026-10-07 by the RE session)
 A bot in a seat holds FIRE whenever its shot is on (`core/src/ai/gunner.rs`, VTAI) and never fires a seat weapon that
 has `MaxPressedTime`. The PS2 has no seat rule at all: ONE fire controller per game serves every controllable kind and

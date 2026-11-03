@@ -76,7 +76,6 @@ pub const WALK_LEG_STOP: f32 = 1.4;
 pub const TURN_CLIP_ANGLE: f32 = std::f32::consts::FRAC_PI_6;
 pub const TURN_RATE_SHARE: f32 = 0.51;
 pub const LEG_UNITS: f32 = 6.0;
-pub const ENERGY_RECOVER: f32 = crate::soldier::ENERGY_RECOVER_THRESHOLD;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sphere {

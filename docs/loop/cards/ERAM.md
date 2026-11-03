@@ -1,21 +1,11 @@
 ---
 id: ERAM
 title: The shell starts the other era's mission: <map>_con.ron whatever armies are picked, so Republic against CIS on any of the 25 two-era maps runs the GCW script with other rosters (lines the PS2's Clone Wars script never sets, other unit counts / barriers / attackers, the other era's music) and the 25 <map>_con_cw.ron missions are never loaded - load the mission whose pair was picked, and seat the player's army on its own team
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/main/windowed.rs,engine/crates/ui/src/shell.rs,engine/crates/game/src/mission.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/blackbox.rs
-declares:
-needs:
-effort:
-branch: eram
-resume:
-created: 2026-10-05
-alpha: yes
-domain: behaviour
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Filed by the audit of ANNC2 (2026-10-05, PARTLY; `reports/20261005_1150_audit_ANNC2.md`, evidence
 `engine/artifacts/lead_tmp/audit-annc2/` = A/). The shell starts `<map>_con.ron` whatever armies are picked

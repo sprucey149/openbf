@@ -1,19 +1,12 @@
 ---
 id: DFOCUS
 title: Focus fire on human players at Hard and Elite - a human's token holders see him, take him as their target and converge; Elite's tokens capped at 7
-milestone: M3
-value: 5
-phase: done
-status: done
-deps: TOKN
-files: engine/crates/core/src/ai/dfocus.rs; engine/crates/core/src/ai/dfocus/tests.rs; engine/crates/core/src/ai/tokn.rs; engine/crates/core/src/ai/tokn/tests.rs; engine/crates/core/src/ai/arsenal.rs; engine/crates/core/src/ai/arsenal/tests.rs; engine/crates/core/src/ai/behave/brain.rs; engine/crates/core/src/ai/tactic.rs; engine/crates/core/src/perception.rs; engine/crates/core/src/ai.rs; engine/crates/core/src/sim/state.rs; engine/crates/game/examples/arena.rs; analysis/bot-design.md
-declares: sim
-needs:
-effort:
-branch: dfocus
-resume:
-created: 2026-10-28
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
+
 ## Why
 The user, after the first play of TOKN (2026-10-28): Hard and Elite are too easy overall. Elite gets a token cap,
 7, a little above Hard's 5, so the whole map never converges on a human. At Hard and Elite the bots that can

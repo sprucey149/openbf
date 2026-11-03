@@ -1,21 +1,10 @@
 ---
 id: CFOVM
 title: The PS2 camera FOV in the spawn-select and death cameras (the soldier camera's FOV per mode is answered by re-zoom.md: the class's ThirdPersonFOV / FirstPersonFOV, default 48 deg, BF2 soldiers 65 / 70, tan(FOV / 2) x 0.7666 / zoom) - which constant, ODF or config value each of the two passes, and the one FEL1 outlier state
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: environment — restore original FEL1 cp3_cp3_1_postA_v3 JSON and its referenced save state, PCSX2 readers and supporting SSEL evidence
-effort:
-branch:
-resume: 2026-10-25: reported tangent matches SSEL's one-step ease, but FEL1's own moment remains unverified. Restore the exact JSON/referenced archive and state readers; read active camera, member/unit/death fields and spawn display before closing. reports/20261025_0051_card_CFOVM.md; wait for inputs, no unchanged retry.
-created: 2026-09-28
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 CFOV ships the RAM-measured third-person standing FOV. The PS2 changes the FOV per camera mode (BF2's FUN_001b93b0 builds a 48° camera; the soldier camera reads 65°), so crouch/prone, first person, the scope zoom and the spawn/death cameras may differ.

@@ -1,20 +1,11 @@
 ---
 id: MYGC
 title: BF2 Mygeeto (showcase) is one-sided because the front never leaves cp3: the port's Alliance never reaches the Empire's forward post cp5_con (cp4, (-130, -31)) - 0 of 87 lives that aim at it in the first 2 min get within 10 m, ~50 deaths a side a round fall at the Alliance's own cp3 - while the PS2's Alliance flips cp4 inside the first minute; port 3-13 over 16 seeds, PS2 1-1 (margins 0 and 14 against the port's 61)
-milestone: M3
-value: 5
-phase: measure
-status: todo
-deps: OPNW,AITHK
-files:
-declares:
-needs:
-effort:
-branch:
-resume: referee only - when OPNW and AITHK have landed, run `lead_tmp/mygc/bars.py` on main (16 seeds of bf2_myg1 with BOT_SAMPLES, the scratch probe patch `lead_tmp/mygc/probe.patch` for the class / goal / owner columns) against the bars; close if met, else trace again
-created: 2026-10-22
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 Card WINS2 (2026-10-22, `reports/20261022_0400_card_WINS2.md`) sorted bf2_myg1 PORT: the port's Empire wins 13 of 16 seeds
 (median winner's tickets 61 of 150), the PS2's two bots-only rounds split 1-1, both close (Empire by domination after

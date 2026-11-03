@@ -1,21 +1,10 @@
 ---
 id: TPOSR
 title: The Tactician's reservation and hide / fire cycle run only on thinks with the target seen, where the PS2's cover state machine runs every update: 20 % of held time unreserved, two bots on positions within 2 m in 175 of 256 rounds (4,024 pair-ticks on the same position), a position hit twice kept 22 s, hide phases over 3 s late in 11 % of cover time - and tests for the 15 rules no test referees (AUDIT TPOS)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: TPOS
-files: engine/crates/core/src/ai/behave.rs, engine/crates/core/src/ai/tactic.rs, engine/crates/core/src/ai/tactic/tests.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/perception.rs, engine/CRATES.md
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: tposr
-resume: landed 28d42d46 2026-10-20; audit INCOMPLETE/UNAUDITED 2026-10-25: restore held inputs and verified history; see private note
-created: 2026-10-19
-alpha: yes
-domain: ai
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 AUDIT TPOS (2026-10-19, `engine/artifacts/loop/audits.md`; evidence `lead_tmp/audit-tpos/EVIDENCE.md`). The Tactician's

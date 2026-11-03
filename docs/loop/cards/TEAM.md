@@ -1,21 +1,10 @@
 ---
 id: TEAM
 title: Team sense: a unit grid for every 'who is near' question, roles with capacities inside a post's group (cover for a capturer, overwatch), fire lanes in the position choice, contacts passed on within 20 m (bot design 4.3)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,TPOS
-files: engine/crates/core/src/ai/team.rs, engine/crates/core/src/ai/team/tests.rs, engine/crates/core/src/ai/behave.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai.rs, engine/crates/core/src/perception.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/ai/mover.rs, engine/crates/core/src/skill.rs, engine/crates/core/src/ai/gunner_foot.rs, engine/crates/core/src/ai/man/tests.rs, engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: team
-resume: landed d4a50c62 2026-10-20; audit INCOMPLETE/UNAUDITED 2026-10-25: restore held inputs and verified history; see private note
-created: 2026-10-03
-alpha: yes
-domain: ai
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02: bots "all standing next to each other", shooting each other; "awareness of friends". `analysis/bot-design.md` 4.3 (the Team board), 4.1 (the unit grid). The PS2 has no team sense at all (SAIR 6). A teammate within 1.5 m: 8.7-17.9 % of a port bot's time against the PS2's 2.0-9.3 % (`lead_tmp/botm/post_jitr/seeds.md`).

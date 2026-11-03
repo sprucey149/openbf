@@ -1,20 +1,11 @@
 ---
 id: BAKEG
 title: Gate tooling: a scratch bake of the 'sounds' group without 'classes' recovers fewer sound names (114 vs 464 on TAT1) — scratch_bake.sh must link or bake classes/ whenever sounds is baked, or land.py's main bake check reports every */sounds/names.ron as not reproducible
-milestone: M0
-value: 5
-phase: cleanup
-status: done
-deps:
-files: scripts/scratch_bake.sh,scripts/gates.py
-declares:
-needs:
-effort:
-branch: bakeg
-resume: landed ff13dbaa 2026-10-03
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 VTUR's landing (2026-09-29) declared rebake=...,sounds,global-sound and land.py's main bake check reported DIFF=34 — every */sounds/names.ron — because the scratch bake's classes/ was empty (the sound-names step reads $OUT/classes). Main's own rebake was right (464 names on TAT1, matching the earlier full-group scratch); the landing was committed on that reading. The next card that declares sounds hits the same false alarm.
 

@@ -1,21 +1,11 @@
 ---
 id: BESR
 title: BF1 Bespin Platforms after HUBP: a bot that reaches hub 35 / 101 / 25 off its centre misses the narrow way out (the ramp 35->4 is 1 m south of the arc's line, a rim barrier on its north) - deaths under the floor 147 -> 234 and recycles 5 -> 29 in 8 rounds
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: HUBP,OBST,MOVR,MOUTH
-files: engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/mover.rs
-declares: sim; sweep; arena
-needs: validation — restore baked maps/missions and remeasure current-main BESR legs before source work
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-06
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card HUBP (2026-10-06) made BF1 Bespin Platforms worse while it made every other map better: 8 seeds, deaths under
 the floor 147 -> 234 and recycles 5 -> 29, "walking in place" 1.4 -> 3.7 % (BES2 0.4 -> 1.0 %). Not a showcase map,

@@ -1,20 +1,11 @@
 ---
 id: OPNW
 title: The opening wave draws a post, then a node, as the PS2's members do - today the bots are dealt round-robin over the flat list of every post's nodes (and the pads' command walkers' points), so a post with more nodes starts with more bots
-milestone: M3
-value: 5
-phase: build
-status: blocked
-deps: BSPN
-files: engine/crates/game/src/walk.rs
-declares: sim; sweep; arena; leak
-needs: maintainer — restore baked assets and local PS2/census evidence for required acceptance
-effort:
-branch:
-resume: 2026-10-24 07:06 UTC cloud preflight blocked; see reports/20261024_0706_card_OPNW.md. Restore engine/assets_baked and the referenced PS2/census evidence; clear needs and set todo. Check shared STOP/PAUSE, loopctl.py start OPNW, take current-main 8 seeds x 32 maps SPAWN_CENSUS baseline before editing; implement post-then-node opening including pad command walkers, mutation-check 1/2/6-node test, repeat census and applicable gates; no source change or validation receipt this run.
-created: 2026-10-09
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card BSPN made a bot's RESPAWN draw one eligible post and then one of its nodes (the maintainer, 2026-10-07: 'make the bot spawn the same as the ps2'). The opening wave was left as it is: `WalkSim::opening_wave` (`game/src/walk.rs`) deals `ai_per_team` bots round-robin over `Sim::spawn_points` plus `pad_walker_spawn_points`.
 

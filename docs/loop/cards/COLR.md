@@ -1,19 +1,10 @@
 ---
 id: COLR
 title: Collision RESPONSE: the step/slope rule (`STEP_HEIGHT`, `WALKABLE_MIN_NY`, `TERRAIN_BURY` are ours), the layer-id constructor stores, the six `LEAF` flag bytes
-milestone: M3
-value: 2
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 13; RE_LOG "Collision LAYERS" §open; `analysis/re-collision-layers.md`. `push_out` is BPO's.

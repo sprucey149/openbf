@@ -1,18 +1,10 @@
 ---
 id: CFOV
 title: The PS2 soldier camera's field of view: BF1 48.0° × 37.69°, BF2 65.0° × 52.06° (h × v), measured in RAM; the port's chase camera uses 70° vertical
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/walk.rs,engine/crates/render/src/camera.rs
-declares:
-needs:
-branch: cfov
-resume: landed cded403b 2026-09-28
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## The maintainer's decision (2026-09-25)
 Use each game's PS2 VERTICAL FOV (BF1 37.69 deg, BF2 52.06 deg) as the default, widened horizontally for the window (Hor+, never stretched), and add an FOV option to the settings so a modern screen can open it up.

@@ -44,6 +44,8 @@ pub struct DroidekaClass {
     pub max_turn_speed: f32,
     pub max_pitch_speed: f32,
     pub pitch_limits: (f32, f32),
+    pub aimer_pitch_limits: (f32, f32),
+    pub aimer_yaw_limits: (f32, f32),
     pub turn_threshold: f32,
     pub ball_radius: f32,
     pub ball_move_speed: f32,
@@ -60,6 +62,7 @@ pub struct DroidekaClass {
     pub jump_vy: f32,
     pub jump_forward: f32,
     pub energy_bar: f32,
+    pub energy_recover_threshold: f32,
     pub energy_cost_jump: f32,
     /// `EnergyCostJumpSprint`, as the soldier reads it; no droideka authors
     /// it, so it is `EnergyCostJump`'s value.
@@ -111,6 +114,8 @@ impl Default for DroidekaClass {
             max_turn_speed: 1.25,
             max_pitch_speed: crate::soldier::SoldierConstants::default().max_pitch_speed,
             pitch_limits: (-25.0 * DEG, 25.0 * DEG),
+            aimer_pitch_limits: (-25.0 * DEG, 25.0 * DEG),
+            aimer_yaw_limits: (-40.0 * DEG, 40.0 * DEG),
             turn_threshold: 30.0 * DEG,
             ball_radius: 0.65,
             ball_move_speed: 6.0,
@@ -127,6 +132,7 @@ impl Default for DroidekaClass {
             jump_vy: (2.0 * GRAVITY * 1.27f32).sqrt(),
             jump_forward: 1.25,
             energy_bar: 100.0,
+            energy_recover_threshold: 20.0,
             energy_cost_jump: 30.0,
             energy_cost_jump_sprint: 30.0,
             energy_drain_boost: 30.0,
@@ -169,6 +175,14 @@ impl DroidekaClass {
             max_speed: f("MaxSpeed", d.max_speed),
             max_turn_speed: f("MaxTurnSpeed", d.max_turn_speed),
             pitch_limits,
+            aimer_pitch_limits: src
+                .prop("AimerPitchLimits")
+                .and_then(floats::<2>)
+                .map_or(d.aimer_pitch_limits, |[lo, hi]| (lo * DEG, hi * DEG)),
+            aimer_yaw_limits: src
+                .prop("AimerYawLimits")
+                .and_then(floats::<2>)
+                .map_or(d.aimer_yaw_limits, |[lo, hi]| (lo * DEG, hi * DEG)),
             turn_threshold: pf(src, "TurnThreshold").map_or(d.turn_threshold, |t| t * DEG),
             ball_radius: f("BallRadius", d.ball_radius),
             ball_move_speed: f("BallMoveSpeed", d.ball_move_speed),
@@ -183,7 +197,9 @@ impl DroidekaClass {
             unroll_time: f("UnrollTime", d.unroll_time),
             jump_vy: pf(src, "BallJumpHeight").map_or(d.jump_vy, |h| (2.0 * GRAVITY * h).sqrt()),
             jump_forward: fh(HASH_BALL_JUMP_FORWARD, d.jump_forward),
-            energy_bar: f("EnergyBar", d.energy_bar),
+            energy_bar: crate::soldier::SoldierConstants::from_props(src).energy_bar,
+            energy_recover_threshold: crate::soldier::SoldierConstants::from_props(src)
+                .energy_recover_threshold,
             energy_cost_jump: f("EnergyCostJump", d.energy_cost_jump),
             energy_cost_jump_sprint: pf(src, "EnergyCostJumpSprint")
                 .unwrap_or_else(|| f("EnergyCostJump", d.energy_cost_jump)),
@@ -299,11 +315,19 @@ impl DroidekaClass {
     }
 
     /// The bar a spent ball needs before it sprints or jumps again: the soldier's recover
-    /// threshold as a share (BF2: 750 points, 2.5 s). OURS and PROVISIONAL,
+    /// threshold as a share (BF2: 600 points, 2 s). OURS and PROVISIONAL,
     /// measure: the maintainer's timed wait from an empty bar to the next sprint
     /// in live play.
     pub fn ball_sprint_recover(&self) -> f32 {
-        self.share_of_bar(super::ENERGY_RECOVER)
+        self.share_of_bar(self.energy_recover_threshold)
+    }
+
+    pub(super) fn ball_energy_floor(&self) -> f32 {
+        -self.share_of_bar(
+            self.energy_cost_jump
+                .max(self.energy_cost_jump_sprint)
+                .max(0.0),
+        )
     }
 
     fn share_of_bar(&self, energy: f32) -> f32 {

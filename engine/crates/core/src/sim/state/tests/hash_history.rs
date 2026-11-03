@@ -152,7 +152,10 @@ fn depleted_history_is_hashed_and_refuses_an_otherwise_valid_jump() {
             break;
         }
     }
-    assert!(s.energy_depleted && s.energy < crate::soldier::ENERGY_RECOVER_THRESHOLD);
+    assert!(
+        s.energy_depleted
+            && s.energy < crate::soldier::SoldierConstants::default().energy_recover_threshold
+    );
     assert_eq!(s.stance, Stance::Stand);
     // Equalized local continuation: both latch values occur in normal life;
     // every other field is shared to isolate the latch's control effect.

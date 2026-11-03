@@ -1,20 +1,11 @@
 ---
 id: BTURN
 title: BF2 bot body turn that looks natural: measure saturation and time-to-face, choose a rate between 5 and 20 rad/s, ease drawn yaw and respect torso aim limits; BF1 stays at 1x (the maintainer 2026-10-22)
-milestone: M3
-value: 3
-phase: measure
-status: blocked
-deps:
-files: engine/crates/core/src/ai/gunner_foot.rs
-declares:
-needs: cloud prerequisites: baked soldiers/maps, missions and PS2 turn/pose references absent
-effort:
-branch:
-resume: Restore data; measure current-main saturation/time-to-face and AIMV barrel/spin rows. Trial 10 rad/s as a provisional midpoint for a 5 rad/s BF2 class; publish measured choice and visual comparisons, keep BF1 1x. See card's amended Acceptance and reports/20261024_0713_planner.md.
-created: 2026-10-22
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card LOOKR's RE (`analysis/re-look-ramp.md` 2 and 4, [V], two blind verifiers): a BF2 bot's soldier turns at
 **4 x MaxTurnSpeed** - `FUN_00238068` returns class +0x754 x 4.0 when E+0x330 < 0 (B2:151844-151851; the 4.0 is

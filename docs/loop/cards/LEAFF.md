@@ -1,19 +1,11 @@
 ---
 id: LEAFF
 title: Forest leaves, ground gusts and leafpatch bird anchors
-milestone: M1
-value: 2
-phase: build
-status: parked
-deps: LEAF
-files:
-declares:
-needs:
-branch: main
-resume: Ground gusts, soldier/vehicle stirring, native draw state and corrected bird anchors implemented; evidence in analysis/re-falling-leaves.md.
-created: 2026-09-30
-public_issue: https://github.com/sprucey149/openbf/issues/15
+status: archived
+issue: 15
 ---
+
+Historical technical record. Recorded state before archival was `parked`. Current scope and ownership are on [issue #15](https://github.com/sprucey149/openbf/issues/15).
 
 Airborne leaves already landed in ae4d886, "Falling leaves beneath forest
 canopies". This change extends that implementation and its shared 100-leaf pool.

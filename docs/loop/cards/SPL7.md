@@ -1,20 +1,10 @@
 ---
 id: SPL7
 title: The files still over the 1,500-line cap — `core/src/weapon.rs` (1,624), `core/src/commander.rs` (2,339), `core/src/sim/vehicles.rs` (1,938)
-milestone: M0
-value: 2
-phase: cleanup
-status: todo
-deps: SPLCMD,SPLMAP
-files: engine/crates/core/src/weapon.rs, engine/crates/core/src/weapon/ordnance.rs, engine/crates/bake/src/map.rs, engine/crates/core/src/commander.rs
-declares:
-needs:
-effort:
-branch:
-resume: Commander remains blocked on SPLCMD literal/fmt conflict; SPLMAP independently owns map orchestration extraction. Keep full SPL7 acceptance and scratch bake DIFF=0.
-created: 2026-09-25 (from QUEUE.md)
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why / Evidence / Acceptance
 Acceptance (planner 2026-09-30): `scripts/size_report.sh --check-map` lists none of the four files over 1,500 lines; every gate PASS with nothing declared (behaviour-neutral); CRATES.md rows current. The original entry below has the files.

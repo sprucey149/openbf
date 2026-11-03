@@ -1,20 +1,10 @@
 ---
 id: CPHOL
 title: The command post's hologram (the maintainer's INBOX 2026-10-12 19:05, split out of LFLR): over every post a translucent additive beam in the VIEWER's relation colour - his team's posts blue (BF2 own 1,86,213), the enemy's red (200,100,100), a neutral post grey (192,192,192) - and the owner's spinning translucent team icon (com_icon_*) at 3.5 m, none on a neutral post, a 2 s fade on a capture, the flicker dips; the port draws none of it. The PS2's renderer is read (re-point-lights 10); BF1's posts carry the same HoloOdf with friend GREEN (100,200,100) - read BF1's draw, then build both
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: BPNT
-files: engine/crates/game/src/holo.rs,engine/crates/render/src/light_beam.rs,engine/crates/render/src/particles.rs,engine/crates/game/src/point_light.rs
-declares: goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_cor1.png,maps/bf2_dag1.png,maps/bf2_dea1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/bf2_yav1.png,maps/tat1.png,maps/tat2.png
-needs:
-effort:
-branch: cphol
-resume: landed dcfd692b 2026-10-13
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-12 (chat, INBOX 19:05): "when is it going to fix the command posts to be the transparent hologram

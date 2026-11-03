@@ -1,20 +1,11 @@
 ---
 id: WTHL
 title: Weather, lightning: the flashes on both Kaminos and BF1 Yavin 2 (dome and fog colour to white, sun and ambients rewritten - BF1 and BF2 in opposite senses), thunder per flash, and the sky bolt on the Kaminos (200 m ahead per group, 800 m out every 4-7 s) - the port has the resting dome tint only
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: WTHR
-files: engine/crates/game/src/lightning.rs (new), engine/crates/game/src/viewer/scene.rs, engine/crates/game/src/viewer/look.rs, engine/crates/render/src/lighting.rs, engine/crates/render/src/particles.rs, engine/crates/manifest/src/lib.rs, engine/crates/bake/src/map.rs, engine/crates/game/src/event_sounds.rs
-declares: rebake=maps
-needs: environment restoration: restore wthr bolt vector/raw RAM states, Kamino/Yavin map/sound bakes, picture references and GPU device
-effort:
-branch:
-resume: 2026-10-24 09:20 UTC: planner prerequisite census; no implementation. Restore this card's inputs in lead_tmp/planner_20261024_0913/queue_preflight.json, recheck original acceptance/current-main baseline, then loopctl start for isolated build. Full CI and required gates remain; reports/20261024_0913_planner.md.
-created: 2026-10-05
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Kamino (both games) and BF1 Yavin 2 flash with lightning on the PS2: groups of 2-5 flashes every 3-5 s lift the sky
 dome and the fog colour to white and rewrite the sun and the ambients for 0.2 s each; thunder plays per flash; on the

@@ -1,19 +1,10 @@
 ---
 id: SKYO
 title: The sky's `SkyObject` bearing: count, altitude band and distance are authored, azimuth is not; `InDirectionFactor` and `0xb4c88558` are parsed and unused
-milestone: M1
-value: 1
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md HOLD 10(e). The port's even azimuth spread is ours (PROVISIONAL).

@@ -1,21 +1,12 @@
 ---
 id: VAIM
 title: A target in a vehicle or a turret is aimed at with the VEHICLE's error block (the PS2: the controller hangs off the vehicle - size factor 2.0-4.2 for a turret, 3.9-12.5 a walker, 7.6 and more a flyer, the vehicle's velocity and top speed, no stance factor); the port takes the seated soldier's size and a velocity of zero, so its bots aim 2 to 25 times tighter at 9-10 % of their targets (audit of CLSE2, re-soldier-ai 21.3)
-milestone: M2
-value: 4
-phase: re
-status: blocked
-deps: CLSE2
-files: engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/seats.rs,engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/vehicle.rs
-declares: sweep; arena; sim
-needs: restoration - K5 RAM table/captures/tools, PS2 corpora/ELFs and BF2 SIDE data; bakes/missions and PCSX2 environment unavailable
-effort:
-branch:
-resume: Blocked on restoration 2026-10-24 10:15 UTC: 28/28 named inputs missing. Restore K5 tab.txt and primary inputs, then resolve per-kind velocity/top-speed/size and human path; predict every K5 row and verify before build. Report engine/artifacts/loop/reports/20261024_1015_card_VAIM.md; queue/next prompt engine/artifacts/lead_tmp/vaim_cloud/CONTINUATION.md. Original Acceptance unchanged.
-created: 2026-10-12
-alpha: yes
-domain: vehicle
+status: archived
+issue: 97
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #97](https://github.com/sprucey149/openbf/issues/97).
+
 ## Why
 Card CLSE2 made a BF2 bot's aim error "the TARGET's own block, with its model's size". For a target that sits in a
 vehicle or mans a turret the PS2's block is the VEHICLE's, and it is several times larger; the port keeps the seated

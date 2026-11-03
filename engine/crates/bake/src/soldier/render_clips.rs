@@ -11,9 +11,9 @@ use sha2::{Digest, Sha256};
 const TARGET: &str = "human_rifle_crouch_reload";
 const DONOR: &str = "human_pistol_crouch_reload";
 // (original, donor, already aligned): the complete twelve-bone rotation AND
-// translation channels, with clip name, frame count and rate. The four rows
-// cover the retail PC BF1 lower rigs; no animation keys are stored here.
-const CHANNELS: [(&str, &str, &str); 4] = [
+// translation channels, with clip name, frame count and rate. The five rows
+// cover the retail PC BF1 faction and Ewok lower rigs; no keys are stored here.
+const CHANNELS: [(&str, &str, &str); 5] = [
     (
         "c66e721c4ac343537a95ce717e940668027decf2a3091287e1c46e7460990fcb",
         "a699aca767dd7f6acfe941c24bd96c793eb577a4ffbff0c879d1fec1e1affc6f",
@@ -33,6 +33,13 @@ const CHANNELS: [(&str, &str, &str); 4] = [
         "7531d4528d87419a55a50746cfb7c50224695ccb26b6f3a2ac9fe7c5da4858a4",
         "a797e04637c44e564c456ecc448b8f977d5fd5eb0ef090e969d9c9b0f1738bcc",
         "720cb8eb84271b8391c79b22b1c641e2175a6baabf699c28ce919bb94bfa109d",
+    ),
+    // Ewok pose rigs use their own rest translations. Their PC pistol lower
+    // channels reproduce the PS2 rifle reload on both ewk_inf and ewk_inf2.
+    (
+        "fa4a7337e58a9985634eb9984fccb1b1aeacb288a78ea4dd3aa0cd3e81803b5d",
+        "b941f7209b978dc0881e26023b61fabb38b35e53f13ebf5343f3468074af5f37",
+        "4f7f83f3ce2371781aa8ac762d9e41718b03e33481593a820293493e9d4fe558",
     ),
 ];
 const MOVING: [&str; 7] = [
@@ -287,5 +294,124 @@ mod tests {
             .unwrap()
             .translations[0][1] = 1.;
         assert_ne!(fingerprint(&model, &changed).unwrap(), before);
+    }
+
+    // Decode the player's retail files rather than storing animation keys in
+    // the test. Explicit inputs make a missing corpus a failure when requested.
+    fn retail_clips(root: &std::path::Path, side: &str, name: &str) -> (SkinnedModel, Vec<Clip>) {
+        let side_path = crate::join_ci(root, &format!("SIDE/{side}.LVL"));
+        let common_path = crate::join_ci(root, "COMMON/ENG/COMMON.LVL");
+        let side = crate::gameplay::read(side_path.to_str().unwrap()).unwrap();
+        let common = crate::gameplay::read(common_path.to_str().unwrap()).unwrap();
+        let inner = mungefs::open(&side).unwrap();
+        let (_, mut skel) = super::super::find_soldier(inner, name).unwrap();
+        crate::dlc_attachment::canonical_bind(inner, &mut skel).unwrap();
+        let common_inner = mungefs::open(&common).unwrap();
+        let classes = crate::anim_sets::bf2::side_classes(&side).unwrap();
+        let mut rigs = mungefs::anim::find_rigs(inner).unwrap();
+        rigs.extend(mungefs::anim::find_rigs(common_inner).unwrap());
+        let pose = super::super::pose_rig(&classes, name, &rigs, false);
+        if let Some(pose) = &pose {
+            super::super::append_rig_attachment(&mut skel, &pose.rig, "hp_weapons").unwrap();
+        }
+        let model = SkinnedModel {
+            name: name.into(),
+            bones: super::super::bones_of(&skel),
+            segments: vec![],
+        };
+        let banks = mungefs::anim::find_banks(mungefs::open(&common).unwrap()).unwrap();
+        let clips = [TARGET, DONOR].map(|name| {
+            let (bank, index) = crate::anim_sets::bf1::BANKS
+                .iter()
+                .find_map(|bank_name| {
+                    banks
+                        .iter()
+                        .find(|b| b.name == *bank_name)
+                        .and_then(|b| Some((b, b.clip_index(name)?)))
+                })
+                .expect("retail crouch reload");
+            let decoded = bank.decode_clip(index).unwrap();
+            let (tracks, _) = super::super::clip_to_tracks(&decoded, &skel, pose.as_ref());
+            Clip {
+                name: name.into(),
+                fps: 30.,
+                frames: u32::from(decoded.frames),
+                tracks,
+            }
+        });
+        (model, clips.into())
+    }
+
+    #[test]
+    #[ignore = "requires OPENBF_RELOAD_PC1 and OPENBF_RELOAD_PS2 retail BF1 LVL roots"]
+    fn retail_ewok_reload_repairs_to_ps2_and_refuses_changed_channels() {
+        let pc = std::path::PathBuf::from(
+            std::env::var_os("OPENBF_RELOAD_PC1").expect("PC BF1 LVL root"),
+        );
+        let ps2 = std::path::PathBuf::from(
+            std::env::var_os("OPENBF_RELOAD_PS2").expect("PS2 BF1 LVL root"),
+        );
+        for name in ["ewk_inf", "ewk_inf2"] {
+            let (model, clips) = retail_clips(&pc, "EWK", name);
+            let (native_model, native) = retail_clips(&ps2, "EWK", name);
+            let expected = fingerprint(&native_model, &native[0]).unwrap();
+            let copied = copy_lower(&model, &clips[0], &clips[1]).unwrap();
+            println!(
+                "{name}: original={} donor={} aligned={} ps2={expected}",
+                fingerprint(&model, &clips[0]).unwrap(),
+                fingerprint(&model, &clips[1]).unwrap(),
+                fingerprint(&model, &copied).unwrap()
+            );
+            assert_ne!(fingerprint(&model, &clips[0]).unwrap(), expected);
+            assert_eq!(fingerprint(&model, &copied).unwrap(), expected);
+            let fixed = corrected_clips(true, true, &model, &clips)
+                .unwrap()
+                .expect("Ewok needs repair");
+            assert_eq!(fingerprint(&model, &fixed[0]).unwrap(), expected);
+            assert_eq!(fixed[0].tracks.len(), clips[0].tracks.len());
+            for original in &clips[0].tracks {
+                if !LOWER
+                    .iter()
+                    .any(|name| model.bones[original.bone].name.eq_ignore_ascii_case(name))
+                {
+                    let after = fixed[0]
+                        .tracks
+                        .iter()
+                        .find(|t| t.bone == original.bone)
+                        .unwrap();
+                    assert_eq!(after.rotations, original.rotations);
+                    assert_eq!(after.translations, original.translations);
+                }
+            }
+            let mut aligned = clips.clone();
+            aligned[0] = fixed[0].clone();
+            assert!(corrected_clips(true, true, &model, &aligned)
+                .unwrap()
+                .is_none());
+            // Each fingerprint stream matters: mutate both target and donor,
+            // including toes, roots and attachments outside the seven movers.
+            for clip in 0..2 {
+                for name in LOWER {
+                    let bone = bone(&model, name).unwrap();
+                    for rotation in [false, true] {
+                        let mut changed = clips.clone();
+                        let track = changed[clip]
+                            .tracks
+                            .iter_mut()
+                            .find(|t| t.bone == bone)
+                            .unwrap();
+                        if rotation {
+                            track.rotations[0][0] += 0.01;
+                        } else {
+                            track.translations[0][0] += 0.01;
+                        }
+                        assert!(
+                            corrected_clips(true, true, &model, &changed).is_err(),
+                            "accepted changed clip {clip} {name} rotation={rotation}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

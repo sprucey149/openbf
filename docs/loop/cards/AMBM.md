@@ -1,20 +1,11 @@
 ---
 id: AMBM
 title: Music: the ambient music's start / middle / end by reinforcements (BF1: team 2's state; BF2: the less advanced team), Music records (fade, min playback, min inactive time, takes), victory / defeat at battle end, a streaming player for the stereo music streams
-milestone: M1
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/sound_props.rs,engine/crates/bake/src/sounds.rs,engine/crates/manifest/src/lib.rs,engine/crates/core/src/music.rs,engine/crates/core/src/lib.rs,engine/crates/game/src/music.rs,engine/crates/game/src/lib.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/mission.rs,engine/crates/audio/src/lib.rs,engine/crates/audio/src/stream.rs,engine/crates/game/src/main/windowed.rs,scripts/gen_missions.py,engine/CRATES.md
-declares: rebake=sounds
-needs:
-effort:
-branch: ambm
-resume: landed 1bde70c8 2026-10-03
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 SNDC (`analysis/audio-census.md`): the port's battle has no music, no ambience and no interface sound. PS2: the
 ambient music plays from the first second (`cis_nab_amb_middle`; UTA1 `cis_uta_amb_start` -> `_middle` -> `_end`,

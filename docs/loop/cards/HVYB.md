@@ -1,20 +1,12 @@
 ---
 id: HVYB
 title: The PS2's explosive claim on missiles too (BF2, re-soldier-ai 24.5): one rocket / grenade user per team at a soldier, and at a hover / walker / flyer one per hull position (1 + turrets + passenger slots); the claim keyed by the vehicle, not the rider
-milestone: M3
-value: 3
-phase: build
-status: todo
-deps: HVYA
-files: engine/crates/core/src/ai/arsenal.rs, engine/crates/core/src/ai/arsenal/tests.rs, engine/crates/core/src/ai/state.rs
-declares: sim; sweep
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-21
-alpha: yes
+status: archived
+issue: 97
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #97](https://github.com/sprucey149/openbf/issues/97).
+
 ## Why
 Card HVYA step 4 read BF2's `FUN_002ab430` (`analysis/re-soldier-ai.md` 24.5 [O], docs 68afc2c): the chooser skips a
 GRENADE or MISSILE weapon when the shooter's team already holds as many kind-4 claims on the target as its capacity - 1 for

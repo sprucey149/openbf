@@ -1,20 +1,11 @@
 ---
 id: CLSE6
 title: Polis Massa inside 10 m: 3.4 port bots aim at one enemy where the PS2 has 1.4 (Kamino 2.1 / 1.3) - the largest term of CLSE3's 0.27 x per aimer-second (crowding 0.41 x, the victim's hurt rate 0.62 x); 35 % of the port's close aimer time is in cp2con's medical room against the PS2's 6.7 %: find why the port's fights pile onto one enemy there, then the hurt rate
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps: CLSE3
-files: engine/crates/core/src/perception.rs, engine/crates/core/src/ai/behave.rs
-declares: sweep; arena
-needs: Restore local baked maps/missions, PS2 corpus/captures and CLSE3 scratch/tools; cloud preflight 2026-10-24 cannot measure Acceptance
-effort:
-branch:
-resume: Read reports/20261024_0733_card_CLSE6.md; restore lead_tmp/clse3 tools, scratch patch and raw port/PS2 captures plus baked assets/missions; verify prerequisites then set todo and remeasure current-main close aimers/victim, victim hurt rate and team kills on 8 seeds x Kamino/Polis Massa; trace seen/told, retargeting and local density before isolated null-controlled candidates.
-created: 2026-10-22
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card CLSE3 (report `loop/reports/20261022_0720_card_CLSE3.md`, evidence `lead_tmp/clse3/`) split Polis Massa's inside-10 m damage per
 aimer-second (port 22.0 hp against the PS2's 80.8 = 0.27 x on main 9193a4c) and found the rate is mostly a CROWD term: the metric

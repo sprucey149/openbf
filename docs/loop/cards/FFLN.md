@@ -1,21 +1,10 @@
 ---
 id: FFLN
 title: Bots shoot their own teammates: 8 of 19 kills in 65 s of BF2 Kamino were team kills (droids killing droids around the human) - measure the PS2's friendly fire for AI, and give a bot a line-of-fire check
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/brain.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/state.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: ffln
-resume: landed 142dd4b1 2026-10-02
-created: 2026-10-02
-alpha: yes
-first: 2
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02: "the bots have no sense of teammates nearby it seems so they'll just shoot their teammate that is standing in the way of me."

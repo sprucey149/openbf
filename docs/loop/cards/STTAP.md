@@ -1,21 +1,11 @@
 ---
 id: STTAP
 title: Bots tap single-shot weapons as the PS2 does (BF2 FUN_002baf70 / FUN_002baa38, BF1 FUN_0023cc20 / FUN_0023c698) instead of holding the trigger and firing once per engagement
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/draw.rs,engine/crates/core/src/ai.rs,engine/crates/core/src/skill.rs,engine/crates/game/examples/round_to_outcome.rs,engine/CRATES.md
-declares: sweep; arena
-needs:
-effort:
-branch: sttap
-resume: landed aecdc0e1 2026-10-02
-created: 2026-09-30
-alpha: yes
-first: 5
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 STALL C4 (`analysis/re-round-stalls.md` §2 C4, [V][O]). A `TriggerSingle` weapon fires only on a fresh press (B1
 `FUN_00289150`, `core::weapon::fire_predicate`). The port's bot sets FIRE on every tick it wants to shoot, so it fires once

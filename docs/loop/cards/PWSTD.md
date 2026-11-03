@@ -1,19 +1,11 @@
 ---
 id: PWSTD
 title: Broken health / ammo droids: a station shot to 0 (MaxHealth 80, BF2 health droid 200) explodes (com_inf_rechargedroid_exp), shows its _dst model and stops serving until rebuilt (BF1 pilot / BF2 engineer fusion cutter); BF2's *_unbuilt stations start unbuilt - RE who damages and rebuilds a station, then build it
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps: PWST
-files:
-declares:
-needs: cloud prerequisites: restore both PS2 corpora/ELFs, PCSX2 kit/states and station data; BF1/BF2 shots-to-kill trials and fresh verifier required
-effort:
-branch:
-resume: 2026-10-24 12:53 UTC: RE BLOCKED/incomplete; 0/30 exact prerequisites available. Restore both corpora/ELFs, PCSX2 kit/states and station data; then BF1/BF2 health-droid shots-to-kill + damage/rebuild/team/bot RE and fresh verifier. See reports/20261024_1253_card_PWSTD.md and lead_tmp/pwstd_cloud/next_prompt.md. No acceptance or landing earned.
-created: 2026-10-20
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 card PWST's RE (analysis/re-powerup-station.md §7, §8, §12): a station is an EntityBuilding with MaxHealth 80 (BF2 health droid 200); its building state (+0x2a4) goes to 1 (destroyed: DestroyedGeometryName, ExplosionName com_inf_rechargedroid_exp) or 2 (unbuilt) and then it gives, sounds and animates nothing until FUN_001c00c8 sets it back to 0. The port's stations (after PWST) cannot break.
 

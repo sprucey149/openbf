@@ -1,20 +1,11 @@
 ---
 id: AITHK
 title: AI think rate by distance and view: far or unseen bots think less often (the PS2's own rule), so a big bot count costs less CPU - deterministic, in the sim
-milestone: M0
-value: 5
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/ai.rs, engine/crates/core/src/ai/behave.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/perception.rs, engine/crates/core/src/unit.rs, engine/crates/game/src/blackbox.rs, engine/crates/game/examples/round_to_outcome.rs, analysis/bot-design.md, engine/CRATES.md
-declares: sim; sweep; arena
-needs: cloud assets and cited PS2/performance/MYGC evidence unavailable
-effort:
-branch:
-resume: Cloud preflight blocked; see reports/20261024_0707_card_AITHK.md. Restore engine/assets_baked, extracted PS2 corpus and lead_tmp/aithk, mygc, obst2/tools/perf.sh; clear needs and set todo. Check shared STOP/PAUSE, loopctl.py start AITHK; BEFORE edits measure current-main ms/tick at 32/64/128 bots (JOBS=1 best-of-two) and 32 maps x 16 seeds plus MYGC bars. Implement analysis/re-ai-think-rate.md section 8, mutation-check deterministic scheduling/wakes/aim cadence, decide spawn wait with MYGC, update bot-design D1, repeat measurements and gates. Obtain planner/the maintainer approvals.AITHK from measured moves before landing. No implementation or validation receipt this run.
-created: 2026-10-19
-alpha: yes
+status: archived
+issue: 93
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #93](https://github.com/sprucey149/openbf/issues/93).
 
 ## Why
 (the maintainer, 2026-10-19: speed on a weak laptop; bot count) Every bot thinks every tick. Engines save most of their AI CPU by letting bots that are far from the player or out of its view think less often. The PS2's own rule must be found (card SAIR / re-soldier-ai.md read the soldier AI; the think cadence by distance may or may not be there), because a made-up cadence changes the fights the gates measure.

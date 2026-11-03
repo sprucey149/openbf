@@ -1,20 +1,11 @@
 ---
 id: SKYB
 title: The port's sky reads 3-11 levels brighter than the PS2's before the frame filter on 10 of 11 maps measured (BF1 NAB1 +6.3, TAT1 +9.0, NAB2 +11.2, BES2 +8.8, BES1 +6.7, RHN1 +4.8, KAS2 +3.3, YAV1 +3.6; BF2 MYG1 +10.5, HOT1 +4.7; only KAM1 is under, -4.0) - find what the PS2 does to a dome shell's colour that the port does not
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore prefilter tools/raw rows, reference pictures and NAB1/TAT1 bakes plus primary corpora; isolate instrument share from sky changes before tuning.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 8/8 exact named paths absent. Restore prefilter tools/raw rows, reference pictures and NAB1/TAT1 bakes plus primary corpora; isolate instrument share from sky changes before tuning. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The sky is a third to a half of a frame on the open maps. On NAB1 (showcase, the worst of the six on parity) it carries +4.0 of the map's +10.6 dluma, on TAT1 +2.4: the DomeInfo filter multiplies whatever excess the surface under it has by about 1.3.
 

@@ -1,20 +1,11 @@
 ---
 id: WAI2
 title: Bots reach and keep walkers as the PS2 does: a claimer walks to its vehicle over the graph (the snow AT-ST is claimed and never reached), comes 75 m for one, the AT-TE routes, and a tauntaun rides to the post (PS2 282-711 m a ride; port 158-203)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: WAI,STARC,PARR
-files: engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/walker_drive.rs,engine/crates/core/src/ai.rs,engine/crates/core/src/ai/brain.rs,engine/crates/core/src/nav.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sweep
-needs:
-effort:
-branch: wai2
-resume: landed a5824628 2026-10-02
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Measured (2026-10-02, `reports/20261002_0520_card_WAI2.md`; PS2 side in `analysis/re-walker-ai.md` section 13)
 **PS2:** a bot pilots every AT-AT and AT-TE from the first seconds and stays in (BF2 HOT1 both AT-ATs from 17-24 s to
 the end of a 240 s run, 414-452 m; BF2 GEO1's AT-TE from 18.5 s; BF1 HOT1 both from 12-14 s with a gunner). Its pilot

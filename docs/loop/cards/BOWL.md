@@ -1,21 +1,10 @@
 ---
 id: BOWL
 title: BF2 Kamino: bots walk over the rim rails onto the platforms' curved hulls (the maintainer, 2026-10-01, in play: 'figure out why the bots are going on this bowl') - the level test calls the first 4.5 m of hull ON the level, so the rail's barrier is no wall and a bot out there is never lost
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/bounds.rs,engine/crates/core/src/ai/steer.rs,engine/crates/core/src/ai/brain.rs,engine/crates/game/examples/round_to_outcome.rs,scripts/sweep_seeds.py
-declares: sweep; arena
-needs:
-effort:
-branch: bowl
-resume: landed b1a32db3 2026-10-02
-created: 2026-10-01
-first: 1
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-01 22:00, playing BF2 Kamino (frame: two droids standing on the sloped hull outside the rail, below the

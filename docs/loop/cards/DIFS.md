@@ -1,19 +1,11 @@
 ---
 id: DIFS
 title: The difficulty numbers for the maintainer to decide on: every human split up to 8 v 8 and 16 on one side, the four tiers, all 57 conquest missions - the recommended lever settings per scenario, where they turn absurd, and the caps proposed (nothing is built into the game from this card)
-milestone: M3
-value: 4
-phase: measure
-status: todo
-deps: DIFH,BOTV
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-05
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
 
 ## Why
 The maintainer, 2026-10-05: "You turn up the difficulty so the ai gets better so the user is more likely to die, how does that translate to making it harder to win games? If all ai is better including teammates, and the user just dies more, how does that make it harder to win a match? ... We need a good solution where victory is somewhat tied to user performance on any difficulty. Easier difficulties are a little more evenly split, while harder difficulties depend on the user playing well and thought needs to be incorporated for when multiple users are playing and they're on opposing teams." With equally good bots on both sides a battle is a coin flip the human tips; better bots only shrink the tip.

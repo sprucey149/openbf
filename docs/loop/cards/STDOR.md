@@ -1,21 +1,11 @@
 ---
 id: STDOR
 title: DEA1's blast doors open outward: rig their prims (and drawn leaves) relative to bones whose bind is off the origin, so the opened leaves clear the doorway the PS2's soldiers walk through
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/bind_pose.rs,engine/crates/bake/src/door.rs,engine/crates/bake/src/map.rs,engine/crates/game/examples/pose_render.rs,engine/crates/game/src/assets.rs
-declares: rebake=maps; sweep; leak; goldens=maps/bf2_dea1.png,maps/bf2_mus1.png,walkabout_stats.ron
-needs:
-effort:
-branch: stdor
-resume: landed 87ee1211 2026-10-01
-created: 2026-09-30
-alpha: yes
-first: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 STALL C3 (`analysis/re-round-stalls.md` §2 C3). `dea1_prop_door_blast` is the only door class whose bones bind away from
 the origin: `bone_leftdoors` at x −5, `bone_rightdoors` at +5. The geometry bound to each bone lies on the opposite side.

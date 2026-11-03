@@ -88,6 +88,9 @@ pub struct SoldierConstants {
     pub roll_speed_factor: f32,
     pub sprint_accelerate_time: f32,
     pub energy_bar: f32,
+    /// Runtime mission hero class: shared locomotion must not create debt.
+    pub hero: bool,
+    pub energy_recover_threshold: f32,
     pub energy_restore: f32,
     pub energy_restore_idle: f32,
     /// Per-tick active weapon override, after the stance chooses its rate.
@@ -170,6 +173,8 @@ impl Default for SoldierConstants {
             roll_speed_factor: 1.7,
             sprint_accelerate_time: 0.5,
             energy_bar: 100.0,
+            hero: false,
+            energy_recover_threshold: 20.0,
             energy_restore: 10.0,
             energy_restore_idle: 15.0,
             energy_override: None,
@@ -239,6 +244,13 @@ impl SoldierConstants {
         set("RollSpeedFactor", &mut c.roll_speed_factor);
         set("SprintAccelerateTime", &mut c.sprint_accelerate_time);
         set("EnergyBar", &mut c.energy_bar);
+        c.energy_bar = c.energy_bar.max(0.0);
+        c.energy_recover_threshold = c.energy_recover_threshold.min(c.energy_bar);
+        set("EnergyOverheat", &mut c.energy_recover_threshold);
+        set("EnergyMinSprint", &mut c.energy_recover_threshold);
+        c.energy_recover_threshold = c.energy_recover_threshold.max(0.0);
+        // FUN_001e1cb8 B2:92481-92493 raises the maximum for a larger threshold.
+        c.energy_bar = c.energy_bar.max(c.energy_recover_threshold);
         set("EnergyRestore", &mut c.energy_restore);
         set("EnergyRestoreIdle", &mut c.energy_restore_idle);
         set("EnergyDrainSprint", &mut c.energy_drain_sprint);
@@ -279,6 +291,25 @@ impl SoldierConstants {
     /// The Jedi's double jump is not one; it pays with the energy bar.
     pub fn has_jet(&self) -> bool {
         self.jet_fuel_recharge > 0.0
+    }
+
+    /// FUN_002517e8 feeds FUN_001e1e28 the class fields +0x864/+0x868/
+    /// +0x86c/+0x88c: jump, sprint jump, roll and jet entry drain. Setters:
+    /// FUN_00252bb0 B2:171431-171435,171116-171119,170992-170995,
+    /// 171527-171528 (hashes 0x0b4a7fd4/0xa44b8f28/0xca24cd33/0x0c2425ea).
+    /// FUN_001e1e28 B2:92503-92507 retains the negative largest cost.
+    pub fn energy_floor(&self) -> f32 {
+        // Coordinator isolation rule (#103): leave hero energy nonnegative
+        // while the hero owner reviews the shared recovery changes.
+        if self.hero {
+            return 0.0;
+        }
+        -self
+            .energy_cost_jump
+            .max(self.energy_cost_jump_sprint)
+            .max(self.energy_cost_roll)
+            .max(self.jet_energy_drain)
+            .max(0.0)
     }
 }
 
@@ -425,10 +456,7 @@ pub struct Soldier {
     pub lock_timer: f32,
     pub lock_hard: bool,
     pub energy: f32,
-    /// BF2 depleted latch (soldier+0xab8): set when the pool empties during
-    /// sprint; sprint can't re-engage until it clears. Recovery threshold is
-    /// PROVISIONAL (25.0) — the decomp confirms the flag, not the clear rule
-    /// (re-stance-roll.md §4.2); pin via PCSX2.
+    /// BF2 depleted latch; clears at the class threshold (re-stance-roll §4.3d).
     pub energy_depleted: bool,
     pub grounded: bool,
     /// The last floor contact's normal; up when airborne (BF2 s+0x4b0, BF1
@@ -613,9 +641,6 @@ pub const PRONE_DOUBLE_TAP: f32 = 1.0;
 /// A sprint starts over this share of MaxSpeed (BF2 B2:160328, the 0.9 at
 /// the compare; [`Soldier::sprint_start_speed`]).
 const SPRINT_START_SHARE: f32 = 0.9;
-
-/// PROVISIONAL sprint-recovery threshold for the depleted latch.
-pub const ENERGY_RECOVER_THRESHOLD: f32 = 25.0;
 
 // ── A blast's push and what follows (card KNOCK, `analysis/re-knockback.md`) ──
 
@@ -834,7 +859,7 @@ impl Soldier {
     /// The jump's energy (BF2 FUN_00247528 -> FUN_001e2010, after the
     /// update's mover): the dearer of the two costs when the forward speed is
     /// over MaxSpeed. Only a depleted bar refuses; a bar that cannot cover the
-    /// cost is emptied and marked depleted.
+    /// cost incurs bounded debt and is marked depleted.
     fn pay_jump(&mut self, c: &SoldierConstants, fwd_axis: Vec2) -> bool {
         let fwd = Vec2::new(self.vel.x, self.vel.z).dot(fwd_axis);
         let cost = if fwd > c.max_speed + 1e-4 {
@@ -842,7 +867,7 @@ impl Soldier {
         } else {
             c.energy_cost_jump
         };
-        self.pay_energy(cost)
+        self.pay_stamina(cost, c)
     }
 
     /// The energy bar's take (BF2 FUN_001e2010, re-stance-roll.md §4.3d): a
@@ -859,6 +884,24 @@ impl Soldier {
         if self.energy < 0.0 {
             self.energy_depleted = true;
             self.energy = 0.0;
+        }
+        true
+    }
+
+    /// Soldier stamina payment (FUN_001e2010 B2:92617-92639). Pass the
+    /// class at the call site so even a payment before the first mover tick
+    /// uses its floor. Hero callers retain `pay_energy` pending owner review.
+    fn pay_stamina(&mut self, cost: f32, c: &SoldierConstants) -> bool {
+        if cost <= 0.0 {
+            return true;
+        }
+        if self.energy_depleted {
+            return false;
+        }
+        self.energy -= cost;
+        if self.energy < 0.0 {
+            self.energy_depleted = true;
+            self.energy = self.energy.max(c.energy_floor());
         }
         true
     }

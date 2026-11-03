@@ -1,20 +1,11 @@
 ---
 id: DOORS
 title: Sliding doors: a bot goes through the centre of a door's opening, entered square-on, and WAITS up to 2 s at a door that is closed or still opening instead of turning back (the maintainer's INBOX 2026-10-12 16:00, ask 2) - on BF2 Kamino two team-mates walked at the side of the sliding door, met its leaf, turned into the wall behind and repeated
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: MOUTH2
-files: core/src/ai/steer.rs, core/src/sim/state.rs
-declares: sweep
-needs:
-effort: high
-branch: doors
-resume: landed 4aaa2a25 2026-10-12
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's playtest of BF2 Kamino conquest, 2026-10-12 (INBOX 16:00, ask 2 - read it first; it is under `## Done` now). His
 eyes, the clone-facility post in the sliding-door room: after he took the post two clone team-mates walked at the SIDE
