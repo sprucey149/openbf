@@ -14,6 +14,7 @@ fn door_and_speckle_indices_follow_an_ocean_splice() {
         first: vec![3, 11, 60],
         frames: Vec::new(),
         fps: 30.0,
+        normal: false,
     });
     let inst = manifest::ManifestInstance {
         name: "t".into(),

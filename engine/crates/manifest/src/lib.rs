@@ -24,9 +24,9 @@ mod environment;
 pub use environment::{
     foliage_bin, FoliageKind, LeafLayout, ManifestFilter, ManifestFog, ManifestFoliage,
     ManifestFoliageMesh, ManifestGrassClass, ManifestHdr, ManifestLeafClass, ManifestLight,
-    ManifestLighting, ManifestLightning, ManifestPointLight, ManifestPrecipitation, ManifestSky,
-    ManifestSkyModel, ManifestSkyObject, ManifestSpotCone, ManifestStars, ManifestWater,
-    ManifestWaterConfig, ManifestWetMask, ManifestWind,
+    ManifestLighting, ManifestLightning, ManifestNormalWater, ManifestPointLight,
+    ManifestPrecipitation, ManifestSky, ManifestSkyModel, ManifestSkyObject, ManifestSpotCone,
+    ManifestStars, ManifestWater, ManifestWaterConfig, ManifestWetMask, ManifestWind,
 };
 
 pub mod shadow;

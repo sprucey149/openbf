@@ -133,6 +133,8 @@ pub struct SpeckleAnim {
     first: Vec<usize>,
     frames: Vec<TextureHandle>,
     fps: f32,
+    /// Normal water has one depth-writing draw, with a discrete frame.
+    normal: bool,
 }
 
 impl SpeckleAnim {
@@ -140,6 +142,9 @@ impl SpeckleAnim {
         let (i, j, w) = speckle_frames(t, self.fps, self.frames.len());
         for &k in &self.first {
             draws[k].texture = Some(self.frames[i]);
+            if self.normal {
+                continue;
+            }
             draws[k].color[3] = 1.0 - w;
             draws[k + 1].texture = Some(self.frames[j]);
             draws[k + 1].color[3] = w;
@@ -756,6 +761,37 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             }
             None => None,
         };
+        let normal_cfg = info
+            .config
+            .as_ref()
+            .filter(|_| info.texture.is_none())
+            .and_then(|c| c.normal_maps.as_ref());
+        let mut normals = Vec::new();
+        if let Some(n) = normal_cfg {
+            for name in &n.textures {
+                let Some(t) = scene.textures.get(&name.to_ascii_lowercase()) else {
+                    normals.clear();
+                    break;
+                };
+                let mut mips: Vec<&[u8]> = vec![&t.rgba];
+                mips.extend(t.extra_mips.iter().map(Vec::as_slice));
+                normals.push(
+                    r.add_texture(&render::TextureDesc {
+                        width: t.width,
+                        height: t.height,
+                        mips: &mips,
+                        sampler: render::SamplerMode::Linear,
+                        wrap_v: render::WrapV::Repeat,
+                        srgb: false,
+                        detail: None,
+                        scroll: info.uv_velocity,
+                        uv_scale: [1.0, 1.0],
+                        label: Some(name),
+                    })
+                    .map_err(|e| anyhow!("normal water {name}: {e}"))?,
+                );
+            }
+        }
         // The speckle layer ([`speckle_look`], queue W3): its frames get
         // their own handles, carrying the layer's tiling and scroll. The
         // WATR cell side is read off the mesh's first lattice quad (the bake
@@ -785,8 +821,23 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             }
         }
         let mut speckle_first = Vec::new();
+        let mut normal_first = Vec::new();
         let mut still_foam = Vec::new();
         for (m, _, _, _) in upload_submeshes(r, mesh)? {
+            if let (Some(n), Some(h)) = (normal_cfg, normals.first()) {
+                normal_first.push(draws.len());
+                draws.push(
+                    DrawCmd::water(
+                        m,
+                        *h,
+                        n.refraction.map(|v| (v / 255.0).clamp(0.0, 1.0)),
+                        Mat4::IDENTITY,
+                    )
+                    .with_light(render::LightPath::WaterNormal)
+                    .with_cull(far),
+                );
+                continue;
+            }
             draws.push(match tex {
                 Some(h) => DrawCmd::water(m, h, look.tint, Mat4::IDENTITY).with_cull(far),
                 None => {
@@ -814,6 +865,15 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                 first: speckle_first,
                 frames,
                 fps: sp.fps,
+                normal: false,
+            });
+        }
+        if let (Some(n), false) = (normal_cfg, normal_first.is_empty()) {
+            speckle = Some(SpeckleAnim {
+                first: normal_first,
+                frames: normals,
+                fps: n.fps,
+                normal: true,
             });
         }
         // What moves it: the bob, or the ocean's FFT patch. Built here, and

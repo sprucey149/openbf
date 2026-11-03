@@ -734,6 +734,27 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
     // and shares the base's scroll offset (`analysis/re-water.md` §3d).
     let uv = in.uv * material.scroll.zw + material.scroll.xy * globals.time;
     let texel = textureSample(t_color, s_color, uv);
+    // Donor water approximation. Normals are uploaded LINEAR, with tangent
+    // X along world X and tangent Y along +Z (the baked water UV basis).
+    // The authored reflection/refraction colours replace unavailable scene
+    // reflection/refraction buffers. PROVISIONAL; replace: matched original
+    // Xbox captures of the near and grazing water, including animated normals.
+    if in.light == 11u {
+        let n = normalize(vec3<f32>(texel.r * 2.0 - 1.0, texel.b * 2.0 - 1.0, texel.g * 2.0 - 1.0));
+        let v = normalize(globals.camera_pos - in.world_pos);
+        let limits = globals.speckle_axis.xy;
+        let f = mix(limits.x, limits.y, pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 5.0));
+        // Approximate an environment's horizon-to-zenith response. In
+        // particular, equal reflection/refraction colours still show waves.
+        let sky = 0.5 + 0.5 * max(reflect(-v, n).y, 0.0);
+        let reflected = vec4<f32>(globals.water_specular.rgb * sky, globals.water_specular.a);
+        let col = mix(in.color, reflected, f);
+        var rgb = srgb_to_linear(col.rgb);
+        if globals.water_fog_begin > 0.0 && in.view_dist > globals.water_fog_begin {
+            rgb = apply_fog(rgb, in.fog_depth);
+        }
+        return vec4<f32>(rgb, clamp(col.a, 0.0, 1.0) * far_fade(in.view_dist));
+    }
     let v = normalize(globals.camera_pos - globals.water_eye_shift - in.world_pos);
     let f = pow(1.0 - max(v.y, 0.0), 3.0);
     let tint = min(in.color + globals.water_specular * f, vec4<f32>(GS_MAX));

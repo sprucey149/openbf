@@ -480,6 +480,7 @@ fn full_manifest() -> Manifest {
 /// it. The values are BF1 KAS2's, off the disc.
 fn full_water_config() -> ManifestWaterConfig {
     ManifestWaterConfig {
+        normal_maps: None,
         main_texture: Some("kas2_water".into()),
         foam_texture: Some("kam1_water".into()),
         metres_per_repeat: Some([16.0, 16.0]),

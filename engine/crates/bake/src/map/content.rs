@@ -287,6 +287,9 @@ pub(super) fn bake_content(
             Err(e) => eprintln!("skipping tex_ 0x{:X}: {e}", c.offset),
         }
     }
+    if original.is_some() {
+        super::render_textures::recover(&expanded, pc.as_ref(), &mut all_textures)?;
+    }
     let alpha_table = crate::alpha::AlphaTable::new(&all_textures);
     // Card TBIND (`crate::bind_pose`): a model with a `skel` is written in
     // its bind pose, so a turret's head and gun sit on their bones.
@@ -1226,6 +1229,9 @@ pub(super) fn bake_content(
             alpha_carried: needs_alpha,
         };
         let mut tier2 = crate::tier::tier2(t, pc.as_ref(), usage);
+        if original.is_some() {
+            tier2 = super::render_textures::larger_own(lvl_path, t, &all_textures, usage, tier2)?;
+        }
         let carries_alpha = || {
             r.mips
                 .iter()

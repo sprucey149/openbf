@@ -360,6 +360,21 @@ pub struct Resolved {
 }
 
 impl Resolved {
+    pub(crate) fn as_texture(&self, name: &str) -> Texture {
+        Texture {
+            name: name.to_ascii_lowercase(),
+            info: mungefs::texture::TextureInfo {
+                width: self.width,
+                height: self.height,
+                bpp: 32,
+                detail_compressed: false,
+                mip_distance: 0.0,
+                mip_count: self.mips.len() as u32,
+            },
+            palette: Vec::new(),
+            mips: self.mips.clone(),
+        }
+    }
     /// The PS2 texture, decoded.
     pub fn from_ps2(t: &Texture) -> Resolved {
         Resolved {
@@ -481,6 +496,18 @@ impl PcTextures {
             let mut own = std::collections::HashMap::new();
             Self::load_pc(inner, &mut own);
             Self::load_xbox(inner, &mut own).map_err(|e| anyhow::anyhow!("{lvl_path}: {e}"))?;
+            // An explicitly supplied PS2 LVL can fill a missing donor sheet too.
+            // Never interpret a cube/volume's first face as an ordinary image.
+            for c in mungefs::content_chunks(inner).map_err(|e| anyhow::anyhow!("{e}"))? {
+                if &c.tag == b"tex_"
+                    && c.child(b"FMT_").is_none()
+                    && !mungefs::texture_xbox::is_xbox(&c)
+                {
+                    if let Ok(t) = Texture::parse(&c) {
+                        own.insert(t.name.to_ascii_lowercase(), Resolved::from_ps2(&t));
+                    }
+                }
+            }
             for (key, r) in own {
                 let area = |x: &Resolved| u64::from(x.width) * u64::from(x.height);
                 let copies = by_name.entry(key).or_default();
@@ -489,6 +516,13 @@ impl PcTextures {
             }
         }
         Ok(PcTextures { by_name })
+    }
+
+    /// Fill an absent image from an explicitly supplied copy. This does not
+    /// replace an existing sheet, whose layout/alpha still gate tier 2.
+    pub(crate) fn missing(&self, name: &str) -> Option<Texture> {
+        let r = self.by_name.get(&name.to_ascii_lowercase())?.first()?;
+        Some(r.as_texture(name))
     }
 
     /// The Xbox's plain surfaces, by the same rules as the PC's.
@@ -612,6 +646,25 @@ pub fn tier2(t: &Texture, pc: Option<&PcTextures>, usage: Usage) -> Option<Resol
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_sheet_keeps_the_donors_colour_mask_and_mips() {
+        let mut donors = PcTextures::default();
+        donors.by_name.insert(
+            "console_fx".into(),
+            vec![Resolved {
+                width: 2,
+                height: 2,
+                mips: vec![[10, 20, 30, 64].repeat(4), vec![40, 50, 60, 128]],
+                tier: Tier::Xbox,
+            }],
+        );
+        let t = donors.missing("Console_FX").unwrap();
+        assert_eq!((t.info.width, t.info.height, t.info.mip_count), (2, 2, 2));
+        assert_eq!(t.rgba8(0), [10, 20, 30, 64].repeat(4));
+        assert_eq!(t.rgba8(1), [40, 50, 60, 128]);
+        assert!(donors.missing("unavailable").is_none());
+    }
 
     #[test]
     fn direct_texture_pair_rebake_clears_only_the_obsolete_override() {
