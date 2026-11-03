@@ -318,6 +318,10 @@ impl Kbm {
         self.press(t, false);
     }
 
+    pub fn tap_bits(&mut self, bits: u32) {
+        self.taps |= bits;
+    }
+
     pub fn wheel(&mut self, dy: f32) {
         if dy > 0.0 {
             self.tap(Trigger::WheelUp);
