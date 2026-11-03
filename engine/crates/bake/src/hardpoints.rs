@@ -135,7 +135,8 @@ pub fn attach<'a>(
 ) {
     let skels = Skeletons::of(chunks);
     for k in classes {
-        if !wants(&k.base) {
+        let destructible = k.base.eq_ignore_ascii_case("destructablebuilding");
+        if !wants(&k.base) && !destructible {
             continue;
         }
         let Some(geom) = k.geometry.as_deref() else {
@@ -145,7 +146,7 @@ pub fn attach<'a>(
             k.hardpoints = of(s);
             // Only a vehicle's rider hangs by the axes (card VRIDE): an armed
             // building's nodes stay positions, as its rig carries them.
-            if !crate::vehicle::is_vehicle_base(&k.base) {
+            if !crate::vehicle::is_vehicle_base(&k.base) && !destructible {
                 k.hardpoints.iter_mut().for_each(|h| h.axes = None);
             }
         }

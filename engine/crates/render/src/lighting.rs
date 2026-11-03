@@ -11,6 +11,106 @@
 #[cfg(doc)]
 use crate::DrawLayer;
 
+pub(crate) const CHARACTER_LIGHT_REGION: u32 = 0x200;
+
+impl crate::Renderer {
+    pub fn set_character_light_regions(&mut self, regions: Vec<CharacterLightRegion>) {
+        self.character_light_regions = regions;
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CharacterLightRegion {
+    pub centre: glam::Vec3,
+    pub axes: glam::Mat3,
+    pub volume: CharacterLightVolume,
+    pub top: [f32; 3],
+    pub bottom: [f32; 3],
+    pub directional: [f32; 2],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CharacterLightVolume {
+    Box(glam::Vec3),
+    Sphere(f32),
+    Cylinder { radius: f32, half_height: f32 },
+}
+
+impl CharacterLightRegion {
+    fn weight(self, sphere: crate::LitSphere) -> f32 {
+        let delta = sphere.centre - self.centre;
+        let distance = match self.volume {
+            CharacterLightVolume::Sphere(radius) => delta.length() - radius,
+            CharacterLightVolume::Box(half_extent) => {
+                let local = self.axes.transpose() * delta;
+                boundary_distance(local.abs() - half_extent)
+            }
+            CharacterLightVolume::Cylinder {
+                radius,
+                half_height,
+            } => {
+                let local = self.axes.transpose() * delta;
+                let radial = glam::Vec2::new(local.x, local.z).length() - radius;
+                let outside = glam::Vec2::new(radial, local.y.abs() - half_height);
+                outside.max(glam::Vec2::ZERO).length() + outside.max_element().min(0.0)
+            }
+        };
+        if sphere.radius <= 0.0 {
+            return f32::from(u8::from(distance < 0.0));
+        }
+        (0.5 - 0.5 * distance / sphere.radius).clamp(0.0, 1.0)
+    }
+}
+
+fn boundary_distance(outside: glam::Vec3) -> f32 {
+    outside.max(glam::Vec3::ZERO).length() + outside.max_element().min(0.0)
+}
+
+pub(crate) fn character_region_light(
+    regions: &[CharacterLightRegion],
+    light: &Lighting,
+    sphere: crate::LitSphere,
+) -> Option<[[f32; 4]; 2]> {
+    let mut sum = 0.0;
+    let mut count = 0;
+    let mut result = [[0.0; 4]; 2];
+    for region in regions {
+        let weight = region.weight(sphere);
+        if weight <= 0.0 {
+            continue;
+        }
+        sum += weight;
+        count += 1;
+        for (i, rgb) in [region.top, region.bottom].into_iter().enumerate() {
+            for (dst, c) in result[i][..3].iter_mut().zip(rgb) {
+                *dst += weight * c;
+            }
+            result[i][3] += weight * region.directional[i];
+        }
+        if count == 4 {
+            break;
+        }
+    }
+    if count == 0 {
+        return None;
+    }
+    let global = if count == 1 || sum <= (count - 1) as f32 * 0.9 {
+        count as f32 - sum
+    } else {
+        0.0
+    };
+    for (i, rgb) in [light.ambient_sky, light.ambient_ground]
+        .into_iter()
+        .enumerate()
+    {
+        for (dst, c) in result[i][..3].iter_mut().zip(rgb) {
+            *dst = (*dst + global * encode(c)) / (sum + global);
+        }
+        result[i][3] = (result[i][3] + global) / (sum + global);
+    }
+    Some(result)
+}
+
 /// The world's fog. `color` is linear RGB; `near`/`far` are metres of PLANAR
 /// view depth. The shader's `apply_fog` takes the PS2's amount, the
 /// `fogspread` table at f = (depth - near) / (far - near), and lerps on
@@ -223,6 +323,50 @@ impl Default for Lighting {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn character_light_region_blends_across_the_sphere_radius() {
+        let mut region = CharacterLightRegion {
+            centre: glam::Vec3::ZERO,
+            axes: glam::Mat3::IDENTITY,
+            volume: CharacterLightVolume::Box(glam::Vec3::splat(2.0)),
+            top: [0.5; 3],
+            bottom: [0.1; 3],
+            directional: [0.0; 2],
+        };
+        let light = Lighting {
+            ambient_sky: [0.0; 3],
+            ambient_ground: [0.0; 3],
+            ..Lighting::default()
+        };
+        let at = |region, centre| {
+            character_region_light(
+                &[region],
+                &light,
+                crate::LitSphere {
+                    centre,
+                    radius: 1.0,
+                },
+            )
+        };
+        let full = Some([[0.5, 0.5, 0.5, 0.0], [0.1, 0.1, 0.1, 0.0]]);
+        let half = Some([[0.25, 0.25, 0.25, 0.5], [0.05, 0.05, 0.05, 0.5]]);
+        for volume in [
+            CharacterLightVolume::Box(glam::Vec3::splat(2.0)),
+            CharacterLightVolume::Sphere(2.0),
+            CharacterLightVolume::Cylinder {
+                radius: 2.0,
+                half_height: 2.0,
+            },
+        ] {
+            region.volume = volume;
+            assert_eq!(at(region, glam::Vec3::ZERO), full);
+            assert_eq!(at(region, glam::Vec3::X * 2.0), half);
+            assert_eq!(at(region, glam::Vec3::Y * 2.0), half);
+            assert_eq!(at(region, glam::Vec3::X * 3.0), None);
+        }
+        assert_eq!(at(region, glam::Vec3::new(2.75, 2.75, 0.0)), None);
+    }
 
     /// Kamino's deck (BF2 KAM1: ambient 100/255, sun 105/255 x n.l 0.906,
     /// blue channel): the display-unit sum is A + S x n.l of the texel's

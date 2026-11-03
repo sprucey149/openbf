@@ -920,7 +920,10 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         // TBLD: a building turret, drawn as its fallen look while down.
         let building = (world && fallen_models.contains_key(&ii)).then_some(ii);
         let station = class
-            .filter(|c| c.base.eq_ignore_ascii_case(super::stations::STATION_BASE))
+            .filter(|c| {
+                c.base.eq_ignore_ascii_case(super::stations::STATION_BASE)
+                    || crate::stations::is_destructible_building(&c.base)
+            })
             .map(|c| {
                 (
                     ii,
@@ -1130,6 +1133,9 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             .with_lit(lit);
             if let Some(c) = p.color {
                 base.color = std::array::from_fn(|i| base.color[i] * c[i]);
+            }
+            if *light == render::LightPath::Glow {
+                base.color[3] *= super::look::hallway_lamp_bloom(&scene.manifest, mat.as_deref());
             }
             draws.push(base);
             if let Some(part) = rig.and_then(|r| r.parts.iter().find(|q| q.submesh as usize == k)) {

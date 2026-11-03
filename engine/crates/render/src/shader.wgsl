@@ -169,6 +169,9 @@ struct VsOut {
     // The depth `color.rgb` and `point` are weighted by (`affine_w`); 0 on a
     // draw that blends them in perspective.
     @location(11) wc: f32,
+    @location(12) @interpolate(flat) region_top: vec4<f32>,
+    @location(13) @interpolate(flat) region_bottom: vec4<f32>,
+    @location(14) @interpolate(flat) bloom_gain: f32,
 };
 
 // The PS2's vertex-colour blend (card BPRL, `analysis/re-vertex-colour-interp.md`
@@ -255,6 +258,7 @@ fn mesh_vertex(in: VsIn) -> VsOut {
     // A self-lit BF2 segment's colour word replaces the draw's (card GLOW):
     // no instance tint.
     let path = in.light & 0xffu;
+    out.bloom_gain = in.inst_color.a;
     if path == LIGHT_GLOW {
         out.color = in.color;
     }
@@ -511,7 +515,7 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
     // so each goes back to display units before its weight. Summing the
     // linear colours left a deck under an ambient and a sun of one size
     // 1.4 x dark. The CPU twin and its referee: `render::lighting::light_sum`.
-    let sun_g = linear_to_srgb(globals.sun_color) * ndotl;
+    var sun_g = linear_to_srgb(globals.sun_color) * ndotl;
     var light2_g = vec3<f32>(0.0);
     if any(globals.light2_color != vec3<f32>(0.0)) {
         light2_g = linear_to_srgb(globals.light2_color)
@@ -528,6 +532,11 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
     // (`analysis/re-model-lighting.md` §12); otherwise `Lit` exactly.
     if in.light == LIGHT_CHARACTER && globals.character_ambient_on > 0.5 {
         ambient_g = linear_to_srgb(globals.character_ambient);
+    }
+    if in.region_top.w >= 1.0 {
+        ambient_g = mix(in.region_bottom.rgb, in.region_top.rgb, n.y * 0.5 + 0.5);
+        sun_g *= in.region_top.w - 1.0;
+        light2_g *= in.region_bottom.w;
     }
     let detail = detail_factor(uv);
     // The PS2's interface light set (card SSELB, `render::LightPath::Iface`):
@@ -1133,6 +1142,7 @@ struct VsSkinnedIn {
     @location(11) cull: vec2<f32>,
     @location(12) cull_near: vec2<f32>,
     @location(13) light: u32,
+    @location(14) region_bottom: vec4<f32>,
     @location(15) lights: vec4<u32>,
 };
 
@@ -1156,6 +1166,12 @@ fn vs_skinned(in: VsSkinnedIn) -> VsOut {
     out.cull = in.cull;
     out.cull_near = in.cull_near;
     out.light = in.light & 0xffu;
+    if (in.light & 0x200u) != 0u {
+        out.region_top = vec4<f32>(in.cull, in.cull_near.x, in.cull_near.y + 1.0);
+        out.region_bottom = in.region_bottom;
+        out.cull = vec2<f32>(1.0e9);
+        out.cull_near = vec2<f32>(0.0);
+    }
     out.fade = 1.0;
     out.point = point_sum(world_pos.xyz, out.world_normal, in.lights);
     out.wc = affine_w(out.clip_pos, in.light);
@@ -1176,7 +1192,7 @@ fn bloom_light(in: VsOut) -> vec4<f32> {
     let d = min(linear_to_srgb(base.rgb * detail_factor(uv)) * gain, vec3<f32>(2.0));
     let fogged = linear_to_srgb(apply_fog(srgb_to_linear(d), in.fog_depth));
     let coverage = select(base.a, 1.0, in.light == LIGHT_GLOW);
-    return vec4<f32>(fogged * 0.5 * coverage * far_fade(in.view_dist), 1.0);
+    return vec4<f32>(fogged * 0.5 * coverage * far_fade(in.view_dist), max(1.0, in.bloom_gain));
 }
 @fragment
 fn fs_bloom(raw: VsOut) -> @location(0) vec4<f32> {

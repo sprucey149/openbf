@@ -1,7 +1,65 @@
 //! Static prop effects at their baked hardpoint frames, including repeat delays.
-use super::{EffectDef, Era, Frame, Lcg, Library, LiveEffect};
+use super::{EffectDef, Era, Frame, Fx, Lcg, Library, LiveEffect};
 use glam::{Mat3, Mat4, Vec3};
 use std::sync::Arc;
+
+impl Fx {
+    pub(super) fn follow_station_damage(&mut self, sim: &core::sim::Sim) {
+        let active = |station: usize, slot: usize| {
+            let s = sim.stations.get(station)?;
+            let effect = sim
+                .station_classes
+                .get(usize::from(s.class))?
+                .damage_effects
+                .get(slot)?;
+            (!s.destroyed && effect.band.active(s.health.cur / s.health.max)).then_some((s, effect))
+        };
+        for live in &mut self.live {
+            let Some((station, slot)) = live.station else {
+                continue;
+            };
+            if active(station, slot).is_none() {
+                live.stop();
+                live.station = None;
+            }
+        }
+        for (station, s) in sim
+            .stations
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.destroyed)
+        {
+            for slot in 0..sim.station_classes[usize::from(s.class)]
+                .damage_effects
+                .len()
+            {
+                let Some((s, effect)) = active(station, slot) else {
+                    continue;
+                };
+                if self
+                    .live
+                    .iter()
+                    .any(|live| live.station == Some((station, slot)))
+                {
+                    continue;
+                }
+                let m = s.pose() * effect.local;
+                let frame = Frame {
+                    pos: m.w_axis.truncate(),
+                    rot: Mat3::from_mat4(m),
+                    vel: Vec3::ZERO,
+                };
+                if self.spawn(&effect.band.effect, frame) {
+                    let live = self.live.last_mut().unwrap();
+                    live.station = Some((station, slot));
+                    for emitter in &mut live.instances {
+                        emitter.size *= effect.scale;
+                    }
+                }
+            }
+        }
+    }
+}
 
 pub(super) struct Glow {
     beam: render::Beam,
@@ -186,6 +244,84 @@ pub(super) fn load(scene: &crate::assets::Scene, library: &Library) -> (Vec<Atta
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mustafar_console_damage_drives_its_authored_smoke() {
+        let root = crate::assets::baked_root();
+        let map = root.join("bf2_mus1");
+        if !pak::exists(map.join("manifest.ron")) {
+            return;
+        }
+        let (scene, _) = crate::assets::load_battle_scene(&map, "con").unwrap();
+        let mut sim = core::sim::Sim::empty(1);
+        scene.install_collision(&mut sim);
+        crate::vehicle_pads::install(
+            &mut sim,
+            &scene.manifest,
+            &scene.dir,
+            &root.join("classes"),
+            &["rep".into(), "cis".into()],
+        )
+        .unwrap();
+        let station = sim
+            .stations
+            .iter()
+            .position(|s| scene.manifest.instances[s.instance.unwrap() as usize].name == "dingdong")
+            .unwrap();
+        let s = sim.stations[station];
+        let class = &sim.station_classes[usize::from(s.class)];
+        assert_eq!(s.health.cur, 150.0);
+        assert_eq!(s.radius, 0.0);
+        assert_eq!(
+            sim.collision.station(s.instance.unwrap()),
+            Some(station as u16)
+        );
+        if class.damage_effects.is_empty() {
+            eprintln!("SKIP: Mustafar must be rebaked for its damage hardpoints");
+            return;
+        }
+        let mut fx = Fx::load(&root, &map, "bf2", &["rep", "cis"]);
+        let smoke = |fx: &Fx| {
+            fx.live
+                .iter()
+                .filter(|e| e.name() == Some("com_sfx_vehiclesmoke") && e.station.is_some())
+                .map(|e| (e.frame.pos, e.instances[0].size))
+                .collect::<Vec<_>>()
+        };
+        fx.ingest_sim(&sim);
+        assert!(smoke(&fx).is_empty());
+        let blast = core::weapon::ExplosionClass {
+            damage: 32.0,
+            damage_inner: 1.0,
+            damage_outer: 5.0,
+            ..Default::default()
+        };
+        sim.explode(&blast, s.sphere_centre, None, Some(0));
+        assert_eq!(sim.stations[station].health.cur, 118.0);
+        fx.ingest_sim(&sim);
+        fx.ingest_sim(&sim);
+        let active = smoke(&fx);
+        assert_eq!(active.len(), 3);
+        for ((pos, scale), (x, expected)) in
+            active
+                .into_iter()
+                .zip([(-63.5076, 2.0), (-67.0152, 3.0), (-59.8152, 3.0)])
+        {
+            assert!(pos.abs_diff_eq(Vec3::new(x, 67.1399, 7.9246), 0.001));
+            assert_eq!(scale, expected);
+        }
+        sim.repair_station(station as u16, 32.0);
+        fx.ingest_sim(&sim);
+        assert!(smoke(&fx).is_empty());
+        let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["rep"]).unwrap();
+        let grenade =
+            crate::roster::explosion_class(&db, "rep_weap_inf_thermaldetonator_exp").unwrap();
+        sim.explode(&grenade, s.sphere_centre, None, Some(0));
+        assert!(sim.stations[station].destroyed);
+        assert_eq!(sim.collision.station(s.instance.unwrap()), None);
+        fx.ingest_sim(&sim);
+        assert!(smoke(&fx).is_empty());
+    }
+
     #[test]
     fn hardpoint_and_instance_axes_both_place_the_effect() {
         let local = manifest::ManifestAttachedEffect {

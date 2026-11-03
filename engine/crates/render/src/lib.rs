@@ -113,8 +113,8 @@ pub use grass::{sprite_quad, sway, GrassClass, GrassPatch, GrassSprite, ViewAxes
 pub use leaf::{LeafClass, LeafObject, LeafSprite};
 pub use light_beam::{Beam, Cross, TOP_ALPHA as BEAM_TOP_ALPHA};
 pub use lighting::{
-    decode as srgb_decode, encode as srgb_encode, light_sum, DirLight, FarFade, Fog, Lighting,
-    WaterDiffuse, WaterShading,
+    decode as srgb_decode, encode as srgb_encode, light_sum, CharacterLightRegion,
+    CharacterLightVolume, DirLight, FarFade, Fog, Lighting, WaterDiffuse, WaterShading,
 };
 pub use mesh::{
     MeshData, MeshHandle, SkinnedMeshData, SkinnedMeshHandle, SkinnedVertex, Vertex, MAX_JOINTS,
@@ -422,6 +422,7 @@ pub struct Renderer {
     /// — how the mismatch LOOKS on the PS2 wants an in-map capture.
     pub spec_mirror: bool,
     pub lighting: Lighting,
+    character_light_regions: Vec<CharacterLightRegion>,
     /// Animation clock in seconds: the water surface's UV scroll, the water's
     /// speckle, the mirrored sky shell's squash ([`mirror_squash`]) and the
     /// grass and leaf sway.
@@ -495,6 +496,7 @@ impl Renderer {
         self.set_grass(Vec::new(), Vec::new());
         self.set_leaves(Vec::new(), Vec::new(), None);
         self.set_point_lights(Vec::new());
+        self.character_light_regions.clear();
         self.set_bolts(Vec::new());
         self.set_particles(Vec::new());
         self.set_fog_cloud(None);

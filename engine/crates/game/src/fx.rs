@@ -399,6 +399,7 @@ pub struct LiveEffect {
     /// The jet soldier whose `JetEffect` this is (card JETP2, `fx/jet.rs`).
     jet: Option<UnitHandle>,
     turret: Option<(u64, usize)>,
+    station: Option<(usize, usize)>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
 }
@@ -441,6 +442,7 @@ impl LiveEffect {
             buff: None,
             jet: None,
             turret: None,
+            station: None,
             burn: None,
             float: None,
         };
@@ -1140,12 +1142,19 @@ impl Fx {
     }
 
     pub fn update(&mut self, dt: f32) {
+        self.update_with_round_frames(dt, Vec::new());
+    }
+
+    fn update_with_round_frames(&mut self, dt: f32, saved: Vec<(usize, Frame)>) {
         for p in &mut self.puffs {
             p.age += dt;
         }
         self.puffs.retain(|p| p.age < p.life());
         for e in &mut self.live {
             e.advance(dt);
+        }
+        for (index, frame) in saved {
+            self.live[index].frame = frame;
         }
         self.live.retain(|e| !e.is_dead());
         self.water.update(dt);

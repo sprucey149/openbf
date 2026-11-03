@@ -139,7 +139,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/walker.rs` 313 — walker animation metadata, collision bind points and skin/layer bake · `bake`, `clips`, `prim_points`, `skin_glb`, `skin_glb_of` (the droideka's too), `layer_bones`, `ENTRIES`; entry and pose rules in the module header (`analysis/re-walker.md`).
 - `bake/src/droideka.rs` 55 — the droideka's walkerdroid bake: the `cis_walk_droideka` bank's 14 state clips (fold, roll loop, unfold), its skin GLB and collision bind points into the side vehicle manifest · `ENTRIES`, `is_droideka_base`, `bake`, `skin_glb`; the LVL walk is `vehicle.rs`'s `bake_droidekas`; `analysis/re-droideka-unit.md` §4, §7.2 and `analysis/droideka-65.md`.
 - `bake/src/bind_pose.rs` 588 — placed-model bind poses, BNAM segments and door/vehicle collision prims (also used by the vehicle bake) · `BindPose`, `pose_bnam`, `BindPose::rest_prims`; transformations and evidence in the module header.
-- `bake/src/hardpoints.rs` 200 — model-space bind hardpoints for vehicles and armed buildings across map/common/side bakes · `attach`, `of`, `wants`, `Skeletons`; skeleton lookup and rider axes in the module header.
+- `bake/src/hardpoints.rs` 201 — model-space bind hardpoints for vehicles and armed buildings across map/common/side bakes · `attach`, `of`, `wants`, `Skeletons`; skeleton lookup and rider axes in the module header.
 - `bake/src/turret_rig.rs` 559 — per-node rigid rigs for armed buildings and health/ammo droids · `TurretRigs::of`, `split`, `attach`; splitting, unsupported cross-node triangles and bind metadata in the module header (`analysis/re-turret-draw.md`, `analysis/re-powerup-station.md` §6).
 - `bake/src/leafpatch.rs` 381 — leafpatch class properties and attachment replay · `leaf_class`, `attach`, `is_leafpatch`, `is_attach_prop`; replay/caps in the module header (`analysis/re-leafpatch.md` §2–§3, [O]).
 - `bake/src/entity_light.rs` 322 — EntityLight classes and prop attachments · `light_class`, `attach`, `Miss`; missing-hardpoint policy in `Miss` (BF2 carrier origin), replay and light fields in the module header (`analysis/re-point-lights.md` §2, `analysis/re-kamino-decks.md` §5).
@@ -267,8 +267,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/abilities/tests.rs` 326 — officer effects, duration, radius, self targeting, bot policy, ammo and replay regressions.
 - `core/src/sim/pickups/tests.rs` 499 — pickup drop-table, lifetime/pool, per-game touch/grant/velocity, energy/buff and hash referees; see `analysis/re-powerups.md` §3–§5.
 - `core/src/sim/pickups/tests/dispensers.rs` 228 — dispenser supply, both firing channels, failed-spawn refunds, pool/owner limits, flight, lifetime, hashing and ammo-refill exclusion.
-- `core/src/sim/stations.rs` 404 — health/ammo/vehicle station class/state and serving ticks · `StationClass`, `StationAnim`, `Station`, `Sim::add_station_class`, `tick_stations`; reach, clock, grants and destruction rules in `analysis/re-powerup-station.md` §3/§4/§14.
-- `core/src/sim/repair.rs` 390 — fusion-cutter target acquisition, energy-gated pulses, station rebuilding and fallen building turrets (`Target::Building`) · Sim::repair_station; analysis/re-build-zones.md.
+- `core/src/sim/stations.rs` 414 — health/ammo/vehicle station class/state and serving ticks · `StationClass`, `StationAnim`, `Station`, `Sim::add_station_class`, `tick_stations`; reach, clock, grants and destruction rules in `analysis/re-powerup-station.md` §3/§4/§14.
+- `core/src/sim/repair.rs` 394 — fusion-cutter target acquisition, energy-gated pulses, station rebuilding and fallen building turrets (`Target::Building`) · Sim::repair_station; analysis/re-build-zones.md.
 - `core/src/sim/building_turrets.rs` 332 — a map's building turrets: spawn on their building, the fall to wreck / pad / hidden (model and collision), no regeneration (ours), the cutter's rebuild at MaxHealth · `BuildingTurret`, `TurretFall`, `Sim::add_building_turret`, `Sim::repair_building`, `Sim::building_down`; analysis/re-build-zones.md 1 (card TBLD).
 - `core/src/sim/building_turrets/tests.rs` 321 — a fallen turret's bodies and rise at MaxHealth only, no rise by itself in 300 s, the cutter's heal / rebuild / build rates (mutation-checked).
 - `core/src/sim/repair/tests.rs` 522 — repair/rebuild progress, relation/range/occlusion/energy, collision restoration and hash regressions.
@@ -407,8 +407,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/kbm/tests.rs` 479 — every pad bit bound, controller pass-through, WASD, taps, sensitivity/invert, stick takeover and a 144 Hz frame-to-tick replay.
 - `game/src/viewer.rs` 62 — viewer facade and stable re-exports; its module header owns the XFRM transform convention and routes to the parts below.
 - `game/src/viewer/walker_aim.rs` 172 — Walker drawn aimer transforms.
-- `game/src/viewer/look.rs` 1485 — manifest-derived water, fog, cull/LOWR, far-fade and lighting state · `water_look`, `speckle_look`, `water_shading`, `far_cull`, `lowres_range`, `apply_lighting`.
-- `game/src/viewer/scene.rs` 1815 — scene GPU upload and draw ranges for terrain, water, foliage, models/LOWD and sky; moving door/turret/station records, texture cache and untextured census · `upload_scene`, `SceneGpu`, `SpeckleAnim`, `sky_wrap_v`, `pose_doors`; posing lives in `turret_pose` / `stations`.
+- `game/src/viewer/look.rs` 1547 — manifest-derived water, fog, cull/LOWR, far-fade and lighting state · `water_look`, `speckle_look`, `water_shading`, `far_cull`, `lowres_range`, `apply_lighting`.
+- `game/src/viewer/scene.rs` 1821 — scene GPU upload and draw ranges for terrain, water, foliage, models/LOWD and sky; moving door/turret/station records, texture cache and untextured census · `upload_scene`, `SceneGpu`, `SpeckleAnim`, `sky_wrap_v`, `pose_doors`; posing lives in `turret_pose` / `stations`.
 - `game/src/viewer/scene/terrain.rs` 169 — terrain draw chunks, layer uploads and chunk bounds; the scene’s terrain upload helpers.
 - `game/src/viewer/scene/tests.rs` 456 — scene draw-range regressions for water replacement and the ranges that follow it.
 - `game/src/viewer/foliage.rs` 223 — terrain foliage model placement, tint and fade · `records`, `models`, `matrix`; module header and `analysis/re-foliage.md` §6.
@@ -438,11 +438,11 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/roster.rs` 1374 — class data into faction/unit/weapon rosters, soldier constants with the jet data (`soldier_constants`, BF1 borrowing BF2 jet keys), held-slot registration, BF2 SBD gameplay with native map audio on both map sets and weapon visual specifications · `FactionRoster`, `held_slots`, `ClassRoster::register`.
 - `game/src/roster/weapon_db.rs` 523 — weapons read from the class db: HUD key, charge stages, ordnance, thrown and sticky weapons, donors · `weapon_from_db`, `thrown_weapon_from_db`, `weapon_hud`
 - `game/src/roster/looks.rs` 177 — muzzle flash, laser, impact and explosion looks read from the class db · `flash_look`, `laser_look`, `impact_look`, `explosion_look`, `explosion_class`
-- `game/src/roster/items.rs` 264 — pickups, stations, drop tables and item pools read from the class db · `item_class_from_db`, `station_class_from_db`, `add_stations`, `item_pool`
+- `game/src/roster/items.rs` 284 — pickups, stations, drop tables and item pools read from the class db · `item_class_from_db`, `station_class_from_db`, `add_stations`, `item_pool`
 - `game/src/roster/tests.rs` 95 — the roster's tests.
 - `game/src/droideka.rs` 237 — the droideka class from its ODF (play-db gameplay keys, native shield sounds, camera sections, ExplosionName) and its baked record (clip frames and root travel, ordnance prims, gun hardpoints) for both teams of a battle, and the shield hum's loops · `droideka_class`, `camera_sections`, `install`, `bakes`, `apply`, `as_walker`, `model_point`, `shield_gain`, `shield_loops`.
 - `game/src/droideka/tests.rs` 191 — Baked droideka class and rig loading checks.
-- `game/src/stations.rs` 167 — service-droid model spheres, rotating collision setup, wreck collision and render models from map/common bakes · `install_collision`, `wreck_models`.
+- `game/src/stations.rs` 216 — service-droid model spheres, rotating collision setup, wreck collision and render models from map/common bakes · `install_collision`, `wreck_models`.
 - `game/src/turret_fall.rs` 127 — a building turret class's fallen look (DestroyedGeometryName, the unbuilt pad, hidden; the common gun turret's pad deviation), its collision parts and the fallen models per placed instance · `fall_look`, `collision_parts`, `fallen_models`; card TBLD.
 - `game/src/shell_ia.rs` 127 — the Instant Action screen's content from the bake: both games' names, baked maps, mission pairs; the profile tier ↔ Session Options' AI level · `instant_action`, `ia_level`, `port_difficulty`.
 - `game/src/shell_movie.rs` 428 — shell movie frame-pack playback and background JPEG decoding · `ShellMovie`, `load_index`, `shell_dir`, `decode`; module header and `analysis/re-bf2-shell.md` §4.
@@ -502,9 +502,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/blackbox.rs` 2425 — dev-mode playtest history and rotating snapshots on F9, quit, panic and stuck alarm; read-only on the sim and excluded from its hash · `BlackBox`, `Snapshot`, `Meta`, `on`, `write_rotating`, `read`, `SoundRow`, `sound_digest`. `blackbox::SCHEMA` owns schema age and supported older reads; module header owns history/build diagnostics; operation in `analysis/dev-tools.md`.
 - `game/src/blackbox/rotating.rs` 173 — serialized snapshot file rotation shared by the hotkey writer and panic hook, with same-thread recursion protection and filesystem regression tests · `write`, `PREVIOUS`.
 - `game/src/blackbox/session.rs` 323 — Card DPRX: the black box's MATCH-LONG tally of one subject - the human, or in a headless round the sweep's human proxy (`core::ai::proxy`). The rings
-- `game/src/fx.rs` 1250 — particle-effect lookup with disc-specific rules for imported SBD trails, lifecycle and draw submission, event-driven impact/explosion hooks, gain effects that follow their unit (one live per unit and kind) and PROVISIONAL fallback quads · `Fx`, `Library`, `LiveEffect`; module header and `analysis/re-fx.md` §5–§7; muzzle flashes come from `soldier_vis`.
+- `game/src/fx.rs` 1259 — particle-effect lookup with disc-specific rules for imported SBD trails, lifecycle and draw submission, event-driven impact/explosion hooks, gain effects that follow their unit (one live per unit and kind) and PROVISIONAL fallback quads · `Fx`, `Library`, `LiveEffect`; module header and `analysis/re-fx.md` §5–§7; muzzle flashes come from `soldier_vis`.
 - `game/src/fx/sky.rs` 134 — dome-attached decorative effects, authored hardpoints and rotation.
-- `game/src/fx/ingest.rs` 333 — a tick's sim events into live effects · `Fx::ingest_sim`
+- `game/src/fx/ingest.rs` 334 — a tick's sim events into live effects · `Fx::ingest_sim`
 - `game/src/fx/abilities.rs` 66 — officer activation effects and timed recipient auras · `follow_buffs`.
 - `game/src/fx/repair.rs` 72 — repair-pulse muzzle effects, owner following and initial-burst placement at the drawn weapon tip.
 - `game/src/fx/children.rs` 128 — EMITTER particles replay their child templates along native path nodes (0.3 s samples, 0.1 s merge, secant velocities), with the parent's colour replacing the child's and native child offsets · `path`, `frame_at`, `draw`; `analysis/re-fx.md` §13; referees `game/src/fx/tests/resupply.rs` (live PCSX2 node captures) and `game/tests/suite/resupply_feedback.rs`.
@@ -541,8 +541,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/frame_profile.rs` 902 — windowed frame timing, GPU-object census, dev hitch record/black-box integration and `OPENBF_FRAME_PROFILE=<csv>` output · `FrameProfile`, `Record`, `Hitches`, `FrameRow`; module header owns switches, thresholds, warmup and CSV fields.
 - `game/src/dyn_res.rs` 240 — the Low Power Resolution setting's controller: steps the world's size down when frames run long and probes back up · `DynRes`, `STEPS`.
 - `game/src/matchlog.rs` 825 — The MATCH LOG (card DPRX) — DEV SCAFFOLDING beside the black box: one compact file per battle with everything the human did, for the WHOLE
-- `render/src/lib.rs` 537 — renderer facade, shared state and public re-exports · `Renderer`, `RenderError`, `TIME_WRAP`, `Renderer::clear_scene` (drops a map's look on leaving a battle); public submodules: `hud`, `affine`; crate header owns sky rules and unbuilt features.
-- `render/src/lighting.rs` 256 — renderer lighting/fog/fade/water data and CPU light-sum reference · `Lighting`, `DirLight`, `Fog`, `FarFade`, `WaterShading`, `light_sum`; shader-unit rules in the module/API docs.
+- `render/src/lib.rs` 539 — renderer facade, shared state and public re-exports · `Renderer`, `RenderError`, `TIME_WRAP`, `Renderer::clear_scene` (drops a map's look on leaving a battle); public submodules: `hud`, `affine`; crate header owns sky rules and unbuilt features.
+- `render/src/lighting.rs` 400 — renderer lighting/fog/fade/water data and CPU light-sum reference · `Lighting`, `DirLight`, `Fog`, `FarFade`, `WaterShading`, `light_sum`; shader-unit rules in the module/API docs.
 - `render/src/stars.rs` 403 — the star fields of the maps that author them (issue #16): the PS2's own star generator and twinkle, drawn in the sky pass after the first dome shell · `analysis/re-stars.md`.
 - `render/src/sky.rs` 525 — sky-shell placement and material modes, with their tests · `Renderer::set_sky`, `SkyShell`, `SkyMode`, `Placement`, `mirror_squash`; rules in the module docs and crate header.
 - `render/src/fog_cloud.rs` 134 — BF2 FogCloud tiled dust, source annular fade and heightfield placement.
@@ -551,8 +551,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/device.rs` 423 — GPU/device setup, upload and resize · `Renderer::new_windowed`, `Renderer::new_headless`, `HEADLESS_FORMAT`; adapter selection (`OPENBF_ADAPTER`) in the module header; constructors finish in `pipelines.rs`.
 - `render/src/bindings.rs` 62 — layout entries and borrowed bind-group resource constructors · `uniform_layout`, `texture_layout`, `sampler_layout`, `texture_view`, `sampler`, `entire_buffer`
 - `render/src/resources.rs` 45 — unmapped buffers and single-level D2 textures through GPU creation instrumentation · `buffer`, `texture_2d`
-- `render/src/pipelines.rs` 966 — renderer pipeline/layout construction and initial GPU resources · `finish_init`, `PipelineDesc`; pass inventory in the module header.
-- `render/src/frame.rs` 2181 — frame submission, culling, instancing, pass/draw ordering and overlay, with ordering tests · `Renderer::render_frame`, `FrameStats`, `OverlayFn`; full pass sequence in the module header.
+- `render/src/pipelines.rs` 967 — renderer pipeline/layout construction and initial GPU resources · `finish_init`, `PipelineDesc`; pass inventory in the module header.
+- `render/src/frame.rs` 2200 — frame submission, culling, instancing, pass/draw ordering and overlay, with ordering tests · `Renderer::render_frame`, `FrameStats`, `OverlayFn`; full pass sequence in the module header.
 - `render/src/frame_ab.rs` 136 — per-frame interleaved pricing states for the bench (`OPENBF_FRAMEAB`) · `FrameAb`.
 - `render/src/world_scale.rs` 180 — the world drawn smaller than the window and upscaled, the HUD at full size · `Renderer::set_world_scale`; `world_scale.wgsl`.
 - `render/src/hud.rs` 477 — window-pixel HUD rendering (clamped and repeating sheets) from `ui::hud_draw` · `HudPass`, `HudVertex`, `HudBatch`, `HudTexture`; display-value blending and mesh depth rules in the module header (`Renderer::display_view_format`).
@@ -576,7 +576,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/specular.rs` 179 — specular lookup-table upload and tex-gen CPU reference · `Renderer::set_specular_table`, `SpecParams`, `spec_texcoord`; pass/blend rules and PROVISIONAL status in the module header (`analysis/re-specular-pass.md`, [O]).
 - `render/src/capture.rs` 164 — the headless readback and the PNG encoders (with and without the alpha plane); the
   padding and encoder tests · `Renderer::capture_rgba`, `encode_png`, `encode_png_rgb`
-- `render/src/shader.wgsl` 1188 — world/skinned shader: lighting, alpha, fog, water/speckle, sky, specular and terrain · `shade_unfogged`, `gs_lit`, `point_sum`, `MASK_CUTOFF`; grass/bolt/terrain-light/filter have separate `.wgsl` files; HUD shader is in `hud.rs`.
+- `render/src/shader.wgsl` 1204 — world/skinned shader: lighting, alpha, fog, water/speckle, sky, specular and terrain · `shade_unfogged`, `gs_lit`, `point_sum`, `MASK_CUTOFF`; grass/bolt/terrain-light/filter have separate `.wgsl` files; HUD shader is in `hud.rs`.
 - `render/src/made.rs` 192 — GPU-object creation wrappers and frame-recorder inventory · `Made`, `note`, `take`, `texture_bytes`; enable/cap and wrapper contract in the module header; consumer: `game::frame_profile` (HITCH).
 - `render/src/mesh.rs` 459 — vertex formats, GPU meshes · `Vertex`, `MeshData`
 - `render/src/texture.rs` 273 — RGBA8 → bind group; samplers · `TextureDesc`
@@ -800,8 +800,8 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 | what the sim hash covers | `core/src/sim/state/hash.rs` (`Sim::hash`) | a declared [SWEEP] re-baseline |
 
 - `game/src/fx/ripple.rs` 352 — flat-water ripples: the PS2's 100-record pool (kept while a camera is within 120 m and the ripple lives), spawned by bolt water hits (1.5 s, 0.01 m) and water blasts (3 + s, s = min(0.4, R/2)), drawn as the 21-column three-strip `FXrippl1` ring lit from the manifest's water colour and sun; the splash bob lift · `Water`, `Look`, `ring`, `Fx::set_water`, `Fx::ripples`; `analysis/re-fx.md` §15; referees the module tests and `game/tests/suite/water_fx.rs` (KAS1 mask and GPU frame).
-- `game/src/fx/trail.rs` 562 — per-projectile trail identities, survivor matching and independent retirement · Rounds, Fx::follow_rounds; repeated collinear shots stay distinct.
-- `game/src/fx/jet.rs` 159 — A jet soldier's `JetEffect` (card JETP2, `analysis/re-jetpack.md` §8): spawned once when he is in a jet stance and has none running, riding him
+- `game/src/fx/trail.rs` 572 — per-projectile trail identities, survivor matching and independent retirement · Rounds, Fx::follow_rounds; repeated collinear shots stay distinct.
+- `game/src/fx/jet.rs` 156 — A jet soldier's `JetEffect` (card JETP2, `analysis/re-jetpack.md` §8): spawned once when he is in a jet stance and has none running, riding him
 - `game/src/fx/tests/jet.rs` 225 — Card JETP2: a soldier in a jet stance carries his class's `JetEffect`; it stops when the jet ends or he dies, and a new jet spawns a new one.
 - `core/src/mine.rs` 195 — placed-explosive class data, detonation causes, flight/attachment state and replay serialization; the half-step fall and friction rebound thrown items share · MineClass, Detonation, Mine, fall, rebound.
 - `core/src/sim/mines.rs` 482 — placed-explosive launch, limits, damage, flight, arming, proximity/contact/timer triggers and remote input; the throw origin, oldest-beyond-the-limit, item sweep, item damage and `damage_item` shared with droids and auto-turrets.
@@ -832,9 +832,9 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `game/src/fx/chunks.rs` 1019 — cosmetic droid and vehicle chunk launch, bounded pool and floor contacts.
 - `bake/src/attached_effects.rs` 149 — ordered AttachEffect replay and baked hardpoint frames/repeat bounds.
-- `game/src/fx/props.rs` 279 — static prop effect frames and optional repeat timers, presentation only.
-- `render/src/bloom.rs` 300 — selective BF2 pre-clamp emissive gather and authored blur · `Bloom`
-- `render/src/bloom.wgsl` 50 — threshold, five-tap blur and display-space composite · bloom fragment entry points
+- `game/src/fx/props.rs` 415 — static prop effect frames and optional repeat timers, presentation only.
+- `render/src/bloom.rs` 319 — selective BF2 pre-clamp emissive gather and authored blur · `Bloom`
+- `render/src/bloom.wgsl` 65 — threshold, five-tap blur and display-space composite · bloom fragment entry points
 - `render/src/falling.rs` 487 — airborne leaf pool, flutter/tumble, visibility retirement and world quads · `LeafEmitter`
 
 

@@ -85,7 +85,8 @@ pub fn item_class_from_db(db: &ClassDb, item: &str) -> Option<ItemClass> {
 /// no such class or it is not a `powerupstation`.
 pub fn station_class_from_db(db: &ClassDb, class: &str) -> Option<StationClass> {
     let name = db.resolve(class)?;
-    if db.engine_base(name) != Some("powerupstation") {
+    let base = db.engine_base(name)?;
+    if base != "powerupstation" && !crate::stations::is_destructible_building(base) {
         return None;
     }
     let f = |key: &str| db.prop_f32(name, key);
@@ -126,6 +127,7 @@ pub fn station_class_from_db(db: &ClassDb, class: &str) -> Option<StationClass> 
         anim: station_anim(db, name),
         sphere: None,
         wreck_sphere: None,
+        damage_effects: Vec::new(),
         max_health: f("MaxHealth").unwrap_or(0.0),
         health_type: db
             .prop(name, "HealthType")
@@ -189,6 +191,9 @@ pub fn add_stations(
         let Some(class) = station_class_from_db(db, &name) else {
             continue;
         };
+        let destructible = db
+            .engine_base(&name)
+            .is_some_and(crate::stations::is_destructible_building);
         let radius = inst
             .props
             .iter()
@@ -196,13 +201,28 @@ pub fn add_stations(
             .find(|(k, _)| *k == radius_key)
             .and_then(|(_, v)| v.trim().parse::<f32>().ok())
             .unwrap_or(0.0);
-        if radius <= 0.0 {
+        if !destructible && radius <= 0.0
+            || destructible && (!class.max_health.is_finite() || class.max_health <= 0.0)
+        {
             continue;
         }
+        let radius = if destructible { 0.0 } else { radius };
         let c = sim.add_station_class(class);
         let class = &sim.station_classes[usize::from(c)];
         let mut s = core::sim::Station::new(c, glam::Vec3::from(inst.translation), radius);
         s.health = core::weapon::Health::new(class.max_health, class.health_type);
+        if destructible {
+            let current = inst
+                .props
+                .iter()
+                .rev()
+                .find(|(k, _)| *k == crate::classdb::fnv1a_lowercase("CurHealth"))
+                .and_then(|(_, v)| v.trim().parse::<f32>().ok())
+                .or_else(|| db.prop_f32(&name, "CurHealth"));
+            if let Some(current) = current.filter(|v| v.is_finite()) {
+                s.health.cur = current.clamp(0.0, class.max_health);
+            }
+        }
         s.instance = Some(instance as u32);
         s.transform = crate::viewer::instance_matrix(inst.rotation, inst.translation);
         s.team = inst

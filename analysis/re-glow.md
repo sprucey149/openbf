@@ -121,6 +121,13 @@ nothing we found** [V the pass; H elsewhere] — the 4× downsample is fixed (DA
 - Per sub-pass gain 5·FIX/128 = 1.17 (1.2), so 5 passes ≈ ×4.8 of energy; spread σ ≈ √(0.8·Σn²/4) ≈ 8.8 buffer texels
   ≈ 35 px at 512 wide ≈ **7.8 % of the screen height** (3 passes: ≈ 4 %).
 
+The Mustafar lava tune drops the fixed tap from 30 to 28 for all ten sub-passes. For
+Mustafar's self-lit hallway strips, the port compensates with an input weight of
+(30/28)^10 after the bloom threshold. This approximates the authored strip halo using
+the same blur kernel. The tuned lava and the strips' base material gain are preserved.
+The bloom buffer also carries the visible strips' coverage so the composite can use a
+local four-tap approximation of the PS2's 60/128 Softness blend around their edges.
+
 ### 2.4 The 0x14 segments [V code, H look]
 They draw at full material colour into the half-scale frame, so their translucent contribution is doubled on screen and
 they pass the bloom threshold easily. None was in view in the states used.

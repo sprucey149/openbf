@@ -517,22 +517,41 @@ impl Renderer {
             drop(palettes);
             let inst: Vec<Instance> = skinned
                 .iter()
-                .map(|d| Instance {
-                    model: d.model.to_cols_array_2d(),
-                    color: d.color,
-                    // Soldiers carry no cull: `SkinnedDrawCmd` has no `cull`
-                    // field, because every skinned draw the port makes is a
-                    // unit inside the near scene. Stated in the item 5 report.
-                    cull: [mesh::NO_CULL; 2],
-                    cull_near: [mesh::NO_CULL_NEAR; 2],
-                    // A skinned draw carries no COL0: the PS2's normal light
-                    // set (hemisphere + Light1 + Light2), with BF1's
-                    // character ambient where the map has one — every
-                    // skinned draw the port makes is a soldier — or, for a
-                    // spawn screen's soldier, the interface set.
-                    light: d.light as u32 | crate::affine::layer_bit(d.layer),
-                    fade: mesh::NO_FADE,
-                    lights: skinned_lights(d.lit),
+                .map(|d| {
+                    let mut inst = Instance {
+                        model: d.model.to_cols_array_2d(),
+                        color: d.color,
+                        // Soldiers carry no cull: `SkinnedDrawCmd` has no `cull`
+                        // field, because every skinned draw the port makes is a
+                        // unit inside the near scene. Stated in the item 5 report.
+                        cull: [mesh::NO_CULL; 2],
+                        cull_near: [mesh::NO_CULL_NEAR; 2],
+                        // A skinned draw carries no COL0: the PS2's normal light
+                        // set (hemisphere + Light1 + Light2), with BF1's
+                        // character ambient where the map has one — every
+                        // skinned draw the port makes is a soldier — or, for a
+                        // spawn screen's soldier, the interface set.
+                        light: d.light as u32 | crate::affine::layer_bit(d.layer),
+                        fade: mesh::NO_FADE,
+                        lights: skinned_lights(d.lit),
+                    };
+                    if d.light == LightPath::Character && d.layer != DrawLayer::Spec {
+                        let sphere = d.lit.unwrap_or(crate::LitSphere {
+                            centre: d.model.w_axis.truncate(),
+                            radius: 0.0,
+                        });
+                        if let Some([top, bottom]) = crate::lighting::character_region_light(
+                            &self.character_light_regions,
+                            &self.lighting,
+                            sphere,
+                        ) {
+                            inst.cull = [top[0], top[1]];
+                            inst.cull_near = [top[2], top[3]];
+                            inst.fade = bottom;
+                            inst.light |= crate::lighting::CHARACTER_LIGHT_REGION;
+                        }
+                    }
+                    inst
                 })
                 .collect();
             self.queue

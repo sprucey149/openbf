@@ -146,6 +146,19 @@ fn bloom_uses_preclip_marked_light_and_scene_depth() {
         .filter(|(a, b)| b[0] == 0 && a[0] > 1)
         .count();
     assert!(halo > 100, "preclip orange halo has only {halo} pixels");
+    d.color[3] = 2.0;
+    assert_eq!(
+        capture(&[d], None),
+        off,
+        "bloom gain leaves the base draw alone"
+    );
+    let boosted = capture(&[d], Some(settings));
+    assert!(boosted
+        .chunks_exact(4)
+        .zip(on.chunks_exact(4))
+        .zip(off.chunks_exact(4))
+        .any(|((a, b), base)| base[0] == 0 && a[0] > b[0].saturating_add(8)));
+    d.color[3] = 1.0;
     d.light = LightPath::Unlit;
     d.texture = Some(white);
     assert_eq!(

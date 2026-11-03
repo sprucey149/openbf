@@ -360,6 +360,16 @@ per-particle draw `FUN_00377cc0`, cull/fade `FUN_0037a090`, state records `FUN_0
 
 ## 9. PS2 frames
 
+- [V] Mustafar's Lava Bridge Control window haze comes from damage to the Conquest bridge
+  console. The PS2 capture shows three normal-blend batches using the exact CLUT of
+  `com_sfx_smoke4`. The running `com_sfx_vehiclesmoke` instances match the console's
+  first three smoke slots, including their bind hardpoints and scales 2, 3, and 3.
+  The console had 118 of 150 health in RAM, within those slots' 25–90% band.
+  The separate lava mist uses an additive red-orange texture. The console starts at
+  its authored 150 health and enters the smoke band at 135. Openbf routes destructible
+  buildings through the shared direct-hit, blast, repair, and wreck handling, with
+  each damage effect sampled at its baked hardpoint.
+
 - [V] `lead_tmp/fxp/ps2cap/` (this session; NAB1 and HOT1 spawn states, fire held 4 s pitched down, 30 fps
   recordings + stills): `crop_nab1_impact.png` — BF1 `ord_explosion` on grass: a white flash, then small yellow-orange
   additive sparks (the `a_sparks3` flipbook) inside ~20 px at ~15 m; the red bolt heads glow as soft red blobs.

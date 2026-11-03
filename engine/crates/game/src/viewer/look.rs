@@ -686,6 +686,68 @@ pub fn apply_lighting(r: &mut Renderer, scene: &Scene) {
     r.lighting.glow_gain = tune.map_or(1.0, |t| t.glow_gain);
     r.set_frame_filter(frame_filter_from(&m.lighting));
     r.set_bloom(m.hdr.map(|h| bloom_from(h, tune)));
+    r.set_character_light_regions(if m.source_game == "bf2" {
+        m.regions
+            .iter()
+            .filter_map(character_light_region)
+            .collect()
+    } else {
+        Vec::new()
+    });
+}
+
+fn character_light_region(r: &manifest::ManifestRegion) -> Option<render::CharacterLightRegion> {
+    use core::region::{Region, Shape};
+    use render::CharacterLightVolume;
+    let mut keys = r.name.split_ascii_whitespace();
+    if !keys.next()?.eq_ignore_ascii_case("shadow") {
+        return None;
+    }
+    let region = Region::from_rows(&r.shape, r.rotation, r.translation, r.size)?;
+    let volume = match region.shape {
+        Shape::Box => CharacterLightVolume::Box(region.size),
+        Shape::Sphere => CharacterLightVolume::Sphere(region.w),
+        Shape::Cylinder => CharacterLightVolume::Cylinder {
+            radius: region.size.x,
+            half_height: region.size.y,
+        },
+    };
+    let mut light = render::CharacterLightRegion {
+        centre: region.center,
+        axes: region.basis,
+        volume,
+        top: [0.0; 3],
+        bottom: [0.0; 3],
+        directional: [1.0; 2],
+    };
+    let mut has_lighting = false;
+    for (key, value) in keys.filter_map(|key| key.split_once('=')) {
+        let rgb = || {
+            let mut channels = value.split(',');
+            let mut rgb = [0.0; 3];
+            for channel in &mut rgb {
+                *channel = f32::from(channels.next()?.parse::<u8>().ok()?) / 255.0;
+            }
+            channels.next().is_none().then_some(rgb)
+        };
+        match key.to_ascii_lowercase().as_str() {
+            "colortop" => light.top = rgb()?,
+            "colorbottom" => light.bottom = rgb()?,
+            "directional" => light.directional[0] = value.parse::<f32>().ok()?.clamp(0.0, 1.0),
+            "directional1" => light.directional[1] = value.parse::<f32>().ok()?.clamp(0.0, 1.0),
+            _ => continue,
+        }
+        has_lighting = true;
+    }
+    has_lighting.then_some(light)
+}
+
+pub(super) fn hallway_lamp_bloom(m: &manifest::Manifest, material: Option<&str>) -> f32 {
+    if m.source_game == "bf2" && m.map == "mus1" && material == Some("mus1_bldg_control06") {
+        (30.0_f32 / 28.0).powi(10)
+    } else {
+        1.0
+    }
 }
 
 fn reference_water_fog(

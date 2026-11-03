@@ -44,13 +44,25 @@ pub(crate) fn gather(
     desc: PipelineDesc<'_>,
     fs: &str,
 ) -> wgpu::RenderPipeline {
+    let write_mask = if desc.blend.is_none() && matches!(fs, "fs_bloom" | "fs_bloom_mask") {
+        wgpu::ColorWrites::ALL
+    } else {
+        crate::pipelines::FRAME_WRITES
+    };
     PipelineDesc {
         fs,
         depth_write: false,
         depth_compare: Some(wgpu::CompareFunction::LessEqual),
         ..desc
     }
-    .build(device, shader, FORMAT)
+    .build_with_stencil(
+        device,
+        shader,
+        FORMAT,
+        &[],
+        write_mask,
+        wgpu::StencilState::default(),
+    )
 }
 
 struct Dest {
@@ -103,7 +115,7 @@ impl BloomState {
                 source: wgpu::ShaderSource::Wgsl(include_str!("bloom.wgsl").into()),
             },
         );
-        let pipeline = |fs, format| {
+        let pipeline = |fs, format, write_mask| {
             PipelineDesc {
                 label: fs,
                 layout: &layout,
@@ -114,14 +126,21 @@ impl BloomState {
                 depth_write: false,
                 depth_compare: None,
             }
-            .build(device, &shader, format)
+            .build_with_stencil(
+                device,
+                &shader,
+                format,
+                &[],
+                write_mask,
+                wgpu::StencilState::default(),
+            )
         };
         Self {
             settings: None,
             gather,
-            extract: pipeline("fs_extract", FORMAT),
-            blur: pipeline("fs_blur", FORMAT),
-            composite: pipeline("fs_composite", format),
+            extract: pipeline("fs_extract", FORMAT, wgpu::ColorWrites::ALL),
+            blur: pipeline("fs_blur", FORMAT, wgpu::ColorWrites::ALL),
+            composite: pipeline("fs_composite", format, crate::pipelines::FRAME_WRITES),
             bgl,
             sampler: crate::made::sampler(
                 device,

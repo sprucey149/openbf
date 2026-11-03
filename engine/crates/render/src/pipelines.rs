@@ -807,6 +807,7 @@ impl Renderer {
             spec_bg: None,
             spec_mirror: true,
             lighting: Lighting::default(),
+            character_light_regions: Vec::new(),
             time: 0.0,
             water_time: 0.0,
             atmosphere_time: None,
