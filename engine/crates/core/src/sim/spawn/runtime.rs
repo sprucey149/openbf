@@ -6,7 +6,7 @@ use super::{
 };
 use crate::aim_assist::AssistState;
 use crate::battle::SpawnOutcome;
-use crate::sim::input::{buttons, PadState};
+use crate::sim::input::{buttons, PadState, ScreenPick};
 use crate::sim::state::{Event, Sim};
 use crate::unit::{Controller, SpawnPost, UnitHandle, UnitSpec};
 use glam::{Vec2, Vec3};
@@ -1054,6 +1054,10 @@ impl Sim {
             CLASS | POST
         };
         for s in 0..self.players.len() {
+            // A pointer pick lands before this pad's accept reads it.
+            if let Some(pick) = pads.get(s).and_then(|p| p.pick) {
+                self.spawn_screen_pick(s, pick);
+            }
             let held = pads.get(s).map_or(0, |p| p.buttons);
             let bits = held & mask;
             let rose = bits & !self.prev_spawn_bits[s];
@@ -1091,6 +1095,32 @@ impl Sim {
             if rose & CLASS != 0 {
                 self.move_spawn_class(s, team, rose & buttons::SPAWN_CLASS_NEXT != 0);
             }
+        }
+    }
+
+    /// PR #102's mouse pick for slot `s` ([`PadState::pick`]): a side row on
+    /// the side screen, or a post on the spawn map that is one of the slot's
+    /// team's spawn posts this tick. Elsewhere it does nothing. The click
+    /// selects only; its double click's accept is the pad's `SPAWN_ACCEPT`.
+    fn spawn_screen_pick(&mut self, s: usize, pick: ScreenPick) {
+        match self.spawn_stage[s] {
+            SpawnStage::Side => {
+                if let Some(side) = pick.side() {
+                    self.side_choice[s] = side;
+                }
+            }
+            SpawnStage::Map => {
+                let Some(post) = pick.spawn_post() else {
+                    return;
+                };
+                let team = self.players[s]
+                    .and_then(|h| self.units.get(h.index as usize))
+                    .map_or(0, |u| u.team);
+                if self.player_spawn_posts(team).iter().any(|q| q.0 == post) {
+                    self.spawn_post_choice[s] = Some(post);
+                }
+            }
+            SpawnStage::Class | SpawnStage::Alive | SpawnStage::Accepted => {}
         }
     }
 

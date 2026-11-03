@@ -244,7 +244,7 @@ pub fn window_point(hud: &Hud, world: [f32; 2], clamp: bool, size: [f32; 2]) -> 
     let (uv, _) = map.place(world, clamp)?;
     let (base, fx) = match map.view {
         MapView::Small => (e.local(), e.pos.x / FRAME_W),
-        MapView::Spawn => (spawn_base(e), POSITION_SPAWN[0]),
+        MapView::Spawn => (spawn_base(e.scale), POSITION_SPAWN[0]),
     };
     let p = map.group(&base).transform_point3(map.local(uv));
     let sc = frame_scale(size);
@@ -254,21 +254,30 @@ pub fn window_point(hud: &Hud, world: [f32; 2], clamp: bool, size: [f32; 2]) -> 
     ])
 }
 
+/// The Map element's `Scale` in `hud`'s layout, which the Spawn view is
+/// drawn at ([`spawn_base`]); `None` when the layout has no Map element.
+pub fn map_scale(hud: &Hud) -> Option<Vec3> {
+    hud.roots
+        .iter()
+        .map(|r| &hud.elems[*r])
+        .find(|e| e.kind == Kind::Map)
+        .map(|e| e.scale)
+}
+
 /// The window pixel a world point's icon centre is drawn at in a `size`
-/// window on the spawn map page (the Map element's Spawn view).
+/// window on the spawn map page (the Map element's Spawn view), the
+/// element's `Scale` being `scale` ([`map_scale`]).
 pub fn spawn_window_point(
     map: &MapModel,
+    scale: Vec3,
     world: [f32; 2],
     clamp: bool,
     size: [f32; 2],
 ) -> Option<[f32; 2]> {
     let (uv, _) = map.place(world, clamp)?;
-    let base = Mat4::from_translation(Vec3::new(
-        POSITION_SPAWN[0] * FRAME_W,
-        POSITION_SPAWN[1] * FRAME_H,
-        0.0,
-    )) * Mat4::from_scale(Vec3::splat(0.9));
-    let p = map.group(&base).transform_point3(map.local(uv));
+    let p = map
+        .group(&spawn_base(scale))
+        .transform_point3(map.local(uv));
     let sc = frame_scale(size);
     Some([
         OVERFILL[0].0 * 4.0 / 3.0 * size[1] + anchor_shift(POSITION_SPAWN[0], size) + sc[0] * p.x,
@@ -276,10 +285,12 @@ pub fn spawn_window_point(
     ])
 }
 
-/// Hit-test command posts on the spawn map view. Returns the post closest to
-/// `point` if within `max_dist` window pixels.
+/// Hit-test command posts on the spawn map view drawn at the Map element's
+/// `scale`. Returns the post closest to `point` if within `max_dist` window
+/// pixels.
 pub fn hit_spawn_post<T: Copy>(
     map: &MapModel,
+    scale: Vec3,
     posts: &[(T, glam::Vec3)],
     point: [f32; 2],
     size: [f32; 2],
@@ -288,7 +299,7 @@ pub fn hit_spawn_post<T: Copy>(
     posts
         .iter()
         .filter_map(|(post, pos)| {
-            let pt = spawn_window_point(map, [pos.x, pos.z], true, size)?;
+            let pt = spawn_window_point(map, scale, [pos.x, pos.z], true, size)?;
             let dx = point[0] - pt[0];
             let dy = point[1] - pt[1];
             let dist = (dx * dx + dy * dy).sqrt();
@@ -300,13 +311,13 @@ pub fn hit_spawn_post<T: Copy>(
 
 /// The Spawn view's place × the element's Scale (the view switch's matrix,
 /// §2.2 [V] `FUN_003a80e8`; RAM on Hoth's spawn map: diag 0.9 at
-/// (155.27, 213.77)).
-fn spawn_base(e: &Elem) -> Mat4 {
+/// (155.27, 213.77)), the element's Scale being `scale`.
+fn spawn_base(scale: Vec3) -> Mat4 {
     Mat4::from_translation(Vec3::new(
         POSITION_SPAWN[0] * FRAME_W,
         POSITION_SPAWN[1] * FRAME_H,
         0.0,
-    )) * Mat4::from_scale(e.scale)
+    )) * Mat4::from_scale(scale)
 }
 
 impl Ctx<'_> {
@@ -350,7 +361,7 @@ impl Ctx<'_> {
             ],
             scale: frame_scale(size),
         };
-        self.map_view(i, e, map, &spawn_base(e), &s, e.alpha);
+        self.map_view(i, e, map, &spawn_base(e.scale), &s, e.alpha);
     }
 
     /// One view of the map under `base` (the view's Position × the
@@ -725,18 +736,38 @@ mod tests {
             (2u32, glam::Vec3::new(100.0, 0.0, 50.0)),
         ];
         let size = [640.0, 480.0];
-        let p1_pt = spawn_window_point(&map, [0.0, 0.0], true, size).unwrap();
-        let p2_pt = spawn_window_point(&map, [100.0, 50.0], true, size).unwrap();
+        let k = Vec3::splat(0.9);
+        let p1_pt = spawn_window_point(&map, k, [0.0, 0.0], true, size).unwrap();
+        let p2_pt = spawn_window_point(&map, k, [100.0, 50.0], true, size).unwrap();
 
         // Exact hit on post 1
-        assert_eq!(hit_spawn_post(&map, &posts, p1_pt, size, 28.0), Some(1u32));
+        assert_eq!(
+            hit_spawn_post(&map, k, &posts, p1_pt, size, 28.0),
+            Some(1u32)
+        );
         // Hit within radius of post 2
         let p2_near = [p2_pt[0] + 10.0, p2_pt[1] - 5.0];
         assert_eq!(
-            hit_spawn_post(&map, &posts, p2_near, size, 28.0),
+            hit_spawn_post(&map, k, &posts, p2_near, size, 28.0),
             Some(2u32)
         );
         // Far away from any post
-        assert_eq!(hit_spawn_post(&map, &posts, [0.0, 0.0], size, 28.0), None);
+        assert_eq!(
+            hit_spawn_post(&map, k, &posts, [0.0, 0.0], size, 28.0),
+            None
+        );
+        // At another Scale post 2 is drawn elsewhere, and the click follows
+        // the scale it is given.
+        let half = Vec3::splat(0.45);
+        let p2_half = spawn_window_point(&map, half, [100.0, 50.0], true, size).unwrap();
+        assert!(
+            (p2_half[0] - p2_pt[0]).abs() > 28.0,
+            "{p2_half:?} {p2_pt:?}"
+        );
+        assert_eq!(
+            hit_spawn_post(&map, half, &posts, p2_half, size, 28.0),
+            Some(2u32)
+        );
+        assert_eq!(hit_spawn_post(&map, half, &posts, p2_pt, size, 28.0), None);
     }
 }

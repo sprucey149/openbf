@@ -698,6 +698,12 @@ impl HudView {
         ui::hud_map::window_point(&self.hud, world, clamp, [size[0] as f32, size[1] as f32])
     }
 
+    /// The layout's Map element `Scale`, which the spawn map page is drawn
+    /// at (`ui::hud_map::map_scale`).
+    pub fn spawn_map_scale(&self) -> Option<glam::Vec3> {
+        ui::hud_map::map_scale(&self.hud)
+    }
+
     /// Paint the last [`HudView::update`] (call from the overlay hook, before
     /// the egui overlay).
     pub fn paint(

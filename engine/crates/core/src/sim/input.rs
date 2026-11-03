@@ -8,7 +8,7 @@ use super::state::Sim;
 use crate::aim_assist::{self, AssistEnv, AssistState, Lead, Sticks};
 use crate::collision::lead_point;
 use crate::perception;
-use crate::unit::UnitHandle;
+use crate::unit::{SpawnPost, UnitHandle};
 use crate::vehicle::VehicleHandle;
 use glam::Vec3;
 use serde::{Deserialize, Serialize};
@@ -117,6 +117,60 @@ pub struct PadState {
     /// logs). See `Sim::step` phase 4.
     #[serde(default, skip_serializing_if = "zero_u8")]
     pub fire_lag: u8,
+    /// [ours] (PR #102): a pointer pick on the spawn screens, applied by
+    /// [`Sim::spawn_select`] before this pad's accept. `None` for a pad, a
+    /// bot and every log written before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pick: Option<ScreenPick>,
+}
+
+/// A mouse click's choice on a spawn screen, carried in the pad so a replay
+/// or a lockstep peer applies it on the same tick ([`PadState::pick`]). The
+/// sim takes it only on the screen it belongs to, and a post only while it
+/// is one of the slot's team's spawn posts that tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ScreenPick {
+    /// The side screen's row: 0 team 1, 1 team 2, anything else Auto Assign.
+    Side(u8),
+    /// A command post by index ([`SpawnPost::Post`]).
+    Post(u16),
+    /// A command walker's post ([`SpawnPost::Walker`]).
+    Walker { index: u32, gen: u32 },
+}
+
+impl ScreenPick {
+    /// The pick of a spawn-map post.
+    pub fn post(post: SpawnPost) -> Self {
+        match post {
+            SpawnPost::Post(i) => ScreenPick::Post(i),
+            SpawnPost::Walker(h) => ScreenPick::Walker {
+                index: h.index,
+                gen: h.gen,
+            },
+        }
+    }
+
+    /// The spawn-map post picked, `None` for a side row.
+    pub fn spawn_post(self) -> Option<SpawnPost> {
+        match self {
+            ScreenPick::Side(_) => None,
+            ScreenPick::Post(i) => Some(SpawnPost::Post(i)),
+            ScreenPick::Walker { index, gen } => {
+                Some(SpawnPost::Walker(VehicleHandle { index, gen }))
+            }
+        }
+    }
+
+    /// The side row picked, `None` for a post.
+    pub fn side(self) -> Option<super::spawn::SideChoice> {
+        use super::spawn::SideChoice;
+        match self {
+            ScreenPick::Side(0) => Some(SideChoice::Team1),
+            ScreenPick::Side(1) => Some(SideChoice::Team2),
+            ScreenPick::Side(_) => Some(SideChoice::Auto),
+            ScreenPick::Post(_) | ScreenPick::Walker { .. } => None,
+        }
+    }
 }
 
 impl PadState {
@@ -158,11 +212,17 @@ impl PadState {
         self.my = 0;
     }
 
-    /// The fields a frame's pad gives only its first tick: the mouse look
-    /// and the fire lag.
+    /// The fields a frame's pad gives only its first tick: the mouse look,
+    /// the fire lag and the screen pick.
     pub fn clear_once(&mut self) {
         self.clear_look();
         self.fire_lag = 0;
+        self.pick = None;
+    }
+
+    /// Whether [`PadState::clear_once`] would change anything.
+    pub fn has_once(&self) -> bool {
+        self.has_look() || self.fire_lag != 0 || self.pick.is_some()
     }
 
     /// The fire lag of a press drawn `drawn` (0..1) of the way into the

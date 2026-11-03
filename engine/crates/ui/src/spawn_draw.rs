@@ -931,6 +931,86 @@ mod tests {
         assert_eq!(lines, ["CAPTURE ALL THE", "COMMAND POSTS"]);
     }
 
+    /// PR #102's spawn-map click lands where the post is drawn whatever
+    /// the layout's Map `Scale`: at 0.6, not the 0.9 it once assumed, the
+    /// hit point of the picked post is the centre of its drawn ring.
+    #[test]
+    fn the_spawn_map_click_follows_the_map_elements_scale() {
+        use crate::hud_map::{hit_spawn_post, map_scale, spawn_window_point, MapIcon, MapModel};
+        use manifest::hud::{HudArg, HudNode};
+        let n = HudArg::Num;
+        let layout = HudLayout {
+            name: "t".into(),
+            nodes: vec![HudNode {
+                name: "Map".into(),
+                args: vec![HudArg::Str("player1map".into())],
+                children: vec![HudNode {
+                    name: "Scale".into(),
+                    args: vec![n(0.6), n(0.6), n(0.6)],
+                    children: Vec::new(),
+                }],
+            }],
+        };
+        let empty = HudLayout {
+            name: "e".into(),
+            nodes: Vec::new(),
+        };
+        let mut art = HudArt::default();
+        art.fonts.insert(MAP_FONT.into(), font(MAP_FONT, 15));
+        let mut hud = Hud::new(&layout, &empty);
+        let post = |x: f32| MapIcon {
+            pos: [x, 0.0],
+            texture: "hud_flag_icon".into(),
+            scale: 2.5,
+            color: crate::hud_map::FRIEND,
+            ..MapIcon::default()
+        };
+        let map = MapModel {
+            extent: 400.0,
+            posts: vec![post(-100.0), post(150.0)],
+            ..MapModel::default()
+        }
+        .spawn_view(Some(1));
+        hud.map = Some(map.clone());
+        hud.spawn = Some(map_page());
+        let size = [1280.0, 720.0];
+        let f = crate::hud_draw::draw(&hud, &art, size);
+        let b = f
+            .batches
+            .iter()
+            .find(|b| b.texture == "hud_icon_flash")
+            .unwrap();
+        let vs: Vec<[f32; 3]> = f.indices[b.first as usize..(b.first + b.count) as usize]
+            .iter()
+            .map(|i| f.verts[*i as usize].pos)
+            .collect();
+        let mid = [0, 1].map(|a| {
+            let (lo, hi) = vs.iter().fold((f32::MAX, f32::MIN), |(lo, hi), v| {
+                (lo.min(v[a]), hi.max(v[a]))
+            });
+            (lo + hi) * 0.5
+        });
+        let scale = map_scale(&hud).unwrap();
+        assert_eq!(scale, glam::Vec3::splat(0.6));
+        let hit = spawn_window_point(&map, scale, [150.0, 0.0], true, size).unwrap();
+        assert!(
+            (mid[0] - hit[0]).abs() < 1.5 && (mid[1] - hit[1]).abs() < 1.5,
+            "drawn {mid:?}, hit {hit:?}"
+        );
+        let posts = [
+            (0u8, glam::Vec3::new(-100.0, 0.0, 0.0)),
+            (1u8, glam::Vec3::new(150.0, 0.0, 0.0)),
+        ];
+        assert_eq!(
+            hit_spawn_post(&map, scale, &posts, mid, size, 28.0),
+            Some(1)
+        );
+        // The old fixed 0.9 puts the click target off the drawn post.
+        let old =
+            spawn_window_point(&map, glam::Vec3::splat(0.9), [150.0, 0.0], true, size).unwrap();
+        assert!((old[0] - mid[0]).abs() > 28.0, "old {old:?}, drawn {mid:?}");
+    }
+
     #[test]
     fn side_row_hit_test_identifies_team_rows_accurately() {
         let size = [640.0, 480.0];

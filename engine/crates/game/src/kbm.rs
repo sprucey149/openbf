@@ -267,6 +267,8 @@ pub struct Kbm {
     pub invert_y: bool,
     held: Vec<Trigger>,
     taps: u32,
+    /// A spawn-screen click's pick, kept like a tap until a tick takes it.
+    pick: Option<core::sim::ScreenPick>,
     pending: (f64, f64),
     mouse_aim: bool,
     want_grab: bool,
@@ -281,6 +283,7 @@ impl Default for Kbm {
             invert_y: false,
             held: Vec::new(),
             taps: 0,
+            pick: None,
             pending: (0.0, 0.0),
             mouse_aim: false,
             want_grab: false,
@@ -320,6 +323,12 @@ impl Kbm {
 
     pub fn tap_bits(&mut self, bits: u32) {
         self.taps |= bits;
+    }
+
+    /// A pointer pick on a spawn screen for the next tick's pad (the last
+    /// one wins until a tick takes it).
+    pub fn set_pick(&mut self, pick: core::sim::ScreenPick) {
+        self.pick = Some(pick);
     }
 
     pub fn wheel(&mut self, dy: f32) {
@@ -426,6 +435,7 @@ impl Kbm {
             buttons: pad.buttons | held | self.taps | look.buttons,
             mx: look.mx,
             my: look.my,
+            pick: self.pick.or(pad.pick),
             ..pad
         }
     }
@@ -437,15 +447,18 @@ impl Kbm {
         self.pending.0 -= f64::from(pad.mx) * f64::from(LOOK_UNIT);
         self.pending.1 -= f64::from(pad.my) * f64::from(LOOK_UNIT);
         self.taps = 0;
+        self.pick = None;
     }
 
     pub fn drop_taps(&mut self) {
         self.taps = 0;
+        self.pick = None;
     }
 
     pub fn release_keys(&mut self) {
         self.held.clear();
         self.taps = 0;
+        self.pick = None;
     }
 
     pub fn grabbed(&self) -> bool {
