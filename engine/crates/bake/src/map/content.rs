@@ -311,6 +311,7 @@ pub(super) fn bake_content(
     let correct_column = super::render_column::enabled(original.as_deref())?;
     let correct_lookout = super::render_lookout::enabled(original.as_deref())?;
     let render_faces = super::render_faces::Faces::of(original.as_deref())?;
+    let render_offsets = super::render_offsets::Offsets::of(original.as_deref())?;
     let mut reflected_door_groups = std::collections::HashMap::new();
     // Card VTURD (`crate::turret_rig`): an armed building's model is written
     // as one primitive per (segment, node), so its gun can turn.
@@ -853,6 +854,23 @@ pub(super) fn bake_content(
                 }
                 parsed_models.insert(model.name.to_ascii_lowercase(), model);
             }
+        }
+    }
+    // Fit the final drawing, after recovery has trimmed or replaced contributor
+    // models. Applying earlier would fit a different topology or be overwritten.
+    for model in parsed_models.values_mut() {
+        if render_offsets.apply(model)? {
+            let alphas = alpha_table.model(model);
+            let glb = if contact_models.contains(&model.name.to_ascii_lowercase()) {
+                crate::glb::world_contact_surface_to_glb(model, &alphas, hdr.is_some())?
+            } else if kind == Content::Map {
+                crate::glb::world_model_to_glb(model, &alphas, hdr.is_some())?
+            } else if kind == Content::Common && turret_rigs.station_model(&model.name) {
+                crate::glb::station_model_to_glb(model, &alphas)?
+            } else {
+                crate::glb::model_to_glb(model, &alphas, false)?
+            };
+            std::fs::write(out.join("models").join(format!("{}.glb", model.name)), glb)?;
         }
     }
     // The far scene's LOWD extension (`crate::far_lowd`, card UTAS): what a
