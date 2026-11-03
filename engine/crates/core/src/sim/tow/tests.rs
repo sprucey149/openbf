@@ -90,7 +90,7 @@ fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
     let mut s = Sim::empty(42);
     s.tow_frames = Some(Arc::new(Leg));
     s.weapon_classes[0].ordnance.max_damage = 50.0;
-    s.weapon_classes[0].ordnance.scales = [1.0; 7];
+    s.weapon_classes[0].ordnance.scales = [0.25; 7];
     s.friendly_fire_scale = 0.0;
     let mut params = walker::WalkerParams {
         clips: vec![None; walker::ANIM_COUNT],
@@ -160,6 +160,7 @@ fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
     ));
     assert_eq!(s.vehicle(target).unwrap().health.cur, 150.0);
     s.vehicle_mut(target).unwrap().team = Some(1);
+    s.vehicle_mut(target).unwrap().health.cur = 120.0;
     assert!(s.step_tripped_tow(
         target,
         &mut anchors,
@@ -168,8 +169,8 @@ fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
         crate::TICK_DT,
         &mut points
     ));
-    assert_eq!(s.vehicle(target).unwrap().health.cur, 100.0);
-    s.vehicle_mut(target).unwrap().health.cur = 150.0;
+    assert_eq!(s.vehicle(target).unwrap().health.cur, 82.5);
+    s.vehicle_mut(target).unwrap().health.cur = 120.0;
     s.vehicle_mut(target).unwrap().team = Some(0);
     s.ground_rules = crate::soldier::GroundRules::Bf2;
     let rng = s.melee_lcg.state();
@@ -181,7 +182,11 @@ fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
         crate::TICK_DT,
         &mut points
     ));
-    assert_eq!(s.vehicle(target).unwrap().health.cur, 50.0);
+    assert_eq!(
+        s.vehicle(target).unwrap().health.cur,
+        45.0,
+        "BF2 sends two packets based on max health 150, not remaining 120 or weapon damage 50"
+    );
     assert_eq!(points.len(), WRAPS);
     let mut oracle = crate::lcg::GameLcg::new(rng);
     let _ = oracle.unit();
@@ -226,4 +231,112 @@ fn the_live_span_uses_the_gun_tangent_in_its_range() {
     assert_eq!(points[CHORDS], Vec3::ZERO);
     let length = points.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>();
     assert!(length > 10.0 && length < 12.0, "{length}");
+}
+
+#[test]
+fn ps2_tow_previous_leg_is_only_supplied_above_two_attachments() {
+    use crate::collision::Shape;
+    use glam::Mat4;
+    let part = |pos, leg| TowPrimitive {
+        frame: Mat4::from_translation(pos),
+        shape: Shape::Sphere { radius: 1.0 },
+        offset: Vec3::X,
+        leg: Some(leg),
+    };
+    let parts = [
+        part(Vec3::ZERO, 0),
+        part(Vec3::X * 5.0, 2),
+        part(Vec3::Z * 5.0, 3),
+    ];
+    let anchor = |prim| Anchor {
+        prim,
+        at: Vec3::X,
+        tangent: Vec3::ZERO,
+    };
+    for count in [1, 2, 3] {
+        let mut anchors = vec![anchor(2); count];
+        anchors[count - 1] = anchor(0);
+        let mut points = Vec::new();
+        let active = advance_latch(
+            &parts,
+            &mut anchors,
+            Vec3::X * 10.0,
+            Vec3::NEG_X,
+            TowClass {
+                initial_length: 60.0,
+                length: 60.0,
+            },
+            0.0,
+            &mut points,
+        );
+        assert_eq!(active, count <= 2, "attachment count {count}");
+        assert_eq!(anchors.len(), count + usize::from(count <= 2));
+        if count <= 2 {
+            assert_eq!(anchors.last().unwrap().prim, 1);
+        }
+    }
+}
+
+#[test]
+fn ps2_tow_previous_leg_count_includes_the_initial_latch_and_each_insert() {
+    use crate::collision::Shape;
+    use glam::Mat4;
+    let parts: Vec<_> = [0.0, 5.0]
+        .into_iter()
+        .enumerate()
+        .map(|(leg, x)| TowPrimitive {
+            frame: Mat4::from_translation(Vec3::X * x),
+            shape: Shape::Sphere { radius: 1.0 },
+            offset: Vec3::X,
+            leg: Some(leg as u8),
+        })
+        .collect();
+    let mut anchors = vec![Anchor {
+        prim: 0,
+        at: Vec3::X,
+        tangent: Vec3::ZERO,
+    }];
+    let mut points = Vec::new();
+    let class = TowClass {
+        initial_length: 60.0,
+        length: 60.0,
+    };
+    assert!(advance_latch(
+        &parts,
+        &mut anchors,
+        Vec3::X * 10.0,
+        Vec3::NEG_X,
+        class,
+        0.0,
+        &mut points
+    ));
+    assert_eq!(
+        anchors.iter().map(|a| a.prim).collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    // With two existing records, reversal is still admitted. The inserted
+    // third record is counted on the next update, when reversal is rejected.
+    assert!(advance_latch(
+        &parts,
+        &mut anchors,
+        Vec3::NEG_X * 5.0,
+        Vec3::X,
+        class,
+        0.0,
+        &mut points
+    ));
+    assert_eq!(
+        anchors.iter().map(|a| a.prim).collect::<Vec<_>>(),
+        vec![0, 1, 0]
+    );
+    assert!(!advance_latch(
+        &parts,
+        &mut anchors,
+        Vec3::X * 10.0,
+        Vec3::NEG_X,
+        class,
+        0.0,
+        &mut points
+    ));
+    assert_eq!(anchors.len(), 3);
 }

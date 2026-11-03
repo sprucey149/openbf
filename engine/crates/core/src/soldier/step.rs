@@ -88,9 +88,8 @@ impl Soldier {
                     if Self::roll_predicate(fwd_in, strafe_in)
                         && self.stance != Stance::Prone
                         && c.roll_speed_factor > 0.0
-                        && self.energy >= c.energy_cost_roll
+                        && self.pay_stamina(c.energy_cost_roll, c)
                     {
-                        self.energy -= c.energy_cost_roll;
                         self.set_stance(Stance::Roll);
                         // BF2 FUN_002471b0: scale planar velocity to exactly
                         // RollSpeedFactor*MaxSpeed when speed in (0.1, target).
@@ -156,25 +155,25 @@ impl Soldier {
                 self.energy += rate * dt;
             }
         } else if self.stance == Stance::Sprint {
-            self.energy -= c.energy_drain_sprint * dt;
-        } else if self.stance.jetting() {
-            // BF2's rate is 0 from stance 4 up (re-stance-roll.md §4.3d): a
-            // hovering Vader neither regains nor spends energy (card JETP).
-        } else {
-            let idle = fwd_in == 0.0 && strafe_in == 0.0;
+            self.pay_stamina(c.energy_drain_sprint * dt, c);
+        } else if matches!(self.stance, Stance::Stand | Stance::Crouch | Stance::Prone) {
+            // FUN_00240bf8 B2:160209-160228: ordinary recovery uses the
+            // incoming horizontal velocity, even after the stick is released.
+            // All other postures have zero rate unless a weapon overrides it.
+            let idle = self.vel.x * self.vel.x + self.vel.z * self.vel.z < 1.0;
             let rate = if idle {
                 c.energy_restore_idle
             } else {
                 c.energy_restore
             };
             if rate < 0.0 {
-                self.pay_energy(-rate * dt);
+                self.pay_stamina(-rate * dt, c);
             } else {
                 self.energy += rate * dt;
             }
         }
-        self.energy = self.energy.clamp(0.0, c.energy_bar);
-        if self.energy_depleted && self.energy >= ENERGY_RECOVER_THRESHOLD {
+        self.energy = self.energy.clamp(c.energy_floor(), c.energy_bar);
+        if self.energy_depleted && self.energy >= c.energy_recover_threshold {
             self.energy_depleted = false;
         }
 

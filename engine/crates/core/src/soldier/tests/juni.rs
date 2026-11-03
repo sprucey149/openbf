@@ -275,7 +275,7 @@ fn juni_landing_lock_edges_held_press_and_energy() {
             go(&mut s, &JUMP, &c, rules, true);
             assert_eq!(s.stance == Stance::Jump, !depleted, "energy {rules:?}");
             if !depleted {
-                assert!(s.energy == 0.0 && s.energy_depleted);
+                assert!(s.energy < 0.0 && s.energy_depleted);
             }
         }
         for stance in [

@@ -122,7 +122,7 @@ fn the_bubble_rim_is_clear_at_the_centre_and_full_at_the_edge() {
     assert!((at(4.0) - 1.0).abs() < 1e-6);
 }
 
-/// The look reads no charge: full and nearly spent draw the same.
+/// The look reads no charge: full, nearly spent and debt draw the same.
 #[test]
 fn the_bubble_does_not_depend_on_the_charge() {
     let mut s = core::sim::Sim::empty(1);
@@ -142,13 +142,15 @@ fn the_bubble_does_not_depend_on_the_charge() {
     let full = vis.bubbles(&s, &cam, Vec3::NEG_Y);
     assert_eq!(full.len(), 1);
     assert!(matches!(full[0].shape, ParticleShape::Shaded { .. }));
-    s.units[h.index as usize]
-        .droideka
-        .as_mut()
-        .unwrap()
-        .shield
-        .points = 1.0;
-    assert_eq!(vis.bubbles(&s, &cam, Vec3::NEG_Y), full);
+    for points in [1.0, 0.0, -900.0] {
+        s.units[h.index as usize]
+            .droideka
+            .as_mut()
+            .unwrap()
+            .shield
+            .points = points;
+        assert_eq!(vis.bubbles(&s, &cam, Vec3::NEG_Y), full);
+    }
 }
 
 #[test]

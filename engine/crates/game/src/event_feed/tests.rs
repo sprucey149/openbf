@@ -133,6 +133,16 @@ fn droideka_target_shield_and_hidden_energy_feedback() {
         .as_mut()
         .unwrap()
         .shield
+        .points = -900.0;
+    assert_eq!(
+        s.feed.target(&s.sim, 0).unwrap().shield,
+        Some(("Shield".into(), 0.0))
+    );
+    s.sim.units[h.index as usize]
+        .droideka
+        .as_mut()
+        .unwrap()
+        .shield
         .on = false;
     assert_eq!(s.feed.target(&s.sim, 0).unwrap().shield, None);
     s.sim.events = vec![Event::Droideka {

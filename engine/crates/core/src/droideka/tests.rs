@@ -630,8 +630,8 @@ fn refused_ball_jump_explains_the_spent_bar_but_not_airtime() {
         report.jumped && !report.energy_refused,
         "the soldier's payment lets the last jump empty the bar"
     );
-    assert_eq!(r.d.shield.points, 0.0);
-    assert!(r.d.sprint_spent, "an emptied bar is spent");
+    assert!(r.d.shield.points < 0.0);
+    assert!(r.d.sprint_spent, "an overdrawn bar is spent");
 }
 
 /// Roll until the ball is down again after a jump.
@@ -793,4 +793,92 @@ fn the_jump_button_leaves_a_standing_droidekas_shield_alone() {
     assert_eq!(r.d.shield.points, plain.d.shield.points);
     assert!(r.d.shield.points < full - 500.0);
     assert!(!r.d.sprint_spent);
+}
+
+/// The approved shared bar applies the soldier's PS2 debt/threshold rule
+/// to the ball, and keeps that same balance when the shield stands up.
+#[test]
+fn ps2_stamina_shared_bar_keeps_jump_debt_until_shield_recharge_repays_it() {
+    let mut r = Rig::rolling();
+    r.d.shield.points = 1.0;
+    r.c.shield.rate_off = 0.0;
+    assert!(
+        r.tick(&Input {
+            jump: true,
+            ..human()
+        })
+        .jumped
+    );
+    assert_eq!(r.d.shield.points, -899.0);
+    assert!(r.d.sprint_spent);
+    r.d.state = IDLE;
+    r.d.order = Order::Deploy;
+    r.c.shield.rate_off = 300.0;
+    r.tick(&Input {
+        shield: true,
+        ..human()
+    });
+    assert!(!r.d.shield.on, "a bar in debt cannot raise the shield");
+    assert_eq!(r.d.shield.points, -889.0);
+    r.d.shield.points = 589.0;
+    r.tick(&human());
+    assert!(r.d.sprint_spent);
+    r.tick(&human());
+    assert!(!r.d.sprint_spent, "20 percent recovery share is 600 points");
+    assert!(r.d.shield.points < 750.0);
+    r.tick(&Input {
+        shield: true,
+        ..human()
+    });
+    assert!(r.d.shield.on);
+    let before = r.d.shield.points;
+    r.tick(&human());
+    assert!(
+        r.d.shield.points < before,
+        "standing shield spends the same bar"
+    );
+}
+
+#[test]
+fn ps2_stamina_ball_sprint_debt_is_bounded_by_the_shared_class_floor() {
+    let mut r = Rig::rolling();
+    r.d.shield.points = 1.0;
+    r.d.boosting = true;
+    r.d.tick_sprint(10.0, &human(), &r.c);
+    assert_eq!(r.d.shield.points, -900.0);
+    assert!(r.d.sprint_spent && !r.d.boosting);
+}
+
+#[test]
+fn shield_debt_has_empty_bar_cues_and_cannot_absorb_damage() {
+    for points in [0.0, -900.0] {
+        let mut r = Rig::rolling();
+        r.c.shield.rate_off = 0.0;
+        r.d.shield.points = points;
+        r.d.shield.on = true;
+        let report = r.tick(&Input {
+            jump: true,
+            shield: true,
+            ..human()
+        });
+        assert!(!r.d.shield.on);
+        assert_eq!(
+            report.cues().collect::<Vec<_>>(),
+            vec![Cue::ShieldOff, Cue::EnergyRefused]
+        );
+        let report = r.tick(&Input {
+            jump: true,
+            ..human()
+        });
+        assert_eq!(
+            report.cues().collect::<Vec<_>>(),
+            vec![Cue::EnergyRefused],
+            "no repeated shield-off sound"
+        );
+        assert_eq!(r.d.shield.absorb(25.0, 1.0), 25.0);
+        assert_eq!(
+            r.d.shield.points, points,
+            "damage must not erase or increase debt"
+        );
+    }
 }

@@ -107,7 +107,7 @@ fn v6_sprint_ramp_and_hysteresis() {
     let mut s3 = s.clone();
     run(&mut s3, &sprint, &c, 200);
     assert_ne!(s3.stance, Stance::Sprint, "empty pool ends sprint");
-    assert!(s3.energy_depleted || s3.energy >= ENERGY_RECOVER_THRESHOLD);
+    assert!(s3.energy_depleted || s3.energy >= c.energy_recover_threshold);
 
     // Strafe past the +-60 deg keep-cone -> drops to stand.
     let veer = PadState {
@@ -830,8 +830,8 @@ fn bf2s_jump_boosts_the_forward_part_and_not_the_side_part() {
     assert!((-s.vel.x - 2.335 * 0.5).abs() < 0.005, "aside {}", -s.vel.x);
 }
 
-struct Props(&'static [(&'static str, &'static str)]);
-impl crate::weapon::PropSource for Props {
+struct Props<'a>(&'a [(&'a str, &'a str)]);
+impl crate::weapon::PropSource for Props<'_> {
     fn prop(&self, key: &str) -> Option<&str> {
         self.0.iter().find(|(k, _)| *k == key).map(|(_, v)| *v)
     }
@@ -861,9 +861,9 @@ fn a_jump_overdraws_the_energy_bar_and_a_depleted_one_refuses() {
     s.energy = 4.0;
     tick(&mut s, &JUMP, &c);
     assert_eq!(s.stance, Stance::Jump);
-    assert!(s.energy == 0.0 && s.energy_depleted);
+    assert!(s.energy < 0.0 && s.energy_depleted);
     let mut s = Soldier::new(Vec3::ZERO);
-    (s.energy, s.energy_depleted) = (20.0, true);
+    (s.energy, s.energy_depleted) = (19.0, true);
     tick(&mut s, &JUMP, &c);
     assert!(s.stance == Stance::Stand && s.grounded);
     // At a sprint's speed the jump costs EnergyCostJumpSprint.
@@ -1205,5 +1205,237 @@ fn knock_landing_speed_and_draw() {
             tick1(&mut s, &PadState::default(), &c);
         }
         assert_eq!(s.stance, want, "draw {draw}");
+    }
+}
+
+/// PS2 FUN_001e2010 / FUN_001e1fc0, re-stance-roll §4.3d.
+#[test]
+fn ps2_stamina_debt_and_authored_recovery_threshold() {
+    let c = SoldierConstants::from_props(&Props(&[
+        ("EnergyMinSprint", "12"),
+        ("EnergyCostJump", "30"),
+    ]));
+    let mut s = Soldier::new(Vec3::ZERO);
+    tick(&mut s, &PadState::default(), &c);
+    s.energy = 4.0;
+    assert!(s.pay_jump(&c, Vec2::ZERO));
+    assert_eq!(s.energy, -26.0);
+    assert!(s.energy_depleted);
+    assert!(!s.pay_jump(&c, Vec2::ZERO));
+    assert!(s.pay_jump(
+        &SoldierConstants {
+            energy_cost_jump: 0.0,
+            ..c
+        },
+        Vec2::ZERO
+    ));
+    tick(&mut s, &PadState::default(), &c);
+    assert_eq!(s.energy, -25.5, "recovery must repay debt");
+    s.energy = 11.0;
+    tick(&mut s, &PadState::default(), &c);
+    assert!(s.energy_depleted);
+    tick(&mut s, &PadState::default(), &c);
+    assert!(!s.energy_depleted, "authored threshold is 12, not 25");
+    s.energy = 1.0;
+    assert!(s.pay_stamina(200.0, &c));
+    assert_eq!(
+        s.energy, -30.0,
+        "class floor is the largest configured cost"
+    );
+}
+
+#[test]
+fn ps2_stamina_short_bar_roll_is_paid_as_debt() {
+    let c = SoldierConstants::default();
+    let mut s = Soldier::new(Vec3::ZERO);
+    s.energy = 1.0;
+    tick(
+        &mut s,
+        &PadState {
+            ly: 32767,
+            buttons: buttons::ROLL_STANCE,
+            ..Default::default()
+        },
+        &c,
+    );
+    assert_eq!(s.stance, Stance::Roll);
+    assert!(s.energy < 0.0 && s.energy_depleted);
+    for energy in [0.0, 1.0] {
+        let mut spent = Soldier::new(Vec3::ZERO);
+        spent.energy = energy;
+        spent.energy_depleted = true;
+        tick(
+            &mut spent,
+            &PadState {
+                ly: 32767,
+                buttons: buttons::ROLL_STANCE,
+                ..Default::default()
+            },
+            &c,
+        );
+        assert_eq!(spent.stance, Stance::Stand, "a depleted bar refuses roll");
+        assert!(spent.energy_depleted);
+    }
+}
+
+#[test]
+fn ps2_stamina_class_aliases_and_floor_apply_before_first_tick() {
+    for key in ["EnergyMinSprint", "EnergyOverheat"] {
+        let c = SoldierConstants::from_props(&Props(&[(key, "120"), ("EnergyCostRoll", "45")]));
+        assert_eq!(c.energy_recover_threshold, 120.0);
+        assert_eq!(c.energy_bar, 120.0);
+        let mut s = Soldier::new(Vec3::ZERO);
+        s.energy = 1.0;
+        assert!(s.pay_stamina(200.0, &c));
+        assert_eq!(s.energy, -45.0);
+        assert!(s.energy_depleted);
+        let c = SoldierConstants::from_props(&Props(&[(key, "-10")]));
+        assert_eq!(c.energy_recover_threshold, 0.0);
+    }
+    for c in [
+        SoldierConstants {
+            energy_cost_jump: 40.0,
+            ..Default::default()
+        },
+        SoldierConstants {
+            energy_cost_jump_sprint: 40.0,
+            ..Default::default()
+        },
+        SoldierConstants {
+            energy_cost_roll: 40.0,
+            ..Default::default()
+        },
+        SoldierConstants {
+            jet_energy_drain: 40.0,
+            ..Default::default()
+        },
+    ] {
+        assert_eq!(c.energy_floor(), -40.0);
+    }
+    let mut s = Soldier::new(Vec3::ZERO);
+    s.energy = 1.0;
+    assert!(s.pay_energy(30.0));
+    assert_eq!(s.energy, 0.0, "hero helper retains its zero clamp");
+}
+
+#[test]
+fn ps2_stamina_small_bar_clamps_default_threshold_before_authored_override() {
+    for (bar, threshold) in [("10", 10.0), ("0", 0.0), ("-10", 0.0)] {
+        let c = SoldierConstants::from_props(&Props(&[("EnergyBar", bar)]));
+        assert_eq!(c.energy_bar, threshold);
+        assert_eq!(c.energy_recover_threshold, threshold);
+    }
+}
+
+#[test]
+fn ps2_recovery_is_limited_to_ground_postures() {
+    let c = SoldierConstants::default();
+    for stance in [
+        Stance::Stand,
+        Stance::Crouch,
+        Stance::Prone,
+        Stance::Jump,
+        Stance::Fall,
+        Stance::Roll,
+        Stance::Thrown,
+        Stance::Tumble,
+        Stance::GetUp,
+        Stance::Dead,
+    ] {
+        let mut s = Soldier::new(Vec3::Y * 10.0);
+        s.stance = stance;
+        s.grounded = !matches!(stance, Stance::Jump | Stance::Fall | Stance::Thrown);
+        s.energy = 5.0;
+        s.step(DT, &PadState::default(), &c, GroundRules::Bf2);
+        let expected = if matches!(stance, Stance::Stand | Stance::Crouch | Stance::Prone) {
+            5.5
+        } else {
+            5.0
+        };
+        assert_eq!(s.energy, expected, "{stance:?}");
+    }
+}
+
+#[test]
+fn ps2_recovery_uses_actual_horizontal_speed_even_with_released_stick() {
+    let c = SoldierConstants::default();
+    for stance in [Stance::Stand, Stance::Crouch, Stance::Prone] {
+        for (vel, idle) in [
+            (Vec3::X * 0.999, true),
+            (Vec3::X, false),
+            (Vec3::Z * 2.0, false),
+            (Vec3::Y * 2.0, true),
+        ] {
+            for pad in [PadState::default(), full_fwd()] {
+                let mut s = Soldier::new(Vec3::ZERO);
+                s.stance = stance;
+                s.vel = vel;
+                s.energy = 5.0;
+                s.step(DT, &pad, &c, GroundRules::Bf2);
+                let rate = if idle {
+                    c.energy_restore_idle
+                } else {
+                    c.energy_restore
+                };
+                assert_eq!(s.energy, 5.0 + rate * DT, "{stance:?} {vel:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn ps2_recovery_weapon_rate_override_survives_airborne_posture() {
+    for rate in [6.0, -6.0, 0.0] {
+        let c = SoldierConstants {
+            energy_override: Some(rate),
+            ..Default::default()
+        };
+        let mut s = Soldier::new(Vec3::Y * 10.0);
+        s.stance = Stance::Jump;
+        s.grounded = false;
+        s.energy = 5.0;
+        s.step(DT, &PadState::default(), &c, GroundRules::Bf2);
+        assert_eq!(s.energy, 5.0 + rate * DT);
+    }
+}
+
+#[test]
+fn shared_locomotion_hero_floor_applies_to_every_stamina_payment() {
+    let c = SoldierConstants {
+        hero: true,
+        ..Default::default()
+    };
+    assert_eq!(c.energy_floor(), 0.0);
+    for cost in [
+        c.energy_cost_jump,
+        c.energy_cost_jump_sprint,
+        c.energy_cost_roll,
+        200.0,
+    ] {
+        let mut s = Soldier::new(Vec3::ZERO);
+        s.energy = 0.1;
+        assert!(s.pay_stamina(cost, &c));
+        assert_eq!(s.energy, 0.0);
+        assert!(s.energy_depleted);
+    }
+}
+
+#[test]
+fn ps2_stamina_floor_uses_all_four_authored_cost_fields() {
+    for (key, field) in [
+        ("EnergyCostJump", 0),
+        ("EnergyCostJumpSprint", 1),
+        ("EnergyCostRoll", 2),
+        ("JetEnergyDrain", 3),
+    ] {
+        let c = SoldierConstants::from_props(&Props(&[(key, "47")]));
+        let costs = [
+            c.energy_cost_jump,
+            c.energy_cost_jump_sprint,
+            c.energy_cost_roll,
+            c.jet_energy_drain,
+        ];
+        assert_eq!(costs[field], 47.0, "{key}");
+        assert_eq!(c.energy_floor(), -47.0, "{key}");
     }
 }

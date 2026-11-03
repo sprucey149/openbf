@@ -661,6 +661,8 @@ impl Sim {
                     }
                     let stamina_cheat = self.cheats.infinite_stamina;
                     let mut consts = self.units[i].consts;
+                    consts.hero =
+                        self.hero_class(self.units[i].team) == Some(self.units[i].spec.class);
                     self.saber_constants(i, &mut consts);
                     self.force_constants(i, &mut consts);
                     // The zoom press and its cancels, then the turn: zoomed,

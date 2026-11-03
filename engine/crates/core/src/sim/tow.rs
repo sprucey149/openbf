@@ -381,6 +381,10 @@ impl Sim {
         let Some(walker) = self.vehicle(target) else {
             return false;
         };
+        // FUN_00323178 B2:315990 reads target +0x174. FUN_00267bf0
+        // B2:185259 loads it from class +0x2ec, the MaxHealth setter
+        // (FUN_0026a340 B2:186807-186808, hash 0x19971f1b).
+        let max_health = walker.health.max;
         let Some(frames) = &self.tow_frames else {
             return false;
         };
@@ -420,9 +424,12 @@ impl Sim {
         let a = anchors[index];
         let p = &parts[a.prim];
         let dir = p.frame.transform_vector3(a.at).normalize_or_zero();
-        let desc = self.weapon_classes[shooter.weapon_class]
+        let mut desc = self.weapon_classes[shooter.weapon_class]
             .ordnance
             .damage_desc_charged(0.0, false, 1.0);
+        // PS2 B2 FUN_00323178:315990 and B1 FUN_002814f8:206359:
+        // tripped wraps replace only the packet base, retaining its scales.
+        desc.damage = max_health;
         for owner in seats {
             // BF2 state 3 forces a friendly-fire scale of one.
             let team = (!bf2).then_some(shooter.team);
@@ -503,7 +510,15 @@ fn advance_latch(
     if length > limit {
         return false;
     }
-    let previous = anchors.iter().rev().nth(1).and_then(|p| parts[p.prim].leg);
+    // FUN_003223d0 B2:314962,315027 clears records then inserts the
+    // initial contact. FUN_00323178 B2:315850-315858 counts occupied
+    // records (including that contact), before inserting the next at 316497.
+    // Its >2 gate (316196-316197) therefore matches anchors.len() > 2.
+    let previous = if anchors.len() > 2 {
+        parts[anchors[anchors.len() - 2].prim].leg
+    } else {
+        None
+    };
     let leg = last.leg.expect("latched leg");
     for w in points.windows(2) {
         let delta = w[1] - w[0];

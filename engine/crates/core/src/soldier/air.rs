@@ -206,7 +206,7 @@ impl Soldier {
         stick: (f32, f32),
         direction: Option<Vec3>,
     ) -> bool {
-        if self.fuel < c.jet_fuel_min_border || !self.pay_energy(c.jet_energy_drain) {
+        if self.fuel < c.jet_fuel_min_border || !self.pay_stamina(c.jet_energy_drain, c) {
             return false;
         }
         self.fuel = (self.fuel - c.jet_fuel_initial).max(0.0);

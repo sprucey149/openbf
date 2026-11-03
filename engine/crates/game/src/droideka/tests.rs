@@ -187,5 +187,33 @@ fn the_shield_hum_fades_as_the_shield_wears() {
     assert_eq!(shield_gain(3000.0, 3000.0), 1.0);
     assert_eq!(shield_gain(1500.0, 3000.0), 0.75);
     assert_eq!(shield_gain(0.0, 3000.0), 0.0);
+    assert_eq!(shield_gain(-900.0, 3000.0), 0.0);
     assert_eq!(shield_gain(10.0, 0.0), 0.0);
+}
+
+#[test]
+fn shield_debt_keeps_the_hum_silent() {
+    let mut sim = core::sim::Sim::empty(42);
+    let mut c = core::droideka::DroidekaClass::default();
+    c.shield.sound = Some("test_shield_hum".into());
+    let h = sim
+        .spawn(&core::unit::UnitSpec {
+            droideka: Some(std::sync::Arc::new(c)),
+            ..core::unit::UnitSpec::player(0, glam::Vec3::ZERO)
+        })
+        .unwrap();
+    let d = sim.unit_mut(h).unwrap().droideka.as_mut().unwrap();
+    d.shield.points = -900.0;
+    d.shield.on = true;
+    let loops = shield_loops(&sim);
+    assert_eq!(loops.len(), 1);
+    assert_eq!(loops[0].2, 0.0);
+    sim.unit_mut(h)
+        .unwrap()
+        .droideka
+        .as_mut()
+        .unwrap()
+        .shield
+        .on = false;
+    assert!(shield_loops(&sim).is_empty());
 }
