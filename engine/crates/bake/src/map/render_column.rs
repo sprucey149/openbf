@@ -9,14 +9,16 @@
 //! taken exclusively from the player's donor model. Collision and model bounds
 //! are not changed. Only the fingerprinted non-PS2 input enters this path.
 
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use glam::Vec3;
 use mungefs::model::{Model, Segment};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 const MODEL: &str = "uta1_prop_col";
 const INPUT_SHA256: &str = "83de312bcf01796789e7e0828da363543896ee39208a09a8cd7225c3b12957c5";
+const LOWD: &str = "uta1_prop_collowd";
+const LOWD_SHA256: &str = "892bdde6a8f218f61e4129027c490cac04f9f07f638f4ced78805e364928713d";
 const DONOR_CENTER_XZ: [f32; 2] = [-0.09712195, -0.1141746];
 const DONOR_YAW_DEGREES: f32 = -16.309;
 const SPHERE_RADIUS: [f32; 7] = [0., 1., 1.732_050_8, 2., 1.732_050_8, 1., 0.];
@@ -56,6 +58,57 @@ pub(super) fn enabled(original: Option<&[u8]>) -> Result<bool> {
         }
     }
     Ok(false)
+}
+
+/// The donor-only LOWD has the same misplaced profile as its original HIGH.
+/// Reuse the already-corrected donor drawing; the PS2 has no LOWD for this
+/// column. Keep the LOWD's own header and the shared HIGH-sphere draw switch.
+pub(super) fn lowd(
+    original: &[u8],
+    models: &HashMap<String, Model>,
+) -> Result<Option<super::render_reassembly::Reassembled>> {
+    if !enabled(Some(original))? {
+        return Ok(None);
+    }
+    let chunks = mungefs::content_chunks(mungefs::open(original)?)?;
+    let donor = chunks.iter().find(|chunk| {
+        chunk.tag == *b"modl"
+            && chunk
+                .child_string(b"NAME")
+                .is_some_and(|name| name.eq_ignore_ascii_case(LOWD))
+    });
+    ensure!(
+        donor.is_some_and(|chunk| format!("{:x}", Sha256::digest(chunk.payload)) == LOWD_SHA256),
+        "render column: changed or missing LOWD donor"
+    );
+    let high = models
+        .get(MODEL)
+        .ok_or_else(|| anyhow!("render column: missing parsed HIGH"))?;
+    let low = models
+        .get(LOWD)
+        .ok_or_else(|| anyhow!("render column: missing parsed LOWD"))?;
+    ensure!(
+        !high.bone_space
+            && !low.bone_space
+            && high.segments.len() == 1
+            && high.segments[0].positions.len() == 129
+            && high.segments[0].triangles.len() == 198
+            && low.segments.len() == 1
+            && low.segments[0].positions.len() == 69
+            && low.segments[0].triangles.len() == 90,
+        "render column: LOWD reuse requires the corrected HIGH and native LOWD"
+    );
+    let lighting = high
+        .segments
+        .iter()
+        .map(|segment| crate::glb::light_path(high, segment))
+        .collect();
+    let mut model = low.clone();
+    model.segments.clone_from(&high.segments);
+    Ok(Some(super::render_reassembly::Reassembled {
+        model,
+        lighting,
+    }))
 }
 
 fn direction(point: [f32; 3]) -> usize {

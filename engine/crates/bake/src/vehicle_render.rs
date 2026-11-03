@@ -82,6 +82,17 @@ fn nose(model: &mut Model) -> Result<()> {
         }
     }
     ensure!(changed == 74, "changed TIE donor nose channels: {changed}");
+    // The brace's two upper corner welds share the nose's authored Z offset.
+    // Its other six corners already agree; moving the entire brace would
+    // disturb those contacts. Four stream vertices represent the two welds.
+    let mut brace = 0;
+    for p in &mut s.positions {
+        if (p[0] - 1.11134).abs() < 0.001 && (p[1] - 1.977598).abs() < 0.001 && p[2] < -0.7 {
+            p[2] += 0.5378;
+            brace += 1;
+        }
+    }
+    ensure!(brace == 4, "changed TIE donor brace welds: {brace}");
     Ok(())
 }
 
@@ -310,6 +321,12 @@ mod tests {
     fn bomber(selected: usize) -> Model {
         let mut p = vec![[0.; 3]; 2022];
         p[..selected].fill([1.4006, 2.68334, -3.1041]);
+        p[100..104].copy_from_slice(&[
+            [1.11134, 1.977598, -1.75835],
+            [1.11134, 1.977598, -1.32811],
+            [1.11134, 1.977598, -1.75835],
+            [1.11134, 1.977598, -1.32811],
+        ]);
         let segment = Segment {
             vertex_count: 2022,
             index_count: 0,
@@ -357,7 +374,16 @@ mod tests {
         assert_eq!(model.segments[1].positions, before);
     }
     #[test]
-    fn only_selected_nose_positions_move_and_no_recipe_leaves_them_alone() {
+    fn a_changed_brace_count_rejects_after_nose_work_without_partial_edits() {
+        let mut model = bomber(74);
+        model.segments[1].positions[100][1] = 0.;
+        let before = model.segments[1].positions.clone();
+        let instructions = Instructions(HashMap::from([("imp_fly_tiebomber".into(), false)]));
+        assert!(instructions.apply(&mut model).is_err());
+        assert_eq!(model.segments[1].positions, before);
+    }
+    #[test]
+    fn only_selected_nose_and_brace_positions_move_and_no_recipe_leaves_them_alone() {
         let mut model = bomber(74);
         let before = model.clone();
         Instructions::of(None).unwrap().apply(&mut model).unwrap();
@@ -367,8 +393,17 @@ mod tests {
             .unwrap();
         assert_eq!(model.segments[0].positions, before.segments[0].positions);
         assert_eq!(
-            &model.segments[1].positions[74..],
-            &before.segments[1].positions[74..]
+            &model.segments[1].positions[74..100],
+            &before.segments[1].positions[74..100]
+        );
+        assert_eq!(
+            &model.segments[1].positions[104..],
+            &before.segments[1].positions[104..]
+        );
+        assert!(
+            (model.segments[1].positions[100][2] - before.segments[1].positions[100][2] - 0.5378)
+                .abs()
+                < 1e-6
         );
         assert_eq!(model.segments[1].normals, before.segments[1].normals);
         assert_eq!(model.segments[1].uvs, before.segments[1].uvs);

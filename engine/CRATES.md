@@ -94,12 +94,13 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/map/texture_alias.rs` 238 — bind native donor far artwork under the public corrected sky name, preserving both tiers and optional-file lifecycle · `far_alias`, `install`
 - `bake/src/map/render_recovery.rs` 615 — exact shared-LVL presentation lookup and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
 - `bake/src/map/render_symmetry.rs` 450 — restore missing DEA1 door halves, fit the lower frame from donor opening profiles and share canonical leaf motion · `enabled`, `model`, `door_parts`.
-- `bake/src/map/render_chamber.rs` 145 — fingerprinted Xbox chamber annex drawing from canonical contact surfaces, retaining donor core and texture projection · `Chamber`.
+- `bake/src/map/render_chamber.rs` 145 — fingerprinted Xbox HIGH/LOWD chamber annex drawing clipped from canonical contact surfaces, retaining the donor core and donor UV projection · `Chamber`.
 - `bake/src/map/render_cloudcity.rs` 90 — copies fingerprinted donor bars into the Cloud City ramp drawing; retains donor topology/materials and canonical simulation inputs · `models`
-- `bake/src/map/render_column.rs` 320 — fingerprinted Utapau donor-group deformation and donor-vertex stem bands, preserving canonical collision · `enabled`, `model`.
+- `bake/src/map/render_column.rs` 373 — fingerprinted Utapau donor-group deformation, donor-vertex stem bands and full corrected donor HIGH reuse inside the original LOWD header, preserving canonical collision · `enabled`, `model`, `lowd`.
+- `bake/src/map/render_lookout.rs` 426 — fingerprinted Citadel donor roof/corner weld profiles, existing-rim floor reassembly and copied upper-lip face; retains donor UVs/materials and gameplay headers · `enabled`, `model`.
 - `bake/src/map/render_entrance.rs` 462 — fingerprinted donor corner deformation, front-rim profile and existing-vertex floor/edge reassembly for the Rhen Var tunnel entrance · `Entrance`.
 - `bake/src/map/render_faces.rs` 428 — fingerprinted donor edge flips for Rhen Var, Geonosis, Tatooine and Felucia, with one donor-vertex rock face closure; preserves drawing attributes and collision · `Faces`.
-- `bake/src/map/render_conform.rs` 647 — fingerprinted plant/special-tunnel drawing from active collision with donor materials/UVs, solid coverage and unchanged gameplay headers · `Conformation`.
+- `bake/src/map/render_conform.rs` 814 — fingerprinted plant/tunnel/cliff contact drawing from active collision with donor materials/UVs, planar hangar UV continuation and accepted HIGH-stream reuse for hangar LOWD, preserving gameplay headers · `Conformation`.
 - `bake/src/map/collision_standin.rs` 719 — lower-detail missing-model stand-ins from corrected collision shapes and own-copy material/UV projection · `fit`; called only for measured absent model types.
 - `bake/src/side_classes.rs` 66 — pull BF2 SIDE/TUR.LVL classes placed by a map but absent from its LVL · `side_classes_lvl`, `pull_side_classes`; joined by `bake/src/map/content.rs`.
 - `bake/src/shell.rs` 373 — BF2 shell logo, menu movie packs and music bake · `bake_shell`, `mvs_segments`, `movie_segments`, `read_movie`; ISO fallback and transcode/output rules in the module header (`analysis/re-bf2-shell.md` §1, §4).
@@ -122,7 +123,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/fpm.rs` 187 — `bake fpm`: a first-person arm model (FPM LVL) as a skinned GLB with its clip-table clips, the `hp_camera` bone added where the rig lacks it · `bake_fpms`, `arm_model`, `BakedFpm`; `analysis/re-first-person-arms.md` §1.
 - `bake/src/soldier/lod.rs` 257 — authored `GeometryLowRes` companions, high-rig bind/joint remap at bake time, PS2 strip-count and sphere metadata; issue #69.
 - `bake/src/shadow.rs` 224 — BF1 vehicle shadow sidecars beside their models, never a reason to fail a bake · `write_model`, `bake`; `analysis/re-vehicle-shadow.md` §9.
-- `bake/src/vehicle_render.rs` 397 — fingerprinted donor nose-channel translation and missile-envelope rack casing instructions; simulation headers and collision remain unchanged.
+- `bake/src/vehicle_render.rs` 432 — fingerprinted donor nose/brace weld translations and donor-textured missile-envelope rack casing instructions; simulation headers and collision remain unchanged.
 - `bake/src/vehicle.rs` 1201 — SIDE vehicle assets and `vehicles.ron`, including destruction geometry, collision, bind poses and walker skins · `bake_vehicles`, `VEHICLE_BASES`; output and pose rules in the module header, donor artwork instructions in `vehicle_render.rs`; walker metadata in `walker.rs`.
 - `bake/src/anim_sets.rs` 354 — resolve soldier animation inventories, sets, masks and root speeds · `Inventory`, `SoldierSets`, `plan_bf1`, `plan_bf2`, `masks`, `root_speed`; algorithms in `bake/src/anim_sets/bf1.rs` and `bf2.rs`; PS2-memory referee: `bake/tests/suite/anim_sets.rs`.
 - `bake/src/anim_sets/bf1.rs` 211 — BF1 soldier animation tables and fallbacks · `build`, `Tables`, `FALLBACK`, `weapon_set`; rules in the module and parent `anim_sets.rs` headers.

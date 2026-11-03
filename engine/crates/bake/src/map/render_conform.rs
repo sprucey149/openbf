@@ -195,6 +195,56 @@ impl Conformation {
         result.name.clone_from(&artwork.name);
         Ok(result)
     }
+    /// Reuse the already-reviewed cliff drawing at distance. Its named plane
+    /// UV projection has already run on HIGH; retain the donor LOWD header.
+    pub(super) fn hangar_lowd(
+        &self,
+        original: &[u8],
+        models: &HashMap<String, Model>,
+    ) -> Result<Option<Model>> {
+        const HIGH: &str = "uta_bldg_cliff_hanger";
+        const LOWD: &str = "uta_bldg_cliff_hangerlowd";
+        if !self.0.contains_key(HIGH) {
+            return Ok(None);
+        }
+        let chunks = mungefs::content_chunks(mungefs::open(original)?)?;
+        ensure!(
+            chunks.iter().any(|chunk| chunk.tag == *b"modl"
+                && chunk
+                    .child_string(b"NAME")
+                    .is_some_and(|name| name.eq_ignore_ascii_case(LOWD))
+                && format!("{:x}", Sha256::digest(chunk.payload))
+                    == "ea98d6fd54cc92287d2f1036c05bd391dd4542a4eab5a124f60a5a9cc8c7a006"),
+            "render conform: changed or missing hangar LOWD donor"
+        );
+        let high = models
+            .get(HIGH)
+            .ok_or_else(|| anyhow!("render conform: missing hangar HIGH"))?;
+        let low = models
+            .get(LOWD)
+            .ok_or_else(|| anyhow!("render conform: missing hangar LOWD"))?;
+        ensure!(
+            !high.bone_space
+                && !low.bone_space
+                && high
+                    .segments
+                    .iter()
+                    .map(|s| s.triangles.len())
+                    .sum::<usize>()
+                    == 27
+                && low
+                    .segments
+                    .iter()
+                    .map(|s| s.triangles.len())
+                    .sum::<usize>()
+                    == 70,
+            "render conform: hangar LOWD reuse requires corrected HIGH and native LOWD"
+        );
+        let mut result = low.clone();
+        result.segments.clone_from(&high.segments);
+        Ok(Some(result))
+    }
+
     pub(super) fn of(original: Option<&[u8]>) -> Result<Self> {
         let mut selected = HashMap::new();
         if let Some(original) = original {
