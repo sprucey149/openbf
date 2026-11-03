@@ -251,7 +251,7 @@ is fixed since) - no BF2 number above uses that column.
 The ball sprint (the maintainer, 2026-11-01, a deliberate port choice replacing the 2026-10-30 "no sprint" rule):
 a player's droideka sprints in ball form only, and BF2's rolling boost IS that sprint, so there is one mechanic.
 From the disc (`re-droideka.md` §4): multiplier 2, forward stick over 0.9, the slower boost turn, `EnergyDrainSprint`.
-OURS: it spends the one stamina bar, the shield's charge, not the hidden jump pool, at the class's share of the bar
+OURS: it spends the one stamina bar, the shield's charge, not the disc's hidden jump pool, at the class's share of the bar
 (`EnergyDrainSprint` / `EnergyBar`: 30 %/s, 900 points/s, 3.3 s from full; its recharge is `AddShieldOff`, paused
 while sprinting); the button is held like a soldier's, not latched as on the disc; a bar that reaches empty, by sprint
 or by the shield, locks the sprint until it is back at the soldier's recover share (25 %, 750 points, 2.5 s). These
@@ -259,10 +259,18 @@ values are PROVISIONAL: a maintainer's timed full-bar ball sprint and empty-to-n
 Transitions cannot refill anything: the one pool and the lockout carry through a fold and an unfold unchanged, only
 ordinary recharge moves them. Unrolling ends the sprint on the press; a sprint button held through a fold starts once
 the ball is formed, if the bar allows. A bar spent to empty and unrolled gives the shield only what recharged. Bots
-never sprint and their hashes do not move. Measured in the sim, not on a disc: 24 m/s, 79 m per full bar. The ball
-jump keeps its separate hidden pool. A refused grounded ball jump
-now emits an explicit movement-energy message for its player; this is a named UI addition. The
-native final jump may exhaust a positive pool: refusal still tests `depleted`, not `energy < cost`.
+never sprint and their hashes do not move. Measured in the sim, not on a disc: 24 m/s, 79 m per full bar.
+
+The ball jump (the maintainer, 2026-11-02): like a soldier's, whose jump and sprint share one stamina bar, it spends
+the same bar as the ball's sprint, the shield's charge, and the disc's separate hidden pool (`EnergyRestore`,
+`EnergyRestoreIdle`) is gone from the port. The soldier's rule (BF2 `FUN_001e2010`, `core::soldier`'s `pay_jump`) at
+the class's own share of the bar: `EnergyCostJump` / `EnergyBar` (BF2 30 of 100: 900 of 3000 points), the dearer
+`EnergyCostJumpSprint` while sprinting (no droideka class authors it). A bar that cannot cover the cost is emptied
+and the jump still happens; only a spent bar (emptied and not yet back at the 25 % recover share, the sprint's
+lockout) refuses, so a refusal always shows on the bar. The stamina cheat makes it free. OURS and PROVISIONAL,
+measure: the maintainer's ball jumps from a full and a low bar in live play. A refused grounded ball jump emits
+"Shield charge spent — wait for recharge" for its player, a named UI addition. Bots never jump, so their play does not
+change; the droideka's hash record lost the pool's two fields.
 The aimed-at unit's existing shield HUD field now shows charge while its sphere is raised.
 
 Droideka `CHUNKSECTION` geometry was omitted from the side vehicle bake. Both CIS classes already

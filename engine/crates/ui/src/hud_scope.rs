@@ -35,17 +35,13 @@
 use crate::hud_draw::{color, Ctx, Quad, Screen};
 use glam::Mat4;
 
-/// The scope picture's sheet (BF2: INGAME.LVL; BF1: COMMON.LVL).
+/// The scope picture's sheet: BF2's (INGAME.LVL), on every map. BF1's
+/// COMMON.LVL copy is not baked (`bake::map::content`).
 pub const SHEET: &str = "weapon_scope";
 
-/// What the scope overlay draws this frame.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScopeView {
-    /// The sheet: [`SHEET`], or a common layer's own copy as
-    /// `"<layer>/<sheet>"` (e.g. `common_bf1/weapon_scope`), which the
-    /// game's HUD view finds in that layer's textures.
-    pub sheet: String,
-}
+/// The scope overlay is up this frame; it draws [`SHEET`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScopeView;
 
 /// The quarter-screen quads in window pixels for a `size` window: (rect
 /// x0, y0, x1, y1; uv u0, v0, u1, v1). The 4:3 box first (four quads),
@@ -72,7 +68,7 @@ pub fn quads(size: [f32; 2]) -> Vec<([f32; 4], [f32; 4])> {
 }
 
 impl Ctx<'_> {
-    pub(crate) fn scope(&mut self, v: &ScopeView, size: [f32; 2]) {
+    pub(crate) fn scope(&mut self, _: &ScopeView, size: [f32; 2]) {
         let s = Screen {
             origin: [0.0, 0.0],
             scale: [1.0, 1.0],
@@ -86,7 +82,7 @@ impl Ctx<'_> {
                     rect,
                     uv,
                     color: color([255.0; 3], 1.0),
-                    texture: &v.sheet,
+                    texture: SHEET,
                     additive: false,
                     shadow: false,
                     boxed: false,

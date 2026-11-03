@@ -6,7 +6,7 @@
 //!
 //! 1. Zoomed on a `ZoomFirstPerson` weapon the HUD draws the scope's
 //!    `weapon_scope` overlay (`ui::hud_scope`, `analysis/re-zoom.md` §8),
-//!    BF1's own picture on a BF1 map; the weapon panel is off
+//!    BF2's picture on every map, BF1's too; the weapon panel is off
 //!    (`weaponsDisable`), the reticle and the target readout stay; zoomed
 //!    out it is all as before.
 //! 2. A scoped shot at a bot is a direct hit (its age is not
@@ -202,12 +202,12 @@ const SIZE: [u32; 2] = [1280, 720];
 
 /// What the HUD draws: the scope's sheet, the weapon panel's ammo count,
 /// the reticle, the readout's name and bar.
-fn drawn(v: &mut game::hud_feed::HudView, m: &ui::hud::HudModel, sheet: &str) -> [bool; 5] {
+fn drawn(v: &mut game::hud_feed::HudView, m: &ui::hud::HudModel) -> [bool; 5] {
     for _ in 0..3 {
         v.update(m, 0.5, SIZE);
     }
     [
-        v.drawn_sheets().any(|t| t == sheet),
+        v.drawn_sheets().any(|t| t == ui::hud_scope::SHEET),
         v.bounds("player1weapon1ammo").is_some(),
         v.bounds("player1reticule_shape").is_some()
             || v.bounds("player1reticule_outline").is_some(),
@@ -219,21 +219,14 @@ fn drawn(v: &mut game::hud_feed::HudView, m: &ui::hud::HudModel, sheet: &str) ->
 /// Case 1, on BF2 and BF1 maps.
 #[test]
 fn the_scope_overlay_is_up_while_zoomed_and_the_readout_stays() {
-    for (map, game, class, sides, sheet) in [
+    for (map, game, class, sides) in [
         (
             "bf2_kam1",
             "bf2",
             "rep_inf_ep2_jettrooper_sniper",
             ["rep", "cis"],
-            "weapon_scope",
         ),
-        (
-            "bf1_tat2",
-            "bf1",
-            "all_inf_marksman",
-            ["all", "imp"],
-            "common_bf1/weapon_scope",
-        ),
+        ("bf1_tat2", "bf1", "all_inf_marksman", ["all", "imp"]),
     ] {
         let (Some(mut s), Some(mut v)) = (scoped(map, game, class, sides, 40.0), hud_view()) else {
             eprintln!("skip {map}: no bake");
@@ -248,7 +241,7 @@ fn the_scope_overlay_is_up_while_zoomed_and_the_readout_stays() {
         let m = model(&s, &feed);
         assert!(m.target.is_some(), "{map}: the reticle picks the enemy");
         assert_eq!(
-            drawn(&mut v, &m, sheet),
+            drawn(&mut v, &m),
             [false, true, true, true, true],
             "{map} unzoomed: no scope, panel, reticle, readout name and bar"
         );
@@ -262,14 +255,11 @@ fn the_scope_overlay_is_up_while_zoomed_and_the_readout_stays() {
                 "{map}: step {step}"
             );
             let m = model(&s, &feed);
-            assert_eq!(
-                m.scope.as_ref().map(|v| v.sheet.as_str()),
-                Some(sheet),
-                "{map} step {step}"
-            );
+            // BF2's sheet on both games' maps.
+            assert_eq!(m.scope, Some(ui::hud_scope::ScopeView), "{map} step {step}");
             assert!(m.target.is_some(), "{map} step {step}: the pick in scope");
             assert_eq!(
-                drawn(&mut v, &m, sheet),
+                drawn(&mut v, &m),
                 [true, false, true, true, true],
                 "{map} step {step}: scope, no panel, reticle, readout name and bar"
             );
@@ -283,7 +273,7 @@ fn the_scope_overlay_is_up_while_zoomed_and_the_readout_stays() {
         );
         let m = model(&s, &feed);
         assert_eq!(
-            drawn(&mut v, &m, sheet),
+            drawn(&mut v, &m),
             [false, true, true, true, true],
             "{map} zoomed out"
         );
@@ -413,21 +403,14 @@ fn width(v: &game::hud_feed::HudView, name: &str) -> f32 {
 #[test]
 fn a_sniper_headshot_shows_the_critical_mark_and_a_body_shot_does_not() {
     let dt = 1.0 / 30.0;
-    for (map, game, class, sides, sheet) in [
+    for (map, game, class, sides) in [
         (
             "bf2_kam1",
             "bf2",
             "rep_inf_ep2_jettrooper_sniper",
             ["rep", "cis"],
-            "weapon_scope",
         ),
-        (
-            "bf1_tat2",
-            "bf1",
-            "all_inf_marksman",
-            ["all", "imp"],
-            "common_bf1/weapon_scope",
-        ),
+        ("bf1_tat2", "bf1", "all_inf_marksman", ["all", "imp"]),
     ] {
         for in_scope in [false, true] {
             for head in [false, true] {
@@ -501,7 +484,11 @@ fn a_sniper_headshot_shows_the_critical_mark_and_a_body_shot_does_not() {
                     head,
                     "{what}: the mark drawn"
                 );
-                assert_eq!(v.drawn_sheets().any(|t| t == sheet), in_scope, "{what}");
+                assert_eq!(
+                    v.drawn_sheets().any(|t| t == ui::hud_scope::SHEET),
+                    in_scope,
+                    "{what}"
+                );
                 // The readout: the name stays, the bar drops at once.
                 let frac1 = m.target.as_ref().expect("still picked").health_fraction;
                 assert!(frac1 < frac0, "{what}: {frac0} -> {frac1}");

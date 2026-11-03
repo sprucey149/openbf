@@ -8,6 +8,12 @@ use super::{
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 
+/// Sheets in BF1's COMMON.LVL that BF2's INGAME.LVL also has and the port
+/// draws only from BF2, on every map (BF2's HUD everywhere,
+/// `analysis/plan/FEATURE_SET.md`): `weapon_scope`, the sniper scope
+/// (`ui::hud_scope::SHEET`). No BF1 model, effect or HUD element names it.
+pub(super) const BF1_COMMON_UNUSED: &[&str] = &["weapon_scope"];
+
 pub(super) fn bake_content(
     lvl_path: &str,
     outdir: &str,
@@ -1080,11 +1086,22 @@ pub(super) fn bake_content(
             consumed.push(name);
         }
     }
+    // BF1's common sheets the port never draws (`BF1_COMMON_UNUSED`).
+    let bf1_common = kind == Content::Common
+        && crate::gameplay::source_game(Path::new(lvl_path))?
+            .map_or(bf2_models == 0, |g| g == "bf1");
     for t in &all_textures {
         if consumed.contains(&t.name.to_ascii_lowercase()) {
             continue;
         }
         let lower = t.name.to_ascii_lowercase();
+        if bf1_common && BF1_COMMON_UNUSED.contains(&lower.as_str()) {
+            eprintln!(
+                "tex_ {}: BF1's copy is not baked; BF2's is drawn on every map",
+                t.name
+            );
+            continue;
+        }
         // ALPHA RULE v2, design D3: the baked file keeps its alpha iff at
         // least one DRAW in this bake was judged MASK or BLEND. A texture a
         // segment names but no such draw needs bakes opaque.

@@ -463,7 +463,7 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         hud.ambush.hit(e);
     }
     hud.spawn = m.spawn.clone();
-    hud.scope = m.scope.clone().filter(|_| alive);
+    hud.scope = m.scope.filter(|_| alive);
     hud.banner = m
         .round_end
         .as_ref()

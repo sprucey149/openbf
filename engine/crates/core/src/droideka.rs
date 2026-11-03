@@ -97,7 +97,8 @@ pub enum Cue {
     ShieldOn,
     ShieldOff,
     Jump,
-    /// A grounded ball jump was refused by the separate movement energy pool.
+    /// A grounded ball jump was refused: the shared bar is spent (it ran
+    /// empty and is not yet back at the recover share).
     EnergyRefused,
 }
 
@@ -119,7 +120,7 @@ pub struct Input {
     /// The sprint button held: a ball's sprint, nothing on its feet.
     pub boost: bool,
     pub human: bool,
-    /// The stamina cheat: a ball's sprint costs the bar nothing.
+    /// The stamina cheat: a ball's sprint and jump cost the bar nothing.
     pub free_sprint: bool,
     pub cramped: bool,
 }
@@ -171,11 +172,10 @@ pub struct Droideka {
     pub spin: [f32; 2],
     pub lean: f32,
     pub boosting: bool,
-    /// The bar ran empty: no sprint until it is back over the recover share.
-    /// A player's only: a bot never sprints and never sets it.
+    /// The bar ran empty: no sprint and no ball jump until it is back over
+    /// the recover share (the soldier's depleted latch). A player's only: a
+    /// bot never sprints or jumps and never sets it.
     pub sprint_spent: bool,
-    pub energy: f32,
-    pub depleted: bool,
     pub air: f32,
     pub water: f32,
     pub shield: Shield,
@@ -197,8 +197,6 @@ impl Droideka {
             lean: 0.0,
             boosting: false,
             sprint_spent: false,
-            energy: c.energy_bar,
-            depleted: false,
             air: 0.0,
             water: c.water_interval,
             shield: Shield::full(&c.shield),
@@ -335,7 +333,6 @@ impl Droideka {
         } else {
             self.walk(dt, input, c, body, &mut report);
         }
-        self.tick_energy(dt, input, c);
         self.tick_sprint(dt, input, c);
         let (sy, cy) = fmath::sin_cos(body.yaw);
         if self.state == ROLLING {
@@ -393,7 +390,6 @@ impl Droideka {
             self.dir,
             // One byte, so a unit that never sprints hashes as it always did.
             self.boosting as u8 | (self.sprint_spent as u8) << 1,
-            self.depleted as u8,
             self.shield.on as u8,
             self.order as u8,
             self.alive as u8,
@@ -406,7 +402,6 @@ impl Droideka {
             self.spin[0],
             self.spin[1],
             self.lean,
-            self.energy,
             self.air,
             self.water,
             self.shield.points,

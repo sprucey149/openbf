@@ -698,9 +698,11 @@ impl EventFeed {
                     cue: core::droideka::Cue::EnergyRefused,
                     ..
                 } if unit == viewer => {
-                    // Ours: explain the hidden movement pool without replacing the shield bar.
+                    // Ours: a refused ball jump means the shared bar (the
+                    // shield's charge) ran empty and is not yet back at the
+                    // recover share.
                     self.say(
-                        "Roll energy depleted — wait for recharge".to_owned(),
+                        "Shield charge spent — wait for recharge".to_owned(),
                         message_color::OWN,
                         tick,
                     );

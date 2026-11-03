@@ -16,7 +16,7 @@ reverse engineering), `analysis/dev-tools.md` (black box, profiling), `scripts/R
   textures and assets. Public correction tables of gameplay numbers and names are approved, preferring instructions
   applied to the player's own files. The repo holds no meshes, art, audio, script bytecode or localized text.
 - **Standing decisions:** BF2's HUD on every map, with the heat ring around the reticle. BF1 maps throw BF1 grenades, with
-  BF2's grenade HUD. Vehicle and unit health are separate. Droidekas sprint only as a ball, on the shared bar. The rest
+  BF2's grenade HUD. Vehicle and unit health are separate. Droidekas sprint only as a ball, on the shared bar; their ball jump spends it too. The rest
   are in `analysis/plan/FEATURE_SET.md`; changing one is the maintainer's call.
 - **Game data never enters Git or a PR:** no textures, models, audio, disc images, extracted scripts, baked assets or
   packed builds. Decompiled text never goes into code or docs.
