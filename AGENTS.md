@@ -19,6 +19,9 @@ black box and profiling, and `scripts/README.md` for tools.
   extracted scripts, baked assets, packed builds and localized text.
 - Explain reverse-engineered behavior in your own words, citing function and line.
   Keep decompiler text out of code, comments and documentation.
+- Unlicensed reconstructions are factual references only. Never copy code or close
+  paraphrases; public notes may use original words with project names and PC addresses.
+  Establish PC leads in the PS2 files and original game before changing Rust.
 - Keep `core` deterministic. Use `core::fmath`, seeded simulation randomness and
   fixed ticks. Every new PROVISIONAL, OURS or INTERIM value names its replacement
   measurement with `replace:`, `measure:` or `trace:`.

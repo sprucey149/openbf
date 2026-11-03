@@ -215,7 +215,7 @@ def _scan_bytes(path, needles, hit_files, counts, details, is_elf=False):
     return len(data)
 
 
-def search(terms, srcs=(), elf=False, quiet=False):
+def search(terms, srcs=(), elf=False, quiet=False, pc=False):
     """The absence search; returns the receipt dict (not yet written). Decomp corpora b1+b2 always; `srcs` raw files/dirs and
     (elf) the two ELFs are grepped as bytes. Prints the usual per-term report unless quiet."""
     rec = dict(version=VERSION, tool="re_check.py absent", terms=list(terms), corpora=[], sources=[], total_hits=0)
@@ -296,6 +296,7 @@ def write_receipt(rec, card=None):
 
 def absent(c0, terms):
     card, srcs, elf, ts, it = None, [], False, [], iter(terms)
+    pc = False
     for x in it:
         if x == "--card":
             card = next(it, None)
@@ -305,7 +306,7 @@ def absent(c0, terms):
             elf = True
         else:
             ts.append(x)
-    rec = search(ts, srcs, elf)
+    rec = search(ts, srcs, elf, pc=pc)
     rid = write_receipt(rec, card)
     print(f"[receipt:{rid}]  {len(ts)} term(s), {rec['total_hits']} hit(s) in all sources — "
           f"{os.path.relpath(loop_dir(), ROOT)}/receipts/{rec['card']}_{rid}.json")
