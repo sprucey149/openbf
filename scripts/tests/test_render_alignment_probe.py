@@ -36,8 +36,8 @@ class ProbeTests(unittest.TestCase):
     def test_layers_do_not_borrow_each_others_bodies(self):
         class Scene:
             collisions={'geo':(Path(),{'prims':[
-                dict(name='foot',mask=0,kind='sphere',dims=[1,0,0],translation=[0,0,0]),
-                dict(name='bolt',mask=0,kind='sphere',dims=[2,0,0],translation=[4,0,0])]})}
+                dict(name='foot',mask=1.0,kind='sphere',dims=[1,0,0],translation=[0,0,0]),
+                dict(name='bolt',mask=16.0,kind='sphere',dims=[2,0,0],translation=[4,0,0])]})}
             def resolve_class(self, instance):
                 return dict(base='prop',collision=[('soldier','foot'),('ordnance','bolt')])
             def resolve(self, instance):

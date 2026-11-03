@@ -38,6 +38,10 @@ class LayerContact:
         folder, entry = scene.collisions[geometry]
         bodies = ([('collisionmesh', 0)] if entry.get('glb') else []) + [
             (str(p['name']).lower(), p.get('mask', 0)) for p in entry.get('prims', [])]
+        if any(type(mask) not in (int, float) or not 0 <= mask <= 255 or int(mask) != mask for _name, mask in bodies):
+            raise ValueError('invalid authored collision mask')
+        # RON's numeric reader represents even integer-valued masks as floats.
+        bodies = [(name, int(mask)) for name, mask in bodies]
         active = layer_bodies(bodies, cls.get('collision', []), layer)
         offset = int(bool(entry.get('glb')))
         if offset and active[0]:

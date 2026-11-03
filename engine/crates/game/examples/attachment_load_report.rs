@@ -504,11 +504,11 @@ mod tests {
     }
     #[test]
     fn new_tier_candidate_changes_catalog() {
-        let p=std::env::temp_dir().join(format!("attachment-catalog-{}",std::process::id()));
+        let p = std::env::temp_dir().join(format!("attachment-catalog-{}", std::process::id()));
         std::fs::create_dir_all(&p).unwrap();
-        let before=Inputs::catalog(&p).unwrap();
+        let before = Inputs::catalog(&p).unwrap();
         std::fs::write(p.join("hull.tier2.ktx2"), b"new fallback candidate").unwrap();
-        assert!(before!=Inputs::catalog(&p).unwrap());
+        assert!(before != Inputs::catalog(&p).unwrap());
         std::fs::remove_dir_all(p).unwrap();
     }
     #[test]

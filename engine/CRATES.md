@@ -90,7 +90,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/map.rs` 910 — map/common public entry points, input-reduction helpers, manifest re-exports and regression tests · `bake_map`, `bake_common`; calls the private content baker.
 - `bake/src/map/content.rs` 1519 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
 - `bake/src/map/render_alignment.rs` 319 — fingerprinted donor-art transforms, end stretches and donor-vertex column caps; preserves PS2 outputs, gameplay headers and collision · `Alignment`
-- `bake/src/map/render_reassembly.rs` 437 — rejoin verified donor-only Jabba room/pipe props into canonical render models without changing simulation placements or collision · `models`
+- `bake/src/map/render_reassembly.rs` 477 — rejoin verified donor-only Jabba room/pipe and Polis Massa hangar-platform props into canonical render models without changing simulation placements or collision · `models`
 - `bake/src/map/texture_alias.rs` 238 — bind native donor far artwork under the public corrected sky name, preserving both tiers and optional-file lifecycle · `far_alias`, `install`
 - `bake/src/map/render_recovery.rs` 615 — exact shared-LVL presentation lookup and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
 - `bake/src/map/render_symmetry.rs` 450 — restore missing DEA1 door halves, fit the lower frame from donor opening profiles and share canonical leaf motion · `enabled`, `model`, `door_parts`.
