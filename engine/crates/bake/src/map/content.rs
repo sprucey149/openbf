@@ -1340,7 +1340,8 @@ pub(super) fn bake_content(
                 layer_color: w.layer.color,
                 wet_cells: w.wet_cells(),
                 patches: w.patches.len(),
-                triangles: crate::water_glb::triangle_count(&w),
+                triangles: crate::water_glb::render_triangle_count(&w, cfg),
+                vertex_diffuse: crate::water_glb::diffuse_divisions(&w, cfg).is_some(),
                 config: cfg.map(|c| crate::water_glb::manifest_config(c, &w)),
                 wet: Some(manifest::ManifestWetMask::from_nibbles(
                     w.info.grid,

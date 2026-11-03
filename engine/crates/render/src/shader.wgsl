@@ -790,7 +790,7 @@ fn fs_speckle(in: VsOut) -> @location(0) vec4<f32> {
         lobe = pow(max(dot(globals.speckle_light, normalize(d)), 0.0), 32.0);
     }
     let col = min(globals.speckle_ambient + globals.speckle_specular * lobe, vec4<f32>(GS_MAX));
-    let rgb = textureSample(t_color, s_color, uv).rgb * srgb_to_linear(col.rgb) * in.color.rgb;
+    let rgb = textureSample(t_color, s_color, uv).rgb * srgb_to_linear(col.rgb);
     var w = col.a * in.color.a * far_fade(in.view_dist);
     if globals.fog_on > 0.5 && globals.water_fog_begin > 0.0 && in.view_dist > globals.water_fog_begin {
         w = w * (1.0 - fog_amount(in.fog_depth));

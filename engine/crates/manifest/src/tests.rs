@@ -343,6 +343,7 @@ fn full_manifest() -> Manifest {
             wet_cells: 128,
             patches: 16,
             triangles: 512,
+            vertex_diffuse: true,
             config: Some(full_water_config()),
             wet: Some(ManifestWetMask::from_nibbles(
                 2,
@@ -795,6 +796,7 @@ fn nested_types_missing_their_defaulted_fields_still_load() {
     assert_eq!(water.uv_velocity, [0.0, 0.0]);
     assert_eq!(water.layer_color, [0, 0, 0, 0]);
     assert_eq!((water.wet_cells, water.patches, water.triangles), (0, 0, 0));
+    assert!(!water.vertex_diffuse);
     // A config with none of its keys: every value is unauthored, and the two
     // flags the PS2's level reset stores as 1 read back ON, not `false`.
     let cfg = water.config.as_ref().unwrap();
@@ -940,6 +942,7 @@ fn water_field_order_is_the_wire_format() {
             "triangles",
             "config",
             "wet",
+            "vertex_diffuse",
         ]
     );
     assert_eq!(

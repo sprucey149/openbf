@@ -437,6 +437,9 @@ pub struct ManifestWater {
     /// Authored wet-cell grid used for projectile/water intersections.
     #[serde(default)]
     pub wet: Option<ManifestWetMask>,
+    /// The water GLB carries diffuse LUT RGB; do not apply its mean tint again.
+    #[serde(default)]
+    pub vertex_diffuse: bool,
 }
 
 /// Authored water-cell mask; hexadecimal nibbles preserve the disc grid.

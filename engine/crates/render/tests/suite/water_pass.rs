@@ -37,6 +37,46 @@ fn shot(r: &mut render::Renderer, draws: &[DrawCmd]) -> [u8; 4] {
     capture_pixel(r, N / 2, N / 2)
 }
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn diffuse_vertex_colours_do_not_tint_the_separate_speckle_layer() {
+    let mut r = unlit();
+    r.lighting.water.speckle_ambient = [0.5, 0.5, 0.5, 1.0];
+    let white = upload_tex(&mut r, 1, 1, &[255; 4], "water");
+    let colored = r
+        .add_mesh(&render::MeshData {
+            positions: &[
+                [-4.0, -4.0, -3.0],
+                [4.0, -4.0, -3.0],
+                [4.0, 4.0, -3.0],
+                [-4.0, 4.0, -3.0],
+            ],
+            normals: &[[0.0, 0.0, 1.0]; 4],
+            uvs: &[[0.0; 2]; 4],
+            colors: Some(&[[40, 80, 120, 255]; 4]),
+            indices: &[0, 1, 2, 0, 2, 3],
+        })
+        .unwrap();
+    let plain = view_quad(&mut r, -3.0);
+    let water = shot(
+        &mut r,
+        &[DrawCmd::water(colored, white, [1.0; 4], Mat4::IDENTITY)],
+    );
+    for (actual, expected) in water[..3].iter().zip([40i32, 80, 120]) {
+        assert!((i32::from(*actual) - expected).abs() <= 2, "{water:?}");
+    }
+    let tinted = shot(
+        &mut r,
+        &[DrawCmd::speckle(colored, white, [1.0; 4], Mat4::IDENTITY)],
+    );
+    let untinted = shot(
+        &mut r,
+        &[DrawCmd::speckle(plain, white, [1.0; 4], Mat4::IDENTITY)],
+    );
+    assert_eq!(tinted, untinted);
+    assert!(tinted[0] > 100, "{tinted:?}");
+}
+
 /// A water quad at half tint alpha over an opaque red one composites — and
 /// the same draw through the opaque pass does not.
 #[test]

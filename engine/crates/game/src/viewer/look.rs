@@ -1136,6 +1136,7 @@ mod tests {
             wet_cells: 1,
             patches: 0,
             triangles: 2,
+            vertex_diffuse: false,
             config: Some(manifest::ManifestWaterConfig {
                 main_texture: Some("kas2_water".into()),
                 foam_texture: ocean.then(|| "kam1_water".to_string()),

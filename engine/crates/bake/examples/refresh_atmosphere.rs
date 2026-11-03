@@ -73,11 +73,26 @@ fn main() -> Result<()> {
     }
     for name in textures {
         let filename = format!("{}.ktx2", name.to_ascii_lowercase());
+        let source = scratch.join("fresh/textures").join(&filename);
+        if !source.exists() {
+            let common = target
+                .parent()
+                .context("baked map parent")?
+                .join(format!("common_{}", fresh.source_game))
+                .join("textures")
+                .join(&filename);
+            anyhow::ensure!(
+                common.exists(),
+                "atmosphere texture {name} is absent from the map and {}",
+                common.display()
+            );
+            continue;
+        }
         let previous = target.join("textures").join(&filename);
         if previous.exists() {
             std::fs::copy(&previous, scratch.join(format!("previous_{filename}")))?;
         }
-        std::fs::copy(scratch.join("fresh/textures").join(&filename), previous)?;
+        std::fs::copy(source, previous)?;
         if !manifest
             .textures
             .iter()
@@ -89,6 +104,15 @@ fn main() -> Result<()> {
     manifest.sky = fresh.sky;
     manifest.fog_cloud = fresh.fog_cloud;
     manifest.sun_flare = fresh.sun_flare;
+    if let Some(water) = &fresh.water {
+        let filename = &water.glb;
+        let previous = target.join(filename);
+        if previous.exists() {
+            std::fs::copy(&previous, scratch.join(format!("previous_{filename}")))?;
+        }
+        std::fs::copy(scratch.join("fresh").join(filename), previous)?;
+    }
+    manifest.water = fresh.water;
     bake::write_ron(&path, &manifest)?;
     println!(
         "refreshed {}; backup {}",

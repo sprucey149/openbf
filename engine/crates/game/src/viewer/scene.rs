@@ -758,14 +758,16 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         };
         // The speckle layer ([`speckle_look`], queue W3): its frames get
         // their own handles, carrying the layer's tiling and scroll. The
-        // WATR cell side is read off the mesh's first lattice quad (the bake
-        // emits the lattice cells before any `CPAT` patch). A frame the bake
+        // WATR cell side comes from the wet mask, or from the first lattice
+        // quad on older bakes. A frame the bake
         // did not ship drops the whole layer — 0 on the shipped maps.
-        let look_s = mesh
-            .indices
-            .get(..6)
-            .and_then(|q| crate::water_anim::lattice_cells(&mesh.positions, q))
-            .and_then(|l| speckle_look(&scene.manifest.source_game, info, l.cell));
+        let cell = info.wet.as_ref().map(|w| w.cell_size).or_else(|| {
+            mesh.indices
+                .get(..6)
+                .and_then(|q| crate::water_anim::lattice_cells(&mesh.positions, q))
+                .map(|l| l.cell)
+        });
+        let look_s = cell.and_then(|cell| speckle_look(&scene.manifest.source_game, info, cell));
         let mut frames = Vec::new();
         if let Some(sp) = &look_s {
             for n in &sp.frames {
@@ -787,8 +789,13 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         let mut speckle_first = Vec::new();
         let mut still_foam = Vec::new();
         for (m, _, _, _) in upload_submeshes(r, mesh)? {
+            let tint = if info.vertex_diffuse {
+                [1.0, 1.0, 1.0, look.tint[3]]
+            } else {
+                look.tint
+            };
             draws.push(match tex {
-                Some(h) => DrawCmd::water(m, h, look.tint, Mat4::IDENTITY).with_cull(far),
+                Some(h) => DrawCmd::water(m, h, tint, Mat4::IDENTITY).with_cull(far),
                 None => {
                     // The water plane keeps its own tint rather than being
                     // routed: the manifest always names a texture, so a miss

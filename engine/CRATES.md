@@ -113,7 +113,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/gltf_bin.rs` 129 — the shared GLB BIN builder · `Bin`
 - `bake/src/skin_glb.rs` 273 — skinned GLB: skeleton, skin, clips (or a skeleton and clips alone) · `skinned_to_glb`
 - `bake/src/terrain_glb.rs` 872 — terrain base/layer GLBs, vertex lighting and UVs · `terrain_to_glb`, `terrain_layers_to_glb`, `gs_vertex_byte`, `layer_uv`; layer order, quad splits and cutter handling in the module header.
-- `bake/src/water_glb.rs` 492 — `WATR` → water GLB + config · `water_to_glb`
+- `bake/src/water_glb.rs` 626 — `WATR` → water GLB + config · `water_to_glb`
 - `bake/src/terrain_glb/alignment.rs` 549 — donor drawing on corrected heights/cutters, query-grid prefix, donor painted layers · `Surface::build`, `base_glb`, `layers_glb`
 - `bake/src/lowres_glb.rs` 230 — `LOWR` → `lowres_<name>.glb` · `lowres_to_glb`
 - `bake/src/ktx2w.rs` 227 — KTX2 RGBA8 writer, full mip chain · `write_rgba8`
@@ -157,7 +157,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 
 ## manifest — the schema
 - `manifest/src/lib.rs` 1402 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
-- `manifest/src/environment.rs` 814 — environment schema: weather, local lights/HDR, foliage and `foliage.bin` codec, water, lighting, fog and sky · `ManifestPrecipitation`, `ManifestWind`, `ManifestLightning`, `ManifestPointLight`, `ManifestHdr`, `ManifestFoliage`, `foliage_bin`, `ManifestWater`, `ManifestLighting`, `ManifestSky`; all names re-exported at crate root.
+- `manifest/src/environment.rs` 817 — environment schema: weather, local lights/HDR, foliage and `foliage.bin` codec, water, lighting, fog and sky · `ManifestPrecipitation`, `ManifestWind`, `ManifestLightning`, `ManifestPointLight`, `ManifestHdr`, `ManifestFoliage`, `foliage_bin`, `ManifestWater`, `ManifestLighting`, `ManifestSky`; all names re-exported at crate root.
 - `manifest/src/anim_sets.rs` 297 — `soldiers/<model>.sets.ron`: a soldier's animation sets over its GLB's clips, and the two games' slot name tables · `SoldierSets`, `Bf1Sets`, `Bf2Sets`, `bf1::weapon_set`, `bf2::base_name`
 - `manifest/src/fpm.rs` 152 — the first-person arm clip tables (BF1 5 rows, BF2 4, 11 columns) and the arm GLB path · `COLUMNS`, `BF1_TABLE`, `BF2_TABLE`, `clip_names`, `glb_path`; `analysis/re-first-person-arms.md` §2.
 - `manifest/src/hud.rs` 137 — `hud/*.ron`, `fonts/*.ron`, the `locl` text table · `HudIndex`, `HudLayout`, `HudNode`, `HudArg`, `HudFont`, `HudGlyph`, `HudLocl`, `locl_key`
@@ -395,7 +395,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/viewer.rs` 62 — viewer facade and stable re-exports; its module header owns the XFRM transform convention and routes to the parts below.
 - `game/src/viewer/walker_aim.rs` 172 — Walker drawn aimer transforms.
 - `game/src/viewer/look.rs` 1429 — manifest-derived water, fog, cull/LOWR, far-fade and lighting state · `water_look`, `speckle_look`, `water_shading`, `far_cull`, `lowres_range`, `apply_lighting`.
-- `game/src/viewer/scene.rs` 1801 — scene GPU upload and draw ranges for terrain, water, foliage, models/LOWD and sky; moving door/turret/station records, texture cache and untextured census · `upload_scene`, `SceneGpu`, `SpeckleAnim`, `sky_wrap_v`, `pose_doors`; posing lives in `turret_pose` / `stations`.
+- `game/src/viewer/scene.rs` 1808 — scene GPU upload and draw ranges for terrain, water, foliage, models/LOWD and sky; moving door/turret/station records, texture cache and untextured census · `upload_scene`, `SceneGpu`, `SpeckleAnim`, `sky_wrap_v`, `pose_doors`; posing lives in `turret_pose` / `stations`.
 - `game/src/viewer/scene/terrain.rs` 169 — terrain draw chunks, layer uploads and chunk bounds; the scene’s terrain upload helpers.
 - `game/src/viewer/scene/tests.rs` 454 — scene draw-range regressions for water replacement and the ranges that follow it.
 - `game/src/viewer/foliage.rs` 223 — terrain foliage model placement, tint and fade · `records`, `models`, `matrix`; module header and `analysis/re-foliage.md` §6.
