@@ -42,13 +42,13 @@ python3 scripts/pack.py
 
 > **Status: PS2 discs, Xbox discs and a PC BF1 install are supported.** Either Xbox disc can replace that game's PS2 disc, and PC BF1 can supply BF1 beside a console BF2. All 34 ground maps are included. The six experimental space maps remain disabled by default while round endings are unfinished.
 >
-> Xbox and PC copies assemble some buildings differently. Rhen Var, PC Cloud City and one Xbox Jabba's Palace prop use shared resources or locally built, textured stand-ins. These can look coarser, and projected textures can stretch. No game meshes or textures are shipped here.
+> Xbox and PC copies assemble some buildings differently. Repairs reuse same-copy pieces and existing donor vertices where possible. Selected structures and plants use locally generated, donor-textured contact surfaces as a last resort. These can look coarse, faceted or stretched. No game meshes or textures are shipped here.
 >
-> Donor terrain is fitted to PS2 ground heights and holes, including terrain visible beyond the play area. Focused repairs cover Rhen Var structures, a Death Star door, an Utapau column, a Polis Massa hangar floor and a PC Tatooine crate. Six Felucia plants use coarser donor-textured stand-ins. The retained PS2 asset controls remain byte-identical.
+> Donor terrain is fitted to PS2 ground heights and holes, including visible distant terrain. Focused drawing repairs cover Cloud City rails and a chamber, Rhen Var roofs and tunnels, Utapau cliffs and distance LODs, a Death Star door, capital-ship panels, TIE nose/braces and Hailfire casings. PS2 asset controls remain byte-identical; collision and simulation inputs stay unchanged.
 >
-> Fresh Linux packages from PS2 with donors, Xbox alone, and PC BF1 with Xbox BF2 passed packed headless scene reports on all 40 maps. With the six experimental space maps opted in, each package contains 67 missions. Full simulation hashes matched the PS2 control at every tick in 134 mission/seed scenarios per source, 1,800 ticks each. These bounded checks do not establish equality of every simulation input.
+> Fresh checked Linux packages from PS2 with donors, Xbox alone, and PC BF1 with Xbox BF2 passed packed headless scene reports on all 40 maps. Each actual packed executable matched the PS2 control at every tick in 134 mission/seed scenarios, 1,800 ticks each. The opt-in space package contains 67 missions. These bounded checks do not establish equality of every possible input or a running-original comparison.
 >
-> Full artwork alignment remains unfinished: other buildings, objects, vehicles and cutout materials still have gaps or need measurement. Donor foliage counts differ on six maps, and some water and props still use plain colors. The three source sets retain 94 untextured draw slots across 26 scene reports. See [#98](https://github.com/sprucey149/openbf/issues/98) and [#99](https://github.com/sprucey149/openbf/issues/99). Live play and a running-original PS2 comparison remain unchecked.
+> Full artwork alignment remains unfinished. Some foliage, vehicle caps, Citadel ridge surfaces and partial-alpha objects still have gaps or need measurement. Donor foliage counts differ on six maps; water and some props retain plain colors, with 94 untextured draw slots across 26 scene reports. See [#98](https://github.com/sprucey149/openbf/issues/98) and [#99](https://github.com/sprucey149/openbf/issues/99). Live play and a running-original PS2 comparison remain unchecked.
 
 | You supply | What you get today |
 |---|---|
