@@ -64,6 +64,7 @@ mod camera;
 mod capture;
 mod device;
 mod draw;
+mod dust;
 mod falling;
 mod filter;
 mod fog_cloud;
@@ -83,6 +84,7 @@ mod pipelines;
 mod point_light;
 mod resources;
 mod shadow;
+mod sun_flare;
 pub use shadow::ShadowMesh;
 mod sky;
 mod specular;
@@ -100,6 +102,7 @@ pub use draw::{
     fragment_kept, DrawCmd, DrawLayer, DrawOrder, Fade, LightPath, LodSide, LodSwitch,
     SkinnedDrawCmd, IFACE_AMBIENT, IFACE_DIR_CAMERA,
 };
+pub use dust::{Dust, DustConfig};
 pub use falling::{ForestBirdType, LeafActor, LeafEmitter};
 pub use filter::{box_side, FrameFilter};
 pub use fog_cloud::FogCloud;
@@ -119,6 +122,7 @@ pub use point_light::{LitSphere, PointLight, SpotCone, MAX_POINT_LIGHTS};
 pub use sky::{mirror_squash, Placement, SkyFlight, SkyMode, SkyShell, MIRROR_LIFT};
 pub use specular::spec_texcoord;
 pub use stars::{half_size as star_half_size, star_rgb, Star, StarField};
+pub use sun_flare::SunFlare;
 pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
@@ -372,6 +376,7 @@ pub struct Renderer {
     /// glow's ADDITIVE pipeline (vs `grass.wgsl`, fs `bolt.wgsl`, no depth
     /// write) and this frame's bolts, set by [`Renderer::set_bolts`].
     bolt_core_pipeline: wgpu::RenderPipeline,
+    atmosphere_pipeline: wgpu::RenderPipeline,
     bolt_glow_pipeline: wgpu::RenderPipeline,
     bolt_solid_pipeline: wgpu::RenderPipeline,
     leaf_cutout_pipeline: wgpu::RenderPipeline,
@@ -394,6 +399,7 @@ pub struct Renderer {
     /// The DomeInfo frame filter (`filter.rs`, card BFLT): its pipeline,
     /// this map's values ([`Renderer::set_frame_filter`]) and the frame copy.
     filter: filter::FilterState,
+    sun_flare: Option<sun_flare::State>,
     bloom: bloom::BloomState,
     spec_buf: wgpu::Buffer,
     spec_bg: Option<wgpu::BindGroup>,
@@ -478,6 +484,8 @@ impl Renderer {
         self.set_bolts(Vec::new());
         self.set_particles(Vec::new());
         self.set_fog_cloud(None);
+        self.set_dust(Vec::new());
+        self.set_sun_flare(None);
         self.set_sky_particles(Vec::new());
         self.set_terrain_lights(Default::default());
         self.set_frame_filter(None);

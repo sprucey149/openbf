@@ -57,6 +57,20 @@ fn main() -> Result<()> {
     if let Some(name) = fresh.fog_cloud.as_ref().and_then(|c| c.texture.as_ref()) {
         textures.insert(name.to_ascii_lowercase());
     }
+    let defs: Vec<manifest::ClassDef> =
+        ron::from_str(&std::fs::read_to_string(scratch.join("fresh/classes.ron"))?)?;
+    for def in defs
+        .iter()
+        .filter(|d| d.base.eq_ignore_ascii_case("dusteffect"))
+    {
+        for (_, value) in def
+            .props
+            .iter()
+            .filter(|(h, _)| *h == mungefs::fnv1a_lowercase("Texture"))
+        {
+            textures.insert(value.to_ascii_lowercase());
+        }
+    }
     for name in textures {
         let filename = format!("{}.ktx2", name.to_ascii_lowercase());
         let previous = target.join("textures").join(&filename);
@@ -74,6 +88,7 @@ fn main() -> Result<()> {
     }
     manifest.sky = fresh.sky;
     manifest.fog_cloud = fresh.fog_cloud;
+    manifest.sun_flare = fresh.sun_flare;
     bake::write_ron(&path, &manifest)?;
     println!(
         "refreshed {}; backup {}",

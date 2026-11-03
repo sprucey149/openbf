@@ -312,6 +312,8 @@ pub(super) fn bake_content(
     // drawn blended by their alpha (re-fx §6.7) and so keep it.
     let fx = crate::effects::Collected::from_chunks(expanded.iter())?;
     let fx_named = fx.textures();
+    let sun_flare = super::atmosphere::sun_flare(&expanded, kind)?;
+    let dust_named = super::atmosphere::dust_textures(&expanded);
     // Card GLOW: BF2's `Effect("HDR")`, read before the models because it
     // decides how their self-lit segments are written (`crate::glb::
     // glow_path`); the first `fx__` that carries one. Only an enabled one
@@ -1173,6 +1175,7 @@ pub(super) fn bake_content(
             || hud_named.contains(&lower)
             || contact_named.contains(&lower)
             || glow_named.contains(&lower)
+            || dust_named.contains(&lower)
             || fx_named.contains(&lower)
             || fx_model_named.contains(&lower)
             || precip_named.as_deref() == Some(lower.as_str())
@@ -1586,6 +1589,7 @@ pub(super) fn bake_content(
         wind,
         terrain_query_size,
         fog_cloud,
+        sun_flare,
     };
     Ok(manifest)
 }

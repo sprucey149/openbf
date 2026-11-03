@@ -22,6 +22,7 @@
 
 mod camera;
 pub mod droidekas;
+mod dust;
 pub mod foliage;
 pub mod grass;
 pub mod leaf;

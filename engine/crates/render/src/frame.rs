@@ -598,6 +598,12 @@ impl Renderer {
                 .to_mut()
                 .extend(cloud.draws(camera, self.atmosphere_time()));
         }
+        let atmosphere_time = self.atmosphere_time();
+        for dust in &mut self.particles.dust {
+            particles
+                .to_mut()
+                .extend(dust.draws(camera, atmosphere_time));
+        }
         let mut bolts = crate::particles::build(&[], &self.particles.sky, camera);
         let sky_particle_runs = bolts.runs.len();
         let mut world_particles = crate::particles::build(&self.bolts.bolts, &particles, camera);
@@ -1215,11 +1221,24 @@ impl Renderer {
                 }
             }
             drop(pass);
+            draw_calls += self.sun_flare_pass(
+                &mut encoder,
+                self.bloom_gather_view(),
+                camera,
+                width,
+                height,
+                true,
+            );
             draw_calls += self.bloom_pass(&mut encoder, frame_texture, &view);
             if let Some(t) = &mut timer {
                 t.mark(&mut encoder, "bloom");
             }
         }
+        let sun_view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.format.remove_srgb_suffix()),
+            ..Default::default()
+        });
+        draw_calls += self.sun_flare_pass(&mut encoder, &sun_view, camera, width, height, false);
         // The frame filter lifts the finished 3D frame, before the overlay
         // (the PS2 draws its HUD after it, `analysis/re-glow.md` §3.3).
         if filter && !ab.skips("filter") {
@@ -1301,17 +1320,19 @@ impl Renderer {
         let mut bound = None;
         let mut calls = 0;
         for run in runs {
-            let kind = (run.glow, run.solid, run.cutout);
+            let kind = (run.glow, run.solid, run.cutout, run.premultiplied);
             if bound != Some(kind) {
                 pass.set_pipeline(match (shown, kind) {
-                    (Some(d), (true, _, _)) => &d.glow,
-                    (Some(d), (false, true, _)) => &d.solid,
-                    (Some(d), (false, false, true)) => &d.cutout,
-                    (Some(d), (false, false, false)) => &d.core,
-                    (None, (true, _, _)) => &self.bolt_glow_pipeline,
-                    (None, (false, true, _)) => &self.bolt_solid_pipeline,
-                    (None, (false, false, true)) => &self.leaf_cutout_pipeline,
-                    (None, (false, false, false)) => &self.bolt_core_pipeline,
+                    (Some(d), (true, _, _, _)) => &d.glow,
+                    (Some(d), (false, true, _, _)) => &d.solid,
+                    (Some(d), (false, false, true, _)) => &d.cutout,
+                    (Some(d), (false, false, false, true)) => &d.atmosphere,
+                    (Some(d), (false, false, false, false)) => &d.core,
+                    (None, (true, _, _, _)) => &self.bolt_glow_pipeline,
+                    (None, (false, true, _, _)) => &self.bolt_solid_pipeline,
+                    (None, (false, false, true, _)) => &self.leaf_cutout_pipeline,
+                    (None, (false, false, false, true)) => &self.atmosphere_pipeline,
+                    (None, (false, false, false, false)) => &self.bolt_core_pipeline,
                 });
                 bound = Some(kind);
             }

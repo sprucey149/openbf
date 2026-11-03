@@ -1243,6 +1243,34 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         None
     };
     r.set_fog_cloud(fog_cloud);
+    let dust = super::dust::load(scene, |name| {
+        Ok(get_texture(
+            r,
+            scene,
+            &mut textures,
+            &name.to_ascii_lowercase(),
+            render::WrapV::Repeat,
+        )?
+        .map(|t| t.handle))
+    })?;
+    r.set_dust(dust);
+    r.set_sun_flare(scene.manifest.sun_flare.as_ref().map(|s| render::SunFlare {
+        distance: (scene.manifest.lighting.far_scene_range.unwrap_or(2000.0) * 0.9).min(2000.0),
+        display_gain: if scene.manifest.hdr.is_some() {
+            2.0
+        } else {
+            1.0
+        },
+        angle: s.angle,
+        color: s.color,
+        size: s.size,
+        flare_out_size: s.flare_out_size,
+        num_flare_outs: s.num_flare_outs,
+        initial_alpha: s.initial_alpha,
+        halo_rings: s.halo_rings,
+        spike_color: s.spike_color,
+        spike_size: s.spike_size,
+    }));
     r.set_sky_particles(Vec::new());
     // Set on every upload, so a map without stars clears the last map's.
     r.set_stars(star_field(&scene.manifest), dome_shells);

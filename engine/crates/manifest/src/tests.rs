@@ -487,6 +487,21 @@ fn full_manifest() -> Manifest {
             velocity_range: 1.0,
             velocity_change_rate: 0.1,
         }),
+        sun_flare: Some(ManifestSunFlare {
+            angle: [115.0, -20.0],
+            color: [255.0; 4],
+            size: 5.0,
+            flare_out_size: 20.0,
+            num_flare_outs: 40,
+            initial_alpha: 70.0,
+            halo_rings: [
+                [0.0, 255.0, 255.0, 255.0, 255.0],
+                [10.0, 255.0, 200.0, 0.0, 255.0],
+                [30.0, 255.0, 127.0, 0.0, 0.0],
+            ],
+            spike_color: [230.0, 230.0, 0.0, 128.0],
+            spike_size: 20.0,
+        }),
         fog_cloud: Some(ManifestFogCloud {
             texture: Some("brownmist".into()),
             range: Some([90.0, 120.0]),
@@ -692,6 +707,7 @@ fn a_manifest_missing_every_defaulted_field_still_loads() {
     assert_eq!(m.sky, None);
     assert_eq!(m.water, None);
     assert_eq!(m.foliage, None);
+    assert_eq!(m.sun_flare, None);
     // lighting falls back to the engine's old hardcoded look, not zeroes.
     assert_eq!(m.lighting, ManifestLighting::default());
     assert_eq!(m.lighting.source, "default");
@@ -888,6 +904,7 @@ fn manifest_field_order_is_the_wire_format() {
             "wind",
             "terrain_query_size",
             "fog_cloud",
+            "sun_flare",
         ]
     );
 }

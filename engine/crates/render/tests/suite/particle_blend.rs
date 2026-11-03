@@ -92,6 +92,27 @@ fn a_normal_particle_blends_in_display_bytes() {
 }
 
 #[test]
+#[ignore = "requires a GPU adapter"]
+fn dust_keeps_its_unscaled_hdr_color_and_authored_alpha() {
+    let quad = |gain| ParticleShape::AtmosphereQuad {
+        pos: Vec3::new(0.0, 0.0, -3.0),
+        a: Vec3::X * 20.0,
+        b: Vec3::Y * 4.0,
+        gain,
+    };
+    close(
+        shot_shape(quad(1.0), [150, 150, 150, 128], [255; 4], false, 100),
+        125,
+        "ordinary source-over",
+    );
+    close(
+        shot_shape(quad(2.0), [150, 150, 150, 128], [255; 4], false, 100),
+        200,
+        "unscaled dust in the half-scale HDR frame",
+    );
+}
+
+#[test]
 #[ignore = "requires a GPU adapter (run with --ignored on the NVIDIA box)"]
 fn an_additive_particle_adds_in_display_bytes() {
     close(

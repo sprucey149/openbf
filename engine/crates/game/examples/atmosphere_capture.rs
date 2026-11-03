@@ -15,6 +15,18 @@ fn resolve_default_path(candidates: &[&str]) -> Result<PathBuf> {
     ))
 }
 
+fn submit(
+    renderer: &mut render::Renderer,
+    fx: &mut game::fx::Fx,
+    weather: &mut Option<game::weather::Weather>,
+    camera: &render::Camera,
+) {
+    let snow = weather
+        .as_mut()
+        .map_or_else(Vec::new, |w| w.frame_draws(renderer, camera, Vec3::ZERO));
+    fx.submit_with(renderer, camera, snow);
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let map = if let Some(arg) = args.get(1) {
@@ -95,6 +107,12 @@ fn main() -> Result<()> {
     if std::env::var_os("CAPTURE_NO_CLOUD").is_some() {
         renderer.set_fog_cloud(None);
     }
+    if std::env::var_os("CAPTURE_NO_DUST").is_some() {
+        renderer.set_dust(Vec::new());
+    }
+    if std::env::var_os("CAPTURE_NO_SUN").is_some() {
+        renderer.set_sun_flare(None);
+    }
     let mut fx = game::fx::Fx::load(
         map.parent().unwrap(),
         &map,
@@ -102,6 +120,12 @@ fn main() -> Result<()> {
         &["rep", "cis"],
     );
     fx.set_scene_effects(&scene);
+    let mut weather = game::weather::Weather::load(
+        &scene.manifest,
+        map.parent().unwrap(),
+        &map,
+        game::weather::STILL_SEED,
+    );
 
     for tick in 0..=seconds * 30 {
         let time = f64::from(tick) / 30.0;
@@ -111,16 +135,19 @@ fn main() -> Result<()> {
         renderer.advance_sky();
         if tick > 0 {
             fx.update(1.0 / 30.0);
+            if let Some(w) = &mut weather {
+                w.update(1.0 / 30.0);
+            }
         }
+        submit(&mut renderer, &mut fx, &mut weather, &camera);
+        renderer.render_frame(
+            &camera,
+            &gpu.draws,
+            &[],
+            game::viewer::clear_color(&scene),
+            None,
+        )?;
         if tick % (30 / hz) == 0 {
-            fx.submit(&mut renderer, &camera);
-            renderer.render_frame(
-                &camera,
-                &gpu.draws,
-                &[],
-                game::viewer::clear_color(&scene),
-                None,
-            )?;
             let (rgba, width, height) = renderer.capture_rgba()?;
             std::fs::write(
                 out.join(format!("{:03}.png", tick / (30 / hz))),
@@ -190,7 +217,7 @@ fn main() -> Result<()> {
     for shell in renderer.sky_mut() {
         shell.lit = false;
     }
-    fx.submit(&mut renderer, &ship_camera);
+    submit(&mut renderer, &mut fx, &mut weather, &ship_camera);
     renderer.render_frame(
         &ship_camera,
         &gpu.draws,
@@ -207,7 +234,7 @@ fn main() -> Result<()> {
     for (shell, lit) in renderer.sky_mut().iter_mut().zip(material_lighting) {
         shell.lit = lit;
     }
-    fx.submit(&mut renderer, &ship_camera);
+    submit(&mut renderer, &mut fx, &mut weather, &ship_camera);
     renderer.render_frame(
         &ship_camera,
         &gpu.draws,
@@ -241,7 +268,7 @@ fn main() -> Result<()> {
     println!("Capturing paused_frame_0.png vs paused_frame_1.png...");
     let frozen_time = renderer.atmosphere_time.unwrap_or(5.0);
     renderer.atmosphere_time = Some(frozen_time);
-    fx.submit(&mut renderer, &ship_camera);
+    submit(&mut renderer, &mut fx, &mut weather, &ship_camera);
     renderer.render_frame(
         &ship_camera,
         &gpu.draws,
@@ -260,7 +287,7 @@ fn main() -> Result<()> {
         renderer.time = (renderer.time + dt) % render::TIME_WRAP;
         renderer.water_time += f64::from(dt);
         renderer.advance_sky();
-        fx.submit(&mut renderer, &ship_camera);
+        submit(&mut renderer, &mut fx, &mut weather, &ship_camera);
         renderer.render_frame(
             &ship_camera,
             &gpu.draws,

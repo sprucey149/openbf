@@ -41,6 +41,33 @@ const BF1: &str = "bf1/lvl/DATA/_LVL_PS2";
 const BF2: &str = "bf2/lvl/DATA/_LVL_PS2";
 
 #[test]
+fn bf2_hoth_sun_flare_is_a_root_scope_with_its_own_angle() {
+    let buf = require_data!(lvl(&format!("{BF2}/HOT/HOT1.LVL")), "BF2 HOT1.LVL");
+    let config = content_chunks(open(&buf).unwrap())
+        .unwrap()
+        .iter()
+        .filter(|c| &c.tag == b"fx__")
+        .find_map(|c| mungefs::sun_flare::SunFlare::parse(c).unwrap())
+        .unwrap();
+    assert_eq!(config.angle, [115.0, -20.0]);
+    assert_eq!(config.color, [255.0; 4]);
+    assert_eq!(config.size, 5.0);
+    assert_eq!(config.flare_out_size, 20.0);
+    assert_eq!(config.num_flare_outs, 40);
+    assert_eq!(config.initial_alpha, 70.0);
+    assert_eq!(
+        config.halo_rings,
+        [
+            [0.0, 255.0, 255.0, 255.0, 255.0],
+            [10.0, 255.0, 200.0, 0.0, 255.0],
+            [30.0, 255.0, 127.0, 0.0, 0.0]
+        ]
+    );
+    assert_eq!(config.spike_color, [230.0, 230.0, 0.0, 128.0]);
+    assert_eq!(config.spike_size, 20.0);
+}
+
+#[test]
 fn bf2_geonosis_fog_cloud_reads_authored_parameters() {
     let buf = require_data!(lvl(&format!("{BF2}/GEO/GEO1.LVL")), "BF2 GEO1.LVL");
     let config = content_chunks(open(&buf).unwrap())

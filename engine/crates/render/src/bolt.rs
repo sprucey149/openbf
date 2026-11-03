@@ -162,10 +162,12 @@ pub(crate) struct BoltRun {
     pub glow: bool,
     pub solid: bool,
     pub cutout: bool,
+    pub premultiplied: bool,
 }
 
 pub(crate) struct DisplayPipelines {
     pub core: wgpu::RenderPipeline,
+    pub atmosphere: wgpu::RenderPipeline,
     pub glow: wgpu::RenderPipeline,
     pub solid: wgpu::RenderPipeline,
     pub cutout: wgpu::RenderPipeline,

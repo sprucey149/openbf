@@ -22,6 +22,14 @@ fn fs_bolt_core(in: GrassOut) -> @location(0) vec4<f32> {
 }
 
 @fragment
+fn fs_atmosphere(in: GrassOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(t_color, s_color, in.uv);
+    let rgb = srgb_to_linear(linear_to_srgb(texel.rgb) * in.color.rgb);
+    let alpha = texel.a * in.color.a;
+    return vec4(rgb * alpha, alpha);
+}
+
+@fragment
 fn fs_bolt_glow(in: GrassOut) -> @location(0) vec4<f32> {
     let c = bolt_texel(in);
     if c.a <= 0.0 {

@@ -21,6 +21,20 @@
 use serde::{Deserialize, Serialize};
 
 mod environment;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestSunFlare {
+    pub angle: [f32; 2],
+    pub color: [f32; 4],
+    pub size: f32,
+    pub flare_out_size: f32,
+    pub num_flare_outs: u32,
+    pub initial_alpha: f32,
+    pub halo_rings: [[f32; 5]; 3],
+    pub spike_color: [f32; 4],
+    pub spike_size: f32,
+}
+
 pub use environment::{
     foliage_bin, FoliageKind, LeafLayout, ManifestFilter, ManifestFog, ManifestFogCloud,
     ManifestFoliage, ManifestFoliageMesh, ManifestGrassClass, ManifestHdr, ManifestLeafClass,
@@ -533,6 +547,8 @@ pub struct Manifest {
     pub terrain_query_size: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fog_cloud: Option<ManifestFogCloud>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sun_flare: Option<ManifestSunFlare>,
 }
 
 /// One world's authored AI data, from `mungefs::plan` and `mungefs::world`.

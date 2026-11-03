@@ -365,7 +365,7 @@ pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> w
         "depth",
         [width, height],
         DEPTH_FORMAT,
-        wgpu::TextureUsages::RENDER_ATTACHMENT,
+        wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         &[],
     );
     texture.create_view(&wgpu::TextureViewDescriptor::default())

@@ -478,6 +478,14 @@ impl Renderer {
             ..PipelineDesc::world("bolt core pipeline", &pipeline_layout, &grass_vb)
         }
         .build(&device, &bolt_shader, format);
+        let atmosphere_pipeline = PipelineDesc {
+            vs: "vs_grass",
+            fs: "fs_atmosphere",
+            blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            depth_write: false,
+            ..PipelineDesc::world("atmosphere pipeline", &pipeline_layout, &grass_vb)
+        }
+        .build(&device, &bolt_shader, format);
         // The star field (`stars.rs`): the bolt glow's ADDITIVE shader
         // (the draw's GS ALPHA is 0x48, `analysis/re-stars.md` §3) over the
         // sky pass's state — no depth test or write.
@@ -528,6 +536,12 @@ impl Renderer {
                 .build(&device, &bolt_shader, display)
             };
             crate::bolt::DisplayPipelines {
+                atmosphere: twin(
+                    "atmosphere display pipeline",
+                    "fs_bolt_glow_display",
+                    Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    false,
+                ),
                 core: twin(
                     "bolt core display pipeline",
                     "fs_bolt_core_display",
@@ -740,6 +754,7 @@ impl Renderer {
             leaves: Default::default(),
             falling: Default::default(),
             bolt_core_pipeline,
+            atmosphere_pipeline,
             bolt_glow_pipeline,
             bolt_solid_pipeline,
             leaf_cutout_pipeline,
@@ -755,6 +770,7 @@ impl Renderer {
                 ..Default::default()
             },
             filter,
+            sun_flare: None,
             bloom,
             spec_buf,
             spec_bg: None,

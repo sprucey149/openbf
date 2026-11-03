@@ -34,3 +34,41 @@ fn geonosis_sky_glow_keeps_the_disc_mask_without_changing_rgb() {
     assert_eq!(reader.levels().next().unwrap().data, disc);
     std::fs::remove_dir_all(out).unwrap();
 }
+
+#[test]
+fn hoth_bakes_its_flare_and_keeps_both_dust_sheets_transparent() {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../extracted/bf2/lvl/DATA/_LVL_PS2/HOT/HOT1.LVL");
+    if !source.exists() {
+        eprintln!("SKIP: extracted BF2 Hoth absent");
+        return;
+    }
+    let bytes = std::fs::read(&source).unwrap();
+    let inner = mungefs::open(&bytes).unwrap();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let out = std::env::temp_dir().join(format!(
+        "openbf-hoth-atmosphere-{}-{stamp}",
+        std::process::id()
+    ));
+    let baked = bake::map::bake_map(source.to_str().unwrap(), out.to_str().unwrap(), None).unwrap();
+    let sun = baked.sun_flare.unwrap();
+    assert_eq!(sun.angle, [115.0, -20.0]);
+    assert_eq!(sun.num_flare_outs, 40);
+    for name in ["whitedust", "hoth_mist"] {
+        let disc = mungefs::chunks(inner)
+            .flatten()
+            .filter(|c| &c.tag == b"tex_")
+            .filter_map(|c| mungefs::texture::Texture::parse(&c).ok())
+            .find(|t| t.name.eq_ignore_ascii_case(name))
+            .unwrap()
+            .rgba8(0);
+        assert!(disc.as_chunks::<4>().0.iter().any(|p| p[3] == 0));
+        let bytes = std::fs::read(out.join(format!("textures/{name}.ktx2"))).unwrap();
+        let reader = ktx2::Reader::new(&bytes).unwrap();
+        assert_eq!(reader.levels().next().unwrap().data, disc);
+    }
+    std::fs::remove_dir_all(out).unwrap();
+}
