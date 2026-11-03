@@ -33,6 +33,7 @@ mod hero_vs_turret;
 mod heroes;
 mod hud_layout;
 mod jet_bots;
+mod jet_round;
 mod load_scene;
 mod locate_ps2;
 mod long_snipe;

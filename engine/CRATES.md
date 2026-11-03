@@ -991,7 +991,8 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `core/src/ai/jet.rs` 231 — rechargeable foot-bot jet scheduler, committed flight and hash.
 - `core/src/ai/jet/tests.rs` 423 — launch order, fuel/range gates, height steering and deterministic hops.
-- `game/tests/suite/jet_bots.rs` 276 — original class route eligibility and BF2 fuel-bar lifecycle; isolated Mustafar nav/collision travel excludes mission hazards.
+- `game/tests/suite/jet_bots.rs` 276 — original class route eligibility, BF2 fuel-bar lifecycle, isolated Mustafar links with mission hazards and PS2-measured damage-region controls.
+- `game/tests/suite/jet_round.rs` 286 — seeded headless Mustafar traversal round: four jet troopers plan both links out and back, land alive without hazard contact or stalled progress, and replay every tick.
 
 - `game/examples/attachment_load_report.rs` 525 — CPU-only actual vehicle load routes, geometry/alpha hashes and whole-input catalog stability; explicitly excludes GPU and collision acceptance.
 
