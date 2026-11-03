@@ -94,6 +94,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/map/texture_alias.rs` 238 — bind native donor far artwork under the public corrected sky name, preserving both tiers and optional-file lifecycle · `far_alias`, `install`
 - `bake/src/map/render_recovery.rs` 615 — exact shared-LVL presentation lookup and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
 - `bake/src/map/render_symmetry.rs` 450 — restore missing DEA1 door halves, fit the lower frame from donor opening profiles and share canonical leaf motion · `enabled`, `model`, `door_parts`.
+- `bake/src/map/render_cloudcity.rs` 90 — copies fingerprinted donor bars into the Cloud City ramp drawing; retains donor topology/materials and canonical simulation inputs · `models`
 - `bake/src/map/render_column.rs` 320 — fingerprinted Utapau donor-group deformation and donor-vertex stem bands, preserving canonical collision · `enabled`, `model`.
 - `bake/src/map/render_entrance.rs` 462 — fingerprinted donor corner deformation, front-rim profile and existing-vertex floor/edge reassembly for the Rhen Var tunnel entrance · `Entrance`.
 - `bake/src/map/render_faces.rs` 428 — fingerprinted donor edge flips for Rhen Var, Geonosis, Tatooine and Felucia, with one donor-vertex rock face closure; preserves drawing attributes and collision · `Faces`.

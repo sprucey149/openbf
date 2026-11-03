@@ -22,6 +22,7 @@ use std::path::Path;
 mod collision_standin;
 mod content;
 mod render_alignment;
+mod render_cloudcity;
 mod render_column;
 mod render_conform;
 mod render_entrance;

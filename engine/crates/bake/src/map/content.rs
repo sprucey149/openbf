@@ -788,9 +788,10 @@ pub(super) fn bake_content(
                 .iter()
                 .chain(mode_layers.iter().flat_map(|layer| &layer.group))
                 .collect();
-            for assembled in
-                super::render_reassembly::models(original, &render_worlds, &parsed_models)?
-            {
+            let mut assembled_models =
+                super::render_reassembly::models(original, &render_worlds, &parsed_models)?;
+            assembled_models.extend(super::render_cloudcity::models(original, &parsed_models)?);
+            for assembled in assembled_models {
                 let model = assembled.model;
                 let alphas = alpha_table.model(&model);
                 alpha_usage.record_model(&model, &alphas);
