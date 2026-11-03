@@ -1,8 +1,10 @@
 //! GPU referees for particle display-byte blending and cutouts.
-use glam::Vec3;
-use render::{Camera, ParticleDraw, ParticleShape};
+use glam::{Mat4, Vec3};
+use render::{
+    Camera, DrawCmd, DrawLayer, LightPath, ParticleDraw, ParticleShape, Renderer, SkinnedDrawCmd,
+};
 
-use crate::common::{capture_pixel, headless, upload_tex, N};
+use crate::common::{capture_pixel, headless, skinned_quad, upload_tex, view_quad, N};
 
 fn linear(display: u8) -> f64 {
     let c = f64::from(display) / 255.0;
@@ -54,6 +56,98 @@ fn close(px: [u8; 4], want: u8, what: &str) {
     for ch in &px[..3] {
         assert!(ch.abs_diff(want) <= 2, "{what}: {px:?}, want {want}");
     }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn blur_softens_scene_edges_in_place_through_alpha_and_respects_depth() {
+    let (width, height) = (512, 448);
+    let mut r = Renderer::new_headless(width, height).expect("headless renderer");
+    let stripes = upload_tex(
+        &mut r,
+        2,
+        1,
+        &[64, 64, 64, 255, 220, 220, 220, 255],
+        "background stripes",
+    );
+    let mask = upload_tex(&mut r, 1, 1, &[255, 0, 255, 128], "half-alpha mask");
+    let clear_mask = upload_tex(&mut r, 1, 1, &[255, 0, 255, 0], "clear mask");
+    let mesh = view_quad(&mut r, -4.0);
+    let scene = [DrawCmd::textured(mesh, stripes, Mat4::IDENTITY)];
+    let character = [SkinnedDrawCmd {
+        mesh: skinned_quad(&mut r, -4.0),
+        texture: Some(stripes),
+        color: [1.0; 4],
+        model: Mat4::IDENTITY,
+        palette: vec![Mat4::IDENTITY].into(),
+        layer: DrawLayer::Opaque,
+        lit: None,
+        light: LightPath::Character,
+    }];
+    let wall = [DrawCmd::textured(
+        mesh,
+        stripes,
+        Mat4::from_translation(Vec3::Z),
+    )];
+    let camera = Camera::default();
+    let clear = [0.0, 0.0, 0.0, 1.0];
+    r.render(&camera, &scene, clear).expect("render");
+    let x = width / 2 - 1;
+    let y = height / 2;
+    let baseline = capture_pixel(&mut r, x, y);
+    let outside = capture_pixel(&mut r, x + 12, y);
+    let mut sample = |z, texture, x, draws: &[DrawCmd], skinned: &[SkinnedDrawCmd]| {
+        let pos = Vec3::new(0.0, 0.0, z);
+        r.set_particles(vec![ParticleDraw {
+            shape: ParticleShape::Blur {
+                pos,
+                half: 4.0,
+                angle: 0.0,
+            },
+            key: pos,
+            color: [0, 255, 0, 255],
+            texture: Some(texture),
+            additive: false,
+        }]);
+        r.render_frame(&camera, draws, skinned, clear, None)
+            .expect("render");
+        capture_pixel(&mut r, x, y)
+    };
+    let softened = sample(-3.0, mask, x, &scene, &[]);
+    for ch in 0..3 {
+        let low = u16::from(baseline[ch]);
+        let high = u16::from(outside[ch]);
+        let expected = low + (high - low) * 3 / 8;
+        assert!(
+            u16::from(softened[ch]).abs_diff(expected) <= 5,
+            "{softened:?}"
+        );
+    }
+    assert_eq!(
+        sample(-3.0, clear_mask, x, &scene, &[]),
+        baseline,
+        "transparent mask"
+    );
+    assert!(
+        sample(-3.0, mask, x + 12, &scene, &[])[0].abs_diff(outside[0]) <= 4,
+        "the edge must not move into the surrounding pixels"
+    );
+    assert_eq!(
+        sample(-5.0, mask, x, &scene, &[]),
+        baseline,
+        "opaque geometry occludes blur"
+    );
+    let character_base = sample(-5.0, clear_mask, x, &[], &character);
+    let character_heat = sample(-5.0, mask, x, &[], &character);
+    assert!(
+        character_heat[0] > character_base[0] + 40,
+        "heat softens the visible soldier"
+    );
+    assert_eq!(
+        sample(-5.0, mask, x, &wall, &character),
+        sample(-5.0, clear_mask, x, &wall, &character),
+        "a wall hides the soldier and blocks the heat"
+    );
 }
 
 #[test]

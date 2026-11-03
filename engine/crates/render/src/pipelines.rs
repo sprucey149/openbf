@@ -629,6 +629,22 @@ impl Renderer {
         // The DomeInfo frame filter (card BFLT, `filter.rs`): its own
         // full-screen pipeline over a copy of the finished 3D frame.
         let filter = crate::filter::FilterState::new(&device, format, copyable);
+        let particle_blur =
+            crate::particle_blur::ParticleBlur::new(&device, format, &globals_bgl, &texture_bgl);
+        let heat_character_mask = PipelineDesc {
+            vs: "vs_skinned",
+            depth_write: false,
+            depth_compare: Some(wgpu::CompareFunction::Equal),
+            ..PipelineDesc::world("heat character mask", &skinned_layout, &skinned_vb)
+        }
+        .build_with_stencil(
+            &device,
+            &shader,
+            format.remove_srgb_suffix(),
+            &[],
+            wgpu::ColorWrites::empty(),
+            crate::particle_blur::character_stencil(wgpu::StencilOperation::Replace),
+        );
         let gather_world = |fs, blend| {
             crate::bloom::gather(
                 &device,
@@ -785,6 +801,8 @@ impl Renderer {
             filter,
             sun_flare: None,
             bloom,
+            particle_blur,
+            heat_character_mask,
             spec_buf,
             spec_bg: None,
             spec_mirror: true,
@@ -881,6 +899,25 @@ impl<'a> PipelineDesc<'a> {
         format: wgpu::TextureFormat,
         constants: &[(&str, f64)],
     ) -> wgpu::RenderPipeline {
+        self.build_with_stencil(
+            device,
+            shader,
+            format,
+            constants,
+            FRAME_WRITES,
+            wgpu::StencilState::default(),
+        )
+    }
+
+    pub(crate) fn build_with_stencil(
+        &self,
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        format: wgpu::TextureFormat,
+        constants: &[(&str, f64)],
+        write_mask: wgpu::ColorWrites,
+        stencil: wgpu::StencilState,
+    ) -> wgpu::RenderPipeline {
         crate::made::render_pipeline(
             device,
             &wgpu::RenderPipelineDescriptor {
@@ -898,7 +935,7 @@ impl<'a> PipelineDesc<'a> {
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: self.blend,
-                        write_mask: FRAME_WRITES,
+                        write_mask,
                     })],
                     compilation_options: wgpu::PipelineCompilationOptions {
                         constants,
@@ -917,7 +954,7 @@ impl<'a> PipelineDesc<'a> {
                         format: crate::device::DEPTH_FORMAT,
                         depth_write_enabled: self.depth_write,
                         depth_compare,
-                        stencil: wgpu::StencilState::default(),
+                        stencil,
                         bias: wgpu::DepthBiasState::default(),
                     }),
                 multisample: wgpu::MultisampleState::default(),

@@ -622,9 +622,14 @@ impl Renderer {
             run.vertices.start += base;
             run.vertices.end += base;
         }
+        for (_, range) in &mut world_particles.blur_runs {
+            range.start += base;
+            range.end += base;
+        }
         bolts.vertices.extend(world_particles.vertices);
         bolts.runs.extend(world_particles.runs);
-        if !bolts.runs.is_empty() {
+        bolts.blur_runs.extend(world_particles.blur_runs);
+        if !bolts.vertices.is_empty() {
             let vb = bytemuck::cast_slice(&bolts.vertices);
             let inst = [crate::bolt::identity_instance()];
             let ib: &[u8] = bytemuck::cast_slice(&inst);
@@ -684,6 +689,11 @@ impl Renderer {
 
         // The DomeInfo frame filter (`filter.rs`): its parameters and copy.
         let bloom = self.prepare_bloom(width, height);
+        let particle_blur = !bolts.blur_runs.is_empty() && !ab.skips("bolts+particles");
+        if particle_blur {
+            self.particle_blur
+                .prepare(&self.device, self.format, [width, height]);
+        }
         let filter = self.filter_wanted();
         if filter {
             self.prepare_filter(width, height);
@@ -730,7 +740,12 @@ impl Renderer {
         };
         // A scaled world draws in its own target, frame and depth, until the
         // upscale below.
-        let world_target = ((width, height) != (frame_width, frame_height)).then(|| {
+        let world_target = ((width, height) != (frame_width, frame_height)
+            || (particle_blur
+                && !frame_texture
+                    .usage()
+                    .contains(wgpu::TextureUsages::COPY_SRC)))
+        .then(|| {
             self.world_scale
                 .target(&self.device, self.format, [width, height])
         });
@@ -1192,6 +1207,39 @@ impl Renderer {
             draw_calls +=
                 self.draw_particle_runs(&mut pass, &bolts.runs[sky_particle_runs..], true);
             mark(&mut timer, &mut pass, "bolts+particles");
+        }
+        if particle_blur {
+            let display_view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(self.format.remove_srgb_suffix()),
+                ..Default::default()
+            });
+            let mut pass = self.particle_blur.pass(
+                &mut encoder,
+                frame_texture,
+                &display_view,
+                &self.depth_view,
+            );
+            draw_calls += 1;
+            pass.set_bind_group(0, &self.globals_bg, &[]);
+            let characters = !skin_opaque.is_empty() && !ab.skips("soldiers");
+            if characters {
+                pass.set_stencil_reference(1);
+                pass.set_pipeline(&self.heat_character_mask);
+                pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
+                for &i in &skin_opaque {
+                    self.draw_skinned(&mut pass, &skinned[i], i);
+                    draw_calls += 1;
+                }
+            }
+            pass.set_vertex_buffer(0, self.bolts.vertex_buf.as_ref().unwrap().0.slice(..));
+            for over_character in [false, true].into_iter().take(1 + usize::from(characters)) {
+                self.particle_blur.bind_composite(&mut pass, over_character);
+                for (texture, vertices) in &bolts.blur_runs {
+                    pass.set_bind_group(1, self.tex_bg(Some(*texture)), &[]);
+                    pass.draw(vertices.clone(), 0..1);
+                    draw_calls += 1;
+                }
+            }
         }
         if bloom && !ab.skips("bloom") {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

@@ -524,7 +524,9 @@ impl LiveEffect {
                 children::draw(self, i, era, eye, forward, assets, out);
                 continue;
             }
-            if em.geometry.blend == manifest::FxBlend::Blur {
+            if em.geometry.blend == manifest::FxBlend::Blur
+                && em.geometry.kind != manifest::FxType::Particle
+            {
                 continue;
             }
             let ps = inst.particles(em, era, self.t, self.frame, self.def.cache(i), |k| {

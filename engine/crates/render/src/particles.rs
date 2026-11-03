@@ -61,6 +61,11 @@ pub enum ParticleShape {
         /// The atlas cell: (u0, v0, u1, v1).
         uv: [f32; 4],
     },
+    Blur {
+        pos: Vec3,
+        half: f32,
+        angle: f32,
+    },
     Quad {
         pos: Vec3,
         a: Vec3,
@@ -240,6 +245,14 @@ fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera
             angle,
             uv,
         } => sprite(out, *pos, (*half, *angle), *uv, (right, up), color),
+        ParticleShape::Blur { pos, half, angle } => sprite(
+            out,
+            *pos,
+            (*half, *angle),
+            [0.0, 0.0, 1.0, 1.0],
+            (right, up),
+            [0.0, 0.0, 0.0, f32::from(d.color[3]) / 128.0],
+        ),
         ParticleShape::Quad { pos, a, b }
         | ParticleShape::AtmosphereQuad { pos, a, b, .. }
         | ParticleShape::CutoutQuad { pos, a, b } => {
@@ -430,6 +443,15 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
                 }
             }
             Item::Particle(p) => {
+                if matches!(p.shape, ParticleShape::Blur { .. }) {
+                    if let Some(texture) = p.texture {
+                        let first = out.vertices.len() as u32;
+                        append_particle_vertices(&mut out.vertices, p, camera);
+                        out.blur_runs
+                            .push((texture, first..out.vertices.len() as u32));
+                    }
+                    continue;
+                }
                 // A missing sheet draws nothing (the PS2 samples VRAM block
                 // 0, re-fx §6.9 [H] — PROVISIONAL).
                 if p.texture.is_some()

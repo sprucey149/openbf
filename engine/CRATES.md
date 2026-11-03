@@ -491,7 +491,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/blackbox.rs` 2425 — dev-mode playtest history and rotating snapshots on F9, quit, panic and stuck alarm; read-only on the sim and excluded from its hash · `BlackBox`, `Snapshot`, `Meta`, `on`, `write_rotating`, `read`, `SoundRow`, `sound_digest`. `blackbox::SCHEMA` owns schema age and supported older reads; module header owns history/build diagnostics; operation in `analysis/dev-tools.md`.
 - `game/src/blackbox/rotating.rs` 173 — serialized snapshot file rotation shared by the hotkey writer and panic hook, with same-thread recursion protection and filesystem regression tests · `write`, `PREVIOUS`.
 - `game/src/blackbox/session.rs` 323 — Card DPRX: the black box's MATCH-LONG tally of one subject - the human, or in a headless round the sweep's human proxy (`core::ai::proxy`). The rings
-- `game/src/fx.rs` 1207 — particle-effect lookup with disc-specific rules for imported SBD trails, lifecycle and draw submission, event-driven impact/explosion hooks, gain effects that follow their unit (one live per unit and kind) and PROVISIONAL fallback quads · `Fx`, `Library`, `LiveEffect`; module header and `analysis/re-fx.md` §5–§7; muzzle flashes come from `soldier_vis`.
+- `game/src/fx.rs` 1209 — particle-effect lookup with disc-specific rules for imported SBD trails, lifecycle and draw submission, event-driven impact/explosion hooks, gain effects that follow their unit (one live per unit and kind) and PROVISIONAL fallback quads · `Fx`, `Library`, `LiveEffect`; module header and `analysis/re-fx.md` §5–§7; muzzle flashes come from `soldier_vis`.
 - `game/src/fx/sky.rs` 134 — dome-attached decorative effects, authored hardpoints and rotation.
 - `game/src/fx/ingest.rs` 324 — a tick's sim events into live effects · `Fx::ingest_sim`
 - `game/src/fx/abilities.rs` 66 — officer activation effects and timed recipient auras · `follow_buffs`.
@@ -499,7 +499,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/fx/children.rs` 126 — EMITTER particles replay their child templates along native path nodes (0.3 s samples, 0.1 s merge, secant velocities), with the parent's colour replacing the child's and native child offsets · `path`, `frame_at`, `draw`; `analysis/re-fx.md` §13; referees `game/src/fx/tests/resupply.rs` (live PCSX2 node captures) and `game/tests/suite/resupply_feedback.rs`.
 - `game/src/fx/emitter.rs` 1003 — particle emitter spawning, burst/lifetime state and Transformer evaluation · `Instance`, `Particle`, `Frame`, `Lcg`; module header and `analysis/re-fx.md` §5.
 - `game/src/fx/tests/resupply.rs` 195 — resupply gain effects: both games' red/blue child emitters drawn from the bake, BF1 child bursts spaced along the parent path, path-node replay against live BF1 captures, and the gain that follows its unit once per kind.
-- `game/src/fx/draw.rs` 437 — effect particle draw shapes, view fades and density thinning · `view_terms`, `emitter_draws`; module header and `analysis/re-fx.md` §6.
+- `game/src/fx/draw.rs` 440 — effect particle draw shapes, view fades and density thinning · `view_terms`, `emitter_draws`; module header and `analysis/re-fx.md` §6.
 - `game/src/bolt_vis.rs` 1922 — laser bolt ribbons, fire-point placement, fired-class remnants, impact surface correlation, fades and BF2 light output · `BoltVis`, `bolt_draw`; module header and `analysis/re-bolt.md` §3–§4, §5.2.
 - `game/src/bolt_light.rs` 227 — BF2 terrain omni-light gathering and patch selection · `gather`, `OmniLight`; module header and `analysis/re-bolt.md` §5.3.
 - `game/src/point_light.rs` 364 — local-light source preparation, colour packing, model bounds and frame submission · `still_lights`, `submit`, `command_post`, `model_sphere`, `Relation`; module header and `analysis/re-point-lights.md`; gather/shading belongs to `render::point_light`.
@@ -529,7 +529,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/frame_profile.rs` 902 — windowed frame timing, GPU-object census, dev hitch record/black-box integration and `OPENBF_FRAME_PROFILE=<csv>` output · `FrameProfile`, `Record`, `Hitches`, `FrameRow`; module header owns switches, thresholds, warmup and CSV fields.
 - `game/src/dyn_res.rs` 240 — the Low Power Resolution setting's controller: steps the world's size down when frames run long and probes back up · `DynRes`, `STEPS`.
 - `game/src/matchlog.rs` 825 — The MATCH LOG (card DPRX) — DEV SCAFFOLDING beside the black box: one compact file per battle with everything the human did, for the WHOLE
-- `render/src/lib.rs` 534 — renderer facade, shared state and public re-exports · `Renderer`, `RenderError`, `TIME_WRAP`, `Renderer::clear_scene` (drops a map's look on leaving a battle); public submodules: `hud`, `affine`; crate header owns sky rules and unbuilt features.
+- `render/src/lib.rs` 537 — renderer facade, shared state and public re-exports · `Renderer`, `RenderError`, `TIME_WRAP`, `Renderer::clear_scene` (drops a map's look on leaving a battle); public submodules: `hud`, `affine`; crate header owns sky rules and unbuilt features.
 - `render/src/lighting.rs` 256 — renderer lighting/fog/fade/water data and CPU light-sum reference · `Lighting`, `DirLight`, `Fog`, `FarFade`, `WaterShading`, `light_sum`; shader-unit rules in the module/API docs.
 - `render/src/stars.rs` 403 — the star fields of the maps that author them (issue #16): the PS2's own star generator and twinkle, drawn in the sky pass after the first dome shell · `analysis/re-stars.md`.
 - `render/src/sky.rs` 525 — sky-shell placement and material modes, with their tests · `Renderer::set_sky`, `SkyShell`, `SkyMode`, `Placement`, `mirror_squash`; rules in the module docs and crate header.
@@ -539,8 +539,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/device.rs` 423 — GPU/device setup, upload and resize · `Renderer::new_windowed`, `Renderer::new_headless`, `HEADLESS_FORMAT`; adapter selection (`OPENBF_ADAPTER`) in the module header; constructors finish in `pipelines.rs`.
 - `render/src/bindings.rs` 62 — layout entries and borrowed bind-group resource constructors · `uniform_layout`, `texture_layout`, `sampler_layout`, `texture_view`, `sampler`, `entire_buffer`
 - `render/src/resources.rs` 45 — unmapped buffers and single-level D2 textures through GPU creation instrumentation · `buffer`, `texture_2d`
-- `render/src/pipelines.rs` 929 — renderer pipeline/layout construction and initial GPU resources · `finish_init`, `PipelineDesc`; pass inventory in the module header.
-- `render/src/frame.rs` 2133 — frame submission, culling, instancing, pass/draw ordering and overlay, with ordering tests · `Renderer::render_frame`, `FrameStats`, `OverlayFn`; full pass sequence in the module header.
+- `render/src/pipelines.rs` 966 — renderer pipeline/layout construction and initial GPU resources · `finish_init`, `PipelineDesc`; pass inventory in the module header.
+- `render/src/frame.rs` 2181 — frame submission, culling, instancing, pass/draw ordering and overlay, with ordering tests · `Renderer::render_frame`, `FrameStats`, `OverlayFn`; full pass sequence in the module header.
 - `render/src/frame_ab.rs` 136 — per-frame interleaved pricing states for the bench (`OPENBF_FRAMEAB`) · `FrameAb`.
 - `render/src/world_scale.rs` 180 — the world drawn smaller than the window and upscaled, the HUD at full size · `Renderer::set_world_scale`; `world_scale.wgsl`.
 - `render/src/hud.rs` 477 — window-pixel HUD rendering (clamped and repeating sheets) from `ui::hud_draw` · `HudPass`, `HudVertex`, `HudBatch`, `HudTexture`; display-value blending and mesh depth rules in the module header (`Renderer::display_view_format`).
@@ -549,8 +549,10 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/light_beam.rs` 748 — command-post hologram lightbeam geometry and visibility · `Beam`, `vertices`, `view_factor`, `fan`, `crosses_near`; fan/alpha rules and near-plane caveat in the module header (CPHOL).
 - `render/src/grass.wgsl` 78 — `vs_grass` / `fs_grass` (grass and leaves; BF2 leaves' static `Lit` on the vertex
   normal), appended to `shader.wgsl` as one module
-- `render/src/bolt.rs` 326 — laser-bolt ribbon geometry and draws · `Renderer::set_bolts`, `BoltDraw`, `ribbon`; geometry, blend/depth rules and shared particle ordering in the module header (`analysis/re-bolt.md` §3, [O]).
-- `render/src/particles.rs` 788 — per-view particle geometry and sorted runs shared with bolts (`ParticleShape::Shaded`: world triangles with their own vertex bytes, the water ripple) · `Renderer::set_particles`, `ParticleDraw`, `ParticleShape`; shape/blend rules in the module header (`analysis/re-fx.md` §6, [O]).
+- `render/src/bolt.rs` 327 — laser-bolt ribbon geometry and draws · `Renderer::set_bolts`, `BoltDraw`, `ribbon`; geometry, blend/depth rules and shared particle ordering in the module header (`analysis/re-bolt.md` §3, [O]).
+- `render/src/particles.rs` 810 — per-view particle geometry and sorted runs shared with bolts (`ParticleShape::Shaded`: world triangles with their own vertex bytes, the water ripple) · `Renderer::set_particles`, `ParticleDraw`, `ParticleShape`; shape/blend rules in the module header (`analysis/re-fx.md` §6, [O]).
+- `render/src/particle_blur.rs` 259 — scene reduction and BLUR particle composite with visible-character coverage.
+- `render/src/particle_blur.wgsl` 30 — alpha-masked sampling of the reduced scene in display space.
 - `render/src/shadow.rs` 365 — BF1 vehicle volumes: capped z-fail, one display-space multiply · `ShadowMesh`, `Renderer::set_shadow_triangles`; `analysis/re-vehicle-shadow.md`.
 - `render/src/bolt.wgsl` 97 — `fs_bolt_core` / `fs_bolt_glow` (GS MODULATE, unfogged), appended after `grass.wgsl`
 - `render/src/terrain_light.rs` 478 — BF2 terrain light projection pass · `Renderer::set_omniproj`, `Renderer::set_terrain_lights`, `TerrainLights`, `LitPatch`; gather contract, gamma addition and frame-copy sequencing in the module header (`analysis/re-bolt.md` §5.3, [O]).
@@ -832,7 +834,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `game/src/fx/chunks/tests.rs` 618 — chunk launch, inertia, contacts, lifetime, pool and real-data regressions.
 - `render/src/falling/birds.rs` 313 — bounded anchor bird pool, motion, atlas wings and lifecycle · `ForestBirdType`.
 - `render/src/falling/ground.rs` 294 — terrain gusts and actor contact impulses · `LeafActor`.
-- `render/tests/suite/particle_blend.rs` 188 — GPU referees for display-byte blending and leaf/bird cutouts.
+- `render/tests/suite/particle_blend.rs` 277 — GPU referees for display-byte blending, masked scene blur and leaf/bird cutouts.
 
 - `bake/src/droid_chunks.rs` 587 — disc-derived SBD sections, five Magnaguard mesh cuts and collision spheres; every droid chunk model (the battle droid's too) with its sheets renamed `openbf_droid_*` so no living soldier sheet is replaced · `bake`, `manifest::DroidChunkManifest`; guard: `bake/tests/suite/side_steps.rs` 197 (no `rebake.sh side` step rewrites or shadows another's file).
 - `game/examples/droid_chunks.rs` 104 — offscreen paired droid deaths through the normal class, event, soldier and effect render paths.

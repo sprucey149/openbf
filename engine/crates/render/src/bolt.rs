@@ -178,6 +178,7 @@ pub(crate) struct DisplayPipelines {
 pub(crate) struct BoltFrame {
     pub vertices: Vec<GrassVertex>,
     pub runs: Vec<BoltRun>,
+    pub blur_runs: Vec<(TextureHandle, std::ops::Range<u32>)>,
 }
 
 /// The one instance every bolt draw uses: the vertices are in world space.

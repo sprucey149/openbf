@@ -79,6 +79,7 @@ mod light_beam;
 mod lighting;
 pub mod made;
 mod mesh;
+mod particle_blur;
 mod particles;
 mod pipelines;
 mod point_light;
@@ -412,6 +413,8 @@ pub struct Renderer {
     filter: filter::FilterState,
     sun_flare: Option<sun_flare::State>,
     bloom: bloom::BloomState,
+    particle_blur: particle_blur::ParticleBlur,
+    heat_character_mask: wgpu::RenderPipeline,
     spec_buf: wgpu::Buffer,
     spec_bg: Option<wgpu::BindGroup>,
     /// The disc's mirrored specular light (`analysis/re-specular-pass.md` §4,
