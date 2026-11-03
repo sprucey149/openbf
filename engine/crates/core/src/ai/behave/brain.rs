@@ -61,7 +61,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         return (PadState::default(), nt);
     };
     super::ride::settle(sim, st);
-    let eye = u.muzzle();
+    let eye = u.ai_eye();
     let wc = &sim.weapon_classes[u.weapon_class];
 
     let tier = sim.unit_tier(u);

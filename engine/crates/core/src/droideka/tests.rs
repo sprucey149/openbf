@@ -542,6 +542,8 @@ fn class_props_read_the_disc_values() {
             ("RollTime", "0.50"),
             ("UnrollTime", "1.66"),
             ("PitchLimits", "-25.0 25.0"),
+            ("AimerPitchLimits", "-12.0 18.0"),
+            ("AimerYawLimits", "-10.0 30.0"),
         ],
         vec![(0xdc52_4dd9, "1.0")],
     );
@@ -563,6 +565,8 @@ fn class_props_read_the_disc_values() {
     assert_eq!(c.shield.sphere.center, Vec3::new(0.0, 1.0, 0.125));
     assert!((c.ball_omega_cap() - 6.0 / 0.65).abs() < 1e-4);
     assert!((c.pitch_limits.1 - 25.0 * DEG).abs() < 1e-6);
+    assert_eq!(c.aimer_pitch_limits, (-12.0 * DEG, 18.0 * DEG));
+    assert_eq!(c.aimer_yaw_limits, (-10.0 * DEG, 30.0 * DEG));
     assert_eq!(c.shield.sound.as_deref(), Some("droid_fx7_hum"));
     assert_eq!(c.shield.off_sound, None);
 }

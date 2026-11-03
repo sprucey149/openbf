@@ -44,6 +44,8 @@ pub struct DroidekaClass {
     pub max_turn_speed: f32,
     pub max_pitch_speed: f32,
     pub pitch_limits: (f32, f32),
+    pub aimer_pitch_limits: (f32, f32),
+    pub aimer_yaw_limits: (f32, f32),
     pub turn_threshold: f32,
     pub ball_radius: f32,
     pub ball_move_speed: f32,
@@ -112,6 +114,8 @@ impl Default for DroidekaClass {
             max_turn_speed: 1.25,
             max_pitch_speed: crate::soldier::SoldierConstants::default().max_pitch_speed,
             pitch_limits: (-25.0 * DEG, 25.0 * DEG),
+            aimer_pitch_limits: (-25.0 * DEG, 25.0 * DEG),
+            aimer_yaw_limits: (-40.0 * DEG, 40.0 * DEG),
             turn_threshold: 30.0 * DEG,
             ball_radius: 0.65,
             ball_move_speed: 6.0,
@@ -171,6 +175,14 @@ impl DroidekaClass {
             max_speed: f("MaxSpeed", d.max_speed),
             max_turn_speed: f("MaxTurnSpeed", d.max_turn_speed),
             pitch_limits,
+            aimer_pitch_limits: src
+                .prop("AimerPitchLimits")
+                .and_then(floats::<2>)
+                .map_or(d.aimer_pitch_limits, |[lo, hi]| (lo * DEG, hi * DEG)),
+            aimer_yaw_limits: src
+                .prop("AimerYawLimits")
+                .and_then(floats::<2>)
+                .map_or(d.aimer_yaw_limits, |[lo, hi]| (lo * DEG, hi * DEG)),
             turn_threshold: pf(src, "TurnThreshold").map_or(d.turn_threshold, |t| t * DEG),
             ball_radius: f("BallRadius", d.ball_radius),
             ball_move_speed: f("BallMoveSpeed", d.ball_move_speed),

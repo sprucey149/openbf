@@ -25,6 +25,13 @@ pub fn capsule_of(c: &DroidekaClass, form: Form, pos: Vec3) -> Capsule {
 }
 
 impl Unit {
+    /// AI/perception origin. The droideka's class eye is in its yaw-only
+    /// body frame (BF1 FUN_001d2fb8, B1:80053-80066); soldiers keep the muzzle.
+    pub fn ai_eye(&self) -> Vec3 {
+        self.droideka_class()
+            .map_or_else(|| self.muzzle(), |c| self.droideka_point(c.eye))
+    }
+
     pub fn droideka_class(&self) -> Option<&DroidekaClass> {
         self.spec.droideka.as_deref()
     }
@@ -124,6 +131,37 @@ fn droideka_pitch(
 }
 
 impl Sim {
+    /// Converge a bot's barrel on its CURRENT aim line at the perceived range,
+    /// keeping the tracker's error and the body's world-level pitch clamp.
+    /// PROVISIONAL, trace: PCSX2 hp_gun_1/2 spawn position/velocity on a ramp,
+    /// convergence, alternation and pitch-limit firing (PS2 aimers untraced).
+    pub(super) fn bot_droideka_shot(&self, i: usize) -> Option<(Vec3, (Vec3, Vec3, Vec3))> {
+        let u = &self.units[i];
+        let c = u.droideka_class()?;
+        let gun = u.droideka_muzzle()?;
+        let contact = crate::perception::contact_of(&u.ai, u.ai.target?)?;
+        let eye = u.ai_eye();
+        let (aim, aim_right, _) = u.aim_frame();
+        let point = eye + aim * contact.last_pos.distance(eye);
+        let dir = (point - gun).normalize_or(aim);
+        // Body yaw only: neither the ground normal nor the aim pitch tilts
+        // the frame in which the authored aimer angles are measured.
+        let body_fwd = Vec3::new(aim_right.z, 0.0, -aim_right.x);
+        let yaw = crate::fmath::atan2(dir.dot(aim_right), dir.dot(body_fwd));
+        let pitch = crate::fmath::asin(dir.y.clamp(-1.0, 1.0));
+        let clamped_yaw = yaw.clamp(c.aimer_yaw_limits.0, c.aimer_yaw_limits.1);
+        let clamped_pitch = pitch.clamp(c.aimer_pitch_limits.0, c.aimer_pitch_limits.1);
+        let fwd = if yaw == clamped_yaw && pitch == clamped_pitch {
+            dir
+        } else {
+            let (sy, cy) = crate::fmath::sin_cos(clamped_yaw);
+            let (sp, cp) = crate::fmath::sin_cos(clamped_pitch);
+            (body_fwd * cy + aim_right * sy) * cp + Vec3::Y * sp
+        };
+        let right = fwd.cross(Vec3::Y).normalize_or(aim_right);
+        Some((gun, (fwd, right, right.cross(fwd).normalize())))
+    }
+
     /// The same edge/headroom inputs for real motion and between-tick look.
     fn droideka_input(&self, i: usize, pad: &PadState) -> Option<Input> {
         let u = self.units.get(i)?;

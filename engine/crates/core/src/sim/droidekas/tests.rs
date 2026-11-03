@@ -1,3 +1,5 @@
+mod aim;
+
 use std::sync::Arc;
 
 use glam::Vec3;

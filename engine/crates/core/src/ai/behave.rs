@@ -64,7 +64,7 @@ pub use brain::think;
 pub(super) use position::lost_jump;
 
 /// What one tick of a bot on foot reads once and every layer shares: the
-/// unit, its muzzle, its weapon class, the difficulty tier and the unit's own
+/// unit, its AI eye, its weapon class, the difficulty tier and the unit's own
 /// skill vector under the tier's overrides.
 #[derive(Clone, Copy)]
 pub(super) struct Tick<'a> {
