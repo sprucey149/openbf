@@ -1,7 +1,8 @@
 # openbf
 
-An open-source Rust engine that plays Star Wars: Battlefront and Star Wars: Battlefront II,
-built from your own copies of both games, with the PlayStation 2 versions as its gameplay reference.
+Star Wars: Battlefront and Star Wars: Battlefront II, rebuilt as one modern game in Rust. Supply any
+copy of the games you own, whether PC, Xbox or PS2, and openbf builds the game from it. Every copy plays
+the same game, so everyone can play together.
 
 **Unofficial fan project.** Not affiliated with or endorsed by Lucasfilm, Disney,
 Electronic Arts, LucasArts or Pandemic Studios. This repository contains no game
@@ -30,11 +31,10 @@ python3 scripts/pack.py
 
 - **Both games.** You need a copy of Battlefront (BF1) and a copy of Battlefront II (BF2).
   It will not build with only one of them.
-- **A console copy of BF2.** PC BF2 does not contain everything the game needs, such as the menus
-  and HUD it uses, so it can only be an add-on to a console BF2, never your only BF2.
-- **Mix and match.** Console copies can be mixed freely, for example PS2 BF1 with Xbox BF2,
-  and the goal is the same game whichever you use: only texture and asset sizes change.
-  The Status note below says how much of this works today.
+- **Any version.** PS2 and Xbox discs and PC installs all work, and can be mixed, for example
+  PC BF1 with Xbox BF2. BF2 can't be built from a PC copy alone yet.
+- **Same game whichever you use.** The copy you supply changes how the game looks (texture sizes
+  and some artwork), never how it plays. The Status note below says how much of this works today.
 - **For best results, add PC and Xbox copies.** The build keeps the largest copy of each texture, as long as
   it is the same painting. The PC copy is the largest much more often: about 680 textures across
   the two games, against 12 where the Xbox copy is larger. Those are mostly on BF2 Geonosis, such as a sky at
@@ -153,7 +153,7 @@ Your profile and snapshots are saved in `openbf_data\` beside `openbf.exe`.
 
 ## Controls
 
-The game is built around a controller and plays like the PS2 versions, with their aim assist.
+The game is built around a controller and plays like the console originals, with their aim assist.
 Keyboard and mouse also work, as a deliberate addition for PC: click into the battle to capture
 the pointer; Esc pauses and frees it again. Mouse aim gets no aim assist. Sensitivity and invert-Y
 are in Options and in the pause menu.
@@ -192,6 +192,10 @@ That scaffolding is published too:
 - `analysis/`: reverse-engineering notes, supporting references, and remaining uncertainties
 - `docs/loop/`: how the AI loop is run (its rules, its session prompt, the backlog and every work card)
 - `scripts/`: the build, bake, test-gate and loop tools
+
+openbf's gameplay is its own. It started from the original games, which we studied closely, mostly
+through the PS2 versions, the best-documented ones. Where it deliberately differs, the difference is
+written down in `analysis/plan/FEATURE_SET.md`.
 
 No code from the original games is included; the decompilation is used only as a reference for
 behaviour.
