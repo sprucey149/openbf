@@ -28,6 +28,9 @@
 //! it starts open to both teams (every BF1 turret instance authors Team 0;
 //! how the PS2 gates a building's seat by team is untraced).
 
+mod flight;
+pub use flight::flight_paths;
+
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::vehicle_class;
 use core::vehicle::gun::{Aimer, GunSetup, GunWeapon, MAX_SEAT_WEAPONS};
@@ -598,16 +601,9 @@ pub fn install(
                 .map(|f| f.params(landed[i].unwrap_or(0.0)))
         })
         .collect();
-    // BF2's AI flyers follow the map's authored paths (re-flyer-ai.md). The
-    // bake keeps their names and nodes; their properties are not baked yet.
-    sim.flyer_paths = m
-        .paths
-        .iter()
-        .filter(|p| game == "bf2" && p.name.to_ascii_lowercase().contains("entitypath"))
-        .map(|p| core::vehicle::flyer::FlyerPath {
-            nodes: p.nodes.iter().map(|(at, _)| Vec3::from(*at)).collect(),
-        })
-        .collect();
+    // BF2's path Properties now survive the bake; older manifests use the
+    // PS2 constructor defaults until rebaked (analysis/re-flyer-ai.md).
+    sim.flyer_paths = flight_paths(m);
     // Bots fly (`core::ai::flyer_drive`). OPENBF_FLYER_BOTS=0 keeps them on the ground,
     // for a run measuring a map's ground war alone.
     sim.flyer_bots = std::env::var_os("OPENBF_FLYER_BOTS").is_none_or(|v| v != "0");

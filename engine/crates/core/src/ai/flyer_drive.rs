@@ -36,8 +36,11 @@
 //!
 //! NOT BUILT: landing hints (agent states 5, 6), squadrons, transports, BF2
 //! boost, avoidance, docking and landing, branching at a node, the path's
-//! Class, Frequency and node properties (not in the current bakes), and the
+//! node properties, and the
 //! roll wobble's address-derived phase (the vehicle's generation stands in).
+
+mod admission;
+pub(crate) use admission::commit as commit_plan;
 
 use super::gunner::Look;
 use super::hover_drive::{self, Body, Class, Order};
@@ -553,8 +556,7 @@ fn clear_chord(sim: &Sim, a: Vec3, b: Vec3, handle: VehicleHandle) -> bool {
 }
 
 /// FUN_002ff478 and FUN_002f9498: the best path end to join, as a connection
-/// curve. Scores are FUN_002f9498's; a path's Frequency and MaxAngle wait on
-/// the bake. FUN_002fff48 checks three chords at the parameter's thirds.
+/// curve. Frequency weights the score; MaxAngle is still unimplemented. FUN_002fff48 checks three chords at the parameter's thirds.
 fn connect(
     sim: &Sim,
     v: &Vehicle,
@@ -572,6 +574,16 @@ fn connect(
         }
         let last = path.nodes.len() - 1;
         for (node, next, reverse) in [(0, 1, false), (last, last - 1, true)] {
+            let cursor = PathCursor {
+                path: i as u16,
+                node: node as u16,
+                reverse,
+            };
+            // Class-zero discovery is broader than joining on PS2. Rank
+            // only candidates that can actually reserve a slot.
+            if !admission::allows(sim, handle, p.follower.class_id, cursor, true) {
+                continue;
+            }
             let end = path.nodes[node];
             let after = path.nodes[next];
             let to = end - pos;
@@ -584,15 +596,7 @@ fn connect(
                 score *= 0.4;
             }
             let curve = [pos - forward * CONNECT_BEHIND, pos, end, after];
-            ranked.push((
-                score.clamp(0.0, 1.0),
-                PathCursor {
-                    path: i as u16,
-                    node: node as u16,
-                    reverse,
-                },
-                curve,
-            ));
+            ranked.push(((score * path.frequency).clamp(0.0, 1.0), cursor, curve));
         }
     }
     ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -615,10 +619,35 @@ fn connect(
     if let Some((_, cursor, curve)) = chosen {
         ai.curve = Some(*curve);
         ai.cursor = Some(*cursor);
+        ai.goal = None;
     } else {
-        ai.curve = None;
-        ai.cursor = None;
+        loiter(v, p, ai);
     }
+    ai.t = 0.0;
+}
+
+/// OURS: hold near the failed connection without occupying a refused route.
+/// measure: PS2 all-routes-refused trajectory after FUN_002fa478 resets the
+/// follower; replace this circle and its two seconds of mid-speed radius.
+fn loiter(v: &Vehicle, p: &FlyerParams, ai: &mut FlyerAi) {
+    ai.curve = Some(if let (Some(center), Some(old)) = (ai.goal, ai.curve) {
+        [old[1], old[2], old[3], center * 2.0 - old[2]]
+    } else {
+        let forward = (v.rot * Vec3::Z * Vec3::new(1.0, 0.0, 1.0))
+            .try_normalize()
+            .unwrap_or(Vec3::Z);
+        let right = Vec3::Y.cross(forward);
+        let radius = p.mid_speed.max(SLOW_FLOOR) * 2.0;
+        let center = v.pos + right * radius;
+        ai.goal = Some(center);
+        [
+            v.pos - forward * radius,
+            v.pos,
+            center + forward * radius,
+            center + right * radius,
+        ]
+    });
+    ai.cursor = None;
     ai.t = 0.0;
 }
 
@@ -648,6 +677,7 @@ fn bf2_plan(
 ) {
     if let Some(t) = target.filter(|_| p.follower.flyer_vs_flyer && !ai.pursuit && ai.escape <= 0.0)
     {
+        ai.goal = None;
         ai.curve = Some(pursuit_curve(sim, me, v, t));
         ai.cursor = None;
         ai.t = 0.0;

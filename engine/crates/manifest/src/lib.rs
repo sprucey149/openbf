@@ -344,6 +344,10 @@ pub struct ManifestGeometry {
 /// as stored — (w, x, y, z), see mungefs::path).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManifestPath {
+    /// BF2 authored path Properties as (lowercase FNV key, value). Empty
+    /// on BF1 and older bakes; no fabricated defaults enter the manifest.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flight_props: Vec<(u32, String)>,
     pub name: String,
     pub nodes: Vec<([f32; 3], [f32; 4])>,
     /// Defaulted: absent in bakes made before path props were read.

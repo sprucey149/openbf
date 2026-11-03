@@ -240,6 +240,7 @@ fn full_manifest() -> Manifest {
             ],
         }],
         paths: vec![ManifestPath {
+            flight_props: Vec::new(),
             name: "spawnpath".into(),
             nodes: vec![([0.0, 1.0, 2.0], [1.0, 0.0, 0.0, 0.0])],
             props: vec![("SpawnPath".into(), 7)],
@@ -1427,4 +1428,20 @@ fn old_leaf_rows_disable_airborne_particles() {
     let old = text.replace("falling_count:6,", "");
     let parsed: ManifestLeafClass = ron::from_str(&old).unwrap();
     assert_eq!(parsed.falling_count, 0);
+}
+
+#[test]
+fn flight_properties_round_trip_and_old_paths_keep_their_serialization() {
+    let old = r#"(name:"type_EntityPath test",nodes:[],props:[])"#;
+    let mut path: ManifestPath = ron::from_str(old).unwrap();
+    assert!(path.flight_props.is_empty());
+    assert_eq!(ron::to_string(&path).unwrap(), old);
+    path.flight_props = vec![
+        (0xab3e0bff, "test_fighter 2".into()),
+        (0xdf6dc76a, "-1".into()),
+    ];
+    assert_eq!(
+        ron::from_str::<ManifestPath>(&ron::to_string(&path).unwrap()).unwrap(),
+        path
+    );
 }

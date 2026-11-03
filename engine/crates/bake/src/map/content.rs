@@ -756,6 +756,7 @@ pub(super) fn bake_content(
                     .map_err(|e| anyhow!("PATH 0x{:X}: {e}", c.offset))?
                 {
                     paths.push(ManifestPath {
+                        flight_props: p.flight_props,
                         name: p.name,
                         nodes: p.nodes.iter().map(|n| (n.pos, n.rot)).collect(),
                         props: p.props,
@@ -769,6 +770,7 @@ pub(super) fn bake_content(
                         .map_err(|e| anyhow!("path 0x{:X}: {e}", c.offset))?
                     {
                         paths.push(ManifestPath {
+                            flight_props: p.flight_props,
                             name: p.name,
                             nodes: p.nodes.iter().map(|n| (n.pos, n.rot)).collect(),
                             props: p.props,

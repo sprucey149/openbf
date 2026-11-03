@@ -56,6 +56,8 @@ pub struct FlyerParams {
 /// See analysis/re-flyer-ai.md for hashes and unit conversions.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FollowerParams {
+    /// PathFollowerClass, BF2 class +0x54 (zero bypasses discovery filtering).
+    pub class_id: u32,
     pub speed: f32,
     pub turn_speed: f32,
     /// Stored inverse of PathFollowerAcceleration (s).
@@ -76,6 +78,7 @@ pub struct FollowerParams {
 impl Default for FollowerParams {
     fn default() -> Self {
         Self {
+            class_id: 0,
             speed: 1.0,
             turn_speed: 0.5,
             inv_acceleration: 0.5,
@@ -203,11 +206,38 @@ pub struct FlyerState {
     pub ai: FlyerAi,
 }
 
-/// One authored `EntityPath`, in node order. Its Class, Direction, Frequency
-/// and node properties are not in the current bakes (analysis/re-flyer-ai.md).
+/// Authored BF2 route admission (analysis/re-flyer-ai.md, issue 103).
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlyerPath {
     pub nodes: Vec<Vec3>,
+    pub name: u32,
+    /// (PathFollowerClass hash, maximum concurrent users), in authored order.
+    pub classes: Vec<(u32, u32)>,
+    pub max_entities: u32,
+    /// -1 last endpoint only, 0 either, +1 first endpoint only.
+    pub direction: i8,
+    pub single_direction: bool,
+    pub frequency: f32,
+    /// Runtime EnableFlyerPath bit; defaults on, not an authored property.
+    pub enabled: bool,
+    /// EnableObject resolved to a placed instance, if present on this map.
+    pub enable_instance: Option<u32>,
+}
+
+impl Default for FlyerPath {
+    fn default() -> Self {
+        Self {
+            nodes: Vec::new(),
+            name: 0,
+            classes: Vec::new(),
+            max_entities: u32::MAX,
+            direction: 0,
+            single_direction: false,
+            frequency: 1.0,
+            enabled: true,
+            enable_instance: None,
+        }
+    }
 }
 
 /// The BF1 UnitFlyAgent states the port keeps (FUN_00246d80).
@@ -237,6 +267,7 @@ pub struct PathCursor {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FlyerAi {
     pub agent: FlyAgent,
+    /// BF1 travel goal; BF2 temporary loiter center (flyer_drive::loiter).
     pub goal: Option<Vec3>,
     /// FUN_001dcbf0's cached obstacle goal and where it was made.
     pub avoid: Option<[Vec3; 2]>,

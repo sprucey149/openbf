@@ -402,6 +402,9 @@ impl Sim {
             r.player_board = None;
             r.ordered_call = false;
             r.maintenance = None;
+            if r.flyer.is_some_and(|f| f.ai.cursor.is_some()) {
+                r.flyer = None;
+            }
             r.bail_draw = None;
             r.bail_seen = false;
         }
@@ -428,6 +431,11 @@ impl Sim {
             if s.occupant == Some(u) {
                 s.occupant = None;
             }
+        }
+        // Detaching the follower releases route occupancy immediately, even
+        // when another pilot enters before clear_driverless runs.
+        if m.seat == 0 && v.kind == VehicleKind::Flyer && v.flyer.ai.cursor.is_some() {
+            v.flyer.ai = crate::vehicle::flyer::FlyerAi::default();
         }
         // A pilot change ends a turret's zoom (card VTURZ, re-turret-draw 4).
         if let Some(Some(g)) = v.guns.get_mut(usize::from(m.seat)) {

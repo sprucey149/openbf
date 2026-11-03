@@ -378,6 +378,7 @@ fn path_props_step_along_the_path() {
         }],
     };
     let paths = [ManifestPath {
+        flight_props: Vec::new(),
         name: "Jungle1".into(),
         nodes: vec![
             ([0.0, 2.0, 0.0], [1.0, 0.0, 0.0, 0.0]),
@@ -427,6 +428,7 @@ fn path_props_step_along_the_path() {
     // A vertical segment has no side axis: no prop there, and none with a
     // NaN rotation after it.
     let climb = [ManifestPath {
+        flight_props: Vec::new(),
         name: "Jungle1".into(),
         nodes: vec![
             ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]),

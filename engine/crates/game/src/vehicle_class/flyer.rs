@@ -179,6 +179,10 @@ impl FlyerClass {
                 return;
             }
         }
+        if key == h("PathFollowerClass") {
+            f.class_id = h(value.trim().trim_matches('"'));
+            return;
+        }
         if key == h("PathFollowerFlyerVsFlyer") {
             if let Some(number) = number {
                 f.flyer_vs_flyer = number != 0.0;

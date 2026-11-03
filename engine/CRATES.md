@@ -70,7 +70,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `mungefs/src/locl.rs` 157 — CORE.LVL localised text tables · `parse`, `find`, `Locl`, `key`; binary format in the module header.
 - `mungefs/src/coll.rs` 910 — `coll` meshes and `prim` primitives · `CollisionMesh`, `Primitives`; leaf triangulation and signed-fan repair route through `coll_fan.rs`.
 - `mungefs/src/coll_fan.rs` 491 — signed-fan collision repair · `repairs`; region reconstruction and POL1 doorway rationale in the module header (STARC).
-- `mungefs/src/path.rs` 298 — `PATH` spawn and AI paths · `Path`
+- `mungefs/src/path.rs` 442 — `PATH` spawn and AI paths · `Path`
 - `mungefs/src/plan.rs` 839 — `plan` graph + BF2 `plnp` patches · `Plan`, `Plnp`
 - `mungefs/src/soundbank.rs` 344 — `SampleBank` samples · `SampleBank`
 - `mungefs/src/sound_props.rs` 626 — `snd_` properties, layered/parameterized sounds and `mus_` music records · `SoundProp`, `find_named_sublevels`, `MusicRecord`, `find_music`; graph, bus and take-lock fields in the module header and record docs.
@@ -88,7 +88,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/gameplay/terrain.rs` 250 — simulation heights inside the play/query bounds, separate full drawing heights · `apply_terrain`, `apply_render_heights`
 - `bake/src/gameplay/tests.rs` 506 — the gameplay table's tests.
 - `bake/src/map.rs` 918 — map/common public entry points, input-reduction helpers, manifest re-exports and regression tests · `bake_map`, `bake_common`; calls the private content baker.
-- `bake/src/map/content.rs` 1593 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
+- `bake/src/map/content.rs` 1595 — shared map/common LVL orchestration: models, terrain, collision, navigation, effects, classes and pulled SIDE turrets · `bake_content`; output contract in the parent header; `side_classes.rs` owns turret pulls.
 - `bake/src/map/render_alignment.rs` 319 — fingerprinted donor-art transforms, end stretches and donor-vertex column caps; preserves PS2 outputs, gameplay headers and collision · `Alignment`
 - `bake/src/map/render_groups.rs` 327 — fingerprinted rigid return of displaced donor vertex groups (BF1 Hoth chamber, PC Rhen Var cathedral window) and of the donor shadow vertices outlining them; PS2 never selects a recipe · `Groups`
 - `bake/src/map/render_offsets.rs` 389 — fingerprinted donor vertex displacements and face removals on final recovered drawing models; guards unknown inputs and leaves PS2 untouched · `Offsets`
@@ -148,7 +148,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/effects.rs` 470 — layered LVL particle effects and resources → `effects.ron` · `Collected`, `bake_side`, `names`; common/map/side outputs and name dictionary in the module/API docs (`analysis/re-fx.md`).
 - `bake/src/door.rs` 463 — BF2 door rigs: triggers, collision/draw motion and sounds · `rigs`, `rig`, `DoorSpec`; clip/transform rules and caveats in the module header (`analysis/re-bf2-doors.md`, [O]).
 - `bake/src/foliage.rs` 770 — terrain foliage placement/tint, path props and grasspatch bake → `foliage.bin` · `bake`, `place`, `tint`, `path_props`, `rng_table`, `grass_class`, `grass_atlas`; ELF-table dependency and arithmetic in the module header (`analysis/re-foliage.md`).
-- `bake/src/foliage/tests.rs` 507 — the placement and tint against instances read out of the PS2's RAM (the height is `game::viewer::foliage`'s); the ELF table and grass atlas, the grass class, the path props
+- `bake/src/foliage/tests.rs` 509 — the placement and tint against instances read out of the PS2's RAM (the height is `game::viewer::foliage`'s); the ELF table and grass atlas, the grass class, the path props
 - `bake/src/sounds.rs` 861 — SOUND LVL bank/property/stream bake → WAVs and `sounds.ron` · `bake_sounds`; per-sublevel inheritance and engine-graph resolution in `read_sublevels` / `engines`; stream outputs in the module header.
 - `bake/src/foley.rs` 87 — the LVL's foley tables → `<map>/sounds/foley.ron` (card FOLY; written by `bake sounds`) · `table`, `write`
 - `bake/src/sound_names.rs` 367 — names for hashed sound properties · `build_dictionary`
@@ -164,27 +164,29 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/donor.rs` 304 — Card COVR: a BF1 map's Cover hints from the BF2 version of the same map (lead_tmp botre xbox_pc note finding 1). BF2's Yavin Temple authors 973
 
 ## manifest — the schema
-- `manifest/src/lib.rs` 1390 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
+- `manifest/src/lib.rs` 1394 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
 - `manifest/src/environment.rs` 786 — environment schema: weather, local lights/HDR, foliage and `foliage.bin` codec, water, lighting, fog and sky · `ManifestPrecipitation`, `ManifestWind`, `ManifestLightning`, `ManifestPointLight`, `ManifestHdr`, `ManifestFoliage`, `foliage_bin`, `ManifestWater`, `ManifestLighting`, `ManifestSky`; all names re-exported at crate root.
 - `manifest/src/anim_sets.rs` 297 — `soldiers/<model>.sets.ron`: a soldier's animation sets over its GLB's clips, and the two games' slot name tables · `SoldierSets`, `Bf1Sets`, `Bf2Sets`, `bf1::weapon_set`, `bf2::base_name`
 - `manifest/src/fpm.rs` 152 — the first-person arm clip tables (BF1 5 rows, BF2 4, 11 columns) and the arm GLB path · `COLUMNS`, `BF1_TABLE`, `BF2_TABLE`, `clip_names`, `glb_path`; `analysis/re-first-person-arms.md` §2.
 - `manifest/src/hud.rs` 137 — `hud/*.ron`, `fonts/*.ron`, the `locl` text table · `HudIndex`, `HudLayout`, `HudNode`, `HudArg`, `HudFont`, `HudGlyph`, `HudLocl`, `locl_key`
 - `manifest/src/shell.rs` 139 — shell asset index and JPEG movie frame-pack schema · `ShellIndex`, `ShellMovie`, `FramePack`; format in the module header (`analysis/re-bf2-shell.md` §1, §4).
-- `manifest/src/tests.rs` 1430 — the round trip: what the bake writes, the runtime reads
+- `manifest/src/tests.rs` 1447 — the round trip: what the bake writes, the runtime reads
 
 ## core — the sim (tick order: the header of `core/src/sim.rs`)
 
-- `core/src/vehicle/flyer.rs` 886 — PS2 BF1/BF2 flight states, speed, attitude, boost and landing restrictions, and BF2's AI curve follower; scoped fidelity in analysis/re-flyer.md · FlyerParams, FollowerParams, FlyerState, FlyerAi, FlightPhase, step, spline_step, curve_at, untilted.
+- `core/src/vehicle/flyer.rs` 917 — PS2 BF1/BF2 flight states, speed, attitude, boost and landing restrictions, and BF2's AI curve follower; scoped fidelity in analysis/re-flyer.md · FlyerParams, FollowerParams, FlyerState, FlyerAi, FlightPhase, step, spline_step, curve_at, untilted.
 - `core/src/vehicle/flyer/tests.rs` 401 — flight equation, transition, boost, landing and parked-hash regressions.
 - `core/src/sim/flyers.rs` 665 — flight/world down rays, mission bands, provisional contact sweep, slide, staying over the terrain sheet and an empty craft's rest, the BF2 follower's dispatch and normal-pad integration tests · FlightLimits, Sim::tick_flyers.
-- `core/src/ai/flyer_drive.rs` 762 — a bot at a flyer's pilot seat: BF1's fly agent, altitude and stick law; BF2's path planner and pursuit curve; invented policy named in its header · can_fly, throttle_for, speed_share, stick_to, drive.
-- `core/src/ai/flyer_drive/tests.rs` 652 — boarding through takeoff and flight, the switch, replay, stick/speed/altitude laws and the follower's curves.
+- `core/src/ai/flyer_drive.rs` 792 — a bot at a flyer's pilot seat: BF1's fly agent, altitude and stick law; BF2's path planner and pursuit curve; invented policy named in its header · can_fly, throttle_for, speed_share, stick_to, drive.
+- `core/src/ai/flyer_drive/tests.rs` 1016 — boarding through takeoff and flight, the switch, replay, stick/speed/altitude laws and the follower's curves.
+- `core/src/ai/flyer_drive/admission.rs` 134 — BF2 discovery/join class, enable, capacity and direction gates; live-pilot occupancy, atomic plan admission and refused-join loiter; named runtime enable toggles (test callers only).
 - `core/src/lib.rs` 72 — module roots and fixed tick rate · `TICK_HZ`, `TICK_DT`
 - `core/src/sim.rs` 194 — simulation facade, public re-exports and shared test fixtures · `Sim`, `PadState`, `InputLog`, `Event`, `buttons`; tick order and part ownership are specified in its module header.
 - `core/src/sim/rider_health_tests.rs` 245 — a vehicle's health and its riders' are two pools: what reaches each.
 - `core/src/sim/state.rs` 1414 — simulation state, counters, cheats, construction and queries; events and the replay hash have rows below · `Sim`, `NavStats`, `Cheats`, `Hazard`, `LETHAL_LANDING_SPEED`, `omni_radius_for`; door methods and hash referees have separate rows below.
 - `core/src/sim/state/events.rs` 479 — what the sim tells the game · `Event`, `Call`, `DeathCause`
-- `core/src/sim/state/hash.rs` 399 — the whole-state hash the replay gates read · `Sim::hash`
+- `core/src/sim/state/hash.rs` 405 — the whole-state hash the replay gates read · `Sim::hash`
+
 - `core/src/sim/state/tests.rs` 644 — sim state/query regressions and hash invariants, including the pinned `--sim-hash 100` referee.
 - `core/src/sim/state/tests/hash_bolts.rs` 139 — HASH field-by-field bolt serialization, predictive-hit continuation and 600-tick repeatability controls.
 - `core/src/sim/state/tests/hash_history.rs` 413 — reachable history and continuation probes for state omitted from the sim hash; see its header for the limits of the collision claims.
@@ -208,7 +210,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/combat.rs` 765 — bolt impacts, damage, kills/tickets and impact explosions; environmental death and cheat exemptions; includes damage/death regressions · `Sim::kill_environment`; see module header, with blasts routed through `Sim::explode`.
 - `core/src/sim/combat/tests.rs` 1090 — the bolt, damage and kill tests.
 - `core/src/sim/round.rs` 603 — command-post registration/capture, conquest bleed, difficulty handicap and round outcome; includes capture/defeat/handicap tests · `Sim::add_cp`; rules are in the module header.
-- `core/src/sim/seats.rs` 939 — human/bot vehicle entry, explicit AI-call/player-order claim-budget reconciliation, follower boarding, pickup clock/output and claim-maintenance write-back, all-AI bailout dispatch/census, takeover and exit placement, driver input and rider transport · `Sim::use_pass`, `Sim::ai_use_pass`, `Sim::enter_target`, `Sim::enter_seat`, `Sim::enter_vehicle`, `Sim::exit_vehicle`, `Sim::shut_in`, `Sim::shut_in_solid`, `driver_input`; see module header, `analysis/re-vehicles.md` §5 and `analysis/re-hover.md` §5.2.
+- `core/src/sim/seats.rs` 943 — human/bot vehicle entry, explicit AI-call/player-order claim-budget reconciliation, follower boarding, pickup clock/output and claim-maintenance write-back, all-AI bailout dispatch/census, takeover and exit placement, driver input and rider transport · `Sim::use_pass`, `Sim::ai_use_pass`, `Sim::enter_target`, `Sim::enter_seat`, `Sim::enter_vehicle`, `Sim::exit_vehicle`, `Sim::shut_in`, `Sim::shut_in_solid`, `driver_input`; see module header, `analysis/re-vehicles.md` §5 and `analysis/re-hover.md` §5.2.
 - `core/src/sim/seats/tests.rs` 589 — vehicle entry/refusal/takeover, follower boarding/seat contention, driving, exit placement and input-shaping regressions on flat ground with the TAT1 skiff fixture.
 - `core/src/sim/damage_regions.rs` 253 — authored `damage` regions (Mustafar's lava and steam): the name's keys, and per-update damage to soldiers and vehicles whose sphere touches one · `DamageRegion`, `Sim::tick_damage_regions`.
 - `core/src/sim/self_turrets.rs` 426 — placed BF2 self-piloted building controllers, targeting and shared seat-gun dispatch (issue #91).
@@ -217,7 +219,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/step.rs` 1415 — fixed-tick orchestration and after-writeback wait-start and routed-departure calls, unit separation, soldier wall/zoom handling and human aim rays · `Sim::step`, `Sim::aim_hit`, `Sim::tick_zoom`; tick order is in `sim.rs`, aim details in `analysis/re-aim-assist.md` §10 and zoom details in `analysis/re-zoom.md` §5; regressions live in `core/src/sim/step/tests.rs`.
 - `core/src/sim/step/tests.rs` 1581 — sim tick, salvo blast-clearance, separation and determinism regressions, extracted from the step implementation.
 - `core/src/sim/step/tests/scratch.rs` 45 — retained AI scratch versus fresh allocation: hashes, event order and buffer lifetime.
-- `core/src/sim/vehicles.rs` 892 — vehicle slots, pickup/charge-tenure, pending-call and boarding-maintenance lifecycle, occupancy/team synchronization, hull damage/death, pad spawning/decay, vehicle ticking and collision hull synchronization; includes lifecycle/hash/pad/hull tests · `Sim::spawn_vehicle`, `Sim::seat_unit`, `Sim::unseat_unit`, `Sim::vehicle_team`, `Sim::damage_vehicle`, `Sim::impact_vehicle`, `Sim::destroy_vehicle`, `Sim::add_vehicle_pad`, `Sim::tick_walkers`, `Sim::sync_hulls`. Only the seat/unseat writers update both `Seat.occupant` and `Unit.mount`; lifecycle rules are specified in the header.
+- `core/src/sim/vehicles.rs` 900 — vehicle slots, pickup/charge-tenure, pending-call and boarding-maintenance lifecycle, occupancy/team synchronization, hull damage/death, pad spawning/decay, vehicle ticking and collision hull synchronization; includes lifecycle/hash/pad/hull tests · `Sim::spawn_vehicle`, `Sim::seat_unit`, `Sim::unseat_unit`, `Sim::vehicle_team`, `Sim::damage_vehicle`, `Sim::impact_vehicle`, `Sim::destroy_vehicle`, `Sim::add_vehicle_pad`, `Sim::tick_walkers`, `Sim::sync_hulls`. Only the seat/unseat writers update both `Seat.occupant` and `Unit.mount`; lifecycle rules are specified in the header.
 - `core/src/sim/vehicles/tests.rs` 1076 — the vehicle lifecycle tests.
 - `core/src/sim/droidekas.rs` 358 — the droideka's sim step: pad edges into fold/deploy/shield/jump and the player's held ball sprint, the bot form order, collision capsules by form, bot barrel convergence within authored aimer limits, fire gating and barrels, events (`Event::Droideka`), shield and ordnance spheres in the world · `Sim::step_droideka`, `Unit::ai_eye`, `Unit::droideka_point`, `Unit::droideka_shield`, `Unit::droideka_spheres`, `Unit::droideka_gun`, `Unit::droideka_muzzle`, `Unit::lend_droideka_shield` (blasts through `Health`), `Unit::separation_radius`.
 - `core/src/sim/droidekas/tests.rs` 881 — Droideka sim inputs, look preview and no-zoom contracts.
@@ -386,7 +388,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 
 - `game/src/dlc.rs` 120 — optional Republic and CIS heroes the Hero Options row can put on every BF2 map, labels and animation descriptors.
 - `game/src/dlc/tests.rs` 660 — content-gated hero lifecycle, every-map, effect layer, tentacle and absent-addon hash checks.
-- `game/src/vehicle_class/flyer.rs` 194 — flyer class defaults and property routing, including turret first refusal, destructible-chunk fallback and the path follower's numbers · FlyerClass.
+- `game/src/vehicle_class/flyer.rs` 198 — flyer class defaults and property routing, including turret first refusal, destructible-chunk fallback and the path follower's numbers · FlyerClass.
 - `game/src/main/sim_trace.rs` 188 — SHASH headless CLI, input validation and fixture/baked conquest setup · `run`.
 - `game/src/main.rs` 611 — binary CLI and mode dispatch; flags and environment variables are specified in its module header · `main`, `ViewerArgs`, `BattleSetup`. The binary loads its parts with `#[path]` because the library owns `game/src/`.
 - `game/src/main/battle.rs` 1045 — battle construction and shared draw/HUD setup, including the installed-turret bounds/readout fixture · `make_walk`, `walk_draws`, `hud_model`.
@@ -453,7 +455,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/vehicle_class/walker.rs` 907 — walker class parsing, section/default conversions and BF1-body adaptation · `WalkerClass`, `WALKER_BASES`, `turret_claims`, `bf1_body`; census tests here; module header and `analysis/re-walker.md` §11, §13.9.
 - `game/src/vehicle_class.rs` 1491 — vehicle/building-turret class properties, seat/gun/rider rules, hull-body selection and flyer rest height · `HoverClass`, `seats`, `SeatSpec`, `GunnerDraw`, `PilotPose`, `health_type`, `ai_size`, `neutral_when_empty`, `damage_effects`, `explosion_name`, `HoverClass::hull`, `hull_names`, `TURRET_BASES`, `is_turret`, `FLYER_BASES`, `landed_height`; module header, `analysis/re-hover.md` §13.2 and `analysis/re-vehicle-rest.md` §2.
 - `game/src/vehicle_class/aim.rs` 44 — Authored vehicle aimer metadata and limits.
-- `game/src/vehicle_pads.rs` 1504 — manifest vehicle pads/building turrets into sim vehicle, gun, hull and seat setup; extra mission side-file routing · `build`, `add_turrets`, `install`, `mission_side_files`, `seat_setup`, `seat_gun`, `hardpoints`, `hull_parts`, `hover_hull`, `walker_bakes`, `building_sphere`, `PadBuild`, `TurretDef`, `class_key_team`; module header and `analysis/re-vehicles.md` §7–§8.
+- `game/src/vehicle_pads.rs` 1500 — manifest vehicle pads/building turrets into sim vehicle, gun, hull and seat setup; extra mission side-file routing · `build`, `add_turrets`, `install`, `mission_side_files`, `seat_setup`, `seat_gun`, `hardpoints`, `hull_parts`, `hover_hull`, `walker_bakes`, `building_sphere`, `PadBuild`, `TurretDef`, `class_key_team`; module header and `analysis/re-vehicles.md` §7–§8.
+- `game/src/vehicle_pads/flight.rs` 85 — authored BF2 path Properties into route setup, including retail type_EntityPath names, PS2 numeric readers, class limits and enabling-object bindings · `flight_paths`.
+
 - `game/src/conquest_defaults.rs` 205 — map/era combatants and calibrated ticket defaults; percentage resolution and pause population changes.
 - `game/src/collision_layers.rs` 486 — which bodies are in a collision layer · `layer_bodies`
 - `game/src/capture_feed.rs` 398 — command-post capture icon selection and meter presentation, including optional own-post/direction rules · `icon`, `for_unit`, `meter_sign`, `PostState`, `Rules`; module header and `analysis/re-capture-display.md` §3.1.
@@ -631,7 +635,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 ## Tests, examples, goldens, data
 
 - `game/examples/flyer_drive.rs` 143 — scripted pad flight on a real map with PS2 class numbers; deterministic headless replay.
-- `game/tests/flyer.rs` 73 — original PS2 class extraction and flight property-routing regressions.
+- `game/tests/flyer.rs` 399 — original PS2 class extraction/census, flight property/limit decoding, owned bake identity and seeded class-restricted Space Yavin flight rounds.
 - `engine/ci.sh` runs workspace fmt, all-target clippy `-D warnings`, build, tests and doctests.
   It uses nextest's `ci` profile when installed, otherwise `cargo test`; both select
   `--lib --bins --tests --example arena`. Other examples are compile-checked by clippy

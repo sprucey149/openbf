@@ -47,6 +47,8 @@ pub struct Path {
     pub nodes: Vec<PathNode>,
     /// Raw (key, 4-byte value) pairs from PROP.
     pub props: Vec<(String, u32)>,
+    /// BF2 path Properties, preserving strings (including class limits).
+    pub flight_props: Vec<(u32, String)>,
     /// INFO's second u16: 0 on ordinary paths, 2 on the map-boundary path
     /// (see the module erratum). Further values undecoded.
     pub kind: u16,
@@ -101,6 +103,7 @@ impl Path {
             name,
             nodes,
             props,
+            flight_props: Vec::new(),
             kind,
             info_word,
         })
@@ -150,6 +153,21 @@ pub fn parse_config_paths(c: &Chunk<'_>) -> Result<Vec<Path>, UcfbError> {
             name,
             nodes,
             props: Vec::new(),
+            flight_props: p
+                .find(fnv1a_lowercase("Properties"))
+                .map_or_else(Vec::new, |scope| {
+                    scope
+                        .children
+                        .iter()
+                        .filter_map(|v| {
+                            let value = v
+                                .str_arg(0)
+                                .map(str::to_owned)
+                                .or_else(|| v.f32(0).map(|x| x.to_string()))?;
+                            Some((v.hash, value))
+                        })
+                        .collect()
+                }),
             kind: 0,
             info_word: 0,
         });
@@ -294,5 +312,131 @@ mod tests {
         assert_eq!(cp7.props[0], ("lanes".to_string(), 0x4000_0000));
         assert_eq!(cp7.info_word, 4);
         assert_eq!(cp3.info_word, 3);
+    }
+    fn record(name: &str, text: Option<&str>, numbers: &[f32], scope: &[u8]) -> Vec<u8> {
+        let mut payload = fnv1a_lowercase(name).to_le_bytes().to_vec();
+        payload.push(if text.is_some() {
+            1
+        } else {
+            numbers.len() as u8
+        });
+        let blob = text
+            .map(|s| format!("{s}\0").into_bytes())
+            .unwrap_or_default();
+        if text.is_some() {
+            payload.extend(4u32.to_le_bytes());
+        } else {
+            for n in numbers {
+                payload.extend(n.to_le_bytes());
+            }
+        }
+        payload.extend((blob.len() as u32).to_le_bytes());
+        payload.extend(blob);
+        let mut out = crate::build_chunk(b"DATA", &payload);
+        if !scope.is_empty() {
+            out.extend(crate::build_chunk(b"SCOP", scope));
+        }
+        out
+    }
+
+    #[test]
+    fn flight_properties_preserve_class_strings_limits_and_path_scope() {
+        let props = [
+            record("Class", Some("test_fighter 2"), &[], &[]),
+            record("Class1", Some("test_bomber"), &[], &[]),
+            record("MaxEntities", None, &[3.0], &[]),
+            record("Direction", None, &[-1.0], &[]),
+            record("SingleDirection", None, &[1.0], &[]),
+            record("Frequency", None, &[0.25], &[]),
+            record("EnableObject", Some("test_generator"), &[], &[]),
+        ]
+        .concat();
+        let node = [
+            record("position", None, &[1.0, 2.0, 3.0], &[]),
+            record("rotation", None, &[1.0, 0.0, 0.0, 0.0], &[]),
+            record(
+                "Properties",
+                None,
+                &[1.0],
+                &record("Frequency", None, &[99.0], &[]),
+            ),
+        ]
+        .concat();
+        let body = [
+            record("Properties", None, &[7.0], &props),
+            record("Nodes", None, &[1.0], &record("Node", None, &[], &node)),
+        ]
+        .concat();
+        let buf = crate::build_chunk(
+            b"path",
+            &record("Path", Some("type_EntityPath test"), &[], &body),
+        );
+        let c = crate::chunks(&buf).next().unwrap().unwrap();
+        let paths = parse_config_paths(&c).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].nodes[0].pos, [1.0, 2.0, -3.0]);
+        let p = &paths[0].flight_props;
+        assert_eq!(
+            p.len(),
+            7,
+            "node properties must not overwrite path admission"
+        );
+        for (key, value) in [
+            ("Class", "test_fighter 2"),
+            ("Class1", "test_bomber"),
+            ("MaxEntities", "3"),
+            ("Direction", "-1"),
+            ("SingleDirection", "1"),
+            ("Frequency", "0.25"),
+            ("EnableObject", "test_generator"),
+        ] {
+            assert!(p.contains(&(fnv1a_lowercase(key), value.into())), "{key}");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires owned PS2 BF2 map LVLs; no silent missing-data pass"]
+    fn ps2_flight_property_census() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../extracted/bf2/lvl/DATA/_LVL_PS2");
+        let mut files = Vec::new();
+        for folder in ["HOT", "SPA"] {
+            for file in std::fs::read_dir(root.join(folder)).unwrap() {
+                let file = file.unwrap().path();
+                if file
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("LVL"))
+                {
+                    files.push(file);
+                }
+            }
+        }
+        files.sort();
+        let (mut count, mut classes, mut directions, mut objects, mut single) = (0, 0, 0, 0, 0);
+        for file in files {
+            let bytes = std::fs::read(&file).unwrap();
+            for c in crate::chunks(crate::open(&bytes).unwrap())
+                .flatten()
+                .filter(|c| &c.tag == b"path")
+            {
+                for p in parse_config_paths(&c)
+                    .unwrap()
+                    .into_iter()
+                    .filter(|p| p.name.to_lowercase().contains("entitypath"))
+                {
+                    count += 1;
+                    for (h, _) in p.flight_props {
+                        classes += usize::from(h == fnv1a_lowercase("Class"));
+                        directions += usize::from(h == fnv1a_lowercase("Direction"));
+                        objects += usize::from(h == fnv1a_lowercase("EnableObject"));
+                        single += usize::from(h == fnv1a_lowercase("SingleDirection"));
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            (count, classes, directions, objects, single),
+            (448, 429, 165, 65, 2)
+        );
     }
 }

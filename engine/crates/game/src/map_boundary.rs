@@ -67,6 +67,7 @@ mod tests {
 
     fn path(name: &str, x: f32) -> ManifestPath {
         ManifestPath {
+            flight_props: Vec::new(),
             name: name.into(),
             nodes: [[0.0, 0.0], [0.0, 10.0], [10.0, 10.0], [10.0, 0.0]]
                 .map(|[a, z]| ([a + x, 0.0, z], [1.0, 0.0, 0.0, 0.0]))

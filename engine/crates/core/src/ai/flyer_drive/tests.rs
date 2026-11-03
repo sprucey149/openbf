@@ -396,12 +396,14 @@ fn bf2_world() -> (Sim, UnitHandle, VehicleHandle) {
                 Vec3::new(600.0, 60.0, 400.0),
                 Vec3::new(600.0, 60.0, 0.0),
             ],
+            ..FlyerPath::default()
         },
         FlyerPath {
             nodes: vec![
                 Vec3::new(-400.0, 40.0, 0.0),
                 Vec3::new(-400.0, 40.0, -400.0),
             ],
+            ..FlyerPath::default()
         },
     ];
     (s, b, v)
@@ -649,4 +651,366 @@ fn a_pilot_leaves_a_craft_wedged_too_many_times() {
             "{wedges} ways out"
         );
     }
+}
+
+fn admission_cursor(reverse: bool) -> PathCursor {
+    PathCursor {
+        path: 0,
+        node: if reverse { 3 } else { 0 },
+        reverse,
+    }
+}
+
+fn planned(s: &Sim, h: VehicleHandle) -> FlyerAi {
+    let v = s.vehicle(h).unwrap();
+    let p = s.flyer_params[v.class as usize].as_ref().unwrap();
+    let mut ai = FlyerAi::default();
+    connect(s, v, h, p, &mut ai, None);
+    ai
+}
+
+#[test]
+fn flight_admission_refuses_wrong_class_disabled_and_full_routes() {
+    let (mut s, _, v) = bf2_world();
+    s.flyer_paths.truncate(1);
+    s.flyer_params[0].as_mut().unwrap().follower.class_id = 7;
+    assert!(planned(&s, v).cursor.is_some(), "ordinary path control");
+    s.flyer_paths[0].classes = vec![(8, 1)];
+    assert!(planned(&s, v).cursor.is_none(), "wrong class");
+    s.flyer_paths[0].classes = vec![(7, 1)];
+    assert!(planned(&s, v).cursor.is_some(), "matching class control");
+    s.flyer_paths[0].max_entities = 0;
+    assert!(planned(&s, v).cursor.is_none(), "total capacity zero");
+    s.flyer_paths[0].max_entities = u32::MAX;
+    s.flyer_paths[0].classes[0].1 = 0;
+    assert!(planned(&s, v).cursor.is_none(), "class capacity zero");
+    s.flyer_paths[0].classes.clear();
+    let before = s.hash();
+    s.enable_flyer_path(0, false);
+    assert_ne!(before, s.hash(), "runtime toggle is sim state");
+    assert!(planned(&s, v).cursor.is_none(), "disabled");
+    s.enable_flyer_path(0, true);
+    assert_eq!(before, s.hash());
+    assert!(planned(&s, v).cursor.is_some());
+}
+
+#[test]
+fn flight_admission_checks_both_forced_directions_and_frequency_ranking() {
+    let (mut s, _, v) = bf2_world();
+    s.flyer_paths.truncate(1);
+    s.flyer_paths[0].direction = 1;
+    assert!(!planned(&s, v).cursor.unwrap().reverse);
+    s.flyer_paths[0].direction = -1;
+    assert!(planned(&s, v).cursor.unwrap().reverse);
+    s.flyer_paths[0].direction = 0;
+    let mut other = s.flyer_paths[0].clone();
+    other.nodes.iter_mut().for_each(|p| p.x += 1.0);
+    s.flyer_paths.push(other);
+    s.flyer_paths[0].frequency = 0.001;
+    assert_eq!(planned(&s, v).cursor.unwrap().path, 1);
+    s.flyer_paths[0].frequency = 1.0;
+    s.flyer_paths[1].frequency = 0.001;
+    assert_eq!(planned(&s, v).cursor.unwrap().path, 0);
+    s.flyer_paths.truncate(1);
+    s.flyer_paths[0].frequency = 0.0;
+    assert!(
+        planned(&s, v).cursor.is_some(),
+        "PS2 permits a geometric fallback at zero Frequency"
+    );
+}
+
+fn two_pilots() -> (Sim, [UnitHandle; 2], [VehicleHandle; 2]) {
+    let (mut s, a, va) = bf2_world();
+    s.flyer_paths.truncate(1);
+    let b = s
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    let vb = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Flyer,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: Vec3::new(30.0, 40.0, 0.0),
+        yaw: 0.0,
+        max_health: 1000.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    for (u, v) in [(a, va), (b, vb)] {
+        assert!(s.seat_unit(u, v, 0));
+        s.vehicle_mut(v).unwrap().flyer.phase = FlightPhase::Flying;
+    }
+    (s, [a, b], [va, vb])
+}
+
+#[test]
+fn flight_admission_reserves_atomically_and_releases_on_lifecycle_changes() {
+    let (mut s, [a, b], [va, vb]) = two_pilots();
+    s.flyer_paths[0].max_entities = 1;
+    // Both immutable planners saw the one remaining slot in this tick.
+    let first = planned(&s, va);
+    let second = planned(&s, vb);
+    assert!(first.cursor.is_some() && second.cursor.is_some());
+    s.vehicle_mut(va).unwrap().flyer.ai = admission::commit(&s, va, first);
+    let loser = admission::commit(&s, vb, second);
+    assert!(loser.cursor.is_none());
+    assert!(
+        loser.curve.is_some(),
+        "a same-tick join loser needs fallback control"
+    );
+    assert!(planned(&s, vb).cursor.is_none(), "total capacity occupied");
+    s.vehicle_mut(va).unwrap().flyer.phase = FlightPhase::Landing;
+    assert!(
+        planned(&s, vb).cursor.is_none(),
+        "a flight-state change alone does not detach the follower"
+    );
+    s.vehicle_mut(va).unwrap().flyer.phase = FlightPhase::Flying;
+    s.flyer_paths[0].max_entities = 2;
+    s.flyer_paths[0].classes = vec![(7, 1), (8, 1)];
+    s.flyer_params[0].as_mut().unwrap().follower.class_id = 7;
+    assert!(planned(&s, vb).cursor.is_none(), "class capacity occupied");
+    let mut p = s.flyer_params[0].clone().unwrap();
+    p.follower.class_id = 8;
+    s.flyer_params.push(Some(p));
+    s.vehicle_mut(vb).unwrap().class = 1;
+    assert!(
+        planned(&s, vb).cursor.is_some(),
+        "other class still has capacity"
+    );
+    s.flyer_paths[0].classes.clear();
+    s.flyer_paths[0].max_entities = 1;
+    // Pursuit owns a curve, but no authored route.
+    s.vehicle_mut(va).unwrap().flyer.ai.cursor = None;
+    s.vehicle_mut(va).unwrap().flyer.ai.pursuit = true;
+    assert!(planned(&s, vb).cursor.is_some());
+    s.vehicle_mut(va).unwrap().flyer.ai = first;
+    s.unseat_unit(a);
+    assert!(s.vehicle(va).unwrap().flyer.ai.cursor.is_none());
+    assert!(planned(&s, vb).cursor.is_some());
+    assert!(s.seat_unit(a, va, 0));
+    assert!(
+        s.vehicle(va).unwrap().flyer.ai.cursor.is_none(),
+        "same-tick reentry has no old reservation"
+    );
+    s.vehicle_mut(va).unwrap().flyer.ai = first;
+    s.unit_mut(a).unwrap().alive = false;
+    assert!(
+        planned(&s, vb).cursor.is_some(),
+        "dead pilot releases before cleanup"
+    );
+    s.units[a.index as usize].alive = true;
+    s.unit_mut(a).unwrap().controller = Controller::Player { slot: 0 };
+    assert!(planned(&s, vb).cursor.is_some(), "human takeover releases");
+    s.unit_mut(a).unwrap().controller = Controller::Ai;
+    s.vehicle_mut(va).unwrap().alive = false;
+    assert!(planned(&s, vb).cursor.is_some(), "dead vehicle releases");
+    assert!(s.unit(b).unwrap().alive);
+}
+
+#[test]
+fn flight_single_direction_unlocks_only_after_the_last_user_leaves() {
+    let (mut s, [a, b], [va, vb]) = two_pilots();
+    s.flyer_paths[0].single_direction = true;
+    for v in [va, vb] {
+        s.vehicle_mut(v).unwrap().flyer.ai.cursor = Some(admission_cursor(true));
+    }
+    assert!(admission::allows(&s, vb, 0, admission_cursor(true), true));
+    assert!(!admission::allows(&s, vb, 0, admission_cursor(false), true));
+    s.unseat_unit(a);
+    // The remaining pilot can reverse only after releasing its own tenure;
+    // a third joining pilot still observes the second user's direction.
+    let vh = VehicleHandle {
+        index: u32::MAX,
+        gen: 0,
+    };
+    assert!(!admission::allows(&s, vh, 0, admission_cursor(false), true));
+    s.unseat_unit(b);
+    assert!(admission::allows(&s, vh, 0, admission_cursor(false), true));
+}
+
+#[test]
+fn flight_discovery_and_join_keep_the_ps2_unspecified_class_distinction() {
+    let (mut s, _, v) = bf2_world();
+    s.flyer_paths.truncate(1);
+    s.flyer_paths[0].classes = vec![(7, 2)];
+    assert!(admission::allows(&s, v, 0, admission_cursor(false), false));
+    let candidate = planned(&s, v);
+    assert!(
+        candidate.cursor.is_none(),
+        "selector must require a joinable choice"
+    );
+    assert!(
+        admission::commit(&s, v, candidate).cursor.is_none(),
+        "joining needs a matching class record"
+    );
+    s.flyer_paths[0].classes = vec![(0, 2)];
+    assert!(
+        planned(&s, v).cursor.is_some(),
+        "explicit zero-class record can join"
+    );
+}
+
+#[test]
+fn flight_enable_object_follows_live_station_and_missing_object_defaults_on() {
+    let (mut s, _, v) = bf2_world();
+    s.flyer_paths.truncate(1);
+    s.flyer_paths[0].enable_instance = Some(12);
+    assert!(
+        planned(&s, v).cursor.is_some(),
+        "unresolved object stays enabled"
+    );
+    let mut station = crate::sim::Station::new(0, Vec3::ZERO, 1.0);
+    station.instance = Some(12);
+    s.stations.push(station);
+    assert!(planned(&s, v).cursor.is_some());
+    s.stations[0].destroyed = true;
+    assert!(planned(&s, v).cursor.is_none());
+    s.stations[0].destroyed = false;
+    assert!(
+        planned(&s, v).cursor.is_some(),
+        "repair reenables admission"
+    );
+}
+
+#[test]
+fn flight_capacity_holds_through_the_real_step_and_replays() {
+    fn run() -> Vec<u64> {
+        let (mut s, pilots, vehicles) = two_pilots();
+        s.flyer_paths[0].max_entities = 1;
+        for u in pilots {
+            s.units[u.index as usize].ai.ride = None;
+        }
+        for v in vehicles {
+            s.vehicle_mut(v).unwrap().pos.y = 40.0;
+        }
+        let mut hashes = Vec::new();
+        let mut admitted = false;
+        for _ in 0..180 {
+            s.step(&[]);
+            let users = vehicles
+                .iter()
+                .filter_map(|&h| s.vehicle(h))
+                .filter(|v| v.flyer.ai.cursor.is_some())
+                .count();
+            assert!(users <= 1, "tick {} overbooked {users}", s.tick);
+            admitted |= users == 1;
+            hashes.push(s.hash());
+        }
+        assert!(admitted, "normal route must actually be used");
+        hashes
+    }
+    assert_eq!(run(), run());
+}
+
+#[test]
+fn flight_all_routes_refused_loiters_without_stalling_or_reserving() {
+    for refusal in 0..3 {
+        let (mut s, b, v) = bf2_world();
+        for path in &mut s.flyer_paths {
+            match refusal {
+                0 => path.enabled = false,
+                1 => path.classes = vec![(7, 1)],
+                _ => path.max_entities = 0,
+            }
+        }
+        assert!(s.seat_unit(b, v, 0));
+        let start = Vec3::new(0.0, 40.0, 0.0);
+        let c = s.vehicle_mut(v).unwrap();
+        c.pos = start;
+        c.vel = Vec3::Z * 50.0;
+        c.flyer.phase = FlightPhase::Flying;
+        let mut travelled = 0.0;
+        let mut previous = start;
+        let mut window_travel = 0.0;
+        for _ in 0..3600 {
+            s.step(&[]);
+            let c = s.vehicle(v).expect("fallback destroyed the craft");
+            assert_eq!(s.unit(b).unwrap().mount.map(|m| m.vehicle), Some(v));
+            assert!(c.flyer.ai.cursor.is_none(), "refused route was reserved");
+            assert!(
+                c.flyer.ai.curve.is_some(),
+                "uncontrolled flight at {}",
+                s.tick
+            );
+            assert!((c.pos - start).length() < 400.0, "flew away: {:?}", c.pos);
+            window_travel += (c.pos - previous).length();
+            if s.tick.is_multiple_of(120) {
+                assert!(window_travel > 50.0, "stalled at {}", s.tick);
+                window_travel = 0.0;
+            }
+            travelled += (c.pos - previous).length();
+            previous = c.pos;
+        }
+        assert!(travelled > 1000.0, "fallback made no sustained progress");
+        s.flyer_paths[1].enabled = true;
+        s.flyer_paths[1].classes.clear();
+        s.flyer_paths[1].max_entities = u32::MAX;
+        for _ in 0..600 {
+            s.step(&[]);
+            if s.vehicle(v).unwrap().flyer.ai.cursor.is_some() {
+                break;
+            }
+        }
+        assert!(
+            s.vehicle(v).unwrap().flyer.ai.cursor.is_some(),
+            "never retried admission"
+        );
+    }
+}
+
+#[test]
+fn flight_zero_class_selects_a_joinable_route_through_step() {
+    let (mut s, b, v) = bf2_world();
+    s.flyer_paths[0].classes = vec![(7, 1)];
+    // The geometrically preferred first path passes discovery but cannot join.
+    assert!(admission::allows(&s, v, 0, admission_cursor(false), false));
+    assert!(!admission::allows(&s, v, 0, admission_cursor(false), true));
+    assert!(s.seat_unit(b, v, 0));
+    let c = s.vehicle_mut(v).unwrap();
+    c.pos = Vec3::new(0.0, 40.0, 0.0);
+    c.flyer.phase = FlightPhase::Flying;
+    s.step(&[]);
+    assert_eq!(s.vehicle(v).unwrap().flyer.ai.cursor.unwrap().path, 1);
+    for _ in 0..600 {
+        s.step(&[]);
+    }
+    assert!(s.vehicle(v).unwrap().flyer.ai.curve.is_some());
+}
+
+#[test]
+fn flight_zero_class_discovery_skips_capacity_but_join_does_not() {
+    let (mut s, _, v) = bf2_world();
+    s.flyer_paths[0].max_entities = 0;
+    let c = admission_cursor(false);
+    assert!(admission::allows(&s, v, 0, c, false));
+    assert!(!admission::allows(&s, v, 0, c, true));
+    assert!(!admission::allows(&s, v, 7, c, false));
+}
+
+#[test]
+fn flight_pursuit_discards_the_loiter_center_before_recovery() {
+    let (mut s, me, vh) = bf2_world();
+    for path in &mut s.flyer_paths {
+        path.enabled = false;
+    }
+    let v = s.vehicle(vh).unwrap();
+    let mut p = s.flyer_params[0].clone().unwrap();
+    p.follower.flyer_vs_flyer = true;
+    let mut ai = planned(&s, vh);
+    assert!(ai.goal.is_some());
+    let mut target = v.clone();
+    target.pos += Vec3::Z * 200.0;
+    bf2_plan(&s, me, v, vh, &p, &mut ai, Some(&target));
+    assert!(ai.pursuit);
+    assert!(ai.goal.is_none());
+    ai.t = 1.0;
+    bf2_plan(&s, me, v, vh, &p, &mut ai, None);
+    assert!(!ai.pursuit);
+    assert!(ai.goal.is_some());
+    assert_eq!(ai.curve.unwrap()[1], v.pos);
+    assert!(ai.cursor.is_none());
 }
