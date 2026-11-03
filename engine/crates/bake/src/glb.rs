@@ -30,6 +30,22 @@ enum VertexLighting<'a> {
     Programs(&'a [LightPath]),
 }
 
+enum MeshMetadata {
+    VisTop,
+    Sphere,
+    ContactSurface,
+}
+
+impl From<bool> for MeshMetadata {
+    fn from(sphere: bool) -> Self {
+        if sphere {
+            Self::Sphere
+        } else {
+            Self::VisTop
+        }
+    }
+}
+
 impl<'a> From<bool> for VertexLighting<'a> {
     fn from(enabled: bool) -> Self {
         if enabled {
@@ -60,12 +76,12 @@ pub fn model_to_glb(
         false,
         None,
         false,
-        vertex_light,
+        vertex_light.into(),
     )
 }
 
 pub fn station_model_to_glb(m: &Model, alphas: &[crate::alpha::SegmentAlpha]) -> Result<Vec<u8>> {
-    write_model(m, alphas, false.into(), false, None, false, true)
+    write_model(m, alphas, false.into(), false, None, false, true.into())
 }
 
 /// [`model_to_glb`] for a HUD mesh (card BHUD2): each segment's COL0 goes out
@@ -74,7 +90,7 @@ pub fn station_model_to_glb(m: &Model, alphas: &[crate::alpha::SegmentAlpha]) ->
 /// (`render::hud`). The weapon backdrops are shaped by it: grey at 83/128
 /// fading to alpha 0 along the pill.
 pub fn hud_model_to_glb(m: &Model, alphas: &[crate::alpha::SegmentAlpha]) -> Result<Vec<u8>> {
-    write_model(m, alphas, false.into(), false, None, true, false)
+    write_model(m, alphas, false.into(), false, None, true, false.into())
 }
 
 /// [`model_to_glb`] for a map bake's world model, `vertex_light` on, on a map
@@ -86,7 +102,33 @@ pub fn world_model_to_glb(
     alphas: &[crate::alpha::SegmentAlpha],
     hdr: bool,
 ) -> Result<Vec<u8>> {
-    write_model(m, alphas, true.into(), hdr, None, false, true)
+    write_model(m, alphas, true.into(), hdr, None, false, true.into())
+}
+
+/// A fingerprinted donor fallback covering the canonical collision surface.
+/// The runtime keeps this solid artwork visible when a small ordinary prop
+/// would fade for the chase camera. Reviewed donor recipes use this wrapper;
+/// ordinary and PS2 models never acquire the extra flag.
+pub(crate) fn world_contact_surface_to_glb(
+    m: &Model,
+    alphas: &[crate::alpha::SegmentAlpha],
+    hdr: bool,
+) -> Result<Vec<u8>> {
+    anyhow::ensure!(
+        alphas
+            .iter()
+            .all(|alpha| alpha.mode == crate::alpha::AlphaMode::Opaque),
+        "contact surfaces require opaque material coverage"
+    );
+    write_model(
+        m,
+        alphas,
+        true.into(),
+        hdr,
+        None,
+        false,
+        MeshMetadata::ContactSurface,
+    )
 }
 
 /// A reassembled world model whose segments keep the lighting programs
@@ -109,7 +151,7 @@ pub(crate) fn world_model_to_glb_programs(
         hdr,
         None,
         false,
-        true,
+        true.into(),
     )
 }
 
@@ -132,7 +174,7 @@ pub fn model_to_glb_joints(
         false,
         joints,
         false,
-        vertex_light,
+        vertex_light.into(),
     )
 }
 
@@ -143,7 +185,7 @@ fn write_model(
     hdr: bool,
     joints: Option<&[Vec<usize>]>,
     hud_colors: bool,
-    sphere: bool,
+    metadata: MeshMetadata,
 ) -> Result<Vec<u8>> {
     let vertex_light = !matches!(lighting, VertexLighting::Off);
     let programs = match lighting {
@@ -268,8 +310,11 @@ fn write_model(
     mesh["extras"] = json!({ "vis_top": m.vis_box.max[1] });
     // Card BPNT: a world model's sphere, which the PS2 gathers its local
     // lights by (`model_sphere`).
-    if sphere {
+    if !matches!(metadata, MeshMetadata::VisTop) {
         mesh["extras"]["sphere"] = json!(model_sphere(m));
+    }
+    if matches!(metadata, MeshMetadata::ContactSurface) {
+        mesh["extras"]["contact_surface"] = json!(true);
     }
     crate::gltf_bin::rigid_glb(bin, mesh, &m.name, Some(json!(materials)))
 }
@@ -617,6 +662,37 @@ mod tests {
             sphere: None,
             segments,
         }
+    }
+
+    #[test]
+    fn contact_visibility_extra_is_written_only_by_the_special_wrapper() {
+        let model = model(vec![bf2(1, false)]);
+        let alphas = crate::alpha::AlphaTable::new(&[]).model(&model);
+        let normal = world_model_to_glb(&model, &alphas, false).unwrap();
+        let contact = world_contact_surface_to_glb(&model, &alphas, false).unwrap();
+        let extras = |bytes: &[u8]| -> serde_json::Value {
+            let gltf = gltf::Gltf::from_slice(bytes).unwrap();
+            serde_json::from_str(
+                gltf.document
+                    .meshes()
+                    .next()
+                    .unwrap()
+                    .extras()
+                    .as_ref()
+                    .unwrap()
+                    .get(),
+            )
+            .unwrap()
+        };
+        let ordinary = extras(&normal);
+        let special = extras(&contact);
+        assert!(ordinary.get("contact_surface").is_none());
+        assert_eq!(special["contact_surface"], true);
+        assert_eq!(special["sphere"], ordinary["sphere"]);
+        assert_eq!(special["vis_top"], ordinary["vis_top"]);
+        let mut cutout = alphas;
+        cutout[0].mode = crate::alpha::AlphaMode::Mask;
+        assert!(world_contact_surface_to_glb(&model, &cutout, false).is_err());
     }
 
     fn bf2(flags: u32, col0: bool) -> Segment {

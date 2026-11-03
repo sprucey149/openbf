@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Generate absolute PS2 gameplay corrections for a fingerprinted donor.
 
-No executable, bytecode, artwork or render data enters the public JSON. Height rows are
+No executable, bytecode or artwork enters the public JSON. Gameplay height rows are
 restricted to authored playable boundary polygons and the corners of the grid cells those
-polygons reach; height fills reach only as far as a query from inside the boundary can
-(HEIGHT_REACH). Changed collision, skeleton, navigation and root motion leave as instructions
+polygons reach; gameplay fills reach only as far as an in-bound query can (HEIGHT_REACH).
+Separate render-only heights cover the full donor grid, including visible distant terrain,
+without changing the heightfield the simulation reads. Changed collision, skeleton, navigation and root motion leave as instructions
 over the player's own donor file, in a sibling programs table (gameplay_programs.py).
 """
 from __future__ import annotations
@@ -379,6 +380,41 @@ def model_bounds(loc, payload):
     return {**loc, "sphere": exact(sphere[:16]) if sphere is not None and len(sphere) >= 16 else None,
             "vis_box": [exact(info[base + 24:base + 36]), exact(info[base + 36:base + 48])]}
 
+def render_height_fills(reference, donor, gameplay_samples=()):
+    """All donor grid heights that differ from the PS2 query surface, as numerical rectangles.
+
+    The render grid can extend past the PS2 grid. Its border follows the PS2
+    height query's clamped edge, rather than inventing playable donor hills.
+    These rows never change the separately retained simulation grid.
+    """
+    a = geometry.terrain(reference, retain_samples=True)[0]
+    b = geometry.terrain(donor, retain_samples=True)[0]
+    if not a["heightfield"] or not b["heightfield"]:
+        return [], {"samples": 0, "different": 0, "worst_m": 0.0, "worst_at": None}
+    ga, gb = Grid(a), Grid(b)
+    if ga.unit != gb.unit or a["height_scale"] != b["height_scale"]:
+        raise ValueError("render terrain needs a reviewed grid/quantization conversion")
+    already_corrected = {(x, z) for x, z, _ in gameplay_samples}
+    rows, worst, at, different = [], 0.0, None, 0
+    for iz in range(gb.n):
+        for ix in range(gb.n):
+            x, z = gb.world(ix, iz)
+            # Shared grid units make these exact grid coordinates, including
+            # the clamped donor-only border.
+            ax = min(max(int((x + ga.offset_x) / ga.unit), 0), ga.n - 1)
+            az = min(max(int((z + ga.offset_z) / ga.unit), 0), ga.n - 1)
+            y = ga.heights[az * ga.n + ax]
+            other = gb.heights[iz * gb.n + ix]
+            if y != other:
+                different += 1
+                if (x, z) not in already_corrected:
+                    rows.append([x, z, y])
+                if abs(y - other) > worst:
+                    worst, at = abs(y - other), [x, other, z]
+    return height_fills(rows, gb.unit), {"samples": gb.n * gb.n, "different": different, "render_only_different": len(rows),
+                                       "worst_m": worst, "worst_at": at}
+
+
 def terrain_record(loc, reference, donor, polygons):
     a = geometry.terrain(reference, retain_samples=True)[0]
     b = geometry.terrain(donor, retain_samples=True)[0]
@@ -405,14 +441,18 @@ def terrain_record(loc, reference, donor, polygons):
                 outside += 1
                 if supports_bounds(polygons, x, z, HEIGHT_REACH):
                     reach.append([x, z, y])
+    render_fills, render_summary = render_height_fills(reference, donor, samples + reach)
     ac, bc = cutters(reference), cutters(donor)
-    summary = {"changed_inside": inside, "changed_outside": outside, "changed_in_reach": len(reach), "missing_boundary": not bool(polygons)}
-    if not samples and not reach and ac == bc and ga.n == gb.n:
+    summary = {"changed_inside": inside, "changed_outside": outside, "changed_in_reach": len(reach), "missing_boundary": not bool(polygons), "render": render_summary}
+    if not samples and not reach and not render_fills and ac == bc and ga.n == gb.n:
         return None, summary
     out = {**loc, "grid_size": ga.n, "grid_unit": ga.unit, "height_scale": a["height_scale"],
            "height_samples": samples, "boundaries": polygons}
     if reach:
         out["height_fills"] = height_fills(reach, ga.unit)
+    if render_fills:
+        out["render_height_fills"] = render_fills
+        out["render_grid_size"] = gb.n
     if ac != bc:
         out["cutters"] = ac
     return out, summary

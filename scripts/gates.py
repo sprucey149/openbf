@@ -23,7 +23,7 @@ Groups:
          --bake-groups (the card's declared groups) on a diff that touches the bake code bakes EVERY group and FAILS on
          a difference in a group that is not declared, naming the file and the group (card BAKEG: a crate shared by
          several groups left `side` stale behind a `rebake=maps`)
-  alignment  sampled placed-art/corrected-collision comparison against independent PS2 bakes; requires
+  alignment  continuous placed-art/corrected-collision certificates against independent PS2 bakes; requires
          --alignment-reference ASSETS and --alignment-case NAME=ASSETS (repeat for each source). Reports every
          base/layer placement, bounds and surface residuals; missing inputs/offenders FAIL. This is an explicit
          developer gate, not part of a normal player build.
@@ -184,8 +184,8 @@ class Gates:
         s.fidelity_both = bool(getattr(a, "fidelity_both", False))
         fa = getattr(a, "fidelity_allow", None)
         s.fidelity_allow = None if fa is None else {x for x in re.split(r"[,\s]+", fa) if x}
-        s.alignment_reference = getattr(a, "alignment_reference", None)
-        s.alignment_cases = getattr(a, "alignment_cases", None) or []
+        s.alignment_reference = getattr(a, "alignment_reference", None) or os.environ.get("OPENBF_ALIGNMENT_REFERENCE")
+        s.alignment_cases = getattr(a, "alignment_cases", None) or shlex.split(os.environ.get("OPENBF_ALIGNMENT_CASES", ""))
         s.moved_goldens = []
         os.makedirs(s.out, exist_ok=True)
 
@@ -223,8 +223,10 @@ class Gates:
                 offenders = sum(row["counts"].get("offender", 0) for row in report["maps"])
                 missing = sum(row["counts"].get("unmeasured", 0) for row in report["maps"])
                 extras = sum(row["extra_source_placements"] for row in report["maps"])
-                clean = not (offenders or missing or extras or any(row.get("error") for row in report["maps"]))
-                value = f"{len(report['maps'])} source/maps, {offenders} offending placements, {missing} unmeasured, {extras} extra"
+                incomplete = sum(row.get(name, {}).get('complete') is not True or row.get(name, {}).get('status') != 'pass'
+                                 for row in report['maps'] for name in ('terrain', 'attachment'))
+                clean = not (offenders or missing or extras or incomplete or any(row.get("error") for row in report["maps"]))
+                value = f"{len(report['maps'])} source/maps, {offenders} offending placements, {missing} unmeasured, {extras} extra, {incomplete} terrain/attachment gaps"
         except (OSError, ValueError, TypeError, KeyError) as exc:
             value = "invalid/missing alignment report: " + str(exc)
         s.row("alignment", shlex.join(cmd), rc, value, "complete report; 0 offenders; 0 unmeasured; 0 extras",
@@ -1314,6 +1316,8 @@ def auto_groups(tree, base):
         g += ["sim", "sweep", "arena", "leak"]   # sweep also runs the fidelity rows (g_sweep): land.py only passes its own group list
     if touches_bake(files):
         g += ["bake"]
+    if touches_bake(files) or any(re.match(r"engine/.*\.(rs|wgsl|toml|lock|json)$|scripts/(render_|version_|gameplay_|data/|world_fingerprint\.py|gates\.py)",f) for f in files):
+        g += ["alignment"]
     if any(re.match(r"engine/crates/(render|game)/", f) for f in files):
         g += ["parity"]
     return g, files
@@ -1548,7 +1552,7 @@ def main():
             groups, files = auto_groups(a.tree, a.base)
             print(f"[gates] --auto: {len(files)} files changed since {a.base} -> groups {' '.join(groups)}")
         else:
-            groups = a.groups or ["ci", "gpu", "map"]
+            groups = a.groups or ["ci", "gpu", "map", "alignment"]
         groups = [g for g in ALL if g in groups]
     rows = run(a, groups, a.resume)
     sys.exit(rows_exit(rows))

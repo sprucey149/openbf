@@ -14,8 +14,9 @@
 //! Ours (PROVISIONAL, playtest 2026-10-28: the camera inside a health droid,
 //! then "the camera goes to the floor looking at my feet" healing beside
 //! one; `analysis/camera-occlusion.md`):
-//! - Only BIG world geometry pulls the camera in: a map instance whose
-//!   model is more than [`PROP_MAX_FOOTPRINT`] across. Its drawn triangles
+//! - BIG world geometry and marked contact surfaces pull the camera in:
+//!   a map instance whose model is more than [`PROP_MAX_FOOTPRINT`] across,
+//!   or whose baked mesh has `contact_surface: true`. Its drawn triangles
 //!   (not the `coll` bodies; terrain is `WalkSim::settle_camera`'s) are cast
 //!   as a sphere of [`CAMERA_RADIUS`] swept along the track, exact against
 //!   each triangle — the PS2's five rays carry its near plane's 0.1 m
@@ -23,8 +24,8 @@
 //!   broad phase: Mos Eisley's buildings are concave, and their bounding
 //!   boxes swallow whole streets.
 //! - SMALL props (health / ammo droids, gun emplacements, columns, lamps)
-//!   and every vehicle never pull the camera: while one stands in the
-//!   camera's sight of the player, or holds the camera, it is drawn
+//!   without that marker and every vehicle never pull the camera: while one
+//!   stands in the camera's sight of the player, or holds the camera, it is drawn
 //!   see-through ([`CameraBlockers::see_through`], [`see_through_vehicles`]:
 //!   an ordered dither at [`SEE_THROUGH_OPACITY`], hidden outright with the
 //!   camera inside it). They stay solid for the sim — this module is visual
@@ -371,8 +372,8 @@ struct Blocker {
     moves: bool,
     /// A door's moving submesh: drawn at its sim door's `open`.
     door: Option<DoorRide>,
-    /// At most [`PROP_MAX_FOOTPRINT`] across: drawn see-through, never pulls.
-    /// A door's parts all take the whole model's answer.
+    /// Unmarked small art: drawn see-through, never pulls. Baked contact
+    /// surfaces stay solid to the camera. Door parts take the whole answer.
     prop: bool,
 }
 
@@ -394,6 +395,7 @@ impl CameraBlockers {
             let Some(model) = scene.resolve_model(&inst.class) else {
                 continue;
             };
+            let contact_surface = scene.meshes[model].contact_surface;
             if !meshes.contains_key(model) {
                 let cpu = &scene.meshes[model];
                 let positions: Vec<Vec3> = cpu.positions.iter().copied().map(Vec3::from).collect();
@@ -439,10 +441,12 @@ impl CameraBlockers {
                 .and_then(|c| c.door.as_ref())
                 .filter(|d| !d.parts.is_empty());
             let Some(rig) = rig else {
-                blockers.push(Blocker::new(mesh, m, ii as u32, moves));
+                let mut blocker = Blocker::new(mesh, m, ii as u32, moves);
+                blocker.prop &= !contact_surface;
+                blockers.push(blocker);
                 continue;
             };
-            let prop = Blocker::new(mesh.clone(), m, ii as u32, false).prop;
+            let prop = !contact_surface && Blocker::new(mesh.clone(), m, ii as u32, false).prop;
             let parts = door_parts
                 .entry((model.to_owned(), inst.class.clone()))
                 .or_insert_with(|| split_door(&scene.meshes[model], &mesh, rig));
@@ -1130,6 +1134,43 @@ mod tests {
         assert!(b.see_through(cam, &[player], Some(7), none, &[]).is_empty());
     }
 
+    /// A millimetre-scale art change can toggle an entire small prop's
+    /// visibility. The alignment gate cannot borrow that prop's resting art
+    /// as permanent coverage for a hole in a different, nonfading building.
+    #[test]
+    fn a_small_geometry_shift_can_hide_only_one_sources_model() {
+        let quad = |size| {
+            mesh(
+                vec![
+                    Vec3::ZERO,
+                    Vec3::new(size, 0., 0.),
+                    Vec3::new(size, 0., size),
+                    Vec3::new(0., 0., size),
+                ],
+                vec![0, 1, 2, 0, 2, 3],
+            )
+        };
+        let reference = one(quad(2.), Mat4::IDENTITY, false);
+        let source = one(
+            quad(2.),
+            Mat4::from_translation(Vec3::new(0., 0.005, 0.)),
+            false,
+        );
+        let big = one(quad(6.), Mat4::IDENTITY, false);
+        let eye = Vec3::new(1., CAMERA_RADIUS + 0.0025, 1.);
+        let sight = Vec3::new(1., 2., 1.);
+        assert!(reference
+            .see_through(eye, &[sight], None, |_| None, &[])
+            .is_empty());
+        assert_eq!(
+            source.see_through(eye, &[sight], None, |_| None, &[]),
+            vec![(7, 0.)]
+        );
+        assert!(big
+            .see_through(eye, &[sight], None, |_| None, &[])
+            .is_empty());
+    }
+
     fn post_clearance(m: &TriMesh, p: Vec3) -> f32 {
         m.indices
             .as_chunks::<3>()
@@ -1309,6 +1350,8 @@ mod tests {
             scroll: Vec::new(),
             sphere: None,
             vis_top: None,
+            render_grid: None,
+            contact_surface: false,
         };
         let rig = manifest::ManifestDoor {
             triggers: Vec::new(),
@@ -1341,6 +1384,53 @@ mod tests {
             })
             .collect();
         CameraBlockers { blockers }
+    }
+
+    #[test]
+    fn contact_surface_stays_visible_and_pulls_the_camera_clear() {
+        let (mut cpu, _) = door_model(1.0);
+        for p in &mut cpu.positions {
+            p[0] *= 0.2;
+        }
+        let positions = cpu.positions.clone();
+        let indices = cpu.indices.clone();
+        let mut scene = crate::assets::Scene {
+            dir: std::path::PathBuf::new(),
+            manifest: ron::from_str(r#"(map:"camera",source_game:"bf1",models:["contact"],textures:[],
+                classes:[(name:"contact",base:"prop",geometry:Some("contact"))],
+                geometries:[(name:"contact",model:"contact",lods:[])],regions:[],layers:[],
+                instances:[(class:"contact",name:"contact",rotation:((1.0,0.0,0.0),(0.0,1.0,0.0),(0.0,0.0,1.0)),translation:(0.0,0.0,0.0),props:[])])"#).unwrap(),
+            meshes: HashMap::from([("contact".to_owned(), cpu)]),
+            terrain: None,
+            water: None,
+            lowres: None,
+            terrain_layers: None,
+            textures: HashMap::new(),
+            collision: HashMap::new(),
+            cutters: Vec::new(),
+        };
+        let legacy = CameraBlockers::from_scene(&scene);
+        let none = |_: u32| None;
+        let target = Vec3::ZERO;
+        let desired = Vec3::new(0.0, 0.0, -4.0);
+        let eye = Vec3::new(0.0, 0.0, -2.01);
+        assert_eq!(legacy.fraction(target, desired, None, none, &[]), 1.0);
+        assert_eq!(
+            legacy.see_through(eye, &[target], None, none, &[]),
+            vec![(0, 0.0)]
+        );
+        scene.meshes.get_mut("contact").unwrap().contact_surface = true;
+        let contact = CameraBlockers::from_scene(&scene);
+        assert!(contact.fraction(target, desired, None, none, &[]) < 0.5);
+        assert!(contact
+            .see_through(eye, &[target], None, none, &[])
+            .is_empty());
+        assert_eq!(
+            contact.pull_in(target, desired),
+            legacy.pull_in(target, desired)
+        );
+        assert_eq!(scene.meshes["contact"].positions, positions);
+        assert_eq!(scene.meshes["contact"].indices, indices);
     }
 
     fn open_at(open: f32) -> [Door; 1] {

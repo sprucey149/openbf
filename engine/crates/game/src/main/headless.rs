@@ -704,6 +704,17 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
             game::forest::configure(&mut r, &scene, Some(mission))?;
         }
         let mut walk = make_walk(&scene, &replay_setup);
+        // Indoor maps can have several floors above their terrain. A scripted
+        // capture can pin its starting feet without changing normal spawns.
+        if let Ok(value) = std::env::var("OPENBF_WALK_FEET_Y") {
+            let height: f32 = value.parse().context("OPENBF_WALK_FEET_Y must be metres")?;
+            anyhow::ensure!(height.is_finite(), "walk feet height is not finite");
+            let player = walk.player;
+            let unit = walk.sim.unit_mut(player).context("walk player is absent")?;
+            anyhow::ensure!(unit.alive, "walk player is not alive at capture setup");
+            unit.soldier.pos.y = height;
+            unit.soldier.vel = glam::Vec3::ZERO;
+        }
         let assets_dir = std::path::Path::new(&v.map)
             .parent()
             .map(std::path::Path::to_path_buf)
@@ -776,11 +787,15 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         };
         gpu.step_stations(&walk.sim);
         let mut scripted_view = game::viewpoint::ScriptedView::default();
+        let state_hashes = std::env::var("OPENBF_WALK_STATE_HASHES").as_deref() == Ok("1");
         for (tick, pads) in log.frames().enumerate() {
             game::heroes::scores(&mut walk.sim, &frame.feed);
             let mut pads = pads.to_vec();
             pads[0] = scripted_view.apply(pads[0]);
             walk.step_tick(&pads);
+            if state_hashes {
+                println!("state {} {:016x}", tick + 1, walk.sim.hash());
+            }
             gpu.step_stations(&walk.sim);
             frame.fx.ingest_posed(&walk, Some(&frame.vis));
             let effect_sounds = frame.fx.take_sounds();

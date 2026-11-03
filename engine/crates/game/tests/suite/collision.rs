@@ -30,6 +30,8 @@ fn mesh_quad() -> CpuMesh {
         scroll: Vec::new(),
         sphere: None,
         vis_top: None,
+        render_grid: None,
+        contact_surface: false,
     }
 }
 

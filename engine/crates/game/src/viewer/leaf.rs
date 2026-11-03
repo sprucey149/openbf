@@ -251,7 +251,7 @@ pub fn build(
             lit,
         });
     }
-    let ground = scene.heightfield();
+    let ground = scene.render_heightfield();
     let objects = objects(m, records, ground.as_ref());
     Ok((classes, objects))
 }

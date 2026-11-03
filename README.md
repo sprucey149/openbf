@@ -44,7 +44,11 @@ python3 scripts/pack.py
 >
 > Xbox and PC copies assemble some buildings differently. Rhen Var, PC Cloud City and one Xbox Jabba's Palace prop use shared resources or locally built, textured stand-ins. These can look coarser, and projected textures can stretch. No game meshes or textures are shipped here.
 >
-> Fresh Linux builds were checked headlessly from PS2 and mixed sources, Xbox discs alone, and PC BF1 with Xbox BF2. Automated comparisons cover both eras and two game modes where authored. They do not establish that every simulation input is identical: the artwork/collision gate still finds disagreements in existing donor models. Some water and prop materials still fall back to plain colors. Live play and a running-original PS2 comparison remain unchecked.
+> Donor terrain is fitted to PS2 ground heights and holes, including terrain visible beyond the play area. Focused repairs cover Rhen Var structures, a Death Star door, an Utapau column, a Polis Massa hangar floor and a PC Tatooine crate. Six Felucia plants use coarser donor-textured stand-ins. The retained PS2 asset controls remain byte-identical.
+>
+> Fresh Linux packages from PS2 with donors, Xbox alone, and PC BF1 with Xbox BF2 passed packed headless scene reports on all 40 maps. With the six experimental space maps opted in, each package contains 67 missions. Full simulation hashes matched the PS2 control at every tick in 134 mission/seed scenarios per source, 1,800 ticks each. These bounded checks do not establish equality of every simulation input.
+>
+> Full artwork alignment remains unfinished: other buildings, objects, vehicles and cutout materials still have gaps or need measurement. Donor foliage counts differ on six maps, and some water and props still use plain colors. The three source sets retain 94 untextured draw slots across 26 scene reports. See [#98](https://github.com/sprucey149/openbf/issues/98) and [#99](https://github.com/sprucey149/openbf/issues/99). Live play and a running-original PS2 comparison remain unchecked.
 
 | You supply | What you get today |
 |---|---|

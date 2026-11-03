@@ -9,10 +9,57 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import pack
+
+
+class MissionSelection(unittest.TestCase):
+    def generation_command(self, space):
+        class AtMissionGeneration(Exception):
+            pass
+
+        captured = []
+
+        def run(command, **kwargs):
+            if any(str(arg).endswith("gen_missions.py") for arg in command):
+                captured.append(command)
+                raise AtMissionGeneration
+
+        games = {game: {"gameplay": {"kind": "ps2-disc", "path": "disc.iso"}, "visual": []}
+                 for game in ("bf1", "bf2")}
+        plan = {"games": games, "refusals": [], "dlc": {"used": False}}
+        with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {}, clear=True):
+            if space is not None:
+                os.environ["OPENBF_BAKE_SPACE"] = space
+            lua = Path(folder) / "lua"
+            for game, groups in pack.LUA.items():
+                for group in groups:
+                    (lua / game / group).mkdir(parents=True)
+                    (lua / game / group / ".complete").touch()
+            with mock.patch.object(sys, "argv", ["pack.py", "--out", str(Path(folder) / "openbf")]), \
+                 mock.patch.object(pack.input_scan, "scan", return_value=plan), \
+                 mock.patch.object(pack.input_scan, "summary_lines", return_value=[]), \
+                 mock.patch.object(pack.input_scan, "write_summary"), \
+                 mock.patch.object(pack.input_scan, "discs_to_extract", return_value=[]), \
+                 mock.patch.object(pack, "need"), mock.patch.object(pack, "run", side_effect=run), \
+                 mock.patch.object(pack, "console_lua_root", return_value=str(lua)), \
+                 mock.patch.object(pack, "git_tracked_missions", return_value=False), \
+                 mock.patch.object(pack, "MISSIONS", str(Path(folder) / "missions")):
+                with self.assertRaises(AtMissionGeneration):
+                    pack.main()
+        self.assertEqual(len(captured), 1)
+        return captured[0]
+
+    def test_explicit_space_bake_generates_space_missions(self):
+        self.assertIn("--space", self.generation_command("1"))
+
+    def test_default_and_non_one_flags_keep_ground_missions(self):
+        for value in (None, "0", "true"):
+            with self.subTest(value=value):
+                self.assertNotIn("--space", self.generation_command(value))
 
 
 class ScratchBake(unittest.TestCase):

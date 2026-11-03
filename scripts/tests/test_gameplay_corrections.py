@@ -132,9 +132,11 @@ class CorrectionTests(unittest.TestCase):
         self.assertNotIn('vertex_box', record)
         self.assertIsNone(c.model_bounds(loc, chunk(b"INFO", info))['sphere'])
 
-    def test_missing_boundary_never_exports_changed_heights(self):
+    def test_missing_boundary_exports_only_render_heights(self):
         row, report = c.terrain_record({'scope': [], 'name': 'x', 'ordinal': 0}, terrain(6), terrain(4), [])
-        self.assertIsNone(row)
+        self.assertEqual(row['height_samples'], [])
+        self.assertNotIn('height_fills', row)
+        self.assertEqual(row['render_height_fills'], [[-64.0,-56.0,16,16,3.0]])
         self.assertTrue(report['missing_boundary'])
         self.assertEqual(report['changed_outside'], 256)
 
@@ -286,6 +288,25 @@ class ExportCorrectionTests(unittest.TestCase):
         self.assertEqual(export.generated_data_problems(self.path, c.encoded(data)), [])
         world['records'][0]['region_setting'] = 'a whole sentence of text that is not a setting'
         self.assertTrue(export.generated_data_problems(self.path, c.encoded(data)))
+
+    def test_render_height_fields_are_bounded_quantized_and_not_gameplay_fields(self):
+        path='engine/crates/manifest/data/gameplay/corrections-v1/bf1-pc.json'
+        doc=correction();row=doc['files'][0]['terrain'][0]
+        row['height_samples']=[]
+        row['boundaries']=[[[-1,-1],[1,-1],[1,1],[-1,1]]]
+        row['render_grid_size']=64
+        row['render_height_fills']=[[-32,-31,2,2,1.0]]
+        self.assertEqual(export.generated_data_problems(path,c.encoded(doc)),[])
+        # These same distant values are still refused as simulation heights.
+        gameplay=copy.deepcopy(doc);gameplay['files'][0]['terrain'][0]['height_samples']=[[-32,-31,1.0]]
+        self.assertTrue(export.generated_data_problems(path,c.encoded(gameplay)))
+        for fills in ([[-33,-31,1,1,1.0]],[[-32,-31,65,1,1.0]],
+                      [[-32,-31,1,1,1.25]],[[-32,-31,1,1,1.0],[-32,-31,1,1,1.0]],
+                      [[-32,-31,True,1,1.0]]):
+            broken=copy.deepcopy(doc);broken['files'][0]['terrain'][0]['render_height_fills']=fills
+            self.assertTrue(export.generated_data_problems(path,c.encoded(broken)),fills)
+        broken=copy.deepcopy(doc);broken['files'][0]['terrain'][0]['render_grid_size']=1025
+        self.assertTrue(export.generated_data_problems(path,c.encoded(broken)))
 
     def test_generated_tables_pass_without_scrub_changes(self):
         root = Path(__file__).resolve().parents[2]

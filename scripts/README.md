@@ -21,10 +21,28 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 | `gameplay_table.py`, `gameplay_foliage.py`, `gameplay_corrections.py`, `gameplay_programs.py` | generate the PS2 reference numbers and the corrections applied to a player's own files |
 | `version_census.py`, `version_geometry.py`, `version_collision.py`, `version_heights.py`, `version_sky.py`, `version_terrain_play.py` | measure how editions differ: names and numbers, never assets |
 | `version_report.py`, `version_parity_check.py` | the measurement receipt, and seeded rounds across source combinations |
-| `render_collision_check.py` | gate every placed object's bounds and sampled render surfaces against corrected collision, relative to PS2 artwork; `gates.py --groups alignment` |
+| `render_collision_check.py`, `render_scene_surface.py`, `render_model_dependencies.py`, `render_gpu_bounds.py` | require continuous surface certificates for every placed model, LOWD and far extension against PS2 artwork, charging world draw rounding for every placement; unresolved coverage, opacity, motion or LOD correspondence fails; `gates.py --groups alignment` |
+| `render_contact_check.py`, `render_contact_proxy.py`, `render_contact_groups.py`, `render_query_frame.py` | alternative complete contact-surface proof within 1 cm, with identical active soldier/ordnance domains, complete primitive proxies, outward query-frame bounds and every matching placement; asymmetric or unsupported domains fail unresolved |
+| `render_terrain_check.py`, `render_attachment_check.py` | the alignment gate's required terrain and moving-object receipts; absent or unmeasured inputs fail |
+| `render_alignment_probe.py`, `alignment_known.py` | sampled ordinary-float PS2-residual comparisons and located open offenders; known entries remain measurable, and in-boundary samples do not establish whole-map reachability or acceptance |
+| `render_input_stability.py` | record every GLB, RON, KTX2 and JSON input, optional sidecar presence and measuring source before and after; changes, missing files or a stale receipt fail |
 | `data/` | the measurement receipt and the UI dependency list |
 
 ## Checks
+
+The default build checks include `alignment`. Automatic checks require it when
+bake, simulation, manifest or rendering code changes, and landing retains that
+requirement. Give `gates.py` independent bakes using `--alignment-reference` and
+repeat `--alignment-case NAME=ASSETS` for every source being accepted. Legacy
+landing commands use `OPENBF_ALIGNMENT_REFERENCE` and shell-quoted
+`OPENBF_ALIGNMENT_CASES` with the same `NAME=ASSETS` entries. Missing roots fail.
+Keep the report outside those input folders. The gate checks their content and
+file metadata before and after measurement, and checks the current folders and
+measuring code when validating a receipt. This verifies the supplied artifacts;
+their extraction and bake provenance remain separate checks. Explicit `--map`
+selections are diagnostic and cannot return alignment acceptance.
+A scoped diagnostic, a source-only CI run, or a successful pack scene report is
+not a complete alignment acceptance result.
 
 | script | what it does |
 |---|---|

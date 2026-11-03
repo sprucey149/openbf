@@ -158,6 +158,8 @@ fn grid_mesh(n: usize) -> CpuMesh {
         scroll: Vec::new(),
         sphere: None,
         vis_top: None,
+        render_grid: None,
+        contact_surface: false,
     }
 }
 

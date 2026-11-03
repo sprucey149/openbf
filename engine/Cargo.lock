@@ -1035,6 +1035,7 @@ dependencies = [
  "ron",
  "serde",
  "serde_json",
+ "sha2",
  "ui",
  "wgpu",
  "winit",

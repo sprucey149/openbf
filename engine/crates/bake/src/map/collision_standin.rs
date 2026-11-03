@@ -130,7 +130,7 @@ fn weights(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> [f32; 3] {
     [1.0 - v - w, v, w]
 }
 
-fn nearest(
+pub(super) fn nearest(
     p: Vec3,
     model: &Model,
     only_segment: Option<usize>,

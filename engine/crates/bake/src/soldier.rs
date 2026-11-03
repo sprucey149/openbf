@@ -42,6 +42,7 @@ use std::path::Path;
 
 mod lod;
 mod output;
+mod render_clips;
 pub(crate) use output::bake_flags;
 pub use output::{
     bake_soldier, bake_soldier_anims, bake_textures_flagged, bake_weapon, texture_flags,
