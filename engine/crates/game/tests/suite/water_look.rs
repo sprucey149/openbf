@@ -146,3 +146,76 @@ fn every_water_map_takes_the_look_its_disc_authors() {
         }
     }
 }
+
+#[test]
+fn water_hdr_gain_only_applies_to_bf2_flat_water_on_hdr_maps() {
+    let path = game::assets::baked_root().join("bf2_kas2");
+    if !path.join("manifest.ron").exists() {
+        eprintln!("SKIP: no baked BF2 Kashyyyk");
+        return;
+    }
+    let mut m = manifest_of(&path);
+    assert_eq!(game::water_anim::flat_display_gain(&m), 255.0 / 128.0);
+    m.water.as_mut().unwrap().config.as_mut().unwrap().ocean = true;
+    assert_eq!(game::water_anim::flat_display_gain(&m), 1.0);
+    m.water.as_mut().unwrap().config.as_mut().unwrap().ocean = false;
+    let hdr = m.hdr.take();
+    assert_eq!(game::water_anim::flat_display_gain(&m), 1.0);
+    m.hdr = hdr;
+    m.source_game = "bf1".into();
+    assert_eq!(game::water_anim::flat_display_gain(&m), 1.0);
+    m.source_game = "bf2".into();
+    m.water = None;
+    assert_eq!(game::water_anim::flat_display_gain(&m), 1.0);
+}
+
+#[test]
+fn kashyyyk_far_water_uses_32_metre_colour_cells_and_the_authored_crossover() {
+    let path = game::assets::baked_root().join("bf2_kas2");
+    if !path.join("manifest.ron").exists() {
+        eprintln!("SKIP: no baked BF2 Kashyyyk");
+        return;
+    }
+    let manifest = manifest_of(&path);
+    let mut water = manifest.water.unwrap();
+    if !water.vertex_diffuse {
+        eprintln!("SKIP: BF2 Kashyyyk requires the vertex diffuse rebake");
+        return;
+    }
+    let mesh = game::assets::load_glb(&path.join(&water.glb)).unwrap();
+    let range = &manifest.lighting;
+    let far = game::water_anim::flat_far_diffuse(&mesh, &water, range).unwrap();
+    assert_eq!(far.dims, [4, 4]);
+    assert_eq!(far.step, [32.0, 32.0]);
+    assert_eq!(far.range, [85.0, 100.0]);
+    let rgb: Vec<_> = far
+        .colors
+        .iter()
+        .flatten()
+        .take(16)
+        .map(|v| v.to_le_bytes())
+        .collect();
+    assert_eq!(
+        rgb.iter().map(|c| c[0]).collect::<Vec<_>>(),
+        [94, 102, 110, 54, 38, 38, 70, 102, 46, 62, 110, 62, 62, 38, 38, 62]
+    );
+    assert!(rgb
+        .iter()
+        .all(|c| c[0] >= 30 && c[0] <= 110 && c[0] == c[1] && c[1] == c[2]));
+    assert!(
+        rgb.iter().map(|c| c[0]).max().unwrap() - rgb.iter().map(|c| c[0]).min().unwrap() >= 64
+    );
+    water.config.as_mut().unwrap().lod_decimation = Some(100.0);
+    assert_eq!(
+        game::water_anim::flat_far_diffuse(&mesh, &water, range).unwrap(),
+        far
+    );
+    water.config.as_mut().unwrap().disable_low_res = true;
+    assert!(game::water_anim::flat_far_diffuse(&mesh, &water, range).is_none());
+    water.config.as_mut().unwrap().disable_low_res = false;
+    water.config.as_mut().unwrap().ocean = true;
+    assert!(game::water_anim::flat_far_diffuse(&mesh, &water, range).is_none());
+    water.config.as_mut().unwrap().ocean = false;
+    water.vertex_diffuse = false;
+    assert!(game::water_anim::flat_far_diffuse(&mesh, &water, range).is_none());
+}

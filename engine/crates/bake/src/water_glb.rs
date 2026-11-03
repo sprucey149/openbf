@@ -203,14 +203,18 @@ fn diffuse_lattice(
     let mut positions = Vec::new();
     let mut indices = Vec::new();
     let mut colors = Vec::new();
-    // PROVISIONAL visual seed; replace: the original flat-water template RNG state and sequence.
-    let mut rng = 0x6d2b_79f5u32;
+    let mut rng = 0x9733_1547u32;
+    let mut next = || {
+        rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        rng
+    };
     let template: Vec<_> = (0..nx * nz)
         .map(|_| {
-            rng ^= rng << 13;
-            rng ^= rng >> 17;
-            rng ^= rng << 5;
-            (rng % 11) as f32 / 5.0
+            let low = next() >> 16;
+            let high = next() & 0xffff_0000;
+            next();
+            next();
+            ((low | high) % 11) as f32 / 5.0
         })
         .collect();
     for z in 0..w.info.grid as usize {
@@ -228,7 +232,7 @@ fn diffuse_lattice(
                         (z as f32 + iz as f32 / nz as f32) * w.info.cell_size
                             - w.info.half_extent[1],
                     ]);
-                    let t = template[(iz % nz) * nx + ix % nx];
+                    let t = template[(ix % nx) * nz + iz % nz];
                     colors.extend(
                         (0..3).map(|k| ((min[k] + (max[k] - min[k]) * t) / 255.0).clamp(0.0, 1.0)),
                     );
@@ -449,6 +453,13 @@ mod tests {
             .max()
             .unwrap();
         assert_eq!((lo, hi), (30, 110));
+        let native_column: Vec<_> = (0..16)
+            .map(|z| (colors[z * 17 * 4] * 255.0).round() as u32)
+            .collect();
+        assert_eq!(
+            native_column,
+            [94, 38, 46, 62, 102, 38, 62, 38, 110, 70, 110, 38, 54, 102, 62, 62]
+        );
         let mut ocean = c.clone();
         ocean.ocean_enable = Some(1.0);
         assert_eq!(diffuse_divisions(&w, Some(&ocean)), None);

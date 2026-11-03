@@ -314,6 +314,12 @@ pub fn water_shading(
     let scs = c.speckle_coord_shift.unwrap_or([10.0, 10.0]);
     let gs = |v: [f32; 4]| v.map(|x| x / 255.0);
     render::WaterShading {
+        far_diffuse: render::WaterDiffuse::default(),
+        far_range: if c.disable_low_res || lighting.far_scene_range.is_some_and(|f| f <= 0.0) {
+            [0.0; 2]
+        } else {
+            lighting.near_scene_range.map_or([0.0; 2], |r| [r[1], r[2]])
+        },
         eye_shift: WATER_EYE_SHIFT * h,
         specular: gs(c.specular_color.unwrap_or(SPECULAR_DEFAULT)),
         speckle_ambient: gs(c.speckle_ambient_color.unwrap_or([0.0; 4])),
@@ -671,9 +677,35 @@ pub fn apply_lighting(r: &mut Renderer, scene: &Scene) {
     let m = &scene.manifest;
     let tune = look_tune(&m.source_game, &m.map);
     r.lighting = render_lighting_from(&m.source_game, &m.lighting, m.water.as_ref());
+    if let (Some(water), Some(mesh)) = (m.water.as_ref(), scene.water.as_ref()) {
+        r.lighting.water.far_diffuse =
+            crate::water_anim::flat_far_diffuse(mesh, water, &m.lighting).unwrap_or_default();
+    }
+    r.lighting.water_fog = reference_water_fog(&m.source_game, &m.map, m.water.as_ref());
+    r.lighting.water_gain = crate::water_anim::flat_display_gain(m);
     r.lighting.glow_gain = tune.map_or(1.0, |t| t.glow_gain);
     r.set_frame_filter(frame_filter_from(&m.lighting));
     r.set_bloom(m.hdr.map(|h| bloom_from(h, tune)));
+}
+
+fn reference_water_fog(
+    source_game: &str,
+    map: &str,
+    water: Option<&manifest::ManifestWater>,
+) -> Option<render::Fog> {
+    if source_game != "bf2" || map != "kas2" {
+        return None;
+    }
+    let water = water?;
+    let cfg = water.config.as_ref()?;
+    if cfg.disable_low_res || !cfg.specular_enable {
+        return None;
+    }
+    Some(render::Fog {
+        color: water.far_fog_color?.map(|c| render::srgb_decode(c / 255.0)),
+        near: 90.0,
+        far: 350.0,
+    })
 }
 
 /// [ours] A map whose authored look the maintainer asked to soften: factors
@@ -776,6 +808,8 @@ pub fn render_lighting_from(
         // with no water leaves it `None`, which is what every non-water draw
         // already ignores.
         water_fog_begin: water_look.as_ref().and_then(|w| w.fog_begin),
+        water_fog: None,
+        water_gain: 1.0,
         water_lit: water_look.as_ref().map_or(0.0, |w| w.sun),
         water_dim: water_look.as_ref().and_then(|w| w.dim),
         water: water_shading(l, water),
@@ -1128,6 +1162,7 @@ mod tests {
         disable_low_res: bool,
     ) -> manifest::ManifestWater {
         manifest::ManifestWater {
+            far_fog_color: None,
             glb: "water.glb".into(),
             texture: Some("kas2_water".into()),
             height: -5.0,
@@ -1151,6 +1186,26 @@ mod tests {
             }),
             wet: None,
         }
+    }
+
+    #[test]
+    fn kashyyyk_reference_water_haze_does_not_enable_world_fog() {
+        let mut water = water_cfg([30.0; 4], [70.0; 4], false, false);
+        water.far_fog_color = Some([104.0, 106.0, 108.0]);
+        let fog = reference_water_fog("bf2", "kas2", Some(&water)).unwrap();
+        assert_eq!([fog.near, fog.far], [90.0, 350.0]);
+        for (actual, expected) in fog.color.iter().zip([104.0, 106.0, 108.0]) {
+            assert!((render::srgb_encode(*actual) * 255.0 - expected).abs() < 0.001);
+        }
+        assert!(reference_water_fog("bf1", "kas2", Some(&water)).is_none());
+        assert!(reference_water_fog("bf2", "yav1", Some(&water)).is_none());
+        assert!(
+            render_lighting_from("bf2", &manifest::ManifestLighting::default(), Some(&water))
+                .fog
+                .is_none()
+        );
+        water.config.as_mut().unwrap().disable_low_res = true;
+        assert!(reference_water_fog("bf2", "kas2", Some(&water)).is_none());
     }
 
     /// The speckle layer on BF1 KAS2's authored numbers (the manifest's

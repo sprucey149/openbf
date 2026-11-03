@@ -135,6 +135,31 @@ pub fn upload_cpu_texture_scrolling(
     upload_cpu_texture_inner(r, t, label, scroll, uv_scale, render::WrapV::Repeat)
 }
 
+pub(super) fn upload_flat_water_texture(
+    r: &mut Renderer,
+    t: &CpuTexture,
+    label: &str,
+    scroll: [f32; 2],
+    uv_scale: [f32; 2],
+) -> Result<TextureHandle> {
+    let mips: Vec<&[u8]> = std::iter::once(t.rgba.as_slice())
+        .chain(t.extra_mips.iter().map(Vec::as_slice))
+        .collect();
+    r.add_texture(&TextureDesc {
+        width: t.width,
+        height: t.height,
+        mips: &mips,
+        sampler: SamplerMode::Linear,
+        wrap_v: render::WrapV::Repeat,
+        srgb: false,
+        detail: None,
+        scroll,
+        uv_scale,
+        label: Some(label),
+    })
+    .map_err(|e| anyhow!("water texture {label}: {e}"))
+}
+
 /// `wrap_v` is [`render::WrapV::Repeat`] for every caller but a clamped sky
 /// shell (see [`super::scene::sky_wrap_v`]).
 pub(super) fn upload_cpu_texture_inner(

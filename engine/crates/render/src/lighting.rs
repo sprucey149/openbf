@@ -40,6 +40,15 @@ pub struct FarFade {
     pub end: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct WaterDiffuse {
+    pub origin: [f32; 2],
+    pub step: [f32; 2],
+    pub dims: [u32; 2],
+    pub range: [f32; 2],
+    pub colors: [[u32; 4]; 16],
+}
+
 /// The flat water's per-map colour constants — the PS2's VU1 water overlay's
 /// constant block (`analysis/re-water-colour.md` §1.4 `[O]`), consumed by
 /// `fs_water` (routine B, the view-angle term) and `fs_speckle` (routine A,
@@ -49,6 +58,8 @@ pub struct FarFade {
 /// ocean (whose path never loads the overlay, §1.9) and a pre-`fx__` bake get.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct WaterShading {
+    pub far_diffuse: WaterDiffuse,
+    pub far_range: [f32; 2],
     /// `10·ĥ` in metres: routine B's view vector runs from the fragment to
     /// `eye − eye_shift` (VU[146], §1.4).
     pub eye_shift: glam::Vec3,
@@ -90,7 +101,7 @@ pub fn encode(l: f32) -> f32 {
 }
 
 /// sRGB decode of one display channel (the shader's `srgb_to_linear`).
-pub(crate) fn decode(d: f32) -> f32 {
+pub fn decode(d: f32) -> f32 {
     if d <= 0.040_45 {
         d / 12.92
     } else {
@@ -162,6 +173,8 @@ pub struct Lighting {
     /// map has no fog" are different states — a map can fog its world and
     /// never its water, as every `DisableLowRes` map does.
     pub water_fog_begin: Option<f32>,
+    pub water_fog: Option<Fog>,
+    pub water_gain: f32,
     /// The weight of the sun's diffuse term on a [`DrawLayer::Water`] draw:
     /// the water's colour is scaled by `sun byte / 128 · max(n·l, 0) · this`
     /// in GS terms. **0 = the water is unlit**, every map's but BF2's ocean
@@ -197,6 +210,8 @@ impl Default for Lighting {
             fog: None,
             far_fade: None,
             water_fog_begin: None,
+            water_fog: None,
+            water_gain: 1.0,
             water_lit: 0.0,
             water_dim: None,
             water: WaterShading::default(),

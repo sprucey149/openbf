@@ -216,6 +216,7 @@ impl Renderer {
         let view_proj = camera.view_proj(aspect);
         self.shadows.prepare(&self.device, &self.queue, view_proj);
         let frustum = frustum::Frustum::from_view_proj(&view_proj);
+        let water_fog = self.lighting.water_fog.or(self.lighting.fog);
         let globals = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: camera.position.to_array(),
@@ -258,11 +259,20 @@ impl Renderer {
             speckle_ambient: self.lighting.water.speckle_ambient,
             speckle_specular: self.lighting.water.speckle_specular,
             speckle_axis: self.lighting.water.speckle_axis.to_array(),
-            _pad8: 0.0,
+            water_gain: self.lighting.water_gain,
             speckle_light: self.lighting.water.speckle_light.to_array(),
-            _pad9: 0.0,
+            speckle_far_begin: self.lighting.water.far_range[0],
             speckle_shift: self.lighting.water.speckle_shift.to_array(),
-            _pad10: 0.0,
+            speckle_far_end: self.lighting.water.far_range[1],
+            water_grid_origin: self.lighting.water.far_diffuse.origin,
+            water_grid_step: self.lighting.water.far_diffuse.step,
+            water_grid_dims: self.lighting.water.far_diffuse.dims,
+            water_grid_range: self.lighting.water.far_diffuse.range,
+            water_grid_colors: self.lighting.water.far_diffuse.colors,
+            water_fog_color: water_fog.map_or([0.0; 3], |f| f.color),
+            water_fog_on: f32::from(u8::from(water_fog.is_some())),
+            water_fog_range: water_fog.map_or([0.0, 1.0], |f| [f.near, f.far]),
+            _pad_water_fog: [0.0; 2],
             character_ambient: self.lighting.character_ambient.unwrap_or([0.0; 3]),
             character_ambient_on: f32::from(u8::from(self.lighting.character_ambient.is_some())),
             iface_dir: iface_dir(camera).to_array(),
@@ -732,6 +742,12 @@ impl Renderer {
         let full_depth = world_target
             .as_ref()
             .map(|t| std::mem::replace(&mut self.depth_view, t.depth.clone()));
+        let water_view = self.water_display_format.map(|format| {
+            frame_texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(format),
+                ..Default::default()
+            })
+        });
         {
             // Render pass shape from an earlier wgpu project's main.rs "Main Render Pass".
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -857,6 +873,7 @@ impl Renderer {
             let mut skin_pending = true;
             // The GPU timer's section of the runs being drawn (`run_section`).
             let mut section: Option<&'static str> = None;
+            let mut water_display_active = false;
             while run_start <= blend_base {
                 let key = (run_start < blend_base).then(|| draw_key(&draws[order[run_start]]));
                 if lights_pending
@@ -954,6 +971,28 @@ impl Renderer {
                 }
 
                 let d = &draws[order[run_start]];
+                let water_display = water_view.is_some()
+                    && matches!(d.layer, DrawLayer::Water | DrawLayer::Speckle);
+                if water_display != water_display_active {
+                    if let Some(l) = section.take() {
+                        mark(&mut timer, &mut pass, l);
+                    }
+                    drop(pass);
+                    pass = continue_pass(
+                        &mut encoder,
+                        if water_display {
+                            water_view.as_ref().unwrap()
+                        } else {
+                            &view
+                        },
+                        &self.depth_view,
+                        "water colour transition",
+                    );
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
+                    pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                    bound_layer = None;
+                    water_display_active = water_display;
+                }
                 let may_discard = sorts[order[run_start]].may_discard;
                 let run = run_section(d);
                 if ab.skips(run) {
@@ -1028,6 +1067,10 @@ impl Renderer {
             }
             if let Some(l) = section.take() {
                 mark(&mut timer, &mut pass, l);
+            }
+            if water_display_active {
+                drop(pass);
+                pass = continue_pass(&mut encoder, &view, &self.depth_view, "after water");
             }
 
             // The grass patches (queue FOLGG) and then the leaf patches (card

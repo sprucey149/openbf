@@ -112,7 +112,8 @@ pub use grass::{sprite_quad, sway, GrassClass, GrassPatch, GrassSprite, ViewAxes
 pub use leaf::{LeafClass, LeafObject, LeafSprite};
 pub use light_beam::{Beam, Cross, TOP_ALPHA as BEAM_TOP_ALPHA};
 pub use lighting::{
-    encode as srgb_encode, light_sum, DirLight, FarFade, Fog, Lighting, WaterShading,
+    decode as srgb_decode, encode as srgb_encode, light_sum, DirLight, FarFade, Fog, Lighting,
+    WaterDiffuse, WaterShading,
 };
 pub use mesh::{
     MeshData, MeshHandle, SkinnedMeshData, SkinnedMeshHandle, SkinnedVertex, Vertex, MAX_JOINTS,
@@ -217,11 +218,20 @@ struct Globals {
     speckle_ambient: [f32; 4],
     speckle_specular: [f32; 4],
     speckle_axis: [f32; 3],
-    _pad8: f32,
+    water_gain: f32,
     speckle_light: [f32; 3],
-    _pad9: f32,
+    speckle_far_begin: f32,
     speckle_shift: [f32; 3],
-    _pad10: f32,
+    speckle_far_end: f32,
+    water_grid_origin: [f32; 2],
+    water_grid_step: [f32; 2],
+    water_grid_dims: [u32; 2],
+    water_grid_range: [f32; 2],
+    water_grid_colors: [[u32; 4]; 16],
+    water_fog_color: [f32; 3],
+    water_fog_on: f32,
+    water_fog_range: [f32; 2],
+    _pad_water_fog: [f32; 2],
     /// [`Lighting::character_ambient`], read by [`LightPath::Character`]
     /// draws when `character_ambient_on` is 1.
     character_ambient: [f32; 3],
@@ -278,6 +288,7 @@ pub struct Renderer {
     /// only by the twelve maps that ship a `WATR`; see `finish_init`
     /// (`pipelines.rs`).
     water_pipeline: wgpu::RenderPipeline,
+    water_display_format: Option<wgpu::TextureFormat>,
     /// The water's SPECKLE layer ([`DrawLayer::Speckle`]): additive, depth
     /// tested `LessEqual`, no depth write — see `finish_init`.
     speckle_pipeline: wgpu::RenderPipeline,
@@ -517,17 +528,7 @@ mod tests {
 
     #[test]
     fn globals_matches_the_wgsl_uniform_size() {
-        // mat4 (64) + seven 16-byte rows (camera, sun dir, sun colour, sky
-        // ambient, ground ambient + fog_on, fog colour + fog_near, fog_far +
-        // time + the two fade distances) = 176 bytes, plus the row the
-        // water's fog crossover opened (its begin, then the lit weight and the
-        // two dim terms that took its three pads) = 192, plus Light2's two rows
-        // (direction + the sun's Static flag, colour + its own) = 224, plus
-        // the water's seven ([`WaterShading`]: the eye shift, the specular,
-        // the two speckle colours, the speckle's axis, light and shift) = 336,
-        // plus the character ambient's row (colour + its on flag) = 352, plus
-        // the interface light's direction = 368.
-        assert_eq!(std::mem::size_of::<Globals>(), 368);
+        assert_eq!(std::mem::size_of::<Globals>(), 688);
         assert_eq!(std::mem::size_of::<Globals>() % 16, 0);
     }
 }

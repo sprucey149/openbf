@@ -1,8 +1,30 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::Path;
 
+fn install_water(
+    target: &Path,
+    scratch: &Path,
+    manifest: &mut manifest::Manifest,
+    water: Option<manifest::ManifestWater>,
+) -> Result<()> {
+    if let Some(water) = &water {
+        let filename = &water.glb;
+        let previous = target.join(filename);
+        if previous.exists() {
+            std::fs::copy(&previous, scratch.join(format!("previous_{filename}")))?;
+        }
+        std::fs::copy(scratch.join("fresh").join(filename), previous)?;
+    }
+    manifest.water = water;
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
+    anyhow::ensure!(
+        args.len() <= 5 && args.get(4).is_none_or(|arg| arg == "--water-only"),
+        "expected source LVL, baked map, new scratch directory and optional --water-only"
+    );
     let source = args.get(1).ok_or_else(|| anyhow!("source LVL"))?;
     let target = Path::new(args.get(2).ok_or_else(|| anyhow!("existing baked map"))?);
     let scratch = Path::new(
@@ -20,6 +42,17 @@ fn main() -> Result<()> {
         scratch.join("fresh").to_str().context("scratch path")?,
         None,
     )?;
+    if args.get(4).is_some_and(|arg| arg == "--water-only") {
+        std::fs::write(scratch.join("previous_manifest.ron"), original)?;
+        install_water(target, scratch, &mut manifest, fresh.water)?;
+        bake::write_ron(&path, &manifest)?;
+        println!(
+            "refreshed water {}; backup {}",
+            target.display(),
+            scratch.display()
+        );
+        return Ok(());
+    }
     if let Some(sky) = &fresh.sky {
         for geometry in sky
             .models
@@ -104,15 +137,7 @@ fn main() -> Result<()> {
     manifest.sky = fresh.sky;
     manifest.fog_cloud = fresh.fog_cloud;
     manifest.sun_flare = fresh.sun_flare;
-    if let Some(water) = &fresh.water {
-        let filename = &water.glb;
-        let previous = target.join(filename);
-        if previous.exists() {
-            std::fs::copy(&previous, scratch.join(format!("previous_{filename}")))?;
-        }
-        std::fs::copy(scratch.join("fresh").join(filename), previous)?;
-    }
-    manifest.water = fresh.water;
+    install_water(target, scratch, &mut manifest, fresh.water)?;
     bake::write_ron(&path, &manifest)?;
     println!(
         "refreshed {}; backup {}",

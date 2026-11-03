@@ -1348,6 +1348,7 @@ pub(super) fn bake_content(
                 .expect("triangle_count > 0");
             std::fs::write(out.join("water.glb"), glb)?;
             Some(ManifestWater {
+                far_fog_color: sky_cfg.as_ref().and_then(|s| s.info.fog_color),
                 glb: "water.glb".into(),
                 texture,
                 height: w.layer.height,

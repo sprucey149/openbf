@@ -715,7 +715,12 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             let Some(t) = name.and_then(|n| scene.textures.get(&n.to_ascii_lowercase())) else {
                 return Ok(None);
             };
-            Ok(Some(upload_cpu_texture_scrolling(
+            let upload = if ocean {
+                upload_cpu_texture_scrolling
+            } else {
+                super::upload::upload_flat_water_texture
+            };
+            Ok(Some(upload(
                 r,
                 t,
                 name.unwrap_or("water"),
@@ -772,7 +777,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         if let Some(sp) = &look_s {
             for n in &sp.frames {
                 match scene.textures.get(&n.to_ascii_lowercase()) {
-                    Some(t) => frames.push(upload_cpu_texture_scrolling(
+                    Some(t) => frames.push(super::upload::upload_flat_water_texture(
                         r,
                         t,
                         n,
@@ -813,7 +818,9 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                 let next = frames[1 % frames.len()];
                 speckle_first.push(draws.len());
                 draws.push(DrawCmd::speckle(m, frames[0], c(1.0), Mat4::IDENTITY).with_cull(far));
-                draws.push(DrawCmd::speckle(m, next, c(0.0), Mat4::IDENTITY).with_cull(far));
+                draws.push(
+                    DrawCmd::speckle(m, next, [0.0, 1.0, 1.0, 0.0], Mat4::IDENTITY).with_cull(far),
+                );
             }
         }
         if let (Some(sp), false) = (&look_s, speckle_first.is_empty()) {

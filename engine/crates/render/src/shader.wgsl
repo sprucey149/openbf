@@ -66,9 +66,14 @@ struct Globals {
     water_specular: vec4<f32>,
     speckle_ambient: vec4<f32>,
     speckle_specular: vec4<f32>,
-    speckle_axis: vec3<f32>, _pad8: f32,
-    speckle_light: vec3<f32>, _pad9: f32,
-    speckle_shift: vec3<f32>, _pad10: f32,
+    speckle_axis: vec3<f32>, water_gain: f32,
+    speckle_light: vec3<f32>, speckle_far_begin: f32,
+    speckle_shift: vec3<f32>, speckle_far_end: f32,
+    water_grid_origin: vec2<f32>, water_grid_step: vec2<f32>,
+    water_grid_dims: vec2<u32>, water_grid_range: vec2<f32>,
+    water_grid_colors: array<vec4<u32>, 16>,
+    water_fog_color: vec3<f32>, water_fog_on: f32,
+    water_fog_range: vec2<f32>, _pad_water_fog: vec2<f32>,
     // BF1's character ambient, flat, for LIGHT_CHARACTER draws while
     // character_ambient_on is 1 (`render::Lighting::character_ambient`).
     character_ambient: vec3<f32>, character_ambient_on: f32,
@@ -103,8 +108,6 @@ struct PointTable {
 @group(1) @binding(2) var t_detail: texture_2d<f32>;
 struct MaterialParams {
     // x = detail UV scale (1.0 = same UVs), y = 0/1 detail on,
-    // z = RESERVED, always 0: it used to carry the texture's alpha mode, but
-    //     ALPHA RULE v2 decides that per DRAW and the pipeline carries it.
     detail: vec4<f32>,
     // xy = UV units per second. Zero on every texture but a map's water, so
     // `uv + 0.0 * time` is exactly `uv` and no other draw's output moves.
@@ -274,6 +277,13 @@ fn mesh_vertex(in: VsIn) -> VsOut {
 @vertex
 fn vs_main(in: VsIn) -> VsOut {
     return mesh_vertex(in);
+}
+
+@vertex
+fn vs_speckle(in: VsIn) -> VsOut {
+    var out = mesh_vertex(in);
+    out.color = in.inst_color;
+    return out;
 }
 
 @vertex
@@ -611,7 +621,11 @@ fn apply_fog(color: vec3<f32>, depth: f32) -> vec3<f32> {
 
 // The fog amount at planar view depth `depth`, 0..248/255 (the fog on).
 fn fog_amount(depth: f32) -> f32 {
-    let f = (depth - globals.fog_near) / max(globals.fog_far - globals.fog_near, 1e-3);
+    return fog_amount_range(depth, vec2<f32>(globals.fog_near, globals.fog_far));
+}
+
+fn fog_amount_range(depth: f32, range: vec2<f32>) -> f32 {
+    let f = (depth - range.x) / max(range.y - range.x, 1e-3);
     if f <= 0.0 {
         return 0.0;
     }
@@ -712,8 +726,6 @@ fn fs_blend_fade(raw: VsOut) -> @location(0) vec4<f32> {
 //     F = (1 - max(0, V.y))^3,  V = normalize((eye - water_eye_shift) - p)
 // to colour AND alpha with `SpecularColor` / 255 as its weight (0 on an
 // ocean), each clamped at the VU's 255/128. The GS then modulates:
-// Cs = texel x colour, As = texel.a x alpha. The colour sum is gamma space,
-// linearised before it scales the linear texel; the blend weight clamps at 1.
 // PROVISIONAL [O]: F per fragment (the PS2's per vertex on a 4 m grid) and
 // the LUT's mean in place of its per-vertex noise (§5).
 //
@@ -737,28 +749,99 @@ fn fs_blend_fade(raw: VsOut) -> @location(0) vec4<f32> {
 // `_fade` twin of this entry point.
 const GS_MAX: f32 = 255.0 / 128.0;
 
-@fragment
-fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
+fn water_grid_color(at: vec2<i32>) -> vec3<f32> {
+    let dims = vec2<i32>(globals.water_grid_dims);
+    let wrapped = ((at % dims) + dims) % dims;
+    let index = u32(wrapped.y * dims.x + wrapped.x);
+    let packed = globals.water_grid_colors[index / 4u][index % 4u];
+    return vec3<f32>(f32(packed & 255u), f32((packed >> 8u) & 255u), f32((packed >> 16u) & 255u)) / 255.0;
+}
+
+fn water_diffuse(in: VsOut) -> vec3<f32> {
+    if any(globals.water_grid_dims == vec2<u32>(0u)) || in.fog_depth <= globals.water_grid_range.x {
+        return in.color.rgb;
+    }
+    let q = (in.world_pos.xz - globals.water_grid_origin) / globals.water_grid_step;
+    let cell = vec2<i32>(floor(q));
+    let f = fract(q);
+    let a = water_grid_color(cell);
+    let b = water_grid_color(cell + vec2<i32>(1, 0));
+    let c = water_grid_color(cell + vec2<i32>(0, 1));
+    let d = water_grid_color(cell + vec2<i32>(1, 1));
+    let low = vec4<f32>(1.0 - f.x - f.y, f.x, f.y, 0.0);
+    let high = vec4<f32>(0.0, 1.0 - f.y, 1.0 - f.x, f.x + f.y - 1.0);
+    let depth_step = vec2<f32>(globals.view_proj[0].w, globals.view_proj[2].w) * globals.water_grid_step;
+    let depth = in.fog_depth - dot(f, depth_step);
+    let corner_depths = depth + vec4<f32>(0.0, depth_step.x, depth_step.y, depth_step.x + depth_step.y);
+    let weights = select(low, high, f.x + f.y > 1.0) * max(corner_depths, vec4<f32>(AFFINE_NEAR));
+    let far = (a * weights.x + b * weights.y + c * weights.z + d * weights.w) / dot(weights, vec4<f32>(1.0));
+    return mix(in.color.rgb, far, water_range_weight(in.fog_depth, globals.water_grid_range));
+}
+
+fn water_range_weight(depth: f32, range: vec2<f32>) -> f32 {
+    if range.y <= range.x {
+        return 0.0;
+    }
+    return clamp((depth - range.x) / (range.y - range.x), 0.0, 1.0);
+}
+
+fn water_texel(uv: vec2<f32>) -> vec4<f32> {
+    let display_bytes = material.detail.z > 0.5;
+    let texel = textureSampleBias(t_color, s_color, uv, select(0.0, -115.0 / 16.0, display_bytes));
+    return vec4<f32>(select(linear_to_srgb(texel.rgb), texel.rgb, display_bytes), texel.a);
+}
+
+fn far_water_add(rgb: vec3<f32>, pixel: vec2<f32>) -> vec3<f32> {
+    let row = select(vec4<f32>(0.0, 2.0, 1.0, 3.0), vec4<f32>(1.0, 3.0, 0.0, 2.0), (u32(pixel.y) & 2u) != 0u);
+    let step = 8.0 * globals.water_gain / 255.0;
+    return floor(rgb / step + row[u32(pixel.x) & 3u] / 8.0) * step;
+}
+
+fn water_color(in: VsOut) -> vec4<f32> {
     far_cull(in);
     // The ocean's foam layer takes its own tiling (`uv_scale`, 1 on every
     // other water draw): the PS2's foam texture matrix scales by `FoamTile`
     // and shares the base's scroll offset (`analysis/re-water.md` §3d).
     let uv = in.uv * material.scroll.zw + material.scroll.xy * globals.time;
-    let texel = textureSample(t_color, s_color, uv);
+    let texel = water_texel(uv);
     let v = normalize(globals.camera_pos - globals.water_eye_shift - in.world_pos);
     let f = pow(1.0 - max(v.y, 0.0), 3.0);
-    let tint = min(in.color + globals.water_specular * f, vec4<f32>(GS_MAX));
-    var rgb = texel.rgb * srgb_to_linear(tint.rgb);
+    let tint = min(vec4<f32>(water_diffuse(in), in.color.a) + globals.water_specular * f, vec4<f32>(GS_MAX));
+    var rgb = srgb_to_linear(min(texel.rgb * tint.rgb * globals.water_gain, vec3<f32>(1.0)));
     if globals.water_lit > 0.0 {
         let ndotl = max(dot(normalize(in.world_normal), -globals.sun_dir), 0.0);
         let dim = max(1.0 - globals.water_dim_rate * max(in.fog_depth - globals.water_dim_begin, 0.0), 0.0);
         let light = linear_to_srgb(globals.sun_color) * (GS_MAX * ndotl * globals.water_lit);
         rgb = srgb_to_linear(linear_to_srgb(rgb) * min(light, vec3<f32>(GS_MAX)) * dim);
     }
-    if globals.water_fog_begin > 0.0 && in.view_dist > globals.water_fog_begin {
-        rgb = apply_fog(rgb, in.fog_depth);
+    var alpha = min(texel.a * tint.a, 1.0);
+    let fog = water_fog_amount(in);
+    if fog > 0.0 {
+        let combined = alpha * (1.0 - fog) + fog;
+        let display = linear_to_srgb(rgb) * (alpha * (1.0 - fog))
+            + linear_to_srgb(globals.water_fog_color) * fog;
+        rgb = srgb_to_linear(display / combined);
+        alpha = combined;
     }
-    return vec4<f32>(rgb, min(texel.a * tint.a, 1.0) * far_fade(in.view_dist));
+    return vec4<f32>(rgb, alpha * far_fade(in.view_dist));
+}
+
+fn water_fog_amount(in: VsOut) -> f32 {
+    if globals.water_fog_on < 0.5 || globals.water_fog_begin <= 0.0 || in.view_dist <= globals.water_fog_begin {
+        return 0.0;
+    }
+    return fog_amount_range(in.fog_depth, globals.water_fog_range);
+}
+
+@fragment
+fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
+    return water_color(in);
+}
+
+@fragment
+fn fs_water_display(in: VsOut) -> @location(0) vec4<f32> {
+    let c = water_color(in);
+    return vec4<f32>(linear_to_srgb(c.rgb), c.a);
 }
 
 // The water's SPECKLE layer (queue W3, `DrawLayer::Speckle`): one frame of
@@ -780,8 +863,7 @@ fn fs_water(in: VsOut) -> @location(0) vec4<f32> {
 // (`fs_water`), the add fades by the same `fog_amount`: the PS2 lays its `fogspread`
 // pass over the far tile after the speckle. The far fade scales it as it
 // scales the water.
-@fragment
-fn fs_speckle(in: VsOut) -> @location(0) vec4<f32> {
+fn speckle_color(in: VsOut) -> vec4<f32> {
     far_cull(in);
     let uv = in.uv * material.scroll.zw + material.scroll.xy * globals.time;
     let d = (in.world_pos - globals.camera_pos + globals.speckle_shift) * globals.speckle_axis;
@@ -790,12 +872,29 @@ fn fs_speckle(in: VsOut) -> @location(0) vec4<f32> {
         lobe = pow(max(dot(globals.speckle_light, normalize(d)), 0.0), 32.0);
     }
     let col = min(globals.speckle_ambient + globals.speckle_specular * lobe, vec4<f32>(GS_MAX));
-    let rgb = textureSample(t_color, s_color, uv).rgb * srgb_to_linear(col.rgb);
-    var w = col.a * in.color.a * far_fade(in.view_dist);
-    if globals.fog_on > 0.5 && globals.water_fog_begin > 0.0 && in.view_dist > globals.water_fog_begin {
-        w = w * (1.0 - fog_amount(in.fog_depth));
-    }
-    return vec4<f32>(rgb * w, 0.0);
+    let texel = water_texel(uv);
+    let rgb = min(texel.rgb * col.rgb * globals.water_gain, vec3<f32>(1.0));
+    let far = water_range_weight(in.fog_depth, vec2<f32>(globals.speckle_far_begin, globals.speckle_far_end));
+    let near_weight = col.a * in.color.a;
+    let far_weight = col.a * in.color.r * texel.a;
+    let weight = mix(near_weight, far_weight, far);
+    let far_rgb = rgb * far_weight;
+    let quantized = select(far_rgb, far_water_add(far_rgb, in.clip_pos.xy), material.detail.z > 0.5);
+    let contribution = mix(rgb * near_weight, quantized, far);
+    let fade = far_fade(in.view_dist) * (1.0 - water_fog_amount(in));
+    return vec4<f32>(contribution / max(weight, 1e-6), weight * fade);
+}
+
+@fragment
+fn fs_speckle(in: VsOut) -> @location(0) vec4<f32> {
+    let c = speckle_color(in);
+    return vec4<f32>(srgb_to_linear(c.rgb) * c.a, 0.0);
+}
+
+@fragment
+fn fs_speckle_display(in: VsOut) -> @location(0) vec4<f32> {
+    let c = speckle_color(in);
+    return vec4<f32>(c.rgb * c.a, 0.0);
 }
 
 // Sky shells: pre-lit dome art, drawn before everything with no depth test.

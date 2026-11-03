@@ -140,14 +140,6 @@ impl GpuTexture {
             },
         );
 
-        // MaterialParams {
-        //   detail: [detail_scale, detail_strength, RESERVED, pad],
-        //   scroll: [du/dt, dv/dt, uv_scale.u, uv_scale.v],
-        // }
-        // detail.z used to be the texture's alpha mode. ALPHA RULE v2 decides
-        // that per DRAW and the pipeline carries it, so one texture can serve
-        // Opaque, Mask and Blend draws and this slot is now always 0.
-        const RESERVED: f32 = 0.0;
         let (detail_scale, detail_strength) = match &desc.detail {
             Some(d) => (d.scale, 1.0),
             None => (1.0, 0.0),
@@ -155,7 +147,7 @@ impl GpuTexture {
         let params: [f32; 8] = [
             detail_scale,
             detail_strength,
-            RESERVED,
+            f32::from(u8::from(!desc.srgb)),
             0.0,
             desc.scroll[0],
             desc.scroll[1],

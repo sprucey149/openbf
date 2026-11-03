@@ -440,6 +440,8 @@ pub struct ManifestWater {
     /// The water GLB carries diffuse LUT RGB; do not apply its mean tint again.
     #[serde(default)]
     pub vertex_diffuse: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub far_fog_color: Option<[f32; 3]>,
 }
 
 /// Authored water-cell mask; hexadecimal nibbles preserve the disc grid.

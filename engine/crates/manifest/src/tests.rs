@@ -337,6 +337,7 @@ fn full_manifest() -> Manifest {
             glow_masks_preserved: true,
         }),
         water: Some(ManifestWater {
+            far_fog_color: None,
             glb: "water.glb".into(),
             texture: Some("water_ps2".into()),
             height: 3.25,
