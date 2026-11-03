@@ -74,7 +74,7 @@ impl Sim {
         };
         if let Some(damage) = self.bolt_strikes_unit(&b, s.victim, &desc, 1.0) {
             let dir = b.vel.normalize_or_zero();
-            self.finish_unit_damage(s.victim, Some(b.owner), damage, b.age, dir);
+            self.finish_round_damage(s.victim, Some(b.owner), damage, b.age, dir);
         }
     }
 }

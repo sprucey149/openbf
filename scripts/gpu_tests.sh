@@ -5,9 +5,14 @@
 #
 #   scripts/gpu_tests.sh            # render GPU tests + goldens --check
 #   scripts/gpu_tests.sh --render   # only the render crate's GPU tests
+#   scripts/gpu_tests.sh --hit-feedback # issue #104 captures on fresh side bakes
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT/engine"
+
+if [ "${1:-}" = "--hit-feedback" ]; then
+  exec cargo test -p game --test hit_feedback -- --ignored --test-threads=1
+fi
 
 cargo test -p render -- --ignored --test-threads=1
 [ "${1:-}" = "--render" ] && exit 0

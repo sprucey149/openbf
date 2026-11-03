@@ -661,6 +661,7 @@ pub struct Hud {
     /// The hit-direction chevrons' timers (`crate::hud_ambush`, card HATK):
     /// set by [`crate::hud::feed`], faded by [`Hud::advance`].
     pub ambush: crate::hud_ambush::Ambush,
+    pub damage_flash: f32,
     /// The spawn screen up this frame (`crate::spawn_draw`, card SSELB);
     /// `None` draws none.
     pub spawn: Option<crate::spawn_draw::SpawnPage>,
@@ -800,6 +801,7 @@ impl Hud {
             squad: None,
             capture: None,
             ambush: Default::default(),
+            damage_flash: 0.0,
             spawn: None,
             scope: None,
             shell: None,

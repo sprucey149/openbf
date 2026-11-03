@@ -1020,3 +1020,26 @@ fn a_pellet_landing_in_its_first_update_does_its_full_damage() {
     let far = 65.0 - 50.0 / 3.0;
     assert!((hit(100.0, 1.0) - far).abs() < 1e-3, "{}", hit(100.0, 1.0));
 }
+
+#[test]
+fn round_contact_metadata_does_not_change_sim_hash_or_damage_bookkeeping() {
+    let (mut round, attacker, victim) = duel();
+    let (mut other, _, _) = duel();
+    round.finish_round_damage(victim, Some(attacker), 0.0, 0.0, Vec3::Z);
+    other.finish_unit_damage(victim, Some(attacker), 0.0, 0.0, Vec3::Z);
+    assert!(matches!(
+        round.events.last(),
+        Some(Event::Hit {
+            direct_round: true,
+            ..
+        })
+    ));
+    assert!(matches!(
+        other.events.last(),
+        Some(Event::Hit {
+            direct_round: false,
+            ..
+        })
+    ));
+    assert_eq!(round.hash(), other.hash());
+}

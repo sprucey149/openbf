@@ -18,7 +18,7 @@ Notation: `skill` is the 1..20 integer described in §2; `t = (skill-1)/19`; `le
 | Question | Answer | Conf |
 |---|---|---|
 | What is "difficulty" in both engines | ONE integer skill per team on a **1..20** scale (BF1 clamp `DAT_00517db8`=1 / `DAT_00517dbc`=20; BF2 clamps in `FUN_002a29d8`). The shell level (1/2/3) only selects the per-team BASE skill; everything else is a function of the skill. | V |
-| Sign convention | **Higher = better AI**: skill 20 gives the fastest aim tracking, spread multiplier 1.0, AI dispersion multiplier 0.0, longest bursts, full charge, highest grenade/dodge chances. Settled by the curve knots (§2.2, §1.3) — not by the scripts. | V |
+| Sign convention | **Higher = better AI**: skill 20 gives the fastest aim tracking, spread multiplier 1.0, AI dispersion multiplier 0.0, longest bursts, full charge, highest grenade and flyer-evade chances. Settled by the curve knots (§2.2, §1.3) — not by the scripts. | V |
 | BF2 per-level base skill (`FUN_002a29d8`) | human (co-op) team's AI teammates `DAT_00621390` = **{6, 11, 11}**; every other team `DAT_006213a0` = **{4, 14, 17}** for Easy / Normal / Elite. Netplay and split-screen versus use the second table for both teams. | V |
 | BF1 per-level base skill (`FUN_00237ba0`) | player team {`DAT_00517dc0`=6, `DAT_00517dc4`=4, `DAT_00517dc8`=4}; enemy team {`DAT_00517dcc`=4, `DAT_00517dd0`=14, `DAT_00517dd4`=17}. The enemy table is byte-identical to BF2's. | V |
 | BF2 `SetAIDifficulty(a, b [, level])` | per-level ADDITIVE skill deltas: `DAT_005fdf88[level-1] = a` (human team's AI), `DAT_005fdf98[level-1] = b` (other teams); no level string = all three levels. Same thing as BF1's `Set{Player,Enemy}TeamDifficulty{Easy,Medium,Hard}` deltas. | V |
@@ -63,7 +63,7 @@ Notation: `skill` is the 1..20 integer described in §2; `t = (skill-1)/19`; `le
 | `FUN_002e3aa0` / `FUN_002a7230` / `FUN_002e3910` / `FUN_002a9d90` / `FUN_002a9c30` / `FUN_002ac8f8` / `FUN_002e4ea8` | perception scan / view cone / view distance / scan radius / weapon range / suitability matrix / distance metric | V |
 | `FUN_002b9a28` / `FUN_002b94a0` / `FUN_002ba088` / `FUN_002a9520` | threat list update / threat score / best slot / retarget interval | V |
 | `FUN_002ab288` | grenade-use chance = `t` (WeaponGrenadeClass `DAT_00699f40`) | V |
-| `FUN_0020a940` | soldier TakeDamage: AI dodge roll chance `lerp(0,0.2)` + the level gate `FUN_001e0580` | V |
+| `FUN_0020a940` | flyer/carrier damage entry: evasive re-plan chance `lerp(0,0.2)` + the level gate `FUN_001e0580`; not soldier dodge evidence (§9.4) | D |
 | `FUN_001e0580` | damage apply: >1 multiplier suppressed for non-human attackers unless level 3 | V |
 | `FUN_002aba38` (BF1 `FUN_00238b38`) | 4-way combat-mode pick weighted by level | V |
 | `FUN_0020e7e0` + `FUN_002a3110` + `FUN_002a3078` | AI standoff-distance band from soldier class +0x834/+0x838/+0x83c/+0x840 (defaults 10/20/30/0, ctor line 124304) | V |
@@ -151,7 +151,7 @@ mission-start reset) is only ever written 0.
 ### 2.4 BF2: everything the level touches directly [V]
 
 1. `FUN_002a29d8` base tables (above).
-2. `FUN_001e0580` (damage application, called from the soldier's TakeDamage `FUN_0020a940` and
+2. `FUN_001e0580` (damage application, called from flyer/carrier damage entry `FUN_0020a940` and
    five other entity classes): when the health component's per-hit multiplier
    (`(+0xbc vtbl+0x24)(hit)`) is > 1.0 and the attacker (*(decompiler detail omitted)*) is absent or not
    human-driven (`+0x130 < 0`), the multiplier is forced to 1.0 unless the level is 3. So AI
@@ -214,7 +214,7 @@ OBSERVER's team skill (`FUN_002ae010`, `FUN_002ae7b8`, `FUN_002ae4d0`).
 | `FUN_002a2d90()` | `lerp(0, 0.7)` | `FUN_002b94a0` | threat-score facing floor = max(0, 2v−1) (§5.2) |
 | `FUN_002a2f70(0)` | `lerp(2.0, 0)` | `FUN_002a89b8` | proximity-alert period + U(0,0.3) s (BF1 tiers U(1.1,2.1)/U(0.6,1.3)/U(0,0.8)) |
 | `FUN_002a2f98` / `FUN_002a2fc0` | `lerp(0,0)` = 0 | `FUN_00209220` | long-range target-notice probabilities — **inert on PS2** |
-| `FUN_002a2fe8` / `FUN_002a3018` | `lerp(0,1.5)` / `lerp(0,0.2)` | `FUN_0020a940` | on being hit, AI soldier dodges with probability `lerp(0,0.2)`; cooldown 2 s (+0x1d80), +0x1d88 = 10, +0x1d84 = (U−0.5)·lerp(0,1.5)+2.25 [dodge/roll trigger `FUN_002fa478` — H] |
+| `FUN_002a2fe8` / `FUN_002a3018` | `lerp(0,1.5)` / `lerp(0,0.2)` | `FUN_0020a940` | on being hit, AI flyer/carrier replans with probability `lerp(0,0.2)`; cooldown 2 s (+0x1d80), +0x1d88 = 10, +0x1d84 = (U−0.5)·lerp(0,1.5)+2.25 [dodge/roll trigger `FUN_002fa478` — H] |
 | `FUN_002a3048` | `lerp(0.5, 1.5)` s | `FUN_00202d08` | interval between target-notice evaluations |
 | `FUN_002a3110` | curve at `lerp(0.3,0.8)` and `lerp(0.5,1.2)` | `FUN_0020e7e0` | standoff distance band over class (10, 20, 30, far) — §4.4 |
 | `FUN_002a3200` / `FUN_002a3268` / `FUN_002a32d0` / `FUN_002a32e8` | U(lerp(45,15), lerp(100,60)) / U(lerp(25,10), lerp(45,12)) / 0.4 / `lerp(0.5,0.25)` | `FUN_002a3c28` | auto-balance nudge cadences and coin biases (§6) |
@@ -407,8 +407,9 @@ Values are the PS2 originals; the recommendation column is only where the code s
 5. **Cadence**: tracker/perception think every 5 frames at full LOD (`FUN_002b7790`), retarget
    ≥ 1.5 s with +10 score hysteresis (`FUN_002b9a28`, `FUN_002a9520`).
 6. **Fire discipline**: bursts `min + U(0,max−min)·t` (≥2), pause `(1.5 − 0.8t) × weapon time
-   constant`, charge to `U(0.15, t)·C`, grenade chance `t` per 3 s window, dodge-on-hit chance
-   `lerp(0,0.2)` with a 2 s cooldown (`FUN_002bac98`, `FUN_002baac0`, `FUN_002ab288`, `FUN_0020a940`).
+   constant`, charge to `U(0.15, t)·C`, grenade chance `t` per 3 s window
+   (`FUN_002bac98`, `FUN_002baac0`, `FUN_002ab288`). The on-hit `lerp(0,0.2)` / 2 s
+   re-plan in `FUN_0020a940` belongs to flyers/carriers (§9.4), not soldiers.
 7. **Perception**: 10 m omni + 77.5° half-angle cone [D], view distance `(20·radius+30)·mult·vis`
    (soldier ≈ 40–50 m at mult 1), ×2 for flyer targets, scan radius = weapon range + 5·speed,
    nearest-first acquisition, facing-aware scoring vs humans (§5.2), proximity alert 7.5 m every
@@ -422,7 +423,7 @@ Values are the PS2 originals; the recommendation column is only where the code s
    (0..100), BF1 snipe ranges 140 (used as 70 m radii), BF2 snipe-range bindings are stubs.
 10. **Hypotheses, not facts**: the identity of the >1 damage multiplier (item 8), the four
     combat-mode meanings, the facing-factor axis convention, the cone being 77.5° rather than
-    12.5°, the dodge trigger being a roll, `SetAIDamageThreshold`'s semantics, the soldier class
+    12.5°, the flyer/carrier evade parameter, `SetAIDamageThreshold`'s semantics, the soldier class
     keys behind +0x834..+0x840.
 
 ---
@@ -521,7 +522,7 @@ For openbf: keep the 77.5° half-angle; the 10 m omni is BF2-only.
 > `FUN_0024ec88`), which this section's chain missed; `headShots` / the "headshot" effect count these soldier hits.
 
 
-**Chain (BF2).** `FUN_0020a940` (soldier TakeDamage, 121219) → `FUN_001e0580(soldier+0x170, desc,
+**Chain (BF2).** `FUN_0020a940` (flyer/carrier damage entry, 121219) → `FUN_001e0580(entity+0x170, desc,
 dir, pos, hit, …)` (91541). The "health component" is the sub-object at entity+0x170 with its vptr
 at +0xbc (GCC 2.95 "vptr after the fields"; the tables carry two header words, so vtbl+0x24 is
 word 9). `mult = (comp+0xbc)->[+0x24](comp, hit)`. Nine vtables hold `FUN_001e0580` at +0x1c
@@ -624,20 +625,20 @@ a session/profile decision for the lead, not an AI parameter.
 
 ### 9.4 The dodge and the "combat modes" — structure only [D/H]
 
-**Dodge** (`FUN_0020a940` 121236–121318, AI soldiers only: `+0x330 < 0`, `+0x5bd`/`+0x5be` clear,
-`+0xa0` bit 0 clear, cooldown `+0x1d80 ≤ 0.0001`): draw `U`; dodge iff `U < lerp(0, 0.2)`
-(`FUN_002a3018`) and the controller's `+0x6cc` byte is set. Then (a) if `+0x660` bit 3, `+0x60c
-== 2`, `+0x228` bit 3, and `+0x660` bits 0/1 clear → `FUN_002fa478(soldier+0x4c0, ctrl+0x654)`;
-(b) `+0x1d80 = 2 s`; (c) unless `+0x660` bits 0/1 or `+0x1d88 > 0`: `+0x1d88 = 10`,
-`+0x1d84 = (U − 0.5)·lerp(0, 1.5) + 2.25`. `FUN_002fa478` (287793) is a **reset of the movement
-sub-object embedded at soldier+0x4c0** (vptr at +0x4f0): it clears `+0xf0`, `+0xfc..+0x102`
-(`FUN_002fa4c0`) and re-seeds `+0x58` from the controller (`FUN_002feaa8` → `FUN_00300d30`). The
-soldier update `FUN_0020b840` issues the identical call when leaving `+0x60c` state 3 (122085), and
-`FUN_00202880` arms the same `+0x1d84/+0x1d88` pair with 5 s / 1.5 outside the damage path
-(116339). The roll itself is dispatched by `FUN_002475f0` → vtable+0xb0 from the input predicate
-`FUN_00247b88` (re-stance-roll §4.2), which this path never reaches. **"Dodge = roll" is not
-supported**: the on-hit dodge is a re-plan of the soldier's movement plus a 2.25 ± 0.75·lerp(0,1.5)
-s evade parameter [D]; what `+0x1d84` drives (strafe direction / duration) stays [H].
+**Corrected 2026-11-03, issue #104.** `FUN_0020a940` (B2:121236-121318)
+handles flyer/carrier damage. Its caller `FUN_001ea4f8` is installed in
+vtables 0x61a94c, 0x61c1cc and 0x62b39c, beside EntityCarrier, EntityFlyer
+and CommandFlyer type strings. The soldier uses vtable 0x61ea80, slot
++0x1c, through thunk `FUN_00255d38` to `FUN_00238e20` (B2:152413-152581).
+The flyer/carrier's chance, 2 s cooldown and movement-subobject reset therefore
+do not establish a walking soldier dodge. The earlier soldier attribution in
+this section and its summary rows was wrong.
+
+**OURS:** openbf keeps its existing soldier side-step and other AI hit reactions,
+by maintainer decision. No behavior changes with this correction.
+measure: PCSX2 T5/T6 from the issue #104 research brief, observing an engaged
+soldier and an idle soldier hit within/beyond view range before replacing this
+openbf deviation. The cosmetic hit pose is separate and changes no AI decision.
 
 **Modes** (`FUN_002aba38`, 231136) are not movement modes: the function is the last stage of the
 **attack-suitability matrix** `FUN_002ac8f8` (231784, §5.1). Attacker kind × target kind picks a

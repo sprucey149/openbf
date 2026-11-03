@@ -685,6 +685,15 @@ impl SoldierVisuals {
             v.saber_throwing = firing;
         }
         for (event, e) in walk.sim.events.iter().enumerate() {
+            if let core::sim::Event::Hit { victim, .. } = e {
+                if let Some(v) = self
+                    .units
+                    .get_mut(victim.index as usize)
+                    .filter(|v| v.gen == victim.gen)
+                {
+                    v.animator.note_hit(&walk.sim, event);
+                }
+            }
             if let core::sim::Event::Despawn { unit } = e {
                 if let Some(v) = self
                     .units

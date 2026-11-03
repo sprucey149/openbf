@@ -100,6 +100,10 @@ pub enum Event {
         to: Vec3,
     },
     Hit {
+        /// Presentation metadata only: the body was struck by a round,
+        /// including a zero-damage shield contact; excludes splash, Force
+        /// and emitters. Never hashed or read to drive gameplay.
+        direct_round: bool,
         shooter: UnitHandle,
         victim: UnitHandle,
         /// The health the hit took (after the shield and the scales; 0 for

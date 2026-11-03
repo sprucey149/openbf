@@ -461,9 +461,12 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/ambience.rs` 327 — fixed world sound-emitter discovery and distances · `Ambience`, `Emitter`, `Kind`, `emitters`, `with_distances`; module header and `analysis/re-ambience-music.md` 1–2; referee `game/tests/suite/ambience_ps2.rs`, RAM data `game/tests/data/ambience_ps2.txt`.
 - `game/src/animator.rs` 1144 — visual soldier clip selection/layering and blending · `Animator`, `AnimInput`, `ClassAnim`, `RollClock`, `body`, `travel`, `find_clip`; module header and `analysis/re-soldier-anim-layers.md` §3, §7 / `analysis/re-roll-picture.md` §7.
 - `game/src/animator/rig.rs` 608 — the animation rig: clip sets, body and action slots, blend times, and the clip player · `Rig`, `Player`, `Ctx`
+- `game/src/animator/hit.rs` 173 — cosmetic directional hit pose, event consumption, clock and bone masks · `Direction`, `Animator::note_hit`.
 - `game/src/animator/aim.rs` 518 — soldier alert state and head/torso aim posing · `Aim`, `AimStep`, `AimKind`, `global`; module header and `analysis/re-soldier-anim-layers.md` §3.4, §7.
 - `game/src/animator/census.rs` 327 — headless animator diagnostics for clip layers, alert/aim and roll-root travel · `Census`; `ANIM_CENSUS` on `round_to_outcome`; module header describes the referee measurements.
 - `game/src/animator/tests.rs` 1608 — the animator on a synthetic rig whose clips say which one a bone was sampled from
+- `game/src/animator/tests/hit.rs` 256 — hit direction probabilities, fade, stance masks, action continuity and unchanged sim hash.
+- `game/src/animator/tests/death.rs` 60 — directional death clip selection and missing-clip fallback.
 - `game/src/animator/jump.rs` 111 — BF1's timed jump poses, landing selection and interruption, and fade back to locomotion · `Jump`; `analysis/re-soldier-anim-layers.md` §10.
 - `game/src/animator/turn.rs` 131 — root twist, roll travel and stationary foot turns, with bounded waist rotation for mouse aiming; `analysis/re-soldier-anim-layers.md` §11.
 - `game/src/animator/tests/legs.rs` 123 — firing and rapid mouse-turn regressions, including controller behavior and animation clocks.
@@ -526,6 +529,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/render_blend.rs` 1006 — presentation interpolation, including the eased camera position and AI-driven walker gunner heading stabilization, with snap handling and bit-exact restoration before sim readers; seat looks and aimers blended; a controller's aim drawn the frame's share into the next tick's turn and a FIRE press stamped with it · `Blend`, `Blend::stamp`, `Pose`, `blend`, `blend_in_looking`, `fraction`, `lerp_angle`; `OPENBF_RENDER_BLEND=0` disables it; module header owns fields, thresholds and restore contract.
 - `game/src/render_blend/walker.rs` 126 — Between-tick walker pose interpolation.
 - `game/src/hud_feed.rs` 837 — BF2 HUD art loading and per-frame `ui::hud_tree` / `ui::hud_draw` → `render::hud` wiring, including weapon model/icon fallbacks · `HudView`; module/API docs own BF1 row keys and material-alpha rules.
+- `game/src/hit_flash.rs` 59 — BF2 local damage flash threshold, alpha, duration and fade · `Flash`.
 - `game/src/input_icons.rs` 607 — the Button prompts setting, the device Auto follows and the shipped SVG icons (`game/assets/input_icons/README.md`: sources, licences) · `IconChoice`, `DeviceTracker`, `icons`, `rasterize`
 - `game/src/minimap.rs` 1039 — map/class minimap configuration and per-frame battle/spawn-map feeds, including command walkers; mission-resolved still feeds and asset-free caller regressions for captures/goldens · `MapStatic`, `ClassIcon`, `bounds_of`, `still`, `spawn_still`; module/API docs and `analysis/re-hud-map.md` §8.
 - `game/src/gallery.rs` 1414 — headless map/unit/walkabout sheets with floor placement and class-specific held weapons, including installed DLC classes · `map_sheet`, `vantage_camera`, `model_class`, `discover_units`; `soldier_spot` owns grounding and `step_water` pins water per eye for goldens.

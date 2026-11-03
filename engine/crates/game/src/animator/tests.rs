@@ -1592,6 +1592,8 @@ fn a_prone_change_plays_its_transition_through_the_lock() {
     assert_eq!(Special::ProneUp(false).name(), "prone_getup_stand");
 }
 
+mod death;
+mod hit;
 mod jet;
 mod legs;
 

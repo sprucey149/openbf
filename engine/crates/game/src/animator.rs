@@ -616,6 +616,7 @@ struct Action {
 pub struct Animator {
     /// Seconds of play, for presentation with no clip of its own.
     age: f32,
+    hit: hit::Reaction,
     upper: Player,
     lower: Player,
     /// The kept pose; `None` until the first update (which snaps).
@@ -891,7 +892,11 @@ impl Animator {
             };
         }
 
-        let (mut up, mut low) = rig.body_slots(i.set, body, alert);
+        let (mut up, mut low) = if body == Body::Special(Special::Dead) {
+            rig.death_slots(i.set, self.hit.direction)
+        } else {
+            rig.body_slots(i.set, body, alert)
+        };
         let mut up_action = false;
         if let Some(a) = self.action {
             up = Some(a.upper);
@@ -1042,6 +1047,7 @@ impl Animator {
             .unwrap_or_else(|| up.map_or((aim::AimKind::None, 0.0), |s| (s.aim, s.blend_in)));
         self.aim.ease(&aim, kind, blend_in);
         self.step_twist(i, body, was_body, mv, dt);
+        self.hit.step(rig, clips, skel, i, body, dt);
         if combo_low.is_some() && self.combo.as_ref().is_some_and(|c| c.forced()) {
             self.combo_override = true;
             self.combo_aim = kind != aim::AimKind::None;
@@ -1069,6 +1075,7 @@ impl Animator {
         dt: f32,
     ) {
         self.age += dt;
+        self.hit.clear_pose();
         let Some(c) = clips.get(clip) else { return };
         let t = self.seat.map_or(0.0, |t| t + dt * 30.0);
         self.seat = Some(t);
@@ -1111,6 +1118,7 @@ impl Animator {
             }
             return pose;
         }
+        self.hit.apply(&mut pose);
         if let Some(r) = skel.index_of("DummyRoot").and_then(|b| pose.0.get_mut(b)) {
             // About the model's up axis: the root has no parent.
             r.rotation = glam::Quat::from_rotation_y(self.twist) * r.rotation;
@@ -1134,6 +1142,7 @@ pub mod aim;
 pub mod census;
 mod combo_pose;
 pub mod custom;
+pub mod hit;
 mod jump;
 mod offhand_pose;
 #[cfg(test)]

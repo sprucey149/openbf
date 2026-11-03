@@ -1230,6 +1230,7 @@ mod tests {
                     });
                 }
                 sim.events.push(Event::Hit {
+                    direct_round: true,
                     shooter: player,
                     victim: player,
                     damage: 0.0,

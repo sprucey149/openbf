@@ -33,6 +33,7 @@ pub mod gallery;
 pub mod hero_blades;
 mod hero_riders;
 pub mod heroes;
+pub mod hit_flash;
 pub mod holo;
 pub mod hud_feed;
 pub mod input_icons;
