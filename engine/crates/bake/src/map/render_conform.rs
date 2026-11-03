@@ -1,8 +1,9 @@
-//! Last-resort solid drawing for fingerprinted donor plants and tunnels.
+//! Last-resort solid drawing for fingerprinted donor plants, tunnels and cliffs.
 //!
-//! Placement/model/group fits, donor vertex projection and three levels of
-//! donor-face subdivision leave measured contact holes on these models. A
-//! dense reference-art cage would store artwork, so it is not a public recipe.
+//! Plant/tunnel fits, donor vertex projection and three subdivision levels
+//! leave measured contact holes. The cliff also resists nearest-surface,
+//! nearest-corner and directional projections. A dense reference-art cage would
+//! store artwork, so it is not a public recipe.
 //! This fallback reads only the player's already-corrected collision, projects
 //! the player's own material/UVs onto it, and leaves all simulation inputs and
 //! model headers unchanged. Pure PS2 never selects a recipe.
@@ -18,14 +19,23 @@ use std::collections::HashMap;
 struct Recipe {
     name: &'static str,
     bf2: bool,
-    inputs: [&'static str; 2],
+    inputs: &'static [&'static str],
 }
 
 const RECIPES: &[Recipe] = &[
+    // The donor cliff's upper lip is recessed by metres. Nearest-surface,
+    // nearest-corner and outward-normal projections leave contact gaps above
+    // two metres. Reuse the player's canonical cliff mesh with donor UVs;
+    // no collision or reference-art vertex stream is stored here.
+    Recipe {
+        name: "uta1_bldg_rep_ground",
+        bf2: true,
+        inputs: &["e52c4caf140cc9a54fa1aeaf001a313866dc37a22e6e1126aea71c5a6fdbd638"],
+    },
     Recipe {
         name: "fel1_bldg_pitcher_l",
         bf2: true,
-        inputs: [
+        inputs: &[
             "987b756723460e437034ae46d3594ec14cd14abf66fbd5203d1c407afa5f641d",
             "679e130ba32271d320b3b3a634ba096355189872eb931dcfe892125a2b0b45e4",
         ],
@@ -33,7 +43,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_pitcher_clump",
         bf2: true,
-        inputs: [
+        inputs: &[
             "a052a91600aa1d4626d9f46b87c4b09d79d75e15496c1c32d3b3ef0c327cd1cd",
             "8e8f716d4f413a183f71b228e8245d4d05a52a5346349363d208ed80f50888b1",
         ],
@@ -41,7 +51,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_whisker_clump01",
         bf2: true,
-        inputs: [
+        inputs: &[
             "00435dd72b4609e3e0532527c04024d95d32bdbe2dc676231e53095fe33dfcf1",
             "034fb1719541a60b03c95a16fb997c5809ce62cd99281ea811316a9664718f1d",
         ],
@@ -49,7 +59,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_pitcher_c",
         bf2: true,
-        inputs: [
+        inputs: &[
             "dc4b6ddcca8e72eeb37643a67d504b3553033a7ee4ef3f54573ef2699d6a20e3",
             "6b0ce32af753d4f53c856f8435e36f620ca6b56b7fb7d5eb215b2b6dbca3f772",
         ],
@@ -57,7 +67,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_pitcher_m",
         bf2: true,
-        inputs: [
+        inputs: &[
             "9650936ac2813921ef0199af1e7b3240095b83d37da34baed6997d13d156415c",
             "259a6153fc6bb5a297ede49be0b9c0c9853c47c719b5e09d91d85c2fefe39bbb",
         ],
@@ -65,7 +75,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_pitcher_s",
         bf2: true,
-        inputs: [
+        inputs: &[
             "faa1cb4c0c84a2037a1c5a40969ccd72f4dd03b049af8d84f8f9c65795228e91",
             "0f764128b400bd89d5eb0656883b71020ab3e8105bcb0adbf3ff43dd6b9f70dc",
         ],
@@ -77,7 +87,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "rhn1_prop_tunnel_special_01",
         bf2: false,
-        inputs: [
+        inputs: &[
             "f2975ca1dcef985a75befd0625ccfd1d0c34ad29b37f5651872752280f4ae7d1",
             "12d98bfa1541004f42de539d440af4bce8402141a31bd84f5d1aafb1565fc0a6",
         ],

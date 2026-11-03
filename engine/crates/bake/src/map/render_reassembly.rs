@@ -1,10 +1,11 @@
 //! Rejoin donor-only render pieces removed by canonical world replacement.
 //!
 //! Xbox Jabba splits the torture room and its pipes into independently placed
-//! props. Polis Massa similarly separates its hangar walkway platform. The
+//! props. Polis Massa similarly separates its hangar walkway platform. Those
 //! source pieces share their target's transform but are not placed by the PS2
 //! world. Append their already-posed donor segments to the retained render model
 //! while keeping all canonical simulation placements and collision unchanged.
+//! The Xbox capital ship separately recovers missing HIGH panels from its LOWD.
 //! The source LVL has passed gameplay fingerprint validation before this call.
 //! Reject missing dependencies, duplicate/changed placements and changed class
 //! bindings rather than silently emitting only part of a room.
@@ -12,6 +13,7 @@
 use anyhow::{anyhow, bail, ensure, Result};
 use mungefs::model::Model;
 use mungefs::world::{Transform, World};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
 pub(super) struct Reassembled {
@@ -53,6 +55,7 @@ pub(super) fn models(
     let chunks = mungefs::content_chunks(mungefs::open(original).map_err(|e| anyhow!(e))?)
         .map_err(|e| anyhow!(e))?;
     let mut resources = HashSet::new();
+    let mut capital_hashes = HashMap::new();
     let mut bindings = HashMap::new();
     let mut lods = HashMap::new();
     let mut worlds = Vec::new();
@@ -60,7 +63,12 @@ pub(super) fn models(
         match &chunk.tag {
             b"modl" => {
                 if let Some(name) = chunk.child_string(b"NAME") {
-                    resources.insert(name.to_ascii_lowercase());
+                    let name = name.to_ascii_lowercase();
+                    if name == CAPITAL || name == CAPITAL_LOW {
+                        capital_hashes
+                            .insert(name.clone(), format!("{:x}", Sha256::digest(chunk.payload)));
+                    }
+                    resources.insert(name);
                 }
             }
             b"entc" => {
@@ -88,6 +96,13 @@ pub(super) fn models(
     }
     let originals: Vec<_> = worlds.iter().collect();
     let mut out = Vec::new();
+    if capital_hashes.get(CAPITAL).map(String::as_str) == Some(CAPITAL_HIGH_SHA) {
+        ensure!(
+            capital_hashes.get(CAPITAL_LOW).map(String::as_str) == Some(CAPITAL_LOW_SHA),
+            "render reassembly: changed or missing fedcruiser LOWD donor"
+        );
+        out.push(capital_panels(models)?);
+    }
     for recipe in RECIPES {
         if !worlds
             .iter()
@@ -112,6 +127,65 @@ pub(super) fn models(
         out.push(join(recipe, &originals, corrected_worlds, models)?);
     }
     Ok(out)
+}
+
+// The Xbox HIGH resource omits these 60 opaque hull panels. Its own LOWD
+// retains them, including all original material, UV and colour streams. Reuse
+// that donor segment at HIGH detail instead of moving collision or replacing
+// the detailed hull. The same resource pair occurs on SPA3, SPA6 and SPA7.
+const CAPITAL: &str = "cis_fly_fedcruiser";
+const CAPITAL_LOW: &str = "cis_fly_fedcruiserlowd";
+const CAPITAL_HIGH_SHA: &str = "46f64bde6c070188f6da476c4e7092c05268a689c0fa99a721b78c4d77928f61";
+const CAPITAL_LOW_SHA: &str = "f5253308a61b0d9d7a5a6b7effe298ec9cffef74dc963d657d89666856717f28";
+const PANEL_TEXTURE: &str = "spa1_bldg_colors1";
+
+fn capital_panels(models: &HashMap<String, Model>) -> Result<Reassembled> {
+    let high = models
+        .get(CAPITAL)
+        .ok_or_else(|| anyhow!("missing fedcruiser HIGH"))?;
+    let low = models
+        .get(CAPITAL_LOW)
+        .ok_or_else(|| anyhow!("missing fedcruiser LOWD"))?;
+    ensure!(
+        !high.bone_space && !low.bone_space && high.segments.len() == 9,
+        "render reassembly: changed fedcruiser posed model"
+    );
+    let panel = |segment: &&mungefs::model::Segment| {
+        segment
+            .textures
+            .iter()
+            .any(|(slot, name)| *slot == 0 && name.eq_ignore_ascii_case(PANEL_TEXTURE))
+    };
+    ensure!(
+        !high.segments.iter().any(|s| panel(&s)),
+        "render reassembly: fedcruiser panels already present"
+    );
+    let panels: Vec<_> = low.segments.iter().filter(panel).collect();
+    ensure!(
+        panels.len() == 1,
+        "render reassembly: expected one fedcruiser panel segment"
+    );
+    let panel = panels[0];
+    ensure!(
+        panel.positions.len() == 66
+            && panel.normals.len() == 66
+            && panel.uvs.len() == 66
+            && panel.colors.as_ref().is_none_or(|c| c.len() == 66)
+            && panel.triangles.len() == 60,
+        "render reassembly: changed fedcruiser panel streams"
+    );
+    let mut lighting: Vec<_> = high
+        .segments
+        .iter()
+        .map(|s| crate::glb::light_path(high, s))
+        .collect();
+    lighting.push(crate::glb::light_path(low, panel));
+    let mut combined = high.clone();
+    combined.segments.push(panel.clone());
+    Ok(Reassembled {
+        model: combined,
+        lighting,
+    })
 }
 
 fn unique_placement(worlds: &[&World], class: &str) -> Result<Transform> {
@@ -263,6 +337,68 @@ mod tests {
                 triangles: vec![[0, 1, 2]],
             }],
         }
+    }
+
+    fn capital_models() -> HashMap<String, Model> {
+        let mut high = model(CAPITAL, 0.0);
+        high.segments = vec![high.segments[0].clone(); 9];
+        let mut low = model(CAPITAL_LOW, 1.0);
+        let panel = &mut low.segments[0];
+        panel.vertex_count = 66;
+        panel.index_count = 180;
+        panel.textures = vec![(0, PANEL_TEXTURE.into())];
+        panel.positions.resize(66, [1., 2., 3.]);
+        panel.normals.resize(66, [1., 0., 0.]);
+        panel.uvs.resize(66, [0.2, 0.8]);
+        panel.colors.as_mut().unwrap().resize(66, [1, 2, 3, 255]);
+        panel.triangles.resize(60, [0, 1, 2]);
+        HashMap::from([(CAPITAL.into(), high), (CAPITAL_LOW.into(), low)])
+    }
+
+    #[test]
+    fn capital_high_reuses_own_low_panels_without_changing_existing_streams_or_header() {
+        let models = capital_models();
+        let before = &models[CAPITAL];
+        let donor = &models[CAPITAL_LOW].segments[0];
+        let result = capital_panels(&models).unwrap();
+        assert_eq!(result.model.segments.len(), 10);
+        for (a, b) in result.model.segments[..9].iter().zip(&before.segments) {
+            assert_eq!(a.positions, b.positions);
+            assert_eq!(a.triangles, b.triangles);
+            assert_eq!(a.textures, b.textures);
+        }
+        let copied = &result.model.segments[9];
+        assert_eq!(copied.positions, donor.positions);
+        assert_eq!(copied.triangles, donor.triangles);
+        assert_eq!(copied.uvs, donor.uvs);
+        assert_eq!(copied.colors, donor.colors);
+        assert_eq!(copied.textures, donor.textures);
+        assert_eq!(result.model.vertex_box.min, before.vertex_box.min);
+        assert_eq!(result.model.vertex_box.max, before.vertex_box.max);
+        assert_eq!(result.model.vis_box.min, before.vis_box.min);
+        assert_eq!(result.model.vis_box.max, before.vis_box.max);
+        assert_eq!(result.model.sphere, before.sphere);
+        assert_eq!(result.model.face_count, before.face_count);
+        assert_eq!(
+            result.lighting[9],
+            crate::glb::light_path(&models[CAPITAL_LOW], donor)
+        );
+    }
+
+    #[test]
+    fn capital_panel_reassembly_rejects_missing_changed_or_duplicate_donors() {
+        let mut models = capital_models();
+        models.get_mut(CAPITAL_LOW).unwrap().segments[0]
+            .positions
+            .pop();
+        assert!(capital_panels(&models).is_err());
+        assert_eq!(models[CAPITAL].segments.len(), 9);
+        let mut models = capital_models();
+        let panel = models[CAPITAL_LOW].segments[0].clone();
+        models.get_mut(CAPITAL_LOW).unwrap().segments.push(panel);
+        assert!(capital_panels(&models).is_err());
+        models.remove(CAPITAL_LOW);
+        assert!(capital_panels(&models).is_err());
     }
 
     fn inputs() -> (World, World, HashMap<String, Model>) {
