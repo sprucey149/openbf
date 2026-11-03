@@ -7,12 +7,12 @@
 //!   the distance flown, up to the class cap max(LaserLength, GlowLength,
 //!   BlurLength); the core is drawn over min(len, LaserLength), the glow
 //!   over min(len, GlowLength).
-//! - **After the hit** (§4): the PS2 keeps the bolt at its impact point for
+//! - **After reaching the end** (§4): the PS2 keeps the bolt at its impact point for
 //!   two more updates; a class with `FadeOutTime` (the snipers) instead
 //!   fades in place — w → 0.1·LaserWidth, the core's alpha and the glow's
 //!   bytes × the fade. The sim drops a bolt on its impact tick, so the port
-//!   keeps these remnants here. A bolt that runs out of life in the air
-//!   leaves none [D: the hit path is the only one that stops the head].
+//!   keeps these remnants here on impact and air expiry alike (BF1
+//!   `FUN_002764c0`, B1:197673–197677; `FUN_0027c478`, B1:202176–202232).
 //! - **Colours** (§3.1, §3.5): the core white × the fade; the glow
 //!   `LaserGlowColor`, BF2's fade toward `EndLaserGlowColor` by seconds of
 //!   flight, × the fade. BF2's `BonusColor` core tint (the
@@ -47,6 +47,8 @@
 //!   but its [`key`] is stable under steering all the same: the trail
 //!   (`crate::fx::trail`) and the hit remnants identify rounds by it.
 
+#[cfg(test)]
+mod expiry_tests;
 mod shots;
 
 use crate::bolt_light::OmniLight;
@@ -163,6 +165,7 @@ struct Tracked {
     dir: Vec3,
     age: f32,
     struck: bool,
+    remaining: f32,
     /// Where the spawn ray ends on the heightfield.
     terrain: bool,
     /// Metres the sim moves it per tick.
@@ -520,13 +523,14 @@ impl BoltVis {
                 dir,
                 age: b.age,
                 struck: !matches!(b.hit, Hit::None),
+                remaining: b.remaining,
                 terrain: matches!(b.hit, Hit::Terrain),
                 step: b.vel.length() * core::TICK_DT,
                 pos: b.pos,
                 flight: b.vel.normalize_or_zero(),
             });
         }
-        // A bolt gone this tick that struck: its remnant at the impact. The
+        // A bolt gone this tick: its remnant at the impact or air expiry. The
         // map and the terrain were known at the press (`t.end`); a soldier,
         // a hull or a mine is met by the tick's sweep (`Sim::sweep_bolts`,
         // issue #41), which moves the end and lands it the same tick - its
@@ -538,7 +542,17 @@ impl BoltVis {
             // short of a foreseen wall is the one it struck.
             let hit = struck
                 .take_on(t.pos, t.flight, t.step, t.class)
-                .or_else(|| t.struck.then_some((t.end, t.terrain)));
+                .or_else(|| t.struck.then_some((t.end, t.terrain)))
+                .or_else(|| {
+                    // A missing round alone is not expiry: require its final
+                    // clipped step to reach the authored end this tick.
+                    let end =
+                        t.pos + t.flight * t.step * (t.remaining / core::TICK_DT).clamp(0.0, 1.0);
+                    let expired = sim.events.iter().any(|e| matches!(e,
+                        core::sim::Event::BoltExpired { pos, struck: false } if pos.abs_diff_eq(t.end, 1e-3)));
+                    (expired && t.remaining <= core::TICK_DT && end.abs_diff_eq(t.end, 1e-3))
+                        .then_some((t.end, false))
+                });
             let Some((end, terrain)) = hit else {
                 continue;
             };

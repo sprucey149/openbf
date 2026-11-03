@@ -498,13 +498,14 @@ impl LiveEffect {
         texture: &mut dyn FnMut(&str) -> Option<TextureHandle>,
         out: &mut Vec<ParticleDraw>,
     ) {
-        self.draws_with(eye, forward, &mut TextureOnly(texture), out);
+        self.draws_with(eye, forward, 1.0, &mut TextureOnly(texture), out);
     }
 
     fn draws_with(
         &self,
         eye: Vec3,
         forward: Vec3,
+        zoom: f32,
         assets: &mut dyn FxAssets,
         out: &mut Vec<ParticleDraw>,
     ) {
@@ -515,12 +516,12 @@ impl LiveEffect {
                 continue;
             }
             let em = &self.def.emitters[i];
-            let terms = draw::view_terms(d, em.bounding_radius);
+            let terms = draw::view_terms(d, em.bounding_radius, zoom);
             if terms.fade <= 0.0 {
                 continue;
             }
             if em.geometry.kind == manifest::FxType::Emitter {
-                children::draw(self, i, era, eye, forward, assets, out);
+                children::draw(self, i, era, eye, forward, zoom, assets, out);
                 continue;
             }
             if em.geometry.blend == manifest::FxBlend::Blur {
@@ -1017,6 +1018,33 @@ impl Fx {
     /// [`Fx::submit`] with `extra` draws sorted into the same list — the
     /// muzzle flashes (`SoldierVisuals::flash_draws`).
     pub fn submit_with(&mut self, r: &mut Renderer, camera: &Camera, extra: Vec<ParticleDraw>) {
+        self.submit_zoomed(r, camera, 1.0, extra);
+    }
+
+    /// Submit a battle frame with camera zoom and attached trail heads at the
+    /// same interpolated positions as the in-flight models. Tick frames remain intact.
+    pub fn submit_walk(
+        &mut self,
+        r: &mut Renderer,
+        camera: &Camera,
+        walk: &WalkSim,
+        extra: Vec<ParticleDraw>,
+    ) {
+        let saved = self.drawn_round_frames(&walk.sim);
+        self.submit_zoomed(r, camera, walk.zoom_s, extra);
+        for (index, frame) in saved {
+            self.live[index].frame = frame;
+        }
+    }
+
+    /// Submit with the camera's PS2 zoom scale (particle far fade and density).
+    pub fn submit_zoomed(
+        &mut self,
+        r: &mut Renderer,
+        camera: &Camera,
+        zoom: f32,
+        extra: Vec<ParticleDraw>,
+    ) {
         let mut out = extra;
         let lift = self.ride_the_water(crate::water_anim::clock(r.water_time) as f32);
         if let Some(lib) = &self.library {
@@ -1027,18 +1055,31 @@ impl Fx {
                 models: &mut self.models,
             };
             for e in &self.live {
-                e.draws_with(camera.position, camera.forward(), &mut assets, &mut out);
+                e.draws_with(
+                    camera.position,
+                    camera.forward(),
+                    zoom,
+                    &mut assets,
+                    &mut out,
+                );
             }
             self.chunks.draws(
                 lib.era,
                 camera.position,
                 camera.forward(),
+                zoom,
                 &mut assets,
                 &mut out,
             );
             for attached in &self.attached {
                 if let Some(effect) = &attached.live {
-                    effect.draws_with(camera.position, camera.forward(), &mut assets, &mut out);
+                    effect.draws_with(
+                        camera.position,
+                        camera.forward(),
+                        zoom,
+                        &mut assets,
+                        &mut out,
+                    );
                 }
             }
             let sheet = assets.texture(ripple::TEXTURE);

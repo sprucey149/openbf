@@ -44,6 +44,8 @@ mod pad_build_input;
 mod pad_respawn;
 mod pickup_seek;
 mod resupply_feedback;
+mod rocket_expiry;
+mod rocket_visible;
 mod rocket_weakspot;
 mod roster;
 mod route_patch;

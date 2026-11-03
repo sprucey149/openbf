@@ -211,13 +211,14 @@ pub(super) fn fired_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
         }
     }
     if ord.kind == OrdKind::Shell {
-        // Its fall, and its burst when its life runs out in the air
-        // (re-ordnance-kinds §6).
+        // Only shells have this fall (re-ordnance-kinds §6).
         ord.gravity = db.prop_f32(ord_name, "Gravity").unwrap_or(0.0);
-        ord.expire = db
-            .prop(ord_name, "ExplosionExpire")
-            .and_then(|e| explosion_class(db, e));
     }
+    // Base ordnance expiry, shared by every family (B1 FUN_00272e98,
+    // B1:195363–195367; B2 FUN_0030f988, B2:301804–301833).
+    ord.expire = db
+        .prop(ord_name, "ExplosionExpire")
+        .and_then(|e| explosion_class(db, e));
     ord
 }
 

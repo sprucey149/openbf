@@ -2199,7 +2199,7 @@ impl winit::application::ApplicationHandler for App {
                             if let Some(w) = self.weather.as_mut() {
                                 particles.extend(w.frame_draws(r, &camera, tracked_velocity(walk)));
                             }
-                            self.fx.submit_with(r, &camera, particles);
+                            self.fx.submit_walk(r, &camera, walk, particles);
                         }
                         None => {
                             r.set_leaf_time(None);

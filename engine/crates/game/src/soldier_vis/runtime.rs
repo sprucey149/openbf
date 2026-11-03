@@ -1237,6 +1237,15 @@ impl SoldierVisuals {
             .collect()
     }
 
+    /// Loaded in-flight model for a registered weapon class, for draw diagnostics.
+    pub fn ordnance_model(&self, class: usize) -> Option<&WeaponAsset> {
+        self.grenades
+            .get(class)
+            .copied()
+            .flatten()
+            .and_then(|i| self.weapons.get(i))
+    }
+
     /// The hand weapon of every drawn unit, at the posed `hp_weapons` bone:
     /// `unit × palette[hp] × bind_global[hp]` (palette = global × inverse bind).
     pub fn weapon_draws(&self, walk: &WalkSim) -> Vec<render::DrawCmd> {

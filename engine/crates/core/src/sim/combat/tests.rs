@@ -1022,6 +1022,74 @@ fn a_pellet_landing_in_its_first_update_does_its_full_damage() {
 }
 
 #[test]
+fn explosion_expire_is_independent_of_flight_kind_and_uses_final_position() {
+    for kind in [
+        crate::weapon::OrdKind::Other,
+        crate::weapon::OrdKind::Beam,
+        crate::weapon::OrdKind::Lobbed,
+        crate::weapon::OrdKind::Missile,
+        crate::weapon::OrdKind::Shell,
+    ] {
+        for authored in [false, true] {
+            let mut sim = Sim::empty(42);
+            sim.heightfield = Some(flat_ground());
+            let mut weapon = crate::weapon::WeaponClass::bf1_rifle();
+            weapon.ordnance.kind = kind;
+            weapon.ordnance.expire = authored.then_some(crate::weapon::ExplosionClass {
+                damage: 20.0,
+                damage_inner: 2.0,
+                damage_outer: 3.0,
+                ..Default::default()
+            });
+            let class = sim.add_weapon_class(weapon);
+            let victim = sim.spawn(&UnitSpec::trooper(1, Vec3::ZERO)).unwrap();
+            let hp = sim.unit(victim).unwrap().health.cur;
+            let b = Bolt {
+                visual_shot: None,
+                pos: Vec3::Y,
+                vel: Vec3::Z,
+                remaining: 0.0,
+                age: 1.0,
+                owner: UnitHandle { index: 100, gen: 0 },
+                team: 0,
+                weapon_class: class,
+                hit: Hit::None,
+                end: Vec3::Z * 100.0,
+                shooter_is_player: true,
+                hulls: crate::collision::HullFilter::Static,
+                hit_mult: 1.0,
+                gravity: 0.0,
+                charge: 1.0,
+                missile: None,
+                fat: None,
+            };
+            sim.resolve_bolt(&b);
+            assert_eq!(
+                sim.unit(victim).unwrap().health.cur < hp,
+                authored,
+                "{kind:?}"
+            );
+            let bursts: Vec<_> = sim
+                .events
+                .iter()
+                .filter_map(|e| match e {
+                    Event::OrdnanceExpired { pos, weapon_class } => Some((*pos, *weapon_class)),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                bursts,
+                if authored {
+                    vec![(b.pos, class as u32)]
+                } else {
+                    vec![]
+                }
+            );
+        }
+    }
+}
+
+#[test]
 fn round_contact_metadata_does_not_change_sim_hash_or_damage_bookkeeping() {
     let (mut round, attacker, victim) = duel();
     let (mut other, _, _) = duel();

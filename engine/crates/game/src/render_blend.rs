@@ -9,9 +9,10 @@
 //! feet, yaw and pitch (the chase camera hangs off them, so the camera blends
 //! too), each vehicle's place and turn, its guns' looks (and their aimers) and a walker's
 //! aim, and the camera's zoom ease (`zoom_s`, `zoom_fov_mix`) and its collision's
-//! stored pull-in (`cam_pull`). Not blended: the
+//! stored pull-in (`cam_pull`), and modelled projectiles
+//! (position and flight direction, matched by producer identity). Not blended: the
 //! door / station animations (they step with
-//! their ticks), the bolts (their own blend, `BoltVis::draws`), effects and
+//! their ticks), ribbon bolts (their own blend, `BoltVis::draws`), effects and
 //! the soldiers' animation clocks (already advanced by the frame's dt).
 //!
 //! A unit or vehicle snaps - drawn where the tick left it, no blend - when
@@ -25,6 +26,8 @@
 //! (the tick, the black box, a menu action): no tick ever sees a blended
 //! value, so the sim hash is the same with or without it.
 
+#[cfg(test)]
+mod projectile_tests;
 mod walker;
 pub use walker::WalkerPose;
 
@@ -80,6 +83,17 @@ pub struct ItemPose {
     pub up: Vec3,
 }
 
+/// A modelled projectile's presentation pose; its slot is only used to write
+/// the captured frame back. Matching across ticks uses its launch identity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProjectilePose {
+    index: usize,
+    key: crate::bolt_vis::Key,
+    age: f32,
+    pos: Vec3,
+    vel: Vec3,
+}
+
 /// Everything the blend reads and writes, as one tick left it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Pose {
@@ -88,6 +102,7 @@ pub struct Pose {
     pub droids: Vec<ItemPose>,
     pub turrets: Vec<ItemPose>,
     pub guided: Vec<(u64, Vec3, Quat, f32)>,
+    pub projectiles: Vec<ProjectilePose>,
     pub zoom_s: f32,
     pub zoom_fov_mix: f32,
     pub cam_place: Option<(f32, Vec3)>,
@@ -168,6 +183,26 @@ impl Pose {
         self.guided.clear();
         self.guided
             .extend(walk.sim.guided.iter().map(|r| (r.id, r.pos, r.rot, r.bank)));
+        self.projectiles.clear();
+        self.projectiles.extend(
+            walk.sim
+                .bolts
+                .iter()
+                .enumerate()
+                .filter(|(_, b)| {
+                    walk.sim
+                        .weapon_classes
+                        .get(b.weapon_class)
+                        .is_some_and(|w| w.ordnance.geometry.is_some())
+                })
+                .map(|(index, b)| ProjectilePose {
+                    index,
+                    key: crate::bolt_vis::key(b),
+                    age: b.age,
+                    pos: b.pos,
+                    vel: b.vel,
+                }),
+        );
         self.zoom_s = walk.zoom_s;
         self.zoom_fov_mix = walk.zoom_fov_mix;
         self.cam_place = walk.cam_place;
@@ -217,6 +252,11 @@ impl Pose {
         for (r, p) in walk.sim.guided.iter_mut().zip(&self.guided) {
             if r.id == p.0 {
                 (r.pos, r.rot, r.bank) = (p.1, p.2, p.3);
+            }
+        }
+        for p in &self.projectiles {
+            if let Some(b) = walk.sim.bolts.get_mut(p.index) {
+                (b.pos, b.vel) = (p.pos, p.vel);
             }
         }
         walk.zoom_s = self.zoom_s;
@@ -328,6 +368,24 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
             r.2 = p.2.lerp(r.2, t).normalize();
             r.3 = mix(p.3, r.3, t);
         }
+    }
+    let mut previous: Vec<_> = prev.projectiles.iter().collect();
+    for o in &mut out.projectiles {
+        let Some(i) = previous.iter().position(|p| {
+            let same = if o.key.5.is_some() {
+                // A shell's changing velocity is part of the fallback key;
+                // native producer provenance survives it and slot compaction.
+                (p.key.0, p.key.1, p.key.2, p.key.5) == (o.key.0, o.key.1, o.key.2, o.key.5)
+            } else {
+                p.key == o.key
+            };
+            same && (p.age + core::TICK_DT - o.age).abs() < 1e-5
+        }) else {
+            continue;
+        };
+        let p = previous.remove(i);
+        o.pos = mix3(p.pos, o.pos, t);
+        o.vel = mix3(p.vel, o.vel, t);
     }
     out.zoom_s = mix(prev.zoom_s, cur.zoom_s, t);
     out.zoom_fov_mix = mix(prev.zoom_fov_mix, cur.zoom_fov_mix, t);

@@ -102,6 +102,7 @@ fn geometry_and_child_geometry_draw_meshes_with_the_particle_transform() {
         effect.draws_with(
             Vec3::new(0.0, 0.0, 10.0),
             Vec3::NEG_Z,
+            1.0,
             &mut Assets,
             &mut out,
         );

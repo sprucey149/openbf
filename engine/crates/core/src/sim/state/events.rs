@@ -164,6 +164,12 @@ pub enum Event {
         pos: Vec3,
         cue: crate::droideka::Cue,
     },
+    /// Authored ExplosionExpire at the final flight position; effects and sound
+    /// resolve this class separately from its impact explosion.
+    OrdnanceExpired {
+        pos: Vec3,
+        weapon_class: u32,
+    },
     BoltExpired {
         pos: Vec3,
         /// The bolt STRUCK something at `pos` — the terrain sheet, a world

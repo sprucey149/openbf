@@ -168,7 +168,7 @@ impl ReplayFrame {
         if let Some(w) = self.weather.as_mut() {
             particles.extend(w.frame_draws(r, &cam, glam::Vec3::ZERO));
         }
-        self.fx.submit_with(r, &cam, particles);
+        self.fx.submit_walk(r, &cam, walk, particles);
         draws.extend(game::squad_vis::squad_draws(
             &walk.sim,
             0,
@@ -353,6 +353,9 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             ),
             Event::Kill { shooter, victim } => {
                 format!("{tick},kill,{},{},\n", shooter.index, victim.index)
+            }
+            Event::OrdnanceExpired { weapon_class, .. } => {
+                format!("{tick},air_burst,,{weapon_class},\n")
             }
             Event::BoltExpired { struck, .. } => format!("{tick},expire,,,{}\n", *struck as u8),
             // Render-only, and the expire / hit line already records it.

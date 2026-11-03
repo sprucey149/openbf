@@ -80,8 +80,9 @@ pub struct ViewTerms {
     pub size_mul: f32,
 }
 
-pub fn view_terms(d: f32, bounding_radius: f32) -> ViewTerms {
-    let far = far_distance(bounding_radius);
+pub fn view_terms(d: f32, bounding_radius: f32, zoom: f32) -> ViewTerms {
+    // Camera scale (B1 FUN_002b8750, B1:245811–245815).
+    let far = far_distance(bounding_radius) * zoom;
     let fade = if d > 0.8 * far {
         1.0 - (d - 0.8 * far) / (0.2 * far)
     } else {
@@ -373,10 +374,10 @@ mod tests {
             ),
             (50.0, 150.0, 150.0, 500.0)
         );
-        let t = view_terms(10.0, 5.0);
+        let t = view_terms(10.0, 5.0, 1.0);
         assert_eq!((t.fade, t.level, t.size_mul), (1.0, 0, 1.2));
         // d = 45 of D = 50: fade = 1 − 5/10 = 0.5; lod = (45 − 25)·4/30 = 2.667.
-        let t = view_terms(45.0, 5.0);
+        let t = view_terms(45.0, 5.0, 1.0);
         assert!((t.fade - 0.5).abs() < 1e-6);
         assert_eq!(t.level, 2);
         assert!((t.size_mul - (1.0 + 0.2 * 8.0 / 3.0)).abs() < 1e-5);
@@ -387,7 +388,17 @@ mod tests {
             "idx 2 goes next"
         );
         assert_eq!(t.alpha(0), t.fade);
-        let t = view_terms(1000.0, 30.0);
+        let scoped_near = view_terms(45.0, 5.0, 2.0);
+        assert_eq!(scoped_near.fade, 1.0);
+        assert_eq!(scoped_near.level, 1);
+        assert!((scoped_near.size_mul - (1.0 + 0.2 * 80.0 / 70.0)).abs() < 1e-6);
+        let scoped = view_terms(90.0, 5.0, 2.0);
+        assert_eq!(scoped.fade, 0.5);
+        // Thinning uses min(D*S, 90), not min(D,90)*S.
+        let lod = (90.0_f32 - 5.0 - 20.0) * 4.0 / 70.0;
+        assert_eq!(scoped.level, 3);
+        assert_eq!(scoped.size_mul, 1.0 + 0.2 * lod.clamp(1.0, 3.0));
+        let t = view_terms(1000.0, 30.0, 1.0);
         assert!(t.fade <= 0.0);
         assert_eq!(t.level, 3);
         assert!((t.size_mul - 1.6).abs() < 1e-6);

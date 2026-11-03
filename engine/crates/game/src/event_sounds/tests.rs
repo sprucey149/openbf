@@ -612,3 +612,23 @@ fn destroyed_stations_stop_chatter_and_play_their_death_explosion_sound_once() {
     assert!(station_asks(&w).is_empty());
     assert_eq!(sounds(&w), [("station_boom".into(), Vec3::ZERO)]);
 }
+
+#[test]
+fn air_expiry_uses_the_fired_class_expire_sound_once_at_the_final_position() {
+    let (mut walk, fired, held) = scene();
+    let mut e = ExplosionClass::default();
+    e.look.sound = Some("air_burst".into());
+    walk.sim.weapon_classes[fired].ordnance.expire = Some(e);
+    walk.sim.weapon_classes[held].ordnance.expire = None;
+    let pos = Vec3::new(10.0, 20.0, 30.0);
+    walk.sim.events = vec![Event::OrdnanceExpired {
+        pos,
+        weapon_class: fired as u32,
+    }];
+    assert_eq!(sounds(&walk), vec![("air_burst".into(), pos)]);
+    walk.sim.events = vec![Event::OrdnanceExpired {
+        pos,
+        weapon_class: held as u32,
+    }];
+    assert!(sounds(&walk).is_empty());
+}

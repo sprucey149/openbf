@@ -476,12 +476,14 @@ impl Sim {
                 self.bolt_explodes(b);
             }
             Hit::None => {
-                // A shell or a missile out of life bursts in the air with
-                // its ExplosionExpire (re-ordnance-kinds §4.3, §6).
-                if b.gravity > 0.0 || b.missile.is_some() {
-                    if let Some(e) = self.weapon_classes[b.weapon_class].ordnance.expire.clone() {
-                        self.explode(&e, b.pos, Some(b.owner), Some(b.team));
-                    }
+                // Base ordnance expiry applies to every flight family
+                // (B1 FUN_00272e98, B1:195363–195367; re-ordnance-kinds §3).
+                if let Some(e) = self.weapon_classes[b.weapon_class].ordnance.expire.clone() {
+                    self.explode(&e, b.pos, Some(b.owner), Some(b.team));
+                    self.events.push(Event::OrdnanceExpired {
+                        pos: b.pos,
+                        weapon_class: b.weapon_class as u32,
+                    });
                 }
                 self.events.push(Event::BoltExpired {
                     pos: b.end,
