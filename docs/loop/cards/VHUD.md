@@ -1,19 +1,11 @@
 ---
 id: VHUD
 title: No HUD in a turret or vehicle seat: the weapon readout, the reticle and the target box are built only on foot (`on_foot` in game/src/main/battle.rs hud_model); RE and draw the PS2's seat HUD (the seat weapon's ammo/heat, its reticle, the vehicle's health) for both games
-milestone: M3
-value: 4
-phase: re
-status: todo
-deps:
-files: engine/crates/game/src/main/battle.rs,engine/crates/ui/src/hud.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The maintainer's playtest 2026-10-28: "turrets and vehicles don't have the hud".
 

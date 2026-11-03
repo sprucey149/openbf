@@ -1,21 +1,11 @@
 ---
 id: WCLMB
 title: Does a PS2 AT-ST step onto HOT1's cp3 bunker? WALK's leg rays (terrain + buildings within LegRayHitLength above the feet, mask 0x90) lift the port's AT-ST ~7 m onto hoth_bldg_bunker bunker1 in two ticks; check on PCSX2 (BF2 HOT1, walk an AT-ST into the bunker) and, if the PS2 blocks it, find what does (the contact pass's place in the frame, C7's push-out, the layer the bunker is in)
-milestone: M2
-value: 3
-phase: capture
-status: blocked
-deps: WALK
-files:
-declares:
-needs: Restore PCSX2 toolkit and verified BF2 HOT1 human AT-ST capture inputs plus a working renderer; original bunker-side trial is still required.
-effort:
-branch:
-resume: 2026-10-25 05:25 UTC; capture input hold, 0/23 inspected paths present. No PS2 climb result or source change. Restore inputs, run side approach/control and current-main walker_drive; repeat after WCON lands. See reports/20261025_0525_card_WCLMB.md.
-created: 2026-09-29
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 game/examples/walker_drive bf2_hot1 imp_walk_atst (WALK, 2026-09-29): turning right from the pad, the AT-ST steps +3.2 m then +4.4 m onto hoth_bldg_bunker bunker1 (cp3, instance at -214, -2.7, 192), walks on its roof and drops off. Each lift is under LegRayHitLength 5 m, which re-walker §6 allows; the order of the contacts against the legs is [H] (§2), and moving the contacts first did not change it.
 

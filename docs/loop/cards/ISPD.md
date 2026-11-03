@@ -1,20 +1,10 @@
 ---
 id: ISPD
 title: Speed on a weak laptop: the game runs well on an Intel Iris Xe class machine (Surface Pro 8, i7-1185G7, 2880x1920) - measure where the time goes on this machine's iGPU, then fix the biggest costs in order
-milestone: M0
-value: 5
-phase: measure
-status: todo
-deps: ISPS,LODP
-files:
-declares:
-needs:
-effort:
-branch:
-resume: Table re-taken on main 8729cae after ISPF (README 'Update 2026-10-20': 52-79 fps at 2880x1920, 132-166 at 1080p on the iGPU) and the world fs priced by shader variants (x/*.wgsl, scratch binary reads OPENBF_X_SHADER: worktree openbf-wt/ispd-x-scratch, target lead_tmp/ispdx_target) -> card ISPS filed (value 5). NEXT after ISPS and LODP land: re-take the table (batch3.sh gating on load < 8 - the iGPU slows ~2x under the other lane's load), price BF1 grass (NAB1 6.6 ms at native: alpha-blend overdraw; try the sprite count and a cheaper fs) and per-vertex lighting (the PS2's VU1 way; lean 7.44 vs flat 2.26 ms on KAM1 is what is left), then state the final target (Acceptance 4) and close; fold in the maintainer's Surface CSV when he sends it.
-created: 2026-10-19
-first: 7
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 (the maintainer, 2026-10-19) On his Surface Pro 8 (i7-1185G7, Intel Iris Xe integrated graphics, 2880x1920 panel) some maps ran poorly: BF2 Geonosis well under 30 fps. The game must run well on that class of machine. This card is the render side and the whole-frame picture; the AI-CPU side is AITHK, the discs' LOD switch is LOD (first, it is ready).

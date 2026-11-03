@@ -1,20 +1,10 @@
 ---
 id: WGNXT
 title: BF1 command-walker pilots call for riders again when setting out after a captured-post stop
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK,WAIT4,CWAIT
-files: engine/crates/core/src/ai/command.rs, engine/crates/core/src/ai/ride/tests/post_setout_tests.rs, engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai/walker_drive.rs, engine/crates/core/src/ai/ride/tests/setout_call_tests.rs, engine/crates/core/src/ai/ride/tests/wait_call_tests.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/ai.rs, engine/CRATES.md
-declares: sim; sweep
-needs: (private workflow note omitted)
-effort:
-branch: main
-resume: Source4adacdc on main;48/48 natural scenes,7new groups,112ride/979core/398game+2ignored/fmt/all-target Clippy;12compiled mutants caught. Protect PASS; map8inherited missing paths/0unmapped/0stale. Full Acceptance1-5 and parent holds pending. reports/20261026_0520_card_WGNXT.md
-created: 2026-10-26
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why and inherited evidence
 A command walker's pilot stays seated at its post. When a teammate captures

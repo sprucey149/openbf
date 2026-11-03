@@ -1,19 +1,12 @@
 ---
 id: TOKN
 title: Hit tokens per human player by tier - a holder aims at him, the rest aim near misses; all fire stays real
-milestone: M3
-value: 5
-phase: done
-status: done
-deps: UNSN
-files: engine/crates/core/src/ai/tokn.rs; engine/crates/core/src/ai/tokn/tests.rs; engine/crates/core/src/ai/gunner_foot.rs; engine/crates/core/src/ai/state.rs; engine/crates/core/src/ai.rs; engine/crates/core/src/sim/state.rs; engine/crates/core/src/sim/step.rs; engine/crates/core/src/sim/combat.rs; engine/crates/core/src/sim/blast.rs; engine/crates/game/examples/arena.rs; analysis/bot-design.md
-declares: sim
-needs:
-effort:
-branch: botup
-resume:
-created: 2026-10-28
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
+
 ## Why
 Damage pacing (the user, 2026-10-28): each HUMAN player has a few attack tokens; a bot's shots at him can hit only
 while it holds one, the rest still shoot and miss near him, visibly and audibly. Scaled so each tier is clearly

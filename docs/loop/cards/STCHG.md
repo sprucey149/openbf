@@ -1,21 +1,10 @@
 ---
 id: STCHG
 title: AI seat gunners charge and release their charge weapons
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps: VTAI,BRSTU,TURR
-files: engine/crates/core/src/ai/gunner.rs, engine/crates/core/src/ai/gunner_foot.rs, engine/crates/core/src/ai/gunner_foot/tests.rs, engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/man/tests.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/seats/tests.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/sim/guns/tests.rs, engine/CRATES.md
-declares: sim; sweep; arena
-needs: decision — VTAT 60m scenes vs the port 49m sight (enemy never seen at 60m by any gun); BF1 AT-AT chin tap scene needs a pilot harness
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-25
-alpha: yes
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 A bot at a charge seat gun never presses FIRE, so it never fires. The shared

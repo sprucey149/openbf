@@ -1,19 +1,12 @@
 ---
 id: MINE
 title: Mines, time bombs and detpacks: the dispenser weapon (per-unit MaxItems), the placed mine entity (lands, arms, fires at an enemy's closest approach inside TriggerRadius; BF2 sticks and fires on contact), the time bomb (LifeSpan) and BF2's detonator (the next press sets the pack's trigger flag)
-milestone: M3
-value: 3
-phase: build
-status: parked
-deps: GREN
-files: engine/crates/core/src/mine.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/weapon/dispenser.rs,engine/crates/core/src/lib.rs,engine/crates/core/src/projectile.rs,engine/crates/core/src/soldier.rs,engine/crates/core/src/ai/arsenal.rs,engine/crates/core/src/sim.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/blast.rs,engine/crates/core/src/sim/ordnance.rs,engine/crates/core/src/sim/mines.rs,engine/crates/core/src/sim/mines/tests.rs,engine/crates/core/src/sim/repair.rs,engine/crates/game/src/roster.rs,engine/crates/game/src/roster/mines.rs,engine/crates/game/src/soldier_vis.rs,engine/crates/game/src/soldier_vis/runtime.rs,engine/crates/game/src/soldier_vis/grenade.rs,engine/crates/game/src/fx.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/tests/suite/placed_explosives.rs,engine/crates/game/tests/suite/main.rs,engine/crates/game/tests/suite/roster.rs,engine/crates/game/tests/data/class_kits.txt,scripts/rebake.sh
-declares: sim
-needs: review — local implementation and disc census available; fresh PCSX2 comparison and autoloop baseline gates remain outstanding
-effort:
-branch: main
-resume: 2026-10-29 implementation is already in public main through PR 55; fresh class-data tests pass. Preserve the live mine/detpack comparison hold; see the implementation report and reports/20261029_CLEANSE.md.
-created: 2026-09-30
+status: archived
+issue: 43
 ---
+
+Historical technical record. Recorded state before archival was `parked`. Current scope and ownership are on [issue #43](https://github.com/sprucey149/openbf/issues/43).
+
 ## Why
 `analysis/re-grenades.md` §5 (`[O]`, f0da5ad). The rocketeers' mines (both games), the engineers' detpacks and the
 Bothan's / Wookiee's time bombs are class equipment the PS2's class-select screen lists; they were missing at this card's original baseline. All of it is

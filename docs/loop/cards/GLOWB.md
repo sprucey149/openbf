@@ -1,20 +1,11 @@
 ---
 id: GLOWB
 title: BF2's HDR bloom: the halo around lamps, strips and lava on the 13 HDR maps (the glow's second half; GLOW landed the self-lit segments)
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: GLOW
-files: engine/crates/render/src/frame.rs, engine/crates/render/src/pipelines.rs, engine/crates/render/src/lib.rs, engine/crates/render/src/bloom.rs (new), engine/crates/render/src/bloom.wgsl (new), engine/crates/render/src/shader.wgsl, engine/crates/game/src/viewer/look.rs, engine/crates/game/src/viewer/scene.rs
-declares: goldens=maps/bf2_cor1.png,maps/bf2_dea1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png
-needs: environment restoration: restore 13 HDR-map bakes, MYG1/UTA1/POL1/KAM1 picture references and approved GPU gate device
-effort:
-branch:
-resume: 2026-10-24 09:20 UTC: planner prerequisite census; no implementation. Restore this card's inputs in lead_tmp/planner_20261024_0913/queue_preflight.json, recheck original acceptance/current-main baseline, then loopctl start for isolated build. Full CI and required gates remain; reports/20261024_0913_planner.md.
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why / Evidence / Acceptance
 - **Why:** on the PS2 every BF2 lamp, strip, skylight and lava sea on the 13 HDR maps carries a white halo; GLOW made the surfaces glow, the halo is still missing (MYG1's corridor strips, POL1's skylight, COR1's light columns, UTA1's hangar lamps).
 - **Evidence:** `analysis/re-glow.md` §2 [O]: luma601 of the half-scale frame >= GlowThreshold·255 (i.e. >= 2·GlowThreshold of display white BEFORE the clamp) → 4× down → NumBloomPasses×2 five-tap passes (tap weight int(int(MaxTotalWeight·127)·0.2)/128, taps at (±1,±1)·n/2 texels) → magnified and ADDED; σ ≈ 7.8 % of the screen height at 5 passes. Measured on MYG1 (§2.5): +16 frame luma, the cascade reproduces the PS2's bloom within ~10 %. Per-map numbers are baked: `manifest.hdr` (ManifestHdr, GLOW).

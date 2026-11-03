@@ -1,21 +1,11 @@
 ---
 id: VLOCK
 title: In-vehicle aim assist: BF2's lock-on for every seat weapon (the reversible default VTUR took from PLAN §Vehicles & space) — RE BF2's lock button and acquisition loop, then build it for riders
-milestone: M2
-value: 3
-phase: re
-status: blocked
-deps: VTUR
-files:
-declares:
-needs: Restore matching BF2 corpus and ELF for lock acquisition/button RE; restore live tools and real disc content for threshold/control trials.
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-09-29
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 VTUR recorded the call (FEEL_NOTES 2026-09-29): vehicles use BF2's lock-on, not BF1's magnet. Nothing is built: a seat weapon has no assist.
 

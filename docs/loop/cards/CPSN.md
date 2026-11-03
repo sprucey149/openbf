@@ -1,20 +1,11 @@
 ---
 id: CPSN
 title: Command post sounds: the hum by the owner's faction (kept by a neutralised post), the charge / discharge / dispute loop with the PS2's pitch ramp, the captured / lost one-shots
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/sounds.rs, engine/crates/game/src/classdb.rs, engine/crates/game/src/sounds.rs, engine/crates/game/src/post_sounds.rs (new), engine/crates/game/src/lib.rs, engine/crates/game/src/event_sounds.rs, engine/crates/game/src/main/windowed.rs
-declares: rebake=sounds
-needs: environment restoration: restore post class/sound bakes, bf1_nab1/bf2_uta1 missions and sndc/bf2_uta1_run2.csv
-effort:
-branch:
-resume: 2026-10-24 09:20 UTC: planner prerequisite census; no implementation. Restore this card's inputs in lead_tmp/planner_20261024_0913/queue_preflight.json, recheck original acceptance/current-main baseline, then loopctl start for isolated build. Full CI and required gates remain; reports/20261024_0913_planner.md.
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 A command post is silent in the port. On the PS2 every owned post hums, a capture is heard as a rising loop, and a
 finished capture or loss plays a one-shot at the post. RE: `analysis/re-ambience-music.md` section 4 (8a35a92).

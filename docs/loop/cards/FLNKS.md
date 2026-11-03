@@ -1,21 +1,11 @@
 ---
 id: FLNKS
 title: Flank share per attack: the board gives the Flank role to about 0.6 of the drawn share in battle (11.4 % of eligible attacks vs 20.1 % drawn; 82 % of its groups are under 3) - give the share per attack start, count every role end, and test the 20 rules the audit's mutations passed (AUDIT FLNK)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/ai/team.rs, engine/crates/core/src/ai/team/tests.rs, engine/crates/core/src/ai/route.rs, engine/crates/core/src/sim/state.rs
-declares: sim; sweep; arena
-needs: (private workflow note omitted)
-effort:
-branch:
-resume: 2026-10-24 07:45 UTC cloud preflight blocked before implementation. Restore engine/assets_baked maps/common/classes/vehicles, engine/missions and lead_tmp/audit-flnk tools/obs_patch.py, epi.py, mk_mut.py, mut_run_nolock.sh, raw sw/obs_b1/obs_b2 and wf/MJ1-3. Verify prerequisites before clearing needs/set todo. Reproduce current-main share/B11/recycle/stall baseline; start isolated FLNKS build, null-prove instrumentation, implement per-attack share and complete role-end accounting/Cover exclusion, mutation-check all listed rules. Require 32-map x 8-seed share within 2 points pooled and 5 on 28 maps, B11 <=15.96 percent, main-plus-noise flank stalls/recycles, Normal and Hard 256/256 and full landing gates. See reports/20261024_0745_card_FLNKS.md.
-created: 2026-10-20
-alpha: yes
-acceptance: 
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT FLNK (2026-10-20, PARTLY): the maintainer's decision 5 is "flankers 20 % per match, drawn between 10 and 30". In battle the team board gives the Flank role to about 0.6 of the drawn share. Of the attacks from a post with a flank route, 11.4 % get the role, against a mean drawn share of 20.1 % (obs_b1, 8 seeds x 32 maps; 11.9 % vs 20.2 % with 24 more seeds on five maps). Within the board's own groups, holders are 13.8 % of members against 20.1 % drawn, and every one of the 32 maps is below its drawn share (5 % on KAM1 / TAT2, at best 18.6 % on HOT1). The cause: the cap is round(share x group) over the group present at a 1 Hz board pass, and 82 % of group samples have fewer than 3 members (mean 1.75), so they get 0. Across maps, the share of small groups goes with the realized share at r -0.89. The acceptance test (2 of a static group of 10) passes on a group the battle almost never forms. Also: 35 of the 44 valid audit mutations of the card's rules pass every test; about 20 of them change battle behaviour.
 

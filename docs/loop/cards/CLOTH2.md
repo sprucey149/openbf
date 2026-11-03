@@ -1,20 +1,10 @@
 ---
 id: CLOTH2
 title: BF2 cloth slice 2: the PS2's cloth step on the CPU - Verlet with gravity -9.8, the frame's inertia (Dampening x its acceleration), drag and random wind along the normals, three distance lists, sphere / cylinder / box pushes off the COLL shapes, 1 iteration, dt <= 0.039 - so skirts and capes swing as on the PS2 (analysis/re-cloth.md 4)
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: CLOTH
-files: engine/crates/game/src/cloth.rs (new), engine/crates/game/src/soldier_vis.rs, engine/crates/manifest/src/lib.rs, engine/crates/bake/src/soldier.rs, engine/CRATES.md
-declares:
-needs: environment — restore BF2 cloth inputs/recorded poses, real bakes, PS2 reference/capture tools and approved GPU gate device; see lead_tmp/cloth2_20261024_0905/inventory.json
-effort:
-branch:
-resume: Preflight blocked before implementation: 26/29 paths absent; report reports/20261024_0908_card_CLOTH2.md. Restore named raw cloth tools/RAM capture and BF2 IMP/REP inputs, record running snowtrooper pose sequence, rebuild real assets and restore approved GPU/reference checks. Then isolated loopctl start CLOTH2, implement re-cloth 4 CPU step and bake/runtime uploads; mutation-check replay, measure hem 0.1-0.4m and no cylinder penetration, view PS2/port running pair, full gates. Acceptance unchanged; no source edits or landing.
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Card CLOTH draws the cloths pinned rigid in their rest shape. On the PS2 they are simulated while drawn: the HOT1 save

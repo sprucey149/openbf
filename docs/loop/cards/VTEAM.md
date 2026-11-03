@@ -1,18 +1,10 @@
 ---
 id: VTEAM
 title: The vehicle's live team as the PS2 keeps it: team 0 (neutral) when empty for ordinary classes, the last entrant's in ANY seat while occupied, command vehicles never neutral, the pad's team kept apart as a home team; plus VENT's audit gaps (per-class HealthType, despawn paths unseat)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VENT
-files: engine/crates/core/src/vehicle.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/sim/spawn.rs,engine/crates/game/src/vehicle_class.rs,analysis/re-vehicles.md
-declares:
-needs:
-branch: vteam
-resume: landed d58652a 2026-09-26; report reports/20260926_1032_build_VTEAM.md
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 AUDIT 2026-09-25 of VENT (ceb27c6) → PARTLY (`engine/artifacts/loop/audits.md`, report

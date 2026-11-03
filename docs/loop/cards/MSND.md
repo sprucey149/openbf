@@ -1,20 +1,10 @@
 ---
 id: MSND
 title: Mission data still unconsumed: `spawn_delay`/`spawn_interval` into `SpawnWaves`, `attacking_team`, the per-team alive-AI cap on BF1 kas1/kas2/nab2, the locals teams
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/mission.rs, engine/crates/core/src/announcer.rs, engine/crates/core/src/battle.rs, engine/crates/game/src/announce.rs, engine/crates/game/src/main/battle.rs, engine/crates/game/examples/round_to_outcome.rs
-declares:
-needs: cloud prerequisites: branch msnd, baked assets, missions and reference evidence absent
-effort:
-branch: msnd
-resume: (private workflow note omitted)
-created: 2026-09-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## The maintainer's decision (2026-09-25)
 The locals teams do what the PS2 does (infinite tickets per `analysis/re-tickets-spawn.md` §2.1). No design call needed.

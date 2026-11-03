@@ -1,20 +1,10 @@
 ---
 id: SPTH
 title: BF2 Kamino: cp2's bots spawn on the wrong path - the conquest script moves the post's SpawnPath to cp2_spawn at run time (12 nodes) and the port keeps the world data's path33 (10 nodes, 3-10 m away): PS2 60 of 60 starts at cp2_spawn nodes, port 249 of 250 at path33's. Plus the three parts of the spawn draw the BSPN audit found no test for
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: scripts/gen_missions.py,engine/crates/game/src/mission.rs,engine/crates/game/src/layout.rs,engine/crates/game/src/walk.rs,engine/crates/core/src/sim/spawn.rs
-declares: sim; sweep; arena; leak
-needs:
-effort:
-branch:
-resume: 20261024_0820 UTC cloud preflight blocked: 24 reference/tool/content/GPU paths missing; restore reports/20261024_0820_card_SPTH.json inputs, decode conquest SetProperty census and establish current-main cp2 baseline before loopctl start SPTH. No implementation or acceptance run.
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Found by the audit of card BSPN (2026-10-12, `loop/audits.md`), which checked "a bot spawns as the PS2's does" against PS2 captures. The maintainer plays BF2 Kamino; at post cp2 the port's bots appear at ten spots the PS2 never uses, 3 to 10 m from where the PS2's appear.

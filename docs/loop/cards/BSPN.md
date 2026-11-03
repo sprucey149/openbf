@@ -1,20 +1,10 @@
 ---
 id: BSPN
 title: A bot spawns as the PS2's does (the maintainer, 2026-10-07): it first draws one eligible post at random, then one of THAT post's spawn nodes at random - today the port draws from a flat list of every node of every eligible post, so a post with more nodes takes more spawns
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/spawn.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/unit.rs, engine/crates/core/src/cp.rs, engine/crates/game/src/layout.rs, engine/crates/game/src/walk.rs, engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep; arena; leak
-needs:
-effort:
-branch: bspn
-resume: landed 2d1fb60a 2026-10-12
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-07, after reading how the port and the PS2 choose a spawn: "make the bot spawn the same as the ps2: first picks a cp available at random, then in that cp it picks a node available at random."

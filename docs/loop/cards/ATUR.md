@@ -1,19 +1,11 @@
 ---
 id: ATUR
 title: The BF2 sniper's portable auto-turret: the dispenser throws a `portableturret` that falls, lands upright, turns on the nearest enemy by its stationary controller, fires its cannon in salvos inside MaxRange, takes damage by BuildingScale, expires at its Lifetime and is replaced past MaxItems
-milestone: M3
-value: 3
-phase: build
-status: parked
-deps: REMOTE
-files: engine/crates/core/src/autoturret.rs,engine/crates/core/src/autoturret/tests.rs,engine/crates/core/src/lib.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/mine.rs,engine/crates/core/src/remote.rs,engine/crates/core/src/projectile.rs,engine/crates/core/src/ai/abilities.rs,engine/crates/core/src/ai/hover_drive.rs,engine/crates/core/src/sim.rs,engine/crates/core/src/sim/turrets.rs,engine/crates/core/src/sim/turrets/tests.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/sim/blast.rs,engine/crates/core/src/sim/mines.rs,engine/crates/core/src/sim/remotes.rs,engine/crates/core/src/sim/pickups.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/sim/ordnance.rs,engine/crates/core/src/sim/repair.rs,engine/crates/game/src/roster.rs,engine/crates/game/src/roster/turrets.rs,engine/crates/game/src/soldier_vis/runtime.rs,engine/crates/game/src/render_blend.rs,engine/crates/game/src/fx.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/tests/suite/auto_turrets.rs,engine/crates/game/tests/suite/main.rs,engine/crates/game/tests/suite/roster.rs,engine/crates/game/tests/data/class_kits.txt,engine/crates/core/src/ai/arsenal.rs,engine/crates/mungefs/src/model.rs,engine/crates/bake/src/soldier/output.rs,engine/crates/bake/src/main.rs,engine/crates/bake/src/glb.rs,engine/crates/game/src/assets.rs,engine/crates/game/src/assets/mesh.rs,engine/crates/game/src/viewer/upload.rs,engine/crates/game/src/hud_feed.rs,engine/crates/ui/src/hud_tree.rs,engine/crates/ui/src/hud_draw.rs,engine/crates/render/src/hud.rs,scripts/rebake.sh
-declares: sim
-needs: review — local implementation and disc census available; a live PCSX2 comparison (throw arc, landing, aim feel, expiry / replacement explosion) remains outstanding
-effort:
-branch: main
-resume: 2026-10-28 local implementation on main, revised after the user's playtest (look, hover, HUD icon, bot spam), not committed; see docs/loop/reports/20261028_ATUR.md. No upstream landing or live PCSX2 capture.
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
+
 ## Why
 `analysis/re-portable-turret.md` (`[O]`), issue #45. Every BF2 sniper carries a portable auto-turret in slot 4, channel
 1; the class kit dropped the slot (14 classes counting variants).

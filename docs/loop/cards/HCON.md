@@ -1,18 +1,11 @@
 ---
 id: HCON
 title: Hover contacts and two missed drive terms (HOVR audit): the terrain contact bounded to a real sphere-surface hit with the cut test at the sphere (POL1's hangar AAT is catapulted where the PS2 holds it still); contacts re-queried after each push-out as FUN_00160da8 does (the TAT1 skiff pops 5.2 m at spawn); re-hover §6.19 g = 0 for SetAltitude <= 0; §6.10's BoostSpeed turn scale (live on every BF2 hover)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps:
-files: core/src/sim/vehicles.rs,core/src/vehicle/hover.rs,core/src/vehicle/hover/tests.rs,game/src/vehicle_class.rs,CRATES.md
-declares: sweep
-needs:
-branch: hcon
-resume: landed f2fdcda7 2026-09-28
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The HOVR audit (2026-09-28, PARTLY) found the transcription of BF2's integrator faithful, but four gaps that change what a player sees:
 1. **Terrain contact.** WorldContacts (sim/vehicles.rs) treats the heightfield as an unbounded half-space: depth = r - (c.y - h)*n.y for ANY sphere below the surface, and it tests is_cut at (c.x, h, c.z), the surface point, not at the sphere. At POL1 hangerdockcon the hangar floor is at y 10.2 under the asteroid's terrain (h 18.6-21.2). The rear spring sphere gets depth 8-9 m, and K5 pushes the vehicle out by depth - len. The AAT is flung 8.4 m up and 5.6 m sideways; the combat speeder is flung 12.5 m up and 28 m sideways. PS2 RAM holds the AAT still at (97.99, 10.79, -102.0) in bf2_pol1_sideselect/spawnmap.

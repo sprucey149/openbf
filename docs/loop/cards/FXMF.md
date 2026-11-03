@@ -1,19 +1,10 @@
 ---
 id: FXMF
 title: Muzzle flash: draw the PS2's flash MODEL (muzzleflash / com_sfx_muzzleflash, additive, tinted FlashColor, scaled FlashRadius, fading over FlashLength) at every soldier-held gun's fire point (hp_weapons × the weapon's hp_fire) along the aim — analysis/re-muzzle-flash.md §8; replaces the PROVISIONAL quad
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/flash.rs (new), engine/crates/core/src/lib.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/fx.rs, engine/crates/game/src/soldier_vis.rs, engine/crates/game/src/bolt_vis.rs, engine/crates/bake/src/soldier.rs, engine/crates/bake/src/alpha.rs, engine/crates/manifest/src/lib.rs, engine/crates/render/src/particles.rs, engine/crates/render/src/particles.wgsl, engine/CRATES.md, engine/artifacts/loop/FEEL_NOTES.md
-declares: rebake=common,side
-needs:
-branch: fxmf
-resume: LANDED bd05f80 (report reports/20260930_1032_card_FXMF.md). Nothing left; ADDM/FXP4 carry the reuse notes.
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why (original)
 The muzzle flash is seen on every shot. It is NOT an `fx__` particle effect: `analysis/re-fx.md` §7 [V] — B1

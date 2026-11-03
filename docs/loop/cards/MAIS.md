@@ -1,19 +1,12 @@
 ---
 id: MAIS
 title: Mission AI settings - the scripts' view multiplier, team aggressiveness, snipe suitability distance and AI capture bans reach the bots
-milestone: M3
-value: 5
-phase: done
-status: done
-deps: BSTK
-files: scripts/gen_missions.py; engine/crates/game/src/mission.rs; engine/crates/core/src/sim/state.rs; engine/crates/core/src/sim/round.rs; engine/crates/core/src/cp.rs; engine/crates/core/src/commander.rs; engine/crates/core/src/ai/snipe.rs; engine/crates/core/src/ai/behave/brain.rs; engine/crates/core/src/ai/gunner.rs; engine/crates/core/src/ai/man.rs; engine/crates/game/src/main/battle.rs; engine/crates/game/examples/round_to_outcome.rs; engine/crates/game/examples/arena.rs
-declares: sim
-needs:
-effort:
-branch: botup
-resume:
-created: 2026-10-28
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
+
 ## Why
 The mission scripts set AI knobs that the mission RON dropped (`lead_tmp/botre/xbox_pc.md` finding 4): BF2 Dagobah's
 bots see 35 % as far and Felucia's 65 % on the PS2, and openbf's saw 100 %.

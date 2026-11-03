@@ -1,20 +1,11 @@
 ---
 id: VSUB
 title: Vehicles meet each building's VEHICLE subset, not its soldier subset: the port's hover (and walker) world contacts query Layers::SOLDIER, but the PS2 pairs a mover's building subset with the building's vehicle subset (B1 +0x98 / B2 +0x110; re-hover §13.3) — 7,967 of 22,258 base-world bodies are soldier-only (PS2 vehicles pass them: FEL1's foliage stalks, KAM1, UTA1, POL1, MYG1, COR1) and 1,477 vehicle-only (PS2 vehicles stop: FEL1's clump cylinders, BF1 KAS1, MYG1 walls, UTA1, BF1 NAB1's tree cylinders)
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/assets.rs,engine/crates/game/src/collision_layers.rs,engine/crates/core/src/collision/shape.rs,engine/crates/core/src/collision/world.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/game/examples/layer_census.rs,engine/crates/game/examples/hover_drive.rs
-declares: sweep
-needs: environment — Restore full 32-map bake/missions and HHUL subset/RAM census kit; verify walker layer from primary evidence.
-effort:
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Reproduce 22258/7967/1477 subset census and main FEL1/NAB1 contacts before changing masks. Keep parked-hover RAM, soldier-leak/golden and per-map sweep checks. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-09-30
-alpha: yes
+status: archived
+issue: 98
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #98](https://github.com/sprucey149/openbf/issues/98).
 
 ## Why
 From HHUL's RE (2026-09-30, analysis/re-hover.md §13.3 [O]). When a hover meets a building, the PS2 tests the hover's

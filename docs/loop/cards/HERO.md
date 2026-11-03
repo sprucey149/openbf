@@ -1,21 +1,11 @@
 ---
 id: HERO
 title: Heroes and lightsabers (M4, PLAN §Heroes): playable BF2 heroes and BF1 AI heroes on all content, killable, BF2's hero health pool from the disc with conquest time/damage drain and kill-heal — the saber combat, the hero spawn/possession flow
-milestone: M4
-value: 2
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore matching BF1/BF2 decompilations, ELFs and disc mission/class data; restore live hero reference tools/states for spawn, health and saber trials.
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-09-28
-defer: post-alpha
-tries: 1
+status: archived
+issue: 81
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #81](https://github.com/sprucey149/openbf/issues/81).
 
 ## Current health decision — 2026-10-30
 

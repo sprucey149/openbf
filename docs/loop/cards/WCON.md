@@ -1,20 +1,10 @@
 ---
 id: WCON
 title: A walker's body prim on the terrain, as the PS2's: a tauntaun or kaadu parked on a slope creeps downhill at 0.98 sin(slope) m/s and loses cos^2(slope) of every step on a climb (both games) - the port has no terrain contact for a non-foot prim and runs the walker's contacts after its legs, not between the fall and the legs
-milestone: M2
-value: 3
-phase: build
-status: blocked
-deps: WALKB1
-files: engine/crates/core/src/vehicle/walker.rs,engine/crates/core/src/vehicle/walker/tests.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/game/src/vehicle_class/walker.rs,engine/crates/bake/src/walker.rs
-declares: sweep; sim
-needs: Restore kaadu velocity rows, slope/rest census tools and NAB1/HOT1 side bakes/missions; parent-versus-branch three-pad vectors are the first referee.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 10/10 exact named paths absent. Restore kaadu velocity rows, slope/rest census tools and NAB1/HOT1 side bakes/missions; parent-versus-branch three-pad vectors are the first referee. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 On the PS2 a walker whose `TerrainCollision` lists a BODY primitive meets the terrain with it (`analysis/re-walker.md`

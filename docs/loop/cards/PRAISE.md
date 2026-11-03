@@ -1,21 +1,11 @@
 ---
 id: PRAISE
 title: Teammates' voices on the player's kill streaks ("glad you're on our side!"): trigger, radius, speaker, cooldown, lines per faction
-milestone: M4
-value: 4
-phase: re
-status: done
-deps: USND
-files:
-declares:
-needs:
-effort:
-branch:
-resume: MERGED into UVO2 by USND's RE 2026-10-13 (analysis/re-unit-chatter.md 3.3-3.5): the praise is BF2's HeadshotKill and KillingSpree4 / 8 VOSound events, fired for a human's kills only; the note at the card's end has trigger, speaker, cooldown, lines and the two open [H]s
-created: 2026-09-30
-defer: 
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-09-30 11:40: nearby teammates say things like "glad you're on our side!" after the player's kill
 streak, in both PS2 games. Filed so it is not lost; belongs with USND's unit voice work.

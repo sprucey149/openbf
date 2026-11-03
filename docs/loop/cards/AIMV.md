@@ -1,21 +1,10 @@
 ---
 id: AIMV
 title: Firing soldiers point the drawn barrel at the target: census moving/standing gun alignment and held-fire spins, trace the pose/facing/wrap cause and keep a mutation-checked referee
-milestone: M3
-value: 5
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: cloud prerequisites: baked soldiers/weapons/maps, missions, PS2 pose references and reproduction snapshot absent
-effort:
-branch:
-resume: PR2 c2453a6 implements a moving-aim candidate; restore snapshot BUILD and pose inputs, remeasure original barrel/shot and firing-spin census before choosing further fixes. Full Acceptance pending; planner report reports/20261026_0616_planner.md.
-created: 2026-10-24
-first: 5
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 The maintainer's 2026-10-22 report: firing while walking/strafing holds the gun sideways, some

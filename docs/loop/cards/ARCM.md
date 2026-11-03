@@ -1,19 +1,11 @@
 ---
 id: ARCM
 title: Failed-link memory (a bot's own for 60 s, its team's for the round) and a back-and-forth detector that fails the progress window early
-milestone: M3
-value: 5
-phase: done
-status: done
-deps: WHY
-files: engine/crates/core/src/ai/arcm.rs; engine/crates/core/src/ai/arcm/tests.rs; engine/crates/core/src/ai/mover.rs; engine/crates/core/src/ai/route.rs; engine/crates/core/src/nav.rs; engine/crates/core/src/ai/state.rs; engine/crates/core/src/sim/state.rs; engine/crates/core/src/sim/step.rs; engine/crates/core/src/ai/hover_drive.rs; engine/crates/core/src/ai/walker_drive.rs; engine/crates/game/src/unit_probe.rs; engine/crates/game/examples/round_to_outcome.rs; analysis/bot-design.md
-declares: sim
-needs:
-effort:
-branch: botup
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Recover's first rung (`analysis/bot-design.md` 6.3) re-plans from the hub the bot stands in, and nothing stopped it
 drawing the arc that had just failed: the authored table offers a second hop at only 0-2 % of entries. Nothing was

@@ -1,18 +1,10 @@
 ---
 id: VCLS
 title: Vehicle class data: bake each map's own entc PROPS (TAT1's skiff, BES1's cloud car) and read hover and seat props into typed structs with the PS2's constructor defaults
-milestone: M2
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/map.rs,engine/crates/game/src/classdb.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/tests/vehicle_class.rs
-declares: rebake=tat1,tat2,maps
-needs:
-branch: vcls
-resume:
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 A vehicle's drive and seat numbers live in its class props. Side classes are baked (hashes → strings) but nothing turns

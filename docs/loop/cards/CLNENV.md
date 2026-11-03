@@ -1,18 +1,10 @@
 ---
 id: CLNENV
 title: Isolate cleanse deletion self-test from inherited repository selection
-milestone: M0
-value: 2
-phase: cleanup
-status: done
-deps:
-files: scripts/cleanse_delete.sh
-declares:
-needs:
-branch:
-resume:
-created: 2026-10-26
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / evidence
 On bb974e5, `OPENBF_REPO="$PWD" bash scripts/cleanse_delete.sh --self-test`

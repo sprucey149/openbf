@@ -1,20 +1,12 @@
 ---
 id: VCOL
 title: No vertical collision response for soldiers (LEAK census classes ceiling + floor): push_out drops the vertical, so a jump puts the head through roofs, eaves and deck undersides (ceiling: 656-14,332 runs per map) and the axis crosses upward faces (floor: 429-9,283) — add a ceiling stop and find the floor crossings' mechanism (ground snap? a walkable slope the ground clamp does not lift onto?), fix, drive both counts down
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: LEAK
-files: engine/crates/core/src/sim/step.rs, engine/CRATES.md
-declares: leak; sweep; arena; sim
-needs: cloud prerequisites: branch vcol, baked assets, missions and reference evidence absent
-effort:
-branch: vcol
-resume: (private workflow note omitted)
-created: 2026-09-29
-alpha: yes
+status: archived
+issue: 98
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #98](https://github.com/sprucey149/openbf/issues/98).
+
 ## Why
 LEAK census classes: `ceiling` = the soldier's axis crossed a downward-facing SOLDIER face (n.y <= -0.5) between two ticks — a head through a roof, an eave, the underside of a deck or stair; `floor` = it crossed an upward-facing one (n.y >= 0.5). core/src/collision/walls.rs push_out's own doc: 'the vertical component dropped — floors are the ground query's job and ceilings are ignored' [V]. The maintainer's KAS2 hut (JWAL) shows ceiling runs round its roof as well.
 

@@ -1,20 +1,12 @@
 ---
 id: BOTV
 title: The redesigned bots are on main: re-take BOTM's table (8 seeds x 32 maps + the PS2 column) on main after every BOTD build card has landed and check each of BOTD's bars - the gate the maintainer set in front of PERF and UCNT (2026-10-02 17:40)
-milestone: M3
-value: 5
-phase: measure
-status: todo
-deps: SAIR,BOTD,JITR,FFLN,OBST,BOTM,FGHT,SPL11,HUBP,MOVR,LLEG,RETW,TPOS,TEAM,TURR,FLNK,GRAI,TIER,TCMP,LOC3,MOVR2,OBSF,OBST2,OBSV,OBSR,FGHTA,REACT,TGAP,GRAIA,MOUTH,DAGS,RLOOP,CLSE2
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-02
-alpha: yes
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
+
 ## Why
 The maintainer, INBOX 2026-10-02 17:40: "the bot programme (incl. every build card BOTD cuts) -> PERF -> UCNT ... do not hand out PERF before the redesigned bots are on main." BOTD closes when its note is written and its build cards are opened, long before they land; this card is the one place every bot build card is listed, so PERF and UCNT wait on ONE id and nobody has to remember to edit three dep lists.
 

@@ -1,20 +1,11 @@
 ---
 id: PROFSEAL
 title: Release builds keep the profile in a sealed (non-editable) format, so unlocks, awards and career numbers have to be earned; dev builds keep profile.ron
-milestone: release
-value: 2
-phase: design
-status: todo
-deps: UNLK3
-files: engine/crates/game/src/profile.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-28
-defer: release
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The maintainer 2026-10-28: "during this dev period, we can keep the profile as a ron file. But when we make this a full release
 game [...] we need to make the profile file unreadable and can't be edited [...] it removes the spirit of the game of

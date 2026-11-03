@@ -1,21 +1,12 @@
 ---
 id: DEKD
 title: Draw the droideka: bake cis_walk_droideka with its 12 clips and bodies, pose it by state (walk steps, fold, the spinning ball, unfold), the shield bubble, fold / unfold / step / engine sounds
-milestone: M1
-value: 4
-phase: build
-status: todo
-deps: DEKU
-files: engine/crates/bake/src/droideka.rs (new),engine/crates/bake/src/main.rs,engine/crates/game/src/droideka_vis.rs (new),engine/crates/game/src/soldier_vis.rs,engine/crates/game/src/assets.rs,scripts/rebake.sh,engine/goldens/deps.toml
-declares: rebake=side; goldens=(the new droideka sheet, named at build)
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-03
-alpha: yes
-first: 12
+status: archived
+issue: 85
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #85](https://github.com/sprucey149/openbf/issues/85).
+
 ## Why
 `analysis/re-droideka-unit.md` section 4 [O]: the model, its bank and its states are known; the port bakes neither. A unit the sim holds (DEKU) must be seen before it is fielded (DEKF).
 

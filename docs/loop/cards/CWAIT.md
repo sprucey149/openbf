@@ -1,21 +1,10 @@
 ---
 id: CWAIT
 title: A ground AI driver keeps its pickup wait while a teammate maintains a live boarding claim
-milestone: M3
-value: 4
-phase: build
-status: done
-deps: UTALK
-files: engine/crates/core/src/ai/ride/tests/claim_wait_tests.rs, engine/crates/core/src/ai/man.rs, engine/crates/core/src/squad.rs, engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai/behave/brain.rs, engine/crates/core/src/ai/hover_drive.rs, engine/crates/core/src/ai/walker_drive.rs, engine/crates/core/src/ai.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/vehicles.rs, engine/CRATES.md
-declares: sim; sweep
-needs:
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-25
-alpha: yes
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 A bot walks toward an empty gunner seat, repeatedly thinks and keeps its

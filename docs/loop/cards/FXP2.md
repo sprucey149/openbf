@@ -1,19 +1,10 @@
 ---
 id: FXP2
 title: Particle effects, part 2: game::fx runs the PS2 emitters (bursts, lifetime budget, 20 variants, Transformer closed forms) and draws PARTICLE/ANIMATED/BILLBOARD/SPARK/STREAK/GEOMETRY/EMITTER with the PS2 blends (re-fx §5-§6), replacing the placeholder quads
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: FXP1
-files: engine/crates/game/src/fx.rs,engine/crates/game/src/fx/emitter.rs,engine/crates/game/src/fx/draw.rs,engine/crates/render/src/particles.rs,engine/crates/render/src/particles.wgsl,engine/crates/render/src/frame.rs,engine/crates/render/src/lib.rs,engine/crates/game/src/viewer/scene.rs,engine/CRATES.md
-declares:
-needs:
-branch: fxp2
-resume: landed b4a5d5b3 2026-09-30
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 `game::fx` draws PROVISIONAL coloured quads; the PS2's effects are emitters with a well-defined runtime and draw

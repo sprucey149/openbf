@@ -1,20 +1,10 @@
 ---
 id: HTGT
 title: The target's name and health on the HUD: what you shoot at (soldier, droid, vehicle, turret) shows its health at the top, the bar dropping as you hit it with bullets, grenades or rockets, coloured by team (friend blue, enemy red, neutral white) - the PS2 BF2 HUD's Target element, every map of both games
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BHUD2
-files: engine/crates/core/src/sim/input.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim.rs, engine/crates/core/src/vehicle.rs, engine/crates/game/src/vehicle_pads.rs, engine/crates/game/src/event_feed.rs, engine/crates/game/src/blackbox.rs, engine/crates/game/examples/blackbox_read.rs, engine/crates/game/src/walk.rs, engine/crates/game/src/main/battle.rs, engine/CRATES.md
-declares: sim
-needs:
-effort:
-branch: htgt
-resume: landed 90132e1a 2026-10-21 (slices 1-3; phase 2 bookkeeping by hand: land.py refused 'nothing to commit' on the previous landing's stale goldens/QUANT.md - card LANDG; no golden moved this landing)
-created: 2026-10-20
-first: 11
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 (the maintainer, 2026-10-20) The originals show the health of what you are shooting at at the top of the screen and it drops as you hit it - soldiers, and vehicles you hit with bullets, grenades or rockets. The maintainer does not remember whether the PS2 needs a hit first, a reticle pass or a hold of about a second, nor whether BF1 does it; he wants it on every map of both games. Colours as he remembers: teammate blue, enemy red, neutral (a droid) white.

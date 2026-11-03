@@ -1,20 +1,10 @@
 ---
 id: TPOS
 title: Positions: a table of standable places with real cover built at map load (hints, barrier edges, hub points), a Tactician that scores and reserves them, and the PS2's hide / fire cycle at the position - replaces card HOLD's shuffle and strafe (bot design 4.1, 4.6)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,FGHT,OBST
-files: engine/crates/core/src/ai/tactic.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/commander.rs,engine/crates/core/src/ai.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: tpos
-resume: landed ce8975da 2026-10-19
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02: "no positional sense in a fight - bots hold in the open or pinball". `analysis/bot-design.md` 4.1 (the position table), 4.6 (the Tactician), 5. The PS2 takes Cover hints by their arrow, with no ray (SAIR 4.6: 21 % of attack time on Kamino, 49 % on Polis Massa); 103 of 185 posts have no covered Cover hint within 30 m, and points at the barriers' edges give 154 of 185 posts five or more covered positions (bot-design.md M6). The PS2's own bots stand within a metre of a barrier a quarter of their time and inside one under 1.2 % (M3).

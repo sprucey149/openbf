@@ -1,22 +1,10 @@
 ---
 id: FARS
 title: The far scene on the 13 maps with a drawn LOWR sheet: cull the heightfield (base + TALPH layers) at NearSceneRange[2] and draw the sheet past it, ruled map by map with PCSX2 pairs - KAS1's ~95%-holed sheet waits on FARC/REFL, POL1's dark shape, the sheet's live DATE mask and VU cull
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps: REDB
-files:
-declares:
-needs: environment — Restore the 13 maps, original PCSX2 states/pairs and REDB raw sweep; validate DATE and winding before per-map policy.
-effort:
-branch:
-resume: Persistent prerequisite hold (2026-10-25): 70/70 inventoried inputs absent. Restore inputs and follow reports/20261025_0301_card_FARS.md; resolve map-by-map pairs, DATE and one-sidedness before implementation. No flag/default change; original Acceptance unpassed. Wait for restoration before retry.
-created: 2026-09-29
-defer: post-alpha
-value_pre_alpha: 4
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Past `NearSceneRange[2]` the PS2 draws the `LOWR` sheet, never the heightfield (`re-lowr.md` §0.2 [V]). The port draws the

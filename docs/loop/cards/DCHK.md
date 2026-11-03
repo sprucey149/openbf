@@ -1,19 +1,11 @@
 ---
 id: DCHK
 title: Droid soldiers blow apart as the PS2's do (BF1 CW, BF2): a class with chunk geometry rolls ChunkFrequency 0.6 at every push call - no push and a sticky mark, or pushed with a dead one's health set to -4 - and again at its death: the chunk death (ExplosionName's effect at the body, the class's chunk thrown at 0.1 + 0.018 x overkill, no corpse) - today a droid is pushed every time and always leaves a corpse
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: KNOCK
-files: engine/crates/core/src/sim/blast.rs,engine/crates/core/src/sim/combat.rs,engine/crates/core/src/unit.rs,engine/crates/game/src/classdb.rs,engine/crates/game/src/roster.rs,engine/crates/game/src/soldier_vis.rs,engine/crates/bake/src/soldier.rs
-declares: rebake=side; sim; sweep; arena
-needs: environment — Restore soldier class/chunk bakes, both disc sources, missions and original KNOCK droid raw capture/PS2-state kit.
-effort:
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Retake current-main push/death and both-disc class census; preserve 1000-droid distribution, mark/death/overkill/corpse controls, PS2 chunk pair and paired 8x32 sweep. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-10-07
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 On the PS2 a battle droid near a blast often does not fly: 6 times in 10 it stands, and when it dies it bursts into
 its chunk with the droid explosion and leaves no body. The port (after KNOCK) pushes every droid and always leaves a

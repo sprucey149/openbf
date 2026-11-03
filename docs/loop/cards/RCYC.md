@@ -1,21 +1,10 @@
 ---
 id: RCYC
 title: The last-resort recycle: a bot that makes no NET progress for minutes is respawned, and every use is counted and listed as a defect to close (the maintainer, 2026-10-01: it should exist, and never be needed)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai.rs,engine/crates/core/src/sim/bounds.rs,engine/crates/game/examples/round_to_outcome.rs,scripts/sweep_seeds.py
-declares: sweep; arena
-needs:
-effort:
-branch: rcyc
-resume: landed 63fdcbac 2026-10-01
-created: 2026-10-01
-first: 2
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-01: "ideally the recycle one is not used, but it should be available in case a bot gets somehow stuck

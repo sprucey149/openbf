@@ -1,21 +1,11 @@
 ---
 id: PWST
 title: Health and ammo droids (powerupstation): a soldier by one is healed and re-supplied as on the PS2 - RE the station's reach, rate and team rule, then build it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/stations.rs, engine/crates/core/src/sim/stations/tests.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/pickups.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/classdb.rs, engine/crates/game/src/assets.rs, engine/crates/bake/src/turret_rig.rs, engine/crates/manifest/src/lib.rs, engine/crates/game/src/viewer/stations.rs, engine/crates/game/src/viewer/scene.rs, engine/crates/game/src/event_sounds.rs, engine/crates/game/src/fx.rs, engine/CRATES.md, engine/crates/game/src/sounds.rs, engine/crates/game/src/main/windowed.rs
-declares:
-needs:
-effort:
-branch: pwst
-resume: DONE: slices 1 (sim be94db1), 2 (draw d79666c) and 3 (chatter 3890c34) landed. Left for the planner: the vehicle droid's +1 clip waits for vehicle-gun reserves (the port's seat guns keep none; core/src/sim/stations.rs header); open [H]s: idle arm / socket pose, the 60 m viewport gate; tips -> TIPS, broken stations -> PWSTD. Independent re-powerup-station.md audit input hold: restore the report's 32 paths before retry (reports/20261025_0454_audit_re-powerup-station.md); no verdict earned.
-created: 2026-10-19
-alpha: yes
-first: 10
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 (the maintainer's INBOX 2026-10-19, the menus / gameplay list) The health and ammo droids (`powerupstation` objects at command posts and bases) are drawn but do nothing in the port: no code reads the class (`grep -i powerupstation engine/crates` is empty). On the PS2 a soldier who stands by one is healed and re-supplied; that is a player-visible rule on every map that places them.
 

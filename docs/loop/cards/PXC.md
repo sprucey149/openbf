@@ -1,18 +1,10 @@
 ---
 id: PXC
 title: The PCSX2 reference library: coverage gaps and the spots a fix needs (Phase 1 proven; batches 1-3 done)
-milestone: M1
-value: 2
-phase: capture
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: CLOSED by the planner 2026-09-30 (stale): the PXWA/PXWB walkabouts cover every post of all 32 maps; a spot a fix needs (open water, a high vantage) is captured by that card, and PARITY scores the library.
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

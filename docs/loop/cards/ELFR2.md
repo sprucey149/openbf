@@ -1,22 +1,11 @@
 ---
 id: ELFR2
 title: BF2 0x04 segments blend by texture alpha and BF1 Normal-class 0x04 words blend (re-material-flags 0.3 / 0.4 [V]) but the alpha census bakes them OPAQUE or MASK: POL1 / COR1 windows draw solid panes, YAV1's and BES1 / HOT1's holo screens solid green (merged: ELFR3)
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps: ELFR
-files: engine/crates/bake/src/alpha.rs,engine/crates/bake/src/map.rs
-declares: rebake=maps; goldens=(census the BF2 materials whose verdict changes first)
-needs: inputs — original material census, discs, PS2 captures and graphics validation
-effort:
-branch:
-resume: Restore census and original PS2 controls; first settle BF1 KAM1 crate/interior and RHN1 floor; census all BF2 changed draws before implementation. See reports/20261025_0056_card_ELFR2.md.
-created: 2026-09-29
-defer: post-alpha
-value_pre_alpha: 4
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 BF2's per-segment draw (`FUN_0058ed70`) composites every segment whose MTRL word has bit 0x04 (or c.a != 0xff, or draw
 flag 0x800000): ALPHA 0x44, Z test with no Z write, As = texture alpha x vertex alpha (`analysis/re-material-flags.md`

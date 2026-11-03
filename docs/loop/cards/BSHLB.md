@@ -1,19 +1,11 @@
 ---
 id: BSHLB
 title: The BF2 PS2 Instant Action screen and Session Options (card BSHL's RE): the iface_instant_action backdrop (top 448 rows), Planet / Mode / Era lists, the LAUNCH / ADD / REMOVE / OPTIONS stack, the info box and the Session Options stacks, with the port's maps, modes and era pairings - replacing the egui setup list
-milestone: M5
-value: 4
-phase: build
-status: blocked
-deps: BSHLA
-files: engine/crates/ui/src/shell.rs, engine/crates/ui/src/menu.rs, engine/crates/bake/src/shell.rs, engine/crates/game/src/main/windowed.rs
-declares: goldens=shell.png; rebake=common
-needs:
-effort:
-branch:
-resume: Restore BSHLB inputs listed in lead_tmp/bshlb_cloud/preflight.json; rerun preflight.py, measure Planet/Playlist outer rects from both PS2 frames BEFORE implementation, then start isolated build and run all four acceptance bars plus full gates. No source candidate or acceptance earned; reports/20261024_1132_card_BSHLB.md.
-created: 2026-10-20
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 BSHL's second screen: the PS2 BF2 Instant Action screen (`ifs_missionselect`) and Session Options replace today's
 egui setup list (`ui/src/shell.rs`, nine rows). `analysis/re-bf2-shell.md` §5, §9.6.

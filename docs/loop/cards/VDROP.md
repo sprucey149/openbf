@@ -1,20 +1,11 @@
 ---
 id: VDROP
 title: Hover bots drive by the PS2's law (re-hover-ai.md) and ride where their graph ends short of the post: BF2 END1's bikes stop dying (PS2 0 crashes in 5 min; port 40 unowned losses a round), BF1 END1 matches the PS2's own 3 crashes a minute, and both Hoths get hover boards
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: WAI,HAIS
-files: engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai/route.rs,engine/crates/core/src/vehicle/hover.rs
-declares: sim; sweep; leak
-needs:
-effort:
-branch: vdrop
-resume: landed 99895d81 2026-10-03
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card WAI (2026-10-02) lets a WALKER's driver route to the reachable hub nearest its post when its type's graph does not
 reach the post's hub (`ai::route::post_hub`, `nearest`). The same rule for hovers was built and switched off: with it on,

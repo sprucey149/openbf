@@ -1,20 +1,11 @@
 ---
 id: FGHT2
 title: The PS2's close contact, after FGHT: its attackers get into the defenders' home zone and the port's are stopped on the way (an enemy within 20 m: Kamino 3.7 % against 12.6-15.1, Death Star 5.7 against 18.6) - measure where the port's attackers die, verify the noise radius, then build it or put the look-rate decision to the maintainer; Investigate and Evade are built on a patch and measured
-milestone: M3
-value: 5
-phase: measure
-status: todo
-deps: FGHT
-files: engine/crates/core/src/ai/behave.rs,engine/crates/core/src/perception.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai.rs,engine/crates/game/examples/round_to_outcome.rs,analysis/re-soldier-ai.md
-declares: sweep; arena
-needs: maintainer — away from a human, do BF2-map bots think slowly as the PS2's do (a: no, as today, and bar B5 becomes reported-not-gated [default]; b: BF2's 4-8 s think for a bot with no contact that no human is near, BF2 maps only; c: a 4 s look everywhere)? Measured cost of each in the card's 'Measured 2026-10-09' and STATUS
-effort: high
-branch:
-resume: planner 10-22 06:58: AITHK (the maintainer's own 10-19 ask, RE done abd49ed, build-ready) builds the PS2's think rate in both games = this card's option (b) and more; the two questions are one now - STATUS Q72. If the maintainer says yes to AITHK, close this card as answered by it.
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 Card FGHT (69f8c84, 2026-10-07) built the PS2's fight styles (stand / circle, spaced out) and did NOT meet its own
 contact bars: an enemy within 20 m, 8 seeds, BF2 Kamino 3.5 -> 3.7 % of alive unit-seconds (bar 12; the PS2 12.6 -

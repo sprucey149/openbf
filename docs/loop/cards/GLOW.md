@@ -1,19 +1,10 @@
 ---
 id: GLOW
 title: Self-lit surfaces glow on the PS2 and are dark in the port: BF2 Utapau's window panels, Coruscant's skyline windows, Mustafar's lava
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/fx.rs,engine/crates/bake/src/glb.rs,engine/crates/bake/src/alpha.rs,engine/crates/bake/src/map.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/assets.rs,engine/crates/render/src/draw.rs,engine/crates/render/src/shader.wgsl
-declares: rebake=maps; goldens=maps/bf2_cor1.png,maps/bf2_dea1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png
-needs:
-branch: glow
-resume: LANDED 375db4c + goldens 9b7b875. The bloom is card GLOWB.
-created: 2026-09-25 (from QUEUE.md)
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 (Rewritten by the planner 2026-09-30; the original entry and the notes below keep the detail.)

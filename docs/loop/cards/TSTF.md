@@ -1,20 +1,10 @@
 ---
 id: TSTF
 title: Four test defects found by TSTX's inventory - a temp-file race between bake classes tests, a loadscreen test that panics instead of skipping, a `return` that ends a terrain test's map loop early, and roster / leaf checks that pass vacuously in a worktree (their data sits in gitignored lead_tmp)
-milestone: M0
-value: 3
-phase: build
-status: blocked
-deps: TSTX
-files: engine/crates/bake/src/classes.rs, engine/crates/bake/src/loadscreen.rs, engine/crates/mungefs/src/terrain.rs, engine/crates/game/tests/suite/roster.rs, engine/crates/game/src/viewer/leaf.rs, engine/CRATES.md
-declares: ci=+1
-needs: green ci on main (RKHULT bind_pose tat1_skiff_fins and VTZT turret_views FOV tests fail; neither is TSTF)
-effort:
-branch: tstf
-resume: (private workflow note omitted)
-created: 2026-10-02
-alpha: no
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Evidence (`lead_tmp/tstx/test_inventory.md`, "Other problems found"; read-only inventory, NOT yet checked by hand)
 1. `bake/src/classes.rs`: three tests write the same per-process temp file; under `cargo test` (threads, one pid) they

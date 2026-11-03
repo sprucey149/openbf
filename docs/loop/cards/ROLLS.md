@@ -1,21 +1,10 @@
 ---
 id: ROLLS
 title: The sideways roll: the PS2 has ONE roll clip (diveforward) and turns the body's root into the direction of travel while it plays - a left roll is a dive head first to the soldier's left, the camera still forward (RE done 2026-10-12, analysis/re-roll-picture.md); the port plays the right clips with NO turn, so the body somersaults forward while it slides sideways - build the root twist in game::animator, one input (the unit's velocity against its facing) for the player and the bots (the maintainer's INBOX 2026-10-12 18:55, ask 2)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/animator.rs,engine/crates/game/src/animator/tests.rs,engine/crates/game/src/animator/census.rs,engine/crates/game/src/soldier_vis.rs
-declares:
-needs:
-effort:
-branch: rolls
-resume:
-created: 2026-10-12
-alpha: yes
-domain: render
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX 2026-10-12 18:55, ask 2: the roll today is the FORWARD roll played while the soldier moves sideways.

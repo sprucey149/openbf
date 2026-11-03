@@ -1,19 +1,11 @@
 ---
 id: USKC
 title: CollisionRootScale: a soldier class's collision size (Wookiee 1.15, BF2 snipers 0.95, Jawa 0.6) - the port's capsule is one shape for every class
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps:
-files: engine/crates/core/src/unit.rs, engine/crates/game/src/roster.rs
-declares:
-needs: Restore both corpora/ELFs and fielded-class census; identify hit primitives and scaled AI point before implementing capsule changes.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 7 exact named inputs absent. Restore both corpora/ELFs and fielded-class census; identify hit primitives and scaled AI point before implementing capsule changes. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-10-16
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Split from USKN (analysis/re-soldier-skeleton-skins.md §8 [O]). The PS2 sizes a soldier's collision primitives by its
 class's `CollisionRootScale` s. BF1 `FUN_0020e2e0` (its only reader past the constructor, copy and setter, receipt

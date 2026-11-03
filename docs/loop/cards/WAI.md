@@ -1,20 +1,11 @@
 ---
 id: WAI
 title: Bots drive walkers: a bot claims a walker's pilot seat and steers it by the PS2's own stick law (re-walker-ai.md: turn in place to 5 deg then walk; the AT-ST / tauntaun strafe branch inside 30 deg; sticks raw and unshaped)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: WALK,GSKIP
-files: engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai/walker_drive.rs,engine/crates/core/src/sim/seats.rs,engine/crates/core/src/vehicle/walker.rs,engine/crates/game/src/vehicle_class/walker.rs,engine/crates/core/src/sim/state.rs
-declares: sweep
-needs:
-effort:
-branch: wai
-resume: landed bbdd58c5 2026-10-02
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 WALK (2026-09-29) moves walkers for a human driver only. No bot boards a walker (`claim_seat` requires
 `Sim::hover_params`), so the AT-STs, tauntauns, spiders and kaadus on the pads stand empty unless the player takes them.

@@ -1,18 +1,10 @@
 ---
 id: LPICK
 title: loopctl next starves value-5 capture cards: the lane-preference window takes every card within ONE value point of the best, so value-4 re/build beat value-5 PXWA/PXWB forever — reorder by lane preference among EQUAL value only
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: scripts/loopctl.py
-declares:
-needs:
-branch: lpick
-resume: landed ed4a2f4 2026-09-29; self-test = loopctl.py self-test
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Planner 2026-09-29. `scripts/loopctl.py pick()` step 4: `top = [c for c in r if val(c) >= best_val - 1]`, then sorts `top`

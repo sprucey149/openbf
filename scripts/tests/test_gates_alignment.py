@@ -79,7 +79,7 @@ class AlignmentReceipt(unittest.TestCase):
         self.assertIn('alignment',run.call_args.args[1])
 
     def test_landing_filter_keeps_automatically_required_alignment(self):
-        import land
+        import gate_policy as land
         self.assertEqual(land.landing_gate_groups({'map','alignment'}),['map','alignment'])
 
     def test_required_alignment_without_configured_roots_fails(self):

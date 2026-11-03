@@ -1,19 +1,10 @@
 ---
 id: PSREC
 title: Frame-exact, repeatable PS2 runs: record pad input into PCSX2 so a save state plus the recording replays the SAME run every time (today's XTEST key events are wall-clock timed and cannot be) - and the same recording converts to an openbf InputLog
-milestone: M0
-value: 3
-phase: capture
-status: blocked
-deps:
-files:
-declares:
-needs: Restore emulator session/live kit and a retained state; prove bit-equal positions at frames 60/300/600 before converter or oracle claims.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 4 exact named inputs absent. Restore emulator session/live kit and a retained state; prove bit-equal positions at frames 60/300/600 before converter or oracle claims. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-10-08
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 A state diff needs both sides fed the same input on the same frame. `pcsx2_session.py` presses keys through XTEST with wall-clock waits (`Down:150 wait:1100`; menus drop presses at less than 1.1 s spacing): two runs of the same script drift by frames, so a PS2 trace taken twice would differ for reasons that have nothing to do with the port. Without a repeatable PS2 run the oracle is noise.

@@ -1,18 +1,10 @@
 ---
 id: SBD
 title: Super battle droid tri-shot, wrist rockets and HUD icons
-milestone: M3
-value: 5
-phase: build
-status: in-progress
-deps:
-files: engine/crates/bake/src/soldier/output.rs,engine/crates/core/src/sim/guns.rs,engine/crates/core/src/sim/ordnance.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/step/tests.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/weapon/tests.rs,engine/crates/game/src/classdb.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/fx.rs,engine/crates/game/src/fx/children.rs,engine/crates/game/src/fx/tests/resupply.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/src/repair_feedback/tests.rs,engine/crates/game/src/roster.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/walk.rs,engine/crates/game/tests/suite/main.rs,engine/crates/game/tests/suite/resupply_feedback.rs,engine/crates/game/tests/suite/roster.rs,engine/crates/game/tests/suite/weapon_classdb.rs,scripts/rebake.sh
-declares: sim; rebake=side
-needs:
-branch:
-created: 2026-10-27
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `in-progress`.
 
 Issue: https://github.com/sprucey149/openbf/issues/27
 

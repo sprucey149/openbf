@@ -1,19 +1,11 @@
 ---
 id: FPV
 title: The PS2's first-person view on foot: the class's FPM arms (FPM/<side>/<class>.LVL, e.g. imp_1st_inf_stormtrooper_arms / _hands) drawn at the eye, posed by the first-person clip table (BF1 _1st_<set>_<action> in human_animation_fp, BF2 humanfp_*: idle, run, shoot, reload, jump, throw...), and the toggle into it
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore both corpora/discs and live first-person state/toolkit; settle view entry, camera and arm model/animation rules first.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 6 exact named inputs absent. Restore both corpora/discs and live first-person state/toolkit; settle view entry, camera and arm model/animation rules first. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-10-22
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer (INBOX 2026-10-21 17:50 item 1) asked for the grenade throw 'in first and third person'. Card GTHRW's RE
 (`analysis/re-grenade-throw-anim.md` 4) found the PS2's first-person throw clips - BF1 `_1st_grenade_shoot2`, BF2

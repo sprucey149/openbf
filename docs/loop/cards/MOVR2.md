@@ -1,20 +1,11 @@
 ---
 id: MOVR2
 title: The PS2's stuck clock, arrival radii and leg aim, measured again on OBST's steering: each cost pinball windows on Kamino or Polis Massa with today's wall slide and was left out of MOVR (bot design 4.5, 4.7)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: OBST,MOVR,OBSF
-files: engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: movr2
-resume: landed 6f6160b2 2026-10-07
-created: 2026-10-06
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card MOVR (2026-10-06) built six rules behind switches and landed the three that measured as gains (the arrive latch
 and deadband, the heading held three ticks, the think's phase by unit index) plus the give-up rung on the old 2 s

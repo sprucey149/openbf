@@ -1,20 +1,10 @@
 ---
 id: KSEAL
 title: BF2 Kamino's ocean is lit by the sun on the PS2 (FFT normals in the packet): (8,19,19) at 314-393 m where the port's unlit unity draw reads (26-49, 38-57, 34-55) with white foam
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: KSEA
-files: engine/crates/game/src/viewer/look.rs,engine/crates/render/src/shader.wgsl,engine/crates/render/src/lighting.rs,engine/crates/render/src/frame.rs,engine/crates/render/src/lib.rs
-declares: goldens=maps/bf2_kam1.png,walkabout_stats.ron; parity=bf2_kam1
-needs:
-effort:
-branch: kseal
-resume: landed 0fb84669 2026-10-01
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 BF2 Kamino's sea is dark and blue-shifted on the PS2 and bright with white foam in the port: the port draws the ocean

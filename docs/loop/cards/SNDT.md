@@ -1,20 +1,11 @@
 ---
 id: SNDT
 title: Sound distances and loudness: bake resolves a property's Inherit template inside its own SOUND LVL only, the templates are in CORE.LVL - every port sound is gain 1.0 and silent beyond 50 m (the disc: weapons 5-400 m gain 0.7, explosions 30-450 m)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/sounds.rs,engine/crates/bake/src/main.rs,engine/crates/mungefs/src/sound_props.rs,engine/crates/game/src/sounds.rs,engine/crates/manifest/src/lib.rs,scripts/rebake.sh
-declares: rebake=sounds
-needs:
-effort:
-branch: sndt
-resume: landed 3aefd6f9 2026-10-02
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 SNDC's census (`analysis/audio-census.md` section 0): every 3-D sound the port plays is cut off at 50 m and has gain
 1.0. `bake sounds` flattens a property's `Inherit` chain only inside its own SOUND LVL (`bake/src/sounds.rs` 82-96,

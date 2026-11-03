@@ -1,18 +1,10 @@
 ---
 id: KASF
 title: BF1 KAS2's far fog is `255,0,0` — is that authored art, or an unset-field default the table read as a colour?
-milestone: M1
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: done — see analysis/re-fog.md §9; follow-ons CLRB, FOGB, REFL note
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 **Why:** BF1 KAS2's port shows a pure-red band the PS2 never shows. Is §6's fog row (255,0,0, 1000..2992) authored art or

@@ -1,20 +1,11 @@
 ---
 id: BMAP2
 title: The minimap's other views and missing icons: Select toggles Small / Large (the whole map at 0.948, numbered posts, alpha 0.25) and the spawn screen shows the Spawn view with the PostSelect ring; the shield generator's hud_dest_icon post on HOT1; the yellow direction mesh in a vehicle / turret; Lua markers
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: BMAP
-files: engine/crates/ui/src/hud_map.rs,engine/crates/game/src/minimap.rs,engine/crates/ui/src/hud.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/main/windowed.rs
-declares:
-needs: maintainer — restore local baked maps/HUD/art, missions, extracted BF2 corpus, BMAP 16-map RAM evidence and PS2 captures, approved GPU/golden environment
-effort:
-branch:
-resume: Cloud preflight blocked; see reports/20261024_0720_card_BMAP2.md. Restore BMAP 16-map mapbounds RAM/bake comparison inputs and lead_tmp/re/bmap/cap/{hot1_large,nab2_large}.p2s, SSELB spawn evidence, assets_baked, missions, extracted BF2/ELF corpus and approved GPU/golden environment. Clear needs and set todo only after restoration. First re-run all 16 bounds comparisons, correct re-hud-map 2.3 with dated evidence and commit exact doc under MAIN; then loopctl start BMAP2. Reconcile existing Spawn view/test, implement remaining Large/objective/direction/marker scope; reproduce all 3px bars, CI and required gates, view declared goldens, land under MAIN. No source implementation or acceptance this run.
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 BMAP (4c8bc60) drew the Map element's Small view only. analysis/re-hud-map.md sections 2.2, 3, 4 and 7 hold the rest, already RE'd and checked on PS2 frames.
 - Large view on Select (FUN_003a8d18): no heading rotation, the mission's north angle, PositionLarge, the mapping x 0.948 about the screen centre (PROVISIONAL, measured), backdrop alpha 0.25, hud_large_map_fov x 0.95, north pointer scale 5.

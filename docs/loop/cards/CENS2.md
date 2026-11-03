@@ -1,19 +1,11 @@
 ---
 id: CENS2
 title: The collision census depends on the runs before it: one run of 52,845 on BF2 KAM1 flips (ok -> ceiling) when the map is dealt to 4 chunks instead of 1 - find the state a run leaves in the sim (not the doors, the tick, lcg or rng) so a run starts from the same world and the census can use every core on its slowest map (192 s -> about 80 s)
-milestone: M0
-value: 3
-phase: measure
-status: blocked
-deps:
-files: engine/crates/game/examples/leak_census.rs,engine/crates/core/src/sim/state.rs
-declares:
-needs: Restore 32-map collision/runtime data and missions; reproduce KAM1 history-dependent run before changing reset state or chunk count.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 6 exact named inputs absent. Restore 32-map collision/runtime data and missions; reproduce KAM1 history-dependent run before changing reset state or chunk count. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-10-07
+status: archived
+issue: 93
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #93](https://github.com/sprucey149/openbf/issues/93).
 
 ## Why
 The maintainer, 2026-10-07: speed the tests up. The census (`leak_census`, the `leak` gate, 3 min 20 s) runs one thread per MAP, so its wall time is the slowest map alone: BF2 FEL1 192 s against a 71 s average over 32 threads (the per-map times are in `loop_baselines/.../leak_1.err`). Card GSPD built `LEAK_CHUNKS=<k>`: a map's samples are dealt to k tasks and merged back in the one-thread order (`run_part` / `merge_map`). At k = 4 it would take the census to about 80 s - but the output is not the k = 1 output.

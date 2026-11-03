@@ -1,18 +1,11 @@
 ---
 id: LEAFS
 title: Leaf canopies as the PS2 lays them out: an unseeded leafpatch class's seed and each leaf object's tint are fixed draws of the global LCG (reseeded to 0 at level load), not per-session random — bake BF1's per map and BF2's per era (LEAF audit)
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/viewer/leaf.rs,analysis/re-leafpatch.md
-declares: goldens=maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_yav1.png,maps/bf2_dag1.png,maps/bf2_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf2_nab2.png,maps/bf2_cor1.png,walkabout_stats.ron
-needs: environment — Restore leaf-map bake and audit-leaf RAM outputs, pose files and paired frames.
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Reproduce seed/tint tables and current leaf mask before build; preserve 96-state seeds, per-era PROVISIONAL fallback and DAG1 IoU >=0.55 with approved picture/golden gates. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT of LEAF (2026-09-30, PARTLY): the leaf patches' placement, template, draw and colour hold. One premise is wrong:
 `analysis/re-leafpatch.md` §0/§4.2 and `game::viewer::leaf`'s module doc say an unseeded `leafpatch` class (every YAV,

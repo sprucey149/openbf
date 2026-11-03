@@ -1,19 +1,10 @@
 ---
 id: ARITH
 title: A tiny deterministic arithmetic helper for RE sessions - int convert (hex/dec/signed/float bits), struct-offset arithmetic, MIPS lui/addiu|ori|lw|sw pair resolver - so a session calls a tool instead of doing address arithmetic in its head
-milestone: M0
-value: 3
-phase: build
-status: done
-deps:
-files: scripts/re_calc.py, scripts/re_calc_selftest.sh, scripts/re_check.py, scripts/gates_selftest.py, engine/artifacts/briefs/LOOP_PROMPT.md
-declares:
-needs:
-effort:
-branch: arith
-resume: (private workflow note omitted)
-created: 2026-10-08
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Research rec. 7 (Lewis; ida-pro-mcp ships `int_convert` for this reason): struct-offset and address arithmetic is a known LLM failure, and a wrong address in an `analysis/re-*.md` claim is exactly the confident-false-[V] class our blind tests measured (4 false [V] in the Opus RE trial). The cost of a tool is a script; the cost of the error is a wrong card.

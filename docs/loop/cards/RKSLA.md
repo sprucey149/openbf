@@ -1,20 +1,11 @@
 ---
 id: RKSLA
 title: Rocket hold rules, the RKSLF audit's fixes: test the press-tick shot (BF1's rocket launcher, the torpedo launchers, the bulldog fire on the press), the AI-only condition, the +1 m margin, hulls / soldiers / open air in the check's ray; place the impact blast 0.2 m along the struck surface's normal (the PS2's), not back along the flight; bound a held charge (102 spells over 3 s in 256 rounds, 10.9 s worst, the bot standing)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: RKPRF,RKMAR
-files: engine/crates/core/src/sim/step.rs, engine/crates/core/src/ai/gunner_foot.rs, engine/crates/core/src/sim/combat.rs, engine/crates/core/src/projectile.rs, engine/crates/core/src/weapon.rs, engine/crates/game/src/fx.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume: RKMAR splits only existing aim/release +1m margin regression tests after omission survives core869; RKPRF immediate/human tests implemented. Keep all original target-kind, surface-normal, long-charge and audit-kit Acceptance. reports/20261025_1014_planner.md
-created: 2026-10-20
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 AUDIT RKSLF 2026-10-20 (engine/artifacts/loop/audits.md; evidence engine/artifacts/lead_tmp/audit-rkslf/, wf/summary.txt + summary2.txt). The landed release check works in battle (on-foot rocket blasts killing self / mates 417 -> 11 in 256 rounds, no own-side casualty from a shot it could see), but:
 1. Its one scene test (`sim::step::tests::a_bot_fires_no_rocket_into_the_wall_before_it`) covers a latched salvo and a charge release only. 14 of 21 audit mutations survived: S3 / S7 (a non-charge launcher pressed this tick is not checked - BF1 rep_weap_inf_rocket_launcher, the cis / imp / rep torpedo launchers, BF2 cis_weap_inf_bulldog all fire in the press update: InitialSalvoDelay 0, no MaxPressedTime), S6 (the check would also hold a HUMAN's rocket), R3 / R10 / F2 (the +1 m margin: every holder in the scenes is 2.2-2.4 m from the blast), R4 (blast point sign), R5 (an open-air shot held), R7 / R8 (the ray through hulls / soldiers), R2 / F1 (mounted mates). cc40b5d's premise "every exploding launcher the bots carry is a charge weapon" is false (only the mortars 0.75 and BF2's arc caster 2.5).

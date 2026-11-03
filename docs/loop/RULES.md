@@ -1,17 +1,18 @@
-# Loop RULES (distilled from JOURNAL.md “Lesson:” lines, 2026-10-08)
+# Engineering lessons (distilled from JOURNAL.md “Lesson:” lines, 2026-10-08)
 
-Read this before your job. Tag `(L#n)` = the n-th `Lesson:` line in JOURNAL.md (`grep 'Lesson:' loop/JOURNAL.md | sed -n 'np'`),
-or a card id. Propose a new rule as ONE line `RULE-PROPOSAL: <imperative rule> (<card>)` in your report; the planner/cleanse merges it
-here. Do not leave a lesson only as JOURNAL prose.
+These lessons preserve measurement and review discipline from earlier work. Current execution and landing instructions
+are in `AGENTS.md` and `docs/agents/`. Dated receipts remain evidence for their named checkpoints.
+References below to launcher lanes, claims, planner ranking and old `loopctl` commands
+are historical explanations; those mechanisms are retired and do not govern new jobs.
 
 ## Top 10 (violated most often)
-0. A gate that refuses a landing on a number the card was not about is a question, not a verdict: sort it NOISE / EXPOSED / CAUSED with evidence before blocking. EXPOSED (already on main, the card only sends more units into it - one traced case on main) = the card lands and the old bug gets its own card; you never approve your own claim - block the card `resume=EXPOSED-CLAIM ...` and the planner's verifier judges it (the maintainer, 2026-10-11; BSPN / DAGS; LOOP_PROMPT has the three proofs).
+0. A gate that refuses a landing on a number the card was not about is a question, not a verdict: sort it NOISE / EXPOSED / CAUSED with evidence before blocking. EXPOSED (already on main, the card only sends more units into it - one traced case on main) = the card lands and the old bug gets its own card; you never approve your own claim - block the card `resume=EXPOSED-CLAIM ...` and an independent reviewer judges it (the maintainer, 2026-10-11; BSPN / DAGS).
 1. Never claim "no class / nothing / never / 0 callers" from one tool: search the signed hash form, the call graph, ELF `jal` words, ALL worlds (incl. unbaked Ewok/wampa sides), the full untruncated output (L84 L89 L99 L103 L182 L192 L255).
 2. A card's named cause is a hypothesis: re-measure the symptom on TODAY's main and trace one case before building the remedy (L5 L98 L145 L160 L231 L244 L248 L254).
 3. Every instrument/test needs a control: a null variant equal to the parent hash for hash, or a mutation check; a test that passes under its own mutation referees nothing (L27 L49 L125 L146 L173 L180 L209 L230 L237 L242).
 4. A headline number needs its baseline: rebuild the PARENT and measure it with the same instrument, plus a random/unaffected population (L51 L98 L149 L178 L200 L205 L252).
-5. Never end a turn waiting on a background job: start gates/land with `--detach`, poll `--status` in a bounded (<=590 s) FOREGROUND loop - the session that detached it waits for it (L1 L58 L69 L111 BF1BK: two sessions died 'waiting').
-6. Before resuming or landing, `ps`/`pgrep -x` for a live land.py/gates.py/session and read `locks/` (cleanse holds CLEANSE, not its card id) (L41 L47 L71 L108 L130 L163 L239).
+5. Own a dispatched job through its completion condition. Use `agent_job.sh status` and `agent_job.sh wait` to collect its exit status and final report (L1 L58 L69 L111 BF1BK).
+6. Before resuming or landing, inspect the job service status and landing queue. Preserve live workers and another contributor's ownership (L41 L47 L71 L108 L130 L163 L239).
 7. Never `pgrep -f`/`until ! pgrep -f` a pattern that appears in your own command line; poll a pid or a log marker (L7 L49 L161).
 8. Sweeps are chaotic: one seed or 4 maps is not evidence; run all 32 maps, >=8 seeds (24 more to confirm a drop), judge paired per-seed/per-spot differences, not single-map finishes (L48 L49 L92 L169 L223 L250).
 9. The branch gates render the SHARED bake: bake-carried changes show goldens/parity only at land phase 1; score with `--bake <scratch>` or an overlay first, and expect stale-bake DIFFs (L16 L45 L63 L88 L95 L117 L168 L208 L211 L213).

@@ -1,21 +1,11 @@
 ---
 id: LOD
 title: The `modl` LOD switch rule: the port draws LOD0 forever (and discards the baked LOD chains); the PS2 switches to `LOWD` / `_low1` by some distance rule
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/assets.rs, engine/crates/game/src/viewer/scene.rs, engine/crates/game/src/viewer/vehicles.rs, engine/crates/render/src/draw.rs, engine/crates/render/src/mesh.rs, engine/crates/render/src/shader.wgsl, engine/crates/bake/src/far_lowd.rs
-declares: goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_yav2.png,maps/bf2_cor1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/tat1.png,maps/tat2.png,tat1_spawn.png,tat1_overview.png,tat1_hud.png,walkabout_stats.ron
-needs:
-effort:
-branch: lod
-resume: LANDED dde30a1 (2026-10-20). Follow-ups: LODV (vehicles), the dither stipple in the band (Calls to reverse)
-created: 2026-09-25
-alpha: yes
-first: 1
+status: archived
+issue: 69
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #69](https://github.com/sprucey149/openbf/issues/69).
 
 ## Why
 (2026-10-16) The PS2 draws a geometry's LOWD past the near scene (NAB1's leafy far crowns, UTA1's sinkhole ring, GEO1's

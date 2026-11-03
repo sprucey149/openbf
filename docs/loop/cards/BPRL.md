@@ -1,20 +1,11 @@
 ---
 id: BPRL
 title: Vertex colour blends in screen space on the PS2 (the GS), cut only at the guard band: the port's perspective blend puts a post's pool on big floors under the camera (UTA1's pen +0/+16/+38 against +0/+1/+3, COR1's cp2 floor 103 against 70) - build the GPU-safe affine blend for model colour and point lights; and renders with no battle light the posts a mission kills (DEA1 CP6)
-milestone: M1
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/render/src/shader.wgsl engine/crates/render/src/affine.rs engine/crates/render/src/frame.rs engine/crates/render/src/lib.rs engine/crates/game/src/point_light.rs engine/crates/game/examples/pose_render.rs engine/CRATES.md
-declares: goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_cor1.png,maps/bf2_dag1.png,maps/bf2_dea1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/bf2_yav1.png,maps/tat1.png,maps/tat2.png,tat1_hud.png,tat1_overview.png,tat1_spawn.png,units/bf1_all_inf_marksperson.png,units/bf1_all_inf_marksperson_snow.png,units/bf1_all_inf_pilot.png,units/bf1_all_inf_snowtrooper.png,units/bf1_all_inf_soldier.png,units/bf1_all_inf_trooperfleet.png,units/bf1_all_inf_wookie.png,units/bf1_cis_inf_bdroid.png,units/bf1_cis_inf_sbdroid.png,units/bf1_imp_inf_atatpilot.png,units/bf1_imp_inf_atstpilot.png,units/bf1_imp_inf_darktrooper.png,units/bf1_imp_inf_pilot.png,units/bf1_imp_inf_scout.png,units/bf1_imp_inf_shocktrooper.png,units/bf1_imp_inf_snowtrooper.png,units/bf1_imp_inf_stormtrooper.png,units/bf1_rep_inf_arctrooper.png,units/bf1_rep_inf_jettrooper.png,units/bf1_rep_inf_pilot.png,units/bf1_rep_inf_trooper.png,units/bf2_all_inf_bothanspy.png,units/bf2_all_inf_engineer.png,units/bf2_all_inf_marksperson.png,units/bf2_all_inf_markspersonsnow.png,units/bf2_all_inf_snowtrooper.png,units/bf2_all_inf_soldier.png,units/bf2_all_inf_tantive4trooper.png,units/bf2_all_inf_vanguard.png,units/bf2_all_inf_wookie.png,units/bf2_cis_inf_bdroid.png,units/bf2_cis_inf_magnaguard.png,units/bf2_cis_inf_sbdroid.png,units/bf2_imp_inf_atatcommander.png,units/bf2_imp_inf_atatpilot.png,units/bf2_imp_inf_darktrooper.png,units/bf2_imp_inf_gunner.png,units/bf2_imp_inf_scout.png,units/bf2_imp_inf_shocktrooper.png,units/bf2_imp_inf_snowtrooper.png,units/bf2_imp_inf_stormtrooper.png,units/bf2_rep_inf_arctrooper.png,units/bf2_rep_inf_clonecommander.png,units/bf2_rep_inf_ep3armoredpilot.png,units/bf2_rep_inf_ep3heavytrooper.png,units/bf2_rep_inf_ep3jettrooper.png,units/bf2_rep_inf_ep3sniper.png,units/bf2_rep_inf_ep3trooper.png,units/bf2_rep_inf_feluciatrooper.png,units/bf2_rep_inf_jettrooper.png,units/bf2_rep_inf_pilot.png,units/bf2_rep_inf_trooper.png,walkabout_stats.ron; parity=bf2_kam1
-needs:
-effort:
-branch: bprl
-resume: landed b9c79397 2026-10-03
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The PS2 does not skip the post's light on these floors (the RE's answer, `analysis/re-vertex-colour-interp.md`, docs
 6bc2437). Its GS blends a triangle's vertex colour in SCREEN space, and the VU1 clipper cuts a triangle only beyond the

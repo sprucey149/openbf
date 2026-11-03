@@ -1,21 +1,11 @@
 ---
 id: JINK
 title: A jump, a roll or a sprint start adds to the unit's aim error, paid from its budget (the PS2's FUN_002ae728: jump +1.0 m, roll and sprint start +2.0, jet +5.0, then the block's decay) - a player or a bot that jinks is harder to hit for 1.3-1.6 s; the port has only the stance factor while the stance lasts (audit of CLSE2, re-soldier-ai 21.2)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: CLSE2
-files: engine/crates/core/src/unit.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/soldier.rs,engine/crates/core/src/ai/gunner_foot.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch:
-resume: Retake current-main JINK baseline after PR2 Jump fire blocking and JUNI when implemented. Restore original audit/scene/data inputs; full original error-budget and rate Acceptance remains. Planner report reports/20261026_0616_planner.md.
-created: 2026-10-12
-alpha: yes
-domain: ai
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card CLSE2 landed "the rest of the PS2's aim error" for BF2's rules. Its audit (2026-10-12, PARTLY) found one more
 rule of the same block that neither the RE nor the port has: on the PS2 a unit that JUMPS, ROLLS or starts a

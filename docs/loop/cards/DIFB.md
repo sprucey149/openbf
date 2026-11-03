@@ -1,19 +1,11 @@
 ---
 id: DIFB
 title: The difficulty handicap in the game: teammate shooting tier, enemy units on the field and reinforcements set from the difficulty and the humans on each side, re-set when a player joins or picks a side; nothing shown on screen
-milestone: M3
-value: 4
-phase: build
-status: todo
-deps: DIFS
-files:
-declares:
-needs: maintainer — he decides on DIFS's numbers and caps first (the maintainer, 2026-10-05: 'I'd want to see the numbers before I decide')
-effort:
-branch:
-resume:
-created: 2026-10-05
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
 
 ## Why
 The maintainer, 2026-10-05: "You turn up the difficulty so the ai gets better so the user is more likely to die, how does that translate to making it harder to win games? If all ai is better including teammates, and the user just dies more, how does that make it harder to win a match? ... We need a good solution where victory is somewhat tied to user performance on any difficulty. Easier difficulties are a little more evenly split, while harder difficulties depend on the user playing well and thought needs to be incorporated for when multiple users are playing and they're on opposing teams." With equally good bots on both sides a battle is a coin flip the human tips; better bots only shrink the tip.

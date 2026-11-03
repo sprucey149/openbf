@@ -1,21 +1,10 @@
 ---
 id: AQD
 title: BF1's hub locate, corridor test and nearest hub are 3-D
-milestone: M3
-value: 2
-phase: build
-status: done
-deps: BPO
-files:
-declares: marks: SWEEP
-needs:
-effort:
-branch:
-resume: MERGED into LOC3 by the planner 2026-10-03 03:35 (not built): LOC3 is the same change with the audit's measurements and a runnable acceptance
-created: 2026-09-25 (from QUEUE.md)
-defer: post-alpha
-acceptance: needed
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

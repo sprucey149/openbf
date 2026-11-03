@@ -1,16 +1,12 @@
 ---
 id: DPRX
 title: Human proxy - a bot the sim treats as a human, a difficulty check against the maintainer's targets, and a whole-match log to calibrate it
-milestone: M3
-value: 5
-phase: review
-status: review
-deps: TOKN
-files: engine/crates/core/src/ai/proxy.rs; engine/crates/core/src/ai/proxy/tests.rs; engine/crates/core/src/unit.rs; engine/crates/core/src/perception.rs; engine/crates/core/src/ai/tokn.rs; engine/crates/core/src/ai/gunner_foot.rs; engine/crates/core/src/ai/gunner.rs; engine/crates/core/src/ai/wake.rs; engine/crates/core/src/ai/behave/brain.rs; engine/crates/core/src/ai/behave/position.rs; engine/crates/core/src/sim/combat.rs; engine/crates/core/src/sim/blast.rs; engine/crates/core/src/sim/round.rs; engine/crates/core/src/sim/step.rs; engine/crates/core/src/sim/guns.rs; engine/crates/core/src/sim/spawn/runtime.rs; engine/crates/game/src/matchlog.rs; engine/crates/game/src/blackbox.rs; engine/crates/game/src/blackbox/session.rs; engine/crates/game/src/main/windowed.rs; engine/crates/game/examples/round_to_outcome.rs; engine/crates/game/examples/arena.rs; engine/crates/game/examples/blackbox_read.rs; scripts/human_profile.py; AGENTS.md
-declares: sim
-branch: dprx
-created: 2026-10-28
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `review`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
+
 ## Why
 `analysis/difficulty-proposal.md` §5 (Q5): measure "hard enough" without the maintainer playing. A bot that the
 human-only layers treat as a human, with a fixed human profile, on both sides of each map, per tier, against

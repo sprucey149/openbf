@@ -1,21 +1,12 @@
 ---
 id: HWAT
 title: Hovers float on water (re-hover §4 S3): the sim gets the map's WMAP wet grid + LAYR height + the 6 cm bob, and each spring point's query compresses on it (115 of 138 RAM hovers have FloatsOnWater on)
-milestone: M2
-value: 3
-phase: build
-status: blocked
-deps: HOVX
-files: engine/crates/core/src/vehicle/hover.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/manifest/src/lib.rs,engine/crates/bake/src/map.rs
-declares: sweep; rebake=maps
-needs: restore water-map LVLs/bakes, paired ride evidence and both-disc primary spring-query evidence before retry
-effort:
-branch:
-resume: 20261025_0450 prerequisite hold; 0/47 inputs present; no implementation or acceptance; restore inputs then build S3 with per-spring damping and BF1 ungated rule; reports/20261025_0450_card_HWAT.md
-created: 2026-09-28
-defer: post-alpha
-tries: 1
+status: archived
+issue: 70
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #70](https://github.com/sprucey149/openbf/issues/70).
+
 ## Why
 Split from HOVX (2026-09-28). A hover driven onto water sinks to the bottom in the port; on the PS2 its spring spheres compress on the water surface (FUN_005613c8) and it skims.
 ## Evidence

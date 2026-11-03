@@ -1,19 +1,11 @@
 ---
 id: SBLOB
 title: Soldier / pickup drop-shadow blob (player_shadow, RedShadowBlob): both PS2 games bind a blob texture in the soldier's and the pickup's draw; the port draws no shadow under a unit - RE the blob and measure it with a PCSX2 knock-out
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore both corpora/ELFs and live states/toolkit; measure BF1/BF2 blob knock-outs before assigning a visible-gap value or build.
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 6 exact named inputs absent. Restore both corpora/ELFs and live states/toolkit; measure BF1/BF2 blob knock-outs before assigning a visible-gap value or build. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-10-16
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Found by VSHD's RE (2026-10-16, `analysis/re-vehicle-shadow.md` 6): besides the vehicle volumes, both PS2 games load a
 `player_shadow` texture for a blob drawn under units - class names `RedShadowBlob`, `DropShadowRenderable` in both ELFs.

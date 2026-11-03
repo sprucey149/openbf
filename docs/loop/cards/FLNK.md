@@ -1,20 +1,10 @@
 ---
 id: FLNK
 title: Flank routes: per post pair the best other way within +35 % is stored at load and a share of the attackers (10-30 %, drawn per match) takes it - the route table has no second way to tilt (the maintainer's annoyance 2; bot design 6.2)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,TEAM,FGHT
-files: engine/crates/core/src/nav.rs, engine/crates/core/src/nav/flank.rs, engine/crates/core/src/ai/route.rs, engine/crates/core/src/ai/team.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/skill.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/round.rs, engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: flnk
-resume: landed 04c725ab 2026-10-20
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's annoyance 2 (2026-10-02): "Some maps have totally unused parts ... On some maps you just know where everyone is going to go" - and his cautions: "It is still fun to have fighting hotspots", bots must not become "dumb" or spread thin. Measured (`analysis/bot-design.md` M5, 6.2): toward a post the authored route table has a second next hop at 0-2 % of its entries on ten maps, so a tilt of the weights cannot do it; another route within +35 % exists for 20 of 20 post pairs on Mygeeto, 22 of 30 on Tatooine Dune Sea, 13 of 18 on Yavin Arena, 18 of 30 on Polis Massa, 13 of 29 on Utapau, 7 of 12 on BF2 Hoth, 3 of 17 on Kamino. The PS2: every never-visited hub lies off every authored post-to-post route (`re-soldier-ai.md` 10b).

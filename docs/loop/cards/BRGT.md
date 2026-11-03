@@ -1,20 +1,11 @@
 ---
 id: BRGT
 title: BF1 bright areas overshoot the PS2 once the DomeInfo filter is on (BFLT): NAB1 median dluma +9.8, BES2 +6.4, RHN1 +3.9; KAM1 and RHN1 mean block error +0.7 — the port's bright surfaces (KAM1's storm sky, NAB1's lit stone) are already too bright before the filter; attribute by surface and card the cause
-milestone: M1
-value: 4
-phase: measure
-status: done
-deps: BFLT
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 BFLT ports the PS2's frame filter faithfully (its own output within 2 levels of the measured model), which moved TAT1 −15.1 → −0.1 median dluma. On maps whose bright areas the port already over-draws, the lift overshoots.
 

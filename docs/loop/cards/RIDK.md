@@ -1,21 +1,11 @@
 ---
 id: RIDK
 title: A rider of a destroyed vehicle: who killed him? The port kills every rider as a WORLD death with no killer (Sim::destroy_vehicle, PROVISIONAL since card VDTH: 'killed or ejected [H]') - 78 % of all world deaths on main are these riders, and every card that makes bots better at destroying vehicles raises the fidelity gate's world_death_pct (HVYW: 1.08 -> 1.48). RE what the PS2 does with the occupants and the kill credit, then build it
-milestone: M2
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/sim/combat.rs, engine/crates/core/src/sim/state.rs
-declares: sweep
-needs:
-effort:
-branch: ridk
-resume: landed 1f00b531 2026-10-16; report reports/20261016_1642_card_RIDK.md; planner: re-take fidelity (world_death_pct 1.47 -> 0.76); audit INCOMPLETE / UNAUDITED 20261025_0818; restore held inputs/history; reports/20261025_0818_audit_RIDK.md
-domain: vehicle
-created: 2026-10-13
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 When a vehicle's hull pool runs out the port kills its riders through `kill_environment(u, DeathCause::VehicleDestroyed)`: a death with
 no killer, no kill on the scoreboard, counted with the falls and the death regions. The code says so itself

@@ -1,20 +1,11 @@
 ---
 id: SPRCL
 title: No soldier freezes at sprint: a census of every class on both games for the clip the animator picks while sprinting (some bodies stay in the idle pose at sprint speed), the PS2's fallback for a set without a sprint clip, every class fixed and the census kept as a test
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/animator.rs, engine/crates/game/src/animator/tests.rs, engine/crates/game/tests/suite/sprint_census.rs (new), engine/crates/game/tests/suite/main.rs, engine/crates/game/tests/data/sprint_rate_bf2.txt (new), engine/CRATES.md
-declares:
-needs: environment restoration: restore real class/animation bakes, sprcl sprint replay, audited pistol/diagonal/droid fixtures and strips
-effort:
-branch:
-resume: 2026-10-24 09:20 UTC: planner prerequisite census; no implementation. Restore this card's inputs in lead_tmp/planner_20261024_0913/queue_preflight.json, recheck original acceptance/current-main baseline, then loopctl start for isolated build. Full CI and required gates remain; reports/20261024_0913_planner.md.
-created: 2026-10-21
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer (INBOX 2026-10-21 17:50 item 2): some characters' bodies freeze in the idle pose while moving at sprint speed.
 ANIML says "no action clip in ... sprint". Related: BLKS (the black box's sprint inputs), CSPD (BF2 per-stance turn).

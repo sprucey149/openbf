@@ -1,19 +1,11 @@
 ---
 id: UPSC
 title: Texture upscaling as a public script: scripts/upscale_textures.py fetches a GPU upscaler, sorts each baked texture (prop / building / rock, terrain layer, sky, alpha billboard), runs the right path (4x, 2x with a de-dither pass, or skip) and writes a third look tier the bake picks after the PC copies
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: scripts/upscale_textures.py (new), engine/crates/bake/src/tier.rs, scripts/rebake.sh
-declares:
-needs: environment — Restore representative baked textures, original category study/ISP cost kit and GPU inputs for required texture/load measurements.
-effort:
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Review existing tier order first; preserve per-category contact sheets, alpha/tier-picker tests and two-map VRAM/load A/B. Tier stays OFF until the maintainer approves reviewed sheets; no asset download/run in this planner pass. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-10-21
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer (INBOX 2026-10-21 18:40 item 4): "use AI to upscale all the textures to HD, as a py script for openbf so anyone
 can". A feasibility study exists (the path is in that INBOX note): an ncnn Vulkan upscaler (BSD-3, no Python ML stack)

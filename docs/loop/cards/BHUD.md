@@ -1,19 +1,10 @@
 ---
 id: BHUD
 title: The BF2 HUD, part 1 — bake it: the five INGAME.LVL hud_ layouts as a named element tree, the four CORE.LVL bitmap fonts, and the sheets/meshes the port lacks (analysis/re-hud.md); BHUD2 draws it, BMAP the minimap
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/hud.rs (new), engine/crates/mungefs/src/font.rs (new), engine/crates/mungefs/src/lib.rs, engine/crates/manifest/src/hud.rs (new), engine/crates/manifest/src/lib.rs, engine/crates/bake/src/hud.rs (new), engine/crates/bake/src/map.rs (bake_common calls it), engine/CRATES.md
-declares: rebake=common
-needs:
-branch: bhud
-resume:
-created: 2026-09-28
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why (RE done 2026-09-30, `analysis/re-hud.md`)
 The whole BF2 HUD is DATA on the disc: five `hud_` config chunks in BF2 INGAME.LVL (`hudtransforms`, `1playerhud`,

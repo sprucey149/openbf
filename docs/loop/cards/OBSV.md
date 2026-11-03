@@ -1,20 +1,11 @@
 ---
 id: OBSV
 title: Bots go round parked vehicles and turrets by their footprints (bot design 4.7 item 2, split off OBST2): a 2.4 x 4.8 m hull costs a bot over 1 s of sliding at 44 of 252 placements and com_weap_gunturret is the small body with the most contact time - the footprint as a rectangle passed by its corners on the committed side
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: OBST,OBSF,OBST2,VMESH
-files: engine/crates/core/src/ai/avoid.rs,engine/crates/core/src/ai/steer.rs,engine/crates/core/src/collision/shape.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: obsv
-resume: LANDED f02bce2 (2026-10-15). com_weap_gunturret's bar is card OBSV2; the Geonosis cave lost spot is noted on RETW.
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Split off OBST2 by the planner (2026-10-12 14:22). OBST2 landed three times (7dfb448 the corner search, 600fac7 the black
 box's row, fe043b4 the cost cuts) and its one design item not built is this: bot design 4.7 item 2. Today a bot meets a

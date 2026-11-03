@@ -1,20 +1,11 @@
 ---
 id: VSHUD
 title: The HUD while seated: BF2's reticle group (reticle, clip ring, heat ring, refire bits) at the seat gun's aim and the weapon panel with the seat's weapon and the vehicle's health - the PS2 shows them in a turret, the port hides both off foot
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps: OVHT
-files: engine/crates/game/src/main/battle.rs, engine/crates/game/src/walk.rs, engine/crates/ui/src/hud.rs, engine/crates/game/tests/suite/hud_layout.rs
-declares:
-needs: maintainer — restore local PS2 corpora/ELFs, VSHUD/BHUD/VRIDE raw evidence and PCSX2 tools; baked assets/missions and approved GPU environment required for acceptance
-effort:
-branch:
-resume: BLOCKED audit prerequisite checkpoint 2026-10-24 14:51 UTC: re-seat-hud.md remains UNAUDITED; ninth incomplete checkpoint, 18/18 recorded primary/data/GPU paths still absent, 0 input changes, six target/source/ledger hashes unchanged against the 13:24 checkpoint. Restore inputs listed in engine/artifacts/lead_tmp/audit-seat-hud-20261024T144704/preflight.json before independent primary re-derivation; no verdict or acceptance run. Report reports/20261024_1451_audit_seat_hud.md. AUDPRE remains uncommitted/unlanded; OVHT dependency and original VSHUD acceptance/continuation preserved below.
-created: 2026-10-22
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 RE DONE 2026-10-22 (`analysis/re-seat-hud.md` [O], workflow-verified; live PS2 frames per seat kind
 `engine/artifacts/lead_tmp/vshud/ps2/ps2_seat_sheet.png`): BF2 runs the SOLDIER's HUD code on the seat's controllable

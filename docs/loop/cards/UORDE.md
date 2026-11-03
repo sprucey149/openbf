@@ -1,19 +1,11 @@
 ---
 id: UORDE
 title: Emitter weapons (BF1 clone pilot's arc caster; BF2 dark trooper / Jawa arc casters, the officer's incinerator, the hero flamethrowers) fire no bolt: each shot is one instant cone query at the muzzle that chains damage from target to target (MaxTargets, JumpDeduction, DamageThreshold, MaxJumpDistance, LOS per hop); BF2 adds hit-all, team / alive filters, class scales, a blast per hit, pull and burn damage over time
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/weapon.rs, engine/crates/core/src/weapon/emitter.rs, engine/crates/core/src/emitter.rs, engine/crates/core/src/sim/emitter.rs, engine/crates/core/src/sim/ordnance.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/guns.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/fx.rs, engine/crates/game/src/fx/arc.rs
-declares: sim; sweep; arena
-needs: the H2 PS2 checks (lead_tmp/uord/helpers/H2_emitter.md) and an 8 x 32 sweep 256 / 256; the deflection / buff keys are uncracked (burn traced 2026-10-30)
-effort:
-branch: uord-missiles
-resume: 2026-10-30: implementation LANDED on branch uord-missiles (70da755 through 1b1e72b, pull request #84) - the emitterordnance class, the BF1 / BF2 query law, the soldier_shots dispatch, one Event::Emitter per link and the lightning-arc renderer, with 22 core tests and the game arc test. Burn (traced in the BF2 decomp), the shot flame effect and the burn bone effects landed later the same day. Status stays blocked: deflection / per-hit buffs / pull have no RE model, and the mutation check and the 8 x 32 sweep are not run. Restore the H2 checks first; the PS2-side files are absent (Test-Path false).
-created: 2026-10-22
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 analysis/re-ordnance-kinds.md §8 (card UORD; full reading lead_tmp/uord/helpers/H2_emitter.md): the emitterordnance class's create slot (B1 FUN_00278208, B2 FUN_00315f78) runs one query per weapon shot and returns 0 - no projectile. The port built these as straight bolts before this branch (see What landed).
 

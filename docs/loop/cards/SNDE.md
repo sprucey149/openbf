@@ -1,21 +1,11 @@
 ---
 id: SNDE
 title: BF1's commander speaks with the other era's voice: on a two-era planet the port's sound bank keeps ONE definition per name for the whole LVL (the last sub-level's, <planet>2cw), where the PS2 holds the sub-level its mission names - so in the default battle on 11 of 15 BF1 maps the Empire and the Rebels hear the Clone Wars stream's takes at every post event (the maintainer: 'empire voiceovers and droid voiceover lines')
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/sounds.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/mission.rs,engine/crates/manifest/src/lib.rs,scripts/gen_missions.py
-declares: rebake=sounds
-needs:
-effort:
-branch: snde
-resume: landed e45d75a3 2026-10-06
-created: 2026-10-05
-alpha: yes
-domain: audio
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Filed by the audit of ANNC2 (2026-10-05, PARTLY; `reports/20261005_1150_audit_ANNC2.md`, evidence
 `engine/artifacts/lead_tmp/audit-annc2/` = A/). The maintainer, 2026-10-04, BF1 Kashyyyk Docks as the Empire: "it has empire

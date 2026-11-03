@@ -1,20 +1,10 @@
 ---
 id: SQVEH
 title: Vehicle-seat squad orders the BF1 way: PILE IN / HOP IN (AI on foot within 30 m board the issuer's vehicle), EVERYONE OUT / BAIL OUT (its AI seats leave, 20 s before they may board again), a gunner's ALL CLEAR / HOLD HER STEADY, and followers boarding the vehicle their leader boards
-milestone: M2
-value: 3
-phase: build
-status: blocked
-deps: SQACK
-files: engine/crates/core/src/squad.rs, engine/crates/core/src/ai/ride.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/seats/tests.rs
-declares: sim
-needs: remaining gunner/type coverage and original content/full gates; PILEIN and GETOUT source implemented
-effort:
-branch:
-resume: PILEIN e47db38 and GETOUT eb7a51e implement ground-pilot Right/Left. Restore OP5/L15 and all prior SQVEH scenes, verify own-search20s and explicit+15s reentry; gunner/type scope and full acceptance remain. reports/20261026_1058_card_GETOUT.md.
-created: 2026-09-30
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 SQACK's RE (`analysis/re-squad-orders.md` §1, §2, §4.4) found that a SEATED BF1 player has a second set of orders on

@@ -1,19 +1,11 @@
 ---
 id: LEAK3S
 title: The leak census samples walls where a soldier meets them (LEAK3's sampler half): body-height points along every SOLDIER wall face every 1 m, sphere belts, and the live world's parked hulls (vehicle_pads::install) - band-only sites <= 5 % of the audit's band sampler, <= 6 min on 32 threads
-milestone: M3
-value: 4
-phase: build
-status: todo
-deps: LEAK3
-files: engine/crates/game/examples/leak_census.rs, engine/crates/game/examples/leak_census_accepted.txt
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-22
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 LEAK3's AUDIT (reports/20260930_0930_audit_LEAK.md, Evidence 1, 2, 5): one centroid per face; 124,797 skipped side-samples span the soldier's band; the band sampler finds 27,035 sites vs 14,597 (7,253 band-only; showcase UTA1 379, TAT1 203, YAV2 147, HOT1 99, MYG1 88, NAB1 18); no sphere samples; build_sim never installs parked hulls.
 

@@ -1,20 +1,11 @@
 ---
 id: EVTK
 title: The windowed game reads a sim tick's events once: effects and event sounds are re-spawned on every render frame that steps no tick (twice per event at 60 Hz), and dropped when a frame steps two
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/main/windowed.rs,engine/crates/game/src/walk.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/bolt_vis.rs,engine/crates/game/src/soldier_vis.rs,engine/CRATES.md
-declares:
-needs:
-effort:
-branch: evtk
-resume: landed 0b994711 2026-10-02
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Found by SQMK (2026-10-02) while fixing the maintainer's doubled 'Follow me — 3 units' line. `Sim::events` holds the LAST stepped
 tick's events until the next step (`core/src/sim/step.rs:73` clears at step start). The windowed frame

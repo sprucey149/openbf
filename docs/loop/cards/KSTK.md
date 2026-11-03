@@ -1,20 +1,10 @@
 ---
 id: KSTK
 title: BF2 Kamino: bots stand next to / on the rail beside a walkway instead of walking it (kam1_bf2_2230_ai_stuck_on_rail.png)
-milestone: M3
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: DONE by BNDS 9440823 (Fable, 2026-10-01) - see the note at the foot; close unless the maintainer's next play shows bots on the hulls
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's BF2 Kamino play: bots (droids) do not use a path — they stand next to it. In the frame two droids are on top of / against

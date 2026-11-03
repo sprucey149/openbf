@@ -1,21 +1,10 @@
 ---
 id: WTCLN
 title: Scratch worktrees remove themselves: a scratch tree stays clean (outputs to lead_tmp/<card>/, the asset symlinks excluded so no tree reads dirty), the session or the landing that made it removes it with a plain git worktree remove, and the planner's pass lists any scratch tree older than one session as a problem
-milestone: M0
-value: 4
-phase: build
-status: blocked
-deps:
-files: scripts/loopctl.py
-declares:
-needs: cloud prerequisites: branch wtcln, baked assets, missions and reference evidence absent
-effort:
-branch: wtcln
-resume: (private workflow note omitted)
-created: 2026-10-21
-alpha: yes
-first: 15
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 INBOX 2026-10-21 20:30 (Claude, the maintainer's yes; `first:` "low but before the next cleanse"). 35 trees under `openbf-wt/`

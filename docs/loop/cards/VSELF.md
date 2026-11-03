@@ -1,20 +1,11 @@
 ---
 id: VSELF
 title: Self-piloted turrets (PilotType = self): the PS2's automatic turret is a seat with a stationary AI controller of its own and nobody in it - BF2 Hoth 1-flag CTF / hunt (14), the campaign's turrets, the dispensed auto turret; build a soldier-less gunner on ai::gunner (re-turret-ai 3, 6)
-milestone: M2
-value: 3
-phase: build
-status: todo
-deps: VTAT
-files: engine/crates/core/src/ai/gunner.rs,engine/crates/core/src/sim/guns.rs,engine/crates/core/src/vehicle.rs,engine/crates/game/src/vehicle_pads.rs
-declares: sim
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-07
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The PS2's "automatic turret" is a turret section whose ODF says `PilotType = self`. The port parses the key and only
 makes such a seat unboardable (`game/src/vehicle_pads.rs` `seat_setup`); nothing ever fires it. No conquest world on

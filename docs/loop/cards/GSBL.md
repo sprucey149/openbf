@@ -1,18 +1,11 @@
 ---
 id: GSBL
 title: Blended draws blend in LINEAR space in the port's sRGB target; the GS blends in display (gamma) units: an ADDITIVE spark (1, 0.5, 0) over NAB1 grass reads (255,146,40) linear vs (255,201,42) in GS units — the port's ord_explosion sparks are orange where the PS2's are yellow
-milestone: M1
-value: 3
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: Restore NAB1 effects/map, PS2 spark crop, port control and approved rendering support; measure G/R and 32-map parity before build or close.
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 6 exact named inputs absent. Restore NAB1 effects/map, PS2 spark crop, port control and approved rendering support; measure G/R and 32-map parity before build or close. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 FXP2 (2026-09-30): the port's ord_explosion on NAB1 grass reads orange, the PS2's yellow. The GS computes (Cs−Cd)·As+Cd / Cs·As+Cd on the frame buffer's own 8-bit display values (re-fx §6.7, re-bolt §3.3); the port's target is Rgba8UnormSrgb, so wgpu blends linearised values. Every NORMAL/ADDITIVE draw is affected (particles, bolt glows, the blend pass).
 

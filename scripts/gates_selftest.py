@@ -4,7 +4,6 @@
   * can_move_golden / plan_goldens: which changed files skip the golden step, which run it, the every-N full run;
   * linked_core / skipped_but_linked: the check that the skip list covers no `core` module a golden test links;
   * Gates._pair: one run when it matches the baseline, a second only when it differs (real move vs nondeterminism);
-  * land.reuse_branch_gates: when main's gates may reuse the branch's;
   * bake_group_of / bake_verdict / Gates.g_bake: a diff in the bake code bakes every group and a difference in a group
     the card does not declare is refused with the file named (card BAKEG);
   * adapter_check / run / land.undeclared: a run that would regenerate a golden stops at once with ADAPTER LOST (exit 7)
@@ -44,7 +43,7 @@ for f, want in [
     ("engine/crates/core/src/a_new_module.rs", True),     # a new core file is not skipped by default
     ("engine/crates/core/Cargo.toml", True), ("engine/crates/core/src/lib.rs", True),
     ("engine/crates/audio/src/lib.rs", False), ("analysis/re-x.md", False), ("PLAN.md", False),
-    ("engine/CRATES.md", False), ("scripts/gates.py", False), ("scripts/loopctl.py", False),
+    ("engine/CRATES.md", False), ("scripts/gates.py", False), ("scripts/cards.py", False),
     ("engine/crates/game/examples/leak_census.rs", False), ("engine/crates/game/tests/roster.rs", False),
     ("engine/goldens/README.md", False),
     ("scripts/goldens.sh", True), ("scripts/rebake.sh", True), ("engine/crates/render/src/lib.rs", True),
@@ -226,26 +225,7 @@ v, n = pair("moved");  check("pair: differs, deterministic -> MOVED after two ru
 v, n = pair("flaky");  check("pair: differs and nondeterministic -> FAIL after two runs", (v, n) == ("FAIL", 2), f"{v} {n}")
 v, n = pair("broken"); check("pair: nonzero exit -> FAIL after one run", (v, n) == ("FAIL", 1), f"{v} {n}")
 
-# ---- land.reuse_branch_gates --------------------------------------------------------------------------------------
-import land
-
-orig = (land.git, gates.full_due)
-try:
-    land.git = lambda *a, **k: "T1"
-    gates.full_due = lambda *a, **k: False
-    ok, why = land.reuse_branch_gates({"tree_branch": "T1"}, {"rebake": []})
-    check("reuse: same tree, no rebake, no full due -> reuse", ok, why)
-    ok, why = land.reuse_branch_gates({"tree_branch": "T1"}, {"rebake": ["maps"]})
-    check("reuse: a declared rebake -> no reuse", not ok, why)
-    ok, why = land.reuse_branch_gates({"tree_branch": "T2"}, {"rebake": []})
-    check("reuse: different tree -> no reuse", not ok, why)
-    ok, why = land.reuse_branch_gates({}, {"rebake": []})
-    check("reuse: no recorded tree -> no reuse", not ok, why)
-    gates.full_due = lambda *a, **k: True
-    ok, why = land.reuse_branch_gates({"tree_branch": "T1"}, {"rebake": []})
-    check("reuse: the every-10 full run is due -> no reuse", not ok, why)
-finally:
-    land.git, gates.full_due = orig
+import gate_policy as land
 
 # ---- the bake gate: a diff in the bake code bakes every group and refuses an undeclared one (card BAKEG) -----------
 for f, want in [
@@ -356,7 +336,7 @@ for f, want in [
     ("engine/crates/audio/src/lib.rs", False), ("engine/crates/net/src/lib.rs", False),
     ("engine/crates/bake/src/main.rs", True), ("engine/crates/mungefs/src/coll.rs", True), ("engine/crates/manifest/src/lib.rs", True),
     ("engine/missions/bf1_kas2_con.ron", True), ("engine/Cargo.lock", True), ("engine/crates/core/Cargo.toml", True),
-    ("analysis/re-x.md", False), ("PLAN.md", False), ("engine/CRATES.md", False), ("scripts/loopctl.py", False),
+    ("analysis/re-x.md", False), ("PLAN.md", False), ("engine/CRATES.md", False), ("scripts/cards.py", False),
     ("scripts/gates.py", True), ("scripts/rebake.sh", True), ("engine/goldens/leak_deps.toml", True),
     ("engine/goldens/deps.toml", False), ("engine/artifacts/loop/STATUS.md", False),
 ]:

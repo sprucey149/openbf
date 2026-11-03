@@ -1,21 +1,10 @@
 ---
 id: LOC3
 title: Locate as the PS2 does: 3-D tests (BF1's hub is a sphere, both games' corridors and last resort are 3-D, only BF2's hub disc is XZ), the corridor with the smallest rA + rB, and a goal arc kept as an arc with the end the route reaches - the port's XZ locate with a fixed nearer end puts 849 of 921 live PS2 soldier goals on the PS2's hub or arc (629 on its destination hub), and the port's own level rule moves a bot's start hub away from the PS2's (BF1 KAS2 86 %, BF2 POL1 80 % agree)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,SPL11
-files: engine/crates/core/src/nav.rs,engine/crates/core/src/ai/route.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: loc3
-resume: landed f5990f8b 2026-10-06
-created: 2026-10-03
-alpha: yes
-domain: ai
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Where a bot's route starts and which hub a post or a goal resolves to both come from `NavGraph::locate_on`. Audit

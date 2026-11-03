@@ -1,17 +1,10 @@
 ---
 id: LITEB
 title: Light static models the PS2's way: the disc's per-vertex COL0 (multiply; 0x200 adds), prelit models (no ambient, no Static lights), BF2 Light2, BF2 sun colour sRGB->linear
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/glb.rs,engine/crates/bake/src/lighting.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/assets.rs,engine/crates/game/src/viewer/look.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/render/src/shader.wgsl,engine/crates/render/src/lighting.rs,engine/crates/render/src/lib.rs
-declares: goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_cor1.png,maps/bf2_dag1.png,maps/bf2_dea1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/bf2_yav1.png,maps/tat1.png,maps/tat2.png,tat1_overview.png,tat1_spawn.png,tat1_hud.png; rebake=tat1,tat2,maps
-branch: liteb
-resume: landed d8e30ba; report reports/20260925_1858_build_LITEB.md
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The port renders BF2's static scenery 1.3-2.6x brighter than the PS2 (F20, F27) because it drops the disc's per-vertex

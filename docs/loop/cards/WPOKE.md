@@ -1,22 +1,11 @@
 ---
 id: WPOKE
 title: BF1 MOVE OUT and AT EASE reach a waiting ground pilot and shorten its pickup window without overriding live board claims
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK
-files: engine/crates/core/src/squad.rs, engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai/ride/tests/order_wait_tests.rs, engine/crates/core/src/sim/vehicles.rs
-declares: sim; sweep
-needs: real-content acceptance and pickup regression gates
-effort:
-branch: main
-resume: Source checkpoint on current main; eight actual-button repairs and forty controls, lifecycle/hash/claim referees and 31 compiled mutations pass. Full real-content Acceptance5 remains pending; preserve pass3 decisions and original GUNWT bars. reports/20261025_2055_card_WPOKE.md
-created: 2026-10-25
-alpha: yes
-tries: 1
-public_issue: https://github.com/sprucey149/openbf/issues/7
+status: archived
+issue: 7
 ---
+
+Historical technical record. Recorded state before archival was `parked`. Current scope and ownership are on [issue #7](https://github.com/sprucey149/openbf/issues/7).
 
 ## Why
 The player cannot tell a newly seated BF1 bot to move out: its pickup wait

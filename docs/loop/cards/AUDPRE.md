@@ -1,21 +1,10 @@
 ---
 id: AUDPRE
 title: An incomplete audit remembers its missing inputs and retries after restoration, while remaining unaudited
-milestone: M0
-value: 4
-phase: build
-status: blocked
-deps:
-files: scripts/loopctl.py
-declares:
-needs: (private workflow note omitted)
-effort:
-branch: audpre
-resume: (private workflow note omitted)
-created: 2026-10-24
-alpha: yes
-domain: tooling
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Two fresh audit sessions selected re-seat-hud.md on unchanged main 3d487d9 and

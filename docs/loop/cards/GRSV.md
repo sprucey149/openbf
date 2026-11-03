@@ -1,20 +1,11 @@
 ---
 id: GRSV
 title: Grass patches, the open [H]s: the GS blend / depth-write of the grasspatch sprites (port: source-over, no depth write) and the BF2 template twin (B2 FUN_003c6788's builder vs B1 FUN_001ae120) — a PCSX2 patched-state or GS read, then match
-milestone: M1
-value: 2
-phase: re
-status: todo
-deps: FOLGG
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-26
-defer: post-alpha
-acceptance: needed
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 FOLGG landed the grass (c7bb5d7) with two PROVISIONAL calls: render::grass composites source-over with no depth write (re-foliage §7 [H]), and BF2 uses BF1's template/quad reading (its fields sit +0x20 later; the atlas and draw selection are checked, the builder is not). Also unread: the +0x58 = 10000 field. Pairs: engine/artifacts/lead_tmp/folgg/pairs/.
 
 ## Planner note (2026-09-30, M-ALPHA)

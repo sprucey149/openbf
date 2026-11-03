@@ -1,18 +1,10 @@
 ---
 id: FOLGG
 title: Grass patches: the PS2's grasspatch sprite clusters — the ferns and grass carpets FOLG places (BF1 END1 KAS1 KAS2 NAB1 YAV1 YAV2; BF2 DAG1 END1 FEL1 KAS2 YAV1) and the grasspatch classes placed as world objects (SKIPC's nab_prop_flowers, yav_prop_grass(_tall))
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: FOLG
-files: engine/crates/bake/src/foliage.rs,engine/crates/manifest/src/lib.rs,engine/crates/manifest/src/tests.rs,engine/crates/render/src/grass.rs,engine/crates/render/src/grass.wgsl,engine/crates/render/src/frame.rs,engine/crates/render/src/lib.rs,engine/crates/game/src/viewer/scene.rs,engine/CRATES.md
-declares: rebake=tat1,tat2,maps; goldens=maps/bf1_end1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_dag1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_kas2.png,maps/bf2_nab2.png,maps/bf2_yav1.png
-needs:
-branch: folgg
-resume: LANDED c7bb5d7; follow-up GRSV (blend/BF2 twin)
-created: 2026-09-26
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The ground carpets the PS2 draws on most jungle/forest maps are `grasspatch` sprite clusters, not models: DAG1's ferns

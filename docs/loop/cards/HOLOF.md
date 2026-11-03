@@ -1,19 +1,12 @@
 ---
 id: HOLOF
 title: Command-post axial flare and authored scan-line animation
-milestone: M1
-value: 2
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/holo.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-22
+status: archived
+issue: 68
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #68](https://github.com/sprucey149/openbf/issues/68).
+
 ## Why
 The command-post beam was missing its axial flare, and its icon ignored
 authored scan-line UV scroll. These are presentation-only gaps left by CPHOL.

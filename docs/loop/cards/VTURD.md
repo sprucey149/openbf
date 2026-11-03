@@ -1,20 +1,11 @@
 ---
 id: VTURD
 title: A building turret turns with its aim (the maintainer's INBOX 2026-10-12 18:55, ask 1a): the TurretNodeName node turns with the seat's look, the AimerNodeName node looks along the aimer's own direction and the barrels slide back at a shot, for the player's turret and the bots', in his third-person seat view and from outside - drawn as rigid per-bone parts moved the way doors are (RE done 2026-10-13, analysis/re-turret-draw.md); the gunner is card VTURG, the wreck and the zoom card VTURX
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTURB
-files: engine/crates/bake/src/map.rs,engine/crates/bake/src/bind_pose.rs,engine/crates/bake/src/hardpoints.rs,engine/crates/bake/src/turret_rig.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/game/src/viewer/turret_pose.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/examples/pose_render.rs,engine/crates/game/tests/turret_pose.rs
-declares: rebake=tat2,maps,common
-needs:
-effort:
-branch: vturd
-resume: landed 1cf5c8be 2026-10-13
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 VTURB keeps the world's static building model for a turret (no viewer geometry), so the gun never visibly turns when a player aims it, and a dead turret (once VHULL lets bolts hit hulls) stays intact.
 

@@ -1,20 +1,11 @@
 ---
 id: MUSV
 title: The battle's music proven in the window, and a music volume: the windowed music frame runs without a sound device so win_run.sh logs the same 'music ... start' lines as the headless round (AMBM's windowed wiring is exercised by no check), and one music gain in the pause menu's options (the PS2's ingamemusic bus)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: AMBM
-files: engine/crates/game/src/main/windowed.rs,engine/crates/game/src/main.rs,engine/crates/game/src/music.rs,engine/crates/game/src/profile.rs,engine/crates/ui/src/menu.rs,engine/CRATES.md
-declares: ci=+1
-needs:
-effort:
-branch: musv
-resume: landed 9f2aa099 2026-10-06
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 AMBM (1bde70c) gave the battle its music, and no check has run the path the maintainer will use. The rules, the records, the
 timing and the decoder are tested, and a headless round logs the changes (`MUSIC_LOG`), but `main/windowed.rs` starts

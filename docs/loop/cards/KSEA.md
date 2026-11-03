@@ -1,20 +1,10 @@
 ---
 id: KSEA
 title: Kamino's sea edge: the port draws its own flat plane past the ocean's far pass; the PS2 draws whole 160 m tiles reaching 0.8*FarSceneRange (640 m), black behind, and fogs the far part with the world fog colour in BF2 too; pose_render must step the ocean
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/water_anim.rs,engine/crates/game/src/viewer/look.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/game/examples/pose_render.rs
-declares: goldens=any; parity=bf1_kam1,bf2_kam1
-needs:
-effort:
-branch: ksea
-resume: landed 6643ba04 2026-09-30
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's first Kamino complaint: "the sea nearby is wavy but then there's a hard cutoff and it looks flat and a different

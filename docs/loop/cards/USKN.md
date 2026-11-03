@@ -1,20 +1,11 @@
 ---
 id: USKN
 title: Per-class skins and size: OverrideTexture / OverrideTexture2 (sharpshooter red, assault/assassin droid blue/red, urban/desert/snow rebels, snow Wookiee, the locals) and SkeletonRootScale / CollisionRootScale (Wookiee 1.15, Gungan 1.1, Jawa 0.6, Ewok 0.5) - the port reads neither
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/soldier.rs, engine/crates/mungefs/src/anim.rs, engine/crates/game/src/animator.rs, engine/crates/game/src/soldier_vis.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/assets.rs
-declares: rebake=side; goldens=units/bf1_all_inf_wookie.png,units/bf1_cis_inf_bdroid.png,units/bf1_cis_inf_sbdroid.png,units/bf2_all_inf_marksperson.png,units/bf2_all_inf_markspersonsnow.png,units/bf2_all_inf_wookie.png,units/bf2_cis_inf_bdroid.png,units/bf2_cis_inf_magnaguard.png,units/bf2_cis_inf_sbdroid.png
-needs:
-effort:
-branch: uskn
-resume: landed c5110943 2026-10-20
-created: 2026-09-29
-alpha: yes
+status: archived
+issue: 82
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #82](https://github.com/sprucey149/openbf/issues/82).
 
 ## Why (RE 2026-10-16, analysis/re-soldier-skeleton-skins.md [O])
 Two visible gaps on every map, one of them on every Clone Wars battle:

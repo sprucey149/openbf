@@ -1,21 +1,12 @@
 ---
 id: UCRY
 title: Hurt and death cries, both games (the maintainer's INBOX 2026-10-12 18:55, ask 3; slice of USND): a unit cries out on a health hit of more than 2 % of the health it has left and survives, and dies with its death cry (cutting the hurt), on ONE voice per unit, in its own class's HurtSound / DeathSound (the droids' droid_death, the Wookiee's, the Gungans') - sample-bank 3-D one-shots outside the voice queue, chance 0.85 / 1, 7-200 m; RE done 2026-10-13 (analysis/re-unit-chatter.md 2.7, 3.6); refereed by cries per hit and by the PS2's per-minute rows; must not overload the mixer
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: USND
-files: engine/crates/game/src/event_sounds.rs,engine/crates/game/src/sounds.rs,engine/crates/core/src/sim/state.rs,engine/crates/game/tests/unit_voice.rs
-declares:
-needs:
-effort:
-branch: ucry
-resume: landed 53a9d7e0 2026-10-16; audit incomplete 2026-10-26 — restore all held primary inputs and verified landing/parent history; reports/20261026_0343_audit_UCRY.md
-domain: audio
-created: 2026-10-13
-alpha: yes
+status: archived
+issue: 82
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #82](https://github.com/sprucey149/openbf/issues/82).
+
 ## Why
 The maintainer's INBOX 2026-10-12 18:55, ask 3 (umbrella card USND, slice 2 of his order): units cry out when hit and when
 they die, in their own faction's voice. The port plays neither. On the PS2 these are the most frequent unit voices

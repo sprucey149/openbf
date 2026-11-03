@@ -1,21 +1,10 @@
 ---
 id: OFFG
 title: BF2 Kamino: bots are off the nav graph 47 % of the time and grind along rails and walls at 0.8 m/s - walk back onto the graph before routing (kills 3.3 / min against the PS2's 17.3; rounds take 35-58 min)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai/steer.rs,engine/crates/core/src/nav.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: offg
-resume: landed fb216e60 2026-10-02
-created: 2026-10-01
-first: 3
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Result (2026-10-02, lane 2; `lead_tmp/offg/README.md`, report `reports/20261002_0530_card_OFFG.md`)
 - Re-taken on main after BOWL: N 13.6 %, slide 19.8 %, 7/8, 8.0 kills / min. **Step 2: the PS2's own soldiers read

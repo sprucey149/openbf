@@ -1,21 +1,11 @@
 ---
 id: ANIMA
 title: The soldier turns his gun to where he aims: the alert timer and its clip rows, the torso aim pose (spine and ribcage) with the PS2's limits, the head-only look when not alert
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: ANIML
-files: engine/crates/game/src/animator.rs,engine/crates/game/src/soldier_vis.rs,engine/CRATES.md
-declares:
-needs:
-effort:
-branch: anima
-resume: landed 87046b14 2026-10-06
-created: 2026-10-05
-alpha: yes
-domain: render
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 With the two layers of ANIML a soldier still fires level whatever the pitch of his aim, and has one idle. On the PS2 a
 soldier who fires, charges or holds a target is ALERT for 2.0-2.5 s: he plays the alert clip rows and his torso is

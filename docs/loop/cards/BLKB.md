@@ -1,21 +1,10 @@
 ---
 id: BLKB
 title: Playtest black box (dev mode): the windowed game keeps the last 60 s of every unit's state in memory and writes a snapshot file on F9, on exit and on a panic, so the maintainer's bug reports come with the bots' goals, legs, steer picks and positions, and the maintainer's own state
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/blackbox.rs,engine/crates/game/src/unit_probe.rs,engine/crates/game/src/main.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/assets.rs,engine/crates/game/src/lib.rs,engine/crates/core/src/ai.rs,engine/crates/core/src/ai/steer.rs,engine/crates/core/src/collision/walls.rs,engine/crates/game/examples/blackbox_read.rs,engine/crates/game/examples/round_to_outcome.rs,engine/CRATES.md,CLAUDE.md
-declares:
-needs:
-effort:
-branch: blkb
-resume: landed 7b64fcd2 2026-10-02
-created: 2026-10-02
-alpha: yes
-first: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02: he now plays the port himself and each time comes back with screenshots and a description. A snapshot of

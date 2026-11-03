@@ -1,18 +1,10 @@
 ---
 id: UTAS
 title: BF2 UTA1: the sinkhole reads as a hole in the world, not a pit
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/map.rs, engine/crates/bake/src/far_lowd.rs (new), engine/crates/manifest/src/lib.rs, engine/crates/game/src/assets.rs, engine/crates/game/src/viewer/scene.rs, engine/crates/render/src (a far-layer near cut), engine/crates/mungefs/src/entity.rs (GeomLod trailer = u32 tri count)
-declares: goldens=maps/bf2_uta1.png; rebake=maps
-needs:
-branch: utas
-resume: LANDED cf1bbaf + 9274979 (report reports/20260929_1100_card_UTAS.md): far LOWD extension drawn past NearSceneRange[1]; con_cp2 black 7.41% -> 0.31%
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## RE result (lane 2, 2026-09-29 — `analysis/re-far-lowd.md` [O], commit 4622b36)
 - The PS2 DOES draw the far wall: `pcsx2/ref/bf2_uta1/cp4_con_cp2_b000.png` (the walkabout's own con_cp2 eye, bearing 0)

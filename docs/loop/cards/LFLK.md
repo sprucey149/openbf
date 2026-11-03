@@ -1,20 +1,11 @@
 ---
 id: LFLK
 title: A lost bot flickers on and off the level and paces for 30-90 s (AUDIT RETW): a lost spell ends at the first think on the level and the leg drags the bot back off - BF2 Utapau's pit under hub 60 recycles 0 -> 9 in 88 seeds with RETW's floor walk (today's main 8, RETW switched off 1), BF1 Rhen Var 1's ramp lost time 676 -> 1535 s per 8 seeds; lost episodes over 20 s 56 -> 103 on main; RETW's window rule and level goal have no unit test
-milestone: M3
-value: 4
-phase: build
-status: todo
-deps: LVLB
-files: engine/crates/core/src/ai/behave.rs, engine/crates/core/src/ai/mover.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/sim/bounds.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 AUDIT RETW (2026-10-16, PARTLY; `engine/artifacts/loop/audits.md`): card RETW's floor walk took 'lost' DEATHS 49 -> 3, but the
 time bots spend lost did not fall with them, because a lost spell ENDS at the first think on the level (card BNDS: "one think on

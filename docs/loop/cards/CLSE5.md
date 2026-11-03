@@ -1,21 +1,10 @@
 ---
 id: CLSE5
 title: The far fire that is left after CLSE4's two rules: snipers deal a third of Kamino's far damage excess (the PS2's stand at snipe hints and hardly shoot - design D13's cost), a shotgun blast deals 39 hp beyond 30 m against the PS2's 16, the port holds a target 3-4 x as long as the PS2 on Polis Massa, and inside 20 m the port deals 0.3-0.6 x the PS2's damage (a PS2 bot fires outside a fight order and on the move) - measure each, put D13 to the maintainer, build the PS2 rules
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps: CLSE4,SNPR
-files: engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/behave.rs
-declares: sweep; arena; sim
-needs: environment — restore baked maps/missions, PS2 corpus and CLSE/CLSE4/audit/SNPR tools and captures; PCSX2 capture environment unavailable
-effort:
-branch:
-resume: Cloud preflight 2026-10-24: blocked before measurement on 3d487d9; restore assets_baked, missions, extracted/discs and ELF corpus, lead_tmp/clse, clse4, audit-clse4, audit-clse2 and snpr plus PCSX2 tools/reference states. Then re-take current-main post-SNPR tables/budgets and two extra PS2 captures/map, run null-controlled candidate 17 BF2 maps x 8 seeds paired tables and 256-round completion; measure PS2 stand only, preserve the maintainer SNPR design. See reports/20261024_0731_card_CLSE5.md.
-created: 2026-10-12
-alpha: yes
-domain: ai
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Card CLSE4's measurement (2026-10-12, `analysis/re-soldier-ai.md` 20) split the port's far fire against the PS2 by

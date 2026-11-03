@@ -1,20 +1,12 @@
 ---
 id: VPOSW
 title: A walker's posed nodes are drawn over its walk skin: the AT-ST's head (cube5) with its chin and ear guns, the AT-AT's head and cannons, BF2's one-man AT-ST aimer_y / aimer_x, the AT-TE's guns and main cannon, the spider walker's turrets - each aimer / turret node of the walker's sections as the PS2's node table holds it (analysis/re-vehicle-pose.md 6)
-milestone: M2
-value: 5
-phase: build
-status: todo
-deps: VPOSE
-files: engine/crates/game/src/viewer/walker_pose.rs, engine/crates/game/src/viewer/vehicles.rs, engine/crates/game/src/vehicle_class.rs, engine/crates/game/tests/suite/walker_nodes.rs (new)
-declares:
-needs:
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-22
-alpha: yes
+status: archived
+issue: 67
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #67](https://github.com/sprucey149/openbf/issues/67).
+
 ## Why
 RE done (`analysis/re-walker-nodes.md` [O], 2026-10-22, docs 8a0c08b). The port's walker skin poses only the walk clip
 (`viewer/walker_pose.rs`), so on five of the six showcase maps a piloted walker never turns its head or guns. On the

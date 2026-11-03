@@ -1,20 +1,11 @@
 ---
 id: FOLGC
 title: Foliage collision: the prp_ path props (tree-billboard lines, DAG1/YAV2/FEL1 hellbushes) are ordinary props with their ODF's collision, and the 0x26edc40c meshes (BF2 FEL1 pitcher bush, GEO1 flat rocks) are solid — the port draws both and collides with neither
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps: FOLG
-files: engine/crates/game/src/assets.rs,engine/crates/core/src/collision/world.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: Keep static body ownership/labels valid when adding foliage collision. The build text names BF2 GEO1 while the later VREST evidence names BF1 GEO1; restore and check both maps, then name which owns the historical laat3 delta before claiming the regression control passed. This is a reference-scope question, not a new measurement. reports/20261024_1151_planner.md
-created: 2026-09-26
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 - **Why:** re-foliage §9/§11: path props are created as entity instances of their class (their ODF's model, collision, leafpatch attachments); a Mesh entry with 0x26edc40c builds a CollisionMesh at every placed spot, at load, map-wide. FOLG (2026-09-26) bakes both (Manifest.foliage.path_props; ManifestFoliageMesh.collision + foliage.bin) but keeps them out of the collision world so the sim gates did not move.
 - **Build:** Scene::collision_world adds the path props as bodies (after the manifest instances, so the existing order is unchanged) and the collision-flagged foliage models (their class geometry's coll mesh at the instance matrix, game::viewer::foliage::matrix — move it where the sim can reach it). Declare the sweep/arena moves on the maps that carry them (BF1 END1 KAS2 NAB2 YAV1 YAV2, BF2 DAG1 END1 FEL1 NAB2 YAV1 GEO1). The maintainer's rule: no collision unless the PS2 gives it one — these are the ones it gives.
 - **Acceptance:** a unit stops at a KAS2 treebill and at a FEL1 pitcher bush; walks through the ferns.

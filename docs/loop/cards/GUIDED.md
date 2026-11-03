@@ -1,19 +1,10 @@
 ---
 id: GUIDED
 title: Fly the award rocket launcher and return control to its soldier
-milestone: M3
-value: 3
-phase: build
-status: parked
-deps:
-files: engine/crates/core/src/guided.rs,engine/crates/core/src/sim/guided.rs,engine/crates/game/src/roster/remotes.rs,engine/crates/game/src/walk.rs
-declares: sim
-needs: original-game comparison — control mapping, camera, flyer motion, collision dimensions and boundary integration
-effort:
-branch:
-resume: User-assigned; use All awards for access; medal progression explicitly separate. Auto-turrets excluded.
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 The ordinary BF2 award rocket launchers were discarded as medal equipment. The maintainer assigned guided-rocket behavior while explicitly keeping medal progression separate; All awards supplies access. BF1's locally available ordinary class data has no equivalent. Portable auto-turrets and heroes remain outside this card's ownership.

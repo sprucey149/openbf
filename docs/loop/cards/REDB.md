@@ -1,18 +1,10 @@
 ---
 id: REDB
 title: BF1 KAS2's red band is the port's fog arithmetic: fog by the PS2's rule (planar view depth, the disc's fogspread table, a lerp on the stored bytes) on every fogged draw — the ground panel and every KAS2 pair lose their red, the vantage keeps the thin dark-red line the PS2 itself draws there
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/render/src/shader.wgsl,engine/crates/render/src/grass.wgsl,engine/crates/render/src/lighting.rs,engine/crates/game/src/viewer/look.rs
-declares: goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/tat1.png,maps/bf2_hot1.png,maps/bf2_myg1.png,tat1_hud.png,tat1_overview.png,tat1_spawn.png,walkabout_stats.ron
-needs:
-branch: redb
-resume: landed 002c99e3 2026-09-29
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## RE result (2026-09-29, lane 2) — `analysis/re-fog-amount.md` [O]
 **Why (rewritten).** The red is the port's fog ARITHMETIC. Past `near` (1000 m) the far land is near-black on both

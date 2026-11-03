@@ -1,22 +1,11 @@
 ---
 id: MUSW
 title: BF2 MUS1's control-room windows are shut in the port: at cp6 (Lava Bridge Control) the PS2 looks through two windows onto the lava river and the stirrer arms, the port draws a solid wall panel there (mus1_prop_window x2, 12.5 m from the post) — find why (an animated shutter the PS2 opens, or a segment the port draws opaque) and fix
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore matching primary PS2 corpora/ELFs, MUS1 source/bake and original cp5_cp6 b000 state/camera/images plus capture tools; remeasure after the existing door/bind work.
-effort:
-branch:
-resume: 20261025_0420 UTC RE input hold, 0/29 minimum paths present. Recheck current-main window7/window8 against the original state; distinguish closed still-render pose from battle door state before any alpha/segment edit. reports/20261025_0420_card_MUSW.md; no unchanged-input retry.
-created: 2026-09-29
-defer: post-alpha
-alpha: 
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 PXWB (2026-09-29): `engine/artifacts/pcsx2/ref/bf2_mus1/walk/pairs/cp5_cp6__sheet.png` b000 (crop
 `lead_tmp/pxwb/frames/mus1_cp5_b000_window.png`): the PS2's two windows show the glowing lava and a stirrer arm —

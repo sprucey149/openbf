@@ -1,20 +1,11 @@
 ---
 id: EVMSG
 title: The PS2's on-screen event messages, built: BF2's systemMessages lines (death / hero / post lines under the PS2's gate, per-viewer team colour, fade 0.5 - hold 3.0 - fade 0.5 s, four lines) and its points + kills pop-up, fed from the sim on every map — replaces the placeholder feed
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BHUD2
-files: engine/crates/ui/src/hud.rs, engine/crates/ui/src/hud_tree.rs, engine/crates/ui/src/hud_draw.rs, engine/crates/game/src/event_feed.rs, engine/crates/game/src/hud_feed.rs, engine/crates/game/src/walk.rs, engine/crates/game/src/main/windowed.rs, engine/crates/game/src/main/headless.rs, engine/crates/game/src/main/battle.rs, engine/crates/mungefs/src/locl.rs, engine/crates/bake/src/hud.rs, engine/crates/bake/src/main.rs, engine/crates/manifest/src/hud.rs, scripts/rebake.sh, engine/CRATES.md
-declares: rebake=common; goldens=tat1_hud.png,tat1_spawn.png
-needs:
-effort: high
-branch: evmsg
-resume: landed 9d4dade5 2026-10-02
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-09-30 11:40: a kill, a death, points, capturing a post or someone else capturing one shows a brief
 message on the PS2; the port shows a placeholder box ("X killed Y" for every death, `game/src/main/windowed.rs` ~1163).

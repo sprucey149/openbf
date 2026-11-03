@@ -1,20 +1,10 @@
 ---
 id: SPHOT
 title: A white specular hot spot on BF2 Kamino's lower landing pad seen from above, where the PS2's pad is mid grey
-milestone: M1
-value: 2
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25 (from QUEUE.md)
-defer: post-alpha
-acceptance: 
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

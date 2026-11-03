@@ -1,22 +1,11 @@
 ---
 id: LAPS
 title: The places the wider recycle watch now shows: bots lapping at BF1 Bespin (0, -160) (24 in 32 rounds, 0 seen before), BF1 Geonosis (108, -12), BF2 Geonosis (-84, 264) and Polis Massa's endgame bursts - find each cause from one snapshot and a flood, cure or file it
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps: OBSR
-files:
-declares:
-needs: cloud prerequisites: baked maps, missions and OBSR/WINS samples and snapshots absent
-effort:
-branch:
-resume: the maintainer promoted this work 2026-10-22: start BF2 GEO1 (-84,264), then other laps; restore OBSR/WINS raw evidence, re-trace current main with a separate headless snapshot directory, then 32-seed cause census and 16-seed win-share referee. See reports/20261024_0713_planner.md.
-created: 2026-10-07
-alpha: yes
-defer:
-first: 4
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 From card OBSR (2026-10-07, landed d9db73c). The last resort now gives up a bot that walks two minutes without
 getting 15 m from where its count began (`RECYCLE_ROAM`); until then its 5 m net could not see a bot LAPPING a few

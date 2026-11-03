@@ -1,20 +1,10 @@
 ---
 id: LKEY
 title: Weapon look keys read the LAST of a repeated line, as the PS2's setters do (NODMG part 1 fixed the sim keys only): 88 look-key repeats still read first-wins - every BF1 / BF2 pistol bolt's GlowLength 0.75 where the disc's later line says 3, the rifle's flash colour 255 80 80 vs 255 100 100 - check the look setters' order in both ELFs, then move the laser / flash / impact / sound readers to prop_last
-milestone: M1
-value: 4
-phase: build
-status: todo
-deps: NODMG
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-22
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 NODMG part 1 (branch nodmg 7a19427, report `reports/20261021_2148_card_NODMG.md`): `ClassDb::prop_last` / `roster::ScalarSrc`

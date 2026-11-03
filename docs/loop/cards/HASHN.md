@@ -1,19 +1,11 @@
 ---
 id: HASHN
 title: Hash-annotated decompiles: every FNV constant in both PS2 decomps followed by its name, and re_check.py hash <name> lists the functions that read a property
-milestone: M0
-value: 3
-phase: build
-status: done
-deps:
-files: scripts/annotate_hashes.py (new), scripts/re_check.py, scripts/tests/test_annotate_hashes.py (new)
-declares:
-needs:
-effort:
-branch: hashn
-resume: (private workflow note omitted)
-created: 2026-10-19
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 (the maintainer's INBOX 2026-10-19, "a tool to build") The RE often asks "which functions read ODF property X": today that is a hand fnv-hash of the name and a grep for the constant in both of its forms (RULES: the signed / 64-bit forms; `lead_tmp/veh0/*.py`). An annotated copy of each decomp, every FNV constant followed by its name as a comment, makes it one grep.
 

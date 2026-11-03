@@ -1,17 +1,10 @@
 ---
 id: LITE
 title: The port runs brighter than the PS2 on static scenery: BF2 Mygeeto ~60 % brighter at mid-distance, BF1 Theed's shaded columns bright beige where the PS2's are d
-milestone: M1
-value: 5
-phase: re
-status: done
-deps:
-files:
-declares:
-branch:
-resume: RE done 2026-09-25: analysis/re-model-lighting.md; builds are LITEB, TERL, FOGN
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance (rewritten 2026-09-25, lane 1 — the RE is DONE)
 - **Why.** The port rendered BF2's static scenery 1.3-2.6x brighter than the PS2, and Theed's shaded columns beige

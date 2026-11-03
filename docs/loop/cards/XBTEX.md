@@ -1,20 +1,12 @@
 ---
 id: XBTEX
 title: The Xbox discs as texture donors: pack.py / rebake.sh find the Xbox BF1 and BF2 images in iso/ by their XDVDFS magic, a bake reader for the Xbox tex_ layout (DXT1 / DXT2-3 as is, the uncompressed formats unswizzled), and bake::tier takes the LARGEST copy per texture name across PS2 / Xbox / PC with the PS2 alpha mask
-milestone: M1
-value: 5
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/tier.rs, engine/crates/mungefs/src/texture_xbox.rs, engine/crates/mungefs/src/xdvdfs.rs, engine/crates/bake/src/main.rs, engine/crates/game/src/assets.rs, scripts/pack.py, scripts/rebake.sh
-declares: rebake=tat1,tat2,common,side,maps
-needs: cloud prerequisites: branch xbtex, baked assets, missions and reference evidence absent
-effort:
-branch: xbtex
-resume: (private workflow note omitted)
-created: 2026-10-21
-alpha: yes
+status: archived
+issue: 99
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #99](https://github.com/sprucey149/openbf/issues/99).
+
 ## Why
 The maintainer (INBOX 2026-10-21 19:30): "pack.py should take whatever versions the player owns and use the best textures".
 First look and tools: `engine/artifacts/lead_tmp/xbtex/README.md` (keep the dir). Measured there: the best copy is per

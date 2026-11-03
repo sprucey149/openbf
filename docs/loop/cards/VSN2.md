@@ -1,20 +1,10 @@
 ---
 id: VSN2
 title: Vehicle sounds 2: walker footsteps and the leg hydraulics (per foot, by the PS2's height rule), turret whir (two looping voices by turn rate), the boarding sound (TurretActivateSound, BF2 also on leaving), the collision sound, the kaadu's and tauntaun's cries on mount / dismount - the PS2 starts 269 walker steps in 105 s on Utapau, the port none
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps: VSND
-files: engine/crates/game/src/vehicle_sounds.rs (new), engine/crates/game/src/engine_sound.rs, engine/crates/game/src/lib.rs, engine/crates/game/src/vehicle_class.rs, engine/crates/game/src/event_sounds.rs, engine/crates/game/src/main/windowed.rs, engine/crates/game/src/main/headless.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/vehicles.rs
-declares:
-needs: environment — Restore UTA1/NAB1 map/sound and side vehicle bakes, missions and VSND sound referee/capture inputs.
-effort:
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Retake current-main SOUND_LOG, then walker steps/hydraulics, whir, board/leave, collision and creature calls; keep all gap/rate/mutation bars. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Card VSND builds the seat guns and the engine loop; these are the other vehicle sounds the PS2 makes

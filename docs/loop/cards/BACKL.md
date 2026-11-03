@@ -1,18 +1,10 @@
 ---
 id: BACKL
 title: The `SunInfo` BACK light: every BF1 map authors `BackAngle`/`BackColor`/`BackDegree`, the port parses and never renders it
-milestone: M1
-value: 3
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: closed 2026-09-26 by SUND's RE: neither ELF reads the SunInfo back light (analysis/re-sun-direction.md §5)
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 A second, opposing light the port drops changes the shaded side of every lit model on BF1 — part of LITE's "too bright /

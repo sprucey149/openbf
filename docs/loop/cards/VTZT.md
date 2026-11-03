@@ -1,19 +1,11 @@
 ---
 id: VTZT
 title: VTURZ's tests miss four mutations (audit VTURZ): the building's hidden range is checked against itself, R3 is tested only as a one-tick tap, the zoomed FOV's expectation is read from the parsed field, and no test drives the game loops' per-viewer draw list; plus three doc numbers to correct
-milestone: M0
-value: 3
-phase: cleanup
-status: blocked
-deps:
-files: engine/crates/game/tests/suite/turret_views.rs,analysis/re-turret-draw.md,engine/crates/core/src/sim/guns.rs
-declares:
-needs: an M4 frame-path test (no test drives the frame draw list); re-kill the 5 unrecorded historical VTURZ mutations; 3 doc corrections (re-turret-draw.md:327-328, guns.rs:140-141)
-effort:
-branch: vtzt
-resume: (private workflow note omitted)
-created: 2026-10-16
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Audit VTURZ (2026-10-16, `reports/20261016_0115_audit_VTURZ.md`): the 6 mutations the test file names are all killed, but four new ones survive with every test green (logs `lead_tmp/audit-vturz/m{1,2,3,4}_*.log`, worktrees `openbf-wt/audit-vturz-m{1..4}-scratch`):
 - M1 `scene.rs` TurretDraw::new's `whole_start..draws.len()` -> `(whole_start + 1)..draws.len()` (a zoomed gunner sees one draw of his building): the test takes `mine` from the same `whole` field.

@@ -1,20 +1,12 @@
 ---
 id: UTALK
 title: BF1's AI squad talk and the natives' idle voice (the maintainer's INBOX 2026-10-12 18:55, ask 3; slice of USND): an AI in a vehicle seat calls for a gunner and the bots that board answer yes, a trooper says follow / move out at its agent's two points (re-squad-orders 5), and a class whose LowHealthThreshold is over 1 - the Gungans, the Ewoks, the Jawa - says its LowHealthSound for as long as it lives; on the PS2 the yes answers are 12 of the Dune Sea's 32 voice lines a minute and the Gungans' takes 16 of Naboo's; RE done (analysis/re-unit-chatter.md 2.8, 5)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: USND,UCALL
-files: engine/crates/core/src/squad.rs,engine/crates/core/src/ai/command.rs,engine/crates/core/src/ai/ride.rs,engine/crates/game/src/announce.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/sounds.rs
-declares: none (sound events only: no sim rule reads them, no hashed state; tests added)
-needs:
-effort:
-branch: utalk
-resume: LANDED e22e702 (report reports/20261016_1325_card_UTALK.md). Lines on the port's events; the PS2's wait-in-seat + boarding is card GUNWT; the Gungans' voice waits on the locals team (MSND note)
-created: 2026-10-13
-alpha: yes
+status: archived
+issue: 82
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #82](https://github.com/sprucey149/openbf/issues/82).
+
 ## Why
 The maintainer's INBOX 2026-10-12 18:55, ask 3 (umbrella card USND, slice 3 of his order): the AI's own squad talk and the
 answers to it, and with it the natives' constant voice. On the PS2's BF1 these are most of the voice slot: on the

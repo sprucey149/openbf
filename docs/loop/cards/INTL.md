@@ -1,22 +1,11 @@
 ---
 id: INTL
 title: BF1 interiors are 2-3x darker and uncoloured in the port: GEO1's cave glows red on the PS2 (rock (54,16,8) vs (18,9,3)), RHN2's blue-floored hall casts blue on its walls ((48,66,74) vs (31,27,25)) — the PS2 adds a light indoors the port lacks (PXWA walkabout pairs)
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: primary inputs: PS2 corpora/ELFs, INTL saved states and pairs, PCSX2 tools and real map content absent
-effort:
-branch:
-resume: Restore the inputs listed in engine/artifacts/loop/reports/20261025_0358_card_INTL.md; reproduce current-main GEO1/RHN2 and BES2 draws, identify static/material flags and light sets, then controlled PS2 knockouts and independent verification before build. Do not repeat the same missing-input attempt.
-created: 2026-09-29
-defer: post-alpha
-value_pre_alpha: 4
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The PXWA walkabout (PCSX2 at the port's own post stands, 1-unit battle) shows two BF1 interiors lit 2-3x brighter and
 COLOURED on the PS2 where the port draws them dim and neutral-brown:

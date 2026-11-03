@@ -1,20 +1,11 @@
 ---
 id: PACK
 title: FINAL DELIVERABLE (only on the maintainer's go-ahead): one self-contained game binary (no DLLs / helper files) + one Python script: 2 ISOs -> bake -> compile -> the single binary
-milestone: M6
-value: 1
-phase: build
-status: done
-deps:
-files:
-declares:
-needs: maintainer — his go-ahead when the core game is basically done; do NOT start before (the maintainer, 2026-09-25)
-effort:
-branch:
-resume: landed 530dc45 2026-10-18
-created: 2026-09-25
-defer: post-alpha
+status: archived
+issue: 99
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #99](https://github.com/sprucey149/openbf/issues/99).
 
 ## The maintainer's spec (2026-09-25)
 Personal use only (the maintainer + local multiplayer / splitscreen with friends; never on the internet), so legal/sharing is not a concern — but assets still never go into git. At the END of the project, not during dev work:

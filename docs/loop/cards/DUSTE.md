@@ -1,19 +1,11 @@
 ---
 id: DUSTE
 title: The dusteffect class — volumes of big drifting alpha sprites (mist, dust, blowing snow) — is drawn by the PS2 and has no code in the port: BF2 POL1's 8 pol1_prop_mist volumes haze the whole asteroid surface on the PS2 (far ridges and the nebula behind a pale drifting mist), crisp in the port; placed on 10 port maps (BF1 GEO1 TAT1 HOT1 KAM1 YAV1 YAV2, BF2 HOT1 KAM1 POL1 YAV1) (PXWB walkabout pairs)
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore both primary corpora/discs, mist class data and POL1 picture pairs; RE DustEffect setters/draw rules with independent verification before a build split.
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 7/7 exact named paths absent. Restore both primary corpora/discs, mist class data and POL1 picture pairs; RE DustEffect setters/draw rules with independent verification before a build split. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 PXWB (2026-09-29) at POL1's three outdoor posts: the PS2 draws a pale, drifting mist over the asteroid's surface and
 across the sky; the port's surface and nebula are crisp (`engine/artifacts/pcsx2/ref/bf2_pol1/walk/pairs/

@@ -1,19 +1,11 @@
 ---
 id: VDMGA
 title: Audit vehicle and turret health: player damage does reach a vehicle (an AT-TE at 10589 of 40000 after the player's rockets), but every vehicle a bot destroyed reads "destroyed by #-1" (no killer credited) and the spiders' health reads 17336 / 19952 / 20000 - check damage in, kill credit and the max-health numbers, vehicles and building turrets, both games
-milestone: M2
-value: 3
-phase: measure
-status: todo
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The maintainer 2026-10-28: "turrets and vehicles can't lose health yet?", then "my health [rockets] was taking down clone vehicles, but vehicle and turret health should be investigated nonetheless". An outside contributor reports the fusion cutter (#35) cannot heal vehicles or turrets because their health never drops.
 

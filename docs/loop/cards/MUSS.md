@@ -1,21 +1,11 @@
 ---
 id: MUSS
 title: BF2 MUS1: a hard seam between the lava backdrop and the sky, in a STILL frame
-milestone: M1
-value: 2
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25 (from QUEUE.md)
-defer: post-alpha
-acceptance: needed
-public_issue: https://github.com/sprucey149/openbf/issues/17
+status: archived
+issue: 17
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #17](https://github.com/sprucey149/openbf/issues/17).
 
 ## Why / Evidence / Acceptance
 See the original entry below; the first session to work this card rewrites this section into short Why / Evidence / Acceptance lines and fills `files:` and `declares:`.

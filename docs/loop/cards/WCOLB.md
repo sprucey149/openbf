@@ -1,18 +1,10 @@
 ---
 id: WCOLB
 title: Build the flat water's PS2 colour model: unlit, the LUT mean, the view-angle term (+ SpecularColor x (1 - V.y)^3), the speckle's sun lobe, the ocean at unity
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: game/src/viewer/{look,scene}.rs, game/tests/water_look.rs, render/src/{shader.wgsl,lighting,frame,lib}.rs, CRATES.md
-declares: goldens=maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab2.png,maps/bf1_yav1.png,maps/bf2_kas2.png,maps/bf2_nab2.png,maps/bf2_yav1.png,maps/bf2_dea1.png,maps/bf2_fel1.png,maps/bf2_dag1.png,maps/bf2_kam1.png
-needs:
-branch: wcolb
-resume: landed 1f43333b 2026-09-25
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 - **Why:** the PS2's flat water is a light, see-through teal (a view-angle term); the port's is a dark lit tint with a white speckle mottle (PCSX2 F1/F8/F13/F18/F25).

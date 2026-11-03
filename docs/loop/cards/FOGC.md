@@ -1,22 +1,10 @@
 ---
 id: FOGC
 title: The PS2's fog curve beyond the fogspread diagonal: in the fogged bins BF1 KAS2's sheet takes 0.5-0.65x fogspread(f,f), and patched ramps give different amounts at the same f - read the VU1 UV-matrix fog path (u64 bit 0x100) or patch the GS CLUT to an index ramp in a kept state and read the sampled texel back
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: restore BF1 fog primary evidence and one FOGC research route; original paired states/frames/depths and real rendering inputs before validation
-effort:
-branch:
-resume: 20261025_0330 input hold; 57 inventoried paths missing. Restore inputs before retry; engine/artifacts/loop/reports/20261025_0330_card_FOGC.md and private continuation below. Diagonal remains PROVISIONAL; Acceptance unchanged.
-created: 2026-09-29
-defer: post-alpha
-value_pre_alpha: 4
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 REDB builds the PS2's fog amount as the disc's `fogspread` table sampled on its diagonal at planar f (`analysis/re-fog-amount.md`

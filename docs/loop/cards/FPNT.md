@@ -1,19 +1,11 @@
 ---
 id: FPNT
 title: Two small weapon rules to the PS2's, one session and one gates run (FPNT + AMMO): (1) every soldier's shot leaves the PS2's fire point - a stance table shared by both games (stand 1.58 m up, 0.06 m right, 0.24 m ahead at the spawn pitch; crouch 1.15 m; prone 0.40 m) in place of the port's 75 % of the capsule, bots included, and every soldier spawns at pitch -0.07 rad; (2) a primary weapon's reserve is WeaponAmmo N = one clip loaded + N-1 in reserve, below 1 = endless
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps: AIMA
-files: engine/crates/core/src/unit.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/soldier.rs, engine/crates/core/src/weapon.rs, engine/crates/game/src/roster.rs, engine/crates/core/src/sim/pickups.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: retain cloud restoration hold and fpnt_cloud/next_prompt.md; Part 2 must update primary reserve_cap as well as spawn construction, with refill/held/infinite controls. No source change or current measurement. reports/20261024_1306_planner.md
-created: 2026-10-02
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The port fires every bolt from feet + 75 % of the capsule height (`core::unit::muzzle_height`, PROVISIONAL: 1.425 m
 standing) along the aim. On the PS2 the fire point is a table by stance, the same numbers in both games, used by

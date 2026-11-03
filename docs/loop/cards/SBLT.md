@@ -1,20 +1,10 @@
 ---
 id: SBLT
 title: Soldier base lighting: the port's un-passed droids are darker than the PS2's at the same pose (BF1 KAS2 SBD luma mean 26 vs 54, BF2 KAM1 battle droid 39 vs 48) — find which term (ambient, sun d4, the gamma-space GS modulate, the texture) and fix
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/lighting.rs
-declares: rebake=maps (bf1_kas2/bf1_nab1/bf1_yav2 manifest.ron only: character_ambient Some(0.2159 x3)); goldens=maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_yav2.png (their soldier-for-scale, LightPath::Character; unit sheets carry no map lighting); ci (+1 test)
-needs: cloud prerequisites: branch sblt, baked assets, missions and reference evidence absent
-effort: high
-branch: sblt
-resume: (private workflow note omitted)
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 DSHN's RE measured the droids with the specular pass removed, at the same camera, in both the PS2 and the port. The

@@ -1,20 +1,10 @@
 ---
 id: HITSND
 title: Impact audio follows the firing ordnance at contact, without a rifle sound per splash victim
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps: TESTEV
-files: engine/crates/game/src/event_sounds.rs, engine/crates/game/src/event_sounds/contact_tests.rs (new), engine/CRATES.md
-declares:
-needs: listening to the named takes (the maintainer, windowed game); real-class census and mutations validated locally 2026-10-25
-effort:
-branch:
-resume: 20261025_0739 implemented Impact contact provenance only; game367/fmt/Clippy pass, parent and five mutations fail relevant caller assertions. Actual-content acceptance pending; reports/20261025_0739_card_HITSND.md and validation continuation.
-created: 2026-10-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 GSND finding 1 is reproducible through the simulation and the event-sound caller.

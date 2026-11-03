@@ -1,20 +1,11 @@
 ---
 id: KNOCK2
 title: Thrown bodies move as on the PS2 (AUDIT KNOCK PARTLY): BF2's tumble / get-up / corpse integrator (FUN_00240bf8: -2.5 / -10 x the velocity along the body rows, no floor test; the corpse brakes in the air and slides on slopes), horizontal speed^2 in the landing / tumble / get-up tests (both games), the corpse draw follows the sim body and a respawn keeps a flying body's item drop, and tests for the 19 live survivors of the audit's mutations (no foot death drops its item, corpses through walls, firing while thrown)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/soldier.rs, engine/crates/core/src/soldier/tests.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/combat.rs, engine/crates/core/src/sim/spawn.rs, engine/crates/core/src/sim/blast.rs, engine/crates/game/src/soldier_vis.rs, engine/crates/game/src/animator.rs, engine/crates/game/src/animator/tests.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume: CLOUD BLOCKED 2026-10-24 08:09 UTC: missing knock BF2 rows, audit-knock mutation/observer tools and raw evidence, PS2 corpora/discs, baked assets/missions and GPU. Restore paths in engine/artifacts/loop/reports/20261024_0809_card_KNOCK2.json; reproduce current-main body census; settle PS2 respawn/off-map [H] before isolated build. See engine/artifacts/loop/reports/20261024_0809_card_KNOCK2.md.
-created: 2026-10-21
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why (AUDIT KNOCK, 2026-10-21: PARTLY)
 The landing's BF1 rules hold against the PS2: the push and its skip set, the apply, the thrown flight, the lock,
 the kick, the late death and the corpse (two RE verifiers on 17 claims, none refuted; every sweep number reproduced

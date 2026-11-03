@@ -1,20 +1,10 @@
 ---
 id: B1LL
 title: BF1's local lights: on the PS2 every BF1 model draw takes up to 4 omnis - the command posts' hologram light (r 8 at the hp_hologram bone; friend green, enemy red, neutral grey), EntityLights at their bones on 8 maps (HOT1 43, KAS1 49), the point weight to the 4th power - and the port lights BF1 with none
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps: B1DK
-files: engine/crates/game/src/point_light.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/bake/src/map.rs,engine/crates/bake/src/entity_light.rs,engine/crates/bake/src/hardpoints.rs,engine/crates/manifest/src/lib.rs,engine/crates/render/src/shader.wgsl,engine/crates/render/src/point_light.rs
-declares: ci (+2 tests: bake a_bf1_light_class_scales_by_its_alpha, game a_bf1_post_lights_green_for_a_friend_at_its_bone; +1 ignored GPU test light_path::an_edge_on_light_takes_a_quarter_on_bf2_and_a_sixteenth_on_bf1); goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/tat1.png,tat1_spawn.png,tat1_overview.png,tat1_hud.png,walkabout_stats.ron; rebake=maps,tat1 (8 manifests: bf1_bes2 end1 geo1 hot1 kas1 kas2 rhn2, tat1); parity=bf1_*,tat1 (all fall or within 0.1)
-needs: cloud prerequisites: branch b1ll, baked assets, missions and reference evidence absent
-effort:
-branch: b1ll
-resume: (private workflow note omitted)
-created: 2026-10-05
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 A friendly command post on the PS2's BF1 washes the deck round it green, an enemy one red, and lights the soldiers

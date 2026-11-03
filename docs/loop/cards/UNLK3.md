@@ -1,19 +1,11 @@
 ---
 id: UNLK3
 title: Unlock stages from career kills (OURS): 0 kills = the full points (8 / 12), 50 kills = half (4 / 6), 100 kills = unlocked for good - one table in profile; the class select shows the progress ('14 / 25 kills with the Jet Trooper')
-milestone: M3
-value: 3
-phase: build
-status: in-progress
-deps: UNLK1,UNLK2
-files: engine/crates/game/src/unlocks.rs,engine/crates/game/src/roster.rs,engine/crates/core/src/sim/spawn/runtime.rs,engine/crates/core/src/sim/state.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/round_stats.rs,engine/crates/ui/src/stats.rs,engine/crates/ui/src/stats_draw.rs,engine/crates/game/examples/stats_capture.rs,engine/crates/game/tests/suite/unlocks_bf1.rs
-declares:
-needs:
-effort:
-branch: worktree-agent-a053df4c9af59dee5
-resume: 2026-10-28 built with UNLK1's BF1 lock and the Career Stats unlocks page on the maintainer's design (below); waiting for the maintainer's playtest. Still owed: the class-select progress line and its picture.
-created: 2026-10-21
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `in-progress`.
+
 ## Why
 The maintainer (INBOX 2026-10-21 17:50 item 4b). The kill numbers and whether officers count as special are asked in STATUS
 (default: 25 / 100, officers count with their 8-point tier).

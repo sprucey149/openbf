@@ -1,19 +1,10 @@
 ---
 id: FXB
 title: Laser bolts, build: the ordnance class's own draw — two camera-facing tapered ribbons (core LaserTexture NORMAL + lightglow ADDITIVE, re-bolt §3-§4) from the weapon's fire point, replacing the port's boxes (the BF2 light is FXBL)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/weapon.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/walk.rs, engine/crates/game/src/main/battle.rs, engine/crates/game/src/viewer/upload.rs, engine/crates/render/src/(new bolt ribbon pass + wgsl), engine/crates/render/src/frame.rs, engine/CRATES.md
-declares:
-needs:
-branch: fxb
-resume: LANDED a788a31 + b21de48 (report reports/20260930_0524_card_FXB.md). Follow-ups: FXBL (the BF2 light, from bolt_vis's tracked bolts); FXP2 should merge bolts into its far-to-near particle list; a true hp_fire needs the weapon bake to keep GLB nodes
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX 2026-09-28 (d) lists "bolts and tracers" with the effects "seen in every second of every battle". The

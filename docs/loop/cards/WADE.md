@@ -1,22 +1,10 @@
 ---
 id: WADE
 title: A wading soldier shows through the water: draw the skinned soldiers BEFORE the near water, as both PS2s do (opaque model segments bucket 5, the near flat water bucket 8 / 7, blended with Z write over them) - the maintainer's BF1 KAS2 stormtrooper ends at the belt, BF2 FEL1's shins are cut off; and the walkabout's soldier stands on the floor, not 0.59 m over BF2 YAV1's bazaar
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/render/src/frame.rs,engine/crates/render/src/draw.rs,engine/crates/game/src/gallery.rs
-declares: goldens=walkabout_stats.ron
-needs:
-effort:
-branch: wade
-resume: landed e8fc7b89 2026-10-06
-created: 2026-09-28
-defer: 
-value_pre_alpha: 4
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why (rewritten 2026-10-06 after the capture + RE; the original card text is kept below)
 The maintainer, playtest 2026-10-04: "Water still isn't transparent ... you can't see its body in the water"

@@ -1,21 +1,11 @@
 ---
 id: NODMG
 title: Shots that hit but do no damage (the maintainer's playtest 10-21): every bolt / bullet that ends in a unit-impact effect against the target's health on its next tick - per weapon, target class, map and game; name the case, fix it at the root, keep the census as a test (the Hailfire droid's chaingun on the player included)
-milestone: M3
-value: 5
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/classdb.rs, engine/crates/core/src/weapon.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/vehicle_pads.rs, engine/crates/game/tests/suite/roster.rs
-declares: sweep; arena; sim
-needs: cloud prerequisites: branch nodmg, baked assets, missions and reference evidence absent
-effort:
-branch: nodmg
-resume: (private workflow note omitted)
-created: 2026-10-21
-alpha: yes
-first: 8
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer (INBOX 2026-10-21 18:40 item 1): a bullet hits a unit, the impact particle shows, and the health does not always drop.
 It hurts every fight. INBOX 20:00 item 5b adds a weapon that seems to do no damage to the player at all: start with the

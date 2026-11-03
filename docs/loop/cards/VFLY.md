@@ -1,22 +1,11 @@
 ---
 id: VFLY
 title: The flyer, transcribed: the 5-state machine (landed/takeoff/flying/landing/4) and the Min/Mid/Max speed law, BF1 FUN_001d9180 and BF2 FUN_00202d08 — then a build card (BF1 flyers, faithful per map)
-milestone: M2
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: restore matching BF1/BF2 corpora and ELFs for transcription; disc extracts, PCSX2 toolkit and checked states for live contact/height trials
-effort:
-branch:
-resume: 20261025_0507 input hold: 0/14 inspected reference paths (static primaries 0/4); restore evidence, derive both dispatches/state-4 writers/contact and speed law, then independent verifier before doc/build card; reports/20261025_0507_card_VFLY.md; do not retry unchanged inputs
-created: 2026-09-25
-defer: post-alpha
-value_pre_alpha: 4
-tries: 1
+status: archived
+issue: 97
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #97](https://github.com/sprucey149/openbf/issues/97).
 
 ## Why
 15 flyer classes; PLAN keeps flyers faithful per source map (BF1's flyable craft on BF1 maps).

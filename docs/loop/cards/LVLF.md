@@ -1,20 +1,11 @@
 ---
 id: LVLF
 title: Bots recycled as 'lost' on open terrain: BF2 UTA1 71, BF1 HOT1 33, BF2 KAM1 23 'lost' deaths over 8 seeds - say for each whether the unit was really off the level or Sim::level_at read terrain (Hoth's trenches, Utapau's sinkhole floors) as off, and fix the test before STLVL / OFFG / STEND lean on it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/bounds.rs,engine/crates/core/src/sim/spawn.rs,engine/CRATES.md
-declares: sweep
-needs:
-effort:
-branch: lvlf
-resume: landed 22eddb07 2026-10-02
-created: 2026-10-01
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-10-01 14:40, item 3 (repeated 17:15, not carded until now): `Sim::level_at` gives false positives under terrain (Hoth's trenches), and it should be right before any rule leans on it harder. Three of the maintainer's `first:` cards do lean on it: OFFG's rule (step 3 names `Sim::level_at`), STLVL (level-aware arrival) and STEND (the endgame hunt that was tried in BNDS and dropped because 'the hunters end up off the level': 155 lost deaths on Hoth, `lead_tmp/fable2/README.md` Task 3). A bot that level_at calls off for 45 s is killed with its ticket (BNDS, `core/src/ai/brain.rs` `st.lost`), so a false positive is a bot the player sees vanish on open ground. UTA1 and HOT1 are showcase maps.
 

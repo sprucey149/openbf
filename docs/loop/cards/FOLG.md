@@ -1,18 +1,10 @@
 ---
 id: FOLG
 title: The terrain's foliage: the PS2 carpets the ground with ferns and grass (BF2 Dagobah and Felucia; BF1 KAS1, KAS2's high ground, YAV1), the port draws bare terrai
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/foliage.rs,engine/crates/mungefs/src/lib.rs,engine/crates/bake/src/foliage.rs,engine/crates/bake/src/map.rs,engine/crates/manifest/src/lib.rs,engine/crates/manifest/src/tests.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/render/src/draw.rs,engine/crates/render/src/shader.wgsl,engine/CRATES.md
-declares: rebake=tat1,tat2,maps; goldens=maps/bf1_end1.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf1_geo1.png,maps/bf1_rhn2.png,maps/bf1_kas2.png,maps/bf1_nab2.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_dag1.png,maps/bf2_nab2.png,maps/bf2_yav1.png
-needs:
-branch: folg
-resume: landed 9b8d040a 2026-09-26
-created: 2026-09-25 (from QUEUE.md)
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance
 - **Why:** the PS2 plants ferns, grass, bushes, rocks and tree-billboard lines on BF1 END1/KAS1/KAS2/NAB1/NAB2/YAV1/

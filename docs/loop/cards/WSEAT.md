@@ -1,20 +1,11 @@
 ---
 id: WSEAT
 title: A walker's turret section keeps every seat key, as BF2's MountedTurret setter claims them through the seat setter FUN_002f6eb8 (B2:191723-191731): today PilotType, EyePointOffset, TrackCenter/TrackOffset, TiltValue and ThirdPersonFOV authored in a walker TURRET section fall onto the walker's own pilot seat (vehicle_class::scoped, walker::turret_claims); card VRIDE kept only the pose keys
-milestone: M2
-value: 3
-phase: build
-status: parked
-deps:
-files: engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/vehicle_class/walker.rs
-declares:
-needs: (private workflow note omitted)
-effort:
-branch: wseat-route-20261024
-resume: (private workflow note omitted)
-created: 2026-10-15
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
+
 ## Why
 Found building VRIDE (analysis/re-vehicle-riders.md 7): the port's walker scoping gives the turret setter first refusal with its OWN compare list only; on the PS2 the turret setter falls through to the Controllable seat setter and returns its claim, so every seat key of a walker turret section stays with that section. The port moves them to the walker's pilot seat: a walker gunner section's PilotType / EyePointOffset / camera keys override the pilot's (boarding, the gun's eye, the seat camera). VRIDE fixed the five pose keys (draw only, no sim effect).
 

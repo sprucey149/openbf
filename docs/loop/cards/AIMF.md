@@ -1,18 +1,10 @@
 ---
 id: AIMF
 title: The soldier's magnet acquisition is the PS2's filtered cone (FUN_0025e098: sphere query, Target team/kind bits, cone score, LOS), not the MountedTurret ray the port copied — it can magnet onto friendlies
-milestone: M3
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/input.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/weapon.rs, engine/crates/core/src/unit.rs, engine/crates/game/src/walk.rs (tests), class data plumbing for the soldier model box (bake::soldier aabb -> the unit)
-declares:
-needs:
-branch: aimf
-resume: landed 73632e1; follow-ups AIMBX (per-class box), AIMG (a referee that sees the magnet), RETC (reads Sim::reticle_pick)
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The port's soldier magnet (`core::sim::input` `Sim::acquire_magnet`, `engine/crates/core/src/sim/input.rs:118-145`) takes

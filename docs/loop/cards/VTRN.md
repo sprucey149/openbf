@@ -1,20 +1,12 @@
 ---
 id: VTRN
 title: Vehicles turn too slowly with the controller (the maintainer 10-21): the PS2's turn rate per vehicle class at full stick (deg / s, its response curve and dead zone) against the port's on the same stick input, hover / speeder / walker / flyer, both games - fix where the port is slower
-milestone: M2
-value: 4
-phase: measure
-status: blocked
-deps: PAD
-files:
-declares:
-needs: environment — Restore both side vehicle bakes/missions, PS2 toolkit/discs and full/half-stick reference trials.
-effort:
-branch:
-resume: 2026-10-24 10:33 UTC: planner prerequisite hold; no new implementation/acceptance. Measure real input-path before/after LOOKR on current main, per family/class; preserve 5 percent and one-second turn bars. No LOOKR dependency added: baseline measurement can precede its build. Exact missing paths: lead_tmp/planner_20261024_1026/preflight.json. Restore or regenerate verified equivalent inputs before clearing hold. reports/20261024_1026_planner.md
-created: 2026-10-21
-alpha: yes
+status: archived
+issue: 97
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #97](https://github.com/sprucey149/openbf/issues/97).
+
 ## Why
 The maintainer (INBOX 2026-10-21 17:50 item 5): vehicles turn more slowly than in the original games. Check that the stick is not
 read through the soldier's look curve or a dead zone twice, and that the vehicle's own turn law (HVRE, VWLK, the air

@@ -1,21 +1,10 @@
 ---
 id: BF1BK
 title: Two ground movers to the PS2's, one build in soldier.rs: (a) BF1 soldiers walk BACKWARD at MaxSpeed - PS2 -6.50 m/s standing and -4.55 crouched (BF1 Theed, live), the port -4.5 and -3.15, it applies BF2's MaxStrafeSpeed backpedal cap to both games; (b) BF2's roll is the drag mover (FUN_00248560, 1.4 m/s2 of stick, no target) - stick held it keeps 10.5 m/s over 8.78 m (port slows to 9.29, 8.21 m) and a sideways stick bends it 0.38 m (port 0.08)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/soldier.rs
-declares: sim; sweep; arena; leak
-needs: cloud prerequisites: branch bf1bk, baked assets, missions and reference evidence absent
-effort:
-branch: bf1bk
-resume: (private workflow note omitted)
-created: 2026-10-02
-alpha: yes
-domain: physics
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 A BF1 soldier on the PS2 walks backward as fast as forward; the port's walks back at the strafe speed, 31 % slower, on

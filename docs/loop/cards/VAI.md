@@ -1,18 +1,10 @@
 ---
 id: VAI
 title: Vehicle AI: bots board (the PS2's enter request), drive with RE_LOG's vehicle nav constants, fire the seat weapons, dismount
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VSEAT,VPAD
-files: engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/sim/seats.rs,engine/crates/core/src/vehicle.rs,engine/crates/game/src/vehicle_class.rs
-declares: sweep
-needs:
-branch: vai
-resume: landed f56e5ed9 2026-09-29
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 M2 is done only when AI drives every vehicle class a map ships.

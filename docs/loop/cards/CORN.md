@@ -1,20 +1,10 @@
 ---
 id: CORN
 title: Aim points in walls: the corner search walks a leg THROUGH a barrier it ignores (BF2 Tantive IV's leg 20 > 79: 36 of the worst door's 45 stalls, a corner inside the wall beside the pod room door), and a hub point or corner can lie behind a door's jamb - find the rule that cures them without the all-maps cost the first prototype had
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: DOORS
-files: engine/crates/core/src/nav.rs, engine/crates/core/src/nav/tests.rs
-declares: sim; sweep; arena
-needs: cloud prerequisites: branch corn, baked assets, missions and reference evidence absent
-effort: high
-branch: corn
-resume: (private workflow note omitted)
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Filed by card DOORS's measure pass (2026-10-12). After MOUTH2 and DOORS a door's LEAF no longer turns bots away; what

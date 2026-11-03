@@ -1,21 +1,10 @@
 ---
 id: LVLB
 title: The level test calls a ramp behind a barrier OFF the level (BOWL's 0.75 m rule): on BF1 Rhen Var Harbor bots walking down the tunnel go lost and turn back every 1.7 s (lost 13,530 unit-s in 32 rounds; the rule off: 36), a 45 degree ramp on BF2 UTA1 and the Yavin temple walkway read off; and the rule's ON band outside a Kamino rail holds a bot for 323 s
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/sim/bounds.rs
-declares: sweep; arena
-needs:
-effort:
-branch:
-resume: Cloud preflight 20261024_0813 UTC: restore audit-bowl tools/raw runs, bowl evidence, audit-retw traces, baked maps/common/classes/vehicles and missions; remeasure current-main profile and 32-map 8-seed UNIT_SAMPLES before building. See engine/artifacts/loop/reports/20261024_0813_card_LVLB.md; no implementation or acceptance run.
-created: 2026-10-02
-domain: ai
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 BOWL (b1a32db3) made `Sim::level_at` allow only `RIM_DROP` 0.75 m under the floor where a walk from a hub was stopped

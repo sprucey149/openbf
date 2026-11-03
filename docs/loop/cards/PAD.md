@@ -1,20 +1,11 @@
 ---
 id: PAD
 title: Scripted pad input on the PS2: drive PCSX2 with a pad script and screenshots through its PINE socket on top of engine/artifacts/pcsx2/, so a measurement can be a scripted action (a full-stick vehicle turn read from RAM is the first user) - headless, isolated, under the GPU lock
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: engine/artifacts/pcsx2/README.md
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-21
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 INBOX 2026-10-21 20:00 item 2. The maintainer's vehicle turn rate (VTRN) needs a full-stick turn per vehicle class with degrees /
 s read from RAM; other measurements want the same. Some scripted-pad trials already exist (the roll strip kit under

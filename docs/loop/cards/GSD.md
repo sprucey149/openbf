@@ -1,19 +1,10 @@
 ---
 id: GSD
 title: A GS-register dump from PCSX2, for the questions only the GS can answer: the D-pad menu's second material layer, the wreck's LOD at ~475 m, the far water fog pass, the 0x04 crate sheet
-milestone: M1
-value: 2
-phase: capture
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-25
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 Several `[D]`/`[H]` rendering answers wait on what the GS actually receives, not on the CPU's reading.

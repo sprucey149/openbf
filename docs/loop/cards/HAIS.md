@@ -1,20 +1,11 @@
 ---
 id: HAIS
 title: Hover bots steer by the PS2's law: the shared FUN_002a54d8 with a strafe speed, FUN_002a45a0's squared turn curve, and FUN_00220528's own goal handling (the port's steer_to is OURS)
-milestone: M2
-value: 4
-phase: re
-status: done
-deps: WAI
-files:
-declares: sim; sweep
-needs:
-effort:
-branch:
-resume: closed 2026-10-03: analysis/re-hover-ai.md (docs b073094), numbers on VDROP
-created: 2026-10-01
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The port's hover driver (ai::ride::steer_to) is OURS / PROVISIONAL: a proportional turn and a throttle cone. The PS2's
 hover AI FUN_00220528 calls the same steering FUN_002a54d8 the walker uses, with K+0x670 (ForwardSpeed), K+0x678

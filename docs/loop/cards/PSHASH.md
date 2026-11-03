@@ -1,19 +1,10 @@
 ---
 id: PSHASH
 title: The PS2 half of the state diff: read SHASH's fields out of a running PCSX2 every N frames (RAM via ps2live's shm reader, or PINE / the GDB stub on EE port 10501 if the shm read is not frame-synchronous) during a recorded replay, and write a trace in SHASH's format
-milestone: M0
-value: 3
-phase: capture
-status: todo
-deps: SHASH,SHSRE,PSREC
-files: engine/artifacts/pcsx2/pstrace.py (new)
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-08
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 The second stream FDIFF compares. Reads must be taken at a KNOWN guest frame: a free-running `pread` of /dev/shm RAM from outside while the emulator runs can tear (positions from frame t, health from t+1). PINE/GDB can pause the VM or take the read at a vsync breakpoint.

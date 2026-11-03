@@ -1,21 +1,10 @@
 ---
 id: B1DK
 title: Kamino's decks after LSUM: BF2 makes an EntityLight whose hardpoint the carrier lacks at the carrier's origin (Kamino's bunkers: 10 lights of r 20 in the middle of the decks; POL1 2, DEA1 1) and the bake skips them; BF1's sun-coloured specular pass is fed the linear sun colour (3-5 x too weak under Kamino's sun)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: LSUM
-files: engine/crates/bake/src/entity_light.rs,engine/crates/bake/src/map.rs,engine/crates/game/src/assets.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/game/src/soldier_vis.rs,engine/crates/game/src/viewer/vehicles.rs,engine/CRATES.md
-declares: goldens=maps/bf2_kam1.png,maps/bf2_pol1.png,maps/bf2_dea1.png,maps/bf2_uta1.png,maps/bf1_kam1.png,maps/bf1_kas2.png,maps/bf1_yav1.png,units/bf1_all_inf_pilot.png,units/bf1_cis_inf_bdroid.png,units/bf1_cis_inf_sbdroid.png,units/bf1_imp_inf_darktrooper.png,units/bf1_rep_inf_pilot.png,units/bf1_rep_inf_trooper.png,walkabout_stats.ron; rebake=maps
-needs:
-effort:
-branch: b1dk
-resume: landed 71c38556 2026-10-05
-created: 2026-09-30
-alpha: yes
-defer: 
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 BF1 Kamino is the worst map of the parity board (26.62) and its floors are the largest term after the sky (KSKY) and

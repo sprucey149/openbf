@@ -1,20 +1,10 @@
 ---
 id: VOICEP
 title: Voice playback keeps the selected definition and positional rate consistent
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/sounds.rs, engine/crates/game/src/sounds/tests.rs (new), engine/CRATES.md
-declares:
-needs: live windowed BF1 cross-era battle with slow off/on, sound log and listening (real-bank census done)
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 A commander line can be played at a different pitch and bus gain from the

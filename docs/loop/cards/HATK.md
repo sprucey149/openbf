@@ -1,20 +1,10 @@
 ---
 id: HATK
 title: Hit-direction chevrons on the HUD: when the player is hit, both PS2 games flash the ambush_icon chevron at the screen edge toward the attacker (left / right; bottom from behind, top when the shot travels up; nothing from the front), full then a linear 1.0 s fade - analysis/re-hud-attacker.md
-milestone: M3
-value: 4
-phase: build
-status: done
-deps: BHUD2
-files: engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/combat.rs, engine/crates/core/src/sim/blast.rs, engine/crates/ui/src/hud_ambush.rs (new), engine/crates/ui/src/hud_draw.rs, engine/crates/ui/src/lib.rs, engine/crates/game/src/hud_feed.rs, engine/CRATES.md
-declares: goldens=hud_ambush.png
-needs:
-effort:
-branch: hatk
-resume:
-created: 2026-10-20
-first: 12
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 (the maintainer, 2026-10-20) When the player is shot, the original shows where the shot came from - he thinks a little arrow on screen pointing the way (maybe from another game). The BF2 HUD config does list attacker icons in its world-marker element; the port draws none.

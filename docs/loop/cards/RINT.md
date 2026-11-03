@@ -1,20 +1,11 @@
 ---
 id: RINT
 title: Render interpolation: the sim stays 30 Hz, the windowed game draws positions, the camera and animation blended between the last two ticks at the display's rate (the maintainer approved 10-20; after HITCH's recorder) - today a 60 / 144 Hz frame repeats the last tick, so motion steps
-milestone: M1
-value: 5
-phase: build
-status: done
-deps: HITCH
-files: engine/crates/game/src/render_blend.rs, engine/crates/game/src/walk.rs, engine/crates/game/src/main/windowed.rs, engine/crates/game/src/bolt_vis.rs, engine/crates/game/src/frame_profile.rs
-declares:
-needs:
-effort:
-branch: rint
-resume: landed 982999c7 2026-10-21
-created: 2026-10-20
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-20 17:05 (INBOX, standing for PERF / HITCH / RINT): "(a) approved: RINT, the sim stays 30 Hz and the drawn
 positions, camera and animation interpolate between the last two ticks at the display's rate (open the card after HITCH's

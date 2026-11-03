@@ -1,19 +1,10 @@
 ---
 id: CWLK
 title: Three state leaks in the bots' route and team plan, read in cleanse 15: a corner walk of exactly six corners (or whose re-search fails) aims its leg line from the leg's START again, not from the last corner (MOUTH's rule lost); a post's held count keeps holders who draw away in the same plan; a unit respawned into a slot reads the dead unit's defence spot until the next plan
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/ai/route.rs,engine/crates/core/src/commander.rs
-declares:
-needs: environment — CWLK current-main census requires missing baked runtime corpus and obst2 legcen; exact probes in lead_tmp/cwlk_cloud/preflight.json
-effort:
-branch:
-resume: Restore engine/assets_baked (32 map manifests/worlds/nav, missions, classes and common assets) and lead_tmp/obst2 legcen; run current-main census bf2_mus1 first, then all 32 maps for each item before any fix. See reports/20261024_1224_card_CWLK.md and lead_tmp/cwlk_cloud/next_prompt.md.
-created: 2026-10-13
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Cleanse 15 (2026-10-13, core diff 177140d..0487827) read these in the code; none was run. Each is a hypothesis until one case is traced on main (RULES top-10 no. 2). Lines are main 0487827.

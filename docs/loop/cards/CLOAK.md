@@ -1,19 +1,10 @@
 ---
 id: CLOAK
 title: Bothan spies can cloak, reveal on damage and recover concealment
-milestone: M3
-value: 3
-phase: build
-status: parked
-deps:
-files: engine/crates/core/src/cloak.rs,engine/crates/core/src/sim/cloaks.rs,engine/crates/game/src/roster.rs,engine/crates/game/src/soldier_vis/runtime.rs
-declares: sim
-needs: original-game comparison — damage categories, frame ordering and visual/audio acceptance
-effort:
-branch:
-resume: User-assigned 2026-10-28. Auto-turrets remain another agent's task. Shared changes isolated in the ordinary-equipment worktree.
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 The Bothan cloak was dropped from all four inherited class records. Scope assigned by the maintainer on 2026-10-28; issue #48 has no ownership comments. Auto-turrets remain another agent's task. Shared file edits are isolated in a managed worktree and must be merged by feature.

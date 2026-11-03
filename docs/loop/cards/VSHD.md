@@ -1,21 +1,12 @@
 ---
 id: VSHD
 title: Vehicle shadow volumes, the data: parse shdw (NAME INFO SHDV SHDI half-edge meshes) and bake each BF1 vehicle's pieces into its manifest - BF1 darkens x0.625 inside sun-extruded volumes, BF2 never draws them (re-vehicle-shadow.md); VSHD2 draws
-milestone: M1
-domain: render
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/mungefs/src/shdw.rs (new), engine/crates/mungefs/src/lib.rs, engine/crates/bake/src/vehicle.rs, engine/crates/manifest/src/lib.rs, engine/CRATES.md
-declares: rebake=side
-needs: environment restoration: restore both discs 404 shadow chunks, vshd/shdw_check.py, fxc/census.tsv and BF1 ALL side bake
-effort:
-branch:
-resume: 2026-10-26 11:09 UTC: shadow RE audit INCOMPLETE; restore the exact primary inputs and independently re-derive claims before implementation; engine/artifacts/loop/reports/20261026_1109_audit_re-vehicle-shadow.md. Original prerequisite hold and Acceptance retained.
-created: 2026-10-16
-alpha: yes
+status: archived
+issue: 66
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #66](https://github.com/sprucey149/openbf/issues/66).
+
 ## Why (rewritten by the RE pass, 2026-10-16 - `analysis/re-vehicle-shadow.md`)
 BF1 darkens the frame under every vehicle that carries a `shdw` volume (27 models: the flyers, hovers and walkers of all
 four sides): a stencil-style count of the sun-extruded volumes, then x 0.625 wherever the count is non-zero. BF2 builds

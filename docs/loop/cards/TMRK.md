@@ -1,18 +1,10 @@
 ---
 id: TMRK
 title: World markers, part 2 — the feed: which entities the PS2 marks as attacker / locked / hint / hint-flag / objective / flag (the per-player tracker FUN_00179278, fills FUN_0017a908 / FUN_0017a900, the objective list DAT_0066af58 by FUN_0017cc00, Lua MapAddEntityMarker), their record distances (max / near / far) and when they expire — RE, then feed BMAP's Target element
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore BF2 corpus/ELF, tracker RAM reader and live battle state; measure record lifetimes and one marker picture.
-branch:
-resume: 2026-10-24 13:06 UTC: planner restoration hold, 5 exact named inputs absent. Restore BF2 corpus/ELF, tracker RAM reader and live battle state; measure record lifetimes and one marker picture. Original measurable acceptance unchanged. reports/20261024_1306_planner.md; lead_tmp/planner_20261024_1303/preflight.json.
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 BMAP's RE (`analysis/re-hud-map.md` §5, 027dad9) read how the Target element DRAWS a marker record (styles by on-screen /

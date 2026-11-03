@@ -1,20 +1,10 @@
 ---
 id: UORD
 title: Primaries that are not bolts fly straight in the port: missile (the torpedo launchers), shell (the IMP and CIS pilots' mortar), emitterordnance (the clone pilot's arc caster), bullet (the jet trooper's EMP launcher) - 13 of the 34 fielded BF1 classes
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: HVYW
-files: engine/crates/core/src/weapon.rs, engine/crates/core/src/weapon/ordnance.rs, engine/crates/core/src/missile.rs, engine/crates/core/src/sim/missiles.rs, engine/crates/core/src/sim/ordnance.rs, engine/crates/core/src/sim/ordnance/tracers.rs, engine/crates/core/src/sim/combat.rs, engine/crates/core/src/sim/guns.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/projectile.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/bolt_vis.rs, engine/crates/game/src/fx/trail.rs, engine/crates/game/src/soldier_vis/runtime.rs, engine/crates/core/src/ai/arsenal.rs, engine/CRATES.md
-declares: sim; sweep; arena
-needs: the four PS2 replay JSONs (lead_tmp/uord/ps2/b1_m_free.json, b2_m_free.json, b1_homing.json, b2_homing.json), the census tool (lead_tmp/hvyw/tools/hvcen.py) and an 8 x 32 sweep
-effort:
-branch: uord-missiles
-resume: 2026-10-30: implementation LANDED on branch uord-missiles (70da755 through 1b1e72b, pull request #84) - missile law, dwell lock, per-tick sweep, draw, and BF2's secondary tracers. Status stays blocked on acceptance evidence only: the four PS2 replay JSONs are absent (paths checked, see Evidence), so the replay-comparison criterion is UNSATISFIED; the mutation run, the 45/20 deg shell test and the hvcen sweep are also missing. Restore the rows, add the replay test, run the sweep, then land.
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 UAUD1 (analysis/unit-audit-bf1.md §3.1). The port builds every primary's ordnance as a straight bolt: core/src/weapon.rs 180-181 "Gravity

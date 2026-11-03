@@ -1,19 +1,10 @@
 ---
 id: BFLT
 title: The DomeInfo Filter: every BF1 map (and BF2 TAT2) brightens its 3D frame on the PS2 by Intensity/128 of (frame - Threshold) — TAT1 +25 luma — and the port has no such pass; it is the cause of TATL (TAT1 -12.8 -> -0.1 median dluma when applied)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/sky.rs,engine/crates/bake/src/lighting.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/viewer/look.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/render/src/frame.rs,engine/crates/render/src/pipelines.rs,engine/crates/render/src/lib.rs,engine/crates/render/src/filter.rs,engine/crates/render/src/filter.wgsl
-declares: rebake=maps; goldens=maps/bf1_bes1.png,maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/tat1.png,maps/tat2.png,tat1_spawn.png,tat1_overview.png,tat1_hud.png,walkabout_stats.ron; parity=bf1_kam1,bf1_rhn1
-needs:
-branch: bflt
-resume: LANDED 7dfe311 (report reports/20260930_1245_card_BFLT.md)
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Every BF1 map authors `DomeInfo { Filter(1) Threshold(T) Intensity(I) }` and the PS2 runs it over the 3D frame before

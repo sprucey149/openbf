@@ -1,19 +1,10 @@
 ---
 id: GSND
 title: Game audio findings of cleanse 16: a hit plays the shooter's CURRENT weapon's collision sound (not the weapon that hit), a commander line's pitch from a different definition than its take, play_take ignores the slow cheat's rate, a hover engine's acceleration filter runs while off, foley's two era tables
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps: VOICEP, HITSND
-files: engine/crates/game/src/event_sounds.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/engine_sound.rs,engine/crates/game/src/foley.rs,engine/crates/core/src/sim/state.rs
-declares:
-needs:
-effort:
-branch:
-resume: Findings1/2/3 implemented by HITSND347a508/VOICEP983addb; TESTEVd87ebf6 repairs layout. All full checks owed;4/5/SPWS original holds/Acceptance retained. engine/artifacts/loop/reports/20261025_0832_planner.md
-created: 2026-10-15
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 Cleanse 16 (card CLN11) read the game crate's audio code (diff 306c4f0..988b229). Findings, each from a reviewer's read; the lead

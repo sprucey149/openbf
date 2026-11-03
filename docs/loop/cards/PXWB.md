@@ -1,18 +1,10 @@
 ---
 id: PXWB
 title: PCSX2 walkabout, BF2: capture the PS2 at every command post of every BF2 map at the port walkabout's stand, eye 1.7 m, level pitch, bearings 0/90/180/270, 0 AI, teleported by RAM; PS2|port pairs, parked-vehicle pairs, findings -> cards (holes first)
-milestone: M1
-value: 5
-phase: capture
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer (INBOX 2026-09-28, value 5, M1): the walkabout (`engine/artifacts/walkabout/`) shows parts of maps the goldens never

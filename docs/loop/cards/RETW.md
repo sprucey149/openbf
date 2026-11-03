@@ -1,20 +1,10 @@
 ---
 id: RETW
 title: A lost bot walks back along a floor path, not in a straight line at the nearest hub: 34 'lost' deaths in 8 rounds stand on ground a walk leads back from (BF2 UTA1 21 under the y 14.4 landing, DEA1 7, GEO1 4, KAM1 2, MYG1 1, BF1 YAV2 1)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: STLVL,OFFG,BOTD,MOVR
-files: engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/sim/bounds.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: retw
-resume: landed d5ae05f4 2026-10-15
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Card LVLF (2026-10-02) refereed every 'lost' death with the real soldier: after its landing 36 remain over 8 seeds x 32 maps, and 34 of them stand where a floor walk DOES lead back to a hub. The bot is given up after 45 s (`LOST_RECYCLE`) because its return walk (`Sim::return_point`) aims a straight line at the XZ-nearest hub, and that hub is on a deck straight overhead or behind a wall. A player sees a bot vanish on ordinary ground. UTA1 is a showcase map.

@@ -1,18 +1,10 @@
 ---
 id: GRDC
 title: claude_guard.sh's deny rules miss `git -C <dir> push|add -A|checkout main` (the merge rule already allows for -C); its header/messages cite the gone briefs/OPUS_LOOP_PROMPT.md and HANDOFF-OPUS.md
-milestone: M0
-value: 2
-phase: cleanup
-status: todo
-deps:
-files: scripts/claude_guard.sh
-declares:
-needs: maintainer — may a loop session edit scripts/claude_guard.sh to add the -C form to the push/add/checkout deny rules (tightening only) and repoint its stale doc lines? Default: left untouched until you say yes.
-branch:
-resume:
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 Scripts cleanse 2026-09-29 (card CLNS). VERIFIED by piping hook JSON into scripts/claude_guard.sh: `git push origin main` and `git add -A` are denied, `git -C /x push origin main` and `git -C /x add -A` print nothing (allowed); with OPENBF_LOOP=1 `git checkout main` is denied, `git -C /x checkout main` is not. The ff-merge rule's regex already carries `git([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+)*[[:space:]]+merge`.

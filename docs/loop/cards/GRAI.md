@@ -1,20 +1,11 @@
 ---
 id: GRAI
 title: The AI's weapon choice and its grenade: bots walk every slot for the target (ammo, target-kind mask, range band, plenty-of-ammo, score), a grenade in 8-24 m is forced in a 3 s window per 30 s per unit or against a group of enemies (BF2: + the difficulty roll = Skill::grenade_chance), thrown on the low-arc ballistic solution
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: GREN,STTAP,BOTD,FGHT
-files: engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/draw.rs,engine/crates/core/src/skill.rs,engine/crates/core/src/weapon.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: grai
-resume: landed 79f18909 2026-10-07
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 `analysis/re-grenades.md` §7 (`[O]`, f0da5ad). On the PS2 a bot's target evaluation walks EVERY weapon slot and picks one
 (ammo, target-kind mask, range band, "plenty of ammo", score); a grenade in range is forced in a 3 s window every 30 s

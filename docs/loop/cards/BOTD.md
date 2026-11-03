@@ -1,21 +1,10 @@
 ---
 id: BOTD
 title: The bot design: what the best AI soldier for this game is - one architecture note (layers, one owner per output, where we match the PS2 and where we deliberately beat it, difficulty tiers), reviewed by the maintainer, then the build cards cut from it
-milestone: M3
-value: 5
-phase: re
-status: done
-deps: SAIR,BOTM
-files: analysis/bot-design.md
-declares:
-needs:
-effort:
-branch:
-resume: the maintainer read it: 'BOTD read, go' (INBOX 2026-10-03 14:08), all eight defaults; filed on the build cards by the planner of 2026-10-05. First build card: SPL11.
-created: 2026-10-02
-alpha: yes
-first: 5
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02: "are we just implementing so many bandaid fixes to a fundamentally flawed bot algorithm ... have opus think more about high level what the best ai bot looks like for this game, and then implement and fix by going into the details or spawning subagents." Do not start a rewrite before this note exists and the maintainer has read it (STATUS "For the maintainer").

@@ -1,20 +1,11 @@
 ---
 id: ZSCP
 title: The scope display: with a ZoomFirstPerson weapon zoomed (sniper rifles; BF2 also bowcaster, award and target pistols) the PS2 draws the weapon_scope quarter picture mirrored into four quadrants over the view and plays binocularzoomin / binocularzoomout while the zoom moves - the port's scope view (card ZOOM) has no overlay and no sound
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: ZOOM
-files: engine/crates/ui/src/hud.rs,engine/crates/game/src/walk.rs,engine/crates/game/src/main/windowed.rs
-declares: ci (+4 tests: hud_scope x2, walk x2); no golden, sim, sweep or bake move intended (the golden HUD/spawn tests only gain scope: None)
-needs: cloud prerequisites: branch zscp, baked assets, missions and reference evidence absent
-effort:
-branch: zscp
-resume: (private workflow note omitted)
-created: 2026-10-06
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card ZOOM's RE (analysis/re-zoom.md section 8, [O]): the PS2's scope is a HUD element of its own. Without it a zoomed sniper looks through a bare first-person camera.
 

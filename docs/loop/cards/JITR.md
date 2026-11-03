@@ -1,21 +1,10 @@
 ---
 id: JITR
 title: Bots holding a position stutter: a droid ran 46 m in 10 s with 26 reversals inside a 1.5 m box (the maintainer's F9 snapshot, BF2 KAM1) - one owner for a holding bot's move goal, a commit time, a walk for a short step, and a slide side that does not flip
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai/steer.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/draw.rs,engine/crates/core/src/ai.rs,engine/crates/core/src/sim/state.rs,engine/crates/game/examples/round_to_outcome.rs,engine/CRATES.md
-declares: sim; sweep; arena
-needs:
-effort:
-branch: jitr
-resume:
-created: 2026-10-02
-alpha: yes
-first: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02 (BF2 Kamino, invincible, standing still on a platform): "the droids were all standing next to each other and just tweaking back and forth ... stuttering back and forth and standing next to each other ... all standing there shooting me while tweaking. It seems very unnatural."

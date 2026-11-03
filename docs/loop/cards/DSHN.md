@@ -1,18 +1,10 @@
 ---
 id: DSHN
 title: Droids look like polished chrome (the maintainer's play session 2026-09-29): the SBD and the other droids take hard white highlights in the port where the PS2's are matte grey — RE the skinned specular pass per droid class (colour, power, whether the PS2 gives droid bodies a specular pass at all), check CAMB's effect, then build
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/soldier.rs,engine/crates/bake/src/vehicle.rs,engine/crates/bake/src/map.rs,engine/crates/bake/src/alpha.rs,engine/crates/bake/src/spec.rs,engine/crates/render/tests/specular.rs,engine/CRATES.md
-declares: goldens=maps/bf1_kam1.png,maps/bf1_kas2.png,maps/bf2_kam1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,units/bf1_all_inf_pilot.png,units/bf1_cis_inf_bdroid.png,units/bf1_cis_inf_sbdroid.png,units/bf1_imp_inf_darktrooper.png,units/bf1_rep_inf_pilot.png,units/bf1_rep_inf_trooper.png,units/bf2_all_inf_bothanspy.png,units/bf2_all_inf_engineer.png,units/bf2_all_inf_marksperson.png,units/bf2_all_inf_soldier.png,units/bf2_all_inf_vanguard.png,units/bf2_cis_inf_bdroid.png,units/bf2_cis_inf_magnaguard.png,units/bf2_cis_inf_sbdroid.png,units/bf2_imp_inf_atatcommander.png,units/bf2_imp_inf_atatpilot.png,units/bf2_imp_inf_darktrooper.png,units/bf2_rep_inf_ep3armoredpilot.png,units/bf2_rep_inf_ep3trooper.png,units/bf2_rep_inf_pilot.png,units/bf2_rep_inf_trooper.png,walkabout_stats.ron; rebake=side,maps,common
-needs:
-branch: dshn
-resume: LANDED 4096329/30c4a14 (report reports/20260929_1850_card_DSHN.md): BF1 SBD p95/p99 214/243 -> 104/138 (PS2 131/189), add +5.73 (PS2 +5.9); rest of the gap = SBLT; 1st-person weapon sheets keep automatically once baked; USKN skins likewise
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's first play session (INBOX 2026-09-29, value 5, front of the queue): the super battle droid looks like polished

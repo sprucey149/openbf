@@ -1,19 +1,11 @@
 ---
 id: FXBL
 title: BF2 bolt lights: every BF2 bolt owns a non-Static omni light and the terrain adds com_sfx_omniproj projected straight down from 5 m above it (a ~5-7 m disc, x max(0,1-dy^2/r^2), vertex alpha 0.25) — HOT1's pink wash (re-bolt §5.2-§5.3); the port lights nothing
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/laser.rs, engine/crates/core/src/weapon.rs, engine/crates/game/src/bolt_vis.rs, engine/crates/game/src/bolt_light.rs, engine/crates/game/src/viewer/scene.rs, engine/crates/game/src/main/{headless,windowed}.rs, engine/crates/render/src/{terrain_light.rs,terrain_light.wgsl,frame.rs,pipelines.rs,device.rs,lib.rs}, engine/crates/bake/src/{spec.rs,main.rs}, scripts/rebake.sh
-declares: rebake=common
-needs:
-branch: fxbl
-resume: landed b56c5d40 2026-09-30
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-09-28 (d) (bolts, every second of every battle) and FXB's RE: the big pink wash round every red bolt
 on BF2 HOT1's snow is the bolt's LIGHT on the terrain, not the bolt or a particle. Proved on the PS2: zeroing every

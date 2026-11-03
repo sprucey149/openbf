@@ -1,20 +1,11 @@
 ---
 id: FOL2
 title: Foley, the rest: the surface from the prop under a soldier's feet (metal / stone / wood groups), which soldiers the PS2 gives an animator (it stepped 15 others on UTA1 where the port's on-screen rule steps 392), BodyFall
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/foley.rs,engine/crates/core/src/collision/rays.rs,engine/crates/game/src/assets.rs,engine/crates/game/src/main/windowed.rs
-declares:
-needs: Restore foley replay/referee, UTA1/NAB1 maps/missions and primary animator evidence; retake surface/105-second counts before any animator allocation change.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 7/7 exact named paths absent. Restore foley replay/referee, UTA1/NAB1 maps/missions and primary animator evidence; retake surface/105-second counts before any animator allocation change. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 FOLY (d51ff74, 2026-10-02) plays steps and stance sounds from the baked table with two surfaces only (terrain,
 water). Left open, in order of what a player hears:

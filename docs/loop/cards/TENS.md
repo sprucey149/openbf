@@ -1,22 +1,10 @@
 ---
 id: TENS
 title: BF1 Kamino and Bespin Platforms have NO terrain floor on the PS2 (TerrainEnable 0: height query -1000, terrain rays never hit) — the port's sim stands soldiers on the y ~ 0 heightfield under the platforms
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps: KOC
-files: engine/crates/game/src/assets.rs,engine/crates/core/src/sim
-declares:
-needs: primary input restoration - PS2 corpora/ELFs, BF1 KAM1/BES1 LVLs, PCSX2 toolkit/states and real bakes/missions
-effort:
-branch:
-resume: Restore inputs in reports/20261025_0014_card_TENS.md before retry; re-kill-floor.md sections 2.2/2.6 already derive BES1 world death, not a new live measurement. Re-read all 12 flag readers and FUN_00381408 alias, default/writers and ELF bytes; independently verify. Log uncheated BF1 BES1/KAM1 edge falls to death with clock/player identity/xyz/vy/health/flag/sink/region. Keep phase re until addendum plus live evidence pass; then build BF1-only heightfield opt-out with sentinel/kill-floor trace and declare sweep.
-created: 2026-09-28
-defer: post-alpha
-value_pre_alpha: 4
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 On BF1 KAM1 and BES1 a soldier knocked or walked off a platform falls on the PS2. In the port he lands on an invisible

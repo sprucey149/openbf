@@ -1,18 +1,10 @@
 ---
 id: LRUL
 title: Loop rules in loopctl: audit by risk (item 3) and the M-ALPHA picker — `alpha: yes` first at equal value, `defer: post-alpha` and `acceptance: needed` never picked while other work exists, the counts in the scoreboard, the card rules printed in `orient`
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: scripts/loopctl.py,engine/artifacts/loop/audits.md
-declares:
-needs:
-branch: lrul
-resume: landed e937a13b 2026-09-30
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX note 2026-09-29 22:40 (approved loop improvements), items 3 and 6. Both change `scripts/loopctl.py`, so they are one card.

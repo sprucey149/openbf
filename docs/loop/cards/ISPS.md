@@ -1,20 +1,11 @@
 ---
 id: ISPS
 title: The world fragment shader at a laptop's cost: specialise it per light path, convert the uniform colours once on the CPU, and keep the far-cull discard only on draws that can be culled - priced on the iGPU at -5.3 ms on KAM1 and -4.4 ms on GEO1 at 2880x1920, same picture
-milestone: M0
-value: 5
-phase: build
-status: blocked
-deps:
-files: engine/crates/render/src/shader.wgsl, engine/crates/render/src/pipelines.rs, engine/crates/render/src/frame.rs, engine/crates/render/src/lib.rs
-declares: goldens=any
-needs:
-effort:
-branch: isps
-resume: ADAPTER LOST, not a refusal: land phase 1 fast-forwarded main, then the RTX died mid golden regen (kernel Xid 119 GSP timeout 19:45, nvidia-smi Unknown Error; vulkaninfo = Intel + llvmpipe only), main's goldens rendered on the iGPU (97 'moved', 40-65 % px) and the landing was aborted (main c6bc4f3 = reverts). The branch gates on the RTX at 19:34 (lead_tmp/isps/gates/SUMMARY.md) moved 72 goldens by <=2/255 on <=45 px each, parity 9.514 = main. After a reboot (nvidia-smi -L lists the RTX): in the isps worktree git merge --ff-only main, git revert the two 'Revert ISPS' commits, delete lead_tmp/isps/land (LANDG stale QUANT), then land.py ISPS; view the sheets (expect rounding only)
-created: 2026-10-20
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card ISPD's re-take on main 8729cae (engine/artifacts/ispd/README.md, "Update 2026-10-20"): after ISPF the biggest GPU cost left on the Intel iGPU is the world fragment shader itself. A flat-colour fs takes KAM1's models 11.85 -> 2.26 ms and GEO1's terrain 5.94 -> 0.82 ms at 2880x1920. Mesa INTEL_DEBUG=fs: the world fs is ~770-980 instructions (SIMD16, no spills, ~60 log/exp) - every LightPath's case, the sRGB pows of uniform colours and the far-cull discard compiled into every pixel.
 Priced variants (GPU ms sum, 2880x1920, quiet machine, control repeats to 0.01 ms; rows in README, shaders engine/artifacts/ispd/x/*.wgsl, runs win/*_{y,z,w,v}_*):

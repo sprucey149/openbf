@@ -1,20 +1,11 @@
 ---
 id: UVO3
 title: BF2's unit voice at the post: the PS2 lets an AI speak only at detail level 3 or 4 (B2 FUN_002e6180, +0x560 < 3 returns) and the port has no detail level - the port says 1.53 / 1.06 VOSound lines a minute round a player parked at his post on UTA1 / MYG1 against the PS2's 0.25 (UVO2's bar: at most 1): find what writes +0x560 and gate AI speakers the same way
-milestone: M3
-value: 4
-phase: re
-status: blocked
-deps: UVO2
-files: engine/crates/game/src/vo.rs, engine/crates/game/src/announce.rs
-declares:
-needs: cloud BF2 primary RE inputs and original voice census/captures unavailable
-effort:
-branch:
-resume: Cloud RE checkpoint 2026-10-24 09:01 UTC: reports/20261024_0901_card_UVO3.md; inventory lead_tmp/uvo3_20261024_0858/. Later AITHK already documents FUN_002b7b00 B2:239522-239661 and ctor FUN_002b6c20 B2:238841 (re-ai-think-rate.md sections 3/6/9; re-soldier-ai.md 1.3). Restore BF2 ELF/decomp, aithk/sair captures+verdicts and UVO2/usnd census inputs; rerun writer/default/constant/caller checks and independent verifier before updating re-unit-chatter.md 3.3 step 4. Keep phase re until that passes; then measure current-main post/fight baselines, isolated gate plus merged UVO4 measured pieces, original acceptance and gates. No source change or new PS2 verification this run.
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card UVO2 landed BF2's VOSound lines with the speaker rule of re-unit-chatter.md 3.3 except step 4, the AI detail level (a named deviation). Its census (`lead_tmp/uvo2/census`: run.sh + tab.py, 8 seeds x 240 s, CW, player parked at his spawn; `tab_post.txt`) reads 1.53 (UTA1) / 1.06 (MYG1) VO lines a minute against the PS2's 0.25 (`lead_tmp/usnd/live_bf2.txt`). At the post the AcquiredTarget speakers stand 30-50 m from the player (gate passes 1.28 / 0.72 a minute against the PS2's 0.25 / 0) and the slaughter lines (subject an AI unit, no tie to the player) add 0.19 / 0.66 a minute with speakers 50-275 m off. The PS2's detail level (AI controller +0x560; 3 and 4 think every 1.0 / 0.25 s) is likely nearness / visibility to the player: it would thin both.
 

@@ -1,22 +1,11 @@
 ---
 id: NOCAP
 title: Uncapturable command posts: BF1 HOT1's shield generator ('shield') and END1's bunker panel ('cp1') are posts on the PS2 (a hologram and its r-8 light in RAM in every walk state, owned by their team) but have no CaptureRegion, and the port's layout loads only posts that have one - so the port has no post, hologram, light (and, to check, spawn point) there
-milestone: M3
-value: 4
-phase: re
-status: blocked
-deps:
-files: engine/crates/game/src/layout.rs, engine/crates/game/src/walk.rs
-declares:
-needs: restore HOT1/END1 manifests, classes, missions, primary PS2 corpora/states and B1LL light referee before further RE
-effort:
-branch:
-resume: 2026-10-24 23:25 UTC — RE prerequisite hold; restore named evidence, resolve Radius fallback and post lifecycle, then verify spawn/map/bleed separately for BF1/BF2 before build. See reports/20261024_2325_card_NOCAP.md; do not repeat unchanged missing-input preflight.
-created: 2026-10-22
-alpha: 
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Found by card B1LL's light referee (lead_tmp/b1ll/referee.py over the BF1 walk states, referee.txt): of 1203 view-0 omnis the PS2 files, the only 10 the port lacks are the hologram lights of HOT1 'shield' (hoth_bldg_shieldgenerator, light at (-423.92, -18.21, 186.03)) and END1 'cp1' (end_bldg_bunker_controlpanel, (137.85, -5.14, -229.31)). Both instances carry Team, Label, ControlRegion and SpawnPath but no CaptureRegion; MapLayout::from_manifest (game/src/layout.rs ~318) skips any instance without CaptureRegion as 'not a command post'. The hologram (card CPHOL) is missing there for the same reason. Census of the baked manifests (ControlRegion without CaptureRegion): bf1_end1 1, bf1_hot1 1, bf1_geo1 4 (no PS2 hologram in GEO1's states: check what they are), bf2_hot1 1, and many BF2 ctf / campaign-only posts.
 

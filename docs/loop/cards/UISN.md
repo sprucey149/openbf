@@ -1,20 +1,11 @@
 ---
 id: UISN
 title: Interface sounds: the spawn screen's five SetSoundEffect slots (class change, post change, accept, back) and the pause menu's open / move / accept / back clicks, 2-D
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: scripts/gen_missions.py,engine/crates/game/src/mission.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/main/windowed.rs
-declares:
-needs: environment restoration: restore both discs mission bytecode/SetSoundEffect data, CORE/map sound bakes and replay inputs
-effort:
-branch:
-resume: 2026-10-24 09:20 UTC: planner prerequisite census; no implementation. Restore this card's inputs in lead_tmp/planner_20261024_0913/queue_preflight.json, recheck original acceptance/current-main baseline, then loopctl start for isolated build. Full CI and required gates remain; reports/20261024_0913_planner.md.
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Every menu move in the port is silent. On the PS2 the spawn screen and the pause menu click on every move, accept
 and back. RE: `analysis/re-ambience-music.md` section 6 (8a35a92).

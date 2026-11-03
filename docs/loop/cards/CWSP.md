@@ -1,20 +1,11 @@
 ---
 id: CWSP
 title: The AT-AT and the AT-TE are spawn posts: on the PS2 14 of BF1 Hoth's 24 Imperials (6 of 16 on BF2) spawn 8-9 m from an AT-AT and one of them pilots it from the first seconds; the port spawns nobody there and no AT-AT is ever boarded
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: WAI
-files: engine/crates/core/src/sim/spawn.rs,engine/crates/core/src/vehicle/walker.rs,engine/crates/game/src/vehicle_class/walker.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/src/walk.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sweep; sim
-needs:
-effort:
-branch: cwsp
-resume: landed 69ba2670 2026-10-02
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Measured by card WAI2 (2026-10-02, `analysis/re-walker-ai.md` section 13, `reports/20261002_0520_card_WAI2.md`). On the PS2 the
 command walker (`commandwalker`: BF2 FUN_0035baa0, vtable 0x62be40; BF1 matrix header 0x53e1e8) is a walker plus a

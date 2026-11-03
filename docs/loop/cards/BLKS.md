@@ -1,20 +1,10 @@
 ---
 id: BLKS
 title: The black box's human row carries the sprint's inputs (energy, the depleted latch, the stance's time, MaxSpeed) so 'sprint does nothing' can be read from a snapshot (the maintainer 2026-10-04: no sprint as the BF1 stormtrooper on KAS2, fine as BF2 clones)
-milestone: M0
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/blackbox.rs
-declares: ci (+1 test)
-needs: cloud prerequisites: branch blks, baked assets, missions and reference evidence absent
-effort:
-branch: blks
-resume: (private workflow note omitted)
-created: 2026-10-04
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 The maintainer, 2026-10-04: "sprint worked when I was playing the clones, for stormtrooper sprint wasn't working or doing anything so that should be investigated."

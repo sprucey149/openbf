@@ -1,20 +1,10 @@
 ---
 id: KSKY
 title: Kamino's sky is 0.6 as bright on the PS2: Effect("Lightning") darkens dome shell 0 to 255*(1-SkyDomeDarkenFactor) = 153 between flashes (BF1 KAM1, BF1 YAV2, BF2 KAM1) - the port draws every shell at white
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/fx.rs,engine/crates/manifest/src/lib.rs,engine/crates/bake/src/map.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/render/src/sky.rs
-declares: goldens=any; rebake=maps; parity=bf1_kam1,bf2_kam1,bf1_yav2
-needs:
-effort:
-branch: ksky
-resume: landed 97df43ad 2026-10-01
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The largest single term of Kamino's parity error (bf1_kam1 26.6, bf2_kam1 22.5, the two worst maps): the port's sky is

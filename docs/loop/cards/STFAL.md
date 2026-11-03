@@ -1,19 +1,11 @@
 ---
 id: STFAL
 title: The AI does not step off walkways: a floor check on every step the steering commits (slide, fan, side-step, corner), and a probe that sees the low hulls the wall pass hits (KAM1 99% fall deaths vs the PS2's 1.6%; KAS2's parked AT-STs)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/steer.rs,engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai.rs
-declares: sim; sweep; arena
-needs:
-branch: stfal
-resume: landed e09c8548 2026-09-30
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 STALL C1 + C8 (`analysis/re-round-stalls.md` §2).
 

@@ -1,18 +1,10 @@
 ---
 id: VSEAT
 title: Enter, drive, exit — the first drivable vehicle: ACTION + the PS2's aim-cone entry, the driver seat's pad drives the skiff, the vehicle camera, the skiff drawn at its transform, exit at the PS2's 9 points (TAT1)
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: HOVR,VTEAM,VDRAW,HCON
-files: engine/crates/core/src/sim/seats.rs,engine/crates/core/src/sim/seats/tests.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/vehicle.rs,engine/crates/core/src/vehicle/hover.rs,engine/crates/game/src/walk.rs,engine/crates/game/src/ride.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/examples/vehicle_ride.rs,engine/CRATES.md
-declares:
-needs:
-branch: vseat
-resume: landed 2c5521fb 2026-09-28
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 M2's first player-visible result: walk up to a vehicle, get in, drive it, get out.

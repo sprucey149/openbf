@@ -1,20 +1,11 @@
 ---
 id: FIDA
 title: The fidelity gate looks at a second seed block for an ALL-MAP sum too: recycled (all maps) over 8 seeds has a tolerance of 12 against a block-to-block spread of 10.7 (1 sd), so about 1 landing in 8 that re-rolls the seeds is refused on noise, every time it is tried - OBSV was (58 against 40; 24 seeds 145 -> 150, t +0.26)
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: scripts/gates.py
-declares: oracle=guards
-needs:
-effort:
-branch: fida
-resume: landed 33d9c78e 2026-10-16
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 `scripts/gates.py`'s fidelity group re-runs a PER-MAP failure on seeds 9-16 against main's own 9-16 values and keeps it
 only if both blocks are worse (card FIDC, 2026-10-11). An ALL-MAP value has no second look (`fidelity_confirm`: "agg

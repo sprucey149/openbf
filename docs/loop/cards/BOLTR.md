@@ -1,20 +1,10 @@
 ---
 id: BOLTR
 title: Same-tick bolt remnants use the fired gun class
-milestone: M1
-value: 4
-phase: build
-status: parked
-deps:
-files: engine/crates/game/src/bolt_vis.rs, engine/CRATES.md
-declares:
-needs: real class banks and HOT1/GEO1/FEL1 plus eight-map paired census, GPU frames and complete acceptance gates
-effort:
-branch: boltr
-resume: Implemented97b0319, acceptance pending: 23bolt/379game+2ignored/fmt/Clippy pass; parent four principals and two added boundary/fade failures,8compiled mutant runs caught/restored. Protect passes; map lacks8input paths. Complete real paired census/GPU/full gates. reports/20261025_2138_card_BOLTR.md
-created: 2026-10-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 A vehicle gun that strikes within its first tick can draw and light its bolt

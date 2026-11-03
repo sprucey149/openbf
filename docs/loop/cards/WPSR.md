@@ -1,19 +1,12 @@
 ---
 id: WPSR
 title: The LEAK census's push residue after WPSH (1,212 runs of 1.83M, 32 maps): name each mechanism — sampled so far: a head grazing an eave's lower edge (BF1 KAS2 City Hall, tri 74 of body 100, 0.42 m under it), a push while stepping onto a sloped face (BF2 DAG1 body 13, n.y 0.36), a far-side push from a sliver triangle the prism test calls 'beside' (the cp5 hut, tri 16 via the ledge path, 0.79 m)
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps: WPSH
-files:
-declares: leak; sweep; arena; sim
-needs: Restore collision bakes/missions and push probes/raw contacts plus audit band data; classify current-main residue before proposing a wall fix.
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 7/7 exact named paths absent. Restore collision bakes/missions and push probes/raw contacts plus audit band data; classify current-main residue before proposing a wall fix. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-09-29
-alpha: yes
+status: archived
+issue: 98
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #98](https://github.com/sprucey149/openbf/issues/98).
+
 ## Why
 WPSH (sub-steps + no far-side push, and the census's in-contact start skip) took the census's push class from 48,415 to
 1,212 runs. The rest is not one mechanism. Three samples, each traced with lead_tmp/wpsh/tools/wpsh_probe.rs (a scratch

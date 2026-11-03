@@ -1,18 +1,10 @@
 ---
 id: TGTC
 title: Scratch cargo targets are deleted when their card is done: land.py removes <card>_target (and the card's worktree leftovers) after a landing, parking a card removes its target, stale *-scratch_target / *_pxc_target go at the next session start, and the scoreboard prints lead_tmp's apparent + btrfs-exclusive size
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: scripts/land.py,scripts/loopctl.py,scripts/cleanse_delete.sh
-declares:
-needs:
-branch: tgtc
-resume: landed 06651bd6 2026-09-29
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX 2026-09-28: 15 `lead_tmp/<card>_target` dirs (btrfs reflinks of `engine/target`, ~45 GB apparent /

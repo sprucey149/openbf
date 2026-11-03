@@ -1,19 +1,11 @@
 ---
 id: VTURX
 title: A destroyed building turret draws its wreck, and a zoomed gunner does not see his own turret: in build state 1 the building is its DestroyedGeometryName model drawn rigid at the instance (none of the 49 destroyed models on the discs holds a posed node), and while the gunner is zoomed (R3) the whole building is left out of his own view, as the PS2 (RE done 2026-10-13, analysis/re-turret-draw.md 4 and 5)
-milestone: M2
-value: 3
-phase: build
-status: todo
-deps: VTURD,TBLD
-files: engine/crates/game/src/viewer/scene.rs,engine/crates/game/src/viewer/turret_pose.rs,engine/crates/game/src/walk.rs,engine/crates/game/tests/suite/turret_wreck.rs (new)
-declares:
-needs:
-effort:
-branch:
-resume: BUILD after VTURD and TBLD: the destroyed half (state 1 -> the class's DestroyedGeometryName model at the instance, the live parts not drawn; back on rebuild). The zoom moved to VTURZ (planner 2026-10-15). PS2 frames: lead_tmp/vturd/ps2/myg1_destroyed_a.png, hot1_bots_lasermortar_turet4_a0.png
-created: 2026-10-13
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The older half of card VTURD ("the turret swaps to DestroyedGeometryName when its pool empties") and the PS2's one
 other turret view, split off by VTURD's RE (2026-10-13, `analysis/re-turret-draw.md` 4 and 5 [O]) so the maintainer's ask

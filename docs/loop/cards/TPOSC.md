@@ -1,20 +1,11 @@
 ---
 id: TPOSC
 title: Positions at posts: Capture and Guard take a reserved position of TPOS's table in or beside the post's region with cover toward the approach (else card PARR's drawn point), and the PS2's at-post wander moves them to another 8-14 m off every 20-30 s (bot design 4.4; split from TPOS as its item 5)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps: TPOS
-files: engine/crates/core/src/ai/route.rs, engine/crates/core/src/ai/tactic.rs, engine/crates/core/src/ai/behave.rs, engine/crates/core/src/commander.rs
-declares: sim; sweep; arena
-needs: environment restoration: real baked assets/missions and named TPOS/BOTD raw census inputs for current-main capture/guard baseline and acceptance
-effort:
-branch:
-resume: 2026-10-24 09:18 UTC: planner encoded restoration hold; restore lead_tmp/tposc_20261024_0846/inventory.json inputs, reproduce both 8-seed blocks x32 maps on current main and trace one capture/guard case before isolated build. Keep Fight B12 unchanged. reports/20261024_0913_planner.md.
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card TPOS item 5, split off 2026-10-16 (lane 2): the Tactician's fight slice is complete without it, and it does not move the bars TPOS is judged on. `analysis/bot-design.md` 4.4: Capture asks for "a covered position in or beside the region facing the approach, else the drawn point; another within 8-14 m every 20-30 s [P 3; BF1: Patrol hints, 30-45 s]"; Guard for "a position of the post's set facing the nearest enemy post's approach". Today a capturer walks to card PARR's drawn point (`route::post_point`) and a defender to an authored Cover / Snipe hint (`commander::hint_spot`); neither is reserved, so two can stand on one spot.
 

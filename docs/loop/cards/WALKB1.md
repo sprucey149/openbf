@@ -1,20 +1,11 @@
 ---
 id: WALKB1
 title: BF1-map walkers take BF2's handling with BF2's class values for the walker body (the kaadu: the tauntaun's handling at its own 19.54 m/s; e0c 0 on the spider, AT-AT and AT-TE) - today BF2's code reads BF1's data: a walking AT-ST turns 3.4 deg/s, the left stick cannot steer a tauntaun and the mounts run at half speed
-milestone: M2
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/vehicle_class/walker.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/examples/walker_drive.rs,engine/crates/core/src/vehicle/walker.rs,engine/crates/core/src/ai/walker_drive/tests.rs,engine/CRATES.md
-declares: sweep
-needs:
-effort:
-branch: walkb1
-resume: landed eec32d13 2026-10-09
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why (the build; rewritten by the RE session, 2026-10-07)
 On BF1 maps the port runs BF2's walker code with BF1's class data. That is neither game (`analysis/re-walker.md` §13.8,
 measured with `walker_drive` on main ab64c9c):

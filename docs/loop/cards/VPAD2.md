@@ -1,20 +1,11 @@
 ---
 id: VPAD2
 title: A vehicle pad's class is one the mission script loaded: on 11 BF2 pad / team slots the port spawns a vehicle the PS2 never has (HOT1 an AT-ST at CP3, GEO1 3 fighter tanks + 2 STAPs, NAB2 GCW 4 combat speeders, Mos Eisley CW an AAT) - and the pads' post-load tick runs before the script re-owns posts (HOT1: a Rebel tauntaun at CP3 that decays in 20 s)
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps:
-files: scripts/gen_missions.py,engine/missions,engine/crates/game/src/mission.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/examples/round_to_outcome.rs,engine/crates/game/examples/turret_ride.rs,engine/crates/game/tests/suite/vehicle_pads.rs,engine/crates/core/src/vehicle_pad.rs,engine/crates/core/src/sim/vehicles.rs
-declares: sweep
-needs: restoration — BF1/BF2 mission bytecode, generated missions, map/side bakes, VPAD2 scratch census/probe and PS2 RAM fixtures; approved GPU gates unavailable
-effort:
-branch:
-resume: Restore and verify lead_tmp/vpad2_cloud/inputs.json first (23/23 absent on 2026-10-24; generator check returns 0 but all 57 missions PROVISIONAL). Then isolated worktree: build part 1 loaded-class filter and regenerate every mission from real scripts; re-run census2/census1 (BF2 same 228/port_only 0; BF1 same 492), pinned 11-slot test and mutation. Part 2 separate commit: first-tick rule plus HOT1 probe 0.1,19,22,30,50 and CP3 region check; full CI/applicable gates including declared sweep, leak only if measured. Do not generate fallback missions or treat skipped data tests as acceptance.
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 RE done 2026-10-07: `analysis/re-vehicle-pads-load.md` ([O], 419e1ec; verifier 40 / 2 / 0 of 42). Report
 `reports/20261007_0421_card_VPAD2.md`.

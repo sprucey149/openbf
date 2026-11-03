@@ -1,18 +1,10 @@
 ---
 id: TALPH
 title: Terrain texture LAYERS: the port draws only LTEX[0]; the PS2 blends every painted layer by ALPH's 4-bit over-alphas — BF2 KAS2's sand beaches, BF1 KAS1's grass, KAS2's pale slopes (KTEX merged)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/terrain.rs,engine/crates/bake/src/terrain_glb.rs,engine/crates/bake/src/map.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/assets.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/render/src/draw.rs,engine/crates/render/src/shader.wgsl,engine/CRATES.md
-declares: goldens=maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_dag1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kas2.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_yav1.png,maps/tat1.png,maps/tat2.png,tat1_overview.png,tat1_spawn.png,tat1_hud.png; rebake=tat1,tat2,maps
-needs:
-branch: talph
-resume: LANDED 23238e1 (2026-09-28 lane 1, report reports/20260928_1320_land_TALPH.md): 28 goldens viewed and committed; PS2-pose checks improved on RHN1/2, HOT1 and BF2 KAS2 shore.
-created: 2026-09-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Planner re-scope (2026-09-26) — value 2 → 5, KTEX merged in
 **Why now:** the maintainer (INBOX 2026-09-25) asked whether BF2 Kashyyyk's sand beaches are the terrain layers. They are [D]:

@@ -1,21 +1,10 @@
 ---
 id: OBST
 title: Bots walk straight into solid props (a round control-panel block, a cp's plinth, turrets, parked vehicles, other bots) instead of going around them: measure what the steering sees, then give a bot obstacle awareness on its way to its goal
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: PARR,BOTD,MOVR
-files: engine/crates/core/src/ai/avoid.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/steer.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/nav.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: obst
-resume: landed e9ce6db6 2026-10-07
-created: 2026-10-02
-alpha: yes
-first: 6
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02 (playing, screenshot of a BF1/BF2 interior with a round raised control-panel block and a command post):

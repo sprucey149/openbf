@@ -1,19 +1,11 @@
 ---
 id: SWPN
 title: The round sweep over 8 seeds: per map, the finish rate and the stuck_max distribution, so a stall fix is judged by more than seed 42 (the maintainer's STALL step 1)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: scripts/sweep_seeds.py,engine/crates/game/examples/round_to_outcome.rs
-declares:
-needs:
-branch: swpn
-resume: landed bcfb2e2d 2026-09-30
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer (INBOX 2026-09-30 08:50, STALL step 1): the sweep reports one seed, and one seed is a noisy instrument — WTUN's
 seeds 1–8 showed KAM1's seed-42 win was the lucky run (7/8 NO OUTCOME), POL1 6 → 8 of 8, MUS1 1 → 2

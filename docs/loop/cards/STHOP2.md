@@ -1,20 +1,11 @@
 ---
 id: STHOP2
 title: Measure STHOP's remaining open-face grounding, steep-contact velocity and crouch airtime; compare from-rest ramp trials while preserving SPUP's approved uphill sprint
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: environment restoration: PCSX2 toolkit/emulator, local discs/reference corpus and raw STHOP/SPUP trials
-effort:
-branch:
-resume: 2026-10-24 09:18 UTC: planner reconciled active acceptance with SPUP: retain its 1 s sprint-start bar and approved uphill rule, BF2 from-rest trials still required; no BF1 PS2 sprint. Restore lead_tmp/sthop2_20261024_0840/prerequisites.json then measure remaining cases; see current Acceptance and reports/20261024_0913_planner.md.
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Found by cleanse CLNC's review of STHOP (81aae53 / de3b9c1 / eb90b56), each reproduced with a scratch test on main 5043dc3 + comments (report `reports/20260930_2125_cleanse_core.md`). All four are movement a player feels on any map with ramps or cliffs.
 

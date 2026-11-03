@@ -1,20 +1,11 @@
 ---
 id: KRMP
 title: Kamino's inclined ramps between the round platforms are walkable but their walkway is not drawn (the maintainer, kam1_play_11 / kam1_play_7): the rails and lamp housings draw, the floor between them does not — several on BF2 KAM1, check BF1's; KAMR did not find them
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/map.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/game/examples/floor_census.rs
-declares:
-needs:
-effort:
-branch:
-resume: closed: fixed in ec47e0b (door indices after the ocean splice); lead_tmp/kamdoor/README.md
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-09-30 18:45: KAMR's "invisible floors" are **the inclined floating ramps that connect the circular
 platforms**. He can walk on them, but their surface is not drawn; there are several on the map. KAMR (closed 19:35)

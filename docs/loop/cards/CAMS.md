@@ -1,20 +1,10 @@
 ---
 id: CAMS
 title: The soldier chase camera per class and game: the port frames every soldier with one BF2 stance table (walk.rs camera_section: stand 3.2 m back, crouch 3.0); BF1's classes author stand 3.5 / crouch 3.5 (+0.15 up) / prone 3.0 and the PS2 sits exactly 3.50 m behind the track centre in 19 of 22 BF1 states - read each class's CAMERASECTION (Wookiee smuggler 2.25 / 4.0, jet trooper tilt 7.5, droideka, locals)
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/walk.rs
-declares:
-needs: Restore class camera data, map/mission and PS2 state/rows; retain landed per-game camera behavior and implement only remaining class/zoom/blend/collision scope after retake.
-effort:
-branch:
-resume: PR2 c2453a6 adds stance-place easing; per-game table already implemented. Restore class/zoom/split/collision/PS2 inputs and measure remaining every-frame smoothing; full original acceptance pending. Planner report reports/20261026_0616_planner.md.
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 UAUD1 (analysis/unit-audit-bf1.md §3.6). The port's soldier chase camera is one stance table, `camera_section` in

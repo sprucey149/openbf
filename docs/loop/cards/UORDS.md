@@ -1,20 +1,11 @@
 ---
 id: UORDS
 title: Bolts are swept every tick against units, as on the PS2: the predictive spawn ray tests only terrain and buildings (BF1 0x48 / BF2 0x90), soldiers / vehicles / riders / water / foliage / shields are struck by a prev->current sweep each frame (0x996 / 0x132e) - a soldier who steps out of a bolt's line is missed, one who steps in is hit (the port's split landed in main's 0ee5a57; its PS2 evidence is open)
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/projectile.rs, engine/crates/core/src/sim/combat.rs, engine/crates/core/src/sim/ordnance.rs, engine/crates/core/src/sim/missiles.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/weapon.rs
-declares: sim; sweep; arena
-needs: the audit-uord PS2 bolt captures and tables (engine/artifacts/lead_tmp/audit-uord/ps2/), a foliage collision body to test against (foliage is render-only today) and an 8 x 32 sweep 256 / 256
-effort:
-branch:
-resume: 2026-10-30: the behaviour is in the tree from main's 0ee5a57 (2026-10-27), not from this branch. Bolt::fire passes no unit targets (projectile.rs:260), so its spawn ray tests terrain, water and the map's static bodies only, and sweep_bolts (sim/combat.rs:41-199) strikes units, riders, shields, guided rockets and vehicle hulls on each tick's prev->current segment; a_bolt_hits_what_it_passes_through (combat.rs:1244-1272) asserts a dodger is missed and a late entrant is hit. This branch adds only the shared world probe Sim::probe_flight (sim/missiles.rs:20-53) for shells and missiles. Open: the foliage case (foliage is render-only, not a collision body), the mutation check, the PS2 dodge / late-entrant comparison and the 8 x 32 sweep. The PS2 captures are absent (Test-Path false, see Evidence); status stays blocked.
-created: 2026-10-22
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 analysis/re-ordnance-kinds.md §2 (card UORD, [O], two verifiers): every class of the bolt family (bolt, laser, bullet; also missile and shell) shares one flight core and one per-frame sweep. B1 FUN_002764c0 casts ONE predictive ray at the first update with mask 0x48 (buildings + terrain only) when class+0x88 = 1; the per-frame sweep FUN_00273128 (called by FUN_00163198 for every moving ordnance) rays prev -> current with 0x9de until that ray ran, 0x996 after: soldiers 2, vehicles 4, riders 0x10, water 0x80, foliage 0x100, shields 0x800. BF2 FUN_00313600 / FUN_0030fad0: 0x90, 0x13be / 0x132e. This corrects re-blaster-damage §5.1 ('targets cannot dodge'), which the port's core/src/projectile.rs transcribed when this card was written; its then-test `predictive_raycast_hits_dodgers_and_ignores_late_entrants` (then at `sim/combat.rs:739`) asserted the opposite of the PS2. Main's 0ee5a57 replaced that path on 2026-10-27 - see What is in the tree.
 

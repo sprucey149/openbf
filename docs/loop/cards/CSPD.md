@@ -1,21 +1,11 @@
 ---
 id: CSPD
 title: BF2 per-stance ControlSpeed: every BF2 team class inherits com_inf_default's sprint / jump / roll turn factor 0.35, the port's CONTROL_SPEED is the BF2 constructor's defaults (0.2 / 0.5 / 0.6) - read ControlSpeed through the class chain on BF2 maps (heroes' and jet troopers' rows too), keep BF1's table
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/soldier.rs, engine/crates/game/src/roster.rs
-declares: sim; sweep
-needs: Restore BF2 primary turn-reader evidence, class RONs and runtime validation inputs
-effort:
-branch:
-resume: 20261024_2336: blocked build; restore +0x7bc reader and real BF2 class chain, then implement row replay preserving sprint turn 0.6 and BF1 table; see engine/artifacts/loop/reports/20261024_2336_card_CSPD.md
-created: 2026-09-29
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 UAUD2 (analysis/unit-audit-bf2.md §3.6). A BF2 soldier on the PS2 turns at 0.35 x MaxTurnSpeed while sprinting, jumping and
 rolling; the port uses 0.2, 0.5 and 0.6 on every BF2 map. The values are measured (disc + RAM); how the difference

@@ -1,21 +1,11 @@
 ---
 id: RKMAR
 title: Rocket safety referees enforce the existing one-metre blast clearance
-milestone: M3
-value: 4
-phase: cleanup
-status: done
-deps:
-files: engine/crates/core/src/ai/gunner_foot/tests.rs, engine/crates/core/src/sim/step/tests.rs, engine/CRATES.md
-declares:
-needs:
-effort:
-branch:
-resume: Source0fc7493 on main; four both-rule referees, core873/game367/fmt/Clippy pass;14compiled mutants caught and production restored exactly. Full CI/cleanup gates pending; original Acceptance unchanged. reports/20261025_1029_card_RKMAR.md
-created: 2026-10-25
-alpha: yes
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 RKSLA requires the existing one-metre clearance around a rocket blast to be
 refereed at the aim gate and at the shot release. The guards currently work,

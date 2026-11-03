@@ -1,18 +1,10 @@
 ---
 id: VDRAW
 title: Parked vehicles drawn: every pad-spawned vehicle (VPAD) drawn rigid at its sim transform from VBAKE's side models (LOD0, cross-side textures), the pad yaw checked against a PCSX2 frame — every map's vehicles become visible
-milestone: M2
-value: 5
-phase: build
-status: done
-deps:
-files: game/src/viewer/vehicles.rs,game/src/viewer/scene.rs,game/src/vehicle_pads.rs,game/src/walk.rs,game/src/main/{battle,headless,windowed}.rs,game/tests/vehicle_pads.rs
-declares:
-needs:
-branch: vdraw
-resume: landed 9f60ffdf 2026-09-28
-created: 2026-09-26
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 VPAD (896b924) spawns every map's vehicles on tick 1 (TAT1: 16), and VBAKE (0a81fc9) baked all 75 side classes, but

@@ -1,21 +1,11 @@
 ---
 id: HTRN
 title: BF1 Hoth: rebels pace against the trench props east of cp4 and are recycled (hub 4, legs 4->39 and back) - 56 recycles in 32 rounds after BSPN, 17 before it at the same cells
-milestone: M3
-value: 3
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: restore real BF1 Hoth bake, mission, classes, raw plan and traced-case inputs before retry
-effort:
-branch:
-resume: 20261024_2344 input hold; no current recycle measurement or classification; restore named inputs then run 32 seeds; engine/artifacts/loop/reports/20261024_2344_card_HTRN.md
-created: 2026-10-09
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 **Correction, same day:** the counts in the title are of parent ff68507. On BSPN's branch rebased over FGHTA (b75d36b) the gate's seeds 1-8 give BF1 Hoth 3 recycles (`lead_tmp/bspn/land/branch/fidelity`). The traced stall below is real; its rate today has to be re-measured first (32 seeds on main).
 

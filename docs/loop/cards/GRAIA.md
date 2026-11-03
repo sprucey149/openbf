@@ -1,20 +1,11 @@
 ---
 id: GRAIA
 title: The weapon choice, from its audit: 8 of 12 mutations pass every test (all four rules of the second commit), three PS2 rules the port has differently ("plenty" is the load a weapon was issued, BF1 scores one shot, BF2 does not choose a reloading weapon), and the bots' grenades put Tantive IV's team kills at 5.1 % of kills (2.0 % without them; the bar is 3 %)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: GRAI
-files: engine/crates/core/src/ai/arsenal.rs,engine/crates/core/src/ai/arsenal/tests.rs,engine/crates/core/src/weapon.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch: graia
-resume: landed e9315326 2026-10-12
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 AUDIT GRAI 2026-10-07: PARTLY (`engine/artifacts/loop/audits.md`; evidence `engine/artifacts/lead_tmp/audit-grai/README.md`,
 `analysis/re-grenades.md` 7.5, report `reports/20261007_1735_audit_GRAI.md`). The landing's numbers reproduce byte for

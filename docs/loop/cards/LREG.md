@@ -1,21 +1,11 @@
 ---
 id: LREG
 title: Light regions: both games dim the sun and blend the ambient of non-static models inside region volumes (BF2 FUN_0059b2f8, BF1 FUN_00493cf0's DAT_0069c548) — the port has none (BF2 RAM: MUS1 13, UTA1 9, POL1 7, TAN1 6 entries)
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files: analysis/re-light-regions.md (new)
-declares:
-needs: Restore matching primary PS2 corpora/ELFs, FOLGL RAM tools and original MUS1/UTA1 paired states/captures; verify both games' region rules before build.
-effort:
-branch:
-resume: 20261025_0413 UTC: RE input hold; 0/48 minimum paths present. Restore evidence, trace list writers and volume weights in both games, census draw/class defaults and run list-empty/restored PS2 controls with independent verification. engine/artifacts/loop/reports/20261025_0413_card_LREG.md; no unchanged-input retry.
-created: 2026-09-28
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Both games dim NON-static models inside light regions:
 - They scale the sun, and on BF2 Light2 too, by a region factor, and blend the ambient toward the region's own.

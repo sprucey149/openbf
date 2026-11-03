@@ -1,20 +1,10 @@
 ---
 id: CAPCR
 title: A player arriving on the capture tick gets assist points, not full capture credit
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/event_feed.rs, engine/CRATES.md
-declares:
-needs: (private workflow note omitted)
-effort:
-branch: capcr-20261025
-resume: (private workflow note omitted)
-created: 2026-10-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 GCL16 finding 5 is a bounded event-feed bug: a player first seen in the post's

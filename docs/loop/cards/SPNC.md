@@ -1,20 +1,11 @@
 ---
 id: SPNC
 title: Every spawn node on the 32 maps against the route it starts on: Dagobah's node at (-20.6, 4.0, -45.1) starts a bot on a leg whose hub is 8 m below it (card DAGS) - list every node whose first leg's hub the floor walked from the node does not reach, per map and post, so the first-leg rule is checked everywhere and not found one playtest at a time
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: DAGS
-files: engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai.rs,engine/crates/game/examples/spawn_node_census.rs,engine/CRATES.md
-declares:
-needs:
-effort:
-branch: spnc
-resume:
-created: 2026-10-11
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card DAGS found one spawn node whose first leg cannot be walked. The PS2's spawn draw (card BSPN) gives every post an equal
 share, so a bad node in a small post now takes a whole post's share of a team's spawns: the same fault on another map would

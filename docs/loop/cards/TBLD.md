@@ -1,21 +1,10 @@
 ---
 id: TBLD
 title: Buildable turrets get built: an unbuilt pad (state 2, health 0 of MaxHealth) becomes its turret when repaired to full and a destroyed one falls back to its pad — PS2 bots build them within seconds (BF2 TAT2 CW 2/11 ~10 s after side select, YAV1 CW 5/6 by ~3.5 min; BF1 NAB1 8/21 before side select); the port never builds, so its 48 BF2 pads (and BF1's gun turrets after BZONE1) stay pads all battle
-milestone: M2
-value: 4
-phase: build
-status: review
-deps: TCOL
-files: engine/crates/core/src/vehicle.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/sim/seats.rs,engine/crates/game/src/vehicle_pads.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/assets.rs,engine/crates/game/src/viewer/vehicles.rs,engine/crates/game/tests/suite/vehicle_pads.rs
-declares: sim; sweep
-needs: cloud prerequisites: restore baked turret maps/classes, missions and PS2 evidence; land TCOL body prerequisite; GPU battle-frame and full gates required
-effort:
-branch: tbld
-resume: 2026-10-28 branch tbld (from playtest-20261028 a9962237): the fall look + collision, cutter repair/rebuild, no timed rebuild (the maintainer), engineer bots fix turrets with one claim a turret. NOT done here: BF2's buildable pads starting unbuilt and built by cutter (still not spawned, VTUR2), the hologram, the sweep census and the GPU battle-frame gate. See the 2026-10-28 section.
-created: 2026-09-30
-alpha: yes
-domain: vehicle
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `review`.
 
 ## Why
 The RE is done (`analysis/re-build-zones.md`, 2026-10-03, commit 4e51e84; verifier 33 / 4 / 0). A pad becomes its

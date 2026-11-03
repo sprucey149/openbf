@@ -1,18 +1,11 @@
 ---
 id: VTAI
 title: Bots use seat guns: a bot pilot fires its seat's weapon and a bot may claim a gunner seat; its look/aim from brain's target through the same perception / fairness rules as on foot
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTUR
-files: engine/crates/core/src/ai/gunner.rs,engine/crates/core/src/ai/ride.rs,engine/crates/core/src/sim/guns.rs,engine/crates/core/src/perception.rs,engine/crates/core/src/ai/brain.rs
-declares: sweep
-needs:
-branch: vtai
-resume: landed 744f8f8; turrets → VTAT
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 VAI's bots board and drive but fire nothing; VTUR (2026-09-29) arms only HUMAN riders (core::sim::guns::Sim::seat_gun returns for a bot). A vehicle full of bots that never shoot is the biggest remaining AI gap in M2.
 

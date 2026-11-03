@@ -1,22 +1,10 @@
 ---
 id: AIRC
 title: A jump steers in the air: a standing jump with the stick forward moves forward (the maintainer, 2026-10-01: 'that is what the original games do and it is better'), for the player and for bots - measure the PS2 on open floor first, then build
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOWL
-files: engine/crates/core/src/soldier.rs,engine/crates/core/src/ai/brain.rs
-declares: sweep; arena; leak
-needs:
-effort:
-branch: airc
-resume: landed 8c34344e 2026-10-02
-created: 2026-10-01
-first: 2
-alpha: yes
-domain: physics
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-01 22:00: "let the unit still go forwards after airborne. They don't have to be walking forwards before

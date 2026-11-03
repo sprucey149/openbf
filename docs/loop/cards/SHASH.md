@@ -1,19 +1,10 @@
 ---
 id: SHASH
 title: A per-tick sim-state hash stream: the port writes one canonical record per tick (unit positions and health, the game LCG state, team scores and tickets, post owners, round timers) as a trace file, and a headless replay of a recorded pad log (InputLog) reproduces it byte for byte - the port half of the PS2 state-diff oracle (research rec. 6)
-milestone: M0
-value: 3
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/sim/trace.rs (new), engine/crates/core/src/sim/trace/tests.rs (new), engine/crates/core/src/sim.rs, engine/crates/game/src/main.rs, engine/crates/game/src/main/sim_trace.rs (new), scripts/sim_gates.sh, engine/CRATES.md, engine/artifacts/oracle/README.md (new)
-declares:
-needs:
-effort:
-branch: shash
-resume: (private workflow note omitted)
-created: 2026-10-08
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 `research/decomp_landscape_20261008/README.md` rec. 6: every decomp project that works has an objective oracle the agent cannot argue with; ours is behavioural and today only prose plus aggregate sweeps. The port already has two coarse determinism hashes (`game --sim-hash N` -> `hash100` / `hash600` in `gates.toml [sim]`, one number after N ticks) which say "something moved" but not which tick or which field. A per-tick stream of per-FIELD hashes is the port half of a first-divergence differ (FDIFF) against the PS2 (PSHASH). It is also a better "did this landing move the sim" gate than one end-of-run number.

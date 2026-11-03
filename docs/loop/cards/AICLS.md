@@ -1,23 +1,12 @@
 ---
 id: AICLS
 title: Which class an AI spawn takes on the PS2: the assignment from the AddUnitClass counts / SetupTeams minimums, and whether a dead bot re-rolls its class — the port's next_ai_class and keep-your-class rule are PROVISIONAL (ours)
-milestone: M3
-value: 2
-phase: re
-status: blocked
-deps:
-files: analysis/re-ai-class-selection.md (new)
-declares:
-needs: repair archived class-name identification; original two-game timed census and independent rule verification
-effort:
-branch:
-resume: partial RE retained; repair the failed class-name instrument before using archived per-class rows, then complete the original 0/2/5-minute live-AI census. Preserve the selected 4:2:1 floor/re-roll policy and original count-matching acceptance; resolve any conflict explicitly
-created: 2026-09-30
-defer: post-alpha
-value_pre_alpha: 3
-public_issue: https://github.com/sprucey149/openbf/issues/9
-tries: 1
+status: archived
+issue: 9
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #9](https://github.com/sprucey149/openbf/issues/9).
+
 ## Why
 Cleanse CLNC (2026-09-30): two PROVISIONAL rules in `core/src/sim/spawn.rs` named an open RE question ('HOLD FOR FABLE') that no card or analysis section owned. The unit mix on the field is player-visible on every map (how many rocketeers, snipers, pilots a team fields, and whether the mix drifts over a battle).
 

@@ -1,20 +1,10 @@
 ---
 id: SPL11
 title: The seams: think split by owner into behave / mover / gunner_foot with one MoveRequest and one AimRequest a tick - a pure move, the first build step of the bot design (was: brain.rs over the size cap)
-milestone: M0
-value: 5
-phase: build
-status: done
-deps: OFFG,STLVL,STTAP,STARC,STEND,BOTD
-files: engine/crates/core/src/ai/brain.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/state.rs,scripts/size_waivers.txt,engine/CRATES.md
-declares:
-needs:
-effort: high
-branch: spl11
-resume: landed 08e29070 2026-10-06
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Filed by cleanse CLNG (2026-10-02): `scripts/size_report.sh --strict` exited 1 on `core/src/ai/brain.rs` (2,032 lines, no waiver, no card). The waiver line in `scripts/size_waivers.txt` names this card. It depends on the `first:` AI cards because every one of them edits brain.rs and a pure move under them would cost each a rebase.

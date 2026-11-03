@@ -1,19 +1,11 @@
 ---
 id: RIDERSTATE
 title: Vehicle rider lifecycle consistency under death, exit and slot reuse
-milestone: M0
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/sim/state.rs, engine/crates/core/src/sim/state/tests.rs
-declares:
-needs:
-effort:
-branch:
-resume: Finite audit closed: existing lifecycle fixtures pass; no defect/new coverage gap established. See reports/20261025_0540_card_RIDERSTATE.md; unrelated core scanner failure recorded, content acceptance remains separate.
-created: 2026-10-25
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Vehicle occupancy and unit handles must remain internally consistent through lifecycle transitions. Existing synthetic simulation fixtures make these invariants executable without interpreting new original-game behavior.
 

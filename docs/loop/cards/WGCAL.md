@@ -1,20 +1,10 @@
 ---
 id: WGCAL
 title: BF1 ground pilots make their initial gunner call when their pickup wait starts
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK,WAIT4,CWAIT
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/ride/tests/wait_call_tests.rs (new), engine/crates/core/src/ai/ride/tests/call_board_tests.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/step/tests.rs, engine/CRATES.md
-declares: sim; sweep
-needs: real-content acceptance and boarding regression gates
-effort:
-branch: main
-resume: Source 8912bc9 on main; 9 WGCAL/67 ride/920 core/379 game+2ignored/fmt/all-target Clippy pass; 8 compiled faulty variants caught. Preserve GUNWT/GBOARD acceptance; restore inputs and finish Acceptance5. reports/20261025_2303_card_WGCAL.md
-created: 2026-10-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 The initial BF1 need-gunner call currently runs in ai_use_pass when the pilot

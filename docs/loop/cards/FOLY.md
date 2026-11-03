@@ -1,20 +1,11 @@
 ---
 id: FOLY
 title: Soldier foley: footsteps by surface (run / walk, left / right), jump, land, roll, squat, get up - the PS2 starts 237 in 105 s on Naboo, the port none
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/foley.rs,engine/crates/mungefs/src/lib.rs,engine/crates/bake/src/foley.rs,engine/crates/bake/src/lib.rs,engine/crates/bake/src/main.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/foley.rs,engine/crates/game/src/lib.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/main/headless.rs,engine/CRATES.md
-declares: rebake=sounds
-needs:
-effort:
-branch: foly
-resume: landed d51ff742 2026-10-02
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 SNDC (`analysis/audio-census.md` sections 2, 3): the PS2 plays a footstep for every step of every soldier in earshot,
 and jump / land / roll / squat / get-up sounds. The port plays none. In 105 s on NAB1 the PS2 started 237 foley

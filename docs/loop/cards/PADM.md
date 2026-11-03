@@ -1,18 +1,10 @@
 ---
 id: PADM
 title: Controllers work out of the box: gilrs has no mapping for the maintainer's GameSir G7 Pro (USB 3537:1022), so the right stick (camera) is dead and X/Y are swapped — bundle SDL_GameControllerDB + a project mapping file via GilrsBuilder::add_mappings, log each pad's resolution, warn on an unresolved camera/fire
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/input/src/lib.rs,engine/crates/input/pads.txt,engine/crates/input/examples/pads.rs,engine/crates/game/src/main/windowed.rs,engine/crates/ui/src/hud.rs,engine/CRATES.md
-declares:
-needs:
-branch: padm
-resume:
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX 2026-09-28: on his GameSir G7 Pro the camera cannot turn, so nothing is testable on a pad. Value 5 by his

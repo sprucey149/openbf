@@ -1,18 +1,11 @@
 ---
 id: FOLGL
 title: Foliage models' lighting: BF2 FEL1's leaves draw near-black in the port where the PS2 shows them pale pink and green — the prp_ entries are Lighting static (draw flag 0x80, meaning [H]) and the port lights them on the ordinary Lit path, back faces getting ambient only
-milestone: M1
-value: 4
-phase: re
-status: done
-deps: FOLG
-files: analysis/re-foliage.md
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-26
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 - **Why:** FOLG's pairs (`engine/artifacts/lead_tmp/folg/pics/strip_bf2_fel1_cp3_cp3_1_postA_spawn.png`, `…_v1.png`: PS2 | before | after) put the right plants in the right places but many fel1_prop_foliage_b / _d leaves are dark brown-black where the PS2's are lit. The baked GLBs are light 'lit', MASK. re-foliage §6 leaves the draw flags 0x80 (static) / 0x800000 (BF1) / 0x1000000 (BF2) as [H].
 - **RE:** what the model draw path (B1 FUN_003465c0 → the model render call with flags) does with 0x80 and the per-game flag: a prelit/unlit light set, two-sided lighting, or the static light set (re-model-lighting.md §3); then the build picks the LightPath for foliage draws in game::viewer::foliage.
 - **Acceptance:** a FEL1 pair's leaves within a few levels of the PS2's mean colour.

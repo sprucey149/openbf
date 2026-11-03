@@ -1,20 +1,11 @@
 ---
 id: CLSE3
 title: Polis Massa after CLSE: inside 10 m the port's bots still deal 0.36 of the PS2's damage per aimer-second (29 hp against 81; Kamino 53 against 71) - they fire for 23 % of that time against 34 %, hold a target they do not see for 11-31 % of it, and hit with 0.3 of their rifle shots against 0.6-0.9: trace it and name the cause
-milestone: M3
-value: 4
-phase: measure
-status: done
-deps: CLSE
-files: engine/crates/core/src/perception.rs
-declares: sweep; arena
-needs:
-effort:
-branch:
-resume: measured 2026-10-22 (report reports/20261022_0720_card_CLSE3.md): the gap is crowding (3.38 aimers per victim vs 1.40) x the victim's hurt rate (0.62 x); two PS2 gunnery rules knocked in moved nothing; follow-up CLSE6
-created: 2026-10-09
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card CLSE's acceptance asked for the port's damage per aimer-second inside 10 m at 0.67-1.5 x the PS2's on both
 maps. After its landing (77f4c70) Kamino is at 0.75 x (53 hp against 71) and **Polis Massa at 0.36 x (29 against

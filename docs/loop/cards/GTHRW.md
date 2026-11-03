@@ -1,20 +1,11 @@
 ---
 id: GTHRW
 title: The grenade throw is shown: the PS2's throw clip per class and game, played on the soldier in third person when he throws (the throw itself exists, card GREN; first person waits on card FPV)
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/animator.rs,engine/crates/game/src/soldier_vis.rs,engine/crates/game/src/animator/tests.rs,engine/crates/game/src/animator/census.rs,engine/crates/core/src/weapon.rs
-declares:
-needs: environment restoration: restore audit-gthrw 22-throw raw/replay inputs, gthrw strips, real class/animation bakes and missions
-effort:
-branch:
-resume: PR2 c2453a6 implements throw action/variant/offhand-set/wind-up wiring; restore original inputs and finish legs-rule mutations, release census and viewed strips. Full acceptance pending; planner report reports/20261026_0616_planner.md.
-created: 2026-10-21
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The maintainer (INBOX 2026-10-21 17:50 item 1): the grenade throw animation is not shown. RE done 2026-10-22
 (`analysis/re-grenade-throw-anim.md`, docs f44cdcf): the port's animator starts an action only on a `Shot` event; a

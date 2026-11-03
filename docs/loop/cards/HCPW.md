@@ -1,20 +1,11 @@
 ---
 id: HCPW
 title: Hover contact sidedness: at TAT1 cp4 yaw 0 the skiff wedges under the command-post overhang (a spring sphere 1.18 m past its length, pressed from above by n = −y) — is the PS2's mesh contact one-sided?
-milestone: M2
-value: 3
-phase: re
-status: blocked
-deps: HOVR,GSKIP
-files: engine/crates/core/src/collision/walls.rs,engine/crates/core/src/vehicle/hover.rs
-declares:
-needs: Restore TAT1 skiff bake/mission and both primary corpora/ELFs; reproduce current-main contact and independently verify sidedness before building or declaring faithful.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 8/8 exact named paths absent. Restore TAT1 skiff bake/mission and both primary corpora/ELFs; reproduce current-main contact and independently verify sidedness before building or declaring faithful. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-09-28
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 The port's CollisionWorld::sphere_contacts is two-sided; a hover driven into TAT1's cp4 model at yaw 0 (game/examples/hover_drive.rs tat1 tat_hover_skiff cp4_vehiclespawn_10 0) wedges. Whether the PS2 would too is [H] (re-hover §11).
 ## Evidence

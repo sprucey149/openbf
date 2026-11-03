@@ -1,20 +1,10 @@
 ---
 id: TSLG
 title: A turret stands at the base of a leg instead of on the platform it belongs to (the maintainer's playtest 2026-10-07, BF2 Kamino): find the platform and every turret slot like it, and put each turret where the PS2 puts it (the pad / hardpoint of the stand, not the stand's origin)
-milestone: M2
-value: 4
-phase: capture
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume: capture done 2026-10-22: the port matches the PS2 (no turret on the AAA-bridge balconies on the PS2 either; 122/122 BF2 and 167/167 BF1 turrets at the PS2's places). Report reports/20261022_0648_card_TSLG.md
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-07: "At the end of the round I noticed a platform that normally hosts a turret but there was no turret there. A turret was at the base of this leg thing - I think the turret should be on this leg thing as a turret station."

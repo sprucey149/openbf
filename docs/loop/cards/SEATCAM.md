@@ -1,19 +1,12 @@
 ---
 id: SEATCAM
 title: A seat camera can end up under the terrain: in BF2 Geonosis's geoturret the camera sat 0.30 m under the terrain sheet, 2 m from the turret at its origin's height, where the class's camera (TrackCenter 0 2.5 0, offset 0 3.6 2.0) puts it ~6 m up; check every turret and vehicle seat
-milestone: M2
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/walk.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-28
+status: archived
+issue: 71
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #71](https://github.com/sprucey149/openbf/issues/71).
+
 ## Why
 The maintainer's playtest 2026-10-28: "when I got in a geonosis turret, the camera went underground", and asked whether the camera drops elsewhere too.
 

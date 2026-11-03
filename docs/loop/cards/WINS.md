@@ -1,20 +1,10 @@
 ---
 id: WINS
 title: One side wins every round on 10 of 32 maps (main a88147b, 16 seeds each: bf2_kam1 16-0 with team 1 at 0-1 tickets and 0 alive, bf2_dag1 16-0, bf2_uta1 0-16, bf1_rhn2 16-0, bf1_geo1 / bf1_hot1 0-16, bf1_end1 15-1, bf1_kas1 / bf1_yav1 1-15, bf2_geo1 1-14): per map, sort the share into the mission's own asymmetry (tickets, unit counts, classes, the PS2's bots-only result) and a port fault on one side, name the fault on the worst showcase maps
-milestone: M3
-value: 5
-phase: measure
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-22
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 KA137's report (2026-10-21 23:36): all 24 BF2 Kamino rounds on main end "team 0 wins" with team 1 at 0-2 tickets. The

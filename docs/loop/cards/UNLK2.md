@@ -1,20 +1,12 @@
 ---
 id: UNLK2
 title: The career counter (OURS): the profile counts the player's career kills per lockable class (kills made as that class in a real match, conquest and instant action, bots or not) and saves them with the profile
-milestone: M3
-value: 3
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/profile.rs,engine/crates/game/src/walk.rs,engine/crates/game/src/event_feed.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/main/windowed/career.rs,engine/crates/game/tests/suite/main.rs,engine/crates/game/tests/suite/career_class_kills.rs,engine/CRATES.md
-declares: ci=+4
-needs:
-effort:
-branch:
-resume: 2026-10-27 class-counter implementation and hit/capture follow-up complete; serial workspace CI passed. Local main integration and packed executable rebuild authorized by the user. Historical cloud checkpoint files are absent; native size/map limitations are recorded below.
-created: 2026-10-21
-public_issue: https://github.com/sprucey149/openbf/issues/19
+status: archived
+issue: 19
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #19](https://github.com/sprucey149/openbf/issues/19).
+
 ## Why
 The maintainer (INBOX 2026-10-21 17:50 item 4b). One number per class, per class not per side.
 

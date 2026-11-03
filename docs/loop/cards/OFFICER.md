@@ -1,19 +1,10 @@
 ---
 id: OFFICER
 title: BF2 officers use their area abilities
-milestone: M3
-value: 4
-phase: measure
-status: in-progress
-deps:
-files: engine/crates/core/src/weapon, engine/crates/core/src/sim/abilities.rs, engine/crates/core/src/sim/pickups.rs, engine/crates/core/src/sim/ordnance.rs, engine/crates/game/src/roster.rs, engine/crates/game/src/fx
-declares: sim; ci=+15
-needs: maintainer validation per Astra instruction
-effort:
-branch:
-resume: Run the added tests and compare officer effects, supply, query boundaries and presentation with live BF2 before accepting issue 47.
-created: 2026-10-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `in-progress`.
 
 The maintainer assigned the exact scope of upstream issue #47 in this chat. At inspection the issue had no claim comments; this session has not posted externally. Scope: original ability research and implementation for officers. Hero copies and Force powers remain deferred.
 

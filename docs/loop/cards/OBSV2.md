@@ -1,20 +1,10 @@
 ---
 id: OBSV2
 title: A walk point that lies in a map body is moved to where a soldier can stand (a detour corner, a hub's centre, a leg line's start) - the cure of com_weap_gunturret's contact time (688 s -> 13-26 s per 256 rounds: 677 s of it is ONE turret on BF1 Endor, in whose middle a detour corner of the leg from hub 18 to hub 0 lies): built behind a switch and measured by card OBSV, held back because the bots it frees walk on into Endor's hollow tree (card ETREE)
-milestone: M3
-value: 4
-phase: build
-status: todo
-deps: OBSV,ETREE
-files: engine/crates/core/src/ai/route.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 Split off card OBSV (2026-10-12): OBSV's bar 'com_weap_gunturret's contact time halved' is not a footprint question.

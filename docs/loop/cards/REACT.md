@@ -1,20 +1,10 @@
 ---
 id: REACT
 title: A bot that is being hit reacts instead of standing there (the maintainer's playtest 2026-10-07): per hit, a chance by difficulty to stay, strafe, dodge-roll, or move to a new angle or cover - for a fighter in the stand style too
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: FGHT
-files: engine/crates/core/src/ai/behave.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/skill.rs, engine/crates/core/src/ai.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch: react
-resume: landed 19708fad 2026-10-12
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-07: "when you are shooting at a bot, if it doesn't die after being hit, it just stays standing there. In the original games there was a chance when you were shooting at a bot that it would either stand still, or try moving around some. The bots do a better job at spreading out, but now they are mostly just standing there. This can also go into the difficulty ladder, but the bots should move around and dodge more and be more aware they are in a firefight and react accordingly when the difficulty gets harder. So there is a percent chance they stay where they are, or they do something such as strafe while fighting, or dodge/roll, or move to a new position or something for a new angle or cover."

@@ -1,21 +1,11 @@
 ---
 id: UNLK
 title: BF2 class unlocks: complete score and reset/re-lock research and validate SSELB's existing 8-point officer / 12-point special gate, silhouette and text
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps:
-files:
-declares:
-needs: Restore primary corpora, ELFs, score scripts and saved-state evidence listed in engine/artifacts/loop/reports/20261025_0021_card_UNLK.md; real roster/UI validation also pending
-effort:
-branch:
-resume: 20261025_0021 reconciliation, no source edit; SSELB re-spawn-flow 4.3 already names the reader/non-hero score and implements refusal/text/black tint. Trace score writers/reset and live threshold crossings after restoration; original Acceptance retained. See engine/artifacts/loop/reports/20261025_0021_card_UNLK.md.
-created: 2026-09-29
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 UAUD2 (analysis/unit-audit-bf2.md §3.8) originally found the BF2 officer/special class gate missing.
 SSELB subsequently added the gate and its presentation. This card retains the score/lifecycle research and full

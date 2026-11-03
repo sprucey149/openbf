@@ -1,20 +1,10 @@
 ---
 id: SPST
 title: Verify post-then-node spawns after BSPN and OPNW: exact respawn shares, opening walker shares, all-map outcomes and walker post light
-milestone: M3
-value: 4
-phase: measure
-status: blocked
-deps: CWSP,BSPN,OPNW
-files: engine/crates/core/src/sim/spawn.rs, engine/crates/game/examples/round_to_outcome.rs
-declares: sweep; sim; arena
-needs: restore baked maps/missions, local PS2 spawn evidence and approved GPU checks; OPNW opening implementation must land before final census
-effort:
-branch:
-resume: 2026-10-24 08:25 UTC: planner reconciled BSPN/OPNW overlap; measure remaining SPST acceptance after OPNW, do not rebuild their production rules. Restore reports/20261024_0817_card_SPST.json inputs, verify current source/refs, reproduce exact 4/12-node 2000-respawn referee and mutation, opening/240s shares and walker counts, paired 8x32 outcomes and HOT1 light census. No acceptance run or closure. See engine/artifacts/loop/reports/20261024_0825_planner.md.
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Current scope (planner 2026-10-24 08:25 UTC)
 This is now a measurement and referee follow-up. Current source already has

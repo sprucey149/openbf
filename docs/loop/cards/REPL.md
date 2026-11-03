@@ -1,19 +1,10 @@
 ---
 id: REPL
 title: An AI-battle replay capture for the maintainer (Tier-4): the sweep proves rounds end, not that a battle looks like one
-milestone: M3
-value: 3
-phase: measure
-status: blocked
-deps:
-files:
-declares:
-needs: Restore two showcase baked maps and missions plus approved rendering support; capture and view two real battle recordings, then publish their local paths in STATUS.
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 4/4 exact named paths absent. Restore two showcase baked maps and missions plus approved rendering support; capture and view two real battle recordings, then publish their local paths in STATUS. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-09-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 2.

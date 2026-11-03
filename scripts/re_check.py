@@ -11,14 +11,16 @@ b2 = analysis/SWBFRNT2.ELF-decomp.c; ELFs: extracted/bf1/SWBFRONT.ELF, extracted
                                              executable MIPS lui + ori/addiu builds within 12 instructions.
                                              Always writes a RECEIPT (engine/artifacts/loop/receipts/<card>_<id>.json) and prints
                                              `[receipt:<id>]` — paste that tag next to every "no class authors X / absent" claim;
-                                             `loopctl.py check-absence analysis/re-x.md` refuses an absence claim without one.
+                                             `re_check.py check-absence analysis/re-x.md` refuses an absence claim without one.
+  re_check.py check-absence analysis/re-x.md [--warn] [--base REF]
+                                             require existing receipt tags on absence claims outside code fences.
   re_check.py writers b2 DAT_006615f9         check 5: every WRITE of a global (`X = ...`, incl. initialisers) with its function
   re_check.py word b2 0x60c1fc [n] [--f32|--u32|--str]   check 4: raw ELF words at a VA, offset formula stated
   re_check.py callers b2 FUN_005755b0         who calls a function (decomp text), with the caller's name
 Check 3 (the twin) is judgement: open both functions with `fn` and walk their callers with `callers`.
 Paste the commands and their output into the RE doc — that is the evidence the verifier and the auditor re-run.
 """
-import datetime, hashlib, json, os, re, struct, sys
+import datetime, glob, hashlib, json, os, re, struct, subprocess, sys
 
 VERSION = 2  # receipt format / tool version
 MAX_SRC_FILES = 200000
@@ -364,8 +366,79 @@ def hash_name(name):
     print("(candidate numeric matches; inspect the function to establish a property read)")
 
 
+ABSENCE_RES = [re.compile(x, re.I) for x in (
+    r"\bno class(es)?\b", r"\bnone of the class", r"\bno (class|file|chunk|record|script|function|code|caller|writer|reader|author)s?\b[^.\n]{0,30}\b(author|write|writes|set|sets|read|reads|call|calls|use|uses|contain|contains|reference|references)",
+    r"\bnone (author|write|set|call|use|contain)", r"\babsent\b", r"\bnever (authored|authors|written|written to|set|called|read|used|referenced)\b",
+    r"\bnot present\b", r"\bnothing (authors|writes|sets|calls|reads|uses|references)\b", r"\bno (callers?|writers?|hits?|users?)\b",
+    r"\bdoes not (exist|appear) (anywhere|in any)\b")]
+RECEIPT_TAG = re.compile(r"\[receipt:([0-9a-f]{6,16})\]")
+
+
+def receipt_exists(rid):
+    for d in {os.path.join(loop_dir(), "receipts"), os.path.join(ROOT, "engine/artifacts/loop/receipts")}:
+        if glob.glob(os.path.join(d, f"*{rid}.json")):
+            return True
+    return False
+
+
+def absence_claims(text, only=None):
+    """[(line no, text, receipt ids, missing ids)] for each absence-claim line outside code fences. A receipt tag counts on
+    the claim's line or the next 3 lines of its paragraph. `only` = set of line numbers to look at (None = all)."""
+    L, out, fence = text.split("\n"), [], False
+    for i, ln in enumerate(L):
+        if ln.lstrip().startswith("```"):
+            fence = not fence
+            continue
+        if fence or (only is not None and i + 1 not in only) or not any(r.search(ln) for r in ABSENCE_RES):
+            continue
+        ids = []
+        for j in range(i, min(i + 4, len(L))):
+            if j > i and not L[j].strip():
+                break
+            ids += RECEIPT_TAG.findall(L[j])
+        out.append((i + 1, ln.strip(), ids, [r for r in ids if not receipt_exists(r)]))
+    return out
+
+
+def added_lines(doc, base, repo=None):
+    """Line numbers of `doc` added since `base` (all of them when the file is untracked at base)."""
+    repo = repo or ROOT
+    rel = os.path.relpath(os.path.abspath(doc), repo)
+    if subprocess.run(["git", "-C", repo, "cat-file", "-e", f"{base}:{rel}"], capture_output=True, text=True).returncode:
+        return None
+    nums = set()
+    for h in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", subprocess.run(["git", "-C", repo, "diff", "-U0", base, "--", rel], capture_output=True, text=True).stdout, re.M):
+        a, n = int(h.group(1)), int(h.group(2) or 1)
+        nums.update(range(a, a + n))
+    return nums
+
+
+def check_absence(doc, base=None, repo=None):
+    """Returns (failures, report lines). A failure = an absence claim with no receipt tag, or a tag naming no receipt."""
+    text = open(doc, errors="replace").read()
+    only = added_lines(doc, base, repo) if base else None
+    bad, rep = 0, []
+    for n, t, ids, missing in absence_claims(text, only):
+        if not ids:
+            bad += 1; rep.append(f"{doc}:{n}: absence claim without a [receipt:<id>] — run `re_check.py absent …` and cite it: {t[:110]}")
+        elif missing:
+            bad += 1; rep.append(f"{doc}:{n}: receipt {', '.join(missing)} does not exist in {os.path.relpath(os.path.join(loop_dir(), "receipts"), ROOT)}/")
+    return bad, rep
+
+
 def main():
     a = sys.argv[1:]
+    if a and a[0] == "check-absence":
+        import argparse
+        parser = argparse.ArgumentParser(description="Validate absence-claim receipts")
+        parser.add_argument("doc")
+        parser.add_argument("--warn", action="store_true")
+        parser.add_argument("--base")
+        args = parser.parse_args(a[1:])
+        bad, report = check_absence(args.doc, args.base)
+        for line in report:
+            print(line)
+        sys.exit(0 if args.warn else int(bool(bad)))
     if len(a) == 2 and a[0] == "hash":
         try:
             hash_name(a[1])

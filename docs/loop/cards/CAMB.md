@@ -1,18 +1,11 @@
 ---
 id: CAMB
 title: BF1 soldiers are lit by SkyInfo CharacterAmbientColor, not AmbientColor — the port uses AmbientColor for every draw (9 of 14 BF1 maps differ: GEO1 d19c49 vs 78654c, HOT1 a6a9ad vs ffffff)
-milestone: M1
-value: 4
-phase: build
-status: done
-deps:
-files: engine/crates/render/src/{shader.wgsl,draw.rs,frame.rs,lib.rs,lighting.rs}, engine/crates/game/src/{soldier_vis.rs,viewer/look.rs}
-declares: goldens=maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_nab2.png,maps/bf1_rhn1.png,maps/bf1_yav1.png,maps/tat1.png
-needs:
-branch: camb
-resume: landed 86d23b5; vehicles → VAMB
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 BF1's model draw gives each kind of draw its own ambient (`analysis/re-model-lighting.md` §12, [O], card FOLGL):
 - `FUN_00496248` → `FUN_00493cf0` gives a NON-static model `DAT_0069c578` = SkyInfo `CharacterAmbientColor`.

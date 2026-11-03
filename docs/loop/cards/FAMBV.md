@@ -1,20 +1,11 @@
 ---
 id: FAMBV
 title: BF1 Naboo's fambaa shield dome as the PS2 draws it: RE the ShieldEffect draw of the fambaa_shield config (Radius 60, Height 30, texture fambaa_shield2 scrolled 0.1, colours 255x4 / 240 160 255, three unnamed keys) and draw it in the port, matched to the PS2 frames
-milestone: M1
-value: 4
-phase: re
-status: todo
-deps: FAMB
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The maintainer's DECISION 1 (2026-09-28): the fambaa's shield is Naboo Plains' unique feature. FAMB brings the fambaas and the
 shield's rule into the port; this card is how it LOOKS - the lavender translucent dome over both fambaas.

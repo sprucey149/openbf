@@ -1,20 +1,11 @@
 ---
 id: BPNT
 title: BF2's local point lights and lamp glows: UTA1's red lamp posts light a strong red pool and haze on the PS2 (floor (151,71,63) vs the port's (98,49,39)), its floors yellow-lit, TAN1's corridor pink, GEO1's bunker strips white-hot — the port lights with the sun, Light2 and the ambient only; RE the point-light path (lght local sets, the VU1 0x20 flag, which models take them) and build it
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/light.rs,engine/crates/bake/src/lighting.rs,engine/crates/bake/src/map.rs,engine/crates/manifest/src/lib.rs,engine/crates/manifest/src/tests.rs,engine/crates/game/src/assets.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/game/src/point_light.rs,engine/crates/game/src/bolt_light.rs,engine/crates/render/src/draw.rs,engine/crates/render/src/shader.wgsl,engine/crates/render/src/pipelines.rs,engine/crates/render/src/frame.rs,engine/crates/render/src/lib.rs,engine/crates/render/src/lighting.rs
-declares: rebake=maps; goldens=maps/bf2_cor1.png,maps/bf2_dag1.png,maps/bf2_dea1.png,maps/bf2_end1.png,maps/bf2_fel1.png,maps/bf2_geo1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_nab2.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/bf2_yav1.png,maps/tat2.png,walkabout_stats.ron
-needs:
-effort:
-branch: bpnt
-resume: landed 3c024fb0 2026-09-30
-created: 2026-09-29
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 PXWB (2026-09-29, FINDINGS F48): BF2's local lights are a visible gap on the lamp-lit maps. The PS2 frames at the
 walkabout's own stands: `engine/artifacts/pcsx2/ref/bf2_uta1/walk/pairs/cp2_con_cp1a__sheet.png` b180 (the red lamp:

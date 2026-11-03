@@ -1,18 +1,11 @@
 ---
 id: ELFR
 title: BF1 materials by the ELF's segment rule, not the alpha census: KAS2 City Hall's lower walls are missing (flag 0x1 thatch MASKed away), the platform huts show clear-black between the bamboo, YAV1's temple holo panels (Scroll|0x04) draw opaque — the PS2 draws the first two solid and blends the third (PXWA walkabout pairs)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: bake/src/alpha.rs,bake/src/map.rs,bake/src/glb.rs
-declares: goldens=maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,walkabout_stats.ron; rebake=maps
-needs:
-branch: elfr
-resume: landed a3d2d65f 2026-09-29
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The PXWA walkabout (PCSX2 at the port's own post stands) shows holes and wrong translucency where the port's ALPHA RULE v2
 (the texture-alpha census, `bake/src/alpha.rs`, PROVISIONAL) disagrees with the BF1 ELF's own segment rule

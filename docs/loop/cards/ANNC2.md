@@ -1,21 +1,11 @@
 ---
 id: ANNC2
 title: The commander hears the right inputs: his bleeding / reinforcement lines follow the listener's FACTION (playing a mission's other side now gives the enemy's commander), and on BF2 maps the last stand speaks as the PS2's does (the script's 3 s bleed rate at every post event: 77 lines missing in 23 of 31 battles)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/announce.rs,engine/crates/core/src/announcer.rs,engine/crates/game/tests/announcer_ps2.rs,engine/crates/game/src/main/battle.rs,analysis/re-announcer.md
-declares:
-needs:
-effort:
-branch: annc2
-resume: landed cc4219f1 2026-10-05
-created: 2026-10-02
-alpha: yes
-domain: behaviour
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Filed by the audit of ANNC (2026-10-02, PARTLY; `reports/20261002_0135_audit_ANNC.md`, evidence
 `engine/artifacts/lead_tmp/audit-annc/README.md`). The commander's RULES are the PS2's; two of his INPUTS are not.

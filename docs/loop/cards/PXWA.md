@@ -1,18 +1,10 @@
 ---
 id: PXWA
 title: PCSX2 walkabout, BF1: capture the PS2 at every command post of every BF1 map at the port walkabout's stand, eye 1.7 m, level pitch, bearings 0/90/180/270, 0 AI, teleported by RAM; PS2|port pairs, parked-vehicle pairs (finishes VPXC1), findings -> cards
-milestone: M1
-value: 5
-phase: capture
-status: done
-deps:
-files:
-declares:
-needs:
-branch:
-resume: done 2026-09-29: all 15 BF1 maps / 88 posts / 352 views; F35-F45; ELFR INTL BESL KFIRE carded; VPXC1 closed
-created: 2026-09-28
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer (INBOX 2026-09-28, value 5, M1): the walkabout (`engine/artifacts/walkabout/`) shows parts of maps the goldens never

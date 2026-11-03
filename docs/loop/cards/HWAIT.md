@@ -1,21 +1,10 @@
 ---
 id: HWAIT
 title: A new BF2 AI ground driver holds its pickup wait for an eligible human teammate
-milestone: M3
-value: 4
-phase: build
-status: done
-deps: UTALK
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/ride/tests/human_wait_tests.rs, engine/CRATES.md
-declares: sim; sweep
-needs:
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-10-25
-alpha: yes
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 A BF2 bot drives away while the human is approaching its vehicle. WAIT4's

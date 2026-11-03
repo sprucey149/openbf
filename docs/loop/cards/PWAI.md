@@ -1,19 +1,11 @@
 ---
 id: PWAI
 title: BF2 bots detour to useful health/ammo pickups, including far/no-human bots under approved BOTD D1; retain the PS2 near/far rate sample and BF1 negative control
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps: PWUP,BOTD,MOVR
-files: engine/crates/core/src/ai/pickup_seek.rs (new), engine/crates/core/src/ai.rs, engine/crates/core/src/ai/behave.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/sim/pickups.rs
-declares: sim; sweep
-needs: restore PWAI PS2 sampling kit, live BF2 state, baked maps and missions
-effort:
-branch:
-resume: 2026-10-24 13:06 UTC: retain PS2-sample-FIRST restoration hold and pwai_cloud/next_prompt.md. Active acceptance now explicitly implements approved BOTD D1 for near/far/no-human BF2 bots; full-health/ammo, energy/buff and BF1 negatives retained. Caller/hash/dry-run ownership recorded; no implementation. reports/20261024_1306_planner.md
-created: 2026-10-02
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 `analysis/re-powerups.md` §6 (`[O]`, 772d174). BF2 only: `FUN_002bd628` -> `FUN_002be050(6.0)`. A bot whose AI level of
 detail is 3 or more (4 within 7 m of a human player, 3 to 20 m, less 1 per failed visibility test), on foot, looks

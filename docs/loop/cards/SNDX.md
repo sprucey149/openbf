@@ -1,20 +1,10 @@
 ---
 id: SNDX
 title: Some sounds play as static (the maintainer's playtest 2026-10-04): the rocket launcher fired at the player on a Republic-vs-CIS map and BF2's shotgun sound like TV noise, 'a terrible noise' - find which baked sounds are wrong (format / rate / channel / loop point of the decode), compare each with the PS2's own output, fix the bake
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/event_sounds.rs, scripts/sound_bake_check.py, analysis/re-weapon-sounds.md
-declares:
-needs:
-effort:
-branch: sndx
-resume: landed 2b278753 2026-10-06
-created: 2026-10-04
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-04: "Some sounds at least in some maps are terrible static sounds that sound like an old static tv ... The rocket launcher when I was playing as the republic and the droid would shoot me with a rocket would do this sound. It was a terrible noise. Same with the bf2 shotgun noise - not quite right".

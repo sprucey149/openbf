@@ -1,20 +1,10 @@
 ---
 id: CPBAR
 title: A command-post capture icon on the HUD (the maintainer's INBOX 2026-10-12 19:10): the PS2 HAS one in both games - the post symbol hud_flag_timer at the right edge at mid height, cut by a line into two colours (a neutral post: the capturing team's colour rising under grey; an enemy post: grey coming down over the owner's colour; two sides inside a neutral post: the top blinks every half second with the other side's colour while the meter is frozen; his own post: nothing) - RE done 2026-10-13, analysis/re-capture-display.md. Build the PS2's icon by the PS2's rule, plus two additions of ours for the asks the PS2 does not answer: his OWN post while it is being lost, and which way the line moves; the same numbers for every post in the black box digest
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/ui/src/hud_capture.rs,engine/crates/ui/src/lib.rs,engine/crates/ui/src/hud.rs,engine/crates/ui/src/hud_tree.rs,engine/crates/ui/src/hud_draw.rs,engine/crates/game/src/capture_feed.rs,engine/crates/game/src/lib.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/main/windowed.rs,engine/crates/core/src/sim/round.rs,engine/crates/game/src/blackbox.rs,engine/crates/game/examples/blackbox_read.rs,engine/crates/game/tests/capture_display_ps2.rs,engine/crates/game/tests/data/capture_display_ps2.csv,engine/crates/game/tests/golden_hud.rs,engine/crates/game/tests/golden_spawn.rs,engine/CRATES.md
-declares:
-needs:
-effort:
-branch: cpbar
-resume: LANDED ab0d172 (report reports/20261015_1421_card_CPBAR.md)
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## What the RE found (2026-10-13; `analysis/re-capture-display.md`, docs cdd8981, report `reports/20261013_0642_card_CPBAR.md`)
 - **The card's premise was wrong: the PS2 shows a capture icon in the 1-player HUD, in both games.** It is a code

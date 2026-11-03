@@ -1,21 +1,10 @@
 ---
 id: JARC
 title: The jump's take-off update: the PS2 runs the ground mover with the update's stick and THEN the jump (stick + jump pressed together from a stand land 3.75 m ahead on BF2, 4.59 m on BF1; the port 0.81 / 1.13 m), the first moving update has no gravity (apex 1.861 / 1.912 m, 28 updates; port 1.605 / 1.647 m, 26), BF2 adds the jump velocity to vy and boosts only a forward component, BF1 adds 0.25 x jump velocity x forward stick (+-2.0 m/s, not x1.3)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/soldier.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/collision.rs,engine/crates/core/src/ai/brain.rs
-declares: sim; sweep; arena; leak
-needs:
-effort:
-branch: jarc
-resume: landed d3ff7dca 2026-10-03
-created: 2026-09-29
-alpha: yes
-domain: physics
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why (re-scoped by AUDIT AIRC, 2026-10-02 — the rule is known now; no measurement is owed)
 The maintainer, 2026-10-01: "they could stand still, jump and press forwards on the stick and they'll move forwards in the

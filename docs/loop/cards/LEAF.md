@@ -1,19 +1,10 @@
 ---
 id: LEAF
 title: Leaf patches: the PS2 hangs sprite clusters of leaves on trees' branch hardpoints (BF2 YAV1, DAG1's canopy, KAS2, COR1's planter tree, NAB2's ivy walls; BF1 NAB
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/bake/src/leafpatch.rs,engine/crates/bake/src/hardpoints.rs,engine/crates/bake/src/map.rs,engine/crates/manifest/src/lib.rs,engine/crates/manifest/src/tests.rs,engine/crates/game/src/viewer/leaf.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/render/src/grass.rs,engine/crates/render/src/grass.wgsl,engine/crates/render/src/frame.rs,engine/CRATES.md
-declares: goldens=maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_cor1.png,maps/bf2_dag1.png,maps/bf2_kas2.png,maps/bf2_nab2.png,maps/bf2_yav1.png,walkabout_stats.ron; rebake=maps
-needs:
-branch: leaf
-resume: landed bca2d7dd 2026-09-30
-created: 2026-09-25 (from QUEUE.md)
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why / Evidence / Acceptance (rewritten 2026-09-30 by the RE session, lane 2)
 - **Why:** the PS2's leafy canopies are `leafpatch` sprite clusters — on props' skeleton hardpoints (nearly every

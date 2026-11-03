@@ -1,21 +1,11 @@
 ---
 id: SPLENV
 title: Extract environment manifest records while preserving root API and serialized bytes
-milestone: M0
-value: 2
-phase: cleanup
-status: parked
-deps:
-files: engine/crates/manifest/src/lib.rs,engine/crates/manifest/src/environment.rs (new)
-declares:
-needs: (private workflow note omitted)
-effort:
-branch: main
-resume: Source eb2c7e0 on main; pure move/regeneration/proof controls and combined 177bake+22manifest/build/fmt/Clippy/docs pass; 80SKIP, map8missing paths. Full acceptance pending. reports/20261026_0758_card_SPLENV.md
-created: 2026-10-26
-domain: tooling
-tries: 0
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
+
 ## Why and scope
 SPL10 still owns the 1,955-line manifest root. Group its environment records
 (weather, lights, foliage and codec, water, fog and sky) in private

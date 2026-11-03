@@ -1,20 +1,10 @@
 ---
 id: GBOARD
 title: BF1 idle teammates that answer a need-gunner call receive its vehicle boarding goal at their next think
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK,WAIT4,CWAIT
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/ride/tests/call_board_tests.rs (new), engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai/behave/brain.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/ai.rs, engine/crates/core/src/squad.rs, engine/CRATES.md
-declares: sim; sweep
-needs: real-content acceptance and boarding regression gates
-effort:
-branch: main
-resume: Source 48b1066 on main; 13 GBOARD/911 core/379 game+2ignored/fmt/all-target Clippy pass, 12 distinct compiled mutants caught. Preserve GUNWT and WPOKE debt; restore inputs and finish real Acceptance5 before done. reports/20261025_2211_card_GBOARD.md
-created: 2026-10-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 A BF1 ground driver asks for a gunner; a nearby idle teammate says yes and

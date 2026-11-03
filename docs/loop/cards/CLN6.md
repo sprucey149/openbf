@@ -1,21 +1,10 @@
 ---
 id: CLN6
 title: Two referee repairs, one session and one gates run (CLN6 + CLN7): (1) the host-libm referee cannot see path-form calls or glam; (2) two game-side referees that do not test what they say (golden_tat1 renders another scene than the binary; water_look asserts a literal table)
-milestone: M0
-value: 2
-phase: cleanup
-status: blocked
-deps:
-files: engine/crates/core/src/fmath.rs, engine/crates/core/src/ai/arsenal.rs, engine/crates/core/src/ai/hover_drive.rs, engine/crates/game/src/vehicle_class.rs, engine/crates/game/tests/golden_tat1.rs, engine/crates/game/tests/suite/water_look.rs
-declares:
-needs: main-green — current-main full gates remain owed; historical sim pin reconciled by planner against parent/candidate local receipts without changing any approved runtime pin
-effort:
-branch:
-resume: 20261024_2231 planner: 69ddd8f committed the real-water fixture fix; no patch reapply. Local report proves base8230082/part14209f8aa hash100=f9f37400e0f3171e and replay neutrality; historical17e1b946 is superseded as an old card citation, not an active runtime pin. Full unchanged current-main gates still owed (AIMG/HASH/guard/baseline debt). See engine/artifacts/loop/reports/20261024_2231_planner.md.
-created: 2026-09-25 (from QUEUE.md)
-acceptance: 
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why / Evidence / Acceptance
 Why: source scans miss primitive paths/function values, powi and glam's hidden transcendentals.

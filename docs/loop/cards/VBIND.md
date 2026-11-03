@@ -1,20 +1,11 @@
 ---
 id: VBIND
 title: The vehicle bake keeps a non-bone-space model's BNAM segments as stored, so their moving parts sit at the model origin: BF2 imp_fly_trooptrans's landing gear and wings, all_hover_hovernaut's turret barrels, all_fly_kwing's cannons, cis_hover_mtt's guns, imp_fly_tiebomber's bomb bay, rep_hover_gian_speeder's turret, all_hover_skiff's guns and rudders, bes_fly_cloudcar's gear doors, all_weap_inf_autoturret's guns
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: TBIND
-files: engine/crates/bake/src/vehicle.rs
-declares: rebake=side
-needs:
-effort:
-branch: vbind
-resume: landed 881c108f 2026-09-30
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 TBIND gave the map bake bake::bind_pose: a bone_space 0 model's BNAM segment is stored in its bone's frame and goes through that bone's bind matrix (PROVISIONAL [D], the PS2's HOT1 mortar frame). The vehicle bake (vehicle.rs model_space) still returns a non-bone-space model as stored, so every vehicle whose parts hang off a non-identity bone draws them at the origin.
 

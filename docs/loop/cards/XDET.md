@@ -1,19 +1,10 @@
 ---
 id: XDET
 title: One cross-OS determinism run (the parry flag + `fmath`): the same replay on two OS/CPU builds hashes the same
-milestone: M7
-value: 1
-phase: measure
-status: todo
-deps:
-files:
-declares:
-needs: maintainer — multiplayer hold (the maintainer, 2026-09-30): do not start until the maintainer says
-branch:
-resume:
-created: 2026-09-25
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 9; DET1 closed the known host-libm leak.

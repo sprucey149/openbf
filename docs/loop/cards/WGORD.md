@@ -1,21 +1,11 @@
 ---
 id: WGORD
 title: BF1 gunner-call recipients temporarily board while retaining their existing Hold or Follow order
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK,WAIT4,CWAIT
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai/command.rs, engine/crates/core/src/ai/behave/brain.rs, engine/crates/core/src/squad.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/ai/ride/tests/call_board_tests.rs, engine/crates/core/src/ai/ride/tests/seat_call_tests.rs, engine/crates/core/src/ai/ride/tests/wait_call_tests.rs, engine/crates/core/src/ai/ride/tests/setout_call_tests.rs, engine/crates/core/src/ai.rs, engine/CRATES.md
-declares: sim; sweep
-needs: real-content acceptance and boarding regression gates
-effort:
-branch: main
-resume: Source417ced9 on main;12/12actual-step matrix,90ride/955core/395game+2ignored/fmt/Clippy/build pass;8compiled mutants caught. Full Acceptance1–5 and parent gates pending; restore real inputs and unreachable/stuck approach validation. reports/20261026_0115_card_WGORD.md
-created: 2026-10-26
-alpha: yes
-public_issue: https://github.com/sprucey149/openbf/issues/4
+status: archived
+issue: 4
 ---
+
+Historical technical record. Recorded state before archival was `parked`. Current scope and ownership are on [issue #4](https://github.com/sprucey149/openbf/issues/4).
 
 ## Why and evidence
 A BF1 pilot's existing need-gunner call receives Yes from nearby Hold/Follow

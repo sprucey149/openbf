@@ -1,19 +1,12 @@
 ---
 id: SOLLO
 title: Soldier _low1 LOD and far-scene soldiers: ~3 hi-res bodies + the player, the rest _low1; past the near scene the 10 nearest soldiers as _low1 to FarSceneRange (re-lod.md, never built); presentation only
-milestone: M3
-value: 4
-phase: build
-status: todo
-deps: LOD
-files: engine/crates/render
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-27
+status: archived
+issue: 69
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #69](https://github.com/sprucey149/openbf/issues/69).
+
 ## Why
 The maintainer 2026-10-27 (INBOX). openbf's own research, never built:
 `analysis/re-lod.md` §0.5, §4.1-4.2, §5; LOD.md:64-65 named it. No `_low1` / GeometryLowRes use in engine/crates today.

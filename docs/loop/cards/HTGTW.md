@@ -1,19 +1,10 @@
 ---
 id: HTGTW
 title: HTGT's wiring has no tests: 10 of 14 audit mutations of the vehicle pick survive all 1812 tests - pin the building turret's aim sphere install (slice 3b's whole fix), the readout's vehicle names from a built walk, the vehicle magnet in the sim hash, a turned turret's sphere centre, a moving vehicle's assist lead and a turret's Target kind
-milestone: M3
-value: 4
-phase: build
-status: done
-deps: HTGT
-files: engine/crates/core/src/sim/input.rs, engine/crates/core/src/sim/state/tests.rs, engine/crates/game/src/main/battle.rs, engine/CRATES.md
-declares:
-needs:
-effort:
-branch: htgtw
-resume: (private workflow note omitted)
-created: 2026-10-21
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 AUDIT 2026-10-21 HTGT (PARTLY). The vehicle / turret pick works on real maps (35 classes, 23 maps: every aimed try

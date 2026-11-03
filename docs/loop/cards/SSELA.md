@@ -1,21 +1,11 @@
 ---
 id: SSELA
 title: The spawn flow in the sim: a human slot is not on the field until it accepts - side (Instant Action level start: team 1 / team 2 / Auto), then post, then class; after a death the 4.0 s timer, then post and class again; the human skips the spawn wave (the PS2's rule); SPAWN_ACCEPT / SPAWN_BACK ride the input log
-milestone: M5
-value: 5
-phase: build
-status: done
-deps: SSEL
-files: engine/crates/core/src/sim/input.rs, engine/crates/core/src/sim/spawn.rs, engine/crates/core/src/sim/step.rs, engine/crates/core/src/sim/state.rs, engine/crates/input/src/lib.rs, engine/crates/game/src/mission.rs, engine/crates/game/src/main/battle.rs, engine/crates/game/src/main/windowed.rs
-declares: sim; arena
-needs:
-effort:
-branch: ssela
-resume: (private workflow note omitted)
-created: 2026-10-20
-alpha: yes
-domain: sim
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer (2026-10-19, INBOX; Reddit's top ask after the release): at the start of a level the player picks a side (or random),
 then a command post, then a class; after a death the post and the class again. The PS2's BF2 does exactly that

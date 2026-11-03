@@ -1,20 +1,11 @@
 ---
 id: TGAP
 title: BF1 Tatooine's footpath is shut between hubs 78 and 77 on the PS2 too (measured 2026-10-09: a PS2 soldier passes 0 of 4 times west, 4 of 4 east; the port's slab is shut both ways) - 44 of the map's 47 recycles in 32 rounds: a load-time wall test beside the floor walk marks the arc unwalkable so the route table takes its second way
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: OBSR
-files: engine/crates/core/src/sim/bounds.rs, engine/crates/core/src/sim/spawn.rs, engine/crates/core/src/ai/route.rs
-declares: sweep; sim
-needs:
-effort:
-branch: tgap
-resume:
-created: 2026-10-07
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 From card OBSR (2026-10-07, landed d9db73c). BF1 Tatooine 1's "rock gap" (AUDIT OBST item 1) is not a steering
 defect: the footpath's connection from hub 78 to hub 77 is SHUT for the port's soldier, on the steering before card

@@ -1,21 +1,12 @@
 ---
 id: DEKU
 title: The droideka unit in the sim: its 14-state form machine (fold 0.50 s, unfold 1.67 s), the ball (13 / 12 m/s top, the PS2's doubled step), the walk form, its collision bodies, the repeater - spawned by tests, not yet fielded
-milestone: M1
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/core/src/droideka.rs,engine/crates/core/src/droideka/tests.rs,engine/crates/core/src/sim.rs,engine/crates/core/src/lib.rs
-declares:
-needs: cloud prerequisites: branch deku, baked assets, missions and reference evidence absent
-effort:
-branch: deku
-resume: (private workflow note omitted)
-created: 2026-10-03
-alpha: yes
-first: 11
+status: archived
+issue: 85
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #85](https://github.com/sprucey149/openbf/issues/85).
+
 ## Why
 DEKA's RE (`analysis/re-droideka-unit.md` [O], `analysis/re-droideka.md`): the PS2 fields 2-4 droidekas in every BF1 Clone Wars battle and 1-2 in BF2's; the port has no such unit. This card is the unit itself in `core`, driven by a Controllable-style input (so a player or a bot can drive it later), with nothing fielded yet - every gate PASS, nothing declared.
 

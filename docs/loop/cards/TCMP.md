@@ -1,20 +1,10 @@
 ---
 id: TCMP
 title: Tiers as competence: Easy decides slowly and fights plainly, Elite uses cover, flanks, priorities and grenades - one column per layer, never damage or sight through walls (bot design section 7)
-milestone: M3
-value: 5
-phase: build
-status: todo
-deps: BOTD,TIER,TPOS,GRAI,ARVS,TPOSR,ARVSA
-files: engine/crates/core/src/skill.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/tactic.rs,engine/crates/core/src/perception.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch:
-resume:
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 The maintainer, 2026-10-02: "better difficulty levels"; the sketch: tiers scale chances, not competence - "Easy is slow and plain, Elite uses everything; never by cheating on damage or sight through walls". `analysis/bot-design.md` section 7 (D15) has the table; the PS2's difficulty is one skill number per team and three mode weights (`re-soldier-ai.md` 8, `re-ai-difficulty.md` 0).

@@ -1,19 +1,10 @@
 ---
 id: TDYN
 title: BF2's runtime lights on the terrain: up to 4 non-Static omni lights (the command posts' glow, explosions) add falloff passes to a patch's top layer, and a projector light adds a textured pass (FUN_0056f208's lit branch); the port lights no terrain from them
-milestone: M1
-value: 3
-phase: re
-status: done
-deps: TERL
-files:
-declares:
-needs:
-branch:
-resume: closed 2026-09-30: RE answered (re-bolt §5.3, re-point-lights §3-§4); its build is BPNT's build step 4
-created: 2026-09-25
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The PS2 lights the ground round BF2's command posts. The library shows a blue pool under BF2 YAV1's CP beam and a brighter

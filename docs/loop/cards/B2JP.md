@@ -1,21 +1,11 @@
 ---
 id: B2JP
 title: BF2 Jabba's Palace (TAT3) is not a port map: TAT/TAT3.LVL with tat3c_con / tat3g_con (+ 1flag), standard rosters and Gamorrean-guard locals, is on the disc and in BF2's Instant Action list (row 7) - bake it under its own key
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps:
-files: scripts/rebake.sh,scripts/gen_missions.py
-declares: rebake=maps,sounds; goldens=maps/bf2_tat3.png; sweep
-needs: the maintainer's decision to adopt bf2_tat3 (assets_baked, missions, golden); GAM guard bake + locals runtime; PS2 pairs
-effort:
-branch:
-resume: Main registration checkpoint e9d9012; restore TAT3 inputs and complete original Acceptance including guard assets/runtime. See reports/20261025_0031_card_B2JP.md; do not repeat unchanged input audit.
-created: 2026-09-29
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 UAUD2 (analysis/unit-audit-bf2.md §2). PLAN's north star is all maps of both games; the port bakes 17 BF2 ground maps and
 not Jabba's Palace. No record of a decision to drop it was found (PLAN, PLAN_LOG, STATUS, INBOX, cards; FOGN mentions a TAT3

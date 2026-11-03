@@ -1,21 +1,11 @@
 ---
 id: ANNC3
 title: The music follows the listener's FACTION too (the mission's music calls are keyed by the script's team number, as the commander's lines were before ANNC2: playing the other side or another era gives the other army's music), BF1's no-post line, and the HUD's bleed flash on BF2's script rate
-milestone: M3
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/music.rs,engine/crates/core/src/music.rs,engine/crates/game/src/announce.rs,engine/crates/core/src/announcer.rs,engine/crates/game/src/main/battle.rs
-declares:
-needs: cloud prerequisites: branch annc3, baked assets, missions and reference evidence absent
-effort:
-branch: annc3
-resume: (private workflow note omitted)
-created: 2026-10-05
-alpha: yes
-domain: behaviour
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Filed by ANNC2's build (2026-10-05, report reports/20261005_1045_card_ANNC2.md). ANNC2 keyed the commander's lines by the armies really in the battle; three neighbours were left.
 1. **Music.** game/src/music.rs bind_with maps the script's team n to port team n - 1 for the ambient, victory and defeat calls (line 51). The shell can seat any army in either slot, so a Republic player on a GCW mission (the maintainer's KAM1 playtest of 2026-10-04 was that pairing) gets the Rebels' music, and the other side of a mission gets the enemy's victory / defeat cue. Same rule as game::announce::battle_lines: the team of the listener's faction; an army the mission lacks takes the Music of the same role with its own prefix when the bank holds it (check the names first - mus_ records may not carry a faction prefix; then keep the slot's).

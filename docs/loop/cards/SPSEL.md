@@ -1,22 +1,10 @@
 ---
 id: SPSEL
 title: The player's spawn POST lives in the sim: the PS2's spawn-map pick (a push takes the own-team post with the lowest along + 0.25 x perp^2, then keep-or-nearest), the respawn at THAT post, and the class row's names from the disc's text - the class choice is already in core (Sim::spawn_choice); the post cursor is still UI-only and the sim picks the node itself
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: CWSP,BSPN
-files: engine/crates/core/src/sim/spawn.rs,engine/crates/core/src/sim/input.rs,engine/crates/core/src/sim/state.rs,engine/crates/game/src/main/battle.rs,engine/crates/game/src/main/windowed.rs,engine/crates/ui/src/spawn.rs
-declares: goldens=tat1_spawn.png
-needs:
-effort:
-branch: spsel
-resume: (private workflow note omitted)
-created: 2026-09-25
-alpha: yes
-first: 4
-domain: sim
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 3. PLAN §LOCKED FEATURE SET (classes per side).

@@ -1,18 +1,10 @@
 ---
 id: SPL15
 title: Split new size debt one file per session — ai/ride.rs 1729 and hud_tree.rs 1826
-milestone: M0
-value: 2
-phase: cleanup
-status: todo
-deps:
-files: engine/crates/core/src/ai/ride.rs, engine/crates/ui/src/hud_tree.rs
-declares:
-needs: reviewed pure-move seams, existing card ownership and exact reference inputs
-branch:
-resume: SPLHUD implemented hud_tree tests extraction (1478/350), parked pending full original acceptance; reports/20261026_1123_card_SPLHUD.md. ai/ride.rs remains behind parked boarding ownership.
-created: 2026-10-26
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why / evidence
 `scripts/size_report.sh --check-map` on bb974e5 lists ai/ride.rs at 1,729 and

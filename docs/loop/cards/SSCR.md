@@ -1,20 +1,11 @@
 ---
 id: SSCR
 title: Splitscreen: local play on one machine — one sim, N cameras, N input devices, N viewports and HUDs, no netcode (not part of the multiplayer hold; before PACK; only after the alpha and M1-M3's open cards)
-milestone: M5
-value: 1
-phase: build
-status: todo
-deps:
-files: engine/crates/game/src/main/windowed.rs,engine/crates/game/src/main/battle.rs,engine/crates/input/src/lib.rs,engine/crates/render/src/frame.rs,engine/crates/ui/src/hud.rs,engine/crates/core/src/sim.rs
-declares:
-needs: maintainer - later scope, PLAN.md: Instant Action only for now
-effort:
-branch:
-resume:
-created: 2026-09-30
-defer: post-alpha
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
+
 ## Why
 The maintainer's INBOX 2026-09-30: **splitscreen is NOT part of the multiplayer hold.** The hold is LAN / network / lockstep /
 lobby only. Splitscreen comes BEFORE PACK, and the loop may work it out and build it without asking him — no `needs:`. (Superseded 2026-11-02: the scope is Instant Action, so this card now waits on the header's `needs:`.)

@@ -1,21 +1,11 @@
 ---
 id: WGPAS
 title: BF1 gunner-call answerers can board an available unarmed secondary seat without changing autonomous boarding
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK,WAIT4,CWAIT
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/ai/behave/brain.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/vehicles.rs, engine/crates/core/src/ai/command.rs, engine/crates/core/src/squad.rs, engine/crates/core/src/ai.rs, engine/crates/core/src/ai/ride/tests/call_board_tests.rs, engine/crates/core/src/ai/ride/tests/claim_wait_tests.rs, engine/crates/core/src/ai/ride/tests/seat_call_tests.rs, engine/crates/core/src/ai/ride/tests/passenger_call_tests.rs, engine/CRATES.md
-declares: sim; sweep
-needs: real-content acceptance and boarding regression gates
-effort:
-branch: main
-resume: Sourced77258e on main;48/48 actual-step seats,98ride/963core/395game+2ignored/fmt/Clippy/build and11caught mutants; protect PASS, map8inherited absent paths/0unmapped/0stale. Full Acceptance1-5 and parent holds pending. reports/20261026_0348_card_WGPAS.md
-created: 2026-10-26
-alpha: yes
-public_issue: https://github.com/sprucey149/openbf/issues/4
+status: archived
+issue: 5
 ---
+
+Historical technical record. Recorded state before archival was `parked`. Current scope and ownership are on [issue #5](https://github.com/sprucey149/openbf/issues/5).
 
 ## Why and evidence
 An existing BF1 ground need-gunner call reaches an on-foot AI and receives

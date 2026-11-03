@@ -1,19 +1,10 @@
 ---
 id: TGTC2
 title: The target sweep misses capture and audit scratch: cover `<card>-render_target`, `<card>-scratch_target`, `audit-<card>-*_target` and the matching `openbf-wt/<name>` worktrees once the card is done/parked or the audit has ended — live-claim and running-process checks first
-milestone: M0
-value: 5
-phase: build
-status: done
-deps: LANE3
-files: scripts/loopctl.py
-declares:
-needs:
-effort:
-branch: tgtc2
-resume: landed a7196742 2026-10-16
-created: 2026-09-30
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX note 2026-09-29 22:05. PXWA and PXWB are `done`, yet `lead_tmp/pxwa-render_target` (23.3 GB real) and

@@ -1,20 +1,10 @@
 ---
 id: HUDW
 title: The HUD's weapon panel is drawn wrong (the maintainer's playtest 2026-10-04): BF1 Empire (KAS2) has a light-blue blob over the health bar under the rifle icon; BF2 Kamino's pistol shows the infinity ring over the clip count ('oo46'), a grenade icon overlapping the count pill and the gun icon stretched across the panel - pixel-measure both against PS2 frames of the same weapons, then fix
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/ui/src/hud.rs, engine/crates/ui/src/hud_tree.rs, engine/crates/ui/src/hud_draw.rs, engine/crates/game/src/hud_feed.rs, scripts/rebake.sh
-declares: rebake=side
-needs:
-effort:
-branch: hudw
-resume: landed 692fa469 2026-10-05
-created: 2026-10-04
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-04: "empire hud weapons has a weird blotch on it" and "pistol weapon hud is all messed up". The weapon panel is on screen all the time.

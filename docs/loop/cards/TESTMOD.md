@@ -1,20 +1,10 @@
 ---
 id: TESTMOD
 title: Restore deterministic-math scanning by conforming the headless replay test module name
-milestone: M0
-value: 4
-phase: cleanup
-status: done
-deps:
-files: engine/crates/game/src/main/headless.rs
-declares:
-needs:
-effort:
-branch:
-resume: 20261025_0554: one-line module rename implemented; focused scanner/replay 1 each, core846 and fmt pass. Full CI result in reports/20261025_0552_card_TESTMOD.md; source checkpoint only, full acceptance pending checks in the report. No repeat repair.
-created: 2026-10-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The production-source deterministic-math referee must run successfully while the

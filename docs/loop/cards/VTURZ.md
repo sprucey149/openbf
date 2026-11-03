@@ -1,20 +1,10 @@
 ---
 id: VTURZ
 title: The building turret's two views as the PS2's (the maintainer's answer to STATUS 47, INBOX 2026-10-13): third person with the camera turning with the gun, and R3 for the zoomed scope view at the eye point along the aim in which his own turret building is not drawn (other viewports still draw it); no gunner's-eye view. Split from VTURX, whose wreck half stays there
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTURD
-files: engine/crates/game/src/viewer/scene.rs,engine/crates/game/src/viewer/turret_pose.rs,engine/crates/game/src/walk.rs,engine/crates/core/src/sim/guns.rs,engine/crates/core/src/sim/seats.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/vehicle/gun.rs,engine/crates/game/src/vehicle_class.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/examples/pose_render.rs,engine/crates/game/tests/turret_views.rs
-declares:
-needs:
-effort:
-branch: vturz
-resume: landed 24931419 2026-10-16
-created: 2026-10-15
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's answer to STATUS question 47 (INBOX 2026-10-13): "build what the PS2 does" - in a building turret he sits in

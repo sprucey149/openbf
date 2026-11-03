@@ -1,20 +1,11 @@
 ---
 id: CLSE2
 title: The rest of the PS2's aim error after CLSE, read and verified (re-soldier-ai 18) - to build: BF1 maps aim with NO error vector; on BF2 the error is the TARGET's own block (grown by its change of velocity, paid from a budget), with the stance factor (crouch 1.5, sprint / jump 2, roll 3), the model-box size term (0.48-1.02) and the weapon class's AIBubble keys (1.25 shotgun, 0.6 sniper rifle), and the direction tumbles
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: CLSE
-files: engine/crates/core/src/ai/gunner_foot.rs,engine/crates/core/src/ai/gunner.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/unit.rs,engine/crates/game/src/roster.rs
-declares: sweep; arena; sim
-needs:
-effort:
-branch: clse2
-resume: landed d57ab7da 2026-10-12
-created: 2026-10-09
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card CLSE (77f4c70) put BF2's scaling of the error VECTOR into the port (x 0.3 against a bot, x (d / 20 + 0.5),
 y >= 0, zero for a human's passenger). Its RE (`analysis/re-soldier-ai.md` 17.3, 17.5) found that the error BLOCK

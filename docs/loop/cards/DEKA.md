@@ -1,20 +1,11 @@
 ---
 id: DEKA
 title: The droideka as a fielded CIS class: BF1 fields 2-4 per Clone Wars battle and the player can pick it; the port's roster rejects it (BASE walkerdroid) - the walker/ball entity, its repeater and shield, its AI
-milestone: M1
-value: 4
-phase: re
-status: done
-deps:
-files:
-declares:
-needs:
-effort: high
-branch:
-resume:
-created: 2026-09-29
-alpha: yes
+status: archived
+issue: 85
 ---
+
+Historical technical record. Recorded state before archival was `done`. Current scope and ownership are on [issue #85](https://github.com/sprucey149/openbf/issues/85).
 
 ## Why
 UAUD1 (analysis/unit-audit-bf1.md §2, §3): `cis_inf_droideka` is in `AddUnitClass` on all 13 BF1 Clone Wars missions (2-4 each), the

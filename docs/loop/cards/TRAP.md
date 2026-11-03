@@ -1,21 +1,11 @@
 ---
 id: TRAP
 title: Endor's log trap (end_weap_treesmash, base trap, both games): collision primitives parented to a bone are baked bone-relative and land at the instance origin; place them by the bone's rest transform, then RE and build the trap itself
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files: engine/crates/bake/src/map.rs,engine/crates/game/src/assets.rs
-declares: rebake=maps; leak; sweep
-needs: restore both PS2 corpora/ELFs, Endor LVLs/bakes/missions, original trap states/body rows, PCSX2 toolkit and VDROP/HAIS evidence
-effort:
-branch:
-resume: 20261025_0438 input hold: 0/30 minimum paths; restore and verify primary evidence, measure both-disc rest/trigger/strike/reset and body transforms before build; reports/20261025_0438_card_TRAP.md
-created: 2026-10-03
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 Card VDROP (2026-10-03) found the two log cylinders of end_weap_treesmash (p_log / p_log1, parents bone_l_tree /
 bone_r_tree, radius 0.5, length 8) lying crossed on the ground at the instance, on the speeder bikes' path: 160 of 171

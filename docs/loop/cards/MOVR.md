@@ -1,20 +1,10 @@
 ---
 id: MOVR
 title: One mover: a bot that arrives stands, a request that barely moves is ignored, the PS2's leg rule and stuck test, and a walk that fails climbs a recovery ladder instead of side-stepping (bot design 4.7, 6.3)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,SPL11,HUBP
-files: engine/crates/core/src/ai/mover.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai/route.rs,engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai.rs,engine/crates/core/src/commander.rs,engine/crates/core/src/squad.rs,engine/crates/game/examples/round_to_outcome.rs,scripts/bot_quality.py,scripts/sweep_seeds.py
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: movr
-resume: landed 6061eece 2026-10-06
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-02: bots "stuttering back and forth", and BF1 bots that "just stop". `analysis/bot-design.md` 4.7 (the Mover: the ONE writer of the stick), 5 (commitment), 6.3 (no walk without an outcome). After JITR a port bot that stays put still walks 8.8 m in 10 s on Kamino and 20.0 m on Kashyyyk Docks (PS2 1.3 m), with 2.96 / 6.47 reversals (PS2 0.36) - `lead_tmp/botm/post_jitr/seeds.md`.

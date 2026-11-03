@@ -1,20 +1,10 @@
 ---
 id: CLN10
 title: Small leftovers: the `missions_root()` / `extracted_root()` literals, the era/sound/HUD-icon fallbacks, the TAT1 `--spawn` pin (delete `HISTORIC_WALK_START_MAP`)
-milestone: M0
-value: 1
-phase: cleanup
-status: done
-deps:
-files: engine/crates/game/src/walk.rs, engine/crates/game/src/main.rs, engine/crates/game/examples/arena.rs, engine/crates/ui/src/hud.rs, engine/crates/ui/src/hud_draw.rs, scripts/sim_gates.sh, engine/CRATES.md
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-09-25
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Evidence
 analysis/PLAN_LOG_2026.md §ARCHIVED 2026-09-25 HANDOFF-OPUS.md §Standing backlog 9. `game/src/walk.rs:198` `HISTORIC_WALK_START_MAP`; pinning `--spawn -140,230` needs an edit to

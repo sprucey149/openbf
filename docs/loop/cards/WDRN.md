@@ -1,20 +1,12 @@
 ---
 id: WDRN
 title: Deep water drowns a soldier, as on both PS2s: while the surface is at or over his aim origin (feet + 1.80 m standing) a 3.0 s timer runs, then 30 damage every 1.0 s; while it is over his fire point (feet + 1.58 m) his triggers are dead - the port's soldiers walk the sea bed unharmed and shoot from under it
-milestone: M3
-value: 3
-phase: build
-status: todo
-deps: HWAT
-files: engine/crates/core/src/soldier.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/bounds.rs,engine/crates/core/src/sim/guns.rs
-declares: sim; sweep
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-06
-defer: post-alpha
+status: archived
+issue: 70
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #70](https://github.com/sprucey149/openbf/issues/70).
+
 ## Why
 RE + live measurement of card WADE (2026-10-06): `analysis/re-water.md` section 9.2 [O]. Both games' soldier update
 (B1 `FUN_00205cc8` 117186-117270, B2 `FUN_00240bf8` 159994-160069) asks the water's height at the soldier's XZ

@@ -1,21 +1,10 @@
 ---
 id: FOGN
 title: BF2 fogs far-scene draws only (beyond NearSceneRange[2], blended over b..c); the port fogs every draw from near (MYG1 mid-distance +20 levels)
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps:
-files: engine/crates/game/src/viewer/look.rs,engine/crates/render/src/shader.wgsl,engine/crates/render/src/lighting.rs
-declares:
-needs: Restore current MYG1 map/pose/frame measurement inputs and BF2 rendering validation inputs; see reports/20261025_0334_card_FOGN.md
-effort:
-branch:
-resume: Restore inputs before retry; reproduce MYG1 spawn/v2 band on current main after LITEB/REDB, then implement and mutation-check a PROVISIONAL BF2-only near/far fog approximation; preserve 0.92 and no-far-layer fade. Acceptance remains unpassed.
-created: 2026-09-25
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 BF2 applies its fog pass only to far-scene draws: beyond `NearSceneRange[2]`, with the near scene composited over the

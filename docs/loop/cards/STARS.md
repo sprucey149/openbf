@@ -1,20 +1,11 @@
 ---
 id: STARS
 title: DomeInfo Stars(): the PS2 draws a star field in the sky pass (after the dome: BF1 FUN_002e7d78, BF2 FUN_003c10a8, flags 0x20031) on BF1 KAS1, RHN2 and BF2 COR1, NAB2; the port draws no stars
-milestone: M1
-value: 2
-phase: re
-status: todo
-deps:
-files:
-declares:
-needs:
-branch:
-resume:
-created: 2026-09-29
-defer: post-alpha
-public_issue: https://github.com/sprucey149/openbf/issues/16
+status: archived
+issue: 16
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #16](https://github.com/sprucey149/openbf/issues/16).
 
 ## Why
 BF1's sky tick draws the `DomeInfo` `Stars` object right after shell 0 (the dome): `FUN_002e7d78(sky+0x104, 0x20031)`,

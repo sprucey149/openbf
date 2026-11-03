@@ -1,20 +1,11 @@
 ---
 id: WINS2
 title: One-sided rounds on two showcase maps, after WINS: BF1 YAV2 ends 2-14 and BF2 MYG1 3-13 over 16 seeds on main with kills near even - take the PS2's own column (bots-only rounds, posts held, first capture, time out of spawn) and sort each map PORT / DESIGN; a PORT map gets its traced cause as a card
-milestone: M3
-value: 5
-phase: measure
-status: done
-deps:
-files:
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-22
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Card WINS (2026-10-22, `reports/20261022_0051_card_WINS.md`, table in `cards/WINS.md` ## Result) sorted 14 lopsided maps but left two
 SHOWCASE maps UNSORTED for want of a PS2 column: bf1_yav2 2-14 (margin 70, kills 118 + 82, posts held 2.1 / 2.8; 37 Imperial

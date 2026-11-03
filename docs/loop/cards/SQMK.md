@@ -1,20 +1,11 @@
 ---
 id: SQMK
 title: Squad markers off by default (a hidden OPENBF_DEV mode brings them back); each order's text shows once with its unit count
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/game/src/main/battle.rs,engine/crates/game/src/main.rs,engine/crates/game/src/main/windowed.rs,engine/crates/game/src/squad_vis.rs
-declares:
-needs:
-effort:
-branch: sqmk
-resume: landed 29185577 2026-10-02
-created: 2026-09-30
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer's INBOX 2026-09-30 11:40 (corrected 12:05): "squad markers should be dropped altogether. Maybe we can keep them for
 a hidden 'dev' mode … for normal gameplay it should be invisible." Keep the brief on-screen command text with the count

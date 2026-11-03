@@ -1,21 +1,10 @@
 ---
 id: B1ME
 title: BF1 Mos Eisley is not a port map: the port's `tat2` is BF2's; BF1's TAT/TAT2.LVL with tat2i / tat2r (Jawa locals) is on the disc and plays on the PS2 - bake it under its own key
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps:
-files: scripts/rebake.sh,scripts/gen_missions.py
-declares: rebake=maps,sounds; goldens=maps/bf1_tat2.png; sweep
-needs: the maintainer decision to bake bf1_tat2 into engine/assets_baked + its two RONs into engine/missions (adds a 33rd map: sweep/fidelity baselines move, golden maps/bf1_tat2.png needed); PS2 postB terrain ~2 m mismatch RE; Jawa locals unconsumed
-effort:
-branch:
-resume: (private workflow note omitted)
-created: 2026-09-29
-defer: post-alpha
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 UAUD1 (analysis/unit-audit-bf1.md §2). PLAN's north star is "all maps of both games"; BF1's Instant Action list has 16 maps and the port

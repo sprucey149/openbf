@@ -1,22 +1,10 @@
 ---
 id: BFC
 title: BF1 interior and behind-mesh poses fill with dark surfaces — establish the cull, strip-facing and near-plane cause before a per-draw fix
-milestone: M1
-value: 3
-phase: re
-status: blocked
-deps:
-files: analysis/re-material-flags.md,analysis/RE_LOG.md
-declares: none
-needs: restore PS2 corpora/ELFs, VU1 evidence, named map LVLs and pose references before retry
-effort:
-branch:
-resume: 20261025_0036 research input hold; restore the report inventory, isolate the occluding draw and near band, then verify both games cull/ADC and winding; engine/artifacts/loop/reports/20261025_0036_card_BFC.md
-created: 2026-09-25 (from QUEUE.md)
-defer: post-alpha
-acceptance: 
-tries: 1
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
 
 ## Why
 At the recorded BF1 interior/behind-mesh camera poses, a nearly flat port frame

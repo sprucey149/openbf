@@ -1,19 +1,11 @@
 ---
 id: FOLYM
 title: Footsteps follow the legs: foley's walk / run choice reads the animator's movement clip (card ANIMM's chooser), not its own strafe-clip model
-milestone: M1
-value: 3
-phase: build
-status: blocked
-deps: ANIMM
-files: engine/crates/game/src/foley.rs
-declares:
-needs:
-effort:
-branch:
-resume: RESTORATION HOLD 2026-10-24: restore baked maps/classes/soldier animation sets and missions plus FOLY step trials; measure current-main baseline before isolated build. See reports/20261024_1319_card_FOLYM.md and lead_tmp/folym_cloud/next_prompt.md; caller timing and resolved clip/stride scope remain. Original Acceptance unchanged.
-created: 2026-10-15
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `blocked`.
+
 ## Why
 game/src/foley.rs (card FOLY) picks walk or run steps with its own model: strafe clips for a standing soldier (left always run, right walk under 5.0 / 5.5), the larger axis wins. re-soldier-anim-layers.md 3.5's erratum: a standing or crouching soldier has NO strafe clips; card ANIMM's `animator::choose` plays the forward / backward clip with the legs twisted (alert window -103.5 .. +67.5, else +-72 / +-108 while a forward clip plays). So the steps and the drawn legs disagree: a non-alert BF1 right strafe at 4.5 m/s draws runbackward but foley plays walk steps; a strafe's stride is foley's PROVISIONAL 1.3-1.55 m, not the played clip's.
 

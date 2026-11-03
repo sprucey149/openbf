@@ -1,21 +1,11 @@
 ---
 id: STEND
 title: Rounds end once one side is clamped at alive = tickets: hunt the last survivors, and settle units crowding one spot (TAT2 11 v 1, BF1 GEO1 2 v 16, KAS2 3 v 2; BES2 stuck_max 9,060)
-milestone: M3
-value: 4
-phase: build
-status: done
-deps: RCYC,STLVL,STTAP
-files: engine/crates/core/src/commander.rs,engine/crates/core/src/ai/brain.rs
-declares: sweep
-needs:
-effort:
-branch: stend
-resume: landed a4566842 2026-10-02
-created: 2026-09-30
-alpha: yes
-first: 7
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 STALL C7 + C9 (`analysis/re-round-stalls.md` §2).
 

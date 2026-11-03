@@ -1,21 +1,11 @@
 ---
 id: TMSK
 title: The PS2 draws no terrain on mask-0 patches (BF1 KAS1 951/1024, KAS2's lake bed, END1, RHN2, NAB2, BES2; BF2 END1) nor where the layers cover < 1; the port draws LTEX[0] there — F16's grey lake bed where the PS2 shows the mirrored sky
-milestone: M1
-value: 3
-phase: build
-status: done
-deps: TALPH,REFL
-files: engine/crates/bake/src/terrain_glb.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/render/src/shader.wgsl,engine/CRATES.md
-declares: goldens=maps/bf1_bes2.png,maps/bf1_end1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab2.png,maps/bf1_rhn2.png,maps/bf2_end1.png,maps/bf2_kas2.png; rebake=maps
-needs:
-effort:
-branch:
-resume: MERGED into TDTL (planner 2026-09-30 21:45): same three files (terrain_glb.rs, scene.rs, shader.wgsl), one rebake=maps; TDTL carries this card's text, acceptance and declares
-created: 2026-09-28
-defer: post-alpha
-value_pre_alpha: 4
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The PS2 issues no terrain layer pass for a patch whose PTCH mask is 0 (`analysis/re-terrain-layers.md` §2.5 [O]: B2 FUN_0056e7d8 zeroes the slot's chains, FUN_0056e898 builds none; B1 FUN_004851b0 / FUN_004852e0). Where a vertex's layers cover < 1 it shows what is behind (§5.5 holes). Those areas are each map's floor: BF1 KAS1 -52.2 m (951 of 1024 patches), KAS2's lake bed -5.9 m (403), END1 (872), RHN2 (858), NAB2 (855), BES2 (389), BF2 END1 (872). The port draws them with LTEX[0], which is F16's grey lake bed; the PS2 shows no bed, so its water shows REFL's mirrored sky shells.
 

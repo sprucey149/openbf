@@ -1,20 +1,10 @@
 ---
 id: WGOUT
 title: BF1 ground pilots attempt a gunner call on their first routed departure after pickup
-milestone: M3
-value: 4
-phase: build
-status: parked
-deps: UTALK,WAIT4,CWAIT
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/ride/tests/setout_call_tests.rs, engine/crates/core/src/ai/ride/tests/wait_call_tests.rs, engine/crates/core/src/ai/ride/tests/call_board_tests.rs, engine/crates/core/src/ai/hover_drive.rs, engine/crates/core/src/ai/walker_drive.rs, engine/crates/core/src/ai/state.rs, engine/crates/core/src/sim/seats.rs, engine/crates/core/src/sim/step.rs, engine/CRATES.md
-declares: sim; sweep
-needs: real-content acceptance and boarding regression gates
-effort:
-branch: main
-resume: Source f79aa1d on main; 9 WGOUT/76 ride/941 core/395 game+2ignored/build/fmt/all-target Clippy pass; 10 compiled faulty variants caught. Restore inputs and finish full Acceptance5/gates; preserve parent bars. reports/20261026_0014_card_WGOUT.md
-created: 2026-10-25
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 A BF1 ground pilot's initial pickup wait can call for a gunner, but its

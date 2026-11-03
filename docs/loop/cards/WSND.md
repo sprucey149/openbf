@@ -1,20 +1,11 @@
 ---
 id: WSND
 title: Weapon and ordnance sounds beyond fire: explosions and the layered record's delays, per-start pitch and gain variation, weapon change and empty click - and the sound bake's skipped sub-level (BF1 Kashyyyk Islands GCW has no map sounds)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/sound_props.rs,engine/crates/mungefs/src/soundbank.rs,engine/crates/bake/src/sounds.rs,engine/crates/manifest/src/lib.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/event_sounds.rs,engine/crates/game/src/fx.rs,engine/crates/game/src/main/headless.rs,engine/crates/game/src/main/windowed.rs,engine/crates/core/src/impact.rs,engine/crates/core/src/weapon.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/sim/ordnance.rs,engine/crates/core/src/sim/step.rs
-declares: rebake=sounds
-needs:
-effort:
-branch: wsnd
-resume: landed 13f3da9c 2026-10-03
-created: 2026-10-02
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why (the card as filed)
 SNDC (`analysis/audio-census.md`): after fire, reload and the bolt's strike, the port plays nothing a weapon or its
 ordnance makes. PS2, 105 s (NAB1 / UTA1): explosions 990 / 392 starts, the bolt's flight hum 174 / 107, grenade and

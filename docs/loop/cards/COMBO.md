@@ -1,19 +1,12 @@
 ---
 id: COMBO
 title: Saber combo data: does the PS2 BF2 disc carry the side comb chunk; a bake reader (combos, states, keywords, energy, input lock, deflect), the hero sabre clip banks, and a pin on unknown keywords
-milestone: M4
-value: 4
-phase: re
-status: todo
-deps:
-files: engine/crates/bake/src/anim_sets/bf2.rs
-declares:
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-27
+status: archived
+issue: 73
 ---
+
+Historical technical record. Recorded state before archival was `todo`. Current scope and ownership are on [issue #73](https://github.com/sprucey149/openbf/issues/73).
+
 ## Why
 The maintainer 2026-10-27 (INBOX 2026-10-27). Saber heroes need the combo data; today `bake/src/anim_sets/bf2.rs:27` leaves
 combo rows unresolved and no `comb` reader exists (`analysis/a2-bake-formats.md:295` only lists the chunk, in the shared

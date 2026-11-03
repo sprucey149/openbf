@@ -1,19 +1,11 @@
 ---
 id: UNLK1
 title: Class unlocks on BF1 too (OURS - the BF1 PS2 has none): the same two tiers as BF2's (officer 8 points, special 12) on every BF1 class that is really fielded as a special (jet trooper, droideka, dark trooper, wookiee) or an officer
-milestone: M3
-value: 3
-phase: build
-status: in-progress
-deps: UNLK
-files:
-declares:
-needs:
-effort:
-branch: worktree-agent-a053df4c9af59dee5
-resume:
-created: 2026-10-21
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `in-progress`.
+
 ## Why
 The maintainer (INBOX 2026-10-21 17:50 item 4a). A named deviation: write it into FEEL_NOTES / the deviation list. Check each class
 against the BF1 class lists: only a class BF1 really fields is locked.

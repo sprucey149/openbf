@@ -1,19 +1,12 @@
 ---
 id: ABAL
 title: BF2's AI auto-balance: in a single-player or co-op round the PS2 shifts the two teams' bot SKILL by the score gap (enemy AI +1 per 10 points past the threshold, at most +-4 of 20, the human team's AI the opposite; re-ai-difficulty 6, seen live 14 -> 17 / 11 -> 8 in 240 s on Polis Massa) - the port has no such shift
-milestone: M3
-value: 3
-phase: build
-status: blocked
-deps: CLSE2
-files:
-declares: sweep; arena; sim
-needs: Restore CLSE2 Polis Massa score trace, baked map/mission and both primary corpora/ELFs; check the BF1 twin and per-skill consumers before implementing the delta.
-effort:
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 7/7 exact named paths absent. Restore CLSE2 Polis Massa score trace, baked map/mission and both primary corpora/ELFs; check the BF1 twin and per-skill consumers before implementing the delta. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-10-12
+status: archived
+issue: 86
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #86](https://github.com/sprucey149/openbf/issues/86).
+
 ## Why
 Filed by the planner 2026-10-12 from card CLSE2's report (reports/20261009_1753_card_CLSE2.md, 'For the planner'): the PS2's
 auto-balance is LIVE in a single-player round and the port has none; no card existed.

@@ -1,20 +1,10 @@
 ---
 id: HJAM
 title: BF1 Endor: a speeder bike's driver circles one spot at the Rebel spawn until it is recycled - the opening's three bikes jostle at (-185, 320) on main too (each turns back twice, stuck 60 at ticks 405-495) and with card OBSV's footprint rule one of them stays there in 20 of 72 seeds (0 on main): trace the driver's circling on open ground, name the cause in hover_drive, fix it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: WCREW
-files: engine/crates/core/src/ai/hover_drive.rs,engine/crates/core/src/ai/route.rs
-declares: sim; sweep; arena
-needs:
-effort: high
-branch: hjam
-resume: landed 37170e27 2026-10-16
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 Filed by card OBSV (2026-10-12). OBSV's rule (a bot on foot passes a standing vehicle by its footprint) makes two Rebel

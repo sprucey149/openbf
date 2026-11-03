@@ -1,20 +1,12 @@
 ---
 id: VPOSE
 title: A hover's own posed nodes are drawn: its TURRET sections' turret / aimer / barrel nodes and its own weapons' aimer nodes by the PS2's node laws (card VTURD's), and its FinAnimation nine-pose from the drive's (a, b, c) - fighter tank skis and winglets, bike vanes and body pitch, BARC lean, skiff rudders - with riders on the posed nodes and HoverNine starting at p = y = 0 (analysis/re-vehicle-pose.md)
-milestone: M2
-value: 4
-phase: build
-status: blocked
-deps:
-files: engine/crates/bake/src/vehicle.rs, engine/crates/bake/src/turret_rig.rs, engine/crates/manifest/src/lib.rs, engine/crates/game/src/viewer/vehicles.rs, engine/crates/game/src/viewer/turret_pose.rs, engine/crates/game/src/soldier_vis.rs
-declares: rebake=side
-needs: environment restoration — original PS2 node tables and fin clips/rigs, disc data, baked assets/missions, PCSX2 and approved GPU checks
-effort:
-branch:
-resume: 2026-10-24 10:25 UTC cloud checkpoint BLOCKED: 22/22 required inputs absent; no alternate candidates. Restore vpose/vride fixtures/readers, disc data, bakes/missions and PS2/GPU environment; see engine/artifacts/loop/reports/20261024_1025_card_VPOSE.md and lead_tmp/vpose_cloud/next_prompt.txt. No implementation or acceptance run; original section 7 build remains.
-created: 2026-10-15
-alpha: yes
+status: archived
+issue: 67
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #67](https://github.com/sprucey149/openbf/issues/67).
+
 ## Why
 The port draws every hover rigid in its bind pose (`game/src/viewer/vehicles.rs`). On the PS2 (RE done 2026-10-22,
 `analysis/re-vehicle-pose.md` [O]) a hover's node table is posed by three writers every update: each TURRET

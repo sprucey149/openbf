@@ -1,20 +1,11 @@
 ---
 id: MOUTH2
 title: BF2 Kamino's two other stall sites after MOUTH: the pod room's door (47 stalls per 100 passes against the PS2's 4 - every bot walks at ONE corner inside the room and meets the east jamb) and round hub 46 with its pod (50 against 5) - trace each beside the PS2's own nodes, name the cause, build it
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: MOUTH
-files: engine/crates/core/src/ai/steer.rs,engine/crates/core/src/sim/state.rs,engine/crates/core/src/ai/avoid.rs,engine/crates/core/src/door.rs,engine/crates/game/src/unit_probe.rs
-declares: sweep; arena; sim
-needs:
-effort: high
-branch: mouth2
-resume:
-created: 2026-10-12
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 The maintainer, 2026-10-11: bots "miss ... go to the side of it, try running at the side for a few seconds, then go back a few feet" - his words of the walkways, which card MOUTH cures. Measured by MOUTH (2026-10-12, main 19708fa, 8 seeds x 3 min): the walkway legs hold 28 of BF2 Kamino's 292 stalls; these two sites hold about 150, and MOUTH's change does not move them (door 93 -> 87, hub 46 unchanged). Kamino is a showcase map and hub 46 is the spot of the maintainer's own scene.
 

@@ -1,21 +1,10 @@
 ---
 id: BLDR
 title: Bots build and repair buildings: engineers, pilots and Jawas (UnitType repair / support / special / pilot, with a cutter) look every 5 s within 75 m for an unbuilt, destroyed or damaged building, one bot per team per building, walk to 1.6 m and hold the cutter - the PS2's rule with two named deviations (no dead zone under 1 m, no building from afar)
-milestone: M2
-value: 4
-phase: build
-status: todo
-deps: TBLD,FCUT,SPL11
-files: engine/crates/core/src/ai/serve.rs (new),engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/ai.rs,engine/crates/game/examples/round_to_outcome.rs
-declares: sim; sweep; arena
-needs:
-effort:
-branch:
-resume:
-created: 2026-10-03
-alpha: yes
-domain: vehicle
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `todo`.
 
 ## Why
 On the PS2 the build pads become turrets because bots build them: Jawas on Mos Eisley, engineers on Yavin, the pilots

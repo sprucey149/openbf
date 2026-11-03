@@ -1,20 +1,10 @@
 ---
 id: ZOOM
 title: Zoom does nothing: the ZOOM bit (R3 since 2026-10-04) has no consumer in the sim or the camera - the PS2's zoom per weapon (ZoomMin / ZoomMax / ZoomRate, the zoomed turn rate, first person on the sniper), read and built
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/weapon.rs,engine/crates/core/src/unit.rs,engine/crates/core/src/soldier.rs,engine/crates/core/src/sim/step.rs,engine/crates/core/src/sim/input.rs,engine/crates/game/src/walk.rs
-declares:
-needs:
-effort:
-branch: zoom
-resume: landed 08d6343c 2026-10-07
-created: 2026-10-04
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer, 2026-10-04: zoom is the right stick's click. The binding is in (commit 6300e19), but `buttons::ZOOM` has no consumer: nothing in `core::sim` or the camera reads it (grep, 2026-10-04).

@@ -1,19 +1,10 @@
 ---
 id: GCL16
 title: Game findings of cleanse 16: the seat leaves the animator's yaw / legs from before it, roster's class_anim skips the case-blind resolve, weapon_slot found by name, minimap still posts without the mission, capture credit on the arrival tick, black box panic/F9 write race + stuck events over 8 dropped, headless feed grows without --hud, unit_probe floor_dy off the graph, windowed's two battle starts
-milestone: M0
-value: 3
-phase: build
-status: parked
-deps: CAPCR, STILLCP, BOLTSURF
-files: engine/crates/game/src/animator.rs, engine/crates/game/src/animator/tests.rs, engine/CRATES.md
-declares:
-needs: findings 4/5/10 via STILLCP/CAPCR/BOLTSURF acceptance, a legal finding-8 wrong-floor witness, and the maintainer's live windowed F9/quit/panic check (finding 6)
-effort:
-branch: gcl16-seat-20261025
-resume: Findings4/5 implemented by STILLCP/CAPCR; full checks pending. Finding10 split to BOLTSURF after slope/world caller failures.8 still lacks legal wrong-floor witness. Keep parked for all prior rider/manual/replay/full gates; reports/20261025_0646_planner.md.
-created: 2026-10-15
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `parked`.
 
 ## Why
 Cleanse 16 (card CLN11) read the game crate (diff 306c4f0..988b229). Fixed there: the player's handle went stale at the first

@@ -1,20 +1,11 @@
 ---
 id: VMESH
 title: A vehicle gets INSIDE a closed prop mesh and its riders get out inside it - BF1 Endor's cp2 boulder (and two trees): a speeder bike crosses the boulder's wall at 23 m/s, an AT-ST walks its centre into its edge, Sim::exit_point puts the rider down inside (131 of 131 stays), nobody sees him, the vehicle is boarded again through the wall and when he is his team's last the whole other team heaps at the boulder with no shot (main seed 74; 500 s on the HVYW branch's seed 91) - close the way in, the exit and add a lost rule for a unit inside a body
-milestone: M2
-value: 5
-phase: build
-status: done
-deps: VTURD
-files: engine/crates/core/src/sim/seats.rs,engine/crates/core/src/sim/vehicles.rs,engine/crates/core/src/vehicle.rs,engine/crates/core/src/vehicle/hover.rs,engine/crates/core/src/ai/stall.rs,engine/crates/core/src/ai/ride.rs,engine/crates/core/src/ai/behave.rs,engine/crates/core/src/ai/state.rs,engine/crates/core/src/collision/rays.rs,engine/crates/core/src/collision/shape.rs,engine/crates/core/src/collision.rs
-declares: sweep
-needs:
-effort:
-branch: vmesh
-resume: landed b8a634dc 2026-10-15
-created: 2026-10-13
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
+
 ## Why
 Found while sorting card HVYW's Endor pile (2026-10-13; the planner's note of 05:13). It is on MAIN. BF1 Endor's boulder at
 cp2's hub (`end_prop_boulder @ (-105.5,-1.4,253.3)`, black-box body 481) is a CLOSED collision mesh (146 triangles, every edge

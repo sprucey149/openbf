@@ -1,18 +1,10 @@
 ---
 id: FALPH
 title: The frame's alpha plane leaks into pictures and maybe the window: since DSHN kept the disc gloss alpha on pass sheets, the unit/map goldens carry low alpha on droid pixels (SBD sheet 7.6 % of pixels < 200), so any compositing viewer shows white ghosts; render/src/device.rs picks caps.alpha_modes.first(), so a compositor listing PreMultiplied first would show droids see-through on the desktop — write opaque alpha in the final output, prefer CompositeAlphaMode::Opaque, and audit every reader of destination alpha
-milestone: M0
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/render/src/device.rs,engine/crates/render/src/capture.rs,engine/crates/render/src/shader.wgsl,engine/crates/game/tests/common/mod.rs
-declares: goldens=maps/bf1_bes1.png,maps/bf1_end1.png,maps/bf1_geo1.png,maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_kas1.png,maps/bf1_kas2.png,maps/bf1_nab1.png,maps/bf1_nab2.png,maps/bf1_rhn2.png,maps/bf1_yav1.png,maps/bf1_yav2.png,maps/bf2_cor1.png,maps/bf2_geo1.png,maps/bf2_kam1.png,maps/bf2_kas2.png,maps/bf2_mus1.png,maps/bf2_myg1.png,maps/bf2_pol1.png,maps/bf2_tan1.png,maps/bf2_uta1.png,maps/tat1.png,maps/tat2.png,tat1_hud.png,tat1_overview.png,tat1_spawn.png,units/bf1_all_inf_pilot.png,units/bf1_all_inf_wookie.png,units/bf1_cis_inf_bdroid.png,units/bf1_cis_inf_sbdroid.png,units/bf1_imp_inf_darktrooper.png,units/bf1_rep_inf_pilot.png,units/bf1_rep_inf_trooper.png,units/bf2_all_inf_bothanspy.png,units/bf2_all_inf_engineer.png,units/bf2_all_inf_marksperson.png,units/bf2_all_inf_soldier.png,units/bf2_all_inf_vanguard.png,units/bf2_all_inf_wookie.png,units/bf2_cis_inf_bdroid.png,units/bf2_cis_inf_magnaguard.png,units/bf2_cis_inf_sbdroid.png,units/bf2_imp_inf_atatcommander.png,units/bf2_imp_inf_atatpilot.png,units/bf2_imp_inf_darktrooper.png,units/bf2_rep_inf_ep3armoredpilot.png,units/bf2_rep_inf_ep3trooper.png,units/bf2_rep_inf_pilot.png,units/bf2_rep_inf_trooper.png
-needs:
-branch: falph
-resume: landed 37098015 2026-09-29
-created: 2026-09-29
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's INBOX note (2026-09-29 18:45) arrived while DSHN was landing; DSHN's goldens were committed (30c4a14) before

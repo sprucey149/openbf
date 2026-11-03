@@ -1,19 +1,12 @@
 ---
 id: WTHIN
 title: Soldiers through thin and narrow geometry (the LEAK census's tunnel residue after WTUN, 1,427 runs): slots narrower than the soldier's 1 m capsule (BF1 NAB2 (-13, 17), a hip-high slab 0.54 m from a sheet) and props of 0.2-0.4 m parts (BF2 POL1 body 837), where the pass's one contact per body and two iterations fight each other — name the classes by count, then decide the rule (keep him out of the slot, or resolve all contacts jointly)
-milestone: M3
-value: 3
-phase: re
-status: blocked
-deps: WTUN
-files:
-declares: leak; sweep; arena; sim
-needs: Restore NAB2/POL1/MYG1 bakes/missions, tunnel sites/probe and audit band data; classify current-main mechanisms and retain float/closed controls.
-branch:
-resume: 2026-10-24 11:57 UTC: planner prerequisite hold; 7/7 exact named paths absent. Restore NAB2/POL1/MYG1 bakes/missions, tunnel sites/probe and audit band data; classify current-main mechanisms and retain float/closed controls. All original acceptance retained. reports/20261024_1151_planner.md; inventory/continuation lead_tmp/planner_20261024_1151/.
-created: 2026-09-29
-alpha: yes
+status: archived
+issue: 98
 ---
+
+Historical technical record. Recorded state before archival was `blocked`. Current scope and ownership are on [issue #98](https://github.com/sprucey149/openbf/issues/98).
+
 ## Why
 WTUN (analysis/re-soldier-walls.md §4.3) removed the two skip mechanisms; what is left of the census's `tunnel` class is geometry the capsule cannot fit, where a push out of one face lands the axis past another. Player-visible but rare (1,427 of 1.83 M runs; top sites 24, 22, 21 runs).
 ## Evidence

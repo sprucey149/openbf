@@ -1,20 +1,10 @@
 ---
 id: MIXH
 title: The port's mix has no headroom because its per-ear level law is hotter than the PS2's: the PS2 splits a 3-D voice linearly between the ears (L + R = gain x level; centred = 0.5 per ear, the port's kira pan gives 1.0, +6 dB) and plays BF2's effects bus at 0.63 - give the port the PS2's per-ear law and bus gains, then UCRY's fight logs must read per-ear clipping <= 0.03 % (RE analysis/re-mix-headroom.md)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/audio/src/lib.rs,engine/crates/game/src/sounds.rs,engine/crates/game/src/event_sounds.rs,engine/crates/manifest/src/lib.rs,engine/crates/bake/src/sounds.rs,engine/crates/mungefs/src/sound_props.rs
-declares: rebake=sounds
-needs:
-effort:
-branch: mixh
-resume: LANDED a91d252 2026-10-16 03:35 (report reports/20261016_0327_card_MIXH.md). Next: UCRY re-measures its mixer clause on main (mix.py --law new --limit).
-created: 2026-10-16
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 RE done 2026-10-16 (`analysis/re-mix-headroom.md`, d1def96): the PS2 has no limiter or count-driven duck; its mix rarely

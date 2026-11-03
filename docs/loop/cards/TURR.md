@@ -1,20 +1,10 @@
 ---
 id: TURR
 title: Turrets with a purpose: a bot mans a turret that has a target it can hit or that covers a front-line post, and gets out by five rules - no hittable target for 10 s, quiet, hit from outside its arcs, the endgame, the fight moved (the maintainer's annoyance 1; bot design 6.1)
-milestone: M3
-value: 5
-phase: build
-status: done
-deps: BOTD,DEFS,FOFG
-files: engine/crates/core/src/ai/ride.rs, engine/crates/core/src/ai/gunner.rs, engine/crates/core/src/ai/behave.rs, engine/crates/core/src/ai/man.rs (new), engine/crates/core/src/sim/guns.rs
-declares: sweep; sim; arena
-needs:
-effort: high
-branch: turr
-resume: landed b19cdf94 2026-10-19
-created: 2026-10-03
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 The maintainer's annoyance 1 (2026-10-02): "If there is an empty turret, they'll get in the turret and rarely leave unless they're being shot at or die ... the last few bots to kill are hiding somewhere sitting in a turret ... there should be more purpose." The PS2's rule and why it camps: `analysis/re-soldier-ai.md` 7, 10a (boarded with a target in an arc; left after 10 s with no remembered threat; an enemy turret 100-180 m away resets the clock; 15 of 32 seated spells on Kamino over 60 s). The port's bots never board a stand-alone turret (0 % seat time on Kamino and Polis Massa against 9.4 % and 18.0 %). Design: `analysis/bot-design.md` 6.1 (D11).

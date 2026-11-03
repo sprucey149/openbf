@@ -1,19 +1,11 @@
 ---
 id: SPLHUD
 title: Extract HUD-tree regressions into a child module while preserving runtime bytes and test identities
-milestone: M0
-value: 2
-phase: cleanup
-status: parked
-deps:
-files: engine/crates/ui/src/hud_tree.rs, engine/crates/ui/src/hud_tree/tests.rs (new)
-declares:
-needs: real HUD/common/Locl bakes, missions, approved captures/goldens and graphics device for full validation
-effort:
-branch: splhud
-resume: Implemented dec763aaa1351e8d7b9e0d1855722bca95250b14; parent1478/child350, exact PURE MOVE and 55 UI identities pass. Restore inputs and run full original acceptance; reports/20261026_1123_card_SPLHUD.md.
-created: 2026-10-26
+status: archived
+issue: 8
 ---
+
+Historical technical record. Recorded state before archival was `parked`. Current scope and ownership are on [issue #8](https://github.com/sprucey149/openbf/issues/8).
 
 ## Why / evidence
 SPL15 owns the HUD tree's 1,826-line size debt. Its final `tests` module is

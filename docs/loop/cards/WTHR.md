@@ -1,22 +1,10 @@
 ---
 id: WTHR
 title: Weather, precipitation: rain on both Kaminos and BF1 Yavin 2, snow on the Hoths and Rhen Var, ash on Mygeeto, embers on Mustafar, pollen on Felucia - the PS2's particles in one 5 m cube tiled round the camera, streaks as lines, flakes as sprites, wind, rain shadows and splashes (RE done: re-weather.md)
-milestone: M1
-value: 5
-phase: build
-status: done
-deps:
-files: engine/crates/mungefs/src/fx.rs,engine/crates/manifest/src/lib.rs,engine/crates/bake/src/map.rs,engine/crates/core/src/region.rs,engine/crates/game/src/weather.rs,engine/crates/game/src/viewer/scene.rs,engine/crates/game/src/fx.rs,engine/crates/render/src/particles.rs
-declares: goldens=maps/bf1_hot1.png,maps/bf1_kam1.png,maps/bf1_rhn1.png,maps/bf1_yav2.png,maps/bf2_fel1.png,maps/bf2_hot1.png,maps/bf2_kam1.png,maps/bf2_mus1.png,maps/bf2_myg1.png; rebake=maps; parity=bf1_kam1,bf2_kam1,bf1_yav2,bf1_hot1,bf2_hot1,bf1_rhn1,bf2_myg1,bf2_mus1,bf2_fel1
-needs:
-effort:
-branch: wthr
-resume: landed 1dbb18fa 2026-10-06
-created: 2026-09-25 (from QUEUE.md)
-defer: 
-acceptance: 
-alpha: yes
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## The maintainer's decision (2026-09-25)
 In scope: rain and lightning are the disc's own content, and anything the PS2 draws is in scope without asking. Build it faithful-yet-modern.

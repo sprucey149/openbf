@@ -1,20 +1,10 @@
 ---
 id: ROLLM
 title: BF2's roll is moved by the drag mover (FUN_00248560, ControlSpeed row 5 = 1.4 m/s2 of stick, no target): stick held it keeps 10.5 m/s and covers 8.78 m (port slows to 9.29, 8.21 m), the stick sideways bends it 0.38 m (port 0.08) - the port still reads the roll row as a target speed
-milestone: M3
-value: 3
-phase: build
-status: done
-deps:
-files: engine/crates/core/src/soldier.rs
-declares: sim; sweep; arena; leak
-needs:
-effort:
-branch:
-resume: MERGED into BF1BK (planner 2026-10-02 09:30): same file core/src/soldier.rs, same declares (sim; sweep; arena; leak), both from the AIRC audit with PS2 rows in lead_tmp/audit-airc - BF1BK carries this card's text and acceptance, one build pays the gates once
-created: 2026-10-02
-domain: physics
+status: archived
 ---
+
+Historical technical record. Recorded state before archival was `done`.
 
 ## Why
 AIRC fixed the jump row of ControlSpeed (0.03 is an acceleration factor, not a speed). The roll row (0.02) has the
