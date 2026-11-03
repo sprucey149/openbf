@@ -736,6 +736,71 @@ fn lists_scroll_one_row_and_page_eight() {
     assert_eq!(m.play_list.at, 3);
 }
 
+#[test]
+fn list_scrolling_moves_top_without_moving_focus() {
+    let mut c = ListCursor { at: 0, top: 0 };
+    // 25 rows, 9 shown -> max top is 16
+    assert!(!c.scroll(25, LIST_ROWS, -1), "cannot scroll above 0");
+    assert_eq!((c.at, c.top), (0, 0));
+
+    assert!(c.scroll(25, LIST_ROWS, 1));
+    assert_eq!(
+        (c.at, c.top),
+        (0, 1),
+        "scrolling down increments top without moving at"
+    );
+
+    assert!(c.scroll(25, LIST_ROWS, 3));
+    assert_eq!((c.at, c.top), (0, 4));
+
+    // Scroll to end
+    assert!(c.scroll(25, LIST_ROWS, 20));
+    assert_eq!((c.at, c.top), (0, 16), "clamped to max top (25 - 9)");
+    assert!(!c.scroll(25, LIST_ROWS, 1), "cannot scroll past max top");
+
+    // Scroll back up
+    assert!(c.scroll(25, LIST_ROWS, -2));
+    assert_eq!((c.at, c.top), (0, 14));
+
+    // InstantAction scroll_left and scroll_pointer
+    let mut m = ia();
+    assert_eq!((m.map_list.at, m.map_list.top), (0, 0));
+    assert!(m.scroll_left(1));
+    assert_eq!(
+        (m.map_list.at, m.map_list.top),
+        (0, 1),
+        "scroll_left advances top without moving at"
+    );
+    assert_eq!(m.take_clicks(), vec![MenuSound::Select]);
+
+    // scroll_pointer over right window scrolls playlist
+    for i in 0..15 {
+        m.playlist.push(Entry {
+            map: i % m.maps.len(),
+            mode: Mode::Con,
+            side: Side::Era(Era::Cw),
+        });
+    }
+    assert_eq!(m.play_list.top, 0);
+    let size = [640.0, 480.0];
+    let pt_right = [400.0 * (640.0 / 512.0), 200.0];
+    assert!(m.scroll_pointer(Some(pt_right), Some(size), 2));
+    assert_eq!(
+        m.play_list.top, 2,
+        "scroll_pointer over right window scrolls playlist"
+    );
+    assert_eq!(m.map_list.top, 1, "left window untouched");
+
+    // scroll_pointer over left window scrolls map list
+    let pt_left = [100.0 * (640.0 / 512.0), 200.0];
+    assert!(m.scroll_pointer(Some(pt_left), Some(size), -1));
+    assert_eq!(
+        m.map_list.top, 0,
+        "scroll_pointer over left window scrolls map list"
+    );
+    assert_eq!(m.map_list.at, 0, "focus unchanged without selecting");
+}
+
 /// The maintainer, 2026-10-28 (a named deviation from the PS2's Normal <-> Elite
 /// toggle): the AI Difficulty row offers exactly the port's four tiers, in
 /// order, a step per press from the lowest to the highest.

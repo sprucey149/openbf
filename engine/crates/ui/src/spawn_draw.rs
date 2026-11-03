@@ -595,6 +595,26 @@ pub fn window_point(p: [f32; 2], size: [f32; 2]) -> [f32; 2] {
     screen_at(size, Anchor::Centre).map(Vec3::new(p[0], p[1], 0.0))
 }
 
+/// Hit-test the "Select a team" screen rows in a `size` window.
+/// Returns `Some(row_idx)` where 0 = Team 1, 1 = Team 2, 2 = Auto Assign.
+pub fn side_row_at(point: [f32; 2], size: [f32; 2], row_count: usize) -> Option<usize> {
+    let s = screen_at(size, Anchor::Centre);
+    let sx = (point[0] - s.origin[0]) / s.scale[0];
+    let sy = (point[1] - s.origin[1]) / s.scale[1];
+    let [x0, x1] = SIDE_STACK_X;
+    if sx < x0 || sx > x1 {
+        return None;
+    }
+    for k in 0..row_count {
+        let y0 = SIDE_STACK_TOP + ROW_PITCH * (k + 1) as f32;
+        let y1 = y0 + ROW_H;
+        if sy >= y0 && sy <= y1 {
+            return Some(k);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -909,5 +929,64 @@ mod tests {
         // The PS2 frame's two lines; a 10-texel font breaks it there too.
         let lines = objective_lines(&art.fonts[MAP_FONT], "Capture all the Command Posts");
         assert_eq!(lines, ["CAPTURE ALL THE", "COMMAND POSTS"]);
+    }
+
+    #[test]
+    fn side_row_hit_test_identifies_team_rows_accurately() {
+        let size = [640.0, 480.0];
+        // Title row is at SIDE_STACK_TOP (k=0 in row layout, but not a team item).
+        let title_pt = window_point(
+            [
+                (SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5,
+                SIDE_STACK_TOP + 10.0,
+            ],
+            size,
+        );
+        assert_eq!(
+            side_row_at(title_pt, size, 3),
+            None,
+            "title row is not clickable"
+        );
+
+        // Row 0 = Team 1 (k=1 in row layout: SIDE_STACK_TOP + ROW_PITCH)
+        let team1_pt = window_point(
+            [
+                (SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5,
+                SIDE_STACK_TOP + ROW_PITCH + 10.0,
+            ],
+            size,
+        );
+        assert_eq!(side_row_at(team1_pt, size, 3), Some(0), "row 0 hits team 1");
+
+        // Row 1 = Team 2 (k=2 in row layout: SIDE_STACK_TOP + ROW_PITCH * 2)
+        let team2_pt = window_point(
+            [
+                (SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5,
+                SIDE_STACK_TOP + ROW_PITCH * 2.0 + 10.0,
+            ],
+            size,
+        );
+        assert_eq!(side_row_at(team2_pt, size, 3), Some(1), "row 1 hits team 2");
+
+        // Row 2 = Auto Assign (k=3: SIDE_STACK_TOP + ROW_PITCH * 3)
+        let auto_pt = window_point(
+            [
+                (SIDE_STACK_X[0] + SIDE_STACK_X[1]) * 0.5,
+                SIDE_STACK_TOP + ROW_PITCH * 3.0 + 10.0,
+            ],
+            size,
+        );
+        assert_eq!(
+            side_row_at(auto_pt, size, 3),
+            Some(2),
+            "row 2 hits auto assign"
+        );
+
+        // Outside to left
+        let left_pt = window_point(
+            [SIDE_STACK_X[0] - 10.0, SIDE_STACK_TOP + ROW_PITCH + 10.0],
+            size,
+        );
+        assert_eq!(side_row_at(left_pt, size, 3), None);
     }
 }

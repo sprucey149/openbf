@@ -399,6 +399,7 @@ pub fn bake_vehicles(
     if let Some(original) = &original {
         ix.use_render_skeletons(original)?;
     }
+    let render = crate::vehicle_render::Instructions::of(original.as_deref())?;
     let out = Path::new(outdir);
     for d in ["models", "collision", "textures", "walkers"] {
         std::fs::create_dir_all(out.join(d))?;
@@ -512,7 +513,8 @@ pub fn bake_vehicles(
             if to_write.iter().any(|m| m.name.eq_ignore_ascii_case(name)) {
                 continue;
             }
-            let (m, mut bones) = ix.model_space(name, &g.name)?;
+            let (mut m, mut bones) = ix.model_space(name, &g.name)?;
+            render.apply(&mut m)?;
             if skinned.contains(&m.name.to_ascii_lowercase()) {
                 ix.canonical_joints(name, &g.name, &mut bones)?;
             }

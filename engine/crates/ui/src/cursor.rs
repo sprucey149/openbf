@@ -8,6 +8,7 @@ pub struct Pointer {
     pos: Option<[f32; 2]>,
     moved: bool,
     click: bool,
+    wheel: f32,
 }
 
 impl Pointer {
@@ -22,6 +23,21 @@ impl Pointer {
     /// A left click for the next frame.
     pub fn click(&mut self) {
         self.click = true;
+    }
+
+    /// Mouse wheel vertical delta accumulated for the next frame.
+    pub fn wheel(&mut self, dy: f32) {
+        self.wheel += dy;
+    }
+
+    /// The accumulated wheel delta since the last take.
+    pub fn take_wheel(&mut self) -> f32 {
+        std::mem::take(&mut self.wheel)
+    }
+
+    /// The current cursor position, if any (even if resting).
+    pub fn pos(&self) -> Option<[f32; 2]> {
+        self.pos
     }
 
     /// The pointer left the window or lost focus.
@@ -106,5 +122,28 @@ mod tests {
             Some(([1.0, 2.0], false)),
             "back after a clear"
         );
+    }
+
+    #[test]
+    fn mouse_wheel_accumulates_and_clears_without_forcing_hover() {
+        let mut p = Pointer::default();
+        p.moved_to([50.0, 60.0]);
+        assert_eq!(p.take_frame(), Some(([50.0, 60.0], false)));
+        // Cursor is now resting at [50.0, 60.0].
+        assert_eq!(p.pos(), Some([50.0, 60.0]));
+        assert_eq!(p.take_frame(), None, "resting cursor has no motion");
+        p.wheel(-1.0);
+        p.wheel(-2.0);
+        assert_eq!(p.take_wheel(), -3.0);
+        assert_eq!(p.take_wheel(), 0.0);
+        assert_eq!(
+            p.take_frame(),
+            None,
+            "wheel delta does not trigger resting hover"
+        );
+        p.wheel(1.0);
+        p.clear();
+        assert_eq!(p.take_wheel(), 0.0);
+        assert_eq!(p.pos(), None);
     }
 }

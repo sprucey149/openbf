@@ -1,11 +1,12 @@
-//! Last-resort solid drawing for fingerprinted donor plants and tunnels.
+//! Last-resort solid drawing for fingerprinted donor plants, tunnels and cliffs.
 //!
-//! Placement/model/group fits, donor vertex projection and three levels of
-//! donor-face subdivision leave measured contact holes on these models. A
-//! dense reference-art cage would store artwork, so it is not a public recipe.
+//! Plant/tunnel fits, donor vertex projection and three subdivision levels
+//! leave measured contact holes. The cliff also resists nearest-surface,
+//! nearest-corner and directional projections. A dense reference-art cage would
+//! store artwork, so it is not a public recipe.
 //! This fallback reads only the player's already-corrected collision, projects
-//! the player's own material/UVs onto it, and leaves all simulation inputs and
-//! model headers unchanged. Pure PS2 never selects a recipe.
+//! the player's own material/UVs onto it and leaves all simulation inputs
+//! and model headers unchanged. Pure PS2 never selects a recipe.
 //! The selected models have identical imported soldier and ordnance surfaces;
 //! a union of different query surfaces would not prove either one's residual.
 
@@ -18,14 +19,32 @@ use std::collections::HashMap;
 struct Recipe {
     name: &'static str,
     bf2: bool,
-    inputs: [&'static str; 2],
+    inputs: &'static [&'static str],
 }
 
 const RECIPES: &[Recipe] = &[
+    // Two missing upper cliff corners expose the hangar through its wall.
+    // Donor projection with three subdivision levels still leaves >22 cm
+    // extra contact gaps. Reuse only the player's canonical collision mesh,
+    // with the donor material/UVs, as the last resort for this cliff model.
+    Recipe {
+        name: "uta_bldg_cliff_hanger",
+        bf2: true,
+        inputs: &["8e72b2cf177e2b6509cc226ace0b0fe6b0605dae28590deadf634db3b24edc91"],
+    },
+    // The donor cliff's upper lip is recessed by metres. Nearest-surface,
+    // nearest-corner and outward-normal projections leave contact gaps above
+    // two metres. Reuse the player's canonical cliff mesh with donor UVs;
+    // no collision or reference-art vertex stream is stored here.
+    Recipe {
+        name: "uta1_bldg_rep_ground",
+        bf2: true,
+        inputs: &["e52c4caf140cc9a54fa1aeaf001a313866dc37a22e6e1126aea71c5a6fdbd638"],
+    },
     Recipe {
         name: "fel1_bldg_pitcher_l",
         bf2: true,
-        inputs: [
+        inputs: &[
             "987b756723460e437034ae46d3594ec14cd14abf66fbd5203d1c407afa5f641d",
             "679e130ba32271d320b3b3a634ba096355189872eb931dcfe892125a2b0b45e4",
         ],
@@ -33,7 +52,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_pitcher_clump",
         bf2: true,
-        inputs: [
+        inputs: &[
             "a052a91600aa1d4626d9f46b87c4b09d79d75e15496c1c32d3b3ef0c327cd1cd",
             "8e8f716d4f413a183f71b228e8245d4d05a52a5346349363d208ed80f50888b1",
         ],
@@ -41,7 +60,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_whisker_clump01",
         bf2: true,
-        inputs: [
+        inputs: &[
             "00435dd72b4609e3e0532527c04024d95d32bdbe2dc676231e53095fe33dfcf1",
             "034fb1719541a60b03c95a16fb997c5809ce62cd99281ea811316a9664718f1d",
         ],
@@ -49,7 +68,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_pitcher_c",
         bf2: true,
-        inputs: [
+        inputs: &[
             "dc4b6ddcca8e72eeb37643a67d504b3553033a7ee4ef3f54573ef2699d6a20e3",
             "6b0ce32af753d4f53c856f8435e36f620ca6b56b7fb7d5eb215b2b6dbca3f772",
         ],
@@ -57,7 +76,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_pitcher_m",
         bf2: true,
-        inputs: [
+        inputs: &[
             "9650936ac2813921ef0199af1e7b3240095b83d37da34baed6997d13d156415c",
             "259a6153fc6bb5a297ede49be0b9c0c9853c47c719b5e09d91d85c2fefe39bbb",
         ],
@@ -65,7 +84,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "fel1_bldg_pitcher_s",
         bf2: true,
-        inputs: [
+        inputs: &[
             "faa1cb4c0c84a2037a1c5a40969ccd72f4dd03b049af8d84f8f9c65795228e91",
             "0f764128b400bd89d5eb0656883b71020ab3e8105bcb0adbf3ff43dd6b9f70dc",
         ],
@@ -77,16 +96,105 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "rhn1_prop_tunnel_special_01",
         bf2: false,
-        inputs: [
+        inputs: &[
             "f2975ca1dcef985a75befd0625ccfd1d0c34ad29b37f5651872752280f4ae7d1",
             "12d98bfa1541004f42de539d440af4bce8402141a31bd84f5d1aafb1565fc0a6",
         ],
     },
+    // These remaining tunnel types retain measured holes after donor-only
+    // edge changes and nearest/vertical floor or wall projection. Even a
+    // canonical floor plus donor-wall edge changes leaves a 15 mm reverse
+    // straight_6 witness. Use the player's active mesh only as
+    // the last resort, with unchanged donor textures and canonical headers.
+    Recipe {
+        name: "rhn1_prop_tunnel_height",
+        bf2: false,
+        inputs: &[
+            "533710ca222b655d4fbc55d7d3adc2089a484a5ea8235f65dc6a38a793d3a376",
+            "cb60cf474128f7ea369a94a86e728ac79929029f4f9e3be83754903e09ae9a04",
+        ],
+    },
+    Recipe {
+        name: "rhn1_prop_tunnel_t",
+        bf2: false,
+        inputs: &[
+            "550a1c79ff441f5a59df80bb40b09d611acfa6ba5a61eed3d7f860e755a0cbc1",
+            "98cc3435dc0a99a64acd72624ddedd7a9e0d234355081c29609b16c91d6835a8",
+        ],
+    },
+    Recipe {
+        name: "rhn1_prop_tunnel_straight_6",
+        bf2: false,
+        inputs: &[
+            "6dd75bae0d4d758fdd9a10d597f325bd4f0df155a3eca0abf1629dcd48c20315",
+            "f23aa7def44edb3d118a9a7e9e69313731a29797b1d4f105092c7b4d943354d0",
+        ],
+    },
 ];
+
+// A new cliff wall can lie beyond the donor face. Clamped nearest-point UVs
+// collapse that extension into stripes. Reuse an aligned donor plane's UV
+// gradient so its texture continues at the donor's own scale.
+fn plane_uv(point: Vec3, triangle: [Vec3; 3], uv: [[f32; 2]; 3]) -> Option<[f32; 2]> {
+    let ab = triangle[1] - triangle[0];
+    let ac = triangle[2] - triangle[0];
+    let ap = point - triangle[0];
+    let aa = ab.dot(ab);
+    let cc = ac.dot(ac);
+    let cross = ab.dot(ac);
+    let denominator = aa * cc - cross * cross;
+    if denominator.abs() < 1e-8 {
+        return None;
+    }
+    let u = (cc * ap.dot(ab) - cross * ap.dot(ac)) / denominator;
+    let v = (aa * ap.dot(ac) - cross * ap.dot(ab)) / denominator;
+    Some(std::array::from_fn(|axis| {
+        uv[0][axis] + u * (uv[1][axis] - uv[0][axis]) + v * (uv[2][axis] - uv[0][axis])
+    }))
+}
+
+fn aligned_face(center: Vec3, normal: Vec3, model: &Model) -> Option<(usize, [u32; 3])> {
+    let mut best = None;
+    for (si, segment) in model.segments.iter().enumerate() {
+        for &face in &segment.triangles {
+            let points = face.map(|i| Vec3::from(segment.positions[i as usize]));
+            let direction = (points[1] - points[0])
+                .cross(points[2] - points[0])
+                .normalize_or_zero();
+            if direction.dot(normal).abs() < 0.75 {
+                continue;
+            }
+            let distance = center.distance_squared((points[0] + points[1] + points[2]) / 3.);
+            if best.is_none_or(|(old, _, _)| distance < old) {
+                best = Some((distance, si, face));
+            }
+        }
+    }
+    best.map(|(_, si, face)| (si, face))
+}
 
 pub(super) struct Conformation(HashMap<String, bool>);
 
 impl Conformation {
+    /// The chamber recipe uses the existing guarded solid-surface producer,
+    /// then keeps only the annex; its caller retains the untouched donor core.
+    pub(super) fn chamber_surface(
+        artwork: &Model,
+        items: &[Chunk<'_>],
+        alpha: &[crate::alpha::SegmentAlpha],
+    ) -> Result<Model> {
+        ensure!(
+            artwork.name.eq_ignore_ascii_case("bes2_bldg_chamber")
+                || artwork.name.eq_ignore_ascii_case("bes2_bldg_chamberLOWD"),
+            "render chamber: unexpected model"
+        );
+        let mut result = artwork.clone();
+        result.name = "bes2_bldg_chamber".into();
+        let selected = Self(HashMap::from([(result.name.clone(), false)]));
+        selected.apply(&mut result, items, alpha)?;
+        result.name.clone_from(&artwork.name);
+        Ok(result)
+    }
     pub(super) fn of(original: Option<&[u8]>) -> Result<Self> {
         let mut selected = HashMap::new();
         if let Some(original) = original {
@@ -139,6 +247,7 @@ impl Conformation {
             "render conform: {} has no active collision",
             artwork.name
         );
+        let planar_cliff = artwork.name.eq_ignore_ascii_case("uta_bldg_cliff_hanger");
         let mut result = artwork.clone();
         result.segments = artwork
             .segments
@@ -168,6 +277,11 @@ impl Conformation {
                 .ok_or_else(|| {
                     anyhow!("render conform: {} has no donor triangles", artwork.name)
                 })?;
+            let (si, donor_face) = if planar_cliff {
+                aligned_face(center, normal, artwork).unwrap_or((si, donor_face))
+            } else {
+                (si, donor_face)
+            };
             let donor = &artwork.segments[si];
             let donor_normal = donor_face
                 .into_iter()
@@ -181,13 +295,22 @@ impl Conformation {
             let output = &mut result.segments[si];
             let first = u32::try_from(output.positions.len())?;
             for point in triangle {
-                let (_, face, weights) =
-                    super::collision_standin::nearest(point, artwork, Some(si)).unwrap();
-                let uv = std::array::from_fn(|axis| {
-                    (0..3)
-                        .map(|i| donor.uvs[face[i] as usize][axis] * weights[i])
-                        .sum()
-                });
+                let uv = if planar_cliff {
+                    plane_uv(
+                        point,
+                        donor_face.map(|i| Vec3::from(donor.positions[i as usize])),
+                        donor_face.map(|i| donor.uvs[i as usize]),
+                    )
+                    .ok_or_else(|| anyhow!("render conform: degenerate donor UV plane"))?
+                } else {
+                    let (_, face, weights) =
+                        super::collision_standin::nearest(point, artwork, Some(si)).unwrap();
+                    std::array::from_fn(|axis| {
+                        (0..3)
+                            .map(|i| donor.uvs[face[i] as usize][axis] * weights[i])
+                            .sum()
+                    })
+                };
                 output.positions.push(point.to_array());
                 output.normals.push(normal.to_array());
                 output.uvs.push(uv);
@@ -377,6 +500,17 @@ fn primitive_faces(prim: &manifest::ManifestPrim) -> Result<Vec<[Vec3; 3]>> {
 mod tests {
     use super::*;
     use mungefs::model::{Aabb, RenderType, Segment};
+
+    #[test]
+    fn projected_cliff_uv_keeps_texture_density_beyond_the_donor_triangle() {
+        let triangle = [Vec3::ZERO, Vec3::X, Vec3::Y];
+        let uv = [[0., 0.], [1., 0.], [0., 1.]];
+        assert_eq!(
+            plane_uv(Vec3::new(3., 5., 2.), triangle, uv),
+            Some([3., 5.])
+        );
+        assert_eq!(plane_uv(Vec3::ZERO, [Vec3::ZERO; 3], uv), None);
+    }
 
     fn conform(selected: &Conformation, model: &mut Model, items: &[Chunk<'_>]) -> Result<bool> {
         let alpha = crate::alpha::AlphaTable::new(&[]).model(model);
@@ -607,12 +741,14 @@ mod tests {
     #[test]
     fn ps2_selection_is_empty_even_for_a_supported_model_name() {
         let selected = Conformation::of(None).unwrap();
-        let mut model = artwork();
-        model.name = "rhn1_prop_tunnel_special_01".into();
-        model.bone_space = true;
-        let original = model.segments[0].positions.clone();
-        assert!(!conform(&selected, &mut model, &[]).unwrap());
-        assert_eq!(model.segments[0].positions, original);
+        for recipe in RECIPES {
+            let mut model = artwork();
+            model.name = recipe.name.into();
+            model.bone_space = true;
+            let original = model.segments[0].positions.clone();
+            assert!(!conform(&selected, &mut model, &[]).unwrap());
+            assert_eq!(model.segments[0].positions, original);
+        }
     }
 
     #[test]

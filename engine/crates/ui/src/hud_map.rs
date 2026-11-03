@@ -254,6 +254,50 @@ pub fn window_point(hud: &Hud, world: [f32; 2], clamp: bool, size: [f32; 2]) -> 
     ])
 }
 
+/// The window pixel a world point's icon centre is drawn at in a `size`
+/// window on the spawn map page (the Map element's Spawn view).
+pub fn spawn_window_point(
+    map: &MapModel,
+    world: [f32; 2],
+    clamp: bool,
+    size: [f32; 2],
+) -> Option<[f32; 2]> {
+    let (uv, _) = map.place(world, clamp)?;
+    let base = Mat4::from_translation(Vec3::new(
+        POSITION_SPAWN[0] * FRAME_W,
+        POSITION_SPAWN[1] * FRAME_H,
+        0.0,
+    )) * Mat4::from_scale(Vec3::splat(0.9));
+    let p = map.group(&base).transform_point3(map.local(uv));
+    let sc = frame_scale(size);
+    Some([
+        OVERFILL[0].0 * 4.0 / 3.0 * size[1] + anchor_shift(POSITION_SPAWN[0], size) + sc[0] * p.x,
+        OVERFILL[1].0 * size[1] + sc[1] * p.y,
+    ])
+}
+
+/// Hit-test command posts on the spawn map view. Returns the post closest to
+/// `point` if within `max_dist` window pixels.
+pub fn hit_spawn_post<T: Copy>(
+    map: &MapModel,
+    posts: &[(T, glam::Vec3)],
+    point: [f32; 2],
+    size: [f32; 2],
+    max_dist: f32,
+) -> Option<T> {
+    posts
+        .iter()
+        .filter_map(|(post, pos)| {
+            let pt = spawn_window_point(map, [pos.x, pos.z], true, size)?;
+            let dx = point[0] - pt[0];
+            let dy = point[1] - pt[1];
+            let dist = (dx * dx + dy * dy).sqrt();
+            (dist <= max_dist).then_some((dist, *post))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, post)| post)
+}
+
 /// The Spawn view's place × the element's Scale (the view switch's matrix,
 /// §2.2 [V] `FUN_003a80e8`; RAM on Hoth's spawn map: diag 0.9 at
 /// (155.27, 213.77)).
@@ -666,5 +710,33 @@ mod tests {
         assert_eq!(post_color(ENEMY, Some(FRIEND), 0.125), FRIEND);
         assert_eq!(post_color(ENEMY, Some(FRIEND), 0.5), ENEMY);
         assert_eq!(post_color(ENEMY, None, 0.125), ENEMY);
+    }
+
+    #[test]
+    fn spawn_map_hit_testing_selects_closest_post_within_radius() {
+        let map = MapModel {
+            view: MapView::Spawn,
+            radius: 200.0,
+            extent: 200.0,
+            ..Default::default()
+        };
+        let posts = vec![
+            (1u32, glam::Vec3::new(0.0, 0.0, 0.0)),
+            (2u32, glam::Vec3::new(100.0, 0.0, 50.0)),
+        ];
+        let size = [640.0, 480.0];
+        let p1_pt = spawn_window_point(&map, [0.0, 0.0], true, size).unwrap();
+        let p2_pt = spawn_window_point(&map, [100.0, 50.0], true, size).unwrap();
+
+        // Exact hit on post 1
+        assert_eq!(hit_spawn_post(&map, &posts, p1_pt, size, 28.0), Some(1u32));
+        // Hit within radius of post 2
+        let p2_near = [p2_pt[0] + 10.0, p2_pt[1] - 5.0];
+        assert_eq!(
+            hit_spawn_post(&map, &posts, p2_near, size, 28.0),
+            Some(2u32)
+        );
+        // Far away from any post
+        assert_eq!(hit_spawn_post(&map, &posts, [0.0, 0.0], size, 28.0), None);
     }
 }

@@ -27,6 +27,16 @@ struct Recipe {
 
 const RECIPES: &[Recipe] = &[
     Recipe {
+        model: "uta1_bldg_rep_groundLOWD",
+        inputs: &["4d81261f8a48694b8bbb76d09b509a10b937a3f9edadab2da89e9940f3af119d"],
+        segments: &[SegmentRecipe {
+            vertices: 263,
+            faces: 258,
+            edges: &[[25, 27], [24, 31], [23, 30]],
+            added: &[],
+        }],
+    },
+    Recipe {
         model: "fel1_prop_rock_group01",
         inputs: &[
             "5d10b9b84f4f433d26a879d60f008fa41397e23bc41ab28881c56f4662d10146",

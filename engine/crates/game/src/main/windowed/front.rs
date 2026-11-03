@@ -472,6 +472,7 @@ impl App {
             }
         }
         // Hover acts only on fresh pointer motion or a click (`Pointer`).
+        let wheel = self.shell_pointer.take_wheel();
         let pointer = self.shell_pointer.take_frame();
         let click = pointer.is_some_and(|(_, c)| c);
         if let (Some((point, _)), Some((w, h)), Some(view)) = (
@@ -502,6 +503,21 @@ impl App {
                 l1: edges & game::kbm::MENU_L1 != 0,
                 r1: edges & game::kbm::MENU_R1 != 0,
             };
+            if wheel != 0.0 {
+                let lines = if wheel > 0.0 {
+                    -(wheel.round().max(1.0) as isize)
+                } else {
+                    (-wheel).round().max(1.0) as isize
+                };
+                let point = self.shell_pointer.pos();
+                let size = self.renderer.as_ref().map(|r| r.size());
+                ia.scroll_pointer(point, size.map(|(w, h)| [w as f32, h as f32]), lines);
+            }
+            let pointer = if wheel != 0.0 && !click {
+                None
+            } else {
+                pointer
+            };
             if let (Some((point, _)), Some((w, h))) =
                 (pointer, self.renderer.as_ref().map(|r| r.size()))
             {
@@ -511,12 +527,30 @@ impl App {
                     .and_then(|view| view.instant_target(ia, point, [w as f32, h as f32]))
                 {
                     if ia.focus_pointer(target) {
-                        ia_input.menu.confirm |=
-                            click && !matches!(target, ui::shell::PointerTarget::Option(..));
+                        ia_input.menu.confirm |= click
+                            && !matches!(
+                                target,
+                                ui::shell::PointerTarget::Option(..)
+                                    | ui::shell::PointerTarget::ScrollLeft(..)
+                                    | ui::shell::PointerTarget::ScrollRight(..)
+                                    | ui::shell::PointerTarget::ScrollOption(..)
+                            );
                         if click {
-                            if let ui::shell::PointerTarget::Option(_, right) = target {
-                                ia_input.menu.left |= !right;
-                                ia_input.menu.right |= right;
+                            match target {
+                                ui::shell::PointerTarget::ScrollLeft(delta) => {
+                                    ia.scroll_left(delta);
+                                }
+                                ui::shell::PointerTarget::ScrollRight(delta) => {
+                                    ia.scroll_right(delta);
+                                }
+                                ui::shell::PointerTarget::ScrollOption(delta) => {
+                                    ia.scroll_option(delta);
+                                }
+                                ui::shell::PointerTarget::Option(_, right) => {
+                                    ia_input.menu.left |= !right;
+                                    ia_input.menu.right |= right;
+                                }
+                                _ => {}
                             }
                         }
                     }

@@ -289,6 +289,7 @@ pub(super) fn bake_content(
     let render_alignment = super::render_alignment::Alignment::of(original.as_deref())?;
     let render_conformation = super::render_conform::Conformation::of(original.as_deref())?;
     let render_entrance = super::render_entrance::Entrance::of(original.as_deref())?;
+    let render_chamber = super::render_chamber::Chamber::of(original.as_deref())?;
     for original in original.as_deref().into_iter().chain(
         side_source
             .as_ref()
@@ -505,10 +506,15 @@ pub(super) fn bake_content(
                 }
                 render_faces.apply(&mut m)?;
                 let entrance_contact = render_entrance.apply(&mut m, &expanded)?;
-                let original_alpha = alpha_table.model(&m);
+                let mut original_alpha = alpha_table.model(&m);
+                let chamber_contact = render_chamber.apply(&mut m, &expanded, &original_alpha)?;
+                if chamber_contact {
+                    original_alpha = alpha_table.model(&m);
+                }
                 let contact_surface =
                     render_conformation.apply(&mut m, &expanded, &original_alpha)?
-                        || entrance_contact;
+                        || entrance_contact
+                        || chamber_contact;
                 if contact_surface {
                     anyhow::ensure!(kind == Content::Map, "contact surfaces require a map bake");
                     if m.is_bf2() {
@@ -809,9 +815,10 @@ pub(super) fn bake_content(
                 .iter()
                 .chain(mode_layers.iter().flat_map(|layer| &layer.group))
                 .collect();
-            for assembled in
-                super::render_reassembly::models(original, &render_worlds, &parsed_models)?
-            {
+            let mut assembled_models =
+                super::render_reassembly::models(original, &render_worlds, &parsed_models)?;
+            assembled_models.extend(super::render_cloudcity::models(original, &parsed_models)?);
+            for assembled in assembled_models {
                 let model = assembled.model;
                 let alphas = alpha_table.model(&model);
                 alpha_usage.record_model(&model, &alphas);

@@ -290,7 +290,12 @@ pub(super) fn empty_segment(source: &Segment) -> Segment {
     result
 }
 
-fn clipped(source: &Segment, transform: Mat3, translation: Vec3, bounds: Aabb) -> Option<Segment> {
+pub(super) fn clipped(
+    source: &Segment,
+    transform: Mat3,
+    translation: Vec3,
+    bounds: Aabb,
+) -> Option<Segment> {
     let mut result = empty_segment(source);
     let normal = transform.inverse().transpose();
     for triangle in &source.triangles {

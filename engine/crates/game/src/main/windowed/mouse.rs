@@ -93,7 +93,18 @@ impl App {
                 button: winit::event::MouseButton::Left,
                 state: winit::event::ElementState::Pressed,
                 ..
-            } if matches!(self.screen, Screen::Shell) => self.shell_pointer.click(),
+            } if matches!(self.screen, Screen::Shell)
+                || (self.in_battle() && !self.paused && !self.can_grab()) =>
+            {
+                self.shell_pointer.click();
+            }
+            WindowEvent::MouseWheel { delta, .. } if matches!(self.screen, Screen::Shell) => {
+                let dy = match delta {
+                    winit::event::MouseScrollDelta::LineDelta(_, y) => *y,
+                    winit::event::MouseScrollDelta::PixelDelta(p) => (p.y / 32.0) as f32,
+                };
+                self.shell_pointer.wheel(dy);
+            }
             WindowEvent::Focused(focused) => {
                 self.focused = *focused;
                 if !focused {
@@ -183,6 +194,48 @@ mod tests {
         walk.sim.spawn_stage[0] = core::sim::SpawnStage::Accepted;
         walk.sim.units[walk.player.index as usize].alive = false;
         assert!(!a.can_grab(), "death and spawn screens");
+    }
+
+    #[test]
+    fn mouse_wheel_records_shell_scroll_activity() {
+        let mut a = app();
+        a.mouse_window_event(&WindowEvent::MouseWheel {
+            device_id: winit::event::DeviceId::dummy(),
+            delta: winit::event::MouseScrollDelta::LineDelta(0.0, -1.0),
+            phase: winit::event::TouchPhase::Moved,
+        });
+        assert_eq!(a.shell_pointer.take_wheel(), -1.0);
+    }
+
+    #[test]
+    fn spawn_screens_left_click_records_pointer_click() {
+        let mut a = app();
+        a.screen = Screen::Battle;
+        a.walk = Some((
+            game::walk::WalkSim::new(42, glam::Vec3::ZERO, None),
+            render::MeshHandle::default(),
+        ));
+        let walk = &mut a.walk.as_mut().unwrap().0;
+        walk.sim.spawn_stage[0] = core::sim::SpawnStage::Side;
+        walk.sim.units[walk.player.index as usize].alive = false;
+        assert!(!a.can_grab());
+
+        a.shell_pointer.moved_to([100.0, 100.0]);
+        a.mouse_window_event(&WindowEvent::MouseInput {
+            device_id: winit::event::DeviceId::dummy(),
+            state: winit::event::ElementState::Pressed,
+            button: winit::event::MouseButton::Left,
+        });
+        assert_eq!(a.shell_pointer.take_frame(), Some(([100.0, 100.0], true)));
+
+        // A click on the pause menu must not wait for the spawn screen or shell.
+        a.paused = true;
+        a.mouse_window_event(&WindowEvent::MouseInput {
+            device_id: winit::event::DeviceId::dummy(),
+            state: winit::event::ElementState::Pressed,
+            button: winit::event::MouseButton::Left,
+        });
+        assert_eq!(a.shell_pointer.take_frame(), None);
     }
 
     #[test]
