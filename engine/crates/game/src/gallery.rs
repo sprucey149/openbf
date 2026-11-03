@@ -1204,6 +1204,7 @@ mod tests {
                 sphere: None,
                 vis_top: None,
                 render_grid: None,
+                contact_surface: false,
             }),
             water: None,
             lowres: None,

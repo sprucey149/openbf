@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import render_attachment_check as check
 
 
-def glb(path, last_y=0, joint=0, animated_x=0, animation_name='idle', alpha=False):
+def glb(path, last_y=0, joint=0, animated_x=0, animation_name='idle', alpha=False, material_name=None):
     positions = [(0, 0, 0), (1, 0, 0), (0, last_y, 1)]
     binary = b''.join(struct.pack('<3f', *p) for p in positions)
     binary += bytes([joint, 0, 0, 0] * 3)
@@ -25,8 +25,9 @@ def glb(path, last_y=0, joint=0, animated_x=0, animation_name='idle', alpha=Fals
                                                                (2, 5125, 'SCALAR', 3), (3, 5126, 'VEC3', 1))],
            'meshes': [{'primitives': [{'attributes': {'POSITION': 0, 'JOINTS_0': 1}, 'indices': 2}]}],
            'animations': [{'name': animation_name, 'channels': [], 'samplers': [{'input': 2, 'output': 3}]}]}
-    if alpha:
-        doc['materials'] = [{'name': 'alpha', 'alphaMode': 'MASK'}]
+    if alpha or material_name is not None:
+        doc['materials'] = [{'name': 'alpha' if alpha else material_name,
+                             'alphaMode': 'MASK' if alpha else 'OPAQUE'}]
         doc['meshes'][0]['primitives'][0]['material'] = 0
     header = json.dumps(doc).encode()
     header += b' ' * (-len(header) % 4)
@@ -37,13 +38,113 @@ def glb(path, last_y=0, joint=0, animated_x=0, animation_name='idle', alpha=Fals
 
 
 def receipt():
-    return {'method': 'exhaustive_attachment_dependency_identity_v1', 'complete': True,
-            'status': 'pass', 'categories': {category: {'items': 0, 'counts': {}, 'status': 'pass'}
+    rows = [dict(check._row(category, 'texture_load_candidates', 'same', 'same'), consumer=consumer)
+            for category, consumer in check.LOAD_CONSUMERS.items()]
+    return {'method': check.METHOD, 'complete': True,
+            'status': 'pass', 'categories': {category: {'items': int(category in check.LOAD_CONSUMERS),
+                                                       'counts': {'pass': 1} if category in check.LOAD_CONSUMERS else {},
+                                                       'status': 'pass'}
                                              for category in check.REQUIRED_CATEGORIES},
-            'objects': [], 'errors': []}
+            'objects': rows, 'errors': []}
+
+
+def roots(folder, material_name='opaque'):
+    values = [Path(folder) / label for label in ('ref', 'src')]
+    for root in values:
+        for name in ('map', 'common_bf1', 'side_bf1/soldiers', 'side_bf1/vehicles/all/models'):
+            (root / name).mkdir(parents=True)
+        (root / 'map/manifest.ron').write_text('(source_game:"bf1",classes:[],instances:[],textures:[])')
+        (root / 'common_bf1/common.ron').write_text('(classes:[],textures:[])')
+        (root / 'side_bf1/vehicles/all/vehicles.ron').write_text('(textures:[])')
+        glb(root / 'side_bf1/vehicles/all/models/model.glb', material_name=material_name)
+        glb(root / 'side_bf1/soldiers/body.glb', material_name='skin')
+    return values
+
+
+def edit_document(path, edit):
+    raw = path.read_bytes()
+    length = struct.unpack_from('<I', raw, 12)[0]
+    doc = json.loads(raw[20:20 + length])
+    edit(doc)
+    header = json.dumps(doc).encode()
+    header += b' ' * (-len(header) % 4)
+    tail = raw[20 + length:]
+    path.write_bytes(struct.pack('<4sII', b'glTF', 2, 20 + len(header) + len(tail))
+                     + struct.pack('<I4s', len(header), b'JSON') + header + tail)
 
 
 class AttachmentTests(unittest.TestCase):
+    def test_ignored_glb_import_input_cannot_keep_zero_increase_identity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            a, b = roots(folder)
+            self.assertTrue(check.attachment_map(a, b, 'map')['complete'])
+            model = b / 'side_bf1/vehicles/all/models/model.glb'
+            # gltf::import_slice decodes declared images even when unused by
+            # materials. These are vertex bytes, not a PNG; Rust refuses it.
+            edit_document(model, lambda doc: doc.update(images=[{'bufferView': 0, 'mimeType': 'image/png'}]))
+            report = check.attachment_map(a, b, 'map')
+            self.assertFalse(report['complete'])
+            self.assertEqual(report['status'], 'unmeasured')
+            self.assertEqual(check.attachment_problems(report), [])
+
+    def test_opaque_name_that_changes_vehicle_draw_to_skip_is_not_identity(self):
+        with tempfile.TemporaryDirectory() as folder:
+            a, b = roots(folder)
+            self.assertTrue(check.attachment_map(a, b, 'map')['complete'])
+            glb(b / 'side_bf1/vehicles/all/models/model.glb', material_name='')
+            report = check.attachment_map(a, b, 'map')
+            self.assertEqual(report['status'], 'unmeasured')
+            self.assertFalse(report['complete'])
+            self.assertEqual(check.attachment_problems(report), [])
+
+    def test_same_blank_or_dangling_name_is_a_native_baseline(self):
+        for name in ('', 'noicon'):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as folder:
+                a, b = roots(folder, name)
+                report = check.attachment_map(a, b, 'map')
+                self.assertTrue(report['complete'])
+                self.assertEqual(report['status'], 'pass')
+                self.assertEqual(check.attachment_problems(report), [])
+                consumers = {row['category']: row['consumer'] for row in report['objects']
+                             if row['name'] == 'texture_load_candidates'}
+                self.assertIn('white', consumers['soldier_feet'])
+                self.assertIn('skips', consumers['vehicles_hulls'])
+
+    def test_opaque_load_candidates_include_map_common_other_side_and_both_tiers(self):
+        for directory in ('map', 'common_bf1', 'side_bf1/vehicles/all', 'side_bf1/vehicles/other'):
+            for suffix in ('.ktx2', '.tier2.ktx2', '.dtl.ktx2'):
+                with self.subTest(directory=directory, suffix=suffix), tempfile.TemporaryDirectory() as folder:
+                    a, b = roots(folder, 'noicon')
+                    if directory.endswith('other'):
+                        for root in (a, b):
+                            (root / directory).mkdir()
+                            (root / directory / 'vehicles.ron').write_text('(textures:["noicon"])')
+                    path = b / directory / 'textures' / ('noicon' + suffix)
+                    path.parent.mkdir(parents=True)
+                    path.write_bytes(b'changed load input, not an image validity assertion')
+                    report = check.attachment_map(a, b, 'map')
+                    self.assertFalse(report['complete'])
+                    self.assertEqual(report['status'], 'unmeasured')
+                    self.assertEqual(check.attachment_problems(report), [])
+
+    def test_file_registration_changes_load_without_changing_file_bytes(self):
+        for relative in ('map/manifest.ron', 'common_bf1/common.ron', 'side_bf1/vehicles/all/vehicles.ron'):
+            with self.subTest(relative=relative), tempfile.TemporaryDirectory() as folder:
+                a, b = roots(folder, 'noicon')
+                path = b / relative
+                path.write_text(path.read_text().replace('textures:[]', 'textures:["noicon"]'))
+                self.assertFalse(check.attachment_map(a, b, 'map')['complete'])
+
+    def test_validator_cannot_strip_candidate_rows_and_recount(self):
+        value = receipt()
+        value['objects'] = [row for row in value['objects'] if row['category'] != 'vehicles_hulls']
+        value['categories']['vehicles_hulls'] = {'items': 0, 'counts': {}, 'status': 'pass'}
+        self.assertIn('vehicles_hulls: required texture load candidates missing or invalid',
+                      check.attachment_problems(value))
+        value = receipt()
+        value['method'] = 'exhaustive_attachment_dependency_identity_v1'
+        self.assertIn('attachment method missing or unsupported', check.attachment_problems(value))
+
     def test_direct_hologram_load_cannot_escape_class_geometry_inventory(self):
         with tempfile.TemporaryDirectory() as folder:
             roots = [Path(folder) / label for label in ('ref', 'src')]
@@ -120,17 +221,17 @@ class AttachmentTests(unittest.TestCase):
         value['categories'].pop('water')
         self.assertIn('attachment categories incomplete or unknown', check.attachment_problems(value))
         value = receipt()
-        value['categories']['water']['items'] = 1
+        value['categories']['water']['items'] = 9
         self.assertIn('water: incomplete or inconsistent inventory', check.attachment_problems(value))
 
     def test_shape_difference_is_structurally_valid_but_not_a_proof(self):
         value = receipt()
-        value['objects'] = [check._row('vehicles_hulls', 'hull', 'a', 'b')]
+        value['objects'].append(check._row('vehicles_hulls', 'hull', 'a', 'b'))
         value['complete'], value['status'] = False, 'unmeasured'
-        value['categories']['vehicles_hulls'] = {'items': 1, 'counts': {'unmeasured': 1}, 'status': 'unmeasured'}
+        value['categories']['vehicles_hulls'] = {'items': 2, 'counts': {'pass': 1, 'unmeasured': 1}, 'status': 'unmeasured'}
         self.assertEqual(check.attachment_problems(value), [])
         wrong = copy.deepcopy(value)
-        wrong['objects'][0]['residual_excess_bound_m'] = 0
+        wrong['objects'][-1]['residual_excess_bound_m'] = 0
         self.assertIn('unmeasured attachment claims a bound', check.attachment_problems(wrong))
 
 

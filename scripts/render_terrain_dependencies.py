@@ -136,12 +136,19 @@ def _texture_path(folder, name, tier):
     return selected
 
 
+class LoadedTextures(dict):
+    """Keep loadable-but-not-yet-draw-valid model facts with the registry."""
+    def __init__(self):
+        super().__init__()
+        self.load_notes = []
+
+
 def _inventory(root, key, manifest, tier):
     folder = root / key
     names = manifest.get('textures', [])
     if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
         raise ValueError('invalid map loaded texture registry')
-    loaded = {}
+    loaded = LoadedTextures()
     for name in names:
         loaded[name.lower()] = {'path': _texture_path(folder, name, tier), 'owner': 'map', 'name': name}
     common = root / f"common_{manifest.get('source_game', 'bf1')}"
@@ -155,10 +162,15 @@ def _inventory(root, key, manifest, tier):
                     or any(not isinstance(name, str) for name in data.get('models', []) + data.get('textures', []))):
                 raise ValueError('invalid common loaded asset registry')
             for name in data.get('models', []):
-                _mesh_parts(safe_child(common, f'models/{name}.glb'), allow_empty=True)
+                parts = _mesh_parts(safe_child(common, f'models/{name}.glb'), allow_empty=True, load_only=True)
+                for ordinal, part in enumerate(parts):
+                    if part.get('nonfinite_uv_rows'):
+                        loaded.load_notes.append(dict(owner='common', model=name, primitive=ordinal,
+                                                      nonfinite_uv_rows=part['nonfinite_uv_rows'],
+                                                      file=f'models/{name}.glb'))
             for collision in data.get('collision', []):
                 if collision.get('glb'):
-                    _mesh_parts(safe_child(common, collision['glb']), allow_empty=True)
+                    _mesh_parts(safe_child(common, collision['glb']), allow_empty=True, load_only=True)
             additions = {}
             for name in data.get('textures', []):
                 additions[name.lower()] = {'path': _texture_path(common, name, tier), 'owner': 'common', 'name': name}
@@ -184,13 +196,20 @@ def _texture_record(row):
             'width': descriptor['width'], 'height': descriptor['height'], 'mips': descriptor['levels']}
 
 
-def _mesh_parts(path, allow_empty=False):
+def _mesh_parts(path, allow_empty=False, load_only=False):
     doc, accessor = read_glb(path)
     if doc.get('asset', {}).get('version') != '2.0':
         raise ValueError('invalid GLB asset version')
+    if any('uri' in buffer for buffer in doc.get('buffers', [])) or doc.get('images'):
+        raise ValueError('external/image GLB dependencies lack an actual loader certificate')
     materials = doc.get('materials', [])
     parts = []
     for mesh in doc.get('meshes', []):
+        extras = mesh.get('extras') or {}
+        if load_only and any(key in extras for key in ('render_grid_offset', 'render_grid_size')):
+            raise ValueError('common model render-grid metadata needs its loader-specific proof')
+        if 'contact_surface' in extras and type(extras['contact_surface']) is not bool:
+            raise ValueError('contact_surface mesh metadata is not a bool')
         for primitive in mesh.get('primitives', []):
             if primitive.get('mode', 4) != 4:
                 raise ValueError('unsupported terrain primitive mode')
@@ -204,7 +223,10 @@ def _mesh_parts(path, allow_empty=False):
                     or any(len(p) != 3 or not all(map(_finite, p)) for p in positions)):
                 raise ValueError('invalid indexed terrain primitive')
             uvs = accessor(attributes['TEXCOORD_0']) if 'TEXCOORD_0' in attributes else [[0.0, 0.0] for _ in positions]
-            if len(uvs) != len(positions) or any(len(uv) != 2 or not all(map(_finite, uv)) for uv in uvs):
+            if len(uvs) != len(positions) or any(len(uv) != 2 for uv in uvs):
+                raise ValueError('invalid terrain texture coordinate shape')
+            nonfinite_uv = sum(not all(map(_finite, uv)) for uv in uvs)
+            if nonfinite_uv and not load_only:
                 raise ValueError('invalid terrain texture coordinates')
             alpha = [255] * len(positions)
             if 'COLOR_0' in attributes:
@@ -234,6 +256,14 @@ def _mesh_parts(path, allow_empty=False):
             if 'TEXCOORD_0' in attributes:
                 descriptor = doc['accessors'][attributes['TEXCOORD_0']]
                 uv_format = [descriptor['componentType'], descriptor.get('normalized', False)]
+            if load_only:
+                # assets::load_glb_joints copies finite and nonfinite UV values
+                # alike; GPU upload checks lengths/indices, not UV finiteness.
+                # A selected draw still takes the strict path above. Retain
+                # this fact instead of inventing a failed common merge.
+                parts.append({'name': material.get('name', ''), 'triangles': len(indices)//3,
+                              'nonfinite_uv_rows': nonfinite_uv})
+                continue
             shape = {'positions': positions, 'indices': indices, 'uv': uvs, 'uv_format': uv_format, 'alpha': alpha}
             parts.append({'name': material.get('name', ''), 'mode': material.get('alphaMode', 'OPAQUE'),
                           'triangles': len(indices) // 3, 'min_vertex_alpha': min(alpha[i] for i in indices),

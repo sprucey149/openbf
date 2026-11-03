@@ -29,6 +29,9 @@ def glb(path, vertices, indices, alpha_mode=None):
     if alpha_mode is not None:
         doc['materials'] = [dict(name='sheet', alphaMode=alpha_mode)]
         doc['meshes'][0]['primitives'][0]['material'] = 0
+    if alpha_mode is None:
+        doc['materials'] = [dict(name='fixture_gray_lookup', alphaMode='OPAQUE')]
+        doc['meshes'][0]['primitives'][0]['material'] = 0
     header = json.dumps(doc).encode()
     header += b' ' * (-len(header) % 4)
     packed += b'\0' * (-len(packed) % 4)
@@ -124,7 +127,7 @@ class SceneTests(unittest.TestCase):
         self.points = [(0, 0, 0), (2, 0, 0), (0, 0, 2)]
         self.inst = dict(name='wall', **{'class': 'class'}, rotation=[[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation=[0, 0, 0])
         self.doc = dict(source_game='bf1', classes=[dict(name='CLASS', geometry='Geo')],
-                        geometries=[dict(name='geo', model='MODEL')], instances=[self.inst],
+                        geometries=[dict(name='geo', model='MODEL')], instances=[self.inst], models=['model'], textures=[],
                         collision=[dict(geometry='Geo', glb='collision/geo.glb', prims=[])], paths=[], layers=[])
         for root in (self.reference, self.other):
             glb(root / 'map/models/model.glb', self.points, [0, 1, 2])
@@ -175,6 +178,18 @@ class SceneTests(unittest.TestCase):
         self.assertEqual(row['status'], 'unmeasured')
         self.assertFalse(row['class_collision_identical'])
         self.assertIn('collision-layer', row['error'])
+
+    def test_collision_layer_keys_remain_case_sensitive_like_runtime(self):
+        self.doc['classes'][0]['collision'] = [['soldier', 'none']]
+        changed = copy.deepcopy(self.doc)
+        changed['classes'][0]['collision'] = [['Soldier', 'none']]
+        self.reader.stop()
+        self.reader = patch.object(check, 'read_ron', side_effect=lambda path: (
+            changed if self.other in path.parents else self.doc) if path.name == 'manifest.ron' else {})
+        self.reader.start()
+        row = self.run_check()['objects'][0]
+        self.assertFalse(row['class_collision_identical'])
+        self.assertEqual(row['status'], 'unmeasured')
 
     def test_render_only_door_parts_are_not_a_physics_policy_mismatch(self):
         self.doc['classes'][0]['door'] = dict(frames=2, triggers=[], prims=[], parts=[])
@@ -235,8 +250,9 @@ class SceneTests(unittest.TestCase):
     def cutout(self, root):
         glb(root / 'map/models/model.glb', self.points, [0, 1, 2], alpha_mode='MASK')
         (root / 'map/textures').mkdir(exist_ok=True)
-        # These identity tokens test dependency selection, not a texture decoder.
-        (root / 'map/textures/sheet.ktx2').write_bytes(b'base-alpha-identity')
+        from test_render_terrain_dependencies import ktx
+        self.doc['textures'] = ['sheet']
+        (root / 'map/textures/sheet.ktx2').write_bytes(ktx(alpha=(0,255,0,255)))
 
     def test_unchanged_cutout_base_control_passes(self):
         for root in (self.reference, self.other):
@@ -245,7 +261,8 @@ class SceneTests(unittest.TestCase):
 
     def test_reference_cutout_cannot_adopt_its_own_enhanced_texture(self):
         self.cutout(self.reference)
-        (self.reference / 'map/textures/sheet.tier2.ktx2').write_bytes(b'different-alpha-identity')
+        from test_render_terrain_dependencies import ktx
+        (self.reference / 'map/textures/sheet.tier2.ktx2').write_bytes(ktx(alpha=(255,0,255,0)))
         row = check.compare_map(self.reference, self.reference, 'map', 'mixed', .1, 32)['objects'][0]
         self.assertEqual(row['status'], 'unmeasured')
         self.assertEqual(row['opacity_certificates']['model']['status'], 'unmeasured')
@@ -421,7 +438,8 @@ class SceneTests(unittest.TestCase):
         self.doc['collision'][0]['prims'] = [dict(name='bad_box', kind='box', dims=[-.1, 1, 1], mask=17,
             rotation=[[1, 0, 0], [0, 1, 0], [0, 0, 1]], translation=[10, 2, 3])]
         row = self.run_check()['objects'][0]
-        self.assertEqual(row['status'], 'unmeasured')
+        self.assertEqual(row['status'], 'baseline_input_identity')
+        self.assertFalse(row['absolute_visible_residual_measured'])
         self.assertEqual(row['invalid_collision_primitives'][0]['name'], 'bad_box')
         self.assertEqual(row['invalid_collision_primitives'][0]['world_location'], [10, 2, 3])
 
@@ -446,6 +464,7 @@ class SceneTests(unittest.TestCase):
         self.doc['classes'].append(dict(name='other_class', base='prop', geometry='other_geo'))
         self.raw_classes.append(dict(name='other_class', base='prop', props=[]))
         self.doc['geometries'].append(dict(name='other_geo', model='other_model'))
+        self.doc['models'].append('other_model')
         self.doc['instances'].append(dict(self.inst, name='other', **{'class': 'other_class'}))
         for root in (self.reference, self.other):
             glb(root / 'map/collision/geo.glb', points, [0, 1, 2, 0, 2, 3])
@@ -479,6 +498,7 @@ class SceneTests(unittest.TestCase):
         self.doc['classes'][0]['base'] = 'prop'
         self.doc['classes'].append(dict(name='small_class', base='prop', geometry='small_geo'))
         self.doc['geometries'].append(dict(name='small_geo', model='small_model'))
+        self.doc['models'].append('small_model')
         self.doc['instances'].append(dict(self.inst, name='small', **{'class': 'small_class'},
                                           translation=[2, 0, 2]))
         full = [(0, 0, 0), (6, 0, 0), (6, 0, 6), (0, 0, 6)]
@@ -505,6 +525,175 @@ class SceneTests(unittest.TestCase):
         # blocker box, hiding its whole model despite a tiny local distance.
         self.assertEqual(row['status'], 'unmeasured')
         self.assertFalse(row['camera_visibility_identical'])
+
+    def test_a_far_cutout_neighbor_cannot_cover_a_missing_opaque_panel(self):
+        self.test_scene_union_accepts_differently_partitioned_static_art()
+        from test_render_terrain_dependencies import ktx
+        self.doc['textures']=['sheet']
+        self.doc['models'].append('other_lowd')
+        self.doc['geometries'][-1]['lods']=[['lowd','other_lowd']]
+        points=[(0,0,0),(6,0,0),(6,0,6),(0,0,6)]
+        for root in (self.reference,self.other):
+            glb(root/'map/models/other_lowd.glb',points,[0,1,2,0,2,3],alpha_mode='MASK')
+            (root/'map/textures').mkdir()
+            (root/'map/textures/sheet.ktx2').write_bytes(ktx(alpha=(0,255,0,255)))
+        rows=self.run_check()['objects']
+        self.assertEqual(rows[0]['status'],'unmeasured')
+
+    def test_exact_shared_draws_cancel_even_at_large_world_coordinates(self):
+        self.inst['translation']=[262144.,0.,0.]
+        row=check.compare_map(self.reference,self.other,'map','source',.01,32)['objects'][0]
+        self.assertEqual(row['status'],'pass')
+        gpu=row['scene_surface_certificates']['model']['world_gpu_bounds']
+        self.assertEqual(gpu['method'],'identical_position_and_pose_inputs')
+
+    def test_nonidentity_world_gpu_rounding_cannot_hide_a_three_centimetre_gap(self):
+        def f32(value):return struct.unpack('<f',struct.pack('<f',value))[0]
+        translation=f32(262144.)
+        reference_x,source_x=f32(.015624),f32(.015626)
+        self.assertLess(source_x-reference_x,.00001)
+        self.assertEqual(f32(translation+source_x)-f32(translation+reference_x),.03125)
+        self.inst['translation']=[translation,0.,0.]
+        reference=[(reference_x,0.,0.),(reference_x,6.,0.),(reference_x,0.,6.)]
+        source=[(source_x,y,z) for _x,y,z in reference]
+        for root in (self.reference,self.other):
+            glb(root/'map/collision/geo.glb',reference,[0,1,2])
+        glb(self.reference/'map/models/model.glb',reference,[0,1,2])
+        glb(self.other/'map/models/model.glb',source,[0,1,2])
+        row=check.compare_map(self.reference,self.other,'map','source',.01,32)['objects'][0]
+        self.assertEqual(row['status'],'unmeasured')
+
+    def test_world_gpu_budget_includes_the_worst_matching_placement(self):
+        points=[(0.,0.,0.),(6.,0.,0.),(0.,0.,6.)]
+        glb(self.reference/'map/models/model.glb',points,[0,1,2])
+        glb(self.other/'map/models/model.glb',[(x,y+.0001,z) for x,y,z in points],[0,1,2])
+        far=copy.deepcopy(self.inst);far.update(name='far wall',translation=[262144.,0.,0.])
+        self.doc['layers']=[dict(name='mode',instances=[far])]
+        rows=check.compare_map(self.reference,self.other,'map','source',.01,32)['objects']
+        self.assertEqual([row['status'] for row in rows],['pass','unmeasured'])
+        gpu=rows[0]['scene_surface_certificates']['model']['world_gpu_bounds']
+        self.assertEqual(gpu['method'],'eligible_scene_candidate_envelopes')
+        # Local proof caches use the whole class/model placement group. Directly
+        # inspect it too: scene fallback may use the smaller local candidate set.
+        from render_gpu_bounds import group_bounds
+        reference,source=check.Scene(self.reference,'map'),check.Scene(self.other,'map')
+        a=reference.render_states('geo')['model'];b=source.render_states('geo')['model']
+        bound=group_bounds(reference,source,(0,0),a,b)
+        self.assertEqual(bound['placement_ids'],[[0,0],[1,0]])
+        self.assertGreater(bound['reference_error_m'],.9)
+
+    def test_nonidentity_moving_model_has_no_sampled_world_draw_pass(self):
+        points=[(0.,0.,0.),(6.,0.,0.),(0.,0.,6.)]
+        for root in (self.reference,self.other):glb(root/'map/models/model.glb',points,[0,1,2])
+        glb(self.other/'map/models/model.glb',[(x,y+.0001,z) for x,y,z in points],[0,1,2])
+        self.doc['classes'][0]['door']=dict(frames=2,parts=[],prims=[],triggers=[])
+        row=check.compare_map(self.reference,self.other,'map','source',.01,32)['objects'][0]
+        self.assertEqual(row['status'],'unmeasured')
+
+    def test_far_draw_uses_exact_registered_name_without_case_fallback(self):
+        self.doc['models'].append('far')
+        self.doc['geometries'][0]['far']='FAR'
+        self.doc['lighting']=dict(near_scene_range=[100.,200.,300.])
+        points=[(0.,10.,0.),(6.,10.,0.),(0.,10.,6.)]
+        glb(self.reference/'map/models/far.glb',points,[0,1,2])
+        glb(self.other/'map/models/FAR.glb',points,[0,1,2])
+        source_doc=copy.deepcopy(self.doc);source_doc['models'][-1]='FAR'
+        self.reader.stop()
+        self.reader=patch.object(check,'read_ron',side_effect=lambda path:(source_doc if self.other in path.parents else self.doc)
+                                 if path.name=='manifest.ron' else self.raw_classes if path.name=='classes.ron' else {})
+        self.reader.start()
+        row=check.compare_map(self.reference,self.other,'map','source',.01,32)['objects'][0]
+        self.assertEqual(row['status'],'unmeasured')
+
+    def test_disabled_far_geometry_does_not_supply_or_add_drawn_faces(self):
+        self.doc['models'].append('far');self.doc['geometries'][0]['far']='far'
+        for root,offset in ((self.reference,10.),(self.other,20.)):
+            glb(root/'map/models/far.glb',[(0.,offset,0.),(6.,offset,0.),(0.,offset,6.)],[0,1,2])
+        row=check.compare_map(self.reference,self.other,'map','source',.01,32)['objects'][0]
+        self.assertEqual(row['status'],'pass')
+        self.assertEqual(set(row['scene_surface_certificates']),{'model','lowd'})
+
+    def test_far_binding_uses_raw_class_even_when_primary_uses_a_pad_alias(self):
+        self.doc['source_game']='bf2'
+        self.doc['classes'][0].update(geometry='raw_geo',build_zone='pad',base='prop')
+        self.doc['classes'].append(dict(name='pad',geometry='Geo'))
+        self.doc['geometries'].append(dict(name='raw_geo',model='model'))
+        self.doc['models'].append('far')
+        self.doc['lighting']=dict(near_scene_range=[100.,200.,300.])
+        for root in (self.reference,self.other):
+            glb(root/'map/models/far.glb',[(0.,10.,0.),(6.,10.,0.),(0.,10.,6.)],[0,1,2])
+        source_doc=copy.deepcopy(self.doc);source_doc['geometries'][-1]['far']='far'
+        self.reader.stop()
+        self.reader=patch.object(check,'read_ron',side_effect=lambda path:(source_doc if self.other in path.parents else self.doc)
+                                 if path.name=='manifest.ron' else self.raw_classes if path.name=='classes.ron' else {})
+        self.reader.start()
+        row=check.compare_map(self.reference,self.other,'map','source',.01,32)['objects'][0]
+        self.assertEqual(row['status'],'unmeasured')
+
+    def test_continuous_absolute_contact_can_accept_collision_fit_beyond_native_art(self):
+        self.doc['classes'][0]['base']='prop'
+        self.points=[(0,0,0),(6,0,0),(0,0,6)]
+        for root in (self.reference,self.other):
+            glb(root/'map/collision/geo.glb',self.points,[0,1,2])
+        glb(self.reference/'map/models/model.glb',[(x,5,z) for x,y,z in self.points],[0,1,2])
+        glb(self.other/'map/models/model.glb',self.points,[0,1,2])
+        row=self.run_check()['objects'][0]
+        self.assertEqual(row['status'],'pass',row.get('scene_surface_certificates'))
+        self.assertEqual(row['scene_surface_certificates']['model']['method'],'absolute_active_contact_bound')
+        self.assertEqual(check.certificate_problems(row['scene_surface_certificates']['model'],.1),[])
+        self.assertGreater(row['render_to_reference_max_m'],4)
+
+    def test_source_contact_policy_proves_one_sided_visibility_without_outlier_vertices(self):
+        from render_scene_surface import camera_visibility_certificate,camera_problems
+        self.doc['classes'][0]['base']='prop'
+        self.run_check()  # Write/validate the ordinary fixture first.
+        path=self.other/'map/models/model.glb'
+        before=check.glb_geometry(path)
+        edit_glb_document(path,lambda doc:doc['meshes'][0].update(extras={'contact_surface':True}))
+        ref=check.Scene(self.reference,'map',reference_art=True);src=check.Scene(self.other,'map')
+        receipt=camera_visibility_certificate(ref,src,(0,0))
+        self.assertEqual(receipt['method'],'source_visibility_superset')
+        self.assertTrue(receipt['reference']['can_fade'])
+        self.assertFalse(receipt['source']['can_fade'])
+        self.assertEqual(camera_problems(receipt),[])
+        self.assertEqual(check.glb_geometry(path),before)
+        self.assertEqual(self.run_check()['objects'][0]['status'],'pass')
+
+    def test_contact_policy_is_strict_bool_and_cannot_hide_source_only(self):
+        from render_scene_surface import camera_visibility_certificate
+        path=self.reference/'map/models/model.glb'
+        edit_glb_document(path,lambda doc:doc['meshes'][0].update(extras={'contact_surface':True}))
+        ref=check.Scene(self.reference,'map',reference_art=True);src=check.Scene(self.other,'map')
+        self.assertEqual(camera_visibility_certificate(ref,src,(0,0))['status'],'unmeasured')
+        edit_glb_document(path,lambda doc:doc['meshes'][0].update(extras={'contact_surface':'true'}))
+        self.assertEqual(self.run_check()['objects'][0]['status'],'unmeasured')
+
+    def test_identically_skipped_neighbor_cannot_fill_a_real_missing_panel(self):
+        self.test_scene_union_accepts_differently_partitioned_static_art()
+        for root in (self.reference, self.other):
+            edit_glb_document(root / 'map/models/other_model.glb',
+                              lambda doc:doc['materials'][0].update(name='noicon'))
+        rows = self.run_check()['objects']
+        self.assertEqual(rows[0]['status'], 'unmeasured')
+        self.assertEqual(rows[1]['world_draw_dependencies']['model']['status'], 'unmeasured')
+
+    def test_opaque_texture_unregistered_while_file_remains_fails_actual_draw_check(self):
+        from test_render_terrain_dependencies import ktx
+        for root in (self.reference, self.other):
+            edit_glb_document(root / 'map/models/model.glb',
+                              lambda doc:doc['materials'][0].update(name='noicon'))
+            (root / 'map/textures').mkdir()
+            (root / 'map/textures/noicon.ktx2').write_bytes(ktx())
+        self.doc['textures'] = ['noicon']
+        changed = copy.deepcopy(self.doc)
+        changed['textures'] = []
+        self.reader.stop()
+        self.reader = patch.object(check, 'read_ron', side_effect=lambda path: (
+            changed if self.other in path.parents else self.doc) if path.name == 'manifest.ron' else {})
+        self.reader.start()
+        row = self.run_check()['objects'][0]
+        self.assertEqual(row['status'], 'unmeasured')
+        self.assertEqual(row['world_draw_dependencies']['model']['status'], 'unmeasured')
 
     def test_another_mode_layer_cannot_hide_a_surface_gap(self):
         self.doc['classes'][0]['base'] = 'prop'
@@ -615,16 +804,21 @@ class ContinuousTests(unittest.TestCase):
 
 
 class CliScopeTests(unittest.TestCase):
-    def run_cli(self, extra):
+    def run_cli(self, extra, mutate=False):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             report = root / 'report.json'
+            for name in ('ref','src'):
+                (root/name).mkdir();(root/name/'manifest.ron').write_text('control')
             clean = dict(source='source', map='map', counts={'pass': 1}, placements=1, extra_source_placements=0,
                          terrain=dict(status='pass', complete=True), attachment=dict(status='pass', complete=True))
             argv = ['render_collision_check.py', '--reference', str(root / 'ref'), '--case', f'source={root / "src"}', '--out', str(report), *extra]
             # Isolate the CLI coverage boundary from the surface algorithm,
             # whose real-content/geometry checks have separate regressions.
-            with patch.object(sys, 'argv', argv), patch.object(check, 'compare_map', return_value=clean), contextlib.redirect_stdout(io.StringIO()):
+            def compare(*_args,**_kwargs):
+                if mutate:(root/'src/manifest.ron').write_text('changed')
+                return clean
+            with patch.object(sys, 'argv', argv), patch.object(check, 'compare_map', side_effect=compare), contextlib.redirect_stdout(io.StringIO()):
                 result = check.main()
             return result, json.loads(report.read_text())
 
@@ -637,6 +831,16 @@ class CliScopeTests(unittest.TestCase):
         result, report = self.run_cli(['--map', 'bf1_rhn1'])
         self.assertEqual(result, 1)
         self.assertFalse(report['acceptance_eligible'])
+
+    def test_explicit_map_selection_is_diagnostic_even_when_it_lists_the_catalog(self):
+        result,report=self.run_cli([arg for key in check.REQUIRED_MAPS for arg in ('--map',key)])
+        self.assertEqual(result,1)
+        self.assertFalse(report['acceptance_eligible'])
+
+    def test_rebake_during_measurement_cannot_return_acceptance_success(self):
+        result,report=self.run_cli([],mutate=True)
+        self.assertEqual(result,1)
+        self.assertEqual(report['input_stability']['status'],'unmeasured')
 
     def test_old_margin_diagnostic_cannot_return_acceptance_success(self):
         result, report = self.run_cli(['--tolerance', '.1'])

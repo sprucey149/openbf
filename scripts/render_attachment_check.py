@@ -23,6 +23,16 @@ REQUIRED_CATEGORIES = ('doors_turrets', 'vehicles_hulls', 'soldier_feet',
                        'foliage', 'command_posts_pads', 'water', 'shadows',
                        'art_collision_presence')
 HOLOGRAM_ICONS = ('alliance', 'imperial', 'republic', 'cis', 'turret')
+METHOD = 'exhaustive_attachment_dependency_identity_v2'
+LOAD_CONSUMERS = {
+    'doors_turrets': 'world: texture lookup may skip a draw',
+    'vehicles_hulls': 'vehicle/droideka: named miss uses grey; empty/dangling miss skips',
+    'soldier_feet': 'soldier: opaque texture miss uses white; nonopaque coverage still depends on pixels',
+    'foliage': 'world foliage: texture lookup may skip a draw',
+    'command_posts_pads': 'world/direct hologram: texture lookup and pixel coverage affect draws',
+    'water': 'water: texture/config lookup affects draw eligibility',
+    'shadows': 'world/vehicle shadow consumers retain all texture load candidates',
+}
 
 
 def _stat(path):
@@ -32,7 +42,11 @@ def _stat(path):
 
 @lru_cache(maxsize=2048)
 def _shape(path, modified, size):
-    del modified, size
+    # The Rust importer also reads inputs outside the geometry subset below,
+    # including unused image declarations. Changing one can make the entire
+    # asset fail to load. Until a real-consumer load receipt proves otherwise,
+    # zero-increase identity requires the complete original GLB input too.
+    load_sha256 = _file_hash(path, modified, size)
     doc, accessor = read_glb(Path(path))
     meshes, alpha_materials = [], set()
     for mesh in doc.get('meshes', []):
@@ -59,6 +73,9 @@ def _shape(path, modified, size):
             parts.append({'attributes': values, 'indices': indices,
                           'mode': part.get('mode', 4), 'targets': targets,
                           'extras': part.get('extras'),
+                          # Opaque pixels do not cut holes, but their NAME
+                          # selects draw/skip/fallback and soldier skin groups.
+                          'material_name': material.get('name'),
                           'alpha': {key: material.get(key) for key in ('name', 'alphaMode', 'alphaCutoff', 'doubleSided')}
                           if nonopaque else {'alphaMode': 'OPAQUE'},
                           'alpha_motion': material.get('extras') if nonopaque else None})
@@ -76,7 +93,8 @@ def _shape(path, modified, size):
                                  for key, v in sampler.items()}
                                 for sampler in value.get('samplers', [])]}
                   for value in doc.get('animations', [])]
-    return (digest({'meshes': meshes, 'nodes': nodes, 'skins': skins,
+    return (digest({'load_glb_sha256': load_sha256,
+                    'meshes': meshes, 'nodes': nodes, 'skins': skins,
                     'animations': animations, 'scenes': doc.get('scenes'), 'scene': doc.get('scene')}),
             tuple(sorted(alpha_materials)))
 
@@ -100,6 +118,34 @@ def texture_inventory(folder):
             for candidate in sorted(texture_folder.glob('*.ktx2')):
                 textures.append([index, candidate.name, _file_hash(*_stat(candidate))])
     return textures
+
+
+def load_candidates(root, key, doc):
+    """Conservative complete input identity for the distinct load routes.
+
+    Retain registries as well as candidate bytes: an existing file that is not
+    registered may not load, and malformed base/detail/tier2 files can abort a
+    vehicle upload even for OPAQUE. Different RGB-only inputs are deliberately
+    unmeasured here until a consumer-specific validity/coverage proof exists.
+    This is not a claim that every missing texture removes opaque skin art.
+    """
+    game = doc.get('source_game', 'bf1')
+    common = root / f'common_{game}'
+    common_doc = ron(common / 'common.ron')
+    world = {'registries': [[key, doc.get('textures', [])],
+                            [f'common_{game}', common_doc.get('textures', [])]],
+             'candidates': texture_inventory(root / key)}
+    sides = []
+    for manifest in sorted((root / f'side_{game}' / 'vehicles').glob('*/vehicles.ron')):
+        data = ron(manifest)
+        sides.append([str(manifest.parent.relative_to(root)), data.get('textures', []),
+                      texture_inventory(manifest.parent)])
+    vehicle = {'world': world, 'ordered_sides': sides}
+    soldier = {'side': f'side_{game}', 'candidates': texture_inventory(root / f'side_{game}')}
+    return {category: {'consumer': consumer,
+                       'inputs': vehicle if category == 'vehicles_hulls' else
+                                 soldier if category == 'soldier_feet' else world}
+            for category, consumer in LOAD_CONSUMERS.items()}
 
 
 @lru_cache(maxsize=16384)
@@ -287,6 +333,12 @@ def attachment_map(reference: Path, source: Path, key: str):
         game = rd.get('source_game', 'bf1')
         if sd.get('source_game', 'bf1') != game:
             raise ValueError('source game differs from reference')
+        loads = [load_candidates(root, key, doc) for root, doc in ((reference, rd), (source, sd))]
+        for category, consumer in LOAD_CONSUMERS.items():
+            row = _row(category, 'texture_load_candidates',
+                       *(digest(value[category]) for value in loads))
+            row['consumer'] = consumer
+            objects.append(row)
         for name in sorted(set(rc) | set(sc)):
             items = [classes.get(name) for classes in (rc, sc)]
             rows = [item[0] if item else {} for item in items]
@@ -386,7 +438,7 @@ def attachment_map(reference: Path, source: Path, key: str):
                                 'unmeasured' if errors or counts.get('unmeasured') else 'pass'}
     status = ('offender' if any(row['status'] == 'offender' for row in objects) else
               'unmeasured' if errors or any(row['status'] == 'unmeasured' for row in objects) else 'pass')
-    return {'method': 'exhaustive_attachment_dependency_identity_v1',
+    return {'method': METHOD,
             'complete': status != 'unmeasured', 'status': status,
             'categories': categories, 'objects': objects, 'errors': errors,
             'baseline': 'Exact identity proves zero increase over PS2 at every pose. Absolute animated PS2 residuals and original-game captures are not measured here.'}
@@ -397,7 +449,7 @@ def attachment_problems(receipt):
     errors = []
     if not isinstance(receipt, dict):
         return ['attachment receipt missing or not an object']
-    if receipt.get('method') != 'exhaustive_attachment_dependency_identity_v1':
+    if receipt.get('method') != METHOD:
         errors.append('attachment method missing or unsupported')
     if not isinstance(receipt.get('complete'), bool) or receipt.get('status') not in ('pass', 'offender', 'unmeasured'):
         errors.append('attachment completeness or status invalid')
@@ -414,6 +466,10 @@ def attachment_problems(receipt):
             errors.append(f'{category}: incomplete or inconsistent inventory')
         if value.get('counts') != dict(Counter(row.get('status') for row in rows)):
             errors.append(f'{category}: status counts differ from objects')
+        if category in LOAD_CONSUMERS:
+            loads = [row for row in rows if row.get('name') == 'texture_load_candidates']
+            if len(loads) != 1 or loads[0].get('consumer') != LOAD_CONSUMERS[category]:
+                errors.append(f'{category}: required texture load candidates missing or invalid')
     if not isinstance(receipt.get('errors'), list):
         errors.append('attachment errors must be a list')
     for row in objects:

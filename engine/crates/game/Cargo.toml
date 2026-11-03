@@ -7,6 +7,7 @@ license.workspace = true
 [dev-dependencies]
 bake = { path = "../bake" }
 mungefs = { path = "../mungefs" }
+sha2 = "0.10"
 
 [dependencies]
 image.workspace = true
@@ -47,4 +48,9 @@ path = "src/main.rs"
 [[example]]
 name = "arena"
 path = "examples/arena.rs"
+test = true
+
+[[example]]
+name = "attachment_load_report"
+path = "examples/attachment_load_report.rs"
 test = true

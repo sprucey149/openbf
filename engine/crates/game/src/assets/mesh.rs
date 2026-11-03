@@ -266,10 +266,16 @@ pub fn load_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
         sphere: None,
         vis_top: None,
         render_grid: None,
+        contact_surface: false,
     };
     for m in doc.meshes() {
         if let Some(raw) = m.extras() {
             let value: serde_json::Value = serde_json::from_str(raw.get())?;
+            if let Some(flag) = value.get("contact_surface") {
+                mesh.contact_surface |= flag
+                    .as_bool()
+                    .ok_or_else(|| anyhow!("contact surface flag must be a boolean"))?;
+            }
             let offset = value.get("render_grid_offset");
             let size = value.get("render_grid_size");
             if offset.is_some() || size.is_some() {
@@ -411,7 +417,7 @@ mod tests {
     /// Two primitives share one buffer; each keeps its indices, defaults and material policy.
     #[test]
     fn glb_streaming_preserves_primitive_offsets_and_whole_extras_failure() {
-        let make = |extras: &str| {
+        let make = |extras: &str, mesh_extras: &str| {
             let json = format!(
                 r#"{{
                 "asset":{{"version":"2.0"}},
@@ -419,7 +425,7 @@ mod tests {
                 "bufferViews":[{{"buffer":0,"byteOffset":0,"byteLength":36}},{{"buffer":0,"byteOffset":36,"byteLength":6}}],
                 "accessors":[{{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3","min":[0,0,0],"max":[1,1,0]}},{{"bufferView":1,"componentType":5123,"count":3,"type":"SCALAR"}}],
                 "materials":[{{"name":"material","alphaMode":"BLEND"{extras}}}],
-                "meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1,"material":0}},{{"attributes":{{"POSITION":0}},"indices":1,"material":0}}]}}]
+                "meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1,"material":0}},{{"attributes":{{"POSITION":0}},"indices":1,"material":0}}]{mesh_extras}}}]
             }}"#
             );
             let mut json = json.into_bytes();
@@ -473,10 +479,11 @@ mod tests {
         ] {
             let path =
                 std::env::temp_dir().join(format!("openbf-stream-{}-{n}.glb", std::process::id()));
-            std::fs::write(&path, make(extras)).unwrap();
+            std::fs::write(&path, make(extras, "")).unwrap();
             let loaded = load_glb(&path);
             std::fs::remove_file(&path).unwrap();
             let mesh = loaded.unwrap();
+            assert!(!mesh.contact_surface);
             assert_eq!(
                 mesh.positions,
                 [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]].repeat(2)
@@ -498,6 +505,23 @@ mod tests {
                 rgb: Some([0.25, 0.5, 0.75]),
             });
             assert_eq!(mesh.spec, vec![spec; 2]);
+        }
+        for (n, value, expected) in [
+            (0, "true", Some(true)),
+            (1, "false", Some(false)),
+            (2, "\"true\"", None),
+            (3, "null", None),
+        ] {
+            let path =
+                std::env::temp_dir().join(format!("openbf-contact-{}-{n}.glb", std::process::id()));
+            let extra = format!(r#", "extras":{{"contact_surface":{value}}}"#);
+            std::fs::write(&path, make("", &extra)).unwrap();
+            let loaded = load_glb(&path);
+            std::fs::remove_file(&path).unwrap();
+            match expected {
+                Some(flag) => assert_eq!(loaded.unwrap().contact_surface, flag),
+                None => assert!(loaded.is_err(), "accepted non-boolean contact flag {value}"),
+            }
         }
     }
 }

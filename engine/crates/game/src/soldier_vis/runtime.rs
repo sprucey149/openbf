@@ -6,7 +6,7 @@ use super::{
     SoldierVisuals, UnitVisual, WeaponAsset, CORPSE_SECS,
 };
 use crate::animator::{AnimInput, Animator, ClassAnim, Rig};
-use crate::assets::{load_skinned_glb, SkinnedAsset};
+use crate::assets::{load_visual_skinned_glb, SkinnedAsset};
 use crate::viewer::turret_pose as tp;
 use crate::walk::{TeamTemplate, WalkSim};
 use glam::{Mat4, Vec3};
@@ -404,7 +404,7 @@ impl SoldierVisuals {
         // the soldiers after the scene.
         let side = assets_dir.join(format!("side_{game}"));
         let glb = side.join("soldiers").join(format!("{geometry}.glb"));
-        let asset = match load_skinned_glb(&glb) {
+        let asset = match load_visual_skinned_glb(&glb) {
             Ok(a) => a,
             Err(e) => {
                 eprintln!("soldier {geometry}: {e:#}");

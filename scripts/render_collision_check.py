@@ -9,10 +9,10 @@ continuous surface certificate, using triangle distance bounds and adaptive
 subdivision. A work limit produces an unmeasured failure, never a sampled pass.
 The PS2 render/collision residual is the baseline: authored collision is simpler
 than art, so zero residual is not a valid general acceptance rule. A source fails
-when a collision sample inside playable bounds is farther from its render art
-than the reference art by --tolerance metres, when a render sample moves farther
-from collision than its nearest reference-art point by that tolerance, or when
-playable render bounds move farther than that. Direct artwork-to-artwork distance
+when a surface point moves farther from corrected collision than the PS2
+baseline plus --tolerance metres. Continuous artwork bounds are sufficient to
+prove that no collision query point has a larger residual increase; every
+uncertified domain fails unmeasured. Direct artwork-to-artwork distance
 is reported separately; different detail alone is not a physical offender.
 Conservative sufficient bounds that cannot certify a detail mesh leave it
 unmeasured. Whole objects are checked: a boundary does not establish invisibility.
@@ -363,49 +363,9 @@ def file_hash(path, modified, size):
 
 
 def opacity_signature(path, scene):
-    """Triangle geometry is insufficient when the shader can discard pixels.
-
-    Equal alpha dependencies prove the same cutout in both builds. Different
-    cutouts remain unmeasured until their actual visible surfaces are bounded.
-    Hashing all RGBA bytes is deliberately conservative: RGB-only changes to a
-    nonopaque material need an alpha-aware measurement rather than a false pass.
-    """
-    stat = path.stat()
-    cache_key = (str(path), stat.st_mtime_ns, stat.st_size)
-    if cache_key in scene.opacity_cache:
-        return scene.opacity_cache[cache_key]
-    doc, accessor = read_glb(path)
-    selected = []
-    for mesh in doc.get('meshes', []):
-        for prim in mesh.get('primitives', []):
-            mat = doc.get('materials', [])[prim['material']] if 'material' in prim else {}
-            mode, extras = mat.get('alphaMode', 'OPAQUE'), mat.get('extras') or {}
-            if mode not in ('OPAQUE', 'MASK', 'BLEND'):
-                raise ValueError('unknown render alpha mode')
-            if mode == 'OPAQUE' and not str(extras.get('light', '')).endswith('_add'):
-                continue
-            name = mat.get('name', '').lower()
-            textures = []
-            for suffix in (('.ktx2',) if scene.reference_art else ('.ktx2', '.tier2.ktx2')):
-                candidate = next((folder / (name + suffix) for folder in scene.texture_dirs
-                                  if (folder / (name + suffix)).is_file()), None)
-                if candidate is not None:
-                    stat = candidate.stat()
-                    textures.append((suffix, file_hash(str(candidate), stat.st_mtime_ns, stat.st_size)))
-            if not textures:
-                raise ValueError(f'nonopaque material has no measured texture: {name}')
-            attrs = prim.get('attributes', {})
-            dependencies = {key: accessor(index) for key, index in attrs.items()
-                            if key in ('POSITION', 'TEXCOORD_0', 'COLOR_0')}
-            selected.append(dict(mode=mode, alpha_cutoff=mat.get('alphaCutoff'), light=extras.get('light'),
-                                 uv_scroll=extras.get('uv_scroll'), textures=textures, attributes=dependencies,
-                                 indices=accessor(prim['indices']) if 'indices' in prim else None))
-    # Triangle-union distance cannot use a cutout face to fill a removed
-    # opaque face. Until coverage resolves alpha texels, a model containing
-    # nonopaque parts requires its complete indexed geometry to stay identical.
-    result = digest(dict(nonopaque=selected, indexed_geometry=glb_geometry(path))) if selected else None
-    scene.opacity_cache[cache_key] = result
-    return result
+    """Effective coverage of actually loaded world draw primitives, RGB-free."""
+    from render_model_dependencies import model_descriptor
+    return model_descriptor(path, scene)['opacity_signature']
 
 
 def require_rigid(transform):
@@ -740,6 +700,8 @@ class Scene:
         self.geometries = merge_named(self.doc.get('geometries', []), common.get('geometries', []), 'name')
         self.models = {p.stem.lower(): p for p in (common_folder / 'models').glob('*.glb')}
         self.models.update({p.stem.lower(): p for p in (self.folder / 'models').glob('*.glb')})
+        self.exact_models = {name: common_folder / 'models' / (name+'.glb') for name in common.get('models',[])}
+        self.exact_models.update({name: self.folder / 'models' / (name+'.glb') for name in self.doc.get('models',[])})
         self.collisions = {}
         for folder, document in ((self.folder, self.doc), (common_folder, common)):
             for row in document.get('collision', []):
@@ -784,7 +746,9 @@ class Scene:
         # hierarchy and bind matrices. The parts array binds render submeshes.
         nodes = ([dict(name=str(node.get('name', '')).lower(), parent=node.get('parent'), bind=node.get('bind'))
                   for node in rig.get('nodes', [])] if rig is not None and base == 'armedbuilding' else None)
-        return dict(base=base, collision=[(str(layer).lower(), str(body).lower()) for layer, body in cls.get('collision', [])],
+        # collision_layers::layer_bodies compares the stored keys/body labels
+        # verbatim. Do not case-fold a malformed source into apparent parity.
+        return dict(base=base, collision=[(str(layer), str(body)) for layer, body in cls.get('collision', [])],
                     door=door, armed_nodes=nodes)
 
     def resolve(self, inst):
@@ -814,17 +778,23 @@ class Scene:
     def in_play(self, point):
         return not self.boundary or any(in_polygon(poly, point[0], point[2]) for poly in self.boundary)
 
-    def render_states(self, geometry):
+    def render_states(self, geometry, instance=None):
         g = self.geometries.get(geometry, {})
         model = str(g.get('model', geometry)).lower()
         lowd = next((str(name).lower() for tier, name in g.get('lods', []) if tier.lower() == 'lowd'), model)
         states = {'model': (self.models.get(model),), 'lowd': (self.models.get(lowd),)}
-        if g.get('far'):
-            states['model_with_far'] = (self.models.get(model), self.models.get(str(g['far']).lower()))
+        # resolve_far uses the raw class (not the build-zone alias), exact
+        # registered mesh key and an enabled near-scene range. Primary/LOWD
+        # intentionally have a case-insensitive fallback in the runtime.
+        raw = self.classes.get(instance['class'].lower(),{}) if instance is not None else None
+        far_g = self.geometries.get(str(raw.get('geometry') or '').lower(),{}) if raw is not None else g
+        far = self.exact_models.get(far_g.get('far'))
+        if far is not None and (self.doc.get('lighting') or {}).get('near_scene_range') is not None:
+            states['model_with_far'] = (self.models.get(model), far)
         return states
 
     def lod_switch(self, inst, geometry):
-        states = self.render_states(geometry)
+        states = self.render_states(geometry, inst)
         if all(paths == states['model'] for paths in states.values()):
             return None
         path = states['model'][0]
@@ -1037,7 +1007,7 @@ def compare_map(reference, other, key, label, tolerance, samples, max_cells=DEFA
             ref_surface, src_surface, collision_points, ref_d, src_d, art_points, art_d, reverse_delta, triangles, certificate = cache[cache_key]
             row['collision_triangles'] = triangles
             row['surface_certificate'] = certificate
-            ref_states, src_states = ref.render_states(geometry), src.render_states(src_geom)
+            ref_states, src_states = ref.render_states(geometry, inst), src.render_states(src_geom, src_inst)
             variants = {}
             for state in sorted(set(ref_states) | set(src_states)):
                 a = ref_states.get(state, ref_states['model'])
@@ -1080,6 +1050,12 @@ def compare_map(reference, other, key, label, tolerance, samples, max_cells=DEFA
                 opacity[state] = dict(status='pass' if equal else 'unmeasured',
                                       reference_sha256=a_signatures, source_sha256=b_signatures,
                                       reason='identical opacity dependencies' if equal else 'different opacity dependencies require visible-surface measurement')
+            from render_model_dependencies import model_dependencies
+            draw_dependencies = {}
+            for state in sorted(set(ref_states) | set(src_states)):
+                a, b = ref_states.get(state, ref_states['model']), src_states.get(state, src_states['model'])
+                draw_dependencies[state] = model_dependencies(ref, src, a, b)
+            row['world_draw_dependencies'] = draw_dependencies
             row['opacity_certificates'] = opacity
             row['reference_opacity_basis'] = 'PS2 base textures only'
             row['source_opacity_basis'] = 'all present base/enhanced texture tiers'
@@ -1096,9 +1072,12 @@ def compare_map(reference, other, key, label, tolerance, samples, max_cells=DEFA
             if (any(b - a > tolerance for a, b in zip(ref_d, src_d)) or any(value > tolerance for value in reverse_delta)):
                 row['local_object_status'] = 'offender'
             row['local_object_status_kind'] = 'all-authored-body per-model sample flag; inactive layers and scene partition are not physical-gap proof'
-            from render_scene_surface import camera_visibility_identical, scene_certificates
+            from render_scene_surface import camera_visibility_certificate, camera_visibility_identical, scene_certificates
             row['camera_visibility_identical'] = camera_visibility_identical(ref, src, identity)
+            row['camera_visibility_certificate'] = camera_visibility_certificate(ref, src, identity)
             scene_proof = scene_certificates(ref, src, identity, geometry, src_geom, variants, tolerance, max_cells)
+            from render_contact_check import supplement_states
+            scene_proof = supplement_states(ref, src, identity, src_states, scene_proof, opacity, tolerance, max_cells)
             row['scene_surface_certificates'] = scene_proof
             row['measurement_seconds'] = time.perf_counter() - started
             if progress and row['measurement_seconds'] >= .1:
@@ -1113,7 +1092,8 @@ def compare_map(reference, other, key, label, tolerance, samples, max_cells=DEFA
             # a failed conservative artwork bound is unmeasured, not a physical
             # offender inferred from a model partition.
             variant_status = ('pass' if all(value.get('status') == 'pass' for value in scene_proof.values())
-                              and all(value.get('status') == 'pass' for value in opacity.values())
+                              and all(value.get('status') == 'pass' or scene_proof[state].get('method') == 'absolute_active_contact_bound'
+                                      for state, value in opacity.items())
                               and row['lod_switch_identical'] else 'unmeasured')
             if not collision_points:
                 row.update(status='baseline_visual_only' if variant_status == 'pass' else 'unmeasured',
@@ -1188,6 +1168,14 @@ def compare_map(reference, other, key, label, tolerance, samples, max_cells=DEFA
                                             used_dimensions=list(used), mask=primitive.get('mask'),
                                             world_location=list(placed(primitive['translation'], inst))))
                 row['invalid_collision_primitives'] = invalid
+            try:
+                from render_identity_baseline import native_anomaly_identity
+                baseline = native_anomaly_identity(ref, src, identity, exc)
+                if baseline is not None:
+                    row.update(baseline)
+                    row.pop('error', None)
+            except (ValueError, OSError, KeyError, IndexError, TypeError):
+                pass  # A malformed dependency is never accepted through identity.
             if str(exc).startswith('unresolved placed class'):
                 try:
                     baseline = unresolved_class_baseline(ref, src, identity)
@@ -1217,12 +1205,17 @@ def certificate_problems(certificate, tolerance):
     if not isinstance(certificate, dict) or certificate.get('status') != 'pass' or certificate.get('complete') is not True:
         return ['missing complete continuous surface certificate']
     method = certificate.get('method')
+    if method == 'absolute_active_contact_bound':
+        from render_contact_check import contact_problems
+        return contact_problems(certificate,tolerance)
     if method == 'identical_indexed_surface':
         value = certificate.get('maximum_observed_m')
         return [] if type(value) in (int, float) and value == 0. else ['invalid exact-surface certificate']
-    if method in ('visual_only_bidirectional_hausdorff', 'placed_object_bidirectional_hausdorff', 'whole_scene_bidirectional_hausdorff'):
+    if method=='visual_only_bidirectional_hausdorff':
+        return [problem for key in ('reference_to_source','source_to_reference') for problem in certificate_problems(certificate.get(key),tolerance)]
+    if method in ('placed_object_bidirectional_hausdorff', 'whole_scene_bidirectional_hausdorff'):
         stretch = certificate.get('stretch_upper', 1.)
-        if not isinstance(stretch, (int, float)) or not math.isfinite(stretch) or stretch < 1:
+        if type(stretch) not in (int, float) or not math.isfinite(stretch) or stretch < 1:
             return ['invalid placed-surface stretch bound']
         if method == 'whole_scene_bidirectional_hausdorff':
             lifetime = certificate.get('lifetime')
@@ -1233,8 +1226,24 @@ def certificate_problems(certificate, tolerance):
                            or type(value.get('class_files')) is not int or value['class_files'] < 1
                            for value in lifetime.values())):
                 return ['scene borrowing has no complete class lifetime proof']
-        return [problem for key in ('reference_to_source', 'source_to_reference')
-                for problem in certificate_problems(certificate.get(key), tolerance / stretch)]
+        from render_gpu_bounds import bounds_problems,scene_bounds_problems
+        gpu=certificate.get('world_gpu_bounds')
+        if method=='whole_scene_bidirectional_hausdorff':
+            problems=scene_bounds_problems(gpu)
+            if problems:return problems
+            budgets=[tolerance-gpu['forward_error_m'],tolerance-gpu['reverse_error_m']]
+        else:
+            problems=bounds_problems(gpu,tolerance)
+            if problems:return problems
+            if stretch<gpu['stretch_upper']:return ['placed certificate underreports world GPU stretch']
+            if gpu.get('method')=='identical_position_and_pose_inputs':
+                if any(certificate.get(key,{}).get('method')!='identical_indexed_surface' for key in ('reference_to_source','source_to_reference')):
+                    return ['exact GPU cancellation lacks exact geometry inputs']
+                budgets=[tolerance,tolerance]
+            else:budgets=[(tolerance-gpu['reference_error_m']-gpu['source_error_m'])/stretch]*2
+        if min(budgets)<0:return ['world GPU envelope exceeds the alignment budget']
+        return [problem for key,budget in zip(('reference_to_source','source_to_reference'),budgets)
+                for problem in certificate_problems(certificate.get(key),budget)]
     if 'forward' in certificate and 'reverse' in certificate:
         return [problem for key in ('forward', 'reverse') for problem in certificate_problems(certificate[key], tolerance)]
     allowed = ('continuous_directed_hausdorff', 'reference_to_source_hausdorff_sufficient_bound', 'source_to_reference_hausdorff_sufficient_bound',
@@ -1261,6 +1270,9 @@ def report_problems(report, reference, cases, expected_tolerance=DEFAULT_TOLERAN
         return ['invalid continuous method or alignment margin']
     if not isinstance(report.get('reference'), str) or Path(report['reference']).resolve() != Path(reference).resolve():
         errors.append('reference assets do not match requested input')
+    from render_input_stability import problems as input_problems
+    parsed_cases=[(name,Path(folder)) for name,folder in (case.split('=',1) for case in cases)]
+    errors.extend(input_problems(report.get('input_stability'),reference,parsed_cases))
     rows = report.get('maps')
     if not isinstance(rows, list) or not rows:
         return errors + ['report has no source/map rows']
@@ -1274,7 +1286,7 @@ def report_problems(report, reference, cases, expected_tolerance=DEFAULT_TOLERAN
     if report.get('source_paths') != requested_paths:
         errors.append('source asset paths do not match requested inputs')
     actual = []
-    statuses = {'pass', 'offender', 'unmeasured', 'baseline_visual_only', 'baseline_no_render_geometry', 'baseline_collision_only', 'baseline_runtime_skip'}
+    statuses = {'pass', 'offender', 'unmeasured', 'baseline_visual_only', 'baseline_no_render_geometry', 'baseline_collision_only', 'baseline_runtime_skip', 'baseline_input_identity'}
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get('source'), str) or not isinstance(row.get('map'), str):
             errors.append('invalid source/map row')
@@ -1310,13 +1322,19 @@ def report_problems(report, reference, cases, expected_tolerance=DEFAULT_TOLERAN
                 or not isinstance(objects, list) or len(objects) != row['placements']):
             errors.append('missing/empty/inconsistent placed-object results')
             continue
-        measured = {}
+        measured = {};identities=[]
         for obj in objects:
+            identity=[obj.get('layer_ordinal'),obj.get('index')] if isinstance(obj,dict) else []
+            if len(identity)!=2 or any(type(i) is not int or i<0 for i in identity):errors.append('invalid placed-object identity')
+            else:identities.append(tuple(identity))
             status = obj.get('status') if isinstance(obj, dict) else None
             if status not in statuses:
                 errors.append('unknown placed-object status')
                 continue
             measured[status] = measured.get(status, 0) + 1
+            if status == 'baseline_input_identity':
+                from render_identity_baseline import identity_problems
+                errors.extend(identity_problems(obj))
             if status in ('pass', 'baseline_visual_only'):
                 if obj.get('collision_identical') is not True:
                     errors.append('corrected collision identity was not verified')
@@ -1327,15 +1345,32 @@ def report_problems(report, reference, cases, expected_tolerance=DEFAULT_TOLERAN
                     errors.append('missing model/LOWD scene-surface certificates')
                 else:
                     errors.extend(problem for cert in variants.values() for problem in certificate_problems(cert, tolerance))
+                    if any(cert.get('method')=='absolute_active_contact_bound' and [obj.get('layer_ordinal'),obj.get('index')] not in cert.get('placement_ids',[]) for cert in variants.values()):
+                        errors.append('absolute contact proof omits this placement')
+                    if any(cert.get('method')=='placed_object_bidirectional_hausdorff' and [obj.get('layer_ordinal'),obj.get('index')] not in cert.get('world_gpu_bounds',{}).get('placement_ids',[]) for cert in variants.values()):
+                        errors.append('world GPU proof omits this placement')
+                from render_model_dependencies import dependency_problems as model_dependency_problems
+                draw = obj.get('world_draw_dependencies')
+                if not isinstance(draw, dict) or not isinstance(variants, dict) or set(draw) != set(variants):
+                    errors.append('missing complete world draw dependencies')
+                else:
+                    for state,dependency in draw.items():
+                        errors.extend(model_dependency_problems(dependency))
+                        physical = variants[state].get('method')=='absolute_active_contact_bound' and variants[state].get('status')=='pass'
+                        if not physical and (dependency.get('status') != 'pass' or dependency.get('complete') is not True):
+                            errors.append('unmeasured world draw coverage')
                 opacity = obj.get('opacity_certificates')
                 if (not isinstance(opacity, dict) or not isinstance(variants, dict) or set(opacity) != set(variants)
-                        or any(not isinstance(v, dict) or v.get('status') != 'pass'
-                               or v.get('reference_sha256') != v.get('source_sha256') for v in opacity.values())):
+                        or any(not isinstance(v, dict) or (variants[state].get('method') != 'absolute_active_contact_bound'
+                               and (v.get('status') != 'pass' or v.get('reference_sha256') != v.get('source_sha256')))
+                               for state,v in opacity.items())):
                     errors.append('missing/unmeasured opacity dependency certificates')
                 if obj.get('lod_switch_identical') is not True:
                     errors.append('unmeasured LOD switch geometry/range correspondence')
                 if obj.get('camera_visibility_identical') is not True:
                     errors.append('unmeasured camera-fade geometry correspondence')
+                from render_scene_surface import camera_problems
+                errors.extend(camera_problems(obj.get('camera_visibility_certificate')))
             elif status in ('baseline_no_render_geometry', 'baseline_collision_only', 'baseline_runtime_skip') and not obj.get('baseline'):
                 errors.append('no-render baseline was not identified')
             if status in ('baseline_no_render_geometry', 'baseline_collision_only', 'baseline_runtime_skip'):
@@ -1360,6 +1395,7 @@ def report_problems(report, reference, cases, expected_tolerance=DEFAULT_TOLERAN
                         errors.append('missing raw runtime-consumer inputs for absent direct art/class')
                 if status == 'baseline_collision_only' and (obj.get('render_absent_both') is not True or obj.get('collision_identical') is not True):
                     errors.append('invisible collision baseline was not proved')
+        if len(set(identities))!=len(identities):errors.append('duplicate placed-object identity')
         if measured != {k: v for k, v in counts.items() if v}:
             errors.append('placed-object counts do not match results')
         if not (counts.get('pass') or counts.get('offender')):
@@ -1394,7 +1430,11 @@ def main():
     full_keys = set(REQUIRED_MAPS) | {path.parent.name for root in (args.reference, *(folder for _name, folder in cases))
                                     for path in root.glob('*/manifest.ron')}
     keys = args.map or sorted(full_keys)
-    acceptance_eligible = set(keys) == full_keys and args.tolerance <= DEFAULT_TOLERANCE_M
+    if any(args.out.resolve().is_relative_to(root.resolve()) for root in (args.reference,*(folder for _name,folder in cases))):
+        p.error('alignment output must be outside the baked input roots')
+    from render_input_stability import capture,finish
+    inputs_before=capture(args.reference,cases)
+    acceptance_eligible = args.map is None and set(keys) == full_keys and args.tolerance <= DEFAULT_TOLERANCE_M
     if not keys:
         p.error('reference has no maps')
     rows = []
@@ -1413,10 +1453,11 @@ def main():
                                     tolerance_m=args.tolerance, margin_reason=MARGIN_REASON, diagnostic_samples_per_mesh=args.samples,
                                     method=METHOD, maps=rows), indent=2) + '\n')
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    input_stability=finish(inputs_before,args.reference,cases)
     args.out.write_text(json.dumps(dict(schema=SCHEMA, complete=True, reference=str(args.reference), tolerance_m=args.tolerance,
                                       source_paths={name: str(folder.resolve()) for name, folder in cases}, acceptance_eligible=acceptance_eligible,
                                       margin_reason=MARGIN_REASON,
-                                      diagnostic_samples_per_mesh=args.samples, method=METHOD, maps=rows), indent=2) + '\n')
+                                      diagnostic_samples_per_mesh=args.samples,method=METHOD,maps=rows,input_stability=input_stability),indent=2)+'\n')
     if args.table:
         lines = ['source,map,placements,pass,offender,unmeasured,baseline_visual_only,baseline_no_render_geometry,baseline_collision_only,baseline_runtime_skip,terrain,attachment']
         for r in rows:
@@ -1426,7 +1467,7 @@ def main():
                          r.get('terrain', {}).get('status', 'unmeasured'), r.get('attachment', {}).get('status', 'unmeasured'))))
         args.table.parent.mkdir(parents=True, exist_ok=True)
         args.table.write_text('\n'.join(lines) + '\n')
-    return int(not acceptance_eligible or any(r.get('error') or r['extra_source_placements'] or r['counts'].get('offender') or r['counts'].get('unmeasured')
+    return int(input_stability['status']!='pass' or not acceptance_eligible or any(r.get('error') or r['extra_source_placements'] or r['counts'].get('offender') or r['counts'].get('unmeasured')
                    or any(r.get(name, {}).get('complete') is not True or r.get(name, {}).get('status') != 'pass'
                           for name in ('terrain', 'attachment')) for r in rows))
 

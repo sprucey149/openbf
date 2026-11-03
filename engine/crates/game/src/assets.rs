@@ -4,6 +4,8 @@
 mod mesh;
 mod render_ground;
 pub use mesh::{load_glb, load_glb_joints, load_skinned_glb, CpuSkinnedMesh, SkinnedAsset};
+mod visual_clips;
+pub use visual_clips::load_visual_skinned_glb;
 
 use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
@@ -199,6 +201,10 @@ pub struct CpuMesh {
     /// A corrected presentation grid after the unchanged simulation grid:
     /// (first vertex, vertices per side). Absent on PS2 and older bakes.
     pub render_grid: Option<(usize, usize)>,
+    /// Donor drawing reconstructed from canonical contact surfaces. Keep it
+    /// visible and let it pull the chase camera clear instead of fading it.
+    /// Absent on PS2 and older bakes; never read by the simulation.
+    pub contact_surface: bool,
 }
 
 /// One submesh's specular second pass as the bake wrote it
@@ -1398,6 +1404,7 @@ mod tests {
                 sphere: None,
                 vis_top: None,
                 render_grid: None,
+                contact_surface: false,
             }
         };
         let mut reference = scene("None");

@@ -82,6 +82,11 @@ def parse_declares(s):
     return d
 
 
+def landing_gate_groups(groups):
+    """Keep every acceptance group selected by the branch's automatic audit."""
+    return [g for g in ("ci", "gpu", "parity", "sim", "sweep", "arena", "leak", "bake", "map", "alignment") if g in groups]
+
+
 def gates(tree, target, out, groups, extra=(), resume=False):
     cmd = [sys.executable, GATES, "--tree", tree, "--target", target, "--out", out, "--groups", *groups, *extra]
     res = os.path.join(out, "results.json")
@@ -339,7 +344,7 @@ def phase1(c, pid, dry=False, resume=False):
             groups |= {"bake"}
         if dec["goldens"] or dec["parity"]:
             groups |= {"parity"}
-        st["groups"] = [g for g in ["ci", "gpu", "parity", "sim", "sweep", "arena", "leak", "bake", "map"] if g in groups]
+        st["groups"] = landing_gate_groups(groups)
     order = st["groups"]
     if "gates_branch" not in done:
         begin("gates_branch")

@@ -108,12 +108,14 @@ pub fn bake_soldier_anims(
     std::fs::create_dir_all(out.join("textures"))?;
 
     let mut clips = Vec::new();
+    let mut bf1 = false;
     let mut meta = SoldierAnims::default();
     if let Some(anim_path) = anim_lvl {
         let anim_resolved = crate::resolve_ci(anim_path);
         let abuf = crate::gameplay::read(&anim_resolved).with_context(|| anim_resolved.clone())?;
         let ainner = mungefs::open(&abuf).map_err(|e| anyhow!("{e}"))?;
         let sanm = mungefs::sanm::find_sanm(ainner).map_err(|e| anyhow!("{e}"))?;
+        bf1 = sanm.is_none();
         // BF2's sets take every soldier side's classes and banks (a level
         // loads two sides; `anim_sets::bf2::Registry::register`).
         let sides: Vec<Vec<u8>> = match sanm {
@@ -383,6 +385,23 @@ pub fn bake_soldier_anims(
     }
     let glb = skinned_to_glb(&sm, &clips)?;
     std::fs::write(out.join("soldiers").join(format!("{}.glb", m.name)), glb)?;
+    let render_path = out
+        .join("soldiers")
+        .join(format!("{}.render-clips.glb", m.name));
+    if let Some(corrected) = super::render_clips::corrected_clips(
+        m.segments.iter().any(|s| s.pc_geometry),
+        bf1,
+        &sm,
+        &clips,
+    )? {
+        let skeleton = crate::skin_glb::SkinnedModel {
+            segments: Vec::new(),
+            ..sm.clone()
+        };
+        std::fs::write(&render_path, skinned_to_glb(&skeleton, &corrected)?)?;
+    } else if render_path.exists() {
+        std::fs::remove_file(&render_path)?;
+    }
 
     let mut wanted: Vec<String> = sm
         .segments

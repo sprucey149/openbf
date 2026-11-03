@@ -158,6 +158,7 @@ fn grid_mesh(n: usize) -> CpuMesh {
         sphere: None,
         vis_top: None,
         render_grid: None,
+        contact_surface: false,
     }
 }
 

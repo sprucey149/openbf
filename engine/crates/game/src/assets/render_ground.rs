@@ -81,6 +81,7 @@ mod tests {
             sphere: None,
             vis_top: None,
             render_grid: Some((4, 2)),
+            contact_surface: false,
         }
     }
 

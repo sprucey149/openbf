@@ -64,6 +64,10 @@ pub(super) fn bake_content(
     // §2; `game::hud_feed::load_mesh`). `hud_herobar_saberhilt` (0x10001) only
     // kept its shape through a census MASK, which BF2's ELF rule now overrules.
     let mut hud_named: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Contact-surface fallbacks ignore alpha for solid coverage, but retain
+    // every native texture alpha byte for any other consumer of their art.
+    let mut contact_named: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut contact_models: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut textures = Vec::new();
     let mut transparent: Vec<String> = Vec::new();
     // One entry per texture that HAS a classic-plus override: which source
@@ -283,6 +287,8 @@ pub(super) fn bake_content(
     let shadow_skels = crate::hardpoints::Skeletons::of(&expanded);
     let mut bind_pose = crate::bind_pose::BindPose::of(&expanded);
     let render_alignment = super::render_alignment::Alignment::of(original.as_deref())?;
+    let render_conformation = super::render_conform::Conformation::of(original.as_deref())?;
+    let render_entrance = super::render_entrance::Entrance::of(original.as_deref())?;
     for original in original.as_deref().into_iter().chain(
         side_source
             .as_ref()
@@ -295,6 +301,7 @@ pub(super) fn bake_content(
     let mut posed: Vec<String> = Vec::new();
     let restore_door_halves = super::render_symmetry::enabled(original.as_deref())?;
     let correct_column = super::render_column::enabled(original.as_deref())?;
+    let render_faces = super::render_faces::Faces::of(original.as_deref())?;
     let mut reflected_door_groups = std::collections::HashMap::new();
     // Card VTURD (`crate::turret_rig`): an armed building's model is written
     // as one primitive per (segment, node), so its gun can turn.
@@ -475,6 +482,37 @@ pub(super) fn bake_content(
                 if correct_column {
                     super::render_column::model(&mut m)?;
                 }
+                render_faces.apply(&mut m)?;
+                let entrance_contact = render_entrance.apply(&mut m, &expanded)?;
+                let original_alpha = alpha_table.model(&m);
+                let contact_surface =
+                    render_conformation.apply(&mut m, &expanded, &original_alpha)?
+                        || entrance_contact;
+                if contact_surface {
+                    anyhow::ensure!(kind == Content::Map, "contact surfaces require a map bake");
+                    if m.is_bf2() {
+                        // Leaf-card fallbacks retain their native alpha for
+                        // other consumers. The guarded BF1 donor was already
+                        // opaque: preserve its existing shared-sheet policy.
+                        contact_named.extend(
+                            m.segments
+                                .iter()
+                                .filter_map(crate::alpha::segment_texture)
+                                .map(str::to_ascii_lowercase),
+                        );
+                    }
+                }
+                let keep_contact_visible = contact_surface
+                    || render_alignment.contact_surface(&m.name)
+                    || render_faces.contact_surface(&m.name)
+                    || (correct_column && m.name.eq_ignore_ascii_case("uta1_prop_col"));
+                anyhow::ensure!(
+                    !keep_contact_visible || kind == Content::Map,
+                    "contact visibility requires a map bake"
+                );
+                if keep_contact_visible {
+                    contact_models.insert(m.name.to_ascii_lowercase());
+                }
                 if turret_rigs.has_model(&m.name) {
                     bind_pose
                         .canonical_model_nodes(&mut m)
@@ -508,7 +546,9 @@ pub(super) fn bake_content(
                 glow_named.extend(crate::alpha::glow_textures(&m, hdr.is_some()));
                 let alphas = alpha_table.model(&m);
                 alpha_usage.record_model(&m, &alphas);
-                let glb = if kind == Content::Map {
+                let glb = if keep_contact_visible {
+                    crate::glb::world_contact_surface_to_glb(&m, &alphas, hdr.is_some())?
+                } else if kind == Content::Map {
                     crate::glb::world_model_to_glb(&m, &alphas, hdr.is_some())?
                 } else if kind == Content::Common && turret_rigs.station_model(&m.name) {
                     crate::glb::station_model_to_glb(&m, &alphas)?
@@ -768,7 +808,13 @@ pub(super) fn bake_content(
             {
                 let alphas = alpha_table.model(&model);
                 alpha_usage.record_model(&model, &alphas);
-                let glb = crate::glb::world_model_to_glb(&model, &alphas, hdr.is_some())?;
+                // Recovery can trim a contributor and rewrite its GLB after
+                // the model loop. Retain its reviewed visibility policy.
+                let glb = if contact_models.contains(&model.name.to_ascii_lowercase()) {
+                    crate::glb::world_contact_surface_to_glb(&model, &alphas, hdr.is_some())?
+                } else {
+                    crate::glb::world_model_to_glb(&model, &alphas, hdr.is_some())?
+                };
                 std::fs::write(out.join("models").join(format!("{}.glb", model.name)), glb)?;
                 if !models
                     .iter()
@@ -1066,6 +1112,7 @@ pub(super) fn bake_content(
             || pass_named.contains(&lower)
             || flash_named.contains(&lower)
             || hud_named.contains(&lower)
+            || contact_named.contains(&lower)
             || glow_named.contains(&lower)
             || fx_named.contains(&lower)
             || fx_model_named.contains(&lower)

@@ -16,6 +16,7 @@ struct Recipe {
     columns: [[f32; 3]; 3],
     translation: [f32; 3],
     bottom_cap: bool,
+    negative_x_scale: Option<f32>,
 }
 
 const IDENTITY: [[f32; 3]; 3] = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
@@ -32,6 +33,7 @@ const RECIPES: &[Recipe] = &[
         columns: [[1., 0., 0.], [0., 4. / 3., 0.], [0., 0., 1.]],
         translation: [0., -32. / 3., 0.],
         bottom_cap: true,
+        negative_x_scale: None,
     },
     Recipe {
         name: "rhn_bldg_lego_2",
@@ -39,6 +41,7 @@ const RECIPES: &[Recipe] = &[
         columns: [[1., 0., 0.], [0., 4. / 3., 0.], [0., 0., 1.]],
         translation: [0., -32. / 3., 0.],
         bottom_cap: true,
+        negative_x_scale: None,
     },
     Recipe {
         name: "geo_sky_spire",
@@ -46,12 +49,48 @@ const RECIPES: &[Recipe] = &[
         columns: IDENTITY,
         translation: [0., 0.40095532, 0.],
         bottom_cap: false,
+        negative_x_scale: None,
+    },
+    // The PC Mos Eisley crate is smaller than its unchanged PS2 collision.
+    // Restore the donor's scale, then lengthen its negative-X end. This keeps
+    // all donor faces, UVs and colours; no replacement geometry is stored.
+    Recipe {
+        name: "tat2_prop_prop4",
+        input: "30cc196e7e0cbbbe67c0c9eb4e0a4f4800e2be0be9275c0e1f52d6f5799205fb",
+        columns: [
+            [1.696_078_4, 0., 0.],
+            [0., 1.696_078_4, 0.],
+            [0., 0., 1.696_078_4],
+        ],
+        translation: [0.; 3],
+        bottom_cap: false,
+        negative_x_scale: Some(2.010_158_8),
     },
 ];
+
+impl Recipe {
+    fn matrix_at(&self, x: f32) -> Mat3 {
+        let mut matrix = Mat3::from_cols_array_2d(&self.columns);
+        if x < 0. {
+            if let Some(scale) = self.negative_x_scale {
+                matrix.x_axis *= scale / self.columns[0][0];
+            }
+        }
+        matrix
+    }
+}
 
 pub(super) struct Alignment(HashMap<String, &'static Recipe>);
 
 impl Alignment {
+    /// This corrected four-metre column would otherwise fade for the camera.
+    /// Keep its complete surface visible without changing its authored bounds.
+    pub(super) fn contact_surface(&self, name: &str) -> bool {
+        self.0
+            .get(&name.to_ascii_lowercase())
+            .is_some_and(|recipe| recipe.name == "rhn_bldg_lego_2")
+    }
+
     pub(super) fn of(original: Option<&[u8]>) -> Result<Self> {
         let mut selected = HashMap::new();
         if let Some(bytes) = original {
@@ -85,10 +124,10 @@ impl Alignment {
         let path = out.join("shadows").join(format!("{name}.ron"));
         let mut pieces: Vec<manifest::shadow::ShadowPiece> =
             ron::from_str(&std::fs::read_to_string(&path)?)?;
-        let matrix = Mat3::from_cols_array_2d(&recipe.columns);
         for piece in &mut pieces {
             for p in &mut piece.positions {
-                *p = (matrix * Vec3::from(*p) + Vec3::from(recipe.translation)).to_array();
+                *p = (recipe.matrix_at(p[0]) * Vec3::from(*p) + Vec3::from(recipe.translation))
+                    .to_array();
             }
         }
         crate::write_ron(&path, &pieces)
@@ -111,12 +150,20 @@ impl Alignment {
         let matrix = Mat3::from_cols_array_2d(&recipe.columns);
         let normal = matrix.inverse().transpose();
         for segment in &mut model.segments {
-            for position in &mut segment.positions {
-                *position =
-                    (matrix * Vec3::from(*position) + Vec3::from(recipe.translation)).to_array();
-            }
-            for n in &mut segment.normals {
-                *n = (normal * Vec3::from(*n)).normalize_or_zero().to_array();
+            for (i, position) in segment.positions.iter_mut().enumerate() {
+                let point_matrix = recipe.matrix_at(position[0]);
+                if let Some(n) = segment.normals.get_mut(i) {
+                    let point_normal = if recipe.negative_x_scale.is_some() && position[0] < 0. {
+                        point_matrix.inverse().transpose()
+                    } else {
+                        normal
+                    };
+                    *n = (point_normal * Vec3::from(*n))
+                        .normalize_or_zero()
+                        .to_array();
+                }
+                *position = (point_matrix * Vec3::from(*position) + Vec3::from(recipe.translation))
+                    .to_array();
             }
         }
         if recipe.bottom_cap {

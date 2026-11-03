@@ -1,9 +1,10 @@
 //! Rejoin donor-only render pieces removed by canonical world replacement.
 //!
 //! Xbox Jabba splits the torture room and its pipes into independently placed
-//! props. Their original placements coincide, while the PS2 world names only
-//! the unsuffixed models. Keep the canonical simulation placements/collision;
-//! append the already-posed donor segments to those two render models only.
+//! props. Polis Massa similarly separates its hangar walkway platform. The
+//! source pieces share their target's transform but are not placed by the PS2
+//! world. Append their already-posed donor segments to the retained render model
+//! while keeping all canonical simulation placements and collision unchanged.
 //! The source LVL has passed gameplay fingerprint validation before this call.
 //! Reject missing dependencies, duplicate/changed placements and changed class
 //! bindings rather than silently emitting only part of a room.
@@ -19,18 +20,26 @@ pub(super) struct Reassembled {
 }
 
 struct Recipe {
+    world: &'static str,
     target: &'static str,
     parts: &'static [&'static str],
 }
 
 const RECIPES: &[Recipe] = &[
     Recipe {
+        world: "tat3",
         target: "tat3_bldg_torture_main",
         parts: &["tat3_bldg_torture_main_2", "tat3_bldg_torture_main_3"],
     },
     Recipe {
+        world: "tat3",
         target: "tat3_bldg_torture_pipes",
         parts: &["tat3_bldg_torture_pipes_1"],
+    },
+    Recipe {
+        world: "pol1_buildings01",
+        target: "pol_bldg_hanger_01",
+        parts: &["pol_bldg_hanger_platform"],
     },
 ];
 
@@ -77,15 +86,15 @@ pub(super) fn models(
             _ => {}
         }
     }
-    if !worlds
-        .iter()
-        .any(|world| world.name.eq_ignore_ascii_case("tat3"))
-    {
-        return Ok(Vec::new());
-    }
     let originals: Vec<_> = worlds.iter().collect();
     let mut out = Vec::new();
     for recipe in RECIPES {
+        if !worlds
+            .iter()
+            .any(|world| world.name.eq_ignore_ascii_case(recipe.world))
+        {
+            continue;
+        }
         if !recipe.parts.iter().any(|part| resources.contains(*part)) {
             continue;
         }
@@ -333,6 +342,37 @@ mod tests {
         }
         body.extend(resource(b"wrld", &world));
         resource(b"ucfb", &body)
+    }
+
+    #[test]
+    fn polis_platform_reuses_donor_segments_at_the_canonical_hangar_transform() {
+        let recipe = &RECIPES[2];
+        let mut original = world(&[recipe.target, recipe.parts[0]]);
+        original.name = recipe.world.into();
+        let mut corrected = world(&[recipe.target]);
+        corrected.name = recipe.world.into();
+        let mut posed = HashMap::new();
+        posed.insert(recipe.target.into(), model(recipe.target, 0.0));
+        posed.insert(recipe.parts[0].into(), model(recipe.parts[0], 1.0));
+        let source = metadata(&original, false, None);
+        let result = super::models(&source, &[&corrected], &posed).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].model.name, recipe.target);
+        assert_eq!(result[0].model.segments.len(), 2);
+        assert_eq!(
+            result[0].model.segments[1].positions,
+            posed[recipe.parts[0]].segments[0].positions
+        );
+        assert_eq!(
+            result[0].model.segments[1].uvs,
+            posed[recipe.parts[0]].segments[0].uvs
+        );
+        assert_eq!(
+            result[0].model.segments[1].textures,
+            posed[recipe.parts[0]].segments[0].textures
+        );
+        original.instances[1].transform = transform(4.0);
+        assert!(super::models(&metadata(&original, false, None), &[&corrected], &posed).is_err());
     }
 
     #[test]

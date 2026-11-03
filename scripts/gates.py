@@ -184,8 +184,8 @@ class Gates:
         s.fidelity_both = bool(getattr(a, "fidelity_both", False))
         fa = getattr(a, "fidelity_allow", None)
         s.fidelity_allow = None if fa is None else {x for x in re.split(r"[,\s]+", fa) if x}
-        s.alignment_reference = getattr(a, "alignment_reference", None)
-        s.alignment_cases = getattr(a, "alignment_cases", None) or []
+        s.alignment_reference = getattr(a, "alignment_reference", None) or os.environ.get("OPENBF_ALIGNMENT_REFERENCE")
+        s.alignment_cases = getattr(a, "alignment_cases", None) or shlex.split(os.environ.get("OPENBF_ALIGNMENT_CASES", ""))
         s.moved_goldens = []
         os.makedirs(s.out, exist_ok=True)
 
@@ -1316,6 +1316,8 @@ def auto_groups(tree, base):
         g += ["sim", "sweep", "arena", "leak"]   # sweep also runs the fidelity rows (g_sweep): land.py only passes its own group list
     if touches_bake(files):
         g += ["bake"]
+    if touches_bake(files) or any(re.match(r"engine/.*\.(rs|wgsl|toml|lock|json)$|scripts/(render_|version_|gameplay_|data/|world_fingerprint\.py|gates\.py)",f) for f in files):
+        g += ["alignment"]
     if any(re.match(r"engine/crates/(render|game)/", f) for f in files):
         g += ["parity"]
     return g, files
@@ -1550,7 +1552,7 @@ def main():
             groups, files = auto_groups(a.tree, a.base)
             print(f"[gates] --auto: {len(files)} files changed since {a.base} -> groups {' '.join(groups)}")
         else:
-            groups = a.groups or ["ci", "gpu", "map"]
+            groups = a.groups or ["ci", "gpu", "map", "alignment"]
         groups = [g for g in ALL if g in groups]
     rows = run(a, groups, a.resume)
     sys.exit(rows_exit(rows))

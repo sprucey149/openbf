@@ -805,6 +805,7 @@ mod tests {
             sphere: None,
             vis_top: None,
             render_grid: None,
+            contact_surface: false,
         });
         let setup = BattleSetup {
             seed: 42,
