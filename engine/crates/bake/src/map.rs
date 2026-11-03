@@ -28,6 +28,7 @@ mod render_column;
 mod render_conform;
 mod render_entrance;
 mod render_faces;
+mod render_lookout;
 mod render_reassembly;
 mod render_recovery;
 mod render_symmetry;

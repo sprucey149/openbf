@@ -302,6 +302,7 @@ pub(super) fn bake_content(
     let mut posed: Vec<String> = Vec::new();
     let restore_door_halves = super::render_symmetry::enabled(original.as_deref())?;
     let correct_column = super::render_column::enabled(original.as_deref())?;
+    let correct_lookout = super::render_lookout::enabled(original.as_deref())?;
     let render_faces = super::render_faces::Faces::of(original.as_deref())?;
     let mut reflected_door_groups = std::collections::HashMap::new();
     // Card VTURD (`crate::turret_rig`): an armed building's model is written
@@ -484,6 +485,9 @@ pub(super) fn bake_content(
                     super::render_column::model(&mut m)?;
                 }
                 render_faces.apply(&mut m)?;
+                if correct_lookout {
+                    super::render_lookout::model(&mut m)?;
+                }
                 let entrance_contact = render_entrance.apply(&mut m, &expanded)?;
                 let mut original_alpha = alpha_table.model(&m);
                 let chamber_contact = render_chamber.apply(&mut m, &expanded, &original_alpha)?;
@@ -797,6 +801,7 @@ pub(super) fn bake_content(
             let mut assembled_models =
                 super::render_reassembly::models(original, &render_worlds, &parsed_models)?;
             assembled_models.extend(super::render_cloudcity::models(original, &parsed_models)?);
+            assembled_models.extend(super::render_column::lowd(original, &parsed_models)?);
             for assembled in assembled_models {
                 let model = assembled.model;
                 let alphas = alpha_table.model(&model);
@@ -808,6 +813,14 @@ pub(super) fn bake_content(
                     &assembled.lighting,
                 )?;
                 std::fs::write(out.join("models").join(format!("{}.glb", model.name)), glb)?;
+                parsed_models.insert(model.name.to_ascii_lowercase(), model);
+            }
+            if let Some(model) = render_conformation.hangar_lowd(original, &parsed_models)? {
+                let alphas = alpha_table.model(&model);
+                alpha_usage.record_model(&model, &alphas);
+                let glb = crate::glb::world_contact_surface_to_glb(&model, &alphas, hdr.is_some())?;
+                std::fs::write(out.join("models").join(format!("{}.glb", model.name)), glb)?;
+                contact_models.insert(model.name.to_ascii_lowercase());
                 parsed_models.insert(model.name.to_ascii_lowercase(), model);
             }
             for model in
