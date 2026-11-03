@@ -24,6 +24,7 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 | `render_collision_check.py`, `render_scene_surface.py`, `render_model_dependencies.py`, `render_gpu_bounds.py` | require continuous surface certificates for every placed model, LOWD and far extension against PS2 artwork, charging world draw rounding for every placement; unresolved coverage, opacity, motion or LOD correspondence fails; `gates.py --groups alignment` |
 | `render_contact_check.py`, `render_contact_proxy.py`, `render_contact_groups.py`, `render_query_frame.py` | alternative complete contact-surface proof within 1 cm, with identical active soldier/ordnance domains, complete primitive proxies, outward query-frame bounds and every matching placement; asymmetric or unsupported domains fail unresolved |
 | `render_terrain_check.py`, `render_attachment_check.py` | the alignment gate's required terrain and moving-object receipts; absent or unmeasured inputs fail |
+| `render_alignment_probe.py`, `alignment_known.py` | sampled ordinary-float PS2-residual comparisons and located open offenders; known entries remain measurable, and in-boundary samples do not establish whole-map reachability or acceptance |
 | `render_input_stability.py` | record every GLB, RON, KTX2 and JSON input, optional sidecar presence and measuring source before and after; changes, missing files or a stale receipt fail |
 | `data/` | the measurement receipt and the UI dependency list |
 
