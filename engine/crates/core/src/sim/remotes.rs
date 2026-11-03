@@ -183,7 +183,7 @@ impl Sim {
     /// Enemies on foot within `r` of `at`.
     fn enemies_near(&self, team: u8, at: Vec3, r: f32) -> usize {
         self.alive_units()
-            .filter(|(_, u)| u.team != team && u.mount.is_none())
+            .filter(|(_, u)| self.hostile(team, u.team) && u.mount.is_none())
             .filter(|(_, u)| (u.soldier.pos + Vec3::Y).distance_squared(at) <= r * r)
             .count()
     }
@@ -212,7 +212,7 @@ impl Sim {
         let body = u.capsule().center();
         let seen = || {
             self.alive_units().any(|(_, e)| {
-                e.team != u.team
+                self.hostile(u.team, e.team)
                     && e.soldier.pos.distance_squared(u.soldier.pos) <= BOT_GUARD * BOT_GUARD
                     && crate::perception::los(self, e.muzzle(), body)
             })
@@ -314,7 +314,9 @@ impl Sim {
     fn droid_enemies(&self, d: &Droid) -> impl Iterator<Item = Vec3> + '_ {
         let (team, eye) = (d.team, d.pos);
         self.alive_units()
-            .filter(move |(_, u)| u.team != team && u.mount.is_none() && u.cloak.visible())
+            .filter(move |(_, u)| {
+                self.hostile(team, u.team) && u.mount.is_none() && u.cloak.visible()
+            })
             .map(|(_, u)| u.soldier.pos + Vec3::Y)
             .filter(move |p| p.distance_squared(eye) <= BOT_RANGE * BOT_RANGE)
     }

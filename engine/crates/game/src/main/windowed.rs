@@ -2042,11 +2042,7 @@ impl winit::application::ApplicationHandler for App {
                             );
                         }
                     }
-                    let models = self
-                        .soldier_vis
-                        .as_ref()
-                        .map_or([false; 2], |v| [v.has_model(0), v.has_model(1)]);
-                    walk_draws(*cube, walk, &mut extra, models);
+                    walk_draws(*cube, walk, &mut extra, self.soldier_vis.as_ref());
                     // The props and vehicles in the camera's way are drawn
                     // see-through (`game::camera_collide`).
                     see = walk.camera_see_through();

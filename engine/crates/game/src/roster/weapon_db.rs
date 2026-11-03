@@ -190,6 +190,26 @@ pub(super) fn fired_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
         }
         ord.beam = Some(beam);
     }
+    if db
+        .engine_base(ord_name)
+        .is_some_and(|base| base.eq_ignore_ascii_case("towcable"))
+    {
+        if let (Some(initial_length), Some(length)) = (
+            db.prop_f32(ord_name, "InitialCableLength"),
+            db.prop_f32(ord_name, "CableLength"),
+        ) {
+            if initial_length.is_finite()
+                && length.is_finite()
+                && initial_length > 0.0
+                && length > 0.0
+            {
+                ord.tow = Some(core::vehicle::tow::TowClass {
+                    initial_length,
+                    length,
+                });
+            }
+        }
+    }
     if ord.kind == OrdKind::Shell {
         // Its fall, and its burst when its life runs out in the air
         // (re-ordnance-kinds §6).

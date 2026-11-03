@@ -123,7 +123,7 @@ impl Sim {
                 };
                 match victim {
                     Victim::Unit(h) => {
-                        let Some(friendly) = self.unit(h).map(|u| u.team == team) else {
+                        let Some(friendly) = self.unit(h).map(|u| self.allied(team, u.team)) else {
                             continue;
                         };
                         self.ignite(h, unit, class);

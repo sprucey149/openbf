@@ -488,9 +488,9 @@ impl Sim {
         let own_building = own.and_then(|h| self.vehicle(h)).and_then(|v| v.instance);
         let rel = |c: &Candidate| -> i8 {
             match c.team {
-                None => 0,
-                Some(t) if t == p.team => 1,
-                Some(_) => -1,
+                Some(t) if self.allied(p.team, t) => 1,
+                Some(t) if self.hostile(p.team, t) => -1,
+                _ => 0,
             }
         };
         let passes =

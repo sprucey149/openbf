@@ -4585,6 +4585,7 @@ fn run_map(
     w.add_posts(&layout);
     // The mission's AI settings (card MAIS), its capture bans by post.
     if let Some(m) = &mission {
+        m.apply_door_locks(&mut w.sim.doors, &scene.manifest);
         m.apply_ai(&mut w.sim);
     }
     // The vehicle spawn pads (card VPAD): the vehicles are in the sim state

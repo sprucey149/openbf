@@ -337,10 +337,10 @@ impl Sim {
                     }
                     let (lift, radius) = super::soldier_blast_sphere(u.soldier.stance);
                     let d = u.soldier.pos + Vec3::Y * lift - m.flight.pos;
-                    if u.team == m.flight.team {
+                    if self.allied(m.flight.team, u.team) {
                         friend |= c.friend_radius > 0.0
                             && d.length_squared() <= square(c.friend_radius + radius);
-                    } else {
+                    } else if self.hostile(m.flight.team, u.team) {
                         triggered |= c.trigger_radius > 0.0
                             && d.length_squared() <= square(c.trigger_radius + radius)
                             && u.soldier.vel.dot(d) >= 0.0;

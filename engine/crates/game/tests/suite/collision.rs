@@ -260,6 +260,7 @@ fn door_scene() -> Scene {
     c.base = "door".to_owned();
     c.collision.clear();
     c.door = Some(game::assets::ManifestDoor {
+        locked: false,
         triggers: vec![game::assets::ManifestDoorTrigger {
             hardpoint: "hp_door".to_owned(),
             radius: 4.0,
@@ -278,6 +279,7 @@ fn door_scene() -> Scene {
         parts: Vec::new(),
         open_sound: Some("door_open".to_owned()),
         close_sound: None,
+        locked_sound: Some("door_locked".to_owned()),
     });
     s
 }
@@ -333,10 +335,46 @@ fn a_door_is_built_shut_with_its_moving_prim_and_its_trigger() {
     assert_eq!(masks(&w), masks(&plain));
 }
 
-/// DR2: the door's box leaves the doorway when the door opens — a soldier
-/// ray that stopped on it goes through — and blocks again when it shuts.
 #[test]
-fn an_open_door_lets_a_soldier_through_and_a_shut_one_does_not() {
+fn mission_door_locks_override_the_class_default_in_call_order() {
+    let mut s = door_scene();
+    s.manifest.classes[0].door.as_mut().unwrap().locked = true;
+    let (_, mut doors) = s.collision_and_doors_with(true);
+    assert!(doors[0].locked);
+    let base = r#"map: "t", mode: "con", source_game: "bf2", teams: [],
+                  ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25"#;
+    let mission = |props: &str| -> game::mission::MissionDef {
+        ron::from_str(&format!("({base}{props})")).unwrap()
+    };
+    mission("").apply_door_locks(&mut doors, &s.manifest);
+    assert!(doors[0].locked, "older missions preserve the class default");
+    mission(r#", door_locks: [("i0", true), ("I0", false), ("i1", true)]"#)
+        .apply_door_locks(&mut doors, &s.manifest);
+    assert!(!doors[0].locked, "last matching instance write wins");
+}
+
+#[test]
+fn locked_door_plays_its_baked_sound_at_the_leaf_origin() {
+    use glam::Vec3;
+    let mut s = door_scene();
+    s.manifest.classes[0].door.as_mut().unwrap().locked = true;
+    let mut walk = game::walk::WalkSim::new(42, Vec3::new(0.0, 0.0, -3.0), None);
+    s.install_collision(&mut walk.sim);
+    walk.sim.units[walk.player.index as usize].soldier.pos = walk.sim.doors[0].triggers[0].center;
+    walk.sim.step(&[Default::default()]);
+    let mut heard = Vec::new();
+    game::event_sounds::each(&walk, Vec3::ZERO, |name, pos| {
+        if name == "door_locked" {
+            heard.push(pos);
+        }
+    });
+    assert_eq!(heard, [walk.sim.doors[0].origin]);
+}
+
+/// DR2: the door's box leaves the doorway when the door opens — a soldier
+/// and ordnance rays that stopped on it go through, then block again when it shuts.
+#[test]
+fn soldier_and_ordnance_rays_use_the_current_door_pose() {
     use core::collision::Layers;
     let s = door_scene();
     let (mut w, mut doors) = s.collision_and_doors_with(true);
@@ -345,10 +383,10 @@ fn an_open_door_lets_a_soldier_through_and_a_shut_one_does_not() {
     // A soldier ray at chest height (y 2) toward the doorway:
     let from = glam::Vec3::new(0.0, 2.0, 20.0);
     let blocked = |w: &core::collision::CollisionWorld| {
-        w.ray(from, glam::Vec3::NEG_Z, 100.0, Layers::SOLDIER)
-            .is_some()
+        [Layers::SOLDIER, Layers::ORDNANCE]
+            .map(|layers| w.ray(from, glam::Vec3::NEG_Z, 100.0, layers).is_some())
     };
-    assert!(blocked(&w), "shut");
+    assert_eq!(blocked(&w), [true; 2], "shut");
     let step = |d: &mut core::door::Door, w: &mut core::collision::CollisionWorld, on: bool| {
         for _ in 0..30 {
             d.advance(on, 1.0 / 30.0);
@@ -359,10 +397,14 @@ fn an_open_door_lets_a_soldier_through_and_a_shut_one_does_not() {
     };
     step(d, &mut w, true);
     assert_eq!(d.open, 1.0);
-    assert!(!blocked(&w), "open: the boxes rode the clip up 3 m");
+    assert_eq!(
+        blocked(&w),
+        [false; 2],
+        "open: the boxes rode the clip up 3 m"
+    );
     step(d, &mut w, false);
     assert_eq!(d.open, 0.0);
-    assert!(blocked(&w), "shut again");
+    assert_eq!(blocked(&w), [true; 2], "shut again");
 }
 
 #[test]

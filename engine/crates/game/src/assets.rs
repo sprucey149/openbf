@@ -687,6 +687,7 @@ impl Scene {
             // DR2: this instance's door, when its class has a rig.
             let rig = class.door.as_ref().filter(|_| doors_open);
             let mut door = rig.map(|r| Door {
+                locked: r.locked,
                 triggers: r
                     .triggers
                     .iter()
@@ -700,6 +701,7 @@ impl Scene {
                 origin: m.w_axis.truncate(),
                 open_sound: r.open_sound.clone(),
                 close_sound: r.close_sound.clone(),
+                locked_sound: r.locked_sound.clone(),
                 ..Door::default()
             });
             if let Some(cpu) = cg.mesh.as_ref() {

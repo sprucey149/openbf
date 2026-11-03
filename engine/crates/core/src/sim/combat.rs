@@ -227,7 +227,7 @@ impl Sim {
     /// The rule of [`Self::bolt_spares`] for a shot with no bolt (an emitter).
     pub(super) fn shot_spares(&self, team: u8, shooter_is_player: bool, victim: &Unit) -> bool {
         (victim.is_player && self.cheats.invincible)
-            || (victim.is_human() && victim.team == team && !shooter_is_player)
+            || (victim.is_human() && self.allied(team, victim.team) && !shooter_is_player)
     }
 
     pub(super) fn bolt_desc(&self, b: &Bolt) -> DamageDesc {
@@ -253,7 +253,7 @@ impl Sim {
     ) -> Option<f32> {
         let victim = self.unit(h)?;
         let spared = self.bolt_spares(b, victim);
-        let friendly = victim.team == b.team;
+        let friendly = self.allied(b.team, victim.team);
         let ff = self.friendly_fire_scale;
         let mult = self.buff_scale(Some(b.owner), h) * scale;
         // Native fat-ray TakeDamage uses flags -1 (shield and health);
@@ -360,7 +360,7 @@ impl Sim {
                     return;
                 };
                 let spared = self.bolt_spares(b, victim);
-                let ff = if victim.team == b.team {
+                let ff = if self.allied(b.team, victim.team) {
                     self.friendly_fire_scale
                 } else {
                     1.0
@@ -605,13 +605,13 @@ impl Sim {
         let v = &self.units[h.index as usize];
         let (victim_team, victim_is_player) = (v.team, v.is_player);
         let respawn_at = self.tick + (self.respawn_delay * TICK_HZ as f32) as u64;
-        let slot = self.waves[usize::from(victim_team).min(1)].assign();
+        let slot = self.assign_unit_wave(victim_team);
         let v = &mut self.units[h.index as usize];
         v.alive = false;
         v.cloak = crate::cloak::CloakState::default();
         v.deaths += 1;
         v.respawn_at = Some(respawn_at);
-        v.spawn_slot = Some(slot);
+        v.spawn_slot = slot;
         // Card KNOCK (re-knockback §3): a soldier killed on foot keeps his
         // body; its item drop waits for the dead state (`Sim::death_block`).
         // An exposed rider's body stays at his seat; an enclosed one's drop is
@@ -625,7 +625,9 @@ impl Sim {
         if !v.body {
             self.drop_item(h, None);
         }
-        self.battle.on_death(victim_team as usize, victim_is_player);
+        if victim_team < 2 {
+            self.battle.on_death(victim_team as usize, victim_is_player);
+        }
         self.class_change_life_ended(h);
         // Phase D: the squad rules for a death, both of them.
         crate::squad::on_unit_died(self, h);
@@ -640,10 +642,10 @@ impl Sim {
                 self.nav_stats.unit_kills += 1;
                 if k == h {
                     self.nav_stats.self_kills += 1;
-                } else if killer_team == Some(victim_team) {
+                } else if killer_team.is_some_and(|team| self.allied(team, victim_team)) {
                     self.nav_stats.team_kills += 1;
                 }
-                if k != h && killer_team.is_some_and(|team| team != victim_team) {
+                if k != h && killer_team.is_some_and(|team| self.hostile(team, victim_team)) {
                     self.heal_hero_kill(k);
                 }
                 // The PS2 credits the member, alive or dead (B1 FUN_00297440:
@@ -727,14 +729,14 @@ impl Sim {
             .then(|| self.hero_body_prims(h.index as usize))
             .flatten();
         let respawn_at = self.tick + (self.respawn_delay * TICK_HZ as f32) as u64;
-        let slot = self.waves[usize::from(team).min(1)].assign();
+        let slot = self.assign_unit_wave(team);
         let v = &mut self.units[h.index as usize];
         v.alive = false;
         v.cloak = crate::cloak::CloakState::default();
         v.deaths += 1;
         v.health.cur = 0.0;
         v.respawn_at = Some(respawn_at);
-        v.spawn_slot = Some(slot);
+        v.spawn_slot = slot;
         if let Some(body) = seated_body {
             v.soldier.pos = body.pos;
             v.soldier.yaw = body.yaw;
@@ -743,7 +745,9 @@ impl Sim {
         } else {
             self.drop_item(h, Some(cause));
         }
-        self.battle.on_death(team as usize, is_player);
+        if team < 2 {
+            self.battle.on_death(team as usize, is_player);
+        }
         self.class_change_life_ended(h);
         crate::squad::on_unit_died(self, h);
         self.unseat_unit(h);

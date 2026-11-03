@@ -562,6 +562,9 @@ impl Sim {
 
     /// Battle admission for a (re)spawn: ticket gate + shedding.
     fn admit(&mut self, team: u8, is_player: bool) -> bool {
+        if team >= 2 {
+            return !is_player && self.native_team_index(team).is_some() && self.admit_native(team);
+        }
         match self.battle.try_spawn(team as usize, is_player) {
             SpawnOutcome::Refused => false,
             SpawnOutcome::Spawned { despawned_ai } => {
@@ -600,7 +603,8 @@ impl Sim {
         let slot = (0..self.units.len()).find(|&i| {
             !self.units[i].alive
                 && !held(i)
-                && (!preserve_respawns || self.units[i].respawn_at.is_none())
+                && (self.units[i].respawn_at.is_none()
+                    || (!preserve_respawns && self.units[i].team < 2))
         });
         let gen = match slot {
             Some(i) => self.units[i].gen + 1,
@@ -862,8 +866,8 @@ impl Sim {
         yaw: f32,
         preserve_respawns: bool,
     ) -> Option<UnitHandle> {
-        let t = usize::from(team.min(1));
-        if self.classes[t].is_empty() {
+        let t = usize::from(team);
+        if self.classes.get(t).is_none_or(Vec::is_empty) {
             return None;
         }
         let c = self.ai_class(team);
@@ -933,7 +937,6 @@ impl Sim {
         // Uniform node pick via the inline LCG (BF1 FUN_0029df70 / BF2
         // FUN_00356998 draw), then ground snap.
         let (pos, yaw) = points[self.lcg.index(points.len() as u32) as usize];
-        let gen = self.units[i].gen + 1;
         let old = self.units[i].spec.clone();
         // A PLAYER comes back as the class their spawn screen chose (D5). A
         // choice past the end of the table clamps to the last class, so a
@@ -971,13 +974,18 @@ impl Sim {
                 },
             }
         };
+        self.replace_respawned_unit(i, spec);
+    }
+
+    pub(in crate::sim) fn replace_respawned_unit(&mut self, i: usize, spec: UnitSpec) {
+        let gen = self.units[i].gen + 1;
         let mut unit = spec.build(gen, &self.weapon_classes);
         // An AI respawn re-derives the tier's skill (D2): a difficulty change
         // between deaths reaches the bot at its next life, and a bot never
         // comes back with a stale level.
         unit.skill = crate::skill_for(spec.controller, self.bot_skill(spec.team));
         unit.spec.skill = unit.skill;
-        unit.soldier.pos.y = self.spawn_ground(pos);
+        unit.soldier.pos.y = self.spawn_ground(spec.pos);
         unit.kills = self.units[i].kills;
         unit.deaths = self.units[i].deaths;
         // Card DPRX: a proxy comes back a proxy.

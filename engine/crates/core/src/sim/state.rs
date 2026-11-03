@@ -210,6 +210,11 @@ pub struct Sim {
     /// rider. Soldier movement and collision do not read it; vehicle state is
     /// hashed.
     pub hero_rider_frames: Option<std::sync::Arc<dyn super::HeroRiderFrames>>,
+    /// Immutable setup for querying animated walker tow collision.
+    pub tow_frames: Option<std::sync::Arc<dyn crate::vehicle::tow::TowFrames>>,
+    pub tow_cables: Vec<super::TowCable>,
+    /// Falling walkers remain in building collision until their clip ends.
+    pub tow_falls: Vec<super::TowFall>,
     pub heightfield: Option<Heightfield>,
     /// The map's baked model collision (`coll` meshes, `prim` primitives,
     /// terrain cutters). Empty = heightfield-only, as before. An INPUT like the
@@ -447,6 +452,9 @@ pub struct Sim {
     pub respawn_delay: f32,
     /// Per-team spawn waves (teams 0/1).
     pub waves: [SpawnWaves; 2],
+    pub(super) native_teams: Vec<super::native_teams::NativeTeam>,
+    pub(super) ally_spawns: Vec<super::native_teams::AllySpawn>,
+    pub(super) team_relations: std::collections::BTreeMap<(u8, u8), bool>,
     /// Legacy/explicit CLI alive-AI cap per team (NumBots default 16).
     /// Main teams can instead use map-relative combatant limits below.
     pub ai_alive_cap: u32,
@@ -930,6 +938,9 @@ impl Sim {
             melee_lcg: GameLcg::new(seed ^ 0x5341_4252),
             melee_lcg_active: false,
             hero_rider_frames: None,
+            tow_frames: None,
+            tow_cables: Vec::new(),
+            tow_falls: Vec::new(),
             heightfield: None,
             collision: CollisionWorld::default(),
             doors: Vec::new(),
@@ -1005,6 +1016,9 @@ impl Sim {
             time_limit: None,
             respawn_delay: 4.0,
             waves: [SpawnWaves::mission_default(), SpawnWaves::mission_default()],
+            native_teams: Vec::new(),
+            ally_spawns: Vec::new(),
+            team_relations: std::collections::BTreeMap::new(),
             ai_alive_cap: 16,
             team_combatants: None,
             death_regions: Vec::new(),

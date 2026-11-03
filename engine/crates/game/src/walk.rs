@@ -670,6 +670,7 @@ pub struct WalkSim {
     /// Pending menu input, retained across render frames with no sim tick.
     respawn_requested: bool,
     pub teams: [TeamTemplate; 2],
+    pub native_teams: std::collections::BTreeMap<u8, TeamTemplate>,
     /// The models the chase camera must stay out of (visual only — never read
     /// by the sim, so it cannot affect determinism). Set by the caller once
     /// the scene is loaded; empty = terrain-only camera flooring.
@@ -773,6 +774,14 @@ fn cp_spawn_nodes(layout: &MapLayout, cp: &CommandPostDef) -> Vec<(Vec3, f32)> {
 }
 
 impl WalkSim {
+    /// Class presentation of a main or native unit.
+    pub fn team_template(&self, team: u8) -> &TeamTemplate {
+        self.teams
+            .get(usize::from(team))
+            .or_else(|| self.native_teams.get(&team))
+            .unwrap_or(&self.teams[1])
+    }
+
     /// `seed` feeds both sim RNGs (spread); replays carry it in the log.
     /// Default templates: BF1 troopers with the BF1 rifle.
     pub fn new(seed: u32, spawn: Vec3, hf: Option<Heightfield>) -> Self {
@@ -867,6 +876,7 @@ impl WalkSim {
             end_shots: Vec::new(),
             round_end: None,
             teams,
+            native_teams: Default::default(),
             blend: crate::render_blend::Blend::default(),
             accum: 0.0,
         }

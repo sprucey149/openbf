@@ -22,6 +22,8 @@ pub const PROP_LABEL: u32 = 0xF697_17FD;
 pub const PROP_CAPTURE_REGION: u32 = 0xC6C1_61F9;
 pub const PROP_CONTROL_REGION: u32 = 0x805C_1F8A;
 pub const PROP_SPAWN_PATH: u32 = 0xDDE0_B14F;
+pub const PROP_ALLY_PATH: u32 = 0xDAD2_15B0;
+pub const PROP_ALLY_COUNT: u32 = 0x7136_FD3E;
 pub const PROP_VALUE_BLEED: u32 = 0x4EBF_97DA;
 /// `AISpawnWeight` (BF2; re-command-walker-post §6 [O]).
 pub const PROP_AI_SPAWN_WEIGHT: u32 = 0xE072_82C2;
@@ -76,6 +78,10 @@ pub struct CommandPostDef {
     pub capture: Option<Region>,
     pub control: Option<Region>,
     pub spawn_path: Option<String>,
+    /// Authored `AllyPath`, separate from this post's own spawn path.
+    pub ally_path: Option<String>,
+    /// Authored `AllyCount` budget, before any class default.
+    pub ally_count: Option<u32>,
     pub value_bleed: i32,
     /// `AISpawnWeight`: the post's weight in a bot's draw of where to spawn
     /// (BF2 only; the constructor's 100 where the instance authors none —
@@ -347,6 +353,8 @@ impl MapLayout {
                 capture: region(cap_name),
                 control: prop(&inst.props, PROP_CONTROL_REGION).and_then(region),
                 spawn_path: prop(&inst.props, PROP_SPAWN_PATH).map(str::to_owned),
+                ally_path: prop(&inst.props, PROP_ALLY_PATH).map(str::to_owned),
+                ally_count: prop(&inst.props, PROP_ALLY_COUNT).and_then(|s| s.trim().parse().ok()),
                 // BF1: scalar ValueBleed (class default 100). BF2: per-faction
                 // ValueBleed_<faction> (identical across main factions in
                 // retail; class default 10) — first present wins.
@@ -629,6 +637,23 @@ mod tests {
         assert_eq!(PROP_CAPTURE_REGION, 3_334_562_297);
     }
 
+    #[test]
+    fn ally_spawn_data_is_separate_from_the_post_spawn_path() {
+        let mut m = manifest();
+        m.instances[0].props.extend([
+            (PROP_SPAWN_PATH, "owned".into()),
+            (PROP_ALLY_PATH, "allies".into()),
+            (PROP_ALLY_COUNT, "65536".into()),
+        ]);
+        let layout = MapLayout::from_manifest(&m);
+        let post = &layout.cps[0];
+        assert_eq!(post.spawn_path.as_deref(), Some("owned"));
+        assert_eq!(post.ally_path.as_deref(), Some("allies"));
+        assert_eq!(post.ally_count, Some(65536));
+        assert_eq!(layout.cps[1].ally_path, None);
+        assert_eq!(layout.cps[1].ally_count, None);
+    }
+
     /// The ten hashes are transcribed as LITERALS (the disc numbers the Phase
     /// B addendum lists) — and, MEASURED here, all ten are also exactly
     /// `classdb::fnv1a_lowercase` of their key names. The addendum says they
@@ -665,6 +690,8 @@ mod tests {
             PROP_CAPTURE_REGION,
             PROP_CONTROL_REGION,
             PROP_SPAWN_PATH,
+            PROP_ALLY_PATH,
+            PROP_ALLY_COUNT,
             PROP_VALUE_BLEED,
         ];
         all.extend(PROP_VALUE_ATK);

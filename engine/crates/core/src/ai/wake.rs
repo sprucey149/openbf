@@ -57,7 +57,7 @@ pub(super) fn events(sim: &Sim, me: UnitHandle, u: &Unit, st: &AiState) -> u8 {
 fn near_miss(sim: &Sim, me: UnitHandle, u: &Unit) -> bool {
     let (feet, eye) = (u.soldier.pos, u.muzzle());
     sim.bolts.iter().any(|b| {
-        if b.team == u.team || b.owner == me {
+        if !sim.hostile(u.team, b.team) || b.owner == me {
             return false;
         }
         let from = b.pos - b.vel * crate::TICK_DT;
@@ -78,7 +78,7 @@ fn new_in_sight(sim: &Sim, me: UnitHandle, u: &Unit, st: &AiState) -> bool {
     sim.units_within(eye, SIGHT, &mut near);
     near.iter().any(|&i| {
         let (h, o) = (sim.handle(i as usize), &sim.units[i as usize]);
-        if o.team == u.team || !o.alive || perception::contact_of(st, h).is_some() {
+        if !sim.hostile(u.team, o.team) || !o.alive || perception::contact_of(st, h).is_some() {
             return false;
         }
         let p = o.capsule().center();

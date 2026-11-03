@@ -359,7 +359,16 @@ impl VehicleVisuals {
     ) -> Vec<DrawCmd> {
         let mut out = Vec::new();
         self.shadow_triangles.clear();
-        for (slot, v) in sim.vehicles.iter().enumerate().filter(|(_, v)| v.alive) {
+        let fallen: Vec<_> = sim
+            .tow_falls
+            .iter()
+            .map(|fall| fall.pose(sim.tick))
+            .collect();
+        let live = sim.vehicles.iter().enumerate().filter(|(_, v)| v.alive);
+        // Temporary fallen meshes keep their own slots if a pad recycles
+        // the vehicle's sim slot before its clip finishes.
+        let falls = fallen.iter().enumerate().map(|(i, v)| (usize::MAX - i, v));
+        for (slot, v) in live.chain(falls) {
             let Some(Some(class)) = self.classes.get_mut(v.class as usize) else {
                 continue;
             };

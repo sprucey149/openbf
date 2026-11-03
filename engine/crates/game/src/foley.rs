@@ -457,9 +457,7 @@ impl Foley {
                 continue;
             }
             let s = &u.soldier;
-            let class = walk.teams[usize::from(u.team).min(1)]
-                .class(u.spec.class)
-                .foley_class;
+            let class = walk.team_template(u.team).class(u.spec.class).foley_class;
             if !t.live || t.gen != u.gen {
                 *t = Track {
                     gen: u.gen,

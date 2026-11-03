@@ -383,6 +383,10 @@ pub enum Event {
     DoorClosed {
         door: u32,
     },
+    /// A soldier approached a locked door after its sound had rearmed.
+    DoorLocked {
+        door: u32,
+    },
 }
 
 /// One of BF1's combat calls ([`Event::Call`]); on a BF2 map only

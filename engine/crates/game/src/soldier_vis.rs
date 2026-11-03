@@ -639,6 +639,14 @@ fn rider_now<'a>(
     })
 }
 
+struct NativeDraw {
+    per_class: Vec<ClassDraw>,
+    held: Vec<HeldDraws>,
+    anim: Vec<ClassAnim>,
+    skins: Vec<Vec<Option<TextureHandle>>>,
+    low_skins: Vec<Vec<Option<TextureHandle>>>,
+}
+
 /// Per-class soldier assets. `assets` is the BODY cache, one upload per
 /// soldier geometry, and `weapons` the hand-weapon cache, one per weapon
 /// geometry — so two classes (or two teams) that share a model share one
@@ -653,6 +661,7 @@ fn rider_now<'a>(
 /// (`scripts/rebake.sh`) makes it stop.
 #[derive(Default)]
 pub struct SoldierVisuals {
+    native: std::collections::BTreeMap<u8, NativeDraw>,
     /// `own_model[team][class]`: the screens draw this class with a model of
     /// its own, not `per_class`'s (a droideka).
     own_model: [Vec<bool>; 2],

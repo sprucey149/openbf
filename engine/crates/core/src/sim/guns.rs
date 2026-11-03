@@ -464,6 +464,28 @@ impl Sim {
                     spec.yaw_spread,
                     spec.tilt,
                 );
+                if ai {
+                    self.nav_stats.ai_shots += 1;
+                    self.nav_stats.seat_shots += 1;
+                    // Design decision 2's rule, as on foot: a pressed shot
+                    // goes only at a contact this bot's perception holds.
+                    if held {
+                        debug_assert!(
+                            perceived,
+                            "AI rider {driver:?} fired at an unperceived target at tick {}",
+                            self.tick
+                        );
+                        if !perceived {
+                            self.nav_stats.unperceived_shots += 1;
+                        }
+                    } else {
+                        self.nav_stats.carry_shots += 1;
+                    }
+                }
+                if let Some(class) = self.weapon_classes[w.class].ordnance.tow {
+                    self.fire_tow(m, who, class, origin, d, speed, life);
+                    continue;
+                }
                 let bolt = Bolt::fire(
                     origin,
                     d,
@@ -492,24 +514,6 @@ impl Sim {
                         .and_then(|f| f.unit())
                         .map(crate::missile::MissileTarget::Unit);
                     bolt.as_missile(&ord, &mc, target, &mut self.lcg);
-                }
-                if ai {
-                    self.nav_stats.ai_shots += 1;
-                    self.nav_stats.seat_shots += 1;
-                    // Design decision 2's rule, as on foot: a pressed shot
-                    // goes only at a contact this bot's perception holds.
-                    if held {
-                        debug_assert!(
-                            perceived,
-                            "AI rider {driver:?} fired at an unperceived target at tick {}",
-                            self.tick
-                        );
-                        if !perceived {
-                            self.nav_stats.unperceived_shots += 1;
-                        }
-                    } else {
-                        self.nav_stats.carry_shots += 1;
-                    }
                 }
                 self.note_bolt_shot(&mut bolt, origin, d);
                 self.launch_round(bolt, false);

@@ -69,7 +69,7 @@ pub(crate) fn input(sim: &Sim, owner: UnitHandle) -> Option<u32> {
                     || ((ability.offense.0 > 0.0 && other.buffs.offense.0 <= 0.0
                         || ability.defense.0 > 0.0 && other.buffs.defense.0 <= 0.0)
                         && sim.alive_units().any(|(_, enemy)| {
-                            enemy.team != u.team
+                            sim.hostile(u.team, enemy.team)
                                 && enemy.soldier.pos.distance_squared(other.soldier.pos)
                                     <= SUPPORT_THREAT_RANGE * SUPPORT_THREAT_RANGE
                                 && crate::perception::los(sim, other.muzzle(), enemy.muzzle())
@@ -174,7 +174,7 @@ pub(crate) fn launch_ok(sim: &Sim, owner: UnitHandle) -> bool {
     }
     let body = u.capsule().center();
     !sim.alive_units().any(|(_, e)| {
-        e.team != u.team && {
+        sim.hostile(u.team, e.team) && {
             let d2 = e.soldier.pos.distance_squared(pos);
             d2 <= BOT_NEAR * BOT_NEAR
                 || (d2 <= BOT_FIGHT * BOT_FIGHT && crate::perception::los(sim, e.muzzle(), body))

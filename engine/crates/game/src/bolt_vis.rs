@@ -764,6 +764,26 @@ impl BoltVis {
                 .and_then(|n| self.texture(r, &texture_name(n)));
             out.push(beam_draw(look, beam, [core, glow]));
         }
+        for tow in &walk.sim.tow_cables {
+            out.extend(tow.points.windows(2).filter_map(|segment| {
+                let travel = segment[1] - segment[0];
+                let length = travel.length();
+                let dir = travel.try_normalize()?;
+                // [D] PS2 Hoth gunner captures (Vita FLYERS, cable look):
+                // dark untextured cable approximately 3.5 cm across at the gun.
+                Some(BoltDraw {
+                    head: segment[1],
+                    dir,
+                    core_len: length,
+                    glow_len: 0.0,
+                    width: 0.0175,
+                    core_texture: None,
+                    glow_texture: None,
+                    core_color: [37, 37, 38, 255],
+                    glow_color: [0; 4],
+                })
+            }));
+        }
         out
     }
 

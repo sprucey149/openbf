@@ -57,6 +57,7 @@ mod input;
 mod look;
 mod mines;
 mod missiles;
+mod native_teams;
 mod ordnance;
 mod pickups;
 mod population;
@@ -73,6 +74,7 @@ mod spawn;
 mod state;
 mod stations;
 mod step;
+mod tow;
 pub mod trace;
 mod turrets;
 mod vehicles;
@@ -93,6 +95,7 @@ pub use guns::SeatLook;
 pub use hero_bodies::HeroRiderFrames;
 pub use input::{buttons, AimTarget, InputLog, PadState, LOOK_SCALE, LOOK_UNIT};
 pub use look::{LookPreview, MOUSE_STEER};
+pub use native_teams::AllySpawn;
 pub use pickups::{
     DropTable, ItemClass, Pickup, BODY_AHEAD, BODY_RADIUS, DROP_HEIGHT, DROP_SIDE_SPEED,
     ITEM_GRAVITY, ITEM_POOL_DEFAULT, LIFE_END, MAX_DROPS, TAKE_AGE,
@@ -109,6 +112,7 @@ pub use stations::{
     Station, StationAnim, StationClass, StationMotion, DELAY_DEFAULT as STATION_DELAY_DEFAULT,
     GATHER_MAX as STATION_GATHER_MAX,
 };
+pub use tow::{TowCable, TowFall};
 
 #[cfg(test)]
 mod tests {

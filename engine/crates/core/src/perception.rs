@@ -422,7 +422,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     );
     for &i in &near {
         let (h, o) = (sim.handle(i as usize), &sim.units[i as usize]);
-        if h == me || o.team == u.team {
+        if h == me || !sim.hostile(u.team, o.team) {
             continue;
         }
         let p = o.capsule().center();
@@ -457,7 +457,10 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
         let double = flyer && sim.ground_rules == crate::soldier::GroundRules::Bf2;
         let reach = (20.0 * radius + 30.0) * tier.view_mult * if double { 2.0 } else { 1.0 };
         for o in v.seats.iter().filter_map(|s| s.occupant) {
-            let Some(rider) = sim.unit(o).filter(|r| r.alive && r.team != u.team) else {
+            let Some(rider) = sim
+                .unit(o)
+                .filter(|r| r.alive && sim.hostile(u.team, r.team))
+            else {
                 continue;
             };
             let at = rider.capsule().center();
@@ -473,7 +476,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     }
     let droid_reach = droid_view_distance(tier.view_mult);
     for d in &sim.droids {
-        if d.team == u.team || !d.alive() || !droid_admitted(sim, u, d) {
+        if !sim.hostile(u.team, d.team) || !d.alive() || !droid_admitted(sim, u, d) {
             continue;
         }
         let off = d.pos - eye;
@@ -484,7 +487,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     }
     let turret_reach = turret_view_distance(tier.view_mult).min(scan_radius(sim, u));
     for t in &sim.turrets {
-        if t.team == u.team || !t.alive() || !turret_admitted(sim, u, t) {
+        if !sim.hostile(u.team, t.team) || !t.alive() || !turret_admitted(sim, u, t) {
             continue;
         }
         let at = t.centre();
@@ -535,7 +538,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     }
     for &i in &near {
         let (h, o) = (sim.handle(i as usize), &sim.units[i as usize]);
-        if h == me || o.team == u.team {
+        if h == me || !sim.hostile(u.team, o.team) {
             continue;
         }
         let shot = tick
@@ -655,7 +658,7 @@ pub fn tell(sim: &Sim, me: UnitHandle, st: &mut AiState) -> u8 {
         for c in o.ai.contacts.iter().flatten().filter(|c| c.seen_now) {
             if c.handle
                 .live_unit(sim)
-                .is_some_and(|e| e.team != u.team && e.cloak.visible())
+                .is_some_and(|e| sim.hostile(u.team, e.team) && e.cloak.visible())
                 && hear(st, c.handle, sim.tick, c.last_pos, true)
             {
                 told = told.saturating_add(1);

@@ -99,9 +99,9 @@ fn critical_mark(sim: &Sim, victim: Target, class: usize, my_team: u8) -> Option
         _ => return None,
     };
     Some(match team {
-        None => NONE,
-        Some(t) if t == my_team => FRIEND,
-        Some(_) => ENEMY,
+        Some(t) if sim.allied(my_team, t) => FRIEND,
+        Some(t) if sim.hostile(my_team, t) => ENEMY,
+        _ => NONE,
     })
 }
 
@@ -393,6 +393,7 @@ pub struct EventFeed {
     /// ([`Texts::class_name`], else the roster's label). Empty for a feed
     /// built without a walk.
     classes: [Vec<String>; 2],
+    native_classes: std::collections::BTreeMap<u8, Vec<String>>,
     /// The vehicle and building-turret classes' names, by `Vehicle::class`
     /// ([`Texts::class_name`], else the class's `Label`, else its ODF name).
     vehicles: Vec<String>,
@@ -449,6 +450,7 @@ impl EventFeed {
             sides: factions.map(str::to_owned),
             posts: post_keys.iter().map(|k| texts.post_name(k)).collect(),
             classes: [Vec::new(), Vec::new()],
+            native_classes: Default::default(),
             vehicles: Vec::new(),
             stations: Vec::new(),
             order_labels: ORDER_LABELS.map(|l| texts.order_label(l)),
@@ -488,6 +490,20 @@ impl EventFeed {
                 })
                 .collect()
         });
+        for (&team, template) in &walk.native_teams {
+            feed.native_classes.insert(
+                team,
+                template
+                    .classes
+                    .iter()
+                    .map(|c| {
+                        feed.texts
+                            .class_name(&c.name)
+                            .unwrap_or_else(|| c.label.clone())
+                    })
+                    .collect(),
+            );
+        }
         feed.vehicles = walk
             .vehicle_classes
             .iter()
@@ -522,7 +538,10 @@ impl EventFeed {
     /// Team `team`'s soldier class names, in its class table's order (empty
     /// without a walk).
     pub fn class_names(&self, team: u8) -> &[String] {
-        &self.classes[usize::from(team.min(1))]
+        self.classes
+            .get(usize::from(team))
+            .or_else(|| self.native_classes.get(&team))
+            .map_or(&[], Vec::as_slice)
     }
 
     pub fn extend_class_names(&mut self, walk: &crate::walk::WalkSim) {
@@ -585,6 +604,13 @@ impl EventFeed {
     pub fn unit_name(&self, sim: &Sim, h: UnitHandle) -> String {
         let i = h.index as usize;
         let u = &sim.units[i];
+        if let Some(name) = self
+            .native_classes
+            .get(&u.team)
+            .and_then(|classes| classes.get(usize::from(u.spec.class)))
+        {
+            return name.clone();
+        }
         match u.spec.player_slot {
             Some(slot) => format!("Player {}", u32::from(slot) + 1),
             None => {
@@ -651,10 +677,12 @@ impl EventFeed {
         let my_team = sim.units[viewer.index as usize].team;
         // A team as the viewer's team sees it (§1.2).
         let relation = |team: u8| {
-            if team == my_team {
+            if sim.allied(my_team, team) {
                 message_color::OWN
-            } else {
+            } else if sim.hostile(my_team, team) {
                 message_color::ENEMY
+            } else {
+                message_color::NEUTRAL
             }
         };
         self.note_capture_regions(sim);
@@ -689,7 +717,7 @@ impl EventFeed {
                     && sim
                         .units
                         .get(victim.index as usize)
-                        .is_some_and(|u| u.gen == victim.gen && u.team != my_team) =>
+                        .is_some_and(|u| u.gen == victim.gen && sim.hostile(my_team, u.team)) =>
                 {
                     // The plain hit flash: any enemy body hit ([ours]).
                     self.body = Some(tick);
@@ -736,7 +764,7 @@ impl EventFeed {
                             fill(&self.texts.line(DEFEATED), &[&kn, &hero_name])
                         } else if shooter == victim {
                             fill(&self.texts.line(SUICIDE), &[&vn])
-                        } else if k.team == v.team {
+                        } else if sim.allied(k.team, v.team) {
                             fill(&self.texts.line(TEAM_KILLED), &[&kn, &vn])
                         } else {
                             fill(&self.texts.line(KILLED), &[&kn, &vn])
@@ -747,7 +775,7 @@ impl EventFeed {
                         if shooter == victim {
                             self.kills -= 1;
                             self.points += points::SUICIDE;
-                        } else if k.team == v.team {
+                        } else if sim.allied(k.team, v.team) {
                             self.kills -= 1;
                             self.points += points::TEAM_KILL;
                         } else {
@@ -984,10 +1012,10 @@ impl EventFeed {
         match t {
             AimTarget::Unit(h) => {
                 let u = sim.unit(h)?;
-                let name = self.classes[usize::from(u.team.min(1))]
-                    .get(usize::from(u.spec.class))
-                    .cloned()
-                    .unwrap_or_default();
+                let name = self
+                    .class_name(u.team, u.spec.class)
+                    .unwrap_or_default()
+                    .to_owned();
                 Some(HudTarget {
                     id: (u64::from(h.gen) << 32) | u64::from(h.index),
                     name,
@@ -1186,7 +1214,7 @@ impl EventFeed {
 
     /// Team `team`'s soldier class `class`'s name, as the spawn screen's.
     pub fn class_name(&self, team: u8, class: u8) -> Option<&str> {
-        self.classes[usize::from(team.min(1))]
+        self.class_names(team)
             .get(usize::from(class))
             .map(String::as_str)
     }

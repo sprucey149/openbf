@@ -175,6 +175,13 @@ def mission_facts(value):
             raise ValueError("expected mission boolean")
         return v
 
+    def lua_team(v):
+        if v == "NM":
+            return v
+        if type(v) is not int or not 1 <= v <= 255:
+            raise ValueError("invalid Lua team number")
+        return v
+
     numeric_fields = {"attacking", "numbots", "ai_view", "ai_snipe", "fly", "bird_count"}
     numeric_maps = {"units", "tickets", "ai_aggr"}
     name_maps = {"names", "heroes"}
@@ -197,6 +204,8 @@ def mission_facts(value):
             out[key] = mapping(v, lambda r: row(r, (numeric, identifier)))
         elif key in ("cps", "ai_damage"):
             out[key] = sequence(v, lambda r: row(r, (identifier, numeric)))
+        elif key == "local_team_relations":
+            out[key] = sequence(v, lambda r: row(r, (lua_team, lua_team, boolean)))
         elif key == "class_load_order":
             out[key] = sequence(v, lambda r: row(r, (identifier, identifier)))
         elif key == "ai_capture":

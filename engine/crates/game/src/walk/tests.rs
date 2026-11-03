@@ -604,6 +604,8 @@ fn post(name: &str, team: u8, pos: Vec3, spawn_path: Option<&str>) -> CommandPos
         capture: None,
         control: None,
         spawn_path: spawn_path.map(str::to_owned),
+        ally_path: None,
+        ally_count: None,
         value_bleed: crate::layout::VALUE_DEFAULT,
         ai_spawn_weight: core::cp::AI_SPAWN_WEIGHT_DEFAULT,
         value_atk: [crate::layout::VALUE_DEFAULT; 5],

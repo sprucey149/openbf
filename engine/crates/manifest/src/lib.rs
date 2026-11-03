@@ -257,6 +257,9 @@ pub fn music_body(source: &str, data_offset: u64) -> String {
 /// its `zaa_` bank (`analysis/re-bf2-doors.md` §2 hops 2–5, §3 hops 7–9).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManifestDoor {
+    /// Default lock state before mission properties are replayed.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
     /// The `AnimationTrigger` pairs, ≤ 3, in ODF order — a soldier inside
     /// any of the spheres opens the door.
     pub triggers: Vec<ManifestDoorTrigger>,
@@ -284,6 +287,9 @@ pub struct ManifestDoor {
     pub open_sound: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub close_sound: Option<String>,
+    /// The ODF sound played when a soldier approaches a locked door.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked_sound: Option<String>,
 }
 
 /// One drawn submesh of a door the clip moves (see [`ManifestDoor::parts`]).

@@ -2686,6 +2686,9 @@ fn ordnance_charge_points_are_the_discs() {
         .map(|k| (k.at, k.damage))
         .collect();
     assert_eq!(dish.ordnance.max_damage, 1000.0);
+    let laser = dish.ordnance.laser.as_ref().expect("dish turret laser");
+    assert_eq!(laser.length, 3.0);
+    assert_eq!(&laser.light_color[..3], &[75, 75, 18]);
     assert_eq!(pts, [(0.5, 1250.0), (0.75, 1500.0), (2.0, 3000.0)]);
 }
 

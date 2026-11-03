@@ -114,8 +114,10 @@ fn budget_against(sim: &Sim, human_team: u8) -> Budget {
 /// the other team, `human` a human player, the budget on?
 fn governed(sim: &Sim, bot: UnitHandle, human: UnitHandle) -> Option<Budget> {
     let (b, h) = (sim.unit(bot)?, sim.unit(human)?);
-    let on =
-        h.is_human() && b.controller == Controller::Ai && b.mount.is_none() && b.team != h.team;
+    let on = h.is_human()
+        && b.controller == Controller::Ai
+        && b.mount.is_none()
+        && sim.hostile(b.team, h.team);
     let budget = budget_against(sim, h.team);
     (on && budget.tokens.is_some()).then_some(budget)
 }

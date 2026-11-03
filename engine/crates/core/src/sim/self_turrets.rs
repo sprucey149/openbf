@@ -107,7 +107,7 @@ impl Sim {
                     return None;
                 }
                 let u = self.unit(u).filter(|u| {
-                    u.alive && u.team != team && u.mount.is_none() && u.cloak.visible()
+                    u.alive && self.hostile(team, u.team) && u.mount.is_none() && u.cloak.visible()
                 })?;
                 (u.capsule().center(), None, None)
             }

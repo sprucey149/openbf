@@ -95,6 +95,7 @@ fn full_class() -> ManifestClass {
             ("vehicle_only".into(), "p_vehicle_3".into()),
         ],
         door: Some(ManifestDoor {
+            locked: true,
             triggers: vec![ManifestDoorTrigger {
                 hardpoint: "hp_trigger_1".into(),
                 radius: 4.0,
@@ -118,6 +119,7 @@ fn full_class() -> ManifestClass {
             }],
             open_sound: Some("door_open".into()),
             close_sound: Some("door_close".into()),
+            locked_sound: Some("door_locked".into()),
         }),
         hardpoints: vec![ManifestHardpoint {
             name: "hp_fire_1".into(),

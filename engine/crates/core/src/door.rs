@@ -8,8 +8,8 @@
 //! soldier layer marks the door OCCUPIED. The animation parameter then moves
 //! toward 1.0 (occupied) or 0.0 (not) by `dt·30/(frames−1)` per tick, clamped
 //! — the clip end to end in (frames − 1)/30 s both ways. A LOCKED door does
-//! not move; nothing in the port locks one (the mission Lua's `IsLocked` is
-//! queue DR3's), so there is no lock here.
+//! not open in response to a soldier. Its class default can be overridden by
+//! a mission's `SetProperty(..., "IsLocked", ...)`.
 //!
 //! Where the port differs, PROVISIONAL `[O]`:
 //! - the query tests every LIVE unit's `soldier.pos` (the feet) — the disc's
@@ -26,7 +26,9 @@
 //! tick with the latch clear plays `OpenSound` and sets it, the first empty
 //! tick with it set plays `CloseSound` and clears it — the TRIGGER's edges,
 //! not the parameter's. [`Door::latch`] is that bit; the sim turns its edges
-//! into `Event::DoorOpened` / `DoorClosed`. `LockedSound` needs a lock.
+//! into `Event::DoorOpened` / `DoorClosed`. A locked door plays its
+//! `LockedSound` after more than three seconds without a soldier in range
+//! (initially eligible, BF2:99213, 99540–99542, 99691–99694, 99712–99713).
 //! The drawn door rides the same parameter (`game::viewer::SceneGpu::pose_doors`).
 //!
 //! The BOTS (card MOUTH2): a leaf of a door that is opening is no wall to
@@ -55,9 +57,8 @@ pub struct DoorBody {
     pub frames: Vec<(Quat, Vec3)>,
 }
 
-/// One placed door. SIM STATE is `open` alone; `latch` is output-side (it
-/// only decides the sound events, which are not hashed); the rest is setup
-/// data.
+/// One placed door. The pose and lock affect gameplay. The latch and
+/// empty time only decide sound events.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Door {
     pub triggers: Vec<Trigger>,
@@ -66,9 +67,13 @@ pub struct Door {
     pub bodies: Vec<DoorBody>,
     /// The animation parameter `this[0x4e9]`: 0 = shut, 1 = open.
     pub open: f32,
+    /// The door ignores an occupied trigger while locked.
+    pub locked: bool,
     /// The sound latch, bit 0x21 of `this+0x5f2`: set by the open edge,
     /// cleared by the close edge. Starts clear (a shut door).
     pub latch: bool,
+    /// Seconds since the last occupied tick. `None` is the initial, ready state.
+    pub empty_secs: Option<f32>,
     /// The manifest instance the door is (after `apply_mode_layer`): what
     /// the renderer moves.
     pub instance: usize,
@@ -78,6 +83,7 @@ pub struct Door {
     /// The ODF's `OpenSound` / `CloseSound`.
     pub open_sound: Option<String>,
     pub close_sound: Option<String>,
+    pub locked_sound: Option<String>,
 }
 
 /// A sound edge of [`Door::latch`].
@@ -85,6 +91,7 @@ pub struct Door {
 pub enum Edge {
     Opened,
     Closed,
+    Locked,
 }
 
 impl Door {
@@ -100,6 +107,9 @@ impl Door {
 
     /// Advance `open` by one tick of `dt` seconds; true when it changed.
     pub fn advance(&mut self, occupied: bool, dt: f32) -> bool {
+        if occupied && self.locked {
+            return false;
+        }
         let step = dt * 30.0 / f32::from(self.frames.max(2) - 1);
         let next = if occupied {
             (self.open + step).min(1.0)
@@ -113,8 +123,11 @@ impl Door {
 
     /// The latch's edge this tick, if any, updating it (the disc's order:
     /// the edge follows the parameter's move in the same tick).
-    pub fn edge(&mut self, occupied: bool) -> Option<Edge> {
+    pub fn edge(&mut self, occupied: bool, dt: f32) -> Option<Edge> {
+        let empty_secs = (self.empty_secs.unwrap_or(500.0) + dt).min(500.0);
+        self.empty_secs = Some(if occupied { 0.0 } else { empty_secs });
         match (occupied, self.latch) {
+            (true, _) if self.locked => (empty_secs > 3.0).then_some(Edge::Locked),
             (true, false) => {
                 self.latch = true;
                 Some(Edge::Opened)
@@ -182,6 +195,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn locked_sound_rearms_after_more_than_three_seconds_empty() {
+        let mut d = door(31);
+        d.locked = true;
+        assert_eq!(d.edge(true, 0.25), Some(Edge::Locked));
+        assert_eq!(d.edge(true, 4.0 / 30.0), None);
+        assert_eq!(d.edge(false, 2.75), None);
+        assert_eq!(d.edge(true, 0.25), None, "exactly three seconds");
+        assert_eq!(d.edge(false, 3.0), None);
+        assert_eq!(d.edge(true, 0.25), Some(Edge::Locked));
+        assert_eq!(d.edge(true, 0.25), None);
+        d.locked = false;
+        assert_eq!(d.edge(true, 0.25), Some(Edge::Opened));
+    }
+
     /// The disc's timing (§2 hop 5 + §3 hop 9): a 31-frame clip opens in
     /// 1.00 s — 30 ticks at 30 Hz — and closes in the same time.
     #[test]
@@ -244,7 +272,7 @@ mod tests {
         let dt = 1.0 / 30.0;
         let tick = |d: &mut Door, occ: bool| {
             d.advance(occ, dt);
-            d.edge(occ)
+            d.edge(occ, 1.0 / 30.0)
         };
         assert_eq!(tick(&mut d, false), None, "shut and empty: silent");
         assert_eq!(tick(&mut d, true), Some(Edge::Opened));

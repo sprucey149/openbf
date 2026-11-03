@@ -119,7 +119,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         // the commander is omniscient by design too.
         let mut hunt: Option<(f32, Vec3)> = None;
         for (h, o) in sim.alive_units() {
-            if h == me || o.team == u.team {
+            if h == me || !sim.hostile(u.team, o.team) {
                 continue;
             }
             let d2 = (o.capsule().center() - eye).length_squared();

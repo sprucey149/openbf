@@ -54,6 +54,8 @@ pub const ANIM_COUNT: usize = 11;
 pub const ANIM_IDLE: u8 = 0;
 pub const ANIM_TURNL: u8 = 1;
 pub const ANIM_TURNR: u8 = 2;
+/// death01, reached by the death action in the walker transition table.
+pub const ANIM_DEATH: u8 = 3;
 /// The empty entry after death01 (FUN_0025ea48 only records it).
 pub const ANIM_NONE: u8 = 4;
 /// walk_leftfoot_rightfoot: its speed is the clock's W (§4.8).

@@ -987,3 +987,86 @@ fn audit_simultaneous_expired_rounds_keep_distinct_presentation_endpoints() {
     }
     assert!(witnessed, "the mounted weapon never emitted a salvo");
 }
+
+#[test]
+fn a_mounted_harpoon_latches_and_releases_on_range_or_owner_loss() {
+    use crate::collision::Shape;
+    use crate::vehicle::tow::{TowClass, TowFrames, TowPrimitive};
+    use crate::vehicle::Vehicle;
+    use glam::Mat4;
+    use std::sync::Arc;
+
+    struct Leg;
+    impl TowFrames for Leg {
+        fn primitives(&self, walker: &Vehicle) -> Vec<TowPrimitive> {
+            if walker.kind != VehicleKind::Walker {
+                return Vec::new();
+            }
+            vec![TowPrimitive {
+                frame: Mat4::from_translation(walker.pos),
+                shape: Shape::Sphere { radius: 1.0 },
+                offset: Vec3::ZERO,
+                leg: Some(0),
+            }]
+        }
+    }
+    let setup = || {
+        let (mut sim, player, craft) = world(true);
+        sim.weapon_classes[0].ordnance.tow = Some(TowClass {
+            initial_length: 60.0,
+            length: 60.0,
+        });
+        sim.weapon_classes[0].ordnance.velocity = 250.0;
+        sim.tow_frames = Some(Arc::new(Leg));
+        assert!(sim.seat_unit(player, craft, 0));
+        let target = sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Walker,
+            class: 1,
+            home_team: Some(1),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::new(0.0, 2.9, 20.0),
+            yaw: 0.0,
+            max_health: 1000.0,
+            health_type: HealthType::Vehicle,
+            seats: vec![],
+        });
+        (sim, player, craft, target)
+    };
+    let (mut sim, player, craft, target) = setup();
+    sim.seat_gun(player.index as usize, &pad(buttons::FIRE));
+    assert_eq!(sim.tow_cables.len(), 1);
+    assert!(sim.bolts.is_empty());
+    sim.fly_tow_cables(crate::TICK_DT);
+    let mid = sim.tow_cables[0].points[0];
+    assert!(mid.z < 19.0, "{mid:?}");
+    sim.fly_tow_cables(crate::TICK_DT);
+    let anchor = sim.tow_cables[0].points[0];
+    assert!(
+        (anchor.distance(Vec3::new(0.0, 2.9, 20.0)) - 1.0).abs() < 0.001 && anchor.z < 19.01,
+        "{anchor:?}"
+    );
+    sim.vehicle_mut(target).unwrap().pos.x += 3.0;
+    sim.fly_tow_cables(crate::TICK_DT);
+    assert!(sim.tow_cables[0].points[0].abs_diff_eq(anchor + Vec3::X * 3.0, 0.001));
+    sim.vehicle_mut(craft).unwrap().pos.z -= 70.0;
+    sim.fly_tow_cables(crate::TICK_DT);
+    assert!(sim.tow_cables.is_empty());
+    assert_eq!(sim.vehicle(target).unwrap().health.cur, 1000.0);
+
+    let (mut sim, player, _, _) = setup();
+    sim.seat_gun(player.index as usize, &pad(buttons::FIRE));
+    sim.unseat_unit(player);
+    sim.fly_tow_cables(crate::TICK_DT);
+    assert!(sim.tow_cables.is_empty(), "the firing seat was left");
+
+    let (mut sim, player, _, target) = setup();
+    sim.seat_gun(player.index as usize, &pad(buttons::FIRE));
+    for _ in 0..2 {
+        sim.fly_tow_cables(crate::TICK_DT);
+    }
+    assert_eq!(sim.tow_cables.len(), 1);
+    sim.destroy_vehicle(target, None);
+    sim.fly_tow_cables(crate::TICK_DT);
+    assert!(sim.tow_cables.is_empty(), "the latched vehicle is gone");
+}
