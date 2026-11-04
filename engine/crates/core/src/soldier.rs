@@ -124,6 +124,12 @@ pub struct SoldierConstants {
     /// 1.15, BF2's snipers 0.95): the bolt prims' scale (`Unit::bolt_hit`,
     /// issue #41; analysis/re-hitzones.md).
     pub collision_scale: f32,
+    /// All three authored `CollisionScale` damage terms are zero. The game
+    /// loader replays the class chain. PS2 collision damage multiplies by
+    /// these terms (BF1 FUN_00202f38:114478–114540; BF2
+    /// FUN_0023cfd0:155769–155866), so a landing cannot hurt this class.
+    /// Positive scales still use the port's provisional lethal-speed rule.
+    pub collision_damage_immune: bool,
     /// The jet (card JETP, `analysis/re-jetpack.md` §2): `JetJump`, the kick's
     /// size at the jet's start (engine default 7.0).
     pub jet_jump: f32,
@@ -189,6 +195,7 @@ impl Default for SoldierConstants {
             prone_up_lock: 44.5 / 30.0,
             aim_size: 1.0,
             collision_scale: 1.0,
+            collision_damage_immune: false,
             jet_jump: 7.0,
             jet_push: 14.0,
             jet_acceleration: 20.0,

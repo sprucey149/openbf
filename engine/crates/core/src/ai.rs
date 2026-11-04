@@ -131,6 +131,7 @@ pub use draw::{
 pub use gunner_foot::yaw_toward;
 pub(crate) use gunner_foot::{burst_len, heat_fits, heat_spent, pause_ticks};
 pub(crate) use gunner_foot::{friend_near_blast, item_line_blocked, release_blasts_own_side};
+pub use mover::SPOT_FLOOR_TOL;
 pub use route::{first_leg, floor_walked};
 pub use state::{
     AiState, Behaviour, FightState, FlankState, HoldState, LostState, MoverState, NavTick,

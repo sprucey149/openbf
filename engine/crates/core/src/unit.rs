@@ -633,6 +633,13 @@ impl Unit {
     /// Feed into the sim hash.
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(&self.gen.to_le_bytes());
+        if self.consts.collision_damage_immune || self.spec.consts.collision_damage_immune {
+            eat(b"COLLISION_IMMUNE");
+            eat(&[
+                u8::from(self.consts.collision_damage_immune),
+                u8::from(self.spec.consts.collision_damage_immune),
+            ]);
+        }
         eat(&[
             self.alive as u8,
             self.team,

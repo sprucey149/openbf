@@ -18,6 +18,7 @@ mod class_change_maps;
 mod class_dbs;
 mod cloaking;
 mod collision;
+mod collision_immunity;
 mod donor_materials;
 mod droideka_preview;
 mod event_messages;

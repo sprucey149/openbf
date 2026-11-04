@@ -872,11 +872,32 @@ pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
 ];
 
 /// A soldier class's movement constants through its chain: the props, the
-/// jet's class data ([`jet_class_data`]) and whether a channel-0 weapon is a
+/// collision-damage immunity, the jet's class data ([`jet_class_data`]) and whether a channel-0 weapon is a
 /// lightsaber (a `melee` weapon; re-jetpack.md §3.3).
 pub fn soldier_constants(db: &ClassDb, class: &str) -> SoldierConstants {
     let mut c = SoldierConstants::from_props(&ClassSrc { db, class });
     jet_class_data(db, class, &mut c);
+    // Both PS2 constructors default CollisionScale to (1, 0, 0): BF1
+    // FUN_0020d238:121825–121832, BF2 FUN_00250488:169421–169427.
+    // Vector setters replace only supplied components, in class-chain order.
+    let mut collision_damage_scale = [1.0, 0.0, 0.0];
+    for def in db.chain(class).into_iter().rev() {
+        for (_, value) in def
+            .props
+            .iter()
+            .filter(|p| p.0 == crate::classdb::fnv1a_lowercase("CollisionScale"))
+        {
+            for (slot, value) in collision_damage_scale
+                .iter_mut()
+                .zip(value.split_whitespace())
+            {
+                if let Ok(value) = value.parse::<f32>() {
+                    *slot = value;
+                }
+            }
+        }
+    }
+    c.collision_damage_immune = collision_damage_scale == [0.0; 3];
     if let Some(row) = db.chain(class).into_iter().find_map(|def| {
         def.props
             .iter()
