@@ -539,7 +539,7 @@ impl Renderer {
                         fade: mesh::NO_FADE,
                         lights: skinned_lights(d.lit),
                     };
-                    if d.light == LightPath::Character && d.layer != DrawLayer::Spec {
+                    if d.light == LightPath::Character {
                         let sphere = d.lit.unwrap_or(crate::LitSphere {
                             centre: d.model.w_axis.truncate(),
                             radius: 0.0,

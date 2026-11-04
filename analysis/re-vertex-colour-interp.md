@@ -205,8 +205,9 @@ the gather or the term.
 
 - Whether terrain, water, sky and vertex ALPHA should take the same blend (the GS does it for every primitive; the
   port's meshes for those differ from the PS2's patches, not measured).
-- The per-pixel lighting of lit (non-prelit) models: the PS2 lights per vertex and blends in screen space, the port
-  shades N·L per pixel in perspective. Not measured here.
+- At this note's baseline, lit models still shaded N·L per pixel. The 2026-11-04
+  runtime correction evaluates the completed material lighting per vertex and blends it in display units:
+  `re-vertex-lighting-port.md`. New port regressions cover this; matched PS2 acceptance remains separate.
 - UTA1's pen floor 8–14 levels above the PS2 after the change; the green over-prediction on the right half.
 - BF1's clipper body (same guard constants and tests; not traced).
 - Bit 31 of the draw flags: no setter found.

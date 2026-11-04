@@ -135,11 +135,15 @@ pub fn bf1_elf_verdict(flags: u32) -> Option<AlphaMode> {
 }
 
 /// What BF2's ELF draws where it contradicts the census (see the module doc):
-/// a word with neither 0x02 nor 0x04 is OPAQUE with no test. The texture's
-/// alpha reaches only the frame buffer's alpha. Words with either bit stay the
-/// census's, and BF2 has one segment class, so nothing else decides this.
+/// a word with neither 0x02 nor 0x04 is OPAQUE with no test. A translucent
+/// word without the cutout bit is BLEND regardless of its texture histogram
+/// or specular flag. Words carrying 0x02 retain the existing census verdict.
 pub fn bf2_elf_verdict(flags: u32) -> Option<AlphaMode> {
-    (flags & crate::detail::ALPHA_IS_MEANINGFUL == 0).then_some(AlphaMode::Opaque)
+    match flags & crate::detail::ALPHA_IS_MEANINGFUL {
+        0 => Some(AlphaMode::Opaque),
+        crate::detail::TRANSPARENT => Some(AlphaMode::Blend),
+        _ => None,
+    }
 }
 
 /// Whether the disc alpha-tests this draw — the rule's `mod` term never
@@ -1044,12 +1048,9 @@ mod tests {
             verdict(0x1_0001, &bf2, Some(&window)),
             (AlphaMode::Opaque, Rule::Mask)
         );
-        // The same stats on a sheet with one texel past the test are rule 3's
-        // histogram again: a smooth ramp reads as grime, OPAQUE (the crate's
-        // body, whose sheet reaches 255).
         assert_eq!(
             verdict(0x1_0005, &bf2, Some(&stats(1.0, 0.0, 193))),
-            (AlphaMode::Opaque, Rule::Mask)
+            (AlphaMode::Blend, Rule::Elf)
         );
     }
 
@@ -1184,6 +1185,29 @@ mod tests {
             verdict(0x100_0002, &RenderType::Bf2(3), Some(&stats(0.1, 0.9, 100))),
             (AlphaMode::Blend, Rule::NeverTests)
         );
+    }
+
+    #[test]
+    fn bf2_translucent_shells_do_not_become_opaque_or_cutouts() {
+        let bf2 = RenderType::Bf2(0);
+        let bladder = stats(0.24868774, 0.017425537, 255);
+        assert_eq!(
+            census_verdict(0x85, &bf2, Some(&bladder)),
+            (AlphaMode::Opaque, Rule::Modulation)
+        );
+        for flags in [0x4, 0x5, 0x85, 0x1_0085, 0x100_0005] {
+            for texture in [bladder, stats(0.0, 0.9, 255), stats(1.0, 0.0, 255)] {
+                assert_eq!(verdict(flags, &bf2, Some(&texture)).0, AlphaMode::Blend);
+            }
+        }
+        assert_eq!(verdict(0x1_0098, &bf2, Some(&bladder)).0, AlphaMode::Opaque);
+        assert_eq!(verdict(0x1_0001, &bf2, Some(&bladder)).0, AlphaMode::Opaque);
+        assert_eq!(verdict(0x1_0007, &bf2, Some(&bladder)).0, AlphaMode::Mask);
+        assert_eq!(
+            verdict(0x85, &bf1("Normal"), Some(&bladder)).0,
+            AlphaMode::Opaque
+        );
+        assert_eq!(verdict(0x85, &bf2, None), (AlphaMode::Opaque, Rule::None));
     }
 
     #[test]

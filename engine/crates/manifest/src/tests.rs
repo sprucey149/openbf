@@ -492,6 +492,7 @@ fn full_manifest() -> Manifest {
             velocity_range: 1.0,
             velocity_change_rate: 0.1,
         }),
+        terrain_detail: Some(("terrain_detail".into(), 16.0)),
         sun_flare: Some(ManifestSunFlare {
             angle: [115.0, -20.0],
             color: [255.0; 4],
@@ -912,6 +913,7 @@ fn manifest_field_order_is_the_wire_format() {
             "terrain_query_size",
             "fog_cloud",
             "sun_flare",
+            "terrain_detail",
         ]
     );
 }

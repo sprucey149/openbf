@@ -40,8 +40,8 @@ pub use environment::{
     ManifestFoliage, ManifestFoliageMesh, ManifestGrassClass, ManifestHdr, ManifestLeafClass,
     ManifestLight, ManifestLighting, ManifestLightning, ManifestNormalWater, ManifestPointLight,
     ManifestPrecipitation, ManifestSky, ManifestSkyEffect, ManifestSkyModel, ManifestSkyObject,
-    ManifestSpotCone,
-    ManifestStars, ManifestWater, ManifestWaterConfig, ManifestWetMask, ManifestWind,
+    ManifestSpotCone, ManifestStars, ManifestWater, ManifestWaterConfig, ManifestWetMask,
+    ManifestWind,
 };
 
 pub mod shadow;
@@ -560,6 +560,8 @@ pub struct Manifest {
     pub fog_cloud: Option<ManifestFogCloud>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sun_flare: Option<ManifestSunFlare>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain_detail: Option<(String, f32)>,
 }
 
 /// One world's authored AI data, from `mungefs::plan` and `mungefs::world`.

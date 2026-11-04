@@ -193,6 +193,7 @@ pub(super) fn upload_cpu_texture_inner(
             height: d.height,
             mips: &detail_mips,
             scale: DETAIL_UV_SCALE,
+            world_patch: 0.0,
         }),
         scroll,
         uv_scale,

@@ -165,9 +165,9 @@ struct VsOut {
     @location(8) @interpolate(flat) fade: f32,
     // PLANAR view depth (clip w), the fog's coordinate (`fog_amount`).
     @location(9) fog_depth: f32,
-    // The local lights' per-vertex sum (`point_sum`), GS units.
-    @location(10) point: vec3<f32>,
-    // The depth `color.rgb` and `point` are weighted by (`affine_w`); 0 on a
+    // The complete per-vertex material lighting in display units.
+    @location(10) lighting: vec3<f32>,
+    // The depth `color.rgb` and `lighting` are weighted by (`affine_w`); 0 on a
     // draw that blends them in perspective.
     @location(11) wc: f32,
     @location(12) @interpolate(flat) region_top: vec4<f32>,
@@ -214,7 +214,7 @@ fn unweight(a: vec3<f32>, wc: f32) -> vec3<f32> {
 fn affine_in(v: VsOut) -> VsOut {
     var o = v;
     o.color = vec4<f32>(unweight(v.color.rgb, v.wc), v.color.a);
-    o.point = unweight(v.point, v.wc);
+    o.lighting = unweight(v.lighting, v.wc);
     return o;
 }
 
@@ -270,11 +270,11 @@ fn mesh_vertex(in: VsIn) -> VsOut {
     out.cull_near = in.cull_near;
     out.light = path;
     out.fade = fade_alpha(in.m3.xyz, in.fade);
-    out.point = point_sum(world_pos.xyz, out.world_normal, in.lights);
+    out.lighting = vertex_lighting(out, in.lights);
     out.wc = affine_w(out.clip_pos, in.light);
     if out.wc > 0.0 {
         out.color = vec4<f32>(out.color.rgb * out.wc, out.color.a);
-        out.point = out.point * out.wc;
+        out.lighting = out.lighting * out.wc;
     }
     return out;
 }
@@ -330,7 +330,7 @@ fn bayer4(p: vec2<f32>) -> f32 {
 // equivalent linear-space factor is pow(d, 2.2) (gamma 2.2 approximates the
 // sRGB curve). Alpha is untouched — the alpha test must see the base alpha.
 fn detail_factor(uv: vec2<f32>) -> f32 {
-    if material.detail.y == 0.0 {
+    if material.detail.y == 0.0 || material.detail.w > 0.0 {
         return 1.0;
     }
     let d = textureSample(t_detail, s_color, uv * material.detail.x).a * 2.0;
@@ -498,14 +498,15 @@ const LIGHT_VERTEX_LIT: u32 = 10u;
 // `render::IFACE_AMBIENT`.
 const IFACE_AMBIENT: f32 = 0.5;
 
-fn shade_unfogged(in: VsOut) -> vec4<f32> {
-    let uv = material_uv(in.uv);
-    var texel = textureSample(t_color, s_color, uv);
-    if in.light == LIGHT_TERRAIN {
-        let display = textureSample(t_color_display, s_color, uv);
-        texel = vec4<f32>(srgb_to_linear(display.rgb), display.a);
+fn vertex_lit_path(path: u32) -> bool {
+    return path == 0u || path == LIGHT_CHARACTER || path == LIGHT_PRELIT
+        || path == LIGHT_PRELIT_ADD || path == LIGHT_VERTEX_LIT || path == LIGHT_IFACE;
+}
+
+fn vertex_lighting(in: VsOut, lights: vec4<u32>) -> vec3<f32> {
+    if !vertex_lit_path(in.light) {
+        return vec3<f32>(0.0);
     }
-    let base = texel * in.color;
     let n = normalize(in.world_normal);
     var ndotl = max(dot(n, -globals.sun_dir), 0.0);
     // BF1's VU1 sun term (`analysis/re-sun-direction.md` §1.8): its light
@@ -544,38 +545,50 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
         sun_g *= in.region_top.w - 1.0;
         light2_g *= in.region_bottom.w;
     }
-    let detail = detail_factor(uv);
-    // The PS2's interface light set (card SSELB, `render::LightPath::Iface`):
-    // a flat ambient and one white light fixed to the camera, in GS units,
-    // times the model's colour word; no map light.
-    if in.light == LIGHT_IFACE {
-        let sum = (IFACE_AMBIENT + max(dot(n, -globals.iface_dir), 0.0)) * in.color.rgb;
-        return vec4<f32>(gs_lit(texel.rgb * detail, sum), base.a);
-    }
-    // `in.point`: BF2's local lights (`point_sum`), already in GS units.
-    if in.light == 0u || in.light == LIGHT_CHARACTER {
-        return vec4<f32>(gs_lit(base.rgb * detail, ambient_g + sun_g + light2_g + in.point), base.a);
-    }
-    // The other paths (`render::LightPath`): `tex` is the texel alone,
-    // `in.color.rgb` the COL0 (times a white instance tint).
-    let tex = texel.rgb * detail;
-    // A prelit set skips every `Static()` light (§3).
-    let dynamic_g = sun_g * (1.0 - globals.sun_static)
-        + light2_g * (1.0 - globals.light2_static)
-        + in.point;
-    var rgb: vec3<f32>;
+    let local = point_sum(in.world_pos, in.world_normal, lights);
+    var lit: vec3<f32>;
     switch in.light {
+        case LIGHT_IFACE: {
+            let sum = (IFACE_AMBIENT + max(dot(n, -globals.iface_dir), 0.0)) * in.color.rgb;
+            lit = gs_lit(vec3<f32>(1.0), sum);
+        }
         case LIGHT_PRELIT: {
-            rgb = gs_lit(base.rgb * detail, dynamic_g);
+            let dynamic_g = sun_g * (1.0 - globals.sun_static)
+                + light2_g * (1.0 - globals.light2_static) + local;
+            lit = gs_lit(in.color.rgb, dynamic_g);
         }
         case LIGHT_PRELIT_ADD: {
-            rgb = gs_lit(tex, linear_to_srgb(in.color.rgb) + dynamic_g);
-        }
-        case LIGHT_UNLIT: {
-            rgb = base.rgb * detail;
+            let dynamic_g = sun_g * (1.0 - globals.sun_static)
+                + light2_g * (1.0 - globals.light2_static) + local;
+            lit = gs_lit(vec3<f32>(1.0), linear_to_srgb(in.color.rgb) + dynamic_g);
         }
         case LIGHT_VERTEX_LIT: {
-            rgb = gs_lit(tex, linear_to_srgb(in.color.rgb) + in.point);
+            lit = gs_lit(vec3<f32>(1.0), linear_to_srgb(in.color.rgb) + local);
+        }
+        default: {
+            lit = gs_lit(in.color.rgb, ambient_g + sun_g + light2_g + local);
+        }
+    }
+    return linear_to_srgb(lit);
+}
+
+fn shade_unfogged(in: VsOut) -> vec4<f32> {
+    let uv = material_uv(in.uv);
+    var texel = textureSample(t_color, s_color, uv);
+    if in.light == LIGHT_TERRAIN {
+        let display = textureSample(t_color_display, s_color, uv);
+        texel = vec4<f32>(srgb_to_linear(display.rgb), display.a);
+    }
+    let base = texel * in.color;
+    let detail = detail_factor(uv);
+    if vertex_lit_path(in.light) {
+        return vec4<f32>(texel.rgb * detail * srgb_to_linear(in.lighting), base.a);
+    }
+    let tex = texel.rgb * detail;
+    var rgb: vec3<f32>;
+    switch in.light {
+        case LIGHT_UNLIT: {
+            rgb = base.rgb * detail;
         }
         case LIGHT_UNLIT_ADD: {
             rgb = tex * (vec3<f32>(1.0) + in.color.rgb);
@@ -597,6 +610,14 @@ fn shade_unfogged(in: VsOut) -> vec4<f32> {
             // LIGHT_TERRAIN: the heightfield's GS vertex byte, 0x80 = 1.0,
             // reaching 1.94 on BF1; the GS clamps the product at 255.
             rgb = min(tex * srgb_to_linear(in.color.rgb * (255.0 / 128.0)), vec3<f32>(1.0));
+        }
+    }
+    if in.light == LIGHT_TERRAIN && material.detail.w > 0.0 {
+        let patch_size = material.detail.w;
+        let local = floor(in.world_pos.xz / patch_size) - floor(globals.camera_pos.xz / patch_size);
+        let detail_alpha = textureSample(t_detail, s_color, in.world_pos.xz * material.detail.x / patch_size).a;
+        if all(abs(local) <= vec2<f32>(1.0)) {
+            rgb = srgb_to_linear(clamp(linear_to_srgb(rgb) * (2.0 * detail_alpha), vec3<f32>(0.0), vec3<f32>(1.0)));
         }
     }
     return vec4<f32>(rgb, base.a);
@@ -676,29 +697,30 @@ var<private> FOGSPREAD_DIAGONAL: array<f32, 129> = array<f32, 129>(
 //
 // Returns the NEAR scene's weight, which the `_fade` entry points write as
 // alpha: 1 nearer than b, 0 past c. DEVIATIONS, both PROVISIONAL: the ramp is
-// a smoothstep where the PS2's palette is a ramp over Z-buffer high bytes
-// (nonlinear in view distance, and its own shape is in the microcode, 8),
+// an unquantized reciprocal-depth ramp where the PS2 uses Z-buffer high bytes,
 // and this composites per FRAGMENT in draw order rather than compositing the
 // finished near-scene buffer once.
 fn far_fade(dist: f32) -> f32 {
     if globals.fade_end <= globals.fade_begin {
         return 1.0;
     }
-    return 1.0 - smoothstep(globals.fade_begin, globals.fade_end, dist);
+    let begin = max(globals.fade_begin, 1e-3);
+    let end = globals.fade_end;
+    return clamp((1.0 / max(dist, 1e-3) - 1.0 / end) / (1.0 / begin - 1.0 / end), 0.0, 1.0);
 }
 
 @fragment
 fn fs_terrain_layer(in: VsOut) -> @location(0) vec4<f32> {
     far_cull(in);
     let c = shade(in);
-    return vec4<f32>(c.rgb, c.a * far_fade(in.view_dist));
+    return vec4<f32>(c.rgb, c.a * far_fade(in.fog_depth));
 }
 
 @fragment
 fn fs_terrain_layer_display(in: VsOut) -> @location(0) vec4<f32> {
     far_cull(in);
     let c = shade(in);
-    return vec4<f32>(linear_to_srgb(c.rgb), c.a * far_fade(in.view_dist));
+    return vec4<f32>(linear_to_srgb(c.rgb), c.a * far_fade(in.fog_depth));
 }
 
 // The three world entry points again, with the fade in alpha. OPAQUE and MASK
@@ -711,7 +733,7 @@ fn fs_terrain_layer_display(in: VsOut) -> @location(0) vec4<f32> {
 fn fs_fade(raw: VsOut) -> @location(0) vec4<f32> {
     let in = affine_in(raw);
     far_cull(in);
-    return vec4<f32>(shade(in).rgb, far_fade(in.view_dist));
+    return vec4<f32>(shade(in).rgb, far_fade(in.fog_depth));
 }
 
 @fragment
@@ -719,7 +741,7 @@ fn fs_mask_fade(raw: VsOut) -> @location(0) vec4<f32> {
     let in = affine_in(raw);
     far_cull(in);
     mask_test(in);
-    return vec4<f32>(shade(in).rgb, far_fade(in.view_dist));
+    return vec4<f32>(shade(in).rgb, far_fade(in.fog_depth));
 }
 
 @fragment
@@ -727,7 +749,7 @@ fn fs_blend_fade(raw: VsOut) -> @location(0) vec4<f32> {
     let in = affine_in(raw);
     far_cull(in);
     let c = shade(in);
-    return vec4<f32>(c.rgb, c.a * far_fade(in.view_dist));
+    return vec4<f32>(c.rgb, c.a * far_fade(in.fog_depth));
 }
 
 // WATER draws (`render::DrawLayer::Water`): the map's surface, composited by
@@ -837,7 +859,7 @@ fn water_color(in: VsOut) -> vec4<f32> {
         if globals.water_fog_begin > 0.0 && in.view_dist > globals.water_fog_begin {
             rgb = apply_fog(rgb, in.fog_depth);
         }
-        return vec4<f32>(rgb, clamp(col.a, 0.0, 1.0) * far_fade(in.view_dist));
+        return vec4<f32>(rgb, clamp(col.a, 0.0, 1.0) * far_fade(in.fog_depth));
     }
     let texel = water_texel(uv);
     let v = normalize(globals.camera_pos - globals.water_eye_shift - in.world_pos);
@@ -859,7 +881,7 @@ fn water_color(in: VsOut) -> vec4<f32> {
         rgb = srgb_to_linear(display / combined);
         alpha = combined;
     }
-    return vec4<f32>(rgb, alpha * far_fade(in.view_dist));
+    return vec4<f32>(rgb, alpha * far_fade(in.fog_depth));
 }
 
 fn water_fog_amount(in: VsOut) -> f32 {
@@ -917,7 +939,7 @@ fn speckle_color(in: VsOut) -> vec4<f32> {
     let far_rgb = rgb * far_weight;
     let quantized = select(far_rgb, far_water_add(far_rgb, in.clip_pos.xy), material.detail.z > 0.5);
     let contribution = mix(rgb * near_weight, quantized, far);
-    let fade = far_fade(in.view_dist) * (1.0 - water_fog_amount(in));
+    let fade = far_fade(in.fog_depth) * (1.0 - water_fog_amount(in));
     return vec4<f32>(contribution / max(weight, 1e-6), weight * fade);
 }
 
@@ -1034,8 +1056,8 @@ struct VsSpecOut {
     // The base draw's fade, so the pass screens the same pixels away.
     @location(9) @interpolate(flat) fade: f32,
     @location(10) fog_depth: f32,
-    // The base draw's local lights (`point_sum`).
-    @location(11) point: vec3<f32>,
+    // The base draw's complete per-vertex material lighting.
+    @location(11) lighting: vec3<f32>,
     // The base draw's `VsOut::wc`.
     @location(12) wc: f32,
 };
@@ -1047,7 +1069,7 @@ fn vs_spec(in: VsIn) -> VsSpecOut {
     // depth and the LessEqual test keeps it.
     let world_pos = model * vec4<f32>(in.position, 1.0);
     let world_normal = (model * vec4<f32>(in.normal, 0.0)).xyz;
-    return spec_varyings(world_pos, world_normal, in.uv, in.color, in.inst_color, in.cull, in.cull_near, in.light, fade_alpha(in.m3.xyz, in.fade), in.lights);
+    return spec_varyings(world_pos, world_normal, in.uv, in.color, in.inst_color, in.cull, in.cull_near, in.light, fade_alpha(in.m3.xyz, in.fade), in.lights, vec4<f32>(0.0));
 }
 
 // The skinned twin (queue SPEC2): `vs_skinned`'s expressions, so the pass
@@ -1064,7 +1086,7 @@ fn vs_spec_skinned(in: VsSkinnedIn) -> VsSpecOut {
     let world = model * skin;
     let world_pos = world * vec4<f32>(in.position, 1.0);
     let world_normal = (world * vec4<f32>(in.normal, 0.0)).xyz;
-    return spec_varyings(world_pos, world_normal, in.uv, in.color, in.inst_color, in.cull, in.cull_near, in.light, 1.0, in.lights);
+    return spec_varyings(world_pos, world_normal, in.uv, in.color, in.inst_color, in.cull, in.cull_near, in.light, 1.0, in.lights, in.region_bottom);
 }
 
 // The pass's varyings from one vertex's world position and normal: the base's
@@ -1080,11 +1102,21 @@ fn spec_varyings(
     light: u32,
     fade: f32,
     lights: vec4<u32>,
+    region_bottom: vec4<f32>,
 ) -> VsSpecOut {
     var out: VsSpecOut;
     out.light = light & 0xffu;
     out.fade = fade;
-    out.point = point_sum(world_pos.xyz, world_normal, lights);
+    var base: VsOut;
+    base.world_pos = world_pos.xyz;
+    base.world_normal = world_normal;
+    base.color = color;
+    base.light = out.light;
+    if (light & 0x200u) != 0u {
+        base.region_top = vec4<f32>(cull, cull_near.x, cull_near.y + 1.0);
+        base.region_bottom = region_bottom;
+    }
+    out.lighting = vertex_lighting(base, lights);
     out.clip_pos = globals.view_proj * world_pos;
     out.world_normal = world_normal;
     out.uv = uv;
@@ -1092,12 +1124,16 @@ fn spec_varyings(
     out.wc = affine_w(out.clip_pos, light);
     if out.wc > 0.0 {
         out.color = vec4<f32>(color.rgb * out.wc, color.a);
-        out.point = out.point * out.wc;
+        out.lighting = out.lighting * out.wc;
     }
     out.view_dist = length(world_pos.xyz - globals.camera_pos);
     out.fog_depth = out.clip_pos.w;
     out.cull = cull;
     out.cull_near = cull_near;
+    if (light & 0x200u) != 0u {
+        out.cull = vec2<f32>(1.0e9);
+        out.cull_near = vec2<f32>(0.0);
+    }
 
     let n = normalize(world_normal);
     let i = normalize(world_pos.xyz - globals.camera_pos);
@@ -1140,7 +1176,7 @@ fn fs_spec(in: VsSpecOut) -> @location(0) vec4<f32> {
     b.light = in.light;
     b.fade = in.fade;
     b.fog_depth = in.fog_depth;
-    b.point = unweight(in.point, in.wc);
+    b.lighting = unweight(in.lighting, in.wc);
     b.wc = 0.0;
     far_cull(b);
     let base = shade_unfogged(b);
@@ -1151,7 +1187,7 @@ fn fs_spec(in: VsSpecOut) -> @location(0) vec4<f32> {
     let stored = clamp(apply_fog(base.rgb, in.fog_depth), vec3<f32>(0.0), vec3<f32>(1.0));
     let wanted = clamp(apply_fog(after, in.fog_depth), vec3<f32>(0.0), vec3<f32>(1.0));
     let delta = max(wanted - stored, vec3<f32>(0.0));
-    return vec4<f32>(delta * far_fade(in.view_dist), 0.0);
+    return vec4<f32>(delta * far_fade(in.fog_depth), 0.0);
 }
 
 struct VsSkinnedIn {
@@ -1200,11 +1236,11 @@ fn vs_skinned(in: VsSkinnedIn) -> VsOut {
         out.cull_near = vec2<f32>(0.0);
     }
     out.fade = 1.0;
-    out.point = point_sum(world_pos.xyz, out.world_normal, in.lights);
+    out.lighting = vertex_lighting(out, in.lights);
     out.wc = affine_w(out.clip_pos, in.light);
     if out.wc > 0.0 {
         out.color = vec4<f32>(out.color.rgb * out.wc, out.color.a);
-        out.point = out.point * out.wc;
+        out.lighting = out.lighting * out.wc;
     }
     return out;
 }
@@ -1219,7 +1255,7 @@ fn bloom_light(in: VsOut) -> vec4<f32> {
     let d = min(linear_to_srgb(base.rgb * detail_factor(uv)) * gain, vec3<f32>(2.0));
     let fogged = linear_to_srgb(apply_fog(srgb_to_linear(d), in.fog_depth));
     let coverage = select(base.a, 1.0, in.light == LIGHT_GLOW);
-    return vec4<f32>(fogged * 0.5 * coverage * far_fade(in.view_dist), max(1.0, in.bloom_gain));
+    return vec4<f32>(fogged * 0.5 * coverage * far_fade(in.fog_depth), max(1.0, in.bloom_gain));
 }
 @fragment
 fn fs_bloom(raw: VsOut) -> @location(0) vec4<f32> {

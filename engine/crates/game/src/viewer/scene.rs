@@ -596,13 +596,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     if let Some(t) = terrain {
         for (mesh, mat, layer, _) in upload_terrain_chunks(r, t)? {
             let tex = match mat {
-                Some(m) => get_texture(
-                    r,
-                    scene,
-                    &mut textures,
-                    &m.to_ascii_lowercase(),
-                    render::WrapV::Repeat,
-                )?,
+                Some(m) => get_terrain_texture(r, scene, &mut textures, &m.to_ascii_lowercase())?,
                 None => None,
             };
             draws.push(match tex {
@@ -632,13 +626,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     // base chunk (none on the disc: every LTEX name ships in its own LVL).
     if let (Some(t), Some(layers)) = (terrain, &scene.terrain_layers) {
         for (mesh, mat) in upload_terrain_layer_chunks(r, t, layers)? {
-            match get_texture(
-                r,
-                scene,
-                &mut textures,
-                &mat.to_ascii_lowercase(),
-                render::WrapV::Repeat,
-            )? {
+            match get_terrain_texture(r, scene, &mut textures, &mat.to_ascii_lowercase())? {
                 Some(b) => draws.push(
                     DrawCmd::terrain_layer(mesh, b.handle, Mat4::IDENTITY)
                         .with_cull(cull.map(|c| c.terrain)),
@@ -1534,7 +1522,12 @@ fn upload_sky(
     // right after them (`analysis/re-stars.md` §3).
     let mut dome_shells = 0;
     for (i, m) in sky.models.iter().enumerate() {
-        let ambient = sky_shell_tint(scene.manifest.lightning.as_ref(), i, ambient);
+        let mut ambient = sky_shell_tint(scene.manifest.lightning.as_ref(), i, ambient);
+        ambient[3] *= super::look::sky_layer_opacity(
+            &scene.manifest.source_game,
+            &scene.manifest.map,
+            &m.geometry,
+        );
         let Some(cpu) = scene.meshes.get(&m.geometry) else {
             // The discs reference four dome models that exist in no LVL
             // (`hoth_mountain_2`, `kas_moon`, `geo_sky_dome_arena`); the bake
@@ -1762,6 +1755,61 @@ fn upload_sky_objects(
         }
     }
     Ok(out)
+}
+
+fn get_terrain_texture(
+    r: &mut Renderer,
+    scene: &Scene,
+    cache: &mut HashMap<String, BoundTexture>,
+    name: &str,
+) -> Result<Option<BoundTexture>> {
+    let detail = scene.manifest.terrain_detail.as_ref().filter(|(_, patch)| {
+        scene.manifest.source_game == "bf2" && patch.is_finite() && *patch > 0.0
+    });
+    let Some(((detail_name, patch), detail)) =
+        detail.and_then(|row| scene.textures.get(&row.0).map(|texture| (row, texture)))
+    else {
+        return get_texture(r, scene, cache, name, render::WrapV::Repeat);
+    };
+    let key = format!("\u{3}terrain:{name}:{detail_name}");
+    if let Some(&binding) = cache.get(&key) {
+        return Ok(Some(binding));
+    }
+    if test_dropped_texture(name) {
+        return Ok(None);
+    }
+    let Some(base) = scene.textures.get(name) else {
+        return Ok(None);
+    };
+    let mips: Vec<&[u8]> = std::iter::once(base.rgba.as_slice())
+        .chain(base.extra_mips.iter().map(Vec::as_slice))
+        .collect();
+    let detail_mips: Vec<&[u8]> = std::iter::once(detail.rgba.as_slice())
+        .chain(detail.extra_mips.iter().map(Vec::as_slice))
+        .collect();
+    let handle = r
+        .add_texture(&render::TextureDesc {
+            width: base.width,
+            height: base.height,
+            mips: &mips,
+            sampler: render::SamplerMode::Linear,
+            wrap_v: render::WrapV::Repeat,
+            srgb: true,
+            detail: Some(render::DetailDesc {
+                width: detail.width,
+                height: detail.height,
+                mips: &detail_mips,
+                scale: 8.0,
+                world_patch: *patch,
+            }),
+            scroll: [0.0; 2],
+            uv_scale: [1.0; 2],
+            label: Some(name),
+        })
+        .map_err(|error| anyhow!("terrain texture {name}: {error}"))?;
+    let binding = BoundTexture { handle };
+    cache.insert(key, binding);
+    Ok(Some(binding))
 }
 
 /// Look up (uploading on first use) one texture; None when the manifest

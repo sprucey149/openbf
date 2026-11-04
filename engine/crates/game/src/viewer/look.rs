@@ -819,6 +819,31 @@ pub fn look_tune(game: &str, map: &str) -> Option<&'static LookTune> {
         .find(|t| t.game.eq_ignore_ascii_case(game) && t.map.eq_ignore_ascii_case(map))
 }
 
+pub struct SkyLayerTune {
+    pub game: &'static str,
+    pub map: &'static str,
+    pub geometry: &'static str,
+    pub opacity: f32,
+}
+
+pub const SKY_LAYER_TUNES: &[SkyLayerTune] = &[SkyLayerTune {
+    game: "bf2",
+    map: "fel1",
+    geometry: "fel_sky_dome_trees",
+    opacity: 0.2,
+}];
+
+pub fn sky_layer_opacity(game: &str, map: &str, geometry: &str) -> f32 {
+    SKY_LAYER_TUNES
+        .iter()
+        .find(|tune| {
+            tune.game.eq_ignore_ascii_case(game)
+                && tune.map.eq_ignore_ascii_case(map)
+                && tune.geometry.eq_ignore_ascii_case(geometry)
+        })
+        .map_or(1.0, |tune| tune.opacity)
+}
+
 /// The map's authored HDR block as the renderer's bloom, under its tune.
 pub fn bloom_from(h: manifest::ManifestHdr, tune: Option<&LookTune>) -> render::Bloom {
     render::Bloom {

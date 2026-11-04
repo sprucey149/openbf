@@ -48,6 +48,7 @@ pub struct DetailDesc<'a> {
     pub mips: &'a [&'a [u8]],
     /// UV multiplier for the detail lookup; 1.0 = same UVs as the base.
     pub scale: f32,
+    pub world_patch: f32,
 }
 
 /// CPU-side description of one texture upload.
@@ -148,7 +149,7 @@ impl GpuTexture {
             detail_scale,
             detail_strength,
             f32::from(u8::from(!desc.srgb)),
-            0.0,
+            desc.detail.map_or(0.0, |d| d.world_patch),
             desc.scroll[0],
             desc.scroll[1],
             desc.uv_scale[0],

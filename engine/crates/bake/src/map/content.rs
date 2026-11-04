@@ -94,6 +94,7 @@ pub(super) fn bake_content(
     let mut base_plan: Option<mungefs::plan::Plan> = None;
     let mut base_plnp: Option<mungefs::plan::Plnp> = None;
     let mut terrain_glb = None;
+    let mut terrain_detail = None;
     let mut terrain_query_size = None;
     let mut terrain_render_heights = None;
     let mut terrain_parsed: Option<mungefs::terrain::Terrain> = None;
@@ -633,6 +634,11 @@ pub(super) fn bake_content(
                         .map_err(|e| anyhow!("tern 0x{:X}: {e}", c.offset))?;
                     terrain_query_size = crate::gameplay::apply_terrain(lvl_path, &mut t)?;
                     terrain_render_heights = crate::gameplay::apply_render_heights(lvl_path, &t)?;
+                    terrain_detail = c.child(b"DTLX").and_then(|chunk| {
+                        let bytes = chunk.payload.split(|&byte| byte == 0).next()?;
+                        let name = std::str::from_utf8(bytes).ok()?.to_ascii_lowercase();
+                        (!name.is_empty()).then_some((name, t.info.grid_unit * 8.0))
+                    });
                     if terrain_cutters.is_empty() {
                         terrain_cutters = t
                             .cutters
@@ -1225,7 +1231,10 @@ pub(super) fn bake_content(
         // `FoamTexture` and nothing else, so a map's terrain, foliage and
         // mist sheets keep design D3's answer.
         let water_named = water_named_textures.contains(&lower);
-        let consumer_named = water_named
+        let consumer_named = terrain_detail
+            .as_ref()
+            .is_some_and(|(name, _)| name == &lower)
+            || water_named
             || sheet_named.as_deref() == Some(lower.as_str())
             || far_texture_alias
                 .as_ref()
@@ -1643,6 +1652,7 @@ pub(super) fn bake_content(
         lowres_glb,
         foliage,
         terrain_layers_glb,
+        terrain_detail,
         leaf,
         hdr: hdr.map(|h| manifest::ManifestHdr {
             num_bloom_passes: h.num_bloom_passes,
