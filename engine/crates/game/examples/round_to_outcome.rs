@@ -125,6 +125,18 @@
 //! that is both reads `stuck unit` with its `noprog` field filled). Only
 //! `stuck` units enter the verdict tally, hubs and clusters.
 //!
+//! AI flyer pilots have a separate position watch: an explicit takeoff request,
+//! takeoff phase, or flying goal/curve means they should be travelling. Spending
+//! the same window within NO_PROGRESS_GAIN of an anchor counts too, even without
+//! a ground leg. The watch uses vehicle position in 3D, not speed or curve time:
+//! wall jitter/replans cannot fake movement; a vertical takeoff does move. Landing,
+//! falling, uncommanded parking and non-pilot seats are excluded. This is OURS,
+//! a diagnostic definition; measure: stuck-pad/deck original-game traces before
+//! interpreting the inherited CEN window as a gameplay acceptance bound.
+//! The no-progress total includes both watches, with one entry per unit. A separate
+//! coverage row retains flight-intent unit-ticks and the whole round's longest
+//! stationary spell, so an earlier stall cannot disappear from the evidence.
+//!
 //! ## What stops a walking bot — `OBST_CSV`
 //! `OBST_CSV=<dir>` (cards OBST, PARR) writes `<dir>/<map>_s<seed>.csv`: every
 //! alive bot on foot every 15 ticks (`game::unit_probe::Probe` with the
@@ -3819,20 +3831,113 @@ struct LegWatch {
     best: f32,
 }
 
+/// A flyer's pilot tenure and the last position it left by NO_PROGRESS_GAIN.
+/// Independent of infantry legs, curve replans and the pilot's seat pose.
+#[derive(Clone, Copy)]
+struct FlightWatch {
+    gen: u32,
+    vehicle: core::vehicle::VehicleHandle,
+    since: u64,
+    anchor: glam::Vec3,
+    excursion: f32,
+}
+
+fn active_flight(
+    sim: &core::sim::Sim,
+    h: core::unit::UnitHandle,
+    departing: Option<core::vehicle::VehicleHandle>,
+) -> Option<core::vehicle::VehicleHandle> {
+    use core::vehicle::flyer::FlightPhase;
+    let u = sim.unit(h)?;
+    let m = u.mount?;
+    let v = sim.vehicle(m.vehicle)?;
+    if !sim.flyer_bots
+        || u.controller != core::unit::Controller::Ai
+        || v.kind != core::vehicle::VehicleKind::Flyer
+        || !v
+            .seats
+            .get(usize::from(m.seat))
+            .is_some_and(|s| s.kind == core::vehicle::SeatKind::Pilot && s.occupant == Some(h))
+    {
+        return None;
+    }
+    let wants_flight = match v.flyer.phase {
+        FlightPhase::Landed => {
+            // Takeoff is an edge toggle. Once requested, an alternating false
+            // output must not erase a failed launch before it can be measured.
+            u.ai.ride
+                .and_then(|r| r.flyer)
+                .is_some_and(|f| f.takeoff || departing == Some(m.vehicle))
+        }
+        FlightPhase::Takeoff => true,
+        FlightPhase::Flying => v.flyer.ai.goal.is_some() || v.flyer.ai.curve.is_some(),
+        FlightPhase::Landing | FlightPhase::Falling => false,
+    };
+    wants_flight.then_some(m.vehicle)
+}
+
 /// Units that keep one leg without closing on it (module header, "The stuck
 /// census"): a wall slide moves the unit enough to reset `stuck_run`, so the
 /// stuck census alone misses it. Only foot travel and active ground-vehicle
-/// pilots follow that leg: flyer steering has its own goal, other seats do
-/// not steer, and a parked walker deliberately retains its old leg. Indexed
-/// by unit index.
+/// pilots follow that leg: other seats do not steer, and a parked walker
+/// deliberately retains its old leg. Flyer pilots have an independent position
+/// watch while they intend to fly. Both lists are indexed by unit index.
 #[derive(Default)]
 struct NoProgress {
     units: Vec<Option<LegWatch>>,
+    flyers: Vec<Option<FlightWatch>>,
+    flight_samples: u64,
+    flight_longest: u64,
 }
 
 impl NoProgress {
+    fn observe_flight(&mut self, sim: &core::sim::Sim, h: core::unit::UnitHandle, tick: u64) {
+        let i = h.index as usize;
+        if self.flyers.len() <= i {
+            self.flyers.resize(i + 1, None);
+        }
+        let departing = self.flyers[i].filter(|w| w.gen == h.gen).map(|w| w.vehicle);
+        let Some(vehicle) = active_flight(sim, h, departing) else {
+            self.flyers[i] = None;
+            return;
+        };
+        let pos = sim.vehicle(vehicle).unwrap().pos;
+        match &mut self.flyers[i] {
+            Some(w) if w.gen == h.gen && w.vehicle == vehicle => {
+                let distance = (pos - w.anchor).length();
+                if distance >= NO_PROGRESS_GAIN {
+                    w.anchor = pos;
+                    w.since = tick;
+                    w.excursion = 0.0;
+                } else {
+                    w.excursion = w.excursion.max(distance);
+                }
+            }
+            slot => {
+                *slot = Some(FlightWatch {
+                    gen: h.gen,
+                    vehicle,
+                    since: tick,
+                    anchor: pos,
+                    excursion: 0.0,
+                });
+            }
+        }
+        self.flight_samples += 1;
+        self.flight_longest = self
+            .flight_longest
+            .max(tick - self.flyers[i].unwrap().since);
+    }
+
+    fn flyer_stalled(&self, h: core::unit::UnitHandle, tick: u64) -> Option<(u64, f32)> {
+        let w = self.flyers.get(h.index as usize).copied().flatten()?;
+        (w.gen == h.gen && tick - w.since >= NO_PROGRESS_TICKS)
+            .then_some((tick - w.since, w.excursion))
+    }
+
     fn observe(&mut self, sim: &core::sim::Sim, tick: u64) {
         for (h, u) in sim.alive_units() {
+            self.observe_flight(sim, h, tick);
             let i = h.index as usize;
             if self.units.len() <= i {
                 self.units.resize(i + 1, None);
@@ -3926,9 +4031,20 @@ fn stuck_census(
     let mut flag_under = 0usize;
     let mut flag_dodge = 0usize;
     let mut lines = String::new();
-    // The no-progress units: `(index, ticks, best)`.
+    // The no-progress units: `(index, ticks, best distance or flyer excursion)`.
     let mut stalled: Vec<(u32, u64, f32)> = Vec::new();
     for (h, u) in &alive {
+        if let (Some((ticks, excursion)), Some((m, v))) = (
+            noprog.flyer_stalled(*h, sim.tick),
+            u.mount.and_then(|m| sim.vehicle(m.vehicle).map(|v| (m, v))),
+        ) {
+            stalled.push((h.index, ticks, excursion));
+            outln!(lines,
+                    "  noprog flyer pilot {} team {} vehicle {} gen {} phase {:?} ticks {ticks} excursion {excursion:.2} m pos ({:.1},{:.1},{:.1}) goal {:?} curve {} cursor {:?}",
+                    h.index, u.team, m.vehicle.index, m.vehicle.gen, v.flyer.phase,
+                    v.pos.x, v.pos.y, v.pos.z, v.flyer.ai.goal, v.flyer.ai.curve.is_some(), v.flyer.ai.cursor);
+        }
+
         let Some(r) = u.ai.route else {
             continue;
         };
@@ -4117,13 +4233,19 @@ fn stuck_census(
     );
     outln!(
         out,
-        "census {key}: {} alive units on one leg >= {NO_PROGRESS_TICKS} ticks gaining < {NO_PROGRESS_GAIN} m on its waypoint [{}]",
+        "census {key}: {} alive units on one leg or stationary flight intent >= {NO_PROGRESS_TICKS} ticks with < {NO_PROGRESS_GAIN} m progress [{}]",
         stalled.len(),
         stalled
             .iter()
             .map(|(i, n, _)| format!("{i}:{n}"))
             .collect::<Vec<_>>()
             .join(" ")
+    );
+    outln!(
+        out,
+        "census {key}: flyer flight-intent {} unit-ticks; longest stationary {} ticks (limit {NO_PROGRESS_TICKS})",
+        noprog.flight_samples,
+        noprog.flight_longest,
     );
     // Card WHY: the round's failed walks by code (`NavStats::fails`).
     let fails = &sim.nav_stats.fails;
@@ -6371,6 +6493,257 @@ mod diagnostic_tests {
             watch.observe(&sim, 0);
             watch.observe(&sim, NO_PROGRESS_TICKS);
             assert!(watch.stalled(h, &route, NO_PROGRESS_TICKS).is_some());
+        }
+    }
+
+    fn flight_intent(
+        sim: &mut core::sim::Sim,
+        h: UnitHandle,
+        phase: core::vehicle::flyer::FlightPhase,
+    ) {
+        use core::vehicle::flyer::{FlyAgent, FlyerAi};
+        let m = sim.unit(h).unwrap().mount.unwrap();
+        sim.flyer_bots = true;
+        let ai = FlyerAi {
+            agent: FlyAgent::Travel,
+            goal: Some(Vec3::new(100.0, 100.0, 0.0)),
+            ..Default::default()
+        };
+        let v = sim.vehicle_mut(m.vehicle).unwrap();
+        v.flyer.phase = phase;
+        v.flyer.ai = ai;
+        // Obtain the private output type through the real public AI driver.
+        let (mut pilot_sim, pilot) = leg_fixture(core::vehicle::VehicleKind::Flyer, 0);
+        pilot_sim.flyer_bots = true;
+        pilot_sim.flyer_params = vec![Some(Default::default())];
+        let mut state = pilot_sim.unit(pilot).unwrap().ai;
+        core::ai::think(&pilot_sim, pilot, &mut state);
+        let mut output = state
+            .ride
+            .unwrap()
+            .flyer
+            .expect("landed driver requests takeoff");
+        output.takeoff = phase == core::vehicle::flyer::FlightPhase::Landed;
+        output.ai = ai;
+        sim.unit_mut(h)
+            .unwrap()
+            .ai
+            .ride
+            .get_or_insert_default()
+            .flyer = Some(output);
+    }
+
+    #[test]
+    fn flyer_no_progress_counts_wedged_pilots_without_a_ground_leg() {
+        use core::vehicle::flyer::FlightPhase::*;
+        for phase in [Landed, Takeoff, Flying] {
+            let (mut sim, h) = leg_fixture(core::vehicle::VehicleKind::Flyer, 0);
+            flight_intent(&mut sim, h, phase);
+            sim.unit_mut(h).unwrap().ai.route = None;
+            let m = sim.unit(h).unwrap().mount.unwrap();
+            if phase == Flying {
+                // BF2 uses its own curve, not an infantry leg or BF1 goal.
+                let ai = &mut sim.vehicle_mut(m.vehicle).unwrap().flyer.ai;
+                ai.goal = None;
+                ai.curve = Some([Vec3::ZERO, Vec3::ZERO, Vec3::X * 100.0, Vec3::X * 200.0]);
+            }
+            let mut watch = NoProgress::default();
+            for tick in 0..=NO_PROGRESS_TICKS {
+                // Wall-contact jitter and even replanned curves must not restart the clock.
+                let v = sim.vehicle_mut(m.vehicle).unwrap();
+                v.pos.z = if tick % 2 == 0 { 0.5 } else { 0.0 };
+                v.vel = Vec3::Z * 5.0; // Requested speed is not actual progress.
+                v.flyer.ai.t = (tick % 60) as f32 / 60.0;
+                if phase == Landed {
+                    sim.unit_mut(h)
+                        .unwrap()
+                        .ai
+                        .ride
+                        .as_mut()
+                        .unwrap()
+                        .flyer
+                        .as_mut()
+                        .unwrap()
+                        .takeoff = tick % 2 == 0;
+                }
+                sim.tick = tick;
+                let hash = sim.hash();
+                watch.observe(&sim, tick);
+                assert_eq!(sim.hash(), hash);
+                assert_eq!(
+                    watch.flyer_stalled(h, tick).is_some(),
+                    tick == NO_PROGRESS_TICKS,
+                    "{phase:?} at {tick}"
+                );
+            }
+            assert_eq!(watch.flight_longest, NO_PROGRESS_TICKS);
+            assert_eq!(watch.flight_samples, NO_PROGRESS_TICKS + 1);
+            let mut w = WalkSim::new(113, Vec3::ZERO, None);
+            w.sim = sim;
+            let hash = w.sim.hash();
+            let census = stuck_census(
+                "fixture",
+                &w,
+                &[vec![], vec![]],
+                120,
+                &LongestRun::default(),
+                &watch,
+            );
+            assert!(
+                census.contains("census fixture: 1 alive units on one leg"),
+                "{census}"
+            );
+            assert!(census.contains("noprog flyer pilot"), "{census}");
+            assert_eq!(w.sim.hash(), hash);
+        }
+    }
+
+    #[test]
+    fn flyer_no_progress_excludes_moving_parked_landing_and_nonpilots() {
+        use core::vehicle::flyer::FlightPhase::*;
+        for case in [
+            "flying",
+            "vertical",
+            "parked",
+            "landing",
+            "falling",
+            "gunner",
+            "passenger",
+            "human",
+            "disabled",
+            "no-intent",
+        ] {
+            let seat = match case {
+                "gunner" => 1,
+                "passenger" => 2,
+                _ => 0,
+            };
+            let (mut sim, h) = leg_fixture(core::vehicle::VehicleKind::Flyer, seat);
+            flight_intent(
+                &mut sim,
+                h,
+                match case {
+                    "parked" => Landed,
+                    "landing" => Landing,
+                    "falling" => Falling,
+                    _ => Flying,
+                },
+            );
+            if case == "parked" {
+                // Old goals may survive deliberate parking; only a takeoff request counts.
+                sim.unit_mut(h)
+                    .unwrap()
+                    .ai
+                    .ride
+                    .as_mut()
+                    .unwrap()
+                    .flyer
+                    .as_mut()
+                    .unwrap()
+                    .takeoff = false;
+            }
+            if case == "human" {
+                sim.unit_mut(h).unwrap().controller = Controller::Player { slot: 0 };
+            }
+            if case == "disabled" {
+                sim.flyer_bots = false;
+            }
+            if case == "no-intent" {
+                sim.vehicle_mut(sim.unit(h).unwrap().mount.unwrap().vehicle)
+                    .unwrap()
+                    .flyer
+                    .ai = Default::default();
+            }
+            let m = sim.unit(h).unwrap().mount.unwrap();
+            let mut watch = NoProgress::default();
+            for tick in 0..=NO_PROGRESS_TICKS * 2 {
+                let v = sim.vehicle_mut(m.vehicle).unwrap();
+                match case {
+                    "flying" => {
+                        v.pos.x = tick as f32 * 0.1;
+                        v.flyer.ai.goal = Some(v.pos + Vec3::X * 100.0);
+                    }
+                    "vertical" => v.pos.y = tick as f32 * 0.1,
+                    _ => {}
+                }
+                let hash = sim.hash();
+                watch.observe(&sim, tick);
+                assert_eq!(sim.hash(), hash);
+                assert!(watch.flyer_stalled(h, tick).is_none(), "{case} at {tick}");
+                let route = sim.unit(h).unwrap().ai.route.unwrap();
+                assert!(watch.stalled(h, &route, tick).is_none(), "old leg: {case}");
+            }
+        }
+    }
+
+    #[test]
+    fn flyer_no_progress_resets_on_landing_dismount_and_vehicle_replacement() {
+        use core::vehicle::flyer::FlightPhase::*;
+        for reset in [
+            "landing",
+            "dismount",
+            "vehicle",
+            "vehicle-generation",
+            "generation",
+            "seat",
+        ] {
+            let (mut sim, mut h) = leg_fixture(core::vehicle::VehicleKind::Flyer, 0);
+            flight_intent(&mut sim, h, Flying);
+            let m = sim.unit(h).unwrap().mount.unwrap();
+            let mut watch = NoProgress::default();
+            watch.observe(&sim, 0);
+            assert!(watch.flyer_stalled(h, NO_PROGRESS_TICKS).is_some());
+            match reset {
+                "landing" => {
+                    sim.vehicle_mut(m.vehicle).unwrap().flyer.phase = Landing;
+                    watch.observe(&sim, NO_PROGRESS_TICKS);
+                    flight_intent(&mut sim, h, Flying);
+                }
+                "dismount" => {
+                    sim.unseat_unit(h);
+                    watch.observe(&sim, NO_PROGRESS_TICKS);
+                    assert!(sim.seat_unit(h, m.vehicle, 0));
+                    flight_intent(&mut sim, h, Flying);
+                }
+                "vehicle" => {
+                    sim.unseat_unit(h);
+                    let spec = core::vehicle::VehicleSpec {
+                        kind: core::vehicle::VehicleKind::Flyer,
+                        class: 0,
+                        home_team: Some(0),
+                        neutral_when_empty: false,
+                        spawn_pad: None,
+                        pos: Vec3::ZERO,
+                        yaw: 0.0,
+                        max_health: 100.0,
+                        health_type: core::weapon::HealthType::Vehicle,
+                        seats: vec![core::vehicle::SeatKind::Pilot],
+                    };
+                    let replacement = sim.spawn_vehicle(&spec);
+                    assert!(sim.seat_unit(h, replacement, 0));
+                    flight_intent(&mut sim, h, Flying);
+                }
+                "vehicle-generation" => {
+                    sim.vehicle_mut(m.vehicle).unwrap().gen += 1;
+                    sim.unit_mut(h).unwrap().mount.as_mut().unwrap().vehicle.gen += 1;
+                    flight_intent(&mut sim, h, Flying);
+                }
+                "seat" => {
+                    sim.unseat_unit(h);
+                    assert!(sim.seat_unit(h, m.vehicle, 1));
+                }
+                "generation" => {
+                    sim.unit_mut(h).unwrap().gen += 1;
+                    h.gen += 1;
+                    sim.vehicle_mut(m.vehicle).unwrap().seats[0].occupant = Some(h);
+                }
+                _ => unreachable!(),
+            }
+            watch.observe(&sim, NO_PROGRESS_TICKS + 1);
+            assert!(
+                watch.flyer_stalled(h, NO_PROGRESS_TICKS + 1).is_none(),
+                "{reset}"
+            );
         }
     }
 
