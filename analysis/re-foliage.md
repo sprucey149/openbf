@@ -449,3 +449,145 @@ per vertex, 368/368 summed). Its additions are folded above: the regions on GEO1
 bit, the signed unpack, the flag-8 pairs, and the 0x701580 queue.
 
 **Stayed [H]:** why BF1 batches; foliage_b's blue residual; the VU prim bit 0x800800 (`re-material-flags.md` §2).
+
+## 17. Grass display-colour compositing (2026-11-04, issue #116)
+
+The maintainer's Dagobah comparison shows pale grass branches standing out much
+more strongly in the port. A fresh local map bake from the PS2 DAG1.LVL produced
+58 textures identical byte-for-byte to the existing map textures, including
+`dag1_grass`; the manifest has no tier-2 texture overrides. This is evidence
+against replacing or recolouring the atlas to solve this report.
+
+BF2's grass draw `FUN_003c6e60` (current local listing 410276–410458) takes the
+instance colour, scales RGB by the HDR draw factor and packs it in GS units.
+The sprite builder `FUN_003c61c8` (409724–409984) likewise packs its grey and
+alpha at scale 128. As elsewhere on the PS2, texture modulation and destination
+blending operate on display-colour values. [V][O] Static primary evidence;
+not a new independent audit of the complete grass draw state.
+
+The port's grass pass previously alpha-blended into an sRGB attachment, which
+performs the blend on linear values. It now uses the compatible display-colour
+attachment view already available for water and particles. The grass shader
+modulates the sampled display RGB by the sprite/patch tint, applies the existing
+leaf-light and fog terms, then lets the source-over blend combine display
+values. The fallback for a surface without that compatible view remains the
+existing path. Grass and attached leaf patches share the pass. No new palette
+or lighting constant is introduced, and no texture files are changed.
+
+The numeric headless GPU regression covers one and two overlapping half-alpha
+grass patches over a dark background, with unequal RGB tints. Each channel
+must match the display-byte equation within two levels. It passed through
+`scripts/gpu_tests.sh --render`, together with all 72 other renderer GPU tests.
+The actual Dagobah scene test also passed: its grass changes 38,155 pixels
+against the same scene without grass. Captures at (25.76, 3.3, -107), yaw -0.5,
+pitch -0.25 were retained for inspection.
+
+Checks on base `af2d62158cad6866b71c51a86a9f833a0ea234db` plus the scoped
+working-tree edits: 15 water unit tests, 6 ripple unit tests, 73 serial renderer
+GPU tests and 2 serial Dagobah scene tests passed; formatting and whitespace
+checks passed. The release build passed. The map bake was an independent
+source check; its unchanged textures need no installation into assets_baked.
+Full PS2 colour/coverage parity at a matched camera, first-person water-foot
+wakes, alignment acceptance and the added pass-transition cost remain
+unmeasured. The maintainer identified the reported red pools as NPC mines;
+mine-placement frequency is outside this visual correction.
+
+The before/after release captures use the same CLI, camera, resolution and
+scene-loading path. They differ by more than three levels on 14,155 pixels;
+mean RGB over that mask changes from (39.74, 48.60, 55.11) to
+(34.75, 43.62, 49.37). This measures removal of excess blend brightness, not
+agreement with a PS2 screenshot at a different camera.
+
+Final delivery: the release executable packed 24,955 current asset/mission
+files, its archive footer was verified, and atomic replacement of
+`dist/openbf.exe` succeeded (1,876,206,592 bytes). This supersedes the staged-only
+delivery recorded for the first water-contact implementation. No command
+modified the profile or playtest files under `dist/openbf_data`.
+
+
+## 18. Dagobah grass lighting and terrain tone (2026-11-04, issue #116)
+
+The new comparison exposed an incorrect assumption in sections 7 and 17:
+white grass template and patch colours do not make the grass unlit. This
+section supersedes that lighting claim. No palette change or map-specific
+colour multiplier is needed.
+
+Primary evidence is BF2 SLUS-21240 paused on Dagobah, read through PINE,
+and a fresh local GS frame dump from the same view. All 60 live template
+sprites have RGBA (1, 1, 1, 1); all 321 initialized FOLG pool entries have
+white byte tints. The live class settings and the atlas RGB match the baked
+PS2 assets. The emulator has no shade-boost or colour filter enabled.
+
+The missing stream is the normal. `FUN_003c5f20` (current local listing
+409632–409720) copies four packed normals from `DAT_006bf600` into the
+sprite buffer. Live memory contains (0, 127, 0) for every corner.
+`FUN_003c5eb0` (409616–409627) submits that buffer to `FUN_00494af8`;
+`FUN_003c6e60` (410276–410458) uploads the global light set through
+`FUN_0057fd90`, then draws the sprite buffer with the patch transform.
+These normals reach the normal lit VU path described in
+`re-model-lighting.md` section 2. The patch up vector, rather than the
+billboard's camera-facing plane, determines its lighting. [V][O]
+
+The frame dump independently confirms the result: the grass texture uses
+GS MODULATE with source-over blending (ALPHA low byte 0x44), and frequently
+emits RGB (80, 93, 108) in GS units where 128 is unity. Thus white inputs
+are being darkened and shifted toward blue before texture modulation.
+The grass TEST word is 0x5160d; exact conditional depth-write parity is
+still unchecked and is not claimed by this colour correction.
+
+The renderer now evaluates hemisphere ambient, the primary directional
+light and the optional second directional light in display-colour units
+for grass, using the transformed packed up normal. Static directional
+lights remain included. Unlit leaf patches and the shared bolt/particle
+vertex path retain their existing lighting selection.
+
+A compatible non-sRGB view of each existing texture allows grass and
+terrain to filter the authored display bytes before decoding; the texture
+and its mip data are shared, not duplicated. Terrain texture layers now
+also composite through the display-colour attachment. Their prior linear
+source-over blend was another source of excess ground brightness. The
+original layer blend evidence is `re-terrain-layers.md` section 2.
+
+The matched-camera capture uses position (-9.229933, 6.6619954, -95.428314),
+yaw 2.254181, pitch -0.372927 and vertical FOV 2*atan(1/2.047594), read from
+the original view. Port captures are 640 by 448; the original screenshot
+was resized to that size with box sampling for the following region
+means. They measure broad colour agreement, not per-pixel registration:
+
+| region (x0,y0,x1,y1) | PS2 mean RGB | before | corrected |
+| --- | --- | --- | --- |
+| left grass (95,135,270,220) | 27.74, 38.29, 39.78 | 48.74, 56.93, 50.95 | 30.30, 40.67, 41.76 |
+| right grass (400,128,525,225) | 28.14, 39.09, 40.84 | 49.50, 58.58, 53.00 | 31.12, 42.14, 43.42 |
+| ground (15,260,220,320) | 45.97, 57.02, 55.96 | 51.51, 64.04, 65.28 | 49.03, 61.39, 61.64 |
+
+Source base is `af2d62158cad6866b71c51a86a9f833a0ea234db` plus the scoped
+working-tree changes. Captures and raw source evidence remain local under
+`engine/artifacts/dagobah-corrections/` and `engine/artifacts/lead_tmp/`.
+There is still a small brightness residual, and this is not an assertion
+of complete scene parity. Sprite placement randomness, mip selection,
+conditional grass depth writes, BF1 visual comparisons and the cost of
+additional pass transitions remain unchecked.
+
+
+Final integration checks use branch revision
+`1166c50b5b9161b54d7232dc4fba7bf923e0a627` plus these working-tree edits.
+The intervening main merge changed vehicle baking, walker AI and exhaust
+cleanup, not the grass or terrain rendering described above. The 76
+serial renderer GPU checks passed; both Dagobah scene checks passed
+(87,165 grass pixels changed against no grass; 11 wakes and 2,736 water
+contact pixels changed). Commands were
+`bash ../scripts/gpu_tests.sh --render` and
+`OPENBF_WATER_CAPTURE=<local-dir> bash ../scripts/gpu_tests.sh --game water_fx::dagobah`
+from `engine/`, with `cargo fmt -p game -p render --check` and
+`git diff --check`. The terrain blend regression covers both ordinary and
+no-discard pipeline selection. Release uses `cargo build --release -p game`.
+No baked asset data changed for this runtime/shader correction.
+
+
+The final release packed 24,955 current asset/mission entries into a staged
+executable. The footer and archive bounds were verified, and the staged
+binary rendered a 640 by 448 Dagobah frame from its embedded assets,
+including the COMMON merge (+111 models, 513 draws). Atomic replacement
+of `dist/openbf.exe` succeeded: 1,876,244,992 bytes. All three files under
+`dist/openbf_data` matched their pre-pack SHA-256 values. The staged smoke
+capture is `engine/artifacts/dagobah-corrections/packed-tone-smoke.png`.

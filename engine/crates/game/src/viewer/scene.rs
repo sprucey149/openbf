@@ -596,13 +596,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     if let Some(t) = terrain {
         for (mesh, mat, layer, _) in upload_terrain_chunks(r, t)? {
             let tex = match mat {
-                Some(m) => get_texture(
-                    r,
-                    scene,
-                    &mut textures,
-                    &m.to_ascii_lowercase(),
-                    render::WrapV::Repeat,
-                )?,
+                Some(m) => get_terrain_texture(r, scene, &mut textures, &m.to_ascii_lowercase())?,
                 None => None,
             };
             draws.push(match tex {
@@ -632,13 +626,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     // base chunk (none on the disc: every LTEX name ships in its own LVL).
     if let (Some(t), Some(layers)) = (terrain, &scene.terrain_layers) {
         for (mesh, mat) in upload_terrain_layer_chunks(r, t, layers)? {
-            match get_texture(
-                r,
-                scene,
-                &mut textures,
-                &mat.to_ascii_lowercase(),
-                render::WrapV::Repeat,
-            )? {
+            match get_terrain_texture(r, scene, &mut textures, &mat.to_ascii_lowercase())? {
                 Some(b) => draws.push(
                     DrawCmd::terrain_layer(mesh, b.handle, Mat4::IDENTITY)
                         .with_cull(cull.map(|c| c.terrain)),
@@ -720,7 +708,12 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             let Some(t) = name.and_then(|n| scene.textures.get(&n.to_ascii_lowercase())) else {
                 return Ok(None);
             };
-            Ok(Some(upload_cpu_texture_scrolling(
+            let upload = if ocean {
+                upload_cpu_texture_scrolling
+            } else {
+                super::upload::upload_flat_water_texture
+            };
+            Ok(Some(upload(
                 r,
                 t,
                 name.unwrap_or("water"),
@@ -773,8 +766,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                     normals.clear();
                     break;
                 };
-                let mut mips: Vec<&[u8]> = vec![&t.rgba];
-                mips.extend(t.extra_mips.iter().map(Vec::as_slice));
+                let mips = t.mips();
                 normals.push(
                     r.add_texture(&render::TextureDesc {
                         width: t.width,
@@ -794,19 +786,21 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         }
         // The speckle layer ([`speckle_look`], queue W3): its frames get
         // their own handles, carrying the layer's tiling and scroll. The
-        // WATR cell side is read off the mesh's first lattice quad (the bake
-        // emits the lattice cells before any `CPAT` patch). A frame the bake
+        // WATR cell side comes from the wet mask, or from the first lattice
+        // quad on older bakes. A frame the bake
         // did not ship drops the whole layer — 0 on the shipped maps.
-        let look_s = mesh
-            .indices
-            .get(..6)
-            .and_then(|q| crate::water_anim::lattice_cells(&mesh.positions, q))
-            .and_then(|l| speckle_look(&scene.manifest.source_game, info, l.cell));
+        let cell = info.wet.as_ref().map(|w| w.cell_size).or_else(|| {
+            mesh.indices
+                .get(..6)
+                .and_then(|q| crate::water_anim::lattice_cells(&mesh.positions, q))
+                .map(|l| l.cell)
+        });
+        let look_s = cell.and_then(|cell| speckle_look(&scene.manifest.source_game, info, cell));
         let mut frames = Vec::new();
         if let Some(sp) = &look_s {
             for n in &sp.frames {
                 match scene.textures.get(&n.to_ascii_lowercase()) {
-                    Some(t) => frames.push(upload_cpu_texture_scrolling(
+                    Some(t) => frames.push(super::upload::upload_flat_water_texture(
                         r,
                         t,
                         n,
@@ -824,6 +818,11 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         let mut normal_first = Vec::new();
         let mut still_foam = Vec::new();
         for (m, _, _, _) in upload_submeshes(r, mesh)? {
+            let tint = if info.vertex_diffuse {
+                [1.0, 1.0, 1.0, look.tint[3]]
+            } else {
+                look.tint
+            };
             if let (Some(n), Some(h)) = (normal_cfg, normals.first()) {
                 normal_first.push(draws.len());
                 draws.push(
@@ -839,7 +838,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                 continue;
             }
             draws.push(match tex {
-                Some(h) => DrawCmd::water(m, h, look.tint, Mat4::IDENTITY).with_cull(far),
+                Some(h) => DrawCmd::water(m, h, tint, Mat4::IDENTITY).with_cull(far),
                 None => {
                     // The water plane keeps its own tint rather than being
                     // routed: the manifest always names a texture, so a miss
@@ -857,7 +856,9 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                 let next = frames[1 % frames.len()];
                 speckle_first.push(draws.len());
                 draws.push(DrawCmd::speckle(m, frames[0], c(1.0), Mat4::IDENTITY).with_cull(far));
-                draws.push(DrawCmd::speckle(m, next, c(0.0), Mat4::IDENTITY).with_cull(far));
+                draws.push(
+                    DrawCmd::speckle(m, next, [0.0, 1.0, 1.0, 0.0], Mat4::IDENTITY).with_cull(far),
+                );
             }
         }
         if let (Some(sp), false) = (&look_s, speckle_first.is_empty()) {
@@ -966,7 +967,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         // TBLD: a building turret, drawn as its fallen look while down.
         let building = (world && fallen_models.contains_key(&ii)).then_some(ii);
         let station = class
-            .filter(|c| c.base.eq_ignore_ascii_case(super::stations::STATION_BASE))
+            .filter(|c| crate::stations::is_station_base(&c.base))
             .map(|c| {
                 (
                     ii,
@@ -1177,6 +1178,9 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             if let Some(c) = p.color {
                 base.color = std::array::from_fn(|i| base.color[i] * c[i]);
             }
+            if *light == render::LightPath::Glow {
+                base.color[3] *= super::look::hallway_lamp_bloom(&scene.manifest, mat.as_deref());
+            }
             draws.push(base);
             if let Some(part) = rig.and_then(|r| r.parts.iter().find(|q| q.submesh as usize == k)) {
                 let frames = part
@@ -1260,6 +1264,9 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     }
     let (sky, dome_shells) = upload_sky(r, scene, &mut textures, &mut census)?;
     r.set_sky(sky);
+    upload_atmosphere(r, scene, &mut textures)?;
+    r.set_sky_particles(Vec::new());
+    r.set_lightning(None);
     // Set on every upload, so a map without stars clears the last map's.
     r.set_stars(star_field(&scene.manifest), dome_shells);
     // The grass patches (queue FOLGG, `super::grass`): the FOLG records'
@@ -1395,6 +1402,16 @@ pub fn sky_wrap_v(v_min: f32, v_max: f32) -> render::WrapV {
     }
 }
 
+fn sky_emission(flags: u32, hdr: bool) -> Option<render::LightPath> {
+    if !hdr || flags & 0x10 == 0 {
+        None
+    } else if flags & 0x04 != 0 {
+        Some(render::LightPath::Unscaled)
+    } else {
+        Some(render::LightPath::Glow)
+    }
+}
+
 /// Build the map's sky shells: each `DomeModel` from the manifest, uploaded
 /// once and scaled so the FIRST shell (the dome) has `SKY_SHELL_RADIUS`. All
 /// shells share that scale so their authored proportions survive.
@@ -1431,7 +1448,12 @@ fn upload_sky(
     // right after them (`analysis/re-stars.md` §3).
     let mut dome_shells = 0;
     for (i, m) in sky.models.iter().enumerate() {
-        let ambient = sky_shell_tint(scene.manifest.lightning.as_ref(), i, ambient);
+        let mut ambient = sky_shell_tint(scene.manifest.lightning.as_ref(), i, ambient);
+        ambient[3] *= super::look::sky_layer_opacity(
+            &scene.manifest.source_game,
+            &scene.manifest.map,
+            &m.geometry,
+        );
         let Some(cpu) = scene.meshes.get(&m.geometry) else {
             // The discs reference four dome models that exist in no LVL
             // (`hoth_mountain_2`, `kas_moon`, `geo_sky_dome_arena`); the bake
@@ -1495,14 +1517,28 @@ fn upload_sky(
                 // angle-invariant scale about the eye) — see
                 // `render::Placement::Dome` and
                 // `analysis/re-sky-dome-placement.md` §3/§4/§8.1.
-                placement: render::Placement::Dome {
-                    offset_y: m.offset,
-                    movement_scale: m.movement_scale,
-                },
+                placement: m.rotation.map_or(
+                    render::Placement::Dome {
+                        offset_y: m.offset,
+                        movement_scale: m.movement_scale,
+                    },
+                    |[speed, x, y, z]| render::Placement::SpinningDome {
+                        offset_y: m.offset,
+                        movement_scale: m.movement_scale,
+                        speed,
+                        axis: Vec3::new(x, y, z),
+                    },
+                ),
                 yaw: 0.0,
                 // No fog flag: the sky draw flag 0x20 excludes every shell
                 // from the fog pass in both ELFs (`analysis/re-fog.md` §2.4).
                 mode: render::SkyMode::from_flags(flags),
+                lit: false,
+                depth: false,
+                emission: sky_emission(
+                    flags,
+                    scene.manifest.hdr.is_some() && sky.glow_masks_preserved,
+                ),
             });
         }
         if m.reflect {
@@ -1549,26 +1585,6 @@ fn sky_shell_tint(
     }
 }
 
-/// The map's `SkyObject` flights — distant capital ships, which the discs
-/// author per map and whose geometry lives in a SIDE LVL rather than the
-/// map's own (see `bake::map::pull_side_models`). BF1 Tatooine 1 asks for
-/// two each of a Republic assault ship, a Federation lander, a Mon Calamari
-/// cruiser and an Imperial destroyer, at 350-500 m altitude and 2500 m out.
-///
-/// They are drawn as sky shells: camera-locked in XZ, so they hold their
-/// authored distance and cannot be flown to, and depth-free, so they sit
-/// behind everything. Unlike a dome they keep scale 1.0 — a capital ship
-/// 2.5 km away needs real perspective, not a dome's normalisation.
-///
-/// **The BEARING is ours and PROVISIONAL.** The discs author a count, an
-/// altitude band and a distance, but no azimuth, so something has to choose
-/// one. This spreads every ship on the map evenly around the compass (and
-/// spreads a flight of more than one across its altitude band), which is
-/// deterministic, keeps ships from overlapping, and gives every direction
-/// something to look at. Two authored fields are NOT consumed because their
-/// meaning is not decoded: `InDirectionFactor` (2.5 on BF1 TAT1) and an
-/// unnamed two-argument range, `0xb4c88558` (30, 50 on TAT1) — either could
-/// be the real bearing rule. See `analysis/RE_LOG.md`.
 fn upload_sky_objects(
     r: &mut Renderer,
     scene: &Scene,
@@ -1579,10 +1595,6 @@ fn upload_sky_objects(
     let Some(sky) = &scene.manifest.sky else {
         return Ok(Vec::new());
     };
-    let total: u32 = sky.objects.iter().map(|o| o.count).sum();
-    if total == 0 {
-        return Ok(Vec::new());
-    }
     let mut out = Vec::new();
     let mut placed = 0u32;
     for o in &sky.objects {
@@ -1590,17 +1602,25 @@ fn upload_sky_objects(
             continue;
         };
         let parts = upload_submeshes(r, cpu)?;
-        for k in 0..o.count {
-            let bearing = std::f32::consts::TAU * placed as f32 / total as f32;
+        for _ in 0..o.count {
+            let index = placed;
             placed += 1;
-            // One ship sits mid-band; a flight spreads across it.
-            let t = if o.count > 1 {
-                k as f32 / (o.count - 1) as f32
-            } else {
-                0.5
-            };
-            let y = o.height[0] + (o.height[1] - o.height[0]) * t;
-            let offset = Vec3::new(bearing.sin() * o.distance, y, bearing.cos() * o.distance);
+            let seed = crate::classdb::fnv1a_lowercase(&o.geometry)
+                ^ crate::classdb::fnv1a_lowercase(&scene.manifest.map).rotate_left(11)
+                ^ index.wrapping_mul(0x9e37_79b9);
+            let flight = render::SkyFlight::new(
+                o.height,
+                o.distance,
+                [
+                    o.velocity_x.unwrap_or([0.0; 2]),
+                    o.velocity_y.unwrap_or([0.0; 2]),
+                    o.velocity_z.unwrap_or([0.0; 2]),
+                ],
+                Vec3::from(o.acceleration.unwrap_or([0.0; 3])),
+                o.direction_factor.unwrap_or(3.0),
+                o.lifetime.unwrap_or(1000.0),
+                seed,
+            );
             for &(mesh, ref mat, _, flags) in &parts {
                 // NOT V-clamped, unlike a dome segment: a capital ship is an
                 // ordinary model that may legitimately tile its hull texture,
@@ -1628,20 +1648,134 @@ fn upload_sky_objects(
                     texture: tex.map(|b| b.handle),
                     color: ambient,
                     scale: 1.0,
-                    // Unchanged by the sky-placement build: a `SkyObject`'s
-                    // offset is the port's own (bearing + altitude below), so
-                    // it stays a fixed vector from the eye.
-                    placement: render::Placement::Object { offset },
-                    yaw: bearing,
+                    placement: render::Placement::Flight(flight),
+                    yaw: 0.0,
                     // Routed off the raw MTRL word exactly like a dome
                     // shell: a `SkyObject` is a model like any other and the
                     // ELF's material rule is not specific to domes (RE §5).
                     mode: render::SkyMode::from_flags(flags),
+                    lit: flags & 1 != 0,
+                    depth: true,
+                    emission: None,
                 });
             }
         }
     }
     Ok(out)
+}
+
+fn atmosphere_texture(
+    r: &mut Renderer,
+    scene: &Scene,
+    cache: &mut HashMap<String, BoundTexture>,
+    name: &str,
+) -> Result<Option<render::TextureHandle>> {
+    Ok(get_texture(
+        r,
+        scene,
+        cache,
+        &name.to_ascii_lowercase(),
+        render::WrapV::Repeat,
+    )?
+    .map(|t| t.handle))
+}
+
+fn upload_atmosphere(
+    r: &mut Renderer,
+    scene: &Scene,
+    cache: &mut HashMap<String, BoundTexture>,
+) -> Result<()> {
+    let display_gain = super::look::atmosphere_display_gain(&scene.manifest);
+    let cloud = scene.manifest.fog_cloud.as_ref();
+    let cloud_texture = match cloud.and_then(|c| c.texture.as_deref()) {
+        Some(name) => atmosphere_texture(r, scene, cache, name)?,
+        None => None,
+    };
+    r.set_fog_cloud(cloud.zip(cloud_texture).map(|(config, texture)| {
+        let ground = scene.heightfield();
+        render::FogCloud {
+            texture,
+            range: config.range.unwrap_or([40.0, 90.0]),
+            color: config
+                .color
+                .unwrap_or([192.0, 192.0, 192.0, 160.0])
+                .map(|c| c.clamp(0.0, 255.0) as u8),
+            velocity: config.velocity.unwrap_or([0.0; 2]),
+            rotation: config.rotation.unwrap_or(0.1),
+            height: config.height.unwrap_or(16.0),
+            size: config.particle_size.unwrap_or(28.0),
+            density: config.particle_density.unwrap_or(30.0).max(0.0) as u32,
+            display_gain,
+            ground: Box::new(move |x, z| ground.as_ref().map_or(0.0, |g| g.height_at(x, z))),
+        }
+    }));
+    let dust = super::dust::load(scene, |name| atmosphere_texture(r, scene, cache, name))?;
+    r.set_dust(dust);
+    r.set_sun_flare(scene.manifest.sun_flare.as_ref().map(|s| render::SunFlare {
+        distance: (scene.manifest.lighting.far_scene_range.unwrap_or(2000.0) * 0.9).min(2000.0),
+        display_gain,
+        angle: s.angle,
+        color: s.color,
+        size: s.size,
+        flare_out_size: s.flare_out_size,
+        num_flare_outs: s.num_flare_outs,
+        initial_alpha: s.initial_alpha,
+        halo_rings: s.halo_rings,
+        spike_color: s.spike_color,
+        spike_size: s.spike_size,
+    }));
+    Ok(())
+}
+
+fn get_terrain_texture(
+    r: &mut Renderer,
+    scene: &Scene,
+    cache: &mut HashMap<String, BoundTexture>,
+    name: &str,
+) -> Result<Option<BoundTexture>> {
+    let detail = scene.manifest.terrain_detail.as_ref().filter(|(_, patch)| {
+        scene.manifest.source_game == "bf2" && patch.is_finite() && *patch > 0.0
+    });
+    let Some(((detail_name, patch), detail)) =
+        detail.and_then(|row| scene.textures.get(&row.0).map(|texture| (row, texture)))
+    else {
+        return get_texture(r, scene, cache, name, render::WrapV::Repeat);
+    };
+    let key = format!("\u{3}terrain:{name}:{detail_name}");
+    if let Some(&binding) = cache.get(&key) {
+        return Ok(Some(binding));
+    }
+    if test_dropped_texture(name) {
+        return Ok(None);
+    }
+    let Some(base) = scene.textures.get(name) else {
+        return Ok(None);
+    };
+    let mips = base.mips();
+    let detail_mips = detail.mips();
+    let handle = r
+        .add_texture(&render::TextureDesc {
+            width: base.width,
+            height: base.height,
+            mips: &mips,
+            sampler: render::SamplerMode::Linear,
+            wrap_v: render::WrapV::Repeat,
+            srgb: true,
+            detail: Some(render::DetailDesc {
+                width: detail.width,
+                height: detail.height,
+                mips: &detail_mips,
+                scale: 8.0,
+                world_patch: *patch,
+            }),
+            scroll: [0.0; 2],
+            uv_scale: [1.0; 2],
+            label: Some(name),
+        })
+        .map_err(|error| anyhow!("terrain texture {name}: {error}"))?;
+    let binding = BoundTexture { handle };
+    cache.insert(key, binding);
+    Ok(Some(binding))
 }
 
 /// Look up (uploading on first use) one texture; None when the manifest

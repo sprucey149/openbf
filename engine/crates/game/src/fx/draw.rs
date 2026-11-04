@@ -12,10 +12,8 @@
 //!   PARTICLE nearer than 1 m + size′ fades out toward the eye (B1
 //!   246005–246009).
 //! - **PARTICLE** (§6.1): a screen-aligned square √2·size′ wide (corners on
-//!   a circle of radius size′), turned by π·frac(0.00314·rot). BLUR ones
-//!   write no colour (§16: pass 1 is ALPHA 0x40 = Cd, pass 2 lays a screen
-//!   copy through that mask): not drawn — PROVISIONAL, the haze of pass 2 is
-//!   §11 [H].
+//!   a circle of radius size′), turned by π·frac(0.00314·rot). BLUR uses the
+//!   same sprite as an alpha mask over a low-resolution scene copy (§16).
 //! - **ANIMATED** (§6.3, §8): BF1 the PARTICLE square over a fixed 4×4 atlas
 //!   (u = (f & 3)/4, v = ((f >> 2) & 3)/4); BF2 a CPU quad 2·size′ wide
 //!   turned by rot·2π/512 over the grid FrameSize cuts (all 7 BF2 ANIMATED
@@ -237,9 +235,6 @@ pub fn emitter_draws(
     out: &mut Vec<ParticleDraw>,
 ) {
     let g = &em.geometry;
-    if g.blend == FxBlend::Blur {
-        return;
-    }
     let additive = g.blend == FxBlend::Additive;
     let m = terms.size_mul;
     let push = |out: &mut Vec<ParticleDraw>, shape, key, color| {
@@ -285,17 +280,25 @@ pub fn emitter_draws(
                 } else {
                     origin
                 };
-                push(
-                    out,
+                let color = bytes(p, a);
+                let shape = if g.blend == FxBlend::Blur {
+                    if color[3] == 0 {
+                        continue;
+                    }
+                    ParticleShape::Blur {
+                        pos: p.pos,
+                        half,
+                        angle,
+                    }
+                } else {
                     ParticleShape::Sprite {
                         pos: p.pos,
                         half,
                         angle,
                         uv,
-                    },
-                    key,
-                    bytes(p, a),
-                );
+                    }
+                };
+                push(out, shape, key, color);
             }
         }
         FxType::Billboard => {

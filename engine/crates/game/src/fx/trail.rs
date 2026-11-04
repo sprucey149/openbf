@@ -481,6 +481,15 @@ mod tests {
         fx.follow_rounds(&walk.sim);
         let id = fx.rounds.bolts[0].1;
         let mut em = super::super::tests::one_shot_emitter();
+        let mut short = em.clone();
+        short.transformer.lifetime = 0.001;
+        let expired = EffectDef::new(0, None, vec![short], Era::Bf2, &mut Lcg(41));
+        fx.live.push(LiveEffect::new(
+            std::sync::Arc::new(expired),
+            Frame::at(Vec3::X),
+            &mut Lcg(41),
+        ));
+        assert!(!fx.live[0].is_dead());
         em.start_delay = manifest::FxRange(0.001, 0.0);
         let def = EffectDef::new(0, None, vec![em.clone()], Era::Bf2, &mut Lcg(42));
         let mut effect = LiveEffect::new(
@@ -491,6 +500,7 @@ mod tests {
         effect.round = Some(Round::Bolt(crate::bolt_vis::key(&walk.sim.bolts[0]), id));
         fx.live.push(effect);
         fx.advance_frame(None, &mut walk, &core::sim::PadState::default(), 0.01);
+        assert_eq!(fx.live.len(), 1);
         let effect = &fx.live[0];
         let particles =
             effect.instances[0].particles(&em, Era::Bf2, effect.t, effect.frame, &[], |_| true);

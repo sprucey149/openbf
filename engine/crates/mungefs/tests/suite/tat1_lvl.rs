@@ -425,6 +425,43 @@ fn tat2_bf2_lights_parse() {
     assert!(lights.fill_light().is_none());
 }
 
+#[test]
+fn bf2_geonosis_sky_keeps_motion_and_effect_attachments() {
+    use mungefs::sky::Sky;
+    let p = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../extracted/bf2/lvl/DATA/_LVL_PS2/GEO/GEO1.LVL"
+    );
+    let buf = require_data!(std::fs::read(p).ok());
+    let chunk = mungefs::content_chunks(open(&buf).unwrap())
+        .unwrap()
+        .into_iter()
+        .find(|c| &c.tag == b"sky_")
+        .unwrap();
+    let sky = Sky::parse(&chunk).unwrap();
+    let ship = sky
+        .objects
+        .iter()
+        .find(|o| o.geometry.eq_ignore_ascii_case("rep_fly_gunship_dome"))
+        .unwrap();
+    assert_eq!(ship.num_objects, Some(20.0));
+    assert_eq!(ship.velocity_y, Some([-10.0, 10.0]));
+    assert_eq!(ship.velocity_z, Some([80.0, 120.0]));
+    assert_eq!(ship.direction_factor, Some(0.5));
+    let dome = sky.dome.unwrap();
+    let effects = &dome
+        .models
+        .iter()
+        .find(|m| m.geometry == "geo_sky_explosions")
+        .unwrap()
+        .effects;
+    assert_eq!(effects.len(), 11);
+    assert!(effects
+        .iter()
+        .all(|e| e.effect == "spa_sfx_skydomeexplosions" && e.parameter == Some(1.0)));
+    assert!(effects.iter().any(|e| e.hardpoint == "hp_sky_15"));
+}
+
 /// `LOWR` is a child of `tern`'s `PCHS`, NOT of `tern` — which is why a
 /// census that walked `tern`'s direct children reported it missing while a
 /// raw byte grep found it. `Chunk::children()` drops nothing; the walk was

@@ -793,6 +793,93 @@ pub struct WaterRanges {
     pub far: f32,
 }
 
+pub fn flat_display_gain(m: &manifest::Manifest) -> f32 {
+    if m.source_game == "bf2"
+        && m.hdr.is_some()
+        && m.water
+            .as_ref()
+            .and_then(|w| w.config.as_ref())
+            .is_some_and(|c| !c.ocean)
+    {
+        255.0 / 128.0
+    } else {
+        1.0
+    }
+}
+
+pub fn flat_far_diffuse(
+    mesh: &CpuMesh,
+    water: &manifest::ManifestWater,
+    lighting: &manifest::ManifestLighting,
+) -> Option<render::WaterDiffuse> {
+    let cfg = water.config.as_ref()?;
+    if cfg.ocean
+        || cfg.disable_low_res
+        || !water.vertex_diffuse
+        || water.patches != 0
+        || lighting
+            .far_scene_range
+            .is_some_and(|f| !f.is_finite() || f <= 0.0)
+    {
+        return None;
+    }
+    let wet = water.wet.as_ref()?;
+    let [near, far] = lighting.near_scene_range.map(|r| [r[1], r[2]])?;
+    let patch = cfg.patch_divisions?;
+    let decimation = cfg.lod_decimation?.min(patch[0]).min(patch[1]).max(1.0);
+    if !wet.cell_size.is_finite()
+        || wet.cell_size <= 0.0
+        || !near.is_finite()
+        || !far.is_finite()
+        || near < 0.0
+        || far <= near
+    {
+        return None;
+    }
+    let first = *mesh.positions.first()?;
+    let stride = mesh.positions.iter().position(|p| p[2] != first[2])?;
+    if stride < 2 {
+        return None;
+    }
+    let nx = stride - 1;
+    let dz = mesh.positions.get(stride)?[2] - first[2];
+    if !dz.is_finite() || dz <= 0.0 {
+        return None;
+    }
+    let nz = (wet.cell_size / dz).round() as usize;
+    if nx > 64 || !(1..=64).contains(&nz) {
+        return None;
+    }
+    let divisions = [nx as f32 / decimation, nz as f32 / decimation];
+    if divisions
+        .iter()
+        .any(|d| !d.is_finite() || *d < 1.0 || d.fract() != 0.0)
+    {
+        return None;
+    }
+    let dims = divisions.map(|d| d as usize);
+    if dims[0] * dims[1] > 64 || !nx.is_multiple_of(dims[0]) || !nz.is_multiple_of(dims[1]) {
+        return None;
+    }
+    let mut colors = [[0u32; 4]; 16];
+    for z in 0..dims[1] {
+        for x in 0..dims[0] {
+            let ordinal = x * dims[1] + z;
+            let source = (ordinal % nz) * stride + ordinal / nz;
+            let color = *mesh.colors.get(source)?;
+            let index = z * dims[0] + x;
+            colors[index / 4][index % 4] = u32::from_le_bytes(color);
+        }
+    }
+    Some(render::WaterDiffuse {
+        origin: [first[0], first[2]],
+        step: [wet.cell_size / divisions[0], wet.cell_size / divisions[1]],
+        dims: dims.map(|d| d as u32),
+        range: [near, far],
+        colors,
+    })
+}
+
 /// A map's water, able to move. Built by `viewer::upload_scene` from the
 /// water draws it has just pushed, and stepped by
 /// `viewer::SceneGpu::animate_water`.

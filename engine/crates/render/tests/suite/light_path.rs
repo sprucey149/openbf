@@ -328,3 +328,217 @@ fn glow_and_unscaled_gain_in_display_units() {
         "unscaled x0.8",
     );
 }
+
+type GouraudFixture = ([[f32; 3]; 3], [[f32; 3]; 3], [[u8; 4]; 3], Vec<Mat4>);
+
+fn gouraud_fixture(camera: &Camera) -> GouraudFixture {
+    let tan = (camera.fov_y * 0.5).tan();
+    let positions = [[-0.8, -0.8, 2.0], [0.8, -0.8, 5.0], [0.0, 0.8, 9.0]]
+        .map(|[x, y, depth]| [x * depth * tan, y * depth * tan, -depth]);
+    let rotations = [2.2142974, -0.6435011, 0.9272952].map(Mat4::from_rotation_y);
+    let normals = rotations.map(|rotation| rotation.transform_vector3(Vec3::Z).to_array());
+    let palette = positions
+        .iter()
+        .zip(rotations)
+        .map(|(position, rotation)| {
+            let p = Vec3::from(*position);
+            Mat4::from_translation(p) * rotation * Mat4::from_translation(-p)
+        })
+        .collect();
+    (
+        positions,
+        normals,
+        [[64, 64, 64, 255], [128, 128, 128, 255], [255; 4]],
+        palette,
+    )
+}
+
+fn gouraud_lighting() -> Lighting {
+    Lighting {
+        sun_dir: Vec3::NEG_Z,
+        sun_color: [render::srgb_decode(0.8); 3],
+        ambient_sky: [render::srgb_decode(0.1); 3],
+        ambient_ground: [render::srgb_decode(0.1); 3],
+        ..Lighting::default()
+    }
+}
+
+fn screen_weights(x: u32, y: u32) -> [f32; 3] {
+    let px = (x as f32 + 0.5) * 2.0 / N as f32 - 1.0;
+    let py = 1.0 - (y as f32 + 0.5) * 2.0 / N as f32;
+    let top = (py + 0.8) / 1.6;
+    let right = (px + 0.8 - 0.8 * top) / 1.6;
+    [1.0 - top - right, right, top]
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn directional_material_lighting_is_gouraud_after_posing_and_in_display_units() {
+    use render::{DrawLayer, SkinnedDrawCmd, SkinnedMeshData};
+    let mut r = headless();
+    let camera = Camera::default();
+    r.lighting = gouraud_lighting();
+    let (positions, normals, colors, palette) = gouraud_fixture(&camera);
+    let uvs = [[0.0; 2]; 3];
+    let indices = [0, 1, 2];
+    let texture = upload_tex(&mut r, 1, 1, &[255; 4], "gouraud white");
+    let rigid = r
+        .add_mesh(&MeshData {
+            positions: &positions,
+            normals: &normals,
+            uvs: &uvs,
+            colors: Some(&colors),
+            indices: &indices,
+        })
+        .unwrap();
+    let skin = r
+        .add_skinned_mesh(&SkinnedMeshData {
+            positions: &positions,
+            normals: &[[0.0, 0.0, 1.0]; 3],
+            uvs: &uvs,
+            colors: Some(&colors),
+            indices: &indices,
+            joints: &[[0, 0, 0, 0], [1, 0, 0, 0], [2, 0, 0, 0]],
+            weights: &[[1.0, 0.0, 0.0, 0.0]; 3],
+        })
+        .unwrap();
+    for path in [LightPath::Lit, LightPath::Prelit, LightPath::Character] {
+        for skinned in [false, true] {
+            let rigid_draws = if skinned {
+                vec![]
+            } else {
+                vec![DrawCmd::textured(rigid, texture, Mat4::IDENTITY).with_light(path)]
+            };
+            let skin_draws = if skinned {
+                vec![SkinnedDrawCmd {
+                    mesh: skin,
+                    texture: Some(texture),
+                    color: [1.0; 4],
+                    model: Mat4::IDENTITY,
+                    palette: palette.clone().into(),
+                    layer: DrawLayer::Opaque,
+                    light: path,
+                    lit: None,
+                }]
+            } else {
+                vec![]
+            };
+            r.render_frame(&camera, &rigid_draws, &skin_draws, [0.0; 4], None)
+                .unwrap();
+            let (rgba, width, _) = r.capture_rgba().unwrap();
+            for (x, y) in [(24, 40), (32, 32), (38, 42)] {
+                let weights = screen_weights(x, y);
+                let expected: f32 = (0..3)
+                    .map(|i| {
+                        let ambient = if path == LightPath::Prelit { 0.0 } else { 0.1 };
+                        let lit = light_sum(
+                            colors[i][0] as f32 / 255.0,
+                            &[
+                                (render::srgb_decode(0.8), normals[i][2].max(0.0)),
+                                (render::srgb_decode(ambient), 1.0),
+                            ],
+                            0.0,
+                        );
+                        weights[i] * render::srgb_encode(lit)
+                    })
+                    .sum();
+                let pixel = common::pixel(&rgba, width, x, y);
+                let expected = (expected * 255.0).round() as u8;
+                assert!(
+                    pixel[0].abs_diff(expected) <= 2,
+                    "{path:?} skinned={skinned}, ({x},{y}) got {pixel:?}, expected {expected}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn specular_uses_the_same_gouraud_base_for_rigid_and_region_lit_skinned_draws() {
+    use render::{
+        CharacterLightRegion, CharacterLightVolume, DrawLayer, LitSphere, SkinnedDrawCmd,
+        SkinnedMeshData,
+    };
+    let mut r = headless();
+    let camera = Camera::default();
+    r.lighting = gouraud_lighting();
+    let (positions, normals, colors, palette) = gouraud_fixture(&camera);
+    let uvs = [[0.0; 2]; 3];
+    let indices = [0, 1, 2];
+    let texture = upload_tex(&mut r, 1, 1, &[100, 100, 100, 255], "gouraud spec base");
+    let rigid = r
+        .add_mesh(&MeshData {
+            positions: &positions,
+            normals: &normals,
+            uvs: &uvs,
+            colors: Some(&colors),
+            indices: &indices,
+        })
+        .unwrap();
+    let skin = r
+        .add_skinned_mesh(&SkinnedMeshData {
+            positions: &positions,
+            normals: &[[0.0, 0.0, 1.0]; 3],
+            uvs: &uvs,
+            colors: Some(&colors),
+            indices: &indices,
+            joints: &[[0, 0, 0, 0], [1, 0, 0, 0], [2, 0, 0, 0]],
+            weights: &[[1.0, 0.0, 0.0, 0.0]; 3],
+        })
+        .unwrap();
+    r.set_character_light_regions(vec![CharacterLightRegion {
+        centre: Vec3::new(0.0, 0.0, -5.0),
+        axes: glam::Mat3::IDENTITY,
+        volume: CharacterLightVolume::Sphere(100.0),
+        top: [0.1; 3],
+        bottom: [0.2; 3],
+        directional: [0.4, 0.6],
+    }]);
+    r.set_specular_table(Some((1, 1, &[255; 4]))).unwrap();
+    let add = [0.05, 0.10, 0.15];
+    for skinned in [false, true] {
+        let rigid_base = DrawCmd::textured(rigid, texture, Mat4::IDENTITY);
+        let skin_base = SkinnedDrawCmd {
+            mesh: skin,
+            texture: Some(texture),
+            color: [1.0; 4],
+            model: Mat4::IDENTITY,
+            palette: palette.clone().into(),
+            layer: DrawLayer::Opaque,
+            light: LightPath::Character,
+            lit: Some(LitSphere {
+                centre: Vec3::new(0.0, 0.0, -5.0),
+                radius: 1.0,
+            }),
+        };
+        let mut captures = Vec::new();
+        for specular in [false, true] {
+            let mut rigid_draws = Vec::new();
+            let mut skin_draws = Vec::new();
+            if skinned {
+                skin_draws.push(skin_base.clone());
+                if specular {
+                    skin_draws.push(skin_base.specular(add, 50));
+                }
+            } else {
+                rigid_draws.push(rigid_base);
+                if specular {
+                    rigid_draws.push(DrawCmd::specular(rigid, texture, add, 50, Mat4::IDENTITY));
+                }
+            }
+            r.render_frame(&camera, &rigid_draws, &skin_draws, [0.0; 4], None)
+                .unwrap();
+            captures.push(r.capture_rgba().unwrap().0);
+        }
+        for (x, y) in [(24, 40), (32, 32), (38, 42)] {
+            let before = common::pixel(&captures[0], N, x, y);
+            let after = common::pixel(&captures[1], N, x, y);
+            for channel in 0..3 {
+                let expected = (f32::from(before[channel]) + add[channel] * 255.0).round() as u8;
+                assert!(after[channel].abs_diff(expected) <= 2,
+                    "skinned={skinned}, ({x},{y}) before={before:?}, after={after:?}, expected {expected}");
+            }
+        }
+    }
+}

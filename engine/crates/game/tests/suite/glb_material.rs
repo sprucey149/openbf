@@ -171,3 +171,58 @@ fn a_glb_without_extras_reads_as_flags_zero() {
     assert_eq!(cpu.submeshes[0].4, 0);
     assert_eq!(render::SkyMode::from_flags(0), render::SkyMode::Opaque);
 }
+
+#[test]
+fn felucia_shell_and_glowing_interior_keep_separate_draw_paths() {
+    let mut shell = seg("fel1_bldg_bladder1", 0x85);
+    shell.colors = Some(vec![[127; 4]; 3]);
+    let mut inner = shell.clone();
+    inner.material_flags = 0x1_0098;
+    let model = Model {
+        name: "felucia_shell_regression".into(),
+        bone_space: false,
+        vertex_box: Aabb {
+            min: [0.0; 3],
+            max: [1.0; 3],
+        },
+        vis_box: Aabb {
+            min: [0.0; 3],
+            max: [1.0; 3],
+        },
+        face_count: 2,
+        sphere: None,
+        segments: vec![inner, shell],
+    };
+    let stats = AlphaStats {
+        mid: 0.24868774,
+        a0: 0.017425537,
+        amax: 255,
+    };
+    let alphas: Vec<_> = model
+        .segments
+        .iter()
+        .map(|segment| {
+            let (mode, rule) =
+                bake::alpha::verdict(segment.material_flags, &segment.render_type, Some(&stats));
+            SegmentAlpha {
+                texture: "fel1_bldg_bladder1".into(),
+                mode,
+                rule,
+                flags: segment.material_flags,
+                rtyp: segment.render_type.clone(),
+                stats: Some(stats),
+            }
+        })
+        .collect();
+    let bytes = bake::glb::world_model_to_glb(&model, &alphas, true).unwrap();
+    let dir = std::env::temp_dir().join(format!("openbf_felucia_shell_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("plant.glb");
+    std::fs::write(&path, bytes).unwrap();
+    let mesh = game::assets::load_glb(&path).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    assert_eq!(mesh.submeshes[0].3, render::DrawLayer::Opaque);
+    assert_eq!(mesh.light_path(0), render::LightPath::Glow);
+    assert_eq!(mesh.submeshes[1].3, render::DrawLayer::Blend);
+    assert_eq!(mesh.light_path(1), render::LightPath::Lit);
+}

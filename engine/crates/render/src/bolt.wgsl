@@ -8,7 +8,7 @@
 
 fn bolt_texel(in: GrassOut) -> vec4<f32> {
     let texel = textureSample(t_color, s_color, in.uv);
-    let rgb = min(texel.rgb * srgb_to_linear(min(in.color.rgb, vec3<f32>(1.0))), vec3<f32>(1.0));
+    let rgb = min(texel.rgb * srgb_to_linear(in.color.rgb), vec3<f32>(1.0));
     return vec4<f32>(rgb, texel.a * in.color.a);
 }
 
@@ -19,6 +19,14 @@ fn fs_bolt_core(in: GrassOut) -> @location(0) vec4<f32> {
         discard;
     }
     return c;
+}
+
+@fragment
+fn fs_atmosphere(in: GrassOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(t_color, s_color, in.uv);
+    let rgb = srgb_to_linear(linear_to_srgb(texel.rgb) * in.color.rgb);
+    let alpha = texel.a * in.color.a;
+    return vec4(rgb * alpha, alpha);
 }
 
 @fragment
@@ -52,7 +60,7 @@ fn fs_bolt_solid(in: GrassOut) -> @location(0) vec4<f32> {
 
 fn display_texel(in: GrassOut) -> vec4<f32> {
     let texel = textureSample(t_color, s_color, in.uv);
-    let rgb = min(linear_to_srgb(texel.rgb) * min(in.color.rgb, vec3<f32>(1.0)), vec3<f32>(1.0));
+    let rgb = linear_to_srgb(texel.rgb) * in.color.rgb;
     return vec4<f32>(rgb, texel.a * in.color.a);
 }
 

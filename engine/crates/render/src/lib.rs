@@ -64,8 +64,10 @@ mod camera;
 mod capture;
 mod device;
 mod draw;
+mod dust;
 mod falling;
 mod filter;
+mod fog_cloud;
 mod frame;
 mod frame_ab;
 mod frustum;
@@ -77,11 +79,14 @@ mod light_beam;
 mod lighting;
 pub mod made;
 mod mesh;
+mod particle_blur;
 mod particles;
 mod pipelines;
 mod point_light;
+mod rand;
 mod resources;
 mod shadow;
+mod sun_flare;
 pub use shadow::ShadowMesh;
 mod sky;
 mod specular;
@@ -99,24 +104,30 @@ pub use draw::{
     fragment_kept, DrawCmd, DrawLayer, DrawOrder, Fade, LightPath, LodSide, LodSwitch,
     SkinnedDrawCmd, IFACE_AMBIENT, IFACE_DIR_CAMERA,
 };
+pub use dust::{Dust, DustConfig};
 pub use falling::{ForestBirdType, LeafActor, LeafEmitter};
 pub use filter::{box_side, FrameFilter};
+pub use fog_cloud::FogCloud;
 pub use frame::{FrameStats, OverlayFn};
 pub use frame_ab::FrameAb;
 pub use grass::{sprite_quad, sway, GrassClass, GrassPatch, GrassSprite, ViewAxes};
 pub use leaf::{LeafClass, LeafObject, LeafSprite};
 pub use light_beam::{Beam, Cross, TOP_ALPHA as BEAM_TOP_ALPHA};
 pub use lighting::{
-    encode as srgb_encode, light_sum, DirLight, FarFade, Fog, Lighting, WaterShading,
+    decode as srgb_decode, encode as srgb_encode, light_sum, CharacterLightRegion,
+    CharacterLightVolume, DirLight, FarFade, Fog, Lighting, WaterDiffuse, WaterShading,
 };
 pub use mesh::{
     MeshData, MeshHandle, SkinnedMeshData, SkinnedMeshHandle, SkinnedVertex, Vertex, MAX_JOINTS,
 };
 pub use particles::{ParticleDraw, ParticleShape};
 pub use point_light::{LitSphere, PointLight, SpotCone, MAX_POINT_LIGHTS};
-pub use sky::{mirror_squash, Placement, SkyMode, SkyShell, MIRROR_LIFT};
+pub use sky::{
+    mirror_squash, spin as sky_spin, Placement, SkyFlight, SkyMode, SkyShell, MIRROR_LIFT,
+};
 pub use specular::spec_texcoord;
 pub use stars::{half_size as star_half_size, star_rgb, Star, StarField};
+pub use sun_flare::SunFlare;
 pub use terrain_light::{
     LitPatch, TerrainLight, TerrainLights, LIGHTS_PER_PATCH, MAX_LIT_PATCHES, MAX_TERRAIN_LIGHTS,
 };
@@ -211,11 +222,20 @@ struct Globals {
     speckle_ambient: [f32; 4],
     speckle_specular: [f32; 4],
     speckle_axis: [f32; 3],
-    _pad8: f32,
+    water_gain: f32,
     speckle_light: [f32; 3],
-    _pad9: f32,
+    speckle_far_begin: f32,
     speckle_shift: [f32; 3],
-    _pad10: f32,
+    speckle_far_end: f32,
+    water_grid_origin: [f32; 2],
+    water_grid_step: [f32; 2],
+    water_grid_dims: [u32; 2],
+    water_grid_range: [f32; 2],
+    water_grid_colors: [[u32; 4]; 16],
+    water_fog_color: [f32; 3],
+    water_fog_on: f32,
+    water_fog_range: [f32; 2],
+    _pad_water_fog: [f32; 2],
     /// [`Lighting::character_ambient`], read by [`LightPath::Character`]
     /// draws when `character_ambient_on` is 1.
     character_ambient: [f32; 3],
@@ -272,6 +292,7 @@ pub struct Renderer {
     /// only by the twelve maps that ship a `WATR`; see `finish_init`
     /// (`pipelines.rs`).
     water_pipeline: wgpu::RenderPipeline,
+    water_display_format: Option<wgpu::TextureFormat>,
     /// The water's SPECKLE layer ([`DrawLayer::Speckle`]): additive, depth
     /// tested `LessEqual`, no depth write — see `finish_init`.
     speckle_pipeline: wgpu::RenderPipeline,
@@ -295,11 +316,12 @@ pub struct Renderer {
     fade_blend_pipeline: wgpu::RenderPipeline,
     fade_skinned_pipeline: wgpu::RenderPipeline,
     fade_skinned_blend_pipeline: wgpu::RenderPipeline,
-    /// Unlit, depth-free pass for the map's sky shells, indexed
-    /// `[SkyMode::index()]` — see [`SkyMode`] and `finish_init` (`pipelines.rs`).
-    sky_pipelines: [wgpu::RenderPipeline; 2],
+    /// Sky pipelines indexed by depth, material lighting and SkyMode:
+    /// domes paint the background; object hulls keep their depth.
+    sky_pipelines: [[[wgpu::RenderPipeline; 2]; 2]; 2],
     /// The map's sky shells, redrawn around the camera every frame.
     sky: Vec<SkyShell>,
+    sky_seed: u32,
     /// What the last frame actually submitted. Read by `--bench`: the number
     /// that moves when culling or batching changes is DRAW CALLS, not the
     /// length of the draw list.
@@ -369,6 +391,7 @@ pub struct Renderer {
     /// glow's ADDITIVE pipeline (vs `grass.wgsl`, fs `bolt.wgsl`, no depth
     /// write) and this frame's bolts, set by [`Renderer::set_bolts`].
     bolt_core_pipeline: wgpu::RenderPipeline,
+    atmosphere_pipeline: wgpu::RenderPipeline,
     bolt_glow_pipeline: wgpu::RenderPipeline,
     bolt_solid_pipeline: wgpu::RenderPipeline,
     leaf_cutout_pipeline: wgpu::RenderPipeline,
@@ -391,7 +414,10 @@ pub struct Renderer {
     /// The DomeInfo frame filter (`filter.rs`, card BFLT): its pipeline,
     /// this map's values ([`Renderer::set_frame_filter`]) and the frame copy.
     filter: filter::FilterState,
+    sun_flare: Option<sun_flare::State>,
     bloom: bloom::BloomState,
+    particle_blur: particle_blur::ParticleBlur,
+    heat_character_mask: wgpu::RenderPipeline,
     spec_buf: wgpu::Buffer,
     spec_bg: Option<wgpu::BindGroup>,
     /// The disc's mirrored specular light (`analysis/re-specular-pass.md` §4,
@@ -399,6 +425,8 @@ pub struct Renderer {
     /// — how the mismatch LOOKS on the PS2 wants an in-map capture.
     pub spec_mirror: bool,
     pub lighting: Lighting,
+    lightning: Option<(Lighting, f32)>,
+    character_light_regions: Vec<CharacterLightRegion>,
     /// Animation clock in seconds: the water surface's UV scroll, the water's
     /// speckle, the mirrored sky shell's squash ([`mirror_squash`]) and the
     /// grass and leaf sway.
@@ -422,6 +450,11 @@ pub struct Renderer {
     /// `TIME_WRAP` period; f64 keeps their phase continuous in long sessions.
     /// Default zero preserves still captures. The simulation never reads it.
     pub water_time: f64,
+    /// Atmosphere animation clock for capital ships, fog clouds and dome spin.
+    /// When `None`, defaults to `water_time` (e.g. in headless replays).
+    /// In windowed play, advanced only when the game is unpaused so pausing
+    /// freezes distant ships, fog clouds and dome rotation.
+    pub atmosphere_time: Option<f64>,
     /// Which GPU this renderer actually got. Reported by `--bench`, because a
     /// timing number without the adapter beside it means nothing.
     adapter_info: wgpu::AdapterInfo,
@@ -450,18 +483,35 @@ pub fn material_scroll_time(seconds: f64) -> f32 {
 }
 
 impl Renderer {
+    /// The current atmosphere animation clock: `atmosphere_time` if set,
+    /// otherwise `water_time`.
+    pub fn atmosphere_time(&self) -> f64 {
+        self.atmosphere_time.unwrap_or(self.water_time)
+    }
+
+    pub fn set_lightning(&mut self, flash: Option<(Lighting, f32)>) {
+        self.lightning = flash;
+    }
+
     /// Drop the map's look: everything drawn without a draw command (the
     /// sky, stars, grass, leaves, lights, effects, filter) and its lighting.
     /// A frame after this is the clear colour plus its draws, as before any
     /// map was loaded (the shell after a battle).
     pub fn clear_scene(&mut self) {
+        self.atmosphere_time = None;
+        self.lightning = None;
         self.set_sky(Vec::new());
         self.set_stars(None, 0);
         self.set_grass(Vec::new(), Vec::new());
         self.set_leaves(Vec::new(), Vec::new(), None);
         self.set_point_lights(Vec::new());
+        self.character_light_regions.clear();
         self.set_bolts(Vec::new());
         self.set_particles(Vec::new());
+        self.set_fog_cloud(None);
+        self.set_dust(Vec::new());
+        self.set_sun_flare(None);
+        self.set_sky_particles(Vec::new());
         self.set_terrain_lights(Default::default());
         self.set_frame_filter(None);
         self.set_bloom(None);
@@ -492,17 +542,7 @@ mod tests {
 
     #[test]
     fn globals_matches_the_wgsl_uniform_size() {
-        // mat4 (64) + seven 16-byte rows (camera, sun dir, sun colour, sky
-        // ambient, ground ambient + fog_on, fog colour + fog_near, fog_far +
-        // time + the two fade distances) = 176 bytes, plus the row the
-        // water's fog crossover opened (its begin, then the lit weight and the
-        // two dim terms that took its three pads) = 192, plus Light2's two rows
-        // (direction + the sun's Static flag, colour + its own) = 224, plus
-        // the water's seven ([`WaterShading`]: the eye shift, the specular,
-        // the two speckle colours, the speckle's axis, light and shift) = 336,
-        // plus the character ambient's row (colour + its on flag) = 352, plus
-        // the interface light's direction = 368.
-        assert_eq!(std::mem::size_of::<Globals>(), 368);
+        assert_eq!(std::mem::size_of::<Globals>(), 688);
         assert_eq!(std::mem::size_of::<Globals>() % 16, 0);
     }
 }

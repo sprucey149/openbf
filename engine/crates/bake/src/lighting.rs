@@ -383,9 +383,7 @@ fn filter_from(dome: &mungefs::sky::DomeInfo) -> Option<ManifestFilter> {
     })
 }
 
-/// Largest `NumObjects` the bake will honour. The discs author 1..4; this is
-/// a bound on a value read straight off the disc, not a design limit.
-const MAX_SKY_OBJECTS: u32 = 16;
+const MAX_SKY_OBJECTS: u32 = 1024;
 
 /// Reduce a map's `sky_ DomeInfo` to the manifest's sky section. A dome
 /// referencing geometry that is not in this LVL is dropped here instead of
@@ -414,6 +412,12 @@ pub fn sky_from(
                 count: count.min(MAX_SKY_OBJECTS),
                 height: o.height?,
                 distance: o.distance?,
+                velocity_x: o.velocity_x,
+                velocity_y: o.velocity_y,
+                velocity_z: o.velocity_z,
+                acceleration: o.acceleration,
+                direction_factor: o.direction_factor,
+                lifetime: o.lifetime,
             })
         })
         .collect();
@@ -427,6 +431,8 @@ pub fn sky_from(
                 offset: m.offset.unwrap_or(0.0),
                 movement_scale: m.movement_scale.unwrap_or(1.0),
                 reflect: m.reflect,
+                effects: Vec::new(),
+                rotation: m.rotation,
             })
         })
         .collect();
@@ -450,6 +456,7 @@ pub fn sky_from(
         terrain_enable: dome.terrain_enable,
         reflection_color: dome.reflection_color.map(reflection_tint),
         stars,
+        glow_masks_preserved: true,
     })
 }
 
@@ -494,6 +501,23 @@ fn reflection_tint(c: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sky_object_count_preserves_authored_geonosis_flights() {
+        let sky = mungefs::sky::Sky {
+            dome: Some(Default::default()),
+            objects: vec![mungefs::sky::SkyObject {
+                geometry: "fighter".into(),
+                num_objects: Some(20.0),
+                height: Some([80.0, 140.0]),
+                distance: Some(300.0),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let baked = sky_from(Some(&sky), |name| Some(name.into())).unwrap();
+        assert_eq!(baked.objects[0].count, 20);
+    }
 
     /// `DomeInfo.Ambient` only ever holds one of the two PS2 neutrals, so it
     /// never darkens a dome — but a real tint would still be applied.

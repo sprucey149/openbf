@@ -18,6 +18,7 @@ mod shadow;
 mod skinned;
 mod sky_shell;
 mod specular;
+mod sun_flare;
 mod uv_scroll;
 mod water_pass;
 mod world_scale;

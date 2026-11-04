@@ -360,6 +360,16 @@ per-particle draw `FUN_00377cc0`, cull/fade `FUN_0037a090`, state records `FUN_0
 
 ## 9. PS2 frames
 
+- [V] Mustafar's Lava Bridge Control window haze comes from damage to the Conquest bridge
+  console. The PS2 capture shows three normal-blend batches using the exact CLUT of
+  `com_sfx_smoke4`. The running `com_sfx_vehiclesmoke` instances match the console's
+  first three smoke slots, including their bind hardpoints and scales 2, 3, and 3.
+  The console had 118 of 150 health in RAM, within those slots' 25–90% band.
+  The separate lava mist uses an additive red-orange texture. The console starts at
+  its authored 150 health and enters the smoke band at 135. Openbf routes destructible
+  buildings through the shared direct-hit, blast, repair, and wreck handling, with
+  each damage effect sampled at its baked hardpoint.
+
 - [V] `lead_tmp/fxp/ps2cap/` (this session; NAB1 and HOT1 spawn states, fire held 4 s pitched down, 30 fps
   recordings + stills): `crop_nab1_impact.png` — BF1 `ord_explosion` on grass: a white flash, then small yellow-orange
   additive sparks (the `a_sparks3` flipbook) inside ~20 px at ~15 m; the red bolt heads glow as soft red blobs.
@@ -576,8 +586,21 @@ Not matched:
 
 - [O] **BLUR writes no particle colour** (B1 records 571949–571961, B2 715450–715452): pass 1's ALPHA byte 0x40 is
   A Cs, B Cs, C As, D Cd = **Cd** (only the particle's alpha reaches the frame's alpha plane); pass 2's 0x54 =
-  (Cs − Cd)·Ad + Cd with Cs a screen copy, laid in through that alpha. The texture's colour never shows. The port draws
-  nothing for BLUR (MUS1's `mus_sfx_blur` heat rows were white sheets as a NORMAL sprite); the haze of pass 2 stays §11 [H].
+  (Cs − Cd)·Ad + Cd with Cs a screen copy, laid in through that alpha. The texture's colour never shows.
+  MUS1's `mus_sfx_blur` uses the alpha of `com_sfx_waterfoam1` with BlurValue 0.1 at authored lava hardpoints.
+  [V] Mustafar GS capture (SLUS-21240, 2026-11-03 14:28:53), transfers 731–739 of the first drawn field:
+  bilinear reduction from 512×448 to 128×112 at GS texture base 0x3400, followed by eight mask and composite
+  pairs. Across both fields, the second-pass ST divided by Q matches the destination screen position within
+  0.07 native pixels on each axis (64 vertices). Both draws use TEST 0x51001. The port uses the aligned,
+  bilinearly reduced scene in display space and preserves the original sampling density at 4:3, widening
+  the copy for wider views. To reproduce the visible overlap with the clone in the playtest reference,
+  the port also composites over visible opaque skinned character pixels where the normal depth test
+  rejects the heat sprite. The silhouette is marked against finished scene depth so scenery can still
+  hide the character. The GS capture does not establish the source of the foreground softness.
+  The mask's TEX0 uses MODULATE with texture alpha. Transfer 728 uploads CLUT alpha bytes
+  0, 54, 64, 69, 71 and 81, and the eight mask draws use vertex alpha bytes 3–243, including values
+  above 128. The port uses the raw vertex alpha divided by 128 with the baked normalized texture alpha,
+  then clamps to the range of standard source-over blending. Ordinary particle vertices use half bytes.
 - [D] **Particles blend in display bytes** (§6.7's ALPHA 0x44 / 0x48 act on the GS's stored bytes). Drawn on the sRGB
   target they blended in linear light: a faint fringe (BF2 `underlitesmoke2`, a 16-colour sheet whose alphas run 0, 15,
   32, 48, 59, 100…) nearly vanished and the body appeared at once — GEO1's smoke column looked thin and cut. Bolts and

@@ -33,6 +33,7 @@ pub mod sky;
 pub mod sound_props;
 pub mod soundbank;
 pub mod stream;
+pub mod sun_flare;
 pub mod terrain;
 pub mod texture;
 pub mod texture_pc;

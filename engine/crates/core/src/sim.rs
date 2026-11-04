@@ -110,8 +110,8 @@ pub use state::{
     SNIPE_SUITABILITY_DEFAULT,
 };
 pub use stations::{
-    Station, StationAnim, StationClass, StationMotion, DELAY_DEFAULT as STATION_DELAY_DEFAULT,
-    GATHER_MAX as STATION_GATHER_MAX,
+    Station, StationAnim, StationClass, StationDamageEffect, StationMotion,
+    DELAY_DEFAULT as STATION_DELAY_DEFAULT, GATHER_MAX as STATION_GATHER_MAX,
 };
 pub use tow::{TowCable, TowFall};
 

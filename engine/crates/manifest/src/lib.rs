@@ -21,12 +21,14 @@
 use serde::{Deserialize, Serialize};
 
 mod environment;
+
 pub use environment::{
-    foliage_bin, FoliageKind, LeafLayout, ManifestFilter, ManifestFog, ManifestFoliage,
-    ManifestFoliageMesh, ManifestGrassClass, ManifestHdr, ManifestLeafClass, ManifestLight,
-    ManifestLighting, ManifestLightning, ManifestNormalWater, ManifestPointLight,
-    ManifestPrecipitation, ManifestSky, ManifestSkyModel, ManifestSkyObject, ManifestSpotCone,
-    ManifestStars, ManifestWater, ManifestWaterConfig, ManifestWetMask, ManifestWind,
+    foliage_bin, FoliageKind, LeafLayout, ManifestFilter, ManifestFog, ManifestFogCloud,
+    ManifestFoliage, ManifestFoliageMesh, ManifestGrassClass, ManifestHdr, ManifestLeafClass,
+    ManifestLight, ManifestLighting, ManifestLightning, ManifestNormalWater, ManifestPointLight,
+    ManifestPrecipitation, ManifestSky, ManifestSkyEffect, ManifestSkyModel, ManifestSkyObject,
+    ManifestSpotCone, ManifestStars, ManifestSunFlare, ManifestWater, ManifestWaterConfig,
+    ManifestWetMask, ManifestWind,
 };
 
 pub mod shadow;
@@ -541,6 +543,12 @@ pub struct Manifest {
     /// heights match. Absent on PS2 and same-size donors, preserving their RON.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terrain_query_size: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fog_cloud: Option<ManifestFogCloud>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sun_flare: Option<ManifestSunFlare>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain_detail: Option<(String, f32)>,
 }
 
 /// One world's authored AI data, from `mungefs::plan` and `mungefs::world`.

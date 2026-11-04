@@ -219,3 +219,117 @@ reset and in RAM. **The verifier** (one Opus agent, claim list only, `verify/VER
 NOT SUPPORTED. Corrections folded in: routine B does use the light direction (the 10 m shift, §1.2); the overlay gate
 is the draw record's word, not VU[7].x (§1.3); "uniform" holds for the near templates only (§1.5); l̂ defined (§1.4).
 Unchecked by it: the virtual callees that receive &0x69c420 (the two direct ones only read it).
+
+## 8. Native template and Kashyyyk reference-state follow-up (2026-11-03)
+
+[V] The maintainer's paused BF2 KAS2 slot 10 state was read without modifying
+it. EE memory identifies near/far packets at 0xe8daa0 / 0xe90c70, 17 by 17
+and 5 by 5 vertices. V4-16 positions paired with V4-8 colour/phase indices
+agree at every one of the 289 near and 25 far vertices with the following
+independently reconstructed sequence. Each template starts at 0x97331547.
+The LCG step is s = 1664525*s + 1013904223 modulo 2^32. Four successive
+states a,b,c,d produce colour index 5 + ((a >> 16) | (b & 0xffff0000)) % 11
+and phase (c >> 16) & 15; d starts the next vertex. X is the outer loop,
+Z the inner loop. Opposite edges copy the first edge without advancing RNG.
+This replaces the port's provisional xorshift realization. Far colours can
+be reconstructed from the initial unwrapped near-template sequence, rather
+than by decimating its spatial samples. LODDecimation clamps to unscaled
+PatchDivisions: Kashyyyk's authored 8 clamps to 4, producing 32 m far cells.
+
+[V] In that same reference, ordinary fog is off: 0x746050/54 and
+0x7c575c/60/64 are zero. The retained fog rows 0x7bb800 nevertheless contain
+1/260 and -90/260. The far-water pass does not test the ordinary fog flag;
+its authored colour at 0x7bb7f0 is RGB (104,106,108). This directly confirms
+the retained-matrix possibility left open in re-fog.md section 2.1. The range
+90..350 is inherited state, not Kashyyk's authored FogRange(0,0). Its prior
+mission provenance and fresh-boot appearance have not been traced. The port
+uses this measured reference range as a stateless visual correction on BF2
+KAS2 only, retaining the colour from the player's own sky data and leaving
+world fog off. It does not emulate arbitrary prior-map fog history.
+
+Local receipts and captures are under engine/artifacts/water_fidelity/.
+The separate zero-water diagnostic state was prepared but not loaded: Windows
+menu targeting failed, and the emulator was left paused at its original view.
+No original-game zero-water bed comparison is claimed.
+
+## 9. Flat-water HDR amplification (2026-11-03)
+
+[V] A new GS dump from the running BF2 Kashyyyk reference confirms the
+post-composite ALPHA register 0xff00000029, with FIX 255: the framebuffer is
+multiplied by 255/128 before adding glow (re-glow.md section 2.2). The dump
+contains 208 vertices using that state. The water's overlay routines A/B
+ignore BF2's HDR scene-colour command (section 1.10), so their RGB is not
+halved before this composite. The resulting flat-water surface and speckle
+contributions therefore receive 255/128 display-colour gain. Ordinary world
+geometry already cancels its half-scale scene colour against this composite.
+
+[V] Main-water TEX0 is 0x2007a00621313c00 (256-square PSMT8, palette at
+0x3d00), ALPHA 0x4144. Its uploaded palette holds source RGB without doubling
+and alpha 79, half the source 158. Near speckle TEX0 is 0x198007000,
+64-square PSMCT32 with TCC cleared; far speckle uses 0x2007a3859930bd04,
+64-square PSMT8, palette at 0x3d1c. Their ALPHA is 0x4148. This supports
+amplifying colour without increasing surface or speckle opacity. The water
+fog vertices have RGB (26,26,27), consistent with their authored fog colour
+(104,106,108) after GS modulation and HDR amplification. The renderer's
+already display-scaled fog colour must not receive a second gain.
+
+The port now applies 255/128 in display space to base water and speckle RGB
+on BF2 HDR maps using the flat-water path, before its separate water-fog
+composite. BF1, non-HDR maps and the separately fitted FFT ocean retain unity.
+This restores a missing measured amplitude rather than introducing a foam
+contrast curve. No asset rebake is needed for this shader correction.
+
+The dump, screenshot, parser and comparison captures remain local under
+engine/artifacts/water_fidelity/contrast/. The reference was briefly resumed
+to record a GS frame and paused again; save states were not overwritten.
+GPU referees cover RGB gain with unchanged transparency, bed colour and fog.
+Same-camera port captures compare the preceding build and corrected build;
+they are not pixel-registered PS2 comparisons or a full map visual sweep.
+
+## 10. Far water sampling and precision (2026-11-03)
+
+[V] The same GS frame from section 9 has 1,615 packed vertices in each
+far-water draw (main, speckle and fog). The main and speckle records write
+PSMCT16S (`FRAME` 0x000000000a080180) with DTHE 1 and DIMX
+0x2031203131203120. The near records write CT32 at 0x0000000000080080
+with DTHE 0. The four DIMX rows in screen order are (0,2,1,3), (0,2,1,3),
+(1,3,0,2), (1,3,0,2). The far target stores its RGB channels in five bits.
+[PCSX2's GS format definitions](https://github.com/PCSX2/pcsx2/blob/master/pcsx2/GS/GSLocalMemory.cpp)
+record the corresponding 0xf8 channel masks.
+
+[V] Kashyyyk's base texture carries one source mip. Its GS TEX1 is
+0xffffff8d00000120 (MXL 0, linear filter and K = -115/16). Far speckle
+uses 0xffffff8d00000128 (MXL 2), while the near crossfade target uses
+0x120 (MXL 0). The port previously sampled the completed baked mip chain
+with zero bias and filtered sRGB textures in linear light before converting
+back to display bytes. The flat-water uploads now filter the stored bytes
+with the measured GS bias. The renderer retains its baked mip chains and
+uses GPU derivatives for LOD selection.
+
+[V] The far speckle uses TCC=1 and the current flipbook frame. The near
+speckle uses TCC=0 and two cross-faded frames. For Kashyyyk, all 25 source
+frames' level-0 texels have alpha 255. After accounting for the GS palette
+layout, all 173 used colours of captured frame 0 match the disc palette
+and have GS alpha 128. The zeros in the first palette check were unused
+entries. The discarded bake diagnosis had attributed those zeros to the
+visible texture. The renderer now switches the far layer to the current
+frame's texture alpha while preserving the near crossfade. It mixes those
+contributions over the authored near/far depth band.
+
+[D] For an additive write onto an RGB5 destination, the stored destination
+is already a multiple of eight before the addition. The rounding can
+therefore be applied directly to the added speckle contribution before fog
+attenuation and HDR display gain. A weak highlight adds five GS levels in
+the GPU referee and rounds to zero or eight under the captured DIMX matrix.
+The far diffuse grid also interpolates its colours with screen-space
+weights, using the corresponding projected corner depths. The base water
+and fog use continuous destination blends. The renderer's dither is aligned
+to its target pixels.
+
+[V] As cross-checks, all 1,615 matched main/fog vertices recover the
+90..350 m fog coordinates (S/Q fitted to 1/Q). At 1,546 positive-depth
+integer-UV main vertices, the captured RGB and alpha agree with the
+reconstructed diffuse table to 2.13 authored levels at p99. The captured
+speckle alpha agrees with the baked light azimuth to 0.67 GS levels RMS over
+506 on-screen vertices. These tests distinguish the sampling and precision
+change from edits to the water palette, fog range or light direction.

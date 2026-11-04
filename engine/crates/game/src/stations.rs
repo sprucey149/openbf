@@ -10,6 +10,15 @@ use manifest::{CommonManifest, Manifest};
 use std::collections::HashMap;
 use std::path::Path;
 
+pub(crate) fn is_destructible_building(base: &str) -> bool {
+    base.eq_ignore_ascii_case("destructablebuilding")
+}
+
+pub(crate) fn is_station_base(base: &str) -> bool {
+    base.eq_ignore_ascii_case(crate::viewer::stations::STATION_BASE)
+        || is_destructible_building(base)
+}
+
 /// A map's game's common bake: its folder and its manifest, `None` when it
 /// is not baked.
 pub type Common = (std::path::PathBuf, Option<CommonManifest>);
@@ -81,6 +90,44 @@ pub fn install_collision(sim: &mut Sim, m: &Manifest, map_dir: &Path, db: &Class
             Some(g) => sphere(g, &c.name)?,
             None => None,
         };
+        if db
+            .engine_base(&c.name)
+            .is_some_and(is_destructible_building)
+        {
+            if let Some(class) = m
+                .classes
+                .iter()
+                .find(|class| class.name.eq_ignore_ascii_case(&c.name))
+            {
+                c.damage_effects = crate::vehicle_class::damage_effects(db, &c.name)
+                    .into_iter()
+                    .filter_map(|effect| {
+                        let local = match effect.attach.as_deref() {
+                            Some(name) => {
+                                let h = class
+                                    .hardpoints
+                                    .iter()
+                                    .find(|h| h.name.eq_ignore_ascii_case(name))?;
+                                crate::viewer::instance_matrix(
+                                    h.axes.unwrap_or(glam::Mat3::IDENTITY.to_cols_array_2d()),
+                                    h.pos,
+                                )
+                            }
+                            None => glam::Mat4::IDENTITY,
+                        };
+                        Some(core::sim::StationDamageEffect {
+                            band: core::autoturret::DamageEffect {
+                                start: effect.start,
+                                stop: effect.stop,
+                                effect: effect.effect,
+                            },
+                            local,
+                            scale: effect.scale,
+                        })
+                    })
+                    .collect();
+            }
+        }
     }
     sim.station_bodies.clear();
     sim.station_live_collision.clear();
@@ -129,6 +176,12 @@ pub fn install_collision(sim: &mut Sim, m: &Manifest, map_dir: &Path, db: &Class
             ))
         })
         .collect::<Result<_>>()?;
+    for si in 0..sim.stations.len() {
+        let station = &sim.stations[si];
+        if !station.serves() && !station.health.alive() {
+            sim.install_station_wreck(si as u16);
+        }
+    }
     Ok(())
 }
 
@@ -139,7 +192,7 @@ pub fn wreck_models(scene: &Scene) -> Result<HashMap<usize, String>> {
         .manifest
         .classes
         .iter()
-        .any(|c| c.base.eq_ignore_ascii_case("powerupstation"))
+        .any(|c| is_station_base(&c.base))
     {
         return Ok(out);
     }
@@ -153,7 +206,7 @@ pub fn wreck_models(scene: &Scene) -> Result<HashMap<usize, String>> {
         }
     }
     for (i, inst) in scene.manifest.instances.iter().enumerate() {
-        if db.engine_base(&inst.class) != Some("powerupstation") {
+        if !db.engine_base(&inst.class).is_some_and(is_station_base) {
             continue;
         }
         if let Some(model) = db

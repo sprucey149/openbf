@@ -297,6 +297,14 @@ pub struct CpuTexture {
     pub detail: Option<Box<CpuTexture>>,
 }
 
+impl CpuTexture {
+    pub fn mips(&self) -> Vec<&[u8]> {
+        std::iter::once(self.rgba.as_slice())
+            .chain(self.extra_mips.iter().map(Vec::as_slice))
+            .collect()
+    }
+}
+
 pub struct Scene {
     /// The baked map directory this scene was loaded from — the root the
     /// manifest's own relative paths (the nav sidecars) resolve against.

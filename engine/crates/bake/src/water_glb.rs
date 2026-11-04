@@ -53,14 +53,14 @@
 //!
 //! 1. **The blend is the runtime's, not this GLB's.** The tint and alpha come
 //!    from the Min → Max diffuse table and the sheet's own alpha (W2, WA;
-//!    `game::viewer::look::water_look`), so the GLB carries no vertex colour.
+//!    `game::viewer::look::water_look`). Flat sheets without CPAT now carry
+//!    diffuse LUT RGB on the authored PatchDivisions * INFO5 lattice.
 //!    `LAYR.color` is NOT applied and never will be — both ELFs drop it, so
 //!    the byte order that fit no map's art is moot.
-//! 2. **The mesh is two triangles per wet cell.** The PS2 builds a
-//!    `(PatchDivisions · INFO5 + 1)²` grid per cell and displaces it on VU1
-//!    (HOLD FOR FABLE 21). `patch_divisions` sizes only the KAM1 ocean's
-//!    runtime grid (`game::water_anim`); `lod_decimation` reaches the
-//!    manifest and is consumed by nothing.
+//! 2. The diffuse template's random realization remains provisional;
+//!    `re-water-colour.md` §1.5 establishes the 11 LUT entries and edge wrap.
+//!    CPAT sheets keep their original triangles and mean tint. Far water
+//!    still uses the near lattice rather than the original reduced template.
 //! 3. **Texture fallbacks**, for data neither disc ships: a map with no
 //!    `MainTexture` falls back to `LAYR`'s name, and one that names neither
 //!    falls back to its single texture ending in `_water`. Both print when
@@ -196,6 +196,82 @@ pub fn triangle_count(w: &Water) -> usize {
     cells * 2 + w.patches.iter().map(|p| p.triangles.len()).sum::<usize>()
 }
 
+pub fn diffuse_divisions(w: &Water, cfg: Option<&WaterConfig>) -> Option<[usize; 2]> {
+    let c = cfg?;
+    if c.ocean_enable.is_some_and(|v| v != 0.0) || !w.patches.is_empty() {
+        return None;
+    }
+    c.min_diffuse_color.zip(c.max_diffuse_color)?;
+    let divisions = c.patch_divisions?.map(|d| d * w.info.unknown_5 as f32);
+    divisions
+        .iter()
+        .all(|d| d.is_finite() && *d >= 1.0 && *d <= 64.0 && d.fract() == 0.0)
+        .then(|| divisions.map(|d| d as usize))
+}
+
+pub fn render_triangle_count(w: &Water, cfg: Option<&WaterConfig>) -> usize {
+    triangle_count(w) * diffuse_divisions(w, cfg).map_or(1, |[x, z]| x * z)
+}
+
+fn diffuse_lattice(
+    w: &Water,
+    c: &WaterConfig,
+    divisions: [usize; 2],
+) -> (Vec<[f32; 3]>, Vec<u32>, Vec<f32>) {
+    let [nx, nz] = divisions;
+    let min = c.min_diffuse_color.unwrap();
+    let max = c.max_diffuse_color.unwrap();
+    let mut positions = Vec::new();
+    let mut indices = Vec::new();
+    let mut colors = Vec::new();
+    let mut rng = 0x9733_1547u32;
+    let mut next = || {
+        rng = rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        rng
+    };
+    let template: Vec<_> = (0..nx * nz)
+        .map(|_| {
+            let low = next() >> 16;
+            let high = next() & 0xffff_0000;
+            next();
+            next();
+            ((low | high) % 11) as f32 / 5.0
+        })
+        .collect();
+    for z in 0..w.info.grid as usize {
+        for x in 0..w.info.grid as usize {
+            if !w.is_wet(x, z) {
+                continue;
+            }
+            let base = positions.len() as u32;
+            for iz in 0..=nz {
+                for ix in 0..=nx {
+                    positions.push([
+                        (x as f32 + ix as f32 / nx as f32) * w.info.cell_size
+                            - w.info.half_extent[0],
+                        w.layer.height,
+                        (z as f32 + iz as f32 / nz as f32) * w.info.cell_size
+                            - w.info.half_extent[1],
+                    ]);
+                    let t = template[(ix % nx) * nz + iz % nz];
+                    colors.extend(
+                        (0..3).map(|k| ((min[k] + (max[k] - min[k]) * t) / 255.0).clamp(0.0, 1.0)),
+                    );
+                    colors.push(1.0);
+                }
+            }
+            for iz in 0..nz {
+                for ix in 0..nx {
+                    let a = base + (iz * (nx + 1) + ix) as u32;
+                    let (b, c, d) = (a + 1, a + (nx + 1) as u32, a + (nx + 2) as u32);
+                    indices.extend([a, c, b, b, c, d]);
+                }
+            }
+        }
+    }
+    (positions, indices, colors)
+}
+
 /// Build the water GLB. Returns `None` when there is nothing to draw.
 pub fn water_to_glb(
     w: &Water,
@@ -245,6 +321,14 @@ pub fn water_to_glb(
         return Ok(None);
     }
 
+    let diffuse = diffuse_divisions(w, cfg).map(|d| diffuse_lattice(w, cfg.unwrap(), d));
+    let colors = if let Some((p, i, colors)) = diffuse {
+        positions = p;
+        indices = i;
+        Some(colors)
+    } else {
+        None
+    };
     let mut bin = Bin::default();
     let (min, max) = min_max3(&positions);
     let pos = bin.f32s(&flat3(&positions), "VEC3", json!({"min": min, "max": max}));
@@ -256,11 +340,15 @@ pub fn water_to_glb(
         .collect();
     let uv = bin.f32s(&uvs, "VEC2", json!({}));
     let idx = bin.u32s(&indices, json!({}));
+    let mut attributes = json!({"POSITION":pos,"NORMAL":nrm,"TEXCOORD_0":uv});
+    if let Some(colors) = colors {
+        attributes["COLOR_0"] = json!(bin.f32s(&colors, "VEC4", json!({})));
+    }
 
     crate::gltf_bin::rigid_glb(
         bin,
         json!({"name": name, "primitives": [{
-            "attributes": {"POSITION":pos,"NORMAL":nrm,"TEXCOORD_0":uv},
+            "attributes": attributes,
             "indices": idx,
             "material": 0,
             "mode": 4
@@ -343,6 +431,63 @@ mod tests {
         let w = water(4, &[(1, 1), (2, 1)], vec![]);
         assert_eq!(triangle_count(&w), 4);
         assert!(water_to_glb(&w, None, "w", None).unwrap().is_some());
+    }
+
+    #[test]
+    fn diffuse_lattice_preserves_wet_footprint_and_periodic_colours() {
+        let mut w = water(4, &[(1, 1), (2, 1)], vec![]);
+        w.info.unknown_5 = 4;
+        let c = WaterConfig {
+            patch_divisions: Some([4.0; 2]),
+            min_diffuse_color: Some([30.0, 40.0, 50.0, 255.0]),
+            max_diffuse_color: Some([70.0, 80.0, 90.0, 255.0]),
+            ..WaterConfig::default()
+        };
+        let divisions = diffuse_divisions(&w, Some(&c)).unwrap();
+        assert_eq!(divisions, [16; 2]);
+        let (p, indices, colors) = diffuse_lattice(&w, &c, divisions);
+        assert_eq!(indices.len() / 3, render_triangle_count(&w, Some(&c)));
+        assert_eq!(indices.len() / 3, 1024);
+        assert!(p.iter().all(|p| p[1] == -3.0
+            && (-16.0..=16.0).contains(&p[0])
+            && (-16.0..=0.0).contains(&p[2])));
+        for tile in 0..2 {
+            let start = tile * 17 * 17;
+            for k in 0..17 {
+                let color = |i: usize| &colors[i * 4..i * 4 + 4];
+                assert_eq!(color(start + k * 17), color(start + k * 17 + 16));
+                assert_eq!(color(start + k), color(start + 16 * 17 + k));
+            }
+        }
+        let lo = colors
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| (c[0] * 255.0).round() as u32)
+            .min()
+            .unwrap();
+        let hi = colors
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| (c[0] * 255.0).round() as u32)
+            .max()
+            .unwrap();
+        assert_eq!((lo, hi), (30, 110));
+        let native_column: Vec<_> = (0..16)
+            .map(|z| (colors[z * 17 * 4] * 255.0).round() as u32)
+            .collect();
+        assert_eq!(
+            native_column,
+            [94, 38, 46, 62, 102, 38, 62, 38, 110, 70, 110, 38, 54, 102, 62, 62]
+        );
+        let mut ocean = c.clone();
+        ocean.ocean_enable = Some(1.0);
+        assert_eq!(diffuse_divisions(&w, Some(&ocean)), None);
+        assert_eq!(
+            water_to_glb(&w, Some(&c), "water", None).unwrap(),
+            water_to_glb(&w, Some(&c), "water", None).unwrap()
+        );
     }
 
     #[test]

@@ -771,6 +771,8 @@ mod grenade;
 pub mod lod;
 use grenade::drawn;
 mod runtime;
+mod water;
+pub use water::WaterFeet;
 mod saber;
 mod saber_trail;
 

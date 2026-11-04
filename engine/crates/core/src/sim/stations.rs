@@ -64,6 +64,14 @@ pub struct StationClass {
     pub sphere: Option<[f32; 4]>,
     /// Wreck-local blast sphere, transformed by the death pose.
     pub wreck_sphere: Option<[f32; 4]>,
+    pub damage_effects: Vec<StationDamageEffect>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct StationDamageEffect {
+    pub band: crate::autoturret::DamageEffect,
+    pub local: glam::Mat4,
+    pub scale: f32,
 }
 
 /// Authored animation keys; defaults follow B1 FUN_002aa5d8 (§§2.1, 6).
@@ -102,6 +110,7 @@ impl StationClass {
             explosion: None,
             sphere: None,
             wreck_sphere: None,
+            damage_effects: Vec::new(),
         }
     }
 }
@@ -146,6 +155,10 @@ impl Station {
             sphere_radius: 0.0,
             motion: StationMotion::new(1),
         }
+    }
+
+    pub fn serves(&self) -> bool {
+        self.radius > 0.0
     }
 
     /// Strictly inside the sphere, in 3-D (§3).
@@ -200,14 +213,11 @@ impl Sim {
         let s = self.stations[station];
         let parts = s
             .instance
+            .filter(|_| s.serves())
             .map_or_else(Vec::new, |i| self.collision.prepare_rotation(i, s.pose()));
-        let live = parts
-            .iter()
-            .map(|(index, local)| {
-                let b = &self.collision.bodies()[*index];
-                crate::collision::HullPart::new(*local, b.shape.clone(), b.layers)
-            })
-            .collect();
+        let live = s
+            .instance
+            .map_or_else(Vec::new, |i| self.collision.instance_parts(i, s.pose()));
         self.station_bodies
             .resize_with(self.stations.len(), Vec::new);
         self.station_live_collision
@@ -238,21 +248,34 @@ impl Sim {
         if s.health.alive() {
             return;
         }
-        s.health.cur = 0.0;
-        s.destroyed = true;
-        s.serving = false;
-        let (class, pos, instance, transform) = (s.class, s.pos, s.instance, s.pose());
+        let (class, pos) = (s.class, s.pos);
         let station_team = s.team;
+        self.install_station_wreck(station);
         self.events.push(Event::StationDestroyed {
             station,
             class,
             pos,
             killer: attacker,
         });
+        if let Some(e) = self.station_classes[usize::from(class)].explosion.clone() {
+            self.explode_from(
+                &e,
+                pos,
+                None,
+                station_team,
+                Some(super::blast::BlastSource::Station(station)),
+            );
+        }
+    }
+
+    pub fn install_station_wreck(&mut self, station: u16) {
+        let s = &mut self.stations[usize::from(station)];
+        s.health.cur = 0.0;
+        s.destroyed = true;
+        s.serving = false;
+        let (class, instance, transform) = (s.class, s.instance, s.pose());
         let c = &self.station_classes[usize::from(class)];
-        let explosion = c.explosion.clone();
         if let Some([x, y, z, r]) = c.wreck_sphere {
-            let s = &mut self.stations[usize::from(station)];
             s.sphere_centre = transform.transform_point3(Vec3::new(x, y, z));
             s.sphere_radius = r;
         }
@@ -270,15 +293,6 @@ impl Sim {
                 .map_or(&[][..], Vec::as_slice);
             self.collision.replace_instance(i, parts, transform);
         }
-        if let Some(e) = explosion {
-            self.explode_from(
-                &e,
-                pos,
-                None,
-                station_team,
-                Some(super::blast::BlastSource::Station(station)),
-            );
-        }
     }
 
     /// Register a station class (one entry per name) and return its index.
@@ -294,7 +308,7 @@ impl Sim {
     pub(super) fn tick_stations(&mut self, dt: f32) {
         for si in 0..self.stations.len() {
             let s = self.stations[si];
-            if s.destroyed {
+            if s.destroyed || !s.serves() {
                 continue;
             }
             let Some(c) = self.station_classes.get(usize::from(s.class)) else {

@@ -12,6 +12,7 @@ mod beep;
 mod combo;
 mod hud_alpha;
 mod side_steps;
+mod sky_glow_alpha;
 mod sound_repairs;
 mod water_patch_cells;
 mod water_sheet_alpha;

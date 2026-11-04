@@ -93,10 +93,7 @@ pub(crate) struct FallingState {
 }
 impl FallingState {
     fn unit(&mut self) -> f32 {
-        self.rng = self.rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let a = self.rng;
-        self.rng = self.rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        f32::from_bits(((a >> 16 | self.rng & 0xffff_0000) >> 9) | 0x3f80_0000) - 1.0
+        crate::rand::unit(&mut self.rng)
     }
     fn update(&mut self, objects: &[LeafObject], camera: &Camera, aspect: f32, now: f64) {
         if !now.is_finite() {

@@ -378,7 +378,11 @@ impl Sim {
                 .map_or(&[][..], Vec::as_slice);
             self.collision.replace_instance(instance, parts, pose);
             self.collision.bind_station(instance, station);
-            let bodies = self.collision.prepare_rotation(instance, pose);
+            let bodies = if s.serves() {
+                self.collision.prepare_rotation(instance, pose)
+            } else {
+                Vec::new()
+            };
             self.station_bodies
                 .resize_with(self.stations.len(), Vec::new);
             self.station_bodies[usize::from(station)] = bodies;

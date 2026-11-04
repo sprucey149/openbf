@@ -135,6 +135,29 @@ pub fn upload_cpu_texture_scrolling(
     upload_cpu_texture_inner(r, t, label, scroll, uv_scale, render::WrapV::Repeat)
 }
 
+pub(super) fn upload_flat_water_texture(
+    r: &mut Renderer,
+    t: &CpuTexture,
+    label: &str,
+    scroll: [f32; 2],
+    uv_scale: [f32; 2],
+) -> Result<TextureHandle> {
+    let mips = t.mips();
+    r.add_texture(&TextureDesc {
+        width: t.width,
+        height: t.height,
+        mips: &mips,
+        sampler: SamplerMode::Linear,
+        wrap_v: render::WrapV::Repeat,
+        srgb: false,
+        detail: None,
+        scroll,
+        uv_scale,
+        label: Some(label),
+    })
+    .map_err(|e| anyhow!("water texture {label}: {e}"))
+}
+
 /// `wrap_v` is [`render::WrapV::Repeat`] for every caller but a clamped sky
 /// shell (see [`super::scene::sky_wrap_v`]).
 pub(super) fn upload_cpu_texture_inner(
@@ -145,17 +168,8 @@ pub(super) fn upload_cpu_texture_inner(
     uv_scale: [f32; 2],
     wrap_v: render::WrapV,
 ) -> Result<TextureHandle> {
-    let mut mips: Vec<&[u8]> = vec![&t.rgba];
-    mips.extend(t.extra_mips.iter().map(Vec::as_slice));
-    let detail_mips: Vec<&[u8]> = t
-        .detail
-        .as_ref()
-        .map(|d| {
-            let mut m: Vec<&[u8]> = vec![&d.rgba];
-            m.extend(d.extra_mips.iter().map(Vec::as_slice));
-            m
-        })
-        .unwrap_or_default();
+    let mips = t.mips();
+    let detail_mips = t.detail.as_ref().map(|d| d.mips()).unwrap_or_default();
     r.add_texture(&TextureDesc {
         width: t.width,
         height: t.height,
@@ -168,6 +182,7 @@ pub(super) fn upload_cpu_texture_inner(
             height: d.height,
             mips: &detail_mips,
             scale: DETAIL_UV_SCALE,
+            world_patch: 0.0,
         }),
         scroll,
         uv_scale,

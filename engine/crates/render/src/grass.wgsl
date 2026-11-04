@@ -1,15 +1,4 @@
 
-// ── The grass patches (`grass.rs`, queue FOLGG) and the leaf patches
-// (`leaf.rs`, card LEAF), which ride the same pass ─────────────────────────
-// Appended to `shader.wgsl` as one module, so it reads the same `globals`,
-// `t_color` / `s_color`, fog and far fade. A vertex is a corner of the
-// class's per-view sprite buffer in the PATCH's frame; the instance is the
-// patch: its matrix and its draw colour (the FOLG tint, alpha × the 20 m
-// fade). The PS2's GS MODULATE: texture × the sprite's grey × the patch
-// colour, unlit (re-foliage §7). The multiply happens on the PS2's gamma
-// bytes, so the colour factors go to linear before they scale a linear
-// texel (the terrain path's rule).
-
 struct GrassIn {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
@@ -56,23 +45,67 @@ fn vs_grass(in: GrassIn) -> GrassOut {
         if any(globals.light2_color != vec3<f32>(0.0)) {
             out.light = ambient + sun + light2;
         }
+    } else if in.params.y < 0.5 {
+        let n = (model * vec4<f32>(0.0, 127.0 / 128.0, 0.0, 0.0)).xyz;
+        let ambient = mix(
+            linear_to_srgb(globals.ambient_ground),
+            linear_to_srgb(globals.ambient_sky),
+            n.y * 0.5 + 0.5,
+        );
+        var ndotl = max(dot(n, -globals.sun_dir), 0.0);
+        if globals.sun_d4 > 0.5 {
+            let d = (1.0 + dot(n, -globals.sun_dir)) * 0.5;
+            ndotl = d * d * d * d;
+        }
+        var light = ambient + linear_to_srgb(globals.sun_color) * ndotl;
+        if any(globals.light2_color != vec3<f32>(0.0)) {
+            light += linear_to_srgb(globals.light2_color)
+                * max(dot(n, -normalize(globals.light2_dir)), 0.0);
+        }
+        out.light = clamp(light, vec3<f32>(0.0), vec3<f32>(GS_MAX));
     }
     return out;
 }
 
+fn grass_alpha(in: GrassOut, texel_alpha: f32) -> f32 {
+    let a = texel_alpha * in.color.a;
+    if in.params.y > 0.5 {
+        return a;
+    }
+    return a * far_fade(in.view_dist);
+}
+
 @fragment
 fn fs_grass(in: GrassOut) -> @location(0) vec4<f32> {
-    let texel = textureSample(t_color, s_color, in.uv);
-    var a = texel.a * in.color.a * far_fade(in.view_dist);
-    if in.params.y > 0.5 {
-        a = texel.a * in.color.a;
-    }
+    let texel = textureSample(t_color_display, s_color, in.uv);
+    let a = grass_alpha(in, texel.a);
     if a <= 0.0 {
         discard;
     }
-    var rgb = min(texel.rgb * srgb_to_linear(min(in.color.rgb, vec3<f32>(1.0))), vec3<f32>(1.0));
+    var rgb = min(srgb_to_linear(texel.rgb) * srgb_to_linear(min(in.color.rgb, vec3<f32>(1.0))), vec3<f32>(1.0));
     if in.params.x > 0.5 {
         rgb = rgb * in.light;
+    } else if in.params.y < 0.5 {
+        rgb = min(rgb * srgb_to_linear(in.light), vec3<f32>(1.0));
     }
     return vec4<f32>(apply_fog(rgb, in.fog_depth), a);
+}
+
+@fragment
+fn fs_grass_display(in: GrassOut) -> @location(0) vec4<f32> {
+    let texel = textureSample(t_color_display, s_color, in.uv);
+    let a = grass_alpha(in, texel.a);
+    if a <= 0.0 {
+        discard;
+    }
+    var rgb = min(texel.rgb * min(in.color.rgb, vec3<f32>(1.0)), vec3<f32>(1.0));
+    if in.params.x > 0.5 {
+        rgb = linear_to_srgb(srgb_to_linear(rgb) * in.light);
+    } else if in.params.y < 0.5 {
+        rgb = min(rgb * in.light, vec3<f32>(1.0));
+    }
+    if globals.fog_on > 0.5 {
+        rgb = mix(rgb, linear_to_srgb(globals.fog_color), fog_amount(in.fog_depth));
+    }
+    return vec4<f32>(rgb, a);
 }

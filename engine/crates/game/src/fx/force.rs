@@ -122,7 +122,7 @@ impl State {
         self.tick = None;
     }
 
-    fn bolt(
+    pub(super) fn bolt(
         &mut self,
         lib: &Library,
         name: &str,

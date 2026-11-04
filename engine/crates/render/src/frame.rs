@@ -22,7 +22,7 @@ use crate::gpu_timer::GpuTimer;
 use crate::mesh::{self, GpuMesh, Instance};
 use crate::{
     Camera, DrawCmd, DrawLayer, DrawOrder, Globals, LightPath, RenderError, Renderer,
-    SkinnedDrawCmd, SkyMode, Target, TextureHandle, MAX_JOINTS, PALETTE_STRIDE,
+    SkinnedDrawCmd, Target, TextureHandle, MAX_JOINTS, PALETTE_STRIDE,
 };
 use glam::Mat4;
 
@@ -124,6 +124,22 @@ impl Renderer {
     /// palette and its instance, both of which sit at the SUBMISSION index.
     /// The pipeline, the globals and the skinned instance buffer are the
     /// caller's to bind.
+    fn draw_sky_slot(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        slot: usize,
+        pipeline: &wgpu::RenderPipeline,
+    ) -> u32 {
+        let shell = &self.sky[slot];
+        let Some(mesh) = self.meshes.get(shell.mesh.0 as usize) else {
+            return 0;
+        };
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(1, self.tex_bg(shell.texture), &[]);
+        draw_mesh(pass, mesh, slot as u32..slot as u32 + 1);
+        1
+    }
+
     fn draw_skinned(&self, pass: &mut wgpu::RenderPass<'_>, d: &SkinnedDrawCmd, i: usize) {
         pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
         pass.set_bind_group(2, &self.palette_bg, &[(i * PALETTE_STRIDE) as u32]);
@@ -166,6 +182,7 @@ impl Renderer {
         overlay: Option<OverlayFn<'_>>,
     ) -> Result<(), RenderError> {
         let leaves = self.falling_draws(camera);
+        self.advance_sky();
         for d in skinned {
             let Some(mesh) = self.skinned_meshes.get(d.mesh.0 as usize) else {
                 return Err(RenderError::BadHandle(format!("skinned mesh {}", d.mesh.0)));
@@ -215,25 +232,23 @@ impl Renderer {
         let view_proj = camera.view_proj(aspect);
         self.shadows.prepare(&self.device, &self.queue, view_proj);
         let frustum = frustum::Frustum::from_view_proj(&view_proj);
+        let (lighting, dome_gain) = self.lightning.unwrap_or((self.lighting, 1.0));
+        let water_fog = lighting.water_fog.or(lighting.fog);
         let globals = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: camera.position.to_array(),
             guard_x: guard[0],
             sun_dir: self.lighting.sun_dir.normalize_or_zero().to_array(),
             sun_d4: f32::from(u8::from(self.lighting.sun_d4)),
-            sun_color: self.lighting.sun_color,
+            sun_color: lighting.sun_color,
             guard_y: guard[1],
-            ambient_sky: self.lighting.ambient_sky,
+            ambient_sky: lighting.ambient_sky,
             material_time: crate::material_scroll_time(self.water_time),
-            ambient_ground: self.lighting.ambient_ground,
-            fog_on: if self.lighting.fog.is_some() {
-                1.0
-            } else {
-                0.0
-            },
-            fog_color: self.lighting.fog.map(|f| f.color).unwrap_or([0.0; 3]),
-            fog_near: self.lighting.fog.map(|f| f.near).unwrap_or(0.0),
-            fog_far: self.lighting.fog.map(|f| f.far).unwrap_or(1.0),
+            ambient_ground: lighting.ambient_ground,
+            fog_on: if lighting.fog.is_some() { 1.0 } else { 0.0 },
+            fog_color: lighting.fog.map(|f| f.color).unwrap_or([0.0; 3]),
+            fog_near: lighting.fog.map(|f| f.near).unwrap_or(0.0),
+            fog_far: lighting.fog.map(|f| f.far).unwrap_or(1.0),
             time: self.time,
             fade_begin: self.lighting.far_fade.map(|f| f.begin).unwrap_or(0.0),
             fade_end: self.lighting.far_fade.map(|f| f.end).unwrap_or(0.0),
@@ -257,11 +272,20 @@ impl Renderer {
             speckle_ambient: self.lighting.water.speckle_ambient,
             speckle_specular: self.lighting.water.speckle_specular,
             speckle_axis: self.lighting.water.speckle_axis.to_array(),
-            _pad8: 0.0,
+            water_gain: self.lighting.water_gain,
             speckle_light: self.lighting.water.speckle_light.to_array(),
-            _pad9: 0.0,
+            speckle_far_begin: self.lighting.water.far_range[0],
             speckle_shift: self.lighting.water.speckle_shift.to_array(),
-            _pad10: 0.0,
+            speckle_far_end: self.lighting.water.far_range[1],
+            water_grid_origin: self.lighting.water.far_diffuse.origin,
+            water_grid_step: self.lighting.water.far_diffuse.step,
+            water_grid_dims: self.lighting.water.far_diffuse.dims,
+            water_grid_range: self.lighting.water.far_diffuse.range,
+            water_grid_colors: self.lighting.water.far_diffuse.colors,
+            water_fog_color: water_fog.map_or([0.0; 3], |f| f.color),
+            water_fog_on: f32::from(u8::from(water_fog.is_some())),
+            water_fog_range: water_fog.map_or([0.0, 1.0], |f| [f.near, f.far]),
+            _pad_water_fog: [0.0; 2],
             character_ambient: self.lighting.character_ambient.unwrap_or([0.0; 3]),
             character_ambient_on: f32::from(u8::from(self.lighting.character_ambient.is_some())),
             iface_dir: iface_dir(camera).to_array(),
@@ -391,22 +415,50 @@ impl Renderer {
         // The sky shells take the first slots of the same instance buffer, so
         // every other index below is offset by `sky_base`.
         let sky_base = self.sky.len();
+        let atmosphere_time = self.atmosphere_time();
         let mut instances: Vec<Instance> = self
             .sky
             .iter()
             .map(|s| Instance {
-                model: Self::sky_model(s, camera.position, self.time).to_cols_array_2d(),
-                color: s.color,
+                model: Self::sky_model(s, camera.position, atmosphere_time, self.water_time)
+                    .to_cols_array_2d(),
+                color: Self::sky_color(s),
                 // The sky is never distance-culled: on the PS2 it is drawn by
                 // the sky tick under draw flag 0x20, outside both scene
                 // ranges (`analysis/re-fog.md` 2.4 [V]).
                 cull: [mesh::NO_CULL; 2],
                 cull_near: [mesh::NO_CULL_NEAR; 2],
-                light: LightPath::Lit as u32,
+                light: s.emission.unwrap_or(LightPath::Lit) as u32,
                 fade: mesh::NO_FADE,
                 lights: [0; 4],
             })
             .collect();
+        if dome_gain != 1.0 {
+            for dome in instances.iter_mut().take(self.stars.slot) {
+                for channel in &mut dome.color[..3] {
+                    *channel *= dome_gain;
+                }
+            }
+        }
+        let object_blend = |slot: usize| {
+            self.sky[slot].depth && Self::sky_mode(&self.sky[slot]) == crate::SkyMode::Blend
+        };
+        let mut sky_order: Vec<_> = (0..sky_base).filter(|&slot| !object_blend(slot)).collect();
+        let mut blended_sky: Vec<_> = (0..sky_base)
+            .filter(|&slot| object_blend(slot))
+            .map(|slot| {
+                let center = self
+                    .meshes
+                    .get(self.sky[slot].mesh.0 as usize)
+                    .map_or(glam::Vec3::ZERO, |m| (m.bounds.0 + m.bounds.1) * 0.5);
+                let point =
+                    glam::Mat4::from_cols_array_2d(&instances[slot].model).transform_point3(center);
+                (slot, point.distance_squared(camera.position))
+            })
+            .collect();
+        blended_sky.sort_by(|a, b| b.1.total_cmp(&a.1));
+        let sky_solid_count = sky_order.len();
+        sky_order.extend(blended_sky.iter().map(|(slot, _)| *slot));
         // A model's primitives are submitted together and share its sphere:
         // one gather serves the run.
         let mut last: Option<(crate::LitSphere, bool, [u16; 4])> = None;
@@ -486,22 +538,41 @@ impl Renderer {
             drop(palettes);
             let inst: Vec<Instance> = skinned
                 .iter()
-                .map(|d| Instance {
-                    model: d.model.to_cols_array_2d(),
-                    color: d.color,
-                    // Soldiers carry no cull: `SkinnedDrawCmd` has no `cull`
-                    // field, because every skinned draw the port makes is a
-                    // unit inside the near scene. Stated in the item 5 report.
-                    cull: [mesh::NO_CULL; 2],
-                    cull_near: [mesh::NO_CULL_NEAR; 2],
-                    // A skinned draw carries no COL0: the PS2's normal light
-                    // set (hemisphere + Light1 + Light2), with BF1's
-                    // character ambient where the map has one — every
-                    // skinned draw the port makes is a soldier — or, for a
-                    // spawn screen's soldier, the interface set.
-                    light: d.light as u32 | crate::affine::layer_bit(d.layer),
-                    fade: mesh::NO_FADE,
-                    lights: skinned_lights(d.lit),
+                .map(|d| {
+                    let mut inst = Instance {
+                        model: d.model.to_cols_array_2d(),
+                        color: d.color,
+                        // Soldiers carry no cull: `SkinnedDrawCmd` has no `cull`
+                        // field, because every skinned draw the port makes is a
+                        // unit inside the near scene. Stated in the item 5 report.
+                        cull: [mesh::NO_CULL; 2],
+                        cull_near: [mesh::NO_CULL_NEAR; 2],
+                        // A skinned draw carries no COL0: the PS2's normal light
+                        // set (hemisphere + Light1 + Light2), with BF1's
+                        // character ambient where the map has one — every
+                        // skinned draw the port makes is a soldier — or, for a
+                        // spawn screen's soldier, the interface set.
+                        light: d.light as u32 | crate::affine::layer_bit(d.layer),
+                        fade: mesh::NO_FADE,
+                        lights: skinned_lights(d.lit),
+                    };
+                    if d.light == LightPath::Character {
+                        let sphere = d.lit.unwrap_or(crate::LitSphere {
+                            centre: d.model.w_axis.truncate(),
+                            radius: 0.0,
+                        });
+                        if let Some([top, bottom]) = crate::lighting::character_region_light(
+                            &self.character_light_regions,
+                            &lighting,
+                            sphere,
+                        ) {
+                            inst.cull = [top[0], top[1]];
+                            inst.cull_near = [top[2], top[3]];
+                            inst.fade = bottom;
+                            inst.light |= crate::lighting::CHARACTER_LIGHT_REGION;
+                        }
+                    }
+                    inst
                 })
                 .collect();
             self.queue
@@ -572,8 +643,24 @@ impl Renderer {
         if !leaves.is_empty() {
             particles.to_mut().extend(leaves);
         }
-        let bolts = crate::particles::build(&self.bolts.bolts, &particles, camera);
-        if !bolts.runs.is_empty() {
+        if let Some(cloud) = &self.particles.cloud {
+            particles
+                .to_mut()
+                .extend(cloud.draws(camera, atmosphere_time));
+        }
+        for dust in &mut self.particles.dust {
+            particles
+                .to_mut()
+                .extend(dust.draws(camera, atmosphere_time));
+        }
+        let mut bolts = crate::particles::build(&[], &self.particles.sky, camera);
+        let sky_particle_runs = bolts.runs.len();
+        bolts.append(crate::particles::build(
+            &self.bolts.bolts,
+            &particles,
+            camera,
+        ));
+        if !bolts.vertices.is_empty() {
             let vb = bytemuck::cast_slice(&bolts.vertices);
             let inst = [crate::bolt::identity_instance()];
             let ib: &[u8] = bytemuck::cast_slice(&inst);
@@ -633,6 +720,11 @@ impl Renderer {
 
         // The DomeInfo frame filter (`filter.rs`): its parameters and copy.
         let bloom = self.prepare_bloom(width, height);
+        let particle_blur = !bolts.blur_runs.is_empty() && !ab.skips("bolts+particles");
+        if particle_blur {
+            self.particle_blur
+                .prepare(&self.device, self.format, [width, height]);
+        }
         let filter = self.filter_wanted();
         if filter {
             self.prepare_filter(width, height);
@@ -679,7 +771,12 @@ impl Renderer {
         };
         // A scaled world draws in its own target, frame and depth, until the
         // upscale below.
-        let world_target = ((width, height) != (frame_width, frame_height)).then(|| {
+        let world_target = ((width, height) != (frame_width, frame_height)
+            || (particle_blur
+                && !frame_texture
+                    .usage()
+                    .contains(wgpu::TextureUsages::COPY_SRC)))
+        .then(|| {
             self.world_scale
                 .target(&self.device, self.format, [width, height])
         });
@@ -691,6 +788,12 @@ impl Renderer {
         let full_depth = world_target
             .as_ref()
             .map(|t| std::mem::replace(&mut self.depth_view, t.depth.clone()));
+        let water_view = self.water_display_format.map(|format| {
+            frame_texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(format),
+                ..Default::default()
+            })
+        });
         {
             // Render pass shape from an earlier wgpu project's main.rs "Main Render Pass".
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -724,16 +827,21 @@ impl Renderer {
                 occlusion_query_set: None,
             });
 
-            // Sky first: unlit shells around the camera, no depth at all. The
+            // Sky first: background domes and depth-tested object hulls. The
             // stars go after the base dome's shells (its mirror included) and
             // under the rest (a cloud deck covers them), as both ELFs order
             // the sky pass (`analysis/re-stars.md` §3).
             let star_slot = self.stars.slot.min(self.sky.len());
+            let mut sky_fx_drawn = false;
             if (sky_base > 0 || star_count > 0) && !ab.skips("sky") {
                 pass.set_bind_group(0, &self.globals_bg, &[]);
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
-                let mut bound: Option<SkyMode> = None;
-                for item in self.sky.iter().enumerate().map(Some).chain([None]) {
+                let mut bound = None;
+                for item in sky_order[..sky_solid_count]
+                    .iter()
+                    .map(|&slot| Some((slot, &self.sky[slot])))
+                    .chain([None])
+                {
                     if item.map_or(self.sky.len(), |(i, _)| i) == star_slot && star_count > 0 {
                         if let (Some((vbuf, _)), Some((ibuf, _))) =
                             (&self.stars.vertex_buf, &self.stars.instance_buf)
@@ -748,24 +856,44 @@ impl Renderer {
                             bound = None;
                         }
                     }
+                    if !sky_fx_drawn && item.is_none_or(|(_, shell)| shell.depth) {
+                        draw_calls += self.draw_particle_runs(
+                            &mut pass,
+                            &bolts.runs[..sky_particle_runs],
+                            false,
+                        );
+                        sky_fx_drawn = true;
+                        pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                        bound = None;
+                    }
                     let Some((slot, shell)) = item else {
                         break;
                     };
                     let Some(mesh) = self.meshes.get(shell.mesh.0 as usize) else {
                         continue;
                     };
-                    // Two pipelines, one per material mode; shells keep
-                    // their authored order (a cloud deck composites over the
-                    // dome, and an OPAQUE shell PAINTS over what is under
-                    // it), so switch rather than sort.
-                    if bound != Some(shell.mode) {
-                        pass.set_pipeline(&self.sky_pipelines[shell.mode.index()]);
-                        bound = Some(shell.mode);
+                    // Shells keep their authored order
+                    // (a cloud deck composites over the dome, and an OPAQUE shell
+                    // PAINTS over what is under it), so switch rather than sort.
+                    let pipeline_idx = (
+                        usize::from(shell.depth),
+                        usize::from(shell.lit),
+                        Self::sky_mode(shell).index(),
+                    );
+                    if bound != Some(pipeline_idx) {
+                        pass.set_pipeline(
+                            &self.sky_pipelines[pipeline_idx.0][pipeline_idx.1][pipeline_idx.2],
+                        );
+                        bound = Some(pipeline_idx);
                     }
                     pass.set_bind_group(1, self.tex_bg(shell.texture), &[]);
                     draw_mesh(&mut pass, mesh, slot as u32..slot as u32 + 1);
                     draw_calls += 1;
                 }
+            }
+            if !sky_fx_drawn {
+                draw_calls +=
+                    self.draw_particle_runs(&mut pass, &bolts.runs[..sky_particle_runs], false);
             }
             mark(&mut timer, &mut pass, "sky");
 
@@ -791,6 +919,7 @@ impl Renderer {
             let mut skin_pending = true;
             // The GPU timer's section of the runs being drawn (`run_section`).
             let mut section: Option<&'static str> = None;
+            let mut water_display_active = false;
             while run_start <= blend_base {
                 let key = (run_start < blend_base).then(|| draw_key(&draws[order[run_start]]));
                 if lights_pending
@@ -811,6 +940,7 @@ impl Renderer {
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                     bound_layer = None;
+                    water_display_active = false;
                 }
                 // The skinned opaque draws, one call each with its palette,
                 // and their specular passes: before the first water run (or
@@ -825,6 +955,17 @@ impl Renderer {
                     skin_pending = false;
                     if let Some(l) = section.take() {
                         mark(&mut timer, &mut pass, l);
+                    }
+                    if water_display_active {
+                        drop(pass);
+                        pass = continue_pass(
+                            &mut encoder,
+                            &view,
+                            &self.depth_view,
+                            "after terrain layers",
+                        );
+                        pass.set_bind_group(0, &self.globals_bg, &[]);
+                        water_display_active = false;
                     }
                     if !skin_opaque.is_empty() && !ab.skips("soldiers") {
                         pass.set_pipeline(match (fade, ab.discard) {
@@ -888,6 +1029,31 @@ impl Renderer {
                 }
 
                 let d = &draws[order[run_start]];
+                let water_display = water_view.is_some()
+                    && matches!(
+                        d.layer,
+                        DrawLayer::TerrainLayer | DrawLayer::Water | DrawLayer::Speckle
+                    );
+                if water_display != water_display_active {
+                    if let Some(l) = section.take() {
+                        mark(&mut timer, &mut pass, l);
+                    }
+                    drop(pass);
+                    pass = continue_pass(
+                        &mut encoder,
+                        if water_display {
+                            water_view.as_ref().unwrap()
+                        } else {
+                            &view
+                        },
+                        &self.depth_view,
+                        "water colour transition",
+                    );
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
+                    pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                    bound_layer = None;
+                    water_display_active = water_display;
+                }
                 let may_discard = sorts[order[run_start]].may_discard;
                 let run = run_section(d);
                 if ab.skips(run) {
@@ -963,6 +1129,10 @@ impl Renderer {
             if let Some(l) = section.take() {
                 mark(&mut timer, &mut pass, l);
             }
+            if water_display_active {
+                drop(pass);
+                pass = continue_pass(&mut encoder, &view, &self.depth_view, "after water");
+            }
 
             // The grass patches (queue FOLGG) and then the leaf patches (card
             // LEAF): after every opaque draw, before the blend pass, each run
@@ -972,6 +1142,15 @@ impl Renderer {
                 &self.grass.vertex_buf,
                 &self.grass.instance_buf,
             ) {
+                if let Some(display_view) = &water_view {
+                    drop(pass);
+                    pass = continue_pass(
+                        &mut encoder,
+                        display_view,
+                        &self.depth_view,
+                        "grass display colour",
+                    );
+                }
                 pass.set_pipeline(&self.grass_pipeline);
                 pass.set_bind_group(0, &self.globals_bg, &[]);
                 pass.set_vertex_buffer(0, vbuf.slice(..));
@@ -980,6 +1159,16 @@ impl Renderer {
                     pass.set_bind_group(1, self.tex_bg(run.texture), &[]);
                     pass.draw(run.vertices.clone(), run.instances.clone());
                     draw_calls += 1;
+                }
+                if water_view.is_some() {
+                    drop(pass);
+                    pass = continue_pass(
+                        &mut encoder,
+                        &view,
+                        &self.depth_view,
+                        "after grass display colour",
+                    );
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
                 }
             }
             mark(&mut timer, &mut pass, "grass");
@@ -991,6 +1180,14 @@ impl Renderer {
             // kind to the other rebinds the pipeline and the instance buffer.
             let mut world_slot = blend_base;
             let mut bound_skinned: Option<bool> = None;
+            if !ab.skips("sky") {
+                pass.set_bind_group(0, &self.globals_bg, &[]);
+                pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+                for &slot in &sky_order[sky_solid_count..] {
+                    let pipeline = &self.sky_pipelines[1][usize::from(self.sky[slot].lit)][1];
+                    draw_calls += self.draw_sky_slot(&mut pass, slot, pipeline);
+                }
+            }
             for &b in blended.iter().filter(|_| !ab.skips("blend")) {
                 let skin = matches!(b, Blended::Skinned(_));
                 if bound_skinned != Some(skin) {
@@ -1030,7 +1227,8 @@ impl Renderer {
             // after the blend pass, far to near, each bolt's core (NORMAL)
             // then its glow (ADDITIVE), each particle by its blend.
             if self.particle_display.is_none() && !ab.skips("bolts+particles") {
-                draw_calls += self.draw_particle_runs(&mut pass, &bolts.runs, false);
+                draw_calls +=
+                    self.draw_particle_runs(&mut pass, &bolts.runs[sky_particle_runs..], false);
                 mark(&mut timer, &mut pass, "bolts+particles");
             }
         }
@@ -1064,8 +1262,42 @@ impl Renderer {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            draw_calls += self.draw_particle_runs(&mut pass, &bolts.runs, true);
+            draw_calls +=
+                self.draw_particle_runs(&mut pass, &bolts.runs[sky_particle_runs..], true);
             mark(&mut timer, &mut pass, "bolts+particles");
+        }
+        let frame_display_view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.format.remove_srgb_suffix()),
+            ..Default::default()
+        });
+        if particle_blur {
+            let mut pass = self.particle_blur.pass(
+                &mut encoder,
+                frame_texture,
+                &frame_display_view,
+                &self.depth_view,
+            );
+            draw_calls += 1;
+            pass.set_bind_group(0, &self.globals_bg, &[]);
+            let characters = !skin_opaque.is_empty() && !ab.skips("soldiers");
+            if characters {
+                pass.set_stencil_reference(1);
+                pass.set_pipeline(&self.heat_character_mask);
+                pass.set_vertex_buffer(1, self.skinned_instance_buf.slice(..));
+                for &i in &skin_opaque {
+                    self.draw_skinned(&mut pass, &skinned[i], i);
+                    draw_calls += 1;
+                }
+            }
+            pass.set_vertex_buffer(0, self.bolts.vertex_buf.as_ref().unwrap().0.slice(..));
+            for over_character in [false, true].into_iter().take(1 + usize::from(characters)) {
+                self.particle_blur.bind_composite(&mut pass, over_character);
+                for (texture, vertices) in &bolts.blur_runs {
+                    pass.set_bind_group(1, self.tex_bg(Some(*texture)), &[]);
+                    pass.draw(vertices.clone(), 0..1);
+                    draw_calls += 1;
+                }
+            }
         }
         if bloom && !ab.skips("bloom") {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1092,6 +1324,12 @@ impl Renderer {
             });
             pass.set_bind_group(0, &self.globals_bg, &[]);
             pass.set_vertex_buffer(1, self.instance_buf.slice(..));
+            if !ab.skips("sky") && self.sky.iter().any(|s| s.emission.is_some()) {
+                for &slot in &sky_order {
+                    let pipeline = &self.bloom.gather.sky[Self::sky_mode(&self.sky[slot]).index()];
+                    draw_calls += self.draw_sky_slot(&mut pass, slot, pipeline);
+                }
+            }
             for (slot, &i) in order.iter().enumerate() {
                 let d = &draws[i];
                 if !matches!(d.light, LightPath::Glow | LightPath::Unscaled)
@@ -1125,11 +1363,27 @@ impl Renderer {
                 }
             }
             drop(pass);
+            draw_calls += self.sun_flare_pass(
+                &mut encoder,
+                self.bloom_gather_view(),
+                camera,
+                width,
+                height,
+                true,
+            );
             draw_calls += self.bloom_pass(&mut encoder, frame_texture, &view);
             if let Some(t) = &mut timer {
                 t.mark(&mut encoder, "bloom");
             }
         }
+        draw_calls += self.sun_flare_pass(
+            &mut encoder,
+            &frame_display_view,
+            camera,
+            width,
+            height,
+            false,
+        );
         // The frame filter lifts the finished 3D frame, before the overlay
         // (the PS2 draws its HUD after it, `analysis/re-glow.md` §3.3).
         if filter && !ab.skips("filter") {
@@ -1211,17 +1465,19 @@ impl Renderer {
         let mut bound = None;
         let mut calls = 0;
         for run in runs {
-            let kind = (run.glow, run.solid, run.cutout);
+            let kind = (run.glow, run.solid, run.cutout, run.premultiplied);
             if bound != Some(kind) {
                 pass.set_pipeline(match (shown, kind) {
-                    (Some(d), (true, _, _)) => &d.glow,
-                    (Some(d), (false, true, _)) => &d.solid,
-                    (Some(d), (false, false, true)) => &d.cutout,
-                    (Some(d), (false, false, false)) => &d.core,
-                    (None, (true, _, _)) => &self.bolt_glow_pipeline,
-                    (None, (false, true, _)) => &self.bolt_solid_pipeline,
-                    (None, (false, false, true)) => &self.leaf_cutout_pipeline,
-                    (None, (false, false, false)) => &self.bolt_core_pipeline,
+                    (Some(d), (true, _, _, _)) => &d.glow,
+                    (Some(d), (false, true, _, _)) => &d.solid,
+                    (Some(d), (false, false, true, _)) => &d.cutout,
+                    (Some(d), (false, false, false, true)) => &d.atmosphere,
+                    (Some(d), (false, false, false, false)) => &d.core,
+                    (None, (true, _, _, _)) => &self.bolt_glow_pipeline,
+                    (None, (false, true, _, _)) => &self.bolt_solid_pipeline,
+                    (None, (false, false, true, _)) => &self.leaf_cutout_pipeline,
+                    (None, (false, false, false, true)) => &self.atmosphere_pipeline,
+                    (None, (false, false, false, false)) => &self.bolt_core_pipeline,
                 });
                 bound = Some(kind);
             }

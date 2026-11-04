@@ -307,6 +307,15 @@ fn full_manifest() -> Manifest {
                 offset: -12.0,
                 movement_scale: 1.0,
                 reflect: true,
+                effects: vec![ManifestSkyEffect {
+                    effect: "sky_fx".into(),
+                    hardpoint: "hp_sky".into(),
+                    parameter: Some(1.0),
+                    max_delay: Some(2.0),
+                    pos: [1.0, 2.0, 3.0],
+                    axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                }],
+                rotation: Some([0.003, 0.0, 1.0, 0.0]),
             }],
             ambient: [1.0, 1.0, 1.0],
             low_res_terrain: Some("tat1_lowres".into()),
@@ -316,12 +325,20 @@ fn full_manifest() -> Manifest {
                 count: 3,
                 height: [400.0, 900.0],
                 distance: 2500.0,
+                velocity_x: Some([1.0, 2.0]),
+                velocity_y: Some([-1.0, 1.0]),
+                velocity_z: Some([80.0, 120.0]),
+                acceleration: Some([0.0, 2.0, 0.0]),
+                direction_factor: Some(0.5),
+                lifetime: Some(80.0),
             }],
             terrain_enable: Some(0.0),
             reflection_color: Some([0.5, 0.5, 1.0]),
             stars: None,
+            glow_masks_preserved: true,
         }),
         water: Some(ManifestWater {
+            far_fog_color: None,
             glb: "water.glb".into(),
             texture: Some("water_ps2".into()),
             height: 3.25,
@@ -330,6 +347,7 @@ fn full_manifest() -> Manifest {
             wet_cells: 128,
             patches: 16,
             triangles: 512,
+            vertex_diffuse: true,
             config: Some(full_water_config()),
             wet: Some(ManifestWetMask::from_nibbles(
                 2,
@@ -473,6 +491,32 @@ fn full_manifest() -> Manifest {
             velocity: [1.0, 0.3],
             velocity_range: 1.0,
             velocity_change_rate: 0.1,
+        }),
+        terrain_detail: Some(("terrain_detail".into(), 16.0)),
+        sun_flare: Some(ManifestSunFlare {
+            angle: [115.0, -20.0],
+            color: [255.0; 4],
+            size: 5.0,
+            flare_out_size: 20.0,
+            num_flare_outs: 40,
+            initial_alpha: 70.0,
+            halo_rings: [
+                [0.0, 255.0, 255.0, 255.0, 255.0],
+                [10.0, 255.0, 200.0, 0.0, 255.0],
+                [30.0, 255.0, 127.0, 0.0, 0.0],
+            ],
+            spike_color: [230.0, 230.0, 0.0, 128.0],
+            spike_size: 20.0,
+        }),
+        fog_cloud: Some(ManifestFogCloud {
+            texture: Some("brownmist".into()),
+            range: Some([90.0, 120.0]),
+            color: Some([168.0, 172.0, 180.0, 128.0]),
+            velocity: Some([5.0, 0.0]),
+            rotation: Some(0.1),
+            height: Some(16.0),
+            particle_size: Some(28.0),
+            particle_density: Some(100.0),
         }),
     }
 }
@@ -670,6 +714,7 @@ fn a_manifest_missing_every_defaulted_field_still_loads() {
     assert_eq!(m.sky, None);
     assert_eq!(m.water, None);
     assert_eq!(m.foliage, None);
+    assert_eq!(m.sun_flare, None);
     // lighting falls back to the engine's old hardcoded look, not zeroes.
     assert_eq!(m.lighting, ManifestLighting::default());
     assert_eq!(m.lighting.source, "default");
@@ -750,12 +795,14 @@ fn nested_types_missing_their_defaulted_fields_still_load() {
     assert!(sky.objects.is_empty());
     assert_eq!(sky.terrain_enable, None);
     assert_eq!(sky.reflection_color, None);
+    assert!(!sky.glow_masks_preserved);
     assert!(!sky.models[0].reflect);
     let water = m.water.as_ref().unwrap();
     assert_eq!(water.texture, None);
     assert_eq!(water.uv_velocity, [0.0, 0.0]);
     assert_eq!(water.layer_color, [0, 0, 0, 0]);
     assert_eq!((water.wet_cells, water.patches, water.triangles), (0, 0, 0));
+    assert!(!water.vertex_diffuse);
     // A config with none of its keys: every value is unauthored, and the two
     // flags the PS2's level reset stores as 1 read back ON, not `false`.
     let cfg = water.config.as_ref().unwrap();
@@ -864,6 +911,9 @@ fn manifest_field_order_is_the_wire_format() {
             "precipitation",
             "wind",
             "terrain_query_size",
+            "fog_cloud",
+            "sun_flare",
+            "terrain_detail",
         ]
     );
 }
@@ -899,6 +949,7 @@ fn water_field_order_is_the_wire_format() {
             "triangles",
             "config",
             "wet",
+            "vertex_diffuse",
         ]
     );
     assert_eq!(

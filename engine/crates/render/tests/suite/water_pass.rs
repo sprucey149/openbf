@@ -15,7 +15,7 @@ use glam::Mat4;
 use render::{Camera, DrawCmd, Fog, Lighting};
 
 use crate::common;
-use common::{capture_pixel, headless, upload_tex, view_quad, N};
+use common::{capture_pixel, headless, tex_desc, upload_tex, view_quad, N};
 
 /// A renderer whose lighting is a flat white ambient: every referee below
 /// wants the texel and the tint back, not a lambert term.
@@ -37,6 +37,231 @@ fn shot(r: &mut render::Renderer, draws: &[DrawCmd]) -> [u8; 4] {
     capture_pixel(r, N / 2, N / 2)
 }
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn diffuse_vertex_colours_do_not_tint_the_separate_speckle_layer() {
+    let mut r = unlit();
+    r.lighting.water.speckle_ambient = [0.5, 0.5, 0.5, 1.0];
+    let white = upload_tex(&mut r, 1, 1, &[255; 4], "water");
+    let colored = r
+        .add_mesh(&render::MeshData {
+            positions: &[
+                [-4.0, -4.0, -3.0],
+                [4.0, -4.0, -3.0],
+                [4.0, 4.0, -3.0],
+                [-4.0, 4.0, -3.0],
+            ],
+            normals: &[[0.0, 0.0, 1.0]; 4],
+            uvs: &[[0.0; 2]; 4],
+            colors: Some(&[[40, 80, 120, 255]; 4]),
+            indices: &[0, 1, 2, 0, 2, 3],
+        })
+        .unwrap();
+    let plain = view_quad(&mut r, -3.0);
+    let water = shot(
+        &mut r,
+        &[DrawCmd::water(colored, white, [1.0; 4], Mat4::IDENTITY)],
+    );
+    for (actual, expected) in water[..3].iter().zip([40i32, 80, 120]) {
+        assert!((i32::from(*actual) - expected).abs() <= 2, "{water:?}");
+    }
+    let tinted = shot(
+        &mut r,
+        &[DrawCmd::speckle(colored, white, [1.0; 4], Mat4::IDENTITY)],
+    );
+    let untinted = shot(
+        &mut r,
+        &[DrawCmd::speckle(plain, white, [1.0; 4], Mat4::IDENTITY)],
+    );
+    assert_eq!(tinted, untinted);
+    assert!(tinted[0] > 100, "{tinted:?}");
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn water_modulates_and_composites_display_colours_with_texture_alpha() {
+    let mut r = unlit();
+    let bed = upload_tex(&mut r, 1, 1, &[120, 100, 80, 255], "bed");
+    let surface = upload_tex(&mut r, 1, 1, &[80, 160, 120, 128], "surface");
+    let floor = view_quad(&mut r, -5.0);
+    let water = view_quad(&mut r, -3.0);
+    let px = shot(
+        &mut r,
+        &[
+            DrawCmd::water(floor, bed, [1.0; 4], Mat4::IDENTITY),
+            DrawCmd::water(water, surface, [0.5; 4], Mat4::IDENTITY),
+        ],
+    );
+    for (actual, expected) in px[..3].iter().zip([100i32, 95, 75]) {
+        assert!((i32::from(*actual) - expected).abs() <= 2, "{px:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn far_water_colour_grid_changes_with_position_and_only_beyond_the_crossover() {
+    let mut r = unlit();
+    let white = upload_tex(&mut r, 1, 1, &[255; 4], "water");
+    let mesh = view_quad(&mut r, -3.0);
+    let draws = [DrawCmd::water(mesh, white, [1.0; 4], Mat4::IDENTITY)];
+    let dark = u32::from_le_bytes([30, 60, 90, 255]);
+    let light = u32::from_le_bytes([110, 160, 210, 255]);
+    r.lighting.water.far_diffuse = render::WaterDiffuse {
+        origin: [-1.0, -3.0],
+        step: [2.0; 2],
+        dims: [2, 2],
+        range: [1.0, 2.0],
+        colors: [[dark, light, dark, light]; 16],
+    };
+    for scale in [1.0, 0.5] {
+        r.set_world_scale(scale);
+        shot(&mut r, &draws);
+        let a = capture_pixel(&mut r, N / 4, N / 2);
+        let b = capture_pixel(&mut r, 3 * N / 4, N / 2);
+        assert!(
+            b[0] > a[0] + 30 && b[2] > a[2] + 50,
+            "{scale}: {a:?}, {b:?}"
+        );
+    }
+    r.lighting.water.far_diffuse.range = [4.0, 5.0];
+    assert_eq!(shot(&mut r, &draws), [255; 4]);
+    r.lighting.water.far_diffuse.range = [2.0, 4.0];
+    let px = shot(&mut r, &draws);
+    for (actual, expected) in px[..3].iter().zip([163i32, 183, 203]) {
+        assert!((i32::from(*actual) - expected).abs() <= 5, "{px:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn water_only_fog_covers_the_composite_even_with_a_transparent_surface() {
+    let mut r = unlit();
+    r.lighting.water_gain = 255.0 / 128.0;
+    r.lighting.water_fog_begin = Some(1.0);
+    r.lighting.water_fog = Some(Fog {
+        color: [0.0, 0.0, render::srgb_decode(104.0 / 255.0)],
+        near: 0.0,
+        far: 1.0,
+    });
+    let green = upload_tex(&mut r, 1, 1, &[0, 255, 0, 255], "bed");
+    let clear = upload_tex(&mut r, 1, 1, &[255, 255, 255, 0], "water");
+    let bed = view_quad(&mut r, -5.0);
+    let mesh = view_quad(&mut r, -3.0);
+    let floor = DrawCmd::textured(bed, green, Mat4::IDENTITY);
+    assert_eq!(shot(&mut r, &[floor]), [0, 255, 0, 255]);
+    let px = shot(
+        &mut r,
+        &[floor, DrawCmd::water(mesh, clear, [1.0; 4], Mat4::IDENTITY)],
+    );
+    for (actual, expected) in px[..3].iter().zip([0i32, 7, 101]) {
+        assert!((i32::from(*actual) - expected).abs() <= 1, "{px:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn water_hdr_gain_amplifies_surface_and_speckle_without_changing_opacity_or_the_bed() {
+    let mut r = unlit();
+    r.lighting.water_gain = 255.0 / 128.0;
+    r.lighting.water.speckle_ambient = [0.5; 4];
+    let bed = upload_tex(&mut r, 1, 1, &[40, 60, 80, 255], "bed");
+    let surface = upload_tex(&mut r, 1, 1, &[80, 120, 160, 128], "surface");
+    let highlight = upload_tex(&mut r, 1, 1, &[40, 80, 120, 0], "highlight");
+    let floor = view_quad(&mut r, -5.0);
+    let water = view_quad(&mut r, -3.0);
+    let ground = DrawCmd::textured(floor, bed, Mat4::IDENTITY);
+    assert_eq!(shot(&mut r, &[ground]), [40, 60, 80, 255]);
+    let px = shot(
+        &mut r,
+        &[
+            ground,
+            DrawCmd::water(water, surface, [0.5; 4], Mat4::IDENTITY),
+            DrawCmd::speckle(water, highlight, [1.0; 4], Mat4::IDENTITY),
+        ],
+    );
+    for (actual, expected) in px[..3].iter().zip([70i32, 115, 160]) {
+        assert!((i32::from(*actual) - expected).abs() <= 2, "{px:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn far_speckle_uses_the_current_frames_texture_alpha_and_keeps_the_near_crossfade() {
+    let mut r = unlit();
+    r.lighting.water.speckle_ambient = [0.5; 4];
+    let bed = upload_tex(&mut r, 1, 1, &[40, 60, 80, 255], "bed");
+    let a = upload_tex(&mut r, 1, 1, &[80, 120, 160, 64], "current");
+    let b = upload_tex(&mut r, 1, 1, &[160, 80, 120, 255], "next");
+    let clear = upload_tex(&mut r, 1, 1, &[80, 120, 160, 0], "unmasked rgb");
+    let floor = view_quad(&mut r, -5.0);
+    let water = view_quad(&mut r, -3.0);
+    let mut draws = [
+        DrawCmd::textured(floor, bed, Mat4::IDENTITY),
+        DrawCmd::speckle(water, a, [1.0, 1.0, 1.0, 0.25], Mat4::IDENTITY),
+        DrawCmd::speckle(water, b, [0.0, 1.0, 1.0, 0.75], Mat4::IDENTITY),
+    ];
+    for (range, expected) in [
+        ([4.0, 5.0], [75i32, 82, 112]),
+        ([2.0, 4.0], [60, 75, 101]),
+        ([1.0, 2.0], [45, 68, 90]),
+    ] {
+        r.lighting.water.far_range = range;
+        let px = shot(&mut r, &draws);
+        for (actual, expected) in px[..3].iter().zip(expected) {
+            assert!(
+                (i32::from(*actual) - expected).abs() <= 2,
+                "{range:?}: {px:?}"
+            );
+        }
+    }
+    draws[1].texture = Some(clear);
+    assert_eq!(shot(&mut r, &draws), [40, 60, 80, 255]);
+    r.lighting.water.far_range = [0.0; 2];
+    let px = shot(&mut r, &draws);
+    assert!(px[0] > 70 && px[2] > 105, "near-only: {px:?}");
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn far_speckle_rounds_weak_highlights_with_the_ps2_dither_pattern() {
+    let mut r = unlit();
+    r.lighting.water_gain = 255.0 / 128.0;
+    r.lighting.water.speckle_ambient = [0.5; 4];
+    let mut desc = tex_desc(1, 1, &[&[20, 20, 20, 255]], "display bytes");
+    desc.srgb = false;
+    let tex = r.add_texture(&desc).unwrap();
+    let mesh = view_quad(&mut r, -3.0);
+    let draws = [DrawCmd::speckle(mesh, tex, [1.0; 4], Mat4::IDENTITY)];
+    r.lighting.water.far_range = [1.0, 2.0];
+    assert_eq!(shot(&mut r, &draws), [0, 0, 0, 255]);
+    assert_eq!(capture_pixel(&mut r, N / 2 + 3, N / 2), [16, 16, 16, 255]);
+    r.lighting.water.far_range = [4.0, 5.0];
+    assert_eq!(shot(&mut r, &draws), [10, 10, 10, 255]);
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn speckle_adds_display_colours_and_crossfades_without_reading_texture_alpha() {
+    let mut r = unlit();
+    r.lighting.water.speckle_ambient = [0.5, 0.5, 0.5, 0.5];
+    let bed = upload_tex(&mut r, 1, 1, &[40, 60, 80, 255], "bed");
+    let a = upload_tex(&mut r, 1, 1, &[80, 120, 160, 0], "frame a");
+    let b = upload_tex(&mut r, 1, 1, &[160, 80, 120, 255], "frame b");
+    let floor = view_quad(&mut r, -5.0);
+    let water = view_quad(&mut r, -3.0);
+    let px = shot(
+        &mut r,
+        &[
+            DrawCmd::water(floor, bed, [1.0; 4], Mat4::IDENTITY),
+            DrawCmd::speckle(water, a, [1.0, 1.0, 1.0, 0.25], Mat4::IDENTITY),
+            DrawCmd::speckle(water, b, [1.0, 1.0, 1.0, 0.75], Mat4::IDENTITY),
+        ],
+    );
+    for (actual, expected) in px[..3].iter().zip([75i32, 82, 112]) {
+        assert!((i32::from(*actual) - expected).abs() <= 2, "{px:?}");
+    }
+}
+
 /// A water quad at half tint alpha over an opaque red one composites — and
 /// the same draw through the opaque pass does not.
 #[test]
@@ -55,14 +280,8 @@ fn the_water_composites_over_the_world_it_covers() {
             DrawCmd::water(water, white, [1.0, 1.0, 1.0, 0.5], Mat4::IDENTITY),
         ],
     );
-    // Half of a white surface over a red one: red stays high, green and blue
-    // come up off the floor. (sRGB, so not 128 — the check is that BOTH
-    // layers are in the pixel.)
     assert_eq!(px[0], 255, "the red floor is still under it: {px:?}");
-    assert!(
-        px[1] > 40 && px[1] < 250,
-        "the water must composite, not paint or vanish: {px:?}"
-    );
+    assert!((i32::from(px[1]) - 128).abs() <= 1, "{px:?}");
     assert_eq!(px[1], px[2], "a white water layer is neutral: {px:?}");
 
     // The same two draws with the water opaque: it PAINTS, and the floor's

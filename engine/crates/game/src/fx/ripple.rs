@@ -23,6 +23,7 @@ pub type Vertex = (Vec3, [f32; 2], [u8; 4]);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Look {
     pub water: [f32; 3],
+    pub specular: [f32; 3],
     pub ambient: [f32; 3],
     pub sun: [f32; 3],
     pub light: Vec3,
@@ -48,6 +49,9 @@ impl Look {
         let l = &m.lighting;
         Some(Look {
             water: [w[0] / 255.0, w[1] / 255.0, w[2] / 255.0],
+            specular: cfg
+                .specular_color
+                .map_or([0.0; 3], |s| [s[0] / 255.0, s[1] / 255.0, s[2] / 255.0]),
             ambient: l.ambient_sky.map(srgb_byte),
             sun: l.sun_color.map(srgb_byte),
             light: Vec3::from(l.sun_dir),
@@ -63,13 +67,46 @@ impl Look {
         [ch(0), ch(1), ch(2), alpha]
     }
 
-    fn edge(&self) -> [u8; 4] {
-        let ch = |i: usize| ((self.water[i] * 128.0).round() as u8).saturating_mul(2);
-        [ch(0), ch(1), ch(2), 0]
+    fn wake_shade(&self, water: [f32; 3], d: f32, alpha: u8) -> [u8; 4] {
+        let rgb = std::array::from_fn::<_, 3, _>(|i| {
+            let ambient = water[i] * self.ambient[i];
+            let diffuse = water[i] * self.sun[i] * d;
+            let specular = self.sun[i] * d * d * d * d;
+            let lit = ambient + diffuse - ambient * diffuse;
+            ((lit + specular - lit * specular) * 255.0).clamp(0.0, 255.0) as u8
+        });
+        [rgb[0], rgb[1], rgb[2], alpha]
     }
 }
 
+fn edge_of(water: [f32; 3]) -> [u8; 4] {
+    let ch = |i: usize| ((water[i] * 128.0).round() as u8).saturating_mul(2);
+    [ch(0), ch(1), ch(2), 0]
+}
+
 pub fn ring(look: &Look, centre: Vec3, radius: f32, life: f32, age: f32) -> Vec<Vertex> {
+    surface_ring(look, centre, radius, life, age, None)
+}
+
+pub fn wake(
+    look: &Look,
+    centre: Vec3,
+    radius: f32,
+    life: f32,
+    age: f32,
+    velocity: Vec3,
+) -> Vec<Vertex> {
+    surface_ring(look, centre, radius, life, age, Some(velocity))
+}
+
+fn surface_ring(
+    look: &Look,
+    centre: Vec3,
+    radius: f32,
+    life: f32,
+    age: f32,
+    velocity: Option<Vec3>,
+) -> Vec<Vertex> {
     let a = age / life;
     let q = if a < 0.15 {
         a * 6.666_666_5
@@ -79,24 +116,60 @@ pub fn ring(look: &Look, centre: Vec3, radius: f32, life: f32, age: f32) -> Vec<
     if q < 0.0 {
         return Vec::new();
     }
-    let p = (q * (1.0 / 3.0) * life).min(1.0);
-    let amp = p * (2.0 - p) * 0.3;
-    let alpha = (p * 255.0) as u8;
+    let mut p = (q * (1.0 / 3.0) * life).min(1.0);
+    let mut water = look.water;
+    let mut direction = Vec3::X;
+    let mut horizontal_speed = 0.0;
+    let mut relative = 0.0;
+    if let Some(velocity) = velocity {
+        let speed = velocity.length();
+        if speed <= 0.0 {
+            return Vec::new();
+        }
+        p *= (speed * (2.0 / 3.0)).min(1.0);
+        let horizontal = Vec3::new(velocity.x, 0.0, velocity.z);
+        horizontal_speed = horizontal.length();
+        direction = horizontal.try_normalize().unwrap_or(Vec3::X);
+        relative = horizontal_speed * (2.0 / 3.0);
+        let strength = (relative - 1.0) * (relative - 1.0) * 4.0 + 0.4;
+        p *= strength / (strength + 1.0);
+        if relative >= 1.0 && p > 0.3 {
+            let blend = (p - 0.3) * 1.428_571_5;
+            water = std::array::from_fn(|i| water[i] + (look.specular[i] - water[i]) * blend);
+        }
+    }
     let flat = f32::from_bits(0x3f00_a3d7);
-    let edge = look.edge();
+    let edge = edge_of(water);
     let l = look.light;
     let columns: Vec<[Vertex; 4]> = (0..COLUMNS)
         .map(|j| {
             let (s, c) = core::fmath::sin_cos(j as f32 * STEP);
+            let radial = Vec3::new(c, 0.0, s);
+            let mut amplitude = p;
+            if velocity.is_some() {
+                let facing = radial.dot(direction);
+                let shape = if relative > 1.0 {
+                    let delta = 1.0 - relative * facing;
+                    1.0 - (1.5 / horizontal_speed) * delta * delta
+                } else {
+                    let delta = relative * (1.0 - facing);
+                    (2.0 - relative) * (1.0 - delta * delta)
+                };
+                amplitude *= shape.max(0.0);
+            }
+            let amp = amplitude * (2.0 - amplitude) * 0.3;
+            let alpha = (amplitude * 255.0).clamp(0.0, 255.0) as u8;
             let n = Vec3::new(amp * SLOPE * c, flat, amp * SLOPE * s).normalize();
             let inner = (n.x * l.x + n.z * l.z - n.y * l.y).max(0.0);
             let outer = (-n.dot(l)).max(0.0);
-            let colour = [
-                edge,
-                look.shade(inner, alpha),
-                look.shade(outer, alpha),
-                edge,
-            ];
+            let shade = |d| {
+                if velocity.is_some() {
+                    look.wake_shade(water, d, alpha)
+                } else {
+                    look.shade(d, alpha)
+                }
+            };
+            let colour = [edge, shade(inner), shade(outer), edge];
             std::array::from_fn(|i| {
                 let r = radius + BAND[i];
                 (
@@ -109,6 +182,9 @@ pub fn ring(look: &Look, centre: Vec3, radius: f32, life: f32, age: f32) -> Vec<
         .collect();
     let mut out = Vec::with_capacity((COLUMNS - 1) * 3 * 6);
     for pair in columns.windows(2) {
+        if velocity.is_some() && pair[0][1].2[3] == 0 && pair[1][1].2[3] == 0 {
+            continue;
+        }
         for i in 0..3 {
             let (a, b, c, d) = (pair[0][i], pair[1][i], pair[0][i + 1], pair[1][i + 1]);
             out.extend([a, b, c, c, b, d]);
@@ -123,6 +199,7 @@ pub struct Ripple {
     pub life: f32,
     pub size: f32,
     pub age: f32,
+    pub velocity: Option<Vec3>,
 }
 
 #[derive(Debug, Default)]
@@ -164,6 +241,19 @@ impl Water {
                 life,
                 size,
                 age: 0.0,
+                velocity: None,
+            });
+        }
+    }
+
+    pub fn spawn_wake(&mut self, at: Vec3, velocity: Vec3) {
+        if velocity.length_squared() > 0.0 && self.look.is_some() && self.pool.len() < CAP {
+            self.pool.push(Ripple {
+                at,
+                life: 2.0,
+                size: 0.25,
+                age: 0.0,
+                velocity: Some(velocity),
             });
         }
     }
@@ -197,7 +287,11 @@ impl Water {
             .retain(|r| (r.at + Vec3::Y * lift).distance_squared(eye) < SEEN_RANGE * SEEN_RANGE);
         for r in &mut self.pool {
             let centre = r.at + Vec3::Y * lift;
-            let tris = ring(look, centre, r.size + SPREAD * r.age, r.life, r.age);
+            let radius = r.size + SPREAD * r.age;
+            let tris = match r.velocity {
+                Some(velocity) => wake(look, centre, radius, r.life, r.age, velocity),
+                None => ring(look, centre, radius, r.life, r.age),
+            };
             if !tris.is_empty() {
                 out.push(ParticleDraw {
                     shape: ParticleShape::Shaded { tris },
@@ -243,6 +337,7 @@ impl Fx {
 pub(super) fn kas1() -> Look {
     Look {
         water: [128.0 / 255.0, 130.0 / 255.0, 128.0 / 255.0],
+        specular: [0.0; 3],
         ambient: [90.0 / 255.0, 90.0 / 255.0, 100.0 / 255.0],
         sun: [120.0 / 255.0, 120.0 / 255.0, 130.0 / 255.0],
         light: Vec3::new(8.742_278e-8, -1.0, 0.0),
@@ -252,6 +347,29 @@ pub(super) fn kas1() -> Look {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wading_ripples_keep_velocity_and_open_into_two_side_arcs() {
+        let look = kas1();
+        let centre = Vec3::ZERO;
+        let static_ring = ring(&look, centre, 1.0, 2.0, 0.3);
+        let moving = wake(&look, centre, 1.0, 2.0, 0.3, Vec3::Z * 7.0);
+        assert!(moving.len() < static_ring.len());
+        let visible: Vec<_> = moving.iter().filter(|v| v.2[3] > 0).collect();
+        assert!(!visible.is_empty());
+        assert!(visible.iter().all(|v| {
+            let radial = Vec3::new(v.0.x, 0.0, v.0.z).normalize();
+            radial.z > -0.26 && radial.z < 0.68
+        }));
+        assert!(visible.iter().any(|v| v.0.x > 0.5));
+        assert!(visible.iter().any(|v| v.0.x < -0.5));
+        assert!(wake(&look, centre, 1.0, 2.0, 0.3, Vec3::ZERO).is_empty());
+        let mut water = Water::new(false, Some(look));
+        water.spawn(BOLT, centre);
+        water.spawn_wake(centre, Vec3::Z * 7.0);
+        assert_eq!(water.ripples()[0].velocity, None);
+        assert_eq!(water.ripples()[1].velocity, Some(Vec3::Z * 7.0));
+    }
 
     #[test]
     fn the_manifest_light_comes_back_to_the_bytes_the_ps2_holds() {

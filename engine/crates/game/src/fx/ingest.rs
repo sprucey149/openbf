@@ -8,6 +8,7 @@ impl Fx {
         use core::sim::Event;
         self.tick = sim.tick;
         self.follow_turrets(sim);
+        self.follow_station_damage(sim);
         // A link lives the record's FadeTime (18 ticks); its clock is the
         // sim tick, so a pause freezes it (card UORDE, `arc.rs`).
         self.arcs.retain(|a| a.alive(sim.tick));

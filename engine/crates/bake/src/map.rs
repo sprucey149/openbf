@@ -19,6 +19,7 @@
 use anyhow::{anyhow, Result};
 use std::path::Path;
 
+mod atmosphere;
 mod collision_standin;
 mod content;
 mod render_alignment;

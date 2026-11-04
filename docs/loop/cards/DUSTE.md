@@ -49,3 +49,15 @@ load_scene.rs` counts them as "dust effect emitters (no geometry)").
 
 ## Planner note (2026-09-30, M-ALPHA)
 `alpha: yes` — blowing sand / snow on TAT1 and HOT1. Value 3 (kept). Showcase maps: BF1 NAB1, BF1 TAT1 (the port's `tat1`), BF1 YAV2, BF2 UTA1, BF2 MYG1, BF2 HOT1 (PLAN §Milestones M-ALPHA).
+
+## Hoth maintainer trial (2026-11-02)
+
+BF2 placed DustEffect rendering now exists on `codex/hoth-atmosphere`, using the
+map's existing classes.ron, active instances and source transparency. Hoth
+conquest's 52 snow and seven mist placements are covered by a regression.
+The follow-up traces world-axis wind, compressed camera-facing cards and bounds
+against original RAM/vertex expansion. Premultiplied native blending retains
+the original unscaled HDR source color without increasing opacity or counts.
+See `analysis/re-hoth-atmosphere.md` for source reads, provisional details and
+local evidence. Do not duplicate that implementation. This does not close the
+independent verification, BF1 work or the original all-map acceptance above.

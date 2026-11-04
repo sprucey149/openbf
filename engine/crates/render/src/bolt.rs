@@ -162,10 +162,12 @@ pub(crate) struct BoltRun {
     pub glow: bool,
     pub solid: bool,
     pub cutout: bool,
+    pub premultiplied: bool,
 }
 
 pub(crate) struct DisplayPipelines {
     pub core: wgpu::RenderPipeline,
+    pub atmosphere: wgpu::RenderPipeline,
     pub glow: wgpu::RenderPipeline,
     pub solid: wgpu::RenderPipeline,
     pub cutout: wgpu::RenderPipeline,
@@ -176,6 +178,25 @@ pub(crate) struct DisplayPipelines {
 pub(crate) struct BoltFrame {
     pub vertices: Vec<GrassVertex>,
     pub runs: Vec<BoltRun>,
+    pub blur_runs: Vec<(TextureHandle, std::ops::Range<u32>)>,
+}
+
+impl BoltFrame {
+    pub fn append(&mut self, other: BoltFrame) {
+        let base = self.vertices.len() as u32;
+        let shift = |range: std::ops::Range<u32>| range.start + base..range.end + base;
+        self.vertices.extend(other.vertices);
+        self.runs.extend(other.runs.into_iter().map(|run| BoltRun {
+            vertices: shift(run.vertices),
+            ..run
+        }));
+        self.blur_runs.extend(
+            other
+                .blur_runs
+                .into_iter()
+                .map(|(texture, range)| (texture, shift(range))),
+        );
+    }
 }
 
 /// The one instance every bolt draw uses: the vertices are in world space.

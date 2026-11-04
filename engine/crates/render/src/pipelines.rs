@@ -53,6 +53,7 @@ impl Renderer {
                 // one bind the base view here and switch it off in params.
                 bindings::texture_layout(2, true),
                 bindings::uniform_layout(3, wgpu::ShaderStages::FRAGMENT, false, None),
+                bindings::texture_layout(4, true),
             ],
         });
 
@@ -153,13 +154,26 @@ impl Renderer {
         // `fs_water` can fold the far fade into alpha unconditionally
         // (`far_fade` returns exactly 1.0 on a map with no fade, and 1.0
         // src-alpha blending over an opaque frame is a paint).
+        let display_format = match &target {
+            Target::Window { config, .. } => config.view_formats.first().copied(),
+            Target::Headless { .. } => Some(crate::device::HEADLESS_FORMAT.remove_srgb_suffix()),
+        };
+        let display_target = display_format.unwrap_or(format);
+        let display_fs = |linear: &'static str, display: &'static str| {
+            if display_format.is_some() {
+                display
+            } else {
+                linear
+            }
+        };
+        let water_fs = display_fs("fs_water", "fs_water_display");
         let water_pipeline = PipelineDesc {
-            fs: "fs_water",
+            fs: water_fs,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             ..PipelineDesc::world("map water pipeline", &pipeline_layout, &vb)
         }
-        .build(&device, &shader, format);
+        .build(&device, &shader, display_target);
 
         // Speckle pipeline: the water's additive second layer (queue W3) —
         // the PS2's record 0x69c3b0, ALPHA 0x48 = `Cs·As + Cd`, TEST 0x51001,
@@ -182,13 +196,14 @@ impl Renderer {
             },
         };
         let speckle_pipeline = PipelineDesc {
-            fs: "fs_speckle",
+            vs: "vs_speckle",
+            fs: display_fs("fs_speckle", "fs_speckle_display"),
             blend: Some(additive),
             depth_write: false,
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             ..PipelineDesc::world("map speckle pipeline", &pipeline_layout, &vb)
         }
-        .build(&device, &shader, format);
+        .build(&device, &shader, display_target);
 
         // The `LOWR` far sheet (queue CLN5): the world pass's opaque state —
         // depth tested and written, no blend — with its own entry point,
@@ -205,14 +220,15 @@ impl Renderer {
         // water's reason — and writing no depth (the base already has).
         // `fs_terrain_layer` folds the far fade into alpha itself, so there
         // is no `_fade` twin.
+        let terrain_fs = display_fs("fs_terrain_layer", "fs_terrain_layer_display");
         let terrain_layer_pipeline = PipelineDesc {
-            fs: "fs_terrain_layer",
+            fs: terrain_fs,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             ..PipelineDesc::world("map terrain layer pipeline", &pipeline_layout, &vb)
         }
-        .build(&device, &shader, format);
+        .build(&device, &shader, display_target);
 
         // The FADE pipelines — the world pass on a map that authors
         // `FarSceneRange(0)` (`render::FarFade`, `game::viewer::far_fade_from`).
@@ -253,7 +269,7 @@ impl Renderer {
         }
         .build(&device, &shader, format);
 
-        // TWO sky pipelines: OPAQUE and BLEND.
+        // Sky materials: OPAQUE and BLEND.
         //
         // The MODE is the shell's own material's, not the pass's: the ELF
         // draws every model — sky shells included — with the GS state its
@@ -269,30 +285,33 @@ impl Renderer {
         // the sky is never fogged and one fragment entry point serves both
         // modes. See [`SkyShell`] for the port deviation this replaced.
         //
-        // Depth is the same in both and unchanged: NO test and NO write,
+        // Domes use no depth test or write,
         // so the shells paint the background first and every other draw lands
         // on top of them wherever the ~20 m dome mesh physically sits. The
         // ELF Z-writes an opaque shell at its far-scene range (RE §6 [H]) but
         // draws the sky first (task priority −9999, §1 [V]), so painting
         // first with depth off is the same picture for everything after.
-        let sky_pipeline = |label: &'static str, blend| {
+        let sky_pipeline = |depth, lit, blend: Option<wgpu::BlendState>| {
             PipelineDesc {
-                fs: "fs_sky",
+                fs: if lit { "fs_sky_lit" } else { "fs_sky" },
                 blend,
-                depth_write: false,
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                ..PipelineDesc::world(label, &pipeline_layout, &vb)
+                depth_write: depth && blend.is_none(),
+                depth_compare: Some(if depth {
+                    wgpu::CompareFunction::LessEqual
+                } else {
+                    wgpu::CompareFunction::Always
+                }),
+                ..PipelineDesc::world("sky pipeline", &pipeline_layout, &vb)
             }
             .build(&device, &shader, format)
         };
-        // Indexed [SkyMode::index()].
-        let sky_pipelines = [
-            sky_pipeline("sky pipeline (opaque)", None),
-            sky_pipeline(
-                "sky pipeline (blended)",
-                Some(wgpu::BlendState::ALPHA_BLENDING),
-            ),
-        ];
+        // Indexed by depth, material lighting and SkyMode::index().
+        let sky_pipelines = [false, true].map(|depth| {
+            [false, true].map(|lit| {
+                [None, Some(wgpu::BlendState::ALPHA_BLENDING)]
+                    .map(|blend| sky_pipeline(depth, lit, blend))
+            })
+        });
 
         // Skinned pipelines: the world's OPAQUE and BLEND passes exactly —
         // same fragment entry points, same state — through `vs_skinned`, with
@@ -359,8 +378,8 @@ impl Renderer {
                 blend: alpha,
                 ..PipelineDesc::world("map fade mask pipeline, no discard", &pipeline_layout, &vb)
             }),
-            terrain_layer: clean(PipelineDesc {
-                fs: "fs_terrain_layer",
+            terrain_layer: PipelineDesc {
+                fs: terrain_fs,
                 blend: alpha,
                 depth_write: false,
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
@@ -369,13 +388,15 @@ impl Renderer {
                     &pipeline_layout,
                     &vb,
                 )
-            }),
-            water: clean(PipelineDesc {
-                fs: "fs_water",
+            }
+            .build_with(&device, &shader, display_target, no_cull),
+            water: PipelineDesc {
+                fs: water_fs,
                 blend: alpha,
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 ..PipelineDesc::world("map water pipeline, no discard", &pipeline_layout, &vb)
-            }),
+            }
+            .build_with(&device, &shader, display_target, no_cull),
             skinned: clean(PipelineDesc {
                 vs: "vs_skinned",
                 ..PipelineDesc::world("skinned pipeline, no discard", &skinned_layout, &skinned_vb)
@@ -443,12 +464,12 @@ impl Renderer {
         ];
         let grass_pipeline = PipelineDesc {
             vs: "vs_grass",
-            fs: "fs_grass",
+            fs: display_fs("fs_grass", "fs_grass_display"),
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
             ..PipelineDesc::world("grass pipeline", &pipeline_layout, &grass_vb)
         }
-        .build(&device, &grass_shader, format);
+        .build(&device, &grass_shader, display_target);
         // The laser bolts (card FXB, `bolt.rs`): `vs_grass` over world-space
         // ribbons; GS TEST 0x51001 = depth tested, no depth write
         // (re-bolt §3.3). The core is ALPHA 0x44 (source-over), the glow 0x48
@@ -473,6 +494,14 @@ impl Renderer {
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
             ..PipelineDesc::world("bolt core pipeline", &pipeline_layout, &grass_vb)
+        }
+        .build(&device, &bolt_shader, format);
+        let atmosphere_pipeline = PipelineDesc {
+            vs: "vs_grass",
+            fs: "fs_atmosphere",
+            blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            depth_write: false,
+            ..PipelineDesc::world("atmosphere pipeline", &pipeline_layout, &grass_vb)
         }
         .build(&device, &bolt_shader, format);
         // The star field (`stars.rs`): the bolt glow's ADDITIVE shader
@@ -509,10 +538,6 @@ impl Renderer {
             ..PipelineDesc::world("leaf cutout pipeline", &pipeline_layout, &grass_vb)
         }
         .build(&device, &bolt_shader, format);
-        let display_format = match &target {
-            Target::Window { config, .. } => config.view_formats.first().copied(),
-            Target::Headless { .. } => Some(crate::device::HEADLESS_FORMAT.remove_srgb_suffix()),
-        };
         let particle_display = display_format.map(|display| {
             let twin = |label: &str, fs: &str, blend: Option<wgpu::BlendState>, depth_write| {
                 PipelineDesc {
@@ -525,6 +550,12 @@ impl Renderer {
                 .build(&device, &bolt_shader, display)
             };
             crate::bolt::DisplayPipelines {
+                atmosphere: twin(
+                    "atmosphere display pipeline",
+                    "fs_bolt_glow_display",
+                    Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                    false,
+                ),
                 core: twin(
                     "bolt core display pipeline",
                     "fs_bolt_core_display",
@@ -600,6 +631,22 @@ impl Renderer {
         // The DomeInfo frame filter (card BFLT, `filter.rs`): its own
         // full-screen pipeline over a copy of the finished 3D frame.
         let filter = crate::filter::FilterState::new(&device, format, copyable);
+        let particle_blur =
+            crate::particle_blur::ParticleBlur::new(&device, format, &globals_bgl, &texture_bgl);
+        let heat_character_mask = PipelineDesc {
+            vs: "vs_skinned",
+            depth_write: false,
+            depth_compare: Some(wgpu::CompareFunction::Equal),
+            ..PipelineDesc::world("heat character mask", &skinned_layout, &skinned_vb)
+        }
+        .build_with_stencil(
+            &device,
+            &shader,
+            format.remove_srgb_suffix(),
+            &[],
+            wgpu::ColorWrites::empty(),
+            crate::particle_blur::character_stencil(wgpu::StencilOperation::Replace),
+        );
         let gather_world = |fs, blend| {
             crate::bloom::gather(
                 &device,
@@ -612,6 +659,18 @@ impl Renderer {
             )
         };
         let gather = crate::bloom::Gather {
+            sky: [None, Some(wgpu::BlendState::ALPHA_BLENDING)].map(|blend| {
+                crate::bloom::gather(
+                    &device,
+                    &shader,
+                    PipelineDesc {
+                        vs: "vs_sky_bloom",
+                        blend,
+                        ..PipelineDesc::world("bloom sky", &pipeline_layout, &vb)
+                    },
+                    "fs_sky_bloom",
+                )
+            }),
             world: gather_world("fs_bloom", None),
             mask: gather_world("fs_bloom_mask", None),
             blend: gather_world("fs_bloom", Some(additive)),
@@ -690,6 +749,7 @@ impl Renderer {
             mask_pipeline,
             blend_pipeline,
             water_pipeline,
+            water_display_format: display_format,
             speckle_pipeline,
             far_sheet_pipeline,
             terrain_layer_pipeline,
@@ -701,6 +761,7 @@ impl Renderer {
             fade_skinned_blend_pipeline,
             sky_pipelines,
             sky: Vec::new(),
+            sky_seed: 0,
             frame_stats: FrameStats::default(),
             gpu_timer,
             acquire_ms: 0.0,
@@ -724,6 +785,7 @@ impl Renderer {
             leaves: Default::default(),
             falling: Default::default(),
             bolt_core_pipeline,
+            atmosphere_pipeline,
             bolt_glow_pipeline,
             bolt_solid_pipeline,
             leaf_cutout_pipeline,
@@ -739,13 +801,19 @@ impl Renderer {
                 ..Default::default()
             },
             filter,
+            sun_flare: None,
             bloom,
+            particle_blur,
+            heat_character_mask,
             spec_buf,
             spec_bg: None,
             spec_mirror: true,
             lighting: Lighting::default(),
+            character_light_regions: Vec::new(),
             time: 0.0,
             water_time: 0.0,
+            atmosphere_time: None,
+            lightning: None,
             adapter_info,
             _gpu_turn: gpu_turn,
         })
@@ -835,6 +903,25 @@ impl<'a> PipelineDesc<'a> {
         format: wgpu::TextureFormat,
         constants: &[(&str, f64)],
     ) -> wgpu::RenderPipeline {
+        self.build_with_stencil(
+            device,
+            shader,
+            format,
+            constants,
+            FRAME_WRITES,
+            wgpu::StencilState::default(),
+        )
+    }
+
+    pub(crate) fn build_with_stencil(
+        &self,
+        device: &wgpu::Device,
+        shader: &wgpu::ShaderModule,
+        format: wgpu::TextureFormat,
+        constants: &[(&str, f64)],
+        write_mask: wgpu::ColorWrites,
+        stencil: wgpu::StencilState,
+    ) -> wgpu::RenderPipeline {
         crate::made::render_pipeline(
             device,
             &wgpu::RenderPipelineDescriptor {
@@ -852,7 +939,7 @@ impl<'a> PipelineDesc<'a> {
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: self.blend,
-                        write_mask: FRAME_WRITES,
+                        write_mask,
                     })],
                     compilation_options: wgpu::PipelineCompilationOptions {
                         constants,
@@ -871,7 +958,7 @@ impl<'a> PipelineDesc<'a> {
                         format: crate::device::DEPTH_FORMAT,
                         depth_write_enabled: self.depth_write,
                         depth_compare,
-                        stencil: wgpu::StencilState::default(),
+                        stencil,
                         bias: wgpu::DepthBiasState::default(),
                     }),
                 multisample: wgpu::MultisampleState::default(),

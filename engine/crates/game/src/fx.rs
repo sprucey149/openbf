@@ -54,8 +54,11 @@ mod jet;
 mod props;
 mod repair;
 pub mod ripple;
+mod sky;
+mod storm;
 mod trail;
 mod turret;
+mod water_contact;
 
 use crate::walk::WalkSim;
 use core::impact::{ExplosionLook, Surface, SPLASH_LIFT, WATER_BLAST_DEPTH};
@@ -398,6 +401,7 @@ pub struct LiveEffect {
     /// The jet soldier whose `JetEffect` this is (card JETP2, `fx/jet.rs`).
     jet: Option<UnitHandle>,
     turret: Option<(u64, usize)>,
+    station: Option<(usize, usize)>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
 }
@@ -440,6 +444,7 @@ impl LiveEffect {
             buff: None,
             jet: None,
             turret: None,
+            station: None,
             burn: None,
             float: None,
         };
@@ -524,7 +529,9 @@ impl LiveEffect {
                 children::draw(self, i, era, eye, forward, zoom, assets, out);
                 continue;
             }
-            if em.geometry.blend == manifest::FxBlend::Blur {
+            if em.geometry.blend == manifest::FxBlend::Blur
+                && em.geometry.kind != manifest::FxType::Particle
+            {
                 continue;
             }
             let ps = inst.particles(em, era, self.t, self.frame, self.def.cache(i), |k| {
@@ -690,6 +697,7 @@ pub struct Fx {
     jet_frames: Vec<Option<Mat4>>,
     burn_frames: Vec<Vec<Option<Mat4>>>,
     water: ripple::Water,
+    water_contact: water_contact::State,
     chunks: chunks::Chunks,
     attached: Vec<props::Attached>,
     beams: Vec<props::Glow>,
@@ -698,6 +706,8 @@ pub struct Fx {
     /// The sim tick last ingested; the arcs' clock.
     tick: u64,
     force: force::State,
+    sky: Vec<sky::SkyEffect>,
+    storm: Option<storm::Storm>,
 }
 
 impl std::fmt::Debug for Fx {
@@ -743,6 +753,7 @@ impl Fx {
             crate::roster::load_classdb(&root.join("classes"), game, &crate::roster::FACTION_ORDER)
         {
             self.force.extend(&db, &walk.sim);
+            self.water_contact.load(&db);
             if let Some(lib) = self.library.as_ref() {
                 let names: Vec<_> = walk
                     .teams
@@ -798,6 +809,7 @@ impl Fx {
             names.dedup();
             fx.chunks = chunks::Chunks::load(&db, &names, &lib.model_dirs, lib.era);
             fx.force = force::State::load(&db, &walk.sim);
+            fx.water_contact.load(&db);
         }
         fx
     }
@@ -808,6 +820,11 @@ impl Fx {
             .library
             .as_ref()
             .map_or_else(Default::default, |lib| props::load(scene, lib));
+        self.sky = self
+            .library
+            .as_ref()
+            .map_or_else(Vec::new, |lib| sky::load(scene, lib));
+        self.storm = storm::Storm::load(&scene.manifest);
     }
 
     pub fn library(&self) -> Option<&Library> {
@@ -1044,6 +1061,12 @@ impl Fx {
         extra: Vec<ParticleDraw>,
     ) {
         let mut out = extra;
+        let mut sky_out = Vec::new();
+        let time = r.atmosphere_time();
+        r.set_lightning(self.storm.as_mut().and_then(|storm| {
+            storm.advance(time, camera, self.library.as_ref());
+            storm.flash(r.lighting)
+        }));
         let lift = self.ride_the_water(crate::water_anim::clock(r.water_time) as f32);
         if let Some(lib) = &self.library {
             let mut assets = Lookup {
@@ -1080,6 +1103,12 @@ impl Fx {
                     );
                 }
             }
+            for effect in &self.sky {
+                effect.draws(camera, time, zoom, &mut assets, &mut sky_out);
+            }
+            if let Some(storm) = &self.storm {
+                out.extend(storm.bolts.draws(camera, |name| assets.texture(name)));
+            }
             let sheet = assets.texture(ripple::TEXTURE);
             self.water.draws(camera.position, lift, sheet, &mut out);
             // The emitter shots' links: the class's `LightningEffect` arc
@@ -1096,6 +1125,7 @@ impl Fx {
             }));
         }
         r.set_particles(out);
+        r.set_sky_particles(sky_out);
     }
 
     /// Ingest the tick using the last drawn soldier pose for chunk launch bones.
@@ -1108,11 +1138,17 @@ impl Fx {
             self.chunks.pose_bursts(walk, vis);
         }
         self.ingest(walk);
+        if walk.sim.water_level.is_some() {
+            if let Some(vis) = vis {
+                self.soldier_water_feet(walk, &vis.water_feet(walk));
+            }
+        }
     }
 
     /// Read this tick's sim events into effects.
     pub fn ingest(&mut self, walk: &WalkSim) {
         self.ingest_sim(&walk.sim);
+        self.soldier_water(walk);
         self.chunks.tick(walk, self.library.as_ref());
         self.follow_jets(&walk.sim, |u| {
             walk.team_template(u.team)
@@ -1124,6 +1160,10 @@ impl Fx {
     }
 
     pub fn update(&mut self, dt: f32) {
+        self.update_with_round_frames(dt, Vec::new());
+    }
+
+    fn update_with_round_frames(&mut self, dt: f32, saved: Vec<(usize, Frame)>) {
         for p in &mut self.puffs {
             p.age += dt;
         }
@@ -1131,12 +1171,18 @@ impl Fx {
         for e in &mut self.live {
             e.advance(dt);
         }
+        for (index, frame) in saved {
+            self.live[index].frame = frame;
+        }
         self.live.retain(|e| !e.is_dead());
         self.water.update(dt);
         self.chunks.update(dt);
         self.force.update(dt);
         for effect in &mut self.attached {
             effect.step(dt);
+        }
+        for effect in &mut self.sky {
+            effect.update(dt);
         }
     }
 
@@ -1160,11 +1206,14 @@ impl Fx {
         self.sounds.clear();
         self.rounds = trail::Rounds::default();
         self.water.clear();
+        self.water_contact.clear();
         self.chunks.clear();
         self.attached.clear();
         self.beams.clear();
         self.arcs.clear();
         self.force.clear();
+        self.sky.clear();
+        self.storm = None;
     }
 
     /// Camera-facing quads for the live effects. `quad` is the unit quad from

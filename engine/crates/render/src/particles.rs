@@ -46,6 +46,12 @@ mod trail;
 /// A particle's shape in world units (see the module doc).
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParticleShape {
+    Cloud {
+        pos: Vec3,
+        half: f32,
+        angle: f32,
+        gain: f32,
+    },
     Sprite {
         pos: Vec3,
         /// Half the square's edge.
@@ -55,10 +61,21 @@ pub enum ParticleShape {
         /// The atlas cell: (u0, v0, u1, v1).
         uv: [f32; 4],
     },
+    Blur {
+        pos: Vec3,
+        half: f32,
+        angle: f32,
+    },
     Quad {
         pos: Vec3,
         a: Vec3,
         b: Vec3,
+    },
+    AtmosphereQuad {
+        pos: Vec3,
+        a: Vec3,
+        b: Vec3,
+        gain: f32,
     },
     Ribbon {
         /// (point, half-width, U).
@@ -196,6 +213,10 @@ fn particle_vertices(d: &ParticleDraw, camera: &Camera) -> Vec<GrassVertex> {
 
 /// Append directly to the frame buffer: dense weather otherwise allocates and
 /// copies a six-vertex temporary for every flake on every frame.
+fn gained(color: [f32; 4], gain: f32) -> [f32; 4] {
+    [color[0] * gain, color[1] * gain, color[2] * gain, color[3]]
+}
+
 fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera: &Camera) {
     let right = camera.right();
     let up = right.cross(camera.forward()).normalize_or_zero();
@@ -206,13 +227,40 @@ fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera
         gs_unit(d.color[3]),
     ];
     match &d.shape {
+        ParticleShape::Cloud {
+            pos,
+            half,
+            angle,
+            gain,
+        } => sprite(
+            out,
+            *pos,
+            (*half, *angle),
+            [0.0, 0.0, 1.0, 1.0],
+            (right, up),
+            gained(color, *gain),
+        ),
         ParticleShape::Sprite {
             pos,
             half,
             angle,
             uv,
         } => sprite(out, *pos, (*half, *angle), *uv, (right, up), color),
-        ParticleShape::Quad { pos, a, b } | ParticleShape::CutoutQuad { pos, a, b } => {
+        ParticleShape::Blur { pos, half, angle } => sprite(
+            out,
+            *pos,
+            (*half, *angle),
+            [0.0, 0.0, 1.0, 1.0],
+            (right, up),
+            [0.0, 0.0, 0.0, f32::from(d.color[3]) / 128.0],
+        ),
+        ParticleShape::Quad { pos, a, b }
+        | ParticleShape::AtmosphereQuad { pos, a, b, .. }
+        | ParticleShape::CutoutQuad { pos, a, b } => {
+            let color = match &d.shape {
+                ParticleShape::AtmosphereQuad { gain, .. } => gained(color, *gain),
+                _ => color,
+            };
             let v = [
                 vtx(*pos - *a + *b, [0.0, 0.0], color),
                 vtx(*pos + *a + *b, [1.0, 0.0], color),
@@ -359,7 +407,7 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
     // Stable: equal keys keep their order (spawn order within an effect).
     sort_far_first(&mut items);
     let mut out = BoltFrame::default();
-    let push = |out: &mut BoltFrame, first, tex, additive, solid, cutout| {
+    let push = |out: &mut BoltFrame, first, tex, additive, solid, cutout, premultiplied| {
         let end = out.vertices.len() as u32;
         if first == end {
             return;
@@ -370,6 +418,7 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
                     && r.glow == additive
                     && r.solid == solid
                     && r.cutout == cutout
+                    && r.premultiplied == premultiplied
                     && r.vertices.end == first =>
             {
                 r.vertices.end = end;
@@ -380,6 +429,7 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
                 glow: additive,
                 solid,
                 cutout,
+                premultiplied,
             }),
         }
     };
@@ -389,10 +439,19 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
                 for (verts, tex, glow) in crate::bolt::bolt_vertices(b, camera) {
                     let first = out.vertices.len() as u32;
                     out.vertices.extend(verts);
-                    push(&mut out, first, tex, glow, false, false);
+                    push(&mut out, first, tex, glow, false, false, false);
                 }
             }
             Item::Particle(p) => {
+                if matches!(p.shape, ParticleShape::Blur { .. }) {
+                    if let Some(texture) = p.texture {
+                        let first = out.vertices.len() as u32;
+                        append_particle_vertices(&mut out.vertices, p, camera);
+                        out.blur_runs
+                            .push((texture, first..out.vertices.len() as u32));
+                    }
+                    continue;
+                }
                 // A missing sheet draws nothing (the PS2 samples VRAM block
                 // 0, re-fx §6.9 [H] — PROVISIONAL).
                 if p.texture.is_some()
@@ -417,6 +476,7 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
                                 p.shape,
                                 ParticleShape::CutoutQuad { .. } | ParticleShape::CutoutMesh { .. }
                             ),
+                        matches!(p.shape, ParticleShape::AtmosphereQuad { .. }),
                     );
                 }
             }
@@ -429,9 +489,23 @@ pub(crate) fn build(bolts: &[BoltDraw], particles: &[ParticleDraw], camera: &Cam
 #[derive(Default)]
 pub(crate) struct ParticleState {
     pub particles: Vec<ParticleDraw>,
+    pub cloud: Option<crate::FogCloud>,
+    pub dust: Vec<crate::Dust>,
+    pub sky: Vec<ParticleDraw>,
 }
 
 impl Renderer {
+    pub fn set_dust(&mut self, dust: Vec<crate::Dust>) {
+        self.particles.dust = dust;
+    }
+
+    pub fn set_fog_cloud(&mut self, cloud: Option<crate::FogCloud>) {
+        self.particles.cloud = cloud;
+    }
+
+    pub fn set_sky_particles(&mut self, particles: Vec<ParticleDraw>) {
+        self.particles.sky = particles;
+    }
     /// Replace the particles drawn from the next frame on (none until this
     /// is called). Texture handles must be this renderer's.
     pub fn set_particles(&mut self, particles: Vec<ParticleDraw>) {

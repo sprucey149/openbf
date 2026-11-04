@@ -9,6 +9,9 @@
 use crate::{MeshHandle, Renderer, TextureHandle};
 use glam::Mat4;
 
+mod flight;
+pub use flight::Flight as SkyFlight;
+
 // Only for `SkyShell`'s docs, which link `Lighting`.
 #[cfg(doc)]
 use crate::Lighting;
@@ -21,12 +24,11 @@ use crate::Lighting;
 /// in that map's baked models: a dome plus, on some maps, parallax shells of
 /// distant rocks or cloud. See `bake::lighting` for the reduction.
 ///
-/// **No shell is ever fogged**, and there is no per-shell fog flag: both
-/// ELFs draw the sky with the draw flag 0x20 set (0x20031 — BF2 425997–426010,
-/// BF1 280279–280286) and both fog gates exclude it — BF2
-/// `(flags & 0x20020) == 0x20000` at 723621, BF1 `(flags & 0x20) == 0` at
-/// 594590 (`analysis/re-fog.md` §2.4 [V]). `SkyObject` ships are drawn the
-/// same way (`| 0x20001`), so they are excluded too.
+/// **No shell is ever fogged**, and there is no per-shell fog flag. Dome
+/// draws use 0x20031, excluded by both fog gates (`analysis/re-fog.md` section 2.4).
+/// `SkyObject` draws instead use `flags | 0x20001` with the composite/fog
+/// switch cleared (BF2 0x3bf060); their material lighting and depth remain
+/// enabled (`analysis/re-bf2-geonosis-atmosphere.md`).
 ///
 /// **Removed deviation (session 5, deleted 2026-09-03):** the port used to
 /// route a PARALLAX shell — a `DomeModel` with an authored `Offset` or
@@ -57,6 +59,12 @@ pub struct SkyShell {
     pub yaw: f32,
     /// The GS state this shell's own MATERIAL asks for — see [`SkyMode`].
     pub mode: SkyMode,
+    /// Whether this shell is lit by the map's sun and ambient light.
+    /// False for dome shells and mirrors. Sky objects follow each segment's
+    /// material bit 0x01 (`analysis/re-bf2-geonosis-atmosphere.md`).
+    pub lit: bool,
+    pub emission: Option<crate::LightPath>,
+    pub depth: bool,
 }
 
 /// How a sky shell's segment is composited — the ELF's per-MATERIAL GS state,
@@ -126,6 +134,13 @@ impl SkyMode {
 /// (the yaw the ELF spins a shell by — the bake does not parse the key).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Placement {
+    Flight(SkyFlight),
+    SpinningDome {
+        offset_y: f32,
+        movement_scale: f32,
+        speed: f32,
+        axis: glam::Vec3,
+    },
     /// A `DomeModel` shell, placed the way both ELFs place it
     /// (`analysis/re-sky-dome-placement.md` §3 BF2 `FUN_003cb918` 425830–425837,
     /// §4 BF1 `FUN_002f2308` 280211–280221, both [V]): X and Z are the
@@ -156,7 +171,9 @@ pub enum Placement {
     /// but no azimuth; see `game::viewer::scene::upload_sky_objects`), so it is held
     /// at a fixed vector from the eye: camera-locked in XZ at its authored
     /// distance and bearing. PROVISIONAL, unchanged by this module's rule.
-    Object { offset: glam::Vec3 },
+    Object {
+        offset: glam::Vec3,
+    },
     /// The mirrored copy of a `Reflect` dome shell, drawn just before the
     /// shell (BF1 `FUN_002f2308` 280190–280255, `analysis/re-sky-reflect.md`
     /// §2 [V][O]): the shell's own [`Placement::Dome`] position lifted by
@@ -191,9 +208,15 @@ impl Placement {
     /// uniform mesh scale of `k`.
     pub fn translation(&self, eye: glam::Vec3, k: f32) -> glam::Vec3 {
         match *self {
+            Placement::Flight(flight) => flight.model().w_axis.truncate(),
             Placement::Dome {
                 offset_y,
                 movement_scale,
+            }
+            | Placement::SpinningDome {
+                offset_y,
+                movement_scale,
+                ..
             } => eye + glam::Vec3::Y * ((offset_y - eye.y) * (1.0 - movement_scale) * k),
             Placement::Object { offset } => eye + offset,
             Placement::Mirror {
@@ -208,31 +231,149 @@ impl Placement {
 }
 
 impl Renderer {
-    /// Replace the map's sky shells. Outermost first — they are drawn in
-    /// order with no depth, so a later shell paints over an earlier one.
+    pub fn set_sky_seed(&mut self, seed: u32) {
+        self.sky_seed = seed;
+    }
+
+    pub fn advance_sky(&mut self) {
+        let time = self.atmosphere_time();
+        advance_flights(&mut self.sky, time, &mut self.sky_seed);
+    }
+
+    pub(super) fn sky_color(shell: &SkyShell) -> [f32; 4] {
+        let mut color = shell.color;
+        if let Placement::Flight(flight) = shell.placement {
+            color[3] *= flight.opacity();
+        }
+        color
+    }
+
+    pub(super) fn sky_mode(shell: &SkyShell) -> SkyMode {
+        if Self::sky_color(shell)[3] < 1.0 {
+            SkyMode::Blend
+        } else {
+            shell.mode
+        }
+    }
+    /// Replace the map's sky shells. Domes paint in authored order;
+    /// object hulls use their material's depth and blend state.
     pub fn set_sky(&mut self, shells: Vec<SkyShell>) {
+        self.sky_seed = shells
+            .iter()
+            .find_map(|s| match s.placement {
+                Placement::Flight(f) => Some(f.id()),
+                _ => None,
+            })
+            .unwrap_or(0);
         self.sky = shells;
     }
 
-    /// Where a shell sits this frame, at renderer time `t` — see
-    /// [`Placement`] for the rule and its citation. A mirrored shell's Y
+    /// Read the map's sky shells.
+    pub fn sky(&self) -> &[SkyShell] {
+        &self.sky
+    }
+
+    /// Access the map's sky shells mutably.
+    pub fn sky_mut(&mut self) -> &mut [SkyShell] {
+        &mut self.sky
+    }
+
+    /// Where a shell sits this frame: `atmo_time` controls dome spin and
+    /// freezes when paused; `water_time` controls mirror squash and continues.
+    /// See [`Placement`] for the rule and its citation. A mirrored shell's Y
     /// scale is negative; the sky pipelines cull nothing, so its flipped
     /// winding still draws.
-    pub(super) fn sky_model(shell: &SkyShell, eye: glam::Vec3, t: f32) -> Mat4 {
+    pub(super) fn sky_model(
+        shell: &SkyShell,
+        eye: glam::Vec3,
+        atmo_time: f64,
+        water_time: f64,
+    ) -> Mat4 {
+        if let Placement::Flight(flight) = shell.placement {
+            return flight.model() * Mat4::from_scale(glam::Vec3::splat(shell.scale));
+        }
         let k = shell.scale;
         let scale = match shell.placement {
-            Placement::Mirror { .. } => glam::Vec3::new(k, -mirror_squash(t) * k, k),
+            Placement::Mirror { .. } => {
+                glam::Vec3::new(k, -mirror_squash((water_time % 2000.0) as f32) * k, k)
+            }
             _ => glam::Vec3::splat(k),
         };
+        let rotation = match shell.placement {
+            Placement::SpinningDome { speed, axis, .. } => spin(speed, axis, atmo_time),
+            _ => None,
+        }
+        .unwrap_or_else(|| Mat4::from_rotation_y(shell.yaw));
         Mat4::from_translation(shell.placement.translation(eye, k))
-            * Mat4::from_rotation_y(shell.yaw)
+            * rotation
             * Mat4::from_scale(scale)
+    }
+}
+
+pub fn spin(speed: f32, axis: glam::Vec3, time: f64) -> Option<Mat4> {
+    (axis.length_squared() > 0.0).then(|| {
+        Mat4::from_axis_angle(
+            axis.normalize(),
+            (f64::from(speed) * time * std::f64::consts::TAU).rem_euclid(std::f64::consts::TAU)
+                as f32,
+        )
+    })
+}
+
+fn advance_flights(shells: &mut [SkyShell], time: f64, seed: &mut u32) {
+    let mut updated = std::collections::HashMap::new();
+    for shell in shells {
+        if let Placement::Flight(flight) = &mut shell.placement {
+            *flight = *updated.entry(flight.id()).or_insert_with(|| {
+                flight.update_shared(time, seed);
+                *flight
+            });
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_spawn_stream_advances_once_per_ship_independent_of_mesh_parts() {
+        let shell = |id| SkyShell {
+            mesh: MeshHandle(0),
+            texture: None,
+            color: [1.0; 4],
+            scale: 1.0,
+            placement: Placement::Flight(SkyFlight::new(
+                [200.0, 300.0],
+                1500.0,
+                [[0.0; 2], [0.0; 2], [20.0, 50.0]],
+                glam::Vec3::ZERO,
+                2.0,
+                1000.0,
+                id,
+            )),
+            yaw: 0.0,
+            mode: SkyMode::Opaque,
+            lit: true,
+            depth: true,
+            emission: None,
+        };
+        let mut single = [shell(3), shell(4)];
+        let mut segmented = [shell(3), shell(3), shell(3), shell(4), shell(4)];
+        let (mut a, mut b) = (3u32, 3u32);
+        for time in [0.0, 0.5, 0.5, 20.0, 120.0, 124.0, 128.0] {
+            advance_flights(&mut single, time, &mut a);
+            advance_flights(&mut segmented, time, &mut b);
+            assert_eq!(a, b);
+            for index in [0, 1, 2] {
+                assert_eq!(single[0].placement, segmented[index].placement);
+            }
+            for index in [3, 4] {
+                assert_eq!(single[1].placement, segmented[index].placement);
+            }
+        }
+        assert_ne!(single[0].placement, single[1].placement);
+    }
 
     /// The ELF's dome rule as arithmetic (`analysis/re-sky-dome-placement.md`
     /// §3 [V]): X/Z are the eye's exactly and Y is the lerp
@@ -289,6 +430,9 @@ mod tests {
             placement,
             yaw: 0.0,
             mode: SkyMode::Opaque,
+            lit: false,
+            depth: false,
+            emission: None,
         };
         let dome = shell(Placement::Dome {
             offset_y,
@@ -306,8 +450,8 @@ mod tests {
 
         // At t = 0 (every headless golden) the squash is exactly 0.85.
         assert_eq!(mirror_squash(0.0), 0.85);
-        let m = Renderer::sky_model(&mirror, eye, 0.0);
-        let d = Renderer::sky_model(&dome, eye, 0.0);
+        let m = Renderer::sky_model(&mirror, eye, 0.0, 0.0);
+        let d = Renderer::sky_model(&dome, eye, 0.0, 0.0);
         let p = glam::Vec3::new(1.0, 2.0, -3.0);
         let (pm, pd) = (m.transform_point3(p), d.transform_point3(p));
         assert!((pm.x - pd.x).abs() < 1e-4 && (pm.z - pd.z).abs() < 1e-4);

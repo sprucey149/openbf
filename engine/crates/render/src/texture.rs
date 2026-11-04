@@ -48,6 +48,7 @@ pub struct DetailDesc<'a> {
     pub mips: &'a [&'a [u8]],
     /// UV multiplier for the detail lookup; 1.0 = same UVs as the base.
     pub scale: f32,
+    pub world_patch: f32,
 }
 
 /// CPU-side description of one texture upload.
@@ -100,7 +101,7 @@ impl GpuTexture {
         layout: &wgpu::BindGroupLayout,
         desc: &TextureDesc<'_>,
     ) -> Result<Self, RenderError> {
-        let view = upload_levels(
+        let (view, display_view) = upload_level_views(
             device,
             queue,
             desc.width,
@@ -140,14 +141,6 @@ impl GpuTexture {
             },
         );
 
-        // MaterialParams {
-        //   detail: [detail_scale, detail_strength, RESERVED, pad],
-        //   scroll: [du/dt, dv/dt, uv_scale.u, uv_scale.v],
-        // }
-        // detail.z used to be the texture's alpha mode. ALPHA RULE v2 decides
-        // that per DRAW and the pipeline carries it, so one texture can serve
-        // Opaque, Mask and Blend draws and this slot is now always 0.
-        const RESERVED: f32 = 0.0;
         let (detail_scale, detail_strength) = match &desc.detail {
             Some(d) => (d.scale, 1.0),
             None => (1.0, 0.0),
@@ -155,8 +148,8 @@ impl GpuTexture {
         let params: [f32; 8] = [
             detail_scale,
             detail_strength,
-            RESERVED,
-            0.0,
+            f32::from(u8::from(!desc.srgb)),
+            desc.detail.map_or(0.0, |d| d.world_patch),
             desc.scroll[0],
             desc.scroll[1],
             desc.uv_scale[0],
@@ -183,6 +176,7 @@ impl GpuTexture {
                     // WebGPU requires every binding to be filled).
                     bindings::texture_view(2, detail_view.as_ref().unwrap_or(&view)),
                     bindings::entire_buffer(3, &params_buf),
+                    bindings::texture_view(4, &display_view),
                 ],
             },
         );
@@ -201,6 +195,18 @@ pub(crate) fn upload_levels(
     srgb: bool,
     label: Option<&str>,
 ) -> Result<wgpu::TextureView, RenderError> {
+    Ok(upload_level_views(device, queue, width, height, mips, srgb, label)?.0)
+}
+
+fn upload_level_views(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    mips: &[&[u8]],
+    srgb: bool,
+    label: Option<&str>,
+) -> Result<(wgpu::TextureView, wgpu::TextureView), RenderError> {
     if width == 0 || height == 0 || mips.is_empty() {
         return Err(RenderError::BadTexture(
             "zero-sized texture or empty mip chain".into(),
@@ -236,7 +242,7 @@ pub(crate) fn upload_levels(
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
         },
     );
 
@@ -264,7 +270,13 @@ pub(crate) fn upload_levels(
             },
         );
     }
-    Ok(texture.create_view(&wgpu::TextureViewDescriptor::default()))
+    Ok((
+        texture.create_view(&wgpu::TextureViewDescriptor::default()),
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            ..Default::default()
+        }),
+    ))
 }
 
 #[cfg(test)]

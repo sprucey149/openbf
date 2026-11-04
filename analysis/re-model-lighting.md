@@ -309,3 +309,21 @@ supported B2–B4. The measurement below is this session's.
     78654c, HOT1 a6a9ad vs ffffff, END1 8c8c78 vs 646e64.
   - This is card **CAMB**. BF2 has no such split: `FUN_00597e98` builds one ambient for every kind (§3).
 - **[H]:** which BF1 draws carry a `shdw` volume (vehicles, by the key's name); the region list's source (card LREG).
+
+## BF2 interior shadow regions
+
+[O] BF2 registers `shadow` at 0x45f330. The region properties parsed at 0x59ab98 are
+`directional`, `directional1`, `colortop` and `colorbottom`. The color triplets are display RGB
+bytes divided by 255. At 0x59b2f8 the model's bounding sphere supplies the influence of up to
+four regions. For a box (0x5ad8e0), the weight is half on the boundary and ramps across one
+sphere radius on either side. Where one box fully covers the sphere, its hemisphere and
+directional weights replace the map's.
+
+Spheres use the distance from their curved surface (0x5adc48). Cylinders blend across their
+side and caps, using the distance to the rim when a point is outside both (0x5ada60).
+The port reads these volumes from the active BF2 world and uses the soldier lighting sphere
+for skinned character draws.
+
+The reported Mustafar hallway position is inside the box with top RGB (120,120,109), bottom RGB
+(13,13,13), and zero weight on both directional lights. The port uses the existing soldier
+lighting sphere there as on other BF2 maps.

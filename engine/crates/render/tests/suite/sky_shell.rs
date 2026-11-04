@@ -31,6 +31,52 @@ fn centre(r: &mut Renderer) -> [u8; 4] {
     capture_pixel(r, N / 2, N / 2)
 }
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn hdr_cloud_keeps_its_full_brightness_without_changing_ordinary_particles() {
+    let mut r = headless();
+    let tex = upload_tex(&mut r, 1, 1, &[135, 97, 66, 255], "brownmist sample");
+    let pos = glam::Vec3::new(0.0, 0.0, -2.0);
+    let draw = |gain| render::ParticleDraw {
+        shape: render::ParticleShape::Cloud {
+            pos,
+            half: 20.0,
+            angle: 0.0,
+            gain,
+        },
+        key: pos,
+        color: [168, 172, 180, 128],
+        texture: Some(tex),
+        additive: false,
+    };
+    let clear = [0.0, 0.0, 0.0, 1.0];
+    r.set_particles(vec![draw(1.0)]);
+    r.render(&Camera::default(), &[], clear).expect("frame");
+    let ordinary = centre(&mut r);
+    r.set_particles(vec![draw(2.0)]);
+    r.render(&Camera::default(), &[], clear).expect("frame");
+    let hdr = centre(&mut r);
+    for (actual, expected) in hdr[..3].iter().zip([89i16, 65, 47]) {
+        assert!(
+            (i16::from(*actual) - expected).abs() <= 2,
+            "HDR cloud: {hdr:?}"
+        );
+    }
+    for i in 0..3 {
+        assert!((i16::from(hdr[i]) - i16::from(ordinary[i]) * 2).abs() <= 2);
+    }
+    let mut particle = draw(2.0);
+    particle.shape = render::ParticleShape::Sprite {
+        pos,
+        half: 20.0,
+        angle: 0.0,
+        uv: [0.0, 0.0, 1.0, 1.0],
+    };
+    r.set_particles(vec![particle]);
+    r.render(&Camera::default(), &[], clear).expect("frame");
+    assert_eq!(centre(&mut r), ordinary);
+}
+
 /// The sky paints the background, and an opaque draw in front of it wins —
 /// even though the sky quad is nearer the camera than the geometry, because
 /// the sky pass tests no depth and writes none.
@@ -51,6 +97,9 @@ fn sky_paints_the_background_and_geometry_draws_over_it() {
         },
         yaw: 0.0,
         mode: render::SkyMode::Blend,
+        lit: false,
+        depth: false,
+        emission: None,
     }]);
 
     // Sky alone: the frame is the shell, not the clear colour.
@@ -76,6 +125,41 @@ fn sky_paints_the_background_and_geometry_draws_over_it() {
     );
 }
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn sky_particles_paint_before_world_and_do_not_write_depth() {
+    let mut r = headless();
+    let texture = upload_tex(&mut r, 1, 1, &[255, 0, 0, 255], "sky effect");
+    r.set_sky_particles(vec![render::ParticleDraw {
+        shape: render::ParticleShape::Sprite {
+            pos: glam::Vec3::new(0.0, 0.0, -2.0),
+            half: 20.0,
+            angle: 0.0,
+            uv: [0.0, 0.0, 1.0, 1.0],
+        },
+        key: glam::Vec3::new(0.0, 0.0, -2.0),
+        color: [255; 4],
+        texture: Some(texture),
+        additive: false,
+    }]);
+    r.render(&Camera::default(), &[], [0.0, 0.0, 0.0, 1.0])
+        .unwrap();
+    assert!(centre(&mut r)[0] > 200);
+    let (mesh, texture) = quad(&mut r, [0, 0, 255, 255], -20.0);
+    r.render(
+        &Camera::default(),
+        &[DrawCmd::textured(mesh, texture, Mat4::IDENTITY)],
+        [0.0, 0.0, 0.0, 1.0],
+    )
+    .unwrap();
+    let pixel = centre(&mut r);
+    assert!(pixel[2] > 150 && pixel[0] < 60, "{pixel:?}");
+    r.clear_scene();
+    r.render(&Camera::default(), &[], [0.0, 0.0, 0.0, 1.0])
+        .unwrap();
+    assert_eq!(centre(&mut r)[0], 0);
+}
+
 /// `clear_scene` drops the sky: the next frame is the clear colour, as the
 /// shell after a battle must be (it drew the map's sky behind its movie).
 #[test]
@@ -93,6 +177,9 @@ fn clear_scene_drops_the_sky() {
         },
         yaw: 0.0,
         mode: render::SkyMode::Blend,
+        lit: false,
+        depth: false,
+        emission: None,
     }]);
     r.render(&Camera::default(), &[], [0.0, 0.0, 0.0, 1.0])
         .expect("frame");
@@ -125,6 +212,9 @@ fn sky_ignores_lighting_and_fog() {
         },
         yaw: 0.0,
         mode: render::SkyMode::Blend,
+        lit: false,
+        depth: false,
+        emission: None,
     }]);
     r.render(&Camera::default(), &[], [0.0, 0.0, 0.0, 1.0])
         .expect("frame");
@@ -180,6 +270,9 @@ fn no_shell_takes_the_fog_whatever_its_placement() {
         placement,
         yaw: 0.0,
         mode,
+        lit: false,
+        depth: false,
+        emission: None,
     };
     // The shapes that used to be routed through the fogged pipeline.
     let placements = [
@@ -276,6 +369,9 @@ fn a_sky_shell_paints_or_composites_by_its_material() {
         },
         yaw: 0.0,
         mode,
+        lit: false,
+        depth: false,
+        emission: None,
     };
     // Green clear, so anything the shell does not paint reads as green.
     let clear = [0.0, 1.0, 0.0, 1.0];
@@ -379,6 +475,9 @@ fn the_v_wrap_mode_decides_whether_the_bottom_ring_wraps_to_the_top_row() {
             },
             yaw: 0.0,
             mode: render::SkyMode::Opaque,
+            lit: false,
+            depth: false,
+            emission: None,
         }
     };
 
@@ -440,6 +539,9 @@ fn a_mirrored_shell_paints_below_the_horizon() {
         placement,
         yaw: 0.0,
         mode: render::SkyMode::Opaque,
+        lit: false,
+        depth: false,
+        emission: None,
     };
     let (dome, mirror) = (
         render::Placement::Dome {
@@ -477,4 +579,268 @@ fn a_mirrored_shell_paints_below_the_horizon() {
     r.render(&Camera::default(), &[], clear).expect("frame");
     let (above, below) = rows(&mut r);
     assert!(red(above) && red(below), "both: {above:?} {below:?}");
+}
+
+/// A lit sky shell (`lit: true`, used for `SkyObject` capital ships) responds
+/// to sun and ambient lighting while keeping the sky pass's unfogged property
+/// and depth-free behavior.
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn sky_lit_shell_takes_sun_lighting_and_ignores_fog() {
+    let mut r = headless();
+    let (mesh, tex) = quad(&mut r, [255, 255, 255, 255], -1.0);
+    r.set_sky(vec![SkyShell {
+        mesh,
+        texture: Some(tex),
+        color: [1.0; 4],
+        scale: 1.0,
+        placement: render::Placement::Object {
+            offset: glam::Vec3::ZERO,
+        },
+        yaw: 0.0,
+        mode: render::SkyMode::Blend,
+        lit: true,
+        depth: false,
+        emission: None,
+    }]);
+
+    // Sun facing the quad directly with color (1.0, 0.5, 0.25), zero ambient.
+    // Dense green fog that would turn anything fogged pure green.
+    r.lighting = Lighting {
+        sun_color: [1.0, 0.5, 0.25],
+        sun_dir: glam::Vec3::new(0.0, 0.0, -1.0),
+        ambient_sky: [0.0; 3],
+        ambient_ground: [0.0; 3],
+        fog: Some(Fog {
+            color: [0.0, 1.0, 0.0],
+            near: 0.1,
+            far: 0.5,
+        }),
+        ..Lighting::default()
+    };
+
+    r.render(&Camera::default(), &[], [0.0, 0.0, 0.0, 1.0])
+        .expect("frame");
+    let lit = centre(&mut r);
+
+    // Should receive sun color (R > G > B in sRGB ~ 255, 188, 137), NOT fogged green.
+    assert!(
+        lit[0] > 240 && lit[1] > 170 && lit[1] < 200 && lit[2] > 120 && lit[2] < 150,
+        "lit sky shell did not take sun lighting: {lit:?}"
+    );
+
+    // If sun is shut off, it becomes dark (unlike unlit shells).
+    r.lighting.sun_color = [0.0; 3];
+    r.render(&Camera::default(), &[], [0.0, 0.0, 0.0, 1.0])
+        .expect("frame");
+    let unlit = centre(&mut r);
+    assert!(
+        unlit[0] < 10 && unlit[1] < 10 && unlit[2] < 10,
+        "lit sky shell remained bright with sun turned off: {unlit:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn sky_glow_uses_alpha_as_gain_and_bloom_stays_behind_world_and_clouds() {
+    let mut r = headless();
+    let mesh = view_quad(&mut r, -1.0);
+    let tex = upload_tex(
+        &mut r,
+        2,
+        1,
+        &[180, 120, 60, 0, 180, 120, 60, 255],
+        "sky glow mask",
+    );
+    let shell = SkyShell {
+        mesh,
+        texture: Some(tex),
+        color: [1.0; 4],
+        scale: 1.0,
+        placement: render::Placement::Object {
+            offset: glam::Vec3::ZERO,
+        },
+        yaw: 0.0,
+        mode: render::SkyMode::Opaque,
+        lit: false,
+        depth: false,
+        emission: Some(render::LightPath::Glow),
+    };
+    r.lighting.fog = Some(Fog {
+        color: [0.0, 1.0, 0.0],
+        near: 0.01,
+        far: 0.02,
+    });
+    let clear = [0.0, 0.0, 0.0, 1.0];
+    r.set_sky(vec![shell]);
+    r.render(&Camera::default(), &[], clear).unwrap();
+    let no_gain = capture_pixel(&mut r, N / 4, N / 2);
+    let gain = capture_pixel(&mut r, 3 * N / 4, N / 2);
+    for (actual, expected) in no_gain[..3].iter().zip([180i16, 120, 60]) {
+        assert!((i16::from(*actual) - expected).abs() <= 1, "{no_gain:?}");
+    }
+    assert!(gain[0] > 250 && gain[1] > 250 && gain[2] > 170, "{gain:?}");
+    let bloom = Some(render::Bloom {
+        passes: 5,
+        weight: 1.2,
+        threshold: 0.5,
+    });
+    r.set_bloom(bloom);
+    r.render(&Camera::default(), &[], clear).unwrap();
+    let halo = capture_pixel(&mut r, N / 2 - 1, N / 2);
+    assert!(
+        halo[0] > no_gain[0] && halo[2] > no_gain[2],
+        "missing sky halo: {halo:?}"
+    );
+    let (cover_mesh, cover_tex) = quad(&mut r, [16, 32, 48, 255], -1.0);
+    let draws = [DrawCmd::textured(
+        cover_mesh,
+        cover_tex,
+        Mat4::from_scale(glam::Vec3::new(100.0, 100.0, 20.0)),
+    )];
+    r.render(&Camera::default(), &draws, clear).unwrap();
+    let covered = r.capture_rgba().unwrap().0;
+    r.set_bloom(None);
+    r.render(&Camera::default(), &draws, clear).unwrap();
+    assert!(
+        covered == r.capture_rgba().unwrap().0,
+        "sky bloom leaked through world geometry"
+    );
+    let cover = SkyShell {
+        mesh: cover_mesh,
+        texture: Some(cover_tex),
+        emission: None,
+        ..shell
+    };
+    r.set_sky(vec![shell, cover]);
+    r.render(&Camera::default(), &[], clear).unwrap();
+    let covered = r.capture_rgba().unwrap().0;
+    r.set_bloom(bloom);
+    r.render(&Camera::default(), &[], clear).unwrap();
+    assert!(
+        covered == r.capture_rgba().unwrap().0,
+        "sky bloom leaked through an opaque sky layer"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn sky_objects_depth_test_their_own_hull_and_the_world() {
+    for lit in [false, true] {
+        let mut r = headless();
+        r.lighting.sun_color = [0.0; 3];
+        r.lighting.ambient_sky = [1.0; 3];
+        r.lighting.ambient_ground = [1.0; 3];
+        let near = view_quad(&mut r, -1.0);
+        let far = view_quad(&mut r, -1.5);
+        let red = upload_tex(&mut r, 1, 1, &[255, 0, 0, 255], "near hull");
+        let blue = upload_tex(&mut r, 1, 1, &[0, 0, 255, 255], "rear hull");
+        let shell = SkyShell {
+            mesh: near,
+            texture: Some(red),
+            color: [1.0; 4],
+            scale: 1.0,
+            placement: render::Placement::Object {
+                offset: glam::Vec3::ZERO,
+            },
+            yaw: 0.0,
+            mode: render::SkyMode::Opaque,
+            lit,
+            depth: true,
+            emission: None,
+        };
+        r.set_sky(vec![
+            shell,
+            SkyShell {
+                mesh: far,
+                texture: Some(blue),
+                ..shell
+            },
+        ]);
+        let clear = [0.0, 0.0, 0.0, 1.0];
+        r.render(&Camera::default(), &[], clear).unwrap();
+        assert_eq!(
+            centre(&mut r),
+            [255, 0, 0, 255],
+            "rear hull painted over front hull"
+        );
+        let (behind, green) = quad(&mut r, [0, 255, 0, 255], -2.0);
+        r.set_sky_particles(vec![render::ParticleDraw {
+            shape: render::ParticleShape::Sprite {
+                pos: glam::Vec3::new(0.0, 0.0, -0.5),
+                half: 20.0,
+                angle: 0.0,
+                uv: [0.0, 0.0, 1.0, 1.0],
+            },
+            key: glam::Vec3::new(0.0, 0.0, -0.5),
+            color: [255; 4],
+            texture: Some(green),
+            additive: false,
+        }]);
+        r.render(&Camera::default(), &[], clear).unwrap();
+        assert_eq!(
+            centre(&mut r),
+            [255, 0, 0, 255],
+            "dome effects painted over a ship hull"
+        );
+        r.set_sky_particles(Vec::new());
+        r.render(
+            &Camera::default(),
+            &[DrawCmd::textured(behind, green, Mat4::IDENTITY)],
+            clear,
+        )
+        .unwrap();
+        assert_eq!(
+            centre(&mut r),
+            [255, 0, 0, 255],
+            "distant world painted through hull"
+        );
+        let front = view_quad(&mut r, -0.5);
+        r.render(
+            &Camera::default(),
+            &[DrawCmd::textured(front, green, Mat4::IDENTITY)],
+            clear,
+        )
+        .unwrap();
+        assert_eq!(
+            centre(&mut r),
+            [0, 255, 0, 255],
+            "ship covered nearby terrain"
+        );
+        let glass = upload_tex(&mut r, 1, 1, &[255, 0, 0, 128], "front glass");
+        r.set_sky(vec![
+            SkyShell {
+                texture: Some(glass),
+                mode: render::SkyMode::Blend,
+                ..shell
+            },
+            SkyShell {
+                mesh: far,
+                texture: Some(blue),
+                ..shell
+            },
+        ]);
+        r.render(&Camera::default(), &[], clear).unwrap();
+        let pixel = centre(&mut r);
+        assert!(
+            pixel[0] > 150 && pixel[2] > 150,
+            "opaque hull covered transparent foreground: {pixel:?}"
+        );
+        r.set_sky(vec![SkyShell {
+            texture: Some(glass),
+            mode: render::SkyMode::Blend,
+            ..shell
+        }]);
+        r.render(
+            &Camera::default(),
+            &[DrawCmd::textured(far, blue, Mat4::IDENTITY)],
+            clear,
+        )
+        .unwrap();
+        let pixel = centre(&mut r);
+        assert!(
+            pixel[0] > 150 && pixel[2] > 150,
+            "distant world covered transparent foreground: {pixel:?}"
+        );
+    }
 }
