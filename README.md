@@ -31,8 +31,8 @@ python3 scripts/pack.py
 
 - **Both games.** You need a copy of Battlefront (BF1) and a copy of Battlefront II (BF2).
   It will not build with only one of them.
-- **Any version.** PS2 and Xbox discs and PC installs all work, and can be mixed, for example
-  PC BF1 with Xbox BF2. BF2 can't be built from a PC copy alone yet.
+- **Any version.** PS2 and Xbox discs and PC installs all work, on their own or mixed: PC copies of
+  both games, Xbox discs of both, PS2 discs of both, or any mix such as PC BF1 with Xbox BF2.
 - **Same game whichever you use.** The copy you supply changes how the game looks (texture sizes
   and some artwork), never how it plays. The Status note below says how much of this works today.
 - **For best results, add PC and Xbox copies.** The build keeps the largest copy of each texture, as long as
