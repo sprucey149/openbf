@@ -1,4 +1,4 @@
-# openbf
+# OpenBF - Star Wars Battlefront 1 & 2 Open-Source Reimplementation
 
 Star Wars: Battlefront and Star Wars: Battlefront II, rebuilt as one modern game in Rust. Supply any
 copy of the games you own, whether PC, Xbox or PS2, and openbf builds the game from it. Every copy plays
