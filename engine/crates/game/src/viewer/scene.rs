@@ -1352,6 +1352,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         spike_size: s.spike_size,
     }));
     r.set_sky_particles(Vec::new());
+    r.set_lightning(None);
     // Set on every upload, so a map without stars clears the last map's.
     r.set_stars(star_field(&scene.manifest), dome_shells);
     // The grass patches (queue FOLGG, `super::grass`): the FOLG records'

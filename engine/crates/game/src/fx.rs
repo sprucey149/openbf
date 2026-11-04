@@ -55,6 +55,7 @@ mod props;
 mod repair;
 pub mod ripple;
 mod sky;
+mod storm;
 mod trail;
 mod turret;
 
@@ -704,6 +705,7 @@ pub struct Fx {
     tick: u64,
     force: force::State,
     sky: Vec<sky::SkyEffect>,
+    storm: Option<storm::Storm>,
 }
 
 impl std::fmt::Debug for Fx {
@@ -818,6 +820,7 @@ impl Fx {
             .library
             .as_ref()
             .map_or_else(Vec::new, |lib| sky::load(scene, lib));
+        self.storm = storm::Storm::load(&scene.manifest);
     }
 
     pub fn library(&self) -> Option<&Library> {
@@ -1058,6 +1061,10 @@ impl Fx {
         let mut out = extra;
         let mut sky_out = Vec::new();
         let time = r.atmosphere_time();
+        r.set_lightning(self.storm.as_mut().and_then(|storm| {
+            storm.advance(time, camera, self.library.as_ref());
+            storm.flash(r.lighting)
+        }));
         let lift = self.ride_the_water(crate::water_anim::clock(r.water_time) as f32);
         if let Some(lib) = &self.library {
             let mut assets = Lookup {
@@ -1095,7 +1102,10 @@ impl Fx {
                 }
             }
             for effect in &self.sky {
-                effect.draws(camera, time, &mut assets, &mut sky_out);
+                effect.draws(camera, time, zoom, &mut assets, &mut sky_out);
+            }
+            if let Some(storm) = &self.storm {
+                out.extend(storm.bolts.draws(camera, |name| assets.texture(name)));
             }
             let sheet = assets.texture(ripple::TEXTURE);
             self.water.draws(camera.position, lift, sheet, &mut out);
@@ -1194,6 +1204,7 @@ impl Fx {
         self.arcs.clear();
         self.force.clear();
         self.sky.clear();
+        self.storm = None;
     }
 
     /// Camera-facing quads for the live effects. `quad` is the unit quad from

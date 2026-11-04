@@ -66,6 +66,7 @@ impl SkyEffect {
         &self,
         camera: &Camera,
         time: f64,
+        zoom: f32,
         assets: &mut dyn FxAssets,
         out: &mut Vec<ParticleDraw>,
     ) {
@@ -93,6 +94,7 @@ impl SkyEffect {
         effect.draws_with(
             inverse.transform_point3(camera.position),
             inverse.transform_vector3(camera.forward()).normalize(),
+            zoom,
             assets,
             &mut local,
         );

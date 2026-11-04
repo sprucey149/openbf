@@ -811,6 +811,7 @@ impl Renderer {
             time: 0.0,
             water_time: 0.0,
             atmosphere_time: None,
+            lightning: None,
             adapter_info,
             _gpu_turn: gpu_turn,
         })

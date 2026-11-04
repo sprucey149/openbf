@@ -56,3 +56,32 @@ Mutation-check: BF2's sun with BF1's weight must fail test 1.
   bolts are on screen (BF1's are), the draw order inside the far pass, the HDR halving of the bolt's colour in BF2.
 - 2026-10-06 planner: `engine/CRATES.md` taken out of `files:`. The picker refuses a card whose files overlap a card in progress, and 22 open cards listed the map, so any one of them held the other 21 (a chain card in progress held WADE and WTHR). The map's row for a new or moved source file is still owed in the same branch (`scripts/size_report.sh --check-map`); a rebase conflict in it is one line. Undo: add the path back.
 - 2026-10-07 planner, WTHR's unchecked list (landed 1dbb18f; `reports/20261006_2350_card_WTHR.md`) - same files, take them here: (a) a splash ring sits over the sea edge in the one live screenshot (`lead_tmp/wthr/win/b1_2.png`); the splash ray takes terrain and ordnance bodies, not the water - what does the PS2 land a splash on? (b) the flake maps' parity rose (bf1_rhn1 +0.148, bf2_myg1 +0.094; limit 0.5) and the port's flakes look crisper than the PS2's in the zooms, cause not found; (c) BF1 and flake-map frame scores were not taken. `port_frame.py` / `pair.py` need a `pose_render` build (`--exe`).
+
+## BF2 Kamino visual follow-up (2026-11-03)
+
+The battle renderer uses the baked `skybolt` and Lightning settings. The flash group and brightness envelope
+follow BF2 `FUN_0045ae80` (520079–520170). The same flash updates the dome, fog and first directional light
+(520182–520313). The ocean shader receives the changed directional light and the far-water fog receives the
+changed fog colour, as observed in the PS2 colour probes in `analysis/re-kamino.md` §2.1. The bolt follows the
+world-space spawn geometry at 520317–520412 and uses the strip renderer shared with the BF2 emitter effects.
+
+Source base `833afa46f4ec` plus the local branch edits. `cargo build --release -p game` passed. A release
+`bake map` from the PS2 `KAM1.LVL` reproduced all 137 map files byte for byte. The disc-data check
+`cargo test -p mungefs --test suite lightning_is_authored_on_kamino_and_bf1_yavin_2` passed (1 test).
+
+The visual random stream is independent of the simulation. The presentation seeds and 60 Hz flicker buckets are
+OURS, replace: a timed original-game capture with the lightning instance RNG recorded. The first far bolt's
+startup delay is sampled from the native 4–7 s interval. Its startup phase still needs an original-game trace.
+
+Refreshed on 2026-11-04 at source base `daf1d59f84b2` plus the local edits. Commands
+`cargo build --release -p game -p bake` and the disc-data test passed. The targeted Kamino rebake again
+matched all 137 current map files. `game.exe --write-pack` packed 24,955 files from the current
+`engine/assets_baked` and `engine/missions`. The packed runtime prefix matched the release executable.
+Three headless packed-game captures at ticks 149, 154 and 220 passed and were inspected at
+`engine/artifacts/kamino-lightning/frame_149.png`, `frame_154.png` and `frame_220.png`.
+The fixed camera was `21.86,72.24,-118.94,0.02,-8.28`, output 960×540, with water time pinned to 5 s.
+The ocean brightens during the flash and returns to its resting appearance afterwards.
+`dist/openbf.exe` was replaced successfully. All 86 profile/playtest files matched their pre-pack hashes.
+
+Unchecked acceptance includes a timed side-by-side original-game comparison, the initial far-bolt phase,
+the bolt's HDR colour scaling, and the full alignment gate.

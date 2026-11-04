@@ -216,26 +216,27 @@ impl Renderer {
         let view_proj = camera.view_proj(aspect);
         self.shadows.prepare(&self.device, &self.queue, view_proj);
         let frustum = frustum::Frustum::from_view_proj(&view_proj);
-        let water_fog = self.lighting.water_fog.or(self.lighting.fog);
+        let (lighting, dome_gain) = self.lightning.unwrap_or((self.lighting, 1.0));
+        let water_fog = lighting.water_fog.or(lighting.fog);
         let globals = Globals {
             view_proj: view_proj.to_cols_array_2d(),
             camera_pos: camera.position.to_array(),
             guard_x: guard[0],
             sun_dir: self.lighting.sun_dir.normalize_or_zero().to_array(),
             sun_d4: f32::from(u8::from(self.lighting.sun_d4)),
-            sun_color: self.lighting.sun_color,
+            sun_color: lighting.sun_color,
             guard_y: guard[1],
-            ambient_sky: self.lighting.ambient_sky,
+            ambient_sky: lighting.ambient_sky,
             material_time: crate::material_scroll_time(self.water_time),
-            ambient_ground: self.lighting.ambient_ground,
-            fog_on: if self.lighting.fog.is_some() {
+            ambient_ground: lighting.ambient_ground,
+            fog_on: if lighting.fog.is_some() {
                 1.0
             } else {
                 0.0
             },
-            fog_color: self.lighting.fog.map(|f| f.color).unwrap_or([0.0; 3]),
-            fog_near: self.lighting.fog.map(|f| f.near).unwrap_or(0.0),
-            fog_far: self.lighting.fog.map(|f| f.far).unwrap_or(1.0),
+            fog_color: lighting.fog.map(|f| f.color).unwrap_or([0.0; 3]),
+            fog_near: lighting.fog.map(|f| f.near).unwrap_or(0.0),
+            fog_far: lighting.fog.map(|f| f.far).unwrap_or(1.0),
             time: self.time,
             fade_begin: self.lighting.far_fade.map(|f| f.begin).unwrap_or(0.0),
             fade_end: self.lighting.far_fade.map(|f| f.end).unwrap_or(0.0),
@@ -419,6 +420,13 @@ impl Renderer {
                 lights: [0; 4],
             })
             .collect();
+        if dome_gain != 1.0 {
+            for dome in instances.iter_mut().take(self.stars.slot) {
+                for channel in &mut dome.color[..3] {
+                    *channel *= dome_gain;
+                }
+            }
+        }
         let object_blend = |slot: usize| {
             self.sky[slot].depth && Self::sky_mode(&self.sky[slot]) == crate::SkyMode::Blend
         };
@@ -542,7 +550,7 @@ impl Renderer {
                         });
                         if let Some([top, bottom]) = crate::lighting::character_region_light(
                             &self.character_light_regions,
-                            &self.lighting,
+                            &lighting,
                             sphere,
                         ) {
                             inst.cull = [top[0], top[1]];

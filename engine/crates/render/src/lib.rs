@@ -422,6 +422,7 @@ pub struct Renderer {
     /// — how the mismatch LOOKS on the PS2 wants an in-map capture.
     pub spec_mirror: bool,
     pub lighting: Lighting,
+    lightning: Option<(Lighting, f32)>,
     character_light_regions: Vec<CharacterLightRegion>,
     /// Animation clock in seconds: the water surface's UV scroll, the water's
     /// speckle, the mirrored sky shell's squash ([`mirror_squash`]) and the
@@ -485,12 +486,17 @@ impl Renderer {
         self.atmosphere_time.unwrap_or(self.water_time)
     }
 
+    pub fn set_lightning(&mut self, flash: Option<(Lighting, f32)>) {
+        self.lightning = flash;
+    }
+
     /// Drop the map's look: everything drawn without a draw command (the
     /// sky, stars, grass, leaves, lights, effects, filter) and its lighting.
     /// A frame after this is the clear colour plus its draws, as before any
     /// map was loaded (the shell after a battle).
     pub fn clear_scene(&mut self) {
         self.atmosphere_time = None;
+        self.lightning = None;
         self.set_sky(Vec::new());
         self.set_stars(None, 0);
         self.set_grass(Vec::new(), Vec::new());
