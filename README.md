@@ -1,7 +1,8 @@
 # openbf
 
-An open-source Rust engine that plays Star Wars: Battlefront and Star Wars: Battlefront II,
-built from your own copies of both games, with the PlayStation 2 versions as its gameplay reference.
+Star Wars: Battlefront and Star Wars: Battlefront II, rebuilt as one modern game in Rust. Supply any
+copy of the games you own, whether PC, Xbox or PS2, and openbf builds the game from it. Every copy plays
+the same game, so everyone can play together.
 
 **Unofficial fan project.** Not affiliated with or endorsed by Lucasfilm, Disney,
 Electronic Arts, LucasArts or Pandemic Studios. This repository contains no game
@@ -30,17 +31,16 @@ python3 scripts/pack.py
 
 - **Both games.** You need a copy of Battlefront (BF1) and a copy of Battlefront II (BF2).
   It will not build with only one of them.
-- **A console copy of BF2.** PC BF2 does not contain everything the game needs, such as the menus
-  and HUD it uses, so it can only be an add-on to a console BF2, never your only BF2.
-- **Mix and match.** Console copies can be mixed freely, for example PS2 BF1 with Xbox BF2,
-  and the goal is the same game whichever you use: only texture and asset sizes change.
-  The Status note below says how much of this works today.
+- **Any version.** PS2 and Xbox discs and PC installs all work, on their own or mixed: PC copies of
+  both games, Xbox discs of both, PS2 discs of both, or any mix such as PC BF1 with Xbox BF2.
+- **Same game whichever you use.** The copy you supply changes how the game looks (texture sizes
+  and some artwork), never how it plays. The Status note below says how much of this works today.
 - **For best results, add PC and Xbox copies.** The build keeps the largest copy of each texture, as long as
   it is the same painting. The PC copy is the largest much more often: about 680 textures across
   the two games, against 12 where the Xbox copy is larger. Those are mostly on BF2 Geonosis, such as a sky at
   1024x256 against the PC's 512x128.
 
-> **Status: PS2 discs, Xbox discs and a PC BF1 install are supported.** Either Xbox disc can replace that game's PS2 disc, and PC BF1 can supply BF1 beside a console BF2. All 34 ground maps are included. The six experimental space maps remain disabled by default while round endings are unfinished.
+> **Status: PS2 discs, Xbox discs and PC installs are supported.** Either Xbox disc can replace that game's PS2 disc, PC BF1 can supply BF1 beside any BF2, and PC BF1 with PC BF2 builds without any disc. All 34 ground maps are included. The six experimental space maps remain disabled by default while round endings are unfinished.
 >
 > Xbox and PC copies assemble some buildings differently. Repairs reuse same-copy pieces and existing donor vertices where possible. Selected structures and plants use locally generated, donor-textured contact surfaces as a last resort. These can look coarse, faceted or stretched. No game meshes or textures are shipped here.
 >
@@ -56,9 +56,9 @@ python3 scripts/pack.py
 | PS2 BF1 + PS2 BF2 + any Xbox or PC copies | Builds, with larger textures where the artwork matches |
 | Xbox BF1 and/or Xbox BF2 in place of that game's PS2 disc | Builds, including all 34 ground maps, with the artwork caveats above |
 | PC BF1 with a console BF2 | Builds, including all 34 ground maps, with the artwork caveats above |
+| PC BF1 + PC BF2, no discs | Builds, including all 34 ground maps; the Instant Action menu uses a replacement backdrop |
 | Any working set above + the DLC folder | Builds, with Kit Fisto and Asajj Ventress available in Hero Options |
-| PC BF2 without a console BF2 | Refused |
-| Only one of the two games | Refused |
+| Only one of the two games (including a single PC game) | Refused |
 
 ### Where to put your files
 
@@ -153,7 +153,7 @@ Your profile and snapshots are saved in `openbf_data\` beside `openbf.exe`.
 
 ## Controls
 
-The game is built around a controller and plays like the PS2 versions, with their aim assist.
+The game is built around a controller and plays like the console originals, with their aim assist.
 Keyboard and mouse also work, as a deliberate addition for PC: click into the battle to capture
 the pointer; Esc pauses and frees it again. Mouse aim gets no aim assist. Sensitivity and invert-Y
 are in Options and in the pause menu.
@@ -192,6 +192,10 @@ That scaffolding is published too:
 - `analysis/`: reverse-engineering notes, supporting references, and remaining uncertainties
 - `docs/loop/`: how the AI loop is run (its rules, its session prompt, the backlog and every work card)
 - `scripts/`: the build, bake, test-gate and loop tools
+
+openbf's gameplay is its own. It started from the original games, which we studied closely, mostly
+through the PS2 versions, the best-documented ones. Where it deliberately differs, the difference is
+written down in `analysis/plan/FEATURE_SET.md`.
 
 No code from the original games is included; the decompilation is used only as a reference for
 behaviour.

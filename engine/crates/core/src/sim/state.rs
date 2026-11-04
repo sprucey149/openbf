@@ -23,7 +23,7 @@ use crate::weapon::WeaponClass;
 use glam::Vec3;
 
 /// PROVISIONAL (ours): a soldier that lands at or beyond this DOWNWARD speed
-/// dies — 25 m/s, about a 17 m drop at the soldier's g = 18
+/// dies unless its class has zero collision damage — 25 m/s, about a 17 m drop at the soldier's g = 18
 /// (`core::soldier::GRAVITY`). Both games deal landing damage by a law the
 /// port does not have yet — (approach − CollisionThreshold)² × CollisionScale
 /// per class (`analysis/re-soldier-ground.md` §4; cards SLAND, DTHR) — so this

@@ -188,6 +188,12 @@ pub struct Speckle {
 /// `None` is "the map authored no such key" and never a substituted default.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WaterConfig {
+    /// Xbox/PC material: normals, never a diffuse image. Same prefix/count/rate
+    /// encoding as SpeckleTextures; absent on PS2.
+    pub normal_maps: Option<Speckle>,
+    pub refraction_color: Option<[f32; 4]>,
+    pub reflection_color: Option<[f32; 4]>,
+    pub fresnel_min_max: Option<[f32; 2]>,
     /// The texture that paints the surface (§3). Authored on all 12.
     pub main_texture: Option<String>,
     /// Blended over the base on an `OceanEnable` map (§3). Both KAM1s only.
@@ -735,6 +741,17 @@ fn from_scope(effect: &ConfigNode) -> WaterConfig {
     let mut any_speckle = false;
     for c in &effect.children {
         match c.hash {
+            0xeac5_87ac => {
+                let (textures, fps) = speckle_frames(c);
+                w.normal_maps = Some(Speckle {
+                    textures,
+                    fps,
+                    ..Default::default()
+                });
+            }
+            0x5aa5_a3bd => w.refraction_color = c.f4(),
+            0x8a81_de8b => w.reflection_color = c.f4(),
+            0x8f7c_fa82 => w.fresnel_min_max = Some(c.floats_or_zero()),
             key::MAIN_TEXTURE => w.main_texture = non_empty(c.string.clone()),
             key::FOAM_TEXTURE => w.foam_texture = non_empty(c.string.clone()),
             key::TILE => w.tile = Some(c.floats_or_zero()),
@@ -942,6 +959,27 @@ mod tests {
         let buf = fx(records);
         let c = crate::chunks(&buf).next().unwrap().unwrap();
         WaterConfig::parse(&c).unwrap().expect("a Water effect")
+    }
+
+    #[test]
+    fn normal_water_is_a_sequence_of_vectors_with_authored_colours() {
+        let w = parse(vec![
+            data(0xeac5_87ac, &[16.0, 8.0], &["water_normalmap_"]),
+            data(0x5aa5_a3bd, &[90.0, 112.0, 90.0, 150.0], &[]),
+            data(0x8a81_de8b, &[200.0; 4], &[]),
+            data(0x8f7c_fa82, &[0.2, 0.5], &[]),
+        ]);
+        let n = w.normal_maps.unwrap();
+        assert_eq!(n.textures.len(), 16);
+        assert_eq!(n.textures[15], "water_normalmap_15");
+        assert_eq!(n.fps, Some(8.0));
+        assert_eq!(w.refraction_color, Some([90.0, 112.0, 90.0, 150.0]));
+        assert_eq!(w.reflection_color, Some([200.0; 4]));
+        assert_eq!(w.fresnel_min_max, Some([0.2, 0.5]));
+        assert!(
+            w.main_texture.is_none(),
+            "a normal is never an albedo binding"
+        );
     }
 
     #[test]

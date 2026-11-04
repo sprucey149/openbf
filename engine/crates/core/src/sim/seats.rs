@@ -798,6 +798,10 @@ impl Sim {
             .vehicle(m.vehicle)
             .filter(|_| human && pad.has_look())
             .and_then(|v| self.walker_params.get(v.class as usize)?.clone());
+        let flyer = flyer.map(|mut f| {
+            f.ai = crate::ai::flyer_drive::commit_plan(self, m.vehicle, f.ai);
+            f
+        });
         let Some(v) = self.vehicle_mut(m.vehicle) else {
             return;
         };

@@ -816,7 +816,10 @@ impl Sim {
                 if landed && self.lands_under_the_map(self.units[i].soldier.pos, vy_before) {
                     let h = self.handle(i);
                     self.kill_environment(h, DeathCause::UnderMap);
-                } else if landed && vy_before <= -LETHAL_LANDING_SPEED {
+                } else if landed
+                    && vy_before <= -LETHAL_LANDING_SPEED
+                    && !self.units[i].consts.collision_damage_immune
+                {
                     let h = self.handle(i);
                     self.kill_environment(h, DeathCause::Fall);
                 }

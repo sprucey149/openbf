@@ -12,10 +12,46 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import gameplay_missions as m
 import gen_missions as g
+import gameplay_corrections as corrections
 from version_terrain_play import parse_ron
 
 
 class MissionCorrectionTests(unittest.TestCase):
+    def test_turret_stop_cue_keeps_its_defer_qualifier(self):
+        prop = struct.pack('<I', 0xc13068b6) + b'turret_whir_end defer\0'
+        payload = b'PROP' + struct.pack('<I', len(prop)) + prop + bytes(-len(prop) % 4)
+        self.assertEqual(corrections.props(payload), [[0xc13068b6, ['turret_whir_end', 'defer']]])
+        self.assertEqual(corrections.preserve_hashes(payload), [])
+        root = Path(__file__).resolve().parents[2]
+        table = json.loads((root / 'engine/crates/manifest/data/gameplay/corrections-v1/bf1-pc.json').read_bytes())
+        row = next(c for f in table['files'] for c in f.get('classes', []) if c['name'] == 'com_weap_gunturret')
+        self.assertIn([0xc13068b6, ['turret_whir_end', 'defer']], row['properties'])
+
+    def test_combined_pc_only_constructs_all_67_console_gameplay_records(self):
+        root = Path(__file__).resolve().parents[2]
+        sources = {game: root / f'PC_swbf{game[-1]}_exe' for game in ('bf1', 'bf2')}
+        if not all(p.is_dir() for p in sources.values()) or not Path(g.PS2_BF2).is_dir():
+            self.skipTest('requires owned PC installs and console mission control')
+        refs = m.load([root / f'engine/crates/manifest/data/gameplay/corrections-v1/{game}-pc.json'
+                       for game in sources], sources)
+        checked = 0
+        for key, game, planet, eras in g.MAPS:
+            for era, (stem, script) in eras.items():
+                with self.subTest(map=key, era=era), patch.object(g, 'PS2_ONLY', True):
+                    with patch.object(g, 'GAMEPLAY_REFERENCES', {}):
+                        before = parse_ron(g.ron(g.build(key, game, planet, era, stem, script)))
+                    with patch.object(g, 'PS2_BF1', '/absent-console/bf1'), \
+                            patch.object(g, 'PS2_BF2', '/absent-console/bf2'), \
+                            patch.object(g, 'GAMEPLAY_REFERENCES', refs):
+                        after = parse_ron(g.ron(g.build(key, game, planet, era, stem, script)))
+                    # Provenance and donor recordings/cameras are presentation.
+                    for record in (before, after):
+                        for field in ('source', 'voice', 'music', 'camera_shots'):
+                            record.pop(field, None)
+                    self.assertEqual(after, before)
+                    checked += 1
+        self.assertEqual(checked, 67)
+
     def test_absolute_target_replaces_missing_and_donor_only_team_values(self):
         base = {'units': {1: 500, 2: 300, 3: 30}, 'classes': {1: [('wrong', 99)]}, 'sound': ['donor']}
         target = {'units': {'1': 16, '2': 20}, 'classes': {'1': [['soldier', 4, None]]}}

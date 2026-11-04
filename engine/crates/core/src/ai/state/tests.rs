@@ -352,3 +352,27 @@ fn cwait_each_maintenance_field_is_hashed_only_with_a_claim() {
     assert_eq!(absent, bytes(&r), "inactive maintenance adds no bytes");
     assert_eq!(bytes(&RideState::default()), bytes(&r));
 }
+
+#[test]
+fn walker_progress_clock_and_each_xz_component_are_hashed() {
+    let bytes = |r: &RideState| {
+        let mut out = vec![];
+        r.hash_into(&mut |b| out.extend_from_slice(b));
+        out
+    };
+    let base = RideState::default();
+    let a = RideState {
+        walker_progress: Some((Vec2::ZERO, 0)),
+        ..base
+    };
+    assert_ne!(bytes(&base), bytes(&a));
+    for value in [(Vec2::X, 0), (Vec2::Y, 0), (Vec2::ZERO, 1)] {
+        assert_ne!(
+            bytes(&a),
+            bytes(&RideState {
+                walker_progress: Some(value),
+                ..a
+            })
+        );
+    }
+}

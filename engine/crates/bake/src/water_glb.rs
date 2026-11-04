@@ -132,6 +132,27 @@ fn metres_per_repeat(w: &Water, cfg: Option<&WaterConfig>) -> [f32; 2] {
 pub fn manifest_config(c: &WaterConfig, w: &Water) -> ManifestWaterConfig {
     let sp = c.speckle.clone().unwrap_or_default();
     ManifestWaterConfig {
+        normal_maps: c.normal_maps.as_ref().and_then(|n| {
+            let fps = n.fps?;
+            let refraction = c.refraction_color?;
+            let reflection = c.reflection_color?;
+            let fresnel = c.fresnel_min_max?;
+            (!n.textures.is_empty()
+                && fps.is_finite()
+                && fps > 0.0
+                && refraction
+                    .iter()
+                    .chain(&reflection)
+                    .chain(&fresnel)
+                    .all(|v| v.is_finite()))
+            .then(|| manifest::ManifestNormalWater {
+                textures: n.textures.clone(),
+                fps,
+                refraction,
+                reflection,
+                fresnel,
+            })
+        }),
         main_texture: c.main_texture.clone(),
         foam_texture: c.foam_texture.clone(),
         metres_per_repeat: c.metres_per_repeat(w.info.cell_size, w.info.unknown_5),

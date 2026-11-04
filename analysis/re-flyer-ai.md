@@ -183,7 +183,7 @@ The authoritative PS2 class defaults are:
 | PathFollowerBranchMaxAngle | `886f9fe5` | cos(180°) = -1; setter takes degrees |
 | PathFollowerMinBranchDist | `e103ce94` | 300 m |
 | PathFollowerFlyerVsFlyer | `c5cf2a8d` | true |
-| PathFollowerClass | `ff158b18` | unrestricted |
+| PathFollowerClass | `ff158b18` | zero (discovery bypass; joining still checks limits) |
 
 The PS2 setter at `0x300230` has explicit degree conversions for acceleration
 and tolerance, but not the RollSpeed hash. Do not silently apply the PC
@@ -353,3 +353,140 @@ The callers identify the BF1 controllable dispatch and BF2 entity AI; the
 45 words are the 15 property-table triples (hash, reader type, field offset).
 The constructor disassembly establishes the PS2 roll constants above, and
 the final disassembly establishes the 1.05 cap and look-ahead/advance order.
+
+## Route admission and ownership (2026-11-03, issue 103)
+
+[O] UNAUDITED, source-confirmed; original-game restricted-route trials remain
+unperformed. This extends the endpoint selector evidence above. BF1's ordinary
+fly agent remains stick-driven (`FUN_00246d80:162403-162544`,
+`FUN_001dd0d0:87931-88024`); these BF2
+EntityPath gates must not be imposed on its post destinations.
+
+BF2 `FUN_002f90c0:286874-286914` reads the config path and dispatches path
+properties to `FUN_002f9980`. The generic scope reader
+`FUN_0055d5d0:694225-694237` enters `Properties` (hash `11de6cdc`), separately
+from node scopes. `FUN_002f8c78:286660-286684` establishes unlimited total
+capacity, no class restrictions, either direction, frequency one, enabled,
+and SingleDirection off. `FUN_002f9980:287244-287400` stores MaxEntities
+(`95ea8376`), Direction (`df6dc76a`, truncated and clamped to -1..1),
+SingleDirection (`3311aa8e`), Frequency (`2fb31c01`), EnableObject (`c87abc4d`)
+and the Name override (`8d39bde6`). Class/Class1..4 strings append up to five
+class IDs; a space separates an optional decimal integer-prefix simultaneous-user
+limit, otherwise unlimited. The IDs are lowercase FNV hashes, not vehicle ODF names.
+`FUN_00300230:292051-292065` stores PathFollowerClass at class +0x54 and
+PathFollowerClassOverride at +0x58; ordinary admission uses the former.
+
+`FUN_002f9740:287111-287136` rejects a full total, then a wrong or full class.
+An empty route class list or zero caller class permits the class test. Admission
+and actual joining are distinct: `FUN_002f9808:287161-287189` increments the
+total, increments the matching class only on success, and rolls total back on
+failure. Consequently a zero caller class passes discovery but cannot join a
+class-restricted path without a matching zero class entry. Retain that distinction.
+`FUN_002f98d8:287203-287232` releases total/class and clears the remembered
+direction only when the total becomes zero. `FUN_002fa4e0:287849-287859`
+detaches the follower; `FUN_002fa570:287879-287909` detaches the old path
+before attempting its new reservation. Pursuit and follower destruction must
+therefore release ownership as well as completing a route.
+
+`FUN_002ff478:291536-291581` performs discovery before scoring. Its call to
+`FUN_002f9740` is conditional on a nonzero follower class (:291536-291540),
+so class-zero discovery skips total capacity as well as class limits. Actual
+joining still enforces both. openbf checks join eligibility before ranking a
+final connection, then rechecks during unit application to arbitrate races.
+Disabled paths
+are omitted. A positive Direction permits only the first endpoint; negative
+permits only the last. With Direction zero and SingleDirection on, the remembered
+user direction supplies the same gate. `FUN_002f9da8:287413-287429` checks the
+explicit enabled bit and, when resolvable, the EnableObject's live bit. An absent
+object does not disable the path. `FUN_002f9f18:287487-287494` toggles all paths
+with a matching effective name. These are runtime toggles, not an authored
+Enabled path property.
+
+Frequency multiplies the normal suitability before the [0,1] clamp
+(`FUN_002ff478:291635-291643`). A zero weighted score can still enter the
+separate geometric fallback (`:291644-291674`); Frequency zero is not an
+absolute prohibition. openbf retains its documented geometric retry fallback
+and deterministic ranking policy; this change does not claim PS2 random
+branch choice, node properties, branch ranges or exact fallback ordering.
+
+The manifest now retains actual BF2 path Properties, including strings, in an
+optional `flight_props` list. BF1 binary paths and BF2 paths without Properties
+serialize identically. Only manifests whose inputs genuinely contain Properties
+change; meshes, collision, nav and other bake products must remain identical.
+Old manifests deserialize but require a rebake to recover dropped properties.
+
+
+The implementation derives route users from live AI pilots and their current
+vehicle cursors, with reciprocal unit/vehicle handles. It excludes the joining
+craft, rechecks a new reservation in unit application order, and clears an
+authored follower on unseating. A pursuit has no cursor. Dead pilots, destroyed
+craft and reused generations cannot reserve capacity. Direction is recovered
+from the remaining live users, so the last release unlocks SingleDirection.
+Disabled bits are hashed; occupancy is already represented by the hashed
+vehicles/units/cursors. Static metadata remains setup input, as with nav data.
+BF1 has no authored-route cursors and retains its previous detach behavior.
+
+The enabling-object adapter observes the destructible instances the simulation
+currently represents: building turrets and powerup stations. Other world objects
+have no destructible runtime state here and remain live; arbitrary building
+health and space-capital destruction are not implemented by this change. A
+missing name retains the PS2's enabled default. Runtime named toggles are exposed
+through `Sim::enable_flyer_path`; there is currently no production caller.
+Only tests exercise named toggles; this does not add a Lua interpreter.
+
+Owned-input source checks find 448 routes across Hoth and nine space LVLs;
+429 carry Class, 165 Direction, 65 EnableObject, 20 Frequency and two
+SingleDirection. All 448 route names and admission-property records agree with
+the corresponding owned Xbox and PC BF2 inputs. This is a metadata comparison,
+not cross-source round or original-game acceptance. Hoth and Space Yavin rebakes
+change only manifests; the BF1 Bespin control stays byte-identical. Restricted
+route fixtures and headless seeded rounds cannot substitute for the outstanding
+PCSX2 class/direction/capacity/frequency and full flight-trajectory comparisons.
+
+
+### Refused connections and numeric readers (2026-11-03)
+
+[O] UNAUDITED source inspection, not an original-game maneuver measurement.
+The endpoint list in `FUN_002ff478` is populated only after admission, enabled
+and direction gates (:291536-291581). Its geometric retry also uses that list,
+so it does not recover a forbidden path. The empty-ranked output has a null path
+(:291739-291771). The caller `FUN_002fc550:289428-289443` attempts a reservation
+only for a non-null path; either failure reaches `FUN_002fa478`. That reset
+releases the path and resets follower flags (`FUN_002fa478:287794-287810`,
+`FUN_002fa4e0:287849-287859`). These functions do not prove a loiter, landing
+or safe post-reset flight trajectory. That still needs a PCSX2 control.
+
+OURS, measure: capture the PS2 all-routes-refused trajectory after this reset,
+then replace openbf's temporary loiter and its two seconds of MidSpeed radius.
+The port uses a horizontal four-segment circle near the failed connection,
+keeps no route cursor/reservation and retries admission after each segment.
+A simultaneous join loser enters the same fallback. Pursuit clears the loiter
+center. This avoids both an uncontrolled straight flight and an idle pilot;
+it does not reconstruct collision avoidance or prove clearance around buildings.
+
+The two limit readers differ. MaxEntities calls `FUN_00490a78`
+(`FUN_002f9980:287264-287267`), which converts a float to an unsigned integer,
+truncates positive fractions, maps negatives to zero and saturates overflow
+(`FUN_00490a78:550912-550946`). Class strings call `FUN_00520f78`
+(:287393-287399), a decimal signed integer-prefix reader through
+`FUN_00525720:654082-654090` and `FUN_005253a8:653972-654079`.
+Thus `fighter 2.5` means two; `fighter -1` stores the low 32 bits as unlimited,
+and `fighter -2` stores 4294967294. This wrap is intentional for the string
+reader; applying it to negative MaxEntities was incorrect. No-digit strings
+read as zero; missing class limits remain unlimited. Overflow follows the
+signed 64-bit reader before storing its low 32 bits.
+
+
+The follow-up raw-disc class census resolves inherited properties across the
+four main faction sides and COMMON (BF1), or INGAME and TUR (BF2). BF1 has
+14 flyer/carrier entity records with no follower class. BF2 has 29 such records,
+22 classified: 25 vehicle-name records (18 classified) and four weapon-name
+records used by guided ordnance (all classified). Hoth's snowspeeder is class
+zero, while the space X-wing and TIE fighter use `all` and `imp` respectively.
+The seeded Space Yavin flight fixture now exercises those real classes against
+rebaked class-restricted routes through normal simulation steps and exact replay.
+It stages pilots outside hangars after normal pad spawning; it does not test
+hangar escape or complete Space Assault scoring. The earlier Bespin/Hoth rounds
+did not exercise real class, finite-capacity or nondefault-frequency admission;
+finite-capacity and nondefault-frequency decisions still have fixture coverage
+only. No original-game admission/trajectory acceptance is inferred.

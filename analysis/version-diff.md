@@ -224,9 +224,9 @@ counted only when the full translated polygon fingerprint matches; equal vertex 
 ## Builds with no PS2 disc for that game
 
 The 2026-11-01 policy requires the same simulation inside playable map bounds from every supported source.
-PS2 remains the reference, and outside-bound differences are acceptable for now, though a long ray from inside play can still read that ground (Yavin 1's hover gun does, from tick 293). Height rows reach one grid cell past the line, because ground inside it reads all four corners of its cell. Texture/asset resolution may differ.
-PC BF1 need not keep a PS2 BF1 disc: public instruction tables over the player's own files are the complete correction path, map by map in `analysis/source-gates.md`. Any PC input still requires a PS2 or
-Xbox BF2 disc for menus and missing data; Xbox discs can stand alone the same way. The census
+openbf's gameplay rules are canonical, and outside-bound differences are acceptable for now, though a long ray from inside play can still read that ground (Yavin 1's hover gun does, from tick 293). Height rows reach one grid cell past the line, because ground inside it reads all four corners of its cell. Texture/asset resolution may differ.
+PC BF1 need not keep a PS2 BF1 disc: public instruction tables over the player's own files are the complete correction path, map by map in `analysis/source-gates.md`. PC BF1 and PC BF2 together
+build without a console disc; a single PC game alone is refused. Xbox discs can stand alone too. The census
 below describes uncorrected source shapes, not acceptance of a source combination or proof of a corrected bake.
 
 Same shapes per map, if a build took all ground and collision from the other edition:

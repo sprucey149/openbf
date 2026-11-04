@@ -156,6 +156,8 @@ pub enum LightPath {
     Iface = 9,
     /// PC geometry with baked vertex lighting; only dynamic local lights are added.
     VertexLit = 10,
+    /// Water pass only: sampled RGB is a tangent-space normal, not albedo.
+    WaterNormal = 11,
 }
 
 /// The interface light set's ambient, GS units (`FUN_00398000` writes 0.5

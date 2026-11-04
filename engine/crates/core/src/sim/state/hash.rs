@@ -65,6 +65,12 @@ impl Sim {
                 }
             }
         }
+        for (index, path) in self.flyer_paths.iter().enumerate() {
+            if !path.enabled {
+                eat(b"FLIGHT_PATH_DISABLED");
+                eat(&(index as u32).to_le_bytes());
+            }
+        }
         for tow in &self.tow_cables {
             tow.hash_into(&mut eat);
         }

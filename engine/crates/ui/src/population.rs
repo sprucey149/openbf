@@ -73,24 +73,28 @@ pub fn summary(table: &[Entry], team_pct: u32, ticket_pct: u32) -> Summary {
 }
 
 /// The measured model (`match_length.rs`, from `scripts/calibrate_match_length.py`):
-/// the team-size curve on log-log axes, flat past its last point, times
-/// (reinforcements % / 100) ^ exponent.
+/// the team-size curve on log-log axes, flat at its population cap, times
+/// the measured ticket-size curve (its end slopes extrapolate).
 pub fn match_minutes(team_pct: u32, ticket_pct: u32) -> f32 {
-    use crate::match_length::{TEAM_MINUTES, TICKET_EXPONENT};
-    let x = team_pct.clamp(10, MAX_TEAM_PCT) as f32;
-    let last = TEAM_MINUTES[TEAM_MINUTES.len() - 1];
-    let team = if x >= last.0 as f32 {
+    use crate::match_length::{TEAM_MINUTES, TICKET_SCALE};
+    curve(&TEAM_MINUTES, team_pct.clamp(10, MAX_TEAM_PCT), true)
+        * curve(&TICKET_SCALE, ticket_pct.clamp(10, 500), false)
+}
+
+fn curve(axis: &[(u32, f32)], pct: u32, flat_above: bool) -> f32 {
+    let x = pct as f32;
+    let last = axis[axis.len() - 1];
+    if flat_above && x >= last.0 as f32 {
         last.1
     } else {
-        let i = TEAM_MINUTES
+        let i = axis
             .windows(2)
             .position(|w| x < w[1].0 as f32)
-            .unwrap_or(0);
-        let ((x0, y0), (x1, y1)) = (TEAM_MINUTES[i], TEAM_MINUTES[i + 1]);
+            .unwrap_or(axis.len() - 2);
+        let ((x0, y0), (x1, y1)) = (axis[i], axis[i + 1]);
         let slope = (y1 / y0).ln() / (x1 as f32 / x0 as f32).ln();
         y0 * (x / x0 as f32).powf(slope)
-    };
-    team * (ticket_pct.clamp(10, 500) as f32 / 100.0).powf(TICKET_EXPONENT)
+    }
 }
 
 fn minutes_text(m: f32) -> String {
@@ -162,19 +166,33 @@ mod tests {
         assert!(notes(Summary { minutes: 0.7, ..s })[0].ends_with("1 minute"));
     }
 
+    #[test]
+    fn curves_keep_the_population_cap_and_extrapolate_ticket_end_slopes() {
+        let axis = [(50, 1.0), (100, 2.0), (200, 8.0)];
+        assert_eq!(curve(&axis, 400, true), 8.0);
+        assert!((curve(&axis, 400, false) - 32.0).abs() < 1e-4);
+        assert!((curve(&axis, 25, false) - 0.5).abs() < 1e-4);
+    }
+
     /// The model goes through its own measured points: interpolation and
     /// exponent read the generated table the way the script fits it.
     #[test]
     fn model_reads_the_generated_table() {
-        use crate::match_length::{MEASURED, TEAM_MINUTES, TICKET_EXPONENT};
+        use crate::match_length::{MEASURED, TEAM_MINUTES, TICKET_SCALE};
         assert!(TEAM_MINUTES.windows(2).all(|w| w[0].0 < w[1].0));
         for (pct, minutes) in TEAM_MINUTES {
             assert!((match_minutes(pct, 100) - minutes).abs() < 1e-3);
         }
         let last = TEAM_MINUTES[TEAM_MINUTES.len() - 1];
         assert_eq!(match_minutes(500, 100), last.1);
-        let r = match_minutes(100, 200) / match_minutes(100, 100);
-        assert!((r - 2f32.powf(TICKET_EXPONENT)).abs() < 1e-4);
+        assert!(TICKET_SCALE
+            .windows(2)
+            .all(|w| w[0].0 < w[1].0 && w[0].1 < w[1].1));
+        for (pct, scale) in TICKET_SCALE {
+            let ratio = match_minutes(100, pct) / match_minutes(100, 100);
+            assert!((ratio - scale).abs() < 1e-4);
+        }
+        assert!(match_minutes(100, 500) > match_minutes(100, 300));
         // Every measured cell the fit used sits on the model within 10%,
         // and the check cells (not fitted) within 15%.
         for (team, ticket, rounds, unfinished, minutes) in MEASURED {

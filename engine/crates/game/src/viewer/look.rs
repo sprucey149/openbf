@@ -305,6 +305,21 @@ pub fn water_shading(
     lighting: &manifest::ManifestLighting,
     water: Option<&manifest::ManifestWater>,
 ) -> render::WaterShading {
+    if let Some(n) = water
+        .filter(|w| w.texture.is_none())
+        .and_then(|w| w.config.as_ref())
+        .and_then(|c| c.normal_maps.as_ref())
+    {
+        return render::WaterShading {
+            specular: n.reflection.map(|v| (v / 255.0).clamp(0.0, 1.0)),
+            speckle_axis: Vec3::new(
+                n.fresnel[0].clamp(0.0, 1.0),
+                n.fresnel[1].clamp(0.0, 1.0),
+                0.0,
+            ),
+            ..Default::default()
+        };
+    }
     let Some(c) = water.and_then(|w| w.config.as_ref()).filter(|c| !c.ocean) else {
         return render::WaterShading::default();
     };

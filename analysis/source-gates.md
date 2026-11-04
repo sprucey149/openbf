@@ -6,8 +6,20 @@ changes or a map is run.
 ## What is accepted
 
 Both `XBOX_SUPPORTED` and `PC_PRIMARY_SUPPORTED` are true. An Xbox disc can be either game's only source, and a PC BF1 install
-can be BF1's. PC BF2 stays a texture donor: it has no menus or HUD. Beside a PS2 disc, the PS2 still supplies the gameplay and
-the others offer larger textures.
+can be BF1's. PC BF1 plus PC BF2 can also supply both games without a console disc. The scanner records an explicit PC-only
+plan: canonical mission tables, PC BF2 shared UI and shell sound, and both copies for the borrowed animations. Single-game
+PC builds remain refused with "both games needed". Beside a PS2 disc, the PS2 still supplies the gameplay and the others
+offer larger textures. PC BF2 does contain the BF2 HUD, fonts and most shell sheets; its missing backdrop uses original
+project artwork and its fingerprinted galaxy movies replace the console ship loops, keeping the same screen structure.
+
+The PC Citadel snowdrift and Mustafar console models themselves reference sheets absent from both PC installs.
+The PC-primary bake makes two explicit appearance substitutions, gated by decoded pixel fingerprints: Citadel uses its
+own `rhn2_main_1` snow sheet for `rhn_bldg_snow_2`; Mustafar uses rectangle (64,112,192,160) of its own 512-square
+`tan4_prop_console` blue display for `mus1_prop_console_fx`. These are local artwork replacements, not same-art proofs.
+An exact sheet takes precedence and changed donor pixels do not receive the substitution. Jabba's axe instead resolves
+the exact `gam_1st_weap_inf_axe` sheet from the same copy's SIDE/GAM LVL. No console artwork is borrowed. Placement,
+collision, navigation and mission rules do not change. Existing PC BF1 packages also gain the snow sheet and the
+canonical turret stop cue; those are intentional presentation corrections, rather than byte-identical output claims.
 
 Nothing outside the public code and the player's own files is read. Each correction row is an instruction list over the donor
 file, and the bake refuses a file whose fingerprint or rebuilt result differs from the table's, so `rebake.sh` needs no gameplay

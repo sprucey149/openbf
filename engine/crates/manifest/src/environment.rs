@@ -570,6 +570,18 @@ pub struct ManifestWaterConfig {
     /// Appended last (the wire-format rule, `manifest::tests`).
     #[serde(default)]
     pub foam_metres_per_repeat: Option<[f32; 2]>,
+    /// Donor normal-map water. Omitted on PS2 to preserve its bake wire bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_maps: Option<ManifestNormalWater>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestNormalWater {
+    pub textures: Vec<String>,
+    pub fps: f32,
+    pub refraction: [f32; 4],
+    pub reflection: [f32; 4],
+    pub fresnel: [f32; 2],
 }
 
 // --- lighting, fog and sky (baked by `bake::lighting`) ----------------------

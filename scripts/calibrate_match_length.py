@@ -12,27 +12,31 @@ engine/crates/ui/src/match_length.rs, which the Team size / Reinforcements help 
 
 Rounds: Normal bots, one Good proxy (SWEEP_PROXY, it takes one slot), SWEEP_THREADS=1, the map's defaults scaled by
 SWEEP_TEAM_PCT / SWEEP_TICKET_PCT exactly as the game scales them. Each entry keeps the same seed (1-3) and proxy side
-in every cell, so cells differ only by the two percentages. Limit 90,000 ticks (50 minutes); an unfinished round is
-reported and its cell is left out of the fit.
+in every cell, so cells differ only by the two percentages. Default limit 180,000 ticks (100 minutes): the issue #86
+2v2 Yavin tail took 62 minutes. Incomplete cells refuse a model write; extend --ticks and --resume their rounds.
 
-Model (plain): minutes(team %, reinforcements %) = TEAM_MINUTES(team %) x (reinforcements % / 100) ^ TICKET_EXPONENT.
+Model: minutes(team %, reinforcements %) = TEAM_MINUTES(team %) x TICKET_SCALE(reinforcements %).
 TEAM_MINUTES is the measured mean at 100 % reinforcements, interpolated on log-log axes between the measured team
-percentages (flat above the last one: every map is at 32 per side by 200 %); TICKET_EXPONENT is the least-squares
-slope of log minutes against log reinforcements % at 100 % team size. The other cells test the model; the report
-prints measured against predicted for every cell.
+percentages (flat above the last one: every map is at 32 per side by 200 %). TICKET_SCALE interpolates the measured
+50/100/200/300 % ticket means divided by the 100 % mean, extrapolating the end slopes. The other cells test the model.
+The former single ticket exponent missed the short-ticket cell's 10 % fit bound after issue #86's changes.
 
 Options: --jobs N (parallel rounds, default 3; heavy.sh still holds them to one at a time while the maintainer plays),
 --fit-only (refit from the last rounds.csv), --resume (after an interruption: keep the rounds already logged in
 raw/, same binary only), --out DIR (default engine/artifacts/match_length, untracked).
+--binary PATH uses an already-built round_to_outcome. --in-scope runs rounds directly, inheriting the caller's
+systemd memory cap so all --jobs share that cap (requires --binary; no nested heavy.sh scopes).
+--ticks N changes the round limit; --resume re-runs cached unfinished rounds when that limit changes.
 Outputs in --out: rounds.csv (one row per round), cells.csv, report.md, raw/ (each round's stdout/stderr), the copied
 binary and its SHA256."""
 import argparse, concurrent.futures as cf, csv, hashlib, math, os, re, shutil, subprocess, sys, time
+from pathlib import Path
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 ENGINE = os.path.join(ROOT, 'engine')
 TABLE_RS = os.path.join(ENGINE, 'crates/game/src/conquest_defaults.rs')
 MODEL_RS = os.path.join(ENGINE, 'crates/ui/src/match_length.rs')
-TICKS = 90_000
+TICKS = 180_000
 TEAM_AXIS = [10, 25, 50, 75, 100, 150, 200]  # at 100 % reinforcements
 TICKET_AXIS = [50, 200, 300]                 # at 100 % team size
 CHECKS = [(50, 200), (200, 50), (200, 200)]  # not fitted: they test the model
@@ -49,7 +53,7 @@ def heavy_sh():
 def table():
     """(map, cw, combatants, tickets) for every TABLE entry, read from the Rust source."""
     pat = re.compile(r'entry\("(\w+)", (true|false), \[(\d+), (\d+)\], \[(\d+), (\d+)\]\)')
-    rows = [(m, cw == 'true', [int(a), int(b)], [int(c), int(d)]) for m, cw, a, b, c, d in pat.findall(open(TABLE_RS).read())]
+    rows = [(m, cw == 'true', [int(a), int(b)], [int(c), int(d)]) for m, cw, a, b, c, d in pat.findall(Path(TABLE_RS).read_text())]
     if len(rows) < 2:
         sys.exit('no TABLE entries found in ' + TABLE_RS)
     return rows
@@ -96,15 +100,22 @@ def play_once(heavy, binary, out, resume, entry, index, team_pct, ticket_pct):
     def parse(stdout, stderr):
         setup = re.search(r'setup \S+ combatants (\d+)/(\d+) tickets (\d+)/(\d+)', stdout)
         proxy = re.search(r'^round .* proxy (\d) good', stderr, re.M)
-        ok = bool(setup and proxy and int(proxy[1]) == side and [int(x) for x in setup.groups()] == want)
+        round_seed = re.search(r'^round \S+ s(\d+) normal ', stderr, re.M)
+        win = re.search(r'team (\d) wins at tick (\d+)', stdout)
+        stopped = re.search(r'NO OUTCOME in (\d+) ticks', stdout)
+        same_limit = (win and int(win[2]) <= TICKS) or (stopped and int(stopped[1]) == TICKS)
+        ok = bool(setup and proxy and round_seed and int(round_seed[1]) == seed
+                  and same_limit and int(proxy[1]) == side
+                  and [int(x) for x in setup.groups()] == want)
         return ok, setup
 
     ok = False
     if resume and os.path.exists(raw + '.out') and os.path.exists(raw + '.err'):
-        stdout, stderr = open(raw + '.out').read(), open(raw + '.err').read()
+        stdout, stderr = Path(raw + '.out').read_text(), Path(raw + '.err').read_text()
         ok, setup = parse(stdout, stderr)
     if not ok:
-        p = subprocess.run(['bash', heavy, binary, str(TICKS), str(seed), m], cwd=ENGINE, env=env,
+        cmd = (['bash', heavy] if heavy else []) + [binary, str(TICKS), str(seed), m]
+        p = subprocess.run(cmd, cwd=ENGINE, env=env,
                            capture_output=True, text=True)
         stdout, stderr = p.stdout, p.stderr
         with open(raw + '.out', 'w') as f:
@@ -120,18 +131,18 @@ def play_once(heavy, binary, out, resume, entry, index, team_pct, ticket_pct):
                 minutes=f'{int(win[2]) / 1800:.4f}' if win else '', winner=win[1] if win else '')
 
 
-def measure(out, jobs, resume):
-    heavy = heavy_sh()
+def measure(out, jobs, resume, supplied_binary=None, in_scope=False):
+    heavy = None if in_scope else heavy_sh()
     entries = table()
     os.makedirs(os.path.join(out, 'raw'), exist_ok=True)
     binary = os.path.join(out, 'round_to_outcome')
     sha_file = os.path.join(out, 'binary_sha256.txt')
-    sha = lambda f: hashlib.sha256(open(f, 'rb').read()).hexdigest()
+    sha = lambda f: hashlib.sha256(Path(f).read_bytes()).hexdigest()
     if resume:  # the interrupted run's own copied binary, unchanged
-        if not os.path.exists(binary) or sha(binary) != open(sha_file).read().strip():
+        if not os.path.exists(binary) or sha(binary) != Path(sha_file).read_text().strip():
             sys.exit('--resume needs the interrupted run\'s binary in ' + out + '; run without --resume')
     else:
-        shutil.copy2(build(heavy), binary)
+        shutil.copy2(supplied_binary or build(heavy), binary)
         with open(sha_file, 'w') as f:
             f.write(sha(binary) + '\n')
     work = [(e, i, t, r) for (t, r) in CELLS for i, e in enumerate(entries)]
@@ -151,11 +162,12 @@ def measure(out, jobs, resume):
         w = csv.DictWriter(f, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
+    Path(out, 'max_ticks.txt').write_text(str(TICKS) + '\n')
 
 
-def interp(axis, x):
-    """Log-log interpolation through [(pct, minutes)], flat past the last point, the first slope below the first."""
-    if x >= axis[-1][0]:
+def interp(axis, x, flat_above=True):
+    """Log-log curve; team counts flatten at their cap, ticket fractions keep their end slopes."""
+    if flat_above and x >= axis[-1][0]:
         return axis[-1][1]
     i = max(j for j in range(len(axis) - 1) if axis[j][0] <= x) if x >= axis[0][0] else 0
     (x0, y0), (x1, y1) = axis[i], axis[i + 1]
@@ -163,12 +175,13 @@ def interp(axis, x):
     return y0 * (x / x0) ** s
 
 
-def predict(team_axis, exponent, team_pct, ticket_pct):
-    return interp(team_axis, team_pct) * (ticket_pct / 100) ** exponent
+def predict(team_axis, ticket_axis, team_pct, ticket_pct):
+    return interp(team_axis, team_pct) * interp(ticket_axis, ticket_pct, flat_above=False)
 
 
 def fit(out):
-    rows = list(csv.DictReader(open(os.path.join(out, 'rounds.csv'))))
+    with open(os.path.join(out, 'rounds.csv'), newline='') as f:
+        rows = list(csv.DictReader(f))
     cells = []
     for t, r in CELLS:
         rs = [x for x in rows if (int(x['team_pct']), int(x['ticket_pct'])) == (t, r)]
@@ -179,14 +192,19 @@ def fit(out):
         tick = sum(sum(map(int, x['tickets'].split('/'))) / 2 for x in rs) / len(rs)
         cells.append(dict(team_pct=t, ticket_pct=r, rounds=len(rs), unfinished=len(rs) - len(done), mean_minutes=mean,
                           se_minutes=sd / math.sqrt(len(done)) if done else float('nan'), team=team, tickets=tick))
+    incomplete = [(c['team_pct'], c['ticket_pct']) for c in cells if c['unfinished']]
+    if incomplete:
+        raise ValueError(f'incomplete cells {incomplete}: extend --ticks and --resume before fitting a mean')
     cell = {(c['team_pct'], c['ticket_pct']): c for c in cells}
     usable = lambda k: k in cell and cell[k]['unfinished'] == 0
     team_axis = [(t, cell[(t, 100)]['mean_minutes']) for t in TEAM_AXIS if usable((t, 100))]
     base = cell[(100, 100)]['mean_minutes']
-    pts = [(math.log(r / 100), math.log(cell[(100, r)]['mean_minutes'] / base)) for r in TICKET_AXIS if usable((100, r))]
-    exponent = sum(x * y for x, y in pts) / sum(x * x for x, _ in pts)
+    ticket_axis = [(r, cell[(100, r)]['mean_minutes'] / base)
+                   for r in sorted([100] + TICKET_AXIS) if usable((100, r))]
+    if len(team_axis) < 2 or len(ticket_axis) < 2:
+        raise ValueError('not enough complete cells to fit both axes')
     for c in cells:
-        c['predicted'] = predict(team_axis, exponent, c['team_pct'], c['ticket_pct'])
+        c['predicted'] = predict(team_axis, ticket_axis, c['team_pct'], c['ticket_pct'])
         c['error_pct'] = 100 * (c['predicted'] / c['mean_minutes'] - 1)
         c['role'] = 'check' if (c['team_pct'], c['ticket_pct']) in CHECKS else 'fit'
     with open(os.path.join(out, 'cells.csv'), 'w', newline='') as f:
@@ -194,31 +212,33 @@ def fit(out):
         w.writeheader()
         w.writerows(cells)
     with open(MODEL_RS, 'w') as f:
-        f.write(render(team_axis, exponent, cells))
+        f.write(render(team_axis, ticket_axis, cells))
     lines = ['# Match length calibration', '',
-             f'binary sha256 `{open(os.path.join(out, "binary_sha256.txt")).read().strip()}`; {len(rows)} rounds; '
-             f'model: minutes = TEAM_MINUTES(team %) x (reinforcements % / 100)^{exponent:.3f}', '',
+             f'binary sha256 `{Path(out, "binary_sha256.txt").read_text().strip()}`; {len(rows)} rounds; '
+             'model: minutes = TEAM_MINUTES(team %) x TICKET_SCALE(reinforcements %)', '',
              '| team % | reinf. % | role | rounds | unfinished | mean team | mean tickets | measured min (se) | predicted | error |',
              '|---|---|---|---|---|---|---|---|---|---|']
     for c in cells:
         lines.append(f'| {c["team_pct"]} | {c["ticket_pct"]} | {c["role"]} | {c["rounds"]} | {c["unfinished"]} | '
                      f'{c["team"]:.1f} | {c["tickets"]:.0f} | {c["mean_minutes"]:.2f} ({c["se_minutes"]:.2f}) | '
                      f'{c["predicted"]:.2f} | {c["error_pct"]:+.1f}% |')
-    open(os.path.join(out, 'report.md'), 'w').write('\n'.join(lines) + '\n')
+    Path(out, 'report.md').write_text('\n'.join(lines) + '\n')
     print('\n'.join(lines))
     print('wrote', MODEL_RS)
 
 
-def render(team_axis, exponent, cells):
+def render(team_axis, ticket_axis, cells):
     """The Rust file the menu reads (its test re-checks MEASURED against the model)."""
     s = ['//! Generated by `scripts/calibrate_match_length.py`; do not edit by hand, re-run the script.',
          '//! Mean Instant Action conquest match length over every map/era default (Normal bots, one Good proxy).',
-         '//! minutes = TEAM_MINUTES(team %) x (reinforcements % / 100) ^ TICKET_EXPONENT.', '',
+         '//! minutes = TEAM_MINUTES(team %) x TICKET_SCALE(reinforcements %), both log-log interpolated.', '',
          '/// Measured mean minutes at 100% reinforcements: (team size %, minutes).',
          f'pub const TEAM_MINUTES: [(u32, f32); {len(team_axis)}] = [']
     s += [f'    ({t}, {m:.3f}),' for t, m in team_axis]
-    s += ['];', '', '/// Least-squares slope of log minutes against log reinforcements % at 100% team size.',
-          f'pub const TICKET_EXPONENT: f32 = {exponent:.4f};', '',
+    s += ['];', '', '/// Measured ticket means relative to 100% tickets, at 100% team size.',
+          f'pub const TICKET_SCALE: [(u32, f32); {len(ticket_axis)}] = [']
+    s += [f'    ({r}, {scale:.6f}),' for r, scale in ticket_axis]
+    s += ['];', '',
           '/// Every measured cell: (team %, reinforcements %, rounds, unfinished, mean minutes).',
           f'pub const MEASURED: [(u32, u32, u32, u32, f32); {len(cells)}] = [']
     s += [f'    ({c["team_pct"]}, {c["ticket_pct"]}, {c["rounds"]}, {c["unfinished"]}, {c["mean_minutes"]:.3f}),'
@@ -228,14 +248,25 @@ def render(team_axis, exponent, cells):
 
 
 def main():
+    global TICKS
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--jobs', type=int, default=3)
     ap.add_argument('--fit-only', action='store_true')
     ap.add_argument('--resume', action='store_true')
     ap.add_argument('--out', default=os.path.join(ENGINE, 'artifacts', 'match_length'))
+    ap.add_argument('--binary', type=os.path.abspath, help='already-built round_to_outcome')
+    ap.add_argument('--in-scope', action='store_true', help='inherit caller cap; no nested heavy.sh scopes')
+    ap.add_argument('--ticks', type=int, default=TICKS, help='maximum ticks per round')
     a = ap.parse_args()
+    if a.in_scope and not (a.binary or a.resume or a.fit_only):
+        ap.error('--in-scope requires --binary (or --resume / --fit-only)')
+    if a.jobs < 1:
+        ap.error('--jobs must be positive')
+    if a.ticks < 1:
+        ap.error('--ticks must be positive')
+    TICKS = a.ticks
     if not a.fit_only:
-        measure(a.out, a.jobs, a.resume)
+        measure(a.out, a.jobs, a.resume, a.binary, a.in_scope)
     fit(a.out)
 
 

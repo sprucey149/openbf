@@ -413,6 +413,11 @@ fn a_command_walkers_pilot_stays_in_at_its_post() {
     let mut p = atst();
     p.spawn_points = vec![(Vec3::ZERO, 0.0)];
     let (mut s, b, v, post) = world(p, 45.0);
+    // Ordinary round population: last-crew escape is covered separately.
+    for i in 0..COMMAND_ENDGAME {
+        s.spawn(&UnitSpec::trooper(0, Vec3::new(500.0 + i as f32, 0.0, 0.0)))
+            .unwrap();
+    }
     for _ in 0..(60 * crate::TICK_HZ) {
         s.step(&[]);
     }
@@ -570,4 +575,113 @@ fn pickup_walker_bf1_full_control() {
 #[test]
 fn pickup_walker_bf2_full_control() {
     pickup_walker_probe(crate::soldier::GroundRules::Bf2, true);
+}
+
+/// #86/#108: a drop hub can be far from an Attack post. Endgame pilots
+/// must leave it even while their retained order still names that post.
+#[test]
+fn command_drop_hub_exits_for_tickets_or_last_crew() {
+    for post in [false, true] {
+        for (alive, tickets, exits) in [(7, 250, false), (7, 10, true), (6, 250, true)] {
+            let mut p = atst();
+            p.spawn_points = vec![(Vec3::ZERO, 0.0)];
+            let (mut s, b, v, _) = world(p.clone(), 0.0);
+            s.seat_setup[0].as_mut().unwrap().guns = vec![Some(crate::vehicle::gun::GunSetup {
+                weapons: vec![],
+                fire_point: Vec3::ZERO,
+                pivot: Vec3::ZERO,
+                eye: Vec3::ZERO,
+                aimer: Default::default(),
+                pilot: true,
+                turn: None,
+                framed: false,
+                aimer_bind: glam::Quat::IDENTITY,
+                gunner: None,
+            })];
+            for i in 1..alive {
+                s.spawn(&UnitSpec::trooper(0, Vec3::new(100.0 + i as f32, 0.0, 0.0)))
+                    .unwrap();
+            }
+            s.battle.teams[1].reinforcements = tickets as f32;
+            assert!(s.enter_vehicle(b, v, 0));
+            let mut st = AiState {
+                target_cp: post.then_some(0),
+                route: Some(super::super::state::Route {
+                    waypoint: Vec3::ZERO,
+                    ..Default::default()
+                }),
+                ride: Some(RideState::default()),
+                ..Default::default()
+            };
+            let m = s.unit(b).unwrap().mount.unwrap();
+            drive(&s, b, m, &p, &mut st, NavTick::default());
+            assert_eq!(
+                st.ride.unwrap().use_req,
+                exits,
+                "post={post}, alive={alive}, tickets={tickets}"
+            );
+        }
+    }
+}
+
+#[test]
+fn walker_progress_ignores_bob_and_jitter_but_counts_travel() {
+    let mut st = AiState::default();
+    for tick in 0..DRIVE_STUCK_BAIL {
+        let pos = Vec3::new(if tick % 2 == 0 { 0.0 } else { 1.0 }, tick as f32, 0.0);
+        walker_progress(&mut st, pos, true);
+        // Replanning and its short progress window cannot erase this clock.
+        st.route = None;
+    }
+    assert_eq!(
+        st.ride.unwrap().walker_progress.unwrap().1,
+        DRIVE_STUCK_BAIL
+    );
+    for _ in 0..100 {
+        walker_progress(&mut st, Vec3::ZERO, false);
+    }
+    assert_eq!(
+        st.ride.unwrap().walker_progress.unwrap().1,
+        DRIVE_STUCK_BAIL
+    );
+    walker_progress(&mut st, Vec3::new(2.0, 500.0, 0.0), true);
+    assert_eq!(st.ride.unwrap().walker_progress.unwrap().1, 0);
+    for tick in 1..(DRIVE_STUCK_BAIL * 4) {
+        walker_progress(&mut st, Vec3::new(2.0 + tick as f32 * 0.1, 0.0, 0.0), true);
+        assert!(st.ride.unwrap().walker_progress.unwrap().1 < DRIVE_STUCK_BAIL);
+    }
+}
+
+#[test]
+fn jittering_spider_bails_and_marks_the_abandoned_vehicle() {
+    let p = spider();
+    let (mut s, b, v, post) = world(p.clone(), 0.0);
+    assert!(s.enter_vehicle(b, v, 0));
+    let m = s.unit(b).unwrap().mount.unwrap();
+    let mut st = AiState {
+        target_cp: Some(0),
+        route: Some(super::super::state::Route {
+            waypoint: post,
+            ..Default::default()
+        }),
+        ride: Some(RideState::default()),
+        ..Default::default()
+    };
+    for tick in 0..=DRIVE_STUCK_BAIL {
+        s.vehicle_mut(v).unwrap().pos = Vec3::new(
+            if tick % 2 == 0 { 0.0 } else { 1.0 },
+            (tick % 3) as f32,
+            0.0,
+        );
+        let r = st.route.as_mut().unwrap();
+        r.stuck_run = 0;
+        r.ref_dist = 151.0; // A fresh route reference may call each jitter progress.
+        drive(&s, b, m, &p, &mut st, NavTick::default());
+        assert_eq!(st.ride.unwrap().use_req, tick == DRIVE_STUCK_BAIL);
+    }
+    assert_eq!(st.route.unwrap().stuck_run, DRIVE_STUCK_BAIL);
+    s.units[b.index as usize].ai = st;
+    s.ai_use_pass();
+    assert!(s.unit(b).unwrap().mount.is_none());
+    assert!(s.vehicle(v).unwrap().stuck_at.is_some());
 }

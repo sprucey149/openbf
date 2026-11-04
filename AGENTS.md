@@ -1,7 +1,8 @@
 # openbf agent instructions
 
 openbf is a Rust port of Star Wars Battlefront (2004) and Battlefront II (2005).
-The PS2 games are the gameplay reference. Players build it from their own discs.
+openbf has one gameplay rulebook that every build follows. The original games are the
+evidence, and deliberate differences are named. Players build it from their own copies.
 
 Read `PLAN.md` for scope and decisions, `engine/CRATES.md` for the module map,
 `analysis/INDEX.md` before reverse engineering, `analysis/dev-tools.md` for the

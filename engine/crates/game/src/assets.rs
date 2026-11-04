@@ -1215,6 +1215,7 @@ pub fn load_scene(dir: &Path) -> Result<Scene> {
         );
     }
 
+    load_shared_materials(dir, &manifest.source_game, &meshes, &mut textures)?;
     let collision = load_collision(dir, &manifest.collision)?;
     let cutters = manifest.terrain_cutters.clone();
     Ok(Scene {
@@ -1229,6 +1230,44 @@ pub fn load_scene(dir: &Path) -> Result<Scene> {
         collision,
         cutters,
     })
+}
+
+/// Exact cross-map dependencies in the shipped artwork. Read through `pak`
+/// so directory and single-file builds resolve the same texture, without
+/// changing any PS2 bake bytes. Existing map images always win. A source
+/// is only read for a scene of the same game, from this scene's own bake
+/// root (one input profile), so another copy's bake is never borrowed.
+fn load_shared_materials(
+    dir: &Path,
+    source_game: &str,
+    meshes: &HashMap<String, CpuMesh>,
+    textures: &mut HashMap<String, CpuTexture>,
+) -> Result<()> {
+    let Some(root) = dir.parent() else {
+        return Ok(());
+    };
+    let wanted: std::collections::BTreeSet<_> = meshes
+        .values()
+        .flat_map(|m| m.submeshes.iter().map(|s| s.2.to_ascii_lowercase()))
+        .filter(|n| !textures.contains_key(n))
+        .collect();
+    for name in wanted {
+        let (game, sources): (&str, &[&str]) = match name.as_str() {
+            "dea1_prop_barrel_crate" => ("bf2", &["bf2_dea1"]),
+            _ => continue,
+        };
+        if !source_game.eq_ignore_ascii_case(game) {
+            continue;
+        }
+        for source in sources {
+            let path = root.join(source).join("textures");
+            if pak::is_file(path.join(format!("{name}.ktx2"))) {
+                textures.insert(name.clone(), load_texture(&path, &name)?);
+                break;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// What [`load_battle_scene`] merged into the map, for the caller to report.

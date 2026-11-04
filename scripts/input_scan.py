@@ -12,7 +12,7 @@ The choice, per game:
     what else went in. The optional DLC heroes are the one exception, and only once a player turns on the DLC Heroes row
     in Hero Options (scripts/DLC.md).
   - look: every other copy is a texture donor. bake::tier keeps the largest same-art copy of each texture.
-  - each game needs one source, and any PC input also needs a console BF2 disc. A folder that holds other, unusable
+  - each game needs one source. PC BF1 plus PC BF2 also works without a console disc. A folder that holds other, unusable
     things still builds; the summary says what was refused. A game left with no usable source stops the build, and
     the message says what to add.
 
@@ -364,7 +364,8 @@ def add_message(game, xbox, pc_primary):
 
 def console_needed_message(xbox, where):
     other = " or an Xbox BF2 disc" if xbox else " (Xbox BF2 input is not supported yet)"
-    return f"PC input requires a console Battlefront II disc: add a PS2 BF2 disc{other} to {where}."
+    return (f"PC input requires a console Battlefront II disc or both PC games: both games needed for PC-only builds. "
+            f"Add a PS2 BF2 disc{other} to {where}, or add the other PC install.")
 
 
 def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_supported=None, dlc_supported=None,
@@ -383,6 +384,11 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
         return [row for row in found if row["kind"] == kind and row["game"] == game and row["status"] == "found"]
 
     any_pc = any(row["kind"] == "pc-install" for row in found)
+    combined_pc = pc_on and all(of_kind("pc-install", game) for game in GAMES)
+    if combined_pc and not any(row["kind"] in ("ps2-disc", "xbox-disc") for row in found):
+        # A cache beside a previous build is not an input to the explicitly
+        # supplied PC pair. Never let it quietly become a console donor.
+        trees = {}
     for game in GAMES:
         ps2, xbox, pc = of_kind("ps2-disc", game), of_kind("xbox-disc", game), of_kind("pc-install", game)
         tree = trees.get(game) or {}
@@ -396,7 +402,7 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
             gameplay = dict(kind="xbox-disc", path=xbox[0]["path"], verified=True)
             if extracted:
                 gameplay["tree"] = xbox_tree(extracted, game)
-        elif pc and pc_on and game == "bf1":
+        elif pc and pc_on and (game == "bf1" or combined_pc):
             gameplay = dict(kind="pc-install", path=pc[0]["path"], verified=True)
         elif xbox:
             refusals.append(f"{short}: found the Xbox disc {xbox[0]['path']}, but Xbox input is not supported yet. "
@@ -441,8 +447,19 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
 
     if any_pc:
         console = games["bf2"]["gameplay"]
-        if not console or console["kind"] == "pc-install" or not console["verified"]:
+        if not console or not console["verified"] or (console["kind"] == "pc-install" and not combined_pc):
             refusals.append(console_needed_message(xbox_on, where))
+
+    # Only the new two-PC primary configuration changes the shared-resource
+    # routing. Existing console/PC1 mixes retain their established donors.
+    pc_only = all((games[g]["gameplay"] or {}).get("kind") == "pc-install" for g in GAMES)
+    source_plan = None
+    if pc_only:
+        source_plan = dict(kind="pc-only", console_donors=False,
+                           missions="fingerprinted canonical tables; PC scripts supply presentation",
+                           shared_ui=games["bf2"]["gameplay"]["path"],
+                           shell_sound=games["bf2"]["gameplay"]["path"],
+                           borrowed_animations={g: games[g]["gameplay"]["path"] for g in GAMES})
 
     dlc = dict(present=False, path=None, donor=None, used=False)
     # PS2 geometry first, as everywhere; a PC copy beside it can still lend the heroes its larger textures.
@@ -468,7 +485,7 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
         if cannot:
             refusals.append("Also found, and not usable: " + "; ".join(f"{row['path']} ({row['reason']})" for row in cannot))
     return dict(schema=1, roots=[str(root) for root in roots], games=games, dlc=dlc, found=found, strays=strays,
-                refusals=refusals, xbox_supported=xbox_on, dlc_supported=dlc_on,
+                refusals=refusals, xbox_supported=xbox_on, dlc_supported=dlc_on, source_plan=source_plan,
                 rule="PS2 is the gameplay reference whenever present; other copies change only the look, and the bake "
                      "keeps the largest same-art copy of each texture.")
 
@@ -530,6 +547,8 @@ def withheld_maps(game, gameplay):
 def bake_env(plan):
     """What the bake is told. Empty for anything not chosen, so the bake's default is the PS2-only one."""
     env = {}
+    if (plan.get("source_plan") or {}).get("kind") == "pc-only":
+        env["OPENBF_PC_ONLY"] = "1"
     for game in GAMES:
         number = game[-1]
         chosen = plan["games"][game]
@@ -567,6 +586,8 @@ def discs_to_extract(plan):
 
 def summary_lines(plan):
     lines = ["Inputs (recognized by content):"]
+    if (plan.get("source_plan") or {}).get("kind") == "pc-only":
+        lines.append("  PC-only: both games; canonical mission tables; BF2 UI and shell audio from PC BF2; no console donors")
     label = {"ps2-disc": "PS2 disc", "ps2-extracted": "PS2 data extracted earlier", "xbox-disc": "Xbox disc", "pc-install": "PC install"}
     for game in GAMES:
         chosen = plan["games"][game]

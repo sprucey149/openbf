@@ -3821,7 +3821,10 @@ struct LegWatch {
 
 /// Units that keep one leg without closing on it (module header, "The stuck
 /// census"): a wall slide moves the unit enough to reset `stuck_run`, so the
-/// stuck census alone misses it. Indexed by unit index.
+/// stuck census alone misses it. Only foot travel and active ground-vehicle
+/// pilots follow that leg: flyer steering has its own goal, other seats do
+/// not steer, and a parked walker deliberately retains its old leg. Indexed
+/// by unit index.
 #[derive(Default)]
 struct NoProgress {
     units: Vec<Option<LegWatch>>,
@@ -3833,6 +3836,27 @@ impl NoProgress {
             let i = h.index as usize;
             if self.units.len() <= i {
                 self.units.resize(i + 1, None);
+            }
+            let follows_leg = u.mount.is_none_or(|m| {
+                sim.vehicle(m.vehicle).is_some_and(|v| {
+                    matches!(
+                        v.kind,
+                        core::vehicle::VehicleKind::Hover | core::vehicle::VehicleKind::Walker
+                    ) && v.seats.get(usize::from(m.seat)).is_some_and(|s| {
+                        s.kind == core::vehicle::SeatKind::Pilot && s.occupant == Some(h)
+                    }) && (v.kind != core::vehicle::VehicleKind::Walker
+                        || u.ai.ride.is_some_and(|r| r.walker_progress.is_some())
+                        || u.ai.route.is_some_and(|r| {
+                            core::nav::xz_dist(v.pos, r.waypoint) > core::ai::walker_drive::ARRIVE
+                                || (v.pos.y - r.waypoint.y).abs() > core::ai::SPOT_FLOOR_TOL
+                        }))
+                })
+            });
+            if !follows_leg {
+                // End this watch rather than pausing it: dismounting must
+                // start a fresh ground-travel window, even on the same leg.
+                self.units[i] = None;
+                continue;
             }
             let Some(r) = u.ai.route else {
                 self.units[i] = None;
@@ -6195,6 +6219,159 @@ mod diagnostic_tests {
             ..UnitSpec::trooper(0, pos)
         })
         .unwrap()
+    }
+
+    fn leg_fixture(kind: core::vehicle::VehicleKind, seat: u8) -> (core::sim::Sim, UnitHandle) {
+        use core::vehicle::{SeatKind, VehicleSpec};
+        let mut sim = core::sim::Sim::empty(113);
+        let h = bot(&mut sim, Vec3::ZERO);
+        let v = sim.spawn_vehicle(&VehicleSpec {
+            kind,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: if kind == core::vehicle::VehicleKind::Turret {
+                vec![
+                    SeatKind::Gunner(0),
+                    SeatKind::Gunner(1),
+                    SeatKind::Gunner(2),
+                ]
+            } else {
+                vec![SeatKind::Pilot, SeatKind::Gunner(0), SeatKind::Passenger(0)]
+            },
+        });
+        assert!(sim.seat_unit(h, v, seat));
+        sim.unit_mut(h).unwrap().ai.route = Some(core::ai::Route {
+            waypoint: Vec3::X * 100.0,
+            ..Default::default()
+        });
+        if kind == core::vehicle::VehicleKind::Walker && seat == 0 {
+            sim.unit_mut(h)
+                .unwrap()
+                .ai
+                .ride
+                .get_or_insert_default()
+                .walker_progress = Some((glam::Vec2::ZERO, 0));
+        }
+        (sim, h)
+    }
+
+    #[test]
+    fn no_progress_ignores_crew_whose_motion_does_not_follow_the_ground_leg() {
+        use core::vehicle::VehicleKind::*;
+        for kind in [Hover, Walker, Flyer, Turret] {
+            for seat in 0..3 {
+                if matches!(kind, Hover | Walker) && seat == 0 {
+                    continue;
+                }
+                let (sim, h) = leg_fixture(kind, seat);
+                let hash = sim.hash();
+                let mut watch = NoProgress::default();
+                watch.observe(&sim, 0);
+                watch.observe(&sim, NO_PROGRESS_TICKS);
+                let route = sim.unit(h).unwrap().ai.route.unwrap();
+                assert!(
+                    watch.stalled(h, &route, NO_PROGRESS_TICKS).is_none(),
+                    "{kind:?} seat {seat}"
+                );
+                assert_eq!(sim.hash(), hash, "census must only read simulation state");
+            }
+        }
+    }
+
+    #[test]
+    fn no_progress_keeps_ground_pilot_and_foot_stalls_and_measured_gain() {
+        use core::vehicle::VehicleKind::{Hover, Walker};
+        for (kind, foot) in [(Hover, false), (Walker, false), (Hover, true)] {
+            let (mut sim, h) = leg_fixture(kind, 0);
+            if foot {
+                sim.unseat_unit(h);
+            }
+            let route = sim.unit(h).unwrap().ai.route.unwrap();
+            let mut watch = NoProgress::default();
+            watch.observe(&sim, 0);
+            watch.observe(&sim, NO_PROGRESS_TICKS);
+            assert!(watch.stalled(h, &route, NO_PROGRESS_TICKS).is_some());
+            sim.unit_mut(h).unwrap().soldier.pos.x += NO_PROGRESS_GAIN;
+            watch.observe(&sim, NO_PROGRESS_TICKS + 1);
+            assert!(watch.stalled(h, &route, NO_PROGRESS_TICKS + 1).is_none());
+        }
+    }
+
+    #[test]
+    fn no_progress_drops_the_old_foot_window_while_aboard_a_flyer() {
+        use core::vehicle::VehicleKind;
+        let (mut sim, h) = leg_fixture(VehicleKind::Flyer, 0);
+        let mount = sim.unit(h).unwrap().mount.unwrap();
+        sim.unseat_unit(h);
+        let route = sim.unit(h).unwrap().ai.route.unwrap();
+        let mut watch = NoProgress::default();
+        watch.observe(&sim, 0);
+        assert!(sim.seat_unit(h, mount.vehicle, mount.seat));
+        watch.observe(&sim, NO_PROGRESS_TICKS);
+        sim.unseat_unit(h);
+        watch.observe(&sim, NO_PROGRESS_TICKS + 1);
+        assert!(watch.stalled(h, &route, NO_PROGRESS_TICKS + 1).is_none());
+        watch.observe(&sim, 2 * NO_PROGRESS_TICKS + 1);
+        assert!(watch
+            .stalled(h, &route, 2 * NO_PROGRESS_TICKS + 1)
+            .is_some());
+    }
+
+    #[test]
+    fn no_progress_drops_a_parked_walkers_clock_but_keeps_active_stuck_drivers() {
+        let (mut sim, h) = leg_fixture(core::vehicle::VehicleKind::Walker, 0);
+        sim.unit_mut(h).unwrap().ai.route.as_mut().unwrap().waypoint =
+            Vec3::X * ((NO_PROGRESS_GAIN + core::ai::walker_drive::ARRIVE) * 0.5);
+        let route = sim.unit(h).unwrap().ai.route.unwrap();
+        let mut watch = NoProgress::default();
+        watch.observe(&sim, 0);
+        sim.unit_mut(h)
+            .unwrap()
+            .ai
+            .ride
+            .as_mut()
+            .unwrap()
+            .walker_progress = None;
+        let hash = sim.hash();
+        watch.observe(&sim, NO_PROGRESS_TICKS + 1);
+        assert_eq!(sim.hash(), hash);
+        assert!(watch.stalled(h, &route, NO_PROGRESS_TICKS + 1).is_none());
+        sim.unit_mut(h)
+            .unwrap()
+            .ai
+            .ride
+            .as_mut()
+            .unwrap()
+            .walker_progress = Some((glam::Vec2::ZERO, 0));
+        watch.observe(&sim, 2 * NO_PROGRESS_TICKS + 1);
+        assert!(watch
+            .stalled(h, &route, 2 * NO_PROGRESS_TICKS + 1)
+            .is_none());
+        watch.observe(&sim, 3 * NO_PROGRESS_TICKS + 1);
+        assert!(watch
+            .stalled(h, &route, 3 * NO_PROGRESS_TICKS + 1)
+            .is_some());
+    }
+
+    #[test]
+    fn no_progress_keeps_stopped_walkers_far_from_the_leg_or_on_the_wrong_floor() {
+        for waypoint in [Vec3::X * 100.0, Vec3::new(3.0, 10.0, 0.0)] {
+            let (mut sim, h) = leg_fixture(core::vehicle::VehicleKind::Walker, 0);
+            let u = sim.unit_mut(h).unwrap();
+            u.ai.route.as_mut().unwrap().waypoint = waypoint;
+            u.ai.ride.as_mut().unwrap().walker_progress = None;
+            let route = u.ai.route.unwrap();
+            let mut watch = NoProgress::default();
+            watch.observe(&sim, 0);
+            watch.observe(&sim, NO_PROGRESS_TICKS);
+            assert!(watch.stalled(h, &route, NO_PROGRESS_TICKS).is_some());
+        }
     }
 
     fn fire_spell(fight_at: impl Fn(u64) -> bool, move_at: Option<u64>) -> Fire {

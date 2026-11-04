@@ -1230,6 +1230,11 @@ def build(key, game, planet, era, pc_stem, ps2_name):
         # spa6..spa9: the map's setup is in `<map>_cmn`, run by `ScriptCB_DoFile`.
         common = load_ps2(game, ps2_name.replace("_ass", "_cmn")) \
             if ps2_name.endswith("_ass") else None
+        if common is None and game in GAMEPLAY_REFERENCES and ps2_name.endswith("_ass"):
+            from gameplay_missions import SOURCE_SCRIPTS
+            body = SOURCE_SCRIPTS.get(game, {}).get(ps2_name.replace("_ass", "_cmn").lower())
+            if body is not None:
+                common = undump50(body)
         if common is not None:
             calls = calls50(common) + calls
         ps2 = facts_from_calls(calls)

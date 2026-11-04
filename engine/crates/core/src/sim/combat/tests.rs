@@ -393,6 +393,69 @@ fn a_long_fall_kills_and_a_short_one_does_not() {
     assert_eq!(drop_from(2.0), (false, 250), "a 2 m fall is not");
 }
 
+#[test]
+fn authored_zero_collision_damage_survives_landings_but_not_death_regions() {
+    use crate::soldier::GroundRules;
+    for rules in [GroundRules::Bf1, GroundRules::Bf2] {
+        for human in [false, true] {
+            for immune in [false, true] {
+                let mut sim = Sim::empty(113);
+                sim.heightfield = Some(flat_ground());
+                sim.ground_rules = rules;
+                let mut spec = if human {
+                    UnitSpec::player(0, Vec3::ZERO)
+                } else {
+                    UnitSpec::trooper(0, Vec3::ZERO)
+                };
+                spec.max_health = 300.0;
+                spec.consts.collision_damage_immune = immune;
+                let h = sim.spawn(&spec).unwrap();
+                {
+                    let u = sim.unit_mut(h).unwrap();
+                    u.soldier.pos.y = 30.0;
+                    u.soldier.grounded = false;
+                }
+                let mut falls = 0;
+                for _ in 0..120 {
+                    sim.step(&[PadState::default()]);
+                    falls += sim.events.iter().filter(|e| matches!(e,
+                        crate::sim::Event::EnvDeath { unit, cause: crate::sim::DeathCause::Fall } if *unit == h
+                    )).count();
+                }
+                assert_eq!(falls, usize::from(!immune), "{rules:?} human {human}");
+                assert_eq!(sim.unit(h).is_some(), immune);
+                if immune {
+                    let u = sim.unit(h).unwrap();
+                    assert!(u.soldier.grounded);
+                    assert_eq!(u.health.cur, 300.0);
+                    sim.death_regions = vec![Region::sphere(u.soldier.pos, 3.0)];
+                    sim.step(&[PadState::default()]);
+                    assert!(
+                        sim.unit(h).is_none(),
+                        "authored immunity is not a world-death exemption"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn collision_damage_immunity_hash_covers_the_unit_and_its_respawn_spec() {
+    let mut sim = Sim::empty(113);
+    let h = sim.spawn(&UnitSpec::trooper(0, Vec3::ZERO)).unwrap();
+    let ordinary = sim.hash();
+    sim.unit_mut(h).unwrap().consts.collision_damage_immune = true;
+    let active = sim.hash();
+    assert_ne!(active, ordinary);
+    let u = sim.unit_mut(h).unwrap();
+    u.consts.collision_damage_immune = false;
+    u.spec.consts.collision_damage_immune = true;
+    let respawn = sim.hash();
+    assert_ne!(respawn, ordinary);
+    assert_ne!(respawn, active);
+}
+
 /// §9.5 bolt flight: BF1 rifle bolt reaches a 20 m target at t = 0.25 s
 /// (impact processed on tick 8), no drop, ray length 120 m.
 #[test]

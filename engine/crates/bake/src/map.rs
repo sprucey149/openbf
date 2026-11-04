@@ -35,6 +35,7 @@ mod render_offsets;
 mod render_reassembly;
 mod render_recovery;
 mod render_symmetry;
+mod render_textures;
 mod texture_alias;
 
 use content::bake_content;

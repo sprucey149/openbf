@@ -1,4 +1,4 @@
-//! Maintainer-selected Instant Action defaults (2026-10-29).
+//! Maintainer-selected Instant Action defaults (2026-10-29; issue #86 retune 2026-11-03).
 //! Combatants include humans. Mission files retain the original disc values.
 //! Tickets: Normal + Good proxy, seeds 1–3 on both sides; 6–9 minute medians.
 pub use ui::population::Defaults;
@@ -20,24 +20,29 @@ const fn entry(
     )
 }
 pub const TABLE: &[(&str, bool, Defaults)] = &[
-    entry("bf1_bes1", false, [20, 20], [227, 227]),
-    entry("bf1_bes1", true, [20, 20], [200, 200]),
+    // OURS: 13.12 min before; measure: repeat seeds 1–3, both Good-proxy sides after sim changes.
+    entry("bf1_bes1", false, [20, 20], [107, 107]),
+    // OURS: 13.03 min before; measure: repeat seeds 1–3, both Good-proxy sides after sim changes.
+    entry("bf1_bes1", true, [20, 20], [95, 95]),
     entry("bf1_bes2", false, [16, 16], [124, 124]),
     entry("bf1_bes2", true, [16, 16], [142, 142]),
     entry("bf1_end1", false, [24, 24], [258, 258]),
     entry("bf1_geo1", true, [27, 21], [237, 237]),
     entry("bf1_hot1", false, [32, 32], [232, 232]),
     entry("bf1_kam1", true, [16, 16], [156, 172]),
-    entry("bf1_kas1", false, [27, 21], [263, 263]),
+    // OURS: 10.15 min before; measure: repeat seeds 1–3, both Good-proxy sides after sim changes.
+    entry("bf1_kas1", false, [27, 21], [169, 169]),
     entry("bf1_kas1", true, [27, 21], [230, 230]),
     entry("bf1_kas2", false, [31, 25], [250, 250]),
     entry("bf1_kas2", true, [31, 25], [250, 250]),
     entry("bf1_nab1", false, [32, 32], [283, 283]),
     entry("bf1_nab1", true, [32, 32], [281, 281]),
-    entry("bf1_nab2", false, [19, 21], [200, 200]),
+    // OURS: 9.05 min before; measure: repeat seeds 1–3, both Good-proxy sides after sim changes.
+    entry("bf1_nab2", false, [19, 21], [168, 168]),
     entry("bf1_nab2", true, [20, 20], [200, 200]),
     entry("bf1_rhn1", false, [20, 20], [213, 213]),
-    entry("bf1_rhn1", true, [20, 20], [250, 250]),
+    // OURS: 9.04 min before; measure: repeat seeds 1–3, both Good-proxy sides after sim changes.
+    entry("bf1_rhn1", true, [20, 20], [184, 184]),
     entry("bf1_rhn2", false, [16, 16], [200, 200]),
     entry("bf1_rhn2", true, [16, 16], [200, 200]),
     entry("bf1_tat2", false, [16, 16], [128, 128]),
@@ -77,10 +82,12 @@ pub const TABLE: &[(&str, bool, Defaults)] = &[
     entry("bf2_uta1", true, [16, 16], [166, 166]),
     entry("bf2_yav1", false, [20, 20], [182, 182]),
     entry("bf2_yav1", true, [20, 20], [189, 189]),
-    entry("tat1", false, [24, 24], [211, 211]),
+    // OURS: 9.96 min before; measure: repeat seeds 1–3, both Good-proxy sides after sim changes.
+    entry("tat1", false, [24, 24], [138, 138]),
     entry("tat1", true, [24, 24], [208, 208]),
     entry("tat2", false, [16, 16], [150, 150]),
-    entry("tat2", true, [16, 16], [150, 150]),
+    // OURS: 5.96 min before; measure: repeat seeds 1–3, both Good-proxy sides after sim changes.
+    entry("tat2", true, [16, 16], [182, 182]),
 ];
 
 pub fn for_map(map: &str, cw: bool) -> Option<Defaults> {

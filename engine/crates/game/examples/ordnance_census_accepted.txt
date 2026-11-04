@@ -28,6 +28,19 @@ bf2_kam1 S- tur_weap_built_gunturret*  # 2 runs: a turret's top
 bf2_tat3 S- tat3_bldg_barracks*  # 9 runs: the barracks roof's edge is a soldier-only box (no ordnance layer on the disc); the grenade drops past it
 bf1_kas1 S- kas1_prop_bamboo2*  # 1 run: a bamboo prop
 
+# #86 review: built BF2 laser-turret tops became census floors when 7912871d
+# kept the built bodies present. Their soldier-only collision is authored;
+# these are the same accepted turret-top category above, not a solver change.
+# Original PS2 throws from these tops remain unmeasured.
+bf2_cor1 S- tur_bldg_laser*
+bf2_end1 S- tur_bldg_laser*
+bf2_nab2 S- tur_bldg_laser*
+bf2_yav1 S- tur_bldg_laser*
+tat2 S- tur_bldg_laser*
+# One throw off tur_bldg_laser9's top starts inside this invisible soldier-only
+# column. Pin this exact instance; do not accept other invisible columns here.
+tat2 S- com_inv_col_64 com_inv_col_648
+
 # SG: the crossed body has both layers, but its ordnance faces do not reach under that soldier face where the grenade
 # went down: a gap in the authoring, as the census's static gap test counts them.
 bf2_dag1 SG dag1_prop_grandtree_2 dag1_prop_grandtree_19  # 2 runs: the grenade rolls off the root's ordnance face (x -46.00) to where the soldier face over it has none (x -46.06), and lands on the terrain 0.9 m down

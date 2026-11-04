@@ -355,7 +355,7 @@ The KAM1 ramp walk of §2.4 on the landed code: 22 of 24 ramp ticks grounded, 0 
   155769–155866, class+0x7dc / +0x7e8).
   - The threshold = T0 + T1·(up·n) + T2·(fwd·n); the BF1 defaults are (10, 3, 0), FUN_0020d238 121824–121839. So a
     flat landing starts to hurt at 13 m/s, a ~4.7 m drop.
-  - The port instead kills outright at a PROVISIONAL 25 m/s (`sim/state.rs` `LETHAL_LANDING_SPEED`). → card SLAND.
+  - The port uses a PROVISIONAL 25 m/s cut-off (`sim/state.rs` `LETHAL_LANDING_SPEED`) for classes with nonzero collision damage. Authored zero-scale immunity is retained (§8); the positive-scale damage law remains SLAND debt.
 - **Steep faces lift.** 0 ≤ n.y ≤ 0.6 contacts push out along the true normal (§1.3); the port's wall pass pushes
   horizontally only. Noted on SLAND; no card.
 - **BF1 AI half rate.** An unimportant soldier (< 10 m/s, > 45 m from the camera, off screen: FUN_00236508) skips an
@@ -660,3 +660,44 @@ port would need the EE's rounding in the axes) and the PS2's 8-in-18 phase of ru
 - **[H] / open:** posture 2 = prone; BF1 on such a face (code only); why batch c's six run-ups all got the
   full-hold update; whether the PS2's AI has any slope test of its own (unread - its bots walk at the band at
   speed, 30 ascents in 16 min, §6); the arithmetic behind the mid-climb residue's sign.
+
+## 8. Zero collision damage exposed by bot jets (issue #113, 2026-11-03)
+
+**[O] New primary-code reading; no fresh original-game capture.** Both games
+multiply the squared excess contact speed by the class's three-term
+`CollisionScale`, evaluated against the contact normal. A positive result is
+required before calling damage: BF1 `FUN_00202f38:114508–114538`, BF2
+`FUN_0023cfd0:155830–155865`. When all three scale terms are zero, neither a
+flat landing nor an inclined contact can produce collision damage.
+
+The defaults are `(1, 0, 0)`: BF1 `FUN_0020d238:121824–121832`, BF2
+`FUN_00250488:169421–169427`. The soldier property setters read successive
+float components into those existing fields: BF1 `FUN_0020f2e0:122899–122901`,
+BF2 `FUN_00252bb0:171547–171549`. The referenced formats in the owned ELFs are
+three float conversions (BF1 `0x532af8`, BF2 `0x61e8c8`). Thus a partial
+subclass value replaces only supplied terms; earlier components not supplied
+by that override retain their inherited values.
+
+BF1's `imp_inf_dark_trooper` and `imp_inf_dark_troopersnow` author all three
+terms as zero. The PS2 gameplay table and the PC correction table retain these
+values. In the same-input port sweep at `e5dd0e03`, Bespin Cloud City has
+24 fall deaths across seeds 1–8, and the jet census attributes all 24 to jet
+units. The corresponding October source `85dc9fa8`, before bot jets, has none.
+The census-only reruns preserve every original outcome/hash row. This exposes
+an older landing-rule error rather than proving that every new jet death is
+wrong: death-region, kill-floor and lost-unit deaths remain separate causes.
+
+The port now retains the class-chain zero-scale result as
+`SoldierConstants::collision_damage_immune` and checks it before the existing
+lethal-landing shortcut. The active unit and its respawn specification both
+contribute this future-relevant state to the hash; the default format stays
+unchanged. Under-map landings are checked first, and death regions, water,
+blast damage and the kill floor receive no new exemption. This is a bounded
+correction for authored immunity, not the full positive-scale collision law.
+
+Focused controls cover both ground-rule sets, humans and bots, ordinary
+lethal landings, preserved health for immune landings, death regions, active
+and respawn-state hashes, partial/ordered class overrides and owned class
+loads. Original-game landing traces and the nonzero-scale collision-damage
+model remain unchecked; the old 25 m/s policy must not be described as the
+PS2 damage formula.

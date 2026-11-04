@@ -24,11 +24,13 @@ The full text of every decision, with its numbers, is `analysis/plan/FEATURE_SET
 area; changing a decision is the maintainer's call. Citations such as `PLAN §Heroes`, `§Modes & rules` or `§Classic-plus
 assets` mean the section of that name there. The ones most often needed:
 
-- **Same game everywhere.** The PS2 is the gameplay reference. Every build plays the same inside the playable bounds,
+- **Same game everywhere.** openbf's gameplay rules are canonical: they started from the original games and name every
+  deliberate difference. Every build plays the same inside the playable bounds,
   whichever discs or versions went in, so multiplayer stays possible. Other versions change only the size and look of
   textures and assets. Public correction tables of gameplay numbers and names are approved, preferring instructions on
   the player's own files.
-- **Inputs:** one source per game, identified by content. Any PC input needs a PS2 or Xbox BF2 disc too. From the DLC only
+- **Inputs:** one source per game, identified by content. PC BF1 plus PC BF2 can supply both games without a console disc;
+  single-game PC installs remain refused. Existing console combinations stay supported. From the DLC only
   Kit Fisto and Asajj Ventress are taken.
 - **HUD:** BF2's on every map, with the heat ring around the reticle. BF1 maps throw BF1 grenades, with BF2's grenade HUD.
 - **Soldiers and vehicles:** vehicle and unit health are separate. Droidekas sprint only as a ball, on the shared bar. BF1
