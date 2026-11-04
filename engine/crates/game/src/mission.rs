@@ -499,6 +499,10 @@ impl MissionDef {
         [self.teams[0].faction.clone(), self.teams[1].faction.clone()]
     }
 
+    pub fn is_hero_assault(&self) -> bool {
+        self.mode == "eli"
+    }
+
     pub fn tickets(&self) -> [u32; 2] {
         [self.teams[0].tickets, self.teams[1].tickets]
     }
@@ -581,7 +585,7 @@ mod tests {
                 missions.push((path, m));
             }
         }
-        assert_eq!(missions.len(), 33);
+        assert_eq!(missions.len(), 34);
         if missions.iter().all(|(_, m)| m.class_load_order.is_empty()) {
             eprintln!(
                 "SKIP: all BF2 missions predate SIDE load-order metadata; regenerate missions"
@@ -944,7 +948,8 @@ mod tests {
                 "{stem}: era must be cw or gcw"
             );
             assert!(
-                stem.starts_with(&m.map) && stem[m.map.len()..].starts_with("_con"),
+                stem.starts_with(&m.map)
+                    && stem[m.map.len()..].starts_with(&format!("_{}", m.mode)),
                 "{stem}: file name does not match map {:?}/mode {:?}",
                 m.map,
                 m.mode
@@ -985,7 +990,12 @@ mod tests {
             // names none. (That the names are real is covered by the
             // generator's check that every string it emits appears in the
             // script's own PS2 constant table.)
-            if m.source_game == "bf2" {
+            if m.is_hero_assault() {
+                assert!(
+                    m.posts.is_empty(),
+                    "{stem}: an objective with no post roster"
+                );
+            } else if m.source_game == "bf2" {
                 assert!(!m.posts.is_empty(), "{stem}: no command-post roster");
                 for cp in &m.posts {
                     assert!(!cp.is_empty(), "{stem}: empty post name");

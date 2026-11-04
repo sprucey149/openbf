@@ -30,6 +30,7 @@ mod guided_rockets;
 mod gun_smooth;
 mod gunner_snipe;
 mod hero_ai;
+mod hero_assault;
 mod hero_audio;
 mod hero_combo;
 mod hero_vs_turret;

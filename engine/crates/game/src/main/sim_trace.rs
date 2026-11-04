@@ -148,6 +148,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         let walk = super::battle::make_walk(&scene, &setup);
         (

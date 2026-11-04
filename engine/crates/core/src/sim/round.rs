@@ -131,7 +131,8 @@ impl Sim {
     /// from the post (`AICanCaptureCP`, [`crate::cp::CommandPost::ai_no_capture`]).
     pub fn counts_in_cp(&self, ui: usize, ci: usize) -> bool {
         let u = &self.units[ui];
-        u.alive
+        self.deathmatch.is_none()
+            && u.alive
             && u.capture_posts
             && u.mount.is_none()
             && (u.team as usize) < self.battle.teams.len()
@@ -172,6 +173,9 @@ impl Sim {
                     self.events.push(Event::Neutralized { cp: ci as u32, by })
                 }
             }
+        }
+        if self.deathmatch.is_some() {
+            return;
         }
         // BF2 conquest bleed (strict CP-value majority, clamped at alive).
         cp::apply_bleed(&mut self.battle, &self.cps);

@@ -1144,6 +1144,7 @@ impl Sim {
 
         // 6. Command posts → bleed → domination → outcome.
         self.update_cps(dt);
+        self.step_deathmatch();
 
         // 7. Vehicle pads: follow the posts just updated, decay, spawn.
         self.tick_vehicle_pads(dt);

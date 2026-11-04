@@ -84,6 +84,8 @@ pub(super) const BF2_MAPS: [(&str, &[Mode], &[Mode]); 24] = {
     ]
 };
 
+const OPTIONAL_ASSAULT: [&str; 1] = ["cor1"];
+
 /// The BF1 IA maps (§6 "BF1 table"): code, name key, English, has a Clone
 /// Wars mission, has a Galactic Civil War one. Conquest only.
 pub(super) const BF1_MAPS: [(&str, &str, &str, bool, bool); 16] = [
@@ -246,7 +248,7 @@ impl MapEntry {
                         (p[0] == a[0] && p[1] == a[1]) || (p[0] == a[1] && p[1] == a[0])
                     })
             }
-            Side::Mixed(_) => pairs.next().is_some(),
+            Side::Mixed(_) => mode != Mode::Eli && pairs.next().is_some(),
         }
     }
 }
@@ -293,13 +295,12 @@ pub fn catalog(
             .map_or_else(|| code.to_uppercase(), |t| t.trim().to_owned());
         let desc = text(Game::Bf2, &format!("mapname.description.{code}"))
             .map_or_else(|| name.clone(), |t| t.trim_end().to_owned());
-        out.push(entry(
-            Game::Bf2,
-            code,
-            name,
-            desc,
-            [cw.to_vec(), gcw.to_vec()],
-        ));
+        let mut gcw = gcw.to_vec();
+        let key = find(Game::Bf2, code).unwrap_or_else(|| format!("bf2_{code}"));
+        if OPTIONAL_ASSAULT.contains(&code) && !missions(&key, Mode::Eli).is_empty() {
+            gcw.push(Mode::Eli);
+        }
+        out.push(entry(Game::Bf2, code, name, desc, [cw.to_vec(), gcw]));
     }
     for (code, key, english, cw, gcw) in BF1_MAPS {
         let localized = text(Game::Bf1, key);

@@ -201,6 +201,7 @@ pub struct HudModel {
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
+    pub team_points: Option<([u32; 2], u32)>,
     /// Reinforcements lost per second to the post bleed, team 0 / team 1.
     pub bleed: [f32; 2],
     pub hp: f32,
@@ -486,6 +487,17 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     // (`FUN_003b59a0`); the count pulses once per lost reinforcement.
     let own = usize::from(m.player_team.min(1));
     for (slot, team) in [(1, own), (2, 1 - own)] {
+        if let Some((points, limit)) = m.team_points {
+            put(
+                &format!("player1.team{slot}.points"),
+                EventValue::Number(points[team] as f32),
+            );
+            put(
+                &format!("player1.team{slot}.pointsText"),
+                EventValue::Text(format!("{}/{limit}", points[team])),
+            );
+            continue;
+        }
         put(
             &format!("player1.team{slot}.reinforcements"),
             EventValue::Number(m.tickets[team] as f32),
@@ -996,6 +1008,7 @@ mod tests {
 
     fn model() -> HudModel {
         HudModel {
+            team_points: None,
             damage_flash: 0.0,
             gauge: Default::default(),
             leaving: None,
@@ -1329,5 +1342,31 @@ mod jet_tests {
         model.jet = None;
         feed(&mut hud, &model, &|_| false);
         assert_eq!(hud.last("player1.jetFuelFraction"), None);
+    }
+}
+
+#[cfg(test)]
+mod team_points_tests {
+    use super::*;
+    #[test]
+    fn team_points_replace_the_reinforcement_count() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let model = HudModel {
+            player_team: 1,
+            tickets: [999_999; 2],
+            team_points: Some(([3, 7], 180)),
+            ..Default::default()
+        };
+        feed(&mut hud, &model, &|_| false);
+        assert_eq!(
+            hud.last("player1.team1.pointsText"),
+            Some(&EventValue::Text("7/180".to_owned()))
+        );
+        assert_eq!(
+            hud.last("player1.team2.pointsText"),
+            Some(&EventValue::Text("3/180".to_owned()))
+        );
+        assert_eq!(hud.last("player1.team1.reinforcements"), None);
+        assert_eq!(hud.last("player1.team2.bleedRate"), None);
     }
 }

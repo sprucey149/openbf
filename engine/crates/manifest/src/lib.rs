@@ -388,6 +388,8 @@ fn default_game() -> String {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub spawn_only_posts: bool,
     pub map: String,
     /// "bf1" | "bf2" — from the model material record size (BF2 = 25 B),
     /// falling back to "bf2" when per-mode world layers exist. Defaulted to

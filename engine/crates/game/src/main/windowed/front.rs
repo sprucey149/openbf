@@ -1016,6 +1016,7 @@ mod tests {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         let mut app = App::new(
             Default::default(),

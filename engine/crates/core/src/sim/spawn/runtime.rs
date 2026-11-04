@@ -988,7 +988,11 @@ impl Sim {
         if self.classes.get(t).is_none_or(Vec::is_empty) {
             return None;
         }
-        let c = self.ai_class(team);
+        let c = if self.deathmatch.is_some() {
+            self.assault_class(team, None)?
+        } else {
+            self.ai_class(team)
+        };
         let spec = self.classes[t][usize::from(c)].spec(
             team,
             pos,
@@ -1032,6 +1036,17 @@ impl Sim {
         } else {
             None
         };
+        let assault_class = if slot.is_none() && forced.is_none() && self.deathmatch.is_some() {
+            let picked = self
+                .assault_class(team, None)
+                .or_else(|| self.assault_class(team, Some(i)));
+            let Some(class) = picked else {
+                return;
+            };
+            Some(class)
+        } else {
+            None
+        };
         let chosen = slot.and_then(|s| self.spawn_post_choice.get(s).copied().flatten());
         let points = if let (Some(s), Some(chosen)) = (slot, chosen) {
             // The PS2 writes the kept-or-nearest post back to the member.
@@ -1064,7 +1079,7 @@ impl Sim {
         let ai_class = (old.player_slot.is_none()
             && old.controller == Controller::Ai
             && !self.classes[usize::from(old.team.min(1))].is_empty())
-        .then(|| self.ai_class(old.team));
+        .then(|| assault_class.unwrap_or_else(|| self.ai_class(old.team)));
         let base = self.bot_skill(old.team);
         let table = &self.classes[usize::from(old.team.min(1))];
         let spec = if let Some(class) = forced.filter(|c| usize::from(*c) < table.len()) {

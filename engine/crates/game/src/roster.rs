@@ -108,6 +108,7 @@ pub struct ClassRoster {
     pub max: Option<u32>,
     /// The ODF's `PointsToUnlock` (0 = none; `UnitClass::unlock_points`).
     pub unlock_points: u32,
+    pub flee_like_a_hero: bool,
     pub droideka: Option<std::sync::Arc<core::droideka::DroidekaClass>>,
     /// A droideka's shield in the HUD's secondary row: its `HUDTag`, from the
     /// play db, so both games show BF2's `hud_droideka_shield`.
@@ -1156,6 +1157,10 @@ impl ClassRoster {
                         .flatten()
                 })
                 .unwrap_or(0),
+            flee_like_a_hero: db
+                .prop(class, "FleeLikeAHero")
+                .and_then(|value| value.trim().parse::<i32>().ok())
+                .is_some_and(|value| value & 1 != 0),
             droideka_shield: walker_droid
                 .then(|| crate::droideka::shield_weapon(weapon_db, class))
                 .flatten()
@@ -1352,7 +1357,17 @@ impl FactionRoster {
         factions: [&str; 2],
         mission: Option<&MissionDef>,
     ) -> Result<([FactionRoster; 2], Vec<String>)> {
-        let db = load_classdb(classes_dir, game, &factions)?;
+        let mut sides = factions.to_vec();
+        for load in mission
+            .filter(|m| m.is_hero_assault())
+            .into_iter()
+            .flat_map(|m| &m.class_load_order)
+        {
+            if !sides.contains(&load.side.as_str()) {
+                sides.push(&load.side);
+            }
+        }
+        let db = load_classdb(classes_dir, game, &sides)?;
         let mut warnings = Vec::new();
         let mut out = Vec::new();
         for (i, f) in factions.into_iter().enumerate() {

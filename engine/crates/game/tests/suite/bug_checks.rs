@@ -150,6 +150,7 @@ fn bugx_a_stations_do_not_heal_or_resupply_a_corpse() {
 
 fn hud_model(dead: bool) -> ui::hud::HudModel {
     ui::hud::HudModel {
+        team_points: None,
         damage_flash: 0.0,
         team_names: ["one".into(), "two".into()],
         tickets: [250; 2],

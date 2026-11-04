@@ -944,6 +944,9 @@ fn every_mission_mix_resolves_against_its_maps_own_disc() {
         let m = MissionDef::load(path).expect("mission");
         let stem = path.file_stem().unwrap().to_str().unwrap();
         let factions = m.factions();
+        if m.is_hero_assault() {
+            continue;
+        }
         let key = format!("{}:{}+{}", m.source_game, factions[0], factions[1]);
         if !dbs.iter().any(|(k, _)| *k == key) {
             let db = game::roster::load_classdb(

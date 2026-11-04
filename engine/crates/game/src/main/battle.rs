@@ -144,6 +144,15 @@ fn team_templates(
             let mut team = 0usize;
             let mut hero_classes = [None; 2];
             let templates = rosters.map(|mut r| {
+                if let Some(m) = b.mission.as_ref().filter(|m| m.is_hero_assault()) {
+                    game::heroes::prepare_assault(
+                        &mut r,
+                        &b.classes_dir,
+                        m,
+                        team,
+                        b.dlc_heroes,
+                    );
+                }
                 // Heroes Off: no hero class at all (Session Options).
                 if b.heroes.is_some() {
                     hero_classes[team] = game::heroes::append_with(
@@ -307,6 +316,13 @@ pub(super) fn make_walk_with_counts(
     if let Some(m) = &b.mission {
         sim.ai_alive_cap = m.ai_alive_cap;
         m.apply_death_drains(&mut sim.battle);
+        if m.is_hero_assault() {
+            sim.time_limit = None;
+            sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::new(
+                b.score_limit,
+                [m.teams[0].units, m.teams[1].units],
+            ));
+        }
     }
     // --ai-cap wins over the mission, and applies with or without one.
     if let Some(cap) = b.ai_cap {
@@ -556,6 +572,7 @@ pub(super) fn hud_model(
     ui::hud::HudModel {
         team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
+        team_points: walk.sim.team_points(),
         bleed: [b.teams[0].bleed_per_sec, b.teams[1].bleed_per_sec],
         hp,
         hp_max,
@@ -835,6 +852,7 @@ mod tests {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         let mut walk = make_walk(&scene, &setup);
         assert_eq!(walk.vehicle_classes, ["fixture_dish"]);
@@ -894,6 +912,7 @@ mod tests {
             player_team: 1,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         // Resolve missions independently of the bake location.
         setup.mission = Some(
@@ -1026,6 +1045,7 @@ mod tests {
                 player_team: 0,
                 heroes: game::heroes::rules(&session),
                 dlc_heroes: false,
+                score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
             };
             walks.push(make_walk(&scene, &setup));
         }

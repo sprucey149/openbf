@@ -1129,7 +1129,11 @@ impl App {
             ),
             None => println!("mission: none for {name} {}", self.mode),
         }
-        let mission = pick.map(|p| p.mission);
+        let mut mission = pick.map(|p| p.mission);
+        let assault = mission.as_ref().is_some_and(|m| m.is_hero_assault());
+        if let Some(m) = mission.as_mut().filter(|_| assault) {
+            m.ai_alive_cap = self.session.ass_numbots.max(0) as u32;
+        }
         let setup = BattleSetup {
             seed: 42u32.wrapping_add(self.profile.career.rounds),
             // The shell round takes the PROFILE's tier (no CLI flag here);
@@ -1142,12 +1146,20 @@ impl App {
             ai: None,
             // Explicit CLI cap is separate from the percentage setting.
             ai_cap: None,
-            team_size_pct: Some(self.session.con_numbots as u32),
+            team_size_pct: (!assault).then_some(self.session.con_numbots as u32),
             // Calibrated map tickets, scaled by the shell percentage.
             tickets: 250,
             tickets_set: false,
-            ticket_pct: self.session.con_mult.max(10) as u32,
-            time_limit: self.session.con_timer.max(0) as u32,
+            ticket_pct: if assault {
+                100
+            } else {
+                self.session.con_mult.max(10) as u32
+            },
+            time_limit: if assault {
+                0
+            } else {
+                self.session.con_timer.max(0) as u32
+            },
             cheats: core::sim::Cheats::default(),
             teams: Some(teams.clone()),
             classes_dir: self.assets_dir.join("classes"),
@@ -1156,6 +1168,7 @@ impl App {
             player_team,
             heroes: game::heroes::rules(&self.session),
             dlc_heroes: self.session.dlc_heroes,
+            score_limit: self.session.ass_score.max(0) as u32,
         };
         // Release the renderer field borrow while installing the other App resources.
         let mut renderer = self.renderer.take().expect("loaded renderer");
@@ -1383,6 +1396,7 @@ pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()
         player_team: 0,
         heroes: Some(core::sim::heroes::HeroRules::default()),
         dlc_heroes: false,
+        score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
     };
     let autopilot = game::dev::on() && std::env::var("OPENBF_AUTOPILOT").is_ok_and(|v| v == "1");
     let quit_at = quit_at();
@@ -2448,6 +2462,7 @@ mod tests {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         }
     }
 

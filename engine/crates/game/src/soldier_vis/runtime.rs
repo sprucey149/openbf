@@ -622,7 +622,7 @@ impl SoldierVisuals {
     }
 
     /// The asset a unit draws with.
-    pub(super) fn asset_for(&self, team: u8, class: u8) -> Option<&SoldierAsset> {
+    pub fn asset_for(&self, team: u8, class: u8) -> Option<&SoldierAsset> {
         self.assets.get(self.asset_index(team, class)?)
     }
 
@@ -969,7 +969,11 @@ impl SoldierVisuals {
             max_speed: u.consts.max_speed,
             root_scale: anim.map_or(1.0, |a| a.root_scale),
             dead: !u.alive,
-            hero_dead: walk.sim.hero_class(u.team) == Some(u.spec.class),
+            hero_dead: walk.sim.hero_class(u.team) == Some(u.spec.class)
+                || walk
+                    .team_template(u.team)
+                    .class(u.spec.class)
+                    .flee_like_a_hero,
             hard_lock: s.look_frozen(),
             set,
             fired: drop_shot

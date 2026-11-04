@@ -38,7 +38,7 @@ pub(in super::super) fn retarget(
             return;
         }
     }
-    if u.team >= 2 {
+    if u.team >= 2 || sim.deathmatch.is_some() {
         // PROVISIONAL, replace: trace the PS2 native Deathmatch and Conquest
         // goal orders. The main-army commander owns neither team's members.
         st.want_stance = 0;

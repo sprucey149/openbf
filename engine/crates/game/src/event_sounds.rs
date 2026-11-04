@@ -656,7 +656,7 @@ pub fn hero_sample_asks(walk: &WalkSim) -> Vec<(core::unit::UnitHandle, String, 
             index: i as u32,
             gen: u.gen,
         };
-        if walk.sim.hero_class(u.team) != Some(u.spec.class) {
+        if walk.sim.deathmatch.is_none() && walk.sim.hero_class(u.team) != Some(u.spec.class) {
             continue;
         }
         let class = walk.team_template(u.team).class(u.spec.class);

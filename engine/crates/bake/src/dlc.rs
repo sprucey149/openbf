@@ -48,8 +48,8 @@ fn scalar<'a>(classes: &'a [BakedClass], name: &str, key: &str) -> Option<&'a st
 fn hero_classes(classes: &[BakedClass]) -> Result<Vec<BakedClass>> {
     for (hero, _) in HEROES {
         let rows = chain(classes, hero);
-        if !rows.first().is_some_and(|c| c.kind == "entc")
-            || !rows.last().is_some_and(|c| c.base == "soldier")
+        if rows.first().is_none_or(|c| c.kind != "entc")
+            || rows.last().is_none_or(|c| c.base != "soldier")
         {
             bail!("DLC must contain soldier class {hero}");
         }

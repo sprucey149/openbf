@@ -42,6 +42,7 @@ mod burn;
 mod cloaks;
 mod combat;
 mod damage_regions;
+pub mod deathmatch;
 mod doors;
 mod droid_death;
 mod droidekas;

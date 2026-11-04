@@ -51,6 +51,9 @@ windowed renderer cannot read its frame back, so the picture is the maintainer's
 - **When the maintainer reports damage or firing that feels wrong** ("it only took half his health", "I fired two at once"): read
   the event rows (`--events`). Since schema 8 they carry each of his shots (`#n fired <weapon>`) and every hit he deals
   or takes: the damage, the victim's health after it, and direct (with the round's flight time) or blast.
+- **A timed battle with no renderer:** `game --map assets_baked/tat2 --mode eli --headless --seconds 60` steps the mission
+  `missions/<map>_<mode>.ron` for that long, prints points, alive counts and classes every 10 s, and writes
+  `artifacts/playtest/headless/<map>_<mode>_<seed>.json`.
 - **Use it yourself** when chasing a bot or sim bug: a headless run writes the same file — `BLACKBOX_AT=<tick>` or
   `BLACKBOX_ON=lost|recycle|stuck[:<ticks>]` on `round_to_outcome` writes
   `engine/artifacts/playtest/headless/<map>_s<seed>.json` (`BLACKBOX_DIR` moves it; never the maintainer's own `last.json`).

@@ -360,6 +360,7 @@ pub fn authored_mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
         // Space Assault's layer, as the six scripts and worlds spell it: `spa6_obj_hangar`
         // with `spa6_obj_spawn`, `spa3_swing_obj`, `spa8_ass_spawn`, `spa1_swingassault`.
         "ass" => vec!["obj", "obj_spawn", "ass_spawn", "swing_obj", "swingassault"],
+        "eli" => vec!["tdm"],
         other => vec![other],
     };
     let map = m.map.clone();
@@ -411,6 +412,7 @@ impl Scene {
     /// conquest posts on 1 of 16 BF2 maps. BF1 maps have no layers
     /// (everything is in the base world). Returns the layer name.
     pub fn apply_mode_layer(&mut self, mode: &str) -> Option<String> {
+        self.manifest.spawn_only_posts = mode == "eli";
         let idx = mode_layer_index(&self.manifest, mode)?;
         let layer = self.manifest.layers.remove(idx);
         self.manifest.regions.extend(layer.regions);
