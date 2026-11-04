@@ -203,6 +203,9 @@ pub struct Vehicle {
     /// claims it again until it is [`STUCK_MOVED`] from there (ours). Hashed
     /// only when set.
     pub stuck_at: Option<Vec3>,
+    /// Qualifying walker/hover contact hold deadline (fixed simulation ticks).
+    /// Zero means no active hold; only contact priority can start it.
+    pub yield_until: u64,
     /// Card TURR: a building turret's last hit by a unit, and its tick (a
     /// gunner hit from outside every arc gets out, `ai::man`). Written for
     /// [`VehicleKind::Turret`] only; hashed only when set.
@@ -304,6 +307,10 @@ impl Vehicle {
             for v in [p.x, p.y, p.z] {
                 eat(&v.to_bits().to_le_bytes());
             }
+        }
+        if self.yield_until != 0 {
+            eat(&[0x5e]);
+            eat(&self.yield_until.to_le_bytes());
         }
         if let Some((u, t)) = self.last_hit {
             eat(&[0x5b]);
@@ -455,6 +462,7 @@ impl VehicleSpec {
             health: Health::new(self.max_health, self.health_type),
             guns: Vec::new(),
             stuck_at: None,
+            yield_until: 0,
             last_hit: None,
             instance: None,
             aim_sphere: None,

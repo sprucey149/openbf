@@ -27,10 +27,11 @@
 //! walks; it crabs along ~5° off its goal with the throttle toggling. That
 //! is the PS2's own behaviour (live: median 5.31°), kept.
 //!
-//! OURS, PROVISIONAL: the goal is the route's next node (the PS2 aims 20.2 m
-//! ahead along the leg, §6 — the port's leg does not keep its start, as for
-//! the hover); a node is reached at `ARRIVE_MIN_RADIUS` (the PS2's 1.0 m, or
-//! its plane passed); the dismount at the post or the drop hub
+//! The route goal projects 20.2 m ahead along the current segment (§6).
+//! `Route::from` keeps and hashes its start, including passed detour corners.
+//! OURS, PROVISIONAL; measure: PS2 node arrival and post/drop-hub exit traces.
+//! A node is reached at `ARRIVE_MIN_RADIUS` (the PS2's
+//! 1.0 m, or its plane passed); the dismount at the post or the drop hub
 //! (`route::post_hub`) — [`ARRIVE`] plus the hull's radius short of either —
 //! when stuck or routeless, and the held throttle for a
 //! gunner walking up, are `ride`'s — but an ARMED walker's pilot that
@@ -43,7 +44,7 @@
 //! not transcribed); with no goal the throttle is 0 (the PS2 leaves the old
 //! value, and A8 flips the stick's sign each tick — seen only on the tick an
 //! AI attaches). Not built: the boost (speed mode 3's senders are [H], §8),
-//! the 7.5 s yield (the port has no walker-vehicle contact), the 30 ticks
+//! the 30 ticks
 //! a rider stands after boarding (§10).
 
 use super::gunner::Look;
@@ -62,6 +63,11 @@ use glam::Vec3;
 /// FUN_002a63e0 for every kind but a soldier, droid or hover: the arrival
 /// radius at the goal (0x2a63e0-0x2a6484).
 pub const ARRIVE: f32 = 4.0;
+/// BF2 FUN_002f1d80:281250; BF1 FUN_0026aba8:189731.
+const ROUTE_LOOKAHEAD: f32 = 20.0;
+/// The segment helper adds its shared 0.2 m padding to the walker's 20 m
+/// lead. Traffic scans/bypass directions use the same effective reach.
+pub(crate) const ROUTE_REACH: f32 = ROUTE_LOOKAHEAD + super::hover_drive::LOOKAHEAD;
 /// A8's test: the strafe branch is taken inside 30° (0x3f5db3d7).
 pub const COS_STRAFE: f32 = 0.866_025_4;
 /// B9: a walker outside [`ARRIVE`] walks only inside 5° — FUN_00539ff8(
@@ -78,6 +84,16 @@ pub const COMMAND_ENDGAME: usize = 6;
 const EPS: f32 = 1.0e-4;
 /// §5: the aim point's reach along the travel or the body's forward.
 const AIM_REACH: f32 = 30.0;
+
+/// Shared command-pilot exit/boarding context; keep the claim policy from
+/// reopening a seat the same last crew just left.
+pub(crate) fn command_endgame(sim: &Sim, team: u8) -> bool {
+    sim.battle
+        .teams
+        .iter()
+        .any(|t| t.tickets() <= super::HOLD_ENDGAME)
+        || sim.alive_units().filter(|(_, u)| u.team == team).count() <= COMMAND_ENDGAME
+}
 
 /// What the steering reads of the class (K+0x748, K+0x75c, K+0xe18 bit 0).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -233,6 +249,38 @@ pub(super) fn drive(
         return (pad, nt);
     };
     let pos = v.pos;
+    // BF2 FUN_00262248:181517-181543 / BF1 FUN_0021c180:132130-132145.
+    // Keep the route and both progress clocks paused while contact yield owns
+    // the movement goal. Aiming continues through the ordinary gunner path.
+    if sim.tick < v.yield_until {
+        let seen = st
+            .target
+            .and_then(|h| perception::contact_of(st, h))
+            .filter(|c| c.seen_now)
+            .and_then(|c| perception::foe_motion(sim, c.handle))
+            .map(|(p, _)| p);
+        let body = Body {
+            pos,
+            up: v.rot * Vec3::Y,
+            fwd: v.rot * Vec3::Z,
+        };
+        let (p2, p3) = sticks(crate::TICK_DT, &Class::of(wp), &body, Some(pos), true, seen);
+        st.ride.get_or_insert_default().sticks = Some([p2, p3]);
+        st.steer = SteerPick::Idle;
+        nt.stuck_run = st.route.map_or(0, |r| r.stuck_run);
+        super::gunner::aim(
+            sim,
+            me,
+            st,
+            &mut pad,
+            Look::Walker {
+                yaw_rate: wp.max_yaw_speed,
+                pitch_rate: wp.max_pitch_speed,
+            },
+            None,
+        );
+        return (pad, nt);
+    }
     advance_route(sim, me, st, pos, ARRIVE_MIN_RADIUS, &mut nt);
 
     let post = st.target_cp.and_then(|i| sim.cps.get(i as usize));
@@ -251,7 +299,8 @@ pub(super) fn drive(
     // stuck bail below). The PS2's tauntaun rides end 4.5-41 m from the
     // post, 282-711 m a ride (§13); the drop hub is 62-86 m from it. OURS,
     // PROVISIONAL.
-    let mut dropped = super::ride::at_drop(st, post, pos, reach);
+    let mut dropped =
+        st.route.is_none_or(|r| r.corner().is_none()) && super::ride::at_drop(st, post, pos, reach);
     if let (true, Some(mut r), Some(cp)) = (dropped && sim.seat_look(me).is_none(), st.route, post)
     {
         let to = glam::Vec2::new(cp.def.pos.x, cp.def.pos.z);
@@ -263,12 +312,19 @@ pub(super) fn drive(
         }
     }
     let goal = match (st.route, post) {
-        (Some(r), _) => Some(sub_point(&r, pos)),
+        (Some(r), _) => Some(super::hover_drive::look_ahead(
+            Vec3::new(r.from.x, pos.y, r.from.y),
+            sub_point(&r, pos),
+            pos,
+            ROUTE_LOOKAHEAD,
+        )),
         (None, Some(cp)) => Some(cp.def.pos),
         (None, None) => None,
     };
     // (From the hop to the post's hub on: that hub is often at the post.)
-    let final_hop = st.route.is_none_or(|r| r.next_hub == r.dest_hub);
+    let final_hop = st
+        .route
+        .is_none_or(|r| r.next_hub == r.dest_hub && r.corner().is_none());
     let reached_post = post.is_some_and(|cp| {
         final_hop && (cp.def.capture.contains(pos) || nav::xz_dist(pos, cp.def.pos) <= reach)
     });
@@ -301,18 +357,7 @@ pub(super) fn drive(
     // walk from a drop hub to its Attack post or hunted enemy. A retained
     // post order must not exempt it from the endgame escape.
     // measure: PS2 command-walker crew orders at ticket/last-unit endgames.
-    let team = sim.unit(me).map(|u| u.team);
-    let endgame = sim
-        .battle
-        .teams
-        .iter()
-        .any(|t| t.tickets() <= super::HOLD_ENDGAME)
-        || sim
-            .units
-            .iter()
-            .filter(|o| o.alive && Some(o.team) == team)
-            .count()
-            <= COMMAND_ENDGAME;
+    let endgame = sim.unit(me).is_some_and(|u| command_endgame(sim, u.team));
     let command_walker = super::ride::command(sim, m.vehicle);
     let command = command_walker && !endgame;
     let stays = command || (!command_walker && seen.is_some() && sim.seat_look(me).is_some());
@@ -370,6 +415,7 @@ pub(super) fn drive(
 
     super::ride::set_out(sim, m, st);
 
+    let gp = sim.ground_traffic_goal(m.vehicle, gp);
     let mut to = Vec3::new(gp.x - pos.x, 0.0, gp.z - pos.z);
     // The contact side-step offsets the target as it does on foot.
     if let Some(r) = st.route.filter(|r| r.sidestep.abs() > 1) {

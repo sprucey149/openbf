@@ -119,6 +119,8 @@ pub struct Route {
     /// does `route::leg_point` until a detour corner is behind the unit:
     /// from there its line starts at that corner (the PS2's rule, card
     /// MOUTH: `route::seg_from`).
+    // Walkers retain the current segment start here as each corner passes;
+    // other movers retain the leg start. Both use the existing hash below.
     pub from: Vec2,
     /// XZ distance to `waypoint` when the current progress window opened.
     pub ref_dist: f32,
@@ -770,6 +772,10 @@ pub struct RideState {
     pub use_req: bool,
     /// No new claim before this tick (after a dismount or a failed entry).
     pub block_until: u64,
+    /// OURS: this crew already left a command walker during the endgame.
+    /// Autonomous command claims stay closed until the team recovers; explicit
+    /// orders retain precedence. measure: PS2 last-crew reboarding decisions.
+    pub command_dismounted: bool,
     /// GETOUT: autonomous ground/turret search only; explicit orders bypass it.
     pub own_search_until: u64,
     /// Card WAI: at a walker's pilot seat, this tick's sticks (throttle p2,
@@ -1446,6 +1452,9 @@ impl RideState {
     fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         // Tag 2: `CmdState`'s stream starts with 1, so the two stay apart.
         eat(&[2, u8::from(self.use_req)]);
+        if self.command_dismounted {
+            eat(&[21]);
+        }
         if let Some(draw) = self.bail_draw {
             eat(&[11, draw, u8::from(self.bail_seen)]);
         }

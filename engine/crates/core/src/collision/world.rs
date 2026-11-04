@@ -338,10 +338,9 @@ impl BodyGrid {
 /// PROVISIONAL (ours) in who passes what: soldiers' queries, bolts and lines
 /// of sight see every hull; a ray from a rider, or at a vehicle or its rider,
 /// skips that vehicle's own ([`HullFilter::Except`]) — its eye and its
-/// target's centre are inside the hull; the vehicles' own contacts see none
-/// ([`HullFilter::Static`]) — the PS2 pairs vehicles with each other
-/// (analysis/re-collision-layers.md §3, "pairs vs 1|4"), which the port does
-/// not model yet.
+/// target's centre are inside the hull. Building/terrain contacts see only
+/// [`HullFilter::Static`]; walker/hover traffic separately sweeps live hulls
+/// through `traffic` using the named subset approximation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HullFilter {
     /// Every body, every hull.

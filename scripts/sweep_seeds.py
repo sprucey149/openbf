@@ -13,7 +13,7 @@ Each seed keeps its raw output: `sweep_s<seed>.txt` (stdout — byte-identical t
 (stderr, with `STUCK_CENSUS=1` and `SWEEP_DEATHS=1`, which only read the sim). Then `seeds.md`:
 
   per map   finish count n/N, the winner split (team 0 / team 1), the median finishing tick, stuck_max min / median / max
-            over the seeds, the no-progress units alive at the end (the census's "on one leg" count — what the
+            over the seeds, the no-progress units alive at the end (the census's ground-leg / stationary-flyer count — what the
             stuck_max footer misses; summed over seeds), and the deaths summed over seeds: kills vs the world (falls,
             death regions, vehicles, blasts, the kill floor, landings under the map, lost bots, stalled bots,
             confirmed Respawn and hero time exhaustion without a credited attacker) and the
@@ -524,7 +524,7 @@ def main():
     L += ["", "Deaths are summed over the seeds and both teams: kills = `Event::Kill`, world = `Event::EnvDeath` "
           "(region / fall / veh = a destroyed vehicle's rider / blast = an attackerless blast / stalled = recycled / "
           "suicide = confirmed Respawn / hero_exhausted = hero time drain with no credited attacker). "
-          "noprog = alive units on one leg >= NO_PROGRESS_TICKS at the round's end, summed over the seeds; recycled = "
+          "noprog = alive units on one leg or with stationary flight intent >= NO_PROGRESS_TICKS at the round's end, summed over the seeds; recycled = "
           "bots the last resort gave up, summed over the seeds."]
     L += ["", "## Recycles", ""] + recycle_section(stats)
     L += ["", "## Walking in place, off graph, sliding (shares of alive unit-seconds, over the seeds)", ""] + shares_section(stats)

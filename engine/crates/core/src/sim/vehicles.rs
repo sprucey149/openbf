@@ -362,6 +362,16 @@ impl Sim {
     /// vacated, leaves the seat) and on a dead vehicle (its riders are
     /// released). The last rider out leaves an ordinary class neutral (§7.1).
     pub fn unseat_unit(&mut self, u: UnitHandle) {
+        let endgame_command = self.unit(u).is_some_and(|unit| {
+            unit.controller == Controller::Ai
+                && unit
+                    .mount
+                    .and_then(|m| self.vehicle(m.vehicle))
+                    .and_then(|v| self.walker_params.get(v.class as usize))
+                    .and_then(|p| p.as_ref())
+                    .is_some_and(|p| !p.spawn_points.is_empty())
+                && crate::ai::walker_drive::command_endgame(self, unit.team)
+        });
         let Some(unit) = self
             .units
             .get_mut(u.index as usize)
@@ -395,6 +405,9 @@ impl Sim {
             unit.order = None;
         }
         unit.ai.charge_until = 0;
+        if endgame_command {
+            unit.ai.ride.get_or_insert_default().command_dismounted = true;
+        }
         if let Some(r) = unit.ai.ride.as_mut() {
             r.pickup = None;
             r.board = None;
@@ -676,6 +689,7 @@ impl Sim {
             let impacts = hover::step(&mut self.vehicles[i], p, &world, dt);
             let (threshold, scale) = (p.collision_threshold, p.collision_scale);
             self.keep_out(i, from);
+            self.ground_traffic(i, from);
             if impacts.is_empty() {
                 continue;
             }
@@ -694,6 +708,9 @@ impl Sim {
     /// heightfield and the world.
     pub(crate) fn tick_walkers(&mut self, dt: f32) {
         for i in 0..self.vehicles.len() {
+            if self.vehicles[i].yield_until != 0 && self.tick >= self.vehicles[i].yield_until {
+                self.vehicles[i].yield_until = 0;
+            }
             let v = &self.vehicles[i];
             if !v.alive {
                 continue;
@@ -712,6 +729,7 @@ impl Sim {
             let from = v.pos;
             walker::step(&mut self.vehicles[i], p, &world, dt);
             self.keep_out(i, from);
+            self.ground_traffic(i, from);
             // Card WAI's sweep counter (OUTPUT only).
             let v = &self.vehicles[i];
             let bot = v

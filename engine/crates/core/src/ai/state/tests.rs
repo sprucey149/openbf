@@ -376,3 +376,18 @@ fn walker_progress_clock_and_each_xz_component_are_hashed() {
         );
     }
 }
+
+#[test]
+fn endgame_command_departure_changes_the_hashed_future() {
+    let bytes = |r: &RideState| {
+        let mut out = vec![];
+        r.hash_into(&mut |b| out.extend_from_slice(b));
+        out
+    };
+    let ordinary = RideState::default();
+    let departed = RideState {
+        command_dismounted: true,
+        ..ordinary
+    };
+    assert_ne!(bytes(&ordinary), bytes(&departed));
+}

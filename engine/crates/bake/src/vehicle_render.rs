@@ -2,7 +2,7 @@
 //! The TIE nose fans move together. The Hailfire's quads take the PS2's
 //! diagonals and its crest loses two extra apexes; its −x missile pack turns
 //! back into the mirror of its +x pack, both packs sit on the PS2 hull's rack
-//! boxes, and each rack gets a casing: the pack's own minimum-area box,
+//! boxes, and each rack gets a donor-derived casing with a fitted perimeter,
 //! keeping the donor's textured end caps. Collision, skeletons, hardpoints,
 //! headers and PS2 output never change.
 
@@ -33,6 +33,24 @@ struct Donor {
 }
 
 const HAILFIRE: &[Donor] = &[
+    // BF2 PC: the shared donor crest uses the same triangle locators as Xbox.
+    Donor {
+        hash: "0cb063cdeece779228cbe2e3dc6b245f0fa7ce34c05db0c40a31a59a5ba18229",
+        quads: &[
+            (504, 505),
+            (512, 513),
+            (532, 533),
+            (576, 577),
+            (667, 668),
+            (687, 688),
+            (689, 690),
+            (691, 692),
+            (808, 809),
+            (952, 953),
+            (966, 967),
+        ],
+        apexes: &[(564, 2, 1), (521, 2, 1)],
+    },
     // BF1 PC, 6 segments.
     Donor {
         hash: "4bbf5501608e347bf8e9b11629f1e99d430e77df1fdbe7369071fcaa2a2f5fea",
@@ -111,10 +129,11 @@ const HAILFIRE: &[Donor] = &[
 const PACK_TURN_DEG: f32 = -5.625;
 
 /// Then each pack (tubes and casing) moves onto its PS2 hull box, −x first:
-/// both sit 16–17 mm high, and the −x one 10 mm out, in all three donors
+/// both sit 16–17 mm high, and the −x one 10 mm out, in the measured donors
 /// (the mean of the four corner offsets between the turned pack's
 /// minimum-area box and the hull's box, the same to 0.1 mm per donor). The
-/// +x hull box is 17 mm wider than its pack; that ±9 mm stays.
+/// +x hull box is 17 mm wider than its pack; the fingerprinted perimeter
+/// offsets resolve that width and the remaining rack-mount gap.
 const PACK_SHIFT: [[f32; 2]; 2] = [[-0.0103, -0.0160], [0.0020, -0.0171]];
 
 #[derive(Clone, Copy)]
@@ -173,6 +192,118 @@ impl Instructions {
         *model = result;
         Ok(())
     }
+}
+
+/// Re-triangulate only the casing caps after the fitted perimeter has moved.
+/// A fan from one corner can cross a scalloped edge; ears derived from the
+/// player's corrected ring keep every cap triangle inside that ring.
+impl Instructions {
+    pub(crate) fn finish(&self, model: &mut Model) -> Result<()> {
+        if !matches!(
+            self.0.get(&model.name.to_ascii_lowercase()),
+            Some(Recipe::Hailfire(_))
+        ) {
+            return Ok(());
+        }
+        for segment in model.segments.iter_mut().rev().take(2) {
+            let n = 64;
+            ensure!(
+                segment.triangles.len() == 4 * n - 4,
+                "changed fitted Hailfire casing"
+            );
+            let side_start = segment.triangles.len() - 2 * n;
+            let sides = segment.triangles[side_start..].to_vec();
+            let ring: Vec<Vec2> = (0..n)
+                .map(|i| Vec3::from(segment.positions[sides[2 * i][0] as usize]).truncate())
+                .collect();
+            let ears = cap_ears(&ring)?;
+            let cap_uv = segment.uvs[segment.triangles[0][0] as usize];
+            let mut caps = Vec::new();
+            for front in [false, true] {
+                let mut indices = Vec::new();
+                for i in 0..n {
+                    let side_index = if front {
+                        sides[2 * i + 1][2]
+                    } else {
+                        sides[2 * i][0]
+                    };
+                    let source = side_index as usize;
+                    let index = segment.positions.len() as u32;
+                    segment.positions.push(segment.positions[source]);
+                    segment.normals.push([0., 0., if front { 1. } else { -1. }]);
+                    // Both fills use the donor casing's existing brown panel.
+                    segment.uvs.push(cap_uv);
+                    indices.push(index);
+                }
+                for &[a, b, c] in &ears {
+                    caps.push(if front {
+                        [indices[a], indices[b], indices[c]]
+                    } else {
+                        [indices[a], indices[c], indices[b]]
+                    });
+                }
+            }
+            caps.extend(sides);
+            segment.vertex_count = segment.positions.len() as u32;
+            segment.triangles = caps;
+            segment.index_count = (segment.triangles.len() * 3) as u32;
+        }
+        Ok(())
+    }
+}
+
+fn cap_ears(ring: &[Vec2]) -> Result<Vec<[usize; 3]>> {
+    let cross = |a: Vec2, b: Vec2, c: Vec2| (b - a).perp_dot(c - a);
+    let area: f32 = ring
+        .iter()
+        .zip(ring.iter().cycle().skip(1))
+        .map(|(a, b)| a.perp_dot(*b))
+        .sum();
+    ensure!(
+        ring.len() >= 3 && area.is_finite() && area > 0.,
+        "fitted casing ring must be CCW"
+    );
+    let mut remaining: Vec<usize> = (0..ring.len()).collect();
+    let mut triangles = Vec::new();
+    while remaining.len() > 3 {
+        let n = remaining.len();
+        let ear = (0..n)
+            .find(|&i| {
+                let [a, b, c] = [
+                    remaining[(i + n - 1) % n],
+                    remaining[i],
+                    remaining[(i + 1) % n],
+                ];
+                let turn = cross(ring[a], ring[b], ring[c]);
+                // Collinear interpolants close up without changing the polygon.
+                if turn.abs() < 1e-7 {
+                    return true;
+                }
+                if turn < 0. {
+                    return false;
+                }
+                !remaining.iter().any(|&j| {
+                    j != a
+                        && j != b
+                        && j != c
+                        && cross(ring[a], ring[b], ring[j]) > -1e-8
+                        && cross(ring[b], ring[c], ring[j]) > -1e-8
+                        && cross(ring[c], ring[a], ring[j]) > -1e-8
+                })
+            })
+            .ok_or_else(|| anyhow::anyhow!("fitted Hailfire casing is not a simple CCW ring"))?;
+        let [a, b, c] = [
+            remaining[(ear + n - 1) % n],
+            remaining[ear],
+            remaining[(ear + 1) % n],
+        ];
+        if cross(ring[a], ring[b], ring[c]).abs() >= 1e-7 {
+            triangles.push([a, b, c]);
+        }
+        remaining.remove(ear);
+    }
+    triangles.push([remaining[0], remaining[1], remaining[2]]);
+    Ok(triangles)
 }
 
 /// The triangle-index locator shared by the index-only instructions.
@@ -600,7 +731,16 @@ fn racks(model: &mut Model) -> Result<()> {
         // −x against the pack's own 1.24 × 1.18 m), so the casing is the pack's
         // minimum-area box rather than its convex envelope, whose cut corners
         // left the hull's corners 6 cm bare.
-        let ring = min_box(&envelope);
+        // A fitted perimeter needs intermediate vertices at the scalloped
+        // PS2 shell's changes of direction. Subdivide the donor's own box;
+        // the fingerprinted offset table moves these existing interpolants.
+        let corners = min_box(&envelope);
+        let ring: Vec<[f32; 2]> = (0..4)
+            .flat_map(|i| {
+                let (a, b) = (Vec2::from(corners[i]), Vec2::from(corners[(i + 1) % 4]));
+                (0..16).map(move |j| a.lerp(b, j as f32 / 16.).to_array())
+            })
+            .collect();
         // Recess the fill behind the donor end caps by 2 mm to avoid z-fights.
         let back = points.iter().map(|p| p[2]).fold(f32::INFINITY, f32::min) + 0.002;
         let front = points
@@ -628,12 +768,19 @@ fn racks(model: &mut Model) -> Result<()> {
         let mut s = empty(&original.segments[group[0].segment]);
         for face in faces {
             let triangle = face.map(|i| v[i]);
-            let normal = (triangle[1] - triangle[0])
-                .cross(triangle[2] - triangle[0])
-                .normalize_or_zero();
-            if normal == Vec3::ZERO {
-                continue;
-            }
+            // Keep every temporary cap fan triangle, including collinear
+            // interpolants. Dropping only exactly-zero cross products made
+            // the fingerprinted stream shape depend on float rounding. The
+            // fitted cap pass replaces all these temporary fans later.
+            let cap = face.iter().all(|&i| i < n) || face.iter().all(|&i| i >= n);
+            let normal = if cap {
+                Vec3::Z * if face[0] < n { -1. } else { 1. }
+            } else {
+                (triangle[1] - triangle[0])
+                    .cross(triangle[2] - triangle[0])
+                    .normalize_or_zero()
+            };
+            ensure!(normal != Vec3::ZERO, "collapsed Hailfire casing side");
             let first = s.positions.len() as u32;
             for p in triangle {
                 s.positions.push(p.to_array());
@@ -884,6 +1031,86 @@ mod tests {
         .collect();
         let b = min_box(&bar);
         assert!((area(&b) - 4.).abs() < 1e-3, "{b:?}");
+    }
+
+    #[test]
+    fn scalloped_caps_keep_the_notch_outside_and_preserve_winding() {
+        let ring: Vec<Vec2> = [[0., 0.], [2., 0.], [2., 2.], [1., 1.], [0., 2.]]
+            .into_iter()
+            .map(Vec2::from)
+            .collect();
+        let triangles = cap_ears(&ring).unwrap();
+        let area: f32 = triangles
+            .iter()
+            .map(|t| {
+                let [a, b, c] = t.map(|i| ring[i]);
+                let twice = (b - a).perp_dot(c - a);
+                assert!(twice > 0.);
+                twice * 0.5
+            })
+            .sum();
+        assert!((area - 3.).abs() < 1e-6);
+        let notch = Vec2::new(1., 1.75);
+        assert!(triangles.iter().all(|t| {
+            let [a, b, c] = t.map(|i| ring[i]);
+            (b - a).perp_dot(notch - a) < 0.
+                || (c - b).perp_dot(notch - b) < 0.
+                || (a - c).perp_dot(notch - c) < 0.
+        }));
+        let reversed: Vec<_> = ring.into_iter().rev().collect();
+        assert!(cap_ears(&reversed).is_err());
+    }
+
+    #[test]
+    fn fitted_caps_keep_the_panel_uv_and_do_not_rewrite_side_vertices() {
+        let mut model = bomber(0);
+        model.name = "cis_tread_hailfire".into();
+        let mut segment = empty(&model.segments[1]);
+        let corners = [Vec2::ZERO, Vec2::X * 2., Vec2::splat(2.), Vec2::Y * 2.];
+        let n = 64;
+        for z in [-1., 1.] {
+            for i in 0..n {
+                let p = corners[i / 16].lerp(corners[(i / 16 + 1) % 4], (i % 16) as f32 / 16.);
+                segment.positions.push([p.x, p.y, z]);
+                segment.normals.push([0., 0., z]);
+                segment
+                    .uvs
+                    .push(if i == 0 { [0.8, 0.05] } else { [0.6, 0.03] });
+            }
+        }
+        for i in 1..n - 1 {
+            segment.triangles.push([0, (i + 1) as u32, i as u32]);
+            segment
+                .triangles
+                .push([n as u32, (n + i) as u32, (n + i + 1) as u32]);
+        }
+        for i in 0..n {
+            let j = (i + 1) % n;
+            segment.triangles.push([i as u32, j as u32, (n + j) as u32]);
+            segment
+                .triangles
+                .push([i as u32, (n + j) as u32, (n + i) as u32]);
+        }
+        let old = segment.clone();
+        model.segments = vec![segment.clone(), segment];
+        let instructions = Instructions(HashMap::from([(
+            model.name.clone(),
+            Recipe::Hailfire(&HAILFIRE[0]),
+        )]));
+        instructions.finish(&mut model).unwrap();
+        for segment in &model.segments {
+            assert_eq!(&segment.positions[..2 * n], old.positions.as_slice());
+            assert_eq!(&segment.uvs[..2 * n], old.uvs.as_slice());
+            assert!(segment.uvs[2 * n..].iter().all(|uv| *uv == [0.8, 0.05]));
+            assert_eq!(segment.positions.len(), 4 * n);
+            assert_eq!(segment.vertex_count as usize, segment.positions.len());
+            assert_eq!(segment.index_count as usize, 3 * segment.triangles.len());
+            // The side strip's original vertex indices and their UVs survive.
+            assert_eq!(
+                &segment.triangles[segment.triangles.len() - 2 * n..],
+                &old.triangles[old.triangles.len() - 2 * n..]
+            );
+        }
     }
 
     /// Two 4 × 4 tube grids for [`turn_pack`]: the +x pack at `angle`, and

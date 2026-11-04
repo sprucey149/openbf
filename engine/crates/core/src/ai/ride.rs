@@ -213,7 +213,12 @@ fn reach_test(sim: &Sim, u: &Unit, vh: VehicleHandle) -> Option<(f32, f32)> {
 /// [`BOARD_TRIP`] (or the vehicle is a [`command`] walker) and no other bot
 /// has claimed that vehicle.
 pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
-    let r = st.ride.unwrap_or_default();
+    let mut r = st.ride.unwrap_or_default();
+    let endgame = r.command_dismounted && super::walker_drive::command_endgame(sim, u.team);
+    if r.command_dismounted && !endgame {
+        r.command_dismounted = false;
+        st.ride = Some(r);
+    }
     if r.board.is_some()
         || u.droideka.is_some()
         || sim.tick < r.block_until
@@ -235,6 +240,12 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
     };
     let mut best: Option<(f32, VehicleHandle)> = None;
     for (vh, v) in sim.alive_vehicles() {
+        // OURS: an endgame escape must not reopen the command seat for the
+        // same nearby crew every BOARD_BLOCK. Explicit calls/orders bypass
+        // autonomous search. measure: PS2 last-crew reboarding decisions.
+        if r.command_dismounted && endgame && command(sim, vh) {
+            continue;
+        }
         // Card TURR: a turret is offered with a purpose (`man::offer_pass`).
         if v.kind == VehicleKind::Turret {
             continue;

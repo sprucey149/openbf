@@ -65,6 +65,10 @@ pub const POST_POINT_INSET: f32 = 0.9;
 const POST_POINT_STEP: f32 = 0.5;
 /// A capsule the wall pass moves by more than this is in a body (m).
 const POST_POINT_CLEAR: f32 = 0.02;
+/// OURS, PROVISIONAL: allow a plane pass within three corner radii of the
+/// incoming segment, retaining the spider's crab/turn corridor.
+/// measure: matched PS2 walker corner passes after lateral displacement.
+const WALKER_CORNER_LATERAL_RADII: f32 = 3.0;
 
 /// The floor a soldier walking the straight line from `from` (feet on a
 /// floor) arrives at over `to`: the foot's own ground query a step at a time,
@@ -806,11 +810,29 @@ pub(super) fn advance_route(
         // foot; a driver's own vehicle stands on every point it comes to.
         // Card HJAM: a hover's driver reaches a corner at its node radius.
         let on_foot = sim.unit(me).is_some_and(|u| u.mount.is_none());
+        let walker = sim
+            .unit(me)
+            .and_then(|u| u.mount)
+            .and_then(|m| sim.vehicle(m.vehicle))
+            .is_some_and(|v| v.kind == crate::vehicle::VehicleKind::Walker);
         let reach = corner_arrive(sim, me, min_arrive);
         while r.corner().is_some_and(|c| {
             (Vec2::new(pos.x, pos.z) - c).length() <= reach
                 || (on_foot && super::avoid::at_foot_of(sim, c, pos, CORNER_ARRIVE))
+                || (walker && {
+                    let incoming = c - r.from;
+                    let past = Vec2::new(pos.x, pos.z) - c;
+                    let lateral = incoming.perp_dot(past);
+                    let limit = WALKER_CORNER_LATERAL_RADII * reach;
+                    incoming.dot(past) > 0.0
+                        && lateral * lateral <= limit * limit * incoming.length_squared()
+                })
         }) {
+            if walker {
+                // A walker follows every segment, including the approach to a
+                // corner. Keep the reached node even when fill_detour refills.
+                r.from = r.corner().expect("tested corner");
+            }
             r.detour_at = r.detour_at.saturating_add(1);
             moved_on = true;
         }
@@ -847,7 +869,10 @@ pub(super) fn advance_route(
                 pos,
                 ARRIVE_MIN_RADIUS,
             );
-        if !r.is_last() && (at_foot || hub_reached(sim, g, &r, pos, min_arrive)) {
+        if !r.is_last()
+            && (!walker || r.corner().is_none())
+            && (at_foot || hub_reached(sim, g, &r, pos, min_arrive))
+        {
             if let Some(mut next) = plan_leg(sim, st, me, r.next_hub, r.dest_hub, r.via_arc, nt) {
                 // Side-step state and the stuck run survive the hop. The
                 // progress window does not (card MOUTH): its reference
@@ -863,7 +888,7 @@ pub(super) fn advance_route(
                 next.stuck_run = r.stuck_run;
                 // Card HUBP: the PS2's leg — from the waypoint just reached
                 // to the unit's point of the next hub.
-                if next.via_arc.is_some() {
+                if next.via_arc.is_some() || walker {
                     next.from = Vec2::new(r.waypoint.x, r.waypoint.z);
                 }
                 st.route = Some(next);
