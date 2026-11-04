@@ -32,7 +32,8 @@
 //! (§7: no walker on either disc authors JumpHeight, so §4.8 branch A is
 //! dead too); the custom stances and anims (K+0x675 = 0 on every class
 //! seen); death (a destroyed vehicle leaves no wreck, re-vehicles §6); the
-//! water damage (§3 I3); the stomp (C4) and vehicle contacts (C6); the AI's
+//! water damage (§3 I3); the stomp (C4) and original vehicle response (C6;
+//! `sim::traffic` supplies a named translation guard and yield writer); the AI's
 //! boost mode (its steering is `ai::walker_drive`, card WAI). The leftup/rightup leg blend (§6 P+0x120) is kept for the
 //! drawn pose (card WSKN, `game::viewer::walker_pose`). Sim also hashes it
 //! when BF2 hero queries use animated rider frames.

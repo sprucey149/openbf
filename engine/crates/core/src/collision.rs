@@ -40,7 +40,9 @@
 //! query sees, and [`CollisionWorld::ray_with`] reports the owner it hit.
 //!
 //! STILL NOT DONE: the VEHICLE subset ([`Layers::VEHICLE`] is reserved and
-//! never set — P7; vehicles meet no hull, [`HullFilter::Static`]), the building/terrain subsets (nothing queries them), and
+//! never set — P7). Walker/hover traffic uses the named SOLDIER-subset surrogate
+//! in `traffic`; ordinary ground contacts still use [`HullFilter::Static`].
+//! Also pending: the building/terrain subsets (nothing queries them), and
 //! the acquisition mask discrepancy: the PS2 aim-assist acquisition ray
 //! passes flag 0 and tests ALL bodies (RE §4, `FUN_00223850`), while
 //! `Sim::acquire_magnet` currently uses `perception::los_seat`, which queries
@@ -137,6 +139,7 @@ mod ceilings;
 pub mod cost;
 mod rays;
 mod shape;
+mod traffic;
 mod walls;
 mod world;
 

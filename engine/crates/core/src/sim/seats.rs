@@ -320,6 +320,12 @@ impl Sim {
                     }
                 }
                 self.exit_vehicle(h);
+                // Unseating records endgame command departure on the unit.
+                // Preserve it when this request's retained ride copy writes back.
+                r.command_dismounted |= self.units[i]
+                    .ai
+                    .ride
+                    .is_some_and(|ride| ride.command_dismounted);
                 r.pickup = None;
                 r.board = None;
                 r.called_board = None;

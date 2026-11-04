@@ -320,3 +320,126 @@ HOT1's tauntauns read 3/8 at 20-30 s with rides of 158-203 m. Cards WAI2 (build)
 30 s, snow AT-STs 2/2 and AT-ATs 2/2 from 30 s; BF1 GEO1 AT-TEs 2/2. What was wrong on BF2: a vehicle was located on
 the smallest hub disc it stood in whatever its type, and the AT-AT stands in a soldier hub (radius 66.4 m) laid over
 the first hub of its own HUGE path (hubs 60-63, three arcs of mask 16), so its route never left that hub.
+
+## 14. Segment look-ahead correction (issue #108, 2026-11-03)
+
+The walker branch in BF2 `FUN_002f1d80:281244–281250` supplies a fixed 20 m
+lead to `FUN_002a5fa8:227076–227155`. BF1 `FUN_0026aba8:189721–189732`
+uses the same walker branch and distance, calling `FUN_00234830:149022–149135`.
+Both helpers flatten the segment ends to the vehicle's height, project its
+position on that segment and advance by the lead plus 0.2 m, stopping at the
+segment endpoint. This is a segment target; it does not look through a corner
+onto the following leg. The PC reference lead, Gametoast `PathFollower`
+(`0x006137c0`), corroborates this ordering. The PS2 functions are the basis.
+
+The port already hashes `Route::from`. For walkers it now retains the current
+segment's start there as corners are passed, including when a full corner array
+is refilled, and carries the reached waypoint into a following final leg.
+Walker corner arrival also admits the passed endpoint plane within three
+corner radii laterally of the incoming segment. **OURS, PROVISIONAL; measure:**
+matched PS2 corner passes after lateral displacement. The bound retains the
+spider's crab/turn corridor while preventing a sideways knock from skipping a
+detour corner. A pending corner prevents arrival at the leg's final hub/post from skipping that corner. Other
+movers retain their existing arrival and leg-start rules. Walker steering uses
+the existing segment projection helper with a 20 m lead; its progress window
+continues measuring distance to the real node, rather than a moving target.
+
+The port's 1.5 m hub threshold, 1 m corner threshold, drawn hub centres,
+post/drop-hub exits and stuck recovery remain named port choices from the
+preceding sections. The BF2 spider's measured five-degree crab is retained,
+so a 20.2 m look-ahead does not imply zero cross-track error. Leg yaw also trails
+body yaw through a sharp turn. Tight-turn fixtures check segment starts, every
+corner transition, bounded completion and the final endpoint, rather than
+assuming instantaneous leg alignment. Straight-leg fixtures check the actual
+steering command. Both run the driving/locomotion consumers beside the unchanged 145
+PS2 stick samples. Fresh matched PS2 tight-turn/straight-leg route traces remain
+unchecked; source reconstruction and port fixtures are not that acceptance.
+
+## 15. Walker/hover contact priority and hold (issue #108, 2026-11-03)
+
+Fresh reads of BF2 `FUN_0025c2b0:177324–177337` and BF1
+`FUN_00217d00:129003–129021` establish the collision writers. Each asks its
+priority predicate before recording mission time. Those predicates are BF2
+`FUN_002a8c30:229192–229313` and BF1 `FUN_00236e58:150955–151069`.
+Both admit another walker or hover. A vehicle over three times the other's
+collision radius has priority; the smaller yields, even at rest. At lesser
+ratios both horizontal speed squares must exceed 0.0001. The comparison then
+uses normalized travel directions and the direction between their centres,
+with a strict inequality. Equal head-on travel, and equal-size stationary
+blockage, do not qualify. A rear vehicle following another does qualify,
+independently of their relative speeds. Crossing priority depends on those
+same directional projections, rather than team or entity index.
+
+BF2 `FUN_00262248:181517–181543` and BF1 `FUN_0021c180:132130–132145`
+replace the walker's movement destination with its own position for 7.5 s
+after a qualifying collision. Aim continues. The PC lead Gametoast
+`EntityWalker` (`0x00506ae0`) corroborates that hold. It is a walker hold when
+meeting a hover/walker, not evidence for adding the same hold to the hover AI.
+The existing RAM runs in §10 did not exercise it; no fresh yield capture is
+claimed here.
+
+The port records a hashed fixed-tick deadline, 225 ticks at 30 Hz, only after
+a swept hull contact and the priority predicate. Refresh uses the same writer.
+The driver pauses route advancement and both progress clocks while held,
+continues aiming, and resumes at expiry. Priority is evaluated at the swept
+contact position, before clamping velocity; using an attempted position beyond
+the obstacle reverses the centre direction on a fast step. The installed model
+collision sphere supplies radius; old fixtures without it use the existing
+seat-radius approximation.
+
+**Named port response, OURS, PROVISIONAL; measure:** matched original-game
+opposing, crossing, following and stationary traffic, including rotating hulls,
+source vehicle-subset geometry and original pair impulses. The port now clamps
+AI-driven translation at the first contact for ground pairs involving a
+walker. Only currently AI-piloted walkers receive the hold; player-driven and
+unpiloted vehicles retain the prior locomotion/contact response. The collision
+writer facts above do not establish a player hard-stop law. It uses
+current SOLDIER-subset hull primitives; a mesh mover uses its conservative world
+box against the other hull. This translation sweep does not establish swept
+angular collision or the original contact impulse/damage law. Stable vehicle
+and part order makes the response deterministic. Separating travel is admitted;
+a pre-existing overlap is not claimed to be repaired by this pass.
+
+The port also steers around an occupied route on the nearer side (right on an
+exact collinear tie), leaving
+its authored route intact. Equal-priority/stationary blockage does not manufacture
+a hold. The bypass target sits one own-radius beyond the sum of radii: targeting
+the inflated boundary itself made the chord from an existing contact run through
+the obstruction, stalling a priority winner beside the held vehicle. Crossing
+traffic must also keep its existing side: forcing a left-side approach across
+to the right directs that driver through the obstruction. The traffic scan and
+temporary steering point use the same effective 20.2 m reach as walker segment projection:
+20 m supplied by the walker plus the shared helper's 0.2 m padding. The point is
+extended to at least that reach from the driver. It is not an
+arrival node: inside the ordinary 4 m arrival branch a sideways-facing plain
+walker can walk with the authored reversed turn factor instead of turning in
+place. Keeping this directional target outside that branch preserves the stick
+law and allows the driver to turn before moving. This bypass
+and its clearance are port recovery choices, not reconstructed PS2 trajectories.
+Hover/hover and flyer traffic retain their previous paths. Headless port fixtures
+cover both ground pair kinds, strict priority, contact-only start, refresh,
+expiry, hashed lifetime, route/progress pause and continuous separation during
+opposing/crossing/following/stationary passage. Original-game contact/feel
+acceptance remains open.
+
+## 16. Bound endgame command-walker reboarding (issue #108 / #86)
+
+The §13 original-game samples keep command crews seated. The port's last-crew
+escape is already a deliberate difference (§14 and the `COMMAND_ENDGAME`
+measurement plan). It needs a matching autonomous boarding policy: leaving a
+terminal command walker, waiting the ordinary 30 s exit cooldown, then boarding
+it again can repeat indefinitely when the foot approach remains blocked nearby.
+An armed terminal-drop fixture exercises the real claim, drive and step-1c
+entry/exit consumers for 120 s and caps each of three crew members at one boarding.
+Normal-population retention and recovery to normal boarding are separate controls.
+The fixture supplies a retained post order and keeps the foot crew in boarding
+reach; it does not claim an original-game crew comparison or a full physics round.
+
+**OURS; measure:** PS2 command-walker last-crew/post-order boarding and unboarding.
+An AI crew member's endgame command departure now closes autonomous command
+boarding for that member while the same endgame context holds. The departure
+latch is hashed, comes from the actual unseat writer, and is carried through
+step-1c's retained ride-state write-back. The existing six-unit/ticket predicate
+is shared with the pilot's escape decision. Once the team recovers, ordinary
+search clears the latch. Explicit boarding orders/calls retain their precedence.
+This adds no new gameplay cooldown and does not change human boarding.

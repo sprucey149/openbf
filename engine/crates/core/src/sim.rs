@@ -76,6 +76,7 @@ mod stations;
 mod step;
 mod tow;
 pub mod trace;
+mod traffic;
 mod turrets;
 mod vehicles;
 mod water;

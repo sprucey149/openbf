@@ -1074,3 +1074,87 @@ fn a_rider_looks_out_through_its_own_hull() {
         crate::perception::past_mounts(&s, p, rider)
     ));
 }
+
+/// Compare stage 3a against its pre-traffic locomotion consumer, with a real
+/// vehicle hull ahead. Both player ground kinds must keep that response.
+#[test]
+fn player_ground_traffic_keeps_the_legacy_locomotion_response() {
+    use crate::collision::{HullPart, Layers, Shape};
+    use crate::vehicle::{hover, walker};
+    use glam::Mat4;
+    for kind in [VehicleKind::Walker, VehicleKind::Hover] {
+        let mut s = Sim::empty(1);
+        s.heightfield = Some(flat_ground());
+        let part = HullPart::new(
+            Mat4::IDENTITY,
+            Shape::Cylinder {
+                radius: 1.0,
+                half_height: 10.0,
+            },
+            Layers::SOLDIER,
+        );
+        s.hull_parts = vec![Some(vec![part.clone()].into()), Some(vec![part].into())];
+        let mut spec = hover4(None);
+        spec.kind = kind;
+        spec.pos = Vec3::new(0.0, 1.0, 0.0);
+        spec.yaw = 0.0;
+        let wp = walker::tests::atst();
+        let hp = hover::tests::skiff();
+        if kind == VehicleKind::Walker {
+            s.walker_params = vec![Some(wp.clone())];
+        } else {
+            s.hover_params = vec![Some(hp.clone())];
+        }
+        let vehicle = s.spawn_vehicle(&spec);
+        spec.kind = VehicleKind::Walker;
+        spec.pos.z = 4.0;
+        spec.class = 1;
+        s.spawn_vehicle(&spec);
+        let pilot = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+        assert!(s.seat_unit(pilot, vehicle, 0));
+        let v = s.vehicle_mut(vehicle).unwrap();
+        v.vel = Vec3::Z * 10.0;
+        v.input.throttle = 1.0;
+        v.input.human = true;
+        let mut contacts = 0;
+        for _ in 0..180 {
+            let from = s.vehicle(vehicle).unwrap().pos;
+            let mut expected = s.vehicle(vehicle).unwrap().clone();
+            let world = super::WorldContacts {
+                heightfield: s.heightfield.as_ref(),
+                collision: &s.collision,
+            };
+            if kind == VehicleKind::Walker {
+                walker::step(&mut expected, &wp, &world, crate::TICK_DT);
+            } else {
+                hover::step(&mut expected, &hp, &world, crate::TICK_DT);
+            }
+            if s.collision
+                .ground_hull_cast(
+                    vehicle,
+                    VehicleHandle { index: 1, gen: 1 },
+                    expected.pos - from,
+                )
+                .is_some()
+            {
+                contacts += 1;
+            }
+            if kind == VehicleKind::Walker {
+                s.tick_walkers(crate::TICK_DT);
+            } else {
+                s.tick_hovers(crate::TICK_DT);
+            }
+            s.tick += 1;
+            let actual = s.vehicle(vehicle).unwrap();
+            assert_eq!(actual.pos, expected.pos, "{kind:?} displacement");
+            assert_eq!(actual.vel, expected.vel, "{kind:?} velocity");
+            assert_eq!(actual.yield_until, 0);
+        }
+        assert!(
+            contacts > 0,
+            "fixture must reach another hull: {kind:?}, end={:?}",
+            s.vehicle(vehicle).unwrap().pos
+        );
+        eprintln!("player {kind:?}: {contacts} witnessed hull contacts, legacy position/velocity equal for 180 ticks");
+    }
+}

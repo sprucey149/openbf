@@ -451,7 +451,8 @@ pub(super) fn drive(
         ai.far = 0.0;
     }
     let from = ai.leg.map_or(pos, |l| l[0]);
-    let goal = look_ahead(from, node, pos, v.vel.length());
+    let segment_goal = look_ahead(from, node, pos, v.vel.length());
+    let goal = sim.ground_traffic_goal(m.vehicle, segment_goal);
     let ray = |(at, dir, len): (Vec3, Vec3, f32)| {
         let hulls = HullFilter::except(Some(m.vehicle));
         let hit = sim
@@ -460,7 +461,11 @@ pub(super) fn drive(
         let side = Vec3::new(-dir.z, 0.0, dir.x);
         Some(if hit.normal.dot(side) > 0.0 { 1 } else { -1 })
     };
-    let probe = probe_ray(pos, v.vel, goal).and_then(ray).unwrap_or(0);
+    let probe = if goal == segment_goal {
+        probe_ray(pos, v.vel, goal).and_then(ray).unwrap_or(0)
+    } else {
+        0
+    };
     let secs = |since: Option<u64>| {
         since.map_or(f32::MAX, |t| {
             sim.tick.saturating_sub(t) as f32 * crate::TICK_DT

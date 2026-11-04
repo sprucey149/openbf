@@ -685,3 +685,586 @@ fn jittering_spider_bails_and_marks_the_abandoned_vehicle() {
     assert!(s.unit(b).unwrap().mount.is_none());
     assert!(s.vehicle(v).unwrap().stuck_at.is_some());
 }
+
+/// The steering must return to the current segment, not cut directly to its end.
+#[test]
+fn walker_route_lookahead_returns_to_a_straight_leg() {
+    let (mut s, b, v, _) = world(bf1_class(), 0.0);
+    assert!(s.seat_unit(b, v, 0));
+    s.vehicle_mut(v).unwrap().pos = Vec3::new(8.0, 0.0, 40.0);
+    let mut st = AiState {
+        route: Some(super::super::state::Route {
+            from: glam::Vec2::ZERO,
+            waypoint: Vec3::new(0.0, 0.0, 150.0),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let p = s.walker_params[0].clone().unwrap();
+    drive(
+        &s,
+        b,
+        Mount {
+            vehicle: v,
+            seat: 0,
+        },
+        &p,
+        &mut st,
+        NavTick::default(),
+    );
+    let actual = st.ride.unwrap().sticks.unwrap();
+    let expected = sticks(
+        crate::TICK_DT,
+        &Class::of(&p),
+        &Body {
+            pos: s.vehicle(v).unwrap().pos,
+            up: Vec3::Y,
+            fwd: Vec3::Z,
+        },
+        Some(Vec3::new(0.0, 0.0, 60.2)),
+        true,
+        None,
+    );
+    assert_eq!(actual, [expected.0, expected.1]);
+}
+
+#[test]
+fn walker_routes_finish_straight_and_tight_turns_without_stall_or_overshoot() {
+    use crate::nav::{Hub, NavGraph, RouteTable};
+    use glam::Vec2;
+    for turn in [false, true] {
+        for (name, p) in [
+            ("BF1", bf1_class()),
+            ("AT-ST", atst()),
+            ("spider", spider()),
+        ] {
+            let (mut s, b, v, _) = world(p.clone(), 0.0);
+            assert!(s.seat_unit(b, v, 0));
+            let end = if turn {
+                Vec3::new(30.0, 0.0, 60.0)
+            } else {
+                Vec3::Z * 120.0
+            };
+            s.cps[0].def.pos = end;
+            s.cps[0].def.capture = Region::sphere(end, 2.0);
+            s.cps[0].nav_hub = Some(0);
+            s.nav = NavGraph::new(
+                vec![Hub {
+                    pos: end,
+                    radius: 2.0,
+                    arcs: vec![],
+                }],
+                vec![],
+                RouteTable::empty(1),
+                vec![],
+                vec![],
+            );
+            let mut route = super::super::state::Route {
+                waypoint: end,
+                ..Default::default()
+            };
+            if turn {
+                route.detour[0] = Vec2::new(0.0, 30.0);
+                route.detour[1] = Vec2::new(30.0, 30.0);
+                route.detour_len = 2;
+            }
+            route.ref_dist = nav::xz_dist(Vec3::ZERO, sub_point(&route, Vec3::ZERO));
+            s.unit_mut(b).unwrap().soldier.pos = Vec3::ZERO;
+            let mut st = AiState {
+                target_cp: Some(0),
+                route: Some(route),
+                ..Default::default()
+            };
+            let mut finished = false;
+            for _ in 0..(90 * crate::TICK_HZ) {
+                drive(
+                    &s,
+                    b,
+                    Mount {
+                        vehicle: v,
+                        seat: 0,
+                    },
+                    &p,
+                    &mut st,
+                    NavTick::default(),
+                );
+                let ride = st.ride.unwrap();
+                if ride.use_req {
+                    assert!(
+                        nav::xz_dist(s.vehicle(v).unwrap().pos, end) <= 7.1,
+                        "premature exit: {:?}",
+                        s.vehicle(v).unwrap().pos
+                    );
+                    assert_eq!(st.route.unwrap().detour_at, if turn { 2 } else { 0 });
+                    finished = true;
+                    break;
+                }
+                let input = ride.sticks.unwrap();
+                s.vehicle_mut(v).unwrap().input.throttle = input[0];
+                s.vehicle_mut(v).unwrap().input.strafe = input[1];
+                s.tick_walkers(crate::TICK_DT);
+                s.tick += 1;
+                let at = s.vehicle(v).unwrap().pos;
+                s.unit_mut(b).unwrap().soldier.pos = at;
+                let r = st.route.unwrap();
+                if turn {
+                    let expected = match r.detour_at {
+                        0 => Vec2::ZERO,
+                        1 => Vec2::new(0.0, 30.0),
+                        _ => Vec2::new(30.0, 30.0),
+                    };
+                    assert_eq!(r.from, expected, "{name}: lost segment start");
+                    if r.detour_at < 2 {
+                        // The observed PS2 spider range reaches 6.5 degrees:
+                        // 20.2 m * tan(6.5 degrees) = 2.30 m, plus step motion.
+                        assert!(
+                            at.x >= -3.0 && at.x <= 33.0 && at.z <= 33.0,
+                            "{name}: left the turn corridor {at:?}"
+                        );
+                    }
+                }
+                assert!(at.z <= end.z + 1.0, "{name}: passed route end {at:?}");
+            }
+            assert!(
+                finished,
+                "stalled at {:?}, route {:?}",
+                s.vehicle(v).unwrap().pos,
+                st.route
+            );
+        }
+    }
+}
+
+/// Vehicle-vs-vehicle contacts must stop a walker at an occupied hull.
+#[test]
+fn walker_traffic_stops_at_a_stationary_vehicle_without_pass_through() {
+    use crate::collision::{HullPart, Layers, Shape};
+    use glam::Mat4;
+    let (mut s, pilot, v, _) = world(atst(), 0.0);
+    assert!(s.seat_unit(pilot, v, 0));
+    s.hull_parts = vec![Some(
+        vec![HullPart::new(
+            Mat4::IDENTITY,
+            Shape::Cylinder {
+                radius: 1.0,
+                half_height: 3.0,
+            },
+            Layers::SOLDIER,
+        )]
+        .into(),
+    )];
+    let other = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Hover,
+        class: 0,
+        pos: Vec3::new(0.0, 0.0, 8.0),
+        yaw: 0.0,
+        max_health: 8000.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+    });
+    // No hover params: a parked hull is still a real obstacle.
+    s.sync_hulls();
+    s.vehicle_mut(v).unwrap().input.throttle = 1.0;
+    let mut closest = f32::MAX;
+    for _ in 0..(6 * crate::TICK_HZ) {
+        s.tick_walkers(crate::TICK_DT);
+        s.tick += 1;
+        let a = s.vehicle(v).unwrap().pos;
+        let b = s.vehicle(other).unwrap().pos;
+        closest = closest.min(nav::xz_dist(a, b));
+        assert!(a.z < b.z, "passed through stationary hover: {a:?}");
+    }
+    assert!(closest >= 1.999, "hulls overlap by {}", 2.0 - closest);
+    assert!(s.vehicle(v).unwrap().pos.z > 5.9, "never reached contact");
+}
+
+#[test]
+fn walker_traffic_hold_pauses_route_and_progress_then_resumes() {
+    let p = atst();
+    let (mut s, b, v, end) = world(p.clone(), 0.0);
+    assert!(s.seat_unit(b, v, 0));
+    let route = super::super::state::Route {
+        waypoint: end,
+        ref_dist: 150.0,
+        stuck_ticks: 20,
+        stuck_run: 30,
+        ..Default::default()
+    };
+    let mut st = AiState {
+        route: Some(route),
+        target_cp: Some(0),
+        ride: Some(RideState {
+            walker_progress: Some((glam::Vec2::ZERO, 40)),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    s.vehicle_mut(v).unwrap().yield_until = 225;
+    for tick in [0, 50, 224] {
+        s.tick = tick;
+        drive(
+            &s,
+            b,
+            Mount {
+                vehicle: v,
+                seat: 0,
+            },
+            &p,
+            &mut st,
+            NavTick::default(),
+        );
+        assert_eq!(st.route, Some(route));
+        assert_eq!(st.ride.unwrap().walker_progress.unwrap().1, 40);
+        assert_eq!(st.ride.unwrap().sticks.unwrap()[0], 0.0);
+        assert!(!st.ride.unwrap().use_req);
+    }
+    s.tick = 225;
+    drive(
+        &s,
+        b,
+        Mount {
+            vehicle: v,
+            seat: 0,
+        },
+        &p,
+        &mut st,
+        NavTick::default(),
+    );
+    assert!(st.ride.unwrap().sticks.unwrap()[0] > 0.0);
+    assert_eq!(st.ride.unwrap().walker_progress.unwrap().1, 41);
+}
+
+/// Real steering and locomotion consumers; every tick must keep the cylinder
+/// hulls disjoint. Port bypass is tested independently from priority holds.
+#[test]
+fn walker_traffic_opposing_crossing_following_and_stationary_congestion_resolves() {
+    use crate::collision::{HullPart, Layers, Shape};
+    use glam::Mat4;
+    for hover in [false, true] {
+        for scenario in ["opposing", "crossing", "following", "stationary"] {
+            let p = atst();
+            let (mut s, a, va, _) = world(p.clone(), 0.0);
+            let mut hp = crate::vehicle::hover::tests::skiff();
+            let mut p_b = p.clone();
+            if scenario == "following" {
+                p_b.max_speed = 2.0;
+                hp.forward_speed = 2.0;
+            }
+            s.walker_params.push((!hover).then_some(p_b.clone()));
+            s.hover_params = vec![None, hover.then_some(hp.clone())];
+            s.seat_setup[0].as_mut().unwrap().radius = 1.0;
+            s.seat_setup.push(s.seat_setup[0].clone());
+            let part = HullPart::new(
+                Mat4::IDENTITY,
+                Shape::Cylinder {
+                    radius: 1.0,
+                    half_height: 3.0,
+                },
+                Layers::SOLDIER,
+            );
+            s.hull_parts = vec![Some(vec![part.clone()].into()), Some(vec![part].into())];
+            let start_a = Vec3::new(0.0, 0.0, -20.0);
+            let end_a = Vec3::new(0.0, 0.0, 40.0);
+            let (start_b, end_b) = match scenario {
+                "opposing" => (Vec3::Z * 20.0, -Vec3::Z * 40.0),
+                "crossing" => (-Vec3::X * 20.0, Vec3::X * 40.0),
+                "following" => (Vec3::ZERO, Vec3::Z * 60.0),
+                _ => (Vec3::ZERO, Vec3::ZERO),
+            };
+            s.vehicle_mut(va).unwrap().pos = start_a;
+            let dir = (end_b - start_b).normalize_or_zero();
+            let vb = s.spawn_vehicle(&VehicleSpec {
+                kind: if hover {
+                    VehicleKind::Hover
+                } else {
+                    VehicleKind::Walker
+                },
+                class: 1,
+                pos: start_b,
+                yaw: crate::fmath::atan2(-dir.x, dir.z),
+                max_health: 8000.0,
+                health_type: HealthType::Vehicle,
+                seats: vec![SeatKind::Pilot],
+                home_team: None,
+                neutral_when_empty: true,
+                spawn_pad: None,
+            });
+            let b = s
+                .spawn(&UnitSpec {
+                    controller: Controller::Ai,
+                    ..UnitSpec::trooper(0, start_b)
+                })
+                .unwrap();
+            assert!(s.seat_unit(a, va, 0));
+            if scenario != "stationary" {
+                assert!(s.seat_unit(b, vb, 0));
+            }
+            s.cps[0].def.pos = end_a;
+            s.cps[0].def.capture = Region::sphere(end_a, 1.0);
+            let mut cp = s.cps[0].def.clone();
+            cp.pos = end_b;
+            cp.capture = Region::sphere(end_b, 1.0);
+            s.add_cp(cp, Some(1));
+            let mut states = [
+                AiState {
+                    target_cp: Some(0),
+                    ..Default::default()
+                },
+                AiState {
+                    target_cp: Some(1),
+                    ..Default::default()
+                },
+            ];
+            let mut done = [false, scenario == "stationary"];
+            s.sync_hulls();
+            for _ in 0..(90 * crate::TICK_HZ) {
+                for (i, (unit, vh)) in [(a, va), (b, vb)].into_iter().enumerate() {
+                    if done[i] {
+                        continue;
+                    }
+                    let m = Mount {
+                        vehicle: vh,
+                        seat: 0,
+                    };
+                    if i == 1 && hover {
+                        super::super::hover_drive::drive(
+                            &s,
+                            unit,
+                            m,
+                            &hp,
+                            &mut states[i],
+                            NavTick::default(),
+                        );
+                    } else {
+                        drive(
+                            &s,
+                            unit,
+                            m,
+                            if i == 0 { &p } else { &p_b },
+                            &mut states[i],
+                            NavTick::default(),
+                        );
+                    }
+                    let r = states[i].ride.unwrap();
+                    if r.use_req {
+                        let reach = if i == 1 && hover {
+                            hp.forward_speed * 0.5
+                        } else {
+                            5.0
+                        };
+                        let end = if i == 0 { end_a } else { end_b };
+                        assert!(
+                            nav::xz_dist(s.vehicle(vh).unwrap().pos, end) <= reach + 0.1,
+                            "{scenario} hover={hover} crew={i} tick={} at={:?} goal={end:?} hold={} progress={:?}", s.tick, s.vehicle(vh).unwrap().pos, s.vehicle(vh).unwrap().yield_until, r.walker_progress
+                        );
+                        done[i] = true;
+                        s.vehicle_mut(vh).unwrap().input = Default::default();
+                    } else if let Some(out) = r.hover {
+                        let v = s.vehicle_mut(vh).unwrap();
+                        v.input.throttle = out.sticks[0];
+                        v.input.strafe = out.sticks[1];
+                        v.input.turn = out.sticks[2];
+                        v.hover.ai = out.ai;
+                    } else {
+                        let input = r.sticks.unwrap();
+                        let v = s.vehicle_mut(vh).unwrap();
+                        v.input.throttle = input[0];
+                        v.input.strafe = input[1];
+                    }
+                }
+                s.tick_hovers(crate::TICK_DT);
+                s.tick_walkers(crate::TICK_DT);
+                s.tick += 1;
+                let pa = s.vehicle(va).unwrap().pos;
+                let pb = s.vehicle(vb).unwrap().pos;
+                s.unit_mut(a).unwrap().soldier.pos = pa;
+                s.unit_mut(b).unwrap().soldier.pos = pb;
+                assert!(
+                    nav::xz_dist(pa, pb) >= 1.99,
+                    "{scenario} hover={hover}: overlapping hulls {pa:?} {pb:?}"
+                );
+                if done.iter().all(|d| *d) {
+                    break;
+                }
+            }
+            assert!(
+                done.iter().all(|d| *d),
+                "{scenario} hover={hover}: deadlock {:?} {:?}",
+                s.vehicle(va).unwrap().pos,
+                s.vehicle(vb).unwrap().pos
+            );
+            eprintln!(
+                "traffic {scenario} hover={hover}: finished at tick {}",
+                s.tick
+            );
+        }
+    }
+}
+
+/// Keep a crew at an armed walker's terminal drop, using the real request
+/// producers and step-1c occupancy/cooldown consumer for two simulated minutes.
+#[test]
+fn endgame_walker_crews_board_at_most_once_each_in_two_minutes() {
+    for (population, tickets, endgame) in [
+        (3, 250.0, true),
+        (6, 250.0, true),
+        (7, 10.0, true),
+        (7, 250.0, false),
+    ] {
+        let mut p = atst();
+        p.spawn_points = vec![(Vec3::ZERO, 0.0)];
+        let (mut s, first, v, _) = world(p, 0.0);
+        s.seat_setup[0].as_mut().unwrap().guns = vec![Some(crate::vehicle::gun::GunSetup {
+            weapons: vec![],
+            fire_point: Vec3::ZERO,
+            pivot: Vec3::ZERO,
+            eye: Vec3::ZERO,
+            aimer: Default::default(),
+            pilot: true,
+            turn: None,
+            framed: false,
+            aimer_bind: glam::Quat::IDENTITY,
+            gunner: None,
+        })];
+        let mut crew = vec![first];
+        for _ in 1..3 {
+            crew.push(
+                s.spawn(&UnitSpec {
+                    controller: Controller::Ai,
+                    ..UnitSpec::trooper(0, -Vec3::Z * 6.0)
+                })
+                .unwrap(),
+            );
+        }
+        for i in 3..population {
+            s.spawn(&UnitSpec::trooper(0, Vec3::new(100.0 + i as f32, 0.0, 0.0)))
+                .unwrap();
+        }
+        s.battle.teams[1].reinforcements = tickets;
+        let mut boards = [0u32; 3];
+        let mut exits = [0u32; 3];
+        for tick in 0..(120 * crate::TICK_HZ as u64) {
+            s.tick = tick;
+            for (i, &me) in crew.iter().enumerate() {
+                let before = s.unit(me).unwrap().mount;
+                let mut st = s.unit(me).unwrap().ai;
+                st.target_cp = Some(0); // retained Attack/post order at a terminal drop hub
+                let mut nt = NavTick::default();
+                if let Some(m) = before {
+                    st.route = Some(super::super::state::Route {
+                        waypoint: s.vehicle(v).unwrap().pos,
+                        ..Default::default()
+                    });
+                    super::super::ride::drive(&s, me, m, &mut st, nt, true);
+                    if st.ride.is_some_and(|r| r.use_req) {
+                        assert!(
+                            st.route.unwrap().stuck_run < DRIVE_STUCK_BAIL,
+                            "normal endgame drop, not a stuck exit"
+                        );
+                    }
+                } else {
+                    // Adverse input: a blocked foot approach keeps this crew
+                    // inside boarding reach of the same drop hub throughout.
+                    s.unit_mut(me).unwrap().soldier.pos = -Vec3::Z * 6.0;
+                    let u = s.unit(me).unwrap().clone();
+                    super::super::ride::claim(&s, me, &u, &mut st);
+                    super::super::ride::maintain(&s, me, &mut st);
+                    super::super::ride::board_goal(&s, me, &u, &mut st, &mut nt);
+                }
+                s.unit_mut(me).unwrap().ai = st;
+                s.ai_use_pass(); // real entry/exit writer, including its cooldown and write-back
+                match (before, s.unit(me).unwrap().mount) {
+                    (None, Some(_)) => boards[i] += 1,
+                    (Some(_), None) => exits[i] += 1,
+                    _ => {}
+                }
+            }
+        }
+        eprintln!(
+            "crew population={population} tickets={tickets}: boards={boards:?} exits={exits:?}"
+        );
+        assert_eq!(s.nav_stats.ai_boards, boards.iter().sum::<u32>() as u64);
+        assert_eq!(s.nav_stats.ai_dismounts, exits.iter().sum::<u32>() as u64);
+        assert!(
+            boards.iter().all(|&n| n <= 1),
+            "reboarding loop: {boards:?}"
+        );
+        assert_eq!(exits.iter().sum::<u32>(), if endgame { 3 } else { 0 });
+        assert!(boards.iter().sum::<u32>() > 0, "vacuous boarding fixture");
+        if endgame {
+            // Explicit BF1 calls still override autonomous closure.
+            let rules = s.ground_rules;
+            s.ground_rules = crate::soldier::GroundRules::Bf1;
+            let u = s.unit(first).unwrap().clone();
+            let mut called = u.ai;
+            called.pending_board = Some((first, v));
+            super::super::ride::deliver_call(&s, first, &u, &mut called);
+            assert_eq!(called.ride.unwrap().board, Some(v));
+            s.ground_rules = rules;
+            while s.alive_units().filter(|(_, u)| u.team == 0).count() < 7 {
+                s.spawn(&UnitSpec::trooper(0, Vec3::X * 100.0)).unwrap();
+            }
+            s.battle.teams[1].reinforcements = 250.0;
+            s.tick += super::super::BOARD_BLOCK + 1;
+            s.unit_mut(first).unwrap().soldier.pos = -Vec3::Z * 6.0;
+            let u = s.unit(first).unwrap().clone();
+            let mut st = u.ai;
+            st.target_cp = Some(0);
+            super::super::ride::claim(&s, first, &u, &mut st);
+            assert_eq!(
+                st.ride.unwrap().board,
+                Some(v),
+                "team recovery reopens boarding"
+            );
+        }
+    }
+}
+
+#[test]
+fn walker_corner_plane_pass_requires_a_bounded_lateral_displacement() {
+    use crate::nav::{Hub, NavGraph, RouteTable};
+    use glam::Vec2;
+    let (mut s, b, v, end) = world(atst(), 0.0);
+    assert!(s.seat_unit(b, v, 0));
+    s.nav = NavGraph::new(
+        vec![Hub {
+            pos: end,
+            radius: 1.0,
+            arcs: vec![],
+        }],
+        vec![],
+        RouteTable::empty(1),
+        vec![],
+        vec![],
+    );
+    let corner = Vec2::new(0.0, 30.0);
+    for (lateral, passed) in [
+        (40.0, false),
+        (-40.0, false),
+        (3.01, false),
+        (-3.01, false),
+        (3.0, true),
+        (-3.0, true),
+        (0.0, true),
+    ] {
+        let mut route = super::super::state::Route {
+            from: Vec2::ZERO,
+            waypoint: end,
+            detour_len: 1,
+            ..Default::default()
+        };
+        route.detour[0] = corner;
+        let mut st = AiState {
+            route: Some(route),
+            ..Default::default()
+        };
+        let pos = Vec3::new(lateral, 0.0, 31.0);
+        super::super::route::advance_route(&s, b, &mut st, pos, 1.0, &mut NavTick::default());
+        let route = st.route.expect("pending leg");
+        assert_eq!(route.detour_at, u8::from(passed), "lateral {lateral}");
+        assert_eq!(route.from, if passed { corner } else { Vec2::ZERO });
+    }
+}
