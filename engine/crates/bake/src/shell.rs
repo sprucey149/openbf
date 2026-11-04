@@ -27,6 +27,9 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+#[path = "shell_pc.rs"]
+mod pc;
+
 /// The movie properties the menus play (§4): the title and main menu, the
 /// sub-menus.
 pub const MENU_MOVIES: [&str; 2] = ["shell_main", "shell_sub_left"];
@@ -252,6 +255,7 @@ pub fn bake_shell(
     let dir = Path::new(out).join("shell");
     let lvl_bytes = std::fs::read(shell_lvl).with_context(|| shell_lvl.to_string())?;
     let lvl = mungefs::open(&lvl_bytes).map_err(|e| anyhow!("{shell_lvl}: {e}"))?;
+    let pc_shell = pc::known_shell(&lvl_bytes);
 
     // The sheets.
     let tex_dir = dir.join("textures");
@@ -275,6 +279,15 @@ pub fn bake_shell(
     }
     for want in SHELL_TEXTURES {
         if !textures.iter().any(|t| t == want) {
+            if pc_shell && want == "iface_instant_action" {
+                std::fs::write(
+                    tex_dir.join("iface_instant_action.ktx2"),
+                    crate::ktx2w::write_rgba8(512, 512, &[pc::backdrop()]),
+                )?;
+                textures.push(want.to_owned());
+                println!("  PC shell: original Instant Action backdrop; console screen layout");
+                continue;
+            }
             bail!("{shell_lvl}: no tex_ {want}");
         }
     }
@@ -287,7 +300,16 @@ pub fn bake_shell(
     let mut movies = Vec::new();
     for prop in MENU_MOVIES {
         let mut files = Vec::new();
-        for h in movie_segments(lvl, prop)? {
+        let order = movie_segments(lvl, prop).or_else(|error| {
+            if pc_shell {
+                if let Some(order) = pc::movie_order(&mvs, prop) {
+                    println!("  PC shell: {prop} uses the fingerprinted PC galaxy loops");
+                    return Ok(order);
+                }
+            }
+            Err(error)
+        })?;
+        for h in order {
             let (k, s) = segs
                 .iter()
                 .enumerate()

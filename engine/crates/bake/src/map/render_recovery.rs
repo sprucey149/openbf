@@ -103,7 +103,23 @@ pub(super) fn shared(lvl: &str, items: &[Chunk<'_>]) -> Result<Vec<u8>> {
             (!known.contains(model)).then(|| model.clone())
         })
         .collect();
-    if wanted.is_empty() {
+    let known_textures: BTreeSet<_> = items
+        .iter()
+        .filter(|c| &c.tag == b"tex_")
+        .filter_map(named)
+        .collect();
+    let wanted_textures: BTreeSet<_> = items
+        .iter()
+        .filter(|c| &c.tag == b"modl")
+        .filter_map(|c| mungefs::model::Model::parse(c).ok())
+        .flat_map(|m| m.segments)
+        .flat_map(|s| s.textures)
+        .map(|(_, n)| n.to_ascii_lowercase())
+        // Jabba's placed Gamorrean axe uses the identical named sheet from
+        // this install's SIDE/GAM. Do not import unrelated optional slots.
+        .filter(|n| n == "gam_1st_weap_inf_axe" && !known_textures.contains(n))
+        .collect();
+    if wanted.is_empty() && wanted_textures.is_empty() {
         return Ok(Vec::new());
     }
     let Some(root) = Path::new(lvl).ancestors().skip(1).find(|p| {
@@ -128,6 +144,15 @@ pub(super) fn shared(lvl: &str, items: &[Chunk<'_>]) -> Result<Vec<u8>> {
             let content = chunks(&bytes).with_context(|| path.display().to_string())?;
             let mut took = false;
             for c in &content {
+                if &c.tag == b"tex_" {
+                    if let Some(name) = named(c).filter(|n| wanted_textures.contains(n)) {
+                        if imported.insert((c.tag, name.clone())) {
+                            append_chunk(&mut body, c);
+                            eprintln!("render recovery: exact tex_ {name} from {}", path.display());
+                        }
+                    }
+                    continue;
+                }
                 if !matches!(&c.tag, b"modl" | b"gmod") {
                     continue;
                 }

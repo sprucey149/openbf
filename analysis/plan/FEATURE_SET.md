@@ -8,8 +8,9 @@ and LAN are decisions for later work, not current tasks.
   whatever discs went in, for future multiplayer. Other versions change only the size and look of textures and assets;
   numbers and shapes the sim reads never change. Public correction tables of gameplay numbers and names are approved,
   preferring instructions on the player's own files. The repo holds no meshes, art, audio, script bytecode or localized text.
-- **Inputs.** One source per game, identified by content, with unknown formats refused clearly. Any PC input needs a PS2 or Xbox
-  BF2 disc too. From the DLC only Kit Fisto and Asajj Ventress are taken. Where versions overlap, compare them and take the
+- **Inputs.** One source per game, identified by content, with unknown formats refused clearly. PC BF1 plus PC BF2 can build
+  without a console disc; single-game PC installs still need the other game. Existing console combinations remain supported.
+  From the DLC only Kit Fisto and Asajj Ventress are taken. Where versions overlap, compare them and take the
   best, or write something better than all of them.
 - **HUD.** BF2's on every map, with the heat ring around the centre reticle.
 - **Grenades.** BF1 maps throw BF1 grenades, by BF1's numbers, with BF2's grenade HUD (`analysis/re-grenades.md`).

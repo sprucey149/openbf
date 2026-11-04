@@ -4,7 +4,7 @@
     python3 scripts/pack.py [--iso-dir iso] [--out dist/openbf] [--scan-only]
 
 Put your discs and install folders in iso/, under any names: scripts/input_scan.py knows them by their content and
-chooses what each game is built from. Each game needs one source; any PC input also needs a console BF2 disc. It says
+chooses what each game is built from. Each game needs one source; both PC games can build without a console disc. It says
 what to add when something is missing, and names what it refuses. --scan-only stops after that.
 
 Steps, each skipped when its output is already there (so a second run only
@@ -619,18 +619,24 @@ def main():
     tracked = git_tracked_missions()
     have = glob.glob(os.path.join(MISSIONS, "*.ron"))
     correction_args = gameplay_correction_args(plan)
+    mission_lua_root = lua_root
+    if (plan.get("source_plan") or {}).get("kind") == "pc-only":
+        # These extracted scripts are PC presentation/name inputs, never console
+        # evidence. Force the required-facts checks even with a warm Lua cache.
+        mission_lua_root = os.path.join(lua_root, "table-only")
+        os.makedirs(mission_lua_root, exist_ok=True)
     mission_env = dict(os.environ)
     for name in ("OPENBF_GAMEPLAY_CORRECTIONS", "OPENBF_GAMEPLAY_SOURCE_BF1", "OPENBF_GAMEPLAY_SOURCE_BF2"):
         mission_env.pop(name, None)
     space = os.environ.get("OPENBF_BAKE_SPACE") == "1"
-    mission_inputs = {"console_lua": lua_root, "corrections": correction_args, "space": space}
+    mission_inputs = {"console_lua": mission_lua_root, "corrections": correction_args, "space": space}
     why = stale(MISSION_STAMP, MISSION_INPUTS, mission_inputs) if have and not tracked else None
     if have and (tracked or (not pc_roots and not a.rebake and why is None)):
         print(f"   already there ({MISSIONS})")
     else:
         if why:
             print(f"   making the missions again: {why}")
-        run([sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"), "--ps2-only", "--lua-root", lua_root, "--out", MISSIONS] + (["--space"] if space else []) + correction_args, env=mission_env)
+        run([sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"), "--ps2-only", "--lua-root", mission_lua_root, "--out", MISSIONS] + (["--space"] if space else []) + correction_args, env=mission_env)
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(MISSION_STAMP, "w") as fh:
@@ -639,7 +645,7 @@ def main():
     step("5/6 the bake")
     bash = find_bash()
     bake_env = dict(os.environ)
-    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR"):
+    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY"):
         bake_env.pop(name, None)  # the scan's choice is the whole story
     bake_env.update(input_scan.bake_env(plan))
     bake_env["OPENBF_INPUTS_CHOSEN"] = "1"  # rebake.sh need not scan again

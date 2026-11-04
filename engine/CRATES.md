@@ -99,7 +99,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/map/render_offsets_data3.rs` 814 — PC2 Felucia bladder donor-relative vertex instructions under its distinct fingerprint.
 - `bake/src/map/render_reassembly.rs` 613 — rejoin verified donor-only Jabba room/pipe, Polis Massa platform and capital-ship LOWD panels into canonical render models without changing simulation placements or collision · `models`
 - `bake/src/map/texture_alias.rs` 238 — bind native donor far artwork under the public corrected sky name, preserving both tiers and optional-file lifecycle · `far_alias`, `install`
-- `bake/src/map/render_recovery.rs` 621 — exact shared-LVL presentation lookup and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
+- `bake/src/map/render_recovery.rs` 646 — exact shared-LVL presentation lookup, Jabba axe sheet and source-art recovery for differently partitioned map structures · `shared`, `pieces`; collision and world records remain unchanged.
 - `bake/src/map/render_symmetry.rs` 450 — restore missing DEA1 door halves, fit the lower frame from donor opening profiles and share canonical leaf motion · `enabled`, `model`, `door_parts`.
 - `bake/src/map/render_chamber.rs` 145 — fingerprinted Xbox HIGH/LOWD chamber annex drawing clipped from canonical contact surfaces, retaining the donor core and donor UV projection · `Chamber`.
 - `bake/src/map/render_cloudcity.rs` 90 — copies fingerprinted donor bars into the Cloud City ramp drawing; retains donor topology/materials and canonical simulation inputs · `models`
@@ -110,7 +110,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/map/render_conform.rs` 814 — fingerprinted plant/tunnel/cliff contact drawing from active collision with donor materials/UVs, planar hangar UV continuation and accepted HIGH-stream reuse for hangar LOWD, preserving gameplay headers · `Conformation`.
 - `bake/src/map/collision_standin.rs` 719 — lower-detail missing-model stand-ins from corrected collision shapes and own-copy material/UV projection · `fit`; called only for measured absent model types.
 - `bake/src/side_classes.rs` 66 — pull BF2 SIDE/TUR.LVL classes placed by a map but absent from its LVL · `side_classes_lvl`, `pull_side_classes`; joined by `bake/src/map/content.rs`.
-- `bake/src/shell.rs` 373 — BF2 shell logo, menu movie packs and music bake · `bake_shell`, `mvs_segments`, `movie_segments`, `read_movie`; ISO fallback and transcode/output rules in the module header (`analysis/re-bf2-shell.md` §1, §4).
+- `bake/src/shell.rs` 395 — BF2 shell logo, menu movie packs and music bake · `bake_shell`, `mvs_segments`, `movie_segments`, `read_movie`; ISO fallback and transcode/output rules in the module header (`analysis/re-bf2-shell.md` §1, §4).
+- `bake/src/shell_pc.rs` 66 — fingerprinted PC galaxy loops and original Instant Action backdrop; preserves console screen structure.
 - `bake/src/alpha.rs` 1403 — PROVISIONAL per-draw ALPHA RULE v2 and BF1/BF2 ELF overrides · `verdict`, `census_verdict`, `bf1_elf_verdict`, `bf2_elf_verdict`, `Bf1Class`, `disc_alpha_tests`, `keep_alpha`; rule, sky exception and census switch in the module header (`analysis/re-material-flags.md`).
 - `bake/src/spec.rs` 237 — PROVISIONAL specular-pass bake and shared CORE textures/table · `spec_pass`, `SpecPass`, `pass_textures`, `bake_table`, `bake_core_texture`; alpha retention and pass rules in the module/API docs (`analysis/re-specular-pass.md`, [O]).
 - `bake/src/tier.rs` 1100 — texture tiers: PS2, or a larger same-art donor · `Tier`, `tier2`, `same_art`
@@ -1008,6 +1009,6 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `game/tests/suite/rocket_visible.rs` 396 — all-side rocket/torpedo/recoilless/guided mesh census, faithful trail-only pins, headless side/head pixels and display-loop captures across source bakes.
 
-- `bake/src/map/render_textures.rs` 199 — missing donor sheets, fingerprinted turret alias and same-art full-size coarse atlases · `recover`, `larger_own`.
+- `bake/src/map/render_textures.rs` 302 — missing donor sheets, fingerprinted PC snow/console replacements, turret alias and same-art full-size coarse atlases · `recover`, `larger_own`.
 
 - `game/tests/suite/donor_materials.rs` 287 — owned map material census, unchanged gameplay manifests and serial headless normal-water captures.

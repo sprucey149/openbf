@@ -8,7 +8,11 @@ pub(super) fn recover(
     expanded: &[Chunk<'_>],
     pc: Option<&PcTextures>,
     all_textures: &mut Vec<Texture>,
+    primary_pc: bool,
 ) -> Result<()> {
+    if primary_pc {
+        own_pc_replacements(all_textures);
+    }
     // Only donor gameplay streams enter this path; a PS2 bake stays identical.
     // Import dependencies before alpha classification, so a recovered glow or
     // cutout uses its real mask rather than the missing-image default.
@@ -67,6 +71,64 @@ pub(super) fn recover(
         }
     }
     Ok(())
+}
+
+/// The PC models themselves name two sheets absent from both retail PC
+/// installs. Deliberate presentation replacements: the map's snow painting
+/// and a crop of its blue console display. These are not same-art aliases.
+/// Exact supplied sheets win; changed source paintings remain unresolved.
+fn own_pc_replacements(textures: &mut Vec<Texture>) {
+    for (missing, source, width, height, hash, crop) in [
+        (
+            "rhn_bldg_snow_2",
+            "rhn2_main_1",
+            256,
+            256,
+            0x67e6_ca4f_ccab_11fa,
+            None,
+        ),
+        (
+            "mus1_prop_console_fx",
+            "tan4_prop_console",
+            512,
+            512,
+            0xb40f_7442_ecff_a762,
+            Some([64, 112, 192, 160]),
+        ),
+    ] {
+        if textures
+            .iter()
+            .any(|t| t.name.eq_ignore_ascii_case(missing))
+        {
+            continue;
+        }
+        let Some(t) = textures
+            .iter()
+            .find(|t| t.name.eq_ignore_ascii_case(source))
+        else {
+            continue;
+        };
+        let pixels = t.rgba8(0);
+        let actual = pixels.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3)
+        });
+        if (t.info.width, t.info.height, actual) != (width, height, hash) {
+            continue;
+        }
+        let mut replacement = Resolved::from_ps2(t);
+        if let Some([x, y, w, h]) = crop {
+            let mut cropped = Vec::with_capacity((w * h * 4) as usize);
+            for row in y..y + h {
+                let start = ((row * width + x) * 4) as usize;
+                cropped.extend_from_slice(&pixels[start..start + (w * 4) as usize]);
+            }
+            replacement.width = w;
+            replacement.height = h;
+            replacement.mips = vec![cropped];
+        }
+        textures.push(replacement.as_texture(missing));
+        eprintln!("render texture replacement: {missing} <- own {source}, crop {crop:?}");
+    }
 }
 
 pub(super) fn larger_own(
@@ -128,6 +190,47 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "owned PC maps: OPENBF_PC_RHN2 and OPENBF_PC_MUS1"]
+    fn owned_pc_replacements_preserve_exact_sheets_and_refuse_changed_art() {
+        for (key, missing, source, size) in [
+            (
+                "OPENBF_PC_RHN2",
+                "rhn_bldg_snow_2",
+                "rhn2_main_1",
+                (256, 256),
+            ),
+            (
+                "OPENBF_PC_MUS1",
+                "mus1_prop_console_fx",
+                "tan4_prop_console",
+                (192, 160),
+            ),
+        ] {
+            let bytes = std::fs::read(std::env::var(key).expect(key)).unwrap();
+            let items = mungefs::content_chunks(mungefs::open(&bytes).unwrap()).unwrap();
+            let source = items
+                .iter()
+                .filter(|c| &c.tag == b"tex_")
+                .filter_map(|c| Texture::parse(c).ok())
+                .find(|t| t.name == source)
+                .unwrap();
+            let mut textures = vec![Resolved::from_ps2(&source).as_texture(&source.name)];
+            own_pc_replacements(&mut textures);
+            assert_eq!(textures.len(), 2);
+            assert_eq!(textures[1].name, missing);
+            assert_eq!(textures[1].mip_dims(0), size);
+            let exact = textures[1].rgba8(0);
+            own_pc_replacements(&mut textures);
+            assert_eq!(textures.len(), 2);
+            assert_eq!(textures[1].rgba8(0), exact);
+            textures.truncate(1);
+            textures[0].mips[0][100] ^= 1;
+            own_pc_replacements(&mut textures);
+            assert_eq!(textures.len(), 1, "changed {key}");
+        }
+    }
+
+    #[test]
     #[ignore = "owned Xbox/PS2 space LVLs: OPENBF_DONOR_TURRET and OPENBF_PS2_TURRET"]
     fn owned_turret_alias_refuses_changed_art() {
         let read = |key| std::fs::read(std::env::var(key).expect(key)).unwrap();
@@ -154,7 +257,7 @@ mod tests {
         assert_eq!(canonical.rgba8(0), find("imp_bldg_boxturret").rgba8(0));
         let mut good = textures();
         assert!(!good.iter().any(|t| t.name == "spa1_weap_boxturret"));
-        recover(&items, None, &mut good).unwrap();
+        recover(&items, None, &mut good, false).unwrap();
         let alias = good
             .iter()
             .find(|t| t.name == "spa1_weap_boxturret")
@@ -174,12 +277,12 @@ mod tests {
                 .unwrap();
             *original = Resolved::from_ps2(original).as_texture("imp_bldg_boxturret");
             original.mips[0][index] ^= 1;
-            recover(&items, None, &mut bad).unwrap();
+            recover(&items, None, &mut bad, false).unwrap();
             assert!(!bad.iter().any(|t| t.name == "spa1_weap_boxturret"));
         }
         let mut exact = textures();
         exact.push(find("spa1_weap_boxturret"));
-        recover(&items, None, &mut exact).unwrap();
+        recover(&items, None, &mut exact, false).unwrap();
         assert_eq!(
             exact
                 .iter()

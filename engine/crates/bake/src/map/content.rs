@@ -288,7 +288,12 @@ pub(super) fn bake_content(
         }
     }
     if original.is_some() {
-        super::render_textures::recover(&expanded, pc.as_ref(), &mut all_textures)?;
+        super::render_textures::recover(
+            &expanded,
+            pc.as_ref(),
+            &mut all_textures,
+            !crate::xbox::lvl_is_xbox(lvl_path)?,
+        )?;
     }
     let alpha_table = crate::alpha::AlphaTable::new(&all_textures);
     // Card TBIND (`crate::bind_pose`): a model with a `skel` is written in

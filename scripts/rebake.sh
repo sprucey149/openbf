@@ -75,6 +75,7 @@ fi
 # empty for anything not chosen. Under pack.py the choice arrives in the environment.
 SCAN_PC1=""; SCAN_PC2=""; SCAN_XB1=""; SCAN_XB2=""; SCAN_BF2_CONSOLE_ISO=""
 SCAN_OPENBF_BF1_TREE=""; SCAN_OPENBF_BF2_TREE=""
+SCAN_OPENBF_PC_ONLY=""
 SCAN_OPENBF_DLC_DIR=""; SCAN_OPENBF_DLC_DONOR=""
 SCAN_OPENBF_BF1_WITHHELD=""; SCAN_OPENBF_BF2_WITHHELD=""
 if [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
@@ -86,6 +87,7 @@ if [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
 fi
 OPENBF_BF1_TREE="${OPENBF_BF1_TREE:-$SCAN_OPENBF_BF1_TREE}"
 OPENBF_BF2_TREE="${OPENBF_BF2_TREE:-$SCAN_OPENBF_BF2_TREE}"
+OPENBF_PC_ONLY="${OPENBF_PC_ONLY:-$SCAN_OPENBF_PC_ONLY}"
 BF2_CONSOLE_ISO="${BF2_CONSOLE_ISO:-$SCAN_BF2_CONSOLE_ISO}"
 # Xbox texture donors: the trees `bake extract-xiso` wrote. Empty until pack.py chooses an Xbox disc.
 XB1="${XB1:-$SCAN_XB1}"; XB2="${XB2:-$SCAN_XB2}"
@@ -127,8 +129,9 @@ for game in 1 2; do
 done
 
 E="$ROOT/extracted"
-# Console BF2 exclusively supplies the shared menus, shell and HUD. PC assets
-# can replace map/side art, but cannot supply those console-only assets.
+# The selected BF2 copy supplies the shared menus, shell and BF2 HUD. A PC BF1 + PC BF2 pair builds
+# through pack.py (its scan sets OPENBF_BF2_TREE and OPENBF_PC_ONLY); run directly with PC inputs and no
+# scan, this script still asks for a console BF2 disc.
 # OPENBF_BF*_TREE: a game the scan chose non-PS2 gameplay data for (no PS2 copy).
 UI2="${OPENBF_BF2_TREE:-$E/bf2/lvl/DATA/_LVL_PS2}"
 if [ -n "$CLI_PC_DIR${PC1:-}${PC2:-}" ] && [ -z "${OPENBF_BF2_TREE:-}" ]; then
@@ -322,7 +325,8 @@ if want common; then
   # The disc image is the one the scan chose (a worktree without iso/ scans the
   # main checkout's).
   UI_SOUND2="$E/bf2/sound/DATA/_LVL_PS2"
-  [ -d "$UI_SOUND2" ] || UI_SOUND2="$UI2"
+  if [ "${OPENBF_PC_ONLY:-}" = 1 ] || [ ! -d "$UI_SOUND2" ]; then UI_SOUND2="$UI2"; fi
+  echo "Shared UI: $UI2; shell sound: $UI_SOUND2"
   MVS="$(ci "$UI2" MOVIES/SHELL.MVS)"
   [ -f "$MVS" ] || MVS="$BF2_CONSOLE_ISO"
   if [ ! -f "$MVS" ]; then

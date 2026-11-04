@@ -481,12 +481,13 @@ class Matrix(unittest.TestCase):
                 sources1, sources2 = set(bf1.split('+')), set(bf2.split('+'))
                 console2 = 'ps2' in sources2 or ('xbox' in sources2 and xbox_on)
                 primary1 = 'ps2' in sources1 or ('xbox' in sources1 and xbox_on) or 'pc' in sources1
-                self.assertEqual(not plan['refusals'], console2 and primary1, plan['refusals'])
+                combined_pc = 'pc' in sources1 and 'pc' in sources2
+                self.assertEqual(not plan['refusals'], (console2 or combined_pc) and primary1, plan['refusals'])
                 if plan['refusals']:
                     continue
                 kind = plan['games']['bf1']['gameplay']['kind']
                 self.assertEqual(kind, 'ps2-disc' if 'ps2' in sources1 else 'xbox-disc' if 'xbox' in sources1 and xbox_on else 'pc-install')
-                self.assertEqual(plan['games']['bf2']['gameplay']['kind'], 'ps2-disc' if 'ps2' in sources2 else 'xbox-disc')
+                self.assertEqual(plan['games']['bf2']['gameplay']['kind'], 'ps2-disc' if 'ps2' in sources2 else 'xbox-disc' if console2 else 'pc-install')
                 env = scan.bake_env(plan)
                 self.assertEqual('OPENBF_BF1_TREE' in env, kind != 'ps2-disc')
                 # A PC install is the data or a donor, never both.
@@ -523,9 +524,35 @@ class Messages(unittest.TestCase):
         iso_image(self.root / 'a', 'bf1')
         pc_install(self.root / 'pc', 'bf2')
         self.assertEqual(self.refusals(), [
-            f'PC input requires a console Battlefront II disc: add a PS2 BF2 disc (Xbox BF2 input is not supported yet) to {self.root}.'])
+            scan.console_needed_message(False, str(self.root))])
         self.assertEqual(self.refusals(xbox_supported=True), [
-            f'PC input requires a console Battlefront II disc: add a PS2 BF2 disc or an Xbox BF2 disc to {self.root}.'])
+            scan.console_needed_message(True, str(self.root))])
+
+    def test_two_pc_installs_use_only_the_selected_copies(self):
+        for game in ('bf1', 'bf2'):
+            pc_install(self.root / game, game)
+        plan = scan.scan([self.root], extracted=str(self.root / 'empty'))
+        self.assertEqual(plan['refusals'], [])
+        self.assertEqual(plan['source_plan']['kind'], 'pc-only')
+        self.assertFalse(plan['source_plan']['console_donors'])
+        env = scan.bake_env(plan)
+        self.assertEqual(env['OPENBF_PC_ONLY'], '1')
+        self.assertEqual(set(env), {'OPENBF_PC_ONLY', 'OPENBF_BF1_TREE', 'OPENBF_BF2_TREE'})
+        self.assertEqual(scan.discs_to_extract(plan), [])
+        extracted = self.root / 'old-extraction'
+        for game in ('bf1', 'bf2'):
+            tree(extracted / game / 'lvl/DATA/_LVL_PS2', game, 'ps2')
+        cached = scan.scan([self.root / 'bf1', self.root / 'bf2'], extracted=str(extracted))
+        self.assertEqual(cached['games'], plan['games'])
+        self.assertEqual(cached['source_plan'], plan['source_plan'])
+
+    def test_single_pc_games_still_need_both_games(self):
+        for game in ('bf1', 'bf2'):
+            with self.subTest(game=game), tempfile.TemporaryDirectory() as temp:
+                pc_install(Path(temp) / 'pc', game)
+                plan = scan.scan([temp])
+                self.assertTrue(plan['refusals'])
+                self.assertIn('both games needed', ' '.join(plan['refusals']))
 
     def test_xbox_until_it_is_switched_on(self):
         disc = xbox_image(self.root / 'x', 'bf2')

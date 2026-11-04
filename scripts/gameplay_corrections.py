@@ -29,6 +29,10 @@ SCHEMA = 2
 REGION_SETTING = re.compile(r"shadow[0-9]* ?[a-z0-9 =,.]*")
 # How far past the boundary an in-bound query can read terrain: the hover gun's aim ray (AIM_RAY in the sim).
 HEIGHT_REACH = 512.0
+# The BF1 console common turret's stop cue includes a loader qualifier. PC
+# omits this whole property, so retaining only donor hashes loses the cue.
+# Keep this measured token pair, without treating arbitrary prose as data.
+KNOWN_PROPERTY_TOKENS = {0xc13068b6: {"turret_whir_end defer": ["turret_whir_end", "defer"]}}
 
 
 def compact_numbers(value):
@@ -68,7 +72,7 @@ def props(payload):
         if key in table.PRESENTATION:
             continue
         raw = census.cstr(value[4:])
-        parsed = census.property_value(key, raw)
+        parsed = KNOWN_PROPERTY_TOKENS.get(key, {}).get(raw, census.property_value(key, raw))
         if parsed == "NM":
             # Unknown/free-text properties cannot be exported. The caller keeps
             # an explicit exclusion so this does not become an invented zero.
@@ -219,6 +223,7 @@ def identity(resource):
 def preserve_hashes(payload):
     return sorted({struct.unpack_from("<I", p)[0] for t, p in geometry.chunks(payload)
                    if t == b"PROP" and len(p) >= 5 and struct.unpack_from("<I", p)[0] not in table.PRESENTATION
+                   and census.cstr(p[4:]) not in KNOWN_PROPERTY_TOKENS.get(struct.unpack_from("<I", p)[0], {})
                    and census.property_value(struct.unpack_from("<I", p)[0], census.cstr(p[4:])) == "NM"})
 
 
@@ -485,7 +490,12 @@ def script_facts(scripts, name, game):
 
 
 def mission_differences(rows, reference_lvl, donor_lvl, game):
-    """Add every fact the donor's own script would get wrong, which the table's declared facts do not already settle."""
+    """Settle donor differences and required declarations for console-free imports."""
+    import gen_missions
+    from gameplay_missions import REQUIRED, unknown
+
+    supported = {script for _, source, _, eras in gen_missions.MAPS if source == game
+                 for _, script in eras.values()}
     reference, donor = mission_scripts(reference_lvl), mission_scripts(donor_lvl)
     added = 0
     for row in rows:
@@ -495,7 +505,13 @@ def mission_differences(rows, reference_lvl, donor_lvl, game):
         target = script_facts(reference, name, game)
         theirs = script_facts(donor, name, game) if name in donor else {}
         for field, value in target.items():
-            if value != theirs.get(field) and (field not in row["facts"] or row["facts"][field] != value):
+            # Equal donor declarations still need an absolute target when the
+            # reference census marked a branched/helper declaration unmeasured.
+            # Use exactly the console generator's existing call fold, including
+            # space's common setup; never turn an unresolved value into a default.
+            required = (name in supported and field in REQUIRED and not unknown(value)
+                        and all(str(team) in value for team in (1, 2)))
+            if (required or value != theirs.get(field)) and row["facts"].get(field) != value:
                 row["facts"][field] = value
                 added += 1
     return added

@@ -48,6 +48,17 @@ fields remain `NM` where identified. These declarations are not authoritative
 evaluated missions. The broader `static_calls` evidence is excluded from this
 table, and complete executed mission values remain unmeasured.
 
+The PC BF2 correction table also carries the existing console mission
+generator's required team declarations for `hot1g_con`, `spa1g_ass`,
+`spa3c_ass`, `spa6c_ass`, `spa7c_ass`, `spa8g_ass` and `spa9g_ass`.
+`gameplay_corrections.script_facts` uses the same call fold and space common
+setup as `gen_missions.build`; equal donor facts still need absolute table
+entries when no console Lua is supplied. Hoth retains 150 tickets per team;
+space retains -1 (no ticket limit). This adds names and numbers, not scripts.
+The combined-PC regression constructs all 67 missions without console scripts
+and compares their gameplay records with the console-generated controls.
+Dynamic callback and original-game play acceptance remain separate.
+
 The original `ps2-v1` files remain reference exports. The correction revision
 below derives the donor-specific overrides consumed by the bake. A table by
 itself does not establish an equal world or remove other source dependencies.
@@ -124,8 +135,9 @@ prose also need source assets or newly authored replacements. Tables can specify
 layout coordinates and name mappings, but cannot make differing art identical. See
 the dependency inventory for measured missing names.
 
-The current input policy requires a PS2 or Xbox BF2 disc with any PC input and
-refuses PC-only builds. Xbox can supply either game, and PC BF1 can supply BF1.
+The current input policy accepts PC BF1 and PC BF2 together without any console disc; a single PC
+game alone is refused ("both games needed"). Xbox can supply either game, and PC BF1 can supply BF1
+beside a console BF2.
 The current map exclusions and measured limits are in [source-gates.md](source-gates.md).
 Source acceptance does not itself establish geometry equivalence.
 
