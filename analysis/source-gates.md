@@ -15,11 +15,16 @@ project artwork and its fingerprinted galaxy movies replace the console ship loo
 The PC Citadel snowdrift and Mustafar console models themselves reference sheets absent from both PC installs.
 The PC-primary bake makes two explicit appearance substitutions, gated by decoded pixel fingerprints: Citadel uses its
 own `rhn2_main_1` snow sheet for `rhn_bldg_snow_2`; Mustafar uses rectangle (64,112,192,160) of its own 512-square
-`tan4_prop_console` blue display for `mus1_prop_console_fx`. These are local artwork replacements, not same-art proofs.
-An exact sheet takes precedence and changed donor pixels do not receive the substitution. Jabba's axe instead resolves
+`tan4_prop_console` blue display for `mus1_prop_console_fx`. These substitutions use local artwork. A map-local exact sheet
+takes precedence. The fingerprinted PC substitutions are checked before looking in supplied donor LVLs. Jabba's axe resolves
 the exact `gam_1st_weap_inf_axe` sheet from the same copy's SIDE/GAM LVL. No console artwork is borrowed. Placement,
 collision, navigation and mission rules do not change. Existing PC BF1 packages also gain the snow sheet and the
 canonical turret stop cue; those are intentional presentation corrections, rather than byte-identical output claims.
+
+Xbox Mustafar has six affected draws across the control and conference buildings. The Xbox-primary bake first checks for an
+exact supplied sheet. Otherwise, a fingerprinted retail Mustafar bake can use the same rectangle from the Xbox disc's own
+Tantive IV atlas. Its DXT1 top mip matches the PC atlas's DXT1 top mip. The PS2 disc supplies its own native 64×64 Mustafar sheet.
+The bake adds one display texture shared by all six slots.
 
 Nothing outside the public code and the player's own files is read. Each correction row is an instruction list over the donor
 file, and the bake refuses a file whose fingerprint or rebuilt result differs from the table's, so `rebake.sh` needs no gameplay
@@ -67,12 +72,14 @@ solid, which has not been looked at.
 
 ## Bytes per source
 
+Table and instruction file sizes measured November 3, 2026. The PC TAT3 locator adds 56 bytes to the BF2 PC table.
+
 | Source | Table | Instructions |
 |---|---:|---:|
-| bf1-pc | 1,938,038 | 515,828 |
-| bf1-xbox | 1,332,492 | 317,793 |
-| bf2-xbox | 1,060,608 | 407,605 |
-| bf2-pc | 1,899,665 | 585,269 |
+| bf1-pc | 2,076,951 | 515,828 |
+| bf1-xbox | 1,471,153 | 317,793 |
+| bf2-xbox | 1,077,861 | 407,605 |
+| bf2-pc | 1,924,166 | 585,269 |
 
 The table includes names, classes, world records, height rows and height fills. These tables replace 2.6 MB of unique private
 collision plus navigation, skeleton and animation files, which no build reads any more.
@@ -137,6 +144,18 @@ With a fresh Xbox Jabba map bake and the retained source-specific common/side as
 build through four complete Normal Conquest rounds: Galactic Civil War seeds 42 and 7 (10,937 and 10,280 ticks), and Clone Wars seeds
 42 and 7 (11,282 and 10,284 ticks). These are automated source comparisons, not a comparison with a running PS2 or a live play check.
 The separate droid-parts render prop is now recovered with a lower-detail local textured stand-in.
+
+PC BF2 carries the same single WATR cell. Its payload matches the Xbox payload byte for byte and the
+PS2 terrain stub has none. In the PC-only build's Normal Conquest seed 42 trace, the first split was at
+tick 1293. Unit 18 selected the same position in both builds, but the PC table assigned it index 1359
+instead of 1380. The missing 21 earlier entries change the held index that the simulation hashes.
+The PC TAT3 fingerprint now selects the same terrain locator as Xbox before the map bake reads water.
+
+A fresh PC TAT3 map bake kept its collision and navigation fingerprints and all other map files, with only the
+manifest water field cleared and `water.glb` removed. It matched the PS2-source build at every tick of four complete
+Normal Conquest rounds. Galactic Civil War seeds 42 and 7 finished in 13,785 and 10,394 ticks. Clone Wars seeds 42 and
+7 finished in 13,907 and 12,065 ticks. These runs used the fresh PC map with retained source-specific common and side
+assets and missions.
 
 ## Jabba render-piece reassembly
 

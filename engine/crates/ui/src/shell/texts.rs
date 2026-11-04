@@ -191,7 +191,20 @@ impl IaTexts {
             t: OPTION_TEXTS
                 .iter()
                 .chain(SMALL_TEXTS.iter())
-                .map(|&(k, e)| (k, text(k, e)))
+                .map(|&(k, e)| {
+                    let localized = text(k, e);
+                    // PC builds these controls beside label-only Locl strings.
+                    // Our console-shaped shell needs the complete row template,
+                    // independently of which row currently has focus.
+                    let row = if e.contains("{OptionL}")
+                        && (!localized.contains("{OptionL}") || !localized.contains("{OptionR}"))
+                    {
+                        e.to_owned()
+                    } else {
+                        localized
+                    };
+                    (k, row)
+                })
                 .collect(),
         }
     }
@@ -350,5 +363,37 @@ impl IaTexts {
             Opt::HunScore => pieces(self.get("ifs.mp.create.opt.scorelimit"), &[&n(v.hun_score)]),
             Opt::AssScore => pieces(self.get("ifs.mp.create.opt.scorelimit"), &[&n(v.ass_score)]),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pc_label_only_strings_still_build_complete_console_controls() {
+        let texts = IaTexts::new(&|key, english| match key {
+            "ifs.mp.createopts.difficulty" => "AI Difficulty Level:".into(),
+            "ifs.mp.create.opt.timer" => "Timer:".into(),
+            _ => english.to_owned(),
+        });
+        let options = SessionOptions::default();
+        for (opt, expected) in [(Opt::AiDifficulty, " Normal "), (Opt::ConTimer, " Off ")] {
+            let row = texts.option(opt, &options);
+            assert!(row.contains(&Piece::Left));
+            assert!(row.contains(&Piece::Right));
+            assert!(row.contains(&Piece::Text(expected.into())), "{row:?}");
+        }
+        // Complete console templates and their translated value are retained.
+        let console = IaTexts::new(&|key, english| {
+            if key == "ifs.difficulty.medium" {
+                "Translated".into()
+            } else {
+                english.into()
+            }
+        });
+        assert!(console
+            .option(Opt::AiDifficulty, &options)
+            .contains(&Piece::Text(" Translated ".into())));
     }
 }

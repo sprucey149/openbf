@@ -4,9 +4,9 @@ use crate::ai::draw::{unit_unit, SALT_CIRCLE, SALT_GRENADE, SALT_HOLD, SALT_REAC
 use crate::ai::state::{AiState, FightState, HoldState, LostState, NavTick, SteerPick};
 use crate::ai::{
     CIRCLE_PAUSE, CIRCLE_STOP, FIGHT_SPACING, FIGHT_STEP, HOLD_CLOSE, HOLD_COMMIT,
-    HOLD_MOVE_PERIOD, HOLD_SPACING, HOLD_SPOT_RADIUS, HOLD_STRAFE, LOST_JUMP_AGAIN,
+    HOLD_MOVE_PERIOD, HOLD_SPACING, HOLD_SPOT_RADIUS, HOLD_STRAFE, HULL_PUSH_MIN, LOST_JUMP_AGAIN,
     LOST_JUMP_CLEAR, PROBE_DIST, REACT_COOLDOWN, REACT_STEP, RING_BACK, RING_SNAP, ROLL_LANE,
-    ROLL_LEAD, ROLL_PAST, ROLL_REACH, STAND_CROUCH, STAND_SHARE,
+    ROLL_LEAD, ROLL_PAST, ROLL_REACH, STAND_CROUCH, STAND_SHARE, STUCK_PROGRESS, STUCK_WINDOW,
 };
 use crate::fmath;
 use crate::nav;
@@ -569,23 +569,40 @@ pub(in crate::ai) fn lost_jump(
     pick: SteerPick,
     l: &mut LostState,
 ) -> bool {
-    if pick == SteerPick::Fwd || !u.soldier.grounded || sim.tick < l.jump_after {
+    if !u.soldier.grounded || sim.tick < l.jump_after {
         return false;
     }
     let cap = u.capsule();
-    if sim
-        .collision
-        .wall_sweep(&cap.stepped(), d, PROBE_DIST)
-        .is_none()
-    {
+    let wall_ahead = || {
+        sim.collision
+            .wall_sweep(&cap.stepped(), d, PROBE_DIST)
+            .is_some()
+    };
+    // OURS: a pinned return can report an open probe while the full capsule
+    // cancels its step on a low ledge. Use that physical contact only here.
+    // trace: compare a PS2 soldier's escape at the Yavin Bazaar riser.
+    let hidden_ledge = pick == SteerPick::Fwd;
+    if hidden_ledge {
+        if !l.pinned
+            || u.droideka.is_some()
+            || u.soldier.stance != crate::soldier::Stance::Stand
+            || u.wall_push.dot(d) >= -HULL_PUSH_MIN
+            || u.soldier.vel.dot(d).abs() * crate::TICK_DT
+                >= STUCK_PROGRESS / f32::from(STUCK_WINDOW)
+            || wall_ahead()
+        {
+            return false;
+        }
+    } else if !wall_ahead() {
         return false; // a drop or a barrier, not a wall
     }
     let mut over = cap;
     over.base += Vec3::Y * LOST_JUMP_CLEAR;
-    if sim
-        .collision
-        .wall_sweep(&over, d, PROBE_DIST + 0.5)
-        .is_some()
+    if (hidden_ledge && sim.collision.ceiling_sweep(&cap, &over).is_some())
+        || sim
+            .collision
+            .wall_sweep(&over, d, PROBE_DIST + 0.5)
+            .is_some()
     {
         return false; // too high to jump
     }

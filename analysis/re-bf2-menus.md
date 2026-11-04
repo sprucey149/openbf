@@ -1076,41 +1076,40 @@ Other BF1 IA text [V]: "AVAILABLE MAPS:", "SELECTED MAPS:", "PICK ERA:", "CONTIN
 planet also has a bare name key `planets.<p>.name` ("BESPIN"), but IA does not use it.
 
 ### Merged list for the port (40 maps + All Maps)
-Rule [D]: BF2's ascending sort, run on `"<English name> (bfN)"`. A raw byte `<` (what BF2 does) mixes cases badly here
-because BF1's text is capitals: "KASHYYYK: DOCKS (bf1)" sorts before "Kamino (bf2)", and every BF1 "X:" row lands
-before the BF2 "X" row. Recommended: case-fold the name, then compare. The suffix then decides nothing between
-different names. "Hoth (bf2)" comes before "HOTH: ECHO BASE (bf1)" because ' ' < ':'. The suffix only breaks
+Rule [D]: sort the merged labels case-insensitively. The port title-cases BF1's all-capital English names
+to match BF2's mixed-case labels, then appends the same lowercase game tags. "Hoth (bf2)" comes before
+"Hoth: Echo Base (bf1)" because the space sorts before the colon. The suffix only breaks
 exact-name ties, and there are none. Case-folded order:
 
 | # | row text | code | game | eras | modes | desc source | preview |
 |---|---|---|---|---|---|---|---|
-| 1 | BESPIN: CLOUD CITY (bf1) | bes2 | bf1 | CW GCW | con | none | BES2fly |
-| 2 | BESPIN: PLATFORMS (bf1) | bes1 | bf1 | CW GCW | con | none | BES1fly |
+| 1 | Bespin: Cloud City (bf1) | bes2 | bf1 | CW GCW | con | none | BES2fly |
+| 2 | Bespin: Platforms (bf1) | bes1 | bf1 | CW GCW | con | none | BES1fly |
 | 3 | Coruscant (bf2) | cor1 | bf2 | CW GCW | con ctf | mapname.description.cor1 | none |
 | 4 | Dagobah (bf2) | dag1 | bf2 | CW GCW | con ctf | ...dag1 | none |
 | 5 | Death Star (bf2) | dea1 | bf2 | CW GCW | con 1flag | ...dea1 | none |
 | 6 | Endor (bf2) **C** | end1 | bf2 | GCW | con hunt 1flag | ...end1 | none |
-| 7 | ENDOR: BUNKER (bf1) **C** | end1 | bf1 | GCW | con | none | END1fly |
+| 7 | Endor: Bunker (bf1) **C** | end1 | bf1 | GCW | con | none | END1fly |
 | 8 | Felucia (bf2) | fel1 | bf2 | CW GCW | con 1flag | ...fel1 | none |
 | 9 | Geonosis (bf2) **C** | geo1 | bf2 | CW | con ctf hunt | ...geo1 | none |
-| 10 | GEONOSIS: SPIRE (bf1) **C** | geo1 | bf1 | CW | con | none | GEO1fly |
+| 10 | Geonosis: Spire (bf1) **C** | geo1 | bf1 | CW | con | none | GEO1fly |
 | 11 | Hoth (bf2) **C** | hot1 | bf2 | GCW | con 1flag hunt | ...hot1 | none |
-| 12 | HOTH: ECHO BASE (bf1) **C** | hot1 | bf1 | GCW | con | none | HOT1fly |
+| 12 | Hoth: Echo Base (bf1) **C** | hot1 | bf1 | GCW | con | none | HOT1fly |
 | 13 | Jabba's Palace (bf2) | tat3 | bf2 | CW GCW | con 1flag | ...tat3 | none |
 | 14 | Kamino (bf2) **C** | kam1 | bf2 | CW GCW | con 1flag | ...kam1 | none |
-| 15 | KAMINO: TIPOCA CITY (bf1) **C** | kam1 | bf1 | CW | con | none | KAM1fly |
+| 15 | Kamino: Tipoca City (bf1) **C** | kam1 | bf1 | CW | con | none | KAM1fly |
 | 16 | Kashyyyk (bf2) **C** | kas2 | bf2 | CW GCW | con ctf hunt(CW) | ...kas2 | none |
-| 17 | KASHYYYK: DOCKS (bf1) **C** | kas2 | bf1 | CW GCW | con | none | KAS2fly |
-| 18 | KASHYYYK: ISLANDS (bf1) | kas1 | bf1 | CW GCW | con | none | KAS1fly |
+| 17 | Kashyyyk: Docks (bf1) **C** | kas2 | bf1 | CW GCW | con | none | KAS2fly |
+| 18 | Kashyyyk: Islands (bf1) | kas1 | bf1 | CW GCW | con | none | KAS1fly |
 | 19 | Mos Eisley (bf2) **C** | tat2 | bf2 | CW GCW | con ctf hunt(G) eli(G) | ...tat2 | none |
 | 20 | Mustafar (bf2) | mus1 | bf2 | CW GCW | con ctf | ...mus1 | none |
 | 21 | Mygeeto (bf2) | myg1 | bf2 | CW GCW | con ctf | ...myg1 | none |
 | 22 | Naboo (bf2) **C** | nab2 | bf2 | CW GCW | con ctf hunt(CW) | ...nab2 | none |
-| 23 | NABOO: PLAINS (bf1) | nab1 | bf1 | CW GCW | con | none | NAB1fly |
-| 24 | NABOO: THEED (bf1) **C** | nab2 | bf1 | CW GCW | con | none | NAB2fly |
+| 23 | Naboo: Plains (bf1) | nab1 | bf1 | CW GCW | con | none | NAB1fly |
+| 24 | Naboo: Theed (bf1) **C** | nab2 | bf1 | CW GCW | con | none | NAB2fly |
 | 25 | Polis Massa (bf2) | pol1 | bf2 | CW GCW | con ctf | ...pol1 | none |
-| 26 | RHEN VAR: CITADEL (bf1) | rhn2 | bf1 | CW GCW | con | none | RHN2fly |
-| 27 | RHEN VAR: HARBOR (bf1) | rhn1 | bf1 | CW GCW | con | none | RHN1fly |
+| 26 | Rhen Var: Citadel (bf1) | rhn2 | bf1 | CW GCW | con | none | RHN2fly |
+| 27 | Rhen Var: Harbor (bf1) | rhn1 | bf1 | CW GCW | con | none | RHN1fly |
 | 28 | Space Felucia (bf2) | spa7 | bf2 | CW | ass 1flag | ...spa7 | none |
 | 29 | Space Hoth (bf2) | spa8 | bf2 | GCW | ass 1flag | ...spa8 | none |
 | 30 | Space Kashyyyk (bf2) | spa3 | bf2 | CW | ass 1flag | ...spa3 | none |
@@ -1118,12 +1117,12 @@ exact-name ties, and there are none. Case-folded order:
 | 32 | Space Tatooine (bf2) | spa9 | bf2 | GCW | ass 1flag | ...spa9 | none |
 | 33 | Space Yavin (bf2) | spa1 | bf2 | GCW | ass 1flag | ...spa1 | none |
 | 34 | Tantive IV (bf2) | tan1 | bf2 | CW GCW | con 1flag | ...tan1 | none |
-| 35 | TATOOINE: DUNE SEA (bf1) | tat1 | bf1 | CW GCW | con | none | TAT1fly |
-| 36 | TATOOINE: MOS EISLEY (bf1) **C** | tat2 | bf1 | CW GCW | con | none | TAT2fly |
+| 35 | Tatooine: Dune Sea (bf1) | tat1 | bf1 | CW GCW | con | none | TAT1fly |
+| 36 | Tatooine: Mos Eisley (bf1) **C** | tat2 | bf1 | CW GCW | con | none | TAT2fly |
 | 37 | Utapau (bf2) | uta1 | bf2 | CW GCW | con 1flag | ...uta1 | none |
 | 38 | Yavin 4 (bf2) **C** | yav1 | bf2 | CW GCW | con 1flag | ...yav1 | none |
-| 39 | YAVIN 4: ARENA (bf1) | yav2 | bf1 | CW GCW | con | none | YAV2fly |
-| 40 | YAVIN 4: TEMPLE (bf1) **C** | yav1 | bf1 | CW GCW | con | none | YAV1fly |
+| 39 | Yavin 4: Arena (bf1) | yav2 | bf1 | CW GCW | con | none | YAV2fly |
+| 40 | Yavin 4: Temple (bf1) **C** | yav1 | bf1 | CW GCW | con | none | YAV1fly |
 | 41 | All Maps | `_all_maps_` | - | | | mapname.description._all_maps_ | |
 
 **C** = collision. These codes exist in both games: end1, geo1, hot1, kam1, kas2, nab2, yav1, plus tat2 (BF2 Mos
@@ -1163,8 +1162,8 @@ are BF1-only; the BF2 ground maps without a BF1 counterpart are cor1 dag1 dea1 f
 
 - **Map list = both games** (the one deliberate difference). Row text "<name> (bf1)" / "<name> (bf2)". For BF2
   maps the name is `mapname.name.<code>` ("Hoth (bf2)"); for BF1 maps the BF1 key `planets.<p>.mapname<n>`
-  ("HOTH: ECHO BASE (bf1)" - the tiny font draws capitals either way). Sort: BF2's ascending sort, case-folded
-  (§6 merged table; a raw byte compare would split the games by case). Description box: BF2 `mapname.description.
+  ("Hoth: Echo Base (bf1)" after title-casing). Sort: BF2's ascending sort, case-folded
+  (§6 merged table). Description box: BF2 `mapname.description.
   <code>`; BF1 has none on its disc - show line 1 = the BF1 name and no body, or write a short line of our own
   [ours, flag it]. Preview: BF2's IA has none, so none for BF1 either (the BF1 `<CODE>fly` clips stay unused).
 - **Dimmed = the PS2's own style** (re-bf2-shell §3.3: label grey 110, focus skips). It exists for button stacks

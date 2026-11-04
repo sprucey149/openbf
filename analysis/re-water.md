@@ -859,8 +859,8 @@ The first-person distance-foley wake path is not reconstructed here; rings still
 follow first-person movement. Full original-game timing/appearance parity,
 catch-up-frame foot sampling and a per-map performance budget remain unmeasured.
 
-Source base: `af2d62158cad6866b71c51a86a9f833a0ea234db`, branch
-`codex/hoth-atmosphere`, with the scoped working-tree changes. Focused checks:
+Source base: `af2d62158cad6866b71c51a86a9f833a0ea234db` with the scoped
+working-tree changes. Focused checks:
 `cargo test -p game --lib water -- --nocapture` and
 `scripts/gpu_tests.sh --game water_fx::dagobah`. The GPU check uses the actual
 Dagobah scene, clone model, foot animation, wet cells and authored effects;

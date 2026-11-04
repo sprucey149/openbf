@@ -288,13 +288,16 @@ pub(super) fn bake_content(
             Err(e) => eprintln!("skipping tex_ 0x{:X}: {e}", c.offset),
         }
     }
-    if original.is_some() {
-        super::render_textures::recover(
-            &expanded,
-            pc.as_ref(),
-            &mut all_textures,
-            !crate::xbox::lvl_is_xbox(lvl_path)?,
-        )?;
+    if let Some(original) = original.as_deref() {
+        let primary_xbox = crate::xbox::lvl_is_xbox(lvl_path)?;
+        super::render_textures::recover(&expanded, pc.as_ref(), &mut all_textures, !primary_xbox)?;
+        if primary_xbox && kind == Content::Map {
+            super::render_textures::recover_xbox_mustafar(
+                Path::new(lvl_path),
+                original,
+                &mut all_textures,
+            )?;
+        }
     }
     let alpha_table = crate::alpha::AlphaTable::new(&all_textures);
     // Card TBIND (`crate::bind_pose`): a model with a `skel` is written in

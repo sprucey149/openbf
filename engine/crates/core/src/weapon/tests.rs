@@ -4,6 +4,7 @@ use super::*;
 use std::collections::HashMap;
 
 mod ammo;
+mod dispenser_bounds;
 
 #[test]
 fn shot_pattern_advances_wraps_and_participates_in_replay_hash() {

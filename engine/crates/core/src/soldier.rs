@@ -616,6 +616,11 @@ pub const WEDGE_MAX_DY: f32 = 0.005;
 /// update of the jump / fall states; PCSX2: 9.0986 -> 9.0546 m/s in one tick
 /// at |v| 12.12).
 pub const AIR_DRAG: f32 = 0.012;
+/// FC-FALL correction: four f32 epsilons (0.48 microseconds) absorb the
+/// 30-add error at one second. BF2's measured stand-to-fall transition is
+/// strictly AFTER that second (re-soldier-ground.md §2.3). This tolerance
+/// applies only to that boundary, not input windows or landing locks.
+const BF2_FALL_TIME_EPS: f32 = 4.0 * f32::EPSILON;
 /// BF1's stick factor in the jump / fall states (FUN_00205cc8 cases 4-6 hand
 /// FUN_002098b8 `fwd * 0.2, strafe * 0.2`; PCSX2: a standing jump reaches
 /// 1.3003 m/s = 0.2 x MaxSpeed 6.5, a strafe 0.9003 = 0.2 x 4.5)...
@@ -1131,8 +1136,14 @@ impl Soldier {
         // 0.3 s and prone falls after 0.3 s (BF2's cases 1 and 2; PROVISIONAL
         // for BF1, whose crouch and prone cases are unread).
         let stance_age = self.stand_age - self.air_time;
+        let fall_limit = rules.fall_after(stance_age)
+            + if rules == GroundRules::Bf2 {
+                BF2_FALL_TIME_EPS
+            } else {
+                0.0
+            };
         match self.stance {
-            Stance::Stand | Stance::Sprint if self.air_time > rules.fall_after(stance_age) => {
+            Stance::Stand | Stance::Sprint if self.air_time > fall_limit => {
                 self.set_stance(Stance::Fall)
             }
             Stance::Crouch if self.air_time > 0.3 => self.set_stance(Stance::Stand),

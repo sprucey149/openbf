@@ -2,10 +2,27 @@
 //! Run with `scripts/gpu_tests.sh`.
 
 use glam::Mat4;
-use render::{Camera, DrawCmd, MeshData};
+use render::{Camera, DrawCmd, MeshData, Renderer};
 
 use crate::common;
 use common::{headless, pixel, N};
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn headless_dimensions_respect_the_requested_device_limit() {
+    let limit = wgpu::Limits::default().max_texture_dimension_2d;
+    let too_large = limit + 1;
+    for (width, height) in [(too_large, 1), (1, too_large)] {
+        assert!(matches!(
+            Renderer::new_headless(width, height),
+            Err(render::RenderError::BadTexture(message))
+                if message.contains(&format!("{width}x{height}"))
+                    && message.contains(&limit.to_string())
+        ));
+    }
+    let renderer = Renderer::new_headless(limit, 1).expect("the limit is a valid size");
+    assert_eq!(renderer.size(), (limit, 1));
+}
 
 #[test]
 #[ignore = "requires a GPU adapter (run with --ignored on the NVIDIA box)"]

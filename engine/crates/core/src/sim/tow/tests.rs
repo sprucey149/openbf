@@ -340,3 +340,141 @@ fn ps2_tow_previous_leg_count_includes_the_initial_latch_and_each_insert() {
     ));
     assert_eq!(anchors.len(), 3);
 }
+
+#[test]
+fn the_wrap_stores_half_the_world_curve_derivative_at_the_hit_fraction() {
+    use crate::collision::Shape;
+    use glam::{Mat4, Quat};
+
+    let muzzle = Vec3::new(10.0, 6.0, 0.0);
+    let aim = Vec3::NEG_X;
+    let incoming = Vec3::new(3.0, 4.0, 2.0);
+    let points = span(Vec3::ZERO, incoming, muzzle, aim);
+    let contact = points[4].lerp(points[5], 0.25);
+    let half = Vec3::new(0.35, 0.35, 0.125);
+    let parts = [
+        TowPrimitive {
+            frame: Mat4::from_translation(Vec3::NEG_X * 5.0),
+            shape: Shape::Sphere { radius: 1.0 },
+            offset: Vec3::ZERO,
+            leg: Some(0),
+        },
+        TowPrimitive {
+            frame: Mat4::from_translation(Vec3::NEG_X),
+            shape: Shape::Sphere { radius: 1.0 },
+            offset: Vec3::X,
+            leg: Some(1),
+        },
+        TowPrimitive {
+            frame: Mat4::from_rotation_translation(
+                Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+                contact + Vec3::X * half.z,
+            ),
+            shape: Shape::Box { half },
+            offset: Vec3::ZERO,
+            leg: Some(2),
+        },
+    ];
+    let mut anchors = vec![
+        Anchor {
+            prim: 0,
+            at: Vec3::ZERO,
+            tangent: Vec3::ZERO,
+        },
+        Anchor {
+            prim: 1,
+            at: Vec3::X,
+            tangent: incoming,
+        },
+    ];
+    assert!(advance_latch(
+        &parts,
+        &mut anchors,
+        muzzle,
+        aim,
+        TowClass {
+            initial_length: 60.0,
+            length: 60.0,
+        },
+        0.0,
+        &mut Vec::new(),
+    ));
+    assert_eq!(anchors.len(), 3);
+    let wrap = anchors[2];
+    assert_eq!(wrap.prim, 2);
+    assert!(parts[2].frame.transform_point3(wrap.at).distance(contact) < 1e-5);
+    // p(t) = (-2, -8, 2)t³ + (9, 10, -4)t² + (3, 4, 2)t. The hit is at t = 0.425.
+    let expected = Vec3::new(4.783125, 4.0825, -0.158125);
+    assert!(wrap.tangent.distance(expected) < 1e-5, "{wrap:?}");
+}
+
+#[test]
+fn the_live_tangent_retains_its_world_direction_while_the_contact_moves() {
+    use crate::collision::Shape;
+    use glam::{Mat4, Quat};
+
+    let start = Vec3::new(0.0, 2.0, 1.0);
+    let tangent = Vec3::new(3.0, 6.0, -2.0);
+    let older = Vec3::new(-2.0, 2.0, -3.0);
+    let parts = [
+        TowPrimitive {
+            frame: Mat4::from_translation(Vec3::NEG_X * 5.0),
+            shape: Shape::Sphere { radius: 1.0 },
+            offset: Vec3::ZERO,
+            leg: Some(0),
+        },
+        TowPrimitive {
+            frame: Mat4::from_translation(older),
+            shape: Shape::Sphere { radius: 0.1 },
+            offset: Vec3::X * 0.5,
+            leg: Some(1),
+        },
+        TowPrimitive {
+            frame: Mat4::from_rotation_translation(Quat::from_rotation_x(1.0), start),
+            shape: Shape::Sphere { radius: 0.1 },
+            offset: Vec3::X * 0.25,
+            leg: Some(2),
+        },
+    ];
+    let mut anchors = vec![
+        Anchor {
+            prim: 0,
+            at: Vec3::ZERO,
+            tangent: Vec3::ZERO,
+        },
+        Anchor {
+            prim: 1,
+            at: Vec3::Y * 0.75,
+            tangent: Vec3::new(0.0, 3.0, 4.0),
+        },
+        Anchor {
+            prim: 2,
+            at: Vec3::ZERO,
+            tangent,
+        },
+    ];
+    let muzzle = Vec3::new(10.0, 4.0, 0.0);
+    let aim = Vec3::NEG_X;
+    let mut points = Vec::new();
+    assert!(advance_latch(
+        &parts,
+        &mut anchors,
+        muzzle,
+        aim,
+        TowClass {
+            initial_length: 60.0,
+            length: 10.43,
+        },
+        crate::TICK_DT,
+        &mut points,
+    ));
+    assert_eq!(anchors.len(), 3);
+    assert_eq!(anchors[0].tangent, Vec3::ZERO);
+    assert!(anchors[1].tangent.distance(Vec3::new(0.0, 2.4, 3.2)) < 1e-6);
+    assert_eq!(anchors[2].tangent, tangent);
+    assert_eq!(points[1], older + Vec3::new(0.5, 0.75, 0.0));
+    let new_start = start + Vec3::X * 0.25;
+    assert_eq!(points[2], new_start);
+    let expected = new_start * 0.972 + tangent * 0.081 + muzzle * 0.028 + aim * 0.135;
+    assert!(points[3].distance(expected) < 1e-5, "{:?}", points[3]);
+}

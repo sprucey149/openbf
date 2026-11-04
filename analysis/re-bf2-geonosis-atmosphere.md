@@ -11,8 +11,8 @@ BF1 SKYO, the separate DustEffect class in DUSTE, or GODR.
 ## BF1 playtest trial (2026-11-04, issue 119)
 
 At the maintainer's explicit request, the shared flight, placed DustEffect and
-FogCloud systems are now enabled for BF1 too, starting from `dec40c460af6` on
-`codex/hoth-atmosphere`. The three BF2-only runtime gates are removed. This is
+FogCloud systems are now enabled for BF1 too, starting from `dec40c460af6`.
+The three BF2-only runtime gates are removed. This is
 a playtest trial of the existing implementation, not a new claim that BF1's
 original runtime follows the BF2 rules. Source-specific lighting, terrain and
 gameplay behavior are outside this change.
@@ -290,9 +290,9 @@ particle-buffer measurements above.
 Other authored dust includes five geo_prop_splash props with five delayed
 geo_sfx_explosion attachments each, and geo2_sfx_bunkerdust on bunkers. Existing
 prop FX continue to run these independently from gameplay explosions.
-BF2 END1/FEL1/KAS2/POL1/YAV1 also enable FogCloud; HOT1 disables it. Runtime
-flight/FogCloud changes remain gated to BF2 until BF1's behavior is verified.
-Other maps receive the data through normal rebakes, not map-name rules.
+BF2 END1/FEL1/KAS2/POL1/YAV1 also enable FogCloud, and HOT1 disables it. The
+initial BF2 runtime gate was removed for the BF1 playtest trial above. Maps
+receive their authored data through normal rebakes.
 
 ## Authored sky glare
 

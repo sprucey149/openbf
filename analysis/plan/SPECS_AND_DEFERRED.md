@@ -296,17 +296,17 @@ exception on the last count, kept for the video.
 - M1–M3 below continue through their alpha cards first.
 
 **Active, interleaved by value (the maintainer, 2026-09-25):**
-- **M1 Looks right** — every map reads like the PS2 in character (colour, water, sky/fog, lighting, foliage, missing or extra
-  objects), under the modern-port rules of `engine/artifacts/pcsx2/ref/COMPARISON_RULES.md`. *Done when* every
-  high-confidence finding in `engine/artifacts/pcsx2/ref/FINDINGS.md` is fixed (its PCSX2 pair re-rendered and reading like
-  the PS2) or ruled expected, and the PCSX2 library covers every map. *Measured by* open M1 cards and open findings.
+- **M1 Looks right** — every map retains its original character (colour, water, sky, fog, lighting, foliage and
+  objects) under the modern-port presentation rules. *Done when* the original-game capture library covers every map,
+  and each high-confidence finding has a fixed and rechecked comparison or a recorded explanation.
+  *Measured by* open M1 cards and open findings.
 - **M2 Vehicles** (old P7 + P6.5 E) — ground vehicles, then flyers, faithful per map, with vehicle AI. *Done when* every
   vehicle class each map ships spawns, is drivable/flyable by the player and by AI with its weapons, turrets and enter/exit,
   and a PCSX2 spot check per class reads right. *Measured by* vehicle classes spawned / drivable / AI-driven per map.
 
 **Next, in order:**
-- **M3 Plays right** — a full conquest round on every map ends by tickets, no unit stuck (the stuck census empty), the round
-  sweep `finished 32/32`; PCSX2 gameplay spot checks. *Measured by* the sweep footer and the census.
+- **M3 Plays right** — full Conquest rounds on all 34 ground maps end by tickets with an empty stuck census.
+  *Measured by* the `finished 34/34` sweep footer, census and original-game gameplay spot checks.
 - **M4 Heroes, space, awards** (old P8): Space Assault faithful first; heroes killable (BF2 conquest hero health, time/damage drain and healing
   on kills); awards/medals; class meta-unlock.
 - **M5 Campaign, Galactic Conquest, splitscreen, polish, Win/Linux/macOS builds** (old P10) — the shell and menus

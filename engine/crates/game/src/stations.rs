@@ -1,6 +1,6 @@
-//! Install service-droid collision and authored wreck models from map/common
-//! resources (`analysis/re-powerup-station.md` §§14–15). The sim owns motion so
-//! collision and rendering sample one deterministic pose.
+//! Install service-droid and destructible-prop collision, authored wrecks and
+//! prop damage effects from map/common resources (`analysis/re-powerup-station.md`
+//! §§14–15 and `analysis/re-fx.md` §9). Collision and drawing use the sim's pose.
 
 use crate::assets::Scene;
 use crate::classdb::ClassDb;
@@ -90,16 +90,16 @@ pub fn install_collision(sim: &mut Sim, m: &Manifest, map_dir: &Path, db: &Class
             Some(g) => sphere(g, &c.name)?,
             None => None,
         };
-        if db
-            .engine_base(&c.name)
-            .is_some_and(is_destructible_building)
+        if let Some(name) = db
+            .resolve(&c.name)
+            .filter(|name| db.engine_base(name).is_some_and(is_destructible_building))
         {
             if let Some(class) = m
                 .classes
                 .iter()
                 .find(|class| class.name.eq_ignore_ascii_case(&c.name))
             {
-                c.damage_effects = crate::vehicle_class::damage_effects(db, &c.name)
+                c.damage_effects = crate::vehicle_class::damage_effects(db, name)
                     .into_iter()
                     .filter_map(|effect| {
                         let local = match effect.attach.as_deref() {
@@ -206,15 +206,46 @@ pub fn wreck_models(scene: &Scene) -> Result<HashMap<usize, String>> {
         }
     }
     for (i, inst) in scene.manifest.instances.iter().enumerate() {
-        if !db.engine_base(&inst.class).is_some_and(is_station_base) {
+        let Some(name) = db.resolve(&inst.class) else {
+            continue;
+        };
+        if !db.engine_base(name).is_some_and(is_station_base) {
             continue;
         }
         if let Some(model) = db
-            .prop(&inst.class, "DestroyedGeometryName")
+            .prop(name, "DestroyedGeometryName")
             .and_then(|g| scene.model_for_geometry(g.trim()))
         {
             out.insert(i, model.to_owned());
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn coruscant_library_stacks_resolve_their_mixed_case_wreck_class() {
+        let map = crate::assets::baked_root().join("bf2_cor1");
+        if !pak::exists(map.join("manifest.ron")) {
+            eprintln!("SKIP: Coruscant bake absent");
+            return;
+        }
+        let (scene, _) = crate::assets::load_battle_scene(&map, "con").unwrap();
+        let wrecks = super::wreck_models(&scene).unwrap();
+        let stacks: Vec<_> = scene
+            .manifest
+            .instances
+            .iter()
+            .enumerate()
+            .filter(|(_, instance)| instance.class == "cor1_prop_librarystack")
+            .collect();
+        assert!(!stacks.is_empty());
+        for (index, _) in stacks {
+            assert_eq!(
+                wrecks.get(&index).map(String::as_str),
+                Some("cor1_prop_librarystack_dest"),
+            );
+        }
+    }
 }

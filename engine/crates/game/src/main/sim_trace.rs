@@ -1,8 +1,9 @@
-//! SHASH headless trace CLI: fixture by default, or the existing battle
-//! builder on a baked conquest map (16 AI/team, the default difficulty (Normal), 250
-//! tickets, default factions). `--mode` selects the map layer; `--mission` loads
-//! an explicit baked mission for mode/era comparisons. `--state-hashes` also
-//! prints the complete Sim::hash after every tick. No renderer or device.
+//! SHASH headless trace CLI. Without a map it runs the fixture. With a baked
+//! map it builds a Normal battle and requests 16 AI per team. Without a mission, the
+//! map supplies its default factions and both teams start with 250 tickets.
+//! `--mode` selects Conquest or an authored world layer. `--mission` uses the
+//! mission's authored faction order and tickets. `--state-hashes` prints the
+//! complete Sim::hash after every tick. No renderer or device.
 //! InputLog frame 0 produces record tick 1. A log must have 1..=16 complete
 //! slots and at least the requested frames; additional frames are ignored.
 
@@ -137,7 +138,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             ticket_pct: 100,
             time_limit: 0,
             cheats: Default::default(),
-            teams: None,
+            teams: mission.as_ref().map(|m| m.factions()),
             classes_dir: map
                 .parent()
                 .unwrap_or_else(|| std::path::Path::new("."))

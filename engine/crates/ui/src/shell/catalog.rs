@@ -302,7 +302,27 @@ pub fn catalog(
         ));
     }
     for (code, key, english, cw, gcw) in BF1_MAPS {
-        let name = text(Game::Bf1, key).map_or_else(|| english.to_owned(), |t| t.trim().to_owned());
+        let localized = text(Game::Bf1, key);
+        let name = localized.as_deref().unwrap_or(english).trim();
+        // The English BF1 table uses all caps. Keep any existing mixed case
+        // and the shared (bf1)/(bf2) suffix used by both menus.
+        let name = if name.chars().any(char::is_lowercase) {
+            name.to_owned()
+        } else {
+            name.split_whitespace()
+                .map(|word| {
+                    let mut chars = word.chars();
+                    let first = chars
+                        .next()
+                        .expect("split_whitespace yields nonempty words");
+                    first
+                        .to_uppercase()
+                        .chain(chars.flat_map(char::to_lowercase))
+                        .collect::<String>()
+                })
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
         let modes = [cw, gcw].map(|on| if on { vec![Mode::Con] } else { Vec::new() });
         out.push(entry(Game::Bf1, code, name.clone(), name, modes));
     }

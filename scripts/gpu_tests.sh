@@ -7,6 +7,7 @@
 #   scripts/gpu_tests.sh --replays  # headless sim/replay referees (GAME overrides binary)
 #   scripts/gpu_tests.sh --goldens GROUP... # selected golden groups
 #   scripts/gpu_tests.sh --game FILTER # ignored game suite GPU tests
+#   scripts/gpu_tests.sh --game-lib [CARGO_ARGS] # serial game lib, including headless tests
 #   scripts/gpu_tests.sh --render   # only the render crate's GPU tests
 #   scripts/gpu_tests.sh --hit-feedback # issue #104 captures on fresh side bakes
 set -euo pipefail
@@ -27,8 +28,24 @@ if [ "${1:-}" = "--game" ]; then
     exec cargo test -p game --test suite "$@" -- --ignored --test-threads=1 --nocapture
 fi
 
+if [ "${1:-}" = "--game-lib" ]; then
+  shift
+  for arg in "$@"; do
+    if [ "$arg" = -- ]; then
+      echo 'gpu_tests: --game-lib accepts Cargo arguments only' >&2
+      exit 2
+    fi
+  done
+  exec cargo test -p game --lib "$@" -- --test-threads=1
+fi
+
 if [ "${1:-}" = "--hit-feedback" ]; then
   exec cargo test -p game --test hit_feedback -- --ignored --test-threads=1
+fi
+
+if [ "${1:-}" = "--ui-sharp" ]; then
+  shift
+  exec cargo test --release -p game --test ui_sharp "$@" -- --ignored --test-threads=1 --nocapture
 fi
 
 cargo test -p render -- --ignored --test-threads=1

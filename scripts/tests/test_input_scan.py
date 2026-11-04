@@ -561,12 +561,12 @@ class Messages(unittest.TestCase):
             f'BF2: found the Xbox disc {disc}, but Xbox input is not supported yet. Add a PS2 BF2 disc image to {self.root}.'])
         self.assertEqual(self.refusals(xbox_supported=True), [])
 
-    def test_pc_bf1_alone_keeps_the_ps2_reference_rule(self):
+    def test_pc_bf1_alone_requires_verified_ps2_input(self):
         pc = pc_install(self.root / 'pc', 'bf1') / 'GameData/Data/_LVL_PC'
         iso_image(self.root / 'b', 'bf2')
         self.assertEqual(self.refusals(), [
-            f'BF1: found the PC install {pc}, but PC BF1 assets currently also need the BF1 PS2 gameplay reference: the '
-            f'PC mission, class and collision data cannot replace it. Add a PS2 BF1 disc image to {self.root}.'])
+            f'BF1: found the PC install {pc}. This selection needs verified BF1 PS2 gameplay input for missions, '
+            f'classes and collision. Add a PS2 BF1 disc image to {self.root}.'])
         self.assertEqual(self.refusals(pc_primary=True), [])
 
     def test_no_correction_table_names_a_private_file(self):
@@ -592,7 +592,11 @@ class Messages(unittest.TestCase):
         xbox_image(self.root / 'x', 'bf1')
         plan = scan.scan([self.root], extracted=str(self.root / 'none'), xbox_supported=True)
         self.assertFalse([name for name in scan.bake_env(plan) if name.endswith('_WITHHELD')])
-        self.assertFalse([line for line in scan.summary_lines(plan) if 'maps left out' in line])
+        summary = scan.summary_lines(plan)
+        self.assertFalse([line for line in summary if 'maps left out' in line])
+        self.assertEqual(summary[-1], "All supported copies use the same openbf gameplay rulebook. "
+                         "A selected PS2 copy supplies gameplay data and base textures. "
+                         "Visual donors can supply larger same-art textures.")
 
     def test_pc_primary_never_stands_in_for_the_console_bf2(self):
         iso_image(self.root / 'a', 'bf1')
@@ -650,7 +654,7 @@ class Messages(unittest.TestCase):
         tree(extracted / 'bf1/lvl/DATA/_LVL_PS2', 'bf1', 'pc')
         iso_image(self.root / 'b', 'bf2')
         pc_install(self.root / 'pc', 'bf1')
-        self.assertIn('BF1 PS2 gameplay reference', '\n'.join(scan.scan([self.root], extracted=str(extracted))['refusals']))
+        self.assertIn('BF1 PS2 gameplay input', '\n'.join(scan.scan([self.root], extracted=str(extracted))['refusals']))
 
     def test_two_copies_choose_one_and_say_so(self):
         first, second = iso_image(self.root / 'a', 'bf1'), iso_image(self.root / 'b', 'bf1')
@@ -848,7 +852,7 @@ class Pack(unittest.TestCase):
         self.assertNotIn('XB2', env)
         self.assertNotIn('BF2_CONSOLE_ISO', env)
         self.assertEqual([call[2] for call in calls if scan.XBOX_EXTRACT in call], [str(xbox)])
-        self.assertFalse([call for call in calls if 'extract-iso' in call and 'bf2' in call[3]])
+        self.assertEqual([Path(call[3]).parent.name for call in calls if call[1:2] == ['extract-iso']], ['bf1'])
 
 
 class RebakeCase(unittest.TestCase):
@@ -1352,6 +1356,7 @@ printf '%s\\n' "$*" >> "$BAKE_LOG"
         unguarded = [line for line in text.splitlines()
                      if re.search(r'"\$\{\w+\[@\]\}"', re.sub(r'\$\{(\w+)\[@\]\+"\$\{\1\[@\]\}"\}', '', line))]
         self.assertEqual(unguarded, [])
+        self.assertNotRegex(text, r'\$\{#(?:SEL|FONT_DONORS)\[@\]\}')
         for needs_more in ('mapfile', 'readarray', 'declare -A', 'xargs -r', 'readlink -f', 'sed -i', 'sha256sum', 'paste -sd,)'):
             self.assertNotIn(needs_more, text)
         self.assertIsNone(re.search(r'\$\{\w+(,,|\^\^)\}', text))
@@ -1439,14 +1444,15 @@ class ReviewFindingsReport(unittest.TestCase):
             self.assertEqual(pack.git_tracked_missions(), '')
 
 
-if __name__ == '__main__':
-    unittest.main()
-
 class CorrectionMissionSelection(unittest.TestCase):
     def test_pc_primary_pins_both_correction_table_and_source(self):
         plan = {'games': {'bf1': {'gameplay': {'kind': 'pc-install', 'path': '/chosen/base'}},
                           'bf2': {'gameplay': {'kind': 'ps2-disc', 'path': '/chosen/disc'}}}}
         args = pack.gameplay_correction_args(plan)
         self.assertEqual(args[-2:], ['--gameplay-source', 'bf1=/chosen/base'])
-        self.assertTrue(args[1].endswith('/corrections-v1/bf1-pc.json'))
+        self.assertEqual(Path(args[1]).parts[-2:], ('corrections-v1', 'bf1-pc.json'))
         self.assertEqual(args.count('--gameplay-reference'), 1)
+
+
+if __name__ == '__main__':
+    unittest.main()

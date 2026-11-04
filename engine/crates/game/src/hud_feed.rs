@@ -263,6 +263,10 @@ pub struct HudView {
     display: Option<wgpu::TextureFormat>,
     /// Where sheets and font pages are looked for, in order.
     texture_dirs: Vec<PathBuf>,
+    native_art: HashSet<String>,
+    common_textures: PathBuf,
+    native_art_dir: PathBuf,
+    distance_pages: HashMap<String, crate::assets::CpuTexture>,
     /// Every drawable mesh by lower-cased name.
     mesh_files: HashMap<String, PathBuf>,
     textures: HashMap<String, Option<HudTexture>>,
@@ -288,6 +292,72 @@ pub struct HudView {
 fn read_ron<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     ron::from_str(&pak::read_to_string(path).with_context(|| path.display().to_string())?)
         .with_context(|| path.display().to_string())
+}
+
+fn read_hud_sheet(path: &Path) -> Option<crate::assets::CpuTexture> {
+    let bytes = pak::read(path).ok()?;
+    let header = ktx2::Reader::new(&bytes).ok()?.header();
+    let max_levels = 32 - header.pixel_width.max(header.pixel_height).leading_zeros();
+    if header.level_count > max_levels {
+        return None;
+    }
+    let image = crate::assets::load_ktx2(&bytes).ok()?;
+    let size = (image.width as usize)
+        .checked_mul(image.height as usize)?
+        .checked_mul(4)?;
+    (size != 0 && image.rgba.len() == size).then_some(image)
+}
+
+fn add_distance_font(
+    art: &mut HudArt,
+    pages: &mut HashMap<String, crate::assets::CpuTexture>,
+    dir: &Path,
+    name: &str,
+) {
+    let Ok(mut font) =
+        read_ron::<manifest::hud::HudDistanceFont>(&dir.join(format!("{name}.sdf.ron")))
+    else {
+        return;
+    };
+    // A partial or damaged optional bake must still render bitmap glyphs.
+    let used: HashSet<_> = font
+        .glyphs
+        .iter()
+        .map(|glyph| usize::from(glyph.page))
+        .collect();
+    let valid: Vec<_> = font
+        .pages
+        .iter()
+        .take(usize::from(u8::MAX) + 1)
+        .enumerate()
+        .map(|(i, page)| {
+            if !used.contains(&i) || *page != format!("{name}.sdf{i}") {
+                return false;
+            }
+            let Some(mut image) = read_hud_sheet(&dir.join(format!("{page}.ktx2"))) else {
+                return false;
+            };
+            // The bake writes fixed-size RGBA8 atlas pages.
+            if image.width != 1024 || image.height != 1024 {
+                return false;
+            }
+            image.extra_mips.clear();
+            pages.insert(page.clone(), image);
+            true
+        })
+        .collect();
+    font.glyphs.retain(|glyph| {
+        valid.get(usize::from(glyph.page)) == Some(&true)
+            && glyph.rect.iter().all(|v| v.is_finite())
+            && glyph.uv.iter().all(|v| (0.0..=1.0).contains(v))
+            && glyph.rect[0] < glyph.rect[2]
+            && glyph.rect[1] < glyph.rect[3]
+            && glyph.uv[0] < glyph.uv[2]
+            && glyph.uv[1] < glyph.uv[3]
+    });
+    if !font.glyphs.is_empty() {
+        art.distance_fonts.insert(name.to_ascii_lowercase(), font);
+    }
 }
 
 /// `name` → file for every `*.glb` in `dirs`; the first directory wins.
@@ -426,9 +496,12 @@ impl HudView {
         let transforms: manifest::hud::HudLayout = read_ron(&common.join("hud/hudtransforms.ron"))?;
         let index: manifest::hud::HudIndex = read_ron(&common.join("hud/index.ron"))?;
         let mut art = HudArt::default();
+        let mut distance_pages = HashMap::new();
+        let fonts_dir = common.join("fonts");
         for f in &index.fonts {
             let font: manifest::hud::HudFont = read_ron(&common.join(format!("fonts/{f}.ron")))?;
             art.fonts.insert(f.to_ascii_lowercase(), font);
+            add_distance_font(&mut art, &mut distance_pages, &fonts_dir, f);
         }
         // BF1's own tiny font for the squad cross's labels (card SQHUD); a
         // bake without it falls back to BF2's.
@@ -436,6 +509,7 @@ impl HudView {
         let tiny = ui::hud_squad::FONT;
         if let Ok(font) = read_ron(&bf1_fonts.join(format!("{tiny}.ron"))) {
             art.fonts.insert(tiny.to_owned(), font);
+            add_distance_font(&mut art, &mut distance_pages, &bf1_fonts, tiny);
         }
         let mesh_files = glb_index(&[
             common.join("models"),
@@ -470,6 +544,10 @@ impl HudView {
                 assets_dir.join("common_bf1/textures"),
                 assets_dir.join("side_bf1/textures"),
             ],
+            native_art: read_ron(&common.join("hud/native-art.ron")).unwrap_or_default(),
+            common_textures: common.join("textures"),
+            native_art_dir: common.join("hud/native-art"),
+            distance_pages,
             mesh_files,
             textures: HashMap::new(),
             drawn_icons: HashMap::new(),
@@ -677,6 +755,17 @@ impl HudView {
         self.batches.iter().map(|b| b.texture.as_str())
     }
 
+    /// Requested sheets that had no usable texture in the last paint.
+    pub fn unresolved_sheets(&self) -> impl Iterator<Item = &str> {
+        self.drawn_sheets().filter(|sheet| {
+            self.textures.get(*sheet) == Some(&None)
+                || self
+                    .drawn_icons
+                    .get(*sheet)
+                    .is_some_and(|sizes| sizes.last().is_some_and(|(_, texture)| texture.is_none()))
+        })
+    }
+
     /// The window box `[x0, y0, x1, y1]` the element called `name` was drawn
     /// in by the last [`HudView::update`]; `None` when it drew nothing.
     pub fn bounds(&self, name: &str) -> Option<[f32; 4]> {
@@ -741,9 +830,20 @@ impl HudView {
             self.movie = t;
         }
         let mut batches = Vec::with_capacity(self.batches.len());
+        let texture_limit = device.limits().max_texture_dimension_2d;
         for b in &self.batches {
             let texture = if b.texture == ui::shell_ps2::MOVIE_SHEET {
                 self.movie
+            } else if let Some(image) = self.distance_pages.remove(&b.texture) {
+                let texture = pass.add_distance_texture(
+                    device,
+                    queue,
+                    &image.rgba,
+                    image.width,
+                    image.height,
+                );
+                self.textures.insert(b.texture.clone(), texture);
+                texture
             } else if let Some(sizes) = self.drawn_icons.get_mut(&b.texture) {
                 let px = crate::input_icons::icon_px(batch_height(
                     &self.verts,
@@ -755,7 +855,7 @@ impl HudView {
                     Some((_, t)) => *t,
                     None => {
                         let t = crate::input_icons::rasterize(&b.texture, px).and_then(
-                            |(rgba, w, h)| pass.add_texture(device, queue, &rgba, w, h, false),
+                            |(rgba, w, h)| pass.add_texture(device, queue, &[&rgba], w, h, false),
                         );
                         sizes.push((px, t));
                         t
@@ -765,7 +865,6 @@ impl HudView {
                 match self.textures.get(&b.texture) {
                     Some(t) => *t,
                     None => {
-                        // The PS2's own pixels: the HUD's sheets have no PC tier.
                         let (sheet, repeat) =
                             match b.texture.strip_suffix(ui::hud_draw::SCROLL_SHEET) {
                                 Some(sheet) => (sheet, true),
@@ -792,9 +891,18 @@ impl HudView {
                             })
                             .map(|d| d.join(format!("{sheet}.ktx2")))
                             .find(|p| pak::is_file(p))
-                            .and_then(|p| pak::read(p).ok())
-                            .and_then(|bytes| crate::assets::load_ktx2(&bytes).ok())
-                            .map(|t| (t.rgba, t.width, t.height));
+                            .and_then(|p| {
+                                let native = (p.parent() == Some(self.common_textures.as_path())
+                                    && self.native_art.contains(sheet))
+                                .then(|| self.native_art_dir.join(format!("{sheet}.ktx2")))
+                                .and_then(|path| read_hud_sheet(&path))
+                                .filter(|t| t.width.max(t.height) <= texture_limit);
+                                native.or_else(|| {
+                                    let mut texture = read_hud_sheet(&p)?;
+                                    texture.extra_mips.clear();
+                                    Some(texture)
+                                })
+                            });
                         // A control prompt no bake supplied is drawn here, at
                         // the size it shows; the next frame finds it above.
                         let icon = baked.is_none() && crate::input_icons::has_art(&b.texture);
@@ -804,17 +912,32 @@ impl HudView {
                             b.first,
                             b.count,
                         ));
-                        let t = baked
-                            .or_else(|| crate::input_icons::rasterize(sheet, px))
-                            .and_then(|(mut rgba, width, height)| {
-                                if opaque {
-                                    rgba.as_chunks_mut::<4>()
-                                        .0
-                                        .iter_mut()
-                                        .for_each(|p| p[3] = 255);
-                                }
-                                pass.add_texture(device, queue, &rgba, width, height, repeat)
-                            });
+                        let t = if let Some(mut image) = baked {
+                            let levels =
+                                std::iter::once(&mut image.rgba).chain(&mut image.extra_mips);
+                            let levels: Vec<&[u8]> = levels
+                                .map(|level| {
+                                    if opaque {
+                                        for pixel in level.as_chunks_mut::<4>().0 {
+                                            pixel[3] = 255;
+                                        }
+                                    }
+                                    level.as_slice()
+                                })
+                                .collect();
+                            pass.add_texture(
+                                device,
+                                queue,
+                                &levels,
+                                image.width,
+                                image.height,
+                                repeat,
+                            )
+                        } else {
+                            crate::input_icons::rasterize(sheet, px).and_then(|(rgba, w, h)| {
+                                pass.add_texture(device, queue, &[&rgba], w, h, repeat)
+                            })
+                        };
                         if t.is_none() {
                             eprintln!("hud: no sheet {:?}; drawn untextured", b.texture);
                         }
@@ -845,5 +968,49 @@ impl HudView {
             view,
             size,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use manifest::hud::{HudDistanceFont, HudDistanceGlyph};
+
+    #[test]
+    fn invalid_distance_page_falls_back_to_bitmap_without_dropping_usable_glyphs() {
+        let dir = std::env::temp_dir().join(format!("openbf-hud-distance-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = "testfont";
+        let metadata = HudDistanceFont {
+            pages: vec!["testfont.sdf0".into(), "testfont.sdf1".into()],
+            glyphs: [65, 66]
+                .into_iter()
+                .enumerate()
+                .map(|(page, code)| HudDistanceGlyph {
+                    code,
+                    page: page as u8,
+                    rect: [0.0, 0.0, 2.0, 4.0],
+                    uv: [0.0, 0.0, 0.25, 0.5],
+                })
+                .collect(),
+        };
+        let metadata_path = dir.join("testfont.sdf.ron");
+        std::fs::write(&metadata_path, ron::to_string(&metadata).unwrap()).unwrap();
+        std::fs::write(dir.join("testfont.sdf0.ktx2"), b"incomplete texture").unwrap();
+        let ktx = bake::ktx2w::write_rgba8(1024, 1024, &[vec![255; 1024 * 1024 * 4]]);
+        std::fs::write(dir.join("testfont.sdf1.ktx2"), ktx).unwrap();
+        let mut art = HudArt::default();
+        let mut pages = HashMap::new();
+        add_distance_font(&mut art, &mut pages, &dir, name);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(
+            art.distance_fonts[name].glyphs,
+            [metadata.glyphs[1].clone()]
+        );
+        std::fs::write(metadata_path, b"incomplete manifest").unwrap();
+        let mut art = HudArt::default();
+        add_distance_font(&mut art, &mut pages, &dir, name);
+        assert!(art.distance_fonts.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

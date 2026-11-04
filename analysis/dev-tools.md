@@ -10,9 +10,15 @@ posts, vehicles, events) on **F9**, on quit, on a panic and on a stuck alarm (20
 2 m away). Files: `engine/artifacts/playtest/last.json` (newest) and `prev1..prev5.json`. There is no `last.png`: the
 windowed renderer cannot read its frame back, so the picture is the maintainer's own screenshot.
 
-- **When the maintainer reports something he saw ("a bot walks into a wall", "this guy is stuck"): read the snapshot first**, with
-  `cargo run -p game --example blackbox_read -- <file>` from `engine/` (under the memory cap:
-  `systemd-run --user --scope --quiet --collect -p MemoryMax=8G -p MemorySwapMax=0 -p OOMPolicy=kill -- timeout 120 ...`).
+- **When the maintainer reports something he saw ("a bot walks into a wall", "this guy is stuck"), read the snapshot first.**
+  Run from the worktree root with its own Cargo target.
+
+  ```bash
+  export CARGO_TARGET_DIR="$PWD/engine/target"
+  systemd-run --user --scope --quiet --collect -p MemoryMax=8G -p MemorySwapMax=0 -p OOMPolicy=kill -- \
+    nice -n 10 cargo run --manifest-path engine/Cargo.toml -p game --example blackbox_read -- path/to/snapshot.json
+  ```
+
   The digest prints the header, the maintainer's last 10 s, the `focus` unit (what he was looking at when he pressed F9: the
   reticle's pick, else the aim assist's, else the unit nearest the view axis) with its brain and trail, every bot whose
   steering was blocked or made no progress for over 3 s (who, where, which body, its goal) and every unit whose trail
@@ -20,10 +26,12 @@ windowed renderer cannot read its frame back, so the picture is the maintainer's
   `--events`, `--replay-spot [id]` (the place as a line for a headless follow-up). Name the cause from the unit's brain
   fields and trail, and write the finding into a card (numbers, spot, unit fields, body name) or an INBOX note for the
   loop. Say which snapshot (the build commit in its header).
-  A unit's STOP and body are asked along the direction its steering really walked that tick (`walk` / `walk_at`: the
-  hold goal, the vehicle it boards, a lost bot's return point, else the leg), and a bot that did not walk carries
-  none; a holder's row has its goal, spot, seconds left and strafe side. A schema 1 file (before card BLKF) asked
-  toward the leg's point instead: its stops are wrong for holders, boarders and lost bots, and the digest says so.
+  STOP and body are probed from the sampled unit pose along `walk_dir`, the direction requested before local
+  avoidance. The selected heading and resulting pad can differ. `walk` and `walk_at` identify the request and its
+  point, such as the hold goal, the vehicle being boarded, a lost bot's return point, hazard escape, an item pickup,
+  the final health droid approach or the route leg. A bot without a recorded request has no stop probe. A holder's row
+  has its goal, spot, seconds left and strafe side. Schema 1 (before card BLKF) used the route leg for every request.
+  The digest flags unreliable schema 1 stops for holders, boarders and lost bots.
   Since schema 4 (card OBST2) a unit's line also says what it `does` (the behaviour that ran: travel, fight, guard,
   recover with its failed-window count, ...) and, for a bot going round an obstacle, `ROUND side +1/-1, nearest N m,
   allowance X of 10 s` (the side it committed to, the nearest its walk has been to its aim point since, how much of
@@ -81,8 +89,10 @@ bot and ray counts.
 
 ## Bots (the maintainer's top concern, 2026-10-02)
 "If the bots suck, the whole game is worthless." The plan is cards JITR, FFLN, BOTM, SAIR (RE the PS2 foot soldier's own
-AI), BOTD (the design note `analysis/bot-design.md`; the maintainer’s original read hold was released as recorded in `engine/artifacts/loop/cards/FGHT.md`) and OBST. The PS2 behaviour is
-the baseline; where the originals' bots annoy, the port deliberately does better, as a named deviation.
+AI), BOTD (the design note `analysis/bot-design.md`) and OBST. The original games provide evidence for bot behaviour.
+openbf names deliberate differences.
+
+
 Reference: the official mod-tools docs are in `community_mods/gametoast_lua/doc/StarWarsBattlefrontII/documentation/`
 (`game.md` and `ZeroEditor_guide.md`: barriers, planning hubs / connections / weights, hint nodes), with each
 platform's executable strings (`StringsFromExecutable/`), a PC debug build and the Gametoast forum archive

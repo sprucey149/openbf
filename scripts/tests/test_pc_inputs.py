@@ -140,10 +140,78 @@ class InputPolicy(unittest.TestCase):
 
     def test_missing_bf1_reference_is_explicit(self):
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(ValueError, 'BF1 PS2 gameplay reference'):
+            with self.assertRaisesRegex(ValueError, 'BF1 PS2 gameplay input'):
                 inputs.require_ps2_bf1_reference(True, directory)
 
-    def test_rebake_uses_console_ui_without_pc_alternatives(self):
+    def test_the_bf1_visual_receipt_names_only_its_role_beside_pc_bf2(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pc1, pc2 = root / 'PC BF1', root / 'PC BF2'
+            pc1.mkdir()
+            pc2.mkdir()
+            plan = {
+                'games': {'bf1': {'gameplay': {'kind': 'ps2-disc'}},
+                          'bf2': {'gameplay': {'kind': 'pc-install', 'path': str(pc2)}}},
+                'found': [],
+            }
+            report = pack.source_report(root, root / 'baked', root / 'missions', {'bf1': None, 'bf2': None},
+                                        plan, ('bf1', 'bf2'), rebaked='all', pc_roots={'bf1': pc1})
+            rows = {row['label']: row for row in report['inputs']}
+            donor = rows['bf1 PC visual input']
+            self.assertEqual((donor['status'], donor['path'], donor['reason']),
+                             ('used', str(pc1), 'passed to the texture-tier bake this run'))
+            self.assertEqual(rows['bf2 PC gameplay data']['path'], str(pc2))
+
+    def test_rebake_uses_the_selected_bf2_shell_sound_on_a_warm_tree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            script = root / 'scripts/rebake.sh'
+            shutil.copyfile(ROOT / 'scripts/rebake.sh', script)
+            (root / 'engine').mkdir()
+            console = root / 'extracted/bf2/lvl/DATA/_LVL_PS2'
+            warm_sound = root / 'extracted/bf2/sound/DATA/_LVL_PS2/SOUND/SHELL.LVL'
+            warm_sound.parent.mkdir(parents=True)
+            warm_sound.touch()
+            pc = root / 'PC BF2'
+            xbox = root / 'Xbox BF2'
+            for primary in (console, pc, xbox):
+                for file in ('MOVIES/SHELL.MVS', 'SOUND/SHELL.LVL', 'SHELL.LVL', 'CORE.LVL'):
+                    path = primary / file
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.touch()
+
+            target = root / 'engine/target'
+            bin_dir = root / 'bin'
+            for path, text in (
+                (bin_dir / 'cargo', '#!/bin/sh\n[ "$*" = "build -p bake --release" ]\n'),
+                (target / 'release/bake',
+                 '#!/bin/sh\nif [ "$1" = shell ]; then printf "%s\\000" "$@" >> "$BAKE_LOG"; fi\n'),
+            ):
+                path.parent.mkdir(parents=True)
+                path.write_text(text)
+                path.chmod(0o755)
+            log = root / 'shell-argv'
+            env = dict(PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
+                       CARGO_TARGET_DIR=str(target), BAKE_LOG=str(log), REBAKE_OUT=str(root / 'out'),
+                       OPENBF_INPUTS_CHOSEN='1')
+            for label, selected, shell_sound in (
+                ('PS2 primary', None, warm_sound),
+                ('PC primary', pc, pc / 'SOUND/SHELL.LVL'),
+                ('Xbox primary', xbox, xbox / 'SOUND/SHELL.LVL'),
+            ):
+                with self.subTest(label=label):
+                    log.unlink(missing_ok=True)
+                    source = dict(env, OPENBF_BF2_TREE=str(selected)) if selected else env
+                    done = subprocess.run(['bash', str(script), 'common'], env=source,
+                                          capture_output=True, text=True, timeout=20)
+                    self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+                    primary = selected or console
+                    self.assertEqual(log.read_bytes().decode().split('\0')[:-1],
+                                     ['shell', str(primary / 'SHELL.LVL'), str(primary / 'MOVIES/SHELL.MVS'),
+                                      str(shell_sound), str(primary / 'CORE.LVL'), str(root / 'out/common_bf2')])
+
+    def test_rebake_keeps_console_ui_primary_with_a_selected_pc_art_donor(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / 'scripts').mkdir()
@@ -168,17 +236,31 @@ class InputPolicy(unittest.TestCase):
                 stale.parent.mkdir(parents=True, exist_ok=True)
                 stale.write_text('stale PC UI')
             log = root / 'calls.log'
-            env = dict(os.environ, PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'], CARGO_TARGET_DIR=str(target.parent), BAKE_LOG=str(log), REBAKE_OUT=str(root / 'out'))
-            env.pop('PC1', None)
-            env.pop('PC2', None)
+            inputs = {'PC', 'PC1', 'PC2', 'XB1', 'XB2', 'BF2_CONSOLE_ISO'}
+            env = {key: value for key, value in os.environ.items()
+                   if key not in inputs and not key.startswith('OPENBF_')}
+            env.update(PATH=str(root / 'bin') + os.pathsep + os.environ['PATH'],
+                       CARGO_TARGET_DIR=str(target.parent), BAKE_LOG=str(log), REBAKE_OUT=str(root / 'out'))
             command = ['bash', str(root / 'scripts/rebake.sh'), '--pc2', str(pc), 'common', 'load']
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertFalse(list((root / 'out/common_bf2').rglob('old-pc-art.txt')))
             shared = [line for line in log.read_text().splitlines() if 'common_bf2' in line]
             self.assertGreaterEqual(len(shared), 6)
-            self.assertTrue(all(str(pc) not in line for line in shared), shared)
             self.assertTrue(all(str(console) in line for line in shared), shared)
+            donor_calls = [line for line in shared if str(pc) in line]
+            self.assertEqual([line.split()[0] for line in donor_calls], ['fonts', 'ui-art'])
+            self.assertTrue(all(line.endswith(str(pc / 'CORE.LVL')) for line in donor_calls), donor_calls)
+
+            log.unlink()
+            console_only = dict(env, OPENBF_INPUTS_CHOSEN='1', OPENBF_BF2_TREE=str(console))
+            result = subprocess.run(['bash', str(root / 'scripts/rebake.sh'), 'common', 'load'],
+                                    env=console_only, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            shared = [line for line in log.read_text().splitlines() if 'common_bf2' in line]
+            self.assertGreaterEqual(len(shared), 6)
+            self.assertTrue(all(str(console) in line and str(pc) not in line for line in shared), shared)
+
             shutil.rmtree(root / 'extracted')
             log.unlink()
             result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=20)

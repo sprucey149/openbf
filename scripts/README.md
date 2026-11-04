@@ -18,7 +18,7 @@ Scripts stay in this flat folder because the notes under `analysis/` and the cra
 
 | script | what it does |
 |---|---|
-| `gameplay_table.py`, `gameplay_foliage.py`, `gameplay_corrections.py`, `gameplay_programs.py` | generate the PS2 reference numbers and the corrections applied to a player's own files |
+| `gameplay_table.py`, `gameplay_foliage.py`, `gameplay_corrections.py`, `gameplay_programs.py` | export measured PS2 input values and generate the shared gameplay corrections applied to a player's own files |
 | `version_census.py`, `version_geometry.py`, `version_collision.py`, `version_heights.py`, `version_sky.py`, `version_terrain_play.py` | measure how editions differ: names and numbers, never assets |
 | `version_report.py`, `version_parity_check.py` | the measurement receipt, and seeded rounds across source combinations |
 | `render_collision_check.py`, `render_scene_surface.py`, `render_model_dependencies.py`, `render_gpu_bounds.py` | require continuous surface certificates for every placed model, LOWD and far extension against PS2 artwork, charging world draw rounding for every placement; unresolved coverage, opacity, motion or LOD correspondence fails; `gates.py --groups alignment` |

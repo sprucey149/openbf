@@ -748,6 +748,7 @@ pub struct ManifestSkyEffect {
 pub struct ManifestSkyObject {
     /// `modl` name, copied into the map's own models by the bake.
     pub geometry: String,
+    /// Number of ships in this flight from the authored `NumObjects` field.
     pub count: u32,
     /// `Height` — an authored altitude RANGE in metres.
     pub height: [f32; 2],

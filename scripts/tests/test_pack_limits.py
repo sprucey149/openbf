@@ -17,7 +17,7 @@ import pack
 
 
 class MissionSelection(unittest.TestCase):
-    def generation_command(self, space):
+    def generation_command(self, space, bf2_kind="ps2-disc"):
         class AtMissionGeneration(Exception):
             pass
 
@@ -30,6 +30,8 @@ class MissionSelection(unittest.TestCase):
 
         games = {game: {"gameplay": {"kind": "ps2-disc", "path": "disc.iso"}, "visual": []}
                  for game in ("bf1", "bf2")}
+        if bf2_kind == "pc-install":
+            games["bf2"]["gameplay"] = {"kind": bf2_kind, "path": "pc-bf2"}
         plan = {"games": games, "refusals": [], "dlc": {"used": False}}
         with tempfile.TemporaryDirectory() as folder, mock.patch.dict(os.environ, {}, clear=True):
             if space is not None:
@@ -47,6 +49,7 @@ class MissionSelection(unittest.TestCase):
                  mock.patch.object(pack, "need"), mock.patch.object(pack, "run", side_effect=run), \
                  mock.patch.object(pack, "console_lua_root", return_value=str(lua)), \
                  mock.patch.object(pack, "git_tracked_missions", return_value=False), \
+                 mock.patch.object(pack, "GAMEPLAY_TREES", {}), \
                  mock.patch.object(pack, "MISSIONS", str(Path(folder) / "missions")):
                 with self.assertRaises(AtMissionGeneration):
                     pack.main()
@@ -60,6 +63,14 @@ class MissionSelection(unittest.TestCase):
         for value in (None, "0", "true"):
             with self.subTest(value=value):
                 self.assertNotIn("--space", self.generation_command(value))
+
+    def test_mixed_pc_bf2_uses_table_only_missions_for_bf2(self):
+        command = self.generation_command(None, bf2_kind="pc-install")
+        self.assertIn("--gameplay-source", command)
+        self.assertIn("bf2=pc-bf2", command)
+        self.assertEqual(command.count("--table-only-game"), 1, command)
+        self.assertEqual(command[command.index("--table-only-game") + 1], "bf2")
+        self.assertNotIn("--table-only-game", self.generation_command(None))
 
 
 class ScratchBake(unittest.TestCase):

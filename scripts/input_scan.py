@@ -408,18 +408,18 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
             refusals.append(f"{short}: found the Xbox disc {xbox[0]['path']}, but Xbox input is not supported yet. "
                             f"Add {add_message(game, xbox_on, pc_on)} to {where}.")
         elif pc and game == "bf1":
-            refusals.append(f"{short}: found the PC install {pc[0]['path']}, but PC BF1 assets currently also need the "
-                            "BF1 PS2 gameplay reference: the PC mission, class and collision data cannot replace it. "
+            refusals.append(f"{short}: found the PC install {pc[0]['path']}. This selection needs verified "
+                            "BF1 PS2 gameplay input for missions, classes and collision. "
                             f"Add {add_message(game, xbox_on, pc_on)} to {where}.")
         elif not (pc and game == "bf2") and require_all:
             refusals.append(f"{short}: no source found. Add {add_message(game, xbox_on, pc_on)} to {where}.")
 
         if pc and game == "bf1" and gameplay and gameplay["kind"] == "ps2-extracted" and not gameplay["verified"]:
-            refusals.append(f"{short}: PC BF1 assets currently also need the BF1 PS2 gameplay reference, and "
-                            f"{gameplay['path']} does not hold it. Add {add_message(game, xbox_on, pc_on)} to {where}.")
+            refusals.append(f"{short}: {gameplay['path']} lacks verified BF1 PS2 gameplay input for this PC build. "
+                            f"Add {add_message(game, xbox_on, pc_on)} to {where}.")
         for row in pc:
             if gameplay and gameplay["kind"] == "pc-install" and row["path"] == gameplay["path"]:
-                row.update(status="used", reason=row["reason"] + "; supplies assets with fingerprinted PS2 gameplay corrections")
+                row.update(status="used", reason=row["reason"] + ". Primary gameplay input with fingerprinted corrections.")
             elif not any(item["kind"] == "pc-install" for item in visual):
                 row.update(status="used", reason=row["reason"] + "; texture donor")
                 visual.append(dict(kind="pc-install", path=row["path"]))
@@ -429,7 +429,7 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
             if not xbox_on:
                 row.update(status="not supported yet", reason=row["reason"] + "; recognized, not read")
             elif gameplay and gameplay["kind"] == "xbox-disc" and row["path"] == gameplay["path"]:
-                row.update(status="used", reason=row["reason"] + "; supplies gameplay (no PS2 copy)")
+                row.update(status="used", reason=row["reason"] + ". Primary gameplay input and base textures.")
             elif not any(item["kind"] == "xbox-disc" for item in visual) and not (gameplay and gameplay["kind"] == "xbox-disc"):
                 row.update(status="used", reason=row["reason"] + "; texture donor")
                 donor = dict(kind="xbox-disc", path=row["path"])
@@ -440,7 +440,7 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
                 row.update(status="unused", reason=row["reason"] + f"; another Xbox copy is in use ({xbox[0]['path']})")
         for index, row in enumerate(ps2):
             if index == 0:
-                row.update(status="used", reason=row["reason"] + "; gameplay reference and base textures")
+                row.update(status="used", reason=row["reason"] + ". Primary gameplay input and base textures.")
             else:
                 row.update(status="unused", reason=row["reason"] + f"; another PS2 copy is in use ({ps2[0]['path']})")
         games[game] = dict(title=TITLE[game], gameplay=gameplay, visual=visual)
@@ -486,8 +486,9 @@ def make_plan(found, trees=None, strays=0, roots=(), explicit_errors=(), xbox_su
             refusals.append("Also found, and not usable: " + "; ".join(f"{row['path']} ({row['reason']})" for row in cannot))
     return dict(schema=1, roots=[str(root) for root in roots], games=games, dlc=dlc, found=found, strays=strays,
                 refusals=refusals, xbox_supported=xbox_on, dlc_supported=dlc_on, source_plan=source_plan,
-                rule="PS2 is the gameplay reference whenever present; other copies change only the look, and the bake "
-                     "keeps the largest same-art copy of each texture.")
+                rule="All supported copies use the same openbf gameplay rulebook. "
+                     "A selected PS2 copy supplies gameplay data and base textures. "
+                     "Visual donors can supply larger same-art textures.")
 
 
 def explicit_inputs(discs, pc_roots):

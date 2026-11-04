@@ -444,7 +444,7 @@ impl Ctx<'_> {
 
     /// A list row's text, left-aligned; `[ours]` squeezed across to fit
     /// `width` (the merged list's "<name> (bfN)" rows outgrow BF2's own
-    /// names: "BESPIN: CLOUD CITY (bf1)").
+    /// names: "Bespin: Cloud City (bf1)").
     fn label_fit(
         &mut self,
         s: &crate::hud_draw::Screen,

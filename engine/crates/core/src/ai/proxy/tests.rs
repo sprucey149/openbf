@@ -468,6 +468,147 @@ fn tier_hurt_bots_seek_a_working_health_droid() {
 }
 
 #[test]
+fn a_mending_bot_leaves_the_last_hub_and_reaches_the_health_droid() {
+    for difficulty in [Difficulty::Hard, Difficulty::Elite] {
+        let (mut sim, bot) = crate::ai::tests::l_sim();
+        sim.difficulty = difficulty;
+        let start = Vec3::new(-0.5, 0.0, 0.0);
+        let unit = sim.unit_mut(bot).unwrap();
+        unit.soldier.pos = start;
+        unit.soldier.grounded = true;
+        let mut ai = unit.ai;
+        crate::ai::think(&sim, bot, &mut ai);
+        assert_eq!(ai.target_cp, Some(0), "control: a post order is active");
+        assert_eq!(
+            ai.route.unwrap().dest_hub,
+            2,
+            "control: the post is elsewhere"
+        );
+
+        // The droid shares the unit's current hub, above the bot's feet. The
+        // bot must enter its sphere even when within a metre of it in XZ.
+        let health =
+            sim.add_station_class(crate::sim::StationClass::soldier("health", 0.5, 20.0, 0));
+        let droid = Vec3::new(1.5, 1.3, 0.0);
+        sim.stations
+            .push(crate::sim::Station::new(health, droid, 1.5));
+        let unit = sim.unit_mut(bot).unwrap();
+        unit.health.cur = unit.health.max * 0.2;
+        let before = unit.health.cur;
+        unit.ai = ai;
+        assert!(!sim.stations[0].reaches(start));
+        assert!(!sim.stations[0].reaches(Vec3::ZERO));
+        assert!(!sim.stations[0].reaches(Vec3::new(0.6, 0.0, 0.0)));
+
+        sim.tick = ai.next_think;
+        crate::ai::think(&sim, bot, &mut ai);
+        let route = ai.route.expect("a route to the station's hub");
+        assert!(route.is_last(), "control: the bot is on the station's hub");
+        assert_eq!(route.dest_hub, 0);
+        assert_eq!(
+            ai.walk.goal, droid,
+            "{difficulty:?}: walk beyond the hub centre"
+        );
+
+        sim.stations[0].destroyed = true;
+        sim.tick = ai.next_think;
+        crate::ai::think(&sim, bot, &mut ai);
+        assert_eq!(ai.target_cp, Some(0), "keep the post assignment");
+        assert_eq!(ai.route.unwrap().dest_hub, 2, "resume the attack route");
+        sim.stations[0].destroyed = false;
+
+        for _ in 0..180 {
+            sim.step(&[]);
+            let unit = sim.unit(bot).expect("the same bot life");
+            if unit.health.cur > before {
+                break;
+            }
+        }
+        let unit = sim.unit(bot).expect("the same bot life");
+        assert!(
+            unit.health.cur > before,
+            "{difficulty:?}: the droid must heal the bot"
+        );
+    }
+}
+
+fn add_disconnected_health_droid(sim: &mut Sim) -> Vec3 {
+    use crate::nav::{Arc, Hub, NavGraph, SOLDIER};
+
+    let droid = Vec3::new(20.0, 0.0, 0.0);
+    let graph = sim.nav.as_mut().unwrap();
+    let mut hubs = std::mem::take(&mut graph.hubs);
+    let mut arcs = std::mem::take(&mut graph.arcs);
+    hubs.extend([droid, droid + Vec3::X * 10.0].map(|pos| Hub {
+        pos,
+        radius: 2.0,
+        arcs: vec![2],
+    }));
+    arcs.push(Arc {
+        a: 3,
+        b: 4,
+        type_mask: 1 << SOLDIER,
+        flags: 0,
+    });
+    *graph = NavGraph::new(hubs, arcs, Default::default(), vec![], vec![]).unwrap();
+    assert!(!graph.reachable(0, 3, SOLDIER));
+    assert!(!graph.reachable(2, 3, SOLDIER));
+
+    let class = sim.add_station_class(crate::sim::StationClass::soldier("health", 0.5, 20.0, 0));
+    sim.stations
+        .push(crate::sim::Station::new(class, droid, 1.5));
+    droid
+}
+
+#[test]
+fn an_unroutable_health_droid_keeps_the_command_post_fallback() {
+    let (mut sim, bot) = crate::ai::tests::l_sim();
+    sim.difficulty = Difficulty::Hard;
+    let mut ai = sim.unit(bot).unwrap().ai;
+    crate::ai::think(&sim, bot, &mut ai);
+    assert_eq!(ai.target_cp, Some(0));
+    assert_eq!(ai.route.unwrap().dest_hub, 2);
+
+    let droid = add_disconnected_health_droid(&mut sim);
+    let unit = sim.unit_mut(bot).unwrap();
+    unit.health.cur = unit.health.max * 0.2;
+    assert_eq!(mend(&sim, sim.unit(bot).unwrap()), Some(droid));
+
+    sim.tick = ai.next_think;
+    crate::ai::think(&sim, bot, &mut ai);
+    assert!(ai.route.is_none(), "the station is on a disconnected graph");
+    assert_eq!(ai.walk.goal, sim.cps[0].def.pos, "keep the post fallback");
+}
+
+#[test]
+fn a_newly_hurt_bot_keeps_its_unrelated_last_leg_between_thinks() {
+    let (mut sim, bot) = crate::ai::tests::l_sim();
+    sim.difficulty = Difficulty::Hard;
+    let at = sim.cps[0].def.pos + Vec3::X;
+    let unit = sim.unit_mut(bot).unwrap();
+    unit.soldier.pos = at;
+    let mut ai = unit.ai;
+    crate::ai::think(&sim, bot, &mut ai);
+    let route = ai.route.expect("a route to the post");
+    assert!(route.is_last());
+    assert_eq!(route.dest_hub, 2);
+    let droid = add_disconnected_health_droid(&mut sim);
+
+    sim.tick = 1;
+    assert!(sim.tick < ai.next_think);
+    let mut healthy = ai;
+    crate::ai::think(&sim, bot, &mut healthy);
+    let unit = sim.unit_mut(bot).unwrap();
+    unit.health.cur = unit.health.max * 0.2;
+    assert_eq!(mend(&sim, sim.unit(bot).unwrap()), Some(droid));
+    crate::ai::think(&sim, bot, &mut ai);
+
+    assert_eq!(ai.last_think, healthy.last_think);
+    assert_eq!(ai.route.unwrap().dest_hub, 2);
+    assert_eq!(ai.walk, healthy.walk, "keep the old leg until a fresh plan");
+}
+
+#[test]
 fn tier_elite_bots_prioritize_visible_threats() {
     use crate::perception::{Contact, Foe};
     let (mut sim, a, near) = field(Difficulty::Easy);

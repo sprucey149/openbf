@@ -70,6 +70,7 @@ pub struct HudMesh {
 #[derive(Debug, Clone, Default)]
 pub struct HudArt {
     pub fonts: HashMap<String, HudFont>,
+    pub distance_fonts: HashMap<String, manifest::hud::HudDistanceFont>,
     pub meshes: HashMap<String, HudMesh>,
     /// Width / height of the sheets a `bitmap:<sheet>` weapon icon may name.
     pub sheet_aspect: HashMap<String, f32>,
@@ -530,25 +531,60 @@ impl Ctx<'_> {
             for g in &glyphs {
                 let page = font.pages.get(usize::from(g.page));
                 if let (Some(page), true) = (page, g.x1 > g.x0 && g.y1 > g.y0) {
+                    let bitmap_rect = [
+                        f32::from(g.x0),
+                        f32::from(g.y0),
+                        f32::from(g.x1),
+                        f32::from(g.y1),
+                    ];
+                    let distance = self.art.distance_fonts.get(&font.name).and_then(|f| {
+                        f.glyphs
+                            .iter()
+                            .find(|d| d.code == g.code)
+                            .and_then(|d| f.pages.get(usize::from(d.page)).map(|p| (p, d)))
+                    });
+                    let (page, rect, uv) = match distance {
+                        Some((p, d)) => (p, d.rect, d.uv),
+                        None => (page, bitmap_rect, [g.uv[0], g.uv[2], g.uv[1], g.uv[3]]),
+                    };
                     self.quad(
                         i,
                         m,
                         s,
                         &Quad {
                             rect: [
-                                pen + f32::from(g.x0) * kx,
-                                top + off + f32::from(g.y0) * ky,
-                                pen + f32::from(g.x1) * kx,
-                                top + off + f32::from(g.y1) * ky,
+                                pen + rect[0] * kx,
+                                top + off + rect[1] * ky,
+                                pen + rect[2] * kx,
+                                top + off + rect[3] * ky,
                             ],
-                            uv: [g.uv[0], g.uv[2], g.uv[1], g.uv[3]],
+                            uv,
                             color: *col,
                             texture: page,
                             additive: r.additive,
                             shadow: false,
-                            boxed: *boxed,
+                            boxed: false,
                         },
                     );
+                    if *boxed {
+                        // Distance padding is artwork, never a hit/layout box.
+                        let [x0, y0, x1, y1] = bitmap_rect;
+                        let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+                        for (x, y) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1)] {
+                            let p = s.map(m.transform_point3(Vec3::new(
+                                pen + x * kx,
+                                top + off + y * ky,
+                                0.0,
+                            )));
+                            bounds = [
+                                bounds[0].min(p[0]),
+                                bounds[1].min(p[1]),
+                                bounds[2].max(p[0]),
+                                bounds[3].max(p[1]),
+                            ];
+                        }
+                        self.out.boxes.push((i, bounds));
+                    }
                 }
                 pen += (f32::from(g.advance) + spacing) * kx;
             }
@@ -841,6 +877,89 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn distance_padding_keeps_text_bounds_alignment_and_shadow_spacing() {
+        use manifest::hud::{HudDistanceFont, HudDistanceGlyph, HudGlyph, HudLayout};
+        let layout = HudLayout {
+            name: "empty".into(),
+            nodes: Vec::new(),
+        };
+        let hud = Hud::new(&layout, &layout);
+        let font = HudFont {
+            name: "fixture".into(),
+            line_height: 12,
+            pages: vec!["bitmap".into()],
+            glyphs: vec![HudGlyph {
+                code: 65,
+                page: 0,
+                advance: 7,
+                x0: 1,
+                x1: 6,
+                y0: 2,
+                y1: 10,
+                uv: [0.0, 1.0, 0.0, 1.0],
+            }],
+        };
+        let bitmap = HudArt::default();
+        let mut scalable = bitmap.clone();
+        scalable.distance_fonts.insert(
+            font.name.clone(),
+            HudDistanceFont {
+                pages: vec!["distance".into()],
+                glyphs: vec![HudDistanceGlyph {
+                    code: 65,
+                    page: 0,
+                    rect: [-3.0, -2.0, 10.0, 14.0],
+                    uv: [0.1, 0.2, 0.8, 0.9],
+                }],
+            },
+        );
+        for align in [HAlign::Left, HAlign::Center, HAlign::Right] {
+            for shadow in [false, true] {
+                let run = Run {
+                    text: "AAA",
+                    at: (50.0, 20.0),
+                    h_align: align,
+                    scale: [1.2, 1.1],
+                    color: [0.5, 0.6, 0.7, 0.8],
+                    additive: false,
+                    shadow,
+                };
+                let draw = |art| {
+                    let mut ctx = Ctx {
+                        hud: &hud,
+                        art,
+                        out: HudFrame::default(),
+                    };
+                    ctx.run(
+                        0,
+                        &Mat4::IDENTITY,
+                        &Screen {
+                            origin: [0.0, 0.0],
+                            scale: [4.0, 4.0],
+                        },
+                        &font,
+                        &run,
+                    );
+                    ctx.out
+                };
+                let a = draw(&bitmap);
+                let b = draw(&scalable);
+                assert_eq!(a.boxes, b.boxes);
+                assert_eq!(a.indices, b.indices);
+                assert!(b.batches.iter().all(|b| b.texture == "distance"));
+                assert_eq!(
+                    a.verts.iter().map(|v| v.color).collect::<Vec<_>>(),
+                    b.verts.iter().map(|v| v.color).collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    a.verts[4].pos[0] - a.verts[0].pos[0],
+                    b.verts[4].pos[0] - b.verts[0].pos[0]
+                );
+            }
+        }
+    }
+
     use super::*;
     use crate::hud_tree::EventValue;
     use manifest::hud::{HudArg, HudLayout, HudNode};

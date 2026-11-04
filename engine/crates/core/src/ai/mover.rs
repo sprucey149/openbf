@@ -36,7 +36,7 @@ use glam::Vec3;
 #[derive(Clone, Copy)]
 pub(super) struct MoveRequest<'a> {
     /// Which link of the chain walks the bot ([`WalkAsk::RETURN`] ..
-    /// [`WalkAsk::LEG`]; the black box's diagnostic).
+    /// [`WalkAsk::MEND`]), as recorded by the black box.
     pub kind: u8,
     /// The point to walk at this tick (the destination, or the navigator's
     /// point on the way to it); `None` = nowhere to be.
@@ -547,7 +547,10 @@ pub(super) fn run(
         pos,
         arrived_at_post || goal.is_none(),
         must_walk && !mv.excused && !piloting,
-        sim.battle.teams.iter().any(|t| t.tickets() <= HOLD_ENDGAME),
+        sim.battle
+            .teams
+            .get(usize::from(u.team))
+            .is_some_and(|team| team.tickets() <= HOLD_ENDGAME),
         if lost_failed { 2 } else { u8::from(failed) },
         nt,
     );
@@ -684,6 +687,64 @@ mod tests {
     use crate::sim::Sim;
     use crate::unit::UnitHandle;
     use glam::Vec2;
+
+    #[test]
+    fn a_travelling_bot_uses_its_own_teams_endgame_watch() {
+        use crate::ai::{StallState, RECYCLE_AFTER, RECYCLE_ROAM};
+
+        let (mut sim, h) = l_sim();
+        sim.battle.teams[1].reinforcements = 1.0;
+        for (own_tickets, travelled, stalled) in [(12.0, true, 0), (1.0, true, 1), (12.0, false, 1)]
+        {
+            sim.battle.teams[0].reinforcements = own_tickets;
+            let mut state = AiState {
+                stall: Some(StallState {
+                    at: if travelled {
+                        Vec3::NEG_X * RECYCLE_ROAM
+                    } else {
+                        Vec3::ZERO
+                    },
+                    lo: Vec3::splat(-50.0),
+                    hi: Vec3::splat(50.0),
+                    ticks: RECYCLE_AFTER - 1,
+                    ..StallState::default()
+                }),
+                ..AiState::default()
+            };
+            let u = sim.unit(h).unwrap();
+            let tick = Tick {
+                me: h,
+                u,
+                eye: u.ai_eye(),
+                wc: &sim.weapon_classes[u.weapon_class],
+                tier: sim.unit_tier(u),
+                skill: sim.skill_of(u),
+            };
+            let move_request = MoveRequest {
+                kind: WalkAsk::LEG,
+                goal: Some(Vec3::NEG_Z * 40.0),
+                arrive: None,
+                post: None,
+                defending: false,
+                in_range: false,
+                ret: None,
+                hold: None,
+                flee: false,
+                boarding: false,
+                roll: 0,
+                excused: false,
+                throwing: false,
+            };
+            let mut pad = PadState::default();
+            let mut nav = NavTick::default();
+            run(&sim, &tick, &mut state, &move_request, &mut pad, &mut nav);
+            assert_ne!((pad.lx, pad.ly), (0, 0), "the bot has a route to walk");
+            assert_eq!(
+                nav.stalled, stalled,
+                "own tickets {own_tickets}, travelled {travelled}"
+            );
+        }
+    }
 
     /// Card PARR's scenes: `l_sim`'s post (hub 2, a 6 m capture sphere) with
     /// a body on it and the bot 12 m short of it. `plinth`: BF1's post, a

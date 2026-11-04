@@ -1,6 +1,8 @@
 //! Reference vectors from re-stance-roll.md §5 (BF2-model subset).
 use super::*;
 
+mod fc_sprint;
+mod fc_timers;
 mod jet;
 mod juni;
 mod motion;
@@ -326,10 +328,7 @@ fn stand_falls_after_the_games_airtime() {
     };
     // air_time > limit on the first tick past it (f32 sums of 1/30).
     let (t, st) = ticks_to_fall(GroundRules::Bf2, 0, Stance::Stand);
-    assert!(
-        (30..=31).contains(&t) && st == Stance::Fall,
-        "BF2: {t} {st:?}"
-    );
+    assert_eq!((t, st), (31, Stance::Fall), "BF2 measured boundary");
     let (t, st) = ticks_to_fall(GroundRules::Bf1, 0, Stance::Stand);
     assert!(
         (21..=22).contains(&t) && st == Stance::Fall,

@@ -214,9 +214,7 @@ pub(in super::super) fn retarget_board(
         return;
     };
     let m = mover(sim, u);
-    let dest = g
-        .unit_hub_on(at, m, &|h| hub_on_level(sim, g, h, at.y))
-        .map(|h| level_hub(sim, g, h, at));
+    let dest = unit_goal_hub(sim, g, m, at);
     match (start_hub(sim, g, me), dest) {
         (Some(c), Some(d)) if g.reachable_by(c, d, m) => {
             if st.route.is_none_or(|r| r.dest_hub != d) {

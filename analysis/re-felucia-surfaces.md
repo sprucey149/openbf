@@ -1,7 +1,7 @@
 # Felucia plant shells, ground detail and distance haze
 
-2026-11-04. Source baseline: `8d4481ab6ef38e18cd3c87ab9914e249d95f1a33`,
-branch `codex/hoth-atmosphere`. [O] UNAUDITED: original static PS2 evidence,
+2026-11-04. Source baseline: `8d4481ab6ef38e18cd3c87ab9914e249d95f1a33`.
+[O] UNAUDITED: original static PS2 evidence,
 maintainer screenshots and port GPU regressions; no new matched PCSX2 capture.
 
 ## Evidence

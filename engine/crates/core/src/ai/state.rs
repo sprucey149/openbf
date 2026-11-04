@@ -1010,8 +1010,8 @@ pub struct MoverState {
     /// destination is within [`crate::ai::DEST_DEADBAND`] of it (and of the
     /// same kind) is this one still.
     pub dest: Vec3,
-    /// ...and the request's kind ([`WalkAsk::RETURN`] .. [`WalkAsk::LEG`]; 0
-    /// = none yet).
+    /// The kind of the request that set `dest` (hold, leg or pickup).
+    /// Zero means the mover has no arrival destination.
     pub kind: u8,
     /// The bot has ARRIVED at `dest` and stands: the stick stays released
     /// until the request changes.
@@ -1148,7 +1148,7 @@ impl MoverState {
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct WalkAsk {
     /// Which link of `think`'s goal chain set the point walked at:
-    /// 0 the bot did not walk, [`WalkAsk::RETURN`] .. [`WalkAsk::LEG`].
+    /// 0 the bot did not walk, [`WalkAsk::RETURN`] .. [`WalkAsk::MEND`].
     pub kind: u8,
     /// The point walked at.
     pub goal: Vec3,
@@ -1169,6 +1169,8 @@ impl WalkAsk {
     /// The route's walk point or corner, an order's point, the post.
     pub const LEG: u8 = 5;
     pub const PICKUP: u8 = 6;
+    /// The health droid on the last leg of the route to it.
+    pub const MEND: u8 = 7;
 }
 
 /// Card FGHT: what a fighting bot's position ([`HoldState`]) is —

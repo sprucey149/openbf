@@ -33,6 +33,16 @@ use mungefs::config::ConfigNode;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+mod art;
+mod distance;
+mod fonts;
+
+/// Generate native UI sheet sidecars, accepting only larger copies which
+/// pass the existing same-art gate. No layout or gameplay record is changed.
+pub fn bake_native_art(core: &Path, out: &Path, donors: &[std::path::PathBuf]) -> Result<usize> {
+    art::bake(core, out, donors)
+}
+
 /// The sibling LVLs the extra sheets come from, searched in this order.
 const SHEET_SOURCES: [&str; 2] = ["COMMON.LVL", "CORE.LVL"];
 /// The sibling LVL holding the fonts.
@@ -94,10 +104,29 @@ fn strings(ns: &[HudNode], out: &mut BTreeSet<String>) {
 /// `<out>/fonts`, each font and its pages named `<prefix><name>`. Answers the
 /// baked fonts' names, sorted.
 pub fn bake_fonts(core_path: &Path, out: &Path, prefix: &str) -> Result<Vec<String>> {
+    bake_fonts_with_donors(core_path, out, prefix, &[])
+}
+
+/// Donors contribute only glyph art. Original metrics and bitmap pages stay
+/// byte-for-byte compatible, including fonts absent from another edition.
+pub fn bake_fonts_with_donors(
+    core_path: &Path,
+    out: &Path,
+    prefix: &str,
+    donor_paths: &[std::path::PathBuf],
+) -> Result<Vec<String>> {
     let core = std::fs::read(core_path).with_context(|| core_path.display().to_string())?;
     let core_inner = mungefs::open(&core).map_err(|e| anyhow!("{}: {e}", core_path.display()))?;
     let fonts_dir = out.join("fonts");
     std::fs::create_dir_all(&fonts_dir)?;
+    let donors = donor_paths
+        .iter()
+        .map(|p| fonts::read_fonts(p))
+        .collect::<Result<Vec<_>>>()?;
+    let sources = std::iter::once(core_path)
+        .chain(donor_paths.iter().map(|p| p.as_path()))
+        .map(fonts::fingerprint)
+        .collect::<Result<Vec<_>>>()?;
     let mut fonts = Vec::new();
     for c in mungefs::content_chunks(core_inner)
         .map_err(|e| anyhow!("{e}"))?
@@ -133,6 +162,7 @@ pub fn bake_fonts(core_path: &Path, out: &Path, prefix: &str) -> Result<Vec<Stri
                 .collect(),
         };
         crate::write_ron(&fonts_dir.join(format!("{}.ron", hf.name)), &hf)?;
+        fonts::bake(&f, &donors, &fonts_dir, prefix, &sources)?;
         fonts.push(hf.name);
     }
     fonts.sort();
@@ -222,6 +252,7 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
         textures,
     };
     crate::write_ron(&out.join("hud").join("index.ron"), &index)?;
+    bake_native_art(&crate::join_ci(dir, FONT_SOURCE), out, &[])?;
     Ok(Some(index))
 }
 

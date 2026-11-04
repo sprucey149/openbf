@@ -162,13 +162,14 @@ fn doing(p: &Probe) -> String {
                 2 => "a point out of a hazard",
                 3 => "its hold goal",
                 4 => "its vehicle",
+                core::ai::WalkAsk::MEND => "its health droid",
                 _ => "its leg's point",
             },
             at(p.walk_at),
             d(p.walk_at)
         );
     }
-    if p.cp >= 0 && p.cp != p.goal_cp {
+    if p.cp >= 0 && p.cp != p.goal_cp && p.walk != core::ai::WalkAsk::MEND {
         let _ = write!(s, " (walks at cp{})", p.cp);
     }
     s

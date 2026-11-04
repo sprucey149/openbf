@@ -9,7 +9,8 @@
 #   scripts/size_report.sh --check-map  also: exit 1 unless every
 #                                       engine/crates/*/src/**/*.rs has its own
 #                                       row in engine/CRATES.md and every path named
-#                                       there exists; rows whose recorded line
+#                                       there exists, except local game data;
+#                                       rows whose recorded line
 #                                       count is stale are listed (not a failure)
 #   scripts/size_report.sh --strict     also: exit 1 for any src file over 2,000
 #                                       lines that scripts/size_waivers.txt does
@@ -132,11 +133,14 @@ if check_map:
     map_rows = set(re.findall(r"^- `([^`]+)` \d+ ", text, re.M))
     unmapped = [p for p in sorted(src) if p not in map_rows]
     bases = (root, os.path.join(root, "engine"), crates_dir)
+    local_data = {"assets_baked/", "engine/assets_baked/", "engine/missions/", "extracted/", "missions/"}
     missing = []
     for t in sorted(tokens):
         if "/" not in t or not re.fullmatch(r"[\w./-]+", t) or not re.search(r"\w", t):
             continue
         rel = t.removeprefix("./")
+        if rel in local_data:
+            continue
         want_dir = rel.endswith("/")
         ok = any(
             (os.path.isdir if want_dir else os.path.exists)(os.path.join(b, rel)) for b in bases

@@ -1,8 +1,10 @@
-# One gameplay reference across disc editions
+# One gameplay rulebook across source editions
 
-PS2 is the reference. Selecting another edition's texture or model must not
-select its health, weapon tuning, mission population, collision, terrain or
-animation timing. The measured differences and coverage are in
+openbf uses one gameplay rulebook. The first conversion tables use measurements
+from the PS2 versions of the two original games. Selecting another edition's
+texture or model preserves gameplay inside playable bounds, including health,
+weapon tuning, mission population, collision, terrain and animation timing.
+The measured differences and coverage are in
 [version-diff.md](version-diff.md); the input inventory is in
 [version-input-dependencies.md](version-input-dependencies.md).
 

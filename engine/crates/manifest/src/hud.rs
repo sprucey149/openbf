@@ -82,6 +82,24 @@ pub struct HudGlyph {
     pub uv: [f32; 4],
 }
 
+/// Optional `fonts/<font>.sdf.ron`: scalable artwork generated from the
+/// player's glyphs. The original HudFont remains the sole layout authority.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HudDistanceFont {
+    pub pages: Vec<String>,
+    pub glyphs: Vec<HudDistanceGlyph>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HudDistanceGlyph {
+    pub code: u16,
+    pub page: u8,
+    /// Padded artwork bounds in the original font's layout units.
+    pub rect: [f32; 4],
+    /// u0, v0, u1, v1 on the generated page.
+    pub uv: [f32; 4],
+}
+
 /// `locl/<language>.ron`: one CORE.LVL `Locl` table. The disc keeps no key
 /// strings: each text sits under the FNV-1a hash of its lower-cased key path
 /// ([`locl_key`]).

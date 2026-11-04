@@ -1585,6 +1585,7 @@ fn sky_shell_tint(
     }
 }
 
+/// Upload decorative flights from both games using authored sky parameters.
 fn upload_sky_objects(
     r: &mut Renderer,
     scene: &Scene,

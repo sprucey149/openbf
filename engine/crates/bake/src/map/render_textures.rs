@@ -3,6 +3,17 @@
 use crate::tier::{PcTextures, Resolved, Usage};
 use anyhow::{anyhow, Result};
 use mungefs::{texture::Texture, Chunk};
+use std::{
+    fs::{self, File, Metadata},
+    io::{self, Read},
+    path::Path,
+};
+
+const MUSTAFAR_DISPLAY: &str = "mus1_prop_console_fx";
+const TANTIVE_CONSOLE: &str = "tan4_prop_console";
+const DISPLAY_CROP: [u32; 4] = [64, 112, 192, 160];
+// Whole retail Xbox BF2 TAN1.LVL size. This optional read needs no larger file.
+const TANTIVE_LVL_MAX_BYTES: u64 = 10_228_324;
 
 pub(super) fn recover(
     expanded: &[Chunk<'_>],
@@ -76,7 +87,8 @@ pub(super) fn recover(
 /// The PC models themselves name two sheets absent from both retail PC
 /// installs. Deliberate presentation replacements: the map's snow painting
 /// and a crop of its blue console display. These are not same-art aliases.
-/// Exact supplied sheets win; changed source paintings remain unresolved.
+/// A map-local exact sheet wins. The fingerprinted PC substitutes are
+/// checked before looking in supplied donor LVLs.
 fn own_pc_replacements(textures: &mut Vec<Texture>) {
     for (missing, source, width, height, hash, crop) in [
         (
@@ -88,12 +100,12 @@ fn own_pc_replacements(textures: &mut Vec<Texture>) {
             None,
         ),
         (
-            "mus1_prop_console_fx",
-            "tan4_prop_console",
+            MUSTAFAR_DISPLAY,
+            TANTIVE_CONSOLE,
             512,
             512,
             0xb40f_7442_ecff_a762,
-            Some([64, 112, 192, 160]),
+            Some(DISPLAY_CROP),
         ),
     ] {
         if textures
@@ -115,20 +127,124 @@ fn own_pc_replacements(textures: &mut Vec<Texture>) {
         if (t.info.width, t.info.height, actual) != (width, height, hash) {
             continue;
         }
-        let mut replacement = Resolved::from_ps2(t);
-        if let Some([x, y, w, h]) = crop {
-            let mut cropped = Vec::with_capacity((w * h * 4) as usize);
-            for row in y..y + h {
-                let start = ((row * width + x) * 4) as usize;
-                cropped.extend_from_slice(&pixels[start..start + (w * 4) as usize]);
-            }
-            replacement.width = w;
-            replacement.height = h;
-            replacement.mips = vec![cropped];
-        }
-        textures.push(replacement.as_texture(missing));
+        textures.push(replacement(t, missing, crop));
         eprintln!("render texture replacement: {missing} <- own {source}, crop {crop:?}");
     }
+}
+
+fn replacement(source: &Texture, name: &str, crop: Option<[u32; 4]>) -> Texture {
+    let mut image = Resolved::from_ps2(source);
+    if let Some([x, y, w, h]) = crop {
+        let pixels = &image.mips[0];
+        let mut cropped = Vec::with_capacity((w * h * 4) as usize);
+        for row in y..y + h {
+            let start = ((row * image.width + x) * 4) as usize;
+            cropped.extend_from_slice(&pixels[start..start + (w * 4) as usize]);
+        }
+        image.width = w;
+        image.height = h;
+        image.mips = vec![cropped];
+    }
+    image.as_texture(name)
+}
+
+/// OURS: the Xbox models request a sheet absent from all 185 Xbox BF2 LVLs.
+/// Use the blue display crop from the same disc's Tantive IV atlas.
+/// replace: an authenticated exact Xbox Mustafar sheet if one is found.
+pub(super) fn recover_xbox_mustafar(
+    lvl: &Path,
+    original: &[u8],
+    textures: &mut Vec<Texture>,
+) -> Result<()> {
+    let Some(mus) = lvl.parent().filter(|p| {
+        p.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.eq_ignore_ascii_case("MUS"))
+    }) else {
+        return Ok(());
+    };
+    if !lvl
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.eq_ignore_ascii_case("MUS1.LVL"))
+        || textures
+            .iter()
+            .any(|t| t.name.eq_ignore_ascii_case(MUSTAFAR_DISPLAY))
+        || crate::gameplay::digest(original)
+            != "a239cc10e6f57d22203d6754060caf32c96cc09cec913f6a3902deb4bca0f76c"
+    {
+        return Ok(());
+    }
+    let Some(root) = mus.parent() else {
+        return Ok(());
+    };
+    let root = if root.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        root
+    };
+    let path = crate::join_ci(root, "TAN/TAN1.LVL");
+    let bytes = match read_tantive_atlas(&path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            eprintln!("render texture replacement: {}: {error}", path.display());
+            return Ok(());
+        }
+    };
+    let atlas = mungefs::open(&bytes)
+        .and_then(mungefs::content_chunks)
+        .ok()
+        .and_then(|items| {
+            items.into_iter().find(|c| {
+                &c.tag == b"tex_"
+                    && c.child_string(b"NAME")
+                        .is_some_and(|name| name.eq_ignore_ascii_case(TANTIVE_CONSOLE))
+            })
+        })
+        .filter(|c| {
+            // The full Xbox TEX_ payload pins the 512x512 DXT1 format,
+            // all mip data, and the layout used by DISPLAY_CROP.
+            crate::gameplay::digest(c.payload)
+                == "87929229ae8fba633c25cec1c3b51bc52f154f5179426fd8b37d9fd55e995d1a"
+        });
+    let Some(atlas) = atlas else {
+        eprintln!(
+            "render texture replacement: unrecognized Xbox atlas in {}",
+            path.display()
+        );
+        return Ok(());
+    };
+    let atlas = Texture::parse(&atlas).map_err(|e| anyhow!("{e}"))?;
+    textures.push(replacement(&atlas, MUSTAFAR_DISPLAY, Some(DISPLAY_CROP)));
+    eprintln!(
+        "render texture replacement: {MUSTAFAR_DISPLAY} <- own {TANTIVE_CONSOLE} from {}, crop {DISPLAY_CROP:?}",
+        path.display()
+    );
+    Ok(())
+}
+
+fn read_tantive_atlas(path: &Path) -> io::Result<Vec<u8>> {
+    let valid = |meta: Metadata| meta.is_file() && meta.len() <= TANTIVE_LVL_MAX_BYTES;
+    let invalid = || {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "expected a regular file no larger than the retail Xbox TAN1.LVL",
+        )
+    };
+    if !valid(fs::symlink_metadata(path)?) {
+        return Err(invalid());
+    }
+    let file = File::open(path)?;
+    if !valid(file.metadata()?) {
+        return Err(invalid());
+    }
+    let mut bytes = Vec::new();
+    file.take(TANTIVE_LVL_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > TANTIVE_LVL_MAX_BYTES {
+        return Err(invalid());
+    }
+    Ok(bytes)
 }
 
 pub(super) fn larger_own(
@@ -188,6 +304,80 @@ pub(super) fn larger_own(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "owned Xbox and PS2 BF2 roots and an empty OPENBF_MUSTAFAR_TEST_OUT"]
+    fn owned_xbox_mustafar_uses_only_the_known_tantive_display() {
+        use std::{fs, path::PathBuf};
+
+        let input = |key| PathBuf::from(std::env::var_os(key).expect(key));
+        let xbox = input("OPENBF_MUSTAFAR_XBOX_ROOT");
+        let ps2 = input("OPENBF_MUSTAFAR_PS2_ROOT");
+        let out = input("OPENBF_MUSTAFAR_TEST_OUT");
+        fs::create_dir(&out).unwrap();
+        let mus = crate::join_ci(&xbox, "MUS/MUS1.LVL");
+        let exact = crate::join_ci(&ps2, "MUS/MUS1.LVL");
+        let run = |input: &std::path::Path, label, donor: Option<&std::path::Path>| {
+            let dest = out.join(label);
+            super::super::bake_map(
+                input.to_str().unwrap(),
+                dest.to_str().unwrap(),
+                donor.map(|p| p.to_str().unwrap()),
+            )
+            .unwrap();
+            dest.join("textures/mus1_prop_console_fx.ktx2")
+        };
+
+        let with_exact = fs::read(run(&mus, "exact", Some(&exact))).unwrap();
+        let with_exact = ktx2::Reader::new(&with_exact).unwrap().header();
+        assert_eq!((with_exact.pixel_width, with_exact.pixel_height), (64, 64));
+
+        let changed = out.join("changed-source/_LVL_XBOX");
+        for rel in ["core.lvl", "mission.lvl", "mus/mus1.lvl", "side/tur.lvl"] {
+            let dst = changed.join(rel);
+            fs::create_dir_all(dst.parent().unwrap()).unwrap();
+            fs::copy(crate::join_ci(&xbox, rel), dst).unwrap();
+        }
+        let mut tan = fs::read(crate::join_ci(&xbox, "TAN/TAN1.LVL")).unwrap();
+        let items = mungefs::content_chunks(mungefs::open(&tan).unwrap()).unwrap();
+        let atlas = items
+            .iter()
+            .find(|c| {
+                &c.tag == b"tex_" && c.child_string(b"NAME").as_deref() == Some("tan4_prop_console")
+            })
+            .unwrap();
+        // Mutate a DXT1 endpoint used by the first texel. Chunk offsets are
+        // relative to the inner UCFB payload.
+        let endpoint = atlas.child(b"BODY").unwrap().offset + 16;
+        tan[endpoint] ^= 0x1f;
+        fs::create_dir(changed.join("tAn")).unwrap();
+        let donor = changed.join("tAn/TaN1.LvL");
+        let changed_mus = changed.join("mus/mus1.lvl");
+        fs::write(&donor, tan).unwrap();
+        assert!(!run(&changed_mus, "changed", None).exists());
+        fs::rename(&donor, changed.join("tAn/mutated.lvl")).unwrap();
+        assert!(!run(&changed_mus, "missing", None).exists());
+        fs::create_dir(&donor).unwrap();
+        assert!(!run(&changed_mus, "non-file", None).exists());
+        fs::rename(&donor, changed.join("tAn/directory")).unwrap();
+        fs::File::create(&donor)
+            .unwrap()
+            .set_len(TANTIVE_LVL_MAX_BYTES + 1)
+            .unwrap();
+        assert!(!run(&changed_mus, "oversize", None).exists());
+
+        let baked = run(&mus, "recovered", None);
+        assert!(baked.is_file(), "the Xbox console display is still missing");
+        let baked = fs::read(baked).unwrap();
+        let ktx = ktx2::Reader::new(&baked).unwrap();
+        let header = ktx.header();
+        assert_eq!((header.pixel_width, header.pixel_height), (192, 160));
+        let rgba = ktx.levels().next().unwrap().data;
+        assert_eq!(
+            crate::gameplay::digest(rgba),
+            "a9ce1118020e68aeb0f212bd1a7654100ab19cbe50f5726c0fce645e24ed2932"
+        );
+    }
 
     #[test]
     #[ignore = "owned PC maps: OPENBF_PC_RHN2 and OPENBF_PC_MUS1"]

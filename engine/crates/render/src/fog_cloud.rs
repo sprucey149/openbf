@@ -2,6 +2,9 @@ use crate::rand::{step, unit as random};
 use crate::{Camera, ParticleDraw, ParticleShape, TextureHandle};
 use glam::Vec3;
 
+// Bound the tiled work even if an input declares a huge range.
+const MAX_CANDIDATES: u64 = 262_144;
+
 pub struct FogCloud {
     pub texture: TextureHandle,
     pub range: [f32; 2],
@@ -26,16 +29,27 @@ impl FogCloud {
     }
 
     pub fn draws(&self, camera: &Camera, time: f64) -> Vec<ParticleDraw> {
+        let density = self.density.min(4096);
+        let reach = self.range[1].max(0.0) + self.size;
+        let lo = ((camera.position - Vec3::splat(reach)) / 256.0).floor();
+        let hi = ((camera.position + Vec3::splat(reach)) / 256.0).floor();
+        if density == 0 || !lo.is_finite() || !hi.is_finite() || reach < 0.0 {
+            return Vec::new();
+        }
+        let (x0, x1) = (lo.x as i32, hi.x as i32);
+        let (z0, z1) = (lo.z as i32, hi.z as i32);
+        let columns = u64::from(x0.abs_diff(x1)) + 1;
+        let rows = u64::from(z0.abs_diff(z1)) + 1;
+        if columns > MAX_CANDIDATES / rows / u64::from(density) {
+            return Vec::new();
+        }
         let mut rng = 0xc71c_2831u32;
         let drift = self
             .velocity
             .map(|v| (f64::from(v) * time).rem_euclid(256.0) as f32);
         let rotation = ((f64::from(self.rotation) * time + 1.0).rem_euclid(2.0) - 1.0) as f32;
-        let reach = self.range[1].max(0.0) + self.size;
-        let lo = ((camera.position - Vec3::splat(reach)) / 256.0).floor();
-        let hi = ((camera.position + Vec3::splat(reach)) / 256.0).floor();
         let mut out = Vec::new();
-        for _ in 0..self.density.min(4096) {
+        for _ in 0..density {
             let x = (random(&mut rng) * 256.0 + drift[0]).rem_euclid(256.0);
             let z = (random(&mut rng) * 256.0 + drift[1]).rem_euclid(256.0);
             let phase = random(&mut rng) * 2.0;
@@ -43,8 +57,8 @@ impl FogCloud {
             let sign = if rng & 0x0010_0000 != 0 { -1.0 } else { 1.0 };
             rng = step(rng);
             let angle = (phase + sign * rotation).rem_euclid(2.0) * std::f32::consts::PI;
-            for ix in lo.x as i32..=hi.x as i32 {
-                for iz in lo.z as i32..=hi.z as i32 {
+            for ix in x0..=x1 {
+                for iz in z0..=z1 {
                     let px = ix as f32 * 256.0 + x;
                     let pz = iz as f32 * 256.0 + z;
                     let pos = Vec3::new(px, (self.ground)(px, pz) + self.height, pz);
@@ -120,5 +134,22 @@ mod tests {
             assert_eq!(seed & 0x0010_0000 != 0, reverse);
             seed = step(seed);
         }
+    }
+
+    #[test]
+    fn oversized_range_is_rejected_before_visiting_the_ground() {
+        let cloud = FogCloud {
+            texture: TextureHandle(0),
+            range: [0.0, 1.0e8],
+            color: [255; 4],
+            velocity: [0.0; 2],
+            rotation: 0.0,
+            height: 0.0,
+            size: 28.0,
+            density: 30,
+            display_gain: 1.0,
+            ground: Box::new(|_, _| panic!("oversized cloud must not visit tiles")),
+        };
+        assert!(cloud.draws(&Camera::default(), 0.0).is_empty());
     }
 }

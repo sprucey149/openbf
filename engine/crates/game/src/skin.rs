@@ -240,7 +240,13 @@ impl Clip {
         }
         let n = self.frames as f32;
         let f = if looping {
-            frame.rem_euclid(n)
+            let wrapped = frame.rem_euclid(n);
+            // Tiny negative inputs can round the remainder up to the clip length.
+            if wrapped == n {
+                0.0
+            } else {
+                wrapped
+            }
         } else {
             frame.clamp(0.0, n - 1.0)
         };
@@ -396,10 +402,17 @@ mod tests {
             clip.sample(&s, 7.0, false).0[0].translation,
             Vec3::new(2.0, 0.0, 0.0)
         ));
-        assert!(close(
-            clip.sample(&s, 2.5, true).0[0].translation,
-            Vec3::new(1.0, 0.0, 0.0)
-        ));
+        for frame in [2.5, -0.5] {
+            assert!(close(
+                clip.sample(&s, frame, true).0[0].translation,
+                Vec3::new(1.0, 0.0, 0.0)
+            ));
+        }
+        // A very small negative offset rounds the loop remainder to 3.0.
+        assert_eq!(
+            clip.sample(&s, -f32::EPSILON / 2.0, true).0[0].translation,
+            Vec3::ZERO
+        );
         assert!((clip.duration() - 0.1).abs() < 1e-6);
     }
 

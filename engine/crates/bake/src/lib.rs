@@ -39,6 +39,7 @@ pub mod lighting;
 pub mod loadscreen;
 pub mod lowres_glb;
 pub mod map;
+pub mod map_icons;
 pub mod ogg;
 pub mod shell;
 pub mod side_classes;

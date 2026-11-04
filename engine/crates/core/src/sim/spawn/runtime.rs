@@ -8,8 +8,9 @@ use crate::aim_assist::AssistState;
 use crate::battle::SpawnOutcome;
 use crate::sim::input::{buttons, PadState, ScreenPick};
 use crate::sim::state::{Event, Sim};
-use crate::unit::{Controller, SpawnPost, UnitHandle, UnitSpec};
+use crate::unit::{Controller, SpawnPost, Unit, UnitHandle, UnitSpec};
 use glam::{Vec2, Vec3};
+use std::collections::HashSet;
 
 impl Sim {
     /// The floor a unit spawned at `node` stands on: the ground under the
@@ -37,6 +38,113 @@ impl Sim {
             Some(&(_, y)) => y,
             None => self.node_floor(node),
         }
+    }
+
+    /// OURS: on an authored command-post node with no walkable exit, a
+    /// regular bot uses the nearest standable, connected node of that post.
+    /// Preserve the original draw and retain it if no alternate is proven.
+    /// trace: compare Endor Path6's chosen spawn and departure in BF2 PS2 RAM.
+    fn settle_spawn(&self, unit: &mut Unit, selected: Option<SpawnPost>) {
+        let node = unit.spec.pos;
+        unit.soldier.pos.y = self.spawn_ground(node);
+        if unit.is_player
+            || unit.controller != Controller::Ai
+            || unit.team >= 2
+            || unit.spec.jet
+            || unit.proxy_human.is_some()
+            || !self.nav_trapped.iter().any(|&trapped| trapped)
+        {
+            return;
+        }
+        if let Some((point, yaw, floor)) = self.connected_spawn_node(unit, selected) {
+            unit.spec.pos = point;
+            unit.spec.yaw = yaw;
+            unit.soldier.pos = Vec3::new(point.x, floor, point.z);
+            unit.soldier.yaw = yaw;
+        }
+    }
+
+    fn connected_spawn_node(
+        &self,
+        unit: &Unit,
+        selected: Option<SpawnPost>,
+    ) -> Option<(Vec3, f32, f32)> {
+        let graph = self.nav.as_ref()?;
+        let mover = crate::nav::Mover::SOLDIER;
+        let hub_at = |pos| crate::ai::unit_goal_hub(self, graph, mover, pos);
+        let hub = hub_at(unit.soldier.pos)?;
+        if !self.hub_trapped(hub) {
+            return None;
+        }
+        let links = |hub| {
+            graph.arcs.iter().enumerate().filter(move |(_, arc)| {
+                arc.allows(mover) && arc.touches(hub) && graph.hub(arc.other(hub)).is_some()
+            })
+        };
+        let walkable = |hub| links(hub).any(|(arc, _)| !self.arc_unwalkable(arc as u16, hub));
+        if links(hub).next().is_none() || walkable(hub) {
+            return None;
+        }
+        let chosen = (unit.spec.pos, unit.spec.yaw);
+        let has_node = |cp: &&crate::cp::CommandPost| {
+            cp.spawnable_by(unit.team) && cp.def.spawn_nodes.contains(&chosen)
+        };
+        let post = match selected {
+            Some(SpawnPost::Post(index)) => self.cps.get(usize::from(index)).filter(has_node)?,
+            Some(SpawnPost::Walker(_)) => return None,
+            None => {
+                // The opening wave has a flat list. Keep its pick if we
+                // cannot identify a unique static post as the source.
+                if self.walker_spawn_points(unit.team).contains(&chosen)
+                    || self.pad_walker_spawn_points(unit.team).contains(&chosen)
+                {
+                    return None;
+                }
+                let mut posts = self.cps.iter().filter(has_node);
+                let post = posts.next()?;
+                if posts.next().is_some() {
+                    return None;
+                }
+                post
+            }
+        };
+        let mut alternatives: Vec<_> = post
+            .def
+            .spawn_nodes
+            .iter()
+            .copied()
+            .filter(|&(point, _)| point != chosen.0)
+            .collect();
+        alternatives.sort_by(|a, b| {
+            a.0.distance_squared(chosen.0)
+                .total_cmp(&b.0.distance_squared(chosen.0))
+        });
+        alternatives.into_iter().find_map(|(point, yaw)| {
+            let floor = self.spawn_ground(point);
+            let feet = Vec3::new(point.x, floor, point.z);
+            let hub = hub_at(feet)?;
+            let goal = graph.hub(hub)?.xz();
+            let goal_floor = self.nav_floor(hub)?;
+            (floor > crate::collision::NO_GROUND
+                && self.kill_floor.is_none_or(|minimum| floor >= minimum)
+                && !self
+                    .death_regions
+                    .iter()
+                    .any(|region| region.contains(feet))
+                && !self.hub_trapped(hub)
+                && walkable(hub)
+                && self.soldier_clear(feet)
+                && self.floor_path(
+                    feet,
+                    goal,
+                    goal_floor,
+                    crate::ai::ARRIVE_MIN_RADIUS,
+                    crate::collision::STEP_HEIGHT,
+                    crate::sim::bounds::WALL_BAND,
+                    crate::sim::bounds::WALL_CELLS,
+                ) == Some(true))
+            .then_some((point, yaw, floor))
+        })
     }
 
     /// Card LLEG: derive [`Sim::spawn_seats`] — for every post's spawn node
@@ -121,7 +229,7 @@ impl Sim {
         cap: usize,
         goal: &dyn Fn(Vec3) -> bool,
     ) -> (usize, Option<(Vec3, f32)>) {
-        let mut seen = std::collections::HashSet::from([flood_key(0, 0, from.y)]);
+        let mut seen = HashSet::from([flood_key(0, 0, from.y)]);
         let mut queue = std::collections::VecDeque::from([(0i32, 0i32, from.y, 0u32)]);
         let mut cells = 0;
         while let Some((ix, iz, y, d)) = queue.pop_front() {
@@ -138,10 +246,9 @@ impl Sim {
                 return (cells, Some((p, d as f32 * PEN_CELL)));
             }
             for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                if let Some(f) = self.flood_step(p, dx as f32, dz as f32) {
-                    if seen.insert(flood_key(ix + dx, iz + dz, f)) {
-                        queue.push_back((ix + dx, iz + dz, f, d + 1));
-                    }
+                let next = (ix + dx, iz + dz);
+                if let Some(f) = self.flood_step(p, (dx, dz), next, &mut seen) {
+                    queue.push_back((next.0, next.1, f, d + 1));
                 }
             }
         }
@@ -150,19 +257,32 @@ impl Sim {
 
     /// One step of the floor flood from the floor point `a` by one
     /// [`PEN_CELL`] along (`dx`, `dz`): the floor a soldier stands on at its
-    /// end ([`Sim::floor_flood`]'s rule), `None` when there is none or a wall
-    /// is between.
-    fn flood_step(&self, a: Vec3, dx: f32, dz: f32) -> Option<f32> {
+    /// end ([`Sim::floor_flood`]'s rule). Record a new cell only after the
+    /// step succeeds so another edge can still reach it when this one fails.
+    fn flood_step(
+        &self,
+        a: Vec3,
+        (dx, dz): (i32, i32),
+        next: (i32, i32),
+        seen: &mut HashSet<(i32, i32, i32)>,
+    ) -> Option<f32> {
         use crate::collision::Capsule;
         let height = crate::unit::capsule_height(crate::soldier::Stance::Stand);
         let radius = crate::unit::SOLDIER_RADIUS;
-        let b = a + Vec3::new(dx, 0.0, dz) * PEN_CELL;
+        let dir = Vec3::new(dx as f32, 0.0, dz as f32);
+        let b = a + dir * PEN_CELL;
         let (f, n) = self.ground_under_n(b, false, a.y + PEN_CELL);
         if f <= crate::collision::NO_GROUND
             || n.y <= crate::soldier::FLOOR_MIN_NY
             || f - a.y > PEN_CELL
             || a.y - f > PEN_DROP
         {
+            return None;
+        }
+        // Resolve the floor before checking the key: another storey at this
+        // XZ is still a new cell. An accepted cell cannot enter the queue again.
+        let key = flood_key(next.0, next.1, f);
+        if seen.contains(&key) {
             return None;
         }
         let base = Vec3::new(a.x, a.y.max(f), a.z);
@@ -172,11 +292,7 @@ impl Sim {
             radius,
         }
         .stepped();
-        if self
-            .collision
-            .wall_sweep(&cap, Vec3::new(dx, 0.0, dz), PEN_CELL)
-            .is_some()
-        {
+        if self.collision.wall_sweep(&cap, dir, PEN_CELL).is_some() {
             return None;
         }
         let end = Capsule {
@@ -184,7 +300,10 @@ impl Sim {
             height,
             radius,
         };
-        (self.collision.push_out_soldier(&end).length() <= PEN_CLEAR).then_some(f)
+        (self.collision.push_out_soldier(&end).length() <= PEN_CLEAR).then(|| {
+            seen.insert(key);
+            f
+        })
     }
 
     /// Is a soldier standing at `from` (feet on a floor) clear of every body
@@ -245,7 +364,7 @@ impl Sim {
         };
         // Integer priority (mm to the goal) keeps the order exact.
         let prio = |p: Vec2| ((p - to).length() * 1000.0) as u32;
-        let mut seen = std::collections::HashSet::from([flood_key(0, 0, from.y)]);
+        let mut seen = HashSet::from([flood_key(0, 0, from.y)]);
         let mut heap = std::collections::BinaryHeap::from([(
             Reverse(prio(start)),
             0i32,
@@ -268,16 +387,15 @@ impl Sim {
             if cells >= cap {
                 return (None, near.1);
             }
+            let cell = Vec3::new(p.x, y, p.y);
             for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
                 let q = p + Vec2::new(dx as f32, dz as f32) * PEN_CELL;
                 if off_line(q) > band {
                     continue;
                 }
-                let Some(f) = self.flood_step(Vec3::new(p.x, y, p.y), dx as f32, dz as f32) else {
-                    continue;
-                };
-                if seen.insert(flood_key(ix + dx, iz + dz, f)) {
-                    heap.push((Reverse(prio(q)), ix + dx, iz + dz, f.to_bits()));
+                let next = (ix + dx, iz + dz);
+                if let Some(f) = self.flood_step(cell, (dx, dz), next, &mut seen) {
+                    heap.push((Reverse(prio(q)), next.0, next.1, f.to_bits()));
                 }
             }
         }
@@ -630,7 +748,7 @@ impl Sim {
         // ON the platforms (BF1 KAM1 `CP4SpawnPath` nodes sit at y ~ 61.4-62.3
         // for a post at y = 61), so the model floor under them is what grounds
         // the unit, not the terrain far below.
-        unit.soldier.pos.y = self.spawn_ground(spec.pos);
+        self.settle_spawn(&mut unit, None);
         let index = match slot {
             Some(i) => {
                 self.units[i] = unit;
@@ -985,11 +1103,11 @@ impl Sim {
         // comes back with a stale level.
         unit.skill = crate::skill_for(spec.controller, self.bot_skill(spec.team));
         unit.spec.skill = unit.skill;
-        unit.soldier.pos.y = self.spawn_ground(spec.pos);
         unit.kills = self.units[i].kills;
         unit.deaths = self.units[i].deaths;
         // Card DPRX: a proxy comes back a proxy.
         unit.proxy_human = self.units[i].proxy_human;
+        self.settle_spawn(&mut unit, self.units[i].spawn_post);
         crate::ai::proxy::hand_weapons(&mut unit);
         self.units[i] = unit;
         let h = UnitHandle {

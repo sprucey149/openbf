@@ -417,7 +417,7 @@ def source_report(root, baked, missions, images, plan, extracted_used=(), images
     for game, image in images.items():
         if game in pc_roots:
             note(pc_roots[game], f'{game} PC visual input', 'used' if pc_read else 'cached',
-                 'passed to texture-tier bake this run; console data supplies gameplay and shared UI' if rebaked == "all" else
+                 'passed to the texture-tier bake this run' if rebaked == "all" else
                  'passed to the soldier, weapon and vehicle bake this run; the rest of the bake is from an earlier run' if pc_read else
                  'not read this run; the cached bake packed was made with it')
         if image:
@@ -583,7 +583,6 @@ def main():
     for g, image in images.items():
         if g in pc_roots:
             print(f"   {g}: larger textures from the PC install ({pc_roots[g]})")
-            # Console extraction remains the source of gameplay and the shared UI.
         if g in GAMEPLAY_TREES:
             continue
         # An extraction from before the executable came along is finished by running it again: only that file is written.
@@ -619,24 +618,24 @@ def main():
     tracked = git_tracked_missions()
     have = glob.glob(os.path.join(MISSIONS, "*.ron"))
     correction_args = gameplay_correction_args(plan)
-    mission_lua_root = lua_root
-    if (plan.get("source_plan") or {}).get("kind") == "pc-only":
-        # These extracted scripts are PC presentation/name inputs, never console
-        # evidence. Force the required-facts checks even with a warm Lua cache.
-        mission_lua_root = os.path.join(lua_root, "table-only")
-        os.makedirs(mission_lua_root, exist_ok=True)
+    # Keep the full Lua cache for sound names. For each PC primary the mission
+    # tables must supply the required facts even when that cache is populated.
+    table_only = [game for game, chosen in plan["games"].items() if chosen["gameplay"]["kind"] == "pc-install"]
+    table_only_args = [arg for game in table_only for arg in ("--table-only-game", game)]
     mission_env = dict(os.environ)
     for name in ("OPENBF_GAMEPLAY_CORRECTIONS", "OPENBF_GAMEPLAY_SOURCE_BF1", "OPENBF_GAMEPLAY_SOURCE_BF2"):
         mission_env.pop(name, None)
     space = os.environ.get("OPENBF_BAKE_SPACE") == "1"
-    mission_inputs = {"console_lua": mission_lua_root, "corrections": correction_args, "space": space}
+    mission_inputs = {"console_lua": lua_root, "corrections": correction_args, "table_only": table_only, "space": space}
     why = stale(MISSION_STAMP, MISSION_INPUTS, mission_inputs) if have and not tracked else None
     if have and (tracked or (not pc_roots and not a.rebake and why is None)):
         print(f"   already there ({MISSIONS})")
     else:
         if why:
             print(f"   making the missions again: {why}")
-        run([sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"), "--ps2-only", "--lua-root", mission_lua_root, "--out", MISSIONS] + (["--space"] if space else []) + correction_args, env=mission_env)
+        command = [sys.executable, "-I", os.path.join(ROOT, "scripts", "gen_missions.py"),
+                   "--ps2-only", "--lua-root", lua_root, "--out", MISSIONS]
+        run(command + (["--space"] if space else []) + correction_args + table_only_args, env=mission_env)
         extracted_used.update(("bf1", "bf2"))
         os.makedirs(EXTRACTED, exist_ok=True)
         with open(MISSION_STAMP, "w") as fh:

@@ -164,8 +164,9 @@ pub struct Probe {
     /// What the steering walked at this tick (`core::ai::WalkAsk`, card
     /// BLKF): 0 it did not walk, 1 a lost bot's return point, 2 out of a
     /// hazard, 3 a held position's goal, 4 the vehicle it boards, 5 the leg
-    /// (walk point, corner, an order's point, the post); the point; the
-    /// direction (XZ) handed to the steering, a side-step's offset included.
+    /// (walk point, corner, an order's point, the post), 6 a pickup detour
+    /// or its return, 7 a health droid. The direction (XZ) includes the
+    /// steering's side-step offset.
     #[serde(default)]
     pub walk: u8,
     #[serde(default)]
@@ -256,7 +257,7 @@ pub const LEGEND: &[(&str, &str)] = &[
     ("steer/fan/slide/sidestep", "the steering's pick, fan step x30 deg, slide side, side-step state"),
     ("doing/recover", "the behaviour that ran this tick (none travel fight evade capture guard board ride follow recover) and the walk's failed progress windows since it last made progress (schema 4)"),
     ("round/round_near/round_t/round_rim", "going round an obstacle on one committed side (the side is slide): live, the nearest the walk has been to its aim point since the obstacle was met (XZ m), ticks of the progress window's allowance spent (300 = spent: the walk's windows fail again), and the last contact was a rim barrier (no allowance) (schema 4)"),
-    ("walk/walk_at/walk_dir", "what the steering walked at this tick: 0 it did not walk, 1 a lost bot's return point, 2 out of a hazard, 3 the hold goal, 4 the vehicle it boards, 5 the leg (walk point / corner / order point / post), 6 a pickup detour or its return; the point; the XZ direction the steering was asked (side-step offset included)"),
+    ("walk/walk_at/walk_dir", "what the steering walked at this tick: 0 it did not walk, 1 a lost bot's return point, 2 out of a hazard, 3 the hold goal, 4 the vehicle it boards, 5 the leg (walk point / corner / order point / post), 6 a pickup detour or its return, 7 a health droid; the point; the XZ direction the steering was asked (side-step offset included)"),
     ("stop/stop_d/stop_n/body", "what shuts the way along walk_dir (the steering's own direction and floor): wall (a body, see names.bodies), barrier, hull, steep, drop; open = nothing, or the bot did not walk (walk 0). Schema 1 asked toward wp, walking or not"),
     ("hold", "2 holding a position, 1 owing hubs, 0 no"),
     ("hold_goal/hold_spot/hold_left/hold_side/hold_commit/hold_blocked", "a hold (hold 2): where it stands or steps to now, the position taken, seconds of dwell left, the side the last strafe went (0 none yet), seconds the goal is still committed, ticks the steering was turned off the line to the goal"),

@@ -226,3 +226,18 @@ fn pickups_and_stations_cannot_refill_primary_or_held_dispensers() {
     let item = s.item_classes[usize::from(DUAL)].clone();
     assert!(!s.item_needed(s.unit(h).unwrap(), &item));
 }
+
+#[test]
+fn fc_pack_release_speed_bounds_preserve_endpoint_hashes() {
+    for bf2 in [false, true] {
+        for (raw, endpoint) in [(-1.0, 0.0), (4.0, 1.0)] {
+            let (mut actual, h, weapon) = setup(bf2);
+            let (mut control, ch, cw) = setup(bf2);
+            assert!(actual.dispense_pickup(h.index as usize, weapon, raw));
+            assert!(control.dispense_pickup(ch.index as usize, cw, endpoint));
+            assert_eq!(actual.pickups.len(), 1);
+            assert_eq!(actual.pickups[0].vel, control.pickups[0].vel);
+            assert_eq!(actual.hash(), control.hash());
+        }
+    }
+}

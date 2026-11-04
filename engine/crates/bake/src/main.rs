@@ -338,17 +338,39 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Some("map-icons") if args.len() >= 4 => {
+            let sides: Vec<std::path::PathBuf> = args[3..].iter().map(|p| ci(p).into()).collect();
+            let icons = bake::map_icons::bake(&sides, Path::new(&args[2]))?;
+            println!(
+                "baked {} side minimap sheets -> {}/textures",
+                icons.len(),
+                args[2]
+            );
+            Ok(())
+        }
         Some("xbox-icons") if args.len() == 4 => {
             let n = bake::xbox_icons::bake_xbox_icons(&ci(&args[2]), &args[3])?;
             println!("baked {n} Xbox button icon(s) -> {}/textures", args[3]);
             Ok(())
         }
-        Some("fonts") if args.len() == 5 => {
+        Some("ui-art") if args.len() >= 4 => {
+            let donors: Vec<std::path::PathBuf> = args[4..].iter().map(|p| ci(p).into()).collect();
+            let count = bake::hud::bake_native_art(
+                std::path::Path::new(&ci(&args[2])),
+                std::path::Path::new(&args[3]),
+                &donors,
+            )?;
+            println!("baked {count} native UI sheets -> {}", args[3]);
+            Ok(())
+        }
+        Some("fonts") if args.len() >= 5 => {
             let p2 = ci(&args[2]);
-            let fonts = bake::hud::bake_fonts(
+            let donors: Vec<std::path::PathBuf> = args[5..].iter().map(|p| ci(p).into()).collect();
+            let fonts = bake::hud::bake_fonts_with_donors(
                 std::path::Path::new(&p2),
                 std::path::Path::new(&args[3]),
                 &args[4],
+                &donors,
             )?;
             println!("baked {} font(s) -> {}/fonts", fonts.len(), args[3]);
             Ok(())
@@ -514,6 +536,7 @@ fn main() -> Result<()> {
                  \x20 bake classes    <file.lvl>   <out.ron>      entc/wpnc/ordc/expc props\n\
                  \x20 bake loadscreen <load.lvl>   <mapdir>       load screen sequence/pool\n\
                  \x20 bake sounds     <sound.lvl>  <mapdir> [CORE.LVL]  sample banks + snd_ props (templates from CORE)\n\
+                 \x20 bake map-icons  <outdir> <side.lvl>...      class-authored minimap sheets\n\
                  \x20 bake xbox-icons <xbox common.lvl> <outdir>  the original Xbox pad's button icons\n\
                  \x20 bake shell     <SHELL.LVL> <SHELL.MVS> <SOUND/SHELL.LVL> <CORE.LVL> <outdir>  BF2 shell logo, menu movie, music\n\
                  \x20 bake sound-names <classes dir> <lua roots> <mapdir>...  names.ron\n\
@@ -522,7 +545,8 @@ fn main() -> Result<()> {
                  \x20 bake specular   <core.lvl>   <outdir>       the specular pass's lookup table\n\
                  \x20 bake omniproj   <core.lvl>   <outdir>       BF2's terrain light texture\n\
                  \x20 bake locl       <core.lvl>   <outdir>       the English text table\n\
-                 \x20 bake fonts      <core.lvl>   <outdir> <prefix>  the bitmap fonts, named <prefix><font>\n\
+                 \x20 bake fonts      <core.lvl>   <outdir> <prefix> [donor-core ...]  bitmap metrics + SDF art\n\
+                 \x20 bake ui-art     <core.lvl>   <outdir> [donor-core ...]  largest same-art UI sheets\n\
                  \x20 bake tex-dump   <file.lvl>   <outdir>       every tex_ to PNG (mip 0)\n\
                  \x20 bake pc-tex     <file.lvl|-> <outdir>       PC-format textures to KTX2\n\
                  \x20 bake soldier    <side.lvl> <model[,model]> <outdir> [anim.lvl] [pc.lvl]\n\

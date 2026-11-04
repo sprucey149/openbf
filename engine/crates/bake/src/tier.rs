@@ -297,7 +297,7 @@ fn pair_stats(a: &[u8], b: &[u8], usage: Usage) -> Pair {
 }
 
 /// Box-filter downsample of an RGBA8 image.
-fn box_down(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
+pub(crate) fn box_down(src: &[u8], sw: u32, sh: u32, dw: u32, dh: u32) -> Vec<u8> {
     if sw == 0 || sh == 0 || dw == 0 || dh == 0 {
         return Vec::new();
     }
@@ -613,6 +613,16 @@ impl PcTextures {
 /// only thing the sim ever reads, and this one beside it as
 /// `<name>.tier2.ktx2`.
 pub fn tier2(t: &Texture, pc: Option<&PcTextures>, usage: Usage) -> Option<Resolved> {
+    tier2_matching(t, pc, usage, |_| true)
+}
+
+/// As in [`tier2`], with a draw-specific constraint on the donor sheet.
+pub(crate) fn tier2_matching(
+    t: &Texture,
+    pc: Option<&PcTextures>,
+    usage: Usage,
+    matches: impl Fn(&Resolved) -> bool,
+) -> Option<Resolved> {
     // Exclusion 1: a detail-compressed base's `_dtl` companion is registered
     // to the PS2 pixels (see the module doc).
     if t.info.detail_compressed {
@@ -621,7 +631,7 @@ pub fn tier2(t: &Texture, pc: Option<&PcTextures>, usage: Usage) -> Option<Resol
     let name = t.name.to_ascii_lowercase();
     let base = t.rgba8(0);
     let (w, h) = (t.info.width, t.info.height);
-    pc?.larger_than(&name, w, h).find_map(|better| {
+    pc?.larger_than(&name, w, h).filter(|r| matches(r)).find_map(|better| {
         let m = compare(&base, w, h, &better.mips[0], better.width, better.height, usage);
         let same = same_art(&m, usage);
         if !same {

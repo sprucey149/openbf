@@ -153,13 +153,23 @@ impl Renderer {
     /// Headless renderer: offscreen `Rgba8UnormSrgb` target, no window or display
     /// needed (adapter requested with `compatible_surface: None`).
     pub fn new_headless(width: u32, height: u32) -> Result<Self, RenderError> {
-        assert!(width > 0 && height > 0, "headless target must be non-empty");
+        if width == 0 || height == 0 {
+            return Err(RenderError::BadTexture(format!(
+                "headless target must be non-empty: {width}x{height}"
+            )));
+        }
         let turn = GpuTurn::take();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::PRIMARY,
             ..Default::default()
         });
         let (adapter, device, queue) = request_device(&instance, None)?;
+        let limit = device.limits().max_texture_dimension_2d;
+        if width > limit || height > limit {
+            return Err(RenderError::BadTexture(format!(
+                "headless target {width}x{height} exceeds the device limit of {limit} per dimension"
+            )));
+        }
         let info = adapter.get_info();
 
         let texture = crate::resources::texture_2d(
@@ -412,6 +422,16 @@ mod tests {
 
     use super::*;
     use wgpu::CompositeAlphaMode::{Auto, Inherit, Opaque, PostMultiplied, PreMultiplied};
+
+    #[test]
+    fn headless_renderer_rejects_zero_dimensions() {
+        for (width, height) in [(0, 720), (1280, 0)] {
+            assert!(matches!(
+                Renderer::new_headless(width, height),
+                Err(RenderError::BadTexture(message)) if message.contains("must be non-empty")
+            ));
+        }
+    }
 
     #[test]
     fn the_surface_is_opaque_whenever_it_can_be() {

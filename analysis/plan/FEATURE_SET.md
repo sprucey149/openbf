@@ -3,11 +3,12 @@
 Current scope is Instant Action, including flying vehicles, space battles and space maps. Items for other modes, splitscreen
 and LAN are decisions for later work, not current tasks.
 
-### Standing decisions (2026-11-01; these win over any older entry below)
-- **Same game on every source.** The PS2 is the gameplay reference. Every build plays the same inside the playable bounds
-  whatever discs went in, for future multiplayer. Other versions change only the size and look of textures and assets;
-  numbers and shapes the sim reads never change. Public correction tables of gameplay numbers and names are approved,
-  preferring instructions on the player's own files. The repo holds no meshes, art, audio, script bytecode or localized text.
+### Standing decisions (updated 2026-11-03, supersede older entries below)
+- **Same game on every source.** openbf's gameplay rules are canonical. The original games provide evidence, and this
+  document records deliberate differences. Every build plays the same inside the playable bounds for future multiplayer.
+  Source editions can change the size and appearance of assets while preserving the simulation's numbers and shapes.
+  The maintainer approves public correction tables of gameplay numbers and names, preferably as instructions on the
+  player's own files. Original meshes, art, audio, script bytecode and localized text stay in local builds.
 - **Inputs.** One source per game, identified by content, with unknown formats refused clearly. PC BF1 plus PC BF2 can build
   without a console disc; single-game PC installs still need the other game. Existing console combinations remain supported.
   From the DLC only Kit Fisto and Asajj Ventress are taken. Where versions overlap, compare them and take the
@@ -66,8 +67,8 @@ and LAN are decisions for later work, not current tasks.
   Both discs' values and the source tests are recorded in `analysis/sbd-weapons.md`.
   SBD sounds follow the map's source game: BF1 on BF1 maps, BF2 on BF2 maps.
   This presentation choice does not change the shared gameplay numbers.
-- Weapon balance: a rebalance pass was planned (documented per weapon, PS2 values kept in data
-  for reference/revert). Not current scope: the PS2's numbers stand as the gameplay reference.
+- **Weapon balance.** Keep the current openbf values. A future rebalance would record each weapon's
+  change and retain the original-game measurements for comparison and rollback.
 - Awards & medals: **KEEP (BF2 system)** — grind-to-permanent-unlock stays. Settings
   toggle on/off; "all awards this session" cheat.
 - Classes: **hybrid unlock**. In-battle: BF2-style score unlock for special classes, every
@@ -251,35 +252,29 @@ and LAN are decisions for later work, not current tasks.
 ### Classic-plus assets (added 2026-08-30 — Harrisonfog remaster integration)
 - **(the maintainer, 2026-09-03) Render quality is a RUNTIME toggle, never a gameplay
   change.** Like Halo MCC's original/anniversary switch: the in-game menu picks
-  the visual tier (strict-faithful PS2 ↔ classic-plus with the remaster), so the
-  bake emits BOTH tiers side by side (the PS2 texture and its override, the PS2
-  render mesh and any remastered one) and the renderer selects at runtime. The
-  sim reads ONLY the PS2 bake — heightfield, `coll`/`prim` collision, instance
-  placements, missions, nav data — and no override may enter it: a remaster
-  pack's meshes, if ever used, replace render geometry only, never collision or
-  placement. GATE for every classic-plus change: `--sim-hash` and the replays
-  byte-identical with the tier switched either way. Creative liberties on
-  textures (units included) are allowed later, but only on the visual tier,
-  decided case by case.
+  the visual tier. The bake keeps the base artwork and any eligible override
+  side by side. The renderer selects the tier at runtime. The simulation reads
+  the same heightfield, `coll`/`prim` collision, placements, missions and
+  navigation at either tier. These inputs follow the shared gameplay rulebook
+  on every supported source. Any remaster mesh is a draw-only override.
+  Every classic-plus change requires byte-identical `--sim-hash` results and
+  replays at both tiers. Later texture liberties are decided case by case for
+  the visual tier.
   **(the maintainer, 2026-09-03, refinements):** the switch lives in the PAUSE menu's
   graphics settings, flipped mid-level without reloading — so both tiers are
   resident (or hot-swappable) at runtime and a mid-round flip is a pure
   renderer event (the sim hash must not move across it). A remastered render
-  mesh may only stand in for the PS2 mesh of the SAME name at the SAME
-  instance transform; overrides never add, remove or move instances, and the
-  bake REJECTS an override mesh whose bounds leave the PS2 mesh's bounds by
-  more than a small tolerance, so no visual building or object ever stands
-  where its collision is not.
-Sources: the maintainer's local `community_mods/harrisonfog/` (gitignored, LOCAL-ONLY; see its
-INVENTORY.md for pack-by-pack verdicts/credits). PS2 bake stays gameplay truth
-(geometry/layout/missions); the remaster contributes VISUALS only.
+  mesh uses the base model's name and instance transform. The bake checks its
+  bounds against the base model with the documented tolerance. Placements,
+  collision and mission data follow the same gameplay rules at both tiers.
+
+
 - **HD textures**: bake learns to read PC-format LVL textures (D3D formats, audit A2
   §5; LibSWBF2/swbf-unmunge = format reference) and emits them as name-matched
-  OVERRIDES over the PS2 bake. Canonical source = `00-canonical-remaster-jan2026/`
-  (Part 1 ground maps + shell, Part 2 sides/FPM, Part 3 space); never bake the
-  superseded standalones alongside (no duplicate maps). Coverage: all BF2 content +
-  BF1 Bespin Platforms (BS1). Remaining BF1 maps/units: our own local upscale pass in
-  bake (one consistent upscaler) so nothing looks left behind.
+  overrides over the base artwork. The planned remaster coverage is BF2 plus
+  BF1 Bespin Platforms. The planned local upscale covers the remaining BF1
+  maps and units.
+
   **Override chain (locked design, the maintainer 2026-08-30): Harrisonfog HD (name-matched) >
   our upscale output > PS2 original**. **REFINEMENT CONFIRMED by the maintainer and IMPLEMENTED
   2026-08-31 (`bake::tier`): PC STOCK sits between Harrisonfog and our upscale,
@@ -291,9 +286,10 @@ INVENTORY.md for pack-by-pack verdicts/credits). PS2 bake stays gameplay truth
   lossy DXT1 and at equal size a PS2 palettized texture may be cleaner — and
   only where it is the same painting, because `sky_hoth` is a blizzard on the
   PS2 and a blue sky on the PC (24 such rejects, plus 11 detail-compressed
-  bases; 312 taken). BF1 is unaffected — no PC BF1 exists here. Cost is memory
-  only: BF2 per-map texture bytes roughly double with no measurable frame-time
-  change. The upscale pass takes per-category settings in the bake config.
+  bases; 312 taken). That survey covered BF2. PC BF1 support came later.
+  On the BF2 survey maps, texture bytes roughly doubled and measured frame
+  time stayed within the same range. The upscale pass takes per-category
+  settings in the bake config.
   **DLSS is NOT the tool for this (asked + answered 2026-08-30).** DLSS is a
   TEMPORAL FRAME upscaler — it reconstructs a rendered frame from motion
   vectors, depth and sub-pixel jitter accumulated across frames. It has no

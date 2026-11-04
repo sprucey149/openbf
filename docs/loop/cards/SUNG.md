@@ -50,7 +50,6 @@ BF2 sky material 0x10/0x14 handling and sky bloom gathering now exist on `map-at
 ### Hoth maintainer trial (2026-11-02)
 
 The BF2 root SunFlare scope now has a parser, optional manifest field and native
-sun/halo/optical pass on `codex/hoth-atmosphere`. Hoth's angle is confirmed against
 the live PS2 object; source occlusion and scene clear have GPU coverage. The
 follow-up replaces analytic rays and arbitrary circles with the original mask
 expansion, spike fans, thirteen polygon reflections and alignment glare, and

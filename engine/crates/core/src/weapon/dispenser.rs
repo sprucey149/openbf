@@ -39,7 +39,12 @@ impl<I> Dispenser<I> {
         }
     }
 
+    /// FC-BOUNDS correction: item throws stay between the authored strengths.
+    /// The shared weapon cycle can retain ShotDelay as its charge limit on a
+    /// held re-trigger. PS2 Fire interpolates raw strength; we bound it here
+    /// for packs and mines (analysis/re-fc-boundaries.md §1).
     pub fn speed(&self, charge: f32) -> f32 {
+        let charge = charge.clamp(0.0, 1.0);
         (self.strength[0] + (self.strength[1] - self.strength[0]) * charge) * self.velocity
     }
 }

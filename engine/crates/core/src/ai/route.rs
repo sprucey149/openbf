@@ -40,6 +40,12 @@ pub(crate) fn mover(sim: &Sim, u: &crate::unit::Unit) -> nav::Mover {
     }
 }
 
+/// Resolve an approach point on the same floor as the route chosen for it.
+pub(crate) fn unit_goal_hub(sim: &Sim, g: &NavGraph, m: nav::Mover, at: Vec3) -> Option<u16> {
+    g.unit_hub_on(at, m, &|h| hub_on_level(sim, g, h, at.y))
+        .map(|h| level_hub(sim, g, h, at))
+}
+
 /// The world point this route is ultimately walking to: the target post, or
 /// the destination hub when hunting.
 fn goal_pos(sim: &Sim, g: &NavGraph, st: &AiState, dest: u16, from_y: f32) -> Vec3 {

@@ -27,6 +27,9 @@
 //! - A patch draws while `−bound ≤ depth ≤ D` (depth along the camera's look
 //!   axis), its alpha × `min((D − depth)·0.05, 1)` — the last 20 m fade.
 //!
+//! PROVISIONAL conditional depth writes (analysis/re-foliage.md §18).
+//! trace: compare overlapping grass against the PS2 GS TEST/ZBUF pass.
+
 use crate::{Camera, Renderer, TextureHandle};
 use glam::{Mat4, Vec3};
 

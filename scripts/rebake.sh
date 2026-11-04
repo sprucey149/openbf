@@ -75,7 +75,6 @@ fi
 # empty for anything not chosen. Under pack.py the choice arrives in the environment.
 SCAN_PC1=""; SCAN_PC2=""; SCAN_XB1=""; SCAN_XB2=""; SCAN_BF2_CONSOLE_ISO=""
 SCAN_OPENBF_BF1_TREE=""; SCAN_OPENBF_BF2_TREE=""
-SCAN_OPENBF_PC_ONLY=""
 SCAN_OPENBF_DLC_DIR=""; SCAN_OPENBF_DLC_DONOR=""
 SCAN_OPENBF_BF1_WITHHELD=""; SCAN_OPENBF_BF2_WITHHELD=""
 if [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
@@ -87,7 +86,6 @@ if [ -z "${OPENBF_INPUTS_CHOSEN:-}" ]; then
 fi
 OPENBF_BF1_TREE="${OPENBF_BF1_TREE:-$SCAN_OPENBF_BF1_TREE}"
 OPENBF_BF2_TREE="${OPENBF_BF2_TREE:-$SCAN_OPENBF_BF2_TREE}"
-OPENBF_PC_ONLY="${OPENBF_PC_ONLY:-$SCAN_OPENBF_PC_ONLY}"
 BF2_CONSOLE_ISO="${BF2_CONSOLE_ISO:-$SCAN_BF2_CONSOLE_ISO}"
 # Xbox texture donors: the trees `bake extract-xiso` wrote. Empty until pack.py chooses an Xbox disc.
 XB1="${XB1:-$SCAN_XB1}"; XB2="${XB2:-$SCAN_XB2}"
@@ -129,9 +127,8 @@ for game in 1 2; do
 done
 
 E="$ROOT/extracted"
-# The selected BF2 copy supplies the shared menus, shell and BF2 HUD. A PC BF1 + PC BF2 pair builds
-# through pack.py (its scan sets OPENBF_BF2_TREE and OPENBF_PC_ONLY); run directly with PC inputs and no
-# scan, this script still asks for a console BF2 disc.
+# The selected BF2 copy supplies the shared menus, shell and BF2 HUD. A selected
+# PC BF2 primary reaches this script through OPENBF_BF2_TREE.
 # OPENBF_BF*_TREE: a game the scan chose non-PS2 gameplay data for (no PS2 copy).
 UI2="${OPENBF_BF2_TREE:-$E/bf2/lvl/DATA/_LVL_PS2}"
 if [ -n "$CLI_PC_DIR${PC1:-}${PC2:-}" ] && [ -z "${OPENBF_BF2_TREE:-}" ]; then
@@ -228,7 +225,7 @@ BAKE="${CARGO_TARGET_DIR:-$ROOT/engine/target}/release/bake"
 
 SEL=(${WANT_GROUPS[@]+"${WANT_GROUPS[@]}"})
 want() {
-  [ "${#SEL[@]}" -eq 0 ] && return 0
+  [ -z "${SEL[0]:-}" ] && return 0
   for g in ${SEL[@]+"${SEL[@]}"}; do [ "$g" = "$1" ] && return 0; done
   return 1
 }
@@ -293,6 +290,18 @@ if want common; then
         "$OUT/common_bf2/fonts" "$OUT/common_bf2/hud" "$OUT/common_bf2/locl"
   "$BAKE" common "$(ci "$B1" COMMON/ENG/COMMON.LVL)" "$OUT/common_bf1"
   "$BAKE" common "$(ci "$UI2" INGAME.LVL)" "$OUT/common_bf2"
+  # Fonts keep the selected source's layout metrics. Compare matching glyph
+  # art only against copies explicitly selected by the input planner.
+  FONT_DONORS=()
+  for donor in "$PC" "$XB2"; do
+    if [ -n "$donor" ] && [ -f "$(ci "$donor" CORE.LVL)" ]; then
+      FONT_DONORS+=("$(ci "$donor" CORE.LVL)")
+    fi
+  done
+  if [ -n "${FONT_DONORS[0]:-}" ]; then
+    "$BAKE" fonts "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2" "" ${FONT_DONORS[@]+"${FONT_DONORS[@]}"}
+    "$BAKE" ui-art "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2" ${FONT_DONORS[@]+"${FONT_DONORS[@]}"}
+  fi
   # The specular pass's lookup table, from each game's own CORE.LVL (the
   # texels are identical on both discs; analysis/re-specular-pass.md §5).
   "$BAKE" specular "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1"
@@ -316,7 +325,13 @@ if want common; then
   fi
   # BF1's own bitmap fonts (card SQHUD: the squad cross's labels are BF1's
   # gamefont_tiny), prefixed so they sit beside BF2's in one name space.
-  "$BAKE" fonts "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1" bf1_
+  FONT_DONORS=()
+  for donor in "${PC1:-}" "$XB1"; do
+    if [ -n "$donor" ] && [ -f "$(ci "$donor" CORE.LVL)" ]; then
+      FONT_DONORS+=("$(ci "$donor" CORE.LVL)")
+    fi
+  done
+  "$BAKE" fonts "$(ci "$B1" CORE.LVL)" "$OUT/common_bf1" bf1_ ${FONT_DONORS[@]+"${FONT_DONORS[@]}"}
   # BF2's PS2 shell (card BSHLA, analysis/re-bf2-shell.md §1, §4): SHELL.LVL's
   # logo, the background movie's menu loops (ffmpeg transcodes them to frame
   # packs) and SOUND/SHELL.LVL's bank + music index. The movie is read from
@@ -324,9 +339,7 @@ if want common; then
   # image (a dev tree's extracted discs leave MOVIES/ out).
   # The disc image is the one the scan chose (a worktree without iso/ scans the
   # main checkout's).
-  UI_SOUND2="$E/bf2/sound/DATA/_LVL_PS2"
-  if [ "${OPENBF_PC_ONLY:-}" = 1 ] || [ ! -d "$UI_SOUND2" ]; then UI_SOUND2="$UI2"; fi
-  echo "Shared UI: $UI2; shell sound: $UI_SOUND2"
+  echo "Shared UI: $UI2; shell sound: $S2"
   MVS="$(ci "$UI2" MOVIES/SHELL.MVS)"
   [ -f "$MVS" ] || MVS="$BF2_CONSOLE_ISO"
   if [ ! -f "$MVS" ]; then
@@ -334,7 +347,7 @@ if want common; then
     exit 2
   fi
   clean "$OUT/common_bf2/shell"
-  "$BAKE" shell "$(ci "$UI2" SHELL.LVL)" "$MVS" "$(ci "$UI_SOUND2" SOUND/SHELL.LVL)" "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
+  "$BAKE" shell "$(ci "$UI2" SHELL.LVL)" "$MVS" "$(ci "$S2" SOUND/SHELL.LVL)" "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2"
 fi
 if want side; then
   echo "== soldiers + weapons + vehicles =="
@@ -461,6 +474,12 @@ if want side; then
   "$BAKE" vehicle "$(ci "$B2" SIDE/IMP.LVL)" "$OUT/side_bf2/vehicles/imp" ${DS2_IMP:+"$DS2_IMP"}
   "$BAKE" vehicle "$(ci "$B2" SIDE/REP.LVL)" "$OUT/side_bf2/vehicles/rep" ${DS2_REP:+"$DS2_REP"}
   "$BAKE" vehicle "$(ci "$B2" SIDE/CIS.LVL)" "$OUT/side_bf2/vehicles/cis" ${DS2_CIS:+"$DS2_CIS"}
+  # MapTexture is class-authored, independent of the vehicle meshes' materials.
+  # Keep the sheets in the side texture directories the HUD already searches.
+  "$BAKE" map-icons "$OUT/side_bf1" "$(ci "$B1" SIDE/ALL.LVL)" "$(ci "$B1" SIDE/IMP.LVL)" \
+    "$(ci "$B1" SIDE/REP.LVL)" "$(ci "$B1" SIDE/CIS.LVL)" "$(ci "$B1" SIDE/GUN.LVL)"
+  "$BAKE" map-icons "$OUT/side_bf2" "$(ci "$B2" SIDE/ALL.LVL)" "$(ci "$B2" SIDE/IMP.LVL)" \
+    "$(ci "$B2" SIDE/REP.LVL)" "$(ci "$B2" SIDE/CIS.LVL)" "$(ci "$B2" SIDE/TUR.LVL)"
   # Every side LVL's `fx__` particle effects + the textures/models they name
   # (card FXP1, analysis/re-fx.md §1): BF2's sides carry per-class effects
   # (IMP 8, SNW 6, CIS 5, ...); BF1's carry none, and a side with none writes

@@ -373,3 +373,18 @@ fn a_capsule_axis_whose_bounds_cross_by_rounding_does_not_panic() {
     assert!(y >= hi && y <= lo);
     assert_eq!(clamp_axis(5.0, 0.0, 1.0), 1.0);
 }
+
+#[test]
+fn fc_mine_release_speed_bounds_preserve_endpoint_hashes() {
+    for bf2 in [false, true] {
+        for (raw, endpoint) in [(-1.0, 0.0), (4.0, 1.0)] {
+            let (mut actual, owner, weapon) = setup(bf2, true, f32::MAX);
+            let (mut control, ci, cw) = setup(bf2, true, f32::MAX);
+            actual.place_mine(owner, weapon, raw);
+            control.place_mine(ci, cw, endpoint);
+            assert_eq!(actual.mines.len(), 1);
+            assert_eq!(actual.mines[0].flight.vel, control.mines[0].flight.vel);
+            assert_eq!(actual.hash(), control.hash());
+        }
+    }
+}

@@ -6,8 +6,8 @@ use crate::ai::gunner_foot::{self, AimRequest};
 use crate::ai::mover::{self, MoveRequest};
 use crate::ai::route::{advance_route, leg_point, retarget, sub_point};
 use crate::ai::state::{
-    AiState, Behaviour, FightState, HoldState, LostState, MoverState, NavTick, SteerPick, Walk,
-    WalkAsk,
+    AiState, Behaviour, FightState, HoldState, LostState, MoverState, NavTick, RouteSource,
+    SteerPick, Walk, WalkAsk,
 };
 use crate::ai::why::Why;
 use crate::ai::{
@@ -65,6 +65,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let wc = &sim.weapon_classes[u.weapon_class];
 
     let tier = sim.unit_tier(u);
+    let mend = crate::ai::proxy::mend_station(sim, u);
     // This unit's own skill vector, under the tier's overrides (D1/D9). It is
     // DERIVED per think, never stored: `Unit.skill` is the state. A proxy's
     // is its profile's (card DPRX, `Sim::skill_of`).
@@ -138,11 +139,10 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         crate::ai::fix::upkeep(sim, me, u, st);
         let fixing = crate::ai::fix::walk(sim, me, st);
         // [ours] A hurt unit breaks off to a health droid (`proxy::mend`).
-        let mend = crate::ai::proxy::mend(sim, u);
-        match (u.command, ring_walk(sim, st), super::snipe::walk(st)) {
-            (Some(c), _, _) => crate::squad::steer(sim, me, st, &c, &mut nt),
-            _ if mend.is_some() => {
-                super::route::retarget_board(sim, me, st, mend.unwrap_or(eye), &mut nt)
+        match (u.command, mend, ring_walk(sim, st), super::snipe::walk(st)) {
+            (Some(c), _, _, _) => crate::squad::steer(sim, me, st, &c, &mut nt),
+            (_, Some(station), _, _) => {
+                super::route::retarget_board(sim, me, st, station.pos, &mut nt)
             }
             // Card TBLD: a fixer walks to its turret over the graph.
             _ if fixing.is_some() => {
@@ -151,9 +151,9 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             // Card FGHT: a circling bot walks over the graph to its ring
             // point's hub and straight at the point from there (as a boarder
             // walks to its vehicle).
-            (_, Some(p), _) => super::route::retarget_board(sim, me, st, p, &mut nt),
+            (_, _, Some(p), _) => super::route::retarget_board(sim, me, st, p, &mut nt),
             // Card SNPR: a sniper, the same way to its spot.
-            (_, None, Some(p)) => super::route::retarget_board(sim, me, st, p, &mut nt),
+            (_, _, None, Some(p)) => super::route::retarget_board(sim, me, st, p, &mut nt),
             _ => retarget(sim, me, st, hunt.map(|(_, p)| p), &mut nt),
         }
         if nt.released != 0
@@ -481,14 +481,13 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     }
     // Card FGHT: the ring point a circling bot walks to — over the graph,
     // and straight at it on the last leg and with no route.
-    let mending = crate::ai::proxy::mend(sim, u).is_some();
     let ring = ring_walk(sim, st).filter(|_| {
         ret.is_none()
             && flee.is_none()
             && boarding.is_none()
             && item.is_none()
             && st.cmd.is_none()
-            && !mending
+            && mend.is_none()
     });
     let goal = match ring {
         Some(p) if st.route.is_none_or(|r| r.is_last()) => Some(p),
@@ -504,7 +503,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             && item.is_none()
             && st.cmd.is_none()
             && ring.is_none()
-            && !mending
+            && mend.is_none()
     });
     let goal = match spot {
         Some(p) if st.route.is_none_or(|r| r.is_last()) => Some(p),
@@ -522,6 +521,35 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         _ => goal,
     };
     let at_fix = fixing.filter(|p| goal == Some(*p));
+    // OURS: finish the walk at the droid's actual service sphere after the
+    // graph has brought us to its hub. measure: Harbor Hard/Elite service
+    // and recycles at the droid hubs (issue #108).
+    let mend_approach = mend.filter(|station| {
+        ret.is_none()
+            && flee.is_none()
+            && boarding.is_none()
+            && item.is_none()
+            && fixing.is_none()
+            && push.is_none()
+            && u.command.is_none()
+            && st.cmd.is_none()
+            && match (st.route, sim.nav.as_ref()) {
+                (Some(r), Some(g)) if r.is_last() && r.corner().is_none() => {
+                    use super::route::{mover, start_hub, unit_goal_hub};
+                    let hub = unit_goal_hub(sim, g, mover(sim, u), station.pos);
+                    // A straight fallback can be the last leg before the
+                    // bot has reached the station's hub.
+                    hub == Some(r.dest_hub)
+                        && (r.source != RouteSource::Straight || start_hub(sim, g, me) == hub)
+                }
+                (None, None) => true,
+                _ => false,
+            }
+    });
+    let goal = match mend_approach {
+        Some(s) => (!s.reaches(pos)).then_some(s.pos),
+        None => goal,
+    };
     // Card HOLD: the position held (when nothing more urgent walks the bot).
     let holding = st.hold.filter(|h| {
         sim.tick < h.until
@@ -531,7 +559,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             && item.is_none()
             && ring.is_none()
             && fixing.is_none()
-            && !mending
+            && mend.is_none()
     });
     // Diagnostic (card BLKF): which link of the chain below walks the bot.
     let walk_kind = match () {
@@ -540,6 +568,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         _ if item.is_some() => WalkAsk::PICKUP,
         _ if holding.is_some() => WalkAsk::HOLD,
         _ if boarding.is_some() && goal == boarding => WalkAsk::BOARD,
+        _ if mend_approach.is_some() => WalkAsk::MEND,
         _ => WalkAsk::LEG,
     };
     if thinking && boarding.is_some() && ret.is_none() && flee.is_none() {
@@ -609,9 +638,10 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             {
                 AimRequest::Travel(goal.unwrap_or(pos) + Vec3::Y * 1.4)
             }
-            // Card TBLD: a fixer with no route walks straight at its turret.
-            (None, None, None, None) if fixing.is_some() => {
-                AimRequest::Travel(goal.unwrap_or(pos) + Vec3::Y * 1.4)
+            // Aim at the turret or droid while approaching or servicing it.
+            (None, None, None, None) if fixing.is_some() || mend_approach.is_some() => {
+                let at = mend_approach.map_or_else(|| goal.unwrap_or(pos), |s| s.pos);
+                AimRequest::Travel(at + Vec3::Y * 1.4)
             }
             (None, None, None, Some(r)) => AimRequest::Travel(r.waypoint),
             (None, None, None, None) => AimRequest::Travel(match post {
@@ -776,8 +806,8 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         kind: walk_kind,
         goal,
         arrive,
-        // A walk to a ring point ends there, not in the post's region.
-        post: post.filter(|_| ring.is_none() && item.is_none()),
+        // A ring point, pickup or health droid has its own destination.
+        post: post.filter(|_| ring.is_none() && item.is_none() && mend_approach.is_none()),
         defending,
         // The stand of a boarder or a commanded bot with an enemy inside
         // 25 m — and of a free bot on the tick it takes its fight position

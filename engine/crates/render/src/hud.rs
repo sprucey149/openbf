@@ -81,11 +81,28 @@ fn fs_hud(in: VsOut) -> @location(0) vec4<f32> {
     let hi = pow((c.rgb + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
     return vec4<f32>(select(hi, lo, c.rgb <= vec3<f32>(0.04045)), c.a);
 }
+
+@fragment
+fn fs_distance(in: VsOut) -> @location(0) vec4<f32> {
+    let distance = textureSample(sheet, sheet_sampler, in.uv).a - 0.5;
+    // Derivatives are in native output pixels, independent of layout scale.
+    let width = max(fwidth(distance), 1.0 / 255.0);
+    let alpha = clamp(distance / width + 0.5, 0.0, 1.0) * in.color.a;
+    var rgb = in.color.rgb;
+    if (screen.linearise > 0.5) {
+        let lo = rgb / 12.92;
+        let hi = pow((rgb + vec3<f32>(0.055)) / 1.055, vec3<f32>(2.4));
+        rgb = select(hi, lo, rgb <= vec3<f32>(0.04045));
+    }
+    return vec4<f32>(rgb, alpha);
+}
 "#;
 
 pub struct HudPass {
     /// Indexed `[depth][additive]`.
     pipelines: [[wgpu::RenderPipeline; 2]; 2],
+    distance_pipelines: [wgpu::RenderPipeline; 2],
+    distance_textures: std::collections::HashSet<HudTexture>,
     screen_buf: wgpu::Buffer,
     screen_bg: wgpu::BindGroup,
     texture_bgl: wgpu::BindGroupLayout,
@@ -108,7 +125,7 @@ fn texture_bind_group(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     sampler: &wgpu::Sampler,
-    rgba: &[u8],
+    levels: &[&[u8]],
     width: u32,
     height: u32,
 ) -> Option<wgpu::BindGroup> {
@@ -117,7 +134,7 @@ fn texture_bind_group(
         queue,
         width,
         height,
-        &[rgba],
+        levels,
         // The sheet's bytes as they are: display values (module doc).
         false,
         Some("hud sheet"),
@@ -175,7 +192,7 @@ impl HudPass {
             },
         );
         let attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x4];
-        let pipeline = |depth: bool, additive: bool| {
+        let pipeline = |depth: bool, additive: bool, distance: bool| {
             let blend = wgpu::BlendState {
                 color: wgpu::BlendComponent {
                     src_factor: wgpu::BlendFactor::SrcAlpha,
@@ -198,7 +215,7 @@ impl HudPass {
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &attributes,
                 }],
-                fs: "fs_hud",
+                fs: if distance { "fs_distance" } else { "fs_hud" },
                 blend: Some(blend),
                 depth_write: depth,
                 depth_compare: Some(if depth {
@@ -210,9 +227,10 @@ impl HudPass {
             .build(device, &shader, format)
         };
         let pipelines = [
-            [pipeline(false, false), pipeline(false, true)],
-            [pipeline(true, false), pipeline(true, true)],
+            [pipeline(false, false, false), pipeline(false, true, false)],
+            [pipeline(true, false, false), pipeline(true, true, false)],
         ];
+        let distance_pipelines = [pipeline(false, false, true), pipeline(false, true, true)];
         let screen_buf = crate::resources::buffer(
             device,
             "hud screen",
@@ -227,14 +245,15 @@ impl HudPass {
                 entries: &[bindings::entire_buffer(0, &screen_buf)],
             },
         );
-        // The HUD's sheets are drawn near their own size: bilinear, clamped,
-        // no mips.
+        // Most sheets have one level. Reconstructed UI sheets retain the
+        // source levels so their new detail is filtered as they shrink.
         let sampler = crate::made::sampler(
             device,
             &wgpu::SamplerDescriptor {
                 label: Some("hud sampler"),
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             },
         );
@@ -246,13 +265,16 @@ impl HudPass {
                 address_mode_v: wgpu::AddressMode::Repeat,
                 mag_filter: wgpu::FilterMode::Linear,
                 min_filter: wgpu::FilterMode::Linear,
+                mipmap_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             },
         );
-        let white = texture_bind_group(device, queue, &texture_bgl, &sampler, &[255; 4], 1, 1)
+        let white = texture_bind_group(device, queue, &texture_bgl, &sampler, &[&[255; 4]], 1, 1)
             .expect("a 1x1 texture uploads");
         Self {
             pipelines,
+            distance_pipelines,
+            distance_textures: Default::default(),
             screen_buf,
             screen_bg,
             texture_bgl,
@@ -268,12 +290,12 @@ impl HudPass {
         }
     }
 
-    /// Upload an RGBA8 sheet; `None` when the bytes do not fit the size.
+    /// Upload the RGBA8 levels of a sheet; `None` when they do not fit the size.
     pub fn add_texture(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        rgba: &[u8],
+        levels: &[&[u8]],
         width: u32,
         height: u32,
         repeat: bool,
@@ -287,12 +309,27 @@ impl HudPass {
             } else {
                 &self.sampler
             },
-            rgba,
+            levels,
             width,
             height,
         )?;
         self.textures.push(bg);
         Some(HudTexture(self.textures.len() as u32 - 1))
+    }
+
+    /// A baked signed-distance glyph page. Coverage is reconstructed at the
+    /// target resolution; colour, weight and shadows remain the layout's.
+    pub fn add_distance_texture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        rgba: &[u8],
+        width: u32,
+        height: u32,
+    ) -> Option<HudTexture> {
+        let texture = self.add_texture(device, queue, &[rgba], width, height, false)?;
+        self.distance_textures.insert(texture);
+        Some(texture)
     }
 
     /// A `width` x `height` RGBA8 texture of display values whose texels
@@ -469,7 +506,14 @@ impl HudPass {
                 .texture
                 .and_then(|t| self.textures.get(t.0 as usize))
                 .unwrap_or(&self.white);
-            pass.set_pipeline(&self.pipelines[usize::from(b.depth)][usize::from(b.additive)]);
+            let distance = b
+                .texture
+                .is_some_and(|t| self.distance_textures.contains(&t));
+            pass.set_pipeline(if distance {
+                &self.distance_pipelines[usize::from(b.additive)]
+            } else {
+                &self.pipelines[usize::from(b.depth)][usize::from(b.additive)]
+            });
             pass.set_bind_group(1, bg, &[]);
             pass.draw_indexed(b.first..end, 0, 0..1);
         }

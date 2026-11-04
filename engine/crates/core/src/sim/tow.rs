@@ -12,12 +12,14 @@ use glam::Vec3;
 
 const CHORDS: usize = 10;
 const WRAPS: usize = 13;
+const GUN_TANGENT_LEN: f32 = 15.0;
 
-/// A wrap point in its primitive's local coordinates.
+/// A local wrap point with its tangent in world coordinates.
 #[derive(Clone, Copy, Debug)]
 struct Anchor {
     prim: usize,
     at: Vec3,
+    // The live tangent is the newest record's unflattened +0x80 vector.
     tangent: Vec3,
 }
 
@@ -127,7 +129,7 @@ impl TowCable {
 }
 
 fn span(at: Vec3, tangent: Vec3, muzzle: Vec3, aim: Vec3) -> [Vec3; CHORDS + 1] {
-    let end_tangent = aim * -15.0;
+    let end_tangent = aim * -GUN_TANGENT_LEN;
     std::array::from_fn(|i| {
         let t = i as f32 / CHORDS as f32;
         let t2 = t * t;
@@ -472,11 +474,15 @@ impl Sim {
 }
 
 fn relax_anchors(anchors: &mut [Anchor], parts: &[TowPrimitive], dt: f32) {
-    for anchor in anchors.iter_mut().skip(1) {
+    let newest = anchors.len().saturating_sub(1);
+    for (index, anchor) in anchors.iter_mut().enumerate().skip(1) {
         let offset = parts[anchor.prim].offset;
         let desired = Vec3::new(offset.x, anchor.at.y, offset.z);
         anchor.at = towards(anchor.at, desired, dt * 30.0);
-        anchor.tangent = towards(anchor.tangent, Vec3::ZERO, dt * 30.0);
+        // B2 FUN_003248d8 only relaxes older +0x80 copies.
+        if index < newest {
+            anchor.tangent = towards(anchor.tangent, Vec3::ZERO, dt * 30.0);
+        }
     }
 }
 
@@ -495,12 +501,9 @@ fn advance_latch(
     relax_anchors(anchors, parts, dt);
     let current = anchors.last().expect("latched cables have an anchor");
     let last = &parts[current.prim];
-    let points = span(
-        last.frame.transform_point3(current.at),
-        last.frame.transform_vector3(current.tangent),
-        muzzle,
-        aim,
-    );
+    let start = last.frame.transform_point3(current.at);
+    let start_tangent = current.tangent;
+    let points = span(start, start_tangent, muzzle, aim);
     let length = points.windows(2).map(|w| w[0].distance(w[1])).sum::<f32>();
     let limit = if anchors.len() == 1 {
         class.initial_length
@@ -520,7 +523,7 @@ fn advance_latch(
         None
     };
     let leg = last.leg.expect("latched leg");
-    for w in points.windows(2) {
+    for (chord, w) in points.windows(2).enumerate() {
         let delta = w[1] - w[0];
         let len = delta.length();
         if len == 0.0 {
@@ -537,11 +540,20 @@ fn advance_latch(
             -1 => return false,
             0 => continue,
             _ => {
+                // B2 FUN_00323178:316443–316497 stores half the world
+                // Hermite derivative at the hit's parameter along this chord.
+                let parameter = (chord as f32 + t / len) / CHORDS as f32;
+                let displacement = muzzle - start;
+                let end_tangent = aim * -GUN_TANGENT_LEN;
+                let cubic = start_tangent + end_tangent - displacement * 2.0;
+                let quadratic = displacement * 3.0 - start_tangent * 2.0 - end_tangent;
+                let derivative =
+                    (cubic * (3.0 * parameter) + quadratic * 2.0) * parameter + start_tangent;
                 let inverse = parts[prim].frame.inverse();
                 anchors.push(Anchor {
                     prim,
                     at: inverse.transform_point3(w[0] + dir * t),
-                    tangent: inverse.transform_vector3(dir),
+                    tangent: derivative * 0.5,
                 });
                 if anchors.len() == WRAPS {
                     // FUN_00323178 enters state 3 and clears
@@ -564,7 +576,7 @@ fn advance_latch(
     let p = &parts[tip.prim];
     out.extend(span(
         p.frame.transform_point3(tip.at),
-        p.frame.transform_vector3(tip.tangent),
+        tip.tangent,
         muzzle,
         aim,
     ));

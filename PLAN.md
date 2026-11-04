@@ -1,18 +1,18 @@
 # openbf - PLAN
 
-One game from two: a single Rust codebase for Windows, Linux and macOS that plays like the PS2 Battlefronts (not the PC
-ports), with all maps of both games, BF2's shell and HUD, BF1's loading screens, and a "classic-plus" wgpu look over the
-same content. Players bring their own discs; we ship no Pandemic assets or code.
+One game from two. openbf brings Battlefront and Battlefront II together in a Rust game for Windows, Linux and macOS.
+It uses one gameplay rulebook, BF2's shell and HUD, BF1's loading screens, and modern wgpu rendering over the original
+maps. Players build it from their own supported copies. All original game data comes from those local inputs.
 
 **Current scope: Instant Action**, including flying vehicles, space battles and space maps. No new features beyond agreed
 tasks. Everything after M3 below is later work and is not being built now.
 
 ## Architecture (locked)
 1. **Rust runtime + wgpu renderer**; cross-platform via Vulkan/Metal/DX12.
-2. **Offline asset bake** from the player's discs; the runtime never parses LVL.
+2. **Offline asset bake** from the player's supported copies. LVL parsing happens exclusively during baking.
 3. **Data-driven missions, no Lua VM.** The Lua mod ecosystem is not a goal (2026-08-30, `analysis/community-projects.md`):
    a mod worth having gets ported as a native feature.
-4. **Decomp = behavioral reference**, never source to port; PCSX2 side by side is the oracle.
+4. **Original-game evidence.** Use the original games, executable analysis and PCSX2 comparisons to verify behaviour, and implement it in original Rust code.
 5. **Same content, classic-plus look.** Same models, maps, silhouettes and palette; modern lighting on by default, a strict
    render mode as a runtime toggle that never changes gameplay.
 6. **Modes are composable rulesets over rosters.** Mode x map x era is data, not code.
@@ -36,8 +36,8 @@ assets` mean the section of that name there. The ones most often needed:
 - **Soldiers and vehicles:** vehicle and unit health are separate. Droidekas sprint only as a ball, on the shared bar. BF1
   passive aim assist on foot, on by default, none on the mouse. Keyboard + mouse is a deliberate deviation from the
   controller-only original.
-- **Bots:** openbf's own AI fed by the discs' graphs and hints; the PS2's behaviour is the baseline, and improvements are
-  named deviations.
+- **Bots.** openbf's AI uses the original games' navigation graphs and hints. Its rules use original-game evidence
+  and name deliberate deviations.
 
 ## Milestones (2026-09-25; older phases are in `analysis/PLAN_LOG_2026.md`)
 GitHub issues track current milestone scope. Done: P0 audits, P1 bake, P2 viewer, P3 soldier, P4 combat, P5 vertical slice, P6 shell, P6.5
@@ -47,13 +47,12 @@ infantry AI A-D, P9's N-pad `Sim::step` and libm-backed `core::fmath`.
   hygiene.
 - **M-ALPHA, the public alpha** (2026-09-29): a full conquest round with drivable vehicles on six showcase maps (BF1 NAB1,
   TAT1, YAV2; BF2 UTA1, MYG1, HOT1) that reads as a real game in a 5-minute video. The alpha issue scope records these targets.
-- **M1 Looks right:** every map reads like the PS2 under the modern-port rules of
-  `engine/artifacts/pcsx2/ref/COMPARISON_RULES.md`; every high-confidence finding in `engine/artifacts/pcsx2/ref/FINDINGS.md`
-  fixed or ruled expected.
+- **M1 Looks right.** Every map retains the look of its original game under the modern-port presentation rules.
+  Every high-confidence comparison finding needs a fix or a recorded explanation.
 - **M2 Vehicles:** every vehicle class each map ships spawns, and is drivable or flyable by player and AI with its weapons,
   turrets and enter/exit.
-- **M3 Plays right:** a full conquest round on every map ends by tickets with no unit stuck, sweep `finished 32/32`, PCSX2
-  spot checks.
+- **M3 Plays right.** Acceptance requires full Conquest rounds on all 34 ground maps to end by tickets with no units stuck,
+  a `finished 34/34` sweep footer, and original-game spot checks.
 
 Later, in order, and not current scope:
 - **M4** Heroes, Space Assault's remaining rules, awards, class meta-unlock (what Instant Action needs of these is in scope).
@@ -87,9 +86,9 @@ The sim is **fixed-step** (rate from audit A5), **seeded RNG**, **no wall-clock 
 logic** (two diagnostic timers, `ai_wall_ms` in `core/src/sim/step.rs` and `TableStats.secs` in
 `core/src/ai/tactic.rs`, are never hashed or read by the sim; `core::fmath`'s `no_wall_clock_in_core`
 referee allows only those). The `game` binary must support from the start:
-- `--headless` (no window; wgpu renders offscreen to a texture)
-- `--replay <inputlog>` and `--record <inputlog>` (deterministic input playback/capture)
-- `--capture-frame <tick> <out.png>` (offscreen render one frame to PNG)
+- `--map <baked-dir> --headless` (render offscreen)
+- `--replay <inputlog>` (deterministic input playback)
+- `--map <baked-dir> --headless --capture-frame <out.png>` (render one frame to PNG)
 - `--sim-hash <ticks>` (run N ticks, print a hash of sim state)
 This single architecture is what makes autonomous testing possible (golden frames,
 replay diffs, state hashing) AND is the foundation for lockstep/rollback netcode. Treat

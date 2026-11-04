@@ -13,14 +13,17 @@ collision primitive and three local coordinates.
 - `FUN_003223d0` (314887–315130) accepts a head contact on a primitive in
   that subset and records the contact in the primitive's moving frame.
 - `FUN_00323178` (316160–316499) builds the live cubic span to the gun. It
-  uses the stored tangent at the wrap and −15 times the gun direction at the
-  gun, measures the span as ten chords, and then tests each chord against the
-  target. The first span uses `InitialCableLength`. Later spans use
-  `CableLength`. A hit on a non-tow body breaks the live link.
+  uses the newest contact's unflattened world tangent at +0x80 and −15 times
+  the gun direction at the gun. It measures the span as ten chords and tests
+  them against the target. A new wrap stores half the cubic derivative in
+  world axes at the hit's fractional position in the chord (316443–316497).
+  The first span uses `InitialCableLength`. Later spans use `CableLength`.
+  A hit on a non-tow body breaks the live link.
 - `FUN_002669f8` ignores another hit on the current leg. The previous leg
   blocks a reversal. When the previous leg neighbors the current leg, the
   leg opposite the current one also breaks the link.
-- `FUN_003248d8` (316950–317096) relaxes the stored tangents and shifts
+- `FUN_003248d8` (316950–317096) relaxes the older +0x80 tangents. The newest
+  +0x80 tangent retains its magnitude and direction. The function also shifts
   wrap contacts toward their authored local x/z coordinates while keeping
   their local y.
 - `FUN_00323178` (316109–316143) changes the cable to state 3 once the
@@ -46,6 +49,7 @@ The BF1 tow class is constructed by `FUN_00282758`. Its update
 same two-step generator shape, but builds one ordinary ordnance
 descriptor via `FUN_00272f88` and dispatches it once. There is no
 source seat loop or temporary friendly-fire override in that path.
+The same BF1 update stores the world derivative on wrap (206696–206762).
 
 ## Implementation evidence
 

@@ -132,6 +132,7 @@ pub use gunner_foot::yaw_toward;
 pub(crate) use gunner_foot::{burst_len, heat_fits, heat_spent, pause_ticks};
 pub(crate) use gunner_foot::{friend_near_blast, item_line_blocked, release_blasts_own_side};
 pub use mover::SPOT_FLOOR_TOL;
+pub(crate) use route::unit_goal_hub;
 pub use route::{first_leg, floor_walked};
 pub use state::{
     AiState, Behaviour, FightState, FlankState, HoldState, LostState, MoverState, NavTick,
@@ -385,9 +386,12 @@ pub const RECYCLE_AFTER: u32 = 120 * crate::TICK_HZ;
 /// 0 -> 24, BF1 Geonosis (108, -12) 0 -> 7); rounds finished 1,021 of 1,024
 /// both ways. At 30 m: 350 (BF2 Geonosis 16 -> 42), not taken.
 pub const RECYCLE_ROAM: f32 = 15.0;
-/// New ground (m): once either team is down to [`HOLD_ENDGAME`]
-/// reinforcements, progress is this far BEYOND the ground covered since the
-/// watch opened ([`StallState`]'s box).
+/// New ground (m): once the bot's own team is down to [`HOLD_ENDGAME`]
+/// reinforcements, progress is this far beyond the ground covered since the
+/// watch opened ([`StallState`]'s box). The opposing team still uses its own
+/// ticket count, so mobile attackers can reach the last defenders.
+/// OURS. trace: compare the original Endor finish and stuck handling with
+/// one team at its last reinforcement and the other still advancing.
 /// Measured, 8 seeds x 32 maps x 120,000 ticks (lead_tmp/rcyc/README.md):
 /// against a point alone a bot PACING a wall is never given up — BF2 UTA1
 /// seed 42 stood 1 v 9 for 30,000 ticks, its last bot walking a 14 x 9 m

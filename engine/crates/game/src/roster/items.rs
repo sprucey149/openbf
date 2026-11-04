@@ -81,8 +81,8 @@ pub fn item_class_from_db(db: &ClassDb, item: &str) -> Option<ItemClass> {
 /// §2.1): `PowerupDelay`, and per health type the health and clips one pass
 /// gives (`SoldierHealth` / `SoldierAmmo` fill the person and droid slots,
 /// then `Person..BuildingHealth` / `..Ammo` their own; no disc class authors
-/// both forms), with the sounds the game layer plays. `None` when the db has
-/// no such class or it is not a `powerupstation`.
+/// both forms), with the sounds the game layer plays. A destructible building
+/// uses the same health and wreck fields without providing services.
 pub fn station_class_from_db(db: &ClassDb, class: &str) -> Option<StationClass> {
     let name = db.resolve(class)?;
     if !crate::stations::is_station_base(db.engine_base(name)?) {

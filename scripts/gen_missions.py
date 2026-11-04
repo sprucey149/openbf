@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""gen_missions.py -- generate engine/missions/*.ron from the PC mod-tools Lua
-sources, cross-checked against the PS2 mission bytecode.
+"""Generate openbf mission RON from authored declarations and correction tables.
 
-Audit A6 (analysis/a6-mission-lua.md) established that the Gametoast
-mod-tools .lua files ARE the shipped mission scripts (100 % string-constant
-overlap on BF1 tat1r/bes1a), so the readable PC source is the authoring
-input and the PS2 bytecode is the referee.  Where the two disagree the PS2
-wins (it is the target) and the RON says PROVISIONAL.
+The source-fingerprinted tables preserve the shared gameplay rules across
+editions. Audit A6 (analysis/a6-mission-lua.md) found every retail bytecode
+string in the corresponding PC mod-tools text for BF1 tat1r and bes1a.
+Comparing the two still exposes platform-specific gameplay values.
 
 Inputs
   PC   community_mods/gametoast_lua/doc/StarWarsBattlefront{,II}/SourceCode/
@@ -28,15 +26,12 @@ That turned out to matter: PS2 retail shrinks nearly every BF2 member pool
 (tat2c_con is units=20 on the disc against the PC source's 28, matching
 re-tickets-spawn.md §1.5), and trims four BF1 pools too.
 
-Without the PC sources (a public checkout has no community_mods; card PACK),
-`--ps2-only` builds from the bytecode alone: the same values wherever the PS2
-script has them -- which is every value of every shipped mission -- minus the
-referee's PC/PS2 notes.
+`--ps2-only` skips the optional PC mod-tools text comparison. The packer uses
+this mode with the selected Lua cache and any required correction tables.
 
 Usage
   scripts/gen_missions.py                 # write engine/missions/*.ron
   scripts/gen_missions.py --ps2-only [--lua-root DIR] [--out DIR]
-                                          # scripts/pack.py: from the ISO alone
   scripts/gen_missions.py --check         # report only, write nothing
   scripts/gen_missions.py --dump bf1 tat1r        # PS2 call trace (Lua 4.0)
   scripts/gen_missions.py --dump bf2 tat2g_con    # PS2 call trace (Lua 5.0)
@@ -60,6 +55,7 @@ PS2_BF1 = os.path.join(ROOT, "extracted/bf1/lua/mission")
 PS2_BF2 = os.path.join(ROOT, "extracted/bf2/lua/mission")
 OUT_DIR = os.path.join(ROOT, "engine/missions")
 PS2_ONLY = False
+TABLE_ONLY_GAMES = ()
 GAMEPLAY_REFERENCES = {}
 
 
@@ -674,6 +670,8 @@ def consts(f, want=None):
 
 
 def load_ps2(game, script):
+    if game in TABLE_ONLY_GAMES:
+        return None
     path = os.path.join(PS2_BF1 if game == "bf1" else PS2_BF2, script + ".luac")
     if not os.path.exists(path):
         return None
@@ -1190,13 +1188,11 @@ def mission_mode(script):
 
 
 def build(key, game, planet, era, pc_stem, ps2_name):
-    """PS2 bytecode is the source of truth; the PC .lua is the referee.
+    """Apply known canonical mission facts over the selected script evidence.
 
-    A6 proved the PC sources ARE the shipped scripts, but PS2 retail carries
-    per-platform tuning (unit lists, member pools), and PLAN's rule is that
-    where they differ the PS2 wins -- it is the target.  So every emitted
-    number comes from the bytecode when the bytecode has it, and any PC/PS2
-    difference is recorded and marked PROVISIONAL.
+    Table-only imports require the canonical playable team names, sizes,
+    tickets and rosters. The optional mod-tools comparison records differences
+    between authored inputs.
     """
     m = Mission()
     m.key, m.game, m.era, m.ps2 = key, game, era, ps2_name
@@ -1622,6 +1618,8 @@ def main():
     ap.add_argument("--lua-root", metavar="DIR",
                     help="the extracted Lua (DIR/bf1/mission, DIR/bf2/mission;"
                          " default extracted/<game>/lua/mission)")
+    ap.add_argument("--table-only-game", choices=("bf1", "bf2"), action="append", default=[],
+                    help="require complete canonical mission facts for this game and skip its extracted Lua cache")
     ap.add_argument("--out", metavar="DIR", help="default engine/missions")
     ap.add_argument("--space", action="store_true",
                     help="also write the six Space Assault missions, which only a"
@@ -1633,7 +1631,7 @@ def main():
     ap.add_argument("--dump", nargs=2, metavar=("GAME", "SCRIPT"),
                     help="print a PS2 script's reconstructed call sequence")
     args = ap.parse_args()
-    global PS2_ONLY, PS2_BF1, PS2_BF2, OUT_DIR, GAMEPLAY_REFERENCES
+    global PS2_ONLY, TABLE_ONLY_GAMES, PS2_BF1, PS2_BF2, OUT_DIR, GAMEPLAY_REFERENCES
     # pack.py runs this with -I, which leaves the script's own folder off the path.
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from gameplay_missions import load
@@ -1649,7 +1647,11 @@ def main():
         GAMEPLAY_REFERENCES = load(references, sources)
     except (ValueError, OSError, KeyError) as exc:
         ap.error(str(exc))
+    for game in args.table_only_game:
+        if game not in GAMEPLAY_REFERENCES:
+            ap.error(f"--table-only-game {game} requires its canonical mission correction table")
     PS2_ONLY = args.ps2_only
+    TABLE_ONLY_GAMES = tuple(args.table_only_game)
     if args.lua_root:
         PS2_BF1 = os.path.join(args.lua_root, "bf1/mission")
         PS2_BF2 = os.path.join(args.lua_root, "bf2/mission")

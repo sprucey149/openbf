@@ -1187,3 +1187,80 @@ fn a_hit_unit_dodges_on_the_skill_coin_and_holds_the_cooldown() {
     }
     assert_eq!(armed, t0 + DODGE_COOLDOWN);
 }
+
+#[test]
+fn a_pinned_bot_can_jump_a_riser_missed_by_the_stepped_probe() {
+    use crate::ai::state::SteerPick;
+    use crate::collision::{trimesh, Body, CollisionWorld, Shape};
+
+    let (mut sim, h) = l_sim();
+    let unit = sim.unit_mut(h).unwrap();
+    unit.soldier.pos = Vec3::ZERO;
+    unit.soldier.grounded = true;
+    let direction = Vec3::Z;
+    let start = unit.capsule();
+    // Two short faces meet at the lower capsule's rim. The stepped sweep
+    // passes between them, while the full step contacts both.
+    let plane = start.radius * std::f32::consts::SQRT_2;
+    let top = crate::collision::STEP_HEIGHT + 0.02;
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for side in [-1.0, 1.0] {
+        let p = |x: f32, y: f32| [side * x, y, plane - x];
+        let base = vertices.len() as u32;
+        vertices.extend([p(0.28, 0.0), p(0.43, 0.0), p(0.43, top), p(0.28, top)]);
+        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    sim.collision = CollisionWorld::new(
+        vec![Body::new(
+            glam::Mat4::IDENTITY,
+            Shape::Mesh(trimesh(&vertices, &indices).unwrap()),
+        )],
+        vec![],
+    );
+    let mut step = start;
+    step.base += direction * 0.08;
+    assert!(sim
+        .collision
+        .wall_sweep(&start.stepped(), direction, crate::ai::PROBE_DIST)
+        .is_none());
+    let push = sim.collision.push_out_soldier_from(&start, &step);
+    assert!(push.dot(direction) < -crate::ai::HULL_PUSH_MIN);
+    let mut lost = LostState {
+        confirmed: true,
+        pinned: true,
+        ..LostState::default()
+    };
+    assert!(!super::lost_jump(
+        &sim,
+        sim.unit(h).unwrap(),
+        direction,
+        SteerPick::Fwd,
+        &mut lost,
+    ));
+    let unit = sim.unit_mut(h).unwrap();
+    unit.wall_push = push;
+    unit.soldier.vel = -direction * unit.consts.max_speed;
+    assert!(!super::lost_jump(
+        &sim,
+        sim.unit(h).unwrap(),
+        direction,
+        SteerPick::Fwd,
+        &mut lost,
+    ));
+    sim.unit_mut(h).unwrap().soldier.vel = Vec3::ZERO;
+    assert!(super::lost_jump(
+        &sim,
+        sim.unit(h).unwrap(),
+        direction,
+        SteerPick::Fwd,
+        &mut lost,
+    ));
+    assert!(!super::lost_jump(
+        &sim,
+        sim.unit(h).unwrap(),
+        direction,
+        SteerPick::Fwd,
+        &mut lost,
+    ));
+}

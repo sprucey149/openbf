@@ -185,7 +185,8 @@ def require_ps2_bf1_reference(pc_present, root, image=None):
     tree = is_ps2_lvl(ci_path(root, "COMMON/ENG/COMMON.LVL"))
     disc = image and REQUIRED_BF1 <= ps2_disc_files(image)
     if not tree and not disc:
-        raise ValueError("PC BF1 assets currently also need the BF1 PS2 gameplay reference: add its disc with --iso1 (or extract it under extracted/bf1/lvl). The PC mission/classes/collision cannot replace PS2 gameplay data.")
+        raise ValueError("This PC BF1 build needs verified BF1 PS2 gameplay input for missions, classes and collision. "
+                         "Add its disc with --iso1 or extract it under extracted/bf1/lvl.")
 
 
 if __name__ == "__main__":

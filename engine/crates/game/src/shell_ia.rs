@@ -107,7 +107,7 @@ mod tests {
         let dune = ia
             .maps
             .iter()
-            .find(|m| m.label == "TATOOINE: DUNE SEA (bf1)")
+            .find(|m| m.label == "Tatooine: Dune Sea (bf1)")
             .unwrap();
         assert_eq!(dune.key, "tat1");
         let rows = ia.map_rows();

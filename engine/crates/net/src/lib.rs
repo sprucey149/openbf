@@ -6,5 +6,5 @@
 // (engine/artifacts/loop/CLEANSE_PLAN.md, Appendix 2).
 //
 // The determinism spine the LAN layer will need is already built and tested
-// elsewhere: fixed 60 Hz ticks, `InputLog` per player slot, `Sim::hash`
+// elsewhere: fixed 30 Hz ticks, `InputLog` per player slot, `Sim::hash`
 // (PLAN.md §Determinism & capture/replay spine).

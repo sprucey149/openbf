@@ -6,14 +6,9 @@ DUSTE/SUNG acceptance across all maps.
 
 ## Integration and reference
 
-The follow-up first fetched origin/main at b436e41 and merged it into
-codex/hoth-atmosphere in 8163f2d. The existing Geonosis work and Hoth changes
-were retained. Both conflicts were crate-map documentation. The pre-update
-patches and stash remain available locally.
-
-The next update merged origin/main 5281236 in 04b156b without conflicts and
-restored the pending atmosphere work. The combined workspace passes all-target
-checking. The later PS2 density investigation confirmed the same 80-particle
+The atmosphere changes were checked against the combined source at `04b156b`,
+including the earlier Geonosis work. The workspace passed all-target checking.
+The later PS2 density investigation confirmed the same 80-particle
 snow pool, eight-particle mist pool and 59 active placements. No further density
 or height tuning was made; the maintainer deferred that comparison.
 

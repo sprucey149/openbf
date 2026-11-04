@@ -313,6 +313,10 @@ pub const MEND_FULL: f32 = 0.95;
 /// share, and on until [`MEND_FULL`] once it is at the droid. `None` for
 /// every other unit and moment.
 pub fn mend(sim: &Sim, u: &Unit) -> Option<Vec3> {
+    mend_station(sim, u).map(|s| s.pos)
+}
+
+pub(super) fn mend_station<'a>(sim: &'a Sim, u: &Unit) -> Option<&'a crate::sim::Station> {
     let low = sim.unit_tier(u).mend;
     if low <= 0.0 || u.mount.is_some() || u.health.max <= 0.0 {
         return None;
@@ -322,7 +326,7 @@ pub fn mend(sim: &Sim, u: &Unit) -> Option<Vec3> {
         return None;
     }
     let at = u.soldier.pos;
-    let (pos, d2, radius) = sim
+    let (station, d2) = sim
         .stations
         .iter()
         .filter(|s| {
@@ -332,11 +336,11 @@ pub fn mend(sim: &Sim, u: &Unit) -> Option<Vec3> {
                     .get(usize::from(s.class))
                     .is_some_and(|c| c.health[0] > 0.0)
         })
-        .map(|s| (s.pos, (s.pos - at).length_squared(), s.radius))
-        .filter(|&(_, d2, _)| d2 < MEND_REACH * MEND_REACH)
+        .map(|s| (s, (s.pos - at).length_squared()))
+        .filter(|&(_, d2)| d2 < MEND_REACH * MEND_REACH)
         .min_by(|a, b| a.1.total_cmp(&b.1))?;
-    let there = d2 < (radius + 1.0) * (radius + 1.0);
-    (share < low || there).then_some(pos)
+    let there = d2 < (station.radius + 1.0) * (station.radius + 1.0);
+    (share < low || there).then_some(station)
 }
 
 /// [`pick`]'s weights, in metres of range: an enemy aiming at the unit

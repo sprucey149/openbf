@@ -97,7 +97,11 @@ fn maps() -> Vec<MapEntry> {
             })
             .collect()
     };
-    catalog(&text, &bakes, &missions)
+    let localized = |game, key: &str| match key {
+        "planets.bespin.mapname2" => Some("  BESPIN: CLOUD CITY  ".to_owned()),
+        _ => text(game, key),
+    };
+    catalog(&localized, &bakes, &missions)
 }
 
 fn ia() -> InstantAction {
@@ -139,33 +143,33 @@ fn the_merged_list_is_both_games_case_folded() {
     assert_eq!(
         labels,
         [
-            "BESPIN: CLOUD CITY (bf1)",
-            "BESPIN: PLATFORMS (bf1)",
+            "Bespin: Cloud City (bf1)",
+            "Bespin: Platforms (bf1)",
             "Coruscant (bf2)",
             "Dagobah (bf2)",
             "Death Star (bf2)",
             "Endor (bf2)",
-            "ENDOR: BUNKER (bf1)",
+            "Endor: Bunker (bf1)",
             "Felucia (bf2)",
             "Geonosis (bf2)",
-            "GEONOSIS: SPIRE (bf1)",
+            "Geonosis: Spire (bf1)",
             "Hoth (bf2)",
-            "HOTH: ECHO BASE (bf1)",
+            "Hoth: Echo Base (bf1)",
             "Jabba's Palace (bf2)",
             "Kamino (bf2)",
-            "KAMINO: TIPOCA CITY (bf1)",
+            "Kamino: Tipoca City (bf1)",
             "Kashyyyk (bf2)",
-            "KASHYYYK: DOCKS (bf1)",
-            "KASHYYYK: ISLANDS (bf1)",
+            "Kashyyyk: Docks (bf1)",
+            "Kashyyyk: Islands (bf1)",
             "Mos Eisley (bf2)",
             "Mustafar (bf2)",
             "Mygeeto (bf2)",
             "Naboo (bf2)",
-            "NABOO: PLAINS (bf1)",
-            "NABOO: THEED (bf1)",
+            "Naboo: Plains (bf1)",
+            "Naboo: Theed (bf1)",
             "Polis Massa (bf2)",
-            "RHEN VAR: CITADEL (bf1)",
-            "RHEN VAR: HARBOR (bf1)",
+            "Rhen Var: Citadel (bf1)",
+            "Rhen Var: Harbor (bf1)",
             "Space Felucia (bf2)",
             "Space Hoth (bf2)",
             "Space Kashyyyk (bf2)",
@@ -173,22 +177,22 @@ fn the_merged_list_is_both_games_case_folded() {
             "Space Tatooine (bf2)",
             "Space Yavin (bf2)",
             "Tantive IV (bf2)",
-            "TATOOINE: DUNE SEA (bf1)",
-            "TATOOINE: MOS EISLEY (bf1)",
+            "Tatooine: Dune Sea (bf1)",
+            "Tatooine: Mos Eisley (bf1)",
             "Utapau (bf2)",
             "Yavin 4 (bf2)",
-            "YAVIN 4: ARENA (bf1)",
-            "YAVIN 4: TEMPLE (bf1)",
+            "Yavin 4: Arena (bf1)",
+            "Yavin 4: Temple (bf1)",
         ]
     );
     // Keys: the bake's directories, the legacy two unprefixed; a map that
     // is not baked keeps `<game>_<code>`.
     let key = |l: &str| m.iter().find(|e| e.label == l).unwrap().key.as_str();
     assert_eq!(key("Hoth (bf2)"), "bf2_hot1");
-    assert_eq!(key("HOTH: ECHO BASE (bf1)"), "bf1_hot1");
+    assert_eq!(key("Hoth: Echo Base (bf1)"), "bf1_hot1");
     assert_eq!(key("Mos Eisley (bf2)"), "tat2");
-    assert_eq!(key("TATOOINE: MOS EISLEY (bf1)"), "bf1_tat2");
-    assert_eq!(key("TATOOINE: DUNE SEA (bf1)"), "tat1");
+    assert_eq!(key("Tatooine: Mos Eisley (bf1)"), "bf1_tat2");
+    assert_eq!(key("Tatooine: Dune Sea (bf1)"), "tat1");
     assert_eq!(key("Space Yavin (bf2)"), "bf2_spa1");
     let rows = ia().map_rows();
     assert_eq!(rows.len(), 41);
@@ -220,12 +224,12 @@ fn dimmed_rows_are_skipped_by_the_cursor() {
         top: polis - 4,
     };
     m.step(down(), 0.0);
-    assert_eq!(rows[m.map_list.at].text, "RHEN VAR: CITADEL (bf1)");
+    assert_eq!(rows[m.map_list.at].text, "Rhen Var: Citadel (bf1)");
     m.step(down(), 0.0);
     m.step(down(), 0.0);
     assert_eq!(rows[m.map_list.at].text, "Tantive IV (bf2)", "six skipped");
     m.step(up(), 0.0);
-    assert_eq!(rows[m.map_list.at].text, "RHEN VAR: HARBOR (bf1)");
+    assert_eq!(rows[m.map_list.at].text, "Rhen Var: Harbor (bf1)");
     // Hoth (bf2): Conquest live, 1-flag CTF and Hunt dimmed, All Modes too.
     let hoth = rows.iter().position(|r| r.text == "Hoth (bf2)").unwrap();
     m.map_list.at = hoth;
@@ -271,7 +275,7 @@ fn the_states_and_their_presses() {
     assert_eq!(m.state, State::Map);
     assert!(COMMANDS.iter().all(|c| !m.command_live(*c)), "all dimmed");
     assert_eq!(COMMANDS[m.command], Cmd::Add, "ADD keeps its focus");
-    assert_eq!(m.info(), "BESPIN: CLOUD CITY", "a BF1 map: its name alone");
+    assert_eq!(m.info(), "Bespin: Cloud City", "a BF1 map: its name alone");
     m.step(triangle(), 0.0);
     assert_eq!(m.state, State::Command);
     m.step(cross(), 0.0);
@@ -369,7 +373,7 @@ fn all_maps_modes_eras_and_the_cap() {
     m.playlist.clear();
     m.add(MapPick::All, ModePick::All, SidePick::AllEras);
     // 34 baked maps; geo1, hot1, end1 (both games), kam1 (bf1) have one era.
-    let one_era = ["Endor (bf2)", "ENDOR: BUNKER (bf1)", "Geonosis (bf2)"];
+    let one_era = ["Endor (bf2)", "Endor: Bunker (bf1)", "Geonosis (bf2)"];
     assert!(one_era.iter().all(|l| m.maps.iter().any(|e| e.label == *l)));
     let expected: usize = m
         .maps
@@ -381,7 +385,7 @@ fn all_maps_modes_eras_and_the_cap() {
     assert!(!m.full);
     // The order: map by map in list order, Clone Wars before Galactic
     // Civil War.
-    assert_eq!(m.maps[m.playlist[0].map].label, "BESPIN: CLOUD CITY (bf1)");
+    assert_eq!(m.maps[m.playlist[0].map].label, "Bespin: Cloud City (bf1)");
     assert_eq!(m.playlist[0].side, Side::Era(Era::Cw));
     assert_eq!(m.playlist[1].side, Side::Era(Era::Gcw));
     // Twice more: 128 rows, then the popup; Cross closes it.
@@ -923,7 +927,7 @@ fn session_options_pages() {
 fn launch_hands_over_the_playlist_in_order() {
     let mut m = ia();
     let at = |l: &str| m.maps.iter().position(|e| e.label == l).unwrap();
-    let (hoth, kam) = (at("Hoth (bf2)"), at("KAMINO: TIPOCA CITY (bf1)"));
+    let (hoth, kam) = (at("Hoth (bf2)"), at("Kamino: Tipoca City (bf1)"));
     m.add(
         MapPick::One(hoth),
         ModePick::One(Mode::Con),

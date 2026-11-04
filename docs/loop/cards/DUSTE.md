@@ -52,7 +52,6 @@ load_scene.rs` counts them as "dust effect emitters (no geometry)").
 
 ## Hoth maintainer trial (2026-11-02)
 
-BF2 placed DustEffect rendering now exists on `codex/hoth-atmosphere`, using the
 map's existing classes.ron, active instances and source transparency. Hoth
 conquest's 52 snow and seven mist placements are covered by a regression.
 The follow-up traces world-axis wind, compressed camera-facing cards and bounds

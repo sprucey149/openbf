@@ -1178,3 +1178,89 @@ fn the_post_choice_is_hashed_and_replays() {
 
 mod class_change;
 mod screens;
+
+#[test]
+fn bots_retry_an_authored_node_when_the_picked_spawn_has_no_walkable_exit() {
+    use crate::nav::{Arc, Hub, NavGraph, RouteTable};
+
+    let mut sim = Sim::empty(7);
+    sim.heightfield = Some(flat_ground());
+    let shelf = Vec3::ZERO;
+    let exit = Vec3::X * 16.0;
+    let approach = Vec3::X * 32.0;
+    sim.nav = NavGraph::new(
+        [shelf, exit, approach]
+            .into_iter()
+            .map(|pos| Hub {
+                pos,
+                radius: 3.0,
+                arcs: vec![],
+            })
+            .collect(),
+        [(0, 1), (1, 2)]
+            .into_iter()
+            .map(|(a, b)| Arc {
+                a,
+                b,
+                type_mask: 1,
+                flags: 0,
+            })
+            .collect(),
+        RouteTable::empty(3),
+        vec![],
+        vec![],
+    );
+    let cp = sim.add_cp(sphere_cp("shelf", shelf, 3.0, false), Some(0));
+    let other = sim.add_cp(sphere_cp("other shelf", approach, 3.0, false), Some(0));
+    let draw = sim.lcg.clone().index(2) as usize;
+    let mut points = vec![(shelf, 0.0), (exit, 1.0)];
+    points.swap(0, draw);
+    sim.cps[cp].def.spawn_nodes = points;
+    sim.nav_floors = vec![0.0; 3];
+    sim.nav_unwalkable = vec![3, 0];
+    sim.nav_trapped = vec![true, false, false];
+
+    let mut spec = UnitSpec::trooper(0, shelf);
+    spec.controller = Controller::Ai;
+    let bot = sim.spawn(&spec).unwrap();
+    assert_eq!(sim.unit(bot).unwrap().soldier.pos, exit);
+    assert_eq!(sim.unit(bot).unwrap().soldier.yaw, 1.0);
+
+    let player = sim.spawn(&UnitSpec::player(0, shelf)).unwrap();
+    assert_eq!(sim.unit(player).unwrap().soldier.pos, shelf);
+    let mut slotted = UnitSpec::player_in_slot(1, 0, shelf);
+    slotted.controller = Controller::Ai;
+    let player = sim.spawn(&slotted).unwrap();
+    assert_eq!(sim.unit(player).unwrap().soldier.pos, shelf);
+
+    let i = bot.index as usize;
+    sim.units[i].alive = false;
+    sim.battle.teams[0].alive_ai -= 1;
+    sim.respawn_slot(i);
+    assert_eq!(sim.units[i].soldier.pos, exit);
+    assert_eq!(sim.units[i].gen, bot.gen + 1);
+
+    sim.death_regions.push(Region::sphere(exit, 0.5));
+    let retained = sim.spawn(&spec).unwrap();
+    assert_eq!(sim.unit(retained).unwrap().soldier.pos, shelf);
+    sim.death_regions.pop();
+
+    sim.cps[cp].def.spawn_nodes = vec![(shelf, 0.0)];
+    let retained = sim.spawn(&spec).unwrap();
+    assert_eq!(sim.unit(retained).unwrap().soldier.pos, shelf);
+
+    sim.cps[cp].def.spawn_nodes.push((exit, 1.0));
+    let mut points = vec![(shelf, 0.0), (approach, 2.0)];
+    let mut draw = sim.lcg.clone();
+    points.swap(0, draw.index(2) as usize);
+    sim.cps[other].def.spawn_nodes = points;
+    let ambiguous = sim.spawn(&spec).unwrap();
+    assert_eq!(sim.unit(ambiguous).unwrap().soldier.pos, shelf);
+    let i = ambiguous.index as usize;
+    sim.units[i].alive = false;
+    sim.units[i].spawn_post = Some(SpawnPost::Post(other as u16));
+    sim.battle.teams[0].alive_ai -= 1;
+    sim.respawn_slot(i);
+    assert_eq!(sim.units[i].soldier.pos, approach);
+    assert_eq!(sim.lcg.state(), draw.state(), "one original draw");
+}
