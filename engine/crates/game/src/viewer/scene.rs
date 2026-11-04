@@ -1596,49 +1596,31 @@ fn upload_sky_objects(
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
-    let bf2 = scene.manifest.source_game == "bf2";
-    let total: u32 = sky.objects.iter().map(|o| o.count).sum();
     let mut placed = 0u32;
     for o in &sky.objects {
         let Some(cpu) = scene.meshes.get(&o.geometry) else {
             continue;
         };
         let parts = upload_submeshes(r, cpu)?;
-        for k in 0..o.count {
+        for _ in 0..o.count {
             let index = placed;
             placed += 1;
-            let (placement, yaw) = if bf2 {
-                let seed = crate::classdb::fnv1a_lowercase(&o.geometry)
-                    ^ crate::classdb::fnv1a_lowercase(&scene.manifest.map).rotate_left(11)
-                    ^ index.wrapping_mul(0x9e37_79b9);
-                let flight = render::SkyFlight::new(
-                    o.height,
-                    o.distance,
-                    [
-                        o.velocity_x.unwrap_or([0.0; 2]),
-                        o.velocity_y.unwrap_or([0.0; 2]),
-                        o.velocity_z.unwrap_or([0.0; 2]),
-                    ],
-                    Vec3::from(o.acceleration.unwrap_or([0.0; 3])),
-                    o.direction_factor.unwrap_or(3.0),
-                    o.lifetime.unwrap_or(1000.0),
-                    seed,
-                );
-                (render::Placement::Flight(flight), 0.0)
-            } else {
-                let bearing = std::f32::consts::TAU * index as f32 / total.max(1) as f32;
-                let fraction = if o.count > 1 {
-                    k as f32 / (o.count - 1) as f32
-                } else {
-                    0.5
-                };
-                let offset = Vec3::new(
-                    bearing.sin() * o.distance,
-                    o.height[0] + (o.height[1] - o.height[0]) * fraction,
-                    bearing.cos() * o.distance,
-                );
-                (render::Placement::Object { offset }, bearing)
-            };
+            let seed = crate::classdb::fnv1a_lowercase(&o.geometry)
+                ^ crate::classdb::fnv1a_lowercase(&scene.manifest.map).rotate_left(11)
+                ^ index.wrapping_mul(0x9e37_79b9);
+            let flight = render::SkyFlight::new(
+                o.height,
+                o.distance,
+                [
+                    o.velocity_x.unwrap_or([0.0; 2]),
+                    o.velocity_y.unwrap_or([0.0; 2]),
+                    o.velocity_z.unwrap_or([0.0; 2]),
+                ],
+                Vec3::from(o.acceleration.unwrap_or([0.0; 3])),
+                o.direction_factor.unwrap_or(3.0),
+                o.lifetime.unwrap_or(1000.0),
+                seed,
+            );
             for &(mesh, ref mat, _, flags) in &parts {
                 // NOT V-clamped, unlike a dome segment: a capital ship is an
                 // ordinary model that may legitimately tile its hull texture,
@@ -1666,8 +1648,8 @@ fn upload_sky_objects(
                     texture: tex.map(|b| b.handle),
                     color: ambient,
                     scale: 1.0,
-                    placement,
-                    yaw,
+                    placement: render::Placement::Flight(flight),
+                    yaw: 0.0,
                     // Routed off the raw MTRL word exactly like a dome
                     // shell: a `SkyObject` is a model like any other and the
                     // ELF's material rule is not specific to domes (RE §5).
@@ -1704,11 +1686,7 @@ fn upload_atmosphere(
     cache: &mut HashMap<String, BoundTexture>,
 ) -> Result<()> {
     let display_gain = super::look::atmosphere_display_gain(&scene.manifest);
-    let cloud = scene
-        .manifest
-        .fog_cloud
-        .as_ref()
-        .filter(|_| scene.manifest.source_game == "bf2");
+    let cloud = scene.manifest.fog_cloud.as_ref();
     let cloud_texture = match cloud.and_then(|c| c.texture.as_deref()) {
         Some(name) => atmosphere_texture(r, scene, cache, name)?,
         None => None,

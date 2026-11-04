@@ -28,9 +28,6 @@ pub(super) fn load(
 }
 
 fn volumes(scene: &Scene) -> Result<Vec<Volume>> {
-    if scene.manifest.source_game != "bf2" {
-        return Ok(Vec::new());
-    }
     let path = scene.dir.join(crate::classdb::MAP_CLASSES_FILE);
     if !pak::exists(&path) {
         return Ok(Vec::new());
@@ -117,6 +114,23 @@ fn volumes(scene: &Scene) -> Result<Vec<Volume>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn bf1_geonosis_loads_its_authored_dust_volumes() {
+        let map = crate::assets::baked_root().join("bf1_geo1");
+        if !map.join("manifest.ron").exists() {
+            eprintln!("SKIP: BF1 Geonosis bake absent");
+            return;
+        }
+        let scene = crate::assets::load_battle_scene(&map, "con").unwrap().0;
+        let volumes = super::volumes(&scene).unwrap();
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0].name, "browndust");
+        assert_eq!(volumes[0].instances.len(), 23);
+        assert_eq!(volumes[0].config.count, 25);
+        assert_eq!(volumes[0].config.lifetime, [3.0, 5.0]);
+        assert_eq!(volumes[0].config.color[3], 0.5);
+    }
+
     #[test]
     fn conquest_loads_the_placed_snow_and_mist_without_the_other_mode_layers() {
         let map = crate::assets::baked_root().join("bf2_hot1");

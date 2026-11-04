@@ -8,6 +8,70 @@ Original assets and captures remain local and ignored. This work covers BF2
 SkyObject flights, dome-attached battle effects, FogCloud, and authored sky glow. It does not close
 BF1 SKYO, the separate DustEffect class in DUSTE, or GODR.
 
+## BF1 playtest trial (2026-11-04, issue 119)
+
+At the maintainer's explicit request, the shared flight, placed DustEffect and
+FogCloud systems are now enabled for BF1 too, starting from `dec40c460af6` on
+`codex/hoth-atmosphere`. The three BF2-only runtime gates are removed. This is
+a playtest trial of the existing implementation, not a new claim that BF1's
+original runtime follows the BF2 rules. Source-specific lighting, terrain and
+gameplay behavior are outside this change.
+
+The reported exit snapshot is `dist/openbf_data/playtest/last.json`, BF1
+Geonosis conquest, seed 231, tick 581. Its build is `5425fda1105a+dirty`, while
+the checkout recorded by the snapshot is `dec40c460af6`. The camera is
+(95.32, -58.73, 164.56); the focused GPU check uses that position and view.
+
+The current Geonosis bake already carries flight velocities/acceleration,
+23 dust placements and an enabled brownmist FogCloud with density 60. Its
+browndust alpha is 0..189 and brownmist is 0..195. The atmosphere texture
+inputs across all 16 local BF1 maps are present and retain alpha variation;
+no opaque-sheet workaround is needed. Local asset audits, headless captures,
+build/test logs and the packaging receipt are retained under
+`engine/artifacts/bf1_atmosphere_trial/`, outside Git.
+
+Focused checks cover actual BF1 dust settings, BF2 Hoth loading, BF1 sky
+movement and paused redraws, and separate dust/cloud pixel attribution.
+Full BF1 original-game equivalence, cross-source alignment acceptance and
+per-map atmosphere frame-cost measurements remain unchecked. The existing
+BF2 reference and acceptance record below remains separate from this trial.
+
+Trial completion evidence on 2026-11-04:
+
+- `cargo test --release -p game --lib viewer::dust -- --nocapture`: both
+  BF1 Geonosis and BF2 Hoth loading regressions pass. The current release
+  game library's `viewer::scene::tests` also passes nine tests, with one
+  existing asset/GPU test ignored.
+- `scripts/gpu_tests.sh --game atmosphere --release`: one headless serial
+  test passes. All 72 Geonosis sky mesh parts use flight placement; motion
+  exceeds 10 m and a frozen clock leaves positions unchanged. Removing
+  placed dust changes 1,530 pixels; separately removing FogCloud changes
+  6,288 pixels in the 320x240 fixed-camera frame after six seconds. The test
+  renders each intervening tick to exercise normal particle updates.
+- Release game, atmosphere capture and refresh utility rebuilt. A targeted
+  PS2 Geonosis atmosphere rebake is installed with its previous manifest
+  and textures backed up locally. Seven 856x642 sequence frames and the
+  capture helper's 30 identical paused redraws are retained locally.
+- All 16 BF1 packed headless scene reports return success from an isolated
+  working directory, using embedded assets. This is loading coverage, not
+  full visual acceptance of those maps.
+- The staged pack contains 24,955 files: 24,894 baked assets and 61
+  missions. Its footer, complete input-name index and embedded release
+  executable hash were checked before replacing `dist/openbf.exe`.
+  All 16 existing profile/playtest files retain their original hashes.
+- Formatting, whitespace and the module-map presence check pass. The map
+  report still lists unrelated pre-existing stale line counts. No game
+  assets, packed binaries or captured images are included in Git.
+
+Pre-commit review keeps one shared runtime implementation and consolidates
+the regression's repeated frame submission into a local helper. The motion
+assertion now requires every uploaded ship part to move. Formatting and
+`scripts/check_provisional.py --selftest` plus its working-tree check pass.
+Strict `cargo clippy --release -p game --lib --test suite -- -D warnings`
+stops at two unchanged `nonminimal_bool` warnings in `bake/src/dlc.rs:51–52`.
+The same command with only `-A clippy::nonminimal_bool` passes; no source
+suppression or unrelated DLC changes are included.
+
 ## Upstream integration (2026-11-02)
 
 Fetched and fast-forwarded to origin/main 9a7d520, then reapplied the complete

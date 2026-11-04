@@ -420,7 +420,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/viewer.rs` 62 — viewer facade and stable re-exports; its module header owns the XFRM transform convention and routes to the parts below.
 - `game/src/viewer/walker_aim.rs` 172 — Walker drawn aimer transforms.
 - `game/src/viewer/look.rs` 1587 — manifest-derived water, fog, cull/LOWR, far-fade, lighting and scoped sky-layer tuning · `water_look`, `speckle_look`, `water_shading`, `far_cull`, `lowres_range`, `apply_lighting`.
-- `game/src/viewer/scene.rs` 1930 — scene GPU upload and draw ranges for terrain, water, foliage, models/LOWD and sky; moving door/turret/station records, texture cache and untextured census · `upload_scene`, `SceneGpu`, `SpeckleAnim`, `sky_wrap_v`, `pose_doors`; posing lives in `turret_pose` / `stations`.
+- `game/src/viewer/scene.rs` 1896 — scene GPU upload and draw ranges for terrain, water, foliage, models/LOWD and sky; moving door/turret/station records, texture cache and untextured census · `upload_scene`, `SceneGpu`, `SpeckleAnim`, `sky_wrap_v`, `pose_doors`; posing lives in `turret_pose` / `stations`.
 - `game/src/viewer/scene/terrain.rs` 169 — terrain draw chunks, layer uploads and chunk bounds; the scene’s terrain upload helpers.
 - `game/src/viewer/scene/tests.rs` 456 — scene draw-range regressions for water replacement and the ranges that follow it.
 - `game/src/viewer/foliage.rs` 223 — terrain foliage model placement, tint and fade · `records`, `models`, `matrix`; module header and `analysis/re-foliage.md` §6.
@@ -1020,7 +1020,8 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `game/examples/attachment_load_report.rs` 525 — CPU-only actual vehicle load routes, geometry/alpha hashes and whole-input catalog stability; explicitly excludes GPU and collision acceptance.
 - `mungefs/src/sun_flare.rs` 70 — BF2 root SunFlare config parser, including angle, halo rings and optical settings · `SunFlare::parse`
 - `bake/src/map/atmosphere.rs` 47 — authored SunFlare schema reduction and DustEffect alpha consumers · `sun_flare`, `dust_textures`
-- `game/src/viewer/dust.rs` 157 — active BF2 placed dust/mist classes to renderer pools; Hoth conquest placement regression · `load`
+- `game/src/viewer/dust.rs` 167 — active BF1/BF2 placed dust/mist classes to renderer pools; BF1 Geonosis and BF2 Hoth conquest placement regressions · `load`
+- `game/tests/suite/atmosphere.rs` — BF1 Geonosis headless sky motion, paused flight, dust and FogCloud attribution; run through `scripts/gpu_tests.sh --game atmosphere --release`.
 - `render/src/dust.rs` 229 — shared BF2 DustEffect particle pools, placed volumes and life/radius alpha · `Dust`, `DustConfig`
 - `render/src/sun_flare.rs` 229 — authored sun direction, native display pass and source depth visibility · `SunFlare`, `Renderer::set_sun_flare`
 - `render/src/sun_flare.wgsl` 55 — depth-filtered additive sun triangles and HDR gather; native source-mask filtering remains provisional
