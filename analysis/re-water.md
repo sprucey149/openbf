@@ -815,3 +815,114 @@ launched projectiles retain their own collision and life rules.
 controls, surfacing and bob resets, both triggers, queued salvos, stance/pitch
 heights, unchanged wading movement, invincibility and deterministic breath state.
 No fresh PCSX2 capture or deep-water AI avoidance rule is claimed.
+
+### 9.6 Soldier contact effects (2026-11-04, issue #115)
+
+The maintainer supplied a BF2 PS2 Dagobah screenshot showing the expanding rings
+around a moving wader. The existing renderer already draws this ring for weapon
+impacts; soldiers had no caller. The latest local black-box file instead records
+BF2 Kamino, build `daf1d59f84b2+dirty`, and provides no Dagobah movement trace.
+
+Re-read against the current local BF2 listing, whose line numbers have shifted
+since §9.2: `FUN_00240bf8`, 159309–159385, queries the wet cell and only runs its
+contact block below the bobbed surface. The ripple and falling-splash clocks are
+shared by soldiers and advance inside that block. The ripple interval is
+`1 / (0.3 * speed_squared + 4)`; after a spawn the remainder is limited to one
+interval. `FUN_00563230`, 685344–685417, rejects the ocean, a full 100-ring pool,
+dry cells and zero velocity, then places a 2-second, size-0.25 ring at the layer
+height, displaced horizontally by 0.03 times velocity. The falling effect comes
+from `WaterSplashEffect`, with downward speed above 5 m/s and a shared clock
+strictly above one second. [V][O] Static primary evidence; not an independent audit.
+
+The body draw `FUN_00239bb0`, 153739–153758, starts `FootWaterSplashEffect` once
+when a moving foot crosses below water, and rearms it above water. The grounded
+foot handler `FUN_0023fe00`, 157193–157237 and 157296–157322, recognizes a low
+foot lifting after its descent. Its wake requires squared speed above 4.5 and
+water above the soldier origin but below the foot plus 0.5 m. The wake starts at
+the soldier origin, facing horizontal travel. The per-class `MinFootHeight`
+defaults to 0.17 m (`re-foley.md` §1.3). [V][O]
+
+These particle effects all enter the water-splash helper `FUN_00461b40`,
+511963–512035. They use the existing surface-following effect path in the port,
+including the 0.02 m lift and flat-water bob; they are not buried at the foot's
+underwater height. The wake's basis follows `FUN_00452330`, 501493–501532.
+Dagobah's baked clone class resolves the three effects to
+`com_sfx_watersplash_md`, `com_sfx_watersplash_sm`, and
+`com_sfx_watersplash_wade`. Their definitions and textures were already baked.
+
+Implementation is presentation-only in `game/src/fx/water_contact.rs` and
+`game/src/soldier_vis/water.rs`. Ripple and fall triggers run once per ingested
+simulation tick, while entry and wake triggers sample the posed foot bones.
+Mounted soldiers, droidekas and dead soldiers are excluded. No movement,
+drowning, collision, gameplay RNG, baked schema or asset files change.
+The first-person distance-foley wake path is not reconstructed here; rings still
+follow first-person movement. Full original-game timing/appearance parity,
+catch-up-frame foot sampling and a per-map performance budget remain unmeasured.
+
+Source base: `af2d62158cad6866b71c51a86a9f833a0ea234db`, branch
+`codex/hoth-atmosphere`, with the scoped working-tree changes. Focused checks:
+`cargo test -p game --lib water -- --nocapture` and
+`scripts/gpu_tests.sh --game water_fx::dagobah`. The GPU check uses the actual
+Dagobah scene, clone model, foot animation, wet cells and authored effects;
+`OPENBF_WATER_CAPTURE` retains matching frames with and without contact effects.
+Results: 15 water-filtered unit tests and 5 ripple unit tests passed, including
+6 new contact regressions. The headless GPU test passed through the required
+wrapper with one test thread: at (-60, 0, 0.2), it retained 11 rings and changed
+6,993 pixels by more than three byte levels against the same scene without
+contact effects. Both retained PNGs were inspected. This is a bounded rendering
+check; the soldier's movement is driven by the fixture, not by player input.
+`cargo fmt -p game -- --check` and `git diff --check` passed.
+
+The size/map report remains failing on this Windows host: its backslash source
+paths fail to match all 738 slash-separated map rows, and it also reports two
+pre-existing missing artifact references (`SPLIT_RECIPE.md`, `gates.toml`).
+The four touched/new source-file row counts were refreshed directly; the new
+modules are 380 and 31 lines. No complete alignment gate or original-game timing
+comparison is claimed. Packed playtest delivery uses a release rebuild and
+`game.exe --write-pack` with current `assets_baked` and `missions` directories;
+its final status follows below.
+
+Delivery: `cargo build --release -p game` passed. The resulting executable
+successfully packed 24,955 current asset/mission files into
+`dist/openbf.water-contact.staged.exe` (1,876,196,352 bytes); its `OPENBFPK`
+footer was verified. Atomic replacement of `dist/openbf.exe` returned Windows
+access denied while the existing game process was running. The packed staged
+file is retained; `dist/openbf.exe` was not updated. No command modified
+`dist/openbf_data` or its profile/playtest files. Close the running game before
+replacing the existing executable with the staged one.
+
+### 9.7 Velocity-shaped wakes (2026-11-04, issue #115 follow-up)
+
+The maintainer's second PS2 comparison exposed a missing distinction in §9.6:
+that implementation sent walking wakes through the circular impact-ring draw.
+The PS2 keeps the spawn velocity on kind-1 records and uses a different draw
+routine. The pool dispatcher at BF2 listing 697178–697231 sends kind 0 to
+`FUN_005781c0` and kind 1 to `FUN_00578c50` (697667 onward). [V][O]
+
+The latter shapes each angular sample by horizontal travel. At walking speed,
+the forward and rear sectors fade out, leaving side arcs that overlap along the
+trail. It also reduces strength at low speed and mixes the water tint toward
+the authored specular colour for a strong wake. Its lighting combines ambient,
+diffuse and specular with successive screen blends, rather than the impact
+ring's sum. The radius and age envelope still use the existing PS2 rules.
+No pairwise circle-union or arbitrary reduction in spawn rate is introduced.
+
+The horizontal-speed reading was checked against the running SLUS-21240 code
+through read-only PINE: 0x578db4 squares X/Z, 0x578db8 adds Z into X and
+0x578dbc takes the square root. The preceding block at 0x578d48–0x578d60 uses
+the full 3-D speed for the low-speed strength factor. The inspected instructions
+are retained locally under `engine/artifacts/dagobah-corrections/`.
+
+`Ripple::velocity` now distinguishes impact rings from moving wakes. The new
+regression checks two open side arcs at 7 m/s, stationary rejection and retention
+of the original velocity. All six ripple unit tests pass. The final headless
+Dagobah check retains 11 wake records but now changes 2,733 pixels against the
+same scene without contact effects, compared with the first implementation's
+6,993. Counts alone are not original-game visual acceptance; the new capture was
+inspected alongside the maintainer's reference. Fall and foot splashes retain
+their existing authored definitions and surface-following behavior.
+
+The current local black box is Dagobah seed 220 at tick 209, player feet
+(25.76, 0.83, -107.0), camera (28.05, 4.2, -107.24). Its build header still says
+`daf1d59f84b2+dirty` while the checkout field says `af2d62158cad+dirty`, so it
+cannot identify this working-tree implementation for acceptance.

@@ -58,6 +58,7 @@ mod sky;
 mod storm;
 mod trail;
 mod turret;
+mod water_contact;
 
 use crate::walk::WalkSim;
 use core::impact::{ExplosionLook, Surface, SPLASH_LIFT, WATER_BLAST_DEPTH};
@@ -696,6 +697,7 @@ pub struct Fx {
     jet_frames: Vec<Option<Mat4>>,
     burn_frames: Vec<Vec<Option<Mat4>>>,
     water: ripple::Water,
+    water_contact: water_contact::State,
     chunks: chunks::Chunks,
     attached: Vec<props::Attached>,
     beams: Vec<props::Glow>,
@@ -751,6 +753,7 @@ impl Fx {
             crate::roster::load_classdb(&root.join("classes"), game, &crate::roster::FACTION_ORDER)
         {
             self.force.extend(&db, &walk.sim);
+            self.water_contact.load(&db);
             if let Some(lib) = self.library.as_ref() {
                 let names: Vec<_> = walk
                     .teams
@@ -806,6 +809,7 @@ impl Fx {
             names.dedup();
             fx.chunks = chunks::Chunks::load(&db, &names, &lib.model_dirs, lib.era);
             fx.force = force::State::load(&db, &walk.sim);
+            fx.water_contact.load(&db);
         }
         fx
     }
@@ -1134,11 +1138,17 @@ impl Fx {
             self.chunks.pose_bursts(walk, vis);
         }
         self.ingest(walk);
+        if walk.sim.water_level.is_some() {
+            if let Some(vis) = vis {
+                self.soldier_water_feet(walk, &vis.water_feet(walk));
+            }
+        }
     }
 
     /// Read this tick's sim events into effects.
     pub fn ingest(&mut self, walk: &WalkSim) {
         self.ingest_sim(&walk.sim);
+        self.soldier_water(walk);
         self.chunks.tick(walk, self.library.as_ref());
         self.follow_jets(&walk.sim, |u| {
             walk.team_template(u.team)
@@ -1196,6 +1206,7 @@ impl Fx {
         self.sounds.clear();
         self.rounds = trail::Rounds::default();
         self.water.clear();
+        self.water_contact.clear();
         self.chunks.clear();
         self.attached.clear();
         self.beams.clear();

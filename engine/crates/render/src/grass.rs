@@ -27,14 +27,6 @@
 //! - A patch draws while `−bound ≤ depth ≤ D` (depth along the camera's look
 //!   axis), its alpha × `min((D − depth)·0.05, 1)` — the last 20 m fade.
 //!
-//! Colour: texture × the sprite's grey × the patch's colour (the PS2's vertex
-//! and draw colours, GS MODULATE), unlit, fogged. **PROVISIONAL [H]**: the
-//! GS blend state (re-foliage §7 leaves it open) — the port composites
-//! source-over with the texture's alpha and does NOT write depth, which is
-//! what the PS2's back-to-front rebuild is for; patches go far to near. The
-//! ground quad under a tall blade (`0xc75263e1`) is not built: no class on
-//! either disc sets it.
-
 use crate::{Camera, Renderer, TextureHandle};
 use glam::{Mat4, Vec3};
 

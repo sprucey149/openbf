@@ -360,3 +360,23 @@ and what shows through the lakes is REFL's mirrored sky. Without REFL and CLRB t
 - B1: the DAT_0060c1b4 gate.
 - Tooling: addrscan misses a `lui` set on another branch path, so every absence was also checked by an any-base
   immediate scan.
+
+
+## Display-colour compositing correction (2026-11-04, issue #116)
+
+The Dagobah comparison in `re-foliage.md` section 18 also exposed excess
+brightness on the ground. The source-over rule established in section 2
+operates on GS display bytes. The renderer now runs terrain overlay layers
+through its compatible non-sRGB colour attachment, converts their shaded
+output to display units and resumes the normal attachment before model,
+skinned and lighting passes. Both ordinary and no-discard terrain layer
+pipelines use this path. The base terrain keeps its existing depth writes.
+Terrain and grass also filter an existing texture's display view before
+colour decoding. The texture data and mip chains are unchanged.
+
+A numeric GPU regression composites one and two half-alpha black terrain
+layers over display grey 200; results must match 200*(127/255)^N within two
+levels. The Dagobah matched-camera ground region changes from mean RGB
+(51.51,64.04,65.28) to (49.03,61.39,61.64), versus the original
+(45.97,57.02,55.96). This closes the linear blend deviation, not the
+remaining complete-scene comparison.

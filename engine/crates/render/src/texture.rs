@@ -100,7 +100,7 @@ impl GpuTexture {
         layout: &wgpu::BindGroupLayout,
         desc: &TextureDesc<'_>,
     ) -> Result<Self, RenderError> {
-        let view = upload_levels(
+        let (view, display_view) = upload_level_views(
             device,
             queue,
             desc.width,
@@ -175,6 +175,7 @@ impl GpuTexture {
                     // WebGPU requires every binding to be filled).
                     bindings::texture_view(2, detail_view.as_ref().unwrap_or(&view)),
                     bindings::entire_buffer(3, &params_buf),
+                    bindings::texture_view(4, &display_view),
                 ],
             },
         );
@@ -193,6 +194,18 @@ pub(crate) fn upload_levels(
     srgb: bool,
     label: Option<&str>,
 ) -> Result<wgpu::TextureView, RenderError> {
+    Ok(upload_level_views(device, queue, width, height, mips, srgb, label)?.0)
+}
+
+fn upload_level_views(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    mips: &[&[u8]],
+    srgb: bool,
+    label: Option<&str>,
+) -> Result<(wgpu::TextureView, wgpu::TextureView), RenderError> {
     if width == 0 || height == 0 || mips.is_empty() {
         return Err(RenderError::BadTexture(
             "zero-sized texture or empty mip chain".into(),
@@ -228,7 +241,7 @@ pub(crate) fn upload_levels(
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
         },
     );
 
@@ -256,7 +269,13 @@ pub(crate) fn upload_levels(
             },
         );
     }
-    Ok(texture.create_view(&wgpu::TextureViewDescriptor::default()))
+    Ok((
+        texture.create_view(&wgpu::TextureViewDescriptor::default()),
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(wgpu::TextureFormat::Rgba8Unorm),
+            ..Default::default()
+        }),
+    ))
 }
 
 #[cfg(test)]

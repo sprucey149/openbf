@@ -102,6 +102,7 @@ struct PointTable {
 @group(0) @binding(1) var<uniform> points: PointTable;
 @group(1) @binding(0) var t_color: texture_2d<f32>;
 @group(1) @binding(1) var s_color: sampler;
+@group(1) @binding(4) var t_color_display: texture_2d<f32>;
 // PS2 detail map (`<name>_dtl`): signal in ALPHA, modulated x2 over the base
 // (audit A2 §4). Materials without one bind the base view here and set
 // detail_strength = 0.
@@ -488,6 +489,7 @@ const LIGHT_PRELIT: u32 = 1u;
 const LIGHT_PRELIT_ADD: u32 = 2u;
 const LIGHT_UNLIT: u32 = 3u;
 const LIGHT_UNLIT_ADD: u32 = 4u;
+const LIGHT_TERRAIN: u32 = 5u;
 const LIGHT_CHARACTER: u32 = 6u;
 const LIGHT_GLOW: u32 = 7u;
 const LIGHT_UNSCALED: u32 = 8u;
@@ -498,7 +500,11 @@ const IFACE_AMBIENT: f32 = 0.5;
 
 fn shade_unfogged(in: VsOut) -> vec4<f32> {
     let uv = material_uv(in.uv);
-    let texel = textureSample(t_color, s_color, uv);
+    var texel = textureSample(t_color, s_color, uv);
+    if in.light == LIGHT_TERRAIN {
+        let display = textureSample(t_color_display, s_color, uv);
+        texel = vec4<f32>(srgb_to_linear(display.rgb), display.a);
+    }
     let base = texel * in.color;
     let n = normalize(in.world_normal);
     var ndotl = max(dot(n, -globals.sun_dir), 0.0);
@@ -681,19 +687,18 @@ fn far_fade(dist: f32) -> f32 {
     return 1.0 - smoothstep(globals.fade_begin, globals.fade_end, dist);
 }
 
-// A terrain texture LAYER (`render::DrawLayer::TerrainLayer`, card TALPH):
-// the terrain's own colour (`LIGHT_TERRAIN`, T_k x COLR) with the layer's
-// "over" alpha, `table[nibble] / 128` in the vertex alpha, composited by the
-// pipeline's src-alpha blend -- the PS2's GS ALPHA 0x44
-// (`analysis/re-terrain-layers.md` 2 [O]). The blend runs on the linear
-// target where the GS blends gamma bytes -- the deviation the water makes.
-// On a fade map the base terrain was composited at the fade weight, and the
-// layer takes it too.
 @fragment
 fn fs_terrain_layer(in: VsOut) -> @location(0) vec4<f32> {
     far_cull(in);
     let c = shade(in);
     return vec4<f32>(c.rgb, c.a * far_fade(in.view_dist));
+}
+
+@fragment
+fn fs_terrain_layer_display(in: VsOut) -> @location(0) vec4<f32> {
+    far_cull(in);
+    let c = shade(in);
+    return vec4<f32>(linear_to_srgb(c.rgb), c.a * far_fade(in.view_dist));
 }
 
 // The three world entry points again, with the fade in alpha. OPAQUE and MASK

@@ -229,11 +229,7 @@ impl Renderer {
             ambient_sky: lighting.ambient_sky,
             material_time: crate::material_scroll_time(self.water_time),
             ambient_ground: lighting.ambient_ground,
-            fog_on: if lighting.fog.is_some() {
-                1.0
-            } else {
-                0.0
-            },
+            fog_on: if lighting.fog.is_some() { 1.0 } else { 0.0 },
             fog_color: lighting.fog.map(|f| f.color).unwrap_or([0.0; 3]),
             fog_near: lighting.fog.map(|f| f.near).unwrap_or(0.0),
             fog_far: lighting.fog.map(|f| f.far).unwrap_or(1.0),
@@ -936,6 +932,7 @@ impl Renderer {
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                     bound_layer = None;
+                    water_display_active = false;
                 }
                 // The skinned opaque draws, one call each with its palette,
                 // and their specular passes: before the first water run (or
@@ -950,6 +947,17 @@ impl Renderer {
                     skin_pending = false;
                     if let Some(l) = section.take() {
                         mark(&mut timer, &mut pass, l);
+                    }
+                    if water_display_active {
+                        drop(pass);
+                        pass = continue_pass(
+                            &mut encoder,
+                            &view,
+                            &self.depth_view,
+                            "after terrain layers",
+                        );
+                        pass.set_bind_group(0, &self.globals_bg, &[]);
+                        water_display_active = false;
                     }
                     if !skin_opaque.is_empty() && !ab.skips("soldiers") {
                         pass.set_pipeline(match (fade, ab.discard) {
@@ -1014,7 +1022,10 @@ impl Renderer {
 
                 let d = &draws[order[run_start]];
                 let water_display = water_view.is_some()
-                    && matches!(d.layer, DrawLayer::Water | DrawLayer::Speckle);
+                    && matches!(
+                        d.layer,
+                        DrawLayer::TerrainLayer | DrawLayer::Water | DrawLayer::Speckle
+                    );
                 if water_display != water_display_active {
                     if let Some(l) = section.take() {
                         mark(&mut timer, &mut pass, l);
@@ -1123,6 +1134,15 @@ impl Renderer {
                 &self.grass.vertex_buf,
                 &self.grass.instance_buf,
             ) {
+                if let Some(display_view) = &water_view {
+                    drop(pass);
+                    pass = continue_pass(
+                        &mut encoder,
+                        display_view,
+                        &self.depth_view,
+                        "grass display colour",
+                    );
+                }
                 pass.set_pipeline(&self.grass_pipeline);
                 pass.set_bind_group(0, &self.globals_bg, &[]);
                 pass.set_vertex_buffer(0, vbuf.slice(..));
@@ -1131,6 +1151,16 @@ impl Renderer {
                     pass.set_bind_group(1, self.tex_bg(run.texture), &[]);
                     pass.draw(run.vertices.clone(), run.instances.clone());
                     draw_calls += 1;
+                }
+                if water_view.is_some() {
+                    drop(pass);
+                    pass = continue_pass(
+                        &mut encoder,
+                        &view,
+                        &self.depth_view,
+                        "after grass display colour",
+                    );
+                    pass.set_bind_group(0, &self.globals_bg, &[]);
                 }
             }
             mark(&mut timer, &mut pass, "grass");

@@ -53,6 +53,7 @@ impl Renderer {
                 // one bind the base view here and switch it off in params.
                 bindings::texture_layout(2, true),
                 bindings::uniform_layout(3, wgpu::ShaderStages::FRAGMENT, false, None),
+                bindings::texture_layout(4, true),
             ],
         });
 
@@ -220,14 +221,19 @@ impl Renderer {
         // water's reason — and writing no depth (the base already has).
         // `fs_terrain_layer` folds the far fade into alpha itself, so there
         // is no `_fade` twin.
+        let terrain_fs = if display_format.is_some() {
+            "fs_terrain_layer_display"
+        } else {
+            "fs_terrain_layer"
+        };
         let terrain_layer_pipeline = PipelineDesc {
-            fs: "fs_terrain_layer",
+            fs: terrain_fs,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             ..PipelineDesc::world("map terrain layer pipeline", &pipeline_layout, &vb)
         }
-        .build(&device, &shader, format);
+        .build(&device, &shader, display_format.unwrap_or(format));
 
         // The FADE pipelines — the world pass on a map that authors
         // `FarSceneRange(0)` (`render::FarFade`, `game::viewer::far_fade_from`).
@@ -377,8 +383,8 @@ impl Renderer {
                 blend: alpha,
                 ..PipelineDesc::world("map fade mask pipeline, no discard", &pipeline_layout, &vb)
             }),
-            terrain_layer: clean(PipelineDesc {
-                fs: "fs_terrain_layer",
+            terrain_layer: PipelineDesc {
+                fs: terrain_fs,
                 blend: alpha,
                 depth_write: false,
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
@@ -387,7 +393,8 @@ impl Renderer {
                     &pipeline_layout,
                     &vb,
                 )
-            }),
+            }
+            .build_with(&device, &shader, display_format.unwrap_or(format), no_cull),
             water: PipelineDesc {
                 fs: water_fs,
                 blend: alpha,
@@ -462,12 +469,16 @@ impl Renderer {
         ];
         let grass_pipeline = PipelineDesc {
             vs: "vs_grass",
-            fs: "fs_grass",
+            fs: if display_format.is_some() {
+                "fs_grass_display"
+            } else {
+                "fs_grass"
+            },
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
             ..PipelineDesc::world("grass pipeline", &pipeline_layout, &grass_vb)
         }
-        .build(&device, &grass_shader, format);
+        .build(&device, &grass_shader, display_format.unwrap_or(format));
         // The laser bolts (card FXB, `bolt.rs`): `vs_grass` over world-space
         // ribbons; GS TEST 0x51001 = depth tested, no depth write
         // (re-bolt §3.3). The core is ALPHA 0x44 (source-over), the glow 0x48

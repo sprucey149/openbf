@@ -58,6 +58,167 @@ fn close(px: [u8; 4], want: u8, what: &str) {
     }
 }
 
+fn grass_fixture(texture: render::TextureHandle) -> (render::GrassClass, render::GrassPatch) {
+    use render::{GrassClass, GrassPatch, GrassSprite};
+    let sprite = GrassSprite {
+        pos: Vec3::new(0.0, -2.0, -3.0),
+        width: 4.0,
+        height: 4.0,
+        up_scale: 1.0,
+        lean: 0.0,
+        phase: 0.0,
+        index: 0,
+        tall: None,
+        uv: [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+        color: [1.0; 4],
+    };
+    let class = GrassClass {
+        texture: Some(texture),
+        sprites: vec![sprite],
+        tall_lean: 0.0,
+        still: true,
+        bound: 5.0,
+    };
+    let patch = GrassPatch {
+        class: 0,
+        matrix: Mat4::IDENTITY,
+        color: [1.0; 4],
+        distance: 100.0,
+    };
+    (class, patch)
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn grass_modulates_and_blends_display_bytes_over_dark_ground() {
+    let mut r = headless();
+    r.lighting = render::Lighting {
+        sun_color: [0.0; 3],
+        ambient_sky: [1.0; 3],
+        ambient_ground: [1.0; 3],
+        ..Default::default()
+    };
+    let texture = upload_tex(&mut r, 1, 1, &[255, 255, 255, 128], "grass display blend");
+    let (class, mut patch) = grass_fixture(texture);
+    patch.color = [0.8, 0.6, 0.5, 1.0];
+    let clear = linear(60);
+    for count in [1, 2] {
+        r.set_grass(vec![class.clone()], vec![patch; count]);
+        r.render(&Camera::default(), &[], [clear, clear, clear, 1.0])
+            .unwrap();
+        let px = capture_pixel(&mut r, N / 2, N / 2);
+        for (channel, tint) in [0.8_f32, 0.6, 0.5].into_iter().enumerate() {
+            let mut expected = 60.0;
+            for _ in 0..count {
+                expected = tint * 255.0 * (128.0 / 255.0) + expected * (127.0 / 255.0);
+            }
+            assert!(
+                px[channel].abs_diff(expected.round() as u8) <= 2,
+                "{px:?}, expected {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn grass_uses_the_patch_up_normal_and_global_display_light_sum() {
+    let mut r = headless();
+    let texture = upload_tex(&mut r, 1, 1, &[255; 4], "grass lighting");
+    let (class, mut patch) = grass_fixture(texture);
+    r.lighting = render::Lighting {
+        sun_dir: Vec3::NEG_Y,
+        sun_color: [render::srgb_decode(80.0 / 255.0), 0.0, 0.0],
+        sun_static: true,
+        light2: Some(render::DirLight {
+            dir: Vec3::NEG_Y,
+            color: [0.0, render::srgb_decode(100.0 / 255.0), 0.0],
+            is_static: true,
+        }),
+        ambient_sky: [0.0, 0.0, render::srgb_decode(150.0 / 255.0)],
+        ambient_ground: [0.0, 0.0, render::srgb_decode(50.0 / 255.0)],
+        ..Default::default()
+    };
+    for scale in [1.0, 0.5] {
+        patch.matrix = Mat4::from_scale(Vec3::new(1.0, scale, 1.0));
+        r.set_grass(vec![class.clone()], vec![patch]);
+        r.render(&Camera::default(), &[], [0.0; 4]).unwrap();
+        let px = capture_pixel(&mut r, N / 2, N / 2);
+        let ny = scale * 127.0 / 128.0;
+        for (channel, expected) in [80.0 * ny, 100.0 * ny, 100.0 + 50.0 * ny]
+            .into_iter()
+            .enumerate()
+        {
+            assert!(
+                px[channel].abs_diff(expected.round() as u8) <= 2,
+                "{scale}: {px:?}"
+            );
+        }
+    }
+    r.lighting.sun_color = [0.0; 3];
+    r.lighting.light2 = None;
+    r.lighting.ambient_sky = [0.0; 3];
+    r.lighting.ambient_ground = [0.0; 3];
+    r.render(&Camera::default(), &[], [0.0; 4]).unwrap();
+    close(capture_pixel(&mut r, N / 2, N / 2), 0, "unlit map");
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn grass_filters_texture_display_bytes_before_decoding() {
+    let mut r = headless();
+    r.lighting = render::Lighting {
+        sun_color: [0.0; 3],
+        ambient_sky: [1.0; 3],
+        ambient_ground: [1.0; 3],
+        ..Default::default()
+    };
+    let data = [0, 0, 0, 255, 128, 128, 128, 255];
+    let mips = [&data[..]];
+    let desc = crate::common::tex_desc(2, 1, &mips, "grass display filtering");
+    let texture = r
+        .add_texture(&render::TextureDesc {
+            sampler: render::SamplerMode::Linear,
+            ..desc
+        })
+        .unwrap();
+    let (mut class, patch) = grass_fixture(texture);
+    class.sprites[0].uv = [[0.5; 2]; 4];
+    r.set_grass(vec![class], vec![patch]);
+    r.render(&Camera::default(), &[], [0.0; 4]).unwrap();
+    close(capture_pixel(&mut r, N / 2, N / 2), 64, "display midpoint");
+}
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn terrain_layers_blend_one_and_two_layers_in_display_bytes() {
+    let mut r = headless();
+    let texture = upload_tex(&mut r, 1, 1, &[0, 0, 0, 128], "terrain layer blend");
+    let mesh = view_quad(&mut r, -3.0);
+    let layer = DrawCmd::terrain_layer(mesh, texture, Mat4::IDENTITY);
+    let c = linear(200);
+    for (state, count) in [
+        ("base", 1),
+        ("base", 2),
+        ("discard:on", 1),
+        ("discard:on", 2),
+    ] {
+        r.frame_ab = render::FrameAb::parse(state).unwrap();
+        let draws = vec![layer.clone(); count];
+        r.render(&Camera::default(), &draws, [c, c, c, 1.0])
+            .unwrap();
+        let mut expected = 200.0_f32;
+        for _ in 0..count {
+            expected *= 127.0 / 255.0;
+        }
+        close(
+            capture_pixel(&mut r, N / 2, N / 2),
+            expected.round() as u8,
+            "terrain source-over",
+        );
+    }
+}
+
 #[test]
 #[ignore = "requires a GPU adapter"]
 fn blur_softens_scene_edges_in_place_through_alpha_and_respects_depth() {
