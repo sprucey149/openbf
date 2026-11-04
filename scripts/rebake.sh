@@ -396,8 +396,13 @@ if want side; then
   A2="$(ci "$B2" INGAME.LVL)"
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear "$A1"
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" wok wok_inf_wookie wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher "$A1"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A1"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A1"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle "$A1"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear,ewk_weap_inf_fusioncutter "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" wok wok_inf_wookiewarrior wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher,wok_weap_inf_thermaldetonator "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle,des_weap_inf_fusioncutter "$A2"
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
   # its class references, including the campaign variants.
   BF1_ANIMS="$A1" "$BAKE" heroes "$B2" "$OUT/side_bf2"
@@ -528,7 +533,7 @@ if want classes; then
   "$BAKE" classes "$(ci "$B1" SIDE/CIS.LVL)"          "$OUT/classes/bf1_cis.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/ALL.LVL)"          "$OUT/classes/bf2_all.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/IMP.LVL)"          "$OUT/classes/bf2_imp.ron"
-  for side in ewk wok; do
+  for side in ewk wok geo des; do
     "$BAKE" classes "$(ci "$B1" "SIDE/$side.LVL")" "$OUT/classes/bf1_$side.ron"
     "$BAKE" classes "$(ci "$B2" "SIDE/$side.LVL")" "$OUT/classes/bf2_$side.ron"
   done

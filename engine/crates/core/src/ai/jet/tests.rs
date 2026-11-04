@@ -59,7 +59,7 @@ fn sim(hover: bool) -> (Sim, UnitHandle) {
     (sim, h)
 }
 #[test]
-fn bots_hop_in_seeded_sim_and_replay_identically() {
+fn bots_out_of_a_fight_do_not_hop_and_replay_identically() {
     for hover in [false, true] {
         let run = || {
             let (mut sim, h) = sim(hover);
@@ -70,12 +70,11 @@ fn bots_hop_in_seeded_sim_and_replay_identically() {
                 let s = &sim.unit(h).unwrap().soldier;
                 let active = s.stance.jetting();
                 if active && !prev {
-                    starts.push(sim.tick);
+                    starts.push((sim.tick, sim.unit(h).unwrap().ai.target.is_some()));
                 }
                 prev = active;
             }
-            assert!(starts.len() >= 3, "hover {hover}: {starts:?}");
-            assert!((6 * 30..=12 * 30 + 3).contains(&starts[0]), "{starts:?}");
+            assert!(starts.iter().all(|s| s.1), "hover {hover}: {starts:?}");
             (sim.hash(), starts)
         };
         assert_eq!(run(), run());
@@ -112,6 +111,7 @@ fn every_flight_field_and_scheduler_is_hashed() {
             kick: Vec3::Y,
             height: Some(5.0),
             route: false,
+            hop: false,
             since: 1,
             launched: false,
             stop: false,
@@ -134,6 +134,7 @@ fn every_flight_field_and_scheduler_is_hashed() {
         |s: &mut JetState| s.flight.as_mut().unwrap().launched = true,
         |s: &mut JetState| s.flight.as_mut().unwrap().stop = true,
         |s: &mut JetState| s.flight.as_mut().unwrap().route = true,
+        |s: &mut JetState| s.flight.as_mut().unwrap().hop = true,
     ] {
         let mut altered = base;
         f(&mut altered);
@@ -156,6 +157,48 @@ fn request() -> MoveRequest<'static> {
         roll: 0,
         excused: false,
         throwing: false,
+    }
+}
+fn engage(sim: &mut Sim, st: &mut AiState, distance: f32) {
+    let enemy = sim
+        .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -distance)))
+        .unwrap();
+    st.target = Some(enemy.into());
+    st.contacts[0] = Some(perception::Contact {
+        handle: enemy.into(),
+        first_seen: 0,
+        last_seen: 0,
+        last_pos: Vec3::new(0.0, 0.0, -distance),
+        seen_now: true,
+        heard: false,
+        told: false,
+    });
+}
+#[test]
+fn a_fight_hop_flies_to_a_clear_spot_twenty_to_fifty_seven_metres_away() {
+    for hover in [false, true] {
+        let mut spots = Vec::new();
+        for tick in 1..40 {
+            let (mut sim, h) = sim(hover);
+            let mut st = AiState::default();
+            engage(&mut sim, &mut st, 10.0);
+            sim.tick = tick;
+            st.jet.next_hop = tick;
+            ask(&sim, h, &mut st, &request());
+            let f = st.jet.flight.expect("a hop");
+            let d = nav::xz_dist(f.goal, Vec3::ZERO);
+            assert!((20.0..=40.0 * std::f32::consts::SQRT_2).contains(&d), "{d}");
+            assert!(f.hop && f.height.is_none() && f.kick == Vec3::ZERO);
+            assert!(st.jet.next_hop >= tick + 6 * 30);
+            spots.push(f.goal);
+        }
+        spots.dedup();
+        assert!(spots.len() > 30);
+        let (sim, h) = sim(hover);
+        let mut st = AiState::default();
+        st.jet.next_hop = 1;
+        ask(&sim, h, &mut st, &request());
+        assert!(st.jet.flight.is_none(), "no hop out of a fight");
     }
 }
 fn ask(sim: &Sim, h: UnitHandle, st: &mut AiState, mv: &MoveRequest) -> PadState {
@@ -205,6 +248,7 @@ fn a_pending_flight_jumps_first_then_uses_the_bot_kick_without_a_second_tap() {
     let mut st = AiState::default();
     st.jet.next_hop = 1;
     let mut sim = sim;
+    engage(&mut sim, &mut st, 10.0);
     sim.tick = 1;
     let pad = ask(&sim, h, &mut st, &request());
     assert!(pad.pressed(buttons::JUMP));
@@ -343,6 +387,7 @@ fn a_short_elevated_jet_link_keeps_jetting_until_above_its_platform() {
                 kick: Vec3::Y,
                 height: Some(5.0),
                 route: true,
+                hop: false,
                 since: 0,
                 launched: true,
                 stop: false,
@@ -412,6 +457,7 @@ fn losing_the_only_goal_stops_and_discards_the_flight() {
         kick: Vec3::Y,
         height: Some(10.0),
         route: false,
+        hop: false,
         since: 0,
         launched: true,
         stop: false,

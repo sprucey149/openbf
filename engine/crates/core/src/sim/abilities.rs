@@ -41,11 +41,8 @@ impl Sim {
             })
             .take(128)
             .filter(move |(_, u)| {
-                if u.team == owner.team {
-                    ability.friends
-                } else {
-                    ability.enemies
-                }
+                (ability.friends && self.allied(owner.team, u.team))
+                    || (ability.enemies && self.hostile(owner.team, u.team))
             })
             .map(|(target, _)| target)
     }

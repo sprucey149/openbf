@@ -2,8 +2,27 @@
 
 use crate::walk::WalkSim;
 
-/// Endor and Kashyyyk supply complete native side assets. Older bakes can
-/// still launch their missions before a native side has been baked.
+const NATIVE_SIDES: [&str; 5] = ["ewk", "wok", "gun", "geo", "des"];
+
+pub fn native_side(
+    classes_dir: &std::path::Path,
+    game: &str,
+    class: &str,
+) -> Option<(&'static str, std::path::PathBuf)> {
+    NATIVE_SIDES.iter().find_map(|&side| {
+        let path = classes_dir.join(format!("{game}_{side}.ron"));
+        if !pak::is_file(&path) {
+            return None;
+        }
+        let mut db = crate::classdb::ClassDb::default();
+        db.load(&path).ok()?;
+        db.get(class).is_some().then_some((side, path))
+    })
+}
+
+/// Every native side the bake carries supplies its class file and models.
+/// Older bakes can still launch their missions before a native side has been
+/// baked.
 pub fn install(
     walk: &mut WalkSim,
     layout: &crate::layout::MapLayout,
@@ -34,20 +53,19 @@ pub fn install(
         let Some((first, _, _)) = authored.classes.first() else {
             continue;
         };
-        let faction = match first.split('_').next() {
-            Some(prefix @ ("ewk" | "wok")) => prefix,
-            _ => continue,
-        };
         let Some(team) = authored.team.checked_sub(1).filter(|team| *team >= 2) else {
             continue;
         };
         if walk.native_teams.contains_key(&team) {
             continue;
         }
-        let source = classes_dir.join(format!("{}_{faction}.ron", mission.source_game));
-        if !pak::is_file(&source) {
+        let Some((faction, source)) = native_side(classes_dir, &mission.source_game, first) else {
+            eprintln!(
+                "native team {} unavailable (no baked native side carries {first})",
+                authored.team
+            );
             continue;
-        }
+        };
         let roster = (|| -> anyhow::Result<_> {
             let mut db = crate::roster::load_classdb(classes_dir, &mission.source_game, &[])?;
             db.load(&source)?;

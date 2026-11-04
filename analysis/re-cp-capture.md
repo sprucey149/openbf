@@ -157,7 +157,7 @@ cylinder about X/Y/Z). [V]
 |---|---|---|
 | index | +0x04 | +0x04 |
 | faction id (1 all, 2 imp, 3 rep, 4 cis, 5+ locals) | +0x64 | +0x60 |
-| relation bytes `[8]` (1 friend, 0 neutral, 0xff enemy; self = 1) | +0x88 | +0x84 |
+| relation bytes `[8]` (1 friend, 0 neutral, 0xff enemy; self = 1; the ctor zeroes byte 0 and writes 0xff to every other team, B1 `FUN_002acf40` / B2 `FUN_0036d468`, so an unset pair is enemies) | +0x88 | +0x84 |
 | **capture affiliation** (team index a unit captures *for*) | +0x90 | +0x8c |
 
 Affiliation: ctor sets it to the team's own index (BF1 `FUN_002acf40` tail, BF2 `FUN_0036d468`

@@ -853,7 +853,6 @@ pub fn held_slots(db: &ClassDb, soldier: &str, primary: u8) -> Vec<HeldSlot> {
 /// (re-jetpack.md §2.1) - come from BF2's class of the same role
 /// (re-jetpack.md §2.2, §12). Rows: (BF1 class, its BF2 twin,
 /// JetAcceleration, the jet row or None for the ctor default 0.3 / 0.3 / 1.0).
-/// The Geonosian is a local class the bake does not carry, so it has no row.
 /// `tests/suite/roster.rs` holds the numbers to the BF2 twins' baked classes.
 pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
     (
@@ -868,6 +867,12 @@ pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
         "imp_inf_dark_trooper",
         10.0,
         None,
+    ),
+    (
+        "geo_inf_geonosian",
+        "geo_inf_geonosian",
+        20.0,
+        Some([2.0, 1.25, 1.25]),
     ),
 ];
 

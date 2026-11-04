@@ -210,6 +210,8 @@ Ordnance knot chains (`ordc` with NextCharge):
 |---|---|---|
 | BF2 | tur_weap_hoth_dishturret_ord <- com_weap_veh_recoilless_ord (bolt, 600 m/s) | 0: Damage 1000, LaserLength 3, LaserWidth 0.3; 0.5: 1250, 4, 0.4; 0.75: 1500, 5, 0.5; 2.0: 3000, 6, 0.6. Charge <= 1, so the last segment reaches s = 0.2 -> Damage 1800 at most [D] |
 | BF1 | gun_weap_inf_haywiredetonator_ord (grenade) | 0: Velocity 1.5; 1.0: Velocity 25. Its weapon has no MaxPressedTime, so strength = 1.0 -> s = 1 -> always 25 m/s [D]; re-grenades §9 table (line 524) lists 25 |
+| BF1 | ewk_weap_inf_spear_ord (sticky) | 0: Velocity 5; 1.0: Velocity 25. No MaxPressedTime on `ewk_weap_inf_spear`, so always 25 m/s [D] (added 2026-11-04, issue #82: the bake's class file; the survey above missed it) |
+| BF1 | ewk_weap_inf_rock_ord (shell) | 0: Velocity 5; 1.0: Velocity 20. No MaxPressedTime on `ewk_weap_inf_rock`, so always 20 m/s [D] (same) |
 
 Classes that author rumble keys with MaxPressedTime 0 (e.g. BF1 crack grenade) have no charge. Their rumble
 code never runs [D: the charge state needs MaxPressedTime > 0]. The full key dump is
@@ -257,6 +259,10 @@ shot delay, no stage was ever reached.
    was not opened.
 5. How a bot holds a charge weapon (press length / release rule) was not looked at. It decides which stage AI
    mortars and bowcasters fire.
+   A weapon with no MaxPressedTime fires every shot at charge 1.0 (the trigger init), so the port's AI reads
+   such a weapon's speed and reach at charge 1.0 (`WeaponClass::shot_ordnance`, 2026-11-04, issue #82). Before that, the
+   Gungans' haywire read the uncharged 1.5 m/s, a 1.35 m reach, and its throwers never fired. A charging weapon
+   is still read at charge 0.
 6. Key 0x0ee66c41 (rumble hold + TriggerSingle) and BF2 class+0x154 ("charged" sound key) are not named. The
    ChargeSoundPitch clamp [0.2, 0.4] reading is a hypothesis.
 7. Not verified on a PS2 here: the stage thresholds (e.g. a mortar tap vs a 0.7 s hold) — a 2-minute RAM read of

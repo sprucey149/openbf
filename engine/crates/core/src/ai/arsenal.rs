@@ -940,10 +940,11 @@ pub(super) fn lob_aim(
         OrdKind::Shell => -gc.ordnance.gravity * crate::weapon::SHELL_G,
         _ => gc.ordnance.sticky.as_ref().map_or(0.0, |s| s.gravity),
     };
-    let (raise, t, ok) = lob(gc.ordnance.velocity, g, d);
+    let speed = gc.shot_ordnance().velocity;
+    let (raise, t, ok) = lob(speed, g, d);
     let lead = d + vel * t;
     let dir = (lead + Vec3::Y * raise).normalize_or_zero();
-    let v0 = dir * gc.ordnance.velocity;
+    let v0 = dir * speed;
     let at = |k: f32| {
         let s = 0.9 * t * k / 4.0;
         origin + v0 * s + Vec3::Y * (0.5 * g * s * s)

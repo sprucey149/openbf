@@ -451,6 +451,7 @@ pub(super) fn sticky_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
         class: ord_name,
     };
     let mut ord = OrdnanceClass::from_props(&osrc);
+    charge_points(db, ord_name, &mut ord);
     if db.prop(ord_name, "Velocity").is_none() {
         ord.velocity = 35.0;
     }

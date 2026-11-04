@@ -99,10 +99,10 @@ fn original_jet_classes_hop_in_both_game_rule_sets() {
             let bot = sim
                 .spawn(&class.spec(0, Vec3::ZERO, 0.0, Controller::Ai, 0, 0))
                 .unwrap();
-            sim.spawn(&core::unit::UnitSpec::trooper(
-                1,
-                Vec3::new(0.0, 0.0, -500.0),
-            ))
+            sim.spawn(&core::unit::UnitSpec {
+                max_health: 1.0e6,
+                ..core::unit::UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -60.0))
+            })
             .unwrap();
             sim.nav = core::nav::NavGraph::new(
                 [Vec3::ZERO, Vec3::new(0.0, 0.0, -500.0)]

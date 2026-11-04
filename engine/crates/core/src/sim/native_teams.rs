@@ -34,17 +34,8 @@ impl Sim {
             || ((from >= 2 || to >= 2) && self.team_relations.get(&(from, to)) == Some(&true))
     }
 
-    /// Preserve the normal opposing-team rule unless a native team is
-    /// configured or the mission explicitly sets the relationship.
     pub fn hostile(&self, from: u8, to: u8) -> bool {
-        if from < 2 && to < 2 {
-            return from != to;
-        }
-        from != to
-            && self.team_relations.get(&(from, to)).map_or_else(
-                || self.native_team_index(from).is_none() && self.native_team_index(to).is_none(),
-                |friendly| !friendly,
-            )
+        from != to && self.team_relations.get(&(from, to)) != Some(&true)
     }
 
     /// Queue the authored native member pool. Member templates stay tied to
@@ -276,14 +267,15 @@ mod tests {
         let mut sim = Sim::empty(9);
         sim.add_native_team(2, Vec::new());
         assert!(sim.hostile(0, 1));
-        assert!(!sim.hostile(0, 2));
+        assert!(sim.hostile(0, 2));
+        assert!(!sim.hostile(2, 2));
         sim.set_team_relation(2, 0, true);
         assert!(sim.allied(2, 0));
         assert!(!sim.allied(0, 2));
         assert!(!sim.hostile(2, 0));
+        assert!(sim.hostile(0, 2));
         sim.set_team_relation(2, 0, false);
         assert!(!sim.allied(2, 0));
         assert!(sim.hostile(2, 0));
-        assert!(!sim.hostile(0, 2));
     }
 }

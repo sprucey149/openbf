@@ -748,3 +748,41 @@ grounded moment with fuel, and the count includes the gaps between lives.
 
 **Still open.** The jet sound voices and the effect's attach bone (no capture). The Geonosians: both GEO1 missions field
 them as locals, nothing in the game spawns a mission's locals team yet, and their classes are not baked.
+
+## 17. Where a hop goes, and the BF1 Geonosian (issue #82, 2026-11-04)
+
+**Report.** Geonosians flew up, stalled and came down nearly where they rose. In the PS2 a hop takes the bot far away.
+
+**The hop's spot [V code].** The mode 0xc entry is BF2 `FUN_002dbb68` (B2:252711) and BF1 `FUN_0025aa08` (B1:176796). It
+makes up to 10 tries:
+
+1. Draw x and z, each `(u - 0.5) * 2 * 40`. Reject the draw if x^2 + z^2 < 400, so the spot is 20 to 40*sqrt(2) m away.
+2. The spot is the bot's position plus (x, 0, z).
+3. Clear test `FUN_002eea68`, radius `FUN_002a76b8`. The radius is class+0x370, half the aim size.
+4. A sky ray from the spot to spot + (0, 40, 0), masks 0x9a (BF2) and 0x4e (BF1).
+5. Only when blind jumps are off: a line test `FUN_002ef6b8`. `DAT_005fdfe2` is 1 by default; only Kamino clears it.
+6. The first spot that passes becomes the move destination, with jet request bit 4 and kick vector 0.
+
+The state's update `FUN_002dbfa8` ends it 1 s after controller bit 0x20 clears. Every caller is an attack sub-state
+(2-9), so **a bot hops only in a fight**. Jet off (bit 0x40) is set only by `FUN_002dc5c0`, the exit of the hover
+attack (mode 0xe).
+
+**The port** (`core/src/ai/jet.rs` `hop_spot`):
+
+- A hop needs a target and the 6-12 s schedule. It flies to the first clear spot of 10 hashed draws, kick zero, no
+  wanted height.
+- [ours] The clear test is the nav graph's soldier barriers at half the aim size. The sky ray is `perception::los`.
+- [ours] The flight ends within 3 m of the spot; the PS2's arrival is not read.
+- Not built: the Kamino line test.
+
+**BF1 Geonosian on BF2 jet rules.** This applies the named deviation of §2.2 and §12, `BF1_JET_BORROW` in
+`game/src/roster.rs`. The baked BF2 `geo_inf_geonosian` has JetAcceleration 20 (default) and the jet row
+[2.0, 1.25, 1.25]. Without the row, the BF1 class kept the ctor row [0.3, 0.3, 1.0] and hovered at about 1.5 m/s.
+Tests: `bf1_jet_borrowing_matches_the_bf2_twins`, `bf1_geonosians_fly_on_their_bf2_twins_jet_rules`.
+
+**Rounds** (sim trace, 5,400 ticks, flights of the locals team):
+
+| Map | Before | After |
+|---|---|---|
+| BF2 GEO1 | 7.8 m mean displacement, 33% of samples near still | 25.6 m, 3% |
+| BF1 GEO1 | 4.9 m, 31% | 18.5 m, 0% |

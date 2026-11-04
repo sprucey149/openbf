@@ -41,6 +41,7 @@ mod load_scene;
 mod locate_ps2;
 mod long_snipe;
 mod music_ps2;
+mod native_teams;
 mod nav_walls;
 mod officer_abilities;
 mod pack_dispenser;
