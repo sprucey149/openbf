@@ -30,7 +30,7 @@ mod render_entrance;
 mod render_faces;
 mod render_groups;
 mod render_lookout;
-mod render_offsets;
+pub(crate) mod render_offsets;
 mod render_reassembly;
 mod render_recovery;
 mod render_symmetry;

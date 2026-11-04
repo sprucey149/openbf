@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 
 #[derive(Clone, Copy)]
-pub(super) struct Recipe {
+pub(crate) struct Recipe {
     pub name: &'static str,
     /// SHA-256 of the donor's raw `modl` chunk payload.
     pub input: &'static str,
@@ -37,14 +37,19 @@ pub(super) struct Recipe {
 
 include!("render_offsets_table.rs");
 
-pub(super) struct Offsets(HashMap<String, &'static Recipe>);
+pub(crate) struct Offsets(HashMap<String, &'static Recipe>);
 
 impl Offsets {
-    pub(super) fn of(original: Option<&[u8]>) -> Result<Self> {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub(crate) fn of(original: Option<&[u8]>) -> Result<Self> {
         Self::select(original, RECIPES)
     }
 
-    fn select(original: Option<&[u8]>, recipes: &'static [Recipe]) -> Result<Self> {
+    pub(crate) fn select(original: Option<&[u8]>, recipes: &'static [Recipe]) -> Result<Self> {
         let mut selected = HashMap::new();
         let Some(bytes) = original else {
             return Ok(Self(selected));
@@ -72,7 +77,7 @@ impl Offsets {
         Ok(Self(selected))
     }
 
-    pub(super) fn apply(&self, model: &mut Model) -> Result<bool> {
+    pub(crate) fn apply(&self, model: &mut Model) -> Result<bool> {
         let Some(recipe) = self.0.get(&model.name.to_ascii_lowercase()) else {
             return Ok(false);
         };

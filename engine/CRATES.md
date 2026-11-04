@@ -132,8 +132,14 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/fpm.rs` 187 — `bake fpm`: a first-person arm model (FPM LVL) as a skinned GLB with its clip-table clips, the `hp_camera` bone added where the rig lacks it · `bake_fpms`, `arm_model`, `BakedFpm`; `analysis/re-first-person-arms.md` §1.
 - `bake/src/soldier/lod.rs` 257 — authored `GeometryLowRes` companions, high-rig bind/joint remap at bake time, PS2 strip-count and sphere metadata; issue #69.
 - `bake/src/shadow.rs` 224 — BF1 vehicle shadow sidecars beside their models, never a reason to fail a bake · `write_model`, `bake`; `analysis/re-vehicle-shadow.md` §9.
-- `bake/src/vehicle_render.rs` 959 — fingerprinted donor nose/brace weld translations; index-only Hailfire instructions (PS2 quad diagonals, crest apex collapse, −x missile pack turned back to the +x pack's mirror, both packs shifted onto the hull rack boxes) and a donor-textured minimum-area box casing per rack; simulation headers and collision remain unchanged.
-- `bake/src/vehicle.rs` 1201 — SIDE vehicle assets and `vehicles.ron`, including destruction geometry, collision, bind poses and walker skins · `bake_vehicles`, `VEHICLE_BASES`; output and pose rules in the module header, donor artwork instructions in `vehicle_render.rs`; walker metadata in `walker.rs`.
+- `bake/src/vehicle_render.rs` 1190 — fingerprinted donor nose/brace, Hailfire quad/crest/pack repairs; subdivided donor rack casings and ear-clipped fitted caps. Collision, joints and simulation headers stay unchanged.
+- `bake/src/vehicle_offsets.rs` 42 — vehicle selection of the shared fingerprinted vertex-offset mechanism and numeric-table guards.
+- `bake/src/vehicle_offsets_table.rs` 118 — Hailfire donor fingerprints, final primitive guards and displacement references; Xbox and PC, both games.
+- `bake/src/vehicle_offsets_data0.rs` 954 — Xbox BF1 donor-relative rack/cap vertex displacements.
+- `bake/src/vehicle_offsets_data1.rs` 951 — PC BF1 donor-relative rack/cap vertex displacements.
+- `bake/src/vehicle_offsets_data2.rs` 948 — Xbox BF2 donor-relative rack/cap vertex displacements.
+- `bake/src/vehicle_offsets_data3.rs` 951 — PC BF2 donor-relative rack/cap vertex displacements.
+- `bake/src/vehicle.rs` 1205 — SIDE vehicle assets and `vehicles.ron`, including destruction geometry, collision, bind poses and walker skins · `bake_vehicles`, `VEHICLE_BASES`; output and pose rules in the module header, donor artwork instructions in `vehicle_render.rs` and `vehicle_offsets.rs`; walker metadata in `walker.rs`.
 - `bake/src/anim_sets.rs` 354 — resolve soldier animation inventories, sets, masks and root speeds · `Inventory`, `SoldierSets`, `plan_bf1`, `plan_bf2`, `masks`, `root_speed`; algorithms in `bake/src/anim_sets/bf1.rs` and `bf2.rs`; PS2-memory referee: `bake/tests/suite/anim_sets.rs`.
 - `bake/src/anim_sets/bf1.rs` 211 — BF1 soldier animation tables and fallbacks · `build`, `Tables`, `FALLBACK`, `weapon_set`; rules in the module and parent `anim_sets.rs` headers.
 - `bake/src/anim_sets/bf2.rs` 730 — BF2 soldier animation registration and inherited set resolution · `Registry`, `Registry::register`, `build`, `base_name`; loader rules in the module and parent `anim_sets.rs` headers.

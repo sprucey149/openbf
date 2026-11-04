@@ -51,6 +51,7 @@ pub mod terrain_glb;
 pub mod tier;
 pub mod turret_rig;
 pub mod vehicle;
+mod vehicle_offsets;
 mod vehicle_render;
 pub mod walker;
 pub mod water_glb;
