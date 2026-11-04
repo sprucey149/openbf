@@ -220,14 +220,13 @@ pub(super) fn run(
         } else {
             None
         };
-        let hop = (st.target.is_some() && sim.tick >= st.jet.next_hop)
-            .then(|| {
-                st.jet.next_hop = after(tk.me, sim.tick, 6, 12, HOP_SALT);
-                hop_spot(sim, tk)
-            })
-            .flatten();
-        if jet_leg.is_some() || attack.is_some() || hint.is_some() || hop.is_some() {
+        let hop_due = st.target.is_some() && sim.tick >= st.jet.next_hop;
+        let hop = hop_due.then(|| hop_spot(sim, tk)).flatten();
+        let launch = jet_leg.is_some() || attack.is_some() || hint.is_some() || hop.is_some();
+        if launch || hop_due {
             st.jet.next_hop = after(tk.me, sim.tick, 6, 12, HOP_SALT);
+        }
+        if launch {
             let goal = jet_leg.or(hint).or(attack).or(hop).unwrap_or(s.pos);
             let directed = jet_leg.is_some() || attack.is_some();
             let kick = if directed {
@@ -248,7 +247,7 @@ pub(super) fn run(
                 kick,
                 height,
                 route: jet_leg.is_some(),
-                hop: jet_leg.is_none() && hint.is_none() && attack.is_none() && hop.is_some(),
+                hop: jet_leg.or(hint).or(attack).is_none(),
                 since: sim.tick,
                 launched: false,
                 stop: false,

@@ -463,7 +463,7 @@ pass and `Soldier::resolve_ground` in `sim/step.rs` 545-640):
 8. Fall damage after a jet: does the PS2 kill a dark trooper landing at 20+ m/s? (the port's `LETHAL_LANDING_SPEED`
    applies to any landing today).
 9. Independent verifier pass on this note (RULES) - not done.
-10. Data gaps in the bake: the Geonosian classes (both games, local) and `geo_inf_fly_parameterized`.
+10. Data gaps in the bake: `geo_inf_fly_parameterized`. The Geonosian classes are baked since issue #82 (§17).
 11. Do PS2 Jedi bots take `jet_jump` connections? The behaviours exclude them (10); the route follower was not read.
 
 ## 12. Build plan (small testable steps)
@@ -747,7 +747,8 @@ none). BF2 GEO1: 13-16 jet units, 37-115 hops, 7-19 hover attacks. BF1 GEO1: 11-
 grounded moment with fuel, and the count includes the gaps between lives.
 
 **Still open.** The jet sound voices and the effect's attach bone (no capture). The Geonosians: both GEO1 missions field
-them as locals, nothing in the game spawns a mission's locals team yet, and their classes are not baked.
+them as locals, nothing in the game spawns a mission's locals team yet, and their classes are not baked. (Both resolved
+by issue #82: §17.)
 
 ## 17. Where a hop goes, and the BF1 Geonosian (issue #82, 2026-11-04)
 
@@ -772,7 +773,8 @@ attack (mode 0xe).
 - A hop needs a target and the 6-12 s schedule. It flies to the first clear spot of 10 hashed draws, kick zero, no
   wanted height.
 - [ours] The clear test is the nav graph's soldier barriers at half the aim size. The sky ray is `perception::los`.
-- [ours] The flight ends within 3 m of the spot; the PS2's arrival is not read.
+  trace: what `FUN_002eea68` queries.
+- [ours] The flight ends within 3 m of the spot. trace: `FUN_002dbfa8`'s arrival, and when it clears bit 0x20.
 - Not built: the Kamino line test.
 
 **BF1 Geonosian on BF2 jet rules.** This applies the named deviation of §2.2 and §12, `BF1_JET_BORROW` in

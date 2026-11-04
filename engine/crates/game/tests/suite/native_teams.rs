@@ -62,35 +62,22 @@ fn geonosians_fly_on_the_hover_jet_bots_already_schedule() {
 
 #[test]
 fn native_thrown_primaries_fly_and_aim_at_their_full_charge() {
-    for (class, slot, weapon, velocity, reach) in [
+    for (class, weapon, velocity, reach) in [
         (
             "gun_inf_soldier",
-            0,
             "gun_weap_inf_haywiredetonator",
             25.0,
             22.5,
         ),
-        (
-            "gun_inf_rider",
-            0,
-            "gun_weap_inf_haywiredetonator",
-            25.0,
-            22.5,
-        ),
-        ("ewk_inf_trooper", 0, "ewk_weap_inf_spear", 25.0, 50.0),
-        ("ewk_inf_trooper", 1, "ewk_weap_inf_rock", 20.0, 60.0),
+        ("gun_inf_rider", "gun_weap_inf_haywiredetonator", 25.0, 22.5),
+        ("ewk_inf_trooper", "ewk_weap_inf_spear", 25.0, 50.0),
+        ("ewk_inf_trooper", "ewk_weap_inf_rock", 20.0, 60.0),
     ] {
         let (_, r) = roster("bf1", class);
-        let w = if slot == 0 {
-            &r.weapon
-        } else {
-            &r.held
-                .iter()
-                .find(|h| h.weapon.name == weapon)
-                .unwrap_or_else(|| panic!("{class} {weapon}"))
-                .weapon
-        };
-        assert_eq!(w.name, weapon, "{class}");
+        let w = std::iter::once(&r.weapon)
+            .chain(r.held.iter().map(|h| &h.weapon))
+            .find(|w| w.name == weapon)
+            .unwrap_or_else(|| panic!("{class} {weapon}"));
         assert_eq!(w.max_pressed_time, 0.0, "{weapon}");
         assert_eq!(w.shot_ordnance().velocity, velocity, "{weapon}");
         assert!(

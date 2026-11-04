@@ -79,11 +79,10 @@ pub(super) fn aim(
     let turret = seen
         .and_then(|c| c.handle.turret())
         .and_then(|id| sim.live_turret(id));
+    let speed = wc.shot_ordnance().velocity;
     let point = enemy
-        .map(|e| seen_aim(sim, me, st, s.eye, e, wc.shot_ordnance().velocity, wc))
-        .or_else(|| {
-            droid.map(|d| droid_aim(sim, me, st, s.eye, d, wc.shot_ordnance().velocity, wc))
-        })
+        .map(|e| seen_aim(sim, me, st, s.eye, e, speed, wc))
+        .or_else(|| droid.map(|d| droid_aim(sim, me, st, s.eye, d, speed, wc)))
         .or_else(|| turret.map(|t| turret_aim(sim, me, st, s.eye, t, wc)));
     let centre = enemy
         .map(|e| e.capsule().center())

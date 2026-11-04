@@ -543,10 +543,11 @@ pub(super) fn charge(
 /// in front of the muzzle met it (a mortar's shell, one tick old: 40 of the
 /// BF2 maps' 53 mortar team kills in 8 seeds, the friend 1-2 m out).
 fn shot_late(wc: &crate::weapon::WeaponClass) -> (f32, f32) {
-    match wc.ordnance.kind {
-        crate::weapon::OrdKind::Missile => (wc.initial_salvo_delay, wc.shot_ordnance().velocity),
-        _ => (1.0 / crate::TICK_HZ as f32, wc.shot_ordnance().velocity),
-    }
+    let late = match wc.ordnance.kind {
+        crate::weapon::OrdKind::Missile => wc.initial_salvo_delay,
+        _ => 1.0 / crate::TICK_HZ as f32,
+    };
+    (late, wc.shot_ordnance().velocity)
 }
 
 /// Card FFLN: is a unit of `u`'s own team in its line of fire — the unit's

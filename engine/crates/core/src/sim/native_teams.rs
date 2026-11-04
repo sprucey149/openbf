@@ -35,7 +35,7 @@ impl Sim {
     }
 
     pub fn hostile(&self, from: u8, to: u8) -> bool {
-        from != to && self.team_relations.get(&(from, to)) != Some(&true)
+        !self.allied(from, to)
     }
 
     /// Queue the authored native member pool. Member templates stay tied to

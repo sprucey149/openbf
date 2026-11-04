@@ -504,13 +504,10 @@ impl WeaponClass {
     /// Reach of an actual shot. Cone weapons query ConeLength, not the
     /// otherwise unused projectile velocity and lifespan (PS2 emitter create).
     pub fn shot_range(&self) -> f32 {
-        self.emitter.as_ref().filter(|e| e.is_cone()).map_or_else(
-            || {
-                let shot = self.shot_ordnance();
-                shot.velocity * shot.life_span
-            },
-            |e| e.cone_length,
-        )
+        self.emitter
+            .as_ref()
+            .filter(|e| e.is_cone())
+            .map_or_else(|| self.shot_ordnance().max_range(), |e| e.cone_length)
     }
 
     pub fn shot_ordnance(&self) -> OrdBlend {

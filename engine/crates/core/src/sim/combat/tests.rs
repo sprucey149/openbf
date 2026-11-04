@@ -467,7 +467,7 @@ fn v5_bolt_flight_time_to_20m_target() {
     // (the press finds only the ground far behind it).
     assert!(!matches!(s.bolts[0].hit, Hit::Target(_)));
     let way = s.bolts[0].vel.normalize();
-    assert_eq!(s.weapon_classes[0].ordnance.max_range(), 120.0);
+    assert_eq!(s.weapon_classes[0].shot_range(), 120.0);
     let mut hit_tick = None;
     for _ in 0..12 {
         s.step(&[PadState::default()]);
