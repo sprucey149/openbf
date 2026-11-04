@@ -213,6 +213,10 @@ fn particle_vertices(d: &ParticleDraw, camera: &Camera) -> Vec<GrassVertex> {
 
 /// Append directly to the frame buffer: dense weather otherwise allocates and
 /// copies a six-vertex temporary for every flake on every frame.
+fn gained(color: [f32; 4], gain: f32) -> [f32; 4] {
+    [color[0] * gain, color[1] * gain, color[2] * gain, color[3]]
+}
+
 fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera: &Camera) {
     let right = camera.right();
     let up = right.cross(camera.forward()).normalize_or_zero();
@@ -228,17 +232,14 @@ fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera
             half,
             angle,
             gain,
-        } => {
-            let color = [color[0] * gain, color[1] * gain, color[2] * gain, color[3]];
-            sprite(
-                out,
-                *pos,
-                (*half, *angle),
-                [0.0, 0.0, 1.0, 1.0],
-                (right, up),
-                color,
-            );
-        }
+        } => sprite(
+            out,
+            *pos,
+            (*half, *angle),
+            [0.0, 0.0, 1.0, 1.0],
+            (right, up),
+            gained(color, *gain),
+        ),
         ParticleShape::Sprite {
             pos,
             half,
@@ -256,11 +257,10 @@ fn append_particle_vertices(out: &mut Vec<GrassVertex>, d: &ParticleDraw, camera
         ParticleShape::Quad { pos, a, b }
         | ParticleShape::AtmosphereQuad { pos, a, b, .. }
         | ParticleShape::CutoutQuad { pos, a, b } => {
-            let gain = match &d.shape {
-                ParticleShape::AtmosphereQuad { gain, .. } => *gain,
-                _ => 1.0,
+            let color = match &d.shape {
+                ParticleShape::AtmosphereQuad { gain, .. } => gained(color, *gain),
+                _ => color,
             };
-            let color = [color[0] * gain, color[1] * gain, color[2] * gain, color[3]];
             let v = [
                 vtx(*pos - *a + *b, [0.0, 0.0], color),
                 vtx(*pos + *a + *b, [1.0, 0.0], color),

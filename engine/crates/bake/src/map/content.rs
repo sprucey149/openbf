@@ -1258,13 +1258,14 @@ pub(super) fn bake_content(
             (a, b) => a.unwrap_or(0) | b.unwrap_or(0),
         };
         let world_needs = alpha_usage.needs_alpha_outside(&lower, &sky_models);
-        let needs_alpha = glow_named.contains(&lower)
+        let glows = glow_named.contains(&lower);
+        let needs_alpha = glows
             || crate::alpha::keep_alpha(is_sky, old_or_flags, world_needs, unnamed, consumer_named);
         if is_sky {
             // Design D3's carve-out check: would leaving the layer models out
             // of the pre-v2 OR — D7's exact input — have answered differently?
             let top_only = top_or_flags.unwrap_or(crate::detail::ALPHA_IS_MEANINGFUL);
-            if (glow_named.contains(&lower)
+            if (glows
                 || crate::alpha::keep_alpha(true, top_only, world_needs, unnamed, consumer_named))
                 != needs_alpha
             {

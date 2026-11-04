@@ -73,18 +73,10 @@ impl SkyEffect {
         let Some(effect) = &self.attached.live else {
             return;
         };
-        let rotation = self.rotation.map_or(Mat4::IDENTITY, |[speed, x, y, z]| {
-            let axis = Vec3::new(x, y, z);
-            if axis.length_squared() == 0.0 {
-                Mat4::IDENTITY
-            } else {
-                Mat4::from_axis_angle(
-                    axis.normalize(),
-                    (f64::from(speed) * time * std::f64::consts::TAU)
-                        .rem_euclid(std::f64::consts::TAU) as f32,
-                )
-            }
-        });
+        let rotation = self
+            .rotation
+            .and_then(|[speed, x, y, z]| render::sky_spin(speed, Vec3::new(x, y, z), time))
+            .unwrap_or(Mat4::IDENTITY);
         let origin = camera.position
             + Vec3::Y * ((self.offset - camera.position.y) * (1.0 - self.movement) * self.scale);
         let matrix =

@@ -1,5 +1,5 @@
 //! BF2 DustEffect's shared class pool and placed volumes, `analysis/re-hoth-atmosphere.md`.
-use crate::{Camera, ParticleDraw, ParticleShape, TextureHandle};
+use crate::{rand::unit as random, Camera, ParticleDraw, ParticleShape, TextureHandle};
 use glam::{Mat4, Vec3};
 
 #[derive(Debug, Clone)]
@@ -35,13 +35,6 @@ pub struct Dust {
     particles: Vec<Particle>,
     seed: u32,
     time: f64,
-}
-
-fn random(seed: &mut u32) -> f32 {
-    *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-    let hi = *seed >> 16;
-    *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-    f32::from_bits(0x3f80_0000 | ((hi | (*seed & 0xffff_0000)) >> 9)) - 1.0
 }
 
 fn spawn(config: &DustConfig, seed: &mut u32) -> Particle {
@@ -104,6 +97,16 @@ impl Dust {
         }
         let config = &self.config;
         let forward = camera.forward();
+        let scale = Vec3::new(1.0, config.height_scale, 1.0);
+        let right = camera.right();
+        let up = right.cross(forward).normalize_or_zero();
+        let radius = if config.radius_fade[0] > 0.0 {
+            config.radius_fade[1] + config.size[1] * 0.5
+        } else {
+            config.max_pos.length().max(config.min_pos.length())
+                + config.max_vel.length().max(config.min_vel.length()) * config.lifetime[1]
+                + config.size[1] * 0.5
+        };
         let mut out = Vec::new();
         for instance in &self.instances {
             let mut origin = instance.w_axis.truncate();
@@ -111,13 +114,6 @@ impl Dust {
                 origin.x = camera.position.x;
                 origin.z = camera.position.z;
             }
-            let radius = if config.radius_fade[0] > 0.0 {
-                config.radius_fade[1] + config.size[1] * 0.5
-            } else {
-                config.max_pos.length().max(config.min_pos.length())
-                    + config.max_vel.length().max(config.min_vel.length()) * config.lifetime[1]
-                    + config.size[1] * 0.5
-            };
             let depth = (origin - camera.position).dot(forward) + radius;
             let fade = ((config.max_distance - depth) / 200.0).min(1.0);
             if depth < 0.0 || fade <= 0.0 {
@@ -139,9 +135,6 @@ impl Dust {
                     continue;
                 }
                 let half = p.size * 0.5;
-                let scale = Vec3::new(1.0, config.height_scale, 1.0);
-                let right = camera.right();
-                let up = right.cross(forward).normalize_or_zero();
                 out.push(ParticleDraw {
                     shape: ParticleShape::AtmosphereQuad {
                         pos,

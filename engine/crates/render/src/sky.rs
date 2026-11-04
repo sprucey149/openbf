@@ -300,19 +300,24 @@ impl Renderer {
             _ => glam::Vec3::splat(k),
         };
         let rotation = match shell.placement {
-            Placement::SpinningDome { speed, axis, .. } if axis.length_squared() > 0.0 => {
-                Mat4::from_axis_angle(
-                    axis.normalize(),
-                    (f64::from(speed) * atmo_time * std::f64::consts::TAU)
-                        .rem_euclid(std::f64::consts::TAU) as f32,
-                )
-            }
-            _ => Mat4::from_rotation_y(shell.yaw),
-        };
+            Placement::SpinningDome { speed, axis, .. } => spin(speed, axis, atmo_time),
+            _ => None,
+        }
+        .unwrap_or_else(|| Mat4::from_rotation_y(shell.yaw));
         Mat4::from_translation(shell.placement.translation(eye, k))
             * rotation
             * Mat4::from_scale(scale)
     }
+}
+
+pub fn spin(speed: f32, axis: glam::Vec3, time: f64) -> Option<Mat4> {
+    (axis.length_squared() > 0.0).then(|| {
+        Mat4::from_axis_angle(
+            axis.normalize(),
+            (f64::from(speed) * time * std::f64::consts::TAU).rem_euclid(std::f64::consts::TAU)
+                as f32,
+        )
+    })
 }
 
 fn advance_flights(shells: &mut [SkyShell], time: f64, seed: &mut u32) {

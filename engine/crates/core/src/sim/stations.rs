@@ -157,6 +157,10 @@ impl Station {
         }
     }
 
+    pub fn serves(&self) -> bool {
+        self.radius > 0.0
+    }
+
     /// Strictly inside the sphere, in 3-D (§3).
     pub fn reaches(&self, feet: Vec3) -> bool {
         (feet - self.pos).length_squared() < self.radius * self.radius
@@ -209,7 +213,7 @@ impl Sim {
         let s = self.stations[station];
         let parts = s
             .instance
-            .filter(|_| s.radius > 0.0)
+            .filter(|_| s.serves())
             .map_or_else(Vec::new, |i| self.collision.prepare_rotation(i, s.pose()));
         let live = s
             .instance
@@ -304,7 +308,7 @@ impl Sim {
     pub(super) fn tick_stations(&mut self, dt: f32) {
         for si in 0..self.stations.len() {
             let s = self.stations[si];
-            if s.destroyed || s.radius <= 0.0 {
+            if s.destroyed || !s.serves() {
                 continue;
             }
             let Some(c) = self.station_classes.get(usize::from(s.class)) else {

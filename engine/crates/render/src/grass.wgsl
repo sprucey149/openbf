@@ -67,13 +67,18 @@ fn vs_grass(in: GrassIn) -> GrassOut {
     return out;
 }
 
+fn grass_alpha(in: GrassOut, texel_alpha: f32) -> f32 {
+    let a = texel_alpha * in.color.a;
+    if in.params.y > 0.5 {
+        return a;
+    }
+    return a * far_fade(in.view_dist);
+}
+
 @fragment
 fn fs_grass(in: GrassOut) -> @location(0) vec4<f32> {
     let texel = textureSample(t_color_display, s_color, in.uv);
-    var a = texel.a * in.color.a * far_fade(in.view_dist);
-    if in.params.y > 0.5 {
-        a = texel.a * in.color.a;
-    }
+    let a = grass_alpha(in, texel.a);
     if a <= 0.0 {
         discard;
     }
@@ -89,10 +94,7 @@ fn fs_grass(in: GrassOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_grass_display(in: GrassOut) -> @location(0) vec4<f32> {
     let texel = textureSample(t_color_display, s_color, in.uv);
-    var a = texel.a * in.color.a * far_fade(in.view_dist);
-    if in.params.y > 0.5 {
-        a = texel.a * in.color.a;
-    }
+    let a = grass_alpha(in, texel.a);
     if a <= 0.0 {
         discard;
     }

@@ -766,8 +766,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
                     normals.clear();
                     break;
                 };
-                let mut mips: Vec<&[u8]> = vec![&t.rgba];
-                mips.extend(t.extra_mips.iter().map(Vec::as_slice));
+                let mips = t.mips();
                 normals.push(
                     r.add_texture(&render::TextureDesc {
                         width: t.width,
@@ -968,10 +967,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         // TBLD: a building turret, drawn as its fallen look while down.
         let building = (world && fallen_models.contains_key(&ii)).then_some(ii);
         let station = class
-            .filter(|c| {
-                c.base.eq_ignore_ascii_case(super::stations::STATION_BASE)
-                    || crate::stations::is_destructible_building(&c.base)
-            })
+            .filter(|c| crate::stations::is_station_base(&c.base))
             .map(|c| {
                 (
                     ii,
@@ -1268,77 +1264,7 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
     }
     let (sky, dome_shells) = upload_sky(r, scene, &mut textures, &mut census)?;
     r.set_sky(sky);
-    let fog_cloud = if let Some(config) = scene
-        .manifest
-        .fog_cloud
-        .as_ref()
-        .filter(|_| scene.manifest.source_game == "bf2")
-    {
-        let texture = match &config.texture {
-            Some(name) => get_texture(
-                r,
-                scene,
-                &mut textures,
-                &name.to_ascii_lowercase(),
-                render::WrapV::Repeat,
-            )?
-            .map(|t| t.handle),
-            None => None,
-        };
-        texture.map(|texture| {
-            let ground = scene.heightfield();
-            render::FogCloud {
-                texture,
-                range: config.range.unwrap_or([40.0, 90.0]),
-                color: config
-                    .color
-                    .unwrap_or([192.0, 192.0, 192.0, 160.0])
-                    .map(|c| c.clamp(0.0, 255.0) as u8),
-                velocity: config.velocity.unwrap_or([0.0; 2]),
-                rotation: config.rotation.unwrap_or(0.1),
-                height: config.height.unwrap_or(16.0),
-                size: config.particle_size.unwrap_or(28.0),
-                density: config.particle_density.unwrap_or(30.0).max(0.0) as u32,
-                display_gain: if scene.manifest.hdr.is_some() {
-                    2.0
-                } else {
-                    1.0
-                },
-                ground: Box::new(move |x, z| ground.as_ref().map_or(0.0, |g| g.height_at(x, z))),
-            }
-        })
-    } else {
-        None
-    };
-    r.set_fog_cloud(fog_cloud);
-    let dust = super::dust::load(scene, |name| {
-        Ok(get_texture(
-            r,
-            scene,
-            &mut textures,
-            &name.to_ascii_lowercase(),
-            render::WrapV::Repeat,
-        )?
-        .map(|t| t.handle))
-    })?;
-    r.set_dust(dust);
-    r.set_sun_flare(scene.manifest.sun_flare.as_ref().map(|s| render::SunFlare {
-        distance: (scene.manifest.lighting.far_scene_range.unwrap_or(2000.0) * 0.9).min(2000.0),
-        display_gain: if scene.manifest.hdr.is_some() {
-            2.0
-        } else {
-            1.0
-        },
-        angle: s.angle,
-        color: s.color,
-        size: s.size,
-        flare_out_size: s.flare_out_size,
-        num_flare_outs: s.num_flare_outs,
-        initial_alpha: s.initial_alpha,
-        halo_rings: s.halo_rings,
-        spike_color: s.spike_color,
-        spike_size: s.spike_size,
-    }));
+    upload_atmosphere(r, scene, &mut textures)?;
     r.set_sky_particles(Vec::new());
     r.set_lightning(None);
     // Set on every upload, so a map without stars clears the last map's.
@@ -1670,6 +1596,7 @@ fn upload_sky_objects(
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
+    let bf2 = scene.manifest.source_game == "bf2";
     let total: u32 = sky.objects.iter().map(|o| o.count).sum();
     let mut placed = 0u32;
     for o in &sky.objects {
@@ -1678,34 +1605,40 @@ fn upload_sky_objects(
         };
         let parts = upload_submeshes(r, cpu)?;
         for k in 0..o.count {
-            let bearing = std::f32::consts::TAU * placed as f32 / total.max(1) as f32;
+            let index = placed;
             placed += 1;
-            let fraction = if o.count > 1 {
-                k as f32 / (o.count - 1) as f32
+            let (placement, yaw) = if bf2 {
+                let seed = crate::classdb::fnv1a_lowercase(&o.geometry)
+                    ^ crate::classdb::fnv1a_lowercase(&scene.manifest.map).rotate_left(11)
+                    ^ index.wrapping_mul(0x9e37_79b9);
+                let flight = render::SkyFlight::new(
+                    o.height,
+                    o.distance,
+                    [
+                        o.velocity_x.unwrap_or([0.0; 2]),
+                        o.velocity_y.unwrap_or([0.0; 2]),
+                        o.velocity_z.unwrap_or([0.0; 2]),
+                    ],
+                    Vec3::from(o.acceleration.unwrap_or([0.0; 3])),
+                    o.direction_factor.unwrap_or(3.0),
+                    o.lifetime.unwrap_or(1000.0),
+                    seed,
+                );
+                (render::Placement::Flight(flight), 0.0)
             } else {
-                0.5
+                let bearing = std::f32::consts::TAU * index as f32 / total.max(1) as f32;
+                let fraction = if o.count > 1 {
+                    k as f32 / (o.count - 1) as f32
+                } else {
+                    0.5
+                };
+                let offset = Vec3::new(
+                    bearing.sin() * o.distance,
+                    o.height[0] + (o.height[1] - o.height[0]) * fraction,
+                    bearing.cos() * o.distance,
+                );
+                (render::Placement::Object { offset }, bearing)
             };
-            let offset = Vec3::new(
-                bearing.sin() * o.distance,
-                o.height[0] + (o.height[1] - o.height[0]) * fraction,
-                bearing.cos() * o.distance,
-            );
-            let seed = crate::classdb::fnv1a_lowercase(&o.geometry)
-                ^ crate::classdb::fnv1a_lowercase(&scene.manifest.map).rotate_left(11)
-                ^ (placed - 1).wrapping_mul(0x9e37_79b9);
-            let flight = render::SkyFlight::new(
-                o.height,
-                o.distance,
-                [
-                    o.velocity_x.unwrap_or([0.0; 2]),
-                    o.velocity_y.unwrap_or([0.0; 2]),
-                    o.velocity_z.unwrap_or([0.0; 2]),
-                ],
-                Vec3::from(o.acceleration.unwrap_or([0.0; 3])),
-                o.direction_factor.unwrap_or(3.0),
-                o.lifetime.unwrap_or(1000.0),
-                seed,
-            );
             for &(mesh, ref mat, _, flags) in &parts {
                 // NOT V-clamped, unlike a dome segment: a capital ship is an
                 // ordinary model that may legitimately tile its hull texture,
@@ -1733,16 +1666,8 @@ fn upload_sky_objects(
                     texture: tex.map(|b| b.handle),
                     color: ambient,
                     scale: 1.0,
-                    placement: if scene.manifest.source_game == "bf2" {
-                        render::Placement::Flight(flight)
-                    } else {
-                        render::Placement::Object { offset }
-                    },
-                    yaw: if scene.manifest.source_game == "bf2" {
-                        0.0
-                    } else {
-                        bearing
-                    },
+                    placement,
+                    yaw,
                     // Routed off the raw MTRL word exactly like a dome
                     // shell: a `SkyObject` is a model like any other and the
                     // ELF's material rule is not specific to domes (RE §5).
@@ -1755,6 +1680,73 @@ fn upload_sky_objects(
         }
     }
     Ok(out)
+}
+
+fn atmosphere_texture(
+    r: &mut Renderer,
+    scene: &Scene,
+    cache: &mut HashMap<String, BoundTexture>,
+    name: &str,
+) -> Result<Option<render::TextureHandle>> {
+    Ok(get_texture(
+        r,
+        scene,
+        cache,
+        &name.to_ascii_lowercase(),
+        render::WrapV::Repeat,
+    )?
+    .map(|t| t.handle))
+}
+
+fn upload_atmosphere(
+    r: &mut Renderer,
+    scene: &Scene,
+    cache: &mut HashMap<String, BoundTexture>,
+) -> Result<()> {
+    let display_gain = super::look::atmosphere_display_gain(&scene.manifest);
+    let cloud = scene
+        .manifest
+        .fog_cloud
+        .as_ref()
+        .filter(|_| scene.manifest.source_game == "bf2");
+    let cloud_texture = match cloud.and_then(|c| c.texture.as_deref()) {
+        Some(name) => atmosphere_texture(r, scene, cache, name)?,
+        None => None,
+    };
+    r.set_fog_cloud(cloud.zip(cloud_texture).map(|(config, texture)| {
+        let ground = scene.heightfield();
+        render::FogCloud {
+            texture,
+            range: config.range.unwrap_or([40.0, 90.0]),
+            color: config
+                .color
+                .unwrap_or([192.0, 192.0, 192.0, 160.0])
+                .map(|c| c.clamp(0.0, 255.0) as u8),
+            velocity: config.velocity.unwrap_or([0.0; 2]),
+            rotation: config.rotation.unwrap_or(0.1),
+            height: config.height.unwrap_or(16.0),
+            size: config.particle_size.unwrap_or(28.0),
+            density: config.particle_density.unwrap_or(30.0).max(0.0) as u32,
+            display_gain,
+            ground: Box::new(move |x, z| ground.as_ref().map_or(0.0, |g| g.height_at(x, z))),
+        }
+    }));
+    let dust = super::dust::load(scene, |name| atmosphere_texture(r, scene, cache, name))?;
+    r.set_dust(dust);
+    r.set_sun_flare(scene.manifest.sun_flare.as_ref().map(|s| render::SunFlare {
+        distance: (scene.manifest.lighting.far_scene_range.unwrap_or(2000.0) * 0.9).min(2000.0),
+        display_gain,
+        angle: s.angle,
+        color: s.color,
+        size: s.size,
+        flare_out_size: s.flare_out_size,
+        num_flare_outs: s.num_flare_outs,
+        initial_alpha: s.initial_alpha,
+        halo_rings: s.halo_rings,
+        spike_color: s.spike_color,
+        spike_size: s.spike_size,
+    }));
+    Ok(())
 }
 
 fn get_terrain_texture(
@@ -1781,12 +1773,8 @@ fn get_terrain_texture(
     let Some(base) = scene.textures.get(name) else {
         return Ok(None);
     };
-    let mips: Vec<&[u8]> = std::iter::once(base.rgba.as_slice())
-        .chain(base.extra_mips.iter().map(Vec::as_slice))
-        .collect();
-    let detail_mips: Vec<&[u8]> = std::iter::once(detail.rgba.as_slice())
-        .chain(detail.extra_mips.iter().map(Vec::as_slice))
-        .collect();
+    let mips = base.mips();
+    let detail_mips = detail.mips();
     let handle = r
         .add_texture(&render::TextureDesc {
             width: base.width,

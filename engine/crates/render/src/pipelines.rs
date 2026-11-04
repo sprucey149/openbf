@@ -158,19 +158,22 @@ impl Renderer {
             Target::Window { config, .. } => config.view_formats.first().copied(),
             Target::Headless { .. } => Some(crate::device::HEADLESS_FORMAT.remove_srgb_suffix()),
         };
-        let water_format = display_format.unwrap_or(format);
-        let water_fs = if display_format.is_some() {
-            "fs_water_display"
-        } else {
-            "fs_water"
+        let display_target = display_format.unwrap_or(format);
+        let display_fs = |linear: &'static str, display: &'static str| {
+            if display_format.is_some() {
+                display
+            } else {
+                linear
+            }
         };
+        let water_fs = display_fs("fs_water", "fs_water_display");
         let water_pipeline = PipelineDesc {
             fs: water_fs,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             ..PipelineDesc::world("map water pipeline", &pipeline_layout, &vb)
         }
-        .build(&device, &shader, water_format);
+        .build(&device, &shader, display_target);
 
         // Speckle pipeline: the water's additive second layer (queue W3) —
         // the PS2's record 0x69c3b0, ALPHA 0x48 = `Cs·As + Cd`, TEST 0x51001,
@@ -194,17 +197,13 @@ impl Renderer {
         };
         let speckle_pipeline = PipelineDesc {
             vs: "vs_speckle",
-            fs: if display_format.is_some() {
-                "fs_speckle_display"
-            } else {
-                "fs_speckle"
-            },
+            fs: display_fs("fs_speckle", "fs_speckle_display"),
             blend: Some(additive),
             depth_write: false,
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             ..PipelineDesc::world("map speckle pipeline", &pipeline_layout, &vb)
         }
-        .build(&device, &shader, water_format);
+        .build(&device, &shader, display_target);
 
         // The `LOWR` far sheet (queue CLN5): the world pass's opaque state —
         // depth tested and written, no blend — with its own entry point,
@@ -221,11 +220,7 @@ impl Renderer {
         // water's reason — and writing no depth (the base already has).
         // `fs_terrain_layer` folds the far fade into alpha itself, so there
         // is no `_fade` twin.
-        let terrain_fs = if display_format.is_some() {
-            "fs_terrain_layer_display"
-        } else {
-            "fs_terrain_layer"
-        };
+        let terrain_fs = display_fs("fs_terrain_layer", "fs_terrain_layer_display");
         let terrain_layer_pipeline = PipelineDesc {
             fs: terrain_fs,
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -233,7 +228,7 @@ impl Renderer {
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             ..PipelineDesc::world("map terrain layer pipeline", &pipeline_layout, &vb)
         }
-        .build(&device, &shader, display_format.unwrap_or(format));
+        .build(&device, &shader, display_target);
 
         // The FADE pipelines — the world pass on a map that authors
         // `FarSceneRange(0)` (`render::FarFade`, `game::viewer::far_fade_from`).
@@ -394,14 +389,14 @@ impl Renderer {
                     &vb,
                 )
             }
-            .build_with(&device, &shader, display_format.unwrap_or(format), no_cull),
+            .build_with(&device, &shader, display_target, no_cull),
             water: PipelineDesc {
                 fs: water_fs,
                 blend: alpha,
                 depth_compare: Some(wgpu::CompareFunction::LessEqual),
                 ..PipelineDesc::world("map water pipeline, no discard", &pipeline_layout, &vb)
             }
-            .build_with(&device, &shader, water_format, no_cull),
+            .build_with(&device, &shader, display_target, no_cull),
             skinned: clean(PipelineDesc {
                 vs: "vs_skinned",
                 ..PipelineDesc::world("skinned pipeline, no discard", &skinned_layout, &skinned_vb)
@@ -469,16 +464,12 @@ impl Renderer {
         ];
         let grass_pipeline = PipelineDesc {
             vs: "vs_grass",
-            fs: if display_format.is_some() {
-                "fs_grass_display"
-            } else {
-                "fs_grass"
-            },
+            fs: display_fs("fs_grass", "fs_grass_display"),
             blend: Some(wgpu::BlendState::ALPHA_BLENDING),
             depth_write: false,
             ..PipelineDesc::world("grass pipeline", &pipeline_layout, &grass_vb)
         }
-        .build(&device, &grass_shader, display_format.unwrap_or(format));
+        .build(&device, &grass_shader, display_target);
         // The laser bolts (card FXB, `bolt.rs`): `vs_grass` over world-space
         // ribbons; GS TEST 0x51001 = depth tested, no depth write
         // (re-bolt §3.3). The core is ALPHA 0x44 (source-over), the glow 0x48

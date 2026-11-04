@@ -1,6 +1,14 @@
 use anyhow::{anyhow, bail, Context, Result};
 use std::path::Path;
 
+fn install(fresh: &Path, installed: &Path, scratch: &Path, filename: &str) -> Result<()> {
+    if installed.exists() {
+        std::fs::copy(installed, scratch.join(format!("previous_{filename}")))?;
+    }
+    std::fs::copy(fresh, installed)?;
+    Ok(())
+}
+
 fn install_water(
     target: &Path,
     scratch: &Path,
@@ -9,11 +17,12 @@ fn install_water(
 ) -> Result<()> {
     if let Some(water) = &water {
         let filename = &water.glb;
-        let previous = target.join(filename);
-        if previous.exists() {
-            std::fs::copy(&previous, scratch.join(format!("previous_{filename}")))?;
-        }
-        std::fs::copy(scratch.join("fresh").join(filename), previous)?;
+        install(
+            &scratch.join("fresh").join(filename),
+            &target.join(filename),
+            scratch,
+            filename,
+        )?;
     }
     manifest.water = water;
     Ok(())
@@ -105,7 +114,7 @@ fn main() -> Result<()> {
         }
     }
     for name in textures {
-        let filename = format!("{}.ktx2", name.to_ascii_lowercase());
+        let filename = format!("{name}.ktx2");
         let source = scratch.join("fresh/textures").join(&filename);
         if !source.exists() {
             let common = target
@@ -121,11 +130,12 @@ fn main() -> Result<()> {
             );
             continue;
         }
-        let previous = target.join("textures").join(&filename);
-        if previous.exists() {
-            std::fs::copy(&previous, scratch.join(format!("previous_{filename}")))?;
-        }
-        std::fs::copy(source, previous)?;
+        install(
+            &source,
+            &target.join("textures").join(&filename),
+            scratch,
+            &filename,
+        )?;
         if !manifest
             .textures
             .iter()

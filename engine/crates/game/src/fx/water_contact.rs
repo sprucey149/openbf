@@ -72,6 +72,17 @@ impl State {
     }
 }
 
+fn wades(u: &core::unit::Unit) -> bool {
+    u.alive && u.mount.is_none() && u.droideka.is_none()
+}
+
+impl State {
+    fn look(&self, walk: &WalkSim, u: &core::unit::Unit) -> Option<&Look> {
+        self.looks
+            .get(&walk.team_template(u.team).class(u.spec.class).name)
+    }
+}
+
 impl Fx {
     pub(super) fn soldier_water(&mut self, walk: &WalkSim) {
         if self.water_contact.tick == Some(walk.sim.tick) {
@@ -79,7 +90,7 @@ impl Fx {
         }
         self.water_contact.tick = Some(walk.sim.tick);
         for u in &walk.sim.units {
-            if !u.alive || u.mount.is_some() || u.droideka.is_some() {
+            if !wades(u) {
                 continue;
             }
             let s = &u.soldier;
@@ -102,11 +113,9 @@ impl Fx {
             self.water_contact.splash_clock += core::TICK_DT;
             if s.vel.y < -5.0 && self.water_contact.splash_clock > 1.0 {
                 self.water_contact.splash_clock = 0.0;
-                let class = &walk.team_template(u.team).class(u.spec.class).name;
                 let name = self
                     .water_contact
-                    .looks
-                    .get(class)
+                    .look(walk, u)
                     .and_then(|l| l.splash.clone());
                 if let Some(name) = name {
                     if let Some(height) = walk.sim.still_water_under(s.pos) {
@@ -128,11 +137,7 @@ impl Fx {
         let mut starts = Vec::new();
         for (i, u) in walk.sim.units.iter().enumerate() {
             let t = &mut self.water_contact.tracks[i];
-            let pose = poses
-                .get(i)
-                .copied()
-                .flatten()
-                .filter(|_| u.alive && u.mount.is_none() && u.droideka.is_none());
+            let pose = poses.get(i).copied().flatten().filter(|_| wades(u));
             let Some(pose) = pose else {
                 t.live = false;
                 continue;

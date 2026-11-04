@@ -137,7 +137,8 @@ impl Renderer {
         let clip = camera.view_proj(width as f32 / height as f32)
             * (camera.position + dir * (camera.far * 0.5)).extend(1.0);
         let uv = [clip.x / clip.w * 0.5 + 0.5, 0.5 - clip.y / clip.w * 0.5];
-        let angular_scale = height as f32 / (2.0 * (camera.fov_y * 0.5).tan() * facing * 120.0);
+        let focal = height as f32 / (2.0 * (camera.fov_y * 0.5).tan());
+        let angular_scale = focal / (facing * 120.0);
         let mut params = [[0.0f32; 4]; 10];
         params[0] = [
             uv[0] * width as f32,
@@ -145,10 +146,9 @@ impl Renderer {
             angular_scale,
             config.size,
         ];
-        let gs = |c: f32| ((c + 1.0) * 0.5).floor() / 128.0;
-        params[1] = config.color.map(gs);
+        params[1] = geometry::gs(config.color);
         for (i, ring) in config.halo_rings.iter().enumerate() {
-            params[2 + i] = [gs(ring[1]), gs(ring[2]), gs(ring[3]), gs(ring[4])];
+            params[2 + i] = geometry::gs([ring[1], ring[2], ring[3], ring[4]]);
         }
         params[5] = [
             config.halo_rings[0][0],
@@ -156,7 +156,7 @@ impl Renderer {
             config.halo_rings[2][0],
             config.spike_size,
         ];
-        params[6] = config.spike_color.map(gs);
+        params[6] = geometry::gs(config.spike_color);
         params[7] = [
             config.flare_out_size,
             config.num_flare_outs as f32,
@@ -164,7 +164,6 @@ impl Renderer {
             config.color[..3].iter().copied().fold(0.0, f32::max),
         ];
         params[8] = [width as f32, height as f32, config.display_gain, 0.0];
-        let focal = height as f32 / (2.0 * (camera.fov_y * 0.5).tan());
         let cos_half = (1.0 + ((camera.fov_y * 0.5).tan() * (0.637_07 / 0.488_378)).powi(2))
             .sqrt()
             .recip();

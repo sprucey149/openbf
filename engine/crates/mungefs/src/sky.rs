@@ -111,6 +111,14 @@ mod key {
     pub const ALPHA_MIN: u32 = 0x7de4_197d; // "AlphaMin"
     pub const COLOR_SATURATION: u32 = 0x0d7e_c5c0; // "ColorSaturation"
     pub const ENABLE_BOTTOM: u32 = 0x02ff_3675; // "EnableBottom"
+    pub const EFFECT: u32 = 0x6e6e_8d54;
+    pub const ROTATION_SPEED: u32 = 0x3204_8fba;
+    pub const VELOCITY_X: u32 = 0xb6c8_887e;
+    pub const VELOCITY_Y: u32 = 0xb7c8_8a11;
+    pub const VELOCITY_Z: u32 = 0xb4c8_8558;
+    pub const ACCELERATION: u32 = 0x2fa0_ba9d;
+    pub const IN_DIRECTION_FACTOR: u32 = 0xc91c_0e2c;
+    pub const LIFE_TIME: u32 = 0x5212_abee;
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -350,7 +358,7 @@ fn parse_dome(node: &ConfigNode, unknown: &mut Vec<(u32, Vec<f32>)>) -> DomeInfo
                         key::OFFSET => m.offset = k.f32(0),
                         key::MOVEMENT_SCALE => m.movement_scale = k.f32(0),
                         key::REFLECT => m.reflect = true,
-                        0x6e6e_8d54 => {
+                        key::EFFECT => {
                             if let (Some(effect), Some(hardpoint)) = (k.str_arg(0), k.str_arg(1)) {
                                 m.effects.push(DomeEffect {
                                     effect: effect.to_owned(),
@@ -360,7 +368,7 @@ fn parse_dome(node: &ConfigNode, unknown: &mut Vec<(u32, Vec<f32>)>) -> DomeInfo
                                 });
                             }
                         }
-                        0x3204_8fba => m.rotation = k.f4(),
+                        key::ROTATION_SPEED => m.rotation = k.f4(),
                         h => unknown.push((h, k.floats())),
                     }
                 }
@@ -420,12 +428,12 @@ fn parse_object(node: &ConfigNode) -> SkyObject {
             key::NUM_OBJECTS => o.num_objects = c.f32(0),
             key::HEIGHT => o.height = Some(c.floats_or_zero()),
             key::DISTANCE => o.distance = c.f32(0),
-            0xb6c8_887e => o.velocity_x = Some(c.floats_or_zero()),
-            0xb7c8_8a11 => o.velocity_y = Some(c.floats_or_zero()),
-            0xb4c8_8558 => o.velocity_z = Some(c.floats_or_zero()),
-            0x2fa0_ba9d => o.acceleration = c.f3(),
-            0xc91c_0e2c => o.direction_factor = c.f32(0),
-            0x5212_abee => o.lifetime = c.f32(0),
+            key::VELOCITY_X => o.velocity_x = Some(c.floats_or_zero()),
+            key::VELOCITY_Y => o.velocity_y = Some(c.floats_or_zero()),
+            key::VELOCITY_Z => o.velocity_z = Some(c.floats_or_zero()),
+            key::ACCELERATION => o.acceleration = c.f3(),
+            key::IN_DIRECTION_FACTOR => o.direction_factor = c.f32(0),
+            key::LIFE_TIME => o.lifetime = c.f32(0),
             _ => {}
         }
     }
@@ -490,6 +498,14 @@ mod tests {
             ("TerrainEnable", key::TERRAIN_ENABLE),
             ("Reflect", key::REFLECT),
             ("ReflectionColor", key::REFLECTION_COLOR),
+            ("Effect", key::EFFECT),
+            ("RotationSpeed", key::ROTATION_SPEED),
+            ("VelocityX", key::VELOCITY_X),
+            ("VelocityY", key::VELOCITY_Y),
+            ("VelocityZ", key::VELOCITY_Z),
+            ("Acceleration", key::ACCELERATION),
+            ("InDirectionFactor", key::IN_DIRECTION_FACTOR),
+            ("LifeTime", key::LIFE_TIME),
         ] {
             assert_eq!(fnv1a_lowercase(name), h, "{name}");
         }

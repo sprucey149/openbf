@@ -234,7 +234,7 @@ fn dagobah_wading_uses_the_authored_effects_and_reaches_the_frame() {
     walk.teams[1 - team].faction = "cis".into();
     walk.teams[team].classes = vec![ClassVisual::from_roster(&class)];
     let u = &mut walk.sim.units[0];
-    u.consts = class.consts.clone();
+    u.consts = class.consts;
     u.alive = true;
     u.soldier.pos = at;
     u.soldier.grounded = true;

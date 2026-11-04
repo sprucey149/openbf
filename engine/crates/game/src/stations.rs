@@ -14,6 +14,11 @@ pub(crate) fn is_destructible_building(base: &str) -> bool {
     base.eq_ignore_ascii_case("destructablebuilding")
 }
 
+pub(crate) fn is_station_base(base: &str) -> bool {
+    base.eq_ignore_ascii_case(crate::viewer::stations::STATION_BASE)
+        || is_destructible_building(base)
+}
+
 /// A map's game's common bake: its folder and its manifest, `None` when it
 /// is not baked.
 pub type Common = (std::path::PathBuf, Option<CommonManifest>);
@@ -173,7 +178,7 @@ pub fn install_collision(sim: &mut Sim, m: &Manifest, map_dir: &Path, db: &Class
         .collect::<Result<_>>()?;
     for si in 0..sim.stations.len() {
         let station = &sim.stations[si];
-        if station.radius == 0.0 && !station.health.alive() {
+        if !station.serves() && !station.health.alive() {
             sim.install_station_wreck(si as u16);
         }
     }
@@ -187,7 +192,7 @@ pub fn wreck_models(scene: &Scene) -> Result<HashMap<usize, String>> {
         .manifest
         .classes
         .iter()
-        .any(|c| c.base.eq_ignore_ascii_case("powerupstation") || is_destructible_building(&c.base))
+        .any(|c| is_station_base(&c.base))
     {
         return Ok(out);
     }
@@ -201,8 +206,7 @@ pub fn wreck_models(scene: &Scene) -> Result<HashMap<usize, String>> {
         }
     }
     for (i, inst) in scene.manifest.instances.iter().enumerate() {
-        let base = db.engine_base(&inst.class);
-        if base != Some("powerupstation") && !base.is_some_and(is_destructible_building) {
+        if !db.engine_base(&inst.class).is_some_and(is_station_base) {
             continue;
         }
         if let Some(model) = db

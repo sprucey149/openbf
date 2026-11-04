@@ -329,7 +329,9 @@ fn glow_and_unscaled_gain_in_display_units() {
     );
 }
 
-fn gouraud_fixture(camera: &Camera) -> ([[f32; 3]; 3], [[f32; 3]; 3], [[u8; 4]; 3], Vec<Mat4>) {
+type GouraudFixture = ([[f32; 3]; 3], [[f32; 3]; 3], [[u8; 4]; 3], Vec<Mat4>);
+
+fn gouraud_fixture(camera: &Camera) -> GouraudFixture {
     let tan = (camera.fov_y * 0.5).tan();
     let positions = [[-0.8, -0.8, 2.0], [0.8, -0.8, 5.0], [0.0, 0.8, 9.0]]
         .map(|[x, y, depth]| [x * depth * tan, y * depth * tan, -depth]);

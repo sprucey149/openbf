@@ -83,6 +83,7 @@ mod particle_blur;
 mod particles;
 mod pipelines;
 mod point_light;
+mod rand;
 mod resources;
 mod shadow;
 mod sun_flare;
@@ -121,7 +122,9 @@ pub use mesh::{
 };
 pub use particles::{ParticleDraw, ParticleShape};
 pub use point_light::{LitSphere, PointLight, SpotCone, MAX_POINT_LIGHTS};
-pub use sky::{mirror_squash, Placement, SkyFlight, SkyMode, SkyShell, MIRROR_LIFT};
+pub use sky::{
+    mirror_squash, spin as sky_spin, Placement, SkyFlight, SkyMode, SkyShell, MIRROR_LIFT,
+};
 pub use specular::spec_texcoord;
 pub use stars::{half_size as star_half_size, star_rgb, Star, StarField};
 pub use sun_flare::SunFlare;

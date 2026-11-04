@@ -91,11 +91,7 @@ fn volumes(scene: &Scene) -> Result<Vec<Volume>> {
             continue;
         }
         let config = render::DustConfig {
-            display_gain: if scene.manifest.hdr.is_some() {
-                2.0
-            } else {
-                1.0
-            },
+            display_gain: super::look::atmosphere_display_gain(&scene.manifest),
             min_pos: vector("MinPos", Vec3::new(-20.0, -1.0, -20.0)),
             max_pos: vector("MaxPos", Vec3::new(20.0, 1.0, 20.0)),
             min_vel: vector("MinVel", Vec3::new(-3.0, -1.0, -3.0)),

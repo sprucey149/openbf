@@ -181,6 +181,24 @@ pub(crate) struct BoltFrame {
     pub blur_runs: Vec<(TextureHandle, std::ops::Range<u32>)>,
 }
 
+impl BoltFrame {
+    pub fn append(&mut self, other: BoltFrame) {
+        let base = self.vertices.len() as u32;
+        let shift = |range: std::ops::Range<u32>| range.start + base..range.end + base;
+        self.vertices.extend(other.vertices);
+        self.runs.extend(other.runs.into_iter().map(|run| BoltRun {
+            vertices: shift(run.vertices),
+            ..run
+        }));
+        self.blur_runs.extend(
+            other
+                .blur_runs
+                .into_iter()
+                .map(|(texture, range)| (texture, shift(range))),
+        );
+    }
+}
+
 /// The one instance every bolt draw uses: the vertices are in world space.
 pub(crate) fn identity_instance() -> GrassInstance {
     GrassInstance {

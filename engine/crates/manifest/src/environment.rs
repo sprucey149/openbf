@@ -20,6 +20,19 @@ pub struct ManifestFogCloud {
     pub particle_density: Option<f32>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestSunFlare {
+    pub angle: [f32; 2],
+    pub color: [f32; 4],
+    pub size: f32,
+    pub flare_out_size: f32,
+    pub num_flare_outs: u32,
+    pub initial_alpha: f32,
+    pub halo_rings: [[f32; 5]; 3],
+    pub spike_color: [f32; 4],
+    pub spike_size: f32,
+}
+
 /// The Precipitation effect's authored numbers
 /// (`mungefs::fx::PrecipitationConfig`; the ELF ctor's defaults where a map
 /// leaves a key out). `game::weather` runs it.

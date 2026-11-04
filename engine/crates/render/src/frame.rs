@@ -124,6 +124,22 @@ impl Renderer {
     /// palette and its instance, both of which sit at the SUBMISSION index.
     /// The pipeline, the globals and the skinned instance buffer are the
     /// caller's to bind.
+    fn draw_sky_slot(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        slot: usize,
+        pipeline: &wgpu::RenderPipeline,
+    ) -> u32 {
+        let shell = &self.sky[slot];
+        let Some(mesh) = self.meshes.get(shell.mesh.0 as usize) else {
+            return 0;
+        };
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(1, self.tex_bg(shell.texture), &[]);
+        draw_mesh(pass, mesh, slot as u32..slot as u32 + 1);
+        1
+    }
+
     fn draw_skinned(&self, pass: &mut wgpu::RenderPass<'_>, d: &SkinnedDrawCmd, i: usize) {
         pass.set_bind_group(1, self.tex_bg(d.texture), &[]);
         pass.set_bind_group(2, &self.palette_bg, &[(i * PALETTE_STRIDE) as u32]);
@@ -399,11 +415,12 @@ impl Renderer {
         // The sky shells take the first slots of the same instance buffer, so
         // every other index below is offset by `sky_base`.
         let sky_base = self.sky.len();
+        let atmosphere_time = self.atmosphere_time();
         let mut instances: Vec<Instance> = self
             .sky
             .iter()
             .map(|s| Instance {
-                model: Self::sky_model(s, camera.position, self.atmosphere_time(), self.water_time)
+                model: Self::sky_model(s, camera.position, atmosphere_time, self.water_time)
                     .to_cols_array_2d(),
                 color: Self::sky_color(s),
                 // The sky is never distance-culled: on the PS2 it is drawn by
@@ -629,9 +646,8 @@ impl Renderer {
         if let Some(cloud) = &self.particles.cloud {
             particles
                 .to_mut()
-                .extend(cloud.draws(camera, self.atmosphere_time()));
+                .extend(cloud.draws(camera, atmosphere_time));
         }
-        let atmosphere_time = self.atmosphere_time();
         for dust in &mut self.particles.dust {
             particles
                 .to_mut()
@@ -639,19 +655,11 @@ impl Renderer {
         }
         let mut bolts = crate::particles::build(&[], &self.particles.sky, camera);
         let sky_particle_runs = bolts.runs.len();
-        let mut world_particles = crate::particles::build(&self.bolts.bolts, &particles, camera);
-        let base = bolts.vertices.len() as u32;
-        for run in &mut world_particles.runs {
-            run.vertices.start += base;
-            run.vertices.end += base;
-        }
-        for (_, range) in &mut world_particles.blur_runs {
-            range.start += base;
-            range.end += base;
-        }
-        bolts.vertices.extend(world_particles.vertices);
-        bolts.runs.extend(world_particles.runs);
-        bolts.blur_runs.extend(world_particles.blur_runs);
+        bolts.append(crate::particles::build(
+            &self.bolts.bolts,
+            &particles,
+            camera,
+        ));
         if !bolts.vertices.is_empty() {
             let vb = bytemuck::cast_slice(&bolts.vertices);
             let inst = [crate::bolt::identity_instance()];
@@ -1176,15 +1184,8 @@ impl Renderer {
                 pass.set_bind_group(0, &self.globals_bg, &[]);
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
                 for &slot in &sky_order[sky_solid_count..] {
-                    let shell = &self.sky[slot];
-                    let Some(mesh) = self.meshes.get(shell.mesh.0 as usize) else {
-                        continue;
-                    };
-                    pass.set_pipeline(&self.sky_pipelines[1][usize::from(shell.lit)][1]);
-                    pass.set_bind_group(1, self.tex_bg(shell.texture), &[]);
-                    let inst = slot as u32;
-                    draw_mesh(&mut pass, mesh, inst..inst + 1);
-                    draw_calls += 1;
+                    let pipeline = &self.sky_pipelines[1][usize::from(self.sky[slot].lit)][1];
+                    draw_calls += self.draw_sky_slot(&mut pass, slot, pipeline);
                 }
             }
             for &b in blended.iter().filter(|_| !ab.skips("blend")) {
@@ -1265,15 +1266,15 @@ impl Renderer {
                 self.draw_particle_runs(&mut pass, &bolts.runs[sky_particle_runs..], true);
             mark(&mut timer, &mut pass, "bolts+particles");
         }
+        let frame_display_view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(self.format.remove_srgb_suffix()),
+            ..Default::default()
+        });
         if particle_blur {
-            let display_view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
-                format: Some(self.format.remove_srgb_suffix()),
-                ..Default::default()
-            });
             let mut pass = self.particle_blur.pass(
                 &mut encoder,
                 frame_texture,
-                &display_view,
+                &frame_display_view,
                 &self.depth_view,
             );
             draw_calls += 1;
@@ -1325,15 +1326,8 @@ impl Renderer {
             pass.set_vertex_buffer(1, self.instance_buf.slice(..));
             if !ab.skips("sky") && self.sky.iter().any(|s| s.emission.is_some()) {
                 for &slot in &sky_order {
-                    let shell = &self.sky[slot];
-                    let Some(mesh) = self.meshes.get(shell.mesh.0 as usize) else {
-                        continue;
-                    };
-                    pass.set_pipeline(&self.bloom.gather.sky[Self::sky_mode(shell).index()]);
-                    pass.set_bind_group(1, self.tex_bg(shell.texture), &[]);
-                    let inst = slot as u32;
-                    draw_mesh(&mut pass, mesh, inst..inst + 1);
-                    draw_calls += 1;
+                    let pipeline = &self.bloom.gather.sky[Self::sky_mode(&self.sky[slot]).index()];
+                    draw_calls += self.draw_sky_slot(&mut pass, slot, pipeline);
                 }
             }
             for (slot, &i) in order.iter().enumerate() {
@@ -1382,11 +1376,14 @@ impl Renderer {
                 t.mark(&mut encoder, "bloom");
             }
         }
-        let sun_view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(self.format.remove_srgb_suffix()),
-            ..Default::default()
-        });
-        draw_calls += self.sun_flare_pass(&mut encoder, &sun_view, camera, width, height, false);
+        draw_calls += self.sun_flare_pass(
+            &mut encoder,
+            &frame_display_view,
+            camera,
+            width,
+            height,
+            false,
+        );
         // The frame filter lifts the finished 3D frame, before the overlay
         // (the PS2 draws its HUD after it, `analysis/re-glow.md` §3.3).
         if filter && !ab.skips("filter") {

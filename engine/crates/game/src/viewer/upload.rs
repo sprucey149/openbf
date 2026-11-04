@@ -142,9 +142,7 @@ pub(super) fn upload_flat_water_texture(
     scroll: [f32; 2],
     uv_scale: [f32; 2],
 ) -> Result<TextureHandle> {
-    let mips: Vec<&[u8]> = std::iter::once(t.rgba.as_slice())
-        .chain(t.extra_mips.iter().map(Vec::as_slice))
-        .collect();
+    let mips = t.mips();
     r.add_texture(&TextureDesc {
         width: t.width,
         height: t.height,
@@ -170,17 +168,8 @@ pub(super) fn upload_cpu_texture_inner(
     uv_scale: [f32; 2],
     wrap_v: render::WrapV,
 ) -> Result<TextureHandle> {
-    let mut mips: Vec<&[u8]> = vec![&t.rgba];
-    mips.extend(t.extra_mips.iter().map(Vec::as_slice));
-    let detail_mips: Vec<&[u8]> = t
-        .detail
-        .as_ref()
-        .map(|d| {
-            let mut m: Vec<&[u8]> = vec![&d.rgba];
-            m.extend(d.extra_mips.iter().map(Vec::as_slice));
-            m
-        })
-        .unwrap_or_default();
+    let mips = t.mips();
+    let detail_mips = t.detail.as_ref().map(|d| d.mips()).unwrap_or_default();
     r.add_texture(&TextureDesc {
         width: t.width,
         height: t.height,

@@ -204,7 +204,7 @@ fn terrain_layers_blend_one_and_two_layers_in_display_bytes() {
         ("discard:on", 2),
     ] {
         r.frame_ab = render::FrameAb::parse(state).unwrap();
-        let draws = vec![layer.clone(); count];
+        let draws = vec![layer; count];
         r.render(&Camera::default(), &draws, [c, c, c, 1.0])
             .unwrap();
         let mut expected = 200.0_f32;

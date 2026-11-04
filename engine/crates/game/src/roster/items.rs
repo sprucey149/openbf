@@ -85,8 +85,7 @@ pub fn item_class_from_db(db: &ClassDb, item: &str) -> Option<ItemClass> {
 /// no such class or it is not a `powerupstation`.
 pub fn station_class_from_db(db: &ClassDb, class: &str) -> Option<StationClass> {
     let name = db.resolve(class)?;
-    let base = db.engine_base(name)?;
-    if base != "powerupstation" && !crate::stations::is_destructible_building(base) {
+    if !crate::stations::is_station_base(db.engine_base(name)?) {
         return None;
     }
     let f = |key: &str| db.prop_f32(name, key);
@@ -194,30 +193,32 @@ pub fn add_stations(
         let destructible = db
             .engine_base(&name)
             .is_some_and(crate::stations::is_destructible_building);
-        let radius = inst
-            .props
-            .iter()
-            .rev()
-            .find(|(k, _)| *k == radius_key)
-            .and_then(|(_, v)| v.trim().parse::<f32>().ok())
-            .unwrap_or(0.0);
-        if !destructible && radius <= 0.0
-            || destructible && (!class.max_health.is_finite() || class.max_health <= 0.0)
-        {
+        let instance_f32 = |key: u32| {
+            inst.props
+                .iter()
+                .rev()
+                .find(|(k, _)| *k == key)
+                .and_then(|(_, v)| v.trim().parse::<f32>().ok())
+        };
+        let radius = if destructible {
+            0.0
+        } else {
+            instance_f32(radius_key).unwrap_or(0.0)
+        };
+        let unusable = if destructible {
+            !class.max_health.is_finite() || class.max_health <= 0.0
+        } else {
+            radius <= 0.0
+        };
+        if unusable {
             continue;
         }
-        let radius = if destructible { 0.0 } else { radius };
         let c = sim.add_station_class(class);
         let class = &sim.station_classes[usize::from(c)];
         let mut s = core::sim::Station::new(c, glam::Vec3::from(inst.translation), radius);
         s.health = core::weapon::Health::new(class.max_health, class.health_type);
         if destructible {
-            let current = inst
-                .props
-                .iter()
-                .rev()
-                .find(|(k, _)| *k == crate::classdb::fnv1a_lowercase("CurHealth"))
-                .and_then(|(_, v)| v.trim().parse::<f32>().ok())
+            let current = instance_f32(crate::classdb::fnv1a_lowercase("CurHealth"))
                 .or_else(|| db.prop_f32(&name, "CurHealth"));
             if let Some(current) = current.filter(|v| v.is_finite()) {
                 s.health.cur = current.clamp(0.0, class.max_health);

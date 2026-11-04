@@ -493,10 +493,15 @@ const LIGHT_TERRAIN: u32 = 5u;
 const LIGHT_CHARACTER: u32 = 6u;
 const LIGHT_GLOW: u32 = 7u;
 const LIGHT_UNSCALED: u32 = 8u;
+const LIGHT_REGION: u32 = 0x200u;
 const LIGHT_IFACE: u32 = 9u;
 const LIGHT_VERTEX_LIT: u32 = 10u;
 // `render::IFACE_AMBIENT`.
 const IFACE_AMBIENT: f32 = 0.5;
+
+fn region_top(cull: vec2<f32>, cull_near: vec2<f32>) -> vec4<f32> {
+    return vec4<f32>(cull, cull_near.x, cull_near.y + 1.0);
+}
 
 fn vertex_lit_path(path: u32) -> bool {
     return path == 0u || path == LIGHT_CHARACTER || path == LIGHT_PRELIT
@@ -546,6 +551,8 @@ fn vertex_lighting(in: VsOut, lights: vec4<u32>) -> vec3<f32> {
         light2_g *= in.region_bottom.w;
     }
     let local = point_sum(in.world_pos, in.world_normal, lights);
+    let dynamic_g = sun_g * (1.0 - globals.sun_static)
+        + light2_g * (1.0 - globals.light2_static) + local;
     var lit: vec3<f32>;
     switch in.light {
         case LIGHT_IFACE: {
@@ -553,13 +560,9 @@ fn vertex_lighting(in: VsOut, lights: vec4<u32>) -> vec3<f32> {
             lit = gs_lit(vec3<f32>(1.0), sum);
         }
         case LIGHT_PRELIT: {
-            let dynamic_g = sun_g * (1.0 - globals.sun_static)
-                + light2_g * (1.0 - globals.light2_static) + local;
             lit = gs_lit(in.color.rgb, dynamic_g);
         }
         case LIGHT_PRELIT_ADD: {
-            let dynamic_g = sun_g * (1.0 - globals.sun_static)
-                + light2_g * (1.0 - globals.light2_static) + local;
             lit = gs_lit(vec3<f32>(1.0), linear_to_srgb(in.color.rgb) + dynamic_g);
         }
         case LIGHT_VERTEX_LIT: {
@@ -570,6 +573,11 @@ fn vertex_lighting(in: VsOut, lights: vec4<u32>) -> vec3<f32> {
         }
     }
     return linear_to_srgb(lit);
+}
+
+fn emission_gain(texel_alpha: f32, in: VsOut) -> f32 {
+    return select(2.0, 1.0 + glow_as(texel_alpha, in.color.a) / 128.0, in.light == LIGHT_GLOW)
+        * globals.glow_gain;
 }
 
 fn shade_unfogged(in: VsOut) -> vec4<f32> {
@@ -980,8 +988,7 @@ fn fs_sky(in: VsOut) -> @location(0) vec4<f32> {
     let texel = textureSample(t_color, s_color, in.uv);
     let base = texel * in.color;
     if in.light == LIGHT_GLOW || in.light == LIGHT_UNSCALED {
-        let gain = select(2.0, 1.0 + glow_as(texel.a, in.color.a) / 128.0, in.light == LIGHT_GLOW)
-            * globals.glow_gain;
+        let gain = emission_gain(texel.a, in);
         let rgb = srgb_to_linear(min(linear_to_srgb(base.rgb) * gain, vec3<f32>(1.0)));
         return vec4<f32>(rgb, select(base.a, 1.0, in.light == LIGHT_GLOW));
     }
@@ -995,8 +1002,7 @@ fn fs_sky_bloom(in: VsOut) -> @location(0) vec4<f32> {
     if in.light != LIGHT_GLOW && in.light != LIGHT_UNSCALED {
         return vec4<f32>(vec3<f32>(0.0), base.a);
     }
-    let gain = select(2.0, 1.0 + glow_as(texel.a, in.color.a) / 128.0, in.light == LIGHT_GLOW)
-        * globals.glow_gain;
+    let gain = emission_gain(texel.a, in);
     let rgb = min(linear_to_srgb(base.rgb) * gain, vec3<f32>(2.0));
     return vec4<f32>(rgb * 0.5, select(base.a, 1.0, in.light == LIGHT_GLOW));
 }
@@ -1112,8 +1118,8 @@ fn spec_varyings(
     base.world_normal = world_normal;
     base.color = color;
     base.light = out.light;
-    if (light & 0x200u) != 0u {
-        base.region_top = vec4<f32>(cull, cull_near.x, cull_near.y + 1.0);
+    if (light & LIGHT_REGION) != 0u {
+        base.region_top = region_top(cull, cull_near);
         base.region_bottom = region_bottom;
     }
     out.lighting = vertex_lighting(base, lights);
@@ -1130,7 +1136,7 @@ fn spec_varyings(
     out.fog_depth = out.clip_pos.w;
     out.cull = cull;
     out.cull_near = cull_near;
-    if (light & 0x200u) != 0u {
+    if (light & LIGHT_REGION) != 0u {
         out.cull = vec2<f32>(1.0e9);
         out.cull_near = vec2<f32>(0.0);
     }
@@ -1229,8 +1235,8 @@ fn vs_skinned(in: VsSkinnedIn) -> VsOut {
     out.cull = in.cull;
     out.cull_near = in.cull_near;
     out.light = in.light & 0xffu;
-    if (in.light & 0x200u) != 0u {
-        out.region_top = vec4<f32>(in.cull, in.cull_near.x, in.cull_near.y + 1.0);
+    if (in.light & LIGHT_REGION) != 0u {
+        out.region_top = region_top(in.cull, in.cull_near);
         out.region_bottom = in.region_bottom;
         out.cull = vec2<f32>(1.0e9);
         out.cull_near = vec2<f32>(0.0);
@@ -1250,8 +1256,7 @@ fn bloom_light(in: VsOut) -> vec4<f32> {
     let uv = material_uv(in.uv);
     let texel = textureSample(t_color, s_color, uv);
     let base = texel * in.color;
-    let gain = select(2.0, 1.0 + glow_as(texel.a, in.color.a) / 128.0, in.light == LIGHT_GLOW)
-        * globals.glow_gain;
+    let gain = emission_gain(texel.a, in);
     let d = min(linear_to_srgb(base.rgb * detail_factor(uv)) * gain, vec3<f32>(2.0));
     let fogged = linear_to_srgb(apply_fog(srgb_to_linear(d), in.fog_depth));
     let coverage = select(base.a, 1.0, in.light == LIGHT_GLOW);

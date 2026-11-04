@@ -79,6 +79,7 @@ use crate::{Chunk, UcfbError};
 /// `hash_preimages_are_confirmed`).
 mod key {
     pub const EFFECT: u32 = 0x6e6e_8d54; // "Effect"
+    pub const HEIGHT: u32 = 0xd5bd_bb42;
     pub const TILE: u32 = 0x713a_7cc9; // "Tile"
     pub const VELOCITY: u32 = 0x3274_1c32; // "Velocity"
     pub const PATCH_DIVISIONS: u32 = 0x0090_36eb; // "PatchDivisions"
@@ -690,7 +691,7 @@ impl FogCloudConfig {
                 key::COLOR => f.color = c.f4(),
                 key::VELOCITY => f.velocity = Some(c.floats_or_zero()),
                 key::ROTATION => f.rotation = c.f32(0),
-                0xd5bd_bb42 => f.height = c.f32(0),
+                key::HEIGHT => f.height = c.f32(0),
                 key::PARTICLE_SIZE => f.particle_size = c.f32(0),
                 key::PARTICLE_DENSITY => f.particle_density = c.f32(0),
                 _ => {}
@@ -840,6 +841,7 @@ mod tests {
     fn hash_preimages_are_confirmed() {
         for (name, want) in [
             ("Effect", key::EFFECT),
+            ("Height", key::HEIGHT),
             ("Tile", key::TILE),
             ("Velocity", key::VELOCITY),
             ("PatchDivisions", key::PATCH_DIVISIONS),

@@ -15,16 +15,33 @@ fn resolve_default_path(candidates: &[&str]) -> Result<PathBuf> {
     ))
 }
 
-fn submit(
+fn draw(
     renderer: &mut render::Renderer,
     fx: &mut game::fx::Fx,
     weather: &mut Option<game::weather::Weather>,
+    draws: &[render::DrawCmd],
+    clear: [f64; 4],
     camera: &render::Camera,
-) {
+) -> Result<()> {
     let snow = weather
         .as_mut()
         .map_or_else(Vec::new, |w| w.frame_draws(renderer, camera, Vec3::ZERO));
     fx.submit_with(renderer, camera, snow);
+    renderer.render_frame(camera, draws, &[], clear, None)?;
+    Ok(())
+}
+
+fn capture(renderer: &mut render::Renderer, path: &Path) -> Result<Vec<u8>> {
+    let (rgba, width, height) = renderer.capture_rgba()?;
+    std::fs::write(path, render::encode_png_rgb(&rgba, width, height)?)?;
+    Ok(rgba)
+}
+
+fn capture_named(renderer: &mut render::Renderer, out: &Path, name: &str) -> Result<Vec<u8>> {
+    let path = out.join(name);
+    let rgba = capture(renderer, &path)?;
+    println!("Wrote {}", path.display());
+    Ok(rgba)
 }
 
 fn main() -> Result<()> {
@@ -112,6 +129,7 @@ fn main() -> Result<()> {
     std::fs::create_dir_all(&out)?;
     let mut renderer = render::Renderer::new_headless(856, 642)?;
     let mut gpu = game::viewer::upload_scene(&mut renderer, &scene)?;
+    let clear = game::viewer::clear_color(&scene);
     if std::env::var_os("CAPTURE_NO_CLOUD").is_some() {
         renderer.set_fog_cloud(None);
     }
@@ -148,19 +166,18 @@ fn main() -> Result<()> {
                 w.update(1.0 / 30.0);
             }
         }
-        submit(&mut renderer, &mut fx, &mut weather, &camera);
-        renderer.render_frame(
-            &camera,
+        draw(
+            &mut renderer,
+            &mut fx,
+            &mut weather,
             &gpu.draws,
-            &[],
-            game::viewer::clear_color(&scene),
-            None,
+            clear,
+            &camera,
         )?;
         if tick % (30 / hz) == 0 {
-            let (rgba, width, height) = renderer.capture_rgba()?;
-            std::fs::write(
-                out.join(format!("{:03}.png", tick / (30 / hz))),
-                render::encode_png_rgb(&rgba, width, height)?,
+            capture(
+                &mut renderer,
+                &out.join(format!("{:03}.png", tick / (30 / hz))),
             )?;
             if tick % 30 == 0 {
                 println!("t={time:.0}: {} live world effects", fx.len());
@@ -226,36 +243,28 @@ fn main() -> Result<()> {
     for shell in renderer.sky_mut() {
         shell.lit = false;
     }
-    submit(&mut renderer, &mut fx, &mut weather, &ship_camera);
-    renderer.render_frame(
-        &ship_camera,
+    draw(
+        &mut renderer,
+        &mut fx,
+        &mut weather,
         &gpu.draws,
-        &[],
-        game::viewer::clear_color(&scene),
-        None,
+        clear,
+        &ship_camera,
     )?;
-    let (rgba_unshaded, width, height) = renderer.capture_rgba()?;
-    let png_unshaded = render::encode_png_rgb(&rgba_unshaded, width, height)?;
-    let unshaded_path = out.join("ship_unshaded.png");
-    std::fs::write(&unshaded_path, png_unshaded)?;
-    println!("Wrote {}", unshaded_path.display());
+    let rgba_unshaded = capture_named(&mut renderer, &out, "ship_unshaded.png")?;
 
     for (shell, lit) in renderer.sky_mut().iter_mut().zip(material_lighting) {
         shell.lit = lit;
     }
-    submit(&mut renderer, &mut fx, &mut weather, &ship_camera);
-    renderer.render_frame(
-        &ship_camera,
+    draw(
+        &mut renderer,
+        &mut fx,
+        &mut weather,
         &gpu.draws,
-        &[],
-        game::viewer::clear_color(&scene),
-        None,
+        clear,
+        &ship_camera,
     )?;
-    let (rgba_shaded, width, height) = renderer.capture_rgba()?;
-    let png_shaded = render::encode_png_rgb(&rgba_shaded, width, height)?;
-    let shaded_path = out.join("ship_shaded.png");
-    std::fs::write(&shaded_path, png_shaded)?;
-    println!("Wrote {}", shaded_path.display());
+    let rgba_shaded = capture_named(&mut renderer, &out, "ship_shaded.png")?;
 
     let pixel_diff = rgba_unshaded
         .as_chunks::<4>()
@@ -277,36 +286,28 @@ fn main() -> Result<()> {
     println!("Capturing paused_frame_0.png vs paused_frame_1.png...");
     let frozen_time = renderer.atmosphere_time.unwrap_or(5.0);
     renderer.atmosphere_time = Some(frozen_time);
-    submit(&mut renderer, &mut fx, &mut weather, &ship_camera);
-    renderer.render_frame(
-        &ship_camera,
+    draw(
+        &mut renderer,
+        &mut fx,
+        &mut weather,
         &gpu.draws,
-        &[],
-        game::viewer::clear_color(&scene),
-        None,
+        clear,
+        &ship_camera,
     )?;
-    let (rgba_paused_0, width, height) = renderer.capture_rgba()?;
-    let png_paused_0 = render::encode_png_rgb(&rgba_paused_0, width, height)?;
-    let paused_0_path = out.join("paused_frame_0.png");
-    std::fs::write(&paused_0_path, png_paused_0)?;
-    println!("Wrote {}", paused_0_path.display());
+    let rgba_paused_0 = capture_named(&mut renderer, &out, "paused_frame_0.png")?;
 
     for _ in 0..30 {
         renderer.advance_sky();
-        submit(&mut renderer, &mut fx, &mut weather, &ship_camera);
-        renderer.render_frame(
-            &ship_camera,
+        draw(
+            &mut renderer,
+            &mut fx,
+            &mut weather,
             &gpu.draws,
-            &[],
-            game::viewer::clear_color(&scene),
-            None,
+            clear,
+            &ship_camera,
         )?;
     }
-    let (rgba_paused_1, width, height) = renderer.capture_rgba()?;
-    let png_paused_1 = render::encode_png_rgb(&rgba_paused_1, width, height)?;
-    let paused_1_path = out.join("paused_frame_1.png");
-    std::fs::write(&paused_1_path, png_paused_1)?;
-    println!("Wrote {}", paused_1_path.display());
+    let rgba_paused_1 = capture_named(&mut renderer, &out, "paused_frame_1.png")?;
 
     anyhow::ensure!(
         rgba_paused_0 == rgba_paused_1,

@@ -26,8 +26,11 @@ impl Vertex {
         }
     }
 }
-fn gs(c: [f32; 4]) -> [f32; 4] {
-    c.map(|v| ((v + 1.0) * 0.5).floor() / 128.0)
+fn gs_byte(v: f32) -> f32 {
+    ((v + 1.0) * 0.5).floor() / 128.0
+}
+pub(super) fn gs(c: [f32; 4]) -> [f32; 4] {
+    c.map(gs_byte)
 }
 struct Mesh {
     vertices: Vec<Vertex>,

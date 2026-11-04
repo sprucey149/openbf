@@ -378,7 +378,7 @@ impl Sim {
                 .map_or(&[][..], Vec::as_slice);
             self.collision.replace_instance(instance, parts, pose);
             self.collision.bind_station(instance, station);
-            let bodies = if s.radius > 0.0 {
+            let bodies = if s.serves() {
                 self.collision.prepare_rotation(instance, pose)
             } else {
                 Vec::new()

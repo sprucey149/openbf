@@ -1,4 +1,4 @@
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3, Vec3Swizzles};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Flight {
@@ -47,10 +47,7 @@ impl Flight {
     }
 
     fn random(&mut self) -> f32 {
-        self.rng = self.rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        let hi = self.rng >> 16;
-        self.rng = self.rng.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-        f32::from_bits(0x3f80_0000 | ((hi | (self.rng & 0xffff_0000)) >> 9)) - 1.0
+        crate::rand::unit(&mut self.rng)
     }
 
     fn sample(&mut self, range: [f32; 2]) -> f32 {
@@ -137,8 +134,6 @@ impl Flight {
         self.alpha.abs()
     }
 }
-
-use glam::Vec3Swizzles;
 
 #[cfg(test)]
 mod tests {

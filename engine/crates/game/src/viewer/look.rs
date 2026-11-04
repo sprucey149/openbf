@@ -757,6 +757,14 @@ fn character_light_region(r: &manifest::ManifestRegion) -> Option<render::Charac
     has_lighting.then_some(light)
 }
 
+pub(super) fn atmosphere_display_gain(m: &manifest::Manifest) -> f32 {
+    if m.hdr.is_some() {
+        2.0
+    } else {
+        1.0
+    }
+}
+
 pub(super) fn hallway_lamp_bloom(m: &manifest::Manifest, material: Option<&str>) -> f32 {
     if m.source_game == "bf2" && m.map == "mus1" && material == Some("mus1_bldg_control06") {
         (30.0_f32 / 28.0).powi(10)

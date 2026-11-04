@@ -67,11 +67,6 @@ impl Look {
         [ch(0), ch(1), ch(2), alpha]
     }
 
-    fn edge(&self) -> [u8; 4] {
-        let ch = |i: usize| ((self.water[i] * 128.0).round() as u8).saturating_mul(2);
-        [ch(0), ch(1), ch(2), 0]
-    }
-
     fn wake_shade(&self, water: [f32; 3], d: f32, alpha: u8) -> [u8; 4] {
         let rgb = std::array::from_fn::<_, 3, _>(|i| {
             let ambient = water[i] * self.ambient[i];
@@ -82,6 +77,11 @@ impl Look {
         });
         [rgb[0], rgb[1], rgb[2], alpha]
     }
+}
+
+fn edge_of(water: [f32; 3]) -> [u8; 4] {
+    let ch = |i: usize| ((water[i] * 128.0).round() as u8).saturating_mul(2);
+    [ch(0), ch(1), ch(2), 0]
 }
 
 pub fn ring(look: &Look, centre: Vec3, radius: f32, life: f32, age: f32) -> Vec<Vertex> {
@@ -120,6 +120,7 @@ fn surface_ring(
     let mut water = look.water;
     let mut direction = Vec3::X;
     let mut horizontal_speed = 0.0;
+    let mut relative = 0.0;
     if let Some(velocity) = velocity {
         let speed = velocity.length();
         if speed <= 0.0 {
@@ -129,7 +130,7 @@ fn surface_ring(
         let horizontal = Vec3::new(velocity.x, 0.0, velocity.z);
         horizontal_speed = horizontal.length();
         direction = horizontal.try_normalize().unwrap_or(Vec3::X);
-        let relative = horizontal_speed * (2.0 / 3.0);
+        relative = horizontal_speed * (2.0 / 3.0);
         let strength = (relative - 1.0) * (relative - 1.0) * 4.0 + 0.4;
         p *= strength / (strength + 1.0);
         if relative >= 1.0 && p > 0.3 {
@@ -138,12 +139,7 @@ fn surface_ring(
         }
     }
     let flat = f32::from_bits(0x3f00_a3d7);
-    let edge = if velocity.is_some() {
-        let rgb = water.map(|v| ((v * 128.0).round() as u8).saturating_mul(2));
-        [rgb[0], rgb[1], rgb[2], 0]
-    } else {
-        look.edge()
-    };
+    let edge = edge_of(water);
     let l = look.light;
     let columns: Vec<[Vertex; 4]> = (0..COLUMNS)
         .map(|j| {
@@ -151,7 +147,6 @@ fn surface_ring(
             let radial = Vec3::new(c, 0.0, s);
             let mut amplitude = p;
             if velocity.is_some() {
-                let relative = horizontal_speed * (2.0 / 3.0);
                 let facing = radial.dot(direction);
                 let shape = if relative > 1.0 {
                     let delta = 1.0 - relative * facing;
