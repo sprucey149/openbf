@@ -1,15 +1,15 @@
 # OpenBF - Star Wars Battlefront 1 & 2 Open-Source Reimplementation
 
-Star Wars: Battlefront and Star Wars: Battlefront II, rebuilt as one modern game in Rust. Supply any
-copy of the games you own, whether PC, Xbox or PS2, and openbf builds the game from it. Every copy plays
-the same game, so everyone can play together.
+OpenBF is an open-source Rust reimplementation of the original Star Wars: Battlefront (2004) and Star Wars: Battlefront II (2005), combining both classic games into one native experience, currently supported on Windows and Linux (Mac coming soon).
+
+OpenBF uses a newly written game engine. Players supply both game copies from either the PC, Xbox, or PS2 versions of the game you own, and OpenBF builds the game from it. Every copy plays the same game, so everyone can play together.
+
+**Current status:** Playable work in progress, with all 34 ground maps included. Some game modes and features are still under development.
 
 **Unofficial fan project.** Not affiliated with or endorsed by Lucasfilm, Disney,
 Electronic Arts, LucasArts or Pandemic Studios. This repository contains no game
 assets: you need your own copies of both games (see [What you need](#what-you-need)).
 Everything the game needs is extracted from your copies on your own machine.
-
-Work in progress: playable, but far from finished.
 
 **Want to help develop it? Start with the [open issues](https://github.com/sprucey149/openbf/issues).**
 Comment on an unassigned task and wait for confirmed scope and assignment before coding,
