@@ -10,15 +10,16 @@ const REPORT_SECS: u64 = 10;
 fn default_mission(v: &ViewerArgs) -> Option<PathBuf> {
     let root = v.map.parent()?.parent().unwrap_or(std::path::Path::new(""));
     let key = v.map.file_name()?.to_string_lossy();
-    let path = root.join("missions").join(format!("{key}_{}.ron", v.mode));
+    let mode = &v.mode;
+    let path = root.join("missions").join(format!("{key}_{mode}.ron"));
     (v.mode != "con" && pak::read_to_string(&path).is_ok()).then_some(path)
 }
 
-fn fielded(walk: &game::walk::WalkSim, team: u8) -> BTreeMap<String, u32> {
+fn fielded<'a>(walk: &'a game::walk::WalkSim, team: u8) -> BTreeMap<&'a str, u32> {
     let mut classes = BTreeMap::new();
     for unit in walk.sim.units.iter().filter(|u| u.alive && u.team == team) {
         let class = walk.team_template(team).class(unit.spec.class);
-        *classes.entry(class.name.clone()).or_insert(0) += 1;
+        *classes.entry(class.name.as_str()).or_insert(0) += 1;
     }
     classes
 }
@@ -76,7 +77,11 @@ pub(super) fn run(v: &ViewerArgs, seconds: u32) -> Result<()> {
             let classes = fielded(&walk, team);
             most[usize::from(team)] = most[usize::from(team)].max(classes.len());
             for class in classes.into_keys() {
-                *seen[usize::from(team)].entry(class).or_insert(0u64) += 1;
+                if let Some(count) = seen[usize::from(team)].get_mut(class) {
+                    *count += 1;
+                } else {
+                    seen[usize::from(team)].insert(class.to_owned(), 1);
+                }
             }
         }
         if tick.is_multiple_of(REPORT_SECS * hz) || walk.sim.outcome.is_some() {
@@ -108,7 +113,9 @@ pub(super) fn run(v: &ViewerArgs, seconds: u32) -> Result<()> {
         );
     }
     let snapshot = black_box.snapshot("timed_battle", Some(&walk), None);
-    let path = dir.join(format!("{map}_{}_{}.json", v.mode, v.seed));
+    let mode = &v.mode;
+    let seed = v.seed;
+    let path = dir.join(format!("{map}_{mode}_{seed}.json"));
     game::blackbox::write_to(&path, &snapshot)?;
     println!("black box: {}", path.display());
     Ok(())

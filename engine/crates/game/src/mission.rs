@@ -947,9 +947,10 @@ mod tests {
                 matches!(m.era.as_deref(), Some("cw") | Some("gcw")),
                 "{stem}: era must be cw or gcw"
             );
+            let mode = &m.mode;
             assert!(
                 stem.starts_with(&m.map)
-                    && stem[m.map.len()..].starts_with(&format!("_{}", m.mode)),
+                    && stem[m.map.len()..].starts_with(&format!("_{mode}")),
                 "{stem}: file name does not match map {:?}/mode {:?}",
                 m.map,
                 m.mode

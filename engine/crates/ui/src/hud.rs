@@ -488,13 +488,14 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     let own = usize::from(m.player_team.min(1));
     for (slot, team) in [(1, own), (2, 1 - own)] {
         if let Some((points, limit)) = m.team_points {
+            let pts = points[team];
             put(
                 &format!("player1.team{slot}.points"),
-                EventValue::Number(points[team] as f32),
+                EventValue::Number(pts as f32),
             );
             put(
                 &format!("player1.team{slot}.pointsText"),
-                EventValue::Text(format!("{}/{limit}", points[team])),
+                EventValue::Text(format!("{pts}/{limit}")),
             );
             continue;
         }

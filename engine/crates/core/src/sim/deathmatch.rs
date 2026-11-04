@@ -37,15 +37,15 @@ impl Sim {
         if self.outcome.is_some() {
             return;
         }
+        let Some(deathmatch) = self.deathmatch.as_mut() else {
+            return;
+        };
         let Some(killer_team) = self.units.get(killer.index as usize).map(|u| u.team) else {
             return;
         };
         if killer_team == victim_team || killer_team > 1 {
             return;
         }
-        let Some(deathmatch) = self.deathmatch.as_mut() else {
-            return;
-        };
         let team = usize::from(killer_team);
         deathmatch.points[team] += 1;
         if deathmatch.points[team] >= deathmatch.score_limit {
