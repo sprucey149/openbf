@@ -112,9 +112,7 @@ impl Fx {
             walk.blend_out();
         }
         self.update(dt);
-        for (index, frame) in saved {
-            self.live[index].frame = frame;
-        }
+        self.restore_round_frames(saved);
     }
 
     /// Card JETP2: keep a jet effect on every soldier in a jet stance whose

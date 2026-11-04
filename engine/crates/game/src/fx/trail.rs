@@ -139,7 +139,7 @@ pub(super) fn along(vel: Vec3) -> Mat3 {
 impl Fx {
     /// Move attached heads to the render pose while retaining world-space
     /// exhaust history. The caller restores these frames after submission.
-    pub(super) fn drawn_round_frames(&mut self, sim: &Sim) -> Vec<(usize, Frame)> {
+    pub(super) fn drawn_round_frames(&mut self, sim: &Sim) -> Vec<(Round, Frame)> {
         if self.rounds.tick != Some(sim.tick) {
             return Vec::new();
         }
@@ -165,14 +165,34 @@ impl Fx {
             })
             .collect();
         let mut saved = Vec::new();
-        for (index, e) in self.live.iter_mut().enumerate() {
-            if let Some((pos, vel)) = e.round.and_then(|r| frames.get(&r)) {
-                saved.push((index, e.frame));
+        for e in self.live.iter_mut() {
+            let Some(round) = e.round else { continue };
+            if let Some((pos, vel)) = frames.get(&round) {
+                saved.push((round, e.frame));
                 e.frame.pos = *pos;
                 e.frame.vel = *vel;
             }
         }
         saved
+    }
+
+    /// Put back the frames [`Self::drawn_round_frames`] replaced. The update in
+    /// between drops finished effects, so match by round (in live order) rather
+    /// than by index: an index saved before the update can point past the end.
+    pub(super) fn restore_round_frames(&mut self, saved: Vec<(Round, Frame)>) {
+        let mut by_round: HashMap<Round, VecDeque<Frame>> = HashMap::new();
+        for (round, frame) in saved {
+            by_round.entry(round).or_default().push_back(frame);
+        }
+        for e in &mut self.live {
+            if let Some(frame) = e
+                .round
+                .and_then(|r| by_round.get_mut(&r))
+                .and_then(VecDeque::pop_front)
+            {
+                e.frame = frame;
+            }
+        }
     }
 
     pub(super) fn follow_rounds(&mut self, sim: &Sim) {
@@ -414,9 +434,7 @@ mod tests {
         assert_eq!(saved.len(), 1);
         assert_eq!(fx.live[0].frame.pos, sim.bolts[0].pos);
         assert_eq!(fx.live[0].t, clock);
-        for (i, old) in saved {
-            fx.live[i].frame = old;
-        }
+        fx.restore_round_frames(saved);
         assert_eq!(fx.live[0].frame, frame);
         sim.tick += 1;
         assert!(
@@ -486,6 +504,40 @@ mod tests {
             "tick emitter frame restored"
         );
         assert_eq!(walk.sim.hash(), hash, "emission must restore the tick pose");
+    }
+
+    /// The update between saving and restoring drops finished effects, so a
+    /// saved frame must find its effect by round, not by a stale index (a
+    /// rocket exhaust ending on that frame used to panic: index out of bounds).
+    #[test]
+    fn restoring_drawn_frames_survives_effects_finishing_in_between() {
+        use super::super::{
+            emitter::{Era, Lcg},
+            EffectDef, LiveEffect,
+        };
+        let em = super::super::tests::one_shot_emitter();
+        let def = std::sync::Arc::new(EffectDef::new(0, None, vec![em], Era::Bf2, &mut Lcg(7)));
+        let key = |n: u32| Round::Sticky(u64::from(n));
+        let mut fx = Fx::default();
+        for n in 0..3u32 {
+            let mut e = LiveEffect::new(def.clone(), Frame::at(Vec3::X * n as f32), &mut Lcg(7));
+            e.round = Some(key(n));
+            fx.live.push(e);
+        }
+        let saved: Vec<_> = fx
+            .live
+            .iter()
+            .map(|e| (e.round.unwrap(), e.frame))
+            .collect();
+        for e in &mut fx.live {
+            e.frame.pos = Vec3::splat(99.0);
+        }
+        // The update retires the first effect, shifting the others down.
+        fx.live.remove(0);
+        fx.restore_round_frames(saved);
+        assert_eq!(fx.live.len(), 2);
+        assert_eq!(fx.live[0].frame.pos, Vec3::X);
+        assert_eq!(fx.live[1].frame.pos, Vec3::X * 2.0);
     }
 
     /// A missile steers before it moves (`Sim::fly_missiles`), so its next

@@ -1032,9 +1032,7 @@ impl Fx {
     ) {
         let saved = self.drawn_round_frames(&walk.sim);
         self.submit_zoomed(r, camera, walk.zoom_s, extra);
-        for (index, frame) in saved {
-            self.live[index].frame = frame;
-        }
+        self.restore_round_frames(saved);
     }
 
     /// Submit with the camera's PS2 zoom scale (particle far fade and density).
