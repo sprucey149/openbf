@@ -428,10 +428,30 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
-        Some("sounds") if args.len() == 4 || args.len() == 5 => {
+        Some("sounds") if (4..=7).contains(&args.len()) => {
             // <sound lvl> <mapdir> [the game's CORE.LVL: the Inherit templates]
-            let core = args.get(4).map(|s| ci(s));
-            let r = bake::sounds::bake_sounds(&ci(&args[2]), &args[3], core.as_deref())?;
+            // [--donor-bnk <another edition's common.bnk>: real takes for the disc's aliases]
+            let mut rest: Vec<&String> = args[4..].iter().collect();
+            let donor = match rest.iter().position(|a| *a == "--donor-bnk") {
+                Some(i) if i + 1 < rest.len() => {
+                    let d = ci(rest[i + 1]);
+                    rest.drain(i..=i + 1);
+                    Some(d)
+                }
+                Some(_) => bail!("--donor-bnk needs a file"),
+                None => None,
+            };
+            anyhow::ensure!(
+                rest.len() <= 1,
+                "bake sounds: unexpected arguments {rest:?}"
+            );
+            let core = rest.first().map(|s| ci(s));
+            let r = bake::sounds::bake_sounds_with_donor(
+                &ci(&args[2]),
+                &args[3],
+                core.as_deref(),
+                donor.as_deref().map(Path::new),
+            )?;
             println!(
                 "baked sounds '{}': {} banks, {} samples, {} properties \
                  ({} odd frequency) -> {}/sounds",
@@ -548,7 +568,7 @@ fn main() -> Result<()> {
                  \x20 bake common     <common.lvl> <outdir> [pc.lvl]  shared models/textures/classes\n\
                  \x20 bake classes    <file.lvl>   <out.ron>      entc/wpnc/ordc/expc props\n\
                  \x20 bake loadscreen <load.lvl>   <mapdir>       load screen sequence/pool\n\
-                 \x20 bake sounds     <sound.lvl>  <mapdir> [CORE.LVL]  sample banks + snd_ props (templates from CORE)\n\
+                 \x20 bake sounds     <sound.lvl>  <mapdir> [CORE.LVL] [--donor-bnk <bnk>]  sample banks + snd_ props\n\
                  \x20 bake map-icons  <outdir> <side.lvl>...      class-authored minimap sheets\n\
                  \x20 bake xbox-icons <xbox common.lvl> <outdir>  the original Xbox pad's button icons\n\
                  \x20 bake shell     <SHELL.LVL> <SHELL.MVS> <SOUND/SHELL.LVL> <CORE.LVL> <outdir>  BF2 shell logo, menu movie, music\n\

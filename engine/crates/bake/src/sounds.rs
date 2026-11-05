@@ -196,12 +196,26 @@ pub(crate) fn find_common_bnk(lvl_path: &Path) -> Option<std::path::PathBuf> {
 }
 
 pub(crate) fn common_bnk_samples(bnk_buf: &[u8]) -> HashMap<u32, (u32, u32, u32, &[u8])> {
+    bnk_samples(bnk_buf, false)
+}
+
+/// A bank file's own recordings by id; its aliases, which hold no take of
+/// their own, are left out.
+fn real_bnk_samples(bnk_buf: &[u8]) -> HashMap<u32, (u32, u32, u32, &[u8])> {
+    bnk_samples(bnk_buf, true)
+}
+
+fn bnk_samples(bnk_buf: &[u8], real_only: bool) -> HashMap<u32, (u32, u32, u32, &[u8])> {
     let mut out = HashMap::new();
     let Ok(inner) = mungefs::open(bnk_buf) else {
         return out;
     };
     for b in mungefs::soundbank::find_banks_deep(inner) {
-        for s in &b.samples {
+        for s in b
+            .samples
+            .iter()
+            .filter(|s| !real_only || s.alias_of.is_none())
+        {
             if let Some(slice) = b.data.get(s.offset..s.offset.saturating_add(s.size)) {
                 out.insert(s.id_hash, (b.format, s.frequency, s.frames, slice));
             }
@@ -217,6 +231,21 @@ pub(crate) fn common_bnk_samples(bnk_buf: &[u8]) -> HashMap<u32, (u32, u32, u32,
 /// not define; with CORE none is left unresolved - card SNDT), and without
 /// it a weapon's fire kept gain 1.0 and the 5 - 50 m default.
 pub fn bake_sounds(sound_lvl: &str, outdir: &str, core_lvl: Option<&str>) -> Result<SoundsRon> {
+    bake_sounds_with_donor(sound_lvl, outdir, core_lvl, None)
+}
+
+/// [`bake_sounds`] with another edition's sample bank as an audio donor. The
+/// PS2 discs alias hundreds of samples to other takes to save console memory
+/// (on Mos Eisley 317 of 321 aliases; Leia's cries play the male rebel takes),
+/// where the PC keeps each as its own recording under the same id. A donor's
+/// real recording replaces such an alias; the properties, mix and every
+/// sample the disc does hold stay the disc's.
+pub fn bake_sounds_with_donor(
+    sound_lvl: &str,
+    outdir: &str,
+    core_lvl: Option<&str>,
+    donor_bnk: Option<&Path>,
+) -> Result<SoundsRon> {
     let buf = std::fs::read(sound_lvl).with_context(|| sound_lvl.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir).join("sounds");
@@ -226,6 +255,13 @@ pub fn bake_sounds(sound_lvl: &str, outdir: &str, core_lvl: Option<&str>) -> Res
     let common_samples = bnk_buf
         .as_deref()
         .map(common_bnk_samples)
+        .unwrap_or_default();
+    let donor_buf = donor_bnk
+        .map(|p| std::fs::read(p).with_context(|| p.display().to_string()))
+        .transpose()?;
+    let donor_samples = donor_buf
+        .as_deref()
+        .map(real_bnk_samples)
         .unwrap_or_default();
 
     let banks = mungefs::soundbank::find_banks_deep(inner);
@@ -271,6 +307,14 @@ pub fn bake_sounds(sound_lvl: &str, outdir: &str, core_lvl: Option<&str>) -> Res
         }
         for s in b.samples.iter().filter(|s| s.alias_of.is_some()) {
             if seen.contains(&s.id_hash) {
+                continue;
+            }
+            if let Some(&(format, rate, _, data_slice)) = donor_samples.get(&s.id_hash) {
+                let pcm = crate::adpcm::decode_bank_sample(format, data_slice);
+                let rel = format!("{:08x}/{:08x}.wav", b.name_hash, s.id_hash);
+                std::fs::write(out.join(&rel), crate::adpcm::wav_mono_s16(rate, &pcm))?;
+                seen.insert(s.id_hash);
+                samples.push((s.id_hash, rel));
                 continue;
             }
             let target = s.alias_of.unwrap();

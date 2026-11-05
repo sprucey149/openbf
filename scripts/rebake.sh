@@ -563,27 +563,40 @@ if want sounds; then
   echo "== map sound banks =="
   # The game's CORE.LVL goes in too: a property's Inherit template (distances,
   # gain, rolloff) is there, not in the planet's LVL (card SNDT).
-  bake_map_sounds() {  # <sound root> <map dir name> <map short name> <CORE.LVL>
-    local root="$1" dir="$2" short="$3" core="$4"
+  # A PC install donates its own recordings for the samples a console disc
+  # aliases to other takes (bake::sounds::bake_sounds_with_donor); the disc's
+  # properties and mix are kept. PC-only trees read the PC banks directly.
+  donor_bnk() {  # <PC _lvl_pc dir or empty> <the sound root in use>
+    local bnk
+    [ -n "$1" ] && [ "$1" != "$2" ] || return 0
+    bnk="$(ci "$1" SOUND/COMMON.BNK)"
+    [ -f "$bnk" ] && printf '%s' "$bnk"
+    return 0
+  }
+  D1="$(donor_bnk "${PC1:-}" "$S1")"
+  D2="$(donor_bnk "${PC2:-}" "$S2")"
+  echo "Sound sample donors: BF1=${D1:-none} BF2=${D2:-none}"
+  bake_map_sounds() {  # <sound root> <map dir name> <map short name> <CORE.LVL> [donor bnk]
+    local root="$1" dir="$2" short="$3" core="$4" donor="${5:-}"
     local planet sf
     planet=$(echo "${short:0:3}" | tr 'a-z' 'A-Z')
     sf="$(ci "$root" "SOUND/$planet.LVL")"
     if [ -f "$sf" ]; then
       clean "$OUT/$dir/sounds"
-      "$BAKE" sounds "$sf" "$OUT/$dir" "$core"
+      "$BAKE" sounds "$sf" "$OUT/$dir" "$core" ${donor:+--donor-bnk "$donor"}
     else
       echo "  (no SOUND/$planet.LVL for $dir — skipped)"
     fi
   }
   C1="$(ci "$B1" CORE.LVL)"
   C2="$(ci "$B2" CORE.LVL)"
-  bake_map_sounds "$S1" tat1 tat1 "$C1"
-  bake_map_sounds "$S2" tat2 tat2 "$C2"
+  bake_map_sounds "$S1" tat1 tat1 "$C1" "$D1"
+  bake_map_sounds "$S2" tat2 tat2 "$C2" "$D2"
   for p in $BF1_MAPS; do
-    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S1" "bf1_$n" "$n" "$C1"
+    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S1" "bf1_$n" "$n" "$C1" "$D1"
   done
   for p in $BF2_MAPS; do
-    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2"
+    n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2" "$D2"
   done
   # The RESIDENT bank both games load and never unload: CORE.LVL's `global`
   # SampleBank + `snd_` — every shell/load sound, incl. shell_menu_accept
