@@ -73,7 +73,7 @@ pub use rotating::PREVIOUS;
 /// 2026-10-28, building turrets): every hit on a vehicle's or turret's pool
 /// the human deals or takes in his ride (`vhit`). 13 (issue #58): a unit's
 /// remote droid target (`target_droid`). An older file still reads.
-pub const SCHEMA: u32 = 13;
+pub const SCHEMA: u32 = 14;
 /// Ticks between two unit frames (0.5 s).
 pub const UNIT_PERIOD: u64 = core::TICK_HZ as u64 / 2;
 /// Ticks between two world frames (2 s).
@@ -186,6 +186,19 @@ pub struct Frame {
 
 /// A pick or magnet as [`HumanRow::reticle`] writes it: a unit's slot, or
 /// -2 - a vehicle's.
+/// The hash of a unit's saber combo state name, 0 without a saber combo.
+fn combo_state_hash(sim: &core::sim::Sim, u: &core::unit::Unit) -> u32 {
+    let Some(state) = u.weapon.melee.as_ref() else {
+        return 0;
+    };
+    sim.weapon_classes
+        .get(u.weapon_class)
+        .and_then(|c| c.saber.as_ref())
+        .and_then(|s| s.combo.states().nth(state.runtime.state))
+        .and_then(|f| f.text(0))
+        .map_or(0, crate::classdb::fnv1a_lowercase)
+}
+
 fn target_code(t: AimTarget) -> i32 {
     match t {
         AimTarget::Unit(h) => h.index as i32,
@@ -235,6 +248,14 @@ pub struct HumanRow {
     /// The vehicle slot and seat ridden, -1 on foot.
     pub veh: i32,
     pub seat: u8,
+    /// The buttons the sim took as presses this tick (schema 14).
+    #[serde(default)]
+    pub edges: u32,
+    /// The saber combo state after the tick, as the hash of its name
+    /// (`fnv1a_lowercase`, resolvable from the combo files); 0 without one
+    /// (schema 14).
+    #[serde(default)]
+    pub combo: u32,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -1012,6 +1033,8 @@ impl Ring {
             magnet: sim.magnet_at(0).map_or(-1, target_code),
             veh: u.mount.map_or(-1, |m| m.vehicle.index as i32),
             seat: u.mount.map_or(0, |m| m.seat),
+            edges: sim.press_edges_of(walk.player.index as usize),
+            combo: combo_state_hash(sim, u),
         }
     }
 
@@ -1309,7 +1332,7 @@ impl Ring {
         for (k, v) in [
             ("ticks", "30 per second of game time; header.time = tick / 30"),
             ("frames", "every alive unit every 0.5 s, oldest first; keys below"),
-            ("human", "the player: every 0.5 s, then every tick for the last 5 s; lx/ly/rx/ry sticks -32767..32767; buttons bits 1 fire 2 jump 4 roll/stance 8 sprint 16 zoom 32 reload 64 action 128 switch 256 secondary fire 512-4096 squad follow / hold / at ease / move out 8192 / 16384 spawn class next / prev 32768 switch secondary 65536-524288 spawn post up / down / left / right 1048576 spawn accept 2097152 spawn back 4194304 pause-menu respawn 8388608 mouse aim (aim assist off); mx/my the mouse look the tick took, 1/65536 rad (mx + turns right, my + looks up), 0 = none or a controller"),
+            ("human", "the player: every 0.5 s, then every tick for the last 5 s; lx/ly/rx/ry sticks -32767..32767; buttons bits 1 fire 2 jump 4 roll/stance 8 sprint 16 zoom 32 reload 64 action 128 switch 256 secondary fire 512-4096 squad follow / hold / at ease / move out 8192 / 16384 spawn class next / prev 32768 switch secondary 65536-524288 spawn post up / down / left / right 1048576 spawn accept 2097152 spawn back 4194304 pause-menu respawn 8388608 mouse aim (aim assist off); mx/my the mouse look the tick took, 1/65536 rad (mx + turns right, my + looks up), 0 = none or a controller; edges the buttons taken as presses this tick; combo the saber combo state after it (name hash, 0 none)"),
             ("world", "every 2 s: tickets, bleed/s, alive, posts (owner -1 neutral, cap charge and cap_team its team, neutral the neutralise charge, inside the counting units per team, times CaptureTime / NeutralizeTime), vehicles (kind 0 hover 1 walker 2 flyer 3 turret; riders by seat), doors (0 shut..1 open)"),
             ("events", "kill: a killer b victim c the killer's weapon in hand (a seat gun's or a thrown grenade's kill reads as it); death_region/fall/rider_death/blast/kill_floor/under_map/lost/recycle: a unit; spawn/despawn: a unit; captured/neutralized/saved: a post b team; vehicle_lost: a vehicle b killer c class; order: a slot b kind c bots; voice: text; stuck: a unit b body (a no-progress run reached 3 s); shot: the human a fired weapon c; hit: a hit b (one of them the human), c a's weapon in hand, v = damage, b's health after, the round's age (-1 = a blast; schema < 11: 0 = a blast or a first-update bolt); vehicle_hit (schema 12): a (-1 a collision) damaged vehicle or building turret b (the human a or a rider of b), c a's weapon in hand, v = damage, b's health at the tick's end (0 = destroyed)"),
             ("trails", "each unit's last 10 s of positions at 4 Hz, oldest first, ending at its own tick: header.trail_tick for a unit alive then, earlier for one that died (its slot not yet respawned); gen is that life's generation"),

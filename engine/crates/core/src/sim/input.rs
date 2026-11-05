@@ -819,6 +819,12 @@ impl Sim {
         Some((out, st, kept))
     }
 
+    /// The buttons unit `unit` pressed this tick (held now, not last tick);
+    /// 0 for a bot or no such unit. Read by the black box.
+    pub fn press_edges_of(&self, unit: usize) -> u32 {
+        self.press_edges.get(unit).copied().unwrap_or(0)
+    }
+
     /// The aim magnet of player slot `slot` (`None` when that slot has no
     /// target, or no such slot). The HUD reads slot 0.
     pub fn magnet_at(&self, slot: usize) -> Option<AimTarget> {
