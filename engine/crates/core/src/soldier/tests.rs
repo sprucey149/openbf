@@ -1120,6 +1120,32 @@ fn knock_bf1_the_ps2_players_impulse() {
     assert!(s.vel.y > 10.0);
 }
 
+/// BF2's flinch (§4): a saber-sized push that neither throws nor tumbles
+/// still stops a sprint and locks every input; a weak one only moves him;
+/// in the air the lock is longer and starts at a lower push.
+#[test]
+fn knock_bf2_a_push_short_of_a_throw_flinches() {
+    let flat = Vec3::new(1.0, 0.0, 0.0);
+    let mut s = Soldier::new(Vec3::ZERO);
+    s.stance = Stance::Sprint;
+    s.knock(flat, 4.0, GroundRules::Bf2, 0.0);
+    assert_eq!(s.stance, Stance::Stand, "the sprint ends");
+    assert!(s.lock_hard && s.fire_lock && s.lock_timer == BF2_FLINCH_FLOOR_SECS);
+    let mut weak = Soldier::new(Vec3::ZERO);
+    weak.knock(flat, 1.5, GroundRules::Bf2, 0.0);
+    assert!(
+        !weak.lock_hard && weak.lock_timer == 0.0,
+        "no flinch at scale 2 or less"
+    );
+    let mut air = Soldier::new(Vec3::ZERO);
+    air.stance = Stance::Jump;
+    air.knock(flat, 1.5, GroundRules::Bf2, 0.0);
+    assert_eq!(
+        (air.stance, air.lock_timer),
+        (Stance::Jump, BF2_FLINCH_AIR_SECS)
+    );
+}
+
 /// §2 [M], update by update: the push's tick sets the velocity; the next
 /// moves him with no gravity (the floor bit is still set); then g 13.5 with
 /// the horizontal 9.16 m/s unchanged; on the ground at update 46, tumbling

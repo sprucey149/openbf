@@ -548,6 +548,7 @@ def main():
     ap.add_argument("--pc2", default=None, help="Star Wars: Battlefront II (PC) _lvl_pc or install directory")
     ap.add_argument("--menu-font-core", default=os.environ.get("OPENBF_MENU_FONT_CORE"),
                     help="optional local PS2 BF2 CORE.LVL for the approved BF2 Light menu glyphs only; native PC/Xbox fallback uses different glyphs")
+    ap.add_argument("--game-bin", default=None, help="use an already compiled game binary (skips step 1 cargo build)")
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
     a = ap.parse_args()
@@ -592,11 +593,20 @@ def main():
             bake_inputs["dlc_donor"] = plan["dlc"]["donor"]
     images_used, extracted_used = set(), set()
     rebaked = None
-    need("cargo", "the Rust toolchain, https://rustup.rs")
 
     step("1/6 build bake + game (release)")
-    run(["cargo", "build", "--release", "-p", "bake", "-p", "game"], cwd=ENGINE)
-    bake, game = os.path.join(TARGET, "release", "bake" + EXE), os.path.join(TARGET, "release", "game" + EXE)
+    if a.game_bin:
+        game = os.path.abspath(a.game_bin)
+        if not os.path.isfile(game):
+            sys.exit(f"pack: --game-bin `{game}` not found")
+        bake = os.path.join(os.path.dirname(game), "bake" + EXE)
+        if not os.path.isfile(bake):
+            bake = os.path.join(TARGET, "release", "bake" + EXE)
+        print(f"   using existing game binary: {game}")
+    else:
+        need("cargo", "the Rust toolchain, https://rustup.rs")
+        run(["cargo", "build", "--release", "-p", "bake", "-p", "game"], cwd=ENGINE)
+        bake, game = os.path.join(TARGET, "release", "bake" + EXE), os.path.join(TARGET, "release", "game" + EXE)
 
     step("2/6 the discs")
     for g, image in images.items():

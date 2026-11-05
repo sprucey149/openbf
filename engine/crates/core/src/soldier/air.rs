@@ -78,9 +78,11 @@ impl Soldier {
     ///   [`KNOCK_THROW_VY`] throws him, else a ground speed over
     ///   [`KNOCK_TUMBLE_SPEED`] tumbles him.
     /// - **BF2** (FUN_002388b8): half the velocity against `dir` goes first;
-    ///   thrown in the air by a push of [`BF2_KNOCK_AIR_SCALE`] or more, on
-    ///   the floor when v . its normal is over [`BF2_KNOCK_THROW_VN`], else
-    ///   tumbling over [`BF2_KNOCK_TUMBLE_SQ`] (its flinch is not built).
+    ///   thrown in the hover by a push over [`BF2_KNOCK_HOVER_SCALE`], in the
+    ///   air by one of [`BF2_KNOCK_AIR_SCALE`] or more, on the floor when
+    ///   v . its normal is over [`BF2_KNOCK_THROW_VN`], else tumbling over
+    ///   [`BF2_KNOCK_TUMBLE_SQ`]. A push that does neither flinches him
+    ///   ([`Soldier::flinch`]): the stagger a hero shows under a saber hit.
     ///
     /// The state setter refuses a corpse ([`Stance::Dead`]): it keeps the
     /// velocity and its state (B1 FUN_00209758).
@@ -105,15 +107,39 @@ impl Soldier {
                     self.vel -= dir * (0.5 * along);
                 }
                 self.vel += dir * scale;
-                if self.stance == Stance::Thrown {
+                if self.stance == Stance::Thrown || self.stance == Stance::Dead {
                     None
-                } else if !self.grounded || matches!(self.stance, Stance::Jump | Stance::Fall) {
-                    (scale >= BF2_KNOCK_AIR_SCALE).then_some(Stance::Thrown)
+                } else if self.stance == Stance::Hover {
+                    if scale > BF2_KNOCK_HOVER_SCALE {
+                        Some(Stance::Thrown)
+                    } else {
+                        if scale > BF2_FLINCH_FLOOR_SCALE {
+                            self.flinch((scale - BF2_FLINCH_FLOOR_SCALE) / BF2_FLINCH_HOVER_RATE);
+                        }
+                        None
+                    }
+                } else if !self.grounded
+                    || matches!(self.stance, Stance::Jump | Stance::Jet | Stance::Fall)
+                {
+                    if scale >= BF2_KNOCK_AIR_SCALE {
+                        Some(Stance::Thrown)
+                    } else {
+                        if scale > BF2_FLINCH_AIR_SCALE {
+                            self.flinch(BF2_FLINCH_AIR_SECS);
+                        }
+                        None
+                    }
                 } else if self.vel.dot(self.ground_n) > BF2_KNOCK_THROW_VN {
                     Some(Stance::Thrown)
                 } else if self.vel.length_squared() > BF2_KNOCK_TUMBLE_SQ {
                     Some(Stance::Tumble)
                 } else {
+                    if scale > BF2_FLINCH_FLOOR_SCALE {
+                        if self.stance == Stance::Sprint {
+                            self.set_stance(Stance::Stand);
+                        }
+                        self.flinch(BF2_FLINCH_FLOOR_SECS);
+                    }
                     None
                 }
             }
@@ -121,6 +147,14 @@ impl Soldier {
         if let Some(s) = next.filter(|&s| s != self.stance && self.stance != Stance::Dead) {
             self.set_stance(s);
         }
+    }
+
+    /// BF2's flinch: every input, the trigger included, is locked for
+    /// `secs` (a longer lock already running is kept).
+    fn flinch(&mut self, secs: f32) {
+        self.lock_timer = self.lock_timer.max(secs);
+        self.lock_hard = true;
+        self.fire_lock = true;
     }
 
     pub fn force_knock(&mut self, dir: Vec3, scale: f32, draw: f32) {

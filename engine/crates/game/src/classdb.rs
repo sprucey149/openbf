@@ -12,21 +12,13 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// FNV-1a-32 over `byte | 0x20` — the PROP key / chunk-tag hash used
-/// throughout the munged data (same function as mungefs::fnv1a_lowercase and
-/// the engine's FUN_00444b30; duplicated here so the runtime keeps zero
-/// LVL-parsing dependencies).
+/// throughout the munged data (the engine's FUN_00444b30; one implementation,
+/// `core::hero_weapon::sound_hash`).
 ///
 /// Note `| 0x20` is NOT `to_ascii_lowercase`: it also flips punctuation and
 /// digits, so the two disagree on any key with an underscore
 /// ("ValueBleed_Alliance" → 0xFDE7C9D2 here vs 0x60FFCE72 lowercased).
-pub fn fnv1a_lowercase(name: &str) -> u32 {
-    let mut h: u32 = 0x811C_9DC5;
-    for b in name.bytes() {
-        h ^= u32::from(b | 0x20);
-        h = h.wrapping_mul(0x0100_0193);
-    }
-    h
-}
+pub use core::hero_weapon::sound_hash as fnv1a_lowercase;
 
 // One record of a classes.ron — `manifest`'s struct, the same one
 // `bake::classes` writes (queue item CT), so the reader cannot drift.

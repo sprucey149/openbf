@@ -53,7 +53,7 @@ impl SoundLib {
             .iter()
             .enumerate()
             .filter_map(|(i, u)| {
-                if walk.sim.hero_class(u.team) != Some(u.spec.class)
+                if !crate::event_sounds::sounds_as_hero(&walk.sim, u)
                     || !crate::event_sounds::saber_visible(u, &walk.sim.weapon_classes)
                 {
                     return None;
