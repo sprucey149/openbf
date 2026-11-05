@@ -590,3 +590,7 @@ Recheck commands: `python3 scripts/re_check.py word b2 0x61bc5c 1 --u32`;
 `python3 scripts/tools/eedis.py bf2 1ffa38 1ffa58`. Test coverage includes
 raised/lowered/depleted shields, a zero shield scale, burning exclusion, emitter
 and choke damage, and a blocked fat ray reaching a second body.
+
+## Addendum: the fighter's lock (2026-11-05)
+
+The port's lock for a flyer's pilot, press and hold, candidates, ranges and `EnableLockOn`: `re-space-assault.md` §14.

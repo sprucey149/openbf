@@ -6,6 +6,15 @@ use super::*;
 /// audio, traces and Tier-4 artifacts).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Event {
+    SpaceLinkChanged {
+        kind: u8,
+        index: u16,
+        up: bool,
+    },
+    SpaceObjectiveDown {
+        objective: u16,
+        owner: u8,
+    },
     MineBlast {
         pos: Vec3,
         weapon_class: u32,

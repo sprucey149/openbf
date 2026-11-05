@@ -31,14 +31,17 @@ transport, so a manned enemy flyer is +3.
 registered points, negated when the object's team is the killer's. A bot therefore gets nothing for its own ship and a
 human loses the points. `KillObject` (`FUN_0018fcd0` to `FUN_001df3d8`) has no killer, so linked deaths score nothing.
 
-### Deviation from the disc, by the maintainer's task specification
+### The whole table (2026-11-05, maintainer's choice on #123)
 
-The maintainer's task supplied in chat asks for 3 a fighter kill, 18 a system, and nothing else; GitHub #109 does not
-specify scoring values. The disc also credits team points for infantry kills,
-a pilot's own death (+1 AI, +2 human), and penalties for humans (self -1, teamkill -2). These are not built.
-`replace:` send every `FUN_003616f0` kind to team points if the maintainer wants the disc's full table.
-The disc's +1 for an empty flyer and -18 for a human on their own ship are also built. These are the implemented scoring
-choices, not additional requirements stated in #109.
+The port now sends every score kind to team points, as the disc does; the earlier deviation (fighters and systems only)
+is gone. `FUN_003616f0` line 346075 holds the table; an AI killer's award under 1 is ignored. `FUN_00361698` adds a killer
+with a team and no player, positive awards only (lines 333939-333950, 185701-185716). Kinds `FUN_00362268` line 346704
+and `FUN_00362c60` line 347113 add the post-defence awards; the flag list `DAT_0066138c` holds nothing in Space Assault and
+hangar posts are not captured, so those branches do not fire on these maps.
+
+What a round can see: AI soldier +1, human +2, hero +5, a kill within 20 m of a post +2, self -1, teammate -2, an armed
+building kind 0xd (`FUN_001e8498` line 96214) +1. A flyer kill is +3 for the craft and +1 (AI pilot) or +2 (human pilot) for
+its pilot. Kind 0x1c arrives through Lua (`FUN_0018c740`), the system points in the section above.
 
 ## 3. The point table
 
@@ -87,19 +90,37 @@ answers for a destroyed station, so `FallenDraw` shows the armed building's wrec
 
 ## 6. HUD
 
-`player1.team{1,2}.points` and `.pointsText` drive the disc's own text. The disc draws ship bitmaps and system icons in
-`player1spaceassaultgroup` (viewport 0.738, 0.072; `FUN_0036b000`). In its place, `ui::hud::draw_space_meters` draws shield,
-hull and points bars under the minimap, whose corner that viewport rectangle would cover. OURS, from the maintainer's
-task supplied in chat rather than GitHub #109. `replace:` the disc's procedural icons. Hull has no
-disc equivalent: it is the summed health of a ship's critical systems over their full health.
+`player1.team{1,2}.points` and `.pointsText` drive the disc's own text. The interim bars are gone: `ui::hud_space` draws the
+disc's own picture in `player1spaceassaultgroup` (viewport 0.738, 0.072, size 0.2007 by 0.2011).
 
-## 7. Not built
+- Layout `FUN_0036b000` line 352920, colours each frame `FUN_0036a2a8` lines 352500-352730. Own ship in the right half, the
+  enemy's in the left, shields over them, a system icon 0.15 of the group wide and high, centred on the script's `u`, `v`
+  inside the ship's half.
+- A system or ship colour runs red (200,100,100), yellow (223,223,32), green (100,200,100) by health (`FUN_0036b900`;
+  colours `FUN_0057ca38` lines 700241 onward). A shield is r=(1-f)255, g=f200, b=f150, a=f255. Either flashes to white over
+  1 s when it falls. A dead system is black. A linked group shows only its first entry (`FUN_0036ad20`) and reads the
+  group's fraction (`FUN_0036b600`).
+- `trace:` a dead system is read from the first part's `destroyed`. The original tests object+0x228 bit 3, whose meaning is
+  inferred, not traced.
+- The bake dropped alpha from the five icon textures, which drew as squares. `consumer_named` in `bake/src/map/content.rs`
+  now keeps it for `*_icon_ass`, `*_icon_ass_shield` and `spa_icon_critsys`.
 
-- Objective messages and voice (`level.spa.hangar.<system>.atk.down`, the `attVO` and `defVO` keys), and `EnableLockOn`
-  on a dead shield. `trace:` `UpdateObjectiveMessage`.
-- `RespawnTime` on buildings: the port's building rule is no self-repair (`building_turrets.rs` header), so a generator or
-  mainframe returns only through a fusion cutter.
-- Bots attacking capital ships, and bot gunnery in general. See section 8.
+The small minimap is off in space (`DisableSmallMapMiniMap`), and the port draws no map there except on the spawn page.
+`trace:` the Large view on SELECT is not ported (card BMAP2 resume), so the disc's way of seeing every fighter on a map is
+missing. `bSoldierHints` (`FUN_0017c698`, `re-hud-attacker.md` §2) defaults off and only draws on-screen rings; not ported.
+
+## 7. What was open here, now answered
+
+- Objective messages and voice are built; see section 13.
+- `EnableLockOn` and fighter lock-on are built; see section 14.
+- **`RespawnTime` on buildings.** Key 0xbd94b44e; the disc's regeneration is MaxHealth over RespawnTime (`re-build-zones.md`
+  lines 74 and 83). In the space data, capital systems, generators (4500 health) and terminals (5 health) use 999999, frigate
+  turrets too, so they effectively never come back on their own. Only `imp_bldg_boxturret` and
+  `all_bldg_moncal_roundturret` are short: 2500 health over 120 s. The port's rule stays the maintainer's (2026-10-28,
+  `building_turrets.rs` header): no self-repair, only the fusion cutter. A generator or mainframe therefore returns through
+  repair, as on the disc in practice, and those two turrets do not regenerate. `measure:` confirm on the PS2 that a boxturret
+  regenerates in a played round.
+- Bots attacking capital ships: see section 15.
 
 ## 8. Measurements
 
@@ -462,3 +483,159 @@ reported score or targeting gaps on that exact head.
 
 Still unchecked: the PS2 through-hole comparison, broader flight/crash parity and ground-vehicle presentation comparisons.
 No new per-map 60 fps population or simulation timing measurement was made during this cleanup.
+
+## 13. Objective messages and voice (#123)
+
+`scripts/gen_missions.py` reads `ObjectiveSpaceAssault` and the map's script. `main.5` is `UpdateObjectiveMessage`, using
+`level.spa.hangar.<kind>.{atk,def}.down` and the `attVO`, `defVO` keys; `main.7` plays the win and lose voice. The closures
+`OnAllShieldsDown`, `OnAllShieldsUp`, `OnDisableMainframe` and `OnEnableMainframe` play `*_obj_16` to `*_obj_23`.
+The generator now shares globals between the `_cmn` and `_ass` chunks, because spa6 to spa9 define the team constants in
+`_cmn`. All six maps emit eight scripted entries.
+
+`Event::SpaceObjectiveDown` fires once when the last part of a system falls and `Event::SpaceLinkChanged` once per shield or
+link change. Tests: `each_shield_change_reports_once_and_a_repeat_kill_awards_nothing_new`,
+`every_objective_names_real_text_and_voice_lines`.
+
+## 14. Fighter lock-on (#123)
+
+`core::sim::lock_on`, HUD in `ui::hud`, `ui::hud_tree`, `ui::hud_draw`.
+
+- **The press.** Flyer tick lines 116130-116175: `(+0x2cc & 3) == 3` is a press, which takes the next target, and
+  `(+0x2cc & 0xf) == 9` is a hold, which clears. The button is Square, the port's `buttons::RELOAD`.
+  `trace:` `LOCK_CLEAR_HOLD_SECS` 0.5 s stands for the hold pattern; the input history's timing is not derived.
+- **Candidates.** Scoring lines 21692-21740, ring lines 21077 and 21131. Distance squared over the aim's dot squared, dot
+  floored at 0.1, a strong preference inside 0.98 and 0.998. A used target is remembered; when the list is spent it starts
+  again (`LOCK_CYCLE_MEMORY` 64 is the port's ring).
+- **Who.** `FUN_0017c6e8` applies the weapon's target mask. `TargetLockMaxDistance` and `TargetLockLose` come from weapon data:
+  20000 and 25000 on flyers, 100 and 110 by default.
+- **`EnableLockOn`.** `FUN_0018f308` writes bits 44-47 of the object's word at +0x268 (3 enabled, 8 disabled). Only spa1 and
+  spa3 call it, on `OnAllShieldsDown`. The port turns a hull into a vehicle-kind target while the group's shields are down
+  and drops it when they return.
+- **Launching.** `FUN_0033a658`: cos at least 0.9 to the target (`LOCK_FIRE_COS`), line of sight, and the class's dwell
+  (class+0x120).
+- **HUD.** Registered at `FUN_003b0aa8` lines 395768-395770 and 395922-395952. Panel `FUN_003b2cd0` line 397248: distance each
+  frame, and a direction arrow while |dot(dir, up)| exceeds 0.2 (0 or 180 degrees). Reticle `FUN_003b3398` lines 398060-398170.
+  Placement `FUN_003abc60` line 392409: a flyer's marker scale runs 1.5 at 200 m to 0.1 at 1700 m (0x5ff98c), the corner sprite
+  is clamped to 0.9 to 1.4, 1.2 off a flyer, and pulses with white in line of sight and grey (64,64,64) out of it.
+
+Open, with `trace:`: who writes `player%d.missileLock*` (`FUN_003b6050` line 399203 reads entity +0x10c and +0x118, no writer
+found), so there is no incoming-missile warning; `lockOnName` (`FUN_003b2b98` unread); the audio cue for a lock (the
+`FUN_00394428` call is a tutorial hint, `level.geo1.hints.lockon`); the off-screen pointer's scale, which the original lerps by
+the record's near and far values while the port uses the minimum.
+
+Finding the last fighters on the PS2 is this: lock cycling across 20 km, the distance and arrow, and the off-screen pointer.
+
+## 15. What the PS2 does about bots in a space round (#122)
+
+### Unseen combat: `FUN_002a3c28`
+
+This corrects `re-ai-difficulty.md` §6. In Space Assault, auto-balance mode 1 (`FUN_002a3328` line 212845) does not hand out
+goals; it kills flyers and damages capital systems, picking only what no player can see. Ported as `core::sim::space_balance`.
+
+- **When** (`FUN_002a3528` line 212948, every 15 AI steps through `FUN_002af948`). Only with humans on exactly one team
+  (`FUN_002a8300` of team 1 xor team 2), so **the PS2 has none of this in a round with no human**. Nothing before 30 s.
+- **The nudge.** diff = human points - enemy points (`FUN_002a3400`: margin 20, divisor 10); the human side gains 20 or 10
+  when the enemy's tickets fall under 25% or 50% of their start, which cannot happen at 999999. Past the margin,
+  enemy nudge = (diff -/+ 20) / 10, human nudge its negative, each held to 4.
+- **The clock.** A due timer redraws with `FUN_002a3200` U(lerp(45,15), lerp(100,60)) s for a fighter kill and `FUN_002a3268`
+  U(lerp(25,10), lerp(45,12)) s for a system attack. The lerp runs on the enemy bots' skill plus nudge, clamped to 1..20
+  (`FUN_002a29d8` with no unit, `FUN_002a2bb8`). The period is multiplied by -1/(n-1) when the human nudge n is negative, n
+  when positive: up to five times faster when the human leads, four times slower when behind.
+- **Which side.** `FUN_002a3f08(0,100)` draws 0 to 100. A fighter dies on the human's team above 40 (`FUN_002a32d0` 0.4), else
+  on the enemy's. A system of the human's ship is attacked above lerp(0.5,0.25) x 100 (`FUN_002a32e8`), else the enemy's.
+- **A flyer** (`FUN_002a3770` line 213050). Up to 40 AI units (`FUN_002b00e8` line 222108 walks the AI controllers,
+  `DAT_005fe08c`) by relation to the team: mask 4 is relation 1, friends; mask 1 is relation -1, enemies (team +0x84 bytes,
+  `re-aim-assist.md`). Walked last to first, the first unit in an EntityFlyer (`DAT_00689368`), outside every player's view by
+  `FUN_001ba840(100, 3000)`, with no human aboard (`FUN_002a7fd8`).
+- **The kill** (`FUN_002a38a0` line 213094). The victim dies through its kill virtual with an unseen enemy flyer credited, so it
+  scores as a normal kill: +3 and +1. Both flyers must exist.
+- **The attack** (`FUN_002a3980` line 213130). The target comes from `FUN_0036b7c0` line 353182: systems of that team that are
+  shown (`FUN_0036ac20`'s flag: an icon, and first in a linked group), alive, and outside every view by
+  `FUN_001ba840(radius, 1500)`. Index = frac(U^2 + round seed) x count. Damage is the best over the attacker's weapons of
+  max(rate value, 2 x per-shot value), where per-shot is ordnance damage times the target type's scale plus explosion damage
+  times falloff at 2 m less half the target's radius (`FUN_002a9e58`, `FUN_00268fe0`), and rate value is the cannon form of
+  `FUN_002aa548` (clip, salvo, shot delay and reload). If the target has shield left, that is x5, held to 15000, then held to
+  the shield. Dealt with all scales 1 (`FUN_001e0900`), credited to the attacker, so a kill scores normally.
+
+Where the port differs, each with `trace:`:
+
+- The sim has no camera. `Sim::balance_seen` stands the player's aim ray in for the camera with `FlyerParams.view_fov` (the
+  pilot seat's `ThirdPersonFOV`, 48 by default as in `flyer_camera.rs`), 65 on foot, and tan y = 0.7666 tan x
+  (`re-zoom.md` §5). Far is the query plus 8 at zoom 1 (`DAT_005fc4f4`), ignoring the map's own far clip, and a dead player sees
+  nothing. The sphere test is otherwise `FUN_0057bc50`.
+- `FUN_002aa630` and `FUN_002aa6b8` (non-cannon weapons) and the charge chain walk are not ported: a thrown weapon counts 2 x
+  per-shot alone, and no space flyer weapon charges.
+- The first draw happens at the first evaluation with a human, not at load, so a round with no human draws nothing and hashes
+  as before.
+- `measure:` the nudge is used for these timers only. On the PS2 it also shifts every bot's skill by up to 4 (`FUN_002a29d8`);
+  the port's bots take their skill at spawn and that shift is not built.
+
+### Who boards: `FUN_002e2e38`
+
+`re-soldier-ai.md` §7.1 already had this scan, and it answers the question of landing craft: every registered vehicle slower
+than 3 m/s with a free seat tells friendly or neutral AI within 50 m, with **no test of the bot's order or post** and no class
+filter beyond `NoEnterVehicles`. Bots do board landing craft on the PS2.
+
+The port's `ride::claim` required a target post. A bot under a reachable Hunt has none, and enemy flyers passing over a hangar
+gave one. So that side's pilots ran around their deck and boarded nothing, and its fleet died out while the other side's grew:
+at 13 minutes on spa1 seed 7, 16 pilots on foot beside three empty fighters. In a space round a flyer is now claimed
+within `VEHICLE_NOTIFY_RADIUS` 50 m with no post, as the scan does. Ground maps keep their rule.
+
+`can_fly` still refuses a class no route names, which keeps `transport` classes parked on spa1, spa3, spa6 and spa7 (only
+spa8 and spa9 name `transport`). The PS2 would seat the pilot; what its follower does with no route is the unported geometric
+candidate (section 10). `measure:` a PS2 round on spa1, watching a landing craft.
+
+### Not ported, and why
+
+- **Route to the human** (`FUN_002fc980` line 277194) and **relocation near the human** (`FUN_002faf90` line 276094): read, helpers
+  `FUN_002faef8`, `FUN_00161a98`, `FUN_002fbe60`, `FUN_002fa8b8`, `FUN_002fe150`, `FUN_002fe588` not. Relocation teleports a squad of
+  int((rand-.5)x3+4.5) to 85 or 700 m ahead of a human flying a flyer, unseen, after 30 s.
+- **Pursuit.** `FUN_002fd930`'s trigger on the PS2 appears inert: flyer+0x59c is written only by `FUN_00209220`, with a chance of 0.
+  The port's "any seen enemy" trigger in `flyer_drive.rs::bf2_plan` is OURS and stays, flagged, until the maintainer decides.
+- **Bots shooting systems directly.** `FUN_002ac8f8` allows flyers against buildings, but whether perception ever puts one on the
+  threat list is unread (`FUN_002ba088`, `FUN_002b7a40`, `FUN_002ac570`).
+
+### Rounds to the limit
+
+108000 ticks (60 minutes) at most, 30 Hz, 16 AI a side, `missions/bf2_<map>_ass.ron`, measured 2026-11-05. Win time, points at the win.
+The counts are for the whole 60 minutes (the sim runs on after the outcome; the unseen routine stops at it), read from the last row.
+
+| Map | Seed | Human | Winner | Time (s) | Points | Units | Flying | Shot | Crashed | Unseen kills | Systems lost | System hits |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| spa1 | 7 | idle | team 1 | 1808 | 29/181 | 17/16 | 15/15 | 77 | 8 | 16 | 0 | 47 |
+| spa3 | 7 | idle | team 0 | 635 | 180/92 | 17/16 | 13/14 | 216 | 21 | 36 | 0 | 112 |
+| spa6 | 7 | idle | team 1 | 1606 | 156/180 | 17/16 | 16/14 | 121 | 7 | 38 | 1 | 106 |
+| spa7 | 7 | idle | team 1 | 1974 | 156/180 | 17/16 | 13/13 | 75 | 29 | 46 | 0 | 130 |
+| spa8 | 7 | idle | team 1 | 2480 | 125/181 | 17/15 | 14/15 | 38 | 6 | 50 | 0 | 140 |
+| spa9 | 7 | idle | team 1 | 1998 | 156/181 | 17/15 | 12/13 | 83 | 10 | 46 | 0 | 132 |
+| spa1 | 11 | idle | team 1 | 1770 | 67/180 | 17/16 | 14/15 | 65 | 6 | 29 | 0 | 75 |
+| spa3 | 11 | idle | team 0 | 557 | 180/102 | 17/15 | 15/12 | 193 | 26 | 44 | 1 | 140 |
+| spa6 | 11 | idle | team 1 | 1940 | 140/182 | 15/16 | 14/14 | 98 | 11 | 41 | 1 | 120 |
+| spa7 | 11 | idle | team 1 | 2308 | 128/180 | 17/16 | 13/14 | 82 | 22 | 38 | 0 | 110 |
+| spa8 | 11 | idle | team 1 | 2648 | 140/182 | 17/16 | 14/13 | 29 | 3 | 58 | 1 | 171 |
+| spa9 | 11 | idle | team 1 | 1978 | 147/181 | 17/16 | 14/15 | 78 | 4 | 44 | 0 | 133 |
+| spa1 | 23 | idle | team 1 | 1621 | 37/182 | 17/16 | 15/15 | 89 | 8 | 17 | 0 | 40 |
+| spa3 | 23 | idle | team 0 | 477 | 180/78 | 17/16 | 14/13 | 210 | 18 | 40 | 1 | 122 |
+| spa6 | 23 | idle | team 1 | 1967 | 172/193 | 17/16 | 15/14 | 101 | 11 | 44 | 1 | 130 |
+| spa7 | 23 | idle | team 1 | 1868 | 108/180 | 17/16 | 14/12 | 99 | 17 | 34 | 0 | 94 |
+| spa8 | 23 | idle | team 0 | 3016 | 182/177 | 17/16 | 13/13 | 26 | 1 | 68 | 0 | 200 |
+| spa9 | 23 | idle | team 1 | 1710 | 85/181 | 17/16 | 14/14 | 96 | 6 | 26 | 0 | 67 |
+| spa1 | 7 | none | team 1 | 1403 | 4/183 | 17/16 | 14/14 | 112 | 4 | 0 | 0 | 0 |
+| spa3 | 7 | none | team 0 | 879 | 180/0 | 17/15 | 15/13 | 202 | 21 | 0 | 0 | 0 |
+| spa6 | 7 | none | team 0 | 3306 | 180/144 | 16/16 | 12/12 | 109 | 9 | 0 | 0 | 0 |
+| spa7 | 7 | none | team 1 | 2816 | 100/180 | 17/16 | 14/14 | 103 | 21 | 0 | 0 | 0 |
+| spa8 | 7 | none | none | over 3600 | 32/77 | 17/16 | 13/14 | 27 | 5 | 0 | 0 | 0 |
+| spa9 | 7 | none | team 1 | 2076 | 41/182 | 17/16 | 14/15 | 93 | 3 | 0 | 0 | 0 |
+
+What this shows and does not:
+
+- All 18 idle-player rounds reach the limit, in 8 to 50 minutes. Five of six no-human rounds do; spa8 stands at 32/77 after an hour.
+- Re-running spa1 seed 7 gives a byte-identical trace (`4725d3e24d4ae50e`). `--sim-hash 600` is `5c5458c8927f122b` and `scripts/sim_gates.sh` is green.
+- No round wins on objectives. At most one system falls in any round, so the points are kills; the report does not split flyer kills from soldier kills. System hits are all the unseen routine's. With no human, no system falls in an hour, so in the port bots do not destroy systems by their own fire, and #122's capital-ship attacks are not established.
+- `measure:` the sides are lopsided. Team 1, the side without the idle player, wins 14 of 18 idle rounds. It takes spa1 with team 0 on 29 to 67; team 0 takes spa3 in 8 to 15 minutes, with or without a human. The cause was not investigated. `Shot` is every credited flyer death except the unseen routine's, turrets included, and which guns do it was not broken down. On spa8 the unseen routine kills more flyers than the fighting does.
+- Measured with seat guns reloading (`re-ammo-reload.md`, Seat guns). The spa1, spa8 and spa9 traces are byte-identical to before that change on every seed, because bots there fire only the first weapon of a seat and those primaries have no clip. On the Republic and CIS maps the V-wing's clipped cannon does change the rounds.
+- Before the boarding fix (seed 7, 20 minutes) one side had no flyers in the air on every map, and only spa3 reached the limit.
+- No comparison with the PS2 was possible here; none of these numbers is a PS2 measurement. Nor did a person play these rounds.
+
+`--sim-trace ... --space-report <csv>` writes the minute rows; `--no-human` empties the player slots. "Idle" keeps the trace's
+player: alive, on team 0, untouched, so it is the original's condition for the simulation but not a person playing.

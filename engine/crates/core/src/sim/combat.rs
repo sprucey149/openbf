@@ -614,6 +614,7 @@ impl Sim {
         killer: Option<UnitHandle>,
         cause: DeathCause,
     ) {
+        self.space_unit_killed(h, killer);
         // A placed self-piloted gun has no soldier to credit. Its distinct
         // shot identity is retained on Hit/Shot, but never a player Kill:
         // HUD and round statistics require an actual unit for that event.
@@ -744,6 +745,10 @@ impl Sim {
         if u.is_player && self.cheats.invincible && cause.cheat_spares() {
             return;
         }
+        self.space_unit_killed(h, None);
+        let Some(u) = self.unit(h) else {
+            return;
+        };
         let (team, is_player) = (u.team, u.is_player);
         // A crash with no destroyer leaves an exposed rider's corpse as a
         // credited kill does (re-vehicle-death 8).

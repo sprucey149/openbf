@@ -261,6 +261,14 @@ pub(crate) struct Run<'a> {
     pub(crate) shadow: bool,
 }
 
+const LOCK_RAMP_NEAR: f32 = 200.0;
+const LOCK_RAMP_FAR: f32 = 1700.0;
+const LOCK_SCALE_NEAR: f32 = 1.5;
+const LOCK_SCALE_FAR: f32 = 0.1;
+const LOCK_CORNER_MIN: f32 = 0.9;
+const LOCK_CORNER_MAX: f32 = 1.4;
+const LOCK_CORNER_FIXED: f32 = 1.2;
+
 impl<'a> Ctx<'a> {
     pub(crate) fn quad(&mut self, elem: usize, m: &Mat4, s: &Screen, q: &Quad<'_>) {
         let [x0, y0, x1, y1] = q.rect;
@@ -302,6 +310,70 @@ impl<'a> Ctx<'a> {
             if *off == 0.0 && q.boxed {
                 self.out.boxes.push((elem, b));
             }
+        }
+    }
+
+    fn lock_marker(&mut self, size: [f32; 2], scale: [f32; 2]) {
+        let hud = self.hud;
+        let Some(marker) = hud.lock_marker else {
+            return;
+        };
+        let slot = usize::from(!marker.on_screen) * 2 + usize::from(!marker.visible);
+        let Some(style) = hud.lock_styles[slot] else {
+            return;
+        };
+        let e = &hud.elems[style.elem];
+        let Some(texture) = e.texture.as_deref().map(|t| self.art.icons.layout_sheet(t)) else {
+            return;
+        };
+        let at = [
+            (marker.ndc[0] * 0.5 + 0.5) * size[0],
+            (marker.ndc[1] * 0.5 + 0.5) * size[1],
+        ];
+        let screen = Screen { origin: at, scale };
+        let (x0, y0) = e.rect.origin();
+        let quad = Quad {
+            rect: [x0, y0, x0 + e.rect.w, y0 + e.rect.h],
+            uv: e.tex_coords,
+            color: color(e.color, e.alpha),
+            texture,
+            additive: e.additive,
+            shadow: e.shadow,
+            boxed: false,
+        };
+        if !marker.on_screen {
+            let turn = marker.ndc[0].atan2(-marker.ndc[1]);
+            let m = Mat4::from_rotation_z(turn) * Mat4::from_scale(Vec3::splat(style.min_scale));
+            self.quad(style.elem, &m, &screen, &quad);
+            return;
+        }
+        let k = (marker.pulse.fract() - 0.5).abs() * 2.0;
+        let flash = if marker.visible { 255.0 } else { 64.0 };
+        let mix = e.color.map(|c| c * k + flash * (1.0 - k));
+        let quad = Quad {
+            color: color(mix, e.alpha),
+            ..quad
+        };
+        let (spread, size_scale) = if marker.flyer {
+            let t = ((marker.distance - LOCK_RAMP_NEAR) / (LOCK_RAMP_FAR - LOCK_RAMP_NEAR))
+                .clamp(0.0, 1.0);
+            let spread = t * LOCK_SCALE_FAR + (1.0 - t) * LOCK_SCALE_NEAR;
+            let corner = if spread < LOCK_CORNER_MIN {
+                LOCK_CORNER_MIN
+            } else {
+                spread.min(LOCK_CORNER_MAX)
+            };
+            (spread, corner)
+        } else {
+            (style.min_scale, LOCK_CORNER_FIXED)
+        };
+        let (w, h) = (e.rect.w * spread, e.rect.h * spread);
+        let corners = [(-w, -h), (w, -h), (w, h), (-w, h)];
+        for (k, (cx, cy)) in corners.into_iter().enumerate() {
+            let m = Mat4::from_translation(Vec3::new(cx, cy, 0.0))
+                * Mat4::from_rotation_z(k as f32 * std::f32::consts::FRAC_PI_2)
+                * Mat4::from_scale(Vec3::splat(size_scale));
+            self.quad(style.elem, &m, &screen, &quad);
         }
     }
 
@@ -872,6 +944,16 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
             ),
         };
         ctx.element(r, &parent, &screen);
+        if let Some(status) = hud
+            .space
+            .as_ref()
+            .filter(|_| tree && e.name == crate::hud_space::GROUP)
+        {
+            ctx.space_status(status, e, r, &screen);
+        }
+    }
+    if tree {
+        ctx.lock_marker(size, scale);
     }
     // The capture icon: a root group of the PS2's own (card CPBAR).
     if let Some(icon) = hud.capture.as_ref().filter(|_| tree) {

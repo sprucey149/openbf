@@ -1070,3 +1070,63 @@ fn a_mounted_harpoon_latches_and_releases_on_range_or_owner_loss() {
     sim.fly_tow_cables(crate::TICK_DT);
     assert!(sim.tow_cables.is_empty(), "the latched vehicle is gone");
 }
+
+fn fire_seat_gun(reserve: Option<u32>, ticks: u32) -> (Vec<u64>, Vec<u64>) {
+    let (mut s, p, v) = world(false);
+    s.weapon_classes[0] = WeaponClass {
+        rounds_per_clip: 6,
+        reload_time: 5.0,
+        shot_delay: [0.33, 0.33],
+        trigger_single: false,
+        ..WeaponClass::bf1_rifle()
+    };
+    let class = s.vehicle(v).unwrap().class as usize;
+    for g in s.seat_setup[class]
+        .as_mut()
+        .unwrap()
+        .guns
+        .iter_mut()
+        .flatten()
+    {
+        g.weapons[0].infinite = reserve.is_none();
+        g.weapons[0].reserve_clips = reserve.unwrap_or(0);
+    }
+    tap(&mut s, buttons::ACTION);
+    tap(&mut s, buttons::SWITCH_WEAPON);
+    tap(&mut s, buttons::SWITCH_WEAPON);
+    assert_eq!(seat(&s, p), SeatKind::Gunner(1));
+    let (mut shots, mut reloads) = (Vec::new(), Vec::new());
+    for _ in 0..ticks {
+        s.events.clear();
+        s.step(&[pad(buttons::FIRE)]);
+        for e in &s.events {
+            match e {
+                Event::Shot { unit, .. } if *unit == p => shots.push(s.tick),
+                Event::Reload { unit, .. } if *unit == p => reloads.push(s.tick),
+                _ => {}
+            }
+        }
+    }
+    (shots, reloads)
+}
+
+#[test]
+fn a_seat_gun_with_an_endless_reserve_still_empties_its_clip_and_reloads() {
+    let (shots, reloads) = fire_seat_gun(None, 30 * 14);
+    assert!(shots.len() >= 12, "it keeps firing: {shots:?}");
+    assert_eq!(reloads.len(), shots.len() / 6);
+    let cycle = |a: usize, b: usize| shots[b] - shots[a];
+    assert!(cycle(0, 5) <= 60, "six rounds at the refire: {shots:?}");
+    let gap = cycle(5, 6);
+    assert!(
+        (150..=165).contains(&gap),
+        "the reload holds the seventh round for 5 s: {gap}"
+    );
+}
+
+#[test]
+fn a_seat_gun_with_counted_clips_stops_when_they_are_spent() {
+    let (shots, reloads) = fire_seat_gun(Some(1), 30 * 20);
+    assert_eq!(shots.len(), 12, "the loaded clip and one more: {shots:?}");
+    assert_eq!(reloads.len(), 1);
+}

@@ -14,6 +14,7 @@ use glam::{Quat, Vec3};
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlyerParams {
     pub bf2: bool,
+    pub view_fov: f32,
     pub acceleration: f32,
     pub min_speed: f32,
     pub mid_speed: f32,
@@ -102,6 +103,7 @@ impl Default for FlyerParams {
     fn default() -> Self {
         Self {
             bf2: false,
+            view_fov: 48.0,
             acceleration: 5.0,
             min_speed: 10.0,
             mid_speed: 20.0,

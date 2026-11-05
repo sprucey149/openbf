@@ -737,6 +737,11 @@ impl HudView {
             let files = &self.mesh_files;
             ui::hud::feed(&mut self.hud, &model, &|n: &str| files.contains_key(n));
         }
+        if let Some(dir) = model.space.as_ref().and_then(|m| m.sheet_dir.as_ref()) {
+            if !self.texture_dirs.contains(dir) {
+                self.texture_dirs.insert(0, dir.clone());
+            }
+        }
         // The minimap's image is the map's own sheet.
         if let Some(dir) = model.map.as_ref().and_then(|m| m.sheet_dir.as_ref()) {
             if !self.texture_dirs.contains(dir) {

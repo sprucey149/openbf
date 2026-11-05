@@ -49,7 +49,9 @@ pub fn page(
         // text (`game.modes.con`; the defenders' `con2` reads the same);
         // the port's battles are all conquest.
         SpawnStage::Map => Some(SpawnPage::Map {
-            objective: feed.screen_text("game.modes.con", "Capture all the Command Posts"),
+            objective: feed.space_objective(me.team).unwrap_or_else(|| {
+                feed.screen_text("game.modes.con", "Capture all the Command Posts")
+            }),
             legend: [
                 feed.screen_text("game.spawndisplay.commandpost", "Command Post"),
                 feed.screen_text("game.spawndisplay.cpchange", "Change Command Post"),

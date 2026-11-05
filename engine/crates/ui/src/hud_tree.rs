@@ -58,6 +58,31 @@ enum Listen {
     Mesh,
     Bitmap,
     Position,
+    Rotation,
+}
+
+pub const LOCK_STYLE_NAMES: [&str; 4] = [
+    "lockedonscreen",
+    "lockedonscreenbehind",
+    "lockedoffscreen",
+    "lockedoffscreenbehind",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LockStyle {
+    pub elem: usize,
+    pub min_scale: f32,
+    pub max_scale: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LockMarker {
+    pub ndc: [f32; 2],
+    pub on_screen: bool,
+    pub visible: bool,
+    pub distance: f32,
+    pub flyer: bool,
+    pub pulse: f32,
 }
 
 /// The fader (`re-hud.md` §2.1 [V][O], `FUN_003afca8` ff.): 0 hidden → 1 in →
@@ -652,6 +677,9 @@ pub struct Hud {
     /// What the Map element shows this frame (`crate::hud_map`); `None`
     /// draws no minimap.
     pub map: Option<crate::hud_map::MapModel>,
+    pub lock_styles: [Option<LockStyle>; 4],
+    pub lock_marker: Option<LockMarker>,
+    pub space: Option<crate::hud_space::SpaceStatus>,
     /// The squad order cross this frame (`crate::hud_squad`); `None` draws
     /// none.
     pub squad: Option<crate::hud_squad::SquadCross>,
@@ -798,6 +826,9 @@ impl Hud {
             transforms: Vec::new(),
             sent: HashMap::new(),
             map: None,
+            lock_styles: [None, None, None, None],
+            lock_marker: None,
+            space: None,
             squad: None,
             capture: None,
             ambush: Default::default(),
@@ -841,6 +872,25 @@ impl Hud {
         self.elems.push(Elem::new(name, kind.clone(), parent));
         for c in &node.children {
             let lname = c.name.to_ascii_lowercase();
+            if kind == Kind::Other {
+                if let Some(slot) = LOCK_STYLE_NAMES.iter().position(|n| *n == lname) {
+                    let scale = |key: &str| {
+                        c.children
+                            .iter()
+                            .find(|p| p.name.eq_ignore_ascii_case(key))
+                            .and_then(|p| num(p, 0))
+                            .unwrap_or(1.0)
+                    };
+                    let (min_scale, max_scale) = (scale("minscale"), scale("maxscale"));
+                    let elem = self.element(c, Kind::Bitmap, None);
+                    self.lock_styles[slot] = Some(LockStyle {
+                        elem,
+                        min_scale,
+                        max_scale,
+                    });
+                    continue;
+                }
+            }
             // An element type with a body is a child element; without one it
             // is a property of the same name (`Bitmap("tex")`, `Text("key")`).
             if !c.children.is_empty() || lname == "group" {
@@ -956,6 +1006,7 @@ impl Hud {
                 "eventtext" => self.listen(c, i, Listen::Text),
                 "eventmesh" => self.listen(c, i, Listen::Mesh),
                 "eventbitmap" => self.listen(c, i, Listen::Bitmap),
+                "eventrotation" => self.listen(c, i, Listen::Rotation),
                 "eventposition" => self.listen(c, i, Listen::Position),
                 _ => {}
             }
@@ -1225,6 +1276,7 @@ impl Hud {
                         e.texture = Some(s.to_ascii_lowercase())
                     }
                     (Listen::Position, EventValue::Position(p)) => e.window_pos = Some(*p),
+                    (Listen::Rotation, EventValue::Number(z)) => e.rot.z = *z,
                     _ => {}
                 }
             }

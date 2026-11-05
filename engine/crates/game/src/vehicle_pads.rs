@@ -620,8 +620,15 @@ pub fn install_with_objective(
         .iter()
         .enumerate()
         .map(|(i, c)| {
-            vehicle_class::FlyerClass::from_db(&db, c, game == "bf2")
-                .map(|f| f.params(landed[i].unwrap_or(0.0)))
+            vehicle_class::FlyerClass::from_db(&db, c, game == "bf2").map(|f| {
+                core::vehicle::flyer::FlyerParams {
+                    view_fov: vehicle_class::seats(&db, c)
+                        .first()
+                        .and_then(|s| s.third_person_fov)
+                        .unwrap_or(48.0),
+                    ..f.params(landed[i].unwrap_or(0.0))
+                }
+            })
         })
         .collect();
     // BF2's path Properties now survive the bake; older manifests use the
@@ -1119,7 +1126,7 @@ pub fn seat_gun(
             Some(GunWeapon {
                 class,
                 infinite: w.ammo < 1,
-                reserve_clips: w.ammo.max(0) as u32,
+                reserve_clips: (w.ammo - 1).max(0) as u32,
             })
         })
         .collect();

@@ -490,6 +490,11 @@ pub(super) fn make_walk_with_counts(
             let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
             game::native_teams::install(&mut walk, &layout, &b.classes_dir, assets_dir, m);
             walk.sound_levels = m.sound_levels();
+            walk.space_round = m.space_assault.as_ref().map(|d| {
+                let mut round = game::space_assault::SpaceRound::new(d);
+                round.sheet_dir = Some(assets_dir.join(&m.map).join("textures"));
+                std::sync::Arc::new(round)
+            });
             walk.voice = Some(game::announce::Commander::for_battle(m, &layout, &walk));
             // ...and the music is the script's too, by the reinforcements
             // the teams start with.
@@ -559,9 +564,51 @@ pub(super) fn load_hud_view(
 
 /// HUD model from the battle state. Takes `feed`'s new event lines: each
 /// model must reach the HUD (`HudView::update`) or its lines are lost.
+fn hud_lock(
+    walk: &WalkSim,
+    feed: &game::event_feed::EventFeed,
+    slot: usize,
+    aspect: f32,
+) -> Option<ui::hud::HudLock> {
+    let (target, pos) = walk.sim.lock_on_target(slot)?;
+    let hud = feed.lock_target(&walk.sim, target)?;
+    let camera = walk.camera();
+    let clip = camera.view_proj(aspect) * pos.extend(1.0);
+    let w = clip.w.abs().max(1.0e-4);
+    let (mut x, mut y) = (clip.x / w, -clip.y / w);
+    let bound = x.abs().max(y.abs());
+    const EDGE: f32 = 0.9;
+    let on_screen = clip.w > 0.0 && bound <= EDGE;
+    if !on_screen && bound > 0.0 {
+        x *= EDGE / bound;
+        y *= EDGE / bound;
+    }
+    let off = pos - camera.position;
+    let distance = off.length();
+    let toward = off.normalize_or_zero();
+    let view = camera.view();
+    let up = glam::Vec3::new(view.x_axis.y, view.y_axis.y, view.z_axis.y).dot(toward);
+    let direction = (up.abs() > 0.2).then_some(if up > 0.0 { 0.0 } else { 180.0 });
+    Some(ui::hud::HudLock {
+        target: hud,
+        distance,
+        direction,
+        ndc: [x, y],
+        on_screen,
+        visible: walk.sim.lock_on_visible(slot),
+        ready: [
+            walk.sim.lock_on_ready(slot, 0),
+            walk.sim.lock_on_ready(slot, 1),
+        ],
+        flyer: true,
+        pulse: walk.sim.tick as f32 / core::TICK_HZ as f32,
+    })
+}
+
 pub(super) fn hud_model(
     walk: &WalkSim,
     feed: &mut game::event_feed::EventFeed,
+    aspect: f32,
 ) -> ui::hud::HudModel {
     let me = &walk.sim.units[walk.player.index as usize];
     let b = &walk.sim.battle;
@@ -574,6 +621,11 @@ pub(super) fn hud_model(
         .controlled_guided(walk.player)
         .and_then(|r| Some((r, walk.sim.guided_class(r)?)));
     let on_foot = me.alive && me.mount.is_none() && droid.is_none() && guided.is_none();
+    let space_status = walk
+        .space_round
+        .as_ref()
+        .filter(|_| me.alive)
+        .and_then(|round| feed.space_status(&walk.sim, round, me.team));
     let (stamina, stamina_max) = me.stamina_bar();
     let (hp, hp_max, energy, energy_max) = match (guided, droid) {
         (Some((r, c)), _) => (r.health, c.health, r.energy, c.energy),
@@ -641,6 +693,7 @@ pub(super) fn hud_model(
         reticle,
         // The reticle's pick by name and health (card HTGT).
         target: on_foot.then(|| feed.target(&walk.sim, slot)).flatten(),
+        lock: hud_lock(walk, feed, slot, aspect),
         reticle_y: walk.reticle_y(),
         dead: !me.alive,
         // A human waits for no spawn wave (card SSELA): its timer only.
@@ -654,10 +707,7 @@ pub(super) fn hud_model(
                 .team_points()
                 .map(|(points, limit)| (points.map(|p| p as i32), limit))
         }),
-        capital_ships: walk
-            .sim
-            .capital_meters()
-            .map(|m| m.map(|c| (c.shield, c.hull))),
+        space: space_status,
         outcome: walk.sim.outcome,
         countdown: walk
             .sim
@@ -677,10 +727,10 @@ pub(super) fn hud_model(
         hit_body: feed.hit_body(walk.sim.tick),
         stats: Some(feed.stats(&walk.sim, walk.player)),
         player_team: me.team,
-        map: walk.minimap.as_ref().map(|m| match &spawn {
+        map: walk.minimap.as_ref().and_then(|m| match &spawn {
             // The spawn map page shows the Map element's Spawn view.
-            Some(ui::spawn_draw::SpawnPage::Map { .. }) => m.spawn_model(walk, slot),
-            _ => m.model(walk),
+            Some(ui::spawn_draw::SpawnPage::Map { .. }) => Some(m.spawn_model(walk, slot)),
+            _ => walk.space_round.is_none().then(|| m.model(walk)),
         }),
         squad: feed.squad(walk.sim.tick),
         // The spawn screen up, drawn in the HUD's frame (card SSELB).

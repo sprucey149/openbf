@@ -741,6 +741,7 @@ pub struct WalkSim {
     /// library, foley table and engine records are theirs
     /// (`crate::foley::battle_levels`). Empty without a mission.
     pub sound_levels: Vec<String>,
+    pub space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
     /// Each command post's name key, `level.<map>.<label>`, by `Sim::cps`
     /// index (card EVMSG; presentation only): what the post is called in the
     /// disc's text table (`crate::event_feed`).
@@ -876,6 +877,7 @@ impl WalkSim {
             voice: None,
             music: None,
             sound_levels: Vec::new(),
+            space_round: None,
             post_keys: Vec::new(),
             minimap: None,
             backdrop: None,

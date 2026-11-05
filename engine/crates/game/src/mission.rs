@@ -291,6 +291,43 @@ pub struct SpaceAssaultDef {
     pub destroyables: Vec<Vec<Vec<String>>>,
     pub turrets: Vec<SpaceTurretsDef>,
     pub frigate_turrets: Vec<(String, Vec<String>)>,
+    #[serde(default)]
+    pub objectives: Vec<SpaceSideDef>,
+    #[serde(default)]
+    pub lock_shields: Vec<u16>,
+    #[serde(default)]
+    pub scripted: Vec<SpaceScriptedDef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpaceScriptedDef {
+    pub kind: u8,
+    pub index: u16,
+    pub up: bool,
+    pub texts: Vec<(String, u8)>,
+    pub vos: Vec<(String, u8)>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpaceSideDef {
+    pub side: String,
+    pub attacker: bool,
+    pub text: String,
+    pub fighters: String,
+    pub win_vo: String,
+    pub lose_vo: String,
+    pub systems: Vec<SpaceObjectiveDef>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpaceObjectiveDef {
+    pub kind: String,
+    pub names: Vec<String>,
+    pub text: String,
+    pub att_vo: String,
+    pub def_vo: String,
+    pub u: f32,
+    pub v: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

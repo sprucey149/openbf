@@ -370,10 +370,10 @@ distance and enters the aim error as `(3 − 2·vis)`.
 
 ## 6. `EnableAIAutoBalance` / `DisableAIAutoBalance` (Q6, BF2) [V]
 
-Active iff `DAT_005fdfad && DAT_005fdfac` (both 1 in `.data`) and `FUN_002a3328` ≠ 3, where the
-mode is 1 when `DAT_005fed90 == 1` (uses `team+0x5c`, threshold 20), 2 when both teams have
-`tickets(+0x24) < 1000` (threshold 15), 0 when a mission flag at `DAT_005fee38+0x621` is set
-(`+0x5c`, threshold 0), 3 (off) for `DAT_005fed90` 2/3 or a 1000+ ticket team. Only in
+Active iff `DAT_005fdfad && DAT_005fdfac` (both 1 in `.data`) and `FUN_002a3328` ≠ 3. Corrected 2026-11-05 from
+lines 212845-212866: the mode is 0 when `DAT_005fed90` is 2 or 3, 3 (off) when it is 1, 1 when Space Assault is enabled
+(`DAT_005fee38+0x621`; `team+0x5c`, threshold 20), 2 when both teams have `tickets(+0x24) < 1000` (threshold 15),
+and 3 otherwise. Only in
 single-player / co-op (`FUN_002a8300(1) xor FUN_002a8300(2)`). Every 15 AI ticks
 (`FUN_002af948`, `DAT_005fe084`) `FUN_002a3528` computes
 `diff = human_score − enemy_score (+20 if the human team's tickets < 25% of initial, +10 if < 50%)`;
@@ -382,7 +382,8 @@ when `|diff| > threshold`: `DAT_005fdfa8 (enemy AI delta) = (diff ∓ threshold)
 gives the enemy bots +1 skill and its own bots −1; ≥ 55 ahead → ±4. Mode 1 additionally runs
 `FUN_002a3c28`: on skill-scaled timers (`U(lerp(45,15), lerp(100,60))` s and
 `U(lerp(25,10), lerp(45,12))` s, stretched by the balance delta) it hands one unit of the losing
-side a new goal (`FUN_002a38a0` / `FUN_002a3980`). **It never changes bot counts**; the
+side a new goal (`FUN_002a38a0` / `FUN_002a3980`). CORRECTED: those two do not give goals; they kill an unseen flyer and damage an
+unseen capital system (`re-space-assault.md` §15). **It never changes bot counts**; the
 `ScriptCB_SetNumBots` table 0x5fa808 (re-tickets-spawn §5) is independent of it.
 
 ---

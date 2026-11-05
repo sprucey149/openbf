@@ -547,6 +547,7 @@ impl Sim {
         }
         // 2a. The launchers' dwell locks (card UORD §5): a human's magnet
         //     target, a bot's combat target, counted against LockTime.
+        self.tick_lock_on(&unit_pads, dt);
         self.tick_locks(dt);
 
         // 2b. DOORS (DR2): open or close by who stands in their triggers
@@ -1144,6 +1145,7 @@ impl Sim {
 
         // 6. Command posts → bleed → domination → outcome.
         self.tick_space_assault(dt);
+        self.tick_space_balance();
         self.update_cps(dt);
         self.step_deathmatch();
 

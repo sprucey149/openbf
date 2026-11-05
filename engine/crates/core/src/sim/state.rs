@@ -416,6 +416,7 @@ pub struct Sim {
     /// Per player slot: ticks the held magnet has been out of sight
     /// (`MAGNET_LOS_GRACE`). Hashed only when one is not 0.
     pub magnet_hidden: Vec<u8>,
+    pub lock_on: Vec<super::lock_on::LockOn>,
     /// What each player slot's crosshair picks, with its relation (−1
     /// enemy, 0 team 0, 1 friend): the PS2's K+0x30 / K+0x40, which the HUD
     /// reticle colours by (`analysis/re-aim-assist.md` §3.7, card RETC) and
@@ -1013,6 +1014,7 @@ impl Sim {
             assist_lead: Vec::new(),
             magnet: Vec::new(),
             magnet_hidden: Vec::new(),
+            lock_on: Vec::new(),
             reticle_pick: Vec::new(),
             events: Vec::new(),
             press_edges: Vec::new(),

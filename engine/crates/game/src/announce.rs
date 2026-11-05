@@ -203,6 +203,7 @@ pub struct Commander {
     leaving_line: Option<String>,
     /// The player's flown droid or flyer was outside at the last [`Commander::leaving`].
     was_leaving: bool,
+    space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
 }
 
 /// One unit's combat call (card UCALL): its class's property for it (None:
@@ -242,6 +243,7 @@ impl Commander {
             vo: None,
             leaving_line: None,
             was_leaving: false,
+            space_round: None,
         }
     }
 
@@ -272,6 +274,7 @@ impl Commander {
             posts,
             sim.cps.iter().map(|c| c.owner).collect(),
         );
+        c.space_round = walk.space_round.clone();
         if mission.source_game == "bf2" {
             c.script_bleed = Some(ScriptBleed::new(script_rates(sim)));
             c.vo = Some(crate::vo::Vo::new(0x5d0_u32 ^ sim.tick as u32));
@@ -388,6 +391,49 @@ impl Commander {
         Some(line)
     }
 
+    fn space_calls(&mut self, sim: &Sim) {
+        let Some(round) = self.space_round.clone() else {
+            return;
+        };
+        let listener = self.announcer.listener();
+        for e in &sim.events {
+            match *e {
+                core::sim::Event::SpaceObjectiveDown { objective, owner } => {
+                    let Some(o) = round.objectives.get(usize::from(objective)) else {
+                        continue;
+                    };
+                    let name = if usize::from(owner) == listener {
+                        &o.def_vo
+                    } else {
+                        &o.att_vo
+                    };
+                    self.queue.ask(Line::commander(name));
+                }
+                core::sim::Event::SpaceLinkChanged { kind, index, up } => {
+                    let Some(event) = round.scripted(kind, index, up) else {
+                        continue;
+                    };
+                    for (name, team) in &event.vos {
+                        if usize::from(*team) == listener {
+                            self.queue.ask(Line::commander(name));
+                        }
+                    }
+                }
+                core::sim::Event::TeamDefeated { team } => {
+                    let name = if usize::from(team) == listener {
+                        round.lose_vo.get(listener)
+                    } else {
+                        round.win_vo.get(listener)
+                    };
+                    if let Some(name) = name.filter(|n| !n.is_empty()) {
+                        self.queue.ask(Line::commander(name));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// The combat calls of the tick the sim just stepped (card UCALL,
     /// `core::sim::Event::Call`): each asks its unit's class's property, at
     /// the unit. Held for [`Commander::gate_calls`]: the gates are the
@@ -428,6 +474,7 @@ impl Commander {
                 self.queue.ask(Line::commander(name));
             }
         }
+        self.space_calls(sim);
         for e in &sim.events {
             let core::sim::Event::Call { unit, call } = *e else {
                 continue;

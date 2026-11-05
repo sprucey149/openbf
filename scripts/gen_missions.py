@@ -1359,15 +1359,24 @@ def space_facts50(calls, chunks):
     if templates is None:
         return None
     template, internal, shield_defaults = templates
-    out = {"critical": [], "shields": [], "destroyables": [], "turrets": [], "frigate_turrets": []}
+    out = {"critical": [], "shields": [], "destroyables": [], "turrets": [], "frigate_turrets": [],
+           "objectives": [], "scripted": [], "lock_shields": []}
     for c in calls:
         a = c.args
         if c.name.endswith(":SetupAllCriticalSystems") and len(a) >= 3 and isinstance(a[2], Table):
             points = template[a[1]]
+            side = {"side": a[1], "attacker": bool(a[3]) if len(a) > 3 else False,
+                    "text": points["objTxt"], "fighters": points["fighterTxt"],
+                    "win_vo": points["winVO"], "lose_vo": points["loseVO"], "systems": []}
             for kind in ("engines", "lifesupport", "bridge", "comm", "sensors", "frigates"):
                 if kind in a[2]:
-                    for name in _tbl_list(a[2][kind]):
-                        out["critical"].append((name, kind, int(points[kind]["pts"])))
+                    entry = points[kind]
+                    names = _tbl_list(a[2][kind])
+                    for name in names:
+                        out["critical"].append((name, kind, int(entry["pts"])))
+                    side["systems"].append((kind, names, entry["objTxt"], entry["attVO"], entry["defVO"],
+                                            float(entry.get("u", -1.0)), float(entry.get("v", -1.0))))
+            out["objectives"].append(side)
             for name in _tbl_list(a[2].get("internalSys", Table())):
                 out["critical"].append((name, "internalSys", int(internal)))
         elif c.name == "LinkedShields:New" and len(a) >= 2 and isinstance(a[1], Table):
@@ -1383,6 +1392,31 @@ def space_facts50(calls, chunks):
             out["turrets"].append((int(t["team"]), t["mainframe"], _tbl_list(t["turrets"])))
     for f in chunks:
         out["frigate_turrets"].extend(frigate_turrets50(f))
+    groups = []
+    for c in calls:
+        if c.name not in ("ShowMessageText", "BroadcastVoiceOver", "EnableLockOn"):
+            continue
+        if not groups or groups[-1][0] is not c.prototype:
+            groups.append((c.prototype, []))
+        groups[-1][1].append(c)
+    seen = {}
+    for _, group in groups:
+        texts = [(c.args[0], int(c.args[1]) - 1) for c in group
+                 if c.name == "ShowMessageText" and len(c.args) > 1 and isinstance(c.args[1], (int, float))]
+        kind = next((k for k, name in enumerate(("shields", "mainframe"))
+                     if texts and (".%s." % name) in texts[0][0]), None)
+        if kind is None:
+            continue
+        up = texts[0][0].endswith(".up")
+        index = seen.get((kind, up), 0)
+        seen[(kind, up)] = index + 1
+        out["scripted"].append({
+            "kind": kind, "index": index, "up": up, "texts": texts,
+            "vos": [(c.args[0], int(c.args[1]) - 1) for c in group
+                    if c.name == "BroadcastVoiceOver" and isinstance(c.args[1], (int, float))],
+        })
+        if kind == 0 and not up and any(c.name == "EnableLockOn" for c in group):
+            out["lock_shields"].append(index)
     return out
 
 
@@ -1432,7 +1466,9 @@ def build(key, game, planet, era, pc_stem, ps2_name):
             if body is not None:
                 common = undump50(body)
         if common is not None:
-            calls = calls50(common) + calls
+            shared = {}
+            common_calls = calls50(common, globs=shared)
+            calls = common_calls + calls50(f, globs=shared)
         if mission_mode(ps2_name) == "ass":
             callbacks = callback_protos50(f) | (callback_protos50(common) if common is not None else set())
             m.space = space_facts50(calls, [p for p in (common, f) if p is not None])
@@ -1720,6 +1756,22 @@ def ron(m):
         L.append("        frigate_turrets: [")
         for frigate, turrets in sp["frigate_turrets"]:
             L.append('            ("%s", [%s]),' % (frigate, q(turrets)))
+        L.append("        ],")
+        L.append("        objectives: [")
+        for o in sp["objectives"]:
+            L.append('            (side: "%s", attacker: %s, text: "%s", fighters: "%s", win_vo: "%s", lose_vo: "%s", systems: ['
+                     % (o["side"], "true" if o["attacker"] else "false", o["text"], o["fighters"], o["win_vo"], o["lose_vo"]))
+            for kind, names, text, att, dfn, u, v in o["systems"]:
+                L.append('                (kind: "%s", names: [%s], text: "%s", att_vo: "%s", def_vo: "%s", u: %s, v: %s),'
+                         % (kind, q(names), text, att, dfn, fmtf(u), fmtf(v)))
+            L.append("            ]),")
+        L.append("        ],")
+        L.append("        lock_shields: [%s]," % ", ".join(str(i) for i in sp["lock_shields"]))
+        L.append("        scripted: [")
+        pairs = lambda items: ", ".join('("%s", %d)' % item for item in items)
+        for e in sp["scripted"]:
+            L.append('            (kind: %d, index: %d, up: %s, texts: [%s], vos: [%s]),'
+                     % (e["kind"], e["index"], "true" if e["up"] else "false", pairs(e["texts"]), pairs(e["vos"])))
         L.append("        ],")
         L.append("    )),")
     if m.birds:

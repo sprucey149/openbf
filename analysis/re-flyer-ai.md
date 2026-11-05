@@ -504,3 +504,9 @@ A craft with no clear route holds with no curve and retries each tick. A class n
 `measure:` a PS2 round. The transports' case is written up in `re-space-assault.md` §10.
 
 Flight contact and pilot rays read `Layers::VEHICLE`, so a hangar field no longer refuses a route.
+
+## Space rounds: boarding and unseen combat (2026-11-05, issue 122)
+
+`re-space-assault.md` §15. In a space round a bot claims a flyer within 50 m with no post, as `FUN_002e2e38` tells it to; before
+this a side under Hunt stopped flying. The disc's AI damage to capital ships is not gunnery but `FUN_002a3c28`, ported as
+`core::sim::space_balance`. `FUN_002fc980`, `FUN_002faf90` and the question of the BF2 pursuit trigger remain open there.

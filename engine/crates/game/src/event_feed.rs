@@ -382,6 +382,9 @@ struct Press {
 #[derive(Debug)]
 pub struct EventFeed {
     texts: Texts,
+    space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
+    space_hud: crate::space_assault::SpaceHud,
+    space_tick: u64,
     /// Per team: its name and its AI soldiers' names in the order they are
     /// made (`crate::bot_names`).
     teams: [(String, Vec<String>); 2],
@@ -457,6 +460,9 @@ impl EventFeed {
             order_labels: ORDER_LABELS.map(|l| texts.order_label(l)),
             driver_labels: DRIVER_LABELS.map(|l| texts.order_label(l)),
             texts,
+            space_round: None,
+            space_hud: Default::default(),
+            space_tick: 0,
             out: Vec::new(),
             ambush: Vec::new(),
             damage_flash: None,
@@ -481,6 +487,7 @@ impl EventFeed {
             [&walk.teams[0].faction, &walk.teams[1].faction],
             &walk.post_keys,
         );
+        feed.space_round = walk.space_round.clone();
         feed.classes = [0, 1].map(|t| {
             walk.teams[t]
                 .classes
@@ -656,6 +663,57 @@ impl EventFeed {
         })
     }
 
+    fn space_messages(&mut self, sim: &Sim, my_team: u8, tick: u64) {
+        let Some(round) = self.space_round.clone() else {
+            return;
+        };
+        for e in &sim.events {
+            let keys: Vec<String> = match *e {
+                Event::SpaceObjectiveDown { objective, owner } => round
+                    .objectives
+                    .get(usize::from(objective))
+                    .map(|o| o.down_text(owner != my_team))
+                    .into_iter()
+                    .collect(),
+                Event::SpaceLinkChanged { kind, index, up } => round
+                    .scripted(kind, index, up)
+                    .map(|s| {
+                        s.texts
+                            .iter()
+                            .filter(|(_, team)| *team == my_team)
+                            .map(|(key, _)| key.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                _ => continue,
+            };
+            for key in keys {
+                if let Some(text) = self.texts.bf2_text(&key).map(|t| t.trim().to_owned()) {
+                    self.say(text, message_color::YELLOW, tick);
+                }
+            }
+        }
+    }
+
+    pub fn space_status(
+        &mut self,
+        sim: &Sim,
+        round: &crate::space_assault::SpaceRound,
+        my_team: u8,
+    ) -> Option<ui::hud_space::SpaceStatus> {
+        let dt = sim.tick.saturating_sub(self.space_tick) as f32 / core::TICK_HZ as f32;
+        self.space_tick = sim.tick;
+        self.space_hud.status(sim, round, my_team, dt)
+    }
+
+    /// The Space Assault objective a team reads on the spawn screen, the
+    /// first its script gives to `AddMissionObjective`.
+    pub fn space_objective(&self, team: u8) -> Option<String> {
+        let round = self.space_round.as_ref()?;
+        let key = round.team_text.get(usize::from(team))?;
+        self.texts.bf2_text(key).map(|t| t.trim().to_owned())
+    }
+
     /// Queue `text` unless the same line is still up.
     pub fn say(&mut self, text: String, color: [u8; 3], tick: u64) {
         self.recent
@@ -690,6 +748,7 @@ impl EventFeed {
         self.note_capture_regions(sim);
         self.round.tick(sim);
 
+        self.space_messages(sim, my_team, tick);
         for e in &sim.events {
             if let Event::Hit {
                 victim,
@@ -1046,6 +1105,35 @@ impl EventFeed {
                 .wreck_target(sim, slot)
                 .or_else(|| self.station_target(sim, slot));
         };
+        self.aim_target(sim, t, relation)
+    }
+
+    pub fn lock_target(&self, sim: &Sim, target: core::sim::LockTarget) -> Option<HudTarget> {
+        match target {
+            core::sim::LockTarget::Aim(t) => self.aim_target(sim, t, -1),
+            core::sim::LockTarget::Station(i) => {
+                let s = sim.stations.get(usize::from(i))?;
+                self.station_hud(s, i as usize, -1)
+            }
+        }
+    }
+
+    fn station_hud(&self, s: &core::sim::Station, i: usize, relation: i8) -> Option<HudTarget> {
+        (s.health.max > 0.0).then(|| HudTarget {
+            id: (1 << 62) | i as u64,
+            name: self
+                .stations
+                .get(usize::from(s.class))
+                .cloned()
+                .unwrap_or_default(),
+            health_fraction: (s.health.cur / s.health.max).clamp(0.0, 1.0),
+            relation,
+            team0: s.team.is_none(),
+            shield: None,
+        })
+    }
+
+    fn aim_target(&self, sim: &Sim, t: AimTarget, relation: i8) -> Option<HudTarget> {
         let fraction = |h: &core::weapon::Health| {
             if h.max > 0.0 {
                 (h.cur / h.max).clamp(0.0, 1.0)

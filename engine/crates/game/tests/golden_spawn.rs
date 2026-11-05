@@ -15,7 +15,8 @@ use game::viewer::{camera_from, upload_scene, GOLDEN_CAM};
 fn hud() -> ui::hud::HudModel {
     ui::hud::HudModel {
         team_points: None,
-        capital_ships: None,
+        lock: None,
+        space: None,
         damage_flash: 0.0,
         gauge: Default::default(),
         leaving: None,

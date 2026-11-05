@@ -1269,6 +1269,9 @@ pub(super) fn bake_content(
             || pass_named.contains(&lower)
             || flash_named.contains(&lower)
             || hud_named.contains(&lower)
+            || lower.ends_with("_icon_ass")
+            || lower.ends_with("_icon_ass_shield")
+            || lower == "spa_icon_critsys"
             || contact_named.contains(&lower)
             || glow_named.contains(&lower)
             || dust_named.contains(&lower)

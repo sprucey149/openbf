@@ -270,3 +270,7 @@ name in title case; which name an AI draws (a hash of its unit index, the PS2 us
 held back while the first is up; the HUD tree is drawn under the spawn screen so the death line is seen. Not built:
 the hero lines and the 2-point kills of §9.1, BF1's two-line MessageDisplay and its StatIconDisplay (BF2's HUD on
 every map, PLAN).
+
+## 10. Space Assault objective lines (2026-11-05)
+
+Built from the disc's script; the keys, the voice and the once-per-change rule are in `re-space-assault.md` §13.
