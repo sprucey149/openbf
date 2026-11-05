@@ -181,7 +181,7 @@ impl ReplayFrame {
         ));
         match &mut self.overlay {
             Some(o) => {
-                let model = hud_model(walk, &mut self.feed);
+                let model = hud_model(walk, &mut self.feed, 4.0 / 3.0);
                 let spawn = spawn_model(walk, &self.feed);
                 render_headless_hud(
                     r,
@@ -389,6 +389,15 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             Event::Neutralized { cp, by } => format!("{tick},neutralized,{cp},{by},\n"),
             Event::Saved { cp, team } => format!("{tick},saved,{cp},{team},\n"),
             Event::TeamDefeated { team } => format!("{tick},defeated,{team},,\n"),
+            Event::SpaceLinkChanged { kind, index, up } => {
+                format!("{tick},space_link,{kind},{index},{}\n", u8::from(*up))
+            }
+            Event::SpaceObjectiveDown { objective, owner } => {
+                format!(
+                    "{tick},space_objective,{objective},{owner},
+"
+                )
+            }
             Event::TimeUp { winner } => format!("{tick},time_up,{winner},,\n"),
             Event::EnvDeath { unit, cause } => {
                 let what = match cause {

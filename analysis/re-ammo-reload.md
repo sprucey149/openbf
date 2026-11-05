@@ -119,3 +119,54 @@ The installed executable's 100/600-tick smoke runs return `06da5e043dd4c755` /
 `989d7c74c627273a`, matching the updated deterministic pins. `ammo-pack.log` and
 `ammo-pack-verification.log` record the packaging checks. No temporary packed replacement remains.
 `git diff --check` and the added-Rust-comment check pass. Changes are kept local; no public export or push was performed.
+
+## Seat guns, 2026-11-05
+
+Report: the maintainer could fire the TIE Bomber's bomb without limit (`last.json`, BF2 spa8, seed 256:
+28 bombs 9 to 13 ticks apart, no pause).
+
+**Original rule [V].** The disc's `imp_weap_fly_tiebomber_bomb` has `RoundsPerClip` 6, `ReloadTime` 5, `ShotDelay` .33;
+the ship's slot has `WeaponAmmo` 0. The flyer setter `FUN_00263f68` (BF2 line 183088) records a value under 1 as a flag, and
+the flyer and turret object constructors (lines 174922 and 187341, `FUN_0026bf88`) turn the flag into 0x7fffffff and pass it to
+the weapon. Every other seat class has the same step. The base weapon `FUN_00325448` hands that count to `FUN_00303670`, the
+ammo object soldiers use: it marks an endless reserve and loads one clip. Reload entry `FUN_003274f8` and exit `FUN_00327658`
+take no account of the owner, and `FUN_00303958` fills the clip from the endless reserve. So `WeaponAmmo` 0 means reserve clips
+never run out, not that the clip never empties. A slot with `WeaponAmmo` N holds N clips, one of them loaded.
+
+**Port cause.** `guns.rs` passed `no_reload` and `infinite_ammo` for an endless slot, which are the two cheats together, so
+shots cost nothing. `vehicle_pads.rs` also issued N spare clips where the disc has N - 1. No reload sound could start either.
+All three are corrected, for every seat gun on both games.
+
+| Ship weapon (disc) | Clip | Reload s | Refire s | Salvo |
+|---|---:|---:|---:|---:|
+| TIE Bomber bomb | 6 | 5 | .33 | 1 |
+| TIE Fighter torpedo | 6 | 5 | 2 | 2 |
+| TIE Interceptor missile | 10 | 10 | .08 | 1 |
+| X-wing torpedo | 6 | 4 | 2 | 2 |
+| Y-wing bomb | 6 | 5 | .66 | 2 |
+| A-wing missile | 8 | 10 | 0 | 8 |
+| Droid fighter torpedo | 6 | 4 | 2 | 2 |
+| Tri-fighter missile | 9 | 9 | .3 | 3 |
+| Grievous fighter bomb | 6 | 6 | .15 | 1 |
+| ARC-170 bomb | 6 | 4 | 2 | 2 |
+| V-wing torpedo | 6 | 5 | .33 | 1 |
+| V-wing cannon | 10 | 3 | .6 | 2 |
+| Jedi fighter missile | 10 | 5 | .1 | 2 |
+| Anakin's fighter missile | 10 | 10 | .2 | 2 |
+| Republic and Alliance gunship missile (`WeaponAmmo` 6: 36 rounds, then dry) | 6 | 4 | 1.25 | 2 |
+
+The other fighter cannons have `RoundsPerClip` 0: no clip at all, limited by heat. That includes the TIE Bomber's primary,
+which the disc names `ptorpedo` but builds on the recoilless base (`HeatPerShot` 0, .5 s refire, .2 s initial delay).
+
+**Heat was already right.** Human shots in the black boxes against the disc's values: TIE Interceptor cannon runs of 39 shots
+then a 49-tick gap (`HeatPerShot` .05, `ShotDelay` .1, recover .25, clear at .6 gives 40 and 48); X-wing cannon runs of 19
+then 23 (.1, .163, .3, .8 gives 19.6 and 20). Refire gaps also match: bomb 10 ticks, torpedo salvo 9 then 61.
+
+**Channels.** The flyer class constructor defaults each slot's channel to its section index (line 181697) and no ship authors
+`WeaponChannel`, so section 1 and 2 are channels 0 and 1. The TIE Bomber's third weapon, the guided rocket, is on its TURRET1 seat.
+The shared ammo and shared heat props (0x8585bb8a, 0x9455a446, lines 182799 and 182846) appear in no baked side class file, BF1 or BF2,
+and are not ported.
+
+**Limits.** `FUN_00327618` advances the reload clock only while the weapon's active flag is set; a port seat gun always counts
+as active. Which channel's weapon the original deactivates, if any, was not traced. No PCSX2 run confirms the timing. The reload
+bar for a ship weapon uses the same clip fraction as on foot, so it empties and refills instead of filling smoothly.

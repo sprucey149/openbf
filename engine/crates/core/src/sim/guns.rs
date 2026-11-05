@@ -18,7 +18,7 @@
 mod seat_switch;
 
 use super::input::{buttons, PadState};
-use super::state::Sim;
+use super::state::{Event, Sim};
 use crate::collision::{HullFilter, Layers};
 use crate::projectile::{Bolt, Shooter};
 use crate::unit::{Controller, UnitHandle};
@@ -189,7 +189,12 @@ impl Sim {
                         .weapons
                         .iter()
                         .map(|w| {
-                            WeaponState::new(&self.weapon_classes[w.class], true, w.reserve_clips)
+                            let class = &self.weapon_classes[w.class];
+                            if w.infinite {
+                                WeaponState::with_clips(class, true, 0)
+                            } else {
+                                WeaponState::new(class, true, w.reserve_clips)
+                            }
                         })
                         .collect(),
                     zoom: None,
@@ -432,12 +437,21 @@ impl Sim {
             let input = FireInput {
                 held: held && !flight_blocked,
                 blocked: flight_blocked,
-                infinite_ammo: w.infinite || infinite_cheat,
-                no_reload: w.infinite || no_reload_cheat,
+                infinite_ammo: infinite_cheat,
+                no_reload: no_reload_cheat,
                 ai_dispersion: None,
             };
             shots.clear();
+            let was_reloading = ws.reloading();
             ws.update(dt, wc, input, &mut self.lcg, &mut shots);
+            let reload_began = !was_reloading && ws.reloading();
+            if let Some(i) = driver.filter(|_| reload_began) {
+                let unit = self.handle(i);
+                self.events.push(Event::Reload {
+                    unit,
+                    weapon_class: w.class as u32,
+                });
+            }
             if shots.is_empty() {
                 continue;
             }
@@ -513,6 +527,8 @@ impl Sim {
                         .and_then(|u| u.ai.target)
                         .and_then(|f| f.unit())
                         .map(crate::missile::MissileTarget::Unit);
+                    let locked = driver.and_then(|i| self.seat_lock_target(i, w.class, origin, d));
+                    let target = locked.or(target);
                     bolt.as_missile(&ord, &mc, target, &mut self.lcg);
                 }
                 self.note_bolt_shot(&mut bolt, origin, d);

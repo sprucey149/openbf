@@ -61,6 +61,11 @@ impl Sim {
                 .iter()
                 .find(|t| t.id == id && t.alive())
                 .map(|t| t.centre()),
+            MissileTarget::Station(s) => self
+                .stations
+                .get(usize::from(s))
+                .filter(|st| !st.destroyed)
+                .map(|st| st.sphere_centre),
         }
     }
 

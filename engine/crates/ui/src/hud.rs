@@ -196,13 +196,27 @@ impl HudTarget {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct HudLock {
+    pub target: HudTarget,
+    pub distance: f32,
+    pub direction: Option<f32>,
+    pub ndc: [f32; 2],
+    pub on_screen: bool,
+    pub visible: bool,
+    pub ready: [bool; 2],
+    pub flyer: bool,
+    pub pulse: f32,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct HudModel {
+    pub lock: Option<HudLock>,
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
     pub team_points: Option<([i32; 2], u32)>,
-    pub capital_ships: Option<[(f32, f32); 2]>,
+    pub space: Option<crate::hud_space::SpaceStatus>,
     /// Reinforcements lost per second to the post bleed, team 0 / team 1.
     pub bleed: [f32; 2],
     pub hp: f32,
@@ -322,6 +336,7 @@ pub const RETICLE_COLORS: [[u8; 3]; 3] = [
 /// like the PS2's publishers, so call it every frame. `has_mesh` answers
 /// whether a model of that name can be drawn (the NameMesh fallback).
 pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
+    feed_lock(hud, m.lock.as_ref(), m.space.clone(), has_mesh);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     put("initialize", EventValue::None);
     let alive = !m.dead;
@@ -825,6 +840,93 @@ fn feed_target(hud: &mut Hud, t: Option<&HudTarget>, has_mesh: &dyn Fn(&str) -> 
     );
 }
 
+fn feed_lock(
+    hud: &mut Hud,
+    lock: Option<&HudLock>,
+    m_space: Option<crate::hud_space::SpaceStatus>,
+    has_mesh: &dyn Fn(&str) -> bool,
+) {
+    const ID: &str = "hud.lockOn.id";
+    const WEAPON: [(&str, &str); 2] = [
+        (
+            "player1.weapon1.lockOnPosition",
+            "player1.weapon1.lockOnDisable",
+        ),
+        (
+            "player1.weapon2.lockOnPosition",
+            "player1.weapon2.lockOnDisable",
+        ),
+    ];
+    let id = EventValue::Text(lock.map(|l| l.target.id.to_string()).unwrap_or_default());
+    if hud.last(ID) != Some(&id) {
+        let first = hud.last(ID).is_none();
+        hud.publish(ID, id, has_mesh);
+        if !first {
+            hud.send("player1.lockOnDisable", EventValue::None, has_mesh);
+            hud.send("player1.lockOnDirectionDisable", EventValue::None, has_mesh);
+        }
+        for e in [
+            "player1.lockOnClassName",
+            "player1.lockOnHealthFraction",
+            "player1.lockOnTeamColor",
+            "player1.lockOnDirection",
+        ] {
+            hud.forget(e);
+        }
+    }
+    hud.space = m_space;
+    hud.lock_marker = lock.map(|l| crate::hud_tree::LockMarker {
+        pulse: l.pulse,
+        ndc: l.ndc,
+        on_screen: l.on_screen,
+        visible: l.visible,
+        distance: l.distance,
+        flyer: l.flyer,
+    });
+    for (k, (position, disable)) in WEAPON.iter().enumerate() {
+        let shown = lock.filter(|l| l.ready[k] && l.on_screen);
+        match shown {
+            Some(l) => hud.publish(
+                position,
+                EventValue::Position([l.ndc[0] * 0.5 + 0.5, l.ndc[1] * 0.5 + 0.5]),
+                has_mesh,
+            ),
+            None => {
+                if hud.last(position).is_some() {
+                    hud.forget(position);
+                    hud.send(disable, EventValue::None, has_mesh);
+                }
+            }
+        }
+    }
+    let Some(l) = lock else {
+        return;
+    };
+    let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
+    put(
+        "player1.lockOnClassName",
+        EventValue::Text(l.target.name.clone()),
+    );
+    put(
+        "player1.lockOnTeamColor",
+        EventValue::Color(l.target.color()),
+    );
+    put(
+        "player1.lockOnHealthFraction",
+        EventValue::Number(l.target.health_fraction.clamp(0.0, 1.0)),
+    );
+    put("player1.lockOnDistance", EventValue::Number(l.distance));
+    match l.direction {
+        Some(z) => put("player1.lockOnDirection", EventValue::Number(z)),
+        None => {
+            if hud.last("player1.lockOnDirection").is_some() {
+                hud.forget("player1.lockOnDirection");
+                hud.send("player1.lockOnDirectionDisable", EventValue::None, has_mesh);
+            }
+        }
+    }
+}
+
 /// `[ours]` "Defeat In" over its number, where "Victory In" sits: BF2's
 /// layout puts the defeat label left of the number (0.664, 0.088 against
 /// the victory label's 0.845, 0.040; re-round-end.md §1.2). A named
@@ -921,78 +1023,11 @@ pub(crate) fn draw_round_end(result: u8, size: [f32; 2]) -> crate::hud_draw::Hud
     frame
 }
 
-fn space_meter(ui: &mut egui::Ui, label: &str, fraction: f32, text: String, color: Color32) {
-    ui.horizontal(|ui| {
-        ui.add_sized(
-            [58.0, 14.0],
-            egui::Label::new(
-                RichText::new(label)
-                    .size(13.0)
-                    .color(Color32::WHITE)
-                    .strong(),
-            ),
-        );
-        ui.add(
-            egui::ProgressBar::new(fraction.clamp(0.0, 1.0))
-                .desired_width(150.0)
-                .desired_height(14.0)
-                .fill(color)
-                .text(RichText::new(text).size(11.0).color(Color32::WHITE)),
-        );
-    });
-}
-
-fn draw_space_meters(ctx: &egui::Context, m: &HudModel) {
-    let (Some((points, limit)), Some(ships)) = (m.team_points, m.capital_ships) else {
-        return;
-    };
-    let own = usize::from(m.player_team.min(1));
-    let below_minimap = ctx.content_rect().height() * 0.3;
-    egui::Area::new(egui::Id::new("hud_space_meters"))
-        .anchor(Align2::RIGHT_TOP, Vec2::new(-12.0, below_minimap))
-        .show(ctx, |ui| {
-            panel().fill(Color32::from_black_alpha(200)).show(ui, |ui| {
-                for team in [own, 1 - own] {
-                    let color = TEAM_COLORS[team];
-                    let (shield, hull) = ships[team];
-                    ui.label(
-                        RichText::new(m.team_names[team].to_uppercase())
-                            .size(13.0)
-                            .color(color)
-                            .strong(),
-                    );
-                    space_meter(
-                        ui,
-                        "SHIELDS",
-                        shield,
-                        format!("{:.0}%", shield * 100.0),
-                        Color32::from_rgb(70, 140, 220),
-                    );
-                    space_meter(
-                        ui,
-                        "HULL",
-                        hull,
-                        format!("{:.0}%", hull * 100.0),
-                        Color32::from_rgb(200, 120, 60),
-                    );
-                    space_meter(
-                        ui,
-                        "POINTS",
-                        points[team].max(0) as f32 / limit.max(1) as f32,
-                        format!("{}/{limit}", points[team]),
-                        color,
-                    );
-                }
-            });
-        });
-}
-
 /// The egui half of the HUD for this frame (module doc).
 pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
     if m.round_end.is_some() {
         return;
     }
-    draw_space_meters(ctx, m);
     // The round timer, top centre under the reinforcement counts.
     if let Some(t) = m.time_left {
         let secs = t.max(0.0).ceil() as u32;
@@ -1077,8 +1112,9 @@ mod tests {
 
     fn model() -> HudModel {
         HudModel {
+            lock: None,
             team_points: None,
-            capital_ships: None,
+            space: None,
             damage_flash: 0.0,
             gauge: Default::default(),
             leaving: None,

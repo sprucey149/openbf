@@ -13,6 +13,101 @@ use core::sim::{trace::TraceWriter, InputLog, PadState, Sim};
 use std::io::BufWriter;
 use std::path::PathBuf;
 
+struct SpaceReport {
+    out: std::fs::File,
+    flyers_lost: [u32; 3],
+    stations_lost: u32,
+    won_at: Option<u64>,
+}
+
+impl SpaceReport {
+    fn open(path: PathBuf) -> Result<Self> {
+        use std::io::Write;
+        let mut out = std::fs::File::create(&path).with_context(|| path.display().to_string())?;
+        writeln!(
+            out,
+            "seconds,points0,points1,units0,units1,flying0,flying1,flyers_shot,flyers_crashed,flyers_unseen,stations_lost,system_hits,outcome"
+        )?;
+        Ok(Self {
+            out,
+            flyers_lost: [0; 3],
+            stations_lost: 0,
+            won_at: None,
+        })
+    }
+
+    fn tick(&mut self, sim: &Sim) -> Result<()> {
+        use core::sim::Event;
+        use std::io::Write;
+        for e in &sim.events {
+            match e {
+                Event::VehicleDestroyed { class, killer, .. } => {
+                    let flyer = sim
+                        .flyer_params
+                        .get(*class as usize)
+                        .is_some_and(Option::is_some);
+                    if flyer {
+                        self.flyers_lost[usize::from(killer.is_none())] += 1;
+                    }
+                }
+                Event::StationDestroyed { .. } => self.stations_lost += 1,
+                _ => {}
+            }
+        }
+        if self.won_at.is_none() && sim.outcome.is_some() {
+            self.won_at = Some(sim.tick);
+            println!(
+                "space assault: outcome {:?} at {} s, points {:?}",
+                sim.outcome,
+                sim.tick / u64::from(core::TICK_HZ),
+                sim.space_team_points().map(|p| p.0)
+            );
+        }
+        if !sim.tick.is_multiple_of(u64::from(core::TICK_HZ) * 60) {
+            return Ok(());
+        }
+        let Some(((points, _), balance)) = sim.space_team_points().zip(sim.space_balance()) else {
+            return Ok(());
+        };
+        let mut units = [0u32; 2];
+        for (_, u) in sim.alive_units() {
+            if let Some(n) = units.get_mut(usize::from(u.team)) {
+                *n += 1;
+            }
+        }
+        let mut flying = [0u32; 2];
+        for (_, v) in sim.alive_vehicles() {
+            let is_flying = v.kind == core::vehicle::VehicleKind::Flyer
+                && v.flyer.phase == core::vehicle::flyer::FlightPhase::Flying;
+            if let (true, Some(n)) = (
+                is_flying,
+                v.team.and_then(|t| flying.get_mut(usize::from(t))),
+            ) {
+                *n += 1;
+            }
+        }
+        let unseen = balance.fighter_kills;
+        writeln!(
+            self.out,
+            "{},{},{},{},{},{},{},{},{},{},{},{},{:?}",
+            sim.tick / u64::from(core::TICK_HZ),
+            points[0],
+            points[1],
+            units[0],
+            units[1],
+            flying[0],
+            flying[1],
+            self.flyers_lost[0].saturating_sub(unseen),
+            self.flyers_lost[1],
+            unseen,
+            self.stations_lost,
+            balance.system_hits,
+            sim.outcome
+        )?;
+        Ok(())
+    }
+}
+
 pub(super) fn run(args: &[String]) -> Result<()> {
     let mut it = args.iter();
     let out = PathBuf::from(it.next().context("--sim-trace <out> <ticks>")?);
@@ -24,6 +119,8 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     let (mut input, mut seed, mut map, mut full) = (None, None, None, false);
     let (mut mode, mut mission_file) = ("con".to_owned(), None);
     let mut state_hashes = false;
+    let mut space_report = None;
+    let mut no_human = false;
     while let Some(flag) = it.next() {
         match flag.as_str() {
             "--input" => input = Some(PathBuf::from(it.next().context("--input <inputlog.ron>")?)),
@@ -41,6 +138,12 @@ pub(super) fn run(args: &[String]) -> Result<()> {
                 mission_file = Some(PathBuf::from(it.next().context("--mission <file.ron>")?));
             }
             "--state-hashes" => state_hashes = true,
+            "--no-human" => no_human = true,
+            "--space-report" => {
+                space_report = Some(PathBuf::from(
+                    it.next().context("--space-report <file.csv>")?,
+                ));
+            }
             "--trace-full" => full = true,
             other => bail!("unknown sim-trace flag: {other}"),
         }
@@ -174,6 +277,10 @@ pub(super) fn run(args: &[String]) -> Result<()> {
     let mut writer = TraceWriter::new(BufWriter::new(file), &name, seed, full)?;
     let idle = [PadState::default()];
     let mut frames = log.as_ref().map(InputLog::frames);
+    let mut report = space_report.map(SpaceReport::open).transpose()?;
+    if no_human {
+        sim.players.iter_mut().for_each(|slot| *slot = None);
+    }
     for _ in 0..ticks {
         let pads = match &mut frames {
             Some(frames) => frames.next().context("input exhausted")?,
@@ -181,6 +288,9 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         };
         sim.step(pads);
         writer.write_tick(&sim)?;
+        if let Some(report) = &mut report {
+            report.tick(&sim)?;
+        }
         if state_hashes {
             println!("state {} {:016x}", sim.tick, sim.hash());
         }

@@ -114,6 +114,8 @@ impl WeaponClass {
             max_pressed_time: 0.0,
             lock_time: 0.0,
             lock_on_range: 64.0,
+            target_lock_max: super::TARGET_LOCK_MAX_DEFAULT,
+            target_lock_lose: super::TARGET_LOCK_LOSE_DEFAULT,
             // LockOnAngle 1.0; the bolt's reach 80 × 1.5 (OrdnanceName after
             // LockOnRange); TargetEnemy 1, TargetPerson/Animal/Droid 1,
             // TargetVehicle/Building 0 (every BF1 side's rifle, disc census).
@@ -224,6 +226,8 @@ impl WeaponClass {
             name: "com_weap_inf_rifle".into(),
             lock_time: 0.0,
             lock_on_range: 40.0,
+            target_lock_max: super::TARGET_LOCK_MAX_DEFAULT,
+            target_lock_lose: super::TARGET_LOCK_LOSE_DEFAULT,
             // The bolt's reach 160 × 0.8 (the BF1 rule, PROVISIONAL for BF2:
             // B2 FUN_00328fb0's OrdnanceName default is unread). The Target*
             // bits and LockOnAngle 1.0 are the disc's, as BF1's.
@@ -394,6 +398,12 @@ impl WeaponClass {
         }
         if let Some(v) = pf(src, "LockOnRange") {
             w.lock_on_range = v;
+        }
+        if let Some(v) = pf(src, "TargetLockMaxDistance") {
+            w.target_lock_max = v;
+        }
+        if let Some(v) = pf(src, "TargetLockMaxDistanceLose") {
+            w.target_lock_lose = v;
         }
         // The cone: both keys write C+0xd8, so which wins depends on the
         // ODF's order; no shipped class writes both.

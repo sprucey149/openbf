@@ -46,6 +46,8 @@ fn world(limit: u32) -> World {
             station,
             points: 18,
             full_health: 1000.0,
+            objective: None,
+            shown: true,
         })
         .collect();
     sa.shields = vec![ShieldGroup::new(
@@ -243,7 +245,7 @@ fn a_manned_enemy_fighter_is_worth_three() {
     w.sim.destroy_vehicle(h, Some(killer));
     assert_eq!(
         w.sim.space_team_points().unwrap().0,
-        [FIGHTER_KILL_POINTS, 0]
+        [FIGHTER_KILL_POINTS + KILL_AI_POINTS, 0]
     );
 }
 
@@ -278,4 +280,69 @@ fn a_ground_round_keeps_conquest_rules() {
     sim.destroy_vehicle(h, Some(killer));
     assert_eq!(sim.space_team_points(), None);
     assert!(!sim.battle.unlimited_reinforcements);
+}
+
+fn bot_kill(sim: &mut Sim, victim: UnitHandle, killer: Option<UnitHandle>) -> [i32; 2] {
+    sim.unit_mut(victim).unwrap().health.cur = 0.0;
+    sim.unit_killed(victim, killer);
+    sim.space_team_points().unwrap().0
+}
+
+#[test]
+fn an_enemy_bot_kill_scores_one_and_a_human_kill_two() {
+    let mut w = world(180);
+    let killer = soldier(&mut w.sim, 0);
+    let bot = soldier(&mut w.sim, 1);
+    assert_eq!(bot_kill(&mut w.sim, bot, Some(killer)), [1, 0]);
+    let human = soldier(&mut w.sim, 1);
+    w.sim.unit_mut(human).unwrap().spec.player_slot = Some(0);
+    w.sim.unit_mut(human).unwrap().is_player = true;
+    assert_eq!(bot_kill(&mut w.sim, human, Some(killer)), [3, 0]);
+}
+
+#[test]
+fn a_bot_never_loses_points_and_a_human_does() {
+    let mut w = world(180);
+    let bot = soldier(&mut w.sim, 0);
+    let mate = soldier(&mut w.sim, 0);
+    assert_eq!(bot_kill(&mut w.sim, mate, Some(bot)), [0, 0]);
+    assert_eq!(bot_kill(&mut w.sim, bot, Some(bot)), [0, 0]);
+    let human = soldier(&mut w.sim, 0);
+    w.sim.unit_mut(human).unwrap().is_player = true;
+    let mate = soldier(&mut w.sim, 0);
+    assert_eq!(bot_kill(&mut w.sim, mate, Some(human)), [-2, 0]);
+    let human_2 = soldier(&mut w.sim, 1);
+    w.sim.unit_mut(human_2).unwrap().is_player = true;
+    assert_eq!(bot_kill(&mut w.sim, human_2, None), [-2, -1]);
+    assert_eq!(bot_kill(&mut w.sim, human, Some(human)), [-3, -1]);
+}
+
+#[test]
+fn a_death_reaching_the_limit_ends_the_round() {
+    let mut w = world(1);
+    let killer = soldier(&mut w.sim, 1);
+    let bot = soldier(&mut w.sim, 0);
+    bot_kill(&mut w.sim, bot, Some(killer));
+    assert_eq!(w.sim.outcome, Some(1));
+}
+
+#[test]
+fn a_grouped_objective_reports_once_on_its_last_system() {
+    let mut w = world(180);
+    let sa = w.sim.space_assault.as_mut().unwrap();
+    sa.critical[0].objective = Some(0);
+    sa.critical[1].objective = Some(0);
+    sa.objectives_left = vec![2];
+    w.sim.space_station_destroyed(w.ship[0], None);
+    let down = |sim: &Sim| {
+        sim.events
+            .iter()
+            .filter(|e| matches!(e, Event::SpaceObjectiveDown { .. }))
+            .count()
+    };
+    assert_eq!(down(&w.sim), 0);
+    w.sim.space_station_destroyed(w.engine, None);
+    assert_eq!(down(&w.sim), 1);
+    w.sim.space_station_destroyed(w.engine, None);
+    assert_eq!(down(&w.sim), 1);
 }

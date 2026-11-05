@@ -748,7 +748,11 @@ impl winit::application::ApplicationHandler for App {
                     }
                     // The tick hook above has read the events; the model
                     // carries the new lines to the HUD's message box.
-                    hud = Some(hud_model(walk, &mut self.feed));
+                    let hud_aspect = self.renderer.as_ref().map_or(16.0 / 9.0, |r| {
+                        let (w, h) = r.size();
+                        w as f32 / h.max(1) as f32
+                    });
+                    hud = Some(hud_model(walk, &mut self.feed, hud_aspect));
                     // The capture icon is off under the pause menu, as the
                     // PS2's (card CPBAR, re-capture-display 3.4).
                     if let Some(m) = hud.as_mut().filter(|_| paused) {

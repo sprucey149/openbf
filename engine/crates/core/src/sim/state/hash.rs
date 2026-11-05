@@ -180,6 +180,7 @@ impl Sim {
             eat(&i.to_le_bytes());
             eat(&g.to_le_bytes());
         }
+        self.lock_on_hash(&mut eat);
         if self.magnet_hidden.iter().any(|&h| h != 0) {
             eat(&[0x4d]);
             eat(&self.magnet_hidden);

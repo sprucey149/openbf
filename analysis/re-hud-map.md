@@ -275,3 +275,7 @@ no-mask and Shadow passes, the rebuild-path-only UV update, the Spawn copy takin
 eye (I had copied the v1 frame's). Its ELF checks: every store to Map+0xc3d0 (base + 0x8000, offset 0x43d0) is in the
 functions listed in §4 (+1 unreachable `sd` at 0x3a9428); the only stores to 0x5ff8e0 are the ctor's and FUN_003a8b98's;
 FUN_003a5228's four jal sites pass 1 / 0 / 1 / 1. Verifier scratch: `/tmp/bmapv/`.
+
+## 11. The flyer's lock events (2026-11-05)
+
+Slots, panel and placement for the Target element's lock states: `re-space-assault.md` §14. `missileLock*` has no writer found.

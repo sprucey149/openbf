@@ -78,7 +78,7 @@ use super::route::{hub_has_floor, post_hub};
 use super::state::{AiState, NavTick, RideState, SteerPick};
 use super::{
     BOARD_BLOCK, BOARD_FRESH, BOARD_GIVEUP, BOARD_PAD_BF1, BOARD_PAD_BF2, BOARD_SEEK, BOARD_SLACK,
-    BOARD_TRIP, GUNNER_WAIT, OTHER_FLOOR, RIDE_GAIN,
+    BOARD_TRIP, GUNNER_WAIT, OTHER_FLOOR, RIDE_GAIN, VEHICLE_NOTIFY_RADIUS,
 };
 use crate::nav;
 use crate::sim::{PadState, Sim, ENTER_REACH};
@@ -227,12 +227,14 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
     {
         return;
     }
-    let Some(cp) = st.target_cp.and_then(|i| sim.cps.get(i as usize)) else {
+    let cp = st.target_cp.and_then(|i| sim.cps.get(i as usize));
+    let space = sim.space_assault.is_some();
+    if cp.is_none() && !space {
         return;
-    };
+    }
     let pos = u.soldier.pos;
     // (A command walker is boarded whatever the trip: see [`command`].)
-    let near_post = nav::xz_dist(pos, cp.def.pos) <= BOARD_TRIP;
+    let near_post = cp.is_some_and(|cp| nav::xz_dist(pos, cp.def.pos) <= BOARD_TRIP);
     let taken = |vh: VehicleHandle| {
         sim.units.iter().enumerate().any(|(i, o)| {
             i != me.index as usize && o.alive && o.ai.ride.is_some_and(|r| r.board == Some(vh))
@@ -250,8 +252,18 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
         if v.kind == VehicleKind::Turret {
             continue;
         }
-        let d = nav::xz_dist(pos, v.pos);
-        if d > BOARD_SEEK || best.is_some_and(|(b, _)| d >= b) || (near_post && !command(sim, vh)) {
+        let space_flyer = space && v.kind == VehicleKind::Flyer;
+        let d = if space_flyer {
+            (v.pos - pos).length()
+        } else {
+            nav::xz_dist(pos, v.pos)
+        };
+        let too_far = if space_flyer {
+            d > VEHICLE_NOTIFY_RADIUS
+        } else {
+            d > BOARD_SEEK || (near_post && !command(sim, vh))
+        };
+        if too_far || best.is_some_and(|(b, _)| d >= b) {
             continue;
         }
         // Card VMESH: not one a driver gave up as stuck that has not moved since.
@@ -260,7 +272,8 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
         {
             continue;
         }
-        if claim_seat(sim, me, vh).is_some() && !taken(vh) && routes_to(sim, vh, cp) {
+        let routed = space_flyer || cp.is_some_and(|cp| routes_to(sim, vh, cp));
+        if routed && claim_seat(sim, me, vh).is_some() && !taken(vh) {
             best = Some((d, vh));
         }
     }
@@ -509,6 +522,12 @@ pub(super) fn board_goal(
         u.command.is_some()
     } else if turret {
         !super::man::endgame(sim, u.team)
+    } else if sim.space_assault.is_some()
+        && sim
+            .vehicle(vh)
+            .is_some_and(|v| v.kind == VehicleKind::Flyer)
+    {
+        true
     } else {
         st.target_cp
             .and_then(|i| sim.cps.get(i as usize))

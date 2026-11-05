@@ -558,6 +558,7 @@ pub const CHARGE_MIN: f32 = 0.15;
 /// Card WAI2: the PS2's bots come 8-71 m for a walker, once 146 m
 /// (re-walker-ai §13); 40 m left BF1 Geonosis's AT-TEs unclaimed.
 pub const BOARD_SEEK: f32 = 75.0;
+pub const VEHICLE_NOTIFY_RADIUS: f32 = 50.0;
 /// ...and only when its objective is farther than this (XZ, m).
 pub const BOARD_TRIP: f32 = 80.0;
 /// A claim not boarded within this many ticks is given up.

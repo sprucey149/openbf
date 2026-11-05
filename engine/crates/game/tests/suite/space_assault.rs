@@ -234,7 +234,7 @@ fn hangars_hold_spawn_only_posts_and_flyers_on_their_pads() {
 }
 
 #[test]
-fn a_dogfight_kill_grants_three_to_the_killers_team() {
+fn a_dogfight_kill_grants_three_and_one_for_the_pilot() {
     let Some(mut b) = battle("bf2_spa1", 180) else {
         return;
     };
@@ -258,7 +258,7 @@ fn a_dogfight_kill_grants_three_to_the_killers_team() {
     let killer = b.soldier(0);
     let before = b.points();
     b.sim.destroy_vehicle(flyer, Some(killer));
-    assert_eq!(b.points(), [before[0] + 3, before[1]]);
+    assert_eq!(b.points(), [before[0] + 4, before[1]]);
 }
 
 #[test]
@@ -581,4 +581,68 @@ fn every_space_mission_opens_its_hangar_barriers() {
         }
         assert!(b.mission.door_locks.is_empty(), "{map}");
     }
+}
+
+#[test]
+fn every_objective_names_real_text_and_voice_lines() {
+    let baked = missions_dir().parent().unwrap().join("assets_baked");
+    let texts = game::event_feed::Texts::load(&baked, "bf2");
+    for map in [
+        "bf2_spa1", "bf2_spa3", "bf2_spa6", "bf2_spa7", "bf2_spa8", "bf2_spa9",
+    ] {
+        let Some(m) = mission(map) else {
+            return;
+        };
+        let Ok(names) = std::fs::read_to_string(baked.join(map).join("sounds/names.ron")) else {
+            return;
+        };
+        let def = m.space_assault.as_ref().unwrap();
+        assert_eq!(def.objectives.len(), 2);
+        for side in &def.objectives {
+            assert!(texts.bf2_text(&side.text).is_some(), "{map} {}", side.text);
+            assert!(names.contains(&side.win_vo), "{map} {}", side.win_vo);
+            assert!(names.contains(&side.lose_vo), "{map} {}", side.lose_vo);
+            for s in &side.systems {
+                for key in [
+                    format!("level.spa.hangar.{}.atk.down", s.kind),
+                    format!("level.spa.hangar.{}.def.down", s.kind),
+                ] {
+                    assert!(texts.bf2_text(&key).is_some(), "{map} {key}");
+                }
+                assert!(names.contains(&s.att_vo), "{map} {}", s.att_vo);
+                assert!(names.contains(&s.def_vo), "{map} {}", s.def_vo);
+            }
+        }
+    }
+}
+
+#[test]
+fn ship_weapons_keep_the_discs_clips_and_reloads() {
+    let classes = game::assets::baked_root().join("classes");
+    if !classes.join("bf2_imp.ron").exists() {
+        eprintln!("SKIP: no baked BF2 classes");
+        return;
+    }
+    let mut db = game::classdb::ClassDb::default();
+    db.load(&classes.join("bf2_imp.ron")).unwrap();
+    db.load(&classes.join("bf2_rep.ron")).unwrap();
+    let mut sim = Sim::empty(1);
+    let pilot_gun = |sim: &mut Sim, name: &str| {
+        let seats = game::vehicle_class::seats(&db, name);
+        game::vehicle_pads::seat_gun(sim, &db, &seats[0], &[]).unwrap()
+    };
+
+    let bomber = pilot_gun(&mut sim, "imp_fly_tiebomber_sc");
+    let bomb = bomber.weapons[1];
+    let class = &sim.weapon_classes[bomb.class];
+    assert_eq!(class.name, "imp_weap_fly_tiebomber_bomb");
+    assert_eq!(class.rounds_per_clip, 6);
+    assert_eq!(class.reload_time, 5.0);
+    assert!(bomb.infinite);
+
+    let gunship = pilot_gun(&mut sim, "rep_fly_gunship_sc");
+    let missile = gunship.weapons[1];
+    assert_eq!(sim.weapon_classes[missile.class].rounds_per_clip, 6);
+    assert_eq!(missile.reserve_clips, 5);
+    assert!(!missile.infinite);
 }

@@ -28,6 +28,7 @@ pub mod hud_capture;
 pub mod hud_draw;
 pub mod hud_map;
 pub mod hud_scope;
+pub mod hud_space;
 pub mod hud_squad;
 pub mod hud_tree;
 pub mod input_icons;

@@ -58,6 +58,8 @@ use glam::Vec3;
 
 /// Degrees→radians literal the ODF parsers multiply by (EE float).
 pub const DEG: f32 = 0.017_453_294;
+pub const TARGET_LOCK_MAX_DEFAULT: f32 = 100.0;
+pub const TARGET_LOCK_LOSE_DEFAULT: f32 = 110.0;
 /// Fire-cycle loop epsilon, 2^-15 (both games).
 pub const FIRE_EPS: f32 = 3.051_757_8e-5;
 
@@ -235,6 +237,8 @@ pub struct WeaponClass {
     /// nothing.
     pub lock_time: f32,
     pub lock_on_range: f32,
+    pub target_lock_max: f32,
+    pub target_lock_lose: f32,
     /// The acquisition cone's slope, radians (C+0xd8: `LockOnAngle` × DEG, or
     /// `AutoAimSize` × 0.072; `analysis/re-aim-assist.md` §3.2). 0 = a cone
     /// only as wide as the target's radius.
@@ -479,6 +483,8 @@ impl Default for WeaponClass {
             max_pressed_time: 0.0,
             lock_time: 0.0,
             lock_on_range: 0.0,
+            target_lock_max: TARGET_LOCK_MAX_DEFAULT,
+            target_lock_lose: TARGET_LOCK_LOSE_DEFAULT,
             lock_on_angle: 0.0,
             extreme_range: 0.0,
             ai_range: [0.0, 30.0, 60.0],
@@ -1218,6 +1224,10 @@ impl WeaponState {
                 crate::missile::MissileTarget::Turret(id) => {
                     eat(&[2]);
                     eat(&id.to_le_bytes());
+                }
+                crate::missile::MissileTarget::Station(s) => {
+                    eat(&[3]);
+                    eat(&s.to_le_bytes());
                 }
             }
             eat(&self.lock_held.to_bits().to_le_bytes());

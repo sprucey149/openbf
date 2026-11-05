@@ -332,9 +332,9 @@ impl AimTarget {
 pub(super) struct Candidate {
     /// The PS2's team nibble: `None` = team 0 (an empty vehicle, an unowned
     /// turret).
-    team: Option<u8>,
+    pub(super) team: Option<u8>,
     /// The object kind the weapon's `target_kind` tests ([`HealthType`]).
-    kind: u32,
+    pub(super) kind: u32,
     /// The acquisition's bounds: centre and radius.
     pub(super) ctr: Vec3,
     r: f32,
@@ -346,8 +346,8 @@ pub(super) struct Candidate {
     /// The assist's target centre.
     assist_ctr: Vec3,
     /// A vehicle's hull and a turret's building, which the LOS ray passes.
-    hull: Option<VehicleHandle>,
-    building: Option<u32>,
+    pub(super) hull: Option<VehicleHandle>,
+    pub(super) building: Option<u32>,
 }
 
 /// The sticky target's cone widening while FIRE is held, π/4 (0x3f490fdb
