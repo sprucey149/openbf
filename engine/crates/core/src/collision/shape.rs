@@ -260,7 +260,7 @@ pub enum Shape {
 }
 
 impl Shape {
-    fn local_aabb(&self) -> Aabb {
+    pub(super) fn local_aabb(&self) -> Aabb {
         match self {
             Shape::Mesh(m) => {
                 let a = m.local_aabb();
@@ -440,6 +440,7 @@ impl Layers {
     pub const ORDNANCE: Layers = Layers(2);
     /// The vehicle subset: what a flyer's contact and its pilot's rays test.
     pub const VEHICLE: Layers = Layers(4);
+    pub const FLYER: Layers = Layers(8);
     /// The two layers that exist, and what `Body::new` gives a body. The PS2
     /// acquisition ray tests both (flag 0, RE §4); the port currently uses
     /// ORDNANCE through `perception::los_seat` (module header discrepancy).
@@ -491,6 +492,7 @@ pub struct Body {
     /// two x0 ones; issue #41, `analysis/re-ai-difficulty.md` 9.2); 1.0 for
     /// every other body.
     pub hit_mult: f32,
+    pub flyer_part: bool,
 }
 
 impl Body {
@@ -577,6 +579,7 @@ impl Body {
             owner: None,
             instance: None,
             hit_mult: 1.0,
+            flyer_part: false,
         }
     }
 }
@@ -661,6 +664,8 @@ pub struct HullPart {
     pub(super) closed: bool,
     /// [`Body::hit_mult`] of the body placed from this part.
     pub hit_mult: f32,
+    pub flyer_part: bool,
+    pub terrain_part: bool,
 }
 
 impl HullPart {
@@ -671,6 +676,16 @@ impl HullPart {
             shape,
             layers,
             hit_mult: 1.0,
+            flyer_part: false,
+            terrain_part: false,
+        }
+    }
+
+    pub fn with_flyer_subsets(self, flyer_part: bool, terrain_part: bool) -> HullPart {
+        HullPart {
+            flyer_part,
+            terrain_part,
+            ..self
         }
     }
 
@@ -686,6 +701,8 @@ impl HullPart {
         let bits = |m: &Mat4| m.to_cols_array().map(f32::to_bits);
         bits(&self.local) == bits(&o.local)
             && self.layers == o.layers
+            && self.flyer_part == o.flyer_part
+            && self.terrain_part == o.terrain_part
             && self.hit_mult.to_bits() == o.hit_mult.to_bits()
             && match (&self.shape, &o.shape) {
                 (Shape::Mesh(a), Shape::Mesh(b)) => Arc::ptr_eq(a, b),

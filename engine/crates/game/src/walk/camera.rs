@@ -21,6 +21,9 @@ impl WalkSim {
         if let Some(b) = &self.backdrop {
             return (b.camera(), None);
         }
+        if let Some(view) = self.held_seat_view() {
+            return (view, None);
+        }
         if let Some(r) = self.sim.controlled_guided(self.player) {
             if let Some(c) = self.sim.guided_class(r) {
                 return (guided_camera(r, c, self.fov_y()), None);
@@ -58,6 +61,19 @@ impl WalkSim {
             ..Camera::default()
         };
         (cam, Some(track))
+    }
+
+    pub(super) fn next_seat_view(&self) -> Option<Camera> {
+        let me = self.sim.units.get(self.player.index as usize)?;
+        if !me.alive {
+            return self.seat_view;
+        }
+        me.mount.is_some().then(|| self.camera())
+    }
+
+    fn held_seat_view(&self) -> Option<Camera> {
+        let me = self.sim.units.get(self.player.index as usize)?;
+        self.seat_view.filter(|_| !me.alive && !me.body)
     }
 
     pub fn eye_camera(&self, eye: &core::unit::IdealCamera) -> Camera {
@@ -449,6 +465,10 @@ impl WalkSim {
     /// The seat cameras take it too (card VSEAT, PROVISIONAL).
     pub fn fov_y(&self) -> f32 {
         let k = self.fov_scale.clamp(FOV_SCALE_RANGE.0, FOV_SCALE_RANGE.1);
+        if let Some(degrees) = self.flyer_fov() {
+            let (s, c) = core::fmath::sin_cos(degrees.to_radians() * 0.5);
+            return (2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0) * k).min(MAX_FOV_Y);
+        }
         let mut fov = self.walker_fovs().map_or_else(chase_fov_y, |(third, _)| {
             let (s, c) = core::fmath::sin_cos(third.to_radians() * 0.5);
             2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0)

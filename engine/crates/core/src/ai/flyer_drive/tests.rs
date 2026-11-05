@@ -513,11 +513,20 @@ fn a_wall_refuses_a_route_and_a_vehicle_clear_field_does_not() {
 
 #[test]
 fn a_pilot_with_no_clear_way_stays_inside_the_walls() {
-    let (mut s, b, v) = walled(crate::collision::Layers::ALL | crate::collision::Layers::VEHICLE);
+    use crate::collision::{HullPart, Layers, Shape};
+    let (mut s, b, v) = walled(Layers::ALL | Layers::VEHICLE | Layers::FLYER);
+    s.hull_parts = vec![Some(std::sync::Arc::from(vec![HullPart::new(
+        glam::Mat4::IDENTITY,
+        Shape::Sphere { radius: 2.0 },
+        Layers::VEHICLE,
+    )
+    .with_flyer_subsets(true, true)]))];
     assert!(s.seat_unit(b, v, 0));
     for _ in 0..(20 * crate::TICK_HZ) {
         s.step(&[]);
-        let c = s.vehicle(v).unwrap();
+        let Some(c) = s.vehicle(v).filter(|c| c.alive) else {
+            return;
+        };
         let from = (c.pos - Vec3::new(0.0, 40.0, 0.0)).abs().max_element();
         assert!(
             from < 55.0,

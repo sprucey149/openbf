@@ -398,6 +398,7 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
             out.cam_flyer = Some(crate::walk::FlyerCam {
                 eye: mix3(p.eye, c.eye, t),
                 rot: p.rot.lerp(c.rot, t),
+                fov: mix(p.fov, c.fov, t),
                 ..c
             });
         }

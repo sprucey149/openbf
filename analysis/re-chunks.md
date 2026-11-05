@@ -134,3 +134,30 @@ Addresses are BF2 (SWBFRNT2.ELF).
 vehicle origin. That origin is itself under the ground: 0.148 m on the PS2 (RE_LOG, the hover rest census) and
 0.18 m in the port. The centroid direction points down, so §4 removes the hull on its first tick in the port.
 The law reads the same on the PS2, but this is not checked against PS2 footage.
+
+## 8. The draw (FUN_001d7cb0)
+
+Slot +0x54 of the cluster vtable at `0x6192c8` is `FUN_001d85a8` (B2:84905-84922), which walks the ten pieces and calls
+`FUN_001d7cb0` (B2:84462-84684) for each live one.
+
+- **The model call.** It ends in slot +0xc of the model's vtable at +0xc0 (B2:84681-84682), with the piece's matrix, a pose block,
+  the colour and the caller's flags with bit 8 set. `FUN_001c5610`, the ordinary object draw, reaches the same slot (B2:71417). In
+  save state 10, 319 objects hold vtable `0x64feb0`, whose slot +0xc is `FUN_0057cf60` (B2:700365). A chunk's own vtable was not read.
+- **Lighting.** `FUN_0057cf60` gathers up to four lights for the model's sphere unless bit 0x10 or the top bit is set, and sets 0x10
+  itself when `FUN_0057f8e8` returns 0 (B2:700497-700526). The chunk adds only bit 8, so it is lit like any other model.
+- **The fade.** The colour is white. Its alpha is the caller's float, multiplied by `0.5 * (life - timer)` in the last two seconds
+  (B2:84515-84535). `life` is 53 for modes 2 and 4, otherwise 8, then `ChunkLifetime` when it is at least 0, then 30 when the budget
+  byte is 0xff.
+
+The port drew chunks through the effects' `SolidMesh`, which keeps only positions and UVs, so a ship's pieces came out unshaded
+beside the shaded ship. `VehicleVisuals::load_chunks` now uploads each chunk model with the ship's upload path, and
+`chunk_draws` submits them with `ClassVis::draws`, as the ship is. `Piece::opacity` is the fade, on the port's `life()`.
+
+`trace:` bit 8, which goes on to `FUN_0058ed70` (B2:700609, 700659, 700691), and the flags and float that `FUN_001d85a8`'s caller passes in. The
+port takes the float as 1. `trace:` the interpolation branch on +0xc9 (B2:84544-84679); the port draws the tick's pose.
+
+`measure:` no PS2 frame with chunks in view has been compared. A save state a second after a crash would give one. The basis
+for the look is the code above and the user's comparison of pieces against the intact ship.
+
+`replace:` droid chunks stay on `SolidMesh`. Their models live in `side/droid_chunks/weapons`, outside `VehicleSides`, so `find_model`
+does not find them. The fade applies to them there.

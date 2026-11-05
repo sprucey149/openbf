@@ -602,6 +602,8 @@ impl CollisionWorld {
                 layers: b.layers,
                 closed: b.closed,
                 hit_mult: b.hit_mult,
+                flyer_part: b.flyer_part,
+                terrain_part: false,
             })
             .collect()
     }
@@ -699,6 +701,7 @@ impl CollisionWorld {
             let mut b = Body::placed(pose * p.local, p.shape.clone(), p.layers, p.closed);
             b.owner = Some(owner);
             b.hit_mult = p.hit_mult;
+            b.flyer_part = p.flyer_part;
             b
         };
         match slot {

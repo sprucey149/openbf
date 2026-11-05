@@ -32,7 +32,8 @@ pub struct FlyerClass {
 
 impl FlyerClass {
     pub fn from_db(db: &ClassDb, class: &str, bf2: bool) -> Option<Self> {
-        if !FLYER_BASES.contains(&db.engine_base(class)?) {
+        let base = db.engine_base(class)?;
+        if !FLYER_BASES.contains(&base) {
             return None;
         }
         let mut c = Self {
@@ -56,6 +57,7 @@ impl FlyerClass {
                 }
             }
         }
+        c.motion.command_flyer = base == "commandflyer";
         Some(c)
     }
 

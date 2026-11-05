@@ -718,6 +718,7 @@ pub struct WalkSim {
     /// How far the chase camera lags a jetting soldier ([`core::unit::jet_camera_lag`]).
     pub cam_jet_lag: Vec3,
     pub cam_flyer: Option<FlyerCam>,
+    seat_view: Option<Camera>,
     /// The camera collision's stored track fraction (B1 `FUN_0019fd70`,
     /// [`crate::camera_collide::ease_pull`]): stepped each tick, it lets a
     /// pulled-in camera return slowly. Visual only.
@@ -868,6 +869,7 @@ impl WalkSim {
             cam_place: None,
             cam_jet_lag: Vec3::ZERO,
             cam_flyer: None,
+            seat_view: None,
             cam_pull: 1.0,
             cam_pull_track: None,
             fov_scale: 1.0,
@@ -1247,6 +1249,7 @@ impl WalkSim {
         self.cam_jet_lag = self.next_cam_jet_lag();
         self.step_cam_pull();
         self.cam_flyer = self.next_cam_flyer();
+        self.seat_view = self.next_seat_view();
         // The squad's answers to this tick's orders join the voice queue;
         // the units' combat calls wait for the sound bank's gates
         // (`Commander::gate_calls`).

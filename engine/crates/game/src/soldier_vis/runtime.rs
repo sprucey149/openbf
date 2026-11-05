@@ -770,6 +770,11 @@ impl SoldierVisuals {
                     ..Default::default()
                 };
             }
+            if u.alive {
+                v.seated = u.mount.is_some();
+            } else if v.seated && !u.body {
+                v.gone = true;
+            }
         }
     }
 

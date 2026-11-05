@@ -1047,6 +1047,44 @@ fn the_spawn_screens_read_the_table() {
 }
 
 #[test]
+fn a_pilot_flashes_when_their_hull_is_damaged_and_a_gunner_does_not() {
+    use core::vehicle::{Mount, SeatKind, VehicleKind, VehicleSpec};
+    let mut s = scene();
+    let me = s.me;
+    let v = s.sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Flyer,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+        max_health: 1000.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot, SeatKind::Gunner(0)],
+    });
+    s.sim.vehicles[v.index as usize].health.cur = 100.0;
+    let hit = Event::VehicleHit {
+        shooter: None,
+        vehicle: v,
+        damage: 20.0,
+        dir: None,
+    };
+    s.sim.units[me.index as usize].mount = Some(Mount {
+        vehicle: v,
+        seat: 1,
+    });
+    happen(&mut s, &[hit.clone()]);
+    assert_eq!(s.feed.damage_flash(s.sim.tick, me), 0.0);
+    s.sim.units[me.index as usize].mount = Some(Mount {
+        vehicle: v,
+        seat: 0,
+    });
+    happen(&mut s, &[hit]);
+    assert_eq!(s.feed.damage_flash(s.sim.tick, me), 128.0 / 255.0);
+}
+
+#[test]
 fn local_damage_flash_filters_rearms_expires_and_cannot_follow_another_life() {
     let mut s = scene();
     let (me, bot, attacker) = (s.me, s.mate, s.rebels[0]);

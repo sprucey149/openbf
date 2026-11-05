@@ -1009,17 +1009,18 @@ pub fn body_layers(
     cg: &CollisionGeom,
     class_collision: &[(String, String)],
 ) -> Vec<core::collision::Layers> {
-    use crate::collision_layers::{layer_bodies, BodyRef, Layer};
+    use crate::collision_layers::{layer_bodies, Layer, FLYER_USES_VEHICLE};
     use core::collision::Layers;
-    let mut refs: Vec<BodyRef> = Vec::with_capacity(cg.prims.len() + 1);
-    if cg.mesh.is_some() {
-        refs.push(BodyRef::mesh());
-    }
-    refs.extend(cg.prims.iter().map(|p| BodyRef::prim(&p.name, p.mask)));
+    let refs = body_refs(cg);
     // The three subsets, from the same body list and the same rule.
     let soldier = layer_bodies(&refs, class_collision, Layer::Soldier);
     let ordnance = layer_bodies(&refs, class_collision, Layer::Ordnance);
     let vehicle = layer_bodies(&refs, class_collision, Layer::Vehicle);
+    let flyer = if class_collision.iter().any(|(k, _)| k == FLYER_USES_VEHICLE) {
+        &vehicle
+    } else {
+        &soldier
+    };
     (0..refs.len())
         .map(|i| {
             (if soldier[i] {
@@ -1034,9 +1035,23 @@ pub fn body_layers(
                 Layers::VEHICLE
             } else {
                 Layers::NONE
+            }) | (if flyer[i] {
+                Layers::FLYER
+            } else {
+                Layers::NONE
             })
         })
         .collect()
+}
+
+fn body_refs(cg: &CollisionGeom) -> Vec<crate::collision_layers::BodyRef> {
+    use crate::collision_layers::BodyRef;
+    let mut refs = Vec::with_capacity(cg.prims.len() + 1);
+    if cg.mesh.is_some() {
+        refs.push(BodyRef::mesh());
+    }
+    refs.extend(cg.prims.iter().map(|p| BodyRef::prim(&p.name, p.mask)));
+    refs
 }
 
 /// A vehicle class's hull (card VHULL): the bodies of its geometry's
@@ -1053,25 +1068,32 @@ pub fn hull_parts(
     class_collision: &[(String, String)],
     hit_locations: &[(String, f32)],
 ) -> Vec<core::collision::HullPart> {
+    use crate::collision_layers::{layer_bodies, Layer};
     use core::collision::{HullPart, Layers, Shape};
     let mut out = Vec::new();
+    let refs = body_refs(cg);
+    let building = layer_bodies(&refs, class_collision, Layer::Building);
+    let terrain = layer_bodies(&refs, class_collision, Layer::Terrain);
+    let mut subsets = building.into_iter().zip(terrain);
     let mut next = body_layers(cg, class_collision).into_iter();
     if let Some(cpu) = cg.mesh.as_ref() {
         let layers = next.next().unwrap_or(Layers::NONE);
+        let (building, terrain) = subsets.next().unwrap_or((false, false));
         if let (true, Some(arc)) = (
-            layers != Layers::NONE,
+            layers != Layers::NONE || building || terrain,
             core::collision::trimesh(&cpu.positions, &cpu.indices),
         ) {
-            out.push(HullPart::new(
-                glam::Mat4::IDENTITY,
-                Shape::Mesh(arc),
-                layers,
-            ));
+            out.push(
+                HullPart::new(glam::Mat4::IDENTITY, Shape::Mesh(arc), layers)
+                    .with_flyer_subsets(building, terrain),
+            );
         }
     }
     for p in &cg.prims {
         let layers = next.next().unwrap_or(Layers::NONE);
-        let Some(shape) = prim_shape(p).filter(|_| layers != Layers::NONE) else {
+        let (building, terrain) = subsets.next().unwrap_or((false, false));
+        let in_any = layers != Layers::NONE || building || terrain;
+        let Some(shape) = prim_shape(p).filter(|_| in_any) else {
             continue;
         };
         // The class's HitLocation for this prim (issue #41: the x4 critical
@@ -1086,7 +1108,8 @@ pub fn hull_parts(
                 shape,
                 layers,
             )
-            .with_hit_mult(mult),
+            .with_hit_mult(mult)
+            .with_flyer_subsets(building, terrain),
         );
     }
     out

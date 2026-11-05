@@ -430,6 +430,7 @@ pub struct UnitVisual {
     /// The unit left the field with no death ([`core::sim::Event::Despawn`],
     /// a hero accept or a class change): nothing to draw until it respawns.
     gone: bool,
+    seated: bool,
     pending_throw: Option<u8>,
     /// Card VTURG: a seated gunner's world matrix this frame; `None` when he
     /// is not drawn in a seat.

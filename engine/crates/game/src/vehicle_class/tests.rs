@@ -356,3 +356,49 @@ fn values_with_a_trailing_comment_parse() {
     );
     assert_eq!(PilotType::parse("bogus"), None);
 }
+
+#[test]
+fn a_chunk_section_does_not_close_the_seat_it_follows() {
+    let db = fixture_db(
+        "chunkseat",
+        vec![ClassDef {
+            name: "ship".to_owned(),
+            kind: "entc".to_owned(),
+            base: "flyer".to_owned(),
+            props: vec![
+                (h("FLYERSECTION"), "BODY".to_owned()),
+                (h("TiltValue"), "3".to_owned()),
+                (h("CHUNKSECTION"), "CHUNK1".to_owned()),
+                (h("TrackCenter"), "0 5 -8".to_owned()),
+                (h("TrackOffset"), "0 1 10".to_owned()),
+            ],
+        }],
+    );
+    let got = seats(&db, "ship");
+    assert_eq!(got[0].track_center, Some([0.0, 5.0, -8.0]));
+    assert_eq!(got[0].track_offset, Some([0.0, 1.0, 10.0]));
+}
+
+#[test]
+fn a_flyer_explodes_by_its_destruct_key_and_a_hover_by_its_name() {
+    let def = |name: &str, base: &str, key: &str| ClassDef {
+        name: name.to_owned(),
+        kind: "entc".to_owned(),
+        base: base.to_owned(),
+        props: vec![(h(key), format!("{name}_exp"))],
+    };
+    let db = fixture_db(
+        "explosionkeys",
+        vec![
+            def("ship", "flyer", "ExplosionDestruct"),
+            def("gunship", "commandflyer", "ExplosionDestruct"),
+            def("bike", "hover", "ExplosionName"),
+        ],
+    );
+    assert_eq!(explosion_name(&db, "ship").as_deref(), Some("ship_exp"));
+    assert_eq!(
+        explosion_name(&db, "gunship").as_deref(),
+        Some("gunship_exp")
+    );
+    assert_eq!(explosion_name(&db, "bike").as_deref(), Some("bike_exp"));
+}

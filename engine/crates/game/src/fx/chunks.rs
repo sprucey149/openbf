@@ -9,7 +9,7 @@ use crate::{classdb::ClassDb, walk::WalkSim};
 use core::collision::{HullFilter, Layers, Shape};
 use core::sim::{Event, Sim};
 use glam::{Mat3, Mat4, Quat, Vec3};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 const MASS: f32 = 40.0;
@@ -177,6 +177,10 @@ impl Piece {
             2 | 4 => 53.0,
             _ => 3.0,
         }
+    }
+
+    fn opacity(&self) -> f32 {
+        ((self.life() - self.timer) * 0.5).clamp(0.0, 1.0)
     }
 
     fn step(&mut self, sim: &Sim, dt: f32, bf1: bool, bursts: &mut Vec<Vec3>) -> bool {
@@ -486,6 +490,7 @@ pub(super) struct Chunks {
     rng: Option<Lcg>,
     bf1: bool,
     posed_nodes: HashMap<u32, Vec<(String, Mat4)>>,
+    lit: HashSet<String>,
 }
 
 impl Chunks {
@@ -846,8 +851,13 @@ impl Chunks {
         out: &mut Vec<render::ParticleDraw>,
     ) {
         for p in self.live.iter().flatten() {
-            if let Some(model) = assets.model(&p.spec.model.to_ascii_lowercase()) {
-                model.draws(p.model(), [255; 4], p.pos, false, era, out);
+            let name = p.spec.model.to_ascii_lowercase();
+            if self.lit.contains(&name) {
+                continue;
+            }
+            if let Some(model) = assets.model(&name) {
+                let alpha = (p.opacity() * 255.0) as u8;
+                model.draws(p.model(), [255, 255, 255, alpha], p.pos, false, era, out);
             }
         }
         let effects = self
@@ -863,6 +873,18 @@ impl Chunks {
 
     pub(super) fn models(&self) -> impl Iterator<Item = &str> {
         self.defs.values().flatten().map(|s| s.model.as_str())
+    }
+
+    pub(super) fn set_lit(&mut self, names: impl IntoIterator<Item = String>) {
+        self.lit.extend(names);
+    }
+
+    pub(super) fn lit_poses(&self) -> impl Iterator<Item = (&str, Mat4, f32)> {
+        self.live
+            .iter()
+            .flatten()
+            .filter(|p| self.lit.contains(&p.spec.model.to_ascii_lowercase()))
+            .map(|p| (p.spec.model.as_str(), p.model(), p.opacity()))
     }
 
     pub(super) fn len(&self) -> usize {

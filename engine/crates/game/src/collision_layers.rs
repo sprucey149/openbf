@@ -155,6 +155,8 @@ fn is_empty_sentinel(body: &str) -> bool {
 ///
 /// `props` are `(layer key, body)` exactly as `manifest::ManifestClass`
 /// carries them; `bodies` are in the manifest's body order (the sim's).
+pub const FLYER_USES_VEHICLE: &str = "flyer_uses_vehicle";
+
 pub fn layer_bodies(bodies: &[BodyRef], props: &[(String, String)], layer: Layer) -> Vec<bool> {
     // Seed from the MASK byte: 0 = no mask read = every subset.
     let bit = layer.mask_bit();

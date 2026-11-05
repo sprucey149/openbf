@@ -45,3 +45,9 @@ to a byte; duration is 0.15 plus 0.15 times strength seconds. The fade setup
 duration. Only the local viewer's current life receives the overlay, on BF1
 and BF2 maps, from both direct and splash damage. trace: PCSX2 T2 for
 shake/rumble, any aim motion, and visual comparison of first-person feedback.
+
+A vehicle's damage flashes the same way since 2026-11-05. `FUN_001dfb38` (B2:90723-90751) walks the damaged object's `+0x240`
+controller list (`FUN_002690c8` returns `p + 0x240`) and flashes each entry with a player index of at least 0, for damage above
+2% of the health left, while the object's alive bit is set. The port takes the pilot of the hull from `Event::VehicleHit`, which
+crash damage also raises. `trace:` who else is on that list: `re-cheat-codes.md` §7 has it unconfirmed, so gunners and
+passengers do not flash.

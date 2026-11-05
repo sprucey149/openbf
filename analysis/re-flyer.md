@@ -113,6 +113,15 @@ Takeoff additionally divides by TurnRate in both games (B1:85954;
 B2:117113,118231,118641,118758). Original quaternion integration uses
 axis-angle with half-angle `length(omega)*dt/2`.
 
+The pitch tilt takes the z part of that cross product and the roll tilt the x
+part (BF2 machine code at `0x20680c`-`0x206810`, B2:117966 and 117979; BF1
+B1:85870-85875). Under plain pitching the z part is `omega.x * local_v.y`, which
+only the velocity's lag behind the nose feeds. The port read the y part until
+2026-11-05, which is `-omega.x * local_v.z`, the whole forward speed, and tilted
+the nose about 0.34 rad at full stick. Save state 10 settles it: `omega.x` -0.056
+at 80 m/s and BankAngle 0.8 hold a tilt of 0.0002, where the y part would give
+0.021.
+
 BF2 flying pitch/yaw approach their targets by at most `Filter*dt`, using
 `PitchFilterDecel` and `TurnFilterDecel` when the angular motion is slowing
 or reversing (B2:118455–118511). These are not `PitchDamp`/`TurnDamp` props.
@@ -195,6 +204,18 @@ Treating every property there as chunk-only silently loses acceleration
 50 and speeds 35/70/95. Turret-claimed rates must still not overwrite the
 body's rates.
 
+The seat table follows the same rule since 2026-11-05: a chunk row does not close
+BODY or the selected turret. Before that `seats()` lost every seat property after
+the first chunk row. The TIE fighter's row 52 is its first chunk and its camera
+rows are 127-169, so its pilot had no camera section and the view broke on the pad.
+The same loss hit `cis_fly_droidfighter_sc`, `cis_fly_greviousfighter`,
+`rep_fly_anakinstarfighter_sc`, `rep_fly_arc170fighter_sc`, `rep_fly_jedifighter_sc`,
+`rep_fly_vwing`, `imp_fly_tiefighter_sc`, `all_fly_xwing_sc` (aimers, weapon,
+IsPilotExposed), `all_fly_awing` (fast FOV), `imp_fly_trooptrans`,
+`imp_fly_ai_trooptrans` and BF2 `cis_hover_aat` (aimers). The chunk-closing rule
+stays for the other readers of `scoped` (hover motion, damage effects, landed
+height, walker), which were not re-read against the setters. `trace:` those.
+
 - BF1 X-wing: acceleration 30; Min/Mid/Max 20/50/82; pitch/yaw rates
   1/1.25; pitch/yaw filters 2.9/1.75; takeoff height/time/speed 2.5/1/3;
   landing time/speed 2/5.
@@ -215,8 +236,9 @@ headless kernel, with separate BF1/BF2 branches. `FlyerState` adds no hash
 bytes while exactly default; parked flyers therefore preserve old ground
 streams. Active state, including input-edge memory and energy, is hashed.
 
-The implementation is **not a complete original-game match**. Still owed:
-actual hull contact response/collision layers; the landing sphere's origin
+The implementation is **not a complete original-game match**. Hull contact and
+its layers are built for a piloted craft (`re-space-assault.md` §11). Still owed:
+the landing sphere's origin
 offset and moving/flagged-surface rejection; fractional landing-region
 coverage (the implemented gate uses origin membership); all fighter dodge/stunt
 maneuvers; the complete roll-level
