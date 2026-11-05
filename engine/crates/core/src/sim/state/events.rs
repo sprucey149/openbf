@@ -433,6 +433,11 @@ pub enum Call {
     /// PS2's table (`game::vo::EVENTS`). Never in the sim's events: the
     /// sound side picks it from them (`game::vo::Vo::tick`).
     Vo(u8),
+    /// A Hero Assault hero's own `SndHeroSpawned` / `SndHeroDefeated` line,
+    /// said where it stands. Never in the sim's events: the sound side asks
+    /// it on a respawn or a death (`game::announce::Commander::calls`).
+    HeroSpawned,
+    HeroDefeated,
 }
 
 /// What the world killed a unit with ([`Event::EnvDeath`]).

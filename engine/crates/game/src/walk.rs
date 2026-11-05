@@ -396,6 +396,8 @@ impl Cries {
             Call::NeedGunner => self.need_gunner.as_deref(),
             Call::Yes => self.yes.as_deref(),
             Call::LowHealth => self.low_health.as_deref(),
+            Call::HeroSpawned => self.hero.spawned.as_deref(),
+            Call::HeroDefeated => self.hero.defeated.as_deref(),
             Call::Vo(_) => None,
         }
     }

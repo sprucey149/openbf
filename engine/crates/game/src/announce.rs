@@ -415,10 +415,32 @@ impl Commander {
                 continue;
             };
             let class = class.unwrap_or(u.spec.class);
+            let hero = &teams[usize::from(u.team.min(1))].class(class).cries.hero;
+            // OURS (maintainer, 2026-11-05: Hero Assault is better with its
+            // heroes' voices; `tat2g_eli` switches hero VO off): in Hero
+            // Assault every hero says its own spawn and defeat line where it
+            // stands, as the hero manager says the spawn line at the hero
+            // (re-announcer.md 2.6); the player's own line is 2-D.
+            if sim.deathmatch.is_some() {
+                let (name, call) = match phase {
+                    1 => (&hero.spawned, core::sim::Call::HeroSpawned),
+                    2 => (&hero.defeated, core::sim::Call::HeroDefeated),
+                    _ => continue,
+                };
+                if let Some(name) = name {
+                    self.calls_asked.push(CallAsk {
+                        unit: unit.index,
+                        call,
+                        name: Some(name.clone()),
+                        pos: u.soldier.pos,
+                        own: u.is_player,
+                    });
+                }
+                continue;
+            }
             if sim.hero_class(u.team) != Some(class) {
                 continue;
             }
-            let hero = &teams[usize::from(u.team.min(1))].class(class).cries.hero;
             let name = match phase {
                 0 => &hero.offer,
                 1 => &hero.spawned,
