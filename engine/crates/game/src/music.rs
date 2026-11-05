@@ -20,6 +20,10 @@ use core::unit::UnitHandle;
 /// gain. 1.0 = what the disc's record plays at; 0 = no music at all.
 pub const VOLUME_RANGE: (f32, f32) = (0.0, 1.0);
 pub const DEFAULT_VOLUME: f32 = 1.0;
+/// OURS (maintainer, 2026-11-05: the music sat too high over the battle): a
+/// factor on every music take's gain before the volume option, about -3 dB
+/// (analysis/plan/FEATURE_SET.md, Presentation & audio).
+pub const MUSIC_MIX: f32 = 0.7;
 
 /// The option's value: `env` (`OPENBF_MUSIC_VOLUME`, for a headless or a
 /// scripted run) when it is a number, else the profile's; held in the range.
@@ -173,7 +177,7 @@ impl BattleMusic {
     pub fn level(&self) -> Option<(usize, f32)> {
         let (i, g) = self.player.current()?;
         let v = self.volume.clamp(VOLUME_RANGE.0, VOLUME_RANGE.1);
-        Some((i, g * self.tracks[i].gain * v))
+        Some((i, g * self.tracks[i].gain * v * MUSIC_MIX))
     }
 
     /// One frame of the battle's state: `listener` is the local player's
@@ -472,7 +476,11 @@ mod tests {
         };
         run(&mut m, 3.0, [200, 200], false, None);
         run(&mut m, 3.0, [200, 200], true, None);
-        assert_eq!(m.level().map(|(_, g)| g), Some(0.5), "fade x gain");
+        let level = m.level().map_or(0.0, |(_, g)| g);
+        assert!(
+            (level - 0.5 * MUSIC_MIX).abs() < 1e-6,
+            "fade x gain: {level}"
+        );
         run(&mut m, 8.0, [200, 197], true, None);
         run(&mut m, 12.0, [200, 0], true, Some(0));
         let names: Vec<&str> = heard
@@ -524,7 +532,8 @@ mod tests {
         let c = run(&mut m, 5.0);
         // Lua team 1 (cis) listens: its `start` is the third record bound.
         assert!(matches!(c[..], [Change::Started { music: 2, .. }]), "{c:?}");
-        assert_eq!(m.level().map(|(_, g)| g), Some(0.25));
+        let level = m.level().map_or(0.0, |(_, g)| g);
+        assert!((level - 0.25 * MUSIC_MIX).abs() < 1e-6, "{level}");
         // Off again: the take is cut, once.
         m.volume = 0.0;
         let c = run(&mut m, 1.0);

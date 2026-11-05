@@ -693,15 +693,16 @@ pub const BF2_KNOCK_TUMBLE_SQ: f32 = 64.0;
 pub const BF2_KNOCK_AIR_SCALE: f32 = 5.0;
 pub const BF2_KNOCK_HOVER_SCALE: f32 = 8.0;
 /// BF2's flinch (§4; PC 0x004e1690), a push that neither throws nor tumbles:
-/// on the floor over scale 2 every input locks for 0.5 s and a sprint ends
-/// (PS2 B2:152167-152287 [V]); in the hover over scale 2 for
-/// (scale - 2) / 12 s, in a jump, jet or fall over scale 1 for 1.0 s
-/// (PC only; trace: the PS2 apply's E+0x4e4 times for states 4, 6, 7, 8).
+/// on the floor over scale 2 every input locks and a sprint ends (PS2
+/// B2:152167-152287 [V]); in the hover over scale 2 for (scale - 2) / 12 s,
+/// in a jump, jet or fall over scale 1. OURS (maintainer, 2026-11-05: the
+/// freeze was too long): 1/3 s on the floor and 1/2 s in the air, where BF2
+/// locks 0.5 s and 1.0 s (analysis/plan/FEATURE_SET.md, Heroes).
 pub const BF2_FLINCH_FLOOR_SCALE: f32 = 2.0;
-pub const BF2_FLINCH_FLOOR_SECS: f32 = 0.5;
+pub const BF2_FLINCH_FLOOR_SECS: f32 = 1.0 / 3.0;
 pub const BF2_FLINCH_HOVER_RATE: f32 = 12.0;
 pub const BF2_FLINCH_AIR_SCALE: f32 = 1.0;
-pub const BF2_FLINCH_AIR_SECS: f32 = 1.0;
+pub const BF2_FLINCH_AIR_SECS: f32 = 0.5;
 /// BF1's gravity in the thrown and get-up states (B1:119278-119299; every
 /// other state has [`GRAVITY`]). BF2 throws with its air integrator: 18
 /// and the drag.
