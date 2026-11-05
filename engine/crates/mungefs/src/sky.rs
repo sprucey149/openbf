@@ -291,6 +291,41 @@ pub struct Sky {
 }
 
 impl Sky {
+    pub fn absorb(&mut self, later: Sky) {
+        let info = later.info;
+        self.info.fog_color = info.fog_color.or(self.info.fog_color);
+        self.info.fog_range = info.fog_range.or(self.info.fog_range);
+        self.info.ambient_color = info.ambient_color.or(self.info.ambient_color);
+        self.info.character_ambient_color = info
+            .character_ambient_color
+            .or(self.info.character_ambient_color);
+        self.info.vehicle_ambient_color = info
+            .vehicle_ambient_color
+            .or(self.info.vehicle_ambient_color);
+        self.info.near_scene_range = info.near_scene_range.or(self.info.near_scene_range);
+        self.info.far_scene_range = info.far_scene_range.or(self.info.far_scene_range);
+        self.sun = later.sun.or(self.sun.take());
+        self.dome = match (self.dome.take(), later.dome) {
+            (Some(mut dome), Some(next)) => {
+                dome.texture = next.texture.or(dome.texture);
+                dome.angle = next.angle.or(dome.angle);
+                dome.ambient = next.ambient.or(dome.ambient);
+                dome.filter = next.filter.or(dome.filter);
+                dome.threshold = next.threshold.or(dome.threshold);
+                dome.intensity = next.intensity.or(dome.intensity);
+                dome.models.extend(next.models);
+                dome.low_res_terrain = next.low_res_terrain.or(dome.low_res_terrain);
+                dome.terrain_enable = next.terrain_enable.or(dome.terrain_enable);
+                dome.reflection_color = next.reflection_color.or(dome.reflection_color);
+                dome.stars = next.stars.or(dome.stars);
+                Some(dome)
+            }
+            (dome, next) => next.or(dome),
+        };
+        self.objects.extend(later.objects);
+        self.unknown.extend(later.unknown);
+    }
+
     pub fn parse(sky: &Chunk<'_>) -> Result<Sky, UcfbError> {
         let mut out = Sky::default();
         for node in parse_tree(sky)? {
@@ -448,6 +483,42 @@ fn non_empty(s: Option<String>) -> Option<String> {
 mod tests {
     use super::*;
     use crate::fnv1a_lowercase;
+
+    #[test]
+    fn a_later_sky_chunk_adds_its_models_and_keeps_what_it_does_not_say() {
+        let mut map = Sky {
+            info: SkyInfo {
+                far_scene_range: Some(7000.0),
+                ..SkyInfo::default()
+            },
+            dome: Some(DomeInfo {
+                intensity: Some(30.0),
+                ..DomeInfo::default()
+            }),
+            ..Sky::default()
+        };
+        map.absorb(Sky {
+            info: SkyInfo {
+                fog_range: Some([1.0, 2.0]),
+                ..SkyInfo::default()
+            },
+            dome: Some(DomeInfo {
+                models: vec![DomeModel {
+                    geometry: "spa1_sky".into(),
+                    ..DomeModel::default()
+                }],
+                ..DomeInfo::default()
+            }),
+            objects: vec![SkyObject::default()],
+            ..Sky::default()
+        });
+        assert_eq!(map.info.far_scene_range, Some(7000.0));
+        assert_eq!(map.info.fog_range, Some([1.0, 2.0]));
+        let dome = map.dome.as_ref().unwrap();
+        assert_eq!(dome.intensity, Some(30.0));
+        assert_eq!(dome.models.len(), 1);
+        assert_eq!(map.objects.len(), 1);
+    }
 
     #[test]
     fn hash_preimages_are_confirmed() {

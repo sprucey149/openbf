@@ -456,6 +456,7 @@ pub fn bake_vehicles(
         let top = top_lod(&ix, geometry).map(|top| &ix.models[&top.to_ascii_lowercase()]);
         let sphere = top.and_then(|m| m.sphere);
         let vis_min_y = top.map(|m| m.vis_box.min[1]);
+        let vis_box = top.map(|m| (m.vis_box.min, m.vis_box.max));
         // Card WALK: a walker's anim table and prim origins; card WSKN: its
         // top LOD's skin (the skeleton and the bank's clips), once per model.
         let walker = if crate::walker::is_walker_base(&e.base) {
@@ -475,6 +476,7 @@ pub fn bake_vehicles(
             sphere,
             vis_min_y,
             walker,
+            vis_box,
         });
     }
 

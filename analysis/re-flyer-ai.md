@@ -490,3 +490,17 @@ hangar escape or complete Space Assault scoring. The earlier Bespin/Hoth rounds
 did not exercise real class, finite-capacity or nondefault-frequency admission;
 finite-capacity and nondefault-frequency decisions still have fixture coverage
 only. No original-game admission/trajectory acceptance is inferred.
+
+### The chosen route out of a hangar (2026-11-04)
+
+[O] `FUN_002ff478` (current lines 279157-279640) has no branch that flies a candidate whose chords failed. Ranked candidates
+are drawn up to four times, each dropped when `FUN_002fff48`'s three chords fail. After that it returns the best candidate
+of a separate list, filled during scoring from candidates out of range or scored zero, each tested on two chords, or a null
+path. The port's `.or(ranked.first())` was therefore wrong and is gone. Not ported: that geometric list. `FUN_002fff48` also
+ignores a hit unless the struck object carries flag 2 or 8 (`FUN_00168af0`); the port's chord treats any hit as a block.
+`trace:` those flags.
+
+A craft with no clear route holds with no curve and retries each tick. A class no route names gets no bot pilot. Both OURS,
+`measure:` a PS2 round. The transports' case is written up in `re-space-assault.md` §10.
+
+Flight contact and pilot rays read `Layers::VEHICLE`, so a hangar field no longer refuses a route.

@@ -90,10 +90,11 @@ pub fn install_collision(sim: &mut Sim, m: &Manifest, map_dir: &Path, db: &Class
             Some(g) => sphere(g, &c.name)?,
             None => None,
         };
-        if let Some(name) = db
-            .resolve(&c.name)
-            .filter(|name| db.engine_base(name).is_some_and(is_destructible_building))
-        {
+        if let Some(name) = db.resolve(&c.name).filter(|name| {
+            db.engine_base(name).is_some_and(|base| {
+                is_destructible_building(base) || crate::vehicle_class::is_turret_base(base)
+            })
+        }) {
             if let Some(class) = m
                 .classes
                 .iter()

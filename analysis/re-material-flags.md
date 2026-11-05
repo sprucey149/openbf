@@ -113,6 +113,8 @@ specular power, two u8 (*(decompiler detail omitted)*), a string. `RTYP` u32 →
 `FUN_005916b0` 724796: `seg+0x04` prim word = 0x4000 if flags&1 (724813), |0x100000 if COL0 (724819),
 |0x2000 if flags&0x200&&1 (724822–724826); `seg+0x18 = flags` verbatim (724860); diffuse floats +0x1c..+0x28,
 spec +0x2c..+0x38, power +0x3c; TNAM slots → +0x08 (0), +0x10 (1), +0x0c (2, bump), +0x14 (3, env).
+**Corrected 2026-11-04:** the two "u8" are two u32 reads each stored in a byte, at MTRL offsets 16 and 20, then a string
+(`FUN_00590328` current lines 711958-711959; `spa2_bldg_shield` stores 0 and 0x3c). The port read 16 and 17 until then.
 `FUN_0058e730` 723062 (the two u8): `flags & 0x0f000000` selects the UV-animation type — 0x1000000 → rates
 +0x18/+0x19, 0x2000000 → +0x1a/+0x1b, 0x4000000 → angle (+0x1c/+0x1d, +0x1e), 0x8000000 → +0x10; none → a
 static UV scale (723073–723095). [D] BF2's "RTYP 3" is redundant with 0x1000000 (census: every rtyp-3 word carries it).

@@ -137,6 +137,7 @@ pub(super) fn run(args: &[String]) -> Result<()> {
             tickets_set: false,
             ticket_pct: 100,
             time_limit: 0,
+            space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
             cheats: Default::default(),
             teams: mission.as_ref().map(|m| m.factions()),
             classes_dir: map
@@ -185,6 +186,12 @@ pub(super) fn run(args: &[String]) -> Result<()> {
         }
     }
     writer.finish()?;
+    if let Some((points, limit)) = sim.space_team_points() {
+        println!(
+            "space assault: points {points:?} of {limit}, outcome {:?}, tick {}",
+            sim.outcome, sim.tick
+        );
+    }
     println!("trace: {ticks} ticks -> {}", out.display());
     Ok(())
 }

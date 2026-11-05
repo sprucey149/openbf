@@ -14,6 +14,7 @@ pub(super) fn setup(cap: Option<u32>) -> BattleSetup {
         tickets_set: false,
         ticket_pct: 100,
         time_limit: 0,
+        space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
         cheats: Default::default(),
         teams: None,
         classes_dir: PathBuf::new(),

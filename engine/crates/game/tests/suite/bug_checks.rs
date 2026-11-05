@@ -150,9 +150,10 @@ fn bugx_a_stations_do_not_heal_or_resupply_a_corpse() {
 
 fn hud_model(dead: bool) -> ui::hud::HudModel {
     ui::hud::HudModel {
-        team_points: None,
         damage_flash: 0.0,
         team_names: ["one".into(), "two".into()],
+        team_points: None,
+        capital_ships: None,
         tickets: [250; 2],
         bleed: [0.0; 2],
         hp: if dead { 0.0 } else { 100.0 },

@@ -438,7 +438,7 @@ impl Layers {
     pub const SOLDIER: Layers = Layers(1);
     /// The ordnance subset: bolts, the reticle, AI line of sight.
     pub const ORDNANCE: Layers = Layers(2);
-    /// RESERVED for the vehicle subset (P7). Never set by anything today.
+    /// The vehicle subset: what a flyer's contact and its pilot's rays test.
     pub const VEHICLE: Layers = Layers(4);
     /// The two layers that exist, and what `Body::new` gives a body. The PS2
     /// acquisition ray tests both (flag 0, RE §4); the port currently uses
@@ -551,7 +551,7 @@ impl Body {
     /// property names (RE §0.3), and the semantics every fixture in this
     /// module was written under.
     pub fn new(to_world: Mat4, shape: Shape) -> Body {
-        Body::with_layers(to_world, shape, Layers::ALL)
+        Body::with_layers(to_world, shape, Layers::ALL | Layers::VEHICLE)
     }
 
     /// A body in exactly `layers` — what the runtime builds
@@ -1285,12 +1285,12 @@ mod tests {
     /// this module is written under.
     #[test]
     fn body_new_is_in_every_layer() {
-        assert_eq!(slab(0.0).layers, Layers::ALL);
+        assert_eq!(slab(0.0).layers, Layers::ALL | Layers::VEHICLE);
         assert!(Layers::ALL.contains(Layers::SOLDIER));
         assert!(Layers::ALL.contains(Layers::ORDNANCE));
         assert!(!Layers::NONE.contains(Layers::SOLDIER));
         assert!(!Layers::NONE.contains(Layers::ORDNANCE));
-        // The vehicle bit is reserved and in nothing this commit builds.
+        assert!(slab(0.0).layers.contains(Layers::VEHICLE));
         assert!(!Layers::ALL.contains(Layers::VEHICLE));
         assert_eq!(Layers::SOLDIER | Layers::ORDNANCE, Layers::ALL);
     }

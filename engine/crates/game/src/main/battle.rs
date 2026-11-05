@@ -440,12 +440,19 @@ pub(super) fn make_walk_with_counts(
         // go in before the opening wave, which spawns at the command walkers
         // they are about to build (card CWSP).
         let factions = [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()];
-        match game::vehicle_pads::install(
+        let space = b.mission.as_ref().filter(|m| m.mode == "ass").map(|m| {
+            (
+                m.space_assault.clone().unwrap_or_default(),
+                b.space_score_limit,
+            )
+        });
+        match game::vehicle_pads::install_with_objective(
             &mut walk.sim,
             &scene.manifest,
             &scene.dir,
             &b.classes_dir,
             &factions,
+            space.as_ref().map(|(def, limit)| (def, *limit)),
         ) {
             Ok(p) => {
                 println!(
@@ -602,7 +609,6 @@ pub(super) fn hud_model(
     ui::hud::HudModel {
         team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
-        team_points: walk.sim.team_points(),
         bleed: [b.teams[0].bleed_per_sec, b.teams[1].bleed_per_sec],
         hp,
         hp_max,
@@ -643,6 +649,15 @@ pub(super) fn hud_model(
                 t.saturating_sub(walk.sim.tick) as f32 / core::TICK_HZ as f32
             })
         }),
+        team_points: walk.sim.space_team_points().or_else(|| {
+            walk.sim
+                .team_points()
+                .map(|(points, limit)| (points.map(|p| p as i32), limit))
+        }),
+        capital_ships: walk
+            .sim
+            .capital_meters()
+            .map(|m| m.map(|c| (c.shield, c.hull))),
         outcome: walk.sim.outcome,
         countdown: walk
             .sim
@@ -910,6 +925,7 @@ mod tests {
             tickets_set: false,
             ticket_pct: 100,
             time_limit: 0,
+            space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
             cheats: Default::default(),
             teams: None,
             classes_dir: dir.join("absent_sides"),
@@ -970,6 +986,7 @@ mod tests {
             tickets_set: false,
             ticket_pct: 100,
             time_limit: 0,
+            space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
             cheats: Default::default(),
             teams: None,
             classes_dir: assets.join("classes"),
@@ -1103,6 +1120,7 @@ mod tests {
                 tickets_set: false,
                 ticket_pct: 100,
                 time_limit: 0,
+                space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
                 cheats: Default::default(),
                 teams: Some(mission.factions()),
                 classes_dir: assets.join("classes"),

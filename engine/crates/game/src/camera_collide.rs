@@ -856,18 +856,21 @@ pub fn see_through_vehicles(
 ) -> Vec<(VehicleHandle, f32)> {
     let mut out = Vec::new();
     for h in vehicles.filter(|h| Some(*h) != own) {
-        let bodies = world.hull(h);
-        if bodies.is_empty() {
+        let bodies = || {
+            world
+                .hull(h)
+                .iter()
+                .filter(|b| b.layers.contains(Layers::ALL))
+        };
+        if bodies().next().is_none() {
             continue;
         }
         let mut near = Aabb::empty();
-        for b in bodies {
+        for b in bodies() {
             near.add(b.aabb.min);
             near.add(b.aabb.max);
         }
-        if near.grown(CAMERA_RADIUS).contains(eye)
-            && bodies.iter().any(|b| camera_meets_hull(b, eye))
-        {
+        if near.grown(CAMERA_RADIUS).contains(eye) && bodies().any(|b| camera_meets_hull(b, eye)) {
             out.push((h, 0.0));
             continue;
         }

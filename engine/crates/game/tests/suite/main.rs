@@ -100,4 +100,5 @@ mod placed_explosives;
 mod remote_droids;
 mod sniper_assist;
 mod sniper_scope;
+mod space_assault;
 mod spawn_lineup_clear;

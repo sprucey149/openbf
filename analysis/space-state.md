@@ -1,5 +1,7 @@
 # Space Instant Action: source survey, 2026-11-01
 
+Superseded for scoring and capital ships by `re-space-assault.md`; kept as the survey it was.
+
 Surveyed source `f20c40c994476c1f73b0187d5a6ac969ba8a55fc`. This is a
 static source/data survey, not a claim of playable space battles or PS2 runtime
 parity. Numeric facts below were read from the PS2 mission bytecode or ELF;
@@ -30,7 +32,7 @@ not supply health, shields, death or a scoring callback.
 not match `*_Assault`, and the other space scripts request `*_Obj`. Carry the
 actual mission-requested sublevel instead of adding increasingly broad guesses.
 Space skies also come from a separate `SPA_SKY.LVL` sublevel, not merely the
-map LVL; the bake currently reads only one map LVL.
+map LVL; `bake map --sky-sublevel` adds it (`re-space-assault.md` §10).
 
 ## Confirmed PS2 mission data
 
@@ -135,7 +137,7 @@ records. The baseline game's CPU scene loader read it and constructed its
 collision world without a renderer. This proves basic content compatibility,
 not playability. It exposed these specific integration gaps:
 
-- The baked sky is `None`; the separate sky LVL is still required.
+- The baked sky was `None` then; the sublevel is baked now.
 - The Assault wrapper contains worlds `spa1_swingassault`, `spa1_mp_turrets`
   and `spa1_mp_flyers`, with 65 additional instances. The existing mode
   selector picks it for `ass`, `assault` and `obj` by its size fallback.

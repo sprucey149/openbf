@@ -132,7 +132,7 @@ fn every_bf2_sniper_deploys_the_discs_auto_turret() {
             assert!(!cpu.indices.is_empty(), "{dir}");
             let band = (0..cpu.submeshes.len()).map(|k| cpu.uv_scroll(k));
             assert!(
-                band.into_iter().any(|s| s == [-200.0 / 255.0, -1.0]),
+                band.into_iter().any(|s| s == [-200.0 / 255.0, 0.0]),
                 "{dir}: no band scroll (rebake common and side)"
             );
         }

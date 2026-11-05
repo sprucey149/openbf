@@ -30,16 +30,7 @@ pub const OPTION_ROWS: usize = 5;
 /// `ScriptCB_GetNetGameDefaults`' non-network branch).
 pub const MAX_BOTS: i32 = 16;
 /// The modes the port's sim can run (§7 dims the rest).
-pub const PORT_MODES: [Mode; 2] = [Mode::Con, Mode::Eli];
-
-/// Space Assault loads and its bots fly, but its capital ships cannot be attacked
-/// and a round has no way to end (`analysis/flying-state-of-play.md`), so its rows
-/// stay dimmed unless `OPENBF_SPACE=1` opens them. The space maps also have to be
-/// baked (`OPENBF_BAKE_SPACE=1 scripts/rebake.sh maps`) and their missions written
-/// (`scripts/gen_missions.py --space`).
-pub fn space_assault_open() -> bool {
-    std::env::var_os("OPENBF_SPACE").is_some_and(|v| v == "1")
-}
+pub const PORT_MODES: [Mode; 3] = [Mode::Con, Mode::Eli, Mode::Assault];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Game {

@@ -107,6 +107,7 @@ pub struct Pose {
     pub zoom_fov_mix: f32,
     pub cam_place: Option<(f32, Vec3)>,
     pub cam_pull: f32,
+    pub cam_flyer: Option<crate::walk::FlyerCam>,
 }
 
 impl Pose {
@@ -207,6 +208,7 @@ impl Pose {
         self.zoom_fov_mix = walk.zoom_fov_mix;
         self.cam_place = walk.cam_place;
         self.cam_pull = walk.cam_pull;
+        self.cam_flyer = walk.cam_flyer;
     }
 
     /// Write this pose into the walk (slots past either length untouched).
@@ -263,6 +265,7 @@ impl Pose {
         walk.zoom_fov_mix = self.zoom_fov_mix;
         walk.cam_place = self.cam_place;
         walk.cam_pull = self.cam_pull;
+        walk.cam_flyer = self.cam_flyer;
     }
 }
 
@@ -390,6 +393,15 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
     out.zoom_s = mix(prev.zoom_s, cur.zoom_s, t);
     out.zoom_fov_mix = mix(prev.zoom_fov_mix, cur.zoom_fov_mix, t);
     out.cam_pull = mix(prev.cam_pull, cur.cam_pull, t);
+    if let (Some(p), Some(c)) = (prev.cam_flyer, cur.cam_flyer) {
+        if p.vehicle == c.vehicle {
+            out.cam_flyer = Some(crate::walk::FlyerCam {
+                eye: mix3(p.eye, c.eye, t),
+                rot: p.rot.lerp(c.rot, t),
+                ..c
+            });
+        }
+    }
     if let (Some(p), Some(c)) = (prev.cam_place, cur.cam_place) {
         out.cam_place = Some((mix(p.0, c.0, t), mix3(p.1, c.1, t)));
     }

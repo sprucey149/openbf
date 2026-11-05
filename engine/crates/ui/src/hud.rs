@@ -201,7 +201,8 @@ pub struct HudModel {
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
-    pub team_points: Option<([u32; 2], u32)>,
+    pub team_points: Option<([i32; 2], u32)>,
+    pub capital_ships: Option<[(f32, f32); 2]>,
     /// Reinforcements lost per second to the post bleed, team 0 / team 1.
     pub bleed: [f32; 2],
     pub hp: f32,
@@ -920,11 +921,78 @@ pub(crate) fn draw_round_end(result: u8, size: [f32; 2]) -> crate::hud_draw::Hud
     frame
 }
 
+fn space_meter(ui: &mut egui::Ui, label: &str, fraction: f32, text: String, color: Color32) {
+    ui.horizontal(|ui| {
+        ui.add_sized(
+            [58.0, 14.0],
+            egui::Label::new(
+                RichText::new(label)
+                    .size(13.0)
+                    .color(Color32::WHITE)
+                    .strong(),
+            ),
+        );
+        ui.add(
+            egui::ProgressBar::new(fraction.clamp(0.0, 1.0))
+                .desired_width(150.0)
+                .desired_height(14.0)
+                .fill(color)
+                .text(RichText::new(text).size(11.0).color(Color32::WHITE)),
+        );
+    });
+}
+
+fn draw_space_meters(ctx: &egui::Context, m: &HudModel) {
+    let (Some((points, limit)), Some(ships)) = (m.team_points, m.capital_ships) else {
+        return;
+    };
+    let own = usize::from(m.player_team.min(1));
+    let below_minimap = ctx.content_rect().height() * 0.3;
+    egui::Area::new(egui::Id::new("hud_space_meters"))
+        .anchor(Align2::RIGHT_TOP, Vec2::new(-12.0, below_minimap))
+        .show(ctx, |ui| {
+            panel().fill(Color32::from_black_alpha(200)).show(ui, |ui| {
+                for team in [own, 1 - own] {
+                    let color = TEAM_COLORS[team];
+                    let (shield, hull) = ships[team];
+                    ui.label(
+                        RichText::new(m.team_names[team].to_uppercase())
+                            .size(13.0)
+                            .color(color)
+                            .strong(),
+                    );
+                    space_meter(
+                        ui,
+                        "SHIELDS",
+                        shield,
+                        format!("{:.0}%", shield * 100.0),
+                        Color32::from_rgb(70, 140, 220),
+                    );
+                    space_meter(
+                        ui,
+                        "HULL",
+                        hull,
+                        format!("{:.0}%", hull * 100.0),
+                        Color32::from_rgb(200, 120, 60),
+                    );
+                    space_meter(
+                        ui,
+                        "POINTS",
+                        points[team].max(0) as f32 / limit.max(1) as f32,
+                        format!("{}/{limit}", points[team]),
+                        color,
+                    );
+                }
+            });
+        });
+}
+
 /// The egui half of the HUD for this frame (module doc).
 pub fn draw_hud(ctx: &egui::Context, m: &HudModel) {
     if m.round_end.is_some() {
         return;
     }
+    draw_space_meters(ctx, m);
     // The round timer, top centre under the reinforcement counts.
     if let Some(t) = m.time_left {
         let secs = t.max(0.0).ceil() as u32;
@@ -1010,6 +1078,7 @@ mod tests {
     fn model() -> HudModel {
         HudModel {
             team_points: None,
+            capital_ships: None,
             damage_flash: 0.0,
             gauge: Default::default(),
             leaving: None,

@@ -85,7 +85,7 @@ fn all_authored_heroes_resolve_from_their_actual_mission_walk_sound_levels() {
     let mut missing = Vec::new();
     for path in paths {
         let mission = game::mission::MissionDef::load(&path).unwrap();
-        if mission.source_game != "bf2" || mission.is_hero_assault() {
+        if mission.source_game != "bf2" || mission.mode != "con" {
             continue;
         }
         let factions = mission.factions();

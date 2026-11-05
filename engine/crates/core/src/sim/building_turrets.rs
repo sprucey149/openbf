@@ -206,6 +206,16 @@ impl Sim {
         self.building_turrets
             .iter()
             .any(|t| t.instance == instance && t.down.is_some())
+            || self
+                .stations
+                .iter()
+                .any(|s| s.instance == Some(instance) && s.destroyed)
+    }
+
+    pub fn building_hidden(&self, instance: u32) -> bool {
+        self.building_turrets
+            .iter()
+            .any(|t| t.instance == instance && t.down.is_some() && t.fall == TurretFall::Hidden)
     }
 
     /// Add `amount` to fallen building turret `i`'s health; at MaxHealth it

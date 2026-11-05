@@ -235,8 +235,7 @@ impl MapEntry {
     /// mode the sim runs, and a mission file - of that pair (either order)
     /// for an era, any of the mode for a cross-era pair (§7).
     pub fn runnable(&self, mode: Mode, side: Side) -> bool {
-        let open = PORT_MODES.contains(&mode) || (mode == Mode::Assault && space_assault_open());
-        if !self.baked || !open {
+        if !self.baked || !PORT_MODES.contains(&mode) {
             return false;
         }
         let mut pairs = self.missions.iter().filter(|(m, _)| *m == mode);

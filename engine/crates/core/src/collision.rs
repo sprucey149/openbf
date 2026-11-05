@@ -39,8 +39,8 @@
 //! [`Body`] names its vehicle as `owner`; [`HullFilter`] says whose hulls a
 //! query sees, and [`CollisionWorld::ray_with`] reports the owner it hit.
 //!
-//! STILL NOT DONE: the VEHICLE subset ([`Layers::VEHICLE`] is reserved and
-//! never set — P7). Walker/hover traffic uses the named SOLDIER-subset surrogate
+//! The VEHICLE subset ([`Layers::VEHICLE`]) is built and flyers query it.
+//! Walker/hover traffic uses the named SOLDIER-subset surrogate
 //! in `traffic`; ordinary ground contacts still use [`HullFilter::Static`].
 //! Also pending: the building/terrain subsets (nothing queries them), and
 //! the acquisition mask discrepancy: the PS2 aim-assist acquisition ray

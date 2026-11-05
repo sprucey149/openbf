@@ -191,7 +191,9 @@ impl Sim {
             }
             let h = self.handle(i);
             if self.units[i].mount.is_some() {
-                self.exit_vehicle(h);
+                if !self.pilot_held_in_flight(h) {
+                    self.exit_vehicle(h);
+                }
             } else if let Some((vh, seat)) = self.enter_target(h) {
                 self.enter_vehicle(h, vh, seat);
             }
@@ -599,6 +601,19 @@ impl Sim {
         let s = &mut self.units[u.index as usize].soldier;
         s.vel = Vec3::ZERO;
         true
+    }
+
+    fn pilot_held_in_flight(&self, u: UnitHandle) -> bool {
+        if self.ground_rules != crate::soldier::GroundRules::Bf2 {
+            return false;
+        }
+        self.seat_of(u).is_some_and(|(h, seat)| {
+            seat == SeatKind::Pilot
+                && self.vehicle(h).is_some_and(|v| {
+                    v.kind == VehicleKind::Flyer
+                        && v.flyer.phase != crate::vehicle::flyer::FlightPhase::Landed
+                })
+        })
     }
 
     /// Take `u` out of its seat and stand it at the first of §5's 9 points

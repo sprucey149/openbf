@@ -306,6 +306,8 @@ BF2 ordnance 0x90 (building|terrain). Soldier world pass: mask 0xd + terrain.
   `FUN_00214600` (lines 127847–128286 → `FUN_00216378`, `FUN_00215fb8`,
   `FUN_00216468`, `FUN_00216198`, `FUN_002160a8`, `FUN_00216288`) and the class
   parsers at 80727, 125368, 137532, 146057.
+- **Built 2026-11-04:** the vehicle subset is `Layers::VEHICLE`, from the same rule as the other two, and flyer contact and
+  pilot rays query it (`re-space-assault.md` §10). Hover and walker traffic still use their named soldier surrogate.
 - **0xC3F25CBB = `VehicleCollisionOnly`** (FNV-1a of the lowercased key; found by
   brute force over `<prefix>Collision<suffix>` and confirmed by the handler's
   semantics). Consumed in BF1 `FUN_001fb6e8` line 109347 and BF2 `FUN_0022f6e8`

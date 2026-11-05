@@ -21,7 +21,7 @@ fn all_bf2_missions_append_their_authored_hero_without_changing_infantry() {
     let mut defeat_voices = std::collections::BTreeSet::new();
     for path in paths {
         let m = game::mission::MissionDef::load(&path).unwrap();
-        if m.source_game != "bf2" || m.is_hero_assault() {
+        if m.source_game != "bf2" || m.mode != "con" {
             continue;
         }
         let factions = m.factions();

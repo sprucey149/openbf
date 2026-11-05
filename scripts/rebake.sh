@@ -245,7 +245,7 @@ fi
 
 # Every other ground map, baked to assets_baked/<game>_<lvl> (the LVL name,
 # not the world name inside it: BF1 and BF2 both ship "hoth", "yavin1", ...).
-# Space (SPA*) only with OPENBF_BAKE_SPACE=1: Instant Action keeps it behind OPENBF_SPACE=1 until a round can end.
+# Space (SPA*) follows below; OPENBF_BAKE_SPACE=0 leaves it out.
 BF1_MAPS="BES/BES1 BES/BES2 END/END1 GEO/GEO1 HOT/HOT1 KAM/KAM1 KAS/KAS1 KAS/KAS2 NAB/NAB1 NAB/NAB2 RHN/RHN1 RHN/RHN2 TAT/TAT2 YAV/YAV1 YAV/YAV2"
 BF2_MAPS="COR/COR1 DAG/DAG1 DEA/DEA1 END/END1 FEL/FEL1 GEO/GEO1 HOT/HOT1 KAM/KAM1 KAS/KAS2 MUS/MUS1 MYG/MYG1 NAB/NAB2 POL/POL1 TAN/TAN1 TAT/TAT3 UTA/UTA1 YAV/YAV1"
 BF1_MAPS="${OPENBF_BF1_MAPS:-$BF1_MAPS}"
@@ -393,8 +393,8 @@ if want side; then
   # soldier (bake::soldier::BORROWED_PRONE, issue #40; the bones share names).
   BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/REP.LVL)" rep_inf_arctrooper,rep_inf_clonecommander,rep_inf_ep3armoredpilot,rep_inf_ep3heavytrooper,rep_inf_ep3jettrooper,rep_inf_ep3sniper,rep_inf_ep3trooper,rep_inf_feluciatrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_REP:+"$DS2_REP"}
   BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/CIS.LVL)" cis_inf_bdroid,cis_inf_magnaguard,cis_inf_sbdroid "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_CIS:+"$DS2_CIS"}
-  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/ALL.LVL)" all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_ALL:+"$DS2_ALL"}
-  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/IMP.LVL)" imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_IMP:+"$DS2_IMP"}
+  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/ALL.LVL)" all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_ALL:+"$DS2_ALL"}
+  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/IMP.LVL)" imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_IMP:+"$DS2_IMP"}
   # Native bodies share texture names with playable sides, with different
   # sheets. Keep their models and textures in a separate side directory.
   bake_native_side() {
@@ -585,6 +585,12 @@ if want sounds; then
   for p in $BF2_MAPS; do
     n=$(basename "$p" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2"
   done
+  if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ]; then
+    for n in SPA1 SPA3 SPA6 SPA7 SPA8 SPA9; do
+      [ -f "$(ci "$B2" "SPA/$n.LVL")" ] || continue
+      n=$(printf '%s' "$n" | tr 'A-Z' 'a-z'); bake_map_sounds "$S2" "bf2_$n" "$n" "$C2"
+    done
+  fi
   # The RESIDENT bank both games load and never unload: CORE.LVL's `global`
   # SampleBank + `snd_` — every shell/load sound, incl. shell_menu_accept
   # (analysis/re-sound-global.md §0.6; the per-map banks do not carry them).
@@ -662,13 +668,23 @@ if want maps; then
     "$BAKE" donor-hints "$OUT"
   fi
 fi
-if [ "${OPENBF_BAKE_SPACE:-}" = 1 ] && want maps; then
+if [ "${OPENBF_BAKE_SPACE:-1}" != 0 ] && want maps; then
   echo "== space maps =="
+  SKY_LVL="$(ci "$B2" SPA/SPA_SKY.LVL)"
   for n in SPA1 SPA3 SPA6 SPA7 SPA8 SPA9; do
+    [ -f "$(ci "$B2" "SPA/$n.LVL")" ] || continue
+    case "$n" in
+      SPA1) SKY=yav ;;
+      SPA3) SKY=kas ;;
+      SPA6) SKY=myg ;;
+      SPA7) SKY=fel ;;
+      SPA8) SKY=hot ;;
+      SPA9) SKY=tat ;;
+    esac
     d="$OUT/bf2_$(printf '%s' "$n" | tr 'A-Z' 'a-z')"
     clean "$d/models" "$d/textures" "$d/collision" "$d/nav" "$d/shadows"
     map_donors bf2 "spa/$(printf '%s' "$n" | tr 'A-Z' 'a-z').lvl"
-    "$BAKE" map "$(ci "$B2" "SPA/$n.LVL")" "$d" ${PC_ARG[@]+"${PC_ARG[@]}"}
+    "$BAKE" map "$(ci "$B2" "SPA/$n.LVL")" "$d" ${PC_ARG[@]+"${PC_ARG[@]}"} --sky-sublevel "$SKY_LVL" "$SKY"
     LF="$(ci "$B2" LOAD/SPA.LVL)"
     [ -f "$LF" ] && "$BAKE" loadscreen "$LF" "$d"
   done

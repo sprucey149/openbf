@@ -1148,6 +1148,7 @@ impl App {
         if let Some(m) = mission.as_mut().filter(|_| assault) {
             m.ai_alive_cap = self.session.ass_numbots.max(0) as u32;
         }
+        let space = self.mode == "ass";
         let setup = BattleSetup {
             seed: 42u32.wrapping_add(self.profile.career.rounds),
             // The shell round takes the PROFILE's tier (no CLI flag here);
@@ -1159,21 +1160,22 @@ impl App {
             // Map-relative team size, including the human.
             ai: None,
             // Explicit CLI cap is separate from the percentage setting.
-            ai_cap: None,
-            team_size_pct: (!assault).then_some(self.session.con_numbots as u32),
+            ai_cap: space.then_some(self.session.ass_numbots.max(0) as u32),
+            team_size_pct: (!assault && !space).then_some(self.session.con_numbots as u32),
             // Calibrated map tickets, scaled by the shell percentage.
             tickets: 250,
             tickets_set: false,
-            ticket_pct: if assault {
+            ticket_pct: if assault || space {
                 100
             } else {
                 self.session.con_mult.max(10) as u32
             },
-            time_limit: if assault {
+            time_limit: if assault || space {
                 0
             } else {
                 self.session.con_timer.max(0) as u32
             },
+            space_score_limit: self.session.ass_score.max(1) as u32,
             cheats: core::sim::Cheats::default(),
             teams: Some(teams.clone()),
             classes_dir: self.assets_dir.join("classes"),
@@ -1409,6 +1411,7 @@ pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()
         tickets_set: false,
         ticket_pct: 100,
         time_limit: 0,
+        space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
         cheats: core::sim::Cheats::default(),
         teams: None,
         classes_dir: assets_dir.join("classes"),

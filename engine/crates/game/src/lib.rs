@@ -59,6 +59,7 @@ mod sim_pose;
 pub mod skin;
 pub mod soldier_vis;
 pub mod sounds;
+pub mod space_assault;
 pub mod spawn_backdrop;
 pub mod spawn_page;
 pub mod spawn_preview;

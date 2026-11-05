@@ -364,6 +364,7 @@ fn tat1_pad_vehicles_are_solid() {
             .collision
             .hull(vh)
             .iter()
+            .filter(|b| b.layers.contains(core::collision::Layers::ALL))
             .map(|b| b.aabb.min.y)
             .fold(0.0f32, f32::min);
         let mid = sim

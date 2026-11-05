@@ -96,6 +96,7 @@ pub struct Battle {
     /// `Sim::hash`: it is fixed setup, and what it spends lands in
     /// `reinforcements`, which is.
     pub death_drain: [[u32; 2]; 2],
+    pub unlimited_reinforcements: bool,
 }
 
 impl Battle {
@@ -106,6 +107,7 @@ impl Battle {
                 TeamState::new(reinforcements[1]),
             ],
             death_drain: [[0; 2]; 2],
+            unlimited_reinforcements: false,
         }
     }
 
@@ -119,6 +121,9 @@ impl Battle {
             t.alive_players = t.alive_players.saturating_sub(1);
         } else {
             t.alive_ai = t.alive_ai.saturating_sub(1);
+        }
+        if self.unlimited_reinforcements {
+            return;
         }
         // Floor at 0: BF1's engine does `if (tickets>0) tickets--`
         // (`FUN_00297440`) and BF2's `Objective.lua` `OnCharacterDeath` guards

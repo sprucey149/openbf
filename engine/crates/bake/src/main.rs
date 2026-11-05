@@ -514,9 +514,12 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        Some("map") if args.len() == 4 || args.len() == 5 => {
-            let pc = args.get(4).map(|s| ci(s));
-            let m = bake::map::bake_map(&ci(&args[2]), &args[3], pc.as_deref())?;
+        Some("map") if matches!(args.len(), 4 | 5 | 7 | 8) => {
+            let sky_at = args.iter().position(|a| a == "--sky-sublevel");
+            let pc = args.get(4).filter(|_| sky_at != Some(4)).map(|s| ci(s));
+            let sky_lvl = sky_at.map(|i| ci(&args[i + 1]));
+            let sky = sky_lvl.as_deref().zip(sky_at.map(|i| args[i + 2].as_str()));
+            let m = bake::map::bake_map_with_sky(&ci(&args[2]), &args[3], pc.as_deref(), sky)?;
             // Since item 11 (`two-tier-ktx2`) every base texture is the PS2
             // disc's own, and `texture_tiers` lists only the textures that
             // ALSO got a `<name>.tier2.ktx2` — so this counts classic-plus
@@ -543,7 +546,7 @@ fn main() -> Result<()> {
                  \x20 bake xbox <disc.iso|root> <outdir> [--ps2 <root>] [--maps a,b] [--allow-gameplay-drift]\n\
                  \x20                                               an Xbox disc's maps, keeping the PS2's gameplay\n\
                  \x20 bake xbox-prints <ps2 root>... <work> <file>  the PS2 gameplay hashes `bake xbox` compares with\n\
-                 \x20 bake map        <map.lvl>    <outdir> [pc.lvl]  models/textures/world manifest\n\
+                 \x20 bake map        <map.lvl>    <outdir> [pc.lvl] [--sky-sublevel <sky.lvl> <name>]  models/textures/world manifest\n\
                  \x20 bake donor-hints <assets_baked>             BF2 cover hints onto the BF1 maps of bake::donor::DONORS\n\
                  \x20 bake common     <common.lvl> <outdir> [pc.lvl]  shared models/textures/classes\n\
                  \x20 bake classes    <file.lvl>   <out.ron>      entc/wpnc/ordc/expc props\n\

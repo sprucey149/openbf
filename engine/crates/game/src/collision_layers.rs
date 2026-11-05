@@ -48,11 +48,12 @@
 //! WHAT THE RUNTIME ASKS FOR: [`Layer`] is the RE's five layers, the INPUT of
 //! this rule; `core::collision::Layers` is the runtime's per-body query mask,
 //! its OUTPUT. They stay two types, mapped
-//! `Layer::Soldier -> Layers::SOLDIER` and `Layer::Ordnance ->
-//! Layers::ORDNANCE` in `game::assets::Scene::collision_world`, which builds
-//! the world as the UNION of the two subsets with a mask per body.
+//! `Layer::Soldier -> Layers::SOLDIER`, `Layer::Ordnance -> Layers::ORDNANCE`
+//! and `Layer::Vehicle -> Layers::VEHICLE` in
+//! `game::assets::Scene::collision_world`, which builds the world as the
+//! UNION of the three subsets with a mask per body.
 //!
-//! BUILT: soldier and ordnance. `CollisionWorld`'s soldier queries (ground,
+//! BUILT: soldier, ordnance and vehicle (flyers query it). `CollisionWorld`'s soldier queries (ground,
 //! push-out, wall sweep) read the soldier subset and its ray reads the
 //! ordnance subset — the subset a PS2 ray with the trailing flag tests (§4:
 //! bolts `FUN_002764C0`, the reticle, AI line of sight `FUN_00162E88`). On
@@ -64,9 +65,7 @@
 //! `com_inv_col_*` (BF2 common), whose `OrdnanceCollision = none` makes the
 //! invisible walls bolt-transparent.
 //!
-//! NOT BUILT: the VEHICLE subset (vehicles drive, but nothing queries a
-//! per-layer body subset for them: `core::collision::Layers::VEHICLE` is
-//! reserved), the building and
+//! NOT BUILT: the building and
 //! terrain subsets (nothing queries them: the port's terrain is a heightfield
 //! sheet, not a collision object), and `TargetableCollision` (no body is ever
 //! in it by default, §2, and the port's aim assist ray-tests unit capsules,

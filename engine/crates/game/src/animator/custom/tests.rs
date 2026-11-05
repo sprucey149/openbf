@@ -207,7 +207,9 @@ fn every_bf2_mission_resolves_only_its_ordered_native_resource_programs() {
         }
         for_mission(&root.join("classes"), &mission)
             .unwrap_or_else(|e| panic!("{}: {e:#}", path.display()));
-        count += 1;
+        if mission.mode != "ass" {
+            count += 1;
+        }
     }
     assert_eq!(count, 34);
 }

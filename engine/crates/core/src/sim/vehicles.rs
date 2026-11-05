@@ -584,6 +584,7 @@ impl Sim {
         riders.extend(seated(|k| matches!(k, SeatKind::Passenger(_))));
         let pilot = seated(|k| k == SeatKind::Pilot).first().copied();
         riders.extend(pilot);
+        self.space_flyer_destroyed(h, killer);
         self.events.push(Event::VehicleDestroyed {
             vehicle: h,
             class,
@@ -792,6 +793,9 @@ impl Sim {
                 self.decay_pad_vehicle(pi, k, dt);
                 k += 1;
             }
+            if self.vehicle_pads[pi].wants_spawn() && self.pad_box_taken(pi) {
+                continue;
+            }
             let pad = &mut self.vehicle_pads[pi];
             if !pad.wants_spawn() || !pad.count_down(dt) {
                 continue;
@@ -848,6 +852,23 @@ impl Sim {
             let h = self.spawn_vehicle(&spec);
             self.vehicle_pads[pi].spawned(h);
         }
+    }
+
+    fn pad_box_taken(&self, pi: usize) -> bool {
+        let pad = &self.vehicle_pads[pi];
+        let Some((lo, hi)) = pad.def.class_for(pad.team).and_then(|class| class.vis_box) else {
+            return false;
+        };
+        let (centre, half) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
+        let inverse = crate::vehicle::hover::quat_y(-pad.def.yaw).inverse();
+        pad.vehicles.iter().any(|k| {
+            self.vehicle(k.handle).is_some_and(|v| {
+                let (at, radius) = self.vehicle_blast_sphere(v);
+                let local = inverse * (at - pad.def.pos) - centre;
+                let out = (local.abs() - half).max(Vec3::ZERO);
+                out.length_squared() < radius * radius
+            })
+        })
     }
 
     /// The idle decay of pad `pi`'s `k`-th vehicle (B1 FUN_002afa90, [O]):

@@ -53,7 +53,9 @@ impl super::SceneGpu {
                     .iter()
                     .find(|(i, _)| *i as usize == f.instance)
                     .map(|&(_, o)| render::Fade::see_through(o));
-                add.extend(f.fallen.iter().map(|d| DrawCmd { fade, ..*d }));
+                if !sim.building_hidden(f.instance as u32) {
+                    add.extend(f.fallen.iter().map(|d| DrawCmd { fade, ..*d }));
+                }
             }
         }
         (hide, add)
