@@ -444,12 +444,21 @@ Current focused checks on that source plus the cleanup:
   The full workspace suite was not repeated; the four previously recorded Rust failures remain disclosed in §9/§11.
 
 Follow-ups: [#122](https://github.com/sprucey149/openbf/issues/122) space bots;
-[#123](https://github.com/sprucey149/openbf/issues/123) objective feedback, icons and scoring;
+[#123](https://github.com/sprucey149/openbf/issues/123) enemy indicators, fighter lock-on, objective feedback, icons and scoring;
 [#124](https://github.com/sprucey149/openbf/issues/124) flyer crash details;
 [#125](https://github.com/sprucey149/openbf/issues/125) shared destruction gaps and duplicate texture uploads;
 [#126](https://github.com/sprucey149/openbf/issues/126) CTF census and space one-flag.
 The hull measurements stay with #112, the content census with #107, and flight-route coordination with #103.
 
-Unchecked acceptance: a full played menu-to-win-screen round, the PS2 through-hole comparison, broader flight/crash
-parity and ground-vehicle presentation comparisons. #109 remains open pending the played-round check. No new per-map
-60 fps population or simulation timing measurement was made during this cleanup.
+Played-round acceptance is blocked. The player's 2026-11-05 reply reports about 130/180 points after destroying all
+available objectives, with the remaining fighter kills impractical because the AI combat loop, enemy-location feedback
+and lock-on are incomplete. This is a reported gameplay blocker, not simply an unperformed win-screen check; the
+automated score-limit transition does not establish a practically completable round. #109 stays open, and draft PR #127
+records the dependencies on #122 and #123. The reported approximate total is not a measurement of every map's scoring.
+
+The latest local black-box snapshot was read first: `dist/openbf_data/playtest/last.json`, Space Hoth Assault, seed 254,
+exit at tick 6165, stamped `f9271f327a12+dirty`. It predates PR head `1374ca69`, so it does not independently verify the
+reported score or targeting gaps on that exact head.
+
+Still unchecked: the PS2 through-hole comparison, broader flight/crash parity and ground-vehicle presentation comparisons.
+No new per-map 60 fps population or simulation timing measurement was made during this cleanup.
