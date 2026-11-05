@@ -1,8 +1,9 @@
 # Space Assault: scoring, capital ships and linked systems
 
 Written 2026-11-04 on `feature/space-assault-109`, brought up to `a3f5c192` on 2026-11-05. Evidence is the PS2 BF2 executable's decompiled
-listing and the PS2 mission bytecode (`bf2/mission/*.luac`, console Lua tree `32a5d83a...6e54d`), read statically. No live
-PS2 comparison is claimed. `core::sim::space_assault`, `game::space_assault` and `scripts/gen_missions.py` carry it.
+listing and the PS2 mission bytecode (`bf2/mission/*.luac`, console Lua tree `32a5d83a...6e54d`), initially read statically.
+Sections 10–11 add bounded Space Hoth save-state and play comparisons; full-round original-game acceptance remains open.
+`core::sim::space_assault`, `game::space_assault` and `scripts/gen_missions.py` carry it.
 
 ## 1. The round
 
@@ -30,13 +31,14 @@ transport, so a manned enemy flyer is +3.
 registered points, negated when the object's team is the killer's. A bot therefore gets nothing for its own ship and a
 human loses the points. `KillObject` (`FUN_0018fcd0` to `FUN_001df3d8`) has no killer, so linked deaths score nothing.
 
-### Deviation from the disc, by the issue's specification
+### Deviation from the disc, by the maintainer's task specification
 
-The issue asks for 3 a fighter kill, 18 a system, and nothing else. The disc also credits team points for infantry kills,
+The maintainer's task supplied in chat asks for 3 a fighter kill, 18 a system, and nothing else; GitHub #109 does not
+specify scoring values. The disc also credits team points for infantry kills,
 a pilot's own death (+1 AI, +2 human), and penalties for humans (self -1, teamkill -2). These are not built.
 `replace:` send every `FUN_003616f0` kind to team points if the maintainer wants the disc's full table.
-The disc's +1 for an empty flyer and -18 for a human on their own ship are built, because the issue says nothing against
-them.
+The disc's +1 for an empty flyer and -18 for a human on their own ship are also built. These are the implemented scoring
+choices, not additional requirements stated in #109.
 
 ## 3. The point table
 
@@ -87,7 +89,8 @@ answers for a destroyed station, so `FallenDraw` shows the armed building's wrec
 
 `player1.team{1,2}.points` and `.pointsText` drive the disc's own text. The disc draws ship bitmaps and system icons in
 `player1spaceassaultgroup` (viewport 0.738, 0.072; `FUN_0036b000`). In its place, `ui::hud::draw_space_meters` draws shield,
-hull and points bars under the minimap, whose corner that viewport rectangle would cover. OURS, asked for by the issue. `replace:` the disc's procedural icons. Hull has no
+hull and points bars under the minimap, whose corner that viewport rectangle would cover. OURS, from the maintainer's
+task supplied in chat rather than GitHub #109. `replace:` the disc's procedural icons. Hull has no
 disc equivalent: it is the summed health of a ship's critical systems over their full health.
 
 ## 7. Not built
@@ -414,3 +417,39 @@ Checks on the working tree over `f9271f32`, with the flyer explosion and lit chu
 at `a3f5c192`'s values, so neither change moved anything on those maps. Whether a flyer died in those runs was not checked, so they may not exercise
 a flyer's new blast damage. Not checked: a person playing it in a window, the chunk fade on screen (the replay's pieces leave the
 view first, so only a unit test covers it), and the through part of the hole against the PS2.
+
+## 12. Pre-PR handoff (2026-11-05)
+
+Source reviewed: `3458f82d` over `upstream/main` at `a3f5c192`. The cleanup corrects attribution of the scoring/HUD task,
+removes the stale dimmed-space-map test description and repairs a crate-map path; it changes no gameplay behavior.
+The two implementation commits remain intact.
+
+Current focused checks on that source plus the cleanup:
+
+- `cargo check --workspace --manifest-path engine/Cargo.toml`: passed.
+- `cargo fmt --all --manifest-path engine/Cargo.toml -- --check` and `git diff --check`: passed.
+- `cargo test --manifest-path engine/Cargo.toml -p core --lib space_assault`: 16 passed.
+- The same core command with `flyer_contact`, `ai::flyer_drive` and `fmath::tests`: 12, 38 and 9 passed.
+- `cargo test --manifest-path engine/Cargo.toml -p game --test suite space_assault -- --test-threads=1`: 18 passed,
+  using the existing local bake and missions, with no ignored tests.
+- Git for Windows bash running `scripts/gpu_tests.sh --game-lib flyer_camera` and `--game-lib shell_ia`: 14 and 2 passed,
+  serially. These selectors do not establish complete visual acceptance.
+- `python scripts/check_provisional.py upstream/main...HEAD` and the working-tree check: zero findings.
+- Native Windows execution of `scripts/size_report.sh`'s embedded Python reports backslash/forward-slash mismatches.
+  A separate portable inventory finds all 808 source files mapped and zero unwaived files above 2,000 lines. Two missing
+  local references (`engine/artifacts/briefs/SPLIT_RECIPE.md`, `engine/artifacts/loop/gates.toml`) also occur on the base.
+  The new invalid `sim/flyer_contact.rs` reference was corrected. The standard size/map gate is not claimed green.
+- `python -m unittest discover -s scripts/tests -p test_pack_limits.py`: 13 passed, 1 failed, 1 errored. `CmpBake` exits
+  127 from its shell harness; `ScratchBake` passes a missing `true` executable as an environment value on Windows.
+  The full workspace suite was not repeated; the four previously recorded Rust failures remain disclosed in §9/§11.
+
+Follow-ups: [#122](https://github.com/sprucey149/openbf/issues/122) space bots;
+[#123](https://github.com/sprucey149/openbf/issues/123) objective feedback, icons and scoring;
+[#124](https://github.com/sprucey149/openbf/issues/124) flyer crash details;
+[#125](https://github.com/sprucey149/openbf/issues/125) shared destruction gaps and duplicate texture uploads;
+[#126](https://github.com/sprucey149/openbf/issues/126) CTF census and space one-flag.
+The hull measurements stay with #112, the content census with #107, and flight-route coordination with #103.
+
+Unchecked acceptance: a full played menu-to-win-screen round, the PS2 through-hole comparison, broader flight/crash
+parity and ground-vehicle presentation comparisons. #109 remains open pending the played-round check. No new per-map
+60 fps population or simulation timing measurement was made during this cleanup.

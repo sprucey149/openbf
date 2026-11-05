@@ -87,8 +87,6 @@ mod tests {
         );
     }
 
-    /// The real bake (skips without one): every baked map in the list under
-    /// its own directory, the space maps dimmed, Conquest live.
     #[test]
     fn the_baked_catalog() {
         let assets = crate::assets::baked_root();
