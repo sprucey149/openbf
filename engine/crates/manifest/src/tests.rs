@@ -8,6 +8,8 @@
 
 use super::*;
 
+mod hud_files;
+
 /// Every field of the nav block populated, so the round trip covers it.
 fn full_nav(layer: &str) -> ManifestNav {
     ManifestNav {
@@ -631,6 +633,7 @@ fn full_vehicles() -> VehicleManifest {
             chunks: vec!["speederbike_chunk3".into(), "speederbike_chunk1".into()],
             sphere: Some([0.0, 0.403_274_57, 0.647_098_5, 1.936_126_4]),
             vis_min_y: Some(-1.778_591),
+            vis_box: Some(([-1.0, -1.778_591, -2.0], [1.0, 1.5, 2.0])),
             walker: Some(ManifestWalker {
                 bank: "imp_walk_atst".into(),
                 clips: vec![
@@ -1017,7 +1020,14 @@ fn vehicle_manifest_field_order_is_the_wire_format() {
     );
     assert_eq!(
         top_level_keys(&to_ron(&v.vehicles[0])),
-        ["class", "chunks", "sphere", "vis_min_y", "walker"]
+        [
+            "class",
+            "chunks",
+            "sphere",
+            "vis_min_y",
+            "walker",
+            "vis_box"
+        ]
     );
 }
 
@@ -1409,67 +1419,6 @@ fn an_effect_set_round_trips_through_ron() {
 /// The HUD bake (card BHUD): a layout tree with both argument kinds, a leaf
 /// and a nested scope, a font and the index. An untagged argument has to read
 /// back as the same variant — `1.0` a number, `"1"` a string.
-#[test]
-fn hud_files_round_trip() {
-    use hud::*;
-    let layout = HudLayout {
-        name: "1playerhud".into(),
-        nodes: vec![
-            HudNode {
-                name: "fileinfo".into(),
-                args: vec![HudArg::Str("1playerhud".into())],
-                children: vec![],
-            },
-            HudNode {
-                name: "Group".into(),
-                args: vec![HudArg::Str("player1health".into())],
-                children: vec![
-                    HudNode {
-                        name: "Position".into(),
-                        args: vec![HudArg::Num(0.06), HudArg::Num(0.84), HudArg::Num(0.0)],
-                        children: vec![],
-                    },
-                    HudNode {
-                        name: "#2b76908f".into(),
-                        args: vec![HudArg::Num(1.0), HudArg::Str("1".into())],
-                        children: vec![],
-                    },
-                ],
-            },
-        ],
-    };
-    let text = to_ron(&layout);
-    let back: HudLayout = ron::from_str(&text).expect("read back layout");
-    assert_eq!(back, layout);
-    assert_eq!(text, to_ron(&back));
-
-    let font = HudFont {
-        name: "gamefont_medium".into(),
-        line_height: 18,
-        pages: vec!["gamefont_medium_tex0".into(), "gamefont_medium_tex1".into()],
-        glyphs: vec![HudGlyph {
-            code: 33,
-            page: 0,
-            advance: 5,
-            x0: 0,
-            x1: 4,
-            y0: 0,
-            y1: 16,
-            uv: [0.1328125, 0.1640625, 0.0078125, 0.1328125],
-        }],
-    };
-    let back: HudFont = ron::from_str(&to_ron(&font)).expect("read back font");
-    assert_eq!(back, font);
-
-    let index = HudIndex {
-        layouts: vec!["hudtransforms".into(), "1playerhud".into()],
-        fonts: vec!["gamefont_medium".into()],
-        textures: vec![("white".into(), "CORE.LVL".into())],
-    };
-    let back: HudIndex = ron::from_str(&to_ron(&index)).expect("read back index");
-    assert_eq!(back, index);
-}
-
 #[test]
 fn old_leaf_rows_disable_airborne_particles() {
     let mut leaf = full_manifest().leaf.remove(0);

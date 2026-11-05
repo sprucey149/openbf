@@ -56,13 +56,13 @@ class MissionSelection(unittest.TestCase):
         self.assertEqual(len(captured), 1)
         return captured[0]
 
-    def test_explicit_space_bake_generates_space_missions(self):
-        self.assertIn("--space", self.generation_command("1"))
-
-    def test_default_and_non_one_flags_keep_ground_missions(self):
-        for value in (None, "0", "true"):
+    def test_space_missions_are_generated_by_default(self):
+        for value in (None, "1", "true"):
             with self.subTest(value=value):
-                self.assertNotIn("--space", self.generation_command(value))
+                self.assertIn("--space", self.generation_command(value))
+
+    def test_space_opt_out_keeps_ground_missions(self):
+        self.assertNotIn("--space", self.generation_command("0"))
 
     def test_mixed_pc_bf2_uses_table_only_missions_for_bf2(self):
         command = self.generation_command(None, bf2_kind="pc-install")

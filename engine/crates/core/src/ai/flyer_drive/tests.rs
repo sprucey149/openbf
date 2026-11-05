@@ -460,6 +460,75 @@ fn a_bf2_map_with_no_paths_gets_no_pilots() {
 }
 
 #[test]
+fn a_class_no_route_names_gets_no_pilot() {
+    let (mut s, b, v) = bf2_world();
+    s.flyer_params[0].as_mut().unwrap().follower.class_id = 3;
+    for path in &mut s.flyer_paths {
+        path.classes = vec![(7, 1)];
+    }
+    assert_eq!(super::super::ride::claim_seat(&s, b, v), None);
+    s.flyer_paths[1].classes.push((3, 1));
+    assert_eq!(super::super::ride::claim_seat(&s, b, v), Some(0));
+}
+
+fn walled(layers: crate::collision::Layers) -> (Sim, UnitHandle, VehicleHandle) {
+    use crate::collision::{Body, CollisionWorld, Shape};
+    let (mut s, b, v) = bf2_world();
+    let at = Vec3::new(0.0, 40.0, 0.0);
+    let c = s.vehicle_mut(v).unwrap();
+    c.pos = at;
+    c.vel = Vec3::ZERO;
+    c.flyer.phase = FlightPhase::Flying;
+    let wall = |offset: Vec3, half: Vec3| {
+        Body::with_layers(
+            glam::Mat4::from_translation(at + offset),
+            Shape::Box { half },
+            layers,
+        )
+    };
+    let (far, side) = (60.0, 200.0);
+    s.collision = CollisionWorld::new(
+        vec![
+            wall(Vec3::X * far, Vec3::new(5.0, side, side)),
+            wall(-Vec3::X * far, Vec3::new(5.0, side, side)),
+            wall(Vec3::Z * far, Vec3::new(side, side, 5.0)),
+            wall(-Vec3::Z * far, Vec3::new(side, side, 5.0)),
+            wall(Vec3::Y * far, Vec3::new(side, 5.0, side)),
+            wall(-Vec3::Y * far, Vec3::new(side, 5.0, side)),
+        ],
+        Vec::new(),
+    );
+    (s, b, v)
+}
+
+#[test]
+fn a_wall_refuses_a_route_and_a_vehicle_clear_field_does_not() {
+    use crate::collision::Layers;
+    let (s, _, v) = walled(Layers::ALL | Layers::VEHICLE);
+    let ai = planned(&s, v);
+    assert!(ai.curve.is_none() && ai.cursor.is_none(), "{ai:?}");
+    let (s, _, v) = walled(Layers::ALL);
+    assert!(planned(&s, v).cursor.is_some(), "the field lets it through");
+}
+
+#[test]
+fn a_pilot_with_no_clear_way_stays_inside_the_walls() {
+    let (mut s, b, v) = walled(crate::collision::Layers::ALL | crate::collision::Layers::VEHICLE);
+    assert!(s.seat_unit(b, v, 0));
+    for _ in 0..(20 * crate::TICK_HZ) {
+        s.step(&[]);
+        let c = s.vehicle(v).unwrap();
+        let from = (c.pos - Vec3::new(0.0, 40.0, 0.0)).abs().max_element();
+        assert!(
+            from < 55.0,
+            "through the wall at tick {}: {:?}",
+            s.tick,
+            c.pos
+        );
+    }
+}
+
+#[test]
 fn a_pursuit_leads_the_target_and_ends_with_the_escape_timer() {
     let (s, _, _) = bf2_world();
     let mut mine = s.vehicles[0].clone();

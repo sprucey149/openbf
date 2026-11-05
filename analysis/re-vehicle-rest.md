@@ -51,6 +51,9 @@ entity = (*(class+0x1c)+0x10)(class, &matrix)                  B1:240520-240521 
 - **The window is read from the code only.** In all 54 rows of §4 the surface lies 0.18–0.68 m under the pad, so
   neither the +1 m start nor "no hit → the pad's own point" is exercised by a PS2 flyer.
 
+**BF2's box against the pad's own vehicles** is ported as `Sim::pad_box_taken` (`re-space-assault.md` §10). It runs before
+arming, and is a separate test from the `FUN_00161b50` query below.
+
 **BF2 `FUN_003725f0`**: the same — `pad+0x60` (B2:370291), `*(0x73d8a0)` (B2:370318; [R] (0, 1, 0, 0)), start /
 direction (B2:370319-370320), `FUN_00161c60(2.0, start, dir, &hit, 0, 0, 0, 0x90, 0)` (B2:370326; 0x90 = BF2's
 building 0x10 | terrain 0x80), f < 1.0 → the hit (B2:370328-370339), the class's create virtual on `&a local`

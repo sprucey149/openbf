@@ -805,6 +805,8 @@ pub struct ManifestVehicle {
     /// (not written) for every other class, or a bake from before WALK.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub walker: Option<ManifestWalker>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vis_box: Option<([f32; 3], [f32; 3])>,
 }
 
 /// What a walker's integrator reads from its bake (card WALK,

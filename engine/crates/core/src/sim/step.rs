@@ -1143,6 +1143,7 @@ impl Sim {
         self.tick_stations(dt);
 
         // 6. Command posts → bleed → domination → outcome.
+        self.tick_space_assault(dt);
         self.update_cps(dt);
         self.step_deathmatch();
 

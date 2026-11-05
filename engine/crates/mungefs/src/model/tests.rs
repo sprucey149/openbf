@@ -70,7 +70,8 @@ fn the_specular_fields_in_both_layouts() {
 fn a_bf2_scroll_word_scrolls_by_its_two_bytes() {
     let mut band = vec![0u8; 25];
     band[0..4].copy_from_slice(&0x0101_0010u32.to_le_bytes());
-    band[16..18].copy_from_slice(&[200, 255]);
+    band[16] = 200;
+    band[20] = 255;
     let s = one_segment(&band, &3u32.to_le_bytes());
     assert_eq!(s.uv_anim, [200, 255]);
     assert_eq!(s.uv_scroll(), Some([-200.0 / 255.0, -1.0]));

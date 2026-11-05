@@ -40,7 +40,7 @@ impl Sim {
             origin,
             Vec3::NEG_Y,
             1024.0,
-            Layers::SOLDIER,
+            Layers::VEHICLE,
             HullFilter::except(Some(handle)),
         ) {
             let height = origin.y - hit.t;
@@ -190,7 +190,7 @@ impl Sim {
                 from,
                 direction,
                 distance,
-                Layers::SOLDIER,
+                Layers::VEHICLE,
                 HullFilter::except(Some(handle)),
             )
             .map(|h| (h.t, h.normal));
@@ -222,7 +222,7 @@ impl Sim {
                     at,
                     along / slid,
                     slid,
-                    Layers::SOLDIER,
+                    Layers::VEHICLE,
                     HullFilter::except(Some(handle)),
                 )
                 .is_none()

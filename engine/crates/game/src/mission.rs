@@ -132,6 +132,8 @@ pub struct MissionDef {
     /// (`analysis/re-flyer.md`). Only the space scripts call it.
     #[serde(default)]
     pub landing_regions: Vec<String>,
+    #[serde(default)]
+    pub space_assault: Option<SpaceAssaultDef>,
     /// The conquest command-post roster, in `CommandPost:New` order — the
     /// posts the mission actually hands to its `ObjectiveConquest`, which is
     /// NOT every post in the world layer (BF2 Hoth builds four and kills the
@@ -280,6 +282,30 @@ pub struct AiSettings {
     /// start has run: (post, team).
     #[serde(default)]
     pub no_capture: Vec<(String, u8)>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SpaceAssaultDef {
+    pub critical: Vec<(String, String, u32)>,
+    pub shields: Vec<SpaceShieldsDef>,
+    pub destroyables: Vec<Vec<Vec<String>>>,
+    pub turrets: Vec<SpaceTurretsDef>,
+    pub frigate_turrets: Vec<(String, Vec<String>)>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpaceShieldsDef {
+    pub objects: Vec<String>,
+    pub max: f32,
+    pub add: f32,
+    pub controller: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SpaceTurretsDef {
+    pub team: u8,
+    pub mainframe: String,
+    pub turrets: Vec<String>,
 }
 
 /// One [`MissionDef::death_drains`] entry, port (0-based) teams.
@@ -586,7 +612,7 @@ mod tests {
                 continue;
             }
             let m = MissionDef::load(&path).unwrap();
-            if m.source_game == "bf2" {
+            if m.source_game == "bf2" && m.mode != "ass" {
                 missions.push((path, m));
             }
         }
@@ -946,6 +972,10 @@ mod tests {
         for p in &files {
             let m = MissionDef::load(p).unwrap_or_else(|e| panic!("{e:#}"));
             let stem = p.file_stem().unwrap().to_str().unwrap();
+            if m.mode != "con" {
+                assert_eq!(stem, format!("{}_{}", m.map, m.mode));
+                continue;
+            }
             // `_con_cw` always means the clone wars; the reverse does not
             // hold, because a map that ships ONLY a clone-wars mission (BF1
             // Geonosis and Kamino, BF2 Geonosis) is its map's `_con.ron`.
@@ -1133,7 +1163,8 @@ mod tests {
             }
             let m = MissionDef::load(&p).expect("parse");
             let k = m.camera_shot_calls.len();
-            assert!((3..=16).contains(&k), "{}: {k} shots", p.display());
+            let least = if m.mode == "ass" { 1 } else { 3 };
+            assert!((least..=16).contains(&k), "{}: {k} shots", p.display());
             n += 1;
         }
         assert!(n >= 57, "{n} missions read");

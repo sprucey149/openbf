@@ -14,7 +14,7 @@ recompiles and re-packs):
   2. extract each disc's DATA/_LVL_PS2 tree and executable -> extracted/bf{1,2}/lvl/  (bake extract-iso)
   3. extract the Lua scripts of the LVLs        -> extracted/bf{1,2}/lua/  (extract_lua.py)
   4. build the missions from the disc's own bytecode -> engine/missions/   (gen_missions.py --ps2-only)
-     OPENBF_BAKE_SPACE=1 also includes the six Space Assault missions.
+     Includes the six Space Assault missions; OPENBF_BAKE_SPACE=0 leaves them out.
   5. bake every asset                           -> engine/assets_baked/    (rebake.sh)
   6. copy the game, strip the copy, append assets_baked/ + missions/  -> --out
      Below about 3.9 GiB that is one file on every OS. From there on, also on every OS, --out is a small executable
@@ -654,7 +654,7 @@ def main():
     mission_env = dict(os.environ)
     for name in ("OPENBF_GAMEPLAY_CORRECTIONS", "OPENBF_GAMEPLAY_SOURCE_BF1", "OPENBF_GAMEPLAY_SOURCE_BF2"):
         mission_env.pop(name, None)
-    space = os.environ.get("OPENBF_BAKE_SPACE") == "1"
+    space = os.environ.get("OPENBF_BAKE_SPACE", "1") != "0"
     mission_inputs = {"console_lua": lua_root, "corrections": correction_args, "table_only": table_only, "space": space}
     why = stale(MISSION_STAMP, MISSION_INPUTS, mission_inputs) if have and not tracked else None
     if have and (tracked or (not pc_roots and not a.rebake and why is None)):

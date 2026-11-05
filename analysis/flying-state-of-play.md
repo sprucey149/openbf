@@ -11,29 +11,12 @@ scripts make the call, so their rules apply on no ground map (`re-flyer.md`). Se
 `re-flyer-ai.md` for what is confirmed, and
 the "What exists" list below for the state before this work.
 
-## Space Assault (sprint/space, 2026-11-01): loads, flies, cannot end, so gated
+## Space Assault (2026-11-04)
 
-Behind `OPENBF_SPACE=1`, and only after `OPENBF_BAKE_SPACE=1 scripts/rebake.sh maps` (the default rebake still skips
-the six maps) and `scripts/gen_missions.py --space`, which writes a `<key>_ass.ron` for each of spa1, 3, 6, 7, 8 and 9,
-running the `_cmn` script before the `_ass` one as the disc does. Keep those missions out of the shared folder for now:
-several tests read every mission there and expect a ground map's roster and heroes. `mode_layer_index` picks the objective layer of each. A hangar's
-`com_bldg_controlzone_ctf`, which authors no capture region, is a post that spawns its team and cannot be taken. The
-scripts' `AddLandingRegion` now reach `Sim::landing_regions`, so their speed caps and gun block apply.
-
-Headless, all six maps, 5400 ticks, seed 7: both teams spawn in their hangars, and between 20 and 45 sorties fly the
-authored `EntityPath`s for 648 to 2746 airborne seconds in the round, with no panic. **Not built:**
-
-- Capital ships. Nothing can damage a critical system, and the port has no destructible world object to hang them on, so
-  `SpaceAssaultAddCriticalSystem`, `LinkedShields`, `LinkedDestroyables` and `LinkedTurrets` have no target. The
-  disc's point values are in `ObjectiveSpaceAssault.lua`'s template (18 a system, engines 3 to 18).
-- Scoring. The score limit is `SpaceAssaultGetScoreLimit` (`DAT_005fa898[...]`) and `AddSpaceAssaultDestroyPoints` calls
-  `FUN_003616f0(.., 0x20, ..)`; neither is transcribed, nor is what a kill is worth. Until they are, a round runs to its
-  time limit at best, and no one wins. That is the gate's reason.
-- Bot gunnery in space: 0 to 2 shots a round from BF2's path followers, and most sorties end with the pilot leaving
-  (14 to 32 falls a round). Bots do not attack ships. Marines and hangar assaults do not run.
-- The HUD's space elements, the spawn screen's look on these maps, and any human flight on them: no window was opened.
-- The space mission's `layers` fact reads the sky's `ReadDataFile('SPA\\spa_sky.lvl', 'myg')` second argument.
-  Only the mission's comment uses it.
+Open by default: `scripts/rebake.sh maps` bakes the six maps and `scripts/pack.py` writes their missions
+(`OPENBF_BAKE_SPACE=0` leaves them out). A round has an objective, capital ships, linked systems and an end: see
+`re-space-assault.md`. Bots alone do not reach the score limit, because flyer combat is still unconfirmed
+(`re-flyer-ai.md`). Marines and hangar assaults do not run. No window was opened on these maps by this work's tests.
 
 ## What exists
 

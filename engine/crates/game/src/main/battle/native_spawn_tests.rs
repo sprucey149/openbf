@@ -24,6 +24,7 @@ fn load(key: &str, mission: &str) -> WalkSim {
         ticket_pct: 100,
         time_limit: 0,
         score_limit: 180,
+        space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
         cheats: Default::default(),
         teams: Some(mission.factions()),
         classes_dir: root.join("classes"),

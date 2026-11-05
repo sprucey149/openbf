@@ -113,7 +113,17 @@ pub fn can_fly(sim: &Sim, v: &Vehicle) -> bool {
             .flyer_params
             .get(v.class as usize)
             .and_then(Option::as_ref)
-            .is_some_and(|p| !p.bf2 || !sim.flyer_paths.is_empty())
+            .is_some_and(|p| {
+                !p.bf2
+                    || sim.flyer_paths.iter().any(|path| {
+                        p.follower.class_id == 0
+                            || path.classes.is_empty()
+                            || path
+                                .classes
+                                .iter()
+                                .any(|(id, _)| *id == p.follower.class_id)
+                    })
+            })
 }
 
 /// A deterministic draw in 0..1; the PS2 uses `rand()` (see the module note).
@@ -250,7 +260,7 @@ fn lift_goal(
         origin,
         forward,
         reach,
-        Layers::SOLDIER,
+        Layers::VEHICLE,
         HullFilter::except(Some(handle)),
     ) {
         let top = (origin.y + forward.y * hit.t) + radius;
@@ -366,7 +376,7 @@ fn avoid_goal(
                 v.pos,
                 flat,
                 p.max_speed,
-                Layers::SOLDIER,
+                Layers::VEHICLE,
                 HullFilter::except(Some(handle)),
             )
             .is_some();
@@ -399,7 +409,7 @@ fn clearest(sim: &Sim, v: &Vehicle, handle: VehicleHandle) -> Vec3 {
                 v.pos,
                 dir,
                 WEDGED_RAY,
-                Layers::SOLDIER,
+                Layers::VEHICLE,
                 HullFilter::except(Some(handle)),
             )
             .map_or(WEDGED_RAY, |h| h.t);
@@ -417,7 +427,7 @@ fn up_blocked(sim: &Sim, v: &Vehicle, handle: VehicleHandle) -> bool {
             v.pos,
             Vec3::Y,
             UP_PROBE,
-            Layers::SOLDIER,
+            Layers::VEHICLE,
             HullFilter::except(Some(handle)),
         )
         .is_some()
@@ -548,7 +558,7 @@ fn clear_chord(sim: &Sim, a: Vec3, b: Vec3, handle: VehicleHandle) -> bool {
             a,
             dir,
             length,
-            Layers::SOLDIER,
+            Layers::VEHICLE,
             HullFilter::except(Some(handle)),
         )
         .is_none()
@@ -611,17 +621,17 @@ fn connect(
             .windows(2)
             .all(|w| clear_chord(sim, w[0], w[1], handle))
     };
-    let chosen = ranked
-        .iter()
-        .take(CONNECT_TRIES)
-        .find(|c| clear(&c.2))
-        .or(ranked.first());
+    let chosen = ranked.iter().take(CONNECT_TRIES).find(|c| clear(&c.2));
     if let Some((_, cursor, curve)) = chosen {
         ai.curve = Some(*curve);
         ai.cursor = Some(*cursor);
         ai.goal = None;
     } else {
         loiter(v, p, ai);
+        if !ai.curve.as_ref().is_some_and(&clear) {
+            ai.curve = None;
+            ai.goal = None;
+        }
     }
     ai.t = 0.0;
 }

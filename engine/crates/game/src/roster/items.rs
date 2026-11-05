@@ -88,6 +88,10 @@ pub fn station_class_from_db(db: &ClassDb, class: &str) -> Option<StationClass> 
     if !crate::stations::is_station_base(db.engine_base(name)?) {
         return None;
     }
+    station_class_of(db, name)
+}
+
+pub(crate) fn station_class_of(db: &ClassDb, name: &str) -> Option<StationClass> {
     let f = |key: &str| db.prop_f32(name, key);
     let sound = |key: &str| {
         db.prop(name, key)

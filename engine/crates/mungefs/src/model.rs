@@ -616,7 +616,7 @@ fn parse_segment(segm: &Chunk<'_>, vbox: &Aabb) -> Result<Segment, UcfbError> {
     let uv_anim = segm
         .child(b"MTRL")
         .filter(|_| bf2_material)
-        .map_or([0, 0], |c| [c.payload[16], c.payload[17]]);
+        .map_or([0, 0], |c| [c.payload[16], c.payload[20]]);
     // RTYP: BF1 a NUL-terminated string, BF2 a u32. Discriminated on the
     // first byte being printable ASCII — the same test the census's
     // `mtrl_census.py` makes, and exact on both discs (BF1's six names all

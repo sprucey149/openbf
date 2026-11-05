@@ -329,6 +329,8 @@ Entity fields (BF1): velocity v +0x5f0, angular velocity ω +0x600 (x, yaw, z), 
   B2 0x61e998 +0x64..+0x70 → FUN_0024a9d0 / FUN_0024ac98 / FUN_0024b4d0 / FUN_0024ba68); every other class returns 0
   (B1 FUN_0023e7c8 = `jr ra; move v0,zero`). BF2's Lua `EnterVehicle` / `ExitVehicle` call the same slots and accept only
   EntityWalker / EntityHover / EntityFlyer targets (B2:35544-35589). BF1 has no binding but the same four virtuals.
+- [V] **A BF2 pilot cannot leave a flyer in flight** (B2 FUN_00202d08, `re-space-assault.md` §10): the exit button reaches
+  the exit logic only when landed. FUN_0024ba68 itself has no refusal and a gunner seat has no such gate. BF1 not read.
 - [V][O] **Player path and range** (B1 FUN_0020a4f0 / B2 FUN_00249870, same code): on the use input (controller byte +0x52
   from bit 7 of the mapped action word, B1:180043; the physical button [H]), gather ≤ 16 objects within the soldier's
   collision radius + 0.5 (B1:119520), then score each with FUN_00241b98(targetR, 1.0, 5.0, eye, aim dir, centre)

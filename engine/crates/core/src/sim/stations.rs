@@ -245,9 +245,16 @@ impl Sim {
         let friendly = s.team.is_some() && s.team == team;
         s.health
             .take_damage(desc, scale, friendly, self.friendly_fire_scale);
-        if s.health.alive() {
+        let alive = s.health.alive();
+        self.space_station_damaged(station);
+        if alive || self.stations[usize::from(station)].destroyed {
             return;
         }
+        self.station_dies(station, attacker);
+    }
+
+    pub(super) fn station_dies(&mut self, station: u16, attacker: Option<UnitHandle>) {
+        let s = &self.stations[usize::from(station)];
         let (class, pos) = (s.class, s.pos);
         let station_team = s.team;
         self.install_station_wreck(station);
@@ -266,6 +273,7 @@ impl Sim {
                 Some(super::blast::BlastSource::Station(station)),
             );
         }
+        self.space_station_destroyed(station, attacker);
     }
 
     pub fn install_station_wreck(&mut self, station: u16) {

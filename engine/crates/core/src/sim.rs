@@ -71,6 +71,7 @@ mod saber;
 mod saber_throw;
 mod seats;
 mod self_turrets;
+mod space_assault;
 mod spawn;
 mod state;
 mod stations;
@@ -104,6 +105,10 @@ pub use pickups::{
 };
 pub use round::scale_reinforcements;
 pub use seats::{ENTER_REACH, EXIT_RING};
+pub use space_assault::{
+    CapitalMeter, CriticalSystem, FrigateTurrets, LinkedTurretSet, ShieldGroup, SpaceAssault,
+    DEFAULT_SCORE_LIMIT, FIGHTER_KILL_POINTS, SPENT_MAX_HEALTH, UNMANNED_FLYER_POINTS,
+};
 pub use spawn::{ClassAmmo, ClassRefusal, SideChoice, SpawnStage, SpawnWaves, CLASS_CHANGE_FACING};
 pub use state::{
     omni_radius_for, Call, Cheats, DeathCause, Event, Hazard, MissionAi, NavStats, Sim, TickCost,

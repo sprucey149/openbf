@@ -242,6 +242,7 @@ pub struct Sim {
     /// BF2 mission hero classes and offer lifecycle; absent on other content.
     pub heroes: Option<super::heroes::Heroes>,
     pub deathmatch: Option<super::deathmatch::Deathmatch>,
+    pub space_assault: Option<super::space_assault::SpaceAssault>,
     /// Per player SLOT, the class index that slot's NEXT respawn takes
     /// (`buttons::SPAWN_CLASS_NEXT`/`PREV` while dead). Parallel to
     /// `players`, grown by `sync_slot_tables`, and HASHED — a player who has
@@ -954,6 +955,7 @@ impl Sim {
             test_rosters: [None; 2],
             heroes: None,
             deathmatch: None,
+            space_assault: None,
             spawn_choice: Vec::new(),
             spawn_post_choice: Vec::new(),
             prev_spawn_bits: Vec::new(),

@@ -21,7 +21,7 @@ by name and by FNV-1a hash (lower-case bytes). The AI half leans on `analysis/re
 | its aim | `PilotType self` → a `UnitStationaryController` running the wait agent: tracks to about 100 m, fights a target inside MinRange..MaxRange that the gun's `AITarget` mask allows, keeps the fight to MaxRange + 10, fires inside MaxRange within 22.5°; idle look base yaw ± 30°, redrawn every 18 thinks; turns by the hover stick law | V (`re-turret-ai.md` §2-3, §6) |
 | its death | `ExplosionName` `<side>_bldg_inf_autoturret_exp`: 50 damage over 4 m, the landmine effect | V (disc), H (on expiry / replacement too) |
 | where it hangs | the entity's origin is the landing point; the model's sphere (radius 0.25) sits at its `boneroot`, 1.056 m up the frame, so it hovers about 0.8 m clear of the ground | V (skel), D (origin = contact point) |
-| its look | `com_prop_dropturret_rep` (128×128, only in the SIDE LVLs; every played side's `OverrideTexture` names this same sheet); a lit shell and an UNLIT band whose UVs scroll at −200/255 and −1 repeat per second | V (§7) |
+| its look | `com_prop_dropturret_rep` (128×128, only in the SIDE LVLs; every played side's `OverrideTexture` names this same sheet); a lit shell and an UNLIT band whose UVs scroll at −200/255 repeats per second in U and not at all in V | V (§7) |
 | bots | a bot presses it when its target is a soldier on foot in a cluster of his own side (more than 3 within 9 m, none hostile) and the dispenser is ready; no range test, no live-turret test; 1 round per life | V (§6.1) |
 
 ## 1. Class labels [V]
@@ -125,16 +125,18 @@ The model is bone-space. Its skeleton: `dummyroot` → `boneroot` (0, 1.0564066,
 `boneroot` (y 0.806..1.32). The entity is placed by its origin, which the landing puts on the contact point (§4), so the
 sphere hangs about 0.8 m above the ground. The aimer and the fire point face +Z, the model's front. Two segments:
 
-| segment | MTRL flags | RTYP | UV bytes (MTRL 16, 17) | draws |
+| segment | MTRL flags | RTYP | UV bytes (MTRL 16, 20) | draws |
 |---|---|---|---|---|
 | shell | 0x00010001 | 0 | 0, 0 | lit |
-| band | 0x01010010 | 3 | 200, 255 | unlit (no 0x01), UV scroll (0x1000000) |
+| band | 0x01010010 | 3 | 200, 0 | unlit (no 0x01), UV scroll (0x1000000) |
 
 The UV animation (`re-material-flags.md` §BF2): `FUN_0058e730` (B2:710803) copies the two bytes into the segment's
 animation record when 0x1000000 is set. Each draw, `FUN_0058e930` (B2:710887-710990) offsets the UVs by
 `u = −b0 · t / 255`, `v = −b1 · t / 255`, with t the seconds since the scene's start (`(Count − start) >> 15` ×
 `DAT_00661318` = 1/9000 s, `a5-tickrate.md`), each reduced into (−1, 1). So the band scrolls 0.784 repeats per second in
-U and 1 in V. The LOWD model's band has bytes 6, 0. The HUD shows the same model (`hudtransforms` `namemesh
+U and none in V. An earlier version of this table read bytes 16 and 17, which gave a V of 255 from the first rate's upper
+byte; `FUN_00590328` reads the rates as two four-byte values (`re-space-assault.md` §10). The LOWD model's band has U byte 6;
+`trace:` its byte 20 was not read again. The HUD shows the same model (`hudtransforms` `namemesh
 com_bldg_inf_autoturret com_weap_inf_dropturret`), so its band scrolls too.
 
 ## 8. The port [O]

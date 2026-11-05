@@ -450,7 +450,7 @@ enum Content {
 }
 
 pub fn bake_common(lvl_path: &str, outdir: &str, pc_lvl: Option<&str>) -> Result<CommonManifest> {
-    let m = bake_content(lvl_path, outdir, Content::Common, pc_lvl)?;
+    let m = bake_content(lvl_path, outdir, Content::Common, pc_lvl, None)?;
     let cm = CommonManifest {
         source: m.map,
         models: m.models,
@@ -486,7 +486,16 @@ pub fn bake_common(lvl_path: &str, outdir: &str, pc_lvl: Option<&str>) -> Result
 /// drive and seat numbers nowhere else (analysis/re-vehicles.md §10 item 2).
 /// Always the PS2 LVL's — the PC tier is textures only.
 pub fn bake_map(lvl_path: &str, outdir: &str, pc_lvl: Option<&str>) -> Result<Manifest> {
-    let m = bake_content(lvl_path, outdir, Content::Map, pc_lvl)?;
+    bake_map_with_sky(lvl_path, outdir, pc_lvl, None)
+}
+
+pub fn bake_map_with_sky(
+    lvl_path: &str,
+    outdir: &str,
+    pc_lvl: Option<&str>,
+    sky_sublevel: Option<(&str, &str)>,
+) -> Result<Manifest> {
+    let m = bake_content(lvl_path, outdir, Content::Map, pc_lvl, sky_sublevel)?;
     crate::write_ron(&Path::new(outdir).join("manifest.ron"), &m)?;
     let classes = Path::new(outdir).join(MAP_CLASSES_FILE);
     crate::classes::bake_classes(lvl_path, &classes.to_string_lossy())?;

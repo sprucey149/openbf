@@ -60,6 +60,7 @@ pub struct PadClass {
     /// `analysis/re-vehicle-rest.md` §2): its constructor stands the origin
     /// this far over the pad's spawn point. `None` for every other kind.
     pub landed_height: Option<f32>,
+    pub vis_box: Option<(Vec3, Vec3)>,
 }
 
 /// A pad as the level authors it, classes resolved.

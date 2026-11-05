@@ -103,11 +103,14 @@ fn scene() -> Scene {
 
 #[test]
 fn collision_world_follows_instance_order_and_uses_the_soldier_subset() {
+    use core::collision::Layers;
     let s = scene();
     let w = s.collision_world();
-    // Two instances × (one mesh + one prim). `VehicleCollisionOnly` takes
-    // `p_vehicle_3` out of the soldier subset.
-    assert_eq!(w.bodies().len(), 2 * 2, "mesh + one prim per instance");
+    // Two instances × (one mesh + two prims). `VehicleCollisionOnly` leaves
+    // `p_vehicle_3` in the vehicle subset alone.
+    assert_eq!(w.bodies().len(), 2 * 3, "mesh + both prims per instance");
+    assert_eq!(w.bodies()[1].layers, Layers::VEHICLE);
+    assert!(w.bodies()[2].layers.contains(Layers::SOLDIER));
     assert!(
         matches!(w.bodies()[0].shape, core::collision::Shape::Mesh(_)),
         "bodies[0] is instance 0's mesh"
@@ -120,19 +123,19 @@ fn collision_world_follows_instance_order_and_uses_the_soldier_subset() {
     // Each body knows its instance (card TURR: a turret's camera ray passes
     // its own building's).
     let of: Vec<Option<u32>> = w.bodies().iter().map(|b| b.instance).collect();
-    assert_eq!(of, [Some(0), Some(0), Some(1), Some(1)]);
+    assert_eq!(of, [Some(0), Some(0), Some(0), Some(1), Some(1), Some(1)]);
     assert_eq!(w.bodies()[0].to_world.w_axis.truncate(), glam::Vec3::ZERO);
     assert_eq!(
-        w.bodies()[2].to_world.w_axis.truncate(),
+        w.bodies()[3].to_world.w_axis.truncate(),
         glam::Vec3::new(100.0, 0.0, 0.0)
     );
     // Instance 1's prim carries the instance transform AND the prim's own.
     assert_eq!(
-        w.bodies()[3].to_world.w_axis.truncate(),
+        w.bodies()[5].to_world.w_axis.truncate(),
         glam::Vec3::new(100.0, 2.0, 0.0)
     );
     // The mesh is built ONCE and shared: both bodies point at the same TriMesh.
-    match (&w.bodies()[0].shape, &w.bodies()[2].shape) {
+    match (&w.bodies()[0].shape, &w.bodies()[3].shape) {
         (core::collision::Shape::Mesh(a), core::collision::Shape::Mesh(b)) => {
             assert!(std::sync::Arc::ptr_eq(a, b), "one TriMesh per geometry")
         }
@@ -197,7 +200,7 @@ fn the_world_is_the_union_with_masks_and_the_soldier_subsequence_is_unchanged() 
     )
     .expect("instances parse");
     // Geometry `geo_hut` has TWO prims; class "a" names none of them, so all
-    // three of its bodies are soldier-only.
+    // three of its bodies are out of the ordnance subset.
     let w = s.collision_world();
     let got: Vec<(Layers, bool)> = w
         .bodies()
@@ -207,11 +210,11 @@ fn the_world_is_the_union_with_masks_and_the_soldier_subsequence_is_unchanged() 
     assert_eq!(
         got,
         vec![
-            (Layers::SOLDIER, true),   // A.mesh
-            (Layers::SOLDIER, false),  // A.p_vehicle_3
-            (Layers::SOLDIER, false),  // A.p_collision
-            (Layers::ALL, true),       // B.mesh  (named by SoldierCollision)
-            (Layers::ORDNANCE, false), // B.p_cube (ordnance keeps the default)
+            (Layers::SOLDIER | Layers::VEHICLE, true),   // A.mesh
+            (Layers::SOLDIER | Layers::VEHICLE, false),  // A.p_vehicle_3
+            (Layers::SOLDIER | Layers::VEHICLE, false),  // A.p_collision
+            (Layers::ALL | Layers::VEHICLE, true),       // B.mesh  (named by SoldierCollision)
+            (Layers::ORDNANCE | Layers::VEHICLE, false), // B.p_cube (ordnance keeps the default)
         ],
         "the union, in instance order, with the prim order inside an instance"
     );
@@ -300,11 +303,12 @@ fn a_door_is_built_shut_with_its_moving_prim_and_its_trigger() {
     assert_eq!(
         got,
         vec![
-            Layers::ALL,
-            Layers::ALL,
-            Layers::ALL,
-            Layers::ALL,
-            Layers::ALL
+            Layers::ALL | Layers::VEHICLE,
+            Layers::ALL | Layers::VEHICLE,
+            Layers::ALL | Layers::VEHICLE,
+            Layers::ALL | Layers::VEHICLE,
+            Layers::VEHICLE,
+            Layers::ALL | Layers::VEHICLE,
         ]
     );
     assert_eq!(doors.len(), 1);

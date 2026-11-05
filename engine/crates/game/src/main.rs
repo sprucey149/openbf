@@ -123,8 +123,6 @@
 //!                                 physical pixels (default 1280x720 logical)
 //!   OPENBF_FLYER_BOTS=0           bots stay out of flyers, for a run measuring a
 //!                                 map's ground war alone (default: they fly)
-//!   OPENBF_SPACE=1                Instant Action opens the Space Assault rows, which
-//!                                 need a space bake and missions and cannot be won yet
 //!   OPENBF_AUTOPILOT=1            dev mode, windowed: a scripted pad drives the
 //!                                 player (card HITCH; default off)
 //!   OPENBF_QUIT_AT=<seconds>      dev mode, windowed: quit when the battle
@@ -550,6 +548,7 @@ struct BattleSetup {
     ticket_pct: u32,
     /// The conquest time limit in minutes; 0 = Off (queue TLO).
     time_limit: u32,
+    space_score_limit: u32,
     cheats: core::sim::Cheats,
     teams: Option<[String; 2]>,
     classes_dir: PathBuf,
@@ -626,6 +625,7 @@ impl BattleSetup {
             tickets_set: v.tickets_set,
             ticket_pct: 100,
             time_limit: v.time_limit,
+            space_score_limit: core::sim::DEFAULT_SCORE_LIMIT,
             cheats: v.cheats,
             teams: v
                 .teams

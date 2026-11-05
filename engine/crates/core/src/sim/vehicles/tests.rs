@@ -538,6 +538,7 @@ fn pad(team: Option<u8>, cp: Option<usize>) -> PadDef {
             },
             radius: 3.0,
             landed_height: None,
+            vis_box: None,
         })
     };
     PadDef {
@@ -664,6 +665,38 @@ fn spawn_count_two_keeps_two() {
         s.step(&[]);
     }
     assert_eq!(s.alive_vehicles().count(), 2, "capped at SpawnCount");
+}
+
+#[test]
+fn a_pad_waits_for_its_last_vehicle_to_leave_the_class_box() {
+    let mut s = Sim::empty(1);
+    let mut def = PadDef {
+        spawn_count: 2,
+        ..pad(Some(0), None)
+    };
+    def.classes[0].as_mut().unwrap().vis_box = Some((Vec3::splat(-4.0), Vec3::splat(4.0)));
+    let pi = s.add_vehicle_pad(def);
+    s.step(&[]);
+    let first = pad_vehicle(&s, pi).unwrap();
+    s.vehicle_mut(first).unwrap().aim_sphere = Some((Vec3::ZERO, 2.0));
+    for _ in 0..(30 * TICKS_PER_S) {
+        s.step(&[]);
+    }
+    assert_eq!(s.vehicle_pads[pi].vehicles.len(), 1, "the box is taken");
+    s.vehicle_mut(first).unwrap().pos = Vec3::new(5.0, 0.0, 0.0);
+    for _ in 0..(30 * TICKS_PER_S) {
+        s.step(&[]);
+    }
+    assert_eq!(
+        s.vehicle_pads[pi].vehicles.len(),
+        1,
+        "its sphere still reaches"
+    );
+    s.vehicle_mut(first).unwrap().pos = Vec3::new(12.0, 0.0, 0.0);
+    for _ in 0..(10 * TICKS_PER_S + 1) {
+        s.step(&[]);
+    }
+    assert_eq!(s.vehicle_pads[pi].vehicles.len(), 2, "clear: one more");
 }
 
 #[test]

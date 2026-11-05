@@ -1016,9 +1016,10 @@ pub fn body_layers(
         refs.push(BodyRef::mesh());
     }
     refs.extend(cg.prims.iter().map(|p| BodyRef::prim(&p.name, p.mask)));
-    // The two subsets, from the same body list and the same rule.
+    // The three subsets, from the same body list and the same rule.
     let soldier = layer_bodies(&refs, class_collision, Layer::Soldier);
     let ordnance = layer_bodies(&refs, class_collision, Layer::Ordnance);
+    let vehicle = layer_bodies(&refs, class_collision, Layer::Vehicle);
     (0..refs.len())
         .map(|i| {
             (if soldier[i] {
@@ -1027,6 +1028,10 @@ pub fn body_layers(
                 Layers::NONE
             }) | (if ordnance[i] {
                 Layers::ORDNANCE
+            } else {
+                Layers::NONE
+            }) | (if vehicle[i] {
+                Layers::VEHICLE
             } else {
                 Layers::NONE
             })

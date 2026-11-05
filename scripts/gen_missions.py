@@ -623,6 +623,55 @@ def barrier_calls50(f):
     return startup_calls50(f, BARRIER_VERBS)
 
 
+def hangar_war_calls50(f, common):
+    """The verbs `LockHangarWarsDoors(flag)` runs as a space mission starts.
+
+    The function sits in `<map>_cmn`, takes a literal bool from the mission's
+    `ScriptPostLoad` and loops over three local name lists: true locks the
+    doors and blocks the arcs, false disables the barriers. Returns
+    `(verb, [name, ...literals])` for each loop pass of the arm it takes.
+    """
+    called = next((c for c in startup_trace50(f) if c.name == "LockHangarWarsDoors"), None)
+    proto = global_functions50(common).get("LockHangarWarsDoors") if common is not None else None
+    if called is None or proto is None or len(called.args) != 1 \
+            or not isinstance(called.args[0], bool):
+        return []
+    lock = called.args[0]
+    registers, tables, out = {}, {}, []
+    code = proto.code
+    pc = 0
+    while pc < len(code):
+        ins = code[pc]
+        op = OPS50[ins & 0x3F]
+        a, b, bx = (ins >> 24) & 0xFF, (ins >> 15) & 0x1FF, (ins >> 6) & 0x3FFFF
+        if op == "NEWTABLE":
+            tables[a] = []
+        elif op == "LOADK":
+            registers[a] = proto.k[bx]
+        elif op == "SETLIST":
+            tables[a].extend(registers[a + i] for i in range(1, bx % 32 + 2))
+        elif op == "TEST" and lock:
+            pc += 2
+            continue
+        elif op == "JMP":
+            pc += 1 + bx - 131071
+            continue
+        elif op == "GETGLOBAL" and proto.k[bx] == "pairs":
+            names = tables[(code[pc + 1] >> 15) & 0x1FF]
+            end = next(i for i in range(pc, len(code)) if OPS50[code[i] & 0x3F] == "TFORLOOP")
+            body = code[pc + 3:end]
+            verb = next(proto.k[(i >> 6) & 0x3FFFF] for i in body
+                        if OPS50[i & 0x3F] == "GETGLOBAL")
+            literals = [proto.k[(i >> 6) & 0x3FFFF] for i in body if OPS50[i & 0x3F] == "LOADK"]
+            out.extend((verb, [name] + literals) for name in names)
+            pc = end + 2
+            continue
+        elif op == "RETURN":
+            break
+        pc += 1
+    return out
+
+
 def death_drains50(f):
     """The unconditional per-death ticket drains a BF2 mission registers.
 
@@ -1204,6 +1253,139 @@ def optional_script(game, script):
     return script.lower() not in GAMEPLAY_REFERENCES.get(game, {})
 
 
+def callback_protos50(f):
+    """Protos below a chunk's own functions: closures a script hands to the
+    engine for later, whose calls have not happened when the round starts."""
+    out = set()
+
+    def walk(p):
+        out.add(p)
+        for q in p.protos:
+            walk(q)
+
+    for q in f.protos:
+        for r in q.protos:
+            walk(r)
+    for _, cb in _kill_callbacks50(f):
+        walk(cb)
+    return out
+
+
+def _tbl_list(v):
+    if isinstance(v, Table):
+        return [x for _, x in sorted(((k, x) for k, x in v.items() if isinstance(k, float)),
+                                     key=lambda kv: kv[0])]
+    return [v]
+
+
+def _frigate_kills50(cb, frigate):
+    named = [c.args[0] for c in calls50(cb, recurse=False)
+             if c.name == "KillObject" and c.args and isinstance(c.args[0], str)]
+    if named or "_tur" not in cb.k:
+        return named
+    top = int(max(k for k in cb.k if isinstance(k, float)))
+    return ["%s_tur%d" % (frigate, i) for i in range(1, top + 1)]
+
+
+def _looped_names50(p):
+    """The strings of the literal list a proto's `pairs` loop walks: the LOADKs
+    of the last NEWTABLE before the GETGLOBAL of `pairs`."""
+    names = []
+    for ins in p.code:
+        op = OPS50[ins & 0x3F]
+        bx = (ins >> 6) & 0x3FFFF
+        if op == "NEWTABLE":
+            names = []
+        elif op == "LOADK" and isinstance(p.k[bx], str):
+            names.append(p.k[bx])
+        elif op == "GETGLOBAL" and p.k[bx] == "pairs":
+            break
+    return names
+
+
+def _kill_callbacks50(f):
+    """(object, callback proto) of every OnObjectKillName in a chunk: its
+    callback a closure or a function the chunk registers as a global, its
+    object named or, in a loop over a literal list, every string of that list."""
+    top = global_functions50(f)
+    out, stack = [], [f]
+    while stack:
+        p = stack.pop()
+        stack.extend(p.protos)
+        for c in calls50(p, recurse=False):
+            if c.name != "OnObjectKillName" or len(c.args) < 2:
+                continue
+            cb = c.args[0]
+            if isinstance(cb, Closure):
+                cb = cb.proto
+            elif isinstance(cb, Unknown) and cb.what.startswith("global:"):
+                cb = top.get(cb.what[7:])
+            else:
+                cb = None
+            if cb is None:
+                continue
+            if isinstance(c.args[1], str):
+                names = [c.args[1]]
+            else:
+                names = _looped_names50(p)
+            out.extend((name, cb) for name in names)
+    return out
+
+
+def frigate_turrets50(f):
+    """(frigate, the objects its death callback kills) of OnObjectKillName."""
+    return [(name, _frigate_kills50(cb, name)) for name, cb in _kill_callbacks50(f)]
+
+
+def space_templates50():
+    """The attacker-keyed point table and the internal-system points out of
+    objectivespaceassault.luac, and LinkedShields' two defaults out of
+    linkedshields.luac (analysis/re-space-assault.md)."""
+    osa = load_ps2("bf2", "objectivespaceassault")
+    linked = load_ps2("bf2", "linkedshields")
+    if osa is None or linked is None:
+        return None
+    globs = {}
+    calls50(osa, globs=globs, recurse=False)
+    internal = next(k for k in osa.protos[3].k if isinstance(k, float))
+    lglobs = {}
+    calls50(linked, globs=lglobs, recurse=False)
+    return globs["gSpaceAssaultSystems_template"], internal, lglobs["LinkedShields"]
+
+
+def space_facts50(calls, chunks):
+    """The capital ship declarations of a Space Assault script."""
+    templates = space_templates50()
+    if templates is None:
+        return None
+    template, internal, shield_defaults = templates
+    out = {"critical": [], "shields": [], "destroyables": [], "turrets": [], "frigate_turrets": []}
+    for c in calls:
+        a = c.args
+        if c.name.endswith(":SetupAllCriticalSystems") and len(a) >= 3 and isinstance(a[2], Table):
+            points = template[a[1]]
+            for kind in ("engines", "lifesupport", "bridge", "comm", "sensors", "frigates"):
+                if kind in a[2]:
+                    for name in _tbl_list(a[2][kind]):
+                        out["critical"].append((name, kind, int(points[kind]["pts"])))
+            for name in _tbl_list(a[2].get("internalSys", Table())):
+                out["critical"].append((name, "internalSys", int(internal)))
+        elif c.name == "LinkedShields:New" and len(a) >= 2 and isinstance(a[1], Table):
+            t = a[1]
+            out["shields"].append((_tbl_list(t["objs"]),
+                                   float(t.get("maxShield", shield_defaults["maxShield"])),
+                                   float(t.get("addShield", shield_defaults["addShield"])),
+                                   t["controllerObject"]))
+        elif c.name == "LinkedDestroyables:New" and len(a) >= 2 and isinstance(a[1], Table):
+            out["destroyables"].append([_tbl_list(x) for x in _tbl_list(a[1]["objectSets"])])
+        elif c.name == "LinkedTurrets:New" and len(a) >= 2 and isinstance(a[1], Table):
+            t = a[1]
+            out["turrets"].append((int(t["team"]), t["mainframe"], _tbl_list(t["turrets"])))
+    for f in chunks:
+        out["frigate_turrets"].extend(frigate_turrets50(f))
+    return out
+
+
 def build(key, game, planet, era, pc_stem, ps2_name):
     """Apply known canonical mission facts over the selected script evidence.
 
@@ -1214,6 +1396,7 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m = Mission()
     m.key, m.game, m.era, m.ps2 = key, game, era, ps2_name
     m.prov, m.dis = [], []
+    m.space = None
 
     if PS2_ONLY:
         m.pc, src = None, ""
@@ -1250,6 +1433,11 @@ def build(key, game, planet, era, pc_stem, ps2_name):
                 common = undump50(body)
         if common is not None:
             calls = calls50(common) + calls
+        if mission_mode(ps2_name) == "ass":
+            callbacks = callback_protos50(f) | (callback_protos50(common) if common is not None else set())
+            m.space = space_facts50(calls, [p for p in (common, f) if p is not None])
+            calls = [c for c in calls if c.prototype not in callbacks
+                     or c.name not in ("KillObject", "SetProperty", "SetObjectTeam")]
         ps2 = facts_from_calls(calls)
         d = ps2
     canonical = GAMEPLAY_REFERENCES.get(game, {}).get(ps2_name.lower())
@@ -1301,6 +1489,14 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m.door_locks = door_locks50(f) if f is not None and game == "bf2" else []
     m.arc_blocks = arc_calls50(f) if f is not None and game == "bf2" else []
     m.barriers = barrier_calls50(f) if f is not None and game == "bf2" else []
+    if f is not None and game == "bf2" and mission_mode(ps2_name) == "ass":
+        for verb, args in hangar_war_calls50(f, common):
+            if verb in BARRIER_VERBS:
+                m.barriers.append((args[0], verb == BARRIER_VERBS[0]))
+            elif verb in ARC_VERBS:
+                m.arc_blocks.append((args[0], verb == ARC_VERBS[0]))
+            elif verb == "SetProperty" and args[1].lower() == "islocked":
+                m.door_locks.append((args[0], args[2] in (1.0, "1")))
     m.death_drains = death_drains50(f) if f is not None and game == "bf2" \
         else []
 
@@ -1496,6 +1692,36 @@ def ron(m):
         L.append("    // AddLandingRegion: where a flyer lands, slows and holds its fire.")
         L.append("    landing_regions: [%s]," % ", ".join(
             '"%s"' % r for r in m.landing_regions))
+    if m.space:
+        q = lambda names: ", ".join('"%s"' % n for n in names)
+        sp = m.space
+        L.append("    // ObjectiveSpaceAssault's critical systems (name, kind, points),")
+        L.append("    // LinkedShields, LinkedDestroyables, LinkedTurrets and the frigates'")
+        L.append("    // death callbacks, as the script declares them.")
+        L.append("    space_assault: Some((")
+        L.append("        critical: [")
+        for name, kind, pts in sp["critical"]:
+            L.append('            ("%s", "%s", %d),' % (name, kind, pts))
+        L.append("        ],")
+        L.append("        shields: [")
+        for objs, mx, add, ctrl in sp["shields"]:
+            L.append('            (objects: [%s], max: %s, add: %s, controller: "%s"),'
+                     % (q(objs), fmtf(mx), fmtf(add), ctrl))
+        L.append("        ],")
+        L.append("        destroyables: [")
+        for sets in sp["destroyables"]:
+            L.append("            [%s]," % ", ".join("[%s]" % q(s) for s in sets))
+        L.append("        ],")
+        L.append("        turrets: [")
+        for team, frame, turrets in sp["turrets"]:
+            L.append('            (team: %d, mainframe: "%s", turrets: [%s]),'
+                     % (team, frame, q(turrets)))
+        L.append("        ],")
+        L.append("        frigate_turrets: [")
+        for frigate, turrets in sp["frigate_turrets"]:
+            L.append('            ("%s", [%s]),' % (frigate, q(turrets)))
+        L.append("        ],")
+        L.append("    )),")
     if m.birds:
         L.append("    birds: [%s]," % ", ".join('(%s, "%s")' % (fmtf(size), name) for size, name in m.birds))
     if m.sound:
@@ -1640,8 +1866,7 @@ def main():
                     help="require complete canonical mission facts for this game and skip its extracted Lua cache")
     ap.add_argument("--out", metavar="DIR", help="default engine/missions")
     ap.add_argument("--space", action="store_true",
-                    help="also write the six Space Assault missions, which only a"
-                         " space bake (OPENBF_BAKE_SPACE=1) and OPENBF_SPACE=1 use")
+                    help="also write the six Space Assault missions")
     ap.add_argument("--gameplay-reference", action="append", default=[], metavar="TABLE",
                     help="absolute PS2 mission declarations from a fingerprinted correction table; repeat per game")
     ap.add_argument("--gameplay-source", action="append", default=[], metavar="GAME=SOURCE",
@@ -1695,6 +1920,10 @@ def main():
             if mission_mode(stem) == "ass" and not args.space:
                 continue
             if optional_script(game, ps2):
+                continue
+            references = GAMEPLAY_REFERENCES.get(game)
+            if mission_mode(stem) == "ass" and references is not None and ps2.lower() not in references:
+                print("%s: no correction record for the source, no Space Assault mission" % key)
                 continue
             m = build(key, game, planet, era, stem, ps2)
             mode = mission_mode(stem)

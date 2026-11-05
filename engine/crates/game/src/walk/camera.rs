@@ -29,6 +29,9 @@ impl WalkSim {
         if let Some(got) = self.droid_camera() {
             return got;
         }
+        if let Some(got) = self.flyer_seat_camera() {
+            return got;
+        }
         if let Some(got) = self.seat_camera() {
             return got;
         }

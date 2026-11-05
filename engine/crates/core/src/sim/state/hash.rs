@@ -39,6 +39,10 @@ impl Sim {
             eat(b"SABER_RNG");
             eat(&self.melee_lcg.state().to_le_bytes());
         }
+        if let Some(space) = &self.space_assault {
+            eat(b"SPACE_ASSAULT");
+            space.hash_into(&mut eat);
+        }
         if let Some(heroes) = &self.heroes {
             heroes.hash_into(&mut eat);
         }

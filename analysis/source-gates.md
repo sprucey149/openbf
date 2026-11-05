@@ -55,8 +55,7 @@ Map availability does not establish complete artwork/collision alignment. The re
 PS2 collision and navigation unchanged, but existing donor models still have measured surface discrepancies. The
 broader automated checks below do not replace live play or a running-original comparison.
 
-All 34 ground maps are now included from the accepted sources. The six experimental space maps require explicit
-opt-in. Xbox BF2 Jabba's Palace uses a local textured stand-in for
+All 34 ground maps are now included from the accepted sources. The six space maps are included by default. Xbox BF2 Jabba's Palace uses a local textured stand-in for
 `tat3_prop_cz1droid_parts`, confirmed absent from all 185 disc LVLs including the sound banks. Its donor-only water cell
 is removed by a fingerprinted correction; four complete rounds matched every tick across two seeds and both eras.
 The counts below record the original unresolved placements, before shared-resource lookup and recovery.
@@ -180,7 +179,7 @@ and the Xbox bake changed only the two reassembled model GLBs. Other maps and mo
   common-asset fallback. These bounded traces do not establish complete round endings or equality of inputs they never
   exercise. Class definitions and world identities still differ in fields the traces did not read, so no source is
   declared multiplayer-equal.
-- **Space maps.** Space stays behind `OPENBF_BAKE_SPACE=1` and `OPENBF_SPACE=1`. On Xbox BF2 all six bake and match
+- **Space maps.** Included by default (`OPENBF_BAKE_SPACE=0` leaves them out). On Xbox BF2 all six bake and match
   the PS2 at every one of 36,000 ticks on one seed, but no round reached a winner in that time, so an ending is not
   compared.
 - **The look.** A placed-object gate compares corrected collision with placed render bounds and sampled triangle

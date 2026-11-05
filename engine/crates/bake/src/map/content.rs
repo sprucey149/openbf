@@ -19,6 +19,7 @@ pub(super) fn bake_content(
     outdir: &str,
     kind: Content,
     pc_lvl: Option<&str>,
+    sky_sublevel: Option<(&str, &str)>,
 ) -> Result<Manifest> {
     let pc = pc_lvl
         .map(crate::tier::PcTextures::load)
@@ -154,9 +155,29 @@ pub(super) fn bake_content(
         Content::Common => None,
     };
     let side_buf = side_source.as_ref().map(|(bytes, _)| bytes.as_slice());
+    let sky_source = sky_sublevel
+        .map(|(path, _)| std::fs::read(path).with_context(|| path.to_string()))
+        .transpose()?;
     let mut expanded: Vec<mungefs::Chunk<'_>> = Vec::new();
     let mut layer_chunks: Vec<mungefs::Chunk<'_>> = Vec::new();
     let mut wrappers = 0usize;
+    if let (Some(bytes), Some((path, name))) = (sky_source.as_deref(), sky_sublevel) {
+        let wanted = mungefs::fnv1a_lowercase(name).to_le_bytes();
+        let mut found = false;
+        for c in mungefs::chunks(mungefs::open(bytes).map_err(|e| anyhow!("{e}"))?) {
+            let c = c.map_err(|e| anyhow!("{e}"))?;
+            if &c.tag != b"lvl_" {
+                continue;
+            }
+            for sub in c.children().flatten().filter(|sub| sub.tag == wanted) {
+                found = true;
+                layer_chunks.extend(sub.children().flatten());
+            }
+        }
+        if !found {
+            return Err(anyhow!("{path} has no sublevel {name}"));
+        }
+    }
     for c in mungefs::chunks(inner) {
         let c = c.map_err(|e| anyhow!("{e}"))?;
         if &c.tag != b"lvl_" {
@@ -474,11 +495,13 @@ pub(super) fn bake_content(
 
     for (i, c) in expanded.iter().enumerate() {
         match &c.tag {
-            b"sky_" if sky_cfg.is_none() => {
-                sky_cfg = Some(
-                    mungefs::sky::Sky::parse(c)
-                        .map_err(|e| anyhow!("sky_ 0x{:X}: {e}", c.offset))?,
-                );
+            b"sky_" => {
+                let parsed = mungefs::sky::Sky::parse(c)
+                    .map_err(|e| anyhow!("sky_ 0x{:X}: {e}", c.offset))?;
+                match sky_cfg.as_mut() {
+                    Some(sky) => sky.absorb(parsed),
+                    None => sky_cfg = Some(parsed),
+                }
             }
             // The water's real config: a map carries 3-9 `fx__` chunks and
             // at most one of them holds the `Effect("Water")` (only the 12

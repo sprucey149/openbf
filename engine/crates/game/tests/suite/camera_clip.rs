@@ -661,6 +661,7 @@ fn a_vehicle_is_seen_through_and_never_pulls() {
             .collision
             .hull(h)
             .iter()
+            .filter(|b| b.layers.contains(Layers::ALL))
             .map(|b| b.aabb.max.y)
             .fold(f32::MIN, f32::max);
         let tall = top - walk.sim.vehicle(h).expect("spawned").pos.y;

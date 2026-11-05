@@ -135,6 +135,7 @@ impl Sim {
     pub fn counts_in_cp(&self, ui: usize, ci: usize) -> bool {
         let u = &self.units[ui];
         self.deathmatch.is_none()
+            && self.space_assault.is_none()
             && u.alive
             && u.capture_posts
             && u.mount.is_none()
@@ -181,7 +182,7 @@ impl Sim {
                 }
             }
         }
-        if self.deathmatch.is_some() {
+        if self.deathmatch.is_some() || self.space_assault.is_some() {
             return;
         }
         // BF2 conquest bleed (strict CP-value majority, clamped at alive).
