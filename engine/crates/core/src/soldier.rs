@@ -687,10 +687,21 @@ pub const KNOCK_TUMBLE_SPEED: f32 = 2.0;
 /// this, else tumbling when |v|^2 is over [`BF2_KNOCK_TUMBLE_SQ`].
 pub const BF2_KNOCK_THROW_VN: f32 = 3.0;
 pub const BF2_KNOCK_TUMBLE_SQ: f32 = 64.0;
-/// BF2's airborne soldier is thrown only by a push this strong (§4: "a
-/// flinch below scale 8 and 5"; PROVISIONAL [H]: which state takes which,
-/// and the flinch itself, are not built).
+/// BF2's jump, jet or falling soldier is thrown only by a push this strong,
+/// and its hover only by one over [`BF2_KNOCK_HOVER_SCALE`] (§4: "a flinch
+/// below scale 8 and 5"; PC 0x004e1690 assigns 8 to the hover, 5 to the air).
 pub const BF2_KNOCK_AIR_SCALE: f32 = 5.0;
+pub const BF2_KNOCK_HOVER_SCALE: f32 = 8.0;
+/// BF2's flinch (§4; PC 0x004e1690), a push that neither throws nor tumbles:
+/// on the floor over scale 2 every input locks for 0.5 s and a sprint ends
+/// (PS2 B2:152167-152287 [V]); in the hover over scale 2 for
+/// (scale - 2) / 12 s, in a jump, jet or fall over scale 1 for 1.0 s
+/// (PC only; trace: the PS2 apply's E+0x4e4 times for states 4, 6, 7, 8).
+pub const BF2_FLINCH_FLOOR_SCALE: f32 = 2.0;
+pub const BF2_FLINCH_FLOOR_SECS: f32 = 0.5;
+pub const BF2_FLINCH_HOVER_RATE: f32 = 12.0;
+pub const BF2_FLINCH_AIR_SCALE: f32 = 1.0;
+pub const BF2_FLINCH_AIR_SECS: f32 = 1.0;
 /// BF1's gravity in the thrown and get-up states (B1:119278-119299; every
 /// other state has [`GRAVITY`]). BF2 throws with its air integrator: 18
 /// and the drag.
