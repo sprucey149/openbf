@@ -79,6 +79,15 @@ pub struct HudArt {
 }
 
 impl HudArt {
+    /// The shell and its pointer queries use this same role selection.
+    pub fn menu_font(&self, role: &str) -> Option<&HudFont> {
+        manifest::hud::MENU_FONTS
+            .iter()
+            .find(|(_, legacy)| *legacy == role)
+            .and_then(|(menu, _)| self.fonts.get(*menu))
+            .or_else(|| self.fonts.get(role))
+    }
+
     pub fn has_mesh(&self, name: &str) -> bool {
         self.meshes.contains_key(name)
     }
@@ -252,7 +261,7 @@ pub(crate) struct Run<'a> {
     pub(crate) shadow: bool,
 }
 
-impl Ctx<'_> {
+impl<'a> Ctx<'a> {
     pub(crate) fn quad(&mut self, elem: usize, m: &Mat4, s: &Screen, q: &Quad<'_>) {
         let [x0, y0, x1, y1] = q.rect;
         let [u0, v0, u1, v1] = q.uv;
@@ -500,6 +509,14 @@ impl Ctx<'_> {
                 shadow: false,
             },
         );
+    }
+
+    pub(crate) fn font(&self, role: &str) -> Option<&'a HudFont> {
+        if self.hud.shell.is_some() {
+            self.art.menu_font(role)
+        } else {
+            self.art.fonts.get(role)
+        }
     }
 
     pub(crate) fn run(&mut self, i: usize, m: &Mat4, s: &Screen, font: &HudFont, r: &Run<'_>) {

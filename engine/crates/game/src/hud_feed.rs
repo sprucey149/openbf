@@ -331,8 +331,19 @@ fn add_distance_font(
         .take(usize::from(u8::MAX) + 1)
         .enumerate()
         .map(|(i, page)| {
-            if !used.contains(&i) || *page != format!("{name}.sdf{i}") {
+            let atlas = if manifest::hud::MENU_FONTS
+                .iter()
+                .any(|(menu, _)| *menu == name)
+            {
+                manifest::hud::MENU_ATLAS
+            } else {
+                name
+            };
+            if !used.contains(&i) || *page != format!("{atlas}.sdf{i}") {
                 return false;
+            }
+            if pages.contains_key(page) {
+                return true;
             }
             let Some(mut image) = read_hud_sheet(&dir.join(format!("{page}.ktx2"))) else {
                 return false;
@@ -360,6 +371,65 @@ fn add_distance_font(
     }
 }
 
+/// Load the optional menu family atomically. Missing/corrupt sidecars retain
+/// the legacy face, including old bakes. Unsupported symbols borrow the legacy
+/// role's bitmap glyphs; supported letters and their metrics stay canonical.
+fn add_menu_fonts(
+    art: &mut HudArt,
+    pages: &mut HashMap<String, crate::assets::CpuTexture>,
+    dir: &Path,
+) {
+    let mut menu_art = HudArt::default();
+    let mut menu_pages = HashMap::new();
+    for (name, legacy) in manifest::hud::MENU_FONTS {
+        let Ok(mut font) = read_ron::<manifest::hud::HudFont>(&dir.join(format!("{name}.ron")))
+        else {
+            return;
+        };
+        add_distance_font(&mut menu_art, &mut menu_pages, dir, name);
+        let Some(distance) = menu_art.distance_fonts.get(name) else {
+            return;
+        };
+        if font.name != name
+            || font.line_height == 0
+            || font.pages != distance.pages
+            || font.glyphs.iter().any(|g| {
+                usize::from(g.page) >= font.pages.len()
+                    || (g.x1 > g.x0
+                        && g.y1 > g.y0
+                        && !distance
+                            .glyphs
+                            .iter()
+                            .any(|d| d.code == g.code && d.page == g.page))
+            })
+        {
+            return;
+        }
+        if let Some(base) = art.fonts.get(legacy) {
+            let offset = font.pages.len();
+            if offset + base.pages.len() > usize::from(u8::MAX) + 1 {
+                return;
+            }
+            let supported: HashSet<_> = font.glyphs.iter().map(|g| g.code).collect();
+            font.glyphs.extend(
+                base.glyphs
+                    .iter()
+                    .filter(|g| !supported.contains(&g.code))
+                    .map(|g| {
+                        let mut g = *g;
+                        g.page = (usize::from(g.page) + offset) as u8;
+                        g
+                    }),
+            );
+            font.pages.extend(base.pages.clone());
+        }
+        menu_art.fonts.insert(name.into(), font);
+    }
+    art.fonts.extend(menu_art.fonts);
+    art.distance_fonts.extend(menu_art.distance_fonts);
+    pages.extend(menu_pages);
+}
+
 /// `name` → file for every `*.glb` in `dirs`; the first directory wins.
 fn glb_index(dirs: &[PathBuf]) -> HashMap<String, PathBuf> {
     let mut out = HashMap::new();
@@ -376,6 +446,49 @@ fn glb_index(dirs: &[PathBuf]) -> HashMap<String, PathBuf> {
         }
     }
     out
+}
+
+/// BF1 pilots carry their Cutter in row 2, which BF2's layout never places.
+/// Use BF2's authored Cutter rotation/scale at its grenade-row position.
+/// This is an openbf presentation choice (BF2 HUD everywhere), not a change
+/// to repair behavior. Existing placements and older/missing-model bakes keep
+/// their normal selection and icon fallback.
+fn place_secondary_cutters(hud: &mut Hud, has_bf2_mesh: impl Fn(&str) -> bool) {
+    let (Some(primary), Some(secondary)) = (
+        hud.find("player1weapon1mesh"),
+        hud.find("player1weapon2mesh"),
+    ) else {
+        return;
+    };
+    let Some(position) = hud.elems[secondary]
+        .mesh_info
+        .iter()
+        .find(|info| info.mesh == "hud_thermaldetonator")
+        .map(|info| info.pos)
+        .filter(|position| *position != glam::Vec3::ZERO)
+    else {
+        return;
+    };
+    for side in ["all", "imp", "rep", "cis"] {
+        let name = format!("{side}_weap_inf_fusioncutter");
+        if !has_bf2_mesh(&name)
+            || hud.elems[secondary]
+                .mesh_info
+                .iter()
+                .any(|info| info.mesh == name)
+        {
+            continue;
+        }
+        if let Some(mut pose) = hud.elems[primary]
+            .mesh_info
+            .iter()
+            .find(|info| info.mesh == name && info.pos != glam::Vec3::ZERO)
+            .cloned()
+        {
+            pose.pos = position;
+            hud.elems[secondary].mesh_info.push(pose);
+        }
+    }
 }
 
 /// The HUD's own art (`hud_*`) composites by its sheets' alpha
@@ -448,7 +561,7 @@ impl HudView {
         point: [f32; 2],
         size: [f32; 2],
     ) -> Option<usize> {
-        let font = self.art.fonts.get(ui::spawn_draw::BUTTON_FONT)?;
+        let font = self.art.menu_font(ui::spawn_draw::BUTTON_FONT)?;
         ui::shell_ps2::row_at(font, menus, point, size)
     }
 
@@ -460,8 +573,7 @@ impl HudView {
         size: [f32; 2],
     ) -> bool {
         self.art
-            .fonts
-            .get(ui::spawn_draw::BUTTON_FONT)
+            .menu_font(ui::spawn_draw::BUTTON_FONT)
             .is_some_and(|font| ui::shell_ps2::prompt_at(font, menus, point, size))
     }
 
@@ -472,7 +584,7 @@ impl HudView {
         point: [f32; 2],
         size: [f32; 2],
     ) -> Option<ui::shell::PointerTarget> {
-        let font = self.art.fonts.get(ui::spawn_draw::BUTTON_FONT)?;
+        let font = self.art.menu_font(ui::spawn_draw::BUTTON_FONT)?;
         ui::shell_ia::pointer_target(ia, point, size, font)
     }
 
@@ -503,6 +615,7 @@ impl HudView {
             art.fonts.insert(f.to_ascii_lowercase(), font);
             add_distance_font(&mut art, &mut distance_pages, &fonts_dir, f);
         }
+        add_menu_fonts(&mut art, &mut distance_pages, &fonts_dir);
         // BF1's own tiny font for the squad cross's labels (card SQHUD); a
         // bake without it falls back to BF2's.
         let bf1_fonts = assets_dir.join("common_bf1/fonts");
@@ -519,6 +632,24 @@ impl HudView {
         let mut layout = layout;
         ui::hud::add_leaving_line(&mut layout);
         let mut hud = Hud::new(&layout, &transforms);
+        let bf2_weapons = assets_dir.join("side_bf2/weapons");
+        place_secondary_cutters(&mut hud, |name| {
+            mesh_files
+                .get(name)
+                .is_some_and(|path| path.parent() == Some(bf2_weapons.as_path()))
+        });
+        // The two faded pills belong behind the weapon images, including
+        // bitmap fallbacks. Our per-model depth slices follow draw order,
+        // so the source ZOrder(8) would shade the default-128 item groups.
+        // Change only these siblings' presentation order; retain their
+        // transforms, alpha and internal mesh depth (also in flat PC trees).
+        for name in ["player1weapon1backdrop", "player1weapon2backdrop"] {
+            if let Some(i) = hud.find(name) {
+                if hud.elems[i].kind == Kind::Model3D {
+                    hud.elems[i].z_order = u8::MAX;
+                }
+            }
+        }
         hud.set_fonts(&art.fonts);
         // The layout's own labels ("Victory In"), from BF2's text table.
         if let Some(locl) = crate::event_feed::read_locl(&common) {
@@ -972,45 +1103,4 @@ impl HudView {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use manifest::hud::{HudDistanceFont, HudDistanceGlyph};
-
-    #[test]
-    fn invalid_distance_page_falls_back_to_bitmap_without_dropping_usable_glyphs() {
-        let dir = std::env::temp_dir().join(format!("openbf-hud-distance-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let name = "testfont";
-        let metadata = HudDistanceFont {
-            pages: vec!["testfont.sdf0".into(), "testfont.sdf1".into()],
-            glyphs: [65, 66]
-                .into_iter()
-                .enumerate()
-                .map(|(page, code)| HudDistanceGlyph {
-                    code,
-                    page: page as u8,
-                    rect: [0.0, 0.0, 2.0, 4.0],
-                    uv: [0.0, 0.0, 0.25, 0.5],
-                })
-                .collect(),
-        };
-        let metadata_path = dir.join("testfont.sdf.ron");
-        std::fs::write(&metadata_path, ron::to_string(&metadata).unwrap()).unwrap();
-        std::fs::write(dir.join("testfont.sdf0.ktx2"), b"incomplete texture").unwrap();
-        let ktx = bake::ktx2w::write_rgba8(1024, 1024, &[vec![255; 1024 * 1024 * 4]]);
-        std::fs::write(dir.join("testfont.sdf1.ktx2"), ktx).unwrap();
-        let mut art = HudArt::default();
-        let mut pages = HashMap::new();
-        add_distance_font(&mut art, &mut pages, &dir, name);
-        assert_eq!(pages.len(), 1);
-        assert_eq!(
-            art.distance_fonts[name].glyphs,
-            [metadata.glyphs[1].clone()]
-        );
-        std::fs::write(metadata_path, b"incomplete manifest").unwrap();
-        let mut art = HudArt::default();
-        add_distance_font(&mut art, &mut pages, &dir, name);
-        assert!(art.distance_fonts.is_empty());
-        std::fs::remove_dir_all(dir).unwrap();
-    }
-}
+mod tests;

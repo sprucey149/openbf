@@ -459,6 +459,7 @@ fn thrown_grenade_keeps_bounce_and_blast_sounds_without_damage_contacts() {
             shot_elevate: 0.21,
             hide_on_fire: true,
             hand: Some(Thrown::BF2_HAND),
+            native_thermal_hand: false,
         }),
         ordnance: OrdnanceClass {
             velocity: 25.0,

@@ -189,6 +189,32 @@ fn poison_is_enemy_only_persists_after_the_caster_dies_and_credits_the_kill() {
 }
 
 #[test]
+fn native_teams_take_the_effect_their_relation_to_the_caster_names() {
+    let mut poison = boost();
+    poison.friends = false;
+    poison.enemies = true;
+    poison.self_on_hit = false;
+    poison.regeneration.0 = 0.0;
+    poison.offense.0 = 0.0;
+    poison.defense.0 = 0.0;
+    poison.poison = (15.0, 20.0);
+    for (ability, friend_hit, foe_hit) in [(boost(), true, false), (poison, false, true)] {
+        let (mut sim, owner, class) = setup(ability);
+        sim.set_team_relation(0, 2, true);
+        sim.set_team_relation(2, 0, true);
+        sim.set_team_relation(0, 3, false);
+        sim.set_team_relation(3, 0, false);
+        let friend = sim.spawn(&UnitSpec::trooper(1, Vec3::Z * 4.0)).unwrap();
+        let foe = sim.spawn(&UnitSpec::trooper(1, Vec3::Z * -4.0)).unwrap();
+        sim.units[friend.index as usize].team = 2;
+        sim.units[foe.index as usize].team = 3;
+        sim.fire_ability(owner.index as usize, class);
+        assert_eq!(sim.unit(friend).unwrap().buffs.active(), friend_hit);
+        assert_eq!(sim.unit(foe).unwrap().buffs.active(), foe_hit);
+    }
+}
+
+#[test]
 fn poison_stops_at_fifteen_seconds_and_never_restarts_after_expiration() {
     let (mut sim, owner, _) = setup(boost());
     let enemy = sim.spawn(&UnitSpec::trooper(1, Vec3::Z * -4.0)).unwrap();

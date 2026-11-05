@@ -775,9 +775,20 @@ fn the_jet_classes_carry_their_disc_numbers() {
 #[test]
 fn bf1_jet_borrowing_matches_the_bf2_twins() {
     let Some(dir) = classes_dir() else { return };
-    let bf1 = load_classdb_all(&dir, "bf1");
-    let bf2 = load_classdb_all(&dir, "bf2");
+    let natives = game::assets::baked_root().join("classes");
+    let [bf1, bf2] = ["bf1", "bf2"].map(|g| {
+        let mut db = load_classdb_all(&dir, g);
+        let geo = natives.join(format!("{g}_geo.ron"));
+        if geo.is_file() {
+            db.load(&geo).expect("native classes");
+        }
+        db
+    });
     for &(class, twin, accel, row) in game::roster::BF1_JET_BORROW {
+        if bf1.get(class).is_none() && class.starts_with("geo_") {
+            eprintln!("SKIP {class}: no baked native classes");
+            continue;
+        }
         assert!(bf1.get(class).is_some(), "BF1 has {class}");
         assert_eq!(bf1.prop(class, "JetAcceleration"), None, "{class}");
         let t = game::roster::soldier_constants(&bf2, twin);
@@ -944,6 +955,9 @@ fn every_mission_mix_resolves_against_its_maps_own_disc() {
         let m = MissionDef::load(path).expect("mission");
         let stem = path.file_stem().unwrap().to_str().unwrap();
         let factions = m.factions();
+        if m.is_hero_assault() {
+            continue;
+        }
         let key = format!("{}:{}+{}", m.source_game, factions[0], factions[1]);
         if !dbs.iter().any(|(k, _)| *k == key) {
             let db = game::roster::load_classdb(

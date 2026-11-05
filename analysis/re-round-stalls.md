@@ -1,5 +1,37 @@
 # OPUS RE (2026-09-30) - [O] UNAUDITED: no Fable pass
 
+## Why rounds stall — current source checkpoint, November 4, 2026
+
+The dated September/October census below remains historical evidence. The
+November 4 source at `4cda5ab4` includes four later port corrections:
+
+- `ai::behave::brain::chain` completes Hard/Elite mending at the droid's actual
+  service sphere after reaching its connected hub. Disconnected and stale route
+  fallbacks remain. Native station-seeking is still untraced.
+- `Sim::settle_spawn` / `connected_spawn_node` use a connected authored alternative
+  at the same selected friendly post when a regular bot's node has no walkable
+  exit. Opening ambiguity, players, proxies, jets and walkers retain their rules.
+  A changed opening spawn can change the battle from tick one.
+- `ai::mover` applies the last-reinforcement stall watch using the individual
+  bot's team tickets. Opposing low tickets no longer tighten a mobile bot's watch.
+- `ai::behave::position::lost_jump` permits the existing ordinary jump when the full
+  capsule demonstrably cancels forward movement despite a clear stepped sweep.
+  Headroom, raised sweep, cooldown, reverse-speed and Droideka controls remain.
+
+These are deliberate openbf corrections. `measure:` matched original-game
+station-seeking, Endor spawn/departure, last-reinforcement movement and pinned
+ledge jumps before claiming equivalent native behavior. The retained scoped
+fixtures and rounds establish the port changes, not that acceptance. The Bazaar
+jump clears the named BF2 Yavin Easy 3 and Normal 3 witnesses; Normal 1 still
+recycles the same life at a later corner. The Geonosis and Bespin false-arrival
+experiments did not demonstrate physical escape and are outside this source.
+
+The exact 34-map Normal 3 no-jump comparison later completed: only BF2 Yavin
+changes, beginning at checkpoint 2,731; the other 33 full streams agree. This
+supersedes the earlier statement that that matrix had not run. The owning
+#108 technical record retains the per-source vectors and unchecked broader gates.
+
+
 > **AUDIT 2026-09-30 (loop lane 3, OK, SCOPED — `engine/artifacts/loop/audits.md`, report
 > `engine/artifacts/loop/reports/20260930_1745_audit_SWPN.md`, evidence `engine/artifacts/lead_tmp/audit-swpn/`).**
 > Audited with SWPN, whose multi-seed tables are this doc's port side. Re-derived before reading the doc; one Opus

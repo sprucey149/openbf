@@ -5,6 +5,8 @@ use crate::unit::{SlotSpec, UnitHandle, UnitSpec};
 use crate::weapon::{ExplosionClass, OrdnanceClass, Thrown, WeaponClass};
 use crate::TICK_DT;
 
+mod charged_sticky;
+
 /// Same-owner warnings are linked to instances, even when contacts share
 /// a tick and unrelated warnings are compacted out of the vector.
 #[test]
@@ -179,6 +181,7 @@ fn thermal(bf2: bool) -> WeaponClass {
             shot_elevate: 0.21,
             hide_on_fire: true,
             hand: bf2.then_some(Thrown::BF2_HAND),
+            native_thermal_hand: false,
         }),
         ordnance: OrdnanceClass {
             velocity: 25.0,
@@ -255,6 +258,208 @@ fn steps_to_throw(s: &mut Sim, buttons: u32, limit: u32) -> Option<u32> {
         }
     }
     None
+}
+
+fn upright_thermal_release(
+    source_bf2: bool,
+    map_bf2: bool,
+    root_scale: &str,
+    yaw: f32,
+) -> (Vec3, Vec3, u32) {
+    thermal_release(source_bf2, map_bf2, root_scale, yaw, Stance::Stand)
+}
+
+fn thermal_release(
+    source_bf2: bool,
+    map_bf2: bool,
+    root_scale: &str,
+    yaw: f32,
+    release_stance: Stance,
+) -> (Vec3, Vec3, u32) {
+    use crate::flash::fnv_lower;
+    use crate::soldier::{GroundRules, SoldierConstants};
+    use crate::weapon::test_props::List;
+
+    let mut sim = Sim::empty(7);
+    sim.heightfield = Some(flat_ground());
+    sim.ground_rules = if map_bf2 {
+        GroundRules::Bf2
+    } else {
+        GroundRules::Bf1
+    };
+    let mut weapon = thermal(source_bf2);
+    weapon.name = "all_weap_inf_thermaldetonator".into();
+    let delay = if source_bf2 { "0.51" } else { "0.3" };
+    let shot_delay = if source_bf2 { "1.3" } else { "1.4" };
+    let weapon_props = List(&[
+        (fnv_lower("ShotElevate"), "0.21"),
+        (fnv_lower("InitialSalvoDelay"), delay),
+        (fnv_lower("ShotDelay"), shot_delay),
+        (fnv_lower("ReloadTime"), "0.01"),
+    ]);
+    Thrown::apply(&mut weapon, &weapon_props, source_bf2);
+    if map_bf2 && !source_bf2 {
+        Thrown::throw_as_bf2(&mut weapon);
+    }
+    let weapon_class = sim.add_weapon_class(weapon);
+    let consts = SoldierConstants::from_props(&List(&[
+        (fnv_lower("SkeletonRootScale"), root_scale),
+        (fnv_lower("CollisionRootScale"), "0.73"),
+    ]));
+    assert_eq!(consts.collision_scale, 0.73);
+    let player = sim
+        .spawn(&UnitSpec {
+            consts,
+            yaw,
+            slots: std::sync::Arc::new([SlotSpec {
+                slot: 2,
+                channel: 1,
+                weapon_class,
+                clips: 4,
+            }]),
+            ..UnitSpec::player(0, Vec3::ZERO)
+        })
+        .unwrap();
+    // Aim pitch changes the shot direction while the upright hand offset
+    // remains in the owner frame.
+    sim.unit_mut(player).unwrap().soldier.pitch = 0.2;
+    sim.step(&[pad(buttons::SECONDARY_FIRE)]);
+    assert_eq!(throws(&sim), 0, "thermal is still winding up");
+    sim.unit_mut(player).unwrap().soldier.stance = release_stance;
+    let tick = 1 + steps_to_throw(&mut sim, buttons::SECONDARY_FIRE, 59).expect("a thermal throw");
+    let origin = sim
+        .events
+        .iter()
+        .find_map(|event| match event {
+            Event::Throw {
+                unit,
+                weapon_class: class,
+                origin,
+            } if *unit == player && *class as usize == weapon_class => Some(*origin),
+            _ => None,
+        })
+        .expect("throw from the selected thermal");
+    let unit = sim.unit(player).unwrap();
+    assert_eq!(unit.soldier.stance, release_stance);
+    assert!(unit.soldier.grounded);
+    let held = &unit.held[unit.cur1.unwrap() as usize];
+    assert_eq!(
+        held.state.rounds(&sim.weapon_classes[weapon_class]),
+        Some(3)
+    );
+    assert_eq!(sim.stickies.len(), 1);
+    (origin - unit.soldier.pos, sim.stickies[0].vel, tick)
+}
+
+#[test]
+fn thermal_skeleton_root_scale_moves_the_upright_bf2_release() {
+    for yaw in [0.0, 1.1] {
+        let (_, unity_velocity, unity_tick) = upright_thermal_release(true, true, "1.0", yaw);
+        let (sy, cy) = crate::fmath::sin_cos(yaw);
+        for (property, scale) in [("0.95", 0.95), ("1.15", 1.15)] {
+            let (origin, velocity, tick) = upright_thermal_release(true, true, property, yaw);
+            // Finalized strong release in the retained original class tables.
+            // Apply the port's floor correction after the raw class vector scales.
+            let expected = Vec3::Y * (1.818_271_8 * scale - 0.02)
+                + Vec3::new(-sy, 0.0, -cy) * (0.743_278_86 * scale);
+            assert_eq!((velocity, tick), (unity_velocity, unity_tick));
+            assert!(
+                (origin - expected).length() < 1e-4,
+                "scaled upright BF2 thermal at {property}, yaw {yaw}: {origin} expected {expected}"
+            );
+        }
+    }
+}
+
+#[test]
+fn thermal_skeleton_root_scale_preserves_unity_and_bf1_throws() {
+    let (origin, _, tick) = upright_thermal_release(true, true, "1.0", 0.0);
+    let hand = Vec3::new(0.0, 1.8183_f32 - 0.02, -0.7433);
+    assert_eq!((origin, tick), (hand, 16));
+
+    let native_bf1 = upright_thermal_release(false, false, "1.0", 0.0);
+    assert_eq!(
+        upright_thermal_release(false, false, "1.15", 0.0),
+        native_bf1
+    );
+    assert_eq!(
+        native_bf1.0,
+        Vec3::Y * crate::unit::muzzle_height(crate::soldier::Stance::Stand)
+    );
+    assert_eq!(native_bf1.2, 10);
+
+    let converted_bf1 = upright_thermal_release(false, true, "1.0", 0.0);
+    assert_eq!(
+        upright_thermal_release(false, true, "1.15", 0.0),
+        converted_bf1
+    );
+    assert_eq!((converted_bf1.0, converted_bf1.2), (hand, 16));
+    assert_eq!(
+        upright_thermal_release(true, false, "1.15", 0.0),
+        upright_thermal_release(true, false, "1.0", 0.0),
+        "BF1 map rules keep the original hand if given a native BF2 weapon"
+    );
+}
+
+#[test]
+fn thermal_skeleton_root_scale_checks_the_release_stance_after_windup() {
+    let standing = upright_thermal_release(true, true, "1.15", 0.0);
+    assert_eq!(
+        thermal_release(true, true, "1.15", 0.0, Stance::Crouch),
+        standing
+    );
+    let prone_unity = thermal_release(true, true, "1.0", 0.0, Stance::Prone);
+    assert_eq!(
+        thermal_release(true, true, "1.15", 0.0, Stance::Prone),
+        prone_unity
+    );
+    assert_ne!(prone_unity.0, standing.0);
+}
+
+#[test]
+fn thermal_skeleton_root_scale_rejects_nonphysical_hand_offsets() {
+    let unity = upright_thermal_release(true, true, "1.0", 0.0);
+    for malformed in ["3.4028235e38", "1e-38", "inf", "NaN", "0", "-1.0"] {
+        assert_eq!(
+            upright_thermal_release(true, true, malformed, 0.0),
+            unity,
+            "malformed thermal skeleton scale {malformed}"
+        );
+    }
+}
+
+#[test]
+fn thermal_skeleton_root_scale_requires_a_native_auto_variant_sticky() {
+    use crate::flash::fnv_lower;
+    use crate::weapon::test_props::List;
+
+    let mut thermal_weapon = thermal(true);
+    thermal_weapon.name = "ALL_weap_inf_thermaldetonator".into();
+    Thrown::apply(&mut thermal_weapon, &List(&[]), true);
+    assert!(thermal_weapon.thrown.unwrap().native_thermal_hand);
+    Thrown::throw_as_bf2(&mut thermal_weapon);
+    assert!(!thermal_weapon.thrown.unwrap().native_thermal_hand);
+
+    thermal_weapon.max_pressed_time = 1.0;
+    Thrown::apply(&mut thermal_weapon, &List(&[]), true);
+    assert!(!thermal_weapon.thrown.unwrap().native_thermal_hand);
+    thermal_weapon.max_pressed_time = 0.0;
+
+    Thrown::apply(
+        &mut thermal_weapon,
+        &List(&[(fnv_lower("ForceFireAnimation"), "0")]),
+        true,
+    );
+    assert!(!thermal_weapon.thrown.unwrap().native_thermal_hand);
+
+    thermal_weapon.ordnance.sticky = None;
+    Thrown::apply(&mut thermal_weapon, &List(&[]), true);
+    assert!(!thermal_weapon.thrown.unwrap().native_thermal_hand);
+
+    let mut crack = thermal(true);
+    crack.name = "imp_weap_inf_crackgrenade".into();
+    Thrown::apply(&mut crack, &List(&[]), true);
+    assert!(!crack.thrown.unwrap().native_thermal_hand);
 }
 
 /// The cycle (§3.2 [M]): the grenade leaves the hand at the first update
@@ -1048,6 +1253,7 @@ fn mortar_shell() -> WeaponClass {
         shot_elevate: 0.1,
         hide_on_fire: true,
         hand: None,
+        native_thermal_hand: false,
     });
     w.ordnance = OrdnanceClass {
         velocity: 40.0,
@@ -1119,18 +1325,24 @@ fn a_shell_is_lifted_by_shot_elevate_for_a_human_only() {
 #[test]
 fn the_mortar_taps_a_shell_and_holds_a_sticky() {
     use crate::weapon::ChargeStage;
-    for (hold, shell) in [(1u32, true), (40, false)] {
+    for (bf2, hold, shell) in [
+        (false, 1u32, true),
+        (false, 40, false),
+        (true, 1, true),
+        (true, 40, false),
+    ] {
         let mut s = Sim::empty(5);
         s.heightfield = Some(flat_ground());
         let mut stage = mortar_shell();
         stage.ordnance = OrdnanceClass {
             velocity: 40.0,
-            life_span: 0.5,
-            ..thermal(false).ordnance
+            life_span: if bf2 { 0.1 } else { 0.5 },
+            ..thermal(bf2).ordnance
         };
         assert!(stage.ordnance.sticky.is_some());
         let stage_index = s.add_weapon_class(stage.clone());
         let mut root = mortar_shell();
+        root.ordnance.life_span = if bf2 { 8.0 } else { 3.0 };
         root.stages = vec![ChargeStage {
             threshold: 0.9,
             class: Box::new(stage),
@@ -1149,8 +1361,23 @@ fn the_mortar_taps_a_shell_and_holds_a_sticky() {
             s.step(&[pad(if t < hold { buttons::FIRE } else { 0 })]);
             for e in &s.events {
                 match *e {
-                    Event::Shot { weapon_class, .. } => shots.push(weapon_class as usize),
-                    Event::Throw { weapon_class, .. } => thrown.push(weapon_class as usize),
+                    Event::Shot { weapon_class, .. } => {
+                        shots.push(weapon_class as usize);
+                        let b = s.bolts.last().unwrap();
+                        let launch = b.vel + Vec3::Y * (b.gravity * TICK_DT);
+                        assert!((launch.length() - 40.0).abs() < 1e-4, "{launch:?}");
+                        assert_eq!(
+                            s.weapon_classes[b.weapon_class].ordnance.life_span,
+                            if bf2 { 8.0 } else { 3.0 }
+                        );
+                    }
+                    Event::Throw { weapon_class, .. } => {
+                        thrown.push(weapon_class as usize);
+                        let g = s.stickies.last().unwrap();
+                        let launch = g.vel - Vec3::Y * (g.gravity * TICK_DT);
+                        assert!((launch.length() - 40.0).abs() < 1e-4, "{launch:?}");
+                        assert_eq!(g.life, if bf2 { 0.1 } else { 0.5 });
+                    }
                     _ => {}
                 }
             }

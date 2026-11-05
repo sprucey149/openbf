@@ -200,6 +200,7 @@ fn thermal() -> core::weapon::WeaponClass {
             shot_elevate: 0.21,
             hide_on_fire: true,
             hand: Some(Thrown::BF2_HAND),
+            native_thermal_hand: false,
         }),
         ordnance: OrdnanceClass {
             velocity: 25.0,

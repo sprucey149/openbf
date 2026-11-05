@@ -232,6 +232,14 @@ impl Bolt {
             ] {
                 eat(&v.to_bits().to_le_bytes());
             }
+            // Launch already encodes the initial desired heading. Add only
+            // learned state, preserving the hash stream of unguided rounds.
+            if m.desired.to_array().map(f32::to_bits) != m.launch.to_array().map(f32::to_bits) {
+                eat(b"MSLAIM");
+                for v in m.desired.to_array() {
+                    eat(&v.to_bits().to_le_bytes());
+                }
+            }
             match m.target {
                 None => eat(&[0]),
                 Some(crate::missile::MissileTarget::Unit(h)) => {
@@ -505,11 +513,11 @@ impl Bolt {
     }
 }
 
-/// What a press ray that met a map body (no hull owner) struck: a station's
+/// What a weapon query that met a map body (no hull owner) struck: a station's
 /// body is the station, a building turret's body is the turret
 /// (`CollisionWorld::bind_turret`; the PS2 damages the armed building,
 /// `analysis/re-turret-collision.md` 3.1), anything else the world.
-fn building_hit(world: &CollisionWorld, instance: Option<u32>) -> Hit {
+pub(crate) fn building_hit(world: &CollisionWorld, instance: Option<u32>) -> Hit {
     let Some(i) = instance else {
         return Hit::World;
     };

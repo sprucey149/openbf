@@ -160,6 +160,8 @@ mod battle;
 mod headless;
 #[path = "main/sim_trace.rs"]
 mod sim_trace;
+#[path = "main/timed_battle.rs"]
+mod timed_battle;
 #[path = "main/windowed.rs"]
 mod windowed;
 
@@ -174,6 +176,7 @@ use windowed::{run_shell, run_windowed};
 struct ViewerArgs {
     map: PathBuf,
     headless: bool,
+    seconds: Option<u32>,
     capture_frame: Option<PathBuf>,
     walk: bool,
     targets: bool,
@@ -316,6 +319,7 @@ fn main() -> Result<()> {
             let mut v = ViewerArgs {
                 map: PathBuf::from(it.next().context("--map <baked-dir>")?),
                 headless: false,
+                seconds: None,
                 capture_frame: None,
                 walk: false,
                 targets: false,
@@ -353,6 +357,9 @@ fn main() -> Result<()> {
             while let Some(f) = it.next() {
                 match f.as_str() {
                     "--headless" => v.headless = true,
+                    "--seconds" => {
+                        v.seconds = Some(it.next().context("--seconds <n>")?.parse()?);
+                    }
                     "--walk" => v.walk = true,
                     "--targets" => v.targets = true,
                     "--hud" => v.hud = true,
@@ -464,7 +471,12 @@ fn main() -> Result<()> {
             if v.capture_frame.is_some() && !v.headless && v.bench_toggle.is_none() {
                 bail!("--capture-frame requires --headless or --bench-toggle");
             }
-            if v.bench {
+            if let Some(seconds) = v.seconds {
+                if !v.headless {
+                    bail!("--seconds requires --headless");
+                }
+                timed_battle::run(&v, seconds)
+            } else if v.bench {
                 run_bench(&v)
             } else if v.headless {
                 run_headless(&v)
@@ -553,6 +565,7 @@ struct BattleSetup {
     /// The shell's "DLC Heroes" row: the DLC heroes for the map's own
     /// (`game::heroes::append_with`). The CLI keeps the map's own.
     dlc_heroes: bool,
+    score_limit: u32,
 }
 
 /// A path's last component as text.
@@ -562,11 +575,35 @@ fn file_name(p: &std::path::Path) -> Option<String> {
 
 impl BattleSetup {
     fn from_args(v: &ViewerArgs, seed: u32) -> Result<Self> {
-        let mission = v
-            .mission
+        let mission_file = v.mission.clone().or_else(|| {
+            (v.mode == "eli").then(|| {
+                let root = v
+                    .map
+                    .parent()
+                    .and_then(std::path::Path::parent)
+                    .unwrap_or_else(|| std::path::Path::new(""));
+                root.join("missions").join(format!(
+                    "{}_{}.ron",
+                    file_name(&v.map).unwrap_or_default(),
+                    v.mode
+                ))
+            })
+        });
+        let mission = mission_file
             .as_deref()
             .map(game::mission::MissionDef::load)
             .transpose()?;
+        if let Some(mission) = mission
+            .as_ref()
+            .filter(|m| v.mode == "eli" || m.is_hero_assault())
+        {
+            anyhow::ensure!(
+                mission.mode == v.mode,
+                "mission mode {} differs from --mode {}",
+                mission.mode,
+                v.mode
+            );
+        }
         // `--teams` naming the mission's own pair the other way round seats
         // the first army on its own team, as the shell does (card ERAM).
         let own_seat = match (&mission, &v.teams) {
@@ -596,10 +633,11 @@ impl BattleSetup {
                 .filter(|_| !own_seat)
                 .or_else(|| mission.as_ref().map(|m| m.factions())),
             mission,
-            mission_file: v.mission.as_deref().and_then(file_name),
+            mission_file: mission_file.as_deref().and_then(file_name),
             player_team: u8::from(own_seat),
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
             classes_dir: v.classes.clone().unwrap_or_else(|| {
                 v.map
                     .parent()

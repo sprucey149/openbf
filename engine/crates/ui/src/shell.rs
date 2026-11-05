@@ -29,9 +29,8 @@ pub const OPTION_ROWS: usize = 5;
 /// Right and R1 at 16 stay 16; the ELF image's 16, not the 25 of
 /// `ScriptCB_GetNetGameDefaults`' non-network branch).
 pub const MAX_BOTS: i32 = 16;
-/// The modes the port's sim can run: Conquest only (`setup_conquest`;
-/// §7 dims the rest).
-pub const PORT_MODES: [Mode; 1] = [Mode::Con];
+/// The modes the port's sim can run (§7 dims the rest).
+pub const PORT_MODES: [Mode; 2] = [Mode::Con, Mode::Eli];
 
 /// Space Assault loads and its bots fly, but its capital ships cannot be attacked
 /// and a round has no way to end (`analysis/flying-state-of-play.md`), so its rows

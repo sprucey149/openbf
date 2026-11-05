@@ -5,4 +5,4 @@
 # 1,500. A queued split is a reason; so is "no seam yields two parts of 400+ lines"
 # (queue SPL7). Delete a file's line when its split lands — the report flags a stale one.
 game/src/blackbox.rs dev scaffolding kept as ONE module so it can be deleted whole when the game is playable (card BLKB; analysis/dev-tools.md "Playtest black box"); a split would spread it
-game/src/main/windowed.rs queued split: card SPL8 (2,075 at cleanse 21)
+bake/src/map/content.rs single bake_content orchestration; further splitting needs a staged-data helper interface, not a pure move; retained by the November 4 code-health pass

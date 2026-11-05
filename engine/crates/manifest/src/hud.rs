@@ -15,6 +15,16 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Optional locally baked BF2 Light faces. Each pair is (menu, legacy role).
+/// All sizes share the same distance pages; older bakes keep their own fonts.
+pub const MENU_FONTS: [(&str, &str); 3] = [
+    ("menu_gamefont_large", "gamefont_large"),
+    ("menu_gamefont_small", "gamefont_small"),
+    ("menu_gamefont_tiny", "gamefont_tiny"),
+];
+
+pub const MENU_ATLAS: &str = "menu_face";
+
 /// `hud/index.ron`: everything the HUD bake wrote, by name.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HudIndex {
@@ -82,8 +92,9 @@ pub struct HudGlyph {
     pub uv: [f32; 4],
 }
 
-/// Optional `fonts/<font>.sdf.ron`: scalable artwork generated from the
-/// player's glyphs. The original HudFont remains the sole layout authority.
+/// Optional `fonts/<font>.sdf.ron`: scalable artwork paired with a HudFont,
+/// which remains the sole layout authority. Source fonts use player glyphs;
+/// the treated menu family shares its own pages across all three roles.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HudDistanceFont {
     pub pages: Vec<String>,

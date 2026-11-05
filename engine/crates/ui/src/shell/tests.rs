@@ -1028,3 +1028,35 @@ fn population_rows_stop_at_the_percent_and_help_averages_every_map() {
     assert!(help(&values, Opt::ConNumBots).starts_with("Average team size: 31 units\n"));
     assert!(help(&values, Opt::NumBots).starts_with("Average team size: 31 units\n"));
 }
+
+#[test]
+fn hero_assault_needs_a_mission_and_a_single_era() {
+    let bakes = [
+        ("tat2".to_owned(), "bf2".to_owned()),
+        ("bf2_cor1".to_owned(), "bf2".to_owned()),
+    ];
+    let pair = || vec![["all".to_owned(), "imp".to_owned()]];
+    let with_coruscant = |key: &str, mode: Mode| {
+        if mode == Mode::Eli && (key == "tat2" || key == "bf2_cor1") {
+            pair()
+        } else {
+            Vec::new()
+        }
+    };
+    let without_coruscant = |key: &str, mode: Mode| {
+        if mode == Mode::Eli && key == "tat2" {
+            pair()
+        } else {
+            Vec::new()
+        }
+    };
+    let list = catalog(&text, &bakes, &without_coruscant);
+    let map = |list: &[MapEntry], key: &str| list.iter().find(|m| m.key == key).unwrap().clone();
+    let tat2 = map(&list, "tat2");
+    assert!(tat2.runnable(Mode::Eli, Side::Era(Era::Gcw)));
+    assert!(!tat2.runnable(Mode::Eli, Side::Era(Era::Cw)));
+    assert!(!tat2.runnable(Mode::Eli, Side::Mixed(0)));
+    assert!(!map(&list, "bf2_cor1").runnable(Mode::Eli, Side::Era(Era::Gcw)));
+    let list = catalog(&text, &bakes, &with_coruscant);
+    assert!(map(&list, "bf2_cor1").runnable(Mode::Eli, Side::Era(Era::Gcw)));
+}

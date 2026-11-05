@@ -134,11 +134,9 @@ fn dwell(s: &mut Sim, n: usize) {
 }
 
 /// §4.3: a missile turns its launch direction onto its locked target's aim
-/// point (within a few degrees a second in) and strikes it; a target that
-/// dies mid-flight drops the handle, and the round then flies its no-target
-/// law back about the launch line instead of steering at the corpse.
+/// point (within a few degrees a second in) and strikes it.
 #[test]
-fn a_guided_missile_curves_onto_its_target_and_an_unguided_one_flies_straight() {
+fn a_guided_missile_curves_onto_its_live_target_and_strikes_it() {
     // A target 20 m off the launch line at 50 m: 21 deg of turn to make.
     let (mut s, me, enemy, wc) = scene(50.0);
     s.units[enemy.index as usize].soldier.pos = Vec3::new(20.0, 0.0, -50.0);
@@ -177,11 +175,78 @@ fn a_guided_missile_curves_onto_its_target_and_an_unguided_one_flies_straight() 
     assert!(s.bolts.is_empty(), "it struck or expired");
     let left = s.unit(enemy).unwrap().health.cur;
     assert!(left < hp, "the missile hurt its target: {hp} -> {left}");
+}
 
-    // A target that dies mid-flight: the handle is dropped on the next tick
-    // and the round flies the no-target law, turning off the dead point.
-    let (mut s, me, enemy, wc) = scene(50.0);
-    s.units[enemy.index as usize].soldier.pos = Vec3::new(20.0, 0.0, -50.0);
+/// The retained direction is the last live aim minus the position BEFORE that
+/// guide pass. It is neither the launch line, the current flight direction nor
+/// a world point to chase after handle loss (BF2 FUN_0031f2e8:312665-312768,
+/// 312843-312872; BF1 FUN_0027d6b8:202955-202987).
+#[test]
+fn target_loss_retains_the_last_desired_heading() {
+    for rules in [
+        crate::soldier::GroundRules::Bf1,
+        crate::soldier::GroundRules::Bf2,
+    ] {
+        for generation_mismatch in [false, true] {
+            let (mut s, me, enemy, wc) = scene(100.0);
+            s.ground_rules = rules;
+            s.units[enemy.index as usize].controller = Controller::Player { slot: 1 };
+            s.units[enemy.index as usize].soldier.pos.x = 40.0;
+            let origin = s.unit(me).unwrap().muzzle();
+            launch(
+                &mut s,
+                me,
+                wc,
+                origin,
+                Vec3::NEG_Z,
+                Some(MissileTarget::Unit(enemy)),
+            );
+            step(&mut s, 14);
+            let previous_pos = s.bolts[0].pos;
+            step(&mut s, 1);
+            let last_point = s.unit(enemy).unwrap().aim_point();
+            let desired = (last_point - previous_pos).normalize();
+            let mut expected = s.bolts[0].missile.unwrap();
+            let mut frozen_point = expected;
+            let mut frozen_point_delta = 0.0_f32;
+            assert!(expected.desired.abs_diff_eq(desired, 1e-6));
+            assert!(desired.angle_between(expected.launch) > 0.3);
+            assert!(
+                desired.angle_between(expected.dir) > 0.05,
+                "still turning at loss"
+            );
+            if generation_mismatch {
+                s.units[enemy.index as usize].gen += 1;
+            } else {
+                s.units[enemy.index as usize].alive = false;
+            }
+            assert!(s.unit(enemy).is_none());
+            let c = s.weapon_classes[wc].ordnance.missile.unwrap();
+            for tick in 0..12 {
+                let pos = s.bolts[0].pos;
+                let mut rng = s.lcg.clone();
+                let want = expected.step(&c, Some(pos + desired * 100.0), pos, TICK_DT, &mut rng);
+                let stale = frozen_point.step(&c, Some(last_point), pos, TICK_DT, &mut rng);
+                step(&mut s, 1);
+                let b = &s.bolts[0];
+                frozen_point_delta = frozen_point_delta.max((stale - b.vel).length());
+                assert_eq!(b.missile.unwrap().target, None, "invalid handle cleared");
+                assert!(b.vel.abs_diff_eq(want, 1e-5),
+                    "{rules:?} generation_mismatch={generation_mismatch} loss tick {tick}: got {:?}, retained-heading {:?}", b.vel, want);
+            }
+            println!("{rules:?} generation_mismatch={generation_mismatch} frozen-point delta {frozen_point_delta} m/s");
+            assert!(
+                frozen_point_delta > 1e-3,
+                "frozen-point control must differ by more than 100 times the velocity tolerance"
+            );
+        }
+    }
+}
+
+/// Losing the handle before any live guide pass keeps the initialized heading.
+#[test]
+fn target_loss_before_first_guide_keeps_the_launch_heading() {
+    let (mut s, me, enemy, wc) = scene(100.0);
     let origin = s.unit(me).unwrap().muzzle();
     launch(
         &mut s,
@@ -191,34 +256,12 @@ fn a_guided_missile_curves_onto_its_target_and_an_unguided_one_flies_straight() 
         Vec3::NEG_Z,
         Some(MissileTarget::Unit(enemy)),
     );
-    step(&mut s, 15);
-    assert!(s.bolts[0].missile.unwrap().target.is_some());
-    let corpse = s.unit(enemy).unwrap().aim_point();
-    s.units[enemy.index as usize].alive = false;
-    let launch_line = s.bolts[0].missile.unwrap().launch;
-    let before = s.bolts[0].missile.unwrap().dir;
-    let (to_launch, to_corpse) = (
-        before.angle_between(launch_line),
-        before.angle_between((corpse - s.bolts[0].pos).normalize()),
-    );
+    s.units[enemy.index as usize].gen += 1;
     step(&mut s, 1);
-    assert_eq!(
-        s.bolts[0].missile.unwrap().target,
-        None,
-        "the dead handle is dropped"
-    );
-    step(&mut s, 30);
-    let now = s.bolts[0].missile.unwrap().dir;
-    let pos = s.bolts[0].pos;
-    assert!(
-        now.angle_between(launch_line) < to_launch,
-        "it turns back to the launch line: {to_launch} -> {}",
-        now.angle_between(launch_line)
-    );
-    assert!(
-        now.angle_between((corpse - pos).normalize()) > to_corpse,
-        "it no longer steers at the corpse"
-    );
+    let m = s.bolts[0].missile.unwrap();
+    assert_eq!(m.target, None);
+    assert_eq!(m.desired, m.launch);
+    assert_eq!(m.dir, m.launch);
 }
 
 /// §4.3: no target, no steer - the round keeps its launch direction (this

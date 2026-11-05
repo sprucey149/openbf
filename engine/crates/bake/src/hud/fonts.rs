@@ -15,7 +15,7 @@ pub(super) fn read_fonts(path: &Path) -> Result<Vec<Font>> {
         .collect()
 }
 
-const SIDE: usize = 1024;
+pub(super) const SIDE: usize = 1024;
 const MAX_GLYPH_SIDE: usize = SIDE / SCALE - PAD * 2;
 
 struct GlyphMask {
@@ -92,8 +92,37 @@ pub(super) fn bake(
     prefix: &str,
     sources: &[String],
 ) -> Result<()> {
+    let baked = distance(base, donors, prefix)?;
+    for (name, page) in baked.font.pages.iter().zip(baked.pages) {
+        std::fs::write(
+            out.join(format!("{name}.ktx2")),
+            crate::ktx2w::write_rgba8(SIDE as u32, SIDE as u32, &[page]),
+        )?;
+    }
+    crate::write_ron(
+        &out.join(format!("{prefix}{}.sdf.ron", base.name)),
+        &baked.font,
+    )?;
+    // Provenance is generated beside the player's art, never a shipped asset.
+    let receipt = serde_json::json!({"font":base.name,"encoding":"signed half-coverage contour with texel-centre UVs, 2 samples/texel, range/pad 4 source texels","source_sha256":sources,"glyphs_per_source":baked.choices});
+    std::fs::write(
+        out.join(format!("{prefix}{}.sdf.json", base.name)),
+        serde_json::to_vec_pretty(&receipt)?,
+    )?;
+    Ok(())
+}
+
+pub(super) struct DistanceBake {
+    pub font: HudDistanceFont,
+    pub pages: Vec<Vec<u8>>,
+    choices: std::collections::BTreeMap<usize, usize>,
+}
+
+/// Shared SDF generation; menu treatment never changes the native bake.
+pub(super) fn distance(base: &Font, donors: &[Vec<Font>], prefix: &str) -> Result<DistanceBake> {
     let mut page = vec![0u8; SIDE * SIDE * 4];
     let mut pages = Vec::new();
+    let mut pixels = Vec::new();
     let mut glyphs = Vec::new();
     let (mut x, mut y, mut row_h) = (0, 0, 0);
     let mut choices = std::collections::BTreeMap::<usize, usize>::new();
@@ -137,10 +166,7 @@ pub(super) fn bake(
         }
         if y + dh > SIDE {
             let name = page_name(pages.len());
-            std::fs::write(
-                out.join(format!("{name}.ktx2")),
-                crate::ktx2w::write_rgba8(SIDE as u32, SIDE as u32, &[page]),
-            )?;
+            pixels.push(page);
             pages.push(name);
             page = vec![0; SIDE * SIDE * 4];
             x = 0;
@@ -177,22 +203,13 @@ pub(super) fn bake(
         row_h = row_h.max(dh);
     }
     let name = page_name(pages.len());
-    std::fs::write(
-        out.join(format!("{name}.ktx2")),
-        crate::ktx2w::write_rgba8(SIDE as u32, SIDE as u32, &[page]),
-    )?;
+    pixels.push(page);
     pages.push(name);
-    crate::write_ron(
-        &out.join(format!("{prefix}{}.sdf.ron", base.name)),
-        &HudDistanceFont { pages, glyphs },
-    )?;
-    // Provenance is generated beside the player's art, never a shipped asset.
-    let receipt = serde_json::json!({"font":base.name,"encoding":"signed half-coverage contour with texel-centre UVs, 2 samples/texel, range/pad 4 source texels","source_sha256":sources,"glyphs_per_source":choices});
-    std::fs::write(
-        out.join(format!("{prefix}{}.sdf.json", base.name)),
-        serde_json::to_vec_pretty(&receipt)?,
-    )?;
-    Ok(())
+    Ok(DistanceBake {
+        font: HudDistanceFont { pages, glyphs },
+        pages: pixels,
+        choices,
+    })
 }
 
 pub(super) fn fingerprint(path: &Path) -> Result<String> {

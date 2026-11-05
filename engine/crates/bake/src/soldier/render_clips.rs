@@ -11,9 +11,9 @@ use sha2::{Digest, Sha256};
 const TARGET: &str = "human_rifle_crouch_reload";
 const DONOR: &str = "human_pistol_crouch_reload";
 // (original, donor, already aligned): the complete twelve-bone rotation AND
-// translation channels, with clip name, frame count and rate. The five rows
-// cover the retail PC BF1 faction and Ewok lower rigs; no keys are stored here.
-const CHANNELS: [(&str, &str, &str); 5] = [
+// translation channels, with clip name, frame count and rate. The eight rows
+// cover the measured retail PC BF1 faction and native lower rigs; no keys are stored here.
+const CHANNELS: [(&str, &str, &str); 8] = [
     (
         "c66e721c4ac343537a95ce717e940668027decf2a3091287e1c46e7460990fcb",
         "a699aca767dd7f6acfe941c24bd96c793eb577a4ffbff0c879d1fec1e1affc6f",
@@ -40,6 +40,23 @@ const CHANNELS: [(&str, &str, &str); 5] = [
         "fa4a7337e58a9985634eb9984fccb1b1aeacb288a78ea4dd3aa0cd3e81803b5d",
         "b941f7209b978dc0881e26023b61fabb38b35e53f13ebf5343f3468074af5f37",
         "4f7f83f3ce2371781aa8ac762d9e41718b03e33481593a820293493e9d4fe558",
+    ),
+    // Geonosian, Gungan and Jawa pose rigs, respectively. Each PC pistol
+    // lower track exactly reproduces its PS2 rifle crouch reload.
+    (
+        "fbd3911e05780b161aac40e47ecfb3b4c53a5c54487e702fc3336b92fe5967ca",
+        "2e32e64c2cd4b1ad738c5ea03e25c755773a0e7beaa93aa014172c3af1110d94",
+        "9bbeaff0fa6e80baf56e4344b0c89437fb4882eedbad9d6490106369fd606205",
+    ),
+    (
+        "83a9e35488f07ec26cc975b10d7e94cb8b264854170162649c51b6cda40871b1",
+        "c8f053c00472cf2eaa0b0886c5b361fea16c9b4ab09eec1406896d03756cfa2c",
+        "4c0168321022f9cf571576c04216092550c21cd5ecbde8a000c6cdc7db4bff15",
+    ),
+    (
+        "fa78cafb21457ea041e5d4c01c833751dde6b4daff8594360164f424d1b5b062",
+        "d6cb92eeb3f50f7e15b4e9aa84f528487f83bb5baf10b0b9ba523833774aa130",
+        "3e5eb8a6d17bc103db9d851fa757baabadd61cefeb36fbbd4a31cbebb6087a9e",
     ),
 ];
 const MOVING: [&str; 7] = [
@@ -345,15 +362,30 @@ mod tests {
     #[test]
     #[ignore = "requires OPENBF_RELOAD_PC1 and OPENBF_RELOAD_PS2 retail BF1 LVL roots"]
     fn retail_ewok_reload_repairs_to_ps2_and_refuses_changed_channels() {
+        retail_reload_repairs(&[("EWK", "ewk_inf"), ("EWK", "ewk_inf2")]);
+    }
+
+    #[test]
+    #[ignore = "requires OPENBF_RELOAD_PC1 and OPENBF_RELOAD_PS2 retail BF1 LVL roots"]
+    fn retail_native_reload_repairs_to_ps2_and_refuses_changed_channels() {
+        retail_reload_repairs(&[
+            ("GEO", "gen_inf_geonosian"),
+            ("GUN", "nab_inf_gungan"),
+            ("DES", "tat_inf_jawa"),
+            ("DES", "tat_inf_tusken"),
+        ]);
+    }
+
+    fn retail_reload_repairs(soldiers: &[(&str, &str)]) {
         let pc = std::path::PathBuf::from(
             std::env::var_os("OPENBF_RELOAD_PC1").expect("PC BF1 LVL root"),
         );
         let ps2 = std::path::PathBuf::from(
             std::env::var_os("OPENBF_RELOAD_PS2").expect("PS2 BF1 LVL root"),
         );
-        for name in ["ewk_inf", "ewk_inf2"] {
-            let (model, clips) = retail_clips(&pc, "EWK", name);
-            let (native_model, native) = retail_clips(&ps2, "EWK", name);
+        for &(side, name) in soldiers {
+            let (model, clips) = retail_clips(&pc, side, name);
+            let (native_model, native) = retail_clips(&ps2, side, name);
             let expected = fingerprint(&native_model, &native[0]).unwrap();
             let copied = copy_lower(&model, &clips[0], &clips[1]).unwrap();
             println!(
@@ -366,7 +398,7 @@ mod tests {
             assert_eq!(fingerprint(&model, &copied).unwrap(), expected);
             let fixed = corrected_clips(true, true, &model, &clips)
                 .unwrap()
-                .expect("Ewok needs repair");
+                .expect("retail PC BF1 lower reload needs repair");
             assert_eq!(fingerprint(&model, &fixed[0]).unwrap(), expected);
             assert_eq!(fixed[0].tracks.len(), clips[0].tracks.len());
             for original in &clips[0].tracks {

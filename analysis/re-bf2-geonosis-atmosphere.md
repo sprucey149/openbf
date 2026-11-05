@@ -1,5 +1,13 @@
 # BF2 Geonosis atmosphere
 
+Current integration note (2026-11-04): #118 and its local guard/lookup fixes are
+in the shared source at `4cda5ab4`. The BF1 flight, placed dust and FogCloud
+trial below is also present; the older BF2 scope exclusions describe their
+original checkpoint. Original BF1 atmosphere equivalence and visual acceptance
+remain open. Decorative flights do not implement Space Assault objectives.
+Oversized loaded FogClouds now report the source game, map, effect and texture
+once; the existing per-frame candidate guard remains authoritative.
+
 [O] UNAUDITED: source reads and local measurements below have not received an
 independent re-derivation.
 

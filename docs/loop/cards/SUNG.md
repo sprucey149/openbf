@@ -56,3 +56,12 @@ expansion, spike fans, thirteen polygon reflections and alignment glare, and
 feeds the existing HDR bloom. Exact partial-occlusion source-mask filtering
 remains unverified. See `analysis/re-hoth-atmosphere.md`.
 This existing implementation does not complete SUNG's remaining maps or acceptance.
+
+## Source reconciliation — November 4, 2026
+
+The #118 atmosphere source and the BF1 shared-runtime playtest trial are now
+integrated at `4cda5ab4`. Earlier scope/hold statements above describe their dated
+checkpoint. Current implementation boundaries and still-open native evidence
+are in `analysis/re-bf2-geonosis-atmosphere.md` and
+`analysis/re-hoth-atmosphere.md`; this note does not close original-game or
+all-map acceptance.

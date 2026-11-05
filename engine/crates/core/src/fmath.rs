@@ -535,6 +535,8 @@ mod tests {
             "viewer/",
             "gallery.rs",
             "sounds.rs",
+            // The same presentation-only mixer math extracted from sounds.rs.
+            "sounds/mixing.rs",
             "water_anim.rs",
             // Effect triangles and cosmetic debris never write simulation state.
             "fx/draw.rs",

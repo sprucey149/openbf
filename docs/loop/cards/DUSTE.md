@@ -60,3 +60,12 @@ the original unscaled HDR source color without increasing opacity or counts.
 See `analysis/re-hoth-atmosphere.md` for source reads, provisional details and
 local evidence. Do not duplicate that implementation. This does not close the
 independent verification, BF1 work or the original all-map acceptance above.
+
+## Source reconciliation — November 4, 2026
+
+The #118 atmosphere source and the BF1 shared-runtime playtest trial are now
+integrated at `4cda5ab4`. Earlier scope/hold statements above describe their dated
+checkpoint. Current implementation boundaries and still-open native evidence
+are in `analysis/re-bf2-geonosis-atmosphere.md` and
+`analysis/re-hoth-atmosphere.md`; this note does not close original-game or
+all-map acceptance.

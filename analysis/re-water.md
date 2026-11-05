@@ -9,6 +9,15 @@ and §3's `1/(N·M)` wrong; queue OCB landed the unnormalised transform (`efab92
 **NOT re-read — the AGENT's claims alone:** everything VU-side — the 16-entry per-vertex diffuse LUT and its alpha, the additive speckle pass, KAM1's Tessendorf FFT ocean, and the GS words quoted with them. They are [V] over the decomp, not over a second reading.
 **VERDICT:** lead-verified on the hops above. HOLD 10(f) and HOLD 19(c) are ANSWERED (§3/§4 and §1/§2); HOLD 4 is AMENDED — the `fx__` chunk's `Effect("Water")` records are released to Opus (§5's 27 keys), every other `fx__` effect stays held; the water VU1 microcode and KAM1's ocean become HOLD FOR FABLE 21. Port work: queue items W1, W2, W3, WL. Everything below this header is the RE agent's report, verbatim.
 
+Current implementation note (2026-11-04): #118's water drawing and later wader
+contact/wake trials are integrated in `4cda5ab4`. See
+`re-bf2-kashyyyk-atmosphere.md` for subdivided flat-water colour and its provisional
+random template, and §§9.6–9.7 below for contact effects. Those source checkpoints
+supersede earlier implementation to-dos only where explicitly covered. The
+historical PS2 readings, original water-rendering gaps, alignment debt and visual
+acceptance remain open. The canonical wet mask and gameplay water rules are
+separate from those presentation changes.
+
 # RE: WATER — fog, level, surface, CPAT (Fable RE agent, session 17, 2026-09-09) — lead-verified on the cited hops (see header)
 Corpora: `analysis/SWBFRONT.ELF-decomp.c` (B1:), `analysis/SWBFRNT2.ELF-decomp.c` (B2:); ELF bytes via `elfrd.py` (BF1 and BF2 both map
 `off = va − 0x160000 + 0x1000`, one PT_LOAD each); disc bytes by `lead_tmp/s17/re/` scratch walkers (`watr.py`, `fxwater.py` — the

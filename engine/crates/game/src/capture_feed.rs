@@ -175,7 +175,7 @@ pub fn icon(
 
 /// The first post whose capture region holds unit `unit` while he counts,
 /// with its units inside per team.
-pub fn post_of(sim: &Sim, unit: usize) -> Option<(usize, [u32; 2])> {
+pub fn post_of(sim: &Sim, unit: usize) -> Option<(usize, [u32; 8])> {
     (0..sim.cps.len())
         .find(|&ci| sim.counts_in_cp(unit, ci))
         .map(|ci| (ci, sim.cp_inside(ci)))

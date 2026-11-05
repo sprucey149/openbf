@@ -109,6 +109,143 @@ fn a_swing_damages_each_vehicle_and_station_pool_once_with_native_unit_scales() 
     }
 }
 
+/// Map turrets have placed bodies and a health binding, but no dynamic hull.
+fn building_turret(layers: Layers) -> (Sim, UnitHandle, crate::vehicle::VehicleHandle) {
+    let (mut sim, owner, other) = scene();
+    sim.weapon_classes[0] = weapon();
+    sim.weapon_classes[0].ordnance.scales.fill(0.0);
+    sim.unit_mut(owner).unwrap().weapon.melee = None;
+    sim.unit_mut(other).unwrap().soldier.pos = Vec3::X * 50.0;
+    for _ in 0..2 {
+        let mut body = Body::with_layers(
+            Mat4::from_translation(Vec3::new(0.0, 0.9, -0.8)),
+            Shape::Sphere { radius: 0.2 },
+            layers,
+        );
+        body.instance = Some(27);
+        sim.collision.push_body(body);
+    }
+    sim.collision.rebuild_broadphase();
+    let turret = sim.add_building_turret(
+        VehicleSpec {
+            kind: VehicleKind::Turret,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos: Vec3::new(0.0, 0.0, -0.8),
+            yaw: 0.0,
+            max_health: 150.0,
+            health_type: HealthType::Building,
+            seats: vec![SeatKind::Gunner(0)],
+        },
+        glam::Quat::IDENTITY,
+        None,
+        27,
+        (crate::sim::TurretFall::Hidden, vec![]),
+    );
+    assert_eq!(sim.collision.turret(27), Some(turret));
+    assert_eq!(sim.vehicle(turret).unwrap().team, None);
+    assert!(sim.collision.bodies_and_hulls().all(|b| b.owner.is_none()));
+    (sim, owner, turret)
+}
+
+#[test]
+fn bound_building_turret_takes_one_hand_hit_per_attack_then_falls_and_unbinds() {
+    for layers in [Layers::SOLDIER, Layers::ORDNANCE] {
+        let (mut sim, owner, turret) = building_turret(layers);
+        let swing = |sim: &mut Sim| {
+            sim.unit_mut(owner).unwrap().weapon.melee = None;
+            sim.saber_inputs(&mut [PadState {
+                buttons: buttons::FIRE,
+                ..Default::default()
+            }]);
+            sim.saber_hits();
+        };
+        swing(&mut sim);
+        sim.saber_hits();
+        let hittable = layers == Layers::ORDNANCE;
+        assert_eq!(
+            sim.vehicle(turret).unwrap().health.cur,
+            if hittable { 50.0 } else { 150.0 },
+            "{layers:?}: two bodies and repeated query share one attack cache"
+        );
+        let hits = |sim: &Sim| {
+            sim.events
+                .iter()
+                .filter(|e| {
+                    matches!(e,
+            crate::sim::Event::VehicleHit { shooter, vehicle, .. }
+                if *shooter == Some(owner) && *vehicle == turret)
+                })
+                .count()
+        };
+        assert_eq!(hits(&sim), usize::from(hittable));
+        swing(&mut sim);
+        if hittable {
+            assert!(sim.vehicle(turret).is_none());
+            assert!(sim.building_down(27));
+            assert_eq!(sim.collision.turret(27), None);
+            assert_eq!(hits(&sim), 2);
+            assert_eq!(
+                sim.events
+                    .iter()
+                    .filter(|e| matches!(e,
+                crate::sim::Event::VehicleDestroyed { vehicle, killer, .. }
+                    if *vehicle == turret && *killer == Some(owner)))
+                    .count(),
+                1
+            );
+            swing(&mut sim);
+            assert_eq!(hits(&sim), 2, "fallen binding cannot be hit again");
+        } else {
+            assert!(!sim.building_down(27));
+            assert_eq!(sim.collision.turret(27), Some(turret));
+            assert_eq!(sim.vehicle(turret).unwrap().health.cur, 150.0);
+        }
+    }
+}
+
+#[test]
+fn bound_building_turret_bolt_control_uses_authored_building_scale() {
+    for layers in [Layers::SOLDIER, Layers::ORDNANCE] {
+        let (mut sim, owner, turret) = building_turret(layers);
+        sim.weapon_classes[1].ordnance.max_damage = 40.0;
+        sim.weapon_classes[1].ordnance.falloff = None;
+        sim.weapon_classes[1].ordnance.scales[HealthType::Building as usize] = 0.25;
+        let bolt = Bolt::fire(
+            Vec3::new(0.0, 0.9, 0.5),
+            Vec3::NEG_Z,
+            100.0,
+            1.0,
+            Shooter {
+                owner,
+                team: 0,
+                weapon_class: 1,
+                is_player: true,
+            },
+            None,
+            None,
+            &sim.collision,
+            HullFilter::All,
+        );
+        let hittable = layers == Layers::ORDNANCE;
+        assert_eq!(
+            bolt.hit,
+            if hittable {
+                Hit::Target(Target::Vehicle(turret))
+            } else {
+                Hit::None
+            }
+        );
+        sim.resolve_bolt(&bolt);
+        assert_eq!(
+            sim.vehicle(turret).unwrap().health.cur,
+            if hittable { 140.0 } else { 150.0 }
+        );
+    }
+}
+
 /// A blade cuts a remote droid (the maintainer's turret report, 2026-10-30):
 /// the PS2's gather holds neither, so [ours]; the wielder's own is spared.
 #[test]

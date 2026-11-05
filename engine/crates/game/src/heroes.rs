@@ -157,6 +157,74 @@ pub fn append_with(
     }
 }
 
+pub fn prepare_assault(
+    roster: &mut FactionRoster,
+    classes_dir: &Path,
+    mission: &MissionDef,
+    team: usize,
+    dlc_heroes: bool,
+) -> anyhow::Result<()> {
+    let mut first_error = None;
+    roster.classes.retain_mut(|class| {
+        match crate::animator::custom::for_hero(classes_dir, mission, &class.class) {
+            Ok(descriptors) => {
+                class.anim.custom = descriptors;
+                true
+            }
+            Err(error) => {
+                eprintln!("hero {}: custom animations: {error:#}", class.class);
+                if first_error.is_none() {
+                    first_error = Some(error);
+                }
+                false
+            }
+        }
+    });
+    if dlc_heroes {
+        match assault_dlc_class(classes_dir, mission, team) {
+            Ok(Some(class)) => roster.classes.push(class),
+            Ok(None) => {}
+            Err(error) => eprintln!("DLC heroes: {error:#}"),
+        }
+    }
+    if roster.classes.is_empty() {
+        let cause = first_error.unwrap_or_else(|| anyhow::anyhow!("no authored hero classes"));
+        return Err(cause.context(format!(
+            "Hero Assault team {} ({}): no usable heroes after loading custom animations from {}",
+            team + 1,
+            roster.faction,
+            classes_dir.display()
+        )));
+    }
+    Ok(())
+}
+
+fn assault_dlc_class(
+    classes_dir: &Path,
+    mission: &MissionDef,
+    team: usize,
+) -> anyhow::Result<Option<ClassRoster>> {
+    let side = ["rep", "cis"][team.min(1)];
+    let Some(name) = crate::dlc::hero(classes_dir, mission, side)? else {
+        return Ok(None);
+    };
+    let mut db = crate::roster::load_classdb(classes_dir, "bf2", &[side])?;
+    db.load(&classes_dir.join(crate::dlc::CLASSES))?;
+    let name = db
+        .resolve(name)
+        .ok_or_else(|| anyhow::anyhow!("hero {name}: class not baked"))?;
+    let mut class = ClassRoster::build(&db, name, 1, Some(2))?;
+    if let Some(label) = crate::dlc::label(name) {
+        class.label = label.to_owned();
+    }
+    let geometry = class
+        .geometry
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("{name}: no DLC geometry"))?;
+    class.anim.custom = crate::dlc::animations(classes_dir, geometry)?;
+    Ok(Some(class))
+}
+
 pub fn install(sim: &mut Sim, classes: [Option<u8>; 2]) {
     install_with(sim, classes, HeroRules::default());
 }

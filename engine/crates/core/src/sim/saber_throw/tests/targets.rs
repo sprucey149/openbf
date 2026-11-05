@@ -63,3 +63,59 @@ fn thrown_saber_hits_map_and_vehicle_pools_once_and_turns_back_with_authored_sca
         assert_eq!(sim.stations[0].health.cur, 500.0 - 40.0 * 0.5 * factor);
     }
 }
+
+#[test]
+fn bound_building_turret_takes_thrown_damage_with_authored_scale_without_a_hull() {
+    for layers in [Layers::SOLDIER, Layers::ORDNANCE] {
+        let (mut sim, owner, victim) = scene();
+        sim.unit_mut(victim).unwrap().soldier.pos = Vec3::X * 50.0;
+        sim.weapon_classes[1].ordnance.scales[HealthType::Building as usize] = 0.5;
+        for _ in 0..2 {
+            let mut body = Body::with_layers(
+                Mat4::from_translation(Vec3::new(0.0, 1.15, -1.0)),
+                Shape::Sphere { radius: 0.1 },
+                layers,
+            );
+            body.instance = Some(27);
+            sim.collision.push_body(body);
+        }
+        let turret = sim.add_building_turret(
+            VehicleSpec {
+                kind: VehicleKind::Turret,
+                class: 0,
+                home_team: None,
+                neutral_when_empty: true,
+                spawn_pad: None,
+                pos: Vec3::new(0.0, 0.0, -1.0),
+                yaw: 0.0,
+                max_health: 500.0,
+                health_type: HealthType::Building,
+                seats: vec![SeatKind::Gunner(0)],
+            },
+            glam::Quat::IDENTITY,
+            None,
+            27,
+            (crate::sim::TurretFall::Hidden, vec![]),
+        );
+        assert!(sim.collision.bodies_and_hulls().all(|b| b.owner.is_none()));
+        assert_eq!(sim.collision.turret(27), Some(turret));
+        sim.launch_saber_throw(owner.index as usize, Some(0), 1);
+        for _ in 0..10 {
+            sim.tick_saber_throws();
+        }
+        let hittable = layers == Layers::ORDNANCE;
+        assert_eq!(
+            sim.vehicle(turret).unwrap().health.cur,
+            if hittable { 480.0 } else { 500.0 }
+        );
+        assert_eq!(
+            sim.events
+                .iter()
+                .filter(|e| matches!(e,
+            crate::sim::Event::VehicleHit { shooter, vehicle, .. }
+                if *shooter == Some(owner) && *vehicle == turret))
+                .count(),
+            usize::from(hittable)
+        );
+    }
+}

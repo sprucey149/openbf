@@ -463,7 +463,7 @@ pass and `Soldier::resolve_ground` in `sim/step.rs` 545-640):
 8. Fall damage after a jet: does the PS2 kill a dark trooper landing at 20+ m/s? (the port's `LETHAL_LANDING_SPEED`
    applies to any landing today).
 9. Independent verifier pass on this note (RULES) - not done.
-10. Data gaps in the bake: the Geonosian classes (both games, local) and `geo_inf_fly_parameterized`.
+10. Data gaps in the bake: `geo_inf_fly_parameterized`. The Geonosian classes are baked since issue #82 (§17).
 11. Do PS2 Jedi bots take `jet_jump` connections? The behaviours exclude them (10); the route follower was not read.
 
 ## 12. Build plan (small testable steps)
@@ -747,4 +747,59 @@ none). BF2 GEO1: 13-16 jet units, 37-115 hops, 7-19 hover attacks. BF1 GEO1: 11-
 grounded moment with fuel, and the count includes the gaps between lives.
 
 **Still open.** The jet sound voices and the effect's attach bone (no capture). The Geonosians: both GEO1 missions field
-them as locals, nothing in the game spawns a mission's locals team yet, and their classes are not baked.
+them as locals, nothing in the game spawns a mission's locals team yet, and their classes are not baked. (Both resolved
+by issue #82: §17.)
+
+## 17. Where a hop goes, and the BF1 Geonosian (issue #82, 2026-11-04)
+
+**Report.** Geonosians flew up, stalled and came down nearly where they rose. In the PS2 a hop takes the bot far away.
+
+**The hop's spot [V code].** The mode 0xc entry is BF2 `FUN_002dbb68` (B2:264972) and BF1 `FUN_0025aa08` (B1:177019). It
+makes up to 10 tries:
+
+1. Draw x and z, each `(u - 0.5) * 2 * 40`. Reject the draw if x^2 + z^2 < 400, so the spot is 20 to 40*sqrt(2) m away.
+2. The spot is the bot's position plus (x, 0, z).
+3. Clear test `FUN_002eea68`, radius `FUN_002a76b8`. The radius is class+0x370, half the aim size.
+4. A sky ray from the spot to spot + (0, 40, 0), masks 0x9a (BF2) and 0x4e (BF1).
+5. Only when blind jumps are off: a line test `FUN_002ef6b8`. `DAT_005fdfe2` is 1 by default; only Kamino clears it.
+6. The first spot that passes becomes the move destination, with jet request bit 4 and kick vector 0.
+
+The state's update `FUN_002dbfa8` ends it 1 s after controller bit 0x20 clears. Every caller is an attack sub-state
+(2-9), so **a bot hops only in a fight**. Jet off (bit 0x40) is set only by `FUN_002dc5c0`, the exit of the hover
+attack (mode 0xe).
+
+**The port** (`core/src/ai/jet.rs` `hop_spot`):
+
+- A hop needs a target and the 6-12 s schedule. It flies to the first clear spot of 10 hashed draws, kick zero, no
+  wanted height.
+- [ours] The point and, on Kamino, intervening line test use enabled nav soldier barriers expanded by half the
+  aim size. BF2 `FUN_002eea68` (B2:278740–278790) and `FUN_002ef6b8` (B2:279349–279475) instead query the original
+  obstacle index with the class filter. trace: its complete obstacle membership and shape/height rules against
+  the port's rectangles. The line condition is BF2 B2:265077–265083 / BF1 B1:177127–177134. The default is on
+  (BF2 `FUN_002a4030`, B2:225626); `SetAllowBlindJetJumps` (B2:32255–32264) changes it. The canonical stock
+  mission correction disables it for `bf1_kam1` and `bf2_kam1`, including retained mission files, across sources.
+- The tactical sky query is separate from ordinary sight. BF2 B2:265074 / BF1 B1:177125 cast 40 m upward and
+  exclude the requesting soldier. Their 0x9a / 0x4e masks select soldier, vehicle, building and terrain objects
+  (re-collision-layers §5); these object masks are **not** per-body subset masks. The port reads terrain,
+  both current world-body subsets and current vehicle hulls, plus other living unseated soldiers' bolt prims.
+  It skips the querying soldier. Ordinary `perception::los` remains ordnance-only.
+- **Deliberate conservative port correction:** a soldier-solid overhead body rejects a tactical hop even if
+  absent from its ordnance subset. This fixes the paired roof control; it is not a claim that 0x9a means
+  `Layers::ALL`. Retail BF2's ray callback `FUN_00162f60` (B2:2542–2588) reaches `FUN_00168318`
+  (B2:6852–6950), whose filtered branch reads the ordnance subset at B2:6945. The port collapses object
+  membership and authored body subsets. trace: exact retail object ownership/subset selection and moving
+  soldier pose queries before replacing the conservative union and the existing posture-based bolt prims.
+- [ours] The flight ends within 3 m of the spot. trace: `FUN_002dbfa8`'s arrival, and when it clears bit 0x20.
+
+
+**BF1 Geonosian on BF2 jet rules.** This applies the named deviation of §2.2 and §12, `BF1_JET_BORROW` in
+`game/src/roster.rs`. The baked BF2 `geo_inf_geonosian` has JetAcceleration 20 (default) and the jet row
+[2.0, 1.25, 1.25]. Without the row, the BF1 class kept the ctor row [0.3, 0.3, 1.0] and hovered at about 1.5 m/s.
+Tests: `bf1_jet_borrowing_matches_the_bf2_twins`, `bf1_geonosians_fly_on_their_bf2_twins_jet_rules`.
+
+**Rounds** (sim trace, 5,400 ticks, flights of the locals team):
+
+| Map | Before | After |
+|---|---|---|
+| BF2 GEO1 | 7.8 m mean displacement, 33% of samples near still | 25.6 m, 3% |
+| BF1 GEO1 | 4.9 m, 31% | 18.5 m, 0% |

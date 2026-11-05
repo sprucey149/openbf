@@ -28,8 +28,9 @@ negative hashes sign-extended (`0xffffffff8316f444`); both forms and the ELF lui
   code chain; D for the motor semantics]
 - On the discs, the weapon stages are what make the mortar (tap = shell, hold > 0.9 = bouncing sticky, both
   games), the bowcaster spread (BF1: 1 -> 3 -> 5 -> 7 bolts; BF2 the other way round: 7-bolt spread -> one
-  heavy bolt) and the BF1 arc caster's heat steps. The only ordnance-knot users are BF2's Hoth dish turret
-  (Damage 1000 -> 3000 knots) and BF1's Gungan haywire (Velocity 1.5 -> 25). [V data]
+  heavy bolt) and the BF1 arc caster's heat steps. Ordnance knots include BF2's Hoth dish turret
+  (Damage 1000 -> 3000), BF1's Gungan haywire (Velocity 1.5 -> 25), and BF1 Ewok rock
+  (shell, Velocity 5 -> 20) and spear (sticky, Velocity 5 -> 25). [V data]
 
 ## 0. Search receipts
 
@@ -119,6 +120,12 @@ negative hashes sign-extended (`0xffffffff8316f444`); both forms and the ELF lui
   Called by 7 instance ctors (bullet, laser, missile `FUN_0027d3f0`, shell `FUN_0027e398`, and others).
 - Shell gravity `FUN_0027e398` (203470-203473): lerp(+0xdc). Missile update `FUN_0027d6b8` (202940-203108):
   TurnRate / WaverTurn / WaverRate lerp.
+- Sticky inherits the same spawn evaluation: `FUN_0027eb18` calls shell at B1:203821;
+  shell calls bullet at 203465; bullet calls base at 197521 and blends speed at
+  197533-197546. The base stores blended life at 195130-195133. BF2 follows the
+  same chain: `FUN_003207e8` at B2:313521, `FUN_003201f0` at 313265,
+  `FUN_003130d8` at 304011 and 304023-304036, `FUN_0030eef8` at
+  301397-301400. A sticky's later fuse arming does not reload root life. [V]
 - Damage descriptor `FUN_00272f88` (195397-195424): MaxDamage (+0x4c), 7 scales (+0x50..+0x68) and ShieldScale
   (+0x6c) lerp toward next by `s`, but only if `s > 0`.
 - Emitter (arc caster) create `FUN_00278208` (199074-199075): `D = lerp(cls+0x94, cls+0x98, packet charge)`. This
@@ -210,6 +217,8 @@ Ordnance knot chains (`ordc` with NextCharge):
 |---|---|---|
 | BF2 | tur_weap_hoth_dishturret_ord <- com_weap_veh_recoilless_ord (bolt, 600 m/s) | 0: Damage 1000, LaserLength 3, LaserWidth 0.3; 0.5: 1250, 4, 0.4; 0.75: 1500, 5, 0.5; 2.0: 3000, 6, 0.6. Charge <= 1, so the last segment reaches s = 0.2 -> Damage 1800 at most [D] |
 | BF1 | gun_weap_inf_haywiredetonator_ord (grenade) | 0: Velocity 1.5; 1.0: Velocity 25. Its weapon has no MaxPressedTime, so strength = 1.0 -> s = 1 -> always 25 m/s [D]; re-grenades §9 table (line 524) lists 25 |
+| BF1 | ewk_weap_inf_rock_ord (shell) | 0: Velocity 5; 1.0: Velocity 20; LifeSpan 3 throughout. No press limit, so strength 1 selects 20 m/s [D] |
+| BF1 | ewk_weap_inf_spear_ord (sticky) | 0: Velocity 5; 1.0: Velocity 25; LifeSpan 2 throughout. No press limit, so strength 1 selects 25 m/s [D] |
 
 Classes that author rumble keys with MaxPressedTime 0 (e.g. BF1 crack grenade) have no charge. Their rumble
 code never runs [D: the charge state needs MaxPressedTime > 0]. The full key dump is
@@ -236,7 +245,7 @@ What the port does with each weapon feature #29 lists, on both games (main after
 | Heat / cooldown | HeatPerShot, HeatRecoverRate, overheat at 1, clear under HeatThreshold | built earlier (card heat), per stage now | `WeaponState::update` |
 | Clips and ammo | RoundsPerClip, WeaponAmmo clips, ReloadTime | built earlier (card AMMO); every class's clips checked against the discs by `roster::every_class_kit_is_the_discs_or_explained` | `game::roster` |
 | Rumble (Light / Heavy) | the two controller motors while charging | **not built** (no rumble in the port) | - |
-| Grenades | the grenade class reads MaxPressedTime, but no thrown grenade on either disc authors it (the survey above): grenades do not charge | as the PS2: a grenade throws at once; the charge it carries is 1.0 (the throw animation's variant reads it) | `core::weapon` |
+| Uncharged throws | thermals and Ewok rock/spear have no press limit: strength is 1.0, including for ordnance knots; mortars have the stages above | sticky launch uses the shot's evaluated speed and life, as the shell path already does | `core::weapon`, `Sim::launch` |
 
 Before the issue the port read a class key's FIRST value in the weapon's own class, so a charge weapon's
 every shot was its stage 0 (the first OrdnanceName and ShotsPerSalvo) - and since the charge never got past the
@@ -257,6 +266,10 @@ shot delay, no stage was ever reached.
    was not opened.
 5. How a bot holds a charge weapon (press length / release rule) was not looked at. It decides which stage AI
    mortars and bowcasters fire.
+   A weapon with no MaxPressedTime fires every shot at charge 1.0 (the trigger init), so the port's AI reads
+   such a weapon's speed and reach at charge 1.0 (`WeaponClass::shot_ordnance`, 2026-11-04, issue #82). Before that, the
+   Gungans' haywire read the uncharged 1.5 m/s, a 1.35 m reach, and its throwers never fired. A charging weapon
+   is still read at charge 0.
 6. Key 0x0ee66c41 (rumble hold + TriggerSingle) and BF2 class+0x154 ("charged" sound key) are not named. The
    ChargeSoundPitch clamp [0.2, 0.4] reading is a hypothesis.
 7. Not verified on a PS2 here: the stage thresholds (e.g. a mortar tap vs a 0.7 s hold) — a 2-minute RAM read of

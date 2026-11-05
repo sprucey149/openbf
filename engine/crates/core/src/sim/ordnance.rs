@@ -7,6 +7,7 @@ use super::input::{buttons, PadState};
 use super::state::{Event, Sim};
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
 use crate::projectile::{Bolt, Shooter};
+use crate::soldier::{GroundRules, Stance};
 use crate::sticky::{self, Anchor, Contact, Sticky, Surface};
 use crate::unit::Controller;
 use crate::vehicle::VehicleKind;
@@ -284,7 +285,7 @@ impl Sim {
                 self.units[i].last_shot_tick = self.tick;
             }
             if sticky {
-                self.launch(i, stage);
+                self.launch(i, stage, spec.charge);
                 continue;
             }
             // BF2's secondary ordnance (`SecondaryOrdnanceName`): count the
@@ -437,7 +438,7 @@ impl Sim {
     /// One shot of weapon class `wc` from unit `i`, when that weapon throws:
     /// spawn the grenade (§3.3) and say so. `false` for a weapon that fires
     /// bolts — the caller's business.
-    pub(super) fn launch(&mut self, i: usize, wc: usize) -> bool {
+    pub(super) fn launch(&mut self, i: usize, wc: usize, charge: f32) -> bool {
         let class = &self.weapon_classes[wc];
         let Some(sc) = class.ordnance.sticky.as_ref() else {
             return false;
@@ -454,13 +455,26 @@ impl Sim {
             _ => aim,
         };
         // BF1: the weapon's fire point; BF2: the hand, in the soldier's frame.
-        let origin = u.launch_origin(thrown.and_then(|t| t.hand));
+        // OURS: the stock scaled hand applies to standing and crouched
+        // releases. trace: retail launch positions in other stances and
+        // the fire-entry variant through wind-up posture changes.
+        let scale = if self.ground_rules == GroundRules::Bf2
+            && matches!(u.soldier.stance, Stance::Stand | Stance::Crouch)
+        {
+            u.consts.skeleton_root_scale
+        } else {
+            1.0
+        };
+        let origin = u.launch_origin(thrown.and_then(|t| t.release_hand(scale)));
         let owner = self.handle(i);
+        // Sticky inherits the shell/bullet/base charge evaluation
+        // (B1 FUN_0027eb18:203821; B2 FUN_003207e8:313521).
+        let blend = class.ordnance.charged(charge);
         let g = Sticky::new(
             origin,
-            dir * class.ordnance.velocity,
+            dir * blend.velocity,
             sc,
-            class.ordnance.life_span,
+            blend.life_span,
             owner,
             u.team,
             wc,
@@ -528,7 +542,6 @@ impl Sim {
         let Some(class) = self.weapon_classes[wc].ordnance.sticky.clone() else {
             return false;
         };
-        let life_span = self.weapon_classes[wc].ordnance.life_span;
         let first = g.touched.is_none();
         if first {
             g.touched = Some(self.tick);
@@ -577,7 +590,7 @@ impl Sim {
         }
         if matches!(out, Contact::Rest | Contact::Stuck) {
             let now = self.tick;
-            let fuse = ticks(g.life.min(life_span));
+            let fuse = ticks(g.life);
             if let Some(z) = self
                 .hazards
                 .iter_mut()

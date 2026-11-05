@@ -526,6 +526,16 @@ def gameplay_correction_args(plan):
             args += ["--gameplay-reference", table, "--gameplay-source", f"{game}={source.get('tree') or source['path']}"]
     return args
 
+def menu_font_input(value):
+    """Only an explicitly supplied local font source participates in the cache."""
+    if not value:
+        return None
+    path = Path(value).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError("--menu-font-core needs a local PS2 BF2 CORE.LVL file")
+    return dict(path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+
+
 def main():
     input_scan.tolerant_stdout()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -536,6 +546,8 @@ def main():
     ap.add_argument("--pc-dir", default=None, help="directory containing installed PC Battlefront I and/or II")
     ap.add_argument("--pc1", default=None, help="Star Wars: Battlefront (PC) _LVL_PC or install directory")
     ap.add_argument("--pc2", default=None, help="Star Wars: Battlefront II (PC) _lvl_pc or install directory")
+    ap.add_argument("--menu-font-core", default=os.environ.get("OPENBF_MENU_FONT_CORE"),
+                    help="optional local PS2 BF2 CORE.LVL for the approved BF2 Light menu glyphs only; native PC/Xbox fallback uses different glyphs")
     ap.add_argument("--out", default=os.path.join(ROOT, "dist", "openbf" + EXE), help="the game file to write")
     ap.add_argument("--rebake", action="store_true", help="bake every asset again even when assets_baked/ exists")
     a = ap.parse_args()
@@ -553,6 +565,11 @@ def main():
         sys.exit(message.encode("utf-8", "backslashreplace").decode("utf-8"))
     if a.scan_only:
         return
+    try:
+        menu_font = menu_font_input(a.menu_font_core)
+    except ValueError as error:
+        sys.exit(f"pack: {error}")
+    menu_font_core = menu_font["path"] if menu_font else None
     pc_roots = {g: item["path"] for g, chosen in plan["games"].items()
                 for item in chosen["visual"] if item["kind"] == "pc-install"}
     images = {g: chosen["gameplay"]["path"] if chosen["gameplay"]["kind"] == "ps2-disc" else None
@@ -564,6 +581,8 @@ def main():
         elif chosen["gameplay"]["kind"] == "pc-install":
             GAMEPLAY_TREES[g] = chosen["gameplay"]["path"]
     bake_inputs = dict(pc_roots)
+    if menu_font_core:
+        bake_inputs["menu_font_core"] = menu_font
     bake_inputs["gameplay_trees"] = dict(GAMEPLAY_TREES)
     for g, image, _ in input_scan.discs_to_extract(plan):
         bake_inputs["xbox_" + g] = image
@@ -644,9 +663,11 @@ def main():
     step("5/6 the bake")
     bash = find_bash()
     bake_env = dict(os.environ)
-    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY"):
+    for name in ("PC1", "PC2", "XB1", "XB2", "BF2_CONSOLE_ISO", "OPENBF_BF1_TREE", "OPENBF_BF2_TREE", "OPENBF_DLC_DIR", "OPENBF_DLC_DONOR", "OPENBF_PC_ONLY", "OPENBF_MENU_FONT_CORE"):
         bake_env.pop(name, None)  # the scan's choice is the whole story
     bake_env.update(input_scan.bake_env(plan))
+    if menu_font_core:
+        bake_env["OPENBF_MENU_FONT_CORE"] = menu_font_core.replace("\\", "/")
     bake_env["OPENBF_INPUTS_CHOSEN"] = "1"  # rebake.sh need not scan again
     bake_env["OPENBF_PYTHON"] = sys.executable.replace("\\", "/")  # `python3` is not there on every Windows install
     bake_env["OPENBF_CONSOLE_LUA_ROOT"] = lua_root.replace("\\", "/")
@@ -718,6 +739,11 @@ def main():
     print("It contains the games' own content: keep it on your machine, never upload or share it.")
     report = source_report(ROOT, BAKED, MISSIONS, images, plan, extracted_used, images_used, rebaked,
                            pc_roots=pc_roots, warnings=warnings)
+    if menu_font_core:
+        report["inputs"].append(dict(path=menu_font_core, label="optional PS2 BF2 menu font source",
+            present=True, status="used" if rebaked == "all" else "cached",
+            reason="menu glyphs only; native HUD art and metrics retain their selected source",
+            sha256=bake_inputs["menu_font_core"]["sha256"]))
     write_source_report(out, report)
 
 

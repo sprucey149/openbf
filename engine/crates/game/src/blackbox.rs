@@ -291,6 +291,8 @@ pub struct WorldFrame {
     pub tickets: [u32; 2],
     pub bleed: [f32; 2],
     pub alive: [u32; 2],
+    #[serde(default)]
+    pub points: [u32; 2],
     pub posts: Vec<PostRow>,
     pub vehicles: Vec<VehicleRow>,
     /// Each door's open parameter, 0 shut .. 1 open.
@@ -1131,6 +1133,7 @@ impl Ring {
     fn world_frame(&mut self, sim: &Sim, t: u64) {
         let w = self.world.next();
         w.tick = t;
+        w.points = sim.team_points().map_or([0; 2], |(points, _)| points);
         for k in 0..2 {
             let team = &sim.battle.teams[k];
             w.tickets[k] = team.tickets();

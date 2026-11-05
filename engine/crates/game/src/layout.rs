@@ -335,9 +335,10 @@ impl MapLayout {
             let space_post = inst.class.eq_ignore_ascii_case("com_bldg_controlzone_ctf")
                 && prop(&inst.props, PROP_SPAWN_PATH).is_some();
             let cap_name = match prop(&inst.props, PROP_CAPTURE_REGION) {
-                Some(name) => name,
+                Some(name) => Some(name),
                 None if space_post => match prop(&inst.props, PROP_CONTROL_REGION) {
-                    Some(name) => name,
+                    Some(name) => Some(name),
+                    None if m.spawn_only_posts => None,
                     None => continue,
                 },
                 None => continue, // not a command post
@@ -350,7 +351,7 @@ impl MapLayout {
                     .and_then(|s| s.trim().parse().ok())
                     .unwrap_or(0),
                 pos: Vec3::from(inst.translation),
-                capture: region(cap_name),
+                capture: cap_name.and_then(region),
                 control: prop(&inst.props, PROP_CONTROL_REGION).and_then(region),
                 spawn_path: prop(&inst.props, PROP_SPAWN_PATH).map(str::to_owned),
                 ally_path: prop(&inst.props, PROP_ALLY_PATH).map(str::to_owned),

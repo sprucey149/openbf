@@ -15,6 +15,7 @@ fn setup(bf2: bool) -> (Sim, UnitHandle, usize) {
             shot_elevate: 0.0,
             hide_on_fire: true,
             hand: bf2.then_some(Dispenser::BF2_HAND),
+            native_thermal_hand: false,
         }),
         dispenser: Some(Dispenser {
             item: items(bf2)[usize::from(DUAL)].clone(),

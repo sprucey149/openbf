@@ -200,8 +200,15 @@ B2:312881-312984, speed B2:312985-312988, velocity B2:312990-313005, core B2:313
 speed and velocity lines).
 - [D] The clamp is against \|axis\| = sin θ, not θ: at TurnRate 2 and 30 Hz the cap matters only within ~3.8° of the
   desired line or past ~176° (a target straight behind gives no turn).
-- [D] The steering runs with or without a target. With none, desired = the launch direction, so the waver cannot
-  build a drift: the missile wobbles about its launch line.
+- [V] The desired heading persists across handle invalidation: the valid-target branch alone writes it
+  (BF1 `FUN_0027d6b8`, B1:202965-202979; BF2 `FUN_0031f2e8`, B2:312753-312768), and steering reads it
+  afterward even without a valid handle (B1:202982-202987; B2:312843-312872). It is a saved direction,
+  not a saved target world point. A never-guided missile keeps its initialized launch direction; only that
+  case wobbles about the launch line throughout. Health death versus generation invalidation timing is unmeasured.
+- [D] Both originals refresh desired inside the positive-turn branch, before steering and waver. They normalize
+  the target displacement without a launch fallback. The port's safe-normalization boundary uses zero desired
+  for coincident finite aim, producing no steering; trace: measure retail zero-displacement RAM updates.
+  Retained recordings do not exercise that boundary or invalid-handle steering.
 - [V] Lock loss: only the dead-handle test (B1:202955-202963, B2:312665-312672) — no cone, range or LOS test in
   flight; with TurnRate 0 the block that reads the target (inside `turn > 0`) does not run.
 - [V] BF2's bot aim error: when the missile's owner is AI-controlled (a UnitController) and the target is not an

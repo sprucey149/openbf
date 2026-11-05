@@ -1631,6 +1631,7 @@ pub(super) fn bake_content(
         fx.write(out, &source_game, &lower(&textures), &lower(&models))?;
     }
     let manifest = Manifest {
+        spawn_only_posts: false,
         map: w.name.clone(),
         source_game,
         terrain_name: w.terrain_name.clone(),

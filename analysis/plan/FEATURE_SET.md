@@ -14,6 +14,15 @@ and LAN are decisions for later work, not current tasks.
   From the DLC only Kit Fisto and Asajj Ventress are taken. Where versions overlap, compare them and take the
   best, or write something better than all of them.
 - **HUD.** BF2's on every map, with the heat ring around the centre reticle.
+- **Shell font (2026-11-04, corrected).** BF2 Light uses the player's BF2 glyphs
+  and original advances, six R8 levels (6/255) of SDF alpha erosion, and a left
+  parenthesis mirrored from the right. These are deliberate presentation choices.
+  The approved appearance uses PS2 BF2 glyphs without higher-resolution donors.
+  Prefer an identified owned PS2 source; PC/Xbox builds can also explicitly select
+  a local PS2 BF2 `CORE.LVL` for menu fonts only. Without it, thin the native glyphs
+  and mirror their right parenthesis: a similar treatment using different source
+  glyphs. PC/Xbox builds require no PS2 copy. Battle HUD, spawn, loading and results
+  retain their existing fonts, art and metrics.
 - **Grenades.** BF1 maps throw BF1 grenades, by BF1's numbers, with BF2's grenade HUD (`analysis/re-grenades.md`).
 - **Health.** Vehicle and unit health are separate.
 - **Droidekas** sprint only as a ball, on the shared bar, and the ball jump spends that bar too.
@@ -88,6 +97,17 @@ and LAN are decisions for later work, not current tasks.
   NPC hero behavior (BF1), and the disc's hero health and kill-heal values.
 
 ### AI
+
+Current port corrections (2026-11-04; issue #108): Hard/Elite health-droid seekers
+finish their graph route at the actual service sphere; disconnected authored bot
+spawns may use a connected node at the same selected command post; the stricter
+last-reinforcement stall watch follows the bot's own team; physically cancelled
+infantry movement can qualify for the existing headroom-checked recovery jump.
+These deliberate openbf rules retain their individual eligibility checks and
+measurement obligations. They do not establish native-game AI equivalence or
+resolve the remaining Yavin, Geonosis and Bespin route traps. Source and retained
+witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
+
 - Infantry AI base: **RESOLVED 2026-09-01 (the maintainer, Fable session 8): openbf's OWN
   AI** — modern architecture (authored-graph navigation + local steering, a
   per-team utility commander, behaviour tree, perception, a skill vector, squad

@@ -1,5 +1,6 @@
-//! Offline signed distances from the player's glyph coverage. Coordinates of
-//! the 50% contour retain sub-texel antialiasing; no installed/system font is used.
+//! Offline signed distances from the player's glyph alpha coverage.
+//! The 50% contour retains sub-texel antialiasing; no installed or
+//! system font is used.
 
 /// Piecewise-linear half-coverage contour, including the transparent border.
 fn contour(alpha: &[u8], w: usize, h: usize) -> Vec<([f32; 2], [f32; 2])> {

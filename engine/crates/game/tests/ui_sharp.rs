@@ -3,6 +3,9 @@
 use std::path::PathBuf;
 use ui::shell::{Group, ListCursor, Page};
 
+#[path = "ui_sharp/cutter.rs"]
+mod cutter;
+
 const VEHICLE_SHEETS: [&str; 3] = ["droidfighter_icon", "jedi_starfighter_icon", "gunship_icon"];
 
 fn assert_all_sheets_bound(view: &game::hud_feed::HudView) {
@@ -37,6 +40,85 @@ fn instant_frame(
     .unwrap();
     assert_all_sheets_bound(&view);
     r.capture_rgba().unwrap().0
+}
+
+/// The production loader's treated font drives both the draw and pointer path.
+#[test]
+#[ignore = "requires GPU and UI_SHARP_ASSETS owned source bake"]
+fn menu_font_pointer_uses_loaded_metrics() {
+    let (assets, _) = paths();
+    let mut ia = game::shell_ia::instant_action(
+        &assets,
+        &assets.join("../missions"),
+        core::skill::Difficulty::Normal,
+    );
+    ia.state = ui::shell::State::Map;
+    let font: manifest::hud::HudFont = ron::from_str(
+        &std::fs::read_to_string(assets.join("common_bf2/fonts/menu_gamefont_large.ron")).unwrap(),
+    )
+    .unwrap();
+    let mut menus = ui::shell_ps2::ShellMenus::new(&|_, english| english.to_owned());
+    menus.page = ui::shell_ps2::Page::Main;
+    menus.on_page = 5.0;
+    for size in [[640, 480], [1920, 1080], [3580, 2020]] {
+        let r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+        let view = game::hud_feed::HudView::for_renderer(&assets, &r).unwrap();
+        let screen = size.map(|v| v as f32);
+        let mut targets = std::collections::BTreeSet::new();
+        let mut shell_hits = 0;
+        // Sample the actual screen, comparing the production loader to the
+        // explicitly baked role. Includes row interiors, edges and empty space.
+        for state in [ui::shell::State::Map, ui::shell::State::Command] {
+            ia.state = state;
+            for y in (0..size[1]).step_by(13) {
+                for x in (0..size[0]).step_by(13) {
+                    let point = [x as f32, y as f32];
+                    let expected = ui::shell_ia::pointer_target(&ia, point, screen, &font);
+                    let actual = view.instant_target(&ia, point, screen);
+                    assert_eq!(actual, expected, "pointer at {point:?} / {size:?}");
+                    let expected_shell = ui::shell_ps2::row_at(&font, &menus, point, screen);
+                    assert_eq!(
+                        view.shell_row_at(&menus, point, screen),
+                        expected_shell,
+                        "shell pointer at {point:?} / {size:?}"
+                    );
+                    shell_hits += usize::from(expected_shell.is_some());
+                    if let Some(target) = actual {
+                        targets.insert(format!("{target:?}"));
+                    }
+                }
+            }
+        }
+        assert!(
+            targets.iter().any(|t| t.starts_with("Map(")),
+            "no map row hit"
+        );
+        assert!(
+            targets.iter().any(|t| t.starts_with("Command(")),
+            "no command hit"
+        );
+        assert!(shell_hits > 0, "no shell row hit");
+    }
+}
+
+/// Scoped shell-art registration capture, including the reported window size.
+#[test]
+#[ignore = "requires GPU and UI_SHARP_ASSETS owned source bake"]
+fn capture_instant_action_registration() {
+    let (assets, out) = paths();
+    let ia = game::shell_ia::instant_action(
+        &assets,
+        &assets.join("../missions"),
+        core::skill::Difficulty::Normal,
+    );
+    for size in [[1920, 1080], [3580, 2020]] {
+        let rgba = instant_frame(&assets, &ia, size);
+        std::fs::write(
+            out.join(format!("ia_{}x{}.png", size[0], size[1])),
+            render::encode_png(&rgba, size[0], size[1]).unwrap(),
+        )
+        .unwrap();
+    }
 }
 
 #[test]
@@ -95,6 +177,113 @@ fn save(out: &std::path::Path, name: &str, r: &render::Renderer) {
         render::encode_png(&rgba, w, h).unwrap(),
     )
     .unwrap();
+}
+
+/// Exercise the longest real catalog labels, all option groups and extreme
+/// population/reinforcement values using the ordinary compact menu paths.
+#[test]
+#[ignore = "requires GPU and UI_SHARP_ASSETS owned source bake with shared menu fonts"]
+fn capture_menu_label_extremes() {
+    let (assets, out) = paths();
+    let mut ia = game::shell_ia::instant_action(
+        &assets,
+        &assets.join("../missions"),
+        core::skill::Difficulty::Normal,
+    );
+    let font: manifest::hud::HudFont = ron::from_str(
+        &std::fs::read_to_string(assets.join("common_bf2/fonts/menu_gamefont_tiny.ron")).unwrap(),
+    )
+    .unwrap();
+    let width = |text: &str| {
+        text.chars()
+            .map(|c| {
+                f32::from(
+                    font.glyphs
+                        .iter()
+                        .find(|g| u32::from(g.code) == c as u32)
+                        .unwrap_or_else(|| panic!("missing menu glyph {c:?}"))
+                        .advance,
+                )
+            })
+            .sum::<f32>()
+            * ui::spawn_draw::MAP_STRETCH
+    };
+    ia.maps
+        .sort_by(|a, b| width(&b.label.to_uppercase()).total_cmp(&width(&a.label.to_uppercase())));
+    for row in ia.map_rows() {
+        println!("menu label width {:.3}: {}", width(&row.text), row.text);
+    }
+    ia.options.num_bots = 500;
+    ia.options.con_numbots = 500;
+    ia.options.con_mult = 500;
+    ia.options.con_timer = 60;
+    ia.options.difficulty = 4;
+    let small: manifest::hud::HudFont = ron::from_str(
+        &std::fs::read_to_string(assets.join("common_bf2/fonts/menu_gamefont_small.ron")).unwrap(),
+    )
+    .unwrap();
+    for population in [10, 100, 500] {
+        let mut options = ia.options;
+        options.num_bots = population;
+        options.con_numbots = population;
+        for group in [
+            Group::Global,
+            Group::Hero,
+            Group::Conquest,
+            Group::Ctf,
+            Group::Hunt,
+            Group::Assault,
+        ] {
+            for option in options.rows(group) {
+                let pieces = ia.texts.option(option, &options);
+                let w: f32 = pieces
+                    .iter()
+                    .map(|p| match p {
+                        ui::shell::Piece::Text(text) => {
+                            text.chars()
+                                .map(|c| {
+                                    f32::from(
+                                        small
+                                            .glyphs
+                                            .iter()
+                                            .find(|g| u32::from(g.code) == c as u32)
+                                            .unwrap()
+                                            .advance,
+                                    )
+                                })
+                                .sum::<f32>()
+                                * ui::spawn_draw::SMALL_STRETCH
+                        }
+                        _ => 14.0,
+                    })
+                    .sum();
+                println!("option width {w:.3}: {population}% {group:?} {option:?}");
+                assert!(w <= 363.6, "{group:?} {option:?}: {w} exceeds compact row");
+            }
+        }
+    }
+    for size in [[1920, 1080], [2560, 1440], [3840, 2160]] {
+        for (label, page) in [
+            ("longest_maps", Page::Missions),
+            ("overview", Page::Overview(0)),
+            (
+                "extreme_global",
+                Page::Group(Group::Global, ListCursor { at: 0, top: 0 }),
+            ),
+            (
+                "extreme_conquest",
+                Page::Group(Group::Conquest, ListCursor { at: 1, top: 0 }),
+            ),
+        ] {
+            ia.page = page;
+            let rgba = instant_frame(&assets, &ia, size);
+            std::fs::write(
+                out.join(format!("{label}_{}x{}.png", size[0], size[1])),
+                render::encode_png(&rgba, size[0], size[1]).unwrap(),
+            )
+            .unwrap();
+        }
+    }
 }
 
 /// Before/after capture matrix. The scene is rendered offscreen, with fixed
@@ -301,6 +490,47 @@ fn capture_native_surfaces() {
                 hud.drawn_sheets().collect::<Vec<_>>().join("\n"),
             )
             .unwrap();
+        }
+    }
+}
+
+#[path = "support/hud_layout.rs"]
+mod shared_hud_layout;
+
+/// The same production model as the CPU source parity check, using native art.
+#[test]
+#[ignore = "requires GPU and UI_SHARP_ASSETS owned source bake"]
+fn shared_conquest_hud_geometry() {
+    let (assets, out) = paths();
+    for game in ["bf1", "bf2"] {
+        for size in shared_hud_layout::SIZES {
+            let mut r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+            for state in 0..3 {
+                let model = shared_hud_layout::model(&assets, game, state);
+                let mut view = game::hud_feed::HudView::for_renderer(&assets, &r).unwrap();
+                shared_hud_layout::settle(&mut view, &model, state, size);
+                r.render_with_overlay(
+                    &render::Camera::default(),
+                    &[],
+                    [0.1, 0.1, 0.1, 1.0],
+                    Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+                )
+                .unwrap();
+                assert_all_sheets_bound(&view);
+                save(&out, &format!("shared_{game}_{state}"), &r);
+                let bounds = shared_hud_layout::ELEMENTS
+                    .iter()
+                    .map(|name| (*name, view.bounds(name)))
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                std::fs::write(
+                    out.join(format!(
+                        "shared_{game}_{state}_{}x{}.json",
+                        size[0], size[1]
+                    )),
+                    serde_json::to_vec_pretty(&bounds).unwrap(),
+                )
+                .unwrap();
+            }
         }
     }
 }

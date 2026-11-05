@@ -19,6 +19,24 @@ pub struct FogCloud {
 }
 
 impl FogCloud {
+    /// Whether this extent can exceed the runtime tile-work limit at some
+    /// camera positions. Checked once when loading an authored cloud; the
+    /// per-frame guard still bounds the actual tile span.
+    pub fn may_exceed_tile_budget(&self) -> bool {
+        let density = self.density.min(4096);
+        let reach = self.range[1].max(0.0) + self.size;
+        if density == 0 || reach < 0.0 || reach.is_nan() {
+            return false;
+        }
+        if reach.is_infinite() {
+            return true;
+        }
+        // An interval can straddle one more tile than its rounded-up width.
+        // Use f64 for the estimate so even the largest finite f32 stays finite.
+        let tiles = ((2.0 * f64::from(reach) / 256.0).ceil() + 1.0) as u64;
+        tiles > MAX_CANDIDATES / tiles / u64::from(density)
+    }
+
     pub fn alpha(&self, distance_squared: f32) -> f32 {
         let [near, far] = self.range.map(|v| v * v);
         if far <= near {
@@ -111,6 +129,7 @@ mod tests {
             position: Vec3::new(0.0, -60.0, 0.0),
             ..Camera::default()
         };
+        assert!(!f.may_exceed_tile_budget());
         let before = f.draws(&camera, 0.0);
         let after = f.draws(&camera, 1.0);
         assert!(!before.is_empty());
@@ -138,7 +157,7 @@ mod tests {
 
     #[test]
     fn oversized_range_is_rejected_before_visiting_the_ground() {
-        let cloud = FogCloud {
+        let mut cloud = FogCloud {
             texture: TextureHandle(0),
             range: [0.0, 1.0e8],
             color: [255; 4],
@@ -150,6 +169,24 @@ mod tests {
             display_gain: 1.0,
             ground: Box::new(|_, _| panic!("oversized cloud must not visit tiles")),
         };
+        assert!(cloud.may_exceed_tile_budget());
         assert!(cloud.draws(&Camera::default(), 0.0).is_empty());
+        cloud.density = 0;
+        assert!(!cloud.may_exceed_tile_budget());
+        cloud.density = 4096;
+        cloud.range[1] = 896.0;
+        cloud.size = 0.0;
+        assert!(!cloud.may_exceed_tile_budget(), "eight tiles fit exactly");
+        cloud.range[1] = 896.001;
+        assert!(
+            cloud.may_exceed_tile_budget(),
+            "a ninth tile can exceed the cap"
+        );
+        cloud.range[1] = f32::MAX;
+        cloud.size = f32::MAX;
+        assert!(
+            cloud.may_exceed_tile_budget(),
+            "overflowed reach is oversized"
+        );
     }
 }

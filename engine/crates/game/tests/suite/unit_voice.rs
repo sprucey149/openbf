@@ -299,8 +299,8 @@ fn every_fielded_class_has_its_own_cries_in_the_map_bank() {
     println!("{checked} fielded classes cry in their own voice");
 }
 
-/// NAB1's natives: the port fields no team-3 locals yet, but their cries are
-/// in the map's bank under the names the Gungan class gives.
+/// NAB1's natives: their cries are in the map's bank under the names the
+/// Gungan class gives.
 #[test]
 fn naboo_gungans_cries_are_in_the_bank() {
     let root = baked_root();

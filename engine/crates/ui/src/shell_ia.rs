@@ -310,7 +310,7 @@ const NONE: usize = usize::MAX;
 
 /// A font's stretch across (the shell's labels, `crate::spawn_draw`).
 fn stretch(font: &str) -> f32 {
-    match font {
+    match font.strip_prefix("menu_").unwrap_or(font) {
         BUTTON_FONT => LABEL_STRETCH,
         MAP_FONT => MAP_STRETCH,
         _ => SMALL_STRETCH,
@@ -453,7 +453,7 @@ impl Ctx<'_> {
         width: f32,
         (rgb, alpha): Style,
     ) {
-        let Some(font) = self.art.fonts.get(LIST_FONT) else {
+        let Some(font) = self.font(LIST_FONT) else {
             return;
         };
         let kx = stretch(LIST_FONT);
@@ -477,10 +477,7 @@ impl Ctx<'_> {
     }
 
     fn font_h(&self, font: &str) -> f32 {
-        self.art
-            .fonts
-            .get(font)
-            .map_or(15.0, |f| f32::from(f.line_height))
+        self.font(font).map_or(15.0, |f| f32::from(f.line_height))
     }
 
     /// `listbox_cursor` around a row: its line sits at texels 3..61 × 4..54
@@ -524,7 +521,7 @@ impl Ctx<'_> {
                 _ => 0.0,
             };
             let width = x1 - x0 - TEXT_X * 2.0 - icons;
-            let lines = match self.art.fonts.get(LIST_FONT) {
+            let lines = match self.font(LIST_FONT) {
                 Some(f) if era => wrap(f, &row.text, width),
                 _ => vec![row.text.clone()],
             };
@@ -635,7 +632,7 @@ impl Ctx<'_> {
         );
         if ia.full {
             self.window_box(&s, POPUP, None);
-            if let Some(f) = self.art.fonts.get(SMALL_FONT) {
+            if let Some(f) = self.font(SMALL_FONT) {
                 let lh = f32::from(f.line_height);
                 let lines = wrap(f, &ia.texts.list_full, POPUP[2] - POPUP[0] - 20.0);
                 let y = (POPUP[1] + POPUP[3]) * 0.5 - lh * lines.len() as f32 * 0.5;
@@ -704,7 +701,7 @@ impl Ctx<'_> {
         }
         // The info box (f9).
         self.window_box(&s, INFO_BOX, None);
-        if let Some(f) = self.art.fonts.get(LIST_FONT) {
+        if let Some(f) = self.font(LIST_FONT) {
             let (x, y, w) = INFO_TEXT;
             let lh = f32::from(f.line_height);
             for (j, line) in wrap(f, &ia.info(), w).iter().enumerate() {
@@ -721,7 +718,7 @@ impl Ctx<'_> {
     fn overview(&mut self, ia: &InstantAction, focus: usize, pulse: f32, size: [f32; 2]) {
         let s = screen_at(size, Anchor::Centre);
         let t = &ia.texts;
-        let Some(font) = self.art.fonts.get(BUTTON_FONT) else {
+        let Some(font) = self.font(BUTTON_FONT) else {
             return;
         };
         let rows: Vec<(&str, bool)> = ia
@@ -810,7 +807,7 @@ impl Ctx<'_> {
                 match p {
                     Piece::Text(text) => {
                         self.label(&s, SMALL_FONT, &text, (x, ty), HAlign::Left, style);
-                        if let Some(f) = self.art.fonts.get(SMALL_FONT) {
+                        if let Some(f) = self.font(SMALL_FONT) {
                             x += run_width(f, &text, kx, false);
                         }
                     }
@@ -835,7 +832,7 @@ impl Ctx<'_> {
         let info = OPTION_INFO;
         let grey = ([128.0; 3], 0.5);
         self.tinted(&s, info, [0.0, 0.0, 1.0, 1.0], "white_rect", grey);
-        if let (Some(o), Some(f)) = (rows.get(cur.at), self.art.fonts.get(SMALL_FONT)) {
+        if let (Some(o), Some(f)) = (rows.get(cur.at), self.font(SMALL_FONT)) {
             let (dx, dy) = OPTION_INFO_TEXT;
             let w = info[2] - info[0] - 2.0 * dx;
             let help = ia

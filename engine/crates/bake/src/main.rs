@@ -365,12 +365,25 @@ fn main() -> Result<()> {
         }
         Some("fonts") if args.len() >= 5 => {
             let p2 = ci(&args[2]);
-            let donors: Vec<std::path::PathBuf> = args[5..].iter().map(|p| ci(p).into()).collect();
-            let fonts = bake::hud::bake_fonts_with_donors(
+            let mut donors = Vec::new();
+            let mut menu_core = None;
+            let mut rest = args[5..].iter();
+            while let Some(arg) = rest.next() {
+                if arg == "--menu-font-core" {
+                    anyhow::ensure!(menu_core.is_none(), "--menu-font-core specified twice");
+                    menu_core = Some(std::path::PathBuf::from(ci(rest
+                        .next()
+                        .context("--menu-font-core needs a local PS2 BF2 CORE.LVL")?)));
+                } else {
+                    donors.push(std::path::PathBuf::from(ci(arg)));
+                }
+            }
+            let fonts = bake::hud::bake_fonts_with_menu_source(
                 std::path::Path::new(&p2),
                 std::path::Path::new(&args[3]),
                 &args[4],
                 &donors,
+                menu_core.as_deref(),
             )?;
             println!("baked {} font(s) -> {}/fonts", fonts.len(), args[3]);
             Ok(())
@@ -545,7 +558,7 @@ fn main() -> Result<()> {
                  \x20 bake specular   <core.lvl>   <outdir>       the specular pass's lookup table\n\
                  \x20 bake omniproj   <core.lvl>   <outdir>       BF2's terrain light texture\n\
                  \x20 bake locl       <core.lvl>   <outdir>       the English text table\n\
-                 \x20 bake fonts      <core.lvl>   <outdir> <prefix> [donor-core ...]  bitmap metrics + SDF art\n\
+                 \x20 bake fonts      <core.lvl>   <outdir> <prefix> [donor-core ...] [--menu-font-core PS2-CORE.LVL]  native HUD + local BF2 Light menu\n\
                  \x20 bake ui-art     <core.lvl>   <outdir> [donor-core ...]  largest same-art UI sheets\n\
                  \x20 bake tex-dump   <file.lvl>   <outdir>       every tex_ to PNG (mip 0)\n\
                  \x20 bake pc-tex     <file.lvl|-> <outdir>       PC-format textures to KTX2\n\

@@ -4,7 +4,7 @@
 use super::{Event, Sim};
 use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
 use crate::hero_weapon::{SaberFlight, SaberThrow};
-use crate::projectile::Target;
+use crate::projectile::{building_hit, Hit, Target};
 use crate::TICK_DT;
 use glam::{Mat4, Vec3};
 
@@ -300,12 +300,13 @@ impl Sim {
                 }
                 // The same blade query includes vehicle hulls and buildings.
                 for body in self.collision.bodies_and_hulls() {
-                    let target = body.owner.map(Target::Vehicle).or_else(|| {
-                        body.instance
-                            .and_then(|n| self.collision.station(n))
-                            .map(Target::Station)
-                    });
-                    let Some(target) = target else { continue };
+                    let target = body.owner.map_or_else(
+                        || building_hit(&self.collision, body.instance),
+                        |v| Hit::Target(Target::Vehicle(v)),
+                    );
+                    let Hit::Target(target) = target else {
+                        continue;
+                    };
                     // The seat he throws from is no collision for his blade.
                     if matches!(target, Target::Vehicle(v) if own_seat == Some(v)) {
                         continue;

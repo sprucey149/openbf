@@ -252,13 +252,13 @@ fn v4_bf2_damage_falloff_by_age() {
     ] {
         assert!((at(d) - want).abs() < 1e-3, "d={d}: {} != {want}", at(d));
     }
-    assert_eq!(o.max_range(), 128.0);
+    assert_eq!(o.charged(0.0).max_range(), 128.0);
     // Team bonus: +25% at close range.
     assert!((o.damage_desc(0.1, true).damage - 100.0).abs() < 1e-4);
     // BF1: flat at any age.
     let b = WeaponClass::bf1_rifle().ordnance;
     assert_eq!(b.damage_desc(1.4, false).damage, 60.0);
-    assert_eq!(b.max_range(), 120.0);
+    assert_eq!(b.charged(0.0).max_range(), 120.0);
 }
 
 /// §9.6 TTK: BF1 rifle vs 300 HP person = 5 shots; building type takes 6/shot.
@@ -1113,6 +1113,7 @@ fn an_empty_thrown_weapon_stays_idle_and_clicks() {
         shot_elevate: 0.21,
         hide_on_fire: true,
         hand: None,
+        native_thermal_hand: false,
     });
     let mut w = WeaponState::new(&c, true, 0);
     w.clip = 0;

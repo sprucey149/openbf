@@ -137,3 +137,41 @@ fn assist_duration_and_slot_are_hashed_with_an_inactive_null_control() {
     s.assist[1].magnet_timer = 0.0;
     assert_eq!(cold, s.hash(), "inactive null control");
 }
+
+/// Desired heading is independent of launch/flight direction and changes the
+/// next no-target update. Hash it even when all other bolt fields match.
+#[test]
+fn missile_desired_heading_is_hashed_and_changes_continuation() {
+    let mut s = Sim::empty(42);
+    let c = crate::missile::MissileClass::default();
+    let mut original = bolt();
+    original.missile = Some(crate::missile::Missile::launch(
+        &c,
+        Vec3::Z,
+        40.0,
+        None,
+        &mut s.lcg,
+    ));
+    s.bolts.push(original.clone());
+    let base = s.hash();
+    for desired in [
+        Vec3::new(1.0, 0.0, 1.0),
+        Vec3::new(0.0, 1.0, 1.0),
+        Vec3::new(0.0, 0.0, 0.5),
+        Vec3::new(-0.0, 0.0, 1.0),
+    ] {
+        s.bolts[0].missile.as_mut().unwrap().desired = desired;
+        assert_ne!(s.hash(), base, "desired {desired:?}, including signed zero");
+    }
+    s.bolts[0] = original.clone();
+    assert_eq!(s.hash(), base, "restored heading is a null control");
+    s.bolts[0].missile.as_mut().unwrap().desired = Vec3::X;
+    let mut rng = s.lcg.clone();
+    s.bolts[0].guide(&c, None, crate::TICK_DT, &mut s.lcg);
+    original.guide(&c, None, crate::TICK_DT, &mut rng);
+    assert_ne!(
+        s.bolts[0].vel, original.vel,
+        "different future after target loss"
+    );
+    assert_eq!(s.bolts[0].missile.unwrap().launch, Vec3::Z);
+}

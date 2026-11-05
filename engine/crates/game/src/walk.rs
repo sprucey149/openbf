@@ -336,6 +336,7 @@ pub struct ClassVisual {
     pub first_person: Option<String>,
     pub first_person_weapon: crate::first_person::FpWeapon,
     pub first_person_held: Vec<(u8, crate::first_person::FpWeapon)>,
+    pub flee_like_a_hero: bool,
     /// The hash of the class's `FoleyFXClass` (card FOLY, `crate::foley`):
     /// which row of the map's foley table its steps play; 0 = none.
     pub foley_class: u32,
@@ -436,6 +437,7 @@ impl ClassVisual {
             first_person: c.first_person.clone(),
             first_person_weapon: c.first_person_weapon.clone(),
             first_person_held: Vec::new(),
+            flee_like_a_hero: c.flee_like_a_hero,
             foley_class: c.foley_class,
             cries: c.cries.clone(),
             anim: c.anim.clone(),
@@ -952,11 +954,7 @@ impl WalkSim {
                 capture_time,
                 neutralize_time,
             };
-            let owner = match cp.team {
-                1 => Some(0),
-                2 => Some(1),
-                _ => None,
-            };
+            let owner = cp.team.checked_sub(1);
             self.sim.add_cp_unresolved(def, owner);
             if let Some(post) = self.sim.cps.last_mut() {
                 post.ai_spawn_weight = cp.ai_spawn_weight;

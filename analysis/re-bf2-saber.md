@@ -21,8 +21,9 @@ counts; a new hit at the exact far endpoint does not. Mesh slot00160d60
 bypasses the expansion helper and uses the plain ray. Raw MIPS is required
 for00166328: the decompiler loses the VU hit branch.
 
-[V] Hand melee gathers at most8 candidates with mask0x3a. Hover collision
-type8 and station type0x10 are included; exposed riders have type0x20.
+[V] Hand melee gathers at most8 candidates with mask0x3a (FUN00340c60,
+B2:336191). Hover collision type8 and building type0x10, including armed
+buildings, are included; exposed riders have type0x20.
 The per-attack cache records a victim before asking it to block, so a block
 consumes that contact. Cache identity is the same authored attack record,
 or a matching nonzero AttackId packed into20bits. A cached record expires
@@ -37,8 +38,11 @@ LOS test. Native primitives decide contact. The target's ordinary friendly
 fire, health and damage bookkeeping still applies.
 
 The port queries posed blade segments, units, dynamic vehicle hulls and
-bound station primitives. Its earlier map-only body iteration omitted
-vehicle hulls; a production-consumer regression exposed that defect.
+bound station and building-turret primitives. Static instance resolution
+shares the bolt lookup: station first, then the bound turret's vehicle pool.
+Building turrets have no dynamic hull; their authored map bodies carry the
+contact. No extra shape or reach is added. Its earlier map-only body iteration
+omitted vehicle hulls; a production-consumer regression exposed that defect.
 `CollisionWorld::bodies_and_hulls` now includes both collections. Linear
 interpolation of baked endpoints replaces the native subframe bone
 evaluator and is named in FEEL_NOTES. Native crowded broadphase ordering
@@ -158,6 +162,14 @@ damage. Per-leg victim count is at most8, so the same target can be struck
 once outgoing and once returning. Its incoming direction is the stored
 flight velocity. The throw descriptor differs from hand melee: class
 vtable6273b8+30 resolves00310178 and retains authored health-type scales.
+
+[V] The throw independently gathers eight candidates with the same0x3a
+mask (FUN0031d688, B2:311800-311801), so armed buildings are included here
+too. It tests each candidate's own collision at311975-311978, asks it to
+block at311999, and dispatches the ordinary ordnance health descriptor at
+312002-312007. Sharing the static binding lookup does not change this
+descriptor to hand melee's uniform scales. The port retains its existing
+return-on-vehicle-contact policy below; this is not native throw acceptance.
 
 [V, RAM] A controlled Anakin throw recording contains133 advancing game
 clock rows and60 live flight rows, with an untargeted Choke control yielding

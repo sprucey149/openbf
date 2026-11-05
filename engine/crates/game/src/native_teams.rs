@@ -1,9 +1,28 @@
-//! Build native conquest rosters and connect their allied command-post paths.
+//! Build native conquest rosters and connect their owned and allied command-post paths.
 
 use crate::walk::WalkSim;
 
-/// Endor and Kashyyyk supply complete native side assets. Older bakes can
-/// still launch their missions before a native side has been baked.
+const NATIVE_SIDES: [&str; 5] = ["ewk", "wok", "gun", "geo", "des"];
+
+pub fn native_side(
+    classes_dir: &std::path::Path,
+    game: &str,
+    class: &str,
+) -> Option<(&'static str, std::path::PathBuf)> {
+    NATIVE_SIDES.iter().find_map(|&side| {
+        let path = classes_dir.join(format!("{game}_{side}.ron"));
+        if !pak::is_file(&path) {
+            return None;
+        }
+        let mut db = crate::classdb::ClassDb::default();
+        db.load(&path).ok()?;
+        db.get(class).is_some().then_some((side, path))
+    })
+}
+
+/// Every native side the bake carries supplies its class file and models.
+/// Older bakes can still launch their missions before a native side has been
+/// baked.
 pub fn install(
     walk: &mut WalkSim,
     layout: &crate::layout::MapLayout,
@@ -11,7 +30,7 @@ pub fn install(
     assets_dir: &std::path::Path,
     mission: &crate::mission::MissionDef,
 ) {
-    if mission.local_teams.is_empty() || mission.local_team_relations.is_empty() {
+    if mission.local_teams.is_empty() {
         return;
     }
     let side = assets_dir.join(format!("side_{}/locals", mission.source_game));
@@ -34,20 +53,19 @@ pub fn install(
         let Some((first, _, _)) = authored.classes.first() else {
             continue;
         };
-        let faction = match first.split('_').next() {
-            Some(prefix @ ("ewk" | "wok")) => prefix,
-            _ => continue,
-        };
         let Some(team) = authored.team.checked_sub(1).filter(|team| *team >= 2) else {
             continue;
         };
         if walk.native_teams.contains_key(&team) {
             continue;
         }
-        let source = classes_dir.join(format!("{}_{faction}.ron", mission.source_game));
-        if !pak::is_file(&source) {
+        let Some((faction, source)) = native_side(classes_dir, &mission.source_game, first) else {
+            eprintln!(
+                "native team {} unavailable (no baked native side carries {first})",
+                authored.team
+            );
             continue;
-        }
+        };
         let roster = (|| -> anyhow::Result<_> {
             let mut db = crate::roster::load_classdb(classes_dir, &mission.source_game, &[])?;
             db.load(&source)?;
@@ -101,7 +119,9 @@ pub fn install(
             }
         }
         // The member pool is distinct from the authored minimums. The normal
-        // roster's fill class takes the remainder here too.
+        // roster's fill class takes the remainder here too. PROVISIONAL,
+        // replace: trace the BF1 quota top-up and assigned-member class draws
+        // across native waves (re-ai-class-selection.md).
         members.resize_with(cap, || {
             table[0].spec(
                 team,
@@ -135,11 +155,14 @@ pub fn install(
         .enumerate()
         .filter_map(|(post, cp)| {
             let def = layout.cps.iter().find(|def| def.name == cp.def.name)?;
-            let path = layout.path(def.ally_path.as_deref()?)?;
+            let path = def.ally_path.as_deref().and_then(|name| layout.path(name));
             Some(core::sim::AllySpawn {
                 post,
                 count: def.ally_count?,
-                nodes: path.nodes.iter().map(|node| (node.pos, node.yaw)).collect(),
+                nodes: path
+                    .into_iter()
+                    .flat_map(|path| path.nodes.iter().map(|node| (node.pos, node.yaw)))
+                    .collect(),
             })
         })
         .collect();

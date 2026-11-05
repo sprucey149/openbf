@@ -120,7 +120,7 @@ fn team_templates(
     scene: &game::assets::Scene,
     b: &BattleSetup,
     sim: &mut core::sim::Sim,
-) -> [game::walk::TeamTemplate; 2] {
+) -> Result<[game::walk::TeamTemplate; 2]> {
     let defaults = game::roster::default_factions(&scene.manifest.source_game);
     let factions: [&str; 2] = match &b.teams {
         Some(t) => [t[0].as_str(), t[1].as_str()],
@@ -135,6 +135,11 @@ fn team_templates(
         Ok((mut rosters, warnings)) => {
             for w in &warnings {
                 eprintln!("{w}");
+            }
+            if let Some(m) = b.mission.as_ref().filter(|m| m.is_hero_assault()) {
+                for (team, roster) in rosters.iter_mut().enumerate() {
+                    game::heroes::prepare_assault(roster, &b.classes_dir, m, team, b.dlc_heroes)?;
+                }
             }
             game::droideka::install(&mut rosters, &scene.dir, &scene.manifest.source_game);
             // One `Sim::weapon_classes` index per weapon NAME (a Vec scan —
@@ -181,12 +186,15 @@ fn team_templates(
             if let Some(rules) = b.heroes {
                 game::heroes::install_with(sim, hero_classes, rules);
             }
-            templates
+            Ok(templates)
         }
         Err(e) => {
+            if b.mission.as_ref().is_some_and(|m| m.is_hero_assault()) {
+                return Err(e.context("Hero Assault roster unavailable"));
+            }
             eprintln!("class data unavailable ({e:#}); using built-in BF1 troopers");
             let t = game::walk::TeamTemplate::default_trooper();
-            [t.clone(), t]
+            Ok([t.clone(), t])
         }
     }
 }
@@ -260,8 +268,38 @@ pub(super) fn stats_pages(
     game::round_stats::screens(sim, feed.round(), walk.player, career, &names)
 }
 
+/// Refuse an Assault round without its matching mission. Other modes retain
+/// optional missions and allow copied or renamed asset directories.
+fn validate_mission(
+    scene: &game::assets::Scene,
+    mission: Option<&game::mission::MissionDef>,
+) -> Result<()> {
+    let assault = scene.manifest.spawn_only_posts;
+    anyhow::ensure!(
+        !assault || mission.is_some(),
+        "Hero Assault requires a mission"
+    );
+    if let Some(m) = mission.filter(|m| assault || m.is_hero_assault()) {
+        anyhow::ensure!(
+            assault == m.is_hero_assault(),
+            "mission mode {} differs from the loaded map mode",
+            m.mode
+        );
+        anyhow::ensure!(
+            scene
+                .dir
+                .file_name()
+                .is_some_and(|key| m.map.eq_ignore_ascii_case(&key.to_string_lossy()))
+                && m.source_game
+                    .eq_ignore_ascii_case(&scene.manifest.source_game),
+            "mission does not describe this map and game"
+        );
+    }
+    Ok(())
+}
+
 /// Build the walk/battle sim for a loaded scene per the CLI flags.
-pub(super) fn make_walk(scene: &game::assets::Scene, b: &BattleSetup) -> WalkSim {
+pub(super) fn make_walk(scene: &game::assets::Scene, b: &BattleSetup) -> Result<WalkSim> {
     make_walk_with_counts(scene, b, None)
 }
 
@@ -271,7 +309,8 @@ pub(super) fn make_walk_with_counts(
     scene: &game::assets::Scene,
     b: &BattleSetup,
     counts: Option<[u32; 2]>,
-) -> WalkSim {
+) -> Result<WalkSim> {
+    validate_mission(scene, b.mission.as_ref())?;
     let mut sim = core::sim::Sim::empty(b.seed);
     // The tier is set BEFORE `setup_conquest` spawns anyone: every bot takes
     // its skill at spawn (D2).
@@ -307,6 +346,13 @@ pub(super) fn make_walk_with_counts(
     if let Some(m) = &b.mission {
         sim.ai_alive_cap = m.ai_alive_cap;
         m.apply_death_drains(&mut sim.battle);
+        if m.is_hero_assault() {
+            sim.time_limit = None;
+            sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::new(
+                b.score_limit,
+                [m.teams[0].units, m.teams[1].units],
+            ));
+        }
     }
     // --ai-cap wins over the mission, and applies with or without one.
     if let Some(cap) = b.ai_cap {
@@ -315,7 +361,7 @@ pub(super) fn make_walk_with_counts(
     if let Some(d) = resolved {
         sim.team_combatants = Some(d.combatants);
     }
-    let teams = team_templates(scene, b, &mut sim);
+    let teams = team_templates(scene, b, &mut sim)?;
     let seat = usize::from(b.player_team.min(1));
     let mut walk = WalkSim::with_teams_seat(
         sim,
@@ -486,7 +532,7 @@ pub(super) fn make_walk_with_counts(
         &vehicle_classes,
         b.mission.as_ref().and_then(|m| m.era.as_deref()),
     ));
-    walk
+    Ok(walk)
 }
 
 /// BF2's HUD from the bake at `assets_dir`, painted into `r`'s frames;
@@ -556,6 +602,7 @@ pub(super) fn hud_model(
     ui::hud::HudModel {
         team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
+        team_points: walk.sim.team_points(),
         bleed: [b.teams[0].bleed_per_sec, b.teams[1].bleed_per_sec],
         hp,
         hp_max,
@@ -750,6 +797,42 @@ pub(super) fn spawn_model(
 mod tests {
     use super::*;
 
+    #[test]
+    fn renamed_conquest_and_optional_mission_views_keep_existing_launch_paths() {
+        let dir = std::env::temp_dir().join(format!("openbf-launch-alias-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("manifest.ron"),
+            r#"(map: "tat2", source_game: "bf2", terrain_name: None, sky_name: None,
+            terrain_glb: None, models: [], textures: [], classes: [], geometries: [],
+            regions: [], instances: [], layers: [
+                (name: "tat2_design", worlds: ["tat2_design"], regions: [], instances: [])
+            ])"#,
+        )
+        .unwrap();
+        let mission: game::mission::MissionDef = ron::from_str(
+            r#"(map: "tat2", mode: "con", source_game: "bf2", teams: [
+                (faction: "all", units: 20, tickets: 150),
+                (faction: "imp", units: 20, tickets: 150)],
+                ai_alive_cap: 16, spawn_delay: 10.0, spawn_interval: 0.25)"#,
+        )
+        .unwrap();
+        let (scene, _) = game::assets::load_battle_scene(&dir, "con").unwrap();
+        assert_ne!(dir.file_name().unwrap(), mission.map.as_str());
+        validate_mission(&scene, Some(&mission)).unwrap();
+        // Existing views can load a design fallback without a mission. The
+        // timed runner and sim-trace enforce their stricter mode contract.
+        let (scene, load) = game::assets::load_battle_scene(&dir, "ass").unwrap();
+        assert_eq!(load.layer.as_deref(), Some("tat2_design"));
+        validate_mission(&scene, None).unwrap();
+        assert!(game::assets::load_battle_scene(&dir, "eli").is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    mod native_spawn_tests {
+        include!("battle/native_spawn_tests.rs");
+    }
+
     /// HTGTW: use the battle's actual setup/install and feed constructors.
     /// The authored building is off its pivot: a radius-zero fallback cannot
     /// stand in for the collision bounds installed for acquisition.
@@ -835,8 +918,9 @@ mod tests {
             player_team: 0,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
-        let mut walk = make_walk(&scene, &setup);
+        let mut walk = make_walk(&scene, &setup).unwrap();
         assert_eq!(walk.vehicle_classes, ["fixture_dish"]);
         let (h, v) = walk.sim.alive_vehicles().next().expect("installed turret");
         assert_eq!(v.instance, Some(0));
@@ -894,6 +978,7 @@ mod tests {
             player_team: 1,
             heroes: Some(core::sim::heroes::HeroRules::default()),
             dlc_heroes: false,
+            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
         };
         // Resolve missions independently of the bake location.
         setup.mission = Some(
@@ -905,7 +990,7 @@ mod tests {
         );
         assert_eq!(scene.manifest.map, "naboo2");
         assert_eq!(setup.mission.as_ref().unwrap().map, "bf1_nab2");
-        let mut walk = make_walk(&scene, &setup);
+        let mut walk = make_walk(&scene, &setup).unwrap();
         assert_eq!(walk.sim.team_combatants, Some([19, 21]));
         assert_eq!(
             (
@@ -976,7 +1061,7 @@ mod tests {
         // percentage set: the scene folder's name must not start a conquest.
         setup.mission = None;
         setup.ai = Some(0);
-        let walk = make_walk(&scene, &setup);
+        let walk = make_walk(&scene, &setup).unwrap();
         assert_eq!(walk.conquest_defaults, None);
         assert_eq!(walk.sim.team_combatants, None);
         assert_eq!(walk.sim.battle.teams.map(|t| t.tickets()), [250; 2]);
@@ -1026,8 +1111,9 @@ mod tests {
                 player_team: 0,
                 heroes: game::heroes::rules(&session),
                 dlc_heroes: false,
+                score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
             };
-            walks.push(make_walk(&scene, &setup));
+            walks.push(make_walk(&scene, &setup).unwrap());
         }
         let (off, on) = (&walks[0], &walks[1]);
         assert!(off.sim.heroes.is_none(), "Off: no manager");

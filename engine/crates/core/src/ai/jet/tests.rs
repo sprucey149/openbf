@@ -59,7 +59,7 @@ fn sim(hover: bool) -> (Sim, UnitHandle) {
     (sim, h)
 }
 #[test]
-fn bots_hop_in_seeded_sim_and_replay_identically() {
+fn bots_out_of_a_fight_do_not_hop_and_replay_identically() {
     for hover in [false, true] {
         let run = || {
             let (mut sim, h) = sim(hover);
@@ -70,12 +70,11 @@ fn bots_hop_in_seeded_sim_and_replay_identically() {
                 let s = &sim.unit(h).unwrap().soldier;
                 let active = s.stance.jetting();
                 if active && !prev {
-                    starts.push(sim.tick);
+                    starts.push((sim.tick, sim.unit(h).unwrap().ai.target.is_some()));
                 }
                 prev = active;
             }
-            assert!(starts.len() >= 3, "hover {hover}: {starts:?}");
-            assert!((6 * 30..=12 * 30 + 3).contains(&starts[0]), "{starts:?}");
+            assert!(starts.iter().all(|s| s.1), "hover {hover}: {starts:?}");
             (sim.hash(), starts)
         };
         assert_eq!(run(), run());
@@ -112,6 +111,7 @@ fn every_flight_field_and_scheduler_is_hashed() {
             kick: Vec3::Y,
             height: Some(5.0),
             route: false,
+            hop: false,
             since: 1,
             launched: false,
             stop: false,
@@ -134,6 +134,7 @@ fn every_flight_field_and_scheduler_is_hashed() {
         |s: &mut JetState| s.flight.as_mut().unwrap().launched = true,
         |s: &mut JetState| s.flight.as_mut().unwrap().stop = true,
         |s: &mut JetState| s.flight.as_mut().unwrap().route = true,
+        |s: &mut JetState| s.flight.as_mut().unwrap().hop = true,
     ] {
         let mut altered = base;
         f(&mut altered);
@@ -156,6 +157,48 @@ fn request() -> MoveRequest<'static> {
         roll: 0,
         excused: false,
         throwing: false,
+    }
+}
+fn engage(sim: &mut Sim, st: &mut AiState, distance: f32) {
+    let enemy = sim
+        .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -distance)))
+        .unwrap();
+    st.target = Some(enemy.into());
+    st.contacts[0] = Some(perception::Contact {
+        handle: enemy.into(),
+        first_seen: 0,
+        last_seen: 0,
+        last_pos: Vec3::new(0.0, 0.0, -distance),
+        seen_now: true,
+        heard: false,
+        told: false,
+    });
+}
+#[test]
+fn a_fight_hop_flies_to_a_clear_spot_twenty_to_fifty_seven_metres_away() {
+    for hover in [false, true] {
+        let mut spots = Vec::new();
+        for tick in 1..40 {
+            let (mut sim, h) = sim(hover);
+            let mut st = AiState::default();
+            engage(&mut sim, &mut st, 10.0);
+            sim.tick = tick;
+            st.jet.next_hop = tick;
+            ask(&sim, h, &mut st, &request());
+            let f = st.jet.flight.expect("a hop");
+            let d = nav::xz_dist(f.goal, Vec3::ZERO);
+            assert!((20.0..=40.0 * std::f32::consts::SQRT_2).contains(&d), "{d}");
+            assert!(f.hop && f.height.is_none() && f.kick == Vec3::ZERO);
+            assert!(st.jet.next_hop >= tick + 6 * 30);
+            spots.push(f.goal);
+        }
+        spots.dedup();
+        assert!(spots.len() > 30);
+        let (sim, h) = sim(hover);
+        let mut st = AiState::default();
+        st.jet.next_hop = 1;
+        ask(&sim, h, &mut st, &request());
+        assert!(st.jet.flight.is_none(), "no hop out of a fight");
     }
 }
 fn ask(sim: &Sim, h: UnitHandle, st: &mut AiState, mv: &MoveRequest) -> PadState {
@@ -205,6 +248,7 @@ fn a_pending_flight_jumps_first_then_uses_the_bot_kick_without_a_second_tap() {
     let mut st = AiState::default();
     st.jet.next_hop = 1;
     let mut sim = sim;
+    engage(&mut sim, &mut st, 10.0);
     sim.tick = 1;
     let pad = ask(&sim, h, &mut st, &request());
     assert!(pad.pressed(buttons::JUMP));
@@ -343,6 +387,7 @@ fn a_short_elevated_jet_link_keeps_jetting_until_above_its_platform() {
                 kick: Vec3::Y,
                 height: Some(5.0),
                 route: true,
+                hop: false,
                 since: 0,
                 launched: true,
                 stop: false,
@@ -412,6 +457,7 @@ fn losing_the_only_goal_stops_and_discards_the_flight() {
         kick: Vec3::Y,
         height: Some(10.0),
         route: false,
+        hop: false,
         since: 0,
         launched: true,
         stop: false,
@@ -420,4 +466,158 @@ fn losing_the_only_goal_stops_and_discards_the_flight() {
     assert_eq!(sim.unit(h).unwrap().soldier.stance, Stance::Fall);
     sim.step(&[]);
     assert_eq!(sim.unit(h).unwrap().ai.jet.flight, None);
+}
+
+#[test]
+fn review_pr120_soldier_roof_blocks_hop_like_ordnance_roof() {
+    use crate::collision::{Body, Layers, Shape};
+    let outcomes = [Layers::ALL, Layers::SOLDIER].map(|layers| {
+        let (mut s, h) = sim(true);
+        s.collision.push_body(Body::with_layers(
+            glam::Mat4::from_translation(Vec3::Y * 5.0),
+            Shape::Box {
+                half: Vec3::new(100.0, 0.5, 100.0),
+            },
+            layers,
+        ));
+        s.tick = 1;
+        let mut st = AiState::default();
+        engage(&mut s, &mut st, 10.0);
+        st.jet.next_hop = 1;
+        ask(&s, h, &mut st, &request());
+        println!("review roof layers={layers:?} flight={:?}", st.jet.flight);
+        st.jet.flight.is_some()
+    });
+    assert_eq!(
+        outcomes,
+        [false, false],
+        "a solid soldier roof must reject all candidate sky rays"
+    );
+}
+
+#[test]
+fn review_pr120_barrier_and_no_target_controls() {
+    let mut outcomes = Vec::new();
+    for mode in 0..4 {
+        let (mut s, h) = sim(true);
+        s.tick = 1;
+        let mut st = AiState::default();
+        if mode != 0 {
+            engage(&mut s, &mut st, 10.0);
+        }
+        if mode >= 2 {
+            s.nav.as_mut().unwrap().barriers.push(crate::nav::Barrier {
+                centre: glam::Vec2::ZERO,
+                axes: [glam::Vec2::X, glam::Vec2::Y],
+                half: glam::Vec2::splat(100.0),
+                mask: 1,
+                enabled: mode == 2,
+            });
+        }
+        st.jet.next_hop = 1;
+        ask(&s, h, &mut st, &request());
+        outcomes.push(st.jet.flight.is_some());
+    }
+    println!("review no-target/open/enabled-barrier/disabled-barrier: {outcomes:?}");
+    assert_eq!(outcomes, [false, true, false, true]);
+}
+
+#[test]
+fn tactical_hop_sky_preserves_sight_and_sees_current_movers() {
+    use crate::collision::{Body, HullPart, Layers, Shape};
+    use glam::Mat4;
+    let (mut s, h) = sim(true);
+    let spot = Vec3::X * 25.0;
+    let roof = |layers| {
+        Body::with_layers(
+            Mat4::from_translation(spot + Vec3::Y * 5.0),
+            Shape::Box {
+                half: Vec3::splat(1.0),
+            },
+            layers,
+        )
+    };
+    assert!(hop_sky_clear(&s, h, spot));
+    s.collision.push_body(roof(Layers::SOLDIER));
+    assert!(!hop_sky_clear(&s, h, spot));
+    assert!(perception::los(&s, spot, spot + Vec3::Y * HOP_SKY));
+    let (mut s, h) = sim(true);
+    let owner = crate::vehicle::VehicleHandle { index: 7, gen: 3 };
+    let parts = [HullPart::new(
+        Mat4::IDENTITY,
+        roof(Layers::SOLDIER).shape,
+        Layers::SOLDIER,
+    )];
+    s.collision
+        .set_hull(owner, &parts, Mat4::from_translation(spot + Vec3::Y * 5.0));
+    assert!(!hop_sky_clear(&s, h, spot), "a moving hull blocks");
+    s.collision
+        .set_hull(owner, &parts, Mat4::from_translation(spot + Vec3::X * 10.0));
+    assert!(hop_sky_clear(&s, h, spot), "the old hull pose is gone");
+    s.collision.push_body(Body::with_layers(
+        Mat4::from_translation(spot + Vec3::Y * 42.0),
+        Shape::Box {
+            half: Vec3::splat(1.0),
+        },
+        Layers::ALL,
+    ));
+    assert!(hop_sky_clear(&s, h, spot), "beyond the 40 m ray");
+    let actor = s
+        .spawn(&UnitSpec::trooper(0, spot + Vec3::Y * 4.0))
+        .unwrap();
+    assert!(
+        !hop_sky_clear(&s, h, spot),
+        "another soldier blocks regardless of team"
+    );
+    assert!(
+        hop_sky_clear(&s, actor, spot),
+        "the query excludes its owner"
+    );
+    s.kill_environment(actor, crate::sim::DeathCause::DeathRegion);
+    assert!(hop_sky_clear(&s, h, spot), "dead soldiers do not block");
+}
+
+#[test]
+fn kamino_hops_require_clear_barrier_lines_only_when_blind_jumps_are_off() {
+    for blind in [false, true] {
+        for enabled in [false, true] {
+            let (mut s, h) = sim(true);
+            s.mission_ai.allow_blind_jet_jumps = blind;
+            s.tick = 1;
+            // A small closed ring surrounds the start, not the candidate
+            // destinations. Every candidate passes the existing point test.
+            for axis in [glam::Vec2::X, glam::Vec2::Y] {
+                for side in [-1.0, 1.0] {
+                    s.nav.as_mut().unwrap().barriers.push(crate::nav::Barrier {
+                        centre: axis * side * 5.0,
+                        axes: [glam::Vec2::X, glam::Vec2::Y],
+                        half: if axis.x != 0.0 {
+                            glam::Vec2::new(0.1, 6.0)
+                        } else {
+                            glam::Vec2::new(6.0, 0.1)
+                        },
+                        mask: 1,
+                        enabled,
+                    });
+                }
+            }
+            let mut st = AiState::default();
+            engage(&mut s, &mut st, 10.0);
+            st.jet.next_hop = 1;
+            ask(&s, h, &mut st, &request());
+            assert_eq!(
+                st.jet.flight.is_some(),
+                blind || !enabled,
+                "blind={blind}, enabled={enabled}"
+            );
+        }
+    }
+    let (mut s, _) = sim(true);
+    let hash = s.hash();
+    s.mission_ai.allow_blind_jet_jumps = false;
+    assert_ne!(
+        hash,
+        s.hash(),
+        "mission policy affects deterministic continuation"
+    );
 }

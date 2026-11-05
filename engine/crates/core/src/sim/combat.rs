@@ -669,6 +669,7 @@ impl Sim {
                 if k != h && killer_team.is_some_and(|team| self.hostile(team, victim_team)) {
                     self.heal_hero_kill(k);
                 }
+                self.deathmatch_kill(k, victim_team);
                 // The PS2 credits the member, alive or dead (B1 FUN_00297440:
                 // a destroyed vehicle's riders die after its destroyer may
                 // have, re-vehicle-death 10.5): this life's slot by generation.

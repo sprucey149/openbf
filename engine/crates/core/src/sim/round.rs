@@ -122,27 +122,35 @@ impl Sim {
     }
 
     /// Whether unit `ui` counts for post `ci`'s capture now: an alive
-    /// CapturePosts soldier of a battle team on foot, tested as a POINT at the
-    /// entity origin (report §4). The capture tick's rule; the HUD's capture
+    /// CapturePosts soldier of a battle team or independent hostile native on
+    /// foot, tested as a POINT at the entity origin (report §4). The capture tick's rule; the HUD's capture
     /// icon (card CPBAR) asks the same. A rider (a vehicle's or a turret's
     /// seat) is not in the PS2's scan (card WCREW: in BF1 RAM, 73 of 73 post
     /// rows with a seated soldier in the region count only those on foot;
     /// BF2 not sampled). Card MAIS: nor a bot of a team the mission bars
     /// from the post (`AICanCaptureCP`, [`crate::cp::CommandPost::ai_no_capture`]).
+    // Independent native affiliation is its own index (BF1 FUN_002ad490:
+    // 238511-238527). Friendly-native affiliation remains separate scope;
+    // retain its existing capture exclusion here.
     pub fn counts_in_cp(&self, ui: usize, ci: usize) -> bool {
         let u = &self.units[ui];
-        u.alive
+        self.deathmatch.is_none()
+            && u.alive
             && u.capture_posts
             && u.mount.is_none()
-            && (u.team as usize) < self.battle.teams.len()
+            && ((u.team as usize) < self.battle.teams.len()
+                || (u.team < 8
+                    && self.native_team_index(u.team).is_some()
+                    && self.hostile(u.team, 0)
+                    && self.hostile(u.team, 1)))
             && !(u.controller == crate::unit::Controller::Ai && self.cps[ci].ai_no_capture(u.team))
             && self.cps[ci].def.capture.contains(u.soldier.pos)
     }
 
     /// Per team, the units that count inside post `ci`'s capture region
     /// ([`Self::counts_in_cp`]): what [`CommandPost::update`] is fed.
-    pub fn cp_inside(&self, ci: usize) -> [u32; 2] {
-        let mut inside = [0u32; 2];
+    pub fn cp_inside(&self, ci: usize) -> [u32; 8] {
+        let mut inside = [0u32; 8];
         for k in 0..self.units.len() {
             if self.counts_in_cp(k, ci) {
                 inside[self.units[k].team as usize] += 1;
@@ -172,6 +180,9 @@ impl Sim {
                     self.events.push(Event::Neutralized { cp: ci as u32, by })
                 }
             }
+        }
+        if self.deathmatch.is_some() {
+            return;
         }
         // BF2 conquest bleed (strict CP-value majority, clamped at alive).
         cp::apply_bleed(&mut self.battle, &self.cps);
@@ -348,7 +359,7 @@ mod tests {
             seats: vec![SeatKind::Pilot],
         });
         // On foot both count: the post is contested.
-        assert_eq!(s.cp_inside(0), [1, 1]);
+        assert_eq!(s.cp_inside(0), [1, 1, 0, 0, 0, 0, 0, 0]);
         assert!(s.seat_unit(rider, v, 0));
         let u = s.unit(rider).unwrap();
         assert!(
@@ -356,7 +367,11 @@ mod tests {
             "{:?}",
             u.soldier.pos
         );
-        assert_eq!(s.cp_inside(0), [1, 0], "the rider is not counted");
+        assert_eq!(
+            s.cp_inside(0),
+            [1, 0, 0, 0, 0, 0, 0, 0],
+            "the rider is not counted"
+        );
         for _ in 0..(12 * 30) {
             s.step(&[]);
         }
@@ -384,11 +399,15 @@ mod tests {
         };
         s.spawn(&bot(0, Vec3::new(2.0, 0.0, -20.0))).unwrap();
         let b1 = s.spawn(&bot(1, Vec3::new(-2.0, 0.0, -20.0))).unwrap();
-        assert_eq!(s.cp_inside(0), [1, 1]);
+        assert_eq!(s.cp_inside(0), [1, 1, 0, 0, 0, 0, 0, 0]);
         s.cps[0].ai_capture_ban = 1 << 1;
-        assert_eq!(s.cp_inside(0), [1, 0], "team 1's bot is barred");
+        assert_eq!(
+            s.cp_inside(0),
+            [1, 0, 0, 0, 0, 0, 0, 0],
+            "team 1's bot is barred"
+        );
         s.unit_mut(b1).unwrap().controller = Controller::Player { slot: 1 };
-        assert_eq!(s.cp_inside(0), [1, 1], "its human is not");
+        assert_eq!(s.cp_inside(0), [1, 1, 0, 0, 0, 0, 0, 0], "its human is not");
     }
 
     /// BF2 rule: a team at 0 tickets is defeated at once; AI never respawn

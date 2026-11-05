@@ -1,5 +1,11 @@
 # Felucia plant shells, ground detail and distance haze
 
+Current integration note (2026-11-04): #118 and its local material/lookup fixes
+are present at `4cda5ab4`. Scoped matched gallery and three material GPU cases
+support the inspected plant shell/glow behavior. Existing reference mismatches
+and fresh matched original-game visual acceptance remain open; none of the
+reference images or tolerances was updated for that review.
+
 2026-11-04. Source baseline: `8d4481ab6ef38e18cd3c87ab9914e249d95f1a33`.
 [O] UNAUDITED: original static PS2 evidence,
 maintainer screenshots and port GPU regressions; no new matched PCSX2 capture.

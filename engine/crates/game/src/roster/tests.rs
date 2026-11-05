@@ -36,6 +36,94 @@ fn db(rows: &[Row<'_>]) -> ClassDb {
 }
 
 const ROUND: Row<'static> = ("test_ord", "bolt", &[("MaxDamage", "65")]);
+
+#[test]
+fn sticky_charge_points_survive_both_weapon_loaders() {
+    let d = db(&[
+        (
+            "base_ord",
+            "sticky",
+            &[("Velocity", "5"), ("LifeSpan", "0.25")],
+        ),
+        (
+            "test_sticky",
+            "base_ord",
+            &[
+                ("NextCharge", "1"),
+                ("Velocity", "25"),
+                ("LifeSpan", "1.25"),
+            ],
+        ),
+        ("test_throw", "grenade", &[("OrdnanceName", "test_sticky")]),
+    ]);
+    for w in [
+        weapon_from_db(&d, "test_throw").unwrap(),
+        thrown_weapon_from_db(&d, "test_throw").unwrap().unwrap(),
+    ] {
+        assert!(w.ordnance.sticky.is_some());
+        assert_eq!((w.ordnance.velocity, w.ordnance.life_span), (5.0, 0.25));
+        let blend = w.ordnance.charged(0.5);
+        assert_eq!((blend.velocity, blend.life_span), (15.0, 0.75));
+    }
+}
+
+#[test]
+fn sticky_charge_segments_keep_shell_defaults_until_each_key_is_authored() {
+    let d = db(&[
+        ("base_ord", "sticky", &[]),
+        (
+            "test_sticky",
+            "base_ord",
+            &[
+                ("NextCharge", "0.25"),
+                ("NextCharge", "0.5"),
+                ("Velocity", "70"),
+                ("NextCharge", "1"),
+                ("LifeSpan", "5"),
+            ],
+        ),
+        ("test_throw", "grenade", &[("OrdnanceName", "test_sticky")]),
+        ("plain_throw", "grenade", &[("OrdnanceName", "base_ord")]),
+        (
+            "test_bolt",
+            "bolt",
+            &[("NextCharge", "1"), ("Velocity", "70")],
+        ),
+        ("test_gun", "cannon", &[("OrdnanceName", "test_bolt")]),
+    ]);
+    for thrown in [false, true] {
+        let load = |name: &str| {
+            if thrown {
+                thrown_weapon_from_db(&d, name).unwrap().unwrap()
+            } else {
+                weapon_from_db(&d, name).unwrap()
+            }
+        };
+        let w = load("test_throw");
+        assert_eq!((w.ordnance.velocity, w.ordnance.life_span), (35.0, 3.0));
+        assert_eq!(w.ordnance.knots.len(), 3);
+        for (charge, speed, life) in [
+            (0.0, 35.0, 3.0),
+            (0.25, 35.0, 3.0),
+            (0.375, 52.5, 3.0),
+            (0.5, 70.0, 3.0),
+            (0.75, 70.0, 4.0),
+            (1.0, 70.0, 5.0),
+        ] {
+            let blend = w.ordnance.charged(charge);
+            assert_eq!((blend.velocity, blend.life_span), (speed, life));
+        }
+        let plain = load("plain_throw");
+        assert!(plain.ordnance.knots.is_empty());
+        let blend = plain.ordnance.charged(1.0);
+        assert_eq!((blend.velocity, blend.life_span), (35.0, 3.0));
+    }
+    // The sticky defaults must not change the ordinary bolt parser.
+    let bolt = weapon_from_db(&d, "test_gun").unwrap().ordnance;
+    assert_eq!((bolt.velocity, bolt.life_span), (150.0, 2.0));
+    let full = bolt.charged(1.0);
+    assert_eq!((full.velocity, full.life_span), (70.0, 2.0));
+}
 const TRACER: Row<'static> = (
     "test_tracer",
     "bolt",
@@ -49,6 +137,53 @@ const TRACER: Row<'static> = (
 fn gun(props: &[(&str, &str)]) -> WeaponClass {
     let d = db(&[ROUND, TRACER, ("test_gun", "cannon", props)]);
     weapon_from_db(&d, "test_gun").unwrap()
+}
+
+#[test]
+fn skeleton_scale_follows_authored_order_into_ai_and_player_specs() {
+    use core::unit::Controller;
+    use glam::Vec3;
+
+    let d = db(&[
+        ROUND,
+        ("test_gun", "cannon", &[("OrdnanceName", "test_ord")]),
+        ("base_unit", "soldier", &[("WeaponName1", "test_gun")]),
+        (
+            "scaled_unit",
+            "base_unit",
+            &[
+                ("SkeletonRootScale", "1.15"),
+                ("CollisionRootScale", "0.73"),
+            ],
+        ),
+        ("inherited_unit", "scaled_unit", &[]),
+        (
+            "override_unit",
+            "scaled_unit",
+            &[("SkeletonRootScale", "1.2"), ("SkeletonRootScale", "0.95")],
+        ),
+    ]);
+    for (name, root_scale, collision_scale) in [
+        ("base_unit", 1.0, 1.0),
+        ("inherited_unit", 1.15, 0.73),
+        ("override_unit", 0.95, 0.73),
+    ] {
+        let class = ClassRoster::build(&d, name, 1, None).unwrap();
+        let mut sim = core::sim::Sim::empty(7);
+        let registered = class.register(&mut sim, &mut Vec::new());
+        let roster = FactionRoster {
+            faction: "all".into(),
+            classes: vec![class],
+        };
+        let template = crate::walk::TeamTemplate::from_roster(&roster, &registered, Vec::new());
+        let ai = registered.spec(0, Vec3::ZERO, 0.0, Controller::Ai, 0, 0);
+        let player = template.spec(0, Vec3::ZERO, 0.0, Controller::Player { slot: 0 }, 0);
+        for spec in [ai, player] {
+            let unit = spec.build(1, &sim.weapon_classes);
+            assert_eq!(unit.consts.skeleton_root_scale, root_scale, "{name}");
+            assert_eq!(unit.consts.collision_scale, collision_scale, "{name}");
+        }
+    }
 }
 
 #[test]

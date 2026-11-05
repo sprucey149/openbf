@@ -298,7 +298,8 @@ impl Ctx<'_> {
         (rgb, alpha): ([f32; 3], f32),
         ky: f32,
     ) {
-        let Some(font) = self.art.fonts.get(font) else {
+        let role = font;
+        let Some(font) = self.font(role) else {
             return;
         };
         self.run(
@@ -311,7 +312,7 @@ impl Ctx<'_> {
                 at,
                 h_align,
                 scale: [
-                    match font.name.as_str() {
+                    match role {
                         BUTTON_FONT => LABEL_STRETCH,
                         MAP_FONT => MAP_STRETCH,
                         _ => SMALL_STRETCH,
@@ -326,10 +327,7 @@ impl Ctx<'_> {
     }
 
     fn line_height(&self, font: &str) -> f32 {
-        self.art
-            .fonts
-            .get(font)
-            .map_or(18.0, |f| f32::from(f.line_height))
+        self.font(font).map_or(18.0, |f| f32::from(f.line_height))
     }
 
     /// A bar of three pieces: two square ends of the row's height, the

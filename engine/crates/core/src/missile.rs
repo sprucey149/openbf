@@ -144,10 +144,14 @@ const TAU: f32 = std::f32::consts::TAU;
 pub struct Missile {
     /// The direction it flies (`vel` is this times [`Missile::speed`]).
     pub dir: Vec3,
-    /// The launch direction (`packet+0x10`, after the shot's spread): the
-    /// desired direction while the missile has no target, so the waver
-    /// wobbles about the launch line instead of drifting off it.
+    /// The immutable launch direction (`packet+0x10`, after spread), also
+    /// used by presentation to identify this round across flight updates.
     pub launch: Vec3,
+    /// Last desired heading, initialized to the launch direction and refreshed
+    /// only by a valid aim in a positive-turn update. Handle loss retains it
+    /// (BF2 FUN_0031f2e8:312665-312768,312843-312872;
+    /// BF1 FUN_0027d6b8:202955-202987).
+    pub desired: Vec3,
     /// The class's ramp, 0 -> 1 (`s+0x12c` / `s+0x16c`).
     pub ramp: f32,
     /// Its speed, m/s: `Velocity` on BF1 and on a no-ramp BF2 class, else
@@ -179,6 +183,7 @@ impl Missile {
         Self {
             dir,
             launch: dir,
+            desired: dir,
             ramp: 0.0,
             speed: if c.speed_ramps() {
                 c.min_speed
@@ -193,7 +198,9 @@ impl Missile {
 
     /// One update at `dt` (`re-ordnance-kinds.md` §4.3). `aim` is the
     /// target's point this tick, `None` when the missile has no target or it
-    /// is gone (the caller drops the handle then). Returns the new velocity.
+    /// is gone (the caller drops the handle then). With no point, the last
+    /// desired heading stays; a never-guided round keeps the launch line.
+    /// Returns the new velocity.
     ///
     /// The rotation is Rodrigues about `dir x desired` by
     /// `min(turn dt, |dir x desired|)`: the clamp is against the SINE of the
@@ -210,10 +217,10 @@ impl Missile {
         self.ramp = (self.ramp + dt * c.ramp_k).min(1.0);
         let turn = self.ramp * c.turn_rate;
         if turn > 0.0 {
-            let desired = aim
-                .and_then(|p| (p - pos).try_normalize())
-                .unwrap_or(self.launch);
-            rotate_toward(&mut self.dir, desired, turn * dt);
+            if let Some(p) = aim {
+                self.desired = (p - pos).normalize_or_zero();
+            }
+            rotate_toward(&mut self.dir, self.desired, turn * dt);
         }
         let waver = self.ramp * c.waver_turn;
         if waver > 0.0 {
@@ -475,6 +482,40 @@ mod tests {
             assert!((phase[0] - m.phases[0]).abs() < 1e-5);
             assert!((phase[1] - m.phases[1]).abs() < 1e-5);
         }
+    }
+
+    /// The target displacement is refreshed only inside the positive-turn
+    /// branch in both originals. Zero turn must not learn a later fallback.
+    #[test]
+    fn zero_turn_does_not_refresh_the_desired_heading() {
+        let c = MissileClass {
+            turn_rate: 0.0,
+            ..MissileClass::default()
+        };
+        let mut m = Missile::launch(&c, Vec3::Z, 40.0, None, &mut lcg());
+        m.step(&c, Some(Vec3::X), Vec3::ZERO, crate::TICK_DT, &mut lcg());
+        assert_eq!(m.desired, Vec3::Z);
+        assert_eq!(m.dir, Vec3::Z);
+    }
+
+    /// A coincident finite aim yields a zero desired vector with the port's
+    /// safe normalization, hence no turn. It does not restore the launch line.
+    /// trace: a retail zero-displacement RAM capture remains unmeasured.
+    #[test]
+    fn coincident_aim_does_not_turn_back_to_launch() {
+        let c = bf2_rocket();
+        let mut m = Missile::launch(&c, Vec3::Z, 100.0, None, &mut lcg());
+        m.ramp = 1.0;
+        m.step(&c, Some(Vec3::X), Vec3::ZERO, crate::TICK_DT, &mut lcg());
+        let before = m.dir;
+        assert!(before.x > 0.05);
+        m.step(&c, Some(Vec3::ONE), Vec3::ONE, crate::TICK_DT, &mut lcg());
+        assert_eq!(m.desired, Vec3::ZERO);
+        assert_eq!(m.dir, before);
+        m.step(&c, None, Vec3::ONE, crate::TICK_DT, &mut lcg());
+        assert_eq!(m.desired, Vec3::ZERO);
+        assert_eq!(m.dir, before);
+        assert_eq!(m.launch, Vec3::Z);
     }
 
     /// The ctor's two phases come from the gameplay LCG, so two missiles of

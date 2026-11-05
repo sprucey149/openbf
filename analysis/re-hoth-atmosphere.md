@@ -1,5 +1,11 @@
 # BF2 Hoth: blowing snow, sun and lens flare
 
+Current integration note (2026-11-04): the #118 shared atmosphere implementation
+is present at `4cda5ab4`, including its reviewed tile-work guard. The scoped
+matched gallery supports the inspected views; original-game visual sign-off and
+all-map atmosphere cost remain open. The earlier deferred density comparison
+below remains acceptance debt.
+
 [O] UNAUDITED. Local disc/ELF reads and PS2 reference captures; no independent
 re-derivation. This implements the maintainer's Hoth atmosphere trial, not
 DUSTE/SUNG acceptance across all maps.

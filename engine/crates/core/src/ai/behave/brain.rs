@@ -479,16 +479,11 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             nt.recycle |= u32::from(over);
         }
     }
+    // These urgent walks exclude each optional positioning request below.
+    let no_urgent_move = ret.is_none() && flee.is_none() && boarding.is_none() && item.is_none();
     // Card FGHT: the ring point a circling bot walks to — over the graph,
     // and straight at it on the last leg and with no route.
-    let ring = ring_walk(sim, st).filter(|_| {
-        ret.is_none()
-            && flee.is_none()
-            && boarding.is_none()
-            && item.is_none()
-            && st.cmd.is_none()
-            && mend.is_none()
-    });
+    let ring = ring_walk(sim, st).filter(|_| no_urgent_move && st.cmd.is_none() && mend.is_none());
     let goal = match ring {
         Some(p) if st.route.is_none_or(|r| r.is_last()) => Some(p),
         _ => goal,
@@ -496,15 +491,8 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let at_ring = ring.filter(|p| goal == Some(*p));
     // Card SNPR: the sniper's spot - over the graph, and straight at it on
     // the last leg and with no route.
-    let spot = super::snipe::walk(st).filter(|_| {
-        ret.is_none()
-            && flee.is_none()
-            && boarding.is_none()
-            && item.is_none()
-            && st.cmd.is_none()
-            && ring.is_none()
-            && mend.is_none()
-    });
+    let spot = super::snipe::walk(st)
+        .filter(|_| no_urgent_move && st.cmd.is_none() && ring.is_none() && mend.is_none());
     let goal = match spot {
         Some(p) if st.route.is_none_or(|r| r.is_last()) => Some(p),
         _ => goal,
@@ -513,9 +501,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     // Card TBLD: a fixer's stand by its turret - over the graph, and
     // straight at it on the last leg and with no route; ahead of the ring
     // and the spot (it walks only while no enemy is seen).
-    let fixing = crate::ai::fix::walk(sim, me, st).filter(|_| {
-        ret.is_none() && flee.is_none() && boarding.is_none() && item.is_none() && st.cmd.is_none()
-    });
+    let fixing = crate::ai::fix::walk(sim, me, st).filter(|_| no_urgent_move && st.cmd.is_none());
     let goal = match fixing {
         Some(p) if st.route.is_none_or(|r| r.is_last()) => Some(p),
         _ => goal,
@@ -525,10 +511,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     // graph has brought us to its hub. measure: Harbor Hard/Elite service
     // and recycles at the droid hubs (issue #108).
     let mend_approach = mend.filter(|station| {
-        ret.is_none()
-            && flee.is_none()
-            && boarding.is_none()
-            && item.is_none()
+        no_urgent_move
             && fixing.is_none()
             && push.is_none()
             && u.command.is_none()
@@ -552,14 +535,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     };
     // Card HOLD: the position held (when nothing more urgent walks the bot).
     let holding = st.hold.filter(|h| {
-        sim.tick < h.until
-            && ret.is_none()
-            && flee.is_none()
-            && boarding.is_none()
-            && item.is_none()
-            && ring.is_none()
-            && fixing.is_none()
-            && mend.is_none()
+        sim.tick < h.until && no_urgent_move && ring.is_none() && fixing.is_none() && mend.is_none()
     });
     // Diagnostic (card BLKF): which link of the chain below walks the bot.
     let walk_kind = match () {

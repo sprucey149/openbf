@@ -784,7 +784,9 @@ impl Fx {
             walk.teams[0].faction.as_str(),
             walk.teams[1].faction.as_str(),
         ];
-        if game.eq_ignore_ascii_case("bf2") && walk.sim.heroes.is_some() {
+        if game.eq_ignore_ascii_case("bf2")
+            && (walk.sim.heroes.is_some() || walk.sim.deathmatch.is_some())
+        {
             for side in ["all", "imp", "rep", "cis"] {
                 if !factions.contains(&side) {
                     factions.push(side);

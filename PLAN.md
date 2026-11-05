@@ -39,6 +39,13 @@ assets` mean the section of that name there. The ones most often needed:
 - **Bots.** openbf's AI uses the original games' navigation graphs and hints. Its rules use original-game evidence
   and name deliberate deviations.
 
+The November 4 source includes the health-droid final approach, connected Endor
+bot spawns, own-team stall watch and pinned Bazaar jump. These are named port
+corrections, not completed original-game acceptance; current scope and remaining
+route traps are in `analysis/re-round-stalls.md`. The #114 art work and #118
+atmosphere, water and material work are implemented source checkpoints. Original
+visual sign-off, gallery debt and broader gameplay acceptance remain open.
+
 ## Milestones (2026-09-25; older phases are in `analysis/PLAN_LOG_2026.md`)
 GitHub issues track current milestone scope. Done: P0 audits, P1 bake, P2 viewer, P3 soldier, P4 combat, P5 vertical slice, P6 shell, P6.5
 infantry AI A-D, P9's N-pad `Sim::step` and libm-backed `core::fmath`.

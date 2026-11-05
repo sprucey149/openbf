@@ -209,7 +209,7 @@ fn every_bf2_mission_resolves_only_its_ordered_native_resource_programs() {
             .unwrap_or_else(|e| panic!("{}: {e:#}", path.display()));
         count += 1;
     }
-    assert_eq!(count, 33);
+    assert_eq!(count, 34);
 }
 
 #[test]

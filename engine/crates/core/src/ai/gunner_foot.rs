@@ -189,7 +189,7 @@ pub(super) fn run(
     } else {
         wc.saber_throw
             .as_ref()
-            .map_or(wc.ordnance.velocity, |p| p.velocity)
+            .map_or(wc.shot_ordnance().velocity, |p| p.velocity)
     };
     let hand = u.proxy_human.and_then(|p| p.hand);
     let mut reaches = false;
@@ -543,10 +543,11 @@ pub(super) fn charge(
 /// in front of the muzzle met it (a mortar's shell, one tick old: 40 of the
 /// BF2 maps' 53 mortar team kills in 8 seeds, the friend 1-2 m out).
 fn shot_late(wc: &crate::weapon::WeaponClass) -> (f32, f32) {
-    match wc.ordnance.kind {
-        crate::weapon::OrdKind::Missile => (wc.initial_salvo_delay, wc.ordnance.velocity),
-        _ => (1.0 / crate::TICK_HZ as f32, wc.ordnance.velocity),
-    }
+    let late = match wc.ordnance.kind {
+        crate::weapon::OrdKind::Missile => wc.initial_salvo_delay,
+        _ => 1.0 / crate::TICK_HZ as f32,
+    };
+    (late, wc.shot_ordnance().velocity)
 }
 
 /// Card FFLN: is a unit of `u`'s own team in its line of fire — the unit's
@@ -769,7 +770,7 @@ pub(crate) fn release_blasts_own_side(sim: &Sim, i: usize) -> bool {
     let Some(r) = wc.ordnance.explosion.as_ref().map(|e| e.damage_outer) else {
         return false;
     };
-    let speed = wc.ordnance.velocity;
+    let speed = wc.shot_ordnance().velocity;
     if r <= 0.0 || speed <= 0.0 {
         return false;
     }

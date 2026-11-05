@@ -15,9 +15,12 @@ set -euo pipefail
 # land.py reads this line too (it refuses a card whose `rebake=` names another).
 REBAKE_GROUPS="tat1 tat2 maps common side dlc classes sounds global-sound load beep"
 CLI_PC_DIR=""
+MENU_FONT_CORE="${OPENBF_MENU_FONT_CORE:-}"
 WANT_GROUPS=()
 while [ $# -gt 0 ]; do
   case "$1" in
+    --menu-font-core) [ $# -ge 2 ] || { echo "rebake: --menu-font-core needs a local PS2 BF2 CORE.LVL" >&2; exit 2; }; MENU_FONT_CORE="${2//\\//}"; shift 2 ;;
+    --menu-font-core=*) v="${1#*=}"; MENU_FONT_CORE="${v//\\//}"; shift ;;
     --pc-dir) [ $# -ge 2 ] || { echo "rebake: --pc-dir needs a directory" >&2; exit 2; }; CLI_PC_DIR="${2//\\//}"; shift 2 ;;
     --pc-dir=*) v="${1#*=}"; CLI_PC_DIR="${v//\\//}"; shift ;;
     --pc1) [ $# -ge 2 ] || { echo "rebake: --pc1 needs a directory" >&2; exit 2; }; PC1="${2//\\//}"; shift 2 ;;
@@ -298,8 +301,17 @@ if want common; then
       FONT_DONORS+=("$(ci "$donor" CORE.LVL)")
     fi
   done
+  MENU_FONT_ARGS=()
+  if [ -n "$MENU_FONT_CORE" ]; then
+    MENU_FONT_ARGS=(--menu-font-core "$MENU_FONT_CORE")
+  fi
+  # The selected PS2 copy is already preferred by the input planner. An
+  # optional explicit PS2 font source changes only menu glyphs. Otherwise
+  # native PC/Xbox glyphs get a similar treatment with different source art.
+  if [ -n "${FONT_DONORS[0]:-}$MENU_FONT_CORE" ]; then
+    "$BAKE" fonts "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2" "" ${FONT_DONORS[@]+"${FONT_DONORS[@]}"} ${MENU_FONT_ARGS[@]+"${MENU_FONT_ARGS[@]}"}
+  fi
   if [ -n "${FONT_DONORS[0]:-}" ]; then
-    "$BAKE" fonts "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2" "" ${FONT_DONORS[@]+"${FONT_DONORS[@]}"}
     "$BAKE" ui-art "$(ci "$UI2" CORE.LVL)" "$OUT/common_bf2" ${FONT_DONORS[@]+"${FONT_DONORS[@]}"}
   fi
   # The specular pass's lookup table, from each game's own CORE.LVL (the
@@ -396,8 +408,13 @@ if want side; then
   A2="$(ci "$B2" INGAME.LVL)"
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear "$A1"
   BF2_ANIMS="$A2" bake_native_side bf1 "$B1" wok wok_inf_wookie wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher "$A1"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" gun nab_inf_gungan gun_weap_inf_grenadethermal,gun_weap_inf_fusioncutter "$A1"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A1"
+  BF2_ANIMS="$A2" bake_native_side bf1 "$B1" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle "$A1"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" ewk ewk_inf,ewk_inf2 ewk_rock,ewk_spear,ewk_weap_inf_fusioncutter "$A2"
   BF1_ANIMS="$A1" bake_native_side bf2 "$B2" wok wok_inf_wookiewarrior wok_weap_inf_bowcaster,wok_weap_inf_fusioncutter,wok_weap_inf_launcher,wok_weap_inf_thermaldetonator "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" geo gen_inf_geonosian geo_weap_inf_blunderbuss "$A2"
+  BF1_ANIMS="$A1" bake_native_side bf2 "$B2" des tat_inf_jawa,tat_inf_tusken tat_weap_tuskrifle,des_weap_inf_fusioncutter "$A2"
   # Every BF2 hero body, cloth, weapon, HUD icon and blade sheet comes from
   # its class references, including the campaign variants.
   BF1_ANIMS="$A1" "$BAKE" heroes "$B2" "$OUT/side_bf2"
@@ -528,7 +545,7 @@ if want classes; then
   "$BAKE" classes "$(ci "$B1" SIDE/CIS.LVL)"          "$OUT/classes/bf1_cis.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/ALL.LVL)"          "$OUT/classes/bf2_all.ron"
   "$BAKE" classes "$(ci "$B2" SIDE/IMP.LVL)"          "$OUT/classes/bf2_imp.ron"
-  for side in ewk wok; do
+  for side in ewk wok geo des; do
     "$BAKE" classes "$(ci "$B1" "SIDE/$side.LVL")" "$OUT/classes/bf1_$side.ron"
     "$BAKE" classes "$(ci "$B2" "SIDE/$side.LVL")" "$OUT/classes/bf2_$side.ron"
   done

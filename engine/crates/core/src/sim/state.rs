@@ -241,6 +241,7 @@ pub struct Sim {
     pub test_rosters: [Option<(usize, Option<u8>)>; 2],
     /// BF2 mission hero classes and offer lifecycle; absent on other content.
     pub heroes: Option<super::heroes::Heroes>,
+    pub deathmatch: Option<super::deathmatch::Deathmatch>,
     /// Per player SLOT, the class index that slot's NEXT respawn takes
     /// (`buttons::SPAWN_CLASS_NEXT`/`PREV` while dead). Parallel to
     /// `players`, grown by `sync_slot_tables`, and HASHED — a player who has
@@ -778,6 +779,9 @@ pub fn omni_radius_for(source_game: &str) -> f32 {
 /// plays as before.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MissionAi {
+    /// Stock Kamino disables blind tactical jet hops. The hop must clear
+    /// the intervening soldier barriers (BF2 FUN_002dbb68 B2:265077–265083).
+    pub allow_blind_jet_jumps: bool,
     /// `SetAIViewMultiplier(m)`: every AI's view distance times this (BF2
     /// clamps it to [0.1, 1.0]; default 1.0). Dagobah 0.35, Felucia 0.65.
     pub view_mult: f32,
@@ -797,6 +801,7 @@ pub const SNIPE_SUITABILITY_DEFAULT: f32 = 70.0;
 impl Default for MissionAi {
     fn default() -> Self {
         Self {
+            allow_blind_jet_jumps: true,
             view_mult: 1.0,
             aggressiveness: [1.0; 2],
             snipe_suitability: SNIPE_SUITABILITY_DEFAULT,
@@ -948,6 +953,7 @@ impl Sim {
             classes: [Vec::new(), Vec::new()],
             test_rosters: [None; 2],
             heroes: None,
+            deathmatch: None,
             spawn_choice: Vec::new(),
             spawn_post_choice: Vec::new(),
             prev_spawn_bits: Vec::new(),

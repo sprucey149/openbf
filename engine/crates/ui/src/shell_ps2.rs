@@ -534,7 +534,7 @@ impl Ctx<'_> {
             self.label(&centre, BUTTON_FONT, &m.prompt, at, HAlign::Center, style);
             return;
         };
-        let Some(font) = self.art.fonts.get(BUTTON_FONT) else {
+        let Some(font) = self.font(BUTTON_FONT) else {
             return;
         };
         let lay = stack_layout(font, stack);
@@ -592,9 +592,7 @@ impl Ctx<'_> {
         let (cx, top) = ((x0 + x1) * 0.5, y0 + (ROW_H - lh) * 0.5);
         if let Some(across) = f.square {
             let w = self
-                .art
-                .fonts
-                .get(BUTTON_FONT)
+                .font(BUTTON_FONT)
                 .map_or(0.0, |font| run_width(font, row.text, LABEL_STRETCH, false));
             let x = cx - w * 0.5 + w * across;
             let rect = [x, top, x + lh, top + lh];
@@ -631,6 +629,77 @@ struct FlashyRow<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_draw_and_pointer_share_menu_metrics_at_all_capture_sizes() {
+        use crate::hud_draw::HudArt;
+        use crate::hud_tree::Hud;
+        use manifest::hud::{HudFont, HudGlyph, HudLayout};
+        let legacy = HudFont {
+            name: BUTTON_FONT.into(),
+            line_height: 22,
+            pages: vec!["legacy".into()],
+            glyphs: (32..127)
+                .map(|code| HudGlyph {
+                    code,
+                    page: 0,
+                    advance: 4,
+                    x0: 0,
+                    x1: 4,
+                    y0: 3,
+                    y1: 18,
+                    uv: [0.0, 0.1, 0.0, 0.1],
+                })
+                .collect(),
+        };
+        let mut menu = legacy.clone();
+        menu.name = "menu_gamefont_large".into();
+        menu.pages = vec!["menu".into()];
+        for g in &mut menu.glyphs {
+            g.advance = 12;
+            g.x1 = 12;
+        }
+        let mut art = HudArt::default();
+        art.fonts.insert(legacy.name.clone(), legacy);
+        art.fonts.insert(menu.name.clone(), menu);
+        let mut menus = ShellMenus::new(&|_, fallback| fallback.into());
+        menus.page = Page::Main;
+        menus.on_page = 5.0;
+        let empty = HudLayout {
+            name: "empty".into(),
+            nodes: Vec::new(),
+        };
+        let mut hud = Hud::new(&empty, &empty);
+        hud.shell = Some((menus.clone(), false));
+        let layout = stack_layout(art.menu_font(BUTTON_FONT).unwrap(), menus.stack().unwrap());
+        for size in [
+            [1920.0, 1080.0],
+            [2560.0, 1440.0],
+            [3840.0, 2160.0],
+            [640.0, 480.0],
+        ] {
+            let frame = crate::hud_draw::draw(&hud, &art, size);
+            assert!(frame.batches.iter().any(|b| b.texture == "menu"));
+            assert!(!frame.batches.iter().any(|b| b.texture == "legacy"));
+            let [x0, y0, x1, y1] = layout.rows[0];
+            let screen = crate::spawn_draw::screen_at(size, crate::spawn_draw::Anchor::Centre);
+            let point = screen.map(glam::vec3(x1 - 1.0, (y0 + y1) * 0.5, 0.0));
+            assert_eq!(
+                row_at(art.menu_font(BUTTON_FONT).unwrap(), &menus, point, size),
+                Some(0)
+            );
+            // The edge of this wider row is outside the old, narrow font's bar.
+            assert!(x1 > x0);
+            assert_eq!(row_at(&art.fonts[BUTTON_FONT], &menus, point, size), None);
+        }
+        hud.shell = None;
+        let ctx = Ctx {
+            hud: &hud,
+            art: &art,
+            out: Default::default(),
+        };
+        assert_eq!(ctx.font(BUTTON_FONT).unwrap().name, BUTTON_FONT);
+    }
 
     fn menus() -> ShellMenus {
         ShellMenus::new(&|_, e| e.to_owned())

@@ -1532,6 +1532,7 @@ fn a_bot_lobs_a_mortar_shell_over_a_wall() {
         shot_elevate: 0.1,
         hide_on_fire: true,
         hand: None,
+        native_thermal_hand: false,
     });
     mortar.ordnance = OrdnanceClass {
         velocity: 40.0,

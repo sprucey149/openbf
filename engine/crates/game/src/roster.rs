@@ -108,6 +108,7 @@ pub struct ClassRoster {
     pub max: Option<u32>,
     /// The ODF's `PointsToUnlock` (0 = none; `UnitClass::unlock_points`).
     pub unlock_points: u32,
+    pub flee_like_a_hero: bool,
     pub droideka: Option<std::sync::Arc<core::droideka::DroidekaClass>>,
     /// A droideka's shield in the HUD's secondary row: its `HUDTag`, from the
     /// play db, so both games show BF2's `hud_droideka_shield`.
@@ -853,7 +854,6 @@ pub fn held_slots(db: &ClassDb, soldier: &str, primary: u8) -> Vec<HeldSlot> {
 /// (re-jetpack.md §2.1) - come from BF2's class of the same role
 /// (re-jetpack.md §2.2, §12). Rows: (BF1 class, its BF2 twin,
 /// JetAcceleration, the jet row or None for the ctor default 0.3 / 0.3 / 1.0).
-/// The Geonosian is a local class the bake does not carry, so it has no row.
 /// `tests/suite/roster.rs` holds the numbers to the BF2 twins' baked classes.
 pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
     (
@@ -868,6 +868,12 @@ pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
         "imp_inf_dark_trooper",
         10.0,
         None,
+    ),
+    (
+        "geo_inf_geonosian",
+        "geo_inf_geonosian",
+        20.0,
+        Some([2.0, 1.25, 1.25]),
     ),
 ];
 
@@ -1156,6 +1162,10 @@ impl ClassRoster {
                         .flatten()
                 })
                 .unwrap_or(0),
+            flee_like_a_hero: db
+                .prop(class, "FleeLikeAHero")
+                .and_then(|value| value.trim().parse::<i32>().ok())
+                .is_some_and(|value| value & 1 != 0),
             droideka_shield: walker_droid
                 .then(|| crate::droideka::shield_weapon(weapon_db, class))
                 .flatten()
@@ -1273,6 +1283,16 @@ impl FactionRoster {
         faction: &str,
         mission_classes: &[(String, u32, Option<u32>)],
     ) -> Result<(FactionRoster, Vec<SkippedClass>)> {
+        Self::build_with_fallback(db, game, faction, mission_classes, true)
+    }
+
+    fn build_with_fallback(
+        db: &ClassDb,
+        game: &str,
+        faction: &str,
+        mission_classes: &[(String, u32, Option<u32>)],
+        allow_defaults: bool,
+    ) -> Result<(FactionRoster, Vec<SkippedClass>)> {
         let defaults = default_classes(game, faction).with_context(|| {
             format!("unknown faction {faction} on a {game} map (all|imp|rep|cis)")
         })?;
@@ -1291,11 +1311,11 @@ impl FactionRoster {
             }
             // The fill class has to be the mission's OWN first class.
             let fill = mission_classes[0].0.to_ascii_lowercase();
-            if classes.first().is_none_or(|c| c.class != fill) {
+            if allow_defaults && classes.first().is_none_or(|c| c.class != fill) {
                 classes.clear();
             }
         }
-        if classes.is_empty() {
+        if allow_defaults && classes.is_empty() {
             // Either the map ships no mission, or none of its classes are in
             // this db. Either way the faction still has to field somebody.
             for name in defaults {
@@ -1323,8 +1343,8 @@ impl FactionRoster {
         ))
     }
 
-    /// The class the AI fill with and the human starts as — the mission's
-    /// first entry, which on every mission censused is the plain trooper.
+    /// The class the AI fill with and the human starts as: Conquest's fill
+    /// trooper, or the first usable authored hero in Hero Assault.
     pub fn fill_class(&self) -> &ClassRoster {
         &self.classes[0]
     }
@@ -1340,6 +1360,9 @@ impl FactionRoster {
     /// `factions`: a GCW mission names `all`/`imp`, a CW one `rep`/`cis`, on
     /// either disc.
     ///
+    /// Hero Assault keeps every usable authored class, even if the first is
+    /// missing, and refuses an empty team instead of substituting infantry.
+    ///
     /// The warnings are RETURNED, not printed. The 32-map sweep runs its maps
     /// on a worker pool and writes each map's result through one ordered
     /// buffer; a roster warning printed from here landed on stderr in
@@ -1352,7 +1375,17 @@ impl FactionRoster {
         factions: [&str; 2],
         mission: Option<&MissionDef>,
     ) -> Result<([FactionRoster; 2], Vec<String>)> {
-        let db = load_classdb(classes_dir, game, &factions)?;
+        let mut sides = factions.to_vec();
+        for load in mission
+            .filter(|m| m.is_hero_assault())
+            .into_iter()
+            .flat_map(|m| &m.class_load_order)
+        {
+            if !sides.contains(&load.side.as_str()) {
+                sides.push(&load.side);
+            }
+        }
+        let db = load_classdb(classes_dir, game, &sides)?;
         let mut warnings = Vec::new();
         let mut out = Vec::new();
         for (i, f) in factions.into_iter().enumerate() {
@@ -1360,14 +1393,25 @@ impl FactionRoster {
                 .and_then(|m| m.teams.get(i))
                 .map(|t| t.classes.as_slice())
                 .unwrap_or(&[]);
-            let (roster, skipped) = FactionRoster::build(&db, game, f, mix)?;
+            let assault = mission.is_some_and(MissionDef::is_hero_assault);
+            let (roster, skipped) = Self::build_with_fallback(&db, game, f, mix, !assault)
+                .with_context(|| {
+                    format!(
+                        "{}team {} ({f})",
+                        if assault { "Hero Assault " } else { "" },
+                        i + 1
+                    )
+                })?;
             for s in &skipped {
                 warnings.push(format!(
                     "roster {f}: skipped class {} — {}",
                     s.class, s.reason
                 ));
             }
-            if !mix.is_empty() && roster.fill_class().class != mix[0].0.to_ascii_lowercase() {
+            if !assault
+                && !mix.is_empty()
+                && roster.fill_class().class != mix[0].0.to_ascii_lowercase()
+            {
                 warnings.push(format!(
                     "roster {f}: the mission's fill class {} is not in the {game} class db \
                      ({} of {} classes missing) — falling back to the default list",

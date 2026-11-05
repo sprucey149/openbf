@@ -1,5 +1,10 @@
 # BF2 Kashyyyk: sky glow, low mist and water colour
 
+Current integration note (2026-11-04): #118's shared atmosphere and subdivided
+flat-water drawing are present at `4cda5ab4`. The original template RNG state,
+reduced far-water template and original-game visual sign-off remain unverified.
+The drawing changes do not alter the canonical wet mask or gameplay geometry.
+
 [O] UNAUDITED. Source configuration, existing water RE and local renderer
 captures; no independent re-derivation or synchronized original-game comparison.
 

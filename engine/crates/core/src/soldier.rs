@@ -124,6 +124,9 @@ pub struct SoldierConstants {
     /// 1.15, BF2's snipers 0.95): the bolt prims' scale (`Unit::bolt_hit`,
     /// issue #41; analysis/re-hitzones.md).
     pub collision_scale: f32,
+    /// BF2 grenade release scales the class hand offset by `SkeletonRootScale`
+    /// (FUN_00337b80, B2:329765–329795), independently of collision scale.
+    pub skeleton_root_scale: f32,
     /// All three authored `CollisionScale` damage terms are zero. The game
     /// loader replays the class chain. PS2 collision damage multiplies by
     /// these terms (BF1 FUN_00202f38:114478–114540; BF2
@@ -195,6 +198,7 @@ impl Default for SoldierConstants {
             prone_up_lock: 44.5 / 30.0,
             aim_size: 1.0,
             collision_scale: 1.0,
+            skeleton_root_scale: 1.0,
             collision_damage_immune: false,
             jet_jump: 7.0,
             jet_push: 14.0,
@@ -240,6 +244,13 @@ impl SoldierConstants {
         set("MaxStrafeSpeed", &mut c.max_strafe_speed);
         set("MaxTurnSpeed", &mut c.max_turn_speed);
         set("CollisionRootScale", &mut c.collision_scale);
+        let root_scale = src
+            .prop_hash_all(crate::flash::fnv_lower("SkeletonRootScale"))
+            .last()
+            .and_then(|raw| raw.split_whitespace().next()?.parse::<f32>().ok());
+        if let Some(scale) = root_scale.filter(|v| v.is_finite() && *v > 0.0) {
+            c.skeleton_root_scale = scale;
+        }
         set("MaxPitchSpeed", &mut c.max_pitch_speed);
         set("Acceleration", &mut c.acceleration);
         set("Acceleraton", &mut c.acceleration);

@@ -157,7 +157,7 @@ cylinder about X/Y/Z). [V]
 |---|---|---|
 | index | +0x04 | +0x04 |
 | faction id (1 all, 2 imp, 3 rep, 4 cis, 5+ locals) | +0x64 | +0x60 |
-| relation bytes `[8]` (1 friend, 0 neutral, 0xff enemy; self = 1) | +0x88 | +0x84 |
+| relation bytes `[8]` (1 friend, 0 neutral, 0xff enemy; self = 1; the ctor zeroes byte 0 and writes 0xff to every other team, B1 `FUN_002acf40` / B2 `FUN_0036d468`, so an unset pair is enemies) | +0x88 | +0x84 |
 | **capture affiliation** (team index a unit captures *for*) | +0x90 | +0x8c |
 
 Affiliation: ctor sets it to the team's own index (BF1 `FUN_002acf40` tail, BF2 `FUN_0036d468`
@@ -307,6 +307,46 @@ BF1 also keeps a per-CP spawn-queue counter `cp+0x8c[isAI][sameTeam]` (reserve `
 release `FUN_0029ddf0`, replicated) — bookkeeping only. AllyCount → locals budget: BF1
 `mgr+0x84 = Σ cp.AllyCount` over CPs whose owner's relation byte to team 3 is > 0 (clamped by
 `mgr+0x50`); BF2 `mgr+0x58` likewise (`FUN_0036c750`). [V]
+
+### 6.1 Independent Dune Sea locals
+
+BF1's team constructor (`FUN_002acf40`, B1:238282–238301) makes every
+nonzero other team an enemy and itself a friend. An empty mission relation
+list therefore does not suppress a roster. The native-owned CP3 has its own
+`CP3SpawnPath` with 13 nodes and no AllyPath: the same-owner branch of
+`FUN_0029de80` (B1:227148–227170) admits its Tuskens through SpawnPath.
+The BF2 equivalent is `FUN_00356880` (B2:350959–350978).
+
+CP1 is also authored on team 3 with its own SpawnPath, no AllyPath, and
+AllyCount 65536. Losing CP3 alone therefore redirects waves to CP1; it must not
+silence the entire team. Losing both removes native spawning until a surviving
+Tusken retakes a usable post.
+
+The budget update (`FUN_002ac378`, B1:237768–237783;
+`FUN_0036c750`, B2:366105–366110,366161–366164) separately sums the
+post owners' directed friendship contributions and clamps to the member pool.
+A usable path does not itself contribute capacity, and a capacity contribution
+does not require that post to have a usable path. Dune Sea's 14 authored members,
+class minima 5 + 2, and CP3's AllyCount 65536 are three different quantities.
+A retained retail BF1 state confirms 14 members, a clamped local budget of 14,
+quotas 12 + 2 and native capture affiliation 3; its 11 living actors are a
+mid-round observation, not an opening count.
+
+The capture scan uses per-affiliation counters (`FUN_0029f0d8`,
+B1:228140–228151). Native affiliation remains its own index when it has no
+friendly main army (`FUN_002ad490`, B1:238511–238527). Neutralization changes
+the real post owner to neutral (`FUN_0029f0d8`, B1:228533–228590), so neither
+its former owner's capacity contribution nor its own SpawnPath remains eligible.
+Subsequent capture restores eligibility only for the new owner and its directed
+allies. openbf retains the BF2 capture/recovery rules and the existing documented
+meter reset on every map.
+
+The Tusken slice counts independent hostile natives for capture; the preexisting
+friendly-native capture affiliation omission remains separate work. Native Hunt
+goals, fixed member classes and first-class quota top-up remain port approximations.
+PROVISIONAL, replace: compare native goal dispatch, class assignment and post/node
+draws over original BF1/BF2 spawn waves; the retained 12 + 2 quotas do not establish
+the top-up algorithm or a full lifecycle match.
 
 ---
 

@@ -156,10 +156,6 @@ pub struct DamageDesc {
 }
 
 impl OrdnanceClass {
-    pub fn max_range(&self) -> f32 {
-        self.velocity * self.life_span
-    }
-
     /// Is this ordnance a TRACER - a round that exists only to be drawn? Every
     /// BF2 class a weapon names as its `SecondaryOrdnanceName` is one
     /// (`com_weap_inf_shotgun_tracer`, `com_weap_inf_chaingun_tracer`, ...:
@@ -187,6 +183,11 @@ impl OrdnanceClass {
             scales: self.scales,
             shield_scale: self.shield_scale,
         };
+        // Ordinary throws have no knots: preserve their values without
+        // allocating the interpolation table. Emitters keep their damage lerp.
+        if self.knots.is_empty() && self.min_damage.is_none() {
+            return root;
+        }
         let point = |k: &OrdKnot| OrdBlend {
             velocity: k.velocity,
             life_span: k.life_span,
@@ -559,6 +560,12 @@ pub struct OrdBlend {
     pub damage: f32,
     pub scales: [f32; 7],
     pub shield_scale: f32,
+}
+
+impl OrdBlend {
+    pub fn max_range(&self) -> f32 {
+        self.velocity * self.life_span
+    }
 }
 
 /// The shell's gravity unit: `v.y += Gravity x -9.8 x dt` each update (B1

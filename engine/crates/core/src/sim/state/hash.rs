@@ -13,6 +13,9 @@ impl Sim {
             }
         };
         eat(&self.tick.to_le_bytes());
+        if !self.mission_ai.allow_blind_jet_jumps {
+            eat(b"NO_BLIND_JET_HOPS");
+        }
         eat(&self.difficulty.bytes());
         if self.team_difficulty.iter().any(Option::is_some) {
             for d in self.team_difficulty {
@@ -38,6 +41,9 @@ impl Sim {
         }
         if let Some(heroes) = &self.heroes {
             heroes.hash_into(&mut eat);
+        }
+        if let Some(deathmatch) = &self.deathmatch {
+            deathmatch.hash_into(&mut eat);
         }
         for (team, roster) in self.test_rosters.iter().enumerate() {
             if let Some((len, hero)) = roster {

@@ -1,7 +1,11 @@
 //! Actual posed blade queries against soldiers and destructible hurt primitives.
 
 use super::*;
-use crate::{collision::Layers, hero_weapon::BladeSegment, projectile::Target};
+use crate::{
+    collision::Layers,
+    hero_weapon::BladeSegment,
+    projectile::{building_hit, Hit, Target},
+};
 use glam::Mat4;
 
 impl Sim {
@@ -161,12 +165,13 @@ impl Sim {
                 if !body.layers.contains(Layers::ORDNANCE) {
                     continue;
                 }
-                let target = body.owner.map(Target::Vehicle).or_else(|| {
-                    body.instance
-                        .and_then(|n| self.collision.station(n))
-                        .map(Target::Station)
-                });
-                let Some(target) = target else { continue };
+                let target = body.owner.map_or_else(
+                    || building_hit(&self.collision, body.instance),
+                    |v| Hit::Target(Target::Vehicle(v)),
+                );
+                let Hit::Target(target) = target else {
+                    continue;
+                };
                 if state.already_hit(attack, target) {
                     continue;
                 }

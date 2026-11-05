@@ -271,8 +271,9 @@ pub fn bake_shell(
         };
         let n = n.to_ascii_lowercase();
         if SHELL_TEXTURES.contains(&n.as_str()) && !textures.contains(&n) {
-            let t = mungefs::texture::Texture::parse(c)
+            let mut t = mungefs::texture::Texture::parse(c)
                 .map_err(|e| anyhow!("{shell_lvl} tex_ 0x{:X}: {e}", c.offset))?;
+            register_xbox_backdrop(c, &mut t);
             crate::detail::write_ktx2(&tex_dir, &format!("{n}.ktx2"), &t)?;
             textures.push(n);
         }
@@ -341,9 +342,150 @@ pub fn bake_shell(
     Ok(index)
 }
 
+/// [M][O] Native disc-art landmarks in the shared 512x448 logical frame:
+/// Xbox body rows [75,438), PS2 [60,386); bright center housing top
+/// 160..175 vs 132..147, bottom 280..291 vs 248..261. Xbox dark panels
+/// x~28/477 vs PS2 ~15/483; the red sign is 215..290,121..143 vs
+/// 212..286,94..116. These are artwork measurements, not runtime evidence.
+/// OURS: register only this native Xbox 512-square sheet to the common
+/// overlay. Crop x=[13,503); scale between the body/housing landmarks so
+/// both housing edges fit, retaining opaque black outside the body.
+/// measure: matched original Xbox 4:3/16:9 menu captures for acceptance.
+fn register_xbox_backdrop(chunk: &mungefs::Chunk<'_>, texture: &mut mungefs::texture::Texture) {
+    if !texture.name.eq_ignore_ascii_case("iface_instant_action")
+        || !mungefs::texture_xbox::is_xbox(chunk)
+        || [texture.info.width, texture.info.height] != [512, 512]
+    {
+        return;
+    }
+    let source = texture.rgba8(0);
+    let mut rgba = [0, 0, 0, 255].repeat(512 * 512);
+    for y in 60..386 {
+        let (dst0, dst1, src0, src1) = match y {
+            60..132 => (60, 132, 75, 160),
+            132..148 => (132, 148, 160, 176),
+            148..248 => (148, 248, 176, 280),
+            248..262 => (248, 262, 280, 292),
+            _ => (262, 386, 292, 438),
+        };
+        // Pixel centers, with taps clamped to the measured content crop.
+        let sy = (src0 as f32
+            + (y as f32 + 0.5 - dst0 as f32) * (src1 - src0) as f32 / (dst1 - dst0) as f32
+            - 0.5)
+            .clamp(75.0, 437.0);
+        for x in 0..512 {
+            let sx = (13.0 + (x as f32 + 0.5) * 490.0 / 512.0 - 0.5).clamp(13.0, 502.0);
+            let (ix, iy) = (sx as usize, sy as usize);
+            let (fx, fy) = (sx - ix as f32, sy - iy as f32);
+            for c in 0..3 {
+                let at = |xx, yy| source[(yy * 512 + xx) * 4 + c] as f32;
+                let top = at(ix, iy) * (1.0 - fx) + at(ix + 1, iy) * fx;
+                let bot = at(ix, iy + 1) * (1.0 - fx) + at(ix + 1, iy + 1) * fx;
+                rgba[(y * 512 + x) * 4 + c] = (top * (1.0 - fy) + bot * fy).round() as u8;
+            }
+        }
+    }
+    // Discard unregistered source mips; the KTX2 writer derives the chain
+    // from the corrected top mip, so minification keeps the same placement.
+    texture.info.bpp = 32;
+    texture.info.mip_count = 1;
+    texture.palette.clear();
+    texture.mips = vec![rgba];
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn xbox_backdrop_registers_body_and_housing_only_for_native_sheet() {
+        fn chunk(tag: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+            let mut out = tag.to_vec();
+            out.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+            out.extend_from_slice(payload);
+            out.resize(out.len().next_multiple_of(4), 0);
+            out
+        }
+        let mut info = Vec::new();
+        for v in [512_u16, 512, 1, 1] {
+            info.extend(v.to_le_bytes());
+        }
+        for v in [1_u32, 0x07, 512 * 512 * 4] {
+            info.extend(v.to_le_bytes());
+        }
+        let body = vec![0; 512 * 512 * 4];
+        let payload = [chunk(b"INFO", &info), chunk(b"BODY", &body)].concat();
+        let native = mungefs::Chunk {
+            tag: *b"tex_",
+            payload: &payload,
+            offset: 0,
+        };
+        assert!(mungefs::texture_xbox::is_xbox(&native));
+        let source: Vec<u8> = (0..512)
+            .flat_map(|y| {
+                (0..512).flat_map(move |x| {
+                    [
+                        if (13..503).contains(&x) { 80 } else { 240 },
+                        if (160..176).contains(&y) || (280..292).contains(&y) {
+                            200
+                        } else {
+                            0
+                        },
+                        if (75..438).contains(&y) { 120 } else { 250 },
+                        255,
+                    ]
+                })
+            })
+            .collect();
+        let mut texture = mungefs::texture::Texture {
+            name: "IFACE_INSTANT_ACTION".into(),
+            info: mungefs::texture::TextureInfo {
+                width: 512,
+                height: 512,
+                bpp: 32,
+                detail_compressed: false,
+                mip_distance: 0.0,
+                mip_count: 2,
+            },
+            palette: Vec::new(),
+            mips: vec![source.clone(), vec![9; 256 * 256 * 4]],
+        };
+        let pc_payload = [payload.clone(), chunk(b"FMT_", &[])].concat();
+        let ps2_payload = [chunk(b"INFO", &info[..14]), chunk(b"BODY", &body)].concat();
+        for payload in [&pc_payload, &ps2_payload] {
+            let other = mungefs::Chunk {
+                tag: *b"tex_",
+                payload,
+                offset: 0,
+            };
+            register_xbox_backdrop(&other, &mut texture);
+            assert_eq!(texture.mips[0], source);
+            assert_eq!(texture.mips.len(), 2);
+        }
+        texture.name = "logo".into();
+        register_xbox_backdrop(&native, &mut texture);
+        assert_eq!(texture.mips[0], source);
+        texture.name = "iface_instant_action".into();
+        register_xbox_backdrop(&native, &mut texture);
+        assert_eq!(texture.mips.len(), 1);
+        assert_eq!(texture.info.mip_count, 1);
+        for y in 0..512 {
+            for x in 0..512 {
+                let pixel = &texture.mips[0][(y * 512 + x) * 4..][..4];
+                if (60..386).contains(&y) {
+                    assert_eq!([pixel[0], pixel[2], pixel[3]], [80, 120, 255]);
+                } else {
+                    assert_eq!(pixel, [0, 0, 0, 255]);
+                }
+            }
+        }
+        for y in [132, 146, 248, 249, 251, 260] {
+            assert!(
+                texture.mips[0][(y * 512 + 256) * 4 + 1] >= 180,
+                "housing row {y}"
+            );
+        }
+    }
 
     #[test]
     fn jpegs_split_at_their_start_markers() {

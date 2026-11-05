@@ -195,12 +195,36 @@ B2 `FUN_00337b80` (329692-329890): position = the owner's matrix x the class off
 16 x index), the offset first scaled by the soldier class's +0x1220 when that is not 1.0; the same `ShotElevate`
 rule on owner+0xc0 >= 0. The offsets are filled at class finalise (`FUN_003383f8` 330057-330155) from the throw
 animations sampled at the variant's `InitialSalvoDelay` — the hand's position at the release.
-The launch speed is the ordnance's `Velocity`: the bullet constructor (B1 `FUN_002762a0` 197504-) sets velocity =
-direction x (Velocity lerped toward the `NextCharge` class's by the charge fraction), and no grenade ordnance on the
-discs has a `NextCharge` (RAM: the class points at itself) — the strength changes the animation only.
+The launch speed is the ordnance's `Velocity`, blended through its charge knots by
+the bullet constructor (B1 `FUN_002762a0`, 197533-197546). The sampled thermal
+classes point to themselves in RAM; their strength changes the animation only.
+That observation does not generalize to all thrown ordnance: BF1 Ewok spear
+authors 5 -> 25 m/s and rock 5 -> 20 m/s at `NextCharge 1.0`; Gungan haywire
+authors 1.5 -> 25 m/s. Their weapons have no press limit. Fire entry
+`FUN_0028eb30` B1:215634-215640 supplies strength 1 in that case, which the
+throw packet carries (`FUN_0028ef70`, 215865). Sticky inherits the shell,
+bullet and base constructors' charge evaluation; `re-weapon-charge` §4 gives
+the complete BF1/BF2 chain. These native code and authored-data findings do
+not constitute new retail Ewok or mortar throw captures.
 [M] BF1: aim (-0.1205, -0.0622, 0.9908) -> launch velocity (-2.9858, 3.6617, 24.5495) = normalise(aim + 0.21 y) x 25
 to 4 decimals; BF2: aim (0.0064, 0.1857, -0.9826) -> (0.1513, 9.3390, -23.1896), the same formula; BF2 spawn position
 = feet + (0, 1.8183, 0) + 0.7433 m along the facing.
+
+The four finalized BF2 stock thermal classes share the strong local hand point
+`(0, 1.8182718, 0.74327886)` in retained retail states. The soldier property
+setter stores `SkeletonRootScale` independently of collision scale (B2:172070–172080).
+The thermal launch reads that value and the owner world matrix through separate
+calls (`FUN_00337b80`, B2:329765–329795). The soldier owner slot resolves to
+`0x255890`, which returns the matrix at entity +0x120. Retained Kamino poses
+keep this basis upright through slope contact and falls. The original samples
+do not include a live scaled, prone or posture-transition thermal release.
+
+The port scales the strong hand vector for the four native uncharged BF2
+thermal classes on standing and crouched releases. The 2 cm world-Y floor
+correction comes after the scale. Unity and compatibility throws keep their
+calibrated bits. OURS: other release stances and authored variant overrides
+keep their existing origin. trace: a live scaled release and the latched
+variant across posture changes, including the port's restored prone.
 
 ## 4. The thrown ordnance (`sticky`; the `grenade` BASE in §4.6)
 

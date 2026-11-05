@@ -111,10 +111,18 @@ pub(super) fn charge_points(db: &ClassDb, ord_name: &str, ord: &mut OrdnanceClas
         .map(|(i, _)| i)
         .collect();
     if let Some(&first) = cuts.first() {
+        let sticky = db
+            .engine_base(name)
+            .is_some_and(|base| base.eq_ignore_ascii_case("sticky"));
         let upto = |end: usize| {
-            OrdnanceClass::from_props(&ListSrc {
+            let src = ListSrc {
                 props: &props[..end],
-            })
+            };
+            if sticky {
+                sticky_props(&src)
+            } else {
+                OrdnanceClass::from_props(&src)
+            }
         };
         let root = upto(first);
         (ord.velocity, ord.life_span, ord.max_damage) =
@@ -441,6 +449,19 @@ pub(super) fn weapon_stage(
     Ok(w)
 }
 
+/// Sticky inherits the shell defaults before any charge segment's keys
+/// are applied (`analysis/re-grenades.md` §4.1).
+fn sticky_props(src: &dyn PropSource) -> OrdnanceClass {
+    let mut ord = OrdnanceClass::from_props(src);
+    if src.prop("Velocity").is_none() {
+        ord.velocity = 35.0;
+    }
+    if src.prop("LifeSpan").is_none() {
+        ord.life_span = 3.0;
+    }
+    ord
+}
+
 /// A `sticky` ordnance class (a grenade's or a charged mortar round's): the
 /// shell's defaults (`LifeSpan` 3.0, `Velocity` 35.0, §4.1) where the
 /// bolt's would apply, the sticky's own keys replayed in file order, and its
@@ -450,13 +471,8 @@ pub(super) fn sticky_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
         db,
         class: ord_name,
     };
-    let mut ord = OrdnanceClass::from_props(&osrc);
-    if db.prop(ord_name, "Velocity").is_none() {
-        ord.velocity = 35.0;
-    }
-    if db.prop(ord_name, "LifeSpan").is_none() {
-        ord.life_span = 3.0;
-    }
+    let mut ord = sticky_props(&osrc);
+    charge_points(db, ord_name, &mut ord);
     ord.impact = impact_look(db, ord_name);
     let mut sticky = core::sticky::StickyClass::replay(chain_props(db, ord_name), db.is_bf2());
     sticky.explosion = db

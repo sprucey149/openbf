@@ -186,7 +186,7 @@ pub(super) fn run(v: &ViewerArgs, output: &std::path::Path) -> Result<()> {
     } else {
         None
     };
-    let mut walk = super::super::battle::make_walk_with_counts(&scene, &setup, counts);
+    let mut walk = super::super::battle::make_walk_with_counts(&scene, &setup, counts)?;
     let setup_ms = ms(t);
     let initial_alive = alive(&walk);
     if total {

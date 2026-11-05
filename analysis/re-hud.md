@@ -299,3 +299,79 @@ mesh is not loaded). Folded into §3.
 3playerhud 9 / 1, 4playerhud 5,271 / 6. Fonts: 4 × 226 glyphs, pages 1 / 3 / 3 / 2. PS2 frame boxes (HOT1 postA v1,
 640×480): health fill x 39–169, rows 406–413; stamina fill rows 420–422; friendly count centre x 172.5, rows 46–59; enemy
 centre x 466.5; reticle outline 76 × 70.
+
+## 8. Shared source layout (November 2026, issue #114)
+
+The single-player HUD uses the PS2 geometry in every source profile and in both
+games. This is an openbf presentation decision, not a claim that the original
+PC and Xbox games used the PS2 layout. `bake/src/hud_layout.rs` applies only to
+stock `1playerhud`, with edition evidence from native vertex buffers and stock
+weapon/map anchors. PS2 input is a strict no-op. Other layouts and modified
+stock anchors remain untouched. A rebake/repack is required for existing
+saved layouts and installed packs; the runtime does not migrate older bakes.
+
+The correction table retains only numeric geometry and alignment names for
+properties consumed by `ui::hud_tree::Hud::element` and `ui::hud_draw`:
+placement with its coordinate mode, rotation, scale, viewport-relative
+rectangles, text alignment and segmented arc geometry. These have the PS2
+property semantics traced in §2.1–2.4. MeshInfo corrections are keyed by their
+model parent as well as mesh name: the primary and secondary rows can name the
+same vehicle mesh with different transforms. Within one model the first
+binding wins, as in the renderer; unused later duplicates remain untouched.
+No asset or localized text is
+retained in the table. Mesh, bitmap and texture-coordinate bindings, root
+events, fades, colors and alpha remain native. The established PC ammo/name/
+team-count font roles and layout scales remain, using the player's PC atlas.
+The same compatibility scales apply to the matching statistics, message and
+distance roles. The message box fits seven font lines with PC tiny at 1.14
+vertical scale (13 × 1.14 = 14.82 pixels) and PS2 tiny at 15 pixels; both give
+a 16-pixel pitch in its 112-pixel rectangle. Queue capacity and fades stay native.
+Selected font files and metrics stay native. PC cap bearings are read from the
+selected baked font's `0` glyph; the PS2 numeric reference is tiny line/top
+15/4, small and medium 18/3, large 22/3. The established role scales are kept;
+large uses the measured numeric advance 10→13 and cap height 12→15. Element
+placement compensates the scaled bearing and vertical alignment, including a
+Text's own scale and a multiline format's line pitch. This aligns cap tops
+without replacing a font face. Glyph widths, descenders and mesh silhouettes
+can still differ. Native width/height variation is not pixel-identical art.
+
+The PC secondary backdrop's 22 native vertices have a different Y origin:
+its bounds are −0.673712..0.505169 model units, against PS2's
+1.131230..2.310093. The shared layout position alone leaves it 32.7 display
+pixels too low at 640×480. A −29.11197 frame-pixel placement correction at the
+existing 0.200001 scale compensates the measured 1.8049331-unit pivot offset.
+Its native binding and vertices remain untouched. Native cap positions and
+pill bounds are tested through `HudView`, since equal raw configuration
+positions alone do not establish rendered spacing.
+
+The PC weapon children lack the PS2 `player1weaponinformation_lineupwithhealth`
+group. The bake inserts that relative group at X −0.070914 and sets the root
+at (0.068639, 0.427927), retaining its original enable/disable events. This
+avoids applying the root correction without its compensating relative offset.
+The Xbox default map Position (0.303257, 0.477156, 0) is its spawn position;
+its separate Small position is not consumed by the current interpreter. The
+shared Small anchor is (0.856385, 0.186248, 0.004111), scale 0.9, preserving the
+renderer’s existing right-edge Hor+ selection. Xbox statistics Y changes from
+1.011855 to 1.155109. Health, stamina, jet, ammo/pills/models, teams, target,
+countdown and message geometry are corrected by the same path. The reticle’s
+runtime aim-ray position event remains authoritative over its authored origin.
+The existing shared placement of victory and defeat labels also remains.
+
+`Target`, `ObjectiveList`, `BorderedBox`, the unnamed hero pulse type and
+`VehiclesSeating` are outside the current renderer’s scope. Their uninterpreted
+geometry and Map child view/style records are excluded from normalization;
+code-drawn capture, hit-direction, squad, scope, spawn and round-end overlays
+continue to use their own shared geometry. Missing native MeshInfo bindings and
+shadow-twin elements are not synthesized. The vehicle health bar can interpret
+its native events, but `HudModel` does not yet publish vehicle health; this
+layout change does not add gameplay publishers. Item/backdrop depth ordering
+is a separate change.
+
+The four-source CPU regression loads real baked trees, checks the interpreted
+geometry and matching MeshInfo transforms against the PS2 control (with the
+intentional PC cap/pill Y compensation), and measures
+native-art bounds at 640×480, 1280×720 and 3840×2252. Infantry, vehicle weapon
+channels and disabled states cover both games. `ui_sharp` uses the same models
+for headless GPU captures. The original PS2-frame tolerances in
+`game/tests/suite/hud_layout.rs` remain unchanged. These are source/renderer
+checks; fresh original-game and packaged visual acceptance remain separate.

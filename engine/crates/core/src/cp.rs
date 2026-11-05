@@ -245,7 +245,7 @@ impl CommandPost {
                         self.owner = None;
                         return CpChange::Neutralized { by: first_enemy };
                     }
-                } else if self.neutral > 0.0 && inside[o as usize] > 0 {
+                } else if self.neutral > 0.0 && inside.get(o as usize).is_some_and(|&n| n > 0) {
                     // BF2 recovery: decays only with owner units inside.
                     self.neutral -= presence_weight(inside[o as usize]) * dt;
                     if self.neutral <= 0.0 {

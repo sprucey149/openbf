@@ -26,6 +26,8 @@
 //! [`bake_fonts`] writes a CORE.LVL's bitmap fonts: [`bake_hud`] runs it for
 //! BF2, and `bake fonts <core> <out> <prefix>` for BF1, whose fonts go into the
 //! BF1 common bake as `bf1_<font>` (card SQHUD).
+//! The unprefixed BF2 bake also writes the BF2 Light menu family from local
+//! glyphs, separately from the native HUD (`menu`, issue #114).
 
 use anyhow::{anyhow, Context, Result};
 use manifest::hud::{HudArg, HudFont, HudGlyph, HudIndex, HudLayout, HudLocl, HudNode};
@@ -36,6 +38,7 @@ use std::path::Path;
 mod art;
 mod distance;
 mod fonts;
+mod menu;
 
 /// Generate native UI sheet sidecars, accepting only larger copies which
 /// pass the existing same-art gate. No layout or gameplay record is changed.
@@ -115,6 +118,23 @@ pub fn bake_fonts_with_donors(
     prefix: &str,
     donor_paths: &[std::path::PathBuf],
 ) -> Result<Vec<String>> {
+    bake_fonts_with_menu_source(core_path, out, prefix, donor_paths, None)
+}
+
+/// Optional PS2 CORE.LVL supplies menu glyphs only. Native HUD metrics and
+/// art donor selection remain those of `core_path` and `donor_paths`.
+pub fn bake_fonts_with_menu_source(
+    core_path: &Path,
+    out: &Path,
+    prefix: &str,
+    donor_paths: &[std::path::PathBuf],
+    menu_core: Option<&Path>,
+) -> Result<Vec<String>> {
+    anyhow::ensure!(
+        menu_core.is_none() || prefix.is_empty(),
+        "--menu-font-core is only for unprefixed BF2 fonts"
+    );
+    let menu_source = menu_core.map(menu::source).transpose()?;
     let core = std::fs::read(core_path).with_context(|| core_path.display().to_string())?;
     let core_inner = mungefs::open(&core).map_err(|e| anyhow!("{}: {e}", core_path.display()))?;
     let fonts_dir = out.join("fonts");
@@ -165,6 +185,17 @@ pub fn bake_fonts_with_donors(
         fonts::bake(&f, &donors, &fonts_dir, prefix, &sources)?;
         fonts.push(hf.name);
     }
+    if prefix.is_empty() {
+        let selected;
+        let source = if let Some(source) = &menu_source {
+            source
+        } else {
+            selected = fonts::read_fonts(core_path)?;
+            &selected
+        };
+        let fingerprint = fonts::fingerprint(menu_core.unwrap_or(core_path))?;
+        menu::bake(&fonts_dir, source, &fingerprint, menu_core.is_some())?;
+    }
     fonts.sort();
     Ok(fonts)
 }
@@ -175,11 +206,20 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
     let buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
     let content = mungefs::content_chunks(inner).map_err(|e| anyhow!("{lvl_path}: {e}"))?;
-    let pc = content.iter().filter(|c| &c.tag == b"modl").any(|model| {
-        model
-            .children_tagged(b"segm")
-            .any(|segment| mungefs::model::is_pc_geometry(&segment))
-    });
+    let geometry = |detect: fn(&mungefs::Chunk<'_>) -> bool| {
+        content.iter().filter(|c| &c.tag == b"modl").any(|model| {
+            model
+                .children_tagged(b"segm")
+                .any(|segment| detect(&segment))
+        })
+    };
+    let source = if geometry(mungefs::model::is_xbox_geometry) {
+        crate::hud_layout::Source::Xbox
+    } else if geometry(mungefs::model::is_pc_geometry) {
+        crate::hud_layout::Source::Pc
+    } else {
+        crate::hud_layout::Source::Ps2
+    };
     let mut layouts = Vec::new();
     for c in content.iter().filter(|c| &c.tag == b"hud_") {
         let l = mungefs::hud::parse(c).map_err(|e| anyhow!("hud_ 0x{:X}: {e}", c.offset))?;
@@ -187,11 +227,10 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
             .file_name()
             .ok_or_else(|| anyhow!("hud_ 0x{:X}: no FileInfo name", c.offset))?
             .to_owned();
-        let mut layout = HudLayout {
+        let layout = HudLayout {
             name,
             nodes: l.nodes.iter().map(node).collect(),
         };
-        crate::hud_pc::normalize(&mut layout, pc);
         layouts.push(layout);
     }
     if layouts.is_empty() {
@@ -202,12 +241,23 @@ pub fn bake_hud(lvl_path: &str, outdir: &str) -> Result<Option<HudIndex>> {
         .parent()
         .ok_or_else(|| anyhow!("{lvl_path}: no parent dir"))?;
     std::fs::create_dir_all(out.join("hud"))?;
-    for l in &layouts {
-        crate::write_ron(&out.join("hud").join(format!("{}.ron", l.name)), l)?;
-    }
-
-    // Fonts.
+    // Keep the selected font metrics native. PC cap-bearing correction needs
+    // only these freshly baked metrics, never a console input or font donor.
     let fonts = bake_fonts(&crate::join_ci(dir, FONT_SOURCE), out, "")?;
+    let native_fonts = fonts
+        .iter()
+        .map(|name| {
+            let p = out.join(format!("fonts/{name}.ron"));
+            ron::from_str::<HudFont>(&std::fs::read_to_string(&p)?).map_err(anyhow::Error::from)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    for layout in &mut layouts {
+        crate::hud_layout::normalize(layout, source, &native_fonts);
+        crate::write_ron(
+            &out.join("hud").join(format!("{}.ron", layout.name)),
+            layout,
+        )?;
+    }
 
     // The sheets the layouts name that INGAME lacks.
     let mut wanted = BTreeSet::new();

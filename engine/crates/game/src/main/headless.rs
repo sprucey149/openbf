@@ -517,7 +517,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
 
     // Sim: a real conquest round on this map (use --ai to populate it), driven
     // by an idle pad.
-    let mut walk = make_walk(&scene, &BattleSetup::from_args(v, v.seed)?);
+    let mut walk = make_walk(&scene, &BattleSetup::from_args(v, v.seed)?)?;
     let assets_dir = std::path::Path::new(&v.map)
         .parent()
         .map(std::path::Path::to_path_buf)
@@ -705,7 +705,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         if let Some(mission) = replay_setup.mission.as_ref() {
             game::forest::configure(&mut r, &scene, Some(mission))?;
         }
-        let mut walk = make_walk(&scene, &replay_setup);
+        let mut walk = make_walk(&scene, &replay_setup)?;
         // Indoor maps can have several floors above their terrain. A scripted
         // capture can pin its starting feet without changing normal spawns.
         if let Ok(value) = std::env::var("OPENBF_WALK_FEET_Y") {

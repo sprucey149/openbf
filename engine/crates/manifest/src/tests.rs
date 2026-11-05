@@ -195,6 +195,7 @@ fn full_collision() -> ManifestCollision {
 /// touches every field the schema has.
 fn full_manifest() -> Manifest {
     Manifest {
+        spawn_only_posts: false,
         map: "tat1".into(),
         source_game: "bf2".into(),
         terrain_name: Some("tat1".into()),
