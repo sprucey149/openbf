@@ -201,7 +201,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 
 - `core/src/vehicle/flyer.rs` 919 — PS2 BF1/BF2 flight states, speed, attitude, boost and landing restrictions, and BF2's AI curve follower; scoped fidelity in analysis/re-flyer.md · FlyerParams, FollowerParams, FlyerState, FlyerAi, FlightPhase, step, spline_step, curve_at, untilted.
 - `core/src/vehicle/flyer/tests.rs` 430 — flight equation, transition, boost, landing and parked-hash regressions.
-- `core/src/sim/flyers.rs` 537 — flight/world down rays, mission bands, hands contact to `sim/flyer_contact.rs` and an empty craft's rest, the BF2 follower's dispatch and normal-pad integration tests · FlightLimits, Sim::tick_flyers.
+- `core/src/sim/flyers.rs` 537 — flight/world down rays, mission bands, hands contact to `core/src/sim/flyer_contact.rs` and an empty craft's rest, the BF2 follower's dispatch and normal-pad integration tests · FlightLimits, Sim::tick_flyers.
 - `core/src/sim/flyer_contact.rs` 498 — a craft against hulls and terrain: sub-steps, damage, bounce, jolt and landing (`re-space-assault.md` §11) · `FlyerRow`
 - `core/src/ai/flyer_drive.rs` 802 — a bot at a flyer's pilot seat: BF1's fly agent, altitude and stick law; BF2's path planner and pursuit curve; invented policy named in its header · can_fly, throttle_for, speed_share, stick_to, drive.
 - `core/src/ai/flyer_drive/tests.rs` 1094 — boarding through takeoff and flight, the switch, replay, stick/speed/altitude laws and the follower's curves.
@@ -496,7 +496,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/space_assault.rs` 179 — mission capital ship names into stations, shield groups, linked sets and turret instances · `install`; `analysis/re-space-assault.md`.
 - `game/src/stations.rs` 252 — service-droid model spheres, rotating collision setup, wreck collision and render models from map/common bakes · `install_collision`, `wreck_models`.
 - `game/src/turret_fall.rs` 127 — a building turret class's fallen look (DestroyedGeometryName, the unbuilt pad, hidden; the common gun turret's pad deviation), its collision parts and the fallen models per placed instance · `fall_look`, `collision_parts`, `fallen_models`; card TBLD.
-- `game/src/shell_ia.rs` 127 — the Instant Action screen's content from the bake: both games' names, baked maps, mission pairs; the profile tier ↔ Session Options' AI level · `instant_action`, `ia_level`, `port_difficulty`.
+- `game/src/shell_ia.rs` 125 — the Instant Action screen's content from the bake: both games' names, baked maps, mission pairs; the profile tier ↔ Session Options' AI level · `instant_action`, `ia_level`, `port_difficulty`.
 - `game/src/shell_movie.rs` 428 — shell movie frame-pack playback and background JPEG decoding · `ShellMovie`, `load_index`, `shell_dir`, `decode`; module header and `analysis/re-bf2-shell.md` §4.
 - `game/src/classdb.rs` 677 — entity-class RON loading, BASE inheritance, case-insensitive resolution and ordered weapon-slot inheritance and an optional canonical SBD weapon database · `ClassDb`, `resolve`, `weapon_slots`, `WeaponSlot`.
 - `game/src/class_picker.rs` 282 — the dev class picker's classes per side · `ClassPicker`, `Choice`
