@@ -663,6 +663,13 @@ impl winit::application::ApplicationHandler for App {
                             if let Some(vis) = self.soldier_vis.as_mut() {
                                 vis.append_test_class(r, &self.assets_dir, walk, &request);
                             }
+                            let lit_chunks = self.vehicle_vis.load_chunks(
+                                r,
+                                scene,
+                                &self.assets_dir,
+                                &self.fx.chunk_models(),
+                            );
+                            self.fx.set_lit_chunks(lit_chunks);
                             self.deka_vis.append_test_class(
                                 r,
                                 scene,
@@ -678,6 +685,7 @@ impl winit::application::ApplicationHandler for App {
                     see = walk.camera_see_through();
                     if let Some(r) = self.renderer.as_mut() {
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
+                        extra.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
                         self.deka_vis.eye = Some(walk.camera().position);
                         extra.extend(self.deka_vis.draws(r, &walk.sim));
                     }

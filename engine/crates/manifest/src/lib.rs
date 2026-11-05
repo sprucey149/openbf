@@ -78,7 +78,7 @@ pub struct ManifestClass {
     /// (analysis/re-collision-layers.md §2).
     ///
     /// `layer` is one of `soldier | vehicle | building | terrain | ordnance |
-    /// targetable | vehicle_only` (the seven hashes the two ELFs consume);
+    /// targetable | vehicle_only | flyer_uses_vehicle` (the eight hashes the two ELFs consume);
     /// `body` is the property's value lowercased verbatim — a primitive NAME,
     /// the literal `collisionmesh` (the `coll` mesh body), or the sentinels
     /// `none` / `clear` meaning "this layer's subset is EMPTY".

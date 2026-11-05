@@ -197,6 +197,10 @@ enum Scope {
     Chunk,
 }
 
+const SLOW_OFFSET: u32 = 0x5dbc_abb0;
+const FAST_OFFSET: u32 = 0x8d0c_fc36;
+const FAST_FOV: u32 = 0xaaa6_d95c;
+
 fn h(name: &str) -> u32 {
     fnv1a_lowercase(name)
 }
@@ -222,6 +226,10 @@ fn section_scope(value: &str) -> Scope {
 /// chain claims ([`walker::turret_claims`]) are the section's, the rest the
 /// body's.
 fn scoped(def: &ClassDef) -> Vec<(Scope, u32, &str)> {
+    scoped_rows(def, true)
+}
+
+fn scoped_rows(def: &ClassDef, chunk_closes: bool) -> Vec<(Scope, u32, &str)> {
     let (flyer, building, chunk) = (h("FLYERSECTION"), h("BuildingSection"), h("CHUNKSECTION"));
     let walker = h("WalkerSection");
     let mut scope = Scope::Body;
@@ -232,7 +240,9 @@ fn scoped(def: &ClassDef) -> Vec<(Scope, u32, &str)> {
             scope = section_scope(v);
             by_walker = *k == walker;
         } else if *k == chunk {
-            scope = Scope::Chunk;
+            if chunk_closes {
+                scope = Scope::Chunk;
+            }
         } else if by_walker && matches!(scope, Scope::Turret(_)) && !walker::turret_claims(*k) {
             // The walker setter gives the turret setter first refusal
             // (B2:182865-182869); what it does not claim is the walker's.
@@ -557,6 +567,9 @@ pub struct SeatSpec {
     /// `TiltValue` (degrees) and `ThirdPersonFOV` (degrees).
     pub track_center: Option<[f32; 3]>,
     pub track_offset: Option<[f32; 3]>,
+    pub slow_offset: Option<[f32; 3]>,
+    pub fast_offset: Option<[f32; 3]>,
+    pub fast_fov: Option<f32>,
     pub tilt_value: Option<f32>,
     pub aim_tension: Option<f32>,
     pub move_tension: [Option<[f32; 2]>; 3],
@@ -693,6 +706,9 @@ impl SeatSpec {
             eye_point_offset: None,
             track_center: None,
             track_offset: None,
+            slow_offset: None,
+            fast_offset: None,
+            fast_fov: None,
             tilt_value: None,
             aim_tension: None,
             move_tension: [None; 3],
@@ -764,6 +780,12 @@ impl SeatSpec {
             self.track_center = floats::<3>(v);
         } else if k == h("TrackOffset") {
             self.track_offset = floats::<3>(v);
+        } else if k == SLOW_OFFSET {
+            self.slow_offset = floats::<3>(v);
+        } else if k == FAST_OFFSET {
+            self.fast_offset = floats::<3>(v);
+        } else if k == FAST_FOV {
+            self.fast_fov = float(v);
         } else if k == h("TiltValue") {
             self.tilt_value = v.trim().parse().ok();
         } else if k == h("AimTension") {
@@ -941,7 +963,15 @@ pub fn damage_effects(db: &ClassDb, class: &str) -> Vec<DamageEffect> {
 /// The class detonated when its hull pool runs out (`ExplosionName`,
 /// re-vehicles §6), if it names one.
 pub fn explosion_name(db: &ClassDb, class: &str) -> Option<String> {
-    db.prop(class, "ExplosionName")
+    let flyer = db
+        .engine_base(class)
+        .is_some_and(|base| FLYER_BASES.contains(&base));
+    let key = if flyer {
+        "ExplosionDestruct"
+    } else {
+        "ExplosionName"
+    };
+    db.prop(class, key)
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
 }
@@ -1121,7 +1151,7 @@ pub fn seats(db: &ClassDb, class: &str) -> Vec<SeatSpec> {
         return Vec::new();
     }
     for def in chain.into_iter().rev() {
-        for (scope, k, v) in scoped(def) {
+        for (scope, k, v) in scoped_rows(def, false) {
             match scope {
                 Scope::Body if k == h("PassengerSlots") => {
                     passengers = v.trim().parse::<i64>().unwrap_or(0).clamp(0, 4) as usize;

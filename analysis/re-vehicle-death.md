@@ -451,3 +451,58 @@ line's two record words (weapon / ordnance) are not named.
   record the deviation.
 - Presentation (game layer, optional): exposed riders leave a corpse at their seat (fall; a turret seat with
   `PilotDeath = "fly"` throws it up at 3.6-6.3 m/s); riders inside the hull leave none.
+
+## 11. What the rider's player sees when the hull dies
+
+§10 says riders inside the hull vanish with the vehicle. The sim had that (`body` false), but the draw rule drew any dead
+unit with a pose, so a rider killed inside a hull fell out of the air at his seat and played a death clip, on every vehicle
+kind. `SoldierVisuals::sync_units` now marks a unit that died seated with no body as gone.
+
+The camera (lines of `SWBFRNT2.ELF-decomp.c`):
+
+- The unit object's destructor `FUN_001cdfc8` (76680-76695): a viewport whose player camera follows this object gets
+  `FUN_001bb4c0(camera, 0)`, which clears the followed object (63784-63800). A death camera on this object is restarted with
+  no unit.
+- The player camera's apply with no object copies its stored matrix and sets the zoom divisor to 1 (63858-63862). So the view
+  holds where it was.
+- With no object the update only looks for one in the branch guarded by `DAT_00600b14` or the camera's `+0xc4` (63588, the
+  random pick at 63729-63770). Both are 0 in save states 9 and 10, so that branch is off in this play.
+- In save state 10, flying, the camera at `0x1759be0` follows `0x1cf2e58`, which is the flyer `0x1cf2bd0` + 0x288, so the
+  object it clears on is the flyer's and not the pilot's.
+- The death camera did start in a real crash (below), though no caller of `FUN_001ce0d8` is in the flyer. `trace:` which caller,
+  and what puts the player camera back as current: the setup makes the death camera current (62971-62985).
+
+The port holds the last seat camera while the rider is dead with no body (`WalkSim::held_seat_view`). The field of view stays,
+since nothing sets one. It applies to every vehicle kind; only the flyer's camera object was read from RAM, so `measure:` a
+hover and a walker. An exposed rider keeps a corpse and the ordinary dead view.
+
+Measured in a crash, save state 10 of 14:15, 0.167 s after the death (member timer `+0x158` 3.833 of 4.0):
+
+- Current camera `vp+0x24` is the player camera; its followed object is 0; `+0x90` reads 0.167.
+- The player camera's rows are the chase view, the rotation within 0.03 of the state 0.65 s earlier, and the eye is at (91.76, 108.17,
+  2217.42), not at the wreck.
+- The death camera holds the same matrix, unit 0, timer 0. Its `+0x60` is the ship's last place + 0.8 up and its `+0x50` follows the
+  set-up's rule, so it was set up on this crash and then restarted with no unit by the destructor. Timer 0 means it is not updating.
+- The ship's object has its destructor's vtable (`+0x288+0x1c` = `0x618e08`), alive bit clear, health -1340.6 of 2250, velocity
+  unchanged by the hit, as the rule that a dead craft takes no response says (`re-space-assault.md` §11).
+
+`measure:` this is one instant. Nothing here shows the view staying for the whole 4 s.
+
+### The explosion was never loaded
+
+Flyers name their blast with `ExplosionDestruct`, hash `0x8a323f32`. The BF2 flyer setter stores it at class `+0xedc` (124798-124808) and the
+death reads that slot and plays it (`FUN_0030c8f8`, 116897-116902); BF1's stores `+0x269c` (B1:89800, 89894-89903) and plays it
+with `FUN_002701a0` (B1:85098-85103). The port read only `ExplosionName`, so every flyer on both games had no explosion: no effect
+and no area damage. On the discs 12 BF1 and 35 BF2 `flyer` classes and 4 BF2 `commandflyer` classes carry the key and none carries
+`ExplosionName`. `explosion_name` now takes the key by engine base. In the replay the burst fills the view with rays, as in the frame
+of that save state, which is the only comparison made.
+
+A ship's pieces are drawn lit and fade over their last two seconds: `re-chunks.md` §8.
+
+`trace:` the three other holders of this key: `cis_hover_aat` and `cis_tread_hailfire` in both games, and `cis_hover_mtt` in BF1. They
+stay on `ExplosionName`, which they lack, so they may have the same gap. The base setter's `+0x3ec` slot (B2:80167-80179) is unread.
+
+Not ported: a ship shot to 0 health falls before it explodes on the PS2, the pilot inside. The alive bit clear in a state other
+than 4 or 5 starts phase 4 with a timer (B2:116868-116935: 600 s when `FUN_00215f80(class)` is below 1, else 0.2 to 2.2 s);
+expiry or any contact gives phase 5 (B2:118283-118286, 121913-121930, 119844), which is the explosion. `destroy_vehicle`
+explodes at once. A crash explodes at once in both. `trace:` also the viewport `+0x90` factor in those phases (B2:122650-122700).

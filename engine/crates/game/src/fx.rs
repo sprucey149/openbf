@@ -969,6 +969,21 @@ impl Fx {
         &self.live
     }
 
+    pub fn chunk_models(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.chunks.models().map(str::to_ascii_lowercase).collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    pub fn set_lit_chunks(&mut self, names: impl IntoIterator<Item = String>) {
+        self.chunks.set_lit(names);
+    }
+
+    pub fn lit_chunk_poses(&self) -> impl Iterator<Item = (&str, Mat4, f32)> {
+        self.chunks.lit_poses()
+    }
+
     /// Upload every sheet and model the library’s effects can draw (card HITCH): at the
     /// battle's load, so no effect's first spawn reads a file and makes a
     /// texture inside a frame. Returns how many were wanted.

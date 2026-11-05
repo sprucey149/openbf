@@ -10,12 +10,15 @@ const BF1_AIM_TENSION: f32 = 30.0;
 const DEFAULT_MOVE_TENSION: [f32; 2] = [30.0; 2];
 const SNAP_SQUARED: f32 = 62_500.0;
 const DEGREES: f32 = 0.017_453_294;
+const FOV_RATE: f32 = 25.0;
+const DEFAULT_THIRD_FOV: f32 = 48.0;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlyerCam {
     pub vehicle: VehicleHandle,
     pub eye: Vec3,
     pub rot: Quat,
+    pub fov: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -25,6 +28,10 @@ pub struct FlyerSection {
     pub tilt: f32,
     pub aim_tension: Option<f32>,
     pub move_tension: [[f32; 2]; 3],
+    pub third_fov: f32,
+    pub fast_fov: f32,
+    pub slow_offset: Vec3,
+    pub fast_offset: Vec3,
 }
 
 impl FlyerSection {
@@ -47,6 +54,41 @@ impl FlyerSection {
             aim_tension: (!bf2)
                 .then(|| seat.and_then(|s| s.aim_tension).unwrap_or(BF1_AIM_TENSION)),
             move_tension: [tension(0), tension(1), tension(2)],
+            third_fov: seat
+                .and_then(|s| s.third_person_fov)
+                .unwrap_or(DEFAULT_THIRD_FOV),
+            fast_fov: seat.and_then(|s| s.fast_fov).unwrap_or(0.0),
+            slow_offset: seat
+                .and_then(|s| s.slow_offset)
+                .map_or(Vec3::ZERO, Vec3::from),
+            fast_offset: seat
+                .and_then(|s| s.fast_offset)
+                .map_or(Vec3::ZERO, Vec3::from),
+        }
+    }
+
+    pub fn speed_fraction(&self, speed: f32, top: f32) -> f32 {
+        if speed > 0.0 && self.fast_fov != 0.0 && top > 0.0 {
+            (speed / top).clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    pub fn offset_at(&self, fraction: f32) -> Vec3 {
+        let offset = self.slow_offset * (1.0 - fraction) + self.fast_offset * fraction;
+        if offset == Vec3::ZERO {
+            self.offset
+        } else {
+            offset
+        }
+    }
+
+    pub fn fov_at(&self, fraction: f32) -> f32 {
+        if self.fast_fov == 0.0 {
+            self.third_fov
+        } else {
+            self.third_fov * (1.0 - fraction) + self.fast_fov * fraction
         }
     }
 }
@@ -96,6 +138,26 @@ impl WalkSim {
         (v.kind == VehicleKind::Flyer && mount.seat == 0).then_some((v, mount.vehicle))
     }
 
+    pub(super) fn flyer_fov(&self) -> Option<f32> {
+        let (_, handle) = self.flyer_pilot()?;
+        self.cam_flyer
+            .filter(|c| c.vehicle == handle)
+            .map(|c| c.fov)
+    }
+
+    fn flyer_speed_fraction(&self, v: &Vehicle, section: &FlyerSection) -> f32 {
+        let top = self
+            .sim
+            .flyer_params
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+            .map_or(0.0, |p| {
+                let region = self.sim.landing_regions.iter().any(|r| r.contains(v.pos));
+                p.speeds(region)[2].max(p.boost_speed)
+            });
+        section.speed_fraction(v.vel.dot(v.rot * Vec3::Z), top)
+    }
+
     fn flyer_section(&self, v: &Vehicle) -> FlyerSection {
         let seat = self
             .vehicle_seats
@@ -113,10 +175,8 @@ impl WalkSim {
     ) -> (Vec3, Vec3) {
         let target = v.pos + frame * self.seat_pull_origin(v, 0);
         let target = self.pull_point_on_own_side(v, target);
-        (
-            target,
-            v.pos + frame * section.center + rot * section.offset,
-        )
+        let offset = section.offset_at(self.flyer_speed_fraction(v, section));
+        (target, v.pos + frame * section.center + rot * offset)
     }
 
     pub(super) fn flyer_seat_camera(&self) -> Option<(Camera, Option<Track>)> {
@@ -151,10 +211,16 @@ impl WalkSim {
         let eye = held.map_or(settled, |c| {
             lag_eye(c.eye, settled, rot, &section.move_tension, core::TICK_DT)
         });
+        let goal = section.fov_at(self.flyer_speed_fraction(v, &section));
+        let was = self
+            .cam_flyer
+            .filter(|c| c.vehicle == handle)
+            .map_or_else(|| chase_fovs().0, |c| c.fov);
         Some(FlyerCam {
             vehicle: handle,
             eye,
             rot,
+            fov: goal + (was - goal) * fmath::exp(-FOV_RATE * core::TICK_DT),
         })
     }
 }
@@ -238,6 +304,66 @@ mod tests {
         let bf1 = FlyerSection::of(Some(&seat), GroundRules::Bf1);
         assert!((bf1.tilt - 20.0 * DEGREES).abs() < 1e-6);
         assert_eq!(bf1.aim_tension, Some(20.0));
+    }
+
+    fn interceptor_section() -> FlyerSection {
+        let mut seat = SeatSpec::new(core::vehicle::SeatKind::Pilot);
+        seat.track_center = Some([0.0, 3.5, -4.0]);
+        seat.third_person_fov = Some(38.0);
+        seat.fast_fov = Some(90.0);
+        seat.slow_offset = Some([0.0, 2.0, 10.0]);
+        seat.fast_offset = Some([0.0, 5.0, -18.0]);
+        seat.move_tension = [Some([3.1, 3.1]), Some([2.9, 15.0]), Some([4.25, 4.25])];
+        FlyerSection::of(Some(&seat), GroundRules::Bf2)
+    }
+
+    #[test]
+    fn the_offset_and_the_view_follow_the_speed_as_the_save_state_has_them() {
+        let section = interceptor_section();
+        let fraction = section.speed_fraction(80.0, 170.0);
+        let offset = section.offset_at(fraction);
+        assert!(
+            offset.abs_diff_eq(Vec3::new(0.0, 58.0 / 17.0, -54.0 / 17.0), 1e-3),
+            "{offset}"
+        );
+        let half = (section.fov_at(fraction) * 0.5).to_radians().tan();
+        assert!((half - 0.6065).abs() < 0.001, "{half}");
+        assert_eq!(
+            section.offset_at(section.speed_fraction(0.0, 170.0)),
+            Vec3::new(0.0, 2.0, 10.0)
+        );
+        assert_eq!(section.fov_at(section.speed_fraction(-5.0, 170.0)), 38.0);
+        assert_eq!(section.fov_at(section.speed_fraction(400.0, 170.0)), 90.0);
+    }
+
+    #[test]
+    fn a_class_without_the_speed_keys_keeps_its_section() {
+        let mut seat = SeatSpec::new(core::vehicle::SeatKind::Pilot);
+        seat.track_offset = Some([0.0, 1.0, 6.0]);
+        seat.third_person_fov = Some(55.0);
+        let section = FlyerSection::of(Some(&seat), GroundRules::Bf2);
+        let fraction = section.speed_fraction(80.0, 170.0);
+        assert_eq!(fraction, 0.0);
+        assert_eq!(section.offset_at(fraction), Vec3::new(0.0, 1.0, 6.0));
+        assert_eq!(section.fov_at(fraction), 55.0);
+    }
+
+    #[test]
+    fn the_ship_sits_in_the_view_where_the_save_state_has_it() {
+        let section = interceptor_section();
+        let fraction = section.speed_fraction(80.0, 170.0);
+        let offset = section.offset_at(fraction);
+        let view = flyer_view(Quat::IDENTITY, section.tilt);
+        let mut pos = Vec3::ZERO;
+        let mut eye = section.center + view * offset;
+        for _ in 0..600 {
+            pos += Vec3::Z * 80.0 * DT;
+            let ideal = pos + section.center + view * offset;
+            eye = lag_eye(eye, ideal, view, &section.move_tension, DT);
+        }
+        let seen = view.inverse() * (pos - eye);
+        assert!((seen.y + 4.5).abs() < 0.5, "{seen}");
+        assert!((-seen.z - 18.5).abs() < 0.5, "{seen}");
     }
 
     #[test]

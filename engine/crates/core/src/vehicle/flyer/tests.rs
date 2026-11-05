@@ -324,6 +324,35 @@ fn bank_uses_boost_ceiling_in_bf2_and_takeoff_turn_rate_in_both_games() {
 }
 
 #[test]
+fn pitching_tilts_by_the_turn_rate_across_the_velocitys_sideways_part() {
+    for bf2 in [false, true] {
+        let p = FlyerParams {
+            bf2,
+            min_speed: 60.0,
+            mid_speed: 60.0,
+            max_speed: 60.0,
+            boost_speed: 120.0,
+            pitch_filter: 0.0,
+            pitch_damp: 0.0,
+            level_filter: 0.0,
+            level_damp: 0.0,
+            velocity_filter: 0.0,
+            bank_angle: 1.0,
+            bank_filter: 30.0,
+            ..FlyerParams::default()
+        };
+        let mut v = craft(FlightPhase::Flying);
+        v.vel = Vec3::new(0.0, 10.0, 60.0);
+        v.flyer.lift = 1.0;
+        v.flyer.omega.x = 1.0;
+        let env = ground(v.pos.y - 1.0);
+        step(&mut v, &p, env, DT);
+        let want = if bf2 { 10.0 / 120.0 } else { 0.0 };
+        near(v.flyer.tilt_pitch, want);
+    }
+}
+
+#[test]
 fn landing_removes_visual_tilt_and_bf2_initializes_leveling_on_takeoff() {
     let p = FlyerParams::bf2();
     let mut v = craft(FlightPhase::Landing);

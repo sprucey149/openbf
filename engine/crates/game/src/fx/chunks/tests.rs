@@ -56,6 +56,52 @@ fn piece(c: &Chunks) -> &Piece {
 }
 
 #[test]
+fn a_chunk_fades_over_the_last_two_seconds_of_its_life() {
+    let mut c = chunks(spec(Prim::Sphere(1.0)));
+    drop(&mut c, Vec3::ZERO, Vec3::ZERO);
+    let life = c.live[0][0].life();
+    for (timer, opacity) in [
+        (0.0, 1.0),
+        (life - 2.0, 1.0),
+        (life - 1.0, 0.5),
+        (life, 0.0),
+    ] {
+        c.live[0][0].timer = timer;
+        assert_eq!(c.live[0][0].opacity(), opacity, "at {timer}");
+    }
+}
+
+#[test]
+fn a_chunk_with_a_lit_model_leaves_the_particle_path() {
+    struct Assets;
+    impl FxAssets for Assets {
+        fn texture(&mut self, _: &str) -> Option<render::TextureHandle> {
+            None
+        }
+        fn model(&mut self, _: &str) -> Option<Arc<crate::fx::draw::EffectModel>> {
+            Some(Arc::new(crate::fx::draw::EffectModel {
+                parts: vec![(None, vec![(Vec3::X, [0.0; 2]); 3], 0)],
+            }))
+        }
+    }
+    let mut c = chunks(spec(Prim::Sphere(1.0)));
+    drop(&mut c, Vec3::Y, Vec3::ZERO);
+    let particles = |c: &Chunks| {
+        let mut out = Vec::new();
+        c.draws(Era::Bf2, Vec3::ZERO, Vec3::Z, 1.0, &mut Assets, &mut out);
+        out.len()
+    };
+    assert_eq!(c.lit_poses().count(), 0);
+    assert_eq!(particles(&c), 1);
+    c.set_lit(["fixture".to_owned()]);
+    assert_eq!(particles(&c), 0);
+    let poses: Vec<_> = c.lit_poses().collect();
+    assert_eq!(poses.len(), 1);
+    assert_eq!(poses[0].0, "fixture");
+    assert_eq!(poses[0].2, 1.0);
+}
+
+#[test]
 fn authored_launch_inherits_velocity_and_droid_scale() {
     let v = launch_velocity(
         Vec3::X * 10.0,

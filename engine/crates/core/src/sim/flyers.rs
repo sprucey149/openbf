@@ -145,7 +145,7 @@ impl Sim {
                 in_landing_region: self.landing_regions.iter().any(|r| r.contains(from)),
                 require_landing_region: !self.landing_regions.is_empty(),
             };
-            let (threshold, scale) = (p.collision_threshold, p.collision_scale);
+            let row = super::flyer_contact::FlyerRow::of(p);
             // BF2's ordinary AI flight writes the pose along its curve in
             // the flying state (B2:117417). OURS: without the original's
             // avoidance and hull response it takes no contact here.
@@ -162,111 +162,8 @@ impl Sim {
                 continue;
             }
             flyer::step(&mut self.vehicles[i], p, env, dt);
-            self.flyer_contact(i, handle, from, threshold, scale);
+            self.flyer_contact(i, handle, from, row);
         }
-    }
-
-    /// PROVISIONAL continuous centre sweep. Keeps a fast fighter from passing
-    /// through a wall in one update; the original hull contact/torque solver
-    /// remains unconfirmed. This is not claimed as PS2 collision parity.
-    fn flyer_contact(
-        &mut self,
-        i: usize,
-        handle: VehicleHandle,
-        from: Vec3,
-        threshold: [f32; 3],
-        scale: [f32; 3],
-    ) {
-        let to = self.vehicles[i].pos;
-        let delta = to - from;
-        let distance = delta.length();
-        if distance < 1e-6 {
-            return;
-        }
-        let direction = delta / distance;
-        let world = self
-            .collision
-            .ray_with(
-                from,
-                direction,
-                distance,
-                Layers::VEHICLE,
-                HullFilter::except(Some(handle)),
-            )
-            .map(|h| (h.t, h.normal));
-        let terrain = self.terrain_ray(from, direction, distance, 0.5).map(|t| {
-            let p = from + direction * t;
-            let n = self
-                .heightfield
-                .as_ref()
-                .map_or(Vec3::Y, |hf| hf.normal_at(p.x, p.z).into());
-            (t, n)
-        });
-        let hit = match (world, terrain) {
-            (Some(a), Some(b)) => Some(if a.0 <= b.0 { a } else { b }),
-            (a, b) => a.or(b),
-        };
-        let Some((t, normal)) = hit else {
-            return;
-        };
-        // OURS: what is left of the move slides along the surface, once, so
-        // a craft in a hangar is not pinned to the first ceiling it touches.
-        let at = from + direction * (t - 0.01).max(0.0);
-        let rest = direction * (distance - t).max(0.0);
-        let along = rest - normal * rest.dot(normal);
-        let slid = along.length();
-        let clear = slid > 1e-4
-            && self
-                .collision
-                .ray_with(
-                    at,
-                    along / slid,
-                    slid,
-                    Layers::VEHICLE,
-                    HullFilter::except(Some(handle)),
-                )
-                .is_none()
-            && self.terrain_ray(at, along / slid, slid, 0.5).is_none();
-        let v = &self.vehicles[i];
-        let closing = (-v.vel.dot(normal)).max(0.0);
-        let up = normal.dot(v.rot * Vec3::Y);
-        let forward = normal.dot(v.rot * Vec3::Z);
-        let at = self.over_sheet(from, at);
-        let rest_at = if clear {
-            self.over_sheet(from, at + along)
-        } else {
-            at
-        };
-        let v = &mut self.vehicles[i];
-        v.pos = rest_at;
-        v.vel += normal * closing;
-        // OURS: an empty craft that came down rests where it hit. The PS2's
-        // falling contact is not read, and its cruise term would otherwise
-        // skate it along the ground at MidSpeed for the rest of the round.
-        if v.flyer.phase == FlightPhase::Falling && v.is_empty() && normal.y > 0.7 {
-            v.flyer.phase = FlightPhase::Landed;
-            v.vel = Vec3::ZERO;
-            v.flyer.omega = Vec3::ZERO;
-        }
-        self.impact_vehicle(handle, closing, up, forward, threshold, scale, 1.0);
-    }
-
-    /// A move that began over the terrain ends over it, where the sheet is not
-    /// cut. `terrain_ray` brackets a crossing to half a 0.5 m step, so a shallow
-    /// approach can be placed past it, and the sheet is two-sided: from below it
-    /// no longer stops anything, and the craft sinks away under the map.
-    fn over_sheet(&self, from: Vec3, p: Vec3) -> Vec3 {
-        let Some(hf) = self.heightfield.as_ref() else {
-            return p;
-        };
-        let height = hf.height_at(p.x, p.z);
-        if from.y < hf.height_at(from.x, from.z)
-            || p.y >= height
-            || self.collision.is_cut(Vec3::new(p.x, height, p.z))
-        {
-            return p;
-        }
-        Vec3::new(p.x, height + 0.01, p.z)
     }
 }
 
@@ -394,13 +291,16 @@ mod tests {
     }
 
     #[test]
-    fn a_craft_grazing_the_terrain_does_not_slip_under_the_sheet() {
+    fn an_empty_craft_is_destroyed_where_it_comes_down() {
         let (mut sim, h) = abandoned();
         for _ in 0..(60 * crate::TICK_HZ) {
             sim.step(&[PadState::default()]);
-            let v = sim.vehicle(h).unwrap();
-            assert!(v.pos.y >= 0.0, "tick {}: {:?}", sim.tick, v.pos);
+            match sim.vehicle(h).filter(|v| v.alive) {
+                Some(v) => assert!(v.pos.y >= 0.0, "tick {}: {:?}", sim.tick, v.pos),
+                None => return,
+            }
         }
+        panic!("still falling after a minute");
     }
 
     #[test]
@@ -423,34 +323,6 @@ mod tests {
             let v = sim.vehicle(h).unwrap();
             assert!(v.pos.y >= 0.0, "tick {}: {:?}", sim.tick, v.pos);
         }
-    }
-
-    #[test]
-    fn an_empty_craft_comes_to_rest_where_it_comes_down_and_can_be_flown_again() {
-        let (mut sim, h) = abandoned();
-        let mut rested = None;
-        for _ in 0..(60 * crate::TICK_HZ) {
-            sim.step(&[PadState::default()]);
-            let v = sim.vehicle(h).unwrap();
-            if v.flyer.phase == FlightPhase::Landed {
-                rested = Some(v.pos);
-                break;
-            }
-        }
-        let at = rested.expect("still falling after a minute");
-        for _ in 0..30 {
-            sim.step(&[PadState::default()]);
-        }
-        let v = sim.vehicle(h).unwrap();
-        assert_eq!(v.pos, at);
-        assert_eq!(v.vel, Vec3::ZERO);
-        let pilot = sim.spawn(&UnitSpec::player(0, at)).unwrap();
-        assert!(sim.seat_unit(pilot, h, 0));
-        sim.step(&[PadState {
-            buttons: buttons::JUMP,
-            ..PadState::default()
-        }]);
-        assert_eq!(sim.vehicle(h).unwrap().flyer.phase, FlightPhase::Takeoff);
     }
 
     fn over_the_line(bf2: bool) -> (Sim, VehicleHandle) {

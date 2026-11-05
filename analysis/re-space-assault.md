@@ -220,7 +220,7 @@ this path. `trace:` the AI callers' `+0x68` test.
 Fields say `VehicleCollision CLEAR`: `imp_cap_stardestroyer_shield` and `cis_fedcruiser_shield_blue` on all six maps. Under
 `re-collision-layers.md` §2 that empties the vehicle subset, so a ship passes and a soldier and a bolt do not. The port had
 no vehicle subset and flyers queried the soldier one, so to them a field was a wall. `Layers::VEHICLE` is now built from the
-same rule and flyer contact and pilot rays use it (`ships_pass_every_hangar_field_and_soldiers_do_not`).
+same rule and pilot rays use it (`ships_pass_every_hangar_field_and_soldiers_do_not`). A craft's own contact now uses `Layers::FLYER`, §11.
 
 ### Bots flying through the wall
 
@@ -257,3 +257,160 @@ Hovers and walkers go through the same PS2 function and keep the provisional `ve
 Seen in frames: `dist/openbf.exe` on spa1, a replay boarding `imp_fly_tiefighter_sc` from 4 m, taking off, flying out through the field, then banking at minimum throttle. The ship sits under the reticle and the horizon rolls with it, as in the PS2 frame the report supplied. At full throttle the ship falls about 30 m back, which is the `MoveTensionZ` lag at 105 m/s. `measure:` that distance against a PS2 frame at a known throttle; the report's frame is at an unknown one.
 
 `Layers::VEHICLE` moves flyer rays, so `bf1_hot1` state hashes change from tick 697: reverting only that restores 9d019cd7a87ac27b. Bodies only in the vehicle subset also grew `building_sphere`; that now counts soldier and ordnance bodies only.
+
+## 11. A second comparison on Space Hoth
+
+The user compared `bf2_spa8` with the PS2 game: nose-down flight took the ship off the top of our screen, a ship could
+enter and ride along the destroyer's walls where the PS2 destroys it, and hitting a hangar floor or ceiling did nothing or
+landed the ship where the PS2 pushes and damages it. Save states 9 and 10 were read from copies only; lines are
+`SWBFRNT2.ELF-decomp.c` unless marked.
+
+The user's save runs the one-flag layer, not assault: RAM holds `spa8g_1flag`, `spa8_1flag`, `ctf_imp1_sp4` and
+`ctf_imp1_cp`, with no `ass_imp1_*` and no trooptrans string. Its pad sp4 is an interceptor. The port's `ass` layer follows
+the disc, where sp4 is `imp_fly_trooptrans` and the interceptor is on sp2, so the two pads differ for that reason.
+
+### The camera
+
+`FUN_0020e1b0` (lines 122921-123085, reached through the thunk `FUN_001ea1e8`) blends the view by speed. With `f =
+clamp(forward speed / max(top speed, boost speed), 0, 1)`, the FOV is `(1-f) ThirdPersonFOV + f FastFOV` and the track offset
+is `lerp(SlowOffset, FastOffset, f)`. Top speed comes from `FUN_00202c50`: the class maximum, capped at 60 inside a slow
+region. The FOV eases at 25/s (lines 64893-64896). The three props have no known names; brute force found none. They are
+`0x5dbcabb0`, `0x8d0cfc36` and `0xaaa6d95c` on the flyer's class. BF1 has none of them.
+
+Save state 10 settles it: interceptor FOVs 38 and 90 at f = 80/170 give 62.47 degrees, and the camera struct at `0x1759720`
+holds a projection of 1/1.6489. The ship sits at (-0.20, -4.50, -18.50) in view space in that state; the port's level
+flight has (0, -4.25, -18.57).
+
+The nose-down fault was in the flight step, not the camera. The pitch tilt took the y part of omega cross local velocity,
+where both games take the z part (machine code `0x20680c`, line 117966; B1:85870; `re-flyer.md`). At full stick the old
+term tilted the nose 0.34 rad, the velocity followed the tilted nose (line 117869 uses the drawn forward row), and the
+ship left the frame. In save state 10 `omega.x` -0.056 at 80 m/s holds a tilt of 0.0002; the y part would give 0.021.
+
+A held dive from a replay, in view space, against the half-height of the frame at that speed's FOV:
+
+| Throttle | Speed | Ship y, z | Height in frame |
+|---|---|---|---|
+| Minimum | 35 | 1.68, -15.67 | 31% of half-height |
+| None | 80 | 4.11, -17.49 | 50% |
+| Full | 105 | 5.36, -18.53 | 54% |
+
+Before the fix the 80 m/s row was 11.75, -13.49, off the frame.
+
+`measure:` the PS2 shot has the ball about 92% of the way up (tan about 0.43), higher than any row above, and its speed is
+unknown. One frame cannot separate speed, stick and timing. A save state taken while holding the dive would give the
+numbers directly.
+
+### Hull contact
+
+Replaces the old `flyer_contact`, which never damaged: it passed a positive closing speed to `impact_damage`, which returns 0
+for those.
+
+Which bodies meet a craft (`FUN_00169328`, lines 7790-7870): the model's byte +3, from prop `0xF31D1478` (lines
+145727-145728, B1:109208), picks the vehicle subset when set and the soldier subset otherwise. The bake carries it as
+`flyer_uses_vehicle` and builds `Layers::FLYER`. A craft tests its building-subset primitives against those bodies and its
+terrain-subset primitives against the terrain's height (`FUN_0016c6c0`, line 10624 on). The deepest overlap wins. Movement is
+sub-stepped by the bound radius (`FUN_00163d08`, lines 3385-3440); RAM holds 4.77 for the interceptor. `measure:` the port's
+`bounding_radius` against that value.
+
+The response (`FUN_0020bff8`, lines 121489-122203), with `s` the relative velocity along the normal:
+
+- Takeoff: another flying craft gives no response. A normal with y below -0.7 sends the craft to Landing.
+- Moving apart: push only.
+- Damage is `impact_damage(s, n.up, n.fwd, T, S)`. BF2's flying state adds `max(-n.fwd, 0) * 0.5 * MaxHealth`, so a nose-on
+  hit costs half the health on top. Another flyer, unless this one is a commandflyer, sets it to `0.2 * MaxHealth`. Another
+  vehicle caps it at half of that vehicle's maximum.
+- Dead stops the response. Falling destroys the craft (lines 121913-121930).
+- Bounce: `j = -1.4 s`, halved against a flying craft (`trace:` the original compares class and uses real masses). Tangent
+  speed shrinks by `min(j * 0.125 / |vt|, 1)`.
+- Landing only with `n.y > 0.7`, `n.up > 0.9375` and lift below 0.0001 (lines 121985-122000). Otherwise the craft jolts:
+  `f = min(1, |v| * 0.025 + 0.01)`, forward bends toward the normal by `0.3 f` and toward the velocity by 0.3 (lines
+  122029-122090).
+- Position moves out along the normal by the depth.
+
+Replays on spa8's `ass` layer, interceptor from pad sp2, Flying state in all of these:
+
+- Into `spa1_prop_minidestroyer2` (`imp_frig3`) at 105 m/s: the craft is gone at tick 478, at (-1594, -33, 1158).
+- Nose down in the hangar: floor at ticks 117 and 123, 1500 to 1021 to 634 health, thrown back, never Landed, and it flew on.
+- Nose up in the hangar: ceiling at tick 129, 1500 to 519; a second surface at tick 137, down to 180; destroyed by the hit at tick 160.
+
+`T [5, 2.5, 0]` and `S [1.5, 0, 0]` are the interceptor's log values in those runs.
+
+Bots over 5400 ticks, seed 7, in `ass`, contacts by phase: spa1 none; spa3 2 Flying; spa6 1 Flying; spa7 3 Flying; spa8 1
+Takeoff and 7 Landing; spa9 1 Takeoff and 8 Landing. BF2's AI curve still takes no contact (line 117417, OURS), so these
+are the phases outside the curve.
+
+The Takeoff lines on spa8 and spa9 are the same case: `imp_fly_trooptrans` on sp4, at y 15.7, meets the hangar overhead with
+normal (-0.58, -0.80, -0.16), which the rule for y below -0.7 turns into a landing. So a transport on that pad goes back down.
+`measure:` the user's save has no transport, so the PS2 was not seen doing this.
+
+Not ported, each `trace:`: hit sound and sparks; rumble `FUN_00432b68`; camera jolt `FUN_001ba7e0` and the viewport `+0x90`
+kick; the model bytes +0 and +1 Landing rules (props `0x6d8fe606`, `0xd9d02e03`); the `DAT_00689738` kill in Takeoff; class bit
+`+0x1208` bit 1; the other body's factor from vtable `+0x40`, taken as 1.0; slot `FUN_00213370`'s `+0x160` branch. OURS: a
+terrain hit needs the start of the step above the sheet, and BF1's `FUN_001dd4c8` shares the structure but has no nose term and
+no flyer substitution, guarded by `FlyerRow::bf2`.
+
+### Checks
+
+On the working tree over `f9271f32`, after a full `scripts/pack.py` bake from the two PS2 discs.
+
+- `cargo test --no-fail-fast --manifest-path engine/Cargo.toml`: 4327 passed, 5 failed, 196 ignored. The failures are the same
+  five as §9, and `nav_walls::mygeetos_position_table_is_built_in_under_a_third_of_a_second` passes alone.
+- `scripts/sim_gates.sh`: green. `--sim-hash 600` is `5c5458c8927f122b`.
+- `--sim-trace ... 2400 --mode con --seed 7 --state-hashes` is unchanged from `a3f5c192` on `bf2_nab2`, `bf1_tat2`, `bf2_kam1` and
+  `bf2_tat3`. `bf1_hot1` moves on purpose to `c1b2c1442827bc54`, first differing at tick 45. Putting back only the old tilt term
+  moves the first difference to tick 431, so tick 45 is the tilt fix and tick 431 is the new contact.
+- Replays with `dist/openbf.exe` on spa8: the crash into the frigate gives the same track and ends at the same place.
+
+Not checked: a person flying in a window, the transport on the PS2, and how close our dive is to the PS2's in numbers.
+
+### A second round on the same map
+
+Corrections after the user flew it again.
+
+**The hull still has a way in.** Straight hits on the destroyer's outside work: 60 + 120 random flights at speeds 20-130 and
+angles up to near grazing, and 80 from inside the hangar, gave no crossing of a surface. But the collision has a real hole. On
+top of the rear right of the Imperial destroyer, world x -36..160, z 2014..2314, y about 100, about 30,624 m2 of drawn hull has
+no collision within 8 m under it. Smaller gaps, mostly riser lines, are in the top at x -432..-144 z 1938..2250, x -176..-60 z
+1838..2434, x -532..-488 z 1854..2438, x -224..-196 z 1162..1242. The bottom is sealed. Flying down at (-21, 2127) from y 180
+to y -1 at 30 m/s gives no contact and no damage, with a dark interior like the user's frame.
+
+That red area is two things, measured by rastering the collision and the drawn hull at 4 m. Through: x -34..66, z 2112..2268,
+about 14,900 m2, drawn hull at y 98..154 and the highest collision at y -76..-52, the hull's bottom. Sunk: x 26..162, z 2112..2316,
+about 15,000 m2, with collision 13 m under the drawn plate (at (62, 2164) drawn 99.8 and 86.5, collision 86.6). The riser lines are
+sunk too, 13 m at the median. So a ship can clip into those plates and then hits something, and it only flies free in the through
+part.
+
+Save state 10 of 14:10 is not a test of this: the ship is at (-141.9, 412.4, 2328.8), 2250 of 2250 health, 70 m/s, about 300 m
+above the deck, beside the dome `imp_cap1_shield_ext_r`, heading within 1 degree of the through part's centre. From there, 1.5 s
+straight then a 70 degree dive to (15, 112, 2191) has a clear line: the drawn plate at 314 m and the first collision at 489 m.
+
+The PS2 agrees on the sunk part. Save state 10 of 14:15 holds a crash that started over it at 14:14: the ship ended at (99.6, 86.5,
+2217.5), health 2250 to -1340.6. The drawn plate there is y 95.8 and the disc's collision y 83.1, so the ship's centre went 9.3 m under the
+plate and stopped 3.5 m above the collision, with nothing to hit at the plate. The user saw it too: "just under the plate".
+The port's formula on that triangle, normal (0.179, 0.982, -0.058), with the class's 5 and 1.5 and the default second threshold of
+2.5, gives 3471.5 against 3590.6 measured, 3.3% low. `trace:` the difference: the normal may not be the triangle's, and the
+velocity was read after the contact. The through part is still `measure:`.
+
+This is the disc's data and not a bake loss: raw `coll` leaves equal the baked counts (118, 188, 258, 209 triangles for parts 1
+to 4), and `imp_cap_stardestroyer3` and `4` hash the same in SPA1, 4, 5, 8 and 9.LVL. All instances and primitives of every
+layer were included. On that data the PS2 should let a ship through too, which nobody has looked at. `measure:` fly the PS2 into
+(-21, 2127) from above. No code changed for this. The port's contact takes the deepest overlap per primitive per step, at most
+8, where `FUN_0016bf10` loops over several contacts; `trace:` whether that matters here.
+
+**Instant explosion.** The death regions on spa8 are 6 x 10 x 6 cylinders in the shield rooms and the sim tests them on soldiers
+only (`re-kill-floor.md`), so they do not explain the user's "instantly explode".
+
+**Death, flash and pad camera.** `re-vehicle-death.md` §11, `re-hit-feedback.md`, `re-flyer.md` (section routing).
+
+Replays with `OPENBF_WALK_FEET_Y=4.9`, spawn -589.3,1433.0: flying nose up into the hangar overhead, the craft dies at about
+tick 160, no pilot is drawn, the view stays while the hull chunks and fire fly past it. Hitting the floor flashes red at ticks 117
+and 123, fading by about 138. Boarding sp3's TIE (`imp_fly_tiefighter_sc`), the log reads center (0,5,-8), offset (0,1,10), and
+the ship is framed on the pad and in flight.
+
+Checks on the working tree over `f9271f32`, with the flyer explosion and lit chunks (`re-vehicle-death.md` §11, `re-chunks.md` §8):
+`cargo test --no-fail-fast`: 4335 passed, 4 failed, 196 ignored. The failures are four of the same five as above;
+`nav_walls::mygeetos_position_table_is_built_in_under_a_third_of_a_second` passed in this run. `scripts/sim_gates.sh` green.
+`--sim-hash 600` and the five `--state-hashes` runs are the same as the round before: `bf1_hot1` stays at `c1b2c1442827bc54`, the others
+at `a3f5c192`'s values, so neither change moved anything on those maps. Whether a flyer died in those runs was not checked, so they may not exercise
+a flyer's new blast damage. Not checked: a person playing it in a window, the chunk fade on screen (the replay's pieces leave the
+view first, so only a unit test covers it), and the through part of the hole against the PS2.

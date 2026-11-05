@@ -112,6 +112,7 @@ pub struct VehicleVisuals {
     /// The items on the field (card PWUP): the battle's other dynamic
     /// models, drawn with the vehicles so every draw site has them.
     items: super::pickups::PickupVisuals,
+    chunks: HashMap<String, ClassVis>,
 }
 
 /// One side's baked vehicles: its directory and geometry → LOD0 model.
@@ -319,6 +320,7 @@ impl VehicleVisuals {
             cull,
             spec_cull: spec_cull(scene, cull),
             items: super::pickups::PickupVisuals::new(assets_dir, &game, cull),
+            chunks: HashMap::new(),
         };
         let mut textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>> =
             HashMap::new();
@@ -337,6 +339,46 @@ impl VehicleVisuals {
                         }
                     });
             out.classes.push(parts);
+        }
+        out
+    }
+
+    pub fn load_chunks(
+        &mut self,
+        r: &mut Renderer,
+        scene: &Scene,
+        assets_dir: &Path,
+        names: &[String],
+    ) -> Vec<String> {
+        let game = scene.manifest.source_game.to_ascii_lowercase();
+        let sides = VehicleSides::load(assets_dir, &game);
+        let mut textures = HashMap::new();
+        for name in names {
+            let key = name.to_ascii_lowercase();
+            if self.chunks.contains_key(&key) {
+                continue;
+            }
+            match upload_class(r, scene, &sides, &mut textures, &key) {
+                Ok(Some(visual)) => {
+                    self.chunks.insert(key, visual);
+                }
+                Ok(None) => {}
+                Err(e) => eprintln!("vehicles: chunk {key}: {e:#}"),
+            }
+        }
+        self.chunks.keys().cloned().collect()
+    }
+
+    pub fn chunk_draws<'a>(
+        &self,
+        poses: impl Iterator<Item = (&'a str, Mat4, f32)>,
+    ) -> Vec<DrawCmd> {
+        let mut out = Vec::new();
+        for (name, m, opacity) in poses {
+            if let Some(visual) = self.chunks.get(&name.to_ascii_lowercase()) {
+                let fade = (opacity < 1.0).then(|| render::Fade::see_through(opacity));
+                visual.draws(&mut out, None, m, (self.cull, self.spec_cull), fade);
+            }
         }
         out
     }

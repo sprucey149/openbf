@@ -483,6 +483,11 @@ fn ships_pass_every_hangar_field_and_soldiers_do_not() {
                 b.sim
                     .collision
                     .ray_with(from, across, 6.0, Layers::SOLDIER, HullFilter::Static);
+            let flyer =
+                b.sim
+                    .collision
+                    .ray_with(from, across, 6.0, Layers::FLYER, HullFilter::Static);
+            assert!(flyer.is_none(), "{map} {}", field.name);
             assert!(
                 ship.is_none(),
                 "{map} {}: {:?}",

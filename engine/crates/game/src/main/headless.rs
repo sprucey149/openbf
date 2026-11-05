@@ -144,6 +144,7 @@ impl ReplayFrame {
         let mut draws = gpu.view_draws(&walk.sim, walk.player);
         walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
+        draws.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
         self.deka_vis.eye = Some(cam.position);
         draws.extend(self.deka_vis.draws(r, &walk.sim));
         let (width, height) = r.size();
@@ -722,7 +723,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
             .map(std::path::Path::to_path_buf)
             .unwrap_or_default();
         let vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
-        let vehicle_vis =
+        let mut vehicle_vis =
             game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
         let deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
         let quad = game::viewer::upload_billboard_quad(&mut r)?;
@@ -732,6 +733,8 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
             game::fx::Fx::for_walk(&assets_dir, &scene.dir, &scene.manifest.source_game, &walk);
         fx.set_water(&scene.manifest);
         fx.set_scene_effects(&scene);
+        let lit_chunks = vehicle_vis.load_chunks(&mut r, &scene, &assets_dir, &fx.chunk_models());
+        fx.set_lit_chunks(lit_chunks);
         let bolts = game::bolt_vis::BoltVis::new(&assets_dir, &scene.manifest.source_game);
         // The map's precipitation (card WTHR), on the sim's tick here.
         let weather = game::weather::Weather::load(

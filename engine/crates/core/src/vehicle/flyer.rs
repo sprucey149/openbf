@@ -41,6 +41,7 @@ pub struct FlyerParams {
     pub landing_speed: f32,
     pub landed_height: f32,
     pub boost_speed: f32,
+    pub command_flyer: bool,
     pub boost_acceleration: f32,
     pub energy_max: f32,
     pub energy_auto_restore: f32,
@@ -127,6 +128,7 @@ impl Default for FlyerParams {
             landing_speed: 3.0,
             landed_height: 0.0,
             boost_speed: 0.0,
+            command_flyer: false,
             boost_acceleration: 0.0,
             energy_max: 100.0,
             energy_auto_restore: 0.0,
@@ -761,7 +763,7 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         bank_speed
     };
     let bank_acceleration = s.omega.cross(local_velocity) / bank_divisor.max(f32::MIN_POSITIVE);
-    let pitch_tilt = throttle * p.thrust_pitch_angle * s.lift + bank_acceleration.y * p.bank_angle;
+    let pitch_tilt = throttle * p.thrust_pitch_angle * s.lift + bank_acceleration.z * p.bank_angle;
     let roll_tilt =
         input.strafe * p.strafe_roll_angle * s.lift - bank_acceleration.x * p.bank_angle;
     s.tilt_pitch += (pitch_tilt - s.tilt_pitch) * p.bank_filter * dt;

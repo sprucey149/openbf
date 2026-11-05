@@ -20,13 +20,13 @@ use crate::{Chunk, UcfbError};
 /// fnv1a_lowercase("geometryname") — the entc PROP key naming the gmod.
 pub const PROP_GEOMETRYNAME: u32 = 0x47C8_6B4A;
 
-/// The seven entc PROP keys that select which BODIES of a model belong to a
+/// The eight entc PROP keys that select which BODIES of a model belong to a
 /// collision LAYER, with the port's layer name for each — the only collision
 /// keys either ELF consumes (analysis/re-collision-layers.md §2, §8; `FlyerCollision`
 /// 0x090AFB1F is consumed by NEITHER engine and is deliberately absent).
 /// Order here is the table's, not the discs'; the PROP list's own order is
 /// what matters and [`EntityClass::collision_layers`] preserves it.
-pub const PROP_COLLISION_LAYERS: [(u32, &str); 7] = [
+pub const PROP_COLLISION_LAYERS: [(u32, &str); 8] = [
     (0x5DFD_C07F, "soldier"),      // SoldierCollision      (BF1 FUN_001E5200)
     (0xDE53_65A1, "vehicle"),      // VehicleCollision      (BF1 FUN_001E4FA8)
     (0x9828_F43F, "building"),     // BuildingCollision     (BF1 FUN_001E4EE0)
@@ -34,6 +34,7 @@ pub const PROP_COLLISION_LAYERS: [(u32, &str); 7] = [
     (0xFB2B_DF07, "ordnance"),     // OrdnanceCollision     (BF1 FUN_001E5138)
     (0xD23D_BAF8, "targetable"),   // TargetableCollision   (BF1 FUN_001E52C8)
     (0xC3F2_5CBB, "vehicle_only"), // VehicleCollisionOnly  (BF1 FUN_001FB6E8)
+    (0xF31D_1478, "flyer_uses_vehicle"),
 ];
 
 #[derive(Debug)]

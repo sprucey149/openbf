@@ -1070,6 +1070,13 @@ impl App {
             &self.assets_dir,
             &walk.vehicle_geometry,
         );
+        let lit_chunks = self.vehicle_vis.load_chunks(
+            renderer,
+            scene,
+            &self.assets_dir,
+            &self.fx.chunk_models(),
+        );
+        self.fx.set_lit_chunks(lit_chunks);
         self.deka_vis =
             game::viewer::DroidekaVisuals::load(renderer, scene, &self.assets_dir, &walk);
         // What the battle can show later, behind the loading (card HITCH).

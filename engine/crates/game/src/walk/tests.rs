@@ -1089,3 +1089,39 @@ fn first_person_arms_and_eye_view_gating() {
     assert!(!walk.shows_first_person_arms());
     assert!(!walk.player_body_hidden());
 }
+
+#[test]
+fn a_rider_lost_with_the_hull_holds_the_seat_view() {
+    use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    let h = w.sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Flyer,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::new(0.0, 40.0, 0.0),
+        yaw: 0.0,
+        max_health: 100.0,
+        health_type: core::weapon::HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    let mut seat = crate::vehicle_class::SeatSpec::new(SeatKind::Pilot);
+    seat.track_center = Some([0.0, 4.0, -6.0]);
+    seat.track_offset = Some([0.0, 0.0, 0.0]);
+    w.vehicle_seats = vec![vec![seat]];
+    w.vehicle_tops = vec![Some(2.0)];
+    let player = w.player;
+    assert!(w.sim.seat_unit(player, h, 0));
+    run_ticks(&mut w, PadState::default(), 1);
+    let view = w.camera().position;
+    w.sim.destroy_vehicle(h, None);
+    let at = player.index as usize;
+    assert!(!w.sim.units[at].alive);
+    assert_eq!(w.camera().position, view);
+    run_ticks(&mut w, PadState::default(), 5);
+    assert_eq!(w.camera().position, view);
+    w.sim.units[at].alive = true;
+    w.seat_view = w.next_seat_view();
+    assert!(w.seat_view.is_none());
+}

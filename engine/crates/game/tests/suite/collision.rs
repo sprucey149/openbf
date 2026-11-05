@@ -210,10 +210,10 @@ fn the_world_is_the_union_with_masks_and_the_soldier_subsequence_is_unchanged() 
     assert_eq!(
         got,
         vec![
-            (Layers::SOLDIER | Layers::VEHICLE, true),   // A.mesh
-            (Layers::SOLDIER | Layers::VEHICLE, false),  // A.p_vehicle_3
-            (Layers::SOLDIER | Layers::VEHICLE, false),  // A.p_collision
-            (Layers::ALL | Layers::VEHICLE, true),       // B.mesh  (named by SoldierCollision)
+            (Layers::SOLDIER | Layers::VEHICLE | Layers::FLYER, true), // A.mesh
+            (Layers::SOLDIER | Layers::VEHICLE | Layers::FLYER, false), // A.p_vehicle_3
+            (Layers::SOLDIER | Layers::VEHICLE | Layers::FLYER, false), // A.p_collision
+            (Layers::ALL | Layers::VEHICLE | Layers::FLYER, true), // B.mesh  (named by SoldierCollision)
             (Layers::ORDNANCE | Layers::VEHICLE, false), // B.p_cube (ordnance keeps the default)
         ],
         "the union, in instance order, with the prim order inside an instance"
@@ -303,12 +303,12 @@ fn a_door_is_built_shut_with_its_moving_prim_and_its_trigger() {
     assert_eq!(
         got,
         vec![
-            Layers::ALL | Layers::VEHICLE,
-            Layers::ALL | Layers::VEHICLE,
-            Layers::ALL | Layers::VEHICLE,
-            Layers::ALL | Layers::VEHICLE,
+            Layers::ALL | Layers::VEHICLE | Layers::FLYER,
+            Layers::ALL | Layers::VEHICLE | Layers::FLYER,
+            Layers::ALL | Layers::VEHICLE | Layers::FLYER,
+            Layers::ALL | Layers::VEHICLE | Layers::FLYER,
             Layers::VEHICLE,
-            Layers::ALL | Layers::VEHICLE,
+            Layers::ALL | Layers::VEHICLE | Layers::FLYER,
         ]
     );
     assert_eq!(doors.len(), 1);

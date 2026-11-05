@@ -1236,3 +1236,41 @@ fn the_hidden_body_gives_no_muzzle_in_the_eye_view() {
     w.sim.units[me].zoom = None;
     assert_eq!(vis.fire_points(&w)[me], None, "a class with no arms bake");
 }
+
+#[test]
+fn a_rider_lost_with_the_hull_is_not_drawn_and_a_corpse_is() {
+    use core::vehicle::{SeatKind, SeatSetup, VehicleKind, VehicleSpec};
+    for exposed in [false, true] {
+        let mut walk = crate::walk::WalkSim::new(1, glam::Vec3::ZERO, None);
+        let h = walk.sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: glam::Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        walk.sim.seat_setup = vec![Some(SeatSetup {
+            radius: 1.0,
+            boardable: vec![true],
+            body_active: vec![exposed],
+            exit_drop: 15.0,
+            ai_size: 1,
+            guns: vec![],
+        })];
+        let player = walk.player;
+        assert!(walk.sim.seat_unit(player, h, 0));
+        let mut vis = SoldierVisuals::default();
+        vis.sync_units(&walk);
+        walk.sim.destroy_vehicle(h, None);
+        vis.sync_units(&walk);
+        let u = &walk.sim.units[player.index as usize];
+        assert!(!u.alive);
+        assert_eq!(u.body, exposed);
+        assert_eq!(vis.units[player.index as usize].gone, !exposed);
+    }
+}

@@ -48,6 +48,7 @@ mod droid_death;
 mod droidekas;
 mod emitter;
 mod fatray;
+mod flyer_contact;
 mod flyers;
 mod force;
 mod guided;

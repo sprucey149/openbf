@@ -704,6 +704,24 @@ impl EventFeed {
                     }
                 }
             }
+            if let Event::VehicleHit {
+                vehicle, damage, ..
+            } = *e
+            {
+                let mount = sim.unit(viewer).and_then(|u| u.mount);
+                let hull = sim.vehicle(vehicle).filter(|v| {
+                    mount.is_some_and(|m| {
+                        m.vehicle == vehicle
+                            && v.seats.get(usize::from(m.seat)).map(|s| s.kind)
+                                == Some(SeatKind::Pilot)
+                    })
+                });
+                if let Some(flash) =
+                    hull.and_then(|v| crate::hit_flash::Flash::from_damage(damage, v.health.cur))
+                {
+                    self.damage_flash = Some((viewer, tick, flash));
+                }
+            }
             if let Some(edge) = ambush_edge(sim, viewer, e) {
                 self.ambush.push(edge);
             }
