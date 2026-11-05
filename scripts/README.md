@@ -52,10 +52,12 @@ not a complete alignment acceptance result.
 |---|---|
 | `gates.py`, `gates_selftest.py`, `gates_history.py` | run the gates and compare them with the stored values; test the shortcuts; replay a golden skip rule over history |
 | `sim_gates.sh`, `gpu_tests.sh`, `goldens.sh` | sim referees, GPU referees, golden pictures |
+| `gpu_tests.sh --render`, `--game FILTER`, `--game-lib [CARGO_ARGS]`, `--ui-sharp`, `--hud-item-layer` | headless serial renderer, ignored game, complete game-library and native HUD checks; all GPU test runs use `--test-threads=1` |
 | `fdiff.py` | first divergence between two sim traces |
 | `parity.py` | score the port against stored PS2 frames |
 | `sound_bake_check.py`, `audition.sh`, `flythrough.sh` | check baked sounds; listen to a bank; one orbit video per map |
 | `size_report.sh`, `size_waivers.txt`, `check_provisional.py` | file sizes and the crate map; provisional values must name their measurement |
+| `tools/pure_move_check.py` | check a source split against a Git revision; retain the extraction proof and check rustfmt-only wrapping separately |
 | `tests/` | `python3 -m unittest discover -s scripts/tests` |
 
 ## Measuring play
