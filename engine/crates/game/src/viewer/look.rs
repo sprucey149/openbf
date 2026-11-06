@@ -699,6 +699,7 @@ pub fn apply_lighting(r: &mut Renderer, scene: &Scene) {
     r.lighting.water_fog = reference_water_fog(&m.source_game, &m.map, m.water.as_ref());
     r.lighting.water_gain = crate::water_anim::flat_display_gain(m);
     r.lighting.glow_gain = tune.map_or(1.0, |t| t.glow_gain);
+    r.set_far_range(m.lighting.far_scene_range.unwrap_or(0.0));
     r.set_frame_filter(frame_filter_from(&m.lighting));
     r.set_bloom(m.hdr.map(|h| bloom_from(h, tune)));
     r.set_character_light_regions(if m.source_game == "bf2" {

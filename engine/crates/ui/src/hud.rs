@@ -212,6 +212,7 @@ pub struct HudLock {
 #[derive(Debug, Clone, Default)]
 pub struct HudModel {
     pub lock: Option<HudLock>,
+    pub hints: Vec<crate::hud_tree::HintMarker>,
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
@@ -221,6 +222,7 @@ pub struct HudModel {
     pub bleed: [f32; 2],
     pub hp: f32,
     pub hp_max: f32,
+    pub seat_health: Option<(f32, f32)>,
     /// The hero's saber-shaped health bar replaces ordinary health.
     pub hero: bool,
     /// Localised offer message and seconds remaining.
@@ -337,6 +339,7 @@ pub const RETICLE_COLORS: [[u8; 3]; 3] = [
 /// whether a model of that name can be drawn (the NameMesh fallback).
 pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     feed_lock(hud, m.lock.as_ref(), m.space.clone(), has_mesh);
+    hud.hint_markers.clone_from(&m.hints);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     put("initialize", EventValue::None);
     let alive = !m.dead;
@@ -366,6 +369,20 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
             },
             EventValue::None,
         );
+        if let Some((cur, max)) = m.seat_health {
+            put(
+                "player1.vehicle.health",
+                EventValue::Number(cur.max(0.0).trunc()),
+            );
+            put(
+                "player1.vehicle.healthFraction",
+                EventValue::Number(if max > 0.0 {
+                    (cur / max).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                }),
+            );
+        }
         let e = if m.energy_max > 0.0 {
             m.energy / m.energy_max
         } else {
@@ -681,9 +698,16 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     hide(
         hud,
         "hud.gate.ordinary_health",
-        alive && !m.hero,
+        alive && !m.hero && m.seat_health.is_none(),
         &["player1.healthDisable"],
         &["player1.health", "player1.healthFraction"],
+    );
+    hide(
+        hud,
+        "hud.gate.vehicle_health",
+        alive && m.seat_health.is_some(),
+        &["player1.vehicle.healthDisable"],
+        &["player1.vehicle.health", "player1.vehicle.healthFraction"],
     );
     hide(
         hud,
@@ -1113,6 +1137,7 @@ mod tests {
     fn model() -> HudModel {
         HudModel {
             lock: None,
+            hints: Vec::new(),
             team_points: None,
             space: None,
             damage_flash: 0.0,
@@ -1136,6 +1161,7 @@ mod tests {
             target: None,
             reticle_y: 0.5,
             dead: false,
+            seat_health: None,
             respawn_in: None,
             outcome: None,
             countdown: None,

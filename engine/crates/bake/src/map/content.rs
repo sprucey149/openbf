@@ -1005,6 +1005,16 @@ pub(super) fn bake_content(
     for line in turret_rigs.attach(&parsed_models, classes.iter_mut()) {
         eprintln!("turret rig: {line}");
     }
+    if kind == Content::Map {
+        let dome = sky_cfg.as_ref().and_then(|s| s.dome.as_ref());
+        for authored in dome.iter().flat_map(|d| d.models.iter()) {
+            if let Some(model) = parsed_models.get(&authored.geometry.to_ascii_lowercase()) {
+                let alphas = alpha_table.model(model);
+                let glb = crate::glb::sky_model_to_glb(model, &alphas, hdr.is_some())?;
+                std::fs::write(out.join("models").join(format!("{}.glb", model.name)), glb)?;
+            }
+        }
+    }
     drop(parsed_models);
 
     // Textures: write each one, plus a `<base>.dtl.ktx2` companion for every

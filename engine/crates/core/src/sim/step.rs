@@ -533,6 +533,7 @@ impl Sim {
                 continue;
             }
             if self.unit(ph).is_none_or(|u| u.mount.is_some()) {
+                self.acquire_flyer_pick(slot, ph);
                 continue;
             }
             let p = unit_pads[ph.index as usize];
@@ -1146,6 +1147,8 @@ impl Sim {
         // 6. Command posts → bleed → domination → outcome.
         self.tick_space_assault(dt);
         self.tick_space_balance();
+        self.tick_target_hints();
+        self.tick_flyer_seek(dt);
         self.update_cps(dt);
         self.step_deathmatch();
 

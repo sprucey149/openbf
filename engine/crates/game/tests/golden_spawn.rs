@@ -16,6 +16,8 @@ fn hud() -> ui::hud::HudModel {
     ui::hud::HudModel {
         team_points: None,
         lock: None,
+        hints: Vec::new(),
+        seat_health: None,
         space: None,
         damage_flash: 0.0,
         gauge: Default::default(),

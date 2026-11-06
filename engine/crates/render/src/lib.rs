@@ -341,6 +341,7 @@ pub struct Renderer {
     pub frame_ab: FrameAb,
     /// The fraction of the window the world draws at (`world_scale`).
     world_scale_now: f32,
+    far_range: f32,
     world_scale: world_scale::WorldScale,
     globals_buf: wgpu::Buffer,
     globals_bg: wgpu::BindGroup,

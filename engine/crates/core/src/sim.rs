@@ -49,6 +49,7 @@ mod droidekas;
 mod emitter;
 mod fatray;
 mod flyer_contact;
+pub(crate) mod flyer_seek;
 mod flyers;
 mod force;
 mod guided;
@@ -75,6 +76,7 @@ mod seats;
 mod self_turrets;
 mod space_assault;
 mod space_balance;
+mod target_hints;
 pub use space_balance::SpaceBalance;
 mod spawn;
 mod state;
@@ -124,6 +126,7 @@ pub use stations::{
     Station, StationAnim, StationClass, StationDamageEffect, StationMotion,
     DELAY_DEFAULT as STATION_DELAY_DEFAULT, GATHER_MAX as STATION_GATHER_MAX,
 };
+pub use target_hints::{TargetHint, TargetHints};
 pub use tow::{TowCable, TowFall};
 
 #[cfg(test)]

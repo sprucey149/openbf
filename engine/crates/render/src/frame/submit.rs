@@ -73,8 +73,9 @@ impl Renderer {
         );
         let aspect = frame_width as f32 / frame_height as f32;
         let guard = crate::affine::guard(aspect);
-        let view_proj = camera.view_proj(aspect);
-        self.shadows.prepare(&self.device, &self.queue, view_proj);
+        self.shadows
+            .prepare(&self.device, &self.queue, camera.view_proj(aspect));
+        let view_proj = camera.reaching(self.far_range).view_proj(aspect);
         let frustum = frustum::Frustum::from_view_proj(&view_proj);
         let (lighting, dome_gain) = self.lightning.unwrap_or((self.lighting, 1.0));
         let water_fog = lighting.water_fog.or(lighting.fog);

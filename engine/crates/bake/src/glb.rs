@@ -27,6 +27,7 @@ use crate::gltf_bin::{flat3, min_max3, Bin};
 enum VertexLighting<'a> {
     Off,
     Model,
+    Sky,
     Programs(&'a [LightPath]),
 }
 
@@ -103,6 +104,22 @@ pub fn world_model_to_glb(
     hdr: bool,
 ) -> Result<Vec<u8>> {
     write_model(m, alphas, true.into(), hdr, None, false, true.into())
+}
+
+pub fn sky_model_to_glb(
+    m: &Model,
+    alphas: &[crate::alpha::SegmentAlpha],
+    hdr: bool,
+) -> Result<Vec<u8>> {
+    write_model(
+        m,
+        alphas,
+        VertexLighting::Sky,
+        hdr,
+        None,
+        false,
+        true.into(),
+    )
 }
 
 /// A fingerprinted donor fallback covering the canonical collision surface.
@@ -188,6 +205,7 @@ fn write_model(
     metadata: MeshMetadata,
 ) -> Result<Vec<u8>> {
     let vertex_light = !matches!(lighting, VertexLighting::Off);
+    let keep_col0_alpha = matches!(lighting, VertexLighting::Sky);
     let programs = match lighting {
         VertexLighting::Programs(programs) => Some(programs),
         _ => None,
@@ -267,7 +285,8 @@ fn write_model(
 
         let mut attributes = json!({"POSITION": pos_acc, "NORMAL": nrm_acc, "TEXCOORD_0": uv_acc});
         if let Some(c) = seg.colors.as_ref().filter(|_| vertex_light) {
-            let glow_av = glow == Some(LightPath::Glow);
+            let glow_av = glow == Some(LightPath::Glow)
+                || (keep_col0_alpha && seg.material_flags & 0x200 == 0);
             let lin: Vec<f32> = c
                 .iter()
                 .flat_map(|v| {
@@ -863,6 +882,38 @@ mod tests {
             .collect();
         assert_eq!(paths, ["prelit_add", "lit"]);
         assert!(world_model_to_glb_programs(&m, &alphas, false, &[LightPath::Lit]).is_err());
+    }
+
+    #[test]
+    fn a_sky_model_keeps_vertex_alpha_and_a_world_model_stays_opaque() {
+        let mut m = model(vec![bf2(0x01, true)]);
+        for c in m.segments[0].colors.as_mut().unwrap() {
+            c[3] = 0x20;
+        }
+        let alphas: Vec<SegmentAlpha> = m
+            .segments
+            .iter()
+            .map(|s| SegmentAlpha {
+                texture: "t".into(),
+                mode: AlphaMode::Opaque,
+                rule: Rule::Mask,
+                flags: s.material_flags,
+                rtyp: RenderType::Bf1("Normal".into()),
+                stats: None,
+            })
+            .collect();
+        let alpha = |bytes: Vec<u8>| {
+            let (doc, buffers, _) = gltf::import_slice(&bytes).expect("gltf reads it");
+            let prim = doc.meshes().next().unwrap().primitives().next().unwrap();
+            prim.reader(|b| buffers.get(b.index()).map(|d| &d.0[..]))
+                .read_colors(0)
+                .unwrap()
+                .into_rgba_f32()
+                .next()
+                .unwrap()[3]
+        };
+        assert_eq!(alpha(model_to_glb(&m, &alphas, true).unwrap()), 1.0);
+        assert!(alpha(sky_model_to_glb(&m, &alphas, true).unwrap()) < 1.0);
     }
 
     #[test]

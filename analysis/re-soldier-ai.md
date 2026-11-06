@@ -112,7 +112,7 @@ threat wakes a bot at the next step at any level - and the first think of a life
 | 5 | UnitUnBoardAgent | 0x623768 | get out |
 | 8 | UnitRandomAgent | 0x623510 | the unstick walk (2) |
 | 9 | UnitTrooperAgent | 0x623618 | capture a post: walk, snipe stand, serve, mines, at-post (re-conquest-goal 4) |
-| 10-0xf | CTFOffense / Deathmatch / Defend / Destroy / Follow / Hold | 0x622ca8 ... 0x623408 | other goals, squad orders |
+| 10-0xf | CTFOffense / Deathmatch / Defend / Destroy / Follow / Hold | 0x622ca8 ... 0x623408 | other goals, squad orders; the Deathmatch agent is state 0xb, `re-space-assault.md` section 17 |
 
 - [V] A message (`FUN_002b7e58`, B2:239703-239740) goes to the agent's vtable+0x58; when it yields an order the
   agent's +0x4c chooses. 1 (the base agent, the trooper, wait ...): `FUN_002b60f0` pushes [new order, a copy of the

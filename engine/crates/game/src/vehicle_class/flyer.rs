@@ -181,6 +181,10 @@ impl FlyerClass {
                 return;
             }
         }
+        if key == 0xe510_8b93 {
+            f.formations = f.formations.saturating_add(1);
+            return;
+        }
         if key == h("PathFollowerClass") {
             f.class_id = h(value.trim().trim_matches('"'));
             return;

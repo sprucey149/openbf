@@ -75,6 +75,7 @@ pub struct FollowerParams {
     pub roll_dampening: f32,
     pub min_branch_dist: f32,
     pub flyer_vs_flyer: bool,
+    pub formations: u8,
 }
 
 impl Default for FollowerParams {
@@ -94,6 +95,7 @@ impl Default for FollowerParams {
             roll_dampening: 0.5,
             min_branch_dist: 300.0,
             flyer_vs_flyer: true,
+            formations: 0,
         }
     }
 }
@@ -307,6 +309,9 @@ pub struct FlyerAi {
     /// FUN_002feed0: +0x6c filtered goal, +0x70 angle, +0x74 acceleration,
     /// +0x78 rate.
     pub roll: [f32; 4],
+    pub relocate_in: f32,
+    pub burst_in: f32,
+    pub fire_held: bool,
 }
 
 impl FlyerAi {
@@ -316,6 +321,15 @@ impl FlyerAi {
         }
         eat(b"FAI");
         eat(&[self.agent as u8, self.pursuit as u8, self.wedges]);
+        if self.relocate_in != 0.0 {
+            eat(&self.relocate_in.to_bits().to_le_bytes());
+        }
+        if self.burst_in != 0.0 {
+            eat(&self.burst_in.to_bits().to_le_bytes());
+        }
+        if self.fire_held {
+            eat(&[1]);
+        }
         for x in self.anchor.to_array() {
             eat(&x.to_bits().to_le_bytes());
         }

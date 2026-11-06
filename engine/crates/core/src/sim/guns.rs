@@ -403,7 +403,8 @@ impl Sim {
         let ai_spread_mult = driver
             .filter(|_| ai)
             .map(|i| self.skill_of(&self.units[i]).spread_mult);
-        let perceived = !ai || {
+        let free_burst = g.pilot && self.vehicles[vi].flyer.ai.fire_held;
+        let perceived = !ai || free_burst || {
             let st = &self.units[driver.unwrap()].ai;
             st.target
                 .is_some_and(|t| st.contacts.iter().flatten().any(|c| c.handle == t))

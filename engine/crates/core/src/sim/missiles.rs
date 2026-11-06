@@ -129,7 +129,7 @@ impl Sim {
                         AimTarget::Unit(h) => Some(MissileTarget::Unit(h)),
                         AimTarget::Vehicle(h) => Some(MissileTarget::Vehicle(h)),
                         AimTarget::Turret(id) => Some(MissileTarget::Turret(id)),
-                        AimTarget::Droid(_) => None,
+                        AimTarget::Droid(_) | AimTarget::Station(_) => None,
                     }),
                 _ => ai_target.and_then(|f| f.unit()).map(MissileTarget::Unit),
             };

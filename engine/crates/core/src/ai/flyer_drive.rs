@@ -99,6 +99,14 @@ pub const CLIMB_SLOPE_LOW: f32 = 1.0;
 pub const GROUND_DANGER: f32 = 8.0;
 /// OURS: how fast a bot pilot's pitch stick moves, in full deflections a second.
 pub const PITCH_SLEW: f32 = 2.5;
+const FREE_BURST_SALT: u32 = 0xF12E;
+const FREE_BURST_FIRST: f32 = 10.0;
+const FREE_BURST_WINDOW: f32 = 0.6;
+const FREE_BURST_DONE: f32 = 0.0001;
+const FREE_BURST_SPREAD: f32 = 1.5;
+const FREE_BURST_MEAN: f32 = 6.0;
+const FREE_BURST_THINK: u64 = 120;
+const FREE_BURST_THINK_STEP: u64 = 37;
 /// OURS: how long an attack run holds a target it no longer sees.
 pub const ATTACK_HOLD: u64 = 2 * crate::TICK_HZ as u64;
 /// OURS: an attack run's steepest climb or dive, rise over run (about 20 degrees).
@@ -127,7 +135,7 @@ pub fn can_fly(sim: &Sim, v: &Vehicle) -> bool {
 }
 
 /// A deterministic draw in 0..1; the PS2 uses `rand()` (see the module note).
-fn draw(tick: u64, me: UnitHandle, salt: u32) -> f32 {
+pub(crate) fn draw(tick: u64, me: UnitHandle, salt: u32) -> f32 {
     let mut x = (tick as u32) ^ me.index.wrapping_mul(0x9E37_79B9) ^ salt.wrapping_mul(0x85EB_CA6B);
     x ^= x >> 15;
     x = x.wrapping_mul(0x2C1B_3C6D);
@@ -546,7 +554,7 @@ fn bf1_sticks(
     [ahead * throttle, strafe * throttle, turn, pitch]
 }
 
-fn clear_chord(sim: &Sim, a: Vec3, b: Vec3, handle: VehicleHandle) -> bool {
+pub(crate) fn clear_chord(sim: &Sim, a: Vec3, b: Vec3, handle: VehicleHandle) -> bool {
     let delta = b - a;
     let length = delta.length();
     if length < 1e-3 {
@@ -720,10 +728,35 @@ fn bf2_plan(
         }
         leave = Some(c.path);
     }
+    if sim.flyer_seek_curve(me, v, handle, p, ai) {
+        return;
+    }
     connect(sim, v, handle, p, ai, leave);
 }
 
 /// The enemy flyer this bot's perception sees now, if any.
+fn free_burst(sim: &Sim, me: UnitHandle, p: &FlyerParams, ai: &mut FlyerAi) -> bool {
+    if !p.follower.flyer_vs_flyer {
+        return false;
+    }
+    if (sim.tick + u64::from(me.index) * FREE_BURST_THINK_STEP).is_multiple_of(FREE_BURST_THINK) {
+        ai.fire_held = false;
+    }
+    let held = if ai.burst_in > 0.0 {
+        ai.burst_in
+    } else {
+        FREE_BURST_FIRST
+    };
+    let left = held - crate::TICK_DT;
+    ai.burst_in = if left <= FREE_BURST_DONE {
+        (draw(sim.tick, me, FREE_BURST_SALT) - 0.5) * FREE_BURST_SPREAD + FREE_BURST_MEAN
+    } else {
+        left
+    };
+    ai.fire_held |= left < FREE_BURST_WINDOW;
+    ai.fire_held
+}
+
 fn seen_flyer<'a>(sim: &'a Sim, st: &AiState) -> Option<&'a Vehicle> {
     let contact = st
         .target
@@ -757,6 +790,7 @@ pub(super) fn drive(
     let mut ai = v.flyer.ai;
     let mut out = [0.0; 4];
     let mut takeoff = false;
+    let mut free_fire = false;
     // A pilot who came to a craft already rising (a gunner moved up after the
     // pilot died) has no landed tick: his clock starts now, not at tick 0.
     if v.flyer.phase == FlightPhase::Takeoff && ai.takeoff_at == 0 {
@@ -777,10 +811,14 @@ pub(super) fn drive(
         // BF1 skips only states 0 and 3 (FUN_001dd0d0).
         _ if p.bf2 => {
             if v.flyer.phase == FlightPhase::Flying {
+                free_fire = free_burst(sim, me, p, &mut ai);
                 bf2_plan(sim, me, v, m.vehicle, p, &mut ai, seen_flyer(sim, st));
             }
         }
         _ => out = bf1_sticks(sim, me, v, m.vehicle, p, &mut ai, aim),
+    }
+    if free_fire {
+        super::gunner::free_fire(sim, me, st, &mut pad);
     }
     // OURS: a craft that cannot find its way out of a bay gets its pilot out too.
     if ai.wedges >= WEDGED_GIVEUP {

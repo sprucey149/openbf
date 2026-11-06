@@ -80,7 +80,7 @@ fn tap(s: &mut Sim) {
 }
 
 fn ahead(s: &Sim, h: UnitHandle, metres: f32, side: f32) -> Vec3 {
-    let (pos, dir) = s.units[h.index as usize].aim_ray(s.ground_rules, s.views());
+    let (pos, dir) = s.flyer_ray(h);
     let across = dir.cross(Vec3::Y).normalize_or_zero();
     pos + dir * metres + across * side
 }

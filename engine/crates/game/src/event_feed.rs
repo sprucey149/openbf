@@ -1108,19 +1108,29 @@ impl EventFeed {
         self.aim_target(sim, t, relation)
     }
 
+    pub fn target_hints<'a>(&self, sim: &'a Sim, slot: usize) -> &'a [core::sim::TargetHint] {
+        sim.target_hints
+            .get(slot)
+            .map_or(&[], |list| list.records())
+    }
+
     pub fn lock_target(&self, sim: &Sim, target: core::sim::LockTarget) -> Option<HudTarget> {
         match target {
             core::sim::LockTarget::Aim(t) => self.aim_target(sim, t, -1),
-            core::sim::LockTarget::Station(i) => {
-                let s = sim.stations.get(usize::from(i))?;
-                self.station_hud(s, i as usize, -1)
-            }
+            core::sim::LockTarget::Station(i) => self.station_hud(sim, i, -1),
         }
     }
 
-    fn station_hud(&self, s: &core::sim::Station, i: usize, relation: i8) -> Option<HudTarget> {
+    fn station_hud(&self, sim: &Sim, i: u16, relation: i8) -> Option<HudTarget> {
+        let s = sim.stations.get(usize::from(i))?;
+        let shield = sim
+            .space_assault
+            .as_ref()
+            .and_then(|sa| sa.shields.iter().find(|g| g.objects.contains(&i)))
+            .filter(|g| g.max > 0.0 && g.shield > 0.0)
+            .map(|g| ("Shield".to_owned(), (g.shield / g.max).clamp(0.0, 1.0)));
         (s.health.max > 0.0).then(|| HudTarget {
-            id: (1 << 62) | i as u64,
+            id: (1 << 62) | u64::from(i),
             name: self
                 .stations
                 .get(usize::from(s.class))
@@ -1129,7 +1139,7 @@ impl EventFeed {
             health_fraction: (s.health.cur / s.health.max).clamp(0.0, 1.0),
             relation,
             team0: s.team.is_none(),
-            shield: None,
+            shield,
         })
     }
 
@@ -1177,6 +1187,7 @@ impl EventFeed {
                     shield: None,
                 })
             }
+            AimTarget::Station(i) => self.station_hud(sim, i, relation),
             AimTarget::Droid(id) => {
                 let d = sim.live_droid(id)?;
                 let max = sim.droid_class(d)?.max_health;

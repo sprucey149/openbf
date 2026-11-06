@@ -130,6 +130,95 @@ impl Battle {
     }
 }
 
+fn flyer_pad(b: &mut Battle, team: u8) -> core::vehicle::VehicleHandle {
+    for _ in 0..(5 * core::TICK_HZ) {
+        b.sim.step(&[]);
+    }
+    b.sim
+        .alive_vehicles()
+        .find(|(h, v)| {
+            v.home_team == Some(team)
+                && b.sim
+                    .flyer_params
+                    .get(v.class as usize)
+                    .is_some_and(Option::is_some)
+                && v.seats.first().is_some_and(|s| s.occupant.is_none())
+                && b.sim.vehicle(*h).is_some()
+        })
+        .map(|(h, _)| h)
+        .expect("a parked flyer")
+}
+
+fn pilot_at(b: &mut Battle, team: u8, pos: Vec3, target: Vec3) -> core::unit::UnitHandle {
+    let v = flyer_pad(b, team);
+    let p = b.sim.spawn(&UnitSpec::player(team, pos)).unwrap();
+    assert!(b.sim.seat_unit(p, v, 0));
+    let dir = (target - pos).normalize();
+    let vehicle = b.sim.vehicle_mut(v).unwrap();
+    vehicle.pos = pos;
+    vehicle.vel = Vec3::ZERO;
+    vehicle.rot = glam::Quat::from_rotation_arc(Vec3::Z, dir);
+    p
+}
+
+#[test]
+fn a_pilots_reticle_on_the_enemy_hull_picks_it_in_red_without_a_magnet() {
+    let Some(mut b) = battle("bf2_spa8", 180) else {
+        return;
+    };
+    let hull = b.station("all_cap1_body");
+    let centre = b.sim.stations[usize::from(hull)].sphere_centre;
+    let pos = centre + Vec3::new(0.0, 900.0, 2200.0);
+    pilot_at(&mut b, 0, pos, centre);
+    b.sim.step(&[]);
+    let (pick, relation) = b.sim.reticle_pick[0].expect("the hull under the reticle");
+    assert_eq!(relation, -1);
+    assert_eq!(pick, core::sim::AimTarget::Station(hull));
+    assert_eq!(b.sim.magnet[0], None);
+}
+
+#[test]
+fn a_pilots_reticle_on_an_allied_hull_picks_it_as_a_friend() {
+    let Some(mut b) = battle("bf2_spa8", 180) else {
+        return;
+    };
+    let hull = b.station("imp_cap1_body1");
+    let centre = b.sim.stations[usize::from(hull)].sphere_centre;
+    let pos = centre + Vec3::new(0.0, 900.0, 2200.0);
+    pilot_at(&mut b, 0, pos, centre);
+    b.sim.step(&[]);
+    let (pick, relation) = b.sim.reticle_pick[0].expect("the hull under the reticle");
+    assert_eq!(relation, 1);
+    assert_eq!(pick, core::sim::AimTarget::Station(hull));
+    assert_eq!(b.sim.magnet[0], None);
+}
+
+#[test]
+fn a_pilot_gets_markers_for_lockable_ships_and_none_for_hulls_in_view() {
+    let Some(mut b) = battle("bf2_spa8", 180) else {
+        return;
+    };
+    let hull = b.station("all_cap1_body");
+    let frigate = b.station("all_frig1");
+    let target = b.sim.stations[usize::from(frigate)].sphere_centre;
+    let pos = target + Vec3::new(0.0, 300.0, 1500.0);
+    let _ = pilot_at(&mut b, 0, pos, target);
+    let mut hints = core::sim::TargetHints::default();
+    for _ in 0..30 {
+        b.sim.tick += 1;
+        b.sim.update_target_hints(&mut hints, 0);
+    }
+    let listed: Vec<_> = hints.records().iter().map(|h| h.target).collect();
+    assert!(listed.contains(&core::sim::LockTarget::Station(frigate)));
+    assert!(!listed.contains(&core::sim::LockTarget::Station(hull)));
+    let frig = hints
+        .records()
+        .iter()
+        .find(|h| h.target == core::sim::LockTarget::Station(frigate))
+        .unwrap();
+    assert!(!frig.friendly);
+}
+
 #[test]
 fn every_space_mission_loads_with_infinite_reinforcements_and_proper_sides() {
     for (map, a, b) in MAPS {
@@ -369,6 +458,133 @@ fn reaching_the_limit_ends_the_round_with_victory() {
         .events
         .iter()
         .any(|e| matches!(e, Event::TeamDefeated { team: 0 })));
+}
+
+fn hub_past_the_offers(b: &Battle, team: u8) -> Vec3 {
+    let (ship, _) = b
+        .sim
+        .alive_vehicles()
+        .find(|(_, v)| {
+            v.home_team == Some(team)
+                && b.sim
+                    .flyer_params
+                    .get(v.class as usize)
+                    .is_some_and(Option::is_some)
+        })
+        .expect("a parked flyer");
+    let at = b.sim.vehicle(ship).unwrap().pos;
+    let g = b.sim.nav.as_ref().expect("a route graph");
+    g.hubs
+        .iter()
+        .map(|h| h.pos)
+        .filter(|p| p.distance(at) > 60.0)
+        .min_by(|a, c| a.distance(at).total_cmp(&c.distance(at)))
+        .expect("a hub away from the ships")
+}
+
+#[test]
+fn soldiers_who_start_out_of_reach_crew_the_ships_and_the_ships_shoot() {
+    let Some(mut b) = battle("bf2_spa8", 1000) else {
+        return;
+    };
+    let dir = game::assets::baked_root().join("bf2_spa8");
+    b.sim.nav = game::layout::nav_graph(&b.manifest, &dir);
+    for _ in 0..(5 * core::TICK_HZ) {
+        b.sim.step(&[]);
+    }
+    for team in 0..2 {
+        let at = hub_past_the_offers(&b, team);
+        for _ in 0..6 {
+            b.sim
+                .spawn(&UnitSpec {
+                    controller: core::unit::Controller::Ai,
+                    ..UnitSpec::trooper(team, at)
+                })
+                .unwrap();
+        }
+    }
+    let mut pilot_shots = 0;
+    let mut untargeted = 0;
+    for _ in 0..(90 * core::TICK_HZ) {
+        b.sim.step(&[]);
+        for e in &b.sim.events {
+            let Event::Shot { unit, .. } = e else {
+                continue;
+            };
+            let Some(u) = b.sim.unit(*unit) else {
+                continue;
+            };
+            let flying = u
+                .mount
+                .filter(|m| m.seat == 0)
+                .and_then(|m| b.sim.vehicle(m.vehicle))
+                .is_some_and(|v| v.kind == core::vehicle::VehicleKind::Flyer);
+            if flying {
+                pilot_shots += 1;
+                if u.ai.target.is_none() {
+                    untargeted += 1;
+                }
+            }
+        }
+    }
+    let crews = b
+        .sim
+        .alive_vehicles()
+        .filter(|(_, v)| {
+            v.kind == core::vehicle::VehicleKind::Flyer
+                && v.seats.first().is_some_and(|s| s.occupant.is_some())
+        })
+        .count();
+    assert!(crews >= 4, "only {crews} of 12 soldiers flying");
+    assert!(pilot_shots > 100, "{pilot_shots} shots");
+    assert!(untargeted > 0, "{pilot_shots} shots, none free");
+}
+
+#[test]
+fn a_human_ship_beside_the_enemy_destroyer_draws_its_turrets_fire() {
+    let Some(mut b) = battle("bf2_spa8", 1000) else {
+        return;
+    };
+    let hull = b.station("all_cap1_body");
+    let centre = b.sim.stations[usize::from(hull)].sphere_centre;
+    for _ in 0..(5 * core::TICK_HZ) {
+        b.sim.step(&[]);
+    }
+    let turrets: Vec<Vec3> = b
+        .sim
+        .building_turrets
+        .iter()
+        .filter(|t| t.down.is_none() && !t.self_pilots.is_empty())
+        .filter_map(|t| b.sim.vehicle(t.handle))
+        .filter(|v| v.team != Some(0))
+        .map(|v| v.pos)
+        .collect();
+    let near = *turrets
+        .iter()
+        .min_by(|a, c| a.distance(centre).total_cmp(&c.distance(centre)))
+        .expect("an enemy turret");
+    let pos = near + (near - centre).normalize() * 300.0;
+    let p = pilot_at(&mut b, 0, pos, centre);
+    let ship = b.sim.unit(p).unwrap().mount.unwrap().vehicle;
+    let full = b.sim.vehicle(ship).unwrap().health.cur;
+    let mut fired = 0;
+    for _ in 0..(30 * core::TICK_HZ) {
+        let Some(v) = b.sim.vehicle_mut(ship) else {
+            break;
+        };
+        v.pos = pos;
+        v.vel = Vec3::ZERO;
+        b.sim.step(&[]);
+        fired += b
+            .sim
+            .events
+            .iter()
+            .filter(|e| matches!(e, Event::Shot { unit, .. } if unit.index == u32::MAX))
+            .count();
+    }
+    let left = b.sim.vehicle(ship).map_or(0.0, |v| v.health.cur);
+    assert!(fired > 0, "{} turrets, no shot in 30 s", turrets.len());
+    assert!(left < full, "{fired} shots, no hit in 30 s");
 }
 
 #[test]
