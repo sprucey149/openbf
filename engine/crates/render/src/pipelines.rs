@@ -768,6 +768,7 @@ impl Renderer {
             cull: true,
             frame_ab: crate::FrameAb::default(),
             world_scale_now: 1.0,
+            far_range: 0.0,
             world_scale,
             skinned_pipeline,
             skinned_blend_pipeline,

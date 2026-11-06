@@ -296,6 +296,7 @@ pub enum AimTarget {
     /// health and colour; the maintainer: "don't aim assist remote droids"):
     /// it has no [`Candidate`], so no magnet can hold it.
     Droid(u64),
+    Station(u16),
 }
 
 impl AimTarget {
@@ -303,7 +304,10 @@ impl AimTarget {
     pub fn unit(self) -> Option<UnitHandle> {
         match self {
             AimTarget::Unit(h) => Some(h),
-            AimTarget::Vehicle(_) | AimTarget::Turret(_) | AimTarget::Droid(_) => None,
+            AimTarget::Vehicle(_)
+            | AimTarget::Turret(_)
+            | AimTarget::Droid(_)
+            | AimTarget::Station(_) => None,
         }
     }
 
@@ -311,7 +315,10 @@ impl AimTarget {
     pub fn vehicle(self) -> Option<VehicleHandle> {
         match self {
             AimTarget::Vehicle(h) => Some(h),
-            AimTarget::Unit(_) | AimTarget::Turret(_) | AimTarget::Droid(_) => None,
+            AimTarget::Unit(_)
+            | AimTarget::Turret(_)
+            | AimTarget::Droid(_)
+            | AimTarget::Station(_) => None,
         }
     }
 
@@ -321,6 +328,7 @@ impl AimTarget {
             AimTarget::Vehicle(h) => (0x56, h.index, h.gen),
             AimTarget::Turret(id) => (0x54, id as u32, (id >> 32) as u32),
             AimTarget::Droid(id) => (0x44, id as u32, (id >> 32) as u32),
+            AimTarget::Station(i) => (0x53, u32::from(i), 0),
         };
         eat(&[tag]);
         eat(&i.to_le_bytes());
@@ -337,7 +345,7 @@ pub(super) struct Candidate {
     pub(super) kind: u32,
     /// The acquisition's bounds: centre and radius.
     pub(super) ctr: Vec3,
-    r: f32,
+    pub(super) r: f32,
     /// Where the LOS ray aims.
     pub(super) aim: Vec3,
     vel: Vec3,
@@ -452,6 +460,22 @@ impl Sim {
                 })
             }
             AimTarget::Droid(_) => None,
+            AimTarget::Station(i) => {
+                self.space_assault.as_ref()?;
+                let s = self.stations.get(usize::from(i)).filter(|s| !s.destroyed)?;
+                Some(Candidate {
+                    team: s.team,
+                    kind: s.health.health_type as u32,
+                    ctr: s.sphere_centre,
+                    r: s.sphere_radius,
+                    aim: s.sphere_centre,
+                    vel: Vec3::ZERO,
+                    assist_r: s.sphere_radius,
+                    assist_ctr: s.sphere_centre,
+                    hull: None,
+                    building: s.instance,
+                })
+            }
             AimTarget::Turret(id) => {
                 let t = self.live_turret(id)?;
                 let ctr = t.centre();
@@ -570,7 +594,7 @@ impl Sim {
             AimTarget::Unit(h) => self.unit(h).is_some_and(|u| u.mount.is_none()),
             AimTarget::Vehicle(h) => self.vehicle(h).is_some() && Some(h) != own,
             AimTarget::Turret(id) => self.live_turret(id).is_some(),
-            AimTarget::Droid(_) => false,
+            AimTarget::Droid(_) | AimTarget::Station(_) => false,
         };
 
         let mut target = self.magnet[slot].filter(|&t| self.aim_candidate(t).is_some());
@@ -746,7 +770,10 @@ impl Sim {
             let ahead = -0.5 * crate::TICK_DT
                 - match m {
                     AimTarget::Unit(_) => crate::unit::HUMAN_SHOT_LAG,
-                    AimTarget::Vehicle(_) | AimTarget::Turret(_) | AimTarget::Droid(_) => 0.0,
+                    AimTarget::Vehicle(_)
+                    | AimTarget::Turret(_)
+                    | AimTarget::Droid(_)
+                    | AimTarget::Station(_) => 0.0,
                 };
             let from = if p.scope_path() {
                 p.scope_point(self.ground_rules)

@@ -438,8 +438,9 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
         cand.push((d2, (0, u64::from(h.index)), Foe::Unit(h), p));
     }
     // A rider is seen by his craft's body (RE §5.1's bound radius; BF2 doubles
-    // a flyer target): for a flyer in the sky, and for a flyer pilot's eyes on
-    // any vehicle. Ground bots and ground vehicles keep the soldier's sight.
+    // a flyer observer and a human target): for a flyer in the sky, and for a
+    // flyer pilot's eyes on any vehicle. Ground bots and ground vehicles keep
+    // the soldier's sight.
     let pilot = u
         .mount
         .and_then(|m| sim.vehicle(m.vehicle))
@@ -454,8 +455,9 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             .get(v.class as usize)
             .and_then(Option::as_ref)
             .map_or(0.0, |s| s.radius);
-        let double = flyer && sim.ground_rules == crate::soldier::GroundRules::Bf2;
-        let reach = (20.0 * radius + 30.0) * tier.view_mult * if double { 2.0 } else { 1.0 };
+        let bf2 = sim.ground_rules == crate::soldier::GroundRules::Bf2;
+        let double = pilot && bf2;
+        let base = (20.0 * radius + 30.0) * tier.view_mult * if double { 2.0 } else { 1.0 };
         for o in v.seats.iter().filter_map(|s| s.occupant) {
             let Some(rider) = sim
                 .unit(o)
@@ -466,6 +468,8 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
             let at = rider.capsule().center();
             let off = at - eye;
             let d2 = off.dot(off);
+            let human_target = bf2 && rider.is_human();
+            let reach = base * if human_target { 2.0 } else { 1.0 };
             if d2 < reach * reach
                 && in_cone(view, off, d2, sim.omni_radius)
                 && !cand.iter().any(|c| c.2 == Foe::Unit(o))

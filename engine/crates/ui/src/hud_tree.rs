@@ -68,6 +68,22 @@ pub const LOCK_STYLE_NAMES: [&str; 4] = [
     "lockedoffscreenbehind",
 ];
 
+pub const HINT_STYLE_NAMES: [&str; 2] = ["hintonscreen", "hintonscreenbehind"];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HintStyle {
+    pub elem: usize,
+    pub friendly: Option<[f32; 3]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HintMarker {
+    pub ndc: [f32; 2],
+    pub distance: f32,
+    pub friendly: bool,
+    pub visible: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LockStyle {
     pub elem: usize,
@@ -679,6 +695,8 @@ pub struct Hud {
     pub map: Option<crate::hud_map::MapModel>,
     pub lock_styles: [Option<LockStyle>; 4],
     pub lock_marker: Option<LockMarker>,
+    pub hint_styles: [Option<HintStyle>; 2],
+    pub hint_markers: Vec<HintMarker>,
     pub space: Option<crate::hud_space::SpaceStatus>,
     /// The squad order cross this frame (`crate::hud_squad`); `None` draws
     /// none.
@@ -828,6 +846,8 @@ impl Hud {
             map: None,
             lock_styles: [None, None, None, None],
             lock_marker: None,
+            hint_styles: [None, None],
+            hint_markers: Vec::new(),
             space: None,
             squad: None,
             capture: None,
@@ -873,6 +893,16 @@ impl Hud {
         for c in &node.children {
             let lname = c.name.to_ascii_lowercase();
             if kind == Kind::Other {
+                if let Some(slot) = HINT_STYLE_NAMES.iter().position(|n| *n == lname) {
+                    let friendly = c
+                        .children
+                        .iter()
+                        .find(|p| p.name.eq_ignore_ascii_case("colorfriendly"))
+                        .and_then(|p| Some([num(p, 0)?, num(p, 1)?, num(p, 2)?]));
+                    let elem = self.element(c, Kind::Bitmap, None);
+                    self.hint_styles[slot] = Some(HintStyle { elem, friendly });
+                    continue;
+                }
                 if let Some(slot) = LOCK_STYLE_NAMES.iter().position(|n| *n == lname) {
                     let scale = |key: &str| {
                         c.children

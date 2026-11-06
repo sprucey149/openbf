@@ -90,6 +90,10 @@ impl Renderer {
         self.world_scale_now = scale.clamp(0.25, 1.0);
     }
 
+    pub fn set_far_range(&mut self, far: f32) {
+        self.far_range = far;
+    }
+
     /// The fraction of the window the world draws at.
     pub fn world_scale(&self) -> f32 {
         self.world_scale_now

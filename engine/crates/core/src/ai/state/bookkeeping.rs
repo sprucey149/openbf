@@ -177,6 +177,7 @@ impl Default for AiState {
             fight: FightState::default(),
             tpos: TposState::default(),
             want_stance: 0,
+            wander: None,
             dodge_until: 0,
             unreachable_dwell: 0,
             route: None,
@@ -268,6 +269,12 @@ impl AiState {
         }
         eat(&self.unreachable_dwell.to_le_bytes());
         eat(&[self.burst, self.strafe_side as u8, self.want_stance]);
+        if let Some((at, hub)) = self.wander {
+            for c in at.to_array() {
+                eat(&c.to_bits().to_le_bytes());
+            }
+            eat(&hub.to_le_bytes());
+        }
         eat(&self.pause_until.to_le_bytes());
         eat(&self.charge_until.to_le_bytes());
         eat(&self.dodge_until.to_le_bytes());

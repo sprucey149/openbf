@@ -318,7 +318,7 @@ capture behaviour → the at-post helper → the owner-change hook; then BF1's t
 
 Stayed [H]: what the fight order does and for how long (section 5); which classes take the hint stand; that Kamino CW's
 blocked arcs are what removes cp2 (section 3); what a BF1 bot does when its capture behaviour ends without a re-pick
-(no path); the other goal classes (Deathmatch for locals, Destroy / Defend on kas2c) — not opened.
+(no path); the other goal classes (Destroy / Defend on kas2c) — not opened. Deathmatch was opened later: `re-space-assault.md` section 17.
 
 ## 10. Audit CONT (2026-10-02): the hub mask, and what the build left open [V]
 

@@ -31,11 +31,18 @@
 use super::gunner_foot::{charge, droid_aim, fire_discipline, seen_aim, tap, turret_aim, Meter};
 use super::state::AiState;
 use super::AIM_TOLERANCE;
+use crate::collision::lead_point;
 use crate::fmath;
 use crate::perception;
 use crate::sim::{buttons, PadState, Sim};
 use crate::unit::UnitHandle;
-use crate::vehicle::gun;
+use crate::vehicle::{gun, VehicleKind};
+
+const FLYER_AIM_CONE: f32 = 22.5 * std::f32::consts::PI / 180.0;
+const FLYER_NEAR: f32 = 50.0;
+const FLYER_MISS: f32 = 200.0;
+const HUMAN_HOLD: f32 = 50.0;
+const HUMAN_SPHERE: f32 = 1.0;
 
 /// Whose look [`aim`] moves.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -80,8 +87,14 @@ pub(super) fn aim(
         .and_then(|c| c.handle.turret())
         .and_then(|id| sim.live_turret(id));
     let speed = wc.shot_ordnance().velocity;
+    let piloting = flyer_pilot(sim, me, &s);
     let point = enemy
-        .map(|e| seen_aim(sim, me, st, s.eye, e, speed, wc))
+        .map(|e| {
+            piloting
+                .then(|| led_flyer(sim, s.eye, e, speed))
+                .flatten()
+                .unwrap_or_else(|| seen_aim(sim, me, st, s.eye, e, speed, wc))
+        })
         .or_else(|| droid.map(|d| droid_aim(sim, me, st, s.eye, d, speed, wc)))
         .or_else(|| turret.map(|t| turret_aim(sim, me, st, s.eye, t, wc)));
     let centre = enemy
@@ -151,10 +164,15 @@ pub(super) fn aim(
         let turned = |q: glam::Vec3, o: glam::Vec3| {
             (q - o).normalize_or_zero().dot((p - o).normalize_or_zero()) >= fmath::sin_cos(reach).1
         };
-        let on = to(p).dot(s.barrel) >= cos_tol
-            || last
-                .zip(pivot)
-                .is_some_and(|(q, o)| to(q).dot(s.barrel) >= cos_tol && turned(q, o));
+        let on = if piloting {
+            flyer_on_target(s.rot * glam::Vec3::Z, p - s.eye)
+                && !human_friend_on_nose(sim, u.team, s.muzzle, s.rot * glam::Vec3::Z)
+        } else {
+            to(p).dot(s.barrel) >= cos_tol
+                || last
+                    .zip(pivot)
+                    .is_some_and(|(q, o)| to(q).dot(s.barrel) >= cos_tol && turned(q, o))
+        };
         let range = (c - s.muzzle).length();
         let ready = held.is_some_and(|c| perception::fireable(&c, sim.tick, tier.reaction_ticks));
         ready && on && range <= wc.shot_range()
@@ -180,6 +198,80 @@ pub(super) fn aim(
         pad.buttons |= buttons::FIRE;
     }
     at
+}
+
+pub(super) fn free_fire(sim: &Sim, me: UnitHandle, st: &mut AiState, pad: &mut PadState) {
+    let (Some(s), Some(u)) = (sim.seat_look(me), sim.unit(me)) else {
+        return;
+    };
+    let Some(w) = s.gun.weapons.first() else {
+        return;
+    };
+    if human_friend_on_nose(sim, u.team, s.muzzle, s.rot * glam::Vec3::Z) {
+        return;
+    }
+    let wc = &sim.weapon_classes[w.class];
+    let skill = sim.skill_of(u);
+    if wc.max_pressed_time > 0.0 {
+        let want = st.burst > 0 && sim.tick >= st.pause_until;
+        charge(sim, me, st, wc, &skill, want, false, pad);
+    } else if wc.trigger_single {
+        if tap(sim, me, st, wc, &skill, true) {
+            pad.buttons |= buttons::FIRE;
+        }
+    } else if st.burst > 0 && sim.tick >= st.pause_until {
+        pad.buttons |= buttons::FIRE;
+    }
+}
+
+fn flyer_pilot(sim: &Sim, me: UnitHandle, s: &crate::sim::SeatLook) -> bool {
+    s.gun.pilot
+        && sim
+            .unit(me)
+            .and_then(|u| u.mount)
+            .and_then(|m| sim.vehicle(m.vehicle))
+            .and_then(|v| {
+                sim.flyer_params
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .map(|p| v.kind == VehicleKind::Flyer && p.bf2)
+            })
+            .unwrap_or(false)
+}
+
+fn led_flyer(sim: &Sim, eye: glam::Vec3, e: &crate::unit::Unit, speed: f32) -> Option<glam::Vec3> {
+    let v = sim
+        .vehicle(e.mount?.vehicle)
+        .filter(|v| v.kind == VehicleKind::Flyer)?;
+    let centre = sim.vehicle_blast_sphere(v).0;
+    Some(lead_point(centre - eye, v.vel, speed).map_or(centre, |rel| eye + rel))
+}
+
+fn flyer_on_target(nose: glam::Vec3, to: glam::Vec3) -> bool {
+    let d2 = to.length_squared();
+    if nose.dot(to.normalize_or_zero()) <= fmath::sin_cos(FLYER_AIM_CONE).1 {
+        return false;
+    }
+    d2 < FLYER_NEAR * FLYER_NEAR || to.cross(nose).length_squared() < FLYER_MISS * FLYER_MISS
+}
+
+fn human_friend_on_nose(sim: &Sim, team: u8, from: glam::Vec3, nose: glam::Vec3) -> bool {
+    sim.players.iter().flatten().any(|&h| {
+        let Some(o) = sim
+            .unit(h)
+            .filter(|o| o.alive && !sim.hostile(team, o.team))
+        else {
+            return false;
+        };
+        let (at, r) = match o.mount.and_then(|m| sim.vehicle(m.vehicle)) {
+            Some(v) => sim.vehicle_blast_sphere(v),
+            None => (o.capsule().center(), HUMAN_SPHERE),
+        };
+        let off = at - from;
+        off.length_squared() < HUMAN_HOLD * HUMAN_HOLD
+            && off.dot(nose) > 0.0
+            && off.cross(nose).length_squared() < r * r
+    })
 }
 
 /// The heat of the first weapon of `u`'s seat gun.
@@ -233,6 +325,43 @@ fn turn_stick(t: &gun::Turn, look: (f32, f32), want: Option<(f32, f32)>, pad: &m
 mod tests {
     use super::*;
     use crate::vehicle::gun::{wrap, Slew, Turn};
+
+    fn off_nose(degrees: f32, distance: f32) -> glam::Vec3 {
+        let (sin, cos) = fmath::sin_cos(degrees.to_radians());
+        glam::Vec3::new(sin * distance, 0.0, cos * distance)
+    }
+
+    #[test]
+    fn a_flyer_pilot_fires_inside_the_cone_when_near_or_a_short_miss() {
+        let nose = glam::Vec3::Z;
+        assert!(flyer_on_target(nose, off_nose(0.0, 900.0)));
+        assert!(flyer_on_target(nose, off_nose(20.0, 40.0)));
+        assert!(flyer_on_target(nose, off_nose(20.0, 500.0)));
+        assert!(!flyer_on_target(nose, off_nose(20.0, 1000.0)));
+        assert!(!flyer_on_target(nose, off_nose(25.0, 40.0)));
+    }
+
+    #[test]
+    fn a_human_friend_on_the_nose_holds_the_fire_and_a_human_foe_does_not() {
+        let mut s = Sim::empty(1);
+        let at = glam::Vec3::new(0.0, 1.0, 0.0);
+        let h = s
+            .spawn(&crate::unit::UnitSpec::player(0, at))
+            .expect("a player");
+        let c = s.unit(h).expect("alive").capsule().center();
+        let nose = glam::Vec3::Z;
+        let back = |d: f32| c - nose * d;
+        assert!(human_friend_on_nose(&s, 0, back(30.0), nose));
+        assert!(!human_friend_on_nose(&s, 1, back(30.0), nose));
+        assert!(!human_friend_on_nose(&s, 0, back(60.0), nose));
+        assert!(!human_friend_on_nose(&s, 0, back(-30.0), nose));
+        assert!(!human_friend_on_nose(
+            &s,
+            0,
+            back(30.0) + glam::Vec3::X * 2.0,
+            nose
+        ));
+    }
 
     #[test]
     fn a_rear_gunner_tracks_across_the_signed_yaw_seam_inside_its_arc() {

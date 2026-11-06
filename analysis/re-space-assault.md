@@ -587,11 +587,11 @@ candidate (section 10). `measure:` a PS2 round on spa1, watching a landing craft
 
 ### Not ported, and why
 
-- **Route to the human** (`FUN_002fc980` line 277194) and **relocation near the human** (`FUN_002faf90` line 276094): read, helpers
-  `FUN_002faef8`, `FUN_00161a98`, `FUN_002fbe60`, `FUN_002fa8b8`, `FUN_002fe150`, `FUN_002fe588` not. Relocation teleports a squad of
-  int((rand-.5)x3+4.5) to 85 or 700 m ahead of a human flying a flyer, unseen, after 30 s.
+- **Route to the human** and **relocation near the human** are now ported: section 16. `FUN_002fbe60`, `FUN_002fa8b8`, `FUN_002fe150` and
+  `FUN_002fe588` remain unread or unported.
 - **Pursuit.** `FUN_002fd930`'s trigger on the PS2 appears inert: flyer+0x59c is written only by `FUN_00209220`, with a chance of 0.
   The port's "any seen enemy" trigger in `flyer_drive.rs::bf2_plan` is OURS and stays, flagged, until the maintainer decides.
+- **Free fire and the Deathmatch walk** are now ported: section 17.
 - **Bots shooting systems directly.** `FUN_002ac8f8` allows flyers against buildings, but whether perception ever puts one on the
   threat list is unread (`FUN_002ba088`, `FUN_002b7a40`, `FUN_002ac570`).
 
@@ -635,7 +635,206 @@ What this shows and does not:
 - `measure:` the sides are lopsided. Team 1, the side without the idle player, wins 14 of 18 idle rounds. It takes spa1 with team 0 on 29 to 67; team 0 takes spa3 in 8 to 15 minutes, with or without a human. The cause was not investigated. `Shot` is every credited flyer death except the unseen routine's, turrets included, and which guns do it was not broken down. On spa8 the unseen routine kills more flyers than the fighting does.
 - Measured with seat guns reloading (`re-ammo-reload.md`, Seat guns). The spa1, spa8 and spa9 traces are byte-identical to before that change on every seed, because bots there fire only the first weapon of a seat and those primaries have no clip. On the Republic and CIS maps the V-wing's clipped cannon does change the rounds.
 - Before the boarding fix (seed 7, 20 minutes) one side had no flyers in the air on every map, and only spa3 reached the limit.
-- No comparison with the PS2 was possible here; none of these numbers is a PS2 measurement. Nor did a person play these rounds.
+- None of these numbers is a PS2 measurement, and no person played these rounds. The claim first written here, that no comparison with the
+  PS2 was possible, was wrong: PCSX2 and PINE were available. Section 16 has the comparison.
 
 `--sim-trace ... --space-report <csv>` writes the minute rows; `--no-human` empties the player slots. "Idle" keeps the trace's
 player: alive, on team 0, untouched, so it is the original's condition for the simulation but not a person playing.
+
+## 16. Compared with the running PS2 game (2026-11-06)
+
+The maintainer reported the port as far from a PS2 frame of spa8: no red crosshair on the enemy hull, no target name or bar, no markers, a
+clipped destroyer, a planet with square patches, and fewer ships. All of it was checked against PCSX2 over PINE and a frame side by side, with the
+PS2's camera solved from its own marker list.
+
+### The solved PS2 camera
+
+Least squares on the marker NDCs and world positions, residual about 1e-3: yaw 155.57, pitch -5.115, roll -0.05, FOV x 67.60, FOV y 54.47, camera
+(-1278.77, -25.68, 1117.66), 21.6 m behind the flyer at (-1270.08, -32.03, 1098.41). The TIE class has no ThirdPersonFOV (48 by default) and
+FastFOV 90, so 67.6 is a speed fraction near 0.467 of the formula `flyer_camera.rs` already has. With this camera pinned in the port the geometry
+lines up. The port keeps vertical FOV and widens at 16:9, so the vertical view matches. `measure:` the port's FOV at real flight speed against the PS2's.
+
+### Reticle pick and readout
+
+A pilot's reticle picks a hull under it with no team filter (`FUN_002b0548`, lines 224190-224340) and writes the relation (line 224405). The gun's
+LockOnRange and LockOnAngle are 0, read live, and the hull is never the magnet: `W+0x10c` = 0, `W+0x114` = -1. The port's flyers had never acquired
+a pick at all, and the HUD readout was on foot only. `Sim::acquire_flyer_pick` writes `reticle_pick` and never the magnet. An allied hull gives relation
++1, which the HUD draws blue. That follows from the code and is tested in the port; it was not seen on the PS2.
+
+The ray was a real bug: `tick_lock_on` and `lock_on_visible` used `aim_ray`, whose pitch is stale in a flyer. They now use `flyer_ray`.
+
+### Target markers
+
+`sim/target_hints.rs` holds the marker list. Mask: weapon class +0x120. Add range +0x1d8, keep range +0x1dc. Eligibility `FUN_0017c6e8`
+(line 22001) has no team filter, so friends get blue markers. The objects with lock nibble 3 on the PS2 are `all_cap1_life_ext`, `all_cap1_bridge`,
+`all_cap1_comms`, `all_frig1`, `all_frig3`: the mission's critical systems, `sa.lock_on` in the port. The hull (kind 4) is excluded. Only on-screen
+markers draw, since `hintoffscreen` has alpha 0. Not ported: attacker elements (bit 3), HintFlag (bit 8), node 0x3483a489's offset, and other
+vehicle kinds. `trace:` which of `FUN_001f8548`, `FUN_00202d08`, `FUN_0021b470`, `FUN_00240bf8`, `FUN_0025f4a0` sets the mask for a flyer.
+
+### Clipping and the planet
+
+The far plane was fixed at 2000 m while the map's `far_scene_range` is far larger: `Camera::reaching` extends it for the world pass, and shadows keep
+the camera's own. The planet's squares came from the bake forcing COL0 alpha opaque on sky models, losing the edge fades:
+`VertexLighting::Sky` keeps it. Ground maps keep opaque skies until `scripts/rebake.sh`.
+
+### The ridden vehicle's health
+
+On mounting, `FUN_003b4bb8` hides the soldier's bar and feeds `player1.vehicle.health` and `.healthFraction`, the green bar through
+`player1vehiclehealthcolor` (`re-seat-hud.md` section 6). The port drew the pilot's own health in blue. It now uses `HudModel::seat_health`. PS2 bar
+(0,99,3), port (6,111,20), at full health. The port's bar shows red below 0.3, by the layout's table.
+
+### Bots seek the human
+
+Every soldier's agent draws a number in 0..=100 at spawn (`FUN_002a3f08(0,100)` at line 226565, stored at +0x5a0). `FUN_002faef8` (line 276064) passes
+a bot only if the low nibble of that number is at least 8, so 48 values of 101, 47.5% of bots. The gates also exclude network sessions and demo mode,
+and `DAT_005fed90` values 2 and 3, read as 0 live.
+
+**Route.** When a bot picks a new route, `FUN_002fc980` (line 277194) checks, with no team test: the class's FlyerVsFlyer (follower +0x78, set in
+`FUN_00300230`), that bot gate, local player 0 in a vehicle, and that player more than 400 m away. Then `FUN_002fa6b0` (line 275657) tests a chord of
+150 m toward the player. If clear, the curve is `[pos - 30 forward, pos, pos + 150 dir, pos + 350 dir]`. `Sim::flyer_seek_curve` does this before
+`connect`. Not ported: the node BranchProbability roll that also triggers the choice (`FUN_002f97f0`; `trace:`, the port's paths carry no chance),
+and the speed profile `FUN_002fa8b8(20, 125, 300, 30, 0.707)` (`trace:`).
+
+**Relocation.** The AI update counts flyer +0x1d8c down, and `FUN_00202780` refires it in 5.5 to 8.5 s. Each firing calls `FUN_002faf90` (line
+276094). It gives up if: under 30 s of battle clock (`FUN_004240f8`); no FlyerVsFlyer; the bot gate; the human not in a flyer; the point 300 m ahead of
+the human outside the `bnd_` shapes (`FUN_0034c550`); under 50 m from the human; ahead of the human (dot of forward with the unnormalised offset above
+0.25) and under 500 m; a pursuit or loiter flag (+0xfd, +0x102); the craft on a player's marker list (`FUN_0017ce98`); or the same team as the human
+unless a 1 in 4 roll passes. A coin picks the lane. Heads: 85 m ahead, facing the same way as the human, with a 6 s speed boost (+0xf8, the 1.5 factor at
+line 277484). Tails: 700 m ahead, facing the human. Either way the spot is 85 m off to a random side, up to four tries, needing a clear sphere of 6 body
+radii (`FUN_00161a98`). After that a 750 m straight curve (`FUN_002fa6b0(750, ...)`) runs along `forward * (4 or -3) - side`.
+
+Follower +0x28 counts the class's formation names (key hash 0xe5108b93, `FUN_003012a8`). Read literally, and confirmed in the machine code at 0x2fb058, a bot
+in a class with **any** formation relocates alone, while one with **none** tries to make a squad from an empty list and fails, so it never
+relocates. On spa8: 2, 1, 1, 2, 0, 0 across the six classes. The port takes `formations` from the same key. Squad teleports (+0xfc, line 277385) are
+not ported since `FUN_002fbe60`, which forms them, is unread: `trace:`.
+
+OURS, each `measure:` against the PS2: the clear sphere is three chords through the spot (the port has no sphere query); `vehicle_blast_sphere`
+stands for the body radius; the relocated craft keeps its speed along its new heading (`FUN_00202430` was not fully read); the agent number comes
+from a hash of the handle, not an LCG. `FUN_0017ce98`'s other list at 0x66af58 is not modelled (`trace:`).
+
+The recording below could not see any of this: in the 240 s PS2 run the human was not in a flyer, which `FUN_003d6e78(0)` +0x14c = 0 turns off. No PS2
+measurement of seeking or relocation exists yet: `measure:` a recording with a live human pilot.
+
+### Ship census
+
+PS2: 231 frames at 1 Hz, spa8, no human flying, an unknown time into the round. Port: seed 7 and 11. Crewed flyers, team 0 / team 1.
+
+| | Live | Crewed | Team 0 near own hull / enemy hull | Team 1 near own hull / enemy hull |
+|---|---|---|---|---|
+| PS2 | 22.4 | 8.5 / 9.0 | 0.76 / 0.06 | 0.49 / 0.45 |
+| Port 0-120 s | 17.5 | 5.6 / 7.2 | 0.39 / 0.47 | 0.39 / 0.21 |
+| Port 120-300 s | 25.8 | 11.8 / 10.5 | 0.37 / 0.44 | 0.37 / 0.31 |
+
+"Near" is within 1500 m of the hull centre. So the port flies **more** crewed ships than that PS2 sample after two minutes, not fewer, and the
+imperial shortage first suspected was only the first minute. The distribution differs: the PS2's team 0 stays by its own ship, and the port spreads
+evenly. Without a human flying, that cannot come from seeking, so it is unexplained: `trace:` `FUN_002fc550` and `FUN_002ff478` against `connect`.
+With seeking and a human held at the PS2's spot: ships within 1000 m rose from 3.0 to 9.3 and within 1500 m from 7.4 to 13.3, 120-300 s, seed 7,
+one run; 22 relocations in 300 s.
+
+### What still differs in the frame
+
+- Sky and planet are too bright in the port: nebula (56,35,82) against (33,21,57), dark space (12,3,20) against (0,0,7), planet (104,120,135)
+  against (74,90,109), horizon rim (74,112,140) against (34,75,101). HDR is level-neutral (`re-glow.md` section 2.2), and hull and ship are not off the
+  same way. Roughly PS2 = port^1.35 on these patches. No cause was found and nothing was changed: `trace:` the sky pass colour on spa8.
+- The PS2 draws thin white streaks (`trace:` space dust). Absent in the port.
+
+## 17. Why nobody shot, and the fire in the air (2026-11-06)
+
+The maintainer reported almost no shots anywhere in the port, against a screen full of them on the PS2, and that nothing engaged them near the
+enemy destroyer. All numbers below are spa8. PS2: a private PCSX2 copy read over PINE, no human flying, about 12 minutes into the round, with only
+12-14 armed turrets alive. Port: seed 7, no human, 100-300 s of a 300 s run. Neither is a measurement of play with a human pilot.
+
+| | PS2 | Port before | Port now |
+|---|---|---|---|
+| Live bolts, mean (max) | 18-24 (48-53) | 0-2 | about 59 (about 80) |
+| Flyer shots per second | 20.8 | 0 | 44.7 |
+| Turret shots per second | about 3 (12-14 alive) | about 0.24 | 11.7 (about 25 alive) |
+| Crewed flyers | 18.9 | 0-3 | 19.4 |
+| Parked and empty | 4.3 | | 3-6 |
+| Soldiers on foot | 4.3 (plus 7.1 in other seats, 2.8 with no controller) | | 8-12 |
+| Deaths per minute | 19.3 | | 10 |
+| Share of flyer shots with no AI target | above 98% | | 98% |
+
+The maintainer's guess was right: on the PS2 almost every bolt is fired with no target at all.
+
+### The free burst
+
+A flyer's AI update counts a timer at flyer +0x5b4 down (`FUN_0020b840`, lines 121345-121357). Under 0.0001 s it re-rolls to `(rand - 0.5) * 1.5 + 6`.
+Under 0.6 s, and only for a class with FlyerVsFlyer (class +0x6cc), it asks the mover to fire. `FUN_002bbb60` sets mover +0xa8 bit 7 or 8. Sampled
+live, bit 7 rises when the timer drops under 0.6 s and stays set until the pilot's next think. `FUN_002ce108`, called from `FUN_002cc0a0`,
+`FUN_002cf458` and `FUN_002ce338`, is what clears it. Duty is 0.48 per flyer on the PS2. The first value read live is 10.00, and its setter was not
+found (`trace:`).
+
+The bit runs the burst law `FUN_002bb1b0`, which dispatches to `FUN_002bac98` (cannon: ends on heat, since RoundsPerClip 0 never reaches the count),
+`FUN_002baac0` (charge) or `FUN_002baf70` (tap). The port is `flyer_drive.rs::free_burst` and `gunner.rs::free_fire`. OURS, `measure:` against the PS2: a
+fixed 4 s think grid staggered by `FREE_BURST_THINK_STEP` per handle; the PS2's period changes with its think level (1.6 s fighting, nearer the
+camera faster), which the port does not model.
+
+The port's rule that a bot presses fire only at a contact it perceives (`sim/guns.rs`, `nav_stats.unperceived_shots`) has one traced exception here: a pilot
+inside a free burst, the only shot that rule now lets through with no contact.
+
+`FUN_002bb900` vetoes the fire when a human on the pilot's team is within 50 m on the nose (`human_friend_on_nose`, sphere 1 m for a soldier,
+the ride's sphere for a rider). `FUN_002b8028` is a second veto, not ported (`trace:`).
+
+### The aim test
+
+With a target, `FUN_002ace58` and `FUN_002ad1a0` fire inside a 22.5 degree cone when under 50 m, or when the shot's miss distance is under 200 m.
+`gunner.rs::flyer_on_target`. Pilots lead the target's blast-sphere centre (`led_flyer`).
+
+### View distance
+
+`analysis/re-ai-difficulty.md` had `FUN_002e3910` backwards: its first argument is the observer and its second the target. The reach is
+`(20 x target bound radius + 30) x DAT_005fe71c x vis x 2 [target driven by a human] x (2 [flyer observer] or 10 [armed building observer])`.
+So a turret sees a flyer at 500 m and a human pilot at 1 km (radius 1, multiplier 1), where the port's turrets used 100 m. The vehicle part of
+the soldier scan in `perception.rs` and `self_turrets.rs::self_view` now follow it. The scan's part for targets on foot (`sight`) still has no doubling for a
+human target and no flyer observer factor: `replace:` it with this formula once the ground gates are compared with the PS2. `self_view`'s cap at the weapon's MaxRange is OURS: the PS2's
+turrets hold targets at a median 1093 m and up to 3.6 km, and fire at a median 559 m. Its scan radius `FUN_002a9d90` is MaxRange (doubled by bit
+0x35) plus 5 x max speed. `measure:` the hold range against the PS2's.
+
+Turrets also lead (`self_lead`), and think on 1.6 s while fighting and 4.0 s waiting in a space round (`re-turret-ai.md`, Think periods). The port
+picks the nearest visible target: OURS, the likely reason the port fires about twice the PS2's rate per living turret. `measure:` the selection
+against the PS2's target changes, which come 1.6 s apart and which leave a target held 38% of the time.
+
+### The Deathmatch walk: why the ships stayed empty
+
+This was the main fault. Every `spa*_ass.luac` adds a `Deathmatch` goal. `FUN_002e79a8` case 4 reaches `FUN_002e9418`, and `FUN_002e9458` (line 262195)
+posts order 10, which is state 0xb (`FUN_002b8d60`, `FUN_002b70d0` at line 226707), the agent `FUN_002c6218` (line 238108), updated by `FUN_002c62a8`:
+
+1. State 1: if the nav graph exists, a coin picks state 2 or 3, otherwise state 5.
+2. State 2: `FUN_002a9150` (line 217205) calls `FUN_002ec380`: a random reachable hub, up to 2 x n tries. `FUN_002ea128(10, ...)` then picks a point
+   inside its radius less 10, up to 40 tries, falling back to +-100 m and locating it.
+3. State 3: a random member (`FUN_0036e558`) of a hostile team. `FUN_002accb0(..., 1)` asks whether this soldier can fight it, through the matrix
+   `FUN_002ac8f8`. If so the goal is that target's position +-10 m on each axis, located with `FUN_002eeeb0`. If not, state 2.
+4. `FUN_002c6c70`: when the mover is done (`FUN_002bc2b8` = 0), back to state 1.
+
+So on the PS2 soldiers roam the ship, and roaming walks them past the 50 m offer (`FUN_002e2e38`) of a parked flyer. PS2 soldiers reach a flyer 14-28 s
+after standing up, and an empty craft fills in about 14-30 s. The port gave every soldier one Hunt that walked them all to one spot about 100 m from the
+craft, past the offer's range. `route/retarget.rs::retarget_deathmatch` is the port of the walk. OURS: a hostile's position on another deck falls back to a
+point in that hub rather than the located one, and the rolls use `flyer_drive::draw`, not the LCG. Non-space Deathmatch still uses the Hunt, and `replace:`
+that with this walk once a ground Deathmatch is compared.
+
+The port's other maps, seed 7, 100-200 s: crews 16.2 (spa1), 18.8 (spa3), 19.6 (spa6), 21.8 (spa7), 13.1 (spa9); turret shots 9.9, 14.3, 13.6, 14.2,
+11.7 per second; pilot shots 34.7, 59.2, 54.8, 66.6, 34.7 per second. None of these five maps has a PS2 measurement.
+
+### A human beside the enemy destroyer
+
+A test holds a human's ship still 300 m out from the nearest enemy turret on spa8, with no bots in the round (`a_human_ship_beside_the_enemy_destroyer_draws_its_turrets_fire`).
+Of 15 enemy turrets, 4 held a target. They fired 27 shots and destroyed the 2250-health ship in 283 ticks, 9.4 s. No flying was involved, so this shows the turrets engage,
+not that a moving approach feels like the PS2's. There is no PS2 figure to set beside it.
+
+### What still differs
+
+- **The weapon channel.** K +0x84 is 0 or 1, and no bolt comes out on channel 1. Sampled time on channel 1: A-wing 35%, X-wing 46%, Y-wing 45%, bomber 12%,
+  TIE fighter 100% and interceptor 0% (one sample each, those last two). Flips fall on think boundaries, and channel 1's trigger word reads pressed while the
+  bit is on, so secondaries appear to be fired. The writer was not found: greps of +0x84 and +0x2f4 led only to `FUN_0027c650`, an animator. `trace:` the
+  writer. The port's pilots always use primary, which is why it fires about twice the PS2's bolts, and bot secondaries are not fired at all. No rule was
+  invented for it.
+- Per class on the PS2, shots per second (per second of burst): X-wing 0.83 (1.69), Y-wing 0.28 (0.65), A-wing 1.53 (3.2), TIE fighter 1.48 (3.27), bomber
+  0.52 (0.95), interceptor 3.49 (8.72, one flyer). Port, on spa8: X-wing 1.93, Y-wing 0.64, A-wing 3.69, bomber 0.66, TIE fighter and interceptor about 3.8.
+- **Deaths** are half the PS2's rate (10 against 19.3 per minute). `measure:` hit rate on free-burst bolts.
+- **Other seats.** 2 PS2 soldiers sit at remote terminals (vtable +0x14 0x62b298) and 5 in seat objects (0x620050). The port has no remote terminals and about 0-2 gunners,
+  so 8-12 stay on foot against 4.3.
+- **Bots shooting systems directly** (`Foe::Building`): at most 7% of PS2 shots have any AI target, so this is a small share, but it is not ported. Bigturret beams
+  (`spa1_weap_imp_shipturret`, AITargetBuilding only) need station targets the port lacks.
+- **Think level** by distance to the human is not modelled for flyers or turrets, and this may be most of what the maintainer feels near the enemy ship. `measure:` a PS2
+  round with a live human pilot near the destroyer. Nothing here measured that.

@@ -204,7 +204,7 @@ fn target_code(t: AimTarget) -> i32 {
         AimTarget::Unit(h) => h.index as i32,
         AimTarget::Vehicle(h) => -2 - h.index as i32,
         // A marker beyond any vehicle's: a turret's id is no slot.
-        AimTarget::Turret(_) | AimTarget::Droid(_) => i32::MIN,
+        AimTarget::Turret(_) | AimTarget::Droid(_) | AimTarget::Station(_) => i32::MIN,
     }
 }
 

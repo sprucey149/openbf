@@ -259,6 +259,7 @@ pub struct AiState {
     /// an allowed-stance MASK and [`stance_hold`] draws one of its bits once
     /// and keeps it while the mask allows. Hashed like the rest of the AI state.
     pub want_stance: u8,
+    pub wander: Option<(Vec3, u16)>,
     /// D11: no dodge before this tick (the 2 s cooldown, RE §4.1).
     pub dodge_until: u64,
     /// Consecutive ticks this unit has spent within

@@ -52,6 +52,7 @@ fn the_route_is_part_of_the_ai_hash() {
         |st: &mut AiState| st.unreachable_dwell = 1,
         // ... and D13's.
         |st: &mut AiState| st.want_stance = 3,
+        |st: &mut AiState| st.wander = Some((Vec3::X, 1)),
         // ... and every field Phase C added (D9's aim tracker, D10's
         // tracked-position error, D11's fire cycle). One assertion PER
         // FIELD and per float COMPONENT: a field left out of `hash_into`

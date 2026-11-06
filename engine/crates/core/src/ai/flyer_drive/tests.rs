@@ -1092,3 +1092,182 @@ fn flight_pursuit_discards_the_loiter_center_before_recovery() {
     assert_eq!(ai.curve.unwrap()[1], v.pos);
     assert!(ai.cursor.is_none());
 }
+
+fn human_in_flyer(s: &mut Sim, at: Vec3, team: u8) -> (UnitHandle, VehicleHandle) {
+    let v = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Flyer,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: at,
+        yaw: 0.0,
+        max_health: 1000.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    let h = s.spawn(&UnitSpec::player(team, at)).unwrap();
+    assert!(s.seat_unit(h, v, 0));
+    s.vehicle_mut(v).unwrap().flyer.phase = FlightPhase::Flying;
+    s.players = vec![Some(h)];
+    (h, v)
+}
+
+fn seeker_of(me: UnitHandle, wanted: bool) -> UnitHandle {
+    (0..64)
+        .map(|gen| UnitHandle { gen, ..me })
+        .find(|h| crate::sim::flyer_seek::seeks_human(*h) == wanted)
+        .unwrap()
+}
+
+#[test]
+fn about_half_of_the_bots_seek_the_human() {
+    let seekers = (0..4000)
+        .filter(|&index| crate::sim::flyer_seek::seeks_human(UnitHandle { index, gen: 0 }))
+        .count();
+    assert!((1700..2100).contains(&seekers), "{seekers} of 4000");
+}
+
+#[test]
+fn a_seeking_bot_ending_its_route_flies_150_m_at_a_far_human() {
+    let (mut s, me, vh) = bf2_world();
+    human_in_flyer(&mut s, Vec3::new(12.0, 1.0, 1000.0), 1);
+    let v = s.vehicle(vh).unwrap();
+    let p = s.flyer_params[0].clone().unwrap();
+    let mut ai = FlyerAi::default();
+    assert!(s.flyer_seek_curve(seeker_of(me, true), v, vh, &p, &mut ai));
+    let curve = ai.curve.unwrap();
+    assert_eq!(curve[1], v.pos);
+    assert!((curve[2] - (v.pos + Vec3::Z * 150.0)).length() < 1e-2);
+    assert!((curve[3] - (v.pos + Vec3::Z * 350.0)).length() < 1e-2);
+    assert!(ai.cursor.is_none());
+    let mut other = FlyerAi::default();
+    assert!(!s.flyer_seek_curve(seeker_of(me, false), v, vh, &p, &mut other));
+    assert!(other.curve.is_none());
+}
+
+#[test]
+fn a_seeking_bot_within_400_m_of_the_human_keeps_to_the_routes() {
+    let (mut s, me, vh) = bf2_world();
+    human_in_flyer(&mut s, Vec3::new(12.0, 1.0, 390.0), 1);
+    let v = s.vehicle(vh).unwrap();
+    let p = s.flyer_params[0].clone().unwrap();
+    let mut ai = FlyerAi::default();
+    assert!(!s.flyer_seek_curve(seeker_of(me, true), v, vh, &p, &mut ai));
+}
+
+fn relocation_world(
+    formations: u8,
+    after_battle_start: bool,
+) -> (Sim, UnitHandle, VehicleHandle, Vec3) {
+    let (mut s, _, vh) = bf2_world();
+    s.flyer_params[0].as_mut().unwrap().follower.formations = formations;
+    let (_, human) = human_in_flyer(&mut s, Vec3::new(0.0, 200.0, 0.0), 1);
+    let human_pos = s.vehicle(human).unwrap().pos;
+    let bot = (0..8)
+        .find_map(|n| {
+            let u = s
+                .spawn(&UnitSpec {
+                    controller: Controller::Ai,
+                    ..UnitSpec::trooper(0, Vec3::new(n as f32, 0.0, 0.0))
+                })
+                .unwrap();
+            crate::sim::flyer_seek::seeks_human(u).then_some(u)
+        })
+        .expect("a seeker");
+    assert!(s.seat_unit(bot, vh, 0));
+    let v = s.vehicle_mut(vh).unwrap();
+    v.flyer.phase = FlightPhase::Flying;
+    v.pos = human_pos - Vec3::Z * 1500.0;
+    s.tick = if after_battle_start {
+        31 * u64::from(crate::TICK_HZ)
+    } else {
+        10 * u64::from(crate::TICK_HZ)
+    };
+    (s, bot, vh, human_pos)
+}
+
+#[test]
+fn an_enemy_behind_the_human_is_relocated_ahead_of_the_human() {
+    let (mut s, _, vh, human_pos) = relocation_world(1, true);
+    s.tick_flyer_seek(crate::TICK_DT);
+    let v = s.vehicle(vh).unwrap();
+    let ahead = (v.pos - human_pos).dot(Vec3::Z);
+    let side = (v.pos - human_pos - Vec3::Z * ahead).length();
+    assert!(
+        (ahead - 85.0).abs() < 1e-2 || (ahead - 700.0).abs() < 1e-2,
+        "ahead {ahead}"
+    );
+    assert!((side - 85.0).abs() < 1e-2, "side {side}");
+    let heading = v.rot * Vec3::Z;
+    if ahead < 100.0 {
+        assert!(heading.dot(Vec3::Z) > 0.99);
+    } else {
+        assert!(heading.dot(Vec3::Z) < -0.99);
+    }
+    assert!(v.flyer.ai.relocate_in >= 5.5 && v.flyer.ai.relocate_in <= 8.5);
+}
+
+#[test]
+fn relocation_waits_for_30_seconds_and_needs_a_formation() {
+    let (mut early, _, vh, human) = relocation_world(1, false);
+    early.tick_flyer_seek(crate::TICK_DT);
+    assert!((early.vehicle(vh).unwrap().pos - human).length() > 1000.0);
+    let (mut none, _, vh, human) = relocation_world(0, true);
+    none.tick_flyer_seek(crate::TICK_DT);
+    assert!((none.vehicle(vh).unwrap().pos - human).length() > 1000.0);
+}
+
+#[test]
+fn a_craft_on_the_humans_marker_list_is_not_relocated() {
+    let (mut s, _, vh, human) = relocation_world(1, true);
+    s.vehicle_mut(vh).unwrap().pos = human + Vec3::Z * 1500.0;
+    let before = s.vehicle(vh).unwrap().pos;
+    s.flyer_params[0].as_mut().unwrap().follower.formations = 1;
+    let listed = s.target_hint_for_test(vh);
+    assert!(listed);
+    s.tick_flyer_seek(crate::TICK_DT);
+    assert_eq!(s.vehicle(vh).unwrap().pos, before);
+}
+
+#[test]
+fn a_free_burst_rises_late_in_its_timer_and_holds_to_the_next_think() {
+    let (mut s, b, _) = bf2_world();
+    let mut p = xwing(true);
+    p.follower.flyer_vs_flyer = true;
+    let mut ai = FlyerAi::default();
+    let mut rises = Vec::new();
+    let mut was = false;
+    for t in 0..(120.0 / crate::TICK_DT) as u64 {
+        s.tick = t;
+        let on = free_burst(&s, b, &p, &mut ai);
+        if on && !was {
+            rises.push(t);
+        }
+        if was && !on {
+            let grid = t + u64::from(b.index) * FREE_BURST_THINK_STEP;
+            assert_eq!(grid % FREE_BURST_THINK, 0, "released off the grid at {t}");
+        }
+        was = on;
+    }
+    let first = rises[0] as f32 * crate::TICK_DT;
+    assert!((first - 9.4).abs() < 0.1, "first burst at {first}");
+    assert!(rises.len() >= 16, "{rises:?}");
+    for pair in rises.windows(2) {
+        let gap = (pair[1] - pair[0]) as f32 * crate::TICK_DT;
+        assert!((5.2..=6.8).contains(&gap), "bursts {gap} s apart");
+    }
+}
+
+#[test]
+fn a_class_without_flyer_vs_flyer_takes_no_free_burst() {
+    let (mut s, b, _) = bf2_world();
+    let mut p = xwing(true);
+    p.follower.flyer_vs_flyer = false;
+    let mut ai = FlyerAi::default();
+    for t in 0..(30.0 / crate::TICK_DT) as u64 {
+        s.tick = t;
+        assert!(!free_burst(&s, b, &p, &mut ai));
+    }
+    assert_eq!(ai.burst_in, 0.0);
+}

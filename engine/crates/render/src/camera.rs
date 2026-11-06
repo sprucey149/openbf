@@ -45,6 +45,13 @@ impl Default for Camera {
 }
 
 impl Camera {
+    pub fn reaching(&self, far: f32) -> Camera {
+        Camera {
+            far: self.far.max(far),
+            ..*self
+        }
+    }
+
     /// World-space look direction. R_y(yaw) then pitch: unit length by construction.
     pub fn forward(&self) -> Vec3 {
         let (sy, cy) = self.yaw.sin_cos();
@@ -76,6 +83,17 @@ mod tests {
     use super::*;
 
     const EPS: f32 = 1e-5;
+
+    #[test]
+    fn reaching_only_ever_extends_the_far_plane() {
+        let cam = Camera {
+            far: 2000.0,
+            ..Camera::default()
+        };
+        assert_eq!(cam.reaching(9000.0).far, 9000.0);
+        assert_eq!(cam.reaching(500.0).far, 2000.0);
+        assert_eq!(cam.reaching(9000.0).near, cam.near);
+    }
 
     #[test]
     fn forward_follows_the_documented_convention() {

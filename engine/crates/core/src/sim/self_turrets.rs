@@ -63,7 +63,47 @@ impl SelfPilot {
     }
 }
 
+const SPACE_WAIT_THINK: f32 = 4.0;
+const SPACE_FIGHT_THINK: f32 = 1.6;
+const ARMED_VIEW_FACTOR: f32 = 10.0;
+const HUMAN_VIEW_FACTOR: f32 = 2.0;
+
 impl Sim {
+    fn self_view(&self, a: Aim, team: u8, max_range: f32) -> f32 {
+        let Aim::Vehicle(vh) = a else {
+            return VIEW;
+        };
+        let Some(v) = self.vehicle(vh) else {
+            return VIEW;
+        };
+        let radius = self
+            .seat_setup
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+            .map_or(0.0, |s| s.radius);
+        let human = v
+            .seats
+            .iter()
+            .filter_map(|s| s.occupant)
+            .filter_map(|o| self.unit(o))
+            .any(|o| o.is_human());
+        let seen = (20.0 * radius + 30.0)
+            * self.ai_tier(team).view_mult
+            * ARMED_VIEW_FACTOR
+            * if human { HUMAN_VIEW_FACTOR } else { 1.0 };
+        VIEW.max(seen.min(max_range))
+    }
+
+    fn self_lead(&self, a: Aim, at: Vec3, eye: Vec3, speed: f32) -> Vec3 {
+        let Aim::Vehicle(vh) = a else {
+            return at;
+        };
+        let Some(v) = self.vehicle(vh) else {
+            return at;
+        };
+        crate::collision::lead_point(at - eye, v.vel, speed).map_or(at, |rel| eye + rel)
+    }
+
     /// Enable only the authored self seats of this placed building.
     pub fn set_building_self_pilots(&mut self, instance: u32, seats: &[u8]) {
         if let Some(t) = self
@@ -189,7 +229,7 @@ impl Sim {
                 let found = units
                     .chain(vehicles)
                     .filter_map(|a| {
-                        self.self_target(h, a, team, eye, VIEW)
+                        self.self_target(h, a, team, eye, self.self_view(a, team, max))
                             .map(|at| (a, at.distance(eye)))
                     })
                     .min_by(|a, b| a.1.total_cmp(&b.1));
@@ -199,10 +239,20 @@ impl Sim {
             if p.target.is_none() && p.thinks % LOOK_EVERY == 1 {
                 p.look = self.lcg.uniform(-LOOK_SPREAD, LOOK_SPREAD);
             }
+            if self.space_assault.is_some() {
+                let period = if p.fighting {
+                    SPACE_FIGHT_THINK
+                } else {
+                    SPACE_WAIT_THINK
+                };
+                p.next_think = self.tick + (period * crate::TICK_HZ as f32) as u64;
+            }
         }
-        let at = p
-            .target
-            .and_then(|a| self.self_target(h, a, team, eye, f32::INFINITY));
+        let shot_speed = self.weapon_classes[class].shot_ordnance().velocity;
+        let at = p.target.and_then(|a| {
+            self.self_target(h, a, team, eye, f32::INFINITY)
+                .map(|at| self.self_lead(a, at, eye, shot_speed))
+        });
         let want = at.map_or((p.look, 0.0), |at| gun::angles(rot.inverse() * (at - eye)));
         let mut pad = PadState::default();
         if let Some(t) = g.turn {
@@ -371,6 +421,75 @@ mod tests {
                     .count()
             })
             .sum()
+    }
+
+    fn flyer(s: &mut Sim, pos: Vec3) -> crate::vehicle::VehicleHandle {
+        s.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        })
+    }
+
+    #[test]
+    fn a_self_seat_sees_a_ship_far_past_its_foot_view_and_a_humans_twice_as_far() {
+        let (mut s, u) = world();
+        let v = flyer(&mut s, Vec3::new(0.0, 0.0, 300.0));
+        let seen = 50.0 * s.ai_tier(0).view_mult * ARMED_VIEW_FACTOR;
+        assert!(seen > VIEW);
+        assert_eq!(s.self_view(Aim::Vehicle(v), 0, 1.0e5), seen);
+        assert_eq!(s.self_view(Aim::Vehicle(v), 0, seen / 2.0), seen / 2.0);
+        assert_eq!(s.self_view(Aim::Unit(u), 0, 1.0e5), VIEW);
+        s.vehicle_mut(v).unwrap().seats[0].occupant = Some(u);
+        assert_eq!(
+            s.self_view(Aim::Vehicle(v), 0, 1.0e5),
+            seen * HUMAN_VIEW_FACTOR
+        );
+    }
+
+    #[test]
+    fn a_self_seat_leads_a_moving_ship_and_not_a_soldier() {
+        let (mut s, u) = world();
+        let at = Vec3::new(0.0, 0.0, 300.0);
+        let v = flyer(&mut s, at);
+        s.vehicle_mut(v).unwrap().vel = Vec3::new(50.0, 0.0, 0.0);
+        let led = s.self_lead(Aim::Vehicle(v), at, Vec3::ZERO, 300.0);
+        assert!(led.x > 40.0, "{led}");
+        assert_eq!(s.self_lead(Aim::Unit(u), at, Vec3::ZERO, 300.0), at);
+    }
+
+    fn think_gaps(s: &mut Sim, ticks: usize) -> Vec<u64> {
+        let mut last = s.building_turrets[0].self_pilots[0].next_think;
+        let mut gaps = Vec::new();
+        for _ in 0..ticks {
+            s.step(&[PadState::default()]);
+            let now = s.building_turrets[0].self_pilots[0].next_think;
+            if now != last && last != 0 {
+                gaps.push(now - last);
+            }
+            last = now;
+        }
+        gaps
+    }
+
+    #[test]
+    fn a_space_round_thinks_at_the_turret_periods() {
+        let (mut s, u) = world();
+        s.space_assault = Some(crate::sim::space_assault::SpaceAssault::new(10));
+        let fighting = think_gaps(&mut s, 400);
+        assert!(fighting.len() >= 4, "{fighting:?}");
+        assert!(fighting.iter().all(|&g| g == 48), "{fighting:?}");
+        s.unit_mut(u).unwrap().alive = false;
+        let waiting = think_gaps(&mut s, 800);
+        assert!(waiting.len() >= 4, "{waiting:?}");
+        assert!(waiting[1..].iter().all(|&g| g == 120), "{waiting:?}");
     }
 
     #[test]

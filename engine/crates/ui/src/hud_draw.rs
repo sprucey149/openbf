@@ -261,6 +261,8 @@ pub(crate) struct Run<'a> {
     pub(crate) shadow: bool,
 }
 
+const HINT_SCALE_FAR: f32 = 0.25;
+const HINT_SCALE_NEAR: f32 = 0.7;
 const LOCK_RAMP_NEAR: f32 = 200.0;
 const LOCK_RAMP_FAR: f32 = 1700.0;
 const LOCK_SCALE_NEAR: f32 = 1.5;
@@ -310,6 +312,47 @@ impl<'a> Ctx<'a> {
             if *off == 0.0 && q.boxed {
                 self.out.boxes.push((elem, b));
             }
+        }
+    }
+
+    fn hint_markers(&mut self, size: [f32; 2], scale: [f32; 2]) {
+        let hud = self.hud;
+        for marker in &hud.hint_markers {
+            let Some(style) = hud.hint_styles[usize::from(!marker.visible)] else {
+                continue;
+            };
+            let e = &hud.elems[style.elem];
+            let Some(texture) = e.texture.as_deref().map(|t| self.art.icons.layout_sheet(t)) else {
+                continue;
+            };
+            let tint = style
+                .friendly
+                .filter(|_| marker.friendly)
+                .unwrap_or(e.color);
+            let t = ((marker.distance - LOCK_RAMP_NEAR) / (LOCK_RAMP_FAR - LOCK_RAMP_NEAR))
+                .clamp(0.0, 1.0);
+            let s = t * HINT_SCALE_FAR + (1.0 - t) * HINT_SCALE_NEAR;
+            let at = [
+                (marker.ndc[0] * 0.5 + 0.5) * size[0],
+                (marker.ndc[1] * 0.5 + 0.5) * size[1],
+            ];
+            let screen = Screen { origin: at, scale };
+            let (x0, y0) = e.rect.origin();
+            let quad = Quad {
+                rect: [x0, y0, x0 + e.rect.w, y0 + e.rect.h],
+                uv: e.tex_coords,
+                color: color(tint, e.alpha),
+                texture,
+                additive: e.additive,
+                shadow: e.shadow,
+                boxed: false,
+            };
+            self.quad(
+                style.elem,
+                &Mat4::from_scale(Vec3::splat(s)),
+                &screen,
+                &quad,
+            );
         }
     }
 
@@ -953,6 +996,7 @@ pub fn draw(hud: &Hud, art: &HudArt, size: [f32; 2]) -> HudFrame {
         }
     }
     if tree {
+        ctx.hint_markers(size, scale);
         ctx.lock_marker(size, scale);
     }
     // The capture icon: a root group of the PS2's own (card CPBAR).

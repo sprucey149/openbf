@@ -436,6 +436,7 @@ pub struct Sim {
     /// slot: slot `s` is driven by `pads[s]`. A slot whose entry is `None` has
     /// no unit; a slot past the end of the `pads` slice idles that tick.
     pub players: Vec<Option<UnitHandle>>,
+    pub target_hints: [super::target_hints::TargetHints; 4],
     pub cps: Vec<CommandPost>,
     /// Zero-CP domination timer: (dominating team, seconds).
     pub domination: Option<(u8, f32)>,
@@ -1020,6 +1021,7 @@ impl Sim {
             press_edges: Vec::new(),
             shot_flights: Vec::new(),
             players: Vec::new(),
+            target_hints: Default::default(),
             cps: Vec::new(),
             domination: None,
             outcome: None,

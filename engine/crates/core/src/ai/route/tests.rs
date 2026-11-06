@@ -245,6 +245,35 @@ fn a_hunter_on_its_quarrys_hub_walks_at_the_quarry() {
     }
 }
 
+fn wander_goals(sim: &mut Sim, h: UnitHandle, seconds: u32) -> Vec<(Vec3, u16)> {
+    let mut seen: Vec<(Vec3, u16)> = Vec::new();
+    for _ in 0..seconds * crate::TICK_HZ {
+        sim.step(&[]);
+        if let Some(goal) = sim.unit(h).and_then(|u| u.ai.wander) {
+            if seen.last() != Some(&goal) {
+                seen.push(goal);
+            }
+        }
+    }
+    seen
+}
+
+#[test]
+fn a_foot_bot_in_a_space_round_walks_from_hub_to_hub_and_decides_again_on_arrival() {
+    let (mut sim, h) = l_sim();
+    sim.space_assault = Some(crate::sim::SpaceAssault::new(10));
+    let goals = wander_goals(&mut sim, h, 120);
+    assert!(goals.len() >= 2, "{goals:?}");
+    let hubs: std::collections::BTreeSet<u16> = goals.iter().map(|g| g.1).collect();
+    assert!(hubs.len() >= 2, "{goals:?}");
+}
+
+#[test]
+fn a_foot_bot_on_a_ground_map_takes_no_space_walk() {
+    let (mut sim, h) = l_sim();
+    assert!(wander_goals(&mut sim, h, 30).is_empty());
+}
+
 #[test]
 fn the_follower_walks_the_corridor_instead_of_the_beeline() {
     let (mut sim, h) = l_sim();

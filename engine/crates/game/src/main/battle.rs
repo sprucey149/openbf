@@ -569,16 +569,8 @@ pub(super) fn load_hud_view(
 
 /// HUD model from the battle state. Takes `feed`'s new event lines: each
 /// model must reach the HUD (`HudView::update`) or its lines are lost.
-fn hud_lock(
-    walk: &WalkSim,
-    feed: &game::event_feed::EventFeed,
-    slot: usize,
-    aspect: f32,
-) -> Option<ui::hud::HudLock> {
-    let (target, pos) = walk.sim.lock_on_target(slot)?;
-    let hud = feed.lock_target(&walk.sim, target)?;
-    let camera = walk.camera();
-    let clip = camera.view_proj(aspect) * pos.extend(1.0);
+fn marker_screen(view_proj: glam::Mat4, pos: glam::Vec3) -> ([f32; 2], bool) {
+    let clip = view_proj * pos.extend(1.0);
     let w = clip.w.abs().max(1.0e-4);
     let (mut x, mut y) = (clip.x / w, -clip.y / w);
     let bound = x.abs().max(y.abs());
@@ -588,6 +580,43 @@ fn hud_lock(
         x *= EDGE / bound;
         y *= EDGE / bound;
     }
+    ([x, y], on_screen)
+}
+
+fn hud_hints(
+    walk: &WalkSim,
+    feed: &mut game::event_feed::EventFeed,
+    slot: usize,
+    aspect: f32,
+) -> Vec<ui::hud_tree::HintMarker> {
+    let locked = walk.sim.lock_on_target(slot).map(|(t, _)| t);
+    let camera = walk.camera();
+    let view_proj = camera.view_proj(aspect);
+    feed.target_hints(&walk.sim, slot)
+        .iter()
+        .filter(|h| Some(h.target) != locked)
+        .filter_map(|h| {
+            let (ndc, on_screen) = marker_screen(view_proj, h.point);
+            on_screen.then(|| ui::hud_tree::HintMarker {
+                ndc,
+                distance: (h.point - camera.position).length(),
+                friendly: h.friendly,
+                visible: h.visible,
+            })
+        })
+        .collect()
+}
+
+fn hud_lock(
+    walk: &WalkSim,
+    feed: &game::event_feed::EventFeed,
+    slot: usize,
+    aspect: f32,
+) -> Option<ui::hud::HudLock> {
+    let (target, pos) = walk.sim.lock_on_target(slot)?;
+    let hud = feed.lock_target(&walk.sim, target)?;
+    let camera = walk.camera();
+    let ([x, y], on_screen) = marker_screen(camera.view_proj(aspect), pos);
     let off = pos - camera.position;
     let distance = off.length();
     let toward = off.normalize_or_zero();
@@ -697,10 +726,17 @@ pub(super) fn hud_model(
         leaving,
         reticle,
         // The reticle's pick by name and health (card HTGT).
-        target: on_foot.then(|| feed.target(&walk.sim, slot)).flatten(),
+        target: (on_foot || walk.sim.flyer_of(walk.player).is_some())
+            .then(|| feed.target(&walk.sim, slot))
+            .flatten(),
         lock: hud_lock(walk, feed, slot, aspect),
+        hints: hud_hints(walk, feed, slot, aspect),
         reticle_y: walk.reticle_y(),
         dead: !me.alive,
+        seat_health: me
+            .mount
+            .and_then(|m| walk.sim.vehicle(m.vehicle))
+            .map(|v| (v.health.cur, v.health.max)),
         // A human waits for no spawn wave (card SSELA): its timer only.
         respawn_in: (!me.alive).then(|| {
             me.respawn_at.map_or(0.0, |t| {

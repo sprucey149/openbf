@@ -38,6 +38,10 @@ pub(in super::super) fn retarget(
             return;
         }
     }
+    if sim.space_assault.is_some() && u.mount.is_none() && u.team < 2 {
+        retarget_deathmatch(sim, me, st, nt);
+        return;
+    }
     if u.team >= 2 || sim.deathmatch.is_some() {
         // PROVISIONAL, replace: trace the PS2 native Deathmatch and Conquest
         // goal orders. The main-army commander owns neither team's members.
@@ -80,6 +84,109 @@ pub(in super::super) fn retarget(
             };
         }
     }
+}
+
+const DM_SALT: u32 = 0xD3A7;
+const DM_HUB_INSET: f32 = 10.0;
+const DM_ENEMY_SPREAD: f32 = 10.0;
+
+pub(super) fn retarget_deathmatch(sim: &Sim, me: UnitHandle, st: &mut AiState, nt: &mut NavTick) {
+    let Some(u) = sim.unit(me) else { return };
+    let pos = u.soldier.pos;
+    let Some(g) = sim.nav.as_ref() else {
+        st.route = None;
+        st.wander = None;
+        return;
+    };
+    let Some(cur) = start_hub(sim, g, me) else {
+        st.route = None;
+        st.wander = None;
+        return;
+    };
+    st.target_cp = None;
+    st.want_stance = 0;
+    let walking = st.wander.zip(st.route).filter(|((at, hub), r)| {
+        let d = nav::xz_dist(pos, *at);
+        let there = d <= ARRIVE_MIN_RADIUS || (r.stuck_run > 0 && d <= g.radius(*hub));
+        r.dest_hub == *hub && !(r.is_last() && there)
+    });
+    if walking.is_none() {
+        let (at, hub) = deathmatch_goal(sim, g, me, u, cur);
+        st.wander = Some((at, hub));
+        st.route = plan_leg(sim, st, me, cur, hub, None, nt);
+    }
+    if let (Some((at, _)), Some(r)) = (st.wander, st.route.as_mut()) {
+        if r.is_last() {
+            r.waypoint = at;
+        }
+    }
+}
+
+fn deathmatch_goal(
+    sim: &Sim,
+    g: &NavGraph,
+    me: UnitHandle,
+    u: &crate::unit::Unit,
+    cur: u16,
+) -> (Vec3, u16) {
+    let pos = u.soldier.pos;
+    let m = mover(sim, u);
+    let tick = sim.tick;
+    let roll = |salt: u32| crate::ai::flyer_drive::draw(tick, me, DM_SALT ^ salt);
+    if roll(1) < 0.5 {
+        if let Some(goal) = deathmatch_enemy_goal(sim, g, me, u, cur) {
+            return goal;
+        }
+    }
+    let hubs = g.hubs.len();
+    let hub = (0..hubs * 2)
+        .map(|k| ((roll(0x100 + k as u32) * hubs as f32) as u16).min(hubs.saturating_sub(1) as u16))
+        .find(|&h| h != cur && g.reachable_by(cur, h, m))
+        .unwrap_or(cur);
+    (hub_point(sim, g, me, hub, pos, DM_HUB_INSET), hub)
+}
+
+fn deathmatch_enemy_goal(
+    sim: &Sim,
+    g: &NavGraph,
+    me: UnitHandle,
+    u: &crate::unit::Unit,
+    cur: u16,
+) -> Option<(Vec3, u16)> {
+    let m = mover(sim, u);
+    let tick = sim.tick;
+    let roll = |salt: u32| crate::ai::flyer_drive::draw(tick, me, DM_SALT ^ salt);
+    let foes: Vec<&crate::unit::Unit> = sim
+        .units
+        .iter()
+        .filter(|o| o.alive && sim.hostile(u.team, o.team))
+        .collect();
+    let foe = foes.get((roll(2) * foes.len() as f32) as usize)?;
+    let at = match foe.mount.and_then(|f| sim.vehicle(f.vehicle)) {
+        Some(v) => {
+            if !crate::ai::arsenal::against_ride(sim, u, foe)?.1 {
+                return None;
+            }
+            v.pos
+        }
+        None => foe.soldier.pos,
+    };
+    let spread = |salt: u32| (roll(salt) - 0.5) * 2.0 * DM_ENEMY_SPREAD;
+    let at = at + Vec3::new(spread(3), spread(4), spread(5));
+    let hub = g.unit_hub_on(at, m, &|h| hub_on_level(sim, g, h, at.y))?;
+    let hub = level_hub(sim, g, hub, at);
+    if hub != cur && !g.reachable_by(cur, hub, m) {
+        return None;
+    }
+    let inside = g
+        .hub(hub)
+        .is_some_and(|h| nav::xz_dist(at, h.pos) <= h.radius);
+    let point = if inside {
+        at
+    } else {
+        hub_point(sim, g, me, hub, u.soldier.pos, DM_HUB_INSET)
+    };
+    Some((point, hub))
 }
 
 /// Route to command post `cp` because the commander said so. `defend` swaps
