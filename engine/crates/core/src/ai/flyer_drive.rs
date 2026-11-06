@@ -757,6 +757,14 @@ fn free_burst(sim: &Sim, me: UnitHandle, p: &FlyerParams, ai: &mut FlyerAi) -> b
     ai.fire_held
 }
 
+fn seen_flyer_handle(sim: &Sim, st: &AiState) -> Option<crate::vehicle::VehicleHandle> {
+    seen_flyer(sim, st)?;
+    let contact = st
+        .target
+        .and_then(|h| crate::perception::contact_of(st, h))?;
+    Some(contact.handle.live_unit(sim)?.mount?.vehicle)
+}
+
 fn seen_flyer<'a>(sim: &'a Sim, st: &AiState) -> Option<&'a Vehicle> {
     let contact = st
         .target
@@ -811,7 +819,20 @@ pub(super) fn drive(
         // BF1 skips only states 0 and 3 (FUN_001dd0d0).
         _ if p.bf2 => {
             if v.flyer.phase == FlightPhase::Flying {
+                let pilot = super::flyer_weapons::Pilot {
+                    me,
+                    vehicle: v,
+                    handle: m.vehicle,
+                    seat: usize::from(m.seat),
+                };
+                let foe = seen_flyer_handle(sim, st);
+                super::flyer_weapons::think(sim, &pilot, &mut ai, foe, &mut st.burst);
                 free_fire = free_burst(sim, me, p, &mut ai);
+                if super::flyer_weapons::armed_shot(sim, me, &ai)
+                    && !super::gunner::friend_on_nose(sim, me)
+                {
+                    pad.buttons |= crate::sim::buttons::FIRE;
+                }
                 bf2_plan(sim, me, v, m.vehicle, p, &mut ai, seen_flyer(sim, st));
             }
         }

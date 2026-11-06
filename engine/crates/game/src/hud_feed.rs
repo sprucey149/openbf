@@ -176,10 +176,12 @@ pub fn weapon_gauge(walk: &crate::walk::WalkSim) -> HudGauge {
 }
 
 pub fn armed_seat(walk: &crate::walk::WalkSim) -> bool {
-    walk.sim
-        .unit(walk.player)
-        .is_some_and(|u| u.alive && u.mount.is_some())
-        && seat_weapon_rows(walk).iter().any(Option::is_some)
+    walk.sim.unit(walk.player).is_some_and(|u| {
+        u.alive
+            && u.mount
+                .and_then(|m| walk.sim.vehicle(m.vehicle))
+                .is_some_and(|v| v.kind != core::vehicle::VehicleKind::Flyer || v.health.alive())
+    }) && seat_weapon_rows(walk).iter().any(Option::is_some)
 }
 
 fn seat_weapon_rows(walk: &crate::walk::WalkSim) -> [Option<HudWeapon>; 2] {

@@ -283,7 +283,8 @@ impl Sim {
         let vehicles = self
             .alive_vehicles()
             .filter(|(_, v)| {
-                v.team.is_some_and(|team| self.hostile(t.team, team))
+                v.health.alive()
+                    && v.team.is_some_and(|team| self.hostile(t.team, team))
                     && kinds & (1 << HealthType::Vehicle as u32) != 0
             })
             .map(|(h, v)| (Aim::Vehicle(h), self.vehicle_blast_sphere(v).0));

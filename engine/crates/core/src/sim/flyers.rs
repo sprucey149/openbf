@@ -120,16 +120,38 @@ impl Sim {
             if !v.alive || v.kind != VehicleKind::Flyer {
                 continue;
             }
+            let handle = VehicleHandle {
+                index: i as u32,
+                gen: v.gen,
+            };
+            if v.flyer.phase == FlightPhase::Crashed {
+                let killer = v.flyer.damager;
+                self.destroy_vehicle(handle, killer);
+                continue;
+            }
+            let crashing = v.flyer.phase == FlightPhase::Falling;
+            let crash_random = if crashing {
+                [
+                    self.lcg.unit(),
+                    self.lcg.unit(),
+                    self.lcg.unit(),
+                    self.lcg.unit(),
+                ]
+            } else {
+                [0.0; 4]
+            };
+            let v = &self.vehicles[i];
+            let player_aboard = v.seats.iter().any(|s| {
+                s.occupant
+                    .and_then(|o| self.unit(o))
+                    .is_some_and(|u| u.is_human())
+            });
             let Some(p) = self
                 .flyer_params
                 .get(v.class as usize)
                 .and_then(Option::as_ref)
             else {
                 continue;
-            };
-            let handle = VehicleHandle {
-                index: i as u32,
-                gen: v.gen,
             };
             let from = v.pos;
             let [min_height, max_height] = if v.input.human {
@@ -144,6 +166,8 @@ impl Sim {
                 // PROVISIONAL: origin membership; PS2 tests the flyer's sphere.
                 in_landing_region: self.landing_regions.iter().any(|r| r.contains(from)),
                 require_landing_region: !self.landing_regions.is_empty(),
+                player_aboard,
+                crash_random,
             };
             let row = super::flyer_contact::FlyerRow::of(p);
             // BF2's ordinary AI flight writes the pose along its curve in
@@ -170,7 +194,7 @@ impl Sim {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::{buttons, PadState};
+    use crate::sim::{buttons, Event, PadState};
     use crate::unit::UnitSpec;
     use crate::vehicle::flyer::FlyerParams;
     use crate::vehicle::{SeatKind, VehicleSpec};
@@ -275,6 +299,140 @@ mod tests {
             sim.step(&[PadState::default()]);
         }
         assert!(sim.vehicle(h).is_none(), "nobody is flying it");
+    }
+
+    fn bf2_world(has_chunks: bool) -> (Sim, VehicleHandle) {
+        let (mut sim, h) = world();
+        let p = sim.flyer_params[0].as_mut().unwrap();
+        p.bf2 = true;
+        p.has_chunks = has_chunks;
+        p.trick_roll_speed = 6.0;
+        p.level_filter = 1.5;
+        let v = sim.vehicle_mut(h).unwrap();
+        v.pos = Vec3::new(0.0, 80.0, 0.0);
+        v.vel = Vec3::new(0.0, 0.0, 50.0);
+        v.flyer.lift = 1.0;
+        v.flyer.initialized = true;
+        v.flyer.phase = FlightPhase::Flying;
+        (sim, h)
+    }
+
+    fn lethal() -> crate::weapon::DamageDesc {
+        crate::vehicle::collision_desc(1.0e6)
+    }
+
+    #[test]
+    fn a_bf2_ship_out_of_hull_tumbles_then_blows_up_and_pays_its_killer() {
+        let (mut sim, h) = bf2_world(true);
+        let pilot = sim.vehicle(h).unwrap().seats[0].occupant.unwrap();
+        let killer = sim
+            .spawn(&UnitSpec::trooper(1, Vec3::new(50.0, 1.0, 0.0)))
+            .unwrap();
+        sim.damage_vehicle(h, &lethal(), 1.0, Some((killer, 1)));
+        let v = sim.vehicle(h).expect("it does not vanish at zero hull");
+        assert_eq!(v.flyer.phase, FlightPhase::Falling);
+        assert!(!v.health.alive());
+        assert!(
+            (0.2..2.2).contains(&v.flyer.crash_timer),
+            "{}",
+            v.flyer.crash_timer
+        );
+        assert!(
+            sim.unit(pilot).is_some_and(|u| u.alive),
+            "aboard until the end"
+        );
+        let forward = v.rot * Vec3::Z;
+        let mut spun = 0.0f32;
+        let mut seen = None;
+        for t in 0..(3 * crate::TICK_HZ) {
+            sim.step(&[PadState::default()]);
+            for e in &sim.events {
+                if let Event::VehicleDestroyed {
+                    vehicle, killer, ..
+                } = e
+                {
+                    assert_eq!(*vehicle, h);
+                    seen = Some((t, *killer));
+                }
+            }
+            if let Some(v) = sim.vehicle(h) {
+                spun = spun.max(1.0 - (v.rot * Vec3::Z).dot(forward));
+            }
+            if seen.is_some() {
+                break;
+            }
+        }
+        let (t, paid) = seen.expect("it blows up on its timer");
+        assert!(t as f32 * crate::TICK_DT <= 2.3, "{t}");
+        assert_eq!(paid, Some(killer));
+        assert!(spun > 0.0, "it tumbles");
+        assert!(
+            sim.unit(pilot).is_none_or(|u| !u.alive),
+            "the crew goes with it"
+        );
+    }
+
+    #[test]
+    fn a_bf2_ship_without_chunks_waits_for_contact() {
+        let (mut sim, h) = bf2_world(false);
+        sim.damage_vehicle(h, &lethal(), 1.0, None);
+        assert_eq!(sim.vehicle(h).unwrap().flyer.crash_timer, 600.0);
+    }
+
+    #[test]
+    fn a_landed_bf2_ship_blows_up_where_it_stands() {
+        let (mut sim, h) = bf2_world(true);
+        sim.vehicle_mut(h).unwrap().flyer.phase = FlightPhase::Landed;
+        sim.damage_vehicle(h, &lethal(), 1.0, None);
+        assert!(sim.vehicle(h).is_none());
+    }
+
+    #[test]
+    fn a_bf2_ship_left_empty_blows_up_half_a_second_later() {
+        let (mut sim, h) = bf2_world(true);
+        let pilot = sim.vehicle(h).unwrap().seats[0].occupant.unwrap();
+        sim.unseat_unit(pilot);
+        sim.step(&[PadState::default()]);
+        let v = sim.vehicle(h).unwrap();
+        assert_eq!(v.flyer.phase, FlightPhase::Falling);
+        assert!(!v.health.alive());
+        for _ in 0..(crate::TICK_HZ * 3 / 4) {
+            sim.step(&[PadState::default()]);
+        }
+        assert!(sim.vehicle(h).is_none());
+    }
+
+    #[test]
+    fn never_crash_keeps_an_empty_bf2_ship_flying() {
+        let (mut sim, h) = bf2_world(true);
+        sim.flyer_params[0].as_mut().unwrap().never_crash = true;
+        let pilot = sim.vehicle(h).unwrap().seats[0].occupant.unwrap();
+        sim.unseat_unit(pilot);
+        for _ in 0..crate::TICK_HZ {
+            sim.step(&[PadState::default()]);
+        }
+        let v = sim.vehicle(h).unwrap();
+        assert!(v.health.alive());
+        assert_eq!(v.flyer.phase, FlightPhase::Flying);
+    }
+
+    #[test]
+    fn a_crashing_ship_keeps_rolling_past_the_wrap() {
+        let (mut sim, h) = bf2_world(true);
+        sim.damage_vehicle(h, &lethal(), 1.0, None);
+        sim.vehicle_mut(h).unwrap().flyer.crash_timer = 100.0;
+        let mut wrapped = false;
+        let mut last = 0.0f32;
+        for _ in 0..(2 * crate::TICK_HZ) {
+            sim.step(&[PadState::default()]);
+            let Some(v) = sim.vehicle(h) else {
+                break;
+            };
+            wrapped |= (v.flyer.crash_roll - last).abs() > std::f32::consts::PI;
+            last = v.flyer.crash_roll;
+            assert!(v.flyer.crash_roll.abs() <= std::f32::consts::PI);
+        }
+        assert!(wrapped, "6 rad/s turns past pi inside two seconds");
     }
 
     /// 12 m up at cruise with its pilot gone: the long shallow glide a craft

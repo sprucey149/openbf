@@ -404,7 +404,20 @@ impl Sim {
             .filter(|_| ai)
             .map(|i| self.skill_of(&self.units[i]).spread_mult);
         let free_burst = g.pilot && self.vehicles[vi].flyer.ai.fire_held;
-        let perceived = !ai || free_burst || {
+        let armed_target = g
+            .pilot
+            .then_some(self.vehicles[vi].flyer.ai.armed_target)
+            .flatten();
+        let channel = (ai
+            && g.pilot
+            && self.vehicles[vi].kind == VehicleKind::Flyer
+            && self
+                .flyer_params
+                .get(self.vehicles[vi].class as usize)
+                .and_then(Option::as_ref)
+                .is_some_and(|p| p.bf2))
+        .then_some(usize::from(self.vehicles[vi].flyer.ai.channel));
+        let perceived = !ai || free_burst || armed_target.is_some() || {
             let st = &self.units[driver.unwrap()].ai;
             st.target
                 .is_some_and(|t| st.contacts.iter().flatten().any(|c| c.handle == t))
@@ -423,9 +436,10 @@ impl Sim {
                     && self.landing_regions.iter().any(|r| r.contains(vehicle.pos))));
         let mut shots = Vec::new();
         for (k, w) in g.weapons.iter().enumerate() {
-            let held = match k {
-                0 => p.pressed(buttons::FIRE),
-                1 => p.pressed(buttons::SECONDARY_FIRE),
+            let held = match (channel, k) {
+                (Some(c), _) => c == k && p.pressed(buttons::FIRE),
+                (None, 0) => p.pressed(buttons::FIRE),
+                (None, 1) => p.pressed(buttons::SECONDARY_FIRE),
                 _ => false,
             };
             let wc = &self.weapon_classes[w.class];
@@ -529,7 +543,8 @@ impl Sim {
                         .and_then(|f| f.unit())
                         .map(crate::missile::MissileTarget::Unit);
                     let locked = driver.and_then(|i| self.seat_lock_target(i, w.class, origin, d));
-                    let target = locked.or(target);
+                    let armed = armed_target.map(crate::missile::MissileTarget::Vehicle);
+                    let target = locked.or(armed).or(target);
                     bolt.as_missile(&ord, &mc, target, &mut self.lcg);
                 }
                 self.note_bolt_shot(&mut bolt, origin, d);

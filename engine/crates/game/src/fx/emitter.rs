@@ -460,6 +460,7 @@ pub struct Instance {
     /// The emitter-level multipliers (§5.8).
     pub rgba: [f32; 4],
     pub size: f32,
+    pub inherit: f32,
     /// BF1: the cache offset; BF2: the per-particle seed's instance term.
     offset: u32,
     dead: bool,
@@ -490,6 +491,7 @@ impl Instance {
             rng,
             rgba,
             size,
+            inherit: 0.0,
             offset,
             dead: max == 0,
         }
@@ -656,7 +658,7 @@ impl Instance {
             _ => sample_variant(&em.spawner, &mut Lcg(bf2_seed(idx, self.offset)), false),
         };
         let pos = rot * v.pos + frame.pos;
-        let vel = rot * v.vel + frame.vel * v.ivf;
+        let vel = rot * v.vel + frame.vel * (v.ivf + self.inherit);
         let mut rgba = v.rgba;
         if em.spawner.fade_in_time > 0.0 && b.time < em.spawner.fade_in_time {
             rgba[3] *= b.time / em.spawner.fade_in_time;

@@ -483,6 +483,158 @@ fn hub_past_the_offers(b: &Battle, team: u8) -> Vec3 {
 }
 
 #[test]
+fn every_ship_on_spa8_carries_its_authored_damage_effects() {
+    let Some(b) = battle("bf2_spa8", 1000) else {
+        return;
+    };
+    let mut ships = 0;
+    for (class, setup) in b.sim.flyer_params.iter().enumerate() {
+        if setup.is_none() {
+            continue;
+        }
+        let effects = &b.sim.vehicle_damage_effects[class];
+        let placed = effects
+            .iter()
+            .filter(|e| e.local != glam::Mat4::IDENTITY)
+            .count();
+        println!(
+            "class {class}: {} effects, {placed} on hardpoints",
+            effects.len()
+        );
+        ships += 1;
+        assert!(effects.len() <= 10, "the class holds ten slots");
+    }
+    assert!(ships > 0);
+    assert!(b.sim.vehicle_damage_effects.iter().any(|e| !e.is_empty()));
+}
+
+#[test]
+fn pilots_turn_on_armed_buildings_and_fire_their_secondaries() {
+    let Some(mut b) = battle("bf2_spa8", 1000) else {
+        return;
+    };
+    let crew = std::env::var("OPENBF_MEASURE_CREW")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(12);
+    let dir = game::assets::baked_root().join("bf2_spa8");
+    b.sim.nav = game::layout::nav_graph(&b.manifest, &dir);
+    for _ in 0..(5 * core::TICK_HZ) {
+        b.sim.step(&[]);
+    }
+    for team in 0..2 {
+        let at = hub_past_the_offers(&b, team);
+        for _ in 0..crew {
+            b.sim
+                .spawn(&UnitSpec {
+                    controller: core::unit::Controller::Ai,
+                    ..UnitSpec::trooper(team, at)
+                })
+                .unwrap();
+        }
+    }
+    let flying = |v: &core::vehicle::Vehicle| {
+        v.kind == core::vehicle::VehicleKind::Flyer
+            && v.flyer.phase == core::vehicle::flyer::FlightPhase::Flying
+    };
+    let (mut samples, mut second, mut armed, mut aimed) = (0u32, 0u32, 0u32, 0u32);
+    let (mut first_shots, mut second_shots) = (0u32, 0u32);
+    let (mut crashing, mut destroyed) = (0u32, 0u32);
+    let (mut lost, mut by_pilot, mut by_turret, mut by_other) = (0.0f32, 0u32, 0u32, 0u32);
+    let mut hull = std::collections::HashMap::new();
+    let mut was_crashing = std::collections::HashSet::new();
+    let seconds = std::env::var("OPENBF_MEASURE_SECONDS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(90u32);
+    for _ in 0..(seconds * core::TICK_HZ) {
+        b.sim.step(&[]);
+        for (h, v) in b.sim.alive_vehicles() {
+            if flying(v) && v.has_pilot() {
+                samples += 1;
+                second += u32::from(v.flyer.ai.channel == 1);
+                armed += u32::from(v.flyer.ai.armed_target.is_some());
+                let before = hull.insert(h, v.health.cur).unwrap_or(v.health.cur);
+                if v.health.cur > 0.0 {
+                    lost += (before - v.health.cur).max(0.0);
+                }
+                let pilot = v.seats[0].occupant.and_then(|p| b.sim.unit(p));
+                aimed += u32::from(pilot.is_some_and(|u| {
+                    u.ai.target
+                        .and_then(|f| f.unit())
+                        .and_then(|e| b.sim.unit(e))
+                        .and_then(|e| e.mount)
+                        .and_then(|m| b.sim.vehicle(m.vehicle))
+                        .is_some_and(|e| e.kind == core::vehicle::VehicleKind::Flyer)
+                }));
+            }
+            if v.flyer.phase == core::vehicle::flyer::FlightPhase::Falling && was_crashing.insert(h)
+            {
+                crashing += 1;
+            }
+        }
+        for e in &b.sim.events {
+            match e {
+                Event::Shot {
+                    unit, weapon_class, ..
+                } => {
+                    let Some(u) = b.sim.unit(*unit) else {
+                        continue;
+                    };
+                    let Some(m) = u.mount.filter(|m| m.seat == 0) else {
+                        continue;
+                    };
+                    let Some(v) = b.sim.vehicle(m.vehicle).filter(|v| flying(v)) else {
+                        continue;
+                    };
+                    let setup = b.sim.seat_setup[v.class as usize].as_ref().unwrap();
+                    let gun = setup.guns[0].as_ref().unwrap();
+                    if gun
+                        .weapons
+                        .first()
+                        .is_some_and(|w| w.class as u32 == *weapon_class)
+                    {
+                        first_shots += 1;
+                    } else {
+                        second_shots += 1;
+                    }
+                }
+                Event::VehicleDestroyed { killer, .. } => {
+                    destroyed += 1;
+                    match killer.and_then(|k| b.sim.unit(k)).and_then(|k| k.mount) {
+                        Some(m)
+                            if b.sim
+                                .vehicle(m.vehicle)
+                                .is_some_and(|k| k.kind == core::vehicle::VehicleKind::Flyer) =>
+                        {
+                            by_pilot += 1
+                        }
+                        Some(_) => by_turret += 1,
+                        None => by_other += 1,
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    println!(
+        "pilots: samples {samples} channel 1 {:.2} armed target {:.2} flyer target {:.2}; shots {first_shots}/{second_shots} per s {:.1}/{:.1}; crashes {crashing} destroyed {destroyed} (flyers {by_pilot}, seats {by_turret}, other {by_other}) in {seconds} s; hull lost per flyer per s {:.1}",
+        f64::from(second) / f64::from(samples.max(1)),
+        f64::from(armed) / f64::from(samples.max(1)),
+        f64::from(aimed) / f64::from(samples.max(1)),
+        f64::from(first_shots) / f64::from(seconds),
+        f64::from(second_shots) / f64::from(seconds),
+        f64::from(lost) / f64::from(samples.max(1)) * f64::from(core::TICK_HZ),
+    );
+    assert!(
+        armed > 0,
+        "no pilot took an armed building in {samples} samples"
+    );
+    assert!(second > 0, "no pilot flipped to the secondary channel");
+    assert!(second_shots > 0, "no pilot fired a secondary");
+}
+
+#[test]
 fn soldiers_who_start_out_of_reach_crew_the_ships_and_the_ships_shoot() {
     let Some(mut b) = battle("bf2_spa8", 1000) else {
         return;

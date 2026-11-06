@@ -125,7 +125,7 @@ impl Sim {
             .map(|(h, _)| LockTarget::Aim(AimTarget::Unit(h)));
         let vehicles = self
             .alive_vehicles()
-            .filter(|(h, _)| *h != own)
+            .filter(|(h, v)| *h != own && v.health.alive())
             .map(|(h, _)| LockTarget::Aim(AimTarget::Vehicle(h)));
         let turrets = self
             .turrets

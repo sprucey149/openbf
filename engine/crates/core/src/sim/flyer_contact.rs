@@ -239,8 +239,11 @@ impl Sim {
         if !self.vehicle(handle).is_some_and(|v| v.alive) {
             return false;
         }
-        if phase == FlightPhase::Falling {
-            self.destroy_vehicle(handle, None);
+        if matches!(phase, FlightPhase::Falling | FlightPhase::Crashed)
+            || self.vehicles[i].flyer.phase == FlightPhase::Falling
+        {
+            let killer = self.vehicles[i].flyer.damager;
+            self.destroy_vehicle(handle, killer);
             return false;
         }
         let mut impulse = RESTITUTION * along;

@@ -72,6 +72,7 @@ pub struct StationDamageEffect {
     pub band: crate::autoturret::DamageEffect,
     pub local: glam::Mat4,
     pub scale: f32,
+    pub inherit: f32,
 }
 
 /// Authored animation keys; defaults follow B1 FUN_002aa5d8 (§§2.1, 6).

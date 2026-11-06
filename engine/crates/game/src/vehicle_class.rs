@@ -917,9 +917,12 @@ pub fn damage_effects(db: &ClassDb, class: &str) -> Vec<DamageEffect> {
     let mut cur: Option<usize> = None;
     // Portable turrets author these building properties after TURRET1.
     let portable = db.engine_base(class) == Some("portableturret");
+    let flyer = db
+        .engine_base(class)
+        .is_some_and(|base| FLYER_BASES.contains(&base));
     for def in db.chain(class).into_iter().rev() {
-        for (scope, k, v) in scoped(def) {
-            if scope != Scope::Body && !portable {
+        for (scope, k, v) in scoped_rows(def, !flyer) {
+            if scope != Scope::Body && !portable && !flyer {
                 continue;
             }
             if k == h("DamageStartPercent") {
@@ -958,6 +961,21 @@ pub fn damage_effects(db: &ClassDb, class: &str) -> Vec<DamageEffect> {
     }
     slots.retain(|s| !s.effect.is_empty());
     slots
+}
+
+pub fn prop_float(db: &ClassDb, class: &str, key: &str) -> Option<f32> {
+    db.prop(class, key).and_then(float)
+}
+
+pub fn prop_flag(db: &ClassDb, class: &str, key: &str) -> bool {
+    prop_float(db, class, key).is_some_and(|v| v != 0.0)
+}
+
+pub fn has_chunks(db: &ClassDb, class: &str) -> bool {
+    let chunk = h("CHUNKSECTION");
+    db.chain(class)
+        .iter()
+        .any(|def| def.props.iter().any(|(k, _)| *k == chunk))
 }
 
 /// The class detonated when its hull pool runs out (`ExplosionName`,
