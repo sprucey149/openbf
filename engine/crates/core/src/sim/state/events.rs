@@ -109,10 +109,12 @@ pub enum Event {
         to: Vec3,
     },
     Hit {
-        /// Presentation metadata only: the body was struck by a round,
-        /// including a zero-damage shield contact; excludes splash, Force
-        /// and emitters. Never hashed or read to drive gameplay.
-        direct_round: bool,
+        /// Presentation metadata only: a direct contact that plays the hit
+        /// pose and sets the death side: a round (including a zero-damage
+        /// shield contact), a saber swing or throw, or Force choke. Splash,
+        /// fat rays, emitters (Force push, pull, lightning) and burns are
+        /// not. Never hashed or read to drive gameplay.
+        direct: bool,
         shooter: UnitHandle,
         victim: UnitHandle,
         /// The health the hit took (after the shield and the scales; 0 for
@@ -442,6 +444,11 @@ pub enum Call {
     /// PS2's table (`game::vo::EVENTS`). Never in the sim's events: the
     /// sound side picks it from them (`game::vo::Vo::tick`).
     Vo(u8),
+    /// A Hero Assault hero's own `SndHeroSpawned` / `SndHeroDefeated` line,
+    /// said where it stands. Never in the sim's events: the sound side asks
+    /// it on a respawn or a death (`game::announce::Commander::calls`).
+    HeroSpawned,
+    HeroDefeated,
 }
 
 /// What the world killed a unit with ([`Event::EnvDeath`]).

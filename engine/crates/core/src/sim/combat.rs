@@ -339,7 +339,7 @@ impl Sim {
                     });
                 }
                 self.push_impact(b, Surface::Soldier, None);
-                if self.finish_round_damage(
+                if self.finish_direct_damage(
                     h,
                     Some(b.owner),
                     damage,
@@ -548,9 +548,9 @@ impl Sim {
         });
     }
 
-    /// Mark a round contact for the visual hit pose without changing damage
-    /// bookkeeping. The general damage path also handles non-round attacks.
-    pub(super) fn finish_round_damage(
+    /// Mark a direct contact (see `Event::Hit::direct`) for the visual hit
+    /// pose without changing damage bookkeeping.
+    pub(super) fn finish_direct_damage(
         &mut self,
         victim: UnitHandle,
         attacker: Option<UnitHandle>,
@@ -560,8 +560,8 @@ impl Sim {
     ) -> bool {
         let at = self.events.len();
         let killed = self.finish_unit_damage(victim, attacker, damage, age, dir);
-        if let Some(Event::Hit { direct_round, .. }) = self.events.get_mut(at) {
-            *direct_round = true;
+        if let Some(Event::Hit { direct, .. }) = self.events.get_mut(at) {
+            *direct = true;
         }
         killed
     }
@@ -582,7 +582,7 @@ impl Sim {
         if let Some(shooter) = attacker {
             u.last_hit = Some((shooter, self.tick));
             self.events.push(Event::Hit {
-                direct_round: false,
+                direct: false,
                 shooter,
                 victim,
                 damage,

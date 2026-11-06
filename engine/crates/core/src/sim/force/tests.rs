@@ -467,3 +467,26 @@ fn force_emitter_damage_is_paid_by_a_raised_droideka_shield() {
     assert_eq!(u.health.cur, before);
     assert_eq!(u.droideka.as_ref().unwrap().shield.points, 2910.0);
 }
+
+/// PC BF2: an emitter (push, pull, lightning) damages through the call that
+/// sets no hit side; a saber swing or throw (`hero_damage`) is direct.
+#[test]
+fn emitter_hits_are_not_direct_and_saber_hits_are() {
+    let (mut sim, player) = scene(emitter());
+    let y = sim.units[0].muzzle().y - 1.0;
+    let target = sim
+        .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, y, -4.0)))
+        .unwrap();
+    let direct = |sim: &Sim| {
+        sim.events.iter().rev().find_map(|e| match e {
+            Event::Hit { victim, direct, .. } if *victim == target => Some(*direct),
+            _ => None,
+        })
+    };
+    sim.fire_force(player.index as usize, 0, 1.0);
+    assert_eq!(direct(&sim), Some(false));
+    let mut desc = sim.weapon_classes[0].ordnance.damage_desc(0.0, false);
+    desc.damage = 1.0;
+    sim.hero_damage(player.index as usize, target, desc, Vec3::NEG_Z);
+    assert_eq!(direct(&sim), Some(true));
+}

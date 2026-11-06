@@ -357,7 +357,7 @@ fn actual_hero_music_binds_starts_and_releases_on_death() {
     let lib = library(&root);
     let mut music =
         game::music::BattleMusic::new(&game::mission::MusicCalls::default(), true, [150; 2]);
-    music.set_hero_music([Some(name.clone()), None]);
+    music.set_hero_music(vec![(0, 0, name.clone())]);
     assert!(music.bind(&lib).is_empty(), "actual SoldierMusic must bind");
     let changes = music.frame(&walk.sim, walk.player, core::TICK_DT);
     assert!(changes

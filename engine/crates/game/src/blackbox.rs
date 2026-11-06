@@ -1990,7 +1990,7 @@ mod tests {
         };
         let (b1, b2) = (bot(&mut w, 0.0), bot(&mut w, 2.0));
         let hit = |shooter, victim, damage, age| Event::Hit {
-            direct_round: true,
+            direct: true,
             shooter,
             victim,
             damage,

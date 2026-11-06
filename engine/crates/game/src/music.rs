@@ -20,6 +20,10 @@ use core::unit::UnitHandle;
 /// gain. 1.0 = what the disc's record plays at; 0 = no music at all.
 pub const VOLUME_RANGE: (f32, f32) = (0.0, 1.0);
 pub const DEFAULT_VOLUME: f32 = 1.0;
+/// OURS (maintainer, 2026-11-05: the music sat too high over the battle): a
+/// factor on every music take's gain before the volume option, about -3 dB
+/// (analysis/plan/FEATURE_SET.md, Presentation & audio).
+pub const MUSIC_MIX: f32 = 0.7;
 
 /// The option's value: `env` (`OPENBF_MUSIC_VOLUME`, for a headless or a
 /// scripted run) when it is a number, else the profile's; held in the range.
@@ -49,8 +53,9 @@ pub struct BattleMusic {
     /// One per `player.musics` entry.
     tracks: Vec<MusicTrack>,
     bound: bool,
-    hero_names: [Option<String>; 2],
-    hero_tracks: [Option<usize>; 2],
+    hero_names: Vec<(u8, u8, String)>,
+    /// `(team, class, track)` per hero class with a `SoldierMusic`.
+    hero_tracks: Vec<(u8, u8, usize)>,
     /// Seconds of [`BattleMusic::observe`] so far.
     pub clock: f32,
     /// The music volume option ([`VOLUME_RANGE`]).
@@ -69,8 +74,8 @@ impl BattleMusic {
             ambient: Ambient::new(if bf2 { Rule::Bf2 } else { Rule::Bf1 }),
             tracks: Vec::new(),
             bound: false,
-            hero_names: [None, None],
-            hero_tracks: [None, None],
+            hero_names: Vec::new(),
+            hero_tracks: Vec::new(),
             clock: 0.0,
             volume: DEFAULT_VOLUME,
         }
@@ -83,8 +88,9 @@ impl BattleMusic {
         self.bind_with(|n| sounds.music(n))
     }
 
-    /// Each mission team's authored SoldierMusic; registered before binding.
-    pub fn set_hero_music(&mut self, names: [Option<String>; 2]) {
+    /// Each hero class's `SoldierMusic`, as `(team, class, property)`: the
+    /// team's one hero in Conquest, every class in Hero Assault.
+    pub fn set_hero_music(&mut self, names: Vec<(u8, u8, String)>) {
         self.hero_names = names;
         self.bound = false;
     }
@@ -131,8 +137,9 @@ impl BattleMusic {
         }
         self.hero_tracks = self
             .hero_names
-            .each_ref()
-            .map(|name| name.as_ref().and_then(|name| index(name, &mut missing)));
+            .iter()
+            .filter_map(|(team, class, name)| Some((*team, *class, index(name, &mut missing)?)))
+            .collect();
         self.player = Player::new(tracks.iter().map(|t| t.def.clone()).collect());
         self.tracks = tracks;
         missing
@@ -173,7 +180,7 @@ impl BattleMusic {
     pub fn level(&self) -> Option<(usize, f32)> {
         let (i, g) = self.player.current()?;
         let v = self.volume.clamp(VOLUME_RANGE.0, VOLUME_RANGE.1);
-        Some((i, g * self.tracks[i].gain * v))
+        Some((i, g * self.tracks[i].gain * v * MUSIC_MIX))
     }
 
     /// One frame of the battle's state: `listener` is the local player's
@@ -216,15 +223,23 @@ impl BattleMusic {
     /// [`BattleMusic::observe`] from the sim.
     pub fn frame(&mut self, sim: &Sim, player: UnitHandle, dt: f32) -> Vec<Change> {
         let me = sim.unit(player);
-        for index in self.hero_tracks.into_iter().flatten() {
+        for &(_, _, index) in &self.hero_tracks {
             if let Some(music) = self.player.musics.get_mut(index) {
                 music.wanted = false;
             }
         }
-        if sim.outcome.is_none() && sim.is_hero(player) {
-            if let Some(index) = me.and_then(|u| self.hero_tracks[usize::from(u.team.min(1))]) {
+        // OURS (maintainer, 2026-11-05): Hero Assault plays its heroes'
+        // music too, though `tat2g_eli` switches hero music off.
+        let hero = sim.is_hero(player) || sim.deathmatch.is_some();
+        if sim.outcome.is_none() && hero {
+            let track = me.and_then(|u| {
+                self.hero_tracks
+                    .iter()
+                    .find(|&&(t, c, _)| t == u.team && c == u.spec.class)
+            });
+            if let Some(&(_, _, index)) = track {
                 if let Some(music) = self.player.musics.get_mut(index) {
-                    music.wanted = true;
+                    music.wanted = me.is_some_and(|u| u.alive);
                 }
             }
         }
@@ -419,7 +434,7 @@ mod tests {
         let hero = sim.spawn(&UnitSpec::player(0, glam::Vec3::ZERO)).unwrap();
         sim.heroes = Some(Heroes::new([Some(0), None]));
         let mut m = BattleMusic::new(&MusicCalls::default(), true, [150; 2]);
-        m.set_hero_music([Some("hero_theme".into()), None]);
+        m.set_hero_music(vec![(0, 0, "hero_theme".into())]);
         m.bind_with(track);
         let changes = m.frame(&sim, hero, core::TICK_DT);
         assert!(changes
@@ -472,7 +487,11 @@ mod tests {
         };
         run(&mut m, 3.0, [200, 200], false, None);
         run(&mut m, 3.0, [200, 200], true, None);
-        assert_eq!(m.level().map(|(_, g)| g), Some(0.5), "fade x gain");
+        let level = m.level().map_or(0.0, |(_, g)| g);
+        assert!(
+            (level - 0.5 * MUSIC_MIX).abs() < 1e-6,
+            "fade x gain: {level}"
+        );
         run(&mut m, 8.0, [200, 197], true, None);
         run(&mut m, 12.0, [200, 0], true, Some(0));
         let names: Vec<&str> = heard
@@ -524,7 +543,8 @@ mod tests {
         let c = run(&mut m, 5.0);
         // Lua team 1 (cis) listens: its `start` is the third record bound.
         assert!(matches!(c[..], [Change::Started { music: 2, .. }]), "{c:?}");
-        assert_eq!(m.level().map(|(_, g)| g), Some(0.25));
+        let level = m.level().map_or(0.0, |(_, g)| g);
+        assert!((level - 0.25 * MUSIC_MIX).abs() < 1e-6, "{level}");
         // Off again: the take is cut, once.
         m.volume = 0.0;
         let c = run(&mut m, 1.0);

@@ -75,7 +75,7 @@ fn hit_feedback_captures_all_four_sides_on_bf1_and_bf2_maps() {
             let mut plain = base.clone();
             plain.step(&rig, &asset.clips, &asset.skeleton, &input, 1.0 / 60.0);
             walk.sim.events = vec![core::sim::Event::Hit {
-                direct_round: true,
+                direct: true,
                 shooter: unit,
                 victim: unit,
                 damage: 0.0,
@@ -146,7 +146,7 @@ fn hit_feedback_captures_all_four_sides_on_bf1_and_bf2_maps() {
         assert!(!before_guns.is_empty(), "{game}: actual FPM gun required");
         walk.sim.tick += 1;
         walk.sim.events = vec![core::sim::Event::Hit {
-            direct_round: true,
+            direct: true,
             shooter: unit,
             victim: unit,
             damage: 30.0,

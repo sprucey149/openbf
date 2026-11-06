@@ -206,7 +206,7 @@ fn bugx_c_a_hit_before_death_has_no_chevron_at_respawn() {
             &w.sim,
             first,
             &Event::Hit {
-                direct_round: true,
+                direct: true,
                 shooter: first,
                 victim: first,
                 damage: 1.0,

@@ -164,6 +164,10 @@ pub struct Missile {
     pub top: f32,
     /// The two waver phases, radians.
     pub phases: [f32; 2],
+    /// [`Missile::phases`] as the ctor drew them, never stepped: with
+    /// [`Missile::launch`], presentation's identity for this round (the live
+    /// phases advance every tick once the waver is in). Derived, not hashed.
+    pub launch_phases: [f32; 2],
     /// The locked target, `None` for an unguided shot. Only the handle's
     /// death drops it (`re-ordnance-kinds.md` §4.3: no cone, range or LOS
     /// test in flight).
@@ -183,6 +187,7 @@ impl Missile {
         lcg: &mut GameLcg,
     ) -> Self {
         let dir = dir.normalize_or_zero();
+        let phases = [lcg.unit() * TAU, lcg.unit() * TAU];
         Self {
             dir,
             launch: dir,
@@ -194,7 +199,8 @@ impl Missile {
                 top_speed
             },
             top: top_speed,
-            phases: [lcg.unit() * TAU, lcg.unit() * TAU],
+            phases,
+            launch_phases: phases,
             target,
         }
     }

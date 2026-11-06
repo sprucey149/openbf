@@ -501,16 +501,21 @@ pub(super) fn make_walk_with_counts(
             let tickets = [0, 1].map(|t| walk.sim.battle.teams[t].tickets());
             let bf2 = m.source_game == "bf2";
             walk.music = Some(game::music::BattleMusic::new(&m.music, bf2, tickets));
-            let names = [0u8, 1].map(|team| {
-                walk.sim.hero_class(team).and_then(|class| {
-                    walk.teams[usize::from(team)]
-                        .class(class)
-                        .cries
-                        .hero
-                        .music
-                        .clone()
+            // Conquest: the team's hero; Hero Assault: every class.
+            let assault = walk.sim.deathmatch.is_some();
+            let names = [0u8, 1]
+                .into_iter()
+                .flat_map(|team| {
+                    let classes = &walk.teams[usize::from(team)].classes;
+                    let hero = walk.sim.hero_class(team);
+                    (0..classes.len() as u8)
+                        .filter(move |&c| assault || hero == Some(c))
+                        .filter_map(move |c| {
+                            let music = classes[usize::from(c)].cries.hero.music.clone()?;
+                            Some((team, c, music))
+                        })
                 })
-            });
+                .collect();
             walk.music.as_mut().unwrap().set_hero_music(names);
         }
         println!(

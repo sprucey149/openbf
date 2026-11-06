@@ -75,19 +75,22 @@ impl Sim {
         desc: DamageDesc,
         direction: glam::Vec3,
     ) {
-        self.hero_damage_phases(i, target, desc, direction, false);
+        self.hero_damage_phases(i, target, desc, direction, false, true);
     }
 
     /// Area damage passes both native shield and health flags. Physical blade
     /// body contacts keep their separate shield-sphere collision rule.
+    /// `direct`: an area effect (choke) plays the hit pose; an emitter
+    /// (push, pull, lightning) does not.
     fn force_damage(
         &mut self,
         i: usize,
         target: UnitHandle,
         desc: DamageDesc,
         direction: glam::Vec3,
+        direct: bool,
     ) {
-        self.hero_damage_phases(i, target, desc, direction, true);
+        self.hero_damage_phases(i, target, desc, direction, true, direct);
     }
 
     fn hero_damage_phases(
@@ -97,6 +100,7 @@ impl Sim {
         mut desc: DamageDesc,
         direction: glam::Vec3,
         shield: bool,
+        direct: bool,
     ) {
         let Some(victim) = self.unit(target) else {
             return;
@@ -133,7 +137,11 @@ impl Sim {
                 soldier.yaw = body.yaw;
             }
         }
-        self.finish_unit_damage(target, Some(owner), damage, 0.0, direction);
+        if direct {
+            self.finish_direct_damage(target, Some(owner), damage, 0.0, direction);
+        } else {
+            self.finish_unit_damage(target, Some(owner), damage, 0.0, direction);
+        }
     }
 
     /// A saber or Force shove. A droideka's mover owns its body and never
@@ -309,7 +317,7 @@ impl Sim {
                 match candidate.target {
                     EmitterTarget::Unit(target) => {
                         if damage > 0.0 {
-                            self.force_damage(i, target, desc, incoming);
+                            self.force_damage(i, target, desc, incoming, false);
                         }
                         if self.unit(target).is_some() {
                             let victim = &mut self.units[target.index as usize];

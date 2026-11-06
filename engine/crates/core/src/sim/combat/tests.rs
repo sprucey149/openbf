@@ -1156,21 +1156,15 @@ fn explosion_expire_is_independent_of_flight_kind_and_uses_final_position() {
 fn round_contact_metadata_does_not_change_sim_hash_or_damage_bookkeeping() {
     let (mut round, attacker, victim) = duel();
     let (mut other, _, _) = duel();
-    round.finish_round_damage(victim, Some(attacker), 0.0, 0.0, Vec3::Z);
+    round.finish_direct_damage(victim, Some(attacker), 0.0, 0.0, Vec3::Z);
     other.finish_unit_damage(victim, Some(attacker), 0.0, 0.0, Vec3::Z);
     assert!(matches!(
         round.events.last(),
-        Some(Event::Hit {
-            direct_round: true,
-            ..
-        })
+        Some(Event::Hit { direct: true, .. })
     ));
     assert!(matches!(
         other.events.last(),
-        Some(Event::Hit {
-            direct_round: false,
-            ..
-        })
+        Some(Event::Hit { direct: false, .. })
     ));
     assert_eq!(round.hash(), other.hash());
 }

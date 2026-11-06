@@ -65,7 +65,7 @@ fn the_events_ask_the_victims_cries() {
     let mut w = walk();
     let me = w.player;
     let hit = |damage: f32, health_left: f32| Event::Hit {
-        direct_round: true,
+        direct: true,
         shooter: me,
         victim: me,
         damage,
@@ -135,7 +135,7 @@ fn the_cry_is_the_victims_class() {
         .expect("enemy");
     for (shooter, victim, team) in [(enemy, me, mine), (me, enemy, 1 - mine)] {
         w.sim.events = vec![Event::Hit {
-            direct_round: true,
+            direct: true,
             shooter,
             victim,
             damage: 40.0,

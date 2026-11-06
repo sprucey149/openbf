@@ -6,9 +6,10 @@ use core::sim::{Event, Sim};
 /// Circular order used by BF2's directional draw.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Direction {
-    #[default]
     Front,
     Left,
+    /// BF2's starting side (PC EntitySoldier ctor).
+    #[default]
     Back,
     Right,
 }
@@ -16,11 +17,13 @@ pub enum Direction {
 impl Direction {
     pub const ALL: [Self; 4] = [Self::Front, Self::Left, Self::Back, Self::Right];
 
-    /// `dir` is projectile travel; negate it to face its source. The PS2
-    /// compares the two planar body-axis projections (B2:152435-152463).
-    /// trace: PCSX2 T3 must settle the sign of the original model's front.
+    /// `dir` is the way the hit travels (a round's flight, a swing, caster
+    /// to target), NOT toward its source: the PS2 compares its two planar
+    /// body-axis projections (B2:152435-152463), and PC BF2 passes the
+    /// bolt's own velocity. So a shot in the chest from in front is `Back`:
+    /// the side names say where the hit pushes the body.
     pub fn from_hit(dir: glam::Vec3, yaw: f32) -> Self {
-        let source = body_vel(-dir, yaw);
+        let source = body_vel(dir, yaw);
         if source.y.abs() > source.x.abs() {
             if source.y > 0.0 {
                 Self::Front
@@ -85,7 +88,7 @@ impl Animator {
             victim,
             dir,
             health_left,
-            direct_round,
+            direct,
             ..
         }) = sim.events.get(event)
         else {
@@ -107,8 +110,13 @@ impl Animator {
             return;
         };
         self.hit.seen = Some(key);
+        // Splash, emitters and burns keep the last direct hit's side for
+        // the death clip (B2 FUN_00238e20 is the only setter).
+        if !*direct {
+            return;
+        }
         self.hit.direction = Direction::from_hit(*dir, u.soldier.yaw);
-        if *health_left > 0.0 && *direct_round && u.mount.is_none() {
+        if *health_left > 0.0 && u.mount.is_none() {
             // Render-only hash; independent of frame count and simulation RNG.
             let mut seed = sim.tick ^ (u64::from(victim.index) << 32) ^ u64::from(victim.gen);
             seed = (seed ^ (seed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -134,7 +142,7 @@ impl Reaction {
         dt: f32,
     ) {
         if self.was_dead && !i.dead {
-            self.direction = Direction::Front;
+            self.direction = Direction::default();
         }
         self.was_dead = i.dead;
         let weight = 0.5 * self.clock.min(1.0);

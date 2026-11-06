@@ -95,6 +95,9 @@ and LAN are decisions for later work, not current tasks.
   data so the maintainer can change them later; zero drain remains a valid option. This
   decision does not set Hero Assault's rules. `RE:` hero spawn/possession flow (BF2),
   NPC hero behavior (BF1), and the disc's hero health and kill-heal values.
+- Push flinch (maintainer, 2026-11-05): a saber or Force push that neither throws nor
+  tumbles locks input for **1/3 s on the ground and 1/2 s in the air**, shorter than
+  BF2's 0.5 s and 1.0 s (`core::soldier::BF2_FLINCH_*`).
 
 ### AI
 
@@ -218,6 +221,8 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   (rotating hero vs squad). Pick 1–2 post-1.0.
 
 ### Presentation & audio
+- Music mix (maintainer, 2026-11-05): battle music plays at **0.7 x** the disc's gain
+  (about -3 dB) before the player's music volume option (`game::music::MUSIC_MIX`).
 - **Widescreen-native (the maintainer, 2026-08-30): 16:9/16:10/ultrawide, hor+** — vertical FOV
   keeps the traced PS2 values (render::Camera is fov_y-based, so hor+ falls out of the
   projection; PS2-traced FOV constants drop into fov_y when camera RE lands). HUD and

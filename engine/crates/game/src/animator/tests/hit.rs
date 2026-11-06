@@ -28,7 +28,8 @@ fn hit_clips(rig: &mut Rig, clips: &mut Vec<Clip>) {
 
 #[test]
 fn hit_directions_and_distribution_on_all_sides() {
-    let vectors = [Vec3::Z, Vec3::X, Vec3::NEG_Z, Vec3::NEG_X];
+    // The way the hit travels, at yaw 0 (the soldier faces -Z).
+    let vectors = [Vec3::NEG_Z, Vec3::NEG_X, Vec3::Z, Vec3::X];
     for (d, dir) in Direction::ALL.into_iter().zip(vectors) {
         assert_eq!(Direction::from_hit(dir, 0.0), d);
         assert_eq!(
@@ -143,13 +144,46 @@ fn hit_clock_masks_and_stance_gating_do_not_change_actions() {
     }
 }
 
+/// PC BF2 `EntitySoldier::ApplyDamage` dots the bolt's own velocity with
+/// the body's forward: a shot in the chest from in front pushes the body
+/// back, and its death falls backward.
+#[test]
+fn a_shot_from_in_front_is_a_hit_from_the_back() {
+    let toward_his_chest = Vec3::Z; // the shooter stands at -Z, in front.
+    assert_eq!(Direction::from_hit(toward_his_chest, 0.0), Direction::Back);
+    assert_eq!(Direction::Back.death_name(), "stand_death_backward");
+    assert_eq!(Direction::default(), Direction::Back);
+}
+
+#[test]
+fn splash_keeps_the_last_direct_hits_death_side() {
+    let mut walk = crate::walk::WalkSim::new(42, Vec3::ZERO, None);
+    let victim = walk.player;
+    let mut a = Animator::new();
+    let hit = |direct, dir| core::sim::Event::Hit {
+        direct,
+        shooter: victim,
+        victim,
+        dir,
+        damage: 1.0,
+        health_left: 50.0,
+        age: 0.0,
+    };
+    walk.sim.events = vec![hit(true, Vec3::X), hit(false, Vec3::Z)];
+    a.note_hit(&walk.sim, 0);
+    let side = a.hit.direction;
+    assert_ne!(side, Direction::from_hit(Vec3::Z, 0.0));
+    a.note_hit(&walk.sim, 1);
+    assert_eq!(a.hit.direction, side, "splash does not move the death side");
+}
+
 #[test]
 fn hit_events_are_read_once_rearm_and_leave_sim_hash_unchanged() {
     let mut walk = crate::walk::WalkSim::new(42, Vec3::ZERO, None);
     let victim = walk.player;
     let mut a = Animator::new();
     let event = |age, health_left| core::sim::Event::Hit {
-        direct_round: age != core::sim::BLAST_AGE,
+        direct: age != core::sim::BLAST_AGE,
         shooter: victim,
         victim,
         dir: Vec3::Z,
@@ -177,12 +211,15 @@ fn hit_events_are_read_once_rearm_and_leave_sim_hash_unchanged() {
     assert_eq!(picked, replay.hit.picked);
     walk.sim.tick += 1;
     walk.sim.events = vec![event(0.0, 100.0)];
-    if let core::sim::Event::Hit { direct_round, .. } = &mut walk.sim.events[0] {
-        *direct_round = false;
+    if let core::sim::Event::Hit { direct, .. } = &mut walk.sim.events[0] {
+        *direct = false;
     }
     a.hit.clock = 0.0;
     a.note_hit(&walk.sim, 0);
-    assert_eq!(a.hit.clock, 0.0, "non-round contact with age zero excluded");
+    assert_eq!(
+        a.hit.clock, 0.0,
+        "non-direct contact with age zero excluded"
+    );
     walk.sim.tick += 1;
     walk.sim.events = vec![event(0.0, 0.0)];
     a.hit.clock = 0.0;
@@ -261,7 +298,7 @@ fn a_restarted_sim_with_an_earlier_tick_still_flinches() {
     let victim = walk.player;
     let mut a = Animator::new();
     walk.sim.events = vec![core::sim::Event::Hit {
-        direct_round: true,
+        direct: true,
         shooter: victim,
         victim,
         dir: Vec3::Z,
