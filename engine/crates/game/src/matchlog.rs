@@ -694,7 +694,7 @@ mod tests {
             .unwrap();
         walk.sim.tick = 4;
         walk.sim.events.push(Event::Hit {
-            direct_round: true,
+            direct: true,
             shooter: other,
             victim: foe,
             damage: 10.0,

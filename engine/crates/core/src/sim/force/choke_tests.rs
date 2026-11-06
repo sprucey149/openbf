@@ -223,3 +223,16 @@ fn choke_damage_uses_the_same_raised_shield_phase() {
     assert!(u.droideka.as_ref().unwrap().shield.points < 3000.0);
     assert!(u.choked.is_none());
 }
+
+/// PC BF2 `WeaponAreaEffect` damages through the hit entry, so a damaging
+/// choke plays the hit pose and sets the death side.
+#[test]
+fn a_damaging_choke_is_a_direct_hit() {
+    let (mut sim, owner) = choke();
+    let target = victim(&mut sim, 4.0, 0.0);
+    sim.force_input(owner.index as usize, None, true, false);
+    assert!(sim.events.iter().any(|e| matches!(
+        e,
+        crate::sim::Event::Hit { victim, direct: true, damage, .. } if *victim == target && *damage > 0.0
+    )));
+}

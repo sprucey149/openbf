@@ -411,7 +411,7 @@ fn a_hit_on_the_player_lights_the_edge_toward_the_shooter() {
     let from = s.sim.units[rebel.index as usize].soldier.pos + Vec3::Y * 1.6;
     let to = s.sim.units[me.index as usize].soldier.pos + Vec3::Y * 1.0;
     let hit = |victim| Event::Hit {
-        direct_round: true,
+        direct: true,
         shooter: rebel,
         victim,
         damage: 10.0,
@@ -447,7 +447,7 @@ fn an_enemy_body_hit_lights_the_plain_flash() {
     let mut s = scene();
     let (me, mate, rebel) = (s.me, s.mate, s.rebels[0]);
     let hit = |shooter, victim, age| Event::Hit {
-        direct_round: true,
+        direct: true,
         shooter,
         victim,
         damage: 50.0,
@@ -489,7 +489,7 @@ fn a_sniper_headshot_lights_the_critical_mark() {
         weapon_class,
     };
     let body = Event::Hit {
-        direct_round: true,
+        direct: true,
         shooter: me,
         victim: rebel,
         damage: 50.0,
@@ -1051,7 +1051,7 @@ fn local_damage_flash_filters_rearms_expires_and_cannot_follow_another_life() {
     let mut s = scene();
     let (me, bot, attacker) = (s.me, s.mate, s.rebels[0]);
     let hit = |victim, damage, health_left| Event::Hit {
-        direct_round: false,
+        direct: false,
         shooter: attacker,
         victim,
         damage,

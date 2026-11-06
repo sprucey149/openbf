@@ -88,7 +88,6 @@ impl BattleMusic {
         self.bind_with(|n| sounds.music(n))
     }
 
-    /// Each mission team's authored SoldierMusic; registered before binding.
     /// Each hero class's `SoldierMusic`, as `(team, class, property)`: the
     /// team's one hero in Conquest, every class in Hero Assault.
     pub fn set_hero_music(&mut self, names: Vec<(u8, u8, String)>) {
