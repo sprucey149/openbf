@@ -33,7 +33,8 @@ impl Rounds {
     /// next tick's read finds it. Its
     /// [`key`](crate::bolt_vis::key) is stable for the whole flight and its
     /// own (the launch line and the ctor's waver phases), so it is matched on
-    /// that alone — one trail per missile, not one per tick of its curve.
+    /// that alone — one trail per missile, not one per tick of its curve or
+    /// waver (#133).
     fn bolt_ids(&mut self, sim: &Sim) -> Vec<u64> {
         let mut previous: HashMap<_, VecDeque<u64>> = HashMap::new();
         let mut steering: HashMap<crate::bolt_vis::Key, VecDeque<u64>> = HashMap::new();
@@ -562,8 +563,11 @@ mod tests {
         o.kind = core::weapon::OrdKind::Missile;
         o.velocity = 40.0;
         o.life_span = 4.0;
+        // A positive waver advances the phases every tick (#133).
         o.missile = Some(core::missile::MissileClass {
             turn_rate: 2.0,
+            waver_rate: 0.5,
+            waver_turn: 0.5,
             ..core::missile::MissileClass::default()
         });
         let wc = sim.add_weapon_class(w);
@@ -590,6 +594,7 @@ mod tests {
         let mc = *ord.missile.as_ref().unwrap();
         bolt.as_missile(&ord, &mc, None, &mut sim.lcg);
         let start = bolt.vel;
+        let phases = bolt.missile.unwrap().phases;
         sim.bolts = vec![bolt];
         let mut rounds = Rounds::default();
         let mut first: Option<Vec<u64>> = None;
@@ -619,6 +624,11 @@ mod tests {
                 .angle_between(start.normalize())
                 > 0.1,
             "the fixture did turn"
+        );
+        assert_ne!(
+            sim.bolts[0].missile.unwrap().phases,
+            phases,
+            "the fixture did waver"
         );
     }
 }

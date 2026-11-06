@@ -88,6 +88,7 @@ pub(crate) type Key = (
 /// its end point and its velocity for its whole flight; a missile steers, so
 /// both are new every tick and it is known instead by what its launch fixed:
 /// the line it left on and the two waver phases the class ctor drew for it
+/// (`launch_phases`; the live ones advance every tick of waver, #133)
 /// (`Missile::launch`, card UORD — an index-free id no other round shares,
 /// and the same fields its replay state carries). Two rounds of one class
 /// from one launcher therefore stay two rounds, however they curve.
@@ -97,8 +98,8 @@ pub(crate) fn key(b: &core::projectile::Bolt) -> Key {
         Some(m) => (
             bits(m.launch),
             [
-                m.phases[0].to_bits(),
-                m.phases[1].to_bits(),
+                m.launch_phases[0].to_bits(),
+                m.launch_phases[1].to_bits(),
                 m.top.to_bits(),
             ],
         ),
