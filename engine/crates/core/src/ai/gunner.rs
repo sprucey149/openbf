@@ -73,7 +73,7 @@ pub(super) fn aim(
     let (Some(s), Some(u)) = (sim.seat_look(me), sim.unit(me)) else {
         return None;
     };
-    let w = s.gun.weapons.first()?;
+    let w = pilot_channel(sim, u, &s)?;
     let wc = &sim.weapon_classes[w.class];
     let skill = sim.skill_of(u);
     let tier = sim.unit_tier(u);
@@ -204,7 +204,7 @@ pub(super) fn free_fire(sim: &Sim, me: UnitHandle, st: &mut AiState, pad: &mut P
     let (Some(s), Some(u)) = (sim.seat_look(me), sim.unit(me)) else {
         return;
     };
-    let Some(w) = s.gun.weapons.first() else {
+    let Some(w) = pilot_channel(sim, u, &s) else {
         return;
     };
     if human_friend_on_nose(sim, u.team, s.muzzle, s.rot * glam::Vec3::Z) {
@@ -221,6 +221,27 @@ pub(super) fn free_fire(sim: &Sim, me: UnitHandle, st: &mut AiState, pad: &mut P
         }
     } else if st.burst > 0 && sim.tick >= st.pause_until {
         pad.buttons |= buttons::FIRE;
+    }
+}
+
+fn pilot_channel<'a>(
+    sim: &Sim,
+    u: &crate::unit::Unit,
+    s: &'a crate::sim::SeatLook,
+) -> Option<&'a crate::vehicle::gun::GunWeapon> {
+    let channel = s
+        .gun
+        .pilot
+        .then(|| u.mount.and_then(|m| sim.vehicle(m.vehicle)))
+        .flatten()
+        .map_or(0, |v| usize::from(v.flyer.ai.channel));
+    s.gun.weapons.get(channel).or(s.gun.weapons.first())
+}
+
+pub(super) fn friend_on_nose(sim: &Sim, me: UnitHandle) -> bool {
+    match (sim.seat_look(me), sim.unit(me)) {
+        (Some(s), Some(u)) => human_friend_on_nose(sim, u.team, s.muzzle, s.rot * glam::Vec3::Z),
+        _ => false,
     }
 }
 
@@ -247,7 +268,7 @@ fn led_flyer(sim: &Sim, eye: glam::Vec3, e: &crate::unit::Unit, speed: f32) -> O
     Some(lead_point(centre - eye, v.vel, speed).map_or(centre, |rel| eye + rel))
 }
 
-fn flyer_on_target(nose: glam::Vec3, to: glam::Vec3) -> bool {
+pub(super) fn flyer_on_target(nose: glam::Vec3, to: glam::Vec3) -> bool {
     let d2 = to.length_squared();
     if nose.dot(to.normalize_or_zero()) <= fmath::sin_cos(FLYER_AIM_CONE).1 {
         return false;

@@ -124,6 +124,7 @@ pub fn install_collision(sim: &mut Sim, m: &Manifest, map_dir: &Path, db: &Class
                             },
                             local,
                             scale: effect.scale,
+                            inherit: effect.inherit_velocity,
                         })
                     })
                     .collect();

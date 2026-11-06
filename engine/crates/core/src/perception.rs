@@ -447,7 +447,7 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
         .is_some_and(|v| v.kind == crate::vehicle::VehicleKind::Flyer);
     for (_, v) in sim.alive_vehicles() {
         let flyer = v.kind == crate::vehicle::VehicleKind::Flyer;
-        if (!flyer && !pilot) || v.is_empty() {
+        if (!flyer && !pilot) || v.is_empty() || !v.health.alive() {
             continue;
         }
         let radius = sim

@@ -505,6 +505,9 @@ impl Sim {
         let eye = unit.muzzle();
         let mut best: Option<(f32, VehicleHandle, u8)> = None;
         for (vh, v) in self.alive_vehicles() {
+            if v.kind == VehicleKind::Flyer && !v.health.alive() {
+                continue;
+            }
             let Some(setup) = self
                 .seat_setup
                 .get(v.class as usize)

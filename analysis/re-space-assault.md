@@ -824,17 +824,123 @@ not that a moving approach feels like the PS2's. There is no PS2 figure to set b
 
 ### What still differs
 
-- **The weapon channel.** K +0x84 is 0 or 1, and no bolt comes out on channel 1. Sampled time on channel 1: A-wing 35%, X-wing 46%, Y-wing 45%, bomber 12%,
-  TIE fighter 100% and interceptor 0% (one sample each, those last two). Flips fall on think boundaries, and channel 1's trigger word reads pressed while the
-  bit is on, so secondaries appear to be fired. The writer was not found: greps of +0x84 and +0x2f4 led only to `FUN_0027c650`, an animator. `trace:` the
-  writer. The port's pilots always use primary, which is why it fires about twice the PS2's bolts, and bot secondaries are not fired at all. No rule was
-  invented for it.
+- **The weapon channel.** Traced and ported: section 18. An earlier version of this note said no bolt comes out on channel 1 and left it unexplained. That was
+  a fault of the probe, which counted bolts only: channel 1 holds missiles and bombs.
 - Per class on the PS2, shots per second (per second of burst): X-wing 0.83 (1.69), Y-wing 0.28 (0.65), A-wing 1.53 (3.2), TIE fighter 1.48 (3.27), bomber
   0.52 (0.95), interceptor 3.49 (8.72, one flyer). Port, on spa8: X-wing 1.93, Y-wing 0.64, A-wing 3.69, bomber 0.66, TIE fighter and interceptor about 3.8.
 - **Deaths** are half the PS2's rate (10 against 19.3 per minute). `measure:` hit rate on free-burst bolts.
 - **Other seats.** 2 PS2 soldiers sit at remote terminals (vtable +0x14 0x62b298) and 5 in seat objects (0x620050). The port has no remote terminals and about 0-2 gunners,
   so 8-12 stay on foot against 4.3.
-- **Bots shooting systems directly** (`Foe::Building`): at most 7% of PS2 shots have any AI target, so this is a small share, but it is not ported. Bigturret beams
+- **Bots shooting systems directly** (`Foe::Building`): the 7% above counted bolts only, so it understated pilots with targets (section 18). Plain buildings are about 4% of
+  held targets on the PS2 and are not ported as pilot targets. Bigturret beams
   (`spa1_weap_imp_shipturret`, AITargetBuilding only) need station targets the port lacks.
 - **Think level** by distance to the human is not modelled for flyers or turrets, and this may be most of what the maintainer feels near the enemy ship. `measure:` a PS2
   round with a live human pilot near the destroyer. Nothing here measured that.
+
+## 18. Pilot targets, weapon channel, damage effects and the crash (2026-11-06)
+
+Everything here is spa8, PS2 from a private PCSX2 copy over PINE with no human flying, about 12 minutes into the round. The port is seed 7. Function and line numbers are
+from `SWBFRNT2.ELF-decomp.c`.
+
+### The PC reconstruction as a reference
+
+`Gametoast/swbf2decomp` is a named C++ reconstruction of the Steam PC build, with no license file. It is a map, not an authority and not a source to copy: names found there were
+each checked in the PS2 decompilation or the running PS2 before use, and the PS2 wins any difference. "PC" below means that repository's `src/Battlefront2/Source`. It found the channel
+writer, which earlier greps had missed, and it names what `FUN_002a3c28` is (`AIDifficulty.cpp` `SpaceAssault_CheatLikeABastard`).
+
+### Who writes the channel
+
+`FUN_002bbf00` (lines 230493-230494) and `FUN_002bbed0` (line 230393) write K +0x84, from `FUN_002ab590` (line 218646; PC `CombatUtil.cpp:792-930`, sSelectBestWeaponType). A target
+is picked first, then the weapon. `FUN_002aaba0` (PC sCauseDamage, `CombatUtil.cpp:749`) refuses a weapon whose AI target mask lacks the target's type, or that is overheated, and
+otherwise accepts it when ten seconds of its rate would take half the target's maximum health, or against a soft target by ordnance kind. Heavy ordnance is reserved per target
+(`FUN_002ab430`, `FUN_002e0160`, `FUN_002e0338`, `FUN_002e03e0`) for ten seconds. Inside the weapon's AI range the rules prefer plenty of ammo, then damage. Port: `core/src/ai/flyer_weapons.rs`.
+
+PS2 by class, 90 s, 13773 sweeps, flyers in state 2:
+
+| Class | Mean count | On channel 1 | No target | Armed or other building | Flyer | Fire bit | Ammo changes ch0/ch1 |
+|---|---|---|---|---|---|---|---|
+| 0x199b200 | 4 | .56 | .69 | .31 | 0 | .48 | 6/37 |
+| 0x19b22c0 | 3 | .48 | .71 | .29 | 0 | .47 | 1/17 |
+| 0x19e0d70 | 2.5 | .49 | .80 | .20 | 0 | .49 | 2/33 |
+| 0x1a006f0 | 3 | .15 | .88 | .12 | 0 | .49 | 2/19 |
+| 0x1a12160 | 3.4 | .65 | .90 | .05 | .05 | .46 | 1/37 |
+| 0x1a23b50 | 1 | 0 | 1.0 | 0 | 0 | .47 | none |
+
+Held non-flyer targets are armed buildings (vtable 0x61a470, 41125 samples) and plain buildings (0x619a78, 1657). There were 38 channel changes in 90 s. So pilots mostly hold turrets, which
+selects torpedoes, missiles and bombs. The channel stays after the target goes, and the free burst of section 17 then fires the secondary at nothing.
+
+Port with 24 bots, 150 s (`OPENBF_MEASURE_CREW=24 OPENBF_MEASURE_SECONDS=150`, `pilots_turn_on_armed_buildings_and_fire_their_secondaries`). About 10.6 ships fly in this test against 17.8 on the PS2, so it is not the full-crew round, which has about 19 flying and whose channel share is not measured:
+
+| | PS2 | Port |
+|---|---|---|
+| Time on channel 1 | about .46 | .09 |
+| Holding a building | about .17 | .05 |
+| Holding a flyer | about .01 | .02 |
+
+`measure:` the port is well short. The likely cause is flight, not the choice: the PS2's pilots spend more time near enemy hulls (see deaths below). PC gives flyers a strafe attack pattern
+(`CombatUtil.cpp:1380`, STATE_FLY_STRAFE) whose body is not in the repository. `trace:` it in the PS2 before porting. No tuning was added to close the gap.
+
+Marked for replacement in `flyer_weapons.rs`:
+
+- OURS, `measure:`: the 4 s think grid is shared with the free burst (`THINK`, `THINK_STEP`). The PS2's period follows its think level.
+- OURS, `replace:`: `RAYS` 2 and the ranking by nearest. The PS2 ranks through the threat table, uniform for these turrets, before its ray checks (PC `VisionManager.cpp:155-260`, `UnitThreatManager.cpp:55`).
+- `trace:` the flyer rule for threats ahead, weapon index 2 and up, and plain buildings or critical systems as pilot targets.
+
+The first timer of section 17 is resolved: PC `EntityFlyer.cpp:185` sets the fire timer to 10.0 in the constructor, matching the 10.00 first read live.
+
+### Damage effects
+
+Each flyer class holds up to ten `DamageEffect` slots, later rows dropped. `FUN_001e0c98` runs on a change of health: at or below zero it clears the alive bit, and below 0.0001 or dead it stops all
+slots. Otherwise a slot is live when `fraction < start + 0.0001` and, if stop is above zero, `fraction >= stop - 0.0001`. A slot that leaves its band stops, and one entering starts, with `FUN_00376d98` giving
+scale and `FUN_00376e10` inherited velocity. PC `Damageable.cpp:633-735`. Port: `game/src/fx/vehicle_damage.rs`, on a change of health only, with the corrected `DamageEffect::active` in `core/src/autoturret.rs`.
+Effects follow the hull's hardpoint, or the hull origin when the attach name is missing (`game/src/vehicle_pads.rs`). On spa8 all 8 classes resolve all their slots (6 to 10 each).
+
+X-wing as authored, kept slots: sparks at 85-25, 75-15, 65-5, 55-5; smoke at 75-35, 65-25, 55-15, 45-5; flame at 35-0.1 and 25-. Fractions are percent of hull.
+
+`trace:` the PS2 reader of emitter +0x1c, where `FUN_00376e10` and `FUN_00377a10` store inherited velocity. The port adds it to the effect's own value, following PC `ParticleSpawner.cpp:112`.
+
+### The crash
+
+`FUN_00202d08` (lines 116891-116926; PC `EntityFlyer.cpp:3822-3861`), once the alive bit is off:
+
+- State 5, or state 0 (parked): pay the kill if the craft has a damager (`FUN_00269a08`), throw the chunk cluster (`FUN_00213630`), kill it, and raise class +0xedc, `ExplosionDestruct`.
+- Any other state except 4: raise class +0xed8, `ExplosionCritical`, set health 0 (`FUN_001df3d8`), enter state 4. The timer is `rand*2 + 0.2` if the class has chunks (`FUN_00215f80`), else 600.
+
+State 4's motion is lines 118135-118285 (PC 4520-4577): angular velocity filtered and scaled by lift, velocity toward cruise, gravity times `1 - lift`, a spin from forward x velocity / 64, and a random spin each step.
+At timer end the state is 5. Lift falls in `case 4`, lines 117315-117320. Roll target 4 pi, with class +0xe20 `TrickRollSpeed` (default 1, lines 123680, 124866; X-wing 6), lines 119059-119132. The pilot stays seated throughout.
+
+Contact in state 4 or by a lethal collision sets state 5 and instant death (`FUN_00200f80`; PC 2991, 5033). A craft abandoned in takeoff or flight gets health 0, state 4 and 0.5 s (lines 116237-116261; PC 3437-3462), unless class +0x1208 bit 0, `NeverCrashWhenUnpiloted` (lines 124034-124046), set only on `uta_fly_ride_gunship*`.
+
+Port: `FlightPhase::Crashed`, `core/src/vehicle/flyer.rs`, `damage_vehicle_by` and `flyer_starts_crash` in `core/src/sim/vehicles.rs`, `fly_flyers`, `core/src/sim/flyer_contact.rs`. BF1 is unchanged.
+
+A dying craft is left out of these, each with a PC check: lock targets (`LockOnManager.cpp:637`), reticle pick (`PlayerController.cpp:579`), the seated crosshair (`EntityFlyer.cpp:191`), boarding (`EntitySoldier.cpp:3507`), and vision (`perception.rs`, `self_turrets.rs`, `turrets.rs`).
+
+`ExplosionCritical` is authored on no regular BF2 ship (guided rockets, the AAT, the snail tank and recoilless turrets only), so no flyer shows a separate blast at the start of its crash.
+
+`trace:` or `measure:`:
+
+- The death camera detach (0.25) during a crash is not ported.
+- PC's `Weapon.cpp` has no alive test and the cannon's only stops sounds, so firing isn't blocked in the sim. A bot's trigger stops because the drive branch is for flying. `measure:` whether a dying PS2 pilot's bit stays up.
+
+### How ships die
+
+PS2, 180 s from one save, sampled at about 5000 sweeps per second, so no state is missed. A second run from the same save replayed the same deaths at the same times, so this is one timeline, not two samples.
+
+| Death | Count | Per minute | How it reads |
+|---|---|---|---|
+| Shot down: state 2 to 4, then 5 | 3 | 1 | timers .60, 1.85, 2.11 against `rand*2 + .2` |
+| Collision: 2 to 5, health below 0 | 8 | 2.7 | -64 to -17439, often near full health before |
+| Instant death: 2 to 5, health exactly 0, usually full before | 8 | 2.7 | open space, far from hulls |
+
+All eight collisions are close to enemy hull objects: four within about 100 m of `imp_cap1_comms` and the bridge, two beside `imp_frig3`, one by `imp_cap1_tur4`, one by `imp_cap1_sensor`. Most instant deaths fit the unseen kill above, which needs a human, so `--no-human` rounds have none. Three of them fall at one point near (-1570, 600, 3430), outside the `mapbounds` box and about 1500 m from any object, which a random pick would not explain. PC `UnitFlyAgent.cpp:277` also kills a pilot's craft outright when its low level reports stuck. `trace:` that rule in the PS2 and whether those three are it. The port has no such kill.
+
+Port, seed 7, idle human, 600 s (`--space-report`): 111 shot, 0 crashed, 11 unseen; about 11, 0 and 1.1 per minute. In the 150 s suite run, 19 deaths: 6 credited to a flyer, 13 with no soldier credited (building turrets have none).
+
+Hull lost on flying ships, 150 s, excluding the killing blow: PS2 8.2 per flyer per second (0.60 drops per second across 17.8 flyers), and 95% of flying time is spent in the top fifth of the hull. Port with 24 bots, 150 s: 42.7.
+
+`measure:` the two rates that differ most. Shot-down is about ten times the PS2's, hull damage about five times, and collisions are zero against 2.7 per minute. A part of the first is the moment: the PS2 save has 12-14 live turrets and the port has about 25, at about twice the rate per turret
+(section 17, nearest-target selection). Collisions may share a cause with the channel gap: the PS2's pilots fly close to hulls and the port's do not. Neither was tuned.
+
+The four suite failures present at this point (`hud_layout::the_squad_cross_is_where_the_ps2_frames_have_it`, `squad_vehicle_maps::move_out_and_at_ease_reach_real_waiting_pilots_once_per_press`, `roster::aim_sizes_are_the_baked_models_boxes`,
+`roster::fill_classes_keep_the_v0_fixtures`) also failed at commit `62c94571`. They are about HUD label position, squad orders and baked class data. They were not run on a tree without that commit.
+

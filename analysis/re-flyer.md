@@ -68,7 +68,9 @@ state 4 must not be interpreted as immediate destruction.
   positional snap in this state branch (B1:85703–85793, B2:117919–117980).
 - Falling: lift decreases by `.2*dt`. Gravity increases as lift disappears:
   vertical velocity receives `-9.8*(1-f)*dt`. The original also adds tumble,
-  random angular disturbances and damage-dependent death timing.
+  random angular disturbances and damage-dependent death timing. BF2's whole
+  sequence is ported: `re-space-assault.md` section 18. BF1 keeps the plain fall
+  and immediate destruction: no 600 s timer was found in B1 (`trace:` its branch).
 
 Throttle `t` is in [-1,1]. Its target speed is `Mid + t*(Max-Mid)` for
 nonnegative input, and `Mid - t*(Min-Mid)` for negative input. Thus neutral

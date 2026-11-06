@@ -58,6 +58,7 @@ mod sky;
 mod storm;
 mod trail;
 mod turret;
+mod vehicle_damage;
 mod water_contact;
 
 use crate::walk::WalkSim;
@@ -402,6 +403,7 @@ pub struct LiveEffect {
     jet: Option<UnitHandle>,
     turret: Option<(u64, usize)>,
     station: Option<(usize, usize)>,
+    vehicle: Option<(VehicleHandle, usize)>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
 }
@@ -445,6 +447,7 @@ impl LiveEffect {
             jet: None,
             turret: None,
             station: None,
+            vehicle: None,
             burn: None,
             float: None,
         };
@@ -683,6 +686,7 @@ fn splash_at(pos: Vec3, level: f32) -> Vec3 {
 /// puffs. `ingest` once per sim tick, `update` once per rendered frame.
 #[derive(Default)]
 pub struct Fx {
+    vehicle_health: Vec<Option<(u32, f32)>>,
     puffs: Vec<Puff>,
     library: Option<Library>,
     live: Vec<LiveEffect>,

@@ -347,6 +347,7 @@ pub struct Sim {
     /// Per vehicle CLASS, its death explosion and its blast sphere (card
     /// VDTH, `crate::vehicle::BlastSetup`); SETUP data, NOT hashed.
     pub blast_setup: Vec<Option<crate::vehicle::BlastSetup>>,
+    pub vehicle_damage_effects: Vec<Vec<super::stations::StationDamageEffect>>,
     /// Per vehicle CLASS, issue #35: the cutter's slice time, s (BF2
     /// `TimeRequiredToEject`, `analysis/re-build-zones.md` §11); 0 or
     /// missing = never sliced. SETUP data, NOT hashed.
@@ -983,6 +984,7 @@ impl Sim {
             walker_params: Vec::new(),
             seat_setup: Vec::new(),
             blast_setup: Vec::new(),
+            vehicle_damage_effects: Vec::new(),
             slice_time: Vec::new(),
             hull_parts: Vec::new(),
             bolts: Vec::new(),

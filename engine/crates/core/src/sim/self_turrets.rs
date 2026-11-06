@@ -154,7 +154,7 @@ impl Sim {
             Aim::Vehicle(vh) => {
                 let v = self
                     .vehicle(vh)
-                    .filter(|v| v.alive && v.team.is_some_and(|t| t != team))?;
+                    .filter(|v| v.alive && v.health.alive() && v.team.is_some_and(|t| t != team))?;
                 (self.vehicle_blast_sphere(v).0, Some(vh), v.instance)
             }
         };

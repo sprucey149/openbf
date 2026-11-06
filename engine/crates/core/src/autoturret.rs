@@ -104,7 +104,7 @@ pub struct DamageEffect {
 
 impl DamageEffect {
     pub fn active(&self, fraction: f32) -> bool {
-        fraction <= self.start && fraction > self.stop
+        fraction < self.start + 0.0001 && (self.stop <= 0.0 || fraction >= self.stop - 0.0001)
     }
 }
 

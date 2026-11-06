@@ -23,6 +23,7 @@ use crate::collision::{CollisionWorld, HullFilter, Layers, Shape};
 use crate::heightfield::Heightfield;
 use crate::unit::SOLDIER_RADIUS;
 use crate::unit::{Controller, UnitHandle};
+use crate::vehicle::flyer::FlightPhase;
 use crate::vehicle::hover::{self, Contact, ContactSource, HullBody, HullShape};
 use crate::vehicle::walker::{self, WalkerState, WalkerWorld};
 use crate::vehicle::{
@@ -492,6 +493,14 @@ impl Sim {
     ) -> f32 {
         let ff = self.friendly_fire_scale;
         let tick = self.tick;
+        let crashes = self.vehicle(h).is_some_and(|v| {
+            v.kind == VehicleKind::Flyer
+                && self
+                    .flyer_params
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|p| p.bf2)
+        });
         let Some(v) = self.vehicle_mut(h) else {
             return 0.0;
         };
@@ -507,17 +516,45 @@ impl Sim {
         if let (Some(u), VehicleKind::Turret) = (shooter, v.kind) {
             v.last_hit = Some((u, tick));
         }
+        if crashes {
+            v.flyer.damager = shooter;
+        }
         let killed = !v.health.alive();
+        let in_flight = crashes
+            && matches!(
+                v.flyer.phase,
+                FlightPhase::Takeoff | FlightPhase::Flying | FlightPhase::Landing
+            );
         self.events.push(Event::VehicleHit {
             shooter,
             vehicle: h,
             damage,
             dir,
         });
-        if killed {
+        if killed && in_flight {
+            self.flyer_starts_crash(h);
+        } else if killed {
             self.destroy_vehicle(h, shooter);
         }
         damage
+    }
+
+    fn flyer_starts_crash(&mut self, h: VehicleHandle) {
+        let has_chunks = self.vehicle(h).is_some_and(|v| {
+            self.flyer_params
+                .get(v.class as usize)
+                .and_then(Option::as_ref)
+                .is_some_and(|p| p.has_chunks)
+        });
+        let timer = if has_chunks {
+            self.lcg.unit() * 2.0 + 0.2
+        } else {
+            600.0
+        };
+        if let Some(v) = self.vehicle_mut(h) {
+            v.flyer.phase = FlightPhase::Falling;
+            v.flyer.crash_timer = timer;
+        }
     }
 
     /// A hull contact (re-vehicles §3.2 item 10): the class's threshold and

@@ -622,6 +622,10 @@ pub fn install_with_objective(
         .map(|(i, c)| {
             vehicle_class::FlyerClass::from_db(&db, c, game == "bf2").map(|f| {
                 core::vehicle::flyer::FlyerParams {
+                    never_crash: vehicle_class::prop_flag(&db, c, "NeverCrashWhenUnpiloted"),
+                    trick_roll_speed: vehicle_class::prop_float(&db, c, "TrickRollSpeed")
+                        .unwrap_or(1.0),
+                    has_chunks: vehicle_class::has_chunks(&db, c),
                     view_fov: vehicle_class::seats(&db, c)
                         .first()
                         .and_then(|s| s.third_person_fov)
@@ -674,6 +678,37 @@ pub fn install_with_objective(
         setups.push(Some(blast_setup(&db, c, sphr)));
     }
     sim.blast_setup = setups;
+    let damage_nodes = hardpoints_from(m, &sides);
+    sim.vehicle_damage_effects =
+        b.classes
+            .iter()
+            .map(|c| {
+                let nodes = damage_nodes.get(&c.to_ascii_lowercase());
+                vehicle_class::damage_effects(&db, c)
+                    .into_iter()
+                    .map(|effect| {
+                        let node = effect.attach.as_deref().and_then(|name| {
+                            nodes?.iter().find(|h| h.name.eq_ignore_ascii_case(name))
+                        });
+                        core::sim::StationDamageEffect {
+                            local: node.map_or(glam::Mat4::IDENTITY, |h| {
+                                crate::viewer::instance_matrix(
+                                    h.axes.unwrap_or(glam::Mat3::IDENTITY.to_cols_array_2d()),
+                                    h.pos,
+                                )
+                            }),
+                            scale: effect.scale,
+                            inherit: effect.inherit_velocity,
+                            band: core::autoturret::DamageEffect {
+                                start: effect.start,
+                                stop: effect.stop,
+                                effect: effect.effect,
+                            },
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
     // Issue #35: each class's slice time.
     sim.slice_time = b
         .classes

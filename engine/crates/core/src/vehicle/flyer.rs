@@ -14,6 +14,9 @@ use glam::{Quat, Vec3};
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlyerParams {
     pub bf2: bool,
+    pub never_crash: bool,
+    pub trick_roll_speed: f32,
+    pub has_chunks: bool,
     pub view_fov: f32,
     pub acceleration: f32,
     pub min_speed: f32,
@@ -105,6 +108,9 @@ impl Default for FlyerParams {
     fn default() -> Self {
         Self {
             bf2: false,
+            never_crash: false,
+            trick_roll_speed: 1.0,
+            has_chunks: false,
             view_fov: 48.0,
             acceleration: 5.0,
             min_speed: 10.0,
@@ -182,9 +188,8 @@ pub enum FlightPhase {
     Takeoff,
     Flying,
     Landing,
-    /// Abandoning a moving flyer enters this too; it is not synonymous
-    /// with destruction. An occupied, living flyer can recover to Takeoff.
     Falling,
+    Crashed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -207,6 +212,10 @@ pub struct FlyerState {
     /// Seconds left of the countdown outside the map's boundary (`Sim::tick_flyers`,
     /// `re-boundary.md`), `None` inside. The PS2 keeps it on the crew's team member.
     pub leaving: Option<f32>,
+    pub crash_timer: f32,
+    pub crash_roll: f32,
+    pub crash_roll_target: f32,
+    pub damager: Option<crate::unit::UnitHandle>,
     /// The AI pilot's flight state (`ai::flyer_drive`). Default unless a bot
     /// is flying it, so it adds no bytes to any other flyer's hash.
     pub ai: FlyerAi,
@@ -272,6 +281,9 @@ pub struct PathCursor {
 /// fields drive [`spline_step`], which writes the pose as the PS2 does.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FlyerAi {
+    pub channel: u8,
+    pub armed_target: Option<super::VehicleHandle>,
+    pub heavy_claim: Option<(super::VehicleHandle, u64)>,
     pub agent: FlyAgent,
     /// BF1 travel goal; BF2 temporary loiter center (flyer_drive::loiter).
     pub goal: Option<Vec3>,
@@ -329,6 +341,18 @@ impl FlyerAi {
         }
         if self.fire_held {
             eat(&[1]);
+        }
+        if self.channel != 0 {
+            eat(&[self.channel]);
+        }
+        if let Some(t) = self.armed_target {
+            eat(&t.index.to_le_bytes());
+            eat(&t.gen.to_le_bytes());
+        }
+        if let Some((t, until)) = self.heavy_claim {
+            eat(&t.index.to_le_bytes());
+            eat(&t.gen.to_le_bytes());
+            eat(&until.to_le_bytes());
         }
         for x in self.anchor.to_array() {
             eat(&x.to_bits().to_le_bytes());
@@ -392,6 +416,10 @@ impl Default for FlyerState {
             level_time: 0.0,
             initialized: false,
             leaving: None,
+            crash_timer: 0.0,
+            crash_roll: 0.0,
+            crash_roll_target: 0.0,
+            damager: None,
             ai: FlyerAi::default(),
         }
     }
@@ -428,6 +456,15 @@ impl FlyerState {
         if let Some(t) = self.leaving {
             eat(&t.to_bits().to_le_bytes());
         }
+        if self.phase == FlightPhase::Falling || self.phase == FlightPhase::Crashed {
+            for value in [self.crash_timer, self.crash_roll, self.crash_roll_target] {
+                eat(&value.to_bits().to_le_bytes());
+            }
+        }
+        if let Some(d) = self.damager {
+            eat(&d.index.to_le_bytes());
+            eat(&d.gen.to_le_bytes());
+        }
         self.ai.hash_into(eat);
     }
 }
@@ -451,6 +488,8 @@ pub struct FlyerEnvironment {
     /// BF2 maps which register landing regions permit the toggle only in
     /// one. Maps without any registered region retain unrestricted landing.
     pub require_landing_region: bool,
+    pub player_aboard: bool,
+    pub crash_random: [f32; 4],
 }
 
 impl Default for FlyerEnvironment {
@@ -460,6 +499,8 @@ impl Default for FlyerEnvironment {
             min_height: -200.0,
             max_height: 200.0,
             in_landing_region: false,
+            player_aboard: false,
+            crash_random: [0.0; 4],
             require_landing_region: false,
         }
     }
@@ -511,6 +552,29 @@ pub fn rest_height(landed_height: f32) -> f32 {
     }
 }
 
+pub const ABANDONED_CRASH_TIME: f32 = 0.5;
+const CRASH_VELOCITY_SPIN: f32 = 0.015625;
+
+fn crash_spin(s: &mut FlyerState, p: &FlyerParams, sign: f32, dt: f32) {
+    use std::f32::consts::{PI, TAU};
+    if s.crash_roll_target == 0.0 {
+        s.crash_roll_target = if sign < 0.5 { 2.0 * TAU } else { -2.0 * TAU };
+    }
+    if s.crash_roll_target > 0.0 {
+        s.crash_roll += p.trick_roll_speed * dt;
+        if s.crash_roll > PI {
+            s.crash_roll -= TAU;
+            s.tilt_roll -= TAU;
+        }
+    } else {
+        s.crash_roll -= p.trick_roll_speed * dt;
+        if s.crash_roll < -PI {
+            s.crash_roll += TAU;
+            s.tilt_roll += TAU;
+        }
+    }
+}
+
 /// State machine and free-flight integration. `v.input` uses the same
 /// pad convention as hover: pitch and turn write negative local x/y rates.
 /// The contact response runs separately; a sweep is not original hull parity.
@@ -518,8 +582,21 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     if !v.alive || dt <= 0.0 {
         return;
     }
+    if v.flyer.phase == FlightPhase::Crashed {
+        return;
+    }
     let occupied = !v.is_empty();
+    let has_pilot = v.has_pilot();
     let input = v.input;
+    if p.bf2
+        && !p.never_crash
+        && matches!(v.flyer.phase, FlightPhase::Takeoff | FlightPhase::Flying)
+        && (!occupied || (!has_pilot && !env.player_aboard))
+    {
+        v.health.cur = 0.0;
+        v.flyer.phase = FlightPhase::Falling;
+        v.flyer.crash_timer = ABANDONED_CRASH_TIME;
+    }
     let s = &mut v.flyer;
     let toggle = input.jump && !s.jump_was_down;
     s.jump_was_down = input.jump;
@@ -539,10 +616,12 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         }
     }
 
-    if matches!(s.phase, FlightPhase::Takeoff | FlightPhase::Flying) && !occupied {
-        s.phase = FlightPhase::Falling;
-    } else if s.phase == FlightPhase::Falling && occupied {
-        s.phase = FlightPhase::Takeoff;
+    if !p.bf2 {
+        if matches!(s.phase, FlightPhase::Takeoff | FlightPhase::Flying) && !occupied {
+            s.phase = FlightPhase::Falling;
+        } else if s.phase == FlightPhase::Falling && occupied {
+            s.phase = FlightPhase::Takeoff;
+        }
     }
     match s.phase {
         FlightPhase::Landed => {
@@ -597,6 +676,7 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             }
         }
         FlightPhase::Falling => s.lift = (s.lift - dt * 0.2).max(0.0),
+        FlightPhase::Crashed => {}
     }
     if s.phase == FlightPhase::Landed {
         v.vel = Vec3::ZERO;
@@ -753,6 +833,29 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             let vertical = Vec3::Y * vertical * (height_factor * 0.875 + 0.125);
             v.vel = vertical + (cruise_velocity - vertical) * s.lift;
         }
+        FlightPhase::Falling if p.bf2 => {
+            crash_spin(s, p, env.crash_random[3], dt);
+            let free = 1.0 - s.lift;
+            if v.vel.x * v.vel.x + v.vel.z * v.vel.z > 1.0 {
+                s.omega.x -= p.level_filter * up.dot(v.vel.normalize()) * free;
+                let blend = (p.pitch_filter * s.lift * dt).min(1.0);
+                s.omega.x += (pitch_target * 0.5 - s.omega.x) * blend;
+            }
+            let blend = (p.turn_filter * s.lift * dt).min(1.0);
+            s.omega.y += (turn_target * 0.5 - s.omega.y) * blend;
+            let blend = (p.level_filter * (s.lift * 0.75 + 0.25) * dt).min(1.0);
+            v.vel += (cruise_velocity - v.vel) * blend;
+            v.vel.y -= 9.8 * free * dt;
+            s.omega += forward.cross(v.vel) * CRASH_VELOCITY_SPIN * free * dt;
+            let [a, b, c, _] = env.crash_random;
+            s.omega.x += (a - 0.5) * 0.25 + forward.y * 0.0625 + 0.0625;
+            s.omega.y += (b - 0.5) * 0.25;
+            s.omega.z += (c - 0.5) * 0.5;
+            s.crash_timer -= dt;
+            if s.crash_timer < 0.0 {
+                s.phase = FlightPhase::Crashed;
+            }
+        }
         FlightPhase::Falling => {
             // The original's uncontrolled fall also adds global-RNG tumble
             // and class-dependent death timers. Those are not transcribed;
@@ -762,7 +865,7 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             v.vel.y -= 9.8 * (1.0 - s.lift) * dt;
             s.omega *= (1.0 - p.level_filter * dt * 0.25).max(0.0);
         }
-        FlightPhase::Landed => unreachable!(),
+        FlightPhase::Landed | FlightPhase::Crashed => unreachable!(),
     }
     let local_velocity = frame.conjugate() * v.vel;
     // BF1 uses MaxSpeed; BF2 uses max(MaxSpeed, BoostSpeed) even outside
@@ -780,8 +883,11 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     };
     let bank_acceleration = s.omega.cross(local_velocity) / bank_divisor.max(f32::MIN_POSITIVE);
     let pitch_tilt = throttle * p.thrust_pitch_angle * s.lift + bank_acceleration.z * p.bank_angle;
-    let roll_tilt =
-        input.strafe * p.strafe_roll_angle * s.lift - bank_acceleration.x * p.bank_angle;
+    let roll_tilt = if p.bf2 && matches!(s.phase, FlightPhase::Falling | FlightPhase::Crashed) {
+        s.crash_roll - bank_acceleration.x * p.bank_angle
+    } else {
+        input.strafe * p.strafe_roll_angle * s.lift - bank_acceleration.x * p.bank_angle
+    };
     s.tilt_pitch += (pitch_tilt - s.tilt_pitch) * p.bank_filter * dt;
     s.tilt_roll += (roll_tilt - s.tilt_roll) * p.bank_filter * dt;
     let angular_speed = s.omega.length();
