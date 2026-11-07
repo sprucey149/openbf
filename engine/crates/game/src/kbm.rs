@@ -9,6 +9,51 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{CursorGrabMode, Window};
 
 pub const RAD_PER_COUNT: f64 = 0.0006;
+pub const FLYER_COUNTS_PER_SECOND_AT_FULL: f64 = 2048.0;
+const FLYER_HOLD_AFTER: f64 = 0.1;
+const FLYER_HOLD_FROM: f64 = 1.0;
+const FLYER_RATE_TOP: f64 = 1.1;
+const FLYER_STICK_CANCEL: f32 = 0.4;
+const FLYER_READ_SECONDS: f64 = 1.0 / core::TICK_HZ as f64;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct HeldRate {
+    rate: f64,
+    moving_for: f64,
+}
+
+impl HeldRate {
+    fn after(self, input: f64, dt: f64, top: f64) -> Self {
+        let held = self.rate.abs() > FLYER_HOLD_FROM;
+        let opposed = self.rate * input < 0.0;
+        let (rate, moving_for) = if !held {
+            (input, 0.0)
+        } else if opposed {
+            let left = self.rate + input * 2.0;
+            if left * self.rate > 0.0 {
+                (left, self.moving_for + dt)
+            } else {
+                (0.0, 0.0)
+            }
+        } else {
+            let moving_for = self.moving_for + dt;
+            let hold = moving_for > FLYER_HOLD_AFTER && input.abs() < self.rate.abs();
+            (if hold { self.rate } else { input }, moving_for)
+        };
+        HeldRate {
+            rate: rate.clamp(-top, top),
+            moving_for,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct FlyerMouse {
+    axes: [HeldRate; 2],
+    counts: (f64, f64),
+    last_read: (f64, f64),
+    next: Option<([HeldRate; 2], (f64, f64))>,
+}
 pub const SENSITIVITY_RANGE: (f32, f32) = ui::menu::MOUSE_SENSITIVITY_RANGE;
 pub const KEY_ESCAPE: u32 = 128;
 pub const KEY_ENTER: u32 = 256;
@@ -273,6 +318,7 @@ pub struct Kbm {
     mouse_aim: bool,
     want_grab: bool,
     grabbed: bool,
+    flyer: FlyerMouse,
 }
 
 impl Default for Kbm {
@@ -288,6 +334,7 @@ impl Default for Kbm {
             mouse_aim: false,
             want_grab: false,
             grabbed: false,
+            flyer: FlyerMouse::default(),
         }
     }
 }
@@ -376,6 +423,8 @@ impl Kbm {
         let up = if self.invert_y { dy } else { -dy };
         self.pending.0 += dx * k;
         self.pending.1 += up * k;
+        self.flyer.counts.0 += dx;
+        self.flyer.counts.1 += up;
         if dx != 0.0 || dy != 0.0 {
             self.mouse_aim = true;
         }
@@ -412,6 +461,48 @@ impl Kbm {
     }
 
     pub fn pad(&mut self, pad: PadState) -> PadState {
+        self.flyer = FlyerMouse::default();
+        self.merge(pad)
+    }
+
+    pub fn flyer_pad(&mut self, pad: PadState) -> PadState {
+        self.pending = (0.0, 0.0);
+        let cancel = PadState::axis(pad.rx).abs() > FLYER_STICK_CANCEL
+            || PadState::axis(pad.ry).abs() > FLYER_STICK_CANCEL;
+        if cancel || !self.grabbed {
+            self.flyer.axes = [HeldRate::default(); 2];
+        }
+        let moved = self.flyer.counts != (0.0, 0.0);
+        let read = if moved {
+            self.flyer.counts
+        } else {
+            self.flyer.last_read
+        };
+        let last_read = if moved { self.flyer.counts } else { (0.0, 0.0) };
+        let scale = f64::from(self.sensitivity) / FLYER_COUNTS_PER_SECOND_AT_FULL;
+        let top = FLYER_RATE_TOP / scale.max(f64::MIN_POSITIVE);
+        let step = |axis: HeldRate, counts: f64| {
+            axis.after(counts / FLYER_READ_SECONDS, FLYER_READ_SECONDS, top)
+        };
+        let axes = [
+            step(self.flyer.axes[0], read.0),
+            step(self.flyer.axes[1], read.1),
+        ];
+        self.flyer.next = Some((axes, last_read));
+        let stick = |rate: f64, held: i16| {
+            let mine = (rate * scale) as f32;
+            if PadState::axis(held).abs() > mine.abs() {
+                held
+            } else {
+                PadState::quantize(mine)
+            }
+        };
+        let (rx, ry) = (stick(axes[0].rate, pad.rx), stick(axes[1].rate, pad.ry));
+        let merged = self.merge(pad);
+        PadState { rx, ry, ..merged }
+    }
+
+    fn merge(&mut self, pad: PadState) -> PadState {
         if pad.rx != 0 || pad.ry != 0 {
             self.mouse_aim = false;
         }
@@ -446,6 +537,11 @@ impl Kbm {
         }
         self.pending.0 -= f64::from(pad.mx) * f64::from(LOOK_UNIT);
         self.pending.1 -= f64::from(pad.my) * f64::from(LOOK_UNIT);
+        if let Some((axes, last_read)) = self.flyer.next.take() {
+            self.flyer.axes = axes;
+            self.flyer.last_read = last_read;
+            self.flyer.counts = (0.0, 0.0);
+        }
         self.taps = 0;
         self.pick = None;
     }
@@ -514,6 +610,7 @@ impl Kbm {
 
     fn clear_grab(&mut self) {
         self.pending = (0.0, 0.0);
+        self.flyer = FlyerMouse::default();
         self.grabbed = false;
     }
 

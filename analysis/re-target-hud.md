@@ -275,9 +275,15 @@ one caller (the damage function) and the countdown. Corpus B2 (grep only).
   a bot's under Hard has none (the level-3 gate). `game::event_feed` keeps the viewer's sniper-on-head and
   rocket-on-vehicle ones as the 0.5 s timer and the relation colour (enemy red, friend blue, white for an empty
   vehicle of no side); `ui::hud::feed` sends `hitColor` + `hitCritical` every frame it runs; the layout element does
-  the hold / sustain / fade. Splash never counts (the blast path's factor is 1, as on the PS2). The plain `hit` flash
-  (the three arcs) is not sent: pictures of it for the maintainer's call, enemy red after a body hit, unscoped on BF2 Kamino and
+  the hold / sustain / fade. Splash never counts (the blast path's factor is 1, as on the PS2). Superseded below for the plain flash: the plain `hit` flash
+  (the three arcs) was not sent at the time: pictures of it for the maintainer's call, enemy red after a body hit, unscoped on BF2 Kamino and
   BF1 Tatooine beside the claws, from the ignored suite test `sniper_scope::hit_arc_pictures`
   (`engine/artifacts/lead_tmp/hitmark/arc_*.png`; `HudView::send` puts the event past the model). To follow the
   PS2 fully: send `hit` for every damaging hit and `hitCritical` for every factor > 1 regardless of weapon (one
   predicate, `critical_mark` in `event_feed`).
+
+### 12a. The plain flash on ships and stations (2026-11-06)
+
+The maintainer showed the PS2's flyer reticle with the three arcs lit and asked for them. `HudModel::hit_body` lit them only for enemy soldiers and auto-turrets, so a pilot never saw them. `Sim::damage_vehicle_by` and `Sim::damage_station` now raise `Event::HitLanded { shooter, team }` when a credited hit lowered the health or the shield pool, which is the PS2's own test (`FUN_001dfb38` B2:91334, 91380, 91482-91484). `game::event_feed` turns it into the flash, in the victim's relation colour: enemy red, friend blue, a non-zero neutral team yellow, no team white. The 0.5 s timer and 0.33 s hold are unchanged.
+
+Still different from section 12's PS2 rule, by the maintainer's earlier calls: a team-mate soldier lights nothing, and the critical claws stay limited to the sniper and rocket cases. The PS2 keeps a timer per relation and prefers friend over enemy colour, the port keeps only the last hit (`trace:` the order in `FUN_003b3398` B2:410434-410467 if it ever shows).

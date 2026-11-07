@@ -364,6 +364,7 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             Event::Impact { .. } => continue,
             // HUD-only (the reticle mark); the hit line records the hit.
             Event::CriticalHit { .. } => continue,
+            Event::HitLanded { .. } => continue,
             Event::Despawn { unit } => format!("{tick},despawn,{},,\n", unit.index),
             Event::Respawn { unit } => format!("{tick},respawn,{},,\n", unit.index),
             Event::Reload { unit, .. } => format!("{tick},reload,{},,\n", unit.index),

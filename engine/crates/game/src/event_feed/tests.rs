@@ -471,6 +471,26 @@ fn an_enemy_body_hit_lights_the_plain_flash() {
 }
 
 #[test]
+fn a_hit_on_a_ship_or_a_ships_system_lights_the_flash_in_its_relation_colour() {
+    use ui::hud::target_color as color;
+    let mut s = scene();
+    let (me, rebel) = (s.me, s.rebels[0]);
+    let foe = s.sim.units[rebel.index as usize].team;
+    let mine = s.sim.units[me.index as usize].team;
+    let landed = |shooter, team| Event::HitLanded { shooter, team };
+    happen(&mut s, &[landed(rebel, Some(mine))]);
+    assert_eq!(s.feed.hit_body(s.sim.tick), None, "a bot's hit");
+    happen(&mut s, &[landed(me, Some(foe))]);
+    let at = s.sim.tick;
+    assert_eq!(s.feed.hit_body(at), Some(color::ENEMY));
+    assert_eq!(s.feed.hit_body(at + HIT_TIMER_TICKS), None, "0.5 s");
+    happen(&mut s, &[landed(me, Some(mine))]);
+    assert_eq!(s.feed.hit_body(s.sim.tick), Some(color::FRIEND));
+    happen(&mut s, &[landed(me, None)]);
+    assert_eq!(s.feed.hit_body(s.sim.tick), Some(color::NONE));
+}
+
+#[test]
 fn a_sniper_headshot_lights_the_critical_mark() {
     let mut s = scene();
     let (me, mate, rebel) = (s.me, s.mate, s.rebels[0]);
