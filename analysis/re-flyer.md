@@ -176,8 +176,23 @@ reader `FUN_0034a7e8`, functions 18..21) hold the same swap in the third. Static
 reading only: [H] BF1's third section is the flyer's by analogy with BF2, its
 selector not opened. `input::flyer_sticks` applies it to the controller for a pilot
 in a flyer; the keyboard and mouse keep walk keys for throttle and roll and the
-mouse for pitch and turn. The PS2's options screen can change the table. The port has
+mouse for pitch and turn (held rate below). The PS2's options screen can change the table. The port has
 no such option yet.
+
+### The mouse in a flyer: the PC's held rate (2026-11-06)
+
+The PS2 has no mouse. The maintainer reports the PC game keeps a ship turning once the mouse has moved, until it comes back. That is the PC's mouse turn assist, in `RawControllerInputs::ReadLatest` (PC 0x00414b80, `Platform/Pc/pcFLJoystick.cpp:748-835` of `Gametoast/swbf2decomp`, a reconstruction, not audited against retail). There is no screen cursor: the rule works on the mouse's rate.
+
+- Counts per second become a stick: full deflection at 2048 counts per second, times the sensitivity.
+- A read with no motion straight after one with motion repeats that one, once.
+- A rate on an axis, once moving for over 0.1 s, does not fall: a slower or absent input leaves it as it is, a faster one raises it.
+- Input against the rate takes off twice its own rate. When that would cross zero, the axis stops at 0 and the 0.1 s starts over. Going on past that steers the other way.
+- The rate is limited to 1.1 of full deflection, and the axis to 1.
+- A controller axis past .4 clears it (`pcFLJoystick.cpp:986-1020`).
+
+The hold starts above 1 count per second in input mode 2, a plane (`PlayerController.cpp:208-212`). Hover vehicles and walkers (mode 1) and turrets (mode 4) get the same rule above 1000 counts per second. The port applies it to a flyer's pilot only, as the maintainer asked. `replace:` the other two modes are not ported.
+
+The port runs it in `game/src/kbm.rs` (`HeldRate`, `Kbm::flyer_pad`), outside the sim, and hands the sim ordinary sticks in `rx` and `ry`, with `mx` and `my` left 0, so a recorded round replays as before. `measure:` two things can differ from the PC. The PC reads at its frame rate and the port at the 30 Hz tick, and "twice its own rate" depends on that read rate, so a faster PC stops the turn with less mouse travel. And the PC's assist can be turned off in its options (`ScriptCB_SetMouseTurnAssist`), where the port has no such option. The PC also defaults to a flipped mouse pitch for planes (`mFlip`, `pcFLJoystick.cpp:350`); the port keeps its single invert-Y setting.
 
 Pilot aim follows the **untilted aircraft forward**, not an independently
 accumulated pitch. BF1 `FUN_001dbbd8` and BF2 `FUN_00209758` remove the

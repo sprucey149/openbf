@@ -365,7 +365,7 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   - Keyboard + mouse (2026-10-25, the public repo's pull request #1) is supported as a
     deliberate deviation. Controller play is unchanged. The mouse aims by angle (`PadState::mx`/`my`,
     `core/src/sim/look.rs`), under pointer lock, without aim assist; the bindings are one table in `game/src/kbm.rs`.
-    Sensitivity and invert-Y are profile settings.
+    Sensitivity and invert-Y are profile settings. A flyer's pilot is the exception: the mouse reaches the sim as ordinary sticks, by the PC's held rate (`re-flyer.md`).
   - The keyboard + mouse rules (moved from `AGENTS.md`, 2026-11-02):
     Keyboard and mouse play is a deliberate deviation from the PS2's controller-only input. Controller play, bots and
     controller-only replays must stay bit-identical. The rules:

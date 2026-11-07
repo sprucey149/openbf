@@ -354,6 +354,10 @@ pub enum Event {
         vel: Vec3,
         killer: Option<UnitHandle>,
     },
+    HitLanded {
+        shooter: UnitHandle,
+        team: Option<u8>,
+    },
     StationDestroyed {
         station: u16,
         class: u8,

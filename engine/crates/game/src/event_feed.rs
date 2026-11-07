@@ -414,7 +414,7 @@ pub struct EventFeed {
     critical: Option<(u64, [u8; 3])>,
     /// The tick of the viewer's last body hit on an enemy
     /// ([`EventFeed::hit_body`]).
-    body: Option<u64>,
+    body: Option<(u64, [u8; 3])>,
     /// What was said lately, and when (the one-line rule).
     recent: Vec<(String, u64)>,
     /// The tick whose events were already read.
@@ -813,8 +813,7 @@ impl EventFeed {
                         .get(victim.index as usize)
                         .is_some_and(|u| u.gen == victim.gen && sim.hostile(my_team, u.team)) =>
                 {
-                    // The plain hit flash: any enemy body hit ([ours]).
-                    self.body = Some(tick);
+                    self.body = Some((tick, ui::hud::target_color::ENEMY));
                     if damage > 0.0 {
                         self.battle.hits = self.battle.hits.saturating_add(1);
                     }
@@ -926,7 +925,17 @@ impl EventFeed {
                 // The plain hit flash on an enemy's auto-turret too (the PS2's
                 // hit call takes any victim of enemy relation, B2 `FUN_001e0580`).
                 Event::TurretHit { shooter, team, .. } if shooter == viewer && team != my_team => {
-                    self.body = Some(tick);
+                    self.body = Some((tick, ui::hud::target_color::ENEMY));
+                }
+                Event::HitLanded { shooter, team } if shooter == viewer => {
+                    use ui::hud::target_color as color;
+                    let hue = match team {
+                        None => color::NONE,
+                        Some(t) if sim.allied(my_team, t) => color::FRIEND,
+                        Some(t) if sim.hostile(my_team, t) => color::ENEMY,
+                        Some(_) => color::NEUTRAL,
+                    };
+                    self.body = Some((tick, hue));
                 }
                 Event::VehicleDestroyed {
                     vehicle,
@@ -1075,8 +1084,8 @@ impl EventFeed {
     /// else `None`. The HUD sends the critical mark instead while one runs.
     pub fn hit_body(&self, tick: u64) -> Option<[u8; 3]> {
         self.body
-            .filter(|&at| tick.saturating_sub(at) < HIT_TIMER_TICKS)
-            .map(|_| ui::hud::target_color::ENEMY)
+            .filter(|&(at, _)| tick.saturating_sub(at) < HIT_TIMER_TICKS)
+            .map(|(_, hue)| hue)
     }
 
     /// Local damage overlay, on the simulation clock and scoped to this life.

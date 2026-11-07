@@ -244,9 +244,14 @@ impl Sim {
             return;
         }
         let friendly = s.team.is_some() && s.team == team;
+        let pool = (s.health.cur, s.health.shield);
         s.health
             .take_damage(desc, scale, friendly, self.friendly_fire_scale);
         let alive = s.health.alive();
+        if let Some(shooter) = attacker.filter(|_| pool != (s.health.cur, s.health.shield)) {
+            let team = s.team;
+            self.events.push(Event::HitLanded { shooter, team });
+        }
         self.space_station_damaged(station);
         if alive || self.stations[usize::from(station)].destroyed {
             return;

@@ -511,7 +511,10 @@ impl Sim {
             return 0.0;
         }
         let friendly = team.is_some() && v.team == team;
+        let pool = (v.health.cur, v.health.shield);
         let damage = v.health.take_damage(desc, multiplier, friendly, ff);
+        let landed = pool != (v.health.cur, v.health.shield);
+        let victim_team = v.team;
         // Card TURR: a turret's gunner reads who hit it (`ai::man`).
         if let (Some(u), VehicleKind::Turret) = (shooter, v.kind) {
             v.last_hit = Some((u, tick));
@@ -531,6 +534,12 @@ impl Sim {
             damage,
             dir,
         });
+        if let Some(shooter) = shooter.filter(|_| landed) {
+            self.events.push(Event::HitLanded {
+                shooter,
+                team: victim_team,
+            });
+        }
         if killed && in_flight {
             self.flyer_starts_crash(h);
         } else if killed {

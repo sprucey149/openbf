@@ -477,3 +477,130 @@ fn a_screen_pick_waits_for_a_tick_like_a_tap() {
     k.drop_taps();
     assert_eq!(k.pad(PadState::default()).pick, None, "paused: dropped");
 }
+
+fn flying() -> Kbm {
+    let mut k = Kbm::default();
+    k.click_in();
+    let _ = k.sync_grab_with(true, |_| Ok::<(), ()>(()));
+    assert!(k.grabbed());
+    k
+}
+
+fn flown_tick(k: &mut Kbm, dx: f64, dy: f64) -> PadState {
+    k.motion(dx, dy);
+    let pad = k.flyer_pad(PadState::default());
+    k.consumed(&pad, 1);
+    pad
+}
+
+#[test]
+fn a_flyer_keeps_steering_after_a_held_mouse_move_stops() {
+    let mut k = flying();
+    let mut pad = PadState::default();
+    for _ in 0..6 {
+        pad = flown_tick(&mut k, 34.0, 0.0);
+    }
+    let moving = PadState::axis(pad.rx);
+    assert!((moving - 0.498).abs() < 0.001, "{moving}");
+    assert_eq!((pad.mx, pad.my), (0, 0), "no look delta in flight");
+    for _ in 0..300 {
+        pad = flown_tick(&mut k, 0.0, 0.0);
+    }
+    assert_eq!(PadState::axis(pad.rx), moving, "still steering 10 s later");
+    assert_eq!(pad.ry, 0);
+}
+
+#[test]
+fn a_short_flick_does_not_hold() {
+    let mut k = flying();
+    let first = flown_tick(&mut k, 34.0, 0.0);
+    assert!(first.rx > 0);
+    let echo = flown_tick(&mut k, 0.0, 0.0);
+    assert_eq!(echo.rx, first.rx, "a quiet read repeats the last move once");
+    assert_eq!(flown_tick(&mut k, 0.0, 0.0).rx, 0);
+    assert_eq!(flown_tick(&mut k, 0.0, 0.0).rx, 0);
+}
+
+#[test]
+fn moving_back_cancels_the_held_steering() {
+    let mut k = flying();
+    for _ in 0..6 {
+        flown_tick(&mut k, 34.0, 0.0);
+    }
+    flown_tick(&mut k, 0.0, 0.0);
+    let eased = flown_tick(&mut k, -4.0, 0.0);
+    let held = PadState::axis(flown_tick(&mut k, 0.0, 0.0).rx);
+    assert!(held > 0.0 && held < 0.498, "{held} after {}", eased.rx);
+    for _ in 0..3 {
+        flown_tick(&mut k, -4.0, 0.0);
+    }
+    flown_tick(&mut k, 0.0, 0.0);
+    assert_eq!(flown_tick(&mut k, 0.0, 0.0).rx, 0, "back at rest");
+    for _ in 0..6 {
+        flown_tick(&mut k, -4.0, 0.0);
+    }
+    let reversed = flown_tick(&mut k, 0.0, 0.0).rx;
+    assert!(reversed < 0, "going on past rest steers the other way");
+    assert_eq!(flown_tick(&mut k, 0.0, 0.0).rx, reversed);
+}
+
+#[test]
+fn steering_tops_out_and_follows_sensitivity_and_invert() {
+    let mut k = flying();
+    let mut pad = PadState::default();
+    for _ in 0..6 {
+        pad = flown_tick(&mut k, 200.0, -20.0);
+    }
+    assert_eq!(PadState::axis(pad.rx), 1.0);
+    assert!(pad.ry > 0, "the mouse pushed away raises the stick");
+    let mut k = flying();
+    k.invert_y = true;
+    assert!(flown_tick(&mut k, 0.0, -20.0).ry < 0);
+    let mut k = flying();
+    k.sensitivity = 2.0;
+    let pad = flown_tick(&mut k, 34.0, 0.0);
+    assert!((PadState::axis(pad.rx) - 0.996).abs() < 0.002);
+}
+
+#[test]
+fn leaving_the_seat_or_losing_the_pointer_or_a_firm_stick_lets_go() {
+    let mut k = flying();
+    for _ in 0..6 {
+        flown_tick(&mut k, 34.0, 0.0);
+    }
+    assert_eq!(k.pad(PadState::default()).rx, 0);
+    assert_eq!(
+        flown_tick(&mut k, 0.0, 0.0).rx,
+        0,
+        "on foot resets the hold"
+    );
+    for _ in 0..6 {
+        flown_tick(&mut k, 34.0, 0.0);
+    }
+    let stick = PadState {
+        rx: PadState::quantize(-0.5),
+        ..PadState::default()
+    };
+    let pad = k.flyer_pad(stick);
+    k.consumed(&pad, 1);
+    assert_eq!(pad.rx, stick.rx);
+    k.motion(0.0, 0.0);
+    flown_tick(&mut k, 0.0, 0.0);
+    assert_eq!(flown_tick(&mut k, 0.0, 0.0).rx, 0, "the stick cancels it");
+    for _ in 0..6 {
+        flown_tick(&mut k, 34.0, 0.0);
+    }
+    k.clear_grab();
+    assert_eq!(flown_tick(&mut k, 0.0, 0.0).rx, 0, "pointer released");
+}
+
+#[test]
+fn a_frame_without_a_tick_does_not_spend_the_mouse_move() {
+    let mut k = flying();
+    k.motion(34.0, 0.0);
+    let preview = k.flyer_pad(PadState::default());
+    k.consumed(&preview, 0);
+    k.motion(34.0, 0.0);
+    let pad = k.flyer_pad(PadState::default());
+    assert_eq!(pad.rx, PadState::quantize((68.0 * 30.0 / 2048.0) as f32));
+}

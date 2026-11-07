@@ -275,11 +275,11 @@ impl winit::application::ApplicationHandler for App {
                                     .walk
                                     .as_ref()
                                     .is_some_and(|(w, _)| w.player_pilots_flyer());
-                                self.kbm.pad(if flying {
-                                    input::flyer_sticks(pad)
+                                if flying {
+                                    self.kbm.flyer_pad(input::flyer_sticks(pad))
                                 } else {
-                                    pad
-                                })
+                                    self.kbm.pad(pad)
+                                }
                             }
                         };
                         self.sprint_latch.apply(pad, on_foot, sprinting)

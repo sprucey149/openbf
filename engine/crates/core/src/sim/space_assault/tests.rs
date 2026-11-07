@@ -97,6 +97,26 @@ fn shields_refill_at_their_add_rate_up_to_the_pool() {
 }
 
 #[test]
+fn a_hit_on_a_station_tells_its_shooter_even_when_the_shield_takes_it() {
+    let mut w = world(180);
+    let killer = soldier(&mut w.sim, 0);
+    let landed = |sim: &Sim| {
+        sim.events
+            .iter()
+            .filter(|e| matches!(e, Event::HitLanded { shooter, .. } if *shooter == killer))
+            .count()
+    };
+    let shielded = w.ship[1];
+    assert!(w.sim.stations[usize::from(shielded)].health.shield > 0.0);
+    w.sim
+        .damage_station(shielded, &desc(150.0), 1.0, Some(killer), Some(0));
+    assert_eq!(landed(&w.sim), 1);
+    w.sim
+        .damage_station(shielded, &desc(150.0), 1.0, None, Some(0));
+    assert_eq!(landed(&w.sim), 1, "no shooter to tell");
+}
+
+#[test]
 fn killing_the_generator_collapses_the_shields_at_once_and_stops_the_refill() {
     let mut w = world(180);
     let killer = soldier(&mut w.sim, 0);
