@@ -73,6 +73,7 @@ mod round;
 mod saber;
 mod saber_throw;
 mod seats;
+mod pilot_threats;
 mod self_turrets;
 mod space_assault;
 mod space_balance;

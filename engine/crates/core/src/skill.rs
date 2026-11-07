@@ -478,6 +478,7 @@ pub struct Skill {
     /// ([`Tier::err_cap`]). The flyer cap `max(0, lerp(4.0, 1.2))` has no
     /// input in the port (no flyer targets).
     pub err_cap: f32,
+    pub err_cap_flyer: f32,
     /// Burst-length fraction: `n = max(2, min + U(0, max − min)·t)`
     /// (RE §4.1 `FUN_002a2c90`, §4.4 `FUN_002bac98`).
     pub burst_t: f32,
@@ -525,6 +526,7 @@ impl Skill {
             // "1 m below skill 12, then 0" rows with it; both are wrong.
             err_floor: lerp(1.6, 0.4).max(0.0),
             err_cap: lerp(2.2, 1.2).max(0.0),
+            err_cap_flyer: lerp(4.0, 1.2).max(0.0),
             burst_t: t,
             pause_mult: 1.5 - 0.8 * t,
             tap_x: (1.0 - lerp(0.1, 0.9)).max(0.0),

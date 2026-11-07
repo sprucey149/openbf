@@ -505,6 +505,10 @@ A craft with no clear route holds with no curve and retries each tick. A class n
 
 Flight contact and pilot rays read `Layers::VEHICLE`, so a hangar field no longer refuses a route.
 
+## Space rounds: pilot targets and side roll (2026-11-06)
+
+A space pilot's target comes from the threat law (`FUN_002b94a0`, `FUN_002b9d10`; `core/src/sim/pilot_threats.rs`), with a target behind the nose dropped at the next think. Pilots also side-roll (`FUN_0020b840`) and repair (`FUN_002f5478`). Evidence and numbers: `re-space-assault.md` §19. `replace:` other rounds keep `flyer_weapons.rs::think`.
+
 ## Space rounds: boarding and unseen combat (2026-11-05, issue 122)
 
 `re-space-assault.md` §15. In a space round a bot claims a flyer within 50 m with no post, as `FUN_002e2e38` tells it to; before

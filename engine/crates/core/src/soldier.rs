@@ -72,6 +72,7 @@ pub struct MotionTarget {
 /// game layer overrides from baked classes.ron via ClassDb).
 #[derive(Debug, Clone, Copy)]
 pub struct SoldierConstants {
+    pub pilot_skill: bool,
     /// Active weapon's per-tick movement output (BF2 vtable +0x6c).
     pub motion_target: Option<MotionTarget>,
     pub immune_to_mines: bool,
@@ -169,6 +170,7 @@ pub struct SoldierConstants {
 impl Default for SoldierConstants {
     fn default() -> Self {
         Self {
+            pilot_skill: false,
             motion_target: None,
             immune_to_mines: false,
             max_speed: 9.0,

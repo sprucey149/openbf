@@ -3,7 +3,7 @@ use crate::collision::HullFilter;
 use crate::perception::los_seat;
 use crate::sim::Sim;
 use crate::unit::UnitHandle;
-use crate::vehicle::flyer::{FlightPhase, FlyerAi};
+use crate::vehicle::flyer::{FlightPhase, FlyerAi, ThreatObject};
 use crate::vehicle::{Vehicle, VehicleHandle, VehicleKind};
 use crate::weapon::{OrdKind, WeaponClass, WeaponState};
 use glam::Vec3;
@@ -18,9 +18,10 @@ const STRONG_SECONDS: f32 = 10.0;
 const STRONG_SHARE: f32 = 0.5;
 const PLENTY: u32 = 2;
 const RAYS: usize = 2;
+const STATION_HANDLE: u32 = 0xffff_0000;
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct Foe {
+pub(crate) struct Foe {
     pub handle: VehicleHandle,
     pub kind: u32,
     pub max_health: f32,
@@ -94,12 +95,12 @@ pub(super) fn claims_on(sim: &Sim, target: VehicleHandle, team: u8, me: VehicleH
         .count()
 }
 
-pub(super) struct Choice {
+pub(crate) struct Choice {
     pub index: u8,
     pub claim: bool,
 }
 
-pub(super) fn choose(
+pub(crate) fn choose(
     sim: &Sim,
     v: &Vehicle,
     me: VehicleHandle,
@@ -187,6 +188,43 @@ struct Eyes {
     view_mult: f32,
 }
 
+pub(super) fn armed_point(sim: &Sim, ai: &FlyerAi) -> Option<Vec3> {
+    if let Some(s) = ai.armed_station {
+        let s = sim
+            .stations
+            .get(usize::from(s))
+            .filter(|s| !s.destroyed && s.health.alive())?;
+        return Some(s.sphere_centre);
+    }
+    let t = sim.vehicle(ai.armed_target?)?;
+    t.health.alive().then_some(t.pos)
+}
+
+pub(crate) fn object_foe(sim: &Sim, object: ThreatObject, eye: Vec3) -> Option<Foe> {
+    match object {
+        ThreatObject::Station(i) => {
+            let st = sim.stations.get(usize::from(i))?;
+            Some(Foe {
+                handle: VehicleHandle {
+                    index: STATION_HANDLE + u32::from(i),
+                    gen: 0,
+                },
+                kind: st.health.health_type as u32,
+                max_health: st.health.max,
+                speed_sq: 0.0,
+                d2: (st.sphere_centre - eye).length_squared(),
+                soft: true,
+                seats: 0,
+            })
+        }
+        ThreatObject::Vehicle(h) => {
+            let t = sim.vehicle(h)?;
+            let (centre, _) = sim.vehicle_blast_sphere(t);
+            Some(foe_of(h, t, (centre - eye).length_squared()))
+        }
+    }
+}
+
 fn armed_ahead(sim: &Sim, h: VehicleHandle, own: Option<u32>, e: &Eyes) -> Option<VehicleHandle> {
     let mut near: Vec<(f32, u64, VehicleHandle, Vec3, Option<u32>)> = Vec::new();
     for t in &sim.building_turrets {
@@ -242,7 +280,7 @@ pub(super) fn think(
         me,
         vehicle: v,
         handle: h,
-        seat,
+        ..
     } = *pilot;
     if !(sim.tick + u64::from(me.index) * THINK_STEP).is_multiple_of(THINK) {
         return;
@@ -275,12 +313,16 @@ pub(super) fn think(
     };
     let (centre, _) = sim.vehicle_blast_sphere(t);
     let foe = foe_of(target, t, (centre - s.eye).length_squared());
+    pick_weapon(sim, pilot, ai, &foe, burst);
+}
+
+fn pick_weapon(sim: &Sim, pilot: &Pilot, ai: &mut FlyerAi, foe: &Foe, burst: &mut u8) {
     let coin = sim.tick & 1 == 0;
-    let Some(pick) = choose(sim, v, h, seat, &foe, coin) else {
+    let Some(pick) = choose(sim, pilot.vehicle, pilot.handle, pilot.seat, foe, coin) else {
         return;
     };
     if pick.claim {
-        ai.heavy_claim = Some((target, sim.tick + CLAIM_TICKS));
+        ai.heavy_claim = Some((foe.handle, sim.tick + CLAIM_TICKS));
     }
     if pick.index != ai.channel {
         ai.channel = pick.index;
@@ -289,18 +331,59 @@ pub(super) fn think(
     }
 }
 
+pub(super) fn follow_threats(sim: &Sim, pilot: &Pilot, ai: &mut FlyerAi, burst: &mut u8) {
+    let threats = &pilot.vehicle.flyer.threats;
+    let object = threats.visible_object();
+    ai.armed_target = None;
+    ai.armed_station = None;
+    match object {
+        Some(ThreatObject::Vehicle(h)) => ai.armed_target = Some(h),
+        Some(ThreatObject::Station(i)) => ai.armed_station = Some(i),
+        None => {}
+    }
+    if ai.threat_thinks == threats.thinks {
+        return;
+    }
+    ai.threat_thinks = threats.thinks;
+    let Some(s) = sim.seat_look(pilot.me) else {
+        return;
+    };
+    if let Some(foe) = object.and_then(|o| object_foe(sim, o, s.eye)) {
+        pick_weapon(sim, pilot, ai, &foe, burst);
+    }
+}
+
 pub(super) fn armed_shot(sim: &Sim, me: UnitHandle, ai: &FlyerAi) -> bool {
-    let (Some(target), Some(s)) = (ai.armed_target, sim.seat_look(me)) else {
+    let Some(s) = sim.seat_look(me) else {
         return false;
     };
-    let Some(t) = sim.vehicle(target).filter(|t| t.health.alive()) else {
+    let at = if ai.armed_station.is_some() {
+        armed_point(sim, ai)
+    } else {
+        ai.armed_target
+            .and_then(|t| sim.vehicle(t))
+            .filter(|t| t.health.alive())
+            .map(|t| {
+                let centre = sim.vehicle_blast_sphere(t).0;
+                if t.kind == VehicleKind::Flyer {
+                    let speed = s.gun.weapons.get(usize::from(ai.channel)).map_or(0.0, |w| {
+                        sim.weapon_classes[w.class].shot_ordnance().velocity
+                    });
+                    crate::collision::lead_point(centre - s.eye, t.vel, speed)
+                        .map_or(centre, |rel| s.eye + rel)
+                } else {
+                    centre
+                }
+            })
+    };
+    let Some(at) = at else {
         return false;
     };
     let Some(w) = s.gun.weapons.get(usize::from(ai.channel)) else {
         return false;
     };
     let wc = &sim.weapon_classes[w.class];
-    let to = sim.vehicle_blast_sphere(t).0 - s.muzzle;
+    let to = at - s.muzzle;
     let d2 = to.length_squared();
     let [min, _, max] = wc.ai_range;
     min * min < d2 && d2 < max * max && super::gunner::flyer_on_target(s.rot * Vec3::Z, to)

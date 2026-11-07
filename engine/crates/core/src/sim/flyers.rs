@@ -4,8 +4,10 @@
 use super::Sim;
 use crate::collision::{HullFilter, Layers};
 use crate::vehicle::flyer::{self, FlightPhase, FlyerEnvironment, LandingSurface};
-use crate::vehicle::{VehicleHandle, VehicleKind};
+use crate::vehicle::{SeatKind, VehicleHandle, VehicleKind};
 use glam::Vec3;
+
+const PILOT_REPAIR_MIN_HEALTH: f32 = 1400.0;
 
 /// Mission inputs, separate from the soldier ceiling. Both bands default to
 /// −200..200 on PS2; the mission's four Set*FlyHeight calls replace them.
@@ -129,6 +131,9 @@ impl Sim {
                 self.destroy_vehicle(handle, killer);
                 continue;
             }
+            self.pilot_repair(i, dt);
+            self.start_side_roll(i);
+            let v = &self.vehicles[i];
             let crashing = v.flyer.phase == FlightPhase::Falling;
             let crash_random = if crashing {
                 [
@@ -170,10 +175,6 @@ impl Sim {
                 crash_random,
             };
             let row = super::flyer_contact::FlyerRow::of(p);
-            // BF2's ordinary AI flight writes the pose along its curve in
-            // the flying state (B2:117417). OURS: without the original's
-            // avoidance and hull response it takes no contact here.
-            // A human who took the seat flies it, whatever curve was left.
             if p.bf2
                 && !v.input.human
                 && v.flyer.phase == FlightPhase::Flying
@@ -183,11 +184,70 @@ impl Sim {
                 let ground_map = self.ground_flyer_map;
                 let p = p.clone();
                 flyer::spline_step(&mut self.vehicles[i], &p, ground_map, time, dt);
+                self.flyer_contact(i, handle, from, row);
                 continue;
             }
             flyer::step(&mut self.vehicles[i], p, env, dt);
             self.flyer_contact(i, handle, from, row);
         }
+    }
+
+    fn start_side_roll(&mut self, i: usize) {
+        let v = &mut self.vehicles[i];
+        let Some(side) = v.flyer.ai.trick.take() else {
+            return;
+        };
+        let Some(p) = self
+            .flyer_params
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+        else {
+            return;
+        };
+        let was = v.flyer.in_roll;
+        flyer::side_roll(&mut v.flyer, p, side);
+        if !was && v.flyer.in_roll {
+            if let Some(h) = v.seats.iter().find_map(|s| s.occupant) {
+                let floor = self
+                    .unit(h)
+                    .map_or(0.0, |u| self.enemy_skill_of(u.team).err_floor);
+                if let Some(u) = self.units.get_mut(h.index as usize) {
+                    u.aim.trick(floor);
+                }
+            }
+        }
+    }
+
+    fn pilot_repair(&mut self, i: usize, dt: f32) {
+        let v = &self.vehicles[i];
+        let Some(p) = self
+            .flyer_params
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+        else {
+            return;
+        };
+        if !p.bf2
+            || v.health.max <= PILOT_REPAIR_MIN_HEALTH
+            || v.health.cur <= 0.0
+            || v.health.cur >= v.health.max
+            || v.flyer.phase == FlightPhase::Falling
+        {
+            return;
+        }
+        let piloted = v
+            .seats
+            .first()
+            .filter(|s| s.kind == SeatKind::Pilot)
+            .and_then(|s| s.occupant)
+            .and_then(|o| self.unit(o))
+            .is_some_and(|u| u.spec.consts.pilot_skill);
+        if !piloted {
+            return;
+        }
+        let rate = v.health.max * p.pilot_repair_scale;
+        let health = &mut self.vehicles[i].health;
+        health.cur = (health.cur + rate * dt).min(health.max);
     }
 }
 
@@ -691,5 +751,34 @@ mod tests {
                 v.pos
             );
         }
+    }
+
+    fn repair_world(max: f32, skill: bool) -> (Sim, usize) {
+        let (mut sim, h) = world();
+        sim.flyer_params[0].as_mut().unwrap().bf2 = true;
+        sim.flyer_params[0].as_mut().unwrap().pilot_repair_scale = 0.005;
+        let pilot = sim.vehicle(h).unwrap().seats[0].occupant.unwrap();
+        sim.unit_mut(pilot).unwrap().spec.consts.pilot_skill = skill;
+        let v = sim.vehicle_mut(h).unwrap();
+        v.health.max = max;
+        v.health.cur = max / 2.0;
+        (sim, h.index as usize)
+    }
+
+    #[test]
+    fn a_pilot_mends_a_big_ship_at_the_class_rate() {
+        let (mut sim, i) = repair_world(2000.0, true);
+        sim.pilot_repair(i, 1.0);
+        assert_eq!(sim.vehicles[i].health.cur, 1010.0);
+    }
+
+    #[test]
+    fn a_soldier_or_a_small_ship_gets_no_pilot_repair() {
+        let (mut sim, i) = repair_world(2000.0, false);
+        sim.pilot_repair(i, 1.0);
+        assert_eq!(sim.vehicles[i].health.cur, 1000.0);
+        let (mut sim, i) = repair_world(PILOT_REPAIR_MIN_HEALTH, true);
+        sim.pilot_repair(i, 1.0);
+        assert_eq!(sim.vehicles[i].health.cur, PILOT_REPAIR_MIN_HEALTH / 2.0);
     }
 }

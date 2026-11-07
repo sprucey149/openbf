@@ -400,7 +400,7 @@ Entity fields (BF1): velocity v +0x5f0, angular velocity ω +0x600 (x, yaw, z), 
   RIDK, 2026-10-16; BF2 the same; live on BF1).
 - [V][O] **Collision damage:** §3.2 item 10 (hover); impact speed beyond CollisionThreshold, squared, × CollisionScale.
 - [V] **Repair:** `AddHealth` would regenerate (B1 FUN_001bbbe0 B1:64106) but no vehicle on either disc carries AddHealth
-  or shields. `com_item_vehiclerecharge` authors VehicleHealth 400 / PowerupDelay 1.0 (parsed B1 FUN_002aa820
+  or shields (the ODF key: a BF2 pilot-class unit does repair a big ship, `re-space-assault.md` §19). `com_item_vehiclerecharge` authors VehicleHealth 400 / PowerupDelay 1.0 (parsed B1 FUN_002aa820
   B1:236557, 236605) and the fusion cutter's weapon class parses VehicleHealth (B1 FUN_00292f60) — their runtime [H].
 
 ## 7. Vehicle spawn pads (Q4)

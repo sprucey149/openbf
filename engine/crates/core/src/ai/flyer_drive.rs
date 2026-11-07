@@ -775,6 +775,36 @@ fn seen_flyer<'a>(sim: &'a Sim, st: &AiState) -> Option<&'a Vehicle> {
         .filter(|v| v.kind == VehicleKind::Flyer && v.flyer.phase == FlightPhase::Flying)
 }
 
+fn side_roll_wanted(
+    sim: &Sim,
+    v: &Vehicle,
+    ai: &crate::vehicle::flyer::FlyerAi,
+    foe: Option<crate::vehicle::VehicleHandle>,
+) -> Option<Vec3> {
+    if v.flyer.in_roll || sim.ground_flyer_map {
+        return None;
+    }
+    let target = super::flyer_weapons::armed_point(sim, ai)
+        .or_else(|| foe.and_then(|f| sim.vehicle(f)).map(|t| t.pos))?;
+    let delta = target - v.pos;
+    let far = delta.length_squared();
+    if far >= SIDE_ROLL_REACH * SIDE_ROLL_REACH {
+        return None;
+    }
+    let nose = v.rot * Vec3::Z;
+    if far >= SIDE_ROLL_CLOSE * SIDE_ROLL_CLOSE
+        && nose.dot(delta.normalize_or_zero()) >= SIDE_ROLL_CONE
+    {
+        return None;
+    }
+    let side = delta - nose * nose.dot(delta);
+    Some(side.normalize_or_zero())
+}
+
+const SIDE_ROLL_REACH: f32 = 200.0;
+const SIDE_ROLL_CLOSE: f32 = 40.0;
+const SIDE_ROLL_CONE: f32 = 0.965925;
+
 pub(super) fn drive(
     sim: &Sim,
     me: UnitHandle,
@@ -794,6 +824,10 @@ pub(super) fn drive(
         return (pad, nt);
     };
     st.steer = SteerPick::Fwd;
+    let space = p.bf2 && sim.space_assault.is_some();
+    if space {
+        st.target = None;
+    }
     let aim = super::gunner::aim(sim, me, st, &mut pad, Look::Steering, None);
     let mut ai = v.flyer.ai;
     let mut out = [0.0; 4];
@@ -825,15 +859,31 @@ pub(super) fn drive(
                     handle: m.vehicle,
                     seat: usize::from(m.seat),
                 };
-                let foe = seen_flyer_handle(sim, st);
-                super::flyer_weapons::think(sim, &pilot, &mut ai, foe, &mut st.burst);
+                let foe = if space {
+                    super::flyer_weapons::follow_threats(sim, &pilot, &mut ai, &mut st.burst);
+                    None
+                } else {
+                    let foe = seen_flyer_handle(sim, st);
+                    super::flyer_weapons::think(sim, &pilot, &mut ai, foe, &mut st.burst);
+                    foe
+                };
                 free_fire = free_burst(sim, me, p, &mut ai);
                 if super::flyer_weapons::armed_shot(sim, me, &ai)
                     && !super::gunner::friend_on_nose(sim, me)
                 {
                     pad.buttons |= crate::sim::buttons::FIRE;
                 }
-                bf2_plan(sim, me, v, m.vehicle, p, &mut ai, seen_flyer(sim, st));
+                ai.trick = side_roll_wanted(sim, v, &ai, foe);
+                if !v.flyer.in_roll {
+                    let chase = if space {
+                        ai.armed_target.and_then(|t| sim.vehicle(t)).filter(|t| {
+                            t.kind == VehicleKind::Flyer && t.flyer.phase == FlightPhase::Flying
+                        })
+                    } else {
+                        seen_flyer(sim, st)
+                    };
+                    bf2_plan(sim, me, v, m.vehicle, p, &mut ai, chase);
+                }
             }
         }
         _ => out = bf1_sticks(sim, me, v, m.vehicle, p, &mut ai, aim),

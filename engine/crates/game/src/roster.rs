@@ -1107,6 +1107,7 @@ impl ClassRoster {
         }
         let first_person_weapon =
             first_person_weapon(weapon_db, &weapon_name, weapon.offhand_weapon);
+        consts.pilot_skill = unit_type.eq_ignore_ascii_case("pilot");
         let jet = consts.has_jet();
         Ok(ClassRoster {
             class: class.to_owned(),
