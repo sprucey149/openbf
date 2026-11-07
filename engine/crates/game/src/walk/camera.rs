@@ -4,10 +4,34 @@ use super::*;
 
 /// The death view hold time in seconds (SWBFRNT2.ELF line 333652: *(float *)(param_1 + 0x158) = 4.0f).
 pub const DEATH_VIEW_HOLD: f32 = 4.0;
+pub(super) const MEASURE_SEAT_TRANSITION_SECONDS_ON_PS2: f32 = 0.4;
 
 impl WalkSim {
     pub fn camera(&self) -> Camera {
-        self.camera_track().0
+        let target = self.camera_track().0;
+        if self.sim.controlled_guided(self.player).is_some() {
+            return target;
+        }
+        let Some((local_pos, local_rot, from_fov, elapsed, vehicle_handle)) = self.seat_transition else {
+            return target;
+        };
+        let Some(vehicle) = self.sim.vehicle(vehicle_handle) else {
+            return target;
+        };
+        let t = (elapsed / MEASURE_SEAT_TRANSITION_SECONDS_ON_PS2).clamp(0.0, 1.0);
+        let t = t * t * (3.0 - 2.0 * t);
+        let current_from_pos = vehicle.pos + vehicle.rot * local_pos;
+        let current_from_rot = vehicle.rot * local_rot;
+        let target_rot = Quat::from_rotation_y(target.yaw)
+            * Quat::from_rotation_x(target.pitch)
+            * Quat::from_rotation_z(target.roll);
+        let slerped_rot = current_from_rot.slerp(target_rot, t);
+        let lerped_pos = current_from_pos.lerp(target.position, t);
+        let lerped_fov = from_fov + (target.fov_y - from_fov) * t;
+        let mut cam = flyer_camera::camera_at(lerped_pos, slerped_rot, lerped_fov);
+        cam.near = target.near;
+        cam.far = target.far;
+        cam
     }
 
     /// The drawn camera, and for a camera the world pulls in, which one it
@@ -24,13 +48,13 @@ impl WalkSim {
         if let Some(b) = &self.backdrop {
             return (b.camera(), None);
         }
-        if let Some(view) = self.held_seat_view() {
-            return (view, None);
-        }
         if let Some(r) = self.sim.controlled_guided(self.player) {
             if let Some(c) = self.sim.guided_class(r) {
                 return (guided_camera(r, c, self.fov_y()), None);
             }
+        }
+        if let Some(view) = self.held_seat_view() {
+            return (view, None);
         }
         if let Some(got) = self.droid_camera() {
             return got;
@@ -69,7 +93,9 @@ impl WalkSim {
     pub(super) fn next_seat_view(&self) -> Option<Camera> {
         let me = self.sim.units.get(self.player.index as usize)?;
         if !me.alive {
-            return (self.seat_view_timer > 0.0).then_some(()).and(self.seat_view);
+            return (self.seat_view_timer > 0.0)
+                .then_some(())
+                .and(self.seat_view);
         }
         me.mount.is_some().then(|| self.camera())
     }
@@ -229,15 +255,16 @@ impl WalkSim {
     /// tan(fov_y / 2) of the half height above the centre, at any aspect.
     /// A rider's stays on the centre (the seat cameras are PROVISIONAL).
     pub fn reticle_y(&self) -> f32 {
+        if self.sim.controlled_guided(self.player).is_some() {
+            return 0.5;
+        }
         let me = &self.sim.units[self.player.index as usize];
         if let Some(look) = self.sim.seat_look(self.player) {
             let point = look.eye + look.view * 1024.0;
             let clip = self.camera().view_proj(1.0) * point.extend(1.0);
             return 0.5 - 0.5 * clip.y / clip.w;
         }
-        let (a, d) = if let Some(r) = self.sim.controlled_guided(self.player) {
-            (r.pos, r.forward())
-        } else if let Some(droid) = self.sim.controlled_droid(self.player) {
+        let (a, d) = if let Some(droid) = self.sim.controlled_droid(self.player) {
             (droid.muzzle(), droid.aim_frame().0)
         } else {
             me.aim_ray(self.sim.ground_rules, self.sim.views())
@@ -360,7 +387,13 @@ impl WalkSim {
         v: &core::vehicle::Vehicle,
         seat: Option<&crate::vehicle_class::SeatSpec>,
     ) -> Option<(Vec3, Camera)> {
-        if v.kind != core::vehicle::VehicleKind::Turret {
+        let gunner = self.sim.unit(self.player)?.mount?.seat != 0;
+        let framed = match v.kind {
+            core::vehicle::VehicleKind::Turret => true,
+            core::vehicle::VehicleKind::Flyer => gunner,
+            _ => false,
+        };
+        if !framed {
             return None;
         }
         let (seat, l) = (seat?, self.sim.seat_look(self.player)?);

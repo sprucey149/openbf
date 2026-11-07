@@ -92,6 +92,7 @@ pub(super) fn draw(
     eye: Vec3,
     forward: Vec3,
     zoom: f32,
+    bias: f32,
     assets: &mut dyn FxAssets,
     out: &mut Vec<ParticleDraw>,
 ) {
@@ -123,6 +124,6 @@ pub(super) fn draw(
             child_inst.update_path(child_em, now, false, |time| frame_at(&nodes, time));
             child_inst.rgba = parent.rgba;
         }
-        child.draws_with(eye, forward, zoom, assets, out);
+        child.draws_with_bias(eye, forward, zoom, bias, assets, out);
     }
 }

@@ -124,6 +124,7 @@ pub fn can_fly(sim: &Sim, v: &Vehicle) -> bool {
             .and_then(Option::as_ref)
             .is_some_and(|p| {
                 !p.bf2
+                    || sim.ctf.is_some()
                     || sim.flyer_paths.iter().any(|path| {
                         p.follower.class_id == 0
                             || path.classes.is_empty()
@@ -323,6 +324,35 @@ fn post_point(sim: &Sim, me: UnitHandle, salt: u32) -> Option<Vec3> {
     Some(sim.cps[k].def.pos + Vec3::Y * POST_CLEARANCE)
 }
 
+fn ctf_goal(sim: &Sim, me: UnitHandle) -> Option<Vec3> {
+    let ctf = sim.ctf.as_ref()?;
+    let my_team = sim.unit(me).map_or(0, |u| u.team);
+    for flag in &ctf.flags {
+        match flag.status {
+            crate::sim::FlagStatus::Carried { carrier } => {
+                if carrier == me {
+                    return ctf.capture_regions.get(my_team as usize).map(|r| r.pos);
+                }
+            }
+            crate::sim::FlagStatus::AtHome | crate::sim::FlagStatus::Dropped { .. } => {
+                return Some(flag.current_pos);
+            }
+        }
+    }
+    None
+}
+
+fn ctf_curve(v: &Vehicle, goal: Vec3) -> [Vec3; 4] {
+    let forward = v.rot * Vec3::Z;
+    let to = goal - v.pos;
+    let dist = to.length();
+    let step = dist.min(200.0);
+    let dir = if dist > 1e-3 { to / dist } else { forward };
+    let mid = v.pos + dir * (step * 0.5);
+    let end = v.pos + dir * step;
+    [v.pos - forward * CONNECT_BEHIND, v.pos, mid, end]
+}
+
 /// OURS: the goal of an attack run, or `None` to fly on. A run dips below the
 /// travel height, keeps [`ATTACK_FLOOR`] over the ground ahead, and ends at
 /// the reach the altitude law looks ahead, or the class's turning room. It holds
@@ -498,7 +528,9 @@ fn bf1_sticks(
         }
     }
     if ai.goal.is_none() {
-        ai.goal = post_point(sim, me, 1).or(Some(pos + forward * ESCAPE_FORWARD));
+        ai.goal = ctf_goal(sim, me)
+            .or_else(|| post_point(sim, me, 1))
+            .or(Some(pos + forward * ESCAPE_FORWARD));
     }
     let travel = ai.goal.unwrap_or(pos + forward * ESCAPE_FORWARD);
     // UNCONFIRMED: an explicit escape path takes no altitude lift or sidestep:
@@ -718,6 +750,18 @@ fn bf2_plan(
         ai.pursuit = true;
         return;
     }
+    if let Some(goal) = ctf_goal(sim, me) {
+        if ai.goal != Some(goal) {
+            let to = goal - v.pos;
+            if to.length_squared() > 15.0 * 15.0 {
+                ai.goal = Some(goal);
+                ai.curve = Some(ctf_curve(v, goal));
+                ai.cursor = None;
+                ai.t = 0.0;
+                return;
+            }
+        }
+    }
     if ai.curve.is_some() && ai.t < 1.0 {
         return;
     }
@@ -743,6 +787,16 @@ fn bf2_plan(
             return;
         }
         leave = Some(c.path);
+    }
+    if let Some(goal) = ctf_goal(sim, me) {
+        let to = goal - v.pos;
+        if to.length_squared() > 15.0 * 15.0 {
+            ai.goal = Some(goal);
+            ai.curve = Some(ctf_curve(v, goal));
+            ai.cursor = None;
+            ai.t = 0.0;
+            return;
+        }
     }
     if sim.flyer_seek_curve(me, v, handle, p, ai) {
         return;
@@ -861,7 +915,7 @@ pub(super) fn drive(
             let far_from_home = v
                 .spawn_pad
                 .and_then(|idx| sim.vehicle_pads.get(idx as usize))
-                .map_or(true, |pad| (v.pos - pad.def.pos).length() > 150.0);
+                .is_none_or(|pad| (v.pos - pad.def.pos).length() > 150.0);
             if is_transport && in_landing && far_from_home {
                 super::ride::request_exit(st);
                 return (pad, nt);
@@ -893,7 +947,7 @@ pub(super) fn drive(
                 let far_from_home = v
                     .spawn_pad
                     .and_then(|idx| sim.vehicle_pads.get(idx as usize))
-                    .map_or(true, |pad| (v.pos - pad.def.pos).length() > 150.0);
+                    .is_none_or(|pad| (v.pos - pad.def.pos).length() > 150.0);
                 if is_transport && in_landing && far_from_home {
                     takeoff = true;
                 }

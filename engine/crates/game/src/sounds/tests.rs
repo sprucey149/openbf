@@ -337,6 +337,7 @@ fn lib() -> SoundLib {
             sample_paths: samples,
             engines: HashMap::new(),
             music: HashMap::new(),
+        triggers: Vec::new(),
         },
         levels: Vec::new(),
         foreign: Vec::new(),
@@ -351,6 +352,7 @@ fn lib() -> SoundLib {
         loops: HashMap::new(),
         ambient: HashMap::new(),
         cries: HashMap::new(),
+        boosts: HashMap::new(),
         weapon_handles: HashMap::new(),
         station_voices: HashMap::new(),
         hero_voices: HashMap::new(),
@@ -917,6 +919,22 @@ fn a_click_cuts_its_weapons_handle_and_mashing_keeps_one_voice() {
 /// it ends, another station's handle is its own, a listener out of range
 /// starts nothing.
 #[test]
+fn a_flyers_boost_handle_lets_a_rise_replace_and_a_fall_wait() {
+    let dir = std::env::temp_dir().join(format!("openbf-boost-{}", std::process::id()));
+    let mut l = lib();
+    l.map.dir = dir.clone();
+    one_second_wav(&dir.join("b/1.wav"));
+    let (pos, ears) = (Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO);
+    assert!(l.boost(3, "exp_high", true, pos, ears).is_some());
+    assert!(l.boost(3, "exp_high", false, pos, ears).is_none());
+    assert!(l.boost(4, "exp_high", false, pos, ears).is_some());
+    assert!(l.boost(3, "exp_high", true, pos, ears).is_some());
+    l.tick(1.01, ears, &mut Vec::new());
+    assert!(l.boost(3, "exp_high", false, pos, ears).is_some());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn a_station_has_one_ambient_handle() {
     let dir = std::env::temp_dir().join(format!("openbf-pwst-{}", std::process::id()));
     let mut l = lib();
@@ -1017,6 +1035,7 @@ impl VoiceFixture {
             streamed: 0,
             engines: vec![],
             music: vec![],
+            triggers: vec![],
         };
         std::fs::write(
             dir.join("sounds/sounds.ron"),

@@ -475,6 +475,8 @@ pub enum Call {
     /// Card UTALK: the class's `LowHealthSound`. Never in the sim's events:
     /// its handle is the sound side's (`game::announce::Commander::calls`).
     LowHealth,
+    Cockpit,
+    Loudspeaker,
     /// Card UVO2: a BF2 `VOSound` line for the event of this index in the
     /// PS2's table (`game::vo::EVENTS`). Never in the sim's events: the
     /// sound side picks it from them (`game::vo::Vo::tick`).

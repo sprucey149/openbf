@@ -105,7 +105,10 @@ fn incoming_missile_warning_lifecycle_and_hud_events() {
     sim.players = vec![Some(pilot)];
 
     let vh = sim.spawn_vehicle(&test_flyer_spec(0, Vec3::new(0.0, 100.0, 0.0)));
-    sim.units[pilot.index as usize].mount = Some(core::vehicle::Mount { vehicle: vh, seat: 0 });
+    sim.units[pilot.index as usize].mount = Some(core::vehicle::Mount {
+        vehicle: vh,
+        seat: 0,
+    });
     if let Some(v) = sim.vehicle_mut(vh) {
         v.seats[0].occupant = Some(pilot);
         v.flyer.phase = core::vehicle::flyer::FlightPhase::Flying;
@@ -399,7 +402,8 @@ fn shield_impact_feedback_routes_surface_shield_on_active_shield() {
 fn capital_ship_system_lifecycle_collapse_restore_and_blackbox() {
     let mut walk = WalkSim::new(42, Vec3::ZERO, None);
     let dir = scratch_blackbox_dir("scenarios_lifecycle");
-    let mut bb = BlackBox::start(true, test_meta(), &walk, Vec::new(), dir.clone()).expect("blackbox on");
+    let mut bb =
+        BlackBox::start(true, test_meta(), &walk, Vec::new(), dir.clone()).expect("blackbox on");
 
     // Set up Space Assault with capital ship, shield generator, and critical engines
     let ship = test_station(&mut walk.sim, 1000.0, 1);
@@ -502,75 +506,36 @@ fn capital_ship_system_lifecycle_collapse_restore_and_blackbox() {
 
     // Also verify fusion cutter cannot revive a spent critical system
     walk.sim.repair_station(engine, 1000.0);
-    assert!(walk.sim.stations[usize::from(engine)].destroyed, "spent critical system cannot be restored");
+    assert!(
+        walk.sim.stations[usize::from(engine)].destroyed,
+        "spent critical system cannot be restored"
+    );
 
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-fn space_assault_spawn_briefing_and_radio_audio_triggers() {
+fn space_assault_has_no_spawn_briefing_and_keeps_lock_audio() {
     use core::announcer::BattleLines;
     use game::announce::Commander;
     use game::space_assault::SpaceRound;
     use std::sync::Arc;
 
-    // 1. Verify opening spawn briefing voice cues for attacker and defender
     let round = Arc::new(SpaceRound {
         faction: ["all".into(), "imp".into()],
         ..SpaceRound::default()
     });
-    assert_eq!(
-        round.briefing_for_team(0),
-        Some("AOSMP_obj_01".into()),
-        "Alliance attacker briefing"
-    );
-    assert_eq!(
-        round.briefing_for_team(1),
-        Some("IOSMP_obj_02".into()),
-        "Imperial defender briefing"
-    );
-
-    // Republic vs CIS
-    let rep_cis_round = SpaceRound {
-        faction: ["rep".into(), "cis".into()],
-        ..SpaceRound::default()
-    };
-    assert_eq!(
-        rep_cis_round.briefing_for_team(0),
-        Some("ROSMP_obj_01".into()),
-        "Republic attacker briefing"
-    );
-    assert_eq!(
-        rep_cis_round.briefing_for_team(1),
-        Some("COSMP_obj_02".into()),
-        "CIS defender briefing"
-    );
-
-    // 2. Verify Commander queues spawn briefing on fresh spawn
-    let mut cmd = Commander::new(
-        BattleLines::default(),
-        ["all", "imp"],
-        0, // listener is player team 0 (Alliance attacker)
-        vec![],
-        vec![],
-    );
+    let mut cmd = Commander::new(BattleLines::default(), ["all", "imp"], 0, vec![], vec![]);
     cmd.space_round = Some(round.clone());
-
-    // Fresh spawn -> queues AOSMP_obj_01
     cmd.observe(0.1, &[], [0.0, 0.0], [100, 100], true, false);
-    assert!(cmd.spawn_briefing_played, "spawn briefing marked played");
-    assert!(
-        cmd.queue.waiting("AOSMP_obj_01"),
-        "AOSMP_obj_01 queued on first spawn"
-    );
-
-    // Subsequent respawn -> does NOT requeue briefing
-    cmd.queue.step(10.0, |_| None); // clear queue
-    cmd.observe(0.1, &[], [0.0, 0.0], [90, 100], true, false);
-    assert!(
-        !cmd.queue.waiting("AOSMP_obj_01"),
-        "no duplicate spawn briefing on respawn"
-    );
+    for name in [
+        "AOSMP_obj_01",
+        "AOSMP_obj_02",
+        "IOSMP_obj_01",
+        "IOSMP_obj_02",
+    ] {
+        assert!(!cmd.queue.waiting(name), "no script plays {name}");
+    }
 
     // 3. Verify event_sounds triggers: lock-on audio, incoming missile warning beep, and space radio chatter
     let mut walk = WalkSim::new(42, Vec3::ZERO, None);
@@ -578,29 +543,32 @@ fn space_assault_spawn_briefing_and_radio_audio_triggers() {
     walk.teams[1].faction = "imp".into();
     walk.space_round = Some(round.clone());
 
-    // Test intermittent space radio chatter at tick % 300 == 150
     walk.sim.tick = 150;
     let mut heard = Vec::new();
     game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
     assert!(
-        heard.iter().any(|s| s == "all_inf_com_space_chatter"),
-        "intermittent space radio chatter emitted during flight: {heard:?}"
+        !heard.iter().any(|s| s.ends_with("_inf_com_space_chatter")),
+        "cockpit chatter belongs to a piloted flyer's voice gate: {heard:?}"
     );
 
     // Test missile lock-on audio (tick % 10 == 0)
     walk.sim.lock_on.resize(1, Default::default());
     walk.sim.tick = 20;
     walk.sim.lock_on[0].target = Some(core::sim::LockTarget::Station(0));
-    walk.sim.lock_on[0].held = 1.0;
+    walk.sim.lock_on[0].held = [3.0, 3.0];
+    walk.sim.lock_on[0].charging = [true, true];
     heard.clear();
     game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
     assert!(
-        heard.iter().any(|s| s == "all_weap_inf_rocket_launcher_tracking"),
-        "tracking sound emitted when target is locked: {heard:?}"
+        !heard
+            .iter()
+            .any(|s| s == "all_weap_inf_rocket_launcher_tracking"),
+        "a flyer's lock plays no launcher tone: {heard:?}"
     );
 
     // Test incoming missile warning beep (distance < 100 -> interval 4, tick 16 % 4 == 0)
-    walk.sim.lock_on[0].held = 0.0;
+    walk.sim.lock_on[0].held = [0.0, 0.0];
+    walk.sim.lock_on[0].charging = [false, false];
     walk.sim.lock_on[0].target = None;
     walk.sim.lock_on[0].incoming_missile = true;
     walk.sim.lock_on[0].incoming_distance = 80.0;
@@ -608,7 +576,9 @@ fn space_assault_spawn_briefing_and_radio_audio_triggers() {
     heard.clear();
     game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
     assert!(
-        heard.iter().any(|s| s == "all_weap_inf_rocket_launcher_tracking"),
+        heard
+            .iter()
+            .any(|s| s == "all_weap_inf_rocket_launcher_tracking"),
         "incoming missile warning beep emitted when targeted by missile: {heard:?}"
     );
 }

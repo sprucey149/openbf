@@ -88,7 +88,15 @@ fn a_chunk_with_a_lit_model_leaves_the_particle_path() {
     drop(&mut c, Vec3::Y, Vec3::ZERO);
     let particles = |c: &Chunks| {
         let mut out = Vec::new();
-        c.draws(Era::Bf2, Vec3::ZERO, Vec3::Z, 1.0, &mut Assets, &mut out);
+        c.draws(
+            Era::Bf2,
+            Vec3::ZERO,
+            Vec3::Z,
+            1.0,
+            0.0,
+            &mut Assets,
+            &mut out,
+        );
         out.len()
     };
     assert_eq!(c.lit_poses().count(), 0);

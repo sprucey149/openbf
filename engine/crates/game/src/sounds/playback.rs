@@ -179,7 +179,7 @@ impl SoundLib {
         pos: Vec3,
         listener: &Listener,
     ) -> Option<Handed> {
-        let hash = fnv1a_lowercase(name);
+        let hash = line_hash(name);
         let (p, _) = self.find(hash)?;
         let path = self.take_path_by_hash(hash, nth)?;
         let pitch = (p.pitch * self.rate_mul).max(0.05);
@@ -240,7 +240,7 @@ impl SoundLib {
         ears: Vec3,
         step: bool,
     ) -> Result<Line, Refused> {
-        let hash = fnv1a_lowercase(name);
+        let hash = line_hash(name);
         let Some((p, _)) = self.find(hash) else {
             return Err(Refused::Unknown);
         };
@@ -302,7 +302,7 @@ impl SoundLib {
         let Some(nth) = line.take else {
             return self.voice_take(&line.name).map(|t| t.2);
         };
-        let hash = fnv1a_lowercase(&line.name);
+        let hash = line_hash(&line.name);
         let pitch = self.find(hash)?.0.pitch.max(0.05);
         let path = self.take_path_by_hash(hash, usize::from(nth))?;
         Some(self.voice_secs(&path)? / pitch)
@@ -469,6 +469,46 @@ impl SoundLib {
         );
         self.played += 1;
         shot
+    }
+
+    pub fn boost(
+        &mut self,
+        vehicle: u32,
+        name: &str,
+        rising: bool,
+        pos: Vec3,
+        ears: Vec3,
+    ) -> Option<Start> {
+        let sounding = self.boosts.get(&vehicle).is_some_and(|c| c.ends > self.now);
+        if sounding && !rising {
+            return None;
+        }
+        self.boosts.remove(&vehicle);
+        let mut out = Vec::new();
+        self.start(fnv1a_lowercase(name), pos, ears, &mut out);
+        let s = out.pop()?;
+        let (path, pitch) = (s.path.clone(), s.pitch.max(0.05));
+        let secs = self.decoded(&path).map_or(0.0, |d| d.duration_secs());
+        let ends = self.now + secs / pitch;
+        self.boosts.insert(vehicle, Cry { ends, shot: None });
+        Some(s)
+    }
+
+    pub fn play_boost(
+        &mut self,
+        audio: &mut audio::Audio,
+        vehicle: u32,
+        name: &str,
+        rising: bool,
+        pos: Vec3,
+        listener: &Listener,
+    ) {
+        if let Some(s) = self.boost(vehicle, name, rising, pos, listener.pos) {
+            let shot = self.mix_shot(audio, &s, listener);
+            if let Some(c) = self.boosts.get_mut(&vehicle) {
+                c.shot = shot;
+            }
+        }
     }
 
     /// A tick's starts on a human's weapon handles (B1 +0xf4, B2 +0xd8), each
@@ -760,4 +800,10 @@ impl SoundLib {
     pub fn waiting(&self) -> usize {
         self.timers.len()
     }
+}
+
+fn line_hash(name: &str) -> u32 {
+    name.strip_prefix('#')
+        .and_then(|h| u32::from_str_radix(h, 16).ok())
+        .unwrap_or_else(|| fnv1a_lowercase(name))
 }

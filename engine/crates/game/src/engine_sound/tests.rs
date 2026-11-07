@@ -96,6 +96,64 @@ fn all(layers: &[EngineLayer], i: &Inputs) -> Vec<(f32, f32)> {
 }
 
 #[test]
+fn a_tie_crosses_its_shift_points_between_gears_on_every_thrust() {
+    let p = core::vehicle::flyer::FlyerParams {
+        bf2: true,
+        min_speed: 35.0,
+        mid_speed: 70.0,
+        max_speed: 95.0,
+        boost_speed: 150.0,
+        ..core::vehicle::flyer::FlyerParams::default()
+    };
+    let divisor = flyer_speed_divisor(&p, false);
+    assert_eq!(divisor, 150.0);
+    let up = BoostEntry::parse("imp_fly_TIE_shift_up_high_property 0.69 1").unwrap();
+    let down = BoostEntry::parse("imp_fly_TIE_shift_down_property 0.69 0").unwrap();
+    let (max, boost) = (95.0 / divisor, 150.0 / divisor);
+    for _ in 0..3 {
+        assert!(up.crossed(max, boost) && !down.crossed(max, boost));
+        assert!(down.crossed(boost, max) && !up.crossed(boost, max));
+    }
+    let no_boost = core::vehicle::flyer::FlyerParams {
+        boost_speed: 0.0,
+        ..p
+    };
+    assert_eq!(flyer_speed_divisor(&no_boost, false), 95.0);
+    let bf1 = core::vehicle::flyer::FlyerParams { bf2: false, ..p };
+    assert_eq!(flyer_speed_divisor(&bf1, false), 95.0);
+}
+
+#[test]
+fn a_bf2_flyers_engine_speed_clamps_at_one() {
+    let mut e = Instance::default();
+    let drive = Drive::Flyer {
+        max_speed: 100.0,
+        acceleration: 25.0,
+        clamped: true,
+    };
+    let m = Motion {
+        piloted: true,
+        speed: 180.0,
+        health: 1.0,
+        phase: Some(core::vehicle::flyer::FlightPhase::Flying),
+        ..Motion::default()
+    };
+    e.update(0.1, drive, 3.0, &m, &[], || 0.5);
+    assert_eq!(e.inputs.speed, 1.0);
+}
+
+#[test]
+fn a_boost_entry_fires_only_on_its_own_crossing() {
+    let up = BoostEntry::parse("imp_fly_TIE_shift_up_property 0.53 1").unwrap();
+    let down = BoostEntry::parse("imp_fly_TIE_shift_down_property 0.69 0").unwrap();
+    assert_eq!(up.sound, "imp_fly_TIE_shift_up_property");
+    assert!(up.rising && !down.rising);
+    assert!(up.crossed(0.53, 0.54) && !up.crossed(0.54, 0.6) && !up.crossed(0.6, 0.5));
+    assert!(down.crossed(0.69, 0.6) && !down.crossed(0.6, 0.5) && !down.crossed(0.6, 0.7));
+    assert!(BoostEntry::parse("imp_fly_TIE_shift_up_property").is_none());
+}
+
+#[test]
 fn a_graph_is_linear_between_its_points_and_flat_outside() {
     let g = [(0.0, 0.8), (0.5, 0.9), (1.0, 1.0)];
     for (x, y) in [
@@ -644,6 +702,7 @@ fn a_flyer_winds_up_at_takeoff_and_stops_only_when_landed() {
     let drive = Drive::Flyer {
         max_speed: 50.0,
         acceleration: 25.0,
+        clamped: false,
     };
     let g = |parameter: &str, points: Points| EngineGraph {
         parameter: parameter.into(),

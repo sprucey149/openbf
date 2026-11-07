@@ -451,7 +451,7 @@ impl Sim {
                         (v.pos + flag.carried_offset, false)
                     }
                 } else {
-                    (flag.current_pos, true)
+                    (u.soldier.pos, true)
                 }
             } else if !u.alive {
                 (u.soldier.pos, true)

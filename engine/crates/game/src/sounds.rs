@@ -211,6 +211,7 @@ struct Bank {
     engines: HashMap<u32, Vec<manifest::EngineSound>>,
     /// The `Music` records by name.
     music: HashMap<u32, manifest::MusicRon>,
+    triggers: Vec<manifest::SoundTriggerRon>,
 }
 
 /// One property per name hash, from records in chunk order: the last
@@ -371,6 +372,7 @@ impl Bank {
             dir: dir.to_path_buf(),
             engines,
             music,
+            triggers: ron.triggers,
             by_level: by_level(&ron.props),
             props: merge_props(ron.props),
             sample_paths: ron.samples.into_iter().collect(),
@@ -582,6 +584,7 @@ pub struct SoundLib {
     /// Each unit's ONE voice for its hurt and death cries, by unit slot
     /// (card UCRY, [`SoundLib::cry`]).
     cries: HashMap<u32, Cry>,
+    boosts: HashMap<u32, Cry>,
     /// What each human's weapon handle still sounds, by (unit slot, weapon
     /// class): the voices the empty click stops ([`SoundLib::weapon_voices`]).
     weapon_handles: HashMap<(u32, u32), Vec<Cry>>,
@@ -760,6 +763,7 @@ impl SoundLib {
             loops: HashMap::new(),
             ambient: HashMap::new(),
             cries: HashMap::new(),
+            boosts: HashMap::new(),
             weapon_handles: HashMap::new(),
             station_voices: HashMap::new(),
             hero_voices: HashMap::new(),
@@ -1255,6 +1259,20 @@ impl SoundLib {
     pub fn streamed(&self, name: &str) -> bool {
         self.find(fnv1a_lowercase(name))
             .is_some_and(|(p, _)| p.stream.is_some())
+    }
+
+    pub fn trigger_sound(&self, region: u32, reinforcements: f32, side: usize) -> Option<u32> {
+        let named = || self.map.triggers.iter().filter(|t| t.name_hash == region);
+        let record = self
+            .levels
+            .iter()
+            .find_map(|l| named().find(|t| t.level == *l))
+            .or_else(|| named().next())?;
+        let group = record
+            .groups
+            .iter()
+            .find(|g| g.reinforcements <= reinforcements)?;
+        group.sounds.get(side).copied().filter(|s| *s != 0)
     }
 
     /// A definition from the resident CORE.LVL bank (the shell/load bank both

@@ -194,7 +194,15 @@ impl Pose {
                     walk.sim
                         .weapon_classes
                         .get(b.weapon_class)
-                        .is_some_and(|w| w.ordnance.geometry.is_some())
+                        .is_some_and(|w| {
+                            w.ordnance.geometry.is_some()
+                                || (w.ordnance.laser.is_none()
+                                    && w.ordnance
+                                        .impact
+                                        .as_ref()
+                                        .and_then(|l| l.trail.as_deref())
+                                        .is_some())
+                        })
                 })
                 .map(|(index, b)| ProjectilePose {
                     index,

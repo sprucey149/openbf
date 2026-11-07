@@ -1125,3 +1125,72 @@ fn a_rider_lost_with_the_hull_holds_the_seat_view() {
     w.seat_view = w.next_seat_view();
     assert!(w.seat_view.is_none());
 }
+
+#[test]
+fn a_controlled_guided_rocket_uses_first_person_camera_and_centered_reticle() {
+    let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    let wc = w.sim.add_weapon_class(core::weapon::WeaponClass {
+        guided: Some(Box::new(core::guided::GuidedWeapon {
+            class: core::guided::GuidedClass {
+                acceleration: 0.0,
+                speeds: [30.0; 3],
+                boost_speed: 60.0,
+                boost_acceleration: 0.0,
+                pitch_rate: 1.0,
+                turn_rate: 1.0,
+                roll_rate: 1.0,
+                pitch_filter: 1.0,
+                turn_filter: 1.0,
+                roll_filter: 1.0,
+                pitch_damp: 1.0,
+                turn_damp: 1.0,
+                bank_angle: 0.0,
+                bank_filter: 1.0,
+                energy: 100.0,
+                energy_restore: 0.0,
+                boost_drain: 0.0,
+                health: 1.0,
+                health_type: core::weapon::HealthType::Droid,
+                explosion: None,
+                noncritical: None,
+                critical_speed: 0.8,
+                track_center: Vec3::ZERO,
+                track_offset: Vec3::ZERO,
+                engine_sound: None,
+                death_sound: None,
+                trail: None,
+            },
+            spawn_offset: Vec3::ZERO,
+            requires_award: false,
+        })),
+        ..Default::default()
+    });
+    let player = w.player;
+    let pos = Vec3::new(10.0, 50.0, 30.0);
+    let rot = Quat::from_rotation_y(0.7);
+    w.sim.guided.push(core::guided::GuidedRocket {
+        id: 42,
+        owner: player,
+        team: 0,
+        weapon_class: wc,
+        seat: Some((core::vehicle::VehicleHandle { index: 0, gen: 0 }, 1)),
+        pos,
+        vel: rot * Vec3::NEG_Z * 30.0,
+        rot,
+        pitch_rate: 0.0,
+        turn_rate: 0.0,
+        roll_input: 0.0,
+        bank: 0.0,
+        health: 1.0,
+        energy: 100.0,
+        age: 0.0,
+        boosted: false,
+        prev_buttons: 0,
+        pending_end: None,
+        blind: 0.0,
+    });
+    assert!(w.player_controls_flyer());
+    let cam = w.camera();
+    assert_eq!(cam.position, pos);
+    assert_eq!(w.reticle_y(), 0.5);
+}

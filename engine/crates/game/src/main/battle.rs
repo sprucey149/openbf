@@ -477,6 +477,8 @@ pub(super) fn make_walk_with_counts(
                 );
                 walk.vehicle_riders = p.riders;
                 walk.vehicle_engines = p.engines;
+                walk.vehicle_sounds = p.sounds;
+                walk.sound_triggers = game::ambience::sound_triggers(&scene.manifest);
                 walk.vehicle_labels = p.labels;
                 walk.vehicle_classes = p.classes.clone();
                 vehicle_classes = p.classes;
@@ -487,6 +489,7 @@ pub(super) fn make_walk_with_counts(
         // The commander speaks the mission's lines over the posts and the
         // battle just set up.
         if let Some(m) = &b.mission {
+            walk.particle_lod_bias = m.particle_lod_bias.unwrap_or(0.0);
             let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
             game::native_teams::install(&mut walk, &layout, &b.classes_dir, assets_dir, m);
             walk.sound_levels = m.sound_levels();
@@ -495,6 +498,38 @@ pub(super) fn make_walk_with_counts(
                 round.sheet_dir = Some(assets_dir.join(&m.map).join("textures"));
                 std::sync::Arc::new(round)
             });
+            if let Some(ctf_def) = &m.ctf {
+                let score_limit =
+                    ctf_def.score_limit.unwrap_or(core::sim::DEFAULT_CTF_SCORE_LIMIT);
+                let find_region = |name: &str| -> glam::Vec3 {
+                    scene
+                        .manifest
+                        .regions
+                        .iter()
+                        .find(|r| r.name.eq_ignore_ascii_case(name))
+                        .map(|r| glam::Vec3::from(r.translation))
+                        .or_else(|| {
+                            scene
+                                .manifest
+                                .instances
+                                .iter()
+                                .find(|i| i.name.eq_ignore_ascii_case(name))
+                                .map(|i| glam::Vec3::from(i.translation))
+                        })
+                        .unwrap_or(glam::Vec3::ZERO)
+                };
+                let home_pos = find_region(&ctf_def.home_region);
+                let team0_goal = find_region(&ctf_def.capture_region_def);
+                let team1_goal = find_region(&ctf_def.capture_region_att);
+                let ctf_state = core::sim::CtfState::new_space_one_flag(
+                    score_limit,
+                    home_pos,
+                    team0_goal,
+                    team1_goal,
+                );
+                walk.sim.install_ctf(ctf_state);
+                walk.sim.flyer_bots = true;
+            }
             walk.voice = Some(game::announce::Commander::for_battle(m, &layout, &walk));
             // ...and the music is the script's too, by the reinforcements
             // the teams start with.
@@ -592,7 +627,8 @@ fn hud_hints(
     let locked = walk.sim.lock_on_target(slot).map(|(t, _)| t);
     let camera = walk.camera();
     let view_proj = camera.view_proj(aspect);
-    feed.target_hints(&walk.sim, slot)
+    let mut hints: Vec<ui::hud_tree::HintMarker> = feed
+        .target_hints(&walk.sim, slot)
         .iter()
         .filter(|h| Some(h.target) != locked)
         .filter_map(|h| {
@@ -604,7 +640,42 @@ fn hud_hints(
                 visible: h.visible,
             })
         })
-        .collect()
+        .collect();
+
+    if let Some(ctf) = &walk.sim.ctf {
+        let me_team = walk.sim.unit(walk.player).map_or(0, |u| u.team);
+        for flag in &ctf.flags {
+            let (pos, friendly) = match flag.status {
+                core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => {
+                    (flag.current_pos, true)
+                }
+                core::sim::FlagStatus::Carried { carrier } => {
+                    if carrier == walk.player {
+                        (
+                            ctf.capture_regions
+                                .get(me_team as usize)
+                                .map_or(flag.current_pos, |r| r.pos),
+                            true,
+                        )
+                    } else {
+                        let carrier_team = walk.sim.unit(carrier).map_or(0, |u| u.team);
+                        (flag.current_pos, carrier_team == me_team)
+                    }
+                }
+            };
+            let (ndc, on_screen) = marker_screen(view_proj, pos);
+            if on_screen {
+                hints.push(ui::hud_tree::HintMarker {
+                    ndc,
+                    distance: (pos - camera.position).length(),
+                    friendly,
+                    visible: true,
+                });
+            }
+        }
+    }
+
+    hints
 }
 
 fn hud_lock(
@@ -630,9 +701,9 @@ fn hud_lock(
         ndc: [x, y],
         on_screen,
         visible: walk.sim.lock_on_visible(slot),
-        ready: [
-            walk.sim.lock_on_ready(slot, 0),
-            walk.sim.lock_on_ready(slot, 1),
+        charge: [
+            walk.sim.lock_on_charge(slot, 0),
+            walk.sim.lock_on_charge(slot, 1),
         ],
         flyer: true,
         pulse: walk.sim.tick as f32 / core::TICK_HZ as f32,
@@ -694,8 +765,17 @@ pub(super) fn hud_model(
         );
     ui::hud::HudModel {
         team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
-        tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
-        bleed: [b.teams[0].bleed_per_sec, b.teams[1].bleed_per_sec],
+        tickets: walk
+            .sim
+            .ctf
+            .as_ref()
+            .map(|c| [c.team_points[0], c.team_points[1]])
+            .unwrap_or([b.teams[0].tickets(), b.teams[1].tickets()]),
+        bleed: if walk.sim.ctf.is_some() {
+            [0.0, 0.0]
+        } else {
+            [b.teams[0].bleed_per_sec, b.teams[1].bleed_per_sec]
+        },
         hp,
         hp_max,
         hero: walk.sim.is_hero(walk.player),

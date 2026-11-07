@@ -15,7 +15,7 @@ pub struct HudLock {
     pub ndc: [f32; 2],
     pub on_screen: bool,
     pub visible: bool,
-    pub ready: [bool; 2],
+    pub charge: [Option<f32>; 2],
     pub flyer: bool,
     pub pulse: f32,
 }
@@ -30,7 +30,11 @@ pub fn feed_lock(
     match incoming_missile {
         Some(d) => {
             hud.publish("player1.missileLock", EventValue::None, has_mesh);
-            hud.publish("player1.missileLockDistance", EventValue::Number(d), has_mesh);
+            hud.publish(
+                "player1.missileLockDistance",
+                EventValue::Number(d),
+                has_mesh,
+            );
         }
         None => {
             if hud.last("player1.missileLock").is_some() {
@@ -41,6 +45,7 @@ pub fn feed_lock(
         }
     }
     const ID: &str = "hud.lockOn.id";
+    const WEAPON_HEAT: [&str; 2] = ["player1.weapon1.heat", "player1.weapon2.heat"];
     const WEAPON: [(&str, &str); 2] = [
         (
             "player1.weapon1.lockOnPosition",
@@ -78,7 +83,13 @@ pub fn feed_lock(
         flyer: l.flyer,
     });
     for (k, (position, disable)) in WEAPON.iter().enumerate() {
-        let shown = lock.filter(|l| l.ready[k] && l.on_screen);
+        let charge = lock.and_then(|l| l.charge[k]);
+        if let Some(c) = charge {
+            hud.send(WEAPON_HEAT[k], EventValue::Number(c), has_mesh);
+        } else if hud.last(position).is_some() {
+            hud.send(WEAPON_HEAT[k], EventValue::Number(0.0), has_mesh);
+        }
+        let shown = lock.filter(|l| l.charge[k].is_some() && l.on_screen);
         match shown {
             Some(l) => hud.publish(
                 position,

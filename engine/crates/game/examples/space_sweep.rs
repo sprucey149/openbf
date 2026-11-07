@@ -196,7 +196,9 @@ fn run_space_map(
         w.walker_shot_styles = p.walker_shot_styles;
         w.vehicle_riders = p.riders;
         w.vehicle_engines = p.engines;
+        w.vehicle_sounds = p.sounds;
         w.vehicle_labels = p.labels;
+        w.vehicle_classes = p.classes;
     }
 
     w.space_round = mission
@@ -320,7 +322,10 @@ fn main() {
     let assets_root = assets_dir();
     let missions_root = missions_dir();
 
-    println!("Running Space Assault sweep across {} maps (seed {seed}, score limit {SCORE_LIMIT})...", maps.len());
+    println!(
+        "Running Space Assault sweep across {} maps (seed {seed}, score limit {SCORE_LIMIT})...",
+        maps.len()
+    );
     println!("Assets: {}", assets_root.display());
     println!("Missions: {}", missions_root.display());
     println!();
@@ -331,7 +336,11 @@ fn main() {
         eprint!("Running {}... ", map);
         match run_space_map(map, seed, max_ticks, &assets_root, &missions_root) {
             Ok(res) => {
-                eprintln!("done ({:.1}s wall, {:.1}s sim)", t0.elapsed().as_secs_f32(), res.duration_s);
+                eprintln!(
+                    "done ({:.1}s wall, {:.1}s sim)",
+                    t0.elapsed().as_secs_f32(),
+                    res.duration_s
+                );
                 results.push(res);
             }
             Err(e) => {

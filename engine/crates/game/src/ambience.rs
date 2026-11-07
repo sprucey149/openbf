@@ -241,6 +241,38 @@ impl Ambience {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SoundTrigger {
+    pub name: u32,
+    pub region: core::region::Region,
+}
+
+pub fn sound_triggers(m: &Manifest) -> Vec<SoundTrigger> {
+    m.regions
+        .iter()
+        .filter_map(|r| {
+            let mut words = r.name.split_whitespace();
+            if !words.next()?.eq_ignore_ascii_case("soundtrigger") {
+                return None;
+            }
+            let name = crate::classdb::fnv1a_lowercase(words.next()?);
+            let region =
+                core::region::Region::from_rows(&r.shape, r.rotation, r.translation, r.size)?;
+            Some(SoundTrigger { name, region })
+        })
+        .collect()
+}
+
+pub fn trigger_side(faction: &str) -> Option<usize> {
+    match faction.to_ascii_lowercase().as_str() {
+        "all" => Some(0),
+        "imp" => Some(1),
+        "rep" => Some(2),
+        "cis" => Some(3),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

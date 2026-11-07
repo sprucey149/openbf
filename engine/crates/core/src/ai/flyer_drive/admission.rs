@@ -47,13 +47,11 @@ fn fallback_transport_classes(sim: &Sim, handle: VehicleHandle) -> Vec<u32> {
         .collect();
     for pad in &sim.vehicle_pads {
         if pad.team == team {
-            for pad_class in &pad.def.classes {
-                if let Some(c) = pad_class {
-                    let cls = c.spec.class;
-                    if let Some(Some(p)) = sim.flyer_params.get(cls as usize) {
-                        if p.follower.class_id != 0 && p.follower.class_id != TRANSPORT_CLASS {
-                            classes.push(p.follower.class_id);
-                        }
+            for c in pad.def.classes.iter().flatten() {
+                let cls = c.spec.class;
+                if let Some(Some(p)) = sim.flyer_params.get(cls as usize) {
+                    if p.follower.class_id != 0 && p.follower.class_id != TRANSPORT_CLASS {
+                        classes.push(p.follower.class_id);
                     }
                 }
             }

@@ -249,3 +249,40 @@ fn each_shield_change_reports_once_and_a_repeat_kill_awards_nothing_new() {
     assert_eq!(count(&s, false), 1);
     assert_eq!(s.space_team_points().unwrap().0, points);
 }
+
+#[test]
+fn a_launchers_lock_fills_only_while_the_target_holds_the_cone() {
+    let (mut s, p, _) = world();
+    let w = &mut s.weapon_classes[0];
+    w.lock_time = 3.0;
+    w.ordnance.missile = Some(Default::default());
+    let centre = ahead(&s, p, 500.0, 0.0);
+    let target = fighter(&mut s, 1, centre);
+    assert_eq!(s.lock_on_charge(0, 0), None, "nothing to lock");
+    tap(&mut s);
+    let early = s.lock_on_charge(0, 0).expect("in the cone");
+    assert!(early < 0.1, "{early}");
+    let idle = pads(&s, false);
+    for _ in 0..(3.1 / STEP) as usize {
+        s.tick_lock_on(&idle, STEP);
+    }
+    assert_eq!(s.lock_on_charge(0, 0), Some(1.0));
+    assert_eq!(s.lock_on[0].held[0], 3.0, "the dwell stops at the class's");
+
+    let aside = ahead(&s, p, 500.0, 800.0);
+    s.vehicles[target.index as usize].pos = aside;
+    s.tick_lock_on(&idle, STEP);
+    assert!(s.lock_on[0].target.is_some(), "the target stays selected");
+    assert_eq!(s.lock_on_charge(0, 0), None, "out of the 0.9 cone");
+    assert_eq!(s.lock_on[0].held[0], 0.0, "and the dwell restarts");
+}
+
+#[test]
+fn a_cannon_with_no_lock_time_never_charges() {
+    let (mut s, p, _) = world();
+    let centre = ahead(&s, p, 500.0, 0.0);
+    fighter(&mut s, 1, centre);
+    tap(&mut s);
+    assert!(s.lock_on[0].target.is_some());
+    assert_eq!(s.lock_on_charge(0, 0), None);
+}

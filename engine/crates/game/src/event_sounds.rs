@@ -41,6 +41,13 @@ fn saber_sound(class: &core::hero_weapon::SaberClass, hash: u32) -> Option<&str>
 /// The local player's ears.
 pub fn listener(walk: &WalkSim) -> Listener {
     let me = &walk.sim.units[walk.player.index as usize];
+    if me.mount.is_some() || (!me.alive && walk.seat_view_timer > 0.0) {
+        let cam = walk.camera();
+        return Listener {
+            pos: cam.position,
+            yaw: cam.yaw,
+        };
+    }
     Listener {
         pos: me.soldier.pos + Vec3::Y * 1.6,
         yaw: me.soldier.yaw,
@@ -333,14 +340,35 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                 let setup = walk.sim.blast_setup.get(*class as usize);
                 let x = setup.and_then(|b| b.as_ref()?.explosion.as_ref());
                 boom(x.map(|x| &x.look), *pos, &mut play);
+                if let Some(s) = walk
+                    .vehicle_sounds
+                    .get(*class as usize)
+                    .and_then(|s| s.death_sound.as_deref())
+                {
+                    play(s, *pos);
+                }
             }
-            Event::FlyerImpact { pos, lethal, .. } => {
-                let sound = if *lethal {
-                    "com_weap_veh_crash"
-                } else {
-                    "com_weap_veh_scrape"
-                };
+            Event::FlyerImpact { vehicle, pos, .. } => {
+                let sound = walk
+                    .sim
+                    .vehicle(*vehicle)
+                    .and_then(|v| walk.vehicle_sounds.get(v.class as usize))
+                    .and_then(|s| s.collision_sound.as_deref())
+                    .unwrap_or("com_veh_collision_lg");
                 play(sound, *pos);
+            }
+            Event::VehicleHit {
+                vehicle, damage, ..
+            } if *damage > 0.0 => {
+                if let Some(v) = walk.sim.vehicle(*vehicle) {
+                    if let Some(s) = walk
+                        .vehicle_sounds
+                        .get(v.class as usize)
+                        .and_then(|s| s.hurt_sound.as_deref())
+                    {
+                        play(s, v.pos);
+                    }
+                }
             }
             // Card DROIDDEATH: the burst's explosion class authors no
             // SoundProperty on either disc; the noise heard is the droid's
@@ -537,44 +565,6 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                         "com_weap_inf_rocket_launcher_tracking".to_owned()
                     };
                     play(&prop, ears);
-                }
-            } else if walk
-                .sim
-                .lock_on
-                .get(slot_idx)
-                .is_some_and(|l| l.target.is_some() && l.held > 0.0)
-            {
-                // Active missile lock-on / locking
-                if walk.sim.tick.is_multiple_of(10) {
-                    let prop = if matches!(side, "all" | "imp" | "rep" | "cis") {
-                        format!("{side}_weap_inf_rocket_launcher_tracking")
-                    } else {
-                        "com_weap_inf_rocket_launcher_tracking".to_owned()
-                    };
-                    play(&prop, ears);
-                }
-            }
-        }
-    }
-
-    // Intermittent NPC space radio chatter during flight in Space Assault (issue #123)
-    if walk.space_round.is_some() {
-        if let Some(player_unit) = walk.sim.units.get(walk.player.index as usize) {
-            let side = walk
-                .teams
-                .get(player_unit.team as usize)
-                .map(|t| t.faction.as_str())
-                .unwrap_or("");
-            let chatter_prop = match side.to_ascii_lowercase().as_str() {
-                "all" => Some("all_inf_com_space_chatter"),
-                "imp" => Some("imp_inf_com_space_chatter"),
-                "rep" => Some("rep_inf_com_space_chatter"),
-                "cis" => Some("cis_inf_com_space_chatter"),
-                _ => None,
-            };
-            if let Some(prop) = chatter_prop {
-                if walk.sim.tick > 0 && walk.sim.tick % 300 == 150 {
-                    play(prop, ears);
                 }
             }
         }
@@ -1047,7 +1037,13 @@ impl SoundLog {
         for (a, r) in v.gate_calls(lib, ears) {
             // A low-health voice asks every tick its handle is idle (card
             // UTALK): only the lines it queues are rows.
-            if a.call == core::sim::Call::LowHealth && r.is_err() {
+            let every_tick = matches!(
+                a.call,
+                core::sim::Call::LowHealth
+                    | core::sim::Call::Cockpit
+                    | core::sim::Call::Loudspeaker
+            );
+            if every_tick && r.is_err() {
                 continue;
             }
             let outcome = match r {

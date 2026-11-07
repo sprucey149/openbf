@@ -25,6 +25,8 @@ use super::state::LETHAL_LANDING_SPEED;
 /// default {head prim, x3.0}, `FUN_002517e8` (`analysis/re-ai-difficulty.md` §9.2).
 pub const HEADSHOT_SCALE: f32 = 3.0;
 
+const LARGE_SHIELD_RADIUS_SQ: f32 = 256.0;
+
 impl Sim {
     /// The PS2's per-frame bolt sweep (B1 FUN_00273128, BF2 FUN_0030fad0;
     /// `re-ordnance-kinds.md` §2.4 [V][M]; issue #41: the port had kept the
@@ -456,7 +458,15 @@ impl Sim {
                     struck: true,
                 });
                 let surface = if st.health.shield > 0.0 {
-                    Surface::Shield
+                    let large = st
+                        .instance
+                        .and_then(|i| self.collision.instance_radius_sq_at(i, b.end))
+                        .is_some_and(|r| r >= LARGE_SHIELD_RADIUS_SQ);
+                    if large {
+                        Surface::ShieldLarge
+                    } else {
+                        Surface::Shield
+                    }
                 } else {
                     Surface::Building
                 };

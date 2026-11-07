@@ -299,6 +299,82 @@ pub fn find_named_sublevels(inner: &[u8]) -> Vec<(u32, Vec<SoundProp>)> {
     out
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerGroup {
+    pub name: u32,
+    pub reinforcements: f32,
+    pub sounds: [u32; 4],
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerRegion {
+    pub level: u32,
+    pub name: u32,
+    pub groups: Vec<TriggerGroup>,
+}
+
+pub fn parse_tsr(chunk: &Chunk<'_>, level: u32) -> Result<Vec<TriggerRegion>, UcfbError> {
+    let h = |s: &str| fnv1a_lowercase(s);
+    let (h_group, h_region, h_name) = (h("group"), h("region"), h("name"));
+    let value = |n: &ConfigNode, k: u32| n.find(k).and_then(|c| c.values.first().copied());
+    let mut groups: Vec<TriggerGroup> = Vec::new();
+    let mut out = Vec::new();
+    for node in parse_tree(chunk)? {
+        if node.hash == h_group && !node.children.is_empty() {
+            let Some(name) = value(&node, h_name) else {
+                continue;
+            };
+            let sounds =
+                ["alliance", "empire", "republic", "cis"].map(|k| value(&node, h(k)).unwrap_or(0));
+            let reinforcements = node
+                .find(h("reinforcements"))
+                .and_then(|c| c.f32(0))
+                .unwrap_or(0.0);
+            groups.push(TriggerGroup {
+                name,
+                reinforcements,
+                sounds,
+            });
+        } else if node.hash == h_region && !node.children.is_empty() {
+            let Some(name) = value(&node, h_name) else {
+                continue;
+            };
+            let mut own: Vec<TriggerGroup> = node
+                .find_all(h_group)
+                .filter_map(|c| c.values.first().copied())
+                .filter_map(|n| groups.iter().find(|g| g.name == n).cloned())
+                .collect();
+            own.sort_by(|a, b| b.reinforcements.total_cmp(&a.reinforcements));
+            out.push(TriggerRegion {
+                level,
+                name,
+                groups: own,
+            });
+        }
+    }
+    Ok(out)
+}
+
+pub fn find_trigger_regions(inner: &[u8]) -> Vec<TriggerRegion> {
+    let mut out = Vec::new();
+    for top in crate::chunks(inner).flatten() {
+        let level = (&top.tag == b"lvl_")
+            .then(|| top.children().flatten().next())
+            .flatten()
+            .map_or(0, |k| u32::from_le_bytes(k.tag));
+        crate::soundbank::walk_sound_wrappers_of(&top, 3, &mut |c| {
+            if &c.tag != b"tsr_" {
+                return false;
+            }
+            if let Ok(v) = parse_tsr(c, level) {
+                out.extend(v);
+            }
+            true
+        });
+    }
+    out
+}
+
 /// A `Music` record of a `mus_` chunk (B1 `FUN_0035ab68`, B2 `FUN_00440788`;
 /// re-ambience-music.md 3.7): the stream property it plays and its times.
 #[derive(Debug, Clone, PartialEq)]

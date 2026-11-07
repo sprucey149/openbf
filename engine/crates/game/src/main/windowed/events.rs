@@ -274,7 +274,7 @@ impl winit::application::ApplicationHandler for App {
                                 let flying = self
                                     .walk
                                     .as_ref()
-                                    .is_some_and(|(w, _)| w.player_pilots_flyer());
+                                    .is_some_and(|(w, _)| w.player_controls_flyer());
                                 if flying {
                                     self.kbm.flyer_pad(input::flyer_sticks(pad))
                                 } else {
@@ -587,7 +587,7 @@ impl winit::application::ApplicationHandler for App {
                                             audio,
                                             &line.name,
                                             usize::from(take),
-                                            at,
+                                            if line.mode_3d { at } else { ears.pos },
                                             &ears,
                                         ),
                                         _ => sl.play_voice(audio, &line.name),

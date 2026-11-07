@@ -717,6 +717,50 @@ pub fn flyer_sticks(pad: PadState) -> PadState {
     }
 }
 
+/// Trigger controller vibration/rumble feedback on the specified gamepad.
+///
+/// `weak` and `strong` are normalized motor intensities in `[0.0, 1.0]`.
+/// `duration_ms` is the effect duration in milliseconds.
+pub fn rumble(
+    g: &mut gilrs::Gilrs,
+    id: gilrs::GamepadId,
+    weak: f32,
+    strong: f32,
+    duration_ms: u32,
+) {
+    let weak_u16 = (weak.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
+    let strong_u16 = (strong.clamp(0.0, 1.0) * u16::MAX as f32) as u16;
+    let duration = gilrs::ff::Ticks::from_ms(duration_ms);
+    let mut builder = gilrs::ff::EffectBuilder::new();
+    if strong_u16 > 0 {
+        builder.add_effect(gilrs::ff::BaseEffect {
+            kind: gilrs::ff::BaseEffectType::Strong {
+                magnitude: strong_u16,
+            },
+            scheduling: gilrs::ff::Replay {
+                play_for: duration,
+                ..Default::default()
+            },
+            envelope: Default::default(),
+        });
+    }
+    if weak_u16 > 0 {
+        builder.add_effect(gilrs::ff::BaseEffect {
+            kind: gilrs::ff::BaseEffectType::Weak {
+                magnitude: weak_u16,
+            },
+            scheduling: gilrs::ff::Replay {
+                play_for: duration,
+                ..Default::default()
+            },
+            envelope: Default::default(),
+        });
+    }
+    if let Ok(effect) = builder.add_gamepad(&g.gamepad(id)).finish(g) {
+        let _ = effect.play();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1234,5 +1278,14 @@ mod tests {
             of(Button::RightTrigger),
             Some(SPAWN_CLASS_NEXT | SWITCH_WEAPON)
         );
+    }
+
+    #[test]
+    fn test_rumble() {
+        if let Ok(mut g) = open_gilrs() {
+            if let Some(id) = g.gamepads().next().map(|(id, _)| id) {
+                rumble(&mut g, id, 0.6, 0.4, 300);
+            }
+        }
     }
 }

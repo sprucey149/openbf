@@ -336,6 +336,7 @@ Entity fields (BF1): velocity v +0x5f0, angular velocity ω +0x600 (x, yaw, z), 
   collision radius + 0.5 (B1:119520), then score each with FUN_00241b98(targetR, 1.0, 5.0, eye, aim dir, centre)
   (B1:119544): t = (centre − eye)·dir, accept 0 ≤ t ≤ 5.0 + targetR and perp² ≤ (targetR + t)², score t + 16·perp²,
   lowest wins (B1 FUN_00241b98 B1:158844-158895). So you enter what you look at within 5 m + its radius, in a 45° cone.
+  The target's sphere is its collision sphere, with its centre and radius (B2 `FUN_00249870`, 163511-163525, scored by `FUN_002f7b28`). The port used a 3.0 m fallback about the origin for every flyer until 2026-11-07, which made boarding far stricter than the PS2; `Sim::enter_target` and the exit ring now read the class's sphere (`vehicle_class::blast_sphere`, the same geometry sphere). `measure:` the sphere values in PS2 RAM for one flyer.
 - [V] **Seat choice** (CanEnter B1 FUN_0020b1b0): target +0xac bit 3 set, the team open (< 1) or matching for an AI (a
   player goes through FUN_00221890 [H]), and a seat in ring order with PilotType 2 that is empty or AI-held → the driver
   seat first when free [D]; a player takes over an AI-held seat and the AI is exited and placed (B1:120133). BF2 also

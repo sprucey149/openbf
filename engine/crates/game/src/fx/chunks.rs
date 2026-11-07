@@ -511,12 +511,7 @@ impl Chunks {
         }
     }
 
-    pub fn load(
-        db: &ClassDb,
-        names: &[String],
-        dirs: &[std::path::PathBuf],
-        era: Era,
-    ) -> Self {
+    pub fn load(db: &ClassDb, names: &[String], dirs: &[std::path::PathBuf], era: Era) -> Self {
         use crate::classdb::fnv1a_lowercase as hash;
         let mut out = Self {
             bf1: era == Era::Bf1,
@@ -536,10 +531,11 @@ impl Chunks {
                 .map_or(&[][..], Vec::as_slice);
             let mut slots = chunk_properties(db.chain(name));
             let mut exp_name = None;
-            if !slots
-                .iter()
-                .any(|s| s.props.get(&hash("ChunkGeometryName")).is_some_and(|m| !m.trim().is_empty()))
-            {
+            if !slots.iter().any(|s| {
+                s.props
+                    .get(&hash("ChunkGeometryName"))
+                    .is_some_and(|m| !m.trim().is_empty())
+            }) {
                 if let Some(exp) = crate::vehicle_class::explosion_name(db, name) {
                     slots = chunk_properties(db.chain(&exp));
                     exp_name = Some(exp);
@@ -652,7 +648,11 @@ impl Chunks {
                     node_name: text("ChunkNodeName").map(|n| n.trim().to_owned()),
                 });
                 let count = text("NumChunks")
-                    .or_else(|| (slots.len() == 1).then(|| db.prop(name, "NumChunks")).flatten())
+                    .or_else(|| {
+                        (slots.len() == 1)
+                            .then(|| db.prop(name, "NumChunks"))
+                            .flatten()
+                    })
                     .or_else(|| {
                         (slots.len() == 1)
                             .then(|| exp_name.as_deref().and_then(|e| db.prop(e, "NumChunks")))
@@ -929,12 +929,14 @@ impl Chunks {
         self.loose.retain(|e| !e.is_dead());
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn draws(
         &self,
         era: Era,
         eye: Vec3,
         forward: Vec3,
         zoom: f32,
+        bias: f32,
         assets: &mut dyn FxAssets,
         out: &mut Vec<render::ParticleDraw>,
     ) {
@@ -955,7 +957,7 @@ impl Chunks {
             .flat_map(|p| p.trails.iter().map(|(e, _)| e).chain(&p.smoke))
             .chain(&self.loose);
         for e in effects {
-            e.draws_with(eye, forward, zoom, assets, out);
+            e.draws_with_bias(eye, forward, zoom, bias, assets, out);
         }
     }
 
@@ -990,11 +992,7 @@ impl Chunks {
     }
 
     pub fn piece_states(&self) -> Vec<(Vec3, Vec3)> {
-        self.live
-            .iter()
-            .flatten()
-            .map(|p| (p.pos, p.vel))
-            .collect()
+        self.live.iter().flatten().map(|p| (p.pos, p.vel)).collect()
     }
 
     pub fn set_piece_vel(&mut self, cluster: usize, piece: usize, vel: Vec3) {

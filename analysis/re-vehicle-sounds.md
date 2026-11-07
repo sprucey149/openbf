@@ -219,7 +219,10 @@ Six `jal`s to the update exist in the ELF (0x1d1de4, 0x1db814, 0x1edbf8, 0x20738
 - **The port's flyer** (`game::engine_sound`, `Drive::Flyer`, 2026-11-01): the row above; `TakeoffSound` and `LandSound`
   play at the two state changes, and the time graphs follow the wind. The baked BF1 Hoth snowspeeder's three layers
   author only `speed`, `acceleration`, `turnontime` and `turnofftime`, so it changes nothing else there. `strain`,
-  `BoostSound`, cockpit sounds and BF2's distance are not fed. Heard by nobody yet: no live window was opened.
+  BF2's distance is not fed. Heard by nobody yet: no live window was opened.
+- **`BoostSound` in the port** (2026-11-07): `EngineClass::boost` keeps the class's list and `BoostEntry::crossed` is the rule in 3.6, which BF2 `FUN_0044d698` confirms. `SoundLib::boost` holds one handle per vehicle: a rise replaces what sounds, a fall waits for it to end. BF1 reads speed as |v| / `MaxSpeed` (B1 `FUN_001d9180` 86624-86640). BF2 `FUN_00202d08` (118664-118680) divides by `BoostSpeed` when the class has one, otherwise by the top speed (`FUN_00202c50`, capped inside a landing region), then clamps to 0..1. The TIE's gears (35 / 70 / 95 / 150) therefore read 0.23 / 0.47 / 0.63 / 1.0, which puts its shift points (0.11, 0.53, 0.69 rising; 0.17, 0.69 falling) between gears, so each thrust crosses one. The take stays at its start position; the PS2's handle follows the craft.
+- **[L] Shift-down has no sample on this disc:** `imp_fly_TIE_shift_down_property` names sample 0x3faed793. That hash occurs only as a reference in SPA.LVL, with no sample-table entry there or in the top-level and SIDE LVLs, so the falling entries are silent in the port. `measure:` confirm they are silent on the PS2 too.
+- **Cockpit chatter in the port** (2026-11-07): see `re-space-assault.md`, "Spawn briefing, lock audio, and flight radio chatter".
 
 ## 5. BF2
 
@@ -387,7 +390,7 @@ Read by the second reader (`AGENT_STEPS_TURRET.md`); B1 `FUN_00216b30` was read 
 | turret whir | two looping voices by turn rate | nothing | VSN2 |
 | `TurretActivateSound` / `Deactivate` | a turret seat gets / loses its pilot | nothing | VSN2 |
 | `VehicleCollisionSound` | hover: with collision damage; walker: vehicle contact | nothing | VSN2 |
-| jet pack and droideka engine, BF2 cockpit chatter, `BoostSound`, flyers' take-off / land | the same component | nothing | notes (USND, post-alpha flyers) |
+| jet pack and droideka engine, BF2 cockpit chatter, `BoostSound`, flyers' take-off / land | the same component | nothing at the time; since added (section 4) | notes (USND, post-alpha flyers) |
 
 ### 10b. What the port does after VSND (main 79eac42, 2026-10-03)
 

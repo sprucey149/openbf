@@ -10,6 +10,7 @@ use glam::Vec3;
 pub const LOCK_CYCLE_MEMORY: usize = 64;
 pub const LOCK_CLEAR_HOLD_SECS: f32 = 0.5;
 pub const LOCK_FIRE_COS: f32 = 0.9;
+pub const LOCK_CHANNELS: usize = 2;
 pub const VEHICLE_KIND_BIT: u32 = 1 << 3;
 pub const BUILDING_KIND_BIT: u32 = 1 << 4;
 
@@ -34,7 +35,9 @@ impl LockTarget {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LockOn {
     pub target: Option<LockTarget>,
-    pub held: f32,
+    pub held: [f32; LOCK_CHANNELS],
+    pub charging: [bool; LOCK_CHANNELS],
+    pub(super) salvo_target: [Option<MissileTarget>; LOCK_CHANNELS],
     cycled: Vec<LockTarget>,
     button: f32,
     down: bool,
@@ -229,7 +232,7 @@ impl Sim {
             }
             state.incoming_missile = nearest_incoming.is_some();
             state.incoming_distance = nearest_incoming.unwrap_or(0.0);
-            let Some(gun) = self.lock_gun(h) else {
+            let Some(gun) = self.lock_launcher(h) else {
                 self.lock_on[slot] = state;
                 continue;
             };
@@ -253,12 +256,11 @@ impl Sim {
                     }
                     state.cycled.push(t);
                     state.target = Some(t);
-                    state.held = 0.0;
+                    state.held = [0.0; LOCK_CHANNELS];
                 }
             } else if pressed && state.button >= LOCK_CLEAR_HOLD_SECS {
                 state.target = None;
                 state.cycled.clear();
-                state.held = 0.0;
             }
             if let Some(t) = state.target {
                 let keep = self.lock_probe(t).is_some_and(|p| {
@@ -266,15 +268,48 @@ impl Sim {
                         && p.team.is_some_and(|o| self.hostile(team, o))
                         && (p.pos - ray.0).length_squared() <= lose * lose
                 });
-                if keep {
-                    state.held += dt;
-                } else {
+                if !keep {
                     state.target = None;
-                    state.held = 0.0;
                 }
+            }
+            for k in 0..LOCK_CHANNELS {
+                let limit = state
+                    .target
+                    .and_then(|t| self.lock_dwell_limit(h, own, k, t, ray));
+                state.charging[k] = limit.is_some();
+                state.held[k] = limit.map_or(0.0, |l| (state.held[k] + dt).min(l));
             }
             self.lock_on[slot] = state;
         }
+    }
+
+    fn lock_dwell_limit(
+        &self,
+        h: UnitHandle,
+        own: VehicleHandle,
+        weapon: usize,
+        target: LockTarget,
+        (pos, dir): (Vec3, Vec3),
+    ) -> Option<f32> {
+        let setup = self.seat_gun_setup(h)?;
+        let c = &self.weapon_classes[setup.weapons.get(weapon)?.class];
+        if c.lock_time <= 0.0 || c.ordnance.missile.is_none() {
+            return None;
+        }
+        let p = self.lock_probe(target)?;
+        let raw = match target {
+            LockTarget::Station(_) => BUILDING_KIND_BIT,
+            LockTarget::Aim(_) => p.kind_bit,
+        };
+        if c.target_kind & raw == 0 && c.target_kind & p.kind_bit == 0 {
+            return None;
+        }
+        if (p.pos - pos).normalize_or_zero().dot(dir) < LOCK_FIRE_COS {
+            return None;
+        }
+        let own_building = self.vehicle(own).and_then(|v| v.instance);
+        self.lock_clear(&p, own, own_building, pos)
+            .then_some(c.lock_time)
     }
 
     pub(super) fn acquire_flyer_pick(&mut self, slot: usize, ph: UnitHandle) {
@@ -347,6 +382,22 @@ impl Sim {
         setup.weapons.first().map(|w| w.class)
     }
 
+    /// The weapon the dwell lock charges: the first launcher (a class with a
+    /// lock time and a missile), else the first weapon. `lock_gun` stays the
+    /// reticle magnet's first weapon.
+    pub(super) fn lock_launcher(&self, h: UnitHandle) -> Option<usize> {
+        let setup = self.seat_gun_setup(h)?;
+        setup
+            .weapons
+            .iter()
+            .map(|w| w.class)
+            .find(|c| {
+                let wc = &self.weapon_classes[*c];
+                wc.lock_time > 0.0 && wc.ordnance.missile.is_some()
+            })
+            .or_else(|| setup.weapons.first().map(|w| w.class))
+    }
+
     pub fn lock_on_target(&self, slot: usize) -> Option<(LockTarget, Vec3)> {
         let t = self.lock_on.get(slot)?.target?;
         Some((t, self.lock_probe(t)?.pos))
@@ -367,17 +418,15 @@ impl Sim {
         self.lock_clear(&p, own, own_building, pos)
     }
 
-    pub fn lock_on_ready(&self, slot: usize, weapon: usize) -> bool {
-        let Some(state) = self.lock_on.get(slot).filter(|s| s.target.is_some()) else {
-            return false;
-        };
-        let Some(h) = self.players.get(slot).copied().flatten() else {
-            return false;
-        };
-        self.seat_gun_setup(h)
-            .and_then(|s| s.weapons.get(weapon).map(|w| w.class))
-            .and_then(|c| self.weapon_classes.get(c))
-            .is_some_and(|c| c.lock_time > 0.0 && state.held >= c.lock_time)
+    pub fn lock_on_charge(&self, slot: usize, weapon: usize) -> Option<f32> {
+        let state = self.lock_on.get(slot)?;
+        if !*state.charging.get(weapon)? {
+            return None;
+        }
+        let h = self.players.get(slot).copied().flatten()?;
+        let class = self.seat_gun_setup(h)?.weapons.get(weapon)?.class;
+        let limit = self.weapon_classes.get(class)?.lock_time;
+        (limit > 0.0).then(|| (state.held[weapon] / limit).clamp(0.0, 1.0))
     }
 
     pub fn incoming_missile(&self, slot: usize) -> Option<f32> {
@@ -400,6 +449,15 @@ impl Sim {
             return None;
         };
         let slot = slot as usize;
+        let channel = self
+            .seat_gun_setup(self.handle(unit))?
+            .weapons
+            .iter()
+            .position(|w| w.class == class)
+            .filter(|k| *k < LOCK_CHANNELS);
+        if let Some(target) = channel.and_then(|k| self.lock_on.get(slot)?.salvo_target[k]) {
+            return Some(target);
+        }
         let t = self.lock_on.get(slot)?.target?;
         let p = self.lock_probe(t)?;
         let c = &self.weapon_classes[class];
@@ -407,14 +465,15 @@ impl Sim {
             LockTarget::Station(_) => BUILDING_KIND_BIT,
             LockTarget::Aim(_) => p.kind_bit,
         };
-        let launcher = c.lock_time > 0.0;
-        if c.target_kind & raw == 0 {
+        let lock_time = c.lock_time;
+        let launcher = lock_time > 0.0;
+        if c.target_kind & raw == 0 && !(launcher && c.target_kind & p.kind_bit != 0) {
             return None;
         }
         if (p.pos - origin).normalize_or_zero().dot(dir) < LOCK_FIRE_COS {
             return None;
         }
-        if launcher && self.lock_on[slot].held < c.lock_time {
+        if launcher && channel.is_none_or(|k| self.lock_on[slot].held[k] < lock_time) {
             return None;
         }
         let own = self.units[unit].mount?.vehicle;
@@ -422,8 +481,9 @@ impl Sim {
         if !self.lock_clear(&p, own, own_building, origin) {
             return None;
         }
-        if launcher {
-            self.lock_on[slot].held = 0.0;
+        if let Some(k) = channel.filter(|_| launcher) {
+            self.lock_on[slot].held[k] = 0.0;
+            self.lock_on[slot].salvo_target[k] = t.missile();
         }
         t.missile()
     }
@@ -442,7 +502,9 @@ impl Sim {
                 LockTarget::Aim(AimTarget::Droid(d)) => eat(&format!("{d:?}").into_bytes()),
                 LockTarget::Aim(AimTarget::Station(s)) => eat(&s.to_le_bytes()),
             }
-            eat(&state.held.to_bits().to_le_bytes());
+            for held in state.held {
+                eat(&held.to_bits().to_le_bytes());
+            }
         }
     }
 }

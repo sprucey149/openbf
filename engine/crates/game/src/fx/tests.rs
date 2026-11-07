@@ -63,6 +63,57 @@ pub(super) fn one_shot_emitter() -> FxEmitter {
 }
 
 #[test]
+fn a_bf2_no_register_step_billboard_lies_in_its_node_plane() {
+    let mut em = one_shot_emitter();
+    em.geometry.kind = manifest::FxType::Billboard;
+    em.no_register_step = true;
+    let p = super::emitter::Particle {
+        basis: glam::Mat3::IDENTITY,
+        pos: Vec3::ZERO,
+        vel: Vec3::ZERO,
+        size: 2.0,
+        rot: 3.0,
+        rgba: [1.0; 4],
+        hsv: false,
+        age: 0.0,
+        idx: 0,
+        frame: None,
+    };
+    let normal = Vec3::new(0.6, 0.0, 0.8);
+    let node = super::trail::along(normal);
+    let terms = draw::view_terms_with_bias(1.0, 5.0, 1.0, 0.0);
+    let axes = |em: &manifest::FxEmitter, era: Era| {
+        let mut out = Vec::new();
+        draw::emitter_draws(
+            em,
+            era,
+            std::slice::from_ref(&p),
+            terms,
+            Vec3::ZERO,
+            node,
+            Vec3::new(0.0, 0.0, -5.0),
+            Vec3::Z,
+            None,
+            &mut out,
+        );
+        match out[0].shape {
+            render::ParticleShape::Quad { a, b, .. } => (a, b),
+            _ => panic!("a billboard draws a quad"),
+        }
+    };
+    let (a, b) = axes(&em, Era::Bf2);
+    assert!(a.dot(normal).abs() < 1e-4 && b.dot(normal).abs() < 1e-4);
+    let (a, b) = axes(&em, Era::Bf1);
+    assert!(a.z.abs() < 1e-4 && b.z.abs() < 1e-4, "BF1 stays world-axis");
+    em.no_register_step = false;
+    let (a, b) = axes(&em, Era::Bf2);
+    assert!(
+        a.z.abs() < 1e-4 && b.z.abs() < 1e-4,
+        "only NoRegisterStep follows"
+    );
+}
+
+#[test]
 fn geometry_and_child_geometry_draw_meshes_with_the_particle_transform() {
     let mut em = one_shot_emitter();
     em.spawner.size = manifest::FxRange(2.0, 0.0);

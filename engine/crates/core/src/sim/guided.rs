@@ -71,11 +71,13 @@ impl Sim {
             owner,
             team: u.team,
             weapon_class,
+            seat: None,
             pos,
             vel: fwd * c.class.speeds[1],
             rot: quat_y(u.soldier.yaw) * quat_x(u.soldier.pitch),
             pitch_rate: 0.0,
             turn_rate: 0.0,
+            roll_input: 0.0,
             bank: 0.0,
             health: c.class.health,
             energy: c.class.energy,
@@ -98,12 +100,85 @@ impl Sim {
         });
     }
 
+    pub(super) fn launch_seat_guided(
+        &mut self,
+        i: usize,
+        weapon_class: usize,
+        vehicle: crate::vehicle::VehicleHandle,
+        seat: u8,
+        muzzle: Vec3,
+        dir: Vec3,
+    ) {
+        let owner = self.handle(i);
+        let Some(c) = self.weapon_classes[weapon_class].guided.as_ref() else {
+            return;
+        };
+        if self.guided.iter().any(|r| r.owner == owner) {
+            return;
+        }
+        let fwd = dir.normalize_or_zero();
+        let right = fwd.cross(Vec3::Y).normalize_or_zero();
+        let up = right.cross(fwd).normalize_or_zero();
+        let offset = c.spawn_offset;
+        let pos = muzzle + right * offset.x + up * offset.y + fwd * offset.z;
+        let yaw = crate::fmath::atan2(-fwd.x, -fwd.z);
+        let pitch = crate::fmath::asin(fwd.y.clamp(-1.0, 1.0));
+        let (speed, health, energy) = (c.class.speeds[1], c.class.health, c.class.energy);
+        let prev_buttons = self.units[i].soldier.prev_buttons() | buttons::FIRE;
+        let team = self.units[i].team;
+        self.next_guided_id = self
+            .next_guided_id
+            .checked_add(1)
+            .expect("guided identity exhausted");
+        self.guided.push(GuidedRocket {
+            id: self.next_guided_id,
+            owner,
+            team,
+            weapon_class,
+            seat: Some((vehicle, seat)),
+            pos,
+            vel: fwd * speed,
+            rot: quat_y(yaw) * quat_x(pitch),
+            pitch_rate: 0.0,
+            turn_rate: 0.0,
+            roll_input: 0.0,
+            bank: 0.0,
+            health,
+            energy,
+            age: 0.0,
+            boosted: false,
+            prev_buttons,
+            pending_end: None,
+            blind: 0.0,
+        });
+        self.events.push(Event::Shot {
+            unit: owner,
+            weapon_class: weapon_class as u32,
+            origin: muzzle,
+            dir: fwd,
+        });
+    }
+
+    fn guided_owner_placed(&self, r: &GuidedRocket) -> bool {
+        self.unit(r.owner).is_some_and(|u| match r.seat {
+            None => u.mount.is_none(),
+            Some((vehicle, seat)) => u
+                .mount
+                .is_some_and(|m| m.vehicle == vehicle && m.seat == seat),
+        })
+    }
+
     pub(super) fn guided_pads(&mut self, pads: &mut [PadState]) -> Vec<PadState> {
         let mut routed = Vec::with_capacity(self.guided.len());
         for k in 0..self.guided.len() {
             let r = &self.guided[k];
             let owner = r.owner;
-            let Some(u) = self.unit(owner).filter(|u| u.mount.is_none()) else {
+            if !self.guided_owner_placed(r) {
+                self.guided[k].pending_end = Some(GuidedEnd::OwnerGone);
+                routed.push(PadState::default());
+                continue;
+            }
+            let Some(u) = self.unit(owner) else {
                 self.guided[k].pending_end = Some(GuidedEnd::OwnerGone);
                 routed.push(PadState::default());
                 continue;
@@ -164,12 +239,12 @@ impl Sim {
         for k in 0..count {
             let mut r = self.guided[k].clone();
             let c = self.guided_class(&r).unwrap();
-            let owner_gone = self.unit(r.owner).is_none_or(|u| u.mount.is_some());
-            if owner_gone {
+            if !self.guided_owner_placed(&r) {
                 r.pending_end = Some(GuidedEnd::OwnerGone);
-            } else if self
-                .unit(r.owner)
-                .is_some_and(|u| u.weapon_class != r.weapon_class)
+            } else if r.seat.is_none()
+                && self
+                    .unit(r.owner)
+                    .is_some_and(|u| u.weapon_class != r.weapon_class)
             {
                 r.pending_end = Some(GuidedEnd::Returned);
             }
@@ -219,6 +294,17 @@ impl Sim {
                 end,
             });
             self.release_remote(r.owner, r.prev_buttons);
+            if let Some((vehicle, seat)) = r.seat {
+                let gun = self
+                    .vehicle_mut(vehicle)
+                    .and_then(|v| v.guns.get_mut(usize::from(seat)))
+                    .and_then(Option::as_mut);
+                if let Some(gun) = gun {
+                    for w in &mut gun.weapons {
+                        w.remote_press = 2;
+                    }
+                }
+            }
             if let Some(u) = self.unit_mut(r.owner) {
                 if u.weapon_class == r.weapon_class {
                     u.weapon.remote_press = 2;

@@ -153,10 +153,15 @@ impl Fx {
                 old.owner == now.owner
                     && old.weapon_class == now.weapon_class
                     && old.visual_shot == now.visual_shot
-                    && sim.weapon_classes[now.weapon_class]
-                        .ordnance
-                        .geometry
-                        .is_some()
+                    && sim.weapon_classes.get(now.weapon_class).is_some_and(|w| {
+                        w.ordnance.geometry.is_some()
+                            || (w.ordnance.laser.is_none()
+                                && w.ordnance
+                                    .impact
+                                    .as_ref()
+                                    .and_then(|l| l.trail.as_deref())
+                                    .is_some())
+                    })
             })
             .map(|((old, id), now)| {
                 (
@@ -170,6 +175,7 @@ impl Fx {
             let Some(round) = e.round else { continue };
             if let Some((pos, vel)) = frames.get(&round) {
                 saved.push((round, e.frame));
+                e.frame.rot = along(*vel);
                 e.frame.pos = *pos;
                 e.frame.vel = *vel;
             }
@@ -225,6 +231,7 @@ impl Fx {
             let Some(r) = e.round else { continue };
             match now.get(&r) {
                 Some(&(pos, vel, _)) => {
+                    e.frame.rot = along(vel);
                     e.frame.pos = pos;
                     e.frame.vel = vel;
                 }

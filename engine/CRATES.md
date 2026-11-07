@@ -1127,4 +1127,5 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `game/tests/suite/charged_sticky.rs` 140 — explicit retained-profile class loads and stepped FIRE observations for charged spear, rock, thermal controls and mortar stages.
 
-- `game/examples/space_sweep.rs` 155 — headless multi-map Space Assault sweep across `bf2_spa1..9` reporting outcome, points, destroyed stations, shot-down flyers and crashes.
+- `game/examples/space_sweep.rs` 360 — headless multi-map Space Assault sweep across `bf2_spa1..9` reporting outcome, points, destroyed stations, shot-down flyers and crashes.
+- `game/tests/space_playtest_fixes.rs` 330 — regression checks for capital hull `ShieldLarge` impacts and sounds, flyer collision/death ODF sounds and mounted listener, `SetParticleLODBias` far fade and interpolated missile trails.

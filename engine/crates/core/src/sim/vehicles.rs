@@ -656,6 +656,9 @@ impl Sim {
             );
         }
         for u in riders {
+            if let Some(r) = self.unit_mut(u) {
+                r.soldier.pos = pos;
+            }
             match killer {
                 Some(k) => {
                     let Some(r) = self.unit_mut(u) else {

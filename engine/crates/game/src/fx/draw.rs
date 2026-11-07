@@ -43,13 +43,18 @@ use render::{ParticleDraw, ParticleShape, TextureHandle};
 /// The far distance of a BoundingRadius class (B1 `FUN_001a90d8` / `9110`
 /// / `9148`).
 pub fn far_distance(bounding_radius: f32) -> f32 {
-    if bounding_radius > 20.0 {
+    far_distance_with_bias(bounding_radius, 0.0)
+}
+
+pub fn far_distance_with_bias(bounding_radius: f32, bias: f32) -> f32 {
+    let base = if bounding_radius > 20.0 {
         500.0
     } else if bounding_radius > 5.0 {
         150.0
     } else {
         50.0
-    }
+    };
+    base + bias.max(0.0)
 }
 
 /// The keep table (`DAT_00518408`) and the fade table (`DAT_00518448`), by
@@ -79,14 +84,19 @@ pub struct ViewTerms {
 }
 
 pub fn view_terms(d: f32, bounding_radius: f32, zoom: f32) -> ViewTerms {
-    // Camera scale (B1 FUN_002b8750, B1:245811–245815).
-    let far = far_distance(bounding_radius) * zoom;
+    view_terms_with_bias(d, bounding_radius, zoom, 0.0)
+}
+
+pub fn view_terms_with_bias(d: f32, bounding_radius: f32, zoom: f32, bias: f32) -> ViewTerms {
+    // Camera scale (B1 FUN_002b8750, B1:245811–245815) + SetParticleLODBias (re-fx §8).
+    let far = far_distance_with_bias(bounding_radius, bias) * zoom;
     let fade = if d > 0.8 * far {
         1.0 - (d - 0.8 * far) / (0.2 * far)
     } else {
         1.0
     };
-    let lod = ((d - bounding_radius - 20.0) * 4.0 / (far.min(90.0) - 20.0)).max(0.0);
+    let denom = (far.min(90.0 + bias.max(0.0)) - 20.0).max(1.0);
+    let lod = ((d - bounding_radius - 20.0) * 4.0 / denom).max(0.0);
     let level = (lod as usize).min(3);
     let frac = if lod < 3.0 { 1.0 - lod.fract() } else { 1.0 };
     ViewTerms {
@@ -229,6 +239,7 @@ pub fn emitter_draws(
     particles: &[Particle],
     terms: ViewTerms,
     origin: Vec3,
+    node: glam::Mat3,
     eye: Vec3,
     forward: Vec3,
     texture: Option<TextureHandle>,
@@ -302,8 +313,14 @@ pub fn emitter_draws(
             }
         }
         FxType::Billboard => {
+            let follows_node = era == Era::Bf2 && em.no_register_step && !em.world_aligned;
             for p in particles {
                 let (a, b) = billboard_axes(era, p.rot);
+                let (a, b) = if follows_node {
+                    (node * a, node * b)
+                } else {
+                    (a, b)
+                };
                 let size = p.size * m;
                 push(
                     out,

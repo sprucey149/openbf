@@ -450,8 +450,18 @@ impl Sim {
             if let Some(m) = ai_spread_mult {
                 ws.spread_mult = m;
             }
+            let player_guided = is_player && wc.guided.is_some();
+            let guided_up = player_guided
+                && driver.is_some_and(|i| {
+                    let owner = self.handle(i);
+                    self.guided.iter().any(|r| r.owner == owner)
+                });
+            let guided_release = player_guided && ws.remote_press == 2 && held;
+            if !held {
+                ws.remote_press = 0;
+            }
             let input = FireInput {
-                held: held && !flight_blocked,
+                held: held && !flight_blocked && !guided_up && !guided_release,
                 blocked: flight_blocked,
                 infinite_ammo: infinite_cheat,
                 no_reload: no_reload_cheat,
@@ -461,6 +471,15 @@ impl Sim {
             let was_reloading = ws.reloading();
             ws.update(dt, wc, input, &mut self.lcg, &mut shots);
             let reload_began = !was_reloading && ws.reloading();
+            if shots.is_empty() && ws.salvo_counter < 1 && k < super::lock_on::LOCK_CHANNELS {
+                if let Some(i) = driver {
+                    if let crate::unit::Controller::Player { slot } = self.units[i].controller {
+                        if let Some(lock) = self.lock_on.get_mut(slot as usize) {
+                            lock.salvo_target[k] = None;
+                        }
+                    }
+                }
+            }
             if let Some(i) = driver.filter(|_| reload_began) {
                 let unit = self.handle(i);
                 self.events.push(Event::Reload {
@@ -528,6 +547,12 @@ impl Sim {
                     HullFilter::except(Some(m.vehicle)),
                 )
                 .shaped(&self.weapon_classes[w.class].ordnance);
+                if is_player && self.weapon_classes[w.class].guided.is_some() {
+                    if let Some(i) = driver {
+                        self.launch_seat_guided(i, w.class, m.vehicle, m.seat, origin, d);
+                    }
+                    continue;
+                }
                 let mut bolt = bolt;
                 bolt.charge = spec.charge;
                 // A seat's missile (card UORD §4): the cannon-class wrist
@@ -553,6 +578,15 @@ impl Sim {
                 if self.weapon_classes[w.class].secondary.is_some() {
                     let round = st.weapons[k].count_secondary_round();
                     self.fire_secondary(who, w.class, round, origin, d, spec.charge);
+                }
+            }
+            if st.weapons[k].salvo_counter < 1 && k < super::lock_on::LOCK_CHANNELS {
+                if let Some(i) = driver {
+                    if let crate::unit::Controller::Player { slot } = self.units[i].controller {
+                        if let Some(lock) = self.lock_on.get_mut(slot as usize) {
+                            lock.salvo_target[k] = None;
+                        }
+                    }
                 }
             }
         }

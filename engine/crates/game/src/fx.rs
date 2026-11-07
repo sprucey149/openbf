@@ -389,6 +389,7 @@ pub struct LiveEffect {
     /// Seconds since the spawn (the PS2's E+0xfc).
     pub t: f32,
     pub frame: Frame,
+    prev_frame: Option<Frame>,
     instances: Vec<Instance>,
     stopped: bool,
     /// The vehicle it rides and its offset in the hull's frame: the PS2
@@ -437,6 +438,7 @@ impl LiveEffect {
             def,
             t: 0.0,
             frame,
+            prev_frame: None,
             instances,
             stopped: false,
             ride: None,
@@ -457,9 +459,27 @@ impl LiveEffect {
 
     /// Advance the clock `dt` seconds.
     pub fn advance(&mut self, dt: f32) {
+        let t0 = self.t;
         self.t += dt;
+        let f1 = self.frame;
+        let f0 = self.prev_frame.unwrap_or(f1);
+        let interpolate = dt > 1e-6 && (f1.pos - f0.pos).length_squared() > 1e-6;
         for (inst, em) in self.instances.iter_mut().zip(&self.def.emitters) {
-            inst.update(em, self.t, self.frame, self.stopped);
+            if interpolate {
+                inst.update_path(em, self.t, self.stopped, |time| {
+                    let alpha = ((time - t0) / dt).clamp(0.0, 1.0);
+                    Frame {
+                        rot: f1.rot,
+                        pos: f0.pos.lerp(f1.pos, alpha),
+                        vel: f0.vel.lerp(f1.vel, alpha),
+                    }
+                });
+            } else {
+                inst.update(em, self.t, f1, self.stopped);
+            }
+        }
+        if dt > 0.0 {
+            self.prev_frame = Some(f1);
         }
     }
 
@@ -517,6 +537,18 @@ impl LiveEffect {
         assets: &mut dyn FxAssets,
         out: &mut Vec<ParticleDraw>,
     ) {
+        self.draws_with_bias(eye, forward, zoom, 0.0, assets, out);
+    }
+
+    pub(super) fn draws_with_bias(
+        &self,
+        eye: Vec3,
+        forward: Vec3,
+        zoom: f32,
+        bias: f32,
+        assets: &mut dyn FxAssets,
+        out: &mut Vec<ParticleDraw>,
+    ) {
         let era = self.def.era;
         let d = (self.frame.pos - eye).dot(forward);
         for (i, inst) in self.instances.iter().enumerate() {
@@ -524,12 +556,12 @@ impl LiveEffect {
                 continue;
             }
             let em = &self.def.emitters[i];
-            let terms = draw::view_terms(d, em.bounding_radius, zoom);
+            let terms = draw::view_terms_with_bias(d, em.bounding_radius, zoom, bias);
             if terms.fade <= 0.0 {
                 continue;
             }
             if em.geometry.kind == manifest::FxType::Emitter {
-                children::draw(self, i, era, eye, forward, zoom, assets, out);
+                children::draw(self, i, era, eye, forward, zoom, bias, assets, out);
                 continue;
             }
             if em.geometry.blend == manifest::FxBlend::Blur
@@ -569,7 +601,18 @@ impl LiveEffect {
                     }
                 }
             } else {
-                draw::emitter_draws(em, era, &ps, terms, self.frame.pos, eye, forward, tex, out);
+                draw::emitter_draws(
+                    em,
+                    era,
+                    &ps,
+                    terms,
+                    self.frame.pos,
+                    self.frame.rot,
+                    eye,
+                    forward,
+                    tex,
+                    out,
+                );
             }
         }
     }
@@ -712,6 +755,7 @@ pub struct Fx {
     force: force::State,
     sky: Vec<sky::SkyEffect>,
     storm: Option<storm::Storm>,
+    pub particle_lod_bias: f32,
 }
 
 impl std::fmt::Debug for Fx {
@@ -798,6 +842,7 @@ impl Fx {
             }
         }
         let mut fx = Fx::load(assets_dir, map_dir, game, &factions);
+        fx.particle_lod_bias = walk.particle_lod_bias;
         if let (Some(lib), Ok(mut db)) = (
             fx.library.as_ref(),
             crate::roster::load_classdb(&assets_dir.join("classes"), game, &factions),
@@ -935,10 +980,13 @@ impl Fx {
         if !spawned {
             return false;
         }
-        // The effect's own sound (`"<name> defer"`, re-weapon-sounds.md §3.1,
-        // §4.2). The PS2's explosion function plays it for a blast out of
-        // every camera's range; PROVISIONAL [H]: inside the range the
-        // effect is taken to play it itself, so it starts either way.
+        self.queue_last_effect_sound(pos);
+        true
+    }
+
+    /// Queue the `SoundName` (`"<name> defer"`, re-weapon-sounds.md §3.1, §4.2)
+    /// of the most recently spawned one-shot effect (explosions and surface/shield impacts).
+    pub(crate) fn queue_last_effect_sound(&mut self, pos: Vec3) {
         let sound = self.live.last().and_then(|e| {
             let mut next = e.def.emitters.iter().collect::<Vec<_>>();
             while let Some(em) = next.pop() {
@@ -955,7 +1003,6 @@ impl Fx {
         if let Some(s) = sound {
             self.sounds.push((s, pos));
         }
-        true
     }
 
     /// The sounds the explosions' effects started since the last call, for
@@ -1069,6 +1116,7 @@ impl Fx {
         walk: &WalkSim,
         extra: Vec<ParticleDraw>,
     ) {
+        self.particle_lod_bias = walk.particle_lod_bias;
         let saved = self.drawn_round_frames(&walk.sim);
         self.submit_zoomed(r, camera, walk.zoom_s, extra);
         self.restore_round_frames(saved);
@@ -1090,6 +1138,7 @@ impl Fx {
             storm.flash(r.lighting)
         }));
         let lift = self.ride_the_water(crate::water_anim::clock(r.water_time) as f32);
+        let bias = self.particle_lod_bias;
         if let Some(lib) = &self.library {
             let mut assets = Lookup {
                 r,
@@ -1098,10 +1147,11 @@ impl Fx {
                 models: &mut self.models,
             };
             for e in &self.live {
-                e.draws_with(
+                e.draws_with_bias(
                     camera.position,
                     camera.forward(),
                     zoom,
+                    bias,
                     &mut assets,
                     &mut out,
                 );
@@ -1111,15 +1161,17 @@ impl Fx {
                 camera.position,
                 camera.forward(),
                 zoom,
+                bias,
                 &mut assets,
                 &mut out,
             );
             for attached in &self.attached {
                 if let Some(effect) = &attached.live {
-                    effect.draws_with(
+                    effect.draws_with_bias(
                         camera.position,
                         camera.forward(),
                         zoom,
+                        bias,
                         &mut assets,
                         &mut out,
                     );

@@ -1000,6 +1000,21 @@ pub struct SoundsRon {
     /// 3.7), one per name in file order; written only when the LVL has one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub music: Vec<MusicRon>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub triggers: Vec<SoundTriggerRon>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SoundTriggerRon {
+    pub name_hash: u32,
+    pub level: u32,
+    pub groups: Vec<SoundTriggerGroupRon>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SoundTriggerGroupRon {
+    pub reinforcements: f32,
+    pub sounds: [u32; 4],
 }
 
 /// A `Music` record: the stream property it plays (a `props` entry with

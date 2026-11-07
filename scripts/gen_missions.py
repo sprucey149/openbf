@@ -988,6 +988,13 @@ MAPS = [
     ("bf2_spa7", "bf2", "SPA", {"cw": ("spa7c_ass", "spa7c_ass")}),
     ("bf2_spa8", "bf2", "SPA", {"gcw": ("spa8g_ass", "spa8g_ass")}),
     ("bf2_spa9", "bf2", "SPA", {"gcw": ("spa9g_ass", "spa9g_ass")}),
+    # Space One-Flag CTF. `<key>_1flag.ron`:
+    ("bf2_spa1", "bf2", "SPA", {"gcw": ("spa1g_1flag", "spa1g_1flag")}),
+    ("bf2_spa3", "bf2", "SPA", {"cw": ("spa3c_1flag", "spa3c_1flag")}),
+    ("bf2_spa6", "bf2", "SPA", {"cw": ("spa6c_1flag", "spa6c_1flag")}),
+    ("bf2_spa7", "bf2", "SPA", {"cw": ("spa7c_1flag", "spa7c_1flag")}),
+    ("bf2_spa8", "bf2", "SPA", {"gcw": ("spa8g_1flag", "spa8g_1flag")}),
+    ("bf2_spa9", "bf2", "SPA", {"gcw": ("spa9g_1flag", "spa9g_1flag")}),
     ("tat2",     "bf2", "tat", {"gcw": ("tat2g_eli", "tat2g_eli")}),
     ("bf2_cor1", "bf2", "COR", {"gcw": ("cor1g_eli", "cor1g_eli")}),
 ]
@@ -1020,7 +1027,7 @@ PRETTY = {
 }
 
 ERA_NAME = {"gcw": "GCW", "cw": "CW"}
-MODE_NAME = {"con": "Conquest", "ass": "Space Assault", "eli": "Hero Assault"}
+MODE_NAME = {"con": "Conquest", "ass": "Space Assault", "eli": "Hero Assault", "1flag": "1-Flag CTF"}
 
 
 
@@ -1043,7 +1050,7 @@ def facts_from_calls(seq):
          "shots": [], "ai_view": None, "ai_aggr": {}, "ai_snipe": None,
          "ai_capture": {}, "ai_damage": [], "fly": None,
          "fly_ai_max": None, "fly_ai_min": None, "fly_min": None,
-         "ground_flyer_map": False,
+         "ground_flyer_map": False, "particle_lod_bias": None,
          "bird_count": 0, "bird_types": {}, "heroes": {}, "class_load_order": [],
          "local_team_relations": []}
 
@@ -1126,6 +1133,8 @@ def facts_from_calls(seq):
             d.setdefault("landing_regions", []).append(a[0])
         elif c.name == "SetGroundFlyerMap" and a and isinstance(a[0], float):
             d["ground_flyer_map"] = a[0] != 0.0
+        elif c.name == "SetParticleLODBias" and a and isinstance(a[0], float):
+            d["particle_lod_bias"] = a[0]
         elif c.name == "ScriptCB_SetNumBots" and a and ti(a[0]) is not None:
             d["numbots"] = ti(a[0])
         elif c.name == "SetProperty" and len(a) >= 3 and \
@@ -1239,8 +1248,8 @@ NO_TICKET_LIMIT = 999999
 
 
 def mission_mode(script):
-    """The mode a mission script runs: `_ass`, `_eli`, else Conquest."""
-    for mode in ("ass", "eli"):
+    """The mode a mission script runs: `_ass`, `_eli`, `_1flag`, else Conquest."""
+    for mode in ("ass", "eli", "1flag"):
         if script.endswith("_" + mode):
             return mode
     return "con"
@@ -1420,6 +1429,25 @@ def space_facts50(calls, chunks):
     return out
 
 
+def ctf_facts50(f):
+    """Extract ObjectiveOneFlagCTF parameters from mission bytecode."""
+    calls = startup_trace50(f)
+    for c in calls:
+        if c.name.startswith("ObjectiveOneFlagCTF:New") and len(c.args) > 1 and isinstance(c.args[1], Table):
+            t = c.args[1]
+            return {
+                "flag": str(t.get("flag", "cmn_flag")),
+                "home_region": str(t.get("homeRegion", "home_1flag")),
+                "capture_region_att": str(t.get("captureRegionATT", "Team1capture")),
+                "capture_region_def": str(t.get("captureRegionDEF", "Team2capture")),
+                "cap_region_dummy_att": str(t["capRegionDummyObjectATT"]) if "capRegionDummyObjectATT" in t else None,
+                "cap_region_dummy_def": str(t["capRegionDummyObjectDEF"]) if "capRegionDummyObjectDEF" in t else None,
+                "hide_cps": bool(t.get("hideCPs", True)),
+                "score_limit": 5,
+            }
+    return None
+
+
 def build(key, game, planet, era, pc_stem, ps2_name):
     """Apply known canonical mission facts over the selected script evidence.
 
@@ -1431,6 +1459,7 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m.key, m.game, m.era, m.ps2 = key, game, era, ps2_name
     m.prov, m.dis = [], []
     m.space = None
+    m.ctf = None
 
     if PS2_ONLY:
         m.pc, src = None, ""
@@ -1458,20 +1487,23 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     else:
         calls = calls40(f) if game == "bf1" else calls50(f)
         # spa6..spa9: the map's setup is in `<map>_cmn`, run by `ScriptCB_DoFile`.
-        common = load_ps2(game, ps2_name.replace("_ass", "_cmn")) \
-            if ps2_name.endswith("_ass") else None
-        if common is None and game in GAMEPLAY_REFERENCES and ps2_name.endswith("_ass"):
+        common = load_ps2(game, ps2_name.replace("_ass", "_cmn").replace("_1flag", "_cmn")) \
+            if ps2_name.endswith(("_ass", "_1flag")) and any(ps2_name.startswith(p) for p in ("spa6", "spa7", "spa8", "spa9")) else None
+        if common is None and game in GAMEPLAY_REFERENCES and ps2_name.endswith(("_ass", "_1flag")):
             from gameplay_missions import SOURCE_SCRIPTS
-            body = SOURCE_SCRIPTS.get(game, {}).get(ps2_name.replace("_ass", "_cmn").lower())
+            body = SOURCE_SCRIPTS.get(game, {}).get(ps2_name.replace("_ass", "_cmn").replace("_1flag", "_cmn").lower())
             if body is not None:
                 common = undump50(body)
         if common is not None:
             shared = {}
             common_calls = calls50(common, globs=shared)
             calls = common_calls + calls50(f, globs=shared)
-        if mission_mode(ps2_name) == "ass":
+        if mission_mode(ps2_name) in ("ass", "1flag"):
             callbacks = callback_protos50(f) | (callback_protos50(common) if common is not None else set())
-            m.space = space_facts50(calls, [p for p in (common, f) if p is not None])
+            if mission_mode(ps2_name) == "ass":
+                m.space = space_facts50(calls, [p for p in (common, f) if p is not None])
+            elif mission_mode(ps2_name) == "1flag":
+                m.ctf = ctf_facts50(f)
             calls = [c for c in calls if c.prototype not in callbacks
                      or c.name not in ("KillObject", "SetProperty", "SetObjectTeam")]
         ps2 = facts_from_calls(calls)
@@ -1521,6 +1553,7 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m.fly_ai_min = (ps2 or {}).get("fly_ai_min")
     m.ground_flyer_map = (ps2 or {}).get("ground_flyer_map", False)
     m.landing_regions = (ps2 or {}).get("landing_regions", [])
+    m.particle_lod_bias = (ps2 or {}).get("particle_lod_bias")
     m.strings = set(consts(f, str)) if f is not None else set()
     m.door_locks = door_locks50(f) if f is not None and game == "bf2" else []
     m.arc_blocks = arc_calls50(f) if f is not None and game == "bf2" else []
@@ -1728,6 +1761,9 @@ def ron(m):
         L.append("    // AddLandingRegion: where a flyer lands, slows and holds its fire.")
         L.append("    landing_regions: [%s]," % ", ".join(
             '"%s"' % r for r in m.landing_regions))
+    if m.particle_lod_bias is not None:
+        L.append("    // SetParticleLODBias: shifts particle cull/lod distances outwards.")
+        L.append("    particle_lod_bias: Some(%s)," % fmtf(m.particle_lod_bias))
     if m.space:
         q = lambda names: ", ".join('"%s"' % n for n in names)
         sp = m.space
@@ -1773,6 +1809,25 @@ def ron(m):
             L.append('            (kind: %d, index: %d, up: %s, texts: [%s], vos: [%s]),'
                      % (e["kind"], e["index"], "true" if e["up"] else "false", pairs(e["texts"]), pairs(e["vos"])))
         L.append("        ],")
+        L.append("    )),")
+    if m.ctf:
+        ct = m.ctf
+        L.append("    // ObjectiveOneFlagCTF parameters, as the script declares them.")
+        L.append("    ctf: Some((")
+        L.append('        flag: "%s",' % ct["flag"])
+        L.append('        home_region: "%s",' % ct["home_region"])
+        L.append('        capture_region_att: "%s",' % ct["capture_region_att"])
+        L.append('        capture_region_def: "%s",' % ct["capture_region_def"])
+        if ct["cap_region_dummy_att"]:
+            L.append('        cap_region_dummy_att: Some("%s"),' % ct["cap_region_dummy_att"])
+        else:
+            L.append('        cap_region_dummy_att: None,')
+        if ct["cap_region_dummy_def"]:
+            L.append('        cap_region_dummy_def: Some("%s"),' % ct["cap_region_dummy_def"])
+        else:
+            L.append('        cap_region_dummy_def: None,')
+        L.append('        hide_cps: %s,' % ("true" if ct["hide_cps"] else "false"))
+        L.append('        score_limit: Some(%d),' % ct["score_limit"])
         L.append("    )),")
     if m.birds:
         L.append("    birds: [%s]," % ", ".join('(%s, "%s")' % (fmtf(size), name) for size, name in m.birds))
@@ -1952,7 +2007,7 @@ def main():
         PS2_BF2 = os.path.join(args.lua_root, "bf2/mission")
     if args.out:
         OUT_DIR = args.out
-        os.makedirs(OUT_DIR, exist_ok=True)
+    os.makedirs(OUT_DIR, exist_ok=True)
 
     if args.dump:
         game, name = args.dump
@@ -1969,13 +2024,13 @@ def main():
             if era not in eras:
                 continue
             stem, ps2 = eras[era]
-            if mission_mode(stem) == "ass" and not args.space:
+            if mission_mode(stem) in ("ass", "1flag") and not args.space:
                 continue
             if optional_script(game, ps2):
                 continue
             references = GAMEPLAY_REFERENCES.get(game)
-            if mission_mode(stem) == "ass" and references is not None and ps2.lower() not in references:
-                print("%s: no correction record for the source, no Space Assault mission" % key)
+            if mission_mode(stem) in ("ass", "1flag") and references is not None and ps2.lower() not in references:
+                print("%s: no correction record for the source, no %s mission" % (key, MODE_NAME.get(mission_mode(stem), "space")))
                 continue
             m = build(key, game, planet, era, stem, ps2)
             mode = mission_mode(stem)

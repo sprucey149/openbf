@@ -56,6 +56,27 @@ pub(crate) fn is_turret_base(base: &str) -> bool {
 
 /// At most this many spring points (`if (5 < count) return`, B1:102074).
 pub const MAX_SPRING_POINTS: usize = 6;
+
+/// Vehicle sound properties authored in the ODF chain (card VSND / card UCRY).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VehicleSoundClass {
+    pub collision_sound: Option<String>,
+    pub hurt_sound: Option<String>,
+    pub death_sound: Option<String>,
+    pub cockpit_sound: Option<String>,
+}
+
+impl VehicleSoundClass {
+    pub fn from_db(db: &ClassDb, class: &str) -> Self {
+        Self {
+            collision_sound: crate::roster::sound_key(db, class, "VehicleCollisionSound"),
+            hurt_sound: crate::roster::sound_key(db, class, "HurtSound"),
+            death_sound: crate::roster::sound_key(db, class, "DeathSound"),
+            cockpit_sound: crate::roster::sound_key(db, class, "Cockpit3rdPersonSound")
+                .or_else(|| crate::roster::sound_key(db, class, "Cockpit1stPersonSound")),
+        }
+    }
+}
 /// MountedTurret sections per vehicle (TURRET1..8, class+0x2678+4i).
 pub const MAX_TURRET_SECTIONS: usize = 8;
 /// `PassengerSlots` is clamped to 0..=4 (B1:102135-102150).

@@ -266,7 +266,6 @@ pub struct SpaceRound {
     pub team_text: [String; 2],
     pub win_vo: [String; 2],
     pub lose_vo: [String; 2],
-    pub briefing_vo: [String; 2],
 }
 
 impl SpaceRound {
@@ -282,38 +281,8 @@ impl SpaceRound {
             round.team_text[team] = side.text.clone();
             round.win_vo[team] = side.win_vo.clone();
             round.lose_vo[team] = side.lose_vo.clone();
-            let prefix = match side.side.to_ascii_lowercase().as_str() {
-                "all" => "A",
-                "imp" => "I",
-                "rep" => "R",
-                "cis" => "C",
-                _ => "",
-            };
-            if !prefix.is_empty() {
-                let suffix = if side.attacker { "01" } else { "02" };
-                round.briefing_vo[team] = format!("{prefix}OSMP_obj_{suffix}");
-            }
         }
         round
-    }
-
-    /// Opening spawn command voice line ("head toward the enemy capital ship..." /
-    /// "defend the flagship...") for the given team (0 attacker, 1 defender).
-    pub fn briefing_for_team(&self, team: usize) -> Option<String> {
-        if let Some(vo) = self.briefing_vo.get(team).filter(|s| !s.is_empty()) {
-            return Some(vo.clone());
-        }
-        let faction = self.faction.get(team)?;
-        let prefix = match faction.to_ascii_lowercase().as_str() {
-            "all" => "A",
-            "imp" => "I",
-            "rep" => "R",
-            "cis" => "C",
-            _ => return None,
-        };
-        let is_attacker = team == 0;
-        let suffix = if is_attacker { "01" } else { "02" };
-        Some(format!("{prefix}OSMP_obj_{suffix}"))
     }
 
     pub fn scripted(

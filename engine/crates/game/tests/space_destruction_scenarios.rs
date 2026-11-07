@@ -526,6 +526,7 @@ fn test_droid_debris_shaded_mesh_upload_and_draw_path() {
         Vec3::ZERO,
         Vec3::Z,
         1.0,
+        0.0,
         &mut DummyAssets,
         &mut particle_draws,
     );

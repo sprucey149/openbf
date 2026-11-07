@@ -1143,6 +1143,7 @@ fn full_sounds_ron() -> SoundsRon {
                 }],
             }],
         }],
+        triggers: vec![],
         music: vec![MusicRon {
             name_hash: 11,
             stream: 12,
