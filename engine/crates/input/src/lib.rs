@@ -441,6 +441,7 @@ pub fn pad_kind(pad: &gilrs::Gamepad<'_>) -> PadKind {
 pub enum PadFamily {
     /// DualShock 2 or 3, through an adapter or natively.
     Ds2,
+    /// DualShock 4, or a Nintendo Switch Pro Controller (identical layout).
     Ds4,
     Ds5,
     XboxOriginal,
@@ -453,6 +454,8 @@ const SONY: u16 = 0x054c;
 const MICROSOFT: u16 = 0x045e;
 /// GameSir's USB vendor ID: its G7 Pro is 3537:1022.
 const GAMESIR: u16 = 0x3537;
+/// Nintendo's USB vendor ID: the Switch Pro Controller is 05E4:2007.
+const NINTENDO: u16 = 0x05e4;
 const SONY_DS3: [u16; 1] = [0x0268];
 const SONY_DS4: [u16; 3] = [0x05c4, 0x09cc, 0x0ba0];
 const SONY_DS5: [u16; 2] = [0x0ce6, 0x0df2];
@@ -473,6 +476,7 @@ pub fn family_of(name: &str, hw: Option<HwId>, kind: PadKind) -> PadFamily {
         Some((MICROSOFT, p)) if MS_DUKE.contains(&p) => return PadFamily::XboxOriginal,
         Some((MICROSOFT, p)) if MS_XINPUT.contains(&p) => return PadFamily::XboxOne,
         Some((GAMESIR, _)) => return PadFamily::XboxOne,
+        Some((NINTENDO, _)) => return PadFamily::Ds4,
         _ => {}
     }
     let name = name.to_ascii_lowercase();
@@ -487,6 +491,9 @@ pub fn family_of(name: &str, hw: Option<HwId>, kind: PadKind) -> PadFamily {
         "ps4",
         // The kernel's name for the first DS4 alone.
         "sony computer entertainment",
+        // The Nintendo Switch Pro Controller copies the PS4 button layout.
+        "pro controller",
+        "nintendo",
     ]) {
         PadFamily::Ds4
     } else if has(&[
@@ -759,6 +766,9 @@ mod tests {
             ((0x3537, 0x0001), F::XboxOne),
             // A Sony ID not listed stays PlayStation.
             ((0x054c, 0x0fff), F::Ds4),
+            // Nintendo Switch Pro Controller: same layout as DS4.
+            ((0x05e4, 0x2007), F::Ds4),
+            ((0x05e4, 0x2009), F::Ds4),
             // Vendors nothing names: the fallback.
             ((0x2dc8, 0x3106), F::XboxOne),
             ((0x057e, 0x2009), F::XboxOne),
@@ -789,6 +799,8 @@ mod tests {
                 F::Ds4,
             ),
             ("Sony PLAYSTATION(R)3 Controller", Sdl, F::Ds2),
+            ("Nintendo Switch Pro Controller", Sdl, F::Ds4),
+            ("Pro Controller", Sdl, F::Ds4),
             ("Twin USB Joystick", Raw, F::XboxOne),
             ("", Raw, F::XboxOne),
         ] {
