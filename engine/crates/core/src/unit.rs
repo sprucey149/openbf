@@ -1140,8 +1140,22 @@ impl AimBlock {
     /// velocity and MaxSpeed, `decay` (m/s) and `floor` (m) the skill's of
     /// who shoots at it, `jolt` the U(-1, 1) cube the axis walks by.
     pub fn think(&mut self, dt: f32, vel: Vec3, top: f32, decay: f32, floor: f32, jolt: Vec3) {
+        self.think_scaled(dt, vel, top, decay, 1.0, floor, jolt);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn think_scaled(
+        &mut self,
+        dt: f32,
+        vel: Vec3,
+        top: f32,
+        decay: f32,
+        own_decay: f32,
+        floor: f32,
+        jolt: Vec3,
+    ) {
         let d = dt * decay;
-        self.add(-d, floor);
+        self.add(-d * own_decay, floor);
         self.budget = (self.budget + 0.5 * d).clamp(0.0, Self::BUDGET_MAX);
         let delta = (self.vel - vel).length();
         self.vel = vel;
@@ -1153,6 +1167,10 @@ impl AimBlock {
         self.quat = (self.quat * turn).normalize();
         self.from = self.dir;
         self.dir = self.quat * Vec3::Y;
+    }
+
+    pub fn trick(&mut self, floor: f32) {
+        self.add(5.0, floor);
     }
 
     /// B2 `FUN_002ae7b8`: growth is cut to the budget and taken off it; then

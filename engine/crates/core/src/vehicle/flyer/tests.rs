@@ -428,3 +428,53 @@ fn bf2_depleted_energy_recharges_while_landed_and_persists_on_relaunch() {
     near(v.flyer.energy, recharged + 7.5 * DT);
     assert!(v.flyer.energy < p.energy_max);
 }
+
+fn trick_params() -> FlyerParams {
+    FlyerParams {
+        trick_drain: 15.0,
+        trick_roll_speed: 5.0,
+        ..FlyerParams::default()
+    }
+}
+
+#[test]
+fn a_side_roll_pays_energy_once_and_refuses_while_rolling() {
+    let p = trick_params();
+    let mut v = craft(FlightPhase::Flying);
+    v.flyer.energy = 100.0;
+    side_roll(&mut v.flyer, &p, Vec3::X);
+    assert_eq!(v.flyer.energy, 85.0);
+    assert!(v.flyer.in_roll);
+    assert_eq!(v.flyer.side_roll, Vec3::X);
+    assert_eq!(v.flyer.crash_roll_target, SIDE_ROLL_ANGLE);
+    side_roll(&mut v.flyer, &p, Vec3::X);
+    assert_eq!(v.flyer.energy, 85.0);
+    assert_eq!(v.flyer.side_roll, Vec3::ZERO);
+}
+
+#[test]
+fn a_side_roll_with_too_little_energy_drains_the_craft() {
+    let p = trick_params();
+    let mut v = craft(FlightPhase::Flying);
+    v.flyer.energy = 5.0;
+    side_roll(&mut v.flyer, &p, -Vec3::X);
+    assert_eq!(v.flyer.energy, 0.0);
+    assert!(v.flyer.drained);
+    assert_eq!(v.flyer.crash_roll_target, -SIDE_ROLL_ANGLE);
+}
+
+#[test]
+fn a_side_roll_turns_a_full_circle_and_comes_back_level() {
+    let p = trick_params();
+    let mut v = craft(FlightPhase::Flying);
+    v.flyer.energy = 100.0;
+    side_roll(&mut v.flyer, &p, Vec3::X);
+    let mut ticks = 0;
+    while v.flyer.in_roll && ticks < 600 {
+        roll_update(&mut v.flyer, &p, DT);
+        ticks += 1;
+    }
+    assert!(!v.flyer.in_roll, "still rolling after {ticks} ticks");
+    assert_eq!(v.flyer.crash_roll, 0.0);
+    assert_eq!(v.flyer.crash_roll_target, 0.0);
+}

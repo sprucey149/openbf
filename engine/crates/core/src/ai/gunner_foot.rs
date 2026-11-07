@@ -997,7 +997,7 @@ pub(super) fn turret_aim(
 /// model term (`SoldierConstants::aim_size`), `stance` its
 /// [`stance_factor`], `err` its block's error, `moving` its speed over its
 /// MaxSpeed, `cap` the skill's.
-pub(super) fn radius(size: f32, stance: f32, err: f32, moving: f32, vis: f32, cap: f32) -> f32 {
+pub(crate) fn radius(size: f32, stance: f32, err: f32, moving: f32, vis: f32, cap: f32) -> f32 {
     size * (3.0 - 2.0 * vis) * (err * stance * (1.0 + ERR_SPEED_TERM * moving)).min(cap)
 }
 

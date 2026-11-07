@@ -245,6 +245,7 @@ pub fn skill_over(level: u8) -> Skill {
     k.err_decay = lerp(0.1, 1.1);
     k.err_floor = lerp(1.6, 0.4).max(0.0);
     k.err_cap = lerp(2.2, 1.2).max(0.0);
+    k.err_cap_flyer = lerp(4.0, 1.2).max(0.0);
     k
 }
 

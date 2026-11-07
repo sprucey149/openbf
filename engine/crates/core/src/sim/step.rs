@@ -19,6 +19,8 @@ use crate::weapon::FireInput;
 use crate::{TICK_DT, TICK_HZ};
 use glam::Vec3;
 
+const FLYER_OWN_DECAY: f32 = 0.5;
+
 impl Sim {
     /// Push overlapping alive units apart in XZ (see step 3b). Deterministic:
     /// pairs visited in index order, a coincident pair separates along +X.
@@ -84,6 +86,7 @@ impl Sim {
         }
         let skills = [0u8, 1, 2].map(|t| self.enemy_skill_of(t));
         let tick = self.tick;
+        let space = self.space_assault.is_some();
         for (i, u) in self.units.iter_mut().enumerate() {
             let period = if u.is_human() {
                 1
@@ -99,11 +102,28 @@ impl Sim {
             };
             let jolt = Vec3::new(draw(0), draw(0x51ED_2701), draw(0xA3DA_4E03));
             let skill = &skills[usize::from(u.team.min(2))];
-            u.aim.think(
+            let flown = u
+                .mount
+                .filter(|_| space)
+                .and_then(|m| self.vehicles.get(m.vehicle.index as usize))
+                .filter(|v| v.kind == crate::vehicle::VehicleKind::Flyer)
+                .and_then(|v| {
+                    self.flyer_params
+                        .get(v.class as usize)
+                        .and_then(Option::as_ref)
+                        .filter(|p| p.bf2)
+                        .map(|p| (v.vel, p.max_speed))
+                });
+            let (vel, top, own) = match flown {
+                Some((vel, top)) => (vel, top, FLYER_OWN_DECAY),
+                None => (u.soldier.vel, u.consts.max_speed, 1.0),
+            };
+            u.aim.think_scaled(
                 period as f32 * TICK_DT,
-                u.soldier.vel,
-                u.consts.max_speed,
+                vel,
+                top,
                 skill.err_decay,
+                own,
                 skill.err_floor,
                 jolt,
             );
@@ -1134,6 +1154,7 @@ impl Sim {
         self.tick_droids(dt, &droid_pads);
         self.tick_turrets(dt);
         self.tick_self_turrets();
+        self.tick_pilot_threats();
         self.tick_guided(&guided_pads, dt);
 
         // 5c. The pickups (PWUP): flight, life, the touch.

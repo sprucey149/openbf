@@ -270,6 +270,7 @@ Per AI think (`FUN_002b7790`: every 5th frame at LOD 0/1, 3rd at LOD 2, else eve
 - `FUN_002ae4d0` → `+0x28` effective radius =
   `min(err × (1 + 0.6·|v|/maxspeed), cap) × 2·FUN_002a76b8(target) × [0.4 if state 7 | 2 if state 2] × (3 − 2·vis)`,
   cap `max(0, lerp(2.2,1.2))` (flyers `max(0, lerp(4.0,1.2))`), both floats, `vis = ai+0x7c` (§5.3).
+  The flyer terms are ported for self-piloted turrets in a space round only (`re-space-assault.md` §19).
 - `FUN_002aec38` refreshes `vis`.
 - **CORRECTED 2026-10-09 (card CLSE, `re-soldier-ai.md` 17.2-17.3):** this block is the unit's OWN - its own
   velocity change grows `err`, its own speed, size and state make the radius, by the ENEMY team's skill (RAM: the

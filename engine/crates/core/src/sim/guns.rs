@@ -417,7 +417,8 @@ impl Sim {
                 .and_then(Option::as_ref)
                 .is_some_and(|p| p.bf2))
         .then_some(usize::from(self.vehicles[vi].flyer.ai.channel));
-        let perceived = !ai || free_burst || armed_target.is_some() || {
+        let armed_station = g.pilot && self.vehicles[vi].flyer.ai.armed_station.is_some();
+        let perceived = !ai || free_burst || armed_target.is_some() || armed_station || {
             let st = &self.units[driver.unwrap()].ai;
             st.target
                 .is_some_and(|t| st.contacts.iter().flatten().any(|c| c.handle == t))

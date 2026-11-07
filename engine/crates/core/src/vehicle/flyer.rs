@@ -16,6 +16,10 @@ pub struct FlyerParams {
     pub bf2: bool,
     pub never_crash: bool,
     pub trick_roll_speed: f32,
+    pub pilot_repair_scale: f32,
+    pub aim_box: f32,
+    pub trick_drain: f32,
+    pub trick_side_strafe: f32,
     pub has_chunks: bool,
     pub view_fov: f32,
     pub acceleration: f32,
@@ -110,6 +114,10 @@ impl Default for FlyerParams {
             bf2: false,
             never_crash: false,
             trick_roll_speed: 1.0,
+            pilot_repair_scale: 0.005,
+            aim_box: 0.0,
+            trick_drain: 15.0,
+            trick_side_strafe: 0.0,
             has_chunks: false,
             view_fov: 48.0,
             acceleration: 5.0,
@@ -192,8 +200,63 @@ pub enum FlightPhase {
     Crashed,
 }
 
+pub const THREAT_SLOTS: usize = 6;
+pub const THREAT_UNSEEN: u8 = 1;
+pub const THREAT_FORCED: u8 = 2;
+pub const THREAT_SEEN: u8 = 3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThreatObject {
+    Vehicle(super::VehicleHandle),
+    Station(u16),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PilotThreat {
+    pub object: ThreatObject,
+    pub status: u8,
+    pub tested_at: u64,
+    pub seen_at: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PilotThreats {
+    pub slots: [Option<PilotThreat>; THREAT_SLOTS],
+    pub visible: Option<u8>,
+    pub next_think: u64,
+    pub thinks: u32,
+}
+
+impl PilotThreats {
+    pub fn visible_object(&self) -> Option<ThreatObject> {
+        self.slots[usize::from(self.visible?)].map(|t| t.object)
+    }
+
+    fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        if self.thinks == 0 {
+            return;
+        }
+        eat(&self.thinks.to_le_bytes());
+        eat(&self.next_think.to_le_bytes());
+        eat(&[self.visible.map_or(255, |v| v)]);
+        for t in self.slots.iter().flatten() {
+            match t.object {
+                ThreatObject::Vehicle(h) => {
+                    eat(&h.index.to_le_bytes());
+                    eat(&h.gen.to_le_bytes());
+                }
+                ThreatObject::Station(s) => eat(&s.to_le_bytes()),
+            }
+            eat(&[t.status]);
+            eat(&t.tested_at.to_le_bytes());
+            eat(&t.seen_at.to_le_bytes());
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlyerState {
+    pub threats: PilotThreats,
     pub phase: FlightPhase,
     pub lift: f32,
     pub strafe_speed: f32,
@@ -215,6 +278,10 @@ pub struct FlyerState {
     pub crash_timer: f32,
     pub crash_roll: f32,
     pub crash_roll_target: f32,
+    pub in_roll: bool,
+    pub side_roll: Vec3,
+    pub strafe_vertical: f32,
+    pub roll_delta: f32,
     pub damager: Option<crate::unit::UnitHandle>,
     /// The AI pilot's flight state (`ai::flyer_drive`). Default unless a bot
     /// is flying it, so it adds no bytes to any other flyer's hash.
@@ -281,8 +348,11 @@ pub struct PathCursor {
 /// fields drive [`spline_step`], which writes the pose as the PS2 does.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FlyerAi {
+    pub trick: Option<Vec3>,
     pub channel: u8,
     pub armed_target: Option<super::VehicleHandle>,
+    pub armed_station: Option<u16>,
+    pub threat_thinks: u32,
     pub heavy_claim: Option<(super::VehicleHandle, u64)>,
     pub agent: FlyAgent,
     /// BF1 travel goal; BF2 temporary loiter center (flyer_drive::loiter).
@@ -349,6 +419,12 @@ impl FlyerAi {
             eat(&t.index.to_le_bytes());
             eat(&t.gen.to_le_bytes());
         }
+        if let Some(s) = self.armed_station {
+            eat(&s.to_le_bytes());
+        }
+        if self.threat_thinks != 0 {
+            eat(&self.threat_thinks.to_le_bytes());
+        }
         if let Some((t, until)) = self.heavy_claim {
             eat(&t.index.to_le_bytes());
             eat(&t.gen.to_le_bytes());
@@ -376,6 +452,7 @@ impl FlyerAi {
             }
             None => eat(&[0]),
         };
+        vec(self.trick, eat);
         vec(self.goal, eat);
         vec(self.run, eat);
         for k in 0..2 {
@@ -419,6 +496,11 @@ impl Default for FlyerState {
             crash_timer: 0.0,
             crash_roll: 0.0,
             crash_roll_target: 0.0,
+            threats: PilotThreats::default(),
+            in_roll: false,
+            side_roll: Vec3::ZERO,
+            strafe_vertical: 0.0,
+            roll_delta: 0.0,
             damager: None,
             ai: FlyerAi::default(),
         }
@@ -461,11 +543,28 @@ impl FlyerState {
                 eat(&value.to_bits().to_le_bytes());
             }
         }
+        if self.phase == FlightPhase::Flying
+            && (self.in_roll || self.crash_roll != 0.0 || self.strafe_vertical != 0.0)
+        {
+            eat(&[self.in_roll as u8]);
+            for value in [
+                self.crash_roll,
+                self.crash_roll_target,
+                self.side_roll.x,
+                self.side_roll.y,
+                self.side_roll.z,
+                self.strafe_vertical,
+                self.roll_delta,
+            ] {
+                eat(&value.to_bits().to_le_bytes());
+            }
+        }
         if let Some(d) = self.damager {
             eat(&d.index.to_le_bytes());
             eat(&d.gen.to_le_bytes());
         }
         self.ai.hash_into(eat);
+        self.threats.hash_into(eat);
     }
 }
 
@@ -553,7 +652,18 @@ pub fn rest_height(landed_height: f32) -> f32 {
 }
 
 pub const ABANDONED_CRASH_TIME: f32 = 0.5;
+const SIDE_ROLL_ANGLE: f32 = std::f32::consts::TAU * 1.1;
+const SLOW_STRAFE_STEP: f32 = 1.0 / 30.0;
 const CRASH_VELOCITY_SPIN: f32 = 0.015625;
+
+fn restore_energy(s: &mut FlyerState, p: &FlyerParams, dt: f32) {
+    if s.initialized {
+        s.energy = (s.energy + p.energy_auto_restore * dt).clamp(0.0, p.energy_max);
+        if s.energy >= 20.0_f32.min(p.energy_max) {
+            s.drained = false;
+        }
+    }
+}
 
 fn crash_spin(s: &mut FlyerState, p: &FlyerParams, sign: f32, dt: f32) {
     use std::f32::consts::{PI, TAU};
@@ -573,6 +683,115 @@ fn crash_spin(s: &mut FlyerState, p: &FlyerParams, sign: f32, dt: f32) {
             s.tilt_roll += TAU;
         }
     }
+}
+
+pub fn side_roll(s: &mut FlyerState, p: &FlyerParams, side: Vec3) {
+    if p.trick_drain == 0.0 || s.in_roll || s.drained {
+        s.side_roll = Vec3::ZERO;
+        return;
+    }
+    s.energy -= p.trick_drain;
+    if s.energy < 0.0 {
+        s.energy = 0.0;
+        s.drained = true;
+    }
+    s.side_roll = side;
+    s.crash_roll_target += if side.x < 0.0 {
+        -SIDE_ROLL_ANGLE
+    } else {
+        SIDE_ROLL_ANGLE
+    };
+    s.in_roll = true;
+    s.ai.curve = None;
+    s.ai.cursor = None;
+}
+
+fn roll_stop(s: &mut FlyerState) {
+    use std::f32::consts::{PI, TAU};
+    s.crash_roll = 0.0;
+    s.crash_roll_target = 0.0;
+    while s.tilt_roll > PI {
+        s.tilt_roll -= TAU;
+    }
+    while s.tilt_roll < -PI {
+        s.tilt_roll += TAU;
+    }
+    s.in_roll = false;
+}
+
+fn roll_update(s: &mut FlyerState, p: &FlyerParams, dt: f32) {
+    use std::f32::consts::{FRAC_PI_2, PI, TAU};
+    if s.side_roll != Vec3::ZERO && s.crash_roll == s.crash_roll_target && s.roll_delta.abs() < 0.8
+    {
+        s.side_roll = Vec3::ZERO;
+    }
+    if s.crash_roll != s.crash_roll_target {
+        s.in_roll = true;
+        if s.crash_roll_target >= s.crash_roll {
+            s.crash_roll += p.trick_roll_speed * dt;
+            if s.crash_roll > PI {
+                s.crash_roll -= TAU;
+                s.crash_roll_target -= TAU;
+                s.tilt_roll -= TAU;
+            }
+            if s.crash_roll < s.crash_roll_target {
+                return;
+            }
+        } else {
+            s.crash_roll -= p.trick_roll_speed * dt;
+            if s.crash_roll < -PI {
+                s.crash_roll += TAU;
+                s.crash_roll_target += TAU;
+                s.tilt_roll += TAU;
+            }
+            if s.crash_roll > s.crash_roll_target {
+                return;
+            }
+        }
+        if s.crash_roll_target.abs() < 0.001 {
+            roll_stop(s);
+        } else {
+            s.crash_roll = s.crash_roll_target;
+        }
+        return;
+    }
+    if s.roll_delta.abs() < 0.25 {
+        if s.crash_roll_target.abs() <= FRAC_PI_2 {
+            s.crash_roll_target = 0.0;
+            if s.crash_roll == 0.0 && s.in_roll {
+                roll_stop(s);
+            }
+        } else {
+            s.in_roll = false;
+        }
+    }
+}
+
+fn side_strafe(s: &mut FlyerState, p: &FlyerParams) {
+    let x_step = if s.side_roll.x == 0.0 {
+        SLOW_STRAFE_STEP
+    } else {
+        1.0
+    };
+    let y_step = if s.side_roll.y == 0.0 {
+        SLOW_STRAFE_STEP
+    } else {
+        1.0
+    };
+    let toward = |now: f32, want: f32, down: f32, up: f32| want.min(now + up).max(now - down);
+    let a = p.acceleration;
+    s.strafe_speed = toward(
+        s.strafe_speed,
+        s.side_roll.x * p.trick_side_strafe,
+        a * x_step,
+        a * x_step,
+    );
+    s.strafe_vertical = toward(
+        s.strafe_vertical,
+        s.side_roll.y * p.trick_side_strafe,
+        a * y_step,
+        a * x_step,
+    );
 }
 
 /// State machine and free-flight integration. `v.input` uses the same
@@ -609,11 +828,8 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     // The original blocks recovery during stunts, not ordinary boost.
     // Stunts remain unimplemented; below the normal speed ceiling a latched
     // boost can therefore recover energy before this tick's drain.
-    if p.bf2 && s.initialized && current_speed <= p.max_speed + 0.0001 {
-        s.energy = (s.energy + p.energy_auto_restore * dt).clamp(0.0, p.energy_max);
-        if s.energy >= 20.0_f32.min(p.energy_max) {
-            s.drained = false;
-        }
+    if p.bf2 && !s.in_roll && current_speed <= p.max_speed + 0.0001 {
+        restore_energy(s, p, dt);
     }
 
     if !p.bf2 {
@@ -734,6 +950,19 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         );
     }
 
+    if p.bf2 {
+        match s.phase {
+            FlightPhase::Flying => {
+                roll_update(s, p, dt);
+                side_strafe(s, p);
+            }
+            FlightPhase::Falling | FlightPhase::Crashed => {}
+            _ => {
+                roll_stop(s);
+                s.side_roll = Vec3::ZERO;
+            }
+        }
+    }
     if p.bf2 && s.phase == FlightPhase::Flying {
         let roll = if env.in_landing_region || input.strafe.abs() < 0.3 {
             0.0
@@ -744,7 +973,7 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         frame *= quat_z(s.roll_input * p.roll_rate * dt);
         if roll != 0.0 {
             s.level_time = 0.0;
-        } else if s.level_time != 0.0 && s.level_time < 0.8 {
+        } else if s.level_time != 0.0 && s.level_time < 0.8 && !s.in_roll {
             s.level_time = if input.pitch.abs() > 0.1 || input.turn.abs() > 0.1 {
                 0.01
             } else {
@@ -797,14 +1026,15 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             if p.bf2 {
                 s.omega.x = angular_slew(s.omega.x, pitch_target, p.pitch_filter, p.pitch_damp, dt);
                 s.omega.y = angular_slew(s.omega.y, turn_target, p.turn_filter, p.turn_damp, dt);
-                s.omega.z = if s.level_time >= 0.8 {
+                s.omega.z = if s.level_time >= 0.8 && !s.in_roll {
                     s.roll_input = 0.0;
                     -p.level_filter * right.y
                 } else {
                     0.0
                 };
                 let blend = (p.velocity_filter * dt).clamp(0.0, 1.0);
-                let target = v.rot * Vec3::Z * speed;
+                let target =
+                    v.rot * Vec3::Z * speed - right * s.strafe_speed - up * s.strafe_vertical;
                 v.vel = v.vel * (1.0 - blend) + target * blend;
                 let forward_speed = v.vel.dot(v.rot * Vec3::Z);
                 if forward_speed > 0.0 && forward_speed != speed {
@@ -883,13 +1113,16 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     };
     let bank_acceleration = s.omega.cross(local_velocity) / bank_divisor.max(f32::MIN_POSITIVE);
     let pitch_tilt = throttle * p.thrust_pitch_angle * s.lift + bank_acceleration.z * p.bank_angle;
-    let roll_tilt = if p.bf2 && matches!(s.phase, FlightPhase::Falling | FlightPhase::Crashed) {
-        s.crash_roll - bank_acceleration.x * p.bank_angle
-    } else {
-        input.strafe * p.strafe_roll_angle * s.lift - bank_acceleration.x * p.bank_angle
-    };
+    let rolling = s.phase == FlightPhase::Flying && (s.in_roll || s.crash_roll != 0.0);
+    let roll_tilt =
+        if p.bf2 && (rolling || matches!(s.phase, FlightPhase::Falling | FlightPhase::Crashed)) {
+            s.crash_roll - bank_acceleration.x * p.bank_angle
+        } else {
+            input.strafe * p.strafe_roll_angle * s.lift - bank_acceleration.x * p.bank_angle
+        };
     s.tilt_pitch += (pitch_tilt - s.tilt_pitch) * p.bank_filter * dt;
     s.tilt_roll += (roll_tilt - s.tilt_roll) * p.bank_filter * dt;
+    s.roll_delta = roll_tilt - s.tilt_roll;
     let angular_speed = s.omega.length();
     if angular_speed > 0.0001 {
         let (sin, cos) = fmath::sin_cos(angular_speed * dt * 0.5);
@@ -961,7 +1194,13 @@ fn roll_step(
 pub fn spline_step(v: &mut Vehicle, p: &FlyerParams, ground_map: bool, time: f32, dt: f32) {
     let f = p.follower;
     let tick_phase = (v.gen & 0xf) as f32;
+    let current_speed = v.vel.dot(v.rot * Vec3::Z);
     let s = &mut v.flyer;
+    if current_speed <= p.max_speed + 0.0001 {
+        restore_energy(s, p, dt);
+    }
+    s.strafe_speed = 0.0;
+    s.strafe_vertical = 0.0;
     s.jump_was_down = v.input.jump;
     s.lift = 1.0;
     s.omega = Vec3::ZERO;

@@ -742,13 +742,13 @@ one run; 22 relocations in 300 s.
 
 The maintainer reported almost no shots anywhere in the port, against a screen full of them on the PS2, and that nothing engaged them near the
 enemy destroyer. All numbers below are spa8. PS2: a private PCSX2 copy read over PINE, no human flying, about 12 minutes into the round, with only
-12-14 armed turrets alive. Port: seed 7, no human, 100-300 s of a 300 s run. Neither is a measurement of play with a human pilot.
+12-14 armed turrets alive (a partial count: section 19 finds 16 that hold targets). Port: seed 7, no human, 100-300 s of a 300 s run. Neither is a measurement of play with a human pilot.
 
 | | PS2 | Port before | Port now |
 |---|---|---|---|
 | Live bolts, mean (max) | 18-24 (48-53) | 0-2 | about 59 (about 80) |
 | Flyer shots per second | 20.8 | 0 | 44.7 |
-| Turret shots per second | about 3 (12-14 alive) | about 0.24 | 11.7 (about 25 alive) |
+| Turret shots per second | about 3 (12-14 alive; section 19: 1.6-2.3) | about 0.24 | 11.7 (about 25 alive) |
 | Crewed flyers | 18.9 | 0-3 | 19.4 |
 | Parked and empty | 4.3 | | 3-6 |
 | Soldiers on foot | 4.3 (plus 7.1 in other seats, 2.8 with no controller) | | 8-12 |
@@ -834,7 +834,7 @@ not that a moving approach feels like the PS2's. There is no PS2 figure to set b
 - **Bots shooting systems directly** (`Foe::Building`): the 7% above counted bolts only, so it understated pilots with targets (section 18). Plain buildings are about 4% of
   held targets on the PS2 and are not ported as pilot targets. Bigturret beams
   (`spa1_weap_imp_shipturret`, AITargetBuilding only) need station targets the port lacks.
-- **Think level** by distance to the human is not modelled for flyers or turrets, and this may be most of what the maintainer feels near the enemy ship. `measure:` a PS2
+- **Think level** by distance to the human is now modelled for space turrets and pilots (section 19). `measure:` a PS2
   round with a live human pilot near the destroyer. Nothing here measured that.
 
 ## 18. Pilot targets, weapon channel, damage effects and the crash (2026-11-06)
@@ -877,13 +877,12 @@ Port with 24 bots, 150 s (`OPENBF_MEASURE_CREW=24 OPENBF_MEASURE_SECONDS=150`, `
 | Holding a building | about .17 | .05 |
 | Holding a flyer | about .01 | .02 |
 
-`measure:` the port is well short. The likely cause is flight, not the choice: the PS2's pilots spend more time near enemy hulls (see deaths below). PC gives flyers a strafe attack pattern
-(`CombatUtil.cpp:1380`, STATE_FLY_STRAFE) whose body is not in the repository. `trace:` it in the PS2 before porting. No tuning was added to close the gap.
+Corrected by section 19: the cause offered here, that the PS2's pilots spend more time near enemy hulls, was measured and is false, and the strafe pattern's body is in `UnitFlyAttackPatterns.cpp`. The gap was the missing threat law. Channel 1 is now .53 and armed targets .14 with a full crew.
 
 Marked for replacement in `flyer_weapons.rs`:
 
 - OURS, `measure:`: the 4 s think grid is shared with the free burst (`THINK`, `THINK_STEP`). The PS2's period follows its think level.
-- OURS, `replace:`: `RAYS` 2 and the ranking by nearest. The PS2 ranks through the threat table, uniform for these turrets, before its ray checks (PC `VisionManager.cpp:155-260`, `UnitThreatManager.cpp:55`).
+- OURS, `replace:`, in rounds other than space (space now has the threat table, section 19): `RAYS` 2 and the ranking by nearest. The PS2 ranks through the threat table, uniform for these turrets, before its ray checks (PC `VisionManager.cpp:155-260`, `UnitThreatManager.cpp:55`).
 - `trace:` the flyer rule for threats ahead, weapon index 2 and up, and plain buildings or critical systems as pilot targets.
 
 The first timer of section 17 is resolved: PC `EntityFlyer.cpp:185` sets the fire timer to 10.0 in the constructor, matching the 10.00 first read live.
@@ -939,8 +938,105 @@ Port, seed 7, idle human, 600 s (`--space-report`): 111 shot, 0 crashed, 11 unse
 Hull lost on flying ships, 150 s, excluding the killing blow: PS2 8.2 per flyer per second (0.60 drops per second across 17.8 flyers), and 95% of flying time is spent in the top fifth of the hull. Port with 24 bots, 150 s: 42.7.
 
 `measure:` the two rates that differ most. Shot-down is about ten times the PS2's, hull damage about five times, and collisions are zero against 2.7 per minute. A part of the first is the moment: the PS2 save has 12-14 live turrets and the port has about 25, at about twice the rate per turret
-(section 17, nearest-target selection). Collisions may share a cause with the channel gap: the PS2's pilots fly close to hulls and the port's do not. Neither was tuned.
+(section 17, nearest-target selection). Collisions may share a cause with the channel gap: the PS2's pilots fly close to hulls and the port's do not. Neither was tuned. Section 19 measured this and found the last two claims false, and traced the damage gap.
 
 The four suite failures present at this point (`hud_layout::the_squad_cross_is_where_the_ps2_frames_have_it`, `squad_vehicle_maps::move_out_and_at_ease_reach_real_waiting_pilots_once_per_press`, `roster::aim_sizes_are_the_baked_models_boxes`,
 `roster::fill_classes_keep_the_v0_fixtures`) also failed at commit `62c94571`. They are about HUD label position, squad orders and baked class data. They were not run on a tree without that commit.
 
+## 19. Why the port's ships took five times the PS2's damage (2026-11-06)
+
+Asked of the running PS2 and the code, not guessed. Everything is spa8. PS2: a private PCSX2 copy over PINE, no human flying, a save about 12 minutes into the round; runs from that save replay one timeline, so they are one sample. Port: `OPENBF_MEASURE_CREW=20 OPENBF_MEASURE_WARM=720 OPENBF_MEASURE_SECONDS=150`, `OPENBF_MEASURE_SEED` 1-6, `pilots_turn_on_armed_buildings_and_fire_their_secondaries`. "PC" is the reference of section 18. Neither side is a measurement of a human flying.
+
+### Two wrong readings, corrected
+
+- Section 18 says the PS2's pilots spend more time near enemy hulls, and that this may explain the channel gap and the missing collisions. Measured, it is false. Share of flying time by distance to the nearest enemy hull, under 100, 200, 400, 800, 1600 m and beyond: PS2 .021, .07, .17, .285, .421, .033; port .028, .087, .239, .26, .308, .079. The port's pilots were if anything closer. 97.8% of PS2 flying time is on splines.
+- The same section says the strafe body is not in the repository. It is, in `UnitFlyAttackPatterns.cpp` (PS2 about line 253330). It is not what separates the two games here.
+- Section 17's "12-14 armed turrets" and "turret shots about 3" were a partial count. A fuller read of the save gives 16 turrets that hold targets and 1.6-2.3 turret bolts per second.
+
+### Where the PS2's hull damage comes from
+
+PS2, 150 s, 17.6 flying, damage to flyers by attacker: armed buildings 81 hits, 15685; no owner (collisions) 7 hits, 6711; other flyers 6 hits, 2250. In total 9.3 per flyer per second. So turrets are about two thirds, and pilots almost nothing.
+
+### What was missing, in the order it mattered
+
+**Pilot hull repair.** `FUN_002f5478` (lines 271520-271625; PC `Controllable.cpp:415-451`) gives a seated pilot-class unit the class's `PilotSkillRepairScale` (+0x2fc, .005 live) of maximum health per second on ships above 1400 maximum health. `core/src/sim/flyers.rs::pilot_repair`, with `SoldierConstants.pilot_skill` set from the unit type (`game/src/roster.rs`). `re-vehicles.md` said no vehicle carries AddHealth, which is true of the ODF key but misses this.
+
+**The side roll.** `FUN_0020b840` (line 121163) and lines 117385-117412 (PC `EntityFlyer.cpp:2119-2150`, 2682-2790, 4148-4157): a pilot rolls aside (the conditions: `flyer_drive.rs::side_roll_wanted`), paying `EnergyTrickDrainSingleTap` and moving at `TrickSideRollStrafeSpeed`. A started roll costs that pilot's attackers aim: the AI's error takes +5, paid from its budget (PC `EntityFlyer.cpp:5295`). `vehicle/flyer.rs::{side_roll, roll_update, side_strafe, restore_energy}`, `sim/flyers.rs::start_side_roll`. 36 rolls per 150 s on average against about 28.
+
+**The threat law for pilots and space turrets.** The port picked the nearest visible target. `FUN_002b94a0` (line 228514) scores each threat, returning 0 when a flyer observer has it behind its true nose (matrix Z, flyer +0x140). `FUN_002b9d10` updates a slot, `FUN_002b9c88` records a ray, `FUN_002b9cb0` forces. A switch needs 10 points more. PS2 live: 94% of emptied slots held a target behind the nose (n 66). Of 92 target drops in 90 s, 40 were removals for being behind and 39 were switches. Port: `core/src/sim/pilot_threats.rs` for pilots, `self_turrets.rs::threat_think` for turrets in a space round.
+
+A flyer seen by something it can fight has that object forced into its own threats if it holds nothing (`FUN_002e43c8`, lines 258415-258418). So being fired on turns pilots on turrets, which is where the PS2's channel 1 time comes from: on channel 1 .53 (PS2 .46), holding an armed building .14 (PS2 .16-.18).
+
+**The aim error on a flyer.** `FUN_002a4cc8` (line 213950), `FUN_002a50c0`, `FUN_002ae4d0`, `FUN_002ae7b8`; PC `AIUtil.cpp:585-640, 705-731`, `Controller.cpp:80-216`. The turn law aims at the target plus a bubble; the fire test's point has no bubble (`FUN_002ace58`). Radius: the target's horizontal box diagonal x (3 - 2 vis) x min(err x (1 + .6 speed/top), the flyer cap `lerp(4, 1.2)`), the weapon's `AIBubbleSizeMultiplier`, .3 when no human flies it, then `min(d / AIBubbleScaleDistDivider + .5, AIBubbleScaleClamp)`. Y is held above zero unless the target is flying. Live radii per class 9.54, 12.08, 12.36, 16.2, 9.61, 19.04 equal the model boxes for four of six. `self_turrets.rs::flyer_aim_error`, `vehicle_pads::FLYER_AIM_BOXES`. The flyer's own decay is halved (PC `Controller.cpp`). This alone did little against bots, because the bubble is 1.6-10 m.
+
+**The turret's fire line. This was the largest single fault.** The port and the PS2 share a turret's weapon timing: inside a burst .27/.37/.47 s, 1.00 s between bursts, on both. They differ in what the fire test reads. `FUN_002ace58` (PC `sIsTargetLinedUpPos`, `CombatUtil.cpp`) takes C +0xd0 and C +0xe0, the eye point and **eye direction**: the turret's own axis (`mAimMatrix` Z, PC `MountedTurret.cpp:1102`), driven by the turn law. It requires:
+
+1. eye direction within 22.5 degrees of the led target;
+2. the aimer's direction within 22.5 degrees of the eye direction (melee and droidekas exempt);
+3. under 50 m, or a miss distance along the eye direction under 20 m (200 for a flyer, 50 for a hover, walker or flyer gun; a building turret gets 20, `FUN_002a8ef0`).
+
+The port tested the aimer. The aimer reaches its target almost at once, while the turret itself has momentum: its turn rate may be 90 rad/s at full stick but its filter accepts only 10 rad/s per second, and the stick law `(1.5 sin e)^2` (PC `AIUtil.cpp` sCalculateTurnControls, port `hover_drive::shaped`) does not brake in time. So a PS2 barrel swings through its target and well past it. One hold, in degrees off target: start 91, best 12, last 104. Another: start 157, best 10, last 122. Many of its 1.6 s holds never come on line and never fire. The port's law already matched (`Turn::step`, TurnRate 90.5, PitchRate 90, filters 10, limits equal once negated). Only the test was wrong, so the port fired while the turret was still swinging. `self_turret` now tests the eye direction in a space round.
+
+| Turret, per hold | PS2 | Port before | Port now |
+|---|---|---|---|
+| Start angle median | 45 | 45 | 41-61 |
+| Reach 5 degrees, p50 and p90 s | .37, 2.0 | .33, .90 | .33-.43, 1.3-6.2 |
+| Holds that never reach 5 degrees | .46 | .15 | .35 (.22-.50) |
+| Time within 5 degrees | .30 | .52 | .29-.53 |
+| Holds with no shot | .59 | .34 | .54 |
+| Shots per held second | .49 | .97 | .53 |
+| First shot p50 and p90 s | .87, 2.81 | .43, 1.27 | .60-.83, 1.3-5.4 |
+
+The port's "before" column measured the aimer for the angles, since that was its fire line.
+
+### Result
+
+Port, six seeds, 150 s each, against the one PS2 timeline. Seed 1, 2, 3, 4, 5, 6 then the mean:
+
+| | Seeds | Mean | PS2 |
+|---|---|---|---|
+| Hull lost per flyer per s | 9.2, 12.4, 13.3, 14.2, 7.8, 7.1 | 10.7 (median 10.8) | 9.3 |
+| Turret hits | 144, 170, 148, 76, 102, 124 | 127 | 81 |
+| Turret damage | 24698, 30226, 25220, 12656, 17313, 20573 | 21700 | 15685 |
+| Collision hits | 9, 2, 15, 31, 16, 0 | 12 | 7 |
+| Collision damage | 4441, 477, 7803, 28314, 7814, 0 | 8200 | 6711 |
+| Pilot hits | 8, 24, 78, 7, 3, 3 | 21 | 6 |
+| Pilot damage | 6500, 7150, 13368, 11650, 2050, 880 | 6900 | 2250 |
+| Turrets holding a flyer | 3.91, 3.70, 3.96, 2.82, 3.05, 3.03 | 3.5 | 3.2-4.4 |
+| Turret shots per s | 2.0, 2.4, 2.2, 1.0, 1.1, 2.2 | 1.8 | 1.6-2.3 |
+| All flyer shots per s | 29.2, 29.6, 34.2, 22.9, 28.0, 23.0 | 28 | 20.3 |
+| Ships destroyed in 150 s | 19, 17, 15, 11, 10, 7 | 13 | about 16 |
+
+Hull lost was about 32 per flyer per second when this work began, and 18.9 with everything above but the fire line.
+
+### What still differs
+
+- `measure:` the PS2 column is one timeline. The port's own spread (7.1 to 14.2) is wider than the remaining gap, so these rows cannot say whether turret hits at 1.6 times the PS2's, collisions at 1.7 times and pilot hits at 3.5 times are real. The PS2 needs a second save, from another moment of a round.
+- `measure:` pilot hits come in a few close episodes: one pilot, on the nose, not its target, closing 58 to 17 m, on channel 0. That is the free burst into a ship ahead on the same spline. `trace:` whether anything on the PS2 spares that ship. PS2 hit rate .2% of bolts, port about .6%.
+- `trace:` target changes. PS2 pilots hold about 147 targets per 150 s for 1.6/3.2/4.0 s; the port 82 for 4.0/4.0/8.8 s. PS2 turrets change about 1.8 times as often as the port's, for about the same time holding. No cause is known, and damage does not seem to depend on it.
+- OURS, `trace:`: a pilot's stick stays neutral during a roll, without PS2 evidence. Flyer candidates must have an occupant (`IsSuitableEnemy` not read). Stations score relative 15 whether armed or plain, where PC `GetRelativePriority` has 10 for a plain building. The awing and xwing rows of `FLYER_AIM_BOXES` are the live PS2's 12.08 and 16.2, because the bake gives 10.94 and 15.97 (`trace:` why). Turret FORCEDSEEN is not ported (2% of live turret slots). Neither are the camera clause `FUN_001ba840`, the flag carrier clause, the medal repair clause `FUN_00360018`, the fake ray hits of PC `Ordnance.cpp:311-315`, soldiers as fallback pilot candidates, or `IsTargetLOSPossiblyBlocked` (`FUN_002b8028`), which needs last-shot distance kept per turret.
+- `replace:` ground rounds keep the old model: self-piloted turrets and pilots outside space still pick the nearest target, and ground self-turrets still test the aimer. All of this applies on the PS2 (nothing in these functions asks whether it is space), but no ground PS2 comparison has been made, and the gate hashes hold because of the split.
+- `measure:` a human near the enemy destroyer, which is the maintainer's complaint and is still not answered. See below.
+- A human pilot on the PS2 has still not been measured, and that is what the maintainer flew against. The law takes a human through its own terms (view doubled, think level, facing score, full aim bubble), but those are unmeasured against the game.
+
+### A human ship near the enemy destroyer
+
+The threat law takes a turret's view from the eye direction: inside 10 m always, otherwise within half-angle 77.5 degrees (PC `AIUtil.cpp:1314` `CanPotentiallySee`), then a clear line. The one skip of the cone is for the human's reticle target at the highest think level (PC `VisionManager.cpp`, `UpdatePotentiallyVisible`). `self_turrets.rs` passes the turret's axis as the view. The old nearest-target rule saw all round, so this is a change the maintainer will feel, and it follows the code without being measured against a human on the PS2.
+
+Port, with no other ships, a human ship parked at (-332, 247, -496): 14 of 15 enemy turrets had it outside their cone or range, and the nearest had it in cone behind a hull. None held it. Parked inside a turret's view with a clear line, 300 m along its axis, it draws fire and takes hits (`a_human_ship_in_a_turrets_view_draws_its_fire`).
+
+Port, a full round (`OPENBF_MEASURE_HUMAN=1`, crew 20, warm 720), a human ship held still 300 m outward of the enemy turret nearest the hull's centre, seeds 1-6:
+
+| Seed | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|
+| Alive, s (the run stops at 120) | 18.0 | 120 | 25.3 | 33.1 | 3.3 | 13.3 |
+| First damage, s | 10.8 | 15.5 | 20.8 | 31.6 | 2.7 | 4.3 |
+| Turrets holding it, mean | .93 | 0 | 0 | 0 | 0 | 2.7 |
+
+In four of the six the mean rounds to zero, so almost no turret held it and the damage there came from something else. The probe does not record the attacker. A ship held still is not a ship being flown, and these numbers have no PS2 column.
+
+`measure:` the way to get that column: the maintainer flies at the enemy destroyer on the PS2 while its turret slots, its bolts and the human ship's health are read over PINE (read only). Compare time to first hit, turrets holding the human, and time to death with the same flight path in the port.
+
+Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): `AudibleManager::UpdateAudience` (radius capped at 30 m; over 3 m it gives `AudibleResult` an unknown status, closer it forces; firing sets the radius to 100 before the cap), `VisionManager.cpp:448-453` (a seen target's handler forces the seer), PC `Ordnance.cpp:305-316` `AddFakeRayhitResult` (both ways, when hit by a soft collision and the bolt has lived under .4 s). Any of these could put a turret on a human the cone would miss.
+
+`FLYER_AIM_BOXES` also holds `all_la_at_gunship` and `rep_la_at_gunship`, 29.257, from the baked model's box like most rows. No gunship was among the six classes read live. `measure:` one when a save has one flying.

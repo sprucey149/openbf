@@ -49,6 +49,39 @@ pub const PAD_CLASS: &str = "com_item_vehicle_spawn";
 /// every class until the vehicle bounds are read.
 pub const VEHICLE_RADIUS: f32 = 3.0;
 
+pub const FLYER_AIM_BOXES: &[(&str, f32)] = &[
+    ("all_fly_awing", 12.08),
+    ("all_fly_kwing", 37.635),
+    ("all_fly_snowspeeder", 7.388),
+    ("all_fly_xwing", 16.2),
+    ("all_fly_ywing", 19.037),
+    ("all_la_at_gunship", 29.257),
+    ("cis_fly_droidfighter", 11.787),
+    ("cis_fly_droidgunship", 18.171),
+    ("cis_fly_geofighter", 12.633),
+    ("cis_fly_greviousfighter", 15.632),
+    ("cis_fly_maf", 21.959),
+    ("cis_fly_tridroidfighter", 8.438),
+    ("imp_fly_shuttleproto", 15.334),
+    ("imp_fly_tiebomber", 12.362),
+    ("imp_fly_tiefighter", 9.541),
+    ("imp_fly_tieinterceptor", 9.606),
+    ("imp_fly_trooptrans", 21.628),
+    ("rep_fly_anakinstarfighter", 6.985),
+    ("rep_fly_arc170fighter", 19.043),
+    ("rep_fly_jedifighter", 11.997),
+    ("rep_fly_vtrans", 51.157),
+    ("rep_fly_vwing", 10.894),
+    ("rep_la_at_gunship", 29.257),
+];
+
+pub fn flyer_aim_box(geometry: &str) -> f32 {
+    FLYER_AIM_BOXES
+        .iter()
+        .find(|(m, _)| m.eq_ignore_ascii_case(geometry))
+        .map_or(0.0, |(_, v)| *v)
+}
+
 /// The side-table row of a port faction key: (`Class<SideName>`, the
 /// `Class<Side>` stem of the Atk / Def keys).
 pub fn side_row(faction: &str) -> Option<(&'static str, &'static str)> {
@@ -625,6 +658,20 @@ pub fn install_with_objective(
                     never_crash: vehicle_class::prop_flag(&db, c, "NeverCrashWhenUnpiloted"),
                     trick_roll_speed: vehicle_class::prop_float(&db, c, "TrickRollSpeed")
                         .unwrap_or(1.0),
+                    trick_drain: vehicle_class::prop_float(&db, c, "EnergyTrickDrainSingleTap")
+                        .unwrap_or(15.0),
+                    trick_side_strafe: vehicle_class::prop_float(
+                        &db,
+                        c,
+                        "TrickSideRollStrafeSpeed",
+                    )
+                    .unwrap_or(0.0),
+                    aim_box: db
+                        .prop(c, "GeometryName")
+                        .map(|g| flyer_aim_box(g.trim()))
+                        .unwrap_or(0.0),
+                    pilot_repair_scale: vehicle_class::prop_float(&db, c, "PilotSkillRepairScale")
+                        .unwrap_or(0.005),
                     has_chunks: vehicle_class::has_chunks(&db, c),
                     view_fov: vehicle_class::seats(&db, c)
                         .first()

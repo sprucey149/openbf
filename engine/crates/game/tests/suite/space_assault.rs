@@ -513,6 +513,48 @@ fn pilots_turn_on_armed_buildings_and_fire_their_secondaries() {
     let Some(mut b) = battle("bf2_spa8", 1000) else {
         return;
     };
+    if std::env::var("OPENBF_MEASURE_POS").is_ok() {
+        for s in &b.sim.stations {
+            println!(
+                "station at {:?} hp {} max {} team {:?} instance {:?} class {} sphere {:?} {}",
+                s.pos,
+                s.health.cur,
+                s.health.max,
+                s.team,
+                s.instance,
+                s.class,
+                s.transform.transform_point3(s.sphere_centre),
+                s.sphere_radius
+            );
+        }
+        for t in &b.sim.building_turrets {
+            if let Some(v) = b.sim.vehicle(t.handle) {
+                let (c, r) = b.sim.vehicle_blast_sphere(v);
+                println!(
+                    "turret class {} team {:?} centre {c:?} radius {r}",
+                    v.class, v.team
+                );
+            }
+        }
+        for (class, setup) in b.sim.seat_setup.iter().enumerate() {
+            let Some(g) = setup
+                .as_ref()
+                .and_then(|s| s.guns.first())
+                .and_then(Option::as_ref)
+            else {
+                continue;
+            };
+            if b.sim.flyer_params.get(class).is_some_and(Option::is_some) {
+                for w in &g.weapons {
+                    let wc = &b.sim.weapon_classes[w.class];
+                    println!(
+                        "flyer {class} weapon {} range {:?} kind mask {:b}",
+                        wc.name, wc.ai_range, wc.ai_target_kind
+                    );
+                }
+            }
+        }
+    }
     let crew = std::env::var("OPENBF_MEASURE_CREW")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -533,6 +575,21 @@ fn pilots_turn_on_armed_buildings_and_fire_their_secondaries() {
                 .unwrap();
         }
     }
+    if let Some(seed) = std::env::var("OPENBF_MEASURE_SEED")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+    {
+        for _ in 0..seed {
+            b.sim.lcg.uniform(0.0, 1.0);
+        }
+    }
+    let warm: u32 = std::env::var("OPENBF_MEASURE_WARM")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    for _ in 0..(warm * core::TICK_HZ) {
+        b.sim.step(&[]);
+    }
     let flying = |v: &core::vehicle::Vehicle| {
         v.kind == core::vehicle::VehicleKind::Flyer
             && v.flyer.phase == core::vehicle::flyer::FlightPhase::Flying
@@ -541,8 +598,93 @@ fn pilots_turn_on_armed_buildings_and_fire_their_secondaries() {
     let (mut first_shots, mut second_shots) = (0u32, 0u32);
     let (mut crashing, mut destroyed) = (0u32, 0u32);
     let (mut lost, mut by_pilot, mut by_turret, mut by_other) = (0.0f32, 0u32, 0u32, 0u32);
+    if std::env::var("OPENBF_MEASURE_HUMAN").is_ok() {
+        let hull = b.station("all_cap1_body");
+        let centre = b.sim.stations[usize::from(hull)].sphere_centre;
+        let near = b
+            .sim
+            .building_turrets
+            .iter()
+            .filter(|t| t.down.is_none() && !t.self_pilots.is_empty())
+            .filter_map(|t| b.sim.vehicle(t.handle))
+            .filter(|v| v.team != Some(0))
+            .map(|v| v.pos)
+            .min_by(|a, c| a.distance(centre).total_cmp(&c.distance(centre)))
+            .expect("an enemy turret");
+        let pos = near + (near - centre).normalize() * 300.0;
+        let p = pilot_at(&mut b, 0, pos, centre);
+        let ship = b.sim.unit(p).unwrap().mount.unwrap().vehicle;
+        let start = b.sim.tick;
+        let full = b.sim.vehicle(ship).map_or(0.0, |v| v.health.cur);
+        let mut first = None;
+        let mut on_me = 0u64;
+        let mut samples = 0u64;
+        while b.sim.tick - start < 120 * u64::from(core::TICK_HZ) {
+            let Some(v) = b
+                .sim
+                .vehicle_mut(ship)
+                .filter(|v| v.alive && v.health.alive())
+            else {
+                break;
+            };
+            v.pos = pos;
+            v.vel = Vec3::ZERO;
+            b.sim.step(&[]);
+            if first.is_none() && b.sim.vehicle(ship).is_some_and(|v| v.health.cur < full) {
+                first = Some(b.sim.tick - start);
+            }
+            samples += 1;
+            on_me += b
+                .sim
+                .building_turrets
+                .iter()
+                .flat_map(|t| &t.self_pilots)
+                .filter(|sp| sp.target == Some(core::autoturret::Aim::Vehicle(ship)))
+                .count() as u64;
+        }
+        println!(
+            "human hold: alive for {:.1} s, first damage {:?} s, turrets on me {:.2}",
+            (b.sim.tick - start) as f32 / core::TICK_HZ as f32,
+            first.map(|f| f as f32 / core::TICK_HZ as f32),
+            on_me as f32 / samples.max(1) as f32
+        );
+        return;
+    }
+    let mut positions = std::env::var("OPENBF_MEASURE_POS")
+        .ok()
+        .map(|_| String::new());
     let mut hull = std::collections::HashMap::new();
     let mut was_crashing = std::collections::HashSet::new();
+    let mut pilot_hit_rows: Vec<(f32, f32, f32, bool, u8)> = Vec::new();
+    let mut near_hist = [0u32; 6];
+    let (mut hits_pilot, mut hits_turret, mut hits_other) = (0u32, 0u32, 0u32);
+    let (mut dmg_pilot, mut dmg_turret, mut dmg_other) = (0.0f32, 0.0f32, 0.0f32);
+    let (mut turret_shots, mut held_flyer, mut held_turrets, mut turret_ticks) =
+        (0u32, 0u32, 0u32, 0u32);
+    let mut held_at: Vec<f32> = Vec::new();
+    let (mut roll_starts, mut roll_ticks, mut roll_speed) = (0u32, 0u32, 0.0f32);
+    let mut rolling_was = std::collections::HashSet::new();
+    let mut roll_lengths: Vec<u32> = Vec::new();
+    let mut roll_began = std::collections::HashMap::new();
+    let mut armed_now: std::collections::HashMap<u32, (u64, f32)> =
+        std::collections::HashMap::new();
+    let (mut armed_lens, mut armed_starts): (Vec<f32>, Vec<f32>) = (Vec::new(), Vec::new());
+    let mut turret_times: std::collections::HashMap<u32, Vec<u64>> =
+        std::collections::HashMap::new();
+    let mut hold_now: std::collections::HashMap<(u32, u8), (core::autoturret::Aim, u64, u32)> =
+        std::collections::HashMap::new();
+    let mut turret_shot_counts: std::collections::HashMap<u32, u32> =
+        std::collections::HashMap::new();
+    let (mut err_bins, mut start_ang, mut reach, mut ang_now) = (
+        [0u32; 13],
+        Vec::new(),
+        [Vec::new(), Vec::new(), Vec::new()],
+        std::collections::HashMap::new(),
+    );
+    let (mut hold_lens, mut hold_shots, mut hold_empty, mut hold_count) =
+        (Vec::new(), 0u32, 0u32, 0u32);
+    let mut last_guns: std::collections::HashMap<(u32, u8), u32> = std::collections::HashMap::new();
+    let mut first_shot: Vec<f32> = Vec::new();
     let seconds = std::env::var("OPENBF_MEASURE_SECONDS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -550,10 +692,168 @@ fn pilots_turn_on_armed_buildings_and_fire_their_secondaries() {
     for _ in 0..(seconds * core::TICK_HZ) {
         b.sim.step(&[]);
         for (h, v) in b.sim.alive_vehicles() {
+            if v.kind != core::vehicle::VehicleKind::Flyer {
+                continue;
+            }
+            let at = v
+                .flyer
+                .ai
+                .armed_station
+                .map(|i| b.sim.stations[usize::from(i)].sphere_centre)
+                .or_else(|| {
+                    v.flyer
+                        .ai
+                        .armed_target
+                        .and_then(|t| b.sim.vehicle(t))
+                        .map(|t| t.pos)
+                });
+            match (at, armed_now.contains_key(&h.index)) {
+                (Some(p), false) => {
+                    armed_now.insert(h.index, (b.sim.tick, p.distance(v.pos)));
+                }
+                (None, true) => {
+                    if let Some((t, d)) = armed_now.remove(&h.index) {
+                        armed_lens.push((b.sim.tick - t) as f32 / core::TICK_HZ as f32);
+                        armed_starts.push(d);
+                    }
+                }
+                _ => {}
+            }
+            if v.flyer.in_roll {
+                roll_ticks += 1;
+                roll_speed += v.vel.length();
+                if rolling_was.insert(h) {
+                    roll_starts += 1;
+                    roll_began.insert(h, b.sim.tick);
+                }
+            } else if rolling_was.remove(&h) {
+                if let Some(at) = roll_began.remove(&h) {
+                    roll_lengths.push((b.sim.tick - at) as u32);
+                }
+            }
+        }
+        for e in &b.sim.events {
+            if let Event::Shot { unit, .. } = e {
+                if unit.index == u32::MAX {
+                    *turret_shot_counts.entry(unit.gen).or_insert(0u32) += 1;
+                }
+            }
+        }
+        for t in &b.sim.building_turrets {
+            if t.down.is_some() {
+                continue;
+            }
+            let Some(bv) = b.sim.vehicle(t.handle) else {
+                continue;
+            };
+            for p in &t.self_pilots {
+                let key = (t.handle.index, p.seat);
+                let flyer = match p.target {
+                    Some(core::autoturret::Aim::Vehicle(a)) => b
+                        .sim
+                        .vehicle(a)
+                        .filter(|v| v.kind == core::vehicle::VehicleKind::Flyer)
+                        .map(|_| core::autoturret::Aim::Vehicle(a)),
+                    _ => None,
+                };
+                if let (Some(core::autoturret::Aim::Vehicle(a)), Some(st)) = (
+                    flyer,
+                    bv.guns.get(usize::from(p.seat)).and_then(Option::as_ref),
+                ) {
+                    if let Some(tv) = b.sim.vehicle(a) {
+                        let dir = bv.rot * core::vehicle::gun::dir(st.look.0, st.look.1);
+                        let ang = dir
+                            .dot((tv.pos - bv.pos).normalize_or_zero())
+                            .clamp(-1.0, 1.0)
+                            .acos()
+                            .to_degrees();
+                        err_bins[((ang / 5.0) as usize).min(12)] += 1;
+                        let tick = b.sim.tick;
+                        let e = ang_now.entry(key).or_insert((a, tick, [false; 3]));
+                        if e.0 != a {
+                            *e = (a, tick, [false; 3]);
+                        }
+                        if e.1 == tick {
+                            start_ang.push(ang);
+                        }
+                        for (i, k) in [5.0f32, 10.0, 20.0].into_iter().enumerate() {
+                            if ang < k && !e.2[i] {
+                                e.2[i] = true;
+                                reach[i].push((tick - e.1) as f32 / core::TICK_HZ as f32);
+                            }
+                        }
+                    }
+                } else {
+                    ang_now.remove(&key);
+                }
+                let shots_now = turret_shot_counts
+                    .get(&t.handle.index)
+                    .copied()
+                    .unwrap_or(0);
+                let before = last_guns.insert(key, shots_now).unwrap_or(shots_now);
+                let mut ended = false;
+                if let Some(h) = hold_now.get_mut(&key) {
+                    if Some(h.0) == flyer {
+                        if shots_now > before {
+                            if h.2 == 0 {
+                                first_shot.push((b.sim.tick - h.1) as f32 / core::TICK_HZ as f32);
+                            }
+                            h.2 += shots_now - before;
+                        }
+                    } else {
+                        ended = true;
+                    }
+                }
+                if ended {
+                    if let Some(h) = hold_now.remove(&key) {
+                        hold_lens.push((b.sim.tick - h.1) as f32 / core::TICK_HZ as f32);
+                        hold_shots += h.2;
+                        hold_count += 1;
+                        if h.2 == 0 {
+                            hold_empty += 1;
+                        }
+                    }
+                }
+                if let (Some(a), false) = (flyer, hold_now.contains_key(&key)) {
+                    hold_now.insert(key, (a, b.sim.tick, 0));
+                }
+                turret_ticks += 1;
+                if p.target.is_some() {
+                    held_turrets += 1;
+                }
+                if let Some(core::autoturret::Aim::Vehicle(a)) = p.target {
+                    if let Some(tv) = b.sim.vehicle(a) {
+                        if tv.kind == core::vehicle::VehicleKind::Flyer {
+                            held_flyer += 1;
+                            if b.sim.tick % 15 == 0 {
+                                held_at.push(tv.pos.distance(bv.pos));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (h, v) in b.sim.alive_vehicles() {
+            if let Some(rows) = positions.as_mut().filter(|_| b.sim.tick % 15 == 0) {
+                if v.kind == core::vehicle::VehicleKind::Flyer {
+                    rows.push_str(&format!(
+                        "{},{:?},{},{},{},{}
+",
+                        v.team.map_or(-1, i32::from),
+                        v.flyer.phase,
+                        v.pos.x,
+                        v.pos.y,
+                        v.pos.z,
+                        v.has_pilot()
+                    ));
+                }
+            }
             if flying(v) && v.has_pilot() {
                 samples += 1;
                 second += u32::from(v.flyer.ai.channel == 1);
-                armed += u32::from(v.flyer.ai.armed_target.is_some());
+                armed += u32::from(
+                    v.flyer.ai.armed_target.is_some() || v.flyer.ai.armed_station.is_some(),
+                );
                 let before = hull.insert(h, v.health.cur).unwrap_or(v.health.cur);
                 if v.health.cur > 0.0 {
                     lost += (before - v.health.cur).max(0.0);
@@ -573,8 +873,92 @@ fn pilots_turn_on_armed_buildings_and_fire_their_secondaries() {
                 crashing += 1;
             }
         }
+        if b.sim.tick % 6 == 0 {
+            let fl: Vec<(u8, glam::Vec3)> = b
+                .sim
+                .alive_vehicles()
+                .filter(|(_, v)| {
+                    v.kind == core::vehicle::VehicleKind::Flyer
+                        && v.flyer.phase == core::vehicle::flyer::FlightPhase::Flying
+                })
+                .filter_map(|(_, v)| v.team.map(|t| (t, v.pos)))
+                .collect();
+            for &(t, p) in &fl {
+                let d = fl
+                    .iter()
+                    .filter(|o| o.0 != t)
+                    .map(|o| o.1.distance(p))
+                    .fold(f32::MAX, f32::min);
+                let k = [100.0, 200.0, 400.0, 800.0, 1600.0]
+                    .iter()
+                    .position(|x| d < *x)
+                    .unwrap_or(5);
+                near_hist[k] += 1;
+            }
+        }
         for e in &b.sim.events {
             match e {
+                Event::VehicleHit {
+                    shooter,
+                    vehicle,
+                    damage,
+                    ..
+                } if b
+                    .sim
+                    .vehicle(*vehicle)
+                    .is_some_and(|v| v.kind == core::vehicle::VehicleKind::Flyer) =>
+                {
+                    let by = shooter.and_then(|s| b.sim.unit(s)).and_then(|u| u.mount);
+                    match (shooter, by) {
+                        (_, Some(m))
+                            if b.sim
+                                .vehicle(m.vehicle)
+                                .is_some_and(|k| k.kind == core::vehicle::VehicleKind::Flyer) =>
+                        {
+                            hits_pilot += 1;
+                            dmg_pilot += *damage;
+                            let (sv, tv) = (b.sim.vehicle(m.vehicle), b.sim.vehicle(*vehicle));
+                            if let (Some(sv), Some(tv)) = (sv, tv) {
+                                let to = tv.pos - sv.pos;
+                                pilot_hit_rows.push((
+                                    *damage,
+                                    to.length(),
+                                    to.normalize_or_zero().dot(sv.rot * glam::Vec3::Z),
+                                    sv.flyer.ai.armed_target == Some(*vehicle),
+                                    sv.flyer.ai.channel,
+                                ));
+                            }
+                        }
+                        (None, _) => {
+                            hits_other += 1;
+                            dmg_other += *damage;
+                        }
+                        _ => {
+                            hits_turret += 1;
+                            dmg_turret += *damage;
+                        }
+                    }
+                }
+                Event::Shot {
+                    unit, weapon_class, ..
+                } if b.sim.unit(*unit).is_none_or(|u| {
+                    u.mount.is_none_or(|m| {
+                        b.sim
+                            .vehicle(m.vehicle)
+                            .is_none_or(|v| v.kind != core::vehicle::VehicleKind::Flyer)
+                    })
+                }) =>
+                {
+                    let _ = weapon_class;
+                    turret_shots += 1;
+                    if let Event::Shot { origin, .. } = e {
+                        let key = (origin.x / 8.0) as i32 as u32
+                            ^ ((origin.z / 8.0) as i32 as u32).rotate_left(12)
+                            ^ ((origin.y / 8.0) as i32 as u32).rotate_left(22);
+                        turret_times.entry(key).or_default().push(b.sim.tick);
+                    }
+                    let _ = unit;
+                }
                 Event::Shot {
                     unit, weapon_class, ..
                 } => {
@@ -626,6 +1010,165 @@ fn pilots_turn_on_armed_buildings_and_fire_their_secondaries() {
         f64::from(second_shots) / f64::from(seconds),
         f64::from(lost) / f64::from(samples.max(1)) * f64::from(core::TICK_HZ),
     );
+    {
+        let (mut within, mut pauses) = (Vec::new(), Vec::new());
+        let mut lens = std::collections::BTreeMap::new();
+        for t in turret_times.values() {
+            let mut n = 1;
+            for w in t.windows(2) {
+                let g = (w[1] - w[0]) as f32 / core::TICK_HZ as f32;
+                if g < 0.75 {
+                    n += 1;
+                    within.push(g);
+                } else {
+                    *lens.entry(n).or_insert(0) += 1;
+                    n = 1;
+                    pauses.push(g);
+                }
+            }
+            *lens.entry(n).or_insert(0) += 1;
+        }
+        within.sort_by(f32::total_cmp);
+        pauses.sort_by(f32::total_cmp);
+        let q = |l: &Vec<f32>, x: f32| l.get((l.len() as f32 * x) as usize).copied().unwrap_or(0.0);
+        println!(
+            "bursts: shooters {} lens {lens:?}; within {:.2} {:.2} {:.2}; pause {:.2} {:.2} {:.2}",
+            turret_times.len(),
+            q(&within, 0.1),
+            q(&within, 0.5),
+            q(&within, 0.9),
+            q(&pauses, 0.1),
+            q(&pauses, 0.5),
+            q(&pauses, 0.9),
+        );
+    }
+    {
+        start_ang.sort_by(f32::total_cmp);
+        let qa =
+            |l: &Vec<f32>, x: f32| l.get((l.len() as f32 * x) as usize).copied().unwrap_or(0.0);
+        println!(
+            "start angle {:.1} {:.1} {:.1} {:.1} n {}",
+            qa(&start_ang, 0.25),
+            qa(&start_ang, 0.5),
+            qa(&start_ang, 0.75),
+            qa(&start_ang, 0.9),
+            start_ang.len()
+        );
+        for r in &mut reach {
+            r.sort_by(f32::total_cmp);
+            println!(
+                "reach n {} p50 {:.2} p90 {:.2}",
+                r.len(),
+                qa(r, 0.5),
+                qa(r, 0.9)
+            );
+        }
+        let held_sum: u32 = err_bins.iter().sum();
+        println!(
+            "error share {:?}",
+            err_bins
+                .iter()
+                .map(|x| (*x as f32 / held_sum.max(1) as f32 * 1000.0).round() / 1000.0)
+                .collect::<Vec<_>>()
+        );
+        hold_lens.sort_by(f32::total_cmp);
+        first_shot.sort_by(f32::total_cmp);
+        let q = |l: &Vec<f32>, x: f32| l.get((l.len() as f32 * x) as usize).copied().unwrap_or(0.0);
+        let total: f32 = hold_lens.iter().sum();
+        println!(
+            "holds {hold_count} total {total:.0} s; len {:.2} {:.2} {:.2}; shots {hold_shots} per held s {:.2}; no shot {:.2}; first shot {:.2} {:.2} {:.2}",
+            q(&hold_lens, 0.1), q(&hold_lens, 0.5), q(&hold_lens, 0.9),
+            hold_shots as f32 / total.max(0.01),
+            hold_empty as f32 / hold_count.max(1) as f32,
+            q(&first_shot, 0.1), q(&first_shot, 0.5), q(&first_shot, 0.9),
+        );
+    }
+    {
+        armed_lens.sort_by(f32::total_cmp);
+        armed_starts.sort_by(f32::total_cmp);
+        let q = |l: &Vec<f32>, x: f32| l.get((l.len() as f32 * x) as usize).copied().unwrap_or(0.0);
+        println!(
+            "pilot holds {} len {:.1} {:.1} {:.1}; start dist {:.0} {:.0} {:.0}",
+            armed_lens.len(),
+            q(&armed_lens, 0.1),
+            q(&armed_lens, 0.5),
+            q(&armed_lens, 0.9),
+            q(&armed_starts, 0.1),
+            q(&armed_starts, 0.5),
+            q(&armed_starts, 0.9),
+        );
+    }
+    roll_lengths.sort_unstable();
+    println!(
+        "rolls {roll_starts}; length median {:.2} s; speed in roll {:.1}; repair scale {:?}",
+        f64::from(
+            roll_lengths
+                .get(roll_lengths.len() / 2)
+                .copied()
+                .unwrap_or(0)
+        ) / f64::from(core::TICK_HZ),
+        roll_speed / roll_ticks.max(1) as f32,
+        b.sim
+            .flyer_params
+            .iter()
+            .flatten()
+            .map(|p| (
+                p.pilot_repair_scale,
+                p.trick_drain,
+                p.trick_side_strafe,
+                p.trick_roll_speed
+            ))
+            .next(),
+    );
+    held_at.sort_by(f32::total_cmp);
+    {
+        let mut seen = std::collections::BTreeMap::new();
+        for (_, v) in b.sim.alive_vehicles() {
+            if v.kind == core::vehicle::VehicleKind::Flyer {
+                let setup = b
+                    .sim
+                    .seat_setup
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .map(|s| s.radius);
+                let top = b
+                    .sim
+                    .flyer_params
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .map(|p| p.max_speed);
+                seen.insert(v.class, (setup, b.sim.vehicle_blast_sphere(v).1, top));
+            }
+        }
+        println!("flyer radii class setup, blast, top: {seen:?}");
+        let total: u32 = near_hist.iter().sum();
+        println!(
+            "nearest hostile flyer bins <100,<200,<400,<800,<1600,rest {:?}",
+            near_hist
+                .iter()
+                .map(|x| (*x as f32 / total.max(1) as f32 * 1000.0).round() / 1000.0)
+                .collect::<Vec<_>>()
+        );
+        println!(
+            "pilot hit rows dmg,dist,cos,targeted,channel: {:?}",
+            pilot_hit_rows
+                .iter()
+                .map(|r| (r.0 as i32, r.1 as i32, (r.2 * 100.0) as i32, r.3, r.4))
+                .collect::<Vec<_>>()
+        );
+    }
+    println!(
+        "hits on flyers: pilot {hits_pilot} ({dmg_pilot:.0}), turret or foot {hits_turret} ({dmg_turret:.0}), none {hits_other} ({dmg_other:.0}); turret shots per s {:.1}; turrets seats {:.1}, holding {:.2}, holding a flyer {:.2}; hold distance median {:.0} p90 {:.0}",
+        f64::from(turret_shots) / f64::from(seconds),
+        f64::from(turret_ticks) / f64::from(seconds * core::TICK_HZ),
+        f64::from(held_turrets) / f64::from(seconds * core::TICK_HZ),
+        f64::from(held_flyer) / f64::from(seconds * core::TICK_HZ),
+        held_at.get(held_at.len() / 2).copied().unwrap_or(0.0),
+        held_at.get(held_at.len() * 9 / 10).copied().unwrap_or(0.0),
+    );
+    if let (Some(rows), Ok(path)) = (positions, std::env::var("OPENBF_MEASURE_POS")) {
+        std::fs::write(path, rows).unwrap();
+    }
     assert!(
         armed > 0,
         "no pilot took an armed building in {samples} samples"
@@ -693,50 +1236,55 @@ fn soldiers_who_start_out_of_reach_crew_the_ships_and_the_ships_shoot() {
 }
 
 #[test]
-fn a_human_ship_beside_the_enemy_destroyer_draws_its_turrets_fire() {
+fn a_human_ship_in_a_turrets_view_draws_its_fire() {
     let Some(mut b) = battle("bf2_spa8", 1000) else {
         return;
     };
-    let hull = b.station("all_cap1_body");
-    let centre = b.sim.stations[usize::from(hull)].sphere_centre;
     for _ in 0..(5 * core::TICK_HZ) {
         b.sim.step(&[]);
     }
-    let turrets: Vec<Vec3> = b
+    let turrets: Vec<core::vehicle::VehicleHandle> = b
         .sim
         .building_turrets
         .iter()
         .filter(|t| t.down.is_none() && !t.self_pilots.is_empty())
-        .filter_map(|t| b.sim.vehicle(t.handle))
-        .filter(|v| v.team != Some(0))
-        .map(|v| v.pos)
+        .map(|t| t.handle)
+        .filter(|h| b.sim.vehicle(*h).is_some_and(|v| v.team != Some(0)))
         .collect();
-    let near = *turrets
-        .iter()
-        .min_by(|a, c| a.distance(centre).total_cmp(&c.distance(centre)))
-        .expect("an enemy turret");
-    let pos = near + (near - centre).normalize() * 300.0;
-    let p = pilot_at(&mut b, 0, pos, centre);
+    let p = pilot_at(&mut b, 0, Vec3::new(0.0, 5000.0, 0.0), Vec3::ZERO);
     let ship = b.sim.unit(p).unwrap().mount.unwrap().vehicle;
     let full = b.sim.vehicle(ship).unwrap().health.cur;
-    let mut fired = 0;
-    for _ in 0..(30 * core::TICK_HZ) {
-        let Some(v) = b.sim.vehicle_mut(ship) else {
-            break;
+    let mut drawn = 0;
+    let mut hit = false;
+    for t in &turrets {
+        let v = b.sim.vehicle(*t).unwrap();
+        let Some(st) = v.guns.first().and_then(Option::as_ref) else {
+            continue;
         };
-        v.pos = pos;
-        v.vel = Vec3::ZERO;
-        b.sim.step(&[]);
-        fired += b
-            .sim
-            .events
-            .iter()
-            .filter(|e| matches!(e, Event::Shot { unit, .. } if unit.index == u32::MAX))
-            .count();
+        let pos = v.pos + v.rot * core::vehicle::gun::dir(st.look.0, st.look.1) * 300.0;
+        let mut fired = 0;
+        for _ in 0..(10 * core::TICK_HZ) {
+            let Some(s) = b.sim.vehicle_mut(ship) else {
+                break;
+            };
+            s.pos = pos;
+            s.vel = Vec3::ZERO;
+            b.sim.step(&[]);
+            fired += b
+                .sim
+                .events
+                .iter()
+                .filter(|e| matches!(e, Event::Shot { unit, .. } if unit.index == u32::MAX))
+                .count();
+        }
+        drawn += usize::from(fired > 0);
+        hit |= b.sim.vehicle(ship).is_none_or(|s| s.health.cur < full);
+        if hit {
+            break;
+        }
     }
-    let left = b.sim.vehicle(ship).map_or(0.0, |v| v.health.cur);
-    assert!(fired > 0, "{} turrets, no shot in 30 s", turrets.len());
-    assert!(left < full, "{fired} shots, no hit in 30 s");
+    assert!(drawn > 0, "{} turrets, none fired", turrets.len());
+    assert!(hit, "{drawn} turrets fired, no hit");
 }
 
 #[test]
@@ -1013,4 +1561,32 @@ fn ship_weapons_keep_the_discs_clips_and_reloads() {
     assert_eq!(sim.weapon_classes[missile.class].rounds_per_clip, 6);
     assert_eq!(missile.reserve_clips, 5);
     assert!(!missile.infinite);
+}
+
+#[test]
+fn flyers_carry_the_aim_boxes_the_ps2_holds() {
+    let boxes = [
+        ("imp_fly_tiefighter", 9.541),
+        ("IMP_FLY_TIEBOMBER", 12.362),
+        ("imp_fly_tieinterceptor", 9.606),
+        ("all_fly_ywing", 19.037),
+        ("all_fly_awing", 12.08),
+        ("all_fly_xwing", 16.2),
+    ];
+    for (model, size) in boxes {
+        assert_eq!(game::vehicle_pads::flyer_aim_box(model), size, "{model}");
+    }
+    assert_eq!(game::vehicle_pads::flyer_aim_box("not_a_ship"), 0.0);
+    let Some(b) = battle("bf2_spa8", 1000) else {
+        return;
+    };
+    let sizes: Vec<f32> = b
+        .sim
+        .flyer_params
+        .iter()
+        .flatten()
+        .map(|p| p.aim_box)
+        .collect();
+    assert!(!sizes.is_empty());
+    assert!(sizes.iter().all(|s| *s > 0.0), "{sizes:?}");
 }

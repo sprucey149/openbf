@@ -3871,7 +3871,7 @@ fn active_flight(
         }
         FlightPhase::Takeoff => true,
         FlightPhase::Flying => v.flyer.ai.goal.is_some() || v.flyer.ai.curve.is_some(),
-        FlightPhase::Landing | FlightPhase::Falling => false,
+        FlightPhase::Landing | FlightPhase::Falling | FlightPhase::Crashed => false,
     };
     wants_flight.then_some(m.vehicle)
 }

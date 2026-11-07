@@ -397,6 +397,10 @@ MountedTurret vtable; `live_an.py`, `live_decode.py`, `ram_turrets.py` print wha
   they have just spawned. Not measured: a bot-manned turret's trigger on the PS2 (the SAIR captures hold seated
   gunners' rows; their weapon is a cannon, so bursts are expected), and the hover stick law's rate term on a turret.
 
+## 9a. Self-piloted turrets in a space round (2026-11-06)
+
+In a space round `self_turrets.rs` follows the PS2's threat table, and aims with the turn law at the target plus the aim error on a flyer. It fires on the turret's eye direction, not the aimer's: `FUN_002ace58`, PC `sIsTargetLinedUpPos`. Evidence and numbers: `re-space-assault.md` §19. `replace:` ground rounds keep nearest-target and the aimer test until a ground comparison.
+
 ## 10. Placed self-piloted buildings in the port (2026-11-01, issue #91)
 
 BF2 placed building seats with `PilotType self` now own a stationary controller in
