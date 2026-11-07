@@ -96,6 +96,7 @@ pub mod fix;
 pub mod flyer_drive;
 pub(crate) mod flyer_weapons;
 mod gunner;
+pub use gunner::flyer_on_target;
 pub(crate) mod gunner_foot;
 pub mod hover_drive;
 mod items;

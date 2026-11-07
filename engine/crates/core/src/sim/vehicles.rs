@@ -631,6 +631,9 @@ impl Sim {
         let pilot = seated(|k| k == SeatKind::Pilot).first().copied();
         riders.extend(pilot);
         self.space_flyer_destroyed(h, killer);
+        if self.vehicles[h.index as usize].kind == VehicleKind::Flyer {
+            self.vehicles[h.index as usize].flyer.phase = FlightPhase::Crashed;
+        }
         self.events.push(Event::VehicleDestroyed {
             vehicle: h,
             class,

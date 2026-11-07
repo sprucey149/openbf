@@ -981,6 +981,21 @@ fn world(snap: &Snapshot) -> String {
         }
         s.push('\n');
     }
+    if let Some(sa) = &w.space {
+        let _ = writeln!(
+            s,
+            "  SPACE ASSAULT  score {}/{} (limit {}) | shields: team0 {:.0}%  team1 {:.0}% | systems alive: team0 {}/{}  team1 {}/{}",
+            sa.team_points[0],
+            sa.team_points[1],
+            sa.score_limit,
+            sa.shields[0] * 100.0,
+            sa.shields[1] * 100.0,
+            sa.systems_alive[0],
+            sa.systems_total[0],
+            sa.systems_alive[1],
+            sa.systems_total[1]
+        );
+    }
     let idle_turret =
         |v: &game::blackbox::VehicleRow| v.kind == 3 && v.riders.iter().all(|r| *r < 0);
     for v in w.vehicles.iter().filter(|v| !idle_turret(v)) {
@@ -990,20 +1005,47 @@ fn world(snap: &Snapshot) -> String {
             .filter(|r| **r >= 0)
             .map(|r| format!("#{r}"))
             .collect();
-        let _ =
-            writeln!(
-            s,
-            "  vehicle {:<3} {:<24} kind {} team {:<2} ({:.1},{:.1},{:.1}) hp {:.0} riders [{}]",
-            v.id,
-            snap.names.vehicles.get(v.class as usize).map_or("?", String::as_str),
-            v.kind,
-            v.team,
-            v.pos[0],
-            v.pos[1],
-            v.pos[2],
-            v.hp,
-            riders.join(" ")
-        );
+        let class_name = snap.names.vehicles.get(v.class as usize).map_or("?", String::as_str);
+        if let Some(fl) = v.flyer {
+            const PHASES: [&str; 6] = ["Landed", "Takeoff", "Flying", "Landing", "Falling", "Crashed"];
+            let phase = PHASES.get(usize::from(fl.phase)).unwrap_or(&"?");
+            let threat = match fl.threat_kind {
+                1 => format!("veh #{}", fl.threat_id),
+                2 => format!("station #{}", fl.threat_id),
+                _ => "-".into(),
+            };
+            let roll = if fl.in_roll { " [ROLL]" } else { "" };
+            let _ = writeln!(
+                s,
+                "  flyer   {:<3} {:<24} team {:<2} ({:.1},{:.1},{:.1}) hp {:.0}  {} {:.1} m/s  ch {}  threat {}{roll}  riders [{}]",
+                v.id,
+                class_name,
+                v.team,
+                v.pos[0],
+                v.pos[1],
+                v.pos[2],
+                v.hp,
+                phase,
+                fl.speed,
+                fl.channel,
+                threat,
+                riders.join(" ")
+            );
+        } else {
+            let _ = writeln!(
+                s,
+                "  vehicle {:<3} {:<24} kind {} team {:<2} ({:.1},{:.1},{:.1}) hp {:.0} riders [{}]",
+                v.id,
+                class_name,
+                v.kind,
+                v.team,
+                v.pos[0],
+                v.pos[1],
+                v.pos[2],
+                v.hp,
+                riders.join(" ")
+            );
+        }
     }
     let open = w.doors.iter().filter(|d| **d > 0.0).count();
     let _ = writeln!(
@@ -1013,6 +1055,79 @@ fn world(snap: &Snapshot) -> String {
         open,
         w.doors.len()
     );
+    s
+}
+
+fn space_view(snap: &Snapshot) -> String {
+    let mut s = String::from("SPACE ASSAULT DIAGNOSTICS\n");
+    let Some(w) = snap.world.last() else {
+        return s + "  no world frames recorded\n";
+    };
+    if let Some(sa) = &w.space {
+        let _ = writeln!(
+            s,
+            "  Score: Team 0 = {} | Team 1 = {} (Limit: {})",
+            sa.team_points[0], sa.team_points[1], sa.score_limit
+        );
+        let _ = writeln!(
+            s,
+            "  Shields: Team 0 = {:.1}% | Team 1 = {:.1}%",
+            sa.shields[0] * 100.0,
+            sa.shields[1] * 100.0
+        );
+        let _ = writeln!(
+            s,
+            "  Critical Systems Alive: Team 0 = {}/{} | Team 1 = {}/{}",
+            sa.systems_alive[0], sa.systems_total[0], sa.systems_alive[1], sa.systems_total[1]
+        );
+    } else {
+        s.push_str("  (Not a space assault round or no space objective active)\n");
+    }
+
+    s.push_str("\nACTIVE FLYERS (last world frame):\n");
+    const PHASES: [&str; 6] = ["Landed", "Takeoff", "Flying", "Landing", "Falling", "Crashed"];
+    let mut flyer_count = 0;
+    for v in &w.vehicles {
+        if v.kind != 2 {
+            continue;
+        }
+        flyer_count += 1;
+        let class_name = snap.names.vehicles.get(v.class as usize).map_or("?", String::as_str);
+        let riders: Vec<String> = v
+            .riders
+            .iter()
+            .filter(|r| **r >= 0)
+            .map(|r| format!("#{r}"))
+            .collect();
+        let rider_str = if riders.is_empty() {
+            "uncrewed".to_string()
+        } else {
+            riders.join(" ")
+        };
+        if let Some(fl) = v.flyer {
+            let phase = PHASES.get(usize::from(fl.phase)).unwrap_or(&"?");
+            let threat = match fl.threat_kind {
+                1 => format!("veh #{}", fl.threat_id),
+                2 => format!("station #{}", fl.threat_id),
+                _ => "-".into(),
+            };
+            let roll = if fl.in_roll { " [ROLL]" } else { "" };
+            let _ = writeln!(
+                s,
+                "  #{:<2} {:<24} team {:<2} pos ({:>6.1},{:>6.1},{:>6.1}) hp {:>4.0} | {:<7} {:>5.1} m/s | ch {} | threat {:<12}{roll} | crew [{}]",
+                v.id, class_name, v.team, v.pos[0], v.pos[1], v.pos[2], v.hp, phase, fl.speed, fl.channel, threat, rider_str
+            );
+        } else {
+            let _ = writeln!(
+                s,
+                "  #{:<2} {:<24} team {:<2} pos ({:>6.1},{:>6.1},{:>6.1}) hp {:>4.0} | (no flyer telemetry) | crew [{}]",
+                v.id, class_name, v.team, v.pos[0], v.pos[1], v.pos[2], v.hp, rider_str
+            );
+        }
+    }
+    if flyer_count == 0 {
+        s.push_str("  none\n");
+    }
     s
 }
 
@@ -1143,14 +1258,14 @@ fn main() -> anyhow::Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("{a} wants a value"))?;
                 view = Some((a.clone(), Some(v.clone())));
             }
-            "--events" | "--sounds" | "--frames" => view = Some((a.clone(), None)),
+            "--events" | "--sounds" | "--frames" | "--space" => view = Some((a.clone(), None)),
             "--replay-spot" => {
                 let v = it.next_if(|n| n.parse::<u32>().is_ok()).cloned();
                 view = Some((a.clone(), v));
             }
             f if !f.starts_with("--") => file = Some(std::path::PathBuf::from(f)),
             other => anyhow::bail!(
-                "unknown view {other} (--unit <id>, --near x,y,z,r, --events, --sounds, --frames, --replay-spot [id])"
+                "unknown view {other} (--unit <id>, --near x,y,z,r, --events, --sounds, --frames, --space, --replay-spot [id])"
             ),
         }
     }
@@ -1198,6 +1313,7 @@ fn main() -> anyhow::Result<()> {
         Some(("--events", _)) => print!("{}", events(&snap, None)),
         Some(("--sounds", _)) => print!("{}", game::blackbox::sound_digest(&snap, None)),
         Some(("--frames", _)) => {}
+        Some(("--space", _)) => print!("{}", space_view(&snap)),
         Some(("--replay-spot", v)) => {
             print!("{}", replay_spot(&snap, v.and_then(|x| x.parse().ok())))
         }

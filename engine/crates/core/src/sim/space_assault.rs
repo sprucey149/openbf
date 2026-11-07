@@ -374,10 +374,13 @@ impl Sim {
             .filter(|f| f.frigate == station)
             .flat_map(|f| f.turrets.iter().copied())
             .collect();
+        let already_spent = self.stations[usize::from(station)].health.max == SPENT_MAX_HEALTH;
         if let Some(points) = critical {
-            self.space_objective_progress(station, objective);
-            self.space_score_system(station, points, attacker);
-            self.stations[usize::from(station)].health.max = SPENT_MAX_HEALTH;
+            if !already_spent {
+                self.space_objective_progress(station, objective);
+                self.space_score_system(station, points, attacker);
+                self.stations[usize::from(station)].health.max = SPENT_MAX_HEALTH;
+            }
         }
         for i in collapsing {
             if let Some(g) = self.space_assault.as_mut().map(|sa| &mut sa.shields[i]) {

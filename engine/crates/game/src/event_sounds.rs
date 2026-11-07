@@ -334,6 +334,14 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                 let x = setup.and_then(|b| b.as_ref()?.explosion.as_ref());
                 boom(x.map(|x| &x.look), *pos, &mut play);
             }
+            Event::FlyerImpact { pos, lethal, .. } => {
+                let sound = if *lethal {
+                    "com_weap_veh_crash"
+                } else {
+                    "com_weap_veh_scrape"
+                };
+                play(sound, *pos);
+            }
             // Card DROIDDEATH: the burst's explosion class authors no
             // SoundProperty on either disc; the noise heard is the droid's
             // DeathSound, started by the kill (`cries`).

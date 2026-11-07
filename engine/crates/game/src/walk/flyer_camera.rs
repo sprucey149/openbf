@@ -12,6 +12,9 @@ const SNAP_SQUARED: f32 = 62_500.0;
 const DEGREES: f32 = 0.017_453_294;
 const FOV_RATE: f32 = 25.0;
 const DEFAULT_THIRD_FOV: f32 = 48.0;
+/// The camera detach factor during Falling / Crashed (SWBFRNT2.ELF FUN_0020d450 line 122651:
+/// move tension scaled by 0.25f, allowing camera to lag behind falling/crashing craft).
+pub const FLYER_CRASH_DETACH_RATE: f32 = 0.25;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlyerCam {
@@ -208,8 +211,30 @@ impl WalkSim {
         let (target, ideal) = self.flyer_ideal(v, &section, frame, rot);
         let (settled, _) =
             self.settle_camera(CamKind::Seat, target, ideal, v.instance, Some(handle));
+        let move_tension = if matches!(
+            v.flyer.phase,
+            core::vehicle::flyer::FlightPhase::Falling
+                | core::vehicle::flyer::FlightPhase::Crashed
+        ) {
+            [
+                [
+                    section.move_tension[0][0] * FLYER_CRASH_DETACH_RATE,
+                    section.move_tension[0][1] * FLYER_CRASH_DETACH_RATE,
+                ],
+                [
+                    section.move_tension[1][0] * FLYER_CRASH_DETACH_RATE,
+                    section.move_tension[1][1] * FLYER_CRASH_DETACH_RATE,
+                ],
+                [
+                    section.move_tension[2][0] * FLYER_CRASH_DETACH_RATE,
+                    section.move_tension[2][1] * FLYER_CRASH_DETACH_RATE,
+                ],
+            ]
+        } else {
+            section.move_tension
+        };
         let eye = held.map_or(settled, |c| {
-            lag_eye(c.eye, settled, rot, &section.move_tension, core::TICK_DT)
+            lag_eye(c.eye, settled, rot, &move_tension, core::TICK_DT)
         });
         let goal = section.fov_at(self.flyer_speed_fraction(v, &section));
         let was = self

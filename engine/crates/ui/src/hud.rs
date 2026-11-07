@@ -201,6 +201,7 @@ pub use crate::hud_space::{feed_lock, HudLock};
 #[derive(Debug, Clone, Default)]
 pub struct HudModel {
     pub lock: Option<HudLock>,
+    pub incoming_missile: Option<f32>,
     pub hints: Vec<crate::hud_tree::HintMarker>,
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
@@ -327,7 +328,13 @@ pub const RETICLE_COLORS: [[u8; 3]; 3] = [
 /// like the PS2's publishers, so call it every frame. `has_mesh` answers
 /// whether a model of that name can be drawn (the NameMesh fallback).
 pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
-    feed_lock(hud, m.lock.as_ref(), m.space.clone(), has_mesh);
+    feed_lock(
+        hud,
+        m.lock.as_ref(),
+        m.incoming_missile,
+        m.space.clone(),
+        has_mesh,
+    );
     hud.hint_markers.clone_from(&m.hints);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     put("initialize", EventValue::None);
@@ -1039,6 +1046,7 @@ mod tests {
     fn model() -> HudModel {
         HudModel {
             lock: None,
+            incoming_missile: None,
             hints: Vec::new(),
             team_points: None,
             space: None,

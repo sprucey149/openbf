@@ -372,6 +372,9 @@ pub struct ExplosionClass {
     /// a combo's PlayExplosion passes its soldier as the owner (FUN_00340350,
     /// B2:335530).
     pub hurt_owner: bool,
+    /// `NumChunks` (byte at class+0xa4 B1 / class+0xd0 B2, ctor 0).
+    /// If > 0, launches up to min(NumChunks, 10) explosion debris chunks (re-vehicle-death §1).
+    pub num_chunks: u8,
     /// Its `Effect` / `WaterEffect` (card FXP3, [`crate::impact`]).
     /// Render-only: the sim never reads it; filled by the game's class
     /// loader.
@@ -390,6 +393,7 @@ impl Default for ExplosionClass {
             push_outer: 0.0,
             spares_living: false,
             hurt_owner: true,
+            num_chunks: 0,
             look: crate::impact::ExplosionLook::default(),
         }
     }
@@ -419,6 +423,9 @@ impl ExplosionClass {
         }
         if let Some(v) = pf(src, "HurtOwner") {
             e.hurt_owner = v != 0.0;
+        }
+        if let Some(v) = pf(src, "NumChunks") {
+            e.num_chunks = v.clamp(0.0, 255.0) as u8;
         }
         e
     }

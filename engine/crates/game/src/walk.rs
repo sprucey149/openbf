@@ -721,6 +721,7 @@ pub struct WalkSim {
     pub cam_jet_lag: Vec3,
     pub cam_flyer: Option<FlyerCam>,
     seat_view: Option<Camera>,
+    pub seat_view_timer: f32,
     /// The camera collision's stored track fraction (B1 `FUN_0019fd70`,
     /// [`crate::camera_collide::ease_pull`]): stepped each tick, it lets a
     /// pulled-in camera return slowly. Visual only.
@@ -873,6 +874,7 @@ impl WalkSim {
             cam_jet_lag: Vec3::ZERO,
             cam_flyer: None,
             seat_view: None,
+            seat_view_timer: 0.0,
             cam_pull: 1.0,
             cam_pull_track: None,
             fov_scale: 1.0,
@@ -1253,6 +1255,12 @@ impl WalkSim {
         self.cam_jet_lag = self.next_cam_jet_lag();
         self.step_cam_pull();
         self.cam_flyer = self.next_cam_flyer();
+        let me = self.sim.units.get(self.player.index as usize);
+        if me.is_some_and(|u| u.alive && u.mount.is_some()) {
+            self.seat_view_timer = camera::DEATH_VIEW_HOLD;
+        } else if self.seat_view_timer > 0.0 {
+            self.seat_view_timer = (self.seat_view_timer - core::TICK_DT).max(0.0);
+        }
         self.seat_view = self.next_seat_view();
         // The squad's answers to this tick's orders join the voice queue;
         // the units' combat calls wait for the sound bank's gates
@@ -1428,7 +1436,8 @@ pub(crate) fn turret_test_walk() -> (WalkSim, usize, usize) {
 
 mod camera;
 mod flyer_camera;
-pub use flyer_camera::FlyerCam;
+pub use camera::DEATH_VIEW_HOLD;
+pub use flyer_camera::{FlyerCam, FLYER_CRASH_DETACH_RATE};
 
 #[cfg(test)]
 mod tests;

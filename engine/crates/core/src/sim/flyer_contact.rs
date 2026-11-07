@@ -202,8 +202,14 @@ impl Sim {
             if other.is_some_and(|o| o.flying) {
                 return true;
             }
+            // Takeoff destruction of non-flying object / pad (SWBFRNT2.ELF-decomp.c lines 121671-121685, DAT_00689738)
+            if let Some(o) = other.filter(|o| !o.flying) {
+                self.destroy_vehicle(o.handle, None);
+            }
             if n.y < CEILING_NORMAL {
                 self.vehicles[i].flyer.phase = FlightPhase::Landing;
+                self.vehicles[i].pos += n * hit.depth;
+                return true;
             }
         }
         if let Some(o) = other.filter(|o| o.flyer && !o.flying) {
@@ -233,19 +239,42 @@ impl Sim {
                 }
             }
         }
-        if damage > 0.0 {
+        let will_die = damage >= self.vehicles[i].health.cur && self.vehicles[i].health.cur > 0.0;
+        let was_falling = matches!(phase, FlightPhase::Falling | FlightPhase::Crashed)
+            || self.vehicles[i].flyer.phase == FlightPhase::Falling;
+        let lethal = will_die || was_falling;
+
+        if damage > 0.0 && self.vehicles[i].health.cur > 0.0 {
             self.damage_vehicle(handle, &collision_desc(damage), 1.0, None);
         }
-        if !self.vehicle(handle).is_some_and(|v| v.alive) {
+
+        if lethal {
+            self.events.push(crate::sim::Event::FlyerImpact {
+                vehicle: handle,
+                pos: self.vehicles[i].pos,
+                normal: n,
+                speed: -along,
+                damage,
+                lethal: true,
+            });
+            self.vehicles[i].pos += n * hit.depth;
+            self.vehicles[i].flyer.phase = FlightPhase::Crashed;
+            if self.vehicle(handle).is_some_and(|v| v.alive) {
+                let killer = self.vehicles[i].flyer.damager;
+                self.destroy_vehicle(handle, killer);
+            }
             return false;
         }
-        if matches!(phase, FlightPhase::Falling | FlightPhase::Crashed)
-            || self.vehicles[i].flyer.phase == FlightPhase::Falling
-        {
-            let killer = self.vehicles[i].flyer.damager;
-            self.destroy_vehicle(handle, killer);
-            return false;
-        }
+
+        self.events.push(crate::sim::Event::FlyerImpact {
+            vehicle: handle,
+            pos: self.vehicles[i].pos,
+            normal: n,
+            speed: -along,
+            damage,
+            lethal: false,
+        });
+
         let mut impulse = RESTITUTION * along;
         if other.is_some_and(|o| o.flying) {
             impulse *= 0.5;

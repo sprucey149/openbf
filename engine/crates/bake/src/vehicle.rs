@@ -351,7 +351,7 @@ fn bake_droidekas(
         for name in std::iter::once(geometry).chain(
             e.props
                 .iter()
-                .filter(|p| p.key_hash == PROP_CHUNK_GEOMETRY)
+                .filter(|p| p.key_hash == PROP_CHUNK_GEOMETRY && !p.value.trim().is_empty())
                 .map(|p| p.value.as_str()),
         ) {
             if geometries.iter().any(|g| g.name.eq_ignore_ascii_case(name)) {
@@ -429,7 +429,7 @@ pub fn bake_vehicles(
         let chunk_names: Vec<String> = e
             .props
             .iter()
-            .filter(|p| p.key_hash == PROP_CHUNK_GEOMETRY)
+            .filter(|p| p.key_hash == PROP_CHUNK_GEOMETRY && !p.value.trim().is_empty())
             .map(|p| p.value.clone())
             .collect();
         for g in std::iter::once(geometry).chain(chunk_names.iter().map(String::as_str)) {
@@ -498,6 +498,7 @@ pub fn bake_vehicles(
                         .is_some_and(|n| n.eq_ignore_ascii_case(&g.name))
                         || e.props.iter().any(|p| {
                             p.key_hash == PROP_CHUNK_GEOMETRY
+                                && !p.value.trim().is_empty()
                                 && p.value.eq_ignore_ascii_case(&g.name)
                         })
                 })

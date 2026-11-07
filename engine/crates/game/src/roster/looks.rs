@@ -137,7 +137,9 @@ pub fn chunk_death(db: &ClassDb, class: &str) -> Option<core::unit::ChunkDeath> 
     Some(core::unit::ChunkDeath {
         frequency: DROID_CHUNK_CHANCE,
         explosion: db
-            .prop(class, "ExplosionName")
+            .prop(class, "ExplosionDestruct")
+            .or_else(|| db.prop(class, "ExplosionName"))
+            .or_else(|| db.prop(class, "Explosion"))
             .map(str::trim)
             .filter(|n| !n.is_empty())
             .and_then(|n| explosion_class(db, n)),

@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// The death view hold time in seconds (SWBFRNT2.ELF line 333652: *(float *)(param_1 + 0x158) = 4.0f).
+pub const DEATH_VIEW_HOLD: f32 = 4.0;
+
 impl WalkSim {
     pub fn camera(&self) -> Camera {
         self.camera_track().0
@@ -66,13 +69,16 @@ impl WalkSim {
     pub(super) fn next_seat_view(&self) -> Option<Camera> {
         let me = self.sim.units.get(self.player.index as usize)?;
         if !me.alive {
-            return self.seat_view;
+            return (self.seat_view_timer > 0.0).then_some(()).and(self.seat_view);
         }
         me.mount.is_some().then(|| self.camera())
     }
 
     fn held_seat_view(&self) -> Option<Camera> {
         let me = self.sim.units.get(self.player.index as usize)?;
+        if self.seat_view_timer <= 0.0 {
+            return None;
+        }
         self.seat_view.filter(|_| !me.alive && !me.body)
     }
 

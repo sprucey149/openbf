@@ -113,6 +113,9 @@ pub struct VehicleVisuals {
     /// models, drawn with the vehicles so every draw site has them.
     items: super::pickups::PickupVisuals,
     chunks: HashMap<String, ClassVis>,
+    textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
+    texture_uploads: usize,
+    texture_cache_hits: usize,
 }
 
 /// One side's baked vehicles: its directory and geometry → LOD0 model.
@@ -293,6 +296,14 @@ impl VehicleVisuals {
         self.shadows_on = on;
     }
 
+    pub fn texture_uploads(&self) -> usize {
+        self.texture_uploads
+    }
+
+    pub fn texture_cache_hits(&self) -> usize {
+        self.texture_cache_hits
+    }
+
     /// World-space shadow triangles the last [`Self::draws`] submitted.
     pub fn shadow_triangles(&self) -> usize {
         self.shadow_triangles.len() / 3
@@ -321,23 +332,32 @@ impl VehicleVisuals {
             spec_cull: spec_cull(scene, cull),
             items: super::pickups::PickupVisuals::new(assets_dir, &game, cull),
             chunks: HashMap::new(),
+            textures: HashMap::new(),
+            texture_uploads: 0,
+            texture_cache_hits: 0,
         };
-        let mut textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>> =
-            HashMap::new();
         for g in geometry {
-            let parts =
-                g.as_deref()
-                    .and_then(|g| match upload_class(r, scene, &sides, &mut textures, g) {
-                        Ok(Some(p)) => Some(p),
-                        Ok(None) => {
-                            eprintln!("vehicles: no model for geometry {g}");
-                            None
-                        }
-                        Err(e) => {
-                            eprintln!("vehicles: {g}: {e:#}");
-                            None
-                        }
-                    });
+            let parts = g.as_deref().and_then(|g| {
+                match upload_class(
+                    r,
+                    scene,
+                    &sides,
+                    &mut out.textures,
+                    &mut out.texture_uploads,
+                    &mut out.texture_cache_hits,
+                    g,
+                ) {
+                    Ok(Some(p)) => Some(p),
+                    Ok(None) => {
+                        eprintln!("vehicles: no model for geometry {g}");
+                        None
+                    }
+                    Err(e) => {
+                        eprintln!("vehicles: {g}: {e:#}");
+                        None
+                    }
+                }
+            });
             out.classes.push(parts);
         }
         out
@@ -352,13 +372,20 @@ impl VehicleVisuals {
     ) -> Vec<String> {
         let game = scene.manifest.source_game.to_ascii_lowercase();
         let sides = VehicleSides::load(assets_dir, &game);
-        let mut textures = HashMap::new();
         for name in names {
             let key = name.to_ascii_lowercase();
             if self.chunks.contains_key(&key) {
                 continue;
             }
-            match upload_class(r, scene, &sides, &mut textures, &key) {
+            match upload_class(
+                r,
+                scene,
+                &sides,
+                &mut self.textures,
+                &mut self.texture_uploads,
+                &mut self.texture_cache_hits,
+                &key,
+            ) {
                 Ok(Some(visual)) => {
                     self.chunks.insert(key, visual);
                 }
@@ -690,6 +717,8 @@ fn upload_class(
     scene: &Scene,
     sides: &VehicleSides,
     textures: &mut HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
+    texture_uploads: &mut usize,
+    texture_cache_hits: &mut usize,
     geometry: &str,
 ) -> Result<Option<ClassVis>> {
     let owned: CpuMesh;
@@ -733,7 +762,18 @@ fn upload_class(
         }
         None => None,
     };
-    let mut visual = upload_parts(r, scene, sides, textures, cpu, home, rig, joints)?;
+    let mut visual = upload_parts(
+        r,
+        scene,
+        sides,
+        textures,
+        texture_uploads,
+        texture_cache_hits,
+        cpu,
+        home,
+        rig,
+        joints,
+    )?;
     if scene.manifest.source_game.eq_ignore_ascii_case("bf1") {
         if let Some(path) = shadow_path.filter(|p| pak::is_file(p)) {
             let load = || -> Result<Vec<(render::ShadowMesh, Option<usize>)>> {
@@ -770,6 +810,8 @@ pub(super) fn upload_parts(
     scene: &Scene,
     sides: &VehicleSides,
     textures: &mut HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
+    texture_uploads: &mut usize,
+    texture_cache_hits: &mut usize,
     cpu: &CpuMesh,
     home: Option<usize>,
     rig: Option<WalkerRig>,
@@ -778,7 +820,16 @@ pub(super) fn upload_parts(
     let mut parts = Vec::new();
     for (k, (mesh, mat, layer, _)) in upload_submeshes(r, cpu)?.into_iter().enumerate() {
         let texture = match mat {
-            Some(name) => texture(r, scene, sides, home, textures, name)?,
+            Some(name) => texture(
+                r,
+                scene,
+                sides,
+                home,
+                textures,
+                texture_uploads,
+                texture_cache_hits,
+                name,
+            )?,
             None => None,
         };
         if texture.is_none() && super::route_untextured(mat) != super::Untextured::LookupFailed {
@@ -832,27 +883,40 @@ fn compact(idx: &[u32], vertices: usize) -> (Vec<u32>, Vec<u32>) {
 }
 
 /// Upload (once; misses cached too) a texture [`find_texture`] finds.
+#[allow(clippy::too_many_arguments)]
 fn texture(
     r: &mut Renderer,
     scene: &Scene,
     sides: &VehicleSides,
     home: Option<usize>,
     cache: &mut HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
+    uploads: &mut usize,
+    hits: &mut usize,
     name: &str,
 ) -> Result<Option<TextureHandle>> {
     let name = name.to_ascii_lowercase();
     let source = find_texture(&scene.manifest, sides, home, &name);
     let key = (source, name.clone());
     if let Some(&t) = cache.get(&key) {
+        *hits += 1;
         return Ok(t);
     }
     let found = match source {
         None => None,
         Some(TexSource::Map) => match scene.textures.get(&name) {
-            Some(t) => Some(upload_cpu_texture(r, t, &name)?),
+            Some(t) => {
+                *uploads += 1;
+                Some(upload_cpu_texture(r, t, &name)?)
+            }
             None => None,
         },
-        Some(TexSource::Side(i)) => upload_texture_file(r, &sides.dir(i).join("textures"), &name)?,
+        Some(TexSource::Side(i)) => {
+            let res = upload_texture_file(r, &sides.dir(i).join("textures"), &name)?;
+            if res.is_some() {
+                *uploads += 1;
+            }
+            res
+        }
     };
     cache.insert(key, found);
     Ok(found)

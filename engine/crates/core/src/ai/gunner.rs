@@ -268,7 +268,7 @@ fn led_flyer(sim: &Sim, eye: glam::Vec3, e: &crate::unit::Unit, speed: f32) -> O
     Some(lead_point(centre - eye, v.vel, speed).map_or(centre, |rel| eye + rel))
 }
 
-pub(super) fn flyer_on_target(nose: glam::Vec3, to: glam::Vec3) -> bool {
+pub fn flyer_on_target(nose: glam::Vec3, to: glam::Vec3) -> bool {
     let d2 = to.length_squared();
     if nose.dot(to.normalize_or_zero()) <= fmath::sin_cos(FLYER_AIM_CONE).1 {
         return false;

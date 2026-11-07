@@ -730,6 +730,7 @@ pub(super) fn hud_model(
             .then(|| feed.target(&walk.sim, slot))
             .flatten(),
         lock: hud_lock(walk, feed, slot, aspect),
+        incoming_missile: walk.sim.incoming_missile(slot),
         hints: hud_hints(walk, feed, slot, aspect),
         reticle_y: walk.reticle_y(),
         dead: !me.alive,

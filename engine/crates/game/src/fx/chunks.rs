@@ -529,11 +529,23 @@ impl Chunks {
                         .and_then(|g| side.nodes.get(&g.to_ascii_lowercase()))
                 })
                 .map_or(&[][..], Vec::as_slice);
-            for slot in chunk_properties(db.chain(name)) {
+            let mut slots = chunk_properties(db.chain(name));
+            if !slots
+                .iter()
+                .any(|s| s.props.get(&hash("ChunkGeometryName")).is_some_and(|m| !m.trim().is_empty()))
+            {
+                if let Some(exp) = crate::vehicle_class::explosion_name(db, name) {
+                    slots = chunk_properties(db.chain(&exp));
+                }
+            }
+            for slot in slots {
                 let props = &slot.props;
                 let Some(model) = props.get(&hash("ChunkGeometryName")) else {
                     continue;
                 };
+                if model.trim().is_empty() {
+                    continue;
+                }
                 let text = |key: &str| props.get(&hash(key)).map(String::as_str);
                 let number = |key: &str| text(key).and_then(|v| v.trim().parse::<f32>().ok());
                 let vector = |key: &str| {
@@ -581,7 +593,7 @@ impl Chunks {
                 };
                 let ps2 = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
                 let omega = vector("ChunkOmega").map_or(Vec3::ZERO, |w| Vec3::new(-w.x, -w.y, w.z));
-                specs.push(Arc::new(Spec {
+                let spec = Arc::new(Spec {
                     model: model.to_owned(),
                     prim,
                     local,
@@ -624,7 +636,14 @@ impl Chunks {
                         .collect(),
                     node: text("ChunkNodeName").and_then(|n| node_matrix(vehicle_nodes, n)),
                     node_name: text("ChunkNodeName").map(|n| n.trim().to_owned()),
-                }));
+                });
+                let count = text("NumChunks")
+                    .or_else(|| db.prop(name, "NumChunks"))
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .map_or(1, |n| n.clamp(1, 10));
+                for _ in 0..count {
+                    specs.push(Arc::clone(&spec));
+                }
             }
             if !specs.is_empty() {
                 out.defs.insert(name.clone(), specs);
@@ -975,6 +994,7 @@ fn chunk_properties(chain: Vec<&crate::classdb::ClassDef>) -> Vec<Slot> {
         "ChunkSmokeEffect",
         "ChunkSmokeNodeName",
         "ChunkNodeName",
+        "NumChunks",
     ]
     .map(hash)
     .into();

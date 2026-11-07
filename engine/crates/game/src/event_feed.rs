@@ -765,6 +765,9 @@ impl EventFeed {
             }
             if let Event::VehicleHit {
                 vehicle, damage, ..
+            }
+            | Event::FlyerImpact {
+                vehicle, damage, ..
             } = *e
             {
                 let mount = sim.unit(viewer).and_then(|u| u.mount);

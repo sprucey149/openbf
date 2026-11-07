@@ -23,9 +23,23 @@ pub struct HudLock {
 pub fn feed_lock(
     hud: &mut Hud,
     lock: Option<&HudLock>,
+    incoming_missile: Option<f32>,
     m_space: Option<SpaceStatus>,
     has_mesh: &dyn Fn(&str) -> bool,
 ) {
+    match incoming_missile {
+        Some(d) => {
+            hud.publish("player1.missileLock", EventValue::None, has_mesh);
+            hud.publish("player1.missileLockDistance", EventValue::Number(d), has_mesh);
+        }
+        None => {
+            if hud.last("player1.missileLock").is_some() {
+                hud.forget("player1.missileLock");
+                hud.forget("player1.missileLockDistance");
+                hud.send("player1.missileLockDisable", EventValue::None, has_mesh);
+            }
+        }
+    }
     const ID: &str = "hud.lockOn.id";
     const WEAPON: [(&str, &str); 2] = [
         (

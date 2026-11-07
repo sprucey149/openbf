@@ -38,6 +38,8 @@ pub struct LockOn {
     cycled: Vec<LockTarget>,
     button: f32,
     down: bool,
+    pub incoming_missile: bool,
+    pub incoming_distance: f32,
 }
 
 pub(super) struct LockProbe {
@@ -205,7 +207,30 @@ impl Sim {
                 }
                 continue;
             };
+            let mut state = std::mem::take(&mut self.lock_on[slot]);
+            let flyer_pos = self.vehicle(own).map_or(Vec3::ZERO, |v| v.pos);
+            let mut nearest_incoming: Option<f32> = None;
+            for b in &self.bolts {
+                let Some(m) = b.missile else {
+                    continue;
+                };
+                if b.hit != crate::projectile::Hit::None {
+                    continue;
+                }
+                let targeted = match m.target {
+                    Some(MissileTarget::Vehicle(vh)) => vh == own,
+                    Some(MissileTarget::Unit(uh)) => uh == h,
+                    _ => false,
+                };
+                if targeted {
+                    let d = (b.pos - flyer_pos).length();
+                    nearest_incoming = Some(nearest_incoming.map_or(d, |min| min.min(d)));
+                }
+            }
+            state.incoming_missile = nearest_incoming.is_some();
+            state.incoming_distance = nearest_incoming.unwrap_or(0.0);
             let Some(gun) = self.lock_gun(h) else {
+                self.lock_on[slot] = state;
                 continue;
             };
             let c = &self.weapon_classes[gun];
@@ -213,7 +238,6 @@ impl Sim {
             let team = self.units[h.index as usize].team;
             let ray = self.flyer_ray(h);
             let pressed = pads.get(slot).is_some_and(|p| p.pressed(buttons::RELOAD));
-            let mut state = std::mem::take(&mut self.lock_on[slot]);
             let edge = pressed && !state.down;
             state.down = pressed;
             state.button = if pressed { state.button + dt } else { 0.0 };
@@ -354,6 +378,15 @@ impl Sim {
             .and_then(|s| s.weapons.get(weapon).map(|w| w.class))
             .and_then(|c| self.weapon_classes.get(c))
             .is_some_and(|c| c.lock_time > 0.0 && state.held >= c.lock_time)
+    }
+
+    pub fn incoming_missile(&self, slot: usize) -> Option<f32> {
+        let state = self.lock_on.get(slot)?;
+        if state.incoming_missile {
+            Some(state.incoming_distance)
+        } else {
+            None
+        }
     }
 
     pub(super) fn seat_lock_target(

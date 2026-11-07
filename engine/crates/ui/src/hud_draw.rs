@@ -386,7 +386,10 @@ impl<'a> Ctx<'a> {
         };
         if !marker.on_screen {
             let turn = marker.ndc[0].atan2(-marker.ndc[1]);
-            let m = Mat4::from_rotation_z(turn) * Mat4::from_scale(Vec3::splat(style.min_scale));
+            let t = ((marker.distance - LOCK_RAMP_NEAR) / (LOCK_RAMP_FAR - LOCK_RAMP_NEAR))
+                .clamp(0.0, 1.0);
+            let s = t * style.min_scale + (1.0 - t) * style.max_scale;
+            let m = Mat4::from_rotation_z(turn) * Mat4::from_scale(Vec3::splat(s));
             self.quad(style.elem, &m, &screen, &quad);
             return;
         }

@@ -477,12 +477,38 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
                 ammo,
                 ..
             } => format!(
-                "{tick},station_served,{station},{},{}
-",
+                "{tick},station_served,{station},{},{}\n",
                 unit.map(|u| u.index.to_string())
                     .or_else(|| vehicle.map(|v| format!("v{}", v.index)))
                     .unwrap_or_default(),
                 u8::from(*health) | u8::from(*ammo) << 1
+            ),
+            Event::FlagPickedUp { flag, unit, team } => {
+                format!("{tick},flag_picked_up,{flag},{team},{}\n", unit.index)
+            }
+            Event::FlagDropped { flag, team, pos } => format!(
+                "{tick},flag_dropped,{flag},{team},{:.2}:{:.2}:{:.2}\n",
+                pos.x, pos.y, pos.z
+            ),
+            Event::FlagCaptured { flag, team } => {
+                format!("{tick},flag_captured,{flag},{team},\n")
+            }
+            Event::FlagReturned { flag, team } => {
+                format!("{tick},flag_returned,{flag},{team},\n")
+            }
+            Event::FlagReset { flag } => {
+                format!("{tick},flag_reset,{flag},,\n")
+            }
+            Event::FlyerImpact {
+                vehicle,
+                damage,
+                speed,
+                lethal,
+                ..
+            } => format!(
+                "{tick},flyer_impact,{},{damage:.1},{speed:.1},{}\n",
+                vehicle.index,
+                u8::from(*lethal)
             ),
         };
         csv.push_str(&line);
