@@ -265,7 +265,7 @@ impl Sim {
                 .iter()
                 .filter_map(|s| s.occupant)
                 .filter_map(|o| self.unit(o))
-                .any(|o| matches!(o.controller, Controller::Player { .. }));
+                .any(|o| o.is_human());
             !human_aboard && !self.balance_seen(v.pos, UNSEEN_FLYER_RADIUS, UNSEEN_FLYER_FAR)
         })
     }

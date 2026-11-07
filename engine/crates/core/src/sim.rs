@@ -64,6 +64,7 @@ mod missiles;
 mod native_teams;
 mod ordnance;
 mod pickups;
+mod pilot_threats;
 mod population;
 mod remotes;
 mod repair;
@@ -73,16 +74,14 @@ mod round;
 mod saber;
 mod saber_throw;
 mod seats;
-mod pilot_threats;
 mod self_turrets;
 mod space_assault;
 mod space_balance;
-mod target_hints;
-pub use space_balance::SpaceBalance;
 mod spawn;
 mod state;
 mod stations;
 mod step;
+mod target_hints;
 mod tow;
 pub mod trace;
 mod traffic;
@@ -117,6 +116,7 @@ pub use space_assault::{
     CapitalMeter, CriticalSystem, FrigateTurrets, LinkedTurretSet, ShieldGroup, SpaceAssault,
     DEFAULT_SCORE_LIMIT, FIGHTER_KILL_POINTS, SPENT_MAX_HEALTH, UNMANNED_FLYER_POINTS,
 };
+pub use space_balance::SpaceBalance;
 pub use spawn::{ClassAmmo, ClassRefusal, SideChoice, SpawnStage, SpawnWaves, CLASS_CHANGE_FACING};
 pub use state::{
     omni_radius_for, Call, Cheats, DeathCause, Event, Hazard, MissionAi, NavStats, Sim, TickCost,

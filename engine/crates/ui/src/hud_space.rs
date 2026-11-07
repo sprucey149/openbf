@@ -1,10 +1,111 @@
+use crate::hud::HudTarget;
 use crate::hud_draw::{color, Ctx, Quad, Screen};
-use crate::hud_tree::Elem;
+use crate::hud_tree::{Elem, EventValue, Hud};
 use glam::{Mat4, Vec3};
 use std::path::PathBuf;
 
 pub const GROUP: &str = "player1spaceassaultgroup";
 const SYSTEM_SIZE: f32 = 0.15;
+
+#[derive(Debug, Clone)]
+pub struct HudLock {
+    pub target: HudTarget,
+    pub distance: f32,
+    pub direction: Option<f32>,
+    pub ndc: [f32; 2],
+    pub on_screen: bool,
+    pub visible: bool,
+    pub ready: [bool; 2],
+    pub flyer: bool,
+    pub pulse: f32,
+}
+
+pub fn feed_lock(
+    hud: &mut Hud,
+    lock: Option<&HudLock>,
+    m_space: Option<SpaceStatus>,
+    has_mesh: &dyn Fn(&str) -> bool,
+) {
+    const ID: &str = "hud.lockOn.id";
+    const WEAPON: [(&str, &str); 2] = [
+        (
+            "player1.weapon1.lockOnPosition",
+            "player1.weapon1.lockOnDisable",
+        ),
+        (
+            "player1.weapon2.lockOnPosition",
+            "player1.weapon2.lockOnDisable",
+        ),
+    ];
+    let id = EventValue::Text(lock.map(|l| l.target.id.to_string()).unwrap_or_default());
+    if hud.last(ID) != Some(&id) {
+        let first = hud.last(ID).is_none();
+        hud.publish(ID, id, has_mesh);
+        if !first {
+            hud.send("player1.lockOnDisable", EventValue::None, has_mesh);
+            hud.send("player1.lockOnDirectionDisable", EventValue::None, has_mesh);
+        }
+        for e in [
+            "player1.lockOnClassName",
+            "player1.lockOnHealthFraction",
+            "player1.lockOnTeamColor",
+            "player1.lockOnDirection",
+        ] {
+            hud.forget(e);
+        }
+    }
+    hud.space = m_space;
+    hud.lock_marker = lock.map(|l| crate::hud_tree::LockMarker {
+        pulse: l.pulse,
+        ndc: l.ndc,
+        on_screen: l.on_screen,
+        visible: l.visible,
+        distance: l.distance,
+        flyer: l.flyer,
+    });
+    for (k, (position, disable)) in WEAPON.iter().enumerate() {
+        let shown = lock.filter(|l| l.ready[k] && l.on_screen);
+        match shown {
+            Some(l) => hud.publish(
+                position,
+                EventValue::Position([l.ndc[0] * 0.5 + 0.5, l.ndc[1] * 0.5 + 0.5]),
+                has_mesh,
+            ),
+            None => {
+                if hud.last(position).is_some() {
+                    hud.forget(position);
+                    hud.send(disable, EventValue::None, has_mesh);
+                }
+            }
+        }
+    }
+    let Some(l) = lock else {
+        return;
+    };
+    let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
+    put(
+        "player1.lockOnClassName",
+        EventValue::Text(l.target.name.clone()),
+    );
+    put(
+        "player1.lockOnTeamColor",
+        EventValue::Color(l.target.color()),
+    );
+    put(
+        "player1.lockOnHealthFraction",
+        EventValue::Number(l.target.health_fraction.clamp(0.0, 1.0)),
+    );
+    put("player1.lockOnDistance", EventValue::Number(l.distance));
+    match l.direction {
+        Some(z) => put("player1.lockOnDirection", EventValue::Number(z)),
+        None => {
+            if hud.last("player1.lockOnDirection").is_some() {
+                hud.forget("player1.lockOnDirection");
+                hud.send("player1.lockOnDirectionDisable", EventValue::None, has_mesh);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpaceSystem {

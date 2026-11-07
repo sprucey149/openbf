@@ -1094,7 +1094,7 @@ fn a_pilot_flashes_when_their_hull_is_damaged_and_a_gunner_does_not() {
         vehicle: v,
         seat: 1,
     });
-    happen(&mut s, &[hit.clone()]);
+    happen(&mut s, &[hit]);
     assert_eq!(s.feed.damage_flash(s.sim.tick, me), 0.0);
     s.sim.units[me.index as usize].mount = Some(Mount {
         vehicle: v,

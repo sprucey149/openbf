@@ -212,9 +212,7 @@ impl Sim {
             let (mask, max, lose) = (c.target_kind, c.target_lock_max, c.target_lock_lose);
             let team = self.units[h.index as usize].team;
             let ray = self.flyer_ray(h);
-            let pressed = pads
-                .get(h.index as usize)
-                .is_some_and(|p| p.pressed(buttons::RELOAD));
+            let pressed = pads.get(slot).is_some_and(|p| p.pressed(buttons::RELOAD));
             let mut state = std::mem::take(&mut self.lock_on[slot]);
             let edge = pressed && !state.down;
             state.down = pressed;
