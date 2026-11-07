@@ -375,7 +375,7 @@ def map_texture_sources(baked, base_labels=None):
             files = {}
             for name, filename in pairs("texture_tier2"):
                 path = Path(filename)
-                if not filename or path.is_absolute() or '..' in path.parts:
+                if not filename or path.is_absolute() or bool(path.root) or '..' in path.parts:
                     raise ValueError("texture_tier2 file must be relative to textures/")
                 if name in files and files[name] != filename:
                     raise ValueError(f"conflicting texture_tier2 files for {name!r}")
