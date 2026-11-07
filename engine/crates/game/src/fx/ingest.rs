@@ -328,6 +328,38 @@ impl Fx {
                         arcs_this_tick += 1;
                     }
                 }
+                Event::FlyerImpact { pos, normal, .. } => {
+                    let candidates = [
+                        "com_sfx_vehiclespark_sc",
+                        "com_sfx_vehiclespark",
+                        "vehiclespark",
+                    ];
+                    let mut spawned = false;
+                    if baked {
+                        let dir = normal.try_normalize().unwrap_or(Vec3::Y);
+                        let z = dir;
+                        let x = Vec3::Y.cross(z).try_normalize().unwrap_or(Vec3::X);
+                        let frame = Frame {
+                            pos: *pos,
+                            rot: glam::Mat3::from_cols(x, z.cross(x), z),
+                            vel: Vec3::ZERO,
+                        };
+                        for name in candidates {
+                            if self.spawn(name, frame) {
+                                spawned = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !spawned {
+                        self.puffs.push(Puff {
+                            pos: *pos,
+                            kind: Kind::Hit,
+                            team: 0,
+                            age: 0.0,
+                        });
+                    }
+                }
                 _ => {}
             }
         }

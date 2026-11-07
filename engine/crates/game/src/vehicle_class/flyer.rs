@@ -195,6 +195,10 @@ impl FlyerClass {
             }
             return;
         }
+        if key == h("NeverCrashWhenUnpiloted") {
+            p.never_crash_when_unpiloted = value.trim() == "1" || number.is_some_and(|v| v != 0.0);
+            return;
+        }
         if key == h("CollisionThreshold") {
             fill(&mut p.collision_threshold, value);
         } else if key == h("CollisionScale") {

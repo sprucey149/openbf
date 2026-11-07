@@ -94,11 +94,18 @@ Addresses are BF2 (SWBFRNT2.ELF).
 
 ## 5. The FULL contact (FUN_001d7740)
 
-- Soldiers (layer 2) are ignored, and a chunk takes one impulse per tick (the +0x370 flag).
+PS2 decompile trace (`SWBFRNT2.ELF-decomp.c` lines 84137–84350):
+- Layer checks (lines 84175–84195):
+  - Layer 2 (Soldier): returns 1 immediately (chunks ignore soldiers).
+  - Layer 8 (Vehicle) and 0x10 (Building): checks ghost bit at slot +0x50; if ghost, returns 1. Live vehicle hulls and building bodies are valid collision targets.
+- A chunk takes one impulse per tick (the +0x370 flag).
 - At the contact point: vp = v + ω×r, vn = vp·n, t = −unit(vp − n·vn).
-- **Over budget on terrain.** If vn < 0, the contact is terrain (0x80) and count ≥ budget:
+- **Over budget on terrain.** (lines 84260–84275):
+  `if (((*(byte *)(iVar5 + 0x460) <= *(byte *)(iVar5 + 0x461)) && (iVar1 != 0x10)) && (iVar1 != 8))`
+  Terrain (0x80) respects the budget check (`ChunkTerrainCollisions` at +0x460 vs count at +0x461):
   - when count == budget, play ChunkTerrainEffect at (p.x, terrain height, p.z) and count + 1;
   - either way, return with no impulse and no push-out.
+  Crucially, Buildings (0x10) and Vehicles (8) are explicitly excluded from this budget suppression (`iVar1 != 0x10 && iVar1 != 8`). Buildings and live vehicle hulls always receive contact impulse and bounce!
 - **Otherwise:**
   - j = (−e·vn − vn) / (1/m + ((I⁻¹(r×n))×r)·n)
   - v += n·j/m; L += r×(n·j); ω = I⁻¹L
@@ -122,7 +129,7 @@ Addresses are BF2 (SWBFRNT2.ELF).
   `dirtspray` bursts after its budget, and the `hp_smoke1` plume of the settled piece.
 
 **[ours]**
-- Contacts come from the terrain and the map's static bodies only: no vehicle hulls, and no damage to units.
+- Contacts come from the terrain, the map's static bodies, and live vehicle hulls: `Layers::SOLDIER | Layers::VEHICLE` with `HullFilter::All` queried through `sphere_contacts_filtered` / `shape_contacts_filtered`. Per the PS2 trace, bodies and live vehicle hulls are excluded from the terrain collision budget suppression and receive bounce impulse. Chunks never damage units.
 - SIMPLE uses the FULL handler, since SIMPLE is never authored.
 - The push-out ignores the chunk's own collision layer, which is not traced.
 - Historical before issue #80: droid chunks used mesh-bounds spheres and ignored `ChunkNodeName`.
@@ -152,6 +159,9 @@ Slot +0x54 of the cluster vtable at `0x6192c8` is `FUN_001d85a8` (B2:84905-84922
 The port drew chunks through the effects' `SolidMesh`, which keeps only positions and UVs, so a ship's pieces came out unshaded
 beside the shaded ship. `VehicleVisuals::load_chunks` now uploads each chunk model with the ship's upload path, and
 `chunk_draws` submits them with `ClassVis::draws`, as the ship is. `Piece::opacity` is the fade, on the port's `life()`.
+Droid chunks (`side_<game>/droid_chunks`) are loaded through `VehicleSides::load`, checking `weapons/` for `.glb` models and
+falling back to `side_<game>/textures` for textures, allowing droid debris to be shaded via the ordinary lit model path
+instead of flat `SolidMesh`.
 
 `trace:` bit 8, which goes on to `FUN_0058ed70` (B2:700609, 700659, 700691), and the flags and float that `FUN_001d85a8`'s caller passes in. The
 port takes the float as 1. `trace:` the interpolation branch on +0xc9 (B2:84544-84679); the port draws the tick's pose.

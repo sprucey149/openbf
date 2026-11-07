@@ -233,7 +233,7 @@ fn shield_impact_feedback_routes_surface_shield_on_active_shield() {
         .spawn(&UnitSpec::trooper(0, Vec3::new(0.0, 0.0, 0.0)))
         .expect("shooter");
 
-    // Case 1: Bolt hits station while shield > 0 -> Surface::Shield
+    // Case 1a: Blaster bolt (missile: None) hits station while shield > 0 -> Surface::Shield
     sim.bolts.push(Bolt {
         visual_shot: None,
         pos: Vec3::ZERO,
@@ -264,7 +264,54 @@ fn shield_impact_feedback_routes_surface_shield_on_active_shield() {
         assert_eq!(
             *surface,
             Surface::Shield,
-            "shield-absorbed impact must route to Surface::Shield"
+            "shield-absorbed bolt impact must route to Surface::Shield"
+        );
+    }
+    // Verify shield effect look matches com_sfx_shieldimpact_sm
+    assert_eq!(
+        core::impact::ImpactLook::ctor(true).effect(Surface::Shield),
+        Some("com_sfx_shieldimpact_sm")
+    );
+
+    // Case 1b: Torpedo / missile ordnance (missile: Some(...)) hits station while shield > 0 -> Surface::Shield
+    sim.events.clear();
+    sim.bolts.push(Bolt {
+        visual_shot: None,
+        pos: Vec3::ZERO,
+        vel: Vec3::Z,
+        remaining: 0.0,
+        age: 0.0,
+        owner: pilot,
+        team: 0,
+        weapon_class: 0,
+        hit: Hit::Target(core::projectile::Target::Station(station)),
+        end: Vec3::ZERO,
+        shooter_is_player: true,
+        hulls: HullFilter::All,
+        hit_mult: 1.0,
+        gravity: 0.0,
+        charge: 1.0,
+        missile: Some(Missile::launch(
+            &core::missile::MissileClass::default(),
+            Vec3::Z,
+            100.0,
+            Some(MissileTarget::Station(station)),
+            &mut core::lcg::GameLcg::new(42),
+        )),
+        fat: None,
+    });
+    sim.step(&[]);
+
+    let impact = sim
+        .events
+        .iter()
+        .find(|e| matches!(e, Event::Impact { .. }))
+        .expect("torpedo shield impact event fired");
+    if let Event::Impact { surface, .. } = impact {
+        assert_eq!(
+            *surface,
+            Surface::Shield,
+            "shield-absorbed torpedo impact must route to Surface::Shield"
         );
     }
 
@@ -301,7 +348,49 @@ fn shield_impact_feedback_routes_surface_shield_on_active_shield() {
         assert_eq!(
             *surface,
             Surface::Building,
-            "unshielded station hit must route to Surface::Building"
+            "unshielded station hit by bolt must route to Surface::Building"
+        );
+    }
+
+    // Unshielded station hit by torpedo:
+    sim.events.clear();
+    sim.bolts.push(Bolt {
+        visual_shot: None,
+        pos: Vec3::ZERO,
+        vel: Vec3::Z,
+        remaining: 0.0,
+        age: 0.0,
+        owner: pilot,
+        team: 0,
+        weapon_class: 0,
+        hit: Hit::Target(core::projectile::Target::Station(station)),
+        end: Vec3::ZERO,
+        shooter_is_player: true,
+        hulls: HullFilter::All,
+        hit_mult: 1.0,
+        gravity: 0.0,
+        charge: 1.0,
+        missile: Some(Missile::launch(
+            &core::missile::MissileClass::default(),
+            Vec3::Z,
+            100.0,
+            Some(MissileTarget::Station(station)),
+            &mut core::lcg::GameLcg::new(42),
+        )),
+        fat: None,
+    });
+    sim.step(&[]);
+
+    let impact = sim
+        .events
+        .iter()
+        .find(|e| matches!(e, Event::Impact { .. }))
+        .expect("torpedo unshielded impact event fired");
+    if let Event::Impact { surface, .. } = impact {
+        assert_eq!(
+            *surface,
+            Surface::Building,
+            "unshielded station hit by torpedo must route to Surface::Building"
         );
     }
 }
@@ -416,4 +505,110 @@ fn capital_ship_system_lifecycle_collapse_restore_and_blackbox() {
     assert!(walk.sim.stations[usize::from(engine)].destroyed, "spent critical system cannot be restored");
 
     let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn space_assault_spawn_briefing_and_radio_audio_triggers() {
+    use core::announcer::BattleLines;
+    use game::announce::Commander;
+    use game::space_assault::SpaceRound;
+    use std::sync::Arc;
+
+    // 1. Verify opening spawn briefing voice cues for attacker and defender
+    let round = Arc::new(SpaceRound {
+        faction: ["all".into(), "imp".into()],
+        ..SpaceRound::default()
+    });
+    assert_eq!(
+        round.briefing_for_team(0),
+        Some("AOSMP_obj_01".into()),
+        "Alliance attacker briefing"
+    );
+    assert_eq!(
+        round.briefing_for_team(1),
+        Some("IOSMP_obj_02".into()),
+        "Imperial defender briefing"
+    );
+
+    // Republic vs CIS
+    let rep_cis_round = SpaceRound {
+        faction: ["rep".into(), "cis".into()],
+        ..SpaceRound::default()
+    };
+    assert_eq!(
+        rep_cis_round.briefing_for_team(0),
+        Some("ROSMP_obj_01".into()),
+        "Republic attacker briefing"
+    );
+    assert_eq!(
+        rep_cis_round.briefing_for_team(1),
+        Some("COSMP_obj_02".into()),
+        "CIS defender briefing"
+    );
+
+    // 2. Verify Commander queues spawn briefing on fresh spawn
+    let mut cmd = Commander::new(
+        BattleLines::default(),
+        ["all", "imp"],
+        0, // listener is player team 0 (Alliance attacker)
+        vec![],
+        vec![],
+    );
+    cmd.space_round = Some(round.clone());
+
+    // Fresh spawn -> queues AOSMP_obj_01
+    cmd.observe(0.1, &[], [0.0, 0.0], [100, 100], true, false);
+    assert!(cmd.spawn_briefing_played, "spawn briefing marked played");
+    assert!(
+        cmd.queue.waiting("AOSMP_obj_01"),
+        "AOSMP_obj_01 queued on first spawn"
+    );
+
+    // Subsequent respawn -> does NOT requeue briefing
+    cmd.queue.step(10.0, |_| None); // clear queue
+    cmd.observe(0.1, &[], [0.0, 0.0], [90, 100], true, false);
+    assert!(
+        !cmd.queue.waiting("AOSMP_obj_01"),
+        "no duplicate spawn briefing on respawn"
+    );
+
+    // 3. Verify event_sounds triggers: lock-on audio, incoming missile warning beep, and space radio chatter
+    let mut walk = WalkSim::new(42, Vec3::ZERO, None);
+    walk.teams[0].faction = "all".into();
+    walk.teams[1].faction = "imp".into();
+    walk.space_round = Some(round.clone());
+
+    // Test intermittent space radio chatter at tick % 300 == 150
+    walk.sim.tick = 150;
+    let mut heard = Vec::new();
+    game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
+    assert!(
+        heard.iter().any(|s| s == "all_inf_com_space_chatter"),
+        "intermittent space radio chatter emitted during flight: {heard:?}"
+    );
+
+    // Test missile lock-on audio (tick % 10 == 0)
+    walk.sim.lock_on.resize(1, Default::default());
+    walk.sim.tick = 20;
+    walk.sim.lock_on[0].target = Some(core::sim::LockTarget::Station(0));
+    walk.sim.lock_on[0].held = 1.0;
+    heard.clear();
+    game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
+    assert!(
+        heard.iter().any(|s| s == "all_weap_inf_rocket_launcher_tracking"),
+        "tracking sound emitted when target is locked: {heard:?}"
+    );
+
+    // Test incoming missile warning beep (distance < 100 -> interval 4, tick 16 % 4 == 0)
+    walk.sim.lock_on[0].held = 0.0;
+    walk.sim.lock_on[0].target = None;
+    walk.sim.lock_on[0].incoming_missile = true;
+    walk.sim.lock_on[0].incoming_distance = 80.0;
+    walk.sim.tick = 16;
+    heard.clear();
+    game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
+    assert!(
+        heard.iter().any(|s| s == "all_weap_inf_rocket_launcher_tracking"),
+        "incoming missile warning beep emitted when targeted by missile: {heard:?}"
+    );
 }

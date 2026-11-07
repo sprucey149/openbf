@@ -633,13 +633,26 @@ impl CollisionWorld {
         layers: Layers,
         out: &mut Vec<(f32, Vec3)>,
     ) {
+        self.sphere_contacts_filtered(centre, radius, layers, HullFilter::Static, out);
+    }
+
+    /// [`Self::sphere_contacts`] with an explicit [`HullFilter`]: allows queries
+    /// (e.g. destruction chunks) to contact live vehicle hulls as well as static bodies.
+    pub fn sphere_contacts_filtered(
+        &self,
+        centre: Vec3,
+        radius: f32,
+        layers: Layers,
+        hulls: HullFilter,
+        out: &mut Vec<(f32, Vec3)>,
+    ) {
         let ball = parry3d::shape::Ball::new(radius);
         let iso = Isometry::translation(centre.x, centre.y, centre.z);
         let aabb = Aabb {
             min: centre - Vec3::splat(radius),
             max: centre + Vec3::splat(radius),
         };
-        self.collect_contacts(&ball, &iso, &aabb, layers, out);
+        self.collect_contacts(&ball, &iso, &aabb, layers, hulls, out);
     }
 
     /// [`Self::sphere_contacts`] for a box or a cylinder placed by `to_world`
@@ -654,12 +667,25 @@ impl CollisionWorld {
         layers: Layers,
         out: &mut Vec<(f32, Vec3)>,
     ) {
+        self.shape_contacts_filtered(shape, to_world, layers, HullFilter::Static, out);
+    }
+
+    /// [`Self::shape_contacts`] with an explicit [`HullFilter`].
+    pub fn shape_contacts_filtered(
+        &self,
+        shape: &Shape,
+        to_world: glam::Mat4,
+        layers: Layers,
+        hulls: HullFilter,
+        out: &mut Vec<(f32, Vec3)>,
+    ) {
         let iso = isometry_of(to_world);
         match *shape {
             Shape::Box { half } => self.convex_contacts(
                 &parry3d::shape::Cuboid::new(vector(half)),
                 &iso,
                 layers,
+                hulls,
                 out,
             ),
             Shape::Cylinder {
@@ -669,6 +695,7 @@ impl CollisionWorld {
                 &parry3d::shape::Cylinder::new(half_height, radius),
                 &iso,
                 layers,
+                hulls,
                 out,
             ),
             Shape::Sphere { .. } | Shape::Mesh(_) => {}
@@ -680,6 +707,7 @@ impl CollisionWorld {
         mover: &S,
         iso: &Isometry,
         layers: Layers,
+        hulls: HullFilter,
         out: &mut Vec<(f32, Vec3)>,
     ) {
         let a = parry3d::shape::Shape::compute_aabb(mover, iso);
@@ -687,7 +715,7 @@ impl CollisionWorld {
             min: Vec3::new(a.mins.x, a.mins.y, a.mins.z),
             max: Vec3::new(a.maxs.x, a.maxs.y, a.maxs.z),
         };
-        self.collect_contacts(mover, iso, &aabb, layers, out);
+        self.collect_contacts(mover, iso, &aabb, layers, hulls, out);
     }
 
     /// Shared narrowphase; callers retain their own exact query bounds.
@@ -697,6 +725,7 @@ impl CollisionWorld {
         iso: &Isometry,
         aabb: &Aabb,
         layers: Layers,
+        hulls: HullFilter,
         out: &mut Vec<(f32, Vec3)>,
     ) {
         self.visit_xz(
@@ -704,7 +733,7 @@ impl CollisionWorld {
             aabb.max.x,
             aabb.min.z,
             aabb.max.z,
-            HullFilter::Static,
+            hulls,
             |body| {
                 if !body.layers.contains(layers) || !body.aabb.overlaps(aabb) {
                     return;

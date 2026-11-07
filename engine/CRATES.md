@@ -1126,3 +1126,5 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `core/src/sim/ordnance/tests/charged_sticky.rs` 199 — charged sticky launch, unchanged unknotted instance bits and blended fuse/warning controls at rest, in water and on an attached actor.
 
 - `game/tests/suite/charged_sticky.rs` 140 — explicit retained-profile class loads and stepped FIRE observations for charged spear, rock, thermal controls and mortar stages.
+
+- `game/examples/space_sweep.rs` 155 — headless multi-map Space Assault sweep across `bf2_spa1..9` reporting outcome, points, destroyed stations, shot-down flyers and crashes.

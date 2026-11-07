@@ -175,59 +175,112 @@ impl VehicleSides {
             .filter(|p| pak::is_file(p.join("vehicles.ron")))
             .collect();
         dirs.sort();
-        Self(
-            dirs.into_iter()
-                .filter_map(|dir| {
-                    let text = pak::read_to_string(dir.join("vehicles.ron")).ok()?;
-                    match ron::from_str::<manifest::VehicleManifest>(&text) {
-                        Ok(m) => {
-                            let mut db = crate::classdb::ClassDb::default();
-                            let _ = db.load(
-                                &assets_dir
-                                    .join("classes")
-                                    .join(format!("{game}_{}.ron", m.source)),
-                            );
-                            let walker_seats = m
+        let mut out: Vec<Side> = dirs
+            .into_iter()
+            .filter_map(|dir| {
+                let text = pak::read_to_string(dir.join("vehicles.ron")).ok()?;
+                match ron::from_str::<manifest::VehicleManifest>(&text) {
+                    Ok(m) => {
+                        let mut db = crate::classdb::ClassDb::default();
+                        let _ = db.load(
+                            &assets_dir
+                                .join("classes")
+                                .join(format!("{game}_{}.ron", m.source)),
+                        );
+                        let walker_seats = m
+                            .vehicles
+                            .iter()
+                            .filter_map(|v| {
+                                Some((
+                                    v.walker.as_ref()?.skin.as_ref()?.to_ascii_lowercase(),
+                                    crate::vehicle_class::seats(&db, &v.class.name),
+                                ))
+                            })
+                            .collect();
+                        Some(Side {
+                            walker_seats,
+                            models: m
+                                .geometries
+                                .iter()
+                                .map(|g| (g.name.to_ascii_lowercase(), lod0(g).to_owned()))
+                                .collect(),
+                            textures: m
+                                .textures
+                                .iter()
+                                .map(|t| t.to_ascii_lowercase())
+                                .collect(),
+                            walkers: m
                                 .vehicles
                                 .iter()
-                                .filter_map(|v| {
-                                    Some((
-                                        v.walker.as_ref()?.skin.as_ref()?.to_ascii_lowercase(),
-                                        crate::vehicle_class::seats(&db, &v.class.name),
-                                    ))
+                                .filter_map(|v| v.walker.as_ref())
+                                .filter_map(|w| {
+                                    Some((w.skin.as_ref()?.to_ascii_lowercase(), w.clone()))
                                 })
-                                .collect();
-                            Some(Side {
-                                walker_seats,
-                                models: m
-                                    .geometries
-                                    .iter()
-                                    .map(|g| (g.name.to_ascii_lowercase(), lod0(g).to_owned()))
-                                    .collect(),
-                                textures: m
-                                    .textures
-                                    .iter()
-                                    .map(|t| t.to_ascii_lowercase())
-                                    .collect(),
-                                walkers: m
-                                    .vehicles
-                                    .iter()
-                                    .filter_map(|v| v.walker.as_ref())
-                                    .filter_map(|w| {
-                                        Some((w.skin.as_ref()?.to_ascii_lowercase(), w.clone()))
-                                    })
-                                    .collect(),
-                                dir,
-                            })
-                        }
-                        Err(e) => {
-                            eprintln!("vehicles: {}: {e}", dir.display());
-                            None
+                                .collect(),
+                            dir,
+                        })
+                    }
+                    Err(e) => {
+                        eprintln!("vehicles: {}: {e}", dir.display());
+                        None
+                    }
+                }
+            })
+            .collect();
+        let droid_dir = assets_dir.join(format!("side_{game}")).join("droid_chunks");
+        if pak::is_file(droid_dir.join("droid_chunks.ron")) {
+            if let Ok(text) = pak::read_to_string(droid_dir.join("droid_chunks.ron")) {
+                if let Ok(meta) = ron::from_str::<manifest::DroidChunkManifest>(&text) {
+                    let mut models = HashMap::new();
+                    for c in &meta.collision {
+                        let key = c.geometry.to_ascii_lowercase();
+                        models.insert(key.clone(), key);
+                    }
+                    if let Ok(entries) = pak::read_dir(droid_dir.join("weapons")) {
+                        for p in entries {
+                            if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("glb")) {
+                                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                                    let key = stem.to_ascii_lowercase();
+                                    models.entry(key.clone()).or_insert(key);
+                                }
+                            }
                         }
                     }
-                })
-                .collect(),
-        )
+                    let mut textures = HashSet::new();
+                    if let Ok(entries) = pak::read_dir(droid_dir.join("textures")) {
+                        for p in entries {
+                            if let Some(file_name) = p.file_name().and_then(|s| s.to_str()) {
+                                if let Some(stem) = file_name.split('.').next() {
+                                    if !stem.is_empty() {
+                                        textures.insert(stem.to_ascii_lowercase());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let side_textures = assets_dir.join(format!("side_{game}")).join("textures");
+                    if let Ok(entries) = pak::read_dir(side_textures) {
+                        for p in entries {
+                            if let Some(file_name) = p.file_name().and_then(|s| s.to_str()) {
+                                if let Some(stem) = file_name.split('.').next() {
+                                    if !stem.is_empty() {
+                                        textures.insert(stem.to_ascii_lowercase());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    out.push(Side {
+                        dir: droid_dir,
+                        models,
+                        textures,
+                        walkers: HashMap::new(),
+                        walker_seats: HashMap::new(),
+                    });
+                }
+            }
+        }
+        Self(out)
     }
 
     /// How many sides were found.
@@ -704,7 +757,12 @@ pub fn model_tops(
                 ModelSource::Map(model) => (map_dir, model),
                 ModelSource::Side(i, model) => (sides.dir(i), model),
             };
-            let mesh = load_glb(&dir.join("models").join(format!("{model}.glb"))).ok()?;
+            let glb = if pak::is_file(dir.join("weapons").join(format!("{model}.glb"))) {
+                dir.join("weapons").join(format!("{model}.glb"))
+            } else {
+                dir.join("models").join(format!("{model}.glb"))
+            };
+            let mesh = load_glb(&glb).ok()?;
             mesh.vis_top
                 .or_else(|| mesh.positions.iter().map(|p| p[1]).reduce(f32::max))
         })
@@ -729,7 +787,12 @@ fn upload_class(
         Some(ModelSource::Map(k)) => (&scene.meshes[&k], None),
         Some(ModelSource::Side(i, model)) => {
             let dir = sides.dir(i);
-            let (mesh, j) = load_glb_joints(&dir.join("models").join(format!("{model}.glb")))?;
+            let glb = if pak::is_file(dir.join("weapons").join(format!("{model}.glb"))) {
+                dir.join("weapons").join(format!("{model}.glb"))
+            } else {
+                dir.join("models").join(format!("{model}.glb"))
+            };
+            let (mesh, j) = load_glb_joints(&glb)?;
             (owned, joints) = (mesh, j);
             // Card WSKN: a walker model with its bones and a baked skin.
             let walker = sides.0[i].walkers.get(&model.to_ascii_lowercase());
@@ -911,7 +974,12 @@ fn texture(
             None => None,
         },
         Some(TexSource::Side(i)) => {
-            let res = upload_texture_file(r, &sides.dir(i).join("textures"), &name)?;
+            let mut res = upload_texture_file(r, &sides.dir(i).join("textures"), &name)?;
+            if res.is_none() {
+                if let Some(parent) = sides.dir(i).parent() {
+                    res = upload_texture_file(r, &parent.join("textures"), &name)?;
+                }
+            }
             if res.is_some() {
                 *uploads += 1;
             }

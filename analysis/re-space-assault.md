@@ -1040,3 +1040,55 @@ In four of the six the mean rounds to zero, so almost no turret held it and the 
 Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): `AudibleManager::UpdateAudience` (radius capped at 30 m; over 3 m it gives `AudibleResult` an unknown status, closer it forces; firing sets the radius to 100 before the cap), `VisionManager.cpp:448-453` (a seen target's handler forces the seer), PC `Ordnance.cpp:305-316` `AddFakeRayhitResult` (both ways, when hit by a soft collision and the bolt has lived under .4 s). Any of these could put a turret on a human the cone would miss.
 
 `FLYER_AIM_BOXES` also holds `all_la_at_gunship` and `rep_la_at_gunship`, 29.257, from the baked model's box like most rows. No gunship was among the six classes read live. `measure:` one when a save has one flying.
+
+## 20. System repair, shield impact FX, and radio chatter verification (Issue #123)
+
+### System repair and restore rules
+- **Decomp evidence:**
+  - `FUN_00268c78` (line 185043): `EntityBuilding::SetProperty` handles property `0x19971f1b` (`fnv1a("maxhealth")`), setting `piVar5[0x5d] = max_health`.
+  - `FUN_0026a7b8` / `FUN_0026afe4` (line 186122): `EntityDestructibleBuilding::SetProperty` handles `0x19971f1b` (`max_health`), setting `iVar9 + 0x2ec = max_health`.
+  - `FUN_001df3d8` (lines 90273–90321): `HealthProperty::SetHealth` applies health changes and calls virtual `OnHealthChanged` at offset `+0x28`.
+  - `FUN_001df4e0` (lines 90324–90345): `HealthProperty::SetShield` updates current shield pool.
+  - `FUN_001df560` (lines 90351–90390): updates regeneration toward `max_health` and `max_shield`.
+  - `FUN_002f5478` (lines 271520–271625; PC `Controllable.cpp:415–451`): pilot repair skill adds `PilotSkillRepairScale` (0.005) of max health per second.
+  - `objectivespaceassault.luac` (closure `main.1.0`): `OnCriticalSystemDestroyed` invokes `SetProperty(obj, 'MaxHealth', 99999997952.0)` (`SPENT_MAX_HEALTH`).
+- **Can destroyed critical systems be rebuilt on PS2?**
+  - **No.** Setting `MaxHealth` to `SPENT_MAX_HEALTH` (`99999997952.0`) prevents any repair tool (`FUN_00346fa0` line 339872, `core::sim::repair::repair_target`) from ever completing the repair to restore the station.
+  - **Before 0 HP:** damaged critical systems can be repaired normally by fusion cutter or pilot repair up to their authored max health.
+  - **Non-critical linked systems:** `shieldgenerator` (`linkedshields.luac`) and `mainframe` (`linkedturrets.luac`) do not receive `SPENT_MAX_HEALTH` on death. When repaired back to 100% health, they restore (`s.destroyed = false`, live collision restored, shields and auto-turrets reactivated).
+  - **Port alignment:** `core::sim::space_assault` (lines 377–382) and `core::sim::repair` (lines 136, 362–366) match PS2 rules.
+
+### Shield impact visual feedback
+- `FUN_00313c40` (lines 292205–292415) & `FUN_003148f0` (lines 292865–292910): bullet ctor sets default small shield impact `0xd4391a69` (`com_sfx_shieldimpact_sm`).
+- Both blaster bolts (`missile: None`) and torpedo/missile ordnance (`missile: Some(...)`) hitting active shields (`st.health.shield > 0.0`) route to `Surface::Shield`, emitting `com_sfx_shieldimpact_sm` oriented on the strike normal.
+- Once shields collapse (`shield == 0.0`), subsequent bolt and torpedo impacts route to `Surface::Building`, emitting static hull debris/explosions.
+
+### Spawn briefing, lock audio, and flight radio chatter
+- `FUN_0018f7f0` (line 34252): Lua `BroadcastVoiceOver(name, teamMask)` invokes `FUN_003e2648(hash, mask)`.
+- **Opening spawn briefing:** on the player's first spawn in a Space Assault round, the commander line `<P>OSMP_obj_01` (attacker) or `<P>OSMP_obj_02` (defender) is queued from `spa1_objective_vo_slow` (`AOSMP_obj_01`/`02`, `IOSMP_obj_01`/`02`, `ROSMP_obj_01`/`02`, `COSMP_obj_01`/`02`). Re-spawning after death does not repeat the briefing.
+- **Flight radio chatter:** flyer engine update `FUN_0044c650` (lines 497605–497635) queues cockpit chatter via `FUN_0043ceb0(class + 0x44, ...)` (3rd person) / `+0x3c` (1st person). During space flight, intermittent `<side>_inf_com_space_chatter` plays for the pilot's faction.
+- **Lock-on & incoming missile audio:** `com_weap_inf_rocket_launcher_tracking` (and side-specific `<side>_weap_inf_rocket_launcher_tracking`) loops sample `3467677457` (`1fcff3b3/ceb08f11.wav`), emitting tracking pulses when locking onto a target or when targeted by an incoming missile.
+
+## 21. Flyer impact presentation, transport fallback, stuck-kill, and 6-map Space Assault sweep (Issues #122 & #124)
+
+### Flyer impact FX & controller rumble (`#124`)
+- `Event::FlyerImpact { vehicle, pos, normal, damage, lethal }` spawns `flyerspray` (with `com_sfx_ord_exp` fallback when unbaked) at the contact point (`game/src/fx/ingest.rs`) and triggers heavy/light controller rumble (`Rumble::blast` on lethal impact, scaled jolt when occupied by the local player in `game/src/rumble.rs`).
+- Crash death camera (`WalkSim::camera` in `game/src/walk.rs`) detaches at `0.25x` follow stiffness during `FlightPhase::Falling` and holds the post-crash view for `seat_view_timer` after `FlightPhase::Crashed` destruction.
+
+### Transport spline fallback & wedged stuck-kill (`#122`)
+- **Transport spline fallback (`core/src/ai/flyer_drive/admission.rs`):** On maps that omit explicit `transport` (`0xd32f6312`) flyer paths (`spa6`, `spa7`), transport AI pilots fall back to friendly fighter spline classes discovered from live friendly flyers and vehicle pads (`fallback_transport_classes`), and request takeoff/landing transitions around enemy hangar landing regions.
+- **Wedged BF2 stuck-kill (`core/src/sim/seats.rs`, `core/src/sim/flyers.rs`, `core/src/ai/flyer_drive.rs`):** Matching PC `UnitFlyAgent.cpp:277` (§18), a BF2 flyer in flight whose wedge counter reaches `WEDGED_GIVEUP` (`3`) is destroyed outright along with its seated bot pilot instead of ejecting a pilot into empty space.
+- **Hangar mouth departure (`core/src/ai/flyer_drive.rs`):** When spline connection chords and loiter circles are blocked by hangar walls, `connect` probes `clearest` and only emits an exit curve if a full `WEDGED_RAY` (`200 m`) ray into open space is unobstructed, preserving `curve == None` inside enclosed boxes.
+
+### Verified 6-map Space Assault sweep (`examples/space_sweep.rs`)
+Command: `cargo run --release --manifest-path engine/Cargo.toml -p game --example space_sweep -- --max-ticks 3600` (seed `42`, score limit `180`, 120.0 s simulated time per map):
+
+| Map | Seed | Outcome | Sim Duration (s) | Points | Stations Destroyed | Flyers Shot | Flyers Crashed |
+|---|---|---|---|---|---|---|---|
+| `bf2_spa1` | 42 | Time Limit | 120.0 | 31 - 11 | 0 | 13 | 9 |
+| `bf2_spa3` | 42 | Time Limit | 120.0 | 5 - 3 | 0 | 2 | 52 |
+| `bf2_spa6` | 42 | Time Limit | 120.0 | 4 - 2 | 0 | 1 | 8 |
+| `bf2_spa7` | 42 | Time Limit | 120.0 | 0 - 0 | 0 | 0 | 17 |
+| `bf2_spa8` | 42 | Time Limit | 120.0 | 2 - 4 | 0 | 4 | 3 |
+| `bf2_spa9` | 42 | Time Limit | 120.0 | 12 - 13 | 0 | 6 | 5 |
+

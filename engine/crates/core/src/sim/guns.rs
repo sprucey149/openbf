@@ -167,7 +167,7 @@ impl Sim {
 
     /// Make every seat's gun state of vehicle `vi` from its class's setup
     /// (each gun at rest, each weapon full), once.
-    pub(super) fn arm(&mut self, vi: usize) {
+    pub fn arm(&mut self, vi: usize) {
         if !self.vehicles[vi].guns.is_empty() {
             return;
         }

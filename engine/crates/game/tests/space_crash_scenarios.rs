@@ -445,3 +445,57 @@ fn blackbox_phase_progression_camera_detach_and_death_view_hold() {
     }
     assert_eq!(walk.seat_view_timer, 0.0, "death view timer expires after 4.0s");
 }
+
+#[test]
+fn flyer_impact_sparks_and_controller_rumble() {
+    let mut sim = Sim::empty(42);
+    let vh = sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Flyer,
+        class: 0,
+        home_team: Some(0),
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+        max_health: 1000.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+
+    let impact_pos = Vec3::new(10.0, 50.0, 10.0);
+    let impact_normal = Vec3::Y;
+    sim.events.push(Event::FlyerImpact {
+        vehicle: vh,
+        pos: impact_pos,
+        normal: impact_normal,
+        speed: 85.0,
+        damage: 50.0,
+        lethal: false,
+    });
+
+    let mut fx = game::fx::Fx::default();
+    assert_eq!(fx.len(), 0);
+    fx.ingest_sim(&sim);
+    assert_eq!(fx.len(), 1, "FlyerImpact event produces spark / hit effect");
+
+    // Also test lethal impact event produces effect
+    sim.events.clear();
+    sim.events.push(Event::FlyerImpact {
+        vehicle: vh,
+        pos: impact_pos,
+        normal: impact_normal,
+        speed: 150.0,
+        damage: 2000.0,
+        lethal: true,
+    });
+    fx.ingest_sim(&sim);
+    assert_eq!(fx.len(), 2, "lethal FlyerImpact event produces spark / hit effect");
+
+    // Verify gilrs rumble helper runs safely with gamepad
+    if let Ok(mut g) = gilrs::Gilrs::new() {
+        let ids: Vec<_> = g.gamepads().map(|(id, _)| id).collect();
+        for id in ids {
+            input::rumble(&mut g, id, 0.6, 0.4, 300);
+        }
+    }
+}

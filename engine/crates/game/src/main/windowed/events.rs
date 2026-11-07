@@ -498,6 +498,32 @@ impl winit::application::ApplicationHandler for App {
                                 stuck_alarm |= bb.tick(walk, Some(tick_pad));
                                 note_sounds(bb, self.sounds.as_mut(), walk.sim.tick);
                             }
+                            for event in &walk.sim.events {
+                                if let core::sim::Event::FlyerImpact {
+                                    vehicle, lethal, ..
+                                } = event
+                                {
+                                    let is_player = walk
+                                        .sim
+                                        .unit(walk.player)
+                                        .and_then(|u| u.mount)
+                                        .is_some_and(|m| m.vehicle == *vehicle);
+                                    if is_player {
+                                        if let Some(g) = self.gilrs.as_mut() {
+                                            if let Some((id, _)) =
+                                                input::active_gamepad(g, &self.active_pad)
+                                            {
+                                                let (weak, strong, duration_ms) = if *lethal {
+                                                    (0.8, 0.6, 600)
+                                                } else {
+                                                    (0.6, 0.4, 300)
+                                                };
+                                                input::rumble(g, id, weak, strong, duration_ms);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                             if let Some(m) = self.matchlog.as_mut() {
                                 m.tick(&walk.sim, &tick_pad);
                                 if walk.sim.outcome.is_some() && !m.written() {

@@ -131,6 +131,12 @@ impl Sim {
                 self.destroy_vehicle(handle, killer);
                 continue;
             }
+            if v.flyer.ai.wedges >= crate::ai::flyer_drive::WEDGED_GIVEUP
+                && v.flyer.phase != FlightPhase::Landed
+            {
+                self.destroy_vehicle(handle, None);
+                continue;
+            }
             self.pilot_repair(i, dt);
             self.start_side_roll(i);
             let v = &self.vehicles[i];
@@ -465,7 +471,7 @@ mod tests {
     #[test]
     fn never_crash_keeps_an_empty_bf2_ship_flying() {
         let (mut sim, h) = bf2_world(true);
-        sim.flyer_params[0].as_mut().unwrap().never_crash = true;
+        sim.flyer_params[0].as_mut().unwrap().never_crash_when_unpiloted = true;
         let pilot = sim.vehicle(h).unwrap().seats[0].occupant.unwrap();
         sim.unseat_unit(pilot);
         for _ in 0..crate::TICK_HZ {

@@ -45,7 +45,7 @@
 mod abilities;
 mod arc;
 mod children;
-mod chunks;
+pub mod chunks;
 pub mod draw;
 pub mod emitter;
 mod flame;
@@ -575,7 +575,7 @@ impl LiveEffect {
     }
 }
 
-trait FxAssets {
+pub trait FxAssets {
     fn texture(&mut self, name: &str) -> Option<TextureHandle>;
     fn model(&mut self, name: &str) -> Option<Arc<draw::EffectModel>>;
 }
@@ -811,6 +811,7 @@ impl Fx {
                     .iter()
                     .flat_map(|t| t.classes.iter().map(|c| c.name.clone())),
             );
+            names.extend(walk.sim.station_classes.iter().map(|s| s.name.clone()));
             names.sort();
             names.dedup();
             fx.chunks = chunks::Chunks::load(&db, &names, &lib.model_dirs, lib.era);

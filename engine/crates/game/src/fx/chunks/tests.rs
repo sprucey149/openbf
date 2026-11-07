@@ -334,7 +334,7 @@ fn a_resting_chunk_lives_three_seconds_on_both_games() {
         drop(&mut c, Vec3::Y * 0.2, Vec3::ZERO);
         c.live[0][0].moving = false;
         let mut ticks = 0;
-        while c.len() > 0 {
+        while !c.is_empty() {
             c.tick(&walk, None);
             ticks += 1;
         }

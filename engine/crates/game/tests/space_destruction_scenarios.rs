@@ -6,12 +6,23 @@
 //! 2. BF2 Jedi starfighter empty chunk entry handling and turret/station chunk checks (SWBFRNT2 FUN_00213630, FUN_00215f80).
 //! 3. Texture-upload cache reuse between intact vehicle and chunk loading, with counter verification proving
 //!    elimination of duplicate texture uploads.
+//! 4. Droid debris shaded mesh upload/draw path (verifying ordinary model shading instead of unlit SolidMesh).
+//! 5. Turret and station destruction chunk piece launch (authored and explosion NumChunks pieces).
+//! 6. Chunk world and live vehicle hull contact bounce per PS2 FUN_001d7740.
 
+use core::collision::{HullPart, Layers, Shape};
+use core::sim::{Event, Station, StationClass};
+use core::vehicle::VehicleHandle;
 use core::weapon::ExplosionClass;
 use game::assets::{CpuMesh, CpuTexture, Scene};
 use game::classdb::{fnv1a_lowercase, ClassDb, ClassDef};
+use game::fx::chunks::Chunks;
+use game::fx::emitter::Era;
+use game::fx::FxAssets;
 use game::vehicle_class::{explosion_name, has_chunks};
 use game::viewer::VehicleVisuals;
+use game::walk::WalkSim;
+use glam::{Mat4, Quat, Vec3};
 use manifest::Manifest;
 use render::{DrawLayer, LightPath, Renderer};
 use std::collections::HashMap;
@@ -394,5 +405,305 @@ fn test_texture_upload_cache_reuse_eliminates_duplicates() {
         vis.texture_cache_hits(),
         1,
         "Texture cache hit must be recorded on chunk loading reuse"
+    );
+}
+
+struct DummyAssets;
+impl FxAssets for DummyAssets {
+    fn texture(&mut self, _: &str) -> Option<render::TextureHandle> {
+        None
+    }
+    fn model(&mut self, _: &str) -> Option<std::sync::Arc<game::fx::draw::EffectModel>> {
+        None
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test 4: Droid Debris Shaded Mesh Upload & Draw Path
+// -----------------------------------------------------------------------------
+#[test]
+fn test_droid_debris_shaded_mesh_upload_and_draw_path() {
+    let mut r = match Renderer::new_headless(64, 64) {
+        Ok(renderer) => renderer,
+        Err(e) => {
+            eprintln!("Skipping GPU headless test (no adapter available): {e}");
+            return;
+        }
+    };
+
+    let droid_chunk_model = "bdroid_chunk1";
+    let droid_tex_name = "openbf_droid_bdroid";
+
+    let manifest: Manifest = ron::from_str(r#"(
+        map: "test_droid_map",
+        source_game: "bf2",
+        terrain_name: None,
+        sky_name: None,
+        terrain_glb: None,
+        models: ["bdroid_chunk1"],
+        textures: ["openbf_droid_bdroid"],
+        classes: [],
+        geometries: [
+            (
+                name: "bdroid_chunk1",
+                model: "bdroid_chunk1",
+                lods: [("LOD0", "bdroid_chunk1")],
+                far: None,
+                hardpoints: [],
+            ),
+        ],
+        regions: [],
+        instances: [],
+    )"#)
+    .expect("deserialize test manifest");
+
+    let mut meshes = HashMap::new();
+    meshes.insert(droid_chunk_model.to_string(), make_test_mesh(droid_tex_name));
+
+    let mut textures = HashMap::new();
+    textures.insert(droid_tex_name.to_string(), make_test_texture());
+
+    let scene = Scene {
+        dir: PathBuf::from("dummy_dir"),
+        manifest,
+        meshes,
+        terrain: None,
+        water: None,
+        lowres: None,
+        terrain_layers: None,
+        textures,
+        collision: HashMap::new(),
+        cutters: Vec::new(),
+    };
+
+    let mut vis = VehicleVisuals::load(&mut r, &scene, Path::new("dummy_assets"), &[]);
+
+    // Upload droid chunk model as ClassVis
+    let loaded_chunks = vis.load_chunks(
+        &mut r,
+        &scene,
+        Path::new("dummy_assets"),
+        &[droid_chunk_model.to_string()],
+    );
+    assert_eq!(
+        loaded_chunks,
+        vec![droid_chunk_model.to_string()],
+        "Droid chunk model must upload via ClassVis"
+    );
+
+    // Setup Chunks with droid class
+    let defs = vec![class_def(
+        "cis_inf_battledroid",
+        "soldier",
+        &[
+            ("CHUNKSECTION", "CHUNK1"),
+            ("ChunkGeometryName", droid_chunk_model),
+            ("ChunkSpeed", "5.0"),
+        ],
+    )];
+    let db = make_test_db(defs);
+    let mut chunks = Chunks::load(&db, &["cis_inf_battledroid".to_string()], &[], Era::Bf2);
+
+    // Register chunk model in lit set
+    chunks.set_lit(loaded_chunks);
+
+    // Launch droid chunk
+    chunks.launch(
+        "cis_inf_battledroid",
+        Vec3::new(0.0, 5.0, 0.0),
+        Vec3::Y,
+        Quat::IDENTITY,
+        1.0,
+        1.0,
+        None,
+    );
+    assert_eq!(chunks.len(), 1, "One droid piece launched");
+
+    // Verify draws() produces ZERO unlit/flat particle draws (since lit chunk bypasses unlit SolidMesh)
+    let mut particle_draws = Vec::new();
+    chunks.draws(
+        Era::Bf2,
+        Vec3::ZERO,
+        Vec3::Z,
+        1.0,
+        &mut DummyAssets,
+        &mut particle_draws,
+    );
+    assert_eq!(
+        particle_draws.len(),
+        0,
+        "Lit droid debris must NOT draw through unlit particle/SolidMesh draws"
+    );
+
+    // Verify lit_poses yields the droid chunk piece
+    let poses: Vec<_> = chunks.lit_poses().collect();
+    assert_eq!(poses.len(), 1, "Lit poses must contain the droid piece");
+    assert_eq!(poses[0].0, droid_chunk_model);
+
+    // Verify vehicle_vis.chunk_draws produces lit DrawCmds
+    let cmds = vis.chunk_draws(poses.into_iter());
+    assert!(
+        !cmds.is_empty(),
+        "chunk_draws must produce DrawCmds for the lit droid piece"
+    );
+    assert_eq!(
+        cmds[0].light,
+        render::LightPath::Lit,
+        "Droid debris draws must route to lit model shading"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Test 5: Turret & Station Destruction Spawns Authored and Explosion Chunks
+// -----------------------------------------------------------------------------
+#[test]
+fn test_turret_and_station_destruction_chunk_launch() {
+    let defs = vec![
+        // Ground / building turret with authored ChunkSECTION
+        class_def(
+            "tur_bldg_laserturret",
+            "armedbuilding",
+            &[
+                ("CHUNKSECTION", "CHUNK1"),
+                ("ChunkGeometryName", "tur_laser_chunk1"),
+                ("ChunkSpeed", "4.0"),
+                ("CHUNKSECTION", "CHUNK2"),
+                ("ChunkGeometryName", "tur_laser_chunk2"),
+                ("ChunkSpeed", "4.0"),
+            ],
+        ),
+        // Destructible space station with death explosion NumChunks
+        class_def(
+            "all_station_shield",
+            "powerupstation",
+            &[("ExplosionDestruct", "all_station_shield_exp")],
+        ),
+        class_def(
+            "all_station_shield_exp",
+            "explosion",
+            &[
+                ("ChunkGeometryName", "station_debris_chunk"),
+                ("NumChunks", "3"),
+            ],
+        ),
+    ];
+    let db = make_test_db(defs);
+
+    let mut chunks = Chunks::load(
+        &db,
+        &[
+            "tur_bldg_laserturret".to_string(),
+            "all_station_shield".to_string(),
+        ],
+        &[],
+        Era::Bf2,
+    );
+
+    let mut walk = WalkSim::new(1, Vec3::ZERO, None);
+    walk.vehicle_classes = vec!["tur_bldg_laserturret".to_string()];
+    walk.sim.station_classes = vec![StationClass::soldier("all_station_shield", 1.0, 100.0, 10)];
+    walk.sim.stations = vec![Station::new(0, Vec3::new(20.0, 5.0, 20.0), 4.0)];
+
+    // Trigger destruction events
+    walk.sim.events = vec![
+        Event::VehicleDestroyed {
+            vehicle: VehicleHandle { index: 0, gen: 0 },
+            class: 0,
+            pos: Vec3::new(0.0, 2.0, 0.0),
+            vel: Vec3::ZERO,
+            killer: None,
+        },
+        Event::StationDestroyed {
+            station: 0,
+            class: 0,
+            pos: Vec3::new(20.0, 5.0, 20.0),
+            killer: None,
+        },
+    ];
+
+    chunks.tick(&walk, None);
+
+    // 2 pieces from turret + 3 pieces from station explosion NumChunks = 5 pieces total!
+    assert_eq!(
+        chunks.len(),
+        5,
+        "Turret and station destruction must spawn authored chunks (2) and explosion NumChunks pieces (3)"
+    );
+}
+
+// -----------------------------------------------------------------------------
+// Test 6: Chunk Contact and Bounce Against Live Vehicle Hull
+// -----------------------------------------------------------------------------
+#[test]
+fn test_chunk_contact_and_bounce_on_live_vehicle_hull() {
+    let defs = vec![class_def(
+        "test_bounce_vehicle",
+        "hover",
+        &[
+            ("CHUNKSECTION", "CHUNK1"),
+            ("ChunkGeometryName", "test_bounce_piece"),
+            ("ChunkSpeed", "0.0"),
+            ("ChunkBounciness", "0.8"),
+            ("ChunkTerrainCollisions", "0"), // Budget = 0: terrain bounces would be suppressed!
+            ("ChunkGravity", "0.0 0.0 0.0"), // No gravity for clean impulse measurement
+        ],
+    )];
+    let db = make_test_db(defs);
+
+    let mut chunks = Chunks::load(&db, &["test_bounce_vehicle".to_string()], &[], Era::Bf2);
+
+    let mut walk = WalkSim::new(1, Vec3::ZERO, None);
+    // Heightfield placed far below so terrain is not contacted
+    walk.sim.heightfield = Some(core::heightfield::Heightfield {
+        size: 2,
+        unit: 100.0,
+        offset_x: 50.0,
+        offset_z: 50.0,
+        heights: vec![-100.0; 4],
+    });
+
+    // Place a live vehicle hull body at the origin: box half-extents (5, 0.5, 5), top surface at y = 0.5
+    let owner = VehicleHandle { index: 1, gen: 0 };
+    let hull_part = HullPart::new(
+        Mat4::IDENTITY,
+        Shape::Box {
+            half: Vec3::new(5.0, 0.5, 5.0),
+        },
+        Layers::VEHICLE,
+    );
+    walk.sim.collision.set_hull(owner, &[hull_part], Mat4::IDENTITY);
+
+    // Launch chunk directly above the vehicle hull, falling downwards
+    chunks.launch(
+        "test_bounce_vehicle",
+        Vec3::new(0.0, 1.0, 0.0),
+        Vec3::ZERO,
+        Quat::IDENTITY,
+        1.0,
+        1.0,
+        None,
+    );
+    assert_eq!(chunks.len(), 1, "One chunk piece launched");
+
+    // Impart downward velocity toward the hull
+    chunks.set_piece_vel(0, 0, Vec3::new(0.0, -10.0, 0.0));
+
+    // Tick simulation
+    chunks.tick(&walk, None);
+
+    let states = chunks.piece_states();
+    assert_eq!(states.len(), 1);
+    let (pos, vel) = states[0];
+
+    // Verify upward bounce impulse against the vehicle hull
+    assert!(
+        vel.y > 0.0,
+        "Chunk must bounce upwards upon contacting vehicle hull (got vel.y = {})",
+        vel.y
+    );
+    assert!(
+        pos.y >= 0.5,
+        "Chunk must be pushed out above the vehicle hull top (got pos.y = {})",
+        pos.y
     );
 }

@@ -78,6 +78,7 @@ use crate::ai::SHUT_PROBE_UP;
 use crate::collision::{HullFilter, Layers};
 use crate::soldier::Stance;
 use crate::unit::{Controller, UnitHandle};
+use crate::vehicle::flyer::FlightPhase;
 use crate::vehicle::hover::{ramp_stick_timer, HoverInput};
 use crate::vehicle::{SeatKind, VehicleHandle, VehicleKind};
 use glam::Vec3;
@@ -885,6 +886,12 @@ impl Sim {
                     ..v.input
                 };
                 v.flyer.ai = f.ai;
+                if v.flyer.ai.wedges >= crate::ai::flyer_drive::WEDGED_GIVEUP
+                    && v.flyer.phase != FlightPhase::Landed
+                {
+                    self.destroy_vehicle(m.vehicle, None);
+                    return;
+                }
             }
         }
     }

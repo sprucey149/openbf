@@ -14,7 +14,7 @@ use glam::{Quat, Vec3};
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlyerParams {
     pub bf2: bool,
-    pub never_crash: bool,
+    pub never_crash_when_unpiloted: bool,
     pub trick_roll_speed: f32,
     pub pilot_repair_scale: f32,
     pub aim_box: f32,
@@ -112,7 +112,7 @@ impl Default for FlyerParams {
     fn default() -> Self {
         Self {
             bf2: false,
-            never_crash: false,
+            never_crash_when_unpiloted: false,
             trick_roll_speed: 1.0,
             pilot_repair_scale: 0.005,
             aim_box: 0.0,
@@ -808,7 +808,7 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     let has_pilot = v.has_pilot();
     let input = v.input;
     if p.bf2
-        && !p.never_crash
+        && !p.never_crash_when_unpiloted
         && matches!(v.flyer.phase, FlightPhase::Takeoff | FlightPhase::Flying)
         && (!occupied || (!has_pilot && !env.player_aboard))
     {

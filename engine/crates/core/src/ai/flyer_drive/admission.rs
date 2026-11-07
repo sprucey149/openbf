@@ -20,6 +20,50 @@ fn pilot(sim: &Sim, index: u32, v: &Vehicle) -> bool {
             })
 }
 
+pub const TRANSPORT_CLASS: u32 = 0xd32f_6312;
+
+pub fn has_transport_paths(sim: &Sim) -> bool {
+    sim.flyer_paths
+        .iter()
+        .any(|p| p.classes.iter().any(|(id, _)| *id == TRANSPORT_CLASS))
+}
+
+fn fallback_transport_classes(sim: &Sim, handle: VehicleHandle) -> Vec<u32> {
+    let Some(v) = sim.vehicle(handle) else {
+        return Vec::new();
+    };
+    let team = v.home_team.or(v.team);
+    let mut classes: Vec<u32> = sim
+        .alive_vehicles()
+        .filter_map(|(_, other)| {
+            if other.home_team == team || other.team == team {
+                let p = sim.flyer_params.get(other.class as usize)?.as_ref()?;
+                if p.follower.class_id != 0 && p.follower.class_id != TRANSPORT_CLASS {
+                    return Some(p.follower.class_id);
+                }
+            }
+            None
+        })
+        .collect();
+    for pad in &sim.vehicle_pads {
+        if pad.team == team {
+            for pad_class in &pad.def.classes {
+                if let Some(c) = pad_class {
+                    let cls = c.spec.class;
+                    if let Some(Some(p)) = sim.flyer_params.get(cls as usize) {
+                        if p.follower.class_id != 0 && p.follower.class_id != TRANSPORT_CLASS {
+                            classes.push(p.follower.class_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    classes.sort_unstable();
+    classes.dedup();
+    classes
+}
+
 /// Discovery and joining differ for an unspecified follower class on a path
 /// with explicit classes (B2 FUN_002f9740 vs FUN_002f9808).
 pub(super) fn allows(
@@ -84,9 +128,11 @@ pub(super) fn allows(
     if path.classes.is_empty() || (!joining && class == 0) {
         return true;
     }
+    let fallback = (class == TRANSPORT_CLASS && !has_transport_paths(sim))
+        .then(|| fallback_transport_classes(sim, handle));
     path.classes
         .iter()
-        .find(|(id, _)| *id == class)
+        .find(|(id, _)| *id == class || fallback.as_ref().is_some_and(|f| f.contains(id)))
         .is_some_and(|(_, max)| same_class < *max)
 }
 

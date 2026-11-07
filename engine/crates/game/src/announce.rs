@@ -203,7 +203,8 @@ pub struct Commander {
     leaving_line: Option<String>,
     /// The player's flown droid or flyer was outside at the last [`Commander::leaving`].
     was_leaving: bool,
-    space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
+    pub space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
+    pub spawn_briefing_played: bool,
 }
 
 /// One unit's combat call (card UCALL): its class's property for it (None:
@@ -244,6 +245,7 @@ impl Commander {
             leaving_line: None,
             was_leaving: false,
             space_round: None,
+            spawn_briefing_played: false,
         }
     }
 
@@ -303,6 +305,15 @@ impl Commander {
     ) -> Vec<Line> {
         if spawned {
             self.announcer.player_spawned();
+            if !self.spawn_briefing_played {
+                self.spawn_briefing_played = true;
+                if let Some(round) = &self.space_round {
+                    let listener = self.announcer.listener();
+                    if let Some(briefing) = round.briefing_for_team(listener) {
+                        self.queue.ask(Line::commander(&briefing));
+                    }
+                }
+            }
         }
         if over {
             self.announcer.battle_over();

@@ -41,6 +41,7 @@
 
 mod admission;
 pub(crate) use admission::commit as commit_plan;
+pub use admission::{has_transport_paths, TRANSPORT_CLASS};
 
 use super::gunner::Look;
 use super::hover_drive::{self, Body, Class, Order};
@@ -130,6 +131,8 @@ pub fn can_fly(sim: &Sim, v: &Vehicle) -> bool {
                                 .classes
                                 .iter()
                                 .any(|(id, _)| *id == p.follower.class_id)
+                            || (p.follower.class_id == admission::TRANSPORT_CLASS
+                                && !admission::has_transport_paths(sim))
                     })
             })
 }
@@ -637,8 +640,21 @@ fn connect(
     } else {
         loiter(v, p, ai);
         if !ai.curve.as_ref().is_some_and(&clear) {
-            ai.curve = None;
-            ai.goal = None;
+            let esc_dir = clearest(sim, v, handle);
+            let curve = [
+                pos - forward * CONNECT_BEHIND,
+                pos,
+                pos + esc_dir * 40.0,
+                pos + esc_dir * 80.0,
+            ];
+            if clear_chord(sim, pos, pos + esc_dir * WEDGED_RAY, handle) && clear(&curve) {
+                ai.curve = Some(curve);
+                ai.cursor = None;
+                ai.goal = None;
+            } else {
+                ai.curve = None;
+                ai.goal = None;
+            }
         }
     }
     ai.t = 0.0;
@@ -840,6 +856,16 @@ pub(super) fn drive(
     }
     match v.flyer.phase {
         FlightPhase::Landed => {
+            let is_transport = p.follower.class_id == admission::TRANSPORT_CLASS;
+            let in_landing = sim.landing_regions.iter().any(|r| r.contains(v.pos));
+            let far_from_home = v
+                .spawn_pad
+                .and_then(|idx| sim.vehicle_pads.get(idx as usize))
+                .map_or(true, |pad| (v.pos - pad.def.pos).length() > 150.0);
+            if is_transport && in_landing && far_from_home {
+                super::ride::request_exit(st);
+                return (pad, nt);
+            }
             // FUN_002518d0: travelling while not flying requests takeoff.
             takeoff = !v.flyer.jump_was_down;
             ai.takeoff_at = sim.tick;
@@ -853,6 +879,24 @@ pub(super) fn drive(
         // BF1 skips only states 0 and 3 (FUN_001dd0d0).
         _ if p.bf2 => {
             if v.flyer.phase == FlightPhase::Flying {
+                let pos = v.pos;
+                if pos.distance(ai.anchor) > WEDGED_MOVE {
+                    ai.anchor = pos;
+                    ai.anchor_at = sim.tick;
+                } else if sim.tick >= ai.anchor_at + WEDGED_TICKS {
+                    ai.anchor_at = sim.tick;
+                    ai.wedged_until = sim.tick + WEDGED_HOLD;
+                    ai.wedges = ai.wedges.saturating_add(1);
+                }
+                let is_transport = p.follower.class_id == admission::TRANSPORT_CLASS;
+                let in_landing = sim.landing_regions.iter().any(|r| r.contains(v.pos));
+                let far_from_home = v
+                    .spawn_pad
+                    .and_then(|idx| sim.vehicle_pads.get(idx as usize))
+                    .map_or(true, |pad| (v.pos - pad.def.pos).length() > 150.0);
+                if is_transport && in_landing && far_from_home {
+                    takeoff = true;
+                }
                 let pilot = super::flyer_weapons::Pilot {
                     me,
                     vehicle: v,
@@ -891,8 +935,9 @@ pub(super) fn drive(
     if free_fire {
         super::gunner::free_fire(sim, me, st, &mut pad);
     }
-    // OURS: a craft that cannot find its way out of a bay gets its pilot out too.
-    if ai.wedges >= WEDGED_GIVEUP {
+    // OURS: on BF1 or when landed, a craft that cannot find its way out gets
+    // its pilot out; on BF2 in flight, stuck-kill destroys the wedged craft.
+    if ai.wedges >= WEDGED_GIVEUP && (!p.bf2 || v.flyer.phase == FlightPhase::Landed) {
         super::ride::request_exit(st);
     }
     let r: RideState = st.ride.unwrap_or_default();

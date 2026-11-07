@@ -655,7 +655,7 @@ pub fn install_with_objective(
         .map(|(i, c)| {
             vehicle_class::FlyerClass::from_db(&db, c, game == "bf2").map(|f| {
                 core::vehicle::flyer::FlyerParams {
-                    never_crash: vehicle_class::prop_flag(&db, c, "NeverCrashWhenUnpiloted"),
+                    never_crash_when_unpiloted: vehicle_class::prop_flag(&db, c, "NeverCrashWhenUnpiloted"),
                     trick_roll_speed: vehicle_class::prop_float(&db, c, "TrickRollSpeed")
                         .unwrap_or(1.0),
                     trick_drain: vehicle_class::prop_float(&db, c, "EnergyTrickDrainSingleTap")

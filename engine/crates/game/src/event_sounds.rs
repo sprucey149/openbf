@@ -511,6 +511,74 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
             _ => {}
         }
     }
+
+    // Incoming missile warning beep and target lock audio loop (card UORD / issue #123)
+    if let Some(player_unit) = walk.sim.units.get(walk.player.index as usize) {
+        if let core::unit::Controller::Player { slot } = player_unit.controller {
+            let side = walk
+                .teams
+                .get(player_unit.team as usize)
+                .map(|t| t.faction.as_str())
+                .unwrap_or("");
+            let slot_idx = usize::from(slot);
+            if let Some(dist) = walk.sim.incoming_missile(slot_idx) {
+                // Incoming missile warning beep: period accelerates as the missile closes in
+                let interval = if dist < 100.0 {
+                    4
+                } else if dist < 250.0 {
+                    8
+                } else {
+                    15
+                };
+                if walk.sim.tick.is_multiple_of(interval) {
+                    let prop = if matches!(side, "all" | "imp" | "rep" | "cis") {
+                        format!("{side}_weap_inf_rocket_launcher_tracking")
+                    } else {
+                        "com_weap_inf_rocket_launcher_tracking".to_owned()
+                    };
+                    play(&prop, ears);
+                }
+            } else if walk
+                .sim
+                .lock_on
+                .get(slot_idx)
+                .is_some_and(|l| l.target.is_some() && l.held > 0.0)
+            {
+                // Active missile lock-on / locking
+                if walk.sim.tick.is_multiple_of(10) {
+                    let prop = if matches!(side, "all" | "imp" | "rep" | "cis") {
+                        format!("{side}_weap_inf_rocket_launcher_tracking")
+                    } else {
+                        "com_weap_inf_rocket_launcher_tracking".to_owned()
+                    };
+                    play(&prop, ears);
+                }
+            }
+        }
+    }
+
+    // Intermittent NPC space radio chatter during flight in Space Assault (issue #123)
+    if walk.space_round.is_some() {
+        if let Some(player_unit) = walk.sim.units.get(walk.player.index as usize) {
+            let side = walk
+                .teams
+                .get(player_unit.team as usize)
+                .map(|t| t.faction.as_str())
+                .unwrap_or("");
+            let chatter_prop = match side.to_ascii_lowercase().as_str() {
+                "all" => Some("all_inf_com_space_chatter"),
+                "imp" => Some("imp_inf_com_space_chatter"),
+                "rep" => Some("rep_inf_com_space_chatter"),
+                "cis" => Some("cis_inf_com_space_chatter"),
+                _ => None,
+            };
+            if let Some(prop) = chatter_prop {
+                if walk.sim.tick > 0 && walk.sim.tick % 300 == 150 {
+                    play(prop, ears);
+                }
+            }
+        }
+    }
 }
 
 /// The hurt cry's share (card UCRY): a hit asks it only when it took more

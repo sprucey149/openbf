@@ -156,6 +156,7 @@ fn hud_model(dead: bool) -> ui::hud::HudModel {
         lock: None,
         hints: Vec::new(),
         seat_health: None,
+        incoming_missile: None,
         space: None,
         tickets: [250; 2],
         bleed: [0.0; 2],

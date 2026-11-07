@@ -18,6 +18,7 @@ fn hud() -> ui::hud::HudModel {
         lock: None,
         hints: Vec::new(),
         seat_health: None,
+        incoming_missile: None,
         space: None,
         damage_flash: 0.0,
         gauge: Default::default(),
