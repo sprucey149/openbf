@@ -103,7 +103,7 @@ impl ImpactLook {
             HASH_IMPACT_WATER => self.water = v(),
             HASH_IMPACT_SHIELD if !bf2 => self.shield = v(),
             HASH_IMPACT_SHIELD_SMALL => self.shield = v(),
-            HASH_IMPACT_SHIELD_LARGE => self.shield = v(),
+            HASH_IMPACT_SHIELD_LARGE => self.shield_large = v(),
             HASH_TRAIL_EFFECT => self.trail = v(),
             _ => {}
         }
