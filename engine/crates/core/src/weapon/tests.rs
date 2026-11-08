@@ -757,6 +757,7 @@ fn from_props_reproduces_rifle_fixtures() {
                 ("FireEmptySound", "com_weap_inf_ammo_empty"),
                 ("WeaponChangeSound", "com_weap_inf_equip_med"),
                 ("ScoreForMedalsType", "1"),
+                ("DisplayRefire", "0"),
             ],
             &[],
         ),

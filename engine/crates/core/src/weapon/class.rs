@@ -287,9 +287,11 @@ impl WeaponClass {
                     terrain: Some("com_sfx_ord_exp".into()),
                     water: Some("com_sfx_watersplash_ord".into()),
                     shield: Some("com_sfx_shieldimpact_sm".into()),
+                    shield_large: Some("com_sfx_shieldimpact_xl".into()),
                     ..Default::default()
                 }),
             },
+            display_refire: false,
             fire_sound: Some("rep_weap_inf_rifle_fire".into()),
             reload_sound: Some("com_weap_inf_reload_med".into()),
             empty_sound: Some("com_weap_inf_ammo_empty".into()),
