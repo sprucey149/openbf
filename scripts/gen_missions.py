@@ -1558,7 +1558,7 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m.door_locks = door_locks50(f) if f is not None and game == "bf2" else []
     m.arc_blocks = arc_calls50(f) if f is not None and game == "bf2" else []
     m.barriers = barrier_calls50(f) if f is not None and game == "bf2" else []
-    if f is not None and game == "bf2" and mission_mode(ps2_name) == "ass":
+    if f is not None and game == "bf2" and mission_mode(ps2_name) in ("ass", "1flag"):
         for verb, args in hangar_war_calls50(f, common):
             if verb in BARRIER_VERBS:
                 m.barriers.append((args[0], verb == BARRIER_VERBS[0]))

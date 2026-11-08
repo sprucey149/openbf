@@ -466,6 +466,7 @@ pub const AIM_SIZE: &[(&str, f32)] = &[
     ("rep_inf_ep3jettrooper", 0.9669),
     ("rep_inf_ep3obiwan", 0.9426),
     ("rep_inf_ep3sniper", 0.9565),
+    ("rep_inf_ep3spacepilot", 0.9588),
     ("rep_inf_ep3trooper", 0.9548),
     ("rep_inf_feluciatrooper", 0.9633),
     ("rep_inf_jettrooper", 0.9673),
