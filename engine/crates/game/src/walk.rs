@@ -1241,9 +1241,8 @@ impl WalkSim {
         if let (Some(old), Some(new)) = (old_mount, new_mount) {
             if old.vehicle == new.vehicle && old.seat != new.seat {
                 if let Some(vehicle) = self.sim.vehicle(new.vehicle) {
-                    let old_rot = Quat::from_rotation_y(old_camera.yaw)
-                        * Quat::from_rotation_x(old_camera.pitch)
-                        * Quat::from_rotation_z(old_camera.roll);
+                    let old_rot =
+                        camera::camera_rotation(old_camera.yaw, old_camera.pitch, old_camera.roll);
                     let local_pos = vehicle.rot.inverse() * (old_camera.position - vehicle.pos);
                     let local_rot = vehicle.rot.inverse() * old_rot;
                     self.seat_transition =

@@ -559,12 +559,14 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                     15
                 };
                 if walk.sim.tick.is_multiple_of(interval) {
-                    let prop = if matches!(side, "all" | "imp" | "rep" | "cis") {
-                        format!("{side}_weap_inf_rocket_launcher_tracking")
-                    } else {
-                        "com_weap_inf_rocket_launcher_tracking".to_owned()
+                    let prop = match side {
+                        "all" => "all_weap_inf_rocket_launcher_tracking",
+                        "imp" => "imp_weap_inf_rocket_launcher_tracking",
+                        "rep" => "rep_weap_inf_rocket_launcher_tracking",
+                        "cis" => "cis_weap_inf_rocket_launcher_tracking",
+                        _ => "com_weap_inf_rocket_launcher_tracking",
                     };
-                    play(&prop, ears);
+                    play(prop, ears);
                 }
             }
         }

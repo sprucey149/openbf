@@ -499,8 +499,9 @@ pub(super) fn make_walk_with_counts(
                 std::sync::Arc::new(round)
             });
             if let Some(ctf_def) = &m.ctf {
-                let score_limit =
-                    ctf_def.score_limit.unwrap_or(core::sim::DEFAULT_CTF_SCORE_LIMIT);
+                let score_limit = ctf_def
+                    .score_limit
+                    .unwrap_or(core::sim::DEFAULT_CTF_SCORE_LIMIT);
                 let find_region = |name: &str| -> glam::Vec3 {
                     scene
                         .manifest

@@ -41,7 +41,8 @@ fn make_test_db(defs: Vec<ClassDef>) -> ClassDb {
     let temp_path = std::env::temp_dir().join(temp_name);
     let ron_str = ron::to_string(&defs).expect("serialize test class defs");
     std::fs::write(&temp_path, ron_str).expect("write temp class file");
-    db.load(&temp_path).expect("load temp class file into ClassDb");
+    db.load(&temp_path)
+        .expect("load temp class file into ClassDb");
     let _ = std::fs::remove_file(temp_path);
     db
 }
@@ -217,10 +218,7 @@ fn test_jedi_starfighter_empty_chunk_entries_and_has_chunks() {
         class_def(
             "tur_bldg_tower",
             "armedbuilding",
-            &[
-                ("CHUNKSECTION", "CHUNK1"),
-                ("ChunkGeometryName", ""),
-            ],
+            &[("CHUNKSECTION", "CHUNK1"), ("ChunkGeometryName", "")],
         ),
         // Vehicle with no chunks of its own, but its explosion class defines chunks
         class_def(
@@ -309,7 +307,8 @@ fn test_texture_upload_cache_reuse_eliminates_duplicates() {
 
     let shared_texture_name = "veh_hull_shared";
 
-    let manifest: Manifest = ron::from_str(r#"(
+    let manifest: Manifest = ron::from_str(
+        r#"(
         map: "test_space_map",
         source_game: "bf2",
         terrain_name: None,
@@ -336,11 +335,15 @@ fn test_texture_upload_cache_reuse_eliminates_duplicates() {
         ],
         regions: [],
         instances: [],
-    )"#)
+    )"#,
+    )
     .expect("deserialize test manifest");
 
     let mut meshes = HashMap::new();
-    meshes.insert("test_flyer".to_string(), make_test_mesh(shared_texture_name));
+    meshes.insert(
+        "test_flyer".to_string(),
+        make_test_mesh(shared_texture_name),
+    );
     meshes.insert(
         "test_flyer_chunk".to_string(),
         make_test_mesh(shared_texture_name),
@@ -434,7 +437,8 @@ fn test_droid_debris_shaded_mesh_upload_and_draw_path() {
     let droid_chunk_model = "bdroid_chunk1";
     let droid_tex_name = "openbf_droid_bdroid";
 
-    let manifest: Manifest = ron::from_str(r#"(
+    let manifest: Manifest = ron::from_str(
+        r#"(
         map: "test_droid_map",
         source_game: "bf2",
         terrain_name: None,
@@ -454,11 +458,15 @@ fn test_droid_debris_shaded_mesh_upload_and_draw_path() {
         ],
         regions: [],
         instances: [],
-    )"#)
+    )"#,
+    )
     .expect("deserialize test manifest");
 
     let mut meshes = HashMap::new();
-    meshes.insert(droid_chunk_model.to_string(), make_test_mesh(droid_tex_name));
+    meshes.insert(
+        droid_chunk_model.to_string(),
+        make_test_mesh(droid_tex_name),
+    );
 
     let mut textures = HashMap::new();
     textures.insert(droid_tex_name.to_string(), make_test_texture());
@@ -672,7 +680,9 @@ fn test_chunk_contact_and_bounce_on_live_vehicle_hull() {
         },
         Layers::VEHICLE,
     );
-    walk.sim.collision.set_hull(owner, &[hull_part], Mat4::IDENTITY);
+    walk.sim
+        .collision
+        .set_hull(owner, &[hull_part], Mat4::IDENTITY);
 
     // Launch chunk directly above the vehicle hull, falling downwards
     chunks.launch(

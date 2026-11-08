@@ -1259,7 +1259,10 @@ impl Ring {
                 }
             }
             let (shields, hulls) = sim.capital_meters().map_or(([1.0, 1.0], [1.0, 1.0]), |m| {
-                ([r2(m[0].shield), r2(m[1].shield)], [r2(m[0].hull), r2(m[1].hull)])
+                (
+                    [r2(m[0].shield), r2(m[1].shield)],
+                    [r2(m[0].hull), r2(m[1].hull)],
+                )
             });
             SpaceAssaultRow {
                 score_limit: sa.score_limit,
@@ -2545,7 +2548,10 @@ mod tests {
             seats: vec![core::vehicle::SeatKind::Pilot],
         };
         let vh = w.sim.spawn_vehicle(&v_spec);
-        w.sim.units[w.player.index as usize].mount = Some(core::vehicle::Mount { vehicle: vh, seat: 0 });
+        w.sim.units[w.player.index as usize].mount = Some(core::vehicle::Mount {
+            vehicle: vh,
+            seat: 0,
+        });
         if let Some(v) = w.sim.vehicle_mut(vh) {
             v.seats[0].occupant = Some(w.player);
             v.flyer.phase = core::vehicle::flyer::FlightPhase::Flying;
@@ -2570,7 +2576,11 @@ mod tests {
         let sa_row = wf.space.as_ref().expect("space assault row");
         assert_eq!(sa_row.score_limit, 180);
         assert_eq!(sa_row.team_points, [42, 18]);
-        let flyer_veh = wf.vehicles.iter().find(|v| v.id == vh.index).expect("flyer vehicle row");
+        let flyer_veh = wf
+            .vehicles
+            .iter()
+            .find(|v| v.id == vh.index)
+            .expect("flyer vehicle row");
         let fl = flyer_veh.flyer.as_ref().expect("flyer telemetry");
         assert_eq!(fl.phase, 2, "FlightPhase::Flying");
         assert_eq!(fl.channel, 1);
@@ -2583,7 +2593,17 @@ mod tests {
         let read_back: Snapshot = serde_json::from_str(&json).expect("deserialize snapshot");
         let rb_sa = read_back.world.last().unwrap().space.as_ref().unwrap();
         assert_eq!(rb_sa.team_points, [42, 18]);
-        let rb_fl = read_back.world.last().unwrap().vehicles.iter().find(|v| v.id == vh.index).unwrap().flyer.as_ref().unwrap();
+        let rb_fl = read_back
+            .world
+            .last()
+            .unwrap()
+            .vehicles
+            .iter()
+            .find(|v| v.id == vh.index)
+            .unwrap()
+            .flyer
+            .as_ref()
+            .unwrap();
         assert_eq!(rb_fl.channel, 1);
         assert_eq!(rb_fl.threat_id, 7);
         let _ = std::fs::remove_dir_all(dir);

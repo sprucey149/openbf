@@ -15,7 +15,7 @@ use core::vehicle::{SeatKind, VehicleHandle, VehicleKind, VehicleSpec};
 use core::weapon::{DamageDesc, HealthType};
 use game::blackbox::FlyerRow;
 use game::vehicle_class::SeatSpec;
-use game::walk::{DEATH_VIEW_HOLD, FLYER_CRASH_DETACH_RATE, WalkSim};
+use game::walk::{WalkSim, DEATH_VIEW_HOLD, FLYER_CRASH_DETACH_RATE};
 use glam::{Mat4, Quat, Vec3};
 use std::sync::Arc;
 
@@ -121,23 +121,44 @@ fn floor_collision_calculates_exact_restitution_damage_and_impact_event() {
     sim.step(&[]);
 
     // Verify FlyerImpact event was emitted
-    let impact = sim.events.iter().find(|e| matches!(e, Event::FlyerImpact { vehicle, .. } if *vehicle == vh));
-    assert!(impact.is_some(), "Event::FlyerImpact must be emitted on floor collision");
+    let impact = sim
+        .events
+        .iter()
+        .find(|e| matches!(e, Event::FlyerImpact { vehicle, .. } if *vehicle == vh));
+    assert!(
+        impact.is_some(),
+        "Event::FlyerImpact must be emitted on floor collision"
+    );
     let (s, d) = match impact {
-        Some(Event::FlyerImpact { speed, damage, lethal, .. }) => {
+        Some(Event::FlyerImpact {
+            speed,
+            damage,
+            lethal,
+            ..
+        }) => {
             assert!(!lethal, "scrape is non-lethal");
-            assert!((*speed - 10.0).abs() < 0.2, "impact speed is closing speed ({speed})");
+            assert!(
+                (*speed - 10.0).abs() < 0.2,
+                "impact speed is closing speed ({speed})"
+            );
             (*speed, *damage)
         }
         _ => unreachable!(),
     };
 
-    let v = sim.vehicle(vh).expect("flyer survives non-lethal floor scrape");
+    let v = sim
+        .vehicle(vh)
+        .expect("flyer survives non-lethal floor scrape");
     assert!(v.alive);
     // Vertical velocity rebounded upward by restitution factor -1.4:
     // pre-impact along was -s, post-bounce vel.y = -s + 1.4 * s = 0.4 * s
     let expected_vy = 0.4 * s;
-    assert!((v.vel.y - expected_vy).abs() < 1e-2, "vel.y was {}, expected {}", v.vel.y, expected_vy);
+    assert!(
+        (v.vel.y - expected_vy).abs() < 1e-2,
+        "vel.y was {}, expected {}",
+        v.vel.y,
+        expected_vy
+    );
     assert!(v.vel.z < 80.0 && v.vel.z > 70.0, "vel.z was {}", v.vel.z);
 
     // Damage verification:
@@ -153,7 +174,10 @@ fn floor_collision_calculates_exact_restitution_damage_and_impact_event() {
         v.health.cur,
         expected_hp
     );
-    assert!((d - expected_damage).abs() < 1.0, "impact damage matches formula");
+    assert!(
+        (d - expected_damage).abs() < 1.0,
+        "impact damage matches formula"
+    );
 }
 
 #[test]
@@ -212,10 +236,16 @@ fn capital_hull_head_on_impact_destroys_craft_with_nose_damage() {
 
     // Lethal impact should immediately destroy the craft
     let v = sim.vehicle(vh);
-    assert!(v.is_none_or(|v| !v.alive), "high speed head-on hull collision must destroy the flyer");
+    assert!(
+        v.is_none_or(|v| !v.alive),
+        "high speed head-on hull collision must destroy the flyer"
+    );
 
     // Check that Event::FlyerImpact was emitted with lethal = true
-    let impact = sim.events.iter().find(|e| matches!(e, Event::FlyerImpact { vehicle, .. } if *vehicle == vh));
+    let impact = sim
+        .events
+        .iter()
+        .find(|e| matches!(e, Event::FlyerImpact { vehicle, .. } if *vehicle == vh));
     assert!(impact.is_some(), "Event::FlyerImpact must be emitted");
     if let Some(Event::FlyerImpact { lethal, damage, .. }) = impact {
         assert!(lethal, "head-on capital hull collision at 85m/s is lethal");
@@ -258,9 +288,18 @@ fn craft_to_craft_collision_halves_impulse_and_scales_damage() {
 
     let craft1 = sim.vehicle(v1).unwrap();
     let craft2 = sim.vehicle(v2).unwrap();
-    assert!(craft1.health.cur < TEST_HEALTH, "craft 1 took collision damage");
-    assert!(craft2.health.cur < TEST_HEALTH, "craft 2 took collision damage");
-    assert!(craft1.alive && craft2.alive, "crafts survive moderate glancing at 40m/s due to 0.2 damage scale");
+    assert!(
+        craft1.health.cur < TEST_HEALTH,
+        "craft 1 took collision damage"
+    );
+    assert!(
+        craft2.health.cur < TEST_HEALTH,
+        "craft 2 took collision damage"
+    );
+    assert!(
+        craft1.alive && craft2.alive,
+        "crafts survive moderate glancing at 40m/s due to 0.2 damage scale"
+    );
 }
 
 #[test]
@@ -322,7 +361,10 @@ fn falling_craft_instantly_transitions_to_crashed_on_hull_contact() {
     }
 
     // Impact event should be lethal
-    let impact = sim.events.iter().find(|e| matches!(e, Event::FlyerImpact { vehicle, .. } if *vehicle == vh));
+    let impact = sim
+        .events
+        .iter()
+        .find(|e| matches!(e, Event::FlyerImpact { vehicle, .. } if *vehicle == vh));
     assert!(impact.is_some());
     if let Some(Event::FlyerImpact { lethal, .. }) = impact {
         assert!(lethal, "contact while Falling is lethal");
@@ -397,7 +439,11 @@ fn blackbox_phase_progression_camera_detach_and_death_view_hold() {
     );
 
     let v = walk.sim.vehicle(vh).unwrap();
-    assert_eq!(v.flyer.phase, FlightPhase::Falling, "shot-down flyer enters Falling phase");
+    assert_eq!(
+        v.flyer.phase,
+        FlightPhase::Falling,
+        "shot-down flyer enters Falling phase"
+    );
 
     // Step a tick in Falling phase
     walk.step_tick(&[PadState::default()]);
@@ -426,12 +472,18 @@ fn blackbox_phase_progression_camera_detach_and_death_view_hold() {
 
     // Flyer is now destroyed / crashed
     assert_eq!(DEATH_VIEW_HOLD, 4.0);
-    assert!(walk.seat_view_timer > 0.0, "seat view timer is active during death hold");
+    assert!(
+        walk.seat_view_timer > 0.0,
+        "seat view timer is active during death hold"
+    );
     assert!(walk.seat_view_timer <= DEATH_VIEW_HOLD);
 
     // Death view camera is held
     let cam = walk.camera();
-    assert!(cam.position.length() > 0.0, "camera held in place or tracking crash point");
+    assert!(
+        cam.position.length() > 0.0,
+        "camera held in place or tracking crash point"
+    );
 
     // Advance 60 ticks (2.0s): death view should still be held
     for _ in 0..60 {
@@ -443,7 +495,10 @@ fn blackbox_phase_progression_camera_detach_and_death_view_hold() {
     for _ in 0..70 {
         walk.step_tick(&[PadState::default()]);
     }
-    assert_eq!(walk.seat_view_timer, 0.0, "death view timer expires after 4.0s");
+    assert_eq!(
+        walk.seat_view_timer, 0.0,
+        "death view timer expires after 4.0s"
+    );
 }
 
 #[test]
@@ -489,7 +544,11 @@ fn flyer_impact_sparks_and_controller_rumble() {
         lethal: true,
     });
     fx.ingest_sim(&sim);
-    assert_eq!(fx.len(), 2, "lethal FlyerImpact event produces spark / hit effect");
+    assert_eq!(
+        fx.len(),
+        2,
+        "lethal FlyerImpact event produces spark / hit effect"
+    );
 
     // Verify gilrs rumble helper runs safely with gamepad
     if let Ok(mut g) = gilrs::Gilrs::new() {

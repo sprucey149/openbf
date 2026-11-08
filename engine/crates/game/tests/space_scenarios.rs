@@ -57,7 +57,10 @@ fn shot_down_flyer_enters_falling_crash_state_instead_of_instant_death() {
     let vh = spawn_test_flyer(&mut sim, 0, Vec3::new(0.0, 500.0, 0.0));
 
     // Seat the pilot and transition to Flying
-    sim.units[pilot.index as usize].mount = Some(core::vehicle::Mount { vehicle: vh, seat: 0 });
+    sim.units[pilot.index as usize].mount = Some(core::vehicle::Mount {
+        vehicle: vh,
+        seat: 0,
+    });
     if let Some(v) = sim.vehicle_mut(vh) {
         v.seats[0].occupant = Some(pilot);
         v.flyer.phase = FlightPhase::Flying;
@@ -73,7 +76,9 @@ fn shot_down_flyer_enters_falling_crash_state_instead_of_instant_death() {
     };
     sim.damage_vehicle(vh, &desc, 1.0, None);
 
-    let v = sim.vehicle(vh).expect("flyer still exists in the sim during crash");
+    let v = sim
+        .vehicle(vh)
+        .expect("flyer still exists in the sim during crash");
     assert_eq!(
         v.flyer.phase,
         FlightPhase::Falling,
@@ -129,8 +134,7 @@ fn evasive_side_roll_consumes_trick_energy_and_sets_strafe_vector() {
         "energy is drained by trick_drain"
     );
     assert_eq!(
-        v.flyer.side_roll,
-        roll_right,
+        v.flyer.side_roll, roll_right,
         "side roll direction vector is set"
     );
 }
@@ -138,7 +142,8 @@ fn evasive_side_roll_consumes_trick_energy_and_sets_strafe_vector() {
 #[test]
 fn capital_shield_group_absorbs_damage_and_destroys_controller_when_depleted() {
     let mut sim = Sim::empty(7);
-    sim.station_classes.push(core::sim::StationClass::soldier("shield_gen", 1.0, 0.0, 0));
+    sim.station_classes
+        .push(core::sim::StationClass::soldier("shield_gen", 1.0, 0.0, 0));
 
     // Set up 2 stations: controller (shield gen) and target system (bridge)
     let gen_id = sim.stations.len() as u16;
@@ -191,7 +196,10 @@ fn capital_shield_group_absorbs_damage_and_destroys_controller_when_depleted() {
     sim.damage_station(bridge_id, &desc_kill, 1.0, None, None);
     let sa_after = sim.space_assault.as_ref().unwrap();
     assert_eq!(sa_after.shields[0].shield, 0.0);
-    assert!(sa_after.shields[0].all_down, "all_down flag is set when shield reaches zero");
+    assert!(
+        sa_after.shields[0].all_down,
+        "all_down flag is set when shield reaches zero"
+    );
     assert!(
         sim.stations[usize::from(gen_id)].destroyed,
         "controller station (generator) is destroyed when shield collapses"

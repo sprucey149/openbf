@@ -194,8 +194,7 @@ impl GuidedRocket {
             (turn, pitch, roll)
         } else {
             let look = pad.look();
-            let turn =
-                (PadState::axis(pad.rx) + look.0 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
+            let turn = (PadState::axis(pad.rx) + look.0 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
             let pitch =
                 (PadState::axis(pad.ry) + look.1 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
             (turn, pitch, 0.0)

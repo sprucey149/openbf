@@ -337,7 +337,7 @@ fn lib() -> SoundLib {
             sample_paths: samples,
             engines: HashMap::new(),
             music: HashMap::new(),
-        triggers: Vec::new(),
+            triggers: Vec::new(),
         },
         levels: Vec::new(),
         foreign: Vec::new(),

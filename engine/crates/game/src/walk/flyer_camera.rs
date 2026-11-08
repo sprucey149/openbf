@@ -213,8 +213,7 @@ impl WalkSim {
             self.settle_camera(CamKind::Seat, target, ideal, v.instance, Some(handle));
         let move_tension = if matches!(
             v.flyer.phase,
-            core::vehicle::flyer::FlightPhase::Falling
-                | core::vehicle::flyer::FlightPhase::Crashed
+            core::vehicle::flyer::FlightPhase::Falling | core::vehicle::flyer::FlightPhase::Crashed
         ) {
             [
                 [

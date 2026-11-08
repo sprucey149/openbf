@@ -12,7 +12,8 @@ impl WalkSim {
         if self.sim.controlled_guided(self.player).is_some() {
             return target;
         }
-        let Some((local_pos, local_rot, from_fov, elapsed, vehicle_handle)) = self.seat_transition else {
+        let Some((local_pos, local_rot, from_fov, elapsed, vehicle_handle)) = self.seat_transition
+        else {
             return target;
         };
         let Some(vehicle) = self.sim.vehicle(vehicle_handle) else {
@@ -22,10 +23,8 @@ impl WalkSim {
         let t = t * t * (3.0 - 2.0 * t);
         let current_from_pos = vehicle.pos + vehicle.rot * local_pos;
         let current_from_rot = vehicle.rot * local_rot;
-        let target_rot = Quat::from_rotation_y(target.yaw)
-            * Quat::from_rotation_x(target.pitch)
-            * Quat::from_rotation_z(target.roll);
-        let slerped_rot = current_from_rot.slerp(target_rot, t);
+        let target_rot = camera_rotation(target.yaw, target.pitch, target.roll);
+        let slerped_rot = crate::sim_pose::quat_slerp(current_from_rot, target_rot, t);
         let lerped_pos = current_from_pos.lerp(target.position, t);
         let lerped_fov = from_fov + (target.fov_y - from_fov) * t;
         let mut cam = flyer_camera::camera_at(lerped_pos, slerped_rot, lerped_fov);
@@ -615,4 +614,10 @@ impl WalkSim {
             _ => false,
         }
     }
+}
+
+pub(crate) fn camera_rotation(yaw: f32, pitch: f32, roll: f32) -> Quat {
+    core::vehicle::hover::quat_y(yaw)
+        * core::vehicle::hover::quat_x(pitch)
+        * core::vehicle::hover::quat_z(roll)
 }

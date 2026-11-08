@@ -102,12 +102,42 @@ fn space_one_flag_mission_definitions_load() {
         .join("missions");
 
     let expected_maps = [
-        ("bf2_spa1_1flag.ron", "home_1flag", "Team1capture", "Team2capture"),
-        ("bf2_spa3_1flag.ron", "home_1flag", "Team1capture", "Team2capture"),
-        ("bf2_spa6_1flag.ron", "1flag_home", "1flag_rep_cap", "1flag_cis_cap"),
-        ("bf2_spa7_1flag.ron", "1flag_home", "1flag_rep_cap", "1flag_cis_cap"),
-        ("bf2_spa8_1flag.ron", "home_1flag", "imp_cap_1flag", "all_cap_1flag"),
-        ("bf2_spa9_1flag.ron", "home_1flag", "imp_cap_1flag", "all_cap_1flag"),
+        (
+            "bf2_spa1_1flag.ron",
+            "home_1flag",
+            "Team1capture",
+            "Team2capture",
+        ),
+        (
+            "bf2_spa3_1flag.ron",
+            "home_1flag",
+            "Team1capture",
+            "Team2capture",
+        ),
+        (
+            "bf2_spa6_1flag.ron",
+            "1flag_home",
+            "1flag_rep_cap",
+            "1flag_cis_cap",
+        ),
+        (
+            "bf2_spa7_1flag.ron",
+            "1flag_home",
+            "1flag_rep_cap",
+            "1flag_cis_cap",
+        ),
+        (
+            "bf2_spa8_1flag.ron",
+            "home_1flag",
+            "imp_cap_1flag",
+            "all_cap_1flag",
+        ),
+        (
+            "bf2_spa9_1flag.ron",
+            "home_1flag",
+            "imp_cap_1flag",
+            "all_cap_1flag",
+        ),
     ];
 
     for (file, home, att_cap, def_cap) in expected_maps {
@@ -122,7 +152,10 @@ fn space_one_flag_mission_definitions_load() {
         assert_eq!(m.ai_alive_cap, 16, "ai_alive_cap for {file}");
         assert!(m.landing_regions.len() >= 2, "landing regions for {file}");
 
-        let ctf = m.ctf.as_ref().unwrap_or_else(|| panic!("missing ctf for {file}"));
+        let ctf = m
+            .ctf
+            .as_ref()
+            .unwrap_or_else(|| panic!("missing ctf for {file}"));
         assert_eq!(ctf.flag, "cmn_flag", "flag name for {file}");
         assert_eq!(ctf.home_region, home, "home region for {file}");
         assert_eq!(ctf.capture_region_att, att_cap, "att cap for {file}");
@@ -155,11 +188,24 @@ fn space_one_flag_manifest_layers_and_regions_resolve() {
         assert!(load.layer.is_some(), "{map_dir} applied 1flag layer");
 
         let find_region = |name: &str| {
-            scene.manifest.regions.iter().find(|r| r.name.eq_ignore_ascii_case(name))
+            scene
+                .manifest
+                .regions
+                .iter()
+                .find(|r| r.name.eq_ignore_ascii_case(name))
         };
-        assert!(find_region(home).is_some(), "found home {home} in {map_dir}");
-        assert!(find_region(att_cap).is_some(), "found att cap {att_cap} in {map_dir}");
-        assert!(find_region(def_cap).is_some(), "found def cap {def_cap} in {map_dir}");
+        assert!(
+            find_region(home).is_some(),
+            "found home {home} in {map_dir}"
+        );
+        assert!(
+            find_region(att_cap).is_some(),
+            "found att cap {att_cap} in {map_dir}"
+        );
+        assert!(
+            find_region(def_cap).is_some(),
+            "found def cap {def_cap} in {map_dir}"
+        );
 
         // Flag item instance cmn_flag exists in manifest instances
         let flag_inst = scene
@@ -186,7 +232,10 @@ fn space_one_flag_pickup_and_carrier_tracking() {
 
     // Flag should be picked up by pilot inside the 20m flyer pickup radius
     let ctf_state = sim.ctf.as_ref().expect("ctf installed");
-    assert_eq!(ctf_state.flags[0].status, FlagStatus::Carried { carrier: pilot });
+    assert_eq!(
+        ctf_state.flags[0].status,
+        FlagStatus::Carried { carrier: pilot }
+    );
     assert_eq!(ctf_state.flags[0].carrier(), Some(pilot));
 
     // Vehicle moves forward in space
@@ -226,7 +275,10 @@ fn space_one_flag_drop_on_flyer_crash_and_return_timeout() {
     // Flag is dropped at crash coordinates
     let ctf_state = sim.ctf.as_ref().unwrap();
     match ctf_state.flags[0].status {
-        FlagStatus::Dropped { timer, pickup_cooldown } => {
+        FlagStatus::Dropped {
+            timer,
+            pickup_cooldown,
+        } => {
             assert!((timer - 15.0).abs() < 0.2);
             assert!(pickup_cooldown > 0.0);
         }
@@ -237,7 +289,10 @@ fn space_one_flag_drop_on_flyer_crash_and_return_timeout() {
     // Cannot re-pickup during cooldown
     let (pilot2, vh2) = spawn_pilot_in_flyer(&mut sim, 1, drop_pos);
     step_sim(&mut sim, 0.1);
-    assert!(matches!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::Dropped { .. }));
+    assert!(matches!(
+        sim.ctf.as_ref().unwrap().flags[0].status,
+        FlagStatus::Dropped { .. }
+    ));
 
     // Wait past cooldown (0.5s total), now pilot2 can pick it up
     step_sim(&mut sim, 0.5);
@@ -248,7 +303,10 @@ fn space_one_flag_drop_on_flyer_crash_and_return_timeout() {
     // Drop again and verify 15.0s return timeout
     sim.unit_mut(pilot2).unwrap().alive = false;
     step_sim(&mut sim, 0.1);
-    assert!(matches!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::Dropped { .. }));
+    assert!(matches!(
+        sim.ctf.as_ref().unwrap().flags[0].status,
+        FlagStatus::Dropped { .. }
+    ));
 
     // Advance 15.5 seconds without pickup
     step_sim(&mut sim, 15.5);

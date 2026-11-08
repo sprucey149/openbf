@@ -184,7 +184,7 @@ fn guided_camera_and_interpolation_restore_the_sim_exactly() {
     }
     let mut walk = guided_walk();
     let initial = walk.camera();
-    assert_eq!(initial.position, Vec3::new(0.0, 13.0, -17.0));
+    assert_eq!(initial.position, Vec3::new(0.0, 10.0, -20.0));
     assert_eq!((initial.yaw, initial.pitch, initial.roll), (0.0, 0.0, 0.0));
     // A seat rocket's view carries the flight frame's roll and keeps the
     // reticle centred.

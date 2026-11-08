@@ -117,7 +117,14 @@ impl Sim {
             return;
         }
         let fwd = dir.normalize_or_zero();
-        let right = fwd.cross(Vec3::Y).normalize_or_zero();
+        let right = {
+            let cross = fwd.cross(Vec3::Y);
+            if cross.length_squared() < 1e-6 {
+                fwd.cross(Vec3::Z).normalize_or_zero()
+            } else {
+                cross.normalize_or_zero()
+            }
+        };
         let up = right.cross(fwd).normalize_or_zero();
         let offset = c.spawn_offset;
         let pos = muzzle + right * offset.x + up * offset.y + fwd * offset.z;

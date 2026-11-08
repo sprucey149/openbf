@@ -471,7 +471,10 @@ mod tests {
     #[test]
     fn never_crash_keeps_an_empty_bf2_ship_flying() {
         let (mut sim, h) = bf2_world(true);
-        sim.flyer_params[0].as_mut().unwrap().never_crash_when_unpiloted = true;
+        sim.flyer_params[0]
+            .as_mut()
+            .unwrap()
+            .never_crash_when_unpiloted = true;
         let pilot = sim.vehicle(h).unwrap().seats[0].occupant.unwrap();
         sim.unseat_unit(pilot);
         for _ in 0..crate::TICK_HZ {

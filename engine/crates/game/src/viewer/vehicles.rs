@@ -204,11 +204,7 @@ impl VehicleSides {
                                 .iter()
                                 .map(|g| (g.name.to_ascii_lowercase(), lod0(g).to_owned()))
                                 .collect(),
-                            textures: m
-                                .textures
-                                .iter()
-                                .map(|t| t.to_ascii_lowercase())
-                                .collect(),
+                            textures: m.textures.iter().map(|t| t.to_ascii_lowercase()).collect(),
                             walkers: m
                                 .vehicles
                                 .iter()
@@ -247,29 +243,21 @@ impl VehicleSides {
                         }
                     }
                     let mut textures = HashSet::new();
-                    if let Ok(entries) = pak::read_dir(droid_dir.join("textures")) {
-                        for p in entries {
-                            if let Some(file_name) = p.file_name().and_then(|s| s.to_str()) {
-                                if let Some(stem) = file_name.split('.').next() {
-                                    if !stem.is_empty() {
-                                        textures.insert(stem.to_ascii_lowercase());
+                    let mut collect_textures = |dir: std::path::PathBuf| {
+                        if let Ok(entries) = pak::read_dir(dir) {
+                            for p in entries {
+                                if let Some(file_name) = p.file_name().and_then(|s| s.to_str()) {
+                                    if let Some(stem) = file_name.split('.').next() {
+                                        if !stem.is_empty() {
+                                            textures.insert(stem.to_ascii_lowercase());
+                                        }
                                     }
                                 }
                             }
                         }
-                    }
-                    let side_textures = assets_dir.join(format!("side_{game}")).join("textures");
-                    if let Ok(entries) = pak::read_dir(side_textures) {
-                        for p in entries {
-                            if let Some(file_name) = p.file_name().and_then(|s| s.to_str()) {
-                                if let Some(stem) = file_name.split('.').next() {
-                                    if !stem.is_empty() {
-                                        textures.insert(stem.to_ascii_lowercase());
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    };
+                    collect_textures(droid_dir.join("textures"));
+                    collect_textures(assets_dir.join(format!("side_{game}")).join("textures"));
                     out.push(Side {
                         dir: droid_dir,
                         models,
@@ -740,6 +728,16 @@ pub fn walker_rigs(
 }
 
 /// The top of each class's model, for its camera's pull point
+fn find_glb_path(dir: &Path, model: &str) -> std::path::PathBuf {
+    let file_name = format!("{model}.glb");
+    let weapons = dir.join("weapons").join(&file_name);
+    if pak::is_file(&weapons) {
+        weapons
+    } else {
+        dir.join("models").join(file_name)
+    }
+}
+
 /// ([`crate::walk::vehicle_pull_height`]), parallel to `geometry`: the vis box's top,
 /// or on a bake older than it the highest vertex, which can stand several metres
 /// lower. `None`: a class with no model.
@@ -757,11 +755,7 @@ pub fn model_tops(
                 ModelSource::Map(model) => (map_dir, model),
                 ModelSource::Side(i, model) => (sides.dir(i), model),
             };
-            let glb = if pak::is_file(dir.join("weapons").join(format!("{model}.glb"))) {
-                dir.join("weapons").join(format!("{model}.glb"))
-            } else {
-                dir.join("models").join(format!("{model}.glb"))
-            };
+            let glb = find_glb_path(dir, &model);
             let mesh = load_glb(&glb).ok()?;
             mesh.vis_top
                 .or_else(|| mesh.positions.iter().map(|p| p[1]).reduce(f32::max))
@@ -787,11 +781,7 @@ fn upload_class(
         Some(ModelSource::Map(k)) => (&scene.meshes[&k], None),
         Some(ModelSource::Side(i, model)) => {
             let dir = sides.dir(i);
-            let glb = if pak::is_file(dir.join("weapons").join(format!("{model}.glb"))) {
-                dir.join("weapons").join(format!("{model}.glb"))
-            } else {
-                dir.join("models").join(format!("{model}.glb"))
-            };
+            let glb = find_glb_path(dir, &model);
             let (mesh, j) = load_glb_joints(&glb)?;
             (owned, joints) = (mesh, j);
             // Card WSKN: a walker model with its bones and a baked skin.

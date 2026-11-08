@@ -751,15 +751,15 @@ fn bf2_plan(
         return;
     }
     if let Some(goal) = ctf_goal(sim, me) {
-        if ai.goal != Some(goal) {
-            let to = goal - v.pos;
-            if to.length_squared() > 15.0 * 15.0 {
-                ai.goal = Some(goal);
-                ai.curve = Some(ctf_curve(v, goal));
-                ai.cursor = None;
-                ai.t = 0.0;
-                return;
-            }
+        let to = goal - v.pos;
+        if to.length_squared() > 15.0 * 15.0
+            && (ai.curve.is_none() || ai.t >= 1.0 || ai.goal != Some(goal))
+        {
+            ai.goal = Some(goal);
+            ai.curve = Some(ctf_curve(v, goal));
+            ai.cursor = None;
+            ai.t = 0.0;
+            return;
         }
     }
     if ai.curve.is_some() && ai.t < 1.0 {
@@ -787,16 +787,6 @@ fn bf2_plan(
             return;
         }
         leave = Some(c.path);
-    }
-    if let Some(goal) = ctf_goal(sim, me) {
-        let to = goal - v.pos;
-        if to.length_squared() > 15.0 * 15.0 {
-            ai.goal = Some(goal);
-            ai.curve = Some(ctf_curve(v, goal));
-            ai.cursor = None;
-            ai.t = 0.0;
-            return;
-        }
     }
     if sim.flyer_seek_curve(me, v, handle, p, ai) {
         return;
@@ -875,6 +865,14 @@ const SIDE_ROLL_REACH: f32 = 200.0;
 const SIDE_ROLL_CLOSE: f32 = 40.0;
 const SIDE_ROLL_CONE: f32 = 0.965925;
 
+fn is_transport_at_destination(sim: &Sim, v: &Vehicle, p: &FlyerParams) -> bool {
+    p.follower.class_id == admission::TRANSPORT_CLASS
+        && sim.landing_regions.iter().any(|r| r.contains(v.pos))
+        && v.spawn_pad
+            .and_then(|idx| sim.vehicle_pads.get(idx as usize))
+            .is_none_or(|pad| (v.pos - pad.def.pos).length_squared() > 150.0 * 150.0)
+}
+
 pub(super) fn drive(
     sim: &Sim,
     me: UnitHandle,
@@ -910,13 +908,7 @@ pub(super) fn drive(
     }
     match v.flyer.phase {
         FlightPhase::Landed => {
-            let is_transport = p.follower.class_id == admission::TRANSPORT_CLASS;
-            let in_landing = sim.landing_regions.iter().any(|r| r.contains(v.pos));
-            let far_from_home = v
-                .spawn_pad
-                .and_then(|idx| sim.vehicle_pads.get(idx as usize))
-                .is_none_or(|pad| (v.pos - pad.def.pos).length() > 150.0);
-            if is_transport && in_landing && far_from_home {
+            if is_transport_at_destination(sim, v, p) {
                 super::ride::request_exit(st);
                 return (pad, nt);
             }
@@ -942,13 +934,7 @@ pub(super) fn drive(
                     ai.wedged_until = sim.tick + WEDGED_HOLD;
                     ai.wedges = ai.wedges.saturating_add(1);
                 }
-                let is_transport = p.follower.class_id == admission::TRANSPORT_CLASS;
-                let in_landing = sim.landing_regions.iter().any(|r| r.contains(v.pos));
-                let far_from_home = v
-                    .spawn_pad
-                    .and_then(|idx| sim.vehicle_pads.get(idx as usize))
-                    .is_none_or(|pad| (v.pos - pad.def.pos).length() > 150.0);
-                if is_transport && in_landing && far_from_home {
+                if is_transport_at_destination(sim, v, p) {
                     takeoff = true;
                 }
                 let pilot = super::flyer_weapons::Pilot {

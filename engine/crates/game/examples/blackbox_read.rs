@@ -1005,9 +1005,15 @@ fn world(snap: &Snapshot) -> String {
             .filter(|r| **r >= 0)
             .map(|r| format!("#{r}"))
             .collect();
-        let class_name = snap.names.vehicles.get(v.class as usize).map_or("?", String::as_str);
+        let class_name = snap
+            .names
+            .vehicles
+            .get(v.class as usize)
+            .map_or("?", String::as_str);
         if let Some(fl) = v.flyer {
-            const PHASES: [&str; 6] = ["Landed", "Takeoff", "Flying", "Landing", "Falling", "Crashed"];
+            const PHASES: [&str; 6] = [
+                "Landed", "Takeoff", "Flying", "Landing", "Falling", "Crashed",
+            ];
             let phase = PHASES.get(usize::from(fl.phase)).unwrap_or(&"?");
             let threat = match fl.threat_kind {
                 1 => format!("veh #{}", fl.threat_id),
@@ -1085,14 +1091,20 @@ fn space_view(snap: &Snapshot) -> String {
     }
 
     s.push_str("\nACTIVE FLYERS (last world frame):\n");
-    const PHASES: [&str; 6] = ["Landed", "Takeoff", "Flying", "Landing", "Falling", "Crashed"];
+    const PHASES: [&str; 6] = [
+        "Landed", "Takeoff", "Flying", "Landing", "Falling", "Crashed",
+    ];
     let mut flyer_count = 0;
     for v in &w.vehicles {
         if v.kind != 2 {
             continue;
         }
         flyer_count += 1;
-        let class_name = snap.names.vehicles.get(v.class as usize).map_or("?", String::as_str);
+        let class_name = snap
+            .names
+            .vehicles
+            .get(v.class as usize)
+            .map_or("?", String::as_str);
         let riders: Vec<String> = v
             .riders
             .iter()

@@ -66,10 +66,7 @@ pub enum FlagStatus {
     /// Carried by a soldier or pilot.
     Carried { carrier: UnitHandle },
     /// Dropped in space or on ground.
-    Dropped {
-        timer: f32,
-        pickup_cooldown: f32,
-    },
+    Dropped { timer: f32, pickup_cooldown: f32 },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -383,8 +380,7 @@ impl Sim {
 
                         if pickup_cooldown <= 0.0 {
                             if let Some(touching_unit) = self.ctf_find_pickup(&flag, false) {
-                                let unit_team =
-                                    self.unit(touching_unit).map_or(0, |u| u.team);
+                                let unit_team = self.unit(touching_unit).map_or(0, |u| u.team);
 
                                 match ctf.mode {
                                     CtfMode::OneFlag => {
@@ -411,7 +407,8 @@ impl Sim {
                                             flag.status = FlagStatus::Carried {
                                                 carrier: touching_unit,
                                             };
-                                            let (pos, _) = self.ctf_carrier_pos(touching_unit, &flag);
+                                            let (pos, _) =
+                                                self.ctf_carrier_pos(touching_unit, &flag);
                                             flag.current_pos = pos;
                                             self.events.push(Event::FlagPickedUp {
                                                 flag: flag_idx as u8,
@@ -552,7 +549,12 @@ mod tests {
     fn test_ctf_space_pickup_soldier_foot() {
         let mut sim = setup_sim();
         let home = Vec3::new(10.0, 0.0, 0.0);
-        let ctf = CtfState::new_space_one_flag(3, home, Vec3::new(-100.0, 0.0, 0.0), Vec3::new(100.0, 0.0, 0.0));
+        let ctf = CtfState::new_space_one_flag(
+            3,
+            home,
+            Vec3::new(-100.0, 0.0, 0.0),
+            Vec3::new(100.0, 0.0, 0.0),
+        );
         sim.install_ctf(ctf);
 
         // Unit 0 at (10.0, 2.0, 0.0): distance 2.0m <= 2.5m pickup radius
@@ -562,7 +564,10 @@ mod tests {
 
         sim.tick_ctf(0.1);
         let ctf_state = sim.ctf.as_ref().unwrap();
-        assert_eq!(ctf_state.flags[0].status, FlagStatus::Carried { carrier: u0 });
+        assert_eq!(
+            ctf_state.flags[0].status,
+            FlagStatus::Carried { carrier: u0 }
+        );
         assert_eq!(ctf_state.flags[0].carrier(), Some(u0));
     }
 
@@ -570,7 +575,12 @@ mod tests {
     fn test_ctf_space_pickup_flyer() {
         let mut sim = setup_sim();
         let home = Vec3::new(0.0, 0.0, 0.0);
-        let ctf = CtfState::new_space_one_flag(5, home, Vec3::new(-500.0, 0.0, 0.0), Vec3::new(500.0, 0.0, 0.0));
+        let ctf = CtfState::new_space_one_flag(
+            5,
+            home,
+            Vec3::new(-500.0, 0.0, 0.0),
+            Vec3::new(500.0, 0.0, 0.0),
+        );
         sim.install_ctf(ctf);
 
         // Spawn a pilot unit and flyer at distance 15m (within 20m flyer pickup radius)
@@ -592,9 +602,15 @@ mod tests {
 
         sim.tick_ctf(0.1);
         let ctf_state = sim.ctf.as_ref().unwrap();
-        assert_eq!(ctf_state.flags[0].status, FlagStatus::Carried { carrier: pilot });
+        assert_eq!(
+            ctf_state.flags[0].status,
+            FlagStatus::Carried { carrier: pilot }
+        );
         // Current position of flag tracks vehicle pos + offset
-        assert_eq!(ctf_state.flags[0].current_pos, flyer_pos + SPACE_CARRIED_OFFSET);
+        assert_eq!(
+            ctf_state.flags[0].current_pos,
+            flyer_pos + SPACE_CARRIED_OFFSET
+        );
     }
 
     #[test]
@@ -608,7 +624,10 @@ mod tests {
 
         let u0 = spawn_soldier(&mut sim, 0, home);
         sim.tick_ctf(0.1);
-        assert_eq!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::Carried { carrier: u0 });
+        assert_eq!(
+            sim.ctf.as_ref().unwrap().flags[0].status,
+            FlagStatus::Carried { carrier: u0 }
+        );
 
         // Move unit 0 into team 0 capture region
         sim.unit_mut(u0).unwrap().soldier.pos = team0_goal;
@@ -624,21 +643,32 @@ mod tests {
         // Second capture to reach score_limit 2
         sim.unit_mut(u0).unwrap().soldier.pos = home;
         sim.tick_ctf(0.1);
-        assert_eq!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::Carried { carrier: u0 });
+        assert_eq!(
+            sim.ctf.as_ref().unwrap().flags[0].status,
+            FlagStatus::Carried { carrier: u0 }
+        );
 
         sim.unit_mut(u0).unwrap().soldier.pos = team0_goal;
         sim.tick_ctf(0.1);
 
         assert_eq!(sim.ctf.as_ref().unwrap().team_points[0], 2);
         assert_eq!(sim.outcome, Some(0)); // Team 0 wins
-        assert!(sim.events.iter().any(|e| matches!(e, Event::TeamDefeated { team: 1 })));
+        assert!(sim
+            .events
+            .iter()
+            .any(|e| matches!(e, Event::TeamDefeated { team: 1 })));
     }
 
     #[test]
     fn test_ctf_dropped_timeout_and_cooldown() {
         let mut sim = setup_sim();
         let home = Vec3::new(0.0, 0.0, 0.0);
-        let ctf = CtfState::new_space_one_flag(3, home, Vec3::new(100.0, 0.0, 0.0), Vec3::new(-100.0, 0.0, 0.0));
+        let ctf = CtfState::new_space_one_flag(
+            3,
+            home,
+            Vec3::new(100.0, 0.0, 0.0),
+            Vec3::new(-100.0, 0.0, 0.0),
+        );
         sim.install_ctf(ctf);
 
         let u0 = spawn_soldier(&mut sim, 0, home);
@@ -651,7 +681,10 @@ mod tests {
 
         let ctf_state = sim.ctf.as_ref().unwrap();
         match ctf_state.flags[0].status {
-            FlagStatus::Dropped { timer, pickup_cooldown } => {
+            FlagStatus::Dropped {
+                timer,
+                pickup_cooldown,
+            } => {
                 assert!(timer <= SPACE_FLAG_RETURN_TIMEOUT);
                 assert!(pickup_cooldown > 0.0);
             }
@@ -661,12 +694,18 @@ mod tests {
         // Another unit at the dropped location should NOT pick it up while cooldown > 0
         let u1 = spawn_soldier(&mut sim, 1, home);
         sim.tick_ctf(0.1);
-        assert!(matches!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::Dropped { .. }));
+        assert!(matches!(
+            sim.ctf.as_ref().unwrap().flags[0].status,
+            FlagStatus::Dropped { .. }
+        ));
 
         // Advance past cooldown (0.5s total)
         sim.tick_ctf(0.4);
         // Now u1 should pick it up
-        assert_eq!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::Carried { carrier: u1 });
+        assert_eq!(
+            sim.ctf.as_ref().unwrap().flags[0].status,
+            FlagStatus::Carried { carrier: u1 }
+        );
 
         // Kill u1 and let full 15s timeout elapse
         sim.unit_mut(u1).unwrap().alive = false;
@@ -676,7 +715,10 @@ mod tests {
         let ctf_state = sim.ctf.as_ref().unwrap();
         assert_eq!(ctf_state.flags[0].status, FlagStatus::AtHome);
         assert_eq!(ctf_state.flags[0].current_pos, home);
-        assert!(sim.events.iter().any(|e| matches!(e, Event::FlagReset { flag: 0 })));
+        assert!(sim
+            .events
+            .iter()
+            .any(|e| matches!(e, Event::FlagReset { flag: 0 })));
     }
 
     #[test]
@@ -690,13 +732,19 @@ mod tests {
         // Enemy u1 (team 1) picks up Team 0 flag (flag 0)
         let u1 = spawn_soldier(&mut sim, 1, team0_home);
         sim.tick_ctf(0.1);
-        assert_eq!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::Carried { carrier: u1 });
+        assert_eq!(
+            sim.ctf.as_ref().unwrap().flags[0].status,
+            FlagStatus::Carried { carrier: u1 }
+        );
 
         // u1 dies at (0, 0, 0)
         sim.unit_mut(u1).unwrap().soldier.pos = Vec3::ZERO;
         sim.unit_mut(u1).unwrap().alive = false;
         sim.tick_ctf(0.1);
-        assert!(matches!(sim.ctf.as_ref().unwrap().flags[0].status, FlagStatus::Dropped { .. }));
+        assert!(matches!(
+            sim.ctf.as_ref().unwrap().flags[0].status,
+            FlagStatus::Dropped { .. }
+        ));
 
         // Advance cooldown past 0.5s
         sim.tick_ctf(0.5);
@@ -708,6 +756,9 @@ mod tests {
         let ctf_state = sim.ctf.as_ref().unwrap();
         assert_eq!(ctf_state.flags[0].status, FlagStatus::AtHome);
         assert_eq!(ctf_state.flags[0].current_pos, team0_home);
-        assert!(sim.events.iter().any(|e| matches!(e, Event::FlagReturned { flag: 0, team: 0 })));
+        assert!(sim
+            .events
+            .iter()
+            .any(|e| matches!(e, Event::FlagReturned { flag: 0, team: 0 })));
     }
 }

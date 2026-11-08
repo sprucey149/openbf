@@ -1221,7 +1221,11 @@ mod tests {
             }
             let m = MissionDef::load(&p).expect("parse");
             let k = m.camera_shot_calls.len();
-            let least = if m.mode == "ass" || m.map.contains("spa") { 1 } else { 3 };
+            let least = if m.mode == "ass" || m.map.contains("spa") {
+                1
+            } else {
+                3
+            };
             assert!((least..=16).contains(&k), "{}: {k} shots", p.display());
             n += 1;
         }

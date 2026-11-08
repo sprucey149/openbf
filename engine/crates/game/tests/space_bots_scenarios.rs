@@ -359,7 +359,8 @@ fn blackbox_records_flyer_row_with_station_threat_and_secondary_channel() {
     };
 
     let mut walk = WalkSim::new(42, Vec3::ZERO, None);
-    let mut bb = BlackBox::start(true, meta, &walk, Vec::new(), dir.clone()).expect("start blackbox");
+    let mut bb =
+        BlackBox::start(true, meta, &walk, Vec::new(), dir.clone()).expect("start blackbox");
 
     let v_spec = VehicleSpec {
         kind: VehicleKind::Flyer,
@@ -410,7 +411,10 @@ fn blackbox_records_flyer_row_with_station_threat_and_secondary_channel() {
     // Must record threat_kind == 2 (Station) and channel == 1 (secondary heavy ordnance)
     assert_eq!(fl.threat_kind, 2, "threat_kind 2 indicates Station target");
     assert_eq!(fl.threat_id, 3, "threat_id indicates station index 3");
-    assert_eq!(fl.channel, 1, "channel 1 indicates secondary ordnance selected");
+    assert_eq!(
+        fl.channel, 1,
+        "channel 1 indicates secondary ordnance selected"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
