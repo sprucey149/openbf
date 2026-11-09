@@ -218,6 +218,59 @@ fn space_one_flag_manifest_layers_and_regions_resolve() {
 }
 
 #[test]
+fn space_one_flag_region_names_match_their_markers() {
+    let baked_root = game::assets::baked_root();
+    // The region RECORD name is what `GetRegion` resolves; the region's
+    // `name` property is swapped on spa1/spa6 and must not drive the lookup.
+    // The capture dummy object sits at the same point as its region.
+    let expected = [
+        (
+            "bf2_spa1",
+            [
+                ("Team1capture", "imp_cap_marker"),
+                ("Team2capture", "all_cap_marker"),
+            ],
+        ),
+        (
+            "bf2_spa6",
+            [
+                ("1flag_rep_cap", "1flag_rep_marker"),
+                ("1flag_cis_cap", "1flag_cis_marker"),
+            ],
+        ),
+    ];
+    for (map_dir, pairs) in expected {
+        let path = baked_root.join(map_dir);
+        if !path.join("manifest.ron").exists() {
+            eprintln!("SKIP {map_dir}: not baked");
+            continue;
+        }
+        let (scene, _) = game::assets::load_battle_scene(&path, "1flag")
+            .unwrap_or_else(|e| panic!("load_battle_scene {map_dir}: {e:#}"));
+        for (region, marker) in pairs {
+            let r = scene
+                .manifest
+                .regions
+                .iter()
+                .find(|r| r.name.eq_ignore_ascii_case(region))
+                .unwrap_or_else(|| panic!("{map_dir}: region {region}"));
+            let i = scene
+                .manifest
+                .instances
+                .iter()
+                .find(|i| i.name.eq_ignore_ascii_case(marker))
+                .unwrap_or_else(|| panic!("{map_dir}: marker {marker}"));
+            let at = Vec3::from(r.translation);
+            let marker_at = Vec3::from(i.translation);
+            assert!(
+                at.distance(marker_at) < 1e-3,
+                "{map_dir}: {region} at {at:?} is not {marker} at {marker_at:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn space_one_flag_pickup_and_carrier_tracking() {
     let mut sim = setup_test_sim();
     let home = Vec3::new(0.0, 100.0, 0.0);

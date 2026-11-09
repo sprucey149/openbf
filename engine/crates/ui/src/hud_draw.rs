@@ -318,20 +318,32 @@ impl<'a> Ctx<'a> {
     fn hint_markers(&mut self, size: [f32; 2], scale: [f32; 2]) {
         let hud = self.hud;
         for marker in &hud.hint_markers {
-            let Some(style) = hud.hint_styles[usize::from(!marker.visible)] else {
+            let styles = if marker.flag {
+                &hud.flag_styles
+            } else {
+                &hud.hint_styles
+            };
+            let slot = usize::from(!marker.on_screen) * 2 + usize::from(!marker.visible);
+            let Some(style) = styles[slot] else {
                 continue;
             };
             let e = &hud.elems[style.elem];
             let Some(texture) = e.texture.as_deref().map(|t| self.art.icons.layout_sheet(t)) else {
                 continue;
             };
-            let tint = style
-                .friendly
-                .filter(|_| marker.friendly)
-                .unwrap_or(e.color);
+            let tint = marker.tint.unwrap_or_else(|| {
+                style
+                    .friendly
+                    .filter(|_| marker.friendly)
+                    .unwrap_or(e.color)
+            });
             let t = ((marker.distance - LOCK_RAMP_NEAR) / (LOCK_RAMP_FAR - LOCK_RAMP_NEAR))
                 .clamp(0.0, 1.0);
-            let s = t * HINT_SCALE_FAR + (1.0 - t) * HINT_SCALE_NEAR;
+            let s = if marker.flag || !marker.on_screen {
+                t * style.min_scale + (1.0 - t) * style.max_scale
+            } else {
+                t * HINT_SCALE_FAR + (1.0 - t) * HINT_SCALE_NEAR
+            };
             let at = [
                 (marker.ndc[0] * 0.5 + 0.5) * size[0],
                 (marker.ndc[1] * 0.5 + 0.5) * size[1],
@@ -347,6 +359,14 @@ impl<'a> Ctx<'a> {
                 shadow: e.shadow,
                 boxed: false,
             };
+            if !marker.on_screen {
+                // An off-screen objective points at its target: the icon turns
+                // to the clamped edge direction (`re-hud-map.md` §5).
+                let turn = marker.ndc[0].atan2(-marker.ndc[1]);
+                let m = Mat4::from_rotation_z(turn) * Mat4::from_scale(Vec3::splat(s));
+                self.quad(style.elem, &m, &screen, &quad);
+                continue;
+            }
             self.quad(
                 style.elem,
                 &Mat4::from_scale(Vec3::splat(s)),

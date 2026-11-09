@@ -49,6 +49,61 @@ fn node(name: &str, args: &[HudArg], children: Vec<HudNode>) -> HudNode {
     }
 }
 
+#[test]
+fn target_hint_and_flag_styles_keep_their_own_slots_and_scales() {
+    let s = |v: &str| HudArg::Str(v.into());
+    let n = HudArg::Num;
+    let style = |name: &str, min: f32, max: f32| {
+        node(
+            name,
+            &[s(name)],
+            vec![
+                node("colorfriendly", &[n(0.0), n(86.0), n(213.0)], vec![]),
+                node("minscale", &[n(min)], vec![]),
+                node("maxscale", &[n(max)], vec![]),
+            ],
+        )
+    };
+    let layout = HudLayout {
+        name: "t".into(),
+        nodes: vec![node(
+            "Target",
+            &[s("player1target")],
+            vec![
+                style("HintOnScreen", 1.0, 0.5),
+                style("HintOnScreenBehind", 1.0, 0.5),
+                style("HintOffScreen", 1.0, 0.5),
+                style("HintOffScreenBehind", 1.0, 0.5),
+                style("HintFlagOnScreen", 1.5, 0.75),
+                style("HintFlagOnScreenBehind", 1.5, 0.75),
+                style("HintFlagOffScreen", 1.2, 0.9),
+                style("HintFlagOffScreenBehind", 1.2, 0.9),
+            ],
+        )],
+    };
+    let hud = Hud::new(&layout, &layout);
+    let scales =
+        |styles: &[Option<HintStyle>; 4]| styles.map(|s| s.map(|s| (s.min_scale, s.max_scale)));
+    assert_eq!(
+        scales(&hud.hint_styles),
+        [
+            Some((1.0, 0.5)),
+            Some((1.0, 0.5)),
+            Some((1.0, 0.5)),
+            Some((1.0, 0.5))
+        ]
+    );
+    assert_eq!(
+        scales(&hud.flag_styles),
+        [
+            Some((1.5, 0.75)),
+            Some((1.5, 0.75)),
+            Some((1.2, 0.9)),
+            Some((1.2, 0.9))
+        ]
+    );
+}
+
 /// The 1-player layout's `player1systemMessages`, record for record
 /// (`re-event-messages.md` §2), with a font of 8-texel glyphs.
 fn message_hud() -> Hud {

@@ -1,6 +1,7 @@
 use super::*;
 use crate::cp::CpDef;
 use crate::region::Region;
+use crate::sim::CtfState;
 use crate::unit::{Controller, UnitSpec};
 use crate::vehicle::flyer::{curve_at, FlyerPath};
 use crate::vehicle::{SeatKind, SeatSetup, VehicleSpec};
@@ -509,6 +510,52 @@ fn a_wall_refuses_a_route_and_a_vehicle_clear_field_does_not() {
     assert!(ai.curve.is_none() && ai.cursor.is_none(), "{ai:?}");
     let (s, _, v) = walled(Layers::ALL);
     assert!(planned(&s, v).cursor.is_some(), "the field lets it through");
+}
+
+#[test]
+fn a_blocked_ctf_hop_keeps_the_authored_route() {
+    use crate::collision::{Body, CollisionWorld, Layers, Shape};
+    let (mut s, b, v) = bf2_world();
+    let at = Vec3::new(0.0, 40.0, 0.0);
+    {
+        let c = s.vehicle_mut(v).unwrap();
+        c.pos = at;
+        c.vel = Vec3::ZERO;
+        c.flyer.phase = FlightPhase::Flying;
+    }
+    // One wall between the pad and the flag, clear of the authored route.
+    s.collision = CollisionWorld::new(
+        vec![Body::with_layers(
+            glam::Mat4::from_translation(at + Vec3::X * 60.0),
+            Shape::Box {
+                half: Vec3::new(5.0, 200.0, 200.0),
+            },
+            Layers::ALL | Layers::VEHICLE,
+        )],
+        Vec::new(),
+    );
+    let goal = Vec3::new(400.0, 40.0, 0.0);
+    s.install_ctf(CtfState::new_space_one_flag(
+        5,
+        goal,
+        Vec3::ZERO,
+        Vec3::ZERO,
+    ));
+    let p = s.flyer_params[s.vehicle(v).unwrap().class as usize]
+        .clone()
+        .unwrap();
+    let mut ai = FlyerAi::default();
+    bf2_plan(&s, b, s.vehicle(v).unwrap(), v, &p, &mut ai, None);
+    assert_ne!(ai.goal, Some(goal), "the blocked hop was taken");
+    assert!(ai.cursor.is_some(), "the authored route plans the way out");
+
+    // Without the wall the same goal is a direct hop.
+    s.collision = CollisionWorld::new(Vec::new(), Vec::new());
+    let mut ai = FlyerAi::default();
+    let c = s.vehicle(v).unwrap();
+    bf2_plan(&s, b, c, v, &p, &mut ai, None);
+    assert_eq!(ai.goal, Some(goal));
+    assert_eq!(ai.curve, Some(ctf_curve(c, goal)));
 }
 
 #[test]

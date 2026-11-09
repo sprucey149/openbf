@@ -9,7 +9,8 @@
 //! - A single neutral flag spawns at `home_pos`.
 //! - Either team can pick it up (on foot or while piloting a flyer in space).
 //! - When carried, the flag tracks the carrier (or their vehicle when mounted).
-//! - Carrier scores by delivering the flag to the enemy team's capture region.
+//! - Carrier scores by delivering the flag to its own team's capture region
+//!   (`captureRegionATT` / `captureRegionDEF` sit at each side's base).
 //! - First team to reach `score_limit` (default 5) wins the round.
 //!
 //! In Two-Flag CTF (used on nine ground maps):
@@ -53,7 +54,7 @@ pub const DEFAULT_CAPTURE_REGION_RADIUS: f32 = 25.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CtfMode {
-    /// 1-flag CTF: neutral flag carried to enemy capture zone.
+    /// 1-flag CTF: neutral flag carried to the carrier's own capture zone.
     OneFlag,
     /// 2-flag CTF: enemy flag carried to own capture zone.
     TwoFlag,

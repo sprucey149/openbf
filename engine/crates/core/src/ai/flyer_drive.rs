@@ -608,6 +608,16 @@ pub(crate) fn clear_chord(sim: &Sim, a: Vec3, b: Vec3, handle: VehicleHandle) ->
         && sim.terrain_ray(a, dir, length, 2.0).is_none()
 }
 
+/// The four sampled points of `curve` at 0, 1/3, 2/3 and 1 joined by clear
+/// chords (`FUN_002fff48` checks three chords at the parameter's thirds).
+fn curve_clear(sim: &Sim, curve: &[Vec3; 4], handle: VehicleHandle) -> bool {
+    let points =
+        [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0].map(|t| crate::vehicle::flyer::curve_at(curve, t).0);
+    points
+        .windows(2)
+        .all(|w| clear_chord(sim, w[0], w[1], handle))
+}
+
 /// FUN_002ff478 and FUN_002f9498: the best path end to join, as a connection
 /// curve. Frequency weights the score; MaxAngle is still unimplemented. FUN_002fff48 checks three chords at the parameter's thirds.
 fn connect(
@@ -653,25 +663,21 @@ fn connect(
         }
     }
     ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let clear = |c: &[Vec3; 4]| {
-        let points = [
-            crate::vehicle::flyer::curve_at(c, 0.0).0,
-            crate::vehicle::flyer::curve_at(c, 1.0 / 3.0).0,
-            crate::vehicle::flyer::curve_at(c, 2.0 / 3.0).0,
-            crate::vehicle::flyer::curve_at(c, 1.0).0,
-        ];
-        points
-            .windows(2)
-            .all(|w| clear_chord(sim, w[0], w[1], handle))
-    };
-    let chosen = ranked.iter().take(CONNECT_TRIES).find(|c| clear(&c.2));
+    let chosen = ranked
+        .iter()
+        .take(CONNECT_TRIES)
+        .find(|c| curve_clear(sim, &c.2, handle));
     if let Some((_, cursor, curve)) = chosen {
         ai.curve = Some(*curve);
         ai.cursor = Some(*cursor);
         ai.goal = None;
     } else {
         loiter(v, p, ai);
-        if !ai.curve.as_ref().is_some_and(&clear) {
+        if !ai
+            .curve
+            .as_ref()
+            .is_some_and(|c| curve_clear(sim, c, handle))
+        {
             let esc_dir = clearest(sim, v, handle);
             let curve = [
                 pos - forward * CONNECT_BEHIND,
@@ -679,7 +685,9 @@ fn connect(
                 pos + esc_dir * 40.0,
                 pos + esc_dir * 80.0,
             ];
-            if clear_chord(sim, pos, pos + esc_dir * WEDGED_RAY, handle) && clear(&curve) {
+            if clear_chord(sim, pos, pos + esc_dir * WEDGED_RAY, handle)
+                && curve_clear(sim, &curve, handle)
+            {
                 ai.curve = Some(curve);
                 ai.cursor = None;
                 ai.goal = None;
@@ -755,11 +763,17 @@ fn bf2_plan(
         if to.length_squared() > 15.0 * 15.0
             && (ai.curve.is_none() || ai.t >= 1.0 || ai.goal != Some(goal))
         {
-            ai.goal = Some(goal);
-            ai.curve = Some(ctf_curve(v, goal));
-            ai.cursor = None;
-            ai.t = 0.0;
-            return;
+            // A hangar wall between the pad and the flag does not make the
+            // direct hop flyable: only take it when every sampled chord is
+            // clear, else the authored route plans the way out (spa1).
+            let curve = ctf_curve(v, goal);
+            if curve_clear(sim, &curve, handle) {
+                ai.goal = Some(goal);
+                ai.curve = Some(curve);
+                ai.cursor = None;
+                ai.t = 0.0;
+                return;
+            }
         }
     }
     if ai.curve.is_some() && ai.t < 1.0 {
