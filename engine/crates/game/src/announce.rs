@@ -203,7 +203,18 @@ pub struct Commander {
     leaving_line: Option<String>,
     /// The player's flown droid or flyer was outside at the last [`Commander::leaving`].
     was_leaving: bool,
-    space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
+    pub space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
+    speaker_asks: Vec<SpeakerAsk>,
+    first_reinforcements: Option<[f32; 2]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct SpeakerAsk {
+    unit: u32,
+    region: u32,
+    center: glam::Vec3,
+    reinforcements: f32,
+    side: usize,
 }
 
 /// One unit's combat call (card UCALL): its class's property for it (None:
@@ -244,6 +255,8 @@ impl Commander {
             leaving_line: None,
             was_leaving: false,
             space_round: None,
+            speaker_asks: Vec::new(),
+            first_reinforcements: None,
         }
     }
 
@@ -441,6 +454,7 @@ impl Commander {
     pub fn calls(&mut self, sim: &Sim, teams: &[crate::walk::TeamTemplate; 2]) {
         if !self.gating {
             self.calls_asked.clear();
+            self.speaker_asks.clear();
         }
         // Hero manager lines use the same 2-D voice queue as the commander.
         for event in &sim.events {
@@ -580,6 +594,68 @@ impl Commander {
         }
     }
 
+    pub fn cockpit(
+        &mut self,
+        sim: &Sim,
+        player: UnitHandle,
+        sounds: &[crate::vehicle_class::VehicleSoundClass],
+    ) {
+        let Some(u) = sim.unit(player) else { return };
+        let Some(m) = u.mount.filter(|m| m.seat == 0) else {
+            return;
+        };
+        let Some(v) = sim.vehicle(m.vehicle).filter(|v| v.alive) else {
+            return;
+        };
+        let name = sounds
+            .get(v.class as usize)
+            .and_then(|s| s.cockpit_sound.clone());
+        if name.is_some() {
+            self.calls_asked.push(CallAsk {
+                unit: player.index,
+                call: core::sim::Call::Cockpit,
+                name,
+                pos: v.pos,
+                own: true,
+            });
+        }
+    }
+
+    pub fn loudspeakers(
+        &mut self,
+        sim: &Sim,
+        player: UnitHandle,
+        regions: &[crate::ambience::SoundTrigger],
+        teams: &[crate::walk::TeamTemplate; 2],
+    ) {
+        let first = *self
+            .first_reinforcements
+            .get_or_insert([0, 1].map(|t| sim.battle.teams[t].reinforcements));
+        let Some(u) = sim.unit(player) else { return };
+        let team = usize::from(u.team).min(1);
+        let Some(side) = crate::ambience::trigger_side(&teams[team].faction) else {
+            return;
+        };
+        let pos = u
+            .mount
+            .and_then(|m| sim.vehicle(m.vehicle))
+            .map_or(u.soldier.pos, |v| v.pos);
+        let reinforcements = if first[team] > 0.0 {
+            sim.battle.teams[team].reinforcements / first[team]
+        } else {
+            1.0
+        };
+        for r in regions.iter().filter(|r| r.region.contains(pos)) {
+            self.speaker_asks.push(SpeakerAsk {
+                unit: player.index,
+                region: r.name,
+                center: r.region.center,
+                reinforcements,
+                side,
+            });
+        }
+    }
+
     /// The calls asked since the last call, through the sound bank's gates
     /// (`SoundLib::ask_line`: the take's lock, the property's interval and
     /// chance, the level at `ears`): what passes joins the voice queue.
@@ -590,7 +666,22 @@ impl Commander {
         ears: glam::Vec3,
     ) -> Vec<(CallAsk, Result<Line, crate::sounds::Refused>)> {
         self.gating = true;
-        let asks = std::mem::take(&mut self.calls_asked);
+        let mut asks = std::mem::take(&mut self.calls_asked);
+        for s in std::mem::take(&mut self.speaker_asks) {
+            if !self.queue.is_idle() || !self.queue.pending().is_empty() {
+                continue;
+            }
+            let sound = sounds.trigger_sound(s.region, s.reinforcements, s.side);
+            if let Some(sound) = sound {
+                asks.push(CallAsk {
+                    unit: s.unit,
+                    call: core::sim::Call::Loudspeaker,
+                    name: Some(format!("#{sound:08x}")),
+                    pos: s.center,
+                    own: false,
+                });
+            }
+        }
         let mut out = Vec::with_capacity(asks.len());
         for a in asks {
             let own = a.call == core::sim::Call::LowHealth;

@@ -356,7 +356,15 @@ pub fn authored_mode_layer_index(m: &Manifest, mode: &str) -> Option<usize> {
     // PS2's loading rules.
     let aliases: Vec<&str> = match mode {
         "con" => vec!["con", "conquest", "cp-conquest"],
-        "ctf" => vec!["ctf", "1flag", "1ctf", "ctfcp"],
+        "ctf" | "1flag" => vec![
+            "1flag_flags",
+            "1flag_paths",
+            "2_flag_ctf",
+            "ctf",
+            "1flag",
+            "1ctf",
+            "ctfcp",
+        ],
         // Space Assault's layer, as the six scripts and worlds spell it: `spa6_obj_hangar`
         // with `spa6_obj_spawn`, `spa3_swing_obj`, `spa8_ass_spawn`, `spa1_swingassault`.
         "ass" => vec!["obj", "obj_spawn", "ass_spawn", "swing_obj", "swingassault"],

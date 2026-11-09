@@ -72,8 +72,9 @@ pub use rotating::PREVIOUS;
 /// struck in its first update (a sniper's inside 66 m). 12 (playtest
 /// 2026-10-28, building turrets): every hit on a vehicle's or turret's pool
 /// the human deals or takes in his ride (`vhit`). 13 (issue #58): a unit's
-/// remote droid target (`target_droid`). An older file still reads.
-pub const SCHEMA: u32 = 14;
+/// remote droid target (`target_droid`). 15: space assault state and flyer
+/// telemetry in world frame (`space`, `flyer`). An older file still reads.
+pub const SCHEMA: u32 = 15;
 /// Ticks between two unit frames (0.5 s).
 pub const UNIT_PERIOD: u64 = core::TICK_HZ as u64 / 2;
 /// Ticks between two world frames (2 s).
@@ -291,6 +292,18 @@ impl PostRow {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct FlyerRow {
+    /// 0 Landed, 1 Takeoff, 2 Flying, 3 Landing, 4 Falling, 5 Crashed.
+    pub phase: u8,
+    pub speed: f32,
+    pub channel: u8,
+    pub in_roll: bool,
+    /// 0 None, 1 Vehicle, 2 Station.
+    pub threat_kind: u8,
+    pub threat_id: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct VehicleRow {
     pub id: u32,
     /// Index into `names.vehicles`.
@@ -303,6 +316,19 @@ pub struct VehicleRow {
     pub hp: f32,
     /// The unit slot in each of the first six seats, -1 empty.
     pub riders: [i32; 6],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flyer: Option<FlyerRow>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SpaceAssaultRow {
+    pub score_limit: u32,
+    pub team_points: [i32; 2],
+    pub shields: [f32; 2],
+    #[serde(default)]
+    pub hulls: [f32; 2],
+    pub systems_alive: [u16; 2],
+    pub systems_total: [u16; 2],
 }
 
 /// The world at `tick`.
@@ -318,6 +344,8 @@ pub struct WorldFrame {
     pub vehicles: Vec<VehicleRow>,
     /// Each door's open parameter, 0 shut .. 1 open.
     pub doors: Vec<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub space: Option<SpaceAssaultRow>,
 }
 
 /// What happened ([`EventRow::kind`]); `a` / `b` / `c` per kind.
@@ -1186,6 +1214,24 @@ impl Ring {
             for (r, s) in riders.iter_mut().zip(&v.seats) {
                 *r = s.occupant.map_or(-1, |o| o.index as i32);
             }
+            let flyer = if v.kind == core::vehicle::VehicleKind::Flyer {
+                let fl = &v.flyer;
+                let (threat_kind, threat_id) = match fl.threats.visible_object() {
+                    Some(core::vehicle::flyer::ThreatObject::Vehicle(vh)) => (1, vh.index),
+                    Some(core::vehicle::flyer::ThreatObject::Station(st)) => (2, st as u32),
+                    None => (0, 0),
+                };
+                Some(FlyerRow {
+                    phase: fl.phase as u8,
+                    speed: r2(v.vel.length()),
+                    channel: fl.ai.channel,
+                    in_roll: fl.in_roll,
+                    threat_kind,
+                    threat_id,
+                })
+            } else {
+                None
+            };
             VehicleRow {
                 id: h.index,
                 class: v.class,
@@ -1194,10 +1240,39 @@ impl Ring {
                 pos: r2v(v.pos.to_array()),
                 hp: r2(v.health.cur),
                 riders,
+                flyer,
             }
         }));
         w.doors.clear();
         w.doors.extend(sim.doors.iter().map(|d| r2(d.open)));
+        w.space = sim.space_assault.as_ref().map(|sa| {
+            let mut alive = [0u16; 2];
+            let mut total = [0u16; 2];
+            for sys in &sa.critical {
+                let st_idx = usize::from(sys.station);
+                if let Some(st) = sim.stations.get(st_idx) {
+                    let team_idx = st.team.unwrap_or(0).min(1) as usize;
+                    total[team_idx] += 1;
+                    if !st.destroyed {
+                        alive[team_idx] += 1;
+                    }
+                }
+            }
+            let (shields, hulls) = sim.capital_meters().map_or(([1.0, 1.0], [1.0, 1.0]), |m| {
+                (
+                    [r2(m[0].shield), r2(m[1].shield)],
+                    [r2(m[0].hull), r2(m[1].hull)],
+                )
+            });
+            SpaceAssaultRow {
+                score_limit: sa.score_limit,
+                team_points: sa.points,
+                shields,
+                hulls,
+                systems_alive: alive,
+                systems_total: total,
+            }
+        });
     }
 
     /// The stuck alarm (module header): the human pushing the stick for most
@@ -2448,5 +2523,89 @@ mod tests {
         assert_eq!(fired(&mut ring, push, 1000), 1, "pushing");
         assert_eq!(fired(&mut ring, push, 2000), 0, "not twice in 2 min");
         assert_eq!(fired(&mut ring, push, 1000 + ALARM_EVERY + 700), 1);
+    }
+
+    #[test]
+    fn space_assault_and_flyer_rows_are_recorded_in_world_frames() {
+        let mut w = walk();
+        let dir = scratch("space_blackbox");
+        let mut bb = BlackBox::start(true, meta(), &w, Vec::new(), dir.clone()).expect("on");
+        // Install Space Assault on the sim
+        let mut sa = core::sim::SpaceAssault::new(180);
+        sa.points = [42, 18];
+        w.sim.space_assault = Some(sa);
+        // Spawn a flyer vehicle
+        let v_spec = core::vehicle::VehicleSpec {
+            kind: core::vehicle::VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: glam::Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 1000.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![core::vehicle::SeatKind::Pilot],
+        };
+        let vh = w.sim.spawn_vehicle(&v_spec);
+        w.sim.units[w.player.index as usize].mount = Some(core::vehicle::Mount {
+            vehicle: vh,
+            seat: 0,
+        });
+        if let Some(v) = w.sim.vehicle_mut(vh) {
+            v.seats[0].occupant = Some(w.player);
+            v.flyer.phase = core::vehicle::flyer::FlightPhase::Flying;
+            v.flyer.ai.channel = 1;
+            v.flyer.in_roll = true;
+            v.flyer.threats.slots[0] = Some(core::vehicle::flyer::PilotThreat {
+                object: core::vehicle::flyer::ThreatObject::Station(7),
+                status: core::vehicle::flyer::THREAT_SEEN,
+                tested_at: 0,
+                seen_at: 0,
+            });
+            v.flyer.threats.visible = Some(0);
+        }
+        // Tick past WORLD_PERIOD to capture a world frame
+        for _ in 0..=WORLD_PERIOD {
+            w.step_tick(&[PadState::default()]);
+            bb.tick(&w, Some(PadState::default()));
+        }
+        let snap = bb.snapshot("manual", Some(&w), None);
+        assert!(!snap.world.is_empty(), "a world frame was recorded");
+        let wf = snap.world.last().expect("last world frame");
+        let sa_row = wf.space.as_ref().expect("space assault row");
+        assert_eq!(sa_row.score_limit, 180);
+        assert_eq!(sa_row.team_points, [42, 18]);
+        let flyer_veh = wf
+            .vehicles
+            .iter()
+            .find(|v| v.id == vh.index)
+            .expect("flyer vehicle row");
+        let fl = flyer_veh.flyer.as_ref().expect("flyer telemetry");
+        assert_eq!(fl.phase, 2, "FlightPhase::Flying");
+        assert_eq!(fl.channel, 1);
+        assert!(fl.in_roll);
+        assert_eq!(fl.threat_kind, 2, "Station");
+        assert_eq!(fl.threat_id, 7);
+
+        // Verify JSON round-trip
+        let json = serde_json::to_string(&snap).expect("serialize snapshot");
+        let read_back: Snapshot = serde_json::from_str(&json).expect("deserialize snapshot");
+        let rb_sa = read_back.world.last().unwrap().space.as_ref().unwrap();
+        assert_eq!(rb_sa.team_points, [42, 18]);
+        let rb_fl = read_back
+            .world
+            .last()
+            .unwrap()
+            .vehicles
+            .iter()
+            .find(|v| v.id == vh.index)
+            .unwrap()
+            .flyer
+            .as_ref()
+            .unwrap();
+        assert_eq!(rb_fl.channel, 1);
+        assert_eq!(rb_fl.threat_id, 7);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

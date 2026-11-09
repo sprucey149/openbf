@@ -391,7 +391,7 @@ if want side; then
   # sheet is 128x64 on the PS2 and 512x256 on the PC.
   # BF2 has no prone clips: BF1_ANIMS lends BF1's rifle prone set to every BF2
   # soldier (bake::soldier::BORROWED_PRONE, issue #40; the bones share names).
-  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/REP.LVL)" rep_inf_arctrooper,rep_inf_clonecommander,rep_inf_ep3armoredpilot,rep_inf_ep3heavytrooper,rep_inf_ep3jettrooper,rep_inf_ep3sniper,rep_inf_ep3trooper,rep_inf_feluciatrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_REP:+"$DS2_REP"}
+  BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/REP.LVL)" rep_inf_arctrooper,rep_inf_clonecommander,rep_inf_ep3armoredpilot,rep_inf_ep3heavytrooper,rep_inf_ep3jettrooper,rep_inf_ep3sniper,rep_inf_ep3spacepilot,rep_inf_ep3trooper,rep_inf_feluciatrooper,rep_inf_jettrooper,rep_inf_pilot,rep_inf_trooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_REP:+"$DS2_REP"}
   BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/CIS.LVL)" cis_inf_bdroid,cis_inf_magnaguard,cis_inf_sbdroid "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_CIS:+"$DS2_CIS"}
   BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/ALL.LVL)" all_inf_bothanspy,all_inf_engineer,all_inf_marksperson,all_inf_markspersonsnow,all_inf_pilot,all_inf_snowtrooper,all_inf_soldier,all_inf_tantive4trooper,all_inf_vanguard,all_inf_wookie "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_ALL:+"$DS2_ALL"}
   BF1_ANIMS="$A1" "$BAKE" soldier "$(ci "$B2" SIDE/IMP.LVL)" imp_inf_atatcommander,imp_inf_atatpilot,imp_inf_darktrooper,imp_inf_gunner,imp_inf_pilot,imp_inf_scout,imp_inf_shocktrooper,imp_inf_snowtrooper,imp_inf_stormtrooper "$OUT/side_bf2" "$(ci "$B2" INGAME.LVL)" ${DS2_IMP:+"$DS2_IMP"}

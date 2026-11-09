@@ -506,3 +506,17 @@ Not ported: a ship shot to 0 health falls before it explodes on the PS2, the pil
 than 4 or 5 starts phase 4 with a timer (B2:116868-116935: 600 s when `FUN_00215f80(class)` is below 1, else 0.2 to 2.2 s);
 expiry or any contact gives phase 5 (B2:118283-118286, 121913-121930, 119844), which is the explosion. `destroy_vehicle`
 explodes at once. A crash explodes at once in both. `trace:` also the viewport `+0x90` factor in those phases (B2:122650-122700).
+
+## 12. Ground/space death presentation and damage blink audit (FUN_001dfb38)
+
+Audit of rider corpse visibility and red damage blink against `SWBFRNT2.ELF-decomp.c`:
+
+1. **Rider corpse visibility during 4s held death camera:**
+   - **Enclosed riders:** When a vehicle with enclosed seating is destroyed, `v.body` is marked `false`. On the unit death path, `SoldierVisuals::sync_units` detects `v.seated && !u.body` and marks `v.gone = true`, completely omitting the rider corpse from rendering during the 4s held death camera.
+   - **Exposed riders:** For exposed mounts (e.g. speeder bikes, STAPs, open turret chairs), `v.body` is marked `true`. The soldier dies and leaves a ragdoll/corpse at the seat that falls under gravity.
+
+2. **Vehicle red damage blink:**
+   - In `SWBFRNT2.ELF-decomp.c` lines 90720–90755 (`FUN_001dfb38`):
+     Damage taking > 2% remaining health flashes the vehicle red ONLY when the alive bit (`*(byte *)((int)pfVar15 + 0xb8) & 8`) is set.
+   - When health reaches 0, the alive bit is cleared immediately.
+   - Neither ground vehicles nor flyers blink red after destruction during the held death camera. Both ground craft and flyers follow identical alive-bit gating.

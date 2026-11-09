@@ -113,6 +113,9 @@ pub struct VehicleVisuals {
     /// models, drawn with the vehicles so every draw site has them.
     items: super::pickups::PickupVisuals,
     chunks: HashMap<String, ClassVis>,
+    textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
+    texture_uploads: usize,
+    texture_cache_hits: usize,
 }
 
 /// One side's baked vehicles: its directory and geometry → LOD0 model.
@@ -172,59 +175,100 @@ impl VehicleSides {
             .filter(|p| pak::is_file(p.join("vehicles.ron")))
             .collect();
         dirs.sort();
-        Self(
-            dirs.into_iter()
-                .filter_map(|dir| {
-                    let text = pak::read_to_string(dir.join("vehicles.ron")).ok()?;
-                    match ron::from_str::<manifest::VehicleManifest>(&text) {
-                        Ok(m) => {
-                            let mut db = crate::classdb::ClassDb::default();
-                            let _ = db.load(
-                                &assets_dir
-                                    .join("classes")
-                                    .join(format!("{game}_{}.ron", m.source)),
-                            );
-                            let walker_seats = m
+        let mut out: Vec<Side> = dirs
+            .into_iter()
+            .filter_map(|dir| {
+                let text = pak::read_to_string(dir.join("vehicles.ron")).ok()?;
+                match ron::from_str::<manifest::VehicleManifest>(&text) {
+                    Ok(m) => {
+                        let mut db = crate::classdb::ClassDb::default();
+                        let _ = db.load(
+                            &assets_dir
+                                .join("classes")
+                                .join(format!("{game}_{}.ron", m.source)),
+                        );
+                        let walker_seats = m
+                            .vehicles
+                            .iter()
+                            .filter_map(|v| {
+                                Some((
+                                    v.walker.as_ref()?.skin.as_ref()?.to_ascii_lowercase(),
+                                    crate::vehicle_class::seats(&db, &v.class.name),
+                                ))
+                            })
+                            .collect();
+                        Some(Side {
+                            walker_seats,
+                            models: m
+                                .geometries
+                                .iter()
+                                .map(|g| (g.name.to_ascii_lowercase(), lod0(g).to_owned()))
+                                .collect(),
+                            textures: m.textures.iter().map(|t| t.to_ascii_lowercase()).collect(),
+                            walkers: m
                                 .vehicles
                                 .iter()
-                                .filter_map(|v| {
-                                    Some((
-                                        v.walker.as_ref()?.skin.as_ref()?.to_ascii_lowercase(),
-                                        crate::vehicle_class::seats(&db, &v.class.name),
-                                    ))
+                                .filter_map(|v| v.walker.as_ref())
+                                .filter_map(|w| {
+                                    Some((w.skin.as_ref()?.to_ascii_lowercase(), w.clone()))
                                 })
-                                .collect();
-                            Some(Side {
-                                walker_seats,
-                                models: m
-                                    .geometries
-                                    .iter()
-                                    .map(|g| (g.name.to_ascii_lowercase(), lod0(g).to_owned()))
-                                    .collect(),
-                                textures: m
-                                    .textures
-                                    .iter()
-                                    .map(|t| t.to_ascii_lowercase())
-                                    .collect(),
-                                walkers: m
-                                    .vehicles
-                                    .iter()
-                                    .filter_map(|v| v.walker.as_ref())
-                                    .filter_map(|w| {
-                                        Some((w.skin.as_ref()?.to_ascii_lowercase(), w.clone()))
-                                    })
-                                    .collect(),
-                                dir,
-                            })
-                        }
-                        Err(e) => {
-                            eprintln!("vehicles: {}: {e}", dir.display());
-                            None
+                                .collect(),
+                            dir,
+                        })
+                    }
+                    Err(e) => {
+                        eprintln!("vehicles: {}: {e}", dir.display());
+                        None
+                    }
+                }
+            })
+            .collect();
+        let droid_dir = assets_dir.join(format!("side_{game}")).join("droid_chunks");
+        if pak::is_file(droid_dir.join("droid_chunks.ron")) {
+            if let Ok(text) = pak::read_to_string(droid_dir.join("droid_chunks.ron")) {
+                if let Ok(meta) = ron::from_str::<manifest::DroidChunkManifest>(&text) {
+                    let mut models = HashMap::new();
+                    for c in &meta.collision {
+                        let key = c.geometry.to_ascii_lowercase();
+                        models.insert(key.clone(), key);
+                    }
+                    if let Ok(entries) = pak::read_dir(droid_dir.join("weapons")) {
+                        for p in entries {
+                            if p.extension().is_some_and(|e| e.eq_ignore_ascii_case("glb")) {
+                                if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                                    let key = stem.to_ascii_lowercase();
+                                    models.entry(key.clone()).or_insert(key);
+                                }
+                            }
                         }
                     }
-                })
-                .collect(),
-        )
+                    let mut textures = HashSet::new();
+                    let mut collect_textures = |dir: std::path::PathBuf| {
+                        if let Ok(entries) = pak::read_dir(dir) {
+                            for p in entries {
+                                if let Some(file_name) = p.file_name().and_then(|s| s.to_str()) {
+                                    if let Some(stem) = file_name.split('.').next() {
+                                        if !stem.is_empty() {
+                                            textures.insert(stem.to_ascii_lowercase());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    collect_textures(droid_dir.join("textures"));
+                    collect_textures(assets_dir.join(format!("side_{game}")).join("textures"));
+                    out.push(Side {
+                        dir: droid_dir,
+                        models,
+                        textures,
+                        walkers: HashMap::new(),
+                        walker_seats: HashMap::new(),
+                    });
+                }
+            }
+        }
+        Self(out)
     }
 
     /// How many sides were found.
@@ -293,6 +337,14 @@ impl VehicleVisuals {
         self.shadows_on = on;
     }
 
+    pub fn texture_uploads(&self) -> usize {
+        self.texture_uploads
+    }
+
+    pub fn texture_cache_hits(&self) -> usize {
+        self.texture_cache_hits
+    }
+
     /// World-space shadow triangles the last [`Self::draws`] submitted.
     pub fn shadow_triangles(&self) -> usize {
         self.shadow_triangles.len() / 3
@@ -321,23 +373,32 @@ impl VehicleVisuals {
             spec_cull: spec_cull(scene, cull),
             items: super::pickups::PickupVisuals::new(assets_dir, &game, cull),
             chunks: HashMap::new(),
+            textures: HashMap::new(),
+            texture_uploads: 0,
+            texture_cache_hits: 0,
         };
-        let mut textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>> =
-            HashMap::new();
         for g in geometry {
-            let parts =
-                g.as_deref()
-                    .and_then(|g| match upload_class(r, scene, &sides, &mut textures, g) {
-                        Ok(Some(p)) => Some(p),
-                        Ok(None) => {
-                            eprintln!("vehicles: no model for geometry {g}");
-                            None
-                        }
-                        Err(e) => {
-                            eprintln!("vehicles: {g}: {e:#}");
-                            None
-                        }
-                    });
+            let parts = g.as_deref().and_then(|g| {
+                match upload_class(
+                    r,
+                    scene,
+                    &sides,
+                    &mut out.textures,
+                    &mut out.texture_uploads,
+                    &mut out.texture_cache_hits,
+                    g,
+                ) {
+                    Ok(Some(p)) => Some(p),
+                    Ok(None) => {
+                        eprintln!("vehicles: no model for geometry {g}");
+                        None
+                    }
+                    Err(e) => {
+                        eprintln!("vehicles: {g}: {e:#}");
+                        None
+                    }
+                }
+            });
             out.classes.push(parts);
         }
         out
@@ -352,13 +413,20 @@ impl VehicleVisuals {
     ) -> Vec<String> {
         let game = scene.manifest.source_game.to_ascii_lowercase();
         let sides = VehicleSides::load(assets_dir, &game);
-        let mut textures = HashMap::new();
         for name in names {
             let key = name.to_ascii_lowercase();
             if self.chunks.contains_key(&key) {
                 continue;
             }
-            match upload_class(r, scene, &sides, &mut textures, &key) {
+            match upload_class(
+                r,
+                scene,
+                &sides,
+                &mut self.textures,
+                &mut self.texture_uploads,
+                &mut self.texture_cache_hits,
+                &key,
+            ) {
                 Ok(Some(visual)) => {
                     self.chunks.insert(key, visual);
                 }
@@ -660,6 +728,16 @@ pub fn walker_rigs(
 }
 
 /// The top of each class's model, for its camera's pull point
+fn find_glb_path(dir: &Path, model: &str) -> std::path::PathBuf {
+    let file_name = format!("{model}.glb");
+    let weapons = dir.join("weapons").join(&file_name);
+    if pak::is_file(&weapons) {
+        weapons
+    } else {
+        dir.join("models").join(file_name)
+    }
+}
+
 /// ([`crate::walk::vehicle_pull_height`]), parallel to `geometry`: the vis box's top,
 /// or on a bake older than it the highest vertex, which can stand several metres
 /// lower. `None`: a class with no model.
@@ -677,7 +755,8 @@ pub fn model_tops(
                 ModelSource::Map(model) => (map_dir, model),
                 ModelSource::Side(i, model) => (sides.dir(i), model),
             };
-            let mesh = load_glb(&dir.join("models").join(format!("{model}.glb"))).ok()?;
+            let glb = find_glb_path(dir, &model);
+            let mesh = load_glb(&glb).ok()?;
             mesh.vis_top
                 .or_else(|| mesh.positions.iter().map(|p| p[1]).reduce(f32::max))
         })
@@ -690,6 +769,8 @@ fn upload_class(
     scene: &Scene,
     sides: &VehicleSides,
     textures: &mut HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
+    texture_uploads: &mut usize,
+    texture_cache_hits: &mut usize,
     geometry: &str,
 ) -> Result<Option<ClassVis>> {
     let owned: CpuMesh;
@@ -700,7 +781,8 @@ fn upload_class(
         Some(ModelSource::Map(k)) => (&scene.meshes[&k], None),
         Some(ModelSource::Side(i, model)) => {
             let dir = sides.dir(i);
-            let (mesh, j) = load_glb_joints(&dir.join("models").join(format!("{model}.glb")))?;
+            let glb = find_glb_path(dir, &model);
+            let (mesh, j) = load_glb_joints(&glb)?;
             (owned, joints) = (mesh, j);
             // Card WSKN: a walker model with its bones and a baked skin.
             let walker = sides.0[i].walkers.get(&model.to_ascii_lowercase());
@@ -733,7 +815,18 @@ fn upload_class(
         }
         None => None,
     };
-    let mut visual = upload_parts(r, scene, sides, textures, cpu, home, rig, joints)?;
+    let mut visual = upload_parts(
+        r,
+        scene,
+        sides,
+        textures,
+        texture_uploads,
+        texture_cache_hits,
+        cpu,
+        home,
+        rig,
+        joints,
+    )?;
     if scene.manifest.source_game.eq_ignore_ascii_case("bf1") {
         if let Some(path) = shadow_path.filter(|p| pak::is_file(p)) {
             let load = || -> Result<Vec<(render::ShadowMesh, Option<usize>)>> {
@@ -770,6 +863,8 @@ pub(super) fn upload_parts(
     scene: &Scene,
     sides: &VehicleSides,
     textures: &mut HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
+    texture_uploads: &mut usize,
+    texture_cache_hits: &mut usize,
     cpu: &CpuMesh,
     home: Option<usize>,
     rig: Option<WalkerRig>,
@@ -778,7 +873,16 @@ pub(super) fn upload_parts(
     let mut parts = Vec::new();
     for (k, (mesh, mat, layer, _)) in upload_submeshes(r, cpu)?.into_iter().enumerate() {
         let texture = match mat {
-            Some(name) => texture(r, scene, sides, home, textures, name)?,
+            Some(name) => texture(
+                r,
+                scene,
+                sides,
+                home,
+                textures,
+                texture_uploads,
+                texture_cache_hits,
+                name,
+            )?,
             None => None,
         };
         if texture.is_none() && super::route_untextured(mat) != super::Untextured::LookupFailed {
@@ -832,27 +936,45 @@ fn compact(idx: &[u32], vertices: usize) -> (Vec<u32>, Vec<u32>) {
 }
 
 /// Upload (once; misses cached too) a texture [`find_texture`] finds.
+#[allow(clippy::too_many_arguments)]
 fn texture(
     r: &mut Renderer,
     scene: &Scene,
     sides: &VehicleSides,
     home: Option<usize>,
     cache: &mut HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
+    uploads: &mut usize,
+    hits: &mut usize,
     name: &str,
 ) -> Result<Option<TextureHandle>> {
     let name = name.to_ascii_lowercase();
     let source = find_texture(&scene.manifest, sides, home, &name);
     let key = (source, name.clone());
     if let Some(&t) = cache.get(&key) {
+        *hits += 1;
         return Ok(t);
     }
     let found = match source {
         None => None,
         Some(TexSource::Map) => match scene.textures.get(&name) {
-            Some(t) => Some(upload_cpu_texture(r, t, &name)?),
+            Some(t) => {
+                *uploads += 1;
+                Some(upload_cpu_texture(r, t, &name)?)
+            }
             None => None,
         },
-        Some(TexSource::Side(i)) => upload_texture_file(r, &sides.dir(i).join("textures"), &name)?,
+        Some(TexSource::Side(i)) => {
+            let mut res = upload_texture_file(r, &sides.dir(i).join("textures"), &name)?;
+            if res.is_none() {
+                if let Some(parent) = sides.dir(i).parent() {
+                    res = upload_texture_file(r, &parent.join("textures"), &name)?;
+                }
+            }
+            if res.is_some() {
+                *uploads += 1;
+            }
+            res
+        }
     };
     cache.insert(key, found);
     Ok(found)

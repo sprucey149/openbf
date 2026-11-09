@@ -18,8 +18,12 @@ pub struct GuidedClass {
     pub boost_acceleration: f32,
     pub pitch_rate: f32,
     pub turn_rate: f32,
+    pub roll_rate: f32,
     pub pitch_filter: f32,
     pub turn_filter: f32,
+    /// The class authors no `RollFilter`; the turn filter stands in for it
+    /// (`analysis/re-guided-rockets.md`).
+    pub roll_filter: f32,
     pub pitch_damp: f32,
     pub turn_damp: f32,
     pub bank_angle: f32,
@@ -55,6 +59,7 @@ fn vector(src: &dyn PropSource, hash: u32, default: Vec3) -> Vec3 {
 impl GuidedClass {
     pub fn from_props(src: &dyn PropSource) -> Self {
         let f = |key, default| pf(src, key).unwrap_or(default);
+        let turn_filter = f("TurnFilter", 0.0);
         Self {
             acceleration: f("Acceleraton", 0.0),
             speeds: [f("MinSpeed", 0.0), f("MidSpeed", 0.0), f("MaxSpeed", 0.0)],
@@ -62,8 +67,10 @@ impl GuidedClass {
             boost_acceleration: f("BoostAcceleration", 0.0),
             pitch_rate: f("PitchRate", 0.0),
             turn_rate: f("TurnRate", 0.0),
+            roll_rate: f("RollRate", 0.0),
             pitch_filter: f("PitchFilter", 0.0),
-            turn_filter: f("TurnFilter", 0.0),
+            turn_filter,
+            roll_filter: f("RollFilter", turn_filter),
             pitch_damp: pf_hash(src, 0x53d5_cdc8).unwrap_or(0.0),
             turn_damp: pf_hash(src, 0x1795_170d).unwrap_or(0.0),
             bank_angle: f("BankAngle", 0.0),
@@ -137,11 +144,14 @@ pub struct GuidedRocket {
     pub owner: UnitHandle,
     pub team: u8,
     pub weapon_class: usize,
+    pub seat: Option<(crate::vehicle::VehicleHandle, u8)>,
     pub pos: Vec3,
     pub vel: Vec3,
     pub rot: Quat,
     pub pitch_rate: f32,
     pub turn_rate: f32,
+    /// A seat rocket's filtered roll stick; the on-foot rocket leaves it 0.
+    pub roll_input: f32,
     pub bank: f32,
     pub health: f32,
     pub energy: f32,
@@ -168,9 +178,27 @@ impl GuidedRocket {
     }
 
     pub fn steer(&mut self, c: &GuidedClass, pad: &PadState, dt: f32) {
-        let look = pad.look();
-        let turn = (PadState::axis(pad.rx) + look.0 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
-        let pitch = (PadState::axis(pad.ry) + look.1 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
+        // A seat rocket uses the flyer sticks: the left stick turns and
+        // pitches (mapped to rx, ry by flyer_sticks / flyer_pad), the right
+        // stick's X rolls (mapped to lx). The on-foot award rocket keeps
+        // its right-stick steering and mouse look.
+        let (turn, pitch, roll) = if self.seat.is_some() {
+            let turn = PadState::axis(pad.rx);
+            let pitch = PadState::axis(pad.ry);
+            let raw = PadState::axis(pad.lx);
+            let roll = if raw.abs() < 0.3 {
+                0.0
+            } else {
+                (raw - 0.3 * raw.signum()) / 0.7
+            };
+            (turn, pitch, roll)
+        } else {
+            let look = pad.look();
+            let turn = (PadState::axis(pad.rx) + look.0 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
+            let pitch =
+                (PadState::axis(pad.ry) + look.1 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
+            (turn, pitch, 0.0)
+        };
         let slew = |value: f32, target: f32, accel: f32, damp: f32| {
             let rate = if value * target > 0.0 && target.abs() > value.abs() {
                 accel
@@ -191,8 +219,17 @@ impl GuidedRocket {
             c.turn_filter,
             c.turn_damp,
         );
-        self.rot =
-            (self.rot * quat_y(self.turn_rate * dt) * quat_x(self.pitch_rate * dt)).normalize();
+        self.roll_input = slew(
+            self.roll_input,
+            c.roll_rate * roll,
+            c.roll_filter,
+            c.roll_filter,
+        );
+        self.rot = (self.rot
+            * quat_y(self.turn_rate * dt)
+            * quat_x(self.pitch_rate * dt)
+            * quat_z(self.roll_input * dt))
+        .normalize();
         self.bank +=
             (-c.bank_angle * turn - self.bank).clamp(-c.bank_filter * dt, c.bank_filter * dt);
     }
@@ -204,7 +241,13 @@ impl GuidedRocket {
     pub fn fly(&mut self, c: &GuidedClass, pad: &PadState, dt: f32) {
         self.steer(c, pad, dt);
         self.boosted = pad.pressed(crate::sim::buttons::SPRINT) && self.energy > 0.0;
-        let throttle = PadState::axis(pad.ly);
+        // A seat rocket's left stick pitches, so it has no throttle axis and
+        // holds the class's mid speed; sprint still boosts.
+        let throttle = if self.seat.is_some() {
+            0.0
+        } else {
+            PadState::axis(pad.ly)
+        };
         let [min, mid, max] = c.speeds;
         let target = if self.boosted {
             c.boost_speed
@@ -248,6 +291,7 @@ impl GuidedRocket {
             .chain([
                 self.pitch_rate,
                 self.turn_rate,
+                self.roll_input,
                 self.bank,
                 self.health,
                 self.energy,

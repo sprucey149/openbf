@@ -49,6 +49,10 @@ impl Sim {
         if let Some(deathmatch) = &self.deathmatch {
             deathmatch.hash_into(&mut eat);
         }
+        if let Some(ctf) = &self.ctf {
+            eat(b"CTF");
+            ctf.hash_into(&mut eat);
+        }
         for (team, roster) in self.test_rosters.iter().enumerate() {
             if let Some((len, hero)) = roster {
                 eat(b"TEST_CLASSES");

@@ -102,11 +102,13 @@ fn guided_walk() -> game::walk::WalkSim {
         owner: walk.player,
         team: 0,
         weapon_class: class,
+        seat: None,
         pos: Vec3::new(0.0, 10.0, -20.0),
         vel: Vec3::new(0.0, 0.0, -30.0),
         rot: glam::Quat::IDENTITY,
         pitch_rate: 0.0,
         turn_rate: 0.0,
+        roll_input: 0.0,
         bank: 0.0,
         health: 1.0,
         energy: 200.0,
@@ -182,7 +184,26 @@ fn guided_camera_and_interpolation_restore_the_sim_exactly() {
     }
     let mut walk = guided_walk();
     let initial = walk.camera();
-    assert_eq!(initial.position, Vec3::new(0.0, 13.0, -17.0));
+    assert_eq!(initial.position, Vec3::new(0.0, 10.0, -20.0));
+    assert_eq!((initial.yaw, initial.pitch, initial.roll), (0.0, 0.0, 0.0));
+    // A seat rocket's view carries the flight frame's roll and keeps the
+    // reticle centred.
+    let roll = 0.4;
+    walk.sim.guided[0].rot = glam::Quat::from_rotation_z(roll);
+    let rolled = walk.camera();
+    assert!((rolled.roll + roll).abs() < 1e-5, "roll {}", rolled.roll);
+    let want_right = walk.sim.guided[0].rot * Vec3::X;
+    assert!(
+        rolled.right().distance(want_right) < 1e-5,
+        "right {} / {want_right}",
+        rolled.right()
+    );
+    assert!(
+        (walk.reticle_y() - 0.5).abs() < 0.01,
+        "reticle at {}",
+        walk.reticle_y()
+    );
+    walk.sim.guided[0].rot = glam::Quat::IDENTITY;
     let mut blend = game::render_blend::Blend::default();
     blend.on = true;
     blend.before_tick(&walk);

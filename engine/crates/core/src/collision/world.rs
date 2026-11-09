@@ -540,6 +540,22 @@ impl CollisionWorld {
             .find_map(|(i, v)| (*v == turret).then_some(*i))
     }
 
+    pub fn instance_radius_sq_at(&self, instance: u32, point: glam::Vec3) -> Option<f32> {
+        let margin = glam::Vec3::splat(0.5);
+        let mut struck = None::<f32>;
+        let mut largest = None::<f32>;
+        for b in self.bodies.iter().filter(|b| b.instance == Some(instance)) {
+            let r = ((b.aabb.max - b.aabb.min) * 0.5).length_squared();
+            largest = Some(largest.map_or(r, |l: f32| l.max(r)));
+            let inside =
+                point.cmpge(b.aabb.min - margin).all() && point.cmple(b.aabb.max + margin).all();
+            if inside {
+                struck = Some(struck.map_or(r, |s: f32| s.min(r)));
+            }
+        }
+        struck.or(largest)
+    }
+
     /// Make bodies movers after construction: each `(index, envelope)` as
     /// [`CollisionWorld::with_movers`] takes them, then the broad phase is
     /// rebuilt over them.

@@ -247,7 +247,19 @@ pub(super) fn retarget_to_post(
         .and_then(|m| sim.vehicle(m.vehicle))
         .is_some_and(|v| v.kind == Walker || (v.kind == Hover && super::super::HOVER_NEAREST));
     let want = if rides {
-        cur.and_then(|c| post_hub(g, m.ty, c, post, true))
+        match cur.and_then(|c| post_hub(g, m.ty, c, post, true)) {
+            Some(to) if post.nav_hub == Some(to) => Some(to),
+            Some(to) => {
+                let cp_pos = post.def.pos;
+                g.hub(to)
+                    .filter(|h| {
+                        nav::xz_dist(pos, cp_pos) - nav::xz_dist(h.pos, cp_pos)
+                            >= crate::ai::RIDE_GAIN
+                    })
+                    .map(|_| to)
+            }
+            None => None,
+        }
     } else {
         post.nav_hub
     };
@@ -457,9 +469,31 @@ pub(super) fn retarget_phase_a(
     // into a prop for 150 s. The enemy's hub, the HUNT destination, is
     // resolved at the ENEMY's level (PLAN "PHASE A.2 DESIGN" decision 3).
     let m = mover(sim, u);
+    use crate::vehicle::VehicleKind::{Hover, Walker};
+    let rides = u
+        .mount
+        .and_then(|m| sim.vehicle(m.vehicle))
+        .is_some_and(|v| v.kind == Walker || (v.kind == Hover && super::super::HOVER_NEAREST));
     if let Some(cur) = start_hub(sim, g, me) {
         for &(_, i) in &cands {
-            let Some(dest) = sim.cps[i as usize].nav_hub else {
+            let dest = if rides {
+                match post_hub(g, m.ty, cur, &sim.cps[i as usize], true) {
+                    Some(to) if sim.cps[i as usize].nav_hub == Some(to) => Some(to),
+                    Some(to) => {
+                        let cp_pos = sim.cps[i as usize].def.pos;
+                        g.hub(to)
+                            .filter(|h| {
+                                nav::xz_dist(pos, cp_pos) - nav::xz_dist(h.pos, cp_pos)
+                                    >= crate::ai::RIDE_GAIN
+                            })
+                            .map(|_| to)
+                    }
+                    None => None,
+                }
+            } else {
+                sim.cps[i as usize].nav_hub
+            };
+            let Some(dest) = dest else {
                 continue;
             };
             if !g.reachable_by(cur, dest, m) {

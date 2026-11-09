@@ -350,6 +350,7 @@ mod tests {
             streamed: 1,
             engines: vec![],
             music: vec![],
+            triggers: vec![],
         };
         let kept = keep_hero_sounds(sounds);
         assert_eq!(kept.props.len(), 1);

@@ -268,7 +268,7 @@ fn led_flyer(sim: &Sim, eye: glam::Vec3, e: &crate::unit::Unit, speed: f32) -> O
     Some(lead_point(centre - eye, v.vel, speed).map_or(centre, |rel| eye + rel))
 }
 
-pub(super) fn flyer_on_target(nose: glam::Vec3, to: glam::Vec3) -> bool {
+pub fn flyer_on_target(nose: glam::Vec3, to: glam::Vec3) -> bool {
     let d2 = to.length_squared();
     if nose.dot(to.normalize_or_zero()) <= fmath::sin_cos(FLYER_AIM_CONE).1 {
         return false;
@@ -276,6 +276,9 @@ pub(super) fn flyer_on_target(nose: glam::Vec3, to: glam::Vec3) -> bool {
     d2 < FLYER_NEAR * FLYER_NEAR || to.cross(nose).length_squared() < FLYER_MISS * FLYER_MISS
 }
 
+/// PS2 `FUN_002bb900` (lines 230103–230200): vetoes firing during free burst
+/// when a friendly human player is within 50 m on the nose (inside the target's
+/// bounding sphere). Friendly AI craft are not checked by the PS2.
 fn human_friend_on_nose(sim: &Sim, team: u8, from: glam::Vec3, nose: glam::Vec3) -> bool {
     sim.players.iter().flatten().any(|&h| {
         let Some(o) = sim

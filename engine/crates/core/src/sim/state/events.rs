@@ -15,6 +15,27 @@ pub enum Event {
         objective: u16,
         owner: u8,
     },
+    FlagPickedUp {
+        flag: u8,
+        unit: UnitHandle,
+        team: u8,
+    },
+    FlagDropped {
+        flag: u8,
+        team: u8,
+        pos: Vec3,
+    },
+    FlagCaptured {
+        flag: u8,
+        team: u8,
+    },
+    FlagReturned {
+        flag: u8,
+        team: u8,
+    },
+    FlagReset {
+        flag: u8,
+    },
     MineBlast {
         pos: Vec3,
         weapon_class: u32,
@@ -354,6 +375,16 @@ pub enum Event {
         vel: Vec3,
         killer: Option<UnitHandle>,
     },
+    /// A flyer met a surface, obstacle or other craft (SWBFRNT2.ELF-decomp.c lines 121808-121845, 121913-121930).
+    /// Emitted for impact sound, sparks, camera jolt and controller feedback on non-lethal scrape or lethal crash.
+    FlyerImpact {
+        vehicle: crate::vehicle::VehicleHandle,
+        pos: Vec3,
+        normal: Vec3,
+        speed: f32,
+        damage: f32,
+        lethal: bool,
+    },
     HitLanded {
         shooter: UnitHandle,
         team: Option<u8>,
@@ -444,6 +475,8 @@ pub enum Call {
     /// Card UTALK: the class's `LowHealthSound`. Never in the sim's events:
     /// its handle is the sound side's (`game::announce::Commander::calls`).
     LowHealth,
+    Cockpit,
+    Loudspeaker,
     /// Card UVO2: a BF2 `VOSound` line for the event of this index in the
     /// PS2's table (`game::vo::EVENTS`). Never in the sim's events: the
     /// sound side picks it from them (`game::vo::Vo::tick`).

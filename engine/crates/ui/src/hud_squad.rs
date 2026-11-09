@@ -173,13 +173,27 @@ impl Ctx<'_> {
     /// Draw one part and note its window box.
     fn squad_part(&mut self, part: Part, alpha: f32, draw: impl FnOnce(&mut Self)) {
         let first = self.out.verts.len();
+        let first_box = self.out.boxes.len();
         draw(self);
-        // A label's shadow copy is black.
-        let b = crate::hud_draw::vertex_bounds(
-            self.out.verts[first..]
+        let b = if self.out.boxes.len() > first_box {
+            self.out.boxes[first_box..]
                 .iter()
-                .filter(|v| v.color[..3] != [0.0; 3]),
-        );
+                .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, (_, bx)| {
+                    [
+                        b[0].min(bx[0]),
+                        b[1].min(bx[1]),
+                        b[2].max(bx[2]),
+                        b[3].max(bx[3]),
+                    ]
+                })
+        } else {
+            // A label's shadow copy is black.
+            crate::hud_draw::vertex_bounds(
+                self.out.verts[first..]
+                    .iter()
+                    .filter(|v| v.color[..3] != [0.0; 3]),
+            )
+        };
         if b[0] <= b[2] {
             self.out.squad.push((part, b, alpha));
         }

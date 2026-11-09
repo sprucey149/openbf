@@ -15,6 +15,7 @@ use glam::Vec3;
 
 const FLYER_RELATIVE: i32 = 20;
 const ARMED_RELATIVE: i32 = 15;
+const BUILDING_RELATIVE: i32 = 10;
 const FLYER_SEER_VIEW: f32 = 2.0;
 const HUMAN_TARGET_VIEW: f32 = 2.0;
 const OMNI_SIGHT: f32 = 10.0;
@@ -109,8 +110,8 @@ impl Sim {
                     at: s.sphere_centre,
                     nose: Vec3::Z,
                     human: false,
-                    relative: ARMED_RELATIVE,
-                    radius: s.sphere_radius,
+                    relative: BUILDING_RELATIVE,
+                    radius: s.sphere_radius.max(s.radius),
                     hull: None,
                     instance: s.instance,
                 })
@@ -126,8 +127,10 @@ impl Sim {
                     .any(|o| o.is_human());
                 let relative = if matches!(v.kind, VehicleKind::Flyer | VehicleKind::Walker) {
                     FLYER_RELATIVE
-                } else {
+                } else if v.kind == VehicleKind::Turret {
                     ARMED_RELATIVE
+                } else {
+                    BUILDING_RELATIVE
                 };
                 let (at, radius) = self.vehicle_blast_sphere(v);
                 Some(Info {

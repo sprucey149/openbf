@@ -227,7 +227,7 @@ impl Piece {
             if self.pos.y + s.prim.bound() < hf.height_at(self.pos.x, self.pos.z)
                 && sim
                     .collision
-                    .ray_down_with(self.pos, 256.0, HullFilter::Static)
+                    .ray_down_with(self.pos, 256.0, HullFilter::All)
                     .is_none()
             {
                 return false;
@@ -326,7 +326,7 @@ fn floor_fraction(sim: &Sim, from: Vec3, reach: f32) -> Option<f32> {
     });
     let body = sim
         .collision
-        .ray_down_with(from, reach, HullFilter::Static)
+        .ray_down_with(from, reach, HullFilter::All)
         .map(|(y, _)| (from.y - y) / reach);
     match (terrain, body) {
         (Some(a), Some(b)) => Some(a.min(b)),
@@ -350,16 +350,21 @@ fn contacts(sim: &Sim, prim: Prim, pos: Vec3, rot: Quat) -> Vec<Hit> {
             });
         }
     }
-    if !sim.collision.bodies().is_empty() {
+    if sim.collision.bodies_and_hulls().next().is_some() {
         let mut found = Vec::new();
         match prim {
-            Prim::Sphere(r) => sim
-                .collision
-                .sphere_contacts(pos, r, Layers::SOLDIER, &mut found),
-            _ => sim.collision.shape_contacts(
+            Prim::Sphere(r) => sim.collision.sphere_contacts_filtered(
+                pos,
+                r,
+                Layers::SOLDIER | Layers::VEHICLE,
+                HullFilter::All,
+                &mut found,
+            ),
+            _ => sim.collision.shape_contacts_filtered(
                 &prim.shape(),
                 Mat4::from_rotation_translation(rot, pos),
-                Layers::SOLDIER,
+                Layers::SOLDIER | Layers::VEHICLE,
+                HullFilter::All,
                 &mut found,
             ),
         }
@@ -483,7 +488,7 @@ fn floats(v: &str) -> Vec<f32> {
 }
 
 #[derive(Default)]
-pub(super) struct Chunks {
+pub struct Chunks {
     defs: HashMap<String, Vec<Arc<Spec>>>,
     live: VecDeque<Vec<Piece>>,
     loose: Vec<LiveEffect>,
@@ -494,7 +499,7 @@ pub(super) struct Chunks {
 }
 
 impl Chunks {
-    pub(super) fn extend(
+    pub fn extend(
         &mut self,
         db: &ClassDb,
         names: &[String],
@@ -506,12 +511,7 @@ impl Chunks {
         }
     }
 
-    pub(super) fn load(
-        db: &ClassDb,
-        names: &[String],
-        dirs: &[std::path::PathBuf],
-        era: Era,
-    ) -> Self {
+    pub fn load(db: &ClassDb, names: &[String], dirs: &[std::path::PathBuf], era: Era) -> Self {
         use crate::classdb::fnv1a_lowercase as hash;
         let mut out = Self {
             bf1: era == Era::Bf1,
@@ -529,11 +529,26 @@ impl Chunks {
                         .and_then(|g| side.nodes.get(&g.to_ascii_lowercase()))
                 })
                 .map_or(&[][..], Vec::as_slice);
-            for slot in chunk_properties(db.chain(name)) {
+            let mut slots = chunk_properties(db.chain(name));
+            let mut exp_name = None;
+            if !slots.iter().any(|s| {
+                s.props
+                    .get(&hash("ChunkGeometryName"))
+                    .is_some_and(|m| !m.trim().is_empty())
+            }) {
+                if let Some(exp) = crate::vehicle_class::explosion_name(db, name) {
+                    slots = chunk_properties(db.chain(&exp));
+                    exp_name = Some(exp);
+                }
+            }
+            for slot in &slots {
                 let props = &slot.props;
                 let Some(model) = props.get(&hash("ChunkGeometryName")) else {
                     continue;
                 };
+                if model.trim().is_empty() {
+                    continue;
+                }
                 let text = |key: &str| props.get(&hash(key)).map(String::as_str);
                 let number = |key: &str| text(key).and_then(|v| v.trim().parse::<f32>().ok());
                 let vector = |key: &str| {
@@ -561,9 +576,16 @@ impl Chunks {
                             (!mesh.positions.is_empty())
                                 .then_some(((lo + hi) * 0.5, (hi - lo).length() * 0.5))
                         });
-                        let Some((centre, radius)) = *bound else {
-                            eprintln!("chunk model {model}: missing bake, no piece drawn");
-                            continue;
+                        let (centre, radius) = match *bound {
+                            Some((c, r)) => (c, r),
+                            None => {
+                                if dirs.is_empty() {
+                                    (Vec3::ZERO, 0.5)
+                                } else {
+                                    eprintln!("chunk model {model}: missing bake, no piece drawn");
+                                    continue;
+                                }
+                            }
                         };
                         (Prim::Sphere(radius), Mat4::from_translation(centre))
                     }
@@ -581,7 +603,7 @@ impl Chunks {
                 };
                 let ps2 = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
                 let omega = vector("ChunkOmega").map_or(Vec3::ZERO, |w| Vec3::new(-w.x, -w.y, w.z));
-                specs.push(Arc::new(Spec {
+                let spec = Arc::new(Spec {
                     model: model.to_owned(),
                     prim,
                     local,
@@ -624,7 +646,23 @@ impl Chunks {
                         .collect(),
                     node: text("ChunkNodeName").and_then(|n| node_matrix(vehicle_nodes, n)),
                     node_name: text("ChunkNodeName").map(|n| n.trim().to_owned()),
-                }));
+                });
+                let count = text("NumChunks")
+                    .or_else(|| {
+                        (slots.len() == 1)
+                            .then(|| db.prop(name, "NumChunks"))
+                            .flatten()
+                    })
+                    .or_else(|| {
+                        (slots.len() == 1)
+                            .then(|| exp_name.as_deref().and_then(|e| db.prop(e, "NumChunks")))
+                            .flatten()
+                    })
+                    .and_then(|v| v.trim().parse::<usize>().ok())
+                    .map_or(1, |n| n.clamp(1, 10));
+                for _ in 0..count {
+                    specs.push(Arc::clone(&spec));
+                }
             }
             if !specs.is_empty() {
                 out.defs.insert(name.clone(), specs);
@@ -633,7 +671,7 @@ impl Chunks {
         out
     }
 
-    pub(super) fn pose_bursts(&mut self, walk: &WalkSim, vis: &crate::soldier_vis::SoldierVisuals) {
+    pub fn pose_bursts(&mut self, walk: &WalkSim, vis: &crate::soldier_vis::SoldierVisuals) {
         self.posed_nodes.clear();
         for e in &walk.sim.events {
             if let Event::DroidBurst { unit, .. } = e {
@@ -643,7 +681,7 @@ impl Chunks {
         }
     }
 
-    pub(super) fn tick(&mut self, walk: &WalkSim, lib: Option<&Library>) {
+    pub fn tick(&mut self, walk: &WalkSim, lib: Option<&Library>) {
         let dt = core::TICK_DT;
         let rng = self.rng.get_or_insert(Lcg(0xdeb1_5eed));
         let mut bursts = Vec::new();
@@ -708,14 +746,64 @@ impl Chunks {
                             .sim
                             .vehicles
                             .get(vehicle.index as usize)
-                            .map_or(Quat::IDENTITY, |v| v.rot);
+                            .map(|v| v.rot)
+                            .filter(|r| r.is_finite() && *r != Quat::IDENTITY)
+                            .or_else(|| {
+                                walk.sim
+                                    .building_turrets
+                                    .iter()
+                                    .find(|t| t.handle == *vehicle)
+                                    .map(|t| t.rot)
+                            })
+                            .unwrap_or(Quat::IDENTITY);
                         let radius = walk
                             .sim
                             .seat_setup
                             .get(*class as usize)
                             .and_then(Option::as_ref)
-                            .map_or(1.0, |s| s.radius);
+                            .map(|s| s.radius)
+                            .filter(|&r| r > 0.0)
+                            .or_else(|| {
+                                walk.sim
+                                    .blast_setup
+                                    .get(*class as usize)
+                                    .and_then(Option::as_ref)
+                                    .map(|b| b.sphere_radius)
+                                    .filter(|&r| r > 0.0)
+                            })
+                            .or_else(|| {
+                                walk.sim
+                                    .building_turrets
+                                    .iter()
+                                    .find(|t| t.handle == *vehicle)
+                                    .and_then(|t| t.aim_sphere.map(|(_, r)| r))
+                                    .filter(|&r| r > 0.0)
+                            })
+                            .unwrap_or(1.0);
                         self.launch(name, *pos, *vel, rot, radius, 1.0, lib);
+                    }
+                }
+                Event::StationDestroyed {
+                    station,
+                    class,
+                    pos,
+                    ..
+                } => {
+                    if let Some(sc) = walk.sim.station_classes.get(usize::from(*class)) {
+                        let st = walk.sim.stations.get(usize::from(*station));
+                        let rot = st.map_or(Quat::IDENTITY, |s| {
+                            Quat::from_mat4(&s.transform).normalize()
+                        });
+                        let radius = st.map_or(1.0, |s| {
+                            if s.sphere_radius > 0.0 {
+                                s.sphere_radius
+                            } else if s.radius > 0.0 {
+                                s.radius
+                            } else {
+                                1.0
+                            }
+                        });
+                        self.launch(&sc.name, *pos, Vec3::ZERO, rot, radius, 1.0, lib);
                     }
                 }
                 _ => {}
@@ -724,7 +812,7 @@ impl Chunks {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn launch(
+    pub fn launch(
         &mut self,
         name: &str,
         pos: Vec3,
@@ -829,7 +917,7 @@ impl Chunks {
         self.live.push_back(cluster);
     }
 
-    pub(super) fn update(&mut self, dt: f32) {
+    pub fn update(&mut self, dt: f32) {
         for p in self.live.iter_mut().flatten() {
             for e in p.trails.iter_mut().map(|(e, _)| e).chain(&mut p.smoke) {
                 e.advance(dt);
@@ -841,12 +929,14 @@ impl Chunks {
         self.loose.retain(|e| !e.is_dead());
     }
 
-    pub(super) fn draws(
+    #[allow(clippy::too_many_arguments)]
+    pub fn draws(
         &self,
         era: Era,
         eye: Vec3,
         forward: Vec3,
         zoom: f32,
+        bias: f32,
         assets: &mut dyn FxAssets,
         out: &mut Vec<render::ParticleDraw>,
     ) {
@@ -867,19 +957,19 @@ impl Chunks {
             .flat_map(|p| p.trails.iter().map(|(e, _)| e).chain(&p.smoke))
             .chain(&self.loose);
         for e in effects {
-            e.draws_with(eye, forward, zoom, assets, out);
+            e.draws_with_bias(eye, forward, zoom, bias, assets, out);
         }
     }
 
-    pub(super) fn models(&self) -> impl Iterator<Item = &str> {
+    pub fn models(&self) -> impl Iterator<Item = &str> {
         self.defs.values().flatten().map(|s| s.model.as_str())
     }
 
-    pub(super) fn set_lit(&mut self, names: impl IntoIterator<Item = String>) {
+    pub fn set_lit(&mut self, names: impl IntoIterator<Item = String>) {
         self.lit.extend(names);
     }
 
-    pub(super) fn lit_poses(&self) -> impl Iterator<Item = (&str, Mat4, f32)> {
+    pub fn lit_poses(&self) -> impl Iterator<Item = (&str, Mat4, f32)> {
         self.live
             .iter()
             .flatten()
@@ -887,14 +977,30 @@ impl Chunks {
             .map(|p| (p.spec.model.as_str(), p.model(), p.opacity()))
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.live.iter().map(Vec::len).sum()
     }
 
-    pub(super) fn clear(&mut self) {
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn clear(&mut self) {
         self.live.clear();
         self.loose.clear();
         self.posed_nodes.clear();
+    }
+
+    pub fn piece_states(&self) -> Vec<(Vec3, Vec3)> {
+        self.live.iter().flatten().map(|p| (p.pos, p.vel)).collect()
+    }
+
+    pub fn set_piece_vel(&mut self, cluster: usize, piece: usize, vel: Vec3) {
+        if let Some(c) = self.live.get_mut(cluster) {
+            if let Some(p) = c.get_mut(piece) {
+                p.vel = vel;
+            }
+        }
     }
 }
 
@@ -975,6 +1081,7 @@ fn chunk_properties(chain: Vec<&crate::classdb::ClassDef>) -> Vec<Slot> {
         "ChunkSmokeEffect",
         "ChunkSmokeNodeName",
         "ChunkNodeName",
+        "NumChunks",
     ]
     .map(hash)
     .into();

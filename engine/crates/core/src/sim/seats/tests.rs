@@ -246,7 +246,7 @@ fn exit_stands_the_soldier_behind_the_vehicle_on_the_ground() {
 }
 
 #[test]
-fn a_bf2_pilot_stays_in_a_flying_ship_and_the_other_seats_may_leave() {
+fn a_bf2_rider_stays_in_a_flying_ship_and_may_leave_when_parked() {
     use crate::soldier::GroundRules;
     use crate::vehicle::flyer::FlightPhase;
     let run = |rules: GroundRules, phase: FlightPhase, seat: u8| {
@@ -262,7 +262,7 @@ fn a_bf2_pilot_stays_in_a_flying_ship_and_the_other_seats_may_leave() {
     use FlightPhase::{Flying, Landed, Landing, Takeoff};
     for phase in [Takeoff, Flying, Landing] {
         assert!(!run(GroundRules::Bf2, phase, 0), "{phase:?}");
-        assert!(run(GroundRules::Bf2, phase, 1), "gunner {phase:?}");
+        assert!(!run(GroundRules::Bf2, phase, 1), "gunner {phase:?}");
         assert!(run(GroundRules::Bf1, phase, 0), "bf1 {phase:?}");
     }
     assert!(run(GroundRules::Bf2, Landed, 0), "parked");

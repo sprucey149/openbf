@@ -28,7 +28,7 @@
 //!   and `LandSound` ([`JetShot`]).
 //!
 //! Not here (card VSN2): the vehicles' `TurnOnSound` / `TurnOffSound`, walker
-//! steps, the turret whir, collision, a flyer's `BoostSound` and cockpit chatter.
+//! steps, the turret whir, collision.
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::walk::WalkSim;
@@ -115,8 +115,13 @@ pub enum Drive {
     /// |velocity| in m/s; `previous - speed / dt`.
     Walker,
     /// |velocity| / `MaxSpeed`; that speed's change per second / `Acceleraton`
-    /// (B1 `FUN_001d9180` B1:86624-86640).
-    Flyer { max_speed: f32, acceleration: f32 },
+    /// (B1 `FUN_001d9180` B1:86624-86640). BF2 divides by `BoostSpeed` when the
+    /// class has one and clamps to 0..=1 (B2 `FUN_00202d08` 118666-118680).
+    Flyer {
+        max_speed: f32,
+        acceleration: f32,
+        clamped: bool,
+    },
 }
 
 /// Which of the time graphs a flyer's timer feeds since its last takeoff or
@@ -127,6 +132,16 @@ pub enum Wind {
     None,
     Up,
     Down,
+}
+
+pub fn flyer_speed_divisor(p: &core::vehicle::flyer::FlyerParams, in_landing_region: bool) -> f32 {
+    if !p.bf2 {
+        return p.max_speed;
+    }
+    if p.boost_speed > 0.0 {
+        return p.boost_speed;
+    }
+    p.speeds(in_landing_region)[2]
 }
 
 /// A vehicle class's engine keys.
@@ -140,6 +155,37 @@ pub struct EngineClass {
     pub takeoff: Option<String>,
     /// A flyer's `LandSound` (or `WindDownSound`, the same slot).
     pub land: Option<String>,
+    pub boost: Vec<BoostEntry>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BoostEntry {
+    pub sound: String,
+    pub threshold: f32,
+    pub rising: bool,
+}
+
+impl BoostEntry {
+    pub fn parse(value: &str) -> Option<BoostEntry> {
+        let mut parts = value.trim().trim_matches('"').split_whitespace();
+        let sound = parts.next()?.to_owned();
+        let threshold = parts.next()?.parse().ok()?;
+        let rising = parts.next()?.parse::<i32>().ok()? != 0;
+        Some(BoostEntry {
+            sound,
+            threshold,
+            rising,
+        })
+    }
+
+    pub fn crossed(&self, previous: f32, speed: f32) -> bool {
+        let t = self.threshold;
+        if self.rising {
+            previous <= t && t < speed
+        } else {
+            speed < t && t <= previous
+        }
+    }
 }
 
 impl EngineClass {
@@ -163,6 +209,11 @@ impl EngineClass {
                 .unwrap_or(TURN_OFF_TIME),
             takeoff: sound(["TakeoffSound", "WindUpSound"]),
             land: sound(["LandSound", "WindDownSound"]),
+            boost: db
+                .props_all(class, "BoostSound")
+                .into_iter()
+                .filter_map(BoostEntry::parse)
+                .collect(),
         })
     }
 }
@@ -220,6 +271,7 @@ pub struct Instance {
     phase: Option<FlightPhase>,
     /// A takeoff or a landing began in the last update.
     pub wind_began: bool,
+    pub speed_step: Option<(f32, f32)>,
 }
 
 impl Instance {
@@ -236,6 +288,7 @@ impl Instance {
     ) {
         self.started.resize(layers.len(), false);
         self.wind_began = false;
+        self.speed_step = None;
         // A flyer starts its engine for any state but landed (B1:85415-85432) and
         // stops it only there (B1:86590-86608).
         let flying = m.phase.is_some_and(|p| p != FlightPhase::Landed);
@@ -274,8 +327,14 @@ impl Instance {
             Drive::Flyer {
                 max_speed,
                 acceleration,
+                clamped,
             } => {
                 let speed = m.speed / if max_speed == 0.0 { 1.0 } else { max_speed };
+                let speed = if clamped {
+                    speed.clamp(0.0, 1.0)
+                } else {
+                    speed
+                };
                 let per = if acceleration == 0.0 {
                     1.0
                 } else {
@@ -309,6 +368,7 @@ impl Instance {
             turning_off: self.turning_off,
             wind: self.wind,
         };
+        self.speed_step = Some((self.previous, speed));
         self.previous = speed;
         self.timer += dt;
         // A layer starts when its delay +- deviation has passed, the
@@ -408,10 +468,14 @@ impl EngineSounds {
                 },
                 VehicleKind::Walker => Drive::Walker,
                 VehicleKind::Flyer => match walk.sim.flyer_params.get(class) {
-                    Some(Some(p)) => Drive::Flyer {
-                        max_speed: p.max_speed,
-                        acceleration: p.acceleration,
-                    },
+                    Some(Some(p)) => {
+                        let in_region = walk.sim.landing_regions.iter().any(|r| r.contains(v.pos));
+                        Drive::Flyer {
+                            max_speed: flyer_speed_divisor(p, in_region),
+                            acceleration: p.acceleration,
+                            clamped: p.bf2,
+                        }
+                    }
                     _ => continue,
                 },
                 _ => continue,
@@ -448,6 +512,16 @@ impl EngineSounds {
                         unit: i,
                         kind,
                         name: name.clone(),
+                        pos: v.pos,
+                    });
+                }
+            }
+            if let Some((previous, speed)) = e.1.speed_step {
+                for b in ec.boost.iter().filter(|b| b.crossed(previous, speed)) {
+                    self.shots.push(JetShot {
+                        unit: i,
+                        kind: JetShotKind::Boost { rising: b.rising },
+                        name: b.sound.clone(),
                         pos: v.pos,
                     });
                 }
@@ -631,6 +705,9 @@ pub enum JetShotKind {
     /// A flyer's: `unit` is then the vehicle's index.
     Takeoff,
     Land,
+    Boost {
+        rising: bool,
+    },
 }
 
 /// A jet's or a flyer's one-shot: the sound property's name, at the soldier or the craft.

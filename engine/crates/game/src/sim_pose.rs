@@ -2,11 +2,12 @@
 
 use crate::skin::{BoneXform, Clip, Pose, Skeleton};
 use core::fmath;
+use glam::Quat;
 
 // Native shortest-path slerp and its near-linear/normalisation thresholds
 // (B2 53a3e8). Transcendentals use the sim's portable implementation.
-pub(crate) fn blend(a: BoneXform, b: BoneXform, t: f32) -> BoneXform {
-    let dot = a.rotation.dot(b.rotation);
+pub(crate) fn quat_slerp(a: Quat, b: Quat, t: f32) -> Quat {
+    let dot = a.dot(b);
     let cosine = dot.abs().min(1.0);
     let (wa, mut wb) = if 1.0 - cosine < 0.0001 {
         (1.0 - t, t)
@@ -21,12 +22,16 @@ pub(crate) fn blend(a: BoneXform, b: BoneXform, t: f32) -> BoneXform {
     if dot < 0.0 {
         wb = -wb;
     }
-    let mut q = a.rotation * wa + b.rotation * wb;
+    let mut q = a * wa + b * wb;
     if (q.length_squared() - 1.0).abs() > 0.0001 {
         q = q.normalize();
     }
+    q
+}
+
+pub(crate) fn blend(a: BoneXform, b: BoneXform, t: f32) -> BoneXform {
     BoneXform {
-        rotation: q,
+        rotation: quat_slerp(a.rotation, b.rotation, t),
         translation: a.translation.lerp(b.translation, t),
     }
 }

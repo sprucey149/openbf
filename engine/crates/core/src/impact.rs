@@ -20,6 +20,8 @@ pub const HASH_IMPACT_WATER: u32 = 0xecaa_a59d;
 /// BF1 only: BF2 never reads `ImpactEffectShield` (elfword 0) and keys its
 /// shield slots `ImpactEffectShieldSmall` / `Large`, which no class authors.
 pub const HASH_IMPACT_SHIELD: u32 = 0x4bc6_c22f;
+pub const HASH_IMPACT_SHIELD_SMALL: u32 = 0x8fc7_9ebe;
+pub const HASH_IMPACT_SHIELD_LARGE: u32 = 0xf73e_c52a;
 pub const HASH_TRAIL_EFFECT: u32 = 0x7e71_e2c6;
 /// The explosion class's keys.
 pub const HASH_EFFECT: u32 = 0x6e6e_8d54;
@@ -51,9 +53,10 @@ pub enum Surface {
     Terrain,
     /// Water → `ImpactEffectWater`.
     Water,
-    /// A shield → BF1 `ImpactEffectShield`, BF2 the small shield impact (no
-    /// shields in the port yet: nothing emits it).
+    /// A shield → BF1 `ImpactEffectShield`, BF2 the small shield impact.
     Shield,
+    /// A large capital-ship shield → BF2 large shield impact (`com_sfx_shieldimpact_xl`).
+    ShieldLarge,
 }
 
 /// An ordnance class's impact effects (re-fx §7): its bullet-base slots after
@@ -66,6 +69,7 @@ pub struct ImpactLook {
     pub terrain: Option<String>,
     pub water: Option<String>,
     pub shield: Option<String>,
+    pub shield_large: Option<String>,
     /// `TrailEffect`: attached to the round at launch (B1 FUN_002728a8).
     pub trail: Option<String>,
     /// The ordnance's `ExplosionName` class's look: detonated at the hit
@@ -76,12 +80,13 @@ pub struct ImpactLook {
 impl ImpactLook {
     /// The bullet ctor's defaults (B1 `FUN_00277248` B1:198246–198248; B2
     /// `FUN_003148f0` B2:305158–305161): Terrain `dirtspray`, Water
-    /// `watersplash_ord`, and BF2's small shield impact.
+    /// `watersplash_ord`, and BF2's small and large shield impacts.
     pub fn ctor(bf2: bool) -> Self {
         Self {
             terrain: Some("dirtspray".into()),
             water: Some("watersplash_ord".into()),
             shield: bf2.then(|| "com_sfx_shieldimpact_sm".into()),
+            shield_large: bf2.then(|| "com_sfx_shieldimpact_xl".into()),
             ..Self::default()
         }
     }
@@ -97,6 +102,8 @@ impl ImpactLook {
             HASH_IMPACT_TERRAIN => self.terrain = v(),
             HASH_IMPACT_WATER => self.water = v(),
             HASH_IMPACT_SHIELD if !bf2 => self.shield = v(),
+            HASH_IMPACT_SHIELD_SMALL => self.shield = v(),
+            HASH_IMPACT_SHIELD_LARGE => self.shield_large = v(),
             HASH_TRAIL_EFFECT => self.trail = v(),
             _ => {}
         }
@@ -121,6 +128,7 @@ impl ImpactLook {
             Surface::Terrain => self.terrain.as_deref(),
             Surface::Water => self.water.as_deref(),
             Surface::Shield => self.shield.as_deref(),
+            Surface::ShieldLarge => self.shield_large.as_deref().or(self.shield.as_deref()),
         }
     }
 }

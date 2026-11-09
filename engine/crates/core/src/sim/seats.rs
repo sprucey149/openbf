@@ -78,6 +78,7 @@ use crate::ai::SHUT_PROBE_UP;
 use crate::collision::{HullFilter, Layers};
 use crate::soldier::Stance;
 use crate::unit::{Controller, UnitHandle};
+use crate::vehicle::flyer::FlightPhase;
 use crate::vehicle::hover::{ramp_stick_timer, HoverInput};
 use crate::vehicle::{SeatKind, VehicleHandle, VehicleKind};
 use glam::Vec3;
@@ -191,7 +192,7 @@ impl Sim {
             }
             let h = self.handle(i);
             if self.units[i].mount.is_some() {
-                if !self.pilot_held_in_flight(h) {
+                if !self.rider_held_in_flight(h) {
                     self.exit_vehicle(h);
                 }
             } else if let Some((vh, seat)) = self.enter_target(h) {
@@ -516,12 +517,19 @@ impl Sim {
                 continue;
             };
             let r = setup.radius;
+            let sphere = v.pos
+                + v.rot
+                    * self
+                        .blast_setup
+                        .get(v.class as usize)
+                        .and_then(|b| b.as_ref())
+                        .map_or(Vec3::ZERO, |b| b.sphere_centre);
             // FUN_00161c00's gather: the two spheres meet, the soldier's grown.
             let reach = r + r_self + ENTER_GROW;
-            if v.pos.distance_squared(centre) > reach * reach {
+            if sphere.distance_squared(centre) > reach * reach {
                 continue;
             }
-            let d = v.pos - eye;
+            let d = sphere - eye;
             let t = d.dot(aim);
             if !(0.0..=ENTER_REACH + r).contains(&t) {
                 continue;
@@ -606,16 +614,21 @@ impl Sim {
         true
     }
 
-    fn pilot_held_in_flight(&self, u: UnitHandle) -> bool {
+    /// A BF2 flyer in flight keeps every rider aboard: the pilot's exit is
+    /// gated by `FUN_00202d08` (re-space-assault §10), and a playtest
+    /// (2026-11-07) showed a gunner pressing ACTION in a TIE bomber being
+    /// dropped into space. The PS2's gunner update (`FUN_001ee668`) refuses
+    /// nothing itself, so which rule holds the gunner is untraced; the port
+    /// applies the same in-flight rule to every seat.
+    fn rider_held_in_flight(&self, u: UnitHandle) -> bool {
         if self.ground_rules != crate::soldier::GroundRules::Bf2 {
             return false;
         }
-        self.seat_of(u).is_some_and(|(h, seat)| {
-            seat == SeatKind::Pilot
-                && self.vehicle(h).is_some_and(|v| {
-                    v.kind == VehicleKind::Flyer
-                        && v.flyer.phase != crate::vehicle::flyer::FlightPhase::Landed
-                })
+        self.seat_of(u).is_some_and(|(h, _)| {
+            self.vehicle(h).is_some_and(|v| {
+                v.kind == VehicleKind::Flyer
+                    && v.flyer.phase != crate::vehicle::flyer::FlightPhase::Landed
+            })
         })
     }
 
@@ -885,6 +898,11 @@ impl Sim {
                     ..v.input
                 };
                 v.flyer.ai = f.ai;
+                if v.flyer.ai.wedges >= crate::ai::flyer_drive::WEDGED_GIVEUP
+                    && v.flyer.phase != FlightPhase::Landed
+                {
+                    self.destroy_vehicle(m.vehicle, None);
+                }
             }
         }
     }

@@ -1168,6 +1168,7 @@ impl Sim {
         // 6. Command posts → bleed → domination → outcome.
         self.tick_space_assault(dt);
         self.tick_space_balance();
+        self.tick_ctf(dt);
         self.tick_target_hints();
         self.tick_flyer_seek(dt);
         self.update_cps(dt);

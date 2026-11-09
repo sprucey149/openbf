@@ -88,7 +88,15 @@ fn a_chunk_with_a_lit_model_leaves_the_particle_path() {
     drop(&mut c, Vec3::Y, Vec3::ZERO);
     let particles = |c: &Chunks| {
         let mut out = Vec::new();
-        c.draws(Era::Bf2, Vec3::ZERO, Vec3::Z, 1.0, &mut Assets, &mut out);
+        c.draws(
+            Era::Bf2,
+            Vec3::ZERO,
+            Vec3::Z,
+            1.0,
+            0.0,
+            &mut Assets,
+            &mut out,
+        );
         out.len()
     };
     assert_eq!(c.lit_poses().count(), 0);
@@ -334,7 +342,7 @@ fn a_resting_chunk_lives_three_seconds_on_both_games() {
         drop(&mut c, Vec3::Y * 0.2, Vec3::ZERO);
         c.live[0][0].moving = false;
         let mut ticks = 0;
-        while c.len() > 0 {
+        while !c.is_empty() {
             c.tick(&walk, None);
             ticks += 1;
         }

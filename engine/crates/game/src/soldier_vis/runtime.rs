@@ -1014,10 +1014,15 @@ impl SoldierVisuals {
                 let m = Mat4::from_rotation_translation(t.rotation(), t.pos);
                 (t.weapon_class, m)
             }))
-            .chain(sim.guided.iter().map(|r| {
-                let m = Mat4::from_rotation_translation(r.drawn_rotation(), r.pos);
-                (r.weapon_class, m)
-            }))
+            .chain(
+                sim.guided
+                    .iter()
+                    .filter(|r| r.owner != walk.player)
+                    .map(|r| {
+                        let m = Mat4::from_rotation_translation(r.drawn_rotation(), r.pos);
+                        (r.weapon_class, m)
+                    }),
+            )
             // Missiles in flight (card UORD) draw as their class's
             // `ordnance.geometry`, the way a thrown grenade does; the bolt's
             // own module says where they are and which way they point.

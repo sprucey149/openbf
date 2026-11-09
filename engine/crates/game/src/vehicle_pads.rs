@@ -171,6 +171,8 @@ pub struct PadBuild {
     /// Each class's `EngineSound` and `TurnOffTime` (card VSND), parallel
     /// to `classes`; filled by [`install`].
     pub engines: Vec<Option<crate::engine_sound::EngineClass>>,
+    /// Each class's sound properties (collision, hurt, death), parallel to `classes`.
+    pub sounds: Vec<vehicle_class::VehicleSoundClass>,
     /// Each class's `Label` (BF1 names a command walker's post on the spawn
     /// screen by it, re-command-walker-post §5), parallel to `classes`;
     /// filled by [`install`].
@@ -655,7 +657,11 @@ pub fn install_with_objective(
         .map(|(i, c)| {
             vehicle_class::FlyerClass::from_db(&db, c, game == "bf2").map(|f| {
                 core::vehicle::flyer::FlyerParams {
-                    never_crash: vehicle_class::prop_flag(&db, c, "NeverCrashWhenUnpiloted"),
+                    never_crash_when_unpiloted: vehicle_class::prop_flag(
+                        &db,
+                        c,
+                        "NeverCrashWhenUnpiloted",
+                    ),
                     trick_roll_speed: vehicle_class::prop_float(&db, c, "TrickRollSpeed")
                         .unwrap_or(1.0),
                     trick_drain: vehicle_class::prop_float(&db, c, "EnergyTrickDrainSingleTap")
@@ -698,6 +704,11 @@ pub fn install_with_objective(
         .classes
         .iter()
         .map(|c| crate::engine_sound::EngineClass::from_db(&db, c))
+        .collect();
+    b.sounds = b
+        .classes
+        .iter()
+        .map(|c| vehicle_class::VehicleSoundClass::from_db(&db, c))
         .collect();
     b.labels = b
         .classes
@@ -846,6 +857,13 @@ pub fn install_with_objective(
             Some(setup)
         })
         .collect();
+    for (setup, blast) in sim.seat_setup.iter_mut().zip(&sim.blast_setup) {
+        if let (Some(setup), Some(blast)) = (setup.as_mut(), blast.as_ref()) {
+            if blast.sphere_radius > 0.0 {
+                setup.radius = blast.sphere_radius;
+            }
+        }
+    }
     let tow_parts = b
         .classes
         .iter()
@@ -1303,9 +1321,9 @@ pub fn blast_setup(db: &ClassDb, class: &str, sphr: Option<[f32; 4]>) -> BlastSe
 
 /// A class's [`SeatSetup`]: a seat boards a soldier for PilotType `vehicle`
 /// or `vehicleself` (re-vehicles §5); the exit's ground ray is BF1's 10 m or
-/// BF2's 15 m; the radius (PROVISIONAL — the PS2 reads the collision sphere,
-/// FUN_001645a0) bounds the hover's spring spheres about the origin — the
-/// TAT1 skiff 5.0 m — else [`VEHICLE_RADIUS`].
+/// BF2's 15 m; the radius starts from the hover's spring spheres, else
+/// [`VEHICLE_RADIUS`]; the install then replaces it with the class's collision
+/// sphere (FUN_001645a0, [`vehicle_class::blast_sphere`]).
 pub fn seat_setup(
     db: &ClassDb,
     class: &str,

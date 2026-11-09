@@ -2163,6 +2163,9 @@ fn aim_sizes_are_the_baked_models_boxes() {
     let mut baked = 0;
     for e in std::fs::read_dir(&soldiers).expect("soldiers dir") {
         let name = e.expect("entry").file_name().to_string_lossy().into_owned();
+        if name.ends_with(".low.glb") {
+            continue;
+        }
         if let Some(model) = name.strip_suffix(".glb") {
             baked += 1;
             assert!(

@@ -185,22 +185,14 @@ pub fn vehicle_camera(
 }
 
 /// A flown guided rocket's camera (card GUIDED): the class's track centre
-/// and offset in the rocket's frame.
+/// and offset in the rocket's flight frame. The full frame includes roll, so
+/// a seat rocket's reticle stays centred while it banks.
 pub fn guided_camera(
     r: &core::guided::GuidedRocket,
-    c: &core::guided::GuidedClass,
+    _c: &core::guided::GuidedClass,
     fov_y: f32,
 ) -> Camera {
-    let (yaw, pitch) = r.yaw_pitch();
-    let target = r.pos + r.rot * c.track_center;
-    let position = target + r.rot * c.track_offset;
-    Camera {
-        position,
-        yaw,
-        pitch,
-        fov_y,
-        ..Camera::default()
-    }
+    flyer_camera::camera_at(r.pos, r.rot, fov_y)
 }
 
 /// `[ours]` The remote droid's chase offset (maintainer, 2026-10-28: "3rd
@@ -396,6 +388,7 @@ impl Cries {
             Call::NeedGunner => self.need_gunner.as_deref(),
             Call::Yes => self.yes.as_deref(),
             Call::LowHealth => self.low_health.as_deref(),
+            Call::Cockpit | Call::Loudspeaker => None,
             Call::HeroSpawned => self.hero.spawned.as_deref(),
             Call::HeroDefeated => self.hero.defeated.as_deref(),
             Call::Vo(_) => None,
@@ -701,6 +694,9 @@ pub struct WalkSim {
     /// only, card VSND): set with the pads, read by
     /// `crate::engine_sound::EngineSounds`.
     pub vehicle_engines: Vec<Option<crate::engine_sound::EngineClass>>,
+    /// Each vehicle class's sound properties (collision, hurt, death), by `Vehicle::class`.
+    pub vehicle_sounds: Vec<crate::vehicle_class::VehicleSoundClass>,
+    pub sound_triggers: Vec<crate::ambience::SoundTrigger>,
     /// Each vehicle class's `Label`, by `Vehicle::class` (display only): set
     /// with the pads (`crate::vehicle_pads::PadBuild::labels`); the spawn
     /// screen names a command walker's post by it (card CWSP).
@@ -709,6 +705,8 @@ pub struct WalkSim {
     /// set with the pads (`crate::vehicle_pads::PadBuild::classes`); the
     /// HUD's target readout names a picked vehicle by it (card HTGT).
     pub vehicle_classes: Vec<String>,
+    /// Mission particle LOD bias (re-fx §8, FUN_0037a040).
+    pub particle_lod_bias: f32,
     /// The camera's projection scale S: 1.0 unzoomed, eased toward the zoom
     /// of the player's weapon each tick ([`WalkSim::step_tick`]). Visual
     /// only, like the FOV.
@@ -720,7 +718,9 @@ pub struct WalkSim {
     /// How far the chase camera lags a jetting soldier ([`core::unit::jet_camera_lag`]).
     pub cam_jet_lag: Vec3,
     pub cam_flyer: Option<FlyerCam>,
+    seat_transition: Option<(Vec3, Quat, f32, f32, core::vehicle::VehicleHandle)>,
     seat_view: Option<Camera>,
+    pub seat_view_timer: f32,
     /// The camera collision's stored track fraction (B1 `FUN_0019fd70`,
     /// [`crate::camera_collide::ease_pull`]): stepped each tick, it lets a
     /// pulled-in camera return slowly. Visual only.
@@ -865,14 +865,19 @@ impl WalkSim {
             walker_shot_styles: Default::default(),
             vehicle_riders: Vec::new(),
             vehicle_engines: Vec::new(),
+            vehicle_sounds: Vec::new(),
+            sound_triggers: Vec::new(),
             vehicle_labels: Vec::new(),
             vehicle_classes: Vec::new(),
+            particle_lod_bias: 0.0,
             zoom_s: 1.0,
             zoom_fov_mix: 0.0,
             cam_place: None,
             cam_jet_lag: Vec3::ZERO,
             cam_flyer: None,
+            seat_transition: None,
             seat_view: None,
+            seat_view_timer: 0.0,
             cam_pull: 1.0,
             cam_pull_track: None,
             fov_scale: 1.0,
@@ -1132,6 +1137,11 @@ impl WalkSim {
             .is_some_and(|v| v.kind == core::vehicle::VehicleKind::Flyer)
     }
 
+    /// Is the player piloting a flyer or controlling a guided rocket?
+    pub fn player_controls_flyer(&self) -> bool {
+        self.player_pilots_flyer() || self.sim.controlled_guided(self.player).is_some()
+    }
+
     /// The magnet target when it is a unit (draw order of `target_draws`;
     /// a vehicle magnet draws no unit marker). Slot 0 — what the HUD draws.
     pub fn magnet(&self) -> Option<UnitHandle> {
@@ -1207,6 +1217,8 @@ impl WalkSim {
     /// One fixed tick (also the headless/replay entry — no accumulator).
     /// `pads` is indexed by player slot; slot 0 is [`WalkSim::player`].
     pub fn step_tick(&mut self, pads: &[PadState]) {
+        let old_mount = self.sim.unit(self.player).and_then(|u| u.mount);
+        let old_camera = self.camera();
         let kills_before = self.sim.units[self.player.index as usize].kills;
         if std::mem::take(&mut self.respawn_requested) {
             let mut requested = pads.to_vec();
@@ -1224,6 +1236,30 @@ impl WalkSim {
         // music, commander, black box).
         if let Some(Some(h)) = self.sim.players.first() {
             self.player = *h;
+        }
+        let new_mount = self.sim.unit(self.player).and_then(|u| u.mount);
+        if let (Some(old), Some(new)) = (old_mount, new_mount) {
+            if old.vehicle == new.vehicle && old.seat != new.seat {
+                if let Some(vehicle) = self.sim.vehicle(new.vehicle) {
+                    let old_rot =
+                        camera::camera_rotation(old_camera.yaw, old_camera.pitch, old_camera.roll);
+                    let local_pos = vehicle.rot.inverse() * (old_camera.position - vehicle.pos);
+                    let local_rot = vehicle.rot.inverse() * old_rot;
+                    self.seat_transition =
+                        Some((local_pos, local_rot, old_camera.fov_y, 0.0, new.vehicle));
+                }
+            }
+        }
+        if let Some((_, _, _, elapsed, vh)) = &mut self.seat_transition {
+            *elapsed += core::TICK_DT;
+            let mounted_same = self
+                .sim
+                .unit(self.player)
+                .and_then(|u| u.mount)
+                .is_some_and(|m| m.vehicle == *vh);
+            if *elapsed >= camera::MEASURE_SEAT_TRANSITION_SECONDS_ON_PS2 || !mounted_same {
+                self.seat_transition = None;
+            }
         }
         self.refill_after_side_change();
         self.track_class_kills(kills_before);
@@ -1253,6 +1289,12 @@ impl WalkSim {
         self.cam_jet_lag = self.next_cam_jet_lag();
         self.step_cam_pull();
         self.cam_flyer = self.next_cam_flyer();
+        let me = self.sim.units.get(self.player.index as usize);
+        if me.is_some_and(|u| u.alive && u.mount.is_some()) {
+            self.seat_view_timer = camera::DEATH_VIEW_HOLD;
+        } else if self.seat_view_timer > 0.0 {
+            self.seat_view_timer = (self.seat_view_timer - core::TICK_DT).max(0.0);
+        }
         self.seat_view = self.next_seat_view();
         // The squad's answers to this tick's orders join the voice queue;
         // the units' combat calls wait for the sound bank's gates
@@ -1261,6 +1303,8 @@ impl WalkSim {
             v.orders(&self.sim, self.player);
             v.leaving(&self.sim, self.player);
             v.calls(&self.sim, &self.teams);
+            v.cockpit(&self.sim, self.player, &self.vehicle_sounds);
+            v.loudspeakers(&self.sim, self.player, &self.sound_triggers, &self.teams);
         }
     }
 
@@ -1428,7 +1472,8 @@ pub(crate) fn turret_test_walk() -> (WalkSim, usize, usize) {
 
 mod camera;
 mod flyer_camera;
-pub use flyer_camera::FlyerCam;
+pub use camera::DEATH_VIEW_HOLD;
+pub use flyer_camera::{FlyerCam, FLYER_CRASH_DETACH_RATE};
 
 #[cfg(test)]
 mod tests;

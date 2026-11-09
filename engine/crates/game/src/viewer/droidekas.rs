@@ -502,8 +502,20 @@ fn upload(
         classes.props_all(&record.class, "AimerNodeName"),
     );
     let rig = WalkerRig::new(a.skeleton, a.clips, &crate::droideka::as_walker(record));
-    upload_parts(r, scene, sides, textures, &cpu, Some(i), Some(rig), joints)
-        .map(|class| (class, aim))
+    let (mut uploads, mut hits) = (0, 0);
+    upload_parts(
+        r,
+        scene,
+        sides,
+        textures,
+        &mut uploads,
+        &mut hits,
+        &cpu,
+        Some(i),
+        Some(rig),
+        joints,
+    )
+    .map(|class| (class, aim))
 }
 
 #[cfg(test)]

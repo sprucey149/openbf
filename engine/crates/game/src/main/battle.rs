@@ -477,6 +477,8 @@ pub(super) fn make_walk_with_counts(
                 );
                 walk.vehicle_riders = p.riders;
                 walk.vehicle_engines = p.engines;
+                walk.vehicle_sounds = p.sounds;
+                walk.sound_triggers = game::ambience::sound_triggers(&scene.manifest);
                 walk.vehicle_labels = p.labels;
                 walk.vehicle_classes = p.classes.clone();
                 vehicle_classes = p.classes;
@@ -487,6 +489,7 @@ pub(super) fn make_walk_with_counts(
         // The commander speaks the mission's lines over the posts and the
         // battle just set up.
         if let Some(m) = &b.mission {
+            walk.particle_lod_bias = m.particle_lod_bias.unwrap_or(0.0);
             let assets_dir = scene.dir.parent().unwrap_or(&scene.dir);
             game::native_teams::install(&mut walk, &layout, &b.classes_dir, assets_dir, m);
             walk.sound_levels = m.sound_levels();
@@ -495,6 +498,48 @@ pub(super) fn make_walk_with_counts(
                 round.sheet_dir = Some(assets_dir.join(&m.map).join("textures"));
                 std::sync::Arc::new(round)
             });
+            if let Some(ctf_def) = &m.ctf {
+                let score_limit = ctf_def
+                    .score_limit
+                    .unwrap_or(core::sim::DEFAULT_CTF_SCORE_LIMIT);
+                let find_region = |name: &str| -> glam::Vec3 {
+                    scene
+                        .manifest
+                        .regions
+                        .iter()
+                        .find(|r| r.name.eq_ignore_ascii_case(name))
+                        .map(|r| glam::Vec3::from(r.translation))
+                        .or_else(|| {
+                            scene
+                                .manifest
+                                .instances
+                                .iter()
+                                .find(|i| i.name.eq_ignore_ascii_case(name))
+                                .map(|i| glam::Vec3::from(i.translation))
+                        })
+                        .unwrap_or(glam::Vec3::ZERO)
+                };
+                let home_pos = find_region(&ctf_def.home_region);
+                let mission_factions = [m.teams[0].faction.as_str(), m.teams[1].faction.as_str()];
+                let sim_factions = [
+                    walk.teams[0].faction.as_str(),
+                    walk.teams[1].faction.as_str(),
+                ];
+                let goals = ctf_capture_goals(
+                    mission_factions,
+                    sim_factions,
+                    find_region(&ctf_def.capture_region_att),
+                    find_region(&ctf_def.capture_region_def),
+                );
+                let ctf_state = core::sim::CtfState::new_space_one_flag(
+                    score_limit,
+                    home_pos,
+                    goals[0],
+                    goals[1],
+                );
+                walk.sim.install_ctf(ctf_state);
+                walk.sim.flyer_bots = true;
+            }
             walk.voice = Some(game::announce::Commander::for_battle(m, &layout, &walk));
             // ...and the music is the script's too, by the reinforcements
             // the teams start with.
@@ -567,10 +612,42 @@ pub(super) fn load_hud_view(
     }
 }
 
-/// HUD model from the battle state. Takes `feed`'s new event lines: each
-/// model must reach the HUD (`HudView::update`) or its lines are lost.
+/// The capture region each sim team must carry the flag into.
+///
+/// Every retail One-Flag script names mission team 1 the attacker and team 2
+/// the defender (`teamATT = 1`, `teamDEF = 2`, or the `IMP`/`ALL`/`REP`/`CIS`
+/// globals that resolve to those numbers). `Start` activates
+/// `captureRegionATT` for the attacker and `captureRegionDEF` for the
+/// defender, and the two `OnEnterRegion` handlers accept only a carrier whose
+/// team matches (`objectiveoneflagctf.luac` proto 5's registrations, protos
+/// 14 and 15). The sim's team order can differ from the mission's when
+/// `--teams` overrides the pair, so match the mission team by faction.
+fn ctf_capture_goals(
+    mission_factions: [&str; 2],
+    sim_factions: [&str; 2],
+    att: glam::Vec3,
+    def: glam::Vec3,
+) -> [glam::Vec3; 2] {
+    let mut goals = [att, def];
+    for (slot, faction) in sim_factions.iter().enumerate() {
+        match mission_factions
+            .iter()
+            .position(|f| f.eq_ignore_ascii_case(faction))
+        {
+            Some(0) => goals[slot] = att,
+            Some(_) => goals[slot] = def,
+            None => {}
+        }
+    }
+    goals
+}
+
 fn marker_screen(view_proj: glam::Mat4, pos: glam::Vec3) -> ([f32; 2], bool) {
     let clip = view_proj * pos.extend(1.0);
+    // Divide by |w|, not w: a target behind the camera has w < 0, and the
+    // signed divide would mirror it to the wrong edge. |w| keeps the sign of
+    // the view-space x/y so the clamped marker points toward the target
+    // (`re-hud-map.md` §5, `FUN_00179c10`).
     let w = clip.w.abs().max(1.0e-4);
     let (mut x, mut y) = (clip.x / w, -clip.y / w);
     let bound = x.abs().max(y.abs());
@@ -592,7 +669,8 @@ fn hud_hints(
     let locked = walk.sim.lock_on_target(slot).map(|(t, _)| t);
     let camera = walk.camera();
     let view_proj = camera.view_proj(aspect);
-    feed.target_hints(&walk.sim, slot)
+    let mut hints: Vec<ui::hud_tree::HintMarker> = feed
+        .target_hints(&walk.sim, slot)
         .iter()
         .filter(|h| Some(h.target) != locked)
         .filter_map(|h| {
@@ -602,9 +680,49 @@ fn hud_hints(
                 distance: (h.point - camera.position).length(),
                 friendly: h.friendly,
                 visible: h.visible,
+                on_screen: true,
+                flag: false,
+                tint: None,
             })
         })
-        .collect()
+        .collect();
+
+    if let Some(ctf) = &walk.sim.ctf {
+        let me_team = walk.sim.unit(walk.player).map_or(0, |u| u.team);
+        let yellow = Some(ui::hud::message_color::YELLOW.map(f32::from));
+        for flag in &ctf.flags {
+            let (pos, friendly) = match flag.status {
+                core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => {
+                    (flag.current_pos, true)
+                }
+                core::sim::FlagStatus::Carried { carrier } => {
+                    if carrier == walk.player {
+                        (
+                            ctf.capture_regions
+                                .get(me_team as usize)
+                                .map_or(flag.current_pos, |r| r.pos),
+                            true,
+                        )
+                    } else {
+                        let carrier_team = walk.sim.unit(carrier).map_or(0, |u| u.team);
+                        (flag.current_pos, carrier_team == me_team)
+                    }
+                }
+            };
+            let (ndc, on_screen) = marker_screen(view_proj, pos);
+            hints.push(ui::hud_tree::HintMarker {
+                ndc,
+                distance: (pos - camera.position).length(),
+                friendly,
+                visible: true,
+                on_screen,
+                flag: true,
+                tint: yellow,
+            });
+        }
+    }
+
+    hints
 }
 
 fn hud_lock(
@@ -630,15 +748,17 @@ fn hud_lock(
         ndc: [x, y],
         on_screen,
         visible: walk.sim.lock_on_visible(slot),
-        ready: [
-            walk.sim.lock_on_ready(slot, 0),
-            walk.sim.lock_on_ready(slot, 1),
+        charge: [
+            walk.sim.lock_on_charge(slot, 0),
+            walk.sim.lock_on_charge(slot, 1),
         ],
         flyer: true,
         pulse: walk.sim.tick as f32 / core::TICK_HZ as f32,
     })
 }
 
+/// HUD model from the battle state. Takes `feed`'s new event lines: each
+/// model must reach the HUD (`HudView::update`) or its lines are lost.
 pub(super) fn hud_model(
     walk: &WalkSim,
     feed: &mut game::event_feed::EventFeed,
@@ -695,7 +815,11 @@ pub(super) fn hud_model(
     ui::hud::HudModel {
         team_names: [walk.teams[0].faction.clone(), walk.teams[1].faction.clone()],
         tickets: [b.teams[0].tickets(), b.teams[1].tickets()],
-        bleed: [b.teams[0].bleed_per_sec, b.teams[1].bleed_per_sec],
+        bleed: if walk.sim.ctf.is_some() {
+            [0.0, 0.0]
+        } else {
+            [b.teams[0].bleed_per_sec, b.teams[1].bleed_per_sec]
+        },
         hp,
         hp_max,
         hero: walk.sim.is_hero(walk.player),
@@ -730,6 +854,7 @@ pub(super) fn hud_model(
             .then(|| feed.target(&walk.sim, slot))
             .flatten(),
         lock: hud_lock(walk, feed, slot, aspect),
+        incoming_missile: walk.sim.incoming_missile(slot),
         hints: hud_hints(walk, feed, slot, aspect),
         reticle_y: walk.reticle_y(),
         dead: !me.alive,
@@ -743,11 +868,23 @@ pub(super) fn hud_model(
                 t.saturating_sub(walk.sim.tick) as f32 / core::TICK_HZ as f32
             })
         }),
-        team_points: walk.sim.space_team_points().or_else(|| {
-            walk.sim
-                .team_points()
-                .map(|(points, limit)| (points.map(|p| p as i32), limit))
-        }),
+        team_points: walk
+            .sim
+            .space_team_points()
+            .or_else(|| {
+                walk.sim.ctf.as_ref().map(|c| {
+                    (
+                        [c.team_points[0] as i32, c.team_points[1] as i32],
+                        c.score_limit,
+                    )
+                })
+            })
+            .or_else(|| {
+                walk.sim
+                    .team_points()
+                    .map(|(points, limit)| (points.map(|p| p as i32), limit))
+            }),
+        ctf: walk.sim.ctf.is_some(),
         space: space_status,
         outcome: walk.sim.outcome,
         countdown: walk
@@ -902,6 +1039,42 @@ pub(super) fn spawn_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ctf_capture_regions_follow_the_mission_faction_not_the_slot() {
+        let (att, def) = (glam::Vec3::X, glam::Vec3::Z);
+        // The mission's first team is the attacker on every retail script.
+        assert_eq!(
+            ctf_capture_goals(["imp", "all"], ["imp", "all"], att, def),
+            [att, def]
+        );
+        // A `--teams` override can put the armies the other way round.
+        assert_eq!(
+            ctf_capture_goals(["imp", "all"], ["all", "imp"], att, def),
+            [def, att]
+        );
+        // Armies the mission does not name keep the mission's slot order.
+        assert_eq!(
+            ctf_capture_goals(["imp", "all"], ["rep", "cis"], att, def),
+            [att, def]
+        );
+        assert_eq!(
+            ctf_capture_goals(["rep", "cis"], ["CIS", "REP"], att, def),
+            [def, att]
+        );
+    }
+
+    #[test]
+    fn a_target_behind_the_camera_keeps_its_side() {
+        let view_proj = glam::Mat4::perspective_rh(60f32.to_radians(), 1.0, 0.1, 1000.0);
+        // Right-handed: +Z is behind the camera. The marker for a target on
+        // the right must sit on the right edge, not its mirror.
+        let (right, on_screen) = marker_screen(view_proj, glam::Vec3::new(10.0, 0.0, 10.0));
+        assert!(!on_screen);
+        assert!(right[0] > 0.0, "{right:?}");
+        let (left, _) = marker_screen(view_proj, glam::Vec3::new(-10.0, 0.0, 10.0));
+        assert!(left[0] < 0.0, "{left:?}");
+    }
 
     #[test]
     fn renamed_conquest_and_optional_mission_views_keep_existing_launch_paths() {

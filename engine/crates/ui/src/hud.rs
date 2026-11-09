@@ -201,11 +201,14 @@ pub use crate::hud_space::{feed_lock, HudLock};
 #[derive(Debug, Clone, Default)]
 pub struct HudModel {
     pub lock: Option<HudLock>,
+    pub incoming_missile: Option<f32>,
     pub hints: Vec<crate::hud_tree::HintMarker>,
     /// Faction keys or display names, team 0 / team 1.
     pub team_names: [String; 2],
     pub tickets: [u32; 2],
     pub team_points: Option<([i32; 2], u32)>,
+    /// When true, 1-Flag CTF HUD displays flag icons and single-score points.
+    pub ctf: bool,
     pub space: Option<crate::hud_space::SpaceStatus>,
     /// Reinforcements lost per second to the post bleed, team 0 / team 1.
     pub bleed: [f32; 2],
@@ -327,7 +330,13 @@ pub const RETICLE_COLORS: [[u8; 3]; 3] = [
 /// like the PS2's publishers, so call it every frame. `has_mesh` answers
 /// whether a model of that name can be drawn (the NameMesh fallback).
 pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
-    feed_lock(hud, m.lock.as_ref(), m.space.clone(), has_mesh);
+    feed_lock(
+        hud,
+        m.lock.as_ref(),
+        m.incoming_missile,
+        m.space.clone(),
+        has_mesh,
+    );
     hud.hint_markers.clone_from(&m.hints);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     put("initialize", EventValue::None);
@@ -509,6 +518,32 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     // (`FUN_003b59a0`); the count pulses once per lost reinforcement.
     let own = usize::from(m.player_team.min(1));
     for (slot, team) in [(1, own), (2, 1 - own)] {
+        if m.ctf {
+            if let Some((points, _)) = m.team_points {
+                let pts = points[team];
+                put(
+                    &format!("player1.team{slot}.texture"),
+                    EventValue::Text("hud_flag_icon".to_owned()),
+                );
+                put(
+                    &format!("player1.team{slot}.points"),
+                    EventValue::Number(pts as f32),
+                );
+                put(
+                    &format!("player1.team{slot}.pointsText"),
+                    EventValue::Text(format!("{pts}")),
+                );
+                put(
+                    &format!("player1.team{slot}.reinforcementsDisable"),
+                    EventValue::None,
+                );
+                continue;
+            }
+        }
+        put(
+            &format!("player1.team{slot}.textureDisable"),
+            EventValue::None,
+        );
         if let Some((points, limit)) = m.team_points {
             let pts = points[team];
             put(
@@ -519,8 +554,16 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
                 &format!("player1.team{slot}.pointsText"),
                 EventValue::Text(format!("{pts}/{limit}")),
             );
+            put(
+                &format!("player1.team{slot}.reinforcementsDisable"),
+                EventValue::None,
+            );
             continue;
         }
+        put(
+            &format!("player1.team{slot}.pointsDisable"),
+            EventValue::None,
+        );
         put(
             &format!("player1.team{slot}.reinforcements"),
             EventValue::Number(m.tickets[team] as f32),
@@ -1039,8 +1082,10 @@ mod tests {
     fn model() -> HudModel {
         HudModel {
             lock: None,
+            incoming_missile: None,
             hints: Vec::new(),
             team_points: None,
+            ctf: false,
             space: None,
             damage_flash: 0.0,
             gauge: Default::default(),
@@ -1402,5 +1447,35 @@ mod team_points_tests {
         );
         assert_eq!(hud.last("player1.team1.reinforcements"), None);
         assert_eq!(hud.last("player1.team2.bleedRate"), None);
+    }
+
+    #[test]
+    fn ctf_shows_flag_icon_and_single_score() {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let model = HudModel {
+            player_team: 1,
+            ctf: true,
+            tickets: [999_999; 2],
+            team_points: Some(([0, 1], 5)),
+            ..Default::default()
+        };
+        feed(&mut hud, &model, &|_| false);
+        assert_eq!(
+            hud.last("player1.team1.texture"),
+            Some(&EventValue::Text("hud_flag_icon".to_owned()))
+        );
+        assert_eq!(
+            hud.last("player1.team2.texture"),
+            Some(&EventValue::Text("hud_flag_icon".to_owned()))
+        );
+        assert_eq!(
+            hud.last("player1.team1.pointsText"),
+            Some(&EventValue::Text("1".to_owned()))
+        );
+        assert_eq!(
+            hud.last("player1.team2.pointsText"),
+            Some(&EventValue::Text("0".to_owned()))
+        );
+        assert_eq!(hud.last("player1.team1.reinforcements"), None);
     }
 }

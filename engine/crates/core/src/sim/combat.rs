@@ -25,6 +25,8 @@ use super::state::LETHAL_LANDING_SPEED;
 /// default {head prim, x3.0}, `FUN_002517e8` (`analysis/re-ai-difficulty.md` §9.2).
 pub const HEADSHOT_SCALE: f32 = 3.0;
 
+const LARGE_SHIELD_RADIUS_SQ: f32 = 256.0;
+
 impl Sim {
     /// The PS2's per-frame bolt sweep (B1 FUN_00273128, BF2 FUN_0030fad0;
     /// `re-ordnance-kinds.md` §2.4 [V][M]; issue #41: the port had kept the
@@ -444,11 +446,10 @@ impl Sim {
             // A model wall ends the flight exactly as the terrain sheet does:
             // the same event, so the same puff and the same impact sound.
             Hit::Target(Target::Station(s)) => {
-                if self
-                    .stations
-                    .get(usize::from(s))
-                    .is_none_or(|s| s.destroyed)
-                {
+                let Some(st) = self.stations.get(usize::from(s)) else {
+                    return;
+                };
+                if st.destroyed {
                     return;
                 }
                 let desc = self.bolt_desc(b);
@@ -456,7 +457,20 @@ impl Sim {
                     pos: b.end,
                     struck: true,
                 });
-                self.push_impact(b, Surface::Building, None);
+                let surface = if st.health.shield > 0.0 {
+                    let large = st
+                        .instance
+                        .and_then(|i| self.collision.instance_radius_sq_at(i, b.end))
+                        .is_some_and(|r| r >= LARGE_SHIELD_RADIUS_SQ);
+                    if large {
+                        Surface::ShieldLarge
+                    } else {
+                        Surface::Shield
+                    }
+                } else {
+                    Surface::Building
+                };
+                self.push_impact(b, surface, None);
                 self.damage_station(s, &desc, 1.0, Some(b.owner), Some(b.team));
                 self.bolt_explodes(b);
             }

@@ -41,6 +41,7 @@
 
 mod admission;
 pub(crate) use admission::commit as commit_plan;
+pub use admission::{has_transport_paths, TRANSPORT_CLASS};
 
 use super::gunner::Look;
 use super::hover_drive::{self, Body, Class, Order};
@@ -123,6 +124,7 @@ pub fn can_fly(sim: &Sim, v: &Vehicle) -> bool {
             .and_then(Option::as_ref)
             .is_some_and(|p| {
                 !p.bf2
+                    || sim.ctf.is_some()
                     || sim.flyer_paths.iter().any(|path| {
                         p.follower.class_id == 0
                             || path.classes.is_empty()
@@ -130,6 +132,8 @@ pub fn can_fly(sim: &Sim, v: &Vehicle) -> bool {
                                 .classes
                                 .iter()
                                 .any(|(id, _)| *id == p.follower.class_id)
+                            || (p.follower.class_id == admission::TRANSPORT_CLASS
+                                && !admission::has_transport_paths(sim))
                     })
             })
 }
@@ -320,6 +324,35 @@ fn post_point(sim: &Sim, me: UnitHandle, salt: u32) -> Option<Vec3> {
     Some(sim.cps[k].def.pos + Vec3::Y * POST_CLEARANCE)
 }
 
+fn ctf_goal(sim: &Sim, me: UnitHandle) -> Option<Vec3> {
+    let ctf = sim.ctf.as_ref()?;
+    let my_team = sim.unit(me).map_or(0, |u| u.team);
+    for flag in &ctf.flags {
+        match flag.status {
+            crate::sim::FlagStatus::Carried { carrier } => {
+                if carrier == me {
+                    return ctf.capture_regions.get(my_team as usize).map(|r| r.pos);
+                }
+            }
+            crate::sim::FlagStatus::AtHome | crate::sim::FlagStatus::Dropped { .. } => {
+                return Some(flag.current_pos);
+            }
+        }
+    }
+    None
+}
+
+fn ctf_curve(v: &Vehicle, goal: Vec3) -> [Vec3; 4] {
+    let forward = v.rot * Vec3::Z;
+    let to = goal - v.pos;
+    let dist = to.length();
+    let step = dist.min(200.0);
+    let dir = if dist > 1e-3 { to / dist } else { forward };
+    let mid = v.pos + dir * (step * 0.5);
+    let end = v.pos + dir * step;
+    [v.pos - forward * CONNECT_BEHIND, v.pos, mid, end]
+}
+
 /// OURS: the goal of an attack run, or `None` to fly on. A run dips below the
 /// travel height, keeps [`ATTACK_FLOOR`] over the ground ahead, and ends at
 /// the reach the altitude law looks ahead, or the class's turning room. It holds
@@ -495,7 +528,9 @@ fn bf1_sticks(
         }
     }
     if ai.goal.is_none() {
-        ai.goal = post_point(sim, me, 1).or(Some(pos + forward * ESCAPE_FORWARD));
+        ai.goal = ctf_goal(sim, me)
+            .or_else(|| post_point(sim, me, 1))
+            .or(Some(pos + forward * ESCAPE_FORWARD));
     }
     let travel = ai.goal.unwrap_or(pos + forward * ESCAPE_FORWARD);
     // UNCONFIRMED: an explicit escape path takes no altitude lift or sidestep:
@@ -573,6 +608,16 @@ pub(crate) fn clear_chord(sim: &Sim, a: Vec3, b: Vec3, handle: VehicleHandle) ->
         && sim.terrain_ray(a, dir, length, 2.0).is_none()
 }
 
+/// The four sampled points of `curve` at 0, 1/3, 2/3 and 1 joined by clear
+/// chords (`FUN_002fff48` checks three chords at the parameter's thirds).
+fn curve_clear(sim: &Sim, curve: &[Vec3; 4], handle: VehicleHandle) -> bool {
+    let points =
+        [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0].map(|t| crate::vehicle::flyer::curve_at(curve, t).0);
+    points
+        .windows(2)
+        .all(|w| clear_chord(sim, w[0], w[1], handle))
+}
+
 /// FUN_002ff478 and FUN_002f9498: the best path end to join, as a connection
 /// curve. Frequency weights the score; MaxAngle is still unimplemented. FUN_002fff48 checks three chords at the parameter's thirds.
 fn connect(
@@ -618,27 +663,38 @@ fn connect(
         }
     }
     ranked.sort_by(|a, b| b.0.total_cmp(&a.0));
-    let clear = |c: &[Vec3; 4]| {
-        let points = [
-            crate::vehicle::flyer::curve_at(c, 0.0).0,
-            crate::vehicle::flyer::curve_at(c, 1.0 / 3.0).0,
-            crate::vehicle::flyer::curve_at(c, 2.0 / 3.0).0,
-            crate::vehicle::flyer::curve_at(c, 1.0).0,
-        ];
-        points
-            .windows(2)
-            .all(|w| clear_chord(sim, w[0], w[1], handle))
-    };
-    let chosen = ranked.iter().take(CONNECT_TRIES).find(|c| clear(&c.2));
+    let chosen = ranked
+        .iter()
+        .take(CONNECT_TRIES)
+        .find(|c| curve_clear(sim, &c.2, handle));
     if let Some((_, cursor, curve)) = chosen {
         ai.curve = Some(*curve);
         ai.cursor = Some(*cursor);
         ai.goal = None;
     } else {
         loiter(v, p, ai);
-        if !ai.curve.as_ref().is_some_and(&clear) {
-            ai.curve = None;
-            ai.goal = None;
+        if !ai
+            .curve
+            .as_ref()
+            .is_some_and(|c| curve_clear(sim, c, handle))
+        {
+            let esc_dir = clearest(sim, v, handle);
+            let curve = [
+                pos - forward * CONNECT_BEHIND,
+                pos,
+                pos + esc_dir * 40.0,
+                pos + esc_dir * 80.0,
+            ];
+            if clear_chord(sim, pos, pos + esc_dir * WEDGED_RAY, handle)
+                && curve_clear(sim, &curve, handle)
+            {
+                ai.curve = Some(curve);
+                ai.cursor = None;
+                ai.goal = None;
+            } else {
+                ai.curve = None;
+                ai.goal = None;
+            }
         }
     }
     ai.t = 0.0;
@@ -701,6 +757,24 @@ fn bf2_plan(
         ai.t = 0.0;
         ai.pursuit = true;
         return;
+    }
+    if let Some(goal) = ctf_goal(sim, me) {
+        let to = goal - v.pos;
+        if to.length_squared() > 15.0 * 15.0
+            && (ai.curve.is_none() || ai.t >= 1.0 || ai.goal != Some(goal))
+        {
+            // A hangar wall between the pad and the flag does not make the
+            // direct hop flyable: only take it when every sampled chord is
+            // clear, else the authored route plans the way out (spa1).
+            let curve = ctf_curve(v, goal);
+            if curve_clear(sim, &curve, handle) {
+                ai.goal = Some(goal);
+                ai.curve = Some(curve);
+                ai.cursor = None;
+                ai.t = 0.0;
+                return;
+            }
+        }
     }
     if ai.curve.is_some() && ai.t < 1.0 {
         return;
@@ -805,6 +879,14 @@ const SIDE_ROLL_REACH: f32 = 200.0;
 const SIDE_ROLL_CLOSE: f32 = 40.0;
 const SIDE_ROLL_CONE: f32 = 0.965925;
 
+fn is_transport_at_destination(sim: &Sim, v: &Vehicle, p: &FlyerParams) -> bool {
+    p.follower.class_id == admission::TRANSPORT_CLASS
+        && sim.landing_regions.iter().any(|r| r.contains(v.pos))
+        && v.spawn_pad
+            .and_then(|idx| sim.vehicle_pads.get(idx as usize))
+            .is_none_or(|pad| (v.pos - pad.def.pos).length_squared() > 150.0 * 150.0)
+}
+
 pub(super) fn drive(
     sim: &Sim,
     me: UnitHandle,
@@ -840,6 +922,10 @@ pub(super) fn drive(
     }
     match v.flyer.phase {
         FlightPhase::Landed => {
+            if is_transport_at_destination(sim, v, p) {
+                super::ride::request_exit(st);
+                return (pad, nt);
+            }
             // FUN_002518d0: travelling while not flying requests takeoff.
             takeoff = !v.flyer.jump_was_down;
             ai.takeoff_at = sim.tick;
@@ -853,6 +939,18 @@ pub(super) fn drive(
         // BF1 skips only states 0 and 3 (FUN_001dd0d0).
         _ if p.bf2 => {
             if v.flyer.phase == FlightPhase::Flying {
+                let pos = v.pos;
+                if pos.distance(ai.anchor) > WEDGED_MOVE {
+                    ai.anchor = pos;
+                    ai.anchor_at = sim.tick;
+                } else if sim.tick >= ai.anchor_at + WEDGED_TICKS {
+                    ai.anchor_at = sim.tick;
+                    ai.wedged_until = sim.tick + WEDGED_HOLD;
+                    ai.wedges = ai.wedges.saturating_add(1);
+                }
+                if is_transport_at_destination(sim, v, p) {
+                    takeoff = true;
+                }
                 let pilot = super::flyer_weapons::Pilot {
                     me,
                     vehicle: v,
@@ -891,8 +989,9 @@ pub(super) fn drive(
     if free_fire {
         super::gunner::free_fire(sim, me, st, &mut pad);
     }
-    // OURS: a craft that cannot find its way out of a bay gets its pilot out too.
-    if ai.wedges >= WEDGED_GIVEUP {
+    // OURS: on BF1 or when landed, a craft that cannot find its way out gets
+    // its pilot out; on BF2 in flight, stuck-kill destroys the wedged craft.
+    if ai.wedges >= WEDGED_GIVEUP && (!p.bf2 || v.flyer.phase == FlightPhase::Landed) {
         super::ride::request_exit(st);
     }
     let r: RideState = st.ride.unwrap_or_default();

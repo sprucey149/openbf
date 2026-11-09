@@ -66,6 +66,7 @@ pub fn battle(root: &Path) -> Result<(WalkSim, game::assets::Scene)> {
     walk.load_walker_views(&scene.manifest, root);
     walk.vehicle_riders = pads.riders;
     walk.vehicle_engines = pads.engines;
+    walk.vehicle_sounds = pads.sounds;
     walk.vehicle_labels = pads.labels;
     walk.vehicle_classes = pads.classes;
     walk.sim.open_spawn_screens(0, false);

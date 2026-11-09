@@ -75,7 +75,14 @@ fn play_event_sounds(
     sl.loop_voices(audio, &voices, &listener);
     // The jets' turn-on and turn-off (card JETP2), at the soldier.
     for s in engines.take_jet_shots() {
-        sl.play(audio, &s.name, s.pos, &listener);
+        match s.kind {
+            game::engine_sound::JetShotKind::Boost { rising } => {
+                sl.play_boost(audio, s.unit, &s.name, rising, s.pos, &listener);
+            }
+            _ => {
+                sl.play(audio, &s.name, s.pos, &listener);
+            }
+        }
     }
     sl.play_repair_loops(audio, &walk.sim, &listener);
     sl.play_shield_loops(audio, &walk.sim, &listener);

@@ -134,6 +134,11 @@ pub struct MissionDef {
     pub landing_regions: Vec<String>,
     #[serde(default)]
     pub space_assault: Option<SpaceAssaultDef>,
+    #[serde(default)]
+    pub ctf: Option<CtfDef>,
+    /// PS2 `SetParticleLODBias(bias)`: shifts particle far/cull distances outwards (e.g. 3000.0 on space maps).
+    #[serde(default)]
+    pub particle_lod_bias: Option<f32>,
     /// The conquest command-post roster, in `CommandPost:New` order — the
     /// posts the mission actually hands to its `ObjectiveConquest`, which is
     /// NOT every post in the world layer (BF2 Hoth builds four and kills the
@@ -282,6 +287,22 @@ pub struct AiSettings {
     /// start has run: (post, team).
     #[serde(default)]
     pub no_capture: Vec<(String, u8)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct CtfDef {
+    pub flag: String,
+    pub home_region: String,
+    pub capture_region_att: String,
+    pub capture_region_def: String,
+    #[serde(default)]
+    pub cap_region_dummy_att: Option<String>,
+    #[serde(default)]
+    pub cap_region_dummy_def: Option<String>,
+    #[serde(default)]
+    pub hide_cps: bool,
+    #[serde(default)]
+    pub score_limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -649,7 +670,7 @@ mod tests {
                 continue;
             }
             let m = MissionDef::load(&path).unwrap();
-            if m.source_game == "bf2" && m.mode != "ass" {
+            if m.source_game == "bf2" && m.mode != "ass" && !m.map.contains("spa") {
                 missions.push((path, m));
             }
         }
@@ -1200,7 +1221,11 @@ mod tests {
             }
             let m = MissionDef::load(&p).expect("parse");
             let k = m.camera_shot_calls.len();
-            let least = if m.mode == "ass" { 1 } else { 3 };
+            let least = if m.mode == "ass" || m.map.contains("spa") {
+                1
+            } else {
+                3
+            };
             assert!((least..=16).contains(&k), "{}: {k} shots", p.display());
             n += 1;
         }

@@ -56,6 +56,27 @@ pub(crate) fn is_turret_base(base: &str) -> bool {
 
 /// At most this many spring points (`if (5 < count) return`, B1:102074).
 pub const MAX_SPRING_POINTS: usize = 6;
+
+/// Vehicle sound properties authored in the ODF chain (card VSND / card UCRY).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VehicleSoundClass {
+    pub collision_sound: Option<String>,
+    pub hurt_sound: Option<String>,
+    pub death_sound: Option<String>,
+    pub cockpit_sound: Option<String>,
+}
+
+impl VehicleSoundClass {
+    pub fn from_db(db: &ClassDb, class: &str) -> Self {
+        Self {
+            collision_sound: crate::roster::sound_key(db, class, "VehicleCollisionSound"),
+            hurt_sound: crate::roster::sound_key(db, class, "HurtSound"),
+            death_sound: crate::roster::sound_key(db, class, "DeathSound"),
+            cockpit_sound: crate::roster::sound_key(db, class, "Cockpit3rdPersonSound")
+                .or_else(|| crate::roster::sound_key(db, class, "Cockpit1stPersonSound")),
+        }
+    }
+}
 /// MountedTurret sections per vehicle (TURRET1..8, class+0x2678+4i).
 pub const MAX_TURRET_SECTIONS: usize = 8;
 /// `PassengerSlots` is clamped to 0..=4 (B1:102135-102150).
@@ -697,7 +718,7 @@ impl RiderHang {
 }
 
 impl SeatSpec {
-    pub(crate) fn new(kind: SeatKind) -> Self {
+    pub fn new(kind: SeatKind) -> Self {
         Self {
             kind,
             pilot_type: PilotType::DEFAULT,
@@ -972,24 +993,26 @@ pub fn prop_flag(db: &ClassDb, class: &str, key: &str) -> bool {
 }
 
 pub fn has_chunks(db: &ClassDb, class: &str) -> bool {
-    let chunk = h("CHUNKSECTION");
-    db.chain(class)
-        .iter()
-        .any(|def| def.props.iter().any(|(k, _)| *k == chunk))
+    let chunk_geom = h("ChunkGeometryName");
+    db.chain(class).iter().any(|def| {
+        def.props
+            .iter()
+            .any(|(k, v)| *k == chunk_geom && !v.trim().is_empty())
+    }) || explosion_name(db, class).is_some_and(|exp| {
+        db.chain(&exp).iter().any(|def| {
+            def.props
+                .iter()
+                .any(|(k, v)| *k == chunk_geom && !v.trim().is_empty())
+        })
+    })
 }
 
-/// The class detonated when its hull pool runs out (`ExplosionName`,
-/// re-vehicles §6), if it names one.
+/// The class detonated when its hull pool runs out (`ExplosionDestruct` / `ExplosionName`,
+/// re-vehicles §6, SWBFRONT lines 89800-89830, SWBFRNT2 lines 80169-80185), if it names one.
 pub fn explosion_name(db: &ClassDb, class: &str) -> Option<String> {
-    let flyer = db
-        .engine_base(class)
-        .is_some_and(|base| FLYER_BASES.contains(&base));
-    let key = if flyer {
-        "ExplosionDestruct"
-    } else {
-        "ExplosionName"
-    };
-    db.prop(class, key)
+    db.prop(class, "ExplosionDestruct")
+        .or_else(|| db.prop(class, "ExplosionName"))
+        .or_else(|| db.prop(class, "Explosion"))
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
 }

@@ -68,12 +68,28 @@ pub const LOCK_STYLE_NAMES: [&str; 4] = [
     "lockedoffscreenbehind",
 ];
 
-pub const HINT_STYLE_NAMES: [&str; 2] = ["hintonscreen", "hintonscreenbehind"];
+pub const HINT_STYLE_NAMES: [&str; 4] = [
+    "hintonscreen",
+    "hintonscreenbehind",
+    "hintoffscreen",
+    "hintoffscreenbehind",
+];
+
+/// The `HintFlag*` styles a CTF / objective marker uses (`re-hud-map.md` §5:
+/// the target element's 16 attacker / locked / hint / hint-flag styles).
+pub const FLAG_STYLE_NAMES: [&str; 4] = [
+    "hintflagonscreen",
+    "hintflagonscreenbehind",
+    "hintflagoffscreen",
+    "hintflagoffscreenbehind",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HintStyle {
     pub elem: usize,
     pub friendly: Option<[f32; 3]>,
+    pub min_scale: f32,
+    pub max_scale: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -82,6 +98,12 @@ pub struct HintMarker {
     pub distance: f32,
     pub friendly: bool,
     pub visible: bool,
+    /// Projected inside the ±0.9 NDC edge; `false` clamps to that edge.
+    pub on_screen: bool,
+    /// A CTF objective: draw with the `HintFlag*` styles.
+    pub flag: bool,
+    /// The marker's own colour (Lua `MapAddEntityMarker`), overriding the style.
+    pub tint: Option<[f32; 3]>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -695,7 +717,8 @@ pub struct Hud {
     pub map: Option<crate::hud_map::MapModel>,
     pub lock_styles: [Option<LockStyle>; 4],
     pub lock_marker: Option<LockMarker>,
-    pub hint_styles: [Option<HintStyle>; 2],
+    pub hint_styles: [Option<HintStyle>; 4],
+    pub flag_styles: [Option<HintStyle>; 4],
     pub hint_markers: Vec<HintMarker>,
     pub space: Option<crate::hud_space::SpaceStatus>,
     /// The squad order cross this frame (`crate::hud_squad`); `None` draws
@@ -846,7 +869,8 @@ impl Hud {
             map: None,
             lock_styles: [None, None, None, None],
             lock_marker: None,
-            hint_styles: [None, None],
+            hint_styles: [None; 4],
+            flag_styles: [None; 4],
             hint_markers: Vec::new(),
             space: None,
             squad: None,
@@ -893,14 +917,35 @@ impl Hud {
         for c in &node.children {
             let lname = c.name.to_ascii_lowercase();
             if kind == Kind::Other {
-                if let Some(slot) = HINT_STYLE_NAMES.iter().position(|n| *n == lname) {
+                let hint_slot = HINT_STYLE_NAMES.iter().position(|n| *n == lname);
+                let flag_slot = FLAG_STYLE_NAMES.iter().position(|n| *n == lname);
+                if hint_slot.is_some() || flag_slot.is_some() {
                     let friendly = c
                         .children
                         .iter()
                         .find(|p| p.name.eq_ignore_ascii_case("colorfriendly"))
                         .and_then(|p| Some([num(p, 0)?, num(p, 1)?, num(p, 2)?]));
+                    let scale = |key: &str| {
+                        c.children
+                            .iter()
+                            .find(|p| p.name.eq_ignore_ascii_case(key))
+                            .and_then(|p| num(p, 0))
+                            .unwrap_or(1.0)
+                    };
+                    let (min_scale, max_scale) = (scale("minscale"), scale("maxscale"));
                     let elem = self.element(c, Kind::Bitmap, None);
-                    self.hint_styles[slot] = Some(HintStyle { elem, friendly });
+                    let style = Some(HintStyle {
+                        elem,
+                        friendly,
+                        min_scale,
+                        max_scale,
+                    });
+                    if let Some(slot) = hint_slot {
+                        self.hint_styles[slot] = style;
+                    }
+                    if let Some(slot) = flag_slot {
+                        self.flag_styles[slot] = style;
+                    }
                     continue;
                 }
                 if let Some(slot) = LOCK_STYLE_NAMES.iter().position(|n| *n == lname) {

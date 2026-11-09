@@ -68,16 +68,24 @@ impl Fx {
                             .spawn(ripple::BOLT, Vec3::new(pos.x, level, pos.z));
                     }
                     if let Some(name) = name {
-                        match (vehicle, level) {
+                        let spawned = match (vehicle, level) {
                             (Some(h), _) if *surface == Surface::Vehicle => {
-                                self.spawn_riding(name, *pos, *h, sim);
+                                self.spawn_riding(name, *pos, *h, sim)
                             }
-                            (_, Some(level)) => {
-                                self.spawn_floating(name, *pos, level);
+                            (_, Some(level)) => self.spawn_floating(name, *pos, level),
+                            _ if matches!(*surface, Surface::Shield | Surface::ShieldLarge) => {
+                                let normal = shield_normal(sim, *pos, *dir);
+                                let frame = Frame {
+                                    rot: super::trail::along(normal),
+                                    pos: *pos + normal * SHIELD_EFFECT_LIFT,
+                                    vel: Vec3::ZERO,
+                                };
+                                self.spawn(name, frame)
                             }
-                            _ => {
-                                self.spawn(name, Frame::at(*pos));
-                            }
+                            _ => self.spawn(name, Frame::at(*pos)),
+                        };
+                        if spawned {
+                            self.queue_last_effect_sound(*pos);
                         }
                     }
                     if let Some(x) = look.and_then(|l| l.explosion.as_ref()) {
@@ -328,8 +336,57 @@ impl Fx {
                         arcs_this_tick += 1;
                     }
                 }
+                Event::FlyerImpact { pos, normal, .. } => {
+                    let candidates = [
+                        "com_sfx_vehiclespark_sc",
+                        "com_sfx_vehiclespark",
+                        "vehiclespark",
+                    ];
+                    let mut spawned = false;
+                    if baked {
+                        let dir = normal.try_normalize().unwrap_or(Vec3::Y);
+                        let z = dir;
+                        let x = Vec3::Y.cross(z).try_normalize().unwrap_or(Vec3::X);
+                        let frame = Frame {
+                            pos: *pos,
+                            rot: glam::Mat3::from_cols(x, z.cross(x), z),
+                            vel: Vec3::ZERO,
+                        };
+                        for name in candidates {
+                            if self.spawn(name, frame) {
+                                spawned = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !spawned {
+                        self.puffs.push(Puff {
+                            pos: *pos,
+                            kind: Kind::Hit,
+                            team: 0,
+                            age: 0.0,
+                        });
+                    }
+                }
                 _ => {}
             }
         }
     }
+}
+
+const SHIELD_EFFECT_LIFT: f32 = 0.1;
+const SHIELD_NORMAL_PROBE: f32 = 2.0;
+
+fn shield_normal(sim: &Sim, pos: Vec3, dir: Vec3) -> Vec3 {
+    let back = -dir.normalize_or_zero();
+    sim.collision
+        .ray_with(
+            pos + back * SHIELD_NORMAL_PROBE,
+            -back,
+            SHIELD_NORMAL_PROBE * 2.0,
+            core::collision::Layers::ALL,
+            core::collision::HullFilter::Static,
+        )
+        .and_then(|hit| hit.normal.try_normalize())
+        .map_or(back, |n| if n.dot(back) < 0.0 { -n } else { n })
 }

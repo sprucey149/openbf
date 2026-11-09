@@ -2,6 +2,7 @@ use super::*;
 use crate::guided::{GuidedClass, GuidedWeapon};
 use crate::unit::UnitSpec;
 use crate::weapon::{ExplosionClass, PropSource, WeaponClass};
+use glam::Quat;
 
 struct Props;
 impl PropSource for Props {
@@ -370,4 +371,58 @@ fn a_bots_rocket_with_no_target_returns_after_three_seconds() {
     );
     assert!(sim.guided.is_empty());
     assert!(sim.controlled_guided(owner).is_none());
+}
+
+#[test]
+fn a_seat_guided_rocket_steers_with_flyer_sticks() {
+    let mut class = GuidedClass::from_props(&Props);
+    class.pitch_rate = 1.0;
+    class.turn_rate = 1.0;
+    class.roll_rate = 1.0;
+    class.pitch_filter = 10.0;
+    class.turn_filter = 10.0;
+    class.roll_filter = 10.0;
+    class.pitch_damp = 10.0;
+    class.turn_damp = 10.0;
+    let mut rocket = GuidedRocket {
+        id: 1,
+        owner: UnitHandle { index: 0, gen: 0 },
+        team: 0,
+        weapon_class: 0,
+        seat: Some((crate::vehicle::VehicleHandle { index: 0, gen: 0 }, 1)),
+        pos: Vec3::ZERO,
+        vel: Vec3::NEG_Z * 30.0,
+        rot: Quat::IDENTITY,
+        pitch_rate: 0.0,
+        turn_rate: 0.0,
+        roll_input: 0.0,
+        bank: 0.0,
+        health: 1.0,
+        energy: 100.0,
+        age: 0.0,
+        boosted: false,
+        prev_buttons: 0,
+        pending_end: None,
+        blind: 0.0,
+    };
+    let pad_pitch = PadState {
+        ry: i16::MAX,
+        ..Default::default()
+    };
+    rocket.steer(&class, &pad_pitch, 0.1);
+    assert!(rocket.pitch_rate > 0.0);
+
+    let pad_turn = PadState {
+        rx: i16::MAX,
+        ..Default::default()
+    };
+    rocket.steer(&class, &pad_turn, 0.1);
+    assert!(rocket.turn_rate < 0.0);
+
+    let pad_roll = PadState {
+        lx: i16::MAX,
+        ..Default::default()
+    };
+    rocket.steer(&class, &pad_roll, 0.1);
+    assert!(rocket.roll_input > 0.0);
 }

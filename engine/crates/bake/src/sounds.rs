@@ -359,6 +359,21 @@ pub fn bake_sounds_with_donor(
         props,
         engines,
         music: music(inner),
+        triggers: mungefs::sound_props::find_trigger_regions(inner)
+            .into_iter()
+            .map(|t| manifest::SoundTriggerRon {
+                name_hash: t.name,
+                level: t.level,
+                groups: t
+                    .groups
+                    .into_iter()
+                    .map(|g| manifest::SoundTriggerGroupRon {
+                        reinforcements: g.reinforcements,
+                        sounds: g.sounds,
+                    })
+                    .collect(),
+            })
+            .collect(),
     };
     crate::write_ron(&out.join("sounds.ron"), &ron_out)?;
     // The soldier foley table (card FOLY); CORE.LVL has none.
@@ -618,6 +633,7 @@ mod tests {
                 streamed: 0,
                 engines: vec![],
                 music: vec![],
+                triggers: vec![],
             };
             let rifle = find(&r, "rep_weap_inf_rifle_fire");
             assert_eq!(dist(&rifle), (0.7, 5.0, 400.0, rolloff), "{lvl}");
@@ -841,6 +857,7 @@ mod tests {
                 streamed: 1,
                 engines: vec![],
                 music: vec![],
+                triggers: vec![],
             },
             ron::ser::PrettyConfig::default(),
         )

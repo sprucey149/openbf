@@ -511,8 +511,24 @@ link change. Tests: `each_shield_change_reports_once_and_a_repeat_kill_awards_no
 - **`EnableLockOn`.** `FUN_0018f308` writes bits 44-47 of the object's word at +0x268 (3 enabled, 8 disabled). Only spa1 and
   spa3 call it, on `OnAllShieldsDown`. The port turns a hull into a vehicle-kind target while the group's shields are down
   and drops it when they return.
-- **Launching.** `FUN_0033a658`: cos at least 0.9 to the target (`LOCK_FIRE_COS`), line of sight, and the class's dwell
-  (class+0x120).
+- **Launching and the dwell (corrected 2026-11-07).** `FUN_0033a658` gives a human's launcher its target: the selected lock, the
+  class's kind mask (class+0x120), cos at least 0.9 from the firer's aim (`LOCK_FIRE_COS`) and line of sight. A class counts
+  as lock-capable when its ordnance is a missile (class+0x305, setter 319784-319797). The weapon's state machine (`FUN_00326170`)
+  moves from idle (0) to state 3 as soon as `FUN_0033ab60` reports a target and a positive `LockTime`, with no trigger needed.
+  In state 3 `FUN_0033a950` adds dt to +0xbc up to +0xc0 (`LockTime`, class+0x300) and sets the ready byte +0x17c when full. A
+  changed target zeroes it, and `FUN_0033aa58` leaves the state when the target is gone. The trigger fires from state 3, homing
+  only with a full dwell, and `FUN_0033a5e0` restarts it. The port keeps `LockOn::held` and `charging` per weapon channel.
+- **The lock ring.** Each channel's `player1.weaponN.lockOnPosition` is sent only in state 3 (`FUN_003b3398`, 398065-398160). Its
+  mesh `hud_main_reticule_rocketlockon_active` takes `chargeScale`, `chargeRotate` and `chargeColor`, which `hudtransforms`
+  derives from `player1.weaponN.heat`. `FUN_003b3398` sends that heat as +0xbc / +0xc0 in state 3 (397707-397719), which is the
+  white-to-red fill. `ui::hud_space` now sends the dwell's fraction as that heat.
+- **No lock tone on a flyer.** `LockedOnSound` (ordnance +0x12c, setter 300862) is authored on no BF2 class. The
+  `<side>_weap_inf_rocket_launcher_tracking` sounds are named only by on-foot launcher classes, under key 1323664648, and no
+  flyer launcher carries that key. An earlier port looped that sound for the whole of a selected lock; that is removed.
+- **Incoming-missile beep is not traced.** The HUD's `missileLock` warning is read at `FUN_003b6050`, but no sound was traced to
+  it, and the beep's intervals and sound in `event_sounds` are OURS. `measure:` being targeted on the PS2. `replace:` or remove it.
+- **OURS `trace:`** a station target in `sa.lock_on` is treated as the vehicle kind for a launcher's mask, following `EnableLockOn`
+  above. `measure:` torpedoes against a downed capital ship's systems on the PS2.
 - **HUD.** Registered at `FUN_003b0aa8` lines 395768-395770 and 395922-395952. Panel `FUN_003b2cd0` line 397248: distance each
   frame, and a direction arrow while |dot(dir, up)| exceeds 0.2 (0 or 180 degrees). Reticle `FUN_003b3398` lines 398060-398170.
   Placement `FUN_003abc60` line 392409: a flyer's marker scale runs 1.5 at 200 m to 0.1 at 1700 m (0x5ff98c), the corner sprite
@@ -1040,3 +1056,86 @@ In four of the six the mean rounds to zero, so almost no turret held it and the 
 Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): `AudibleManager::UpdateAudience` (radius capped at 30 m; over 3 m it gives `AudibleResult` an unknown status, closer it forces; firing sets the radius to 100 before the cap), `VisionManager.cpp:448-453` (a seen target's handler forces the seer), PC `Ordnance.cpp:305-316` `AddFakeRayhitResult` (both ways, when hit by a soft collision and the bolt has lived under .4 s). Any of these could put a turret on a human the cone would miss.
 
 `FLYER_AIM_BOXES` also holds `all_la_at_gunship` and `rep_la_at_gunship`, 29.257, from the baked model's box like most rows. No gunship was among the six classes read live. `measure:` one when a save has one flying.
+
+## 20. System repair, shield impact FX, and radio chatter verification (Issue #123)
+
+### System repair and restore rules
+- **Decomp evidence:**
+  - `FUN_00268c78` (line 185043): `EntityBuilding::SetProperty` handles property `0x19971f1b` (`fnv1a("maxhealth")`), setting `piVar5[0x5d] = max_health`.
+  - `FUN_0026a7b8` / `FUN_0026afe4` (line 186122): `EntityDestructibleBuilding::SetProperty` handles `0x19971f1b` (`max_health`), setting `iVar9 + 0x2ec = max_health`.
+  - `FUN_001df3d8` (lines 90273–90321): `HealthProperty::SetHealth` applies health changes and calls virtual `OnHealthChanged` at offset `+0x28`.
+  - `FUN_001df4e0` (lines 90324–90345): `HealthProperty::SetShield` updates current shield pool.
+  - `FUN_001df560` (lines 90351–90390): updates regeneration toward `max_health` and `max_shield`.
+  - `FUN_002f5478` (lines 271520–271625; PC `Controllable.cpp:415–451`): pilot repair skill adds `PilotSkillRepairScale` (0.005) of max health per second.
+  - `objectivespaceassault.luac` (closure `main.1.0`): `OnCriticalSystemDestroyed` invokes `SetProperty(obj, 'MaxHealth', 99999997952.0)` (`SPENT_MAX_HEALTH`).
+- **Can destroyed critical systems be rebuilt on PS2?**
+  - **No.** Setting `MaxHealth` to `SPENT_MAX_HEALTH` (`99999997952.0`) prevents any repair tool (`FUN_00346fa0` line 339872, `core::sim::repair::repair_target`) from ever completing the repair to restore the station.
+  - **Before 0 HP:** damaged critical systems can be repaired normally by fusion cutter or pilot repair up to their authored max health.
+  - **Non-critical linked systems:** `shieldgenerator` (`linkedshields.luac`) and `mainframe` (`linkedturrets.luac`) do not receive `SPENT_MAX_HEALTH` on death. When repaired back to 100% health, they restore (`s.destroyed = false`, live collision restored, shields and auto-turrets reactivated).
+  - **Port alignment:** `core::sim::space_assault` (lines 377–382) and `core::sim::repair` (lines 136, 362–366) match PS2 rules.
+
+### Shield impact visual feedback
+- `FUN_003148f0` (lines 292899-292900) gives every bullet two shield effects: `com_sfx_shieldimpact_sm` at +0xfc and `com_sfx_shieldimpact_xl` at +0x100. The `ImpactEffectShieldSmall` and `ImpactEffectShieldLarge` setters (lines 293108-293110, 293139-293141) both write +0xfc, so authoring either replaces the small effect and the large one stays at its default. `ImpactLook::apply` does the same.
+- The hit handler (lines 292458-292470) reads the struck primitive's bounding-sphere radius through `FUN_00164ff0`. Below 16.0 (`DAT_005fea68`, read from the ELF) it plays the small effect, otherwise the large one. The port's `CollisionWorld::instance_radius_sq_at` stands in for that radius: the smallest body of the station's instance containing the hit, by AABB half-diagonal. OURS, `measure:` the struck primitive's sphere on PS2 for a Star Destroyer prim under 16 m.
+- Measured on spa1, spa3 and spa8: nearly every shield-group body is over 16 m, so these hits use the large effect, and a few Star Destroyer prims (12-14 m) use the small one.
+- `imp_cap_stardestroyer_shield`, `sensors_spin` and `sensors_spin0` have a `prop` base and stay out of the shield groups. Hull classes are `armedbuilding` with MaxHealth 999999 and AddHealth 50000, and were `Station`s before this work.
+- Several shield objects have `Team` 0 on the instance (every hull on spa3, `all_cap_rebelcruiser3` and `shield_r`/`shield_l` on spa1). They stay teamless in the port, so any side's shots drain the pool through them and pilots do not rank them as threats. `measure:` friendly fire on such a hull on PS2.
+- `SetParticleLODBias`: spa3, spa6-spa9 Assault use 15000; `spa1g_ass.luac` has no such call (`spa1g_c` and `spa1g_1flag` use 3000). `FUN_0037a008` resets the bias to 0 from `FUN_00174b28`, so spa1 Assault runs at 0 in the port. `measure:` the bias tiers `DAT_0068226c`, `DAT_0068228c` and `DAT_006822ac` live in spa1 Assault.
+- Once shields collapse (`shield == 0.0`), subsequent bolt and torpedo impacts route to `Surface::Building`, emitting static hull debris/explosions.
+
+### Shield ring orientation (playtest fix, 2026-11-07)
+- The hit handler passes the hit normal to `FUN_00313c40`, which offsets the effect by 0.1 along it and hands it to `FUN_00452330` as the frame's z axis. The port now builds the same frame (`game/src/fx/ingest.rs`, `shield_normal`).
+- `com_sfx_shieldimpact_xl`'s Rings are BILLBOARD with `NoRegisterStep`, and re-fx.md (BF2 differences) says those axes follow the emitter node. `emitter_draws` applies the node rotation for that case only, so BF1 and other BF2 billboards keep their world axes.
+- OURS `measure:` `Event::Impact` carries no normal, so the normal comes from a 2 m static ray either side of the hit (`SHIELD_NORMAL_PROBE`), falling back to the reversed bolt direction. `replace:` with the struck primitive's normal if the event ever carries one.
+- `measure:` the rings' darkness against the PS2. The coplanar world-axis quads overlapped before this fix, so overlap is the suspected cause of the extra brightness. No gain factor was added; re-glow says HDR is level-neutral.
+
+### Bomber gunner camera (playtest fix, 2026-11-07)
+- `SWITCH_WEAPON` while mounted switches seat (`core/src/sim/guns/seat_switch.rs`), so the wheel moves a TIE Bomber pilot to `FLYERSECTION TURRET1`. The fallback `vehicle_camera` flattens the view to the heading and world up, which is wrong on a pitched flyer.
+- A flyer gunner now takes `turret_seat_camera`: `TrackCenter` and `TrackOffset` on the aim frame, per re-turret-draw.md section 4. That section is about building turrets, and re-seat-hud.md marks the flyer gunner's seat evidence [H]. `measure:` a PS2 bomber gunner's view through the oracle.
+
+### Spawn briefing, lock audio, and flight radio chatter
+- `FUN_0018f7f0` (line 34252): Lua `BroadcastVoiceOver(name, teamMask)` invokes `FUN_003e2648(hash, mask)`.
+- **No opening spawn briefing:** an earlier port queued `<P>OSMP_obj_01`/`02` at first spawn. No mission script on the disc names those lines (a search of `extracted/bf2/lua` finds only `obj_03` and later), so the rule was invented and is removed. `measure:` the PS2 at a space round's first spawn, to confirm no line plays.
+- **Ship loudspeakers:** see `re-ambience-music.md`, "Sound trigger regions".
+- **Flight radio chatter:** `FUN_0044c650` (lines 497625-497632) requests `Cockpit3rdPersonSound` (+0x44) or `Cockpit1stPersonSound` (+0x3c) on every engine update when `param_13` is set. Its flyer caller (118865-118878, 118925) sets that only when a local player controls the craft. All 19 flyer classes author both keys with `<side>_inf_com_space_chatter`, and the record's `play_interval (12.0, 3.0)` is what spaces the lines.
+- The port asks each tick while the player holds a flyer's pilot seat (`Commander::cockpit`, `Call::Cockpit`) through `gate_calls`, 2-D at the ears. This replaces an invented 10 s timer that played on foot too and went through the one-shot path, which does not play a stream record.
+- `measure:` whether the PS2 stream voice overlaps commander lines. The port shares the one voice queue, so a commander line delays chatter.
+- Not covered: on-foot unit lines inside a capital ship. They belong to `crate::vo`, and spa1's names table has no `inf_chatter`, `_command_` or `ai_` entries.
+- **Lock-on & incoming missile audio:** corrected in section 14. A flyer's lock plays nothing, and the incoming beep is untraced.
+
+## 21. Flyer impact presentation, transport fallback, stuck-kill, and 6-map Space Assault sweep (Issues #122 & #124)
+
+### Flyer impact FX & controller rumble (`#124`)
+- `Event::FlyerImpact { vehicle, pos, normal, damage, lethal }` spawns `flyerspray` (with `com_sfx_ord_exp` fallback when unbaked) at the contact point (`game/src/fx/ingest.rs`) and triggers heavy/light controller rumble (`Rumble::blast` on lethal impact, scaled jolt when occupied by the local player in `game/src/rumble.rs`).
+- Crash death camera (`WalkSim::camera` in `game/src/walk.rs`) detaches at `0.25x` follow stiffness during `FlightPhase::Falling` and holds the post-crash view for `seat_view_timer` after `FlightPhase::Crashed` destruction.
+
+### Transport spline fallback & wedged stuck-kill (`#122`)
+- **Transport spline fallback (`core/src/ai/flyer_drive/admission.rs`):** On maps that omit explicit `transport` (`0xd32f6312`) flyer paths (`spa6`, `spa7`), transport AI pilots fall back to friendly fighter spline classes discovered from live friendly flyers and vehicle pads (`fallback_transport_classes`), and request takeoff/landing transitions around enemy hangar landing regions.
+- **Wedged BF2 stuck-kill (`core/src/sim/seats.rs`, `core/src/sim/flyers.rs`, `core/src/ai/flyer_drive.rs`):** Matching PC `UnitFlyAgent.cpp:277` (§18), a BF2 flyer in flight whose wedge counter reaches `WEDGED_GIVEUP` (`3`) is destroyed outright along with its seated bot pilot instead of ejecting a pilot into empty space.
+- **Hangar mouth departure (`core/src/ai/flyer_drive.rs`):** When spline connection chords and loiter circles are blocked by hangar walls, `connect` probes `clearest` and only emits an exit curve if a full `WEDGED_RAY` (`200 m`) ray into open space is unobstructed, preserving `curve == None` inside enclosed boxes.
+
+### Verified 6-map Space Assault sweep (`examples/space_sweep.rs`)
+Command: `cargo run --release --manifest-path engine/Cargo.toml -p game --example space_sweep -- --max-ticks 3600` (seed `42`, score limit `180`, 120.0 s simulated time per map):
+
+| Map | Seed | Outcome | Sim Duration (s) | Points | Stations Destroyed | Flyers Shot | Flyers Crashed |
+|---|---|---|---|---|---|---|---|
+| `bf2_spa1` | 42 | Time Limit | 120.0 | 31 - 11 | 0 | 13 | 9 |
+| `bf2_spa3` | 42 | Time Limit | 120.0 | 5 - 3 | 0 | 2 | 52 |
+| `bf2_spa6` | 42 | Time Limit | 120.0 | 4 - 2 | 0 | 1 | 8 |
+| `bf2_spa7` | 42 | Time Limit | 120.0 | 0 - 0 | 0 | 0 | 17 |
+| `bf2_spa8` | 42 | Time Limit | 120.0 | 2 - 4 | 0 | 4 | 3 |
+| `bf2_spa9` | 42 | Time Limit | 120.0 | 12 - 13 | 0 | 6 | 5 |
+
+## 22. Seat-launched guided rockets (2026-11-07)
+
+`imp_fly_tiebomber_sc`'s `TURRET1` holds `imp_weap_fly_tiebomber_guided_rocket`, a `remote` weapon whose ordnance is a flyer. The gunship and troop transport have the same kind of weapon. The on-foot path in `re-guided-rockets.md` ends a rocket when its owner is mounted, and the seat path fired a plain round.
+
+- The port now launches a player's seat rocket from the seat's muzzle and aim (`Sim::launch_seat_guided`) and records the seat on the rocket. The pad routes to the rocket while the owner stays in that seat, and the camera follows it. ACTION returns control and SECONDARY_FIRE ends the flight, as on foot. The class's `0 -3 20` offset is applied in the aim frame.
+- OURS `measure:` the offset's reference frame and whether the craft keeps flying while its gunner steers, both against a PS2 bomber.
+- OURS `replace:` a bot gunner still fires the old plain round. Bots steering seat rockets are not traced.
+
+## 23. Capital ship and frigate destruction (not implemented)
+
+A frigate is a `destructablebuilding` (`all_prop_blockaderunner`, `spa1_prop_minidestroyer2`, `spa1_prop_correliancruiser`). Its class data has `ExplosionName spa_prop_frigate_destruct_exp` (which uses `com_weap_obj_huge_exp`) and chunk entries with trail effects `spa_sfx_frigate_exp_1` to `_4`; the mini destroyer's chunks are `spa1_prop_minidestroyer2_chunk1` to `3`. Capital ships also have `all_cap_rebelcruiser_destruct*` classes.
+
+The player reports that the PS2 plays a long sequence and the port removes the ship at once. `trace:` how these chunks are timed, what moves or swaps the hull, and whether `DeathAnimation` (setter 94683) is involved. Tracked as a GitHub issue.

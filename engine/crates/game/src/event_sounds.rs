@@ -41,6 +41,13 @@ fn saber_sound(class: &core::hero_weapon::SaberClass, hash: u32) -> Option<&str>
 /// The local player's ears.
 pub fn listener(walk: &WalkSim) -> Listener {
     let me = &walk.sim.units[walk.player.index as usize];
+    if me.mount.is_some() || (!me.alive && walk.seat_view_timer > 0.0) {
+        let cam = walk.camera();
+        return Listener {
+            pos: cam.position,
+            yaw: cam.yaw,
+        };
+    }
     Listener {
         pos: me.soldier.pos + Vec3::Y * 1.6,
         yaw: me.soldier.yaw,
@@ -333,6 +340,35 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                 let setup = walk.sim.blast_setup.get(*class as usize);
                 let x = setup.and_then(|b| b.as_ref()?.explosion.as_ref());
                 boom(x.map(|x| &x.look), *pos, &mut play);
+                if let Some(s) = walk
+                    .vehicle_sounds
+                    .get(*class as usize)
+                    .and_then(|s| s.death_sound.as_deref())
+                {
+                    play(s, *pos);
+                }
+            }
+            Event::FlyerImpact { vehicle, pos, .. } => {
+                let sound = walk
+                    .sim
+                    .vehicle(*vehicle)
+                    .and_then(|v| walk.vehicle_sounds.get(v.class as usize))
+                    .and_then(|s| s.collision_sound.as_deref())
+                    .unwrap_or("com_veh_collision_lg");
+                play(sound, *pos);
+            }
+            Event::VehicleHit {
+                vehicle, damage, ..
+            } if *damage > 0.0 => {
+                if let Some(v) = walk.sim.vehicle(*vehicle) {
+                    if let Some(s) = walk
+                        .vehicle_sounds
+                        .get(v.class as usize)
+                        .and_then(|s| s.hurt_sound.as_deref())
+                    {
+                        play(s, v.pos);
+                    }
+                }
             }
             // Card DROIDDEATH: the burst's explosion class authors no
             // SoundProperty on either disc; the noise heard is the droid's
@@ -501,6 +537,38 @@ fn each_with(walk: &WalkSim, ears: Vec3, handles: bool, mut play: impl FnMut(&st
                 }
             }
             _ => {}
+        }
+    }
+
+    // Incoming missile warning beep and target lock audio loop (card UORD / issue #123)
+    if let Some(player_unit) = walk.sim.units.get(walk.player.index as usize) {
+        if let core::unit::Controller::Player { slot } = player_unit.controller {
+            let side = walk
+                .teams
+                .get(player_unit.team as usize)
+                .map(|t| t.faction.as_str())
+                .unwrap_or("");
+            let slot_idx = usize::from(slot);
+            if let Some(dist) = walk.sim.incoming_missile(slot_idx) {
+                // Incoming missile warning beep: period accelerates as the missile closes in
+                let interval = if dist < 100.0 {
+                    4
+                } else if dist < 250.0 {
+                    8
+                } else {
+                    15
+                };
+                if walk.sim.tick.is_multiple_of(interval) {
+                    let prop = match side {
+                        "all" => "all_weap_inf_rocket_launcher_tracking",
+                        "imp" => "imp_weap_inf_rocket_launcher_tracking",
+                        "rep" => "rep_weap_inf_rocket_launcher_tracking",
+                        "cis" => "cis_weap_inf_rocket_launcher_tracking",
+                        _ => "com_weap_inf_rocket_launcher_tracking",
+                    };
+                    play(prop, ears);
+                }
+            }
         }
     }
 }
@@ -971,7 +1039,13 @@ impl SoundLog {
         for (a, r) in v.gate_calls(lib, ears) {
             // A low-health voice asks every tick its handle is idle (card
             // UTALK): only the lines it queues are rows.
-            if a.call == core::sim::Call::LowHealth && r.is_err() {
+            let every_tick = matches!(
+                a.call,
+                core::sim::Call::LowHealth
+                    | core::sim::Call::Cockpit
+                    | core::sim::Call::Loudspeaker
+            );
+            if every_tick && r.is_err() {
                 continue;
             }
             let outcome = match r {

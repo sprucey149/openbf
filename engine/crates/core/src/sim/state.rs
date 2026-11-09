@@ -243,6 +243,7 @@ pub struct Sim {
     pub heroes: Option<super::heroes::Heroes>,
     pub deathmatch: Option<super::deathmatch::Deathmatch>,
     pub space_assault: Option<super::space_assault::SpaceAssault>,
+    pub ctf: Option<super::ctf::CtfState>,
     /// Per player SLOT, the class index that slot's NEXT respawn takes
     /// (`buttons::SPAWN_CLASS_NEXT`/`PREV` while dead). Parallel to
     /// `players`, grown by `sync_slot_tables`, and HASHED — a player who has
@@ -959,6 +960,7 @@ impl Sim {
             heroes: None,
             deathmatch: None,
             space_assault: None,
+            ctf: None,
             spawn_choice: Vec::new(),
             spawn_post_choice: Vec::new(),
             prev_spawn_bits: Vec::new(),

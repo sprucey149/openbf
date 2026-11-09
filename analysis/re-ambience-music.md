@@ -348,7 +348,8 @@ independent verifier (section 10).
 | post hum by owner faction; charge / discharge / dispute with the pitch ramp; captured / lost one-shots | none | **CPSN** (new) |
 | spawn-screen slots, pause-menu sounds | none | **UISN** (new) |
 | FX-7 chatter, serve sound, recon droid loops, droideka shield hum | none | notes on USND / PWUP / DEKA |
-| `soundspace` (occlusion), `soundtrigger` (BF1 Hoth, BF2 space), `BuildingSound` (silent on the PS2) | none | not carded |
+| `soundspace` (occlusion), `BuildingSound` (silent on the PS2) | none | not carded |
+| `soundtrigger` (BF1 Hoth, BF2 space) | `ambience::sound_triggers`, `Commander::loudspeakers`, `SoundLib::trigger_sound` | "Sound trigger regions" below |
 
 ## 9. Checks run
 
@@ -399,3 +400,14 @@ python3 $T/ram_music.py [--verbose] [state.p2s]    # music table, thresholds, bo
 python3 $T/ram_regions.py [--all] [state.p2s]      # sound entities in RAM
 python3 engine/artifacts/lead_tmp/annc/luacalls.py bf1|bf2 <script>   # the script's sound calls
 ```
+
+## Sound trigger regions
+
+Read for the BF2 space ship announcements (2026-11-07).
+
+- **Data:** `soundtrigger <name>` world regions place a box. `tsr_` chunks in the sound LVL's sub-levels hold `Group` records (name, `Reinforcements`, `Alliance` / `Empire` / `Republic` / `CIS` sounds) and `Region` records (name, group names). Parser: B2 `FUN_0043ee10`, `FUN_0043ec08`, `FUN_0043e730`. A region's groups sort by `Reinforcements`, highest first. The bake keeps them per sub-level in `sounds.ron` (`triggers`).
+- **Rule (B2 `FUN_0043f138`, caller 62818; B1 `FUN_00359448`):** on every update, take the position of the entity the local player controls. For each trigger region holding it, take the ratio of the team's current to maximum reinforcements (team +0x24 / +0x28) and the team's side (+0x60), and pick the first enabled group whose threshold is at or below the ratio (`FUN_0043eb28`). A stream sound starts only while its stream slot is idle (`FUN_00542338`). The sound plays at the region's centre (`FUN_0043ceb0`).
+- **SPA1:** `imp_loudspeaker` covers `IMPHangar` (centre 698.0, 230.67, -79.12; half-extents 40.8, 18.9, 59.7). All three of its groups name property 1776054091, whose text name is not recovered, so the port asks for it by hash (`#xxxxxxxx`). Record: gain 0.65, min 16, max 150, 7 takes on `imp_unit_vo_slow`, `play_interval (13, 3)`, take locks (20, 3). `all_loudspeaker` holds the other hangar's property.
+- **OURS `measure:`** team +0x28 is read as the reinforcement count at the first update. `replace:` with the team's authored maximum if the sim ever stores one. Every SPA group of one region names one sound, so this does not change the line on these maps.
+- **OURS `trace:`** slot idle is read as the shared voice queue being idle with nothing waiting. The PS2 checks the property's own stream slot; the port has one voice queue. `measure:` the PS2's gap between lines in `IMPHangar` against the port's. The take lock is armed before the interval check, which may stretch the gap towards 20 s.
+- **Not fed:** `ScriptCB_TriggerSoundRegionEnable` (the group's enabled bit). `spa1g_ass` does not call it. `replace:` when a mission that does is carded.

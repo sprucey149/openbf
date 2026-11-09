@@ -41,6 +41,7 @@ mod building_turrets;
 mod burn;
 mod cloaks;
 mod combat;
+pub mod ctf;
 mod damage_regions;
 pub mod deathmatch;
 mod doors;
@@ -96,6 +97,12 @@ pub use bounds::{
 };
 pub use buffs::Buffs;
 pub use building_turrets::{BuildingTurret, PosedBody, PosedParts, TurretFall};
+pub use ctf::{
+    CaptureRegion, CtfMode, CtfState, Flag, FlagStatus, DEFAULT_CAPTURE_REGION_RADIUS,
+    DEFAULT_CTF_SCORE_LIMIT, FLAG_REPICKUP_DELAY, FLYER_PICKUP_RADIUS, GROUND_CARRIED_OFFSET,
+    GROUND_FLAG_RETURN_TIMEOUT, SOLDIER_PICKUP_RADIUS, SPACE_CARRIED_OFFSET,
+    SPACE_FLAG_RETURN_TIMEOUT,
+};
 pub use damage_regions::DamageRegion;
 pub use droid_death::PUSHED_DEAD_HEALTH;
 pub use droidekas::{capsule_of as droideka_capsule, FLOOR_SNAP as DROIDEKA_FLOOR_SNAP};

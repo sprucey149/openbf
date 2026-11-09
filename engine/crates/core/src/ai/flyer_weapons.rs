@@ -353,7 +353,7 @@ pub(super) fn follow_threats(sim: &Sim, pilot: &Pilot, ai: &mut FlyerAi, burst: 
     }
 }
 
-pub(super) fn armed_shot(sim: &Sim, me: UnitHandle, ai: &FlyerAi) -> bool {
+pub fn armed_shot(sim: &Sim, me: UnitHandle, ai: &FlyerAi) -> bool {
     let Some(s) = sim.seat_look(me) else {
         return false;
     };
