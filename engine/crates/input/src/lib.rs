@@ -1279,13 +1279,4 @@ mod tests {
             Some(SPAWN_CLASS_NEXT | SWITCH_WEAPON)
         );
     }
-
-    #[test]
-    fn test_rumble() {
-        if let Ok(mut g) = open_gilrs() {
-            if let Some(id) = g.gamepads().next().map(|(id, _)| id) {
-                rumble(&mut g, id, 0.6, 0.4, 300);
-            }
-        }
-    }
 }

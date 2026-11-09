@@ -101,11 +101,11 @@ PS2 decompile trace (`SWBFRNT2.ELF-decomp.c` lines 84137–84350):
 - A chunk takes one impulse per tick (the +0x370 flag).
 - At the contact point: vp = v + ω×r, vn = vp·n, t = −unit(vp − n·vn).
 - **Over budget on terrain.** (lines 84260–84275):
-  `if (((*(byte *)(iVar5 + 0x460) <= *(byte *)(iVar5 + 0x461)) && (iVar1 != 0x10)) && (iVar1 != 8))`
+  *(decompiler detail omitted)*
   Terrain (0x80) respects the budget check (`ChunkTerrainCollisions` at +0x460 vs count at +0x461):
   - when count == budget, play ChunkTerrainEffect at (p.x, terrain height, p.z) and count + 1;
   - either way, return with no impulse and no push-out.
-  Crucially, Buildings (0x10) and Vehicles (8) are explicitly excluded from this budget suppression (`iVar1 != 0x10 && iVar1 != 8`). Buildings and live vehicle hulls always receive contact impulse and bounce!
+  Crucially, Buildings (0x10) and Vehicles (8) are explicitly excluded from this budget suppression (*(decompiler detail omitted)*). Buildings and live vehicle hulls always receive contact impulse and bounce!
 - **Otherwise:**
   - j = (−e·vn − vn) / (1/m + ((I⁻¹(r×n))×r)·n)
   - v += n·j/m; L += r×(n·j); ω = I⁻¹L

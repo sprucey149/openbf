@@ -727,7 +727,6 @@ pub fn walker_rigs(
         .collect()
 }
 
-/// The top of each class's model, for its camera's pull point
 fn find_glb_path(dir: &Path, model: &str) -> std::path::PathBuf {
     let file_name = format!("{model}.glb");
     let weapons = dir.join("weapons").join(&file_name);
@@ -738,6 +737,7 @@ fn find_glb_path(dir: &Path, model: &str) -> std::path::PathBuf {
     }
 }
 
+/// The top of each class's model, for its camera's pull point
 /// ([`crate::walk::vehicle_pull_height`]), parallel to `geometry`: the vis box's top,
 /// or on a bake older than it the highest vertex, which can stand several metres
 /// lower. `None`: a class with no model.

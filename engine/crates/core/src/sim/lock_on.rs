@@ -123,25 +123,21 @@ impl Sim {
         &self,
         own: VehicleHandle,
         shooter: UnitHandle,
-    ) -> Vec<LockTarget> {
+    ) -> impl Iterator<Item = LockTarget> + '_ {
         let units = self
             .alive_units()
-            .filter(|(h, u)| *h != shooter && u.mount.is_none())
+            .filter(move |(h, u)| *h != shooter && u.mount.is_none())
             .map(|(h, _)| LockTarget::Aim(AimTarget::Unit(h)));
         let vehicles = self
             .alive_vehicles()
-            .filter(|(h, v)| *h != own && v.health.alive())
+            .filter(move |(h, v)| *h != own && v.health.alive())
             .map(|(h, _)| LockTarget::Aim(AimTarget::Vehicle(h)));
         let turrets = self
             .turrets
             .iter()
             .map(|t| LockTarget::Aim(AimTarget::Turret(t.id)));
         let stations = (0..self.stations.len() as u16).map(LockTarget::Station);
-        units
-            .chain(vehicles)
-            .chain(turrets)
-            .chain(stations)
-            .collect()
+        units.chain(vehicles).chain(turrets).chain(stations)
     }
 
     pub(super) fn lock_clear(
@@ -490,6 +486,11 @@ impl Sim {
 
     pub(super) fn lock_on_hash(&self, eat: &mut impl FnMut(&[u8])) {
         for state in &self.lock_on {
+            // A salvo's target outlives a cleared lock and steers its missiles.
+            for s in state.salvo_target.iter().flatten() {
+                eat(b"SALVO");
+                eat(&format!("{s:?}").into_bytes());
+            }
             let Some(t) = state.target else {
                 continue;
             };

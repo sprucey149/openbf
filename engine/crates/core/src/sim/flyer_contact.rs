@@ -110,10 +110,12 @@ impl Sim {
         let pose = Mat4::from_rotation_translation(v.rot, v.pos);
         let admits = |b: &Body| self.flyer_meets(b);
         let mut best: Option<FlyerHit> = None;
+        let mut has_prim = false;
         for part in parts {
             if !part.flyer_part || matches!(part.shape, Shape::Mesh(_)) {
                 continue;
             }
+            has_prim = true;
             let found = self.collision.deepest_contact(
                 part,
                 pose,
@@ -127,6 +129,28 @@ impl Sim {
                         depth: c.depth,
                         other: c.owner,
                     });
+                }
+            }
+        }
+        if !has_prim {
+            let radius = bounding_radius(parts);
+            if radius > 0.0 {
+                let fallback =
+                    HullPart::new(Mat4::IDENTITY, Shape::Sphere { radius }, Layers::FLYER)
+                        .with_flyer_subsets(true, true);
+                if let Some(c) = self.collision.deepest_contact(
+                    &fallback,
+                    pose,
+                    HullFilter::except(Some(handle)),
+                    admits,
+                ) {
+                    if best.is_none_or(|b| c.depth > b.depth) {
+                        best = Some(FlyerHit {
+                            normal: c.normal,
+                            depth: c.depth,
+                            other: c.owner,
+                        });
+                    }
                 }
             }
         }
@@ -168,7 +192,11 @@ impl Sim {
             }
         }
         if !any {
-            best = Some((hf.height_at(center.x, center.z) - center.y, center));
+            let r = bounding_radius(parts);
+            best = Some((
+                hf.height_at(center.x, center.z) - (center.y - r),
+                center - Vec3::Y * r,
+            ));
         }
         let (depth, low) = best?;
         if depth <= 0.0 {
@@ -202,8 +230,11 @@ impl Sim {
             if other.is_some_and(|o| o.flying) {
                 return true;
             }
-            // Takeoff destruction of non-flying object / pad (SWBFRNT2.ELF-decomp.c lines 121671-121685, DAT_00689738)
-            if let Some(o) = other.filter(|o| !o.flying) {
+            // BF2: a craft taking off destroys a non-flying object it touches.
+            // Space modes only until the rule is checked against Conquest
+            // hangars, where it would destroy parked tanks and their riders.
+            let space = self.space_assault.is_some() || self.ctf.is_some();
+            if let Some(o) = other.filter(|o| !o.flying && space) {
                 self.destroy_vehicle(o.handle, None);
             }
             if n.y < CEILING_NORMAL {
@@ -211,10 +242,6 @@ impl Sim {
                 self.vehicles[i].pos += n * hit.depth;
                 return true;
             }
-        }
-        if let Some(o) = other.filter(|o| o.flyer && !o.flying) {
-            let damage = FLYER_VS_FLYER_DAMAGE * o.max_health;
-            self.damage_vehicle(o.handle, &collision_desc(damage), 1.0, None);
         }
         let v = &self.vehicles[i];
         let (phase, rot, max_health) = (v.flyer.phase, v.rot, v.health.max);
@@ -246,6 +273,10 @@ impl Sim {
 
         if damage > 0.0 && self.vehicles[i].health.cur > 0.0 {
             self.damage_vehicle(handle, &collision_desc(damage), 1.0, None);
+            if let Some(o) = other.filter(|o| o.flyer && !o.flying) {
+                let other_damage = FLYER_VS_FLYER_DAMAGE * o.max_health;
+                self.damage_vehicle(o.handle, &collision_desc(other_damage), 1.0, None);
+            }
         }
 
         if lethal {
@@ -526,5 +557,68 @@ mod tests {
         );
         let v = sim.vehicle(h).unwrap();
         assert!((v.pos.y - (ground + 4.0)).abs() < 1e-3, "{}", v.pos.y);
+    }
+
+    #[test]
+    fn parked_flyer_takes_no_damage_when_other_moves_away() {
+        let (mut sim, h) = flying(Vec::new(), true);
+        let parked_h = sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos: Vec3::new(0.0, 0.0, 5.0),
+            yaw: 0.0,
+            max_health: HEALTH,
+            health_type: HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        let parts = sim.hull_parts[0].as_ref().unwrap().clone();
+        sim.collision.set_hull(
+            parked_h,
+            &parts,
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 5.0)),
+        );
+
+        fly(
+            &mut sim,
+            h,
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, -10.0),
+        );
+        assert_eq!(sim.vehicle(parked_h).unwrap().health.cur, HEALTH);
+        assert_eq!(sim.vehicle(h).unwrap().health.cur, HEALTH);
+    }
+
+    #[test]
+    fn ramming_parked_flyer_at_speed_damages_parked_flyer() {
+        let (mut sim, h) = flying(Vec::new(), true);
+        let parked_h = sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos: Vec3::new(0.0, 0.0, 5.0),
+            yaw: 0.0,
+            max_health: HEALTH,
+            health_type: HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        let parts = sim.hull_parts[0].as_ref().unwrap().clone();
+        sim.collision.set_hull(
+            parked_h,
+            &parts,
+            Mat4::from_translation(Vec3::new(0.0, 0.0, 5.0)),
+        );
+
+        fly(
+            &mut sim,
+            h,
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 80.0),
+        );
+        assert!(sim.vehicle(parked_h).unwrap().health.cur < HEALTH);
     }
 }

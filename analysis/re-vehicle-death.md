@@ -503,7 +503,7 @@ A ship's pieces are drawn lit and fade over their last two seconds: `re-chunks.m
 stay on `ExplosionName`, which they lack, so they may have the same gap. The base setter's `+0x3ec` slot (B2:80167-80179) is unread.
 
 Not ported: a ship shot to 0 health falls before it explodes on the PS2, the pilot inside. The alive bit clear in a state other
-than 4 or 5 starts phase 4 with a timer (B2:116868-116935: 600 s when `FUN_00215f80(class)` is below 1, else 0.2 to 2.2 s);
+than 4 or 5 starts phase 4 with a timer (B2:116868-116935: 600 s when `…
 expiry or any contact gives phase 5 (B2:118283-118286, 121913-121930, 119844), which is the explosion. `destroy_vehicle`
 explodes at once. A crash explodes at once in both. `trace:` also the viewport `+0x90` factor in those phases (B2:122650-122700).
 
@@ -517,6 +517,6 @@ Audit of rider corpse visibility and red damage blink against `SWBFRNT2.ELF-deco
 
 2. **Vehicle red damage blink:**
    - In `SWBFRNT2.ELF-decomp.c` lines 90720–90755 (`FUN_001dfb38`):
-     Damage taking > 2% remaining health flashes the vehicle red ONLY when the alive bit (`*(byte *)((int)pfVar15 + 0xb8) & 8`) is set.
+     Damage taking > 2% remaining health flashes the vehicle red ONLY when the alive bit (*(decompiler detail omitted)*) is set.
    - When health reaches 0, the alive bit is cleared immediately.
    - Neither ground vehicles nor flyers blink red after destruction during the held death camera. Both ground craft and flyers follow identical alive-bit gating.

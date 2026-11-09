@@ -176,16 +176,17 @@ impl Ctx<'_> {
         let first_box = self.out.boxes.len();
         draw(self);
         let b = if self.out.boxes.len() > first_box {
-            self.out.boxes[first_box..]
-                .iter()
-                .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, (_, bx)| {
+            self.out.boxes[first_box..].iter().fold(
+                [f32::MAX, f32::MAX, f32::MIN, f32::MIN],
+                |b, (_, bx)| {
                     [
                         b[0].min(bx[0]),
                         b[1].min(bx[1]),
                         b[2].max(bx[2]),
                         b[3].max(bx[3]),
                     ]
-                })
+                },
+            )
         } else {
             // A label's shadow copy is black.
             crate::hud_draw::vertex_bounds(

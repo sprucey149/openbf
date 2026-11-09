@@ -2,7 +2,7 @@
 
 use super::*;
 
-/// The death view hold time in seconds (SWBFRNT2.ELF line 333652: *(float *)(param_1 + 0x158) = 4.0f).
+/// How long the seat view is held after the player dies in a vehicle (BF2: 4 s).
 pub const DEATH_VIEW_HOLD: f32 = 4.0;
 pub(super) const MEASURE_SEAT_TRANSITION_SECONDS_ON_PS2: f32 = 0.4;
 

@@ -87,15 +87,20 @@ impl Sim {
         if human.kind != VehicleKind::Flyer {
             return;
         }
-        let flying: Vec<(VehicleHandle, UnitHandle)> = self
-            .alive_vehicles()
-            .filter(|(_, v)| v.kind == VehicleKind::Flyer && v.flyer.phase == FlightPhase::Flying)
-            .filter_map(|(h, v)| Some((h, v.seats.first()?.occupant?)))
-            .filter(|(_, me)| self.unit(*me).map(|u| u.controller) == Some(Controller::Ai))
-            .collect();
-        for (handle, me) in flying {
-            let Some(v) = self.vehicle(handle) else {
+        for idx in 0..self.vehicles.len() {
+            let v = &self.vehicles[idx];
+            if !v.alive || v.kind != VehicleKind::Flyer || v.flyer.phase != FlightPhase::Flying {
                 continue;
+            }
+            let Some(me) = v.seats.first().and_then(|s| s.occupant) else {
+                continue;
+            };
+            if self.unit(me).map(|u| u.controller) != Some(Controller::Ai) {
+                continue;
+            }
+            let handle = VehicleHandle {
+                index: idx as u32,
+                gen: v.gen,
             };
             let left = v.flyer.ai.relocate_in - dt;
             let fires = left <= 0.0;
@@ -105,9 +110,7 @@ impl Sim {
             } else {
                 left
             };
-            if let Some(v) = self.vehicle_mut(handle) {
-                v.flyer.ai.relocate_in = next;
-            }
+            self.vehicles[idx].flyer.ai.relocate_in = next;
             if fires {
                 self.try_relocate(me, handle);
             }

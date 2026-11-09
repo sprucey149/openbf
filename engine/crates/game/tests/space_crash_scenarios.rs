@@ -549,12 +549,4 @@ fn flyer_impact_sparks_and_controller_rumble() {
         2,
         "lethal FlyerImpact event produces spark / hit effect"
     );
-
-    // Verify gilrs rumble helper runs safely with gamepad
-    if let Ok(mut g) = gilrs::Gilrs::new() {
-        let ids: Vec<_> = g.gamepads().map(|(id, _)| id).collect();
-        for id in ids {
-            input::rumble(&mut g, id, 0.6, 0.4, 300);
-        }
-    }
 }

@@ -269,7 +269,8 @@ impl Sim {
             .flyer_params
             .get(v.class as usize)
             .is_some_and(Option::is_some);
-        if v.team == Some(team) {
+        let vehicle_team = v.team.or(v.home_team);
+        if vehicle_team == Some(team) {
             return;
         }
         if !flyer {

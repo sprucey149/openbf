@@ -2,7 +2,6 @@ use super::{emitter::Frame, Fx};
 use core::sim::{Sim, StationDamageEffect};
 use core::vehicle::{Vehicle, VehicleHandle};
 use glam::{Mat3, Mat4};
-use std::collections::HashSet;
 
 const DEAD_HEALTH: f32 = 0.0001;
 
@@ -24,7 +23,6 @@ fn frame_on(v: &Vehicle, effect: &StationDamageEffect) -> Frame {
 
 impl Fx {
     pub(super) fn follow_vehicle_damage(&mut self, sim: &Sim) {
-        let mut held = HashSet::new();
         for live in &mut self.live {
             let Some((h, slot)) = live.vehicle else {
                 continue;
@@ -39,7 +37,6 @@ impl Fx {
             match owner {
                 Some((v, effect)) => {
                     live.frame = frame_on(v, effect);
-                    held.insert((h, slot));
                 }
                 None => {
                     live.stop();
@@ -66,7 +63,7 @@ impl Fx {
                 continue;
             };
             for (slot, effect) in effects.iter().enumerate() {
-                if !showing(v, effect) || held.contains(&(h, slot)) {
+                if !showing(v, effect) || self.live.iter().any(|l| l.vehicle == Some((h, slot))) {
                     continue;
                 }
                 if self.spawn(&effect.band.effect, frame_on(v, effect)) {

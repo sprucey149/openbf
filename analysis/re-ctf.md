@@ -152,7 +152,7 @@ In `SWBFRNT2.ELF` (`FUN_0035d050` line 343062-343064 and `FUN_00269758` line 185
 - **Dropped lifespan**:
   - In space 1-flag: `com_icon_spaceflag` ODF specifies `Lifespan = 15.0` seconds. If untouched for 15 seconds,
     the flag resets (`FUN_0035d7c8`) to `homeRegion` (`home_1flag`).
-  - In ground CTF: default return timeout is 60.0 seconds (`FUN_0035d2f8` line 343281: `piVar9[0xaa] = 0x42700000`,
+  - In ground CTF: default return timeout is 60.0 seconds (`FUN_0035d2f8` line 343281: *(decompiler detail omitted)*,
     IEEE 754 60.0f).
 - **Out of bounds / death region**: If a flag falls into a death region (`AddDeathRegion`), below the map
   kill floor, or outside world boundaries (`SetWorldExtents`), `FUN_0035e058` line 343726-343731

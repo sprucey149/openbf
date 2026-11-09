@@ -275,6 +275,8 @@ fn friendly_and_environmental_fighter_deaths_score_nothing() {
     let killer = soldier(&mut w.sim, 1);
     let h = manned_flyer(&mut w.sim, 1);
     w.sim.destroy_vehicle(h, Some(killer));
+    let h_empty = flyer(&mut w.sim, 1);
+    w.sim.destroy_vehicle(h_empty, Some(killer));
     let h = manned_flyer(&mut w.sim, 0);
     w.sim.destroy_vehicle(h, None);
     assert_eq!(w.sim.space_team_points().unwrap().0, [0, 0]);
@@ -365,4 +367,39 @@ fn a_grouped_objective_reports_once_on_its_last_system() {
     assert_eq!(down(&w.sim), 1);
     w.sim.space_station_destroyed(w.engine, None);
     assert_eq!(down(&w.sim), 1);
+}
+
+#[test]
+fn time_limit_ends_round_in_favor_of_team_with_more_points() {
+    let mut w = world(180);
+    w.sim.time_limit = Some(2); // 2 seconds = 60 ticks
+    w.sim.space_assault.as_mut().unwrap().points = [10, 5];
+    for _ in 0..59 {
+        w.sim.step(&[]);
+        assert_eq!(w.sim.outcome, None);
+    }
+    w.sim.step(&[]);
+    assert_eq!(w.sim.outcome, Some(0));
+    assert!(w
+        .sim
+        .events
+        .iter()
+        .any(|e| matches!(e, Event::TimeUp { winner: 0 })));
+}
+
+#[test]
+fn time_limit_draw_when_points_equal() {
+    use crate::sim::OUTCOME_DRAW;
+    let mut w = world(180);
+    w.sim.time_limit = Some(2);
+    w.sim.space_assault.as_mut().unwrap().points = [10, 10];
+    for _ in 0..60 {
+        w.sim.step(&[]);
+    }
+    assert_eq!(w.sim.outcome, Some(OUTCOME_DRAW));
+    assert!(w
+        .sim
+        .events
+        .iter()
+        .any(|e| matches!(e, Event::TimeUp { winner } if *winner == OUTCOME_DRAW)));
 }

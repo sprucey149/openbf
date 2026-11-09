@@ -161,9 +161,6 @@ impl Sim {
     }
 
     pub(super) fn update_cps(&mut self, dt: f32) {
-        if self.cps.is_empty() {
-            return;
-        }
         let teams = self.battle.teams.len();
         for ci in 0..self.cps.len() {
             let inside = self.cp_inside(ci);
@@ -183,6 +180,15 @@ impl Sim {
             }
         }
         if self.deathmatch.is_some() || self.space_assault.is_some() {
+            if self.outcome.is_none() {
+                self.check_time_limit();
+            }
+            return;
+        }
+        if self.cps.is_empty() {
+            if self.outcome.is_none() {
+                self.check_time_limit();
+            }
             return;
         }
         // BF2 conquest bleed (strict CP-value majority, clamped at alive).
@@ -226,14 +232,34 @@ impl Sim {
         if self.outcome.is_some() || self.tick + 1 < u64::from(limit) * u64::from(TICK_HZ) {
             return;
         }
-        let t = [
-            self.battle.teams[0].tickets(),
-            self.battle.teams[1].tickets(),
-        ];
-        let winner = match t[0].cmp(&t[1]) {
-            std::cmp::Ordering::Greater => 0,
-            std::cmp::Ordering::Less => 1,
-            std::cmp::Ordering::Equal => OUTCOME_DRAW,
+        let winner = if let Some(sa) = &self.space_assault {
+            match sa.points[0].cmp(&sa.points[1]) {
+                std::cmp::Ordering::Greater => 0,
+                std::cmp::Ordering::Less => 1,
+                std::cmp::Ordering::Equal => OUTCOME_DRAW,
+            }
+        } else if let Some(ctf) = &self.ctf {
+            match ctf.team_points[0].cmp(&ctf.team_points[1]) {
+                std::cmp::Ordering::Greater => 0,
+                std::cmp::Ordering::Less => 1,
+                std::cmp::Ordering::Equal => OUTCOME_DRAW,
+            }
+        } else if let Some(dm) = &self.deathmatch {
+            match dm.points[0].cmp(&dm.points[1]) {
+                std::cmp::Ordering::Greater => 0,
+                std::cmp::Ordering::Less => 1,
+                std::cmp::Ordering::Equal => OUTCOME_DRAW,
+            }
+        } else {
+            let t = [
+                self.battle.teams[0].tickets(),
+                self.battle.teams[1].tickets(),
+            ];
+            match t[0].cmp(&t[1]) {
+                std::cmp::Ordering::Greater => 0,
+                std::cmp::Ordering::Less => 1,
+                std::cmp::Ordering::Equal => OUTCOME_DRAW,
+            }
         };
         self.outcome = Some(winner);
         self.events.push(Event::TimeUp { winner });

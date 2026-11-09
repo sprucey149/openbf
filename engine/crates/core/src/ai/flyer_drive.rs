@@ -272,7 +272,7 @@ fn lift_goal(
         origin,
         forward,
         reach,
-        Layers::VEHICLE,
+        Layers::FLYER,
         HullFilter::except(Some(handle)),
     ) {
         let top = (origin.y + forward.y * hit.t) + radius;
@@ -417,7 +417,7 @@ fn avoid_goal(
                 v.pos,
                 flat,
                 p.max_speed,
-                Layers::VEHICLE,
+                Layers::FLYER,
                 HullFilter::except(Some(handle)),
             )
             .is_some();
@@ -450,7 +450,7 @@ fn clearest(sim: &Sim, v: &Vehicle, handle: VehicleHandle) -> Vec3 {
                 v.pos,
                 dir,
                 WEDGED_RAY,
-                Layers::VEHICLE,
+                Layers::FLYER,
                 HullFilter::except(Some(handle)),
             )
             .map_or(WEDGED_RAY, |h| h.t);
@@ -468,7 +468,7 @@ fn up_blocked(sim: &Sim, v: &Vehicle, handle: VehicleHandle) -> bool {
             v.pos,
             Vec3::Y,
             UP_PROBE,
-            Layers::VEHICLE,
+            Layers::FLYER,
             HullFilter::except(Some(handle)),
         )
         .is_some()
@@ -601,7 +601,7 @@ pub(crate) fn clear_chord(sim: &Sim, a: Vec3, b: Vec3, handle: VehicleHandle) ->
             a,
             dir,
             length,
-            Layers::VEHICLE,
+            Layers::FLYER,
             HullFilter::except(Some(handle)),
         )
         .is_none()

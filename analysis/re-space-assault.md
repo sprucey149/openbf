@@ -1061,8 +1061,8 @@ Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): 
 
 ### System repair and restore rules
 - **Decomp evidence:**
-  - `FUN_00268c78` (line 185043): `EntityBuilding::SetProperty` handles property `0x19971f1b` (`fnv1a("maxhealth")`), setting `piVar5[0x5d] = max_health`.
-  - `FUN_0026a7b8` / `FUN_0026afe4` (line 186122): `EntityDestructibleBuilding::SetProperty` handles `0x19971f1b` (`max_health`), setting `iVar9 + 0x2ec = max_health`.
+  - `FUN_00268c78` (line 185043): `EntityBuilding::SetProperty` handles property `0x19971f1b` (`fnv1a("maxhealth")`), setting *(decompiler detail omitted)*.
+  - `FUN_0026a7b8` / `FUN_0026afe4` (line 186122): `EntityDestructibleBuilding::SetProperty` handles `0x19971f1b` (`max_health`), setting *(decompiler detail omitted)*.
   - `FUN_001df3d8` (lines 90273–90321): `HealthProperty::SetHealth` applies health changes and calls virtual `OnHealthChanged` at offset `+0x28`.
   - `FUN_001df4e0` (lines 90324–90345): `HealthProperty::SetShield` updates current shield pool.
   - `FUN_001df560` (lines 90351–90390): updates regeneration toward `max_health` and `max_shield`.
@@ -1097,7 +1097,7 @@ Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): 
 - `FUN_0018f7f0` (line 34252): Lua `BroadcastVoiceOver(name, teamMask)` invokes `FUN_003e2648(hash, mask)`.
 - **No opening spawn briefing:** an earlier port queued `<P>OSMP_obj_01`/`02` at first spawn. No mission script on the disc names those lines (a search of `extracted/bf2/lua` finds only `obj_03` and later), so the rule was invented and is removed. `measure:` the PS2 at a space round's first spawn, to confirm no line plays.
 - **Ship loudspeakers:** see `re-ambience-music.md`, "Sound trigger regions".
-- **Flight radio chatter:** `FUN_0044c650` (lines 497625-497632) requests `Cockpit3rdPersonSound` (+0x44) or `Cockpit1stPersonSound` (+0x3c) on every engine update when `param_13` is set. Its flyer caller (118865-118878, 118925) sets that only when a local player controls the craft. All 19 flyer classes author both keys with `<side>_inf_com_space_chatter`, and the record's `play_interval (12.0, 3.0)` is what spaces the lines.
+- **Flight radio chatter:** `FUN_0044c650` (lines 497625-497632) requests `Cockpit3rdPersonSound` (+0x44) or `Cockpit1stPersonSound` (+0x3c) on every engine update when *(decompiler detail omitted)* is set. Its flyer caller (118865-118878, 118925) sets that only when a local player controls the craft. All 19 flyer classes author both keys with `<side>_inf_com_space_chatter`, and the record's `play_interval (12.0, 3.0)` is what spaces the lines.
 - The port asks each tick while the player holds a flyer's pilot seat (`Commander::cockpit`, `Call::Cockpit`) through `gate_calls`, 2-D at the ears. This replaces an invented 10 s timer that played on foot too and went through the one-shot path, which does not play a stream record.
 - `measure:` whether the PS2 stream voice overlaps commander lines. The port shares the one voice queue, so a commander line delays chatter.
 - Not covered: on-foot unit lines inside a capital ship. They belong to `crate::vo`, and spa1's names table has no `inf_chatter`, `_command_` or `ai_` entries.

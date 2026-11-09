@@ -505,7 +505,7 @@ fn walled(layers: crate::collision::Layers) -> (Sim, UnitHandle, VehicleHandle) 
 #[test]
 fn a_wall_refuses_a_route_and_a_vehicle_clear_field_does_not() {
     use crate::collision::Layers;
-    let (s, _, v) = walled(Layers::ALL | Layers::VEHICLE);
+    let (s, _, v) = walled(Layers::ALL | Layers::FLYER);
     let ai = planned(&s, v);
     assert!(ai.curve.is_none() && ai.cursor.is_none(), "{ai:?}");
     let (s, _, v) = walled(Layers::ALL);
@@ -530,7 +530,7 @@ fn a_blocked_ctf_hop_keeps_the_authored_route() {
             Shape::Box {
                 half: Vec3::new(5.0, 200.0, 200.0),
             },
-            Layers::ALL | Layers::VEHICLE,
+            Layers::ALL | Layers::VEHICLE | Layers::FLYER,
         )],
         Vec::new(),
     );

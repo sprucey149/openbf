@@ -495,7 +495,7 @@ pub(super) fn bake_content(
 
     for (i, c) in expanded.iter().enumerate() {
         match &c.tag {
-            b"sky_" => {
+            b"sky_" if sky_cfg.is_none() || sky_sublevel.is_some() => {
                 let parsed = mungefs::sky::Sky::parse(c)
                     .map_err(|e| anyhow!("sky_ 0x{:X}: {e}", c.offset))?;
                 match sky_cfg.as_mut() {
