@@ -82,6 +82,7 @@ fn target_hint_and_flag_styles_keep_their_own_slots_and_scales() {
                 style("ObjectiveOnScreenBehind", 2.0, 1.0),
                 style("ObjectiveOffScreen", 2.0, 1.0),
                 style("ObjectiveOffScreenBehind", 2.0, 1.0),
+                style("FlagOnScreen", 3.0, 2.0),
             ],
         )],
     };
@@ -107,6 +108,10 @@ fn target_hint_and_flag_styles_keep_their_own_slots_and_scales() {
         ]
     );
     assert_eq!(scales(&hud.objective_styles), [Some((2.0, 1.0)); 4]);
+    assert_eq!(
+        hud.carrier_styles[0].map(|s| (s.min_scale, s.max_scale)),
+        Some((3.0, 2.0))
+    );
 }
 
 /// The 1-player layout's `player1systemMessages`, record for record

@@ -34,6 +34,46 @@ const CONE_COS: f32 = 0.913_545_5; // cos 24°
 /// `[ours]`, PROVISIONAL: "while the unit fires" = a shot within this many seconds.
 const FIRING_SECONDS: f32 = 0.5;
 
+pub fn carrier_marker(
+    sim: &core::sim::Sim,
+    carrier: core::unit::UnitHandle,
+    viewer: core::unit::UnitHandle,
+) -> Option<(Vec3, bool)> {
+    let unit = sim.unit(carrier)?;
+    if !unit.alive {
+        return None;
+    }
+    let friendly = unit.team == sim.unit(viewer)?.team;
+    if let Some(mount) = unit.mount {
+        let vehicle = sim
+            .vehicles
+            .get(mount.vehicle.index as usize)
+            .filter(|v| v.gen == mount.vehicle.gen && v.alive)?;
+        let radius = sim
+            .blast_setup
+            .get(vehicle.class as usize)
+            .and_then(Option::as_ref)
+            .map(|b| b.sphere_radius)
+            .or_else(|| {
+                sim.seat_setup
+                    .get(vehicle.class as usize)
+                    .and_then(Option::as_ref)
+                    .map(|s| s.radius)
+            })?;
+        let offset = if carrier == viewer {
+            Vec3::new(0.0, 0.3, -0.2 * radius)
+        } else {
+            Vec3::Y * (0.7 * radius).min(4.0)
+        };
+        Some((vehicle.pos + vehicle.rot * offset, friendly))
+    } else {
+        Some((
+            unit.soldier.pos + Vec3::Y * (0.7 * unit.capsule().height).min(4.0),
+            friendly,
+        ))
+    }
+}
+
 pub fn ctf_marker(sim: &core::sim::Sim, flag: &core::sim::Flag, team: u8) -> Option<(Vec3, bool)> {
     match flag.status {
         core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => {
@@ -640,6 +680,62 @@ mod tests {
         let flag = &sim.ctf.as_ref().unwrap().flags[0];
         assert_eq!(ctf_marker(&sim, flag, 1), Some((goal1, true)));
         assert_eq!(ctf_marker(&sim, flag, 0), None);
+    }
+
+    #[test]
+    fn carrier_marker_tracks_live_unit_and_relation() {
+        let mut sim = core::sim::Sim::empty(1);
+        let viewer = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, Vec3::ZERO))
+            .unwrap();
+        let carrier = sim
+            .spawn(&core::unit::UnitSpec::trooper(1, Vec3::new(2.0, 3.0, 4.0)))
+            .unwrap();
+        let (point, friendly) = carrier_marker(&sim, carrier, viewer).unwrap();
+        assert!(!friendly);
+        assert!(point.y > sim.unit(carrier).unwrap().soldier.pos.y);
+        sim.unit_mut(carrier).unwrap().team = 0;
+        assert!(carrier_marker(&sim, carrier, viewer).unwrap().1);
+        sim.unit_mut(carrier).unwrap().alive = false;
+        assert!(carrier_marker(&sim, carrier, viewer).is_none());
+    }
+
+    #[test]
+    fn carrier_marker_follows_flyer_rotation_and_viewer() {
+        use core::vehicle::{BlastSetup, SeatKind, VehicleKind, VehicleSpec};
+        let mut sim = core::sim::Sim::empty(1);
+        let pilot = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, Vec3::ZERO))
+            .unwrap();
+        let observer = sim
+            .spawn(&core::unit::UnitSpec::trooper(1, Vec3::ZERO))
+            .unwrap();
+        let flyer = sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::new(10.0, 20.0, 30.0),
+            yaw: 0.0,
+            max_health: 1000.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        sim.blast_setup = vec![Some(BlastSetup {
+            explosion: None,
+            sphere_centre: Vec3::ZERO,
+            sphere_radius: 10.0,
+        })];
+        assert!(sim.seat_unit(pilot, flyer, 0));
+        let vehicle = &mut sim.vehicles[flyer.index as usize];
+        vehicle.rot = glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let (own, friendly) = carrier_marker(&sim, pilot, pilot).unwrap();
+        assert!(friendly);
+        assert!((own - Vec3::new(8.0, 20.3, 30.0)).length() < 0.001);
+        let (other, friendly) = carrier_marker(&sim, pilot, observer).unwrap();
+        assert!(!friendly);
+        assert!((other - Vec3::new(10.0, 24.0, 30.0)).length() < 0.001);
     }
 
     fn region(rotation: [[f32; 3]; 3], size: [f32; 3]) -> ManifestRegion {

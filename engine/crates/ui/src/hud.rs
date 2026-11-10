@@ -209,6 +209,7 @@ pub struct HudModel {
     pub team_points: Option<([i32; 2], u32)>,
     /// When true, 1-Flag CTF HUD displays flag icons and single-score points.
     pub ctf: bool,
+    pub flag_status: Option<crate::hud_flag::FlagStatus>,
     pub space: Option<crate::hud_space::SpaceStatus>,
     /// Reinforcements lost per second to the post bleed, team 0 / team 1.
     pub bleed: [f32; 2],
@@ -299,12 +300,7 @@ pub struct HudModel {
     pub scope: Option<crate::hud_scope::ScopeView>,
 }
 
-/// PROVISIONAL team accents for the egui HUD and spawn menu (orange/green);
-/// these RGB values have not been measured from the PS2 HUD.
-pub const TEAM_COLORS: [Color32; 2] = [
-    Color32::from_rgb(242, 100, 40),
-    Color32::from_rgb(80, 220, 90),
-];
+pub use crate::hud_flag::TEAM_COLORS;
 
 /// The reticle's place for a chase camera that looks `tilt` radians below
 /// the aim (`analysis/re-aim-assist.md` §10.4): tan(tilt) / tan(fov_y / 2) of
@@ -338,6 +334,7 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         has_mesh,
     );
     hud.hint_markers.clone_from(&m.hints);
+    crate::hud_flag::feed(hud, m.flag_status, has_mesh);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     put("initialize", EventValue::None);
     let alive = !m.dead;
@@ -1091,6 +1088,7 @@ mod tests {
             hints: Vec::new(),
             team_points: None,
             ctf: false,
+            flag_status: None,
             space: None,
             damage_flash: 0.0,
             gauge: Default::default(),

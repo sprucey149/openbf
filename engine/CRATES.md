@@ -442,14 +442,15 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/vehicle_class/flyer.rs` 204 — flyer class defaults and property routing, including turret first refusal, destructible-chunk fallback and the path follower's numbers · FlyerClass.
 - `game/src/main/sim_trace.rs` 307 — SHASH headless CLI, input validation and fixture or baked mission setup · `run`.
 - `game/src/main.rs` 649 — binary CLI and mode dispatch; flags and environment variables are specified in its module header · `main`, `ViewerArgs`, `BattleSetup`. The binary loads its parts with `#[path]` because the library owns `game/src/`.
-- `game/src/main/battle.rs` 1493 — battle construction and shared draw/HUD setup, including the installed-turret bounds/readout fixture; no spawn panel while the death camera runs (ground maps) · `make_walk`, `walk_draws`, `hud_model`, `spawn_model`.
+- `game/src/main/battle.rs` 1453 — battle construction and shared draw/HUD setup, including the installed-turret bounds/readout fixture; no spawn panel while the death camera runs (ground maps) · `make_walk`, `walk_draws`, `hud_model`, `spawn_model`.
 - `game/src/main/battle/native_spawn_tests.rs` 316 — owned-content Dune Sea launch, native post lifecycle and deterministic friendly/two-army controls through `make_walk`.
+- `game/src/main/battle/ctf_hud.rs` 214 — CTF and target marker projection, occlusion and HUD selection.
 - `game/src/main/headless.rs` 1317 — offscreen bench, frame/orbit capture, walk/ride replay, scene reports and the asset-free scripted aim referee · `run_bench`, `run_headless`, `run_aim_replay`, `tick_event_feed` (drains unused HUD output each replay tick).
 - `game/src/main/headless/detailed_bench.rs` 507 — opt-in raw CPU tick and full replay-render frame measurements (thread CPU, instructions, allocations, memory), cold GPU objects, periodic sim hashes and captures · `run`.
-- `game/src/main/windowed.rs` 1535 — windowed shell/loading/battle state machine (the window opens maximized: `window_attributes`), the Instant Action playlist played row by row, per-tick event/audio and black-box hooks, pause/cheats and profile autosave, including newly earned class kills · `App`, `run_windowed`, `run_shell`, `play_event_sounds`, `start_take`.
-- `game/src/main/windowed/tests.rs` 374 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
-- `game/src/main/windowed/events.rs` 1105 — native window lifecycle and application event dispatch · `ApplicationHandler for App`; headless automation never starts this path
-- `game/src/main/windowed/idle.rs` 286 — keeps the display awake while a round is played unpaused (Wayland idle-inhibit, X11 screen-saver reset, Windows `SetThreadExecutionState`; macOS no-op) · `IdleInhibit`, `wants_idle_inhibit`
+- `game/src/main/windowed.rs` 1597 — windowed shell/loading/battle state machine (the window opens maximized: `window_attributes`), the Instant Action playlist played row by row, per-tick event/audio and black-box hooks, pause/cheats and profile autosave, including newly earned class kills · `App`, `run_windowed`, `run_shell`, `play_event_sounds`, `start_take`.
+- `game/src/main/windowed/tests.rs` 394 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
+- `game/src/main/windowed/events.rs` 1113 — native window lifecycle and application event dispatch · `ApplicationHandler for App`; headless automation never starts this path
+- `game/src/main/windowed/idle.rs` 321 — keeps the display awake while a round is played unpaused (Wayland idle-inhibit, X11 screen-saver reset, Windows `SetThreadExecutionState`; macOS no-op) · `IdleInhibit`, `wants_idle_inhibit`
 - `game/src/main/windowed/career.rs` 14 — finished/abandoned battle profile save and career summary logging, using the event feed's battle totals · `record_round`.
 - `game/src/main/windowed/front.rs` 1062 — shell front screens, movie/music (takes in turn), menu clicks, the BF2 Instant Action screen, Instant Action, settings and binding capture · `FrontShell`, `App::redraw_shell`; `ui::shell_ps2` owns the screen flow.
 - `game/src/lib.rs` 81 — module roots
@@ -599,9 +600,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/spawn_preview.rs` 932 — spawn-screen side soldier and class line-up placement/animation · `shown`, `stands`, `place`, `place_at`, `lineup_at`, `ring_place`, `ring_at`, `Preview`; module header and `analysis/re-spawn-flow.md` §2, §4.1 own fitted perspective, tint, scale and ring constants.
 - `game/src/spawn_backdrop.rs` 244 — mission camera-shot selection and level-start spawn-screen backdrop · `CameraShot`, `ShotPicker`, `Backdrop`; module header and `analysis/re-spawn-flow.md` §1.1.
 - `game/src/music.rs` 564 — mission/bank music into `core::music`, playback changes and headless `MUSIC_LOG` · `BattleMusic`, `HeadlessLog`, `volume_option`; profile / `OPENBF_MUSIC_VOLUME` control; module header and `analysis/re-ambience-music.md` §3.
-- `game/src/announce.rs` 1097 — mission/post commander lines, one-flag announcements and unit combat/squad/low-health voice requests into `core::announcer`; BF2 unit voice through `crate::vo` · `Commander`, `CallAsk`, `battle_lines`, `calls`, `gate_calls`, `vo`, `vo_body`; playback in `game/src/main/windowed.rs`; module/API docs and `analysis/re-unit-chatter.md`.
+- `game/src/announce.rs` 1137 — mission/post commander lines, one-flag announcements and unit combat/squad/low-health voice requests into `core::announcer`; BF2 unit voice through `crate::vo` · `Commander`, `CallAsk`, `battle_lines`, `calls`, `gate_calls`, `vo`, `vo_body`; playback in `game/src/main/windowed.rs`; module/API docs and `analysis/re-unit-chatter.md`.
 - `game/src/vo.rs` 1168 — BF2 `VOSound` entry parsing, context/ranking (the PS2's library sort and slot tie-break on ground battles), speaker selection and event requests · `Vo`, `VoLines`, `Entry`, `Said`, `Who`, `Body`, `context`, `best`, `class_lines`, `EVENTS`, `ASKED`; module header and `analysis/re-unit-chatter.md` 3.
-- `game/src/pause.rs` 490 — pause-menu action dispatch, the Game Menu's page and Yes/No popup state (Respawn, Restart, Quit), its text keys, and the rows' share of the D-pad (Left/Right kept for the Morse cheats, CHEAT2) · `PauseMenu`, `apply_menu_action`, `texts`, `rows_input`, `pause_sound`; `analysis/re-spawn-flow.md` §7, BUGX scene tests.
+- `game/src/pause.rs` 509 — pause-menu action dispatch, the Game Menu's page and Yes/No popup state (Respawn, Restart, Quit), its text keys, and the rows' share of the D-pad (Left/Right kept for the Morse cheats, CHEAT2) · `PauseMenu`, `apply_menu_action`, `texts`, `rows_input`, `pause_sound`; `analysis/re-spawn-flow.md` §7, BUGX scene tests.
 - `game/src/profile.rs` 555 — autosaved settings, validated custom controls and career stats, including backward-compatible per-class kills and recorded capture totals · `Profile`, `Career`, `BattleStats`
 - `game/src/render_blend.rs` 1077 — presentation interpolation of modelled projectiles and the eased camera position and AI-driven walker gunner heading stabilization, with snap handling and bit-exact restoration before sim readers; seat looks and aimers blended; a controller's aim drawn the frame's share into the next tick's turn and a FIRE press stamped with it · `Blend`, `Blend::stamp`, `Pose`, `blend`, `blend_in_looking`, `fraction`, `lerp_angle`; `OPENBF_RENDER_BLEND=0` disables it; module header owns fields, thresholds and restore contract.
 - `game/src/render_blend/walker.rs` 126 — Between-tick walker pose interpolation.
@@ -611,7 +612,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/hud_feed/cutter_tests.rs` 132 — secondary Cutter pose, missing-model/pose and existing-placement regressions.
 - `game/src/hit_flash.rs` 59 — BF2 local damage flash threshold, alpha, duration and fade · `Flash`.
 - `game/src/input_icons.rs` 607 — the Button prompts setting, the device Auto follows and the shipped SVG icons (`game/assets/input_icons/README.md`: sources, licences) · `IconChoice`, `DeviceTracker`, `icons`, `rasterize`
-- `game/src/minimap.rs` 1106 — map/class minimap configuration and per-frame battle/spawn-map feeds, including command walkers and team-scoped CTF markers; mission-resolved still feeds and asset-free caller regressions for captures/goldens · `MapStatic`, `ClassIcon`, `bounds_of`, `still`, `spawn_still`; module/API docs and `analysis/re-hud-map.md` §8.
+- `game/src/minimap.rs` 1202 — map/class minimap configuration and per-frame battle/spawn-map feeds, including command walkers and team-scoped CTF markers; mission-resolved still feeds and asset-free caller regressions for captures/goldens · `MapStatic`, `ClassIcon`, `bounds_of`, `still`, `spawn_still`; module/API docs and `analysis/re-hud-map.md` §8.
 - `game/src/gallery.rs` 1414 — headless map/unit/walkabout sheets with floor placement and class-specific held weapons, including installed DLC classes · `map_sheet`, `vantage_camera`, `model_class`, `discover_units`; `soldier_spot` owns grounding and `step_water` pins water per eye for goldens.
 - `game/src/gallery/unit_discovery_tests.rs` 127 — unit-gallery class/weapon/animation discovery regressions; broken installed DLC class data fails the gallery instead of selecting generic rifle poses.
 - `game/src/bench.rs` 583 — `--bench` per adapter · `Report`; `--bench-toggle`: one feature off and on in alternating blocks · `Toggle`; `OPENBF_FRAMEAB`'s paired prices · `price`.
@@ -677,14 +678,15 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `pak/src/tests.rs` 486 — round trip, re-pack, a damaged footer, ranged reads, dedupe, the disk fallback
 
 ## ui, input, audio, net
-- `ui/src/lib.rs` 48 — module roots; re-exports `egui`
-- `ui/src/hud.rs` 1406 — HUD models/events, round-end banner geometry and egui compatibility drawing (the banner and stats use the HUD pass) · `HudModel`, `RoundEndModel`, `HudWeapon`, `HudTarget`, `HudMessage`, `HudStats`, `message_color`, `target_color`, `feed`, `draw_hud`, `draw_pad_warning`; event coverage in the module header.
-- `ui/src/hud_tree.rs` 1499 — BF2 HUD tree state, events, fades/colours and message queue · `Hud`, `Elem`, `Fader`, `BarFlash`, `EventValue`, `MultiLine`, `Line`; interpretation scope in the module header (`analysis/re-hud.md`, `analysis/re-target-hud.md`, `analysis/re-event-messages.md`).
+- `ui/src/lib.rs` 49 — module roots; re-exports `egui`
+- `ui/src/hud.rs` 1498 — HUD models/events, round-end banner geometry and egui compatibility drawing (the banner and stats use the HUD pass) · `HudModel`, `RoundEndModel`, `HudWeapon`, `HudTarget`, `HudMessage`, `HudStats`, `message_color`, `target_color`, `feed`, `draw_hud`, `draw_pad_warning`; event coverage in the module header.
+- `ui/src/hud_tree.rs` 1493 — BF2 HUD tree state, events, fades/colours and message queue · `Hud`, `Elem`, `Fader`, `BarFlash`, `EventValue`, `MultiLine`, `Line`; interpretation scope in the module header (`analysis/re-hud.md`, `analysis/re-target-hud.md`, `analysis/re-event-messages.md`).
 - `ui/src/hud_tree/fixture.rs` 194 — existing shared HUD test fixtures; test-only module and visibility unchanged
 - `ui/src/input_icons.rs` 568 — the one lookup every drawn control prompt goes through · `Icons`, `IconSet`, `Prompt`, `PadButton`, `pad_sheet`, `pad_name`
-- `ui/src/hud_tree/styles.rs` 47 — HUD style slots and event values shared by the tree.
-- `ui/src/hud_tree/tests.rs` 492 — HUD-tree regressions for faders, messages, number colour, bar flashes and group tint · same private `hud_tree::tests` identities.
-- `ui/src/hud_draw.rs` 1411 — HUD layout → window-pixel triangles, mesh parts scrolled by the HUD clock · `draw`, `HudFrame`, `HudArt`, `anchor_shift`, `MESH_UNIT`; coordinate/Hor+ rules in the module header; spawn pages/veil route through `spawn_draw.rs`.
+- `ui/src/hud_tree/styles.rs` 70 — HUD style slots and event values shared by the tree.
+- `ui/src/hud_tree/tests.rs` 497 — HUD-tree regressions for faders, messages, number colour, bar flashes and group tint · same private `hud_tree::tests` identities.
+- `ui/src/hud_draw.rs` 1416 — HUD layout → window-pixel triangles, mesh parts scrolled by the HUD clock · `draw`, `HudFrame`, `HudArt`, `anchor_shift`, `MESH_UNIT`; coordinate/Hor+ rules in the module header; spawn pages/veil route through `spawn_draw.rs`.
+- `ui/src/hud_flag.rs` 66 — CTF carrier and dropped-state HUD event routing.
 - `ui/src/hud_capture.rs` 292 — command-post capture icon and direction mark · `CaptureIcon`, `Side`, `Mark`, `Part`, `picture`, `BOX`; split-colour layout and port additions in the module header (`analysis/re-capture-display.md` §3.3–4).
 - `ui/src/hud_ambush.rs` 316 — hit-direction chevrons and per-edge timers · `Ambush`, `Edge`, `edge`, `visible_box`, `SHEET`; direction, fade and measured/Hor+ layout rules in the module header (`analysis/re-hud-attacker.md`).
 - `ui/src/hud_map.rs` 781 — minimap and spawn-map model/layout · `MapModel`, `MapView`, `MapIcon`, `heading`, `view_radius`, `post_color`, `window_point`; view rules and unbuilt portions in the module header (`analysis/re-hud-map.md`); spawn page uses `spawn_draw.rs`.
@@ -738,8 +740,9 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
   test id is `suite <file>::<name>`); a new test file goes there with a `mod` line. Beside game's stay the goldens and
   `walkabout_stats` (found by name by gates.py / goldens.sh) and `texture_tier` / `capture_display_ps2` (they set the
   process-wide texture tier).
+- `game/tests/suite/flag_hud.rs` 272 — original-art flag HUD lifecycle and GPU captures.
 - `game/tests/suite/space_ctf_visuals.rs` 136 — six-map CTF model, visibility and team-marker GPU regression.
-- `game/tests/suite/bug_checks.rs` 584 — BUGX synthetic corpse targeting, station-service control, hit-chevron fade through respawn and death-region-under-water spawn flow; Suicide menu paths remain uncovered.
+- `game/tests/suite/bug_checks.rs` 592 — BUGX synthetic corpse targeting, station-service control, hit-chevron fade through respawn and death-region-under-water spawn flow; Suicide menu paths remain uncovered.
 - `game/tests/suite/officer_abilities.rs` 237 — disc-based officer class census, secondary activation and deferred hero ability regressions.
 - `game/tests/suite/pack_dispenser.rs` 176 — all twenty class variants and eight faction dispensers; real class data, self/friend/enemy touch collection, health/ammo and refill exclusion.
 - `game/tests/suite/career_class_kills.rs` 482 — UNLK2 real Utapau officer/Wookiee kills and capture, respawn/class switching, whole-battle shot/hit totals, catch-up ticks, autosave/reload and victory accounting; synthetic same-tick dead-shooter credit and damage eligibility/tick deduplication.

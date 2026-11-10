@@ -39,9 +39,32 @@ pub const FLAG_STYLE_NAMES: [&str; 4] = [
     "hintflagoffscreenbehind",
 ];
 
+pub const CARRIER_STYLE_NAMES: [&str; 4] = [
+    "flagonscreen",
+    "flagonscreenbehind",
+    "flagoffscreen",
+    "flagoffscreenbehind",
+];
+
 pub const OBJECTIVE_STYLE_NAMES: [&str; 4] = [
     "objectiveonscreen",
     "objectiveonscreenbehind",
     "objectiveoffscreen",
     "objectiveoffscreenbehind",
 ];
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HintMarker {
+    pub ndc: [f32; 2],
+    pub distance: f32,
+    pub friendly: bool,
+    pub visible: bool,
+    pub on_screen: bool,
+    pub flag: bool,
+    pub carrier: bool,
+    pub flyer_view: bool,
+    pub own_carrier: bool,
+    pub objective: bool,
+    pub pulse: Option<f32>,
+    pub tint: Option<[f32; 3]>,
+}

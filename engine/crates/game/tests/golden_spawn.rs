@@ -16,7 +16,7 @@ fn hud() -> ui::hud::HudModel {
     ui::hud::HudModel {
         ctf: false,
         team_points: None,
-        ctf: false,
+        flag_status: None,
         lock: None,
         hints: Vec::new(),
         seat_health: None,

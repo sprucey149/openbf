@@ -25,6 +25,7 @@ mod coruscant_turret_contact;
 mod donor_materials;
 mod droideka_preview;
 mod event_messages;
+mod flag_hud;
 mod flyer_decks;
 mod glb_material;
 mod global_sound;

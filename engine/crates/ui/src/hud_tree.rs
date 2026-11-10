@@ -46,25 +46,9 @@ enum Listen {
 
 mod styles;
 pub use styles::{
-    EventValue, HintStyle, FLAG_STYLE_NAMES, FRAME_H, FRAME_W, HINT_STYLE_NAMES, LOCK_STYLE_NAMES,
-    OBJECTIVE_STYLE_NAMES,
+    EventValue, HintMarker, HintStyle, CARRIER_STYLE_NAMES, FLAG_STYLE_NAMES, FRAME_H, FRAME_W,
+    HINT_STYLE_NAMES, LOCK_STYLE_NAMES, OBJECTIVE_STYLE_NAMES,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct HintMarker {
-    pub ndc: [f32; 2],
-    pub distance: f32,
-    pub friendly: bool,
-    pub visible: bool,
-    /// Projected inside the ±0.9 NDC edge; `false` clamps to that edge.
-    pub on_screen: bool,
-    /// A CTF objective: draw with the `HintFlag*` styles.
-    pub flag: bool,
-    pub objective: bool,
-    pub pulse: Option<f32>,
-    /// The marker's own colour (Lua `MapAddEntityMarker`), overriding the style.
-    pub tint: Option<[f32; 3]>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LockStyle {
@@ -679,6 +663,7 @@ pub struct Hud {
     pub lock_marker: Option<LockMarker>,
     pub hint_styles: [Option<HintStyle>; 4],
     pub flag_styles: [Option<HintStyle>; 4],
+    pub carrier_styles: [Option<HintStyle>; 4],
     pub objective_styles: [Option<HintStyle>; 4],
     pub hint_markers: Vec<HintMarker>,
     pub space: Option<crate::hud_space::SpaceStatus>,
@@ -832,6 +817,7 @@ impl Hud {
             lock_marker: None,
             hint_styles: [None; 4],
             flag_styles: [None; 4],
+            carrier_styles: [None; 4],
             objective_styles: [None; 4],
             hint_markers: Vec::new(),
             space: None,
@@ -881,8 +867,13 @@ impl Hud {
             if kind == Kind::Other {
                 let hint_slot = HINT_STYLE_NAMES.iter().position(|n| *n == lname);
                 let flag_slot = FLAG_STYLE_NAMES.iter().position(|n| *n == lname);
+                let carrier_slot = CARRIER_STYLE_NAMES.iter().position(|n| *n == lname);
                 let objective_slot = OBJECTIVE_STYLE_NAMES.iter().position(|n| *n == lname);
-                if hint_slot.is_some() || flag_slot.is_some() || objective_slot.is_some() {
+                if hint_slot.is_some()
+                    || flag_slot.is_some()
+                    || carrier_slot.is_some()
+                    || objective_slot.is_some()
+                {
                     let friendly = c
                         .children
                         .iter()
@@ -908,6 +899,9 @@ impl Hud {
                     }
                     if let Some(slot) = flag_slot {
                         self.flag_styles[slot] = style;
+                    }
+                    if let Some(slot) = carrier_slot {
+                        self.carrier_styles[slot] = style;
                     }
                     if let Some(slot) = objective_slot {
                         self.objective_styles[slot] = style;
