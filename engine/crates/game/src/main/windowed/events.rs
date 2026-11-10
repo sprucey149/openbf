@@ -300,14 +300,7 @@ impl winit::application::ApplicationHandler for App {
                                 } else {
                                     self.kbm.pad(pad)
                                 };
-                                // A button held through the resume waits for
-                                // its release (playtest A3); space battles
-                                // keep their input as it was.
-                                if space {
-                                    pad
-                                } else {
-                                    game::pause::resume_pad(&mut self.resume_gate, pad)
-                                }
+                                game::pause::resume_pad(&mut self.resume_gate, pad)
                             }
                         };
                         self.sprint_latch.apply(pad, on_foot, sprinting)
@@ -327,8 +320,6 @@ impl winit::application::ApplicationHandler for App {
                     let mut stuck_alarm = false;
                     let mut look = PadState::default();
                     if paused {
-                        // A ground battle's paused bus holds its loops where
-                        // they are; a space battle's engines stop with the sim.
                         if !self.audio.as_ref().is_some_and(|a| a.game_paused()) {
                             if let Some(sl) = self.sounds.as_mut() {
                                 sl.stop_loops();
@@ -361,12 +352,11 @@ impl winit::application::ApplicationHandler for App {
                             icons,
                             first_person: self.profile.settings.viewpoint.is_first(),
                             cursor: self.pause_menu.cursor,
-                            // Space battles keep their flat list.
-                            page: (!walk.space_battle()).then_some(self.pause_menu.page),
+                            page: Some(self.pause_menu.page),
                             popup: self.pause_menu.confirm,
                             restart_available: self.map.is_none() && self.current.is_some(),
                             texts: game::pause::texts(&self.feed),
-                            back_steps_out: walk.space_battle(),
+                            back_steps_out: false,
                             // The disc's key; English fallback is §7's label.
                             respawn_label: (walk.sim.outcome.is_none()
                                 && walk.sim.unit(walk.player).is_some())

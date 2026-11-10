@@ -1,5 +1,4 @@
 //! The ground Game Menu (playtest A6, issue #128): both discs' row order,
-//! pages and Yes/No popups; space battles and the shell keep the flat list.
 use super::*;
 
 fn ground() -> MenuModel {
@@ -67,7 +66,7 @@ fn the_game_menu_lists_the_original_rows_in_order() {
 /// Space battles and the shell's settings page keep the flat list exactly;
 /// the flat Quit leaves at once.
 #[test]
-fn the_flat_menu_is_unchanged_for_space_and_shell() {
+fn the_flat_menu_remains_available() {
     let space = MenuModel {
         page: None,
         back_steps_out: true,

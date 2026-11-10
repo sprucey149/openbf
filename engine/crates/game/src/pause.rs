@@ -44,7 +44,6 @@ pub struct PauseMenu {
     pub confirm: Option<Popup>,
     pub class_picker: bool,
     pub class_tab: usize,
-    /// The Game Menu page (ground battles; space keeps the flat list).
     pub page: PausePage,
     /// The Game Menu row that opened the page shown, for its Back.
     pub opener: usize,
