@@ -782,6 +782,7 @@ pub fn install_with_objective(
         &b.classes,
         |c| vehicle_class::is_turret(&db, c),
         |c| crate::assets::hit_locations(&db, c),
+        |c| crate::assets::added_weak_parts(&db, c),
     );
     sim.sync_hulls();
     let nodes = hardpoints_from(m, &sides);
@@ -1129,6 +1130,7 @@ pub fn hull_parts(
         classes,
         turret,
         |_| Vec::new(),
+        |_| Vec::new(),
     )
 }
 
@@ -1139,6 +1141,7 @@ fn hull_parts_from(
     classes: &[String],
     turret: impl Fn(&str) -> bool,
     hit_locations: impl Fn(&str) -> Vec<(String, f32)>,
+    added: impl Fn(&str) -> Vec<core::collision::HullPart>,
 ) -> Vec<Option<std::sync::Arc<[core::collision::HullPart]>>> {
     classes
         .iter()
@@ -1148,7 +1151,11 @@ fn hull_parts_from(
             }
             let (dir, k, entry) = class_collision(m, map_dir, sides, c)?;
             let cg = crate::assets::load_collision_geom(dir, &entry).ok()?;
-            let parts = crate::assets::hull_parts(&cg, &k.collision, &hit_locations(c));
+            let mut parts = crate::assets::hull_parts(&cg, &k.collision, &hit_locations(c));
+            // After the model's own, so their order (and indices) stay.
+            if !parts.is_empty() {
+                parts.extend(added(c));
+            }
             (!parts.is_empty()).then(|| parts.into())
         })
         .collect()

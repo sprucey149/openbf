@@ -212,7 +212,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/lib.rs` 72 — module roots and fixed tick rate · `TICK_HZ`, `TICK_DT`
 - `core/src/sim.rs` 210 — simulation facade, public re-exports and shared test fixtures · `Sim`, `PadState`, `InputLog`, `Event`, `buttons`; tick order and part ownership are specified in its module header.
 - `core/src/sim/rider_health_tests.rs` 245 — a vehicle's health and its riders' are two pools: what reaches each.
-- `core/src/sim/state.rs` 1428 — simulation state, counters, cheats, construction and queries; events and the replay hash have rows below · `Sim`, `NavStats`, `Cheats`, `Hazard`, `LETHAL_LANDING_SPEED`, `omni_radius_for`; door methods and hash referees have separate rows below.
+- `core/src/sim/state.rs` 1465 — simulation state, counters, cheats, construction and queries; events and the replay hash have rows below · `Sim`, `NavStats`, `Cheats`, `Hazard`, `LETHAL_LANDING_SPEED`, `omni_radius_for`; door methods and hash referees have separate rows below.
 - `core/src/sim/state/events.rs` 503 — what the sim tells the game · `Event`, `Call`, `DeathCause`
 - `core/src/sim/state/hash.rs` 416 — the whole-state hash the replay gates read · `Sim::hash`
 
@@ -224,8 +224,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/trace/tests.rs` 177 — SHASH replay equality/first divergence, independent wire vectors, field sensitivity, read-only controls and legacy hash pins.
 - `core/src/sim/input.rs` 874 — pad/button definitions, input logs and replay, player aim-assist acquisition and reticle picks; includes replay, pad-slot and assist tests · `PadState` (`fire_lag`: a press fired part way into its tick's turn; `pick`: a spawn-screen mouse pick, `ScreenPick`), `buttons`, `InputLog`, `AimTarget`, `Sim::run_log`, `Sim::magnet_at`, `cone_score`; see the module header and `analysis/re-aim-assist.md`.
 - `core/src/sim/input/tests.rs` 926 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
-- `core/src/sim/foot_lock.rs` 334 — BF2's on-foot launcher lock: the lock button's pick, the 2 s hold, the 25.8° dwell gate and the HUD getters; BF1 maps and space rounds keep the magnet · `FootLock`, `Sim::tick_foot_lock`, `Sim::foot_lock_target`, `Sim::foot_lock_charge`, `Sim::space_round`.
-- `core/src/sim/foot_lock/tests.rs` 338 — press-only lock, pick limits, dwell reset, 2 s hold, hold-to-clear and no manual reload, BF1/space magnet unchanged, silent hash.
+- `core/src/sim/foot_lock.rs` 383 — the on-foot launcher lock on every ground map (BF2's rule): the lock button's pick, the 2 s hold, the 25.8° dwell gate and the HUD getters (the lock box on a vehicle's weak part in sight); space rounds keep the magnet · `FootLock`, `Sim::tick_foot_lock`, `Sim::foot_lock_target`, `Sim::foot_lock_weak`, `Sim::foot_lock_charge`, `Sim::space_round`.
+- `core/src/sim/foot_lock/tests.rs` 549 — auto lock, pick limits, dwell reset, 2 s hold, press reload or cycle, on both games' ground rules; BF1 torpedo lock and its named deviation; space magnet unchanged, silent hash.
 - `core/src/sim/lock_on.rs` 418 — flyer and vehicle target lock-on, target cycling, hold-to-clear and missile launch readiness · `LockOn`, `LockTarget`, `Sim::tick_lock_on`, `Sim::lock_on_target`, `Sim::lock_on_ready`.
 - `core/src/sim/lock_on/tests.rs` 251 — lock-on acquisition, target cycle memory, hold clear, LOS obstruction and firing ready tests.
 - `core/src/sim/target_hints.rs` 161 — pilot target hint candidate caching, cone pruning and friendly/enemy marker lists · `TargetHint`, `TargetHints`, `Sim::update_target_hints`, `Sim::tick_target_hints`.
@@ -242,7 +242,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/blast.rs` 1001 — shared explosion area-damage path · `Sim::explode`, `soldier_blast_sphere`, `BLAST_GATHER_MAX`; gather, LOS, falloff and team rules are specified in the module header and `analysis/re-vehicle-death.md` §2–§5.
 - `core/src/sim/bounds.rs` 1048 — playable-level floor resolution, arc/hub walkability, rim/kill-floor tests and lost-bot floor return paths · `Sim::resolve_nav_floors`, `Sim::level_at`, `Sim::rim_drop`, `Sim::return_point`, `Sim::return_path`, `Sim::floor_walk_to`, `Sim::floor_line`, `ReturnPath`, `Sim::arc_unwalkable`, `Sim::lands_under_the_map`, `Level`; floor/return rules are specified here and in `analysis/re-kill-floor.md`. Trapped hubs are pinned by `game/tests/suite/nav_walls.rs`; kill-floor/under-map deaths bypass invincibility.
 - `core/src/sim/bounds/tests.rs` 646 — floor resolution, arc walled/walkable, per-hub start check, rim and kill-floor regressions.
-- `core/src/sim/buffs.rs` 185 — shared timed buff state, refresh, hashing, healing and attributed poison · `Buffs`, `tick_buffs`.
+- `core/src/sim/buffs.rs` 203 — shared timed buff state, refresh, hashing, healing and attributed poison · `Buffs`, `tick_buffs`.
 - `core/src/sim/combat.rs` 790 — bolt impacts, damage, kills/tickets and impact explosions; environmental death and cheat exemptions; includes damage/death regressions · `Sim::kill_environment`; see module header, with blasts routed through `Sim::explode`.
 - `core/src/sim/combat/tests.rs` 1170 — the bolt, damage and kill tests.
 - `core/src/sim/round.rs` 623 — command-post registration/capture, conquest bleed, difficulty handicap and round outcome; includes capture/defeat/handicap tests · `Sim::add_cp`; rules are in the module header.
@@ -309,7 +309,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/impact.rs` 217 — render-only impact/trail/explosion effect selection · `Surface`, `ImpactLook`, `ExplosionLook`; see module header and `analysis/re-fx.md` §7 `[O]` for surface slots, defaults and per-game effect lists.
 - `core/src/projectile.rs` 534 — bolts, one predictive ray at spawn and complete replay serialization · `Bolt`
 - `core/src/sim/pickups.rs` 518 — dropped-item tables/state, drop and pickup ticking · `ItemClass`, `DropTable`, `Pickup`, `Sim::add_item_class`, `drop_item`, `dispense_shots`, shared `spawn_pickup`, `tick_pickups`; the buff state is `Buffs` in `buffs.rs`; rules are in the header and `analysis/re-powerups.md` §3–§5. Damage applies buffs through `buff_scale` in `combat.rs`.
-- `core/src/sim/awards.rs` 87 — BF2's award weapons: the medal bits a unit holds (only the session cheat sets them, for the player, outside space), the unlock/lock rule the switch, guided launch and bot weapon choice share, and the in-hand swap when the medals change · `Sim::award_bits`, `Sim::weapon_locked`; tests in `core/src/sim/awards/tests.rs`; `analysis/re-grenades.md` §2.4.
+- `core/src/sim/awards.rs` 89 — BF2's award weapons: the medal bits a unit holds (only the session cheat sets them, for the player, outside space), the unlock/lock rule the switch, guided launch and bot weapon choice share, and the in-hand swap when the medals change · `Sim::award_bits`, `Sim::weapon_locked`; tests in `core/src/sim/awards/tests.rs`; `analysis/re-grenades.md` §2.4.
+- `core/src/sim/awards/tests.rs` 213 — the cheat swaps the player's kit only, a lock with no award carried, nothing in space, the damage award.
 - `core/src/sim/abilities/tests.rs` 352 — officer effects, duration, radius, self targeting, bot policy, ammo and replay regressions.
 - `core/src/sim/pickups/tests.rs` 499 — pickup drop-table, lifetime/pool, per-game touch/grant/velocity, energy/buff and hash referees; see `analysis/re-powerups.md` §3–§5.
 - `core/src/sim/pickups/tests/dispensers.rs` 244 — dispenser supply, both firing channels, failed-spawn refunds, pool/owner limits, flight, lifetime, hashing and ammo-refill exclusion.
@@ -325,6 +326,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/ordnance/tests.rs` 1400 — the soldier weapon and grenade tests.
 - `core/src/aim_assist.rs` 579 — BF1 aim-assist magnetism · `apply`
 - `core/src/water.rs` 136 — the water plane as the sim sees it: one level plus the WMAP wet-cell mask (a nibble per 32 m cell, the PS2's clamped lookup), and the downward crossing tested at the crossing's cell · `WetMask`, `Plane`; `Sim::water_plane` / `Sim::water_under`; `analysis/re-fx.md` §15. The mask and oscillation flag are load-time inputs like `water_level`; `Sim::water_plane` adds the deterministic flat-water bob from the sim tick.
+- `core/src/sim/weak_lock.rs` 116 — OURS: a human's launcher lock goes to the vehicle's weak part in sight nearest the reticle; the part a locked rocket steers to and the factor it takes on that hull · `Sim::weak_part`, `Sim::weak_part_point`, `Sim::foot_weak_part`, `part_factor`. Note: `analysis/re-ordnance-kinds.md` §5.1.
+- `core/src/sim/weak_lock/tests.rs` 445 — lock point choice, hidden and covered parts, homing to the part, the x4 on the locked hull, a moving and a turned vehicle, the dwell and hold on a part, bots and space unchanged, the silent hash.
 - `core/src/sim/water.rs` 55 — PS2 soldier drowning and fire-point submersion; fixed-tick breath state lives on `Soldier`, water height/mask/bob are shared map inputs. `core/tests/drowning.rs` pins measured timelines, both weapon channels, queued salvos, surface resets and replay hashes.
 - `core/src/boundary.rs` 96 — the map boundary's point test and countdown time; only the remote droid reads it so far · `Boundary`, `leaving_time`.
 - `core/src/heightfield.rs` 374 — terrain triangle height/normal queries and bounds-assisted ray-march probes · `Heightfield`, `HeightProbe`; interpolation and probe rules are specified in the module header.
@@ -376,7 +379,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/ai/team.rs` 612 — derived think-window unit grid, follow spacing and team Cover/Flank roles · `UnitGrid`, `Sim::units_within`, `follow_ease`, `board`, `flank_cap`; shared perception stays in `perception::tell`. Grid lifetime/order, role rules and constants are specified in the header and `analysis/bot-design.md` 4.1/4.3/6.2; derived grid is not hashed.
 - `core/src/ai/team/tests.rs` 471 — unit-grid equivalence/lifetime, follow spacing and Cover/Flank role regressions, including diamond-route behavior.
 - `core/src/ai/behave.rs` 77 — foot-bot behavior facade, shared `Tick`, and the `think` / `lost_jump` exports; see `analysis/bot-design.md` 3.
-- `core/src/ai/behave/brain.rs` 1012 — foot-bot tick priority chain, next-think call delivery and explicit human boarding over retained commands, valid boarding maintenance, guard goal, failed-walk recovery, hub arrival and the health droid’s final approach; hands one aim request to the gunner and one move request to the mover, writing no sticks.
+- `core/src/ai/behave/brain.rs` 1131 — foot-bot tick priority chain, next-think call delivery and explicit human boarding over retained commands, valid boarding maintenance, guard goal, failed-walk recovery, hub arrival and the health droid’s final approach; hands one aim request to the gunner and one move request to the mover, writing no sticks.
 - `core/src/ai/behave/position.rs` 614 — fight and hold positions, hit reactions, grenade escape and lost-bot jump probes.
 - `core/src/ai/behave/position/tests.rs` 1266 — the 25 behavior regressions spanning tick dispatch, fight positions, reactions, grenades and return to the level.
 - `core/src/ai/abilities.rs` 183 — pure officer support, remote-droid and auto-turret (the BF2 cluster rule) selection through secondary fire and switch inputs · `input` (re-exported as `ai::ability_input` in `ai.rs`).
@@ -454,7 +457,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/main/windowed/front.rs` 1062 — shell front screens, movie/music (takes in turn), menu clicks, the BF2 Instant Action screen, Instant Action, settings and binding capture · `FrontShell`, `App::redraw_shell`; `ui::shell_ps2` owns the screen flow.
 - `game/src/lib.rs` 81 — module roots
 - `game/src/world_fingerprint.rs` 101 — baked world compatibility identity for a future multiplayer handshake.
-- `game/src/assets.rs` 1398 — baked-map loading into a CPU scene, texture tiers, collision/hull body extraction and mesh-reader re-exports · `load_scene`, `Scene`, `TextureTier`, `mode_layer_index`, `body_layers`, `hull_parts`.
+- `game/src/assets.rs` 1543 — baked-map loading into a CPU scene, texture tiers, collision/hull body extraction, the vehicles' hit locations (OURS: BF1's weak spots) and mesh-reader re-exports · `load_scene`, `Scene`, `TextureTier`, `mode_layer_index`, `body_layers`, `hull_parts`, `hit_locations`, `BF1_WEAK_SPOTS`, `BF1_ADDED_WEAK_SPOTS`, `added_weak_parts`.
 - `game/src/assets/tests.rs` 391 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
 - `game/src/assets/visual_clips.rs` 168 — Loads optional meshless clip companions for rendering while preserving the simulation body.
 - `game/src/assets/mesh.rs` 527 — static/skinned GLB mesh readers, material and contact-surface extras, and streaming fixtures · `load_glb`, `load_glb_joints`, `load_skinned_glb`, `CpuSkinnedMesh`, `SkinnedAsset`.
@@ -495,10 +498,13 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/layout.rs` 963 — manifest command posts, spawn paths and navigation graph · `MapLayout`, `nav_graph`.
 - `game/src/mission.rs` 1236 — mission RON loading and army/team selection, planning/barrier calls, sound/music/voice and camera-shot data · `MissionDef`, `MusicCalls`, `Pick`, `pick`; generated by `scripts/gen_missions.py`; module header describes field-consumption limits.
 - `game/src/native_teams.rs` 184 — native conquest class setup and authored ally spawn paths · `install`.
+- `game/src/normalize.rs` 520 — one set of soldier health and damage numbers for both games (ours): BF2 is the reference, each BF1 class definition is rewritten as it loads - soldier health from its BF2 counterpart, infantry damage to soldiers, animals, droids and shields by one factor, a few keys taken whole; interim, every other BF1 gun and blast x4/3 against soldiers · `apply`, `covers`, `covers_map`, `HEALTH`, `PERSON_DAMAGE`, `KEYS`, `BF1_SCALE`, `REFERENCE_HEALTH`, `health_row`, `is_infantry_damage`; `analysis/gameplay-normalization.md`.
+- `game/src/normalize/tests.rs` 396 — the rewrite rules on in-memory definitions.
 - `game/src/round_end.rs` 284 — the end of a round (issue #33): the camera shot, the victory / defeat banner's time, then BF2's stats pages (issue #50) fed this frame's presses, Square's Done and the idle quit · `RoundEnd`, `Phase`, `RoundEnd::wants_stats`; `analysis/re-round-end.md` §2-§3.
 - `game/src/round_stats.rs` 573 — every soldier's round for the stats pages (points, kills, posts, sprees, team kills, vehicles, class / weapon time, who killed whom) read from the sim's events by the feed, and the pages built from it (awards, Personal Stats lines, the profile's Career Stats, the medals' table) · `RoundStats`, `UnitRound`, `Names`, `screens`, `MEDALS`, `medal_level`; module header and statsref README.
-- `game/src/roster.rs` 1442 — class data into faction/unit/weapon rosters, soldier constants with the jet data (`soldier_constants`, BF1 borrowing BF2 jet keys), held-slot registration, BF2 SBD gameplay with native map audio on both map sets and weapon visual specifications · `FactionRoster`, `held_slots`, `ClassRoster::register`.
-- `game/src/roster/weapon_db.rs` 539 — weapons read from the class db: HUD key, charge stages, ordnance, thrown and sticky weapons, donors · `weapon_from_db`, `thrown_weapon_from_db`, `weapon_hud`
+- `game/src/roster.rs` 1473 — class data into faction/unit/weapon rosters, soldier constants with the jet data (`soldier_constants`, BF1 borrowing BF2 jet keys), held-slot registration, BF2 SBD gameplay with native map audio on both map sets and weapon visual specifications · `FactionRoster`, `held_slots`, `ClassRoster::register`.
+- `game/src/roster/weapon_db.rs` 543 — weapons read from the class db: HUD key, charge stages, ordnance, thrown and sticky weapons, donors · `weapon_from_db`, `thrown_weapon_from_db`, `weapon_hud`
+- `game/src/roster/awards.rs` 269 — BF2's award weapons on BF1 classes (ours): the BF1 weapon to BF2 award table, the award built from BF2's class data and dressed as the BF1 weapon it stands for, BF2's clips, the lock a BF1 weapon carries · `BF1_AWARDS`, `bf1_award`, `add`, `sound_as`; `analysis/award-weapons.md`.
 - `game/src/roster/looks.rs` 177 — muzzle flash, laser, impact and explosion looks read from the class db · `flash_look`, `laser_look`, `impact_look`, `explosion_look`, `explosion_class`
 - `game/src/roster/items.rs` 289 — pickups, stations, drop tables and item pools read from the class db · `item_class_from_db`, `station_class_from_db`, `add_stations`, `item_pool`
 - `game/src/roster/tests.rs` 230 — the roster's tests.
@@ -509,12 +515,12 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/turret_fall.rs` 127 — a building turret class's fallen look (DestroyedGeometryName, the unbuilt pad, hidden; the common gun turret's pad deviation), its collision parts and the fallen models per placed instance · `fall_look`, `collision_parts`, `fallen_models`; card TBLD.
 - `game/src/shell_ia.rs` 125 — the Instant Action screen's content from the bake: both games' names, baked maps, mission pairs; the profile tier ↔ Session Options' AI level · `instant_action`, `ia_level`, `port_difficulty`.
 - `game/src/shell_movie.rs` 428 — shell movie frame-pack playback and background JPEG decoding · `ShellMovie`, `load_index`, `shell_dir`, `decode`; module header and `analysis/re-bf2-shell.md` §4.
-- `game/src/classdb.rs` 669 — entity-class RON loading, BASE inheritance, case-insensitive resolution and ordered weapon-slot inheritance and an optional canonical SBD weapon database · `ClassDb`, `resolve`, `weapon_slots`, `WeaponSlot`.
+- `game/src/classdb.rs` 697 — entity-class RON loading, BASE inheritance, case-insensitive resolution and ordered weapon-slot inheritance and an optional canonical SBD weapon database; BF1 class files and a BF1 map's own class file take the shared health and damage numbers as they load · `ClassDb`, `ClassDb::disc`, `resolve`, `weapon_slots`, `WeaponSlot`.
 - `game/src/class_picker.rs` 282 — the dev class picker's classes per side · `ClassPicker`, `Choice`
 - `game/src/class_picker/playable.rs` 116 — the class names the picker offers, per game · `BF1`, `BF2`
 - `game/src/class_picker/tests.rs` 222 — the picker's lists and availability.
 - `game/src/vehicle_class/walker.rs` 907 — walker class parsing, section/default conversions and BF1-body adaptation · `WalkerClass`, `WALKER_BASES`, `turret_claims`, `bf1_body`; census tests here; module header and `analysis/re-walker.md` §11, §13.9.
-- `game/src/vehicle_class.rs` 1201 — vehicle/building-turret class properties, seat/gun/rider rules, hull-body selection and flyer rest height · `HoverClass`, `seats`, `SeatSpec`, `GunnerDraw`, `PilotPose`, `health_type`, `ai_size`, `neutral_when_empty`, `damage_effects`, `explosion_name`, `HoverClass::hull`, `hull_names`, `TURRET_BASES`, `is_turret`, `FLYER_BASES`, `landed_height`; module header, `analysis/re-hover.md` §13.2 and `analysis/re-vehicle-rest.md` §2.
+- `game/src/vehicle_class.rs` 1263 — vehicle/building-turret class properties, seat/gun/rider rules, hull-body selection and flyer rest height · `HoverClass`, `seats`, `SeatSpec`, `GunnerDraw`, `PilotPose`, `health_type`, `ai_size`, `neutral_when_empty`, `damage_effects`, `explosion_name`, `HoverClass::hull`, `hull_names`, `TURRET_BASES`, `is_turret`, `FLYER_BASES`, `landed_height`; module header, `analysis/re-hover.md` §13.2 and `analysis/re-vehicle-rest.md` §2.
 - `game/src/vehicle_class/aim.rs` 44 — Authored vehicle aimer metadata and limits.
 - `game/src/vehicle_class/tests.rs` 404 — vehicle class parsing, seat, hull and damage effect checks.
 - `game/src/vehicle_pads.rs` 1375 — manifest vehicle pads/building turrets into sim vehicle, gun, hull and seat setup; extra mission side-file routing · `build`, `add_turrets`, `install`, `mission_side_files`, `seat_setup`, `seat_gun`, `hardpoints`, `hull_parts`, `hover_hull`, `walker_bakes`, `building_sphere`, `PadBuild`, `TurretDef`, `class_key_team`; module header and `analysis/re-vehicles.md` §7–§8.
@@ -543,7 +549,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/animator/tests/jet.rs` 112 — Card JETP2: the jet stances play `jetpack_hover` on the baked jet classes of both games, a shot plays over it, and the soldier lands back
 - `game/src/skin.rs` 445 — skeleton, pose and looping frame sampling → joint palette · `Skeleton`, `Pose`, `Clip`
 - `game/src/soldier_vis.rs` 781 — shared soldier/weapon asset types, draw plans, rider/seat helpers and muzzle geometry; preserves the `soldier_vis` API · `SoldierVisuals`, `DrawPlan`, `WeaponAsset`, `FlashModel`, `weapon_in_hand`, `seat_now`, `rider_now`, `fire_point`.
-- `game/src/soldier_vis/runtime.rs` 1399 — `SoldierVisuals` asset loading, animation updates, spawn-screen stills and body/weapon/flash draw submission · `for_walk`, `load`, `load_cpu`, `update_with`, `still_draws`, `step_hover_nines`.
+- `game/src/soldier_vis/runtime.rs` 1418 — `SoldierVisuals` asset loading, animation updates, spawn-screen stills and body/weapon/flash draw submission · `for_walk`, `load`, `load_cpu`, `update_with`, `still_draws`, `step_hover_nines`.
 - `game/src/soldier_vis/runtime/animation.rs` 311 — advance soldier animation from the current sim · `SoldierVisuals::update`, `update_with` and foot-step animation
 - `game/src/soldier_vis/water.rs` 31 — posed left/right foot positions in model and world space for water contact: `WaterFeet`, `SoldierVisuals::water_feet`.
 - `game/src/soldier_vis/first_person.rs` 459 — the player's first-person arms and weapon: loading per class, the clip choice and playback each frame, the draw and the muzzle on the 1st-person gun · `FirstPersonVisuals`, `first_person_draws`; `analysis/re-first-person-arms.md` §5-§6.
@@ -744,6 +750,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `game/tests/suite/cheat_ammo.rs` 156 — CHEAT2 on BF1's stormtrooper rifle off the disc: infinite ammo (reserve fixed, free reloads), no reloading (clip full, the reserve pays, 275 rounds in one burst), both (nothing drawn) and neither, per tick.
 - `game/tests/suite/spawn_lineup_clear.rs` 250 — the class screen's real soldiers stay clear of its panel and the window's edge at each aspect (GPU), its outlines are not measured on opening, and a capture of the real page.
 - `game/tests/suite/unlocks_bf1.rs` 179 — UNLK1/UNLK3 on real BF1 Kamino and Yavin: the jet trooper, dark trooper and Wookiee smuggler refuse the class accept at 11 points and spawn at 12; career kills (BF2's and BF1's jet trooper together) halve the cost at 25 and free it at 100.
+- `game/tests/suite/normalization.rs` 1011 — the shared health and damage numbers on the baked classes: equivalent classes and weapons equal on both games, each table row equal to BF2's own number, pinned hits to kill (BF1's vehicle and turret guns too), BF2 untouched, BF1 changed only inside the rules, a map's own class file following its game, the scale keeping hit counts, every BF1 soldier and the damage classes it reaches covered; `print_table` prints the note's tables.
 - `game/tests/suite/turret_damage.rs` 720 — building turrets take the ordnance's damage (playtest 2026-10-28): BF2 Kamino's Minigun Turret with a bot gunner under the EMP launcher, rocket launcher and rifle (the drop by the building scales, direct + blast; destroyed at 0 with the gunner killed), BF2 Hoth's dish and BF1 Kamino / Naboo / Geonosis turrets, and a gunner's own rounds sparing his turret.
 - GPU referees: `render/tests/suite/` (one binary, card WEARY), run only by `scripts/gpu_tests.sh` (then `scripts/goldens.sh --check`).
 - Goldens: *engine/goldens/maps/*, *engine/goldens/units/* and the HUD / shell / spawn PNGs beside them; referees
@@ -790,6 +797,9 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 | soldier speed, stances, energy | `core/src/soldier.rs` (`SoldierConstants::from_props`) | `game/src/classdb.rs` |
 | jet and jump packs (fuel, the leap, the hover, the Jedi double jump, the fly-height ceiling; card JETP) | `core/src/soldier/air.rs` (`Soldier::jet_on`, `step_jet`, `fly_ceiling`) | `game/src/roster.rs` (`soldier_constants`, `BF1_JET_BORROW`), `core/src/sim/step.rs` (`AirEnv`, the cheat), `game/src/mission.rs` (`max_player_fly_height`), `scripts/gen_missions.py`, `analysis/re-jetpack.md` §13 |
 | a faction's classes | `game/src/roster.rs` | `game/src/mission.rs` |
+| award weapons: the switch rule, the cheat, the damage award; BF1 classes' award slots | `core/src/sim/awards.rs`, `core/src/sim/buffs.rs` (`WAR_HERO`), `game/src/roster/awards.rs` | `core/src/sim/state.rs` (`Cheats::all_awards`), `game/src/roster.rs` (`load_classdb`, `ClassRoster::build`), `game/tests/suite/award_weapons.rs`, `game/tests/data/class_kits.txt`, `analysis/award-weapons.md` |
+| slicing: the cutter on an enemy vehicle, slice times, cutter reach | `core/src/sim/repair.rs`, `game/src/vehicle_class.rs` (`slice_time`, `BF1_SLICE_TIMES`) | `game/src/normalize.rs` (`KEYS`: BF1's cutter reach), `game/tests/suite/squad_vehicle_maps.rs`, `game/tests/suite/vehicle_class.rs` |
+| soldier health and weapon damage shared by both games' maps (the BF1 rewrite tables) | `game/src/normalize.rs` | `game/src/classdb.rs` (`ClassDb::load`, `ClassDb::load_map`, `ClassDb::disc`), `analysis/gameplay-normalization.md`, `game/tests/suite/normalization.rs` |
 | which class a bot or a respawning player takes | `core/src/sim/spawn/runtime.rs` (`ai_class`, `respawn_slot`) | `game/src/roster.rs` |
 | a mission's teams, tickets, timing | `scripts/gen_missions.py` → `engine/missions/` | `game/src/mission.rs` |
 | post capture, bleed, domination | `core/src/cp.rs` | `core/src/region.rs`, `core/src/sim/round.rs` (`update_cps`) |
@@ -920,6 +930,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `core/src/sim/droid_death/tests.rs` 334 — Card DROIDDEATH's referees (`analysis/re-droid-death.md`): the death roll's 6 in 10 with no damage threshold, the push roll's mark, the burst
 - `core/src/sim/guided/tests.rs` 373 — guided launch, control, collision, detonation and hand-back tests.
 - `game/tests/suite/guided_rockets.rs` 377 — all 14 inherited guided launchers, award gating, camera/interpolation restoration, smooth mouse/controller turning at 60/75/144 Hz and all-side/map-local equipment census.
+- `game/tests/suite/award_weapons.rs` 470 — award weapons on both games' baked classes: BF2's advantage per medal, BF1 award slots and looks, the cheat on a BF1 kit in the sim (150 a round x 1.5), the beam and the flechette.
 
 - `game/src/fx/chunks.rs` 1041 — cosmetic droid and vehicle chunk launch, bounded pool and floor contacts.
 - `bake/src/attached_effects.rs` 149 — ordered AttachEffect replay and baked hardpoint frames/repeat bounds.
@@ -1062,8 +1073,8 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `core/src/sim/emitter.rs` 754 — emitter shots: gather, query, damage, push and arc events.
 - `core/src/sim/fatray.rs` 83 — fat ray ordnance damage along a wide sweep.
 - `core/src/sim/fatray/tests.rs` 168 — fat ray scene tests.
-- `core/src/sim/missiles.rs` 150 — missile steering step and the launcher dwell lock.
-- `core/src/sim/missiles/tests.rs` 575 — missile homing, expiry and dwell lock scene tests.
+- `core/src/sim/missiles.rs` 165 — missile steering step (to the target's point, or the weak part a round was sent at) and the launcher dwell lock.
+- `core/src/sim/missiles/tests.rs` 596 — missile homing, expiry and dwell lock scene tests.
 - `core/src/sim/ordnance/tracers.rs` 311 — BF2 secondary ordnance: the periodic round beside the primary.
 - `core/src/sim/saber/tests/contact.rs` 107 — hand blade contact effects and sounds.
 - `core/src/sim/saber/tests/turning.rs` 183 — a human hero turns during an attack; bots keep the lock.
@@ -1108,6 +1119,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `game/tests/suite/rocket_expiry.rs` 116 — real-disc ExplosionExpire loading and wrist-rocket natural air expiry through authored effects.
 
+- `game/tests/suite/rocket_weakspot.rs` 870 — real-data weak spots: the critical mark for a rocket on a x4 prim, which weapons are rocket launchers, BF1's torpedo lock data, the weak-part lock through the trigger on both games' Geonosis, BF1's weak-spot tables on the baked hulls, and the ignored `weak_part_lock_survey` behind `analysis/re-ordnance-kinds.md` §5.1.
 - `game/tests/suite/rocket_visible.rs` 396 — all-side rocket/torpedo/recoilless/guided mesh census, faithful trail-only pins, headless side/head pixels and display-loop captures across source bakes.
 
 - `bake/src/map/render_textures.rs` 492 — missing donor sheets, fingerprinted PC snow and PC/Xbox console replacements, turret alias and same-art full-size coarse atlases · `recover`, `recover_xbox_mustafar`, `larger_own`.

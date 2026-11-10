@@ -517,7 +517,10 @@ fn parse_cheats(s: &str) -> Result<core::sim::Cheats> {
             "run" | "stamina" => c.infinite_stamina = true,
             "all" | "classes" => c.all_classes = true,
             "awards" => c.all_awards = true,
-            other => bail!("unknown cheat: {other} (invincible, ammo, clip, run, all, awards)"),
+            "damage" | "damage_award" => c.damage_award = true,
+            other => {
+                bail!("unknown cheat: {other} (invincible, ammo, clip, run, all, awards, damage)")
+            }
         }
     }
     Ok(c)

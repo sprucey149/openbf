@@ -66,26 +66,46 @@ pub struct ClassDb {
     bf2: bool,
     /// Asset root of the loaded class files, also used for companion hero data.
     assets_root: Option<std::path::PathBuf>,
+    /// Keep every class as its disc wrote it ([`ClassDb::disc`]).
+    disc: bool,
 }
 
 impl ClassDb {
+    /// A db that keeps BF1's classes as the disc wrote them, skipping the
+    /// shared health and damage numbers ([`crate::normalize`]). For reading
+    /// the original data; the game plays from [`ClassDb::default`].
+    pub fn disc() -> Self {
+        Self {
+            disc: true,
+            ..Self::default()
+        }
+    }
+
     /// Load one classes.ron into the db. First definition of a name wins
     /// (load order: map-specific before shared commons, mirroring the game's
     /// level-stacking).
     pub fn load(&mut self, path: &Path) -> Result<usize> {
+        self.load_file(path, false)
+    }
+
+    /// [`ClassDb::load`]; `bf1_map` marks a BF1 map's own class file.
+    fn load_file(&mut self, path: &Path, bf1_map: bool) -> Result<usize> {
         let defs: Vec<ClassDef> =
             ron::from_str(&pak::read_to_string(path).with_context(|| path.display().to_string())?)
                 .context("parse classes.ron")?;
         if self.assets_root.is_none() {
             self.assets_root = path.parent().and_then(Path::parent).map(Path::to_path_buf);
         }
-        self.bf2 |= path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.starts_with("bf2_"));
+        let file = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        self.bf2 |= file.starts_with("bf2_");
+        // BF1's soldiers and their weapons take the shared numbers here.
+        let normalize = !self.disc && (bf1_map || crate::normalize::covers(file));
         let mut added = 0;
-        for d in defs {
+        for mut d in defs {
             if !self.classes.contains_key(&d.name) {
+                if normalize {
+                    crate::normalize::apply(&mut d);
+                }
                 self.classes.insert(d.name.clone(), d);
                 added += 1;
             }
@@ -137,12 +157,19 @@ impl ClassDb {
     /// vehicles and props no side LVL carries (TAT1's `tat_hover_skiff`,
     /// BF1 BES1's cloud car). Call it BEFORE the side files, the order
     /// [`ClassDb::load`] names. `Ok(0)` when the map's bake predates the file.
+    /// A BF1 map's turret guns and blasts take the shared numbers as BF1's
+    /// side files do ([`crate::normalize`]); the manifest names the game.
     pub fn load_map(&mut self, map_dir: &Path) -> Result<usize> {
         let p = map_dir.join(MAP_CLASSES_FILE);
         if !pak::exists(&p) {
             return Ok(0);
         }
-        self.load(&p)
+        let bf1_map = !self.disc
+            && pak::read_to_string(map_dir.join("manifest.ron"))
+                .ok()
+                .and_then(|txt| ron::from_str::<manifest::ManifestHead>(&txt).ok())
+                .is_some_and(|h| crate::normalize::covers_map(&h.source_game));
+        self.load_file(&p, bf1_map)
     }
 
     /// `class` and its BASE chain, child first, down to the last def the db
@@ -163,8 +190,9 @@ impl ClassDb {
     /// The db was loaded from a BF2 disc's class files (`bf2_*.ron`) — the
     /// game whose engine rules its classes take where the two differ (the
     /// muzzle flash's model, `core::flash`).
-    /// BF2's class data a BF1 side loads for its `roster::WEAPON_DONORS`
-    /// classes, if any.
+    /// BF2's class data a BF1 side loads beside its own, if any: its classes'
+    /// award weapons (`roster::awards`) and a `roster::WEAPON_DONORS` class's
+    /// whole kit come from it.
     pub fn donor_classdb(&self) -> Option<&ClassDb> {
         self.donor_weapons.as_deref()
     }

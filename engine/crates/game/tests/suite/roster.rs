@@ -5,6 +5,7 @@
 
 use core::weapon::{HealthType, WeaponClass};
 use game::mission::MissionDef;
+use game::normalize::BF1_SCALE;
 use game::roster::{ClassRoster, FactionRoster};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -380,16 +381,25 @@ fn fill_classes_keep_the_v0_fixtures() {
         FactionRoster::pair(&dir, "bf1", ["all", "imp"], None).expect("bf1 rosters");
     let a = all.fill_class();
     assert_eq!(a.class, "all_inf_soldier");
-    assert_eq!(a.max_health, 300.0);
+    // BF1's trooper takes the shared 400 health (`game::normalize`).
+    assert_eq!(a.max_health, 400.0);
     assert_eq!(a.consts.max_speed, 6.5);
     assert_eq!(a.consts.max_strafe_speed, 4.5);
     assert_eq!(a.consts.max_turn_speed, 4.0);
     assert_eq!(a.consts.acceleration, 70.0);
     assert_eq!(a.total_clips, 6);
+    // The disc's rifle, hitting soldiers and shields 4/3 as hard: 80.
+    let mut want = WeaponClass::bf1_rifle();
+    for scale in &mut want.ordnance.scales[..3] {
+        *scale *= BF1_SCALE;
+    }
+    want.ordnance.shield_scale *= BF1_SCALE;
+    // It gives way to BF2's award rifle, which the class carries.
+    want.medal_lock = Some(1);
+    assert_eq!(a.weapon, want, "all rifle == §8.1 fixture, normalized");
     assert_eq!(
-        a.weapon,
-        WeaponClass::bf1_rifle(),
-        "all rifle == §8.1 fixture"
+        a.weapon.ordnance.max_damage * a.weapon.ordnance.scales[HealthType::Person as usize],
+        80.0
     );
     let i = imp.fill_class();
     assert_eq!(i.weapon.name, "imp_weap_inf_rifle");
@@ -412,6 +422,8 @@ fn fill_classes_keep_the_v0_fixtures() {
     assert_eq!(r.consts.sprint_accelerate_time, 0.35);
     let mut want = WeaponClass::bf2_rifle();
     want.name = "rep_weap_inf_rifle".into();
+    // The disc's rifle is the one the award rifle replaces.
+    want.medal_lock = Some(1);
     assert_eq!(
         r.weapon, want,
         "rep rifle == §8.2 fixture via the ordc reskin chain"
@@ -474,7 +486,8 @@ fn tat1_alliance_roster_is_the_missions_mix() {
     }
     assert_eq!(all.fill_class().class, "all_inf_soldierdesert");
     assert_eq!(all.classes[3].label, "Rebel Scout");
-    assert_eq!(all.classes[3].max_health, 240.0);
+    // The scout takes BF2's sniper health (`game::normalize`; 240 on the disc).
+    assert_eq!(all.classes[3].max_health, 300.0);
     assert_eq!(all.classes[4].geometry.as_deref(), Some("all_inf_wookie"));
     let imp_names: Vec<&str> = imp.classes.iter().map(|c| c.class.as_str()).collect();
     assert_eq!(
@@ -657,7 +670,8 @@ fn only_the_jet_pack_classes_are_jet() {
 }
 
 /// Card JETP step 1: each jet class's numbers off its disc (re-jetpack.md
-/// §2.2), with BF1's missing keys borrowed from its BF2 twin.
+/// §2.2), with BF1's missing keys borrowed from its BF2 twin. The jet
+/// troopers fly on the one profile (`roster::JET_TROOPER_FUEL_*`).
 #[test]
 fn the_jet_classes_carry_their_disc_numbers() {
     let Some(dir) = classes_dir() else { return };
@@ -679,7 +693,8 @@ fn the_jet_classes_carry_their_disc_numbers() {
             "rep_inf_ep3_jettrooper",
             [5.0, 8.0, 30.0],
             true,
-            [0.16, 0.25, 0.12, 0.24, 0.0],
+            // The disc's 0.16 / 0.12 give way to the jet trooper profile.
+            [0.1, 0.25, 0.1, 0.24, 0.0],
             [1.5, 1.25, 1.25],
         ),
         (
@@ -715,7 +730,7 @@ fn the_jet_classes_carry_their_disc_numbers() {
             [1.5, 1.25, 1.25],
         ),
         // BF1 on BF2's rules: its own numbers, the twin's JetAcceleration
-        // and jet row; a hover class pays BF1's net cost 0.2 - 0.1.
+        // and jet row; the jet trooper profile is BF1's net cost 0.2 - 0.1.
         (
             "bf1",
             "rep_inf_jet_trooper",
@@ -774,8 +789,8 @@ fn the_jet_classes_carry_their_disc_numbers() {
 /// Playtest 2026-11-05 B4: a BF1 hover class pays its disc JetFuelCost less
 /// its JetFuelRechargeRate in flight (BF1 refills in the hover; BF2's rule
 /// does not), so the jet trooper flies 7.5 s from full and 2.5 s from the
-/// spawn's half tank, as on BF1. Leap classes and BF2 classes keep the disc
-/// cost.
+/// spawn's half tank, as on BF1. Leap classes keep the disc cost; every jet
+/// trooper flies on that same profile (`every_jet_trooper_flies_as_long_as_bf1s`).
 #[test]
 fn bf1_hover_classes_keep_bf1s_net_jet_drain() {
     let Some(dir) = classes_dir() else { return };
@@ -814,7 +829,107 @@ fn bf1_hover_classes_keep_bf1s_net_jet_drain() {
         );
     }
     let ep3 = game::roster::soldier_constants(&bf2, "rep_inf_ep3_jettrooper");
-    assert_eq!(ep3.jet_fuel_cost, 0.16);
+    assert_eq!(ep3.jet_fuel_cost, game::roster::JET_TROOPER_FUEL_COST);
+}
+
+/// The maintainer 2026-11-10 ("one game"): every jet trooper class on every
+/// map flies BF1's 7.5 s from full and 2.5 s from spawn on one fuel profile.
+/// The disc's lift-off cost and border already agree across the games; the
+/// profile replaces only the drain and the refill. The other hover and leap
+/// classes keep their own numbers.
+#[test]
+fn every_jet_trooper_flies_as_long_as_bf1s() {
+    let Some(dir) = classes_dir() else { return };
+    let mut bf1 = load_classdb_all(&dir, "bf1");
+    let bf2 = load_classdb_all(&dir, "bf2");
+    for key in ["JetFuelInitialCost", "JetFuelMinBorder"] {
+        assert_eq!(
+            bf1.prop_f32("rep_inf_jet_trooper", key),
+            bf2.prop_f32("rep_inf_default_jettrooper", key),
+            "{key}"
+        );
+    }
+    let troopers = [
+        (&bf1, "rep_inf_jet_trooper"),
+        (&bf2, "rep_inf_ep2_jettrooper"),
+        (&bf2, "rep_inf_ep3_jettrooper"),
+        (&bf2, "rep_inf_ep2_jettrooper_training"),
+        (&bf2, "rep_inf_ep2_jettrooper_rifleman"),
+    ];
+    let fuel = |c: &core::soldier::SoldierConstants| {
+        [
+            c.jet_fuel_cost,
+            c.jet_fuel_initial,
+            c.jet_fuel_recharge,
+            c.jet_fuel_min_border,
+        ]
+    };
+    let first = fuel(&game::roster::soldier_constants(
+        &bf1,
+        "rep_inf_jet_trooper",
+    ));
+    assert_eq!(
+        first,
+        [
+            game::roster::JET_TROOPER_FUEL_COST,
+            0.25,
+            game::roster::JET_TROOPER_FUEL_RECHARGE,
+            0.24
+        ]
+    );
+    for (db, class) in troopers {
+        let c = game::roster::soldier_constants(db, class);
+        assert!(game::roster::is_jet_trooper(db, class, &c), "{class}");
+        assert_eq!(fuel(&c), first, "{class}");
+        let full = (1.0 - c.jet_fuel_initial) / c.jet_fuel_cost;
+        let spawn = (core::soldier::Soldier::spawn_fuel(&c) - c.jet_fuel_initial) / c.jet_fuel_cost;
+        assert!((full - 7.5).abs() < 1e-3, "{class} full {full}");
+        assert!((spawn - 2.5).abs() < 1e-3, "{class} spawn {spawn}");
+    }
+    // The sniper never jets.
+    let sniper = game::roster::soldier_constants(&bf2, "rep_inf_ep2_jettrooper_sniper");
+    assert!(!game::roster::is_jet_trooper(
+        &bf2,
+        "rep_inf_ep2_jettrooper_sniper",
+        &sniper
+    ));
+    assert_eq!(
+        (sniper.jet_fuel_cost, sniper.jet_fuel_min_border),
+        (1.0, 1.04)
+    );
+    // Heroes and leapers keep their own.
+    for (class, cost, recharge) in [
+        ("cis_hero_jangofett", 0.15, 0.12),
+        ("imp_hero_bobafett", 0.15, 0.12),
+        ("imp_hero_darthvader", 0.3, 0.9),
+        ("imp_hero_emperor", 0.3, 0.9),
+        ("imp_inf_dark_trooper", 0.0, 0.075),
+    ] {
+        let c = game::roster::soldier_constants(&bf2, class);
+        assert!(!game::roster::is_jet_trooper(&bf2, class, &c), "{class}");
+        assert_eq!(
+            (c.jet_fuel_cost, c.jet_fuel_recharge),
+            (cost, recharge),
+            "{class}"
+        );
+    }
+    let dark = game::roster::soldier_constants(&bf1, "imp_inf_dark_trooper");
+    assert_eq!((dark.jet_fuel_cost, dark.jet_fuel_recharge), (0.0, 0.025));
+    let natives = game::assets::baked_root().join("classes");
+    match game::native_teams::native_side(&natives, "bf1", "geo_inf_geonosian") {
+        Some((_, file)) => {
+            bf1.load(&file).expect("native classes");
+            let geo = game::roster::soldier_constants(&bf1, "geo_inf_geonosian");
+            assert!(!game::roster::is_jet_trooper(
+                &bf1,
+                "geo_inf_geonosian",
+                &geo
+            ));
+            assert!((geo.jet_fuel_cost - (0.1 - 0.03)).abs() < 1e-6);
+            assert_eq!(geo.jet_fuel_recharge, 0.03);
+        }
+        None => eprintln!("SKIP geo_inf_geonosian: no baked native classes"),
+    }
 }
 
 /// The borrowed BF1 numbers are BF2's twins' own (re-jetpack.md §12).
@@ -2075,9 +2190,11 @@ fn drop_tables_are_the_discs() {
             "bf1",
             &[
                 ("com_item_powerup_ammo", 0.0, 1, 0.1255),
-                ("com_item_powerup_health25", 50.0, 0, 0.0965),
-                ("com_item_powerup_health100", 75.0, 0, 0.1206),
-                ("com_item_powerup_dual", 100.0, 2, 0.1565),
+                // The disc's 50, 75 and 100, as the same share of the
+                // shared 400-health trooper (`game::normalize`).
+                ("com_item_powerup_health25", 50.0 * BF1_SCALE, 0, 0.0965),
+                ("com_item_powerup_health100", 75.0 * BF1_SCALE, 0, 0.1206),
+                ("com_item_powerup_dual", 100.0 * BF1_SCALE, 2, 0.1565),
             ][..],
         ),
         (
@@ -2504,6 +2621,8 @@ fn only_the_bulldog_and_incinerator_pushes_spare_the_living() {
 /// A slot is fielded with the disc's channel and clips (a `WEAPON_DONORS`
 /// class: its donor's), thrown exactly when it is a grenade with a sticky,
 /// or left out with its reason; a class that cannot be fielded says why.
+/// A BF1 class's rows end with the BF2 award slots it gains
+/// (`roster::awards`), marked as such.
 /// The table is held to `tests/data/class_kits.txt` (`CLASS_KITS_BLESS=1`
 /// rewrites it), so any change to a class's kit is a diff to explain.
 #[test]
@@ -2616,7 +2735,14 @@ fn every_class_kit_is_the_discs_or_explained() {
                     } else {
                         "fired"
                     };
-                    format!("{how} x{}", h.clips)
+                    // A BF1 class's award slot is BF2's class, not its disc's.
+                    if game == "bf1" && donor.is_none() && kind.is_none() {
+                        assert!(bf2.resolve(&w).is_some(), "{game} {c} {disc}");
+                        assert!(h.weapon.unlock_medal().is_some(), "{game} {c} {disc}");
+                        format!("{how} x{} (BF2's award, roster::awards)", h.clips)
+                    } else {
+                        format!("{how} x{}", h.clips)
+                    }
                 } else {
                     counts[2] += 1;
                     match kind {

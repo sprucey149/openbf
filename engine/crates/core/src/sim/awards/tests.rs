@@ -156,3 +156,64 @@ fn the_award_cheat_does_nothing_in_space() {
     assert_eq!(s.award_bits(s.unit(p).unwrap()), 0);
     assert_eq!(cycle(&mut s, p), ["pistol"]);
 }
+
+/// The damage award is its own cheat: the player deals x1.5 while it is
+/// on, a bot and a hero never, and nothing in space. The award-weapon cheat
+/// alone leaves damage as it was.
+#[test]
+fn the_damage_award_cheat_gives_x1_5() {
+    use crate::sim::buffs::WAR_HERO;
+    let (mut s, p, b) = rifleman();
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.dealt(), 1.0);
+
+    s.cheats.all_awards = true;
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.dealt(), 1.0, "weapons only");
+    s.cheats.all_awards = false;
+
+    s.cheats.damage_award = true;
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.offense, WAR_HERO);
+    assert_eq!(s.unit(p).unwrap().buffs.dealt(), 1.5);
+    assert_eq!(s.buff_scale(Some(p), b), 1.5);
+    assert_eq!(
+        s.unit(b).unwrap().buffs.dealt(),
+        1.0,
+        "a bot holds no medal"
+    );
+    assert_eq!(
+        s.unit(p).unwrap().buffs.taken(),
+        1.0,
+        "damage taken is as it was"
+    );
+    // It never runs down while the medal is held.
+    for _ in 0..600 {
+        s.step(&[pad(0)]);
+    }
+    assert_eq!(s.unit(p).unwrap().buffs.offense, WAR_HERO);
+
+    s.cheats.damage_award = false;
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.dealt(), 1.0, "gone with the medal");
+    assert!(!s.unit(p).unwrap().buffs.active());
+
+    // A hero gets none (the PS2 clears a hero's).
+    s.cheats.damage_award = true;
+    s.unit_mut(p).unwrap().consts.hero = true;
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.dealt(), 1.0);
+
+    let (mut s, p, _) = rifleman();
+    s.landing_regions.push(crate::region::Region::sphere(
+        Vec3::new(0.0, -500.0, 0.0),
+        1.0,
+    ));
+    s.cheats.damage_award = true;
+    s.step(&[pad(0)]);
+    assert_eq!(
+        s.unit(p).unwrap().buffs.dealt(),
+        1.0,
+        "space keeps its numbers"
+    );
+}

@@ -577,6 +577,20 @@ impl SoldierVisuals {
         if !pak::is_file(&wpath) && pak::is_file(&shared) {
             side = common;
             wpath = shared;
+        } else if !pak::is_file(&wpath) {
+            // A BF2 award's own model on a BF1 map (the guided rocket), or a
+            // BF1 class's on a BF2 map: the other game's side holds it.
+            let other = if game.starts_with("bf2") {
+                "side_bf1"
+            } else {
+                "side_bf2"
+            };
+            let other = assets_dir.join(other);
+            let theirs = other.join("weapons").join(format!("{wg}.glb"));
+            if pak::is_file(&theirs) {
+                side = other;
+                wpath = theirs;
+            }
         }
         if let Some(r) = r {
             match crate::assets::load_glb(&wpath) {

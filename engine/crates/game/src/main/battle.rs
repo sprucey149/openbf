@@ -172,7 +172,8 @@ fn team_templates(
                         c.max_health,
                         c.consts.max_speed,
                         c.weapon.name,
-                        c.weapon.ordnance.max_damage,
+                        // What a hit takes off a soldier.
+                        c.weapon.ordnance.max_damage * c.weapon.ordnance.scales[0],
                         c.weapon.ordnance.velocity,
                         if c.jet { "  [jet pack]" } else { "" }
                     );

@@ -1,9 +1,12 @@
-//! BF2's award weapons (`analysis/re-grenades.md` §2.4). Every BF2 soldier
-//! class carries its award slots (`MedalsTypeToUnlock`); a slot joins the
-//! channel-0 switch cycle only when the unit holds that medal, and then the
-//! weapon it replaces (`MedalsTypeToLock`) leaves the cycle (B2
-//! `FUN_00240bf8` 161138-161154). Medals are not earned yet (issue #130):
-//! the session cheat "awards" grants the player all of them.
+//! BF2's award weapons (`analysis/re-grenades.md` §2.4,
+//! `analysis/award-weapons.md`). Every trooper class of both games carries
+//! its award slots (`MedalsTypeToUnlock`; a BF1 class BF2's, from
+//! `game::roster::awards`); a slot joins the channel-0 switch cycle only when
+//! the unit holds that medal, and then the weapon it replaces
+//! (`MedalsTypeToLock`) leaves the cycle (B2 `FUN_00240bf8` 161138-161154).
+//! Medals are not earned yet (issue #130): the session cheat "awards" grants
+//! the player all of them, and with them the damage award
+//! (`super::buffs::WAR_HERO`).
 
 use super::state::Sim;
 use crate::unit::Unit;
@@ -18,14 +21,22 @@ fn bit(t: i8) -> u16 {
 
 impl Sim {
     /// The medals unit `u` holds, one bit per medal type. Only the session
-    /// cheat sets any (all of them, for a player, outside the space modes,
-    /// which keep their kits as they are); issue #130 adds earned medals here.
+    /// cheats set any, for a player, outside the space modes (which keep
+    /// their kits as they are): "awards" every medal but the damage award,
+    /// "damage" that one. Issue #130 adds earned medals here.
     pub fn award_bits(&self, u: &Unit) -> u16 {
-        if self.cheats.all_awards && u.is_player && !self.space_round() {
-            u16::MAX
-        } else {
-            0
+        if !u.is_player || self.space_round() {
+            return 0;
         }
+        let war_hero = 1u16 << crate::sim::buffs::WAR_HERO_MEDAL;
+        let mut bits = 0;
+        if self.cheats.all_awards {
+            bits |= !war_hero;
+        }
+        if self.cheats.damage_award {
+            bits |= war_hero;
+        }
+        bits
     }
 
     /// Is weapon class `class` out of `u`'s cycle? An award weapon is until

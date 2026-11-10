@@ -91,6 +91,7 @@ mod traffic;
 mod turrets;
 mod vehicles;
 mod water;
+mod weak_lock;
 
 pub use beam::Beam;
 pub use blast::{soldier_blast_sphere, BLAST_GATHER_MAX};

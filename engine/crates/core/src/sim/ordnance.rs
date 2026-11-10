@@ -366,6 +366,20 @@ impl Sim {
             if let Some(mc) = self.weapon_classes[stage].ordnance.missile {
                 let ord = self.weapon_classes[stage].ordnance.clone();
                 bolt.as_missile(&ord, &mc, lock_target, &mut self.lcg);
+                // A human's locked rocket goes to the vehicle's weak part
+                // in his sight (`weak_lock`); space rounds keep the centre.
+                let part = match lock_target {
+                    Some(crate::missile::MissileTarget::Vehicle(vh))
+                        if who.is_player && !self.space_round() =>
+                    {
+                        let (eye, aim) = self.units[i].aim_ray(self.ground_rules, self.views());
+                        self.weak_part(vh, eye, aim).map(|(k, _)| k)
+                    }
+                    _ => None,
+                };
+                if let Some(m) = bolt.missile.as_mut() {
+                    m.part = part;
+                }
                 let st = match held_slot {
                     Some(k) => &mut self.units[i].held[k].state,
                     None => &mut self.units[i].weapon,

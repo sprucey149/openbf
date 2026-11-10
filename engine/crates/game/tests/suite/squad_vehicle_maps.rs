@@ -929,9 +929,10 @@ fn pile_in_with_one_free_seat_boards_exactly_one_receiver() {
 }
 
 /// Issue #35: a player's fusion cutter slices a real enemy AAT on NAB1 and
-/// NAB2: its meter fills by ShotDelay a shot (10 s for BF2's AAT, its
-/// `TimeRequiredToEject`; BF1's hover default 3 s), both riders are put out,
-/// only the slicer may board for SLICE_RESERVE, and it boards.
+/// NAB2, the same on both: its meter fills by ShotDelay a shot (10 s, BF2's
+/// AAT `TimeRequiredToEject`, which BF1's AAT takes), from BF2's cutter reach
+/// (3.5 m off the hull's sphere: past the 3 m of BF1's disc), both riders
+/// are put out, only the slicer may board for SLICE_RESERVE, and it boards.
 #[test]
 fn a_player_slices_a_real_enemy_aat() {
     if !maps_available() {
@@ -941,7 +942,7 @@ fn a_player_slices_a_real_enemy_aat() {
         let mut s = scene_in(map, "con_cw", VehicleKind::Hover, Some("cis_hover_aat"));
         let class = s.walk.sim.vehicle(s.vehicle).unwrap().class as usize;
         let time = s.walk.sim.slice_time[class];
-        assert_eq!(time, if map == "bf2_nab2" { 10.0 } else { 3.0 }, "{map}");
+        assert_eq!(time, 10.0, "{map}");
         // Two enemy riders: idle players, so nobody drives off.
         let riders: Vec<_> = (0..2u8)
             .map(|k| {
@@ -965,13 +966,26 @@ fn a_player_slices_a_real_enemy_aat() {
         let (centre, radius) = s.walk.sim.vehicle_sphere(s.vehicle).unwrap();
         let mut away = s.approach - centre;
         away.y = 0.0;
-        let mut at = centre + away.normalize() * (radius + 1.0);
+        let mut at = centre + away.normalize() * (radius + 3.5);
         at.y = s.walk.sim.spawn_ground(at);
+        let reach = &s.walk.sim.weapon_classes[cutter];
+        assert_eq!(
+            (
+                reach.lock_on_range,
+                reach.lock_on_angle.to_degrees().round()
+            ),
+            (4.0, 90.0),
+            "{map}: the cutter's reach"
+        );
         s.walk.sim.cheats.infinite_stamina = true;
         let player = s.walk.player;
         let health = s.walk.sim.vehicle(s.vehicle).unwrap().health.cur;
         let mut ejected = None;
         for tick in 0..20 * 30 {
+            // The hull settles on its hover: keep the stand-off to it.
+            let (centre, radius) = s.walk.sim.vehicle_sphere(s.vehicle).unwrap();
+            let mut at = centre + away.normalize() * (radius + 3.5);
+            at.y = s.walk.sim.spawn_ground(at);
             {
                 let u = s.walk.sim.unit_mut(player).unwrap();
                 u.weapon_class = cutter;

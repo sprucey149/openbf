@@ -1054,10 +1054,15 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
 }
 
 /// The farthest a bot on foot fights: the longest AI range of the weapons it
-/// holds plus [`FIGHT_BEYOND`] (playtest C3; `re-soldier-ai.md` 4.2).
+/// holds and may use plus [`FIGHT_BEYOND`] (playtest C3; `re-soldier-ai.md`
+/// 4.2). An award weapon it has no medal for does not count.
 fn fight_reach(sim: &Sim, u: &crate::unit::Unit) -> f32 {
     let range = |c: usize| sim.weapon_classes.get(c).map_or(0.0, |w| w.ai_range[2]);
-    let held = u.held.iter().map(|h| range(h.class));
+    let held = u
+        .held
+        .iter()
+        .filter(|h| !sim.weapon_locked(u, h.class))
+        .map(|h| range(h.class));
     held.fold(range(u.weapon_class), f32::max) + FIGHT_BEYOND
 }
 

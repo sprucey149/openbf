@@ -192,3 +192,28 @@ fn a_space_rounds_walking_bot_still_looks_at_the_vehicle() {
     assert_ne!(st.aim_dir, Vec3::ZERO, "space: aimed at");
     assert_ne!(pad.rx, travel_rx(true), "space: turns to it: {pad:?}");
 }
+
+/// An award weapon the bot holds no medal for adds nothing to its reach: a
+/// 16 m rifle beside a locked 64 m award keeps the travelling look; the same
+/// second weapon with no medal key is aimed with.
+#[test]
+fn a_locked_award_adds_nothing_to_a_bots_reach() {
+    let scene = |medal: Option<i8>| {
+        let (mut sim, bot) = walk_scene();
+        let u = sim.unit(bot).unwrap();
+        let (hand, slot) = (u.weapon_class, u.held[0].class);
+        sim.weapon_classes[hand].ai_range = [0.0, 8.0, 16.0];
+        sim.weapon_classes[slot].ai_range = [0.0, 32.0, 64.0];
+        sim.weapon_classes[slot].medal_unlock = medal;
+        let e = dummy(&mut sim, Vec3::new(15.0, 0.0, -30.0));
+        let (pad, st) = one_think(&sim, bot);
+        assert_eq!(st.target, Some(e.into()), "seen");
+        (pad, st)
+    };
+    let (pad, st) = scene(Some(0));
+    assert_eq!(st.aim_dir, Vec3::ZERO, "the travelling look");
+    assert_eq!(pad.rx, travel_rx(false), "no turn off its walk: {pad:?}");
+    let (pad, st) = scene(None);
+    assert_ne!(st.aim_dir, Vec3::ZERO, "aimed at");
+    assert_ne!(pad.rx, travel_rx(false), "turns to him: {pad:?}");
+}

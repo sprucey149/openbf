@@ -65,23 +65,28 @@ pub struct Cheats {
     pub infinite_stamina: bool,
     /// `[ours]` Every class costs the player 0 points (`game::unlocks`).
     pub all_classes: bool,
-    /// `[ours]` The player holds every BF2 medal, so each class's award
-    /// weapons replace the ones they stand for (`Sim::award_bits`). Not in
-    /// the space modes; BF1 classes have no award weapons (the CIS battle
-    /// droid's BF2 kit aside). Earned medals are issue #130.
+    /// `[ours]` The player holds every BF2 weapon medal on either game's
+    /// maps: each class's award weapons replace the ones they stand for
+    /// (`Sim::award_bits`; a BF1 class carries BF2's, `game::roster::awards`).
+    /// Not in the space modes. Earned medals are issue #130.
     pub all_awards: bool,
+    /// `[ours]` The player holds BF2's damage award (medal 8, "War Hero"):
+    /// x1.5 on everything dealt (`sim::buffs::WAR_HERO`). Its own row so the
+    /// award weapons can be judged at their own damage. Not in space.
+    pub damage_award: bool,
 }
 
 impl Cheats {
     /// Registry view: (id, label, enabled) in menu order.
-    pub fn entries(&self) -> [(&'static str, &'static str, bool); 6] {
+    pub fn entries(&self) -> [(&'static str, &'static str, bool); 7] {
         [
             ("invincible", "Invincibility (sos)", self.invincible),
             ("ammo", "Infinite ammo (ammo)", self.infinite_ammo),
             ("clip", "No reloading (clip)", self.no_reload),
             ("stamina", "Infinite stamina (run)", self.infinite_stamina),
             ("classes", "Unlock all classes (all)", self.all_classes),
-            ("awards", "Award weapons (BF2 kits)", self.all_awards),
+            ("awards", "Award weapons", self.all_awards),
+            ("damage", "Damage award (x1.5)", self.damage_award),
         ]
     }
 
@@ -93,6 +98,7 @@ impl Cheats {
             "stamina" => self.infinite_stamina = !self.infinite_stamina,
             "classes" => self.all_classes = !self.all_classes,
             "awards" => self.all_awards = !self.all_awards,
+            "damage" => self.damage_award = !self.damage_award,
             _ => {}
         }
     }
@@ -431,7 +437,8 @@ pub struct Sim {
     /// (`MAGNET_LOS_GRACE`). Hashed only when one is not 0.
     pub magnet_hidden: Vec<u8>,
     pub lock_on: Vec<super::lock_on::LockOn>,
-    /// Per player slot: BF2's on-foot launcher lock (`sim::foot_lock`).
+    /// Per player slot: the on-foot launcher lock on every ground map
+    /// (`sim::foot_lock`); unused in space rounds.
     pub foot_lock: Vec<super::foot_lock::FootLock>,
     /// What each player slot's crosshair picks, with its relation (−1
     /// enemy, 0 team 0, 1 friend): the PS2's K+0x30 / K+0x40, which the HUD

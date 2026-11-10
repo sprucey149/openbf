@@ -114,6 +114,15 @@ impl Buffs {
     }
 }
 
+/// BF2's damage award (medal 8, "War Hero"): its holder deals 1.5 x damage
+/// while it holds the medal. The PS2 writes the offense effect at 340 s on
+/// every soldier update (B2 `FUN_0024ece0`, 168133-168137; a hero gets
+/// none), and a timer over 300 s never runs down.
+pub const WAR_HERO: (f32, f32) = (340.0, 1.5);
+
+/// The damage award's medal type.
+pub const WAR_HERO_MEDAL: u16 = 8;
+
 /// Replace an effect only with a longer one; true when it was replaced.
 fn refresh(current: &mut (f32, f32), incoming: (f32, f32)) -> bool {
     if incoming.0 > current.0 {
@@ -134,7 +143,16 @@ impl Sim {
                 self.units[i].buffs = Buffs::default();
                 continue;
             }
-            self.units[i].buffs.tick(dt);
+            // The damage award lasts exactly as long as its medal is held.
+            let u = &self.units[i];
+            let war_hero = !u.consts.hero && self.award_bits(u) & (1 << WAR_HERO_MEDAL) != 0;
+            let buffs = &mut self.units[i].buffs;
+            if war_hero {
+                buffs.offense = WAR_HERO;
+            } else if buffs.offense == WAR_HERO {
+                buffs.offense = Buffs::default().offense;
+            }
+            buffs.tick(dt);
             let sealed = self.units[i].mount.is_some() && !self.hero_body_active(i);
             let u = &mut self.units[i];
             // Inside a hull his health is what he boarded with, either way.

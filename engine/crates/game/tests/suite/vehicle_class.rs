@@ -469,3 +469,46 @@ fn bf2_fighter_tank_hull_is_p_cube1() {
     assert!(!prims("imp_hover_speederbike").is_empty());
     assert!(bike.hull(prims("imp_hover_speederbike")).is_empty());
 }
+
+/// A BF1 vehicle's slice time is its BF2 counterpart's own
+/// `TimeRequiredToEject`, and a BF1 class with no row has the same default
+/// as BF2's class of that name.
+#[test]
+fn bf1_slice_times_match_the_bf2_twins() {
+    use game::vehicle_class::{slice_time, BF1_SLICE_TIMES};
+    let dir = game::assets::baked_root().join("classes");
+    if !dir.join("bf1_all.ron").is_file() || !dir.join("bf2_all.ron").is_file() {
+        eprintln!("SKIP: class bakes absent");
+        return;
+    }
+    let [bf1, bf2] = ["bf1", "bf2"]
+        .map(|g| game::roster::load_classdb(&dir, g, &game::roster::FACTION_ORDER).unwrap());
+    for &(class, twin, time) in BF1_SLICE_TIMES {
+        assert!(bf1.get(class).is_some(), "BF1 has {class}");
+        assert_eq!(bf1.prop(class, "TimeRequiredToEject"), None, "{class}");
+        assert_eq!(
+            bf2.prop_f32(twin, "TimeRequiredToEject"),
+            Some(time),
+            "BF2 {twin}"
+        );
+        assert_eq!(slice_time(&bf1, class), time, "{class}");
+        assert_eq!(slice_time(&bf2, twin), time, "{twin}");
+    }
+    // A class both games name alike is sliced alike, table or default.
+    let mut same = 0;
+    let mut names: Vec<&str> = bf1.names().collect();
+    names.sort_unstable();
+    for class in names {
+        let sliced = slice_time(&bf1, class);
+        if sliced == 0.0 || bf2.get(class).is_none() || slice_time(&bf2, class) == 0.0 {
+            continue;
+        }
+        assert_eq!(sliced, slice_time(&bf2, class), "{class}");
+        same += 1;
+    }
+    assert!(same >= 12, "{same} same-named vehicles compared");
+    // Command vehicles are never sliced on either.
+    for class in ["imp_walk_atat", "rep_walk_atte", "cis_hover_mtt"] {
+        assert_eq!(slice_time(&bf1, class), 0.0, "{class}");
+    }
+}

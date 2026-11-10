@@ -1100,16 +1100,24 @@ pub fn hull_parts(
     for p in &cg.prims {
         let layers = next.next().unwrap_or(Layers::NONE);
         let (building, terrain) = subsets.next().unwrap_or((false, false));
-        let in_any = layers != Layers::NONE || building || terrain;
-        let Some(shape) = prim_shape(p).filter(|_| in_any) else {
-            continue;
-        };
         // The class's HitLocation for this prim (issue #41: the x4 critical
         // prims), matched by name.
         let mult = hit_locations
             .iter()
             .find(|(n, _)| n.eq_ignore_ascii_case(&p.name))
             .map_or(1.0, |(_, m)| *m);
+        // A weak spot must be strikable: BF2 lists every one of its own in
+        // the ordnance subset; a BF1 prim given a factor ([`BF1_WEAK_SPOTS`])
+        // joins it here.
+        let layers = if mult > 1.0 {
+            layers | Layers::ORDNANCE
+        } else {
+            layers
+        };
+        let in_any = layers != Layers::NONE || building || terrain;
+        let Some(shape) = prim_shape(p).filter(|_| in_any) else {
+            continue;
+        };
         out.push(
             HullPart::new(
                 crate::viewer::instance_matrix(p.rotation, p.translation),
@@ -1123,11 +1131,128 @@ pub fn hull_parts(
     out
 }
 
+/// The factor of a weak spot this port gives a vehicle: BF2's own, on every
+/// one of its critical prims.
+pub const WEAK_SPOT_FACTOR: f32 = 4.0;
+
+/// OURS: the weak spots of BF1's armoured ground vehicles, as collision
+/// prims of their own models. BF1's classes author no factor over 1 (its
+/// only `HitLocation` lines are two x0), though its models carry these
+/// critical prims; BF2 gives each twin x4. One game: a tank has a weak spot
+/// on every map, so a launcher's lock has a part to go to
+/// (`analysis/re-hitzones.md` Part A §3.1). The hovernaut and the MTT have
+/// no BF2 twin and take the same factor on the prim their models carry.
+/// The fighter tanks and the AT-TE are in [`BF1_ADDED_WEAK_SPOTS`]. Bikes,
+/// animals and flyers have none in either game.
+/// measure: maintainer playtest of rockets against BF1 vehicles (B7).
+pub const BF1_WEAK_SPOTS: &[(&str, &[&str])] = &[
+    ("all_hover_combatspeeder", &["p_crithit"]),
+    ("all_hover_hovernaut", &["p_crithit"]),
+    ("cis_hover_aat", &["p_crithit"]),
+    ("cis_hover_mtt", &["p_crithit"]),
+    ("cis_tread_hailfire", &["p_crithit"]),
+    ("cis_walk_spider", &["p_crithit1", "p_crithit2"]),
+    ("imp_walk_atat", &["p_neck_soldier"]),
+    ("imp_walk_atst", &["p_crit_hit"]),
+    ("imp_walk_atst_jungle", &["p_crit_hit"]),
+    ("imp_walk_atst_snow", &["p_crit_hit"]),
+];
+
+/// The shape of an [`AddedWeakSpot`]: a cylinder (radius, full height along
+/// its own Y) or a box (half extents).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AddedShape {
+    Cylinder(f32, f32),
+    Box([f32; 3]),
+}
+
+/// A weak spot this port adds to a class's hull, in model space.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AddedWeakSpot {
+    pub class: &'static str,
+    pub shape: AddedShape,
+    /// Rotation rows, as a baked prim's.
+    pub rows: [[f32; 3]; 3],
+    pub at: [f32; 3],
+}
+
+const UPRIGHT: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// The fighter tank's disc: its axis along the hull, tilted 9 degrees up.
+const fn tank_disc(class: &'static str) -> AddedWeakSpot {
+    AddedWeakSpot {
+        class,
+        shape: AddedShape::Cylinder(0.5, 0.2),
+        rows: [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.156_586_29, 0.987_664_3],
+            [0.0, -0.987_664_3, 0.156_586_29],
+        ],
+        at: [0.0, 0.899_732_65, -3.852_299_7],
+    }
+}
+
+/// OURS: weak spots for the BF1 vehicles whose own models give none to
+/// strike, each BF2's part for the same hull, at BF2's place.
+/// - The two fighter tanks carry no critical prim. Their hulls are BF2's
+///   prim for prim, and BF2 added a disc on the rear face.
+/// - The AT-TE's own critical prim sits inside its hull boxes, where no
+///   round reaches it. BF2 moved it to a box under the front of the belly.
+///
+/// measure: maintainer playtest of rockets against BF1 vehicles (B7).
+pub const BF1_ADDED_WEAK_SPOTS: &[AddedWeakSpot] = &[
+    tank_disc("imp_hover_fightertank"),
+    tank_disc("rep_hover_fightertank"),
+    AddedWeakSpot {
+        class: "rep_walk_atte",
+        shape: AddedShape::Box([0.958_399_8, 0.707_916_14, 2.081_097_8]),
+        rows: UPRIGHT,
+        at: [0.0, 3.113_692_3, 3.141_827],
+    },
+];
+
+/// The hull parts this port adds to a BF1 class ([`BF1_ADDED_WEAK_SPOTS`]):
+/// in the ordnance subset only, so only rounds and sight rays meet them.
+pub fn added_weak_parts(
+    db: &crate::classdb::ClassDb,
+    class: &str,
+) -> Vec<core::collision::HullPart> {
+    use core::collision::{HullPart, Layers, Shape};
+    if db.is_bf2() {
+        return Vec::new();
+    }
+    let chain = db.chain(class);
+    BF1_ADDED_WEAK_SPOTS
+        .iter()
+        .filter(|w| chain.iter().any(|d| d.name.eq_ignore_ascii_case(w.class)))
+        .map(|w| {
+            let shape = match w.shape {
+                AddedShape::Cylinder(radius, height) => Shape::Cylinder {
+                    radius,
+                    half_height: height * 0.5,
+                },
+                AddedShape::Box(half) => Shape::Box {
+                    half: glam::Vec3::from(half),
+                },
+            };
+            HullPart::new(
+                crate::viewer::instance_matrix(w.rows, w.at),
+                shape,
+                Layers::ORDNANCE,
+            )
+            .with_hit_mult(WEAK_SPOT_FACTOR)
+        })
+        .collect()
+}
+
 /// A class's `HitLocation` lines (`"<collision prim> <factor>"`, BF2
 /// `FUN_00214600`, at most 10, only those not 1.0; `analysis/re-ai-difficulty.md`
-/// 9.2): the vehicles' critical prims (issue #41).
+/// 9.2): the vehicles' critical prims (issue #41). A BF1 class in
+/// [`BF1_WEAK_SPOTS`] takes its rows from there, over any authored factor
+/// for the same prim (the hailfire's x0).
 pub fn hit_locations(db: &crate::classdb::ClassDb, class: &str) -> Vec<(String, f32)> {
-    db.props_all(class, "HitLocation")
+    let mut out: Vec<(String, f32)> = db
+        .props_all(class, "HitLocation")
         .into_iter()
         .filter_map(|v| {
             let mut w = v.split_whitespace();
@@ -1136,7 +1261,19 @@ pub fn hit_locations(db: &crate::classdb::ClassDb, class: &str) -> Vec<(String, 
             (m != 1.0).then_some((name, m))
         })
         .take(10)
-        .collect()
+        .collect();
+    if !db.is_bf2() {
+        let ours = db.chain(class).into_iter().find_map(|d| {
+            BF1_WEAK_SPOTS
+                .iter()
+                .find(|(c, _)| c.eq_ignore_ascii_case(&d.name))
+        });
+        for prim in ours.map_or(&[][..], |(_, prims)| prims) {
+            out.retain(|(n, _)| n != prim);
+            out.push(((*prim).to_owned(), WEAK_SPOT_FACTOR));
+        }
+    }
+    out
 }
 
 impl Scene {

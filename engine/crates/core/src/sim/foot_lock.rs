@@ -1,15 +1,17 @@
-//! BF2's on-foot lock for a human's launcher (`analysis/re-ordnance-kinds.md`
-//! §5): a hostile target in front is locked (on its own, or by the lock
-//! button), the target is kept while it stays roughly ahead, and the
-//! launcher's dwell clock runs only while that target sits within 25.8° of
-//! the aim and in sight. BF1 maps and space rounds keep the magnet dwell in
-//! `missiles.rs`.
+//! The on-foot lock for a human's launcher (`analysis/re-ordnance-kinds.md`
+//! §5), BF2's rule on every ground map: a hostile target in front is locked
+//! (on its own, or by the lock button), the target is kept while it stays
+//! roughly ahead, and the launcher's dwell clock runs only while that target
+//! sits within 25.8° of the aim and in sight. Space rounds keep the magnet
+//! dwell in `missiles.rs`.
 //!
 //! Read in the soldier's lock setup (B2:159266-159302), the tracker's pick
 //! and hold (`FUN_0017a908`, B2:21224-21312, 21690-21740, 21828) and the
-//! launcher's candidate (`FUN_0033a658`, B2:331689-331750). A human's lock
-//! never names a body part: the missile steers to the target's centre, so a
-//! vehicle's critical spots are hit only by aim, never by the lock.
+//! launcher's candidate (`FUN_0033a658`, B2:331689-331750). There a human's
+//! lock never names a body part: the missile steers to the target's centre.
+//! OURS: a vehicle's lock goes to its weak part in sight (`weak_lock.rs`).
+//! The pick stays on the centre; for the dwell and the hold a weak part in
+//! sight counts as the vehicle does.
 
 use super::input::{buttons, AimTarget, PadState};
 use super::lock_on::{
@@ -19,7 +21,6 @@ use super::state::Sim;
 use crate::collision::HullFilter;
 use crate::missile::MissileTarget;
 use crate::perception;
-use crate::soldier::GroundRules;
 use crate::unit::UnitHandle;
 use crate::weapon::WeaponClass;
 use glam::Vec3;
@@ -52,15 +53,21 @@ pub struct FootLock {
     down: bool,
 }
 
-/// A launcher the BF2 lock serves: a lock time, a missile, a kind to lock.
+/// A launcher the on-foot lock serves: a lock time, a missile, a kind to
+/// lock.
 fn foot_launcher(c: &WeaponClass) -> bool {
     c.lock_time > 0.0 && c.ordnance.missile.is_some() && c.target_kind != 0
 }
 
 impl Sim {
-    /// Does BF2's on-foot lock serve this round?
+    /// Does the on-foot lock serve this round? Every ground map does.
+    ///
+    /// OURS: BF1 maps take BF2's lock too, so a launcher locks the same way
+    /// in both games; BF1 counted its dwell on the aim magnet (175 m, 6° on,
+    /// 10° off). Each launcher keeps its own LockTime and kinds.
+    /// measure: maintainer playtest of the BF1 torpedo launchers.
     pub(super) fn foot_lock_rules(&self) -> bool {
-        self.ground_rules == GroundRules::Bf2 && !self.space_round()
+        !self.space_round()
     }
 
     /// Slot `slot`'s soldier on foot with a lock launcher in hand.
@@ -87,7 +94,9 @@ impl Sim {
     }
 
     /// Is `t` the launcher's dwell candidate for `u`: of a kind it takes,
-    /// within 25.8° of the aim (dot >= 0.9) and in sight?
+    /// within 25.8° of the aim (dot >= 0.9) and in sight? A vehicle's weak
+    /// part in sight inside the cone counts as the vehicle does, so aiming
+    /// at the lock box keeps the clock running on a large hull.
     fn foot_in_dwell(&self, t: LockTarget, i: usize) -> bool {
         let u = &self.units[i];
         let c = &self.weapon_classes[u.weapon_class];
@@ -98,7 +107,9 @@ impl Sim {
             return false;
         }
         let (eye, dir) = u.aim_ray(self.ground_rules, self.views());
-        (p.pos - eye).normalize_or_zero().dot(dir) >= LOCK_FIRE_COS && self.foot_clear(&p, eye)
+        let inside = |at: Vec3| (at - eye).normalize_or_zero().dot(dir) >= LOCK_FIRE_COS;
+        (inside(p.pos) && self.foot_clear(&p, eye))
+            || self.foot_weak_part(t, i).is_some_and(|(_, at)| inside(at))
     }
 
     /// The press's pick: hostile soldiers on foot, live vehicles and
@@ -261,9 +272,11 @@ impl Sim {
                     None => state.target = None,
                     Some(p) => {
                         let off = p.pos - ray.0;
+                        // A weak part in sight keeps a vehicle whose centre
+                        // is hidden.
                         let inside = off.normalize_or_zero().dot(ray.1) >= FOOT_LOSE_DOT
                             && off.length_squared() <= lose * lose
-                            && self.foot_clear(&p, ray.0);
+                            && (self.foot_clear(&p, ray.0) || self.foot_weak_part(t, i).is_some());
                         state.lose = if inside { 0.0 } else { state.lose + dt };
                         if state.lose >= FOOT_LOSE_SECS {
                             state.target = None;
@@ -279,7 +292,7 @@ impl Sim {
         }
     }
 
-    /// The launcher's dwell candidate under BF2's rule: the slot's locked
+    /// The launcher's dwell candidate on a ground map: the slot's locked
     /// target, of a kind the launcher takes, within 25.8° of the aim
     /// (dot >= 0.9) and in sight, checked every tick.
     pub(super) fn foot_dwell_candidate(&self, slot: usize, i: usize) -> Option<MissileTarget> {
@@ -290,28 +303,31 @@ impl Sim {
         t.missile()
     }
 
-    /// What the lock box shows on foot: BF2's locked target, or on a BF1
-    /// map the launcher's dwell target (BF1's own HUD drew a lock square
-    /// on it, B1:262320-262339). `None` in space rounds.
+    /// What the lock box shows on foot: the slot's locked target, at a
+    /// vehicle's weak part in sight (where a locked rocket will steer), else
+    /// at its centre. `None` in space rounds.
     pub fn foot_lock_target(&self, slot: usize) -> Option<(LockTarget, Vec3)> {
-        if self.space_round() {
+        if !self.foot_lock_rules() {
             return None;
         }
         let h = self.foot_launcher_unit(slot)?;
-        let t = if self.foot_lock_rules() {
-            self.foot_lock.get(slot)?.target?
-        } else {
-            LockTarget::Aim(match self.unit(h)?.weapon.lock_target? {
-                MissileTarget::Unit(o) => AimTarget::Unit(o),
-                MissileTarget::Vehicle(v) => AimTarget::Vehicle(v),
-                MissileTarget::Turret(id) => AimTarget::Turret(id),
-                MissileTarget::Station(_) => return None,
-            })
-        };
-        Some((t, self.lock_probe(t)?.pos))
+        let t = self.foot_lock.get(slot)?.target?;
+        let centre = self.lock_probe(t)?.pos;
+        let weak = self.foot_weak_part(t, h.index as usize);
+        Some((t, weak.map_or(centre, |(_, at)| at)))
     }
 
-    /// Is the foot lock box's target in sight from the eye?
+    /// Is the foot lock box on a vehicle's weak part?
+    pub fn foot_lock_weak(&self, slot: usize) -> bool {
+        self.foot_lock_rules()
+            && self
+                .foot_launcher_unit(slot)
+                .zip(self.foot_lock.get(slot).and_then(|s| s.target))
+                .is_some_and(|(h, t)| self.foot_weak_part(t, h.index as usize).is_some())
+    }
+
+    /// Is the foot lock box's point in sight from the eye? A weak part is
+    /// shown only while it is.
     pub fn foot_lock_visible(&self, slot: usize) -> bool {
         let Some((t, _)) = self.foot_lock_target(slot) else {
             return false;
@@ -322,7 +338,8 @@ impl Sim {
         let (Some(p), Some(u)) = (self.lock_probe(t), self.unit(h)) else {
             return false;
         };
-        self.foot_clear(&p, u.aim_ray(self.ground_rules, self.views()).0)
+        self.foot_lock_weak(slot)
+            || self.foot_clear(&p, u.aim_ray(self.ground_rules, self.views()).0)
     }
 
     /// The hands' launcher's dwell fill, 0..1, while it has a candidate
@@ -363,4 +380,4 @@ impl Sim {
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;
