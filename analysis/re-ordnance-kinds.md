@@ -360,6 +360,76 @@ Validation on the source checkpoint plus this patch:
   task handoff records whether replacement succeeded; the profile/playtest
   directory must be preserved.
 
+### 4.7 Republic secondary: duplicate TurnRate disabled homing (2026-11-09) [V][M][O]
+
+The section 4.6 acceptance did not cover the Republic secondary. The maintainer's
+next black box is from clean build `482d8b455eb3`, `bf2_spa6` 1-flag CTF, seed
+290: Anakin's Republic Starfighter, 40 `rep_weap_fly_anakin_missile` rounds,
+66 total shots and no recorded hits. The retained copy is
+`engine/artifacts/lead_tmp/republic-parity/reported-blackbox.json`.
+
+Its ordnance, `rep_weap_fly_jedifighter_missile_ord`, authors TurnRate twice:
+first 0, later 0.5. `ClassDb::prop_hash` intentionally exposes the first value
+of a key. That lookup is unsuitable for this setter stream: the missile loader
+used `ClassSrc`, so it constructed TurnRate 0. The real missile setter
+`FUN_0031fd68`, current decompilation lines 300853-300855, writes each occurrence
+to class+0x120. The later authored value replaces the earlier one. The launcher
+can still acquire a full lock and attach a target to a zero-turn missile, but
+the flight law never steers it toward that target; waver alone still runs.
+
+This was reproduced through the mounted Republic craft's actual secondary
+channel, not by attaching a missile handle in the test. The real baked weapon
+and hulls were loaded, Square-equivalent input selected each CIS fighter, the
+secondary's charge reached 1.0, and held secondary fire emitted six rounds.
+All six retained the selected vehicle handle. Before correction the 12 sampled
+70 m/s crossing cases all missed with the loader's zero turn rate.
+
+**Native PS2 check.** On the same SLUS-21240 v2.01 disc and PCSX2/emucap build
+as section 4.6, Instant Action was navigated to Clone Wars Space Kashyyyk CTF
+(retail Space Hoth offers GCW only). A Republic pilot normally boarded the
+Republic Starfighter and took off. The live launcher at `0x1be2340` points to
+weapon class `0x1a09190`, whose ordnance at `0x1a09040` reads TurnRate 0.5,
+WaverRate 2, WaverTurn 0.25, Velocity 300 and LifeSpan 6. These are the same
+ordnance values used by the reported craft in the port.
+
+Two native locked missiles were recorded for 90 frozen boundaries. Across 178
+update pairs, the existing turn-and-waver law with those class values matches
+retail velocity to at most 0.000058 m/s. That particular shot passed a turning
+Tri-fighter and missed. A second native paired shot, trailing a moving Droid
+Starfighter at approximately 439 m when fired, stopped both missiles at age
+2.0 s while target hull health fell by about 600. Retail therefore permits both
+hits and misses with this weapon; restoring steering does not imply a guaranteed
+intercept against every crossing target.
+
+For the controlled shots only the player's pilot/craft pose was relocated or
+rotated. Boarding, takeoff, selection, the 0.1 s dwell and L1 firing were retail
+operations. No weapon class, missile state, target pose or target assignment was
+injected. Setup bytes, native save states, RAM boundaries and replay results
+are local under `engine/artifacts/lead_tmp/republic-parity/`, Tracking run
+`01M71JH8NSEM52XKCEKPCEZV2F`.
+
+The correction resolves missile keys through the existing parent-first ordered
+property view, taking the last value before the first NextCharge boundary.
+It keeps the root stage separate from later charge stages. The generic class
+database and flight kernel are unchanged; the existing baked property stream
+already preserves the repeated keys, so no rebake is required.
+
+Validation on base `482d8b455eb3598fe8f24916a4f4b3d854380ed5` plus this patch:
+
+- The asset-independent loader regression fails with 0 versus expected 0.5
+  before correction and passes afterward. All six `roster::tests` pass.
+- All nine `space_playtest_fixes` tests pass. The Republic scenario exercises
+  48 actual full-lock firing sequences across three CIS craft, with six of six
+  emitted missiles carrying the selected target in every sequence. Twelve of
+  twelve stationary, seven of twelve 35 m/s crossing, zero of twelve 70 m/s
+  crossing and twelve of twelve 70 m/s receding scenarios register damage.
+  These are controlled port regression cases, not retail hit-rate estimates.
+- Full core tests pass again: 2,086 passed, two existing ignored tests.
+- Strict workspace Clippy and the touched integration target pass. The prior
+  all-target HUD fixture failures noted in section 4.6 remain outside this fix.
+- The release executable must be rebuilt and repacked before local handoff.
+  The final handoff records the distribution result.
+
 ## 5. The lock: when a missile gets its target [V][O] (H4)
 
 - The packet's target is filled only when the weapon's vt+0x34 says so: B1 packet+0x38 = W+0x128 and +0x3c = W+0x130

@@ -160,6 +160,138 @@ fn missions_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../missions")
 }
 
+#[test]
+fn baked_republic_secondary_keeps_its_lock_and_hits_moving_fighters() {
+    use core::missile::MissileTarget;
+    use core::sim::{buttons, PadState};
+    use core::vehicle::flyer::FlightPhase;
+    let root = assets_dir();
+    let mission_path = missions_dir().join("bf2_spa6_1flag.ron");
+    if !root.join("bf2_spa6").exists() || !mission_path.exists() {
+        eprintln!("skipping Republic secondary scenario: local assets or mission unavailable");
+        return;
+    }
+    let mut scene = game::assets::load_scene(&root.join("bf2_spa6")).unwrap();
+    scene.apply_mode_layer("1flag").unwrap();
+    let mission = game::mission::MissionDef::load(&mission_path).unwrap();
+    let mut setup = Sim::empty(290);
+    let build = game::vehicle_pads::install_with_objective(
+        &mut setup,
+        &scene.manifest,
+        &scene.dir,
+        &root.join("classes"),
+        &mission.factions(),
+        None,
+    )
+    .unwrap();
+    let own_class = build
+        .classes
+        .iter()
+        .position(|n| n == "rep_fly_anakinstarfighter_sc")
+        .unwrap();
+    let wc = setup.seat_setup[own_class].as_ref().unwrap().guns[0]
+        .as_ref()
+        .unwrap()
+        .weapons[1]
+        .class;
+    assert_eq!(setup.weapon_classes[wc].name, "rep_weap_fly_anakin_missile");
+    let missile = setup.weapon_classes[wc].ordnance.missile.unwrap();
+    assert_eq!(
+        (missile.turn_rate, missile.waver_rate, missile.waver_turn),
+        (0.5, 2.0, 0.25)
+    );
+    let mut hits = [0; 4];
+    let mut cases = [0; 4];
+    for (target_class, name) in build
+        .classes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.starts_with("cis_fly_"))
+    {
+        for seed in 0..16 {
+            let motion = seed as usize / 4;
+            let mut sim = Sim::empty(seed);
+            sim.weapon_classes = setup.weapon_classes.clone();
+            sim.hull_parts = setup.hull_parts.clone();
+            sim.blast_setup = setup.blast_setup.clone();
+            sim.missile_target_points = setup.missile_target_points.clone();
+            sim.seat_setup = setup.seat_setup.clone();
+            sim.flyer_params = vec![None; build.classes.len()];
+            let mut p = setup.flyer_params[own_class].clone().unwrap();
+            p.min_speed = 0.0;
+            p.mid_speed = 0.0;
+            p.max_speed = 0.0;
+            sim.flyer_params[own_class] = Some(p);
+            let spec = |class, team, pos| VehicleSpec {
+                kind: VehicleKind::Flyer,
+                class: class as u32,
+                home_team: Some(team),
+                neutral_when_empty: false,
+                spawn_pad: None,
+                pos,
+                yaw: 0.0,
+                max_health: 10000.0,
+                health_type: HealthType::Vehicle,
+                seats: vec![SeatKind::Pilot],
+            };
+            let own = sim.spawn_vehicle(&spec(own_class, 0, Vec3::Y * 100.0));
+            let target = sim.spawn_vehicle(&spec(target_class, 1, Vec3::new(0.0, 100.0, 500.0)));
+            let me = sim.spawn(&UnitSpec::player(0, Vec3::Y * 100.0)).unwrap();
+            assert!(sim.seat_unit(me, own, 0));
+            sim.vehicle_mut(own).unwrap().flyer.phase = FlightPhase::Flying;
+            sim.step(&[PadState {
+                buttons: buttons::RELOAD,
+                ..Default::default()
+            }]);
+            for _ in 0..100 {
+                sim.step(&[PadState::default()]);
+            }
+            assert_eq!(sim.lock_on_charge(0, 1), Some(1.0));
+            let mut rounds = 0;
+            let mut guided = 0;
+            for tick in 0..180 {
+                let velocity = [Vec3::ZERO, Vec3::X * 35.0, Vec3::X * 70.0, Vec3::Z * 70.0][motion];
+                let v = sim.vehicle_mut(target).unwrap();
+                v.vel = velocity;
+                v.pos += v.vel * core::TICK_DT;
+                sim.step(&[PadState {
+                    buttons: if tick < 12 {
+                        buttons::SECONDARY_FIRE
+                    } else {
+                        0
+                    },
+                    ..Default::default()
+                }]);
+                for b in sim.bolts.iter().filter(|b| {
+                    b.weapon_class == wc && b.visual_shot.is_some_and(|s| s.tick + 1 == sim.tick)
+                }) {
+                    rounds += 1;
+                    guided += usize::from(
+                        b.missile
+                            .is_some_and(|m| m.target == Some(MissileTarget::Vehicle(target))),
+                    );
+                }
+            }
+            let hp = sim.vehicle(target).unwrap().health.cur;
+            assert_eq!(
+                rounds, 6,
+                "{name} seed {seed}: the actual paired salvos fire"
+            );
+            assert_eq!(
+                guided, rounds,
+                "{name} seed {seed}: every round retains the locked handle"
+            );
+            hits[motion] += usize::from(hp < 10000.0);
+            cases[motion] += 1;
+        }
+    }
+    println!(
+        "Republic hitting cases {hits:?} of {cases:?}: stationary, crossing 35/70, receding 70 m/s"
+    );
+    assert!(hits[1] > 0, "the secondary strikes crossing fighters");
+    assert!(hits[3] > 0, "the secondary strikes receding fighters");
+}
+
 fn walk_from_sim(sim: Sim) -> WalkSim {
     let t = TeamTemplate::default_trooper();
     WalkSim::with_teams(sim, None, Vec3::ZERO, [t.clone(), t], None)
