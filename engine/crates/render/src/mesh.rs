@@ -75,6 +75,8 @@ pub(crate) struct Instance {
     /// The light-table records this instance's vertices add (card BPNT,
     /// `crate::point_light::gather`); 0 = none.
     pub lights: [u16; 4],
+    pub region_top: [f32; 4],
+    pub region_bottom: [f32; 4],
 }
 
 /// "This draw never fades": a begin no horizontal distance reaches, and no
@@ -105,6 +107,36 @@ impl Instance {
         14 => Float32x4, // fade [begin, end, near] metres, opacity
         15 => Uint16x4, // light-table records, 0 = none
     ];
+
+    pub(crate) fn rigid_layout() -> wgpu::VertexBufferLayout<'static> {
+        const ATTRS: [wgpu::VertexAttribute; 12] = [
+            Instance::ATTRIBS[0],
+            Instance::ATTRIBS[1],
+            Instance::ATTRIBS[2],
+            Instance::ATTRIBS[3],
+            Instance::ATTRIBS[4],
+            Instance::ATTRIBS[5],
+            Instance::ATTRIBS[6],
+            Instance::ATTRIBS[7],
+            Instance::ATTRIBS[8],
+            Instance::ATTRIBS[9],
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: std::mem::offset_of!(Instance, region_top) as u64,
+                shader_location: 9,
+            },
+            wgpu::VertexAttribute {
+                format: wgpu::VertexFormat::Float32x4,
+                offset: std::mem::offset_of!(Instance, region_bottom) as u64,
+                shader_location: 10,
+            },
+        ];
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Instance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &ATTRS,
+        }
+    }
 
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {

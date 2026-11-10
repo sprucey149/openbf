@@ -111,7 +111,7 @@ impl Renderer {
         // Every pipeline below is [`PipelineDesc::world`] with one or two fields
         // moved; see [`PipelineDesc`] for the shape they share and why sharing
         // it is safe.
-        let vb = [Vertex::layout(), Instance::layout()];
+        let vb = [Vertex::layout(), Instance::rigid_layout()];
         let pipeline = PipelineDesc::world("map pipeline", &pipeline_layout, &vb)
             .build(&device, &shader, format);
 

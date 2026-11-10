@@ -477,7 +477,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/viewer/leaf.rs` 538 — leaf sprite templates and attached/world/FOLG object placement · `template`, `objects`, `object_matrix`, `build`; module header and `analysis/re-leafpatch.md` §4–§5; per-view quads belong to `render::leaf`.
 - `game/src/viewer/upload.rs` 350 — GPU mesh/texture uploads and procedural primitives · `upload_submeshes`, `upload_skinned`, `upload_texture_file`, `upload_texture_file_scrolling`.
 - `game/src/viewer/pickups.rs` 293 — field pickup models and visibility · `PickupVisuals`, `item_drawn`; submitted through `VehicleVisuals::draws`; module header and `analysis/re-powerups.md` §4.
-- `game/src/viewer/vehicles.rs` 1159 — vehicle model/texture lookup and draws, including CPU-skinned walkers through `walker_pose` · `VehicleVisuals`, `VehicleSides`, `find_model`, `find_texture`; `ClassVis` (`draws`), `upload_parts` and `pose_class` are shared with `droidekas.rs`.
+- `game/src/viewer/vehicles.rs` 1173 — vehicle model/texture lookup and draws, including CPU-skinned walkers through `walker_pose` and BF2 shadow-region lighting spheres · `VehicleVisuals`, `VehicleSides`, `find_model`, `find_texture`; `ClassVis` (`draws`), `upload_parts` and `pose_class` are shared with `droidekas.rs`.
 - `game/src/viewer/stations.rs` 485 — service-droid scene node poses driven by simulation motion · `StationAnimState`, `StationNodes`, `pose`, `StationDraw`, `SceneGpu::pose_stations`; `analysis/re-powerup-station.md` §6/§14.
 - `game/src/viewer/turret_fall.rs` 63 — a fallen building turret's view: its intact draws left out and its wreck / pad drawn while the sim has it down · `FallenDraw`, `SceneGpu::fallen`; card TBLD.
 - `game/src/viewer/turret_pose.rs` 606 — turret/recoil and rider node poses, scene turret records and zoomed-gunner visibility · `pose`, `part_matrices`, `PoseSpec`, `TurretDraw`, `rigged_turrets`, `GunnerHang`, `nine_pose`, `SceneGpu::hidden_for`, `view_draws`, `pose_turrets`, `pose_turrets_at`; module header and `analysis/re-turret-draw.md` 2–4.
@@ -573,7 +573,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/blackbox.rs` 2452 — dev-mode playtest history and rotating snapshots on F9, quit, panic and stuck alarm; read-only on the sim and excluded from its hash · `BlackBox`, `Snapshot`, `Meta`, `on`, `write_rotating`, `read`, `SoundRow`, `sound_digest`. `blackbox::SCHEMA` owns schema age and supported older reads; module header owns history/build diagnostics; operation in `analysis/dev-tools.md`.
 - `game/src/blackbox/rotating.rs` 173 — serialized snapshot file rotation shared by the hotkey writer and panic hook, with same-thread recursion protection and filesystem regression tests · `write`, `PREVIOUS`.
 - `game/src/blackbox/session.rs` 323 — Card DPRX: the black box's MATCH-LONG tally of one subject - the human, or in a headless round the sweep's human proxy (`core::ai::proxy`). The rings
-- `game/src/fx.rs` 1354 — particle-effect lookup with disc-specific rules for imported SBD trails, lifecycle and draw submission, event-driven impact/explosion hooks, gain effects that follow their unit (one live per unit and kind) and PROVISIONAL fallback quads · `Fx`, `Library`, `LiveEffect`; module header and `analysis/re-fx.md` §5–§7; muzzle flashes come from `soldier_vis`.
+- `game/src/fx.rs` 1361 — particle-effect lookup with disc-specific rules for imported SBD trails, lifecycle and draw submission, event-driven impact/explosion hooks, gain effects that follow their unit (one live per unit and kind) and PROVISIONAL fallback quads · `Fx`, `Library`, `LiveEffect`; module header and `analysis/re-fx.md` §5–§7; muzzle flashes come from `soldier_vis`.
 - `game/src/fx/sky.rs` 128 — dome-attached decorative effects, authored hardpoints and rotation.
 - `game/src/fx/storm.rs` 139 — BF2 Kamino lightning groups, skybolt placement and temporary dome, fog and sun lighting, including the ocean. See `analysis/re-weather.md` §§7–8 and `analysis/re-kamino.md` §2.
 - `game/src/fx/water_contact.rs` 385 — soldier water-contact clocks, class-authored entry/fall splashes and posed-foot wakes, using the existing ripple and floating-effect pools; issue #115, `analysis/re-water.md` section 9.6.
@@ -626,13 +626,13 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/fog_cloud.rs` 192 — Authored FogCloud tiled dust, source annular fade and heightfield placement; one-time load warning for a potentially oversized cloud, retaining the per-frame guard.
 - `render/src/rand.rs` 10 — seeded random sampling for decorative sky and atmosphere.
 - `render/src/sky/flight.rs` 177 — decorative sky-object flight state, source movement and spawn RNG; no simulation state.
-- `render/src/draw.rs` 738 — static/skinned draw-list types, lighting paths, fades and LOD switching · `DrawCmd`, `DrawLayer`, `LightPath`, `Fade`, `LodSwitch`, `LodSide`, `SkinnedDrawCmd`; cull/dither rules in type docs; GPU referee: `render/tests/suite/lod_switch.rs`.
+- `render/src/draw.rs` 740 — static/skinned draw-list types, lighting paths, fades and LOD switching · `DrawCmd`, `DrawLayer`, `LightPath`, `Fade`, `LodSwitch`, `LodSide`, `SkinnedDrawCmd`; cull/dither rules in type docs; GPU referee: `render/tests/suite/lod_switch.rs`.
 - `render/src/device.rs` 443 — GPU/device setup, upload and resize · `Renderer::new_windowed`, `Renderer::new_headless`, `HEADLESS_FORMAT`; adapter selection (`OPENBF_ADAPTER`) in the module header. The offscreen constructor checks nonzero extents and the device’s texture limit before target allocation. Constructors finish in `pipelines.rs`.
 - `render/src/bindings.rs` 62 — layout entries and borrowed bind-group resource constructors · `uniform_layout`, `texture_layout`, `sampler_layout`, `texture_view`, `sampler`, `entire_buffer`
 - `render/src/resources.rs` 45 — unmapped buffers and single-level D2 textures through GPU creation instrumentation · `buffer`, `texture_2d`
 - `render/src/pipelines.rs` 998 — renderer pipeline/layout construction and initial GPU resources · `finish_init`, `PipelineDesc`; pass inventory in the module header.
 - `render/src/frame.rs` 610 — frame submission, culling, instancing, pass/draw ordering and overlay · `Renderer::render_frame`, `FrameStats`, `OverlayFn`; full pass sequence in the module header.
-- `render/src/frame/submit.rs` 1285 — frame validation, instance/palette uploads and ordered render-pass submission · `Renderer::render_frame`; frame helpers and public paths remain in the facade
+- `render/src/frame/submit.rs` 1327 — frame validation, instance/palette uploads, rigid and skinned shadow-region lighting and ordered render-pass submission · `Renderer::render_frame`; frame helpers and public paths remain in the facade
 - `render/src/frame/tests.rs` 362 — frame sort keys, pass ordering and interface light regressions.
 - `render/src/frame_ab.rs` 136 — per-frame interleaved pricing states for the bench (`OPENBF_FRAMEAB`) · `FrameAb`.
 - `render/src/world_scale.rs` 180 — the world drawn smaller than the window and upscaled, the HUD at full size · `Renderer::set_world_scale`; `world_scale.wgsl`.
@@ -657,9 +657,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `render/src/specular.rs` 179 — specular lookup-table upload and tex-gen CPU reference · `Renderer::set_specular_table`, `SpecParams`, `spec_texcoord`; pass/blend rules and PROVISIONAL status in the module header (`analysis/re-specular-pass.md`, [O]).
 - `render/src/capture.rs` 164 — the headless readback and the PNG encoders (with and without the alpha plane); the
   padding and encoder tests · `Renderer::capture_rgba`, `encode_png`, `encode_png_rgb`
-- `render/src/shader.wgsl` 1272 — world/skinned shader: vertex lighting, alpha, fog, water/speckle, sky, specular and terrain · `shade_unfogged`, `gs_lit`, `point_sum`, `MASK_CUTOFF`; grass/bolt/terrain-light/filter have separate `.wgsl` files; HUD shader is in `hud.rs`.
+- `render/src/shader.wgsl` 1279 — world/skinned shader: vertex lighting, alpha, fog, water/speckle, sky, specular and terrain · `shade_unfogged`, `gs_lit`, `point_sum`, `MASK_CUTOFF`; grass/bolt/terrain-light/filter have separate `.wgsl` files; HUD shader is in `hud.rs`.
 - `render/src/made.rs` 192 — GPU-object creation wrappers and frame-recorder inventory · `Made`, `note`, `take`, `texture_bytes`; enable/cap and wrapper contract in the module header; consumer: `game::frame_profile` (HITCH).
-- `render/src/mesh.rs` 459 — vertex formats, GPU meshes · `Vertex`, `MeshData`
+- `render/src/mesh.rs` 491 — vertex formats, GPU meshes · `Vertex`, `MeshData`
 - `render/src/texture.rs` 293 — RGBA8 → bind group; samplers · `TextureDesc`
 - `render/src/camera.rs` 143 — the fly camera (Y-up, −Z forward) · `Camera`
 - `render/src/frustum.rs` 175 — frustum culling, a box's distance range from the eye (card LODP) · `Frustum`, `distance_range`

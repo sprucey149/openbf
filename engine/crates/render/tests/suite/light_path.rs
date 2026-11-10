@@ -542,3 +542,47 @@ fn specular_uses_the_same_gouraud_base_for_rigid_and_region_lit_skinned_draws() 
         }
     }
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn rigid_region_lighting_preserves_distance_culling() {
+    use render::{CharacterLightRegion, CharacterLightVolume, LitSphere};
+    let mut r = headless();
+    let camera = Camera::default();
+    r.lighting = gouraud_lighting();
+    let (positions, normals, colors, _) = gouraud_fixture(&camera);
+    let mesh = r
+        .add_mesh(&MeshData {
+            positions: &positions,
+            normals: &normals,
+            uvs: &[[0.0; 2]; 3],
+            colors: Some(&colors),
+            indices: &[0, 1, 2],
+        })
+        .unwrap();
+    let texture = upload_tex(&mut r, 1, 1, &[100, 100, 100, 255], "region base");
+    r.set_character_light_regions(vec![CharacterLightRegion {
+        centre: Vec3::new(0.0, 0.0, -5.0),
+        axes: glam::Mat3::IDENTITY,
+        volume: CharacterLightVolume::Sphere(100.0),
+        top: [0.8, 0.1, 0.1],
+        bottom: [0.8, 0.1, 0.1],
+        directional: [0.0, 0.0],
+    }]);
+    let mut draw = DrawCmd::textured(mesh, texture, Mat4::IDENTITY);
+    draw.region_lit = Some(LitSphere {
+        centre: Vec3::new(0.0, 0.0, -5.0),
+        radius: 1.0,
+    });
+    r.render_frame(&camera, &[draw], &[], [0.0; 4], None)
+        .unwrap();
+    let lit = r.capture_rgba().unwrap().0;
+    let pixel = common::pixel(&lit, N, 32, 32);
+    assert!(pixel[0] > pixel[1] * 2, "{pixel:?}");
+    draw.cull = Some(0.01);
+    r.render_frame(&camera, &[draw], &[], [0.0; 4], None)
+        .unwrap();
+    let culled = r.capture_rgba().unwrap().0;
+    let pixel = common::pixel(&culled, N, 32, 32);
+    assert_eq!(pixel[0..3], [0, 0, 0]);
+}

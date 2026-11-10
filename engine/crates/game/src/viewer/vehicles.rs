@@ -572,6 +572,7 @@ impl VehicleVisuals {
                     shadow.append_volume(m * node, sun * length, &mut self.shadow_triangles);
                 }
             }
+            let first_draw = out.len();
             class.draws(
                 &mut out,
                 posed.as_deref(),
@@ -579,6 +580,19 @@ impl VehicleVisuals {
                 (self.cull, self.spec_cull),
                 fade,
             );
+            if let Some(sphere) = sim
+                .blast_setup
+                .get(v.class as usize)
+                .and_then(Option::as_ref)
+            {
+                let lit = render::LitSphere {
+                    centre: m.transform_point3(sphere.sphere_centre),
+                    radius: sphere.sphere_radius,
+                };
+                for draw in &mut out[first_draw..] {
+                    draw.region_lit = Some(lit);
+                }
+            }
         }
         r.set_shadow_triangles(&self.shadow_triangles);
         out.extend(self.items.draws(r, sim));

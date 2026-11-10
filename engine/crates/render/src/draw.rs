@@ -225,6 +225,7 @@ pub struct DrawCmd {
     /// draw but a placed world model's. `Lit` and `Character` take all local
     /// lights; `Prelit`, `PrelitAdd` and PC `VertexLit` skip static lights.
     pub lit: Option<LitSphere>,
+    pub region_lit: Option<LitSphere>,
 }
 
 /// Which side of the far scene's switch a draw is ([`LodSwitch`]).
@@ -526,6 +527,7 @@ impl DrawCmd {
             light: LightPath::Lit,
             fade: None,
             lit: None,
+            region_lit: None,
         }
     }
 }

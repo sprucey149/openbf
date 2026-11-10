@@ -277,6 +277,8 @@ impl Renderer {
                 light: s.emission.unwrap_or(LightPath::Lit) as u32,
                 fade: mesh::NO_FADE,
                 lights: [0; 4],
+                region_top: [0.0; 4],
+                region_bottom: [0.0; 4],
             })
             .collect();
         if dome_gain != 1.0 {
@@ -331,6 +333,13 @@ impl Renderer {
         }
         instances.extend(order.iter().map(|&i| {
             let (cull, cull_near) = crate::draw::instance_cull(&draws[i]);
+            let region = draws[i].region_lit.and_then(|sphere| {
+                crate::lighting::character_region_light(
+                    &self.character_light_regions,
+                    &lighting,
+                    sphere,
+                )
+            });
             Instance {
                 model: draws[i].model.to_cols_array_2d(),
                 color: draws[i].color,
@@ -341,6 +350,8 @@ impl Renderer {
                     .fade
                     .map_or(mesh::NO_FADE, |f| [f.begin, f.end, f.near, f.opacity]),
                 lights: draw_lights[i],
+                region_top: region.map_or([0.0; 4], |r| [r[0][0], r[0][1], r[0][2], r[0][3] + 1.0]),
+                region_bottom: region.map_or([0.0; 4], |r| r[1]),
             }
         }));
         if !instances.is_empty() {
@@ -401,6 +412,8 @@ impl Renderer {
                         light: d.light as u32 | crate::affine::layer_bit(d.layer),
                         fade: mesh::NO_FADE,
                         lights: skinned_lights(d.lit),
+                        region_top: [0.0; 4],
+                        region_bottom: [0.0; 4],
                     };
                     if d.light == LightPath::Character {
                         let sphere = d.lit.unwrap_or(crate::LitSphere {

@@ -1334,6 +1334,7 @@ impl Fx {
                     light: render::LightPath::Lit,
                     fade: None,
                     lit: None,
+                    region_lit: None,
                 }
             })
             .collect()
