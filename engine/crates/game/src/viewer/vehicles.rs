@@ -590,6 +590,7 @@ impl VehicleVisuals {
                     radius: sphere.sphere_radius,
                 };
                 for draw in &mut out[first_draw..] {
+                    draw.lit = Some(lit);
                     draw.region_lit = Some(lit);
                 }
             }
@@ -1169,5 +1170,78 @@ mod shadow_tests {
                 "rendering must not mutate simulation"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod local_light_tests {
+    use super::*;
+    use core::vehicle::{BlastSetup, VehicleKind, VehicleSpec};
+    use glam::Vec3;
+
+    #[test]
+    fn vehicle_draws_gather_local_lights_from_the_model_sphere() {
+        let mut r = Renderer::new_headless(64, 64).unwrap();
+        let mesh = r
+            .add_mesh(&MeshData {
+                positions: &[[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]],
+                normals: &[[0.0, 0.0, 1.0]; 3],
+                uvs: &[[0.0; 2]; 3],
+                colors: None,
+                indices: &[0, 1, 2],
+            })
+            .unwrap();
+        let mut vis = VehicleVisuals::default();
+        vis.classes.push(Some(ClassVis {
+            parts: vec![Part {
+                mesh,
+                texture: None,
+                layer: DrawLayer::Opaque,
+                spec: None,
+                light: LightPath::Lit,
+                skin: None,
+            }],
+            skin: None,
+            shadows: Vec::new(),
+        }));
+        let mut sim = core::sim::Sim::empty(1);
+        sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos: Vec3::new(0.0, 0.0, -5.0),
+            yaw: 0.0,
+            max_health: 1000.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: Vec::new(),
+        });
+        sim.blast_setup = vec![Some(BlastSetup {
+            explosion: None,
+            sphere_centre: Vec3::ZERO,
+            sphere_radius: 1.0,
+        })];
+        let draws = vis.draws(&mut r, &sim, &[]);
+        assert!(!draws.is_empty());
+        assert_eq!(draws[0].lit.unwrap().centre, Vec3::new(0.0, 0.0, -5.0));
+        r.lighting.ambient_sky = [0.0; 3];
+        r.lighting.ambient_ground = [0.0; 3];
+        r.lighting.sun_color = [0.0; 3];
+        let camera = render::Camera::default();
+        r.render(&camera, &draws, [0.0; 4]).unwrap();
+        let before = r.capture_rgba().unwrap().0;
+        r.set_point_lights(vec![crate::point_light::omni(
+            Vec3::new(0.0, 0.0, -3.0),
+            [255, 20, 20],
+            20.0,
+            true,
+        )]);
+        r.render(&camera, &draws, [0.0; 4]).unwrap();
+        let after = r.capture_rgba().unwrap().0;
+        assert!(after
+            .chunks_exact(4)
+            .zip(before.chunks_exact(4))
+            .any(|(a, b)| a[0] > b[0] + 10 && a[0] > a[1]));
     }
 }
