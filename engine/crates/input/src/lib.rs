@@ -143,6 +143,69 @@ pub const DEADZONE: f32 = 0.15;
 /// stick keeps its own scale ([`LOOK_SCALE`]).
 pub const STICK_FULL: f32 = 0.95;
 
+/// The least left-stick travel the game will take as a full push (#142, #146,
+/// ours, PROVISIONAL): a pad whose stick tops out short of [`STICK_FULL`]
+/// (an uncalibrated raw-HID pad, a worn third-party stick) never reached the
+/// run speed, so no sprint and no roll. [`StickRange`] learns the pad's own
+/// peak and scales by that instead, down to this floor; a stick that never
+/// passes it keeps [`STICK_FULL`] and stays slow rather than amplifying a
+/// broken or drifting axis.
+/// measure: the lowest cardinal peak of a working pad seen in #146's replies.
+pub const STICK_FULL_MIN: f32 = 0.6;
+
+/// The left stick's learned travel, one peak per axis (x, y): the largest
+/// push seen on that axis since the pad was picked. Calibration and wear
+/// are per axis (a pad's forward reach may stop at 0.80 while its sideways
+/// reach is 1.0), and a diagonal on a round gate gives about 0.7 per axis,
+/// so it never raises an axis past its own cardinal reach.
+/// [`StickRange::full`] is what each soldier stick axis is scaled by: it is
+/// [`STICK_FULL`] until that axis has been pushed past [`STICK_FULL_MIN`],
+/// then its peak, up to [`STICK_FULL`]. So a pad that reaches 0.95 maps
+/// exactly as before once it has been pushed that far, and a one-off
+/// over-travel spike only takes it back toward that. While the peak is
+/// still climbing (the first push of a session or after a reset, at any
+/// speed), a push between [`STICK_FULL_MIN`] and [`STICK_FULL`] reads as
+/// full until a larger one is seen: on a healthy pad that is the few frames
+/// of the first ramp. The caller resets it with the pad.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StickRange {
+    peak: [f32; 2],
+}
+
+impl StickRange {
+    /// The raw gilrs left stick, every sampled frame.
+    pub fn feed(&mut self, x: f32, y: f32) {
+        for (p, v) in self.peak.iter_mut().zip([x, y]) {
+            let v = v.abs();
+            if v.is_finite() {
+                *p = p.max(v.min(1.0));
+            }
+        }
+    }
+
+    /// The travel that reads as a full push on each axis of this pad.
+    pub fn full(&self) -> [f32; 2] {
+        self.peak.map(|p| {
+            if p < STICK_FULL_MIN {
+                STICK_FULL
+            } else {
+                p.min(STICK_FULL)
+            }
+        })
+    }
+
+    /// The largest push seen so far on each axis (0 before any), for the
+    /// black box.
+    pub fn peak(&self) -> [f32; 2] {
+        self.peak
+    }
+
+    /// Forget the pad: a disconnect, or another pad picked.
+    pub fn reset(&mut self) {
+        self.peak = [0.0; 2];
+    }
+}
+
 /// An analog trigger (`RightTrigger2` / `LeftTrigger2` mapped from an axis)
 /// counts as pressed at this travel. PROVISIONAL and ours (FEEL_NOTES): the
 /// PS2 reads L2/R2 as digital buttons [H — the pad-read code is not RE'd],
@@ -622,9 +685,17 @@ fn dz(v: f32) -> f32 {
     }
 }
 
-/// A left-stick axis: the deadzone, then [`STICK_FULL`] reads as 1.
-fn move_axis(v: f32) -> f32 {
-    (dz(v) / STICK_FULL).clamp(-1.0, 1.0)
+/// A left-stick axis: the deadzone, then `full` (the pad's [`StickRange`],
+/// or [`STICK_FULL`]) reads as 1.
+fn move_axis(v: f32, full: f32) -> f32 {
+    (dz(v) / full).clamp(-1.0, 1.0)
+}
+
+/// A right-stick axis as the sim reads it: the deadzone, [`LOOK_SCALE`] and
+/// the player's look sensitivity `look` (1 = the stick as [`LOOK_SCALE`]
+/// gives it; the setting is `ui::menu::PAD_LOOK_SENSITIVITY_RANGE`).
+pub fn look_axis(v: f32, look: f32) -> i16 {
+    PadState::quantize(dz(v) * LOOK_SCALE * look)
 }
 
 /// Card (the maintainer, 2026-10-20): the left stick works the menus and the spawn map
@@ -655,10 +726,17 @@ pub fn stick_arms(x: f32, y: f32, held: u32) -> u32 {
 
 /// Sample with the previous gameplay stick arms, returning the new latch.
 /// The caller owns controller selection and resets `held` on disconnect/change.
+/// `look` is the look sensitivity ([`look_axis`]); a flyer pilot's caller
+/// passes 1, as [`flyer_sticks`] undoes [`LOOK_SCALE`] alone.
+/// `full` is the left-stick travel that reads as a full push on each axis
+/// (x, y): the pad's [`StickRange::full`] on foot, [`STICK_FULL`] in any
+/// seat (vehicle, walker and flyer input stays as it was).
 pub fn pad_from_gamepad_with_arms(
     pad: &gilrs::Gamepad<'_>,
     map: &Mapping,
     held: u32,
+    look: f32,
+    full: [f32; 2],
 ) -> (PadState, u32) {
     use gilrs::Axis;
     let mut b = 0u32;
@@ -688,10 +766,10 @@ pub fn pad_from_gamepad_with_arms(
 
     (
         PadState {
-            lx: PadState::quantize(move_axis(pad.value(Axis::LeftStickX))),
-            ly: PadState::quantize(move_axis(pad.value(Axis::LeftStickY))),
-            rx: PadState::quantize(dz(pad.value(Axis::RightStickX)) * LOOK_SCALE),
-            ry: PadState::quantize(dz(pad.value(Axis::RightStickY)) * LOOK_SCALE),
+            lx: PadState::quantize(move_axis(pad.value(Axis::LeftStickX), full[0])),
+            ly: PadState::quantize(move_axis(pad.value(Axis::LeftStickY), full[1])),
+            rx: look_axis(pad.value(Axis::RightStickX), look),
+            ry: look_axis(pad.value(Axis::RightStickY), look),
             buttons: b,
             ..PadState::default()
         },
@@ -764,6 +842,27 @@ pub fn rumble(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Issue #142: the look sensitivity scales the right stick only; at 1 it
+    /// is the stick as it was, bit for bit.
+    #[test]
+    fn look_sensitivity_scales_only_the_look_stick() {
+        for v in [-1.0, -0.73, -0.2, 0.0, 0.1, 0.16, 0.5, 0.99, 1.0] {
+            assert_eq!(
+                look_axis(v, 1.0),
+                PadState::quantize(dz(v) * LOOK_SCALE),
+                "{v}"
+            );
+            let half = PadState::axis(look_axis(v, 0.5));
+            assert!((half - dz(v) * LOOK_SCALE * 0.5).abs() < 1e-4, "{v}");
+        }
+        // Inside the deadzone stays still at any sensitivity.
+        assert_eq!(look_axis(0.1, 1.5), 0);
+        // A full push saturates from 1.25 up.
+        assert_eq!(look_axis(1.0, 1.5), 32767);
+        assert_eq!(look_axis(-1.0, 1.25), -32767);
+        assert!(look_axis(0.7, 1.5) > look_axis(0.7, 1.0));
+    }
 
     #[test]
     fn a_flyer_pilots_sticks_swap_and_reach_full() {
@@ -1167,10 +1266,10 @@ mod tests {
         assert_eq!(dz(-0.14), 0.0);
         assert_eq!(dz(0.2), 0.2);
         // A pad that tops out short of 1.0 still gives a full push (SPUP).
-        assert_eq!(PadState::quantize(move_axis(0.984)), 32767);
-        assert_eq!(PadState::quantize(move_axis(-0.96)), -32767);
-        assert_eq!(move_axis(0.1), 0.0);
-        assert!((move_axis(0.475) - 0.5).abs() < 1e-6);
+        assert_eq!(PadState::quantize(move_axis(0.984, STICK_FULL)), 32767);
+        assert_eq!(PadState::quantize(move_axis(-0.96, STICK_FULL)), -32767);
+        assert_eq!(move_axis(0.1, STICK_FULL), 0.0);
+        assert!((move_axis(0.475, STICK_FULL) - 0.5).abs() < 1e-6);
         // Quantize/axis round-trip stays within one quantum.
         for v in [-1.0f32, -0.5, 0.0, 0.33, 0.999, 1.0] {
             let q = PadState::quantize(v);
@@ -1179,6 +1278,107 @@ mod tests {
         // Out-of-range hardware values clamp instead of wrapping.
         assert_eq!(PadState::quantize(1.7), 32767);
         assert_eq!(PadState::quantize(-1.7), -32767);
+    }
+
+    /// #142: a pad whose left stick tops out at 0.80 walked at 0.84 of
+    /// MaxSpeed, under the sprint's and the roll's 0.9 gate. Its learned
+    /// range makes that push full, and the sim's gates then pass.
+    #[test]
+    fn a_pad_that_tops_out_short_still_walks_full() {
+        use core::soldier::Soldier;
+        let before = move_axis(0.80, STICK_FULL);
+        assert!((before - 0.842).abs() < 1e-3 && before < 0.9, "{before}");
+        let mut r = StickRange::default();
+        assert_eq!(r.full(), [STICK_FULL; 2]);
+        r.feed(0.80, 0.80);
+        r.feed(0.78, 0.78);
+        assert!(
+            r.full().iter().all(|f| (f - 0.80).abs() < 1e-6),
+            "{:?}",
+            r.full()
+        );
+        assert_eq!(PadState::quantize(move_axis(0.80, r.full()[1])), 32767);
+        assert_eq!(PadState::quantize(move_axis(-0.80, r.full()[0])), -32767);
+        let fwd = PadState::axis(PadState::quantize(move_axis(0.80, r.full()[1])));
+        let strafe = PadState::axis(PadState::quantize(move_axis(0.0, r.full()[0])));
+        assert!(Soldier::sprint_predicate(fwd, strafe, false));
+        assert!(Soldier::roll_predicate(fwd, strafe));
+        assert!(!Soldier::sprint_predicate(before, 0.0, false));
+        assert!(!Soldier::roll_predicate(before, 0.0));
+        // A diagonal is read per axis: it never claims more than the pad's
+        // cardinal reach (a square-response pad's 0.80 stays 0.80).
+        r.feed(0.80, 0.80);
+        assert!(r.full().iter().all(|f| (f - 0.80).abs() < 1e-6));
+    }
+
+    /// #142: the axes learn on their own. A pad whose sideways reach is a
+    /// full 1.0 but whose forward reach stops at 0.80 still gets a full
+    /// forward push, and the sprint and roll gates pass; the sideways axis
+    /// keeps the fixed scale.
+    #[test]
+    fn a_pad_short_on_the_forward_axis_alone_still_sprints() {
+        use core::soldier::Soldier;
+        let mut r = StickRange::default();
+        r.feed(1.0, 0.0);
+        r.feed(0.0, 0.80);
+        r.feed(-1.0, -0.80);
+        // A round-gate diagonal does not raise the short axis.
+        r.feed(0.71, 0.71);
+        let full = r.full();
+        assert_eq!(full[0], STICK_FULL);
+        assert!((full[1] - 0.80).abs() < 1e-6, "{full:?}");
+        let fwd = PadState::axis(PadState::quantize(move_axis(0.80, full[1])));
+        let strafe = PadState::axis(PadState::quantize(move_axis(0.0, full[0])));
+        assert!((fwd - 1.0).abs() < 1e-4, "{fwd}");
+        assert!(Soldier::sprint_predicate(fwd, strafe, false));
+        assert!(Soldier::roll_predicate(fwd, strafe));
+        // The same pad with one shared peak would have stayed slow forward.
+        let shared = move_axis(0.80, STICK_FULL);
+        assert!(!Soldier::sprint_predicate(shared, 0.0, false));
+        assert_eq!(PadState::quantize(move_axis(1.0, full[0])), 32767);
+        assert!((move_axis(0.475, full[0]) - 0.5).abs() < 1e-6);
+    }
+
+    /// The maintainer's pad (0.984) and a pad that reaches 1.0 map as before.
+    #[test]
+    fn a_full_range_pad_maps_as_before() {
+        let mut r = StickRange::default();
+        r.feed(0.984, 0.0);
+        r.feed(0.0, -1.0);
+        r.feed(1.7, 0.0);
+        assert_eq!(r.full(), [STICK_FULL; 2]);
+        assert_eq!(PadState::quantize(move_axis(0.984, r.full()[0])), 32767);
+        assert!((move_axis(0.475, r.full()[1]) - 0.5).abs() < 1e-6);
+    }
+
+    /// A stick that never passes the floor maps as before: a 0.3 push is
+    /// 0.316 of the run, never a full one.
+    #[test]
+    fn the_range_floor_never_amplifies_a_broken_stick() {
+        let mut r = StickRange::default();
+        r.feed(0.3, 0.0);
+        r.feed(f32::NAN, f32::NAN);
+        assert_eq!(r.full(), [STICK_FULL; 2]);
+        assert_eq!(move_axis(0.1, r.full()[0]), 0.0);
+        assert!((move_axis(0.3, r.full()[0]) - 0.3 / STICK_FULL).abs() < 1e-6);
+        r.feed(0.0, -STICK_FULL_MIN);
+        assert_eq!(r.full(), [STICK_FULL, STICK_FULL_MIN]);
+        assert_eq!(
+            PadState::quantize(move_axis(STICK_FULL_MIN, r.full()[1])),
+            32767
+        );
+    }
+
+    #[test]
+    fn the_range_resets_with_the_pad() {
+        let mut r = StickRange::default();
+        r.feed(0.0, 0.75);
+        assert!((r.full()[1] - 0.75).abs() < 1e-6);
+        assert_eq!(r.full()[0], STICK_FULL);
+        assert!((r.peak()[1] - 0.75).abs() < 1e-6);
+        r.reset();
+        assert_eq!(r.full(), [STICK_FULL; 2]);
+        assert_eq!(r.peak(), [0.0; 2]);
     }
 
     #[test]

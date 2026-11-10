@@ -183,7 +183,17 @@ impl Piece {
         ((self.life() - self.timer) * 0.5).clamp(0.0, 1.0)
     }
 
-    fn step(&mut self, sim: &Sim, dt: f32, bf1: bool, bursts: &mut Vec<Vec3>) -> bool {
+    /// `rays` is what the settle and below-terrain rays see: map bodies on
+    /// the ground (PS2 masks 0x90 and 0x10 hold no vehicle), every hull in
+    /// space.
+    fn step(
+        &mut self,
+        sim: &Sim,
+        dt: f32,
+        bf1: bool,
+        rays: HullFilter,
+        bursts: &mut Vec<Vec3>,
+    ) -> bool {
         self.touched = false;
         if !self.moving || sim.heightfield.is_none() || self.budget == 0xff {
             let life = self.life();
@@ -217,7 +227,7 @@ impl Piece {
         if self.count > self.budget {
             let reach = s.prim.bound() * 1.001;
             let limit = if s.mode == 4 { 0.3 } else { 0.75 };
-            let near = floor_fraction(sim, self.pos, reach).is_some_and(|f| f < limit);
+            let near = floor_fraction(sim, self.pos, reach, rays).is_some_and(|f| f < limit);
             if near || s.mode == 2 || u32::from(self.count) > u32::from(self.budget) + 5 {
                 self.moving = false;
                 return true;
@@ -225,10 +235,7 @@ impl Piece {
         }
         if let Some(hf) = &sim.heightfield {
             if self.pos.y + s.prim.bound() < hf.height_at(self.pos.x, self.pos.z)
-                && sim
-                    .collision
-                    .ray_down_with(self.pos, 256.0, HullFilter::All)
-                    .is_none()
+                && sim.collision.ray_down_with(self.pos, 256.0, rays).is_none()
             {
                 return false;
             }
@@ -317,7 +324,7 @@ impl Piece {
     }
 }
 
-fn floor_fraction(sim: &Sim, from: Vec3, reach: f32) -> Option<f32> {
+fn floor_fraction(sim: &Sim, from: Vec3, reach: f32, rays: HullFilter) -> Option<f32> {
     let terrain = sim.heightfield.as_ref().and_then(|hf| {
         let h = hf.height_at(from.x, from.z);
         let gap = from.y - h;
@@ -326,7 +333,7 @@ fn floor_fraction(sim: &Sim, from: Vec3, reach: f32) -> Option<f32> {
     });
     let body = sim
         .collision
-        .ray_down_with(from, reach, HullFilter::All)
+        .ray_down_with(from, reach, rays)
         .map(|(y, _)| (from.y - y) / reach);
     match (terrain, body) {
         (Some(a), Some(b)) => Some(a.min(b)),
@@ -496,6 +503,10 @@ pub struct Chunks {
     bf1: bool,
     posed_nodes: HashMap<u32, Vec<(String, Mat4)>>,
     lit: HashSet<String>,
+    /// Space rules: explosion-class pieces stand in for a class without its
+    /// own, and the pieces' floor rays see vehicle hulls. Ground modes keep
+    /// the class's own pieces and the map's bodies.
+    space: bool,
 }
 
 impl Chunks {
@@ -506,15 +517,29 @@ impl Chunks {
         dirs: &[std::path::PathBuf],
         era: Era,
     ) {
-        for (name, pieces) in Self::load(db, names, dirs, era).defs {
+        for (name, pieces) in Self::load_for(db, names, dirs, era, self.space).defs {
             self.defs.entry(name).or_insert(pieces);
         }
     }
 
+    /// The pieces under space rules ([`Chunks::load_for`]).
     pub fn load(db: &ClassDb, names: &[String], dirs: &[std::path::PathBuf], era: Era) -> Self {
+        Self::load_for(db, names, dirs, era, true)
+    }
+
+    /// The pieces of `names`. Under ground rules (`space` false) a class
+    /// throws only its own pieces, one per slot.
+    pub fn load_for(
+        db: &ClassDb,
+        names: &[String],
+        dirs: &[std::path::PathBuf],
+        era: Era,
+        space: bool,
+    ) -> Self {
         use crate::classdb::fnv1a_lowercase as hash;
         let mut out = Self {
             bf1: era == Era::Bf1,
+            space,
             ..Self::default()
         };
         let side = SideData::load(dirs);
@@ -531,11 +556,13 @@ impl Chunks {
                 .map_or(&[][..], Vec::as_slice);
             let mut slots = chunk_properties(db.chain(name));
             let mut exp_name = None;
-            if !slots.iter().any(|s| {
-                s.props
-                    .get(&hash("ChunkGeometryName"))
-                    .is_some_and(|m| !m.trim().is_empty())
-            }) {
+            if space
+                && !slots.iter().any(|s| {
+                    s.props
+                        .get(&hash("ChunkGeometryName"))
+                        .is_some_and(|m| !m.trim().is_empty())
+                })
+            {
                 if let Some(exp) = crate::vehicle_class::explosion_name(db, name) {
                     slots = chunk_properties(db.chain(&exp));
                     exp_name = Some(exp);
@@ -647,7 +674,11 @@ impl Chunks {
                     node: text("ChunkNodeName").and_then(|n| node_matrix(vehicle_nodes, n)),
                     node_name: text("ChunkNodeName").map(|n| n.trim().to_owned()),
                 });
+                // NumChunks belongs to explosion classes, whose own law
+                // (`re-vehicle-death.md` §6.1) is not ported; the ground
+                // throws each slot once.
                 let count = text("NumChunks")
+                    .filter(|_| space)
                     .or_else(|| {
                         (slots.len() == 1)
                             .then(|| db.prop(name, "NumChunks"))
@@ -658,6 +689,7 @@ impl Chunks {
                             .then(|| exp_name.as_deref().and_then(|e| db.prop(e, "NumChunks")))
                             .flatten()
                     })
+                    .filter(|_| space)
                     .and_then(|v| v.trim().parse::<usize>().ok())
                     .map_or(1, |n| n.clamp(1, 10));
                 for _ in 0..count {
@@ -685,12 +717,17 @@ impl Chunks {
         let dt = core::TICK_DT;
         let rng = self.rng.get_or_insert(Lcg(0xdeb1_5eed));
         let mut bursts = Vec::new();
+        let rays = if self.space {
+            HullFilter::All
+        } else {
+            HullFilter::Static
+        };
         for cluster in &mut self.live {
             for p in std::mem::take(cluster) {
                 let mut p = p;
                 let moving = p.moving;
                 let mut here = Vec::new();
-                if p.step(&walk.sim, dt, self.bf1, &mut here) {
+                if p.step(&walk.sim, dt, self.bf1, rays, &mut here) {
                     if moving && !p.moving {
                         p.settle(lib, rng);
                     }

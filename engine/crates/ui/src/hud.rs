@@ -510,7 +510,7 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         .and_then(|r| r.stats.clone())
         .map(Box::new);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
-    if alive && m.map.is_some() {
+    if map_shown(m) {
         put("player1.map.enable", EventValue::None);
     }
 
@@ -816,10 +816,15 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
     hide(
         hud,
         "hud.gate.map",
-        alive && m.map.is_some(),
+        map_shown(m),
         &["player1.map.disable"],
         &["player1.map.enable"],
     );
+}
+
+/// The minimap is up alive and over the death camera (`re-spawn-flow.md` §6).
+fn map_shown(m: &HudModel) -> bool {
+    m.map.is_some() && (!m.dead || (m.spawn.is_none() && m.outcome.is_none()))
 }
 
 /// The target readout's events (`re-target-hud.md` §3 [V][O],
@@ -1197,6 +1202,20 @@ mod tests {
         m.outcome = Some(2);
         m.time_left = Some(0.0);
         let _ = ctx.run(egui::RawInput::default(), |ctx| draw_hud(ctx, &m));
+    }
+
+    /// The minimap stays over the death camera (`re-spawn-flow.md` §6.2).
+    #[test]
+    fn the_minimap_stays_over_the_death_camera() {
+        let (objective, legend) = (String::new(), Default::default());
+        let mut m = model();
+        (m.map, m.dead) = (Some(Default::default()), true);
+        assert!(map_shown(&m));
+        m.outcome = Some(1);
+        assert!(!map_shown(&m), "the round's end");
+        m.outcome = None;
+        m.spawn = Some(crate::spawn_draw::SpawnPage::Map { objective, legend });
+        assert!(!map_shown(&m), "the spawn map draws its own");
     }
 
     /// The target readout's feed (`re-target-hud.md` §3): a picked enemy at

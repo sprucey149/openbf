@@ -35,6 +35,16 @@ fn the_sonic_blaster_rides_a_fat_ray_with_its_blast_effect() {
         Some("imp_sfx_weap_sonicblast_ord")
     );
     assert!(w.ordnance.fat_ray.is_none());
+    // Playtest 2026-11-05 B3: the BF2 data's damage and reach. The primary
+    // is an unseen 100-damage bolt reaching 250 m; MaxPressedTime is not
+    // authored, so every shot fires at charge 1 and the ray does its full
+    // 100 x (1 - miss / 1 m) out to 25 m, floor 10.
+    assert_eq!(w.ordnance.max_damage, 100.0);
+    assert_eq!(w.ordnance.velocity, 500.0);
+    assert_eq!(w.ordnance.life_span, 0.5);
+    assert_eq!(w.max_pressed_time, 0.0);
+    assert_eq!(fat.min_damage, 10.0);
+    assert_eq!(fat.damage(1.0), 100.0);
 }
 
 #[test]
@@ -76,4 +86,32 @@ fn the_beam_turret_strikes_with_its_impact_effect() {
     let impact = w.ordnance.impact.as_ref().unwrap();
     assert_eq!(impact.soft.as_deref(), Some("com_sfx_weap_beam_exp"));
     assert_eq!(impact.water, None);
+}
+
+/// BF2's award slots are built with their medal keys (#142): the Elite
+/// rifle and the award pistol are held, and the weapons they replace carry
+/// the matching lock. Han's pistol inherits the pistol's lock but needs no
+/// medal.
+#[test]
+fn award_slots_are_built_with_their_medal_keys() {
+    let Some(mut db) = bf2_db() else { return };
+    let all = crate::assets::baked_root().join("classes/bf2_all.ron");
+    if !all.is_file() {
+        return;
+    }
+    db.load(&all).unwrap();
+    let r = super::ClassRoster::build(&db, "imp_inf_rifleman", 0, None).unwrap();
+    let held = |name: &str| {
+        r.held
+            .iter()
+            .find(|h| h.weapon.name == name)
+            .unwrap_or_else(|| panic!("{name} held"))
+    };
+    assert_eq!(held("imp_weap_award_rifle").weapon.medal_unlock, Some(1));
+    assert_eq!(held("imp_weap_award_pistol").weapon.medal_unlock, Some(0));
+    assert_eq!(held("imp_weap_inf_pistol").weapon.medal_lock, Some(0));
+    let rifle = super::weapon_from_db(&db, "imp_weap_inf_rifle").unwrap();
+    assert_eq!((rifle.medal_unlock, rifle.medal_lock), (None, Some(1)));
+    let han = super::weapon_from_db(&db, "all_weap_hero_hanpistol").unwrap();
+    assert_eq!((han.medal_unlock, han.medal_lock), (None, Some(0)));
 }

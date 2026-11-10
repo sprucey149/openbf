@@ -61,7 +61,10 @@ const LEFT_RADIUS: f32 = 3.0;
 /// Does `u` hold a scoped rifle (the AI sniper table's class) in any slot?
 pub fn is_sniper(sim: &Sim, u: &Unit) -> bool {
     let scoped = |c: usize| sim.weapon_classes[c].ai_distance_table();
-    scoped(u.weapon_class) || u.held.iter().any(|w| scoped(w.class))
+    scoped(u.weapon_class)
+        || u.held
+            .iter()
+            .any(|w| scoped(w.class) && !sim.weapon_locked(u, w.class))
 }
 
 /// Is the sniper on its spot, `hold` (the live hold) the spot's?
@@ -190,6 +193,9 @@ pub(super) fn arrive(sim: &Sim, me: UnitHandle, st: &mut AiState) {
         strafe_side: if me.index.is_multiple_of(2) { 1 } else { -1 },
         stance_mask: c.mask,
         last_contact: sim.tick,
+        // It watches down its lane until an enemy it can see is nearer
+        // (the hold's upkeep, `behave::brain`).
+        look: c.look,
         ..HoldState::default()
     });
 }
@@ -246,7 +252,7 @@ pub fn pick(sim: &Sim, me: UnitHandle, u: &Unit, left: Option<Vec3>) -> Option<S
             if !reach(p) {
                 continue;
             }
-            let (score, len) = lane(sim, u, p);
+            let (score, len, far) = lane_far(sim, u, p);
             if score > 0.0 && best.is_none_or(|(b, _)| score > b) {
                 best = Some((
                     score,
@@ -254,6 +260,13 @@ pub fn pick(sim: &Sim, me: UnitHandle, u: &Unit, left: Option<Vec3>) -> Option<S
                         spot: p,
                         mask,
                         lane: len,
+                        // Ground rounds only: a space round's sniper (a
+                        // hangar fight) holds as it did.
+                        look: if !sim.space_round() {
+                            far.unwrap_or(Vec3::ZERO)
+                        } else {
+                            Vec3::ZERO
+                        },
                         ..SnipeState::default()
                     },
                 ));
@@ -306,13 +319,22 @@ pub fn pick(sim: &Sim, me: UnitHandle, u: &Unit, left: Option<Vec3>) -> Option<S
 /// default (70 m) gives a lane to 140 m, past a scope's 128 m; the indoor
 /// maps' 30 m keeps a lane to 60 m.
 pub fn lane(sim: &Sim, u: &Unit, p: Vec3) -> (f32, f32) {
+    let (score, len, _) = lane_far(sim, u, p);
+    (score, len)
+}
+
+/// [`lane`] with the farthest point in sight itself (a metre up), `None`
+/// for no lane: where the sniper looks from the spot with nothing in sight
+/// (`SnipeState::look`).
+pub fn lane_far(sim: &Sim, u: &Unit, p: Vec3) -> (f32, f32, Option<Vec3>) {
     let Some(g) = sim.nav.as_ref() else {
-        return (0.0, 0.0);
+        return (0.0, 0.0, None);
     };
     let tier = sim.unit_tier(u);
     let share = perception::scope_share(u, &tier);
     let scope = std::iter::once(u.weapon_class)
         .chain(u.held.iter().map(|w| w.class))
+        .filter(|&c| !sim.weapon_locked(u, c))
         .filter_map(|c| perception::scope_reach(sim, &sim.weapon_classes[c], share))
         .fold(0.0f32, f32::max);
     let sight = perception::view_distance(Stance::Stand, tier.view_mult)
@@ -339,7 +361,7 @@ pub fn lane(sim: &Sim, u: &Unit, p: Vec3) -> (f32, f32) {
             }
         }
     }
-    let (mut score, mut len) = (0.0f32, 0.0f32);
+    let (mut score, mut len, mut far) = (0.0f32, 0.0f32, None);
     for q in pts {
         let d = (q - p).length();
         if !(LANE_MIN..=sight).contains(&d) {
@@ -353,10 +375,13 @@ pub fn lane(sim: &Sim, u: &Unit, p: Vec3) -> (f32, f32) {
             perception::los_terrain(sim, eye, to) && perception::los_world(sim, eye, to)
         }) {
             score += d / sight;
-            len = len.max(d);
+            if d > len {
+                len = d;
+                far = Some(to);
+            }
         }
     }
-    (score, len)
+    (score, len, far)
 }
 
 #[cfg(test)]

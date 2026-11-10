@@ -2,8 +2,9 @@
 //! `new_headless`) — the adapter and device (`request_device`, which honours
 //! `OPENBF_ADAPTER`) and the window surface or the headless texture
 //! ([`HEADLESS_FORMAT`]; the surface composites `Opaque` when it can,
-//! `pick_alpha_mode`) — the depth target, the meshes and textures uploaded
-//! to the device, and the size, resize and idle queries. Both constructors
+//! `pick_alpha_mode`; plain vsync, `pick_present_mode`) — the depth
+//! target, the meshes and textures uploaded to the device, and the size,
+//! resize and idle queries. Both constructors
 //! finish in `finish_init` (`pipelines.rs`).
 
 use crate::mesh::GpuMesh;
@@ -78,7 +79,7 @@ impl Renderer {
     pub fn new_windowed(window: Arc<winit::window::Window>) -> Result<Self, RenderError> {
         let turn = GpuTurn::take();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: backends(),
             ..Default::default()
         });
         let surface = instance
@@ -109,6 +110,11 @@ impl Renderer {
             caps.alpha_modes
         );
         let size = window.inner_size();
+        let present_mode = pick_present_mode(
+            std::env::var("OPENBF_NO_VSYNC").ok().as_deref(),
+            std::env::var("OPENBF_PRESENT").ok().as_deref(),
+            &caps.present_modes,
+        );
         // COPY_SRC where the surface allows it: BF2's terrain light pass
         // reads a copy of the frame (`terrain_light.rs`).
         let usage =
@@ -132,7 +138,7 @@ impl Renderer {
             format,
             width: size.width.max(1),
             height: size.height.max(1),
-            present_mode: present_mode(),
+            present_mode,
             alpha_mode,
             view_formats,
             desired_maximum_frame_latency: 2,
@@ -140,10 +146,32 @@ impl Renderer {
         surface.configure(&device, &config);
 
         let info = adapter.get_info();
+        // What a display report needs (#142): the GPU, the backend and the
+        // present mode actually used, and the monitor's refresh rate.
+        let refresh = window
+            .current_monitor()
+            .and_then(|m| m.refresh_rate_millihertz())
+            .map_or("unknown".to_string(), |mhz| {
+                format!("{:.1} Hz", f64::from(mhz) / 1000.0)
+            });
+        println!(
+            "display: {} ({:?}, {:?}, driver {} {}), surface {format:?}, \
+             present {present_mode:?} of {:?}, monitor {refresh}",
+            info.name,
+            info.backend,
+            info.device_type,
+            info.driver,
+            info.driver_info,
+            caps.present_modes,
+        );
         Self::finish_init(
             device,
             queue,
-            Target::Window { surface, config },
+            Target::Window {
+                surface,
+                config,
+                window,
+            },
             format,
             info,
             turn,
@@ -160,7 +188,7 @@ impl Renderer {
         }
         let turn = GpuTurn::take();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::PRIMARY,
+            backends: backends(),
             ..Default::default()
         });
         let (adapter, device, queue) = request_device(&instance, None)?;
@@ -237,16 +265,39 @@ impl Renderer {
     }
 
     /// Windowed only: reconfigure surface + depth on window resize (no-op headless).
+    /// A resize to nothing (minimized) or to the size the surface already has
+    /// keeps the swapchain: some platforms send one on focus or activation,
+    /// and rebuilding the swapchain there can show as a blink (#142).
     pub fn resize(&mut self, width: u32, height: u32) {
-        if let Target::Window { surface, config } = &mut self.target {
-            if width == 0 || height == 0 {
-                return; // minimized; keep old config
-            }
+        if resize_wanted(self.size(), (width, height)) {
+            self.reconfigure_window(width, height);
+        }
+    }
+
+    /// Rebuild the window's swapchain, depth target and scaled-world targets
+    /// at `width` x `height` (no-op headless). The one path for a resize, an
+    /// out-of-date surface and a frame presented at a stale size.
+    pub(crate) fn reconfigure_window(&mut self, width: u32, height: u32) {
+        if let Target::Window {
+            surface, config, ..
+        } = &mut self.target
+        {
             config.width = width;
             config.height = height;
             surface.configure(&self.device, config);
             self.depth_view = create_depth_texture(&self.device, width, height);
             self.world_scale.clear();
+        }
+    }
+
+    /// The window's current inner size (`None` headless).
+    pub(crate) fn window_size(&self) -> Option<(u32, u32)> {
+        match &self.target {
+            Target::Window { window, .. } => {
+                let size = window.inner_size();
+                Some((size.width, size.height))
+            }
+            Target::Headless { .. } => None,
         }
     }
 
@@ -321,14 +372,85 @@ fn request_device(
     Ok((adapter, device, queue))
 }
 
-/// The window's present mode: vsync, unless `OPENBF_NO_VSYNC=1` (a
+/// The graphics APIs to try: `WGPU_BACKEND` (`vulkan`, `dx12`, `metal`,
+/// `gl`) when set, so a display problem can be tried on another API, else
+/// the primary ones.
+fn backends() -> wgpu::Backends {
+    wgpu::Backends::from_env().unwrap_or(wgpu::Backends::PRIMARY)
+}
+
+/// The window's present mode, from what the surface offers (`available`).
+///
+/// Plain `Fifo` by default, not `AutoVsync`: that takes `FifoRelaxed` where
+/// offered, which shows a late frame at once and can tear or flicker in a
+/// window (#142). `Fifo` is always offered.
+///
+/// `no_vsync` is `OPENBF_NO_VSYNC`; `"1"` presents without vsync (a
 /// measurement knob, card ISPD: with vsync a frame's time is the display's,
-/// whatever the frame cost).
-fn present_mode() -> wgpu::PresentMode {
-    if std::env::var("OPENBF_NO_VSYNC").as_deref() == Ok("1") {
-        wgpu::PresentMode::AutoNoVsync
+/// whatever the frame cost). `want` is `OPENBF_PRESENT` (`fifo`, `relaxed`,
+/// `mailbox`, `immediate`), a diagnostic knob for a display report; a mode
+/// the surface does not offer is ignored with a note.
+fn pick_present_mode(
+    no_vsync: Option<&str>,
+    want: Option<&str>,
+    available: &[wgpu::PresentMode],
+) -> wgpu::PresentMode {
+    use wgpu::PresentMode::{Fifo, FifoRelaxed, Immediate, Mailbox};
+    if let Some(name) = want.filter(|w| !w.is_empty()) {
+        let asked = match name.to_ascii_lowercase().as_str() {
+            "fifo" => Some(Fifo),
+            "relaxed" | "fiforelaxed" => Some(FifoRelaxed),
+            "mailbox" => Some(Mailbox),
+            "immediate" => Some(Immediate),
+            _ => None,
+        };
+        match asked {
+            Some(mode) if available.contains(&mode) => return mode,
+            _ => println!("OPENBF_PRESENT={name} is not offered here ({available:?}); ignored"),
+        }
+    }
+    if no_vsync == Some("1") {
+        // The order wgpu's AutoNoVsync tries, resolved here so the startup
+        // line names the mode actually used.
+        if let Some(mode) = [Immediate, Mailbox]
+            .into_iter()
+            .find(|m| available.contains(m))
+        {
+            return mode;
+        }
+    }
+    Fifo
+}
+
+/// Whether a window resize to `new` should rebuild a surface of size
+/// `current`: not for a minimized window (a zero side) and not for the
+/// same size.
+fn resize_wanted(current: (u32, u32), new: (u32, u32)) -> bool {
+    new.0 != 0 && new.1 != 0 && new != current
+}
+
+/// The size to rebuild an out-of-date surface at: the window's own size
+/// (`window`), not the stale one the surface was configured with. `None`
+/// while the window is minimized: the frame is skipped and the surface is
+/// left alone until the window has an area again.
+pub(crate) fn outdated_surface_size(window: (u32, u32)) -> Option<(u32, u32)> {
+    (window.0 != 0 && window.1 != 0).then_some(window)
+}
+
+/// Whether a frame the surface called suboptimal should rebuild it after
+/// presenting: only when the window's size (`window`) has moved from the
+/// surface's (`config`). Suboptimal alone never rebuilds it, since a
+/// platform that reports it on every frame would then rebuild the swapchain
+/// every frame.
+pub(crate) fn suboptimal_rebuild_size(
+    suboptimal: bool,
+    window: (u32, u32),
+    config: (u32, u32),
+) -> Option<(u32, u32)> {
+    if suboptimal && window != config {
+        outdated_surface_size(window)
     } else {
-        wgpu::PresentMode::AutoVsync
+        None
     }
 }
 
@@ -337,7 +459,7 @@ fn present_mode() -> wgpu::PresentMode {
 /// every number printed afterwards a lie.
 fn pick_adapter(instance: &wgpu::Instance, want: &str) -> Result<wgpu::Adapter, RenderError> {
     use wgpu::DeviceType;
-    let all = instance.enumerate_adapters(wgpu::Backends::PRIMARY);
+    let all = instance.enumerate_adapters(backends());
     let want_lc = want.to_ascii_lowercase();
     let hit = all.iter().find(|a| {
         let info = a.get_info();
@@ -431,6 +553,56 @@ mod tests {
                 Err(RenderError::BadTexture(message)) if message.contains("must be non-empty")
             ));
         }
+    }
+
+    #[test]
+    fn a_window_presents_with_plain_fifo_unless_vsync_is_off() {
+        use wgpu::PresentMode::{AutoNoVsync, AutoVsync, Fifo, FifoRelaxed, Immediate, Mailbox};
+        let all = [Fifo, FifoRelaxed, Mailbox, Immediate];
+        // Never FifoRelaxed by default, though the surface offers it.
+        assert_eq!(pick_present_mode(None, None, &all), Fifo);
+        assert_eq!(pick_present_mode(Some("0"), None, &all), Fifo);
+        assert_eq!(pick_present_mode(Some("1"), None, &all), Immediate);
+        assert_eq!(
+            pick_present_mode(Some("1"), None, &[Fifo, Mailbox]),
+            Mailbox
+        );
+        assert_eq!(pick_present_mode(Some("1"), None, &[Fifo]), Fifo);
+        // The diagnostic knob, only for a mode the surface offers.
+        assert_eq!(pick_present_mode(None, Some("relaxed"), &all), FifoRelaxed);
+        assert_eq!(pick_present_mode(None, Some("MAILBOX"), &all), Mailbox);
+        assert_eq!(pick_present_mode(None, Some("mailbox"), &[Fifo]), Fifo);
+        assert_eq!(pick_present_mode(None, Some("bogus"), &all), Fifo);
+        assert_eq!(pick_present_mode(Some("1"), Some("fifo"), &all), Fifo);
+        for no_vsync in [None, Some("1")] {
+            let mode = pick_present_mode(no_vsync, None, &all);
+            assert!(mode != AutoVsync && mode != AutoNoVsync);
+        }
+    }
+
+    #[test]
+    fn a_resize_to_the_same_size_or_to_nothing_keeps_the_swapchain() {
+        assert!(!resize_wanted((1280, 720), (1280, 720)));
+        assert!(!resize_wanted((1280, 720), (1280, 0)));
+        assert!(!resize_wanted((1280, 720), (0, 720)));
+        assert!(resize_wanted((1280, 720), (1920, 1080)));
+        assert!(resize_wanted((1280, 720), (1280, 721)));
+    }
+
+    #[test]
+    fn an_outdated_surface_rebuilds_at_the_window_size_not_the_old_one() {
+        assert_eq!(outdated_surface_size((1920, 1080)), Some((1920, 1080)));
+        assert_eq!(outdated_surface_size((0, 0)), None);
+        assert_eq!(outdated_surface_size((1920, 0)), None);
+    }
+
+    #[test]
+    fn a_suboptimal_frame_rebuilds_only_when_the_size_moved() {
+        let (old, new) = ((1280, 720), (1920, 1080));
+        assert_eq!(suboptimal_rebuild_size(true, old, old), None);
+        assert_eq!(suboptimal_rebuild_size(true, new, old), Some(new));
+        assert_eq!(suboptimal_rebuild_size(false, new, old), None);
+        assert_eq!(suboptimal_rebuild_size(true, (0, 0), old), None);
     }
 
     #[test]

@@ -1218,3 +1218,140 @@ fn a_jump_arc_starts_with_one_jump_and_a_plain_arc_has_none() {
         assert_eq!(jumps, want, "flags {flags}");
     }
 }
+
+/// Card WAI: [`crate::ai::RIDE_GAIN`] is judged once, when a walker is
+/// claimed (`ride::routes_to`). A ride under way to the hub nearest the post
+/// keeps its leg however little gain is left (the gain falls to 0 as the
+/// walker reaches that hub), and a fresh plan from near the drop hub still
+/// gets a leg to it: the pilot is not put out 40 m short, and a command
+/// walker is not left standing.
+#[test]
+fn a_walker_ride_to_a_drop_hub_is_not_judged_again_on_the_way() {
+    use crate::cp::CpDef;
+    use crate::heightfield::Heightfield;
+    use crate::nav::NavGraph;
+    use crate::region::Region;
+    use crate::unit::{Controller, UnitSpec};
+    use crate::vehicle::{SeatKind, SeatSetup, VehicleKind, VehicleSpec};
+    use crate::weapon::HealthType;
+    let mut s = Sim::empty(3);
+    s.heightfield = Some(Heightfield {
+        size: 2,
+        unit: 4000.0,
+        offset_x: 2000.0,
+        offset_z: 2000.0,
+        heights: vec![0.0; 4],
+    });
+    s.walker_params = vec![Some(crate::vehicle::walker::tests::atst())];
+    // ai_size 8: the walker routes as type 3.
+    s.seat_setup = vec![Some(SeatSetup {
+        radius: 3.0,
+        body_active: vec![],
+        boardable: vec![true],
+        exit_drop: 10.0,
+        ai_size: 8,
+        guns: Vec::new(),
+    })];
+    let post = Vec3::new(0.0, 0.0, 150.0);
+    s.add_cp(
+        CpDef {
+            name: "far".into(),
+            pos: post,
+            capture: Region::sphere(post, 8.0),
+            control: None,
+            value_bleed: 100,
+            value_atk: [100, 100],
+            value_def: [100, 100],
+            spawn_nodes: vec![],
+            capture_time: 10.0,
+            neutralize_time: 12.0,
+        },
+        Some(1),
+    );
+    // Hub 1 is the drop hub: the walker's type reaches it, the last arc to
+    // the post's hub 2 is soldiers' only.
+    let hub = |z: f32, radius: f32, arcs: Vec<u16>| Hub {
+        pos: Vec3::new(0.0, 0.0, z),
+        radius,
+        arcs,
+    };
+    s.nav = NavGraph::new(
+        vec![
+            hub(0.0, 10.0, vec![0]),
+            hub(100.0, 4.0, vec![0, 1]),
+            hub(150.0, 4.0, vec![1]),
+        ],
+        vec![
+            Arc {
+                a: 0,
+                b: 1,
+                type_mask: 1 | 1 << 3,
+                flags: 0,
+            },
+            Arc {
+                a: 1,
+                b: 2,
+                type_mask: 1,
+                flags: 0,
+            },
+        ],
+        RouteTable::empty(3),
+        vec![],
+        vec![],
+    );
+    s.cps[0].nav_hub = Some(2);
+    let b = s
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    let v = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Walker,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: Vec3::ZERO,
+        yaw: 0.0,
+        max_health: 8000.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    assert!(s.seat_unit(b, v, 0));
+    let place = |s: &mut Sim, z: f32| {
+        let p = Vec3::new(0.0, 0.0, z);
+        s.vehicle_mut(v).unwrap().pos = p;
+        s.unit_mut(b).unwrap().soldier.pos = p;
+    };
+
+    // Mid-ride, 30 m of gain left: the leg to the drop hub is kept.
+    place(&mut s, 70.0);
+    let leg = Route {
+        dest_hub: 1,
+        next_hub: 1,
+        waypoint: Vec3::new(0.0, 0.0, 100.0),
+        ..Default::default()
+    };
+    let mut st = AiState {
+        target_cp: Some(0),
+        route: Some(leg),
+        ..Default::default()
+    };
+    let mut nt = NavTick::default();
+    retarget_to_post(&s, b, &mut st, 0, false, &mut nt);
+    assert_eq!(
+        st.route.map(|r| r.dest_hub),
+        Some(1),
+        "leg dropped mid-ride"
+    );
+    assert_eq!(nt.unroutable, 0);
+
+    // No route yet, 25 m of gain: a leg to the drop hub is planned.
+    place(&mut s, 75.0);
+    let mut st = AiState::default();
+    let mut nt = NavTick::default();
+    retarget_to_post(&s, b, &mut st, 0, false, &mut nt);
+    assert_eq!(st.route.map(|r| r.dest_hub), Some(1), "no leg planned");
+    assert_eq!(nt.unroutable, 0);
+}

@@ -731,7 +731,10 @@ fn hud_lock(
     slot: usize,
     aspect: f32,
 ) -> Option<ui::hud::HudLock> {
-    let (target, pos) = walk.sim.lock_on_target(slot)?;
+    // A flyer's lock, else the launcher's on foot (`core::sim::foot_lock`).
+    let flyer = walk.sim.lock_on_target(slot);
+    let (target, pos) = flyer.or_else(|| walk.sim.foot_lock_target(slot))?;
+    let flyer = flyer.is_some();
     let hud = feed.lock_target(&walk.sim, target)?;
     let camera = walk.camera();
     let ([x, y], on_screen) = marker_screen(camera.view_proj(aspect), pos);
@@ -747,12 +750,20 @@ fn hud_lock(
         direction,
         ndc: [x, y],
         on_screen,
-        visible: walk.sim.lock_on_visible(slot),
-        charge: [
-            walk.sim.lock_on_charge(slot, 0),
-            walk.sim.lock_on_charge(slot, 1),
-        ],
-        flyer: true,
+        visible: if flyer {
+            walk.sim.lock_on_visible(slot)
+        } else {
+            walk.sim.foot_lock_visible(slot)
+        },
+        charge: if flyer {
+            [
+                walk.sim.lock_on_charge(slot, 0),
+                walk.sim.lock_on_charge(slot, 1),
+            ]
+        } else {
+            [walk.sim.foot_lock_charge(slot), None]
+        },
+        flyer,
         pulse: walk.sim.tick as f32 / core::TICK_HZ as f32,
     })
 }
@@ -908,7 +919,9 @@ pub(super) fn hud_model(
         map: walk.minimap.as_ref().and_then(|m| match &spawn {
             // The spawn map page shows the Map element's Spawn view.
             Some(ui::spawn_draw::SpawnPage::Map { .. }) => Some(m.spawn_model(walk, slot)),
-            _ => walk.space_round.is_none().then(|| m.model(walk)),
+            // A space map's dead player keeps no minimap.
+            _ => (walk.space_round.is_none() && (me.alive || !walk.space_battle()))
+                .then(|| m.model(walk)),
         }),
         squad: feed.squad(walk.sim.tick),
         // The spawn screen up, drawn in the HUD's frame (card SSELB).
@@ -938,6 +951,17 @@ pub(super) fn spawn_model(
     // screen he opened at a friendly post is up.
     let alive_screen = walk.sim.spawn_stage.get(slot) == Some(&core::sim::SpawnStage::Alive);
     if (me.alive && !alive_screen) || walk.sim.outcome.is_some() {
+        return None;
+    }
+    // The death camera holds the screen until the spawn map opens (playtest
+    // A7, issue #128): no panel over the body. Space maps keep theirs, and a
+    // dead rider's held seat view (no death camera) keeps the waiting panel.
+    if !me.alive
+        && walk.death_cam.is_some()
+        && !walk.space_battle()
+        && walk.sim.spawn_screens
+        && walk.sim.spawn_stage.get(slot) == Some(&core::sim::SpawnStage::Accepted)
+    {
         return None;
     }
     let b = &walk.sim.battle;
@@ -1410,5 +1434,81 @@ mod tests {
         let rules = on.sim.heroes.as_ref().unwrap().rules;
         assert_eq!(rules.unlock, core::sim::heroes::HeroUnlock::Timer(42));
         assert_eq!(rules.respawn_ticks, None);
+    }
+
+    /// A dead rider whose seat view is held runs no death camera, so he keeps
+    /// the waiting panel and its countdown instead of a bare frozen view.
+    #[test]
+    fn a_death_with_no_death_camera_keeps_the_waiting_panel() {
+        use core::sim::SpawnStage;
+        let flat = core::heightfield::Heightfield {
+            size: 2,
+            unit: 4000.0,
+            offset_x: 2000.0,
+            offset_z: 2000.0,
+            heights: vec![0.0; 4],
+        };
+        let feed = game::event_feed::EventFeed::default();
+        let mut walk = WalkSim::new(1, glam::Vec3::ZERO, Some(flat));
+        walk.sim.spawn_screens = true;
+        walk.sim.spawn_stage = vec![SpawnStage::Accepted];
+        walk.step_tick(&[core::sim::PadState::default()]);
+        walk.sim
+            .kill_environment(walk.player, core::sim::DeathCause::Suicide);
+        walk.step_tick(&[core::sim::PadState::default()]);
+        assert_eq!(walk.sim.spawn_stage[0], SpawnStage::Accepted);
+        walk.death_cam = None;
+        assert!(matches!(
+            spawn_model(&walk, &feed).and_then(|m| m.screen),
+            Some(ui::spawn::SpawnScreen::Waiting)
+        ));
+    }
+
+    /// Playtest A7: no spawn panel over the death camera; the spawn map
+    /// comes when the timer runs out. A space map keeps its panel.
+    #[test]
+    fn no_spawn_panel_while_the_death_camera_runs() {
+        use core::sim::SpawnStage;
+        let flat = || core::heightfield::Heightfield {
+            size: 2,
+            unit: 4000.0,
+            offset_x: 2000.0,
+            offset_z: 2000.0,
+            heights: vec![0.0; 4],
+        };
+        let feed = game::event_feed::EventFeed::default();
+        for space in [false, true] {
+            let mut walk = WalkSim::new(1, glam::Vec3::ZERO, Some(flat()));
+            if space {
+                // Only the space scripts add landing regions.
+                let region = core::region::Region::sphere(glam::Vec3::ZERO, 10.0);
+                walk.sim.landing_regions.push(region);
+            }
+            walk.sim.spawn_screens = true;
+            walk.sim.spawn_stage = vec![SpawnStage::Accepted];
+            walk.step_tick(&[core::sim::PadState::default()]);
+            assert!(spawn_model(&walk, &feed).is_none(), "alive");
+            walk.sim
+                .kill_environment(walk.player, core::sim::DeathCause::Suicide);
+            let mut ticks = 0;
+            while walk.sim.spawn_stage[0] == SpawnStage::Accepted {
+                walk.step_tick(&[core::sim::PadState::default()]);
+                ticks += 1;
+                assert!(ticks < 200, "the spawn map never opened");
+                let model = spawn_model(&walk, &feed);
+                if walk.sim.spawn_stage[0] == SpawnStage::Accepted {
+                    match space {
+                        false => assert!(model.is_none(), "tick {ticks}"),
+                        true => assert!(matches!(
+                            model.and_then(|m| m.screen),
+                            Some(ui::spawn::SpawnScreen::Waiting)
+                        )),
+                    }
+                }
+            }
+            assert!(ticks >= 4 * core::TICK_HZ as usize, "{ticks} ticks");
+            let screen = spawn_model(&walk, &feed).and_then(|m| m.screen);
+            assert!(matches!(screen, Some(ui::spawn::SpawnScreen::Map)));
+        }
     }
 }

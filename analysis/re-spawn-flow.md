@@ -403,6 +403,26 @@ C7 / C12 narrowed (folded in below).
   for a death camera still on that unit it re-initialises it with no unit and no killer from the player camera's
   matrix (`B2:77354-77378`) - the spawn-screen replay of §6 item 3 [D].
 
+### 6.6 BF1's twin, and the port (2026-11-10) [V]
+
+- BF1 has the same camera: set-up `FUN_001aaed8` (B1:52711; the 0.8 and 0.5 vectors, timer `+0x70` and killer `+0x74`
+  cleared, the killer kept unless it equals the word at `+0xe0`, [H] the player's own record), update `FUN_001aaa68` (B1:52444: the timer
+  against `DAT_00517484` 1.0 and `DAT_00517488` 1.5, phase 2's weight (timer - 1.5) x 0.5, the killer's vehicle at
+  `+0xb8` or else his unit at `+0xb4`, looked at on its `+0x100`; the two casts through `FUN_00161d68` with
+  `DAT_0051748c` 6.0 from 0.75 m above and below), started through `FUN_0019fa90` (B1:44710) only while the player
+  camera is current. `re_check.py word b1 0x517484` / `0x517488` / `0x51748c` read 1.0 / 1.5 / 6.0, the same words as
+  BF2's `0x5fc51c` / `0x5fc520` / `0x5fc524`; `re_check.py fn b1 52711 52444 44710` places each line in the function
+  named. Both games' rule is one, so no deviation is named.
+- The port (`engine/crates/game/src/walk/death_camera.rs`, playtest A7, issue #128): the camera starts on the first
+  tick the player is seen dead in play (spawn screen accepted), from the camera drawn before the death; a death inside
+  a closed hull keeps the seat view (`DEATH_VIEW_HOLD`). The killer is the shooter of the tick's `Event::Kill` (none for
+  a suicide, a world death or a hero class). The spawn map opening replays phase 1 from the camera at the death with no
+  killer and no body to follow. No spawn panel is drawn while it runs; the minimap stays and no reticle shows (the BF2
+  HUD's dead state). The port's tick is 30 Hz, the PS2's update rate, so the per-update weights carry over. Space maps
+  keep the chase camera and the waiting panel.
+- Not traced: the point a mounted killer is looked at (BF2 vehicle `+0xd0`, BF1 `+0x100`); the port uses the
+  vehicle's origin (PROVISIONAL).
+
 ## 7. Other entries [V]
 
 - **Pause menu "Respawn"**: a yes / no popup "Do you really wish to kill your current player?" (`ps2_flow_sheet.png` row 4
@@ -431,7 +451,7 @@ BF1 mission files [receipt:b3866474]). PLAN's shell is BF2's, so the port shows 
 | post | spawn map pick, kept | SPSEL: `Sim::spawn_post_choice`, kept (done) |
 | class | carousel, accept | `Sim::spawn_choice` moved by pad bits (done); no accept |
 | respawn gate | 4.0 s, then the screens; spawn on X, no wave | 4.0 s timer AND the team's spawn wave (`SpawnWaves`), then automatic |
-| death camera | §6.5: the body from 6.22 m (phase 1), then from the body toward the killer from 1.5 s (phase 2), 4 s | the chase camera |
+| death camera | §6.5: the body from 6.22 m (phase 1), then from the body toward the killer from 1.5 s (phase 2), 4 s | built (§6.6, `walk/death_camera.rs`); space maps keep the chase camera |
 | backdrop | camera shots at the start, the death view at a respawn, dimmed 0.51 | the battle, dimmed by the egui panel |
 | `AddCameraShot` | 3..22 per BF2 conquest mission (first 16 kept) | not baked (`scripts/gen_missions.py` drops it) |
 

@@ -305,6 +305,8 @@ fn craft_to_craft_collision_halves_impulse_and_scales_damage() {
 #[test]
 fn takeoff_collision_destroys_non_flying_obstacle() {
     let (mut sim, flyer_h) = setup_sim_flyer(Vec::new());
+    // Takeoff destruction is a space-mode rule; ground flyer maps keep the obstacle.
+    sim.space_assault = Some(core::sim::SpaceAssault::new(180));
     sim.hull_parts.push(Some(Arc::from(vec![HullPart::new(
         Mat4::IDENTITY,
         Shape::Sphere { radius: 4.0 },

@@ -319,3 +319,62 @@ fn a_scoped_snipers_assist_turns_no_faster_than_the_cap() {
         }
     }
 }
+
+/// [ours] C5 (playtest 2026-11-05: "aim assist should follow moving
+/// targets a little"): a scoped sniper on a controller, the sticks at rest
+/// and no press, turns with an enemy crossing at 3 m/s 50 m out by about
+/// `SNIPER_FOLLOW` of the enemy's own turn, and holds him as the magnet.
+/// Unscoped, and the rifle (whose magnet follows only after a press),
+/// turn not at all; a mouse never.
+#[test]
+fn a_scoped_sniper_follows_a_crossing_enemy_a_little_without_firing() {
+    let turn = |w: &WeaponClass, game: &str, dist: f32, scoped: bool, pad: PadState| {
+        let (mut s, e) = range(w, game, dist, scoped);
+        let vel = Vec3::X * 3.0;
+        let u = s.unit_mut(e).unwrap();
+        u.controller = core::unit::Controller::Pacer { vel, period: 0 };
+        u.soldier.vel = vel;
+        u.health.cur = 1.0e9;
+        let bearing = |s: &Sim| {
+            let p = s.unit(e).unwrap().soldier.pos;
+            (-p.x).atan2(-p.z)
+        };
+        let (yaw0, b0) = (s.units[0].soldier.yaw, bearing(&s));
+        for i in 0..10 {
+            s.step(&[pad]);
+            assert_eq!(
+                s.magnet_at(0),
+                Some(AimTarget::Unit(e)),
+                "{} tick {i}",
+                w.name
+            );
+        }
+        (s.units[0].soldier.yaw - yaw0) / (bearing(&s) - b0)
+    };
+    let mouse = PadState {
+        buttons: buttons::MOUSE_AIM,
+        ..Default::default()
+    };
+    for (game, weapon) in [
+        ("bf1", "all_weap_inf_sniperrifle"),
+        ("bf2", "rep_weap_inf_sniper_rifle"),
+    ] {
+        let Some(w) = sniper(game, weapon) else {
+            eprintln!("SKIP: no baked classes");
+            return;
+        };
+        let k = turn(&w, game, 50.0, true, PadState::default());
+        println!("{weapon}: scoped, the aim turned {k:.3} of the enemy's turn");
+        assert!((0.3..0.7).contains(&k), "{weapon} scoped: {k}");
+        assert_eq!(turn(&w, game, 50.0, false, PadState::default()), 0.0);
+        let (mut s, _) = range(&w, game, 50.0, true);
+        let yaw0 = s.units[0].soldier.yaw;
+        s.step(&[mouse]);
+        assert_eq!(s.units[0].soldier.yaw, yaw0, "{weapon}: mouse");
+    }
+    let Some(rifle) = sniper("bf1", "all_weap_inf_rifle") else {
+        eprintln!("SKIP: no baked classes");
+        return;
+    };
+    assert_eq!(turn(&rifle, "bf1", 30.0, false, PadState::default()), 0.0);
+}

@@ -92,8 +92,13 @@ pub fn page(
             );
             text.push_str(&feed.text_by_hash(0xfe98_f5cf, "Equipment:"));
             text.push('\n');
-            // The primary first, then the other slots in slot order.
-            let mut held: Vec<&(u8, crate::walk::WeaponHud)> = class.held_hud.iter().collect();
+            // The primary first, then the other slots in slot order; the
+            // award slots are not listed.
+            let mut held: Vec<&(u8, crate::walk::WeaponHud)> = class
+                .held_hud
+                .iter()
+                .filter(|(slot, _)| !class.award_slots.contains(slot))
+                .collect();
             held.sort_by_key(|(slot, _)| *slot);
             for w in std::iter::once(&class.weapon_hud).chain(held.into_iter().map(|(_, w)| w)) {
                 if w.class.is_empty() {
@@ -230,7 +235,10 @@ mod tests {
         c.held_hud = vec![
             (4, hud("imp_weap_inf_thermaldetonator")),
             (1, hud("imp_weap_inf_pistol")),
+            (5, hud("imp_weap_award_rifle")),
         ];
+        // An award slot is held but not listed.
+        c.award_slots = vec![5];
         let mates = w
             .sim
             .units

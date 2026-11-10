@@ -272,7 +272,7 @@ one caller (the damage function) and the countdown. Corpus B2 (grep only).
   spot** (their only `HitLocation`s, `cis_tread_hailfire` and `rep_fly_vtrans`, are ×0), so on BF1 vehicles the
   claws never light. The sim raises `Event::CriticalHit { shooter, victim: Target, weapon_class }` for every bolt
   hit with a factor > 1 that took health — a head (`Target::Unit`) or a vehicle critical prim (`Target::Vehicle`);
-  a bot's under Hard has none (the level-3 gate). `game::event_feed` keeps the viewer's sniper-on-head and
+  a bot's has none on a ground round at any tier (space rounds: from Hard up; `Sim::hit_scale`). `game::event_feed` keeps the viewer's sniper-on-head and
   rocket-on-vehicle ones as the 0.5 s timer and the relation colour (enemy red, friend blue, white for an empty
   vehicle of no side); `ui::hud::feed` sends `hitColor` + `hitCritical` every frame it runs; the layout element does
   the hold / sustain / fade. Splash never counts (the blast path's factor is 1, as on the PS2). Superseded below for the plain flash: the plain `hit` flash

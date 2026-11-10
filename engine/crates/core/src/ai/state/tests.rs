@@ -88,6 +88,7 @@ fn the_route_is_part_of_the_ai_hash() {
         |st: &mut AiState| st.arm.group_next = 1,
         |st: &mut AiState| st.arm.claim = Some((UnitHandle { index: 1, gen: 0 }, 1)),
         |st: &mut AiState| st.dodge_until = 1,
+        |st: &mut AiState| st.flinch_until = 1,
         |st: &mut AiState| st.strafe_until = 1,
         |st: &mut AiState| st.strafe_side = -1,
         |st: &mut AiState| st.fight.mode = FightState::STAND,
@@ -179,10 +180,11 @@ fn the_route_is_part_of_the_ai_hash() {
     assert_ne!(di(None), di(Some(0.0)));
     assert_ne!(di(Some(0.0)), di(Some(0.125)));
     // D11 tick stamps in distinct hash positions must not collide.
-    let stamp: [fn(&mut AiState); 4] = [
+    let stamp: [fn(&mut AiState); 5] = [
         |st: &mut AiState| st.pause_until = 7,
         |st: &mut AiState| st.charge_until = 7,
         |st: &mut AiState| st.dodge_until = 7,
+        |st: &mut AiState| st.flinch_until = 7,
         |st: &mut AiState| st.strafe_until = 7,
     ];
     let stamped: Vec<u64> = stamp

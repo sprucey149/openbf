@@ -249,23 +249,61 @@ fn exit_stands_the_soldier_behind_the_vehicle_on_the_ground() {
 fn a_bf2_rider_stays_in_a_flying_ship_and_may_leave_when_parked() {
     use crate::soldier::GroundRules;
     use crate::vehicle::flyer::FlightPhase;
-    let run = |rules: GroundRules, phase: FlightPhase, seat: u8| {
+    let run_in = |rules: GroundRules, phase: FlightPhase, seat: u8, space: bool| {
         let (mut s, p, v) = world(Vec3::new(0.0, 2.0, -6.0), None, true);
         s.ground_rules = rules;
+        if space {
+            s.space_assault = Some(crate::sim::space_assault::SpaceAssault::new(100));
+        }
         let c = s.vehicle_mut(v).unwrap();
         c.kind = VehicleKind::Flyer;
         c.flyer.phase = phase;
+        c.seats[3].kind = SeatKind::Passenger(0);
         assert!(s.seat_unit(p, v, seat));
         press(&mut s);
         s.unit(p).unwrap().mount.is_none()
     };
+    let run = |rules, phase, seat| run_in(rules, phase, seat, false);
     use FlightPhase::{Flying, Landed, Landing, Takeoff};
     for phase in [Takeoff, Flying, Landing] {
         assert!(!run(GroundRules::Bf2, phase, 0), "{phase:?}");
         assert!(!run(GroundRules::Bf2, phase, 1), "gunner {phase:?}");
+        assert!(run(GroundRules::Bf2, phase, 3), "passenger {phase:?}");
         assert!(run(GroundRules::Bf1, phase, 0), "bf1 {phase:?}");
+        assert!(
+            !run_in(GroundRules::Bf2, phase, 3, true),
+            "space passenger {phase:?}"
+        );
+        assert!(
+            !run_in(GroundRules::Bf2, phase, 1, true),
+            "space gunner {phase:?}"
+        );
     }
     assert!(run(GroundRules::Bf2, Landed, 0), "parked");
+    assert!(run(GroundRules::Bf2, Landed, 3), "parked passenger");
+}
+
+/// A BF2 passenger who jumps from a flying ship falls; he is not stood in
+/// the air where the ship was.
+#[test]
+fn a_bf2_passenger_leaving_a_flying_ship_falls() {
+    use crate::soldier::GroundRules;
+    use crate::vehicle::flyer::FlightPhase;
+    let (mut s, p, v) = world(Vec3::new(0.0, 40.0, -6.0), None, true);
+    s.ground_rules = GroundRules::Bf2;
+    let c = s.vehicle_mut(v).unwrap();
+    c.kind = VehicleKind::Flyer;
+    c.flyer.phase = FlightPhase::Flying;
+    c.seats[3].kind = SeatKind::Passenger(0);
+    assert!(s.seat_unit(p, v, 3));
+    press(&mut s);
+    assert!(s.unit(p).unwrap().mount.is_none(), "out");
+    let y0 = s.unit(p).unwrap().soldier.pos.y;
+    for _ in 0..30 {
+        s.step(&[PadState::default()]);
+    }
+    let y1 = s.unit(p).unwrap().soldier.pos.y;
+    assert!(y0 > 20.0 && y1 < y0 - 1.0, "falls: {y0} -> {y1}");
 }
 
 #[test]
@@ -609,4 +647,102 @@ fn sqveh_following_cancels_an_old_autonomous_board_request() {
     assert!(r.board.is_none());
     assert!(!r.use_req);
     assert_eq!(r.block_until, 600);
+}
+
+/// An AT-AT-like walker (pilot + gunner) at (0, 0, −8) facing −Z, entered
+/// through `sphere` (centre in its frame, radius); the player at the origin
+/// facing −Z, and the walker's AI pilot when `ai_pilot`.
+fn atat(
+    sphere: (Vec3, f32),
+    ai_pilot: bool,
+) -> (Sim, UnitHandle, VehicleHandle, Option<UnitHandle>) {
+    let mut s = Sim::empty(1);
+    s.heightfield = Some(flat_ground());
+    s.walker_params = vec![Some(crate::vehicle::walker::tests::atst())];
+    s.seat_setup = vec![Some(SeatSetup {
+        radius: sphere.1,
+        body_active: vec![],
+        boardable: vec![true; 2],
+        exit_drop: 10.0,
+        ai_size: 1,
+        guns: Vec::new(),
+    })];
+    s.blast_setup = vec![Some(crate::vehicle::BlastSetup {
+        explosion: None,
+        sphere_centre: sphere.0,
+        sphere_radius: sphere.1,
+    })];
+    let p = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+    let v = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Walker,
+        class: 0,
+        home_team: Some(0),
+        neutral_when_empty: false,
+        spawn_pad: None,
+        pos: Vec3::new(0.0, 0.0, -8.0),
+        yaw: std::f32::consts::PI,
+        max_health: 6000.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot, SeatKind::Gunner(0)],
+    });
+    let ai = ai_pilot.then(|| {
+        let ai = s
+            .spawn(&UnitSpec::trooper(0, Vec3::new(6.0, 0.0, -8.0)))
+            .unwrap();
+        assert!(s.seat_unit(ai, v, 0));
+        ai
+    });
+    (s, p, v, ai)
+}
+
+/// Playtest C7: the BF1 AT-AT's use press is tested against its collision
+/// sphere (baked centre (0, 10.04, 3.41) in its frame, r 16), which rides
+/// high over the walker's ground origin, as the PS2's entry scoring does.
+const ATAT_SPHERE: (Vec3, f32) = (Vec3::new(0.0, 10.04, 3.41), 16.0);
+
+#[test]
+fn a_walker_is_entered_by_its_raised_collision_sphere_not_its_origin() {
+    let (mut s, p, v, _) = atat(ATAT_SPHERE, false);
+    assert_eq!(s.enter_target(p), Some((v, 0)));
+    press(&mut s);
+    assert_eq!(s.seat_of(p), Some((v, SeatKind::Pilot)));
+    // The pilot drives it.
+    let start = s.vehicle(v).unwrap().pos;
+    let full = PadState {
+        ly: i16::MAX,
+        ..PadState::default()
+    };
+    for _ in 0..90 {
+        s.step(&[full]);
+    }
+    let ran = s.vehicle(v).unwrap().pos.distance(start);
+    assert!(ran > 1.0, "3 s of throttle moved it {ran} m");
+
+    // The playtest build's rule (a 3 m sphere at the ground origin) found
+    // nothing from 8 m away: the cause of C7.
+    let (s, p, _, _) = atat((Vec3::ZERO, 3.0), false);
+    assert_eq!(s.enter_target(p), None);
+}
+
+#[test]
+fn a_player_takes_a_walkers_ai_held_pilot_seat_and_the_gunner_seat_stays_open() {
+    let (mut s, p, v, ai) = atat(ATAT_SPHERE, true);
+    let ai = ai.unwrap();
+    assert_eq!(
+        s.enter_seat(ai, v),
+        Some(1),
+        "an AI is offered the free gunner seat, not an AI-held pilot seat"
+    );
+    press(&mut s);
+    assert_eq!(s.seat_of(p), Some((v, SeatKind::Pilot)));
+    let a = s.unit(ai).unwrap();
+    assert_eq!(a.mount, None);
+    let off = a.soldier.pos - s.vehicle(v).unwrap().pos;
+    let flat = Vec3::new(off.x, 0.0, off.z).length();
+    assert!(flat > ATAT_SPHERE.1, "outside the sphere's ring: {flat} m");
+    // A second soldier of the team still finds the gunner seat.
+    let g = s
+        .spawn(&UnitSpec::trooper(0, Vec3::new(0.0, 0.0, 2.0)))
+        .unwrap();
+    assert_eq!(s.enter_target(g), Some((v, 1)));
 }

@@ -100,8 +100,9 @@ impl Sim {
     /// The dwell lock (`re-ordnance-kinds.md` §5): a launcher with
     /// `LockTime > 0` holds a candidate target and counts the seconds; at the
     /// class's limit the next missile it fires homes. A human's candidate is
-    /// the magnet (the PS2's acquisition, `re-aim-assist.md` §3); a bot's is
-    /// its combat target. A new target restarts the clock, and the shot
+    /// BF2's lock ([`Sim::tick_foot_lock`]) on BF2 ground maps, else the
+    /// magnet (BF1's acquisition, `re-aim-assist.md` §3); a bot's is its
+    /// combat target. A new target restarts the clock, and the shot
     /// consumes the lock ([`Sim::missile_lock`] at the press).
     pub(super) fn tick_locks(&mut self, dt: f32) {
         for i in 0..self.units.len() {
@@ -120,6 +121,9 @@ impl Sim {
             let controller = self.units[i].controller;
             let ai_target = self.units[i].ai.target;
             let candidate = match controller {
+                Controller::Player { slot } if self.foot_lock_rules() => {
+                    self.foot_dwell_candidate(slot as usize, i)
+                }
                 Controller::Player { slot } => self
                     .magnet
                     .get(slot as usize)

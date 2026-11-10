@@ -10,7 +10,10 @@
 //! - **Main Menu** (`ifs_main`): logo + stack 10 units lower than the
 //!   others: Singleplayer, **Multiplayer in its slot but disabled** (the
 //!   PS2's own dimmed style: label grey 110, focus skips it, §3.3 - the port
-//!   has no online play), Splitscreen disabled (until card SSCR), Options.
+//!   has no online play), Splitscreen disabled (until card SSCR), Options,
+//!   then `[ours]` **Quit Game**, which exits. The PC's `ifs_main` ends in a
+//!   quit row ("Exit To Windows") that the PS2 hides (`re-bf2-menus.md`,
+//!   ifs_main list order); the port shows it with its own label.
 //! - **Singleplayer** (`ifs_sp`, left-justified, `shell_sub_left`): Rise of
 //!   the Empire and Galactic Conquest disabled (no port mode yet), Instant
 //!   Action live; Training and Space Overview hidden (§9.5).
@@ -115,6 +118,7 @@ pub enum RowId {
     Multiplayer,
     Splitscreen,
     Options,
+    QuitGame,
     RiseOfTheEmpire,
     GalacticConquest,
     InstantAction,
@@ -132,6 +136,8 @@ impl RowId {
             RowId::Multiplayer => ("ifs.main.mp", "Multiplayer"),
             RowId::Splitscreen => ("ifs.main.split", "Splitscreen"),
             RowId::Options => ("ifs.main.options", "Options"),
+            // Our own key: the disc's `common.quit2windows` reads "Exit To Windows".
+            RowId::QuitGame => ("ifs.main.quitgame", "Quit Game"),
             RowId::RiseOfTheEmpire => ("ifs.sp.riseempire", "Rise of the Empire"),
             RowId::GalacticConquest => ("ifs.sp.meta", "Galactic Conquest"),
             RowId::InstantAction => ("ifs.sp.ia", "Instant Action"),
@@ -195,7 +201,8 @@ pub enum ShellCommand {
     /// Options → Game Options / Audio Options: the port's settings page.
     Settings,
     Controls,
-    /// Back on the title screen (`[ours]`: the PS2 has no way out).
+    /// Back on the title screen, or the main menu's Quit Game row (`[ours]`:
+    /// the PS2 has no way out).
     Quit,
 }
 
@@ -258,6 +265,7 @@ impl ShellMenus {
                     row(RowId::Multiplayer, false),
                     row(RowId::Splitscreen, false),
                     row(RowId::Options, true),
+                    row(RowId::QuitGame, true),
                 ],
                 false,
                 MAIN_Y_ADD,
@@ -400,6 +408,7 @@ impl ShellMenus {
             RowId::InstantAction => return Some(ShellCommand::InstantAction),
             RowId::GameOptions | RowId::AudioOptions => return Some(ShellCommand::Settings),
             RowId::Controls => return Some(ShellCommand::Controls),
+            RowId::QuitGame => return Some(ShellCommand::Quit),
             _ => {}
         }
         None
@@ -726,7 +735,8 @@ mod tests {
                 RowId::Singleplayer,
                 RowId::Multiplayer,
                 RowId::Splitscreen,
-                RowId::Options
+                RowId::Options,
+                RowId::QuitGame
             ]
         );
         let mp = &m.main.rows[1];
@@ -740,16 +750,69 @@ mod tests {
         );
         m.step(press(|i| i.up = true), false, 0.1);
         assert_eq!(m.main.rows[m.main.focus].id, RowId::Singleplayer, "and Up");
-        // Wrapping: Up from Singleplayer lands on Options, Down from Options
-        // on Singleplayer.
+        // Wrapping: Up from Singleplayer lands on Quit Game, Down from Quit
+        // Game on Singleplayer.
         m.step(press(|i| i.up = true), false, 0.1);
-        assert_eq!(m.main.rows[m.main.focus].id, RowId::Options);
+        assert_eq!(m.main.rows[m.main.focus].id, RowId::QuitGame);
         m.step(press(|i| i.down = true), false, 0.1);
         assert_eq!(m.main.rows[m.main.focus].id, RowId::Singleplayer);
         // A confirm never lands on a disabled row.
         m.main.focus = 1;
         assert_eq!(m.step(press(|i| i.confirm = true), false, 0.1), None);
         assert_eq!(m.page, Page::Main);
+    }
+
+    /// Playtest A5: the main menu's bottom row is Quit Game, by pad (the
+    /// wrap) or by mouse, and it quits.
+    #[test]
+    fn main_menu_quit_game_is_the_last_row_and_quits() {
+        use crate::shell_feel::MenuSound as S;
+        use manifest::hud::{HudFont, HudGlyph};
+        let mut m = menus();
+        m.step(MenuInput::default(), true, 0.1);
+        m.cues.take();
+        m.step(press(|i| i.up = true), false, 0.2);
+        let row = &m.main.rows[m.main.focus];
+        assert_eq!((row.id, row.label.as_str()), (RowId::QuitGame, "Quit Game"));
+        assert_eq!(m.main.focus, m.main.rows.len() - 1, "the bottom row");
+        m.cues.take();
+        assert_eq!(
+            m.step(press(|i| i.confirm = true), false, 0.2),
+            Some(ShellCommand::Quit)
+        );
+        assert_eq!(m.cues.take(), [S::Accept]);
+        // The mouse: the row's bar is a hit, and a click on it quits.
+        let font = HudFont {
+            name: BUTTON_FONT.into(),
+            line_height: 22,
+            pages: vec!["page0".into()],
+            glyphs: (32u8..127)
+                .map(|code| HudGlyph {
+                    code: u16::from(code),
+                    page: 0,
+                    advance: 10,
+                    x0: 0,
+                    x1: 10,
+                    y0: 2,
+                    y1: 14,
+                    uv: [0.0, 0.1, 0.0, 0.1],
+                })
+                .collect(),
+        };
+        let mut m = menus();
+        m.page = Page::Main;
+        m.on_page = 2.0;
+        let [x0, y0, x1, y1] = stack_layout(&font, m.stack().unwrap()).rows[4];
+        let p = [
+            ((x0 + x1) * 0.5) * 1.25,
+            ((y0 + y1) * 0.5) * (480.0 / 448.0),
+        ];
+        assert_eq!(row_at(&font, &m, p, [640.0, 480.0]), Some(4));
+        assert!(m.focus_row(4));
+        assert_eq!(
+            m.step(press(|i| i.confirm = true), false, 0.2),
+            Some(ShellCommand::Quit)
+        );
     }
 
     #[test]
@@ -931,10 +994,11 @@ mod tests {
         assert!(m.cues.take().is_empty(), "Cross does nothing on the title");
         m.step(MenuInput::default(), true, 0.2);
         assert_eq!(m.cues.take(), [S::Accept]);
-        for _ in 0..3 {
+        // Options, Quit Game, Singleplayer (the wrap), Options.
+        for _ in 0..4 {
             m.step(press(|i| i.down = true), false, 0.2);
         }
-        assert_eq!(m.cues.take(), [S::Select; 3], "every press, the wrap too");
+        assert_eq!(m.cues.take(), [S::Select; 4], "every press, the wrap too");
         m.step(press(|i| i.confirm = true), false, 0.2);
         assert_eq!(m.page, Page::Options);
         assert_eq!(m.cues.take(), [S::Accept]);
@@ -990,7 +1054,7 @@ mod tests {
             .iter()
             .filter(|v| v.color == [grey, grey, grey, 0.6])
             .count();
-        assert_eq!(grey_bars, 3 * 3 * 4, "the other three rows' bars");
+        assert_eq!(grey_bars, 4 * 3 * 4, "the other four rows' bars");
     }
 
     /// re-bf2-menus §5, menuref §9.4.5: on entering a page nothing of row 1

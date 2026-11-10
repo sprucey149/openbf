@@ -289,6 +289,26 @@ BF1 KAS2 Clone Wars as the ARC trooper (`ps2/out/b1_kas2_arc_spawned.p2s`), BF2 
   (player+0x928, acquired by `FUN_0017a908`, TargetLockMaxDistance 100 / ...Lose 110 m defaults) ∩ Target* ∩ a 25.8°
   cone of the aim ∩ LOS (B2:331689-331750); BF2 bot = `FUN_002bbb98` (W+0x10c, AITarget* kinds, part −1,
   B2:242514-242534).
+- BF2's human lock, read [V] (openbf `core::sim::foot_lock`). The soldier's Controllable tick (B2:159266-159302)
+  copies TargetLockMaxDistance / ...Lose and the Target* mask from the first armed channel and sets the lock object:
+  pick dot 0.8 (+0x960), hold dot 0.1 with a 2.0 s grace and the lose distance for the locked target (+0x950 /
+  +0x954 / +0x958), visibility checks on and AutoLock off (+0x1570 high word bits 0-3 set, bit 4 cleared). A press of
+  action 0xc (Square on PS2, `re-zoom.md`) forces a pick (+0x940 = 5); holding it clears the lock (`FUN_00179ab0`).
+  The tracker (`FUN_0017a908`) refuses a new lock while neither forced nor AutoLock (B2:21828); its pick takes
+  hostile targets of the mask with dist² ≤ max², dist² < lose², dot ≥ 0.8 and sight, scored d²/dot² with the
+  0.98 / 0.998 boosts (B2:21690-21740); the hold adds dt while dot < 0.1, past the lose distance or out of sight,
+  resets on any tick inside, and drops the target at 2.0 s (B2:21224-21312). The launcher's candidate is then that
+  target ∩ the mask ∩ dot ≥ 0.9 from the eye ∩ sight, and the body part it reports is always −1 (B2:331689-331750):
+  the missile steers to the target's centre, so no lock ever aims at a vehicle's critical spot; the ×4 critical
+  damage comes only from a rocket that happens to strike a critical part. openbf uses this rule on BF2 ground maps
+  for a human's launcher; BF1 maps keep the BF1 magnet and space rounds are unchanged. Deviations: OURS auto lock
+  (`FOOT_AUTO_LOCK`, for the B7 playtest: dwelling alone shows the box and curves the rocket): while no target is
+  held, or the held one has left the 25.8° cone, the best target of the pick takes the lock; a target the button
+  picked is left alone until the hold drops it or a long press clears it. One button serves reload and lock (openbf
+  has no D-pad reload): with a lock launcher in hand a press reloads when a reload can start (the Bulldog's six-round
+  clip), otherwise moves the lock to the next target, and reloads when nothing is in the cone; held ticks never
+  reload. With `FOOT_AUTO_LOCK = false` (BF2's press rule) a press locks first and reloads only when nothing is in
+  the cone. The 2 auto target brackets are not drawn on foot.
 - **Bots never wait for the lock:** the AI trigger (B1 `FUN_0023cd40` B1:155149-155257, B2 twin) does not read the
   flag; its one launcher test keeps a launcher out of the charge-hold branch (B1:154927, B2:242112). [D] A bot's
   missile homes only when its target was held ≥ LockTime before the aim-on press; follow-up shots are unguided. The
@@ -512,7 +532,6 @@ supported.
 
 ## 12. What stayed [H]
 - The reader of BF2's occupant warning fields (c+0x10c..+0x118) — the HUD's missileLock events likely.
-- The BF2 HUD lock acquisition's pick rule and button (`FUN_0017a908`).
 - The live share of guided BOT missiles (needs a battle with vehicles in a launcher bot's sight).
 - The double explosion of a predictive-hit bullet with both explosion keys; the BF2 pellet falloff steps.
 - Why the BF1 player missile's +0x104 reads 0 every other update.

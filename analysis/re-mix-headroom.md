@@ -116,8 +116,9 @@ the listener (not the camera eye's 4.2 m), level 0.8603, handle block 0.3016 / 0
     `ambience` 0.6 under `main`, `voiceover` 0.7. **`voiceover` is the one bus with `AttenuateBus`: `main` x 0.5 (BF1) /
     0.65 (BF2), AttenuationLeadIn / LeadOut 0.5 s.** The key hash 0x247db064 occurs 3 times in the 323 LVLs of both
     discs, once in each CORE.LVL (BF1 ships two byte-identical copies, `lvl/` and `sound/`; `checks/attenuatebus_count.txt`)
-    [receipt:78f2aa0a] (the receipt's raw scan is ASCII; the count is the u32 scan). Also under `root`: an unnamed bus
-    0x82c7f467 at 0.4 in both games, scaled by the effects slider. Properties by bus (resolved through `Inherit`): BF1
+    [receipt:78f2aa0a] (the receipt's raw scan is ASCII; the count is the u32 scan). Also under `root`: a bus
+    0x82c7f467 at 0.4 in both games, scaled by the effects slider; it hashes as fnv1a("shellfx"), the bus of the shell
+    menu clicks. Open: openbf's BF2 table carries both a `shellfx` 0.4 row and a 0.4 x 0.7 row for it, and the first wins. Properties by bus (resolved through `Inherit`): BF1
     soundfx 6,648, voiceover 1,090, ingamemusic 192, ambience 173; BF2 battlechatter 20,363, soundfx 8,779, voiceover
     6,679, ingamemusic 840, ambience 328.
 11. **[V] Option sliders scale the buses**: B1 `FUN_00356178` sets bus gain = slider x the bus's disc gain (saved by

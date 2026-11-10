@@ -303,6 +303,12 @@ threat wakes a bot at the next step at any level - and the first think of a life
   for it and attackable -> walk to the attacker's position (sub-type 0) and add him to the threats; otherwise, a
   soldier only, a 20 m run away from a point within 1 m of itself (sub-type 2; a roll instead when 4 m are clear,
   1 in 2).
+  Early on it calls `FUN_002c26b0` (B2:247809; B2:247649-247758, also called by four other combat helpers): when the attacker is more than 50 m away
+  (squared distance over 2500.0, B2:247712) it passes the hit on to friends within 20 m (B2:247715); and when the
+  attacker's +0x130 word is not negative (read as the human test [H]) and his team is hostile, it adds him to the threat list
+  (`FUN_002b9bb0`, B2:247748) and makes him the attack target (`FUN_002b7a40`, B2:247749), at any range. No delay
+  before the answer is found in either step. openbf's flinch and find-the-shooter search are OURS
+  (re-ai-difficulty 9.4, playtest C1); the 50 m pass-on and the out-of-view run are not ported.
 - **A shot passing** (`FUN_002a89b8`, B2:229082-229181, called by two ordnance updates, B2:309191 and 314368): every
   unit within 7.5 m of the ordnance gets message 2 with its position, at most once a second per ordnance and after a
   skill delay: a soldier not yet fighting gets an evade order (sub-type 2: run 20 m away from that point, or a roll);
@@ -698,7 +704,7 @@ against the PS2 (a card or a note on one, section 14); B = a choice for BOTD.
 | perception | cone 77.5 deg + 10 m (BF2); one sight ray that SOLDIERS block; {1..5} candidates per think by level | the cone and 10 m; a ray over terrain, bodies and hulls, not soldiers; up to 6 contacts | D (small): on the PS2 any soldier on the sight line hides the target; FFLN's line check covers the friend case |
 | hearing | every enemy within min(radius, 30) m: walk to it up to 10 s; within 3 m fight | shots within 30 m and whoever hit me become contacts; no walk toward them | **D**: the "go to the noise" order is missing - over half of Polis Massa's fight time (FGHT) |
 | a shot passing | within 7.5 m: BF2 run 20 m away or roll; BF1 face the point | nothing (only the grenade flee) | D |
-| being hit | out of a fight: walk to the attacker, or a 20 m dash / roll; in an attack: ignored | attacker becomes a contact; a dodge by chance (side-step, strafe or roll) | B |
+| being hit | out of a fight: walk to the attacker, or a 20 m dash / roll; in an attack: ignored; no delay before the answer | attacker becomes a contact, fired at after a search if unseen (OURS) and a 0.2 s flinch (OURS); a dodge by chance (side-step, strafe or roll) | B |
 | fight movement | a per-bot style: stand / circle at optimal range / zig-zag / flank; a band: back off 15 m inside, advance 15 m beyond | walks its route; stops within 25 m of a seen enemy (HOLD) or holds at a hub; JITR's commit times | **D/B**: no fight order, no range band, no modes (FGHT) |
 | cover in a fight | Cover hints within 40 m facing the target: 21-49 % of attack time; hide / fire / lean cycle | Cover / Snipe hints as hold or defend spots; none chosen against a target | **D/B** (BOTD's tactical positions; the PS2's test is the cheap version) |
 | fire | whenever the aim is within 22.5 deg (and inside range); bursts by skill; while moving | yaw and pitch error under 0.035 rad (2 deg); reaction timer; bursts 2-6; while walking | B: the port's trigger is 11x tighter and has a reaction time the PS2 lacks |
@@ -720,6 +726,7 @@ against the PS2 (a card or a note on one, section 14); B = a choice for BOTD.
 | the corpse shot | rebel troopers beside the player shoot a dead enemy | none | B (skip?) |
 | failure | BF1 none (stalls); BF2 limits that a failing walk resets | lost return, stall recycle, dwell give-up | B: the port already does better; keep no agent without an exit |
 | map use | post-to-post routes only: 8-32 % of hubs never visited | the same table | B: the maintainer's weight tilt |
+| facing on a walk | the body turns to the aim order, and there is an aim order only in an attack (1.5, 4.2); a vehicle its weapons cannot hurt is not attacked (4.3); no shared contacts (6). PC BF2 fact: the trooper agent runs its attack helper in its Goto and Patrol states (`UnitTrooperAgent::UpdateStatePostVision` 0x0066a980 -> `AttackHelper::Aim` 0x00447c50), aiming at a visible threat or its last known point while walking | since playtest C3 (2026-11-10), a bot walking a leg faces its walk unless its target can be fought: seen, within its longest weapon range + 10 m, and not a rider it cannot hurt; told records and remembered riders are not faced on the walk; ground rounds only (`ai/behave/brain.rs`) | matches the PS2; BF1 Hoth's travelling bots facing more than 60 deg off their walk 13.5 -> 4.9 % (4 seeds, Hard; 4.1-4.5 % with no target) |
 
 ## 13. What in the PS2's bot is weak or annoying by its own code (facts; BOTD decides)
 
@@ -1255,6 +1262,12 @@ the slots +0x24 and +0x28 of the vtable at C+0x34 (0x61e948; ELF words 0x61e96c 
   same soldier on 96-97 % of them; its type 1 orders point a median 47-53 m away (`tools/bf1_fire_target.py`).
 - So a BF1 bot's misses are its aim tracker's lag and its weapon's spread (x the two skill multipliers) and
   nothing else. The port puts BF2's whole radius on a BF1 bot's aim point (17.4: "a BF1 round is unchanged").
+- The port's form of the (velocity - shooter's) x dt step (playtest C5, `ai::gunner_foot::swept_lead`): a bot on
+  foot thinks before anyone moves, and its bolt sweeps whole ticks against targets that have already moved, so the
+  aim point is the target one tick on, less the shooter's tick, plus the flight in whole ticks (a droid, which moves
+  after the bolts, takes no first tick). Ground rounds and foot gunners only, a port scope choice: seats and space
+  battles keep the plain intercept (on the PS2 only the fire and range checks pass 0). A bot sniper on a 6 m/s runner at 40 m: 0.08 m behind before, under
+  0.01 m after (aim error off).
 
 ### 18.6 Knocked in on the running PS2: the vector takes the TARGET's radius, and nothing else moves the aim [L]
 `tools/sair_bf2_poke.py` = section 17's sampler + a write of class +0x370 (18.3) for every soldier class of one

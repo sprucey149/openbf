@@ -55,6 +55,9 @@ impl WalkSim {
         if let Some(view) = self.held_seat_view() {
             return (view, None);
         }
+        if let Some(d) = &self.death_cam {
+            return (d.camera(self.fov_y()), None);
+        }
         if let Some(got) = self.droid_camera() {
             return got;
         }
@@ -92,19 +95,31 @@ impl WalkSim {
     pub(super) fn next_seat_view(&self) -> Option<Camera> {
         let me = self.sim.units.get(self.player.index as usize)?;
         if !me.alive {
-            return (self.seat_view_timer > 0.0)
-                .then_some(())
-                .and(self.seat_view);
+            return self.seat_view_holds().then_some(()).and(self.seat_view);
         }
         me.mount.is_some().then(|| self.camera())
     }
 
-    fn held_seat_view(&self) -> Option<Camera> {
+    /// Does a dead rider's seat view still hold? On the ground it holds
+    /// until he respawns: the PS2 player camera keeps its last matrix once
+    /// the hull's destructor clears what it follows (`re-vehicle-death.md`
+    /// §11). Space keeps its 4 s expiry. replace: a PS2 capture of a ground
+    /// vehicle death held on the spawn screen past 4 s.
+    fn seat_view_holds(&self) -> bool {
+        self.seat_view_timer > 0.0 || !self.space_battle()
+    }
+
+    pub(super) fn held_seat_view(&self) -> Option<Camera> {
         let me = self.sim.units.get(self.player.index as usize)?;
-        if self.seat_view_timer <= 0.0 {
+        if !self.seat_view_holds() {
             return None;
         }
         self.seat_view.filter(|_| !me.alive && !me.body)
+    }
+
+    /// Is the drawn view a dead rider's held seat view?
+    pub fn holds_seat_view(&self) -> bool {
+        self.held_seat_view().is_some()
     }
 
     pub fn eye_camera(&self, eye: &core::unit::IdealCamera) -> Camera {

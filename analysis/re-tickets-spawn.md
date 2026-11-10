@@ -102,6 +102,8 @@ options value is 0 = Off and no conquest mission sets a limit (§6 below; the re
   shipping SP path:
   - `enemyBleedValue = Σ GetCommandPostBleedValue(cp, owner)` over CPs owned by the
     opposing team.
+    A post held by a locals (native) team is not the opposing team, so it adds nothing to
+    either army's enemy value, but it stays in `totalBleedValue` (openbf `cp::bf2_bleed_rate`).
   - with thresholds: rate of the highest threshold ≤ enemyBleedValue;
   - default: `if totalBleedValue[team]/2 < enemyBleedValue then rate = 1/3 else 0`
     (strict majority of CP bleed value).
@@ -221,6 +223,9 @@ a class field — identity open, §5).
   **No ticket change.**
 - Death `FUN_00297440`: awards/scoring; `respawnTimer = 4.0`; `member+0xb4 = 0`;
   `if (flag==0) alive--`; **`if (tickets > 0) tickets--`** (unconditional w.r.t. flag).
+  The ticket comes from the dying member's own team, so a native's death spends only its
+  locals team's unlimited pool; BF2's `OnCharacterDeath` likewise charges the dying
+  character's own team. Killing an allied native never costs the army a ticket.
 - HUD (`FUN_0033f3c8`) renders team1/team2 `+0x10` directly, so the on-screen counter
   drops by exactly 1 per death.
 

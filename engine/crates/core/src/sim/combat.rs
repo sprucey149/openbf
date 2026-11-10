@@ -21,8 +21,9 @@ use glam::Vec3;
 #[cfg(doc)]
 use super::state::LETHAL_LANDING_SPEED;
 
-/// The head prim's HitLocation factor (see `Sim::hit_scale`): BF2's hard-coded
-/// default {head prim, x3.0}, `FUN_002517e8` (`analysis/re-ai-difficulty.md` §9.2).
+/// The head prim's HitLocation factor (`Sim::hit_scale` says whose hits
+/// get it): both games' hard-coded default {head prim, x3.0}, BF2
+/// `FUN_002517e8`, BF1 `FUN_0020e2e0` (`analysis/re-ai-difficulty.md` §9.2).
 pub const HEADSHOT_SCALE: f32 = 3.0;
 
 const LARGE_SHIELD_RADIUS_SQ: f32 = 256.0;
@@ -213,15 +214,8 @@ impl Sim {
         }
     }
 
-    /// The struck prim's damage factor (issue #41): a soldier's head prim
-    /// takes the PS2's default HitLocation x3 (BF2 FUN_002517e8
-    /// B2:170444-170450, BF1 FUN_0020e2e0 B1:122725; analysis/re-hitzones.md),
-    /// a vehicle prim its class's HitLocation (the x4 critical prims; BF1's
-    /// two x0). A factor over 1 is a bot's only on the PS2's top level (BF2
-    /// FUN_001e0580 B2:91567-91580: dropped for an AI attacker under level
-    /// 3; the port's Hard and Elite - our Normal has the PS2 Elite's base
-    /// skill but not its level-3 rules, so it goes without
-    /// this). BF1 has no such gate; one rule on both games' maps.
+    /// Does a bolt do nothing to this victim (cheats, or a bot's bolt into
+    /// a human of its own team)?
     pub(super) fn bolt_spares(&self, b: &Bolt, victim: &Unit) -> bool {
         self.shot_spares(b.team, b.shooter_is_player, victim)
     }
@@ -287,6 +281,18 @@ impl Sim {
         Some(damage)
     }
 
+    /// The struck prim's damage factor (issue #41): a soldier's head prim
+    /// takes the default HitLocation x3 (BF2 FUN_002517e8 B2:170444-170450,
+    /// BF1 FUN_0020e2e0 B1:122725; analysis/re-hitzones.md), a vehicle prim
+    /// its class's HitLocation (the x4 critical prims; BF1's two x0).
+    ///
+    /// A factor over 1 is a human's only: a bot's head or critical-prim hit
+    /// does plain damage at every tier, on both games' maps. This is BF2's
+    /// rule below its top level (FUN_001e0580 B2:91567-91580 drops the factor
+    /// for an AI attacker under level 3), used for every tier so that
+    /// difficulty comes from behaviour, not damage (card DRETIRE, playtest
+    /// 2026-11-05 B1). BF1 lets every attacker score heads; a named deviation.
+    /// Space rounds keep the old gate (bots get it from Hard up).
     fn hit_scale(&self, b: &Bolt) -> f32 {
         // [ours] A proxy with `headshots` counts its head hits as a player
         // does (its slot keeps the flag through deaths).
@@ -297,7 +303,7 @@ impl Sim {
             .is_some_and(|p| p.headshots);
         let bot_gate = !b.shooter_is_player
             && !proxy_head
-            && self.difficulty_of(b.team) < crate::skill::Difficulty::Hard;
+            && (!self.space_round() || self.difficulty_of(b.team) < crate::skill::Difficulty::Hard);
         if b.hit_mult > 1.0 && bot_gate {
             1.0
         } else {

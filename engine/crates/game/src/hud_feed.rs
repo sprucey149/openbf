@@ -168,7 +168,16 @@ pub fn weapon_gauge(walk: &crate::walk::WalkSim) -> HudGauge {
             held.and_then(|w| of(w.class, &w.state)),
         ]
     };
-    let first = rows[0].unwrap_or_default();
+    let mut first = rows[0].unwrap_or_default();
+    // On foot a launcher's dwell fills the ring (`FUN_003b3398` sends the
+    // lock clock as heat while the weapon dwells), or this later send
+    // would zero the lock box's fill.
+    if me.mount.is_none() {
+        let slot = me.spec.player_slot.map_or(0, usize::from);
+        if let Some(f) = sim.foot_lock_charge(slot) {
+            first.ring = f;
+        }
+    }
     HudGauge {
         overheated: rows.iter().flatten().any(|g| g.overheated),
         ..first

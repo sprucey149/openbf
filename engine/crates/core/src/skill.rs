@@ -119,8 +119,9 @@
 //!
 //! Card TEAM / FLNK (ours): every tier passes on what it sees and
 //! flanks; Hard and Elite also cover a capturer (`Tier::cover`).
-//! A bot's head (and vehicle critical-prim) hit multiplier is Hard's and
-//! Elite's only (`Sim::hit_scale`, the PS2's level-3 gate).
+//! No tier gives a bot the head (or vehicle critical-prim) hit multiplier
+//! on a ground round (`Sim::hit_scale`, playtest 2026-11-05 B1); space
+//! rounds keep it from Hard up.
 //!
 //! Only the SKILL SCALE and the curves below are the RE's. Every column of
 //! that table is the lead's design placeholder: the base skills, the view

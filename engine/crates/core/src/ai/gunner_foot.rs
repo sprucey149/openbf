@@ -192,6 +192,8 @@ pub(super) fn run(
             .map_or(wc.shot_ordnance().velocity, |p| p.velocity)
     };
     let hand = u.proxy_human.and_then(|p| p.hand);
+    // A space battle keeps the plain intercept (its rules are its own).
+    let swept = !sim.space_round();
     let mut reaches = false;
     let look_at = match (*aim, &armed) {
         // A grenade or a shell: the low-arc solution to the target's feet,
@@ -201,7 +203,7 @@ pub(super) fn run(
         // same solution from the muzzle (issue #29).
         (AimRequest::Enemy(e, _), Armed::Thrown(gc, _) | Armed::Lobbed(gc)) => {
             let c = e.capsule().center();
-            let err = seen_aim(sim, me, st, eye, e, 1e6, wc) - c;
+            let err = seen_aim(sim, me, st, eye, e, 1e6, wc, false) - c;
             let mut feet = e.soldier.pos + Vec3::new(err.x, 0.0, err.z);
             if let Some(off) = barred.and_then(|h| super::tokn::short_of(sim, me, h, eye, feet)) {
                 feet += off;
@@ -214,7 +216,7 @@ pub(super) fn run(
             // [ours] A proxy's hand aims as a player does (`proxy::hand`).
             let p = match hand {
                 Some(h) => super::proxy::hand::aim(&h, me, sim.tick, c.first_seen, eye, e, speed),
-                None => seen_aim(sim, me, st, eye, e, speed, wc),
+                None => seen_aim(sim, me, st, eye, e, speed, wc, swept),
             };
             let off = barred.and_then(|h| super::tokn::miss_offset(sim, me, h, eye, p));
             p + off.unwrap_or(Vec3::ZERO)
@@ -224,7 +226,7 @@ pub(super) fn run(
             reaches = ok;
             p
         }
-        (AimRequest::Droid(d, _), _) => droid_aim(sim, me, st, eye, d, speed, wc),
+        (AimRequest::Droid(d, _), _) => droid_aim(sim, me, st, eye, d, speed, wc, swept),
         (AimRequest::Turret(t, _), Armed::Thrown(gc, _) | Armed::Lobbed(gc)) => {
             let (p, ok) = arsenal::lob_aim(sim, u, eye, t.pos, Vec3::ZERO, gc);
             reaches = ok;
@@ -267,7 +269,7 @@ pub(super) fn run(
             ad = u.aim_frame().0;
             av = Vec3::ZERO;
         }
-        (st.aim_dir, st.aim_vel) = track_step(ad, av, dir, accel, damping, dt);
+        (st.aim_dir, st.aim_vel) = track_step(ad, av, dir, accel, damping, dt, !sim.space_round());
         let ad = st.aim_dir;
         // Card GRAI (OURS): a throw's elevation is the solution's itself,
         // not the tracker's — on the grenade's flat arc the tracker's lag of
@@ -354,6 +356,8 @@ pub(super) fn run(
         .or(droid);
     let range = match target {
         Some((at, ready)) => {
+            // Playtest C1: no shot while the bot flinches from a hit.
+            let ready = ready && sim.tick >= st.flinch_until;
             let range = (at - eye).length();
             let in_reach = match armed {
                 // Card CLSE4 (`analysis/re-soldier-ai.md` 20.2, both games):
@@ -829,6 +833,10 @@ const BLAST_CLEAR: f32 = 1.0;
 /// it the port's BF1 bots kill from farther off (an enemy within 20 m 10.9
 /// -> 8.1 % of unit time on the 16 BF1 maps), away from the PS2, until the
 /// far fire is the PS2's (card CLSE4).
+///
+/// `swept`: the lead is [`swept_lead`]'s, where the bolt's whole-tick
+/// sweeps meet the target; otherwise the plain intercept.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn seen_aim(
     sim: &Sim,
     me: UnitHandle,
@@ -837,9 +845,14 @@ pub(super) fn seen_aim(
     e: &Unit,
     speed: f32,
     wc: &WeaponClass,
+    swept: bool,
 ) -> Vec3 {
     let c = e.capsule().center();
-    let aim = lead_point(c - eye, e.soldier.vel, speed).map_or(c, |rel| eye + rel);
+    let own = sim.unit(me).map_or(Vec3::ZERO, |u| u.soldier.vel);
+    let aim = match swept {
+        true => eye + swept_lead(c - eye, e.soldier.vel, own, speed, crate::TICK_DT),
+        false => lead_point(c - eye, e.soldier.vel, speed).map_or(c, |rel| eye + rel),
+    };
     let Some(u) = sim.unit(me) else {
         return aim;
     };
@@ -867,6 +880,37 @@ pub(super) fn seen_aim(
         (aim - eye).length(),
         wc,
     )
+}
+
+/// Below this ordnance speed (m/s) [`swept_lead`] leads nothing: the sweep
+/// count divides by the speed.
+const MIN_LEAD_SPEED: f32 = 1e-3;
+
+/// Where a bolt of `speed` fired this tick meets a target `rel` from the
+/// shooter's eye moving at `vel`, relative to the eye, for a shooter moving
+/// at `own`. Both games move the target point on by the two units' relative
+/// velocity over a frame before solving the intercept (BF1 `FUN_00232a70`,
+/// `analysis/re-soldier-ai.md` 18.5; BF2 the same). The port's own form of
+/// that rule: a bot thinks before anyone moves, the bolt leaves after the
+/// shooter's move and sweeps a whole tick at a time against targets that
+/// stand still within the sweep. So the target is where it is after
+/// `first` s of its own move (a tick for a soldier, none for a droid,
+/// which moves after the bolts), the shooter's tick of move is taken off,
+/// and the flight is counted in whole ticks: the sweep that reaches the
+/// target meets it where that tick left it. An ordnance with no speed (a
+/// class without one) leads nothing: the aim is the target as it stands.
+fn swept_lead(rel: Vec3, vel: Vec3, own: Vec3, speed: f32, first: f32) -> Vec3 {
+    if speed.is_nan() || speed <= MIN_LEAD_SPEED {
+        return rel;
+    }
+    let dt = crate::TICK_DT;
+    let start = rel - own * dt + vel * first;
+    // The least whole number of sweeps `n` with |start + vel (n - 1) dt|
+    // <= speed n dt: the intercept time of the point a tick behind `start`,
+    // rounded up to whole ticks.
+    let n = lead_point(start - vel * dt, vel, speed)
+        .map_or(1.0, |p| (p.length() / (speed * dt)).ceil().max(1.0));
+    start + vel * (dt * (n - 1.0))
 }
 
 /// The way `me`'s own aim error points this tick (BF2, [`crate::unit::AimBlock`]).
@@ -925,7 +969,10 @@ pub(super) const DROID_AIM_SIZE: f32 = 0.17;
 /// controller hangs off (21.3: a unit's block is the controllable it drives):
 /// the owner's error, the stance slot's constant 1.0, the droid's own speed
 /// over its `MaxSpeed`, no concealment (5.3: 1.0 for what is not a soldier),
-/// and a human's only while the human drives it.
+/// and a human's only while the human drives it. `swept` as for
+/// [`seen_aim`]; a droid moves after the bolts in a tick, so the first
+/// sweep meets it where the bot saw it.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn droid_aim(
     sim: &Sim,
     me: UnitHandle,
@@ -934,8 +981,13 @@ pub(super) fn droid_aim(
     d: &Droid,
     speed: f32,
     wc: &WeaponClass,
+    swept: bool,
 ) -> Vec3 {
-    let aim = lead_point(d.pos - eye, d.vel, speed).map_or(d.pos, |rel| eye + rel);
+    let own = sim.unit(me).map_or(Vec3::ZERO, |u| u.soldier.vel);
+    let aim = match swept {
+        true => eye + swept_lead(d.pos - eye, d.vel, own, speed, 0.0),
+        false => lead_point(d.pos - eye, d.vel, speed).map_or(d.pos, |rel| eye + rel),
+    };
     let (Some(u), Some(c)) = (sim.unit(me), sim.droid_class(d)) else {
         return aim;
     };
@@ -1289,7 +1341,8 @@ pub(crate) fn pause_ticks(
 /// zeroed; then, in the same call, the second-order step: the acceleration
 /// that would reach `dir` next tick, `((dir − ad)/dt − av)/dt`, clamped to
 /// `accel`, MINUS `av · damping` (the damping is outside the clamp), then
-/// `av += a·dt`, `ad = unit(ad + av·dt)`.
+/// `av += a·dt`, `ad = unit(ad + av·dt)`. `ground`: a ground round, where a
+/// point almost straight behind is slewed round the vertical ([`slew`]).
 pub(super) fn track_step(
     ad: Vec3,
     av: Vec3,
@@ -1297,10 +1350,11 @@ pub(super) fn track_step(
     accel: f32,
     damping: f32,
     dt: f32,
+    ground: bool,
 ) -> (Vec3, Vec3) {
     let (mut ad, mut av) = (ad, av);
     if ad.dot(dir) < SLEW_COS {
-        ad = slew(ad, dir);
+        ad = slew(ad, dir, ground);
         av = Vec3::ZERO;
     }
     let mut a = ((dir - ad) / dt - av) / dt;
@@ -1318,16 +1372,31 @@ pub(super) fn track_step(
     (ad, av)
 }
 
+/// cos 160°: a wanted direction within 20° of straight behind the tracked
+/// one is slewed round the vertical ([`slew`]). OURS; replace: see `slew`.
+const BEHIND_COS: f32 = -0.9397;
+
 /// Rotate `from` 30° toward `to` about their common perpendicular (D9's slew,
 /// RE §4.2 step 3). Falls back to `to` when the two are (anti)parallel, where
-/// the axis is undefined.
-fn slew(from: Vec3, to: Vec3) -> Vec3 {
+/// the axis is undefined. `ground`: a ground round (the vertical-axis turn
+/// below is a ground rule; a space round's bots slew as they did).
+fn slew(from: Vec3, to: Vec3, ground: bool) -> Vec3 {
     let axis = from.cross(to);
     let len = axis.length();
     if len < 1e-6 {
         return to;
     }
-    let k = axis / len;
+    let mut k = axis / len;
+    // A point almost straight behind: the common perpendicular is set by
+    // the few centimetres of height difference, and the 30° steps went over
+    // the pole — a bot with a contact behind it stared at the floor for
+    // five ticks (playtest C4's pose, by another road). OURS: the turn is
+    // made round the vertical, the way a soldier turns; replace: the PS2's
+    // own answer at the antiparallel case, if its slew (RE §4.2 step 3)
+    // has one.
+    if ground && from.dot(to) < BEHIND_COS && from.y.abs() < 0.9 && to.y.abs() < 0.9 {
+        k = if axis.y < 0.0 { -Vec3::Y } else { Vec3::Y };
+    }
     // Rodrigues at 30°, in `fmath`-free constants (no libm in core).
     (from * SLEW_COS + k.cross(from) * SLEW_SIN + k * k.dot(from) * (1.0 - SLEW_COS)).normalize()
 }

@@ -657,6 +657,10 @@ from the trace.
      the PS2's default table for two armies; the port has no neutral team.
 - The lead solver must run in f32 with the same operation order (vrsqrt-based
   normalize) if bit-exact traces are wanted; otherwise document tolerance.
+- OURS (playtest C5): a scoped sniper rifle on a controller matches half its
+  magnet's sideways motion before the press (`aim_assist::SNIPER_FOLLOW`,
+  under Auto Aim). Nothing on either disc to copy: their snipers have no
+  magnet (§3.8).
 
 ## 10. The aim ray, the camera's tilt and where a shot goes — OPUS RE (loop lane 3, 2026-10-02, card AIMA) - [O] UNAUDITED
 
@@ -948,7 +952,8 @@ Since 2026-10-28 (playtest; `analysis/camera-occlusion.md`, ours): every map pla
 see-through instead of pulling the camera in, and a wall pulls it toward step 4's 1.5 m point.
 
 Port deviations from §5 and §10 (2026-10-28, branch `aimfix`, `[ours]`; one line each in FEEL_NOTES): past the ray's
-reach the shot converges on the reticle's pick instead of item 2's far end (`Sim::beyond_reach`); a human's bolt and
+reach the shot converges on the reticle's pick instead of item 2's far end (`Sim::beyond_reach`), or, with no pick,
+on the terrain or world a second ray meets within 305 m (2026-11-05, playtest B6, `FAR_AIM_LENGTH`; ground maps only); a human's bolt and
 ray meet the soldiers 1.25 ticks back along their velocity, where the interpolated window drew them
 (`core::unit::HUMAN_SHOT_LAG`); §5's pull aims at a low-passed, eased lead point and term 1 rate-matches its motion in
 full whatever the move stick (`core::aim_assist::Lead`). Branch `sniperassist`: every disc sniper ships LockOnRange 0;

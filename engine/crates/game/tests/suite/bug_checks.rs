@@ -150,6 +150,7 @@ fn bugx_a_stations_do_not_heal_or_resupply_a_corpse() {
 
 fn hud_model(dead: bool) -> ui::hud::HudModel {
     ui::hud::HudModel {
+        ctf: false,
         damage_flash: 0.0,
         team_names: ["one".into(), "two".into()],
         team_points: None,
@@ -329,9 +330,11 @@ fn pause_input(
     paused: &mut bool,
     input: ui::menu::MenuInput,
 ) {
+    // The ground Game Menu, as a ground battle draws it.
     let model = ui::menu::MenuModel {
         cursor: menu.cursor,
-        respawn_confirm: menu.confirm,
+        page: Some(menu.page),
+        popup: menu.confirm,
         respawn_label: Some("Respawn".into()),
         ..Default::default()
     };
@@ -344,6 +347,7 @@ fn pause_input(
 
 fn request_respawn(w: &mut WalkSim, menu: &mut game::pause::PauseMenu, paused: &mut bool) {
     let model = ui::menu::MenuModel {
+        page: Some(menu.page),
         respawn_label: Some("Respawn".into()),
         ..Default::default()
     };
@@ -360,7 +364,7 @@ fn request_respawn(w: &mut WalkSim, menu: &mut game::pause::PauseMenu, paused: &
             ..Default::default()
         },
     );
-    assert!(menu.confirm);
+    assert_eq!(menu.confirm, Some(ui::menu::Popup::Respawn));
     assert_eq!(menu.cursor, 0, "confirmation defaults to No");
 }
 
@@ -393,7 +397,7 @@ fn bugx_d_suicide_menu_cancel_accept_delay_and_spawn_flow() {
             ..Default::default()
         },
     );
-    assert!(!menu.confirm);
+    assert!(menu.confirm.is_none());
     assert!(paused);
     assert!(w.sim.unit(first).is_some());
     assert_eq!(w.sim.battle.teams[0].reinforcements, tickets);
@@ -407,8 +411,12 @@ fn bugx_d_suicide_menu_cancel_accept_delay_and_spawn_flow() {
             ..Default::default()
         },
     );
+    // Back from the popup resumes the battle (playtest A3) and kills no one.
+    assert!(!paused);
+    assert!(menu.confirm.is_none());
     assert!(w.sim.unit(first).is_some());
     assert_eq!(w.sim.battle.teams[0].reinforcements, tickets);
+    paused = true;
     request_respawn(&mut w, &mut menu, &mut paused);
     let killed_at = w.sim.tick;
     pause_input(
@@ -422,7 +430,7 @@ fn bugx_d_suicide_menu_cancel_accept_delay_and_spawn_flow() {
         },
     );
     assert!(!paused);
-    assert!(!menu.confirm);
+    assert!(menu.confirm.is_none());
     assert!(
         w.sim.unit(first).is_some(),
         "queued until the next sim tick"
@@ -455,7 +463,7 @@ fn bugx_d_suicide_menu_cancel_accept_delay_and_spawn_flow() {
         &mut paused,
         &mut menu,
     );
-    assert!(!menu.confirm);
+    assert!(menu.confirm.is_none());
     game::pause::apply_menu_action(
         &mut w,
         ui::menu::MenuAction::Respawn,

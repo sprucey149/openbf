@@ -214,6 +214,32 @@ fn a_start_hands_each_ear_the_ps2s_level() {
     assert!(close(engine(&sl, -right), (2.0 * half, 0.0)));
 }
 
+/// A menu click (bus `shellfx`) plays on the menu bus, which the pause menu
+/// leaves running; a battle sound plays on the game bus it pauses.
+#[test]
+fn a_shellfx_start_plays_on_the_menu_bus() {
+    let props = vec![
+        SoundProp {
+            bus: fnv1a_lowercase("shellfx"),
+            ..prop("click", 1)
+        },
+        SoundProp {
+            bus: fnv1a_lowercase("soundfx"),
+            ..prop("shot", 2)
+        },
+    ];
+    let mut sl = lib();
+    sl.map.by_level = by_level(&props);
+    sl.map.props = merge_props(props);
+    let menu = |sl: &mut SoundLib, name: &str| {
+        let mut out = Vec::new();
+        sl.start(fnv1a_lowercase(name), Vec3::ZERO, Vec3::ZERO, &mut out);
+        out.pop().expect(name).menu
+    };
+    assert!(menu(&mut sl, "click"));
+    assert!(!menu(&mut sl, "shot"));
+}
+
 fn prop(name: &str, sample: u32) -> SoundProp {
     SoundProp {
         name_hash: fnv1a_lowercase(name),

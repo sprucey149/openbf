@@ -1,6 +1,6 @@
 use super::*;
 use crate::cloak::CloakClass;
-use crate::sim::{buttons, DeathCause, PadState};
+use crate::sim::{buttons, AimTarget, DeathCause, PadState};
 use crate::unit::{Controller, UnitHandle, UnitSpec};
 use crate::weapon::{WeaponClass, WeaponState};
 use glam::Vec3;
@@ -240,5 +240,114 @@ fn a_portable_turret_drops_and_cannot_reacquire_a_concealed_soldier() {
     for _ in 0..40 {
         press(&mut sim, 0);
         assert!(sim.turrets[0].target.is_none());
+    }
+}
+
+/// Playtest C6: the cloak hides, it does not protect. The PS2's bolt sweep
+/// and damage receiver never read the concealment byte (it only starts the
+/// flicker), so a hidden Bothan takes a human's or a bot's bolt exactly as a
+/// visible one does; only acquisition skips him (`analysis/re-cloaking.md`).
+#[test]
+fn a_cloaked_soldier_is_still_hit_by_bolts() {
+    let cloak_class = || CloakClass {
+        energy_cost: 40.0,
+        energy_drain: 17.0,
+        delay: 0.3,
+        linger: 1.0,
+        moving: 1.0,
+        still: 1.0,
+        fast_speed: 9.5,
+        slow_speed: 6.5,
+        fade_in: 0.6,
+        fade_out: 0.9,
+        flicker: 0.6,
+        flicker_interval: [5.0, 10.0],
+    };
+    // The human's aim point, the damage the target took and his cloak just
+    // after the hit.
+    fn run(cloak: CloakClass, cloaked: bool, human: bool) -> (Vec3, f32, CloakState) {
+        let mut s = Sim::empty(7);
+        s.heightfield = Some(crate::sim::tests::flat_ground());
+        let class = s.add_weapon_class(WeaponClass {
+            cloak: Some(cloak),
+            ..WeaponClass::default()
+        });
+        let shooter = if human {
+            UnitSpec::player(0, Vec3::ZERO)
+        } else {
+            UnitSpec::trooper(0, Vec3::ZERO)
+        };
+        let p = s.spawn(&shooter).unwrap();
+        let t = s
+            .spawn(&UnitSpec {
+                weapon_class: class,
+                ..UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -20.0))
+            })
+            .unwrap();
+        let u = s.unit_mut(t).unwrap();
+        // The visible control cannot afford to start cloaking itself.
+        u.soldier.energy = if cloaked { 100.0 } else { 0.0 };
+        if cloaked {
+            u.cloak = CloakState {
+                active: true,
+                strength: 1.0,
+                health: u.health.cur,
+                flicker_left: 100.0,
+                ..Default::default()
+            };
+        }
+        let hidden = !s.unit(t).unwrap().cloak.visible();
+        assert_eq!(hidden, cloaked);
+        // No reticle lock or assist on what cannot be seen.
+        assert_eq!(s.aim_candidate(AimTarget::Unit(t)).is_none(), cloaked);
+        let aim = s.aim_hit(p.index as usize);
+        if human {
+            s.step(&[crate::sim::tests::fire()]);
+        } else {
+            let from = Vec3::new(0.0, 1.15, 0.0);
+            let b = crate::projectile::Bolt::fire(
+                from,
+                Vec3::new(0.0, 1.15, -20.0) - from,
+                80.0,
+                1.5,
+                crate::projectile::Shooter {
+                    owner: p,
+                    team: 0,
+                    weapon_class: 0,
+                    is_player: false,
+                },
+                s.heightfield.as_ref(),
+                s.water_plane(),
+                &s.collision,
+                crate::collision::HullFilter::All,
+            );
+            s.bolts.push(b);
+        }
+        for _ in 0..60 {
+            let hit: f32 = crate::sim::tests::hits(&s)
+                .iter()
+                .filter(|(v, _)| *v == t.index)
+                .map(|(_, d)| d)
+                .sum();
+            if hit > 0.0 {
+                return (aim, hit, s.unit(t).unwrap().cloak);
+            }
+            press(&mut s, 0);
+        }
+        panic!("no hit (cloaked {cloaked}, human {human})");
+    }
+    for human in [true, false] {
+        let (aim_seen, seen, _) = run(cloak_class(), false, human);
+        let (aim_hidden, hidden, after) = run(cloak_class(), true, human);
+        // The reticle's ray still stops on the hidden body.
+        assert_eq!(aim_hidden, aim_seen);
+        if human {
+            assert!(aim_hidden.z > -21.0, "{aim_hidden}");
+        }
+        assert!(hidden > 0.0);
+        assert_eq!(hidden, seen, "human {human}");
+        // The hit reveals him without ending the cloak.
+        assert!(after.active);
+        assert!(after.strength < 0.1, "{after:?}");
     }
 }

@@ -39,7 +39,10 @@
 //! [`Body`] names its vehicle as `owner`; [`HullFilter`] says whose hulls a
 //! query sees, and [`CollisionWorld::ray_with`] reports the owner it hit.
 //!
-//! The VEHICLE subset ([`Layers::VEHICLE`]) is built and flyers query it.
+//! The VEHICLE subset ([`Layers::VEHICLE`]) is built; a flyer's landing ray
+//! queries it. A flyer's own contact and its pilot's probes query
+//! [`Layers::FLYER`], which the class rule sets to the soldier subset or,
+//! with `flyer_uses_vehicle`, the vehicle subset.
 //! Walker/hover traffic uses the named SOLDIER-subset surrogate
 //! in `traffic`; ordinary ground contacts still use [`HullFilter::Static`].
 //! Also pending: the building/terrain subsets (nothing queries them), and

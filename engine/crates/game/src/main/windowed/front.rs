@@ -256,6 +256,17 @@ fn setting_sound(
     }
 }
 
+/// A settings page click's sound, as its pad press's ([`setting_sound`]): a
+/// toggle or a value step accept, the music's step nothing but the music,
+/// Back nothing here.
+fn shell_click_sound(action: ui::menu::MenuAction) -> Option<MenuSound> {
+    use ui::menu::MenuAction;
+    match action {
+        MenuAction::SetMusic(_) | MenuAction::Resume | MenuAction::Quit => None,
+        _ => Some(MenuSound::Accept),
+    }
+}
+
 impl App {
     /// Session Options were left (`push_prefs`): AI Difficulty is the
     /// profile's tier, saved.
@@ -661,6 +672,7 @@ impl App {
                 fov_deg: (game::walk::chase_fov_y() * k).to_degrees(),
                 music_volume: settings.music_volume,
                 mouse_sensitivity: settings.mouse_sensitivity,
+                pad_look_sensitivity: settings.pad_look_sensitivity,
                 invert_y: settings.invert_y,
                 low_power_resolution: settings.low_power_resolution,
                 input_icons_label: settings.input_icons.label(),
@@ -822,15 +834,8 @@ impl App {
             }
         }
         for action in setting_clicked {
-            // A pointer click sounds as its pad press (only toggles click).
-            if matches!(
-                action,
-                ui::menu::MenuAction::ToggleInvertY
-                    | ui::menu::MenuAction::ToggleLowPowerResolution
-                    | ui::menu::MenuAction::ToggleViewpoint
-                    | ui::menu::MenuAction::CycleInputIcons(_)
-            ) {
-                front.cue(MenuSound::Accept);
+            if let Some(s) = shell_click_sound(action) {
+                front.cue(s);
             }
             self.apply_shell_setting(&mut front, action);
         }
@@ -861,8 +866,15 @@ impl App {
             | MenuAction::SetClassTab(_)
             | MenuAction::CloseClassPicker
             | MenuAction::SelectClass(_) => return,
-            MenuAction::RequestRespawn | MenuAction::CancelRespawn | MenuAction::Respawn => return,
-            MenuAction::Resume | MenuAction::Quit => {
+            MenuAction::RequestRespawn
+            | MenuAction::CancelPopup
+            | MenuAction::Respawn
+            | MenuAction::OpenPage(_)
+            | MenuAction::RequestQuit
+            | MenuAction::RequestRestart
+            | MenuAction::Restart => return,
+            // The shell page is flat (no Game Menu pages): Back closes it.
+            MenuAction::Resume | MenuAction::Quit | MenuAction::ClosePage => {
                 front.settings = None;
                 return;
             }
@@ -890,6 +902,9 @@ impl App {
                     game::kbm::SENSITIVITY_RANGE.0,
                     game::kbm::SENSITIVITY_RANGE.1,
                 )
+            }
+            MenuAction::SetPadLookSensitivity(v) => {
+                s.pad_look_sensitivity = game::profile::clamp_pad_look(v)
             }
             MenuAction::ToggleInvertY => s.invert_y = !s.invert_y,
             MenuAction::ToggleLowPowerResolution => {
@@ -958,6 +973,23 @@ mod tests {
         );
         assert_eq!(sound(&at(Row::Music), left), None);
         assert_eq!(sound(&at(Row::Fov), back), None);
+        // A click sounds as its press: a value step accepts, music and Back
+        // stay quiet (issue #142).
+        use ui::menu::MenuAction;
+        assert_eq!(
+            shell_click_sound(MenuAction::SetFov(1.05)),
+            Some(MenuSound::Accept)
+        );
+        assert_eq!(
+            shell_click_sound(MenuAction::SetPadLookSensitivity(1.1)),
+            Some(MenuSound::Accept)
+        );
+        assert_eq!(
+            shell_click_sound(MenuAction::ToggleInvertY),
+            Some(MenuSound::Accept)
+        );
+        assert_eq!(shell_click_sound(MenuAction::SetMusic(0.5)), None);
+        assert_eq!(shell_click_sound(MenuAction::Resume), None);
         assert_eq!(sound(&at(Row::Fov), MenuInput::default()), None);
     }
 

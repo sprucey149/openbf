@@ -62,6 +62,8 @@ impl Sim {
         if !pri && !sec && !ch1_has_it && !released {
             if edges & 1 != 0 {
                 self.switch_channel0(i);
+            } else {
+                self.award_fixup(i);
             }
             if edges & 2 != 0 {
                 self.switch_channel1(i);
@@ -383,21 +385,24 @@ impl Sim {
 
     /// Step channel 0 to its next slot: the weapon in the hands trades
     /// places with the held one (§2.4; the same slot again does nothing).
-    fn switch_channel0(&mut self, i: usize) {
-        let awards = self.cheats.all_awards;
-        let classes = &self.weapon_classes;
-        let u = &mut self.units[i];
+    pub(super) fn switch_channel0(&mut self, i: usize) {
+        let u = &self.units[i];
         let cur = u.weapon_slot;
         let next = u
             .held
             .iter()
             .enumerate()
-            .filter(|(_, w)| w.channel == 0 && !classes[w.class].award_locked(awards))
+            .filter(|(_, w)| w.channel == 0 && !self.weapon_locked(u, w.class))
             .min_by_key(|(_, w)| (w.slot < cur, w.slot))
             .map(|(k, _)| k);
-        let Some(k) = next else {
-            return;
-        };
+        if let Some(k) = next {
+            self.take_channel0(i, k);
+        }
+    }
+
+    /// Held slot `k` goes into unit `i`'s hands, the weapon there into `k`.
+    pub(super) fn take_channel0(&mut self, i: usize, k: usize) {
+        let u = &mut self.units[i];
         let w = &mut u.held[k];
         std::mem::swap(&mut u.weapon, &mut w.state);
         std::mem::swap(&mut u.weapon_class, &mut w.class);

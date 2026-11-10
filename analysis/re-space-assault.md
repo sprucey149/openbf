@@ -234,10 +234,15 @@ second gate, `FUN_00161b50` for hovers and walkers, which remains unported.
 
 `FUN_00202d08` (line 115783, exit test lines 116984-117024) sends the exit button to the exit logic only in flight state 0,
 landed, or for a class with bit 1 of `+0x1208`, which property `0xc6e9c80b` sets on guided rockets only. A further float at
-`+0x188` also forces it, and that field has not been read. `FUN_0024ba68` itself refuses nothing, and a gunner's update
-(`FUN_001ee668`) has no flight gate. `Sim::pilot_held_in_flight` holds a BF2 pilot in a flyer that is not landed. BF1 was not
-read, so its rule is unchanged. AI exits stay as they were: `FUN_002baa20`'s request is spent in `FUN_002bbf00`, which is not
-this path. `trace:` the AI callers' `+0x68` test.
+`+0x188` also forces it, and that field has not been read. `FUN_0024ba68` itself refuses nothing. The gunner's hold is in
+the mounted-turret seat tick `FUN_0026cea0` (B2:189079-189087): when the seat's owner passes the flyer type test
+(`DAT_00689368`, the same type `EnterVehicle` and the takeoff and land actions test) and its flight state at `+0x60c` is not
+0, the exit is skipped. The passenger seat tick `FUN_00271b28` (B2:192404-192440) exits on use, or when the seat is disabled,
+with no flight test. So in a BF2 flyer that is not landed the pilot and the gunners stay, and a passenger may jump, in every
+mode. `Sim::rider_held_in_flight` follows that on ground maps. In Space Assault and space CTF it holds passengers too, a named
+deviation since there is no ground under them; `measure:` a PS2 space transport passenger pressing exit in flight. BF1 was
+not read, so its rule is unchanged. AI exits stay as they were: `FUN_002baa20`'s request is spent in `FUN_002bbf00`, which is
+not this path. `trace:` the AI callers' `+0x68` test.
 
 ### The shield entrance
 
@@ -947,7 +952,7 @@ PS2, 180 s from one save, sampled at about 5000 sweeps per second, so no state i
 | Collision: 2 to 5, health below 0 | 8 | 2.7 | -64 to -17439, often near full health before |
 | Instant death: 2 to 5, health exactly 0, usually full before | 8 | 2.7 | open space, far from hulls |
 
-All eight collisions are close to enemy hull objects: four within about 100 m of `imp_cap1_comms` and the bridge, two beside `imp_frig3`, one by `imp_cap1_tur4`, one by `imp_cap1_sensor`. Most instant deaths fit the unseen kill above, which needs a human, so `--no-human` rounds have none. Three of them fall at one point near (-1570, 600, 3430), outside the `mapbounds` box and about 1500 m from any object, which a random pick would not explain. PC `UnitFlyAgent.cpp:277` also kills a pilot's craft outright when its low level reports stuck. `trace:` that rule in the PS2 and whether those three are it. The port has no such kill.
+All eight collisions are close to enemy hull objects: four within about 100 m of `imp_cap1_comms` and the bridge, two beside `imp_frig3`, one by `imp_cap1_tur4`, one by `imp_cap1_sensor`. Most instant deaths fit the unseen kill above, which needs a human, so `--no-human` rounds have none. Three of them fall at one point near (-1570, 600, 3430), outside the `mapbounds` box and about 1500 m from any object, which a random pick would not explain. PC `UnitFlyAgent.cpp:277` also kills a pilot's craft outright when its low level reports stuck. `trace:` that rule in the PS2 and whether those three are it. The port now has a stuck kill (§21, §24).
 
 Port, seed 7, idle human, 600 s (`--space-report`): 111 shot, 0 crashed, 11 unseen; about 11, 0 and 1.1 per minute. In the 150 s suite run, 19 deaths: 6 credited to a flyer, 13 with no soldier credited (building turrets have none).
 
@@ -1139,3 +1144,27 @@ Command: `cargo run --release --manifest-path engine/Cargo.toml -p game --exampl
 A frigate is a `destructablebuilding` (`all_prop_blockaderunner`, `spa1_prop_minidestroyer2`, `spa1_prop_correliancruiser`). Its class data has `ExplosionName spa_prop_frigate_destruct_exp` (which uses `com_weap_obj_huge_exp`) and chunk entries with trail effects `spa_sfx_frigate_exp_1` to `_4`; the mini destroyer's chunks are `spa1_prop_minidestroyer2_chunk1` to `3`. Capital ships also have `all_cap_rebelcruiser_destruct*` classes.
 
 The player reports that the PS2 plays a long sequence and the port removes the ship at once. `trace:` how these chunks are timed, what moves or swaps the hull, and whether `DeathAnimation` (setter 94683) is involved. Tracked as a GitHub issue.
+
+## 24. Ground maps after the space merge (2026-11-10)
+
+A review of the 11-08 merge for side effects on Conquest and other ground modes.
+
+- **Stuck kill.** Both PS2 fly agents kill the craft a bot flies when its path follower reports stuck (value 2), before any
+  state logic and with no mode test: BF2 `FUN_002c87c8` (B2:251620-251627, the stuck word read by `FUN_002ba940` and a full
+  instant-death hit through the health object) and BF1 `FUN_00246d80` (B1:162418-162426, `FUN_001bbc98` with the instant
+  flag). So the port's kill of a BF2 craft wedged `WEDGED_GIVEUP` times in flight stays in every mode, and costs a ticket in
+  Conquest as the originals do. A craft that never died would also hold its pad. `trace:` whether the PS2 flyer's follower
+  reports stuck in flight at all; if it does after one 3 s window, `WEDGED_GIVEUP` falls to 1.
+- **Riders of a destroyed vehicle.** The PS2 kills each rider in his seat (re-vehicle-death §10). The merge stood every rider
+  at the hull origin before the kill, which moved a building turret's drawn gunner off his seat into the turret. Each rider
+  now takes his carried pose (`rider_pose`): the origin for flyers, hovers and walkers, as before, and his seat for a turret
+  gunner.
+- **Leaving in flight.** §10: pilot and gunners held, passengers free, except in space modes.
+- **Mesh-only sphere and terrain fallback** (`flyer_contact.rs`). Every baked flyer and command-flyer class has at least one
+  non-mesh prim in its building subset and one in its terrain subset, so neither fallback runs on any shipped craft. Separate
+  and older: the PS2 puts the `coll` mesh in the building subset of several BF2 craft (gunship, V-wing, A-wing, droid
+  fighters, droid gunship, ARC-170), and the port's contact skips mesh parts. `measure:` a landing in a hangar by one of those.
+- **Probe layer.** `Layers::FLYER` is given to every map body and every vehicle hull by the same class rule, so capital and
+  ground-vehicle hulls carry it; the probes already see all other hulls. Probing `FLYER | VEHICLE` would widen the probe to
+  bodies a craft flies through. Only the comments were stale. Older mismatch, left alone: contact with a flyer- or
+  walker-owned body uses its building subset while the probes use FLYER.

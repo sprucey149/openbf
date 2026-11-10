@@ -1,8 +1,9 @@
 //! Frame validation, buffer upload and ordered render passes.
 use super::{
-    blend_order, continue_pass, create_instance_buffer, create_palette_buffer, draw_key,
-    draw_key_layer, draw_mesh, iface_dir, mark, may_move, run_section, runs_key, skinned_go_before,
-    sort_distance, sort_runs, Blended, DrawSort, FrameStats, OverlayFn, WorldBox,
+    blend_order, continue_pass, create_instance_buffer, create_palette_buffer,
+    display_view_allowed, draw_key, draw_key_layer, draw_mesh, iface_dir, mark, may_move,
+    run_section, runs_key, skinned_go_before, sort_distance, sort_runs, Blended, DrawSort,
+    FrameStats, OverlayFn, WorldBox,
 };
 use crate::frustum;
 use crate::mesh::{self, GpuMesh, Instance};
@@ -577,8 +578,8 @@ impl Renderer {
 
         // Acquire the frame's color view.
         let acquire = std::time::Instant::now();
-        let (frame, view) = match &mut self.target {
-            Target::Window { surface, config } => match surface.get_current_texture() {
+        let (frame, view) = match &self.target {
+            Target::Window { surface, .. } => match surface.get_current_texture() {
                 Ok(frame) => {
                     let view = frame
                         .texture
@@ -586,7 +587,12 @@ impl Renderer {
                     (Some(frame), view)
                 }
                 Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
-                    surface.configure(&self.device, config);
+                    // Rebuilt at the window's size, not the stale one; left
+                    // alone while minimized (#142).
+                    let window = self.window_size().unwrap_or((0, 0));
+                    if let Some((w, h)) = crate::device::outdated_surface_size(window) {
+                        self.reconfigure_window(w, h);
+                    }
                     return Ok(());
                 }
                 Err(wgpu::SurfaceError::Timeout) => return Ok(()),
@@ -1111,15 +1117,23 @@ impl Renderer {
                 self.draw_particle_runs(&mut pass, &bolts.runs[sky_particle_runs..], true);
             mark(&mut timer, &mut pass, "bolts+particles");
         }
-        let frame_display_view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(self.format.remove_srgb_suffix()),
-            ..Default::default()
+        // The particle blur and the sun flare draw in display values. The
+        // world target always carries the non-sRGB view; a surface carries
+        // it only where the backend allows, and without it both are left out
+        // rather than making an illegal view.
+        let frame_display_view = (world_target.is_some()
+            || display_view_allowed(self.format, self.display_view_format()))
+        .then(|| {
+            frame_texture.create_view(&wgpu::TextureViewDescriptor {
+                format: Some(self.format.remove_srgb_suffix()),
+                ..Default::default()
+            })
         });
-        if particle_blur {
+        if let (true, Some(frame_display_view)) = (particle_blur, &frame_display_view) {
             let mut pass = self.particle_blur.pass(
                 &mut encoder,
                 frame_texture,
-                &frame_display_view,
+                frame_display_view,
                 &self.depth_view,
             );
             draw_calls += 1;
@@ -1221,14 +1235,16 @@ impl Renderer {
                 t.mark(&mut encoder, "bloom");
             }
         }
-        draw_calls += self.sun_flare_pass(
-            &mut encoder,
-            &frame_display_view,
-            camera,
-            width,
-            height,
-            false,
-        );
+        if let Some(frame_display_view) = &frame_display_view {
+            draw_calls += self.sun_flare_pass(
+                &mut encoder,
+                frame_display_view,
+                camera,
+                width,
+                height,
+                false,
+            );
+        }
         // The frame filter lifts the finished 3D frame, before the overlay
         // (the PS2 draws its HUD after it, `analysis/re-glow.md` §3.3).
         if filter && !ab.skips("filter") {
@@ -1274,7 +1290,20 @@ impl Renderer {
             self.gpu_timer = Some(t);
         }
         if let Some(frame) = frame {
+            let suboptimal = frame.suboptimal;
             frame.present();
+            // A frame presented at a stale size: rebuild the surface at the
+            // window's, once the frame is gone (#142). The window is asked
+            // only then: on X11 its size is a round trip to the server.
+            if suboptimal {
+                let window = self.window_size().unwrap_or((0, 0));
+                let config = self.size();
+                if let Some((w, h)) =
+                    crate::device::suboptimal_rebuild_size(suboptimal, window, config)
+                {
+                    self.reconfigure_window(w, h);
+                }
+            }
         }
         Ok(())
     }

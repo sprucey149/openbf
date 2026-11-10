@@ -119,8 +119,14 @@
 //!   OPENBF_FRAME_PROFILE=<csv>    windowed: a row of CPU and GPU ms per
 //!                                 battle frame (game::frame_profile)
 //!   OPENBF_NO_VSYNC=1             windowed: present without vsync
+//!   OPENBF_PRESENT=fifo|relaxed|mailbox|immediate  windowed: this present
+//!                                 mode where the display offers it, to
+//!                                 diagnose flicker (default fifo)
+//!   WGPU_BACKEND=vulkan|dx12|metal  the graphics API (default: the
+//!                                 platform's primary ones)
 //!   OPENBF_WINDOW_SIZE=WxH        windowed: the first window size in
-//!                                 physical pixels (default 1280x720 logical)
+//!                                 physical pixels, not maximized (default:
+//!                                 maximized, restoring to 1280x720 logical)
 //!   OPENBF_FLYER_BOTS=0           bots stay out of flyers, for a run measuring a
 //!                                 map's ground war alone (default: they fly)
 //!   OPENBF_AUTOPILOT=1            dev mode, windowed: a scripted pad drives the

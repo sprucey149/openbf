@@ -61,7 +61,7 @@ fn aim_offset(s: &Sim, a: UnitHandle, t: UnitHandle) -> Vec3 {
     let eye = s.unit(a).unwrap().muzzle();
     let c = e.capsule().center();
     let st = AiState::default();
-    let off = seen_aim(s, a, &st, eye, e, 1e6, &WeaponClass::default()) - c;
+    let off = seen_aim(s, a, &st, eye, e, 1e6, &WeaponClass::default(), false) - c;
     off / (ERR_BOT_SCALE * ((c - eye).length() / 20.0 + 0.5))
 }
 
@@ -117,7 +117,7 @@ fn a_bf1_bot_keeps_its_own_tracked_error() {
         let e = s.unit(t).unwrap();
         let eye = s.unit(a).unwrap().muzzle();
         let wc = WeaponClass::default();
-        seen_aim(s, a, &st, eye, e, 1e6, &wc) - e.capsule().center()
+        seen_aim(s, a, &st, eye, e, 1e6, &wc, false) - e.capsule().center()
     };
     let dir = bf1_error_dir(&s, a);
     assert!((off(&s, 0.7) - dir * 0.7).length() < 1e-4);
@@ -245,6 +245,32 @@ fn the_error_offset_is_bounded_and_re_drawn_once_per_think() {
     assert!((Difficulty::Hard.skill_at(20).err_cap - 1.2).abs() < 1e-6);
 }
 
+/// A wanted direction almost straight behind the tracked one (a heard shot
+/// from behind: the point a few centimetres under the eye) is slewed round
+/// the vertical, 30° a step with the aim level, not over the pole through
+/// the floor (playtest C4's pose by another road).
+#[test]
+fn a_point_straight_behind_is_slewed_round_not_down() {
+    let from = Vec3::new(0.0, 0.0, -1.0);
+    let to = Vec3::new(0.0, -0.01, 1.0).normalize();
+    let (mut ad, mut av) = (from, Vec3::ZERO);
+    for step in 0..30 {
+        (ad, av) = track_step(ad, av, to, 14.0, 5.0, crate::TICK_DT, true);
+        assert!((ad.length() - 1.0).abs() < 1e-5, "unit vector");
+        assert!(ad.y > -0.1, "dipped to y {} at step {step}", ad.y);
+    }
+    assert!(ad.dot(to) > 0.99, "round to the point: {ad}");
+    // Off to the side the slew is the common-perpendicular one as before.
+    let side = Vec3::new(1.0, 0.0, 0.0);
+    let (ad, _) = track_step(from, Vec3::ZERO, side, 14.0, 5.0, crate::TICK_DT, true);
+    let deg = ad.dot(from).clamp(-1.0, 1.0).acos().to_degrees();
+    assert!((29.0..32.0).contains(&deg), "30 deg toward the side: {deg}");
+    assert!(ad.y.abs() < 1e-5);
+    // A space round keeps the common-perpendicular slew at the point behind.
+    let (ad, _) = track_step(from, Vec3::ZERO, to, 14.0, 5.0, crate::TICK_DT, false);
+    assert!(ad.y < -0.4, "space: the old slew, over the pole: {ad}");
+}
+
 /// D9: the aim tracker steers the aim direction instead of snapping it,
 /// slews when the target is more than 30° off, and is idle with no target.
 #[test]
@@ -336,7 +362,7 @@ fn the_aim_tracker_clamps_the_reach_then_damps() {
         let mut lag = 0.0f32;
         for t in 0..300 {
             let want = at(0.4 * t as f32 * dt);
-            (ad, av) = track_step(ad, av, want, accel, damping, dt);
+            (ad, av) = track_step(ad, av, want, accel, damping, dt, true);
             if t >= 150 {
                 lag = lag.max(angle(ad, want));
             }
@@ -349,7 +375,7 @@ fn the_aim_tracker_clamps_the_reach_then_damps() {
         let want = at(10f32.to_radians());
         let (mut ad, mut av) = (at(0.0), Vec3::ZERO);
         for t in 0..90 {
-            (ad, av) = track_step(ad, av, want, accel, damping, dt);
+            (ad, av) = track_step(ad, av, want, accel, damping, dt, true);
             if t >= 20 {
                 let off = angle(ad, want);
                 assert!(off < 0.5, "skill {level}: {off} deg off at tick {t}");
@@ -360,7 +386,7 @@ fn the_aim_tracker_clamps_the_reach_then_damps() {
     // step is the clamped reach minus `av·damping`.
     let (accel, damping) = (2.0, 1.5);
     let av = Vec3::new(-1.0, 0.0, 0.0);
-    let (_, next) = track_step(at(0.0), av, at(0.4), accel, damping, dt);
+    let (_, next) = track_step(at(0.0), av, at(0.4), accel, damping, dt, true);
     let reach = ((at(0.4) - at(0.0)) / dt - av) / dt;
     let want = av + (reach.normalize() * accel - av * damping) * dt;
     assert!((next - want).length() < 1e-5, "{next} vs {want}");
@@ -1623,5 +1649,137 @@ fn a_cone_bot_holds_fire_outside_the_cone_length() {
                 .count();
         }
         assert_eq!(shots > 0, should_fire, "distance={distance}, shots={shots}");
+    }
+}
+
+/// A skill-20 BF2 bot sniper with no aim error (bubble 0, no spread) on a
+/// soldier pacing across its front at 6 m/s, 40 m out, and each shot's
+/// miss along the runner's way where its bolt passes his depth (ahead is
+/// positive). The bolt sweeps a whole tick at a time against soldiers that
+/// have already made this tick's move, so the bot aims where that sweep
+/// meets him: the tick's move, then the whole ticks the bolt flies. At
+/// 2000 m/s and 40 m that is the one tick: 0.2 m ahead of where the bot
+/// saw him. Measured (19 shots): before, every shot trailed by 0.08-0.09
+/// m (the flight lead alone, 6 x 0.02 s, against the tick's 6 / 30); now
+/// by 0.008-0.009 m.
+fn sniper_misses_on_a_runner(space: bool) -> Vec<f32> {
+    let _style = crate::ai::tests::all_stand();
+    use crate::sim::{Event, Sim};
+    use crate::unit::{Controller, UnitSpec};
+    let mut s = Sim::empty(5);
+    s.ground_rules = crate::soldier::GroundRules::Bf2;
+    s.cheats.infinite_ammo = true;
+    if space {
+        s.space_assault = Some(crate::sim::SpaceAssault::new(10));
+    }
+    let w = &mut s.weapon_classes[0];
+    w.trigger_single = true;
+    w.zoom_max = 8.0;
+    w.yaw_spread = 0.0;
+    w.pitch_spread = 0.0;
+    w.posture_spread = [[0.0; 3]; 3];
+    w.spread_per_shot = 0.0;
+    w.ai_bubble_size = 0.0;
+    w.ordnance.velocity = 2000.0;
+    w.ordnance.life_span = 0.15;
+    let speed = 2000.0;
+    let shooter = s
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    s.unit_mut(shooter).unwrap().skill = 20;
+    let period = 150;
+    let vel = Vec3::X * 6.0;
+    let t = s
+        .spawn(&UnitSpec {
+            controller: Controller::Pacer { vel, period },
+            ..UnitSpec::trooper(1, Vec3::new(-15.0, 0.0, -40.0))
+        })
+        .unwrap();
+    let mut misses = Vec::new();
+    for _ in 0..1800u32 {
+        s.step(&[PadState::default()]);
+        s.unit_mut(t).unwrap().health.cur = 1.0e9;
+        let shot = s.events.iter().find_map(|e| match e {
+            Event::Shot {
+                unit, origin, dir, ..
+            } if *unit == shooter => Some((*origin, *dir)),
+            _ => None,
+        });
+        let Some((o, u)) = shot else {
+            continue;
+        };
+        // Clear of a turn about: settled on this leg, and no turn before
+        // the bolt passes.
+        let leg = (s.tick - 1) % u64::from(period);
+        if !(20..u64::from(period) - 5).contains(&leg) {
+            continue;
+        }
+        let e = s.unit(t).unwrap();
+        let v = e.soldier.vel;
+        let c = e.capsule().center();
+        let j = (((c - o).dot(u) / (speed * crate::TICK_DT)).ceil() - 1.0).max(0.0);
+        let q = c + v * crate::TICK_DT * j;
+        let on_line = o + u * (q - o).dot(u);
+        misses.push((on_line - q).dot(v.normalize()));
+    }
+    misses
+}
+
+#[test]
+fn a_bot_sniper_leads_a_runner_to_where_its_bolt_meets_him() {
+    let misses = sniper_misses_on_a_runner(false);
+    println!("ground misses {misses:?}");
+    assert!(misses.len() >= 6, "shots {}", misses.len());
+    assert!(misses.iter().all(|m| m.abs() < 0.02), "{misses:?}");
+}
+
+/// A space battle keeps the plain intercept: its bot sniper trails the
+/// runner as before (the space rules are their own).
+#[test]
+fn a_space_bot_sniper_keeps_the_plain_intercept() {
+    let misses = sniper_misses_on_a_runner(true);
+    assert!(misses.len() >= 6, "shots {}", misses.len());
+    assert!(
+        misses.iter().all(|m| (-0.1..-0.07).contains(m)),
+        "{misses:?}"
+    );
+}
+
+/// [`swept_lead`]: still, it is the target; a soldier crossing at 6 m/s
+/// inside a tick's sweep is led by the tick's move less the shooter's own,
+/// past a tick's sweep by a tick more; a droid, which moves after the
+/// bolts, by the flight's whole ticks alone.
+#[test]
+fn the_swept_lead_counts_whole_ticks() {
+    let dt = crate::TICK_DT;
+    let (v, s) = (Vec3::X * 6.0, 2000.0);
+    let near = Vec3::new(0.0, 0.0, -40.0);
+    let far = Vec3::new(0.0, 0.0, -100.0);
+    let close = |a: Vec3, b: Vec3| (a - b).length() < 1e-4;
+    assert!(close(swept_lead(near, Vec3::ZERO, Vec3::ZERO, s, dt), near));
+    assert!(close(swept_lead(near, v, Vec3::ZERO, s, dt), near + v * dt));
+    assert!(close(
+        swept_lead(near, v, Vec3::X * 2.0, s, dt),
+        near + Vec3::X * 4.0 * dt
+    ));
+    assert!(close(
+        swept_lead(far, v, Vec3::ZERO, s, dt),
+        far + v * 2.0 * dt
+    ));
+    assert!(close(swept_lead(near, v, Vec3::ZERO, s, 0.0), near));
+    assert!(close(swept_lead(far, v, Vec3::ZERO, s, 0.0), far + v * dt));
+    // A slow bolt (80 m/s) at 20 m: 0.25 s, 8 ticks, with the first.
+    let mid = Vec3::new(0.0, 0.0, -20.0);
+    let p = swept_lead(mid, v, Vec3::ZERO, 80.0, dt);
+    let n = ((p.length() / (80.0 * dt)).ceil()).max(1.0);
+    assert!(close(p, mid + v * dt * n), "{p} after {n} ticks");
+    assert!((8.0..=9.0).contains(&n), "{n}");
+    // An ordnance with no speed leads nothing, even at a target coming in.
+    for speed in [0.0, 1e-6, f32::NAN] {
+        let p = swept_lead(near, -near.normalize() * 6.0, Vec3::ZERO, speed, dt);
+        assert_eq!(p, near, "speed {speed}");
     }
 }

@@ -755,13 +755,6 @@ pub fn slot_kind(db: &ClassDb, weapon: &str, channel: u8) -> SlotKind {
         .and_then(|o| db.engine_base(o))
         .unwrap_or("")
         .to_ascii_lowercase();
-    if (base.as_str(), ord.as_str()) != ("remote", "flyer")
-        && db
-            .prop_f32(weapon, "MedalsTypeToUnlock")
-            .is_some_and(|m| m != -1.0)
-    {
-        return SlotKind::NotBuilt("an award weapon, unlocked by a medal (no medals yet)");
-    }
     match (base.as_str(), ord.as_str()) {
         ("repair", _) => SlotKind::Repair,
         ("grenade", "sticky") if channel == 1 => SlotKind::Thrown,
@@ -858,6 +851,8 @@ pub fn held_slots(db: &ClassDb, soldier: &str, primary: u8) -> Vec<HeldSlot> {
 /// (re-jetpack.md §2.2, §12). Rows: (BF1 class, its BF2 twin,
 /// JetAcceleration, the jet row or None for the ctor default 0.3 / 0.3 / 1.0).
 /// `tests/suite/roster.rs` holds the numbers to the BF2 twins' baked classes.
+/// A BF1 hover class also keeps BF1's net drain in flight
+/// ([`bf1_net_jet_fuel_cost`]).
 pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
     (
         "rep_inf_jet_trooper",
@@ -951,6 +946,7 @@ pub fn soldier_constants(db: &ClassDb, class: &str) -> SoldierConstants {
 /// The class data `SoldierConstants::from_props` cannot read alone: the
 /// `ControlSpeed jet` row, child-most first (the PS2 applies each class's
 /// rows over its parent's, one stance at a time), and on a BF1 disc the
+/// net in-flight drain ([`bf1_net_jet_fuel_cost`]) and the
 /// [`BF1_JET_BORROW`] numbers.
 fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
     let h = crate::classdb::fnv1a_lowercase("ControlSpeed");
@@ -968,6 +964,7 @@ fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
     if db.is_bf2() {
         return;
     }
+    c.jet_fuel_cost = bf1_net_jet_fuel_cost(c);
     if let Some(&(_, _, accel, row)) = BF1_JET_BORROW
         .iter()
         .find(|(bf1, ..)| bf1.eq_ignore_ascii_case(class))
@@ -978,6 +975,22 @@ fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
         if let Some(r) = row {
             c.jet_control = r;
         }
+    }
+}
+
+/// `[ours]` (playtest 2026-11-05 B4): BF1 refills the tank in every stance,
+/// the hover included (B1:117346-117350), and a BF1 hover class's
+/// JetFuelCost was set for that. Under BF2's no-refill rule the class pays
+/// only the net cost (JetFuelCost - JetFuelRechargeRate), so it flies as
+/// long as on BF1: the jet trooper 7.5 s from full, 2.5 s from spawn
+/// (re-jetpack.md §6, §16). A leap class (cost 0) keeps its numbers.
+/// measure: a BF1 PS2 jet trooper's hover time from a full tank, against
+/// the 7.5 s this gives.
+pub fn bf1_net_jet_fuel_cost(c: &SoldierConstants) -> f32 {
+    if c.jet_hover && c.jet_fuel_recharge > 0.0 && c.jet_fuel_cost > c.jet_fuel_recharge {
+        c.jet_fuel_cost - c.jet_fuel_recharge
+    } else {
+        c.jet_fuel_cost
     }
 }
 
@@ -1045,13 +1058,26 @@ impl ClassRoster {
                 "{class}: saber throw requires the authored primary weapon attachment and blade templates");
         }
         if donated {
+            // An award weapon BF1 has no class for sounds as the weapon it
+            // replaces does.
+            let replaced: Vec<(i8, String)> = std::iter::once(&weapon)
+                .chain(held.iter().map(|s| &s.weapon))
+                .filter_map(|w| Some((w.medal_lock?, w.name.clone())))
+                .collect();
             for selected in
                 std::iter::once(&mut weapon).chain(held.iter_mut().map(|s| &mut s.weapon))
             {
+                let own = match selected.medal_unlock {
+                    Some(t) if db.resolve(&selected.name).is_none() => replaced
+                        .iter()
+                        .find(|(lock, _)| *lock == t)
+                        .map_or(selected.name.as_str(), |(_, name)| name.as_str()),
+                    _ => selected.name.as_str(),
+                };
                 let name = twins
                     .iter()
-                    .find(|(bf2, _)| *bf2 == selected.name)
-                    .map_or(selected.name.as_str(), |(_, bf1)| *bf1);
+                    .find(|(bf2, _)| *bf2 == own)
+                    .map_or(own, |(_, bf1)| *bf1);
                 let native = weapon_from_db(db, name)?;
                 selected.fire_sound = native.fire_sound;
                 selected.fire_loop_sound = native.fire_loop_sound;

@@ -197,6 +197,8 @@ impl WeaponClass {
             thrown: None,
             offhand_weapon: false,
             medals_type: None,
+            medal_unlock: None,
+            medal_lock: None,
             repair: None,
             dispenser: None,
             mine: None,
@@ -310,8 +312,15 @@ impl WeaponClass {
         }
     }
 
-    pub fn award_locked(&self, all_awards: bool) -> bool {
-        !all_awards && self.guided.as_ref().is_some_and(|g| g.requires_award)
+    /// The medal this award weapon needs (`medal_unlock`); a guided award
+    /// launcher built without the key still needs demolition (2).
+    pub fn unlock_medal(&self) -> Option<i8> {
+        self.medal_unlock.or_else(|| {
+            self.guided
+                .as_ref()
+                .is_some_and(|g| g.requires_award)
+                .then_some(2)
+        })
     }
 
     pub fn dispenses(&self) -> bool {
@@ -359,6 +368,14 @@ impl WeaponClass {
         }
         if let Some(v) = pf(src, "ScoreForMedalsType") {
             w.medals_type = Some(v as i8);
+        }
+        // -1 is BF2's "no medal" (a hero weapon writes it over its parent's).
+        let medal = |v: f32| (v != -1.0).then_some(v as i8);
+        if let Some(v) = pf(src, "MedalsTypeToUnlock") {
+            w.medal_unlock = medal(v);
+        }
+        if let Some(v) = pf(src, "MedalsTypeToLock") {
+            w.medal_lock = medal(v);
         }
         // The zoom keys (`analysis/re-zoom.md` §2): a written 0 reads 1.0
         // (B2:320352-320361, B1:209974-209983), and `ZoomMin` / `ZoomMax`

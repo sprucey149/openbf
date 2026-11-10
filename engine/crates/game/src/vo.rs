@@ -7,8 +7,9 @@
 //! units talk only round the player - and an enemy of the subject speaks 31
 //! times in 101; the speaker's entries of that event whose conditions all
 //! match the context (where the object is from the subject, what it is, its
-//! `VOUnitType`) are ranked by how many match, and the first is asked
-//! through the battle's voice queue (`announce::Commander::gate_calls`).
+//! `VOUnitType`) are ranked by how many match (ties as the PS2's sort
+//! leaves them, [`best`]), and the top one is asked through the battle's
+//! voice queue (`announce::Commander::gate_calls`).
 //!
 //! Called from `Commander::calls` once per stepped tick on a BF2 battle; the
 //! sim's events feed it (the tracker's take, a live grenade, hits, kills).
@@ -245,10 +246,25 @@ pub fn score(cond: u32, ctx: u32) -> u32 {
         .count() as u32
 }
 
-/// The entry an event plays: of the passing ones the highest score; on a
-/// tie the earlier (the comparator at 0x2e6130 orders by the entry's
-/// address, which is parse order). At most 64 are looked at.
+/// The entry an event plays (`FUN_002e6180` 272041-272079): the first 64
+/// passing entries of the event in list order, sorted by score with the
+/// PS2's C library quicksort (`FUN_005216b0`, the BSD one); slot 0 plays.
+/// On equal scores the comparator (ELF 0x2e6130) puts the later array slot
+/// first, so with fewer than 7 passing the last parsed of the best wins.
 pub fn best(lines: &VoLines, event: u8, ctx: u32) -> Option<&Entry> {
+    let pass: Vec<&Entry> = lines
+        .entries
+        .iter()
+        .filter(|e| e.event == event && passes(e.cond, ctx))
+        .take(64)
+        .collect();
+    let scores: Vec<u32> = pass.iter().map(|e| score(e.cond, ctx)).collect();
+    ps2_rank(&scores).first().map(|&i| pass[i])
+}
+
+/// The ranking space battles keep: the first of the best among the first
+/// 64 entries of the event.
+fn best_space(lines: &VoLines, event: u8, ctx: u32) -> Option<&Entry> {
     let mut out: Option<(&Entry, u32)> = None;
     for e in lines
         .entries
@@ -263,6 +279,144 @@ pub fn best(lines: &VoLines, event: u8, ctx: u32) -> Option<&Entry> {
         }
     }
     out.map(|(e, _)| e)
+}
+
+/// The order the PS2's library quicksort leaves `scores` in, as indices:
+/// the 4.4BSD qsort (insertion sort under 7, median of three over 7,
+/// ninther over 40, the swap-count fallback to insertion sort) with the VO
+/// comparator, which ranks by score and then by the CURRENT slot, so the
+/// result depends on the sort's moves and not only on the scores.
+fn ps2_rank(scores: &[u32]) -> Vec<usize> {
+    let mut v: Vec<usize> = (0..scores.len()).collect();
+    if v.len() > 1 {
+        qsort(&mut v, scores, 0, scores.len());
+    }
+    v
+}
+
+/// The comparator over slots `i` and `j`: higher score first, then the
+/// higher slot first.
+fn slot_cmp(v: &[usize], s: &[u32], i: usize, j: usize) -> i32 {
+    let (a, b) = (s[v[i]], s[v[j]]);
+    match (a.cmp(&b), i.cmp(&j)) {
+        (std::cmp::Ordering::Less, _) => 1,
+        (std::cmp::Ordering::Greater, _) => -1,
+        (_, std::cmp::Ordering::Less) => 1,
+        (_, std::cmp::Ordering::Greater) => -1,
+        _ => 0,
+    }
+}
+
+fn med3(v: &[usize], s: &[u32], a: usize, b: usize, c: usize) -> usize {
+    let cmp = |i, j| slot_cmp(v, s, i, j);
+    if cmp(a, b) < 0 {
+        if cmp(b, c) < 0 {
+            b
+        } else if cmp(a, c) < 0 {
+            c
+        } else {
+            a
+        }
+    } else if cmp(b, c) > 0 {
+        b
+    } else if cmp(a, c) < 0 {
+        a
+    } else {
+        c
+    }
+}
+
+fn insertion(v: &mut [usize], s: &[u32], a: usize, n: usize) {
+    for m in a + 1..a + n {
+        let mut l = m;
+        while l > a && slot_cmp(v, s, l - 1, l) > 0 {
+            v.swap(l, l - 1);
+            l -= 1;
+        }
+    }
+}
+
+fn vecswap(v: &mut [usize], a: usize, b: usize, n: usize) {
+    for k in 0..n {
+        v.swap(a + k, b + k);
+    }
+}
+
+/// Sorts the `n` slots from `a` (the whole array stays addressed, as the
+/// comparator reads absolute slots).
+fn qsort(v: &mut [usize], s: &[u32], mut a: usize, mut n: usize) {
+    loop {
+        if n < 7 {
+            insertion(v, s, a, n);
+            return;
+        }
+        let mut pm = a + n / 2;
+        if n > 7 {
+            let (mut pl, mut pn) = (a, a + n - 1);
+            if n > 40 {
+                let d = n / 8;
+                pl = med3(v, s, pl, pl + d, pl + 2 * d);
+                pm = med3(v, s, pm - d, pm, pm + d);
+                pn = med3(v, s, pn - 2 * d, pn - d, pn);
+            }
+            pm = med3(v, s, pl, pm, pn);
+        }
+        v.swap(a, pm);
+        let (mut pa, mut pb) = (a + 1, a + 1);
+        let (mut pc, mut pd) = (a + n - 1, a + n - 1);
+        let mut swapped = false;
+        loop {
+            while pb <= pc {
+                let r = slot_cmp(v, s, pb, a);
+                if r > 0 {
+                    break;
+                }
+                if r == 0 {
+                    swapped = true;
+                    v.swap(pa, pb);
+                    pa += 1;
+                }
+                pb += 1;
+            }
+            while pb <= pc {
+                let r = slot_cmp(v, s, pc, a);
+                if r < 0 {
+                    break;
+                }
+                if r == 0 {
+                    swapped = true;
+                    v.swap(pc, pd);
+                    pd -= 1;
+                }
+                pc -= 1;
+            }
+            if pb > pc {
+                break;
+            }
+            v.swap(pb, pc);
+            swapped = true;
+            pb += 1;
+            pc -= 1;
+        }
+        if !swapped {
+            insertion(v, s, a, n);
+            return;
+        }
+        let pn = a + n;
+        let r = (pa - a).min(pb - pa);
+        vecswap(v, a, pb - r, r);
+        let r = (pd - pc).min(pn - pd - 1);
+        vecswap(v, pb, pn - r, r);
+        if pb - pa > 1 {
+            qsort(v, s, a, pb - pa);
+        }
+        let right = pd - pc;
+        if right <= 1 {
+            return;
+        }
+        a = pn - right;
+        n = right;
+    }
 }
 
 /// One side of a context: where a unit stands, its facing, what it is.
@@ -351,6 +505,9 @@ pub struct Vo {
     spree: (u32, f32),
     /// Per unit, per kind (enemy, friendly, team kill): four death times.
     slaughter: Vec<[[f32; 4]; 3]>,
+    /// A space battle: lines keep the ranking they had before the PS2's
+    /// sort was followed (space modes are tuned separately).
+    pub space: bool,
 }
 
 impl Vo {
@@ -409,7 +566,11 @@ impl Vo {
         if sp.team != sub.team && self.roll() >= ENEMY_SPEAKS && event != REBELS_SHOOT_DEAD_BODY {
             return None;
         }
-        let e = best(sp.lines, event, ctx)?;
+        let e = if self.space {
+            best_space(sp.lines, event, ctx)?
+        } else {
+            best(sp.lines, event, ctx)?
+        };
         Some(Said {
             speaker,
             event,
@@ -616,9 +777,84 @@ mod tests {
         );
         assert!(!passes(l.entries[1].cond, 84 << 16));
         assert!(best(&l, 9, ctx).is_none());
-        // A tie goes to the first parsed.
+        // A tie goes to the later slot (the PS2's sort and comparator).
         let t = lines(&["a NearbyEnemySlaughter", "b NearbyEnemySlaughter"]);
-        assert_eq!(best(&t, 0x24, 0).map(|e| e.sound.as_str()), Some("a"));
+        assert_eq!(best(&t, 0x24, 0).map(|e| e.sound.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn space_keeps_the_first_parsed_tie() {
+        let t = lines(&["a NearbyEnemySlaughter", "b NearbyEnemySlaughter"]);
+        assert_eq!(best_space(&t, 0x24, 0).map(|e| e.sound.as_str()), Some("a"));
+        let units = [who(&t, 0, 0.0), who(&t, 0, 5.0)];
+        let mut vo = Vo::new(1);
+        vo.space = true;
+        let s = vo.ask(&units, Some(0), ENEMY_SLAUGHTER, Some(1), None, None);
+        assert_eq!(s.map(|s| s.sound), Some("a".to_owned()));
+    }
+
+    #[test]
+    fn the_ps2_library_sort_orders_ties_by_slot() {
+        let order = |s: &[u32]| ps2_rank(s);
+        assert_eq!(order(&[1, 1, 0])[0], 1);
+        assert_eq!(order(&[1; 6]), [5, 4, 3, 2, 1, 0]);
+        assert_eq!(order(&[1; 7]), [6, 5, 4, 0, 2, 1, 3]);
+        assert_eq!(order(&[1; 8]), [7, 6, 5, 0, 3, 2, 1, 4]);
+        // Seven or more: the winner is not simply the last of the best.
+        assert_eq!(order(&[0, 0, 0, 1, 1, 1, 1]), [5, 6, 4, 3, 1, 2, 0]);
+        assert_eq!(order(&[0, 0, 1, 1, 0, 0, 0]), [2, 3, 6, 5, 4, 0, 1]);
+        assert_eq!(order(&[0, 1, 1, 0, 2, 1, 1, 0]), [4, 6, 5, 2, 1, 0, 3, 7]);
+        assert_eq!(
+            order(&[1, 0, 1, 0, 1, 0, 1, 0, 1, 0]),
+            [0, 8, 6, 4, 2, 7, 5, 3, 1, 9]
+        );
+        assert_eq!(order(&[2, 2, 1, 1, 2, 0, 1, 2, 1, 1])[0], 7);
+        // Any length sorts by score, highest first.
+        for n in [0usize, 1, 2, 40, 41, 64] {
+            let s: Vec<u32> = (0..n as u32).map(|i| (i * 7 + 3) % 5).collect();
+            let o = order(&s);
+            let mut seen = o.clone();
+            seen.sort_unstable();
+            assert_eq!(seen, (0..n).collect::<Vec<_>>());
+            assert!(o.windows(2).all(|w| s[w[0]] >= s[w[1]]), "{n}: {o:?}");
+        }
+    }
+
+    #[test]
+    fn the_cap_counts_passing_entries() {
+        let mut v = vec!["x AcquiredTarget +VOUnitNum5"; 70];
+        v.push("hit AcquiredTarget +VOUnitNum83");
+        let l = lines(&v);
+        assert_eq!(best(&l, 1, 83 << 16).map(|e| e.sound.as_str()), Some("hit"));
+    }
+
+    #[test]
+    fn an_enemy_trooper_names_the_player_hero() {
+        let l = lines(&[
+            "l AcquiredTarget +left",
+            "r AcquiredTarget +right",
+            "maul AcquiredTarget +VOUnitNum196",
+            "plain AcquiredTarget",
+        ]);
+        let hero = Body {
+            unit_type: 196,
+            ..Body::default()
+        };
+        // The subject is the player and so is the object: LEFT, under 10 m.
+        let ctx = context(&hero, Some(&hero));
+        assert_eq!(best(&l, 1, ctx).map(|e| e.sound.as_str()), Some("maul"));
+        let mut player = who(&l, 0, 0.0);
+        player.body.unit_type = 196;
+        let units = [player, who(&l, 1, 10.0)];
+        let mut said = 0;
+        for seed in 0..50 {
+            let mut vo = Vo::new(seed);
+            if let Some(s) = vo.ask(&units, Some(0), ACQUIRED_TARGET, Some(1), None, Some(0)) {
+                assert_eq!(s.sound, "maul");
+                said += 1;
+            }
+        }
+        assert!(said > 0);
     }
 
     #[test]

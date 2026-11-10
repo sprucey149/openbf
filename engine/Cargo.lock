@@ -1037,8 +1037,12 @@ dependencies = [
  "serde_json",
  "sha2",
  "ui",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
  "wgpu",
  "winit",
+ "x11rb",
  "zune-jpeg",
 ]
 

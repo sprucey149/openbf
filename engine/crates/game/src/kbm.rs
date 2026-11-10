@@ -75,6 +75,19 @@ pub const KEY_ADJUST_RIGHT: u32 = 8192;
 /// The menu edge bits of a value step: those keys, or the left stick.
 pub const MENU_ADJUST_LEFT: u32 = 1024;
 pub const MENU_ADJUST_RIGHT: u32 = 2048;
+/// North (Triangle / Y) as held, so a Triangle already down when the pause
+/// menu opens is no Back edge. Never returned as an edge itself.
+pub const MENU_NORTH: u32 = 4096;
+
+/// A frame's menu edges from the held bits. With `north_backs` (the ground
+/// pause menu, as BF2's ifs_pausemenu) North's own fresh press is Back (32).
+pub fn menu_edges(now: u32, prev: u32, tapped: u32, north_backs: bool) -> u32 {
+    let mut edges = (now & !prev) | tapped;
+    if north_backs && edges & MENU_NORTH != 0 {
+        edges |= 32;
+    }
+    edges & !MENU_NORTH
+}
 
 /// The arms the stick held last frame, for `input::stick_arms`' hysteresis. Left
 /// and Right come from the value-step bits, because the bare arm bits are the

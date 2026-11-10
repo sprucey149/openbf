@@ -54,8 +54,9 @@ impl Renderer {
 
     /// Render one frame. `clear` is LINEAR RGBA (the sRGB target encodes it);
     /// its alpha is ignored — the frame is always opaque (`FRAME_WRITES`).
-    /// Windowed mode presents; a lost/outdated surface reconfigures and skips
-    /// the frame (returns Ok) — the next frame draws normally.
+    /// Windowed mode presents; a lost/outdated surface is rebuilt at the
+    /// window's size (left alone while minimized) and the frame is skipped
+    /// (returns Ok) — the next frame draws normally.
     pub fn render(
         &mut self,
         camera: &Camera,
@@ -226,6 +227,15 @@ impl Renderer {
         }
         calls
     }
+}
+
+/// Whether the surface frame of `format` may be viewed in its non-sRGB
+/// twin: always when it has no sRGB twin, otherwise only when the surface
+/// lists that twin (`display`, `Renderer::display_view_format`), which a
+/// backend without surface view formats never does.
+fn display_view_allowed(format: wgpu::TextureFormat, display: Option<wgpu::TextureFormat>) -> bool {
+    let plain = format.remove_srgb_suffix();
+    plain == format || display == Some(plain)
 }
 
 /// The GPU timer's mark at the end of section `label`, when the timer is on.

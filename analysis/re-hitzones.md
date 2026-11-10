@@ -78,6 +78,7 @@ BF2 snipers 300. BF1 rep_inf_clone_trooper, imp_inf_storm_trooper, all_inf_soldi
 |---|---|---|---|---|
 | 20/50/100/150 m | 300 (no kill, 100 left) | 900 kill* | 160 (no kill, 2 shots) | 480 kill |
 *BF2 AI shooters get ×3 only at difficulty level 3 (FUN_001e0580). Body shot kills only BF2/BF1 snipers? BF2 300 HP sniper: yes (300 >= 300) [D: kill test >=/>, untraced]; BF1 240 classes: no.
+openbf (2026-11-10, playtest B1): bots never get the ×3 head or ×4 critical-prim factor on ground rounds, at any tier (BF2's below-level-3 rule for every tier, so difficulty comes from behaviour; BF1, which has no gate, is a named deviation). Space rounds keep the old Hard-and-up gate. `Sim::hit_scale`.
 
 
 ## Part B: the headshot multiplier and the award

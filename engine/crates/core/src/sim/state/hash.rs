@@ -185,6 +185,7 @@ impl Sim {
             eat(&g.to_le_bytes());
         }
         self.lock_on_hash(&mut eat);
+        self.foot_lock_hash(&mut eat);
         if self.magnet_hidden.iter().any(|&h| h != 0) {
             eat(&[0x4d]);
             eat(&self.magnet_hidden);
@@ -203,6 +204,14 @@ impl Sim {
         eat(&(self.prev_spawn_bits.len() as u32).to_le_bytes());
         for b in &self.prev_spawn_bits {
             eat(&b.to_le_bytes());
+        }
+        // Held prompt presses: no bytes while none is held, preserving pins.
+        if self.held_eaten.iter().any(|h| !h.is_clear()) {
+            eat(b"HELD");
+            eat(&(self.held_eaten.len() as u32).to_le_bytes());
+            for h in &self.held_eaten {
+                eat(&h.0.to_le_bytes());
+            }
         }
         // SPSEL: no bytes without a post pick, preserving idle hash pins;
         // otherwise a tag, table length and each slot's pick.

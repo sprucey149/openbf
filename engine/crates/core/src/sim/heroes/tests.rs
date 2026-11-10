@@ -209,6 +209,66 @@ fn hero_live_state_changes_the_hash_and_absence_keeps_legacy_state() {
     assert_ne!(sim.hash(), offer);
 }
 
+/// Playtest A4: the button that answers the offer also carries a squad
+/// order and a spawn-map arm. Held past the answer it issues nothing; the
+/// next press after its release orders as usual.
+#[test]
+fn hero_prompt_press_held_past_the_offer_issues_no_order() {
+    let commands = |sim: &Sim| {
+        sim.events
+            .iter()
+            .filter(|e| matches!(e, Event::Command { .. }))
+            .count()
+    };
+    let hold = |bits| PadState {
+        buttons: bits,
+        ..Default::default()
+    };
+    // The pad's Right: decline, FOLLOW and the spawn map's right.
+    let (mut sim, p) = scene();
+    earn(&mut sim, p, 10);
+    sim.step(&[PadState::default()]);
+    assert!(sim.hero_offer(0).is_some());
+    let right = buttons::HERO_DECLINE | buttons::SQUAD_FOLLOW | buttons::SPAWN_POST_RIGHT;
+    let mut issued = 0;
+    for _ in 0..10 {
+        sim.step(&[hold(right)]);
+        issued += commands(&sim);
+    }
+    assert!(sim.hero_offer(0).is_none(), "the press declined");
+    assert_eq!(issued, 0, "the decline press is not also an order");
+    sim.step(&[PadState::default()]);
+    assert!(sim.held_eaten.iter().all(|h| h.is_clear()));
+    sim.step(&[hold(buttons::SQUAD_FOLLOW)]);
+    assert_eq!(commands(&sim), 1, "a fresh press still orders");
+
+    // F1: accept and FOLLOW. The hero comes in at once headless.
+    let (mut sim, p) = scene();
+    earn(&mut sim, p, 10);
+    sim.step(&[PadState::default()]);
+    let f1 = buttons::HERO_ACCEPT | buttons::SQUAD_FOLLOW;
+    let mut issued = 0;
+    for _ in 0..10 {
+        sim.step(&[hold(f1)]);
+        issued += commands(&sim);
+    }
+    assert!(sim.is_hero(sim.players[0].unwrap()));
+    assert_eq!(issued, 0, "the accept press is not also an order");
+    assert_eq!(sim.spawn_post_choice[0], None);
+}
+
+/// The held mask is hashed only while it holds something.
+#[test]
+fn hero_held_prompt_press_is_hashed_only_while_held() {
+    let (mut sim, _) = scene();
+    sim.sync_slot_tables();
+    let baseline = sim.hash();
+    sim.held_eaten[0].eat(buttons::SQUAD_FOLLOW);
+    assert_ne!(sim.hash(), baseline);
+    sim.held_eaten[0] = Default::default();
+    assert_eq!(sim.hash(), baseline);
+}
+
 #[test]
 fn hero_kill_heal_uses_the_pre_kill_streak_and_caps_at_disc_health() {
     let (mut sim, p) = scene();

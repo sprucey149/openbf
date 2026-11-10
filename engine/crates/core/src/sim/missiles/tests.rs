@@ -41,10 +41,13 @@ fn torpedo() -> WeaponClass {
     w
 }
 
-/// Flat ground (a trooper must stand on something) and no map bodies.
+/// Flat ground (a trooper must stand on something) and no map bodies, on
+/// BF1's rules: a human's dwell candidate is the magnet (BF2's lock is
+/// `foot_lock`).
 fn sim() -> Sim {
     let mut s = Sim::empty(3);
     s.heightfield = Some(flat_ground());
+    s.ground_rules = crate::soldier::GroundRules::Bf1;
     s
 }
 

@@ -17,13 +17,18 @@ fn model() -> MenuModel {
         fov_deg: 37.7,
         music_volume: 1.0,
         mouse_sensitivity: 1.0,
+        pad_look_sensitivity: 1.0,
         invert_y: false,
         low_power_resolution: false,
         input_icons_label: "Auto",
         icons: Default::default(),
         first_person: false,
         cursor: 0,
-        respawn_confirm: false,
+        page: None,
+        popup: None,
+        restart_available: false,
+        texts: Default::default(),
+        back_steps_out: false,
         respawn_label: Some("Respawn".into()),
         outcome_line: None,
         in_shell: None,
@@ -144,7 +149,7 @@ fn the_pause_rows_show_whole_at_any_window() {
                     );
                     let label = match row {
                         Row::Respawn => Some("Respawn"),
-                        Row::InputIcons => Some("Button prompts  ◀ ▶"),
+                        Row::InputIcons => Some("Button prompts"),
                         Row::Quit => Some("Quit to desktop"),
                         _ => None,
                     };
@@ -219,7 +224,7 @@ fn the_button_prompts_row_explains_itself() {
 }
 
 #[test]
-fn team_size_row_only_where_it_acts_and_rows_explain_averages() {
+fn team_size_row_explains_averages_and_greys_where_it_cannot_act() {
     let mut m = model();
     m.population_note = ["A\nL".into(), "R\nL".into()];
     m.reinforcements_pct = 150;
@@ -232,19 +237,102 @@ fn team_size_row_only_where_it_acts_and_rows_explain_averages() {
     assert_eq!(row_help(&m, Row::Fov), None);
     assert_eq!(
         population_row(&m, Row::AiCap),
-        Some(("Team size  ◀ ▶", "100%".into()))
+        Some(("Team size", "100%".into()))
     );
     assert_eq!(
         population_row(&m, Row::Reinforcements),
-        Some(("Reinforcements  ◀ ▶", "150%".into()))
+        Some(("Reinforcements", "150%".into()))
     );
+    assert_eq!(row_locked(&m, Row::AiCap), None);
+    // Over, the round keeps its teams: the value is the next round's.
+    m.outcome_line = Some("Round over".into());
+    assert_eq!(
+        row_help(&m, Row::AiCap).as_deref(),
+        Some("A\nL\nChanges apply from the next round.")
+    );
+    m.outcome_line = None;
     m.team_size_off = true;
-    assert!(!rows(&m).contains(&Row::AiCap));
+    assert!(rows(&m).contains(&Row::AiCap));
+    assert!(row_locked(&m, Row::AiCap).is_some());
+    assert_eq!(
+        row_help(&m, Row::AiCap).as_deref(),
+        row_locked(&m, Row::AiCap)
+    );
     assert!(rows(&m).contains(&Row::Reinforcements));
-    // The shell's settings page sets the next battles: both rows.
+    assert_eq!(row_locked(&m, Row::Reinforcements), None);
+    // The shell's settings page sets the next battles: both rows act.
     m.in_shell = Some("Game Options".into());
     assert!(rows(&m).contains(&Row::AiCap));
+    assert_eq!(row_locked(&m, Row::AiCap), None);
     assert_eq!(row_help(&m, Row::Reinforcements).as_deref(), Some("R\nL"));
+}
+
+/// Issue #142: a battle without map team sizes shows Team size greyed with
+/// its reason; no key, stick or click changes it.
+#[test]
+fn a_battle_without_team_sizes_greys_the_team_size_row() {
+    let mut m = model();
+    m.team_size_off = true;
+    let at = rows(&m).iter().position(|r| *r == Row::AiCap).unwrap();
+    m.cursor = at;
+    for right in [false, true] {
+        let input = MenuInput {
+            left: !right,
+            right,
+            ..Default::default()
+        };
+        assert!(navigate(&m, input).1.is_empty());
+        assert!(step(&m, at, right).is_empty());
+    }
+    // The cursor still lands on it and moves on.
+    let down = MenuInput {
+        down: true,
+        ..Default::default()
+    };
+    assert_eq!(navigate(&m, down).0, at + 1);
+    let (_, whole, _) = settled_text(&m, [1280.0, 900.0]);
+    assert!(whole.iter().any(|t| t == "Team size"), "{whole:?}");
+    let reason = row_locked(&m, Row::AiCap).unwrap();
+    assert!(whole.iter().any(|t| t == reason), "{whole:?}");
+}
+
+/// Issue #142: the controller look row steps by tenths in its range, in a
+/// round and in the shell, and says what it does.
+#[test]
+fn the_pad_look_row_steps_and_clamps() {
+    let mut m = model();
+    for shell in [None, Some("Game Options".to_owned())] {
+        m.in_shell = shell;
+        let at = rows(&m)
+            .iter()
+            .position(|r| *r == Row::PadLookSensitivity)
+            .expect("the row is in both menus");
+        assert_eq!(
+            rows(&m)[at - 1],
+            Row::MouseSensitivity,
+            "beside the mouse's"
+        );
+        m.pad_look_sensitivity = 1.0;
+        assert_eq!(
+            step(&m, at, true),
+            vec![MenuAction::SetPadLookSensitivity(1.1)]
+        );
+        assert_eq!(
+            step(&m, at, false),
+            vec![MenuAction::SetPadLookSensitivity(0.9)]
+        );
+        m.pad_look_sensitivity = PAD_LOOK_SENSITIVITY_RANGE.0;
+        assert_eq!(
+            step(&m, at, false),
+            vec![MenuAction::SetPadLookSensitivity(0.5)]
+        );
+        m.pad_look_sensitivity = PAD_LOOK_SENSITIVITY_RANGE.1;
+        assert_eq!(
+            step(&m, at, true),
+            vec![MenuAction::SetPadLookSensitivity(1.5)]
+        );
+        assert!(row_help(&m, Row::PadLookSensitivity).is_some());
+    }
 }
 
 #[test]
@@ -292,7 +380,7 @@ fn respawn_confirmation_navigation_and_shell_exclusion() {
         .1,
         vec![MenuAction::RequestRespawn]
     );
-    m.respawn_confirm = true;
+    m.popup = Some(Popup::Respawn);
     m.cursor = 0;
     assert_eq!(rows(&m), vec![Row::No, Row::Yes]);
     assert_eq!(
@@ -304,7 +392,7 @@ fn respawn_confirmation_navigation_and_shell_exclusion() {
             }
         )
         .1,
-        vec![MenuAction::CancelRespawn]
+        vec![MenuAction::CancelPopup]
     );
     assert_eq!(
         navigate(
@@ -331,6 +419,7 @@ fn respawn_confirmation_navigation_and_shell_exclusion() {
         vec![MenuAction::Respawn]
     );
     m.cursor = 1;
+    // Back from the popup resumes (playtest A3); No is its cancel.
     assert_eq!(
         navigate(
             &m,
@@ -340,13 +429,13 @@ fn respawn_confirmation_navigation_and_shell_exclusion() {
             }
         )
         .1,
-        vec![MenuAction::CancelRespawn]
+        vec![MenuAction::Resume]
     );
     let ctx = egui::Context::default();
     let _ = ctx.run(egui::RawInput::default(), |ctx| {
         draw_menu(ctx, &m);
     });
-    m.respawn_confirm = false;
+    m.popup = None;
     m.in_shell = Some("Options".into());
     assert!(!rows(&m).contains(&Row::Respawn));
     m.in_shell = None;
@@ -447,4 +536,68 @@ fn navigation_wraps_toggles_and_adjusts() {
     let _ = ctx.run(egui::RawInput::default(), |ctx| {
         draw_menu(ctx, &m);
     });
+}
+
+/// Playtest A3: Back (B / Circle, Backspace) resumes from every row.
+#[test]
+fn back_resumes_from_every_pause_row() {
+    let mut m = model();
+    let back = MenuInput {
+        back: true,
+        ..Default::default()
+    };
+    for cursor in 0..rows(&m).len() {
+        m.cursor = cursor;
+        assert_eq!(
+            navigate(&m, back).1,
+            vec![MenuAction::Resume],
+            "row {cursor}"
+        );
+    }
+    // A space battle keeps Back as the popup's cancel; its rows still resume.
+    m.back_steps_out = true;
+    m.cursor = 0;
+    assert_eq!(navigate(&m, back).1, vec![MenuAction::Resume]);
+    m.popup = Some(Popup::Respawn);
+    assert_eq!(navigate(&m, back).1, vec![MenuAction::CancelPopup]);
+}
+
+/// A value row's arrows sit clear of its label and inside the panel, on the
+/// longest label too.
+#[test]
+fn the_value_arrows_clear_their_labels() {
+    let mut m = model();
+    m.fov_deg = 120.0;
+    m.fov_scale = 1.25;
+    // Each value its own text.
+    (m.mouse_sensitivity, m.pad_look_sensitivity) = (2.5, 0.7);
+    m.reinforcements_pct = 150;
+    let ctx = egui::Context::default();
+    let mut out = None;
+    for _ in 0..4 {
+        out = Some(menu_frame(&ctx, &m, [1280.0, 1080.0], Vec::new()));
+    }
+    let out = out.unwrap();
+    let text_rect = |want: &str| {
+        out.shapes.iter().find_map(|c| match &c.shape {
+            egui::Shape::Text(t) if t.galley.text() == want => Some(t.visual_bounding_rect()),
+            _ => None,
+        })
+    };
+    for (i, row) in rows(&m).into_iter().enumerate() {
+        if !is_value_row(row) {
+            continue;
+        }
+        let (label, value) = row_text(&m, row);
+        let label = text_rect(&label).unwrap_or_else(|| panic!("{row:?} label"));
+        let value = text_rect(&value.unwrap()).unwrap_or_else(|| panic!("{row:?} value"));
+        let left = ctx.read_response(step_id(i, false)).unwrap().rect;
+        let right = ctx.read_response(step_id(i, true)).unwrap().rect;
+        assert!(label.right() < left.left(), "{row:?}: {label:?} {left:?}");
+        assert!(left.right() <= value.left(), "{row:?}: {left:?} {value:?}");
+        assert!(
+            value.right() <= right.left(),
+            "{row:?}: {value:?} {right:?}"
+        );
+    }
 }

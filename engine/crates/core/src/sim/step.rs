@@ -147,6 +147,9 @@ impl Sim {
         self.sync_tow_falls();
         // Existing hero lives drain before this tick's replacements/spawns.
         self.tick_hero_health(dt);
+        // A press a prompt answered stays out of play until released.
+        let eaten = self.eat_held_pads(pads);
+        let pads = eaten.as_deref().unwrap_or(pads);
         let hero_pads = self.step_heroes(pads);
         let pads = hero_pads.as_deref().unwrap_or(pads);
 
@@ -566,9 +569,11 @@ impl Sim {
             let steer = super::input::Steer::of(&p);
             self.acquire_magnet_steering(slot, ph, p.pressed(buttons::FIRE), steer);
         }
-        // 2a. The launchers' dwell locks (card UORD §5): a human's magnet
-        //     target, a bot's combat target, counted against LockTime.
+        // 2a. The launchers' dwell locks (card UORD §5): a human's BF2
+        //     lock (`foot_lock`) or BF1 magnet target, a bot's combat
+        //     target, counted against LockTime.
         self.tick_lock_on(&unit_pads, dt);
+        self.tick_foot_lock(&mut unit_pads, dt);
         self.tick_locks(dt);
 
         // 2b. DOORS (DR2): open or close by who stands in their triggers
@@ -1240,6 +1245,15 @@ pub const AIM_RAY_START: f32 = 2.0;
 pub const AIM_RAY_LENGTH: f32 = 60.0;
 /// In the scope view the aim's far point is this far along it, with no ray.
 pub const SCOPE_AIM_LENGTH: f32 = 200.0;
+/// OURS (playtest 2026-11-05, B6): when the aim ray meets nothing within
+/// its reach and the reticle picks nothing, a second ray goes on from its
+/// far end this much further through the terrain and the ordnance layer,
+/// so a shot at the ground or a wall out to 300 m converges on the
+/// reticle's point instead of the ray's far end. Past a launcher's
+/// MaxRange (150 m), close to a torpedo's 320 m flight. Ground maps only:
+/// a foot shot in a space hangar keeps the PS2's far end. replace: a
+/// maintainer playtest value if 300 m reads as too far or too near.
+pub const FAR_AIM_LENGTH: f32 = 240.0;
 
 impl Sim {
     /// The views drawn: one per player slot (split screen tilts the camera
@@ -1334,14 +1348,52 @@ impl Sim {
     /// and climbs over it - 0.35 m at 100 m, 0.65 m at 150 m: a shot at the
     /// chest of a soldier past 110 m flies over his head. Two lines of 480
     /// on the PS2's screen; on today's it is most of a soldier. Within the
-    /// reach the PS2's rule stands. `None` without such a pick.
+    /// reach the PS2's rule stands.
+    ///
+    /// Without such a pick (playtest 2026-11-05, B6: a rocket at the beach
+    /// from Kashyyyk's docks), the ray goes on [`FAR_AIM_LENGTH`] further
+    /// through the terrain and the ordnance layer, and the shot converges
+    /// on the ground, wall or vehicle hull it meets. Soldiers, auto-turrets
+    /// and droids past the reach that the reticle does not pick stay unseen
+    /// (the PS2's rule). `None` when the far ray meets nothing either, and
+    /// always on a space map (a foot shot in a hangar is the PS2's): the
+    /// far end.
     fn beyond_reach(&self, i: usize, start: Vec3, d: Vec3) -> Option<f32> {
         let me = self.handle(i);
         let slot = self.players.iter().position(|p| *p == Some(me))?;
-        let (pick, _) = self.reticle_pick.get(slot).copied().flatten()?;
-        let at = self.aim_candidate(pick)?.ctr;
-        let t = (at - start).dot(d);
-        (t > AIM_RAY_LENGTH).then_some(t)
+        let pick = self.reticle_pick.get(slot).copied().flatten();
+        if let Some(at) = pick.and_then(|(p, _)| self.aim_candidate(p)).map(|c| c.ctr) {
+            let t = (at - start).dot(d);
+            if t > AIM_RAY_LENGTH {
+                return Some(t);
+            }
+        }
+        // Space Assault and space CTF: the far ray is a ground-map rule.
+        if self.space_round() {
+            return None;
+        }
+        let far = start + d * AIM_RAY_LENGTH;
+        let mut best = FAR_AIM_LENGTH;
+        let mut hit = false;
+        // The same rule as the near ray: from under the ground, no hit.
+        let under = self.heightfield.as_ref().is_some_and(|h| {
+            far.y < h.height_at(far.x, far.z)
+                && !crate::collision::is_cut_by(&self.collision.cutters, far)
+        });
+        if !under {
+            if let Some(t) = self.terrain_ray(far, d, best, TERRAIN_RAY_STEP) {
+                best = best.min(t);
+                hit = true;
+            }
+        }
+        let u = &self.units[i];
+        let own = crate::collision::HullFilter::except(u.mount.map(|m| m.vehicle));
+        let layer = crate::collision::Layers::ORDNANCE;
+        if let Some(h) = self.collision.ray_with(far, d, best, layer, own) {
+            best = best.min(h.t);
+            hit = true;
+        }
+        hit.then_some(AIM_RAY_LENGTH + best)
     }
 
     /// The soldier's zoom routine (B1 `FUN_00204578`, B2 `FUN_0023ead8`,

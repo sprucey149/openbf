@@ -161,6 +161,12 @@ Census numbers: BF1 MaxTurnSpeed 4.0 x 43, 2.25 x 3 (gun_inf_defender / rider / 
   noted on card VTRN as the first suspect for the maintainer's "vehicles turn too slowly" (INBOX 10-21 item 5).
 - `sim/input.rs` ~411: the assist's R = max_turn_speed (section 5: the PS2's is MaxPitchSpeed).
 - No sensitivity factor (BF1's x 1.35).
+- Later (issue #142, 2026-11-10): a "Controller look sensitivity" setting, 0.5..1.5, default 1, multiplies the right
+  stick in the pad sampler with LOOK_SCALE (`input::look_axis`), so the input log records the scaled stick and the sim
+  stays deterministic. This is where BF2 PS2 puts its own: its pad page's X / Y-Axis Sensitivity (1..10) goes to
+  `ScriptCB_SetControlScale` (re-bf2-menus.md, ifs_opt_controller), and its soldier turn has no factor (section 0).
+  A flyer pilot's sticks are not scaled. The stick clamps at 1, so from 1.25 up a full push gives the class's top
+  rate and higher values only reach it sooner; a rate above MaxTurnSpeed (BF1's S) stays card LOOKR's.
 
 ## 8. What a build needs (card LOOKR, phase build)
 

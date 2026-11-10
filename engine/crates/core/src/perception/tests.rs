@@ -784,6 +784,159 @@ fn every_ai_shot_is_at_a_held_contact() {
     }
 }
 
+/// An AI soldier facing −Z on a platform 5 m over flat ground: a box floor
+/// 60 m square and half a metre thick, its top at y = 5, pushed before the
+/// spawn so the unit stands on it.
+fn platform_watcher(seed: u32) -> (Sim, crate::unit::UnitHandle) {
+    let mut s = Sim::empty(seed);
+    s.heightfield = Some(ground());
+    s.collision.push_body(Body::new(
+        Mat4::from_translation(Vec3::new(0.0, 4.75, 0.0)),
+        Shape::Box {
+            half: Vec3::new(30.0, 0.25, 30.0),
+        },
+    ));
+    let a = s
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::new(0.0, 5.0, 0.0))
+        })
+        .unwrap();
+    (s, a)
+}
+
+/// Playtest C4 (BF1 Kashyyyk Docks): a sniper on a platform aimed straight
+/// down through its floor at the fight beneath. A floor is the same ORDNANCE
+/// body a bolt flies through, so it blocks the sight ray: the trooper
+/// shooting under the platform is HEARD, never seen, never fired on, and the
+/// gun stays level — the memory is faced, not pitched at. Control: the same
+/// enemy on the platform is seen and fired on.
+#[test]
+fn a_floor_body_blocks_sight_and_aim_downward() {
+    let (mut s, a) = platform_watcher(43);
+    let eye = s.unit(a).unwrap().ai_eye();
+    assert!((eye.y - 5.0) > 1.0, "stands on the platform: eye {eye}");
+    let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, -3.0));
+    assert!(!los(&s, eye, Vec3::new(0.0, 1.4, -3.0)), "the floor blocks");
+    let mut st = AiState::default();
+    for t in 0..90u64 {
+        s.tick = t;
+        s.units[e.index as usize].last_shot_tick = t;
+        let (pad, _) = think(&s, a, &mut st);
+        assert_eq!(
+            pad.buttons & buttons::FIRE,
+            0,
+            "fired through the floor at tick {t}"
+        );
+        assert!(
+            pad.ry >= 0,
+            "pitched down through the floor at tick {t}: ry {}",
+            pad.ry
+        );
+        assert_eq!(st.aim_dir, Vec3::ZERO, "tracking a point it cannot see");
+    }
+    let c = contact_of(&st, e).expect("the shooter is heard");
+    assert!(c.heard && !c.seen_now, "heard, not seen");
+    assert_eq!(st.target, Some(e.into()), "it is the target all the same");
+    assert!(st.memory_blocked, "the memory is behind the floor");
+
+    // Control: on the platform it is seen, aimed at and shot.
+    let (mut s, a) = platform_watcher(43);
+    let e = enemy_at(&mut s, Vec3::new(0.0, 5.0, -20.0));
+    let mut st = AiState::default();
+    let mut fired = false;
+    for t in 0..90u64 {
+        s.tick = t;
+        let (pad, _) = think(&s, a, &mut st);
+        fired |= pad.buttons & buttons::FIRE != 0;
+    }
+    assert!(contact_of(&st, e).is_some_and(|c| c.seen_now), "seen");
+    assert!(!st.memory_blocked);
+    assert!(fired, "fires at what it sees on the platform");
+}
+
+/// A shot heard from behind a wall is a direction to face, not a point to
+/// pitch at: the bot turns toward it with the tracker idle and the gun
+/// level. With the wall gone the remembered point is tracked as before.
+#[test]
+fn a_heard_shooter_behind_geometry_is_faced_not_aimed_at() {
+    let run = |wall: bool| {
+        let (mut s, a) = watcher(47);
+        // Behind the listener: the cone never sees it, so it is a memory
+        // with or without the wall.
+        let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, 25.0));
+        if wall {
+            s.collision.push_body(Body::new(
+                Mat4::from_translation(Vec3::new(0.0, 5.0, 12.5)),
+                Shape::Box {
+                    half: Vec3::new(5.0, 5.0, 0.5),
+                },
+            ));
+        }
+        let mut st = AiState::default();
+        s.units[e.index as usize].last_shot_tick = 0;
+        s.tick = 1;
+        let (pad, _) = think(&s, a, &mut st);
+        let c = contact_of(&st, e).expect("heard");
+        assert!(c.heard && !c.seen_now);
+        assert_eq!(st.target, Some(e.into()));
+        (st.memory_blocked, st.aim_dir, pad)
+    };
+    let (blocked, aim, pad) = run(true);
+    assert!(blocked, "the wall is between");
+    assert_eq!(aim, Vec3::ZERO, "faced level, not tracked");
+    assert_ne!(pad.rx, 0, "turns toward the shot");
+    assert_eq!(pad.ry, 0, "the gun stays level");
+    let (blocked, aim, _) = run(false);
+    assert!(!blocked);
+    assert_ne!(aim, Vec3::ZERO, "the open point is tracked");
+}
+
+/// A space round's foot bots (a hangar fight in Space Assault) aim as they
+/// did: the heard shooter behind the wall is tracked by the memory arm and
+/// `memory_blocked` stays clear, so their state and hashes do not move.
+#[test]
+fn a_space_round_keeps_the_memory_aim_through_geometry() {
+    let (mut s, a) = watcher(47);
+    s.space_assault = Some(crate::sim::SpaceAssault::new(10));
+    assert!(s.space_round());
+    let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, 25.0));
+    s.collision.push_body(Body::new(
+        Mat4::from_translation(Vec3::new(0.0, 5.0, 12.5)),
+        Shape::Box {
+            half: Vec3::new(5.0, 5.0, 0.5),
+        },
+    ));
+    let mut st = AiState::default();
+    s.units[e.index as usize].last_shot_tick = 0;
+    s.tick = 1;
+    think(&s, a, &mut st);
+    let c = contact_of(&st, e).expect("heard");
+    assert!(c.heard && !c.seen_now);
+    assert_eq!(st.target, Some(e.into()));
+    assert!(!st.memory_blocked, "space: no sight gate");
+    assert_ne!(
+        st.aim_dir,
+        Vec3::ZERO,
+        "space: the remembered point is tracked"
+    );
+}
+
+/// `Sim::space_round`: a space One-Flag round (the space flag) is a space
+/// round too; a ground One-Flag round is not.
+#[test]
+fn a_space_one_flag_round_is_a_space_round() {
+    use crate::sim::CtfState;
+    let (goal0, goal1) = (Vec3::new(-50.0, 0.0, 0.0), Vec3::new(50.0, 0.0, 0.0));
+    let mut s = Sim::empty(1);
+    assert!(!s.space_round());
+    s.install_ctf(CtfState::new_space_one_flag(5, Vec3::ZERO, goal0, goal1));
+    assert!(s.space_round());
+    let mut s = Sim::empty(1);
+    s.install_ctf(CtfState::new_ground_one_flag(5, Vec3::ZERO, goal0, goal1));
+    assert!(!s.space_round());
+}
+
 /// The whole state a scan writes is hashed: two sims whose units carry
 /// different memories must not hash alike.
 #[test]
@@ -880,4 +1033,245 @@ fn audit_whole_brain_preferences_respect_spawn_grace() {
             }
         }
     }
+}
+
+/// Playtest C1: the search's length, by distance and by whether the bot
+/// already held a record of the shooter.
+#[test]
+fn the_hit_search_grows_with_distance_and_shrinks_for_a_known_shooter() {
+    assert_eq!(search_ticks(20.0, false), 21);
+    assert_eq!(search_ticks(40.0, false), 33);
+    assert_eq!(search_ticks(60.0, false), 45);
+    assert_eq!(search_ticks(200.0, false), SEARCH_CAP);
+    const {
+        assert!(
+            SEARCH_CAP + 9 < MEMORY_TICKS,
+            "the record outlives its search"
+        )
+    };
+    // Hit from `dist` m behind (outside the cone and BF2's bubble);
+    // `known`: a shot of his was heard at the think before.
+    let hit = |dist: f32, known: bool| {
+        let (mut s, a) = watcher(41);
+        let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, dist));
+        let mut st = AiState::default();
+        if known {
+            hear(&mut st, Foe::Unit(e), 0, Vec3::new(0.0, 0.0, dist), false);
+        }
+        s.units[a.index as usize].last_hit = Some((e, 4));
+        s.tick = 5;
+        scan(&s, a, &mut st, normal());
+        let eye = s.unit(a).unwrap().ai_eye();
+        let d = (Vec3::new(0.0, 0.0, dist) - eye).length();
+        let c = contact_of(&st, e).expect("the shooter is held");
+        assert!(c.heard && !c.seen_now);
+        assert_eq!(
+            c.first_seen,
+            5 + search_ticks(d, known),
+            "{dist} m known={known}"
+        );
+        assert!(!fireable(&c, 5 + search_ticks(d, known) + 8, 9));
+        c.first_seen
+    };
+    assert!(hit(15.0, false) < hit(45.0, false), "farther is longer");
+    assert!(
+        hit(45.0, true) < hit(45.0, false),
+        "a known shooter is quicker"
+    );
+}
+
+/// Playtest C1: a shooter the bot sees as it is hit, or saw with its own
+/// eyes at its last think, costs no search; nor does another hit lengthen
+/// a search under way.
+#[test]
+fn a_hit_from_a_shooter_in_sight_costs_no_search() {
+    // In front, in sight.
+    let (mut s, a) = watcher(43);
+    let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, -20.0));
+    s.units[a.index as usize].last_hit = Some((e, 0));
+    s.tick = 1;
+    let mut st = AiState::default();
+    scan(&s, a, &mut st, normal());
+    let c = contact_of(&st, e).unwrap();
+    assert!(c.seen_now);
+    assert_eq!(c.first_seen, 1);
+    // Seen at tick 1, behind a wall by tick 6 and hitting the bot.
+    s.collision.push_body(Body::new(
+        Mat4::from_translation(Vec3::new(0.0, 5.0, -10.0)),
+        Shape::Box {
+            half: Vec3::new(5.0, 5.0, 0.5),
+        },
+    ));
+    s.units[a.index as usize].last_hit = Some((e, 5));
+    s.tick = 6;
+    scan(&s, a, &mut st, normal());
+    let c = contact_of(&st, e).unwrap();
+    assert!(c.heard && !c.seen_now);
+    assert_eq!(c.first_seen, 1, "seen at the last think: no search");
+
+    // Behind: the first hit starts a search, a second does not move it.
+    let (mut s, a) = watcher(47);
+    let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, 40.0));
+    let mut st = AiState::default();
+    s.units[a.index as usize].last_hit = Some((e, 0));
+    s.tick = 1;
+    scan(&s, a, &mut st, normal());
+    let pending = contact_of(&st, e).unwrap().first_seen;
+    assert!(pending > 1 + 20);
+    s.units[a.index as usize].last_hit = Some((e, 10));
+    s.tick = 11;
+    scan(&s, a, &mut st, normal());
+    assert_eq!(contact_of(&st, e).unwrap().first_seen, pending);
+}
+
+/// Playtest C1: space maps and proxies keep the hit rule they had - the
+/// reaction counts from the hearing, and there is no flinch.
+#[test]
+fn space_maps_and_proxies_keep_the_old_hit_rule() {
+    let cases: [fn(&mut Sim, UnitHandle); 3] = [
+        |s, _| {
+            s.landing_regions.push(
+                crate::region::Region::from_rows(
+                    "box",
+                    [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                    [0.0, 500.0, 0.0],
+                    [1.0, 1.0, 1.0],
+                )
+                .unwrap(),
+            )
+        },
+        |s, _| s.space_assault = Some(crate::sim::SpaceAssault::new(10)),
+        |s, a| {
+            s.units[a.index as usize].proxy_human =
+                Some(crate::ai::proxy::Strength::Average.profile())
+        },
+    ];
+    for (i, setup) in cases.iter().enumerate() {
+        let (mut s, a) = watcher(53);
+        let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, 40.0));
+        setup(&mut s, a);
+        s.units[a.index as usize].last_hit = Some((e, 0));
+        s.tick = 1;
+        let mut st = AiState::default();
+        think(&s, a, &mut st);
+        let c = contact_of(&st, e).expect("the shooter is held");
+        assert_eq!(c.first_seen, 1, "case {i}: no search");
+        assert_eq!(st.flinch_until, 0, "case {i}: no flinch");
+    }
+}
+
+/// Playtest C1: a hit makes a bot on foot hold a shot it would have fired
+/// for FLINCH_TICKS, at most once per FLINCH_GAP, and hits every tick do
+/// not stop it shooting back.
+#[test]
+fn a_hit_flinch_holds_fire_briefly_and_not_too_often() {
+    use crate::ai::{FLINCH_GAP, FLINCH_TICKS};
+    let (mut s, a) = watcher(59);
+    let e = enemy_at(&mut s, Vec3::new(0.0, 0.0, -20.0));
+    let mut st = AiState::default();
+    let fire = |s: &mut Sim, st: &mut AiState, t: u64, hit: Option<u64>| {
+        s.tick = t;
+        s.units[a.index as usize].last_hit = hit.map(|h| (e, h));
+        think(s, a, st).0.buttons & buttons::FIRE != 0
+    };
+    // Find a tick where the unhit bot fires.
+    let mut t = 1;
+    loop {
+        let mut probe = st;
+        if fire(&mut s, &mut probe, t, None) {
+            break;
+        }
+        fire(&mut s, &mut st, t, None);
+        t += 1;
+        assert!(t < 120, "the bot never fired");
+    }
+    // Hit on the tick before it: that shot and the flinch's are held.
+    let mut hit = st;
+    for k in 0..FLINCH_TICKS {
+        assert!(
+            !fire(&mut s, &mut hit, t + k, Some(t - 1)),
+            "tick {k} of the flinch"
+        );
+    }
+    assert_eq!(hit.flinch_until, t + FLINCH_TICKS);
+    // Another hit inside the gap is no flinch.
+    fire(
+        &mut s,
+        &mut hit,
+        t + FLINCH_TICKS,
+        Some(t + FLINCH_TICKS - 1),
+    );
+    assert_eq!(hit.flinch_until, t + FLINCH_TICKS, "inside the gap");
+    // Hit every tick: it still shoots back.
+    let mut shots = 0;
+    for k in FLINCH_TICKS + 1..FLINCH_TICKS + 1 + 4 * FLINCH_GAP {
+        shots += u32::from(fire(&mut s, &mut hit, t + k, Some(t + k - 1)));
+    }
+    assert!(shots > 0, "steady fire never locks it out");
+    assert!(
+        hit.flinch_until > t + FLINCH_TICKS,
+        "it flinched again after the gap"
+    );
+}
+
+/// Playtest C1, the whole bot: hit from 40 m off its side, just out of
+/// its view cone, it turns, finds the shooter and fires no sooner than the
+/// search and its reaction allow - under the old rule (a space map's) the
+/// turn alone held it. From straight behind the 180 degree turn (2 rad/s)
+/// takes about as long as the search, so the change is mostly at the side.
+#[test]
+fn a_far_hit_from_an_unseen_shooter_waits_out_the_search() {
+    let first_shot = |at: Vec3, space: bool, every_tick: bool| {
+        let (mut s, a) = watcher(61);
+        let e = enemy_at(&mut s, at);
+        if space {
+            s.space_assault = Some(crate::sim::SpaceAssault::new(10));
+        }
+        for _ in 0..5 {
+            s.step(&[]);
+        }
+        let hit = s.tick - 1;
+        s.units[a.index as usize].last_hit = Some((e, hit));
+        let before = s.unit(a).unwrap().last_shot_tick;
+        for _ in 0..200 {
+            if every_tick {
+                let t = s.tick - 1;
+                s.units[a.index as usize].last_hit = Some((e, t));
+            }
+            s.step(&[]);
+            s.unit_mut(e).unwrap().health.cur = 300.0;
+            let shot = s.unit(a).unwrap().last_shot_tick;
+            if shot != before {
+                return shot - hit;
+            }
+        }
+        panic!("{at} space={space} every_tick={every_tick}: never fired");
+    };
+    let r = normal().reaction_ticks;
+    let side = Vec3::new(40.0, 0.0, 0.0);
+    let search = search_ticks(39.0, false);
+    let (old, new) = (
+        first_shot(side, true, false),
+        first_shot(side, false, false),
+    );
+    assert!(
+        old < search + r,
+        "the old rule answers after the turn ({old} ticks)"
+    );
+    assert!(new >= search + r, "{new} ticks");
+    assert!(new <= SEARCH_CAP + r + 30, "{new} ticks");
+    // Hit every tick: the search is not lengthened, and it still fires.
+    let sustained = first_shot(side, false, true);
+    assert!(sustained <= SEARCH_CAP + r + 60, "{sustained} ticks");
+    // Behind: the turn is the longer part either way.
+    let behind = Vec3::new(0.0, 0.0, 40.0);
+    let (old_b, new_b) = (
+        first_shot(behind, true, false),
+        first_shot(behind, false, false),
+    );
+    assert!(
+        new_b >= old_b && new_b <= SEARCH_CAP + r + 60,
+        "{old_b} -> {new_b}"
+    );
+    eprintln!("C1 side {old} -> {new} (sustained {sustained}), behind {old_b} -> {new_b}");
 }

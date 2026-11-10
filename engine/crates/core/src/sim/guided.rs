@@ -30,7 +30,7 @@ impl Sim {
         if wc.guided.is_none() {
             return false;
         }
-        let locked = wc.award_locked(self.cheats.all_awards);
+        let locked = self.weapon_locked(u, class);
         let has = self
             .guided
             .iter()
@@ -53,9 +53,7 @@ impl Sim {
         };
         let u = &self.units[i];
         let owner = self.handle(i);
-        if self.weapon_classes[weapon_class].award_locked(self.cheats.all_awards)
-            || self.guided.iter().any(|r| r.owner == owner)
-        {
+        if self.weapon_locked(u, weapon_class) || self.guided.iter().any(|r| r.owner == owner) {
             return;
         }
         let (fwd, right, up) = u.aim_frame();

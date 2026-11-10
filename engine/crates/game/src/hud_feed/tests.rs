@@ -129,3 +129,29 @@ fn invalid_distance_page_falls_back_to_bitmap_without_dropping_usable_glyphs() {
     assert!(art.distance_fonts.is_empty());
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+/// On foot, a launcher's dwell fills the reticle ring (BF2's state-3 heat),
+/// so the lock box's fill survives the gauge's later send.
+#[test]
+fn a_launchers_dwell_fills_the_ring_on_foot() {
+    let mut w = crate::walk::WalkSim::new(7, glam::Vec3::ZERO, None);
+    let foe = w
+        .sim
+        .spawn(&core::unit::UnitSpec::trooper(
+            1,
+            glam::Vec3::new(0.0, 0.0, -30.0),
+        ))
+        .expect("foe");
+    let mut c = core::weapon::WeaponClass::bf1_rifle();
+    c.ordnance.kind = core::weapon::OrdKind::Missile;
+    c.ordnance.missile = Some(core::missile::MissileClass::default());
+    c.lock_time = 1.0;
+    c.target_kind = 1;
+    let wc = w.sim.add_weapon_class(c);
+    let i = w.player.index as usize;
+    w.sim.units[i].weapon_class = wc;
+    assert_eq!(weapon_gauge(&w).ring, 0.0);
+    w.sim.units[i].weapon.lock_target = Some(core::missile::MissileTarget::Unit(foe));
+    w.sim.units[i].weapon.lock_held = 0.25;
+    assert_eq!(weapon_gauge(&w).ring, 0.25);
+}

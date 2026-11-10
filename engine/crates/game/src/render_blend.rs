@@ -108,6 +108,8 @@ pub struct Pose {
     pub cam_place: Option<(f32, Vec3)>,
     pub cam_pull: f32,
     pub cam_flyer: Option<crate::walk::FlyerCam>,
+    /// The death camera's timer, eye and turn.
+    pub cam_death: Option<(f32, Vec3, Quat)>,
 }
 
 impl Pose {
@@ -217,6 +219,7 @@ impl Pose {
         self.cam_place = walk.cam_place;
         self.cam_pull = walk.cam_pull;
         self.cam_flyer = walk.cam_flyer;
+        self.cam_death = walk.death_cam.map(|d| (d.timer, d.eye, d.rot));
     }
 
     /// Write this pose into the walk (slots past either length untouched).
@@ -274,6 +277,9 @@ impl Pose {
         walk.cam_place = self.cam_place;
         walk.cam_pull = self.cam_pull;
         walk.cam_flyer = self.cam_flyer;
+        if let (Some(d), Some((_, eye, rot))) = (walk.death_cam.as_mut(), self.cam_death) {
+            (d.eye, d.rot) = (eye, rot);
+        }
     }
 }
 
@@ -409,6 +415,16 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
                 fov: mix(p.fov, c.fov, t),
                 ..c
             });
+        }
+    }
+    // The same run of the death camera (a replay restarts its timer: snap).
+    if let (Some(p), Some(c)) = (prev.cam_death, cur.cam_death) {
+        if c.0 >= p.0 {
+            out.cam_death = Some((
+                c.0,
+                mix3(p.1, c.1, t),
+                crate::sim_pose::quat_slerp(p.2, c.2, t),
+            ));
         }
     }
     if let (Some(p), Some(c)) = (prev.cam_place, cur.cam_place) {

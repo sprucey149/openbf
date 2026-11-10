@@ -179,6 +179,7 @@ impl Default for AiState {
             want_stance: 0,
             wander: None,
             dodge_until: 0,
+            flinch_until: 0,
             unreachable_dwell: 0,
             route: None,
             steer: SteerPick::default(),
@@ -194,6 +195,7 @@ impl Default for AiState {
             arcm: super::arcm::ArcmState::default(),
             aim_dir: Vec3::ZERO,
             aim_vel: Vec3::ZERO,
+            memory_blocked: false,
             err: ERR_NO_TARGET,
             err_pos: Vec3::ZERO,
             dispersion: None,
@@ -278,6 +280,12 @@ impl AiState {
         eat(&self.pause_until.to_le_bytes());
         eat(&self.charge_until.to_le_bytes());
         eat(&self.dodge_until.to_le_bytes());
+        // Tagged and only once set: a round where no bot flinched hashes as
+        // it did before the flinch existed (space maps never set it).
+        if self.flinch_until != 0 {
+            eat(b"FLINCH");
+            eat(&self.flinch_until.to_le_bytes());
+        }
         eat(&self.strafe_until.to_le_bytes());
         match self.dispersion {
             Some(d) => {
@@ -348,6 +356,9 @@ impl AiState {
         }
         if self.arm != ArmState::default() {
             self.arm.hash_into(eat);
+        }
+        if self.memory_blocked {
+            eat(b"MWALL");
         }
         if self.snipe != SnipeBook::default() {
             self.snipe.hash_into(eat);

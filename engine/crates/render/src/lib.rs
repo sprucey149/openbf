@@ -264,6 +264,8 @@ enum Target {
     Window {
         surface: wgpu::Surface<'static>,
         config: wgpu::SurfaceConfiguration,
+        /// Read for its size when the surface goes out of date.
+        window: Arc<winit::window::Window>,
     },
     Headless {
         texture: wgpu::Texture,

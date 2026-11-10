@@ -64,10 +64,13 @@ fn world() -> (Sim, UnitHandle, VehicleHandle) {
     (s, p, own)
 }
 
+/// Per-unit pads, as the step hands them over: the press sits on the
+/// player's own unit, wherever that unit is in the table.
 fn pads(s: &Sim, held: bool) -> Vec<PadState> {
     let mut pads = vec![PadState::default(); s.units.len()];
     if held {
-        pads[0].buttons = buttons::RELOAD;
+        let p = s.players[0].expect("slot 0 has a player");
+        pads[p.index as usize].buttons = buttons::RELOAD;
     }
     pads
 }
@@ -107,6 +110,42 @@ fn a_press_takes_the_target_nearest_the_aim_then_the_next() {
         s.lock_on[0].target,
         Some(LockTarget::Aim(AimTarget::Vehicle(near))),
         "the exhausted list starts again"
+    );
+}
+
+#[test]
+fn a_press_reads_the_players_own_unit_pad() {
+    let mut s = Sim::empty(1);
+    s.flyer_params = vec![Some(FlyerParams::default())];
+    let w = &mut s.weapon_classes[0];
+    w.target_kind = VEHICLE_KIND_BIT;
+    w.target_lock_max = 1000.0;
+    w.target_lock_lose = 1100.0;
+    s.seat_setup = vec![Some(SeatSetup {
+        radius: 5.0,
+        body_active: vec![],
+        boardable: vec![true],
+        exit_drop: 10.0,
+        ai_size: 1,
+        guns: vec![Some(gun())],
+    })];
+    let bot = s
+        .spawn(&UnitSpec::trooper(1, Vec3::new(0.0, 0.0, -50.0)))
+        .unwrap();
+    let own = fighter(&mut s, 0, Vec3::ZERO);
+    let p = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+    assert!(s.seat_unit(p, own, 0));
+    assert_eq!((bot.index, p.index), (0, 1), "slot 0 is not unit 0");
+    let at = ahead(&s, p, 300.0, 0.0);
+    let enemy = fighter(&mut s, 1, at);
+    let mut down = vec![PadState::default(); s.units.len()];
+    down[p.index as usize].buttons = buttons::RELOAD;
+    s.tick_lock_on(&down, STEP);
+    let up = vec![PadState::default(); s.units.len()];
+    s.tick_lock_on(&up, STEP);
+    assert_eq!(
+        s.lock_on[0].target,
+        Some(LockTarget::Aim(AimTarget::Vehicle(enemy)))
     );
 }
 

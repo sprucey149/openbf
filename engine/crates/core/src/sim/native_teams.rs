@@ -279,6 +279,74 @@ mod tests {
     }
 
     #[test]
+    fn killing_an_allied_native_spends_no_army_ticket() {
+        let mut sim = Sim::empty(4);
+        sim.heightfield = Some(crate::heightfield::Heightfield {
+            size: 2,
+            unit: 50.0,
+            offset_x: 25.0,
+            offset_z: 25.0,
+            heights: vec![0.0; 4],
+        });
+        let mut a = post(&mut sim, 0, -10.0);
+        a.count = 2;
+        let b = post(&mut sim, 1, 10.0);
+        sim.set_ally_spawns(vec![a, b]);
+        let mut soldier = UnitSpec::trooper(1, Vec3::Z * 20.0);
+        soldier.controller = Controller::Ai;
+        let enemy = sim.spawn(&soldier).unwrap();
+        soldier.team = 0;
+        soldier.pos = Vec3::Z * -20.0;
+        let ally = sim.spawn(&soldier).unwrap();
+        let mut native = UnitSpec::trooper(2, Vec3::ZERO);
+        native.controller = Controller::Ai;
+        sim.add_native_team(2, vec![native; 2]);
+        sim.set_team_relation(2, 0, true);
+        sim.set_team_relation(0, 2, true);
+        sim.set_team_relation(2, 1, false);
+        sim.populate_native_teams();
+        let natives: Vec<_> = sim
+            .alive_units()
+            .filter(|(_, u)| u.team == 2)
+            .map(|(h, _)| h)
+            .collect();
+        assert_eq!(natives.len(), 2);
+
+        let tickets = [0, 1].map(|team| sim.battle.teams[team].tickets());
+        let alive = [0, 1].map(|team| sim.battle.teams[team].alive());
+        let waves = sim.waves.clone();
+        // A credited kill by the enemy army, then a team kill by the ally.
+        for (native, killer) in natives.into_iter().zip([enemy, ally]) {
+            sim.events.clear();
+            sim.unit_killed(native, Some(killer));
+            assert!(sim.events.contains(&crate::sim::Event::Kill {
+                shooter: killer,
+                victim: native,
+            }));
+            assert_eq!([0, 1].map(|team| sim.battle.teams[team].tickets()), tickets);
+            assert_eq!([0, 1].map(|team| sim.battle.teams[team].alive()), alive);
+            assert_eq!(sim.waves, waves);
+        }
+    }
+
+    #[test]
+    fn native_owned_posts_cause_no_army_bleed_through_step() {
+        let mut sim = Sim::empty(4);
+        for (i, owner) in [0, 0, 1, 1, 2, 2].into_iter().enumerate() {
+            post(&mut sim, owner, i as f32 * 100.0);
+        }
+        sim.add_native_team(2, Vec::new());
+        for _ in 0..300 {
+            sim.step(&[]);
+        }
+        for team in &sim.battle.teams {
+            assert_eq!(team.bleed_per_sec, 0.0);
+            assert_eq!(team.tickets(), 250);
+        }
+        assert_eq!(sim.outcome, None);
+    }
+
+    #[test]
     fn authored_relations_are_directed_and_last_write_wins() {
         let mut sim = Sim::empty(9);
         sim.add_native_team(2, Vec::new());

@@ -89,7 +89,10 @@ pub const WEDGED_TICKS: u64 = (hover_drive::STUCK_STILL * crate::TICK_HZ as f32)
 pub const WEDGED_RAY: f32 = 200.0;
 /// OURS: how long a way out holds against the upward probe.
 pub const WEDGED_HOLD: u64 = 6 * crate::TICK_HZ as u64;
-/// OURS: how many ways out a craft tries before its pilot leaves it.
+/// OURS: how many ways out a craft tries before its pilot leaves it, or, a
+/// BF2 craft in flight, it is destroyed (the PS2 fly agents' stuck kill).
+/// trace: whether the PS2 flyer's path follower reports stuck in flight,
+/// which would replace the three tries with one.
 pub const WEDGED_GIVEUP: u8 = 3;
 /// OURS: an attack run dips no lower than this over the ground ahead.
 pub const ATTACK_FLOOR: f32 = 10.0;
@@ -990,7 +993,8 @@ pub(super) fn drive(
         super::gunner::free_fire(sim, me, st, &mut pad);
     }
     // OURS: on BF1 or when landed, a craft that cannot find its way out gets
-    // its pilot out; on BF2 in flight, stuck-kill destroys the wedged craft.
+    // its pilot out (the exit runs before the craft's own stuck check); on
+    // BF2 in flight, the stuck kill destroys the wedged craft in any mode.
     if ai.wedges >= WEDGED_GIVEUP && (!p.bf2 || v.flyer.phase == FlightPhase::Landed) {
         super::ride::request_exit(st);
     }

@@ -603,12 +603,13 @@ pub(super) fn slots<'a>(sim: &'a Sim, u: &Unit) -> [Option<Cand<'a>>; 8] {
     // The soldier's first weapon: its lowest slot.
     let first = u.held.iter().map(|w| w.slot).fold(u.weapon_slot, u8::min);
     let cand = |slot, class: usize, w: &crate::weapon::WeaponState| {
+        let locked = sim.weapon_locked(u, class);
         let class = &sim.weapon_classes[class];
         Cand {
             slot,
             class,
             rounds: w.issued(class),
-            empty: w.out_of_ammo(class) || class.award_locked(sim.cheats.all_awards),
+            empty: w.out_of_ammo(class) || locked,
             busy: w.reloading(),
             heavy: (class.ordnance.kind == OrdKind::Missile || class.guided.is_some())
                 && (class.ai_target_kind & 1 == 0 || slot != first),

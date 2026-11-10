@@ -81,15 +81,16 @@ fn jet_trooper() -> SoldierConstants {
 }
 
 /// BF1 `rep_inf_jet_trooper` on BF2's rules: its own numbers (MaxSpeed 6.5,
-/// MaxStrafeSpeed 4.5, cost 0.2 / 0.25 / 0.1 / 0.24) and the BF2 twin's
-/// JetAcceleration 30 and jet row.
+/// MaxStrafeSpeed 4.5, initial / recharge / border 0.25 / 0.1 / 0.24), the
+/// net cost 0.2 - 0.1 = 0.1 that `game::roster::bf1_net_jet_fuel_cost`
+/// gives it, and the BF2 twin's JetAcceleration 30 and jet row.
 fn bf1_jet_trooper() -> SoldierConstants {
     SoldierConstants {
         jet_jump: 5.0,
         jet_push: 8.0,
         jet_acceleration: 30.0,
         jet_hover: true,
-        jet_fuel_cost: 0.2,
+        jet_fuel_cost: 0.1,
         jet_fuel_initial: 0.25,
         jet_fuel_recharge: 0.1,
         jet_fuel_min_border: 0.24,
@@ -424,10 +425,11 @@ fn the_jet_trooper_flies_four_point_seven_seconds_and_refills_in_eight_point_thr
 }
 
 /// BF1's jet trooper on BF2's rules: BF2's mover with the borrowed row on
-/// its own speeds (forward 6.5 x 1.5 = 9.75, strafe 4.5 x 1.25 = 5.625)
-/// and its own fuel, with no recharge in flight: (1 - 0.25) / 0.2 = 3.75 s.
+/// its own speeds (forward 6.5 x 1.5 = 9.75, strafe 4.5 x 1.25 = 5.625).
+/// No recharge in flight, but at BF1's net cost, so it flies as long as on
+/// BF1: (1 - 0.25) / 0.1 = 7.5 s from full (playtest 2026-11-05 B4).
 #[test]
-fn the_bf1_jet_trooper_hovers_by_bf2s_rules() {
+fn the_bf1_jet_trooper_flies_as_long_as_on_bf1() {
     let c = bf1_jet_trooper();
     let s = hover(&c, level_pitch(), (FWD, 0), 60);
     assert!((-s.vel.z - 9.75).abs() < 1e-3, "forward {:?}", s.vel);
@@ -440,7 +442,7 @@ fn the_bf1_jet_trooper_hovers_by_bf2s_rules() {
         tick_over(&mut s, &PadState::default(), &c, -1000.0, human());
         ticks += 1;
     }
-    assert!((ticks as f32 * DT - 3.75).abs() < 0.1, "{ticks} updates");
+    assert!((ticks as f32 * DT - 7.5).abs() < 0.1, "{ticks} updates");
 }
 
 /// The jet row's turn (1.25) for a human; a bot turns at 1.0.

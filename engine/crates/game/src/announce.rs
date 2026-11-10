@@ -290,7 +290,9 @@ impl Commander {
         c.space_round = walk.space_round.clone();
         if mission.source_game == "bf2" {
             c.script_bleed = Some(ScriptBleed::new(script_rates(sim)));
-            c.vo = Some(crate::vo::Vo::new(0x5d0_u32 ^ sim.tick as u32));
+            let mut vo = crate::vo::Vo::new(0x5d0_u32 ^ sim.tick as u32);
+            vo.space = sim.space_round();
+            c.vo = Some(vo);
         }
         c.leaving_line = leaving_line(
             &mission.voice,

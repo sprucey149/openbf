@@ -6,6 +6,17 @@ use super::{buttons, Event, PadState, Sim};
 use crate::unit::{Controller, UnitHandle};
 use crate::TICK_HZ;
 
+/// The offered slot's buttons the hero prompt owns while it is up: the
+/// answer and every arm sharing its physical button (D-pad Left / Right, F1
+/// / F2) - the squad orders and the spawn map's left / right.
+const PROMPT_BITS: u32 = buttons::HERO_ACCEPT
+    | buttons::HERO_DECLINE
+    | buttons::SQUAD_AT_EASE
+    | buttons::SQUAD_FOLLOW
+    | buttons::SQUAD_HOLD
+    | buttons::SPAWN_POST_LEFT
+    | buttons::SPAWN_POST_RIGHT;
+
 /// How a team unlocks its hero: the shell's "Unlock Hero" row
 /// (`HeroPrefs.iHeroUnlock`, `analysis/re-bf2-menus.md` §2.3) as the
 /// manager's unlock rule `DAT_0060052c` reads it (FUN_003ef9d0,
@@ -417,14 +428,17 @@ impl Sim {
             if let Some(offer) = state.offer {
                 let slot = self.hero_human_member(offer.member);
                 if let Some(slot) = slot.filter(|s| usize::from(*s) < pads.len()) {
+                    let s = usize::from(slot);
                     let output = filtered.get_or_insert_with(|| pads.to_vec());
-                    output[usize::from(slot)].buttons &= !(buttons::HERO_ACCEPT
-                        | buttons::HERO_DECLINE
-                        | buttons::SQUAD_AT_EASE
-                        | buttons::SQUAD_FOLLOW
-                        | buttons::SQUAD_HOLD
-                        | buttons::SPAWN_POST_LEFT
-                        | buttons::SPAWN_POST_RIGHT);
+                    output[s].buttons &= !PROMPT_BITS;
+                    // The press that answers the offer (or is held across
+                    // it) stays out of play until released: the squad order
+                    // and spawn-map arm on the same button do not fire on the
+                    // next tick, when the offer is gone.
+                    if self.held_eaten.len() <= s {
+                        self.held_eaten.resize(s + 1, Default::default());
+                    }
+                    self.held_eaten[s].eat(pads[s].buttons & PROMPT_BITS);
                 }
                 let pressed = slot
                     .and_then(|s| {

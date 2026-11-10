@@ -231,6 +231,8 @@ multiplier. **The human damage multiplier (×1.15 Hard, ×1.3 Elite) should go**
 at least as hard (card DRETIRE). It is the lever the maintainer felt as "I died more" without the match getting
 harder. bot-design §7 decision 2 already dropped it by default. The PS2's own level-3 lever, the head/critical
 hit-location multiplier for AI attackers (`Sim::hit_scale`, Hard and Elite), is the PS2's and stays.
+Superseded 2026-11-10 (playtest B1): bots get no head or critical-prim factor on ground rounds at any tier;
+space rounds keep the Hard-and-up gate (`Sim::hit_scale`).
 
 Aim assist stays on (LOCKED FEATURE SET, 2026-09-03). The PS2's Elite switched it off (`re-ai-difficulty.md`
 §9.3). The port cannot use that lever, which is one more reason the bots must be better.
