@@ -1161,7 +1161,13 @@ fn hull_parts_from(
             }
             let (dir, k, entry) = class_collision(m, map_dir, sides, c)?;
             let cg = crate::assets::load_collision_geom(dir, &entry).ok()?;
-            let parts = crate::assets::hull_parts(&cg, &k.collision, &hit_locations(c));
+            let parts = if m.source_game.eq_ignore_ascii_case("bf2")
+                && vehicle_kind(&k.base) == Some(VehicleKind::Flyer)
+            {
+                crate::assets::bf2_flyer_hull_parts(&cg, &k.collision, &hit_locations(c))
+            } else {
+                crate::assets::hull_parts(&cg, &k.collision, &hit_locations(c))
+            };
             (!parts.is_empty()).then(|| parts.into())
         })
         .collect()

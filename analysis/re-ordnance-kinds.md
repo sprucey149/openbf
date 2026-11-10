@@ -430,6 +430,84 @@ Validation on base `482d8b455eb3598fe8f24916a4f4b3d854380ed5` plus this patch:
 - The release executable must be rebuilt and repacked before local handoff.
   The final handoff records the distribution result.
 
+### 4.8 Complete space secondary audit (2026-11-10) [V][M][O]
+
+Source base `1ea7aa2d4cf82e9b07866d04b9549b61db96e620`, same branch and
+SLUS-21240 v2.01 disc as sections 4.6-4.7. All six space maps were loaded in
+Assault and 1-flag CTF: 12 map/mode combinations, 86 mounted pilot secondaries,
+and 16 distinct craft loadouts. Several missions field six craft rather than
+eight; completeness is checked against the actual mission layers. Repeated
+loadouts must resolve to equal weapon classes across missions. The scan also
+checks every flyer seat for an inaccessible third weapon or an untested gunner
+secondary. All current secondaries belong to the pilot seat.
+
+There are twelve homing loadouts: TIE Fighter, TIE Interceptor, Imperial
+Transport, X-wing, A-wing, Rebel Transport, Droid Starfighter, Tri-fighter,
+Droid Gunship, ARC-170, Republic Starfighter and Republic Gunship. Four others
+are ballistic shells: TIE Bomber, Y-wing, V-wing and CIS Strike Bomber. The
+ARC-170's weapon name contains `bomb`, but its actual ordnance is a homing
+missile; the V-wing's `ptorpedo` name resolves to a shell. Tests use the loaded
+ordnance kind rather than class-name guesses.
+
+The authored-key audit checks velocity, life, damage and live steering or
+shell gravity against the last authored root-stage values. It found no other
+secondary with the Republic's repeated TurnRate problem. Gravity authored on
+a missile remains a dead key, consistent with section 4.3.
+
+The wider sweep did expose another bug: generic entity collision selection
+removed the X-wing fuselage from projectile contacts when named wing/laser
+primitives were present. `re-collision-layers.md` section 9 establishes the
+BF2 flyer's different setter behavior and the live PS2 class masks and hits.
+The correction retains the mesh in the flyer's soldier/ordnance accumulators.
+It changes hull setup, not missile turn rate, guidance, sweep radius or RNG.
+
+`game/tests/space_secondary_weapons.rs` exercises real loaded seat weapons,
+selection input, dwell, trigger input and complete salvos. It runs 768 locked
+sequences: 12 weapons, four opposing craft, four seeds and four motion cases
+(stationary, 35 m/s crossing, 70 m/s receding, and a requested 70 m/s shooter
+cruise with a target moving 70 m/s forward plus 35 m/s across). Initial range
+is 350 m. It requires hits against every opposing hull in the stationary and
+receding categories and some hits in both crossing categories per weapon.
+Every launched round must retain the selected handle and the salvo must emit
+its authored round count. These are controlled port fixtures, not retail
+hit-rate estimates or an assertion that every crossing missile must hit.
+
+Each missile weapon also runs without selection and with a newly selected,
+incompletely dwelled target. Shots emitted before readiness must be unguided;
+a delayed first emission may legitimately become ready before it launches.
+All sixteen weapons exhaust and reload their first clip, then fire again;
+finite reserves pay for the reload, infinite reserves remain infinite, and
+secondary input must not fire the primary. All four bomb weapons run four
+seeded flying drops each, fall under their authored gravity, and damage a
+large rectangular hull below. That hull is a test fixture, not a reconstructed
+capital-ship subsystem. Total: 768 locked sequences, 24 selection/dwell timing
+cases, 16 reload cases and 16 bomb-drop cases. Three asset-independent unit
+regressions cover the flyer mesh seed, targetable separation and sentinel
+handling. Optional native-contact replay consumes the retained local captures.
+
+Run from `engine/` with `OPENBF_REQUIRE_SPACE_ASSETS=1` to reject a missing
+local bake. `OPENBF_SPACE_SECONDARY_REPORT` writes the per-weapon JSON result;
+`OPENBF_NATIVE_CONTACTS` accepts the two native JSON paths separated by a
+semicolon. The recorded run enables both native replays. Receipts and command
+logs remain under `engine/artifacts/lead_tmp/republic-parity/`.
+
+Checks on this patch: the complete space-secondary integration target and both
+native contact replays pass; all nine existing `space_playtest_fixes` tests
+pass; collision-layer unit tests pass 15/15 and vehicle-pad unit tests 6/6.
+`cargo test -p core` passes 2,086 tests with two existing ignored tests and
+unchanged determinism pins. `cargo clippy --workspace -- -D warnings` and
+strict Clippy for both touched integration targets pass. The earlier all-target
+HUD fixture failure remains outside this patch. These scoped checks are not
+a complete cross-source alignment acceptance run; independent bake inputs for
+that gate were not supplied. The local handoff rebuilds and repacks the release
+distribution, preserving the profile and playtest files.
+
+Coverage is complete for the secondaries fielded by these twelve local space
+missions. Native evidence covers the shared flight law, both measured steering
+families and the X-wing contact correction; it does not independently measure
+every individual weapon's retail hit rate, every aspect angle, ground-map
+secondaries or every capital-ship damageable subsystem.
+
 ## 5. The lock: when a missile gets its target [V][O] (H4)
 
 - The packet's target is filled only when the weapon's vt+0x34 says so: B1 packet+0x38 = W+0x128 and +0x3c = W+0x130

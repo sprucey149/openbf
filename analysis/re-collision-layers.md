@@ -39,6 +39,9 @@ scratchpad: `scan_mask.py`, `scan_namemask.py`, `entc_props.py`). Nothing under
 
 Tags: [V] verified in the decomp / on the discs, [D] derived, [H] hypothesis.
 
+The BF2 flyer override is a measured exception to the generic entity rules
+below; see section 9 (2026-11-10) before applying them to flyer hulls.
+
 ## 0. Headline (the answer the port needs)
 
 1. **Prim NAMES are never parsed.** Neither engine scans the name for `-so-` letters
@@ -340,3 +343,52 @@ BF2 ordnance 0x90 (building|terrain). Soldier world pass: mask 0xd + terrain.
   NAME into a 128-byte buffer and the ctor hashes it; the letters are consumed by the
   PC exporter/munger, which writes them as the 1-byte `MASK` chunk (§1, §2 table).
   The BF2 engine reads only that byte.
+
+
+## 9. BF2 flyer exception: retain the fuselage mesh (2026-11-10) [V][M][O]
+
+The generic entity rule above is not the BF2 flyer's SoldierCollision and
+OrdnanceCollision rule. `FUN_0020fd58` handles these keys itself. In the current
+local decompilation, its GeometryName branch (lines 124396-124419) loads the
+mesh and seeds both flyer accumulators, `DAT_005fcf44` and `DAT_005fcf48`, with
+that body's bit. Its SoldierCollision branch (124684-124698) and
+OrdnanceCollision branch (125151-125162) add named bodies to those seeded
+accumulators. Neither branch handles `none` or `clear` as a special value:
+an unresolved body name leaves the existing set alone. The generic entity
+handlers remain separate, with initially empty accumulators.
+
+The live Space Hoth X-wing class is `0x19b22c0`. Its model at class+0x168 has
+13 bodies. Body 12 is `CollisionMesh`, name hash `0x29173102`. The soldier and
+ordnance masks both read `0x10ff`: the fuselage mesh plus the eight wing/laser
+primitives. Vehicle, building and terrain read `0xe00`, the three spheres;
+targetable reads `0x1000`, the mesh alone. OpenBF previously used the generic
+rule for this flyer and therefore retained only the eight named wing/laser
+primitives in its ordnance subset. A missile aimed at the model origin could
+pass through the absent fuselage.
+
+Two native locked TIE torpedo launches corroborate the mask measurement. One
+uses a player craft translated and rotated to trail the native X-wing by
+approximately 350 m. The other restores that state, changes both craft
+matrices, and repeatedly resets the target matrix. The target's native flight
+state reconstructs its orientation during updates, so the second shot is not
+a frozen-orientation or natural-flight hit-rate experiment. Both use retail
+L1 firing, missile guidance and target assignment; health and weapon values
+are not written. Both register 1600 damage including the intervening target
+regeneration. In the first, the impact endpoint in the X-wing's frame is
+approximately `(0.020109, 0.458971, -3.988204)`, on the fuselage mesh's rear
+face at z=-3.988209.
+
+The port replays each recorded chord against the target's same-boundary
+matrix. The native bullet's previous/current positions are instance+0x100
+and +0x50 (`FUN_00313600`, current lines 292053-292067), not consecutive
+previous-position samples. A 1 cm extension of the test ray covers recorded
+matrix/endpoint rounding; it does not change simulation collision radii.
+Both native contacts failed against the old hull and pass against the corrected
+one. The correction applies only to BF2 flyer hull setup; generic entities,
+BF1 flyers, targetable points and the flight kernel are unchanged. The existing
+baked mesh and primitive data are sufficient; no asset rebake is needed.
+
+Local raw captures and masks are in
+`engine/artifacts/lead_tmp/republic-parity/native-{near,aligned}-xwing.json`
+and `native-xwing-masks.json`, Tracking run `01M72PBHAM092X7D4YBF8P58J5`.
+`re-ordnance-kinds.md` section 4.8 records the complete secondary loadout sweep.

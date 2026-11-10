@@ -1017,12 +1017,25 @@ pub fn body_layers(
     cg: &CollisionGeom,
     class_collision: &[(String, String)],
 ) -> Vec<core::collision::Layers> {
+    body_layers_for(cg, class_collision, false)
+}
+
+fn body_layers_for(
+    cg: &CollisionGeom,
+    class_collision: &[(String, String)],
+    flyer: bool,
+) -> Vec<core::collision::Layers> {
     use crate::collision_layers::{layer_bodies, Layer, FLYER_USES_VEHICLE};
     use core::collision::Layers;
     let refs = body_refs(cg);
     // The three subsets, from the same body list and the same rule.
-    let soldier = layer_bodies(&refs, class_collision, Layer::Soldier);
-    let ordnance = layer_bodies(&refs, class_collision, Layer::Ordnance);
+    let select = if flyer {
+        crate::collision_layers::bf2_flyer_layer_bodies
+    } else {
+        layer_bodies
+    };
+    let soldier = select(&refs, class_collision, Layer::Soldier);
+    let ordnance = select(&refs, class_collision, Layer::Ordnance);
     let vehicle = layer_bodies(&refs, class_collision, Layer::Vehicle);
     let flyer = if class_collision.iter().any(|(k, _)| k == FLYER_USES_VEHICLE) {
         &vehicle
@@ -1094,6 +1107,23 @@ pub fn hull_parts(
     class_collision: &[(String, String)],
     hit_locations: &[(String, f32)],
 ) -> Vec<core::collision::HullPart> {
+    hull_parts_for(cg, class_collision, hit_locations, false)
+}
+
+pub fn bf2_flyer_hull_parts(
+    cg: &CollisionGeom,
+    class_collision: &[(String, String)],
+    hit_locations: &[(String, f32)],
+) -> Vec<core::collision::HullPart> {
+    hull_parts_for(cg, class_collision, hit_locations, true)
+}
+
+fn hull_parts_for(
+    cg: &CollisionGeom,
+    class_collision: &[(String, String)],
+    hit_locations: &[(String, f32)],
+    flyer: bool,
+) -> Vec<core::collision::HullPart> {
     use crate::collision_layers::{layer_bodies, Layer};
     use core::collision::{HullPart, Layers, Shape};
     let mut out = Vec::new();
@@ -1101,7 +1131,7 @@ pub fn hull_parts(
     let building = layer_bodies(&refs, class_collision, Layer::Building);
     let terrain = layer_bodies(&refs, class_collision, Layer::Terrain);
     let mut subsets = building.into_iter().zip(terrain);
-    let mut next = body_layers(cg, class_collision).into_iter();
+    let mut next = body_layers_for(cg, class_collision, flyer).into_iter();
     if let Some(cpu) = cg.mesh.as_ref() {
         let layers = next.next().unwrap_or(Layers::NONE);
         let (building, terrain) = subsets.next().unwrap_or((false, false));
