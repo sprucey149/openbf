@@ -260,6 +260,106 @@ BF1 KAS2 Clone Wars as the ARC trooper (`ps2/out/b1_kas2_arc_spawned.p2s`), BF2 
   ended 0.6 / 1.5 m from the target point (hits). So the steering law, the target point and the handle re-check are
   measured; the lock that fills the fields in play is read code (§5), not measured.
 
+### 4.6 Space fighter target points and locked shots (2026-11-09) [V][M][O]
+
+Source checkpoint: `14db28ce58ce1030551a950c1a081c2640cf1a1f`, branch
+`feature/starfighter-ps2-parity`. Retail PS2 SLUS-21240 v2.01, disc CRC
+`02f4b541`, PCSX2 `fd9d310`, emucap build `8587968`, headless. Base state:
+`emulator/sstates/SLUS-21240 (02F4B541).10.p2s`, SHA-256
+`85da3e7445e4826eb55f17b90d0851b50fa9f65bed12a394acfb915a0b392371`.
+Local captures, savestates and replay analysis are retained under
+`engine/artifacts/lead_tmp/starfighter-parity/`; no RAM dumps or assets are public.
+Tracking run: `01M71E6VMGFQPRTXY8GC37ABBR`.
+
+The initial capital ship obstructs the fighter sightlines. For these controlled
+shots, only the player's craft was translated to a clear line; one shot also
+rotated that craft. Square selected the enemy, the retail launcher accumulated
+its dwell, and L1 fired. No missile, target-handle, target-pose, weapon-class or
+dwell fields were injected. Exact translations, rotation, input durations and
+frozen memory boundaries are in the local capture/Tracking records. The Y-wing
+and X-wing ready states retain the retail launcher with `held = limit = 3.0`,
+ready byte 1, and the selected target's pointer and generation.
+
+Three launches were observed: Y-wing at approximately 4.4 degrees, Y-wing at
+19.8 degrees, and X-wing at 19.7 degrees. The two Y-wing shots struck at about
+1.9 s; the X-wing shot approached to 7.78 m from its origin at age 1.683 s before
+impact and object reuse. Hull-health loss confirms the impacts. This is three
+controlled successful shots, not a measured general dogfight hit rate.
+
+The live TIE ordnance class has Velocity 350, MinSpeed 300, Acceleration 100,
+TurnRate 1.75, WaverTurn/WaverRate 0, LifeSpan 5. Ramp reaches 1 after one
+second; speed reaches 350 after half a second. Replaying the existing sine-clamped
+rotation and speed law against the recorded desired heading fits 55, 55 and 48
+clean update pairs, respectively, with maximum velocity errors 0.000043,
+0.000055 and 0.000042 m/s. The observed ordinary flight needs neither a turn-rate
+unit conversion nor a velocity-intercept lead. The current hull chord sweep
+does not need an enlarged missile radius to reproduce the tested contacts.
+
+**The missing rule is the authored targetable body.** In the current local
+decompilation, `FUN_00213488` lines 126088-126100 checks the TargetableCollision
+subset before its sphere fallback. `FUN_00168858` lines 7177-7219 visits those
+bodies in order, transforms each body's origin into world space and chooses the
+greatest positive dot between the missile direction and the normalized vector
+from missile to body. It starts with the entity origin and score zero. Without
+an authored targetable body, `FUN_00213488` lines 126103-126123 uses the collision
+sphere centre plus the class offset. These line numbers are from the current
+local file; the older sections above retain their original corpus numbering.
+
+The X-wing authors `TargetableCollision = collisionmesh`. Its targetable mesh
+origin is its model origin. Across 49 distinct clean X-wing states, the missile's
+desired heading matches the current target origin to 0.0000027 degrees in the
+double-precision replay comparison. Aiming at its enclosing sphere centre instead
+is wrong by up to 4.579 degrees near contact. OpenBF's former unconditional
+sphere-centre aim missed this craft at all three tested crossing speeds, 70,
+100 and 120 m/s, while the other seven GCW craft classes were struck in the same
+24-shot zero-aspect probe.
+
+The port now retains authored targetable body origins as class setup, applies
+the direction-scored choice for missile guidance, and keeps sphere targeting
+when that subset is empty. Existing baked manifests already contain these
+properties and bind-space primitive transforms, so this change needs no rebake.
+The collision shapes, ordnance masks, turn law and seeded random sequence are
+unchanged.
+
+**The launch cone is the firer's aim.** `FUN_0033a658` lines 319443-319475 checks
+the target against the firer controller's position and direction with dot at
+least 0.9, then LOS. It does not use the dispersed ordnance direction. OpenBF
+previously rechecked a full dwell against the individual round's spread/tilt
+direction and muzzle, which could leave that round unguided. Mounted firing now
+uses the seat's view ray for this check. A regression fires a fully charged
+launcher with a round tilt outside the cone and requires the target handle to
+remain attached; it fails before the correction and passes afterward.
+
+Acceptance is bounded: these captures do not measure countermeasure success,
+every authored waver class, every range/aspect/speed combination, or the flyer's
+extra maneuver-offset vcall (`FUN_0020ead8`). A 120 m/s crossing TIE at 500 m
+with 20 degrees of launch offset missed in a port diagnostic; no matching retail
+measurement establishes that case as a discrepancy. A separate Clone Wars
+diagnostic also missed the tridroid fighter at 70 m/s; its retail target-point
+and contact comparison remains unmeasured. No guidance buff is inferred from
+either case.
+
+Validation on the source checkpoint plus this patch:
+
+- `cargo test -p core`: 2,086 passed, two existing ignored tests; the original
+  deterministic hash pins pass. The missile scene subset passes 11 tests.
+- `cargo test -p game --test space_playtest_fixes`: eight passed. The new GCW
+  hull scenario hits all 28 cases: eight classes at 70/100/120 m/s crossing
+  speed and zero launch offset, plus both 20-degree offsets on X-wing and
+  Y-wing at 70 m/s. These are port regressions, not 28 retail measurements.
+- `cargo clippy --workspace -- -D warnings`, core with `--all-targets`, and the
+  touched game integration target all pass. The broader workspace
+  `--all-targets` check is blocked by existing missing `HudModel::ctf` fields
+  in `game/tests/golden_hud.rs:19` and `game/tests/suite/bug_checks.rs:152`.
+- Focused rustfmt and `git diff --check` pass. Logs are retained in the local
+  artifact directory. No GPU run or full source/edition alignment acceptance
+  is claimed for this guidance-only change.
+- Local handoff requires `cargo build --release -p game`, then that binary's
+  `--write-pack` over the current `engine/assets_baked` and `engine/missions`
+  into a staged executable before replacing `dist/openbf.exe`. The final
+  task handoff records whether replacement succeeded; the profile/playtest
+  directory must be preserved.
+
 ## 5. The lock: when a missile gets its target [V][O] (H4)
 
 - The packet's target is filled only when the weapon's vt+0x34 says so: B1 packet+0x38 = W+0x128 and +0x3c = W+0x130

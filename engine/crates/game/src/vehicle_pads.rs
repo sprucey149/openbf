@@ -784,6 +784,19 @@ pub fn install_with_objective(
         |c| crate::assets::hit_locations(&db, c),
     );
     sim.sync_hulls();
+    sim.missile_target_points = b
+        .classes
+        .iter()
+        .map(|c| {
+            let Some((dir, k, entry)) = class_collision(m, map_dir, &sides, c) else {
+                return Vec::new();
+            };
+            let Ok(cg) = crate::assets::load_collision_geom(dir, &entry) else {
+                return Vec::new();
+            };
+            crate::assets::missile_target_points(&cg, &k.collision)
+        })
+        .collect();
     let nodes = hardpoints_from(m, &sides);
     b.riders = b
         .classes

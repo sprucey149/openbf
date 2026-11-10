@@ -69,6 +69,32 @@ impl Sim {
         }
     }
 
+    fn missile_guidance_aim(&self, t: MissileTarget, pos: Vec3, dir: Vec3) -> Option<Vec3> {
+        let fallback = self.missile_aim(t)?;
+        let MissileTarget::Vehicle(h) = t else {
+            return Some(fallback);
+        };
+        let v = self.vehicle(h)?;
+        let Some(points) = self
+            .missile_target_points
+            .get(v.class as usize)
+            .filter(|p| !p.is_empty())
+        else {
+            return Some(fallback);
+        };
+        let mut aim = v.pos;
+        let mut best = 0.0;
+        for local in points {
+            let point = v.pos + v.rot * *local;
+            let score = (point - pos).normalize_or_zero().dot(dir);
+            if score > best {
+                best = score;
+                aim = point;
+            }
+        }
+        Some(aim)
+    }
+
     /// Stage 5's missiles (card UORD): each steers toward its target's point
     /// (`re-ordnance-kinds.md` §4.3), then meets the world on this tick's
     /// chord like a shell; soldiers and hulls are the sweep that follows.
@@ -86,7 +112,9 @@ impl Sim {
             else {
                 continue;
             };
-            let aim = m.target.and_then(|t| self.missile_aim(t));
+            let aim = m
+                .target
+                .and_then(|t| self.missile_guidance_aim(t, self.bolts[k].pos, m.dir));
             let b = &mut self.bolts[k];
             b.guide(&c, aim, dt, &mut self.lcg);
         }

@@ -359,6 +359,7 @@ pub struct Sim {
     /// own body. SETUP data, NOT hashed: a live vehicle's hull in
     /// [`Sim::collision`] follows its hashed pose (`Sim::sync_hulls`).
     pub hull_parts: Vec<Option<std::sync::Arc<[crate::collision::HullPart]>>>,
+    pub missile_target_points: Vec<Vec<Vec3>>,
     pub bolts: Vec<Bolt>,
     pub beams: Vec<super::Beam>,
     /// The thrown grenades in flight or lying armed (card GREN,
@@ -989,6 +990,7 @@ impl Sim {
             vehicle_damage_effects: Vec::new(),
             slice_time: Vec::new(),
             hull_parts: Vec::new(),
+            missile_target_points: Vec::new(),
             bolts: Vec::new(),
             beams: Vec::new(),
             stickies: Vec::new(),

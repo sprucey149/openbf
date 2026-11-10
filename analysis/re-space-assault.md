@@ -500,6 +500,10 @@ link change. Tests: `each_shield_change_reports_once_and_a_repeat_kill_awards_no
 
 `core::sim::lock_on`, HUD in `ui::hud`, `ui::hud_tree`, `ui::hud_draw`.
 
+The November 9 retail locked-shot measurements and targetable-body correction
+are in `re-ordnance-kinds.md` section 4.6. The missile's dispersed shot direction
+does not decide whether the launcher's completed lock is passed to the round.
+
 - **The press.** Flyer tick lines 116130-116175: `(+0x2cc & 3) == 3` is a press, which takes the next target, and
   `(+0x2cc & 0xf) == 9` is a hold, which clears. The button is Square, the port's `buttons::RELOAD`.
   `trace:` `LOCK_CLEAR_HOLD_SECS` 0.5 s stands for the hold pattern; the input history's timing is not derived.

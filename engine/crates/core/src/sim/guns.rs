@@ -391,6 +391,8 @@ impl Sim {
         // The weapons.
         let origin = pos + rot * g.muzzle(st.aim);
         let fwd = (rot * gun::dir(st.aim.0, st.aim.1)).normalize();
+        let lock_origin = pos + rot * g.ray_eye(st.look, st.zoom.is_some());
+        let lock_dir = (rot * gun::dir(st.look.0, st.look.1)).normalize_or_zero();
         let right = fwd.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
         let up = right.cross(fwd).normalize();
         let is_player = driver.is_some_and(|i| self.units[i].is_player);
@@ -568,7 +570,8 @@ impl Sim {
                         .and_then(|u| u.ai.target)
                         .and_then(|f| f.unit())
                         .map(crate::missile::MissileTarget::Unit);
-                    let locked = driver.and_then(|i| self.seat_lock_target(i, w.class, origin, d));
+                    let locked = driver
+                        .and_then(|i| self.seat_lock_target(i, w.class, lock_origin, lock_dir));
                     let armed = armed_target.map(crate::missile::MissileTarget::Vehicle);
                     let target = locked.or(armed).or(target);
                     bolt.as_missile(&ord, &mc, target, &mut self.lcg);

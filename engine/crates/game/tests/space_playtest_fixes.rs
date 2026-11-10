@@ -33,6 +33,126 @@ fn assets_dir() -> PathBuf {
     }
 }
 
+#[test]
+fn baked_space_missiles_hit_moving_fighter_hulls() {
+    use core::missile::MissileTarget;
+    use core::projectile::Shooter;
+    for map in ["bf2_spa1"] {
+        let root = assets_dir();
+        let mission_path = missions_dir().join(format!("{map}_ass.ron"));
+        if !root.join(map).exists() || !mission_path.exists() {
+            eprintln!("skipping {map}: local baked assets or mission unavailable");
+            continue;
+        }
+        let mut scene = game::assets::load_scene(&root.join(map)).unwrap();
+        scene.apply_mode_layer("ass").expect("the Assault layer");
+        let mission = game::mission::MissionDef::load(&mission_path).unwrap();
+        let mut setup = Sim::empty(99);
+        let pads = game::vehicle_pads::install_with_objective(
+            &mut setup,
+            &scene.manifest,
+            &scene.dir,
+            &root.join("classes"),
+            &mission.factions(),
+            None,
+        )
+        .unwrap();
+        let wc = setup
+            .weapon_classes
+            .iter()
+            .position(|w| {
+                w.ordnance.velocity == 350.0
+                    && w.ordnance
+                        .missile
+                        .is_some_and(|m| m.turn_rate == 1.75 && m.waver_turn == 0.0)
+            })
+            .expect("the measured space missile class");
+        let ord = setup.weapon_classes[wc].ordnance.clone();
+        let targets: Vec<_> = pads
+            .classes
+            .iter()
+            .enumerate()
+            .filter(|(class, _)| setup.flyer_params[*class].is_some())
+            .collect();
+        assert!(targets.len() >= 8, "{map}: missing fighter classes");
+        let mut shots = 0;
+        for (class, name) in targets {
+            if name == "all_fly_xwing_sc" {
+                assert_eq!(setup.missile_target_points[class], [Vec3::ZERO]);
+            }
+            for speed in [70.0, 100.0, 120.0] {
+                let angles: &[f32] = if speed == 70.0
+                    && matches!(name.as_str(), "all_fly_ywing_sc" | "all_fly_xwing_sc")
+                {
+                    &[-20.0, 0.0, 20.0]
+                } else {
+                    &[0.0]
+                };
+                for &angle in angles {
+                    let mut sim = Sim::empty(99);
+                    sim.weapon_classes = setup.weapon_classes.clone();
+                    sim.hull_parts = setup.hull_parts.clone();
+                    sim.blast_setup = setup.blast_setup.clone();
+                    sim.missile_target_points = setup.missile_target_points.clone();
+                    let me = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+                    let vh = sim.spawn_vehicle(&VehicleSpec {
+                        kind: VehicleKind::Flyer,
+                        class: class as u32,
+                        home_team: Some(1),
+                        neutral_when_empty: false,
+                        spawn_pad: None,
+                        pos: Vec3::new(0.0, 1000.0, -500.0),
+                        yaw: 0.0,
+                        max_health: 10000.0,
+                        health_type: HealthType::Vehicle,
+                        seats: vec![SeatKind::Pilot],
+                    });
+                    let origin = Vec3::Y * 1000.0;
+                    let (sin, cos) = core::fmath::sin_cos(angle.to_radians());
+                    let mut bolt = Bolt::fire(
+                        origin,
+                        Vec3::new(sin, 0.0, -cos),
+                        ord.velocity,
+                        ord.life_span,
+                        Shooter {
+                            owner: me,
+                            team: 0,
+                            weapon_class: wc,
+                            is_player: true,
+                        },
+                        None,
+                        None,
+                        &sim.collision,
+                        HullFilter::All,
+                    );
+                    bolt.as_missile(
+                        &ord,
+                        &ord.missile.unwrap(),
+                        Some(MissileTarget::Vehicle(vh)),
+                        &mut sim.lcg,
+                    );
+                    sim.bolts.push(bolt);
+                    for _ in 0..151 {
+                        let v = sim.vehicle_mut(vh).unwrap();
+                        v.pos.x += speed * core::TICK_DT;
+                        v.vel = Vec3::X * speed;
+                        sim.step(&[]);
+                        if sim.bolts.is_empty() {
+                            break;
+                        }
+                    }
+                    assert!(
+                        sim.vehicle(vh).unwrap().health.cur < 10000.0,
+                        "{map} {name}: miss at {speed} m/s, launch angle {angle}"
+                    );
+                    shots += 1;
+                }
+            }
+        }
+        println!("{map}: {shots}/{shots} moving-hull shots hit");
+    }
+}
+
 fn missions_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("OPENBF_MISSIONS") {
         return PathBuf::from(dir);

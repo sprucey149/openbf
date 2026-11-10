@@ -1062,6 +1062,24 @@ fn body_refs(cg: &CollisionGeom) -> Vec<crate::collision_layers::BodyRef> {
     refs
 }
 
+pub fn missile_target_points(
+    cg: &CollisionGeom,
+    class_collision: &[(String, String)],
+) -> Vec<glam::Vec3> {
+    use crate::collision_layers::{layer_bodies, Layer};
+    let refs = body_refs(cg);
+    let points = cg
+        .mesh
+        .iter()
+        .map(|_| glam::Vec3::ZERO)
+        .chain(cg.prims.iter().map(|p| glam::Vec3::from(p.translation)));
+    layer_bodies(&refs, class_collision, Layer::Targetable)
+        .into_iter()
+        .zip(points)
+        .filter_map(|(targetable, point)| targetable.then_some(point))
+        .collect()
+}
+
 /// A vehicle class's hull (card VHULL): the bodies of its geometry's
 /// collision `cg` in model space, each in the subsets the class's lists put
 /// it in (the vehicle classes read the same six properties as a building,
