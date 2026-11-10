@@ -34,6 +34,27 @@ const CONE_COS: f32 = 0.913_545_5; // cos 24°
 /// `[ours]`, PROVISIONAL: "while the unit fires" = a shot within this many seconds.
 const FIRING_SECONDS: f32 = 0.5;
 
+pub fn ctf_marker(sim: &core::sim::Sim, flag: &core::sim::Flag, team: u8) -> Option<(Vec3, bool)> {
+    match flag.status {
+        core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => {
+            Some((flag.current_pos, false))
+        }
+        core::sim::FlagStatus::Carried { carrier } => {
+            if sim.unit(carrier)?.team != team {
+                return None;
+            }
+            Some((
+                sim.ctf
+                    .as_ref()?
+                    .capture_regions
+                    .get(usize::from(team))?
+                    .pos,
+                true,
+            ))
+        }
+    }
+}
+
 /// A class's icon and view radii.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassIcon {
@@ -443,6 +464,31 @@ impl MapStatic {
                 number: None,
             });
         }
+        let mut markers = Vec::new();
+        if let Some(ctf) = sim
+            .ctf
+            .as_ref()
+            .filter(|ctf| ctf.mode == core::sim::CtfMode::OneFlag)
+        {
+            for flag in &ctf.flags {
+                let Some((pos, delivery)) = ctf_marker(sim, flag, own) else {
+                    continue;
+                };
+                markers.push(MapIcon {
+                    pos: [pos.x, pos.z],
+                    texture: if delivery {
+                        "hud_objective_icon_circle"
+                    } else {
+                        "hud_target_flag_onscreen"
+                    }
+                    .into(),
+                    scale: 0.9 + 3.0 * (clock % 1.0),
+                    color: [223, 223, 32],
+                    heading: None,
+                    number: None,
+                });
+            }
+        }
         MapModel {
             sheet_dir: Some(self.sheet_dir.clone()),
             image: self.image.clone(),
@@ -455,6 +501,7 @@ impl MapStatic {
             radius: view_radius(view, (vel.x * vel.x + vel.z * vel.z).sqrt()),
             posts,
             units,
+            markers,
             ..MapModel::default()
         }
     }
@@ -574,6 +621,26 @@ pub fn spawn_still(scene: &crate::assets::Scene, select: Option<usize>) -> MapMo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_flag_markers_follow_the_carriers_team() {
+        let mut sim = core::sim::Sim::empty(1);
+        let home = Vec3::new(10.0, 20.0, 30.0);
+        let goal0 = Vec3::new(100.0, 0.0, 0.0);
+        let goal1 = -goal0;
+        sim.ctf = Some(core::sim::CtfState::new_space_one_flag(
+            5, home, goal0, goal1,
+        ));
+        let carrier = sim.spawn(&core::unit::UnitSpec::trooper(1, home)).unwrap();
+        assert_eq!(
+            ctf_marker(&sim, &sim.ctf.as_ref().unwrap().flags[0], 0),
+            Some((home, false))
+        );
+        sim.ctf.as_mut().unwrap().flags[0].status = core::sim::FlagStatus::Carried { carrier };
+        let flag = &sim.ctf.as_ref().unwrap().flags[0];
+        assert_eq!(ctf_marker(&sim, flag, 1), Some((goal1, true)));
+        assert_eq!(ctf_marker(&sim, flag, 0), None);
+    }
 
     fn region(rotation: [[f32; 3]; 3], size: [f32; 3]) -> ManifestRegion {
         ManifestRegion {

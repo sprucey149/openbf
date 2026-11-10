@@ -827,6 +827,7 @@ impl winit::application::ApplicationHandler for App {
                             gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
                             gpu.pose_stations(&walk.sim);
                             gpu.see_through(&see.props);
+                            gpu.pose_ctf(&walk.sim, walk.player);
                             self.holos.advance(walk);
                             game::point_light::submit(
                                 r,

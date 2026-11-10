@@ -115,6 +115,7 @@ pub struct MapModel {
     pub radius: f32,
     pub posts: Vec<MapIcon>,
     pub units: Vec<MapIcon>,
+    pub markers: Vec<MapIcon>,
     pub view: MapView,
     /// The Large / Spawn group's turn, radians: the mission's
     /// `SetMapNorthAngle` with or without its flag (§2.2 [M]).
@@ -413,6 +414,13 @@ impl Ctx<'_> {
             };
             let turn = p.heading.unwrap_or(upright);
             self.icon_at(i, &group, s, map.local(uv), turn, p, alpha);
+        }
+        if small {
+            for marker in &map.markers {
+                if let Some((uv, _)) = map.place(marker.pos, true) {
+                    self.icon_at(i, &group, s, map.local(uv), upright, marker, alpha);
+                }
+            }
         }
         // The picked post's ring on the Spawn view (§3 [V]).
         if let Some(p) = map.select.and_then(|k| map.posts.get(k)).filter(|_| !small) {

@@ -184,6 +184,7 @@ pub struct DrawCmd {
     pub model: Mat4,
     /// Which pass this draw belongs to.
     pub layer: DrawLayer,
+    pub additive: bool,
     /// Metres from the eye past which this draw's fragments are DISCARDED, or
     /// `None` for a draw that is never culled by distance — the far-scene
     /// cull's mechanism. WHICH draw gets which distance is the caller's
@@ -518,6 +519,7 @@ impl DrawCmd {
             color,
             model,
             layer: DrawLayer::Opaque,
+            additive: false,
             cull: None,
             cull_near: None,
             lod: None,

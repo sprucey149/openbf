@@ -112,6 +112,7 @@ pub struct VehicleVisuals {
     /// The items on the field (card PWUP): the battle's other dynamic
     /// models, drawn with the vehicles so every draw site has them.
     items: super::pickups::PickupVisuals,
+    flags: super::pickups::FlagVisuals,
     chunks: HashMap<String, ClassVis>,
     textures: HashMap<(Option<TexSource>, String), Option<TextureHandle>>,
     texture_uploads: usize,
@@ -372,6 +373,7 @@ impl VehicleVisuals {
             cull,
             spec_cull: spec_cull(scene, cull),
             items: super::pickups::PickupVisuals::new(assets_dir, &game, cull),
+            flags: super::pickups::FlagVisuals::load(r, scene, cull),
             chunks: HashMap::new(),
             textures: HashMap::new(),
             texture_uploads: 0,
@@ -580,6 +582,7 @@ impl VehicleVisuals {
         }
         r.set_shadow_triangles(&self.shadow_triangles);
         out.extend(self.items.draws(r, sim));
+        out.extend(self.flags.draws(sim));
         out
     }
 }

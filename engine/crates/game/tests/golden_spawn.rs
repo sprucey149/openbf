@@ -15,6 +15,7 @@ use game::viewer::{camera_from, upload_scene, GOLDEN_CAM};
 fn hud() -> ui::hud::HudModel {
     ui::hud::HudModel {
         team_points: None,
+        ctf: false,
         lock: None,
         hints: Vec::new(),
         seat_health: None,

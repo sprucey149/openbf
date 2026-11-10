@@ -28,6 +28,118 @@ struct Part {
     texture: Option<TextureHandle>,
     layer: DrawLayer,
     light: LightPath,
+    additive: bool,
+}
+
+#[derive(Default)]
+pub struct FlagVisuals {
+    loose: Vec<Part>,
+    carried: Vec<Part>,
+    cull: Option<f32>,
+    home_rotation: Quat,
+}
+
+fn flag_pose(
+    sim: &core::sim::Sim,
+    flag: &core::sim::Flag,
+    home_rotation: Quat,
+) -> Option<(bool, Mat4)> {
+    match flag.status {
+        core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => Some((
+            false,
+            Mat4::from_rotation_translation(home_rotation, flag.current_pos),
+        )),
+        core::sim::FlagStatus::Carried { carrier } => {
+            let unit = sim.unit(carrier)?;
+            let rot = unit
+                .mount
+                .and_then(|mount| {
+                    sim.vehicles
+                        .get(mount.vehicle.index as usize)
+                        .filter(|v| v.gen == mount.vehicle.gen)
+                        .map(|v| v.rot)
+                })
+                .unwrap_or_else(|| Quat::from_rotation_y(unit.soldier.yaw));
+            Some((true, Mat4::from_rotation_translation(rot, flag.current_pos)))
+        }
+    }
+}
+
+impl FlagVisuals {
+    pub fn load(r: &mut Renderer, scene: &crate::assets::Scene, cull: Option<f32>) -> Self {
+        let mut out = Self {
+            cull,
+            ..Self::default()
+        };
+        let Some(instance) = scene
+            .manifest
+            .instances
+            .iter()
+            .find(|i| i.class.eq_ignore_ascii_case("com_icon_spaceflag"))
+        else {
+            return out;
+        };
+        out.home_rotation = Quat::from_mat4(&super::instance_matrix(
+            instance.rotation,
+            instance.translation,
+        ));
+        for (name, carried) in [
+            ("com_icon_spaceflag", false),
+            ("com_icon_spaceflag_carried", true),
+        ] {
+            let Some(cpu) = scene.meshes.get(name) else {
+                continue;
+            };
+            let Ok(meshes) = upload_submeshes(r, cpu) else {
+                continue;
+            };
+            let mut parts = Vec::new();
+            for (k, (mesh, mat, layer, flags)) in meshes.into_iter().enumerate() {
+                let texture = mat.and_then(|name| {
+                    scene
+                        .textures
+                        .get(&name.to_ascii_lowercase())
+                        .and_then(|t| super::upload::upload_cpu_texture(r, t, name).ok())
+                });
+                if texture.is_some() {
+                    parts.push(Part {
+                        mesh,
+                        texture,
+                        layer,
+                        light: cpu.light_path(k),
+                        additive: layer == DrawLayer::Blend && flags & 0x40 != 0,
+                    });
+                }
+            }
+            if carried {
+                out.carried = parts;
+            } else {
+                out.loose = parts;
+            }
+        }
+        out
+    }
+
+    pub fn draws(&self, sim: &core::sim::Sim) -> Vec<DrawCmd> {
+        let mut out = Vec::new();
+        let Some(ctf) = &sim.ctf else { return out };
+        for flag in &ctf.flags {
+            let Some((carried, m)) = flag_pose(sim, flag, self.home_rotation) else {
+                continue;
+            };
+            let parts = if carried { &self.carried } else { &self.loose };
+            for part in parts {
+                if let Some(texture) = part.texture {
+                    let mut draw = draw_in(part.layer, part.mesh, texture, m)
+                        .with_cull(self.cull)
+                        .with_light(part.light);
+                    draw.additive = part.additive;
+                    out.push(draw);
+                }
+            }
+        }
+        out
+    }
 }
 
 /// The item models uploaded so far, by geometry name.
@@ -81,6 +193,7 @@ impl PickupVisuals {
                 texture,
                 layer,
                 light: cpu.light_path(k),
+                additive: false,
             });
         }
         Ok(parts)
@@ -150,5 +263,31 @@ mod tests {
         assert!(!item_drawn(true, -0.5));
         assert!(item_drawn(false, 1.0));
         assert!(item_drawn(false, -0.9));
+    }
+
+    #[test]
+    fn space_flag_uses_live_state_and_carrier_pose() {
+        let mut sim = core::sim::Sim::empty(1);
+        let mut flag = core::sim::Flag::new_space_neutral(glam::Vec3::new(1.0, 2.0, 3.0));
+        let (carried, home) = flag_pose(&sim, &flag, Quat::IDENTITY).unwrap();
+        assert!(!carried);
+        assert_eq!(home.w_axis.truncate(), flag.home_pos);
+        flag.current_pos = glam::Vec3::new(20.0, 30.0, 40.0);
+        flag.status = core::sim::FlagStatus::Dropped {
+            timer: 5.0,
+            pickup_cooldown: 0.0,
+        };
+        let (carried, dropped) = flag_pose(&sim, &flag, Quat::IDENTITY).unwrap();
+        assert!(!carried);
+        assert_eq!(dropped.w_axis.truncate(), flag.current_pos);
+        let unit = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, glam::Vec3::ZERO))
+            .unwrap();
+        sim.unit_mut(unit).unwrap().soldier.yaw = std::f32::consts::FRAC_PI_2;
+        flag.status = core::sim::FlagStatus::Carried { carrier: unit };
+        let (carried, pose) = flag_pose(&sim, &flag, Quat::IDENTITY).unwrap();
+        assert!(carried);
+        assert_eq!(pose.w_axis.truncate(), flag.current_pos);
+        assert!((pose.transform_vector3(glam::Vec3::Z) - glam::Vec3::X).length() < 0.001);
     }
 }

@@ -50,6 +50,36 @@ fn flat(rgba: [u8; 4]) -> [[u8; 4]; 1] {
     [rgba]
 }
 
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn additive_world_blend_preserves_the_background() {
+    let mut r = headless();
+    r.cull = false;
+    let blue = upload_tex(&mut r, 1, 1, &[0, 0, 180, 255], "blue");
+    let red = upload_tex(&mut r, 1, 1, &[180, 0, 0, 128], "red");
+    let back = view_quad(&mut r, -6.0);
+    let front = view_quad(&mut r, -5.0);
+    let mut glow = DrawCmd::textured_blended(front, red, Mat4::IDENTITY);
+    glow.additive = true;
+    r.render(
+        &Camera::default(),
+        &[DrawCmd::textured(back, blue, Mat4::IDENTITY), glow],
+        [0.0, 0.0, 0.0, 1.0],
+    )
+    .unwrap();
+    let pixel = capture_pixel(&mut r, N / 2, N / 2);
+    assert!(pixel[0] > 40 && pixel[2] > 160, "{pixel:?}");
+    glow.fade = Some(render::Fade::see_through(0.0));
+    r.render(
+        &Camera::default(),
+        &[DrawCmd::textured(back, blue, Mat4::IDENTITY), glow],
+        [0.0, 0.0, 0.0, 1.0],
+    )
+    .unwrap();
+    let hidden = capture_pixel(&mut r, N / 2, N / 2);
+    assert!(hidden[0] < 5 && hidden[2] > 160, "{hidden:?}");
+}
+
 /// The whole point: a texture whose every texel is below the alpha test draws
 /// NOTHING when alpha-tested, and something when composited.
 #[test]

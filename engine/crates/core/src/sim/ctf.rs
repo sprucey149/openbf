@@ -446,7 +446,7 @@ impl Sim {
                     if dead {
                         (v.pos, true)
                     } else {
-                        (v.pos + flag.carried_offset, false)
+                        (v.pos + v.rot * flag.carried_offset, false)
                     }
                 } else {
                     (u.soldier.pos, true)
@@ -454,7 +454,12 @@ impl Sim {
             } else if !u.alive {
                 (u.soldier.pos, true)
             } else {
-                (u.soldier.pos + flag.carried_offset, false)
+                let (s, c) = crate::fmath::sin_cos(u.soldier.yaw);
+                let o = flag.carried_offset;
+                (
+                    u.soldier.pos + Vec3::new(c * o.x + s * o.z, o.y, -s * o.x + c * o.z),
+                    false,
+                )
             }
         } else {
             (flag.current_pos, true)
@@ -612,6 +617,11 @@ mod tests {
             ctf_state.flags[0].current_pos,
             flyer_pos + SPACE_CARRIED_OFFSET
         );
+        sim.vehicles[v.index as usize].rot =
+            glam::Quat::from_xyzw(0.0, 0.70710677, 0.0, 0.70710677);
+        sim.tick_ctf(0.1);
+        let pos = sim.ctf.as_ref().unwrap().flags[0].current_pos;
+        assert!((pos - (flyer_pos + Vec3::new(-1.5, 1.5, 0.0))).length() < 0.001);
     }
 
     #[test]

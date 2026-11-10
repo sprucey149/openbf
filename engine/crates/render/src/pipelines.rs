@@ -135,6 +135,31 @@ impl Renderer {
             ..PipelineDesc::world("map blend pipeline", &pipeline_layout, &vb)
         }
         .build(&device, &shader, format);
+        let additive = wgpu::BlendState {
+            color: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::SrcAlpha,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+            alpha: wgpu::BlendComponent {
+                src_factor: wgpu::BlendFactor::Zero,
+                dst_factor: wgpu::BlendFactor::One,
+                operation: wgpu::BlendOperation::Add,
+            },
+        };
+        let additive_blend_pipeline = PipelineDesc {
+            blend: Some(additive),
+            depth_write: false,
+            ..PipelineDesc::world("map additive blend pipeline", &pipeline_layout, &vb)
+        }
+        .build(&device, &shader, format);
+        let fade_additive_blend_pipeline = PipelineDesc {
+            fs: "fs_blend_fade",
+            blend: Some(additive),
+            depth_write: false,
+            ..PipelineDesc::world("map fade additive blend pipeline", &pipeline_layout, &vb)
+        }
+        .build(&device, &shader, format);
 
         // Water pipeline: the blend pipeline with the depth write BACK ON and
         // its own fragment entry point. The PS2's near main water layer is
@@ -748,6 +773,8 @@ impl Renderer {
             instance_capacity,
             mask_pipeline,
             blend_pipeline,
+            additive_blend_pipeline,
+            fade_additive_blend_pipeline,
             water_pipeline,
             water_display_format: display_format,
             speckle_pipeline,

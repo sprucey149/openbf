@@ -682,6 +682,8 @@ fn hud_hints(
                 visible: h.visible,
                 on_screen: true,
                 flag: false,
+                objective: false,
+                pulse: None,
                 tint: None,
             })
         })
@@ -691,22 +693,27 @@ fn hud_hints(
         let me_team = walk.sim.unit(walk.player).map_or(0, |u| u.team);
         let yellow = Some(ui::hud::message_color::YELLOW.map(f32::from));
         for flag in &ctf.flags {
-            let (pos, friendly) = match flag.status {
-                core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => {
-                    (flag.current_pos, true)
-                }
-                core::sim::FlagStatus::Carried { carrier } => {
-                    if carrier == walk.player {
-                        (
-                            ctf.capture_regions
-                                .get(me_team as usize)
-                                .map_or(flag.current_pos, |r| r.pos),
-                            true,
-                        )
-                    } else {
-                        let carrier_team = walk.sim.unit(carrier).map_or(0, |u| u.team);
-                        (flag.current_pos, carrier_team == me_team)
-                    }
+            let (pos, delivery, friendly) = if ctf.mode == core::sim::CtfMode::OneFlag {
+                let Some((pos, delivery)) = game::minimap::ctf_marker(&walk.sim, flag, me_team)
+                else {
+                    continue;
+                };
+                (pos, delivery, true)
+            } else {
+                match flag.status {
+                    core::sim::FlagStatus::Carried { carrier } if carrier == walk.player => (
+                        ctf.capture_regions
+                            .get(usize::from(me_team))
+                            .map_or(flag.current_pos, |r| r.pos),
+                        false,
+                        true,
+                    ),
+                    core::sim::FlagStatus::Carried { carrier } => (
+                        flag.current_pos,
+                        false,
+                        walk.sim.unit(carrier).is_some_and(|u| u.team == me_team),
+                    ),
+                    _ => (flag.current_pos, false, true),
                 }
             };
             let (ndc, on_screen) = marker_screen(view_proj, pos);
@@ -717,6 +724,9 @@ fn hud_hints(
                 visible: true,
                 on_screen,
                 flag: true,
+                objective: delivery,
+                pulse: (ctf.mode == core::sim::CtfMode::OneFlag)
+                    .then_some((walk.sim.tick as f32 * core::TICK_DT) % 1.0),
                 tint: yellow,
             });
         }

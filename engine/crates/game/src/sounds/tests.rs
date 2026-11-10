@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn space_flag_announcements_resolve_to_audible_takes() {
+    let root = crate::assets::baked_root();
+    let mut lib = SoundLib::load(&root.join("bf2_spa8")).expect("space sound bank");
+    for listener in ["imp", "all"] {
+        for subject in ["imp", "all"] {
+            for name in [
+                format!("{listener}_1Flag_take_{subject}"),
+                format!("{listener}_1Flag_drop_{subject}"),
+                format!("{listener}_{subject}Flag_score"),
+            ] {
+                let take = lib
+                    .prepare_voice(&name)
+                    .unwrap_or_else(|| panic!("missing {name}"));
+                assert!(
+                    take.path.is_file() && take.secs > 0.0 && take.gain > 0.0,
+                    "{name}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn both_games_resolve_the_cutters_loop_to_an_audible_take() {
     let root = crate::assets::baked_root();
     for map in ["bf1_bes1", "bf2_cor1"] {

@@ -1316,6 +1316,7 @@ impl Fx {
                     // depth, so overlapping puffs add up instead of one
                     // punching a hole in the others.
                     layer: render::DrawLayer::Blend,
+                    additive: false,
                     // An effect puff is a near-scene draw and takes no
                     // far-scene cull; the map's cull is applied to the
                     // world, the terrain and the water (`viewer::far_cull`).

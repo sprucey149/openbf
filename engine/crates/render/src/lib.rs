@@ -287,6 +287,8 @@ pub struct Renderer {
     mask_pipeline: wgpu::RenderPipeline,
     /// Alpha-composited pass for materials the bake judged BLEND.
     blend_pipeline: wgpu::RenderPipeline,
+    additive_blend_pipeline: wgpu::RenderPipeline,
+    fade_additive_blend_pipeline: wgpu::RenderPipeline,
     /// The WATER pass: alpha-composited with the depth WRITTEN and a
     /// `LessEqual` test — the PS2's near main water record. Built once, used
     /// only by the twelve maps that ship a `WATR`; see `finish_init`

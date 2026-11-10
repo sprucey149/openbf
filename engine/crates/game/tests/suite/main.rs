@@ -64,6 +64,7 @@ mod shell_layout;
 mod skinned_glb;
 mod skirt_climb;
 mod sound_sublevels;
+mod space_ctf_visuals;
 mod squad_orders_ps2;
 mod squad_vehicle_maps;
 mod station_destruction;

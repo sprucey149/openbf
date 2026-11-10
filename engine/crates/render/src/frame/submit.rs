@@ -1024,7 +1024,7 @@ impl Renderer {
             // skinned ones where their distance puts them. Passing from one
             // kind to the other rebinds the pipeline and the instance buffer.
             let mut world_slot = blend_base;
-            let mut bound_skinned: Option<bool> = None;
+            let mut bound_skinned: Option<(bool, bool, bool)> = None;
             if !ab.skips("sky") {
                 pass.set_bind_group(0, &self.globals_bg, &[]);
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
@@ -1035,12 +1035,16 @@ impl Renderer {
             }
             for &b in blended.iter().filter(|_| !ab.skips("blend")) {
                 let skin = matches!(b, Blended::Skinned(_));
-                if bound_skinned != Some(skin) {
-                    pass.set_pipeline(match (skin, fade) {
-                        (false, false) => &self.blend_pipeline,
-                        (false, true) => &self.fade_blend_pipeline,
-                        (true, false) => &self.skinned_blend_pipeline,
-                        (true, true) => &self.fade_skinned_blend_pipeline,
+                let additive = matches!(b, Blended::World(i) if draws[i].additive);
+                let fading = fade || matches!(b, Blended::World(i) if draws[i].fade.is_some());
+                if bound_skinned != Some((skin, fading, additive)) {
+                    pass.set_pipeline(match (skin, fading, additive) {
+                        (false, false, true) => &self.additive_blend_pipeline,
+                        (false, true, true) => &self.fade_additive_blend_pipeline,
+                        (false, false, false) => &self.blend_pipeline,
+                        (false, true, false) => &self.fade_blend_pipeline,
+                        (true, false, _) => &self.skinned_blend_pipeline,
+                        (true, true, _) => &self.fade_skinned_blend_pipeline,
                     });
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(
@@ -1051,7 +1055,7 @@ impl Renderer {
                             self.instance_buf.slice(..)
                         },
                     );
-                    bound_skinned = Some(skin);
+                    bound_skinned = Some((skin, fading, additive));
                 }
                 match b {
                     Blended::World(i) => {
