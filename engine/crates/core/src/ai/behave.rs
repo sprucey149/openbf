@@ -33,7 +33,11 @@
 //! it stays, strafes, rolls aside or moves to a new position (`react`; the
 //! PS2's attacker ignores the hit, a named deviation); no such step goes
 //! through a death region (`react_ok`), and a roll or a move ends in a hub
-//! of the graph (`in_hub`).
+//! of the graph (`in_hub`). REACT and the dodge only move the bot; any hit
+//! by an enemy also makes a bot on foot flinch, holding its fire for
+//! `FLINCH_TICKS`, and a shooter it does not see must be found before it
+//! may fire at him (`perception::search_ticks`). Both are OURS (playtest C1:
+//! neither original delays its answer to a hit).
 //!
 //! Here too, until their own cards replace them: the held position (card
 //! HOLD: `spot_free`, `stand_ok`, `roll_clear`, the expired hold settled at a

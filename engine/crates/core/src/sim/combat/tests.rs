@@ -544,20 +544,25 @@ fn v6_five_shots_kill_and_pay_a_ticket() {
 }
 
 /// Issue #41: a bolt that meets a soldier's head prim does the PS2's
-/// HitLocation x3 - a human's always, a bot's only on Hard and Elite
-/// (the PS2's level-3 gate). The same bolt at his chest is the x1.
+/// HitLocation x3, a human's always. A bot's does plain damage at every
+/// tier on a ground round (playtest 2026-11-05 B1, card DRETIRE: no damage
+/// lever by tier); a space round keeps the old gate (x3 from Hard up). The
+/// same bolt at his chest is the x1.
 #[test]
 fn a_headshot_takes_three_times_the_damage() {
     // A bolt from 20 m at a still soldier's head prim (1.65 m up, 0.16 m
     // ahead of his feet) or his chest (the torso, 1.15 m), by a human or
     // a bot of team 1: the damage it does.
     fn shot(human: bool, d: Difficulty, y: f32) -> f32 {
-        struck(human, d, y).0
+        struck(human, d, y, false).0
     }
     // The damage and whether the hit raised `Event::CriticalHit`.
-    fn struck(human: bool, d: Difficulty, y: f32) -> (f32, bool) {
+    fn struck(human: bool, d: Difficulty, y: f32, space: bool) -> (f32, bool) {
         let (mut s, p, t) = duel();
         s.difficulty = d;
+        if space {
+            s.space_assault = Some(crate::sim::space_assault::SpaceAssault::new(10));
+        }
         // Card DTEAM: the duel's human stands on team 0; one counted on
         // team 1 evens them, so team 0's bots keep the tier's row.
         s.extra_humans = [0, 1];
@@ -603,28 +608,36 @@ fn a_headshot_takes_three_times_the_damage() {
     // The critical-hit event (the reticle's `hitCritical`, hitmark):
     // the x3 head hit only.
     assert!(
-        struck(true, Difficulty::Normal, head).1,
+        struck(true, Difficulty::Normal, head, false).1,
         "a human's headshot"
     );
     assert!(
-        !struck(true, Difficulty::Normal, chest).1,
+        !struck(true, Difficulty::Normal, chest, false).1,
         "a body shot: none"
-    );
-    assert!(
-        !struck(false, Difficulty::Normal, head).1,
-        "a bot's x1 headshot is no critical hit"
     );
     let body = shot(true, Difficulty::Normal, chest);
     assert!(body > 0.0);
     // The PS2's x3, not the constant (a test of the rule, not of itself).
     assert_eq!(shot(true, Difficulty::Normal, head), body * 3.0);
-    assert_eq!(shot(false, Difficulty::Normal, head), body, "a bot: no x3");
-    assert_eq!(shot(false, Difficulty::Easy, head), body, "nor on Easy");
-    assert_eq!(
-        shot(false, Difficulty::Hard, head),
-        shot(false, Difficulty::Hard, chest) * 3.0,
-        "a bot on the PS2's top level: x3"
-    );
+    for d in [
+        Difficulty::Easy,
+        Difficulty::Normal,
+        Difficulty::Hard,
+        Difficulty::Elite,
+    ] {
+        assert_eq!(shot(true, d, head), body * 3.0, "a human's x3 on {d:?}");
+        assert_eq!(shot(false, d, chest), body, "a bot's body shot on {d:?}");
+        assert_eq!(shot(false, d, head), body, "a bot's head: x1 on {d:?}");
+        assert!(
+            !struck(false, d, head, false).1,
+            "a bot's x1 headshot is no critical hit on {d:?}"
+        );
+    }
+    // Space rounds keep the old gate: a bot's x3 from Hard up.
+    assert_eq!(struck(false, Difficulty::Normal, head, true).0, body);
+    assert_eq!(struck(false, Difficulty::Hard, head, true).0, body * 3.0);
+    assert_eq!(struck(false, Difficulty::Elite, head, true).0, body * 3.0);
+    assert!(struck(false, Difficulty::Hard, head, true).1);
 }
 
 /// Issue #41 (OURS; the PS2's one ray at the press, report §5.1, hit a
@@ -990,8 +1003,8 @@ fn no_tier_multiplies_a_bots_bolt_into_a_human() {
         // its own, so the table may still be empty here).
         s.players.resize(1, None);
         s.players[0] = Some(e);
-        // At his chest: a level shot meets the head prim, and the
-        // headshot's x3 (issue #41) is not what this compares.
+        // At his chest: the head's x3 (issue #41) is not what this
+        // compares (`a_headshot_takes_three_times_the_damage` does).
         s.units[e.index as usize].soldier.pitch = -0.08;
         // Short enough that the victim SURVIVES in every arm: past the
         // kill the damage would clip at the killing bolt and the arms

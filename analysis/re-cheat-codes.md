@@ -291,6 +291,9 @@ Mapping of the authentic set onto the registry:
 | `alias` | no-op | PS2 GS post-filter. |
 `infinite_stamina` (which since 2026-10-28 also keeps a jet class's fuel full; the separate jet-fuel cheat was removed), `all_awards` have **no PS2
 counterpart** (BF2 or BF1) — keep them as openbf extensions and label them so.
+`all_awards` (menu label "Award weapons (BF2 kits)", #142) gives the player every BF2 medal bit, so the class's
+award weapons replace the ones they stand for through BF2's switch filter (re-grenades.md §2.4); bots and the space
+modes keep their kits. The medal effects that are not weapons, and earning medals, wait for #130.
 Persistence: flags live for the process, never saved to the profile, not reset
 by mission restart or return-to-shell; in a network session `sos`/`ammo`/`80s`
 must refuse to toggle and `at` must not apply.

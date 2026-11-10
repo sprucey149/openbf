@@ -100,6 +100,10 @@ pub struct Settings {
     pub music_volume: f32,
     #[serde(default = "one")]
     pub mouse_sensitivity: f32,
+    /// The controller's look sensitivity on the right stick
+    /// (`ui::menu::PAD_LOOK_SENSITIVITY_RANGE`; 1 = the stick as it was).
+    #[serde(default = "one", deserialize_with = "pad_look_setting")]
+    pub pad_look_sensitivity: f32,
     #[serde(default)]
     pub invert_y: bool,
     /// Low Power Resolution: the world draws smaller when frames run long
@@ -135,6 +139,7 @@ impl Default for Settings {
             fov_scale: 1.0,
             music_volume: 1.0,
             mouse_sensitivity: 1.0,
+            pad_look_sensitivity: 1.0,
             invert_y: false,
             low_power_resolution: false,
             viewpoint: crate::viewpoint::Viewpoint::default(),
@@ -275,6 +280,20 @@ fn hundred() -> u32 {
     100
 }
 
+fn pad_look_setting<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    f32::deserialize(d).map(clamp_pad_look)
+}
+
+/// A look sensitivity held to its range; a broken value reads as 1.
+pub fn clamp_pad_look(v: f32) -> f32 {
+    let (lo, hi) = ui::menu::PAD_LOOK_SENSITIVITY_RANGE;
+    if v.is_finite() {
+        v.clamp(lo, hi)
+    } else {
+        1.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -366,6 +385,26 @@ mod tests {
         };
         let back: Settings = ron::from_str(&ron::to_string(&s).unwrap()).unwrap();
         assert_eq!(back.difficulty, Difficulty::Elite);
+    }
+
+    /// Issue #142: a profile from before the setting reads 1; a value out of
+    /// range is held to it; a saved value comes back.
+    #[test]
+    fn the_pad_look_sensitivity_loads_in_range() {
+        let old: Settings = ron::from_str("(assist_intensity: 0.5)").unwrap();
+        assert_eq!(old.pad_look_sensitivity, 1.0);
+        let high: Settings =
+            ron::from_str("(assist_intensity: 0.5, pad_look_sensitivity: 99.0)").unwrap();
+        assert_eq!(high.pad_look_sensitivity, 1.5);
+        let low: Settings =
+            ron::from_str("(assist_intensity: 0.5, pad_look_sensitivity: 0.0)").unwrap();
+        assert_eq!(low.pad_look_sensitivity, 0.5);
+        let s = Settings {
+            pad_look_sensitivity: 0.7,
+            ..Default::default()
+        };
+        let back: Settings = ron::from_str(&ron::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back.pad_look_sensitivity, 0.7);
     }
 
     #[test]

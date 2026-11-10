@@ -531,6 +531,15 @@ pub const FIGHT_STEP: f32 = 7.0;
 
 /// Ticks between two dodges of a bot walking its leg (2 s, RE §4.1).
 pub const DODGE_COOLDOWN: u64 = 60;
+/// OURS (playtest C1): a bot on foot hit by an enemy holds its fire this
+/// many ticks (0.2 s). Neither original holds fire on a hit
+/// (`analysis/re-ai-difficulty.md` 9.4).
+/// measure: PCSX2 T5/T6 (issue #104 brief): time from a hit by a far human
+/// to the bot's first shot, engaged vs idle, within vs beyond view distance.
+pub const FLINCH_TICKS: u64 = 6;
+/// OURS: at most one flinch this often (ticks, 1 s), so steady fire cannot
+/// keep a bot from shooting back. measure: as [`FLINCH_TICKS`].
+pub const FLINCH_GAP: u64 = 30;
 /// Card REACT: ticks between two reactions to a hit of a bot on a position
 /// (1.5 s: a burst is one draw). OURS, PROVISIONAL (the maintainer: "about 1-2 s").
 pub const REACT_COOLDOWN: u64 = 45;
@@ -593,7 +602,8 @@ pub const DRIVE_STUCK_BAIL: u16 = 3 * STUCK_WINDOW;
 pub const HOVER_ARRIVE_FACTOR: f32 = 0.5;
 /// Card WAI: a walker whose type cannot reach a post's hub is claimed for
 /// the hub nearest the post only when the ride ends this much nearer the
-/// post than the vehicle stands (XZ, m).
+/// post than the vehicle stands (XZ, m). Claim only: a ride under way is not
+/// judged again (`route::retarget_to_post`).
 pub const RIDE_GAIN: f32 = 40.0;
 /// Card VDROP: a hover whose type cannot reach a post's hub rides to the
 /// hub nearest the post, as a walker does (`route::post_hub`).

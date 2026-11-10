@@ -958,15 +958,24 @@ fn a_bolt_at_a_parked_hull_damages_it() {
 }
 
 /// Issue #41: a bolt into a hull part its class authors a HitLocation
-/// for (the x4 critical prims) does that much more: a human's always, a
-/// bot's only on Hard and Elite (the PS2's level 3 gate), as a headshot.
+/// for (the x4 critical prims) does that much more: a human's always. A
+/// bot's does plain damage at every tier on a ground round, as a headshot
+/// (playtest 2026-11-05 B1); a space round keeps the old gate (Hard up).
 #[test]
 fn a_critical_prim_takes_its_hit_location() {
     use crate::collision::{HullPart, Layers, Shape};
     use crate::skill::Difficulty;
-    let damage = |mult: f32, human: bool, d: Difficulty| {
+    let hit = |mult: f32, human: bool, d: Difficulty, space: bool| {
         let (mut s, p, v) = parked(true);
         s.difficulty = d;
+        if space {
+            s.install_ctf(crate::sim::ctf::CtfState::new_space_one_flag(
+                5,
+                Vec3::new(0.0, 500.0, 0.0),
+                Vec3::new(500.0, 500.0, 0.0),
+                Vec3::new(-500.0, 500.0, 0.0),
+            ));
+        }
         // Card DTEAM: the human is on team 0; one counted on team 1
         // evens them, so team 0's bots keep the tier's row.
         s.extra_humans = [0, 1];
@@ -1013,20 +1022,31 @@ fn a_critical_prim_takes_its_hit_location() {
         }
         (before - s.vehicle(v).unwrap().health.cur, critical)
     };
+    let damage = |mult, human, d| hit(mult, human, d, false);
     // The critical-hit event (hitmark): the x4 hits that took health.
     assert!(damage(4.0, true, Difficulty::Normal).1, "a human's x4");
     assert!(!damage(1.0, true, Difficulty::Normal).1, "the hull: none");
     assert!(!damage(4.0, false, Difficulty::Normal).1, "a bot's x1");
-    assert!(damage(4.0, false, Difficulty::Hard).1, "a bot's x4 on Hard");
+    assert!(!damage(4.0, false, Difficulty::Hard).1, "nor on Hard");
     assert!(!damage(0.0, true, Difficulty::Normal).1, "BF1's x0");
     let damage = |mult, human, d| damage(mult, human, d).0;
     let plain = damage(1.0, true, Difficulty::Normal);
     assert_eq!(plain, 8.0, "the BF2 rifle's 80 x VehicleScale 0.1");
     assert_eq!(damage(4.0, true, Difficulty::Normal), 32.0);
-    assert_eq!(damage(4.0, false, Difficulty::Normal), 8.0, "a bot: no x4");
-    assert_eq!(damage(4.0, false, Difficulty::Easy), 8.0, "nor on Easy");
-    assert_eq!(damage(4.0, false, Difficulty::Hard), 32.0);
+    assert_eq!(damage(4.0, true, Difficulty::Elite), 32.0);
+    for d in [
+        Difficulty::Easy,
+        Difficulty::Normal,
+        Difficulty::Hard,
+        Difficulty::Elite,
+    ] {
+        assert_eq!(damage(4.0, false, d), 8.0, "a bot: no x4 on {d:?}");
+    }
     assert_eq!(damage(0.0, true, Difficulty::Normal), 0.0, "BF1's x0 prims");
+    // Space rounds keep the old gate: a bot's x4 from Hard up.
+    assert_eq!(hit(4.0, false, Difficulty::Normal, true).0, 8.0);
+    assert_eq!(hit(4.0, false, Difficulty::Hard, true), (32.0, true));
+    assert_eq!(hit(4.0, false, Difficulty::Elite, true).0, 32.0);
 }
 
 /// A destroyed vehicle leaves no wreck (§6) and no hull: the next walk
@@ -1190,4 +1210,75 @@ fn player_ground_traffic_keeps_the_legacy_locomotion_response() {
         );
         eprintln!("player {kind:?}: {contacts} witnessed hull contacts, legacy position/velocity equal for 180 ticks");
     }
+}
+
+/// A destroyed building turret's drawn gunner dies at his seat, where
+/// `carry_riders` held him, not at the turret's origin (re-vehicle-death
+/// §10: riders die where they sit); a hover's rider dies at its origin.
+#[test]
+fn a_destroyed_turrets_gunner_dies_at_his_seat() {
+    use crate::vehicle::gun::{Aimer, GunSetup, GunnerSeat};
+    use crate::vehicle::SeatSetup;
+    let seat = Vec3::new(0.0, 1.0, -2.0);
+    let mut s = Sim::empty(1);
+    s.heightfield = Some(flat_ground());
+    s.hover_params = vec![None];
+    s.seat_setup = vec![Some(SeatSetup {
+        radius: 3.0,
+        body_active: vec![],
+        boardable: vec![true],
+        exit_drop: 10.0,
+        ai_size: 1,
+        guns: vec![Some(GunSetup {
+            weapons: Vec::new(),
+            fire_point: Vec3::ZERO,
+            pivot: Vec3::ZERO,
+            eye: Vec3::ZERO,
+            aimer: Aimer::default(),
+            pilot: false,
+            turn: None,
+            framed: false,
+            aimer_bind: glam::Quat::IDENTITY,
+            gunner: Some(GunnerSeat {
+                node_bind: glam::Mat4::IDENTITY,
+                local: glam::Mat4::from_translation(seat),
+                turns: false,
+                pitch_factor: 1.0,
+            }),
+        })],
+    })];
+    let at = Vec3::new(5.0, 0.0, 5.0);
+    let g = s.spawn(&UnitSpec::trooper(0, Vec3::ZERO)).unwrap();
+    let v = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Turret,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: at,
+        yaw: 0.0,
+        max_health: 300.0,
+        health_type: HealthType::Building,
+        seats: vec![SeatKind::Gunner(0)],
+    });
+    assert!(s.seat_unit(g, v, 0));
+    let want = {
+        let t = s.vehicle(v).unwrap();
+        t.pos + t.rot * seat
+    };
+    s.destroy_vehicle(v, None);
+    assert!(s.unit(g).is_none(), "the gunner died");
+    let p = s.units[g.index as usize].soldier.pos;
+    assert!((p - want).length() < 1e-4, "at his seat: {p} vs {want}");
+
+    let mut s = Sim::empty(1);
+    let r = s.spawn(&UnitSpec::trooper(1, Vec3::ZERO)).unwrap();
+    let h = s.spawn_vehicle(&hover4(Some(1)));
+    assert!(s.seat_unit(r, h, 1));
+    let origin = s.vehicle(h).unwrap().pos;
+    s.destroy_vehicle(h, None);
+    assert_eq!(
+        s.units[r.index as usize].soldier.pos, origin,
+        "hover origin"
+    );
 }

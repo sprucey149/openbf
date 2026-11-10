@@ -518,6 +518,14 @@ game". Each class keeps its own disc numbers; a BF1 class borrows from its BF2 t
 0.3 / 0.3 / 1.0). The Geonosians are skipped: their class data is not baked (11.10). BF2's fuel rule everywhere: no
 recharge in a jet stance.
 
+**Amended 2026-11-10 (playtest 2026-11-05 B4, `[ours]`):** BF1's JetFuelCost was set for a tank that refills in the
+hover (5.1), so on BF2's no-refill rule a BF1 hover class flew half as long (the jet trooper 3.75 s from full, 1.25 s
+from spawn). A BF1 hover class now pays the net cost JetFuelCost - JetFuelRechargeRate in flight
+(`game::roster::bf1_net_jet_fuel_cost`): the jet trooper 0.2 - 0.1 = 0.1 / s (7.5 s from full, 2.5 s from spawn, BF1's
+own times, section 16's net drain), the BF1 Geonosian 0.1 - 0.03 = 0.07 / s (11.4 s). The disc's JetFuelInitialCost,
+border and spawn fuel are unchanged (they are the data in both games). Leap classes (cost 0) and every BF2 class keep
+their disc numbers. Do not revert this as "not the disc number": it is the translation of BF1's rule onto BF2's.
+
 Built for human players and the sim; bots, effects, sounds, the HUD bar and the animation are card JETP2 (12 steps
 9-13).
 
@@ -556,7 +564,7 @@ section until 2026-11-01).
 | | flight from full / refill empty to full | 4.7 s / 8.3 s | 4.7 / 8.33 |
 | | released stick | e^-2t | e^-2t off the flight and right axes; along them the approach also brakes 1 m/s an update |
 | BF1 jet trooper on BF2 rules | forward / strafe | (BF1: 13 / 9) | 9.75 / 5.63 (6.5 / 4.5 x 1.5 / 1.25) |
-| | flight from full | (BF1: 7.5 s, recharging in flight) | 3.75 s (no recharge in flight) |
+| | flight from full / from spawn | (BF1: 7.5 s / 2.5 s, recharging in flight) | 7.5 s / 2.5 s (net cost 0.1, no recharge in flight; 3.75 s / 1.25 s before 2026-11-10) |
 | BF1 dark trooper on BF2 rules | | (BF1: no cancel, no drag, 19.6 s refill) | BF2's leap: tap-off, drag, stick at 10 m/s^2; refill to 0.49 at 0.025 / s = 19.6 s |
 | Vader / Emperor | start / hover / energy | full tank, 2.5 s, 30 | full tank (0.56 s from spawn), 2.5 s, 30; the bar holds while he hovers |
 | Jedi (JumpHeight 3.5) | double jump | 16.8 m/s, 40 energy | 16.84, 40; the stick's run speed |

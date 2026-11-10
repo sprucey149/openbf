@@ -1,6 +1,6 @@
 //! Distance attenuation, stereo conversion and authored mixer bus gains.
 
-use super::{fnv1a_lowercase, level_db, Listener, SoundProp, Vec3, LISTENER_ROLLOFF, UNNAMED_BUS};
+use super::{fnv1a_lowercase, level_db, Listener, SoundProp, Vec3, LISTENER_ROLLOFF, SHELLFX};
 
 /// A 3-D sound's level 0..1 at `dist` metres from the listener: the PS2's
 /// function (B1 `FUN_0044cac8`, B2 `FUN_005407e8`, the same on both; `[O]`
@@ -97,7 +97,9 @@ pub fn bus_table(game: &str) -> Vec<(u32, f32)> {
         ],
     };
     let mut t: Vec<(u32, f32)> = rows.iter().map(|(n, g)| (fnv1a_lowercase(n), *g)).collect();
-    // The unnamed bus under `root`: 0.4 x the effects slider (1.4 claim 10).
-    t.push((UNNAMED_BUS, if game == "bf2" { 0.4 * 0.7 } else { 0.4 }));
+    // The `root` bus of 1.4 claim 10 (0.4 x the effects slider) is
+    // `shellfx`, so the `shellfx` row above shadows this one; which BF2
+    // gain is right is open.
+    t.push((SHELLFX, if game == "bf2" { 0.4 * 0.7 } else { 0.4 }));
     t
 }

@@ -11,6 +11,8 @@
 //! scale them (`view_mult`, `reaction_ticks`, `pressure`) are the lead's
 //! PROVISIONAL placeholders in [`crate::skill`], not RE. OURS: a bot standing
 //! still with a scoped rifle sees out to the rifle's range ([`sight`]).
+//! OURS (playtest C1): a bot on foot hit by a shooter it does not see must
+//! find him before its reaction time starts ([`search_ticks`]).
 //!
 //! Nothing here reads wall time or the LCG: a scan is a pure function of the
 //! sim state, so it replays bit-exactly.
@@ -38,6 +40,28 @@ pub const MEMORY_TICKS: u64 = 90;
 /// A shot fired within this radius is heard (m). PROVISIONAL (lead
 /// placeholder, no RE).
 pub const HEAR_RADIUS: f32 = 30.0;
+
+/// OURS (playtest C1): a bot on foot hit by a shooter it does not see must
+/// find him before its reaction time starts ([`search_ticks`]). Neither
+/// original delays the answer to a hit (`analysis/re-ai-difficulty.md` 9.4);
+/// without this a bot hit from 40 m just outside its view cone fired back
+/// 0.6 s later. The search's fixed part (ticks, 0.3 s).
+/// measure: PCSX2 T5/T6 (issue #104 brief): time from a hit by a far human
+/// to the bot's first shot, engaged vs idle, within vs beyond view distance.
+pub const SEARCH_BASE: f32 = 9.0;
+/// OURS: ...plus this many ticks per metre to the shooter.
+/// measure: as [`SEARCH_BASE`].
+pub const SEARCH_PER_M: f32 = 0.6;
+/// OURS: ...up to this many (1.8 s). Below [`MEMORY_TICKS`], so the record
+/// outlives its search. measure: as [`SEARCH_BASE`].
+pub const SEARCH_CAP: u64 = 54;
+/// OURS: the share of the search paid for a shooter the bot already held a
+/// record of (heard, told, or seen before). measure: as [`SEARCH_BASE`].
+pub const SEARCH_KNOWN: f32 = 0.5;
+/// OURS: a shooter the bot's own eyes held this recently (ticks, one think)
+/// costs no search: it is where the bot was looking.
+/// measure: as [`SEARCH_BASE`].
+pub const SEARCH_FRESH: u64 = THINK_PERIOD;
 
 /// The unit grid's query is this much wider than the test it feeds (m): the
 /// grid measures the feet in XZ, the tests a body's centre in 3D (card TEAM).
@@ -112,7 +136,9 @@ impl PartialEq<UnitHandle> for Foe {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Contact {
     pub handle: Foe,
-    /// Tick the slot was created — the reaction timer's zero.
+    /// Tick the slot was created — the reaction timer's zero. A hit by a
+    /// shooter the bot cannot see moves it on by the search
+    /// ([`search_ticks`]), so it can lie in the future.
     pub first_seen: u64,
     /// Tick of the last sighting or hearing.
     pub last_seen: u64,
@@ -122,8 +148,9 @@ pub struct Contact {
     /// The last record came from hearing, not sight.
     pub heard: bool,
     /// Card TEAM: ...and from a FRIEND's sight ([`tell`]), not this unit's
-    /// own eyes or ears. A told record is aimed at; it does not keep the
-    /// unit on a position (`ai::behave`).
+    /// own eyes or ears. A told record is aimed at, but not by a unit
+    /// walking a leg (playtest C3); it does not keep the unit on a position
+    /// (`ai::behave`).
     pub told: bool,
 }
 
@@ -201,6 +228,31 @@ pub fn los_seat(
             ),
             None => true,
         }
+}
+
+/// May bot `me`, its eye at `eye`, PITCH its gun at `p`? Only if the sight
+/// ray is clear: the same terrain + ORDNANCE test as [`scan`] and the bolt
+/// ([`los_seat`], past its own mount). The foot brain asks this before it
+/// aims at a point it does not see — a heard shot, a friend's report, a
+/// lost contact, the holder's nearest enemy — so nobody stares through a
+/// floor or a wall (playtest C4, BF1 Kashyyyk Docks: a platform sniper aimed
+/// straight down through its floor at the fight below). OURS: the PS2 has
+/// neither hearing nor a nearest-enemy stare to match.
+pub fn can_aim(sim: &Sim, me: UnitHandle, eye: Vec3, p: Vec3) -> bool {
+    los_seat(
+        sim,
+        eye,
+        p,
+        past_mounts(sim, me, me),
+        past_buildings(sim, me, me),
+    )
+}
+
+/// The point `p` brought to the eye's height: the yaw-only look a bot takes
+/// toward something it cannot see ([`can_aim`] false) — it faces that way
+/// with the gun level.
+pub fn level(eye: Vec3, p: Vec3) -> Vec3 {
+    Vec3::new(p.x, eye.y, p.z)
 }
 
 /// Both vehicles `a` and `b` ride in, skipped ([`HullFilter::Except`]).
@@ -344,7 +396,8 @@ pub fn in_cone(view: Vec3, off: Vec3, d2: f32, omni_radius: f32) -> bool {
 /// A contact may be FIRED at once the tier's reaction time has passed since
 /// the slot was created, and only while it is seen right now. A contact that
 /// was HEARD first counts its reaction from the hearing — a shot you heard is
-/// warning, which is what makes a heard contact useful at all.
+/// warning, which is what makes a heard contact useful at all. A shooter
+/// that hit the bot unseen counts it from the end of the search.
 pub fn fireable(c: &Contact, tick: u64, reaction_ticks: u64) -> bool {
     c.seen_now && tick.saturating_sub(c.first_seen) >= reaction_ticks
 }
@@ -529,9 +582,11 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
     }
 
     // 3. Listen (no cone, no LOS): a shot fired inside HEAR_RADIUS since the
-    //    last think, and — at any range — whoever hit me.
+    //    last think, and — at any range — whoever hit me. A shooter that hit
+    //    me unseen must be found first ([`search_ticks`], playtest C1).
     //    Card TEAM: the grid's units within HEAR_RADIUS, and whoever hit me.
     let mut heard = 0u8;
+    let searches = hit_reaction_applies(sim, u);
     sim.units_within(eye, HEAR_RADIUS + NEAR_MARGIN, &mut near);
     if let Some((s, _)) = u.last_hit {
         if let Err(k) = near.binary_search(&s.index) {
@@ -552,8 +607,22 @@ pub fn scan(sim: &Sim, me: UnitHandle, st: &mut AiState, tier: Tier) -> (u8, u8)
         let hit_me = u
             .last_hit
             .is_some_and(|(s, t)| s == h && tick.checked_sub(t).is_some_and(|d| d < THINK_PERIOD));
+        let prior = if hit_me && searches {
+            contact_of(st, h)
+        } else {
+            None
+        };
         if (shot || hit_me) && hear(st, Foe::Unit(h), tick, o.soldier.pos, false) {
             heard += 1;
+            if hit_me && searches {
+                search(
+                    st,
+                    Foe::Unit(h),
+                    tick,
+                    (o.soldier.pos - eye).length(),
+                    prior,
+                );
+            }
         }
     }
 
@@ -580,7 +649,12 @@ pub fn turret_view_distance(view_mult: f32) -> f32 {
 /// stays as it is; this only keeps [`turret_view_distance`]'s long reach.
 fn scan_radius(sim: &Sim, u: &crate::unit::Unit) -> f32 {
     let range = |c: usize| sim.weapon_classes.get(c).map_or(0.0, |w| w.ai_range[2]);
-    let held = u.held.iter().map(|h| range(h.class));
+    // An award weapon out of the unit's cycle does not count.
+    let held = u
+        .held
+        .iter()
+        .filter(|h| !sim.weapon_locked(u, h.class))
+        .map(|h| range(h.class));
     held.fold(range(u.weapon_class), f32::max) + 5.0 * u.consts.max_speed
 }
 
@@ -752,6 +826,46 @@ fn hear(st: &mut AiState, h: Foe, tick: u64, pos: Vec3, told: bool) -> bool {
         c.told = told;
     }
     true
+}
+
+/// OURS (playtest C1): ticks a bot spends finding a shooter `dist` metres
+/// away that hit it unseen: [`SEARCH_BASE`] + [`SEARCH_PER_M`] per metre, up
+/// to [`SEARCH_CAP`], times [`SEARCH_KNOWN`] when it already held a record
+/// of him. 20 m is 21 ticks, 40 m 33, 60 m 45, 75 m and beyond 54.
+pub fn search_ticks(dist: f32, known: bool) -> u64 {
+    let full = (SEARCH_BASE + SEARCH_PER_M * dist.max(0.0))
+        .round()
+        .min(SEARCH_CAP as f32);
+    let t = if known {
+        (full * SEARCH_KNOWN).round()
+    } else {
+        full
+    };
+    t as u64
+}
+
+/// Whether unit `u` pays the hit search and the flinch (playtest C1): a bot
+/// on foot on a ground map. A seated bot keeps its seat's rules, a proxy
+/// (a stand-in for a human, card DPRX) a human's, and a space map its own.
+pub fn hit_reaction_applies(sim: &Sim, u: &crate::unit::Unit) -> bool {
+    u.mount.is_none() && u.proxy_human.is_none() && !sim.space_round()
+}
+
+/// A hit by `h`, heard this think and not seen, moves the record's reaction
+/// zero on by the search. `prior` is the record before this think's hearing.
+/// A shooter the bot's own eyes held within [`SEARCH_FRESH`] costs nothing,
+/// and a search already under way is not lengthened by another hit.
+fn search(st: &mut AiState, h: Foe, tick: u64, dist: f32, prior: Option<Contact>) {
+    let fresh = prior
+        .is_some_and(|c| !c.heard && !c.told && tick.saturating_sub(c.last_seen) <= SEARCH_FRESH);
+    if fresh {
+        return;
+    }
+    if let Some(c) = st.contacts.iter_mut().flatten().find(|c| c.handle == h) {
+        if c.first_seen <= tick {
+            c.first_seen = tick + search_ticks(dist, prior.is_some());
+        }
+    }
 }
 
 /// Common admission for every target choice, including focus and threat

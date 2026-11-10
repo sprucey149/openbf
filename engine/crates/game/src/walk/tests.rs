@@ -1126,6 +1126,53 @@ fn a_rider_lost_with_the_hull_holds_the_seat_view() {
     assert!(w.seat_view.is_none());
 }
 
+/// A ground rider lost with his hull keeps the seat view until he respawns;
+/// a space round lets it go after `DEATH_VIEW_HOLD`.
+#[test]
+fn a_ground_rider_lost_with_the_hull_holds_the_seat_view_past_four_seconds() {
+    use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    for space in [false, true] {
+        let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+        if space {
+            w.sim.space_assault = Some(core::sim::SpaceAssault::new(10));
+        }
+        w.sim.respawn_delay = 60.0;
+        let h = w.sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Hover,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::new(0.0, 2.0, 0.0),
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        let mut seat = crate::vehicle_class::SeatSpec::new(SeatKind::Pilot);
+        seat.track_center = Some([0.0, 4.0, -6.0]);
+        seat.track_offset = Some([0.0, 0.0, 0.0]);
+        w.vehicle_seats = vec![vec![seat]];
+        w.vehicle_tops = vec![Some(2.0)];
+        let player = w.player;
+        assert!(w.sim.seat_unit(player, h, 0));
+        run_ticks(&mut w, PadState::default(), 1);
+        let view = w.camera().position;
+        w.sim.destroy_vehicle(h, None);
+        let ticks = ((DEATH_VIEW_HOLD + 1.0) / core::TICK_DT) as usize;
+        run_ticks(&mut w, PadState::default(), ticks);
+        assert!(!w.sim.units[player.index as usize].alive);
+        assert_eq!(w.holds_seat_view(), !space, "space {space}");
+        if space {
+            assert_ne!(w.camera().position, view);
+        } else {
+            assert_eq!(w.camera().position, view);
+            let ears = crate::event_sounds::listener(&w);
+            assert_eq!(ears.pos, view, "the ears stay with the held view");
+        }
+    }
+}
+
 #[test]
 fn a_controlled_guided_rocket_uses_first_person_camera_and_centered_reticle() {
     let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
@@ -1193,4 +1240,89 @@ fn a_controlled_guided_rocket_uses_first_person_camera_and_centered_reticle() {
     let cam = w.camera();
     assert_eq!(cam.position, pos);
     assert_eq!(w.reticle_y(), 0.5);
+}
+
+/// Playtest A7: a death on foot starts the death camera (the body drawn, a
+/// view that is not the chase camera), an enemy's kill keeps its killer, and
+/// the respawn ends it.
+#[test]
+fn a_death_on_foot_starts_the_death_view_and_respawn_clears_it() {
+    use core::cp::CpDef;
+    use core::region::Region;
+    let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    let (capture_time, neutralize_time) = CpDef::class_times(false);
+    w.sim.add_cp(
+        CpDef {
+            name: "cp".into(),
+            pos: Vec3::ZERO,
+            capture: Region::sphere(Vec3::ZERO, 8.0),
+            control: None,
+            value_bleed: 0,
+            value_atk: [0, 0],
+            value_def: [0, 0],
+            spawn_nodes: vec![(Vec3::new(0.0, 0.0, 3.0), 0.0)],
+            capture_time,
+            neutralize_time,
+        },
+        Some(0),
+    );
+    run_ticks(&mut w, PadState::default(), 10);
+    let first = w.player;
+    w.sim
+        .kill_environment(first, core::sim::DeathCause::Suicide);
+    run_ticks(&mut w, PadState::default(), 1);
+    let d = w.death_cam.expect("the death camera starts");
+    assert_eq!((d.body, d.killer), (first, None));
+    run_ticks(&mut w, PadState::default(), 20);
+    let me = &w.sim.units[first.index as usize];
+    let chase = me.ideal_camera(w.sim.ground_rules, w.sim.views()).position;
+    assert!(
+        (w.camera().position - chase).length() > 1.0,
+        "not the chase camera"
+    );
+    assert!(!w.player_body_hidden());
+    let mut ticks = 0;
+    while w.sim.unit(w.player).is_none() {
+        run_ticks(&mut w, PadState::default(), 1);
+        ticks += 1;
+        assert!(ticks < 3000, "the player never respawned");
+    }
+    assert!(w.death_cam.is_none(), "the respawn ends it");
+
+    // An enemy's blast: its thrower is the killer followed.
+    let enemy = w
+        .sim
+        .spawn(&core::unit::UnitSpec::trooper(
+            1,
+            Vec3::new(0.0, 0.0, -15.0),
+        ))
+        .unwrap();
+    run_ticks(&mut w, PadState::default(), 1);
+    let me = w.player;
+    let pos = w.sim.unit(me).unwrap().soldier.pos;
+    let lethal = core::weapon::ExplosionClass {
+        damage: 10_000.0,
+        damage_outer: 10_000.0,
+        ..Default::default()
+    };
+    w.sim.explode(&lethal, pos, Some(enemy), Some(1));
+    assert!(w.sim.unit(me).is_none(), "the blast killed the player");
+    run_ticks(&mut w, PadState::default(), 1);
+    assert_eq!(w.death_cam.expect("started").killer, Some(enemy));
+}
+
+/// Space maps keep their own death flow: a death there keeps the chase
+/// camera.
+#[test]
+fn a_space_map_death_keeps_the_chase_camera() {
+    let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    // Only the space scripts add landing regions.
+    w.sim
+        .landing_regions
+        .push(core::region::Region::sphere(Vec3::ZERO, 10.0));
+    run_ticks(&mut w, PadState::default(), 10);
+    w.sim
+        .kill_environment(w.player, core::sim::DeathCause::Suicide);
+    run_ticks(&mut w, PadState::default(), 30);
+    assert!(w.death_cam.is_none());
 }

@@ -715,13 +715,13 @@ fn the_jet_classes_carry_their_disc_numbers() {
             [1.5, 1.25, 1.25],
         ),
         // BF1 on BF2's rules: its own numbers, the twin's JetAcceleration
-        // and jet row.
+        // and jet row; a hover class pays BF1's net cost 0.2 - 0.1.
         (
             "bf1",
             "rep_inf_jet_trooper",
             [5.0, 8.0, 30.0],
             true,
-            [0.2, 0.25, 0.1, 0.24, 0.0],
+            [0.1, 0.25, 0.1, 0.24, 0.0],
             [1.5, 1.25, 1.25],
         ),
         (
@@ -769,6 +769,52 @@ fn the_jet_classes_carry_their_disc_numbers() {
     assert_eq!((obi.jet_jump, obi.jet_energy_drain), (10.0, 40.0));
     let vader = game::roster::soldier_constants(&bf2, "imp_hero_darthvader");
     assert!(vader.saber && vader.jet_hover);
+}
+
+/// Playtest 2026-11-05 B4: a BF1 hover class pays its disc JetFuelCost less
+/// its JetFuelRechargeRate in flight (BF1 refills in the hover; BF2's rule
+/// does not), so the jet trooper flies 7.5 s from full and 2.5 s from the
+/// spawn's half tank, as on BF1. Leap classes and BF2 classes keep the disc
+/// cost.
+#[test]
+fn bf1_hover_classes_keep_bf1s_net_jet_drain() {
+    let Some(dir) = classes_dir() else { return };
+    let mut bf1 = load_classdb_all(&dir, "bf1");
+    let bf2 = load_classdb_all(&dir, "bf2");
+    let natives = game::assets::baked_root().join("classes");
+    match game::native_teams::native_side(&natives, "bf1", "geo_inf_geonosian") {
+        Some((_, file)) => {
+            bf1.load(&file).expect("native classes");
+        }
+        None => eprintln!("SKIP geo_inf_geonosian: no baked native classes"),
+    }
+    for class in ["rep_inf_jet_trooper", "geo_inf_geonosian"] {
+        if bf1.get(class).is_none() && class.starts_with("geo_") {
+            continue;
+        }
+        let c = game::roster::soldier_constants(&bf1, class);
+        let cost = bf1.prop_f32(class, "JetFuelCost").expect("cost");
+        let recharge = bf1
+            .prop_f32(class, "JetFuelRechargeRate")
+            .expect("recharge");
+        assert!(c.jet_hover, "{class}");
+        assert!(
+            (c.jet_fuel_cost - (cost - recharge)).abs() < 1e-6,
+            "{class}"
+        );
+    }
+    let c = game::roster::soldier_constants(&bf1, "rep_inf_jet_trooper");
+    let full = (1.0 - c.jet_fuel_initial) / c.jet_fuel_cost;
+    let spawn = (0.5 - c.jet_fuel_initial) / c.jet_fuel_cost;
+    assert!((full - 7.5).abs() < 1e-3 && (spawn - 2.5).abs() < 1e-3);
+    for class in ["imp_inf_dark_trooper", "imp_inf_dark_troopersnow"] {
+        assert_eq!(
+            game::roster::soldier_constants(&bf1, class).jet_fuel_cost,
+            0.0
+        );
+    }
+    let ep3 = game::roster::soldier_constants(&bf2, "rep_inf_ep3_jettrooper");
+    assert_eq!(ep3.jet_fuel_cost, 0.16);
 }
 
 /// The borrowed BF1 numbers are BF2's twins' own (re-jetpack.md §12).
@@ -1945,8 +1991,7 @@ fn fielded_classes_hold_their_sidearm_and_grenades() {
                         c.class
                     );
                     assert!(
-                        !h.weapon.name.contains("award")
-                            || h.weapon.guided.as_ref().is_some_and(|g| g.requires_award),
+                        !h.weapon.name.contains("award") || h.weapon.unlock_medal().is_some(),
                         "{}: {}",
                         c.class,
                         h.weapon.name

@@ -311,7 +311,8 @@ impl Drop for MusicVoice {
 }
 
 impl crate::Audio {
-    /// Start a take, 2-D, at `volume_db`; `looping` wraps it at its end.
+    /// Start a take on [`crate::Bus::Game`], 2-D, at `volume_db`; `looping`
+    /// wraps it at its end.
     pub fn play_stream(
         &mut self,
         take: StreamTake,
@@ -327,7 +328,7 @@ impl crate::Audio {
                 data = data.loop_region(..);
             }
             let inner = self
-                .manager
+                .game
                 .play(data)
                 .map_err(|e| anyhow::anyhow!("music stream: {e}"))?;
             Ok(MusicVoice { inner })

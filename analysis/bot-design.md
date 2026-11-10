@@ -211,7 +211,11 @@ a running fight, boarding or unstick walk and the capture queued behind comes ba
 - **Knowledge is perception** [C the six contacts, kept]. Two exceptions exist and stay, both coarse: the commander
   knows who owns each post, and the hunt knows the enemy's HUB, not his position [C `route::retarget_hunt`]. The
   Team board adds one: a contact held by a friend within 20 m is passed on as "heard" - walked toward and aimed
-  at, never fired at unseen.
+  at, never fired at unseen. A heard or told point and a lost sighting are pitched at only when the sight ray
+  (the bolt's own, terrain + ORDNANCE) reaches the point; otherwise they are faced with the gun level [C
+  `perception::can_aim`; playtest C4, a Docks platform sniper staring down through its floor]. The holder's idle
+  look at its nearest enemy is yaw-only (always a Travel, gun level); a sniper on its spot watches down its lane
+  unless that enemy is in clear sight. Ground rounds only: a space round's foot bots aim as before.
 
 ### 4.2 Commander - kept
 The PS2's Conquest goal as card CONT built it (4c1460d): one enemy post drawn by its authored value and kept until
@@ -249,7 +253,7 @@ formation or a plan.
 
 | behaviour | entered when | it asks for | it ends when | at least | the PS2's |
 |---|---|---|---|---|---|
-| Travel | an order with a destination, nobody to fight | move: the order's point over the route (a capture's last leg ends at a drawn point of the post's region [C PARR]); aim: none, the gun level | arrived; a threat; a new order | 1 think | the trooper agent's walk |
+| Travel | an order with a destination, nobody to fight | move: the order's point over the route (a capture's last leg ends at a drawn point of the post's region [C PARR]); aim: none, the gun level - and, while it walks, none at a target it cannot fight: a rider no weapon of its hurts, a target beyond its longest weapon range + 10 m, a told record, a remembered rider (playtest C3; ground rounds) | arrived; a threat; a new order | 1 think | the trooper agent's walk |
 | Fight | the threat list's best target is seen (or was, within the tier's memory) inside weapon range + 10 m [P 4.2] | the Tactician's position for (target, weapon), body to the target; aim at it, fire free | no target, or it is beyond weapon range + 10 m, for 2 s (OURS; the PS2 at once); then what it interrupted | 2 s (PS2 spells: median 2.2-3.4 s [P 4.11]) | combat agent, state 5 |
 | Investigate | an enemy heard within min(its radius, 30) m; out of a fight, a hit by an attacker inside view distance [P 4.1]; the target lost from sight (D14) | walk to the point, facing it; fire when seen | Fight when seen; at the point two looks of 0.4 s; after 10 s [P 4.2] | 1 s | combat states 2-4. **Built on a patch, measured, NOT TAKEN** (cards FGHT, FGHT2; re-soldier-ai 15.2): it runs at the PS2's share of time and close contact does not move (Kamino 3.5 -> 3.2 %), and on Polis Massa a team mills over a sniper it cannot reach (deaths a minute 18.7 -> 13.8, last-resort respawns 10 -> 27 with the storey rule and a 10 s pause) |
 | Evade | inside a grenade's warning radius (the tier's chance and delay [C `hazard_flee`]); out of a fight, a shot passing within 7.5 m or a hit by an attacker out of view [P 4.1] | 20 m from the point, or 3 m past the radius; or a roll (the PS2 rolls when 4 m are clear, 1 in 2 [P 4.1]; by tier, OURS) | done, or after 2 s [P 4.2] | runs to its end | combat state 6. The grenade entry is built; the passing-shot entry was **built on a patch, measured, NOT TAKEN** (re-soldier-ai 15.3: without the PS2's skill delay, pinball windows on the Death Star 1.5 -> 4.0 %, the PS2 1.5) |
@@ -380,7 +384,10 @@ round on and round what, an arrived latch, the progress anchors.
 ### 4.8 Gunner - kept, in one place; the only writer of the look sticks and the trigger
 - **Target:** the top of the threat list with the PS2's hysteresis (1.5 s, +10 [C `perception::choose_target`]);
   the tier adds priorities (section 7).
-- **Aim:** the tracker and the tracked-position error (re-ai-difficulty 4.2-4.3 [C]) - unchanged.
+- **Aim:** the tracker and the tracked-position error (re-ai-difficulty 4.2-4.3 [C]) - unchanged, but a
+  remembered point the sight ray does not reach is faced level, not pitched at (4.1, `perception::can_aim`), and
+  a point almost straight behind is slewed round the vertical, not over the pole (`gunner_foot::slew`, OURS).
+  Both are ground-round rules (not `Sim::space_round`).
 - **Trigger:** the tier's cone and reaction time (D9; today 2 degrees, and 5-15 ticks from the contact's first
   sighting or hearing), bursts and taps [C STTAP], no shot with a friend in the line [C FFLN; D4], under the
   behaviour's fire permission (free / hold / at a point).
@@ -535,6 +542,9 @@ seeds before TCMP changes anything.
 bullets is a cheap way to do this. We should make the competition actually stiffer, not just give the enemy better
 weapons"): no `Tier::human_damage`, no `human_damage_on` host option. The human-target preference (pressure) is a
 different lever, whom a bot picks, and stays.
+2026-11-10 (playtest 2026-11-05 B1): the same rule now covers the head: a bot's head ×3 and vehicle
+critical-prim ×4 are gone at every tier on ground rounds (they were Hard's and Elite's, the PS2's level-3
+gate). Space rounds are unchanged. `Sim::hit_scale`.
 
 **2026-10-28 (the maintainer), card DTEAM [ours]:** only humans change bot skill, per team (`skill::team_skill`). A team's
 human surplus (its humans minus the other's, never below 0, capped at 3) lowers its own bots by the tier's offset

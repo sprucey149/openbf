@@ -73,8 +73,13 @@ pub use rotating::PREVIOUS;
 /// 2026-10-28, building turrets): every hit on a vehicle's or turret's pool
 /// the human deals or takes in his ride (`vhit`). 13 (issue #58): a unit's
 /// remote droid target (`target_droid`). 15: space assault state and flyer
-/// telemetry in world frame (`space`, `flyer`). An older file still reads.
-pub const SCHEMA: u32 = 15;
+/// telemetry in world frame (`space`, `flyer`). 16 (#142): the human's raw
+/// left stick as gilrs reports it, before the deadzone and the range scale
+/// (`stick_raw`), and the travel the game took as a full push on each axis
+/// that tick (`stick_full`): a pad that walks slowly shows a peak under 0.9
+/// there.
+/// An older file still reads.
+pub const SCHEMA: u32 = 16;
 /// Ticks between two unit frames (0.5 s).
 pub const UNIT_PERIOD: u64 = core::TICK_HZ as u64 / 2;
 /// Ticks between two world frames (2 s).
@@ -257,6 +262,14 @@ pub struct HumanRow {
     /// (schema 14).
     #[serde(default)]
     pub combo: u32,
+    /// The left stick as gilrs gave it (schema 16): before the deadzone and
+    /// the range scale; 0 without a pad. `stick_full` is the travel that
+    /// read as a full push on each axis (`input::StickRange::full`, or
+    /// `STICK_FULL` in a seat and in space); 0 without a pad.
+    #[serde(default)]
+    pub stick_raw: [f32; 2],
+    #[serde(default)]
+    pub stick_full: [f32; 2],
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
@@ -738,6 +751,17 @@ pub struct Ring {
     hitches: Option<Arc<Mutex<crate::frame_profile::Record>>>,
     /// Card DPRX: the match-long tally of the human or the proxy.
     session: session::Tally,
+    /// The human's raw left stick and its full-push travel this tick (#142).
+    stick: ([f32; 2], [f32; 2]),
+}
+
+/// A stick value to three places (the pad's own resolution is ~1/256).
+fn r3(v: f32) -> f32 {
+    if v.is_finite() {
+        (v * 1000.0).round() / 1000.0
+    } else {
+        0.0
+    }
 }
 
 fn r2(v: f32) -> f32 {
@@ -816,6 +840,7 @@ impl Ring {
             alarm: Alarm::default(),
             hitches: None,
             session: session::Tally::default(),
+            stick: ([0.0; 2], [0.0; 2]),
         }
     }
 
@@ -1027,7 +1052,7 @@ impl Ring {
         }
     }
 
-    fn human_row(walk: &WalkSim, pad: PadState) -> HumanRow {
+    fn human_row(walk: &WalkSim, pad: PadState, stick: ([f32; 2], [f32; 2])) -> HumanRow {
         let sim = &walk.sim;
         let u = &sim.units[walk.player.index as usize];
         let cam = walk.camera();
@@ -1063,6 +1088,8 @@ impl Ring {
             seat: u.mount.map_or(0, |m| m.seat),
             edges: sim.press_edges_of(walk.player.index as usize),
             combo: combo_state_hash(sim, u),
+            stick_raw: [r3(stick.0[0]), r3(stick.0[1])],
+            stick_full: [r3(stick.1[0]), r3(stick.1[1])],
         }
     }
 
@@ -1103,7 +1130,7 @@ impl Ring {
         let mut alarm = false;
         if let Some(u) = human {
             let pad = pad.unwrap_or_default();
-            let row = Ring::human_row(walk, pad);
+            let row = Ring::human_row(walk, pad, self.stick);
             *self.human_fast.next() = row;
             if t.is_multiple_of(UNIT_PERIOD) {
                 *self.human_slow.next() = row;
@@ -1809,6 +1836,12 @@ impl BlackBox {
         let names = names_of(walk);
         ring.names.classes = names.classes;
         ring.names.weapons = names.weapons;
+    }
+
+    /// The human's left stick as gilrs gave it this frame and the travel the
+    /// game took as a full push (#142); read into the next human row.
+    pub fn stick(&mut self, raw: [f32; 2], full: [f32; 2]) {
+        locked(&self.ring).stick = (raw, full);
     }
 
     /// Add a `key=value` line to the header's environment list (a headless

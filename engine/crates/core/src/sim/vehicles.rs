@@ -610,8 +610,10 @@ impl Sim {
     /// ([`Event::Kill`], a team kill if friendly, a suicide for a rider who
     /// destroyed his own ride); `None` (a crash into the world): a death with
     /// no killer ([`DeathCause::VehicleDestroyed`]). A ticket each, as any
-    /// death. The blast comes first with the riders still seated, so it
-    /// spares them (§5); it does not gather the dying vehicle itself, nor
+    /// death. Each rider first takes this tick's carried pose, so he dies
+    /// where he sits: the origin, or a building turret gunner's seat. The
+    /// blast comes first with the riders still seated, so it spares them
+    /// (§5); it does not gather the dying vehicle itself, nor
     /// the riders of a dying building turret (the PS2's turret path is not
     /// read; they die in the loop below either way).
     pub fn destroy_vehicle(&mut self, h: VehicleHandle, killer: Option<UnitHandle>) {
@@ -619,17 +621,20 @@ impl Sim {
             return;
         };
         let (class, pos, vel, team) = (v.class, v.pos, v.vel, v.team);
-        let seated = |kind: fn(SeatKind) -> bool| -> Vec<UnitHandle> {
+        // Each rider with where he sits (`rider_pose`), so he dies there.
+        let seated = |kind: fn(SeatKind) -> bool| -> Vec<(UnitHandle, Vec3)> {
             v.seats
                 .iter()
-                .filter(|s| kind(s.kind))
-                .filter_map(|s| s.occupant)
+                .enumerate()
+                .filter(|(_, s)| kind(s.kind))
+                .filter_map(|(i, s)| Some((s.occupant?, self.rider_pose(v, i as u8).0)))
                 .collect()
         };
         let mut riders = seated(|k| matches!(k, SeatKind::Gunner(_)));
         riders.extend(seated(|k| matches!(k, SeatKind::Passenger(_))));
-        let pilot = seated(|k| k == SeatKind::Pilot).first().copied();
-        riders.extend(pilot);
+        let pilot_seat = seated(|k| k == SeatKind::Pilot).first().copied();
+        let pilot = pilot_seat.map(|(u, _)| u);
+        riders.extend(pilot_seat);
         self.space_flyer_destroyed(h, killer);
         if self.vehicles[h.index as usize].kind == VehicleKind::Flyer {
             self.vehicles[h.index as usize].flyer.phase = FlightPhase::Crashed;
@@ -655,9 +660,9 @@ impl Sim {
                 Some(super::blast::BlastSource::Vehicle(h)),
             );
         }
-        for u in riders {
+        for (u, at) in riders {
             if let Some(r) = self.unit_mut(u) {
-                r.soldier.pos = pos;
+                r.soldier.pos = at;
             }
             match killer {
                 Some(k) => {

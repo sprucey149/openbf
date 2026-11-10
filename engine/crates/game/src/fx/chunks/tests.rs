@@ -670,3 +670,83 @@ fn a_piece_without_baked_launch_nodes_keeps_its_original_origin() {
     );
     assert_eq!(piece(&c).model().w_axis.truncate(), Vec3::X * 10.0);
 }
+
+/// A class db from in-memory classes, through the real loader.
+fn db_of(defs: &[ClassDef]) -> ClassDb {
+    let path = std::env::temp_dir().join(format!(
+        "openbf-chunks-{}-{:?}.ron",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    std::fs::write(&path, ron::to_string(defs).unwrap()).unwrap();
+    let mut db = ClassDb::default();
+    db.load(&path).unwrap();
+    std::fs::remove_file(&path).unwrap();
+    db
+}
+
+#[test]
+fn ground_rules_throw_no_explosion_debris_for_a_class_without_chunks() {
+    let named = |name: &str, base: &str, props: &[(&str, &str)]| ClassDef {
+        name: name.into(),
+        base: base.into(),
+        ..class(props)
+    };
+    let db = db_of(&[
+        named("tur_x", "turret", &[("ExplosionDestruct", "tur_x_exp")]),
+        named(
+            "tur_x_exp",
+            "explosion",
+            &[("ChunkGeometryName", "tur_x_chunk"), ("NumChunks", "9")],
+        ),
+    ]);
+    let mut walk = WalkSim::new(1, Vec3::ZERO, None);
+    walk.vehicle_classes = vec!["tur_x".into()];
+    walk.sim.events.push(Event::VehicleDestroyed {
+        vehicle: core::vehicle::VehicleHandle { index: 0, gen: 0 },
+        class: 0,
+        pos: Vec3::Y * 10.0,
+        vel: Vec3::ZERO,
+        killer: None,
+    });
+    for (space, pieces) in [(false, 0), (true, 9)] {
+        let mut c = Chunks::load_for(&db, &["tur_x".into()], &[], Era::Bf2, space);
+        c.tick(&walk, None);
+        assert_eq!(c.len(), pieces, "space {space}");
+    }
+}
+
+#[test]
+fn ground_settle_ray_ignores_vehicle_hulls() {
+    use core::collision::HullPart;
+    for space in [false, true] {
+        let mut s = spec(Prim::Sphere(0.5));
+        s.gravity = Vec3::ZERO;
+        let mut c = chunks(s);
+        c.space = space;
+        let mut walk = WalkSim::new(1, Vec3::ZERO, None);
+        walk.sim.heightfield = Some(core::heightfield::Heightfield {
+            size: 2,
+            unit: 100.0,
+            offset_x: 50.0,
+            offset_z: 50.0,
+            heights: vec![-100.0; 4],
+        });
+        let hull = HullPart::new(
+            Mat4::IDENTITY,
+            Shape::Box {
+                half: Vec3::new(5.0, 0.5, 5.0),
+            },
+            Layers::SOLDIER | Layers::VEHICLE,
+        );
+        walk.sim.collision.set_hull(
+            core::vehicle::VehicleHandle { index: 1, gen: 0 },
+            &[hull],
+            Mat4::IDENTITY,
+        );
+        drop(&mut c, Vec3::Y * 0.8, Vec3::ZERO);
+        c.live[0][0].count = 1;
+        c.tick(&walk, None);
+        assert_eq!(piece(&c).moving, !space, "space {space}");
+    }
+}

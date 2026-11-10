@@ -859,7 +859,13 @@ impl Fx {
             names.extend(walk.sim.station_classes.iter().map(|s| s.name.clone()));
             names.sort();
             names.dedup();
-            fx.chunks = chunks::Chunks::load(&db, &names, &lib.model_dirs, lib.era);
+            fx.chunks = chunks::Chunks::load_for(
+                &db,
+                &names,
+                &lib.model_dirs,
+                lib.era,
+                walk.space_battle(),
+            );
             fx.force = force::State::load(&db, &walk.sim);
             fx.water_contact.load(&db);
         }

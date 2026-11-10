@@ -94,18 +94,18 @@ Addresses are BF2 (SWBFRNT2.ELF).
 
 ## 5. The FULL contact (FUN_001d7740)
 
-PS2 decompile trace (`SWBFRNT2.ELF-decomp.c` lines 84137–84350):
-- Layer checks (lines 84175–84195):
-  - Layer 2 (Soldier): returns 1 immediately (chunks ignore soldiers).
-  - Layer 8 (Vehicle) and 0x10 (Building): checks ghost bit at slot +0x50; if ghost, returns 1. Live vehicle hulls and building bodies are valid collision targets.
+B2 lines 84822–85112 (`SWBFRNT2.ELF-decomp.c`):
+- Layer checks (84867–84879):
+  - Layer 2 (Soldier): returns at once; chunks ignore soldiers.
+  - Layer 8 (Vehicle) and 0x10 (Building): a ghosted object (its +0x50 test) is skipped; live vehicle hulls and
+    building bodies are contact targets.
 - A chunk takes one impulse per tick (the +0x370 flag).
 - At the contact point: vp = v + ω×r, vn = vp·n, t = −unit(vp − n·vn).
-- **Over budget on terrain.** (lines 84260–84275):
-  *(decompiler detail omitted)*
-  Terrain (0x80) respects the budget check (`ChunkTerrainCollisions` at +0x460 vs count at +0x461):
+- **Over budget on terrain** (84938–84957). When count (+0x461) has reached `ChunkTerrainCollisions` (+0x460) and the
+  contact is not a vehicle (8) or a building (0x10):
   - when count == budget, play ChunkTerrainEffect at (p.x, terrain height, p.z) and count + 1;
   - either way, return with no impulse and no push-out.
-  Crucially, Buildings (0x10) and Vehicles (8) are explicitly excluded from this budget suppression (*(decompiler detail omitted)*). Buildings and live vehicle hulls always receive contact impulse and bounce!
+  Vehicles and buildings are left out of this test, so they always bounce a chunk.
 - **Otherwise:**
   - j = (−e·vn − vn) / (1/m + ((I⁻¹(r×n))×r)·n)
   - v += n·j/m; L += r×(n·j); ω = I⁻¹L
@@ -130,6 +130,12 @@ PS2 decompile trace (`SWBFRNT2.ELF-decomp.c` lines 84137–84350):
 
 **[ours]**
 - Contacts come from the terrain, the map's static bodies, and live vehicle hulls: `Layers::SOLDIER | Layers::VEHICLE` with `HullFilter::All` queried through `sphere_contacts_filtered` / `shape_contacts_filtered`. Per the PS2 trace, bodies and live vehicle hulls are excluded from the terrain collision budget suppression and receive bounce impulse. Chunks never damage units.
+- Ground modes keep the PS2 floor rays: the settle ray and the below-terrain ray see the map's bodies only
+  (`HullFilter::Static`; §4's masks 0x90 and 0x10 hold no vehicle), so a piece never rests on a hull that drives
+  away. Space rounds cast them at every hull.
+- A class with no chunk slot of its own throws nothing on the ground. In space it borrows its explosion class's
+  slot, `NumChunks` copies (at most 10), on the vehicle law. The explosion's own debris law (`re-vehicle-death.md`
+  §6.1: random direction, ChunkSpeed as a range, no bounce, 5 s) is not ported; `replace:` both with that law.
 - SIMPLE uses the FULL handler, since SIMPLE is never authored.
 - The push-out ignores the chunk's own collision layer, which is not traced.
 - Historical before issue #80: droid chunks used mesh-bounds spheres and ignored `ChunkNodeName`.

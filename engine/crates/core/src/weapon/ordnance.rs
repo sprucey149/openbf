@@ -160,9 +160,9 @@ impl OrdnanceClass {
     /// BF2 class a weapon names as its `SecondaryOrdnanceName` is one
     /// (`com_weap_inf_shotgun_tracer`, `com_weap_inf_chaingun_tracer`, ...:
     /// `MaxDamage 0`, no scales; `analysis/re-ordnance-kinds.md` §7). The
-    /// exception on the discs is the probe droid's sonic blaster, whose
-    /// "secondary" is a real 100-damage round, so the spawn is gated on this
-    /// test rather than on the key's presence.
+    /// exception on the discs is BF2's Imperial officer's sonic blaster,
+    /// whose "secondary" is a real 100-damage fat ray, so the tracer handling
+    /// is gated on this test rather than on the key's presence.
     pub fn is_tracer(&self) -> bool {
         self.max_damage <= 0.0
     }

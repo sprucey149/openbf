@@ -156,3 +156,68 @@ fn every_fielded_bf2_class_talks_with_its_own_lines() {
     assert!(checked > 0 && typed > 0, "no mission checked");
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// Playtest C2: an enemy trooper who acquires the player's hero says the
+/// line typed for that hero ("It's Darth Maul!"), not the side line. The
+/// subject and the object are both the player, so the context is LEFT and
+/// under 10 m with the hero's type; the PS2's sort lets the typed line,
+/// parsed after `left`, win the tie.
+#[test]
+fn enemy_troopers_name_each_hero_they_have_a_line_for() {
+    let root = game::assets::baked_root();
+    let classes = root.join("classes");
+    if !classes.join("bf2_rep.ron").exists() {
+        eprintln!("SKIP: no baked classes at {}", classes.display());
+        return;
+    }
+    let missions = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"));
+    let mut wrong = Vec::new();
+    let mut named = 0;
+    for name in SHOWCASE.iter().copied().chain(["bf2_cor1_con"]) {
+        for era in ["", "_cw"] {
+            let path = missions.join(format!("{name}{era}.ron"));
+            if !path.exists() {
+                continue;
+            }
+            let m = MissionDef::load(&path).expect("mission");
+            let Some(mut lib) = SoundLib::load_for(&root.join(&m.map), &m) else {
+                eprintln!("SKIP {}: no sound bank", m.map);
+                continue;
+            };
+            let f = m.factions();
+            let (rosters, _) = FactionRoster::pair(
+                &classes,
+                &m.source_game,
+                [f[0].as_str(), f[1].as_str()],
+                Some(&m),
+            )
+            .expect("rosters");
+            for r in &rosters {
+                for c in &r.classes {
+                    let v = &c.cries.vo;
+                    for e in v.entries.iter().filter(|e| {
+                        e.event == vo::ACQUIRED_TARGET
+                            && e.cond & 0xffff == 0
+                            && (181..=199).contains(&(e.cond >> 16))
+                    }) {
+                        let hero = vo::Body {
+                            unit_type: (e.cond >> 16) as u8,
+                            ..vo::Body::default()
+                        };
+                        let ctx = vo::context(&hero, Some(&hero));
+                        let pick = vo::best(v, vo::ACQUIRED_TARGET, ctx).map(|p| &p.sound);
+                        named += 1;
+                        if pick != Some(&e.sound) {
+                            wrong.push(format!("{} {}: {pick:?} not {}", m.map, c.class, e.sound));
+                        } else if lib.voice_take(&e.sound).is_none() {
+                            wrong.push(format!("{} {}: {} has no take", m.map, c.class, e.sound));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    eprintln!("{named} hero lines checked");
+    assert!(named > 0, "no hero line checked");
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}

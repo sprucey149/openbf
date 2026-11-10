@@ -131,6 +131,9 @@ impl Sim {
                 self.destroy_vehicle(handle, killer);
                 continue;
             }
+            // A bot-flown craft stuck in flight is destroyed in every mode,
+            // as both PS2 fly agents kill a stuck craft (re-space-assault
+            // §10); a ticket each rider, and its pad is freed.
             if v.flyer.ai.wedges >= crate::ai::flyer_drive::WEDGED_GIVEUP
                 && v.flyer.phase != FlightPhase::Landed
             {
@@ -436,6 +439,28 @@ mod tests {
             sim.unit(pilot).is_none_or(|u| !u.alive),
             "the crew goes with it"
         );
+    }
+
+    /// The stuck kill runs with no space mode installed (a Conquest round):
+    /// a craft wedged too often in flight is destroyed and its pilot costs
+    /// a ticket; a parked one is left alone.
+    #[test]
+    fn a_wedged_ship_in_flight_dies_in_any_mode_and_a_parked_one_does_not() {
+        use crate::ai::flyer_drive::WEDGED_GIVEUP;
+        let (mut sim, h) = bf2_world(true);
+        assert!(!sim.space_round());
+        sim.vehicle_mut(h).unwrap().flyer.ai.wedges = WEDGED_GIVEUP;
+        let tickets = sim.battle.teams[0].tickets();
+        sim.step(&[PadState::default()]);
+        assert!(sim.vehicle(h).is_none(), "destroyed");
+        assert_eq!(sim.battle.teams[0].tickets(), tickets - 1);
+
+        let (mut sim, h) = bf2_world(true);
+        let v = sim.vehicle_mut(h).unwrap();
+        v.flyer.phase = FlightPhase::Landed;
+        v.flyer.ai.wedges = WEDGED_GIVEUP;
+        sim.step(&[PadState::default()]);
+        assert!(sim.vehicle(h).is_some(), "parked");
     }
 
     #[test]

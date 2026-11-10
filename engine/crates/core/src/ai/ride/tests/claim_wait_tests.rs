@@ -2,6 +2,17 @@
 use super::*;
 use crate::ai::state::BoardMaintenance;
 
+/// A boarder slow enough that a walk from the edge of the claim range
+/// outlasts the old eight-second cutoff, whichever way it faces (playtest
+/// C3 turned walking bots to face their walk, at full forward speed).
+fn slow_walker() -> crate::soldier::SoldierConstants {
+    crate::soldier::SoldierConstants {
+        max_speed: 6.0,
+        max_strafe_speed: 6.0,
+        ..Default::default()
+    }
+}
+
 #[test]
 fn cwait_natural_long_approaches_and_departure_controls() {
     for rules in [GroundRules::Bf1, GroundRules::Bf2] {
@@ -24,6 +35,7 @@ fn cwait_natural_long_approaches_and_departure_controls() {
                     let other = distance.map(|d| {
                         s.spawn(&UnitSpec {
                             controller: Controller::Ai,
+                            consts: slow_walker(),
                             ..UnitSpec::trooper(0, start + Vec3::new(d, -start.y, 0.0))
                         })
                         .unwrap()
@@ -528,6 +540,7 @@ fn cwait_natural_maintenance_clocks_hash_and_change_the_same_future() {
         let h = s
             .spawn(&UnitSpec {
                 controller: Controller::Ai,
+                consts: slow_walker(),
                 ..UnitSpec::trooper(0, start + Vec3::new(70.0, -start.y, 0.0))
             })
             .unwrap();

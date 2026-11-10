@@ -387,6 +387,64 @@ mod tests {
         // 1 rad, and it comes back (a wobble, not a drift).
         assert!(worst < 0.6, "bounded about the launch line: {worst}");
         assert!(Vec3::Z.angle_between(m.dir) < 0.6);
+        // Once the ramp is up, the turn (2/30 rad a tick) snaps the round
+        // back onto the launch line every tick and the waver then pushes it
+        // off by at most |v| WaverTurn dt = sqrt(2) x 0.5 / 30 rad: a REP
+        // torpedo flies at most 1.35 deg off its line, 3.5 m at 150 m.
+        let bound = (2.0f32).sqrt() * 0.5 / 30.0;
+        let mut m = Missile::launch(&c, Vec3::Z, 40.0, None, &mut lcg());
+        let mut g = GameLcg::new(7);
+        for tick in 0..300 {
+            m.step(&c, None, Vec3::ZERO, 1.0 / 30.0, &mut g);
+            if tick >= 30 {
+                let off = Vec3::Z.angle_between(m.dir);
+                assert!(off <= bound + 1e-4, "tick {tick}: {off} > {bound}");
+            }
+        }
+    }
+
+    /// §4.5: the port's law on the PS2's own rows (`b1_m_free.json`, round
+    /// 0xd35290: the REP torpedo of a BF1 Kashyyyk Docks round, three pairs
+    /// of consecutive updates with the ramp up, dt from the round's `life`).
+    /// The next velocity is the PS2's to the fmath tables' precision.
+    #[test]
+    fn the_rep_torpedo_follows_the_ps2s_rows() {
+        let c = rep();
+        let desired = Vec3::new(-0.703_213_63, -0.149_560_02, 0.695_070_1);
+        let rows = [
+            (
+                Vec3::new(-28.521_122, -5.864_108, 27.421_07),
+                [3.337_977_6, 5.321_653_4],
+                0.033_366,
+                Vec3::new(-28.522_078, -5.852_604_4, 27.422_386),
+            ),
+            (
+                Vec3::new(-28.406_027, -5.589_548, 27.593_555),
+                [3.804_376_8, 5.751_883],
+                0.033_366,
+                Vec3::new(-28.403_35, -5.575_078_5, 27.599_108),
+            ),
+            (
+                Vec3::new(-28.209_702, -5.397_912_5, 27.828_201),
+                [4.227_285, 6.229_598_5],
+                0.033_369,
+                Vec3::new(-28.207_468, -5.396_881, 27.830_568),
+            ),
+        ];
+        for (k, (vel, phases, dt, next)) in rows.iter().enumerate() {
+            // The PS2 carries the rotated vector itself, so its speed drifts
+            // a few mm/s under Velocity; the port holds the class speed.
+            // The row's own speed, so the direction law is what is compared.
+            let speed = vel.length();
+            let mut m = Missile::launch(&c, desired, speed, None, &mut lcg());
+            m.dir = *vel / speed;
+            m.phases = *phases;
+            m.ramp = 1.0;
+            let v = m.step(&c, None, Vec3::ZERO, *dt, &mut lcg());
+            let err = (v - *next).length();
+            println!("row {k}: {v:?} vs {next:?}, {err:.2e} m/s off");
+            assert!(err < 5e-4, "row {k}: {err}");
+        }
     }
 
     /// §4.3: BF2 ramps 20 -> 100 at 80 m/s² over a second, and a class that

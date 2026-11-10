@@ -319,6 +319,9 @@ pub struct ClassVisual {
     /// The class's other slots in the HUD (card GREN): `(slot, what to
     /// show)` for each weapon the unit holds besides the primary.
     pub held_hud: Vec<(u8, WeaponHud)>,
+    /// The held slots that are award weapons (`MedalsTypeToUnlock`), which
+    /// the class screen leaves out of its equipment list, as BF2 does.
+    pub award_slots: Vec<u8>,
     /// A droideka's shield in the secondary row (it is no held weapon).
     pub droideka_shield: Option<WeaponHud>,
     /// The model each of those slots is drawn as in the hand (card WHELD):
@@ -404,6 +407,12 @@ impl ClassVisual {
     pub fn from_roster_with_held(c: &crate::roster::ClassRoster) -> Self {
         Self {
             held_hud: c.held.iter().map(|h| (h.slot, h.hud.clone())).collect(),
+            award_slots: c
+                .held
+                .iter()
+                .filter(|h| h.weapon.unlock_medal().is_some())
+                .map(|h| h.slot)
+                .collect(),
             held_models: c
                 .held
                 .iter()
@@ -427,6 +436,7 @@ impl ClassVisual {
             weapon_geometry: c.weapon_geometry.clone(),
             weapon_hud: c.weapon_hud.clone(),
             held_hud: Vec::new(),
+            award_slots: Vec::new(),
             droideka_shield: c.droideka_shield.clone(),
             held_models: Vec::new(),
             first_person: c.first_person.clone(),
@@ -760,6 +770,11 @@ pub struct WalkSim {
     /// The end of the round once it is decided (issue #33,
     /// [`crate::round_end`]): its camera shot, banner and stats screens.
     pub round_end: Option<crate::round_end::RoundEnd>,
+    /// The death camera while the player is dead on a ground map
+    /// ([`death_camera`]; presentation only).
+    pub death_cam: Option<DeathCam>,
+    /// The life whose death the death camera last noticed (once per life).
+    death_seen: Option<UnitHandle>,
     /// The drawn frame's blend between the last two ticks (card RINT;
     /// presentation only - the sim never reads it): [`WalkSim::advance_with`]
     /// keeps the pose each tick starts from.
@@ -890,6 +905,8 @@ impl WalkSim {
             backdrop: None,
             end_shots: Vec::new(),
             round_end: None,
+            death_cam: None,
+            death_seen: None,
             teams,
             native_teams: Default::default(),
             blend: crate::render_blend::Blend::default(),
@@ -1120,6 +1137,13 @@ impl WalkSim {
         self.sim.units[self.player.index as usize].team
     }
 
+    /// A space battle ([`core::sim::Sim::space_round`]): the pause menu,
+    /// resume, pause audio, pad look, death flow, debris and the lost
+    /// vehicle's view keep their space behaviour there.
+    pub fn space_battle(&self) -> bool {
+        self.sim.space_round()
+    }
+
     /// Is the player on foot (alive and in no seat)? A rider is not drawn.
     pub fn player_on_foot(&self) -> bool {
         self.sim
@@ -1135,6 +1159,15 @@ impl WalkSim {
             .filter(|m| m.seat == 0)
             .and_then(|m| self.sim.vehicle(m.vehicle))
             .is_some_and(|v| v.kind == core::vehicle::VehicleKind::Flyer)
+    }
+
+    /// The controller look sensitivity a battle takes from the profile's
+    /// `value`: space battles keep the stick as it is.
+    pub fn pad_look_for_battle(&self, value: f32) -> f32 {
+        match self.space_battle() {
+            true => 1.0,
+            false => crate::profile::clamp_pad_look(value),
+        }
     }
 
     /// Is the player piloting a flyer or controlling a guided rocket?
@@ -1220,6 +1253,9 @@ impl WalkSim {
         let old_mount = self.sim.unit(self.player).and_then(|u| u.mount);
         let old_camera = self.camera();
         let kills_before = self.sim.units[self.player.index as usize].kills;
+        // A death outside the tick (a test, a menu) left its kill in the
+        // events this step clears.
+        let killer_before = self.killer_of(self.player);
         if std::mem::take(&mut self.respawn_requested) {
             let mut requested = pads.to_vec();
             if requested.is_empty() {
@@ -1264,6 +1300,8 @@ impl WalkSim {
         self.refill_after_side_change();
         self.track_class_kills(kills_before);
         self.follow_backdrop();
+        self.step_death_cam();
+        self.notice_death(&old_camera, killer_before);
         // The camera's zoom follows the player's (`re-zoom.md` §5): S and
         // the FOV ease toward their targets, and rest exactly once there.
         // A building turret's zoom is the seat's (card VTURZ); the same ease
@@ -1471,8 +1509,10 @@ pub(crate) fn turret_test_walk() -> (WalkSim, usize, usize) {
 }
 
 mod camera;
+mod death_camera;
 mod flyer_camera;
 pub use camera::DEATH_VIEW_HOLD;
+pub use death_camera::DeathCam;
 pub use flyer_camera::{FlyerCam, FLYER_CRASH_DETACH_RATE};
 
 #[cfg(test)]

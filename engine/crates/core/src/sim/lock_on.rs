@@ -21,7 +21,7 @@ pub enum LockTarget {
 }
 
 impl LockTarget {
-    fn missile(self) -> Option<MissileTarget> {
+    pub(super) fn missile(self) -> Option<MissileTarget> {
         match self {
             LockTarget::Aim(AimTarget::Unit(h)) => Some(MissileTarget::Unit(h)),
             LockTarget::Aim(AimTarget::Vehicle(h)) => Some(MissileTarget::Vehicle(h)),
@@ -236,7 +236,9 @@ impl Sim {
             let (mask, max, lose) = (c.target_kind, c.target_lock_max, c.target_lock_lose);
             let team = self.units[h.index as usize].team;
             let ray = self.flyer_ray(h);
-            let pressed = pads.get(slot).is_some_and(|p| p.pressed(buttons::RELOAD));
+            let pressed = pads
+                .get(h.index as usize)
+                .is_some_and(|p| p.pressed(buttons::RELOAD));
             let edge = pressed && !state.down;
             state.down = pressed;
             state.button = if pressed { state.button + dt } else { 0.0 };

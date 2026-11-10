@@ -621,7 +621,8 @@ impl Sim {
     }
 
     /// Grow the per-slot tables (`players`, `assist`, `magnet`,
-    /// `reticle_pick`, `spawn_choice`, `prev_spawn_bits`, `spawn_post_choice`)
+    /// `reticle_pick`, `spawn_choice`, `prev_spawn_bits`, `held_eaten`,
+    /// `spawn_post_choice`)
     /// so `slot` is addressable. They are
     /// kept the same length so a slot index is valid in all of them.
     fn reserve_slot(&mut self, slot: usize) {
@@ -632,7 +633,7 @@ impl Sim {
     }
 
     /// Re-align `assist`/`magnet`/`reticle_pick`/`spawn_choice`/`prev_spawn_bits`/
-    /// `spawn_post_choice` with
+    /// `held_eaten`/`spawn_post_choice` with
     /// `players` (callers may assign into `players` directly — it is a public
     /// field).
     pub fn sync_slot_tables(&mut self) {
@@ -644,6 +645,7 @@ impl Sim {
         self.reticle_pick.resize(n, None);
         self.spawn_choice.resize(n, 0);
         self.prev_spawn_bits.resize(n, 0);
+        self.held_eaten.resize(n, Default::default());
         self.spawn_post_choice.resize(n, None);
         self.spawn_stage.resize(n, SpawnStage::Accepted);
         self.side_choice.resize(n, SideChoice::Team1);

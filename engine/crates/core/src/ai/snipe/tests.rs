@@ -2,6 +2,8 @@
 //! left after a quiet lane, and the pistol close in.
 
 use super::*;
+use crate::ai::THINK_PERIOD;
+use crate::collision::{Body, Shape};
 use crate::cp::CpDef;
 use crate::heightfield::Heightfield;
 use crate::nav::{Arc, Hint, Hub, NavGraph, RouteTable};
@@ -9,6 +11,7 @@ use crate::region::Region;
 use crate::sim::{Event, PadState};
 use crate::unit::{Controller, SlotSpec, UnitSpec};
 use crate::weapon::WeaponClass;
+use glam::Mat4;
 
 /// A scoped rifle (the AI sniper table's class): MinRange `min`.
 fn sniper_rifle(min: f32) -> WeaponClass {
@@ -330,6 +333,69 @@ fn a_sniper_under_a_spot_it_cannot_climb_to_gives_it_up() {
         }
     }
     panic!("picked {picked}: still on its way to the perch after 40 s");
+}
+
+/// Playtest C4: a sniper on its spot with nothing in sight watches down its
+/// lane — the lane's farthest point, the enemy post at x = 100 — not the
+/// nearest enemy wherever it is. An enemy that steps behind a wall is not
+/// stared at through it: the hold keeps the lane look and the gun stays
+/// level.
+#[test]
+fn a_sniper_on_its_spot_looks_down_its_lane() {
+    let _stand = crate::ai::tests::all_stand();
+    let (mut sim, w) = line_scene();
+    let h = sniper(&mut sim, w, FAR);
+    let u = sim.unit(h).expect("alive").clone();
+    let lane_far = Vec3::new(100.0, 1.0, 0.0);
+    assert_eq!(pick(&sim, h, &u, None).expect("a spot").look, lane_far);
+    for _ in 0..TICK_HZ as u64 {
+        sim.step(&[PadState::default()]);
+    }
+    let u = sim.unit(h).expect("alive");
+    assert!(spot_of(&sim, h).is_some_and(|c| c.arrived && c.spot == FAR));
+    assert_eq!(
+        u.ai.hold.expect("holding").look,
+        lane_far,
+        "no enemy: the lane"
+    );
+    // An enemy 10 m off behind a wall: unseen, its way blocked, the lane
+    // still the look and the gun level.
+    sim.collision.push_body(Body::new(
+        Mat4::from_translation(Vec3::new(60.0, 5.0, 0.0)),
+        Shape::Box {
+            half: Vec3::new(0.5, 5.0, 5.0),
+        },
+    ));
+    let e = sim
+        .spawn(&UnitSpec::trooper(1, Vec3::new(65.0, 0.0, 0.0)))
+        .expect("enemy");
+    for _ in 0..2 * THINK_PERIOD {
+        sim.step(&[PadState::default()]);
+        sim.unit_mut(e).expect("enemy").health.cur = 1e9;
+        let u = sim.unit(h).expect("alive");
+        assert!(
+            u.soldier.pitch.abs() < 0.2,
+            "pitched at a wall: {}",
+            u.soldier.pitch
+        );
+    }
+    let u = sim.unit(h).expect("alive");
+    assert!(
+        u.ai.contacts.iter().all(Option::is_none),
+        "the wall hides it"
+    );
+    assert_eq!(u.ai.hold.expect("holding").look, lane_far, "the lane still");
+    // The wall gone (body 0, moved under the map): the holder looks at the
+    // enemy itself.
+    sim.collision
+        .move_body(0, Mat4::from_translation(Vec3::new(60.0, -50.0, 0.0)));
+    for _ in 0..2 * THINK_PERIOD {
+        sim.step(&[PadState::default()]);
+        sim.unit_mut(e).expect("enemy").health.cur = 1e9;
+    }
+    let u = sim.unit(h).expect("alive");
+    let p = sim.unit(e).expect("enemy").soldier.pos + Vec3::Y * 1.4;
+    assert_eq!(u.ai.hold.expect("holding").look, p, "in sight: the enemy");
 }
 
 /// The weapon in a sniper's hands at each distance of an enemy dummy put

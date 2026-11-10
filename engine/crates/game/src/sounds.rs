@@ -397,6 +397,9 @@ pub struct Start {
     pub bus: f32,
     /// A 2-D property: full gain in both ears, wherever it starts.
     pub flat: bool,
+    /// A menu click (bus [`SHELLFX`]): it plays on [`audio::Bus::Menu`],
+    /// heard while the pause menu holds the game's sound.
+    pub menu: bool,
 }
 
 impl Start {
@@ -611,8 +614,10 @@ pub struct SoundLib {
 /// reference states; no writer found (analysis/re-sound-distance.md `[O]`).
 pub const LISTENER_ROLLOFF: f32 = 10.0;
 
-/// The bus 0x82c7f467 (its name is not on the discs' candidate lists).
-const UNNAMED_BUS: u32 = 0x82c7_f467;
+/// The bus 0x82c7f467, `shellfx`: the menu clicks. It sits under root,
+/// outside the in-game bus the pause menu fades
+/// (`analysis/re-mix-headroom.md` 1.4).
+pub(crate) const SHELLFX: u32 = 0x82c7_f467;
 
 fn read_index(path: &Path) -> GlobalRon {
     // A missing index is normal (an unbaked group) and stays silent; one that
@@ -1456,7 +1461,12 @@ impl SoundLib {
             let pitch = (s.pitch * self.rate_mul).max(0.05);
             let ears = s.ears(listener);
             let (db, pan) = mixer_pair(ears);
-            audio.play_oneshot(&self.cache[&s.path], db, f64::from(pitch), pan);
+            let bus = if s.menu {
+                audio::Bus::Menu
+            } else {
+                audio::Bus::Game
+            };
+            audio.play_oneshot_on(bus, &self.cache[&s.path], db, f64::from(pitch), pan);
             let dist = (s.pos - listener.pos).length();
             self.note(s.hash, &s.path, s.gain, ears, pitch, dist);
             self.played += 1;

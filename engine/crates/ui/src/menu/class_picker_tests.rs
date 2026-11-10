@@ -48,10 +48,13 @@ fn class_picker_navigation_and_back_stay_inside_pause() {
         back: true,
         ..Default::default()
     };
-    assert_eq!(
-        navigate(&picker, back).1,
-        vec![MenuAction::CloseClassPicker]
-    );
+    assert_eq!(navigate(&picker, back).1, vec![MenuAction::Resume]);
+    // A space battle's Back steps out of the picker only.
+    let space = MenuModel {
+        back_steps_out: true,
+        ..picker.clone()
+    };
+    assert_eq!(navigate(&space, back).1, vec![MenuAction::CloseClassPicker]);
     assert_eq!(
         navigate(
             &picker,

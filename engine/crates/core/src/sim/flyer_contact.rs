@@ -233,7 +233,7 @@ impl Sim {
             // BF2: a craft taking off destroys a non-flying object it touches.
             // Space modes only until the rule is checked against Conquest
             // hangars, where it would destroy parked tanks and their riders.
-            let space = self.space_assault.is_some() || self.ctf.is_some();
+            let space = self.space_round();
             if let Some(o) = other.filter(|o| !o.flying && space) {
                 self.destroy_vehicle(o.handle, None);
             }

@@ -93,9 +93,9 @@ pub(super) fn aim(
             piloting
                 .then(|| led_flyer(sim, s.eye, e, speed))
                 .flatten()
-                .unwrap_or_else(|| seen_aim(sim, me, st, s.eye, e, speed, wc))
+                .unwrap_or_else(|| seen_aim(sim, me, st, s.eye, e, speed, wc, false))
         })
-        .or_else(|| droid.map(|d| droid_aim(sim, me, st, s.eye, d, speed, wc)))
+        .or_else(|| droid.map(|d| droid_aim(sim, me, st, s.eye, d, speed, wc, false)))
         .or_else(|| turret.map(|t| turret_aim(sim, me, st, s.eye, t, wc)));
     let centre = enemy
         .map(|e| e.capsule().center())

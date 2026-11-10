@@ -83,6 +83,7 @@ mod unlocks_bf1;
 mod vehicle_class;
 mod vehicle_pads;
 mod vehicle_rider;
+mod walker_enter;
 mod walker_shots;
 mod water_anim;
 mod water_floor;

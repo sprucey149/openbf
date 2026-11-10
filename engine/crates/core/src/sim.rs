@@ -33,6 +33,7 @@
 //! re-exported here; shared test fixtures stay in this facade.
 
 mod abilities;
+mod awards;
 mod beam;
 mod blast;
 mod bounds;
@@ -52,6 +53,7 @@ mod fatray;
 mod flyer_contact;
 pub(crate) mod flyer_seek;
 mod flyers;
+mod foot_lock;
 mod force;
 mod guided;
 mod guns;
@@ -107,9 +109,12 @@ pub use damage_regions::DamageRegion;
 pub use droid_death::PUSHED_DEAD_HEALTH;
 pub use droidekas::{capsule_of as droideka_capsule, FLOOR_SNAP as DROIDEKA_FLOOR_SNAP};
 pub use flyers::FlightLimits;
+pub use foot_lock::FootLock;
 pub use guns::SeatLook;
 pub use hero_bodies::HeroRiderFrames;
-pub use input::{buttons, AimTarget, InputLog, PadState, ScreenPick, LOOK_SCALE, LOOK_UNIT};
+pub use input::{
+    buttons, AimTarget, HeldEat, InputLog, PadState, ScreenPick, LOOK_SCALE, LOOK_UNIT,
+};
 pub use lock_on::{LockOn, LockTarget};
 pub use look::{LookPreview, MOUSE_STEER};
 pub use native_teams::AllySpawn;

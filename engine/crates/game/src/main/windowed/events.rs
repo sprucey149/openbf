@@ -1,10 +1,10 @@
 //! Native window lifecycle and event dispatch for the application.
 
 use super::{
-    autopilot_pad, hud_model, hud_title, load_and_upload, mouse, note_sounds, persist_setting,
+    apply_pause_action, autopilot_pad, hud_model, hud_title, load_and_upload, mouse, note_sounds,
     play_ambience, play_event_sounds, rain_splashes, record_round, spawn_model, start_take,
-    stats_pages, tracked_velocity, walk_draws, window_size, App, Arc, DrawCmd, PadState, Renderer,
-    Screen, CLEAR,
+    stats_pages, tracked_velocity, walk_draws, window_attributes, window_size_env, App, Arc,
+    DrawCmd, PadState, Renderer, Screen, CLEAR,
 };
 
 impl winit::application::ApplicationHandler for App {
@@ -14,13 +14,10 @@ impl winit::application::ApplicationHandler for App {
         }
         let window = Arc::new(
             event_loop
-                .create_window(
-                    winit::window::Window::default_attributes()
-                        .with_title("openbf")
-                        .with_inner_size(window_size()),
-                )
+                .create_window(window_attributes(window_size_env()))
                 .expect("create window"),
         );
+        self.idle = Some(super::idle::IdleInhibit::new(&window));
         let mut renderer = Renderer::new_windowed(window.clone()).expect("renderer");
         self.overlay = Some(ui::overlay::EguiOverlay::new(
             &window,
@@ -94,6 +91,8 @@ impl winit::application::ApplicationHandler for App {
     }
 
     fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+        // Released while winit's display and surface are still alive.
+        self.idle = None;
         self.release_mouse();
     }
 
@@ -202,6 +201,11 @@ impl winit::application::ApplicationHandler for App {
                 }
 
                 self.sync_grab();
+                self.sync_pause_audio();
+                let awake = super::idle::wants_idle_inhibit(self.in_battle(), self.paused);
+                if let Some(idle) = self.idle.as_mut() {
+                    idle.set(awake);
+                }
                 if matches!(self.screen, Screen::Shell) {
                     self.redraw_shell(event_loop, dt);
                     if let Some(w) = &self.window {
@@ -228,6 +232,8 @@ impl winit::application::ApplicationHandler for App {
                 let clear = self.gpu.as_ref().map_or(CLEAR, |g| g.clear);
                 let mut hud: Option<ui::hud::HudModel> = None;
                 let mut spawn: Option<ui::spawn::SpawnModel> = None;
+                // A death camera or a dead rider's held seat view is up.
+                let mut death_view = false;
                 let icons = self.current_icons();
                 let mut menu: Option<ui::menu::MenuModel> = None;
                 let edges = if self.walk.is_some() {
@@ -239,9 +245,7 @@ impl winit::application::ApplicationHandler for App {
                     if !self.pause_menu.class_picker {
                         self.paused = !self.paused;
                     }
-                    self.pause_menu.confirm = false;
-                    self.pause_menu.class_picker = false;
-                    self.pause_menu.cursor = 0;
+                    self.pause_menu.reset();
                     // Start opens the pause menu with the accept click
                     // (menuref "In battle").
                     if self.paused {
@@ -254,31 +258,55 @@ impl winit::application::ApplicationHandler for App {
                     }
                 }
                 self.sync_grab();
+                self.sync_pause_audio();
                 let camera = if self.walk.is_some() {
                     self.step_spawn_pointer(dt);
                     let pad = if self.paused {
                         self.kbm.drop_taps();
+                        game::pause::hold_for_resume(&mut self.resume_gate);
                         PadState::default()
                     } else {
-                        let (on_foot, sprinting) =
-                            self.walk.as_ref().map_or((false, false), |(w, _)| {
+                        let (on_foot, sprinting, space) =
+                            self.walk.as_ref().map_or((false, false, false), |(w, _)| {
                                 (
                                     w.player_on_foot(),
                                     w.soldier().stance == core::soldier::Stance::Sprint,
+                                    w.space_battle(),
                                 )
                             });
                         let pad = match self.autopilot {
                             true => autopilot_pad(self.walk.as_ref().map_or(0, |w| w.0.sim.tick)),
                             false => {
-                                let pad = self.sample_pad();
                                 let flying = self
                                     .walk
                                     .as_ref()
                                     .is_some_and(|(w, _)| w.player_controls_flyer());
-                                if flying {
+                                // A pilot's right stick throttles and rolls:
+                                // the look sensitivity is not his. Space
+                                // battles keep the stick as it is.
+                                let look = match &self.walk {
+                                    Some((w, _)) if !flying => w.pad_look_for_battle(
+                                        self.profile.settings.pad_look_sensitivity,
+                                    ),
+                                    Some(_) => 1.0,
+                                    None => self.profile.settings.pad_look_sensitivity,
+                                };
+                                let pad = self.sample_pad(look, on_foot && !space);
+                                if let Some(bb) = self.blackbox.as_mut() {
+                                    bb.stick(self.stick_sample.0, self.stick_sample.1);
+                                }
+                                let pad = if flying {
                                     self.kbm.flyer_pad(input::flyer_sticks(pad))
                                 } else {
                                     self.kbm.pad(pad)
+                                };
+                                // A button held through the resume waits for
+                                // its release (playtest A3); space battles
+                                // keep their input as it was.
+                                if space {
+                                    pad
+                                } else {
+                                    game::pause::resume_pad(&mut self.resume_gate, pad)
                                 }
                             }
                         };
@@ -299,9 +327,12 @@ impl winit::application::ApplicationHandler for App {
                     let mut stuck_alarm = false;
                     let mut look = PadState::default();
                     if paused {
-                        // The engines fall silent with the sim.
-                        if let Some(sl) = self.sounds.as_mut() {
-                            sl.stop_loops();
+                        // A ground battle's paused bus holds its loops where
+                        // they are; a space battle's engines stop with the sim.
+                        if !self.audio.as_ref().is_some_and(|a| a.game_paused()) {
+                            if let Some(sl) = self.sounds.as_mut() {
+                                sl.stop_loops();
+                            }
                         }
                         let model = ui::menu::MenuModel {
                             class_picker_available: walk.class_picker.is_some()
@@ -323,13 +354,19 @@ impl winit::application::ApplicationHandler for App {
                                 .as_ref()
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
+                            pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             input_icons_label: self.profile.settings.input_icons.label(),
                             icons,
                             first_person: self.profile.settings.viewpoint.is_first(),
                             cursor: self.pause_menu.cursor,
-                            respawn_confirm: self.pause_menu.confirm,
+                            // Space battles keep their flat list.
+                            page: (!walk.space_battle()).then_some(self.pause_menu.page),
+                            popup: self.pause_menu.confirm,
+                            restart_available: self.map.is_none() && self.current.is_some(),
+                            texts: game::pause::texts(&self.feed),
+                            back_steps_out: walk.space_battle(),
                             // The disc's key; English fallback is §7's label.
                             respawn_label: (walk.sim.outcome.is_none()
                                 && walk.sim.unit(walk.player).is_some())
@@ -364,16 +401,11 @@ impl winit::application::ApplicationHandler for App {
                             input,
                             adjust & game::kbm::MENU_ADJUST_LEFT != 0,
                             adjust & game::kbm::MENU_ADJUST_RIGHT != 0,
-                            model.respawn_confirm || model.class_choices.is_some(),
+                            model.popup.is_some() || model.class_choices.is_some(),
                         );
                         let (cursor, actions) = ui::menu::navigate(&model, rows_input);
-                        let click = game::pause::pause_sound(
-                            model.respawn_confirm,
-                            rows_input,
-                            model.cursor,
-                            cursor,
-                            &actions,
-                        );
+                        let click =
+                            game::pause::pause_sound(rows_input, model.cursor, cursor, &actions);
                         if let (Some(c), Some(sl)) = (click, self.sounds.as_mut()) {
                             sl.play_2d(self.audio.as_mut(), c.name());
                         }
@@ -397,23 +429,18 @@ impl winit::application::ApplicationHandler for App {
                         self.pause_menu.cursor = cursor;
                         let mut quit = false;
                         for a in actions {
-                            game::pause::apply_menu_action(
+                            self.restart_clicked |= a == ui::menu::MenuAction::Restart;
+                            quit |= apply_pause_action(
                                 walk,
                                 a,
                                 &mut self.paused,
                                 &mut self.pause_menu,
+                                &mut self.cheats,
+                                &mut self.profile,
+                                &mut self.session,
+                                &mut self.kbm,
+                                self.music_voice.as_mut(),
                             );
-                            self.cheats.follow(&walk.sim);
-                            persist_setting(&mut self.profile, &mut self.session, a, walk);
-                            quit |= a == ui::menu::MenuAction::Quit;
-                            self.kbm.follow(&self.profile.settings);
-                            // The music follows its slider while paused.
-                            if let (ui::menu::MenuAction::SetMusic(_), Some(m), Some(v)) =
-                                (a, walk.music.as_ref(), self.music_voice.as_mut())
-                            {
-                                let level = m.level().map_or(0.0, |(_, l)| l);
-                                v.set_volume(game::sounds::level_db(level), 0.1);
-                            }
                         }
                         if quit {
                             self.quit_clicked = true;
@@ -421,7 +448,8 @@ impl winit::application::ApplicationHandler for App {
                         menu = Some(ui::menu::MenuModel {
                             class_choices: self.pause_menu.class_picker_model(walk),
                             cursor: self.pause_menu.cursor,
-                            respawn_confirm: self.pause_menu.confirm,
+                            page: model.page.map(|_| self.pause_menu.page),
+                            popup: self.pause_menu.confirm,
                             cheats: walk.sim.cheats.entries().to_vec(),
                             assist_intensity: walk.sim.assist_intensity,
                             team_size_pct: walk.team_size_pct,
@@ -438,6 +466,7 @@ impl winit::application::ApplicationHandler for App {
                                 .as_ref()
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
+                            pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             input_icons_label: self.profile.settings.input_icons.label(),
@@ -788,6 +817,7 @@ impl winit::application::ApplicationHandler for App {
                     // are the sim's (card SPSEL), moved by the pad bits.
                     spawn =
                         spawn_model(walk, &self.feed).map(|s| ui::spawn::SpawnModel { icons, ..s });
+                    death_view = walk.death_cam.is_some() || walk.holds_seat_view();
                     let camera = walk.camera();
                     if let (Some(p), Some(me)) =
                         (self.frame_profile.as_mut(), walk.sim.unit(walk.player))
@@ -943,13 +973,12 @@ impl winit::application::ApplicationHandler for App {
                             let mut clicked: Vec<ui::menu::MenuAction> = Vec::new();
                             let paint = overlay.begin(window, |ctx| {
                                 if !hud_hidden {
-                                    // The spawn screen owns the death message.
-                                    let m = match &spawn {
-                                        Some(_) => ui::hud::HudModel {
-                                            dead: false,
-                                            ..model.clone()
-                                        },
-                                        None => model.clone(),
+                                    // The death camera and the spawn screen
+                                    // own the death: the egui banner is only
+                                    // for launches with neither.
+                                    let m = ui::hud::HudModel {
+                                        dead: model.dead && spawn.is_none() && !death_view,
+                                        ..model.clone()
                                     };
                                     ui::hud::draw_hud(ctx, &m);
                                     if let Some(s) = &spawn {
@@ -979,19 +1008,27 @@ impl winit::application::ApplicationHandler for App {
                                 render::made::note("egui texture", Some("egui"), bytes, 0.0);
                             }
                             if let Some((walk, _)) = self.walk.as_mut() {
+                                // A click sounds as the pad's press of it.
+                                let none = ui::menu::MenuInput::default();
+                                if let (Some(c), Some(sl)) = (
+                                    game::pause::pause_sound(none, 0, 0, &clicked),
+                                    self.sounds.as_mut(),
+                                ) {
+                                    sl.play_2d(self.audio.as_mut(), c.name());
+                                }
                                 for a in clicked {
-                                    game::pause::apply_menu_action(
+                                    self.restart_clicked |= a == ui::menu::MenuAction::Restart;
+                                    self.quit_clicked |= apply_pause_action(
                                         walk,
                                         a,
                                         &mut self.paused,
                                         &mut self.pause_menu,
+                                        &mut self.cheats,
+                                        &mut self.profile,
+                                        &mut self.session,
+                                        &mut self.kbm,
+                                        self.music_voice.as_mut(),
                                     );
-                                    self.cheats.follow(&walk.sim);
-                                    persist_setting(&mut self.profile, &mut self.session, a, walk);
-                                    self.kbm.follow(&self.profile.settings);
-                                    if a == ui::menu::MenuAction::Quit {
-                                        self.quit_clicked = true;
-                                    }
                                 }
                             }
                             r.render_frame(
@@ -1045,6 +1082,9 @@ impl winit::application::ApplicationHandler for App {
                 }
                 if let (Some(at), Some((walk, _))) = (self.quit_at, self.walk.as_ref()) {
                     self.quit_clicked |= walk.sim.tick >= at;
+                }
+                if std::mem::take(&mut self.restart_clicked) {
+                    self.restart_round();
                 }
                 if self.quit_clicked {
                     self.quit_clicked = false;

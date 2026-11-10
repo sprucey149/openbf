@@ -604,3 +604,21 @@ fn a_frame_without_a_tick_does_not_spend_the_mouse_move() {
     let pad = k.flyer_pad(PadState::default());
     assert_eq!(pad.rx, PadState::quantize((68.0 * 30.0 / 2048.0) as f32));
 }
+
+/// Triangle / Y backs out of the ground pause menu on its own fresh press: one
+/// already held when the menu opens is no Back, and space keeps it inert.
+#[test]
+fn north_backs_the_pause_menu_only_on_a_fresh_press() {
+    // The Start frame: not yet paused, Triangle (ACTION) held.
+    let open = MENU_NORTH | 64;
+    assert_eq!(menu_edges(open, 0, 0, false), 64);
+    // Paused next frame, Triangle still held: no Back.
+    assert_eq!(menu_edges(MENU_NORTH, open, 0, true), 0);
+    // Released, then pressed again: Back.
+    assert_eq!(menu_edges(0, MENU_NORTH, 0, true), 0);
+    assert_eq!(menu_edges(MENU_NORTH, 0, 0, true), 32);
+    // Space battles: Triangle does nothing in the pause menu.
+    assert_eq!(menu_edges(MENU_NORTH, 0, 0, false), 0);
+    // Other edges and taps pass as before.
+    assert_eq!(menu_edges(16 | 32, 32, 2, true), 16 | 2);
+}

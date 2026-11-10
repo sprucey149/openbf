@@ -163,6 +163,14 @@ pub struct CtfState {
 }
 
 impl CtfState {
+    /// A space flag round: its flag carries at the space offset
+    /// ([`CtfState::new_space_one_flag`]).
+    pub fn is_space(&self) -> bool {
+        self.flags
+            .iter()
+            .any(|f| f.carried_offset == SPACE_CARRIED_OFFSET)
+    }
+
     /// Constructs a Space One-Flag state with neutral flag in space and team hangar capture goals.
     pub fn new_space_one_flag(
         score_limit: u32,

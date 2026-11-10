@@ -688,7 +688,8 @@ fn wgord_ordered_call_matrix() {
                     assert_eq!(due, Some(19));
                     assert_eq!(claim, Some(19));
                     if order == "pool" {
-                        assert_eq!(entry, Some(83));
+                        // The gunner faces the vehicle it walks to (playtest C3).
+                        assert_eq!(entry, Some(76));
                     }
                 }
                 let supported = !bf2;

@@ -42,6 +42,14 @@
 //! to his other side at no more than [`LEAD_MAX_RATE`]: the reticle's path
 //! bends, it never jumps. The slowdown, term 2's gain, timer and fall-off
 //! and the player's own-motion share of term 1 are the PS2's.
+//!
+//! OURS, the sniper's follow (playtest 2026-11-05 C5: "aim assist should
+//! follow moving targets a little"; [`AssistEnv::follow`]). A sniper lines
+//! his one shot up before the press, so with the rule above his magnet
+//! only slows his stick while he does it. A scoped sniper rifle's term 1
+//! matches [`SNIPER_FOLLOW`] of the lead point's sideways motion while the
+//! pull is not live, under the Auto Aim option as the pull is; every other
+//! weapon still follows nothing it is not shooting at.
 
 use glam::Vec3;
 
@@ -119,8 +127,12 @@ pub struct AssistEnv {
     /// OURS (the module doc's lead): the velocity of the point the pull aims
     /// at (the target's, plus its lead offset's easing), which term 1
     /// rate-matches in full while the pull's timer is live; `None` = the
-    /// PS2's term 1.
+    /// PS2's term 1 (unless `follow` applies).
     pub lead_vel: Option<Vec3>,
+    /// OURS (the module doc's sniper follow): the share of the lead point's
+    /// sideways motion term 1 matches while the pull is not live and Auto
+    /// Aim is on; 0 = the PS2's term 1.
+    pub follow: f32,
     /// The yaw stick a full push delivers on this pad (`LOOK_SCALE` for a
     /// human pad, 1 for a raw one): the weight reads the push before it.
     pub look_scale: f32,
@@ -131,6 +143,12 @@ pub struct AssistEnv {
 pub struct AssistState {
     pub magnet_timer: f32,
 }
+
+/// OURS (the maintainer, playtest 2026-11-05 C5: follow "a little"): the
+/// share of a moving magnet a scoped sniper rifle's assist follows before
+/// the press ([`AssistEnv::follow`]). PROVISIONAL. measure: a controller
+/// playtest, scoped on a crossing runner at 50 and 100 m.
+pub const SNIPER_FOLLOW: f32 = 0.5;
 
 /// OURS: the time constant of the lead's low-pass on the target's velocity
 /// (s): a runner who turns about swings the lead over about this long.
@@ -210,17 +228,26 @@ pub fn apply(dt: f32, sticks: &mut Sticks, env: &AssistEnv, st: &mut AssistState
     // Term 1: velocity tracking (yaw only, rate-matched, no dt). With the
     // lead (ours), the target's own motion is taken out of it and matched in
     // full, the player's own share left as the PS2's - only while the pull
-    // is live (fire within MAGNET_TIMER_SECS, [ours] 2026-10-29).
+    // is live (fire within MAGNET_TIMER_SECS, [ours] 2026-10-29). Not
+    // pulling, a scoped sniper matches `follow` of it ([ours] C5), or the
+    // PS2's share where that is larger (a forward push).
     let fwd_dist = (env.target_center - env.self_pos).dot(env.aim_fwd);
     let pulling = env.armed && st.magnet_timer > 0.0;
-    let track = match env.lead_vel.filter(|_| pulling) {
+    let share = match pulling {
+        true => env.lead_vel.map(|v| (v, 1.0)),
+        false => (env.armed && env.follow > 0.0).then(|| {
+            let ps2 = sticks.move_mag.abs() * GAIN;
+            (env.lead_vel.unwrap_or(env.target_vel), env.follow.max(ps2))
+        }),
+    };
+    let track = match share {
         None => {
             let lat_vel = (env.self_vel - env.target_vel).dot(env.lat);
             (sticks.move_mag.abs() * w * GAIN * lat_vel) / (fwd_dist * r)
         }
-        Some(v) => {
+        Some((v, k)) => {
             let own = sticks.move_mag.abs() * GAIN * env.self_vel.dot(env.lat);
-            w * (own - v.dot(env.lat)) / (fwd_dist * r)
+            w * (own - k * v.dot(env.lat)) / (fwd_dist * r)
         }
     };
     sticks.yaw += track.clamp(-cap, cap) * intensity;
@@ -271,6 +298,7 @@ mod tests {
             fire_held: false,
             armed: false,
             lead_vel: None,
+            follow: 0.0,
             look_scale: 1.0,
         }
     }
@@ -500,6 +528,36 @@ mod tests {
         assert_eq!(late.yaw, 0.0, "timer out: the PS2's term 1");
     }
 
+    /// [ours] C5: a scoped sniper (`follow`) matches its share of the lead
+    /// point's motion before the press, in full once the pull is live, and
+    /// nothing with Auto Aim off.
+    #[test]
+    fn a_scoped_sniper_follows_a_share_before_the_press() {
+        let still = Sticks {
+            move_mag: 0.0,
+            yaw: 0.0,
+            pitch: 0.0,
+        };
+        let run = |armed: bool, follow: f32, fire: bool| {
+            let mut e = env();
+            e.armed = armed;
+            e.target_vel = Vec3::X * 5.0;
+            e.lead_vel = Some(Vec3::X * 5.0);
+            e.follow = follow;
+            e.fire_held = fire;
+            let mut s = still;
+            apply(DT, &mut s, &e, &mut AssistState::default(), 1.0);
+            s.yaw
+        };
+        assert!(
+            (run(true, 0.5, false) + 0.025).abs() < EPS,
+            "half of firing's"
+        );
+        assert!((run(true, 0.5, true) + 0.05).abs() < EPS, "firing: in full");
+        assert_eq!(run(false, 0.5, false), 0.0, "Auto Aim off");
+        assert_eq!(run(true, 0.0, false), 0.0, "not a sniper: the PS2's");
+    }
+
     /// The assist's own turn is capped at three times BF1's (0.675 rad/s):
     /// the tracking and the pull each at most 3 x 0.675 / R stick units,
     /// zoomed or not (the zoom divides the assist's rate and the cap alike).
@@ -559,6 +617,23 @@ mod tests {
             assert!(
                 (s.yaw - want).abs() < EPS,
                 "stick {yaw}: {} vs {want}",
+                s.yaw
+            );
+        }
+        // Issue #142: a look sensitivity of 0.5 on the human pad: its full
+        // push (0.4) still gives the floor, its half push half the pull.
+        e.look_scale = 0.8 * 0.5;
+        for (yaw, w) in [(0.4, 0.1), (0.2, 0.5)] {
+            let mut s = Sticks {
+                move_mag: 0.0,
+                yaw,
+                pitch: 0.0,
+            };
+            apply(DT, &mut s, &e, &mut AssistState::default(), 1.0);
+            let want = yaw * 0.5 - w * 0.05;
+            assert!(
+                (s.yaw - want).abs() < EPS,
+                "sensitivity 0.5, stick {yaw}: {} vs {want}",
                 s.yaw
             );
         }

@@ -262,6 +262,9 @@ pub struct AiState {
     pub wander: Option<(Vec3, u16)>,
     /// D11: no dodge before this tick (the 2 s cooldown, RE §4.1).
     pub dodge_until: u64,
+    /// Playtest C1: a flinch from a hit holds the trigger until this tick
+    /// ([`crate::ai::FLINCH_TICKS`]); 0 before the first.
+    pub flinch_until: u64,
     /// Consecutive ticks this unit has spent within
     /// [`crate::commander::DWELL_RADIUS`] of the post of an objective it has
     /// NOT completed — the sweep's `unreachable_dwell_max`. It is a
@@ -328,6 +331,12 @@ pub struct AiState {
     pub aim_dir: Vec3,
     /// The tracker's angular rate (D9). Zeroed by a slew and by a new target.
     pub aim_vel: Vec3,
+    /// The target's remembered point (a heard shot, a friend's report, a
+    /// lost sighting) is behind a floor or a wall: it is faced with the gun
+    /// level, not pitched at (`perception::can_aim`, playtest C4). Asked
+    /// once per think — the record only moves at a scan — and read every
+    /// tick by the aim. Hashed only when set.
+    pub memory_blocked: bool,
     /// A BF1 round's tracked-position error radius in metres (brief D10; a
     /// BF2 round's error is the TARGET's `unit::AimBlock`, card CLSE2, and
     /// this stays at its start value): the aim point is the lead point
@@ -477,6 +486,10 @@ pub struct SnipeState {
     /// The lane's length when the spot was picked, m: its farthest enemy-side
     /// point in sight (a diagnostic the census reads; not a rule's input).
     pub lane: f32,
+    /// Where the sniper looks from the spot with nothing in sight: the
+    /// lane's farthest point (a metre up), so it watches down its lane
+    /// rather than at the nearest enemy wherever it is; `ZERO` for no lane.
+    pub look: Vec3,
 }
 
 /// Card SNPR: the spot a sniper has ([`SnipeState`]), the one it left last
@@ -506,6 +519,12 @@ impl SnipeBook {
             eat(&c.lane_at.to_le_bytes());
             for v in [c.spot.x, c.spot.y, c.spot.z, c.lane] {
                 eat(&v.to_bits().to_le_bytes());
+            }
+            // Eaten only when set: a spot without a lane point hashes as it did.
+            if c.look != Vec3::ZERO {
+                for v in [c.look.x, c.look.y, c.look.z] {
+                    eat(&v.to_bits().to_le_bytes());
+                }
             }
         }
     }

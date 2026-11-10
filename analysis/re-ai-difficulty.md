@@ -642,6 +642,27 @@ measure: PCSX2 T5/T6 from the issue #104 research brief, observing an engaged
 soldier and an idle soldier hit within/beyond view range before replacing this
 openbf deviation. The cosmetic hit pose is separate and changes no AI decision.
 
+**OURS (playtest C1, 2026-11-10): a hit delays the answer.** Neither original
+holds fire on a hit or charges time to find the shooter: BF2's damage entry
+(`FUN_002c26b0`) makes the attacker a threat and the attack target at any
+range, and `FUN_002c28e8` turns the bot to him when he is inside its view
+distance (`re-soldier-ai.md` 4.1); BF1 faces him (`FUN_00252520`). The only
+delay in either is the aim tracker's turn. openbf adds two, for a bot on foot
+on a ground map (not a seated bot, a proxy or a space map):
+- a flinch: no shot for `ai::FLINCH_TICKS` (6 ticks, 0.2 s) after any enemy
+  hit, at most once per `ai::FLINCH_GAP` (1 s);
+- a search: a shooter the bot does not see when it is hit is fired at only
+  after `perception::search_ticks` (9 ticks + 0.6 per metre, at most 54; half
+  for a shooter it already held a record of; none for one its own eyes held
+  at its last think) plus the tier's reaction time. The turn runs alongside.
+Measured in `perception::tests::a_far_hit_from_an_unseen_shooter_waits_out_the_search`
+(Normal, a 40 m shooter just out of the cone at the side): first shot 19 ticks
+after the hit before, 43 after; from straight behind 49 either way, the
+180-degree turn at the default soldier turn rate (2 rad/s) being the longer part. Tiers are unchanged; the
+reaction time still adds on top.
+measure: PCSX2 T5/T6 (issue #104 brief): time from a hit by a far human to the
+bot's first shot, engaged vs idle, within vs beyond view distance.
+
 **Modes** (`FUN_002aba38`, 231136) are not movement modes: the function is the last stage of the
 **attack-suitability matrix** `FUN_002ac8f8` (231784, §5.1). Attacker kind × target kind picks a
 handler (`FUN_002abd38` / `FUN_002abe18` / `FUN_002abda8` for a soldier-kind attacker against

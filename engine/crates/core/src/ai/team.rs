@@ -3,9 +3,10 @@
 //! r of p" for the thinks (`perception::scan`'s look and listen and
 //! `perception::tell`, the gunner's friend-in-line test, the follow gap),
 //! which each walked every unit; and the FOLLOW GAP ([`follow_ease`]). The
-//! contacts a friend passes on are `perception::tell`'s (every tier): a TOLD record is aimed at while the bot walks its
-//! own way - it keeps nobody on a position (`ai::behave`) and never
-//! overwrites the bot's own record. Fire lanes: the gunner's friend-in-line
+//! contacts a friend passes on are `perception::tell`'s (every tier): a TOLD
+//! record is aimed at by a bot that is not walking a leg (on a ground round a
+//! walking bot faces its way, playtest C3); it keeps nobody on a position
+//! (`ai::behave`) and never overwrites the bot's own record. Fire lanes: the gunner's friend-in-line
 //! test clears every shot's line by a tick of walking and its flight
 //! (`gunner_foot::shot_late`). The TEAM BOARD ([`board`]) gives the roles
 //! inside a post's group: COVER (while a friend captures, up to two others

@@ -226,6 +226,20 @@ passing entries the one with the most matching fields wins (`FUN_002e6060`, sort
 So `rep1_inf_chatter_AcquiredTarget_VOUnitNum83` is the clone's line for a target of unit type 83, and the plain
 `..._AcquiredTarget` the fallback. 2,131 of the disc's 11,667 lines carry no condition.
 
+**Ties and the cap** [V, 2026-11-10]: `FUN_002e6180` collects up to 64 PASSING entries of the event in list order
+(the counter only rises on a pass, 272041-272055), sorts them with the C library quicksort `FUN_005216b0`
+(B2:651110-651550, the 4.4BSD routine: insertion sort under 7, median of three over 7, ninther over 40, the swap-count
+fallback) and plays slot 0. The comparator at ELF 0x2e6130 (read by disassembly; it is not in the export) orders by
+the score byte at entry +0x14, highest first, and on equal scores by the sort's own slot addresses, the higher slot
+first. Under 7 passing entries the last parsed of the best wins; at 7 or more the winner follows the sort's moves.
+This decides the hero callout (playtest C2): `FUN_002cde30` (255563-255580) asks AcquiredTarget with subject 0, so
+the subject is the player; when the player is the target the direction is zero and the context reads LEFT and under
+10 m with the hero's `VOUnitType` (181-199 on the BF2 hero classes). `..._AcquiredTarget_left` and
+`..._AcquiredTarget_VOUnitNum<hero>` both score 1, and the typed line, parsed later, wins. The BF2 armies carry lines
+only for the other side's heroes (rep 191-199, cis 181 and 186-190, imp 182-190, all 191-194); BF1 has no typed
+AcquiredTarget. The port follows this in `game::vo::best` on ground battles; space battles keep the earlier
+first-parsed ranking.
+
 ### 3.3 Who speaks [V]
 
 `FUN_002e6180(event, speaker, subject, context)` (B2:271860-272084):

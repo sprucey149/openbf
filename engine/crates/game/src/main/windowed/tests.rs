@@ -269,3 +269,126 @@ fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
 
 #[path = "tests/assault.rs"]
 mod assault;
+
+/// The game's sound pauses with a ground battle's pause menu and nowhere
+/// else: never in the shell (leaving from the pause menu), never once the
+/// pause ends, never in a space battle.
+#[test]
+fn pause_audio_follows_the_battle_pause_only() {
+    let mut a = App::new(
+        Default::default(),
+        Default::default(),
+        setup(None),
+        None,
+        None,
+        None,
+        Default::default(),
+    );
+    assert!(!a.game_audio_paused(), "shell");
+    a.paused = true;
+    assert!(!a.game_audio_paused(), "shell, paused flag left over");
+    a.screen = Screen::Battle;
+    a.walk = Some((
+        game::walk::WalkSim::new(42, glam::Vec3::ZERO, None),
+        render::MeshHandle::default(),
+    ));
+    assert!(a.game_audio_paused(), "battle pause menu");
+    a.paused = false;
+    assert!(!a.game_audio_paused(), "resumed");
+    a.paused = true;
+    a.screen = Screen::Shell;
+    assert!(!a.game_audio_paused(), "left from the pause menu");
+    a.screen = Screen::Battle;
+    let region = core::region::Region::sphere(glam::Vec3::ZERO, 10.0);
+    a.walk.as_mut().unwrap().0.sim.landing_regions.push(region);
+    assert!(!a.game_audio_paused(), "space battle");
+    let sim = &mut a.walk.as_mut().unwrap().0.sim;
+    sim.landing_regions.clear();
+    assert!(a.game_audio_paused(), "ground again");
+    let ctf = core::sim::CtfState::new_space_one_flag(
+        1,
+        glam::Vec3::ZERO,
+        glam::Vec3::X,
+        glam::Vec3::NEG_X,
+    );
+    a.walk.as_mut().unwrap().0.sim.install_ctf(ctf);
+    assert!(!a.game_audio_paused(), "space CTF without landing regions");
+}
+
+/// Playtest A5: the window opens maximized; a forced size stays exact.
+#[test]
+fn window_attributes_maximize_unless_a_size_is_forced() {
+    let a = window_attributes(None);
+    assert!(a.maximized);
+    assert_eq!(
+        a.inner_size,
+        Some(winit::dpi::LogicalSize::new(1280, 720).into())
+    );
+    assert!(
+        window_attributes(Some((0, 600))).maximized,
+        "a zero size is ignored"
+    );
+    let a = window_attributes(Some((800, 600)));
+    assert!(!a.maximized);
+    assert_eq!(
+        a.inner_size,
+        Some(winit::dpi::PhysicalSize::new(800, 600).into())
+    );
+}
+
+/// Playtest A1: the display is held awake only in a round being played.
+#[test]
+fn idle_inhibit_only_in_an_unpaused_battle() {
+    assert!(idle::wants_idle_inhibit(true, false));
+    assert!(!idle::wants_idle_inhibit(true, true));
+    assert!(!idle::wants_idle_inhibit(false, false));
+    assert!(!idle::wants_idle_inhibit(false, true));
+}
+
+#[test]
+fn idle_inhibit_set_is_idempotent_without_a_backend() {
+    let mut i = idle::IdleInhibit::none();
+    for hold in [true, true, false, false, true] {
+        i.set(hold);
+        assert_eq!(i.held(), hold);
+    }
+}
+
+/// Playtest A6: Restart Mission plays the battle in play again next, then the
+/// rest of the playlist in its order.
+#[test]
+fn restart_requeues_the_battle_in_play_first() {
+    let row = |key: &str| ui::shell::Launch {
+        key: key.to_owned(),
+        game: ui::shell::Game::Bf2,
+        mode: ui::shell::Mode::Con,
+        armies: ["rep".to_owned(), "cis".to_owned()],
+        label: key.to_owned(),
+    };
+    let mut playlist: std::collections::VecDeque<_> = [row("tat2"), row("hot1")].into();
+    requeue_front(&mut playlist, row("cor1"));
+    let keys: Vec<_> = playlist.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(keys, ["cor1", "tat2", "hot1"]);
+    let mut empty = std::collections::VecDeque::new();
+    requeue_front(&mut empty, row("cor1"));
+    assert_eq!(empty, [row("cor1")]);
+}
+
+/// #142: a pad's learned stick range scales the soldier's stick only when
+/// the caller says so (on foot in a ground mode). In any seat (vehicle,
+/// walker, flyer) and anywhere in a space mode the scale is the fixed
+/// `STICK_FULL` on both axes whatever the pad has shown, so that input is
+/// unchanged.
+#[test]
+fn a_seated_or_flying_player_keeps_the_fixed_stick_scale() {
+    let fixed = [input::STICK_FULL; 2];
+    let mut r = input::StickRange::default();
+    assert_eq!(stick_full(&r, true), fixed);
+    assert_eq!(stick_full(&r, false), fixed);
+    r.feed(0.0, 0.8);
+    assert_eq!(stick_full(&r, true)[0], input::STICK_FULL);
+    assert!((stick_full(&r, true)[1] - 0.8).abs() < 1e-6);
+    assert_eq!(stick_full(&r, false), fixed);
+    r.feed(0.3, 0.0);
+    assert_eq!(stick_full(&r, false), fixed);
+}

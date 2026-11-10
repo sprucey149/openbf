@@ -420,10 +420,10 @@ pub fn trimesh(positions: &[[f32; 3]], indices: &[u32]) -> Option<Arc<TriMesh>> 
     TriMesh::new(points, tris).ok().map(Arc::new)
 }
 
-/// Which QUERIES a body answers — the port's two collision layers so far
-/// (`analysis/re-collision-layers.md` §4: a soldier's walk / ground / wall
-/// queries use the model's SOLDIER subset, a bolt / reticle / LOS ray its
-/// ORDNANCE subset). Bit 2 is RESERVED for the vehicle subset (P7) and unused.
+/// Which QUERIES a body answers (`analysis/re-collision-layers.md` §4: a
+/// soldier's walk / ground / wall queries use the model's SOLDIER subset, a
+/// bolt / reticle / LOS ray its ORDNANCE subset), plus the VEHICLE subset and
+/// FLYER, the subset a craft collides with.
 ///
 /// The bit VALUES are ours, not the PS2's layer ids (RE §5 tabulates those:
 /// BF1 soldier 2 / ordnance 0x200, BF2 soldier 2 / ordnance 0x400) — this is a
@@ -438,8 +438,12 @@ impl Layers {
     pub const SOLDIER: Layers = Layers(1);
     /// The ordnance subset: bolts, the reticle, AI line of sight.
     pub const ORDNANCE: Layers = Layers(2);
-    /// The vehicle subset: what a flyer's contact and its pilot's rays test.
+    /// The vehicle subset: a flyer's landing ray; `flyer_uses_vehicle`
+    /// picks it for FLYER.
     pub const VEHICLE: Layers = Layers(4);
+    /// What a craft's contact and its pilot's probes test: the soldier
+    /// subset, or the vehicle subset under `flyer_uses_vehicle`
+    /// (re-collision-layers §8).
     pub const FLYER: Layers = Layers(8);
     /// The two layers that exist, and what `Body::new` gives a body. The PS2
     /// acquisition ray tests both (flag 0, RE §4); the port currently uses

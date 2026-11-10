@@ -33,6 +33,15 @@ wgpu.workspace = true
 # The shell movie's frames (card BSHLA): already in the tree through `image`.
 zune-jpeg = "0.5"
 
+# Keeping the display awake during a round (src/main/windowed/idle.rs): the
+# Wayland idle-inhibit protocol on winit's own connection, and an X11
+# screen-saver reset. All already in the tree through winit.
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "ios", target_os = "android", target_os = "redox"))))'.dependencies]
+wayland-client = "0.31"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+x11rb = "0.13"
+
 [features]
 # Count every heap allocation, for `--bench` runs that report it (`game::alloc_count`).
 alloc-count = []

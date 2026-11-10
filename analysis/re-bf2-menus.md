@@ -608,6 +608,12 @@ Script `common/ifs_pausemenu` [V]. `nologo`, no movie, `bDimBackdrop`, `bAcceptI
 Triangle = resume (`exitSound`, `ScriptCB_Unpause`; main.f14) [V]. In single player the PS2 shows the host text
 "Leaving the game now will end this session. Are you sure you want to leave?" [M menuref `pause_menu`].
 
+Port (playtest A6, #128): ground battles draw this Game Menu with the same texts, row order and popups (focus No;
+Quit shows the host text). `[ours]`: Cheats and Change class (testing) follow Options; Options stays after the round
+ends; the Options page is the shell's one settings page (Game and Audio together, no Controls or Online rows yet);
+Back resumes from every page and popup (playtest A3), and a page's own Back row returns to the Game Menu. Space
+battles keep the flat list (`ui::menu::MenuModel::page` `None`).
+
 ### Hidden on the PS2 (do not draw)
 
 `ifs_tutorials` (main-menu row hidden, `ifs_main` main.f15 pc 178), `ifs_unlockables`, `ifs_fonttest`, Video /
@@ -624,7 +630,7 @@ Free Camera / Fake Console (pause) [V].
 | Game Options | rows the port does not honour (Auto Target, Aim Assist, Sticky Reticule, Tool Tips, Objective Details) | dimmed rows (label grey 110, focus skips) |
 | Audio Options | Output Mode | dimmed (the port is stereo) |
 | Controls | Select Control Type -> pad page | dimmed until a rebinding card |
-| pause | Restart Mission | live if the port can restart; else dimmed |
+| pause | Restart Mission | live in a battle launched from the shell (the playlist row loads again); hidden in a `--map` launch |
 
 ## 4. Menu sounds
 

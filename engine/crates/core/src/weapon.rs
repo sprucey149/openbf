@@ -163,8 +163,9 @@ pub struct ChargeStage {
 /// bolt: `com_weap_inf_shotgun_tracer`, `com_weap_inf_chaingun_tracer`,
 /// `com_weap_award_shotgun_tracer`, `com_weap_award_pistol_tracer`), and the
 /// port spawns it as [`crate::projectile::Bolt`] of its own class every
-/// `period`-th round. Every other class a `SecondaryOrdnanceName` names is a
-/// real round (the probe droid's sonic blaster) and spawns nothing.
+/// `period`-th round. The other class a `SecondaryOrdnanceName` names is a
+/// real round, BF2's Imperial officer's sonic blaster fat ray, which spawns
+/// as its own round beside the primary (`Sim::fire_secondary`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Secondary {
     /// The ordnance class's name as the db spells it, for reports and tests.
@@ -332,6 +333,13 @@ pub struct WeaponClass {
     /// rocket launchers; 4 = marksman, the sniper rifles). `None` when no
     /// class in the chain authors it (every BF1 weapon).
     pub medals_type: Option<i8>,
+    /// `MedalsTypeToUnlock` (BF2 wpn+0x1e2, `analysis/re-grenades.md` §2.4):
+    /// the medal an award weapon needs before it joins the switch cycle.
+    /// `None` for an ordinary weapon (a written -1, or no key: every BF1 one).
+    pub medal_unlock: Option<i8>,
+    /// `MedalsTypeToLock` (BF2 wpn+0x1e4): the medal whose award replaces
+    /// this weapon (`Sim::weapon_locked`).
+    pub medal_lock: Option<i8>,
     pub repair: Option<Repair>,
     pub dispenser: Option<Dispenser>,
     pub mine: Option<Dispenser<crate::mine::MineClass>>,
@@ -522,6 +530,8 @@ impl Default for WeaponClass {
             thrown: None,
             offhand_weapon: false,
             medals_type: None,
+            medal_unlock: None,
+            medal_lock: None,
             repair: None,
             dispenser: None,
             mine: None,
@@ -885,14 +895,19 @@ impl WeaponState {
         self.start_reload_as(c, false)
     }
 
+    /// Would [`Self::start_reload_as`] start a reload now? Not while one
+    /// runs, not on a full clip, not with nothing left to load.
+    pub fn can_start_reload(&self, c: &WeaponClass, free: bool) -> bool {
+        !(c.infinite_ammo()
+            || self.reloading()
+            || self.clip >= c.rounds_per_clip
+            || (!free && self.spare == 0))
+    }
+
     /// [`Self::start_reload`]; `free` (the `ammo` cheat) fills the clip at
     /// the end without touching the reserve, even an empty one.
     pub fn start_reload_as(&mut self, c: &WeaponClass, free: bool) -> bool {
-        if c.infinite_ammo()
-            || self.reloading()
-            || self.clip >= c.rounds_per_clip
-            || (!free && self.spare == 0)
-        {
+        if !self.can_start_reload(c, free) {
             return false;
         }
         if !free && self.spare != SPARE_INFINITE {

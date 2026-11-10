@@ -322,7 +322,15 @@ independent verifier (section 10).
    "shell_menu_accept" rows on the spawn screen are `shell_menu_enter`; `shell_select_unit` is a record of every
    battle SOUND LVL (not CORE): 2-D, bus shellfx, pitch 0.3 +- 0.1, gain 0.3 (BF1 NAB) / 0.4 (BF2 UTA). [L] RAM:
    all five slots hold 2-D records in both games' battle states.
-7. **Not found**: what starts BF1's `shell_menu_exit` at the suicide confirm (one start in `bf1_nab1_ui.csv`; the
+7. **[V] Pause silences the game, not the menu.** BF1's pause toggle (`FUN_002d27f0`) looks up the `ingame` bus
+   (hash 0x985c8f54) and fades it to 0 on pause (B1 260702) and back to 1 on unpause (B1 260664), with fade time
+   -1 (the bus's own default); when the round is over it also stops every sound (`FUN_00356000`). BF2's toggle
+   (`FUN_0038b3c8`) does the same to bus 0xfa930d1c (B2 385743 to 0, 385718 to 1). The in-game buses sit under
+   that bus and `shellfx` (0x82c7f467, every menu click on both discs) sits under root
+   (`analysis/re-mix-headroom.md` 1.4), so the clicks stay audible. The fade leaves the voices running, so a
+   line or take that ends inside the pause is lost. Port: the game's sounds play on a mixer bus that the pause
+   menu pauses outright, and they resume where they stopped; `shellfx` starts play outside it (OURS, playtest A2).
+8. **Not found**: what starts BF1's `shell_menu_exit` at the suicide confirm (one start in `bf1_nab1_ui.csv`; the
    scripts give two accepts only) - needs a live look.
 
 ## 7. Corrections to earlier records

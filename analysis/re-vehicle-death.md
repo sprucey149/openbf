@@ -476,6 +476,11 @@ The port holds the last seat camera while the rider is dead with no body (`WalkS
 since nothing sets one. It applies to every vehicle kind; only the flyer's camera object was read from RAM, so `measure:` a
 hover and a walker. An exposed rider keeps a corpse and the ordinary dead view.
 
+On the ground the held view lasts until the player respawns, as the object-less PS2 camera above does. Space rounds
+let it go after `DEATH_VIEW_HOLD` (4 s), the space work's own rule; the `+0x158` 4.0 below fits the 4.0 s respawn
+wait (`Sim::respawn_delay`) at least as well as a camera hold. `replace:` with a PS2 capture of a ground vehicle death
+held on the spawn screen past 4 s.
+
 Measured in a crash, save state 10 of 14:15, 0.167 s after the death (member timer `+0x158` 3.833 of 4.0):
 
 - Current camera `vp+0x24` is the player camera; its followed object is 0; `+0x90` reads 0.167.

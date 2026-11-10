@@ -11,10 +11,10 @@ use crate::ai::state::{
 };
 use crate::ai::why::Why;
 use crate::ai::{
-    CIRCLE_PAUSE, CORNER_ARRIVE, DODGE_COOLDOWN, FIGHT_BEYOND, GIVE_UP_AFTER, HOLD_ARRIVE,
-    HOLD_CLOSE, HOLD_COMMIT, HOLD_QUIET, HOLD_RANGE, HOLD_STRAFE, LOST_RECYCLE, RETURN_ARRIVE,
-    RETURN_ARRIVE_DY, RETURN_PLANS, RING_ARRIVE, SHUT_PROBE_UP, SHUT_RECYCLE, SIDESTEP_TICKS,
-    THINK_PERIOD,
+    CIRCLE_PAUSE, CORNER_ARRIVE, DODGE_COOLDOWN, FIGHT_BEYOND, FLINCH_GAP, FLINCH_TICKS,
+    GIVE_UP_AFTER, HOLD_ARRIVE, HOLD_CLOSE, HOLD_COMMIT, HOLD_QUIET, HOLD_RANGE, HOLD_STRAFE,
+    LOST_RECYCLE, RETURN_ARRIVE, RETURN_ARRIVE_DY, RETURN_PLANS, RING_ARRIVE, SHUT_PROBE_UP,
+    SHUT_RECYCLE, SIDESTEP_TICKS, THINK_PERIOD,
 };
 use crate::fmath;
 use crate::nav;
@@ -63,6 +63,9 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     super::ride::settle(sim, st);
     let eye = u.ai_eye();
     let wc = &sim.weapon_classes[u.weapon_class];
+    // The sight-gated aim (playtest C4) is a ground rule: a space round's
+    // foot bots aim as they did.
+    let ground = !sim.space_round();
 
     let tier = sim.unit_tier(u);
     let mend = crate::ai::proxy::mend_station(sim, u);
@@ -105,6 +108,19 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         }
         nt.contacts = held;
         nt.heard = heard;
+        // A target known only by memory (heard, told, or lost from sight) is
+        // pitched at only if the sight ray reaches its point: behind a floor
+        // or a wall it is faced level (`perception::can_aim`, playtest C4).
+        // One ray a think; the aim reads the answer every tick. On foot in
+        // a ground round only: a seat's gun is its own (`ride::drive`), and
+        // a space round's foot bots keep the aim they had.
+        st.memory_blocked = ground
+            && u.mount.is_none()
+            && st
+                .target
+                .and_then(|h| perception::contact_of(st, h))
+                .filter(|c| !c.seen_now)
+                .is_some_and(|c| !perception::can_aim(sim, me, eye, c.last_pos + Vec3::Y * 1.4));
         // Card UCALL: hearing that made a record while no enemy is in sight
         // turns the unit to the sound (B1's hearing check, the fourth of an
         // agent's interrupt checks, `FUN_00252dc8` 171455: re-unit-chatter.md
@@ -248,8 +264,30 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             if held > 0 && st.contacts.iter().flatten().any(|c| !c.told) {
                 h.last_contact = sim.tick;
             }
+            // The holder faces the way the nearest enemy is. The look sets
+            // the yaw only (it is aimed as a Travel, which keeps the gun
+            // level), and `hunt` itself stays omniscient for the walk. A
+            // sniper on its spot watches down its lane instead unless the
+            // nearest enemy is in clear sight (card SNPR, `SnipeState::look`;
+            // `perception::can_aim`, playtest C4: a BF1 Docks platform sniper
+            // facing the fight beneath its floor). Ground rounds only.
             if let Some((_, p)) = hunt {
-                h.look = p + Vec3::Y * 1.4;
+                let at = p + Vec3::Y * 1.4;
+                let lane = st
+                    .snipe
+                    .cur
+                    .filter(|c| c.arrived && c.spot == h.spot && c.look != Vec3::ZERO)
+                    .map(|c| c.look);
+                h.look = match lane {
+                    Some(l)
+                        if ground
+                            && u.mount.is_none()
+                            && !perception::can_aim(sim, me, eye, at) =>
+                    {
+                        l
+                    }
+                    _ => at,
+                };
             }
             if sim.tick.saturating_sub(h.last_contact) >= HOLD_QUIET {
                 h.until = sim.tick;
@@ -347,6 +385,19 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let flee = hazard_flee(sim, me, u, &tier);
     // The on-hit reaction as a ROLL (below): the side, this tick only.
     let mut roll: i8 = 0;
+
+    // OURS (playtest C1): a hit by an enemy is a flinch, a short hold of the
+    // trigger (`gunner_foot::run`), at most once per FLINCH_GAP. It runs
+    // beside the moves below and the hit search (`perception::search_ticks`).
+    if u.last_hit.is_some_and(|(s, t)| {
+        sim.tick > 0
+            && t == sim.tick - 1
+            && sim.unit(s).is_some_and(|o| sim.hostile(u.team, o.team))
+    }) && perception::hit_reaction_applies(sim, u)
+        && (st.flinch_until == 0 || sim.tick >= st.flinch_until + (FLINCH_GAP - FLINCH_TICKS))
+    {
+        st.flinch_until = sim.tick + FLINCH_TICKS;
+    }
 
     // OURS: soldier dodge on hit. FUN_0020a940 (B2:121236-121318)
     // belongs to flyer/carrier vtables (0x61a94c/0x61c1cc/0x62b39c),
@@ -574,6 +625,39 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     };
     let goal = ret.or(flee).or(item).or(holding.map(|h| h.goal)).or(goal);
 
+    // Playtest C3: a bot walking somewhere faces its walk unless it can
+    // fight what it looks at. The PS2 gives no aim order outside an attack
+    // (`analysis/re-soldier-ai.md` 1.5), ends one past the weapon's range
+    // + 10 m (4.2), never attacks a vehicle its weapons cannot hurt (4.3)
+    // and shares no contacts (6). So a rider no weapon of the bot's hurts,
+    // a target beyond its reach, a friend's report and a remembered rider
+    // are not faced on the walk (they stay its target). A bot that has
+    // arrived, holds or takes a position, and a space round's, aim as before.
+    let walking_on = goal.is_some()
+        && !st.mv.arrived
+        && holding.is_none()
+        && ring.is_none()
+        && wc.saber.is_none()
+        && u.proxy_human.is_none()
+        && u.droideka_class().is_none()
+        && !sim.space_round();
+    let reach = fight_reach(sim, u);
+    let within = |p: Vec3| (p - eye).length_squared() <= reach * reach;
+    let faced = enemy.zip(seen).filter(|(e, _)| {
+        !walking_on || (within(e.capsule().center()) && (e.mount.is_none() || !st.arm.spare))
+    });
+    let faced_memory = memory.filter(|p| {
+        !walking_on
+            || goal == Some(*p)
+            || held.is_some_and(|c| {
+                !c.told
+                    && c.handle.live_unit(sim).is_none_or(|o| o.mount.is_none())
+                    && within(c.last_pos)
+            })
+    });
+    let walks_past = (enemy.is_some() && seen.is_some() && faced.is_none())
+        || (memory.is_some() && faced_memory.is_none());
+
     // Where to look: the engaged enemy's lead point, else where we are
     // walking, else the target post (the last leg, and the no-graph
     // placeholder).
@@ -582,13 +666,19 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     } else if let Some((t, ready)) = turret {
         AimRequest::Turret(t, ready)
     } else {
-        match (enemy.zip(seen), memory, corner, route_leg) {
+        match (faced, faced_memory, corner, route_leg) {
             // A seen enemy: the gunner's own aim point (its lead point under the
             // D10 error), and the only target it fires on.
             (Some((e, c)), _, _, _) => AimRequest::Enemy(e, c),
             // A remembered contact is aimed at where it was last known to be —
             // a point on the target, no lead (the PS2 aims at a point, and there
-            // is no velocity to lead with once the eyes are off it).
+            // is no velocity to lead with once the eyes are off it). A heard
+            // shot, a friend's report or a lost contact behind geometry is a
+            // direction to face, not a point to pitch at: the gun stays level
+            // (`perception::can_aim`, playtest C4).
+            (None, Some(p), _, _) if st.memory_blocked => {
+                AimRequest::Travel(perception::level(eye, p + Vec3::Y * 1.4))
+            }
             (None, Some(p), _, _) => AimRequest::Memory(p + Vec3::Y * 1.4),
             // Card HOLD: a holder standing on its point with nobody in sight
             // watches the way the nearest enemy is.
@@ -607,8 +697,16 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             (None, None, None, _) if flee.is_some() || ret.is_some() => {
                 AimRequest::Travel(goal.unwrap_or(pos) + Vec3::Y * 1.4)
             }
-            // PILEIN can send an uncommanded bot to a vehicle without a post
-            // or graph. Its explicit approach must not take the idle fallback.
+            // A boarder on its last leg looks at the vehicle it walks to, not
+            // at its post (playtest C3: it walked there sideways); ground
+            // rounds only. PILEIN can send an uncommanded bot to a vehicle
+            // without a post or graph; its approach must not take the idle
+            // fallback either.
+            (None, None, None, None)
+                if boarding.is_some() && goal == boarding && !sim.space_round() =>
+            {
+                AimRequest::Travel(goal.unwrap_or(pos) + Vec3::Y * 1.4)
+            }
             (None, None, None, None)
                 if boarding.is_some() && st.ride.is_some_and(|r| r.player_board.is_some()) =>
             {
@@ -620,6 +718,11 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
                 AimRequest::Travel(at + Vec3::Y * 1.4)
             }
             (None, None, None, Some(r)) => AimRequest::Travel(r.waypoint),
+            // (Playtest C3: a bot walking past what it does not face, with
+            // no leg and no post, looks where it walks rather than stopping.)
+            (None, None, None, None) if walks_past => {
+                AimRequest::Travel(goal.unwrap_or(pos) + Vec3::Y * 1.4)
+            }
             (None, None, None, None) => AimRequest::Travel(match post {
                 Some(cp) => cp.def.pos + Vec3::Y * 1.4,
                 // Hunting on the last leg: the destination hub itself.
@@ -950,6 +1053,14 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     (pad, nt)
 }
 
+/// The farthest a bot on foot fights: the longest AI range of the weapons it
+/// holds plus [`FIGHT_BEYOND`] (playtest C3; `re-soldier-ai.md` 4.2).
+fn fight_reach(sim: &Sim, u: &crate::unit::Unit) -> f32 {
+    let range = |c: usize| sim.weapon_classes.get(c).map_or(0.0, |w| w.ai_range[2]);
+    let held = u.held.iter().map(|h| range(h.class));
+    held.fold(range(u.weapon_class), f32::max) + FIGHT_BEYOND
+}
+
 /// Card TEAM: the guard position of a bot with the Cover role, while no
 /// fight holds it.
 fn guard_post(sim: &Sim, st: &AiState) -> Option<Vec3> {
@@ -1010,3 +1121,6 @@ fn hub_reached(sim: &Sim, st: &mut AiState) {
         st.hold = (h.skip > 0).then_some(h);
     }
 }
+
+#[cfg(test)]
+mod tests;

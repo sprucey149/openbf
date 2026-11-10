@@ -29,6 +29,9 @@ pub(super) fn persist_setting(
                 game::kbm::SENSITIVITY_RANGE.1,
             )
         }
+        MenuAction::SetPadLookSensitivity(v) => {
+            profile.settings.pad_look_sensitivity = game::profile::clamp_pad_look(v)
+        }
         MenuAction::ToggleInvertY => profile.settings.invert_y = !profile.settings.invert_y,
         MenuAction::ToggleLowPowerResolution => {
             profile.settings.low_power_resolution = !profile.settings.low_power_resolution
@@ -44,6 +47,36 @@ pub(super) fn persist_setting(
     if let Err(e) = profile.save() {
         eprintln!("profile autosave failed: {e:#}");
     }
+}
+
+/// One in-round pause-menu action, from a pad press or a pointer click alike:
+/// the battle, the cheats, the saved settings, the keyboard and mouse, and the
+/// paused music's level. True for Quit.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn apply_pause_action(
+    walk: &mut WalkSim,
+    a: ui::menu::MenuAction,
+    paused: &mut bool,
+    menu: &mut game::pause::PauseMenu,
+    cheats: &mut game::cheats::Session,
+    profile: &mut game::profile::Profile,
+    session: &mut ui::shell::SessionOptions,
+    kbm: &mut game::kbm::Kbm,
+    music_voice: Option<&mut audio::MusicVoice>,
+) -> bool {
+    game::pause::apply_menu_action(walk, a, paused, menu);
+    cheats.follow(&walk.sim);
+    persist_setting(profile, session, a, walk);
+    kbm.follow(&profile.settings);
+    // The music follows its slider; with the game bus paused the change is
+    // heard on resume.
+    if let (ui::menu::MenuAction::SetMusic(_), Some(m), Some(v)) =
+        (a, walk.music.as_ref(), music_voice)
+    {
+        let level = m.level().map_or(0.0, |(_, l)| l);
+        v.set_volume(game::sounds::level_db(level), 0.1);
+    }
+    a == ui::menu::MenuAction::Quit
 }
 
 /// Resolve only interactive direct-launch settings. Headless remains profile-free.

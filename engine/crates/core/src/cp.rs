@@ -271,13 +271,18 @@ impl CommandPost {
     }
 }
 
-/// BF2 ObjectiveConquest bleed recompute for `team` over `cps`: 1/3 per
-/// second when the enemy holds a strict majority of the total bleed value.
+/// BF2 ObjectiveConquest bleed recompute for army `team` over `cps`: 1/3 per
+/// second when the opposing army holds a strict majority of the total bleed
+/// value. Only the opposing army's posts count; a post a native team holds
+/// counts for neither army but stays in the total (analysis/re-tickets-spawn.md
+/// §1.3).
 pub fn bf2_bleed_rate(cps: &[CommandPost], team: u8) -> f32 {
+    debug_assert!(team < 2);
     let total: i32 = cps.iter().map(|c| c.def.value_bleed).sum();
+    let opposing = team ^ 1;
     let enemy: i32 = cps
         .iter()
-        .filter(|c| c.owner.is_some_and(|o| o != team))
+        .filter(|c| c.owner == Some(opposing))
         .map(|c| c.def.value_bleed)
         .sum();
     if (total as f32) / 2.0 < enemy as f32 {
@@ -574,6 +579,26 @@ mod tests {
             b.tick_bleed(DT);
         }
         assert_eq!(b.teams[1].tickets(), 17);
+    }
+
+    #[test]
+    fn bf2_bleed_ignores_native_owned_posts() {
+        // Dune Sea's opening layout: two posts each, Tuskens (team 2) hold two.
+        let mut cps: Vec<CommandPost> = [0, 0, 1, 1, 2, 2]
+            .iter()
+            .enumerate()
+            .map(|(i, &o)| {
+                CommandPost::new(def(&format!("cp{i}"), i as f32 * 50.0, false), Some(o))
+            })
+            .collect();
+        assert_eq!(bf2_bleed_rate(&cps, 0), 0.0);
+        assert_eq!(bf2_bleed_rate(&cps, 1), 0.0);
+        cps[4].owner = Some(1); // 30 of 60 is not a strict majority
+        assert_eq!(bf2_bleed_rate(&cps, 0), 0.0);
+        assert_eq!(bf2_bleed_rate(&cps, 1), 0.0);
+        cps[5].owner = Some(1);
+        assert_eq!(bf2_bleed_rate(&cps, 0), BF2_BLEED_TICKETS_PER_SEC);
+        assert_eq!(bf2_bleed_rate(&cps, 1), 0.0);
     }
 
     #[test]

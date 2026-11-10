@@ -614,21 +614,20 @@ impl Sim {
         true
     }
 
-    /// A BF2 flyer in flight keeps every rider aboard: the pilot's exit is
-    /// gated by `FUN_00202d08` (re-space-assault §10), and a playtest
-    /// (2026-11-07) showed a gunner pressing ACTION in a TIE bomber being
-    /// dropped into space. The PS2's gunner update (`FUN_001ee668`) refuses
-    /// nothing itself, so which rule holds the gunner is untraced; the port
-    /// applies the same in-flight rule to every seat.
+    /// A BF2 flyer in flight keeps its pilot and gunners aboard; passengers
+    /// may jump out (re-space-assault §10). In space modes passengers are held
+    /// too, a named deviation (no ground to land on);
+    /// measure: a PS2 space transport passenger pressing ACTION in flight.
     fn rider_held_in_flight(&self, u: UnitHandle) -> bool {
         if self.ground_rules != crate::soldier::GroundRules::Bf2 {
             return false;
         }
-        self.seat_of(u).is_some_and(|(h, _)| {
-            self.vehicle(h).is_some_and(|v| {
-                v.kind == VehicleKind::Flyer
-                    && v.flyer.phase != crate::vehicle::flyer::FlightPhase::Landed
-            })
+        self.seat_of(u).is_some_and(|(h, seat)| {
+            (!matches!(seat, SeatKind::Passenger(_)) || self.space_round())
+                && self.vehicle(h).is_some_and(|v| {
+                    v.kind == VehicleKind::Flyer
+                        && v.flyer.phase != crate::vehicle::flyer::FlightPhase::Landed
+                })
         })
     }
 
@@ -898,6 +897,7 @@ impl Sim {
                     ..v.input
                 };
                 v.flyer.ai = f.ai;
+                // Stuck in flight: destroyed in every mode (see `tick_flyers`).
                 if v.flyer.ai.wedges >= crate::ai::flyer_drive::WEDGED_GIVEUP
                     && v.flyer.phase != FlightPhase::Landed
                 {

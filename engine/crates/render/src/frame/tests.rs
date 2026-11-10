@@ -360,3 +360,13 @@ fn the_speckle_sorts_after_the_water() {
     let s = rank(s);
     assert!(rank(DrawCmd::water(m, t, [1.0; 4], Mat4::IDENTITY)) < s);
 }
+
+/// The frame's non-sRGB view is made only where it is legal: an sRGB
+/// surface needs its plain twin listed, a plain surface is its own twin.
+#[test]
+fn the_display_view_needs_a_listed_twin_on_an_srgb_surface() {
+    use wgpu::TextureFormat::{Bgra8Unorm, Bgra8UnormSrgb};
+    assert!(!display_view_allowed(Bgra8UnormSrgb, None));
+    assert!(display_view_allowed(Bgra8UnormSrgb, Some(Bgra8Unorm)));
+    assert!(display_view_allowed(Bgra8Unorm, None));
+}

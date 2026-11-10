@@ -773,6 +773,7 @@ impl SoundLib {
             pos,
             bus: self.bus_of(&p),
             flat: p.flat,
+            menu: p.bus == super::SHELLFX,
         });
     }
 

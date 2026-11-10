@@ -237,6 +237,30 @@ impl PadState {
     }
 }
 
+/// Button bits a menu or prompt has taken: they are kept from play until
+/// they are released, so the press that answered the menu is not also the
+/// next reader's press (BF1 issues a held order once, re-squad-orders §1).
+/// [`HeldEat::eat`] may name more bits than are held; the next
+/// [`HeldEat::filter`] keeps only those still down.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeldEat(pub u32);
+
+impl HeldEat {
+    pub fn eat(&mut self, bits: u32) {
+        self.0 |= bits;
+    }
+
+    /// The held bits play may see: a released bit leaves the mask for good.
+    pub fn filter(&mut self, held: u32) -> u32 {
+        self.0 &= held;
+        held & !self.0
+    }
+
+    pub fn is_clear(&self) -> bool {
+        self.0 == 0
+    }
+}
+
 /// Deterministic input log: seed + per-tick pad states.
 ///
 /// FLAT layout: `ticks` holds `slots` pads per tick back to back, so tick `t`
@@ -415,6 +439,23 @@ pub(crate) fn cone_score(r: f32, slope: f32, maxd: f32, pos: Vec3, dir: Vec3, ct
 }
 
 impl Sim {
+    /// The tick's pads with each slot's [`Sim::held_eaten`] buttons taken
+    /// out; `None` (no copy) while no slot holds one. A slot with no pad
+    /// this tick has released everything.
+    pub(super) fn eat_held_pads(&mut self, pads: &[PadState]) -> Option<Vec<PadState>> {
+        if self.held_eaten.iter().all(HeldEat::is_clear) {
+            return None;
+        }
+        let mut out = pads.to_vec();
+        for (slot, held) in self.held_eaten.iter_mut().enumerate() {
+            match out.get_mut(slot) {
+                Some(p) => p.buttons = held.filter(p.buttons),
+                None => *held = HeldEat::default(),
+            }
+        }
+        Some(out)
+    }
+
     /// What the acquisition reads of `t`, `None` when it is gone. A
     /// vehicle's bounds are its `aim_sphere` (a building turret's building),
     /// else its blast sphere (card VDTH; PROVISIONAL: the PS2 takes the
@@ -836,7 +877,15 @@ impl Sim {
             fire_held: pad.pressed(buttons::FIRE),
             armed: self.assist_armed,
             lead_vel,
-            look_scale: LOOK_SCALE,
+            // OURS (C5): a scoped sniper rifle follows a share of its magnet
+            // before the press (`aim_assist::SNIPER_FOLLOW`).
+            follow: match self.weapon_classes[p.weapon_class].is_sniper_rifle() && p.scoped() {
+                true => aim_assist::SNIPER_FOLLOW,
+                false => 0.0,
+            },
+            // A full push, after the pad's sensitivity, as far as the
+            // stick can go.
+            look_scale: (LOOK_SCALE * self.pad_look_sensitivity).min(1.0),
         };
         let mut st = self.assist.get(slot).copied().unwrap_or_default();
         aim_assist::apply(dt, &mut sticks, &env, &mut st, self.assist_intensity);

@@ -939,6 +939,67 @@ fn the_aim_origin_camera_and_fire_point_are_the_ps2s() {
     assert!((cam.forward.y.asin().to_degrees() + 4.0).abs() < 0.01);
 }
 
+/// B6 (playtest 2026-11-05, ours): past the ray's reach the shot converges
+/// on the terrain or wall the far ray meets within `FAR_AIM_LENGTH`, so a
+/// stationary shot at the ground 150 m out lands on the reticle's point
+/// (the PS2's far-end rule put it about 1 m high there, so it landed long).
+/// Past the far ray the PS2's far end stays.
+#[test]
+fn a_far_terrain_shot_converges_on_the_reticle() {
+    let rules = GroundRules::Bf1;
+    let at = |o: Vec3, d: Vec3, wall: f32| o + d * ((-wall - o.z) / d.z);
+
+    // Flat ground met by the ray about 150 m out.
+    let mut s = aim_sim(rules, -0.0157, None);
+    let ((a, d), h, f, dir) = one_shot(&mut s);
+    let ray_floor = a + d * (-a.y / d.y);
+    let land = f + dir * (-f.y / dir.y);
+    println!(
+        "floor: H {h:?}, the ray meets the floor {:.1} m out, the bolt lands {:.1} m out, {:.3} m off",
+        -ray_floor.z,
+        -land.z,
+        (land - ray_floor).length()
+    );
+    assert!((120.0..200.0).contains(&-ray_floor.z), "{ray_floor:?}");
+    assert!(
+        (h - ray_floor).length() < 0.15,
+        "H is where the ray meets the floor"
+    );
+    assert!(
+        (land - ray_floor).length() < 0.15,
+        "the bolt lands under the reticle"
+    );
+
+    // A wall 120 m out: within the far ray.
+    let mut s = aim_sim(rules, 0.05, Some((120.0, 1.0)));
+    let ((a, d), h, f, dir) = one_shot(&mut s);
+    let miss = (at(f, dir, 120.0) - at(a, d, 120.0)).length();
+    println!("wall 120 m: H {h:?}, the bolt passes {miss:.4} m from the ray's point");
+    assert!((h.z + 120.0).abs() < 1e-3, "H is on the wall: {h:?}");
+    assert!(miss < 0.05, "{miss}");
+
+    // A wall 400 m out: past the far ray, so H is the near ray's end and
+    // the bolt crosses the ray there and climbs over it (the PS2's rule).
+    let mut s = aim_sim(rules, 0.05, Some((400.0, 1.0)));
+    let ((a, d), h, f, dir) = one_shot(&mut s);
+    let over = at(f, dir, 80.0).y - at(a, d, 80.0).y;
+    println!(
+        "wall 400 m: |H - A| {:.3}, the bolt {over:.4} m over the ray's point at 80 m",
+        (h - a).length()
+    );
+    assert!(((h - a).length() - 65.2).abs() < 1e-3);
+    assert!((0.0..0.2).contains(&over), "{over}");
+
+    // A space map (a landing region marks one): the wall at 120 m is not
+    // seen and H stays the near ray's far end, the PS2's rule.
+    let mut s = aim_sim(rules, 0.05, Some((120.0, 1.0)));
+    s.landing_regions
+        .push(crate::region::Region::sphere(Vec3::ZERO, 50.0));
+    let ((a, _), h, _, _) = one_shot(&mut s);
+    println!("wall 120 m on a space map: |H - A| {:.3}", (h - a).length());
+    assert!(((h - a).length() - 65.2).abs() < 1e-3, "{h:?}");
+}
+
 /// Card AIMA, the wall test (on a BF1 map, which plays BF2's camera table
 /// since 2026-10-28; the spread off). Within the
 /// ray's reach the bolt goes to the reticle's point; past it the bolt is
@@ -960,8 +1021,10 @@ fn a_humans_bolt_goes_where_the_reticles_ray_hits() {
     assert!((h.z + 20.0).abs() < 1e-3, "H is on the wall: {h:?}");
     assert!(miss < 0.05);
 
-    // 80 m out: H is the ray's end, 65.2 m from A (the 3.2 m track and the
-    // AIM_RAY_START and AIM_RAY_LENGTH past it).
+    // 80 m out: past the ray's reach (65.2 m from A: the 3.2 m track and
+    // the AIM_RAY_START and AIM_RAY_LENGTH past it) but within the far ray
+    // (ours, B6), so H is on the wall and the bolt passes through the ray's
+    // point there instead of crossing the ray at its far end.
     let mut s = aim_sim(rules, 0.05, Some((80.0, 1.0)));
     let ((a, d), h, f, dir) = one_shot(&mut s);
     let over = at(f, dir, 80.0).y - at(a, d, 80.0).y;
@@ -969,8 +1032,8 @@ fn a_humans_bolt_goes_where_the_reticles_ray_hits() {
         "wall 80 m: |H - A| {:.3}, the bolt {over:.4} m over the ray's point",
         (h - a).length()
     );
-    assert!(((h - a).length() - 65.2).abs() < 1e-3);
-    assert!((0.0..0.2).contains(&over), "{over}");
+    assert!((h.z + 80.0).abs() < 1e-3, "H is on the wall: {h:?}");
+    assert!(over.abs() < 0.05, "{over}");
 
     // 4.8 m from the feet (0.2 m thick): before the ray's 5.2 m start.
     let mut s = aim_sim(rules, 0.05, Some((4.8, 0.2)));

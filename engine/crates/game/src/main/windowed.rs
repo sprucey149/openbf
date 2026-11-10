@@ -223,22 +223,36 @@ fn note_sounds(
     }
 }
 
-/// The window's first size: 1280x720 logical, or `OPENBF_WINDOW_SIZE=WxH`
-/// physical pixels (a measurement knob, card ISPD: the same frame at a
-/// laptop panel's resolution).
-fn window_size() -> winit::dpi::Size {
-    let want = std::env::var("OPENBF_WINDOW_SIZE").ok().and_then(|s| {
-        let (w, h) = s.split_once('x')?;
-        Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))
-    });
+/// `OPENBF_WINDOW_SIZE=WxH` in physical pixels (a measurement knob, card
+/// ISPD: the same frame at a laptop panel's resolution).
+fn window_size_env() -> Option<(u32, u32)> {
+    let s = std::env::var("OPENBF_WINDOW_SIZE").ok()?;
+    let (w, h) = s.split_once('x')?;
+    Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))
+}
+
+/// The window opens maximized (playtest A5), restoring to 1280x720
+/// logical; a forced size opens at exactly that size, not maximized.
+fn window_attributes(want: Option<(u32, u32)>) -> winit::window::WindowAttributes {
+    let base = winit::window::Window::default_attributes().with_title("openbf");
     match want {
-        Some((w, h)) if w > 0 && h > 0 => winit::dpi::PhysicalSize::new(w, h).into(),
-        _ => winit::dpi::LogicalSize::new(1280, 720).into(),
+        Some((w, h)) if w > 0 && h > 0 => base.with_inner_size(winit::dpi::PhysicalSize::new(w, h)),
+        _ => base
+            .with_inner_size(winit::dpi::LogicalSize::new(1280, 720))
+            .with_maximized(true),
     }
 }
 
 /// The weather's own random stream starts here (never the sim's).
 const WEATHER_SEED: u32 = 0x7ea7_4e12;
+
+/// Restart Mission's playlist: `row` plays next, then the rest in order.
+fn requeue_front(
+    playlist: &mut std::collections::VecDeque<ui::shell::Launch>,
+    row: ui::shell::Launch,
+) {
+    playlist.push_front(row);
+}
 
 /// The velocity of what the player's camera tracks — the soldier, or the
 /// vehicle ridden: what tilts a rain streak (re-weather.md §3.1).
@@ -321,7 +335,9 @@ mod front;
 use front::FrontShell;
 #[path = "windowed/menu_actions.rs"]
 mod menu_actions;
-use menu_actions::{persist_setting, resolve_direct_settings};
+use menu_actions::{apply_pause_action, resolve_direct_settings};
+#[path = "windowed/idle.rs"]
+mod idle;
 #[path = "windowed/mouse.rs"]
 mod mouse;
 
@@ -455,6 +471,8 @@ struct App {
     snapshot_requested: bool,
     /// Quit chosen in the pause menu; handled after the frame.
     quit_clicked: bool,
+    /// Restart Mission confirmed in the pause menu; handled after the frame.
+    restart_clicked: bool,
     /// The frame record (dev mode, card HITCH) and `OPENBF_FRAME_PROFILE=<csv>`'s
     /// row of CPU / GPU ms per battle frame (`game::frame_profile`).
     frame_profile: Option<game::frame_profile::FrameProfile>,
@@ -468,6 +486,11 @@ struct App {
     prev_menu_buttons: u32,
     /// Separate from menu/D-pad state; reset when the sampled controller changes.
     gameplay_stick: GameplayStick<gilrs::GamepadId>,
+    /// The left stick's learned travel (#142); reset with `gameplay_stick`.
+    stick_range: input::StickRange,
+    /// The last sampled raw left stick and its full-push travel, for the
+    /// black box's human row.
+    stick_sample: ([f32; 2], [f32; 2]),
     /// The pad that last sent input; read instead of the first (issue #56).
     active_pad: input::ActivePad<gilrs::GamepadId>,
     /// Which device the Auto input icons follow.
@@ -489,6 +512,9 @@ struct App {
     front: Option<FrontShell>,
     /// One click of L3 sprints (`input::SprintLatch`).
     sprint_latch: input::SprintLatch,
+    /// The buttons held through a resume, kept from play until released
+    /// (`game::pause::resume_pad`).
+    resume_gate: core::sim::HeldEat,
     view_toggle: game::viewpoint::ViewToggle,
     /// `OPENBF_AUTOPILOT=1` in dev mode: [`autopilot_pad`] drives the player.
     autopilot: bool,
@@ -499,6 +525,9 @@ struct App {
     /// The session's cheats and the pause menu's Morse recogniser (card
     /// CHEAT2): copied into every battle, all off back at the main menu.
     cheats: game::cheats::Session,
+    /// Keeps the display awake while a round is played (playtest A1);
+    /// declared before `window` so it goes first.
+    idle: Option<idle::IdleInhibit>,
     window: Option<Arc<winit::window::Window>>,
     renderer: Option<Renderer>,
     gpu: Option<SceneGpu>,
@@ -600,6 +629,32 @@ impl<Id: PartialEq> GameplayStick<Id> {
     }
 }
 
+/// The left-stick travel a sample reads as a full push, per axis: the pad's
+/// learned range for a soldier on foot in a ground mode (#142),
+/// [`input::STICK_FULL`] in every seat and anywhere in a space mode, so
+/// ground vehicle, walker, flyer and all space input never change with the
+/// range.
+fn stick_full(range: &input::StickRange, learned: bool) -> [f32; 2] {
+    if learned {
+        range.full()
+    } else {
+        [input::STICK_FULL; 2]
+    }
+}
+
+/// Run the event loop. A loop that ends in an error has already dropped the
+/// display connection the idle inhibit borrows, so that is let go without
+/// its teardown requests (the display drops the inhibit with the client).
+fn run_app(event_loop: winit::event_loop::EventLoop<()>, app: &mut App) -> Result<()> {
+    if let Err(e) = event_loop.run_app(app) {
+        if let Some(idle) = app.idle.take() {
+            std::mem::forget(idle);
+        }
+        return Err(e.into());
+    }
+    Ok(())
+}
+
 pub(super) fn run_windowed(v: ViewerArgs) -> Result<()> {
     let event_loop = winit::event_loop::EventLoop::new()?;
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -633,8 +688,7 @@ pub(super) fn run_windowed(v: ViewerArgs) -> Result<()> {
     app.cam = camera_from(v.cam);
     app.walk_requested = v.walk;
     app.mode = v.mode;
-    event_loop.run_app(&mut app)?;
-    Ok(())
+    run_app(event_loop, &mut app)
 }
 
 impl App {
@@ -678,6 +732,7 @@ impl App {
             paused: false,
             pause_menu: game::pause::PauseMenu::default(),
             quit_clicked: false,
+            restart_clicked: false,
             frame_profile: None,
             dyn_res: game::dyn_res::DynRes::default(),
             dyn_res_budget_ms: None,
@@ -696,6 +751,8 @@ impl App {
             snapshot_requested: false,
             prev_menu_buttons: 0,
             gameplay_stick: GameplayStick::default(),
+            stick_range: input::StickRange::default(),
+            stick_sample: ([0.0; 2], [0.0; 2]),
             active_pad: input::ActivePad::default(),
             icon_device: game::input_icons::DeviceTracker::default(),
             keys_held: 0,
@@ -707,10 +764,12 @@ impl App {
             kbm,
             front: None,
             sprint_latch: input::SprintLatch::default(),
+            resume_gate: core::sim::HeldEat::default(),
             view_toggle: game::viewpoint::ViewToggle::default(),
             autopilot: false,
             quit_at: None,
             cheats,
+            idle: None,
             window: None,
             renderer: None,
             gpu: None,
@@ -839,6 +898,7 @@ impl App {
         if input::pump_tracking(g, &mut self.active_pad) {
             self.pad_warning = input::log_pads_with(g, map, &self.active_pad);
             self.gameplay_stick.select(None);
+            self.stick_range.reset();
         } else if self.active_pad.id != was {
             self.pad_warning = input::active_pad_warning(g, map, &self.active_pad);
         }
@@ -1090,6 +1150,8 @@ impl App {
         self.vehicle_vis.preload(renderer, &walk.sim);
         self.bolts.preload(renderer, &walk);
         walk.sim.assist_intensity = self.profile.settings.assist_intensity;
+        walk.sim.pad_look_sensitivity =
+            walk.pad_look_for_battle(self.profile.settings.pad_look_sensitivity);
         walk.fov_scale = self.profile.settings.fov_scale;
         if let Some(m) = walk.music.as_mut() {
             m.volume = game::music::volume_from_env(self.profile.settings.music_volume);
@@ -1226,6 +1288,7 @@ impl App {
             r.atmosphere_time = Some(0.0);
         }
         self.kbm.release_keys();
+        self.resume_gate = core::sim::HeldEat::default();
         self.outcome_reported = false;
         self.round_recorded = false;
         self.screen = Screen::Battle;
@@ -1263,6 +1326,42 @@ impl App {
         self.matchlog = None;
     }
 
+    /// Whether the battle's sound is held: a ground battle in the pause menu.
+    /// Space battles keep their own pause behaviour for now.
+    fn game_audio_paused(&self) -> bool {
+        self.in_battle() && self.paused && !self.space_battle()
+    }
+
+    /// A space battle ([`game::walk::WalkSim::space_battle`]).
+    fn space_battle(&self) -> bool {
+        self.walk.as_ref().is_some_and(|(w, _)| w.space_battle())
+    }
+
+    /// Pause or resume the game's mixer bus to match [`App::game_audio_paused`].
+    /// Run every frame, so every way out of the pause (Resume, a respawn,
+    /// leaving the battle) brings the sound back.
+    fn sync_pause_audio(&mut self) {
+        let paused = self.game_audio_paused();
+        if let Some(a) = self.audio.as_mut() {
+            a.set_game_paused(paused);
+        }
+    }
+
+    /// Restart Mission: the battle in play again from its loading screen, the
+    /// rest of the playlist after it and the session's cheats kept. The left
+    /// round is recorded as a Quit's is.
+    fn restart_round(&mut self) {
+        let Some(row) = self.current.clone() else {
+            return;
+        };
+        self.leave_battle();
+        requeue_front(&mut self.playlist, row);
+        if !self.next_round() {
+            self.playlist.clear();
+            self.cheats.end();
+        }
+    }
+
     /// Battle → shell (records the round).
     fn leave_battle(&mut self) {
         self.blackbox_exit();
@@ -1281,12 +1380,19 @@ impl App {
             r.clear_scene();
         }
         self.hud_view = None;
+        // Left from the pause menu: drop the held battle sounds rather than
+        // resume them over the shell. (Space never pauses the bus.)
+        if let Some(a) = self.audio.as_mut().filter(|a| a.game_paused()) {
+            a.clear_game_bus();
+        }
         self.paused = false;
         self.kbm.release_keys();
+        self.resume_gate = core::sim::HeldEat::default();
         self.release_mouse();
         if let Some(sl) = self.sounds.as_mut() {
             sl.stop_loops();
         }
+        self.sync_pause_audio();
         self.init_shell();
     }
 
@@ -1311,6 +1417,7 @@ impl App {
             if input::pump_tracking(g, &mut self.active_pad) {
                 self.pad_warning = input::log_pads_with(g, map, &self.active_pad);
                 self.gameplay_stick.select(None);
+                self.stick_range.reset();
                 if let Some(front) = self.front.as_mut() {
                     front.reset_control_device();
                 }
@@ -1343,9 +1450,14 @@ impl App {
                     .walk
                     .as_ref()
                     .is_some_and(|(w, _)| w.round_end.as_ref().is_some_and(|r| r.stats.is_some()));
-                if (matches!(self.screen, Screen::Shell) || stats) && pad.is_pressed(Button::North)
-                {
-                    now |= 32;
+                if pad.is_pressed(Button::North) {
+                    // Held North is remembered everywhere; it backs out of
+                    // the ground pause menu only on its own fresh press
+                    // (`kbm::menu_edges`).
+                    now |= game::kbm::MENU_NORTH;
+                    if matches!(self.screen, Screen::Shell) || stats {
+                        now |= 32;
+                    }
                 }
                 // The left stick presses the same arms as the D-pad.
                 let stick = input::stick_arms(
@@ -1366,15 +1478,26 @@ impl App {
         let shell = matches!(self.screen, Screen::Shell);
         now |= game::kbm::menu_bits(self.keys_held, shell);
         let tapped = game::kbm::menu_bits(std::mem::take(&mut self.keys_tapped), shell);
-        let edges = (now & !self.prev_menu_buttons) | tapped;
+        // BF2's pause menu backs out on Triangle too (re-bf2-menus,
+        // ifs_pausemenu); in play it is ACTION, which the resume gate keeps
+        // from play until released. Space battles have no such gate, so
+        // their pause menu keeps Triangle as it was.
+        let space = self.walk.as_ref().is_some_and(|(w, _)| w.space_battle());
+        let north_backs = self.paused && !space;
+        let edges = game::kbm::menu_edges(now, self.prev_menu_buttons, tapped, north_backs);
         self.prev_menu_buttons = now;
         edges
     }
 
-    /// Sample the active gamepad into a sim PadState (walk mode).
-    fn sample_pad(&mut self) -> PadState {
+    /// Sample the active gamepad into a sim PadState (walk mode); `look` is
+    /// the right stick's look sensitivity. `learned`: the soldier's stick is
+    /// scaled by the pad's learned range (on foot in a ground mode);
+    /// otherwise the fixed [`input::STICK_FULL`] keeps vehicle, flyer and
+    /// space input as it was.
+    fn sample_pad(&mut self, look: f32, learned: bool) -> PadState {
         let Some(g) = &mut self.gilrs else {
             self.gameplay_stick.select(None);
+            self.stick_range.reset();
             return PadState::default();
         };
         let was = self.active_pad.id;
@@ -1383,22 +1506,37 @@ impl App {
             self.pad_warning = input::log_pads_with(g, map, &self.active_pad);
             // A disconnect/reconnect can reuse the same gilrs ID between frames.
             self.gameplay_stick.select(None);
+            self.stick_range.reset();
         } else if self.active_pad.id != was {
             self.pad_warning = input::active_pad_warning(g, map, &self.active_pad);
         }
         match input::active_gamepad(g, &self.active_pad) {
             Some((id, pad)) => {
+                if self.gameplay_stick.controller != Some(id) {
+                    self.stick_range.reset();
+                }
                 self.gameplay_stick.select(Some(id));
+                let raw = [
+                    pad.value(gilrs::Axis::LeftStickX),
+                    pad.value(gilrs::Axis::LeftStickY),
+                ];
+                self.stick_range.feed(raw[0], raw[1]);
+                let full = stick_full(&self.stick_range, learned);
+                self.stick_sample = (raw, full);
                 let (state, arms) = input::pad_from_gamepad_with_arms(
                     &pad,
                     &self.profile.settings.controller_bindings,
                     self.gameplay_stick.arms,
+                    look,
+                    full,
                 );
                 self.gameplay_stick.arms = arms;
                 state
             }
             None => {
                 self.gameplay_stick.select(None);
+                self.stick_range.reset();
+                self.stick_sample = ([0.0; 2], [0.0; 2]);
                 PadState::default()
             }
         }
@@ -1451,8 +1589,7 @@ pub(super) fn run_shell(assets_dir: PathBuf, missions_dir: PathBuf) -> Result<()
     app.frame_profile = frame_profile;
     app.autopilot = autopilot;
     app.quit_at = quit_at;
-    event_loop.run_app(&mut app)?;
-    Ok(())
+    run_app(event_loop, &mut app)
 }
 
 #[path = "windowed/tests.rs"]

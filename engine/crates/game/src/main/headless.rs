@@ -44,6 +44,7 @@ fn render_headless_hud(
     skinned: &[render::SkinnedDrawCmd],
     model: &ui::hud::HudModel,
     spawn: Option<&ui::spawn::SpawnModel>,
+    death_view: bool,
     clear: [f64; 4],
 ) -> Result<()> {
     let (w, h) = r.size();
@@ -53,13 +54,11 @@ fn render_headless_hud(
         hv.update(model, dt, [w, h]);
     }
     let paint = overlay.begin_headless([w, h], 1.0, |ctx| {
-        // The spawn screen owns the death message when it is up.
-        let hud = match spawn {
-            Some(_) => ui::hud::HudModel {
-                dead: false,
-                ..model.clone()
-            },
-            None => model.clone(),
+        // The death camera and the spawn screen own the death: the egui
+        // banner is only for launches with neither.
+        let hud = ui::hud::HudModel {
+            dead: model.dead && spawn.is_none() && !death_view,
+            ..model.clone()
         };
         ui::hud::draw_hud(ctx, &hud);
         if let Some(s) = spawn {
@@ -194,6 +193,7 @@ impl ReplayFrame {
                     &skinned,
                     &model,
                     spawn.as_ref(),
+                    walk.death_cam.is_some() || walk.holds_seat_view(),
                     gpu.clear,
                 )?
             }

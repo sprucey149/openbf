@@ -41,7 +41,7 @@ fn saber_sound(class: &core::hero_weapon::SaberClass, hash: u32) -> Option<&str>
 /// The local player's ears.
 pub fn listener(walk: &WalkSim) -> Listener {
     let me = &walk.sim.units[walk.player.index as usize];
-    if me.mount.is_some() || (!me.alive && walk.seat_view_timer > 0.0) {
+    if me.mount.is_some() || (!me.alive && walk.seat_view_timer > 0.0) || walk.holds_seat_view() {
         let cam = walk.camera();
         return Listener {
             pos: cam.position,

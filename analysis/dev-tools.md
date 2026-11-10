@@ -51,6 +51,12 @@ windowed renderer cannot read its frame back, so the picture is the maintainer's
 - **When the maintainer reports damage or firing that feels wrong** ("it only took half his health", "I fired two at once"): read
   the event rows (`--events`). Since schema 8 they carry each of his shots (`#n fired <weapon>`) and every hit he deals
   or takes: the damage, the victim's health after it, and direct (with the round's flight time) or blast.
+- **When a controller walks slowly, will not sprint or roll** (#142): the human rows carry the left stick as gilrs
+  gave it (`stick_raw`, schema 16) next to the scaled `lx`/`ly`, and `stick_full`, the travel the game took as a full
+  push on each axis that tick (`input::StickRange`: the pad's own learned peak per axis for a soldier on foot in a
+  ground mode, `STICK_FULL` in a seat and in space). A raw peak under 0.9 on a full push is an axis that tops out
+  short; under `STICK_FULL_MIN` that axis is out of range. Without a snapshot the reporter runs
+  `cargo run --release -p input --example pads -- --live` and pastes the peaks line.
 - **A timed battle with no renderer:** `game --map assets_baked/tat2 --mode eli --headless --seconds 60` steps the mission
   `missions/<map>_<mode>.ron` for that long, prints points, alive counts and classes every 10 s, and writes
   `artifacts/playtest/headless/<map>_<mode>_<seed>.json`.

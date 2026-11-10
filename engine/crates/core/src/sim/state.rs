@@ -65,7 +65,10 @@ pub struct Cheats {
     pub infinite_stamina: bool,
     /// `[ours]` Every class costs the player 0 points (`game::unlocks`).
     pub all_classes: bool,
-    /// All awards granted this session (awards system lands at P8).
+    /// `[ours]` The player holds every BF2 medal, so each class's award
+    /// weapons replace the ones they stand for (`Sim::award_bits`). Not in
+    /// the space modes; BF1 classes have no award weapons (the CIS battle
+    /// droid's BF2 kit aside). Earned medals are issue #130.
     pub all_awards: bool,
 }
 
@@ -78,7 +81,7 @@ impl Cheats {
             ("clip", "No reloading (clip)", self.no_reload),
             ("stamina", "Infinite stamina (run)", self.infinite_stamina),
             ("classes", "Unlock all classes (all)", self.all_classes),
-            ("awards", "All awards (openbf, session)", self.all_awards),
+            ("awards", "Award weapons (BF2 kits)", self.all_awards),
         ]
     }
 
@@ -253,6 +256,10 @@ pub struct Sim {
     /// dead soldier does not step, so `Soldier::prev_buttons` cannot serve.
     /// Hashed beside `spawn_choice`.
     pub prev_spawn_bits: Vec<u32>,
+    /// Per player slot, the buttons a prompt took that stay out of play until
+    /// released (`Sim::eat_held_pads`). Hashed only while some slot holds
+    /// one, so a sim that never answered a prompt keeps its hash.
+    pub held_eaten: Vec<super::input::HeldEat>,
     /// Per player slot, the POST the spawn map has selected for that slot's
     /// next respawn (card SPSEL; `buttons::SPAWN_POST_*` while dead, the PS2's
     /// pick `Sim::pick_spawn_post`). `None` = never picked: the respawn draws
@@ -403,6 +410,11 @@ pub struct Sim {
     pub friendly_fire_scale: f32,
     /// PLAN intensity slider; 1.0 = PS2-authentic.
     pub assist_intensity: f32,
+    /// The player's controller look sensitivity, which the pad sampler has
+    /// already put on the right stick: the aim assist reads the push before
+    /// it. A session setting like `assist_intensity`; 1 = none. Neither is
+    /// in the input log, so a replay runs both at 1.
+    pub pad_look_sensitivity: f32,
     /// Term-3 gate (SP Auto Aim option); default on.
     pub assist_armed: bool,
     /// Aim-assist state per player slot (parallel to `players`).
@@ -420,6 +432,8 @@ pub struct Sim {
     /// (`MAGNET_LOS_GRACE`). Hashed only when one is not 0.
     pub magnet_hidden: Vec<u8>,
     pub lock_on: Vec<super::lock_on::LockOn>,
+    /// Per player slot: BF2's on-foot launcher lock (`sim::foot_lock`).
+    pub foot_lock: Vec<super::foot_lock::FootLock>,
     /// What each player slot's crosshair picks, with its relation (−1
     /// enemy, 0 team 0, 1 friend): the PS2's K+0x30 / K+0x40, which the HUD
     /// reticle colours by (`analysis/re-aim-assist.md` §3.7, card RETC) and
@@ -828,6 +842,23 @@ impl MissionAi {
 }
 
 impl Sim {
+    /// A space round: Space Assault, or the space one-flag CTF, which today
+    /// is the only CTF the battle installs (a ground CTF, once the battle
+    /// installs one, stays a ground round: its flag carries at the ground
+    /// offset). A map with landing regions counts too; only the space
+    /// scripts add them, in every space mode, so on a launched battle this
+    /// decides the same rounds and keeps a space fixture that has only them.
+    /// Every space-or-ground rule reads this one test, core and game alike,
+    /// so that space rounds keep their own behaviour.
+    pub fn space_round(&self) -> bool {
+        self.space_assault.is_some()
+            || self
+                .ctf
+                .as_ref()
+                .is_some_and(super::ctf::CtfState::is_space)
+            || !self.landing_regions.is_empty()
+    }
+
     /// Card MAIS: team `team`'s AI tier as its bots see with it - the
     /// difficulty tier's columns, its `view_mult` times the mission's
     /// [`MissionAi::view_mult`]. Every view distance a bot uses comes from
@@ -965,6 +996,7 @@ impl Sim {
             spawn_choice: Vec::new(),
             spawn_post_choice: Vec::new(),
             prev_spawn_bits: Vec::new(),
+            held_eaten: Vec::new(),
             spawn_screens: false,
             spawn_stage: Vec::new(),
             side_choice: Vec::new(),
@@ -1015,6 +1047,7 @@ impl Sim {
             cheats: Cheats::default(),
             friendly_fire_scale: 1.0,
             assist_intensity: 1.0,
+            pad_look_sensitivity: 1.0,
             assist_armed: true,
             assist: Vec::new(),
             assist_lead_on: true,
@@ -1022,6 +1055,7 @@ impl Sim {
             magnet: Vec::new(),
             magnet_hidden: Vec::new(),
             lock_on: Vec::new(),
+            foot_lock: Vec::new(),
             reticle_pick: Vec::new(),
             events: Vec::new(),
             press_edges: Vec::new(),
