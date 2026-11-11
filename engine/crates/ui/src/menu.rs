@@ -378,11 +378,18 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
         return Some(why.to_owned());
     }
     match row {
+<<<<<<< HEAD
         // Over, the round keeps its teams; the value is the next round's.
         Row::AiCap if m.in_shell.is_none() && m.outcome_line.is_some() => Some(format!(
             "{}\nChanges apply from the next round.",
             m.population_note[0]
         )),
+=======
+        Row::Assist => Some(
+            "Aim assist intensity for controllers. Mouse aim uses raw input without assist."
+                .to_owned(),
+        ),
+>>>>>>> e897aa1 (pause UI)
         Row::AiCap => Some(m.population_note[0].clone()),
         Row::Reinforcements if m.in_shell.is_none() => Some(format!(
             "{}\nChanges apply from the next round.",
@@ -402,17 +409,66 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
     }
 }
 
+<<<<<<< HEAD
 /// Why a row cannot change here, if it cannot: such a row is drawn greyed
 /// with this reason as its help, and takes no step.
 pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
     match row {
         Row::AiCap if m.team_size_off && m.in_shell.is_none() => {
             Some("Team size is fixed in this battle: it has no map team sizes to scale.")
+=======
+/// Step a slider row forward (right) or backward (left).
+pub fn step_slider_action(m: &MenuModel, row: Row, right: bool) -> Option<MenuAction> {
+    match row {
+        Row::Assist => {
+            let d = if right { 0.1 } else { -0.1 };
+            Some(MenuAction::SetAssist(
+                ((m.assist_intensity + d) * 10.0).round() / 10.0,
+            ))
+        }
+        Row::AiCap => {
+            let pct = if right {
+                m.team_size_pct
+                    .saturating_add(10)
+                    .min(crate::population::MAX_TEAM_PCT)
+            } else {
+                m.team_size_pct.saturating_sub(10).max(10)
+            };
+            Some(MenuAction::SetAiCap(pct))
+        }
+        Row::Reinforcements => {
+            let pct = if right {
+                m.reinforcements_pct.saturating_add(10).min(500)
+            } else {
+                m.reinforcements_pct.saturating_sub(10).max(10)
+            };
+            Some(MenuAction::SetReinforcements(pct))
+        }
+        Row::Fov => {
+            let d = if right { 0.05 } else { -0.05 };
+            Some(MenuAction::SetFov(
+                ((m.fov_scale + d) * 20.0).round() / 20.0,
+            ))
+        }
+        Row::Music => {
+            let d = if right { 0.1 } else { -0.1 };
+            Some(MenuAction::SetMusic(
+                ((m.music_volume + d) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+            ))
+        }
+        Row::MouseSensitivity => {
+            let d = if right { 0.1 } else { -0.1 };
+            let (lo, hi) = MOUSE_SENSITIVITY_RANGE;
+            Some(MenuAction::SetMouseSensitivity(
+                (((m.mouse_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
+            ))
+>>>>>>> e897aa1 (pause UI)
         }
         _ => None,
     }
 }
 
+<<<<<<< HEAD
 /// The rows a step changes (Left / Right, ◀ / ▶); Button prompts too.
 fn is_value_row(row: Row) -> bool {
     matches!(
@@ -451,6 +507,8 @@ pub fn step_id(index: usize, right: bool) -> egui::Id {
     egui::Id::new(("menu_step", index, right))
 }
 
+=======
+>>>>>>> e897aa1 (pause UI)
 /// Apply controller input to the cursor/values; returns actions to perform
 /// and the new cursor.
 pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
@@ -500,6 +558,7 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
         }
     }
     match rows[cursor] {
+<<<<<<< HEAD
         row if row_locked(m, row).is_some() => {}
         Row::Assist if input.left || input.right => {
             let d = if input.right { 0.1 } else { -0.1 };
@@ -543,6 +602,27 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
             actions.push(MenuAction::SetMouseSensitivity(
                 (((m.mouse_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
             ));
+=======
+        Row::ClassPicker if input.confirm => actions.push(MenuAction::OpenClassPicker),
+        Row::ClassBack if input.confirm => actions.push(MenuAction::CloseClassPicker),
+        Row::ClassChoice(i) if input.confirm => actions.push(MenuAction::SelectClass(i)),
+        Row::Respawn if input.confirm => actions.push(MenuAction::RequestRespawn),
+        Row::No if input.confirm => actions.push(MenuAction::CancelRespawn),
+        Row::Yes if input.confirm => actions.push(MenuAction::Respawn),
+        Row::Resume if input.confirm => actions.push(MenuAction::Resume),
+        Row::Cheat(i) if input.confirm => actions.push(MenuAction::ToggleCheat(i)),
+        Row::Assist
+        | Row::AiCap
+        | Row::Reinforcements
+        | Row::Fov
+        | Row::Music
+        | Row::MouseSensitivity
+            if input.left || input.right =>
+        {
+            if let Some(act) = step_slider_action(m, rows[cursor], input.right) {
+                actions.push(act);
+            }
+>>>>>>> e897aa1 (pause UI)
         }
         Row::PadLookSensitivity if input.left || input.right => {
             let d = if input.right { 0.1 } else { -0.1 };
@@ -1000,11 +1080,17 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                         if picker.choices.is_empty() { ui.label("No supported characters are available in this tab."); }
                     }
                     let rows = rows(m);
+<<<<<<< HEAD
                     let has_help = rows.iter().any(|r| {
                         matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity)
                             || row_locked(m, *r).is_some()
                     });
                     let mut hovered_help = None;
+=======
+                    let has_help = rows.contains(&Row::Reinforcements)
+                        || rows.contains(&Row::InputIcons)
+                        || rows.contains(&Row::Assist);
+>>>>>>> e897aa1 (pause UI)
                     let room = ctx.content_rect().height()
                         - PANEL_MARGINS
                         - ui.min_rect().height()
@@ -1032,6 +1118,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                 } else {
                                     RowKind::Plain
                                 };
+<<<<<<< HEAD
                                 let (clicked, stepped, hovered) = menu_row(ui, sel, text, value, kind);
                                 if hovered {
                                     hovered_help = row_help(m, *row);
@@ -1052,6 +1139,60 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                         }
                                         Row::Viewpoint => actions.push(MenuAction::ToggleViewpoint),
                                         _ => {}
+=======
+                                let is_primary = clicked.clicked_by(egui::PointerButton::Primary);
+                                let is_secondary = clicked.clicked_by(egui::PointerButton::Secondary);
+                                if is_primary || is_secondary {
+                                    let is_right_half = clicked
+                                        .interact_pointer_pos()
+                                        .is_none_or(|pos| pos.x >= clicked.rect.center().x);
+                                    let step_forward = is_primary && is_right_half;
+                                    if let Some(act) = step_slider_action(m, *row, step_forward) {
+                                        actions.push(act);
+                                    } else {
+                                        match row {
+                                            Row::ClassPicker if is_primary => {
+                                                actions.push(MenuAction::OpenClassPicker)
+                                            }
+                                            Row::ClassBack if is_primary => {
+                                                actions.push(MenuAction::CloseClassPicker)
+                                            }
+                                            Row::ClassChoice(k) if is_primary => {
+                                                actions.push(MenuAction::SelectClass(*k))
+                                            }
+                                            Row::Respawn if is_primary => {
+                                                actions.push(MenuAction::RequestRespawn)
+                                            }
+                                            Row::No if is_primary => {
+                                                actions.push(MenuAction::CancelRespawn)
+                                            }
+                                            Row::Yes if is_primary => {
+                                                actions.push(MenuAction::Respawn)
+                                            }
+                                            Row::Resume if is_primary => {
+                                                actions.push(MenuAction::Resume)
+                                            }
+                                            Row::Cheat(k) if is_primary => {
+                                                actions.push(MenuAction::ToggleCheat(*k))
+                                            }
+                                            Row::InvertY if is_primary => {
+                                                actions.push(MenuAction::ToggleInvertY)
+                                            }
+                                            Row::LowPowerResolution if is_primary => {
+                                                actions.push(MenuAction::ToggleLowPowerResolution)
+                                            }
+                                            Row::InputIcons => {
+                                                actions.push(MenuAction::CycleInputIcons(
+                                                    if step_forward { 1 } else { -1 },
+                                                ))
+                                            }
+                                            Row::Viewpoint if is_primary => {
+                                                actions.push(MenuAction::ToggleViewpoint)
+                                            }
+                                            Row::Quit if is_primary => actions.push(MenuAction::Quit),
+                                            _ => {}
+                                        }
+>>>>>>> e897aa1 (pause UI)
                                     }
                                 }
                             }

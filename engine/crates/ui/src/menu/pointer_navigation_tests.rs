@@ -110,6 +110,7 @@ fn entire_row_accepts_pointer_including_binding_value_and_padding() {
     assert!(r.clicked_by(egui::PointerButton::Primary));
 }
 
+<<<<<<< HEAD
 /// One frame of the menu at 1280 x 900 with `events`; its actions.
 fn menu_frame(ctx: &egui::Context, m: &MenuModel, events: Vec<egui::Event>) -> Vec<MenuAction> {
     let mut actions = Vec::new();
@@ -310,4 +311,127 @@ fn a_hovered_row_shows_its_help() {
     );
     let gone = frame_texts(&ctx, &m, vec![]);
     assert!(!shows(&gone, why) && !shows(&gone, &pad_help));
+=======
+#[test]
+fn step_slider_action_increments_and_decrements_all_six_sliders() {
+    let model = MenuModel {
+        mouse_sensitivity: 1.0,
+        fov_scale: 1.0,
+        music_volume: 0.8,
+        assist_intensity: 1.0,
+        team_size_pct: 100,
+        reinforcements_pct: 100,
+        ..Default::default()
+    };
+    // Mouse sensitivity
+    assert_eq!(
+        step_slider_action(&model, Row::MouseSensitivity, true),
+        Some(MenuAction::SetMouseSensitivity(1.1))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::MouseSensitivity, false),
+        Some(MenuAction::SetMouseSensitivity(0.9))
+    );
+    // Field of view
+    assert_eq!(
+        step_slider_action(&model, Row::Fov, true),
+        Some(MenuAction::SetFov(1.05))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::Fov, false),
+        Some(MenuAction::SetFov(0.95))
+    );
+    // Music volume
+    assert_eq!(
+        step_slider_action(&model, Row::Music, true),
+        Some(MenuAction::SetMusic(0.9))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::Music, false),
+        Some(MenuAction::SetMusic(0.7))
+    );
+    // Aim assist intensity
+    assert_eq!(
+        step_slider_action(&model, Row::Assist, true),
+        Some(MenuAction::SetAssist(1.1))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::Assist, false),
+        Some(MenuAction::SetAssist(0.9))
+    );
+    // Team size
+    assert_eq!(
+        step_slider_action(&model, Row::AiCap, true),
+        Some(MenuAction::SetAiCap(110))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::AiCap, false),
+        Some(MenuAction::SetAiCap(90))
+    );
+    // Reinforcements
+    assert_eq!(
+        step_slider_action(&model, Row::Reinforcements, true),
+        Some(MenuAction::SetReinforcements(110))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::Reinforcements, false),
+        Some(MenuAction::SetReinforcements(90))
+    );
+    // Non-slider row returns None
+    assert_eq!(step_slider_action(&model, Row::InvertY, true), None);
+}
+
+#[test]
+fn clicking_slider_row_in_draw_menu_dispatches_action() {
+    let ctx = egui::Context::default();
+    let model = MenuModel {
+        mouse_sensitivity: 1.0,
+        fov_scale: 1.0,
+        music_volume: 0.8,
+        assist_intensity: 1.0,
+        team_size_pct: 100,
+        reinforcements_pct: 100,
+        ..Default::default()
+    };
+    let frame = |events| {
+        let mut actions = Vec::new();
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280.0, 720.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| actions = draw_menu(ctx, &model),
+        );
+        actions
+    };
+    // Settle layout
+    frame(vec![]);
+    frame(vec![]);
+    // Center is (640, 360). Click on the right half of the menu area.
+    // The menu is centered around (640, 360).
+    // Let's test that clicking with primary/secondary produces actions.
+    let actions_right = frame(vec![
+        egui::Event::PointerMoved(egui::pos2(700.0, 360.0)),
+        egui::Event::PointerButton {
+            pos: egui::pos2(700.0, 360.0),
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: Default::default(),
+        },
+        egui::Event::PointerButton {
+            pos: egui::pos2(700.0, 360.0),
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        },
+    ]);
+    assert!(
+        !actions_right.is_empty(),
+        "clicking a row in draw_menu must produce an action: got {actions_right:?}"
+    );
+>>>>>>> e897aa1 (pause UI)
 }

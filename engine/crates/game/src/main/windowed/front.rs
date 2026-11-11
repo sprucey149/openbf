@@ -834,8 +834,26 @@ impl App {
             }
         }
         for action in setting_clicked {
+<<<<<<< HEAD
             if let Some(s) = shell_click_sound(action) {
                 front.cue(s);
+=======
+            // A pointer click sounds as its pad press.
+            if matches!(
+                action,
+                ui::menu::MenuAction::ToggleInvertY
+                    | ui::menu::MenuAction::ToggleLowPowerResolution
+                    | ui::menu::MenuAction::ToggleViewpoint
+                    | ui::menu::MenuAction::CycleInputIcons(_)
+                    | ui::menu::MenuAction::SetAssist(_)
+                    | ui::menu::MenuAction::SetAiCap(_)
+                    | ui::menu::MenuAction::SetReinforcements(_)
+                    | ui::menu::MenuAction::SetFov(_)
+                    | ui::menu::MenuAction::SetMusic(_)
+                    | ui::menu::MenuAction::SetMouseSensitivity(_)
+            ) {
+                front.cue(MenuSound::Accept);
+>>>>>>> e897aa1 (pause UI)
             }
             self.apply_shell_setting(&mut front, action);
         }

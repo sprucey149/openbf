@@ -1011,6 +1011,7 @@ impl winit::application::ApplicationHandler for App {
                                 render::made::note("egui texture", Some("egui"), bytes, 0.0);
                             }
                             if let Some((walk, _)) = self.walk.as_mut() {
+<<<<<<< HEAD
                                 // A click sounds as the pad's press of it.
                                 let none = ui::menu::MenuInput::default();
                                 if let (Some(c), Some(sl)) = (
@@ -1019,6 +1020,9 @@ impl winit::application::ApplicationHandler for App {
                                 ) {
                                     sl.play_2d(self.audio.as_mut(), c.name());
                                 }
+=======
+                                let had_clicks = !clicked.is_empty();
+>>>>>>> e897aa1 (pause UI)
                                 for a in clicked {
                                     self.restart_clicked |= a == ui::menu::MenuAction::Restart;
                                     self.quit_clicked |= apply_pause_action(
@@ -1032,6 +1036,30 @@ impl winit::application::ApplicationHandler for App {
                                         &mut self.kbm,
                                         self.music_voice.as_mut(),
                                     );
+<<<<<<< HEAD
+=======
+                                    self.cheats.follow(&walk.sim);
+                                    persist_setting(&mut self.profile, &mut self.session, a, walk);
+                                    self.kbm.follow(&self.profile.settings);
+                                    // The music follows its slider while paused.
+                                    if let (ui::menu::MenuAction::SetMusic(_), Some(m), Some(v)) =
+                                        (a, walk.music.as_ref(), self.music_voice.as_mut())
+                                    {
+                                        let level = m.level().map_or(0.0, |(_, l)| l);
+                                        v.set_volume(game::sounds::level_db(level), 0.1);
+                                    }
+                                    if a == ui::menu::MenuAction::Quit {
+                                        self.quit_clicked = true;
+                                    }
+>>>>>>> e897aa1 (pause UI)
+                                }
+                                if had_clicks {
+                                    if let Some(sl) = self.sounds.as_mut() {
+                                        sl.play_2d(
+                                            self.audio.as_mut(),
+                                            ui::shell_feel::MenuSound::Accept.name(),
+                                        );
+                                    }
                                 }
                             }
                             r.render_frame(
