@@ -341,21 +341,23 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
 
     // Health and stamina: shown while alive.
     if alive {
-        let frac = if m.hp_max > 0.0 { m.hp / m.hp_max } else { 0.0 };
-        let health = if m.hero {
-            "player1.hero.health"
-        } else {
-            "player1.health"
-        };
-        put(health, EventValue::Number(m.hp.max(0.0)));
-        put(
-            if m.hero {
-                "player1.hero.healthFraction"
+        if m.hero || m.seat_health.is_none() {
+            let frac = if m.hp_max > 0.0 { m.hp / m.hp_max } else { 0.0 };
+            let health = if m.hero {
+                "player1.hero.health"
             } else {
-                "player1.healthFraction"
-            },
-            EventValue::Number(frac.clamp(0.0, 1.0)),
-        );
+                "player1.health"
+            };
+            put(health, EventValue::Number(m.hp.max(0.0)));
+            put(
+                if m.hero {
+                    "player1.hero.healthFraction"
+                } else {
+                    "player1.healthFraction"
+                },
+                EventValue::Number(frac.clamp(0.0, 1.0)),
+            );
+        }
         put(
             if m.hero {
                 "player1.healthDisable"
@@ -1494,5 +1496,42 @@ mod team_points_tests {
             Some(&EventValue::Text("0".to_owned()))
         );
         assert_eq!(hud.last("player1.team1.reinforcements"), None);
+    }
+}
+
+#[cfg(test)]
+mod seat_health_tests {
+    use super::*;
+    #[test]
+    fn a_seat_keeps_the_soldier_bar_hidden_until_the_rider_leaves() {
+        for first_in_seat in [false, true] {
+            let mut hud = crate::hud_tree::fixture::target_hud();
+            let mut model = HudModel {
+                hp: 300.0,
+                hp_max: 300.0,
+                ..Default::default()
+            };
+            if !first_in_seat {
+                feed(&mut hud, &model, &|_| false);
+                assert!(hud.last("player1.health").is_some());
+            }
+            model.seat_health = Some((800.0, 1000.0));
+            for _ in 0..3 {
+                feed(&mut hud, &model, &|_| false);
+                assert_eq!(hud.last("player1.health"), None);
+                assert_eq!(hud.last("player1.healthFraction"), None);
+                assert_eq!(
+                    hud.last("player1.vehicle.healthFraction"),
+                    Some(&EventValue::Number(0.8))
+                );
+            }
+            model.seat_health = None;
+            feed(&mut hud, &model, &|_| false);
+            assert_eq!(
+                hud.last("player1.healthFraction"),
+                Some(&EventValue::Number(1.0))
+            );
+            assert_eq!(hud.last("player1.vehicle.healthFraction"), None);
+        }
     }
 }

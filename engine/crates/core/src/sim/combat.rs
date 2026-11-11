@@ -525,11 +525,12 @@ impl Sim {
                     pos: b.end,
                     struck: true,
                 });
-                let surface = if st.health.shield > 0.0 {
-                    let large = st
-                        .instance
-                        .and_then(|i| self.collision.instance_radius_sq_at(i, b.end))
-                        .is_some_and(|r| r >= LARGE_SHIELD_RADIUS_SQ);
+                let large = st
+                    .instance
+                    .and_then(|i| self.collision.instance_radius_sq_at(i, b.end))
+                    .is_some_and(|r| r >= LARGE_SHIELD_RADIUS_SQ);
+                self.damage_station(s, &desc, 1.0, Some(b.owner), Some(b.team));
+                let surface = if self.stations[usize::from(s)].health.shield > 0.0 {
                     if large {
                         Surface::ShieldLarge
                     } else {
@@ -539,7 +540,6 @@ impl Sim {
                     Surface::Building
                 };
                 self.push_impact(b, surface, None);
-                self.damage_station(s, &desc, 1.0, Some(b.owner), Some(b.team));
                 self.bolt_explodes(b);
             }
             // A fallen building turret's bodies are plain world bodies: no

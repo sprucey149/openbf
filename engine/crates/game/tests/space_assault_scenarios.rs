@@ -607,19 +607,18 @@ fn space_assault_has_no_spawn_briefing_and_keeps_lock_audio() {
         "a flyer's lock plays no launcher tone: {heard:?}"
     );
 
-    // Test incoming missile warning beep (distance < 100 -> interval 4, tick 16 % 4 == 0)
     walk.sim.lock_on[0].held = [0.0, 0.0];
     walk.sim.lock_on[0].charging = [false, false];
     walk.sim.lock_on[0].target = None;
     walk.sim.lock_on[0].incoming_missile = true;
-    walk.sim.lock_on[0].incoming_distance = 80.0;
-    walk.sim.tick = 16;
-    heard.clear();
-    game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
-    assert!(
-        heard
-            .iter()
-            .any(|s| s == "all_weap_inf_rocket_launcher_tracking"),
-        "incoming missile warning beep emitted when targeted by missile: {heard:?}"
-    );
+    for (distance, tick) in [(80.0, 16), (200.0, 16), (400.0, 30)] {
+        walk.sim.lock_on[0].incoming_distance = distance;
+        walk.sim.tick = tick;
+        heard.clear();
+        game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
+        assert!(
+            !heard.iter().any(|s| s.contains("rocket_launcher_tracking")),
+            "the incoming-missile warning is HUD-only at {distance} m: {heard:?}"
+        );
+    }
 }
