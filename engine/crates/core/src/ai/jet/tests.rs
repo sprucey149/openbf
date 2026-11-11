@@ -156,9 +156,9 @@ fn request() -> MoveRequest<'static> {
         hold: None,
         flee: false,
         boarding: false,
-        roll: 0,
+        serving: false,
         excused: false,
-        throwing: false,
+        acts: crate::ai::brain::intent::Acts::default(),
     }
 }
 fn engage(sim: &mut Sim, st: &mut AiState, distance: f32) {
@@ -206,6 +206,7 @@ fn a_fight_hop_flies_to_a_clear_spot_twenty_to_fifty_seven_metres_away() {
 fn ask(sim: &Sim, h: UnitHandle, st: &mut AiState, mv: &MoveRequest) -> PadState {
     let u = sim.unit(h).unwrap();
     let tk = Tick {
+        rules: crate::ai::UnitRules::for_unit(sim, u),
         me: h,
         u,
         eye: u.muzzle(),

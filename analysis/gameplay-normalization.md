@@ -3,6 +3,11 @@
 Status: [ours], PROVISIONAL. measure: BF1-map win rate and kills a minute for the frozen
 stand-in human against the pre-change baseline, and the same on the BF2 twin map.
 
+This note records the 2026-11-10 soldier pass. Its tables give the baseline for
+the later [ground vehicle and anti-vehicle pass](vehicle-normalization.md),
+which supersedes rule 5 for matched ground guns and changes the listed
+infantry weapons against vehicles and buildings.
+
 The maintainer (2026-11-10): "I want this to be one game, not 2 games in 1 keeping the games
 separate - one seamless game. ... make health for each class equivalent across the 2 games ...
 rifles do the same damage in bf1 as they do in bf2, and it has the same effect because health
@@ -45,7 +50,7 @@ files and a BF2 map's `classes.ron` are read as written.
    a person on its BF2 counterpart's, or 4/3 when it has none. `MaxDamage`, `VehicleScale`
    and `BuildingScale` stay as written, so damage to vehicles and buildings does not change.
    BF1's arc caster is the one exception: BF1's emitter ignores the scales, so its `MaxDamage`
-   and `Damage` are multiplied instead (and its damage to vehicles rises by 4/3 with them).
+   and `Damage` are multiplied instead. Its sweep targets units.
 3. **Keys taken whole from BF2** (`normalize::KEYS`). A weapon that takes BF2's damage takes
    BF2's rate of fire, so it is the same weapon on every map: the sniper rifles (1.0 s), the
    jet trooper's pistol (0.1 s), the Tusken rifle (0.33 s) and sniper (1.0 s), the Geonosian's
@@ -54,12 +59,10 @@ files and a BF2 map's `classes.ron` are read as written.
    90 degree cone, for repairing and slicing (`award-weapons.md` section 4).
 4. **Pickups.** A BF1 bacta tank or pack heals 4/3 as much, the same share of a trooper as on
    its disc (see "Left as they are").
-5. **Every other BF1 gun and blast, INTERIM.** Vehicle and flyer guns, building turrets
-   (those in a map's own class file too) and death blasts have the same four scales
-   multiplied by 4/3 and nothing else, so each kills the shared trooper in as many hits as it
-   killed BF1's 300-health one: BF1's vehicles are as strong against soldiers as they were.
-   Their damage to vehicles and buildings is unchanged. replace: the vehicle pass that sets
-   vehicle health and vehicle guns together for both games (see "Left as they are").
+5. **Other BF1 guns and blasts before the vehicle pass.** Vehicle and flyer guns,
+   building turrets and death blasts took the 4/3 soldier scale. The scale kept the
+   same hit counts against the 400-health trooper as against BF1's 300-health trooper.
+   Their damage to vehicles and buildings was unchanged by the soldier pass.
 
 Award weapons are BF2's own classes, so they are the reference and have no rows: pistol 150,
 rifle 150, sniper 600, shotgun pellet 85 to a person. A BF1 class carries them from BF2's
@@ -186,30 +189,26 @@ Scaled, not yet one rule:
   without BF2's odds would nearly double healing on BF1 maps, so the items are scaled by 4/3
   and the odds kept. One rule here means one drop table too. replace: the maintainer's
   choice between this and BF2's amounts with BF2's odds for the four shared items.
-- **Vehicle and turret guns against soldiers, INTERIM.** BF1's are scaled by 4/3 against
+- **Vehicle and turret guns before the vehicle pass.** BF1's were scaled by 4/3 against
   soldiers (rule 5), not made equal to BF2's. The same-named guns differ both ways between
   the games (to a person, BF1 now against BF2: fighter tank cannon 400 against 200, Imperial
   speeder bike 400 against 150, STAP 400 against 250, AAT cannon 533 against 200; but
   Republic speeder bike 67 against 100 and AT-ST chin gun 600 against 1000), and 33
   same-named vehicle and death-blast classes were identical on the discs. So a BF1 light
-  cannon still kills a trooper in one hit where BF2's takes two or three. Vehicle health and
-  vehicle guns want one pass of their own. replace: that vehicle pass.
-  - The Geonosis turret's wide ray reads no scales (`core::sim::fatray`), so only its direct
-    hit is scaled (533); the ray's own 400 still kills a trooper in one.
+  cannon still killed a trooper in one hit where BF2's took two or three.
+  - The Geonosis turret's wide ray reads MaxDamage and ignores scales
+    (`core::sim::fatray`). BF1's ray authored Damage and used the default 20
+    on the soldier pass. The vehicle pass supplies MaxDamage 400.
   - The scale keeps every hit count on a trooper
     (`normalization::the_scale_keeps_every_hit_count_on_a_trooper`) except the 20-damage
     blasts (light vehicles, droids, the STAP cannon): 26.67 is not exact in the running health,
     so the sixteenth hit kills, not the fifteenth.
-- **Vehicle beams that pass through, INTERIM.** BF2's vehicle beams set PassThrough and,
+- **Vehicle beams that pass through.** BF2's vehicle beams set PassThrough and,
   since 2026-11-10, go on through every soldier and vehicle on their line on ground rounds
   (`re-ordnance-kinds.md` section 9b): the fighter tank gunner lasers, the spider walker beam,
-  the LAAT/i, Rebel and droid gunship ball beams and the beam turret. No BF1 beam sets it, so
-  BF1's counterparts (the fighter tank lasers, the spider walker laser, the LAAT/i ball) still
-  stop at their first hit: the same fighter tank's gunner beam passes through on a BF2 map and
-  not on a BF1 map. Setting pierce on BF1's classes now would move every BF1 round with those
-  vehicles while their damage is still the interim x4/3. replace: the vehicle pass sets pierce
-  on BF1's counterparts together with their damage; measure: vehicle kills a minute on BF2
-  maps against the pre-change baseline.
+  the LAAT/i, Rebel and droid gunship ball beams and the beam turret. The vehicle
+  pass adds PassThrough to the BF1 fighter tank lasers and spider walker beam.
+  The BF1 LAAT/i ball still stops at its first hit. replace: a ground-map flyer pass.
 - **A vehicle running a soldier over** deals the vehicle class's own collision damage; the
   soldier's larger health makes a glancing hit a little less deadly on BF1 maps.
 - **Blaster fall-off and bolt speed.** BF1's bolts keep their damage at any range and fly at
@@ -219,8 +218,9 @@ Scaled, not yet one rule:
   1.0 s at 65 (520 a volley, with fall-off): about 11 % more damage a second on BF1 maps.
 - **Bowcaster.** BF1's single bolt and BF2's seven-bolt fan are different weapons.
 - **Clip sizes, reload times, heat and spread** are each game's own.
-- **Damage to vehicles and buildings** from infantry weapons is each game's own (BF1's
-  thermal detonator does a quarter of its damage to a vehicle, BF2's all of it).
+- **Damage to vehicles and buildings** was edition-specific in the soldier
+  pass. The later vehicle pass applies BF2's armor scales to listed light arms
+  and BF2's damage and scales to the matched anti-vehicle weapons.
 - **The landing-damage law** of the originals is not ported (`re-soldier-ground.md` sections 4, 8).
 - **The fallback trooper** (`WalkSim::default_trooper`, used with no class data) keeps 300
   health and the 60 rifle: it is self-consistent and keeps `--sim-hash` stable.

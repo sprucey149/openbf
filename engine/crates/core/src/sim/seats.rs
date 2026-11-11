@@ -74,7 +74,7 @@
 
 use super::input::{buttons, PadState};
 use super::state::Sim;
-use crate::ai::SHUT_PROBE_UP;
+use crate::ai::{route, SHUT_PROBE_UP};
 use crate::collision::{HullFilter, Layers};
 use crate::soldier::Stance;
 use crate::unit::{Controller, UnitHandle};
@@ -315,7 +315,7 @@ impl Sim {
                 // window has given up on (`DRIVE_STUCK_BAIL`) marks it.
                 let stuck = self.units[i]
                     .ai
-                    .route
+                    .route()
                     .is_some_and(|rt| rt.stuck_run >= crate::ai::DRIVE_STUCK_BAIL);
                 if stuck {
                     if let Some(v) = self.vehicle_mut(m.vehicle) {
@@ -402,7 +402,7 @@ impl Sim {
             let ai = &mut self.units[i].ai;
             ai.ride = Some(r);
             if moved {
-                ai.route = None;
+                route::clear(ai);
                 ai.next_think = self.tick;
             }
         }

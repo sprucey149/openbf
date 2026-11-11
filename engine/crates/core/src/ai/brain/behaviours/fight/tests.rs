@@ -1,7 +1,7 @@
 //! Behaviour regressions spanning the priority chain and positioning.
 
-use super::super::{think, Tick};
 use super::{react_ok, ring_point, roll_clear, style_of};
+use crate::ai::brain::{ground::think, Tick};
 use crate::ai::draw::{unit_unit, SALT_DODGE};
 use crate::ai::state::{AiState, Behaviour, FightState, LostState};
 pub(super) use crate::ai::tests::STYLE;
@@ -162,7 +162,7 @@ fn hit_once(d: crate::skill::Difficulty, at: u64) -> (usize, u64) {
     (what, st.dodge_until)
 }
 
-/// Card REACT (the maintainer, 2026-10-07): a bot that stands to shoot answers a
+/// Card REACT (2026-10-07): a bot that stands to shoot answers a
 /// hit by its tier's row — it stays, strafes, rolls or moves in the
 /// row's shares (400 hits a tier, each within 7 points of the row, as
 /// numbers: the row's own constants would follow a broken table), most
@@ -206,7 +206,7 @@ fn a_hit_stander_stays_strafes_rolls_or_moves_by_its_tiers_row() {
 /// Card REACT: a burst is ONE draw — a second hit inside the cooldown
 /// changes nothing; and a stander under steady fire for 20 s (a hit
 /// every third of a second, Normal) does not stand still for long
-/// (the maintainer: "it just stays standing there"), keeps its fight, and when it
+/// (playtest: "it just stays standing there"), keeps its fight, and when it
 /// was sent to a new position stands to shoot again once it is there.
 #[test]
 fn steady_fire_moves_a_stander_about_and_it_fights_on() {
@@ -360,10 +360,10 @@ fn a_stander_keeps_its_place_and_a_circler_walks_a_ring_round_its_target() {
     );
 }
 
-/// Card FGHT, OURS (the maintainer, 2026-10-05: "everyone stops in their tracks
-/// which puts them all right next to each other"): bots that stand to
-/// shoot do not stand side by side — the first keeps its place, every
-/// next one takes a spot [`FIGHT_SPACING`] clear of the others'.
+/// Card FGHT, OURS, measure: original spacing when a group acquires a target.
+/// Reproduces the October 5 report of bots stopping next to each other.
+/// The first bot keeps its place, and the next bot to stop stays
+/// [`FIGHT_SPACING`] clear.
 #[test]
 fn standers_do_not_stop_beside_each_other() {
     use crate::sim::PadState;
@@ -419,6 +419,7 @@ fn a_ring_point_is_on_the_weapons_ring_and_no_wider_than_the_bots_distance() {
             let u = sim.unit(bots[0]).expect("alive");
             let wc = &sim.weapon_classes[u.weapon_class];
             let tk = Tick {
+                rules: crate::ai::UnitRules::for_unit(&sim, u),
                 me: bots[0],
                 u,
                 eye: u.muzzle(),
@@ -684,6 +685,7 @@ fn the_water_bob_does_not_move_a_bots_ring_points() {
                 sim.tick = 17 * tick;
                 let u = sim.unit(h).expect("alive");
                 let tk = Tick {
+                    rules: crate::ai::UnitRules::for_unit(&sim, u),
                     me: h,
                     u,
                     eye: u.muzzle(),
@@ -728,6 +730,7 @@ fn a_ring_point_on_a_graph_lies_in_a_hub_and_never_farther_back() {
                 sim.tick = 17 * tick;
                 let u = sim.unit(h).expect("alive");
                 let tk = Tick {
+                    rules: crate::ai::UnitRules::for_unit(&sim, u),
                     me: h,
                     u,
                     eye: u.muzzle(),
@@ -1231,7 +1234,7 @@ fn a_pinned_bot_can_jump_a_riser_missed_by_the_stepped_probe() {
         pinned: true,
         ..LostState::default()
     };
-    assert!(!super::lost_jump(
+    assert!(!super::super::recover::lost_jump(
         &sim,
         sim.unit(h).unwrap(),
         direction,
@@ -1241,7 +1244,7 @@ fn a_pinned_bot_can_jump_a_riser_missed_by_the_stepped_probe() {
     let unit = sim.unit_mut(h).unwrap();
     unit.wall_push = push;
     unit.soldier.vel = -direction * unit.consts.max_speed;
-    assert!(!super::lost_jump(
+    assert!(!super::super::recover::lost_jump(
         &sim,
         sim.unit(h).unwrap(),
         direction,
@@ -1249,14 +1252,14 @@ fn a_pinned_bot_can_jump_a_riser_missed_by_the_stepped_probe() {
         &mut lost,
     ));
     sim.unit_mut(h).unwrap().soldier.vel = Vec3::ZERO;
-    assert!(super::lost_jump(
+    assert!(super::super::recover::lost_jump(
         &sim,
         sim.unit(h).unwrap(),
         direction,
         SteerPick::Fwd,
         &mut lost,
     ));
-    assert!(!super::lost_jump(
+    assert!(!super::super::recover::lost_jump(
         &sim,
         sim.unit(h).unwrap(),
         direction,

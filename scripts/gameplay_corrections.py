@@ -191,6 +191,50 @@ def supports_bounds(polygons, x, z, unit):
     return in_bounds(polygons, x, z) or any(touches_box(a, b, x, z, unit) for p in polygons for a, b in zip(p, p[1:] + p[:1]))
 
 
+def water_grid(terrain):
+    """The simulation reads WATR height and the row-major WMAP wet bits."""
+    water = geometry.child(terrain, b"WATR")
+    if water is None:
+        raise ValueError("water mask correction needs a WATR chunk")
+    info, layer, packed = (geometry.child(water, tag) for tag in (b"INFO", b"LAYR", b"WMAP"))
+    if info is None or layer is None or packed is None or len(info) < 24:
+        raise ValueError("incomplete WATR for water mask correction")
+    grid, cell, half_x, half_z = struct.unpack_from("<I4x3f", info)
+    _, separator, layer_info = layer.partition(b"\0")
+    if not separator or len(layer_info) < 28 or not 0 < grid <= 128 or grid % 2 or len(packed) != grid * grid // 2:
+        raise ValueError("invalid WATR grid for water mask correction")
+    height = struct.unpack_from("<f", layer_info, 4)[0]
+    if not math.isfinite(height) or not math.isfinite(cell) or not cell > 0 or any(
+            not math.isfinite(half) or half * 2 != cell * grid for half in (half_x, half_z)):
+        raise ValueError("unaligned WATR extent for water mask correction")
+    cells = bytes(bool(nibble) for byte in packed for nibble in (byte >> 4, byte & 15))
+    return grid, cell, (half_x, half_z), height, cells
+
+
+def water_mask_record(reference, donor, polygons):
+    grid, cell, half, height, cells = water_grid(reference)
+    donor_grid, _, donor_half, donor_height, donor_cells = water_grid(donor)
+    if half != donor_half or height != donor_height or grid <= donor_grid or grid % donor_grid or not all(donor_cells):
+        raise ValueError("water mask correction needs a coarser, entirely wet donor with the same extent and height")
+    runs = []
+    for z in range(grid):
+        x = 0
+        while x < grid:
+            if cells[z * grid + x]:
+                x += 1
+                continue
+            start = x
+            while x < grid and not cells[z * grid + x]:
+                if not all(in_bounds(polygons, ix * cell - half[0], iz * cell - half[1])
+                           for ix in (x, x + 1) for iz in (z, z + 1)):
+                    raise ValueError("dry water correction reaches outside the playable bounds")
+                x += 1
+            runs.append([z, start, x - start])
+    if not runs or len(runs) > 128 or sum(run[2] for run in runs) > 256:
+        raise ValueError("invalid dry water correction size")
+    return {"grid": grid, "dry_runs": runs, "sha256": digest(cells)}
+
+
 def resources(buf):
     out, counts = [], Counter()
     if buf[:4] != b"ucfb":
@@ -623,6 +667,10 @@ def generate(reference_root, donor_root, out, program_out, *, reference_census=N
                 report["maps"][file] = summary
                 if target:
                     row.setdefault("terrain", []).append(target)
+                if game == "bf1" and file == "kas/kas1.lvl":
+                    if "water_mask" in row:
+                        raise ValueError("multiple Kashyyyk Islands water corrections")
+                    row["water_mask"] = water_mask_record(payload, other[2], polygon)
             elif tag in {b"PATH", b"path", b"plan", b"plnp", b"skel", b"zaa_"}:
                 if tag == b"zaa_":
                     reference_motion = root_motion_signature(payload, game)

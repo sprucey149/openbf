@@ -188,18 +188,16 @@ fn mustafar_jet_connections_arrive_alive_through_the_mission_hazards() {
                 .unwrap();
             let u = &mut sim.units[bot.index as usize];
             u.soldier.fuel = 1.0;
-            u.ai = AiState {
-                next_think: u64::MAX,
-                route: Some(Route {
-                    dest_hub: to,
-                    next_hub: to,
-                    via_arc: Some(arc_index as u16),
-                    waypoint: graph.hubs[to as usize].pos,
-                    from: glam::Vec2::new(start.x, start.z),
-                    ..Default::default()
-                }),
+            u.ai = AiState::default();
+            u.ai.next_think = u64::MAX;
+            u.ai.install_route_for_fixture(Some(Route {
+                dest_hub: to,
+                next_hub: to,
+                via_arc: Some(arc_index as u16),
+                waypoint: graph.hubs[to as usize].pos,
+                from: glam::Vec2::new(start.x, start.z),
                 ..Default::default()
-            };
+            }));
             let mut jet_ticks = 0;
             let mut closest = f32::MAX;
             for _ in 0..600 {

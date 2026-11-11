@@ -256,7 +256,7 @@ mod tests {
         let stood_at = stood_at.expect("never stood up inside 2 s of a route");
         assert!(stood_at < 60, "stood at tick {stood_at}");
         assert!(
-            sim.unit(h).expect("alive").ai.route.is_some(),
+            sim.unit(h).expect("alive").ai.route().is_some(),
             "it is walking back to its post"
         );
     }

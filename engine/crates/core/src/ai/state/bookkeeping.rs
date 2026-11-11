@@ -1,8 +1,8 @@
 //! Navigation tick diagnostics, neutral AI state and state serialization.
 
 use super::{
-    AiState, ArmState, Behaviour, FightState, FlankState, MoverState, RoleState, SnipeBook,
-    SteerPick, TposState, Vec3, WalkAsk, ERR_NO_TARGET,
+    AiState, ArmState, Behaviour, FightState, FlankState, MoverState, NavState, RoleState, Route,
+    SnipeBook, SteerPick, TposState, Vec3, WalkAsk, ERR_NO_TARGET,
 };
 
 #[cfg(doc)]
@@ -192,7 +192,7 @@ impl Default for AiState {
             dodge_until: 0,
             flinch_until: 0,
             unreachable_dwell: 0,
-            route: None,
+            nav: NavState::default(),
             steer: SteerPick::default(),
             slide: 0,
             walk: WalkAsk::default(),
@@ -202,6 +202,7 @@ impl Default for AiState {
             mv: MoverState::default(),
             jet: super::jet::JetState::default(),
             behaviour: Behaviour::None,
+            step: crate::ai::StepKind::None,
             why: super::why::WhyLog::default(),
             arcm: super::arcm::ArcmState::default(),
             aim_dir: Vec3::ZERO,
@@ -228,6 +229,11 @@ impl Default for AiState {
     }
 }
 impl AiState {
+    /// The leg the navigator is currently following.
+    pub fn route(&self) -> Option<Route> {
+        self.nav.route()
+    }
+
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         if let Some(melee) = &self.melee {
             melee.hash_into(eat);
@@ -264,13 +270,7 @@ impl AiState {
             }
         }
         eat(&self.last_switch.to_le_bytes());
-        match &self.route {
-            Some(r) => {
-                eat(&[1]);
-                r.hash_into(eat);
-            }
-            None => eat(&[0]),
-        }
+        self.nav.hash_into(eat);
         eat(&self.steer.bytes());
         eat(&[self.slide as u8]);
         match self.squad {

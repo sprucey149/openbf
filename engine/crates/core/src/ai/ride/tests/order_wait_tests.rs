@@ -607,13 +607,13 @@ fn wpoke_consumption_changes_only_release_state_and_one_answer() {
         };
         assert_eq!(s.give_order(0, order), 1);
         let pending = s.unit_mut(b).unwrap().order.take().unwrap();
-        let route = s.unit(b).unwrap().ai.route;
+        let route = s.unit(b).unwrap().ai.route();
         let rng = s.rng.state();
         let events = s.events.len();
         let old = wait(&s, b);
         assert!(!s.take_order(b.index as usize, pending));
         assert_eq!(s.rng.state(), rng);
-        assert_eq!(s.unit(b).unwrap().ai.route, route);
+        assert_eq!(s.unit(b).unwrap().ai.route(), route);
         assert_eq!(s.events.len(), events + 1);
         assert!(
             matches!(s.events.last(),Some(crate::sim::Event::OrderTaken {unit,did:true,..}) if *unit==b)

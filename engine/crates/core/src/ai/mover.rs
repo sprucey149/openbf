@@ -5,34 +5,35 @@
 //! offset, the steering's heading picked every third tick and held, the
 //! short step, the last step's scale, a lost bot's jump), the routeless
 //! dodge's strafe, the D13 stance controller and the dodge as a roll — and
-//! then keeps the progress books: the side-step countdown and the stuck
-//! window ([`stuck_window`]), a lost bot's return window, the last resort's
-//! watch ([`super::stall`]). It answers the walk's outcome ([`Walk`]). Card
+//! then calls the navigator's stuck window ([`progress`]) and keeps a lost
+//! bot's return window and the last resort's watch ([`super::stall`]). It
+//! answers the walk's outcome ([`Walk`]). Card
 //! SPL11, `analysis/bot-design.md` 3 and 4.7: this is the ONLY writer of a
 //! foot soldier's `pad.lx` / `pad.ly` and of ROLL_STANCE and JUMP. The
 //! heading itself is the avoidance's ([`super::avoid::pick`], card OBST). The
 //! arrival, deadband, blocked-walk, short step and hold range tests live here.
 
 use super::avoid;
-use super::behave::{lost_jump, Tick};
-use super::route::{replan, sub_point};
+use super::brain::behaviours::recover::lost_jump;
+use super::brain::intent::Acts;
+use super::brain::Tick;
+use super::route::{progress, sidestep_tick, sub_point};
 use super::state::{AiState, HoldState, NavTick, SteerPick, Walk, WalkAsk};
 use super::steer::floor_ahead;
 use super::{
     ARRIVED_SLACK, CORNER_ARRIVE, DEST_DEADBAND, HEADING_PERIOD, HOLD_BLOCKED, HOLD_ENDGAME,
-    HOLD_WALK_DIST, HOLD_WALK_STICK, LEDGE_DROP, LOST_DOWN, SIDESTEP_OFFSET, SIDESTEP_TICKS,
-    STUCK_PROGRESS, STUCK_WINDOW,
+    HOLD_WALK_DIST, HOLD_WALK_STICK, LEDGE_DROP, LOST_DOWN, SIDESTEP_OFFSET, STUCK_PROGRESS,
+    STUCK_WINDOW,
 };
 use crate::cp::CommandPost;
 use crate::fmath;
 use crate::nav;
 use crate::sim::{buttons, PadState, Sim};
 use crate::soldier::Stance;
-use crate::unit::UnitHandle;
 use glam::Vec3;
 
 /// What the running behaviour asks of the mover this tick — exactly one a
-/// tick (`behave::think`): today's priority chain as one value.
+/// tick (`brain::think`): today's priority chain as one value.
 #[derive(Clone, Copy)]
 pub(super) struct MoveRequest<'a> {
     /// Which link of the chain walks the bot ([`WalkAsk::RETURN`] ..
@@ -62,15 +63,30 @@ pub(super) struct MoveRequest<'a> {
     pub flee: bool,
     /// The bot has a boarding claim.
     pub boarding: bool,
-    /// The on-hit dodge as a ROLL, this tick only: the side (0 = none).
-    pub roll: i8,
+    /// The bot is in reach of its repair target and ready to use its cutter.
+    pub serving: bool,
     /// Excused from the last resort's watch (card RCYC).
     pub excused: bool,
-    /// Card GRAI: the bot's grenade is its weapon in range, or leaving its
-    /// hand — it STANDS to throw (the PS2's mode 2 for an offhand weapon,
-    /// `analysis/re-soldier-ai.md` 4.4), unless it runs from a grenade or
-    /// walks back to the level.
-    pub throwing: bool,
+    pub acts: Acts,
+}
+
+pub(super) enum MoverMode {
+    Serve,
+    Droideka { stop: bool },
+}
+
+pub(super) fn finish(pad: &mut PadState, mode: MoverMode) {
+    pad.lx = 0;
+    match mode {
+        MoverMode::Serve => pad.ly = 0,
+        MoverMode::Droideka { stop } => {
+            pad.buttons &=
+                !(buttons::ROLL_STANCE | buttons::JUMP | buttons::SPRINT | buttons::ACTION);
+            if stop {
+                pad.ly = 0;
+            }
+        }
+    }
 }
 
 /// What [`run`] answers: the walk's outcome, and whether the bot stands AT
@@ -96,7 +112,7 @@ fn arc_jumps(sim: &Sim, arc: u16) -> bool {
 /// heading is picked every [`HEADING_PERIOD`]-th tick and held between, and
 /// a progress window with no progress is a FAILED walk ([`Walk::Failed`]) —
 /// what is done about it beyond the window's own re-plan and side-step is
-/// the behaviour's (`behave::recover`).
+/// the behaviour's (the recovery ladder).
 pub(super) fn run(
     sim: &Sim,
     tk: &Tick,
@@ -118,11 +134,11 @@ pub(super) fn run(
         post,
         defending,
         ret,
-        roll,
+        acts: Acts { roll, .. },
         ..
     } = *mv;
     let (walk_kind, holding, hold) = (mv.kind, mv.hold, mv.in_range);
-    let route_leg = st.route.filter(|r| !r.is_last());
+    let route_leg = st.route().filter(|r| !r.is_last());
 
     // THE COMMITMENT. A destination within the deadband of the one the mover
     // is committed to (and asked by the same link of the chain) is that one
@@ -181,7 +197,7 @@ pub(super) fn run(
             let in_region = match post {
                 Some(cp) if walk_kind == WalkAsk::LEG => {
                     route_leg.is_none()
-                        && ((defending && st.route.is_some()) || cp.def.capture.contains(pos))
+                        && ((defending && st.route().is_some()) || cp.def.capture.contains(pos))
                         && !off_floor(sim, pos, d.y)
                 }
                 _ => true,
@@ -203,9 +219,9 @@ pub(super) fn run(
     let at_post = match walk_kind {
         WalkAsk::LEG => arrived && post.is_some(),
         _ => post.is_some_and(|cp| {
-            let p = st.route.map_or(cp.def.pos, |r| r.waypoint);
+            let p = st.route().map_or(cp.def.pos, |r| r.waypoint);
             route_leg.is_none()
-                && ((defending && st.route.is_some()) || cp.def.capture.contains(pos))
+                && ((defending && st.route().is_some()) || cp.def.capture.contains(pos))
                 && nav::xz_dist(pos, p) <= CORNER_ARRIVE + ARRIVED_SLACK
                 && !off_floor(sim, pos, p.y)
         }),
@@ -239,7 +255,7 @@ pub(super) fn run(
             // Card JITR: nor on the way to a held position — that is not
             // the leg the side-step belongs to.
             let stepping = ret.is_none() && holding.is_none() && walk_kind != WalkAsk::PICKUP;
-            if let Some(r) = st.route.filter(|r| r.sidestep.abs() > 1 && stepping) {
+            if let Some(r) = st.route().filter(|r| r.sidestep.abs() > 1 && stepping) {
                 let d = to.normalize_or_zero();
                 if d != Vec3::ZERO {
                     let off = to
@@ -252,12 +268,14 @@ pub(super) fn run(
             }
             let d = to.normalize_or_zero();
             if d != Vec3::ZERO {
-                let side = st.route.map_or(1, |r| if r.sidestep < 0 { -1 } else { 1 });
+                let side = st
+                    .route()
+                    .map_or(1, |r| if r.sidestep < 0 { -1 } else { 1 });
                 let mut slide = st.slide;
                 // Card OBST: the point the walk is measured against — the
                 // leg's own point (a corner, the waypoint), not the point
                 // ahead on its line.
-                let aim = match st.route {
+                let aim = match st.route() {
                     Some(r) if walk_kind == WalkAsk::LEG => sub_point(&r, pos),
                     _ => gp,
                 };
@@ -342,7 +360,7 @@ pub(super) fn run(
                 // far end (BF2 `FUN_002c0220`, `FUN_002f1778`, RE_LOG "BF2 arc
                 // flags"), and the stick stays on that line in the air.
                 let jump_arc = st
-                    .route
+                    .route()
                     .and_then(|r| r.via_arc)
                     .filter(|&a| arc_jumps(sim, a));
                 if st.mv.jumped != jump_arc {
@@ -436,10 +454,10 @@ pub(super) fn run(
         }
     }
 
-    if st.melee.is_some_and(|m| m.jump_tick == Some(sim.tick)) && !mv.flee && ret.is_none() {
+    if mv.acts.melee_jump && !mv.flee && ret.is_none() {
         pad.buttons |= buttons::JUMP;
     }
-    if mv.throwing && !mv.flee && ret.is_none() {
+    if mv.acts.throw_stand && !mv.flee && ret.is_none() {
         pad.lx = 0;
         pad.ly = 0;
     }
@@ -456,14 +474,14 @@ pub(super) fn run(
     // A unit standing at a ledge (card STFAL) is still trying to walk: its
     // window runs and it re-plans. Measured (AUDIT of STFAL, 2026-10-01),
     // the re-plan hands back the same leg and the unit stays: what ends a
-    // long stand is the behaviour's give-up (card MOVR, `behave::recover`),
+    // long stand is the behaviour's give-up (card MOVR, the recovery ladder),
     // then the watch below.
     let walking = (pad.lx != 0 || pad.ly != 0 || steer == SteerPick::Ledge) && !mv.boarding;
     // Card BSTK: a bot flying its remote droid stands still on purpose (the
     // droid takes its pad, `Sim::droid_pads`): no window runs, so its stand
     // is not a failed walk, and the last resort's watch waits. The same for
     // an engineer cutting its claimed turret back up (card TBLD).
-    let piloting = sim.controlled_droid(me).is_some() || super::fix::serve(sim, me, st).is_some();
+    let piloting = sim.controlled_droid(me).is_some() || mv.serving;
     let mut failed = false;
     let mut lost_failed = false;
     match (ret, st.lost) {
@@ -472,9 +490,7 @@ pub(super) fn run(
         // walking its leg: the leg's progress window waits.
         // Card JITR: ...but a side-step it brought along still runs down.
         _ if ret.is_none() && (holding.is_some() || mv.flee) => {
-            if let Some(r) = st.route.as_mut().filter(|r| r.sidestep.abs() > 1) {
-                r.sidestep -= r.sidestep.signum();
-            }
+            sidestep_tick(st);
         }
         // The return walk's own progress window: no nearer its hub after a
         // window, the next hub.
@@ -485,7 +501,7 @@ pub(super) fn run(
                 let d = nav::xz_dist(pos, rp);
                 if l.ref_dist > 0.0 && l.ref_dist - d < STUCK_PROGRESS {
                     // Card RETW: a floor walk that got nowhere is looked
-                    // for again from here (`behave::think`), and given up
+                    // for again from here (`brain::think`), and given up
                     // for the hubs after `RETURN_PLANS`.
                     if l.path_at < l.path.len {
                         l.path_at = l.path.len;
@@ -504,14 +520,14 @@ pub(super) fn run(
         _ => {
             // Card MOVR: a window with no progress is a FAILED walk, and a
             // window with progress ends the recovery.
-            let was = st.route.map_or(0, |r| r.stuck_run);
+            let was = st.route().map_or(0, |r| r.stuck_run);
             // Card ARCM: back and forth at the window's own waypoint closes
             // the window now, as a failed one - not while the bot goes round
             // a body on its committed side under the allowance (card OBST:
             // along a long wall the way to the waypoint opens and closes).
             let rd = st.mv.round;
             let rounding = rd.live() && !rd.rim && rd.ticks < avoid::ROUND_MAX;
-            let osc = match st.route {
+            let osc = match st.route() {
                 Some(r) if walking && !mv.excused && !rounding && r.via_arc.is_some() => {
                     st.arcm.osc.step(sub_point(&r, pos), pos, sim.tick)
                 }
@@ -520,8 +536,8 @@ pub(super) fn run(
                     false
                 }
             };
-            stuck_window(sim, me, st, pos, walking, osc, nt);
-            let now = st.route.map_or(0, |r| r.stuck_run);
+            progress(sim, me, st, pos, walking, osc, nt);
+            let now = st.route().map_or(0, |r| r.stuck_run);
             if now > was {
                 failed = true;
             } else if now == 0 && st.mv.round.ticks < avoid::ROUND_MAX {
@@ -586,99 +602,6 @@ fn off_floor(sim: &Sim, pos: Vec3, spot_y: f32) -> bool {
     (floor - spot_y).abs() <= SPOT_FLOOR_TOL && (pos.y - floor).abs() > SPOT_FLOOR_TOL
 }
 
-/// The side-step countdown, then the progress window (design decision 4),
-/// for a unit that `moving` — its stick is deflected — this tick. Card
-/// ARCM: `back_and_forth` (the detector, `arcm::Osc`) closes the window now
-/// as a failed one.
-pub(super) fn stuck_window(
-    sim: &Sim,
-    me: UnitHandle,
-    st: &mut AiState,
-    pos: Vec3,
-    moving: bool,
-    back_and_forth: bool,
-    nt: &mut NavTick,
-) {
-    if sim.unit(me).is_none() {
-        return;
-    }
-    // Both only matter while the unit is actually trying to walk somewhere.
-    if let Some(mut r) = st.route {
-        if r.sidestep.abs() > 1 {
-            r.sidestep -= r.sidestep.signum();
-        }
-        if moving {
-            r.stuck_ticks += 1;
-            if r.stuck_ticks >= STUCK_WINDOW || back_and_forth {
-                r.stuck_ticks = 0;
-                // Progress is measured to the CURRENT sub-waypoint, not to the
-                // hub: a corner walk legitimately moves AWAY from the hub for
-                // a while, and measuring the hub made every detour look stuck
-                // and re-plan itself every 60 ticks. The PS2's own timer is
-                // "distance to the node stopped improving" (`FUN_0026b450`).
-                let d = nav::xz_dist(pos, sub_point(&r, pos));
-                // Card OBST: a bot going round a body on its committed side
-                // gets no nearer its waypoint for a while, and is not stuck
-                // while it moves on: the window neither fails nor resets.
-                // Card OBSR: ...round a BODY. A rim barrier is not gone
-                // round, and a bot that follows one gets no allowance.
-                let rd = st.mv.round;
-                let rounding = rd.live()
-                    && !rd.rim
-                    && rd.ticks < avoid::ROUND_MAX
-                    && nav::xz_dist(pos, rd.anchor) >= avoid::ROUND_TRAVEL;
-                st.mv.round.anchor = pos;
-                if r.ref_dist - d >= STUCK_PROGRESS && !back_and_forth {
-                    r.stuck_run = 0;
-                    r.ref_dist = d;
-                } else if !rounding || back_and_forth {
-                    // Card WHY: what the books say, before the cure below
-                    // changes them.
-                    let driving = sim.unit(me).is_some_and(|u| u.mount.is_some());
-                    nt.failed(if back_and_forth {
-                        super::why::Why::Oscillation
-                    } else {
-                        super::why::walk_failed(st, &r, driving)
-                    });
-                    nt.fail_arc = r.via_arc;
-                    // Card ARCM: the leg's arc failed twice running (a
-                    // failure since the walk last got anywhere), or back
-                    // and forth: closed to the bot, so the re-plan below
-                    // draws round it while another way exists.
-                    if let Some(a) = r
-                        .via_arc
-                        .filter(|_| !driving && (back_and_forth || st.mv.recover > 0))
-                    {
-                        st.arcm.close(a, sim.tick);
-                        nt.closed_arc = Some(a);
-                    }
-                    // The commitment ends with the failed window: the
-                    // side-step's side starts the next.
-                    st.mv.round.end();
-                    r.stuck_run = r.stuck_run.saturating_add(STUCK_WINDOW);
-                    // Re-locate and re-route once, then side-step to the side
-                    // we did not use last time.
-                    let side: i8 = if r.sidestep > 0 { -1 } else { 1 };
-                    // ...and hand that side to the avoidance as well (Phase
-                    // A.4; card OBST: the commitment has just ended above, so
-                    // this side starts the next one — the PS2's "side-step to
-                    // the side we did not use last time").
-                    st.slide = side;
-                    st.route = Some(r);
-                    // Plan again from the hub the unit stands in
-                    // (`route::replan`).
-                    if replan(sim, me, st, pos, nt) {
-                        r = st.route.unwrap_or(r);
-                    }
-                    r.sidestep = side * (SIDESTEP_TICKS + 1);
-                }
-            }
-        }
-        nt.stuck_run = r.stuck_run;
-        st.route = Some(r);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -713,6 +636,7 @@ mod tests {
             };
             let u = sim.unit(h).unwrap();
             let tick = Tick {
+                rules: crate::ai::UnitRules::for_unit(&sim, u),
                 me: h,
                 u,
                 eye: u.ai_eye(),
@@ -731,9 +655,9 @@ mod tests {
                 hold: None,
                 flee: false,
                 boarding: false,
-                roll: 0,
+                serving: false,
                 excused: false,
-                throwing: false,
+                acts: Acts::default(),
             };
             let mut pad = PadState::default();
             let mut nav = NavTick::default();
@@ -1106,12 +1030,12 @@ mod tests {
             let u = sim.unit(h).expect("alive");
             let pos = u.soldier.pos;
             let mut st = u.ai;
-            let mut r = st.route.expect("a route");
+            let mut r = st.route().expect("a route");
             // No nearer its waypoint than at the last window...
             r.ref_dist = nav::xz_dist(pos, sub_point(&r, pos));
             r.stuck_ticks = STUCK_WINDOW - 1;
             r.stuck_run = 0;
-            st.route = Some(r);
+            st.install_route_for_fixture(Some(r));
             // ...3 m along what it is going round.
             st.slide = 1;
             st.mv.round = crate::ai::Round {
@@ -1121,8 +1045,11 @@ mod tests {
                 ..crate::ai::Round::default()
             };
             let mut nt = NavTick::default();
-            stuck_window(&sim, h, &mut st, pos, true, false, &mut nt);
-            (st.route.expect("a route").stuck_run > 0, st.mv.round.live())
+            progress(&sim, h, &mut st, pos, true, false, &mut nt);
+            (
+                st.route().expect("a route").stuck_run > 0,
+                st.mv.round.live(),
+            )
         };
         assert_eq!(window_fails(false), (false, true), "round a body");
         assert_eq!(window_fails(true), (true, false), "along a rim");
@@ -1145,10 +1072,10 @@ mod tests {
         }
         let u = sim.unit(h).expect("alive");
         assert!(
-            u.ai.route
+            u.ai.route()
                 .is_none_or(|r| r.source == crate::ai::RouteSource::Straight),
             "no route on the graph: {:?}",
-            u.ai.route
+            u.ai.route()
         );
         assert_eq!(u.ai.behaviour, Behaviour::Travel);
         assert_ne!(stick(&sim, h), (0, 0), "it walks at its post");
@@ -1435,7 +1362,7 @@ mod tests {
         assert!(sim.controlled_droid(h).is_some(), "still flying");
         let u = sim.unit(h).expect("alive");
         assert!(u.soldier.pos.length() < 0.5, "the body stood");
-        assert_eq!(u.ai.route.map_or(0, |r| r.stuck_run), 0);
+        assert_eq!(u.ai.route().map_or(0, |r| r.stuck_run), 0);
         assert_eq!(sim.nav_stats.stuck_max, 0);
         assert_eq!(u.ai.stall.map_or((0, 0), |s| (s.ticks, s.fails)), (0, 0));
     }

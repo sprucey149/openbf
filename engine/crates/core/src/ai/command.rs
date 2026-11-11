@@ -38,7 +38,7 @@ impl AiState {
         if let Some(w) = self.ride.as_mut().and_then(|r| r.pickup.as_mut()) {
             w.post_stop = None;
         }
-        self.route = None;
+        super::route::clear(self);
         self.target_cp = None;
         self.cmd = None;
     }
@@ -126,7 +126,7 @@ mod tests {
         sim.unit_mut(leader).expect("leader").soldier.pos = Vec3::new(40.0, 0.0, -40.0);
         sim.step(&[PadState::default()]);
         let st = |s: &Sim| s.unit(bot).expect("bot").ai;
-        let r = st(&sim).route.expect("a leg to the leader");
+        let r = st(&sim).route().expect("a leg to the leader");
         assert_eq!(r.dest_hub, 2, "the leader's hub, not a post's");
         assert_eq!(st(&sim).target_cp, None, "a commanded bot takes no post");
         // Across the next thinks the destination hub does not move, so the leg
@@ -135,7 +135,7 @@ mod tests {
             sim.unit_mut(leader).expect("leader").soldier.pos = Vec3::new(40.0, 0.0, -40.0);
             sim.step(&[PadState::default()]);
             assert_eq!(
-                st(&sim).route.map(|r| r.dest_hub),
+                st(&sim).route().map(|r| r.dest_hub),
                 Some(2),
                 "still walking at the leader's hub"
             );
@@ -272,7 +272,7 @@ mod tests {
         assert!(nearest <= crate::squad::APPROACH_BODY + 0.3, "{nearest}");
         let at = sim.unit(bot).expect("bot").soldier.pos;
         let st = sim.unit(bot).expect("bot").ai;
-        assert!(st.route.is_none(), "no leg beside the leader");
+        assert!(st.route().is_none(), "no leg beside the leader");
         let lp = sim.unit(leader).expect("leader").soldier.pos;
         let d = (at - lp).length();
         assert!((0.5..=4.3).contains(&d), "stands {d} m from him");
@@ -333,7 +333,7 @@ mod tests {
             sim.step(&[PadState::default()]);
             let u = sim.unit(bot).expect("bot");
             assert!(u.command.is_some(), "the hold stands");
-            assert!(u.ai.route.is_none(), "a hold is never a leg");
+            assert!(u.ai.route().is_none(), "a hold is never a leg");
             assert!((u.soldier.pos - spot).length() <= 0.3, "it moved");
         }
         assert_eq!(sim.nav_stats.releases, 0);

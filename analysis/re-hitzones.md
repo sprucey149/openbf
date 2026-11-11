@@ -88,13 +88,11 @@ A named deviation, for one game on every map and so that a launcher's lock has a
   and spider walker: make weak spot hits x4. Everything else x2 and that seems good."): **x4** on the AT-TE, the
   AT-AT and the spider walker (`weak_lock::HEAVY_WALKER_WEAK_SPOT_FACTOR`; every class of them in both games, BF2's
   Kashyyyk spider too, and any class whose chain reaches one: `game::vehicle_class::HEAVY_WALKERS`), **x2** on
-  every other vehicle (`weak_lock::GROUND_WEAK_SPOT_FACTOR`), locked or not, whatever the round: a torpedo (600)
-  does 1200 on a BF1 tank's part and 2400 on a BF1 AT-TE's. Space rounds keep the data's factors. Blast damage is
-  never located on a prim in either original, so a splash takes x1 (`re-ordnance-kinds.md` §5.1). Torpedoes to
-  destroy on the part (`weak_spot_kill_table`): AAT and fighter tanks (6600) 6, hailfire (5200) 5, combat speeder
-  (5400) 5, AT-STs (6000) 5 at x2; spider (6000) 3, AT-TE (15000) 7, AT-AT (30000) 13 at x4; on the hull 11, 9, 9,
-  10, 10, 25, 50. (Before 2026-11-10's third pass: x4 for an unlocked strike, and a part lock's factor from the
-  centre's line; the third pass first built x2 on every vehicle.)
+  every other vehicle (`weak_lock::GROUND_WEAK_SPOT_FACTOR`) on direct hits,
+  whether locked or aimed. Space rounds use the class factors. A splash takes
+  x1 because blast damage has no struck prim (`re-ordnance-kinds.md` §5.1).
+  The [ground vehicle pass](vehicle-normalization.md) lists hull and weak-part
+  counts using the shared 500–1,500 rocket damage curve.
 - **Side effect.** The BF1 prims that join the ordnance subset now stop bolts and sight rays that used to pass
   through them to the hull behind; each sits on or inside its hull.
 - measure: maintainer playtest of rockets against BF1 vehicles (B7). Exposure per vehicle: the survey table in

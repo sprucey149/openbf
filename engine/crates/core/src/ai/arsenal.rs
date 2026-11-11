@@ -40,7 +40,7 @@
 //! a missile's line of fire is cleared of friends by what is walked before
 //! the rocket gets there (`gunner_foot::friend_in_line`).
 
-use super::behave::Tick;
+use super::brain::Tick;
 use super::draw::{unit_unit, SALT_ARM, SALT_NUMBER};
 use super::state::{AiState, ArmState};
 use crate::autoturret::Turret;

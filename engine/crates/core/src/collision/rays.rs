@@ -581,17 +581,31 @@ const TERRAIN_RAY_PIECE: f32 = 3.0;
 /// (`FUN_0055fdd0`) refuses one — PROVISIONAL: the port's cutters stand in
 /// for the PS2's holes.
 pub fn ray_terrain_ps2(hf: &Heightfield, cutters: &[Cutter], a: Vec3, b: Vec3) -> Option<f32> {
+    let delta = b - a;
+    if !delta.is_finite() {
+        return None;
+    }
     let under = |p: Vec3| p.y < hf.height_at(p.x, p.z);
-    let f = if (a.x - b.x).abs() < 0.001 && (a.z - b.z).abs() < 0.001 {
+    let f = if delta.x.abs() < 0.001 && delta.z.abs() < 0.001 {
         if b.y >= a.y || under(a) {
             return None;
         }
-        (hf.height_at(a.x, a.z) - a.y) / (b.y - a.y)
+        (hf.height_at(a.x, a.z) - a.y) / delta.y
     } else {
         let mut clear = !under(a);
         terrain_march(hf, a, b, &mut clear)
     };
-    (f < 1.0 && !is_cut_by(cutters, a + (b - a) * f)).then_some(f)
+    (f < 1.0 && !is_cut_by(cutters, a + delta * f)).then_some(f)
+}
+
+/// Keep the original rounding on normal segments. Halve before adding if the sum overflows.
+fn terrain_midpoint(a: Vec3, b: Vec3) -> Vec3 {
+    let mid = (a + b) * 0.5;
+    if mid.is_finite() {
+        mid
+    } else {
+        a * 0.5 + b * 0.5
+    }
 }
 
 /// `FUN_0055f940`: pieces of at most [`TERRAIN_RAY_PIECE`] level metres,
@@ -599,22 +613,24 @@ pub fn ray_terrain_ps2(hf: &Heightfield, cutters: &[Cutter], a: Vec3, b: Vec3) -
 /// the ray has been over the terrain (`clear`, shared along the ray).
 fn terrain_march(hf: &Heightfield, a: Vec3, b: Vec3, clear: &mut bool) -> f32 {
     let d = a - b;
-    if d.x * d.x + d.z * d.z <= TERRAIN_RAY_PIECE * TERRAIN_RAY_PIECE {
-        if b.y < hf.height_at(b.x, b.z) {
-            if *clear {
-                return terrain_bisect(hf, a, b);
-            }
-        } else {
-            *clear = true;
+    let mid = (d.x * d.x + d.z * d.z > TERRAIN_RAY_PIECE * TERRAIN_RAY_PIECE)
+        .then(|| terrain_midpoint(a, b));
+    if let Some(mid) = mid.filter(|&mid| mid != a && mid != b) {
+        let f = terrain_march(hf, a, mid, clear);
+        if f < 1.0 {
+            return f * 0.5;
         }
-        return 1.0;
+        return terrain_march(hf, mid, b, clear) * 0.5 + 0.5;
     }
-    let mid = (a + b) * 0.5;
-    let f = terrain_march(hf, a, mid, clear);
-    if f < 1.0 {
-        return f * 0.5;
+    // A segment with no representable split still carries its height bracket.
+    if b.y < hf.height_at(b.x, b.z) {
+        if *clear {
+            return terrain_bisect(hf, a, b);
+        }
+    } else {
+        *clear = true;
     }
-    terrain_march(hf, mid, b, clear) * 0.5 + 0.5
+    1.0
 }
 
 /// `FUN_0055f818`: halve `lo -> hi` until the two ends are within the
@@ -622,7 +638,10 @@ fn terrain_march(hf: &Heightfield, a: Vec3, b: Vec3, clear: &mut bool) -> f32 {
 fn terrain_bisect(hf: &Heightfield, mut lo: Vec3, mut hi: Vec3) -> f32 {
     let (mut f, mut h) = (0.0f32, 0.5f32);
     while (lo - hi).length_squared() > TERRAIN_RAY_TOL * TERRAIN_RAY_TOL {
-        let mid = (lo + hi) * 0.5;
+        let mid = terrain_midpoint(lo, hi);
+        if mid == lo || mid == hi {
+            break;
+        }
         let e = hf.height_at(mid.x, mid.z) - mid.y;
         if e > TERRAIN_RAY_TOL {
             hi = mid;
@@ -692,6 +711,73 @@ mod tests {
         s.heightfield = terrain_y.map(flat_hf);
         s.collision = world;
         s
+    }
+
+    #[test]
+    fn retail_terrain_ray_rejects_nonfinite_endpoints() {
+        let hf = flat_hf(0.0);
+        let finite = Vec3::new(0.0, 1.0, 0.0);
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            let invalid = Vec3::new(invalid, -1.0, 0.0);
+            assert_eq!(ray_terrain_ps2(&hf, &[], finite, invalid), None);
+            assert_eq!(ray_terrain_ps2(&hf, &[], invalid, finite), None);
+        }
+    }
+
+    #[test]
+    fn retail_terrain_ray_finishes_when_the_midpoint_rounds_to_an_end() {
+        let hf = flat_hf(0.0);
+        let from = Vec3::new(134_217_728.0, 1.0, 0.0);
+        let to = Vec3::new(134_217_744.0, 1.0, 0.0);
+        assert_eq!((from + to) * 0.5, from);
+        assert_eq!(ray_terrain_ps2(&hf, &[], from, to), None);
+        assert_eq!(ray_terrain_ps2(&hf, &[], to, from), None);
+    }
+
+    #[test]
+    fn retail_terrain_ray_finishes_a_nonrepresentable_height_bracket() {
+        let from = Vec3::new(134_217_728.0, 1.0, 0.0);
+        let to = Vec3::new(134_217_744.0, 1.0, 0.0);
+        let hf = Heightfield {
+            size: 2,
+            unit: 16.0,
+            offset_x: -from.x,
+            offset_z: 0.0,
+            heights: vec![0.0, 2.0, 0.0, 2.0],
+        };
+        assert_eq!(hf.height_at(from.x, 0.0), 0.0);
+        assert_eq!(hf.height_at(to.x, 0.0), 2.0);
+        assert_eq!(ray_terrain_ps2(&hf, &[], from, to), Some(0.5));
+    }
+
+    #[test]
+    fn retail_terrain_ray_finishes_with_overflowing_midpoint_sum() {
+        let hf = flat_hf(0.0);
+        let a = Vec3::new(f32::from_bits(f32::MAX.to_bits() - 1), 1.0, 0.0);
+        let b = Vec3::new(f32::MAX, 1.0, 0.0);
+        assert!(!(a + b).is_finite());
+        assert_eq!(ray_terrain_ps2(&hf, &[], a, b), None);
+        assert_eq!(ray_terrain_ps2(&hf, &[], b, a), None);
+        let top = Vec3::Y * f32::MAX;
+        assert_eq!(ray_terrain_ps2(&hf, &[], top, -top), None);
+    }
+
+    #[test]
+    fn retail_terrain_ray_preserves_a_crossing_and_a_clear_ray() {
+        let hf = flat_hf(0.0);
+        let from = Vec3::new(-5.0, 1.0, 0.0);
+        let across = Vec3::new(5.0, -1.0, 0.0);
+        assert_eq!(ray_terrain_ps2(&hf, &[], from, across), Some(0.53125));
+        let cut = Cutter {
+            sphere: [1.0, 0.3125, -0.0625, 0.0],
+            planes: vec![Vec4::new(1.0, 0.0, 0.0, -1.0)],
+        };
+        assert_eq!(ray_terrain_ps2(&hf, &[cut], from, across), None);
+        assert_eq!(
+            ray_terrain_ps2(&hf, &[], from, Vec3::Y + Vec3::X * 5.0),
+            None
+        );
+        assert_eq!(ray_terrain_ps2(&hf, &[], Vec3::Y, Vec3::NEG_Y), Some(0.5));
     }
 
     #[test]

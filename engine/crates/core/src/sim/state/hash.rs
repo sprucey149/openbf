@@ -60,8 +60,9 @@ impl Sim {
                 eat(&(*len as u32).to_le_bytes());
             }
         }
+        let ground = !self.space_round();
         for u in &self.units {
-            u.hash_into(&mut eat);
+            u.hash_for_round(&mut eat, ground);
         }
         // The vehicles (VENT): nothing at all when there are none, like the
         // doors, so the replay values stay put until a vehicle exists.

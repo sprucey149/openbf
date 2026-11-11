@@ -120,12 +120,23 @@ impact, mine, building and vehicle death — `re_check.py callers`, §9):
    presentation: Effect (+ its sound), Decal (size = DamageRadius), Light, the water splash (when `pos.y ≤ water + 0.3`,
    B1:193763), and the shake (step 5). The SoundProperty sound plays always.
 2. Chunks (`NumChunks` of `ChunkGeometryName`) — §6.1. Always.
-3. **Gather** (only if DamageRadiusOuter > 0 or PushRadiusOuter > 0): `FUN_00161c00(max(DamageOuter, PushOuter), pos,
-   list, 20, 0, 0x81e)` (B1:194072; B2 `FUN_00161a98(…, 20, 0, 0x103b)` B2:300525) → FUN_00162a98: an **axis-aligned
-   box** pos ± r over the collision manager's layer lists of the mask (B1 lists 2, 4, 8, 0x10, 0x800 — re-collision-
-   layers §4; 0x10 holds riders, §5), each body mapped to its owner, **cap 20**. Desc = [the 16-byte attacker record
-   passed in][class Damage, the 7 scales, ShieldScale] (B1 copies class+0x30..+0x50 after it; the ordnance desc
-   layout of re-blaster-damage §6.1).
+3. **Gather**. A positive outer damage or push radius opens a query with
+   `r = max(DamageOuter, PushOuter)`. BF1 calls `FUN_00161c00` with mask
+   `0x81e` and BF2 calls `FUN_00161a98` with mask `0x103b`. Both cap the
+   list at 20 (B1:194072, B2:300516–300526). The query box is `pos ± r`.
+   BF1's partition checks sphere overlap with the box (`FUN_0016ca28`,
+   inclusive comparison at 0x0016cad4). BF2's initialized world also
+   supplies a partition (`FUN_00174b28`, B2:16877–16884). Its check uses
+   the squared distance from the body centre to the box and includes
+   tangency (`FUN_0016d848`, B2:11478–11500, compare at 0x0016d8f4).
+   BF2 then checks the squared horizontal distance against `(r + w)²`,
+   inclusive, before spending a slot (`FUN_00162a58`, B2:2288–2305,
+   0x00162b2c–0x00162b58). Here `w` is the body's sphere radius. The BF2
+   list fallback checks axis overlap before the same horizontal test.
+   BF1 has no corresponding horizontal test. The mask admits riders
+   in the collision layer described in §5. The damage record combines
+   the attacker record with the class Damage, scales and ShieldScale
+   (re-blaster-damage §6.1).
 4. For each gathered object (from the end of the list): target point `t = obj.vt+0x5c(obj, pos, centre − pos, −1)`
    (B1 FUN_001e2500 for most classes: the collision-sphere centre, or a point on the class's TargetableCollision
    bodies when it has any — FUN_00168030, not read [H]; the soldier's own FUN_0020c680 not read [H]);
@@ -144,6 +155,19 @@ impact, mine, building and vehicle death — `re_check.py callers`, §9):
    entity, `f` = the same falloff (§3) on the distance to that entity with ShakeRadiusInner/Outer; amplitude Shake·f
    (× a per-entity factor), length ShakeLength·f (camera FUN_0019fbb0) and pad rumble (FUN_003499b8, 1.2 × length)
    (B1:194113-194150; B2 the same, B2 FUN_00268fe0 at B2:300586).
+
+### Shared ground gather
+
+Both ground eras use BF2's inclusive sphere-to-box and horizontal checks
+before the port's 20-slot gather. Applying the horizontal check on BF1
+maps is a deliberate departure from BF1. A diagonal body that cannot pass
+the check leaves a slot for a nearer victim. The body lists still use
+the port's slot order, and exposed riders and the protected owner can
+consume a slot. The space and separate uncapped item paths use axis
+overlap. Damage and push are evaluated with the existing falloff and
+sight checks. Pruning a corpse or droid before the gather can change
+its kick, chunk roll and later seeded outcomes. The stock incidence and
+original victim order in a crowded fight remain to be measured.
 
 ## 3. The falloff and the victim's sphere [V][O]
 

@@ -193,14 +193,14 @@ fn a_bot_drawn_round_keeps_the_way_round_to_the_same_goal() {
     let mut nt = NavTick::default();
     let back = plan_leg(&sim, &st, h, 1, 2, None, &mut nt).expect("a leg");
     assert_eq!((back.via_arc, back.source), (Some(0), RouteSource::Shun));
-    st.route = Some(back);
+    st.install_route_for_fixture(Some(back));
     let on = plan_leg(&sim, &st, h, 0, 2, None, &mut nt).expect("a leg");
     assert_eq!((on.via_arc, on.source), (Some(2), RouteSource::Shun));
     // Another goal: the table again.
-    st.route = Some(Route {
+    st.install_route_for_fixture(Some(Route {
         dest_hub: 1,
         ..back
-    });
+    }));
     let other = plan_leg(&sim, &st, h, 0, 2, None, &mut nt).expect("a leg");
     assert_eq!(other.via_arc, Some(0));
 }
@@ -230,12 +230,12 @@ fn an_arc_is_closed_to_the_bot_at_its_second_failure_running() {
     let (sim, h) = l_sim();
     let mut st = AiState::default();
     let mut nt = NavTick::default();
-    st.route = plan_leg(&sim, &st, h, 0, 2, None, &mut nt);
+    crate::ai::route::plan_to(&sim, &mut st, h, 0, 2, &mut nt);
     let pos = sim.unit(h).expect("bot").soldier.pos;
     let window = |st: &mut AiState| {
         let mut nt = NavTick::default();
         for _ in 0..STUCK_WINDOW {
-            crate::ai::mover::stuck_window(&sim, h, st, pos, true, false, &mut nt);
+            crate::ai::route::progress(&sim, h, st, pos, true, false, &mut nt);
         }
         nt
     };
@@ -243,7 +243,7 @@ fn an_arc_is_closed_to_the_bot_at_its_second_failure_running() {
     assert!(nt.fail().is_fail() && nt.closed_arc.is_none(), "{nt:?}");
     assert!(!st.arcm.any_closed(sim.tick));
     st.mv.recover = 1;
-    let arc = st.route.and_then(|r| r.via_arc).expect("an arc leg");
+    let arc = st.route().and_then(|r| r.via_arc).expect("an arc leg");
     let nt = window(&mut st);
     assert_eq!(nt.closed_arc, Some(arc), "{nt:?}");
     assert!(st.arcm.is_closed(arc, sim.tick));
@@ -275,13 +275,13 @@ fn a_back_and_forth_fails_the_window_at_once_and_closes_the_arc() {
     let (sim, h) = l_sim();
     let mut st = AiState::default();
     let mut nt = NavTick::default();
-    st.route = plan_leg(&sim, &st, h, 0, 2, None, &mut nt);
-    let arc = st.route.and_then(|r| r.via_arc).expect("an arc leg");
+    crate::ai::route::plan_to(&sim, &mut st, h, 0, 2, &mut nt);
+    let arc = st.route().and_then(|r| r.via_arc).expect("an arc leg");
     let pos = sim.unit(h).expect("bot").soldier.pos;
     let mut nt = NavTick::default();
-    crate::ai::mover::stuck_window(&sim, h, &mut st, pos, true, false, &mut nt);
+    crate::ai::route::progress(&sim, h, &mut st, pos, true, false, &mut nt);
     assert_eq!(nt.fail(), Why::None, "one tick of a window");
-    crate::ai::mover::stuck_window(&sim, h, &mut st, pos, true, true, &mut nt);
+    crate::ai::route::progress(&sim, h, &mut st, pos, true, true, &mut nt);
     assert_eq!(
         (nt.fail(), nt.fail_arc, nt.closed_arc),
         (Why::Oscillation, Some(arc), Some(arc))

@@ -8,7 +8,7 @@
 //! ahead of its post, its sniper's spot and its fight's ring (a seen enemy
 //! still comes first: the claim waits while it fights). It walks to the
 //! turret, stands, turns its cutter on it and holds the trigger until the
-//! turret is whole ([`serve`]).
+//! turret is whole ([`serve_plan`]).
 //!
 //! **One engineer a turret**: a claim ([`FixState`]) no other bot's pick takes;
 //! two that pick on one tick pick blind of each other, and the later claim
@@ -373,12 +373,17 @@ pub(super) fn walk_failed(sim: &Sim, st: &mut AiState) {
     }
 }
 
-/// The fixer's pad once the turret is in its cutter's reach: stand, turn
-/// the cutter on the turret's centre, bring the cutter up and hold its
-/// trigger. `None` while it walks, fights or holds no claim.
-pub(super) fn serve(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<PadState> {
+#[derive(Clone, Copy)]
+pub(super) struct ServePlan {
+    pub rx: i16,
+    pub ry: i16,
+    pub button: u32,
+}
+
+/// How to turn the cutter onto the target and whether to switch or fire.
+/// The fixer must have a claim in reach and see no enemy.
+pub(super) fn serve_plan(sim: &Sim, u: &Unit, st: &AiState) -> Option<ServePlan> {
     let c = st.fix.cur.filter(|_| !fighting(st))?;
-    let u = sim.unit(me)?;
     let (class, channel) = cutter(sim, u)?;
     let (_, centre, radius) = stand(sim, u, c.target)?;
     let wc = &sim.weapon_classes[class];
@@ -398,11 +403,6 @@ pub(super) fn serve(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<PadState>
     let want_pitch = fmath::asin(dir.y.clamp(-1.0, 1.0));
     let e_yaw = (want_yaw - u.soldier.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
         - std::f32::consts::PI;
-    let mut pad = PadState {
-        rx: PadState::quantize(-e_yaw / (u.consts.max_turn_speed * dt)),
-        ry: PadState::quantize((want_pitch - u.soldier.pitch) / (u.consts.max_pitch_speed * dt)),
-        ..Default::default()
-    };
     // The cutter up: a switch press on alternate ticks (the press is an
     // edge) until its channel's current weapon is the cutter.
     let up = match channel {
@@ -412,22 +412,18 @@ pub(super) fn serve(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<PadState>
             .and_then(|k| u.held.get(usize::from(k)))
             .is_some_and(|w| w.class == class),
     };
-    if !up {
-        if sim.tick.is_multiple_of(2) {
-            pad.buttons |= if channel == 0 {
-                buttons::SWITCH_WEAPON
-            } else {
-                buttons::SWITCH_SECONDARY
-            };
-        }
-        return Some(pad);
-    }
-    pad.buttons |= if channel == 0 {
-        buttons::FIRE
-    } else {
-        buttons::SECONDARY_FIRE
+    let button = match (up, channel == 0) {
+        (true, true) => buttons::FIRE,
+        (true, false) => buttons::SECONDARY_FIRE,
+        (false, true) if sim.tick.is_multiple_of(2) => buttons::SWITCH_WEAPON,
+        (false, false) if sim.tick.is_multiple_of(2) => buttons::SWITCH_SECONDARY,
+        _ => 0,
     };
-    Some(pad)
+    Some(ServePlan {
+        rx: PadState::quantize(-e_yaw / (u.consts.max_turn_speed * dt)),
+        ry: PadState::quantize((want_pitch - u.soldier.pitch) / (u.consts.max_pitch_speed * dt)),
+        button,
+    })
 }
 
 #[cfg(test)]

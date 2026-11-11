@@ -236,7 +236,7 @@ Not built (issue #130):
 
 Bots hold no medal, so every award slot is locked for them: the switch, the weapon choice,
 the sniper's scope and the guided launch already skipped it. One reader did not: the reach a
-walking bot fights within (`ai::behave::brain::fight_reach`, playtest C3) took the longest AI
+walking bot fights within (`ai::brain::behaviours::fight::fight_reach`, playtest C3) took the longest AI
 range of every slot, locked or not. On BF2 maps a rifleman, a pilot and a dark trooper
 therefore turned to fight out to the Precision pistol's 80 m (+10) instead of their rifle's
 64 m or their own 60 m. With award slots on BF1 classes the same fault would have stretched
@@ -286,7 +286,7 @@ map.
 - `game/src/event_feed/tests.rs` `the_heavy_blast_cannon_has_its_own_name_and_line`.
 - `game/src/spawn_page.rs` `the_unit_screen_lists_the_players_awards`, `a_bf1_class_lists_its_awards_by_their_own_names` (a real BF1 dark trooper; skips without the class bakes).
 - `core/src/sim/awards/tests.rs` `all_awards_give_the_damage_award`.
-- `core/src/ai/behave/brain/tests.rs` `a_locked_award_adds_nothing_to_a_bots_reach`.
+- `core/src/ai/brain/ground/tests.rs` `a_locked_award_adds_nothing_to_a_bots_reach`.
 - `game/tests/suite/squad_vehicle_maps.rs` `a_player_slices_a_real_enemy_aat`: 10 s from
   3.5 m on BF1 Naboo and BF2 Naboo alike.
 - `game/tests/suite/vehicle_class.rs` `bf1_slice_times_match_the_bf2_twins`.

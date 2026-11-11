@@ -23,9 +23,9 @@ fn a_last_leg_walks_at_an_unseen_enemy_in_the_capture_region() {
             ..AiState::default()
         };
         let mut nt = NavTick::default();
-        st.route = plan_leg(sim, &st, h, 2, 2, None, &mut nt);
+        st.nav.route = plan_leg(sim, &st, h, 2, 2, None, &mut nt);
         aim_last_leg(sim, h, &mut st, &mut nt);
-        st.route.expect("a last leg").waypoint
+        st.nav.route.expect("a last leg").waypoint
     };
     let own = leg(&sim, None);
     assert!(sim.cps[0].def.capture.contains(own) && own != sim.cps[0].def.pos);
@@ -213,7 +213,7 @@ fn a_bot_spawned_on_a_deck_over_a_lower_route_takes_the_decks_own_hub() {
     );
     let mut st = AiState::default();
     retarget_phase_a(&sim, me, &mut st, None, &mut NavTick::default());
-    let r = st.route.expect("a leg");
+    let r = st.nav.route.expect("a leg");
     assert_eq!(st.target_cp, Some(1), "the deck's post");
     assert_eq!(
         (r.via_arc, r.next_hub),
@@ -232,7 +232,7 @@ fn a_hunter_on_its_quarrys_hub_walks_at_the_quarry() {
     let mut nt = NavTick::default();
     for enemy in [Vec3::new(5.0, 0.0, -3.0), Vec3::new(-6.0, 0.0, 4.0)] {
         retarget_hunt(&sim, h, &mut st, Some(enemy), &mut nt);
-        let r = st.route.expect("a route");
+        let r = st.nav.route.expect("a route");
         assert_eq!(
             (r.dest_hub, r.is_last()),
             (0, true),
@@ -283,7 +283,7 @@ fn the_follower_walks_the_corridor_instead_of_the_beeline() {
     for _ in 0..1200 {
         sim.step(&[PadState::default()]);
         let u = sim.unit(h).expect("alive");
-        if let Some(r) = u.ai.route {
+        if let Some(r) = u.ai.nav.route {
             if legs.last() != Some(&r.next_hub) {
                 legs.push(r.next_hub);
             }
@@ -326,7 +326,7 @@ fn an_unreachable_post_falls_back_to_the_straight_line() {
     }
     let u = sim.unit(h).expect("alive");
     assert_eq!(u.ai.target_cp, Some(0));
-    assert!(u.ai.route.is_none(), "no route: {:?}", u.ai.route);
+    assert!(u.ai.nav.route.is_none(), "no route: {:?}", u.ai.nav.route);
 }
 
 /// A barrier across the first leg puts CORNER waypoints on the route, and
@@ -348,7 +348,7 @@ fn a_barrier_across_the_leg_puts_corners_on_the_route() {
     }
     let mut st = AiState::default();
     think(&sim, h, &mut st);
-    let r = st.route.expect("a route");
+    let r = st.nav.route.expect("a route");
     assert!(r.detour_len > 0, "the leg was detoured: {r:?}");
     let c = r.corner().expect("a corner to walk to");
     assert!(c.x.abs() > 8.0, "round an end of the wall: {c}");
@@ -358,7 +358,7 @@ fn a_barrier_across_the_leg_puts_corners_on_the_route() {
         sim.step(&[PadState::default()]);
         if sim
             .unit(h)
-            .and_then(|u| u.ai.route)
+            .and_then(|u| u.ai.nav.route)
             .is_some_and(|r| r.detour_at > 0 || r.detour_len == 0)
         {
             reached = true;
@@ -406,13 +406,13 @@ fn a_corner_walk_over_the_legs_array_is_continued() {
     // On the last stored corner: the walk goes on, clear of the ring.
     let last = r.detour[DETOUR_MAX - 1];
     assert!(last.y > -40.0, "short of the arrival plane: {last}");
-    st.route = Some(Route {
+    st.nav.route = Some(Route {
         detour_at: (DETOUR_MAX - 1) as u8,
         ..r
     });
     let at = Vec3::new(last.x, 0.0, last.y);
     advance_route(&sim, h, &mut st, at, 0.0, &mut nt);
-    let r = st.route.expect("the leg");
+    let r = st.nav.route.expect("the leg");
     let next = r.corner().expect("a corner after the array's last");
     assert_eq!(
         g.leg_crosses_barrier(last, next, crate::unit::SOLDIER_RADIUS, nav::SOLDIER),
@@ -426,9 +426,9 @@ fn a_corner_walk_over_the_legs_array_is_continued() {
         ..r
     };
     short.detour[1] = last;
-    st.route = Some(short);
+    st.nav.route = Some(short);
     advance_route(&sim, h, &mut st, at, 0.0, &mut nt);
-    let r = st.route.expect("the leg");
+    let r = st.nav.route.expect("the leg");
     assert_eq!((r.detour_len, r.detour_at), (2, 2), "no new search");
 }
 
@@ -541,7 +541,7 @@ fn a_waypoint_with_no_floor_on_this_level_is_rejected_for_the_other_arc() {
     let mut seen = Vec::new();
     for _ in 0..1500 {
         sim.step(&[PadState::default()]);
-        if let Some(r) = sim.unit(h).expect("alive").ai.route {
+        if let Some(r) = sim.unit(h).expect("alive").ai.nav.route {
             if seen.last() != Some(&r.next_hub) {
                 seen.push(r.next_hub);
             }
@@ -760,7 +760,7 @@ fn a_leg_planned_on_arrival_starts_at_the_waypoint_reached() {
     }
     sim.cps[0].def.pos = Vec3::new(80.0, 0.0, -40.0);
     sim.step(&[PadState::default()]);
-    let first = sim.unit(h).and_then(|u| u.ai.route).expect("a route");
+    let first = sim.unit(h).and_then(|u| u.ai.nav.route).expect("a route");
     assert_eq!((first.next_hub, first.from), (1, Vec2::ZERO));
     let reached = Vec2::new(first.waypoint.x, first.waypoint.z);
     assert!(
@@ -769,7 +769,7 @@ fn a_leg_planned_on_arrival_starts_at_the_waypoint_reached() {
     );
     for _ in 0..900 {
         sim.step(&[PadState::default()]);
-        let r = sim.unit(h).and_then(|u| u.ai.route).expect("a route");
+        let r = sim.unit(h).and_then(|u| u.ai.nav.route).expect("a route");
         if r.next_hub == 2 {
             assert_eq!(r.from, reached);
             return;
@@ -931,7 +931,7 @@ fn a_bot_past_a_barriers_corner_walks_on_from_the_corner() {
     for _ in 0..900 {
         sim.step(&[PadState::default()]);
         let u = sim.unit(h).expect("alive");
-        let (Some(r), true) = (u.ai.route, u.ai.walk.kind == crate::ai::WalkAsk::LEG) else {
+        let (Some(r), true) = (u.ai.nav.route, u.ai.walk.kind == crate::ai::WalkAsk::LEG) else {
             continue;
         };
         if r.via_arc.is_none() || r.detour_at == 0 || r.corner().is_some() || u.ai.slide != 0 {
@@ -970,13 +970,13 @@ fn a_hop_opens_a_new_progress_window() {
         // The window's phase: this one closes `phase` ticks early (and
         // passes, its reference being out of reach), every later one 60
         // ticks after the last.
-        let r = sim.unit_mut(h).expect("bot").ai.route.as_mut();
+        let r = sim.unit_mut(h).expect("bot").ai.nav.route.as_mut();
         let r = r.expect("a route");
         (r.stuck_ticks, r.ref_dist) = (phase, f32::MAX);
         let (mut hops, mut last) = (0, None);
         for _ in 0..400 {
             sim.step(&[PadState::default()]);
-            let Some(r) = sim.unit(h).expect("alive").ai.route else {
+            let Some(r) = sim.unit(h).expect("alive").ai.nav.route else {
                 continue;
             };
             assert_eq!(
@@ -1007,7 +1007,7 @@ fn a_bot_beside_its_leg_walks_at_the_leg_point_by_its_own_speed() {
         let (pos, vel) = (before.pos, before.vel);
         sim.step(&[PadState::default()]);
         let u = sim.unit(h).expect("alive");
-        let (Some(r), true) = (u.ai.route, u.ai.walk.kind == crate::ai::WalkAsk::LEG) else {
+        let (Some(r), true) = (u.ai.nav.route, u.ai.walk.kind == crate::ai::WalkAsk::LEG) else {
             continue;
         };
         if r.via_arc.is_none() || u.ai.slide != 0 {
@@ -1054,7 +1054,7 @@ fn a_hovers_driver_reaches_a_corner_at_its_node_radius() {
     }
     let mut st = AiState::default();
     think(&sim, h, &mut st);
-    let route = st.route.expect("a route");
+    let route = st.nav.route.expect("a route");
     let c = route.corner().expect("a corner to walk to");
     // `d` metres short of the corner, on the way to it from the start.
     let at = |d: f32| {
@@ -1063,12 +1063,12 @@ fn a_hovers_driver_reaches_a_corner_at_its_node_radius() {
     };
     let passed = |sim: &Sim, d: f32, min_arrive: f32| {
         let mut st = AiState {
-            route: Some(route),
+            nav: crate::ai::route::NavState::for_fixture(Some(route)),
             ..AiState::default()
         };
         let mut nt = NavTick::default();
         advance_route(sim, h, &mut st, at(d), min_arrive, &mut nt);
-        st.route.and_then(|r| r.corner()) != Some(c)
+        st.nav.route.and_then(|r| r.corner()) != Some(c)
     };
     assert!(!passed(&sim, 8.0, 12.0), "on foot: the soldier's metre");
     assert!(passed(&sim, 0.9, 12.0), "on foot, inside the metre");
@@ -1114,12 +1114,12 @@ fn a_jet_only_boarding_route_uses_the_units_mover() {
     let mut nt = NavTick::default();
     sim.unit_mut(me).expect("bot").spec.jet = true;
     retarget_board(&sim, me, &mut st, at, &mut nt);
-    let r = st.route.expect("jet can reach the boarding hub");
+    let r = st.nav.route.expect("jet can reach the boarding hub");
     assert_eq!((r.dest_hub, r.next_hub, r.via_arc), (2, 1, Some(0)));
     assert_eq!(r.source, RouteSource::Bfs);
     sim.unit_mut(me).expect("bot").spec.jet = false;
     retarget_board(&sim, me, &mut st, at, &mut nt);
-    assert_eq!(st.route, None, "jetless unit cannot cross the same arc");
+    assert_eq!(st.nav.route, None, "jetless unit cannot cross the same arc");
 }
 
 /// Issue #34: a flight of stairs 2.0 m wide between its rail barriers (BF2
@@ -1203,7 +1203,7 @@ fn a_jump_arc_starts_with_one_jump_and_a_plain_arc_has_none() {
         for _ in 0..300 {
             sim.step(&[PadState::default()]);
             let u = sim.unit(me).expect("alive");
-            let via = u.ai.route.and_then(|r| r.via_arc);
+            let via = u.ai.nav.route.and_then(|r| r.via_arc);
             if via.is_some() && leg.is_none() {
                 leg = via;
             }
@@ -1335,13 +1335,13 @@ fn a_walker_ride_to_a_drop_hub_is_not_judged_again_on_the_way() {
     };
     let mut st = AiState {
         target_cp: Some(0),
-        route: Some(leg),
+        nav: crate::ai::route::NavState::for_fixture(Some(leg)),
         ..Default::default()
     };
     let mut nt = NavTick::default();
     retarget_to_post(&s, b, &mut st, 0, false, &mut nt);
     assert_eq!(
-        st.route.map(|r| r.dest_hub),
+        st.nav.route.map(|r| r.dest_hub),
         Some(1),
         "leg dropped mid-ride"
     );
@@ -1352,6 +1352,6 @@ fn a_walker_ride_to_a_drop_hub_is_not_judged_again_on_the_way() {
     let mut st = AiState::default();
     let mut nt = NavTick::default();
     retarget_to_post(&s, b, &mut st, 0, false, &mut nt);
-    assert_eq!(st.route.map(|r| r.dest_hub), Some(1), "no leg planned");
+    assert_eq!(st.nav.route.map(|r| r.dest_hub), Some(1), "no leg planned");
     assert_eq!(nt.unroutable, 0);
 }

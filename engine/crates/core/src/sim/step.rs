@@ -299,9 +299,6 @@ impl Sim {
         self.unit_grid.build(&self.units);
         // The bot that took longest, and the rays it cast (the slow-frame log).
         let mut worst_think: Option<crate::sim::UnitCost> = None;
-        // Bot rework stage 0: proxies and every unit of a space round think
-        // through the legacy entry point (`ai::legacy_think`); today both
-        // entry points are the same brain.
         let space = self.space_round();
         crate::ai::think_memo::during_thinks(|| {
             for (i, u) in self.units.iter().enumerate() {
@@ -309,11 +306,7 @@ impl Sim {
                     let mut st = u.ai;
                     let think_t0 = std::time::Instant::now();
                     let queries_before = crate::collision::cost::queries();
-                    let (p, mut nt) = if u.proxy_human.is_some() || space {
-                        ai::legacy_think(self, self.handle(i), &mut st)
-                    } else {
-                        ai::think(self, self.handle(i), &mut st)
-                    };
+                    let (p, mut nt) = ai::think(self, self.handle(i), &mut st);
                     let elapsed = think_t0.elapsed();
                     let ms = elapsed.as_secs_f32() * 1000.0;
                     // Bot census: the call's wall time (a measurement of the
@@ -330,8 +323,20 @@ impl Sim {
                 }
             }
         });
+        #[cfg(feature = "brain-shadow")]
+        let live_ai_elapsed = ai_t0.elapsed();
+        #[cfg(feature = "brain-shadow")]
+        crate::collision::cost::preserve(|| {
+            crate::ai::think_memo::during_thinks(|| {
+                for (i, _, _, st, pad, nt) in &ai_updates {
+                    ai::verify_shadow(self, *i, st, *pad, *nt);
+                }
+            });
+        });
         self.unit_grid.clear();
-        self.ai_wall_ms = ai_t0.elapsed().as_secs_f32() * 1000.0;
+        #[cfg(not(feature = "brain-shadow"))]
+        let live_ai_elapsed = ai_t0.elapsed();
+        self.ai_wall_ms = live_ai_elapsed.as_secs_f32() * 1000.0;
         self.tick_cost.worst_think = worst_think;
         let mut recycled: Vec<(usize, DeathCause)> = Vec::new();
         // Card UNSN: the bots moved on unseen this tick, and where to.

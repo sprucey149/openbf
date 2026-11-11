@@ -5,7 +5,7 @@
 //! individual rules and constants; implemented rules are not all fidelity.
 //!
 //! Ownership (`analysis/bot-design.md` 3):
-//! - `behave::think` runs one priority chain and hands one aim request to
+//! - `brain::think` dispatches the unit. Each brain hands one aim request to
 //!   `gunner_foot` and one move request to `mover`; it writes no sticks.
 //! - `gunner_foot` alone writes foot look sticks and FIRE; `mover` alone
 //!   writes move sticks, ROLL_STANCE and JUMP and keeps progress books.
@@ -13,7 +13,7 @@
 //!   detours; `steer` probes walls, floors, hulls and level edges; `avoid`
 //!   commits to a side around obstacles. `stall` owns last-resort recycling.
 //! - `tactic` chooses and reserves fighting positions, falling back to the
-//!   stand/circle styles in `behave`; `arsenal` chooses weapons and grenades;
+//!   stand/circle styles in the fight owner; `arsenal` chooses weapons and grenades;
 //!   `crate::perception` owns contact memory and target acquisition.
 //! - `command` applies squad orders; `team` coordinates roles; `ride`,
 //!   `gunner`, `hover_drive`, `walker_drive` and `man` own seated behavior.
@@ -45,7 +45,7 @@
 //! - An arrived bot releases the stick until the destination moves beyond
 //!   `DEST_DEADBAND` or another request walks it; `ARRIVED_SLACK` tolerates
 //!   shoves and the last step is scaled. Each walk answers `Walk`; after
-//!   `GIVE_UP_AFTER` failed windows `behave::recover` gives up its goal.
+//!   `GIVE_UP_AFTER` failed windows the recovery ladder gives up its goal.
 //! - `route::leg_point` leads the projection on the current leg (from the
 //!   last detour corner) by speed plus `LEG_LEAD` (MOVR2 / MOUTH). The PS2
 //!   stuck clock, arrival radii and third-window give-up were measured and
@@ -70,7 +70,7 @@
 //! while another way exists. Card WHY (`why`): every failed walk and every
 //! behaviour change carries a reason code (diagnostic only).
 //!
-//! Fighting (`behave`, `tactic`, `skill::Tier`): the Tactician's position
+//! Fighting (`brain::behaviours::fight`, `tactic`, `skill::Tier`): the Tactician's position
 //! takes priority; fallback fighters stand clear of others or circle within
 //! their own range. An engaged bot outside a position keeps walking its
 //! route while aiming and firing. Hit reactions (REACT) are a named
@@ -87,7 +87,8 @@ mod abilities;
 pub mod arcm;
 mod arsenal;
 mod avoid;
-mod behave;
+mod brain;
+pub use brain::selector::StepKind;
 pub mod census;
 mod command;
 pub mod dfocus;
@@ -108,7 +109,7 @@ mod melee;
 mod mover;
 pub mod proxy;
 mod ride;
-mod route;
+pub(crate) mod route;
 pub mod snipe;
 mod stall;
 mod state;
@@ -125,17 +126,11 @@ pub mod why;
 pub(crate) use abilities::input as ability_input;
 pub use arsenal::{droid_suited, item_suited, vehicle_bonus};
 pub use avoid::ROUND_MAX;
-pub use behave::think;
-/// The bot brain as it stands at the bot rework's stage 0, the entry point
-/// for proxies and for every AI unit of a space round (`Sim::step`). Today
-/// it is [`think`] itself. Contract for the rework's later stages: they build
-/// the new brain beside it and do not change what this runs for proxies or
-/// in space rounds without a declared, measured hash move; a shared leaf they
-/// need to change is forked into this path first. Being the same function,
-/// it changes with any edit to the brain: the tripwire for proxies is the
-/// pin `an_all_proxy_skirmish_keeps_its_hash` (`ai::proxy`), for space the
-/// space scenario goldens.
-pub use behave::think as legacy_think;
+pub use brain::legacy_think;
+#[cfg(feature = "brain-shadow")]
+pub(crate) use brain::shadow::verify as verify_shadow;
+pub use brain::think;
+pub(crate) use brain::UnitRules;
 pub use command::CmdState;
 pub use draw::{
     route_rand, stance_hold, unit_dir, unit_rand, unit_unit, SALT_BURST, SALT_CHARGE, SALT_DODGE,
@@ -177,7 +172,7 @@ pub const ARRIVED_SLACK: f32 = 1.5;
 /// every frame near the human and every 3rd or 5th away, re-soldier-ai 1.3).
 pub const HEADING_PERIOD: u64 = 3;
 /// A walk that has failed this many progress windows in a row gives its
-/// goal up (`behave::recover`): the post, for the commander to draw another,
+/// goal up (`brain::behaviours::recover`): the post, for the commander to draw another,
 /// or the boarding claim.
 pub const GIVE_UP_AFTER: u8 = 6;
 

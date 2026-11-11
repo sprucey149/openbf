@@ -1235,7 +1235,12 @@ pub fn seat_gun(
             {
                 Some(i) => i,
                 None => match crate::roster::weapon_from_db(db, &w.class) {
-                    Ok(wc) => sim.add_weapon_class(wc),
+                    Ok(mut wc) => {
+                        if !sim.space_round() {
+                            crate::normalize::vehicles::ground_gun(db, &mut wc);
+                        }
+                        sim.add_weapon_class(wc)
+                    }
                     Err(e) => {
                         eprintln!("seat weapon {}: {e:#}", w.class);
                         return None;

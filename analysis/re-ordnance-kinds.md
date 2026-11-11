@@ -393,8 +393,11 @@ the award. That is something I want different." Code: `core::sim::weak_lock`.
   `Event::CriticalHit` a rocket launcher raises), locked or not (`award-weapons.md` §5).
 - **Who.** A human's round. A bot never locks a vehicle and gets no factor over 1 on a ground round at any tier
   (`Sim::hit_scale`, unchanged). Space rounds, flyer and seat locks keep the centre (`lock_on.rs` is unchanged).
-- **The result in play.** Rockets to destroy from 25-30 m at the vehicles' own health (pinned by
-  `rockets_to_destroy_a_vehicle_locked_and_aimed`, `game/tests/suite/rocket_weakspot.rs`). A rocket on a lock whose
+- **Before the ground vehicle pass.** These were the rockets to destroy from 25–30 m
+  at the vehicles' pre-pass health. The
+  [ground vehicle pass](vehicle-normalization.md) gives both launchers the same damage
+  curve and changes the BF1 health values. The current fixture is
+  `rockets_to_destroy_a_vehicle_locked_and_aimed` in `game/tests/suite/rocket_weakspot.rs`. A rocket on a lock whose
   box is on the part and an unlocked rocket aimed at the part deal the same factor. Locked counts trigger pulls;
   aimed counts rounds that struck the part. They agree but against the Alliance on BF1 maps, whose torpedo launcher
   fires two rounds a pull (the first steers to the part; the second, unguided, often meets the hull beside it):
@@ -417,13 +420,13 @@ the award. That is something I want different." Code: `core::sim::weak_lock`.
 
   A rifle bolt on the part (`a_rifle_bolt_on_the_part_deals_the_vehicles_factor`, BF2 Geonosis and Hoth): 20 on the
   Republic fighter tank's part against 10 on its hull, 16 against 8 on the hailfire, 32 against 8 on the spider
-  walker and on the AT-AT. A BF1 rifle takes nothing off a BF1 vehicle today, so it has nothing to multiply there
-  until the vehicle pass. BF1 maps keep BF1's health and torpedo until the vehicle pass.
+  walker and on the AT-AT. BF1 rifle bolts dealt zero damage to vehicle hulls in
+  this baseline. The vehicle pass gives them a 0.1 vehicle scale.
 - **Hits to kill under the rule** (`weak_spot_kill_table`, rerun 2026-11-10 with the per-class factor; one
   unlocked round per line, a human's on the part against a bot's on the same line, which is plain, to part the
   direct hit from the blast; the blast added nothing to any hull). BF2 maps use BF2's rocket (it grows from 500 to
-  1500 over its first half second, so about 1030 at 9-10 m and 1430 at 19-20 m); BF1 maps use BF1's torpedo (600 at
-  any range) until the vehicle pass. The range is the line's length to the struck point; where no line at the part
+  1500 over its first half second, so about 1030 at 9-10 m and 1430 at 19-20 m). The BF1
+  rows below are the pre-pass 600-damage torpedo. The range is the line's length to the struck point; where no line at the part
   was found that close, the nearest is given.
 
   | Game | Vehicle | Health | Factor | Body ~10 m | Body 20 m+ | Weak spot ~10 m | Weak spot 20 m+ |
@@ -482,6 +485,24 @@ BF2's centre lock met a weak prim by chance: always on the one-man AT-ST (its hi
 15 on the hailfire, almost never elsewhere.
 
 ## 6. The shell and the mortar launcher [V][O] (H3 §3-4)
+
+**Port checkpoint, November 11.** The original BF1 shell constructor sets a
+3 s lifetime (`FUN_0027e598`, B1:203546–203562). The stock Imperial and CIS tap
+shells omit that property, so the loader now supplies the default for those
+two classes. Authored and inherited values take precedence. In headless FIRE
+fixtures both taps expire at tick 91 instead of tick 61. Both still hit a
+nearby floor at tick 14 and launch at 40 m/s with Gravity 1.75. The BF1 held
+charge uses its separate sticky stage with a 0.5 s fuse. The BF2 tap uses the
+8 s authored lifetime. These tests use four retained source class profiles.
+
+**Original-game check, November 11.** The stock Imperial pilot on Hoth
+and CIS pilot on Naboo each fired two high taps in ordinary play. Passive
+RAM samples identify the fresh shell by its class and firing actor. All
+four had 3 s of life from the constructor and reached the expiry flag in
+flight. Launch speed reconstructed from the first observed velocity and
+gravity was 40 m/s. The low-angle controls left the active list with
+2.266 and 2.433 s remaining. Held releases selected each pilot's separate
+sticky class with its initial 0.5 s fuse.
 
 - Shell update (B1 `FUN_0027e478` B1:203497-203542, B2 `FUN_003202d0`): v.y += Gravity x −9.8 x dt above water, then
   the bullet core (re-grenades §4.1). Flag 0 (§2.1) -> full-mask sweep every frame. Impact handler = the bullet's
@@ -665,13 +686,11 @@ flamethrowers.
   `com_weap_veh_fly_beam_ord` (the LAAT/i and Rebel gunship ball turrets `rep/all_weap_fly_gunship_ball_ord` and
   the droid gunship's `cis_weap_fly_droidgunship_beam_ord`, all fired on ground maps; the space turret's
   `tur_weap_spa_beam_ord`). BF2's LAAT wing guns and the chaingun tracers are beams without it.
-- One game, INTERIM: no BF1 beam sets PassThrough, so the BF1 versions of the same vehicles still stop at their
-  first hit: the fighter tank lasers `rep/imp_weap_hover_fightertank_laser_ord`, the spider walker's
-  `cis_weap_walk_spider_laser_ord` and the LAAT/i ball `rep_weap_fly_gunship_ball_ord` (BF1's MAF laser, hovernaut
-  cannon and LAAT wing guns have no piercing BF2 counterpart). On a BF2 map both sides fire BF2's classes, so a
-  fighter tank's gunner beam passes through there and not on a BF1 map. replace: the vehicle pass sets pierce on
-  BF1's counterparts together with their damage (`game::normalize`); measure: vehicle kills a minute on BF2 maps
-  against the pre-change baseline.
+- The [ground vehicle pass](vehicle-normalization.md) adds PassThrough to the BF1
+  fighter tank lasers `rep/imp_weap_hover_fightertank_laser_ord` and the spider
+  walker beam `cis_weap_walk_spider_laser_ord`. The BF1 LAAT/i ball
+  `rep_weap_fly_gunship_ball_ord` keeps its first-hit behavior.
+  replace: a ground-map flyer pass. measure: vehicle kills per minute in live rounds.
 - B1's bullet render `FUN_00277130` (B1:198108) draws the class model (GeometryName, the bullet setter's +0x84) along the
   velocity for any bullet-family round: the jet trooper's rocket is drawn as `com_weap_missile`.
 

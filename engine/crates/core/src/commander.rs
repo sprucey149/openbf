@@ -523,7 +523,7 @@ pub fn plan(sim: &mut Sim, team: u8) {
             let u = &sim.units[i];
             (u.ai.target.is_some(), u.ai.unreachable_dwell)
         };
-        // Card MOVR: the post this unit's walk gave up (`behave::recover`),
+        // Card MOVR: the post this unit's walk gave up (the recovery ladder),
         // read once.
         let gave_up = std::mem::take(&mut sim.units[i].ai.mv.give_up).checked_sub(1);
         gens[i] = gen;

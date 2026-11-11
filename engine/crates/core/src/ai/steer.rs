@@ -693,7 +693,7 @@ mod tests {
             side |= u.ai.slide != 0;
             let v = u.soldier.vel;
             held += u32::from(u.soldier.pos.z > -14.0 && v.x.hypot(v.z) < 1.0 && t > 30);
-            let wp = u.ai.route.as_ref().expect("on its leg").waypoint;
+            let wp = u.ai.route().as_ref().expect("on its leg").waypoint;
             let want = Vec3::new(wp.x - u.soldier.pos.x, 0.0, wp.z - u.soldier.pos.z).normalize();
             let cap = u.capsule().stepped();
             let stop = stop_ahead(&sim, u, &cap, want);
@@ -729,7 +729,7 @@ mod tests {
         for _ in 0..200 {
             sim.step(&[PadState::default()]);
             let u = sim.unit(h).expect("alive");
-            let wp = u.ai.route.as_ref().expect("on its leg").waypoint;
+            let wp = u.ai.route().as_ref().expect("on its leg").waypoint;
             let want = Vec3::new(wp.x - u.soldier.pos.x, 0.0, wp.z - u.soldier.pos.z).normalize();
             if steep_ahead(&sim, u, want).is_some() {
                 let cap = u.capsule().stepped();
@@ -1021,7 +1021,7 @@ mod tests {
     /// NOT covered (measured, `artifacts/lead_tmp/bowl/README.md`): a walk
     /// shallower than about 30 degrees looks at the hull's first metre, which
     /// is a kerb's drop, and steps over; the level test then calls the bot
-    /// lost and it walks back (`behave`'s test). Looking across the barrier as
+    /// lost and it walks back (the recovery test). Looking across the barrier as
     /// well closed that and cost BF2 GEO1, MUS1 and DEA1 rounds and kills.
     #[test]
     fn a_rim_rail_holds_an_oblique_walk_and_the_slide_along_it() {
@@ -1066,7 +1066,7 @@ mod tests {
             sim.step(&[PadState::default()]);
             if sim
                 .unit(h)
-                .and_then(|u| u.ai.route)
+                .and_then(|u| u.ai.route())
                 .is_some_and(|r| r.sidestep != 0)
             {
                 armed = true;
@@ -1075,7 +1075,7 @@ mod tests {
         }
         assert!(armed, "the stuck window never fired");
         let u = sim.unit(h).expect("alive");
-        let r = u.ai.route.expect("route");
+        let r = u.ai.route().expect("route");
         assert_ne!(u.ai.slide, 0, "a side is set for the next pick");
         assert_eq!(
             u.ai.slide,

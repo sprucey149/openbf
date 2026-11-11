@@ -225,6 +225,20 @@ pub(super) fn fired_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
     if ord.kind == OrdKind::Shell {
         // Only shells have this fall (re-ordnance-kinds §6).
         ord.gravity = db.prop_f32(ord_name, "Gravity").unwrap_or(0.0);
+        // The two stock BF1 pilot tap shells omit LifeSpan. The native
+        // constructor supplies 3 s (FUN_0027e598, B1:203546–203562).
+        if !db.is_bf2()
+            && ord.knots.is_empty()
+            && [
+                "imp_weap_inf_mortar_launcher_ord1",
+                "cis_weap_inf_mortar_launcher_ord1",
+            ]
+            .iter()
+            .any(|name| ord_name.eq_ignore_ascii_case(name))
+            && db.prop(ord_name, "LifeSpan").is_none()
+        {
+            ord.life_span = 3.0;
+        }
     }
     // Base ordnance expiry, shared by every family (B1 FUN_00272e98,
     // B1:195363–195367; B2 FUN_0030f988, B2:301804–301833).

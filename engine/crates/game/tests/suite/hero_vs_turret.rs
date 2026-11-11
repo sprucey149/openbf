@@ -6,8 +6,10 @@
 //! through the pad, the reticle on the turret.
 
 use super::auto_turret_damage::{lay_reticle, scene_on, Scene};
+use super::turret_damage::spawn;
 use core::autoturret::TurretEnd;
 use core::sim::{buttons, Event, PadState};
+use core::unit::Controller;
 
 const MAP: &str = "bf2_cor1";
 
@@ -134,6 +136,62 @@ fn a_thrown_saber_turns_back_off_the_turret_and_hurts_it() {
         u.held.iter().all(|h| h.state.saber_flight.is_none()),
         "home"
     );
+}
+
+#[test]
+fn mauls_thrown_saber_can_cut_a_soldier_again_after_the_turret_turns_it_back() {
+    let Some(mut s) = cis_hero("cis_hero_darthmaul", 10.0) else {
+        return;
+    };
+    select(&mut s, |c| c.saber_throw.is_some());
+    let at = s.at.lerp(s.centre.with_y(s.at.y), 0.5);
+    let victim = spawn(&mut s.w, "rep_inf_ep3_rifleman", 1, at, Controller::Idle);
+    let soldier = s.w.sim.unit_mut(victim).unwrap();
+    soldier.health.max = 10_000.0;
+    soldier.health.cur = soldier.health.max;
+    let mut hp = soldier.health.cur;
+    let mut hits = [0; 2];
+    let mut launches = 0;
+    let mut stopped = false;
+    for t in 0..(3 * core::TICK_HZ) {
+        lay_reticle(&mut s.w, s.me, s.centre);
+        s.w.sim
+            .step(&pad(if t < 4 { buttons::SECONDARY_FIRE } else { 0 }));
+        let after = s.w.sim.unit(victim).unwrap().health.cur;
+        if after < hp {
+            hits[usize::from(stopped)] += 1;
+        }
+        hp = after;
+        if s.w.sim.events.iter().any(|e| {
+            matches!(e, Event::TurretHit { shooter, turret, .. } if *shooter == s.me && *turret == s.id)
+        }) {
+            assert!(!stopped, "the turret takes only the outgoing contact");
+            let flight = s.w.sim.unit(s.me).unwrap().held.iter()
+                .find_map(|h| h.state.saber_flight.as_ref()).unwrap();
+            assert!(flight.returning, "the turret turns the blade back");
+            stopped = true;
+        }
+        launches +=
+            s.w.sim
+                .events
+                .iter()
+                .filter(|e| {
+                    matches!(e, Event::Ability { unit, weapon_class, .. } if *unit == s.me
+                && s.w.sim.weapon_classes[*weapon_class as usize].saber_throw.is_some())
+                })
+                .count();
+    }
+    assert!(stopped, "the throw reached the turret");
+    assert_eq!(launches, 1);
+    assert_eq!(hits, [1, 1]);
+    assert!(s
+        .w
+        .sim
+        .unit(s.me)
+        .unwrap()
+        .held
+        .iter()
+        .all(|h| h.state.saber_flight.is_none()));
 }
 
 #[test]

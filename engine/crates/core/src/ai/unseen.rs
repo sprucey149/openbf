@@ -56,7 +56,7 @@ const BODY: [f32; 3] = [0.3, 1.0, 1.7];
 pub(super) fn spot(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<Vec3> {
     let u = sim.unit(me).filter(|u| u.mount.is_none())?;
     let g = sim.nav.as_ref()?;
-    let r = st.route?;
+    let r = st.route()?;
     let pos = u.soldier.pos;
     if seen_by_human(sim, pos) {
         return None;
@@ -154,7 +154,7 @@ pub fn seen_by_human(sim: &Sim, feet: Vec3) -> bool {
 /// the next tick. Its failed-link memory (card ARCM) is kept, so the link
 /// stays closed to it.
 pub(super) fn reset(st: &mut AiState, tick: u64) {
-    st.route = None;
+    super::route::clear(st);
     st.stall = None;
     st.lost = None;
     st.mv = MoverState {

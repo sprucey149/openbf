@@ -135,7 +135,7 @@ fn kas1_carries_its_wmap_mask_and_a_ripple_reaches_the_frame() {
     };
     let m: manifest::Manifest = ron::from_str(&text).unwrap();
     let water = m.water.as_ref().unwrap();
-    let wet = water.wet.as_ref().expect("a bake with the WMAP mask");
+    let wet = water.gameplay_mask().expect("a bake with a water mask");
     let mask =
         core::water::WetMask::new(wet.grid, wet.cell_size, wet.half_extent, &wet.cells()).unwrap();
     assert_eq!(

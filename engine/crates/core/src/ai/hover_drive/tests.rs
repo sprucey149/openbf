@@ -282,7 +282,7 @@ fn the_segment_to_a_corner_is_kept_while_the_hover_bobs() {
     route.detour[0] = corner;
     route.detour_len = 1;
     let mut st = AiState {
-        route: Some(route),
+        nav: crate::ai::route::NavState::for_fixture(Some(route)),
         target_cp: Some(0),
         ..AiState::default()
     };

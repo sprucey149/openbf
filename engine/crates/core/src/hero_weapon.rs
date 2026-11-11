@@ -383,9 +383,7 @@ impl SaberFlight {
     /// [ours] (the maintainer, 2026-10-30): a contact ends the outbound leg
     /// at the blade's place in this tick. The clock and the leg's seconds
     /// shrink as the PS2's own cut does (FUN_0031d658), so the return scales
-    /// by the seconds really flown and always ends. The hit cache stays: what
-    /// stopped the blade is not struck again as the blade turns back, though
-    /// the rest of the return is a fresh leg for everyone else.
+    /// by the seconds really flown and always ends.
     pub fn turn_back(&mut self, pos: Vec3, angle: f32, unspent_of_tick: f32) {
         let unspent = self.remaining.max(0.0) + unspent_of_tick.max(0.0);
         self.outbound_seconds = (self.outbound_seconds - unspent).max(0.0);

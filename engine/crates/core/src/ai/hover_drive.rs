@@ -50,8 +50,7 @@
 //! (speed mode 3's senders are [H], §6).
 
 use super::gunner::Look;
-use super::mover::stuck_window;
-use super::route::{advance_route, sub_point};
+use super::route::{advance_route, progress, sub_point};
 use super::state::{AiState, HoverOut, NavTick, RideState, SteerPick};
 use super::{DRIVE_STUCK_BAIL, HOVER_ARRIVE_FACTOR};
 use crate::collision::{HullFilter, Layers};
@@ -410,8 +409,8 @@ pub(super) fn drive(
     advance_route(sim, me, st, pos, arrive, &mut nt);
 
     let post = st.target_cp.and_then(|i| sim.cps.get(i as usize));
-    let last_leg = st.route.is_none_or(|r| r.is_last());
-    let node = match (st.route, post) {
+    let last_leg = st.route().is_none_or(|r| r.is_last());
+    let node = match (st.route(), post) {
         (Some(r), _) => Some(sub_point(&r, pos)),
         (None, Some(cp)) => Some(cp.def.pos),
         (None, None) => None,
@@ -422,11 +421,11 @@ pub(super) fn drive(
     // On a graph, a driver with no route has nowhere its vehicle can go (the
     // post is off its type's graph): straight at the post it would drive
     // into a wall with no stuck window to notice (BF2 POL1, MEDIUM).
-    let bail = st.route.is_some_and(|r| r.stuck_run >= DRIVE_STUCK_BAIL)
-        || (sim.nav.is_some() && st.route.is_none());
+    let bail = st.route().is_some_and(|r| r.stuck_run >= DRIVE_STUCK_BAIL)
+        || (sim.nav.is_some() && st.route().is_none());
     let Some(node) = node.filter(|_| !at_post && !bail) else {
         super::ride::request_exit(st);
-        nt.stuck_run = st.route.map_or(0, |r| r.stuck_run);
+        nt.stuck_run = st.route().map_or(0, |r| r.stuck_run);
         return (pad, nt);
     };
 
@@ -473,7 +472,7 @@ pub(super) fn drive(
     };
     let order = Order {
         goal: Some(goal),
-        path: st.route.is_some(),
+        path: st.route().is_some(),
         bit4: false,
         stand: false,
         probe,
@@ -510,7 +509,7 @@ pub(super) fn drive(
     st.steer = SteerPick::Fwd;
     super::gunner::aim(sim, me, st, &mut pad, Look::Steering, None);
     if ai.state == 0 {
-        stuck_window(
+        progress(
             sim,
             me,
             st,

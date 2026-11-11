@@ -22,6 +22,7 @@ fn droideka_gunner_uses_the_class_pitch_rate_and_soldiers_keep_theirs() {
             s.unit_mut(h).unwrap().soldier.pitch = pitch;
             let u = s.unit(h).unwrap();
             let tk = Tick {
+                rules: crate::ai::UnitRules::for_unit(&s, u),
                 me: h,
                 u,
                 eye: u.ai_eye(),

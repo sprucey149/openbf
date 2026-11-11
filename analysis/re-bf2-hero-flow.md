@@ -258,6 +258,26 @@ Obi-Wan's `0xa9eb1581` is a positive control in that same index
 is invented. This is a scoped metadata observation, not a claim that the
 property definitions or identifiers are absent from the executable.
 
+The original BF2 Mos Eisley sound bank also defines
+`hero_mundi_AcquiredTarget` four times. Each points to the same five
+`global_vo_slow` segments: `e06ef513`, `e56efcf2`, `e66efe85`,
+`e36ef9cc` and `e46efb5f`. The PS2 disc's GLOBAL and TAT stream
+indexes contain 6,523 and 20 records respectively, with none of the
+five IDs. The checked English, German and French PC GLOBAL indexes and
+the Xbox disc's GLOBAL and TAT indexes also lack all five. Xbox has 6,074
+GLOBAL and 20 TAT records. In each GLOBAL index, the Anakin call
+`c02b98f3` and Obi-Wan spawn `a9eb1581` both resolve.
+
+BF2 `FUN_005519c8` B2:685320–685390 selects the entry and can send
+it to the stream queue. The actual segment lookup is later, when
+`FUN_00551d08` B2:685446–685449 calls `FUN_00551128`
+B2:684995–685034 to start it. The current baked Mos Eisley port accepts
+Mundi's call at five metres, then finds no playable take, while all five
+Anakin controls decode. The November 5 windowed exit also records a Mundi
+playback attempt without a mixer handoff. The exact archived package's
+audio was outside this bake comparison. Relative voice loudness
+against the original remains open.
+
 [V, bounded content gap] Tantive's Leia hurt/death properties both name
 sample IDs `0x88f8eee4`, `0x89f8f077`, `0x06fbf3d5`. The original TAN bank's
 714 sample records contain none of those IDs, although they do contain

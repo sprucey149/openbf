@@ -98,5 +98,33 @@ BF1 `FUN_00388ee8` / BF2 `FUN_0046e378` (records `FUN_0046e7e0`), mesh BF2 `FUN_
 - Pass 1: the shared `specular` table, `s = 16 / 255`, `t = 0.5 + 0.5 d` (`render::spec_texcoord`), in `SpecularColor` 216 240 255, Cs + Cd.
 - No ripple, flash or pulse on a hit, and the look reads no charge: only the sound's gain does. A hit's own impact effect is the existing `Surface::Shield` path, unchanged.
 - [H] and open: VU1 0x2da-0x2fd reads literally as 255 + c(b - 255), a warm rim; the BF1 frame `bf1_yav1_cp2_viaduct_viaduct_spawn` measures (33, 57, 66) against c.b's (36, 60, 72), so the port takes c.b. Whether back faces draw is unread: OURS draws one layer (the half toward the camera, or ahead of it from inside), which that frame's falloff fits. BF2's colours are predicted from the same code, not measured on a clean BF2 frame.
-- Rim against that frame (issue #85, 2026-11-01; its state's RAM has the shield on): fitted to the same size, 33.3 px at 640x480, the port's peak adds 30 50 60 against the frame's 29 50 59, and green through the fade from 0.94 to 0.70 of the radius is within 4 levels (`the_rim_matches_the_ps2_frame`). The outer edge falls in about 2 px on both. So the crisper edge the issue described is no longer there and nothing was retuned. It stays one BF1 frame: no existing frame has a BF2 shield near enough to measure.
+- Rim against that frame (issue #85, 2026-11-01; its state's RAM has the shield on): fitted to the same size, 33.3 px at 640x480, the port's peak adds 30 50 60 against the frame's 29 50 59, and the nine green samples through the fade from 0.94 to 0.70 of the radius differ by at most 4.5 code values, within the fixture's tolerance of seven (`the_rim_matches_the_ps2_frame`). The outer edge falls in about 2 px in both Yavin frames. The Docks comparison below isolates a brighter stock upper arc. The BF2 witness below also shows a bright upper arc.
 - No Shield record exists on BF2's Polis Massa, Mygeeto or Hoth maps: a scan of every LVL's `fx__` finds three, `fambaa_shield` and the two `DroidekaShield`.
+
+### Stock shield footage, November 11
+
+Two paired raised and lowered shots from BF1 Kashyyyk Docks keep the
+player droideka's feet and camera in the same pose within each view.
+The raised flag is set, with 450 HP and about 2,925 shield points. A
+scan of the upper-right arc shows a broad increase in brightness inside
+the silhouette. The off frame removes most of the water and background
+colour from that scan.
+
+The existing GPU fixture for the original Yavin Temple frame passed again.
+The peak RGB addition was 29.8, 49.6 and 59.6 against 28.8, 49.9 and 58.6,
+and the nine green samples differed by at most 4.5 code values. Two Docks port captures use the original eye, yaw, pitch, body location
+and 4:3 framing. The port dome's top aligns within about a pixel in the
+first view. On-minus-off green addition over the upper centre is 124 and
+143 code values in the two original views, against 53 in each port view.
+The corresponding original lowered-frame differences have medians of
+0 and −1. The stock bright band runs across the top while the port has a
+smaller left-side glint. The renderer uses the original feet height for
+the comparison because the port sim settles 0.25 m lower at those points.
+A stock Utapau battle shows a raised BF2 dome at close range. The
+follow-up camera sample was 10.74 m from the same shielded bot, with
+2,750 shield points. A placed port render near that pose has a dimmer
+upper arc and a brighter lower glint. The original foreground soldier
+covers the lower part and there is no original lowered control. A
+scratch check using the unmirrored specular light leaves the measured
+upper green median unchanged in Docks and Utapau. The cause of the
+light difference and a matched BF2 on/off pair remain open.

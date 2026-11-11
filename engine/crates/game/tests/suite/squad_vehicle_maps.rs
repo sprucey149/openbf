@@ -1,4 +1,5 @@
 //! Real baked-map and vehicle-class coverage for issues #4 and #7.
+use core::commander::Objective;
 use core::sim::{buttons, Event, PadState, Sim};
 use core::squad::CommandKind;
 use core::unit::{Controller, UnitHandle};
@@ -457,7 +458,16 @@ fn waiting(map: &str, kind: VehicleKind, distance: f32) -> (Scene, UnitHandle) {
         })
         .map(|(i, _)| i as u32)
         .unwrap();
-    s.walk.sim.unit_mut(pilot).unwrap().ai.target_cp = Some(target);
+    if map == "bf2_geo1" {
+        // The AT-TE spawns after the first plan, outside the infantry post
+        // graph. An attack assignment lets it route on the walker graph.
+        let plan = &mut s.walk.sim.commander[0];
+        let slots = plan.assignment.len().max(pilot.index as usize + 1);
+        plan.assignment.resize(slots, None);
+        plan.assignment[pilot.index as usize] = Some(Objective::Attack(target));
+    } else {
+        s.walk.sim.unit_mut(pilot).unwrap().ai.target_cp = Some(target);
+    }
     s.walk.sim.unit_mut(pilot).unwrap().ai.next_think = s.walk.sim.tick + 9;
     for _ in 0..12 {
         s.step(0);
@@ -467,6 +477,10 @@ fn waiting(map: &str, kind: VehicleKind, distance: f32) -> (Scene, UnitHandle) {
         .mount
         .is_some_and(|m| m.vehicle == s.vehicle && m.seat == 0));
     assert!(u.ai.ride.unwrap().pickup.is_some_and(|w| !w.complete));
+    if map == "bf2_geo1" {
+        assert_eq!(u.ai.target_cp, Some(target));
+        assert!(u.ai.route().is_some(), "{map}: departure route");
+    }
     assert_eq!(locomotion(&s.walk.sim, pilot), 0.0);
     (s, pilot)
 }

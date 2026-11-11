@@ -65,6 +65,28 @@ pub fn queries() -> u32 {
     QUERIES.with(Cell::get)
 }
 
+#[cfg(feature = "brain-shadow")]
+pub(crate) fn preserve(f: impl FnOnce()) {
+    struct Restore {
+        rays: RayCost,
+        last_cast: u32,
+    }
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            QUERIES.with(|c| c.set(self.rays.queries));
+            MESH_CASTS.with(|c| c.set(self.rays.mesh_casts));
+            TRIANGLES.with(|c| c.set(self.rays.triangles));
+            LAST_CAST.with(|c| c.set(self.last_cast));
+            WORST.with(|c| c.set(self.rays.worst));
+        }
+    }
+    let _restore = Restore {
+        rays: take(),
+        last_cast: LAST_CAST.with(|c| c.replace(0)),
+    };
+    f();
+}
+
 #[inline]
 pub(super) fn query() {
     QUERIES.with(|c| c.set(c.get() + 1));

@@ -427,22 +427,23 @@ fn cwait_extension_preserves_progress_aim_rng_events_and_bailout() {
             zoom: None,
         });
         let mut st = s.unit(pilot).unwrap().ai;
-        st.route = Some(crate::ai::state::Route {
+        st.install_route_for_fixture(Some(crate::ai::state::Route {
             waypoint: Vec3::new(0.0, 0.0, -300.0),
             ref_dist: 300.0,
             stuck_ticks: 59,
             stuck_run: 100,
             sidestep: 7,
             ..Default::default()
-        });
-        let route = st.route;
+        }));
+        let route = st.route();
         let follower = s.vehicle(vh).unwrap().hover.ai;
         let rng = s.rng.state();
         let events = s.events.len();
         let m = s.unit(pilot).unwrap().mount.unwrap();
         let (pad, nt) = drive(&s, pilot, m, &mut st, NavTick::default(), true);
         assert_eq!(
-            st.route, route,
+            st.route(),
+            route,
             "claim hold cannot spend progress/stuck clocks"
         );
         assert_eq!(nt.stuck_run, 0);

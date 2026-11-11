@@ -512,6 +512,10 @@ struct Stand {
     weak: bool,
     /// A rocket left.
     fired: bool,
+    /// Rounds fired during the trigger press and its salvo.
+    rounds: usize,
+    /// Vehicle health when the trigger was pressed.
+    before: f32,
     /// The rocket left steering to a part.
     part: bool,
     /// The vehicle's drop.
@@ -543,6 +547,7 @@ fn lock_and_fire(
     vh: VehicleHandle,
     p: Vec3,
     centre_only: bool,
+    full_health: bool,
 ) -> Stand {
     use core::sim::{AimTarget, LockTarget};
     let mut out = Stand::default();
@@ -578,7 +583,12 @@ fn lock_and_fire(
     }
     let mut feed =
         game::event_feed::EventFeed::new(game::event_feed::Texts::builtin(), ["rep", "cis"], &[]);
-    let before = w.sim.vehicle(vh).unwrap().health.cur;
+    if full_health {
+        // A rejected stand can leave a round in flight during the next
+        // lock dwell. Start the kill count at full health on the press.
+        heal(w, vh);
+    }
+    out.before = w.sim.vehicle(vh).unwrap().health.cur;
     let fire = PadState {
         buttons: core::sim::buttons::FIRE,
         ..PadState::default()
@@ -593,6 +603,12 @@ fn lock_and_fire(
         let press = !flown && k % 2 == 0;
         w.sim
             .step(&[if press { fire } else { PadState::default() }]);
+        out.rounds += w
+            .sim
+            .events
+            .iter()
+            .filter(|event| matches!(event, Event::Shot { unit, .. } if *unit == me))
+            .count();
         look(w, me, p, at);
         let mine = w
             .sim
@@ -623,7 +639,7 @@ fn lock_and_fire(
             break;
         }
     }
-    out.drop = before - w.sim.vehicle(vh).map_or(0.0, |v| v.health.cur.max(0.0));
+    out.drop = out.before - w.sim.vehicle(vh).map_or(0.0, |v| v.health.cur.max(0.0));
     out
 }
 
@@ -708,7 +724,7 @@ fn survey(map: &str, mission: &str, dirs: usize, dists: &[f32]) -> Option<Vec<(S
                     continue;
                 }
                 s.stands += 1;
-                let r = lock_and_fire(&mut w, me, vh, p, false);
+                let r = lock_and_fire(&mut w, me, vh, p, false, false);
                 heal(&mut w, vh);
                 s.locked += usize::from(r.locked);
                 if !r.fired {
@@ -728,7 +744,7 @@ fn survey(map: &str, mission: &str, dirs: usize, dists: &[f32]) -> Option<Vec<(S
                         s.lost += 1;
                     }
                     // The same stand with BF2's centre steering.
-                    let c = lock_and_fire(&mut w, me, vh, p, true);
+                    let c = lock_and_fire(&mut w, me, vh, p, true, false);
                     heal(&mut w, vh);
                     if c.fired && c.drop > 0.0 {
                         s.centre += 1;
@@ -932,14 +948,18 @@ fn rockets_to_kill(map: &str, mission: &str, class: &str) -> (Option<usize>, Opt
                     if (p.y - floor).abs() > 4.0 {
                         continue;
                     }
-                    let r = lock_and_fire(&mut w, me, vh, p, false);
+                    let r = lock_and_fire(&mut w, me, vh, p, false, true);
                     if !(r.part && r.drop > 0.0) {
                         heal(&mut w, vh);
                         continue;
                     }
+                    eprintln!(
+                        "{map} {class}: first locked pull fired {} rounds, took {} from {}",
+                        r.rounds, r.drop, r.before
+                    );
                     let mut n = 1;
                     while !gone(&w) && n < 100 {
-                        let r = lock_and_fire(&mut w, me, vh, p, false);
+                        let r = lock_and_fire(&mut w, me, vh, p, false, false);
                         assert!(r.part && r.drop > 0.0, "{map} {class}: shot {n} {r:?}");
                         n += 1;
                     }
@@ -978,8 +998,8 @@ fn rockets_to_kill(map: &str, mission: &str, class: &str) -> (Option<usize>, Opt
 /// torpedo's waver put beside it is undone and not counted). The two agree
 /// but against the Alliance, whose torpedo launcher fires two a pull: its
 /// first steers to the part, the second flies where the first left (on the
-/// part or the hull beside it). BF1 maps keep BF1's health and torpedo
-/// (600) until the vehicle pass.
+/// part or the hull beside it). Both games' rockets take their damage
+/// from the same age curve.
 #[test]
 fn rockets_to_destroy_a_vehicle_locked_and_aimed() {
     let mut ran = 0;
@@ -994,19 +1014,14 @@ fn rockets_to_destroy_a_vehicle_locked_and_aimed() {
         ("bf2_geo1", "bf2_geo1_con", "cis_walk_spider", 4, 4),
         ("bf2_geo1", "bf2_geo1_con", "rep_walk_atte", 7, 7),
         ("bf2_hot1", "bf2_hot1_con", "imp_walk_atat", 10, 10),
-        // BF1: 600 a torpedo. x2, 1200 on the part: 6600, 5200.
-        ("bf1_nab1", "bf1_nab1_con_cw", "rep_hover_fightertank", 6, 6),
-        ("bf1_geo1", "bf1_geo1_con", "cis_tread_hailfire", 5, 5),
-        // 6000 at x2 by the Alliance: pulls of 2400, 1800, 600; five
-        // torpedoes on the part.
-        ("bf1_hot1", "bf1_hot1_con", "imp_walk_atst_snow", 3, 5),
-        // x4, 2400 on the part: 6000 (the Republic torpedo, which
-        // wavers), 15000; 30000 by the Alliance, 3000 a pull (the second
-        // torpedo on the hull), 13 torpedoes on the part.
-        ("bf1_geo1", "bf1_geo1_con", "cis_walk_spider", 3, 3),
+        ("bf1_nab1", "bf1_nab1_con_cw", "rep_hover_fightertank", 3, 3),
+        ("bf1_geo1", "bf1_geo1_con", "cis_tread_hailfire", 3, 3),
+        ("bf1_hot1", "bf1_hot1_con", "imp_walk_atst_snow", 2, 3),
+        ("bf1_geo1", "bf1_geo1_con", "cis_walk_spider", 4, 4),
         ("bf1_geo1", "bf1_geo1_con", "rep_walk_atte", 7, 7),
-        ("bf1_hot1", "bf1_hot1_con", "imp_walk_atat", 10, 13),
+        ("bf1_hot1", "bf1_hot1_con", "imp_walk_atat", 8, 10),
     ];
+    let mut differences = Vec::new();
     for (map, mission, class, locked, aimed) in cases {
         if !game::assets::baked_root()
             .join(map)
@@ -1018,19 +1033,20 @@ fn rockets_to_destroy_a_vehicle_locked_and_aimed() {
         }
         let (got_locked, got_aimed) = rockets_to_kill(map, mission, class);
         eprintln!("{map} {class}: locked {got_locked:?}, aimed {got_aimed:?}");
-        assert_eq!(got_locked, Some(locked), "{map} {class}: locked");
-        assert_eq!(got_aimed, Some(aimed), "{map} {class}: aimed at the part");
+        if (got_locked, got_aimed) != (Some(locked), Some(aimed)) {
+            differences.push(format!(
+                "{map} {class}: expected {locked}/{aimed}, got {got_locked:?}/{got_aimed:?}"
+            ));
+        }
         ran += 1;
     }
     eprintln!("{ran} of {} vehicles checked", cases.len());
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
 }
 
 /// A human's rifle bolt on a vehicle's weak part deals its class's factor
 /// over the same bolt on the plain hull, and is the critical hit: x2 on a
 /// tank, x4 on an AT-AT and on a spider walker; on the hull it is plain.
-/// BF2 maps only: a BF1 rifle bolt takes nothing off a BF1 AAT today (0 on
-/// the part and the hull), so there is nothing to multiply there until the
-/// vehicle pass gives rifles their share against vehicles.
 #[test]
 fn a_rifle_bolt_on_the_part_deals_the_vehicles_factor() {
     let mut ran = 0;

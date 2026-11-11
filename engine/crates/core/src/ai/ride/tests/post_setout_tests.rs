@@ -239,7 +239,7 @@ fn wgnxt_stop_consumption_and_invalid_transitions() {
             }
             "unroutable" => {
                 s.nav = Some(crate::ai::tests::l_graph());
-                st.route = None;
+                crate::ai::route::clear(&mut st);
                 st.target_cp = Some(1);
             }
             "noncommand" => {

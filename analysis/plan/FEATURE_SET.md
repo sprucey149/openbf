@@ -3,7 +3,7 @@
 Current scope is Instant Action, including flying vehicles, space battles and space maps. Items for other modes, splitscreen
 and LAN are decisions for later work, not current tasks.
 
-### Standing decisions (updated 2026-11-03, supersede older entries below)
+### Standing decisions
 - **Same game on every source.** openbf's gameplay rules are canonical. The original games provide evidence, and this
   document records deliberate differences. Every build plays the same inside the playable bounds for future multiplayer.
   Source editions can change the size and appearance of assets while preserving the simulation's numbers and shapes.
@@ -23,8 +23,14 @@ and LAN are decisions for later work, not current tasks.
   and mirror their right parenthesis: a similar treatment using different source
   glyphs. PC/Xbox builds require no PS2 copy. Battle HUD, spawn, loading and results
   retain their existing fonts, art and metrics.
-- **Grenades.** BF1 maps throw BF1 grenades, by BF1's numbers, with BF2's grenade HUD (`analysis/re-grenades.md`).
-- **Health.** Vehicle and unit health are separate.
+- **Grenades.** BF1 maps keep their grenade types and throwing rules, with BF2's
+  grenade HUD. The [ground vehicle and ordnance rulebook](../vehicle-normalization.md)
+  records the shared damage and armor scales for each affected type.
+- **Health.** Vehicle and unit health are separate. The
+  [soldier rulebook](../gameplay-normalization.md) defines the shared infantry scale.
+  The [vehicle rulebook](../vehicle-normalization.md) defines BF2 numbers for matched
+  ground hulls and guns, family scaling for BF1-only hulls, and the authored differences
+  in projectile motion, kits, and flyer rules.
 - **Droidekas** sprint only as a ball, on the shared bar, and the ball jump spends that bar too.
 
 ### Movement & feel

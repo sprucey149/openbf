@@ -48,8 +48,7 @@
 //! a rider stands after boarding (§10).
 
 use super::gunner::Look;
-use super::mover::stuck_window;
-use super::route::{advance_route, sub_point};
+use super::route::{advance_route, mark_abandoned, progress, set_waypoint, sub_point, Refresh};
 use super::state::{AiState, NavTick, RideState, SteerPick};
 use super::{ARRIVE_MIN_RADIUS, DRIVE_STUCK_BAIL, SIDESTEP_OFFSET};
 use crate::nav;
@@ -267,7 +266,7 @@ pub(super) fn drive(
         let (p2, p3) = sticks(crate::TICK_DT, &Class::of(wp), &body, Some(pos), true, seen);
         st.ride.get_or_insert_default().sticks = Some([p2, p3]);
         st.steer = SteerPick::Idle;
-        nt.stuck_run = st.route.map_or(0, |r| r.stuck_run);
+        nt.stuck_run = st.route().map_or(0, |r| r.stuck_run);
         super::gunner::aim(
             sim,
             me,
@@ -299,19 +298,16 @@ pub(super) fn drive(
     // stuck bail below). The PS2's tauntaun rides end 4.5-41 m from the
     // post, 282-711 m a ride (§13); the drop hub is 62-86 m from it. OURS,
     // PROVISIONAL.
-    let mut dropped =
-        st.route.is_none_or(|r| r.corner().is_none()) && super::ride::at_drop(st, post, pos, reach);
-    if let (true, Some(mut r), Some(cp)) = (dropped && sim.seat_look(me).is_none(), st.route, post)
-    {
+    let mut dropped = st.route().is_none_or(|r| r.corner().is_none())
+        && super::ride::at_drop(st, post, pos, reach);
+    if let (true, Some(_), Some(cp)) = (dropped && sim.seat_look(me).is_none(), st.route(), post) {
         let to = glam::Vec2::new(cp.def.pos.x, cp.def.pos.z);
         if super::route::walk_floor(sim, pos, to).is_some() {
-            r.waypoint = cp.def.pos;
-            r.ref_dist = nav::xz_dist(pos, sub_point(&r, pos));
-            st.route = Some(r);
+            set_waypoint(st, cp.def.pos, Refresh::RefDist(pos));
             dropped = false;
         }
     }
-    let goal = match (st.route, post) {
+    let goal = match (st.route(), post) {
         (Some(r), _) => Some(super::hover_drive::look_ahead(
             Vec3::new(r.from.x, pos.y, r.from.y),
             sub_point(&r, pos),
@@ -323,7 +319,7 @@ pub(super) fn drive(
     };
     // (From the hop to the post's hub on: that hub is often at the post.)
     let final_hop = st
-        .route
+        .route()
         .is_none_or(|r| r.next_hub == r.dest_hub && r.corner().is_none());
     let reached_post = post.is_some_and(|cp| {
         final_hop && (cp.def.capture.contains(pos) || nav::xz_dist(pos, cp.def.pos) <= reach)
@@ -334,8 +330,8 @@ pub(super) fn drive(
         .and_then(|r| r.walker_progress)
         .is_some_and(|(_, t)| t >= DRIVE_STUCK_BAIL);
     let stuck = no_progress
-        || st.route.is_some_and(|r| r.stuck_run >= DRIVE_STUCK_BAIL)
-        || (sim.nav.is_some() && st.route.is_none());
+        || st.route().is_some_and(|r| r.stuck_run >= DRIVE_STUCK_BAIL)
+        || (sim.nav.is_some() && st.route().is_none());
     let seen = st
         .target
         .and_then(|h| perception::contact_of(st, h))
@@ -404,12 +400,10 @@ pub(super) fn drive(
     let Some(gp) = goal.filter(|_| !at_post && !stuck) else {
         super::ride::request_exit(st);
         if no_progress {
-            if let Some(r) = st.route.as_mut() {
-                // Preserve the existing abandoned-vehicle marker in ai_use_pass.
-                r.stuck_run = r.stuck_run.max(DRIVE_STUCK_BAIL);
-            }
+            // Preserve the existing abandoned-vehicle marker in ai_use_pass.
+            mark_abandoned(st, DRIVE_STUCK_BAIL);
         }
-        nt.stuck_run = st.route.map_or(0, |r| r.stuck_run);
+        nt.stuck_run = st.route().map_or(0, |r| r.stuck_run);
         return (pad, nt);
     };
 
@@ -418,7 +412,7 @@ pub(super) fn drive(
     let gp = sim.ground_traffic_goal(m.vehicle, gp);
     let mut to = Vec3::new(gp.x - pos.x, 0.0, gp.z - pos.z);
     // The contact side-step offsets the target as it does on foot.
-    if let Some(r) = st.route.filter(|r| r.sidestep.abs() > 1) {
+    if let Some(r) = st.route().filter(|r| r.sidestep.abs() > 1) {
         let d = to.normalize_or_zero();
         to += Vec3::new(-d.z, 0.0, d.x) * (f32::from(r.sidestep.signum()) * SIDESTEP_OFFSET);
     }
@@ -432,7 +426,7 @@ pub(super) fn drive(
     st.steer = SteerPick::Fwd;
     super::gunner::aim(sim, me, st, &mut pad, look, None);
     walker_progress(st, pos, p2 != 0.0);
-    stuck_window(sim, me, st, pos, p2 != 0.0, false, &mut nt);
+    progress(sim, me, st, pos, p2 != 0.0, false, &mut nt);
     (pad, nt)
 }
 

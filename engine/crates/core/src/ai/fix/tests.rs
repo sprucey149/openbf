@@ -248,3 +248,40 @@ fn engineer_walks_to_portable_turret_and_releases_claim_on_repair_or_expiry() {
         "expired identity is never reused"
     );
 }
+
+#[test]
+fn serve_finish_replaces_seat_input() {
+    let (sim, bots, vh) = world(1, 3.0);
+    let me = bots[0];
+    let u = sim.unit(me).unwrap();
+    let mut st = u.ai;
+    st.fix.cur = Some(FixClaim {
+        target: FixTarget::Vehicle(vh),
+        since: 0,
+        best: 400.0,
+        progress_at: 0,
+    });
+    let plan = serve_plan(&sim, u, &st).expect("cutter in reach");
+    assert_eq!(plan.button, buttons::FIRE);
+    let mut pad = PadState {
+        lx: 1,
+        ly: 2,
+        rx: 3,
+        ry: 4,
+        buttons: buttons::ACTION,
+        mx: 5,
+        my: 6,
+        fire_lag: 7,
+        pick: Some(crate::sim::ScreenPick::Post(0)),
+    };
+    crate::ai::brain::finish_pad(&sim, me, &st, Some(plan), &mut pad);
+    assert_eq!(
+        pad,
+        PadState {
+            rx: plan.rx,
+            ry: plan.ry,
+            buttons: buttons::FIRE,
+            ..PadState::default()
+        }
+    );
+}

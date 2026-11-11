@@ -10,13 +10,14 @@ use crate::ai::{arcm, fix, items, jet, why};
 pub use bookkeeping::NavTick;
 
 use super::command::CmdState;
+use super::route::NavState;
 use super::{DETOUR_MAX, ERR_NO_TARGET};
 use crate::unit::UnitHandle;
 use glam::{Vec2, Vec3};
 
 // Only for the field docs below, which link `think` and `stance_hold`.
 #[cfg(doc)]
-use super::{behave::think, draw::stance_hold};
+use super::{draw::stance_hold, think};
 
 /// What the steering picked this tick — ROUND_VERBOSE prints it, and it is
 /// part of the AI hash because it is carried in [`AiState`] between ticks.
@@ -161,7 +162,7 @@ impl Route {
         (at < len.min(DETOUR_MAX)).then(|| self.detour[at])
     }
 
-    fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+    pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         eat(&self.dest_hub.to_le_bytes());
         eat(&self.next_hub.to_le_bytes());
         eat(&self.via_arc.unwrap_or(u16::MAX).to_le_bytes());
@@ -206,7 +207,7 @@ pub struct AiState {
     /// Tick of the last target SWITCH — the 1.5 s minimum retarget interval
     /// of decision 3 measures from here.
     pub last_switch: u64,
-    // ── Behaviour: the order it is under and what it is doing about it (`behave`).
+    // ── Behaviour: the order it is under and what it is doing about it (`brain`).
     pub next_think: u64,
     /// Card HYST: the tick of the last think, and what has happened since
     /// that wakes the bot early (`crate::ai::wake`'s bits). Scheduling, like
@@ -272,9 +273,7 @@ pub struct AiState {
     /// so like `Route::stuck_run` it is sim state and it is hashed.
     pub unreachable_dwell: u16,
     // ── Navigator: the route (`route`).
-    /// The route being walked (Phase A). `None` = no graph, or nothing on it
-    /// to walk to.
-    pub route: Option<Route>,
+    pub(crate) nav: NavState,
     // ── Mover: the steering's memory, the progress books (`mover`, `steer`, `stall`).
     /// What the steering picked last tick (Phase A.1). Carried so
     /// ROUND_VERBOSE can report it for a unit that is stuck right now; hashed
@@ -316,9 +315,10 @@ pub struct AiState {
     pub mv: MoverState,
     /// Jet scheduler and the committed flight; absent for jetless classes.
     pub jet: super::jet::JetState,
-    /// DIAGNOSTIC ONLY (card MOVR) — never hashed, never read by a rule: what
-    /// the bot is doing this tick ([`Behaviour`]).
+    /// The bot's current behaviour. Ground bot droidekas also read it for their form.
     pub behaviour: Behaviour,
+    /// Owner of the ground walk request, for diagnostics.
+    pub step: super::StepKind,
     /// DIAGNOSTIC ONLY (card WHY) — never hashed, never read by a rule: the
     /// last reasons this bot changed behaviour or failed a walk.
     pub why: super::why::WhyLog,
@@ -784,41 +784,40 @@ pub struct LostState {
 }
 
 /// What a bot is DOING this tick (card MOVR; `analysis/bot-design.md` 4.4):
-/// the link of `think`'s chain that runs, named. DIAGNOSTIC — never hashed,
-/// never read by a rule: the sweep's unexplained-standing counter (B9) and
-/// the black box read it. `None` is a bot with nowhere to be and nobody to
-/// fight.
+/// The active label used by the sweep and the black box. Ground bot droidekas
+/// also use it to commit to a fight and change form, so their unit hash includes it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[repr(u8)]
 pub enum Behaviour {
     #[default]
-    None,
+    None = 0,
     /// Walking its route to the order's point.
-    Travel,
+    Travel = 1,
     /// Fighting a seen target inside its weapon's range — standing to shoot
     /// or circling (card FGHT) — or on a held position (card HOLD).
-    Fight,
+    Fight = 2,
     /// Running from a grenade.
-    Evade,
+    Evade = 3,
     /// Arrived at the post it attacks.
-    Capture,
+    Capture = 4,
     /// Arrived at the post, or the spot, it defends.
-    Guard,
+    Guard = 5,
     /// Walking to the vehicle it has claimed.
-    Board,
+    Board = 6,
     /// In a seat (`ride::drive`).
-    Ride,
+    Ride = 7,
     /// Under a squad order (Follow / Hold area).
-    Follow,
+    Follow = 8,
     /// The walk keeps failing, or the bot is off the level: the ladder of
-    /// `behave::recover`, the return walk.
-    Recover,
+    /// the recovery ladder, the return walk.
+    Recover = 9,
     /// Card SNPR: on its sniper's spot, held while its lane is busy
     /// (`super::snipe`; bot design 4.3's Overwatch role).
-    Overwatch,
+    Overwatch = 10,
     /// Card TURR: in a building turret's seat (`man::seated`).
-    Man,
-    Pickup,
+    Man = 11,
+    Pickup = 12,
 }
 
 impl Behaviour {
@@ -873,7 +872,7 @@ pub enum Walk {
     /// kind changes.
     Arrived,
     /// A progress window closed with no progress this tick
-    /// (`mover::stuck_window`).
+    /// (`route::progress`).
     Failed,
 }
 
@@ -893,7 +892,7 @@ pub struct MoverState {
     /// The bot has ARRIVED at `dest` and stands: the stick stays released
     /// until the request changes.
     pub arrived: bool,
-    /// The Recover ladder (`behave::recover`): the walk's failures since it
+    /// The recovery ladder counts the walk's failures since it
     /// last made progress (0 = not recovering).
     pub recover: u8,
     /// The post given up, + 1 (0 = none): the commander draws again without
@@ -1036,18 +1035,18 @@ pub struct WalkAsk {
 
 impl WalkAsk {
     /// A lost bot's return point.
-    pub const RETURN: u8 = 1;
+    pub const RETURN: u8 = super::brain::intent::MoveKind::Return as u8;
     /// Out of a hazard.
-    pub const FLEE: u8 = 2;
+    pub const FLEE: u8 = super::brain::intent::MoveKind::Flee as u8;
     /// A held position's goal.
-    pub const HOLD: u8 = 3;
+    pub const HOLD: u8 = super::brain::intent::MoveKind::Hold as u8;
     /// The vehicle it boards.
-    pub const BOARD: u8 = 4;
+    pub const BOARD: u8 = super::brain::intent::MoveKind::Board as u8;
     /// The route's walk point or corner, an order's point, the post.
-    pub const LEG: u8 = 5;
-    pub const PICKUP: u8 = 6;
+    pub const LEG: u8 = super::brain::intent::MoveKind::Leg as u8;
+    pub const PICKUP: u8 = super::brain::intent::MoveKind::Pickup as u8;
     /// The health droid on the last leg of the route to it.
-    pub const MEND: u8 = 7;
+    pub const MEND: u8 = super::brain::intent::MoveKind::Mend as u8;
 }
 
 /// Card FGHT: what a fighting bot's position ([`HoldState`]) is —

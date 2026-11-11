@@ -1,8 +1,8 @@
 //! An explosion's area damage (card VDTH, `analysis/re-vehicle-death.md`
 //! [O]): the ONE function every blast goes through — destroyed vehicles
 //! ([`Sim::destroy_vehicle`]), exploding bolts and grenades. B1 FUN_002701a0 / B2 FUN_0030c8f8 (§2): gather at most 20
-//! objects in an axis-aligned box, keep those a ray from the blast reaches
-//! past buildings and terrain, and hand each the class's damage times the
+//! objects in reach, keep those a ray from the blast reaches past buildings
+//! and terrain, and hand each the class's damage times the
 //! falloff on its sphere (§3) through the bolt's TakeDamage (§4). A soldier
 //! riding a vehicle takes none (§5). Then card KNOCK's death kick and push
 //! (`analysis/re-knockback.md` [O]): a corpse's body is gathered too, a dead
@@ -77,12 +77,11 @@ impl Sim {
     /// player cannot hurt a human player of that team at all (§4, B1
     /// FUN_001bc190).
     ///
-    /// The gather (§2 step 3): live units, then live vehicles, in slot order —
-    /// the PS2 walks its collision layers' lists [H: the order] — whose box
-    /// (sphere centre ± w, FUN_00168830) overlaps the blast's (pos ± r, r =
-    /// [`ExplosionClass::gather_radius`]); the first [`BLAST_GATHER_MAX`],
-    /// handled from the end of the list. Riders are gathered (they fill the
-    /// cap) and then skipped unless their mount is a building turret (§5).
+    /// The gather (§2 step 3) takes units and corpses, then live vehicles and
+    /// stations, in slot order. Ground uses BF2's inclusive sphere/box
+    /// overlap and horizontal radius before filling the [`BLAST_GATHER_MAX`]
+    /// slots. Space and the separate item pass use axis overlap. Eligible
+    /// riders can fill slots, and only building turret riders take the splash.
     /// LOS (§2 step 4): the ray to the sphere centre — the PS2's target point
     /// for most classes; the soldier's own FUN_0020c680 [H] — must clear the
     /// terrain and the world's ORDNANCE subset (PROVISIONAL: the port's
@@ -121,9 +120,20 @@ impl Sim {
         if r <= 0.0 {
             return;
         }
-        let overlaps = |c: Vec3, w: f32| {
-            let d = (c - pos).abs();
-            d.x <= r + w && d.y <= r + w && d.z <= r + w
+        let ground = !self.space_round();
+        let box_min = pos - Vec3::splat(r);
+        let box_max = pos + Vec3::splat(r);
+        let overlaps = |c: Vec3, w: f32, ground_gather: bool| {
+            let delta = c - pos;
+            let reach = r + w;
+            if ground_gather {
+                let outside = c - c.max(box_min).min(box_max);
+                delta.is_finite()
+                    && delta.x * delta.x + delta.z * delta.z <= reach * reach
+                    && outside.length_squared() <= w * w
+            } else {
+                delta.abs().cmple(Vec3::splat(reach)).all()
+            }
         };
         let mut gathered: Vec<(Victim, Vec3, f32)> = Vec::with_capacity(BLAST_GATHER_MAX);
         for (i, u) in self.units.iter().enumerate() {
@@ -140,7 +150,7 @@ impl Sim {
                 !e.hurt_owner && attacker.is_some_and(|a| a.index as usize == i && a.gen == u.gen);
             let (lift, w) = soldier_blast_sphere(u.soldier.stance);
             let c = u.soldier.pos + Vec3::Y * lift;
-            if overlaps(c, w) {
+            if overlaps(c, w, ground) {
                 let v = if owner {
                     Victim::Owner
                 } else {
@@ -160,7 +170,7 @@ impl Sim {
                 continue;
             }
             let (c, w) = self.vehicle_blast_sphere(v);
-            if overlaps(c, w) {
+            if overlaps(c, w, ground) {
                 gathered.push((Victim::Vehicle(h), c, w));
             }
         }
@@ -168,7 +178,7 @@ impl Sim {
             if gathered.len() == BLAST_GATHER_MAX {
                 break;
             }
-            if !s.destroyed && overlaps(s.sphere_centre, s.sphere_radius) {
+            if !s.destroyed && overlaps(s.sphere_centre, s.sphere_radius, ground) {
                 gathered.push((Victim::Station(i as u16), s.sphere_centre, s.sphere_radius));
             }
         }
@@ -195,7 +205,7 @@ impl Sim {
             }))
             // The cheap reach test first, as for every other victim: only an
             // item inside the outer radius is worth a line-of-sight ray.
-            .filter(|&(_, c, w)| overlaps(c, w))
+            .filter(|&(_, c, w)| overlaps(c, w, false))
             .filter(|&(_, c, _)| {
                 crate::perception::los_seat(
                     self,
@@ -631,6 +641,65 @@ mod tests {
             .count();
         assert_eq!(hit, BLAST_GATHER_MAX);
         assert!(s.unit(hs[24]).unwrap().health.cur == hp);
+    }
+
+    #[test]
+    fn ground_blast_gather_filters_before_filling_slots() {
+        use crate::soldier::GroundRules;
+
+        let e = ExplosionClass {
+            damage: 50.0,
+            damage_outer: 6.5,
+            ..ExplosionClass::default()
+        };
+        let (lift, radius) = soldier_blast_sphere(Stance::Stand);
+        let reach = e.gather_radius() + radius;
+        let diagonal = reach * 0.8;
+        let corner = Vec3::new(diagonal, 0.0, diagonal);
+        let mixed_corner = e.gather_radius() + radius * 0.9;
+        let vertical = Vec3::new(diagonal, diagonal, 0.0);
+        let mixed_corner = Vec3::new(mixed_corner, mixed_corner, 0.0);
+        for (rules, space, lift_to_blast, offset, hit) in [
+            (GroundRules::Bf1, false, lift, corner, true),
+            (GroundRules::Bf2, false, lift, corner, true),
+            (GroundRules::Bf2, false, lift, vertical, false),
+            (GroundRules::Bf2, false, lift, mixed_corner, true),
+            (GroundRules::Bf2, false, lift, Vec3::X * reach, false),
+            (GroundRules::Bf2, false, lift, Vec3::Y * reach, false),
+            (
+                GroundRules::Bf2,
+                false,
+                28.705_603,
+                Vec3::Y * 7.962_637,
+                false,
+            ),
+            (GroundRules::Bf2, true, lift, corner, false),
+            (GroundRules::Bf2, true, lift, mixed_corner, false),
+        ] {
+            let mut s = sim();
+            s.ground_rules = rules;
+            if space {
+                s.space_assault = Some(crate::sim::SpaceAssault::new(10));
+            }
+            let blast = Vec3::Y * lift_to_blast;
+            let feet = blast - Vec3::Y * lift;
+            for _ in 0..BLAST_GATHER_MAX {
+                let at = feet + offset;
+                let decoy = s.spawn(&UnitSpec::trooper(1, at)).unwrap();
+                // Preserve vertical separation after the spawn grounds the unit.
+                s.unit_mut(decoy).unwrap().soldier.pos.y = at.y;
+            }
+            let at = feet + Vec3::X * 2.0;
+            let target = s.spawn(&UnitSpec::trooper(1, at)).unwrap();
+            s.unit_mut(target).unwrap().soldier.pos.y = at.y;
+            let hp = s.unit(target).unwrap().health.cur;
+            s.explode(&e, blast, None, Some(0));
+            assert_eq!(
+                s.unit(target).unwrap().health.cur < hp,
+                hit,
+                "{rules:?} space={space} blast={blast} crowd offset={offset}"
+            );
+        }
     }
 
     /// §4's team rules: a blast of team 0 whose attacker is a bot spares a

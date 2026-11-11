@@ -13,16 +13,221 @@
 //! then the hub, `hub_reached`), the navigator's half of what `think` held.
 //! The routing tests are in `route/tests.rs`.
 
+use super::avoid;
 use super::draw::{route_rand, stance_hold, unit_unit, SALT_HUB_POINT, SALT_POST_POINT};
 use super::state::{AiState, NavTick, Route, RouteSource};
 use super::{
     ARC_LINE_TOL, ARRIVE_MIN_RADIUS, CORNER_ARRIVE, DETOUR_MAX, DETOUR_RADIUS, DETOUR_WIDE_SLACK,
-    HUB_LEVEL_TOL, LEG_LEAD, LEVEL_HUB_NEAR, LEVEL_HUB_REACH, LEVEL_HUB_TRIES,
+    HUB_LEVEL_TOL, LEG_LEAD, LEVEL_HUB_NEAR, LEVEL_HUB_REACH, LEVEL_HUB_TRIES, SIDESTEP_TICKS,
+    STUCK_PROGRESS, STUCK_WINDOW,
 };
 use crate::nav::{self, NavGraph};
 use crate::sim::Sim;
 use crate::unit::UnitHandle;
 use glam::{Vec2, Vec3};
+
+/// The leg the navigator follows. No leg means there is no graph or no
+/// destination on it.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct NavState {
+    route: Option<Route>,
+}
+
+impl NavState {
+    pub fn route(&self) -> Option<Route> {
+        self.route
+    }
+
+    #[cfg(test)]
+    pub(super) fn for_fixture(route: Option<Route>) -> Self {
+        Self { route }
+    }
+
+    pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        match &self.route {
+            Some(r) => {
+                eat(&[1]);
+                r.hash_into(eat);
+            }
+            None => eat(&[0]),
+        }
+    }
+}
+
+impl AiState {
+    /// Install a synthetic navigation leg for test fixtures.
+    #[cfg(any(test, feature = "route-fixtures"))]
+    #[doc(hidden)]
+    pub fn install_route_for_fixture(&mut self, route: Option<Route>) {
+        self.nav.route = route;
+    }
+}
+
+pub(crate) fn clear(st: &mut AiState) {
+    st.nav.route = None;
+}
+
+pub(crate) fn plan_to(
+    sim: &Sim,
+    st: &mut AiState,
+    me: UnitHandle,
+    cur: u16,
+    dest: u16,
+    nt: &mut NavTick,
+) {
+    st.nav.route = plan_leg(sim, st, me, cur, dest, None, nt);
+}
+
+pub(crate) fn keep_or_plan(
+    sim: &Sim,
+    st: &mut AiState,
+    me: UnitHandle,
+    cur: u16,
+    dest: u16,
+    nt: &mut NavTick,
+) {
+    if st.nav.route.is_none_or(|r| r.dest_hub != dest) {
+        plan_to(sim, st, me, cur, dest, nt);
+    }
+}
+
+pub(crate) enum Refresh {
+    None,
+    RefDist(Vec3),
+}
+
+pub(crate) fn set_waypoint(st: &mut AiState, point: Vec3, refresh: Refresh) {
+    if let Some(r) = st.nav.route.as_mut() {
+        r.waypoint = point;
+        if let Refresh::RefDist(pos) = refresh {
+            r.ref_dist = nav::xz_dist(pos, sub_point(r, pos));
+        }
+    }
+}
+
+pub(crate) fn set_last_waypoint(st: &mut AiState, point: Vec3, refresh: Refresh) {
+    if st.nav.route.is_some_and(|r| r.is_last()) {
+        set_waypoint(st, point, refresh);
+    }
+}
+
+pub(crate) fn grant_flank(st: &mut AiState, r: Route) {
+    st.nav.route = Some(r);
+}
+
+pub(crate) fn dodge(st: &mut AiState, side: i8) -> bool {
+    if let Some(r) = st.nav.route.as_mut() {
+        r.sidestep = side * (SIDESTEP_TICKS + 1);
+        true
+    } else {
+        false
+    }
+}
+
+pub(crate) fn sidestep_tick(st: &mut AiState) {
+    if let Some(r) = st.nav.route.as_mut().filter(|r| r.sidestep.abs() > 1) {
+        r.sidestep -= r.sidestep.signum();
+    }
+}
+
+pub(crate) fn mark_abandoned(st: &mut AiState, floor: u16) {
+    if let Some(r) = st.nav.route.as_mut() {
+        r.stuck_run = r.stuck_run.max(floor);
+    }
+}
+
+/// The side-step countdown, then the progress window (design decision 4),
+/// for a unit that `moving` — its stick is deflected — this tick. Card
+/// ARCM: `back_and_forth` (the detector, `arcm::Osc`) closes the window now
+/// as a failed one.
+pub(super) fn progress(
+    sim: &Sim,
+    me: UnitHandle,
+    st: &mut AiState,
+    pos: Vec3,
+    moving: bool,
+    back_and_forth: bool,
+    nt: &mut NavTick,
+) {
+    if sim.unit(me).is_none() {
+        return;
+    }
+    // Both only matter while the unit is actually trying to walk somewhere.
+    if let Some(mut r) = st.nav.route {
+        if r.sidestep.abs() > 1 {
+            r.sidestep -= r.sidestep.signum();
+        }
+        if moving {
+            r.stuck_ticks += 1;
+            if r.stuck_ticks >= STUCK_WINDOW || back_and_forth {
+                r.stuck_ticks = 0;
+                // Progress is measured to the CURRENT sub-waypoint, not to the
+                // hub: a corner walk legitimately moves AWAY from the hub for
+                // a while, and measuring the hub made every detour look stuck
+                // and re-plan itself every 60 ticks. The PS2's own timer is
+                // "distance to the node stopped improving" (`FUN_0026b450`).
+                let d = nav::xz_dist(pos, sub_point(&r, pos));
+                // Card OBST: a bot going round a body on its committed side
+                // gets no nearer its waypoint for a while, and is not stuck
+                // while it moves on: the window neither fails nor resets.
+                // Card OBSR: ...round a BODY. A rim barrier is not gone
+                // round, and a bot that follows one gets no allowance.
+                let rd = st.mv.round;
+                let rounding = rd.live()
+                    && !rd.rim
+                    && rd.ticks < avoid::ROUND_MAX
+                    && nav::xz_dist(pos, rd.anchor) >= avoid::ROUND_TRAVEL;
+                st.mv.round.anchor = pos;
+                if r.ref_dist - d >= STUCK_PROGRESS && !back_and_forth {
+                    r.stuck_run = 0;
+                    r.ref_dist = d;
+                } else if !rounding || back_and_forth {
+                    // Card WHY: what the books say, before the cure below
+                    // changes them.
+                    let driving = sim.unit(me).is_some_and(|u| u.mount.is_some());
+                    nt.failed(if back_and_forth {
+                        super::why::Why::Oscillation
+                    } else {
+                        super::why::walk_failed(st, &r, driving)
+                    });
+                    nt.fail_arc = r.via_arc;
+                    // Card ARCM: the leg's arc failed twice running (a
+                    // failure since the walk last got anywhere), or back
+                    // and forth: closed to the bot, so the re-plan below
+                    // draws round it while another way exists.
+                    if let Some(a) = r
+                        .via_arc
+                        .filter(|_| !driving && (back_and_forth || st.mv.recover > 0))
+                    {
+                        st.arcm.close(a, sim.tick);
+                        nt.closed_arc = Some(a);
+                    }
+                    // The commitment ends with the failed window: the
+                    // side-step's side starts the next.
+                    st.mv.round.end();
+                    r.stuck_run = r.stuck_run.saturating_add(STUCK_WINDOW);
+                    // Re-locate and re-route once, then side-step to the side
+                    // we did not use last time.
+                    let side: i8 = if r.sidestep > 0 { -1 } else { 1 };
+                    // ...and hand that side to the avoidance as well (Phase
+                    // A.4; card OBST: the commitment has just ended above, so
+                    // this side starts the next one — the PS2's "side-step to
+                    // the side we did not use last time").
+                    st.slide = side;
+                    st.nav.route = Some(r);
+                    // Plan again from the hub the unit stands in
+                    // (`route::replan`).
+                    if replan(sim, me, st, pos, nt) {
+                        r = st.nav.route.unwrap_or(r);
+                    }
+                    r.sidestep = side * (SIDESTEP_TICKS + 1);
+                }
+            }
+        }
+        nt.stuck_run = r.stuck_run;
+        st.nav.route = Some(r);
+    }
+}
 
 /// How this unit routes on the planning graph: as a soldier on foot, as its
 /// vehicle's `AISizeType` in a seat (card VAI; RE_LOG "The six type bits" —
@@ -219,7 +424,7 @@ pub(super) fn post_point(
 /// 60,000 ticks — the ring round BF1 NAB1's cp3 again). OURS, PROVISIONAL:
 /// like the hunt it is not bounded by what the bot sees.
 pub(super) fn aim_last_leg(sim: &Sim, me: UnitHandle, st: &mut AiState, nt: &mut NavTick) {
-    let (Some(u), Some(mut r)) = (sim.unit(me), st.route) else {
+    let (Some(u), Some(mut r)) = (sim.unit(me), st.nav.route) else {
         return;
     };
     let Some(cp) = st.target_cp.and_then(|i| sim.cps.get(i as usize)) else {
@@ -263,7 +468,7 @@ pub(super) fn aim_last_leg(sim: &Sim, me: UnitHandle, st: &mut AiState, nt: &mut
             fill_detour(g, mover(sim, u).ty, pos, &mut r, nt);
         }
         r.ref_dist = nav::xz_dist(pos, sub_point(&r, pos));
-        st.route = Some(r);
+        st.nav.route = Some(r);
     }
 }
 
@@ -414,7 +619,7 @@ pub(super) fn leg_point(r: &Route, pos: Vec3, speed: f32) -> Vec3 {
     Vec3::new(q.x, pos.y, q.y)
 }
 
-/// The stuck window's re-plan (`mover::stuck_window`; card MOVR lifted it
+/// The stuck window's re-plan (`route::progress`; card MOVR lifted it
 /// here, unchanged): plan the leg again from the hub the unit stands in. Beside the arc it would leave that hub on, and not at the hub:
 /// to the hub's centre first (once — an approach leg that sticks re-plans
 /// the arc); card HUBP: and on the arc's own line, centre to centre, not at
@@ -431,7 +636,7 @@ pub(super) fn replan(
     pos: Vec3,
     nt: &mut NavTick,
 ) -> bool {
-    let Some(r) = st.route else { return false };
+    let Some(r) = st.nav.route else { return false };
     let Some(g) = sim.nav.as_ref() else {
         return false;
     };
@@ -457,7 +662,7 @@ pub(super) fn replan(
     next.detour_len = 0;
     next.detour_at = 0;
     next.ref_dist = nav::xz_dist(pos, sub_point(&next, pos));
-    st.route = Some(next);
+    st.nav.route = Some(next);
     true
 }
 
@@ -578,6 +783,7 @@ pub(crate) fn plan_leg(
     // went round in loops (BF1 Rhen Var 1: 32 recycles in 6 seeds, against 2).
     let detouring = shunning
         && st
+            .nav
             .route
             .is_some_and(|r| r.source == RouteSource::Shun && r.dest_hub == dest);
     let hop = if shunning {
@@ -809,7 +1015,7 @@ pub(super) fn advance_route(
     min_arrive: f32,
     nt: &mut NavTick,
 ) {
-    if let (Some(g), Some(mut r)) = (sim.nav.as_ref(), st.route) {
+    if let (Some(g), Some(mut r)) = (sim.nav.as_ref(), st.nav.route) {
         let mut moved_on = false;
         // Card OBSV: a corner or a waypoint a vehicle stands on is reached at
         // the vehicle's side ([`super::avoid::at_foot_of`]) — by a soldier on
@@ -863,7 +1069,7 @@ pub(super) fn advance_route(
             r.ref_dist = nav::xz_dist(pos, sub_point(&r, pos));
             r.stuck_ticks = 0;
         }
-        st.route = Some(r);
+        st.nav.route = Some(r);
         let at_foot = on_foot
             && r.corner().is_none()
             && sim
@@ -897,7 +1103,7 @@ pub(super) fn advance_route(
                 if next.via_arc.is_some() || walker {
                     next.from = Vec2::new(r.waypoint.x, r.waypoint.z);
                 }
-                st.route = Some(next);
+                st.nav.route = Some(next);
             }
         }
     }

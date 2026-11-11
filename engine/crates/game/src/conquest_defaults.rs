@@ -29,7 +29,8 @@ pub const TABLE: &[(&str, bool, Defaults)] = &[
     entry("bf1_end1", false, [24, 24], [258, 258]),
     entry("bf1_geo1", true, [27, 21], [237, 237]),
     entry("bf1_hot1", false, [32, 32], [232, 232]),
-    entry("bf1_kam1", true, [16, 16], [156, 172]),
+    // OURS: pace after the blast change. measure: repeat both proxy sides after sim changes.
+    entry("bf1_kam1", true, [16, 16], [164, 181]),
     // OURS: 10.15 min before; measure: repeat seeds 1–3, both Good-proxy sides after sim changes.
     entry("bf1_kas1", false, [27, 21], [169, 169]),
     entry("bf1_kas1", true, [27, 21], [230, 230]),
@@ -72,7 +73,8 @@ pub const TABLE: &[(&str, bool, Defaults)] = &[
     entry("bf2_myg1", true, [20, 20], [246, 246]),
     entry("bf2_nab2", false, [20, 20], [203, 203]),
     entry("bf2_nab2", true, [20, 20], [217, 217]),
-    entry("bf2_pol1", false, [16, 16], [234, 234]),
+    // OURS: pace after the blast change. measure: repeat both proxy sides after sim changes.
+    entry("bf2_pol1", false, [16, 16], [187, 187]),
     entry("bf2_pol1", true, [16, 16], [150, 150]),
     entry("bf2_tan1", false, [16, 16], [223, 223]),
     entry("bf2_tan1", true, [16, 16], [227, 227]),

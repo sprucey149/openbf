@@ -211,7 +211,7 @@ pub fn print_map(lvl: &str, out: &Path, m: &Manifest) -> Result<BTreeMap<String,
     // The level and the wet cells: `Scene::install_water` gives the sim both.
     sections.insert(
         "water".to_owned(),
-        hash_ron(&m.water.as_ref().map(|w| (w.height, &w.wet)))?,
+        hash_ron(&m.water.as_ref().map(|w| (w.height, w.gameplay_mask())))?,
     );
     sections.insert("instances".to_owned(), hash_ron(&m.instances)?);
     sections.insert("regions".to_owned(), hash_ron(&m.regions)?);

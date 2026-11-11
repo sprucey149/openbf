@@ -1,25 +1,29 @@
 //! Fight positions, hit reactions and escape probes.
 
-use crate::ai::draw::{unit_unit, SALT_CIRCLE, SALT_GRENADE, SALT_HOLD, SALT_REACT, SALT_STYLE};
-use crate::ai::state::{AiState, FightState, HoldState, LostState, NavTick, SteerPick};
+use super::super::situation::Sense;
+use crate::ai::brain::Tick;
+use crate::ai::draw::{
+    stance_hold, unit_unit, SALT_CIRCLE, SALT_DODGE, SALT_GRENADE, SALT_HOLD, SALT_REACT,
+    SALT_STYLE,
+};
+use crate::ai::state::{AiState, FightState, HoldState, NavTick, Walk};
 use crate::ai::{
-    CIRCLE_PAUSE, CIRCLE_STOP, FIGHT_SPACING, FIGHT_STEP, HOLD_CLOSE, HOLD_COMMIT,
-    HOLD_MOVE_PERIOD, HOLD_SPACING, HOLD_SPOT_RADIUS, HOLD_STRAFE, HULL_PUSH_MIN, LOST_JUMP_AGAIN,
-    LOST_JUMP_CLEAR, PROBE_DIST, REACT_COOLDOWN, REACT_STEP, RING_BACK, RING_SNAP, ROLL_LANE,
-    ROLL_LEAD, ROLL_PAST, ROLL_REACH, STAND_CROUCH, STAND_SHARE, STUCK_PROGRESS, STUCK_WINDOW,
+    census, route, snipe, tactic, CIRCLE_PAUSE, CIRCLE_STOP, DODGE_COOLDOWN, FIGHT_BEYOND,
+    FIGHT_SPACING, FIGHT_STEP, HOLD_CLOSE, HOLD_COMMIT, HOLD_MOVE_PERIOD, HOLD_QUIET, HOLD_SPACING,
+    HOLD_SPOT_RADIUS, HOLD_STRAFE, REACT_COOLDOWN, REACT_STEP, RING_BACK, RING_SNAP, ROLL_LANE,
+    ROLL_LEAD, ROLL_PAST, ROLL_REACH, SIDESTEP_TICKS, STAND_CROUCH, STAND_SHARE,
 };
 use crate::fmath;
 use crate::nav;
+use crate::perception::{self, Contact};
 use crate::sim::Sim;
 use crate::unit::{Unit, UnitHandle};
 use glam::{Vec2, Vec3};
 
-use super::Tick;
-
 /// Card JITR: is `p` free to hold — not within [`HOLD_SPACING`] of the point
 /// another bot holds, nor of a player? OURS; the full reservation is card
 /// BOTD's.
-pub(super) fn spot_free(sim: &Sim, me: UnitHandle, p: Vec3) -> bool {
+pub(in crate::ai) fn spot_free(sim: &Sim, me: UnitHandle, p: Vec3) -> bool {
     spot_clear_of(sim, me, p, HOLD_SPACING, None)
 }
 
@@ -55,10 +59,10 @@ fn spot_clear_of(sim: &Sim, me: UnitHandle, p: Vec3, r: f32, team: Option<u8>) -
 /// The position is a [`HoldState`], kept [`HOLD_CLOSE`] past the last tick
 /// the target was in reach.
 ///
-/// OURS (the maintainer, 2026-10-05): a stander does not stop beside another fighter
-/// ([`stand_spot`]), and a ring is no wider than the bot's own distance
-/// ([`ring_point`]).
-pub(super) fn fight_position(
+/// OURS (2026-10-05), measure: spacing and ring distance in matched original fights.
+/// Standers seek space from other fighters ([`stand_spot`]). A ring is no
+/// wider than the bot's current distance to its target ([`ring_point`]).
+pub(in crate::ai) fn fight_position(
     sim: &Sim,
     tk: &Tick,
     st: &mut AiState,
@@ -89,9 +93,9 @@ pub(super) fn fight_position(
     });
     if live.is_none() {
         if st.fight.mode == FightState::TAKE {
-            nt.tpos_ev |= super::tactic::EV_WALK_DROPPED;
+            nt.tpos_ev |= tactic::EV_WALK_DROPPED;
         }
-        super::tactic::release(st, sim.tick);
+        tactic::release(st, sim.tick);
         st.fight.mode = 0;
     }
     h.until = h.until.max(sim.tick + HOLD_CLOSE);
@@ -100,19 +104,8 @@ pub(super) fn fight_position(
     // with a scope's sight (not Easy): it fights from there (OURS,
     // 2026-10-29: with a scope's band it walked off its perch to a table
     // position nearer the target).
-    let perched =
-        super::snipe::holds(st, live) && crate::perception::scope_share(u, &tk.tier) > 0.0;
-    if !perched
-        && super::tactic::fight(
-            sim,
-            tk,
-            st,
-            &super::tactic::Foe::seen(e),
-            &mut h,
-            thinking,
-            nt,
-        )
-    {
+    let perched = snipe::holds(st, live) && crate::perception::scope_share(u, &tk.tier) > 0.0;
+    if !perched && tactic::fight(sim, tk, st, &tactic::Foe::seen(e), &mut h, thinking, nt) {
         // (In the open, a croucher by style crouches.)
         if !st.tpos.covered && crouches && h.stance_mask == 0 {
             h.stance_mask = crate::commander::MASK_CROUCH;
@@ -135,7 +128,7 @@ pub(super) fn fight_position(
                 h.blocked = 0;
                 st.fight.mode = FightState::WALK;
                 // Over the graph to the point's hub, straight at it from there.
-                super::route::retarget_board(sim, me, st, p, nt);
+                route::retarget_board(sim, me, st, p, nt);
             }
             None => {
                 h.settle(pos);
@@ -211,10 +204,10 @@ fn style(tk: &Tick) -> (bool, bool, bool) {
     if let Some((stands, anywhere)) = tests::STYLE.with(std::cell::Cell::get) {
         return (stands, false, anywhere);
     }
-    let Tick { me, u, wc, .. } = *tk;
+    let Tick { me, wc, .. } = *tk;
     let (stander, crouches) = style_of(me, wc.ai_distance_table());
     // Card DPRX: a proxy that strafes fights on the move (a scope stands).
-    if u.proxy_human.is_some_and(|p| p.circles) && !wc.ai_distance_table() {
+    if tk.rules.proxy.is_some_and(|p| p.circles) && !wc.ai_distance_table() {
         return (false, false, false);
     }
     (stander, crouches, false)
@@ -230,7 +223,7 @@ fn style_of(me: UnitHandle, scoped: bool) -> (bool, bool) {
 
 /// Card FGHT: the ring point a circling bot is walking to, while its fight's
 /// position is live.
-pub(super) fn ring_walk(sim: &Sim, st: &AiState) -> Option<Vec3> {
+pub(in crate::ai) fn ring_walk(sim: &Sim, st: &AiState) -> Option<Vec3> {
     st.hold
         .filter(|h| st.fight.walks() && sim.tick < h.until)
         .map(|h| h.goal)
@@ -309,10 +302,10 @@ fn ring_point(sim: &Sim, tk: &Tick, target: Vec3) -> Option<Vec3> {
     })
 }
 
-/// Card FGHT, OURS (the maintainer, 2026-10-05): where a bot STANDS to shoot — where
-/// it is, unless that is within [`FIGHT_SPACING`] of another fighter's
-/// position or of a player: then the first of eight drawn points within
-/// [`FIGHT_STEP`] that is clear of them and can be stepped to.
+/// Card FGHT, OURS (2026-10-05), measure: original stand spacing and step distance.
+/// Stay in place unless a fighter or player is within [`FIGHT_SPACING`].
+/// When crowded, take the first clear, reachable point among eight
+/// samples within [`FIGHT_STEP`].
 fn stand_spot(sim: &Sim, me: UnitHandle, u: &Unit) -> Vec3 {
     let pos = u.soldier.pos;
     let clear = |p: Vec3| spot_clear_of(sim, me, p, FIGHT_SPACING, Some(u.team));
@@ -353,7 +346,7 @@ fn stand_ok(sim: &Sim, u: &Unit, from: Vec3, p: Vec3) -> bool {
     })
 }
 
-/// Card REACT (the maintainer, 2026-10-07: "if it doesn't die after being hit, it
+/// Card REACT (2026-10-07: "if it doesn't die after being hit, it
 /// just stays standing there"): what a bot on a position does about a HIT —
 /// one draw per hit outside the cooldown ([`REACT_COOLDOWN`]: a burst is one
 /// draw) over its tier's row ([`crate::skill::Tier::react`]): it STAYS, it
@@ -371,7 +364,7 @@ fn stand_ok(sim: &Sim, u: &Unit, from: Vec3, p: Vec3) -> bool {
 /// ignores a damage message while it attacks (`analysis/re-soldier-ai.md`,
 /// the fight row) and re-plans by its skill's `lerp(0, 0.2)` coin otherwise —
 /// that coin is still the dodge of a bot walking its leg (`think`).
-pub(super) fn react(
+pub(in crate::ai) fn react(
     sim: &Sim,
     tk: &Tick,
     st: &mut AiState,
@@ -405,7 +398,7 @@ pub(super) fn react(
             h.commit_until = sim.tick + HOLD_COMMIT;
             h.blocked = 0;
             st.fight.mode = FightState::MOVE;
-            super::route::retarget_board(sim, me, st, p, nt);
+            route::retarget_board(sim, me, st, p, nt);
             st.hold = Some(h);
             nt.levers |= crate::ai::census::LV_REACT_MOVE;
             return 0;
@@ -469,7 +462,7 @@ pub(super) fn react(
 /// stands to `p` (a hit reaction or a step out of a friend's line) —
 /// [`stand_ok`], `p` on the level, and
 /// no metre of the way inside a mission death region?
-pub(super) fn react_ok(sim: &Sim, u: &Unit, p: Vec3) -> bool {
+pub(in crate::ai) fn react_ok(sim: &Sim, u: &Unit, p: Vec3) -> bool {
     let from = u.soldier.pos;
     let n = nav::xz_dist(from, p).ceil().max(1.0) as u32;
     stand_ok(sim, u, from, p)
@@ -527,7 +520,7 @@ fn roll_clear(sim: &Sim, u: &Unit, side: i8) -> bool {
 /// from it, to 3 m past its radius. The PS2 warns every AI unit within 7.5 m
 /// after a difficulty-ranked delay (re-grenades.md §7.4); what its
 /// controller then does is not traced, and running clear is ours.
-pub(super) fn hazard_flee(
+pub(in crate::ai) fn hazard_flee(
     sim: &Sim,
     me: UnitHandle,
     u: &Unit,
@@ -566,58 +559,256 @@ pub(super) fn hazard_flee(
     best.map(|b| b.1)
 }
 
-/// Card BNDS: should a lost bot JUMP this tick? Its way `d` is shut by a wall
-/// low enough to clear (the sweep of its capsule lifted [`LOST_JUMP_CLEAR`]
-/// is open) — a rim rail from outside, a kerb over the step. It jumps from
-/// where it stands: the stick steers a jump in the air (card AIRC), and on
-/// BF2 Kamino's 50 rim stops a standing jump with the stick held clears
-/// every one a running jump does. One try per [`LOST_JUMP_AGAIN`]
-/// (`LostState::jump_after`); between tries the steering slides it along.
-pub(in crate::ai) fn lost_jump(
+/// The farthest a bot on foot fights: the longest AI range of the weapons it
+/// holds and may use plus [`FIGHT_BEYOND`] (playtest C3; `re-soldier-ai.md`
+/// 4.2). An award weapon it has no medal for does not count.
+pub(crate) fn fight_reach(sim: &Sim, u: &crate::unit::Unit) -> f32 {
+    let range = |c: usize| sim.weapon_classes.get(c).map_or(0.0, |w| w.ai_range[2]);
+    let held = u
+        .held
+        .iter()
+        .filter(|h| !sim.weapon_locked(u, h.class))
+        .map(|h| range(h.class));
+    held.fold(range(u.weapon_class), f32::max) + FIGHT_BEYOND
+}
+
+pub(in crate::ai) fn hold_upkeep(
     sim: &Sim,
-    u: &Unit,
-    d: Vec3,
-    pick: SteerPick,
-    l: &mut LostState,
-) -> bool {
-    if !u.soldier.grounded || sim.tick < l.jump_after {
-        return false;
-    }
-    let cap = u.capsule();
-    let wall_ahead = || {
-        sim.collision
-            .wall_sweep(&cap.stepped(), d, PROBE_DIST)
-            .is_some()
-    };
-    // OURS: a pinned return can report an open probe while the full capsule
-    // cancels its step on a low ledge. Use that physical contact only here.
-    // trace: compare a PS2 soldier's escape at the Yavin Bazaar riser.
-    let hidden_ledge = pick == SteerPick::Fwd;
-    if hidden_ledge {
-        if !l.pinned
-            || u.droideka.is_some()
-            || u.soldier.stance != crate::soldier::Stance::Stand
-            || u.wall_push.dot(d) >= -HULL_PUSH_MIN
-            || u.soldier.vel.dot(d).abs() * crate::TICK_DT
-                >= STUCK_PROGRESS / f32::from(STUCK_WINDOW)
-            || wall_ahead()
-        {
-            return false;
+    tk: &Tick,
+    st: &mut AiState,
+    sense: &Sense,
+    ground: bool,
+) {
+    let Tick { me, u, eye, .. } = *tk;
+    // Card HOLD: the position's upkeep. With nobody perceived any more
+    // the fight is over and the bot advances; else it keeps the hint's
+    // stance and, every few seconds, may step to another spot near by.
+    if let Some(mut h) = st.hold.filter(|h| sim.tick < h.until) {
+        // (Card TEAM: what a friend tells keeps nobody on a position.)
+        if sense.held > 0 && st.contacts.iter().flatten().any(|c| !c.told) {
+            h.last_contact = sim.tick;
         }
-    } else if !wall_ahead() {
-        return false; // a drop or a barrier, not a wall
+        // The holder faces the way the nearest enemy is. The look sets
+        // the yaw only (it is aimed as a Travel, which keeps the gun
+        // level), and `hunt` itself stays omniscient for the walk. A
+        // sniper on its spot watches down its lane instead unless the
+        // nearest enemy is in clear sight (card SNPR, `SnipeState::look`;
+        // `perception::can_aim`, playtest C4: a BF1 Docks platform sniper
+        // facing the fight beneath its floor). Ground rounds only.
+        if let Some((_, p)) = sense.hunt {
+            let at = p + Vec3::Y * 1.4;
+            let lane = st
+                .snipe
+                .cur
+                .filter(|c| c.arrived && c.spot == h.spot && c.look != Vec3::ZERO)
+                .map(|c| c.look);
+            h.look = match lane {
+                Some(l)
+                    if ground && u.mount.is_none() && !perception::can_aim(sim, me, eye, at) =>
+                {
+                    l
+                }
+                _ => at,
+            };
+        }
+        if sim.tick.saturating_sub(h.last_contact) >= HOLD_QUIET {
+            h.until = sim.tick;
+        } else {
+            // (Card TPOS: no shuffle - a fighter's cycle and its next
+            // position are the Tactician's, `tactic::fight`.)
+            st.want_stance = stance_hold(st.want_stance, h.stance_mask, me, sim.tick);
+        }
+        st.hold = Some(h);
     }
-    let mut over = cap;
-    over.base += Vec3::Y * LOST_JUMP_CLEAR;
-    if (hidden_ledge && sim.collision.ceiling_sweep(&cap, &over).is_some())
-        || sim
-            .collision
-            .wall_sweep(&over, d, PROBE_DIST + 0.5)
-            .is_some()
-    {
-        return false; // too high to jump
+}
+
+pub(in crate::ai) fn react_to_hit(
+    sim: &Sim,
+    tk: &Tick,
+    st: &mut AiState,
+    enemy: Option<&Unit>,
+    hit_now: bool,
+    nt: &mut NavTick,
+) -> i8 {
+    let Tick { me, skill, .. } = *tk;
+    // The on-hit reaction can request a roll for this tick.
+    let mut roll = 0;
+
+    // OURS: soldier dodge on hit. FUN_0020a940 (B2:121236-121318)
+    // belongs to flyer/carrier vtables (0x61a94c/0x61c1cc/0x62b39c),
+    // not the soldier; its evasive re-plan does not establish this step.
+    // Keep the current skill coin, 2 s cooldown and alternating side-step.
+    // measure: PS2 soldier hit reactions in PCSX2 T5/T6 before replacing
+    // this openbf deviation (analysis/re-ai-difficulty.md §9.4).
+    // Card REACT: a bot on a position (a hub's, a fight's) answers the hit
+    // by its tier's row instead (`react`).
+    if hit_now && sim.tick >= st.dodge_until {
+        if st.fight.tactician() {
+            // Card TPOS: a hit counts against the position (`tactic::hit`).
+            tactic::hit(sim, tk, st);
+            nt.levers |= census::LV_POSITION_HIT;
+        } else if let Some(h) = st.hold.filter(|h| sim.tick < h.until) {
+            roll = react(sim, tk, st, h, enemy, nt);
+        } else if unit_unit(me.index, sim.tick, me.gen, SALT_DODGE) < skill.dodge_chance {
+            let side: i8 = if st.slide > 0 { -1 } else { 1 };
+            st.dodge_until = sim.tick + DODGE_COOLDOWN;
+            nt.levers |= census::LV_DODGE;
+            // Nothing to offset: strafe the pad directly for the same window.
+            if !route::dodge(st, side) {
+                st.strafe_until = sim.tick + SIDESTEP_TICKS as u64;
+                st.strafe_side = side;
+            }
+        }
     }
-    l.jump_after = sim.tick + LOST_JUMP_AGAIN;
+
+    // Card REACT: the roll a reaction asked for, now that the bot is under
+    // way to where it ends.
+    if let Some(mut h) = st.hold.filter(|h| h.roll_at != 0 && sim.tick >= h.roll_at) {
+        roll = h.strafe_side;
+        h.roll_at = 0;
+        st.hold = Some(h);
+    }
+    roll
+}
+
+pub(in crate::ai) fn step_aside(
+    sim: &Sim,
+    tk: &Tick,
+    st: &mut AiState,
+    pos: Vec3,
+    line: Option<i8>,
+    holding: Option<HoldState>,
+) {
+    let Tick { me, u, .. } = *tk;
+    // Card FFLN: a friend in the line of fire. The shot waits (the gunner), and a
+    // holder whose last step's commit time is over steps aside, away from the
+    // friend, through its goal's one writer. A bot walking its leg walks on:
+    // the line clears by itself. Card TPOS: not a bot on a Tactician's
+    // position - those are chosen out of the friends' lines - but still the
+    // fallback's stander (without it, BF2 Hoth's fighters with a teammate
+    // within 1.5 m went 3.6 -> 5.8 % over 8 seeds; with it 3.6 %). No strafe
+    // on a new burst any more.
+    if let (Some(side), Some(mut h), false) = (line, holding, st.fight.tactician()) {
+        let (sy, cy) = fmath::sin_cos(u.soldier.yaw);
+        let p = pos + Vec3::new(cy, 0.0, -sy) * (f32::from(side) * HOLD_STRAFE);
+        if sim.tick >= h.commit_until
+            && react_ok(sim, u, p)
+            && spot_free(sim, me, p)
+            && h.step_to(p, sim.tick, false)
+        {
+            h.strafe_side = side;
+            st.hold = Some(h);
+        }
+    }
+}
+
+pub(in crate::ai) fn keep_remembered(
+    sim: &Sim,
+    tk: &Tick,
+    st: &mut AiState,
+    held: Option<Contact>,
+    free: bool,
+    thinking: bool,
+    nt: &mut NavTick,
+) {
+    // Card TPOS: hidden at its position a bot does not see its target - the
+    // hide phase's point - and it keeps the position while it remembers it
+    // (without this the fight lapsed 2 s into the hide and the bot walked
+    // off, then back: the Kamino playtest).
+    // Card TEAM: not on a told record - a friend's sight is aimed at, it
+    // does not keep the bot at a position it cannot fire from.
+    // Card TPOSR: and the Tactician runs on the remembered target as on a
+    // seen one - the walk there, the hide / fire cycle, the leave tests (hit
+    // twice, round its cover, out of the band, the 5-12 s timer): the PS2's
+    // cover state machine runs every update, its walk and hidden states
+    // keeping the target (re-soldier-ai 4.6; AUDIT TPOS: a bot hit twice kept
+    // its position 22 s, hidden, while its target was out of sight).
+    if let (true, Some(c), true, Some(mut h)) = (
+        st.fight.tactician(),
+        held.filter(|c| !c.seen_now && !c.told),
+        free,
+        st.hold,
+    ) {
+        let foe = tactic::Foe::remembered(c.last_pos);
+        if tactic::fight(sim, tk, st, &foe, &mut h, thinking, nt) {
+            h.until = h.until.max(sim.tick + HOLD_CLOSE);
+        }
+        st.hold = Some(h);
+    }
+}
+
+pub(in crate::ai) fn update_position(
+    sim: &Sim,
+    tk: &Tick,
+    st: &mut AiState,
+    target: Option<(&Unit, f32)>,
+    free: bool,
+    thinking: bool,
+    nt: &mut NavTick,
+) {
+    match target {
+        Some((e, r)) => fight_position(sim, tk, st, e, r, thinking, nt),
+        None if !free || st.hold.is_none_or(|h| sim.tick >= h.until) => {
+            if st.fight.mode == FightState::TAKE {
+                nt.tpos_ev |= tactic::EV_WALK_DROPPED;
+            }
+            tactic::release(st, sim.tick);
+            st.fight.mode = 0;
+        }
+        None => {}
+    }
+    // Card TPOSR: the position held stays reserved while it is held.
+    tactic::keep(sim, st, thinking, nt);
+}
+
+/// Settle a ring walk when it ends. A finished Tactician cycle leaves the
+/// walk outcome available to the other owners.
+pub(super) fn on_walk(
+    sim: &Sim,
+    tk: &Tick,
+    st: &mut AiState,
+    pos: Vec3,
+    walk: Walk,
+    nt: &mut NavTick,
+) -> bool {
+    match walk {
+        // Card FGHT: at the ring point, or where the way to it is shut: the
+        // circle's pause, where the bot stands.
+        // Card TPOS: at the Tactician's position its cycle starts; a way
+        // there that is shut leaves it (the next think asks again).
+        Walk::Arrived if st.fight.mode == FightState::TAKE => {
+            if let Some(mut h) = st.hold {
+                if tactic::walk_arrived(sim, tk, st, &mut h) {
+                    nt.tpos_ev |= tactic::EV_WALK_ARRIVED;
+                    st.hold = Some(h);
+                }
+            }
+        }
+        // (Given up near enough, it is there where it stopped.)
+        Walk::Failed if st.fight.mode == FightState::TAKE => {
+            let mut h = st.hold.unwrap_or_default();
+            if tactic::cut_short(sim, tk, st, &mut h) {
+                nt.tpos_ev |= tactic::EV_WALK_NEAR;
+                st.hold = st.hold.map(|_| h);
+            } else {
+                nt.tpos_ev |= tactic::EV_WALK_GIVEN_UP;
+                if let Some(h) = st.hold.as_mut() {
+                    h.settle(pos);
+                }
+                st.fight.mode = FightState::STAND;
+            }
+        }
+        // (Not a bot already at its Tactician's position: `tactic::fight`
+        // ended the walk there this tick.)
+        Walk::Arrived | Walk::Failed if !st.fight.tactician() => {
+            if let Some(h) = st.hold.as_mut() {
+                h.settle(pos);
+            }
+            st.fight.mode = FightState::PAUSE;
+            st.fight.pause_until = sim.tick + CIRCLE_PAUSE;
+        }
+        _ => return false,
+    }
     true
 }
 

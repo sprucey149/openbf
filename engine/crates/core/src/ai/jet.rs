@@ -2,7 +2,7 @@
 //! 6–12 s hops and 3–8 s jump hints; FUN_002dc0b8 gates hover attacks by
 //! 20 m and fuel for the trip. See analysis/re-jetpack.md §3.1 and §10.
 use super::{
-    behave::Tick,
+    brain::Tick,
     draw::{unit_rand, unit_unit},
     mover::MoveRequest,
     state::AiState,
@@ -164,10 +164,10 @@ pub(super) fn run(
     // Service and boarding must not launch a bot away from its work. Lost
     // recovery keeps its existing ground policy instead of inventing an air route.
     let blocked = mv.boarding
-        || mv.throwing
+        || mv.acts.throw_stand
         || mv.ret.is_some()
         || sim.controlled_droid(tk.me).is_some()
-        || super::fix::serve(sim, tk.me, st).is_some();
+        || mv.serving;
     if let Some(mut f) = st.jet.flight {
         f.launched |= matches!(s.stance, Stance::Jet | Stance::Hover);
         if (f.launched && !s.stance.airborne())
@@ -197,7 +197,7 @@ pub(super) fn run(
         && s.lock_timer <= 0.0
         && s.fuel > c.jet_fuel_min_border
     {
-        let jet_leg = st.route.and_then(|r| {
+        let jet_leg = st.route().and_then(|r| {
             let graph = sim.nav.as_ref()?;
             let arc = graph.arcs.get(r.via_arc? as usize)?;
             if arc.flags & nav::Arc::JET_JUMP == 0 {

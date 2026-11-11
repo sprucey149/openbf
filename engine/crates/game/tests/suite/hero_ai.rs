@@ -51,10 +51,8 @@ fn input(
 ) -> (PadState, AiState) {
     let u = sim.unit(bot).unwrap();
     let e = sim.unit(target).unwrap();
-    let mut state = AiState {
-        target: Some(Foe::Unit(target)),
-        ..Default::default()
-    };
+    let mut state = AiState::default();
+    state.target = Some(Foe::Unit(target));
     state.contacts[0] = Some(Contact {
         handle: target.into(),
         first_seen: 0,

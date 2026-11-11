@@ -1073,7 +1073,7 @@ impl JetCensus {
                 continue;
             }
             if f.route {
-                let arc = u.ai.route.and_then(|r| {
+                let arc = u.ai.route().and_then(|r| {
                     let arc = sim.nav.as_ref()?.arcs.get(r.via_arc? as usize).copied()?;
                     let from = if arc.a == r.next_hub { arc.b } else { arc.a };
                     Some((from, r.next_hub))
@@ -1891,7 +1891,7 @@ impl Recycles {
             };
             let p = u.soldier.pos;
             let (tag, hub, dy) = locus_of(sim, p);
-            let leg = u.ai.route.map_or_else(
+            let leg = u.ai.route().map_or_else(
                 || "none".to_owned(),
                 |r| {
                     let from = r
@@ -1912,7 +1912,7 @@ impl Recycles {
                 .map_or_else(|| "none".to_owned(), |o| o.label());
             // XZ metres to the leg's waypoint: a bot recycled a step from
             // its point was crowded off it.
-            let wp = u.ai.route.map_or_else(
+            let wp = u.ai.route().map_or_else(
                 || "-".to_owned(),
                 |r| format!("{:.1}", core::nav::xz_dist(p, r.waypoint)),
             );
@@ -1932,7 +1932,7 @@ impl Recycles {
             // Card STLVL: the same recycle against the floors the ROUTING
             // uses — the leg hub's resolved floor (`Sim::nav_floor`, `-` when
             // unresolved), the waypoint's height and the level test.
-            if let Some(r) = u.ai.route {
+            if let Some(r) = u.ai.route() {
                 let nf = sim.nav_floor(r.next_hub);
                 let (hub_d, hub_r) = sim
                     .nav
@@ -2762,7 +2762,7 @@ impl RimLog {
                 // separation pass, a wall push.
                 let (d, own) = (p - q.1, u.soldier.vel / 30.0);
                 let pushed = glam::Vec2::new(d.x - own.x, d.z - own.z).length();
-                let r = u.ai.route;
+                let r = u.ai.route();
                 outln!(
                     self.text,
                     "rim cross {key}: tick {tick} unit {i} team {} pos ({:.1},{:.2},{:.1}) drop {drop:.2} grounded {} speed {:.1} vy {:.1} pushed {pushed:.3} steer {} slide {} hold {} lost {} target {} leg {:?}->{:?} sidestep {} level {:?}",
@@ -3148,7 +3148,10 @@ impl HeadlessBox {
                 hit = w
                     .sim
                     .alive_units()
-                    .find(|(_, u)| u.ai.route.is_some_and(|r| r.stuck_run >= self.stuck_ticks))
+                    .find(|(_, u)| {
+                        u.ai.route()
+                            .is_some_and(|r| r.stuck_run >= self.stuck_ticks)
+                    })
                     .map(|(h, _)| (format!("stuck: unit {}", h.index), Some(h.index)));
             }
             _ => {}
@@ -3363,7 +3366,7 @@ impl Obst {
             let r = game::unit_probe::Probe::of(sim, h, u, tick, true);
             let p = u.soldier.pos;
             // Can a soldier stand on the aim point?
-            let wp_push = u.ai.route.map_or(-1.0, |rt| {
+            let wp_push = u.ai.route().map_or(-1.0, |rt| {
                 let aim = rt
                     .corner()
                     .map_or(rt.waypoint, |c| glam::Vec3::new(c.x, p.y, c.y));
@@ -3821,7 +3824,7 @@ struct LongestRun {
 impl LongestRun {
     fn observe(&mut self, sim: &core::sim::Sim, tick: u64) {
         for (h, u) in sim.alive_units() {
-            let run = u.ai.route.map_or(0, |r| r.stuck_run);
+            let run = u.ai.route().map_or(0, |r| r.stuck_run);
             if run > self.run {
                 *self = LongestRun {
                     run,
@@ -3981,7 +3984,7 @@ impl NoProgress {
                         s.kind == core::vehicle::SeatKind::Pilot && s.occupant == Some(h)
                     }) && (v.kind != core::vehicle::VehicleKind::Walker
                         || u.ai.ride.is_some_and(|r| r.walker_progress.is_some())
-                        || u.ai.route.is_some_and(|r| {
+                        || u.ai.route().is_some_and(|r| {
                             core::nav::xz_dist(v.pos, r.waypoint) > core::ai::walker_drive::ARRIVE
                                 || (v.pos.y - r.waypoint.y).abs() > core::ai::SPOT_FLOOR_TOL
                         }))
@@ -3993,7 +3996,7 @@ impl NoProgress {
                 self.units[i] = None;
                 continue;
             }
-            let Some(r) = u.ai.route else {
+            let Some(r) = u.ai.route() else {
                 self.units[i] = None;
                 continue;
             };
@@ -4075,7 +4078,7 @@ fn stuck_census(
                     v.pos.x, v.pos.y, v.pos.z, v.flyer.ai.goal, v.flyer.ai.curve.is_some(), v.flyer.ai.cursor);
         }
 
-        let Some(r) = u.ai.route else {
+        let Some(r) = u.ai.route() else {
             continue;
         };
         let stall = noprog.stalled(*h, &r, sim.tick);
@@ -5249,7 +5252,7 @@ fn run_map(
         if let Some(spec) = trace_unit.as_ref() {
             if t.is_multiple_of(10) && t >= spec.1 && t <= spec.2 {
                 if let Some(u) = w.sim.units.get(spec.0).filter(|u| u.alive) {
-                    let r = u.ai.route;
+                    let r = u.ai.route();
                     eprintln!(
                         "trace {t} pos ({:.1},{:.2},{:.1}) vel {:.1} gr {} {:?} steer {} slide {} leg {:?}->{:?} wp {:?} corner {:?} sidestep {} stuck {} lost {:?} tgt {} lvl {:?}",
                         u.soldier.pos.x, u.soldier.pos.y, u.soldier.pos.z,
@@ -5710,7 +5713,7 @@ fn run_map(
                     None => "none".to_owned(),
                 },
             );
-            let route = u.ai.route.map_or_else(
+            let route = u.ai.route().map_or_else(
                 || "none".to_owned(),
                 |r| {
                     format!(
@@ -5723,11 +5726,11 @@ fn run_map(
                     )
                 },
             );
-            let stuck = u.ai.route.map_or(0, |r| r.stuck_run);
+            let stuck = u.ai.route().map_or(0, |r| r.stuck_run);
             // Phase A.2: the WAYPOINT'S GROUND VERDICT, asked the way the
             // follower asks it — at this unit's own y — and the push the
             // wall pass actually applied to it last tick.
-            let verdict = u.ai.route.map_or_else(
+            let verdict = u.ai.route().map_or_else(
                 || "-".to_owned(),
                 |r| {
                     let at = |y: f32| {
@@ -5771,7 +5774,7 @@ fn run_map(
             // sub-waypoint it is aiming at (a detour corner, else the
             // leg's own waypoint).
             let steer = u.ai.steer.label();
-            let sub = u.ai.route.map_or_else(
+            let sub = u.ai.route().map_or_else(
                 || "-".to_owned(),
                 |r| match r.corner() {
                     Some(c) => format!(
@@ -6550,10 +6553,13 @@ mod diagnostic_tests {
             },
         });
         assert!(sim.seat_unit(h, v, seat));
-        sim.unit_mut(h).unwrap().ai.route = Some(core::ai::Route {
-            waypoint: Vec3::X * 100.0,
-            ..Default::default()
-        });
+        sim.unit_mut(h)
+            .unwrap()
+            .ai
+            .install_route_for_fixture(Some(core::ai::Route {
+                waypoint: Vec3::X * 100.0,
+                ..Default::default()
+            }));
         if kind == core::vehicle::VehicleKind::Walker && seat == 0 {
             sim.unit_mut(h)
                 .unwrap()
@@ -6578,7 +6584,7 @@ mod diagnostic_tests {
                 let mut watch = NoProgress::default();
                 watch.observe(&sim, 0);
                 watch.observe(&sim, NO_PROGRESS_TICKS);
-                let route = sim.unit(h).unwrap().ai.route.unwrap();
+                let route = sim.unit(h).unwrap().ai.route().unwrap();
                 assert!(
                     watch.stalled(h, &route, NO_PROGRESS_TICKS).is_none(),
                     "{kind:?} seat {seat}"
@@ -6596,7 +6602,7 @@ mod diagnostic_tests {
             if foot {
                 sim.unseat_unit(h);
             }
-            let route = sim.unit(h).unwrap().ai.route.unwrap();
+            let route = sim.unit(h).unwrap().ai.route().unwrap();
             let mut watch = NoProgress::default();
             watch.observe(&sim, 0);
             watch.observe(&sim, NO_PROGRESS_TICKS);
@@ -6613,7 +6619,7 @@ mod diagnostic_tests {
         let (mut sim, h) = leg_fixture(VehicleKind::Flyer, 0);
         let mount = sim.unit(h).unwrap().mount.unwrap();
         sim.unseat_unit(h);
-        let route = sim.unit(h).unwrap().ai.route.unwrap();
+        let route = sim.unit(h).unwrap().ai.route().unwrap();
         let mut watch = NoProgress::default();
         watch.observe(&sim, 0);
         assert!(sim.seat_unit(h, mount.vehicle, mount.seat));
@@ -6630,9 +6636,10 @@ mod diagnostic_tests {
     #[test]
     fn no_progress_drops_a_parked_walkers_clock_but_keeps_active_stuck_drivers() {
         let (mut sim, h) = leg_fixture(core::vehicle::VehicleKind::Walker, 0);
-        sim.unit_mut(h).unwrap().ai.route.as_mut().unwrap().waypoint =
-            Vec3::X * ((NO_PROGRESS_GAIN + core::ai::walker_drive::ARRIVE) * 0.5);
-        let route = sim.unit(h).unwrap().ai.route.unwrap();
+        let ai = &mut sim.unit_mut(h).unwrap().ai;
+        let mut route = ai.route().unwrap();
+        route.waypoint = Vec3::X * ((NO_PROGRESS_GAIN + core::ai::walker_drive::ARRIVE) * 0.5);
+        ai.install_route_for_fixture(Some(route));
         let mut watch = NoProgress::default();
         watch.observe(&sim, 0);
         sim.unit_mut(h)
@@ -6668,9 +6675,10 @@ mod diagnostic_tests {
         for waypoint in [Vec3::X * 100.0, Vec3::new(3.0, 10.0, 0.0)] {
             let (mut sim, h) = leg_fixture(core::vehicle::VehicleKind::Walker, 0);
             let u = sim.unit_mut(h).unwrap();
-            u.ai.route.as_mut().unwrap().waypoint = waypoint;
+            let mut route = u.ai.route().unwrap();
+            route.waypoint = waypoint;
+            u.ai.install_route_for_fixture(Some(route));
             u.ai.ride.as_mut().unwrap().walker_progress = None;
-            let route = u.ai.route.unwrap();
             let mut watch = NoProgress::default();
             watch.observe(&sim, 0);
             watch.observe(&sim, NO_PROGRESS_TICKS);
@@ -6721,7 +6729,7 @@ mod diagnostic_tests {
         for phase in [Landed, Takeoff, Flying] {
             let (mut sim, h) = leg_fixture(core::vehicle::VehicleKind::Flyer, 0);
             flight_intent(&mut sim, h, phase);
-            sim.unit_mut(h).unwrap().ai.route = None;
+            sim.unit_mut(h).unwrap().ai.install_route_for_fixture(None);
             let m = sim.unit(h).unwrap().mount.unwrap();
             if phase == Flying {
                 // BF2 uses its own curve, not an infantry leg or BF1 goal.
@@ -6852,7 +6860,7 @@ mod diagnostic_tests {
                 watch.observe(&sim, tick);
                 assert_eq!(sim.hash(), hash);
                 assert!(watch.flyer_stalled(h, tick).is_none(), "{case} at {tick}");
-                let route = sim.unit(h).unwrap().ai.route.unwrap();
+                let route = sim.unit(h).unwrap().ai.route().unwrap();
                 assert!(watch.stalled(h, &route, tick).is_none(), "old leg: {case}");
             }
         }

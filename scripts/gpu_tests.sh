@@ -7,7 +7,8 @@
 #   scripts/gpu_tests.sh --replays  # headless sim/replay referees (GAME overrides binary)
 #   scripts/gpu_tests.sh --goldens GROUP... # selected golden groups
 #   scripts/gpu_tests.sh --game FILTER # ignored game suite GPU tests
-#   scripts/gpu_tests.sh --game-lib [CARGO_ARGS] # serial game lib, including headless tests
+#   scripts/gpu_tests.sh --game --include-ignored FILTER # include ordinary game suite tests
+#   scripts/gpu_tests.sh --game-lib [--include-ignored] [CARGO_ARGS] # serial game lib
 #   scripts/gpu_tests.sh --battle-launch # owned Hero Assault shell launch checks
 #   scripts/gpu_tests.sh --render   # only the render crate's GPU tests
 #   scripts/gpu_tests.sh --hit-feedback # issue #104 captures on fresh side bakes
@@ -27,7 +28,12 @@ fi
 
 if [ "${1:-}" = "--game" ]; then
     shift
-    exec cargo test -p game --test suite "$@" -- --ignored --test-threads=1 --nocapture
+    test_mode=--ignored
+    if [ "${1:-}" = "--include-ignored" ]; then
+        test_mode=$1
+        shift
+    fi
+    exec cargo test -p game --test suite "$@" -- "$test_mode" --test-threads=1 --nocapture
 fi
 
 if [ "${1:-}" = "--battle-launch" ]; then
@@ -36,13 +42,18 @@ fi
 
 if [ "${1:-}" = "--game-lib" ]; then
   shift
+  test_args=(--test-threads=1)
+  if [ "${1:-}" = "--include-ignored" ]; then
+    test_args+=("$1")
+    shift
+  fi
   for arg in "$@"; do
     if [ "$arg" = -- ]; then
       echo 'gpu_tests: --game-lib accepts Cargo arguments only' >&2
       exit 2
     fi
   done
-  exec cargo test -p game --lib "$@" -- --test-threads=1
+  exec cargo test -p game --lib "$@" -- "${test_args[@]}"
 fi
 
 if [ "${1:-}" = "--hit-feedback" ]; then

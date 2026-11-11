@@ -940,15 +940,15 @@ mod tests {
         let (mut sim, h) = hull_sim(Vec3::new(0.0, 0.0, -8.0), HULL, 0.0);
         let at = |sim: &mut Sim, pos: Vec3| {
             let mut st = sim.unit(h).expect("alive").ai;
-            let mut r = st.route.expect("a route");
+            let mut r = st.route().expect("a route");
             r.detour[0] = glam::Vec2::new(0.3, -8.5);
             r.detour[1] = glam::Vec2::new(5.0, -20.0);
             (r.detour_len, r.detour_at) = (2, 0);
-            st.route = Some(r);
+            st.install_route_for_fixture(Some(r));
             sim.unit_mut(h).expect("alive").soldier.pos = pos;
             let mut nt = NavTick::default();
             crate::ai::route::advance_route(sim, h, &mut st, pos, 0.0, &mut nt);
-            st.route.expect("a route").detour_at
+            st.route().expect("a route").detour_at
         };
         // (A tick, so the bot has its route.)
         sim.step(&[PadState::default()]);
@@ -1026,7 +1026,7 @@ mod tests {
                     u.ai.steer,
                     SteerPick::Fwd | SteerPick::Round | SteerPick::Idle
                 ));
-                if hop.is_none() && u.ai.route.is_some_and(|r| r.next_hub == 2) {
+                if hop.is_none() && u.ai.route().is_some_and(|r| r.next_hub == 2) {
                     hop = Some((t, nav::xz_dist(u.soldier.pos, Vec3::new(0.0, 0.0, -40.0))));
                 }
             }
@@ -1150,7 +1150,7 @@ mod tests {
 
     /// Card OBSR: a commitment met at a rim barrier is marked so
     /// ([`Round::rim`]) — the progress window gives it no allowance
-    /// (`mover::stuck_window`) — and one met at a wall is not.
+    /// (`route::progress`) — and one met at a wall is not.
     #[test]
     fn a_commitment_at_a_rim_barrier_is_marked() {
         let rim_of = |sim: &Sim, h: UnitHandle, want: Vec3| {

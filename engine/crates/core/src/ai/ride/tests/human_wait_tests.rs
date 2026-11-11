@@ -424,21 +424,21 @@ fn hwait_extension_preserves_route_rng_events_and_bailout() {
         let (mut s, b, v, _) = human_scene(kind, 8.0, 0.0);
         held_steps(&mut s, b, v, 180);
         let mut st = s.unit(b).unwrap().ai;
-        st.route = Some(super::super::super::state::Route {
+        st.install_route_for_fixture(Some(super::super::super::state::Route {
             waypoint: Vec3::new(0.0, 0.0, -300.0),
             ref_dist: 300.0,
             stuck_ticks: 59,
             stuck_run: 100,
             sidestep: 7,
             ..Default::default()
-        });
-        let route = st.route;
+        }));
+        let route = st.route();
         let rng = s.rng.state();
         let events = s.events.len();
         let follower = s.vehicle(v).unwrap().hover.ai;
         let m = s.unit(b).unwrap().mount.unwrap();
         let (_, nt) = drive(&s, b, m, &mut st, NavTick::default(), true);
-        assert_eq!(st.route, route);
+        assert_eq!(st.route(), route);
         assert_eq!(nt.stuck_run, 0);
         assert!(!st.ride.unwrap().use_req);
         if let Some(h) = st.ride.unwrap().hover {

@@ -1,8 +1,10 @@
 //! GBOARD/WGORD call targets are consumed only at scheduled thinks over retained orders.
 //! Foot-bot tick priority chain, valid boarding maintenance (CWAIT), and failed-walk recovery.
 
+use crate::ai::brain::intent::Acts;
 use crate::ai::census;
 use crate::ai::draw::{stance_hold, unit_unit, SALT_DODGE};
+use crate::ai::fix::{self, ServePlan};
 use crate::ai::gunner_foot::{self, AimRequest};
 use crate::ai::mover::{self, MoveRequest};
 use crate::ai::route::{advance_route, leg_point, retarget, sub_point};
@@ -34,12 +36,8 @@ use super::Tick;
 /// when one is safe ([`crate::ai::unseen`]).
 pub fn think(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let (was, cp) = (st.behaviour, st.target_cp);
-    let (mut pad, mut nt) = chain(sim, me, st);
-    // Card TBLD: a fixer at its turret stands and holds its cutter on it.
-    if let Some(p) = crate::ai::fix::serve(sim, me, st) {
-        pad = p;
-    }
-    crate::ai::droideka::steer(sim, me, st, &mut pad);
+    let (mut pad, mut nt, serve) = chain(sim, me, st);
+    crate::ai::brain::finish_pad(sim, me, st, serve, &mut pad);
     // Card UNSN: a bot on the level given up for going nowhere is moved on
     // where no human sees it, else recycled.
     if nt.stalled != 0 && nt.recycle == 0 {
@@ -54,12 +52,12 @@ pub fn think(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick)
 }
 
 /// One tick of the priority chain ([`think`]).
-fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
+fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Option<ServePlan>) {
     let mut nt = NavTick::default();
     st.walk = WalkAsk::default();
     let Some(u) = sim.unit(me) else {
         st.jet.flight = None;
-        return (PadState::default(), nt);
+        return (PadState::default(), nt, None);
     };
     super::ride::settle(sim, st);
     let eye = u.ai_eye();
@@ -200,7 +198,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         {
             if let Some(at) = super::ride::board_point(sim, st) {
                 if st.ride.is_some_and(|r| r.since == sim.tick) {
-                    st.route = None;
+                    super::route::clear(st);
                     nt.claim = NavTick::CLAIM_NEW;
                 }
                 super::route::retarget_board(sim, me, st, at, &mut nt);
@@ -338,13 +336,15 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         }
     }
 
+    let serve = fix::serve_plan(sim, u, st);
     // Card VAI: a seated bot's think is its seat's (`ride::drive`).
     if let Some(m) = u.mount {
         st.jet.flight = None;
         st.stall = None; // a rider is not on the walker's watch (card RCYC)
         st.mv = MoverState::default();
         st.behaviour = Behaviour::Ride;
-        return super::ride::drive(sim, me, m, st, nt, thinking);
+        let (pad, nt) = super::ride::drive(sim, me, m, st, nt, thinking);
+        return (pad, nt, serve);
     }
 
     let mut pad = PadState::default();
@@ -373,6 +373,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         wc,
         tier,
         skill,
+        rules: super::UnitRules::for_unit(sim, u),
     };
     // D9: the AI sniper distance table's spread, every tick (the gunner's).
     let seen_at = enemy
@@ -389,10 +390,10 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         }
     }
 
-    let leg_hub = st.route.filter(|r| !r.is_last()).map(|r| r.next_hub);
+    let leg_hub = st.route().filter(|r| !r.is_last()).map(|r| r.next_hub);
     advance_route(sim, me, st, pos, 0.0, &mut nt);
     // Card HOLD: a hub just reached settles a hold that has run out.
-    if leg_hub.is_some_and(|h| st.route.map(|r| r.next_hub) != Some(h)) {
+    if leg_hub.is_some_and(|h| st.route().map(|r| r.next_hub) != Some(h)) {
         hub_reached(sim, st);
     }
     // ...and a grenade on the ground near by is a thing to run from.
@@ -443,16 +444,10 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             let side: i8 = if st.slide > 0 { -1 } else { 1 };
             st.dodge_until = sim.tick + DODGE_COOLDOWN;
             nt.levers |= census::LV_DODGE;
-            match st.route {
-                Some(mut r) => {
-                    r.sidestep = side * (SIDESTEP_TICKS + 1);
-                    st.route = Some(r);
-                }
-                // Nothing to offset: strafe the pad directly for the same window.
-                None => {
-                    st.strafe_until = sim.tick + SIDESTEP_TICKS as u64;
-                    st.strafe_side = side;
-                }
+            // Nothing to offset: strafe the pad directly for the same window.
+            if !super::route::dodge(st, side) {
+                st.strafe_until = sim.tick + SIDESTEP_TICKS as u64;
+                st.strafe_side = side;
             }
         }
     }
@@ -465,21 +460,21 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         st.hold = Some(h);
     }
 
-    let route_leg = st.route.filter(|r| !r.is_last());
+    let route_leg = st.route().filter(|r| !r.is_last());
     let post = st.target_cp.and_then(|i| sim.cps.get(i as usize));
 
     // The point this tick walks at: the current detour corner, else the leg's
     // waypoint, else (no graph at all) the target post. A corner is XZ only —
     // walking is XZ and the gun is levelled while travelling — so it takes the
     // unit's own y and costs no ground query.
-    let corner = st.route.and_then(|r| r.corner());
+    let corner = st.route().and_then(|r| r.corner());
     // Card DFOCUS: a focuser that lost sight of its human walks to where he
     // was last seen, when that is near (`dfocus::push`).
     let push = crate::ai::dfocus::push(sim, me, st, pos).filter(|_| st.cmd.is_none());
     if thinking && push.is_some() {
         nt.levers |= census::LV_PUSH;
     }
-    let goal: Option<Vec3> = match (st.route, st.cmd) {
+    let goal: Option<Vec3> = match (st.route(), st.cmd) {
         _ if push.is_some() => push,
         // On an arc leg, along the arc's line (`leg_point`) — but not while
         // the steering is going round something (`slide`): a wall on the line
@@ -512,7 +507,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let boarding = super::ride::board_goal(sim, me, u, st, &mut nt);
     let item = crate::ai::items::goal(sim, u, st).filter(|_| flee.is_none());
     let goal = match boarding {
-        Some(_) if st.route.is_some_and(|r| !r.is_last()) => goal,
+        Some(_) if st.route().is_some_and(|r| !r.is_last()) => goal,
         _ => boarding.or(goal),
     };
     // Card BNDS: a bot off the playable level walks BACK to it before
@@ -563,7 +558,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     // and straight at it on the last leg and with no route.
     let ring = ring_walk(sim, st).filter(|_| no_urgent_move && st.cmd.is_none() && mend.is_none());
     let goal = match ring {
-        Some(p) if st.route.is_none_or(|r| r.is_last()) => Some(p),
+        Some(p) if st.route().is_none_or(|r| r.is_last()) => Some(p),
         _ => goal,
     };
     let at_ring = ring.filter(|p| goal == Some(*p));
@@ -572,7 +567,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let spot = super::snipe::walk(st)
         .filter(|_| no_urgent_move && st.cmd.is_none() && ring.is_none() && mend.is_none());
     let goal = match spot {
-        Some(p) if st.route.is_none_or(|r| r.is_last()) => Some(p),
+        Some(p) if st.route().is_none_or(|r| r.is_last()) => Some(p),
         _ => goal,
     };
     let at_spot = spot.filter(|p| goal == Some(*p));
@@ -581,7 +576,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     // and the spot (it walks only while no enemy is seen).
     let fixing = crate::ai::fix::walk(sim, me, st).filter(|_| no_urgent_move && st.cmd.is_none());
     let goal = match fixing {
-        Some(p) if st.route.is_none_or(|r| r.is_last()) => Some(p),
+        Some(p) if st.route().is_none_or(|r| r.is_last()) => Some(p),
         _ => goal,
     };
     let at_fix = fixing.filter(|p| goal == Some(*p));
@@ -594,7 +589,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             && push.is_none()
             && u.command.is_none()
             && st.cmd.is_none()
-            && match (st.route, sim.nav.as_ref()) {
+            && match (st.route(), sim.nav.as_ref()) {
                 (Some(r), Some(g)) if r.is_last() && r.corner().is_none() => {
                     use super::route::{mover, start_hub, unit_goal_hub};
                     let hub = unit_goal_hub(sim, g, mover(sim, u), station.pos);
@@ -643,7 +638,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         WalkAsk::LEG if ring.is_some() => at_ring.map(|p| (p, RING_ARRIVE)),
         WalkAsk::LEG if spot.is_some() => at_spot.map(|p| (p, RING_ARRIVE)),
         WalkAsk::LEG if push.is_some() && goal == push => push.map(|p| (p, CORNER_ARRIVE)),
-        WalkAsk::LEG => match (st.route, st.cmd) {
+        WalkAsk::LEG => match (st.route(), st.cmd) {
             (_, Some(_)) => None,
             (Some(r), None) => r.is_last().then_some((r.waypoint, CORNER_ARRIVE)),
             (None, None) => goal.map(|g| (g, CORNER_ARRIVE)),
@@ -753,7 +748,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
             (None, None, None, None) => AimRequest::Travel(match post {
                 Some(cp) => cp.def.pos + Vec3::Y * 1.4,
                 // Hunting on the last leg: the destination hub itself.
-                None => match st.route {
+                None => match st.route() {
                     Some(r) => r.waypoint,
                     // D6: a commanded unit LOOKS where it walks — the idle arm
                     // below is for a unit with no route, no post AND no order.
@@ -763,7 +758,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
                             st.steer = SteerPick::Idle;
                             st.behaviour = Behaviour::None;
                             st.jet.cancel(u.soldier.stance);
-                            return (pad, nt);
+                            return (pad, nt, serve);
                         }
                     },
                 },
@@ -776,7 +771,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         st.steer = SteerPick::Idle;
         st.behaviour = Behaviour::None;
         st.jet.cancel(u.soldier.stance);
-        return (pad, nt);
+        return (pad, nt, serve);
     };
     // Card FFLN: a friend in the line of fire. The shot waits (the gunner), and a
     // holder whose last step's commit time is over steps aside, away from the
@@ -844,7 +839,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         super::tactic::release(st, sim.tick);
         st.hold = None;
         st.fight.mode = 0;
-        st.route = None;
+        super::route::clear(st);
         st.want_stance = 0;
     } else if wc.saber.is_none() {
         st.melee = None;
@@ -852,7 +847,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     // Card TPOS: hidden at its position a bot does not see its target - the
     // hide phase's point - and it keeps the position while it remembers it
     // (without this the fight lapsed 2 s into the hide and the bot walked
-    // off, then back: the maintainer's Kamino scene).
+    // off, then back: the Kamino playtest).
     // Card TEAM: not on a told record - a friend's sight is aimed at, it
     // does not keep the bot at a position it cannot fire from.
     // Card TPOSR: and the Tactician runs on the remembered target as on a
@@ -927,19 +922,23 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         hold: holding,
         flee: flee.is_some(),
         boarding: boarding.is_some(),
-        roll,
+        serving: serve.is_some(),
         excused,
-        // Card HVYW (OURS): ... but not for a throw at a VEHICLE that cannot
-        // be made from here - the grenade is the one weapon most bots have
-        // for a tank and no 3 s window ends that choice, so a bot under a
-        // turret its arc does not reach stood until it was shot (BF1 Rhen
-        // Var, seed 3: 40 s). It walks on, and throws where it can.
-        throwing: item.is_none()
-            && enemy.is_some_and(|e| e.mount.is_none() || !gun.no_throw)
-            && matches!(
-                super::arsenal::armed(sim, u, st),
-                super::arsenal::Armed::Thrown(..)
-            ),
+        acts: Acts {
+            roll,
+            melee_jump: st.melee.is_some_and(|m| m.jump_tick == Some(sim.tick)),
+            // Card HVYW (OURS): ... but not for a throw at a VEHICLE that cannot
+            // be made from here - the grenade is the one weapon most bots have
+            // for a tank and no 3 s window ends that choice, so a bot under a
+            // turret its arc does not reach stood until it was shot (BF1 Rhen
+            // Var, seed 3: 40 s). measure: stock movement when the anti-vehicle throw arc is blocked.
+            throw_stand: item.is_none()
+                && enemy.is_some_and(|e| e.mount.is_none() || !gun.no_throw)
+                && matches!(
+                    super::arsenal::armed(sim, u, st),
+                    super::arsenal::Armed::Thrown(..)
+                ),
+        },
     };
     if let Some(goal) = melee_goal {
         mv.kind = WalkAsk::LEG;
@@ -948,7 +947,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         mv.post = None;
         mv.in_range = false;
         mv.hold = None;
-        mv.throwing = false;
+        mv.acts.throw_stand = false;
     }
     // The mover: the move sticks, the stance, the roll and the jump. It
     // answers whether the bot stands at its post.
@@ -1077,7 +1076,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         0
     };
     nt.dwell = st.unreachable_dwell;
-    (pad, nt)
+    (pad, nt, serve)
 }
 
 /// The farthest a bot on foot fights: the longest AI range of the weapons it
@@ -1108,7 +1107,7 @@ fn guard_post(sim: &Sim, st: &AiState) -> Option<Vec3> {
 /// failures since the walk last made progress). The ladder:
 ///
 /// 1. plan again from the hub the bot stands in and side-step — the window's
-///    own cure (`mover::stuck_window`, `route::replan`), every failure;
+///    own cure (`route::progress`, `route::replan`), every failure;
 /// 2. (card RETW: back along the floor to a hub it can stand level with);
 /// 3. on every [`GIVE_UP_AFTER`]-th failure give the goal up — a boarder
 ///    drops its claim; any other reports its post and the commander draws
@@ -1153,6 +1152,3 @@ fn hub_reached(sim: &Sim, st: &mut AiState) {
         st.hold = (h.skip > 0).then_some(h);
     }
 }
-
-#[cfg(test)]
-mod tests;

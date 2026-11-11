@@ -34,6 +34,10 @@ enum Flight {
         target: VehicleHandle,
         anchors: Vec<Anchor>,
     },
+    Detached {
+        target: VehicleHandle,
+        anchors: Vec<Anchor>,
+    },
 }
 
 #[derive(Debug)]
@@ -77,7 +81,7 @@ impl TowFall {
 
 impl TowCable {
     fn tripped(&self) -> bool {
-        matches!(&self.flight, Flight::Latched { anchors, .. } if anchors.len() == WRAPS)
+        matches!(self.flight, Flight::Detached { .. })
     }
 
     pub(super) fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
@@ -108,8 +112,15 @@ impl TowCable {
                     eat(&x.to_bits().to_le_bytes());
                 }
             }
-            Flight::Latched { target, anchors } => {
-                eat(&[anchors.len() as u8]);
+            Flight::Latched { target, anchors } | Flight::Detached { target, anchors } => {
+                let count = anchors.len() as u8;
+                // The high bit distinguishes the full live phase from the old count tags.
+                let tag = if anchors.len() == WRAPS && !self.tripped() {
+                    count | 0x80
+                } else {
+                    count
+                };
+                eat(&[tag]);
                 eat(&target.index.to_le_bytes());
                 eat(&target.gen.to_le_bytes());
                 for anchor in anchors {
@@ -255,17 +266,10 @@ impl Sim {
     }
 
     fn fly_tow(&mut self, cable: &mut TowCable, dt: f32) -> bool {
-        if let Flight::Latched { target, anchors } = &mut cable.flight {
-            if anchors.len() == WRAPS {
-                return self.step_tripped_tow(
-                    *target,
-                    anchors,
-                    cable.mount.vehicle,
-                    cable.shooter,
-                    dt,
-                    &mut cable.points,
-                );
-            }
+        if cable.tripped()
+            || matches!(&cable.flight, Flight::Latched { anchors, .. } if anchors.len() == WRAPS)
+        {
+            return self.step_full_tow(cable, dt);
         }
         if self.unit(cable.shooter.owner).and_then(|u| u.mount) != Some(cable.mount) {
             return false;
@@ -355,31 +359,39 @@ impl Sim {
                 else {
                     return false;
                 };
-                advance_latch(
+                let space = self.space_round();
+                let active = advance_latch(
                     &parts,
                     anchors,
-                    muzzle,
-                    aim,
+                    (muzzle, aim),
                     cable.class,
                     dt,
                     &mut cable.points,
-                ) || anchors.len() == WRAPS
+                    space,
+                );
+                if anchors.len() < WRAPS {
+                    return active;
+                }
+                if space {
+                    cable.flight = Flight::Detached {
+                        target: *target,
+                        anchors: std::mem::take(anchors),
+                    };
+                } else {
+                    cable.points.clear();
+                }
+                true
             }
+            Flight::Detached { .. } => unreachable!("detached wraps update before the live span"),
         }
     }
 
-    // FUN_00323178 state 3: the live link is gone but the wraps continue
-    // contacting the walker. The native call iterates the source seats,
-    // overriding friendly fire to 1 while it sends the ordnance packet.
-    fn step_tripped_tow(
-        &mut self,
-        target: VehicleHandle,
-        anchors: &mut [Anchor],
-        source: VehicleHandle,
-        shooter: Shooter,
-        dt: f32,
-        points: &mut Vec<Vec3>,
-    ) -> bool {
+    fn step_full_tow(&mut self, cable: &mut TowCable, dt: f32) -> bool {
+        let (target, anchors, detached) = match &mut cable.flight {
+            Flight::Latched { target, anchors } => (*target, anchors, false),
+            Flight::Detached { target, anchors } => (*target, anchors, true),
+            Flight::Flying { .. } => unreachable!("full wraps have a target"),
+        };
         let Some(walker) = self.vehicle(target) else {
             return false;
         };
@@ -394,9 +406,20 @@ impl Sim {
         if anchors.iter().any(|a| a.prim >= parts.len()) {
             return false;
         }
-        let Some(vehicle) = self.vehicle(source) else {
+        let Some(vehicle) = self.vehicle(cable.mount.vehicle) else {
             return false;
         };
+        // B2 FUN_00323178:316106–316139 and B1 FUN_002814f8:206776–206808
+        // clear the link one update after the last insert, then return.
+        if !detached {
+            settle_full_wraps(anchors, &parts, dt, &mut cable.points);
+            cable.flight = Flight::Detached {
+                target,
+                anchors: std::mem::take(anchors),
+            };
+            return true;
+        }
+        let shooter = cable.shooter;
         let bf2 = self.ground_rules == crate::soldier::GroundRules::Bf2;
         let seats: Vec<_> = if bf2 {
             vehicle
@@ -412,13 +435,7 @@ impl Sim {
         if seats.is_empty() {
             return false;
         }
-        relax_anchors(anchors, &parts, dt);
-        points.clear();
-        points.extend(
-            anchors
-                .iter()
-                .map(|a| parts[a.prim].frame.transform_point3(a.at)),
-        );
+        settle_full_wraps(anchors, &parts, dt, &mut cable.points);
         self.melee_lcg_active = true;
         // This is the same native stream as the saber's: 2 states per
         // uniform draw, choosing among the records preceding the final one.
@@ -473,6 +490,21 @@ impl Sim {
     }
 }
 
+fn settle_full_wraps(
+    anchors: &mut [Anchor],
+    parts: &[TowPrimitive],
+    dt: f32,
+    points: &mut Vec<Vec3>,
+) {
+    relax_anchors(anchors, parts, dt);
+    points.clear();
+    points.extend(
+        anchors
+            .iter()
+            .map(|a| parts[a.prim].frame.transform_point3(a.at)),
+    );
+}
+
 fn relax_anchors(anchors: &mut [Anchor], parts: &[TowPrimitive], dt: f32) {
     let newest = anchors.len().saturating_sub(1);
     for (index, anchor) in anchors.iter_mut().enumerate().skip(1) {
@@ -489,12 +521,13 @@ fn relax_anchors(anchors: &mut [Anchor], parts: &[TowPrimitive], dt: f32) {
 fn advance_latch(
     parts: &[TowPrimitive],
     anchors: &mut Vec<Anchor>,
-    muzzle: Vec3,
-    aim: Vec3,
+    muzzle_and_aim: (Vec3, Vec3),
     class: TowClass,
     dt: f32,
     out: &mut Vec<Vec3>,
+    space: bool,
 ) -> bool {
+    let (muzzle, aim) = muzzle_and_aim;
     if anchors.iter().any(|a| a.prim >= parts.len()) {
         return false;
     }
@@ -542,7 +575,8 @@ fn advance_latch(
             _ => {
                 // B2 FUN_00323178:316443–316497 stores half the world
                 // Hermite derivative at the hit's parameter along this chord.
-                let parameter = (chord as f32 + t / len) / CHORDS as f32;
+                let fraction = t / len;
+                let parameter = (chord as f32 + fraction) / CHORDS as f32;
                 let displacement = muzzle - start;
                 let end_tangent = aim * -GUN_TANGENT_LEN;
                 let cubic = start_tangent + end_tangent - displacement * 2.0;
@@ -550,15 +584,16 @@ fn advance_latch(
                 let derivative =
                     (cubic * (3.0 * parameter) + quadratic * 2.0) * parameter + start_tangent;
                 let inverse = parts[prim].frame.inverse();
+                // Both originals also scale the unit chord direction by the hit fraction
+                // for the stored point (B2:316442–316459, B1:206692–206721).
+                let advance = if space { t } else { fraction };
                 anchors.push(Anchor {
                     prim,
-                    at: inverse.transform_point3(w[0] + dir * t),
+                    at: inverse.transform_point3(w[0] + dir * advance),
                     tangent: derivative * 0.5,
                 });
                 if anchors.len() == WRAPS {
-                    // FUN_00323178 enters state 3 and clears
-                    // the firing vehicle's live cable link.
-                    // Detached wraps begin the damage path on the next update.
+                    // FUN_00322890 and FUN_00280c20 omit the full live span.
                     return false;
                 }
                 break;

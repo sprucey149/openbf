@@ -619,7 +619,7 @@ impl Scene {
             .manifest
             .water
             .as_ref()
-            .and_then(|w| w.wet.as_ref())
+            .and_then(ManifestWater::gameplay_mask)
             .and_then(|m| {
                 core::water::WetMask::new(m.grid, m.cell_size, m.half_extent, &m.cells())
             });
