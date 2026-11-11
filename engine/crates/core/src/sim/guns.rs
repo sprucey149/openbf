@@ -436,7 +436,7 @@ impl Sim {
                     .get(vehicle.class as usize)
                     .and_then(Option::as_ref)
                     .is_some_and(|p| p.bf2)
-                    && self.landing_regions.iter().any(|r| r.contains(vehicle.pos))));
+                    && self.flyer_region_coverage(vehicle).0));
         let mut shots = Vec::new();
         for (k, w) in g.weapons.iter().enumerate() {
             let held = match (channel, k) {

@@ -55,6 +55,40 @@ fn flyer_salvo_uses_each_authored_muzzle() {
 }
 
 #[test]
+fn flyer_region_overlap_distinguishes_firing_from_landing() {
+    for (x, overlap, inside) in [
+        (8.03, true, true),
+        (8.05, true, false),
+        (11.0, true, false),
+        (13.0, false, false),
+    ] {
+        let (mut sim, pilot, h) = world(true);
+        sim.flyer_params = vec![Some(crate::vehicle::flyer::FlyerParams::bf2())];
+        sim.blast_setup = vec![Some(crate::vehicle::BlastSetup {
+            explosion: None,
+            sphere_centre: Vec3::ZERO,
+            sphere_radius: 2.0,
+        })];
+        sim.landing_regions
+            .push(crate::region::Region::sphere(Vec3::ZERO, 10.0));
+        let v = sim.vehicle_mut(h).unwrap();
+        v.kind = VehicleKind::Flyer;
+        v.pos = Vec3::new(x, 0.0, 0.0);
+        v.flyer.phase = crate::vehicle::flyer::FlightPhase::Flying;
+        assert!(sim.seat_unit(pilot, h, 0));
+        assert_eq!(
+            sim.flyer_region_coverage(sim.vehicle(h).unwrap()),
+            (overlap, inside)
+        );
+        sim.seat_gun(pilot.index as usize, &pad(buttons::FIRE));
+        assert_eq!(
+            sim.events.iter().any(|e| matches!(e, Event::Shot { .. })),
+            !overlap
+        );
+    }
+}
+
+#[test]
 fn flyer_pilot_looks_along_untilted_body_without_accumulating_stick_or_mouse_pitch() {
     let (mut sim, pilot, h) = world(true);
     let v = sim.vehicle_mut(h).unwrap();

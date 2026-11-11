@@ -220,6 +220,7 @@ fn bf2_registered_landing_regions_gate_the_landing_button() {
         let env = FlyerEnvironment {
             require_landing_region: required,
             in_landing_region: inside,
+            almost_inside_landing_region: inside,
             ..FlyerEnvironment::default()
         };
         step(&mut v, &p, env, DT);

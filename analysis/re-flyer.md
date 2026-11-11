@@ -32,6 +32,14 @@ overlap, writes the float at flyer+`0x668`, and sets bit 5 at +`0x660`
 refreshed (B2:116574–116580). These are hangar/landing caps, not generic
 BF2 speed caps and not a distinction between atmospheric and space physics.
 
+Correction after the shield-edge playtest: BF2 `FUN_00202d08` requires the
+overlap to exceed 0.99 when a flying craft requests landing (117193–117218),
+while any nonzero overlap blocks firing (118290–118318). The earlier port
+used origin membership for both. The box calculation in `FUN_005ad8e0`
+(732152–732215) makes the 0.99 threshold a sphere inset of 0.98 times its
+radius. See `re-space-assault.md` for the rejected touchdown workaround and
+the unchecked original-game comparison.
+
 **Installed for space only (2026-11-01).** The sim implements these rules against
 `Sim::landing_regions`, filled from the mission's `landing_regions`, which
 `scripts/gen_missions.py` reads from `AddLandingRegion`. Only the space scripts make

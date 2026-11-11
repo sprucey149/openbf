@@ -135,6 +135,25 @@ impl Region {
         }
     }
 
+    pub fn almost_contains_sphere(&self, center: Vec3, radius: f32) -> bool {
+        if radius <= 0.0 {
+            return self.contains(center);
+        }
+        let margin = radius * 0.98;
+        match self.shape {
+            Shape::Sphere => (center - self.center).length() < self.w - margin,
+            Shape::Box => {
+                let inside = self.size - self.to_local(center).abs();
+                inside.x > margin && inside.y > margin && inside.z > margin
+            }
+            Shape::Cylinder => {
+                let local = self.to_local(center);
+                let radial = (local.x * local.x + local.z * local.z).sqrt();
+                self.size.x - radial > margin && self.size.y - local.y.abs() > margin
+            }
+        }
+    }
+
     /// Nominal footprint radius (placement/AI heuristics).
     pub fn radius(&self) -> f32 {
         match self.shape {
@@ -150,6 +169,22 @@ mod tests {
     use super::*;
 
     const ID: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+    #[test]
+    fn landing_requires_more_than_99_percent_sphere_overlap() {
+        let region = Region::from_rows("box", ID, [0.0; 3], [10.0; 3]).unwrap();
+        for (x, touch, inside) in [
+            (7.0, true, true),
+            (8.03, true, true),
+            (8.05, true, false),
+            (10.5, true, false),
+            (12.1, false, false),
+        ] {
+            let center = Vec3::new(x, 0.0, 0.0);
+            assert_eq!(region.touches_sphere(center, 2.0), touch);
+            assert_eq!(region.almost_contains_sphere(center, 2.0), inside);
+        }
+    }
 
     #[test]
     fn rotated_box_containment_is_strict_half_extents() {

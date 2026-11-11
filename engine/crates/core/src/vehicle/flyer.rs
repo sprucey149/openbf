@@ -584,6 +584,7 @@ pub struct FlyerEnvironment {
     pub min_height: f32,
     pub max_height: f32,
     pub in_landing_region: bool,
+    pub almost_inside_landing_region: bool,
     /// BF2 maps which register landing regions permit the toggle only in
     /// one. Maps without any registered region retain unrestricted landing.
     pub require_landing_region: bool,
@@ -598,6 +599,7 @@ impl Default for FlyerEnvironment {
             min_height: -200.0,
             max_height: 200.0,
             in_landing_region: false,
+            almost_inside_landing_region: false,
             player_aboard: false,
             crash_random: [0.0; 4],
             require_landing_region: false,
@@ -868,7 +870,8 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         }
         FlightPhase::Flying => {
             s.lift = 1.0;
-            if toggle && (!p.bf2 || !env.require_landing_region || env.in_landing_region) {
+            if toggle && (!p.bf2 || !env.require_landing_region || env.almost_inside_landing_region)
+            {
                 s.phase = FlightPhase::Landing;
             }
         }

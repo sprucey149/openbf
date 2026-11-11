@@ -27,6 +27,24 @@ impl Default for FlightLimits {
 }
 
 impl Sim {
+    pub(super) fn flyer_region_coverage(&self, vehicle: &crate::vehicle::Vehicle) -> (bool, bool) {
+        let sphere = self
+            .blast_setup
+            .get(vehicle.class as usize)
+            .and_then(Option::as_ref);
+        let center = sphere.map_or(vehicle.pos, |s| vehicle.pos + vehicle.rot * s.sphere_centre);
+        let radius = sphere.map_or(0.0, |s| s.sphere_radius.max(0.0));
+        let mut touches = false;
+        let mut inside = false;
+        for region in &self.landing_regions {
+            if region.contains(center) || (radius > 0.0 && region.touches_sphere(center, radius)) {
+                touches = true;
+                inside = region.almost_contains_sphere(center, radius);
+            }
+        }
+        (touches, inside)
+    }
+
     fn flyer_ground(&self, origin: Vec3, handle: VehicleHandle) -> Option<LandingSurface> {
         let mut surface = self.heightfield.as_ref().and_then(|hf| {
             let height = hf.height_at(origin.x, origin.z);
@@ -173,12 +191,13 @@ impl Sim {
             } else {
                 self.flight_limits.ai
             };
+            let (in_landing_region, almost_inside_landing_region) = self.flyer_region_coverage(v);
             let env = FlyerEnvironment {
                 ground: self.flyer_ground(from, handle),
                 min_height,
                 max_height,
-                // PROVISIONAL: origin membership; PS2 tests the flyer's sphere.
-                in_landing_region: self.landing_regions.iter().any(|r| r.contains(from)),
+                in_landing_region,
+                almost_inside_landing_region,
                 require_landing_region: !self.landing_regions.is_empty(),
                 player_aboard,
                 crash_random,
