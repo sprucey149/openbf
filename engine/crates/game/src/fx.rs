@@ -49,12 +49,14 @@ pub mod chunks;
 pub mod draw;
 pub mod emitter;
 mod flame;
+mod flyer_spray;
 mod force;
 mod jet;
 mod props;
 mod repair;
 pub mod ripple;
 mod sky;
+mod space_dust;
 mod storm;
 mod trail;
 mod turret;
@@ -730,6 +732,8 @@ fn splash_at(pos: Vec3, level: f32) -> Vec3 {
 #[derive(Default)]
 pub struct Fx {
     vehicle_health: Vec<Option<(u32, f32)>>,
+    flyer_phases: Vec<Option<(u32, core::vehicle::flyer::FlightPhase)>>,
+    space_dust: Option<space_dust::SpaceDust>,
     puffs: Vec<Puff>,
     library: Option<Library>,
     live: Vec<LiveEffect>,
@@ -823,7 +827,9 @@ impl Fx {
 
     /// The map's effect layers (see [`Library::load`]).
     pub fn load(assets_dir: &Path, map_dir: &Path, game: &str, factions: &[&str]) -> Fx {
-        Fx::with_library(Library::load(assets_dir, map_dir, game, factions))
+        let mut fx = Fx::with_library(Library::load(assets_dir, map_dir, game, factions));
+        fx.space_dust = space_dust::SpaceDust::load(map_dir);
+        fx
     }
 
     /// The effect layers of the map at `map_dir` for `walk`'s two sides.
@@ -1152,6 +1158,9 @@ impl Fx {
                 textures: &mut self.textures,
                 models: &mut self.models,
             };
+            if let Some(dust) = &self.space_dust {
+                dust.draws(camera, &mut assets, &mut out);
+            }
             for e in &self.live {
                 e.draws_with_bias(
                     camera.position,

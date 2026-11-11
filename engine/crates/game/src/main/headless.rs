@@ -851,6 +851,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
             frame.bolts.set_fire_points(fire_points);
             frame.fx.set_jet_frames(frame.vis.jet_frames(&walk));
             frame.fx.set_burn_frames(frame.vis.burn_frames(&walk));
+            frame.fx.advance_space_dust(&walk, core::TICK_DT);
             frame.fx.update(core::TICK_DT);
             if let Some(w) = frame.weather.as_mut() {
                 w.update(core::TICK_DT);

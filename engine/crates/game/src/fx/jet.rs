@@ -108,6 +108,7 @@ impl Fx {
         // position as the model, as well as the attached NoRegisterStep head.
         // Otherwise each new tick leaves bright particles ahead of a blended model.
         let saved = self.drawn_round_frames(&walk.sim);
+        self.advance_space_dust(walk, dt);
         if restore {
             walk.blend_out();
         }
