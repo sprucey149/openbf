@@ -313,7 +313,7 @@ Kick directions: no stick = straight up x JetJump; full forward = (up 0.740, for
   (5.25 x 1.5; corrected from the caller B2:160710–160717), strafe 6.6 m/s; the speed along D moves at most 30 x dt = 1.0 m/s per update. Level aim climbs:
   D.y = 0.16 / 1.0127 -> +1.66 m/s at full forward; aim 4.6 deg down flies level. Turn x 1.25 (players). Fuel:
   start costs 0.25, 0.16 / s -> 4.7 s from full, 1.6 s from the spawn's 0.5; empty to the border 0.24 in 2.0 s,
-  to full 8.3 s.
+  to full 8.3 s. (The port flies every jet trooper on BF1's profile instead since 2026-11-10: 7.5 s / 2.5 s, 13.)
 - **Jango / Boba**: as the jet trooper with kick 7, forward 2.0 x MaxSpeed, cost 0.15 / s (5.0 s from full).
 - **BF2 Geonosian**: kick 8, hover at 2.0 x 6.0 = 12 m/s forward, strafe 6.25, JetAcceleration 20 (default), cost
   0.1 / s, start 0.2, border 0.3 -> 8 s from full.
@@ -524,7 +524,34 @@ from spawn). A BF1 hover class now pays the net cost JetFuelCost - JetFuelRechar
 (`game::roster::bf1_net_jet_fuel_cost`): the jet trooper 0.2 - 0.1 = 0.1 / s (7.5 s from full, 2.5 s from spawn, BF1's
 own times, section 16's net drain), the BF1 Geonosian 0.1 - 0.03 = 0.07 / s (11.4 s). The disc's JetFuelInitialCost,
 border and spawn fuel are unchanged (they are the data in both games). Leap classes (cost 0) and every BF2 class keep
-their disc numbers. Do not revert this as "not the disc number": it is the translation of BF1's rule onto BF2's.
+their disc numbers (except the jet troopers since 2026-11-10, below). Do not revert this as "not the disc number": it is the translation of BF1's rule onto BF2's.
+
+**Amended 2026-11-10 (the maintainer, "one game", `[ours]`):** every jet trooper class on both discs flies on one fuel
+profile, BF1's as the port flies it: in-flight cost 0.1 / s, lift-off cost 0.25, border 0.24, refill 0.1 / s outside
+the jet, spawn 0.5. That is 7.5 s from full, 2.5 s from spawn, 2.4 s from empty back to the border and 10 s from empty
+to full (`game::roster::{JET_TROOPER_ROOTS, JET_TROOPER_FUEL_COST, JET_TROOPER_FUEL_RECHARGE, is_jet_trooper}`). The
+jet troopers are the classes whose chain reaches BF1's `rep_inf_jet_trooper` or BF2's `rep_inf_default_jettrooper`
+(ep2, ep3, training, rifleman) and that can start a hover (JetJump > 0, border <= 1); the ep2 sniper (JetJump 0,
+border 1.04) still never jets. It replaces BF2's disc drain 0.16 / s and refill 0.12 / s (4.7 s from full, 1.6 s from
+spawn, 8.3 s empty to full): a BF2 trooper now flies 1.6 times as long. The lift-off cost and border were already the
+same on both discs, so only the drain and the refill change; BF1's trooper keeps exactly its numbers (0.2 - 0.1 and
+0.1). Jango and Boba (5.0 s), Vader and the Emperor, the dark troopers' leap, the Jedi double jump and the
+Geonosians (BF2 8.0 s, BF1 net 0.07 / s, 11.4 s) keep their own; `bf1_net_jet_fuel_cost` now serves only a BF1 hover
+class that is not a jet trooper. The mover fixtures in `core/src/soldier/tests/jet.rs` keep the disc's 0.16 / 0.12
+because they replay the PS2 capture (section 16). Do not revert this as "not the disc number". Tests:
+`roster::every_jet_trooper_flies_as_long_as_bf1s`, `roster::the_jet_classes_carry_their_disc_numbers`.
+
+Bot rounds (`round_to_outcome 9000 42`, release, `JET_CENSUS=1`, main a99f64be against the profile):
+
+| map | jet classes | hash main | hash profile | jets main: hops / attacks | jets profile: hops / attacks |
+|---|---|---|---|---|---|
+| bf2_geo1 | ep2 jet trooper, Geonosian | 3abede4cc7914e00 | b17ea4a4507421cf | 35 / 10 | 11 / 17 |
+| bf2_mus1 (GCW) | dark trooper | c772c41b5300a1d7 | c772c41b5300a1d7 | 18 / 0 | 18 / 0 |
+| bf1_geo1 | BF1 jet trooper, Geonosian | caa3e80d39f4dcb9 | caa3e80d39f4dcb9 | 29 / 22 | 29 / 22 |
+
+The BF2 bot's hover-attack gate (`core::ai::jet`, the trip's time against the fuel left over the cost) opens about 1.6
+times farther away, and an attack takes the place of a plain hop, so BF2 jet-trooper bots attack from the air more
+and hop less. BF1 maps and maps without a jet trooper keep their hashes.
 
 Built for human players and the sim; bots, effects, sounds, the HUD bar and the animation are card JETP2 (12 steps
 9-13).
@@ -565,6 +592,7 @@ section until 2026-11-01).
 | | released stick | e^-2t | e^-2t off the flight and right axes; along them the approach also brakes 1 m/s an update |
 | BF1 jet trooper on BF2 rules | forward / strafe | (BF1: 13 / 9) | 9.75 / 5.63 (6.5 / 4.5 x 1.5 / 1.25) |
 | | flight from full / from spawn | (BF1: 7.5 s / 2.5 s, recharging in flight) | 7.5 s / 2.5 s (net cost 0.1, no recharge in flight; 3.75 s / 1.25 s before 2026-11-10) |
+| BF2 jet trooper as shipped | flight from full / from spawn / refill empty to full | (disc: 4.7 s / 1.6 s / 8.3 s) | 7.5 s / 2.5 s / 10 s (the one jet trooper profile, 2026-11-10) |
 | BF1 dark trooper on BF2 rules | | (BF1: no cancel, no drag, 19.6 s refill) | BF2's leap: tap-off, drag, stick at 10 m/s^2; refill to 0.49 at 0.025 / s = 19.6 s |
 | Vader / Emperor | start / hover / energy | full tank, 2.5 s, 30 | full tank (0.56 s from spawn), 2.5 s, 30; the bar holds while he hovers |
 | Jedi (JumpHeight 3.5) | double jump | 16.8 m/s, 40 energy | 16.84, 40; the stick's run speed |

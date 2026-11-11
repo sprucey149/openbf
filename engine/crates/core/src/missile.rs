@@ -172,6 +172,10 @@ pub struct Missile {
     /// death drops it (`re-ordnance-kinds.md` §4.3: no cone, range or LOS
     /// test in flight).
     pub target: Option<MissileTarget>,
+    /// The body of the target vehicle's hull this round steers to, its weak
+    /// part (`Sim::weak_part`), chosen at launch; `None` steers to the
+    /// target's own point.
+    pub part: Option<u16>,
 }
 
 impl Missile {
@@ -202,6 +206,7 @@ impl Missile {
             phases,
             launch_phases: phases,
             target,
+            part: None,
         }
     }
 

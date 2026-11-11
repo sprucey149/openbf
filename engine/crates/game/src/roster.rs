@@ -15,6 +15,7 @@
 //! What is PROVISIONAL here is labelled at its definition: the DEFAULT class
 //! lists, the `label` rule, and the `jet` route flag (no bot jets yet).
 
+pub mod awards;
 mod mines;
 mod remotes;
 #[cfg(test)]
@@ -249,16 +250,24 @@ pub fn load_classdb(classes_dir: &Path, game: &str, factions: &[&str]) -> Result
         ));
     }
     db.load_droid_chunks(&classes_dir.join("droid_chunks.ron"))?;
-    // A BF1 side whose class takes a BF2 class's weapons loads BF2's side too.
-    let mut donors: Vec<&str> = WEAPON_DONORS
-        .iter()
-        .filter_map(|d| d.class.split('_').next())
+    // A BF1 side loads BF2's side too: its classes carry BF2's award weapons
+    // (`awards`), and a `WEAPON_DONORS` class takes a BF2 class's whole kit.
+    // Only a donor class needs BF2's data; without it the others keep their
+    // disc kits.
+    let sides: Vec<&str> = FACTION_ORDER
+        .into_iter()
         .filter(|side| factions.contains(side))
         .collect();
-    donors.sort_unstable();
-    donors.dedup();
-    if game == "bf1" && !donors.is_empty() {
-        db.donor_weapons = Some(Box::new(load_classdb(classes_dir, "bf2", &donors)?));
+    let donor = WEAPON_DONORS
+        .iter()
+        .filter_map(|d| d.class.split('_').next())
+        .any(|side| sides.contains(&side));
+    if game == "bf1" && !sides.is_empty() {
+        match load_classdb(classes_dir, "bf2", &sides) {
+            Ok(bf2) => db.donor_weapons = Some(Box::new(bf2)),
+            Err(e) if donor => return Err(e),
+            Err(_) => {}
+        }
     }
     Ok(db)
 }
@@ -851,7 +860,8 @@ pub fn held_slots(db: &ClassDb, soldier: &str, primary: u8) -> Vec<HeldSlot> {
 /// (re-jetpack.md §2.2, §12). Rows: (BF1 class, its BF2 twin,
 /// JetAcceleration, the jet row or None for the ctor default 0.3 / 0.3 / 1.0).
 /// `tests/suite/roster.rs` holds the numbers to the BF2 twins' baked classes.
-/// A BF1 hover class also keeps BF1's net drain in flight
+/// Every jet trooper flies on one fuel profile ([`JET_TROOPER_FUEL_COST`]);
+/// another BF1 hover class keeps BF1's net drain in flight
 /// ([`bf1_net_jet_fuel_cost`]).
 pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
     (
@@ -874,6 +884,40 @@ pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
         Some([2.0, 1.25, 1.25]),
     ),
 ];
+
+/// The jet trooper classes' roots: BF1's own class and the BF2 base that
+/// the ep2, ep3, training, rifleman and sniper troopers inherit.
+pub const JET_TROOPER_ROOTS: &[&str] = &["rep_inf_jet_trooper", "rep_inf_default_jettrooper"];
+
+/// `[ours]` one jet trooper (the maintainer 2026-11-10, "one game"): every
+/// jet trooper on every map pays BF1's net in-flight drain, 0.2 - 0.1 per
+/// second ([`bf1_net_jet_fuel_cost`]). With the disc's lift-off cost 0.25
+/// (the same in both games) that is (1 - 0.25) / 0.1 = 7.5 s from full and
+/// (0.5 - 0.25) / 0.1 = 2.5 s from the spawn's half tank. BF2's disc drain
+/// is 0.16 (4.7 s / 1.6 s; re-jetpack.md §13).
+/// measure: a playtest hover from a full tank on a BF2 map against 7.5 s.
+pub const JET_TROOPER_FUEL_COST: f32 = 0.1;
+
+/// `[ours]` the jet trooper's refill per second outside the jet, BF1's rate
+/// (BF2's disc has 0.12): empty to the lift-off border in 2.4 s, to full in
+/// 10 s. BF1 maps keep their numbers exactly.
+/// replace: with the maintainer's rate after a playtest of the refill.
+pub const JET_TROOPER_FUEL_RECHARGE: f32 = 0.1;
+
+/// A jet trooper class: a hover jet that can start (JetJump over 0, a
+/// border a full tank reaches) on a chain through [`JET_TROOPER_ROOTS`].
+/// The BF2 sniper jet trooper (JetJump 0, border 1.04) never jets and is
+/// not one.
+pub fn is_jet_trooper(db: &ClassDb, class: &str, c: &SoldierConstants) -> bool {
+    c.jet_hover
+        && c.jet_jump > 0.0
+        && c.jet_fuel_min_border <= 1.0
+        && db.chain(class).iter().any(|d| {
+            JET_TROOPER_ROOTS
+                .iter()
+                .any(|r| r.eq_ignore_ascii_case(&d.name))
+        })
+}
 
 /// A soldier class's movement constants through its chain: the props, the
 /// collision-damage immunity, the jet's class data ([`jet_class_data`]) and whether a channel-0 weapon is a
@@ -945,8 +989,9 @@ pub fn soldier_constants(db: &ClassDb, class: &str) -> SoldierConstants {
 
 /// The class data `SoldierConstants::from_props` cannot read alone: the
 /// `ControlSpeed jet` row, child-most first (the PS2 applies each class's
-/// rows over its parent's, one stance at a time), and on a BF1 disc the
-/// net in-flight drain ([`bf1_net_jet_fuel_cost`]) and the
+/// rows over its parent's, one stance at a time), the jet trooper's fuel
+/// profile on both discs ([`is_jet_trooper`]), and on a BF1 disc another
+/// hover class's net in-flight drain ([`bf1_net_jet_fuel_cost`]) and the
 /// [`BF1_JET_BORROW`] numbers.
 fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
     let h = crate::classdb::fnv1a_lowercase("ControlSpeed");
@@ -961,10 +1006,15 @@ fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
     if let Some(r) = row {
         c.jet_control = r;
     }
+    if is_jet_trooper(db, class, c) {
+        c.jet_fuel_cost = JET_TROOPER_FUEL_COST;
+        c.jet_fuel_recharge = JET_TROOPER_FUEL_RECHARGE;
+    } else if !db.is_bf2() {
+        c.jet_fuel_cost = bf1_net_jet_fuel_cost(c);
+    }
     if db.is_bf2() {
         return;
     }
-    c.jet_fuel_cost = bf1_net_jet_fuel_cost(c);
     if let Some(&(_, _, accel, row)) = BF1_JET_BORROW
         .iter()
         .find(|(bf1, ..)| bf1.eq_ignore_ascii_case(class))
@@ -980,10 +1030,11 @@ fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
 
 /// `[ours]` (playtest 2026-11-05 B4): BF1 refills the tank in every stance,
 /// the hover included (B1:117346-117350), and a BF1 hover class's
-/// JetFuelCost was set for that. Under BF2's no-refill rule the class pays
-/// only the net cost (JetFuelCost - JetFuelRechargeRate), so it flies as
-/// long as on BF1: the jet trooper 7.5 s from full, 2.5 s from spawn
-/// (re-jetpack.md §6, §16). A leap class (cost 0) keeps its numbers.
+/// JetFuelCost was set for that. Under BF2's no-refill rule a BF1 hover
+/// class that is not a jet trooper (the Geonosian) pays only the net cost
+/// (JetFuelCost - JetFuelRechargeRate), so it flies as long as on BF1
+/// (re-jetpack.md §6, §16). The jet trooper's 0.2 - 0.1 is
+/// [`JET_TROOPER_FUEL_COST`]. A leap class (cost 0) keeps its numbers.
 /// measure: a BF1 PS2 jet trooper's hover time from a full tank, against
 /// the 7.5 s this gives.
 pub fn bf1_net_jet_fuel_cost(c: &SoldierConstants) -> f32 {
@@ -1015,7 +1066,7 @@ impl ClassRoster {
             _ => (db, class, false),
         };
         let twins = donor.map_or(&[][..], |d| d.twins);
-        let slots = weapon_db.weapon_slots(weapon_owner);
+        let mut slots = weapon_db.weapon_slots(weapon_owner);
         let primary = primary_slot(&slots).with_context(|| format!("{class}: no WeaponName"))?;
         let (weapon_name, total_clips, weapon_slot) = (
             primary.weapon.clone(),
@@ -1079,27 +1130,7 @@ impl ClassRoster {
                     .find(|(bf2, _)| *bf2 == own)
                     .map_or(own, |(_, bf1)| *bf1);
                 let native = weapon_from_db(db, name)?;
-                selected.fire_sound = native.fire_sound;
-                selected.fire_loop_sound = native.fire_loop_sound;
-                selected.reload_sound = native.reload_sound;
-                selected.empty_sound = native.empty_sound;
-                selected.change_sound = native.change_sound;
-                selected.ordnance.ordnance_sound = native.ordnance.ordnance_sound;
-                selected.ordnance.collision_sound = native.ordnance.collision_sound;
-                if let (Some(selected), Some(native)) =
-                    (&mut selected.ordnance.impact, native.ordnance.impact)
-                {
-                    if let (Some(selected), Some(native)) =
-                        (&mut selected.explosion, native.explosion)
-                    {
-                        selected.sound = native.sound;
-                    }
-                }
-                if let (Some(selected), Some(native)) =
-                    (&mut selected.ordnance.explosion, native.ordnance.explosion)
-                {
-                    selected.look.sound = native.look.sound;
-                }
+                awards::sound_as(selected, &native);
             }
         }
         let mut anim = class_anim(db, class, &db.weapon_slots(class));
@@ -1134,6 +1165,21 @@ impl ClassRoster {
         }
         let first_person_weapon =
             first_person_weapon(weapon_db, &weapon_name, weapon.offhand_weapon);
+        if let (false, false, Some(bf2)) = (donated, db.is_bf2(), db.donor_weapons.as_deref()) {
+            awards::add(
+                bf2,
+                awards::Kit {
+                    weapon: &weapon,
+                    weapon_slot,
+                    weapon_hud: weapon_hud(db, &weapon_name),
+                    weapon_geometry: weapon_geometry(db, class),
+                    first_person_weapon: first_person_weapon.clone(),
+                    held: &mut held,
+                    slots: &mut slots,
+                    anim: &mut anim,
+                },
+            );
+        }
         consts.pilot_skill = unit_type.eq_ignore_ascii_case("pilot");
         let jet = consts.has_jet();
         Ok(ClassRoster {

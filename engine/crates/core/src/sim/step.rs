@@ -569,9 +569,9 @@ impl Sim {
             let steer = super::input::Steer::of(&p);
             self.acquire_magnet_steering(slot, ph, p.pressed(buttons::FIRE), steer);
         }
-        // 2a. The launchers' dwell locks (card UORD §5): a human's BF2
-        //     lock (`foot_lock`) or BF1 magnet target, a bot's combat
-        //     target, counted against LockTime.
+        // 2a. The launchers' dwell locks (card UORD §5): a human's on-foot
+        //     lock (`foot_lock`), the magnet target in space, a bot's
+        //     combat target, counted against LockTime.
         self.tick_lock_on(&unit_pads, dt);
         self.tick_foot_lock(&mut unit_pads, dt);
         self.tick_locks(dt);

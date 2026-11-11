@@ -668,10 +668,11 @@ fn the_showcase_maps_place_their_droids() {
         );
         assert_eq!(got, [health, ammo, vehicle], "{map}");
         assert_eq!(sim.stations.len(), health + ammo + vehicle, "{map}");
-        let bf2 = m.source_game.eq_ignore_ascii_case("bf2");
         for c in &sim.station_classes {
             let (delay, hp, clips, veh) = match c.name.as_str() {
-                "com_item_healthrecharge" => (1.0, if bf2 { 25.0 } else { 15.0 }, 0, 0.0),
+                // One healing rate on every map (`game::normalize`; BF1's
+                // disc says 15).
+                "com_item_healthrecharge" => (1.0, 25.0, 0, 0.0),
                 "com_item_weaponrecharge" => (2.0, 0.0, 1, 0.0),
                 "com_item_vehiclerecharge" => (1.0, 0.0, 0, 400.0),
                 other => panic!("{map}: unexpected station class {other}"),

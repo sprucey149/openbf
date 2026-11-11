@@ -201,7 +201,9 @@ impl Sim {
                     if let Some(v) = r.owner.filter(|_| r.t < reach) {
                         reach = r.t;
                         hit = Some(Target::Vehicle(v));
-                        mult = r.hit_mult;
+                        // A rocket sent at this hull's weak part counts as
+                        // striking it wherever it meets the hull.
+                        mult = super::weak_lock::part_factor(world, b, v).unwrap_or(r.hit_mult);
                     }
                 }
             }

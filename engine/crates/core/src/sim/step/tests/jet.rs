@@ -3,7 +3,8 @@
 use super::*;
 use crate::soldier::{SoldierConstants, Stance};
 
-/// BF2 `rep_inf_ep3_jettrooper` (re-jetpack.md §2.2).
+/// BF2 `rep_inf_ep3_jettrooper` (re-jetpack.md §2.2), the disc's numbers;
+/// the game flies every jet trooper on `game::roster::JET_TROOPER_FUEL_*`.
 fn jet_trooper() -> SoldierConstants {
     SoldierConstants {
         max_speed: 7.0,
@@ -61,7 +62,7 @@ fn a_player_spawns_with_half_a_tank_and_hovers_on_the_second_tap() {
 }
 
 /// The cheat keeps a jet class's tank full; without it the spawn's half
-/// tank lasts 1.6 s (§6).
+/// tank lasts 1.6 s on the disc's numbers (§6).
 #[test]
 fn the_stamina_cheat_keeps_the_jet_tank_full() {
     for cheat in [false, true] {

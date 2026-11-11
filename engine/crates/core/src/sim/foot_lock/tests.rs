@@ -1,12 +1,13 @@
-//! BF2's on-foot launcher lock (`analysis/re-ordnance-kinds.md` §5): the
-//! lock comes on its own (OURS) or by the button, the hold keeps it, the
-//! dwell runs only inside 25.8° and in sight; BF1 maps and space rounds
-//! keep the magnet dwell.
+//! The on-foot launcher lock (`analysis/re-ordnance-kinds.md` §5), BF2's
+//! rule on every ground map: the lock comes on its own (OURS) or by the
+//! button, the hold keeps it, the dwell runs only inside 25.8° and in sight;
+//! space rounds keep the magnet dwell.
 
 use super::*;
 use crate::collision::{Body, Shape};
 use crate::sim::tests::flat_ground;
 use crate::sim::PadState;
+use crate::soldier::GroundRules;
 use crate::unit::UnitSpec;
 use crate::vehicle::{BlastSetup, SeatKind, VehicleHandle, VehicleKind, VehicleSpec};
 use crate::weapon::{ExplosionClass, HealthType, OrdKind, WeaponClass};
@@ -19,7 +20,7 @@ const PERSON_DROID_ANIMAL: u32 = (1 << HealthType::Person as u32)
 
 /// A vehicle launcher: 40 m/s missile, a 1 s lock, the BF2 lock defaults
 /// (100 / 110 m).
-fn launcher() -> WeaponClass {
+pub(in crate::sim) fn launcher() -> WeaponClass {
     let mut w = WeaponClass::bf1_rifle();
     let o = &mut w.ordnance;
     o.kind = OrdKind::Missile;
@@ -43,7 +44,7 @@ fn launcher() -> WeaponClass {
     w
 }
 
-fn tank(s: &mut Sim, team: Option<u8>, pos: Vec3) -> VehicleHandle {
+pub(in crate::sim) fn tank(s: &mut Sim, team: Option<u8>, pos: Vec3) -> VehicleHandle {
     s.spawn_vehicle(&VehicleSpec {
         kind: VehicleKind::Hover,
         class: 0,
@@ -69,13 +70,31 @@ fn bulldog() -> WeaponClass {
     w
 }
 
+/// BF1's torpedo launcher as baked (`*_weap_inf_torpedo_launcher`): vehicles
+/// only, a 1.5 s lock, two rounds a clip (ALL, REP), a 4 s reload.
+pub(in crate::sim) fn torpedo() -> WeaponClass {
+    let mut w = launcher();
+    w.rounds_per_clip = 2;
+    w.reload_time = 4.0;
+    w.lock_time = 1.5;
+    w.target_kind = VEHICLE;
+    w
+}
+
 /// A player at the origin facing −Z with the launcher, on a BF2 ground map.
-fn scene() -> (Sim, UnitHandle) {
+pub(in crate::sim) fn scene() -> (Sim, UnitHandle) {
     scene_with(launcher())
 }
 
 fn scene_with(class: WeaponClass) -> (Sim, UnitHandle) {
+    let (s, me) = scene_rules(class, GroundRules::Bf2);
+    assert_eq!(s.ground_rules, GroundRules::Bf2);
+    (s, me)
+}
+
+pub(in crate::sim) fn scene_rules(class: WeaponClass, rules: GroundRules) -> (Sim, UnitHandle) {
     let mut s = Sim::empty(3);
+    s.ground_rules = rules;
     s.heightfield = Some(flat_ground());
     s.blast_setup = vec![Some(BlastSetup {
         explosion: None,
@@ -90,24 +109,23 @@ fn scene_with(class: WeaponClass) -> (Sim, UnitHandle) {
         })
         .unwrap();
     s.units[me.index as usize].soldier.pitch = 0.0;
-    assert_eq!(s.ground_rules, GroundRules::Bf2);
     (s, me)
 }
 
 /// A point `range` m out at `deg` degrees right of −Z.
-fn ahead(range: f32, deg: f32) -> Vec3 {
+pub(in crate::sim) fn ahead(range: f32, deg: f32) -> Vec3 {
     let a = deg.to_radians();
     Vec3::new(a.sin() * range, 0.0, -a.cos() * range)
 }
 
-fn pad(buttons: u32) -> PadState {
+pub(in crate::sim) fn pad(buttons: u32) -> PadState {
     PadState {
         buttons,
         ..Default::default()
     }
 }
 
-fn steps(s: &mut Sim, n: usize, buttons: u32) {
+pub(in crate::sim) fn steps(s: &mut Sim, n: usize, buttons: u32) {
     for _ in 0..n {
         s.step(&[pad(buttons)]);
     }
@@ -130,16 +148,23 @@ fn fire(s: &mut Sim) -> Option<MissileTarget> {
     panic!("the launcher did not fire");
 }
 
-fn held(s: &Sim, me: UnitHandle) -> f32 {
+pub(in crate::sim) fn held(s: &Sim, me: UnitHandle) -> f32 {
     s.unit(me).unwrap().weapon.lock_held
 }
 
 /// The playtest's rule (B7): dwelling alone locks, fills LockTime and the
-/// shot homes; a press on the same lone target keeps it.
+/// shot homes; a press on the same lone target keeps it. BF1 maps too.
 #[test]
-fn bf2_launcher_locks_by_dwelling_alone() {
+fn launcher_locks_by_dwelling_alone() {
+    for rules in [GroundRules::Bf2, GroundRules::Bf1] {
+        launcher_locks_by_dwelling_alone_on(rules);
+    }
+}
+
+#[allow(clippy::assertions_on_constants)] // the flag must be on for this rule's test
+fn launcher_locks_by_dwelling_alone_on(rules: GroundRules) {
     const { assert!(FOOT_AUTO_LOCK) };
-    let (mut s, me) = scene();
+    let (mut s, me) = scene_rules(launcher(), rules);
     let v = tank(&mut s, Some(1), ahead(60.0, 3.0));
     steps(&mut s, 1, 0);
     assert_eq!(
@@ -159,7 +184,7 @@ fn bf2_launcher_locks_by_dwelling_alone() {
     let class = s.weapon_classes[s.unit(me).unwrap().weapon_class].clone();
     assert!(
         s.unit(me).unwrap().weapon.locked(&class),
-        "{}",
+        "{rules:?} {}",
         held(&s, me)
     );
     assert_eq!(s.foot_lock_charge(0), Some(1.0));
@@ -267,10 +292,16 @@ fn bf2_dwell_resets_outside_25_8_degrees_or_out_of_sight() {
 }
 
 /// The hold: 2 s in a row outside dot 0.1 drops the lock; a tick back
-/// inside restarts the count.
+/// inside restarts the count. BF1 maps too.
 #[test]
 fn locked_target_drops_after_two_seconds_away() {
-    let (mut s, me) = scene();
+    for rules in [GroundRules::Bf2, GroundRules::Bf1] {
+        locked_target_drops_after_two_seconds_away_on(rules);
+    }
+}
+
+fn locked_target_drops_after_two_seconds_away_on(rules: GroundRules) {
+    let (mut s, me) = scene_rules(launcher(), rules);
     tank(&mut s, Some(1), ahead(60.0, 0.0));
     tap(&mut s);
     assert!(s.foot_lock[0].target.is_some());
@@ -294,10 +325,16 @@ fn locked_target_drops_after_two_seconds_away() {
 /// The Bulldog (six rounds): a press on a partly fired clip reloads even
 /// with a target in front, and a press on a full clip cycles the lock
 /// without reloading. Holding the button clears a pressed lock; letting go
-/// hands the target back to the auto lock.
+/// hands the target back to the auto lock. BF1 maps too.
 #[test]
 fn the_bulldog_reloads_a_partly_fired_clip_and_locks_on_a_full_one() {
-    let (mut s, me) = scene_with(bulldog());
+    for rules in [GroundRules::Bf2, GroundRules::Bf1] {
+        bulldog_on(rules);
+    }
+}
+
+fn bulldog_on(rules: GroundRules) {
+    let (mut s, me) = scene_rules(bulldog(), rules);
     let a = s.spawn(&UnitSpec::trooper(1, ahead(30.0, 0.0))).unwrap();
     let b = s.spawn(&UnitSpec::trooper(1, ahead(40.0, 15.0))).unwrap();
     let (la, lb) = (
@@ -385,36 +422,120 @@ fn the_auto_lock_moves_to_what_the_aim_dwells_on() {
     assert_eq!(fire(&mut s), Some(MissileTarget::Vehicle(b)));
 }
 
-/// BF1 maps and space rounds keep the magnet's dwell exactly: no press,
-/// the candidate is the magnet, and the foot lock stays empty.
+/// Space rounds keep the magnet's dwell exactly: no press, the candidate is
+/// the magnet, the foot lock stays empty and the box shows nothing.
 #[test]
-fn bf1_rules_and_space_rounds_keep_the_magnet_dwell() {
-    for space in [false, true] {
-        let (mut s, me) = scene();
-        if space {
-            s.space_assault = Some(crate::sim::SpaceAssault::new(10));
-        } else {
-            s.ground_rules = GroundRules::Bf1;
-        }
+fn space_rounds_keep_the_magnet_dwell() {
+    for rules in [GroundRules::Bf2, GroundRules::Bf1] {
+        let (mut s, me) = scene_rules(launcher(), rules);
+        s.space_assault = Some(crate::sim::SpaceAssault::new(10));
         let v = tank(&mut s, Some(1), ahead(60.0, 0.0));
         steps(&mut s, 2, 0);
-        assert_eq!(s.magnet[0], Some(AimTarget::Vehicle(v)), "space {space}");
+        assert_eq!(s.magnet[0], Some(AimTarget::Vehicle(v)), "{rules:?}");
         assert_eq!(
             s.unit(me).unwrap().weapon.lock_target,
             Some(MissileTarget::Vehicle(v))
         );
         steps(&mut s, 30, 0);
         let class = s.weapon_classes[s.unit(me).unwrap().weapon_class].clone();
-        assert!(s.unit(me).unwrap().weapon.locked(&class), "space {space}");
+        assert!(s.unit(me).unwrap().weapon.locked(&class), "{rules:?}");
         assert!(s.foot_lock.iter().all(|f| *f == FootLock::default()));
+        assert_eq!(s.foot_lock_target(0), None);
+        assert_eq!(s.foot_lock_charge(0), None);
         // The button still reloads there.
         fire(&mut s);
         steps(&mut s, 30, 0);
         steps(&mut s, 1, buttons::RELOAD);
-        assert!(s.unit(me).unwrap().weapon.reloading(), "space {space}");
-        // BF1's HUD square follows the dwell target; space shows none.
-        assert_eq!(s.foot_lock_target(0).is_some(), !space);
+        assert!(s.unit(me).unwrap().weapon.reloading(), "{rules:?}");
     }
+}
+
+/// BF1's torpedo launcher on a BF1 map takes the foot lock with its own
+/// 1.5 s LockTime: the tank is held from the first tick, the box shows it,
+/// the dwell fills at 1.5 s and the shot homes.
+#[test]
+fn bf1_torpedo_locks_by_dwelling_and_homes() {
+    let (mut s, me) = scene_rules(torpedo(), GroundRules::Bf1);
+    let class = s.weapon_classes[s.unit(me).unwrap().weapon_class].clone();
+    let v = tank(&mut s, Some(1), ahead(60.0, 0.0));
+    steps(&mut s, 1, 0);
+    let lv = LockTarget::Aim(AimTarget::Vehicle(v));
+    assert_eq!(s.foot_lock[0].target, Some(lv));
+    assert_eq!(s.foot_lock_target(0).map(|t| t.0), Some(lv));
+    assert_eq!(held(&s, me), 0.0);
+    let mut ticks = 0;
+    while !s.unit(me).unwrap().weapon.locked(&class) {
+        steps(&mut s, 1, 0);
+        ticks += 1;
+        assert!(ticks < 60, "never locked: {}", held(&s, me));
+    }
+    // 1.5 s of 1/30 s ticks, give or take the f32 sum's last tick.
+    assert!((45..=46).contains(&ticks), "{ticks} ticks");
+    assert_eq!(s.foot_lock_charge(0), Some(1.0));
+    assert_eq!(fire(&mut s), Some(MissileTarget::Vehicle(v)));
+}
+
+/// The named deviation: on BF1 the lock follows the foot rule, not BF1's
+/// magnet. A tank 15 deg off the aim (outside the magnet's 6 deg, inside
+/// the 25.8 deg dwell) fills the dwell; a tank at 150 m (inside the
+/// magnet's 175 m LockOnRange, past the 100 m TargetLockMaxDistance) is
+/// never locked.
+#[test]
+fn bf1_lock_follows_the_foot_rule_not_the_magnet() {
+    let (mut s, me) = scene_rules(torpedo(), GroundRules::Bf1);
+    let v = tank(&mut s, Some(1), ahead(60.0, 15.0));
+    steps(&mut s, 20, 0);
+    assert_eq!(
+        s.foot_lock[0].target,
+        Some(LockTarget::Aim(AimTarget::Vehicle(v)))
+    );
+    assert_eq!(
+        s.unit(me).unwrap().weapon.lock_target,
+        Some(MissileTarget::Vehicle(v))
+    );
+    assert!(held(&s, me) > 0.5, "{}", held(&s, me));
+
+    let (mut s, me) = scene_rules(torpedo(), GroundRules::Bf1);
+    tank(&mut s, Some(1), ahead(150.0, 0.0));
+    steps(&mut s, 20, 0);
+    tap(&mut s);
+    assert_eq!(s.foot_lock[0].target, None);
+    assert_eq!(s.unit(me).unwrap().weapon.lock_target, None);
+    assert_eq!(s.foot_lock_target(0), None);
+}
+
+/// BF1's two-round torpedo: after one shot a press reloads though a target
+/// sits in the cone; on a full clip a press cycles to the next tank.
+#[test]
+fn bf1_two_round_clip_press_reloads_then_cycles() {
+    let (mut s, me) = scene_rules(torpedo(), GroundRules::Bf1);
+    let a = tank(&mut s, Some(1), ahead(60.0, 0.0));
+    let b = tank(&mut s, Some(1), ahead(60.0, 15.0));
+    let (la, lb) = (
+        LockTarget::Aim(AimTarget::Vehicle(a)),
+        LockTarget::Aim(AimTarget::Vehicle(b)),
+    );
+    steps(&mut s, 1, 0);
+    assert_eq!(s.foot_lock[0].target, Some(la), "the centred one");
+    fire(&mut s);
+    steps(&mut s, 30, 0);
+    let w = &s.unit(me).unwrap().weapon;
+    assert!(w.clip == 1 && !w.reloading(), "clip {}", w.clip);
+    steps(&mut s, 1, buttons::RELOAD);
+    assert!(s.unit(me).unwrap().weapon.reloading(), "a press reloads");
+    assert_eq!(s.foot_lock[0].target, Some(la), "the lock stays");
+    steps(&mut s, 1, 0);
+    // The 4 s reload, then a press on the full clip moves the lock.
+    let mut ticks = 0;
+    while s.unit(me).unwrap().weapon.reloading() {
+        steps(&mut s, 1, 0);
+        ticks += 1;
+        assert!(ticks < 200, "the reload never ended");
+    }
+    assert_eq!(s.unit(me).unwrap().weapon.clip, 2);
+    tap(&mut s);
+    assert_eq!(s.foot_lock[0].target, Some(lb));
+    assert!(!s.unit(me).unwrap().weapon.reloading());
 }
 
 #[test]

@@ -51,7 +51,9 @@ impl Sim {
     /// a soldier's feet + the stance's 1.4 / 0.6 / 0.2 m
     /// ([`crate::unit::Unit::aim_point`]), a vehicle's collision-sphere
     /// centre in its frame. `None` when the target is gone - the missile drops
-    /// it (the handle test is the only one in flight, §4.3).
+    /// it (the handle test is the only one in flight, §4.3). A round a human
+    /// locked on a vehicle's weak part steers to that part instead
+    /// ([`Sim::fly_missiles`], §5.1).
     pub(super) fn missile_aim(&self, t: MissileTarget) -> Option<Vec3> {
         match t {
             MissileTarget::Unit(h) => self.unit(h).map(|u| u.aim_point()),
@@ -112,9 +114,16 @@ impl Sim {
             else {
                 continue;
             };
+            // A round sent at a weak part follows it while the hull has
+            // it, else the vehicle's own point.
+            let part = match (m.target, m.part) {
+                (Some(MissileTarget::Vehicle(h)), Some(k)) => self.weak_part_point(h, k),
+                _ => None,
+            };
             let aim = m
                 .target
-                .and_then(|t| self.missile_guidance_aim(t, self.bolts[k].pos, m.dir));
+                .and_then(|t| self.missile_guidance_aim(t, self.bolts[k].pos, m.dir))
+                .map(|p| part.unwrap_or(p));
             let b = &mut self.bolts[k];
             b.guide(&c, aim, dt, &mut self.lcg);
         }
@@ -128,9 +137,9 @@ impl Sim {
     /// The dwell lock (`re-ordnance-kinds.md` §5): a launcher with
     /// `LockTime > 0` holds a candidate target and counts the seconds; at the
     /// class's limit the next missile it fires homes. A human's candidate is
-    /// BF2's lock ([`Sim::tick_foot_lock`]) on BF2 ground maps, else the
-    /// magnet (BF1's acquisition, `re-aim-assist.md` §3); a bot's is its
-    /// combat target. A new target restarts the clock, and the shot
+    /// the on-foot lock ([`Sim::tick_foot_lock`]) on every ground map and the
+    /// magnet (`re-aim-assist.md` §3) in space rounds; a bot's is its combat
+    /// target. A new target restarts the clock, and the shot
     /// consumes the lock ([`Sim::missile_lock`] at the press).
     pub(super) fn tick_locks(&mut self, dt: f32) {
         for i in 0..self.units.len() {

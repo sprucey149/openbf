@@ -56,7 +56,13 @@ fn check_disc_values(game: &str, name: &str, w: &WeaponClass) {
             Some("com_sfx_weap_remotedroid_exp")
         );
     } else {
-        assert_eq!((c.max_health, c.add_health), (40.0, -1.0));
+        // As tough as BF2's, and its blaster hits a soldier as hard
+        // (`game::normalize`; the disc says 40 health and 10 a hit).
+        assert_eq!((c.max_health, c.add_health), (100.0, -1.0));
+        assert_eq!(
+            blaster.ordnance.max_damage * blaster.ordnance.scales[HealthType::Person as usize],
+            60.0
+        );
         let altitude = if name.starts_with("imp_") { 2.0 } else { 1.75 };
         assert_eq!((c.set_altitude, c.acceleration), (altitude, 70.0));
         assert_eq!(c.energy_restore, 0.0);
@@ -155,7 +161,7 @@ fn every_remote_droid_class_flies_the_discs_droid() {
         return;
     }
     // [ours] 90 s in both games; health (40 / 100) is only for damage.
-    for (game, want, max_health) in [("bf1", 8, 40.0), ("bf2", 13, 100.0)] {
+    for (game, want, max_health) in [("bf1", 8, 100.0), ("bf2", 13, 100.0)] {
         let db = load_classdb(&root.join("classes"), game, &["all", "imp", "rep", "cis"]).unwrap();
         let model = root.join(format!("common_{game}/models/com_weap_probedroid.glb"));
         assert!(!game::assets::load_glb(&model).unwrap().indices.is_empty());

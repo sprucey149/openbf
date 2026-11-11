@@ -61,8 +61,35 @@ Head index 2 in every posture -> BF1 default HitLocation {2, ×3} (B1:122725) [V
 ## 3. Vehicle crit prims in the bake
 - Present with names: engine/assets_baked/side_bf1/vehicles/{all,cis,imp,rep}/vehicles.ron, side_bf2/vehicles/{all,cis,imp,rep}/vehicles.ron,
   tat1/manifest.ron (prims[] with name, parent, kind, dims, rotation, translation, mask; walker form name/bone/pos/radius e.g. p_crithit on bone_head).
-- Port drops them: game/src/assets.rs `hull_parts` (~l.921-951) builds core::collision::HullPart {local, shape, layers} — **no name, no index**,
-  mesh first, and `continue` skips prims whose layers are NONE -> part order != PS2 prim index; a crit lookup needs name/index carried through.
+- Port: game/src/assets.rs `hull_parts` matches HitLocation by prim name into `HullPart::hit_mult` (issue #41); BF1 rows per §3.1.
+
+### 3.1 OURS: BF1 vehicles take BF2's weak spots (2026-11-10)
+
+A named deviation, for one game on every map and so that a launcher's lock has a part to go to
+(`re-ordnance-kinds.md` §5.1). Tables: `game::assets::BF1_WEAK_SPOTS`, `BF1_ADDED_WEAK_SPOTS`.
+
+- **The originals.** BF2 authors a x4 `HitLocation` on 15 vehicle classes, each on a prim in the ordnance subset.
+  BF1 authors none over 1: its two lines are x0 (`cis_tread_hailfire`, `rep_fly_vtrans`). BF1's models do carry the
+  critical prims, mostly outside the ordnance lists, so no round met them.
+- **The rule.** A BF1 armoured ground vehicle takes x4 on its own model's critical prim, which joins the ordnance
+  subset: AAT `p_crithit`, hailfire `p_crithit` (replacing its x0), spider walker `p_crithit1` / `p_crithit2`, the
+  three AT-STs `p_crit_hit`, the AT-AT `p_neck_soldier`, the combat speeder `p_crithit`. The hovernaut and the MTT
+  have no BF2 twin and take x4 on the `p_crithit` their models carry.
+- **Added parts.** Two hulls have no prim a round can reach, and take BF2's part for the same hull at BF2's place,
+  in the ordnance subset only. The two fighter tanks: their prims are BF2's one for one, and BF2 added a disc
+  (radius 0.5 m, 0.2 m thick) on the rear face at (0, 0.90, -3.85). The AT-TE: its own `p_crithit` (a 1 m sphere at
+  (0, 3.43, -1.30)) lies inside the hull boxes; BF2 moved it to a box (half 0.96 x 0.71 x 2.08) under the front of
+  the belly at (0, 3.11, 3.14).
+- **None:** speeder bikes, the STAP, the tauntaun, the kaadu, the landspeeder and every flyer, as in BF2.
+- **Effect.** As on BF2 maps, the factor is a human's only (`Sim::hit_scale`): a bot's hit there is plain. A human's
+  torpedo (600) does 2400 on the part. Rockets to destroy from the weak side, before -> after: AAT and fighter tanks
+  (6600) 11 -> 3, hailfire (5200) 9 -> 3, combat speeder (5400) 9 -> 3, AT-ST and spider (6000) 10 -> 3, hovernaut
+  (12500) 21 -> 6, AT-TE and MTT (15000) 25 -> 7, AT-AT (30000) 50 -> 13. A rifle's bolt on the part is x4 of very
+  little (its VehicleScale).
+- **Side effect.** The BF1 prims that join the ordnance subset now stop bolts and sight rays that used to pass
+  through them to the hull behind; each sits on or inside its hull.
+- measure: maintainer playtest of rockets against BF1 vehicles (B7). Exposure per vehicle: the survey table in
+  `re-ordnance-kinds.md` §5.1.
 
 ## 4. Sniper damage [V data]
 | | BF2 com_weap_inf_sniper_rifle_ord | BF1 {rep,cis,imp,all}_weap_inf_sniperrifle_ord |
@@ -126,7 +153,7 @@ Helpers in this scratchpad: elf.py (read words), mdis.py (capstone, skipdata), l
 ## 4. BF1 [V]
 - FUN_0020e2e0 builds main_body(0), coll_body(1), coll_head(2), ... per posture list (B1:122439-122507), then `if (cls+0x14a0 == 0)` table = {node 2, 3.0} (B1:122725-122732).
   Lookup FUN_001e3080 reads cls+0x149c/+0x14a0 (B1:92189). FUN_001bc748 (B1:64451) applies mult for every attacker (no difficulty gate), plays "headshot" feedback; no medal system.
-  BF1 ODF HitLocation only cis_tread_hailfire / rep_fly_vtrans ×0.
+  BF1 ODF HitLocation only cis_tread_hailfire / rep_fly_vtrans ×0 (openbf gives BF1's armoured vehicles x4 parts: Part A §3.1).
 
 ## 5. What the existing notes got wrong
 - re-ai-difficulty §9.2: vtable list missed soldier DAT_0061ea80; FUN_0020a940 is not the soldier TakeDamage (soldier's is FUN_00238e20);

@@ -261,6 +261,11 @@ impl Bolt {
                     eat(&s.to_le_bytes());
                 }
             }
+            // Only a round steering to a weak part adds to the stream.
+            if let Some(k) = m.part {
+                eat(b"MSLPART");
+                eat(&k.to_le_bytes());
+            }
         }
         if let Some(damage) = self.fat {
             eat(b"FAT");

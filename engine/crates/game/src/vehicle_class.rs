@@ -1120,11 +1120,42 @@ pub fn neutral_when_empty(db: &ClassDb, class: &str) -> bool {
         .is_none_or(|b| !KEEPS_TEAM_BASES.iter().any(|k| k.eq_ignore_ascii_case(b)))
 }
 
+/// A BF1 vehicle's slice time: BF1 authors none, so each class takes its BF2
+/// counterpart's `TimeRequiredToEject` and a vehicle is as hard to slice on
+/// every map (`[ours]`, one game). Rows: (BF1 class, the BF2 class, seconds).
+/// A class with no row keeps its base's default, which is what its BF2
+/// counterpart has too (tauntaun, gunship, MAF, Jedi starfighter).
+/// `tests/suite/vehicle_class.rs` holds the rows to BF2's baked classes.
+pub const BF1_SLICE_TIMES: &[(&str, &str, f32)] = &[
+    ("cis_hover_aat", "cis_hover_aat", 10.0),
+    ("cis_hover_stap", "cis_hover_stap", 1.0),
+    ("cis_tread_hailfire", "cis_tread_hailfire", 5.0),
+    ("cis_walk_spider", "cis_walk_spider", 12.5),
+    ("imp_hover_fightertank", "imp_hover_fightertank", 7.5),
+    ("rep_hover_fightertank", "rep_hover_fightertank", 7.5),
+    ("all_hover_combatspeeder", "all_hover_combatspeeder", 7.5),
+    ("imp_hover_speederbike", "imp_hover_speederbike", 1.0),
+    // BF2's Republic bike is the BARC speeder.
+    ("rep_hover_speederbike", "rep_hover_barcspeeder", 1.0),
+    ("imp_walk_atst", "imp_walk_atst", 10.0),
+    ("imp_walk_atst_jungle", "imp_walk_atst_jungle", 10.0),
+    ("imp_walk_atst_snow", "imp_walk_atst_snow", 10.0),
+    ("all_fly_xwing", "all_fly_xwing_sc", 2.5),
+    ("all_fly_ywing", "all_fly_ywing_sc", 2.5),
+    ("all_fly_snowspeeder", "all_fly_snowspeeder", 2.5),
+    ("imp_fly_tiefighter", "imp_fly_tiefighter_sc", 2.5),
+    ("imp_fly_tiebomber", "imp_fly_tiebomber_sc", 2.5),
+    ("cis_fly_droidfighter", "cis_fly_droidfighter_sc", 2.5),
+    // PROVISIONAL: BF2 has no Geonosian fighter; every BF2 starfighter is
+    // 2.5 s. replace: the maintainer's pick after slicing one in play.
+    ("cis_fly_geofighter", "cis_fly_droidfighter_sc", 2.5),
+];
+
 /// Issue #35: the cutter's slice time, s: `TimeRequiredToEject` over the
-/// class chain, else the PS2 class table's default for its base (hover 3,
-/// walker 12, flyer 4; B2:136736, 182455, 124430). 0 for every other base
-/// (command walkers and hovers, turrets): never sliced. BF1 classes have no
-/// key and take their base's default (BF2's rule on both games).
+/// class chain, else a BF1 class's [`BF1_SLICE_TIMES`] row, else the PS2
+/// class table's default for its base (hover 3, walker 12, flyer 4;
+/// B2:136736, 182455, 124430). 0 for every other base (command walkers and
+/// hovers, turrets): never sliced. BF2's rule on both games.
 pub fn slice_time(db: &ClassDb, class: &str) -> f32 {
     let base = db.engine_base(class).map(str::to_ascii_lowercase);
     let default = match base.as_deref() {
@@ -1133,9 +1164,17 @@ pub fn slice_time(db: &ClassDb, class: &str) -> f32 {
         Some("flyer") => 4.0,
         _ => return 0.0,
     };
+    let twin = (!db.is_bf2())
+        .then(|| {
+            BF1_SLICE_TIMES
+                .iter()
+                .find(|(bf1, ..)| bf1.eq_ignore_ascii_case(class))
+        })
+        .flatten()
+        .map_or(default, |row| row.2);
     db.prop(class, "TimeRequiredToEject")
         .and_then(|v| v.trim().parse::<f32>().ok())
-        .map_or(default, |t| t.max(0.0))
+        .map_or(twin, |t| t.max(0.0))
 }
 
 /// The hull pool's `HealthType`: the ODF's over the BASE chain, else the

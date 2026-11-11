@@ -45,6 +45,7 @@ pub mod minimap;
 pub mod mission;
 pub mod music;
 pub mod native_teams;
+pub mod normalize;
 pub mod pause;
 pub mod point_light;
 pub mod profile;

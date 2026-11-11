@@ -457,7 +457,8 @@ mod tests {
                         text[last..].starts_with("#[cfg(test)]\nmod tests {")
                             || text[last..].trim_end() == "#[cfg(test)]\nmod tests;"
                             // shares its fixtures with other test modules
-                            || text[last..].trim_end() == "#[cfg(test)]\npub(crate) mod tests;",
+                            || text[last..].trim_end() == "#[cfg(test)]\npub(crate) mod tests;"
+                            || text[last..].trim_end() == "#[cfg(test)]\npub(super) mod tests;",
                         "{name}: the last #[cfg(test)] is not the trailing `mod tests` \
                          — teach the referee to skip it"
                     );
@@ -552,6 +553,8 @@ mod tests {
             // `Sim` and nothing reads a pose back (card ANIML).
             "animator.rs",
             "animator/",
+            // Keeps the display awake while a round runs; it reads no `Sim`.
+            "main/windowed/idle.rs",
         ];
         let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../game/src"));
         let offenders = offenders_under(dir, PRESENTATION);

@@ -245,9 +245,17 @@ fn shot(r: &mut Range, run: f32, alpha: f32, aim: Aim, lead: bool) -> Option<f32
     let pi = r.player();
     let w = &mut r.walk.sim.units[pi].weapon;
     (w.clip, w.reload_timer) = (w.clip.max(50), 0.0);
-    // Run up from behind the spot so the shot finds him on it, and let the
-    // shot delay pass.
+    // Run up from behind the spot so the shot finds him on it. The run-up
+    // covers most weapons' shot delay; a longer one (the sniper rifle's
+    // second) passes first.
     const RUN_UP: u32 = 20;
+    for _ in 0..120 {
+        let w = &r.walk.sim.units[pi].weapon;
+        if w.refire_time - w.refire_accum <= RUN_UP as f32 * core::TICK_DT {
+            break;
+        }
+        r.tick(0);
+    }
     let u = r.walk.sim.unit_mut(r.enemy).unwrap();
     if run > 0.0 {
         u.soldier.pos = start - side * (run * (RUN_UP + 1) as f32 * core::TICK_DT);

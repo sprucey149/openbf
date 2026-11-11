@@ -5,6 +5,8 @@ use crate::{
     unit::{Controller, UnitSpec},
 };
 
+/// The disc's jet numbers; the game flies every jet trooper on
+/// `game::roster::JET_TROOPER_FUEL_*`.
 fn class(hover: bool) -> SoldierConstants {
     SoldierConstants {
         jet_jump: if hover { 5.0 } else { 21.0 },

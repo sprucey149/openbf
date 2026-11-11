@@ -5,21 +5,29 @@ bf1 all_inf_marksman
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_remotedroid xSome(1) ch1 -> remote droid x1
+    5:all_weap_award_sniper_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_marksmanjungle
     1:all_weap_inf_sniperrifle xSome(10) ch0 -> primary x10
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_remotedroid xSome(1) ch1 -> remote droid x1
+    5:all_weap_award_sniper_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_marksmansnow
     1:all_weap_inf_sniperrifle xSome(10) ch0 -> primary x10
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_remotedroid xSome(1) ch1 -> remote droid x1
+    5:all_weap_award_sniper_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_pilot
     1:all_weap_inf_shotgun xSome(4) ch0 -> primary x4
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_fusioncutter xSome(1) ch1 -> repair x1
     4:all_weap_inf_powerup_dispenser xSome(5) ch1 -> dispenser x5
+    5:all_weap_award_shotgun xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_smuggler
     1:all_weap_inf_bowcaster xSome(6) ch0 -> primary x6
     2:all_weap_inf_mortar_launcher xSome(3) ch0 -> launched x3
@@ -33,51 +41,71 @@ bf1 all_inf_soldier
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_crackgrenade xSome(3) ch1 -> thrown x3
+    5:all_weap_award_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_soldierdesert
     1:all_weap_inf_rifle xSome(6) ch0 -> primary x6
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_crackgrenade xSome(3) ch1 -> thrown x3
+    5:all_weap_award_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_soldierjungle
     1:all_weap_inf_rifle xSome(6) ch0 -> primary x6
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_crackgrenade xSome(3) ch1 -> thrown x3
+    5:all_weap_award_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_soldiersnow
     1:all_weap_inf_rifle xSome(6) ch0 -> primary x6
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_crackgrenade xSome(3) ch1 -> thrown x3
+    5:all_weap_award_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_soldierurban
     1:all_weap_inf_rifle xSome(6) ch0 -> primary x6
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_crackgrenade xSome(3) ch1 -> thrown x3
+    5:all_weap_award_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_vanguard
     1:all_weap_inf_torpedo_launcher xSome(5) ch0 -> primary x5
     2:all_weap_inf_pistol xSome(4) ch0 -> fired x4
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_mine_dispenser xSome(4) ch1 -> dispenser x4
+    5:all_weap_award_rocket_launcher xSome(5) ch0 -> fired x5 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_vanguardjungle
     1:all_weap_inf_torpedo_launcher xSome(5) ch0 -> primary x5
     2:all_weap_inf_pistol xSome(4) ch0 -> fired x4
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_mine_dispenser xSome(4) ch1 -> dispenser x4
+    5:all_weap_award_rocket_launcher xSome(5) ch0 -> fired x5 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_vanguardsnow
     1:all_weap_inf_torpedo_launcher xSome(5) ch0 -> primary x5
     2:all_weap_inf_pistol xSome(4) ch0 -> fired x4
     3:all_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:all_weap_inf_mine_dispenser xSome(4) ch1 -> dispenser x4
+    5:all_weap_award_rocket_launcher xSome(5) ch0 -> fired x5 (BF2's award, roster::awards)
+    6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 cis_inf_assassindroid
     1:cis_weap_inf_sniperrifle xSome(10) ch0 -> primary x10
     2:cis_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:cis_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:cis_weap_inf_remotedroid xSome(1) ch1 -> remote droid x1
+    5:cis_weap_award_sniper_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:cis_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 cis_inf_assault
     1:cis_weap_inf_torpedo_launcher xSome(7) ch0 -> primary x7
     2:cis_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:cis_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:cis_weap_inf_mine_dispenser xSome(4) ch1 -> dispenser x4
+    5:cis_weap_award_rocket_launcher xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    6:cis_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 cis_inf_battledroid: takes BF2 cis_inf_rifleman's weapons (WEAPON_DONORS)
     1:cis_weap_inf_wrist_blaster xSome(5) ch0 -> primary x5
     2:cis_weap_inf_wrist_trishot xSome(0) ch0 -> fired x0
@@ -88,105 +116,140 @@ bf1 cis_inf_battledroid_av
     2:cis_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:cis_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:cis_weap_inf_mine_dispenser xSome(4) ch1 -> dispenser x4
+    5:cis_weap_award_rocket_launcher xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    6:cis_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 cis_inf_battledroid_inf
     1:cis_weap_inf_rifle xSome(5) ch0 -> primary x5
     2:cis_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:cis_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:cis_weap_inf_crackgrenade xSome(2) ch1 -> thrown x2
+    5:cis_weap_award_rifle xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    6:cis_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 cis_inf_battledroid_pilot
     1:cis_weap_inf_mortar_launcher xSome(3) ch0 -> primary x3
     2:cis_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:cis_weap_inf_fusioncutter xSome(1) ch1 -> repair x1
     4:cis_weap_inf_powerup_dispenser xSome(5) ch1 -> dispenser x5
+    5:cis_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 cis_inf_battledroid_sniper
     1:cis_weap_inf_sniperrifle xSome(10) ch0 -> primary x10
     2:cis_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:cis_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:cis_weap_inf_remotedroid xSome(1) ch1 -> remote droid x1
+    5:cis_weap_award_sniper_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:cis_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 cis_inf_countdooku: NOT FIELDED (cis_weap_lightsaber: no OrdnanceName)
 bf1 cis_inf_pilotdroid
     1:cis_weap_inf_mortar_launcher xSome(3) ch0 -> primary x3
     2:cis_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:cis_weap_inf_fusioncutter xSome(1) ch1 -> repair x1
     4:cis_weap_inf_powerup_dispenser xSome(5) ch1 -> dispenser x5
+    5:cis_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_dark_trooper
     1:imp_weap_inf_shotgun xSome(7) ch0 -> primary x7
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(4) ch1 -> thrown x4
+    4:imp_weap_award_shotgun xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    5:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_dark_troopersnow
     1:imp_weap_inf_shotgun xSome(7) ch0 -> primary x7
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(4) ch1 -> thrown x4
+    4:imp_weap_award_shotgun xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    5:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_darthvader: NOT FIELDED (imp_weap_lightsaber: no OrdnanceName)
 bf1 imp_inf_pilotatat
     1:imp_weap_inf_mortar_launcher xSome(3) ch0 -> primary x3
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_fusioncutter xSome(1) ch1 -> repair x1
     4:imp_weap_inf_powerup_dispenser xSome(5) ch1 -> dispenser x5
+    5:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_pilotatst
     1:imp_weap_inf_mortar_launcher xSome(3) ch0 -> primary x3
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_fusioncutter xSome(1) ch1 -> repair x1
     4:imp_weap_inf_powerup_dispenser xSome(5) ch1 -> dispenser x5
+    5:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_pilottie
     1:imp_weap_inf_mortar_launcher xSome(3) ch0 -> primary x3
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_fusioncutter xSome(1) ch1 -> repair x1
     4:imp_weap_inf_powerup_dispenser xSome(5) ch1 -> dispenser x5
+    5:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_scout_trooper
     1:imp_weap_inf_sniperrifle xSome(7) ch0 -> primary x7
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:imp_weap_inf_remotedroid xSome(1) ch1 -> remote droid x1
+    5:imp_weap_award_sniper_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_scout_troopersnow
     1:imp_weap_inf_sniperrifle xSome(7) ch0 -> primary x7
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:imp_weap_inf_remotedroid xSome(1) ch1 -> remote droid x1
+    5:imp_weap_award_sniper_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_shock_trooper
     1:imp_weap_inf_torpedo_launcher xSome(7) ch0 -> primary x7
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:imp_weap_inf_mine_dispenser xSome(4) ch1 -> dispenser x4
+    5:imp_weap_award_rocket_launcher xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    6:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_shock_troopersnow
     1:imp_weap_inf_torpedo_launcher xSome(7) ch0 -> primary x7
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:imp_weap_inf_mine_dispenser xSome(4) ch1 -> dispenser x4
+    5:imp_weap_award_rocket_launcher xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    6:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_storm_trooper
     1:imp_weap_inf_rifle xSome(5) ch0 -> primary x5
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(4) ch1 -> thrown x4
     4:imp_weap_inf_crackgrenade xSome(2) ch1 -> thrown x2
+    5:imp_weap_award_rifle xSome(5) ch0 -> fired x5 (BF2's award, roster::awards)
+    6:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_storm_troopersnow
     1:imp_weap_inf_rifle xSome(5) ch0 -> primary x5
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(4) ch1 -> thrown x4
     4:imp_weap_inf_crackgrenade xSome(2) ch1 -> thrown x2
+    5:imp_weap_award_rifle xSome(5) ch0 -> fired x5 (BF2's award, roster::awards)
+    6:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 rep_inf_arc_trooper
     1:rep_weap_inf_torpedo_launcher xSome(4) ch0 -> primary x4
     2:rep_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:rep_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:rep_weap_inf_mine_dispenser xSome(4) ch1 -> dispenser x4
+    5:rep_weap_award_rocket_launcher xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    6:rep_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 rep_inf_clone_pilot
     1:rep_weap_inf_arccaster xSome(0) ch0 -> primary x0
     2:rep_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:rep_weap_inf_fusioncutter xSome(1) ch1 -> repair x1
     4:rep_weap_inf_powerup_dispenser xSome(5) ch1 -> dispenser x5
+    5:rep_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 rep_inf_clone_sharpshooter
     1:rep_weap_inf_sniperrifle xSome(7) ch0 -> primary x7
     2:rep_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:rep_weap_inf_thermaldetonator xSome(3) ch1 -> thrown x3
     4:rep_weap_inf_remotedroid xSome(1) ch1 -> remote droid x1
+    5:rep_weap_award_sniper_rifle xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    6:rep_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 rep_inf_clone_trooper
     1:rep_weap_inf_rifle xSome(4) ch0 -> primary x4
     2:rep_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:rep_weap_inf_haywiredetonator xSome(3) ch1 -> thrown x3
     4:rep_weap_inf_crackgrenade xSome(2) ch1 -> thrown x2
+    5:rep_weap_award_rifle xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    6:rep_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 rep_inf_jet_trooper
     1:rep_weap_inf_rocket_launcher xSome(4) ch0 -> primary x4
     2:rep_weap_inf_commando_pistol xSome(0) ch0 -> fired x0
     3:rep_weap_inf_thermaldetonator xSome(6) ch1 -> thrown x6
+    4:rep_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 rep_inf_macewindu: NOT FIELDED (rep_weap_lightsaber: no OrdnanceName)
 bf2 all_hero_chewbacca
     1:all_weap_inf_bowcaster xSome(6) ch0 -> primary x6

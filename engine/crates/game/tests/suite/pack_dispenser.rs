@@ -41,7 +41,16 @@ fn both_games_keep_every_pack_slot_and_deliver_health_and_ammo() {
                 [db.prop_f32(&held.weapon.name, "ShotDelay").unwrap(); 2]
             );
             assert_eq!(d.item.name, "com_item_powerup_dual");
-            assert_eq!(d.item.health, if game == "bf2" { 200.0 } else { 100.0 });
+            // BF1's pack heals the same third of a trooper as on its disc
+            // (`game::normalize`).
+            assert_eq!(
+                d.item.health,
+                if game == "bf2" {
+                    200.0
+                } else {
+                    100.0 * game::normalize::BF1_SCALE
+                }
+            );
             assert_eq!(d.item.ammo, 2);
             assert_eq!(d.max_items, 4);
             assert_eq!(d.velocity, 10.0);

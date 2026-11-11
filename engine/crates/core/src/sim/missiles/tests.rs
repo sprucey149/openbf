@@ -1,7 +1,7 @@
 //! Scene tests for missiles (card UORD, `analysis/re-ordnance-kinds.md` §4-§5):
 //! homing onto a locked target's point (and the drop of a target that dies in
 //! flight), an unguided round's straight flight and expiry burst, the dwell
-//! lock (`acquire_magnet`, a bot's combat target, a non-launcher), its
+//! lock (a human's foot lock, a bot's combat target, a non-launcher), its
 //! consumption at the press and a vehicle's aim-sphere point.
 
 use super::*;
@@ -17,6 +17,7 @@ use crate::TICK_DT;
 
 /// A launcher's missile class at the REP torpedo's numbers, on a rifle's
 /// chassis: 40 m/s, TurnRate 2, no waver, a 1 s lock, a blast on expiry.
+/// It locks soldiers, so the scene's trooper is a candidate.
 fn torpedo() -> WeaponClass {
     let mut w = WeaponClass::bf1_rifle();
     let o = &mut w.ordnance;
@@ -38,12 +39,13 @@ fn torpedo() -> WeaponClass {
     // Two shots at once, so the trigger's own cycle does not hide the flight.
     w.rounds_per_clip = 8;
     w.lock_time = 1.0;
+    w.target_kind = 1 << HealthType::Person as u32;
     w
 }
 
 /// Flat ground (a trooper must stand on something) and no map bodies, on
-/// BF1's rules: a human's dwell candidate is the magnet (BF2's lock is
-/// `foot_lock`).
+/// BF1's rules: a human's dwell candidate is the foot lock, as on every
+/// ground map.
 fn sim() -> Sim {
     let mut s = Sim::empty(3);
     s.heightfield = Some(flat_ground());
@@ -127,6 +129,13 @@ fn fire(s: &mut Sim) {
         }
     }
     panic!("the launcher did not fire");
+}
+
+/// Slot 0's foot lock held on `t`, as `Sim::tick_foot_lock` leaves it.
+fn hold(s: &mut Sim, t: AimTarget) {
+    let mut f = crate::sim::foot_lock::FootLock::default();
+    f.target = Some(crate::sim::lock_on::LockTarget::Aim(t));
+    s.foot_lock = vec![f];
 }
 
 /// `n` counted dwell ticks after the acquisition's settle tick.
@@ -321,7 +330,7 @@ fn an_unguided_missile_flies_its_launch_line_and_bursts_at_its_life() {
     assert!((lost - want).abs() < 1e-2, "{lost} vs {want}");
 }
 
-/// §5: a human's launcher counts its magnet target's dwell; LockTime is
+/// §5: a human's launcher counts its foot lock's dwell; LockTime is
 /// reached on the 30th counted tick, a new target restarts the clock, and a
 /// class that is no launcher never locks.
 #[test]
@@ -332,9 +341,8 @@ fn a_launchers_dwell_lock_reaches_lock_time_and_a_new_target_restarts_it() {
         .spawn(&UnitSpec::trooper(1, Vec3::new(1.0, 0.0, -40.0)))
         .unwrap();
     let i = me.index as usize;
-    // The magnet is the acquisition's: the enemy under the reticle.
-    s.acquire_magnet(0, me, false);
-    assert_eq!(s.magnet[0], Some(AimTarget::Unit(enemy)));
+    // The foot lock holds the enemy under the reticle.
+    hold(&mut s, AimTarget::Unit(enemy));
     // The first tick takes the candidate and starts the clock at zero.
     s.tick_locks(TICK_DT);
     assert_eq!(
@@ -361,10 +369,9 @@ fn a_launchers_dwell_lock_reaches_lock_time_and_a_new_target_restarts_it() {
     );
     assert!((s.units[i].weapon.lock_held - 1.0).abs() < 1e-5);
     // A new target restarts the clock: the first steps out of the cone and
-    // the magnet takes the second.
+    // the lock takes the second.
     s.units[enemy.index as usize].soldier.pos = Vec3::new(40.0, 0.0, 0.0);
-    s.acquire_magnet(0, me, false);
-    assert_eq!(s.magnet[0], Some(AimTarget::Unit(other)));
+    hold(&mut s, AimTarget::Unit(other));
     s.tick_locks(TICK_DT);
     assert_eq!(
         s.units[i].weapon.lock_target,
@@ -418,7 +425,7 @@ fn the_press_consumes_the_lock_and_carries_it_onto_the_missile() {
     let (mut s, me, enemy, wc) = scene(40.0);
     let class = s.weapon_classes[wc].clone();
     let i = me.index as usize;
-    s.acquire_magnet(0, me, false);
+    hold(&mut s, AimTarget::Unit(enemy));
     s.tick_locks(TICK_DT);
     dwell(&mut s, 30);
     assert!(s.units[i].weapon.locked(&class));
@@ -432,10 +439,10 @@ fn the_press_consumes_the_lock_and_carries_it_onto_the_missile() {
 
     // Before the lock: the same press leaves unguided and the lock is
     // consumed all the same (B1 class+0x258 && +0x254).
-    let (mut s, me, _enemy, wc) = scene(40.0);
+    let (mut s, me, enemy, wc) = scene(40.0);
     let class = s.weapon_classes[wc].clone();
     let i = me.index as usize;
-    s.acquire_magnet(0, me, false);
+    hold(&mut s, AimTarget::Unit(enemy));
     s.tick_locks(TICK_DT);
     dwell(&mut s, 14);
     assert!(!s.units[i].weapon.locked(&class));
@@ -541,22 +548,33 @@ fn a_missile_locked_onto_a_vehicle_homes_on_its_aim_sphere_centre() {
 
 #[test]
 fn launcher_locks_a_turret_hashes_its_id_and_drops_a_destroyed_target() {
-    let (mut s, me, owner, _) = scene(50.0);
+    let (mut s, me, owner, wc) = scene(50.0);
+    // An auto turret's health type is Building: the launcher takes it.
+    s.weapon_classes[wc].target_kind |= 1 << HealthType::Building as u32;
     let class = crate::autoturret::TurretClass::new(
         &crate::weapon::test_props::List(&[]),
         WeaponClass::bf1_rifle(),
     );
+    let dispenser = s.add_weapon_class(WeaponClass {
+        turret: Some(Box::new(crate::weapon::Dispenser {
+            item: class.clone(),
+            velocity: 0.0,
+            strength: [0.0; 2],
+            max_items: 1,
+        })),
+        ..Default::default()
+    });
     s.turrets.push(crate::autoturret::Turret::new(
         19,
         owner,
         1,
-        0,
+        dispenser,
         &class,
         Vec3::new(0.0, 1.0, -10.0),
         Vec3::ZERO,
         0.0,
     ));
-    s.magnet[0] = Some(AimTarget::Turret(19));
+    hold(&mut s, AimTarget::Turret(19));
     s.tick_locks(TICK_DT);
     s.tick_locks(TICK_DT);
     assert_eq!(

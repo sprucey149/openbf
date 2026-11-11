@@ -64,7 +64,9 @@ fn dark_trooper() -> SoldierConstants {
     }
 }
 
-/// BF2 `rep_inf_ep3_jettrooper`: MaxSpeed 7.0, MaxStrafeSpeed 5.25.
+/// BF2 `rep_inf_ep3_jettrooper`: MaxSpeed 7.0, MaxStrafeSpeed 5.25. These
+/// are the disc's fuel numbers, which the PS2 capture replays; the game
+/// flies every jet trooper on `game::roster::JET_TROOPER_FUEL_*`.
 fn jet_trooper() -> SoldierConstants {
     SoldierConstants {
         jet_jump: 5.0,
@@ -82,8 +84,8 @@ fn jet_trooper() -> SoldierConstants {
 
 /// BF1 `rep_inf_jet_trooper` on BF2's rules: its own numbers (MaxSpeed 6.5,
 /// MaxStrafeSpeed 4.5, initial / recharge / border 0.25 / 0.1 / 0.24), the
-/// net cost 0.2 - 0.1 = 0.1 that `game::roster::bf1_net_jet_fuel_cost`
-/// gives it, and the BF2 twin's JetAcceleration 30 and jet row.
+/// net cost 0.2 - 0.1 = 0.1 (`game::roster::JET_TROOPER_FUEL_COST`, every
+/// jet trooper's), and the BF2 twin's JetAcceleration 30 and jet row.
 fn bf1_jet_trooper() -> SoldierConstants {
     SoldierConstants {
         jet_jump: 5.0,

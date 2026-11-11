@@ -289,11 +289,12 @@ Mapping of the authentic set onto the registry:
 | `80s` | (new, render) | force soldier LOD model. |
 | `at` | (new, fx) | needs `AddHitEffect` support in the weapon class; only the Wampa uses it. |
 | `alias` | no-op | PS2 GS post-filter. |
-`infinite_stamina` (which since 2026-10-28 also keeps a jet class's fuel full; the separate jet-fuel cheat was removed), `all_awards` have **no PS2
+`infinite_stamina` (which since 2026-10-28 also keeps a jet class's fuel full; the separate jet-fuel cheat was removed), `all_awards`, `damage_award` have **no PS2
 counterpart** (BF2 or BF1) — keep them as openbf extensions and label them so.
-`all_awards` (menu label "Award weapons (BF2 kits)", #142) gives the player every BF2 medal bit, so the class's
-award weapons replace the ones they stand for through BF2's switch filter (re-grenades.md §2.4); bots and the space
-modes keep their kits. The medal effects that are not weapons, and earning medals, wait for #130.
+`all_awards` (menu label "Award weapons", #142) gives the player every BF2 medal bit but the damage award's (medal 8, its own row `damage_award`, "Damage award (x1.5)") on either game's maps, so
+the class's award weapons replace the ones they stand for through BF2's switch filter (re-grenades.md §2.4; a BF1 class
+carries BF2's awards, award-weapons.md §3); with `damage_award` on, the damage award's x1.5 applies (award-weapons.md §1); bots and the space
+modes keep their kits and numbers. The other medal effects, and earning medals, wait for #130.
 Persistence: flags live for the process, never saved to the profile, not reset
 by mission restart or return-to-shell; in a network session `sos`/`ammo`/`80s`
 must refuse to toggle and `at` must not apply.

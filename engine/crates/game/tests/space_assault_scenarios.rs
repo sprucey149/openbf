@@ -155,6 +155,7 @@ fn incoming_missile_warning_lifecycle_and_hud_events() {
             phases: [0.0; 2],
             launch_phases: [0.0; 2],
             target: Some(MissileTarget::Vehicle(vh)),
+            part: None,
         }),
         fat: None,
     });

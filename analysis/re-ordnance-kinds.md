@@ -548,8 +548,12 @@ secondaries or every capital-ship damageable subsystem.
   resets on any tick inside, and drops the target at 2.0 s (B2:21224-21312). The launcher's candidate is then that
   target ∩ the mask ∩ dot ≥ 0.9 from the eye ∩ sight, and the body part it reports is always −1 (B2:331689-331750):
   the missile steers to the target's centre, so no lock ever aims at a vehicle's critical spot; the ×4 critical
-  damage comes only from a rocket that happens to strike a critical part. openbf uses this rule on BF2 ground maps
-  for a human's launcher; BF1 maps keep the BF1 magnet and space rounds are unchanged. Deviations: OURS auto lock
+  damage comes only from a rocket that happens to strike a critical part (openbf differs: §5.1). openbf uses this rule on every ground map
+  for a human's launcher; space rounds keep the magnet. OURS one rule for both games: BF1 counted a human's dwell on
+  the magnet (LockOnRange 175 m, 6° on, 10° off); on BF1 maps the torpedo launchers now take this lock with their own
+  vehicle-only kinds, BF2's LockTime 1.0 (the shared numbers, `gameplay-normalization.md`; the disc's 1.5), and the 100 / 110 m TargetLockMaxDistance / ...Lose defaults BF2's rocket
+  launcher also takes (neither game's launcher sets the key), so the reach drops from 175 m to 100 m and the cones
+  widen to the pick's dot 0.8 and the dwell's 25.8° (measure: maintainer playtest). Deviations: OURS auto lock
   (`FOOT_AUTO_LOCK`, for the B7 playtest: dwelling alone shows the box and curves the rocket): while no target is
   held, or the held one has left the 25.8° cone, the best target of the pick takes the lock; a target the button
   picked is left alone until the hold drops it or a long press clears it. One button serves reload and lock (openbf
@@ -570,6 +574,62 @@ secondaries or every capital-ship damageable subsystem.
   a `bullet`: no homing.
 - `re-vehicles.md` corrections (H4): BF1's lock HUD square is B1:262320-262339 (B1:262211 is the refire alpha); BF2's
   Controllable ticks copy TargetLockMaxDistance / ...Lose and the Target* mask, not LockOnRange / Angle / OffAngle.
+
+### 5.1 OURS: the lock goes to the vehicle's weak part (2026-11-10)
+
+A named deviation; neither original does this. The maintainer: "I want the lock onto vehicle weak parts that give
+the award. That is something I want different." Code: `core::sim::weak_lock`.
+
+- **What a weak part is.** A hull body in the ordnance subset whose class gives it a direct-hit factor over 1
+  (`HitLocation`, `re-hitzones.md` Part A §3): BF2's 15 classes with a x4 prim, and BF1's armoured vehicles through
+  the port's table (`re-hitzones.md` Part A §3.1).
+- **The lock point.** While a human's on-foot lock (§5) holds a vehicle, the lock point is the weak part in sight
+  from his eye that is nearest his reticle. In sight: the line from the eye to the part's centre meets a weak part
+  before any other body of that hull, and neither the terrain, the map nor another hull stands in it. With no part in
+  sight the point is the hull centre, as before. The pick is made fresh every tick and keeps no state; the lock
+  box is drawn at the point.
+- **The dwell and the hold.** The pick of a target stays on the vehicle's centre. For the dwell's 25.8° cone and
+  the hold's sight test, a weak part in sight counts as the vehicle does, so aiming at the box on a large hull (the
+  AT-AT's neck from close by) keeps the clock running. Moving from one part to another does not restart the dwell.
+- **The rocket.** A rocket fired on a full lock takes the part chosen on the tick it leaves and steers to that
+  part's centre every tick, following it as the vehicle moves; if the hull loses the part it steers to the centre.
+- **The hit.** A rocket sent at a part takes the part's factor wherever it meets that vehicle's hull. Steering alone
+  was not enough: in the survey below 260 of 275 BF2 part rockets and 149 of 170 BF1 ones struck the part itself;
+  the rest landed 0.5-1.7 m beside it (turn rate 2 rad/s; BF1's Republic and Alliance torpedoes waver). With the
+  rule every part rocket that met its vehicle was critical. Any other round, and a part rocket into another
+  vehicle, keeps the struck prim's factor.
+- **Who.** A human's on-foot launcher on a ground map: BF2's rocket launchers, BF1's torpedo launchers. A bot never
+  locks a vehicle and gets no factor over 1 on a ground round (`Sim::hit_scale`). Space rounds, flyer and seat locks
+  keep the centre (`lock_on.rs` is unchanged).
+- **The result in play.** The hit is the critical hit the reticle mark shows and the demolition award counts
+  (`re-target-hud.md` §12). From a side where the part shows, a BF2 rocket does up to 6000 (1500 after its first
+  half second, x4) against a tank's 8000: two rockets in place of six. A BF1 torpedo does 2400 in place of 600.
+- **State and hash.** `Missile::part` is the hull body's index; it adds `MSLPART` to the hash only when set, so
+  rounds with no human part lock hash as before.
+
+Survey (`game/tests/suite/rocket_weakspot.rs`, `weak_part_lock_survey`, run 2026-11-10): a human with the other
+side's launcher at 24 directions, 15 m and 30 m from each pad vehicle where it stands on the map, locking, dwelling
+and firing through the trigger. "Part" = rockets that left for a weak part, of the stands where the lock took the
+vehicle; the rest were centre locks.
+
+| Vehicle | BF2 part / locked | BF1 part / locked |
+|---|---|---|
+| Fighter tank (rep) | 18/37 Geonosis, 15/39 Kashyyyk, 14/36 Mygeeto | 10/31 Naboo |
+| Fighter tank (imp) | 5/32 Kashyyyk | 14/43 Rhen Var |
+| AAT | 21/45 Naboo, 7/26 Mygeeto, 13/37 Utapau | 7/37 Naboo, 9/38 Kashyyyk |
+| Hailfire | 15/46 Geonosis | 5/44 Geonosis |
+| Spider walker | 18/47 Geonosis | 15/40 Geonosis, 16/42 Kashyyyk |
+| AT-TE | 21/43 Geonosis | 8/48 Geonosis |
+| AT-ST | 15/39 Hoth, 13/44 Endor | 16/40 Hoth, 12/33 Yavin, 13/44 Endor |
+| AT-AT | 21/46 Hoth | 20/48 Hoth, 18/45 Rhen Var |
+| Combat speeder | 8/40 Kashyyyk | 15/39 Rhen Var |
+| One-man AT-ST | 20/42 Naboo, 11/19 Felucia, 18/31 Utapau | - |
+| Snail tank | 13/34 Kashyyyk, 9/37 Felucia | - |
+
+Of 275 BF2 part rockets 270 were critical and 5 met the ground or a wall first; of 178 BF1 ones, 177 and 1. In one
+shot of 453 the part came into sight on the tick of the shot (the box was on the centre, the rocket took the part).
+Not surveyed: BF1's hovernaut and MTT (one command spawn on Rhen Var, not out on the first tick), BF2's Bespin
+combat speeder and Kashyyyk spider (the same hulls as their twins).
 
 ## 6. The shell and the mortar launcher [V][O] (H3 §3-4)
 
