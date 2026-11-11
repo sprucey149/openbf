@@ -251,6 +251,12 @@ Before the issue the port read a class key's FIRST value in the weapon's own cla
 every shot was its stage 0 (the first OrdnanceName and ShotsPerSalvo) - and since the charge never got past the
 shot delay, no stage was ever reached.
 
+On ground maps, openbf's foot bots begin charging a staged shell after the
+weapon finishes its firing cycle and reload. The idle press resets the
+previous shot's accumulator. A press during cooldown could carry it into
+the next release and fire the sticky stage along the shell's aim. The bot
+uses its ordinary charge duration and still waits for a clear firing line.
+
 ## Open questions
 
 1. **re-ordnance-kinds.md conflicts with the data.** Its table row says the BF2 mortar is "one stage, shell", but

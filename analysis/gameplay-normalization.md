@@ -8,6 +8,12 @@ the later [ground vehicle and anti-vehicle pass](vehicle-normalization.md),
 which supersedes rule 5 for matched ground guns and changes the listed
 infantry weapons against vehicles and buildings.
 
+The ground Conquest roster applies one additional E-11 adjustment on both
+games' maps. A full-damage bolt takes 80 health from a person, restoring the
+five body hits of BF1's stock 60-damage rifle against a 300-health trooper.
+It uses the same refire, flight and falloff rules as the normalized rifle.
+The tables below give the class values before this roster adjustment.
+
 The maintainer (2026-11-10): "I want this to be one game, not 2 games in 1 keeping the games
 separate - one seamless game. ... make health for each class equivalent across the 2 games ...
 rifles do the same damage in bf1 as they do in bf2, and it has the same effect because health

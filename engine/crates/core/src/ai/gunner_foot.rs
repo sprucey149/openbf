@@ -33,7 +33,7 @@ use crate::remote::Droid;
 use crate::sim::{buttons, PadState, Sim};
 use crate::soldier::Stance;
 use crate::unit::{Unit, UnitHandle};
-use crate::weapon::WeaponClass;
+use crate::weapon::{FireState, OrdKind, WeaponClass};
 use glam::Vec3;
 
 /// What the running behaviour asks of the gunner this tick — exactly one a
@@ -564,6 +564,22 @@ pub(super) fn charge(
     pad: &mut PadState,
 ) {
     if want_fire && st.charge_until == 0 {
+        // A staged shell needs an idle press edge to clear the last shot's
+        // accumulator. Starting during cooldown can release its sticky stage.
+        if !sim.space_round()
+            && wc.ordnance.kind == OrdKind::Shell
+            && wc
+                .stages
+                .first()
+                .is_some_and(|s| s.class.ordnance.sticky.is_some())
+            && sim.unit(me).is_some_and(|u| {
+                !u.is_human()
+                    && u.mount.is_none()
+                    && (u.weapon.state != FireState::Idle || u.weapon.reloading())
+            })
+        {
+            return;
+        }
         let draw = unit_unit(me.index, sim.tick, me.gen, SALT_CHARGE);
         let frac = CHARGE_MIN + (skill.charge_hi - CHARGE_MIN).max(0.0) * draw;
         let ticks = (frac * wc.max_pressed_time * crate::TICK_HZ as f32).round();

@@ -1,7 +1,28 @@
-# Faction balance, November 2026 - measured 2026-11-10
+# Faction balance, November 2026
 
-Is one faction downright better than the other, and if so, why? This note gives what a faction study measured, the
-two bot changes that came out of it, and the proxy gate before and after them on main.
+## November 11 follow-up
+
+Foot bots now wait for the mortar's firing cycle and reload to finish
+before starting the next charge. The ground Conquest E-11 deals
+80 damage per full-damage body hit to a person, restoring the original
+BF1 five-hit threshold for a trooper. The two rules are described in
+[weapon charge](re-weapon-charge.md) and the [infantry scale](gameplay-normalization.md).
+
+Across 384 matched Hard Good proxy rounds on BF1 Yavin 2, Mos Eisley and
+Naboo Theed, with awards off and both faction assignments and proxy sides,
+the Empire went from 56/192 wins (29.2%) to 87/192 (45.3%) and the Rebels
+from 105/192 (54.7%) to 81/192 (42.2%). This comparison used seeds 161–192.
+With the original starting assignments, the faction gap fell from
+37.5 to 5.2 percentage points and the combined win rate reached 45.3%.
+In 96 separate bot-only rounds, the Empire's mean ticket deficit fell
+from 20.2 to 5.8.
+
+Easy reached 90.2% on the established four-map cohort. Normal and Elite
+finished within their target bands on the separate tier check. The
+maintainer accepted the current difficulty levels for now. Live play
+and wider Clone Wars balance remain open.
+
+## November 10 study
 
 The question (maintainer, 2026-11-10): the stage-0 baseline (`analysis/bot-baseline-2026-11.md` §2.2) found the proxy
 winning 19.8 % at Hard as the Empire and 64.6 % as the Rebels on the three BF1 check maps, and 0/16 as the Republic
