@@ -70,8 +70,10 @@ fn bulldog() -> WeaponClass {
     w
 }
 
-/// BF1's torpedo launcher as baked (`*_weap_inf_torpedo_launcher`): vehicles
-/// only, a 1.5 s lock, two rounds a clip (ALL, REP), a 4 s reload.
+/// BF1's torpedo launcher (`*_weap_inf_torpedo_launcher`): vehicles only,
+/// the disc's 1.5 s lock (the shared numbers bake 1.0; a time unlike the
+/// rocket's shows each launcher counts its own), two rounds a clip (ALL,
+/// REP), a 4 s reload.
 pub(in crate::sim) fn torpedo() -> WeaponClass {
     let mut w = launcher();
     w.rounds_per_clip = 2;
@@ -193,7 +195,7 @@ fn launcher_locks_by_dwelling_alone_on(rules: GroundRules) {
     assert!(s.foot_lock[0].target.is_some());
 }
 
-/// The pick: TargetLockMaxDistance, dot >= 0.8, sight, hostile only.
+/// The pick: the 175 m reach, dot >= 0.8, sight, hostile only.
 #[test]
 fn bf2_pick_needs_dot_0_8_target_lock_max_and_sight() {
     let refused = |place: &dyn Fn(&mut Sim)| {
@@ -204,10 +206,10 @@ fn bf2_pick_needs_dot_0_8_target_lock_max_and_sight() {
     };
     assert_eq!(
         refused(&|s| {
-            tank(s, Some(1), ahead(120.0, 0.0));
+            tank(s, Some(1), ahead(180.0, 0.0));
         }),
         None,
-        "120 m is past the 100 m default"
+        "180 m is past the 175 m reach"
     );
     assert_eq!(
         refused(&|s| {
@@ -250,9 +252,13 @@ fn bf2_pick_needs_dot_0_8_target_lock_max_and_sight() {
         }),
         None
     );
-    // The control: 95 m at 30 deg locks.
+    // The controls: 95 m at 30 deg and 170 m ahead lock.
     assert!(refused(&|s| {
         tank(s, Some(1), ahead(95.0, 30.0));
+    })
+    .is_some());
+    assert!(refused(&|s| {
+        tank(s, Some(1), ahead(170.0, 0.0));
     })
     .is_some());
 }
@@ -476,9 +482,8 @@ fn bf1_torpedo_locks_by_dwelling_and_homes() {
 
 /// The named deviation: on BF1 the lock follows the foot rule, not BF1's
 /// magnet. A tank 15 deg off the aim (outside the magnet's 6 deg, inside
-/// the 25.8 deg dwell) fills the dwell; a tank at 150 m (inside the
-/// magnet's 175 m LockOnRange, past the 100 m TargetLockMaxDistance) is
-/// never locked.
+/// the 25.8 deg dwell) fills the dwell; a tank at 180 m (past the 175 m
+/// reach) is never locked.
 #[test]
 fn bf1_lock_follows_the_foot_rule_not_the_magnet() {
     let (mut s, me) = scene_rules(torpedo(), GroundRules::Bf1);
@@ -495,7 +500,7 @@ fn bf1_lock_follows_the_foot_rule_not_the_magnet() {
     assert!(held(&s, me) > 0.5, "{}", held(&s, me));
 
     let (mut s, me) = scene_rules(torpedo(), GroundRules::Bf1);
-    tank(&mut s, Some(1), ahead(150.0, 0.0));
+    tank(&mut s, Some(1), ahead(180.0, 0.0));
     steps(&mut s, 20, 0);
     tap(&mut s);
     assert_eq!(s.foot_lock[0].target, None);
@@ -535,6 +540,136 @@ fn bf1_two_round_clip_press_reloads_then_cycles() {
     tap(&mut s);
     assert_eq!(s.foot_lock[0].target, Some(lb));
     assert!(!s.unit(me).unwrap().weapon.reloading());
+}
+
+/// Hold `v` so its centre is `d` m from `me`'s eye, straight ahead.
+fn pin(s: &mut Sim, me: UnitHandle, v: VehicleHandle, d: f32) {
+    let t = LockTarget::Aim(AimTarget::Vehicle(v));
+    let eye = s.units[me.index as usize]
+        .aim_ray(s.ground_rules, s.views())
+        .0;
+    let dy = s.lock_probe(t).unwrap().pos.y - eye.y;
+    let flat = (d * d - dy * dy).max(0.0).sqrt();
+    let x = &mut s.vehicles[v.index as usize];
+    x.pos = Vec3::new(eye.x, x.pos.y, eye.z - flat);
+    x.vel = Vec3::ZERO;
+}
+
+/// How far `v`'s centre is from `me`'s eye.
+fn reach(s: &Sim, me: UnitHandle, v: VehicleHandle) -> f32 {
+    let eye = s.units[me.index as usize]
+        .aim_ray(s.ground_rules, s.views())
+        .0;
+    let t = LockTarget::Aim(AimTarget::Vehicle(v));
+    s.lock_probe(t).unwrap().pos.distance(eye)
+}
+
+/// Ticks of dwell to a full lock on a tank held `d` m out.
+fn dwell_ticks(class: WeaponClass, rules: GroundRules, d: f32) -> usize {
+    let (mut s, me) = scene_rules(class.clone(), rules);
+    let v = tank(&mut s, Some(1), ahead(d, 0.0));
+    pin(&mut s, me, v, d);
+    steps(&mut s, 1, 0);
+    let lv = LockTarget::Aim(AimTarget::Vehicle(v));
+    assert_eq!(s.foot_lock[0].target, Some(lv), "{rules:?} {d} m");
+    assert_eq!(held(&s, me), 0.0);
+    let mut ticks = 0;
+    while !s.unit(me).unwrap().weapon.locked(&class) {
+        pin(&mut s, me, v, d);
+        steps(&mut s, 1, 0);
+        ticks += 1;
+        assert!(ticks < 200, "{rules:?} {d} m: never locked");
+    }
+    assert!((reach(&s, me, v) - d).abs() < 0.05, "{}", reach(&s, me, v));
+    ticks
+}
+
+/// The far lock: out to 100 m the dwell needs LockTime; past it the
+/// need rises in a line to twice LockTime at the 175 m reach. Both games'
+/// launchers, each on its own LockTime, on both games' maps.
+#[test]
+fn a_far_lock_needs_a_longer_dwell() {
+    assert_eq!(foot_dwell_scale(50.0), 1.0);
+    assert_eq!(foot_dwell_scale(100.0), 1.0);
+    assert!((foot_dwell_scale(140.0) - (1.0 + 40.0 / 75.0)).abs() < 1e-6);
+    assert_eq!(foot_dwell_scale(175.0), 2.0);
+    assert_eq!(foot_dwell_scale(185.0), 2.0);
+    for (class, name) in [(launcher(), "rocket"), (torpedo(), "torpedo")] {
+        for rules in [GroundRules::Bf2, GroundRules::Bf1] {
+            // 175 m less a centimetre: the reach's own edge is f32 noise.
+            for (d, scale) in [
+                (50.0, 1.0),
+                (100.0, 1.0),
+                (140.0, 1.0 + 40.0 / 75.0),
+                (174.99, 2.0),
+            ] {
+                let want = (class.lock_time * scale * crate::TICK_HZ as f32).round() as usize;
+                let got = dwell_ticks(class.clone(), rules, d);
+                assert!(
+                    (want..=want + 1).contains(&got),
+                    "{name} {rules:?} {d} m: {got} ticks, want {want}"
+                );
+            }
+        }
+    }
+}
+
+/// A full lock stays full as the tank draws away past 100 m: no new dwell,
+/// the shot homes; the lock is lost only past 185 m, after the 2 s hold.
+#[test]
+fn a_held_lock_keeps_past_100_m_and_drops_past_185_m() {
+    for class in [launcher(), torpedo()] {
+        for rules in [GroundRules::Bf2, GroundRules::Bf1] {
+            let (mut s, me) = scene_rules(class.clone(), rules);
+            let v = tank(&mut s, Some(1), ahead(60.0, 0.0));
+            pin(&mut s, me, v, 60.0);
+            steps(&mut s, 60, 0);
+            assert!(s.unit(me).unwrap().weapon.locked(&class), "{rules:?}");
+            let full = held(&s, me);
+            pin(&mut s, me, v, 150.0);
+            steps(&mut s, 1, 0);
+            assert!(s.unit(me).unwrap().weapon.locked(&class), "{rules:?}");
+            assert!(held(&s, me) > full, "{rules:?}: the clock runs on");
+            assert_eq!(s.foot_lock_charge(0), Some(1.0));
+            // Out to 184 m for 3 s: still held, still full.
+            for _ in 0..90 {
+                pin(&mut s, me, v, 184.0);
+                steps(&mut s, 1, 0);
+            }
+            let lv = LockTarget::Aim(AimTarget::Vehicle(v));
+            assert_eq!(s.foot_lock[0].target, Some(lv), "{rules:?}");
+            assert_eq!(s.foot_lock_target(0).map(|t| t.0), Some(lv));
+            assert!(s.unit(me).unwrap().weapon.locked(&class), "{rules:?}");
+            // Past 185 m: kept through the 2 s hold, then dropped.
+            for _ in 0..60 {
+                pin(&mut s, me, v, 190.0);
+                steps(&mut s, 1, 0);
+            }
+            assert_eq!(s.foot_lock[0].target, Some(lv), "{rules:?}");
+            pin(&mut s, me, v, 190.0);
+            steps(&mut s, 1, 0);
+            assert_eq!(s.foot_lock[0].target, None, "{rules:?}");
+            assert!(!s.unit(me).unwrap().weapon.locked(&class), "{rules:?}");
+            assert_eq!(fire(&mut s), None, "{rules:?}");
+        }
+    }
+}
+
+/// A far lock fills the ring slower (1 2/3 s at 150 m) and homes.
+#[test]
+fn a_far_full_lock_homes() {
+    for rules in [GroundRules::Bf2, GroundRules::Bf1] {
+        let (mut s, me) = scene_rules(launcher(), rules);
+        let v = tank(&mut s, Some(1), ahead(150.0, 0.0));
+        pin(&mut s, me, v, 150.0);
+        steps(&mut s, 46, 0);
+        let f = s.foot_lock_charge(0).unwrap();
+        assert!((0.8..1.0).contains(&f), "{rules:?}: {f}");
+        steps(&mut s, 6, 0);
+        assert_eq!(s.foot_lock_charge(0), Some(1.0), "{rules:?}");
+        assert_eq!(fire(&mut s), Some(MissileTarget::Vehicle(v)), "{rules:?}");
+        assert!(reach(&s, me, v) > 145.0);
+    }
 }
 
 #[test]

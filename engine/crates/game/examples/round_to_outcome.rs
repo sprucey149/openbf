@@ -437,6 +437,31 @@
 //! the map defaults); `SWEEP_COMBATANTS` / `SWEEP_TICKETS` override. Without
 //! maps it runs [`CHECK_MAPS`]. `SWEEP_THREADS` (default 8) rounds at once.
 //!
+//! ## Bot census — `BOT_CENSUS`
+//! With `BOT_CENSUS=1` or `STUCK_CENSUS`, and always inside
+//! `--difficulty-check`, every round adds these stderr lines from
+//! `core::ai::census` (bot rework stage 0; STDOUT is unchanged). The counts
+//! come per GROUP `G` = `[proxy ]<row>[ vs-human]`: the row the unit's team
+//! plays, and whether a hostile team has a human (a player or a proxy). In
+//! a proxy round his allies play a lower row (card DTEAM) than the bots
+//! facing him, so the two never share a line.
+//! - `levers <key>: tier T | tokn off n stray n cross n cover-ticks n`: the
+//!   round's host tier and its token counts;
+//! - `d1 <key> G: thinks N | human H far HF (p %) takes HT far HTF | bot B
+//!   far BF (p %) takes BT far BTF`: thinks whose target is an enemy
+//!   soldier in sight, split by a human or a bot target; "far" = an
+//!   engageable enemy bot at most half as far; "takes" = new this think.
+//!   In a `vs-human` group the human rate is the far-human preference and
+//!   the bot rate, from the same bots, its comparison;
+//! - `levers <key> G: foot-min M thinks N | <lever> n ... | events <lever>
+//!   n ...`: think-sampled levers count thinks, events count events;
+//! - `think <key>: calls N p50 X p99 Y max Z us | thinks ... | proxy calls
+//!   ...`: the think's wall time per call (a machine measurement: never
+//!   compare it across loads or cores).
+//!
+//! `--difficulty-check` adds the D1 rates of the bots facing the proxy and
+//! each group's lever counts per foot-minute to its tier table.
+//!
 //! ## Animation census — `ANIM_CENSUS`
 //! `ANIM_CENSUS=1` (card ANIML) runs every soldier's animator beside the
 //! round (no renderer) and prints `game::animator::census`'s lines: the shots
@@ -513,6 +538,8 @@ struct Cfg {
     mission_dir: Option<std::path::PathBuf>,
     /// The proxy's team, profile and strength label.
     proxy: Option<(u8, core::ai::proxy::Profile, String)>,
+    /// `BOT_CENSUS=1` (module header): the bot census lines.
+    bot_census: bool,
 }
 
 impl Cfg {
@@ -559,6 +586,7 @@ impl Cfg {
                     None
                 }
             }),
+            bot_census: var("BOT_CENSUS").is_some_and(|v| v != "0"),
         }
     }
 }
@@ -696,6 +724,8 @@ struct RoundResult {
     winner: Option<u8>,
     margin: i64,
     proxy: Option<(u8, game::blackbox::session::Session)>,
+    /// The round's bot census (`core::ai::census`).
+    bots: core::ai::census::BotCensus,
 }
 
 impl RoundResult {
@@ -5827,6 +5857,7 @@ fn run_map(
             );
         }
     }
+    let census_on = census.is_some();
     let mut census = census.map_or_else(String::new, |threshold| {
         stuck_census(key, &w, &class_names, threshold, &longest, &noprog)
     });
@@ -5895,6 +5926,9 @@ fn run_map(
             wake_why.join(" "),
         ));
     }
+    if census_on || cfg().bot_census {
+        census.push_str(&bot_census_lines(key, &w.sim));
+    }
     if let Some(f) = &fire {
         census.push_str(&f.line(key));
     }
@@ -5942,6 +5976,7 @@ fn run_map(
         margin: i64::from(w.sim.battle.teams[1].tickets())
             - i64::from(w.sim.battle.teams[0].tickets()),
         proxy: proxy.map(|(i, tally)| (w.sim.units[i].team, tally.out)),
+        bots: w.sim.bot_census,
     };
     census.push_str(&round.line(
         key,
@@ -5961,6 +5996,115 @@ fn run_map(
         }),
         round: Some(round),
     }
+}
+
+/// A census group's name: `[proxy ]<row>[ vs-human]`.
+fn census_group(row: core::skill::Difficulty, vs_human: bool, proxy: bool) -> String {
+    format!(
+        "{}{}{}",
+        if proxy { "proxy " } else { "" },
+        row.label(),
+        if vs_human { " vs-human" } else { "" }
+    )
+}
+
+/// The census groups that saw a unit on foot, in row order.
+fn census_groups(c: &core::ai::census::BotCensus) -> Vec<(String, core::ai::census::CensusCell)> {
+    let mut out = Vec::new();
+    for proxy in [false, true] {
+        for row in core::skill::Difficulty::ALL {
+            for vs in [true, false] {
+                let cell = *c.cell(row, vs, proxy);
+                if cell.foot_ticks > 0 {
+                    out.push((census_group(row, vs, proxy), cell));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// One group's D1 counts: its human-target thinks with the far share,
+/// beside the same for its bot targets.
+fn census_d1(c: &core::ai::census::CensusCell) -> String {
+    let pct = |a: u64, b: u64| 100.0 * a as f64 / b.max(1) as f64;
+    let d = c.d1_split();
+    format!(
+        "thinks {} | human {} far {} ({:.1} %) takes {} far {} | bot {} far {} ({:.1} %) takes {} far {}",
+        c.thinks,
+        d[0],
+        d[1],
+        pct(d[1], d[0]),
+        d[2],
+        d[3],
+        d[4],
+        d[5],
+        pct(d[5], d[4]),
+        d[6],
+        d[7],
+    )
+}
+
+/// One group's lever counts: think-sampled, then events.
+fn census_levers(c: &core::ai::census::CensusCell) -> String {
+    use core::ai::census::{EVENT_LEVERS, LEVER_NAMES};
+    let part = |events: bool| {
+        LEVER_NAMES
+            .iter()
+            .zip(c.levers)
+            .enumerate()
+            .filter(|(b, (n, _))| !n.is_empty() && (*b as u32 >= EVENT_LEVERS) == events)
+            .map(|(_, (n, v))| format!("{n} {v}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    format!(
+        "foot-min {:.1} thinks {} | {} | events {}",
+        c.foot_ticks as f64 / core::TICK_HZ as f64 / 60.0,
+        c.thinks,
+        part(false),
+        part(true)
+    )
+}
+
+/// The bot census lines (module header, `BOT_CENSUS`): a `d1` and a
+/// `levers` line per group (the row the unit's team plays, whether it
+/// faces a human, bot or proxy), so a proxy's allies on a lower row are
+/// never mixed with the bots facing him.
+fn bot_census_lines(key: &str, sim: &core::sim::Sim) -> String {
+    let ns = &sim.nav_stats;
+    let groups = census_groups(&sim.bot_census);
+    let mut s = format!(
+        "levers {key}: tier {} | tokn off {} stray {} cross {} cover-ticks {}\n",
+        sweep_difficulty().label(),
+        ns.tokn_aimed_off,
+        ns.tokn_stray,
+        ns.tokn_cross,
+        ns.cover_ticks,
+    );
+    for (name, c) in &groups {
+        s.push_str(&format!("d1 {key} {name}: {}\n", census_d1(c)));
+    }
+    for (name, c) in &groups {
+        s.push_str(&format!("levers {key} {name}: {}\n", census_levers(c)));
+    }
+    let h = &sim.think_hist;
+    let q = |h: &core::ai::census::Hist| {
+        format!(
+            "{} p50 {:.1} p99 {:.1}",
+            h.n,
+            h.quantile_us(0.5),
+            h.quantile_us(0.99)
+        )
+    };
+    s.push_str(&format!(
+        "think {key}: calls {} max {:.1} us | thinks {} | proxy calls {}\n",
+        q(&h.all),
+        f64::from(h.all.max_ns) / 1000.0,
+        q(&h.thinks),
+        q(&h.proxy),
+    ));
+    s
 }
 
 /// The LOWER median of `v` (already sorted): index `(n − 1) / 2`, and `-` when
@@ -6066,6 +6210,7 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
                     *c.borrow_mut() = Cfg {
                         difficulty: d,
                         proxy: Some((side, strength.profile(), strength.label().to_owned())),
+                        bot_census: true,
                         ..base.clone()
                     };
                 });
@@ -6075,7 +6220,12 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
                     report
                         .census
                         .lines()
-                        .filter(|l| l.starts_with("round "))
+                        .filter(|l| {
+                            l.starts_with("round ")
+                                || l.starts_with("d1 ")
+                                || l.starts_with("levers ")
+                                || l.starts_with("think ")
+                        })
                         .map(|l| format!("{l}\n"))
                         .collect::<String>()
                 );
@@ -6102,6 +6252,7 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
         let (mut k, mut de, mut sh, mut hi, mut alive, mut lives) =
             (0u32, 0u32, 0u32, 0u32, 0u64, 0usize);
         let mut per_map: Vec<String> = Vec::new();
+        let mut bots = core::ai::census::BotCensus::default();
         for (m, (key, _)) in selected.iter().enumerate() {
             let mut side_w = [0u32; 2];
             let mut side_n = [0u32; 2];
@@ -6111,6 +6262,7 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
                     continue;
                 }
                 let Some(r) = r else { continue };
+                bots.merge(&r.bots);
                 let side = j.2;
                 let own = if side == 1 { r.margin } else { -r.margin };
                 let won = r.winner == Some(side);
@@ -6162,6 +6314,36 @@ fn difficulty_check(maps: &[(String, String, std::path::PathBuf)], args: &[Strin
         );
         for l in per_map {
             println!("{l}");
+        }
+        // Bot census: the far-human preference of the bots facing the
+        // proxy, beside the same rate for their bot targets, and each
+        // group's levers per foot-minute under its own row's label (the
+        // proxy's allies play a lower row, card DTEAM).
+        let facing = bots.sum(|_, vs, proxy| vs && !proxy);
+        let d = facing.d1_split();
+        let pct = |a: u64, b: u64| 100.0 * a as f64 / b.max(1) as f64;
+        println!(
+            "    d1 bots facing the proxy: human-target thinks {} far {:.1} % | bot-target thinks {} far {:.1} %",
+            d[0],
+            pct(d[1], d[0]),
+            d[4],
+            pct(d[5], d[4])
+        );
+        for (name, c) in census_groups(&bots) {
+            if name.starts_with("proxy ") {
+                continue;
+            }
+            let foot_min = c.foot_ticks as f64 / core::TICK_HZ as f64 / 60.0;
+            println!(
+                "    levers per foot-min, {name} ({foot_min:.0}): {}",
+                core::ai::census::LEVER_NAMES
+                    .iter()
+                    .zip(c.levers)
+                    .filter(|(n, v)| !n.is_empty() && *v > 0)
+                    .map(|(n, v)| format!("{n} {:.2}", v as f64 / foot_min.max(1e-9)))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
         }
     }
     println!(

@@ -93,12 +93,15 @@ mod vehicles;
 mod water;
 mod weak_lock;
 
+pub use awards::{
+    DEFAULT_REPAIR_SCALE, ENDURANCE, ENDURANCE_MEDAL, TECHNICIAN_MEDAL, WEAPON_MEDALS,
+};
 pub use beam::Beam;
 pub use blast::{soldier_blast_sphere, BLAST_GATHER_MAX};
 pub use bounds::{
     Level, ReturnPath, BOUND_DROP, KILL_FLOOR_DROP, LEVEL_HUBS, LEVEL_RISE, UNDER_MAP_SPEED,
 };
-pub use buffs::Buffs;
+pub use buffs::{Buffs, GUARDIAN, GUARDIAN_MEDAL, WAR_HERO, WAR_HERO_MEDAL};
 pub use building_turrets::{BuildingTurret, PosedBody, PosedParts, TurretFall};
 pub use ctf::{
     CaptureRegion, CtfMode, CtfState, Flag, FlagStatus, DEFAULT_CAPTURE_REGION_RADIUS,
@@ -142,6 +145,7 @@ pub use stations::{
 };
 pub use target_hints::{TargetHint, TargetHints};
 pub use tow::{TowCable, TowFall};
+pub use weak_lock::{GROUND_WEAK_SPOT_FACTOR, HEAVY_WALKER_WEAK_SPOT_FACTOR};
 
 #[cfg(test)]
 mod tests {

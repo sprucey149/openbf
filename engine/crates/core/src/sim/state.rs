@@ -74,11 +74,22 @@ pub struct Cheats {
     /// x1.5 on everything dealt (`sim::buffs::WAR_HERO`). Its own row so the
     /// award weapons can be judged at their own damage. Not in space.
     pub damage_award: bool,
+    /// `[ours]` The player holds BF2's defense award (medal 7, "Guardian"):
+    /// x0.5 on all damage taken (`sim::buffs::GUARDIAN`). Not in space.
+    pub defense_award: bool,
+    /// `[ours]` The player holds BF2's energy award (medal 6, "Endurance"):
+    /// x1.5 energy refill for him and the vehicle he drives
+    /// (`sim::awards::ENDURANCE`). Not in space.
+    pub energy_award: bool,
+    /// `[ours]` The player holds BF2's vehicle award (medal 3,
+    /// "Technician"): the vehicle he drives repairs itself
+    /// (`Sim::vehicle_regen`). Not in space.
+    pub vehicle_award: bool,
 }
 
 impl Cheats {
     /// Registry view: (id, label, enabled) in menu order.
-    pub fn entries(&self) -> [(&'static str, &'static str, bool); 7] {
+    pub fn entries(&self) -> [(&'static str, &'static str, bool); 10] {
         [
             ("invincible", "Invincibility (sos)", self.invincible),
             ("ammo", "Infinite ammo (ammo)", self.infinite_ammo),
@@ -86,7 +97,26 @@ impl Cheats {
             ("stamina", "Infinite stamina (run)", self.infinite_stamina),
             ("classes", "Unlock all classes (all)", self.all_classes),
             ("awards", "Award weapons", self.all_awards),
-            ("damage", "Damage award (x1.5)", self.damage_award),
+            (
+                "damage",
+                "War Hero: damage increase (x1.5)",
+                self.damage_award,
+            ),
+            (
+                "guardian",
+                "Guardian: damage reduction (x0.5)",
+                self.defense_award,
+            ),
+            (
+                "endurance",
+                "Endurance: energy regen (x1.5)",
+                self.energy_award,
+            ),
+            (
+                "technician",
+                "Technician: vehicle regen",
+                self.vehicle_award,
+            ),
         ]
     }
 
@@ -99,6 +129,9 @@ impl Cheats {
             "classes" => self.all_classes = !self.all_classes,
             "awards" => self.all_awards = !self.all_awards,
             "damage" => self.damage_award = !self.damage_award,
+            "guardian" => self.defense_award = !self.defense_award,
+            "endurance" => self.energy_award = !self.energy_award,
+            "technician" => self.vehicle_award = !self.vehicle_award,
             _ => {}
         }
     }
@@ -366,6 +399,17 @@ pub struct Sim {
     /// `TimeRequiredToEject`, `analysis/re-build-zones.md` §11); 0 or
     /// missing = never sliced. SETUP data, NOT hashed.
     pub slice_time: Vec<f32>,
+    /// Per vehicle CLASS, its repair a second as a share of its maximum
+    /// health while a Technician drives it (`PilotSkillRepairScale`,
+    /// `Sim::vehicle_regen`); missing = `awards::DEFAULT_REPAIR_SCALE`.
+    /// SETUP data, NOT hashed.
+    pub repair_scale: Vec<f32>,
+    /// Per vehicle CLASS, the factor a strike on one of its weak parts deals
+    /// on a ground map (`weak_lock::struck_factor`): x4 for the AT-TE, the
+    /// AT-AT and the spider walker, x2 for every other class; missing =
+    /// [`super::GROUND_WEAK_SPOT_FACTOR`]. Space rounds keep the data's.
+    /// SETUP data, NOT hashed.
+    pub weak_spot_factor: Vec<f32>,
     /// Per vehicle CLASS, its hull's bodies in model space (card VHULL,
     /// `crate::collision::HullPart`) — `None` for a class with no collision
     /// the port builds, or a building turret, whose building is the world's
@@ -577,6 +621,14 @@ pub struct Sim {
     /// What the last [`Sim::step`] cost, for the slow-frame log. A measurement
     /// like `ai_wall_ms`: never read by the sim, not hashed.
     pub tick_cost: TickCost,
+    /// Bot census (`ai::census`): the round's target and tier-lever counts,
+    /// bots and proxies apart. A diagnostic OUTPUT like `nav_stats`:
+    /// deterministic, never read by the sim, not hashed. Space rounds are
+    /// not counted.
+    pub bot_census: crate::ai::census::BotCensus,
+    /// Bot census: the round's think wall times. A measurement of the
+    /// machine like `tick_cost`: never read by the sim, not hashed.
+    pub think_hist: crate::ai::census::ThinkHist,
     /// Phase B: the two teams' objective plans (`core::commander`). SIM STATE
     /// — hashed, replay-exact, re-made one team per tick.
     pub commander: [crate::commander::TeamPlan; 2],
@@ -1027,6 +1079,8 @@ impl Sim {
             blast_setup: Vec::new(),
             vehicle_damage_effects: Vec::new(),
             slice_time: Vec::new(),
+            repair_scale: Vec::new(),
+            weak_spot_factor: Vec::new(),
             hull_parts: Vec::new(),
             bolts: Vec::new(),
             beams: Vec::new(),
@@ -1100,6 +1154,8 @@ impl Sim {
             nav_stats: NavStats::default(),
             ai_wall_ms: 0.0,
             tick_cost: TickCost::default(),
+            bot_census: Default::default(),
+            think_hist: Default::default(),
             commander: [
                 crate::commander::TeamPlan::new(0),
                 crate::commander::TeamPlan::new(1),

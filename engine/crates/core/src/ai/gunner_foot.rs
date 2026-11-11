@@ -991,7 +991,7 @@ pub(super) fn droid_aim(
     let (Some(u), Some(c)) = (sim.unit(me), sim.droid_class(d)) else {
         return aim;
     };
-    let cap = sim.difficulty_of(u.team).skill_at(u.skill).err_cap;
+    let cap = sim.aim_err_cap(u);
     let moving = d.vel.length() / c.max_speed.max(0.1);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
         let r = radius(1.0, 1.0, st.err, moving, 1.0, cap);
@@ -1026,7 +1026,7 @@ pub(super) fn turret_aim(
     let Some(u) = sim.unit(me) else {
         return aim;
     };
-    let cap = sim.difficulty_of(u.team).skill_at(u.skill).err_cap;
+    let cap = sim.aim_err_cap(u);
     if sim.ground_rules != crate::soldier::GroundRules::Bf2 {
         let r = radius(1.0, 1.0, st.err, 0.0, 1.0, cap);
         return aim + bf1_error_dir(sim, me) * r;

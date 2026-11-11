@@ -80,7 +80,15 @@ impl Sim {
                 Some((h, rides, p, min, max, vel))
             })
             .collect();
+        let space = self.space_round();
         let (world, bolts, classes) = (&self.collision, &mut self.bolts, &self.weapon_classes);
+        // The weak-spot factor of the struck vehicle's class on a ground
+        // map; `None` in a space round, which keeps the data's.
+        let (vehicles, weak_rows) = (&self.vehicles, &self.weak_spot_factor);
+        let ground = |v: VehicleHandle| {
+            let class = vehicles.get(v.index as usize).map_or(u32::MAX, |x| x.class);
+            (!space).then(|| super::weak_lock::class_factor(weak_rows, class))
+        };
         for b in bolts.iter_mut() {
             let ord = &classes[b.weapon_class].ordnance;
             if ord.fat_ray.is_some() || (ord.is_tracer() && ord.explosion.is_none()) {
@@ -201,9 +209,10 @@ impl Sim {
                     if let Some(v) = r.owner.filter(|_| r.t < reach) {
                         reach = r.t;
                         hit = Some(Target::Vehicle(v));
-                        // A rocket sent at this hull's weak part counts as
-                        // striking it wherever it meets the hull.
-                        mult = super::weak_lock::part_factor(world, b, v).unwrap_or(r.hit_mult);
+                        // Any round on a weak part takes its vehicle
+                        // class's weak-spot factor, locked or not; any
+                        // other body its own.
+                        mult = super::weak_lock::struck_factor(r.hit_mult, ground(v));
                     }
                 }
             }
@@ -286,7 +295,9 @@ impl Sim {
     /// The struck prim's damage factor (issue #41): a soldier's head prim
     /// takes the default HitLocation x3 (BF2 FUN_002517e8 B2:170444-170450,
     /// BF1 FUN_0020e2e0 B1:122725; analysis/re-hitzones.md), a vehicle prim
-    /// its class's HitLocation (the x4 critical prims; BF1's two x0).
+    /// its class's HitLocation (BF1's two x0), a weak part its class's factor
+    /// on a ground map (x4 on the AT-TE, the AT-AT and the spider walker, x2
+    /// on the rest, `Sim::weak_spot_factor`; the data's x4 in space).
     ///
     /// A factor over 1 is a human's only: a bot's head or critical-prim hit
     /// does plain damage at every tier, on both games' maps. This is BF2's
@@ -428,8 +439,8 @@ impl Sim {
                     Some(b.team),
                     Some(b.vel.normalize_or_zero()),
                 );
-                // A critical prim's x4 (the weak spot) that took health:
-                // the critical hit, as a head's (hitmark).
+                // A weak part's factor that took health: the critical
+                // hit, as a head's (hitmark).
                 if scale > 1.0 && damage > 0.0 {
                     self.events.push(Event::CriticalHit {
                         shooter: b.owner,

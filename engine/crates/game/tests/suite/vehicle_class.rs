@@ -512,3 +512,98 @@ fn bf1_slice_times_match_the_bf2_twins() {
         assert_eq!(slice_time(&bf1, class), 0.0, "{class}");
     }
 }
+
+/// The Technician award repairs a BF1 flyer at its BF2 twin's
+/// `PilotSkillRepairScale`, and every ground vehicle of both games at the
+/// 0.005 default (neither game authors one there).
+#[test]
+fn bf1_repair_scales_match_the_bf2_twins() {
+    use game::vehicle_class::{repair_scale, BF1_REPAIR_SCALES};
+    let dir = game::assets::baked_root().join("classes");
+    if !dir.join("bf1_all.ron").is_file() || !dir.join("bf2_all.ron").is_file() {
+        eprintln!("SKIP: class bakes absent");
+        return;
+    }
+    let [bf1, bf2] = ["bf1", "bf2"]
+        .map(|g| game::roster::load_classdb(&dir, g, &game::roster::FACTION_ORDER).unwrap());
+    let twin = |class: &str| match class {
+        "all_fly_snowspeeder" | "rep_fly_gunship" => class.to_owned(),
+        "cis_fly_geofighter" => "cis_fly_droidfighter_sc".to_owned(),
+        _ => format!("{class}_sc"),
+    };
+    for &(class, scale) in BF1_REPAIR_SCALES {
+        assert!(bf1.get(class).is_some(), "BF1 has {class}");
+        assert_eq!(repair_scale(&bf1, class), scale, "{class}");
+        assert_eq!(
+            repair_scale(&bf2, &twin(class)),
+            scale,
+            "BF2 {}",
+            twin(class)
+        );
+    }
+    for class in ["imp_walk_atst", "cis_hover_aat", "rep_hover_fightertank"] {
+        assert_eq!(repair_scale(&bf1, class), 0.005, "{class}");
+        assert_eq!(repair_scale(&bf2, class), 0.005, "BF2 {class}");
+    }
+}
+
+/// The weak spot's factor on a ground map, per class: x4 for every AT-TE,
+/// AT-AT and spider walker class of both games (BF2's Kashyyyk spider too),
+/// x2 for every other vehicle with a weak spot; the class chain decides, so
+/// a map's own child of a big walker is one.
+#[test]
+fn heavy_walkers_take_x4_on_their_weak_spots() {
+    use game::vehicle_class::{weak_spot_factor, HEAVY_WALKERS};
+    let dir = game::assets::baked_root().join("classes");
+    if !dir.join("bf1_all.ron").is_file() || !dir.join("bf2_all.ron").is_file() {
+        eprintln!("SKIP: class bakes absent");
+        return;
+    }
+    let [bf1, bf2] = ["bf1", "bf2"]
+        .map(|g| game::roster::load_classdb(&dir, g, &game::roster::FACTION_ORDER).unwrap());
+    let heavy = core::sim::HEAVY_WALKER_WEAK_SPOT_FACTOR;
+    let plain = core::sim::GROUND_WEAK_SPOT_FACTOR;
+    assert_eq!((heavy, plain), (4.0, 2.0));
+    for (db, game) in [(&bf1, "BF1"), (&bf2, "BF2")] {
+        for class in ["rep_walk_atte", "imp_walk_atat", "cis_walk_spider"] {
+            assert!(db.get(class).is_some(), "{game} has {class}");
+            assert_eq!(weak_spot_factor(db, class), heavy, "{game} {class}");
+        }
+        for class in [
+            "imp_walk_atst",
+            "imp_walk_atst_snow",
+            "imp_walk_atst_jungle",
+            "cis_hover_aat",
+            "cis_tread_hailfire",
+            "rep_hover_fightertank",
+            "imp_hover_fightertank",
+            "all_hover_combatspeeder",
+        ] {
+            assert!(db.get(class).is_some(), "{game} has {class}");
+            assert_eq!(weak_spot_factor(db, class), plain, "{game} {class}");
+        }
+    }
+    assert!(bf2.get("cis_walk_spiderkas").is_some());
+    assert_eq!(weak_spot_factor(&bf2, "cis_walk_spiderkas"), heavy);
+    for class in ["rep_walk_oneman_atst", "cis_tread_snailtank"] {
+        assert_eq!(weak_spot_factor(&bf2, class), plain, "BF2 {class}");
+    }
+    assert_eq!(HEAVY_WALKERS.len(), 4);
+    // A child class of a big walker, as a map's own would be.
+    let tmp = std::env::temp_dir().join(format!("openbf-weak-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).unwrap();
+    let file = tmp.join("classes.ron");
+    std::fs::write(
+        &file,
+        r#"[
+    (name: "kas2_walk_spider_local", kind: "entc", base: "cis_walk_spider", props: []),
+    (name: "kas2_walk_atst_local", kind: "entc", base: "imp_walk_atst", props: []),
+]"#,
+    )
+    .unwrap();
+    let mut db = game::roster::load_classdb(&dir, "bf2", &game::roster::FACTION_ORDER).unwrap();
+    db.load(&file).unwrap();
+    let _ = std::fs::remove_dir_all(&tmp);
+    assert_eq!(weak_spot_factor(&db, "kas2_walk_spider_local"), heavy);
+    assert_eq!(weak_spot_factor(&db, "kas2_walk_atst_local"), plain);
+}

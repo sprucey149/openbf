@@ -313,8 +313,10 @@ Kick directions: no stick = straight up x JetJump; full forward = (up 0.740, for
   (5.25 x 1.5; corrected from the caller B2:160710–160717), strafe 6.6 m/s; the speed along D moves at most 30 x dt = 1.0 m/s per update. Level aim climbs:
   D.y = 0.16 / 1.0127 -> +1.66 m/s at full forward; aim 4.6 deg down flies level. Turn x 1.25 (players). Fuel:
   start costs 0.25, 0.16 / s -> 4.7 s from full, 1.6 s from the spawn's 0.5; empty to the border 0.24 in 2.0 s,
-  to full 8.3 s. (The port flies every jet trooper on BF1's profile instead since 2026-11-10: 7.5 s / 2.5 s, 13.)
-- **Jango / Boba**: as the jet trooper with kick 7, forward 2.0 x MaxSpeed, cost 0.15 / s (5.0 s from full).
+  to full 8.3 s. (The port flies every jet trooper on BF1's flight and BF2's refill instead since 2026-11-10:
+  7.5 s / 2.5 s, refill 0.12 / s, 13.)
+- **Jango / Boba**: as the jet trooper with kick 7, forward 2.0 x MaxSpeed, cost 0.15 / s (5.0 s from full). (The
+  port flies them 8.5 s from full at 0.0882 / s since 2026-11-10, refill 0.12 / s, 13.)
 - **BF2 Geonosian**: kick 8, hover at 2.0 x 6.0 = 12 m/s forward, strafe 6.25, JetAcceleration 20 (default), cost
   0.1 / s, start 0.2, border 0.3 -> 8 s from full.
 - **Vader / Emperor**: need a FULL bar (border 1.0); spawn 0.5 -> wait 0.56 s; each hover costs 30 energy and 0.25 fuel,
@@ -540,6 +542,31 @@ Geonosians (BF2 8.0 s, BF1 net 0.07 / s, 11.4 s) keep their own; `bf1_net_jet_fu
 class that is not a jet trooper. The mover fixtures in `core/src/soldier/tests/jet.rs` keep the disc's 0.16 / 0.12
 because they replay the PS2 capture (section 16). Do not revert this as "not the disc number". Tests:
 `roster::every_jet_trooper_flies_as_long_as_bf1s`, `roster::the_jet_classes_carry_their_disc_numbers`.
+
+**Amended 2026-11-10, later (the maintainer: "use the bf1 fly time and the bf2 refill time for both games ... Increase
+jango and boba to allow to fly a little longer than standard troops, say 8.5s vs the standard 7.5s, and have their
+jetpacks refill the same speed as everyone elses", `[ours]`):** the jet pack's refill outside the jet is BF2's disc
+rate 0.12 / s for every jet trooper on both discs (`game::roster::JET_PACK_FUEL_RECHARGE`, `JET_TROOPER_FUEL_RECHARGE`):
+2.0 s from empty back to the border 0.24, 8.3 s from empty to full (BF1's 0.1 gave 2.4 s / 10 s). The flight stays
+BF1's (0.1 / s, 7.5 s from full, 2.5 s from spawn). Jango and Boba Fett (`cis_hero_jangofett`, `imp_hero_bobafett`;
+BF2 only, BF1 has neither class; `game::roster::{JET_HERO_ROOTS, JET_HERO_FUEL_COST, is_jet_hero}`) keep their disc's
+lift-off cost 0.25 and border 0.24 and pay (1 - 0.25) / 8.5 = 0.0882 / s in flight: 8.5 s from full, 2.8 s from the
+spawn's half tank (their disc's 0.15 gave 5.0 s / 1.7 s); they refill at the same 0.12 / s (already their disc rate).
+The dark troopers' leap, the Geonosians, Vader and the Emperor and the Jedi keep their own. BF1 maps with a jet trooper
+change (the refill), so their round hashes move. Tests: `roster::every_jet_trooper_flies_as_long_as_bf1s` (flight from
+full and spawn, refill to the border and to full), `roster::jango_and_boba_fly_8_5_s_and_refill_as_a_trooper`,
+`roster::the_jet_classes_carry_their_disc_numbers`.
+
+Bot rounds (`round_to_outcome 9000 42`, release, `JET_CENSUS=1`, main 39c6f1eb against the refill):
+
+| map | hash main | hash refill | jets main: units / hops / attacks | jets refill: units / hops / attacks |
+|---|---|---|---|---|
+| bf2_geo1 | b17ea4a4507421cf | e1952b11617abe44 | 13 / 11 / 17 | 12 / 12 / 20 |
+| bf1_geo1 | c9d94cde45449c1b | 6c11d2e95500591e | 8 / 26 / 13 | 9 / 32 / 18 |
+| bf2_mus1 (GCW, dark trooper) | c772c41b5300a1d7 | c772c41b5300a1d7 | 8 / 18 / 0 | 8 / 18 / 0 |
+
+The faster refill puts jet-trooper bots back in the air sooner (more hops and attacks); the dark-trooper map keeps
+its hash. These rounds field no Fett.
 
 Bot rounds (`round_to_outcome 9000 42`, release, `JET_CENSUS=1`, main a99f64be against the profile):
 

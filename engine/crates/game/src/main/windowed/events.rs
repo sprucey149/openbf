@@ -501,6 +501,7 @@ impl winit::application::ApplicationHandler for App {
                             }
                             self.fx.ingest_posed(walk, self.soldier_vis.as_ref());
                             let effect_sounds = self.fx.take_sounds();
+                            let buff_loops = self.fx.buff_loops(&walk.sim);
                             if let Some(vis) = self.soldier_vis.as_mut() {
                                 vis.note_shots(walk);
                                 let mut points = vis.fire_points(walk);
@@ -520,6 +521,9 @@ impl winit::application::ApplicationHandler for App {
                                     aspect,
                                     walk,
                                 );
+                                // The auras' loops (the War Hero's crackle).
+                                let listener = game::event_sounds::listener(walk);
+                                sl.play_buff_loops(audio, &buff_loops, &listener);
                                 play_ambience(audio, sl, &self.ambience, walk);
                             }
                             game::heroes::tick(walk, &mut self.feed);

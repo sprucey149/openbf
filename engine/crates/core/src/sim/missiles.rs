@@ -113,8 +113,9 @@ impl Sim {
     /// class's limit the next missile it fires homes. A human's candidate is
     /// the on-foot lock ([`Sim::tick_foot_lock`]) on every ground map and the
     /// magnet (`re-aim-assist.md` §3) in space rounds; a bot's is its combat
-    /// target. A new target restarts the clock, and the shot
-    /// consumes the lock ([`Sim::missile_lock`] at the press).
+    /// target. An on-foot lock past 100 m fills slower. A new target
+    /// restarts the clock, and the shot consumes the lock
+    /// ([`Sim::missile_lock`] at the press).
     pub(super) fn tick_locks(&mut self, dt: f32) {
         for i in 0..self.units.len() {
             if !self.units[i].alive {
@@ -131,9 +132,14 @@ impl Sim {
             }
             let controller = self.units[i].controller;
             let ai_target = self.units[i].ai.target;
+            // A far on-foot lock counts slower (`foot_dwell_scale`).
+            let mut scale = 1.0;
             let candidate = match controller {
                 Controller::Player { slot } if self.foot_lock_rules() => {
-                    self.foot_dwell_candidate(slot as usize, i)
+                    self.foot_dwell_candidate(slot as usize, i).map(|(t, k)| {
+                        scale = k;
+                        t
+                    })
                 }
                 Controller::Player { slot } => self
                     .magnet
@@ -155,7 +161,7 @@ impl Sim {
                 st.lock_target = candidate;
                 st.lock_held = 0.0;
             } else if candidate.is_some() {
-                st.lock_held += dt;
+                st.lock_held += dt / scale;
             }
         }
     }

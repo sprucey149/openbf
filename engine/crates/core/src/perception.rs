@@ -353,10 +353,11 @@ pub fn scope_reach(sim: &Sim, wc: &crate::weapon::WeaponClass, share: f32) -> Op
 }
 
 /// The share of a scope's reach unit `u` sees with under `tier`: the tier's
-/// [`Tier::scope_sight`]; a proxy (a stand-in for a strong human) Hard's.
+/// [`Tier::scope_sight`]; a proxy (a stand-in for a strong human) Hard's,
+/// from its frozen rows (`ai::proxy::FROZEN_TIERS`).
 pub fn scope_share(u: &crate::unit::Unit, tier: &Tier) -> f32 {
     if u.proxy_human.is_some() {
-        crate::skill::Difficulty::Hard.tier().scope_sight
+        crate::ai::proxy::frozen_tier(crate::skill::Difficulty::Hard).scope_sight
     } else {
         tier.scope_sight
     }

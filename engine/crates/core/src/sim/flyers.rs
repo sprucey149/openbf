@@ -140,7 +140,7 @@ impl Sim {
                 self.destroy_vehicle(handle, None);
                 continue;
             }
-            self.pilot_repair(i, dt);
+            self.vehicle_regen(i, dt);
             self.start_side_roll(i);
             let v = &self.vehicles[i];
             let crashing = v.flyer.phase == FlightPhase::Falling;
@@ -154,6 +154,7 @@ impl Sim {
             } else {
                 [0.0; 4]
             };
+            let endurance = self.driver_medal(i, super::awards::ENDURANCE_MEDAL);
             let v = &self.vehicles[i];
             let player_aboard = v.seats.iter().any(|s| {
                 s.occupant
@@ -166,6 +167,16 @@ impl Sim {
                 .and_then(Option::as_ref)
             else {
                 continue;
+            };
+            let boosted;
+            let p = if endurance {
+                boosted = flyer::FlyerParams {
+                    energy_auto_restore: super::awards::endurance_rate(p.energy_auto_restore),
+                    ..p.clone()
+                };
+                &boosted
+            } else {
+                p
             };
             let from = v.pos;
             let [min_height, max_height] = if v.input.human {
@@ -227,23 +238,15 @@ impl Sim {
         }
     }
 
-    fn pilot_repair(&mut self, i: usize, dt: f32) {
+    /// The repair a second of a BF2 pilot-class rider driving vehicle slot
+    /// `i`, a flyer of over 1400 maximum health (`re-space-assault.md`);
+    /// None when the rule does not hold.
+    fn pilot_skill_rate(&self, i: usize) -> Option<f32> {
         let v = &self.vehicles[i];
-        let Some(p) = self
+        let p = self
             .flyer_params
             .get(v.class as usize)
-            .and_then(Option::as_ref)
-        else {
-            return;
-        };
-        if !p.bf2
-            || v.health.max <= PILOT_REPAIR_MIN_HEALTH
-            || v.health.cur <= 0.0
-            || v.health.cur >= v.health.max
-            || v.flyer.phase == FlightPhase::Falling
-        {
-            return;
-        }
+            .and_then(Option::as_ref)?;
         let piloted = v
             .seats
             .first()
@@ -251,10 +254,43 @@ impl Sim {
             .and_then(|s| s.occupant)
             .and_then(|o| self.unit(o))
             .is_some_and(|u| u.spec.consts.pilot_skill);
-        if !piloted {
+        (p.bf2 && v.kind == VehicleKind::Flyer && v.health.max > PILOT_REPAIR_MIN_HEALTH && piloted)
+            .then_some(v.health.max * p.pilot_repair_scale)
+    }
+
+    /// One tick of vehicle slot `i`'s self-repair while it is driven: by a
+    /// BF2 pilot in a big flyer, or by a holder of the Technician award
+    /// (medal 3) in any hover, walker or flyer, at its class's
+    /// `PilotSkillRepairScale` of maximum health a second. One count, not
+    /// two: the PS2 adds the rate once when either holds (B2 `FUN_002f5478`
+    /// 283804, 283897; `FUN_00269410`). Never while a flyer falls.
+    /// `[ours]` The PS2 counts the rider when he boards; this asks every
+    /// tick, so a cheat toggled in a seat applies at once.
+    pub(super) fn vehicle_regen(&mut self, i: usize, dt: f32) {
+        let v = &self.vehicles[i];
+        if !v.alive
+            || !matches!(
+                v.kind,
+                VehicleKind::Hover | VehicleKind::Walker | VehicleKind::Flyer
+            )
+            || v.health.cur <= 0.0
+            || v.health.cur >= v.health.max
+            || (v.kind == VehicleKind::Flyer && v.flyer.phase == FlightPhase::Falling)
+        {
             return;
         }
-        let rate = v.health.max * p.pilot_repair_scale;
+        let rate = match self.pilot_skill_rate(i) {
+            Some(rate) => rate,
+            None if self.driver_medal(i, super::awards::TECHNICIAN_MEDAL) => {
+                let scale = self
+                    .repair_scale
+                    .get(v.class as usize)
+                    .copied()
+                    .unwrap_or(super::awards::DEFAULT_REPAIR_SCALE);
+                v.health.max * scale
+            }
+            None => return,
+        };
         let health = &mut self.vehicles[i].health;
         health.cur = (health.cur + rate * dt).min(health.max);
     }
@@ -270,6 +306,10 @@ mod tests {
     use crate::weapon::HealthType;
 
     fn world() -> (Sim, VehicleHandle) {
+        world_with(UnitSpec::player)
+    }
+
+    fn world_with(pilot: fn(u8, Vec3) -> UnitSpec) -> (Sim, VehicleHandle) {
         let mut sim = Sim::empty(42);
         sim.heightfield = Some(crate::sim::tests::flat_ground());
         sim.flyer_params = vec![Some(FlyerParams {
@@ -295,9 +335,38 @@ mod tests {
             health_type: HealthType::Vehicle,
             seats: vec![SeatKind::Pilot],
         });
-        let pilot = sim.spawn(&UnitSpec::player(0, pos)).unwrap();
+        let pilot = sim.spawn(&pilot(0, pos)).unwrap();
         assert!(sim.seat_unit(pilot, h, 0));
         (sim, h)
+    }
+
+    /// The energy award (Endurance) refills the flyer its holder pilots at
+    /// 1.5 x; a bot pilot gets nothing.
+    #[test]
+    fn the_energy_regen_award_refills_the_pilots_flyer_1_5x() {
+        let gain = |on: bool, bot: bool| {
+            let (mut s, h) = world_with(if bot {
+                UnitSpec::trooper
+            } else {
+                UnitSpec::player
+            });
+            if let Some(p) = s.flyer_params[0].as_mut() {
+                p.bf2 = true;
+                p.energy_auto_restore = 10.0;
+            }
+            s.cheats.energy_award = on;
+            let f = &mut s.vehicle_mut(h).unwrap().flyer;
+            f.initialized = true;
+            f.energy = 10.0;
+            for _ in 0..15 {
+                s.tick_flyers(crate::TICK_DT);
+            }
+            s.vehicle(h).unwrap().flyer.energy - 10.0
+        };
+        let plain = gain(false, false);
+        assert!((plain - 5.0).abs() < 0.01, "{plain}");
+        assert!((gain(true, false) - 7.5).abs() < 0.01);
+        assert!((gain(true, true) - 5.0).abs() < 0.01, "a bot");
     }
 
     #[test]
@@ -802,17 +871,38 @@ mod tests {
     #[test]
     fn a_pilot_mends_a_big_ship_at_the_class_rate() {
         let (mut sim, i) = repair_world(2000.0, true);
-        sim.pilot_repair(i, 1.0);
+        sim.vehicle_regen(i, 1.0);
         assert_eq!(sim.vehicles[i].health.cur, 1010.0);
     }
 
     #[test]
     fn a_soldier_or_a_small_ship_gets_no_pilot_repair() {
         let (mut sim, i) = repair_world(2000.0, false);
-        sim.pilot_repair(i, 1.0);
+        sim.vehicle_regen(i, 1.0);
         assert_eq!(sim.vehicles[i].health.cur, 1000.0);
         let (mut sim, i) = repair_world(PILOT_REPAIR_MIN_HEALTH, true);
-        sim.pilot_repair(i, 1.0);
+        sim.vehicle_regen(i, 1.0);
         assert_eq!(sim.vehicles[i].health.cur, PILOT_REPAIR_MIN_HEALTH / 2.0);
+    }
+
+    /// The vehicle award (Technician) in a flyer: 0.5 % a second, and with
+    /// a BF2 pilot in a big ship one count, not two (the PS2 adds the rate
+    /// once when either rule holds).
+    #[test]
+    fn the_vehicle_regen_award_and_the_pilot_rule_do_not_stack() {
+        let (mut sim, i) = repair_world(2000.0, false);
+        sim.cheats.vehicle_award = true;
+        sim.vehicle_regen(i, 1.0);
+        assert_eq!(sim.vehicles[i].health.cur, 1010.0, "the award alone");
+        let (mut sim, i) = repair_world(2000.0, true);
+        sim.cheats.vehicle_award = true;
+        sim.vehicle_regen(i, 1.0);
+        assert_eq!(sim.vehicles[i].health.cur, 1010.0, "both: one count");
+        // A falling ship mends nothing.
+        let (mut sim, i) = repair_world(2000.0, false);
+        sim.cheats.vehicle_award = true;
+        sim.vehicles[i].flyer.phase = FlightPhase::Falling;
+        sim.vehicle_regen(i, 1.0);
+        assert_eq!(sim.vehicles[i].health.cur, 1000.0);
     }
 }

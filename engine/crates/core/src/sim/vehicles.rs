@@ -17,6 +17,7 @@
 //! for an AI ground pilot; unseating clears it, including seat switches.
 //! STCHG clears the previous weapon's AI charge deadline on both boundaries.
 
+use super::awards::endurance_rate;
 use super::state::{DeathCause, Event, Sim};
 use crate::collision::NO_GROUND;
 use crate::collision::{CollisionWorld, HullFilter, Layers, Shape};
@@ -732,12 +733,24 @@ impl Sim {
             if !v.alive {
                 continue;
             }
+            let endurance = self.driver_medal(i, super::awards::ENDURANCE_MEDAL);
+            let v = &self.vehicles[i];
             let Some(p) = self
                 .hover_params
                 .get(v.class as usize)
                 .and_then(|p| p.as_ref())
             else {
                 continue;
+            };
+            let boosted;
+            let p = if endurance {
+                boosted = hover::HoverParams {
+                    energy_auto_restore: endurance_rate(p.energy_auto_restore),
+                    ..p.clone()
+                };
+                &boosted
+            } else {
+                p
             };
             let world = WorldContacts {
                 heightfield: self.heightfield.as_ref(),
@@ -746,6 +759,7 @@ impl Sim {
             let from = v.pos;
             let impacts = hover::step(&mut self.vehicles[i], p, &world, dt);
             let (threshold, scale) = (p.collision_threshold, p.collision_scale);
+            self.vehicle_regen(i, dt);
             self.keep_out(i, from);
             self.ground_traffic(i, from);
             if impacts.is_empty() {
@@ -773,6 +787,8 @@ impl Sim {
             if !v.alive {
                 continue;
             }
+            let endurance = self.driver_medal(i, super::awards::ENDURANCE_MEDAL);
+            let v = &self.vehicles[i];
             let Some(p) = self
                 .walker_params
                 .get(v.class as usize)
@@ -780,12 +796,23 @@ impl Sim {
             else {
                 continue;
             };
+            let boosted;
+            let p = if endurance {
+                boosted = walker::WalkerParams {
+                    energy_auto_restore: endurance_rate(p.energy_auto_restore),
+                    ..p.clone()
+                };
+                &boosted
+            } else {
+                p
+            };
             let world = WorldContacts {
                 heightfield: self.heightfield.as_ref(),
                 collision: &self.collision,
             };
             let from = v.pos;
             walker::step(&mut self.vehicles[i], p, &world, dt);
+            self.vehicle_regen(i, dt);
             self.keep_out(i, from);
             self.ground_traffic(i, from);
             // Card WAI's sweep counter (OUTPUT only).

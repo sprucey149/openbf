@@ -1,4 +1,4 @@
-# Award weapons, the damage award and slicing on both games' maps
+# Award weapons, the stat medals and slicing on both games' maps
 
 Status: [ours], built 2026-11-10. Builds on `gameplay-normalization.md`.
 
@@ -40,7 +40,12 @@ classes on flat ground (a still target 10 m off, one trigger pull, body hits):
 | Shotgun / Flechette shotgun | up to 8 / up to 7 | 65 / 85 |
 
 A head hit is x3 on every one. So no award weapon hit for less than its disc value. (The beam
-gives 600 x dt / 0.15 on each of its five ticks, 11 % over 600; that is how it already was.)
+gives 600 x dt / 0.15 on each of its five ticks, 11 % over 600. The PS2 does the same: BF2's beam
+update `FUN_00311d00` scales each update's damage by dt / LifeSpan (B2:303292-303294) and only
+then steps the beam's life and removes it at zero or below (`FUN_0030f988`, B2:301820-301822), so
+a 0.15 s beam lands ceil(0.15 / dt) updates, five at the PS2's 30 Hz: 666.67. Not a port error;
+nothing changed. Clipping the last update to give exactly 600 would move every beam of both games,
+the BF1 tank laser 867 -> 800 and BF2's spider beam 3067 -> 3000.)
 
 ### What BF2 adds that the port did not
 
@@ -57,13 +62,12 @@ link to the remark is not proved.
 
 ### What is built
 
-- The damage award has its own cheat row, "Damage award (x1.5)" (id `damage`): while it is on,
-  the player holds medal 8 and deals x1.5 (`core::sim::buffs::WAR_HERO`, written each tick
-  while medal 8 is held and removed with it). Never a bot, a hero or a space round. The
-  "Award weapons" row gives every other medal, so the award weapons can be judged at their
-  own damage; both rows on is BF2's player holding every award.
-- The other medal effects are not built (see section 5): damage taken x0.5 would change how
-  hard every fight is for the player, which was not asked for.
+- The damage award has its own cheat row, "War Hero: damage increase (x1.5)" (id `damage`):
+  while it is on, the player holds medal 8 and deals x1.5 (`core::sim::buffs::WAR_HERO`,
+  written each tick while medal 8 is held and removed with it). Never a bot, a hero or a
+  space round. The "Award weapons" row gives the five weapon medals only (0, 1, 2, 4, 5), so
+  the award weapons can be judged at their own damage. The other three stat medals have a row
+  each (section 9); all five rows on is BF2's player holding every award.
 - No award number is changed. On BF1 maps the award is BF2's own class, so on the shared scale
   its advantage over the BF1 weapon it replaces is BF2's (next section).
 
@@ -106,9 +110,11 @@ Rules:
   80 (Empire 70), pistol 150 over 60, sniper 600 over 300.
 - **The shotgun is the one named difference.** BF1's Blast Cannon is its own gun (5 x 86.67
   every 0.75 s); the flechette is BF2's 7 x 85 every 1.2 s on both. Against the Blast Cannon
-  that is x1.37 a volley (BF2: x1.14 over its shotgun) with BF2's reach and shield damage.
-  Scaling the flechette to the Blast Cannon would make the same award a different gun on
-  BF1 maps.
+  that is x1.37 a volley (595 against 433; BF2: x1.14 over its shotgun) but, counting the
+  rate, about x0.86 a second point-blank (496 against 578 a second): on a BF1 map the award
+  hits harder a shot and less a second, and it fires BF2's thin instant pellets in place of
+  the Blast Cannon's bolts. A BF1 award Blast Cannon of its own (same bolts and sound, the
+  flechette's advantage over its base gun) waits for the maintainer's pick.
 - **Clips** are BF2's: the count on the first of the side's rifleman, marine, rocketeer,
   sniper, engineer or pilot that carries the award.
 - **Slots** follow the class's own, in the order of the weapons they stand for.
@@ -160,7 +166,7 @@ Exists, the same on both games:
 
 - the medal bits and the switch rule (`Sim::award_bits`, `Sim::weapon_locked`);
 - award slots on every trooper class of both games;
-- the damage award's effect (section 1);
+- the four stat medals' effects as player-only cheat rows (section 9);
 - critical-hit counting for the demolition award (`WeaponClass::rocket_launcher`,
   `Event::CriticalHit`);
 - the round-end stats and medal pages (`game::round_stats`; medal counts are always 0);
@@ -173,11 +179,16 @@ Not built (issue #130):
   kills, and 12 / 24 / 36 points), the three-quarter threshold at a higher career level, the
   bit update with its on-screen message, loss on death and permanence at the top level;
 - career counts in the profile and on the stats pages, and the settings toggle;
-- the other medal effects: Guardian (bit 7, damage taken x0.5, B2:168138-168144), Endurance
-  (bit 6, energy regeneration x1.5: six update sites, for one B2:160231, each multiplying by
-  the 1.5 at `DAT_005feda0`), Technician (bit 3, the vehicle the holder sits in repairs
-  itself, B2 `FUN_002f5478`, 283804);
+- the yellow "Award: <bonus>" line when a bonus becomes available (`game.awards.bonus.*`);
 - the riders' "Slicer Alert" line;
+- the weak-part lock's count (the maintainer's ask, 2026-11-10: "I want the lock onto vehicle weak
+  parts that give the award"): since the third weak-spot pass any round that strikes a weak part
+  deals its vehicle class's factor (x4 on the AT-TE, the AT-AT and the spider walker, x2 on the
+  rest) and raises `Event::CriticalHit`, locked or not (`re-ordnance-kinds.md` §5.1), so a
+  part-locked rocket on the part is a real critical hit and counts as one, from the rocket
+  launcher's `Event::CriticalHit`. One that meets the plate beside the part (about 1 in 25 in the
+  survey) is plain and does not count; replace: count every part-locked hit on its vehicle if the
+  maintainer wants that;
 - whether bots earn medals;
 - medal scoring keys on BF1 weapons (`ScoreForMedalsType`), which earning will need.
 
@@ -236,3 +247,79 @@ map.
 - `game/tests/suite/normalization.rs`: the cutter rows against BF2's class.
 - `game/tests/suite/roster.rs` `every_class_kit_is_the_discs_or_explained` and
   `tests/data/class_kits.txt`: 63 added rows, each marked as BF2's award.
+- `core/src/sim/awards/tests.rs` `each_award_row_sets_only_its_medal`,
+  `the_damage_reduction_cheat_halves_damage_taken`, `the_energy_regen_award_refills_energy_1_5x`,
+  `a_bot_and_the_proxy_never_hold_a_medal`.
+- `core/src/sim/vehicles/tests.rs` `the_energy_regen_award_refills_the_drivers_vehicle_1_5x`,
+  `the_vehicle_regen_award_repairs_the_drivers_vehicle`; `core/src/sim/flyers.rs`
+  `the_vehicle_regen_award_and_the_pilot_rule_do_not_stack`.
+- `game/src/fx/tests.rs` `a_bf1_library_carries_the_buff_auras_and_their_loops`,
+  `an_ability_cast_queues_its_effect_sound`; `game/src/sounds/tests.rs`
+  `a_bf1_core_bank_imports_the_buff_sounds`; `game/tests/suite/vehicle_class.rs`
+  `bf1_repair_scales_match_the_bf2_twins`.
+
+## 9. The stat medals: War Hero, Guardian, Endurance, Technician
+
+Built 2026-11-10 ([ours] as cheat rows; the effects are BF2's). BF2 has nine medals: five
+unlock a weapon, three are earned by points in one life (Endurance 12, Guardian 24, War Hero
+36) and one by a slice (Technician); `re-hitzones.md` Part B section 3. BF1 has none. Each
+stat medal is a pause-menu cheat row beside "Award weapons", off by default, named after the
+medal and BF2's own words for its bonus (`game.awards.bonus.*`):
+
+| Row (id) | Medal | Effect | Look and sound | Evidence |
+|---|---|---|---|---|
+| War Hero: damage increase (x1.5) (`damage`) | 8 | everything dealt x1.5 | red lightning aura (`com_sfx_buffed_offense`), loop `buff_rage_effect` (gain 0.5, 15-30 m) | B2 `FUN_0024ece0` 168133-168137 |
+| Guardian: damage reduction (x0.5) (`guardian`) | 7 | all damage taken x0.5 | teal aura (`com_sfx_buffed_defense`), loop `buff_rally_effect` | B2 168138-168144 |
+| Endurance: energy regen (x1.5) (`endurance`) | 6 | every energy refill x1.5, for him and the hover, walker or flyer he drives; a drain is unchanged | none | f32 1.5 at B2 `DAT_005feda0`; B2:160231 (soldier), 101661, 109523, 116988, 133701, 178209 |
+| Technician: vehicle regen (`technician`) | 3 | the hover, walker or flyer he drives repairs its class's `PilotSkillRepairScale` of its maximum a second (0.005 when it authors none) | none | B2 `FUN_002f5478` 283804, 283897; `FUN_00269410` |
+
+Rules, the same on both games' maps:
+
+- **Who.** The player only (`Sim::award_bits`): never a bot, the difficulty proxy (it is a bot
+  for every cheat), a hero, or a space round. Difficulty tiers are tuned with every award off
+  (the maintainer, 2026-11-10); no tier reads a medal.
+- **War Hero and Guardian** are the PS2's 340 s effect timers, rewritten every update while
+  the medal is held and cleared with it; a timer over 300 s never runs down, so a shorter
+  Rally, Rage or power-up does not replace them. A hero gets neither (the PS2 clears them).
+  A hero is the hero manager's class for the team or, in Hero Assault, every class
+  (`Sim::hero_unit`), as the PS2's class-level hero flag covers them all; before, the damage
+  award's `consts.hero` check never saw a hero in play.
+- **Endurance** multiplies the soldier's `EnergyRestore` and `EnergyRestoreIdle` (and a
+  weapon's positive energy override) and the driven vehicle's `EnergyAutoRestore`. `[ours]`
+  Never for a hero: the original gives a hero the bonus (no hero check at B2:160231).
+  Not applied: the droideka, whose shared bar refills at its shield's `AddShieldOff` in the
+  port (the original multiplies its separate soldier energy), and the remote droid, which runs
+  the port's fixed 90 s clock.
+- **Technician** counts once: the PS2 adds the repair when the driver is a BF2 pilot in a
+  flyer over 1400 health OR holds the medal, never twice. Only the vehicle's own seat counts
+  (a passenger holder adds nothing); not while a flyer falls; never past full; not turrets,
+  remote droids or guided rockets. `[ours]` The PS2 counts the rider when he boards; the port
+  asks every tick, so a row toggled in a seat applies at once. `[ours]` A BF1 flyer repairs at
+  its BF2 twin's scale (0.02 for every fighter and the snowspeeder, 0.01 for the gunship;
+  BF1 authors 0.03-0.04, which no rule of the port reads on a BF1 map; `game::vehicle_class::BF1_REPAIR_SCALES`).
+  Ground vehicles author none in either game and take 0.005.
+- **Looks and sounds on BF1 maps** (`[ours]`; BF1 has no auras): the four auras come from
+  BF2's common effect layer, loaded after every BF1 layer with nothing else of it
+  (`game::fx::Library::load`); their textures and models are searched after every BF1
+  directory, so a BF1 file of the same name always wins (on today's bakes no BF1 effect's
+  texture or model resolves to a BF2 file, checked against every BF1 map's layers), and the aura loops and cast sounds from BF2's Naboo bank into
+  the BF1 resident bank (`game::sounds`, `BUFF_SOUNDS`). No BF2 bank bakes
+  `buff_rally_fire`'s sample, so the Rally cast is silent on both games' maps.
+- **New on every map:** an aura's looping sound plays while it shows
+  (`Fx::buff_loops`, `SoundLib::play_buff_loops`), and an ability's cast plays its effect's
+  own sound (`buff_rage_fire` and the like) beside the weapon's `com_buff_fire`. Both were
+  missing for the officer and hero abilities too.
+
+Not done: the "Award: <bonus>" line, earning and career levels (issue #130), the spawn page
+listing award weapons. trace: whether the PS2 hides the aura while its soldier sits in a
+vehicle (`FUN_002368a0`'s attach test); the port draws it at the rider as before.
+
+Hashes, measured 2026-11-10: a release binary of the base (`2fc4df71`) against this one,
+`--sim-trace <out> 15000 --map <dir> --mission <ron> --state-hashes` (`--mode eli` for Hero
+Assault), every cheat off: `bf2_nab2_con_cw`, `bf2_mus1_con`, `bf1_hot1_con` and `tat2_eli`
+traces and every tick's hash byte-identical (tick 15000: `4c202c8120eb2028`,
+`b516a33c5bd18455`, `3d0a7fe55bab684a`, `4cf70baa801e3f06`). `scripts/sim_gates.sh` prints
+the same values on both (`5c5458c8927f122b`, `443de283b68845b0`, `c906917527627f71`,
+`8a742201c8d1a7ec`). With a row on, the player's defense effect is in the state hash, as the
+offense one is; vehicle health and energy already are. The sim-trace tool takes no cheats, so
+no round was replayed with a row on.

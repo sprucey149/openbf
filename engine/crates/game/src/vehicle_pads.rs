@@ -773,6 +773,18 @@ pub fn install_with_objective(
         .iter()
         .map(|c| vehicle_class::slice_time(&db, c))
         .collect();
+    // Each class's Technician repair rate (`Sim::vehicle_regen`).
+    sim.repair_scale = b
+        .classes
+        .iter()
+        .map(|c| vehicle_class::repair_scale(&db, c))
+        .collect();
+    // Each class's weak-spot factor on a ground map (x4 the big walkers).
+    sim.weak_spot_factor = b
+        .classes
+        .iter()
+        .map(|c| vehicle_class::weak_spot_factor(&db, c))
+        .collect();
     // Each class's hull (card VHULL), before anything spawns from a pad; a
     // building turret has none — its building is the world's own body.
     sim.hull_parts = hull_parts_from(

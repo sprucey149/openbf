@@ -1,34 +1,76 @@
-//! A launcher's lock goes to the vehicle's weak spot
-//! (`analysis/re-ordnance-kinds.md` §5.1). A weak part is a hull body whose
-//! class gives it a direct-hit factor over 1 (`HitLocation`, the x4 critical
-//! prims). While a human's on-foot lock holds a vehicle, the lock point is
+//! A launcher's lock goes to the vehicle's weak spot, and a strike on a weak
+//! spot deals one factor (`analysis/re-ordnance-kinds.md` §5.1). A weak part
+//! is a hull body whose class gives it a direct-hit factor over 1
+//! (`HitLocation`: BF2's x4 critical prims, and BF1's through the port's
+//! table). While a human's on-foot lock holds a vehicle, the lock point is
 //! the weak part he can see that is nearest his reticle; with none in sight
 //! it stays the hull centre. A rocket fired on a full lock steers to that
-//! part, so a hit there is the critical hit.
+//! part.
 //!
 //! OURS: neither original aims a lock at a critical spot (BF2's launcher
 //! candidate carries no body part, `FUN_0033a658` B2:331689-331750; BF1's
 //! target point is a targetable body or the sphere centre, `FUN_001e2500`
-//! B1:91606-91683). A rocket sent at a part takes the part's factor
-//! wherever it meets that hull: steering alone left one part lock in ten
-//! on the plate beside the part (the survey in
-//! `game/tests/suite/rocket_weakspot.rs`). Any other round keeps the struck
-//! prim's factor. Bots never lock a vehicle and space rounds keep the
-//! centre. measure: maintainer playtest of the weak-part lock (B7).
-
+//! B1:91606-91683). The hit is the originals' rule with the port's factor:
+//! any round that strikes a weak part deals its vehicle class's factor on a
+//! ground map ([`HEAVY_WALKER_WEAK_SPOT_FACTOR`] x4 on the AT-TE, the AT-AT
+//! and the spider walker, [`GROUND_WEAK_SPOT_FACTOR`] x2 on the rest),
+//! locked or not, whatever the ordnance; a hit elsewhere on the hull is
+//! plain ([`struck_factor`]). Blast damage is never located on a
+//! prim (both originals' radius damage takes the no-prim factor, 1.0). Bots
+//! never lock a vehicle and get no factor over 1 on a ground round
+//! (`Sim::hit_scale`); space rounds keep the centre and their data's
+//! factors.
 use super::input::AimTarget;
 use super::lock_on::LockTarget;
 use super::state::Sim;
-use crate::collision::{Body, CollisionWorld, HullFilter, Layers, Shape};
-use crate::missile::MissileTarget;
+use crate::collision::{Body, HullFilter, Layers, Shape};
 use crate::perception;
-use crate::projectile::Bolt;
 use crate::vehicle::VehicleHandle;
 use glam::Vec3;
+
+/// OURS: the factor of a strike on a vehicle's weak part on a ground map,
+/// for every weak spot of every vehicle in both games but the three big
+/// walkers' ([`HEAVY_WALKER_WEAK_SPOT_FACTOR`]). The maintainer 2026-11-10:
+/// "If a rocket hits the weak spot it should do the increased damage,
+/// regardless of it being a "lock" or something. Even a grenade or regular
+/// bullet in the weak spot can do the increased damage." and then "ATTE,
+/// atat, and spider walker: make weak spot hits x4. Everything else x2 and
+/// that seems good." The originals author x4 everywhere (BF2's 15 classes;
+/// BF1 none, the port gives its armour BF2's). It is the default of
+/// `Sim::weak_spot_factor`. measure: maintainer playtest of rockets to kill
+/// (`re-ordnance-kinds.md` §5.1's table).
+pub const GROUND_WEAK_SPOT_FACTOR: f32 = 2.0;
+
+/// OURS: the factor of a strike on the weak part of an AT-TE, an AT-AT or a
+/// spider walker on a ground map, every class of them in both games (the
+/// game layer reads the class chain, `game::vehicle_class::weak_spot_factor`).
+/// The originals' own x4, kept for these three only (the maintainer
+/// 2026-11-10, [`GROUND_WEAK_SPOT_FACTOR`]). measure: maintainer playtest of
+/// rockets to kill (`re-ordnance-kinds.md` §5.1's table).
+pub const HEAVY_WALKER_WEAK_SPOT_FACTOR: f32 = 4.0;
 
 /// A weak part: a round can strike it and it scales the hit up.
 fn weak(b: &Body) -> bool {
     b.layers.contains(Layers::ORDNANCE) && b.hit_mult > 1.0
+}
+
+/// The factor a round deals that strikes a vehicle's hull body with data
+/// factor `hit_mult`: on a ground map (`ground` is the vehicle class's
+/// weak-spot factor, `Sim::weak_spot_factor`) a weak part's is `ground`,
+/// any other body keeps its own (1, or BF1's x0); a space round (`ground`
+/// `None`) keeps the data's.
+pub(super) fn struck_factor(hit_mult: f32, ground: Option<f32>) -> f32 {
+    match ground {
+        Some(f) if hit_mult > 1.0 => f,
+        _ => hit_mult,
+    }
+}
+
+/// A class's row of `Sim::weak_spot_factor`, else the default.
+pub(super) fn class_factor(rows: &[f32], class: u32) -> f32 {
+    rows.get(class as usize)
+        .copied()
+        .unwrap_or(GROUND_WEAK_SPOT_FACTOR)
 }
 
 /// The middle of a hull body: a prim is centred on its own origin.
@@ -39,18 +81,14 @@ fn centre(b: &Body) -> Vec3 {
     }
 }
 
-/// The factor of the weak part round `b` was sent at, when `v` is the
-/// vehicle it locked and the hull still has the part.
-pub(super) fn part_factor(world: &CollisionWorld, b: &Bolt, v: VehicleHandle) -> Option<f32> {
-    let m = b.missile.as_ref()?;
-    if m.target != Some(MissileTarget::Vehicle(v)) {
-        return None;
-    }
-    let part = world.hull(v).get(usize::from(m.part?))?;
-    weak(part).then_some(part.hit_mult)
-}
-
 impl Sim {
+    /// The factor a strike on a weak part of a vehicle of class `class`
+    /// deals on a ground map: its [`Sim::weak_spot_factor`] row, else
+    /// [`GROUND_WEAK_SPOT_FACTOR`].
+    pub fn ground_weak_spot_factor(&self, class: u32) -> f32 {
+        class_factor(&self.weak_spot_factor, class)
+    }
+
     /// Where weak part `k` of `vh`'s hull is now; `None` when the hull has
     /// no such part.
     pub(super) fn weak_part_point(&self, vh: VehicleHandle, k: u16) -> Option<Vec3> {

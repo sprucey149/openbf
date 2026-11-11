@@ -5,6 +5,10 @@
 //! sits within 25.8° of the aim and in sight. Space rounds keep the magnet
 //! dwell in `missiles.rs`.
 //!
+//! OURS: the reach is one for both games' launchers, BF1's 175 m
+//! ([`FOOT_REACH`]), and a far lock takes longer to dwell
+//! ([`foot_dwell_scale`]). measure: maintainer playtest of the far lock.
+//!
 //! Read in the soldier's lock setup (B2:159266-159302), the tracker's pick
 //! and hold (`FUN_0017a908`, B2:21224-21312, 21690-21740, 21828) and the
 //! launcher's candidate (`FUN_0033a658`, B2:331689-331750). There a human's
@@ -38,6 +42,27 @@ pub const FOOT_LOSE_DOT: f32 = 0.1;
 /// best target in the pick cone is taken; the button still cycles. `false`
 /// is BF2's press rule. measure: maintainer playtest of the auto lock.
 pub const FOOT_AUTO_LOCK: bool = true;
+/// OURS: a lock can start out to here, on every ground map. BF1's launchers
+/// authored LockOnRange 175; BF2's foot lock reads TargetLockMaxDistance
+/// (100 m on every disc launcher). The class keys still serve flyer and
+/// seat locks. PROVISIONAL, measure: maintainer playtest of the reach.
+pub const FOOT_REACH: f32 = 175.0;
+/// OURS: a held lock is lost past here (the reach + BF2's 10 m margin).
+/// PROVISIONAL, measure: maintainer playtest of the reach.
+pub const FOOT_REACH_LOSE: f32 = 185.0;
+/// Out to here the dwell needs the weapon's LockTime (BF2's 100 m reach).
+pub const FOOT_NEAR: f32 = crate::weapon::TARGET_LOCK_MAX_DEFAULT;
+/// OURS: at [`FOOT_REACH`] the dwell needs this many LockTimes, rising in a
+/// line from 1 at [`FOOT_NEAR`]. PROVISIONAL, measure: maintainer playtest
+/// of the far dwell.
+pub const FOOT_FAR_DWELL: f32 = 2.0;
+
+/// The dwell a lock `d` m away needs, in LockTimes: 1 out to
+/// [`FOOT_NEAR`], [`FOOT_FAR_DWELL`] at [`FOOT_REACH`] and beyond.
+pub fn foot_dwell_scale(d: f32) -> f32 {
+    let t = ((d - FOOT_NEAR) / (FOOT_REACH - FOOT_NEAR)).clamp(0.0, 1.0);
+    1.0 + (FOOT_FAR_DWELL - 1.0) * t
+}
 
 /// One player slot's on-foot lock.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -64,7 +89,8 @@ impl Sim {
     ///
     /// OURS: BF1 maps take BF2's lock too, so a launcher locks the same way
     /// in both games; BF1 counted its dwell on the aim magnet (175 m, 6° on,
-    /// 10° off). Each launcher keeps its own LockTime and kinds.
+    /// 10° off). Both keep BF1's 175 m reach ([`FOOT_REACH`]). Each launcher
+    /// keeps its own LockTime and kinds.
     /// measure: maintainer playtest of the BF1 torpedo launchers.
     pub(super) fn foot_lock_rules(&self) -> bool {
         !self.space_round()
@@ -113,9 +139,9 @@ impl Sim {
     }
 
     /// The press's pick: hostile soldiers on foot, live vehicles and
-    /// turrets of a kind the launcher locks, within TargetLockMaxDistance
-    /// (and short of ...Lose), dot >= 0.8, in sight; the lowest
-    /// [`lock_score`] wins. Neutral and friendly targets are refused.
+    /// turrets of a kind the launcher locks, within [`FOOT_REACH`], dot >=
+    /// 0.8, in sight; the lowest [`lock_score`] wins. Neutral and friendly
+    /// targets are refused.
     fn foot_pick(
         &self,
         state: &FootLock,
@@ -124,8 +150,7 @@ impl Sim {
     ) -> Option<LockTarget> {
         let u = self.unit(h)?;
         let team = u.team;
-        let c = &self.weapon_classes[u.weapon_class];
-        let (mask, max, lose) = (c.target_kind, c.target_lock_max, c.target_lock_lose);
+        let mask = self.weapon_classes[u.weapon_class].target_kind;
         let units = self
             .alive_units()
             .filter(|(o, x)| *o != h && x.mount.is_none())
@@ -151,7 +176,7 @@ impl Sim {
             }
             let off = p.pos - eye;
             let d2 = off.length_squared();
-            if d2 > max * max || d2 >= lose * lose {
+            if d2 > FOOT_REACH * FOOT_REACH {
                 continue;
             }
             if off.normalize_or_zero().dot(dir) < FOOT_PICK_DOT {
@@ -254,8 +279,8 @@ impl Sim {
                 }
             }
             if let Some(t) = state.target {
-                let c = &self.weapon_classes[self.units[i].weapon_class];
-                let (mask, lose) = (c.target_kind, c.target_lock_lose);
+                let mask = self.weapon_classes[self.units[i].weapon_class].target_kind;
+                let lose = FOOT_REACH_LOSE;
                 let team = self.units[i].team;
                 let rider = match t {
                     LockTarget::Aim(AimTarget::Unit(o)) => {
@@ -294,13 +319,22 @@ impl Sim {
 
     /// The launcher's dwell candidate on a ground map: the slot's locked
     /// target, of a kind the launcher takes, within 25.8° of the aim
-    /// (dot >= 0.9) and in sight, checked every tick.
-    pub(super) fn foot_dwell_candidate(&self, slot: usize, i: usize) -> Option<MissileTarget> {
+    /// (dot >= 0.9) and in sight, checked every tick; and the dwell it
+    /// needs at its distance now, in LockTimes ([`foot_dwell_scale`]). The
+    /// clock is counted at that rate, so a full lock stays full as the
+    /// target draws away.
+    pub(super) fn foot_dwell_candidate(
+        &self,
+        slot: usize,
+        i: usize,
+    ) -> Option<(MissileTarget, f32)> {
         let t = self.foot_lock.get(slot)?.target?;
         if self.units[i].mount.is_some() || !self.foot_in_dwell(t, i) {
             return None;
         }
-        t.missile()
+        let eye = self.units[i].aim_ray(self.ground_rules, self.views()).0;
+        let d = (self.lock_probe(t)?.pos - eye).length();
+        Some((t.missile()?, foot_dwell_scale(d)))
     }
 
     /// What the lock box shows on foot: the slot's locked target, at a

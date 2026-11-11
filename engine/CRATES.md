@@ -224,8 +224,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/trace/tests.rs` 177 — SHASH replay equality/first divergence, independent wire vectors, field sensitivity, read-only controls and legacy hash pins.
 - `core/src/sim/input.rs` 874 — pad/button definitions, input logs and replay, player aim-assist acquisition and reticle picks; includes replay, pad-slot and assist tests · `PadState` (`fire_lag`: a press fired part way into its tick's turn; `pick`: a spawn-screen mouse pick, `ScreenPick`), `buttons`, `InputLog`, `AimTarget`, `Sim::run_log`, `Sim::magnet_at`, `cone_score`; see the module header and `analysis/re-aim-assist.md`.
 - `core/src/sim/input/tests.rs` 926 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
-- `core/src/sim/foot_lock.rs` 383 — the on-foot launcher lock on every ground map (BF2's rule): the lock button's pick, the 2 s hold, the 25.8° dwell gate and the HUD getters (the lock box on a vehicle's weak part in sight); space rounds keep the magnet · `FootLock`, `Sim::tick_foot_lock`, `Sim::foot_lock_target`, `Sim::foot_lock_weak`, `Sim::foot_lock_charge`, `Sim::space_round`.
-- `core/src/sim/foot_lock/tests.rs` 549 — auto lock, pick limits, dwell reset, 2 s hold, press reload or cycle, on both games' ground rules; BF1 torpedo lock and its named deviation; space magnet unchanged, silent hash.
+- `core/src/sim/foot_lock.rs` 417 — the on-foot launcher lock on every ground map (BF2's rule): the lock button's pick, the 2 s hold, the 25.8° dwell gate, the 175 m reach and the slower dwell past 100 m (ours) and the HUD getters (the lock box on a vehicle's weak part in sight); space rounds keep the magnet · `FootLock`, `Sim::tick_foot_lock`, `Sim::foot_lock_target`, `Sim::foot_lock_weak`, `Sim::foot_lock_charge`, `Sim::space_round`, `FOOT_REACH`, `foot_dwell_scale`.
+- `core/src/sim/foot_lock/tests.rs` 684 — auto lock, pick limits, dwell reset, 2 s hold, press reload or cycle, the far dwell and the 185 m loss, on both games' ground rules; BF1 torpedo lock and its named deviation; space magnet unchanged, silent hash.
 - `core/src/sim/lock_on.rs` 418 — flyer and vehicle target lock-on, target cycling, hold-to-clear and missile launch readiness · `LockOn`, `LockTarget`, `Sim::tick_lock_on`, `Sim::lock_on_target`, `Sim::lock_on_ready`.
 - `core/src/sim/lock_on/tests.rs` 251 — lock-on acquisition, target cycle memory, hold clear, LOS obstruction and firing ready tests.
 - `core/src/sim/target_hints.rs` 161 — pilot target hint candidate caching, cone pruning and friendly/enemy marker lists · `TargetHint`, `TargetHints`, `Sim::update_target_hints`, `Sim::tick_target_hints`.
@@ -326,8 +326,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/ordnance/tests.rs` 1400 — the soldier weapon and grenade tests.
 - `core/src/aim_assist.rs` 579 — BF1 aim-assist magnetism · `apply`
 - `core/src/water.rs` 136 — the water plane as the sim sees it: one level plus the WMAP wet-cell mask (a nibble per 32 m cell, the PS2's clamped lookup), and the downward crossing tested at the crossing's cell · `WetMask`, `Plane`; `Sim::water_plane` / `Sim::water_under`; `analysis/re-fx.md` §15. The mask and oscillation flag are load-time inputs like `water_level`; `Sim::water_plane` adds the deterministic flat-water bob from the sim tick.
-- `core/src/sim/weak_lock.rs` 116 — OURS: a human's launcher lock goes to the vehicle's weak part in sight nearest the reticle; the part a locked rocket steers to and the factor it takes on that hull · `Sim::weak_part`, `Sim::weak_part_point`, `Sim::foot_weak_part`, `part_factor`. Note: `analysis/re-ordnance-kinds.md` §5.1.
-- `core/src/sim/weak_lock/tests.rs` 445 — lock point choice, hidden and covered parts, homing to the part, the x4 on the locked hull, a moving and a turned vehicle, the dwell and hold on a part, bots and space unchanged, the silent hash.
+- `core/src/sim/weak_lock.rs` 154 — OURS: a human's launcher lock goes to the vehicle's weak part in sight nearest the reticle, and the weak-spot factor a strike deals on a ground map, any round, locked or not (x4 on the AT-TE, the AT-AT and the spider walker, x2 on the rest, per class in `Sim::weak_spot_factor`; space keeps the data's) · `GROUND_WEAK_SPOT_FACTOR`, `HEAVY_WALKER_WEAK_SPOT_FACTOR`, `struck_factor`, `Sim::ground_weak_spot_factor`, `Sim::weak_part`, `Sim::weak_part_point`, `Sim::foot_weak_part`. Note: `analysis/re-ordnance-kinds.md` §5.1.
+- `core/src/sim/weak_lock/tests.rs` 815 — lock point choice, hidden and covered parts, a part at 150 m, homing to the part, the class's factor for locked, unlocked and rifle strikes on the part (x2, and x4 on a big walker's row) and x1 beside it, a moving and a turned vehicle, the dwell and hold on a part, bots plain, space keeps the data's factor, the silent hash.
 - `core/src/sim/water.rs` 55 — PS2 soldier drowning and fire-point submersion; fixed-tick breath state lives on `Soldier`, water height/mask/bob are shared map inputs. `core/tests/drowning.rs` pins measured timelines, both weapon channels, queued salvos, surface resets and replay hashes.
 - `core/src/boundary.rs` 96 — the map boundary's point test and countdown time; only the remote droid reads it so far · `Boundary`, `leaving_time`.
 - `core/src/heightfield.rs` 374 — terrain triangle height/normal queries and bounds-assisted ray-march probes · `Heightfield`, `HeightProbe`; interpolation and probe rules are specified in the module header.
@@ -376,7 +376,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/ai/tactic.rs` 1435 — card TPOS: the derived position/cover table and the Tactician’s fighter position selection, hold/cycle and reservations · `PositionTable`, `Position`, `Source`, `build`, `fight`, `grant`, `keep`; see the module header and `analysis/bot-design.md` 4.1 / 4.6 for generation, filtering and timing rules. Diagnostic ownership stays here: `covered_from_target` (B12), `NavTick::tpos_ev` / `tpos_funnel` and the sweep’s `fightsplit` / `tactician` / `tfunnel` lines.
 - `core/src/ai/tactic/cover.rs` 96 — directional cover masks and indexed position queries · `Position` and `PositionTable` methods, `sector_bit`, `sector_pair`
 - `core/src/ai/tactic/tests.rs` 1501 — position-table/Tactician regressions: generation/reachability, candidate scoring, reservations/spacing, cover cycle, arrivals/deadlines and friend/grenade safety (TPOS/TPOSR); cases and constants live in the tests.
-- `core/src/ai/team.rs` 612 — derived think-window unit grid, follow spacing and team Cover/Flank roles · `UnitGrid`, `Sim::units_within`, `follow_ease`, `board`, `flank_cap`; shared perception stays in `perception::tell`. Grid lifetime/order, role rules and constants are specified in the header and `analysis/bot-design.md` 4.1/4.3/6.2; derived grid is not hashed.
+- `core/src/ai/team.rs` 626 — derived think-window unit grid, follow spacing and team Cover/Flank roles · `UnitGrid`, `Sim::units_within`, `follow_ease`, `board`, `flank_cap`; shared perception stays in `perception::tell`. Grid lifetime/order, role rules and constants are specified in the header and `analysis/bot-design.md` 4.1/4.3/6.2; derived grid is not hashed.
 - `core/src/ai/team/tests.rs` 471 — unit-grid equivalence/lifetime, follow spacing and Cover/Flank role regressions, including diamond-route behavior.
 - `core/src/ai/behave.rs` 77 — foot-bot behavior facade, shared `Tick`, and the `think` / `lost_jump` exports; see `analysis/bot-design.md` 3.
 - `core/src/ai/behave/brain.rs` 1131 — foot-bot tick priority chain, next-think call delivery and explicit human boarding over retained commands, valid boarding maintenance, guard goal, failed-walk recovery, hub arrival and the health droid’s final approach; hands one aim request to the gunner and one move request to the mover, writing no sticks.
@@ -418,8 +418,9 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/ai/walker_drive/tests/ps2_rows.rs` 155 — the 145 rows (numbers read from PS2 RAM, the RE session's ps2_rows.csv) · `ROWS`
 - `core/src/ai/gunner.rs` 447 — seated-bot aim/fire requests, shared foot-gunner charge release/fire gates and barrel-cone checks · `aim`, `Look`; `Sim::seat_gun` executes them. Rules and PROVISIONAL AI-gunner limitations are in the module header; building-turret aim state belongs to `ManState::aim`.
 - `core/src/ai/arcm.rs` 221 — failed-link memory, team arc exclusions and back-and-forth detection · `ArcmState`, `Osc`, `ArcFails`; OURS, `analysis/bot-design.md` §9 D20.
-- `core/src/ai/dfocus.rs` 270 — Card DFOCUS (D25, OURS): focus fire on HUMAN players at Hard and Elite. The holders of a human's hit tokens (`super::tokn`) are his focusers: at
-- `core/src/ai/proxy.rs` 456 — fixed human proxy profiles and shared tier targeting, health-droid and post choices · `Profile`, `Strength`, `front`, `mend`, `pick`, `TARGETS`.
+- `core/src/ai/dfocus.rs` 280 — Card DFOCUS (D25, OURS): focus fire on HUMAN players at Hard and Elite. The holders of a human's hit tokens (`super::tokn`) are his focusers: at
+- `core/src/ai/proxy.rs` 591 — fixed human proxy profiles, its frozen tier rows, shared tier targeting, health-droid and post choices · `Profile`, `Strength`, `FROZEN_TIERS`, `frozen_tier`, `front`, `mend`, `pick`, `TARGETS`.
+- `core/src/ai/census.rs` 494 — bot census (rework stage 0, diagnostics only): far-human preference (D1), tier-lever bits, think-cost histogram · `d1`, `think_levers`, `BotCensus` (by row, vs-human, proxy), `CensusCell`, `ThinkHist`, `LV_*`, `D1_*`.
 - `core/src/ai/tokn.rs` 265 — Card TOKN (D24, OURS): damage pacing against HUMAN players - hit tokens. Each human has a budget of tokens per difficulty ([`budget`]); a bot's
 - `core/src/ai/unseen.rs` 170 — Card UNSN (D23, OURS): a bot the stall watch gives up is moved on, not killed, when no human can see it happen. The recycle of card RCYC
 - `core/src/ai/wake.rs` 135 — early bot think on hits, near misses and newly seen enemies, with wake cooldown · `HIT`, `NEAR`, `SEEN`; OURS, `analysis/bot-design.md` §9 D21.
@@ -428,7 +429,8 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/ai/unseen/tests.rs` 179 — tests for `core/src/ai/unseen`
 - `core/src/ai/tokn/tests.rs` 254 — tests for `core/src/ai/tokn`
 - `core/src/ai/proxy/hand.rs` 136 — proxy-only player aim and held-trigger model · `Hand`, `aim`, `tolerance`, `holds`, `tap`.
-- `core/src/ai/proxy/tests.rs` 657 — profile and goal tests, including health droid service and disconnected or stale route controls
+- `core/src/ai/proxy/tests.rs` 744 — profile and goal tests, including health droid service and disconnected or stale route controls
+- `core/src/ai/census/tests.rs` 157 — D1 bits, census fold, histogram and hash-independence tests
 - `core/src/ai/dfocus/tests.rs` 371 — tests for `core/src/ai/dfocus`
 - `core/src/ai/arcm/tests.rs` 290 — Card ARCM: the back-and-forth detector, the bot's closed arcs, the team's count and the route draw round them.
 - `core/src/commander.rs` 1026 — persistent per-bot Conquest post goals and defend-hint allocation · `TeamPlan`, `plan`, `draw_post`, `defend_cap`, `post_threatened`; per-game redraw rules and port defender limits are specified in the header and `analysis/re-conquest-goal.md`.
@@ -1073,7 +1075,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `core/src/sim/emitter.rs` 754 — emitter shots: gather, query, damage, push and arc events.
 - `core/src/sim/fatray.rs` 83 — fat ray ordnance damage along a wide sweep.
 - `core/src/sim/fatray/tests.rs` 168 — fat ray scene tests.
-- `core/src/sim/missiles.rs` 165 — missile steering step (to the target's point, or the weak part a round was sent at) and the launcher dwell lock.
+- `core/src/sim/missiles.rs` 171 — missile steering step (to the target's point, or the weak part a round was sent at) and the launcher dwell lock.
 - `core/src/sim/missiles/tests.rs` 596 — missile homing, expiry and dwell lock scene tests.
 - `core/src/sim/ordnance/tracers.rs` 311 — BF2 secondary ordnance: the periodic round beside the primary.
 - `core/src/sim/saber/tests/contact.rs` 107 — hand blade contact effects and sounds.

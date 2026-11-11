@@ -64,6 +64,7 @@ use glam::Vec3;
 
 mod brain;
 mod position;
+pub(crate) use brain::fight_reach;
 pub use brain::think;
 pub(super) use position::lost_jump;
 

@@ -655,3 +655,90 @@ fn proxy_features_do_not_inherit_the_hosts_bot_columns() {
         }
     }
 }
+
+/// The proxy freeze (bot rework stage 0): every read site of a proxy's tier
+/// gives the frozen value, on every tier. Where a site takes the live value
+/// as an input (the Cover role, the scope share) the test passes a live
+/// value unlike the frozen one, so a site gone back to the live row fails
+/// here. The others read `Difficulty::tier` directly, which equals the
+/// frozen rows today; for them the all-proxy pin below is the real guard.
+#[test]
+fn the_proxy_reads_the_frozen_rows() {
+    let p = Strength::Good.profile();
+    for d in Difficulty::ALL {
+        let (mut sim, a, b) = field(d);
+        sim.set_proxy(a, Some(p));
+        let u = sim.unit(a).unwrap();
+        // (The proxy's team takes its DTEAM row: one human more.)
+        let row_d = sim.difficulty_of(u.team);
+        let frozen = frozen_tier(row_d);
+        let mut row = frozen;
+        row.view_mult *= sim.mission_ai.view_mult;
+        assert_eq!(
+            sim.unit_tier(u),
+            p.over(row, sim.mission_ai.view_mult),
+            "{d:?}"
+        );
+        assert_eq!(sim.aim_err_cap(u), frozen_err_cap(row_d, u.skill), "{d:?}");
+        // The Cover role: the proxy's frozen row whatever the live row says;
+        // a bot follows the live row.
+        let bot_u = sim.unit(b).unwrap();
+        for live in [false, true] {
+            assert_eq!(
+                crate::ai::team::covers(u, row_d, live),
+                frozen.cover,
+                "{d:?}"
+            );
+            assert_eq!(crate::ai::team::covers(bot_u, row_d, live), live, "{d:?}");
+        }
+        // The scope share: Hard's frozen share, whatever tier is passed.
+        let mut odd = frozen;
+        odd.scope_sight = 0.25;
+        assert_eq!(
+            crate::perception::scope_share(u, &odd),
+            FROZEN_TIERS[2].scope_sight,
+            "{d:?}"
+        );
+        assert_eq!(crate::perception::scope_share(bot_u, &odd), 0.25);
+        // The focus rule.
+        assert_eq!(
+            crate::ai::dfocus::focuses_as(&sim, u),
+            frozen_focuses(row_d),
+            "{d:?}"
+        );
+    }
+}
+
+/// Two Good proxies a side, 20 m apart on the flat L, stepped 30 s at Easy
+/// and at Elite: a pin on everything the proxy's brain runs. It moves with
+/// any change to the code a proxy runs (`ai::legacy_think`), the physics
+/// and the weapons included; such a move is declared and explained.
+#[test]
+fn an_all_proxy_skirmish_keeps_its_hash() {
+    let run = |d: Difficulty| {
+        let (mut sim, _) = crate::ai::tests::l_sim();
+        sim.units.clear();
+        sim.players.clear();
+        sim.difficulty = d;
+        let p = Strength::Good.profile();
+        for (team, x, z) in [
+            (0, 0.0, 0.0),
+            (0, 3.0, 0.0),
+            (1, 0.0, -20.0),
+            (1, 3.0, -20.0),
+        ] {
+            let h = bot(&mut sim, team, Vec3::new(x, 0.0, z));
+            assert!(sim.set_proxy(h, Some(p)));
+        }
+        for _ in 0..900 {
+            sim.step(&[]);
+        }
+        sim.hash()
+    };
+    let got = [run(Difficulty::Easy), run(Difficulty::Elite)];
+    assert_eq!(
+        got.map(|h| format!("{h:016x}")),
+        ["67abfedaa0631084", "e3f2d3c9099e44c4"],
+        "the all-proxy skirmish moved"
+    );
+}

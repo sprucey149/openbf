@@ -88,6 +88,27 @@ impl SoundLib {
         });
     }
 
+    /// The auras' looping sounds (`crate::fx::Fx::buff_loops`): each starts
+    /// with its aura and stops with it. The property holds its own gain and
+    /// distances (`buff_rage_effect`: 0.5, 15 to 30 m, looping).
+    pub fn play_buff_loops(
+        &mut self,
+        audio: &mut audio::Audio,
+        loops: &[(core::unit::UnitHandle, usize, String, Vec3)],
+        listener: &Listener,
+    ) {
+        let requests = loops.iter().map(|(unit, kind, name, pos)| LoopRequest {
+            source: LoopSource::Buff(*unit, *kind),
+            sound: fnv1a_lowercase(name),
+            pos: *pos,
+            gain: 1.0,
+            pitch: 1.0,
+        });
+        self.play_loop_set(audio, listener, requests, |k| {
+            matches!(k, LoopSource::Buff(..))
+        });
+    }
+
     fn play_loop_set(
         &mut self,
         audio: &mut audio::Audio,
