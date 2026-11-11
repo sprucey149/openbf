@@ -6,14 +6,15 @@
 use core::weapon::{DamageDesc, ExplosionClass, Health, HealthType, OrdnanceClass};
 use game::classdb::{fnv1a_lowercase, ClassDb, ClassDef};
 use game::normalize::{
-    health_row, is_infantry_damage, BF1_SCALE, HEALTH, KEYS, PERSON_DAMAGE, REFERENCE_HEALTH,
+    health_row, is_infantry_damage, vehicles, BF1_SCALE, HEALTH, KEYS, PERSON_DAMAGE,
+    REFERENCE_HEALTH,
 };
 use game::roster::{load_classdb, weapon_from_db, ClassRoster, ClassSrc};
 use std::path::PathBuf;
 
-const SIDES: [&str; 4] = ["all", "imp", "rep", "cis"];
+pub(super) const SIDES: [&str; 4] = ["all", "imp", "rep", "cis"];
 
-fn dir() -> Option<PathBuf> {
+pub(super) fn dir() -> Option<PathBuf> {
     let dir = std::env::var_os("OPENBF_CLASSES")
         .map(PathBuf::from)
         .unwrap_or_else(|| game::assets::baked_root().join("classes"));
@@ -27,7 +28,7 @@ fn dir() -> Option<PathBuf> {
 
 /// Every class file of one game, the shared one last (a side's own
 /// definition of a name wins).
-fn files(game: &str) -> Vec<PathBuf> {
+pub(super) fn files(game: &str) -> Vec<PathBuf> {
     let Some(dir) = dir() else { return Vec::new() };
     let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
         .unwrap()
@@ -46,7 +47,7 @@ fn files(game: &str) -> Vec<PathBuf> {
 }
 
 /// One game's whole class data: as the game plays it, or as the disc wrote it.
-fn all_classes(game: &str, disc: bool) -> ClassDb {
+pub(super) fn all_classes(game: &str, disc: bool) -> ClassDb {
     let mut db = if disc {
         ClassDb::disc()
     } else {
@@ -58,7 +59,7 @@ fn all_classes(game: &str, disc: bool) -> ClassDb {
     db
 }
 
-fn sorted_names(db: &ClassDb) -> Vec<String> {
+pub(super) fn sorted_names(db: &ClassDb) -> Vec<String> {
     let mut names: Vec<String> = db.names().map(str::to_owned).collect();
     names.sort();
     names
@@ -70,7 +71,7 @@ fn is_soldier(def: &ClassDef) -> bool {
             || def.base.eq_ignore_ascii_case("walkerdroid"))
 }
 
-fn authors_damage(db: &ClassDb, class: &str) -> bool {
+pub(super) fn authors_damage(db: &ClassDb, class: &str) -> bool {
     ["MaxDamage", "Damage"]
         .iter()
         .any(|k| db.prop_f32(class, k).is_some_and(|d| d > 0.0))
@@ -78,7 +79,7 @@ fn authors_damage(db: &ClassDb, class: &str) -> bool {
 
 /// What a hit of an ordnance or explosion class deals, as the sim applies
 /// it: BF1's emitter ignores the class's scales.
-fn desc(db: &ClassDb, class: &str) -> DamageDesc {
+pub(super) fn desc(db: &ClassDb, class: &str) -> DamageDesc {
     let class = db.resolve(class).unwrap_or(class);
     let src = ClassSrc { db, class };
     if db.get(class).is_some_and(|d| d.kind == "expc") {
@@ -93,12 +94,12 @@ fn desc(db: &ClassDb, class: &str) -> DamageDesc {
     }
 }
 
-fn to_person(db: &ClassDb, class: &str) -> f32 {
+pub(super) fn to_person(db: &ClassDb, class: &str) -> f32 {
     let d = desc(db, class);
     d.damage * d.scales[HealthType::Person as usize]
 }
 
-fn hits_to_kill(desc: &DamageDesc, health: f32, health_type: HealthType) -> u32 {
+pub(super) fn hits_to_kill(desc: &DamageDesc, health: f32, health_type: HealthType) -> u32 {
     let mut h = Health::new(health, health_type);
     let mut n = 0;
     while h.alive() {
@@ -123,8 +124,13 @@ fn soft_factor(disc: &ClassDb, now: &ClassDb, name: &str) -> f32 {
         assert!(is_infantry_damage(name), "{name} is an emitter");
     } else {
         assert_eq!(d0.damage, d1.damage, "{name} damage");
-        for i in 3..7 {
-            assert_eq!(d0.scales[i], d1.scales[i], "{name} scale {i}");
+        // The vehicle pass's own lists move the vehicle and building scales
+        // (`vehicle_normalization`); every other class keeps them.
+        let hard = |list: &[&str]| list.iter().any(|c| pattern_matches(c, name));
+        if !hard(vehicles::VEHICLE_FACTOR_CLASSES) && !hard(vehicles::LIGHT_ARMS) {
+            for i in 3..7 {
+                assert_eq!(d0.scales[i], d1.scales[i], "{name} scale {i}");
+            }
         }
     }
     let soft = |d: &DamageDesc| {
@@ -150,7 +156,7 @@ fn soft_factor(disc: &ClassDb, now: &ClassDb, name: &str) -> f32 {
 
 /// Every baked map of `game` that has its own class file: (key, its
 /// classes as played, as the disc wrote them).
-fn map_classes(game: &str) -> Vec<(String, ClassDb, ClassDb)> {
+pub(super) fn map_classes(game: &str) -> Vec<(String, ClassDb, ClassDb)> {
     let mut out = Vec::new();
     for (key, source, map_dir) in game::assets::discover_maps(&game::assets::baked_root()) {
         if !source.eq_ignore_ascii_case(game) {
@@ -165,7 +171,7 @@ fn map_classes(game: &str) -> Vec<(String, ClassDb, ClassDb)> {
     out
 }
 
-fn pattern_matches(pattern: &str, name: &str) -> bool {
+pub(super) fn pattern_matches(pattern: &str, name: &str) -> bool {
     match pattern.strip_prefix('*') {
         Some(tail) => name.to_ascii_lowercase().ends_with(tail),
         None => pattern.eq_ignore_ascii_case(name),
@@ -529,10 +535,17 @@ fn hits_to_kill_are_pinned() {
             "imp_inf_shock_trooper",
             2,
         ),
+        // A rocket's direct hit is BF2's: 500 at the muzzle, so two on a
+        // heavy there, rising to 1500 by 20 m.
+        (
+            "all_weap_inf_torpedo_launcher_ord",
+            "imp_inf_storm_trooper",
+            1,
+        ),
         (
             "all_weap_inf_torpedo_launcher_ord",
             "imp_inf_shock_trooper",
-            1,
+            2,
         ),
     ] {
         let (h, t) = body(&bf1, victim);
@@ -575,16 +588,31 @@ fn bf2_class_files_are_untouched() {
     }
 }
 
-/// Only soldiers, pickups, the rows of the key table and damage classes
-/// change, and a damage class changes only against soldiers: an infantry
-/// weapon by its row or the scale, every other gun and blast by the scale.
+/// Only soldiers, pickups, the rows of the key table, the vehicle pass's
+/// rows and damage classes change, and a damage class without a vehicle
+/// twin changes only against soldiers: an infantry weapon by its row or the
+/// scale, every other gun and blast by the scale (the vehicle pass's
+/// lists also move its vehicle and building scales).
 #[test]
 fn bf1_changes_stay_inside_the_rules() {
     if dir().is_none() {
         return;
     }
     let (now, disc) = (all_classes("bf1", false), all_classes("bf1", true));
-    assert_eq!(sorted_names(&now), sorted_names(&disc));
+    let added: Vec<_> = sorted_names(&now)
+        .into_iter()
+        .filter(|name| disc.get(name).is_none())
+        .collect();
+    assert_eq!(
+        added,
+        [
+            "openbf_bf1_gunturret_impact_exp",
+            "openbf_bf1_hailfire_cannon",
+            "openbf_bf1_hailfire_cannon_ord",
+            "openbf_bf1_mtt_cannon",
+            "openbf_bf1_mtt_cannon_ord",
+        ]
+    );
     let (mut soldiers, mut infantry, mut others) = (0, 0, 0);
     for name in sorted_names(&disc) {
         let (a, b) = (disc.get(&name).unwrap(), now.get(&name).unwrap());
@@ -597,8 +625,13 @@ fn bf1_changes_stay_inside_the_rules() {
         let keyed = KEYS.iter().any(|r| pattern_matches(r.class, &name));
         if a.kind == "entc" {
             let item = a.base.eq_ignore_ascii_case("powerupitem");
-            assert!(is_soldier(a) || item || keyed, "{name} changed");
+            let vehicle = vehicles::health_row(&name).is_some();
+            assert!(is_soldier(a) || item || keyed || vehicle, "{name} changed");
             soldiers += usize::from(is_soldier(a));
+            continue;
+        }
+        if vehicles::twin_row(&name).is_some() {
+            // Checked against its BF2 twin (`vehicle_normalization`).
             continue;
         }
         if a.kind == "wpnc" {
@@ -610,18 +643,19 @@ fn bf1_changes_stay_inside_the_rules() {
         if is_infantry_damage(&name) {
             infantry += 1;
         } else {
-            // The interim rule: the plain scale, no row.
+            // Starfighter guns, death blasts, droids: the plain scale.
             assert!((k - BF1_SCALE).abs() <= 1e-3 || k == 1.0, "{name} x{k}");
             others += 1;
         }
     }
     assert!(soldiers >= 30, "{soldiers} soldier classes changed");
-    assert!(infantry >= 60, "{infantry} infantry damage classes changed");
-    assert!(others >= 100, "{others} other damage classes changed");
+    assert!(infantry >= 50, "{infantry} infantry damage classes changed");
+    assert!(others >= 60, "{others} other damage classes changed");
 }
 
-/// A map's own class file follows the map's game: a BF1 map's guns and
-/// blasts take the interim scale, a BF2 map's file is read as written.
+/// A map's own class file follows the map's game: a BF1 map's turrets and
+/// vehicles take the vehicle pass, its other guns and blasts the soldier
+/// scale, and a BF2 map's file is read as written.
 #[test]
 fn a_maps_own_classes_follow_its_game() {
     if dir().is_none() {
@@ -633,6 +667,10 @@ fn a_maps_own_classes_follow_its_game() {
         for name in sorted_names(&disc) {
             let (a, b) = (disc.get(&name).unwrap(), now.get(&name).unwrap());
             if a == b {
+                continue;
+            }
+            if vehicles::twin_row(&name).is_some() || vehicles::health_row(&name).is_some() {
+                scaled += 1;
                 continue;
             }
             assert!(
@@ -661,8 +699,8 @@ fn a_maps_own_classes_follow_its_game() {
     }
 }
 
-/// The scale keeps the hit count: a BF1 gun or blast with no BF2 row kills
-/// the shared trooper in as many hits as it killed BF1's.
+/// The scale keeps the hit count: a BF1 gun or blast with no BF2 row and no
+/// vehicle twin kills the shared trooper in as many hits as it killed BF1's.
 #[test]
 fn the_scale_keeps_every_hit_count_on_a_trooper() {
     if dir().is_none() {
@@ -682,6 +720,7 @@ fn the_scale_keeps_every_hit_count_on_a_trooper() {
                 || PERSON_DAMAGE
                     .iter()
                     .any(|r| pattern_matches(r.class, &name))
+                || vehicles::twin_row(&name).is_some()
                 || to_person(disc, &name) < 1.0
             {
                 continue;
@@ -697,97 +736,7 @@ fn the_scale_keeps_every_hit_count_on_a_trooper() {
         }
     }
     assert!(moved.is_empty(), "{moved:#?}");
-    assert!(checked >= 150, "{checked} classes checked");
-}
-
-/// INTERIM (replace: the vehicle pass): the guns of BF1's vehicles and
-/// turrets against the shared soldiers.
-#[test]
-fn bf1_vehicle_and_turret_guns_are_pinned() {
-    let Some(dir) = dir() else { return };
-    let now = all_classes("bf1", false);
-    let bf1 = load_classdb(&dir, "bf1", &SIDES).unwrap();
-    let body = |class: &str| {
-        let c = ClassRoster::build(&bf1, class, 0, None).unwrap();
-        (c.max_health, c.health_type)
-    };
-    for (class, person, victim, hits) in [
-        // The light cannons still kill a trooper in one.
-        (
-            "imp_weap_hover_fightertank_cannon_ord",
-            400.0,
-            "all_inf_soldier",
-            1,
-        ),
-        (
-            "rep_weap_hover_fightertank_cannon_ord",
-            400.0,
-            "cis_inf_battledroid",
-            1,
-        ),
-        (
-            "imp_weap_hover_speederbike_cannon_ord",
-            400.0,
-            "all_inf_soldier",
-            1,
-        ),
-        (
-            "cis_weap_hover_stap_cannon_ord",
-            400.0,
-            "rep_inf_clone_trooper",
-            1,
-        ),
-        (
-            "rep_weap_fly_gunship_cannon_ord",
-            400.0,
-            "cis_inf_battledroid",
-            1,
-        ),
-        (
-            "com_weap_bldg_gunturret_ord",
-            400.0 / 3.0,
-            "imp_inf_storm_trooper",
-            3,
-        ),
-        // The AT-ST's chin gun still kills a heavy in one; the head guns
-        // (400 on the disc) now need two on the 550-health heavy.
-        (
-            "imp_weap_walk_atst_cannon_chin1_ord",
-            600.0,
-            "all_inf_vanguard",
-            1,
-        ),
-        (
-            "imp_weap_walk_atst_cannon_head_ord",
-            1600.0 / 3.0,
-            "all_inf_soldier",
-            1,
-        ),
-        (
-            "imp_weap_walk_atst_cannon_head_ord",
-            1600.0 / 3.0,
-            "all_inf_vanguard",
-            2,
-        ),
-    ] {
-        let got = to_person(&now, class);
-        assert!((got - person).abs() < 1e-3, "{class}: {got}");
-        let (h, t) = body(victim);
-        assert_eq!(
-            hits_to_kill(&desc(&now, class), h, t),
-            hits,
-            "{class} on {victim}"
-        );
-    }
-    // A map's own turret: Hoth's laser turret kills a trooper in one.
-    for (key, map, _) in map_classes("bf1") {
-        if key == "bf1_hot1" {
-            let class = "hoth_weap_bldg_hothturret_cannon_ord";
-            assert_eq!(to_person(&map, class), 400.0);
-            let (h, t) = body("imp_inf_storm_troopersnow");
-            assert_eq!(hits_to_kill(&desc(&map, class), h, t), 1);
-        }
-    }
+    assert!(checked >= 100, "{checked} classes checked");
 }
 
 /// Every BF1 soldier has a health row or is on the BF1-only list, and
@@ -928,7 +877,7 @@ fn print_table() {
         );
     }
 
-    println!("\n### BF1 vehicle, turret and blast classes (interim x4/3)\n");
+    println!("\n### BF1 starfighter, death-blast and droid classes (x4/3)\n");
     println!("| BF1 class | From | To a person, disc | Hits on 300 | Now | Hits on 400 |");
     println!("|---|---|---|---|---|---|");
     let mut dbs = vec![(
@@ -942,6 +891,7 @@ fn print_table() {
             let def = disc.get(&name).unwrap();
             if !matches!(def.kind.as_str(), "ordc" | "expc")
                 || is_infantry_damage(&name)
+                || vehicles::twin_row(&name).is_some()
                 || !authors_damage(disc, &name)
             {
                 continue;

@@ -642,8 +642,12 @@ impl Unit {
         self.health.health_type as u32
     }
 
-    /// Feed into the sim hash.
+    /// Feed into a ground simulation hash.
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
+        self.hash_for_round(eat, true);
+    }
+
+    pub(crate) fn hash_for_round(&self, eat: &mut impl FnMut(&[u8]), ground: bool) {
         eat(&self.gen.to_le_bytes());
         if self.consts.collision_damage_immune || self.spec.consts.collision_damage_immune {
             eat(b"COLLISION_IMMUNE");
@@ -767,6 +771,10 @@ impl Unit {
         }
         if let Some(d) = &self.droideka {
             d.hash_into(eat);
+            // Form choice and fight commitment read this label on a ground bot.
+            if ground && self.controller == Controller::Ai && self.proxy_human.is_none() {
+                eat(&[b'B', self.ai.behaviour as u8]);
+            }
         }
     }
 

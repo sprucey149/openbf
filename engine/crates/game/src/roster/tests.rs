@@ -79,6 +79,37 @@ fn missile_class_uses_the_last_authored_keys_before_the_next_charge() {
 }
 
 #[test]
+fn bf1_tap_mortar_lifespan_uses_the_default_only_when_omitted() {
+    let uncharged = db(&[
+        (
+            "imp_weap_inf_mortar_launcher_ord1",
+            "shell",
+            &[("Velocity", "40"), ("Gravity", "1.75")],
+        ),
+        ("zero_life", "shell", &[("LifeSpan", "0")]),
+        ("cis_weap_inf_mortar_launcher_ord1", "zero_life", &[]),
+        ("other_shell", "shell", &[]),
+    ]);
+    let fired = |name| super::weapon_db::fired_ordnance(&uncharged, name);
+    let mortar = fired("imp_weap_inf_mortar_launcher_ord1");
+    assert_eq!(
+        (mortar.velocity, mortar.gravity, mortar.life_span),
+        (40.0, 1.75, 3.0)
+    );
+    assert_eq!(fired("cis_weap_inf_mortar_launcher_ord1").life_span, 0.0);
+    assert_eq!(fired("other_shell").life_span, 2.0);
+
+    let charged = db(&[(
+        "imp_weap_inf_mortar_launcher_ord1",
+        "shell",
+        &[("NextCharge", "1"), ("Velocity", "25")],
+    )]);
+    let shell = super::weapon_db::fired_ordnance(&charged, "imp_weap_inf_mortar_launcher_ord1");
+    assert_eq!(shell.life_span, 2.0);
+    assert_eq!(shell.charged(1.0).life_span, 2.0);
+}
+
+#[test]
 fn sticky_charge_points_survive_both_weapon_loaders() {
     let d = db(&[
         (

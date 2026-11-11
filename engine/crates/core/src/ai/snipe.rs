@@ -16,7 +16,7 @@
 //! Standing still with the rifle in hand it sees out to its tier's share of
 //! the rifle's `MaxRange` (`perception::scope_reach`, OURS, 2026-10-29), its
 //! lanes reach as far, and on its spot it fights from there
-//! (`behave::position`); at Easy (share 0) none of the three.
+//! (`brain::behaviours::fight`); at Easy (share 0) none of the three.
 //!
 //! The PS2's sniper stands 60-120 s at one hint whatever it sees (BF1 60-100
 //! s; `analysis/re-soldier-ai.md` 20, card CLSE4: 99 % of its rifle time in
@@ -159,7 +159,7 @@ pub(super) fn upkeep(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState, seen
         if nav::xz_dist(pos, c.spot) <= ARRIVE {
             if (pos.y - c.spot.y).abs() <= ARRIVE_DY {
                 arrive(sim, me, st);
-            } else if st.route.is_none_or(|r| r.is_last()) {
+            } else if st.route().is_none_or(|r| r.is_last()) {
                 walk_failed(sim, st);
             }
         }
@@ -194,7 +194,7 @@ pub(super) fn arrive(sim: &Sim, me: UnitHandle, st: &mut AiState) {
         stance_mask: c.mask,
         last_contact: sim.tick,
         // It watches down its lane until an enemy it can see is nearer
-        // (the hold's upkeep, `behave::brain`).
+        // (the hold's upkeep, the ground or legacy brain).
         look: c.look,
         ..HoldState::default()
     });
@@ -262,7 +262,7 @@ pub fn pick(sim: &Sim, me: UnitHandle, u: &Unit, left: Option<Vec3>) -> Option<S
                         lane: len,
                         // Ground rounds only: a space round's sniper (a
                         // hangar fight) holds as it did.
-                        look: if !sim.space_round() {
+                        look: if sim.round_rules().ground() {
                             far.unwrap_or(Vec3::ZERO)
                         } else {
                             Vec3::ZERO

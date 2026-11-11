@@ -1,5 +1,9 @@
 # OPUS RE (2026-09-29) - [O] UNAUDITED — Unit fidelity audit, BF1 (card UAUD1)
 
+> This is the September 29, 2026 audit. Its port verdicts describe the revisions
+> listed below. For current scope, see the [feature set](plan/FEATURE_SET.md)
+> and [source gates](source-gates.md).
+
 The maintainer's DECISION 3 (INBOX 2026-09-28): audit every unit class on every map of both games. This document covers BF1.
 It lists every soldier class the 28 BF1 Instant Action mission scripts load, and checks each one column by column
 against three sources:

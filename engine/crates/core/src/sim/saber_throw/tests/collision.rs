@@ -1,7 +1,6 @@
-//! The maintainer, 2026-10-30: "Should go to its range limit and return, or go
-//! until it hits collision and then it returns." [ours] over the PS2, whose
-//! flight passes through soldiers, hulls and stations (only the launch's world
-//! ray shortens the leg; FUN_0031cb78, FUN_0031d688).
+//! Ground saber throw and return. The port turns the blade back early at
+//! hard stops. BF2 clears its contact cache when the flight clock crosses
+//! zero (FUN_0031cb78).
 
 use super::*;
 use crate::collision::{Body, HullPart, Layers, Shape};
@@ -116,6 +115,54 @@ fn a_shielded_droideka_stops_it_at_the_bubble_and_the_shield_takes_the_damage() 
     let u = sim.unit(d).unwrap();
     assert_eq!(u.health.cur, before, "the bubble absorbs it");
     assert_eq!(u.droideka.as_ref().unwrap().shield.points, 460.0);
+}
+
+#[test]
+fn a_ground_saber_return_after_a_hard_stop_can_hit_the_same_soldier_again() {
+    for space in [false, true] {
+        let (mut sim, owner, victim) = long_throw();
+        if space {
+            sim.landing_regions
+                .push(crate::region::Region::sphere(Vec3::ZERO, 1.0));
+        }
+        assert_eq!(sim.space_round(), space);
+        stand_on_the_line(&mut sim, victim, 10.0);
+        let stoppers = [deka(&mut sim, 20.0), deka(&mut sim, 20.0)];
+        for stopper in stoppers {
+            let shield = &mut sim
+                .unit_mut(stopper)
+                .unwrap()
+                .droideka
+                .as_mut()
+                .unwrap()
+                .shield;
+            shield.on = true;
+            shield.points = 500.0;
+        }
+        let before = sim.unit(victim).unwrap().health.cur;
+
+        sim.launch_saber_throw(owner.index as usize, Some(0), 1);
+        let mut turned = false;
+        for _ in 0..100 {
+            sim.tick_saber_throws();
+            let Some(f) = flight(&sim, owner) else { break };
+            if !turned && f.returning {
+                assert!(f.outbound_seconds < 1.0, "the shield stopped the throw");
+                assert_eq!(sim.unit(victim).unwrap().health.cur, before - 40.0);
+                assert!(stoppers.iter().all(|&h| f.hit.contains(&Target::Shield(h))));
+                assert_eq!(f.hit.contains(&Target::Unit(victim)), space);
+                turned = true;
+            }
+        }
+
+        assert!(turned && flight(&sim, owner).is_none());
+        for stopper in stoppers {
+            let shield = &sim.unit(stopper).unwrap().droideka.as_ref().unwrap().shield;
+            assert_eq!(shield.points, 460.0);
+        }
+        let hits = if space { 1.0 } else { 2.0 };
+        assert_eq!(sim.unit(victim).unwrap().health.cur, before - 40.0 * hits);
+    }
 }
 
 #[test]

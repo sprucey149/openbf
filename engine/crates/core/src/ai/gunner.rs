@@ -2,7 +2,7 @@
 //! weapons. `Sim::seat_gun` then moves the look and the aimer and fires, as
 //! it does for a human, and holds the shot to the fairness rule.
 //!
-//! The rules are on foot's (`behave::think`, `gunner_foot::run`): the target is the one this
+//! The rules are on foot's (`brain::think`, `gunner_foot::run`): the target is the one this
 //! bot's perception SEES (`perception::scan` looks from the seat's eye along
 //! the gun's look), aimed at through the lead point and the aim error (BF2: the target's own);
 //! FIRE waits for the tier's reaction, the weapon's range, D11's bursts and

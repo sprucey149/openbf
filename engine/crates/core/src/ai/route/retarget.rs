@@ -38,7 +38,7 @@ pub(in super::super) fn retarget(
             return;
         }
     }
-    if sim.space_assault.is_some() && u.mount.is_none() && u.team < 2 {
+    if sim.round_rules().space_assault() && u.mount.is_none() && u.team < 2 {
         retarget_deathmatch(sim, me, st, nt);
         return;
     }
@@ -75,7 +75,7 @@ pub(in super::super) fn retarget(
             // of `retarget_phase_a` with nowhere to walk is IDLE — it takes
             // the hint rule from its own position instead of from a post, so
             // a bot standing in an authored crouch spot crouches in it.
-            st.want_stance = if st.route.is_none() {
+            st.want_stance = if st.nav.route.is_none() {
                 let scoped = sim.weapon_classes[u.weapon_class].ai_distance_table();
                 let mask = crate::commander::hint_stance(sim, u.soldier.pos, scoped);
                 stance_hold(st.want_stance, mask, me, sim.tick)
@@ -94,18 +94,18 @@ pub(super) fn retarget_deathmatch(sim: &Sim, me: UnitHandle, st: &mut AiState, n
     let Some(u) = sim.unit(me) else { return };
     let pos = u.soldier.pos;
     let Some(g) = sim.nav.as_ref() else {
-        st.route = None;
+        clear(st);
         st.wander = None;
         return;
     };
     let Some(cur) = start_hub(sim, g, me) else {
-        st.route = None;
+        clear(st);
         st.wander = None;
         return;
     };
     st.target_cp = None;
     st.want_stance = 0;
-    let walking = st.wander.zip(st.route).filter(|((at, hub), r)| {
+    let walking = st.wander.zip(st.nav.route).filter(|((at, hub), r)| {
         let d = nav::xz_dist(pos, *at);
         let there = d <= ARRIVE_MIN_RADIUS || (r.stuck_run > 0 && d <= g.radius(*hub));
         r.dest_hub == *hub && !(r.is_last() && there)
@@ -113,12 +113,10 @@ pub(super) fn retarget_deathmatch(sim: &Sim, me: UnitHandle, st: &mut AiState, n
     if walking.is_none() {
         let (at, hub) = deathmatch_goal(sim, g, me, u, cur);
         st.wander = Some((at, hub));
-        st.route = plan_leg(sim, st, me, cur, hub, None, nt);
+        plan_to(sim, st, me, cur, hub, nt);
     }
-    if let (Some((at, _)), Some(r)) = (st.wander, st.route.as_mut()) {
-        if r.is_last() {
-            r.waypoint = at;
-        }
+    if let Some((at, _)) = st.wander {
+        set_last_waypoint(st, at, Refresh::None);
     }
 }
 
@@ -206,7 +204,7 @@ pub(super) fn retarget_to_post(
     let (Some(g), Some(post)) = (sim.nav.as_ref(), sim.cps.get(cp as usize)) else {
         // No graph: walk straight at the post, as before Phase A, and with no
         // graph there are no hints to take a stance from either (D13).
-        st.route = None;
+        clear(st);
         st.want_stance = 0;
         return false;
     };
@@ -253,14 +251,14 @@ pub(super) fn retarget_to_post(
     } else {
         post.nav_hub
     };
-    if let Some(r) = st.route {
+    if let Some(r) = st.nav.route {
         if want == Some(r.dest_hub) {
             match spot.filter(|_| r.is_last() && post.nav_hub == Some(r.dest_hub)) {
                 Some(p) if r.waypoint != p => {
                     let mut r = r;
                     r.waypoint = p;
                     r.ref_dist = nav::xz_dist(pos, sub_point(&r, pos));
-                    st.route = Some(r);
+                    st.nav.route = Some(r);
                 }
                 _ => {}
             }
@@ -268,7 +266,7 @@ pub(super) fn retarget_to_post(
         }
     }
     let Some(dest) = want else {
-        st.route = None;
+        clear(st);
         nt.unroutable = 1;
         return false;
     };
@@ -287,18 +285,18 @@ pub(super) fn retarget_to_post(
             } else if st.flank.route.is_none() {
                 st.flank.from = c;
             }
-            st.route = plan_leg(sim, st, me, c, dest, None, nt);
-            if let (Some(p), Some(mut r)) = (spot, st.route) {
+            plan_to(sim, st, me, c, dest, nt);
+            if let (Some(p), Some(mut r)) = (spot, st.nav.route) {
                 if r.is_last() && post.nav_hub == Some(r.dest_hub) {
                     r.waypoint = p;
                     r.ref_dist = nav::xz_dist(pos, sub_point(&r, pos));
-                    st.route = Some(r);
+                    st.nav.route = Some(r);
                 }
             }
         }
         None => {
             // Report it and leave the assignment for the commander to drop.
-            st.route = None;
+            clear(st);
             nt.unroutable = 1;
         }
     }
@@ -326,11 +324,9 @@ pub(in super::super) fn retarget_board(
     let dest = unit_goal_hub(sim, g, m, at);
     match (start_hub(sim, g, me), dest) {
         (Some(c), Some(d)) if g.reachable_by(c, d, m) => {
-            if st.route.is_none_or(|r| r.dest_hub != d) {
-                st.route = plan_leg(sim, st, me, c, d, None, nt);
-            }
+            keep_or_plan(sim, st, me, c, d, nt);
         }
-        _ => st.route = None,
+        _ => clear(st),
     }
 }
 
@@ -373,9 +369,7 @@ pub(super) fn retarget_hunt(
     match (g, cur, dest) {
         (Some(g), Some(c), Some(d)) if g.reachable_by(c, d, mover(sim, u)) => {
             st.target_cp = None;
-            if st.route.is_none_or(|r| r.dest_hub != d) {
-                st.route = plan_leg(sim, st, me, c, d, None, nt);
-            }
+            keep_or_plan(sim, st, me, c, d, nt);
             // (An armed walker stops at the end of its graph: card WAI2,
             // `ride::at_drop`.)
             let walker = u
@@ -384,7 +378,7 @@ pub(super) fn retarget_hunt(
                 .is_some_and(|v| v.kind == crate::vehicle::VehicleKind::Walker)
                 && sim.seat_look(me).is_some();
             if HUNT_AT_ENEMY && !walker {
-                if let (Some(r), Some(e)) = (st.route.as_mut(), nearest_enemy) {
+                if let (Some(r), Some(e)) = (st.nav.route.as_mut(), nearest_enemy) {
                     if r.is_last() {
                         r.waypoint = e;
                     }
@@ -427,7 +421,7 @@ pub(super) fn retarget_phase_a(
     let Some(g) = sim.nav.as_ref() else {
         // No graph: exactly the pre-Phase-A placeholder.
         st.target_cp = nearest(&|c| !mine(c)).or_else(|| nearest(&|_| true));
-        st.route = None;
+        clear(st);
         return;
     };
 
@@ -444,7 +438,7 @@ pub(super) fn retarget_phase_a(
     // The first choice has not changed and we are already walking to it: keep
     // the leg we are on (re-planning every think would also re-roll the
     // chooser every ten ticks).
-    if let (Some(t), Some(r)) = (st.target_cp, st.route) {
+    if let (Some(t), Some(r)) = (st.target_cp, st.nav.route) {
         if cands.first().is_some_and(|&(_, i)| i == t)
             && sim.cps.get(t as usize).and_then(|c| c.nav_hub) == Some(r.dest_hub)
         {
@@ -468,7 +462,7 @@ pub(super) fn retarget_phase_a(
                 continue;
             }
             st.target_cp = Some(i);
-            st.route = plan_leg(sim, st, me, cur, dest, None, nt);
+            plan_to(sim, st, me, cur, dest, nt);
             return;
         }
         // HUNT: nothing capturable we can reach, so go to the nearest enemy's
@@ -477,7 +471,7 @@ pub(super) fn retarget_phase_a(
             if let Some(dest) = g.unit_hub_on(e, m, &|h| hub_on_level(sim, g, h, e.y)) {
                 if g.reachable_by(cur, dest, m) {
                     st.target_cp = None;
-                    st.route = plan_leg(sim, st, me, cur, dest, None, nt);
+                    plan_to(sim, st, me, cur, dest, nt);
                     return;
                 }
             }
@@ -485,5 +479,5 @@ pub(super) fn retarget_phase_a(
     }
     // Off the graph entirely: the placeholder's own choice, walked straight.
     st.target_cp = nearest(&|c| !mine(c)).or_else(|| nearest(&|_| true));
-    st.route = None;
+    clear(st);
 }

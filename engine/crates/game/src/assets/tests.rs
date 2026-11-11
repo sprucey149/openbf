@@ -186,8 +186,23 @@ fn installed_water_keeps_dry_cells_and_clears_previous_scene_inputs() {
     assert_eq!(water.crossing(dry, glam::Vec3::NEG_Y), None);
     assert_eq!(sim.water_under(dry), None);
 
-    // A legacy manifest must clear the preceding map's mask, not inherit it.
-    scene.manifest.water.as_mut().unwrap().wet = None;
+    let authored = scene.manifest.water.as_mut().unwrap();
+    authored.gameplay_wet = Some(manifest::ManifestWetMask::from_nibbles(
+        2,
+        10.0,
+        [10.0, 10.0],
+        &[0, 1, 0, 0],
+    ));
+    assert_eq!(authored.wet.as_ref().unwrap().cells(), [1, 0, 0, 0]);
+    scene.install_water(&mut sim);
+    let water = sim.water_plane().unwrap();
+    assert_eq!(water.crossing(wet, glam::Vec3::NEG_Y), None);
+    assert_eq!(water.crossing(dry, glam::Vec3::NEG_Y), Some(4.0));
+
+    // A legacy manifest must clear the preceding map's mask.
+    let authored = scene.manifest.water.as_mut().unwrap();
+    authored.wet = None;
+    authored.gameplay_wet = None;
     scene.install_water(&mut sim);
     assert!(sim.water_mask.is_none());
     assert_eq!(sim.water_under(dry), Some(-2.0));
@@ -238,7 +253,7 @@ fn installed_kashyyyk_water_preserves_baked_wet_and_dry_cells() {
     let mut sim = core::sim::Sim::empty(1);
     scene.install_water(&mut sim);
     let authored = scene.manifest.water.as_ref().unwrap();
-    let mask = authored.wet.as_ref().expect("rebaked KAS1 WMAP");
+    let mask = authored.gameplay_mask().expect("rebaked KAS1 water mask");
     let cells = mask.cells();
     assert_eq!(sim.water_mask.as_ref().unwrap().wet_cells(), 4014);
     let plane = sim.water_plane().unwrap();

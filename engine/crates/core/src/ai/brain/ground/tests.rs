@@ -9,6 +9,7 @@ use crate::sim::Event;
 use crate::unit::UnitSpec;
 use crate::vehicle::VehicleKind;
 use crate::TICK_HZ;
+use glam::Vec2;
 
 /// A rifleman (a rifle in both slots) at the origin with the L graph and an
 /// enemy post at hub 2: he walks -Z to hub 1, then +X.
@@ -127,7 +128,7 @@ fn a_walking_bot_faces_its_walk_past_a_told_record() {
 /// One think of a fresh bot in `sim`: the pad and the state.
 fn one_think(sim: &Sim, bot: UnitHandle) -> (PadState, AiState) {
     let mut st = AiState::default();
-    let (pad, _) = super::think(sim, bot, &mut st);
+    let (pad, _) = crate::ai::think(sim, bot, &mut st);
     (pad, st)
 }
 
@@ -138,7 +139,7 @@ fn travel_rx(space: bool) -> i16 {
         sim.space_assault = Some(crate::sim::SpaceAssault::new(10));
     }
     let (pad, st) = one_think(&sim, bot);
-    assert!(st.target.is_none() && st.route.is_some());
+    assert!(st.target.is_none() && st.route().is_some());
     pad.rx
 }
 
@@ -179,7 +180,7 @@ fn a_space_rounds_walking_bot_still_looks_at_the_vehicle() {
         let (pad, st) = one_think(&sim, bot);
         assert_eq!(st.target, Some(rider.into()));
         assert!(st.arm.spare);
-        assert!(st.route.is_some(), "walking its leg");
+        assert!(st.route().is_some(), "walking its leg");
         (pad, st)
     };
     let (pad, st) = scene(false);

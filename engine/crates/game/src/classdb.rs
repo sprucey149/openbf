@@ -104,6 +104,10 @@ impl ClassDb {
         for mut d in defs {
             if !self.classes.contains_key(&d.name) {
                 if normalize {
+                    if let Some(mut variant) = crate::normalize::vehicles::variant(&d) {
+                        crate::normalize::apply(&mut variant);
+                        self.classes.entry(variant.name.clone()).or_insert(variant);
+                    }
                     crate::normalize::apply(&mut d);
                 }
                 self.classes.insert(d.name.clone(), d);

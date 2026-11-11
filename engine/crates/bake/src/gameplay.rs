@@ -16,6 +16,7 @@ mod rebuild;
 mod terrain;
 #[cfg(test)]
 mod tests;
+mod water;
 
 pub use terrain::{apply_render_heights, apply_terrain};
 
@@ -197,6 +198,8 @@ pub(super) struct File {
     terrain: Vec<Terrain>,
     #[serde(default)]
     remove_water: Vec<Locator>,
+    #[serde(default)]
+    water_mask: Option<water::WaterMaskCorrection>,
     #[serde(default)]
     sky: Vec<Sky>,
     #[serde(default)]
@@ -446,10 +449,25 @@ pub fn read(path: impl AsRef<Path>) -> Result<Vec<u8>> {
 /// stream, after the same file and source-root fingerprint checks. Render
 /// vertices' BMAP indices belong to that donor's skeleton ordering.
 pub(crate) fn read_with_original(path: impl AsRef<Path>) -> Result<(Vec<u8>, Option<Vec<u8>>)> {
+    let level = read_level(path)?;
+    Ok((level.gameplay, level.original))
+}
+
+pub(crate) struct Level {
+    pub gameplay: Vec<u8>,
+    pub original: Option<Vec<u8>>,
+    pub water_mask: Option<&'static water::WaterMaskCorrection>,
+}
+
+pub(crate) fn read_level(path: impl AsRef<Path>) -> Result<Level> {
     let path = path.as_ref();
     let bytes = std::fs::read(path).with_context(|| path.display().to_string())?;
     let Some((table, file)) = correction(path, &bytes)? else {
-        return Ok((bytes, None));
+        return Ok(Level {
+            gameplay: bytes,
+            original: None,
+            water_mask: None,
+        });
     };
     let corrected = rebuild::apply(&bytes, table, file).with_context(|| {
         format!(
@@ -458,5 +476,9 @@ pub(crate) fn read_with_original(path: impl AsRef<Path>) -> Result<(Vec<u8>, Opt
             file.file
         )
     })?;
-    Ok((corrected, Some(bytes)))
+    Ok(Level {
+        gameplay: corrected,
+        original: Some(bytes),
+        water_mask: file.water_mask.as_ref(),
+    })
 }

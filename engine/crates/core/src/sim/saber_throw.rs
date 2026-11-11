@@ -8,6 +8,13 @@ use crate::projectile::{building_hit, Hit, Target};
 use crate::TICK_DT;
 use glam::{Mat4, Vec3};
 
+fn stops_saber_throw(target: Target) -> bool {
+    matches!(
+        target,
+        Target::Shield(_) | Target::Vehicle(_) | Target::Station(_) | Target::Turret(_)
+    )
+}
+
 impl Sim {
     fn saber_attachment(&self, i: usize, blade_class: usize, throw_class: usize) -> Option<Mat4> {
         let u = &self.units[i];
@@ -182,6 +189,10 @@ impl Sim {
                         if struck && outbound {
                             // [ours] A hard stop ends the leg, past the launch
                             // ray the PS2 has: see `saber_throw_contacts`.
+                            if !self.space_round() {
+                                // Only the blocking contacts carry into the return leg.
+                                flight.hit.retain(|&target| stops_saber_throw(target));
+                            }
                             flight.turn_back(
                                 after.w_axis.truncate(),
                                 before_angle + (flight.angle - before_angle) * fraction,
@@ -326,17 +337,13 @@ impl Sim {
         let desc = self.weapon_classes[class].ordnance.damage_desc(0.0, false);
         let direction = flight.velocity.normalize_or_zero();
         let blade = flight.blade_class as u32;
-        // Soldiers, bare droidekas and remote droids are flown through, each
-        // struck once a leg, as on the PS2. [ours] A raised bubble, a hull, a
-        // station or an auto-turret turns the blade back.
+        // Soldiers, bare droidekas and remote droids take one hit per leg.
+        // [ours] A raised bubble, a hull, a station or an auto-turret turns it back.
         let mut stopped = false;
         let mut sound_at = None;
         for (target, pos) in hits.into_iter().take(8 - flight.hit.len()) {
             flight.hit.push(target);
-            stopped |= matches!(
-                target,
-                Target::Shield(_) | Target::Vehicle(_) | Target::Station(_) | Target::Turret(_)
-            );
+            stopped |= stops_saber_throw(target);
             // Read before the blow: a killed victim still heard it.
             let body = match target {
                 Target::Unit(h) | Target::Shield(h) => self.unit(h).map(|u| u.soldier.pos),

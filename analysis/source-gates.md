@@ -131,6 +131,37 @@ records original unresolved instances before shared-resource lookup and recovery
 | bf2_yav1 | 76 | 853 | 3,210 | match, 12,651 ticks |  |
 | tat2 | 0 | 0 | 21,382 | match, 12,208 ticks |  |
 
+## Kashyyyk Islands gameplay water coverage
+
+BF1 Kashyyyk Islands has a common −45 m water height. The original PS2
+uses a 64 by 64 wet grid with 32 m cells, including 82 dry cells around
+playable land. PC and Xbox cover the same extent with entirely wet
+256 m and 128 m cells. The running port reproduced a donor-only sticky
+water contact at tick 2,094 of Easy Clone Wars seed 42. The PS2 cell at
+that contact is dry. Exchanging only the simulation mask in both
+directions reversed the divergence. Clean main also differs on this
+seed, starting at tick 14,641.
+
+The fingerprinted PC and Xbox rows now refine their wet grids and clear
+22 bounded runs to reconstruct the original PS2 gameplay coverage.
+The bake checks the resulting cell digest. The exporter independently
+checks each dry cell against the reviewed playable polygon. The new
+manifest field supplies water intersection, movement, and the
+simulation fingerprint. The renderer reads the native wet grid,
+mesh, texture, and water config for each edition.
+
+Fresh map bakes before and after differ only by the added simulation
+field in the PC and Xbox manifests. PS2 and mixed map files match
+byte for byte. The Easy CW seed-42 witness on all four corrected
+profiles matches through all 12,835 ticks, with the same result and
+end hash. This comparison uses retained common and side assets and
+one frozen mission set. The broader seed-42 run finished all 976
+rounds across four difficulties and 61 default or distinct alternate
+mission variants per profile and difficulty. All sampled checkpoints
+match PS2. The only changes against the earlier run are the two
+Easy CW donor streams on this map. See `re-fx.md` §15 for the original
+wet-cell lookup.
+
 ## Jabba source-water correction
 
 Xbox BF2 Jabba's Palace stores a single water cell at Y = -10.5 in its terrain stub; the PS2 stub has no water.

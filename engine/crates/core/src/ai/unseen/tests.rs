@@ -83,7 +83,7 @@ fn a_stalled_bot_no_human_sees_is_moved_past_its_failing_link() {
             .any(|e| matches!(e, Event::EnvDeath { .. })),
         "no death, so no ticket"
     );
-    assert_eq!(u.ai.route.map(|r| r.next_hub), None, "a new walk");
+    assert_eq!(u.ai.route().map(|r| r.next_hub), None, "a new walk");
     assert!(u.ai.stall.is_none());
     let row = u.ai.why.rows().filter(|r| r.failed).last().expect("a row");
     assert_eq!(row.why, Why::Relocated);

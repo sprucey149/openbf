@@ -447,7 +447,7 @@ mod tests {
 
             // The LAST `#[cfg(test)]` of a file is its trailing `mod tests`,
             // and cutting there drops the test code. One before it is a test
-            // SEAM in the code (card FGHT: `ai/behave.rs` `style`): one
+            // SEAM in the code (card FGHT: `ai/brain/behaviours/fight.rs` `style`): one
             // braced statement, skipped to its closing brace. Anything else
             // would leave the referee blind without saying so — fail loudly.
             let cuts: Vec<usize> = text.match_indices("#[cfg(test)]").map(|(i, _)| i).collect();
@@ -457,8 +457,10 @@ mod tests {
                         text[last..].starts_with("#[cfg(test)]\nmod tests {")
                             || text[last..].trim_end() == "#[cfg(test)]\nmod tests;"
                             // shares its fixtures with other test modules
-                            || text[last..].trim_end() == "#[cfg(test)]\npub(crate) mod tests;"
-                            || text[last..].trim_end() == "#[cfg(test)]\npub(super) mod tests;",
+                            || matches!(
+                                text[last..].trim_end(),
+                                "#[cfg(test)]\npub(crate) mod tests;" | "#[cfg(test)]\npub(super) mod tests;"
+                            ),
                         "{name}: the last #[cfg(test)] is not the trailing `mod tests` \
                          — teach the referee to skip it"
                     );

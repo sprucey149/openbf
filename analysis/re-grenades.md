@@ -676,6 +676,16 @@ forward from 1 s before the press), -26.3, -13.9 and the upper limit, 63.6 deg. 
 
 ### 13.2 Why the bounces differ: the terrain ray does not return the crossing [V, M] [O]
 
+**Port progress guard, November 11.** The terrain marcher retains the original
+split and tolerance for playable coordinates. It treats a rounded midpoint
+that equals an endpoint as a leaf, preserves that leaf's height bracket, and
+stops bisection when no new point is representable. A segment whose delta is
+nonfinite is rejected. The midpoint sum uses half endpoints only when the
+ordinary sum overflows. Focused fixtures retain the ordinary crossing,
+vertical hit and terrain-cutter rejection. These guards address an engine
+crash on malformed or extreme segments. They do not measure the map-specific
+CPU spikes tracked by issue #110.
+
 The sticky's sweep (B2 `FUN_00320de8` 313836-313919): first = the previous position (vtable +0x2c), second = the
 position (+0x28), dir = normalise(second - first), origin = first - 0.1 dir, length = |second - first| + 0.2, mask
 0x13ba (0x132a — no terrain bit — when the byte s+0x38 is 0); the point handed to the contact handler is

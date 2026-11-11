@@ -1,7 +1,7 @@
 use super::state::{AiState, Behaviour};
 use crate::droideka::{Form, Order};
-use crate::sim::{buttons, PadState, Sim};
-use crate::unit::{Unit, UnitHandle};
+use crate::sim::Sim;
+use crate::unit::Unit;
 use crate::vehicle::VehicleKind;
 
 pub const SIGHT_FIGHT: f32 = 10.0;
@@ -44,27 +44,18 @@ pub(super) fn takes_fight(sim: &Sim, u: &Unit, st: &AiState, e: &Unit, range: f3
     range <= SIGHT_FIGHT || hit || st.behaviour == Behaviour::Fight
 }
 
-pub(super) fn steer(sim: &Sim, me: UnitHandle, st: &AiState, pad: &mut PadState) {
-    let Some(u) = sim.unit(me) else {
-        return;
-    };
-    let (Some(d), Some(c)) = (u.droideka.as_deref(), u.droideka_class()) else {
-        return;
-    };
-    pad.buttons &= !(buttons::ROLL_STANCE
-        | buttons::JUMP
-        | buttons::SECONDARY_FIRE
-        | buttons::SPRINT
-        | buttons::ACTION);
-    pad.lx = 0;
-    if st.behaviour != Behaviour::Fight || d.form() != Form::Walk || st.target.is_none() {
-        return;
-    }
-    pad.ly = 0;
-    if !d.in_transform() && !d.shield.on && d.shield.points > SHIELD_RAISE * c.shield.max {
-        pad.buttons |= buttons::SECONDARY_FIRE;
-        pad.buttons &= !buttons::FIRE;
-    }
+pub(super) struct DrivePlan {
+    pub stop: bool,
+    pub raise_shield: bool,
+}
+
+pub(super) fn drive_plan(u: &Unit, st: &AiState) -> Option<DrivePlan> {
+    let d = u.droideka.as_deref()?;
+    let c = u.droideka_class()?;
+    let stop = st.behaviour == Behaviour::Fight && d.form() == Form::Walk && st.target.is_some();
+    let raise_shield =
+        stop && !d.in_transform() && !d.shield.on && d.shield.points > SHIELD_RAISE * c.shield.max;
+    Some(DrivePlan { stop, raise_shield })
 }
 
 #[cfg(test)]

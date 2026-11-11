@@ -25,8 +25,11 @@ pub(super) fn bake_content(
         .map(crate::tier::PcTextures::load)
         .transpose()
         .with_context(|| format!("PC override LVL for {lvl_path}"))?;
-    let (buf, original) =
-        crate::gameplay::read_with_original(lvl_path).with_context(|| lvl_path.to_string())?;
+    let crate::gameplay::Level {
+        gameplay: buf,
+        original,
+        water_mask,
+    } = crate::gameplay::read_level(lvl_path).with_context(|| lvl_path.to_string())?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir);
     std::fs::create_dir_all(out.join("models"))?;
@@ -1419,6 +1422,16 @@ pub(super) fn bake_content(
         format!("{n} water sheet(s) this map's Effect(\"Water\") names keep their disc alpha")
     });
 
+    let gameplay_wet = water_mask
+        .map(|correction| {
+            let authored = water
+                .as_ref()
+                .context("water mask correction requires water")?;
+            correction.apply(authored)
+        })
+        .transpose()
+        .with_context(|| format!("{lvl_path}: gameplay water mask"))?;
+
     // Water, after the texture list is final: resolving which texture paints
     // it needs the baked names (4 of the 12 maps name none in `LAYR`).
     let water = match water {
@@ -1451,6 +1464,7 @@ pub(super) fn bake_content(
                     w.info.half_extent,
                     &w.cells,
                 )),
+                gameplay_wet,
             })
         }
         _ => None,

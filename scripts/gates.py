@@ -14,6 +14,7 @@ Groups:
   gpu    gpu_tests.sh --render, then goldens.sh REGENERATES in the tree: moved goldens are quantified (goldens/QUANT.md),
          sheeted (goldens/pair_*.png) and restored from HEAD unless --keep-goldens
   sim    scripts/sim_gates.sh (walk/aim/600 hashes + motion.csv vs motion_base) and `game --sim-hash 100`
+  rounds  round_goldens.py (pinned ground proxy and space round hashes)
   sweep  round_to_outcome 60000 42 twice: the pair identical, and identical to <baseline_dir>/sweep_main_1.txt
   arena  arena 3000 42 flat all / arena 9000 42 tat2 all, twice each: pairs identical and identical to the baselines
   leak   leak_census (card LEAK) twice: the pair identical, and identical to <baseline_dir>/leak_main_1.txt; its footer's
@@ -50,7 +51,7 @@ Groups:
          declaring it (`declares: oracle=<class|any>` or `goldens=` for goldens); declared = MOVED. Always part of --auto.
   (land.py passes its own fixed group list, so both new groups also ride on existing ones: protect on `map`, fidelity on
   `sweep`; each runs once per gates run. Run alone with --groups protect / fidelity.)
---auto: always ci, gpu, map, protect; core|game|input|net crates → sim, sweep, arena, leak; render|game crates → parity;
+--auto: always ci, gpu, map, protect; core|game|input|net crates → sim, rounds, sweep, arena, leak; render|game crates → parity;
   (leak under --auto, and under --leak-plan auto, runs only when a changed file can move the census — engine/goldens/
   leak_deps.toml — or every 10th crate commit; marker loop/leak_full.sha. A skipped census is a PASS row saying why.)
 mungefs|bake|manifest or scripts/{rebake,scratch_bake}.sh → bake. land.py adds parity for a card that declares goldens=.
@@ -75,7 +76,7 @@ Detached runs (card LDET) — a session never has to die waiting on a gate:
   scripts/gates.py --out <dir> --resume          # re-run only the groups a dead run did not finish (arguments from state)
 <out>/gates_state.json is written at every group's start and end: the arguments (tree HEAD and gates.toml hash
 included), the finished groups and their rows, the running group, its child pid. A resume keeps a finished group only
-when the arguments are unchanged; an unfinished group re-runs from its start.
+when the arguments are unchanged. The rounds group rechecks its live inputs on resume.
 
 ADAPTER LOST (card LOOPA, 2026-10-16): the goldens were rendered on the NVIDIA GPU (render/device.rs asks wgpu for
 HighPerformance). When it has fallen off the bus, wgpu takes the Intel iGPU and every regenerated golden moves (2026-10-15:
@@ -89,9 +90,10 @@ import argparse, datetime, glob, hashlib, json, math, os, re, shlex, subprocess,
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 GATES_TOML = os.path.join(REPO, "engine/artifacts/loop/gates.toml")
+ROUND_PINS = "engine/artifacts/loop/round_goldens.toml"
 LOCK = os.path.join(REPO, "engine/artifacts/loop/ci.lock")
 GPU_LOCK = os.path.join(REPO, "engine/artifacts/loop/gpu.lock")
-ALL = ["ci", "gpu", "parity", "sim", "sweep", "arena", "leak", "bake", "map", "protect", "fidelity", "alignment"]
+ALL = ["ci", "gpu", "parity", "sim", "rounds", "sweep", "arena", "leak", "bake", "map", "protect", "fidelity", "alignment"]
 
 
 GOLDEN_ADAPTER = "NVIDIA"  # a substring of the goldens' adapter's vulkaninfo deviceName
@@ -232,7 +234,7 @@ class Gates:
         s.row("alignment", shlex.join(cmd), rc, value, "complete report; 0 offenders; 0 unmeasured; 0 extras",
               "PASS" if rc == 0 and valid and clean else "FAIL")
 
-    def build_release(s, *examples):
+    def build_release(s, *examples, failure_gate="build"):
         """The release `game` binary plus only the named examples (card WEARX, SSD wear): `--examples` linked all ~27 of
         the crate's, each a whole engine (3.1 GB written per build after a core edit, 0.78 GB for the four the gates run).
         Each gate asks for its own; a later call links only what no earlier one built, so nothing links twice in a run.
@@ -246,10 +248,13 @@ class Gates:
         args = " ".join(["--bins"] * ("game" in want) + [f"--example {x}" for x in want if x != "game"])
         cmd = f"cargo build --release -p game {args}"
         log = "build_release.txt" if not built else f"build_release_{'_'.join(x for x in want if x != 'game')}.txt"
+        if failure_gate != "build":
+            log = f"{failure_gate}_build.txt"
         rc = sh(cmd, os.path.join(s.tree, "engine"), s.env, s.p(log))
         if rc:
-            s._build_rc = rc
-            s.row("build", cmd, rc, f"FAILED — see {log}", "", "FAIL")
+            if failure_gate == "build":
+                s._build_rc = rc
+            s.row(failure_gate, cmd, rc, f"FAILED — see {log}", "", "FAIL")
         else:
             built.update(want)
         return rc
@@ -321,6 +326,23 @@ class Gates:
         rc2 = sh(f"{s.target}/release/game --sim-hash 100", os.path.join(s.tree, "engine"), s.env, s.p("sim_hash_100.txt"))
         v = (open(s.p("sim_hash_100.txt")).read().strip().splitlines() or ["?"])[-1].strip()
         s.row("simhash", "game --sim-hash 100", rc2, v, e["hash100"], "PASS" if v == e["hash100"] else ("FAIL" if rc2 else "MOVED"))
+
+    def g_rounds(s):
+        receipt = s.p("rounds", "results.json")
+        if os.path.isfile(receipt):
+            os.remove(receipt)
+        # Resume reruns rounds, including a failed build. Keep the failure
+        # with this group and let later groups build their own examples.
+        if s.build_release("round_to_outcome", failure_gate="rounds"):
+            return
+        cmd = shlex.join([sys.executable, os.path.join(s.tree, "scripts/round_goldens.py"),
+                          "--tree", s.tree, "--target", s.target, "--out", s.p("rounds")])
+        log = s.p("rounds.log")
+        rc = sh(cmd, s.tree, s.env, log)
+        with open(log, errors="replace") as f:
+            summary = next((line.strip() for line in f if line.startswith("round goldens: ")), None)
+        verdict = {0: "PASS", 3: "MOVED"}.get(rc, "FAIL") if summary else "FAIL"
+        s.row("rounds", cmd, rc, summary or "no round summary (see rounds.log)", "all round hashes match", verdict)
 
     def _pair(s, name, cmd, baseline):
         """One run of the example `cmd` names first. Identical to the baseline = PASS (an output that byte-matches an accepted one is the determinism
@@ -1313,7 +1335,9 @@ def auto_groups(tree, base):
     files = changed_files(tree, base)
     g = ["ci", "gpu", "map", "protect"]
     if any(re.match(r"engine/crates/(core|game|input|net)/", f) for f in files):
-        g += ["sim", "sweep", "arena", "leak"]   # sweep also runs the fidelity rows (g_sweep): land.py only passes its own group list
+        g += ["sim", "rounds", "sweep", "arena", "leak"]   # sweep also runs the fidelity rows
+    elif ROUND_PINS in files or "scripts/round_goldens.py" in files:
+        g += ["rounds"]
     if touches_bake(files):
         g += ["bake"]
     if touches_bake(files) or any(re.match(r"engine/.*\.(rs|wgsl|toml|lock|json)$|scripts/(render_|version_|gameplay_|data/|world_fingerprint\.py|gates\.py)",f) for f in files):
@@ -1396,6 +1420,10 @@ def run(a, groups, resume=False, cls=None):
     if resume and old and old.get("args") == args and not replay:
         done = list(old.get("done", []))
         G.rows = list(old.get("rows", []))
+        if "rounds" in done:
+            # Bakes, mission overrides and unstaged source may move at the same HEAD.
+            done.remove("rounds")
+            G.rows = [row for row in G.rows if row["gate"] != "rounds"]
         G.moved_goldens = list(old.get("moved_goldens", []))
         print(f"[gates] --resume: kept {' '.join(done) or 'nothing'}; running {' '.join(g for g in groups if g not in done) or 'nothing'}", flush=True)
     elif resume and old:

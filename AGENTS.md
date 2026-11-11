@@ -10,12 +10,8 @@ black box and profiling, and `scripts/README.md` for tools.
 
 ## Working rules
 
-- Instant Action is the scope, including flying vehicles, space battles and space maps.
-- Every supported source plays the same game inside playable bounds. Other editions
-  change asset size and appearance. Public gameplay correction tables are approved.
-- Use BF2's HUD on every map, with the heat ring around the reticle. BF1 maps use BF1
-  grenades with BF2's grenade HUD. Unit and vehicle health are separate. Droidekas
-  sprint as a ball on the shared bar; their ball jump spends it too. Other decisions are in `analysis/plan/FEATURE_SET.md`.
+- Follow the [project scope](PLAN.md) and [gameplay decisions](analysis/plan/FEATURE_SET.md).
+  Instant Action includes flying vehicles, space battles and space maps.
 - Keep game data out of Git and PRs, including meshes, art, audio, disc images,
   extracted scripts, baked assets, packed builds and localized text.
 - Explain reverse-engineered behavior in your own words, citing function and line.

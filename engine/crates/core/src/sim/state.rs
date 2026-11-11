@@ -910,12 +910,7 @@ impl Sim {
     /// Every space-or-ground rule reads this one test, core and game alike,
     /// so that space rounds keep their own behaviour.
     pub fn space_round(&self) -> bool {
-        self.space_assault.is_some()
-            || self
-                .ctf
-                .as_ref()
-                .is_some_and(super::ctf::CtfState::is_space)
-            || !self.landing_regions.is_empty()
+        !self.round_rules().ground()
     }
 
     /// Card MAIS: team `team`'s AI tier as its bots see with it - the

@@ -580,7 +580,7 @@ pub const EV_NAMES: [&str; 16] = [
     "upgrade",
 ];
 
-use super::behave::Tick;
+use super::brain::Tick;
 use super::draw::{unit_unit, SALT_TPOS};
 use super::state::{AiState, FightState, HoldState, NavTick};
 use crate::unit::Unit;

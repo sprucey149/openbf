@@ -480,7 +480,7 @@ fn a_mending_bot_leaves_the_last_hub_and_reaches_the_health_droid() {
         crate::ai::think(&sim, bot, &mut ai);
         assert_eq!(ai.target_cp, Some(0), "control: a post order is active");
         assert_eq!(
-            ai.route.unwrap().dest_hub,
+            ai.route().unwrap().dest_hub,
             2,
             "control: the post is elsewhere"
         );
@@ -502,7 +502,7 @@ fn a_mending_bot_leaves_the_last_hub_and_reaches_the_health_droid() {
 
         sim.tick = ai.next_think;
         crate::ai::think(&sim, bot, &mut ai);
-        let route = ai.route.expect("a route to the station's hub");
+        let route = ai.route().expect("a route to the station's hub");
         assert!(route.is_last(), "control: the bot is on the station's hub");
         assert_eq!(route.dest_hub, 0);
         assert_eq!(
@@ -514,7 +514,7 @@ fn a_mending_bot_leaves_the_last_hub_and_reaches_the_health_droid() {
         sim.tick = ai.next_think;
         crate::ai::think(&sim, bot, &mut ai);
         assert_eq!(ai.target_cp, Some(0), "keep the post assignment");
-        assert_eq!(ai.route.unwrap().dest_hub, 2, "resume the attack route");
+        assert_eq!(ai.route().unwrap().dest_hub, 2, "resume the attack route");
         sim.stations[0].destroyed = false;
 
         for _ in 0..180 {
@@ -567,7 +567,7 @@ fn an_unroutable_health_droid_keeps_the_command_post_fallback() {
     let mut ai = sim.unit(bot).unwrap().ai;
     crate::ai::think(&sim, bot, &mut ai);
     assert_eq!(ai.target_cp, Some(0));
-    assert_eq!(ai.route.unwrap().dest_hub, 2);
+    assert_eq!(ai.route().unwrap().dest_hub, 2);
 
     let droid = add_disconnected_health_droid(&mut sim);
     let unit = sim.unit_mut(bot).unwrap();
@@ -576,7 +576,10 @@ fn an_unroutable_health_droid_keeps_the_command_post_fallback() {
 
     sim.tick = ai.next_think;
     crate::ai::think(&sim, bot, &mut ai);
-    assert!(ai.route.is_none(), "the station is on a disconnected graph");
+    assert!(
+        ai.route().is_none(),
+        "the station is on a disconnected graph"
+    );
     assert_eq!(ai.walk.goal, sim.cps[0].def.pos, "keep the post fallback");
 }
 
@@ -589,7 +592,7 @@ fn a_newly_hurt_bot_keeps_its_unrelated_last_leg_between_thinks() {
     unit.soldier.pos = at;
     let mut ai = unit.ai;
     crate::ai::think(&sim, bot, &mut ai);
-    let route = ai.route.expect("a route to the post");
+    let route = ai.route().expect("a route to the post");
     assert!(route.is_last());
     assert_eq!(route.dest_hub, 2);
     let droid = add_disconnected_health_droid(&mut sim);
@@ -604,7 +607,7 @@ fn a_newly_hurt_bot_keeps_its_unrelated_last_leg_between_thinks() {
     crate::ai::think(&sim, bot, &mut ai);
 
     assert_eq!(ai.last_think, healthy.last_think);
-    assert_eq!(ai.route.unwrap().dest_hub, 2);
+    assert_eq!(ai.route().unwrap().dest_hub, 2);
     assert_eq!(ai.walk, healthy.walk, "keep the old leg until a fresh plan");
 }
 

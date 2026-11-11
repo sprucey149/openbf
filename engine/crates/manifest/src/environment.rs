@@ -447,9 +447,12 @@ pub struct ManifestWater {
     /// mean a water map with no `Effect("Water")`, which neither disc ships.
     #[serde(default)]
     pub config: Option<ManifestWaterConfig>,
-    /// Authored wet-cell grid used for projectile/water intersections.
+    /// Authored wet cells used by the water renderer and uncorrected scenes.
     #[serde(default)]
     pub wet: Option<ManifestWetMask>,
+    /// Source correction for simulation water coverage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gameplay_wet: Option<ManifestWetMask>,
     /// The water GLB carries diffuse LUT RGB; do not apply its mean tint again.
     #[serde(default)]
     pub vertex_diffuse: bool,
@@ -457,7 +460,13 @@ pub struct ManifestWater {
     pub far_fog_color: Option<[f32; 3]>,
 }
 
-/// Authored water-cell mask; hexadecimal nibbles preserve the disc grid.
+impl ManifestWater {
+    pub fn gameplay_mask(&self) -> Option<&ManifestWetMask> {
+        self.gameplay_wet.as_ref().or(self.wet.as_ref())
+    }
+}
+
+/// Water-cell mask. Hexadecimal nibbles preserve the authored grid.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ManifestWetMask {
     pub grid: u32,

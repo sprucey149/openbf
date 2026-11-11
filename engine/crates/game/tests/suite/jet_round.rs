@@ -213,7 +213,7 @@ fn run(scene: &Scene, mission: &MissionDef, roster: &ClassRoster, seed: u32) -> 
             let distance = core::nav::xz_dist(pos, goal);
             c.jet_ticks[trip] += usize::from(u.soldier.stance.jetting());
             c.routed[trip] |=
-                u.ai.route
+                u.ai.route()
                     .is_some_and(|r| r.via_arc == Some(c.arc) && r.next_hub == c.hubs[1 - trip])
                     && u.ai.jet.flight.is_some_and(|f| f.route && f.launched);
             assert!(

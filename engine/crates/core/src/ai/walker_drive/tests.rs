@@ -606,10 +606,10 @@ fn command_drop_hub_exits_for_tickets_or_last_crew() {
             assert!(s.enter_vehicle(b, v, 0));
             let mut st = AiState {
                 target_cp: post.then_some(0),
-                route: Some(super::super::state::Route {
+                nav: crate::ai::route::NavState::for_fixture(Some(super::super::state::Route {
                     waypoint: Vec3::ZERO,
                     ..Default::default()
-                }),
+                })),
                 ride: Some(RideState::default()),
                 ..Default::default()
             };
@@ -631,7 +631,7 @@ fn walker_progress_ignores_bob_and_jitter_but_counts_travel() {
         let pos = Vec3::new(if tick % 2 == 0 { 0.0 } else { 1.0 }, tick as f32, 0.0);
         walker_progress(&mut st, pos, true);
         // Replanning and its short progress window cannot erase this clock.
-        st.route = None;
+        crate::ai::route::clear(&mut st);
     }
     assert_eq!(
         st.ride.unwrap().walker_progress.unwrap().1,
@@ -660,10 +660,10 @@ fn jittering_spider_bails_and_marks_the_abandoned_vehicle() {
     let m = s.unit(b).unwrap().mount.unwrap();
     let mut st = AiState {
         target_cp: Some(0),
-        route: Some(super::super::state::Route {
+        nav: crate::ai::route::NavState::for_fixture(Some(super::super::state::Route {
             waypoint: post,
             ..Default::default()
-        }),
+        })),
         ride: Some(RideState::default()),
         ..Default::default()
     };
@@ -673,13 +673,14 @@ fn jittering_spider_bails_and_marks_the_abandoned_vehicle() {
             (tick % 3) as f32,
             0.0,
         );
-        let r = st.route.as_mut().unwrap();
+        let mut r = st.route().unwrap();
         r.stuck_run = 0;
         r.ref_dist = 151.0; // A fresh route reference may call each jitter progress.
+        st.install_route_for_fixture(Some(r));
         drive(&s, b, m, &p, &mut st, NavTick::default());
         assert_eq!(st.ride.unwrap().use_req, tick == DRIVE_STUCK_BAIL);
     }
-    assert_eq!(st.route.unwrap().stuck_run, DRIVE_STUCK_BAIL);
+    assert_eq!(st.route().unwrap().stuck_run, DRIVE_STUCK_BAIL);
     s.units[b.index as usize].ai = st;
     s.ai_use_pass();
     assert!(s.unit(b).unwrap().mount.is_none());
@@ -693,11 +694,11 @@ fn walker_route_lookahead_returns_to_a_straight_leg() {
     assert!(s.seat_unit(b, v, 0));
     s.vehicle_mut(v).unwrap().pos = Vec3::new(8.0, 0.0, 40.0);
     let mut st = AiState {
-        route: Some(super::super::state::Route {
+        nav: crate::ai::route::NavState::for_fixture(Some(super::super::state::Route {
             from: glam::Vec2::ZERO,
             waypoint: Vec3::new(0.0, 0.0, 150.0),
             ..Default::default()
-        }),
+        })),
         ..Default::default()
     };
     let p = s.walker_params[0].clone().unwrap();
@@ -772,7 +773,7 @@ fn walker_routes_finish_straight_and_tight_turns_without_stall_or_overshoot() {
             s.unit_mut(b).unwrap().soldier.pos = Vec3::ZERO;
             let mut st = AiState {
                 target_cp: Some(0),
-                route: Some(route),
+                nav: crate::ai::route::NavState::for_fixture(Some(route)),
                 ..Default::default()
             };
             let mut finished = false;
@@ -795,7 +796,7 @@ fn walker_routes_finish_straight_and_tight_turns_without_stall_or_overshoot() {
                         "premature exit: {:?}",
                         s.vehicle(v).unwrap().pos
                     );
-                    assert_eq!(st.route.unwrap().detour_at, if turn { 2 } else { 0 });
+                    assert_eq!(st.route().unwrap().detour_at, if turn { 2 } else { 0 });
                     finished = true;
                     break;
                 }
@@ -806,7 +807,7 @@ fn walker_routes_finish_straight_and_tight_turns_without_stall_or_overshoot() {
                 s.tick += 1;
                 let at = s.vehicle(v).unwrap().pos;
                 s.unit_mut(b).unwrap().soldier.pos = at;
-                let r = st.route.unwrap();
+                let r = st.route().unwrap();
                 if turn {
                     let expected = match r.detour_at {
                         0 => Vec2::ZERO,
@@ -829,7 +830,7 @@ fn walker_routes_finish_straight_and_tight_turns_without_stall_or_overshoot() {
                 finished,
                 "stalled at {:?}, route {:?}",
                 s.vehicle(v).unwrap().pos,
-                st.route
+                st.route()
             );
         }
     }
@@ -894,7 +895,7 @@ fn walker_traffic_hold_pauses_route_and_progress_then_resumes() {
         ..Default::default()
     };
     let mut st = AiState {
-        route: Some(route),
+        nav: crate::ai::route::NavState::for_fixture(Some(route)),
         target_cp: Some(0),
         ride: Some(RideState {
             walker_progress: Some((glam::Vec2::ZERO, 40)),
@@ -916,7 +917,7 @@ fn walker_traffic_hold_pauses_route_and_progress_then_resumes() {
             &mut st,
             NavTick::default(),
         );
-        assert_eq!(st.route, Some(route));
+        assert_eq!(st.route(), Some(route));
         assert_eq!(st.ride.unwrap().walker_progress.unwrap().1, 40);
         assert_eq!(st.ride.unwrap().sticks.unwrap()[0], 0.0);
         assert!(!st.ride.unwrap().use_req);
@@ -1154,14 +1155,14 @@ fn endgame_walker_crews_board_at_most_once_each_in_two_minutes() {
                 st.target_cp = Some(0); // retained Attack/post order at a terminal drop hub
                 let mut nt = NavTick::default();
                 if let Some(m) = before {
-                    st.route = Some(super::super::state::Route {
+                    st.install_route_for_fixture(Some(super::super::state::Route {
                         waypoint: s.vehicle(v).unwrap().pos,
                         ..Default::default()
-                    });
+                    }));
                     super::super::ride::drive(&s, me, m, &mut st, nt, true);
                     if st.ride.is_some_and(|r| r.use_req) {
                         assert!(
-                            st.route.unwrap().stuck_run < DRIVE_STUCK_BAIL,
+                            st.route().unwrap().stuck_run < DRIVE_STUCK_BAIL,
                             "normal endgame drop, not a stuck exit"
                         );
                     }
@@ -1258,12 +1259,12 @@ fn walker_corner_plane_pass_requires_a_bounded_lateral_displacement() {
         };
         route.detour[0] = corner;
         let mut st = AiState {
-            route: Some(route),
+            nav: crate::ai::route::NavState::for_fixture(Some(route)),
             ..Default::default()
         };
         let pos = Vec3::new(lateral, 0.0, 31.0);
         super::super::route::advance_route(&s, b, &mut st, pos, 1.0, &mut NavTick::default());
-        let route = st.route.expect("pending leg");
+        let route = st.route().expect("pending leg");
         assert_eq!(route.detour_at, u8::from(passed), "lateral {lateral}");
         assert_eq!(route.from, if passed { corner } else { Vec2::ZERO });
     }

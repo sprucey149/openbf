@@ -1400,7 +1400,7 @@ fn bots_probe(world: &mut World, out: &mut String) {
                         out!(out, "death {key} t{t} {what} unit {i} team {} at ({:.1},{:.1},{:.1}); last on ground ({:.1},{:.1},{:.1}) {:.1} s ago; last seat {:?} {:.1} s ago; goal {:?} {:?}",
                             world.w.sim.units[i].team, p.x, p.y, p.z, g.x, g.y, g.z, (t - gt) as f32 / 30.0,
                             m.and_then(|(c, _)| world.classes.get(c as usize)), m.map_or(-1.0, |(_, st)| (t - st) as f32 / 30.0),
-                            world.w.sim.units[i].ai.route.as_ref().map(|r| r.next_hub), world.w.sim.units[i].ai.route.as_ref().map(|r| r.dest_hub));
+                            world.w.sim.units[i].ai.route().as_ref().map(|r| r.next_hub), world.w.sim.units[i].ai.route().as_ref().map(|r| r.dest_hub));
                     }
                 }
                 _ => {}
@@ -1409,7 +1409,7 @@ fn bots_probe(world: &mut World, out: &mut String) {
         if let Some((unit, from, to)) = watch {
             if (from..=to).contains(&t) {
                 let u = &world.w.sim.units[unit];
-                out!(out, "watch t{t} unit {unit} alive {} pos ({:.2},{:.2},{:.2}) vel ({:.1},{:.1},{:.1}) {:?} grounded {} mount {:?} route {:?} does {:?} lost {:?} jet {:?} ev {:?}", u.alive, u.soldier.pos.x, u.soldier.pos.y, u.soldier.pos.z, u.soldier.vel.x, u.soldier.vel.y, u.soldier.vel.z, u.soldier.stance, u.soldier.grounded, u.mount, u.ai.route.as_ref().map(|r| (r.next_hub, r.dest_hub)), u.ai.behaviour, u.ai.lost.map(|l| l.confirmed), u.mount.and_then(|m| world.w.sim.vehicle(m.vehicle)).map(|v| (v.flyer.phase, v.pos, v.vel.length(), v.spawn_pad, v.input)), world.w.sim.events.iter().filter(|e| format!("{e:?}").contains(&format!("index: {unit},"))).collect::<Vec<_>>());
+                out!(out, "watch t{t} unit {unit} alive {} pos ({:.2},{:.2},{:.2}) vel ({:.1},{:.1},{:.1}) {:?} grounded {} mount {:?} route {:?} does {:?} lost {:?} jet {:?} ev {:?}", u.alive, u.soldier.pos.x, u.soldier.pos.y, u.soldier.pos.z, u.soldier.vel.x, u.soldier.vel.y, u.soldier.vel.z, u.soldier.stance, u.soldier.grounded, u.mount, u.ai.route().as_ref().map(|r| (r.next_hub, r.dest_hub)), u.ai.behaviour, u.ai.lost.map(|l| l.confirmed), u.mount.and_then(|m| world.w.sim.vehicle(m.vehicle)).map(|v| (v.flyer.phase, v.pos, v.vel.length(), v.spawn_pad, v.input)), world.w.sim.events.iter().filter(|e| format!("{e:?}").contains(&format!("index: {unit},"))).collect::<Vec<_>>());
             }
         }
         if flyer_log {
@@ -1510,7 +1510,7 @@ fn bots_probe(world: &mut World, out: &mut String) {
                             spots.add("bot-parked-60s", at);
                             if std::env::var_os("CENSUS_PARKED").is_some() {
                                 let u = &world.w.sim.units[i];
-                                out!(out, "parked {key} t{t} unit {i} team {} at ({:.1},{:.1},{:.1}) {:?} seat {:?} route {:?} does {:?} lost {:?}", u.team, at.x, at.y, at.z, u.soldier.stance, u.mount.and_then(|m| world.w.sim.vehicle(m.vehicle)).map(|v| (world.classes.get(v.class as usize).cloned(), v.pos)), u.ai.route.as_ref().map(|r| (r.next_hub, r.dest_hub)), u.ai.behaviour, u.ai.lost.map(|l| l.confirmed));
+                                out!(out, "parked {key} t{t} unit {i} team {} at ({:.1},{:.1},{:.1}) {:?} seat {:?} route {:?} does {:?} lost {:?}", u.team, at.x, at.y, at.z, u.soldier.stance, u.mount.and_then(|m| world.w.sim.vehicle(m.vehicle)).map(|v| (world.classes.get(v.class as usize).cloned(), v.pos)), u.ai.route().as_ref().map(|r| (r.next_hub, r.dest_hub)), u.ai.behaviour, u.ai.lost.map(|l| l.confirmed));
                             }
                             sites[i] = Some((at, t));
                         }

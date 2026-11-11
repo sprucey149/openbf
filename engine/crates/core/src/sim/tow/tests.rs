@@ -1,4 +1,29 @@
 use super::*;
+use crate::collision::{Body, Shape};
+use crate::vehicle::tow::TowFrames;
+use glam::Mat4;
+
+struct Leg;
+
+impl TowFrames for Leg {
+    fn primitives(&self, vehicle: &Vehicle) -> Vec<TowPrimitive> {
+        vec![TowPrimitive {
+            frame: Mat4::from_translation(vehicle.pos),
+            shape: Shape::Sphere { radius: 1.0 },
+            offset: Vec3::X,
+            leg: Some(0),
+        }]
+    }
+
+    fn fallen_bodies(&self, vehicle: &Vehicle) -> Vec<Body> {
+        let pos = vehicle.pos + Vec3::Y * vehicle.walker.clip_time * 4.0;
+        vec![Body::with_layers(
+            Mat4::from_translation(pos),
+            Shape::Sphere { radius: 1.0 },
+            Layers::SOLDIER | Layers::ORDNANCE,
+        )]
+    }
+}
 
 #[test]
 fn the_leg_ring_accepts_forward_wraps_and_rejects_reversal() {
@@ -16,77 +41,171 @@ fn the_leg_ring_accepts_forward_wraps_and_rejects_reversal() {
 }
 
 #[test]
-fn the_thirteenth_anchor_releases_the_live_link() {
-    use crate::collision::Shape;
-    use glam::Mat4;
-    let part = |pos, leg, offset| TowPrimitive {
-        frame: Mat4::from_translation(pos),
-        shape: Shape::Sphere { radius: 1.0 },
-        offset,
-        leg: Some(leg),
-    };
-    let parts = [
-        part(Vec3::ZERO, 0, Vec3::X),
-        part(Vec3::X * 5.0, 1, Vec3::NEG_X),
-        part(Vec3::Z * 5.0, 3, Vec3::X),
-    ];
-    let anchor = |prim| Anchor {
-        prim,
-        at: Vec3::X,
-        tangent: Vec3::ZERO,
-    };
-    for count in [11, 12] {
-        let mut anchors = vec![anchor(2); count];
-        anchors[count - 1] = anchor(0);
-        let mut points = Vec::new();
-        let active = advance_latch(
-            &parts,
-            &mut anchors,
+fn a_full_ground_cable_releases_then_damages_on_separate_updates() {
+    use crate::soldier::GroundRules;
+    use crate::unit::UnitSpec;
+    use crate::vehicle::{SeatKind, SeatSetup, VehicleKind, VehicleSpec};
+    use crate::weapon::HealthType;
+    use glam::Quat;
+    use std::sync::Arc;
+
+    struct Ring;
+    impl TowFrames for Ring {
+        fn primitives(&self, vehicle: &Vehicle) -> Vec<TowPrimitive> {
+            [
+                (Vec3::ZERO, 0, Vec3::X),
+                (Vec3::X * 5.0, 1, Vec3::NEG_X),
+                (Vec3::Z * 5.0, 3, Vec3::X),
+            ]
+            .into_iter()
+            .map(|(center, leg, offset)| TowPrimitive {
+                frame: Mat4::from_translation(vehicle.pos + center),
+                shape: Shape::Sphere { radius: 1.0 },
+                offset,
+                leg: Some(leg),
+            })
+            .collect()
+        }
+    }
+
+    for (rules, space, source_lost) in [
+        (GroundRules::Bf1, false, false),
+        (GroundRules::Bf2, false, false),
+        (GroundRules::Bf2, false, true),
+        (GroundRules::Bf2, true, false),
+    ] {
+        let mut sim = Sim::empty(42);
+        sim.ground_rules = rules;
+        if space {
+            sim.space_assault = Some(crate::sim::SpaceAssault::new(10));
+        }
+        sim.tow_frames = Some(Arc::new(Ring));
+        sim.weapon_classes[0].ordnance.scales = [1.0; 7];
+        sim.seat_setup = vec![Some(SeatSetup {
+            radius: 1.0,
+            boardable: vec![true],
+            body_active: vec![],
+            exit_drop: 10.0,
+            ai_size: 1,
+            guns: vec![Some(gun::GunSetup {
+                weapons: vec![],
+                fire_point: Vec3::ZERO,
+                pivot: Vec3::ZERO,
+                eye: Vec3::ZERO,
+                aimer: gun::Aimer::default(),
+                pilot: true,
+                turn: None,
+                framed: false,
+                aimer_bind: Quat::IDENTITY,
+                gunner: None,
+            })],
+        })];
+        let mut spawn = |kind, team, pos, yaw, seats| {
+            sim.spawn_vehicle(&VehicleSpec {
+                kind,
+                class: 0,
+                home_team: Some(team),
+                neutral_when_empty: false,
+                spawn_pad: None,
+                pos,
+                yaw,
+                max_health: 150.0,
+                health_type: HealthType::Vehicle,
+                seats,
+            })
+        };
+        let source = spawn(
+            VehicleKind::Flyer,
+            0,
             Vec3::X * 10.0,
-            Vec3::NEG_X,
-            TowClass {
-                initial_length: 60.0,
-                length: 60.0,
-            },
-            crate::TICK_DT,
-            &mut points,
+            std::f32::consts::FRAC_PI_2,
+            vec![SeatKind::Pilot],
         );
-        assert_eq!(anchors.len(), count + 1);
-        assert_eq!(anchors.last().unwrap().prim, 1);
-        assert_eq!(active, count == 11);
+        let target = spawn(VehicleKind::Walker, 1, Vec3::ZERO, 0.0, vec![]);
+        let owner = sim.spawn(&UnitSpec::trooper(0, Vec3::ZERO)).unwrap();
+        assert!(sim.seat_unit(owner, source, 0));
+        let mount = sim.unit(owner).unwrap().mount.unwrap();
+        sim.arm(source.index as usize);
+        let (muzzle, aim) = sim.tow_muzzle(mount).unwrap();
+        assert_eq!(muzzle, Vec3::X * 10.0);
+        assert!(aim.abs_diff_eq(Vec3::NEG_X, 1.0e-6));
+        let shooter = Shooter {
+            owner,
+            team: 0,
+            weapon_class: 0,
+            is_player: false,
+        };
+        let class = TowClass {
+            initial_length: 60.0,
+            length: 60.0,
+        };
+        let fire = |sim: &mut Sim| {
+            sim.fire_tow(mount, shooter, class, Vec3::ZERO, Vec3::Z, 250.0, 1.0);
+        };
+        fire(&mut sim);
+        // The live sweep inserts the final contact from the 12-record state.
+        let anchor = |prim| Anchor {
+            prim,
+            at: Vec3::X,
+            tangent: Vec3::ZERO,
+        };
+        let mut anchors = vec![anchor(2); WRAPS - 1];
+        anchors[WRAPS - 2] = anchor(0);
+        sim.tow_cables[0].flight = Flight::Latched { target, anchors };
+        sim.tow_cables[0].points = vec![Vec3::Z];
+
+        let rng = sim.melee_lcg.state();
+        sim.fly_tow_cables(crate::TICK_DT);
+        assert_eq!(sim.vehicle(target).unwrap().health.cur, 150.0);
+        assert_eq!(sim.melee_lcg.state(), rng);
+        assert_eq!(sim.tow_cables[0].tripped(), space);
+        if space {
+            assert_eq!(sim.tow_cables[0].points, [Vec3::Z]);
+        } else {
+            let Flight::Latched { anchors, .. } = &sim.tow_cables[0].flight else {
+                panic!("the full ground cable should still be latched");
+            };
+            assert_eq!(anchors.len(), WRAPS);
+            assert_eq!(anchors.last().unwrap().prim, 1);
+            assert!(sim.tow_cables[0].points.is_empty());
+            fire(&mut sim);
+            assert_eq!(
+                sim.tow_cables.len(),
+                1,
+                "the last record keeps the live link"
+            );
+            let live_hash = sim.hash();
+            if source_lost {
+                sim.remove_vehicle(source);
+            }
+            sim.fly_tow_cables(crate::TICK_DT);
+            assert_eq!(sim.vehicle(target).unwrap().health.cur, 150.0);
+            assert_eq!(sim.melee_lcg.state(), rng);
+            if source_lost {
+                assert!(sim.tow_cables.is_empty());
+                continue;
+            }
+            assert!(sim.tow_cables[0].tripped());
+            assert_eq!(sim.tow_cables[0].points.len(), WRAPS);
+            assert_ne!(sim.hash(), live_hash);
+        }
+        fire(&mut sim);
+        assert_eq!(sim.tow_cables.len(), 2, "release frees the live link");
+        sim.fly_tow_cables(crate::TICK_DT);
+        assert!(sim.vehicle(target).is_none());
+        let mut oracle = crate::lcg::GameLcg::new(rng);
+        oracle.unit();
+        assert_eq!(sim.melee_lcg.state(), oracle.state());
     }
 }
 
 #[test]
 fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
-    use crate::collision::{Body, Shape};
     use crate::unit::UnitSpec;
-    use crate::vehicle::tow::TowFrames;
     use crate::vehicle::{SeatKind, VehicleKind, VehicleSpec};
     use crate::weapon::HealthType;
-    use glam::Mat4;
     use std::sync::Arc;
 
-    struct Leg;
-    impl TowFrames for Leg {
-        fn primitives(&self, vehicle: &Vehicle) -> Vec<TowPrimitive> {
-            vec![TowPrimitive {
-                frame: Mat4::from_translation(vehicle.pos),
-                shape: Shape::Sphere { radius: 1.0 },
-                offset: Vec3::X,
-                leg: Some(0),
-            }]
-        }
-
-        fn fallen_bodies(&self, vehicle: &Vehicle) -> Vec<Body> {
-            let pos = vehicle.pos + Vec3::Y * vehicle.walker.clip_time * 4.0;
-            vec![Body::with_layers(
-                Mat4::from_translation(pos),
-                Shape::Sphere { radius: 1.0 },
-                Layers::SOLDIER | Layers::ORDNANCE,
-            )]
-        }
-    }
     let mut s = Sim::empty(42);
     s.tow_frames = Some(Arc::new(Leg));
     s.weapon_classes[0].ordnance.max_damage = 50.0;
@@ -132,73 +251,59 @@ fn detached_wraps_damage_per_occupied_seat_then_play_the_fall_clip() {
             .unwrap();
         s.vehicle_mut(source).unwrap().seats[seat].occupant = Some(owner);
     }
-    let mut anchors = vec![
-        Anchor {
-            prim: 0,
-            at: Vec3::X,
-            tangent: Vec3::ZERO
-        };
-        WRAPS
-    ];
-    let mut points = Vec::new();
     let shooter = Shooter {
         owner: s.vehicle(source).unwrap().seats[1].occupant.unwrap(),
         team: 0,
         weapon_class: 0,
         is_player: false,
     };
+    let mut cable = TowCable {
+        mount: Mount {
+            vehicle: source,
+            seat: 1,
+        },
+        shooter,
+        class: TowClass {
+            initial_length: 60.0,
+            length: 60.0,
+        },
+        flight: Flight::Detached {
+            target,
+            anchors: vec![
+                Anchor {
+                    prim: 0,
+                    at: Vec3::X,
+                    tangent: Vec3::ZERO,
+                };
+                WRAPS
+            ],
+        },
+        points: Vec::new(),
+    };
     // BF1 sends one packet with its original team. First verify it
     // honors friendly fire, then verify its ordinary hostile damage.
     s.ground_rules = crate::soldier::GroundRules::Bf1;
-    assert!(s.step_tripped_tow(
-        target,
-        &mut anchors,
-        source,
-        shooter,
-        crate::TICK_DT,
-        &mut points
-    ));
+    assert!(s.step_full_tow(&mut cable, crate::TICK_DT));
     assert_eq!(s.vehicle(target).unwrap().health.cur, 150.0);
     s.vehicle_mut(target).unwrap().team = Some(1);
     s.vehicle_mut(target).unwrap().health.cur = 120.0;
-    assert!(s.step_tripped_tow(
-        target,
-        &mut anchors,
-        source,
-        shooter,
-        crate::TICK_DT,
-        &mut points
-    ));
+    assert!(s.step_full_tow(&mut cable, crate::TICK_DT));
     assert_eq!(s.vehicle(target).unwrap().health.cur, 82.5);
     s.vehicle_mut(target).unwrap().health.cur = 120.0;
     s.vehicle_mut(target).unwrap().team = Some(0);
     s.ground_rules = crate::soldier::GroundRules::Bf2;
     let rng = s.melee_lcg.state();
-    assert!(s.step_tripped_tow(
-        target,
-        &mut anchors,
-        source,
-        shooter,
-        crate::TICK_DT,
-        &mut points
-    ));
+    assert!(s.step_full_tow(&mut cable, crate::TICK_DT));
     assert_eq!(
         s.vehicle(target).unwrap().health.cur,
         45.0,
         "BF2 sends two packets based on max health 150, not remaining 120 or weapon damage 50"
     );
-    assert_eq!(points.len(), WRAPS);
+    assert_eq!(cable.points.len(), WRAPS);
     let mut oracle = crate::lcg::GameLcg::new(rng);
     let _ = oracle.unit();
     assert_eq!(s.melee_lcg.state(), oracle.state());
-    assert!(!s.step_tripped_tow(
-        target,
-        &mut anchors,
-        source,
-        shooter,
-        crate::TICK_DT,
-        &mut points
-    ));
+    assert!(!s.step_full_tow(&mut cable, crate::TICK_DT));
     assert!(s.vehicle(target).is_none());
     assert_eq!(s.tow_falls.len(), 1);
     let pose = s.tow_falls[0].pose(s.tick + u64::from(crate::TICK_HZ));
@@ -260,14 +365,14 @@ fn ps2_tow_previous_leg_is_only_supplied_above_two_attachments() {
         let active = advance_latch(
             &parts,
             &mut anchors,
-            Vec3::X * 10.0,
-            Vec3::NEG_X,
+            (Vec3::X * 10.0, Vec3::NEG_X),
             TowClass {
                 initial_length: 60.0,
                 length: 60.0,
             },
             0.0,
             &mut points,
+            false,
         );
         assert_eq!(active, count <= 2, "attachment count {count}");
         assert_eq!(anchors.len(), count + usize::from(count <= 2));
@@ -304,11 +409,11 @@ fn ps2_tow_previous_leg_count_includes_the_initial_latch_and_each_insert() {
     assert!(advance_latch(
         &parts,
         &mut anchors,
-        Vec3::X * 10.0,
-        Vec3::NEG_X,
+        (Vec3::X * 10.0, Vec3::NEG_X),
         class,
         0.0,
-        &mut points
+        &mut points,
+        false,
     ));
     assert_eq!(
         anchors.iter().map(|a| a.prim).collect::<Vec<_>>(),
@@ -319,11 +424,11 @@ fn ps2_tow_previous_leg_count_includes_the_initial_latch_and_each_insert() {
     assert!(advance_latch(
         &parts,
         &mut anchors,
-        Vec3::NEG_X * 5.0,
-        Vec3::X,
+        (Vec3::NEG_X * 5.0, Vec3::X),
         class,
         0.0,
-        &mut points
+        &mut points,
+        false,
     ));
     assert_eq!(
         anchors.iter().map(|a| a.prim).collect::<Vec<_>>(),
@@ -332,17 +437,17 @@ fn ps2_tow_previous_leg_count_includes_the_initial_latch_and_each_insert() {
     assert!(!advance_latch(
         &parts,
         &mut anchors,
-        Vec3::X * 10.0,
-        Vec3::NEG_X,
+        (Vec3::X * 10.0, Vec3::NEG_X),
         class,
         0.0,
-        &mut points
+        &mut points,
+        false,
     ));
     assert_eq!(anchors.len(), 3);
 }
 
 #[test]
-fn the_wrap_stores_half_the_world_curve_derivative_at_the_hit_fraction() {
+fn the_wrap_stores_the_chord_fraction_and_half_the_world_curve_derivative() {
     use crate::collision::Shape;
     use glam::{Mat4, Quat};
 
@@ -375,7 +480,7 @@ fn the_wrap_stores_half_the_world_curve_derivative_at_the_hit_fraction() {
             leg: Some(2),
         },
     ];
-    let mut anchors = vec![
+    let prior = [
         Anchor {
             prim: 0,
             at: Vec3::ZERO,
@@ -387,25 +492,37 @@ fn the_wrap_stores_half_the_world_curve_derivative_at_the_hit_fraction() {
             tangent: incoming,
         },
     ];
-    assert!(advance_latch(
-        &parts,
-        &mut anchors,
-        muzzle,
-        aim,
-        TowClass {
-            initial_length: 60.0,
-            length: 60.0,
-        },
-        0.0,
-        &mut Vec::new(),
-    ));
-    assert_eq!(anchors.len(), 3);
-    let wrap = anchors[2];
-    assert_eq!(wrap.prim, 2);
-    assert!(parts[2].frame.transform_point3(wrap.at).distance(contact) < 1e-5);
-    // p(t) = (-2, -8, 2)t³ + (9, 10, -4)t² + (3, 4, 2)t. The hit is at t = 0.425.
-    let expected = Vec3::new(4.783125, 4.0825, -0.158125);
-    assert!(wrap.tangent.distance(expected) < 1e-5, "{wrap:?}");
+    for space in [false, true] {
+        let mut anchors = prior.to_vec();
+        assert!(advance_latch(
+            &parts,
+            &mut anchors,
+            (muzzle, aim),
+            TowClass {
+                initial_length: 60.0,
+                length: 60.0,
+            },
+            0.0,
+            &mut Vec::new(),
+            space,
+        ));
+        assert_eq!(anchors.len(), 3);
+        let wrap = anchors[2];
+        assert_eq!(wrap.prim, 2);
+        let expected_position = if space {
+            contact
+        } else {
+            points[4] + (points[5] - points[4]).normalize() * 0.25
+        };
+        let actual_position = parts[2].frame.transform_point3(wrap.at);
+        assert!(
+            actual_position.distance(expected_position) < 1e-5,
+            "{actual_position:?}"
+        );
+        // p(t) = (-2, -8, 2)t³ + (9, 10, -4)t² + (3, 4, 2)t. The hit is at t = 0.425.
+        let expected = Vec3::new(4.783125, 4.0825, -0.158125);
+        assert!(wrap.tangent.distance(expected) < 1e-5, "{wrap:?}");
+    }
 }
 
 #[test]
@@ -459,14 +576,14 @@ fn the_live_tangent_retains_its_world_direction_while_the_contact_moves() {
     assert!(advance_latch(
         &parts,
         &mut anchors,
-        muzzle,
-        aim,
+        (muzzle, aim),
         TowClass {
             initial_length: 60.0,
             length: 10.43,
         },
         crate::TICK_DT,
         &mut points,
+        false,
     ));
     assert_eq!(anchors.len(), 3);
     assert_eq!(anchors[0].tangent, Vec3::ZERO);

@@ -17,8 +17,9 @@
 //! bursts and charge release). The aim and fire tests live here.
 
 use super::arsenal::{self, Armed};
-use super::behave::Tick;
+use super::brain::Tick;
 use super::draw::{unit_dir, unit_unit, SALT_BURST, SALT_CHARGE, SALT_ERR_DIR, SALT_TAP};
+use super::fix::ServePlan;
 use super::state::{AiState, NavTick};
 use super::{
     AIM_TOLERANCE, CHARGE_MIN, ERR_GROWTH, ERR_MAX, ERR_NO_TARGET, ERR_SPEED_TERM, LINE_CLEAR,
@@ -36,7 +37,7 @@ use crate::weapon::WeaponClass;
 use glam::Vec3;
 
 /// What the running behaviour asks of the gunner this tick — exactly one a
-/// tick (`behave::think`). The fire permission is the variant today: only a
+/// tick (`brain::think`). The fire permission is the variant today: only a
 /// seen enemy is fired on.
 #[derive(Clone, Copy)]
 pub(super) enum AimRequest<'a> {
@@ -53,6 +54,43 @@ pub(super) enum AimRequest<'a> {
     Droid(&'a Droid, bool),
     /// A SEEN enemy auto-turret, likewise (`re-portable-turret.md` 10).
     Turret(&'a Turret, bool),
+}
+
+pub(super) enum GunMode {
+    Serve(ServePlan),
+    Droideka { raise_shield: bool },
+}
+
+pub(super) fn finish(pad: &mut PadState, mode: GunMode) {
+    match mode {
+        GunMode::Serve(plan) => {
+            let PadState {
+                lx: _,
+                ly: _,
+                rx,
+                ry,
+                buttons,
+                mx,
+                my,
+                fire_lag,
+                pick,
+            } = pad;
+            *rx = plan.rx;
+            *ry = plan.ry;
+            *buttons = plan.button;
+            *mx = 0;
+            *my = 0;
+            *fire_lag = 0;
+            *pick = None;
+        }
+        GunMode::Droideka { raise_shield } => {
+            pad.buttons &= !buttons::SECONDARY_FIRE;
+            if raise_shield {
+                pad.buttons |= buttons::SECONDARY_FIRE;
+                pad.buttons &= !buttons::FIRE;
+            }
+        }
+    }
 }
 
 /// What the gunner answers, for the behaviour's position rules.
@@ -155,6 +193,7 @@ pub(super) fn run(
         wc,
         tier,
         skill,
+        rules,
     } = *tk;
     let support = super::ability_input(sim, me);
     let dt = crate::TICK_DT;
@@ -191,9 +230,9 @@ pub(super) fn run(
             .as_ref()
             .map_or(wc.shot_ordnance().velocity, |p| p.velocity)
     };
-    let hand = u.proxy_human.and_then(|p| p.hand);
+    let hand = rules.proxy.and_then(|p| p.hand);
     // A space battle keeps the plain intercept (its rules are its own).
-    let swept = !sim.space_round();
+    let swept = rules.round.ground();
     let mut reaches = false;
     let look_at = match (*aim, &armed) {
         // A grenade or a shell: the low-arc solution to the target's feet,
@@ -269,7 +308,7 @@ pub(super) fn run(
             ad = u.aim_frame().0;
             av = Vec3::ZERO;
         }
-        (st.aim_dir, st.aim_vel) = track_step(ad, av, dir, accel, damping, dt, !sim.space_round());
+        (st.aim_dir, st.aim_vel) = track_step(ad, av, dir, accel, damping, dt, swept);
         let ad = st.aim_dir;
         // Card GRAI (OURS): a throw's elevation is the solution's itself,
         // not the tracker's — on the grenade's flat arc the tracker's lag of

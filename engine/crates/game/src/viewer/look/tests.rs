@@ -362,6 +362,7 @@ fn water_cfg(
             ..manifest::ManifestWaterConfig::default()
         }),
         wet: None,
+        gameplay_wet: None,
     }
 }
 

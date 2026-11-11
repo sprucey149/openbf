@@ -77,18 +77,19 @@ fn a_named_soldier_takes_its_row_and_others_scale() {
     apply(&mut hero);
     assert_eq!(all(&hero, "MaxHealth"), [1_000_000.0]);
 
+    // A vehicle is not a soldier: it takes its own row (the vehicle pass),
+    // and a starfighter has none.
     let mut tank = def(
         "imp_hover_fightertank",
         "entc",
         "hover",
-        &[("MaxHealth", "3000")],
+        &[("MaxHealth", "6600")],
     );
     apply(&mut tank);
-    assert_eq!(
-        all(&tank, "MaxHealth"),
-        [3000.0],
-        "vehicles are not soldiers"
-    );
+    assert_eq!(all(&tank, "MaxHealth"), [8000.0]);
+    let mut xwing = def("all_fly_xwing", "entc", "flyer", &[("MaxHealth", "6600")]);
+    apply(&mut xwing);
+    assert_eq!(all(&xwing, "MaxHealth"), [6600.0]);
 }
 
 #[test]
@@ -113,8 +114,9 @@ fn soft_scales_move_and_hard_scales_stay() {
     // An animal took the default 1.0: the key is added.
     assert_eq!(all(&rifle, "AnimalScale"), [BF1_SCALE]);
     assert_eq!(all(&rifle, "ShieldScale"), [BF1_SCALE]);
-    assert_eq!(all(&rifle, "VehicleScale"), [0.0]);
-    assert_eq!(all(&rifle, "BuildingScale"), [0.1]);
+    // Against vehicles and buildings a blaster does BF2's 0.1.
+    assert_eq!(all(&rifle, "VehicleScale"), [vehicles::LIGHT_ARMS_SCALE]);
+    assert_eq!(all(&rifle, "BuildingScale"), [vehicles::LIGHT_ARMS_SCALE]);
     assert_eq!(60.0 * all(&rifle, "PersonScale")[0], 80.0);
 }
 
@@ -183,7 +185,7 @@ fn a_named_weapon_lands_on_its_target() {
             &[("MaxDamage", damage), ("PersonScale", scale)],
         );
         apply(&mut d);
-        let got = damage.parse::<f32>().unwrap() * all(&d, "PersonScale")[0];
+        let got = all(&d, "MaxDamage")[0] * all(&d, "PersonScale")[0];
         assert_eq!(got, target, "{name}");
     }
     // The Tusken sniper is not the factions' sniper rifle.
@@ -237,7 +239,7 @@ fn an_emitter_moves_its_damage_not_its_scales() {
 #[test]
 fn other_guns_and_blasts_keep_their_strength_against_soldiers() {
     let mut cannon = def(
-        "imp_weap_hover_fightertank_cannon_ord",
+        "imp_weap_fly_tiefighter_cannon_ord",
         "ordc",
         "bolt",
         &[
@@ -257,20 +259,20 @@ fn other_guns_and_blasts_keep_their_strength_against_soldiers() {
     assert_eq!(all(&cannon, "DroidScale"), [BF1_SCALE]);
     assert_eq!(all(&cannon, "ShieldScale"), [BF1_SCALE]);
 
-    // A turret's bolt that writes no scale at all, and a death blast with
+    // A droid's bolt that writes no scale at all, and a death blast with
     // the combined scale.
-    let mut minigun = def(
-        "yav_weap_bldg_tower_minigun_ord",
+    let mut probe = def(
+        "imp_weap_droid_probe_blaster_ord",
         "ordc",
         "bolt",
-        &[("MaxDamage", "100.0")],
+        &[("MaxDamage", "75.0")],
     );
-    apply(&mut minigun);
+    apply(&mut probe);
     for key in ["PersonScale", "AnimalScale", "DroidScale", "ShieldScale"] {
-        assert_eq!(all(&minigun, key), [BF1_SCALE], "{key}");
+        assert_eq!(all(&probe, key), [BF1_SCALE], "{key}");
     }
-    assert!(all(&minigun, "VehicleScale").is_empty());
-    assert!(all(&minigun, "BuildingScale").is_empty());
+    assert!(all(&probe, "VehicleScale").is_empty());
+    assert!(all(&probe, "BuildingScale").is_empty());
     let mut blast = def(
         "imp_walk_atat_exp",
         "expc",
@@ -280,6 +282,152 @@ fn other_guns_and_blasts_keep_their_strength_against_soldiers() {
     apply(&mut blast);
     assert_eq!(all(&blast, "HealthScale"), [BF1_SCALE]);
     assert_eq!(all(&blast, "Damage"), [400.0]);
+}
+
+#[test]
+fn a_twin_gun_takes_its_twins_numbers() {
+    let mut gun = def(
+        "imp_weap_hover_fightertank_cannon",
+        "wpnc",
+        "weapon",
+        &[
+            ("ShotDelay", "0.3"),
+            ("HeatPerShot", "0.2"),
+            ("Velocity", "9"),
+        ],
+    );
+    apply(&mut gun);
+    assert_eq!(all(&gun, "ShotDelay"), [0.22]);
+    assert_eq!(all(&gun, "HeatPerShot"), [0.12]);
+    assert_eq!(all(&gun, "ReloadTime"), [0.0]);
+    assert_eq!(all(&gun, "Velocity"), [9.0], "a key the row has no word on");
+
+    let mut bolt = def(
+        "imp_weap_hover_fightertank_cannon_ord",
+        "ordc",
+        "bolt",
+        &[
+            ("MaxDamage", "300.0"),
+            ("PersonScale", "1.0"),
+            ("VehicleScale", "0.19"),
+            ("Velocity", "180.0"),
+        ],
+    );
+    apply(&mut bolt);
+    assert_eq!(all(&bolt, "MaxDamage"), [200.0]);
+    // BF2's numbers, not the soldier rule's x4/3.
+    assert_eq!(all(&bolt, "PersonScale"), [1.0]);
+    assert_eq!(all(&bolt, "VehicleScale"), [0.1]);
+    assert_eq!(all(&bolt, "Velocity"), [180.0], "the round keeps its speed");
+    let falloff = |h: u32| bolt.props.iter().find(|p| p.0 == h).map(|p| p.1.clone());
+    assert_eq!(falloff(0xA745_61B2).as_deref(), Some("0.75"));
+    assert_eq!(falloff(0x955F_71E9).as_deref(), Some("100"));
+
+    // BF2's light cannon has no blast: BF1's keeps its look and deals none.
+    let mut blast = def(
+        "imp_weap_hover_fightertank_cannon_exp",
+        "expc",
+        "explosion",
+        &[("Damage", "300.0"), ("VehicleScale", "0.0")],
+    );
+    apply(&mut blast);
+    assert_eq!(all(&blast, "Damage"), [0.0]);
+    assert_eq!(all(&blast, "MaxDamage"), [0.0]);
+}
+
+#[test]
+fn a_twin_round_sets_each_charge_point_and_the_fat_rays_damage() {
+    let mut dish = def(
+        "hoth_weap_bldg_dishturret_cannon_ord",
+        "ordc",
+        "bolt",
+        &[
+            ("Damage", "200.0"),
+            ("NextCharge", "0.5"),
+            ("Damage", "300.0"),
+            ("NextCharge", "0.75"),
+            ("Damage", "400.0"),
+            ("NextCharge", "0.99"),
+            ("Damage", "500.0"),
+        ],
+    );
+    apply(&mut dish);
+    assert_eq!(all(&dish, "Damage"), [1000.0, 1250.0, 1500.0, 3000.0]);
+    assert_eq!(all(&dish, "NextCharge"), [0.5, 0.75, 2.0]);
+    assert!(
+        all(&dish, "MaxDamage").is_empty(),
+        "the points keep their key"
+    );
+
+    // The fat ray reads only MaxDamage; BF1's authors Damage.
+    let mut ray = def(
+        "geo_weap_bldg_geoturret_ord",
+        "ordc",
+        "fatray",
+        &[("Damage", "400.0"), ("VehicleScale", "1.0")],
+    );
+    apply(&mut ray);
+    assert_eq!(all(&ray, "MaxDamage"), [400.0]);
+    assert_eq!(all(&ray, "Damage"), [400.0]);
+    assert_eq!(all(&ray, "VehicleScale"), [0.0]);
+}
+
+#[test]
+fn a_one_game_gun_and_a_bf1_grenade_do_more_to_vehicles() {
+    // ArmorScale sets vehicles and buildings; the factor moves vehicles.
+    let mut cannon = def(
+        "all_weap_hover_hovernaut_cannon1_ord",
+        "ordc",
+        "beam",
+        &[
+            ("MaxDamage", "800.0"),
+            ("HealthScale", "1.5"),
+            ("ArmorScale", "1.0"),
+        ],
+    );
+    apply(&mut cannon);
+    assert_eq!(all(&cannon, "VehicleScale"), [vehicles::VEHICLE_FACTOR]);
+    assert_eq!(all(&cannon, "ArmorScale"), [1.0]);
+    assert_eq!(all(&cannon, "HealthScale"), [1.5 * BF1_SCALE]);
+
+    let mut crack = def(
+        "imp_weap_inf_crackgrenade_exp",
+        "expc",
+        "explosion",
+        &[
+            ("Damage", "400.0"),
+            ("PersonScale", "0.25"),
+            ("VehicleScale", "1.0"),
+        ],
+    );
+    apply(&mut crack);
+    assert_eq!(all(&crack, "VehicleScale"), [vehicles::VEHICLE_FACTOR]);
+    assert_eq!(all(&crack, "PersonScale"), [0.25 * BF1_SCALE]);
+}
+
+#[test]
+fn vehicle_rows_set_health_and_twins_parse() {
+    for (name, base, disc, now) in [
+        ("cis_hover_stap", "hover", "600", 150.0),
+        ("cis_hover_mtt", "commandhover", "15000", 40000.0),
+        ("tat_hover_landspeeder", "hover", "750", 100.0),
+        ("tat_bldg_barge_turret", "armedbuilding", "", 400.0),
+    ] {
+        let props: &[(&str, &str)] = if disc.is_empty() {
+            &[]
+        } else {
+            &[("MaxHealth", disc)]
+        };
+        let mut d = def(name, "entc", base, props);
+        apply(&mut d);
+        assert_eq!(all(&d, "MaxHealth"), [now], "{name}");
+    }
+    for r in vehicles::HEALTH.iter().filter(|r| r.twin.is_none()) {
+        assert!(r.ratio > 0.0, "{}", r.class);
+    }
+    for r in vehicles::TWINS {
+        assert!(r.values().count() > 0, "{}", r.class);
+    }
 }
 
 #[test]
@@ -390,6 +538,16 @@ fn the_tables_name_each_class_once() {
     }
     for (i, a) in PERSON_DAMAGE.iter().enumerate() {
         for b in &PERSON_DAMAGE[i + 1..] {
+            assert_ne!(a.class, b.class);
+        }
+    }
+    for (i, a) in vehicles::TWINS.iter().enumerate() {
+        for b in &vehicles::TWINS[i + 1..] {
+            assert!(!matches(a.class, b.class), "{} and {}", a.class, b.class);
+        }
+    }
+    for (i, a) in vehicles::HEALTH.iter().enumerate() {
+        for b in &vehicles::HEALTH[i + 1..] {
             assert_ne!(a.class, b.class);
         }
     }

@@ -75,6 +75,7 @@ mod repair;
 #[cfg(test)]
 mod rider_health_tests;
 mod round;
+mod round_rules;
 mod saber;
 mod saber_throw;
 mod seats;
@@ -128,6 +129,7 @@ pub use pickups::{
     ITEM_GRAVITY, ITEM_POOL_DEFAULT, LIFE_END, MAX_DROPS, TAKE_AGE,
 };
 pub use round::scale_reinforcements;
+pub(crate) use round_rules::RoundRules;
 pub use seats::{ENTER_REACH, EXIT_RING};
 pub use space_assault::{
     CapitalMeter, CriticalSystem, FrigateTurrets, LinkedTurretSet, ShieldGroup, SpaceAssault,

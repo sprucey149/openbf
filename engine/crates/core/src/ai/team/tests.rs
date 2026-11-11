@@ -393,8 +393,8 @@ fn flank_scene(n: usize, share: f32, d: crate::skill::Difficulty) -> Sim {
             to: 3,
             ..Default::default()
         };
-        st.route = crate::ai::plan_leg(&sim, &st, h, 0, 3, None, &mut Default::default());
-        assert_eq!(st.route.map(|r| r.next_hub), Some(1), "the authored hop");
+        crate::ai::route::plan_to(&sim, &mut st, h, 0, 3, &mut Default::default());
+        assert_eq!(st.route().map(|r| r.next_hub), Some(1), "the authored hop");
         sim.units[i].ai = st;
     }
     sim.tick = 0;
@@ -419,7 +419,7 @@ fn two_of_ten_attackers_flank_at_a_share_of_a_fifth_and_none_of_two() {
     assert_eq!(flanking(&sim), vec![0, 1]);
     assert_eq!(sim.nav_stats.flank_given, 2);
     for i in 0..10 {
-        let r = sim.units[i].ai.route.expect("a leg");
+        let r = sim.units[i].ai.route().expect("a leg");
         let (next, src) = if i < 2 {
             (2, crate::ai::RouteSource::Flank)
         } else {
@@ -461,7 +461,7 @@ fn a_flanker_walks_the_other_side_and_the_role_ends_at_the_post() {
         let p = u.soldier.pos;
         via2 |= crate::nav::xz_dist(p, Vec3::new(20.0, 0.0, -8.0)) < 3.0;
         via1 |= crate::nav::xz_dist(p, Vec3::new(20.0, 0.0, 5.0)) < 3.0;
-        if u.ai.route.is_some_and(|r| r.is_last()) && u.ai.flank.route.is_none() {
+        if u.ai.route().is_some_and(|r| r.is_last()) && u.ai.flank.route.is_none() {
             ended = true;
             break;
         }

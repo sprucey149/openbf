@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dev-dependencies]
+core = { path = "../core", features = ["route-fixtures"] }
 bake = { path = "../bake" }
 mungefs = { path = "../mungefs" }
 sha2 = "0.10"
@@ -43,6 +44,7 @@ wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
 x11rb = "0.13"
 
 [features]
+brain-shadow = ["core/brain-shadow"]
 # Count every heap allocation, for `--bench` runs that report it (`game::alloc_count`).
 alloc-count = []
 

@@ -1,14 +1,14 @@
 //! Card WHY: a reason code on every behaviour change and on every failed
 //! walk of a bot (`analysis/bot-design.md` 4.4, 4.5: "every walk has an
 //! outcome - Failed(why)"). The codes are the ones the code already knows at
-//! those points: the link of `think`'s chain that ran ([`super::behave`]),
+//! those points: the link of `think`'s chain that ran ([`super::brain`]),
 //! and what the mover's books say when a progress window fails (the
 //! steering's pick, the going-round commitment, the leg's source). L4D's
 //! action system carries the same "reason" on each transition
 //! (`engine/artifacts/lead_tmp/botre/modern.md` A6).
 //!
 //! DIAGNOSTIC ONLY: the log ([`WhyLog`], a small fixed ring per bot) is
-//! never hashed and never read by a rule, like `AiState::behaviour`. The
+//! never hashed and never read by a rule. The
 //! black box shows it per unit; the sweep's census counts the failed-walk
 //! codes per map (`NavStats::fails`).
 

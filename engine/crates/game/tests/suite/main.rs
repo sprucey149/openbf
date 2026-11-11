@@ -84,6 +84,7 @@ mod unit_vo;
 mod unit_voice;
 mod unlocks_bf1;
 mod vehicle_class;
+mod vehicle_normalization;
 mod vehicle_pads;
 mod vehicle_rider;
 mod walker_enter;

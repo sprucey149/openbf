@@ -24,6 +24,53 @@ class GateBoundaryTests(unittest.TestCase):
         Path(a.out).mkdir(exist_ok=True)
         return a
 
+    def test_rounds_build_failure_clears_previous_receipt(self):
+        with tempfile.TemporaryDirectory() as td:
+            gate = gates.Gates(self.args(Path(td)))
+            receipt = Path(gate.p('rounds', 'results.json'))
+            receipt.parent.mkdir()
+            receipt.write_text('stale receipt')
+            with patch.object(gate, 'build_release', return_value=101) as build, \
+                 patch.object(gates, 'sh') as run:
+                gate.g_rounds()
+            build.assert_called_once_with('round_to_outcome', failure_gate='rounds')
+            run.assert_not_called()
+            self.assertFalse(receipt.exists())
+
+    def test_rounds_build_failure_is_replaced_when_resumed(self):
+        class Fake(gates.Gates):
+            def g_protect(self):
+                if not resumed:
+                    self.build_release('ordnance_census')
+                    raise InterruptedError
+                self.row('protect', 'probe', 0, 'clean', 'clean', 'PASS')
+
+        builds = []
+
+        def sh(cmd, cwd, env, log):
+            if cmd.startswith('cargo build'):
+                builds.append(cmd)
+                return 101 if not resumed and '--example round_to_outcome' in cmd else 0
+            Path(log).write_text('round goldens: 14 PASS\n')
+            return 0
+
+        with tempfile.TemporaryDirectory() as td:
+            a = self.args(Path(td))
+            groups = ['rounds', 'protect']
+            with patch.object(gates, 'run_args', return_value={'groups': groups}), \
+                 patch.object(gates, 'sh', side_effect=sh):
+                resumed = False
+                with self.assertRaises(InterruptedError):
+                    gates.run(a, groups, cls=Fake)
+                saved = gates.load_state(a.out)
+                self.assertEqual(saved['done'], ['rounds'])
+                self.assertEqual([(r['gate'], r['verdict']) for r in saved['rows']], [('rounds', 'FAIL')])
+                self.assertIn('--example ordnance_census', builds[1])
+                resumed = True
+                rows = gates.run(a, groups, resume=True, cls=Fake)
+            self.assertEqual([(r['gate'], r['verdict']) for r in rows],
+                             [('rounds', 'PASS'), ('protect', 'PASS')])
+
     def fidelity(self, cfg, values, allow=None):
         with tempfile.TemporaryDirectory() as td:
             a = self.args(Path(td), fidelity_dir='fixture', fidelity_allow=allow)

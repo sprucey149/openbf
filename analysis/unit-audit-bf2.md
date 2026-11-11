@@ -1,5 +1,10 @@
 # OPUS RE (2026-09-29) - [O] UNAUDITED — Unit fidelity audit, BF2 (card UAUD2)
 
+> This is the September 29, 2026 audit. Its port verdicts describe the revisions
+> listed below. For current scope, see the [feature set](plan/FEATURE_SET.md)
+> and [source gates](source-gates.md). BF2 Jabba’s Palace now ships in both Conquest eras.
+> The original disc census remains in this document.
+
 The maintainer's DECISION 3 (INBOX 2026-09-28): audit every unit class on every map of both games. This document covers BF2;
 `analysis/unit-audit-bf1.md` covers BF1. It lists every class the 33 BF2 conquest scripts (`*_con`) load and checks
 each one column by column against three sources:

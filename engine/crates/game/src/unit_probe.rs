@@ -146,6 +146,9 @@ pub struct Probe {
     /// progress windows since it last made progress (`MoverState::recover`).
     #[serde(default)]
     pub doing: Doing,
+    /// The owner of the ground bot's walk request, when one was selected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub walk_owner: Option<core::ai::StepKind>,
     #[serde(default)]
     pub recover: u8,
     /// The going-round commitment (`core::ai::Round`): live (a side chosen at
@@ -255,6 +258,7 @@ pub const LEGEND: &[(&str, &str)] = &[
     ("from/next/dest/arc/src", "the route leg: hubs, arc (-1 last leg or straight), t table b bfs s straight f flank r round a shunned arc (card ARCM)"),
     ("wp/wp_d", "the leg's aim point and XZ metres to it"),
     ("steer/fan/slide/sidestep", "the steering's pick, fan step x30 deg, slide side, side-step state"),
+    ("walk_owner", "ground bot walk owner selected for the tick"),
     ("doing/recover", "the behaviour that ran this tick (none travel fight evade capture guard board ride follow recover) and the walk's failed progress windows since it last made progress (schema 4)"),
     ("round/round_near/round_t/round_rim", "going round an obstacle on one committed side (the side is slide): live, the nearest the walk has been to its aim point since the obstacle was met (XZ m), ticks of the progress window's allowance spent (300 = spent: the walk's windows fail again), and the last contact was a rim barrier (no allowance) (schema 4)"),
     ("walk/walk_at/walk_dir", "what the steering walked at this tick: 0 it did not walk, 1 a lost bot's return point, 2 out of a hazard, 3 the hold goal, 4 the vehicle it boards, 5 the leg (walk point / corner / order point / post), 6 a pickup detour or its return, 7 a health droid; the point; the XZ direction the steering was asked (side-step offset included)"),
@@ -324,7 +328,7 @@ impl Probe {
             core::sim::Level::Off(d) => d.max(0.01),
             core::sim::Level::Unknown => -1.0,
         };
-        let r = u.ai.route;
+        let r = u.ai.route();
         let (steer, fan) = match u.ai.steer {
             SteerPick::Idle => (Steer::Idle, 0),
             SteerPick::Fwd => (Steer::Fwd, 0),
@@ -385,6 +389,11 @@ impl Probe {
             slide: u.ai.slide,
             sidestep: r.map_or(0, |r| r.sidestep),
             doing: doing_of(u.ai.behaviour),
+            walk_owner: (!sim.space_round()
+                && u.controller == core::unit::Controller::Ai
+                && u.proxy_human.is_none()
+                && u.ai.step != core::ai::StepKind::None)
+                .then_some(u.ai.step),
             recover: u.ai.mv.recover,
             round: u.ai.mv.round.live(),
             round_near: u.ai.mv.round.meet,

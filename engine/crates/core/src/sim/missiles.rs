@@ -140,8 +140,7 @@ impl Sim {
     /// the on-foot lock ([`Sim::tick_foot_lock`]) on every ground map and the
     /// magnet (`re-aim-assist.md` §3) in space rounds; a bot's is its combat
     /// target. An on-foot lock past 100 m fills slower. A new target
-    /// restarts the clock, and the shot consumes the lock
-    /// ([`Sim::missile_lock`] at the press).
+    /// restarts the clock, and [`Sim::soldier_shots`] consumes the lock.
     pub(super) fn tick_locks(&mut self, dt: f32) {
         for i in 0..self.units.len() {
             if !self.units[i].alive {

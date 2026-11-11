@@ -212,7 +212,66 @@ and explicit despawn. Health-death continuation, current mounted return,
 Despawn/recycle retirement and independent flight drawing pass their
 production-consumer regressions.
 
+[D] A ground hard stop starts a fresh leg for bodies the blade flew through.
+Only the contacts that stopped the blade carry into the return cache, in
+their original order. Those entries count toward the eight-contact limit.
+The ordinary natural turnaround clears the whole cache as in BF2. A baked
+Maul throw through a clone to a sniper's turret checks one hit on the clone
+each way and a single turret hit at the turn. This covers the port's named
+hard-stop rule.
+
+[V-PS2] In two-player stock Mos Eisley Assault with zero AI, Maul took
+400 HP off a stationary Mace about 13 m away during the outbound clock.
+The same target lost another 400 HP at the signed turn boundary, leaving
+400 of 1,200. The second hit occurred before the first full return step.
+Four complete throws from the same setup reproduce both hits. After the
+first damage update, the next move covered about three quarters of its
+ordinary distance, then the blade stayed at that position for 27 sampled
+positive clock values spanning 0.867 s. Mace's post-launch sidestep left
+the first 12 unique flight positions, velocity and clock identical, then
+the blade reached 26.25 m farther and Mace took no damage. Two post-hit
+sidestep trials resume ordinary flight at tick 34 and end with only the
+first 400 HP loss. The baked port, with the same heroes and feet positions,
+also deals 400 HP each way. Its reticle aim and flight path differ, and
+the second hit is during full return motion.
+
+[V] A separate collision pass explains the position hold. FUN_00163770
+dispatches the ordnance ray (B2:2889–2898). FUN_0030fad0 tests the previous
+to current chord after integration and passes the contact fraction to the
+saber (301878–301951). With its launch query finished, the mask includes
+soldiers. FUN_0031d190 accepts an ordinary unblocked soldier contact with
+positive clock (311125–311128, 311178–311205, 311255–311260), and
+FUN_0030f550 writes the contact position while keeping the clock and
+velocity (301643–301661). At zero the damage cache clears and the signed
+step can hit again. The port deliberately lets the blade travel through
+soldiers and turns it back early on its documented dynamic blockers.
+Stock and port blade and deflect visual comparisons remain open.
+
 ## Authored movement
+
+[V] Sprint attack selection follows the late soldier posture in BF2.
+FUN_00240bf8 samples melee controls before movement (B2:159812–159820),
+tests sprint after the grounded move (160283, 160319–160329, 160505 and
+160525–160556), then calls the weapon with the resulting posture and age
+(161057–161060). FUN_0033baf0 stores that sample (332669–332671). The later
+weapon update FUN_0033cda8 uses it to select combo transitions through
+FUN_0033ff90 (335345–335347). Melee also bypasses the ordinary early FIRE
+sprint cancellation (159167–159183).
+
+[V-PS2] In stock Mos Eisley Assault with zero AI, Maul, Aayla and Mace
+select DASHATTACK when sprint and fire start together during a fast run.
+Each selects ATTACK1 when forward is released and fire starts from Sprint.
+Stand fire and fire while maintaining an established sprint select ATTACK1
+and DASHATTACK respectively. Mace reaches 22.5 m/s horizontally in two
+stock runs. The terrain varies along the stock path.
+
+[D] The baked port selects the same two control attacks and the same Mace
+top speed. It reverses both attack choices on the simultaneous inputs,
+including through the window's sprint latch. The port feeds incoming
+posture into the combo before movement, then uses the resulting locks,
+energy, root motion and gravity during that movement. Changing that order
+requires testing these consumers together. The older reported windowed miss
+and the other heroes' sprint and jump attacks remain open.
 
 [V] Combo state parser00307a80 packs Gravity as a signed byte in tenths
 and GravityVelocityTarget as signed12bit tenths. Impulse writes the gravity

@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use glam::Vec3;
 
-use super::{form_order, steer, takes_fight, SIGHT_FIGHT};
+use super::{form_order, takes_fight, SIGHT_FIGHT};
+use crate::ai::brain::finish_pad;
 use crate::ai::{AiState, Behaviour};
 use crate::droideka::{DroidekaClass, Order, ROLLING};
 use crate::perception::Foe;
@@ -55,7 +56,7 @@ fn the_form_order_deploys_only_to_fight() {
 }
 
 #[test]
-fn steer_clears_the_soldier_buttons_and_strafe_a_droideka_has_no_use_for() {
+fn finish_clears_the_soldier_buttons_and_strafe_a_droideka_has_no_use_for() {
     let (s, me, _) = world();
     let misuse = buttons::ROLL_STANCE
         | buttons::JUMP
@@ -68,14 +69,14 @@ fn steer_clears_the_soldier_buttons_and_strafe_a_droideka_has_no_use_for() {
         ly: PadState::quantize(1.0),
         ..Default::default()
     };
-    steer(&s, me, &AiState::default(), &mut pad);
+    finish_pad(&s, me, &AiState::default(), None, &mut pad);
     assert_eq!(pad.buttons, buttons::FIRE);
     assert_eq!(pad.lx, 0);
     assert_eq!(pad.ly, PadState::quantize(1.0));
 }
 
 #[test]
-fn steer_leaves_an_ordinary_soldier_alone() {
+fn finish_leaves_an_ordinary_soldier_alone() {
     let (s, _, foe) = world();
     let pad0 = PadState {
         buttons: buttons::SPRINT | buttons::JUMP,
@@ -83,7 +84,7 @@ fn steer_leaves_an_ordinary_soldier_alone() {
         ..Default::default()
     };
     let mut pad = pad0;
-    steer(&s, foe, &fighting(foe), &mut pad);
+    finish_pad(&s, foe, &fighting(foe), None, &mut pad);
     assert_eq!(pad, pad0);
 }
 
@@ -95,7 +96,7 @@ fn a_deployed_fighter_stands_and_raises_its_shield_over_half() {
         ly: PadState::quantize(1.0),
         ..Default::default()
     };
-    steer(&s, me, &fighting(foe), &mut pad);
+    finish_pad(&s, me, &fighting(foe), None, &mut pad);
     assert_eq!(pad.ly, 0);
     assert_eq!(pad.buttons, buttons::SECONDARY_FIRE);
 
@@ -109,7 +110,7 @@ fn a_deployed_fighter_stands_and_raises_its_shield_over_half() {
         buttons: buttons::FIRE,
         ..Default::default()
     };
-    steer(&s, me, &fighting(foe), &mut pad);
+    finish_pad(&s, me, &fighting(foe), None, &mut pad);
     assert_eq!(pad.buttons, buttons::FIRE, "at half it is not raised");
 
     let d = s.units[me.index as usize].droideka.as_mut().unwrap();
@@ -119,7 +120,7 @@ fn a_deployed_fighter_stands_and_raises_its_shield_over_half() {
         buttons: buttons::FIRE,
         ..Default::default()
     };
-    steer(&s, me, &fighting(foe), &mut pad);
+    finish_pad(&s, me, &fighting(foe), None, &mut pad);
     assert_eq!(pad.buttons, buttons::FIRE, "up already: it fires");
 }
 
@@ -131,7 +132,7 @@ fn a_rolling_droideka_never_presses_the_shield() {
         ly: PadState::quantize(1.0),
         ..Default::default()
     };
-    steer(&s, me, &fighting(foe), &mut pad);
+    finish_pad(&s, me, &fighting(foe), None, &mut pad);
     assert_eq!(pad.buttons, 0);
     assert_eq!(pad.ly, PadState::quantize(1.0));
 }
@@ -171,7 +172,7 @@ fn shield_debt_does_not_make_ai_raise_the_bubble() {
             buttons: buttons::FIRE,
             ..Default::default()
         };
-        steer(&s, me, &fighting(foe), &mut pad);
+        finish_pad(&s, me, &fighting(foe), None, &mut pad);
         assert_eq!(pad.buttons, buttons::FIRE);
     }
 }

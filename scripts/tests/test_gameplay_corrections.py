@@ -44,6 +44,25 @@ def correction():
 
 
 class CorrectionTests(unittest.TestCase):
+    def test_water_mask_uses_only_in_bounds_dry_runs(self):
+        def grid(size, packed, height=-2.0):
+            info = struct.pack("<IIfffI", size, 2, 8 / size, 4, 4, 1)
+            layer = b"\0" + struct.pack("<If", 10, height) + bytes(20)
+            return chunk(b"WATR", chunk(b"INFO", info) + chunk(b"LAYR", layer) + chunk(b"WMAP", packed))
+
+        reference = grid(4, bytes([17, 17, 16, 1, 17, 17, 17, 17]))
+        donor = grid(2, bytes([17, 17]))
+        polygons = [[[-2, -2], [2, -2], [2, 0], [-2, 0]]]
+        self.assertEqual(c.water_mask_record(reference, donor, polygons), {
+            "grid": 4, "dry_runs": [[1, 1, 2]], "sha256": c.digest(bytes([1] * 5 + [0, 0] + [1] * 9)),
+        })
+        with self.assertRaisesRegex(ValueError, "playable bounds"):
+            c.water_mask_record(reference, donor, [])
+        with self.assertRaisesRegex(ValueError, "same extent and height"):
+            c.water_mask_record(reference, grid(2, bytes([17, 17]), 2.0), polygons)
+        with self.assertRaisesRegex(ValueError, "entirely wet"):
+            c.water_mask_record(reference, grid(2, bytes([16, 17])), polygons)
+
     def test_water_is_corrected_on_a_dry_reference_terrain_stub(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -189,6 +208,42 @@ class CorrectionTests(unittest.TestCase):
 
 class ExportCorrectionTests(unittest.TestCase):
     path = 'engine/crates/manifest/data/gameplay/corrections-v1/bf1-pc.json'
+
+    def test_water_mask_export_checks_bounds_order_and_fingerprint(self):
+        doc = correction()
+        row = doc["files"][0]
+        row["file"] = "kas/kas1.lvl"
+        row["terrain"][0].update(grid_size=256, grid_unit=8)
+        row["terrain"][0]["boundaries"] = [[[-64, -64], [64, -64], [64, 64], [-64, 64]]]
+        row["terrain"][0]["height_samples"] = []
+        cells = bytearray([1]) * (64 * 64)
+        start = 31 * 64 + 31
+        cells[start:start + 2] = bytes(2)
+        row["water_mask"] = {"grid": 64, "dry_runs": [[31, 31, 2]], "sha256": c.digest(cells)}
+        self.assertEqual(export.generated_data_problems(self.path, c.encoded(doc)), [])
+        outer = c.digest(bytes([0] + [1] * (len(cells) - 1)))
+        overlap = c.digest(bytes([1] * start + [0, 0, 0] + [1] * (len(cells) - start - 3)))
+        odd = c.digest(bytes([1] * 40 + [0] + [1] * 40))
+        for changes in ({"dry_runs": [[0, 0, 1]], "sha256": outer},
+                        {"dry_runs": [[31, 31, 2], [31, 32, 2]], "sha256": overlap},
+                        {"dry_runs": [[31, 31, 0]]},
+                        {"grid": 9, "dry_runs": [[4, 4, 1]], "sha256": odd},
+                        {"sha256": "a" * 64}, {"grid": True}):
+            with self.subTest(changes=changes):
+                invalid = copy.deepcopy(doc)
+                invalid["files"][0]["water_mask"].update(changes)
+                self.assertTrue(any("water mask correction" in error
+                                    for error in export.generated_data_problems(self.path, c.encoded(invalid))))
+        for changes in (
+            {"grid_unit": 4},
+            {"boundaries": [[[-64, -64], [-20, -64], [-20, -16], [-12, -16], [-12, -64],
+                              [64, -64], [64, 64], [-64, 64]]]},
+        ):
+            with self.subTest(changes=changes):
+                invalid = copy.deepcopy(doc)
+                invalid["files"][0]["terrain"][0].update(changes)
+                self.assertTrue(any("water mask correction" in error
+                                    for error in export.generated_data_problems(self.path, c.encoded(invalid))))
 
     def test_water_removal_only_accepts_resource_locators(self):
         data = correction()

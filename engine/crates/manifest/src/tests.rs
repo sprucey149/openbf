@@ -358,6 +358,12 @@ fn full_manifest() -> Manifest {
                 [16.0, 16.0],
                 &[1, 0, 9, 15],
             )),
+            gameplay_wet: Some(ManifestWetMask::from_nibbles(
+                2,
+                16.0,
+                [16.0, 16.0],
+                &[1, 1, 0, 1],
+            )),
         }),
         collision: vec![full_collision()],
         terrain_cutters: vec![ManifestCutter {

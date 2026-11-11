@@ -147,7 +147,7 @@ pub(super) fn send_off(sim: &Sim, st: &mut AiState, pos: Vec3, nt: &mut NavTick)
         || s.walked
             .is_some_and(|w| (pos - w).length_squared() < PIN_WALKED * PIN_WALKED);
     let walk = st
-        .route
+        .route()
         .filter(|_| !again)
         .and_then(|r| sim.floor_walk_to(pos, r.waypoint));
     match walk {
@@ -729,7 +729,7 @@ mod tests {
         let (mut plans, mut resets, mut last) = (Vec::new(), 0, 0);
         let early = stalls(sim, bound - 1, |s| {
             if let Some(u) = s.unit(h) {
-                if let Some(r) = u.ai.route {
+                if let Some(r) = u.ai.route() {
                     if !plans.contains(&(r.next_hub, r.via_arc)) {
                         plans.push((r.next_hub, r.via_arc));
                     }

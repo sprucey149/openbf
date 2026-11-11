@@ -51,13 +51,9 @@
 //! which numbers the fit supports - `scripts/human_profile.py`,
 //! `analysis/difficulty-proposal.md` §5).
 //!
-//! The freeze (bot rework stage 0): the tier columns a proxy still reads
-//! come from [`FROZEN_TIERS`], not the bots' live rows, and a proxy thinks
-//! through `ai::legacy_think`. Today that is the bots' own brain, so the
-//! freeze is a contract with a tripwire, not a separate copy: the rework's
-//! later stages must not change what `legacy_think` runs for proxies
-//! without a declared, measured move, and the asset-free pin
-//! `an_all_proxy_skirmish_keeps_its_hash` trips on any such change.
+//! The proxy reads [`FROZEN_TIERS`] and thinks through the separate legacy
+//! brain. The asset-free pin `an_all_proxy_skirmish_keeps_its_hash` and
+//! ground proxy round goldens check the dispatch and the shared helpers.
 //!
 //! Tier reads a proxy still takes from live code, not the frozen rows:
 //! - a manned building turret's view (`ai::man::hittable`, `Sim::ai_tier`

@@ -139,7 +139,7 @@ pub fn d1(sim: &Sim, me: UnitHandle, st: &AiState, taken: bool) -> u8 {
     };
     let eye = u.ai_eye();
     let dt = (t.last_pos - eye).length();
-    let reach = super::behave::fight_reach(sim, u);
+    let reach = super::brain::fight_reach(sim, u);
     let far = st.contacts.iter().flatten().any(|c| {
         c.handle != t.handle
             && c.seen_now

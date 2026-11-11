@@ -734,7 +734,8 @@ fn a_walk_ended_short_of_the_position_held_is_not_its_arrival() {
         let u = sim.unit(h).expect("bot");
         let mut st = u.ai;
         let mut hs = st.hold.unwrap_or_default();
-        let tk = crate::ai::behave::Tick {
+        let tk = crate::ai::brain::Tick {
+            rules: crate::ai::UnitRules::for_unit(&sim, u),
             me: h,
             u,
             eye: u.muzzle(),
@@ -973,7 +974,8 @@ fn low_toward(p: Vec3, toward: Vec3) -> Position {
 /// Bot `h`'s Tactician asked once, against its seen enemy `e`.
 fn ask(sim: &Sim, h: UnitHandle, e: UnitHandle, leaving: Option<(u32, bool)>) -> Option<Pick> {
     let u = sim.unit(h).expect("bot");
-    let tk = crate::ai::behave::Tick {
+    let tk = crate::ai::brain::Tick {
+        rules: crate::ai::UnitRules::for_unit(sim, u),
         me: h,
         u,
         eye: u.muzzle(),
@@ -1092,7 +1094,8 @@ fn the_tiers_move_share_leaves_on_one_hit() {
         assert_eq!(u.ai.fight.mode, FightState::COVER);
         let mut tier = sim.difficulty.tier();
         tier.react[2] = share;
-        let tk = crate::ai::behave::Tick {
+        let tk = crate::ai::brain::Tick {
+            rules: crate::ai::UnitRules::for_unit(&sim, u),
             me: h,
             u,
             eye: u.muzzle(),
@@ -1427,7 +1430,8 @@ fn ask_keep(
     keep: bool,
 ) -> (Option<Pick>, NavTick) {
     let u = sim.unit(h).expect("bot");
-    let tk = crate::ai::behave::Tick {
+    let tk = crate::ai::brain::Tick {
+        rules: crate::ai::UnitRules::for_unit(sim, u),
         me: h,
         u,
         eye: u.muzzle(),

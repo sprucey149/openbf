@@ -11,6 +11,10 @@ serde.workspace = true
 parry3d.workspace = true
 libm.workspace = true
 
+[features]
+brain-shadow = []
+route-fixtures = []
+
 # Test-only: every `ron::` use in this crate is inside `#[cfg(test)] mod tests`
 # (check with `grep -n 'ron::' src/sim/input.rs` — line numbers are deliberately not
 # quoted here, they rotted twice). The sim itself reads no RON — `game` does the

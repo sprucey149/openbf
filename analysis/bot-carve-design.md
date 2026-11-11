@@ -1,21 +1,17 @@
-# Bot rework stage 1: the carve design (2026-11-10) - [O] UNAUDITED design, nothing built
+# Bot rework stage 1 design and implementation
 
-Written at main 39c6f1eb for stage 1 of `bot-rework-plan.md`. Line numbers drift; verify before building.
-
-# Bot rework stage 1: the carve (design, 2026-11-10)
-
-[O] UNAUDITED design. Nothing is built.
+The November 11 checkpoint is recorded under issue #108. Section 1 retains the November 10 pre-carve source map at `39c6f1eb`. The live ground path is `ai/brain/ground.rs`, with derived `RoundRules` and per-unit dispatch in `ai/brain.rs`.
 
 | | |
 |---|---|
-| Base | private main 39c6f1eb plus whatever stage 0 lands |
+| Base | private main `4562dd6a` with the verified ground vehicle pass |
 | Plan | `analysis/bot-rework-plan.md` §4, stage 1 |
 | Issue | #108 |
 | Defaults taken | Q1: a declared hash move is allowed if every census metric stays inside seed noise. Q2: space foot bots stay on the legacy chain. Q3: the proxy is frozen. Q4: one think rate. Q5-Q10 as the plan proposes. |
 
-Stage 1 is a refactor. Every step keeps each round hash and every per-tick trajectory identical. The one exception is step S1.8: it hashes the behaviour label, but only for droidekas, the only units whose rules read it. That changes the hash format and nothing else, and only on maps with droidekas.
+Stage 1 preserves the movement and combat rules. S1.8 extends the hash format for ground AI bot droidekas, whose form and fight rules read the behaviour label.
 
-Space foot bots and proxies run a frozen copy of today's chain from the second step on. Ground bots run the new skeleton. A shadow check proves, on every think, that the skeleton gives the same state, pad and diagnostics as the frozen chain.
+Space bots and difficulty proxies dispatch to the frozen chain. In a build with `brain-shadow`, every live AI call in the run is compared to the alternate path on the same pre-writeback inputs in a separate memo window. The comparison covers pads, state bytes and diagnostics, excluding elapsed timing and the diagnostic walk owner.
 
 ---
 
@@ -43,12 +39,13 @@ Space foot bots and proxies run a frozen copy of today's chain from the second s
 ## 2. Target layout for stage 1
 
 ```
-ai/brain.rs              think(): picks Brain::{Skeleton, Legacy} per unit; Brain, UnitRules
+ai/brain.rs              per-unit think dispatch, shared Tick and UnitRules, pad finish
+ai/brain/ground.rs       ground tick pipeline
 ai/brain/legacy.rs       today's think()+chain()+fight_reach/guard_post/recover/hub_reached, frozen
 ai/brain/shadow.rs       feature "brain-shadow": legacy vs skeleton on every think, asserts equality
 ai/brain/situation.rs    Sense (think part), Frame (tick part), Cands (selection inputs)
 ai/brain/selector.rs     Dest requests (think), StepKind + SCORES + select(), the late Melee rule
-ai/brain/intent.rs       Intent{aim, mv, acts}, Acts, MoveKind, compose_goal(), compose_aim()
+ai/brain/intent.rs       Intent, movement actions, MoveKind, compose_goal(), compose_aim()
 ai/brain/doing.rs        settle(): the label table; Active (per-variant view)
 ai/brain/behaviours/     fight.rs (fight_position, react, FFLN step, Tactician glue: from behave/position.rs),
                          recover.rs (return walk, ladder), board.rs, overwatch.rs, serve.rs, pickup.rs,
@@ -62,6 +59,11 @@ sim/round_rules.rs       RoundRules, Sim::round_rules(); space_round() becomes a
 `behave.rs` and `behave/brain.rs` are deleted at the end (S1.9). `behave/position.rs` moves into `brain/behaviours/fight.rs`. `engine/CRATES.md` gets the new map.
 
 ## 3. RoundRules and UnitRules
+
+The sketch below records the planned fields. The implementation stores the
+derived space classification in `RoundRules`. The existing sim still owns
+the game and mode fields. `UnitRules` carries round, proxy, seat and
+droideka decisions, and the brain dispatcher selects the chain at entry.
 
 ```rust
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -191,16 +193,18 @@ Exactly one of the scored rows runs. The two "then" rows run after it.
 | 800 | Pickup | item | PICKUP 6 | (item, 0.2) |
 | 750 | Melee (LATE: decided after the gunner, 802-815) | free && saber && !arm.spare && pick ok && enemy on foot | LEG 5 | none; also post none, in_range false, hold none, throwing false |
 | 700 | Hold | holding | HOLD 3 | (h.goal, HOLD_ARRIVE), read again at 876-883 |
-| 600 | Board | boarding && last | BOARD 4 | none |
+| 600 | Board | boarding && composed goal equals its point | BOARD 4 | none |
 | 500 | Mend | mend_approach | MEND 7 | none (goal none once it reaches) |
-| 450 | Fix | fixing | LEG 5 | last ? (fixing, HOLD_ARRIVE) : none |
-| 400 | RingTake | ring && fight.mode == TAKE | LEG 5 | last ? (ring, HOLD_ARRIVE) : none |
-| 390 | Ring | ring | LEG 5 | last ? (ring, RING_ARRIVE) : none |
-| 300 | Spot | spot | LEG 5 | last ? (spot, RING_ARRIVE) : none |
+| 450 | Fix | fixing | LEG 5 | (at_fix, HOLD_ARRIVE) when at_fix exists |
+| 400 | RingTake | ring && fight.mode == TAKE | LEG 5 | (at_ring, HOLD_ARRIVE) when at_ring exists |
+| 390 | Ring | ring | LEG 5 | (at_ring, RING_ARRIVE) when at_ring exists |
+| 300 | Spot | spot | LEG 5 | (at_spot, RING_ARRIVE) when at_spot exists |
 | 200 | Push | push && compose_goal == push | LEG 5 | (push, CORNER_ARRIVE) |
 | 100 | Leg | otherwise | LEG 5 | cmd: none; route: last ? (waypoint, CORNER_ARRIVE) : none; no route: (goal, CORNER_ARRIVE) |
 
-Why the scores are total and safe:
+Why the scores preserve the chain:
+
+- Each arrival point compares equal to the goal at its own composition step. An intermediate route can already coincide with the candidate in all three coordinates. A Fix with no arrival suppresses lower-priority arrivals.
 
 - Ring, spot, fixing and holding all need `!urgent`, so they never meet Return, Flee, Pickup or Board.
 - Spot needs ring to be none.
@@ -245,7 +249,7 @@ Rows 4-6 use the holding refreshed at 776. That value can be stale after the mel
 Stage 1 adds two things:
 
 - `AiState::step: StepKind`, the walk owner. Diagnostic only, not hashed.
-- `doing::Active`, the per-variant view. It is built by `settle`, logged in WHY and F9, and not stored.
+- `doing::Active`, the temporary result of `settle`. Its tag and reason feed the existing WHY rows. The optional `walk_owner` in F9 records the selected movement step. The payload sketch below describes the next state split.
 
 ```rust
 pub enum Active {
@@ -282,20 +286,9 @@ These are a declared hash move under the plan's stage 2. Adding Serve changes th
 
 ## 7. Intent
 
-```rust
-pub(super) struct Intent<'a> { pub aim: AimRequest<'a>, pub mv: MoveRequest<'a>, pub acts: Acts }
-pub(super) struct Acts {
-    pub roll: i8,            // MoveRequest.roll today (387, 418, 439)
-    pub throw_stand: bool,   // MoveRequest.throwing (910-915)
-    pub melee_jump: bool,    // mover.rs:439 reads st.melee.jump_tick; set at 884, after melee::goal
-    pub support: Option<u32>,// gunner_foot.rs:159 ability_input (pure; same tick)
-}
-#[repr(u8)] pub enum MoveKind { Return = 1, Flee = 2, Hold = 3, Board = 4, Leg = 5, Pickup = 6, Mend = 7 }
-```
+`Intent` carries the aim request, the chosen step, the goal and the arrival point. The gunner runs before the movement request is finalized. `Acts` carries roll, grenade throw stand and melee jump into the mover. The gunner still reads support when it builds its input.
 
-- **Aim is built before the move.** The gunner runs between the two halves (H7 in section 12). `Intent.aim` is fixed before the gunner; `mv` and `acts` are fixed after the rules that run after the gunner.
-- **The `WalkAsk` codes must survive.** `MoverState.kind` stores the code and is hashed (state.rs, tag 6). The black box also reads `st.walk.kind` (game/src/unit_probe.rs:393, blackbox_read.rs:165). So `MoveKind` keeps today's values. Only the chain that computes them goes.
-- **`MoveRequest` gains `mode: MoverMode`.** `AimRequest` is unchanged; the facing mode waits for stage 3.
+`MoveKind` retains Return 1, Flee 2, Hold 3, Board 4, Leg 5, Pickup 6 and Mend 7. `MoverState.kind` hashes the number. `WalkAsk` retains those numeric aliases for the legacy chain and diagnostic readers. Serve readiness is one flag on the movement request, used by the mover and its Jet mode.
 
 ## 8. The navigator: sole writer of the route
 
@@ -347,8 +340,8 @@ pub(crate) fn mark_abandoned(st, floor: u16);                     // stuck_run =
 ## 9. Mover and gunner modes; only these two modules write the pad
 
 ```rust
-pub(super) enum MoverMode { Walk, Jet /* decided inside run(), as today */, Serve, Pilot, Droideka { fight: bool } }
-pub(super) enum GunMode   { Aim, Serve(ServePlan), Droideka { shield: bool } }
+pub(super) enum MoverMode { Serve, Droideka { stop: bool } }
+pub(super) enum GunMode { Serve(ServePlan), Droideka { raise_shield: bool } }
 pub(super) struct ServePlan { rx: i16, ry: i16, button: u32 }   // fix::serve's pad, as data
 ```
 
@@ -363,15 +356,15 @@ This also saves up to two `los_terrain` rays per fixer per tick.
 **Finish pass.** Stage 1 keeps the edits after the label, because the droideka reads this tick's label (H10) and the mover's progress books read the stick values from before the edits. The finish runs at the end of `think()` on every path, in today's order, then the unseen relocate, then why::log.
 
 - `mover::finish(mode, &mut pad)`:
-  - Serve: lx = ly = 0; clear JUMP and ROLL_STANCE.
+  - Serve: lx = ly = 0.
   - Droideka: lx = 0; clear ROLL_STANCE, JUMP, SPRINT and ACTION (the last two are never set; kept for equality); if `fight`, ly = 0.
 - `gunner_foot::finish(mode, &mut pad)`:
-  - Serve: rx and ry from the plan; clear FIRE, SECONDARY_FIRE, SWITCH_WEAPON and SWITCH_SECONDARY; set `plan.button`.
+  - Serve: rx and ry from the plan, replace every button with `plan.button`, and reset mouse, fire lag and screen pick.
   - Droideka: clear SECONDARY_FIRE; if `shield`, set SECONDARY_FIRE and clear FIRE.
 
 Here `fight` = behaviour == Fight, the form is Walk and there is a target. `shield` = `fight`, not transforming, the shield is off and its points exceed `SHIELD_RAISE` × max.
 
-These two passes equal serve's whole-pad swap, because no AI foot writer sets any other bit and `mx`, `my`, `fire_lag` and `pick` stay at their defaults. Serve and droideka never meet, since a droideka carries no cutter; add a debug assertion.
+These passes preserve the whole-pad replacement even on a seat tick. Stock droidekas carry no cutter. A custom class can combine the two, so the finish runs Serve first and Droideka second, as before.
 
 **The rule.**
 
@@ -391,10 +384,10 @@ The label is read by rules only for droidekas:
 - takes_fight reads the previous tick's label;
 - steer and form_order (sim/droidekas.rs:208, 240) read this tick's.
 
-So the hash is incomplete for droidekas today. Stage 1 hashes what is read, where it is read: in `Unit::hash_into`'s droideka block (unit.rs:748), `eat(&[b'B', behaviour as u8])`.
+The pre-carve hash omitted this input. The new format appends the `B` marker and stable behaviour byte after droideka state in `Unit::hash_for_round`. It applies to AI-controlled ground bots with no proxy profile. Space and proxy hashes keep their prior format, including on custom droidekas.
 
 - Every round with no droideka keeps its hash: both space goldens, and most ground maps.
-- Rounds with droidekas move by format only. The trajectory is identical; check it with motion.csv, the shadow check and the census, the same signature `scripts/sim_gates.sh` describes for a format change.
+- Rounds with ground bot droidekas can move by format. Compare motion CSVs, the shadow paths and the census to check trajectories and outcomes.
 
 Hashing the label for every bot would move the space goldens too. That waits for stage 3, when the selector itself reads the running behaviour for commitment and the hash moves anyway.
 
@@ -404,17 +397,7 @@ Hashing the label for every bot would move the space goldens too. That waits for
 
 `ai/brain/legacy.rs` is a verbatim copy of today's `think` and `chain`, plus `fight_reach`, `guard_post`, `recover` and `hub_reached`. Its only edits are API renames: `nav.route()`, RoundRules wrappers, finish calls in place of serve and steer.
 
-```rust
-pub enum Brain { Skeleton, Legacy }
-fn brain_for(r: &UnitRules) -> Brain {
-    if r.proxy.is_some() { return Brain::Legacy; }       // Q3. OURS, replace: a recalibrated proxy
-    if r.round.space.is_some() && !SPACE_ON_SKELETON { return Brain::Legacy; }
-    Brain::Skeleton
-}
-/// INTERIM. replace: the space owner's sign-off, or the space goldens matching
-/// under the skeleton (plan stage 7).
-const SPACE_ON_SKELETON: bool = false;
-```
+`brain::think` checks `Sim::space_round()` and the unit's proxy profile through `uses_legacy`. It calls the legacy chain for either condition and the ground pipeline otherwise. Both paths share the same think cadence.
 
 - **Dispatch comes early (S1.2).** From then on, a slip in any later step can only move ground hashes.
 - **Evidence for stage 7.** The shadow check runs both brains for every unit, so its record shows continuously whether space and proxy units would match under the skeleton.
@@ -451,7 +434,7 @@ The rule is that **phases keep today's call order, and every mutating call happe
 
 1. **Shadow (S1.1).** For every AI unit on every tick, run legacy and skeleton on copies of `u.ai`, inside `Sim::step` where the real think runs (after the commander, team board, tokn and unit grid). Assert equal:
    - the `AiState::hash_into` bytes;
-   - the unhashed fields: behaviour, walk, why, next_think, last_think, wake;
+   - the fields outside `AiState::hash_into`: behaviour, walk, why, next_think, last_think, wake. The ground-bot droideka label is hashed by the unit;
    - the PadState;
    - the NavTick.
 
@@ -472,7 +455,7 @@ The rule is that **phases keep today's call order, and every mutating call happe
 - land the rest as its own commit, declaring either "format" (motion.csv identical) or "behaviour" (census inside seed noise);
 - re-pin the moved goldens in that commit, giving the reason.
 
-Space and proxy cannot move, because they run legacy.
+Space and proxy use legacy dispatch and must keep their pins.
 
 ## 13. Stage acceptance
 
@@ -481,15 +464,18 @@ Space and proxy cannot move, because they run legacy.
 | ground hashes | identical, except the droideka-map format move from S1.8, declared |
 | space and all-proxy goldens | unchanged |
 | shadow | green on all scenes, including space and proxy units under the skeleton |
-| think time | p50 and p99 per bot within +5 % of stage 0's census (expected lower: serve dedupe) |
+| think time | p50 and p99 per bot within +5% of the pre-carve control |
 | writers | the compiler shows one route writer module; grep shows pad writes only in mover.rs, jet.rs (a mover mode) and gunner_foot.rs on the foot path |
 | issue #108 | updated |
 
-## 14. Open for the maintainer
+## 14. Stage 1 decisions and later stages
 
-1. Accept the droideka-only format move in S1.8, or defer hashing the label to stage 3?
-2. Proxies on legacy for good (Q3), which means stage 4 builds new tier behaviours for bots only?
-3. Keep the frozen legacy copy (about 1,100 lines) until stage 7, as the space and proxy freeze?
+1. S1.8 keeps the declared droideka-only format move. The exact deterministic
+   census and pinned comparisons are in #108.
+2. Stage 1 keeps proxies on the frozen legacy chain. Stage 4 must account
+   for that freeze when defining tier behaviour scope.
+3. Space foot bots keep legacy in stage 1. The space carve still requires
+   its own matching goldens before changing dispatch.
 
 ## Carve steps
 
@@ -511,7 +497,7 @@ Accept: normal builds unchanged and every hash identical; shadow green (triviall
 - Make ai::think a dispatch: proxies and space foot bots go to Legacy, ground bots to Skeleton (which is still today's code).
 Accept: all goldens identical; shadow green; the shadow log shows space and proxy units matching under the skeleton. Tests:
 - perception::tests::a_space_round_keeps_the_memory_aim_through_geometry, perception::tests::a_space_one_flag_round_is_a_space_round
-- ai::behave::brain::tests::a_space_rounds_walking_bot_still_looks_at_the_vehicle
+- ai::brain::ground::tests::a_space_rounds_walking_bot_still_looks_at_the_vehicle
 - ai::gunner_foot filtered by lead and track; ai::snipe; ai::proxy; ai::route filtered by deathmatch and space
 - game suite space_assault (filter a_space_round)
 4. S1.3a Navigator API inside the module.
@@ -532,7 +518,7 @@ Accept: identical; shadow green; nothing outside ai::route writes .route. Tests:
 - Compute ServePlan once, right after the THINK block. Pass it to jet::run's block, the mover's `piloting`, and the finish.
 - Add MoverMode, GunMode, mover::finish and gunner_foot::finish, run at the end of think() on every path (on foot, mounted, both early exits), in both brains.
 - Delete fix::serve's pad (brain.rs:38-40) and droideka::steer (brain.rs:41, droideka.rs:34-55).
-Accept: identical; shadow green, pad equality included; a debug assertion that serve and droideka never meet. Tests:
+Accept: identical; shadow green, pad equality included. Preserve the finish order for custom classes that combine the two. Tests:
 - ai::fix::tests, ai::droideka::tests (the steer tests rewritten against finish), ai::gunner_foot::tests::droideka, ai::jet::tests
 - sim droideka tests
 - game suite droideka_preview, jet_bots, remote_droids, turret_damage (filter repair/fix)
@@ -540,7 +526,7 @@ Accept: identical; shadow green, pad equality included; a debug assertion that s
 - Add Sense, Frame and Post, built at today's points.
 - Replace the locals in the skeleton (not in legacy) with their fields. No change of call order.
 Accept: identical; shadow green; the brain tests compile against the new types. Tests:
-- ai::behave::brain::tests (the C3 walk tests), ai::behave::position::tests
+- ai::brain::ground::tests (the C3 walk tests), ai::brain::behaviours::fight::tests
 - perception::tests filtered by can_aim and memory
 8. S1.6 Candidates, the selector and Intent.
 - Add Cands, built in today's order with every mutating source called once in place: board_goal, items::goal, the lost advance.
@@ -590,11 +576,11 @@ Accept: section 13 of the design. Tests: stage 0's goldens; the shadow scenes; t
 
 5. MoverState.kind stores the walk code and is hashed. Any renumbering of MoveKind moves every hash.
 
-6. The S1.8 format move re-pins the goldens of maps with droidekas. If the maintainer prefers a pure stage 1, defer it to stage 3. The incompleteness this leaves already exists today.
+6. S1.8 adds a declared hash format change for active ground bot droidekas. All 14 pinned cases kept their hashes. The post-vehicle census has 177 changed end hashes with the same outcomes and deterministic counters.
 
 7. Q2 and Q3 keep a frozen copy of about 1,100 lines until stage 7, and for proxies possibly for good. That is a second brain to keep compiling through API renames. Stage 4 of the plan, as written, conflicts with a frozen proxy.
 
-8. THINK TIME. Building Situation and Cands copies a few hundred bytes per bot per tick, and the dispatch adds a branch. The serve dedupe removes up to two terrain rays per fixer per tick. Expected net: neutral or better. It is still measured against stage 0's p50 and p99 census.
+8. THINK TIME. Building Situation and Cands copies a few hundred bytes per bot per tick, and the dispatch adds a branch. The serve dedupe removes up to two terrain rays per fixer per tick. Expected net: neutral or better. The recorded comparison uses the post-vehicle, pre-carve control.
 
 9. DEPENDENCE ON STAGE 0, which is running in parallel.
 - If stage 0 declares its own hash move, or pins the goldens under different names, S1.0 rebases on its values.

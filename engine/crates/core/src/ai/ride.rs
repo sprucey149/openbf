@@ -228,7 +228,7 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
         return;
     }
     let cp = st.target_cp.and_then(|i| sim.cps.get(i as usize));
-    let space = sim.space_assault.is_some();
+    let space = sim.round_rules().space_assault();
     if cp.is_none() && !space {
         return;
     }
@@ -525,7 +525,7 @@ pub(super) fn board_goal(
         u.command.is_some()
     } else if turret {
         !super::man::endgame(sim, u.team)
-    } else if sim.space_assault.is_some()
+    } else if sim.round_rules().space_assault()
         && sim
             .vehicle(vh)
             .is_some_and(|v| v.kind == VehicleKind::Flyer)
@@ -575,7 +575,7 @@ pub(super) fn board_goal(
 }
 
 /// Card MOVR: the walk to the claimed vehicle has FAILED twice
-/// (`behave::recover`): the claim is given up and the vehicle blocked for
+/// (the recovery ladder): the claim is given up and the vehicle blocked for
 /// [`BOARD_BLOCK`], as when its clock runs out.
 pub(super) fn give_up(sim: &Sim, st: &mut AiState, nt: &mut NavTick) {
     if let Some(mut r) = st.ride {
@@ -848,7 +848,7 @@ pub(super) fn at_drop(
     pos: Vec3,
     reach: f32,
 ) -> bool {
-    st.route.is_some_and(|r| {
+    st.route().is_some_and(|r| {
         post.is_none_or(|cp| cp.nav_hub != Some(r.dest_hub))
             && r.next_hub == r.dest_hub
             && nav::xz_dist(pos, r.waypoint) <= reach

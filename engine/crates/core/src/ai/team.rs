@@ -6,7 +6,7 @@
 //! contacts a friend passes on are `perception::tell`'s (every tier): a TOLD
 //! record is aimed at by a bot that is not walking a leg (on a ground round a
 //! walking bot faces its way, playtest C3); it keeps nobody on a position
-//! (`ai::behave`) and never overwrites the bot's own record. Fire lanes: the gunner's friend-in-line
+//! (`ai::brain`) and never overwrites the bot's own record. Fire lanes: the gunner's friend-in-line
 //! test clears every shot's line by a tick of walking and its flight
 //! (`gunner_foot::shot_late`). The TEAM BOARD ([`board`]) gives the roles
 //! inside a post's group: COVER (while a friend captures, up to two others
@@ -467,7 +467,7 @@ fn flank_pass(sim: &mut Sim, t: u8) {
             continue;
         }
         let arrived =
-            u.ai.route
+            u.ai.route()
                 .is_some_and(|r| r.is_last() && r.dest_hub == u.ai.flank.to);
         let left = !u.alive || attacked_hub(sim, i) != Some(u.ai.flank.to);
         let died = !u.alive;
@@ -514,7 +514,7 @@ fn flank_pass(sim: &mut Sim, t: u8) {
             let start = u.ai.flank.from;
             let at = sim.nav.as_ref().and_then(|g| g.hub(start)).map(|h| h.xz());
             let first_leg =
-                u.ai.route
+                u.ai.route()
                     .is_some_and(|r| r.dest_hub == to && !r.is_last() && Some(r.from) == at);
             if u.ai.flank.route.is_some()
                 || u.ai.role.post.is_some()
@@ -529,7 +529,7 @@ fn flank_pass(sim: &mut Sim, t: u8) {
             let mut nt = super::NavTick::default();
             let leg = super::plan_leg(sim, &st, sim.handle(i), start, to, None, &mut nt);
             if let Some(r) = leg.filter(|r| r.source == super::RouteSource::Flank) {
-                st.route = Some(r);
+                super::route::grant_flank(&mut st, r);
                 sim.units[i].ai = st;
                 sim.nav_stats.flank_given += 1;
                 held += 1;

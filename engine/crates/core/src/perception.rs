@@ -150,7 +150,7 @@ pub struct Contact {
     /// Card TEAM: ...and from a FRIEND's sight ([`tell`]), not this unit's
     /// own eyes or ears. A told record is aimed at, but not by a unit
     /// walking a leg (playtest C3); it does not keep the unit on a position
-    /// (`ai::behave`).
+    /// (`ai::brain`).
     pub told: bool,
 }
 
@@ -713,7 +713,7 @@ pub const TELL_RADIUS: f32 = 20.0;
 /// bot's own record of the same enemy is never overwritten.
 /// Friends in unit-index order, their records in slot order. Every tier
 /// tells (the design's column was every tier but Easy, removed 2026-10-28).
-/// A told record keeps no bot on a position (`ai::behave`): before that
+/// A told record keeps no bot on a position (`ai::brain`): before that
 /// rule a told enemy held a bot standing at its fight spot while its friends
 /// saw him - BF2 Coruscant's foot time in 20 s spells within 2 m 11.7 ->
 /// 21.1 % (8 seeds), with it 9.4 %. Runs after [`scan`] in the same think.
@@ -849,7 +849,7 @@ pub fn search_ticks(dist: f32, known: bool) -> u64 {
 /// on foot on a ground map. A seated bot keeps its seat's rules, a proxy
 /// (a stand-in for a human, card DPRX) a human's, and a space map its own.
 pub fn hit_reaction_applies(sim: &Sim, u: &crate::unit::Unit) -> bool {
-    u.mount.is_none() && u.proxy_human.is_none() && !sim.space_round()
+    crate::ai::UnitRules::for_unit(sim, u).hit_reaction()
 }
 
 /// A hit by `h`, heard this think and not seen, moves the record's reaction

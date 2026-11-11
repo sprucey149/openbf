@@ -2047,10 +2047,12 @@ mod tests {
                     glam::Vec3::new(i as f32, 0.0, 0.0),
                 ))
                 .expect("spawn");
-            w.sim.units[h.index as usize].ai.route = Some(core::ai::Route {
-                stuck_run: STUCK_EVENT_TICKS,
-                ..core::ai::Route::default()
-            });
+            w.sim.units[h.index as usize]
+                .ai
+                .install_route_for_fixture(Some(core::ai::Route {
+                    stuck_run: STUCK_EVENT_TICKS,
+                    ..core::ai::Route::default()
+                }));
             ids.push(h.index as i32);
         }
         let mut ring = Ring::new(meta(), Names::default(), Vec::new());
@@ -2065,15 +2067,13 @@ mod tests {
         assert_eq!(stuck(&ring), ids, "all twelve crossings survive");
         ring.unit_frame(&w.sim, 2);
         assert_eq!(stuck(&ring), ids, "a continuing stall is not another edge");
-        let route = &mut w.sim.units[ids[0] as usize].ai.route;
-        route.as_mut().unwrap().stuck_run = 0;
+        let i = ids[0] as usize;
+        let mut route = w.sim.units[i].ai.route().unwrap();
+        route.stuck_run = 0;
+        w.sim.units[i].ai.install_route_for_fixture(Some(route));
         ring.unit_frame(&w.sim, 3);
-        w.sim.units[ids[0] as usize]
-            .ai
-            .route
-            .as_mut()
-            .unwrap()
-            .stuck_run = STUCK_EVENT_TICKS;
+        route.stuck_run = STUCK_EVENT_TICKS;
+        w.sim.units[i].ai.install_route_for_fixture(Some(route));
         ring.unit_frame(&w.sim, 4);
         ids.push(ids[0]);
         assert_eq!(stuck(&ring), ids, "a new stall gets its own event");

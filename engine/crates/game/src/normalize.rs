@@ -9,24 +9,28 @@
 //! the same kind of soldier and weapon then behaves the same on every map.
 //! BF2's files are never touched.
 //!
-//! Four rules:
+//! The rules:
 //! - a soldier class takes its BF2 counterpart's health ([`HEALTH`]); a
 //!   class BF2 has no counterpart for keeps its strength relative to its own
 //!   game's trooper ([`BF1_SCALE`]);
 //! - an infantry weapon's damage to soldiers, animals, droids and shields
 //!   takes its BF2 counterpart's ([`PERSON_DAMAGE`]), or else
-//!   [`BF1_SCALE`]. Damage to vehicles and buildings is left as authored;
+//!   [`BF1_SCALE`];
 //! - a few keys follow their BF2 counterpart outright ([`KEYS`]);
-//! - INTERIM: every other BF1 damage class (vehicle and turret guns, death
-//!   blasts; a BF1 map's own class file too, [`covers_map`]) scales its
-//!   damage to soldiers by [`BF1_SCALE`], so a gun that killed BF1's trooper
-//!   in one hit still does. replace: the vehicle pass that sets vehicle
-//!   health and vehicle guns together for both games.
+//! - the vehicle pass ([`vehicles`]): vehicles and turrets take their BF2
+//!   twin's health and guns, and infantry weapons their twin's damage to
+//!   vehicles and buildings;
+//! - every other BF1 damage class (starfighter guns, death blasts, droids;
+//!   a BF1 map's own class file too, [`covers_map`]) scales its damage to
+//!   soldiers by [`BF1_SCALE`], so a gun that killed BF1's trooper in one
+//!   hit still does. replace: a flyer pass for the starfighters.
 //!
 //! measure: BF1-map win rate and kills a minute for the frozen stand-in
 //! human against the pre-change baseline, and the same on the BF2 twin map.
 
 use crate::classdb::{fnv1a_lowercase, ClassDef};
+
+pub mod vehicles;
 
 /// The reference trooper's health (BF2 `*_inf_rifleman`).
 pub const REFERENCE_HEALTH: f32 = 400.0;
@@ -458,12 +462,21 @@ fn set(def: &mut ClassDef, names: &[&str], v: f32) {
 /// Rewrite one BF1 class definition to the shared numbers. BF1 classes
 /// never inherit from one another, so one definition at a time is exact.
 pub fn apply(def: &mut ClassDef) {
-    match def.kind.as_str() {
-        "entc" => entity(def),
-        // An infantry weapon by its row or the scale; any other gun or
-        // blast by the scale (INTERIM; replace: the vehicle pass).
-        "ordc" | "expc" => damage(def),
-        _ => {}
+    vehicles::link_variants(def);
+    if let Some(row) = vehicles::twin_row(&def.name) {
+        // A gun, round or blast that takes its BF2 twin's numbers whole.
+        vehicles::take(def, row);
+    } else {
+        match def.kind.as_str() {
+            "entc" => entity(def),
+            // An infantry weapon by its row or the scale; any other gun or
+            // blast by the scale.
+            "ordc" | "expc" => {
+                damage(def);
+                vehicles::against_vehicles(def);
+            }
+            _ => {}
+        }
     }
     for row in KEYS {
         if matches(row.class, &def.name) {
@@ -474,7 +487,9 @@ pub fn apply(def: &mut ClassDef) {
 
 fn entity(def: &mut ClassDef) {
     let base = def.base.to_ascii_lowercase();
-    if base == "soldier" || base == "walkerdroid" {
+    if let Some(row) = vehicles::health_row(&def.name) {
+        set(def, &["MaxHealth"], row.health);
+    } else if base == "soldier" || base == "walkerdroid" {
         let max_health = fnv1a_lowercase("MaxHealth");
         if let Some(row) = health_row(&def.name) {
             set(def, &["MaxHealth"], row.health);

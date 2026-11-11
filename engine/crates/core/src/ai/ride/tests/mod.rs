@@ -322,14 +322,14 @@ fn a_vehicle_given_up_as_stuck_is_not_claimed_until_it_moves() {
         let r = u.ai.ride.unwrap_or_default();
         u.ai.ride = Some(RideState { use_req: true, ..r });
         // The driver's stuck window, as its vehicle's drive left it.
-        u.ai.route = Some(crate::ai::Route {
+        u.ai.install_route_for_fixture(Some(crate::ai::Route {
             stuck_run: if stuck {
                 crate::ai::DRIVE_STUCK_BAIL
             } else {
                 0
             },
             ..Default::default()
-        });
+        }));
         s.ai_use_pass();
         assert!(s.unit(b).unwrap().mount.is_none());
         s.units[b.index as usize].ai.ride = None;
@@ -707,15 +707,15 @@ fn pickup_wait_preserves_progress_rng_events_and_bailout_priority() {
         let (mut s, b, v) = pickup_world(kind);
         assert!(s.enter_vehicle(b, v, 0));
         let mut st = s.unit(b).unwrap().ai;
-        st.route = Some(super::super::state::Route {
+        st.install_route_for_fixture(Some(super::super::state::Route {
             waypoint: Vec3::new(0.0, 0.0, -300.0),
             ref_dist: 300.0,
             stuck_ticks: 59,
             stuck_run: 100,
             sidestep: 7,
             ..Default::default()
-        });
-        let route = st.route;
+        }));
+        let route = st.route();
         let follower = s.vehicle(v).unwrap().hover.ai;
         let rng = s.rng.state();
         let events = s.events.len();
@@ -723,7 +723,7 @@ fn pickup_wait_preserves_progress_rng_events_and_bailout_priority() {
         for tick in 0..120 {
             s.tick = tick;
             let (_, nt) = drive(&s, b, m, &mut st, NavTick::default(), tick % 10 == 0);
-            assert_eq!(st.route, route, "wait cannot spend route progress");
+            assert_eq!(st.route(), route, "wait cannot spend route progress");
             assert_eq!(nt.stuck_run, 0);
             assert!(!st.ride.unwrap().use_req);
             if let Some(h) = st.ride.unwrap().hover {

@@ -1,9 +1,14 @@
-# Bot AI rework: assessment and recommendation (2026-11-10) - [O] UNAUDITED research, nothing built
+# Bot AI rework assessment and staged plan
 
-Status: written after the pre-difficulty sprint. Stage 0's single space predicate is already done (`Sim::space_round()`, landed with that sprint). Every number in section 3 is OURS and PROVISIONAL, measure: the proxy win-rate gate on the three check maps, both sides. The maintainer decides the open questions in section 5 before stage 1 starts.
+Sections 1–3 retain the November 10 pre-carve assessment. The November 11
+[stage 1 design and checkpoint](bot-carve-design.md) records the implemented
+ground pipeline, the declared hash move and the equivalence checks. [Issue
+#108](https://github.com/sprucey149/openbf/issues/108) tracks physical recovery
+and difficulty acceptance. Section 3's proposed values are OURS and PROVISIONAL.
+Measure: both proxy sides in the prescribed [four-map and BF1 cohorts](faction-balance-2026-11.md).
 
 
-Sources I read: `analysis/bot-design.md` (BOTD, with its amendments through D25), `analysis/difficulty-proposal.md`, `analysis/bot-quality.md`, `re-soldier-ai.md` §0/1.4/1.5/13, `re-ai-think-rate.md` §0, the headings of `re-ai-difficulty.md`, `re-ai-sniper.md` and `re-ai-class-selection.md`, PROJECT_STATE "Before AI difficulty" and "Playtest 2026-11-05" groups A-D, the current code under `engine/crates/core/src/ai/` plus `perception.rs`, `skill.rs` and `commander.rs`, and the five fix branches (diffs below). I built nothing and ran no cargo.
+Sources I read: `analysis/bot-design.md` (BOTD, with its amendments through D25), `analysis/difficulty-proposal.md`, `analysis/bot-quality.md`, `re-soldier-ai.md` §0/1.4/1.5/13, `re-ai-think-rate.md` §0, the headings of `re-ai-difficulty.md`, `re-ai-sniper.md` and `re-ai-class-selection.md`, the dated November 5 playtest and pre-difficulty sprint order, the current code under `engine/crates/core/src/ai/` plus `perception.rs`, `skill.rs` and `commander.rs`, and the five fix branches (diffs below). I built nothing and ran no cargo.
 
 ---
 
@@ -219,7 +224,7 @@ Each stage lands alone, deletes what it replaces, and uses only filtered tests (
     - Ground: bf1_yav2, tat1 and bf1_nab2, GCW, one full round per tier, seed 1, 16 a side on mission tickets, a Good proxy on team 0 (`round_to_outcome 90000 1 <map>`), pinned every 3000 ticks and at the round's end. These are the first pins with a human present at every tier.
     - Each pin also stores the inputs' `world_fingerprint.py` hash. Missing inputs, a changed fingerprint, a failed run or two runs that disagree FAIL; nothing skips. A differing hash that repeats is MOVED, naming the first tick that moved.
     - Check: `scripts/round_goldens.py` (about 25 s at 4 rounds at once). Re-bless: `scripts/round_goldens.py --bless` prints the pins file and never writes it; replacing the pins needs a card that declares the move and the maintainer's approval, and a space pin also needs the space owner's agreement. After an input change (a rebake makes every ground golden FAIL "inputs changed"), bless with a binary built from main, then check the branch against those pins; a branch binary would fold its own behaviour change into the new pins.
-    - Not yet a gates.py group: wiring it there, and protecting the pins file, edit protected gate files and wait for an approval.
+    - The `rounds` group in `scripts/gates.py` runs these pins. Its resume path rechecks the live inputs and source.
 - Freeze the proxy's decisions on a fixed profile, so a smarter brain does not make the stand-in human smarter.
 - New census lines:
   - D1 "far-human preference": the share of picks where a human is chosen while an engageable bot is at least 2× nearer;
@@ -230,16 +235,22 @@ Each stage lands alone, deletes what it replaces, and uses only filtered tests (
 - **Accept:** golden hashes pinned; baseline table written; space hash unchanged by the merge (or the change explained to LightVelox).
 
 ### Stage 1: the skeleton (carve)
+
+Source checkpoint verified November 11. The [design and test results](bot-carve-design.md)
+document the declared droideka hash move, matching census and space pins, and
+timing within budget.
+
 - New `ai/brain/{situation, selector, behaviours/*}`. The existing chain order becomes fixed step scores, so it behaves the same.
 - Navigator API becomes the only `Route` writer (34 sites go to 1 module).
 - Droideka and fixer become mover modes. The pad is written only by the mover and the gunner.
-- The behaviour is real state and hashed. The droideka reads it legitimately.
-- Space rounds run the new skeleton only if their golden hash is identical. Otherwise they keep the legacy `chain` behind `RoundRules` until LightVelox agrees.
+- Ground bot droidekas read the behaviour label and include it in their unit hash. The ground walk owner is diagnostic.
+- Space and difficulty proxies use the legacy chain. The shadow feature compares
+  the ground pipeline with the legacy chain on identical ground bot inputs.
 - **Accept:**
   - ground hash identical, or a declared move with every census line inside seed noise on 34 maps × 6 seeds (recycles, relocations, stand20, Recover %, B12, kills a minute);
   - space golden unchanged;
   - think time within +5 %.
-- **Delete:** `walk_kind`/`WalkAsk` chain, the label derivation (`brain.rs` ~896-930), `fix::serve` pad override, `droideka::steer` pad edits.
+- **Ground replacements:** fixed walk priorities and the post-walk label table. The mover and foot gunner apply cutter and droideka plans. Legacy and diagnostic readers retain the existing movement codes.
 
 ### Stage 2: state by owner
 - `AiState` split.
@@ -290,18 +301,18 @@ Each stage lands alone, deletes what it replaces, and uses only filtered tests (
 
 ## 5. Risks and open questions for the maintainer
 
-1. **Hash identity of the carve may not be achievable.** The chain mutates `hold`, `route` and `fight` mid-tick in an order-dependent way. The fallback is "declared hash move with no census metric outside seed noise". Is that acceptable for stage 1?
-2. **Space.** Do we keep a frozen legacy brain for space foot bots for a while, or ask LightVelox to accept a re-baseline? Either way, stage 0's pinned space goldens come first.
-3. **Proxy validity.**
-   - The bands passed on Nov 3 partly through levers now gone: pressure, Elite view ×1.5, and bot headshots ×3.
-   - Expect Hard and Elite to drop after B1/B2, before any behaviour work.
-   - The proxy must stop sharing the tiered brain.
-   - Recalibrate it against one live playtest at Normal?
-4. **Think rate as a tier lever.** Slower thinks at Easy and Normal (0.67 / 0.5 s) are a real competence cut and save CPU. BOTD D1 chose one rate everywhere. Your call.
+1. **Hash changes.** Stage 1 uses the approved declared-move rule and retains
+   its measured equivalence. Later stages need their own acceptance checks.
+2. **Space.** Stage 1 keeps legacy space foot dispatch. Coordinate any later
+   space work and new baselines with LightVelox.
+3. **Proxy validity.** Stage 0 froze the proxy. A live Normal playtest comparison
+   still needs evidence. The [November gate study](faction-balance-2026-11.md)
+   records the current awards-off cohorts and misses.
+4. **Think cadence.** Stage 1 keeps one think cadence across all tiers.
 5. **Tuning burden.** Utility can grow knobs. Proposed limits: at most 4 considerations per behaviour, weights shared across tiers, and tiers change gates plus one weight each. Is that tight enough?
 6. **Elite TOKN 7 plus focus** could read as ganging up (the D1 feel). Should focus at Elite need the human to be the top local threat, as proposed, or stay as it is today?
 7. **Investigate** was measured and not taken in October: Polis Massa bots milled under an unreachable sniper. With exits and commitment it may now work. Retry at Hard and Elite only?
-8. **Map bias** (Kamino 0/8, Mygeeto 8/8 symmetric) dominates per-map results. The three check maps and the both-sides average must stay the judge. Confirm we never tune per map.
+8. **Map bias** (Kamino 0/8, Mygeeto 8/8 symmetric) dominates per-map results. Use both sides and retain the four-map and BF1 cohort results. Per-map tuning remains open.
 9. **Scope.** Vehicle drivers (`ride`, `flyer_drive`, `walker_drive`, `hover_drive`) stay as they are and are entered through Board/Ride. Aircraft AI (#131) is not part of this rework.
 10. **Sequencing.** Every stage edits `core/src/ai/`. Under the 2-heavy-job cap, stages 1-5 are serial. Stage 6 (mover) is the only parallel track.
 

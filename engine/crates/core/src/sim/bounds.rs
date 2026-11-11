@@ -863,6 +863,7 @@ impl Sim {
         let mut order = 0u32;
         let mut end = None;
         let mut cells = 0usize;
+        let space = self.space_round();
         // The floor a column answers from one height: up to eight cells step
         // onto it from the same floor, and only their walls differ.
         let mut floors: std::collections::HashMap<(i32, i32, u32), Option<f32>> =
@@ -902,9 +903,12 @@ impl Sim {
                 let f = *floors
                     .entry((n.0, n.1, y.to_bits()))
                     .or_insert_with(|| self.return_floor(p, np));
-                let Some(f) = f.filter(|&f| self.return_clear(p, np, f)) else {
+                let Some(f) = f else {
                     continue;
                 };
+                if space && !self.return_clear(p, np, f) {
+                    continue;
+                }
                 let nk = key(n, f);
                 let nlen = len
                     + if dx != 0 && dz != 0 {
@@ -912,7 +916,10 @@ impl Sim {
                     } else {
                         RETURN_CELL
                     };
-                if seen.get(&nk).is_some_and(|&(_, _, l)| l <= nlen) {
+                // A ground edge that cannot improve this storey needs no wall ray.
+                if seen.get(&nk).is_some_and(|&(_, _, l)| l <= nlen)
+                    || (!space && !self.return_clear(p, np, f))
+                {
                     continue;
                 }
                 seen.insert(nk, (k, f, nlen));

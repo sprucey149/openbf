@@ -36,6 +36,7 @@
 //! pilot's need-gunner call, `Sim::need_gunner_call`, temporarily boards
 //! recipients over their retained Hold/Follow order, WGORD).
 
+use crate::ai::route::{self, Refresh};
 use crate::unit::UnitHandle;
 use glam::Vec3;
 
@@ -491,7 +492,7 @@ impl crate::sim::Sim {
                 } else {
                     // Leaving ends the vehicle route, not another player's
                     // retained field order or its accumulated release clock.
-                    ai.route = None;
+                    route::clear(ai);
                 }
                 let r = ai.ride.get_or_insert_default();
                 r.board = None;
@@ -529,7 +530,7 @@ impl crate::sim::Sim {
                     r.player_board = None;
                 }
                 self.units[i].ai.ride = Some(r);
-                self.units[i].ai.route = None;
+                route::clear(&mut self.units[i].ai);
                 (admitted, false)
             }
             Order::MoveOut | Order::AtEase => {
@@ -786,23 +787,19 @@ pub fn steer(
                 let cur = g.and_then(|g| crate::ai::start_hub(sim, g, me));
                 match (g, cur, dest) {
                     (Some(g), Some(cu), Some(de)) if g.reachable(cu, de, m.ty) => {
-                        if st.route.is_none_or(|r| r.dest_hub != de) {
-                            st.route = crate::ai::plan_leg(sim, st, me, cu, de, None, nt);
-                        }
+                        route::keep_or_plan(sim, st, me, cu, de, nt);
                     }
-                    _ => st.route = None,
+                    _ => route::clear(st),
                 }
                 // The last leg ends at the goal itself, not at its hub.
-                if let Some(r) = st.route.as_mut().filter(|r| r.is_last()) {
-                    r.waypoint = c.goal;
-                }
+                route::set_last_waypoint(st, c.goal, Refresh::None);
             } else {
-                st.route = None;
+                route::clear(st);
             }
         }
         CommandKind::Hold(spot) => {
             // The PS2's hold agent never moves the unit.
-            st.route = None;
+            route::clear(st);
             c.goal = spot;
         }
     }

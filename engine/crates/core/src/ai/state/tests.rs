@@ -15,7 +15,7 @@ fn the_route_is_part_of_the_ai_hash() {
     };
     let mut a = AiState::default();
     let base = hash(&a);
-    a.route = Some(Route::default());
+    a.install_route_for_fixture(Some(Route::default()));
     assert_ne!(base, hash(&a), "having a route is hashed");
     for mutate in [
         (|r: &mut Route| r.dest_hub = 3) as fn(&mut Route),
@@ -35,11 +35,13 @@ fn the_route_is_part_of_the_ai_hash() {
         |r: &mut Route| r.detour_at = 1,
     ] {
         let mut b = AiState {
-            route: Some(Route::default()),
+            nav: crate::ai::route::NavState::for_fixture(Some(Route::default())),
             ..AiState::default()
         };
         let before = hash(&b);
-        mutate(b.route.as_mut().unwrap());
+        let mut r = b.route().unwrap();
+        mutate(&mut r);
+        b.install_route_for_fixture(Some(r));
         assert_ne!(before, hash(&b), "every Route field is hashed");
     }
     // ... and the two AiState fields Phase A.1 added.
@@ -393,4 +395,48 @@ fn endgame_command_departure_changes_the_hashed_future() {
         ..ordinary
     };
     assert_ne!(bytes(&ordinary), bytes(&departed));
+}
+
+#[test]
+fn the_label_is_hashed_only_for_a_ground_bot_droideka() {
+    use crate::ai::proxy::Strength;
+    use crate::droideka::DroidekaClass;
+    use crate::sim::{CtfState, Sim};
+    use crate::unit::{Controller, UnitSpec};
+    use std::sync::Arc;
+
+    for (droideka, controller, proxy, space, hashed) in [
+        (false, Controller::Ai, false, false, false),
+        (true, Controller::Ai, false, false, true),
+        (true, Controller::Player { slot: 0 }, false, false, false),
+        (true, Controller::Ai, true, false, false),
+        (true, Controller::Ai, false, true, false),
+    ] {
+        let mut sim = Sim::empty(42);
+        if space {
+            sim.install_ctf(CtfState::new_space_one_flag(
+                5,
+                Vec3::ZERO,
+                -Vec3::X,
+                Vec3::X,
+            ));
+        }
+        let me = sim
+            .spawn(&UnitSpec {
+                controller,
+                droideka: droideka.then(|| Arc::new(DroidekaClass::default())),
+                ..UnitSpec::trooper(0, Vec3::ZERO)
+            })
+            .expect("spawn hash witness");
+        let u = sim.unit_mut(me).unwrap();
+        u.proxy_human = proxy.then(|| Strength::Good.profile());
+        u.ai.behaviour = Behaviour::Travel;
+        let before = sim.hash();
+        sim.unit_mut(me).unwrap().ai.behaviour = Behaviour::Fight;
+        assert_eq!(
+            sim.hash() != before,
+            hashed,
+            "droideka {droideka}, controller {controller:?}, proxy {proxy}, space {space}"
+        );
+    }
 }
