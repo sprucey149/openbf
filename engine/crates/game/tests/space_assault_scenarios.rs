@@ -14,8 +14,8 @@ use core::impact::Surface;
 use core::missile::{Missile, MissileTarget};
 use core::projectile::{Bolt, Hit};
 use core::sim::{
-    CriticalSystem, Event, PadState, ShieldGroup, Sim, SpaceAssault, Station, StationClass,
-    SPENT_MAX_HEALTH,
+    CriticalSystem, DeathCause, Event, PadState, ShieldGroup, Sim, SpaceAssault, Station,
+    StationClass, SPENT_MAX_HEALTH,
 };
 use core::unit::UnitSpec;
 use core::vehicle::flyer::FlyerParams;
@@ -182,7 +182,30 @@ fn incoming_missile_warning_lifecycle_and_hud_events() {
         Some(&EventValue::Number(dist_val))
     );
 
+    sim.unseat_unit(pilot);
+    sim.step(&[]);
+    assert_eq!(sim.incoming_missile(0), None);
+    feed(&mut hud, &HudModel::default(), &has_mesh);
+    assert_eq!(hud.last("player1.missileLock"), None);
+    assert_eq!(hud.last("player1.missileLockDistance"), None);
+
+    sim.units[pilot.index as usize].mount = Some(core::vehicle::Mount {
+        vehicle: vh,
+        seat: 0,
+    });
+    sim.vehicle_mut(vh).unwrap().seats[0].occupant = Some(pilot);
+    sim.step(&[]);
+    assert!(sim.incoming_missile(0).is_some());
+    feed(
+        &mut hud,
+        &HudModel {
+            incoming_missile: sim.incoming_missile(0),
+            ..Default::default()
+        },
+        &has_mesh,
+    );
     // Step 3: Missile hits or expires -> incoming_missile becomes None
+    let missile = sim.bolts[0].clone();
     sim.bolts.clear();
     sim.step(&[]);
     assert_eq!(sim.incoming_missile(0), None);
@@ -197,6 +220,23 @@ fn incoming_missile_warning_lifecycle_and_hud_events() {
         None,
         "warning turned off after missile expires"
     );
+    sim.bolts.push(missile);
+    sim.step(&[]);
+    assert!(sim.incoming_missile(0).is_some());
+    feed(
+        &mut hud,
+        &HudModel {
+            incoming_missile: sim.incoming_missile(0),
+            ..Default::default()
+        },
+        &has_mesh,
+    );
+    sim.kill_environment(pilot, DeathCause::VehicleDestroyed);
+    sim.step(&[]);
+    assert_eq!(sim.incoming_missile(0), None);
+    feed(&mut hud, &HudModel::default(), &has_mesh);
+    assert_eq!(hud.last("player1.missileLock"), None);
+    assert_eq!(hud.last("player1.missileLockDistance"), None);
 }
 
 #[test]

@@ -1137,7 +1137,8 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 
 - `core/src/sim/deathmatch/tests.rs` 182 — deathmatch kills, suicides/team kills, score limit win condition, class pickers and hash invariance tests.
 - `core/src/sim/space_assault.rs` 550 — Space Assault team points, capital ship critical systems, linked shields, shieldgen collapse and interior links, the auto-defense mainframe and the round's end · `SpaceAssault`, `space_team_points`, `DEFAULT_SCORE_LIMIT`; `analysis/re-space-assault.md`.
-- `core/src/sim/space_assault/tests.rs` 368 — point awards, link order, shield collapse, defeat and hash inclusion checks.
+- `core/src/sim/space_assault/tests.rs` 451 — point awards, link order, shield collapse, mainframe repair and turret team restoration, defeat and hash inclusion checks.
+- `game/tests/space_assault_scenarios.rs` 625 — synthetic Assault feedback, incoming warning cleanup, shield routing, system repair and scoring scenarios.
 - `core/src/sim/space_balance.rs` 372 — Space Assault background balance director, unseen fighter and system attrition, score nudges and difficulty throttling · `SpaceBalance`, `Sim::tick_space_balance`, `balance_nudges`, `balance_time_factor`.
 - `core/src/sim/space_balance/tests.rs` 276 — unseen fighter/system attrition, quiet windows, score margin nudges, ordnance valuation and hash inclusion checks.
 - `core/src/sim/ctf.rs` 783 — Instant Action One-Flag and Two-Flag CTF simulation state, space flyer and foot pickup spheres, drop cooldown/timeout, touch return, hangar capture scoring and hash inclusion · `CtfState`, `CtfMode`, `Flag`, `FlagStatus`, `Sim::install_ctf`; `analysis/re-ctf.md`.
