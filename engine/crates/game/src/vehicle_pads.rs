@@ -193,6 +193,8 @@ pub struct PadBuild {
 pub struct FlyerExhaust {
     pub effect: String,
     pub local: glam::Mat4,
+    pub node: Option<String>,
+    pub offset: Vec3,
 }
 
 fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<FlyerExhaust> {
@@ -231,6 +233,8 @@ fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<
             FlyerExhaust {
                 effect,
                 local: base * glam::Mat4::from_translation(offset),
+                node,
+                offset,
             }
         })
         .collect()

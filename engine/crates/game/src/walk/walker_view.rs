@@ -37,6 +37,7 @@ pub fn camera_on_frame(
 impl WalkSim {
     pub fn load_walker_views(&mut self, manifest: &manifest::Manifest, root: &std::path::Path) {
         self.walker_rigs = crate::viewer::walker_rigs(manifest, root, &self.vehicle_geometry);
+        self.flyer_rigs = crate::viewer::flyer_rigs(manifest, root, &self.vehicle_geometry);
     }
 
     /// Read each vehicle class's model top, once [`Self::vehicle_geometry`] is set.

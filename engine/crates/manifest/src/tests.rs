@@ -634,6 +634,11 @@ fn full_vehicles() -> VehicleManifest {
             sphere: Some([0.0, 0.403_274_57, 0.647_098_5, 1.936_126_4]),
             vis_min_y: Some(-1.778_591),
             vis_box: Some(([-1.0, -1.778_591, -2.0], [1.0, 1.5, 2.0])),
+            flyer: Some(ManifestFlyer {
+                bank: "fighter".into(),
+                skin: "fighter".into(),
+                frames: 3,
+            }),
             walker: Some(ManifestWalker {
                 bank: "imp_walk_atst".into(),
                 clips: vec![

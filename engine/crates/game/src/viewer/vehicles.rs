@@ -128,6 +128,7 @@ struct Side {
     /// LOD0 model (lowercase) → the walker record that names it as its
     /// skin (card WSKN).
     walkers: HashMap<String, manifest::ManifestWalker>,
+    flyers: HashSet<String>,
     walker_seats: HashMap<String, Vec<crate::vehicle_class::SeatSpec>>,
 }
 
@@ -214,6 +215,12 @@ impl VehicleSides {
                                     Some((w.skin.as_ref()?.to_ascii_lowercase(), w.clone()))
                                 })
                                 .collect(),
+                            flyers: m
+                                .vehicles
+                                .iter()
+                                .filter_map(|v| v.flyer.as_ref())
+                                .map(|f| f.skin.to_ascii_lowercase())
+                                .collect(),
                             dir,
                         })
                     }
@@ -264,6 +271,7 @@ impl VehicleSides {
                         models,
                         textures,
                         walkers: HashMap::new(),
+                        flyers: HashSet::new(),
                         walker_seats: HashMap::new(),
                     });
                 }
@@ -489,13 +497,19 @@ impl VehicleVisuals {
                 .iter()
                 .find(|(h, _)| h.index as usize == slot && h.gen == v.gen)
                 .map(|&(_, o)| render::Fade::see_through(visibility_opacity(walker, o)));
-            let palette = class.skin.as_ref().filter(|_| walker).map(|sk| {
+            let palette = class.skin.as_ref().and_then(|sk| {
+                if v.kind == core::vehicle::VehicleKind::Flyer {
+                    return sk.rig.flyer_palette(v.flyer.lift);
+                }
+                if !walker {
+                    return None;
+                }
                 let scale = sim
                     .walker_params
                     .get(v.class as usize)
                     .and_then(Option::as_ref)
                     .map_or(1.0, |p| p.root_scale);
-                sk.rig.aimed_palette(v, scale)
+                Some(sk.rig.aimed_palette(v, scale))
             });
             let posed = match (&class.skin, &palette) {
                 (Some(skin), Some(palette)) => {
@@ -745,6 +759,31 @@ pub fn walker_rigs(
         .collect()
 }
 
+pub fn flyer_rigs(
+    manifest: &manifest::Manifest,
+    assets_dir: &Path,
+    geometry: &[Option<String>],
+) -> Vec<Option<std::sync::Arc<WalkerRig>>> {
+    let sides = VehicleSides::load(assets_dir, &manifest.source_game.to_ascii_lowercase());
+    geometry
+        .iter()
+        .map(|g| {
+            let ModelSource::Side(i, model) = find_model(manifest, &sides, g.as_deref()?)? else {
+                return None;
+            };
+            if !sides.0[i].flyers.contains(&model.to_ascii_lowercase()) {
+                return None;
+            }
+            let path = sides.dir(i).join("walkers").join(format!("{model}.glb"));
+            let asset = load_skinned_glb(&path).ok()?;
+            Some(std::sync::Arc::new(WalkerRig::new_flyer(
+                asset.skeleton,
+                asset.clips,
+            )))
+        })
+        .collect()
+}
+
 fn find_glb_path(dir: &Path, model: &str) -> std::path::PathBuf {
     let file_name = format!("{model}.glb");
     let weapons = dir.join("weapons").join(&file_name);
@@ -804,19 +843,22 @@ fn upload_class(
             (owned, joints) = (mesh, j);
             // Card WSKN: a walker model with its bones and a baked skin.
             let walker = sides.0[i].walkers.get(&model.to_ascii_lowercase());
-            if let (Some(w), false) = (walker, joints.is_empty()) {
+            let flyer = sides.0[i].flyers.contains(&model.to_ascii_lowercase());
+            if !joints.is_empty() && (walker.is_some() || flyer) {
                 let path = dir.join("walkers").join(format!("{model}.glb"));
                 match load_skinned_glb(&path) {
                     Ok(a) => {
-                        rig = Some(
+                        rig = Some(if let Some(w) = walker {
                             WalkerRig::new(a.skeleton, a.clips, w).with_seats(
                                 sides.0[i]
                                     .walker_seats
                                     .get(&model.to_ascii_lowercase())
                                     .cloned()
                                     .unwrap_or_default(),
-                            ),
-                        )
+                            )
+                        } else {
+                            WalkerRig::new_flyer(a.skeleton, a.clips)
+                        })
                     }
                     Err(e) => eprintln!("vehicles: {}: {e:#} — drawn rigid", path.display()),
                 }
@@ -1012,6 +1054,7 @@ mod texture_cache_tests {
             dir: name.into(),
             models: HashMap::new(),
             walkers: HashMap::new(),
+            flyers: HashSet::new(),
             walker_seats: HashMap::new(),
             textures: ["shared".to_owned()].into_iter().collect(),
         };
@@ -1178,6 +1221,81 @@ mod local_light_tests {
     use super::*;
     use core::vehicle::{BlastSetup, VehicleKind, VehicleSpec};
     use glam::Vec3;
+
+    #[test]
+    fn flyer_draw_changes_with_takeoff_lift() {
+        use crate::skin::{BoneXform, Clip, Skeleton};
+        let mut r = Renderer::new_headless(64, 64).unwrap();
+        let positions = vec![[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]];
+        let normals = vec![[0.0, 0.0, 1.0]; 3];
+        let uvs = vec![[0.0, 0.0]; 3];
+        let indices = vec![0, 1, 2];
+        let mesh = r
+            .add_mesh(&MeshData {
+                positions: &positions,
+                normals: &normals,
+                uvs: &uvs,
+                colors: None,
+                indices: &indices,
+            })
+            .unwrap();
+        let skeleton = Skeleton::new(vec!["root".into()], vec![None], vec![Mat4::IDENTITY]);
+        let clip = Clip {
+            name: "takeoff".into(),
+            fps: 30.0,
+            frames: 2,
+            tracks: vec![Some(vec![
+                BoneXform::IDENTITY,
+                BoneXform {
+                    rotation: glam::Quat::IDENTITY,
+                    translation: Vec3::X,
+                },
+            ])],
+        };
+        let mut vis = VehicleVisuals::default();
+        vis.classes.push(Some(ClassVis {
+            parts: vec![Part {
+                mesh,
+                texture: None,
+                layer: DrawLayer::Opaque,
+                spec: None,
+                light: LightPath::Lit,
+                skin: Some((vec![0, 1, 2], indices)),
+            }],
+            skin: Some(Skin {
+                rig: WalkerRig::new_flyer(skeleton, vec![clip]),
+                positions,
+                normals,
+                uvs,
+                colors: vec![[255; 4]; 3],
+                joints: vec![[0; 4]; 3],
+            }),
+            shadows: Vec::new(),
+        }));
+        let mut sim = core::sim::Sim::empty(1);
+        let handle = sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos: Vec3::new(0.0, 0.0, -5.0),
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: Vec::new(),
+        });
+        let draws = vis.draws(&mut r, &sim, &[]);
+        r.render(&render::Camera::default(), &draws, [0.0; 4])
+            .unwrap();
+        let landed = r.capture_rgba().unwrap().0;
+        sim.vehicle_mut(handle).unwrap().flyer.lift = 1.0;
+        let draws = vis.draws(&mut r, &sim, &[]);
+        r.render(&render::Camera::default(), &draws, [0.0; 4])
+            .unwrap();
+        let flying = r.capture_rgba().unwrap().0;
+        assert_ne!(landed, flying);
+    }
 
     #[test]
     fn vehicle_draws_gather_local_lights_from_the_model_sphere() {

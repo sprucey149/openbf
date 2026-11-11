@@ -14,7 +14,39 @@ impl Fx {
                     FlightPhase::Takeoff | FlightPhase::Flying | FlightPhase::Landing
                 )
         };
-        let frame = |v: &core::vehicle::Vehicle, local: glam::Mat4| {
+        let nodes: Vec<_> = walk
+            .sim
+            .vehicles
+            .iter()
+            .map(|v| {
+                if !active(v)
+                    || walk
+                        .flyer_exhaust
+                        .get(v.class as usize)
+                        .is_none_or(Vec::is_empty)
+                {
+                    return None;
+                }
+                walk.flyer_rigs
+                    .get(v.class as usize)?
+                    .as_ref()?
+                    .flyer_nodes(v.flyer.lift)
+            })
+            .collect();
+        let frame = |vehicle_index: usize,
+                     v: &core::vehicle::Vehicle,
+                     exhaust: &crate::vehicle_pads::FlyerExhaust| {
+            let local = exhaust
+                .node
+                .as_deref()
+                .and_then(|name| {
+                    let rig = walk.flyer_rigs.get(v.class as usize)?.as_ref()?;
+                    let bone = rig.skeleton.index_of(name)?;
+                    nodes.get(vehicle_index)?.as_ref()?.get(bone).copied()
+                })
+                .map_or(exhaust.local, |node| {
+                    node * glam::Mat4::from_translation(exhaust.offset)
+                });
             let m = glam::Mat4::from_rotation_translation(v.rot, v.pos) * local;
             Frame {
                 pos: m.w_axis.truncate(),
@@ -37,7 +69,7 @@ impl Fx {
                         .map(|e| (v, e))
                 });
             if let Some((vehicle, exhaust)) = owner {
-                effect.frame = frame(vehicle, exhaust.local);
+                effect.frame = frame(handle.index as usize, vehicle, exhaust);
             } else {
                 effect.stop();
                 effect.flyer_exhaust = None;
@@ -65,7 +97,7 @@ impl Fx {
                 {
                     continue;
                 }
-                if self.spawn(&exhaust.effect, frame(vehicle, exhaust.local)) {
+                if self.spawn(&exhaust.effect, frame(index, vehicle, exhaust)) {
                     self.live.last_mut().unwrap().flyer_exhaust = Some((handle, slot));
                 }
             }
@@ -173,6 +205,59 @@ mod tests {
     use glam::Mat4;
 
     #[test]
+    fn flyer_exhaust_follows_the_animated_attachment() {
+        use crate::skin::{BoneXform, Clip, Skeleton};
+        use crate::viewer::walker_pose::WalkerRig;
+        let root = crate::assets::baked_root();
+        let mut fx = Fx::load(&root, &root.join("bf2_spa6"), "bf2", &["cis"]);
+        let mut walk = crate::walk::WalkSim::new(42, Vec3::ZERO, None);
+        let skeleton = Skeleton::new(vec!["engine".into()], vec![None], vec![Mat4::IDENTITY]);
+        let clip = Clip {
+            name: "takeoff".into(),
+            fps: 30.0,
+            frames: 2,
+            tracks: vec![Some(vec![
+                BoneXform::IDENTITY,
+                BoneXform {
+                    rotation: glam::Quat::IDENTITY,
+                    translation: Vec3::X * 2.0,
+                },
+            ])],
+        };
+        walk.flyer_rigs = vec![Some(std::sync::Arc::new(WalkerRig::new_flyer(
+            skeleton,
+            vec![clip],
+        )))];
+        walk.flyer_exhaust = vec![vec![crate::vehicle_pads::FlyerExhaust {
+            effect: "com_sfx_exhaust_jedistarfighter".into(),
+            local: Mat4::IDENTITY,
+            node: Some("engine".into()),
+            offset: Vec3::Y,
+        }]];
+        let handle = walk.sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![],
+        });
+        walk.sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Takeoff;
+        fx.follow_flyer_exhaust(&walk);
+        assert_eq!(fx.live[0].frame.pos, Vec3::Y);
+        walk.sim.vehicle_mut(handle).unwrap().flyer.lift = 0.5;
+        fx.follow_flyer_exhaust(&walk);
+        assert!(fx.live[0]
+            .frame
+            .pos
+            .abs_diff_eq(Vec3::new(1.0, 1.0, 0.0), 1e-5));
+    }
+
+    #[test]
     fn flyer_exhaust_follows_the_craft_and_stops_on_landing() {
         let root = crate::assets::baked_root();
         let mut fx = Fx::load(&root, &root.join("bf2_spa6"), "bf2", &["cis"]);
@@ -180,6 +265,8 @@ mod tests {
         walk.flyer_exhaust = vec![vec![crate::vehicle_pads::FlyerExhaust {
             effect: "com_sfx_exhaust_jedistarfighter".into(),
             local: Mat4::from_translation(Vec3::new(0.0, 1.0, -3.0)),
+            node: None,
+            offset: Vec3::ZERO,
         }]];
         let handle = walk.sim.spawn_vehicle(&VehicleSpec {
             kind: VehicleKind::Flyer,

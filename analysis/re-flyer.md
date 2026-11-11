@@ -47,10 +47,26 @@ clips in its named animation bank. `FUN_00201300` (114590–114640)
 samples `takeoff` at its lift fraction times the clip's last frame, with a
 render-frame adjustment during the transition. The local BF2 side banks
 contain a 121-frame `takeoff` clip for `all_fly_xwing` and a 72-frame clip
-for `cis_fly_droidfighter`; both are currently omitted by the vehicle bake,
-which only bakes walker skins. A correct fix needs the flyer skeleton and
-clip baked and the model posed through landed, takeoff, flying and landing,
-including moving muzzle and exhaust attachments. This remains unimplemented.
+for `cis_fly_droidfighter`; both were omitted by the vehicle bake,
+which previously only baked walker skins. The vehicle bake now writes these
+flyer rigs and clips and the runtime samples them using the interpolated
+lift fraction. The rendered model can therefore transform through landed,
+takeoff, flying and landing. Exhaust attachments follow the sampled node;
+weapon origins still use their bind poses, so trace and implement their
+animated transforms. A matched PCSX2 visual comparison remains outstanding.
+The maintainer playtested the transformation build and reported that it worked.
+
+At revision b5f1818a plus this change, local PS2 ALL and CIS vehicle bakes
+produced the X-wing and droid starfighter rigs. Sampling their first and last
+frames moved 2,199 of 2,846 X-wing vertices and 3,031 of 3,031 droid
+starfighter vertices by over 1 cm. `cargo test --manifest-path
+engine/Cargo.toml -p game --test flyer baked_flyer_takeoff_clips_move_the_models`
+passed, as did the synthetic lift interpolation and manifest round-trip
+checks. These establish a changing pose, not visual agreement with PCSX2.
+`scripts/gpu_tests.sh --game-lib flyer_draw_changes_with_takeoff_lift` passed
+its serial headless GPU test, and `cargo test --manifest-path engine/Cargo.toml
+-p game --lib flyer_exhaust_follows_the_animated_attachment` passed its
+attachment test. Both are controlled tests rather than original-game captures.
 
 **Installed for space only (2026-11-01).** The sim implements these rules against
 `Sim::landing_regions`, filled from the mission's `landing_regions`, which

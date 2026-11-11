@@ -806,7 +806,16 @@ pub struct ManifestVehicle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub walker: Option<ManifestWalker>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flyer: Option<ManifestFlyer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vis_box: Option<([f32; 3], [f32; 3])>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestFlyer {
+    pub bank: String,
+    pub skin: String,
+    pub frames: u16,
 }
 
 /// What a walker's integrator reads from its bake (card WALK,

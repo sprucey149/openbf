@@ -695,6 +695,7 @@ pub struct WalkSim {
     /// ([`crate::viewer::model_tops`]), for [`vehicle_pull_height`].
     pub vehicle_tops: Vec<Option<f32>>,
     pub walker_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
+    pub flyer_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
     pub flyer_exhaust: Vec<Vec<crate::vehicle_pads::FlyerExhaust>>,
     pub vehicle_weapon_hud: Vec<Vec<Vec<WeaponHud>>>,
@@ -877,6 +878,7 @@ impl WalkSim {
             vehicle_seats: Vec::new(),
             vehicle_tops: Vec::new(),
             walker_rigs: Vec::new(),
+            flyer_rigs: Vec::new(),
             vehicle_weapon_hud: Vec::new(),
             walker_shot_styles: Default::default(),
             flyer_exhaust: Vec::new(),

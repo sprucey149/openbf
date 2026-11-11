@@ -71,6 +71,7 @@ pub struct VehiclePose {
     /// `WalkerState::aim_yaw` / `aim_pitch`.
     pub aim: (f32, f32),
     pub walker: Option<WalkerPose>,
+    pub flyer_lift: Option<f32>,
 }
 
 /// One remote droid's or auto-turret's drawn pose, matched across ticks by its id.
@@ -155,6 +156,7 @@ impl Pose {
                     .map(|g| g.as_ref().map(|g| [g.look, g.aim]))
                     .collect(),
                 aim: (v.walker.aim_yaw, v.walker.aim_pitch),
+                flyer_lift: (v.kind == core::vehicle::VehicleKind::Flyer).then_some(v.flyer.lift),
                 walker: (v.kind == core::vehicle::VehicleKind::Walker).then(|| {
                     WalkerPose::capture(
                         v,
@@ -248,6 +250,9 @@ impl Pose {
                 }
             }
             (v.walker.aim_yaw, v.walker.aim_pitch) = p.aim;
+            if let Some(lift) = p.flyer_lift {
+                v.flyer.lift = lift;
+            }
             if let Some(p) = &p.walker {
                 p.write(v);
             }
@@ -373,6 +378,9 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
             }
         }
         o.aim = lerp_look(p.aim, o.aim, t);
+        if let (Some(current), Some(previous)) = (&mut o.flyer_lift, p.flyer_lift) {
+            *current = mix(previous, *current, t);
+        }
         if let (Some(o), Some(p)) = (o.walker.as_mut(), p.walker.as_ref()) {
             o.blend(p, t);
         }
@@ -866,9 +874,25 @@ mod tests {
         );
     }
 
-    /// A seat's aimer is blended with its look: a building turret's gun
-    /// draws along `GunState::aim`, and a 60 Hz frame of a bot's gun
-    /// turning 0.3 deg a tick drew it in 30 Hz steps.
+    #[test]
+    fn flyer_lift_is_drawn_between_ticks() {
+        let pose = |lift| Pose {
+            vehicles: vec![VehiclePose {
+                gen: 1,
+                alive: true,
+                pos: Vec3::ZERO,
+                rot: Quat::IDENTITY,
+                looks: Vec::new(),
+                aim: (0.0, 0.0),
+                walker: None,
+                flyer_lift: Some(lift),
+            }],
+            ..Pose::default()
+        };
+        let mid = blend(&pose(0.2), &pose(0.8), 0.5);
+        assert!((mid.vehicles[0].flyer_lift.unwrap() - 0.5).abs() < 1e-6);
+    }
+
     #[test]
     fn a_guns_aimer_is_drawn_between_its_ticks() {
         let pose = |look: f32, aim: f32| Pose {
@@ -880,6 +904,7 @@ mod tests {
                 looks: vec![None, Some([(look, 0.0), (aim, 0.2)])],
                 aim: (0.0, 0.0),
                 walker: None,
+                flyer_lift: None,
             }],
             ..Pose::default()
         };

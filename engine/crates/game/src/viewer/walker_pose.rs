@@ -48,6 +48,39 @@ pub struct WalkerRig {
 }
 
 impl WalkerRig {
+    pub fn new_flyer(skeleton: Skeleton, clips: Vec<Clip>) -> Self {
+        let flyer = manifest::ManifestWalker {
+            bank: String::new(),
+            clips: Vec::new(),
+            prims: Vec::new(),
+            skin: None,
+            layer_bones: Vec::new(),
+        };
+        Self::new(skeleton, clips, &flyer)
+    }
+
+    pub fn flyer_palette(&self, lift: f32) -> Option<Vec<Mat4>> {
+        let clip = self
+            .clips
+            .iter()
+            .find(|clip| clip.name.eq_ignore_ascii_case("takeoff"))?;
+        let frame = lift.clamp(0.0, 1.0) * clip.frames.saturating_sub(1) as f32;
+        Some(
+            self.skeleton
+                .palette(&clip.sample(&self.skeleton, frame, false).locals()),
+        )
+    }
+
+    pub fn flyer_nodes(&self, lift: f32) -> Option<Vec<Mat4>> {
+        Some(
+            self.flyer_palette(lift)?
+                .iter()
+                .zip(&self.skeleton.global_bind)
+                .map(|(palette, bind)| *palette * *bind)
+                .collect(),
+        )
+    }
+
     /// The rig from a skin GLB's skeleton and clips and the class's walker
     /// record (its entries' clip names and its pairs' layer bones).
     pub fn new(skeleton: Skeleton, clips: Vec<Clip>, walker: &manifest::ManifestWalker) -> Self {
@@ -346,6 +379,28 @@ mod tests {
     fn angle_x(q: Quat) -> f32 {
         let (axis, a) = q.to_axis_angle();
         a * axis.x.signum()
+    }
+
+    #[test]
+    fn flyer_takeoff_pose_tracks_lift_between_authored_frames() {
+        let skeleton = Skeleton::new(vec!["root".into()], vec![None], vec![Mat4::IDENTITY]);
+        let clip = Clip {
+            name: "takeoff".into(),
+            fps: 30.0,
+            frames: 2,
+            tracks: vec![Some(vec![
+                BoneXform::IDENTITY,
+                BoneXform {
+                    rotation: Quat::IDENTITY,
+                    translation: Vec3::X * 2.0,
+                },
+            ])],
+        };
+        let rig = WalkerRig::new_flyer(skeleton, vec![clip]);
+        for (lift, x) in [(0.0, 0.0), (0.5, 1.0), (1.0, 2.0)] {
+            let palette = rig.flyer_palette(lift).unwrap();
+            assert!((palette[0].w_axis.x - x).abs() < 1e-5);
+        }
     }
 
     #[test]
