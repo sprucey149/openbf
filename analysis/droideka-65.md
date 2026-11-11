@@ -57,7 +57,7 @@ PROVISIONAL [H] or OURS, each named so it can be replaced when read:
   `cis_droideka_shield_on` (the infinite-ammo fire path does not run [H]).
 - HUD: the shield charge is the stamina bar and BF2's `hud_droideka_shield` the secondary row, on both games (the maintainer, 2026-10-30; OURS for the bar). The primary shows the repeater's `hud_vehicle_lasers`.
 - Death: BF1's five CHUNKSECTIONs are not spawned (chunk models not baked).
-- From the sim and draw stages: recover order deploys (RE: walk out of a stuck spot); the AI clears SPRINT and
+- From the sim and draw stages: a bot's Recover rolls (OURS, 2026-11-10; the original deploys for its short stuck walk, which the port's Recover is not: `analysis/faction-balance-2026-11.md`); the AI clears SPRINT and
   ACTION; the legs offset is not drawn; ball spin drives the roll clip time; the ball lean is a model rotation;
   ordnance prims are bind-pose spheres; BF1's untagged prims follow one rule; droideka voices are exempt; the walk
   uses the human yaw and mouse turn; the player spawns deployed; the main bar shows shield charge; issue #85 adds a refusal message for the ball jump, which since 2026-11-02 spends the shared bar; a player's ball sprints on the held sprint button and spends the shield's bar, standing never sprints, bots never sprint (the maintainer, 2026-11-01; `re-droideka-unit.md` section 9); the barrels alternate [H];

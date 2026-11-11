@@ -18,6 +18,7 @@ fn texts() -> Texts {
         ("common.sides.all.lastnames.01", "Pulastra"),
         ("level.hoth.cp5", "Echo Base"),
         ("weapons.imp.weap.inf_rifle", "Blaster Rifle"),
+        ("game.awards.bonus.regulator", "Award: Flechette Shotgun"),
         ("ifs.sideselect.chooseteam", "Select a team"),
         ("entity.all.inf_soldier", "Rebel Soldier"),
         ("entity.imp.inf_rifleman", "Stormtrooper"),
@@ -1064,6 +1065,37 @@ fn the_spawn_screens_read_the_table() {
         feed.text_by_hash(0xecf8_496f, "Unit Count: %d"),
         "Unit Count: %d"
     );
+}
+
+/// Our own award, the Heavy Blast Cannon, has our own name and earned line,
+/// which no disc has; BF2's awards keep BF2's (`game.awards.bonus.<medal>`).
+#[test]
+fn the_heavy_blast_cannon_has_its_own_name_and_line() {
+    let feed = EventFeed::new(texts(), ["all", "imp"], &[]);
+    for class in ["all_weap_award_blast_cannon", "imp_weap_award_blast_cannon"] {
+        assert_eq!(
+            feed.weapon_name(class).as_deref(),
+            Some("AWARD Blast Cannon"),
+            "{class}"
+        );
+        assert_eq!(
+            feed.award_bonus("regulator", Some(class)).as_deref(),
+            Some("Award: Heavy Blast Cannon"),
+            "{class}"
+        );
+    }
+    assert_eq!(
+        feed.award_bonus("regulator", Some("imp_weap_award_shotgun"))
+            .as_deref(),
+        Some("Award: Flechette Shotgun")
+    );
+    assert_eq!(
+        feed.award_bonus("regulator", None).as_deref(),
+        Some("Award: Flechette Shotgun")
+    );
+    assert_eq!(feed.award_bonus("warhero", None), None);
+    assert_eq!(feed.weapon_name("imp_weap_award_shotgun"), None);
+    assert_eq!(feed.weapon_name("geo_weap_award_blast_cannon"), None);
 }
 
 #[test]

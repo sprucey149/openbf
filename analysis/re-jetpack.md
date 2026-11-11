@@ -580,6 +580,17 @@ The BF2 bot's hover-attack gate (`core::ai::jet`, the trip's time against the fu
 times farther away, and an attack takes the place of a plain hop, so BF2 jet-trooper bots attack from the air more
 and hop less. BF1 maps and maps without a jet trooper keep their hashes.
 
+**Amended 2026-11-10, the dark troopers' refill (the maintainer: "make it the faster refill stat, again we're trying
+to normalize things across both games", `[ours]`):** BF1's two dark troopers (`imp_inf_dark_trooper`,
+`imp_inf_dark_troopersnow`) refill their leap at BF2's dark trooper's `JetFuelRechargeRate`, 0.075 / s in place of
+BF1's 0.025 (`game::roster::BF1_LEAP_REFILL`, a one-game row beside `BF1_JET_BORROW`). Back to the lift-off border
+that is 6.5 s, not 19.6 s (the snow variant's border 0.4: 5.3 s, not 16 s). The rest stays each disc's: BF1's 21 m/s
+kick, lift-off cost 0.5 (snow 0.4), border 0.49 (snow 0.4) and no cost in flight; BF2's numbers on BF2 maps. A dark
+trooper bot on a BF1 GCW map can leap again in a third of the wait, so those rounds move: the round goldens' `bf1_yav2`, `tat1`
+and `bf1_nab2` rounds end at other ticks, some with the other winner (`award-weapons.md` section 11). Test:
+`roster::bf1_dark_troopers_refill_their_leap_as_bf2s`; `roster::the_jet_classes_carry_their_disc_numbers` and
+`roster::every_jet_trooper_flies_as_long_as_bf1s` hold the new value.
+
 Built for human players and the sim; bots, effects, sounds, the HUD bar and the animation are card JETP2 (12 steps
 9-13).
 
@@ -620,7 +631,7 @@ section until 2026-11-01).
 | BF1 jet trooper on BF2 rules | forward / strafe | (BF1: 13 / 9) | 9.75 / 5.63 (6.5 / 4.5 x 1.5 / 1.25) |
 | | flight from full / from spawn | (BF1: 7.5 s / 2.5 s, recharging in flight) | 7.5 s / 2.5 s (net cost 0.1, no recharge in flight; 3.75 s / 1.25 s before 2026-11-10) |
 | BF2 jet trooper as shipped | flight from full / from spawn / refill empty to full | (disc: 4.7 s / 1.6 s / 8.3 s) | 7.5 s / 2.5 s / 10 s (the one jet trooper profile, 2026-11-10) |
-| BF1 dark trooper on BF2 rules | | (BF1: no cancel, no drag, 19.6 s refill) | BF2's leap: tap-off, drag, stick at 10 m/s^2; refill to 0.49 at 0.025 / s = 19.6 s |
+| BF1 dark trooper on BF2 rules | | (BF1: no cancel, no drag, 19.6 s refill) | BF2's leap: tap-off, drag, stick at 10 m/s^2; refill to 0.49 at BF2's 0.075 / s = 6.5 s (0.025 / s, 19.6 s, before the 2026-11-10 refill row) |
 | Vader / Emperor | start / hover / energy | full tank, 2.5 s, 30 | full tank (0.56 s from spawn), 2.5 s, 30; the bar holds while he hovers |
 | Jedi (JumpHeight 3.5) | double jump | 16.8 m/s, 40 energy | 16.84, 40; the stick's run speed |
 | any | ceiling | spring toward 5 m under it | a climbing hover settles 4.7 m under it (15.3 m under a 20 m ceiling) |

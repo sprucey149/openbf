@@ -1,6 +1,6 @@
 # Award weapons, the stat medals and slicing on both games' maps
 
-Status: [ours], built 2026-11-10. Builds on `gameplay-normalization.md`.
+Status: [ours], built 2026-11-10 (sections 3, 10 and 11 amended the same day). Builds on `gameplay-normalization.md`.
 
 The maintainer (2026-11-10): "award weapons don't seem to be doing as much damage as they
 should. The award weapons in bf2 did more damage. Also I want to extend award weapons to bf1
@@ -22,7 +22,7 @@ BF2's PS2 class data (`engine/assets_baked/classes/bf2_*.ron`), damage to a pers
 | Award wrist blaster (1, super battle droid) | 150, far 75 | 100, far 60 | x1.5 | as the Elite rifle |
 | Precision pistol (0, Gunslinger) | 150 | 60, far 40 | x2.5 | instant hit, no fall-off, no heat, 16 rounds, 0.1 s, spread 0.1 against 0.4 |
 | Beam rifle (4, Marksman) | 600 over 0.15 s | 300 | x2.0 | a beam, 4 rounds, 1.5 s between shots, fixed x6 zoom |
-| Flechette shotgun (5, Regulator) | 85 x 7, far 25 | 65 x 8, far 15 | x1.31 a pellet, x1.14 a volley | 1.2 s against 1.0 s, full damage to shields against a quarter |
+| Flechette shotgun (5, Regulator) | 85 x 7, far 25 | 65 x 8, far 15 | x1.31 a pellet, x1.14 a volley, x0.95 a second | 1.2 s against 1.0 s, full damage to shields against a quarter |
 | Guided rocket (2, Demolition) | blast 500, radius 22.5 m, x0.2 to vehicles and buildings | none replaced | - | an extra slot beside the launcher |
 
 ### What the port did before this change
@@ -46,6 +46,14 @@ then steps the beam's life and removes it at zero or below (`FUN_0030f988`, B2:3
 a 0.15 s beam lands ceil(0.15 / dt) updates, five at the PS2's 30 Hz: 666.67. Not a port error;
 nothing changed. Clipping the last update to give exactly 600 would move every beam of both games,
 the BF1 tank laser 867 -> 800 and BF2's spider beam 3067 -> 3000.)
+
+The beam rifle's class sets PassThrough 1, so the beam goes on through every soldier and vehicle on
+its line, each taking its 133.33 a tick, and stops only at terrain, a building or other map body, a
+saber block or its 500 m range (`re-ordnance-kinds.md` §9b, checked against the original game). The
+port had stopped it on the first soldier; since 2026-11-10 it passes through on ground rounds
+(`Sim::pierce_beam`). Han's target pistol and BF2's vehicle beams (the fighter tank gunner lasers,
+the spider walker, the gunship ball turrets and the beam turret) pass through the same way; BF1's
+vehicle beams do not set PassThrough (an INTERIM difference, `gameplay-normalization.md`).
 
 ### What BF2 adds that the port did not
 
@@ -76,10 +84,26 @@ link to the remark is not proved.
 Yes, in both.
 
 - BF1: the Blast Cannon, `all_weap_inf_shotgun` (Rebel pilot) and `imp_weap_inf_shotgun` (dark
-  trooper): 5 bolts of 65 (86.67 on the shared scale), 0.75 s between shots, 30 rounds. The
-  Republic and the CIS have none in BF1.
-- BF2: `*_weap_inf_shotgun` on all four engineers (8 instant pellets of 65, far 15, 1.0 s) and
-  its award `*_weap_award_shotgun` (`MedalsTypeToUnlock 5`, the Flechette shotgun: 7 of 85).
+  trooper): 5 bolts of 65 (86.67 on the shared scale) at 160 m/s, 0.75 s between shots, yaw
+  spread 4, pitch 2, 30 rounds. The Republic and the CIS have none in BF1.
+- BF2: `*_weap_inf_shotgun` on all four engineers (8 instant pellets of 65, far 15, 1.0 s, spread
+  4.5 / 3, 40 rounds) and its award `*_weap_award_shotgun` (`MedalsTypeToUnlock 5`, the Flechette
+  shotgun: 7 of 85, far 25, 1.2 s, spread 4 / 3, 42 rounds).
+
+Point-blank, every pellet or bolt on the body, to a soldier on the shared scale:
+
+| Gun | A volley | Between shots | A second |
+|---|---|---|---|
+| BF2 shotgun | 8 x 65 = 520 | 1.0 s | 520 |
+| BF2 Flechette shotgun | 7 x 85 = 595 | 1.2 s | 496 |
+| BF1 Blast Cannon | 5 x 86.67 = 433 | 0.75 s | 578 |
+| Heavy Blast Cannon (ours, section 3) | 5 x 113.33 = 567 | 0.9 s | 630 |
+
+So the flechette is x1.14 a volley over BF2's shotgun but x0.95 a second. Against BF1's Blast
+Cannon it would be x1.37 a volley and x0.86 a second: on a BF1 map BF2's award would hit harder a
+shot, less a second, and fire thin instant pellets in place of the Blast Cannon's bolts. The
+Heavy Blast Cannon is x1.31 a volley and x1.09 a second over the Blast Cannon: it keeps its five
+bolts where the flechette drops a pellet.
 
 ## 3. Award weapons on BF1 maps
 
@@ -92,11 +116,11 @@ the four trooper sides carries BF2's award for each weapon BF2 has one for
 | `*_weap_inf_rifle` | `*_weap_award_rifle` | 1 | yes |
 | `*_weap_inf_pistol`, `rep_weap_inf_commando_pistol` | `*_weap_award_pistol` | 0 | yes |
 | `*_weap_inf_sniperrifle` | `*_weap_award_sniper_rifle` | 4 | yes |
-| `*_weap_inf_shotgun` | `*_weap_award_shotgun` | 5 | yes |
+| `*_weap_inf_shotgun` | `*_weap_award_blast_cannon`, the Heavy Blast Cannon (ours) | 5 | yes |
 | `*_weap_inf_torpedo_launcher` | `*_weap_award_rocket_launcher` | 2 | no: an extra slot, as in BF2 |
 
 Who gets what: soldiers the rifle and pistol; heavies the guided rocket and pistol; snipers
-the beam rifle and pistol; the Rebel pilot and the dark trooper the flechette shotgun and
+the beam rifle and pistol; the Rebel pilot and the dark trooper the Heavy Blast Cannon and
 pistol; the other pilots (mortar launcher or arc caster) and the jet trooper the pistol;
 smugglers none; the super battle droid keeps the BF2 kit it already takes whole. 63 award
 slots on 34 BF1 classes (`tests/data/class_kits.txt`).
@@ -108,19 +132,32 @@ Rules:
   beam and the guided rocket are BF2's, the same on every map. BF2's files are not rewritten,
   and BF1's base weapons are already on BF2's scale, so the advantage is BF2's: rifle 150 over
   80 (Empire 70), pistol 150 over 60, sniper 600 over 300.
-- **The shotgun is the one named difference.** BF1's Blast Cannon is its own gun (5 x 86.67
-  every 0.75 s); the flechette is BF2's 7 x 85 every 1.2 s on both. Against the Blast Cannon
-  that is x1.37 a volley (595 against 433; BF2: x1.14 over its shotgun) but, counting the
-  rate, about x0.86 a second point-blank (496 against 578 a second): on a BF1 map the award
-  hits harder a shot and less a second, and it fires BF2's thin instant pellets in place of
-  the Blast Cannon's bolts. A BF1 award Blast Cannon of its own (same bolts and sound, the
-  flechette's advantage over its base gun) waits for the maintainer's pick.
+- **The Blast Cannon's award is our own, the Heavy Blast Cannon** (`[ours]`, the maintainer
+  2026-11-10: "blast cannon award: sure, I'm on board"; earlier "I don't want to lose the blast
+  cannon effect or its equivalent power"; `roster::awards::heavy_blast_cannon`). BF1's Blast
+  Cannon is its own gun, so BF2's flechette would not be its award (section 2's table). The
+  Heavy Blast Cannon is the Blast Cannon (its model, its fat bolts at 160 m/s with no purple
+  tint, its sound, impacts, reload and animation) with the flechette's advantage over BF2's
+  shotgun on each number BF2 changes: a bolt x85/65 to a soldier and a shield, 113.33 on the
+  shared scale (to vehicles and buildings as the base); 0.9 s between shots (x1.2); yaw spread
+  3.56 degrees (x4/4.5), pitch 2 as the base (BF2's pitch is the same on both); 35 rounds a
+  clip, seven shots against six (BF2's award fires six to its shotgun's five). It keeps five
+  bolts a shot: BF2's award trades a pellet for its damage, which here would lose the Blast
+  Cannon's look. It is named "AWARD Blast Cannon" on the unit screen and the stats pages, and its
+  line when the medal is earned is "Award: Heavy Blast Cannon" (no disc has a text for either;
+  BF2's key for this medal's line, `game.awards.bonus.regulator`, reads "Award: Flechette
+  Shotgun"; `EventFeed::weapon_name`, `EventFeed::award_bonus`). The in-game HUD shows no weapon
+  name for any weapon yet (`game::hud_feed::hud_weapon` sends an empty name), so the HUD names
+  it once that is wired, for every weapon at once with the HUD goldens. The earned line is text
+  only until issue #130 draws it. measure: a playtest of the award against the Blast Cannon on a
+  BF1 map. BF2 maps keep BF2's flechette.
 - **Clips** are BF2's: the count on the first of the side's rifleman, marine, rocketeer,
-  sniper, engineer or pilot that carries the award.
+  sniper, engineer or pilot that carries the award. The Heavy Blast Cannon has the Blast
+  Cannon's (the pilot 4, the dark trooper 7).
 - **Slots** follow the class's own, in the order of the weapons they stand for.
 - **Looks and sounds** are the BF1 weapon's: its hand model, first-person model, HUD row,
-  animation bank, sounds, muzzle flash and impact effects (a BF1 map has those loaded). The
-  award keeps its purple bolt. The guided launcher keeps BF2's HUD row so it can be told from
+  animation bank, sounds, muzzle flash and impact effects (a BF1 map has those loaded). A BF2
+  award keeps its purple bolt; the Heavy Blast Cannon fires the Blast Cannon's own. The guided launcher keeps BF2's HUD row so it can be told from
   the launcher; its rocket trails and bursts as the BF1 rocket does.
 - **The switch rule** is BF2's on both games (`core::sim::awards`, `re-grenades.md` section
   2.4): an award is out of the cycle until its medal is held, and then the weapon it replaces
@@ -179,7 +216,10 @@ Not built (issue #130):
   kills, and 12 / 24 / 36 points), the three-quarter threshold at a higher career level, the
   bit update with its on-screen message, loss on death and permanence at the top level;
 - career counts in the profile and on the stats pages, and the settings toggle;
-- the yellow "Award: <bonus>" line when a bonus becomes available (`game.awards.bonus.*`);
+- the yellow "Award: <bonus>" line when a bonus becomes available (`game.awards.bonus.*`; its
+  text is ready, `EventFeed::award_bonus`, our own for the Heavy Blast Cannon; nothing calls it
+  yet, and the line should call `award_bonus(medal_key, Some(<the award class the medal unlocks
+  in the player's kit>))` so a BF1 kit reads its own award);
 - the riders' "Slicer Alert" line;
 - the weak-part lock's count (the maintainer's ask, 2026-11-10: "I want the lock onto vehicle weak
   parts that give the award"): since the third weak-spot pass any round that strikes a weak part
@@ -238,7 +278,13 @@ map.
 - `game/tests/suite/award_weapons.rs`: the advantage per medal on every class of both games,
   BF1 award slots and their looks, the cheat on a BF1 kit in the sim (150 a round x 1.5, the
   kit back with the cheat off), the same pull on BF1's and BF2's trooper, the beam and the
-  flechette on BF1 kits.
+  Heavy Blast Cannon on BF1 kits;
+  `the_heavy_blast_cannon_is_the_blast_cannon_with_the_flechettes_edge` (its numbers, look and
+  clips on the three BF1 classes), `the_heavy_blast_cannon_replaces_the_blast_cannon_only_with_the_medal`
+  (the player's kit with and without the medal, 113.33 a bolt in the sim, a bot keeps the Blast
+  Cannon with the cheat on).
+- `game/src/event_feed/tests.rs` `the_heavy_blast_cannon_has_its_own_name_and_line`.
+- `game/src/spawn_page.rs` `the_unit_screen_lists_the_players_awards`, `a_bf1_class_lists_its_awards_by_their_own_names` (a real BF1 dark trooper; skips without the class bakes).
 - `core/src/sim/awards/tests.rs` `all_awards_give_the_damage_award`.
 - `core/src/ai/behave/brain/tests.rs` `a_locked_award_adds_nothing_to_a_bots_reach`.
 - `game/tests/suite/squad_vehicle_maps.rs` `a_player_slices_a_real_enemy_aat`: 10 s from
@@ -310,8 +356,7 @@ Rules, the same on both games' maps:
   own sound (`buff_rage_fire` and the like) beside the weapon's `com_buff_fire`. Both were
   missing for the officer and hero abilities too.
 
-Not done: the "Award: <bonus>" line, earning and career levels (issue #130), the spawn page
-listing award weapons. trace: whether the PS2 hides the aura while its soldier sits in a
+Not done: the "Award: <bonus>" line, earning and career levels (issue #130). trace: whether the PS2 hides the aura while its soldier sits in a
 vehicle (`FUN_002368a0`'s attach test); the port draws it at the rider as before.
 
 Hashes, measured 2026-11-10: a release binary of the base (`2fc4df71`) against this one,
@@ -323,3 +368,32 @@ the same values on both (`5c5458c8927f122b`, `443de283b68845b0`, `c906917527627f
 `8a742201c8d1a7ec`). With a row on, the player's defense effect is in the state hash, as the
 offense one is; vehicle health and energy already are. The sim-trace tool takes no cheats, so
 no round was replayed with a row on.
+
+## 10. The unit screen lists the awards the player holds
+
+BF2's unit screen (`FUN_00396430`, B2:392068-392110) walks the class's weapons in order after
+"Equipment:" and skips one that is out of the player's cycle: an award until its medal is held
+(weapon+0x1e2, `MedalsTypeToUnlock`, B2:392085-392092), and the weapon an award replaces once it
+is (+0x1e4, `MedalsTypeToLock`, B2:392094-392096); with no stats record (B2:392081-392082) it
+shows the plain weapons only. The label at weapon+0x60, else the name. So the award is listed in place of the weapon it
+replaces, and the guided rocket, which replaces nothing, beside the launcher. The port's screen
+(`game::spawn_page::page`) did not list award slots at all; it now lists a slot when
+`Sim::class_weapon_locked` is false for the player (the switch rule of `Sim::weapon_locked`
+asked of the class on the screen, which the player may not be carrying yet), in slot order with
+the primary first. A listed award is named by its own sim weapon class: a BF1 class's
+replacing award keeps the HUD row (and so the class name on it) of the weapon it replaces, for
+its mesh, so the row alone would name the Blast Cannon or the BF1 pistol. `[ours]` as the switch: a lock applies only when the class carries the award
+that replaces the weapon (BF2's Han pistol, `Sim::weapon_locked`), so no class is listed with
+no weapon in place of its pistol. Bots never see the screen and hold no medal. No sim state changes.
+
+## 11. Hashes, 2026-11-10 (Heavy Blast Cannon, dark trooper leap refill, unit screen)
+
+`scripts/round_goldens.py` against the pins blessed at 39c6f1eb: the two space goldens PASS; all
+twelve ground goldens (`bf1_yav2`, `tat1`, `bf1_nab2`, four tiers each) MOVED from tick 3000.
+With the Heavy Blast Cannon alone (the leap row taken out), each of the twelve still moves its
+hash (the award slot's clip is hashed, 35 rounds against the flechette's 42) but ends at the
+same tick with the same winner as the pin, and `bf1_yav2` normal prints the same tickets, kills,
+deaths, shots and hits as main's: no bot fires an award. The outcomes move with the dark
+trooper's faster leap refill (`re-jetpack.md` §13). A BF1 GCW `--sim-trace 4000` of `bf1_yav2`
+with the award alone keeps main's trace byte for byte. The pins are re-blessed for both changes;
+the old and new values are in the commit that re-blesses them.

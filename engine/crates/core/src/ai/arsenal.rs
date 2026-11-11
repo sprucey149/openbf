@@ -290,7 +290,8 @@ pub(super) fn shot(wc: &WeaponClass, kind: u32) -> f32 {
 /// in order — the slot picked and whether the target is inside its band.
 /// The first weapon in range is taken; a later one replaces it when it was
 /// issued plenty of ammunition (over 20 rounds in BF1, over 2 in BF2: a rifle
-/// is "plenty" until it is empty, BF1's 3-4 detonators never are) and the
+/// is "plenty" until it is empty, BF1's 3-4 detonators never are; OURS, a
+/// shell launcher is always plenty, `re-grenades.md` 7.5) and the
 /// best was not, or on a higher score at equal
 /// "plenty"; a forced grenade in range is taken whatever the best is (and a
 /// later weapon can still replace it by the same rule). With nothing in
@@ -342,7 +343,14 @@ pub(super) fn choose<'a>(cands: impl Iterator<Item = Cand<'a>>, ask: &Ask) -> Op
         if s <= 0.0 {
             continue;
         }
-        let plenty = c.rounds.is_none_or(|r| r > if ask.bf2 { 2 } else { 20 });
+        // OURS, a named deviation (`analysis/re-grenades.md` 7.5): a shell
+        // launcher (the mortar) counts as plenty on every map. BF1's rule
+        // left the BF1 pilots' 15-round mortar to the pistol from 10 to 32 m;
+        // on BF2 maps every mortar already passes BF2's threshold.
+        // measure: BF1 GCW gate and both bot-only sets against
+        // analysis/faction-balance-2026-11.md.
+        let plenty = c.class.ordnance.kind == OrdKind::Shell
+            || c.rounds.is_none_or(|r| r > if ask.bf2 { 2 } else { 20 });
         let higher = s > best_score || (s == best_score && ask.coin);
         let by_rule = if best_plenty {
             plenty && higher

@@ -7,7 +7,10 @@
 //! the shared health and damage scale (`crate::normalize`) it keeps BF2's
 //! advantage over the weapon it stands for. It is held, sounds and hits the
 //! ground as that BF1 weapon does; only its purple bolt is the award's own.
-//! The switch rule is BF2's on both games (`core::sim::awards`).
+//! BF1's Blast Cannon is the one exception: its award is our own Heavy Blast
+//! Cannon ([`heavy_blast_cannon`]), the BF1 gun with the flechette's
+//! advantage over BF2's shotgun. The switch rule is BF2's on both games
+//! (`core::sim::awards`).
 
 use super::*;
 
@@ -23,6 +26,9 @@ pub struct AwardRow {
     /// `MedalsTypeToLock` on the weapon). The guided launcher is an extra
     /// slot beside the launcher, as in BF2.
     pub replaces: bool,
+    /// The award is BF2's class of that name. `false`: our own award, built
+    /// from the BF1 weapon ([`heavy_blast_cannon`], the only one).
+    pub bf2: bool,
 }
 
 pub const BF1_AWARDS: &[AwardRow] = &[
@@ -31,38 +37,112 @@ pub const BF1_AWARDS: &[AwardRow] = &[
         award: "_weap_award_rifle",
         medal: 1,
         replaces: true,
+        bf2: true,
     },
     AwardRow {
         weapon: "_weap_inf_pistol",
         award: "_weap_award_pistol",
         medal: 0,
         replaces: true,
+        bf2: true,
     },
     AwardRow {
         weapon: "_weap_inf_commando_pistol",
         award: "_weap_award_pistol",
         medal: 0,
         replaces: true,
+        bf2: true,
     },
     AwardRow {
         weapon: "_weap_inf_sniperrifle",
         award: "_weap_award_sniper_rifle",
         medal: 4,
         replaces: true,
+        bf2: true,
     },
     AwardRow {
         weapon: "_weap_inf_shotgun",
-        award: "_weap_award_shotgun",
+        award: "_weap_award_blast_cannon",
         medal: 5,
         replaces: true,
+        bf2: false,
     },
     AwardRow {
         weapon: "_weap_inf_torpedo_launcher",
         award: "_weap_award_rocket_launcher",
         medal: 2,
         replaces: false,
+        bf2: true,
     },
 ];
+
+/// `[ours]` The Heavy Blast Cannon (the maintainer 2026-11-10: "blast cannon
+/// award: sure, I'm on board"; "I don't want to lose the blast cannon effect
+/// or its equivalent power"): the award for BF1's Blast Cannon in place of
+/// BF2's flechette shotgun. It is the BF1 gun, its model, bolts, sound and
+/// impacts, with the flechette's advantage over BF2's shotgun on each number
+/// BF2 changes (`analysis/award-weapons.md` section 3):
+///
+/// - a bolt to a soldier x[`HBC_DAMAGE`] (85 over 65): 113.33 on the shared
+///   scale, and the same to a shield; to vehicles and buildings as the base;
+/// - the time between shots x[`HBC_SHOT_DELAY`] (1.2 s over 1.0 s): 0.9 s;
+/// - the yaw spread x[`HBC_YAW_SPREAD`] (4 over 4.5): 3.56 degrees; the
+///   pitch spread as the base's 2 (BF2's is 3 on both);
+/// - [`HBC_ROUNDS`] rounds a clip, one a bolt: seven shots, where BF2's
+///   award fires six to its shotgun's five.
+///
+/// It keeps the base's five bolts a shot (BF2 trades a pellet for the
+/// damage; five fat bolts are the Blast Cannon's look) and its clips.
+/// measure: a playtest of the award against the Blast Cannon on a BF1 map.
+pub fn heavy_blast_cannon(base: &WeaponClass, name: &str, medal: i8) -> WeaponClass {
+    let mut w = base.clone();
+    w.name = name.to_owned();
+    w.medal_unlock = Some(medal);
+    w.medal_lock = None;
+    for s in &mut w.ordnance.scales[..3] {
+        *s *= HBC_DAMAGE;
+    }
+    w.ordnance.shield_scale *= HBC_DAMAGE;
+    for d in &mut w.shot_delay {
+        *d *= HBC_SHOT_DELAY;
+    }
+    w.yaw_spread *= HBC_YAW_SPREAD;
+    w.rounds_per_clip = HBC_ROUNDS;
+    w
+}
+
+/// The Heavy Blast Cannon's damage to a soldier over the Blast Cannon's:
+/// BF2's flechette pellet over its shotgun pellet (85 / 65).
+pub const HBC_DAMAGE: f32 = 85.0 / 65.0;
+
+/// Its time between shots over the Blast Cannon's: BF2's 1.2 s over 1.0 s.
+pub const HBC_SHOT_DELAY: f32 = 1.2;
+
+/// Its yaw spread over the Blast Cannon's: BF2's 4 over 4.5.
+pub const HBC_YAW_SPREAD: f32 = 4.0 / 4.5;
+
+/// Its rounds a clip (the Blast Cannon 30): one more shot than the base's
+/// six, about BF2's x1.2 (five shots to six).
+pub const HBC_ROUNDS: u32 = 35;
+
+/// Its name on the HUD and the unit screen, `[ours]` (BF2's award
+/// weapons read "AWARD <weapon>"; no disc has a text for it).
+pub const HBC_NAME: &str = "AWARD Blast Cannon";
+
+/// Its line when the medal is earned, `[ours]` in BF2's words for an award
+/// (`game.awards.bonus.*`, "Award: Flechette Shotgun" for this medal on a
+/// BF2 map; no disc has a text for it).
+pub const HBC_BONUS: &str = "Award: Heavy Blast Cannon";
+
+/// Our own award class `weapon`'s name and earned line ([`HBC_NAME`],
+/// [`HBC_BONUS`]), for a class no disc has a text for. `None` for any other
+/// class.
+pub fn own_texts(weapon: &str) -> Option<(&'static str, &'static str)> {
+    let weapon = weapon.to_ascii_lowercase();
+    let (side, tail) = weapon.split_at(weapon.find('_')?);
+    (FACTION_ORDER.contains(&side) && BF1_AWARDS.iter().any(|r| !r.bf2 && r.award == tail))
+        .then_some((HBC_NAME, HBC_BONUS))
+}
 
 /// The BF2 classes whose kit gives an award its clips on a BF1 class, after
 /// the side (and the Republic's `ep3_`): the first that carries the award.
@@ -232,15 +312,21 @@ pub(super) fn add(bf2: &ClassDb, kit: Kit<'_>) {
         {
             continue;
         }
-        let Some(name) = bf2.resolve(&name).map(str::to_owned) else {
-            continue;
+        let (name, weapon, clips) = if row.bf2 {
+            let Some(name) = bf2.resolve(&name).map(str::to_owned) else {
+                continue;
+            };
+            let Ok(mut weapon) = weapon_from_db(bf2, &name) else {
+                continue;
+            };
+            dress(&mut weapon, &base.weapon);
+            let side = name.split('_').next().unwrap_or_default();
+            let clips = bf2_clips(bf2, side, &name).unwrap_or(base.clips);
+            (name, weapon, clips)
+        } else {
+            let weapon = heavy_blast_cannon(&base.weapon, &name, row.medal);
+            (name, weapon, base.clips)
         };
-        let Ok(mut weapon) = weapon_from_db(bf2, &name) else {
-            continue;
-        };
-        dress(&mut weapon, &base.weapon);
-        let side = name.split('_').next().unwrap_or_default();
-        let clips = bf2_clips(bf2, side, &name).unwrap_or(base.clips);
         let bank = kit.anim.bank_of(&base.weapon.name).to_owned();
         kit.anim.banks.push((name.to_ascii_lowercase(), bank));
         kit.slots.push(WeaponSlot {

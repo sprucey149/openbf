@@ -885,6 +885,20 @@ pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
     ),
 ];
 
+/// `[ours]` one leap refill (the maintainer 2026-11-10: "make it the faster
+/// refill stat, again we're trying to normalize things across both games"):
+/// BF1's dark troopers refill their leap at their BF2 twin's
+/// `JetFuelRechargeRate`, 0.075 / s in place of BF1's 0.025. To the lift-off
+/// border 0.49 that is 6.5 s, not 19.6 s (the snow variant's 0.4: 5.3 s, not
+/// 16 s). The rest of the leap stays each disc's own (re-jetpack.md §6, §13).
+/// Rows: (BF1 class, its BF2 twin, the refill a second).
+/// `tests/suite/roster.rs` holds the value to the twin's baked class.
+/// measure: a playtest of the leap's wait on a BF1 map.
+pub const BF1_LEAP_REFILL: &[(&str, &str, f32)] = &[
+    ("imp_inf_dark_trooper", "imp_inf_dark_trooper", 0.075),
+    ("imp_inf_dark_troopersnow", "imp_inf_dark_trooper", 0.075),
+];
+
 /// The jet trooper classes' roots: BF1's own class and the BF2 base that
 /// the ep2, ep3, training, rifleman and sniper troopers inherit.
 pub const JET_TROOPER_ROOTS: &[&str] = &["rep_inf_jet_trooper", "rep_inf_default_jettrooper"];
@@ -1019,8 +1033,8 @@ pub fn soldier_constants(db: &ClassDb, class: &str) -> SoldierConstants {
 /// rows over its parent's, one stance at a time), the jet trooper's fuel
 /// profile on both discs ([`is_jet_trooper`]), Jango's and Boba's
 /// ([`is_jet_hero`]), and on a BF1 disc another
-/// hover class's net in-flight drain ([`bf1_net_jet_fuel_cost`]) and the
-/// [`BF1_JET_BORROW`] numbers.
+/// hover class's net in-flight drain ([`bf1_net_jet_fuel_cost`]), the
+/// [`BF1_LEAP_REFILL`] and the [`BF1_JET_BORROW`] numbers.
 fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
     let h = crate::classdb::fnv1a_lowercase("ControlSpeed");
     let row = db.chain(class).into_iter().find_map(|def| {
@@ -1045,6 +1059,12 @@ fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
     }
     if db.is_bf2() {
         return;
+    }
+    if let Some(&(_, _, refill)) = BF1_LEAP_REFILL
+        .iter()
+        .find(|(bf1, ..)| bf1.eq_ignore_ascii_case(class))
+    {
+        c.jet_fuel_recharge = refill;
     }
     if let Some(&(_, _, accel, row)) = BF1_JET_BORROW
         .iter()

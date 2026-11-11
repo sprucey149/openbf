@@ -625,25 +625,54 @@ flamethrowers.
 
 ## 9b. The fat ray and the beam [V] (2026-10-30)
 
-- `fatray` (the sonic blaster's secondary, the geonosian turret): class ctor `FUN_003183f0` (B2:295295, the bullet class
-  plus seven floats), setter `FUN_00318520` (B2:295351): MaxDamage 0x47d0e794 (+0x11c, ctor 20), 0xfe544f96 (min, +0x120,
+- `fatray` (the sonic blaster's secondary, the geonosian turret): class ctor `FUN_003183f0` (B2:307556, the bullet class
+  plus seven floats), setter `FUN_00318520` (B2:307612): MaxDamage 0x47d0e794 (+0x11c, ctor 20), 0xfe544f96 (min, +0x120,
   10), 0xaf922a6b (deduction, +0x124, 5), 0xaee05d99 / 0x3ed11ac3 / 0x58a7da24 (push max / min / deduction, 15 / 5 / 3),
-  RayRadius 0xa4c53efd (+0x134, 3). Instance `FUN_00317e10` (B2:295036): damage = lerp(min, max, charge), push alike.
-  Sweep `FUN_00317f20` (B2:295077) replaces the bullet sweep: bodies of mask 0x1022 (no vehicles) on the tick's
+  RayRadius 0xa4c53efd (+0x134, 3). Instance `FUN_00317e10` (B2:307297): damage = lerp(min, max, charge), push alike.
+  Sweep `FUN_00317f20` (B2:307338) replaces the bullet sweep: bodies of mask 0x1022 (no vehicles) on the tick's
   segment, owner skipped, at the soldier's target point with 0 < t < L and distance d < radius; f = 1 − d/radius;
   damage x f with every scale 1.0, then damage = max(damage − deduction x f, min); it returns 1 (the round flies on).
-- `beam` (the BF2 award sniper rifles, the vehicle beams): class `FUN_003126c0` (B2:291369, 0xe0 bytes), setter
-  `FUN_00312838` (B2:291429): Range 0xfadc0cd2 (+0xbc, ctor 150), LaserWidth / LaserTexture / LaserGlowColor, the pierce
+- `beam` (the BF2 award sniper rifles, the vehicle beams): class `FUN_003126c0` (B2:303630, 0xe0 bytes), setter
+  `FUN_00312838` (B2:303690): Range 0xfadc0cd2 (+0xbc, ctor 150), LaserWidth / LaserTexture / LaserGlowColor, the pierce
   bit 0x604e2441 (+0xd8), ImpactEffect 0x11727a92 (+0xdc); the bullet ImpactEffect* keys are dead on it. Instance
-  `FUN_00311b50` (B2:290798) holds the owner's nearest fire point. Update `FUN_00311d00` (B2:290892-291107), every frame
+  `FUN_00311b50` (B2:303059) holds the owner's nearest fire point. Update `FUN_00311d00` (B2:303153-303368), every frame
   of its LifeSpan: origin and direction again from the fire point, a ray of Range; an entity struck takes the class's
-  damage desc x dt / LifeSpan and spawns the +0xdc effect; without the pierce bit the first hit stops it, with it a
-  soldier-type hit (0x80 / 0x10 / 4) still does; the drawn ribbon is the reached length + 1 about its middle.
+  damage desc x dt / LifeSpan and spawns the +0xdc effect; without the pierce bit the first hit stops it. With it
+  (PassThrough 1) the ray goes on from each hit with the range left, past a list of the objects already struck (the
+  owner first, at most 128; B2:303281): every soldier,
+  vehicle or other object it crosses takes its share once an update. It stops on a hit whose collision type is
+  terrain 0x80, static 0x10 (buildings and props) or asteroid 4 (B2:303308; these are collision types, not soldier
+  types: the earlier reading here had them backwards), on a hit with no object behind it, on an accepted saber
+  deflect (the object's deflect call at B2:303289 leaves the update before any damage), when the list is full, or at
+  the end of its range. The drawn ribbon is the total reached length + 1 about its middle. Checked against the
+  original game.
 - The port: `Sim::sweep_fat_rays` (`sim/fatray.rs`); `Sim::beams` (`sim/beam.rs`) casts one full-range round a tick
-  through the bolt sweep, with damage x TICK_DT / LifeSpan. Deviations: a pierce beam stops at the first vehicle too;
-  a seat's beam keeps its spawn ray; the per-hit impact effect has a network-looking gate (DAT_00600548 / 0x549 /
-  0x560 / 0x6d85ad) that is taken as open.
-- B1's bullet render `FUN_00277130` (B1:197885) draws the class model (GeometryName, the bullet setter's +0x84) along the
+  through the bolt sweep, with damage x TICK_DT / LifeSpan. A PassThrough beam on a ground round goes on through
+  soldiers, droidekas (shield and body are one object), vehicles, droids, autoturrets, mines and guided rockets
+  (`Sim::pierce_beam`): each takes its share once a tick, and the ray ends at terrain, water, a map body, a station,
+  a building turret's building, a saber block or the end of its range; its drawn length is the whole reach.
+  Deviations: in a space round a pierce beam still stops at its first hit (space is kept as it is; trace: the space
+  beams `com_weap_veh_fly_beam_ord` and the space turret's `tur_weap_spa_beam_ord`, PassThrough 1); water stops it
+  (the original's ray flags were not traced for water; trace: the collision-type gate on a water hit); a building
+  turret's own gun hull (a vehicle with a turret instance) stops it as its building does (trace: whether the
+  original's turret object stops a beam or only the building's static body does); a seat's beam keeps its spawn ray;
+  the per-hit impact effect has a network-looking gate (DAT_00600548 / 0x549 / 0x560 / 0x6d85ad) that is taken as
+  open.
+  PassThrough beams on the discs, all BF2: the award sniper rifle (`com_weap_award_sniper_rifle_ord` and its four
+  sides), Han's target pistol (`all_weap_hero_targetpistol_ord`), the vehicle beam `com_weap_veh_beam_ord` (the
+  spider walker's `cis_weap_walk_spider_beam_ord`, both fighter tanks' gunner lasers
+  `rep/imp_weap_hover_fightertank_laser_ord`, the beam turret `tur_weap_beam_ord`) and the flyer beam
+  `com_weap_veh_fly_beam_ord` (the LAAT/i and Rebel gunship ball turrets `rep/all_weap_fly_gunship_ball_ord` and
+  the droid gunship's `cis_weap_fly_droidgunship_beam_ord`, all fired on ground maps; the space turret's
+  `tur_weap_spa_beam_ord`). BF2's LAAT wing guns and the chaingun tracers are beams without it.
+- One game, INTERIM: no BF1 beam sets PassThrough, so the BF1 versions of the same vehicles still stop at their
+  first hit: the fighter tank lasers `rep/imp_weap_hover_fightertank_laser_ord`, the spider walker's
+  `cis_weap_walk_spider_laser_ord` and the LAAT/i ball `rep_weap_fly_gunship_ball_ord` (BF1's MAF laser, hovernaut
+  cannon and LAAT wing guns have no piercing BF2 counterpart). On a BF2 map both sides fire BF2's classes, so a
+  fighter tank's gunner beam passes through there and not on a BF1 map. replace: the vehicle pass sets pierce on
+  BF1's counterparts together with their damage (`game::normalize`); measure: vehicle kills a minute on BF2 maps
+  against the pre-change baseline.
+- B1's bullet render `FUN_00277130` (B1:198108) draws the class model (GeometryName, the bullet setter's +0x84) along the
   velocity for any bullet-family round: the jet trooper's rocket is drawn as `com_weap_missile`.
 
 ## 10. The port today, and the build

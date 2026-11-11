@@ -35,10 +35,10 @@ fn fighting(foe: UnitHandle) -> AiState {
 }
 
 #[test]
-fn the_form_order_deploys_only_to_fight_or_walk_out_of_a_stuck_spot() {
+fn the_form_order_deploys_only_to_fight() {
     for (b, want) in [
         (Behaviour::Fight, Order::Deploy),
-        (Behaviour::Recover, Order::Deploy),
+        (Behaviour::Recover, Order::Roll),
         (Behaviour::None, Order::Roll),
         (Behaviour::Travel, Order::Roll),
         (Behaviour::Capture, Order::Roll),

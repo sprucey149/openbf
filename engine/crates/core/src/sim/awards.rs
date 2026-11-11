@@ -107,23 +107,40 @@ impl Sim {
     /// On every BF2 trooper class the result is BF2's (each lockable weapon
     /// has its award on the class).
     pub fn weapon_locked(&self, u: &Unit, class: usize) -> bool {
+        let kit = std::iter::once(u.weapon_class).chain(u.held.iter().map(|w| w.class));
+        self.locked_in(self.award_bits(u), kit, class)
+    }
+
+    /// [`Sim::weapon_locked`] for `u` were it to carry class `kit`'s weapons
+    /// (the unit screen, which shows a class before `u` takes it).
+    pub fn class_weapon_locked(
+        &self,
+        u: &Unit,
+        kit: &crate::unit::UnitClass,
+        class: usize,
+    ) -> bool {
+        let weapons =
+            std::iter::once(kit.weapon_class).chain(kit.slots.iter().map(|s| s.weapon_class));
+        self.locked_in(self.award_bits(u), weapons, class)
+    }
+
+    /// Is weapon class `class` out of the cycle of a holder of medals `bits`
+    /// carrying the weapon classes `kit`?
+    fn locked_in(&self, bits: u16, kit: impl IntoIterator<Item = usize>, class: usize) -> bool {
         let Some(wc) = self.weapon_classes.get(class) else {
             return false;
         };
-        let bits = self.award_bits(u);
         if wc.unlock_medal().is_some_and(|t| bits & bit(t) == 0) {
             return true;
         }
         let Some(t) = wc.medal_lock.filter(|&t| bits & bit(t) != 0) else {
             return false;
         };
-        std::iter::once(u.weapon_class)
-            .chain(u.held.iter().map(|w| w.class))
-            .any(|c| {
-                self.weapon_classes
-                    .get(c)
-                    .is_some_and(|c| c.unlock_medal() == Some(t))
-            })
+        kit.into_iter().any(|c| {
+            self.weapon_classes
+                .get(c)
+                .is_some_and(|c| c.unlock_medal() == Some(t))
+        })
     }
 
     /// The weapon in unit `i`'s hands left the cycle (the medals changed):

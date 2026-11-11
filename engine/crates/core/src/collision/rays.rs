@@ -209,6 +209,23 @@ impl CollisionWorld {
         hulls: HullFilter,
         skip: [Option<u32>; 2],
     ) -> Option<RayHit> {
+        self.ray_past_owners(origin, dir, max_t, layers, hulls, skip, |_| false)
+    }
+
+    /// [`Self::ray_past`] that also passes through every hull whose owner
+    /// `passed` names: a piercing beam's ray past the vehicles it has
+    /// already struck this tick (`Sim::pierce_beam`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn ray_past_owners(
+        &self,
+        origin: Vec3,
+        dir: Vec3,
+        max_t: f32,
+        layers: Layers,
+        hulls: HullFilter,
+        skip: [Option<u32>; 2],
+        passed: impl Fn(VehicleHandle) -> bool,
+    ) -> Option<RayHit> {
         if max_t <= 0.0 {
             return None;
         }
@@ -220,6 +237,7 @@ impl CollisionWorld {
         self.visit_segment(origin, dir, max_t, hulls, |body| {
             if !body.layers.contains(layers)
                 || (body.instance.is_some() && skip.contains(&body.instance))
+                || body.owner.is_some_and(&passed)
             {
                 return;
             }

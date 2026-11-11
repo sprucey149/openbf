@@ -508,6 +508,15 @@ their own side, card FFLN). [M], 24 seeds x 32 maps: team + self kills 1.96 -> 1
 Tantive IV 6.7 -> 2.9), for 22 % of the throws; in the first 210 s on Polis Massa a throw per 384 bot-seconds
 becomes one per 710 (the PS2: 347-363), on Kamino 806 -> 1,052 (the PS2: 146-239).
 
+**OURS, a named deviation (2026-11-10): a shell launcher is "plenty" on every map.** BF1's rule (issued over 20)
+leaves the BF1 Imperial and CIS pilots' mortar, 3 clips of 5 = 15 rounds issued, to their endless pistol wherever both
+are in range (10-32 m), so the mortar fired only at 32-48 m, about 2 rounds a life, and the Imperial pilot was the
+largest class gap between the BF1 factions (`analysis/faction-balance-2026-11.md` section 2). `arsenal::choose` counts
+a weapon whose ordnance is a shell as plenty. On BF2 maps every mortar already passes BF2's threshold (15-25 issued,
+over 2), so only BF1 maps move. A lobbed launcher (the BF1 smuggler's) is untouched. Asset-free test:
+`a_bf1_pilot_keeps_its_mortar_over_the_pistol_in_both_bands`. measure: the proxy gate and both bot-only sets of
+`analysis/faction-balance-2026-11.md`, BF1 GCW and BF1 CW.
+
 [M] **The PS2's rate** (SAIR's four BF2 captures re-read, `lead_tmp/audit-grai/ps2/`; GCW conquest, 16 a side): the
 mover's request step (B2:242749-242778) sets controllable+0x84 = the requested weapon's channel and it stays until
 the next request. Channel 0 -> 1 episodes: Kamino 37 in 5,391 bot-seconds and 30 in 7,180 (one per 146 / 239),

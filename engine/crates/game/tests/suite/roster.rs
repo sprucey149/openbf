@@ -741,12 +741,13 @@ fn the_jet_classes_carry_their_disc_numbers() {
             [0.1, 0.25, 0.12, 0.24, 0.0],
             [1.5, 1.25, 1.25],
         ),
+        // The leap refills at BF2's 0.075 (BF1_LEAP_REFILL).
         (
             "bf1",
             "imp_inf_dark_trooper",
             [21.0, 0.0, 10.0],
             false,
-            [0.0, 0.5, 0.025, 0.49, 0.0],
+            [0.0, 0.5, 0.075, 0.49, 0.0],
             [0.3, 0.3, 1.0],
         ),
     ];
@@ -923,7 +924,7 @@ fn every_jet_trooper_flies_as_long_as_bf1s() {
         );
     }
     let dark = game::roster::soldier_constants(&bf1, "imp_inf_dark_trooper");
-    assert_eq!((dark.jet_fuel_cost, dark.jet_fuel_recharge), (0.0, 0.025));
+    assert_eq!((dark.jet_fuel_cost, dark.jet_fuel_recharge), (0.0, 0.075));
     let natives = game::assets::baked_root().join("classes");
     match game::native_teams::native_side(&natives, "bf1", "geo_inf_geonosian") {
         Some((_, file)) => {
@@ -978,6 +979,41 @@ fn jango_and_boba_fly_8_5_s_and_refill_as_a_trooper() {
             (refill - 25.0 / 3.0).abs() < 1e-3,
             "{class} refill {refill}"
         );
+    }
+}
+
+/// The maintainer 2026-11-10 ("make it the faster refill stat"): BF1's dark
+/// troopers refill their leap at their BF2 twin's disc rate, 0.075 / s
+/// against BF1's 0.025, back to the lift-off border in 6.5 s (the snow
+/// variant 5.3 s); the leap's other numbers stay BF1's.
+#[test]
+fn bf1_dark_troopers_refill_their_leap_as_bf2s() {
+    let Some(dir) = classes_dir() else { return };
+    let bf1 = load_classdb_all(&dir, "bf1");
+    let bf2 = load_classdb_all(&dir, "bf2");
+    assert_eq!(game::roster::BF1_LEAP_REFILL.len(), 2);
+    for &(class, twin, refill) in game::roster::BF1_LEAP_REFILL {
+        assert_eq!(
+            bf1.prop_f32(class, "JetFuelRechargeRate"),
+            Some(0.025),
+            "{class}"
+        );
+        assert_eq!(
+            bf2.prop_f32(twin, "JetFuelRechargeRate"),
+            Some(refill),
+            "{twin}"
+        );
+        let c = game::roster::soldier_constants(&bf1, class);
+        assert_eq!(c.jet_fuel_recharge, refill, "{class}");
+        assert_eq!(c.jet_fuel_cost, 0.0, "{class}: still a leap");
+        assert_eq!(
+            Some(c.jet_fuel_min_border),
+            bf1.prop_f32(class, "JetFuelMinBorder"),
+            "{class}: BF1's border"
+        );
+        let wait = c.jet_fuel_min_border / c.jet_fuel_recharge;
+        let want = if class.ends_with("snow") { 0.4 } else { 0.49 } / 0.075;
+        assert!((wait - want).abs() < 1e-3, "{class} waits {wait}");
     }
 }
 
@@ -2784,11 +2820,19 @@ fn every_class_kit_is_the_discs_or_explained() {
                     } else {
                         "fired"
                     };
-                    // A BF1 class's award slot is BF2's class, not its disc's.
+                    // A BF1 class's award slot is BF2's class, not its disc's,
+                    // or our own Heavy Blast Cannon.
                     if game == "bf1" && donor.is_none() && kind.is_none() {
-                        assert!(bf2.resolve(&w).is_some(), "{game} {c} {disc}");
                         assert!(h.weapon.unlock_medal().is_some(), "{game} {c} {disc}");
-                        format!("{how} x{} (BF2's award, roster::awards)", h.clips)
+                        if bf2.resolve(&w).is_some() {
+                            format!("{how} x{} (BF2's award, roster::awards)", h.clips)
+                        } else {
+                            assert!(
+                                game::roster::awards::own_texts(&w).is_some(),
+                                "{game} {c} {disc}"
+                            );
+                            format!("{how} x{} (our own award, roster::awards)", h.clips)
+                        }
                     } else {
                         format!("{how} x{}", h.clips)
                     }

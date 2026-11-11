@@ -92,21 +92,55 @@ pub fn page(
             );
             text.push_str(&feed.text_by_hash(0xfe98_f5cf, "Equipment:"));
             text.push('\n');
-            // The primary first, then the other slots in slot order; the
-            // award slots are not listed.
-            let mut held: Vec<&(u8, crate::walk::WeaponHud)> = class
+            // The primary first, then the other slots in slot order. A
+            // weapon out of the player's cycle is not listed (`FUN_00396430`,
+            // B2:392007-392128: an award until its medal is held, then the
+            // weapon it replaces), so an award shows in its own slot in
+            // place of that weapon; a guided launcher, which replaces
+            // nothing, shows beside the launcher. Without the sim's class
+            // the award slots are left out.
+            let kit = walk
+                .sim
+                .classes
+                .get(usize::from(team))
+                .and_then(|c| c.get(pick));
+            // The sim weapon in a slot (`None`: the primary).
+            let weapon = |slot: Option<u8>| {
+                kit.and_then(|kit| match slot {
+                    None => Some(kit.weapon_class),
+                    Some(slot) => kit
+                        .slots
+                        .iter()
+                        .find(|s| s.slot == slot)
+                        .map(|s| s.weapon_class),
+                })
+            };
+            let listed = |slot: Option<u8>| match (kit, weapon(slot)) {
+                (Some(kit), Some(c)) => !walk.sim.class_weapon_locked(me, kit, c),
+                _ => slot.is_none_or(|slot| !class.award_slots.contains(&slot)),
+            };
+            let mut held: Vec<(Option<u8>, &crate::walk::WeaponHud)> = class
                 .held_hud
                 .iter()
-                .filter(|(slot, _)| !class.award_slots.contains(slot))
+                .filter(|(slot, _)| listed(Some(*slot)))
+                .map(|(slot, w)| (Some(*slot), w))
                 .collect();
             held.sort_by_key(|(slot, _)| *slot);
-            for w in std::iter::once(&class.weapon_hud).chain(held.into_iter().map(|(_, w)| w)) {
+            let primary = listed(None).then_some((None, &class.weapon_hud));
+            for (slot, w) in primary.into_iter().chain(held) {
                 if w.class.is_empty() {
                     continue;
                 }
-                let name = feed
-                    .weapon_name(&w.class)
-                    .unwrap_or_else(|| w.class.clone());
+                // An award is named by its own class. A BF1 class's
+                // replacing award keeps the HUD row of the weapon it
+                // replaces (its mesh), so the row's class would name that
+                // weapon instead.
+                let award = weapon(slot)
+                    .and_then(|c| walk.sim.weapon_classes.get(c))
+                    .filter(|c| c.unlock_medal().is_some())
+                    .map(|c| c.name.to_ascii_lowercase());
+                let named = award.as_ref().unwrap_or(&w.class);
+                let name = feed.weapon_name(named).unwrap_or_else(|| named.clone());
                 text.push_str(&name);
                 text.push('\n');
             }
@@ -332,5 +366,174 @@ mod tests {
             }
             p => panic!("{p:?}"),
         }
+    }
+
+    /// The unit screen lists what the player would carry, as BF2's
+    /// `FUN_00396430` does: an award only once its medal is held, and then
+    /// not the weapon it replaces, every slot in its order; a guided
+    /// launcher, which replaces nothing, beside the launcher.
+    #[test]
+    fn the_unit_screen_lists_the_players_awards() {
+        use core::unit::SlotSpec;
+        use core::weapon::WeaponClass;
+        let mut w = WalkSim::new(3, Vec3::ZERO, None);
+        let feed = EventFeed::default();
+        assert!(w.sim.open_spawn_screens(0, true));
+        w.sim.spawn_stage[0] = core::sim::SpawnStage::Class;
+        let me = w.player.index as usize;
+        let team = usize::from(w.sim.units[me].team.min(1));
+        let mut add = |name: &str, unlock: Option<i8>, lock: Option<i8>| {
+            w.sim.add_weapon_class(WeaponClass {
+                name: name.into(),
+                medal_unlock: unlock,
+                medal_lock: lock,
+                ..WeaponClass::default()
+            })
+        };
+        let kit = [
+            add("imp_weap_inf_shotgun", None, Some(5)),
+            add("imp_weap_inf_pistol", None, Some(0)),
+            add("imp_weap_inf_rocket_launcher", None, None),
+            add("imp_weap_award_blast_cannon", Some(5), None),
+            add("imp_weap_award_pistol", Some(0), None),
+            add("imp_weap_award_rocket_launcher", Some(2), None),
+        ];
+        let u = &w.sim.units[me];
+        w.sim.classes[team] = vec![core::unit::UnitClass {
+            consts: u.spec.consts,
+            max_health: u.health.max,
+            health_type: u.spec.health_type,
+            weapon_class: kit[0],
+            total_clips: 6,
+            weapon_slot: 0,
+            slots: kit[1..]
+                .iter()
+                .zip(1u8..)
+                .map(|(&weapon_class, slot)| SlotSpec {
+                    slot,
+                    channel: 0,
+                    weapon_class,
+                    clips: 4,
+                })
+                .collect(),
+            jet: false,
+            capture_posts: true,
+            drops: Default::default(),
+            chunk: None,
+            droideka: None,
+            min: 1,
+            max: None,
+            unlock_points: 0,
+        }];
+        let hud = |class: &str| WeaponHud {
+            class: class.into(),
+            ..WeaponHud::default()
+        };
+        let names: Vec<String> = kit
+            .iter()
+            .map(|&c| w.sim.weapon_classes[c].name.clone())
+            .collect();
+        let c: &mut ClassVisual = &mut w.teams[team].classes[0];
+        c.weapon_hud = hud(&names[0]);
+        // Held out of slot order, as a class may list them.
+        c.held_hud = vec![
+            (5, hud(&names[5])),
+            (1, hud(&names[1])),
+            (3, hud(&names[3])),
+            (2, hud(&names[2])),
+            (4, hud(&names[4])),
+        ];
+        c.award_slots = vec![3, 4, 5];
+        let equipment = |w: &WalkSim| match page(w, &feed, 0) {
+            Some(SpawnPage::Class { lines, .. }) => {
+                let at = lines.iter().position(|l| l == "Equipment:").unwrap();
+                lines[at + 1..].to_vec()
+            }
+            p => panic!("{p:?}"),
+        };
+        assert_eq!(
+            equipment(&w),
+            [
+                "imp_weap_inf_shotgun",
+                "imp_weap_inf_pistol",
+                "imp_weap_inf_rocket_launcher"
+            ],
+            "no medal: the class's own kit"
+        );
+        w.sim.cheats.all_awards = true;
+        assert_eq!(
+            equipment(&w),
+            [
+                "imp_weap_inf_rocket_launcher",
+                // Our own award's own name (no table has one).
+                "AWARD Blast Cannon",
+                "imp_weap_award_pistol",
+                "imp_weap_award_rocket_launcher"
+            ],
+            "every weapon medal: the awards in place of what they replace"
+        );
+        // A bot holds no medal, so a bot's view would be the class's own
+        // kit: the medals are the player's.
+        let mut bot = w.sim.units[me].clone();
+        bot.is_player = false;
+        let class = &w.sim.classes[team][0];
+        assert!(w.sim.class_weapon_locked(&bot, class, kit[3]));
+        assert!(!w.sim.class_weapon_locked(&bot, class, kit[0]));
+        w.sim.cheats.all_awards = false;
+        assert_eq!(equipment(&w).len(), 3, "the cheat off gives the kit back");
+    }
+
+    /// A real BF1 dark trooper: its awards keep the HUD rows of the
+    /// weapons they replace, and the screen still names the awards, not
+    /// those weapons. Skips without the class bakes.
+    #[test]
+    fn a_bf1_class_lists_its_awards_by_their_own_names() {
+        let dir = crate::assets::baked_root().join("classes");
+        if !dir.join("bf1_all.ron").is_file() || !dir.join("bf2_all.ron").is_file() {
+            eprintln!("SKIP: class bakes absent");
+            return;
+        }
+        let db = crate::roster::load_classdb(&dir, "bf1", &crate::roster::FACTION_ORDER)
+            .expect("class db");
+        let roster =
+            crate::roster::ClassRoster::build(&db, "imp_inf_dark_trooper", 1, None).expect("class");
+        let mut w = WalkSim::new(3, Vec3::ZERO, None);
+        let feed = EventFeed::default();
+        assert!(w.sim.open_spawn_screens(0, true));
+        w.sim.spawn_stage[0] = core::sim::SpawnStage::Class;
+        let me = w.player.index as usize;
+        let team = usize::from(w.sim.units[me].team.min(1));
+        let mut names = Vec::new();
+        let uc = roster.register(&mut w.sim, &mut names);
+        w.sim.classes[team] = vec![uc];
+        w.teams[team].classes[0] = ClassVisual::from_roster_with_held(&roster);
+        let equipment = |w: &WalkSim| match page(w, &feed, 0) {
+            Some(SpawnPage::Class { lines, .. }) => {
+                let at = lines.iter().position(|l| l == "Equipment:").unwrap();
+                lines[at + 1..].to_vec()
+            }
+            p => panic!("{p:?}"),
+        };
+        let own = equipment(&w);
+        assert_eq!(own[0], "imp_weap_inf_shotgun", "{own:?}");
+        assert!(own.iter().any(|l| l == "imp_weap_inf_pistol"), "{own:?}");
+        assert!(!own.iter().any(|l| l.contains("award")), "{own:?}");
+        w.sim.cheats.all_awards = true;
+        let awarded = equipment(&w);
+        assert!(
+            awarded.iter().any(|l| l == "AWARD Blast Cannon"),
+            "{awarded:?}"
+        );
+        assert!(
+            awarded.iter().any(|l| l == "imp_weap_award_pistol"),
+            "{awarded:?}"
+        );
+        assert!(
+            !awarded
+                .iter()
+                .any(|l| l == "imp_weap_inf_shotgun" || l == "imp_weap_inf_pistol"),
+            "{awarded:?}"
+        );
+        assert_eq!(awarded.len(), own.len(), "one for one: {own:?} {awarded:?}");
     }
 }
