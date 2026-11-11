@@ -1,7 +1,12 @@
 use super::state::Sim;
 use crate::collision::HullFilter;
-use crate::projectile::{Bolt, Shooter};
+use crate::projectile::{Bolt, Hit, Shooter, Target};
 use glam::Vec3;
+
+/// How many objects one beam ray may pass, its owner counted: BF2's beam
+/// keeps a list of 128 (`FUN_00311d00`, B2:303281) and stops on the hit
+/// that finds it full.
+const BEAM_PASS_LIMIT: usize = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Beam {
@@ -56,9 +61,9 @@ impl Sim {
     }
 
     pub(super) fn fly_bolts(&mut self, dt: f32) {
-        let beams = self.cast_beams(dt);
+        let first = self.cast_beams(dt);
+        let count = self.beams.len();
         self.sweep_bolts(dt);
-        self.settle_beams(beams, dt);
         let mut done = Vec::new();
         for (i, b) in self.bolts.iter_mut().enumerate() {
             if b.advance(dt) {
@@ -69,10 +74,20 @@ impl Sim {
                     .push(crate::projectile::ShotFlight { shot, end: b.end });
             }
         }
+        // Where each beam's ray ended this tick: its round's end, or the
+        // last hit of a piercing beam's chain.
+        let mut ends: Vec<Vec3> = self.bolts[first..first + count]
+            .iter()
+            .map(|b| b.end)
+            .collect();
         for &i in &done {
             let b = self.bolts[i].clone();
-            self.resolve_bolt(&b);
+            match i.checked_sub(first).filter(|&k| k < count) {
+                Some(k) if self.beam_pierces(k) => ends[k] = self.pierce_beam(k, b, dt),
+                _ => self.resolve_bolt(&b),
+            }
         }
+        self.settle_beams(&ends, dt);
         self.bolts.retain(|b| b.remaining > 0.0);
     }
 
@@ -106,9 +121,93 @@ impl Sim {
         first
     }
 
-    fn settle_beams(&mut self, first: usize, dt: f32) {
-        for (beam, b) in self.beams.iter_mut().zip(&self.bolts[first..]) {
-            beam.len = (b.end - beam.origin).length();
+    /// Does beam `k` go on through what it strikes? Its class's
+    /// PassThrough, on a ground round only: space keeps the first hit
+    /// stopping every beam (`Sim::space_round`).
+    fn beam_pierces(&self, k: usize) -> bool {
+        !self.space_round()
+            && self.weapon_classes[self.beams[k].shooter.weapon_class]
+                .ordnance
+                .beam
+                .as_ref()
+                .is_some_and(|c| c.pierce)
+    }
+
+    /// A PassThrough beam's ray this tick (BF2 `FUN_00311d00`,
+    /// B2:303242-303353; `re-ordnance-kinds.md` §9b): every soldier,
+    /// vehicle, droid, turret, mine or rocket it crosses takes its share,
+    /// once, and the ray goes on from that hit with the range left. It
+    /// ends at terrain, water, a building or other map body, a saber that
+    /// turns it, or the end of its range, and after its 128th object (the
+    /// original's list of 128 passed objects, the owner first, is full).
+    /// `first` is beam `k`'s round, already swept and flown; the result is
+    /// where the ray ended.
+    fn pierce_beam(&mut self, k: usize, first: Bolt, dt: f32) -> Vec3 {
+        let range = self.weapon_classes[first.weapon_class]
+            .ordnance
+            .beam
+            .as_ref()
+            .map_or(0.0, |c| c.range);
+        let (origin, dir, charge) = (self.beams[k].origin, self.beams[k].dir, first.charge);
+        let speed = range / dt;
+        let mut passed = Vec::new();
+        let mut bodies = None;
+        let mut b = first;
+        loop {
+            if self.resolve_bolt_turned(&b) {
+                return b.end;
+            }
+            let Some(target) = self.beam_passes(b.hit) else {
+                return b.end;
+            };
+            if passed.len() + 1 >= BEAM_PASS_LIMIT {
+                return b.end;
+            }
+            passed.push(target);
+            let left = range - (b.end - origin).length();
+            if left <= 0.0 {
+                return b.end;
+            }
+            let mut next = Bolt::fire(
+                b.end,
+                dir,
+                speed,
+                left / speed,
+                b.shooter(),
+                self.heightfield.as_ref(),
+                self.water_plane(),
+                &self.collision,
+                b.hulls,
+            );
+            next.charge = charge;
+            let bodies = bodies.get_or_insert_with(|| self.sweep_bodies());
+            self.sweep_bolt(bodies, &mut next, dt, &passed);
+            next.advance(dt);
+            b = next;
+        }
+    }
+
+    /// What a piercing beam goes on through: anything but the ground and
+    /// the map. A building turret's body is its building, and stops it.
+    fn beam_passes(&self, hit: Hit) -> Option<Target> {
+        let Hit::Target(t) = hit else {
+            return None;
+        };
+        match t {
+            Target::Unit(_)
+            | Target::Shield(_)
+            | Target::Mine(_)
+            | Target::Droid(_)
+            | Target::Turret(_)
+            | Target::Guided(_) => Some(t),
+            Target::Vehicle(v) => self.collision.turret_instance(v).is_none().then_some(t),
+            Target::Station(_) | Target::Building(_) => None,
+        }
+    }
+
+    fn settle_beams(&mut self, ends: &[Vec3], dt: f32) {
+        for (beam, end) in self.beams.iter_mut().zip(ends) {
+            beam.len = (*end - beam.origin).length();
             beam.life -= dt;
         }
         self.beams.retain(|b| b.life > 0.0);

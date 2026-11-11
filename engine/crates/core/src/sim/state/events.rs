@@ -161,7 +161,7 @@ pub enum Event {
     },
     /// A bolt's hit on a prim with a HitLocation factor over 1 that took
     /// health: a soldier's head (beside its [`Event::Hit`]) or a vehicle's
-    /// critical prim, the x4 weak spot (beside its [`Event::VehicleHit`]).
+    /// weak part, x2 or x4 on a ground map (beside its [`Event::VehicleHit`]).
     /// The PS2's critical hit, which lights BF2's `hitCritical` reticle
     /// flash for its shooter (`analysis/re-target-hud.md` §12: B2
     /// `FUN_001dfb38` hands the factor to the shooter's hit timer

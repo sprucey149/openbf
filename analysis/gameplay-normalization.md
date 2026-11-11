@@ -64,7 +64,9 @@ files and a BF2 map's `classes.ron` are read as written.
 Award weapons are BF2's own classes, so they are the reference and have no rows: pistol 150,
 rifle 150, sniper 600, shotgun pellet 85 to a person. A BF1 class carries them from BF2's
 class data (`award-weapons.md` section 3), as BF1's droids read their BF2 weapons, and they
-arrive on this scale.
+arrive on this scale. BF1's Blast Cannon is the exception: its award is our own Heavy Blast
+Cannon, built from the normalized Blast Cannon with the flechette's 85 / 65 on its soldier
+scales (113.33 a bolt), so it is on this scale too.
 
 Reading damage: `OrdnanceClass::max_damage` is still the disc's number (60 for BF1's rifle);
 what a hit takes off a soldier is `max_damage x scales[health type]`. The AI and the space
@@ -198,6 +200,16 @@ Scaled, not yet one rule:
     (`normalization::the_scale_keeps_every_hit_count_on_a_trooper`) except the 20-damage
     blasts (light vehicles, droids, the STAP cannon): 26.67 is not exact in the running health,
     so the sixteenth hit kills, not the fifteenth.
+- **Vehicle beams that pass through, INTERIM.** BF2's vehicle beams set PassThrough and,
+  since 2026-11-10, go on through every soldier and vehicle on their line on ground rounds
+  (`re-ordnance-kinds.md` section 9b): the fighter tank gunner lasers, the spider walker beam,
+  the LAAT/i, Rebel and droid gunship ball beams and the beam turret. No BF1 beam sets it, so
+  BF1's counterparts (the fighter tank lasers, the spider walker laser, the LAAT/i ball) still
+  stop at their first hit: the same fighter tank's gunner beam passes through on a BF2 map and
+  not on a BF1 map. Setting pierce on BF1's classes now would move every BF1 round with those
+  vehicles while their damage is still the interim x4/3. replace: the vehicle pass sets pierce
+  on BF1's counterparts together with their damage; measure: vehicle kills a minute on BF2
+  maps against the pre-change baseline.
 - **A vehicle running a soldier over** deals the vehicle class's own collision damage; the
   soldier's larger health makes a glancing hit a little less deadly on BF1 maps.
 - **Blaster fall-off and bolt speed.** BF1's bolts keep their damage at any range and fly at

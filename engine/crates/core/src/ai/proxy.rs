@@ -42,13 +42,37 @@
 //! columns for ordinary bots. The other player rules remain proxy-only.
 //!
 //! The profile is a fixed "human" row, the same on every tier (a human does
-//! not get better when the host picks Elite): its aim skill, its reaction,
+//! not get better when the host picks Elite; the tier columns the profile
+//! does not replace still vary by tier, below): its aim skill, its reaction,
 //! what it does when hit, how readily it runs from a grenade, how far it
 //! sees and whether it strafes (circles) instead of standing. Two strengths,
 //! [`Strength::Average`] (PROVISIONAL) and [`Strength::Good`] (fitted to the
 //! maintainer's own matches on 2026-10-29, a little under him; its row says
 //! which numbers the fit supports - `scripts/human_profile.py`,
 //! `analysis/difficulty-proposal.md` §5).
+//!
+//! The freeze (bot rework stage 0): the tier columns a proxy still reads
+//! come from [`FROZEN_TIERS`], not the bots' live rows, and a proxy thinks
+//! through `ai::legacy_think`. Today that is the bots' own brain, so the
+//! freeze is a contract with a tripwire, not a separate copy: the rework's
+//! later stages must not change what `legacy_think` runs for proxies
+//! without a declared, measured move, and the asset-free pin
+//! `an_all_proxy_skirmish_keeps_its_hash` trips on any such change.
+//!
+//! Tier reads a proxy still takes from live code, not the frozen rows:
+//! - a manned building turret's view (`ai::man::hittable`, `Sim::ai_tier`
+//!   of the gunner's team);
+//! - the level curve under its error cap at a droid or a turret
+//!   (`Skill::from_level` in [`frozen_err_cap`]);
+//! - when a proxy faces another human (two proxies, or a proxy against a
+//!   player): the focus switch and token budget against that human
+//!   (`dfocus::on_against`, `tokn::budget`), which follow the proxy's
+//!   team's live row;
+//! - the round's bleed handicap: a proxy counts as a human, so at a tier
+//!   whose live `bleed_handicap` is not 1 (Elite, x1.25) a lone proxy's
+//!   team bleeds faster (`Sim::apply_team_handicap`, reading
+//!   `Sim::difficulty.tier()`). `FROZEN_TIERS` copies the column, but no
+//!   rule reads the copy.
 
 use crate::sim::Sim;
 use crate::skill::{Difficulty, Skill, Tier};
@@ -224,6 +248,107 @@ impl Profile {
     }
 }
 
+/// [ours] The tier rows a proxy's brain reads (bot rework stage 0, the
+/// proxy freeze): a copy of `Difficulty::tier`'s rows as they stood at
+/// 39c6f1eb, so tier work on the bots does not change the stand-in human.
+/// The columns its [`Profile`] replaces are unused; the rest still reach
+/// it: the grenade delay, `pressure`, `scope_sight` (Hard's, `scope_share`),
+/// `cover` (the team board's Cover role) and `err_cap` (its error cap at a
+/// droid or a turret, [`frozen_err_cap`]). OURS; replace: when the
+/// maintainer recalibrates the proxy against a live playtest (rework
+/// question 3), with the proxy gate re-run on both sides.
+pub const FROZEN_TIERS: [Tier; 4] = [
+    // Easy
+    Tier {
+        view_mult: 1.0,
+        reaction_ticks: 9,
+        pressure: 0.8,
+        err_cap: None,
+        bleed_handicap: 1.0,
+        react: [0.30, 0.15, 0.20],
+        grenade: 0.60,
+        grenade_delay: (18, 39),
+        cover: false,
+        scope_sight: 0.0,
+        picks: false,
+        mend: 0.0,
+        hunts: false,
+    },
+    // Normal
+    Tier {
+        view_mult: 1.0,
+        reaction_ticks: 9,
+        pressure: 1.0,
+        err_cap: None,
+        bleed_handicap: 1.0,
+        react: [0.30, 0.15, 0.20],
+        grenade: 0.60,
+        grenade_delay: (18, 39),
+        cover: false,
+        scope_sight: 0.75,
+        picks: false,
+        mend: 0.0,
+        hunts: false,
+    },
+    // Hard
+    Tier {
+        view_mult: 1.25,
+        reaction_ticks: 6,
+        pressure: 1.3,
+        err_cap: None,
+        bleed_handicap: 1.0,
+        react: [0.30, 0.20, 0.30],
+        grenade: 0.85,
+        grenade_delay: (0, 24),
+        cover: true,
+        scope_sight: 1.0,
+        picks: false,
+        mend: 0.35,
+        hunts: false,
+    },
+    // Elite
+    Tier {
+        view_mult: 1.5,
+        reaction_ticks: 5,
+        pressure: 1.6,
+        err_cap: Some(0.9),
+        bleed_handicap: 1.25,
+        react: [0.30, 0.25, 0.35],
+        grenade: 0.95,
+        grenade_delay: (0, 24),
+        cover: true,
+        scope_sight: 1.0,
+        picks: true,
+        mend: 0.35,
+        hunts: true,
+    },
+];
+
+/// [`FROZEN_TIERS`]' row for tier `d`.
+pub fn frozen_tier(d: Difficulty) -> Tier {
+    FROZEN_TIERS[match d {
+        Difficulty::Easy => 0,
+        Difficulty::Normal => 1,
+        Difficulty::Hard => 2,
+        Difficulty::Elite => 3,
+    }]
+}
+
+/// A proxy's error cap at a droid or a turret, on a team at tier `d` with
+/// integer skill `level`: the level's own cap, under the frozen row's
+/// override (`Difficulty::skill_at` as it stood at the freeze).
+pub fn frozen_err_cap(d: Difficulty, level: u8) -> f32 {
+    frozen_tier(d)
+        .err_cap
+        .unwrap_or_else(|| Skill::from_level(level).err_cap)
+}
+
+/// Does a proxy on a team at tier `d` focus on humans (card DFOCUS's
+/// `focuses` as it stood at the freeze)?
+pub fn frozen_focuses(d: Difficulty) -> bool {
+    matches!(d, Difficulty::Hard | Difficulty::Elite)
+}
+
 /// The highest proxy skill (5 levels past the originals' 20).
 pub const SKILL_MAX: u8 = 25;
 
@@ -392,10 +517,25 @@ impl Sim {
     /// The tier columns unit `u`'s brain works to: its team's
     /// ([`Sim::ai_tier`]), or a proxy's own profile over them.
     pub fn unit_tier(&self, u: &Unit) -> Tier {
-        let tier = self.ai_tier(u.team);
         match &u.proxy_human {
-            Some(p) => p.over(tier, self.mission_ai.view_mult),
-            None => tier,
+            // The frozen row (`FROZEN_TIERS`), its view under the mission's
+            // as `Sim::ai_tier` does, then the profile over it.
+            Some(p) => {
+                let mut tier = frozen_tier(self.difficulty_of(u.team));
+                tier.view_mult *= self.mission_ai.view_mult;
+                p.over(tier, self.mission_ai.view_mult)
+            }
+            None => self.ai_tier(u.team),
+        }
+    }
+
+    /// Unit `u`'s error cap at a droid or a turret: its integer skill's
+    /// under its team's tier, or a proxy's frozen one ([`frozen_err_cap`]).
+    pub fn aim_err_cap(&self, u: &Unit) -> f32 {
+        let d = self.difficulty_of(u.team);
+        match u.proxy_human {
+            Some(_) => frozen_err_cap(d, u.skill),
+            None => d.skill_at(u.skill).err_cap,
         }
     }
 

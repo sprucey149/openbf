@@ -271,7 +271,9 @@ one caller (the damage function) and the countdown. Corpus B2 (grep only).
   `rep_weap_inf_rocket_launcher` and `{rep,cis,all,imp}_weap_inf_torpedo_launcher`. **BF1's vehicles author no weak
   spot** (their only `HitLocation`s, `cis_tread_hailfire` and `rep_fly_vtrans`, are ×0); since 2026-11-10 the port
   gives BF1's armoured vehicles BF2's (`re-hitzones.md` Part A §3.1), so the claws light there too, and a launcher's
-  lock goes to the part (`re-ordnance-kinds.md` §5.1). The sim raises `Event::CriticalHit { shooter, victim: Target, weapon_class }` for every bolt
+  lock goes to the part. Any round on a weak part deals its vehicle class's factor on a ground map (x4 on the AT-TE,
+  the AT-AT and the spider walker, x2 on the rest), locked or not, and raises the event (`re-ordnance-kinds.md`
+  §5.1, 2026-11-10 third pass). The sim raises `Event::CriticalHit { shooter, victim: Target, weapon_class }` for every bolt
   hit with a factor > 1 that took health — a head (`Target::Unit`) or a vehicle critical prim (`Target::Vehicle`);
   a bot's has none on a ground round at any tier (space rounds: from Hard up; `Sim::hit_scale`). `game::event_feed` keeps the viewer's sniper-on-head and
   rocket-on-vehicle ones as the 0.5 s timer and the relation colour (enemy red, friend blue, white for an empty

@@ -5,8 +5,12 @@
 use super::{emitter::Frame, Fx, Gain};
 
 use core::sim::{Event, Sim};
+use core::unit::UnitHandle;
+use glam::Vec3;
 
-const BUFF_EFFECTS: [u32; 4] = [0xc17a_b11a, 0x28b9_f3ac, 0xbb3e_84e9, 0xcaa1_4018];
+/// The auras of the offense, defense, regeneration and poison effects, in
+/// `Buffs::timers` order (`com_sfx_buffed_*`).
+pub(super) const BUFF_EFFECTS: [u32; 4] = [0xc17a_b11a, 0x28b9_f3ac, 0xbb3e_84e9, 0xcaa1_4018];
 
 impl Fx {
     pub(super) fn follow_buffs(&mut self, sim: &Sim) {
@@ -60,7 +64,32 @@ impl Fx {
             };
             if self.spawn(name, Frame::at(u.soldier.pos)) {
                 self.live.last_mut().unwrap().unit = Some((*unit, Gain::Activation));
+                // The cast effect's own sound (`buff_rage_fire` and the like),
+                // beside the weapon's `FireSound` (`crate::event_sounds`).
+                self.queue_last_effect_sound(u.soldier.pos);
             }
         }
+    }
+
+    /// Each live aura's looping sound (its effect's `SoundName`, e.g.
+    /// `buff_rage_effect`, `" defer"` dropped) at the unit it follows:
+    /// (unit, the aura's kind, the sound, where). It lasts as long as the
+    /// aura, which [`Fx::follow_buffs`] stops at the effect's end, the
+    /// unit's death or its cloak, as the PS2 does (B2 `FUN_002368a0`).
+    pub fn buff_loops(&self, sim: &Sim) -> Vec<(UnitHandle, usize, String, Vec3)> {
+        self.live
+            .iter()
+            .filter(|e| !e.is_dead())
+            .filter_map(|e| {
+                let (h, kind) = e.buff?;
+                let u = sim.unit(h)?;
+                let name = e.def.emitters.iter().find_map(|em| {
+                    em.sound_name
+                        .as_deref()
+                        .and_then(|s| s.split_whitespace().next())
+                })?;
+                Some((h, kind, name.to_owned(), u.soldier.pos))
+            })
+            .collect()
     }
 }

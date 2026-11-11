@@ -21,6 +21,16 @@ use glam::Vec3;
 
 const FLYER_OWN_DECAY: f32 = 0.5;
 
+/// The Endurance award on a soldier's constants for this tick: every
+/// refill rate x1.5, a drain as it was (B2:160231 multiplies only a rate of
+/// 0 or more; the sprint drain is negative there).
+fn endurance(c: &mut crate::soldier::SoldierConstants) {
+    let up = super::awards::endurance_rate;
+    c.energy_restore = up(c.energy_restore);
+    c.energy_restore_idle = up(c.energy_restore_idle);
+    c.energy_override = c.energy_override.map(up);
+}
+
 impl Sim {
     /// Push overlapping alive units apart in XZ (see step 3b). Deterministic:
     /// pairs visited in index order, a coincident pair separates along +X.
@@ -289,14 +299,26 @@ impl Sim {
         self.unit_grid.build(&self.units);
         // The bot that took longest, and the rays it cast (the slow-frame log).
         let mut worst_think: Option<crate::sim::UnitCost> = None;
+        // Bot rework stage 0: proxies and every unit of a space round think
+        // through the legacy entry point (`ai::legacy_think`); today both
+        // entry points are the same brain.
+        let space = self.space_round();
         crate::ai::think_memo::during_thinks(|| {
             for (i, u) in self.units.iter().enumerate() {
                 if u.alive && u.controller == Controller::Ai {
                     let mut st = u.ai;
                     let think_t0 = std::time::Instant::now();
                     let queries_before = crate::collision::cost::queries();
-                    let (p, nt) = ai::think(self, self.handle(i), &mut st);
-                    let ms = think_t0.elapsed().as_secs_f32() * 1000.0;
+                    let (p, mut nt) = if u.proxy_human.is_some() || space {
+                        ai::legacy_think(self, self.handle(i), &mut st)
+                    } else {
+                        ai::think(self, self.handle(i), &mut st)
+                    };
+                    let elapsed = think_t0.elapsed();
+                    let ms = elapsed.as_secs_f32() * 1000.0;
+                    // Bot census: the call's wall time (a measurement of the
+                    // machine, read only by `think_hist` below).
+                    nt.think_ns = u32::try_from(elapsed.as_nanos()).unwrap_or(u32::MAX);
                     if worst_think.is_none_or(|w| ms > w.ms) {
                         worst_think = Some(crate::sim::UnitCost {
                             unit: i as u32,
@@ -321,7 +343,33 @@ impl Sim {
         // Publish only after every scratch AiState has been written back, so
         // neither index ordering can erase a receiver's pending target.
         let mut wait_calls = Vec::new();
-        for (i, _, _, mut st, p, nt) in ai_updates.iter().copied() {
+        // Bot census: the humans each team has and the rows teams 0..3
+        // play, for its groups (below).
+        let (census_humans, census_rows) = if space {
+            ([0; 2], [self.difficulty; 4])
+        } else {
+            (
+                self.humans_per_team(),
+                [0u8, 1, 2, 3].map(|t| self.difficulty_of(t)),
+            )
+        };
+        for (i, _, mount, mut st, p, nt) in ai_updates.iter().copied() {
+            // Bot census (diagnostic OUTPUT, not hashed): think cost always,
+            // the target and lever counts on ground rounds, by the unit's
+            // row and whether a hostile team has a human.
+            let proxy = self.units[i].proxy_human.is_some();
+            self.think_hist.add(&nt, proxy);
+            if !space {
+                let team = self.units[i].team;
+                let vs_human =
+                    (0..2u8).any(|t| census_humans[usize::from(t)] > 0 && self.hostile(team, t));
+                let row = census_rows
+                    .get(usize::from(team))
+                    .copied()
+                    .unwrap_or_else(|| self.difficulty_of(team));
+                self.bot_census
+                    .add(row, vs_human, proxy, mount.is_none(), &nt);
+            }
             if self.ground_rules == GroundRules::Bf1 {
                 if let Some(w) = st.ride.and_then(|r| r.pickup) {
                     let previous = self.units[i].ai.ride.and_then(|r| r.pickup);
@@ -692,6 +740,9 @@ impl Sim {
                         self.hero_class(self.units[i].team) == Some(self.units[i].spec.class);
                     self.saber_constants(i, &mut consts);
                     self.force_constants(i, &mut consts);
+                    if self.medal_effect(&self.units[i], super::awards::ENDURANCE_MEDAL) {
+                        endurance(&mut consts);
+                    }
                     // The zoom press and its cancels, then the turn: zoomed,
                     // the yaw and pitch rates are divided by the weapon's
                     // turn divisor (`re-zoom.md` §4, §6).

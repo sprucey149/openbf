@@ -432,6 +432,78 @@ fn bf1_plenty_is_over_twenty_rounds_and_bf2_over_two() {
     assert_eq!(pick(3, true), Some(0));
 }
 
+/// OURS (7.5's named deviation): a shell launcher counts as plenty on every
+/// map. A BF1 pilot with a 15-round mortar in slot 0 (its disc band, 10/32/48
+/// m, one shell 150 x 4/3) and an endless pistol in slot 1 (0/16/32 m, 40 x
+/// 1.5) fires the mortar at 20 m and the pistol inside the mortar's 10 m.
+/// The same 15 rounds of a sticky launcher are still not plenty.
+#[test]
+fn a_bf1_pilot_keeps_its_mortar_over_the_pistol_in_both_bands() {
+    let mortar = WeaponClass {
+        name: "mortar".into(),
+        rounds_per_clip: 5,
+        reload_time: 2.25,
+        shot_delay: [1.5; 2],
+        ai_range: [10.0, 32.0, 48.0],
+        ai_target_kind: 0x07,
+        ordnance: OrdnanceClass {
+            kind: OrdKind::Shell,
+            max_damage: 150.0,
+            scales: [4.0 / 3.0; 7],
+            ..OrdnanceClass::default()
+        },
+        ..WeaponClass::default()
+    };
+    let pistol = WeaponClass {
+        name: "pistol".into(),
+        rounds_per_clip: 0,
+        reload_time: 2.0,
+        shot_delay: [0.2; 2],
+        ai_range: [0.0, 16.0, 32.0],
+        ai_target_kind: 0x07,
+        ordnance: OrdnanceClass {
+            max_damage: 40.0,
+            scales: [1.5; 7],
+            ..OrdnanceClass::default()
+        },
+        ..WeaponClass::default()
+    };
+    assert!(shot(&mortar, 0) > shot(&pistol, 0), "the fixture's premise");
+    let pick = |m: &WeaponClass, d| {
+        let slots = [cand(0, m, Some(15)), cand(1, &pistol, None)];
+        choose(
+            slots.into_iter(),
+            &Ask {
+                bf2: false,
+                ..ask(d)
+            },
+        )
+    };
+    assert_eq!(pick(&mortar, 20.0), Some((0, true)), "the mortar at 20 m");
+    assert_eq!(
+        pick(&mortar, 8.0),
+        Some((1, true)),
+        "the pistol inside 10 m"
+    );
+    assert_eq!(
+        pick(&mortar, 40.0),
+        Some((0, true)),
+        "past the pistol's band"
+    );
+    let lobbed = WeaponClass {
+        ordnance: OrdnanceClass {
+            kind: OrdKind::Lobbed,
+            ..mortar.ordnance.clone()
+        },
+        ..mortar.clone()
+    };
+    assert_eq!(
+        pick(&lobbed, 20.0),
+        Some((1, true)),
+        "a sticky's 15 are not"
+    );
+}
+
 /// A flat 400 m floor.
 fn flat() -> Heightfield {
     Heightfield {

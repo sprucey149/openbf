@@ -1,6 +1,7 @@
 //! GBOARD/WGORD call targets are consumed only at scheduled thinks over retained orders.
 //! Foot-bot tick priority chain, valid boarding maintenance (CWAIT), and failed-walk recovery.
 
+use crate::ai::census;
 use crate::ai::draw::{stance_hold, unit_unit, SALT_DODGE};
 use crate::ai::gunner_foot::{self, AimRequest};
 use crate::ai::mover::{self, MoveRequest};
@@ -80,6 +81,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     let woken = st.wake != 0 && sim.tick >= st.last_think + crate::ai::wake::GAP;
     let thinking = sim.tick >= st.next_think || woken;
     if thinking {
+        nt.thought = 1;
         if sim.tick < st.next_think {
             nt.wake = st.wake;
         }
@@ -100,11 +102,23 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         // Card DFOCUS: a holder of a human's token at Hard / Elite makes him
         // its target (`crate::ai::dfocus`).
         if let Some(h) = crate::ai::dfocus::pick(sim, me, st) {
+            nt.levers |= census::LV_DFOCUS;
             nt.acquired |= u8::from(perception::take_target(st, h, sim.tick));
         }
         // [ours] A picking unit prefers threats (`proxy::pick`).
         if let Some(h) = crate::ai::proxy::pick(sim, me, st) {
+            nt.levers |= census::LV_PICK;
             nt.acquired |= u8::from(perception::take_target(st, h, sim.tick));
+        }
+        // Bot census (diagnostics only, `crate::ai::census`): the target
+        // this think holds, and the tier levers it shows. On foot in a
+        // ground round.
+        if ground && u.mount.is_none() {
+            nt.d1 = census::d1(sim, me, st, nt.acquired != 0);
+            nt.levers |= census::think_levers(sim, me, u, st, &tier);
+            if mend.is_some() {
+                nt.levers |= census::LV_MEND;
+            }
         }
         nt.contacts = held;
         nt.heard = heard;
@@ -383,6 +397,13 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     }
     // ...and a grenade on the ground near by is a thing to run from.
     let flee = hazard_flee(sim, me, u, &tier);
+    if thinking {
+        if flee.is_some() {
+            nt.levers |= census::LV_GRENADE_FLEE;
+        } else if !sim.hazards.is_empty() && census::hazard_near(sim, me, u) {
+            nt.levers |= census::LV_GRENADE_IGNORE;
+        }
+    }
     // The on-hit reaction as a ROLL (below): the side, this tick only.
     let mut roll: i8 = 0;
 
@@ -397,6 +418,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         && (st.flinch_until == 0 || sim.tick >= st.flinch_until + (FLINCH_GAP - FLINCH_TICKS))
     {
         st.flinch_until = sim.tick + FLINCH_TICKS;
+        nt.levers |= census::LV_FLINCH;
     }
 
     // OURS: soldier dodge on hit. FUN_0020a940 (B2:121236-121318)
@@ -414,11 +436,13 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
         if st.fight.tactician() {
             // Card TPOS: a hit counts against the position (`tactic::hit`).
             super::tactic::hit(sim, &tk, st);
+            nt.levers |= census::LV_POSITION_HIT;
         } else if let Some(h) = st.hold.filter(|h| sim.tick < h.until) {
             roll = react(sim, &tk, st, h, enemy, &mut nt);
         } else if unit_unit(me.index, sim.tick, me.gen, SALT_DODGE) < skill.dodge_chance {
             let side: i8 = if st.slide > 0 { -1 } else { 1 };
             st.dodge_until = sim.tick + DODGE_COOLDOWN;
+            nt.levers |= census::LV_DODGE;
             match st.route {
                 Some(mut r) => {
                     r.sidestep = side * (SIDESTEP_TICKS + 1);
@@ -452,6 +476,9 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
     // Card DFOCUS: a focuser that lost sight of its human walks to where he
     // was last seen, when that is near (`dfocus::push`).
     let push = crate::ai::dfocus::push(sim, me, st, pos).filter(|_| st.cmd.is_none());
+    if thinking && push.is_some() {
+        nt.levers |= census::LV_PUSH;
+    }
     let goal: Option<Vec3> = match (st.route, st.cmd) {
         _ if push.is_some() => push,
         // On an arc leg, along the arc's line (`leg_point`) — but not while
@@ -1056,7 +1083,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick) {
 /// The farthest a bot on foot fights: the longest AI range of the weapons it
 /// holds and may use plus [`FIGHT_BEYOND`] (playtest C3; `re-soldier-ai.md`
 /// 4.2). An award weapon it has no medal for does not count.
-fn fight_reach(sim: &Sim, u: &crate::unit::Unit) -> f32 {
+pub(crate) fn fight_reach(sim: &Sim, u: &crate::unit::Unit) -> f32 {
     let range = |c: usize| sim.weapon_classes.get(c).map_or(0.0, |w| w.ai_range[2]);
     let held = u
         .held

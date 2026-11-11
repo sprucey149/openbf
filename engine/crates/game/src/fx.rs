@@ -349,6 +349,25 @@ impl Library {
                 dirs.push(assets_dir.join("common_bf2"));
             }
         }
+        // [ours] BF2's soldier auras (the award and ability effects, e.g. War
+        // Hero's red lightning) on a BF1 map, which has none of its own; after
+        // every BF1 layer, so the native variant caches do not move. Their
+        // files are searched after every BF1 directory, so a BF1 file of the
+        // same name always wins.
+        let mut aura_dir = None;
+        if game == "bf1" {
+            let common = assets_dir.join("common_bf2");
+            if let Some(mut set) = Self::read_set(&common) {
+                set.effects
+                    .retain(|e| abilities::BUFF_EFFECTS.contains(&e.hash));
+                set.beams.clear();
+                set.lightning.clear();
+                sets.push(set);
+                if !dirs.contains(&common) {
+                    aura_dir = Some(common);
+                }
+            }
+        }
         let mut lib = Library::from_sets(era, sets, &mut Lcg(0x5eed_f00d));
         lib.model_dirs = dirs.iter().map(|d| d.join("models")).collect();
         lib.texture_dirs = dirs.iter().map(|d| d.join("textures")).collect();
@@ -363,6 +382,10 @@ impl Library {
         for v in vehicles {
             lib.model_dirs.push(v.join("models"));
             lib.texture_dirs.push(v.join("textures"));
+        }
+        if let Some(d) = aura_dir {
+            lib.model_dirs.push(d.join("models"));
+            lib.texture_dirs.push(d.join("textures"));
         }
         lib
     }

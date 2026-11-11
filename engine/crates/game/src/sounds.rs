@@ -271,6 +271,21 @@ fn by_level(records: &[SoundProp]) -> HashMap<(u32, u32), SoundProp> {
     out
 }
 
+/// The aura loops and cast sounds of BF2's soldier effects
+/// (`common_bf2` `com_sfx_buffed_*` and `com_sfx_buff_*`), and the ability
+/// weapons' `FireSound`.
+const BUFF_SOUNDS: [&str; 9] = [
+    "buff_rage_effect",
+    "buff_rally_effect",
+    "buff_regen_effect",
+    "buff_poison_effect",
+    "buff_rage_fire",
+    "buff_rally_fire",
+    "buff_regen_fire",
+    "buff_poison_fire",
+    "com_buff_fire",
+];
+
 impl Bank {
     fn import_sbd_sounds(&mut self, root: &Path, game: &str) {
         let names: &[&str] = match game {
@@ -298,6 +313,23 @@ impl Bank {
             &source,
             names.iter().map(|name| fnv1a_lowercase(name)).collect(),
         );
+    }
+
+    /// [ours] BF2's aura and ability sounds on a BF1 map, which has no
+    /// awards or abilities of its own: the auras' loops (the War Hero's
+    /// `buff_rage_effect` crackle and the like) and the casts'. Taken from a
+    /// BF2 world bank that holds all of them; a BF1 property of the same
+    /// name wins.
+    fn import_buff_sounds(&mut self, root: &Path) {
+        let Some(source) = Bank::load(&root.join("bf2_nab2/sounds")) else {
+            return;
+        };
+        let names = BUFF_SOUNDS
+            .iter()
+            .map(|name| fnv1a_lowercase(name))
+            .filter(|hash| !self.props.contains_key(hash))
+            .collect();
+        self.import_props(&source, names);
     }
 
     /// [ours] The optional DLC heroes' sounds, from their selective bake. Absent
@@ -530,6 +562,9 @@ enum LoopSource {
     Repair(core::unit::UnitHandle, usize),
     Hero(core::unit::UnitHandle, u32),
     Shield(core::unit::UnitHandle),
+    /// A soldier's aura loop (the War Hero's crackle and the like), by unit
+    /// and the aura's kind.
+    Buff(core::unit::UnitHandle, usize),
     WalkerFire(core::unit::UnitHandle, usize),
 }
 
@@ -732,6 +767,9 @@ impl SoundLib {
                 let mut core = Bank::load(&root.join(format!("core_{game}")).join("sounds"));
                 if let Some(core) = &mut core {
                     core.import_sbd_sounds(root, &game);
+                    if game == "bf1" {
+                        core.import_buff_sounds(root);
+                    }
                     if game == "bf2" {
                         core.import_dlc_sounds(root);
                     }

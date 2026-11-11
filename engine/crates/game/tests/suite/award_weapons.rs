@@ -1,15 +1,15 @@
 //! BF2's award weapons on both games' classes (`analysis/award-weapons.md`):
 //! each keeps BF2's advantage over the weapon it stands for on the shared
-//! damage scale, BF1 classes carry them, and the award cheat puts them in
-//! the player's hands on a BF1 kit. Real classes from the bake; each case
-//! skips without it.
+//! damage scale, BF1 classes carry them (BF1's Blast Cannon our own Heavy
+//! Blast Cannon), and the award cheat puts them in the player's hands on a
+//! BF1 kit. Real classes from the bake; each case skips without it.
 
 use core::heightfield::Heightfield;
 use core::sim::{buttons, Event, PadState, Sim};
 use core::unit::{Controller, UnitHandle};
 use core::weapon::{HealthType, WeaponClass};
 use game::classdb::ClassDb;
-use game::roster::awards::{bf1_award, BF1_AWARDS};
+use game::roster::awards::{bf1_award, heavy_blast_cannon, BF1_AWARDS};
 use game::roster::{load_classdb, ClassRoster, FACTION_ORDER};
 use glam::Vec3;
 
@@ -91,14 +91,20 @@ fn award_damage_keeps_bf2s_advantage_over_its_base() {
                     continue;
                 }
                 let (a, b) = disc(side, t);
-                assert_eq!(to_person(award), a, "{class} {}", award.name);
                 // BF1's Blast Cannon is its own gun (five 86.67 bolts), not
-                // BF2's shotgun: the flechette award is the same on both.
-                let b = if g == 1 && t == 5 {
-                    65.0 * 4.0 / 3.0
+                // BF2's shotgun, and its award is the Heavy Blast Cannon:
+                // the same gun with the flechette's 85 / 65.
+                let (a, b) = if g == 1 && t == 5 {
+                    (65.0 * 4.0 / 3.0 * 85.0 / 65.0, 65.0 * 4.0 / 3.0)
                 } else {
-                    b
+                    (a, b)
                 };
+                assert!(
+                    close(to_person(award), a),
+                    "{class} {}: {} to a person, want {a}",
+                    award.name,
+                    to_person(award)
+                );
                 assert!(
                     close(to_person(base), b),
                     "{class} {}: {} to a person, want {b}",
@@ -151,17 +157,18 @@ fn bf1_classes_carry_their_award_slots() {
             ("all_weap_award_pistol", 5, 6)
         ])
     );
+    // The Blast Cannon's award is our own, with the Blast Cannon's clips.
     assert_eq!(
         awards(&build("imp_inf_dark_trooper")),
         named(&[
-            ("imp_weap_award_shotgun", 3, 6),
+            ("imp_weap_award_blast_cannon", 3, 7),
             ("imp_weap_award_pistol", 4, 6)
         ])
     );
     assert_eq!(
         awards(&build("all_inf_pilot")),
         named(&[
-            ("all_weap_award_shotgun", 4, 4),
+            ("all_weap_award_blast_cannon", 4, 4),
             ("all_weap_award_pistol", 5, 6)
         ])
     );
@@ -219,7 +226,12 @@ fn bf1_classes_carry_their_award_slots() {
                 .iter()
                 .find(|h| h.weapon.name == award)
                 .unwrap_or_else(|| panic!("{class} holds {award}"));
-            let own = game::roster::weapon_from_db(&bf2, &award).unwrap();
+            let row = bf1_award(&base.name).unwrap().0;
+            let own = if row.bf2 {
+                game::roster::weapon_from_db(&bf2, &award).unwrap()
+            } else {
+                heavy_blast_cannon(&base, &award, row.medal)
+            };
             let w = &h.weapon;
             assert_eq!(h.channel, 0);
             assert_eq!(
@@ -249,7 +261,6 @@ fn bf1_classes_carry_their_award_slots() {
                 r.anim.bank_of(&base.name),
                 "{class} {award}"
             );
-            let row = bf1_award(&base.name).unwrap().0;
             assert_eq!(
                 base.medal_lock,
                 row.replaces.then_some(row.medal),
@@ -261,11 +272,11 @@ fn bf1_classes_carry_their_award_slots() {
         }
     }
     assert!(checked >= 60, "{checked} BF1 award slots checked");
-    // Each row's award is a BF2 class on all four sides.
+    // Each row's award is a BF2 class on all four sides, but our own.
     for row in BF1_AWARDS {
         for side in FACTION_ORDER {
             let award = format!("{side}{}", row.award);
-            assert!(bf2.resolve(&award).is_some(), "BF2 has {award}");
+            assert_eq!(bf2.resolve(&award).is_some(), row.bf2, "BF2 has {award}");
         }
     }
 }
@@ -446,8 +457,8 @@ fn a_bf1_award_rifle_is_bf2s() {
     assert_eq!(imp, (vec![70.0], vec![150.0; 3]));
 }
 
-/// The beam rifle and the flechette shotgun on BF1 kits: a held beam takes
-/// BF2's 600 off a body, and each flechette that lands takes BF2's 85.
+/// The beam rifle and the Heavy Blast Cannon on BF1 kits: a held beam takes
+/// BF2's 600 off a body, and each award bolt that lands 113.33.
 #[test]
 fn bf1_snipers_and_pilots_fire_bf2s_awards() {
     let Some(bf1) = db("bf1") else { return };
@@ -464,11 +475,144 @@ fn bf1_snipers_and_pilots_fire_bf2s_awards() {
     let mut r = range(&bf1, "all_inf_pilot", "imp_inf_storm_trooper", 5.0);
     r.sim.cheats.all_awards = true;
     r.sim.step(&[pad(0)]);
-    assert_eq!(r.in_hand(), "all_weap_award_shotgun");
-    let pellets = r.shoot();
-    assert!(!pellets.is_empty() && pellets.len() <= 7, "{pellets:?}");
-    for p in pellets {
-        // A flechette on the body, or x3 on the head.
-        assert!(p == 85.0 || p == 255.0, "{p}");
+    assert_eq!(r.in_hand(), "all_weap_award_blast_cannon");
+    let bolts = r.shoot();
+    assert!(!bolts.is_empty() && bolts.len() <= 5, "{bolts:?}");
+    for p in bolts {
+        // A bolt on the body, or x3 on the head.
+        assert!(close(p, 340.0 / 3.0) || close(p, 340.0), "{p}");
     }
+}
+
+/// The maintainer 2026-11-10 ("blast cannon award: sure, I'm on board"):
+/// BF1's Blast Cannon users get the Heavy Blast Cannon, the same gun, bolts,
+/// sound and impacts with the flechette's edge over BF2's shotgun: five
+/// bolts of 113.33 to a soldier, 0.9 s between shots, yaw spread 3.56
+/// degrees, 35 rounds; every other number the Blast Cannon's.
+#[test]
+fn the_heavy_blast_cannon_is_the_blast_cannon_with_the_flechettes_edge() {
+    let Some(bf1) = db("bf1") else { return };
+    let mut seen = 0;
+    for class in [
+        "all_inf_pilot",
+        "imp_inf_dark_trooper",
+        "imp_inf_dark_troopersnow",
+    ] {
+        let r = ClassRoster::build(&bf1, class, 1, None).expect(class);
+        let kit = kit(&r);
+        let (award, base) = pair(&kit, 5).expect(class);
+        let side = &class[..3];
+        assert_eq!(base.name, format!("{side}_weap_inf_shotgun"));
+        assert_eq!(award.name, format!("{side}_weap_award_blast_cannon"));
+        assert_eq!((award.medal_unlock, award.medal_lock), (Some(5), None));
+        assert_eq!(
+            base.medal_lock,
+            Some(5),
+            "{class}: the Blast Cannon gives way"
+        );
+        // The numbers.
+        assert!(close(to_person(award), 340.0 / 3.0), "{}", to_person(award));
+        assert!(close(to_person(base), 260.0 / 3.0), "{}", to_person(base));
+        assert_eq!((award.shots_per_salvo, award.salvo_count), (5, 1));
+        assert!(close(award.shot_delay[0], 0.9) && close(award.shot_delay[1], 0.9));
+        let deg = |r: f32| r.to_degrees();
+        assert!(
+            close(deg(award.yaw_spread), 32.0 / 9.0),
+            "{}",
+            deg(award.yaw_spread)
+        );
+        assert!(close(deg(award.pitch_spread), 2.0));
+        assert!(close(deg(base.yaw_spread), 4.0));
+        assert_eq!((award.rounds_per_clip, base.rounds_per_clip), (35, 30));
+        let o = &award.ordnance;
+        let b = &base.ordnance;
+        assert!(close(o.shield_scale, b.shield_scale * 85.0 / 65.0));
+        assert_eq!(
+            o.scales[3..],
+            b.scales[3..],
+            "vehicles and buildings as the base"
+        );
+        assert_eq!(
+            (o.max_damage, o.velocity, o.life_span),
+            (65.0, 160.0, b.life_span)
+        );
+        assert_eq!(b.velocity, 160.0);
+        // The Blast Cannon's look and sound: no purple bolt.
+        assert_eq!(o.laser, b.laser);
+        assert_eq!(o.impact, b.impact);
+        assert_eq!(o.geometry, b.geometry);
+        assert_eq!(award.flash, base.flash);
+        assert_eq!(award.fire_sound, base.fire_sound);
+        assert_eq!(award.reload_sound, base.reload_sound);
+        assert_eq!(award.reload_time, base.reload_time);
+        assert_eq!(award.ai_range, base.ai_range);
+        assert_eq!(award.posture_spread, base.posture_spread);
+        let h = r.held.iter().find(|h| h.weapon.name == award.name).unwrap();
+        let base_clips = if r.weapon.name == base.name {
+            r.total_clips
+        } else {
+            r.held
+                .iter()
+                .find(|h| h.weapon.name == base.name)
+                .unwrap()
+                .clips
+        };
+        assert_eq!(h.clips, base_clips, "{class}: the Blast Cannon's clips");
+        assert_eq!(r.anim.bank_of(&award.name), r.anim.bank_of(&base.name));
+        seen += 1;
+    }
+    assert_eq!(seen, 3);
+}
+
+/// The Heavy Blast Cannon takes the Blast Cannon's place only while the
+/// player holds the Regulator medal (5); a bot never holds it, with the
+/// cheat on or off.
+#[test]
+fn the_heavy_blast_cannon_replaces_the_blast_cannon_only_with_the_medal() {
+    let Some(bf1) = db("bf1") else { return };
+    let mut r = range(&bf1, "imp_inf_dark_trooper", "imp_inf_dark_trooper", 5.0);
+    assert_eq!(r.in_hand(), "imp_weap_inf_shotgun");
+    assert_eq!(
+        r.cycle(),
+        ["imp_weap_inf_pistol"],
+        "no medal: the disc's kit"
+    );
+    let base = r.shoot();
+    assert!(!base.is_empty() && base.len() <= 5, "{base:?}");
+    for p in base {
+        assert!(close(p, 260.0 / 3.0) || close(p, 260.0), "{p}");
+    }
+    let award = r
+        .sim
+        .weapon_classes
+        .iter()
+        .position(|w| w.name == "imp_weap_award_blast_cannon")
+        .unwrap();
+    let me = r.sim.unit(r.player).unwrap();
+    assert!(r.sim.weapon_locked(me, award));
+    r.sim.cheats.all_awards = true;
+    r.sim.step(&[pad(0)]);
+    assert_eq!(r.in_hand(), "imp_weap_award_blast_cannon");
+    assert_eq!(r.cycle(), ["imp_weap_award_pistol"]);
+    let bolts = r.shoot();
+    assert!(!bolts.is_empty() && bolts.len() <= 5, "{bolts:?}");
+    for p in bolts {
+        assert!(close(p, 340.0 / 3.0) || close(p, 340.0), "{p}");
+    }
+    // The bot dark trooper keeps the Blast Cannon with the cheat on.
+    let bot = r.sim.unit(r.target).unwrap();
+    assert!(r.sim.weapon_locked(bot, award));
+    assert_eq!(
+        r.sim.weapon_classes[bot.weapon_class].name,
+        "imp_weap_inf_shotgun"
+    );
+    r.sim.cheats.all_awards = false;
+    r.sim.step(&[pad(0)]);
+    assert_eq!(
+        r.in_hand(),
+        "imp_weap_inf_shotgun",
+        "the Blast Cannon is back"
+    );
+    let me = r.sim.unit(r.player).unwrap();
+    assert!(r.sim.weapon_locked(me, award));
 }

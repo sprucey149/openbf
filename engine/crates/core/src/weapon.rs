@@ -697,8 +697,9 @@ pub struct WeaponState {
     /// constant of the unit's class and slot.
     pub issued: u32,
     /// The dwell lock's candidate (card UORD §5, the PS2's W+0x128 / +0x170)
-    /// and the seconds it has been held. A launcher's missile homes only when
-    /// [`WeaponState::locked`] says so at the press.
+    /// and the seconds it has been held (an on-foot lock past 100 m counts
+    /// them slower, `sim::foot_lock::foot_dwell_scale`). A launcher's
+    /// missile homes only when [`WeaponState::locked`] says so at the press.
     pub lock_target: Option<crate::missile::MissileTarget>,
     pub lock_held: f32,
 }

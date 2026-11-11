@@ -302,6 +302,15 @@ const COVER_STOREY: f32 = 2.5;
 /// `SPACING` of a position another bot holds or guards.
 pub const COVER_CLEAR: f32 = 3.0;
 
+/// May unit `u` hold a Cover role on a team at tier `d` whose live row says
+/// `cover`? A proxy reads its frozen row instead (`proxy::FROZEN_TIERS`).
+pub(crate) fn covers(u: &crate::unit::Unit, d: crate::skill::Difficulty, cover: bool) -> bool {
+    match u.proxy_human {
+        Some(_) => super::proxy::frozen_tier(d).cover,
+        None => cover,
+    }
+}
+
 /// Card TEAM — the TEAM BOARD (`analysis/bot-design.md` 4.3; OURS: the PS2
 /// has no team sense). Once a second per team (team `t` on the ticks with
 /// `tick % TICK_HZ == t`), in unit-index order, before the thinks: it ends
@@ -326,7 +335,10 @@ pub fn board(sim: &mut Sim) {
         if sim.tick % hz != u64::from(t) {
             continue;
         }
-        let cover = sim.difficulty_of(t).tier().cover;
+        let d = sim.difficulty_of(t);
+        let cover = d.tier().cover;
+        let proxy_cover = super::proxy::frozen_tier(d).cover;
+        let may_cover = |u: &crate::unit::Unit| covers(u, d, cover);
         let n = sim.units.len();
         // Who counts in each post's region, per post (unit-index order).
         let inside: Vec<Vec<usize>> = (0..sim.cps.len())
@@ -343,7 +355,7 @@ pub fn board(sim: &mut Sim) {
                 continue;
             };
             let cp = sim.cps.get(usize::from(c));
-            let done = !cover
+            let done = !may_cover(u)
                 || !u.alive
                 || u.mount.is_some()
                 || u.command.is_some()
@@ -355,7 +367,7 @@ pub fn board(sim: &mut Sim) {
             }
         }
         flank_pass(sim, t);
-        if !cover {
+        if !cover && !proxy_cover {
             continue;
         }
         // 2. Give.
@@ -375,6 +387,7 @@ pub fn board(sim: &mut Sim) {
                 }
                 let u = &sim.units[i];
                 if i == capturer
+                    || !may_cover(u)
                     || u.ai.role.post.is_some()
                     || u.controller != crate::unit::Controller::Ai
                     || u.command.is_some()

@@ -386,6 +386,7 @@ pub(super) fn react(
     let [strafes, rolls, moves] = tier.react;
     let x = unit_unit(me.index, sim.tick, me.gen, SALT_REACT);
     if x >= strafes + rolls + moves {
+        nt.levers |= crate::ai::census::LV_REACT_STAY;
         return 0;
     }
     let pos = u.soldier.pos;
@@ -406,6 +407,7 @@ pub(super) fn react(
             st.fight.mode = FightState::MOVE;
             super::route::retarget_board(sim, me, st, p, nt);
             st.hold = Some(h);
+            nt.levers |= crate::ai::census::LV_REACT_MOVE;
             return 0;
         }
         let near = (0..8u32).find_map(|k| {
@@ -419,6 +421,7 @@ pub(super) fn react(
             h.spot = p;
             h.step_to(p, sim.tick, true);
             st.hold = Some(h);
+            nt.levers |= crate::ai::census::LV_REACT_MOVE;
             return 0;
         }
     } else if x >= moves && x < moves + rolls {
@@ -426,6 +429,7 @@ pub(super) fn react(
         if let Some(s) = [side, -side].into_iter().find(|s| {
             roll_clear(sim, u, *s) && react_ok(sim, u, lands(*s)) && in_hub(sim, lands(*s))
         }) {
+            nt.levers |= crate::ai::census::LV_REACT_ROLL;
             if walking {
                 return s;
             }
@@ -440,6 +444,7 @@ pub(super) fn react(
             return 0;
         }
     }
+    let mut strafed = false;
     if !walking {
         for s in [side, -side] {
             let p = pos + right * (f32::from(s) * HOLD_STRAFE);
@@ -447,10 +452,16 @@ pub(super) fn react(
                 h.step_to(p, sim.tick, true);
                 h.strafe_side = s;
                 st.hold = Some(h);
+                strafed = true;
                 break;
             }
         }
     }
+    nt.levers |= if strafed {
+        crate::ai::census::LV_REACT_STRAFE
+    } else {
+        crate::ai::census::LV_REACT_STAY
+    };
     0
 }
 

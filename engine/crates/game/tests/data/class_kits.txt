@@ -26,7 +26,7 @@ bf1 all_inf_pilot
     2:all_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:all_weap_inf_fusioncutter xSome(1) ch1 -> repair x1
     4:all_weap_inf_powerup_dispenser xSome(5) ch1 -> dispenser x5
-    5:all_weap_award_shotgun xSome(4) ch0 -> fired x4 (BF2's award, roster::awards)
+    5:all_weap_award_blast_cannon xSome(4) ch0 -> fired x4 (our own award, roster::awards)
     6:all_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 all_inf_smuggler
     1:all_weap_inf_bowcaster xSome(6) ch0 -> primary x6
@@ -149,13 +149,13 @@ bf1 imp_inf_dark_trooper
     1:imp_weap_inf_shotgun xSome(7) ch0 -> primary x7
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(4) ch1 -> thrown x4
-    4:imp_weap_award_shotgun xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    4:imp_weap_award_blast_cannon xSome(7) ch0 -> fired x7 (our own award, roster::awards)
     5:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_dark_troopersnow
     1:imp_weap_inf_shotgun xSome(7) ch0 -> primary x7
     2:imp_weap_inf_pistol xSome(0) ch0 -> fired x0
     3:imp_weap_inf_thermaldetonator xSome(4) ch1 -> thrown x4
-    4:imp_weap_award_shotgun xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
+    4:imp_weap_award_blast_cannon xSome(7) ch0 -> fired x7 (our own award, roster::awards)
     5:imp_weap_award_pistol xSome(6) ch0 -> fired x6 (BF2's award, roster::awards)
 bf1 imp_inf_darthvader: NOT FIELDED (imp_weap_lightsaber: no OrdnanceName)
 bf1 imp_inf_pilotatat

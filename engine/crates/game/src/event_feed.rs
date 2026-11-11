@@ -314,6 +314,10 @@ impl Texts {
         display_name(text, bf1)
     }
 
+    /// A weapon class's name: `<side>_<kind>_<rest>` is keyed
+    /// `weapons.<side>.<kind>.<rest>`, the map's own game's table first;
+    /// our own award (`roster::awards::own_texts`) has our own name when no
+    /// table has one.
     pub fn weapon_name(&self, class: &str) -> Option<String> {
         let (side, rest) = class.split_once('_')?;
         let (kind, rest) = rest.split_once('_')?;
@@ -321,6 +325,22 @@ impl Texts {
         [(&self.map, self.bf1_map), (&self.bf2, false)]
             .into_iter()
             .find_map(|(table, bf1)| display_name(table.as_ref()?.text(&key)?, bf1))
+            .or_else(|| Some(crate::roster::awards::own_texts(class)?.0.to_owned()))
+    }
+
+    /// The line an earned award shows (issue #130): BF2's
+    /// `game.awards.bonus.<medal>` (`medal` as `round_stats::MEDALS` keys
+    /// it), or our own for an award weapon of ours, `award` being the class
+    /// the medal unlocks in the player's kit (the Heavy Blast Cannon on a BF1
+    /// map, where BF2's text would name the flechette).
+    pub fn award_bonus(&self, medal: &str, award: Option<&str>) -> Option<String> {
+        if let Some((_, line)) = award.and_then(crate::roster::awards::own_texts) {
+            return Some(line.to_owned());
+        }
+        let key = format!("game.awards.bonus.{medal}");
+        [&self.map, &self.bf2]
+            .into_iter()
+            .find_map(|table| display_name(table.as_ref()?.text(&key)?, false))
     }
 
     /// The side's name lists, `<side>.firstnames.01` … and `.lastnames.01` …
@@ -579,6 +599,11 @@ impl EventFeed {
 
     pub fn weapon_name(&self, class: &str) -> Option<String> {
         self.texts.weapon_name(class)
+    }
+
+    /// The line an earned award shows ([`Texts::award_bonus`]).
+    pub fn award_bonus(&self, medal: &str, award: Option<&str>) -> Option<String> {
+        self.texts.award_bonus(medal, award)
     }
 
     /// The boundary's warning in the map's game's words (`re-boundary.md` T4).

@@ -95,7 +95,10 @@ pub struct Bolt {
     pub hulls: HullFilter,
     /// The struck prim's HitLocation factor, set by the sweep (issue #41):
     /// a soldier's head x3 (`Unit::bolt_hit`), a vehicle prim its class's
-    /// (`Body::hit_mult`: the x4 critical prims, BF1's x0 two), else 1.0.
+    /// (`Body::hit_mult`: BF1's x0 two), a vehicle's weak part its class's
+    /// factor on a ground map (x4 on the AT-TE, the AT-AT and the spider
+    /// walker, x2 on the rest) and its data's x4 in space
+    /// (`weak_lock::struck_factor`), else 1.0.
     pub hit_mult: f32,
     /// A shell's fall, m/s² ([`Bolt::shaped`]); 0 flies straight.
     pub gravity: f32,

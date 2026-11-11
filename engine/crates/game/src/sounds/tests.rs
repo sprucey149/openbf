@@ -1327,9 +1327,14 @@ fn voicep_bank_census() {
             for nth in 0..p.samples.len().max(p.segments.len()) {
                 let path = sl.take_path(name, nth).expect("indexed take");
                 let decoded = sl.voice_secs(&path).expect("actual decoded take");
-                println!("TAKE\t{row}\t{nth}\t{}\tdecoded={decoded}\told_rate={old_pitch}\told_play_secs={}\told_return_secs={}\tnew_rate={}\tnew_secs={}",
-                    path.display(), decoded / old_pitch, decoded / p.pitch.max(0.05),
-                    p.pitch.max(0.05), decoded / p.pitch.max(0.05));
+                println!(
+                    "TAKE\t{row}\t{nth}\t{}\tdecoded={decoded}\told_rate={old_pitch}\told_play_secs={}\told_return_secs={}\tnew_rate={}\tnew_secs={}",
+                    path.display(),
+                    decoded / old_pitch,
+                    decoded / p.pitch.max(0.05),
+                    p.pitch.max(0.05),
+                    decoded / p.pitch.max(0.05)
+                );
             }
         }
         rows += 1;
@@ -1404,4 +1409,30 @@ fn real_dlc_bubble_sounds_start_in_a_battle() {
         let path = core.sample_path(prop.samples[0].0).expect(name);
         assert!(pak::is_file(&path), "{}", path.display());
     }
+}
+
+/// A BF1 map's resident bank carries BF2's aura loops and cast sounds,
+/// which BF1 has none of; each resolves to a file on disk.
+#[test]
+fn a_bf1_core_bank_imports_the_buff_sounds() {
+    let root = crate::assets::baked_root();
+    if !root.join("bf1_nab1/sounds/sounds.ron").exists()
+        || !root.join("bf2_nab2/sounds/sounds.ron").exists()
+    {
+        eprintln!("no baked bf1_nab1 and bf2_nab2 sounds: skipped");
+        return;
+    }
+    let lib = SoundLib::load(&root.join("bf1_nab1")).expect("map bank");
+    // No BF2 bank bakes `buff_rally_fire`'s sample: the Rally cast is
+    // silent on BF2's maps too, and nothing is imported for it.
+    assert!(lib.find_named("buff_rally_fire").is_none());
+    for name in BUFF_SOUNDS.into_iter().filter(|n| *n != "buff_rally_fire") {
+        let (prop, in_core) = lib.find_named(name).expect(name);
+        assert!(in_core, "{name}: the resident bank's");
+        let core = lib.core.as_ref().expect("resident bank");
+        let path = core.sample_path(prop.samples[0].0).expect(name);
+        assert!(pak::is_file(&path), "{}", path.display());
+    }
+    let (rage, _) = lib.find_named("buff_rage_effect").unwrap();
+    assert!(rage.looping && rage.gain == 0.5 && rage.max_distance == 30.0);
 }

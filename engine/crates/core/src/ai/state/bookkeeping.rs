@@ -129,6 +129,17 @@ pub struct NavTick {
     pub closed_arc: Option<u16>,
     pub shun_round: u8,
     pub shun_kept: u8,
+    /// Bot census: 1 when the think ran this tick (scheduled or woken).
+    pub thought: u8,
+    /// Bot census: the target this think, as `crate::ai::census::D1_*` bits
+    /// (0 off a think, in a seat or in a space round).
+    pub d1: u8,
+    /// Bot census: the tier levers that worked this tick, as
+    /// `crate::ai::census::LV_*` bits.
+    pub levers: u32,
+    /// Bot census: the wall time of this call, in nanoseconds. `Sim::step`
+    /// writes it after the think returns; nothing in the think reads it.
+    pub think_ns: u32,
 }
 impl NavTick {
     /// Card WHY: note a failed walk, or what came of one.

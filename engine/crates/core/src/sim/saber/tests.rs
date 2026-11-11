@@ -475,3 +475,51 @@ fn a_fat_ray_block_spares_the_defender_but_the_ray_reaches_the_next_body() {
         "accepted block creates reflected ordnance"
     );
 }
+
+/// A saber block ends a PassThrough beam: the defender takes nothing and
+/// the soldier behind him is not reached.
+#[test]
+fn a_saber_block_ends_a_pass_through_beam() {
+    let (mut sim, defender, owner) = scene();
+    sim.weapon_classes[1].ordnance.kind = crate::weapon::OrdKind::Beam;
+    sim.weapon_classes[1].ordnance.beam = Some(crate::weapon::BeamClass {
+        range: 50.0,
+        life: 0.15,
+        pierce: true,
+        impact: None,
+    });
+    let behind = sim
+        .spawn(&UnitSpec::trooper(0, Vec3::new(0.0, 0.0, 5.0)))
+        .unwrap();
+    let (health, behind_health) = (
+        sim.unit(defender).unwrap().health.cur,
+        sim.unit(behind).unwrap().health.cur,
+    );
+    let from = sim.unit(owner).unwrap().muzzle();
+    let round = Bolt::fire(
+        from,
+        Vec3::Z,
+        50.0,
+        1.0,
+        Shooter {
+            owner,
+            team: 1,
+            weapon_class: 1,
+            is_player: false,
+        },
+        None,
+        None,
+        &sim.collision,
+        HullFilter::All,
+    );
+    sim.launch_round(round, false);
+    sim.fly_bolts(crate::TICK_DT);
+    assert_eq!(sim.unit(defender).unwrap().health.cur, health);
+    assert!(
+        sim.unit(defender).unwrap().soldier.energy < 100.0,
+        "blocked"
+    );
+    assert_eq!(sim.unit(behind).unwrap().health.cur, behind_health);
+    let len = sim.beams[0].len;
+    assert!(len < 5.0, "drawn to the defender: {len}");
+}

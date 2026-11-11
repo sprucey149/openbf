@@ -71,7 +71,8 @@ A named deviation, for one game on every map and so that a launcher's lock has a
 - **The originals.** BF2 authors a x4 `HitLocation` on 15 vehicle classes, each on a prim in the ordnance subset.
   BF1 authors none over 1: its two lines are x0 (`cis_tread_hailfire`, `rep_fly_vtrans`). BF1's models do carry the
   critical prims, mostly outside the ordnance lists, so no round met them.
-- **The rule.** A BF1 armoured ground vehicle takes x4 on its own model's critical prim, which joins the ordnance
+- **The rule.** A BF1 armoured ground vehicle takes BF2's x4 row on its own model's critical prim (dealt x2, or x4 on the AT-TE, AT-AT and spider walker, on a
+  ground map, below), which joins the ordnance
   subset: AAT `p_crithit`, hailfire `p_crithit` (replacing its x0), spider walker `p_crithit1` / `p_crithit2`, the
   three AT-STs `p_crit_hit`, the AT-AT `p_neck_soldier`, the combat speeder `p_crithit`. The hovernaut and the MTT
   have no BF2 twin and take x4 on the `p_crithit` their models carry.
@@ -81,11 +82,19 @@ A named deviation, for one game on every map and so that a launcher's lock has a
   (0, 3.43, -1.30)) lies inside the hull boxes; BF2 moved it to a box (half 0.96 x 0.71 x 2.08) under the front of
   the belly at (0, 3.11, 3.14).
 - **None:** speeder bikes, the STAP, the tauntaun, the kaadu, the landspeeder and every flyer, as in BF2.
-- **Effect.** As on BF2 maps, the factor is a human's only (`Sim::hit_scale`): a bot's hit there is plain. A human's
-  torpedo (600) does 2400 on the part. Rockets to destroy from the weak side, before -> after: AAT and fighter tanks
-  (6600) 11 -> 3, hailfire (5200) 9 -> 3, combat speeder (5400) 9 -> 3, AT-ST and spider (6000) 10 -> 3, hovernaut
-  (12500) 21 -> 6, AT-TE and MTT (15000) 25 -> 7, AT-AT (30000) 50 -> 13. A rifle's bolt on the part is x4 of very
-  little (its VehicleScale).
+- **Effect.** As on BF2 maps, the factor is a human's only (`Sim::hit_scale`): a bot's hit there is plain. The
+  rows carry BF2's authored x4 as data; on a ground map every strike on a weak part, BF1's or BF2's, deals the
+  port's factor for the vehicle's class (`Sim::weak_spot_factor`, OURS, the maintainer 2026-11-10: "ATTE, atat,
+  and spider walker: make weak spot hits x4. Everything else x2 and that seems good."): **x4** on the AT-TE, the
+  AT-AT and the spider walker (`weak_lock::HEAVY_WALKER_WEAK_SPOT_FACTOR`; every class of them in both games, BF2's
+  Kashyyyk spider too, and any class whose chain reaches one: `game::vehicle_class::HEAVY_WALKERS`), **x2** on
+  every other vehicle (`weak_lock::GROUND_WEAK_SPOT_FACTOR`), locked or not, whatever the round: a torpedo (600)
+  does 1200 on a BF1 tank's part and 2400 on a BF1 AT-TE's. Space rounds keep the data's factors. Blast damage is
+  never located on a prim in either original, so a splash takes x1 (`re-ordnance-kinds.md` §5.1). Torpedoes to
+  destroy on the part (`weak_spot_kill_table`): AAT and fighter tanks (6600) 6, hailfire (5200) 5, combat speeder
+  (5400) 5, AT-STs (6000) 5 at x2; spider (6000) 3, AT-TE (15000) 7, AT-AT (30000) 13 at x4; on the hull 11, 9, 9,
+  10, 10, 25, 50. (Before 2026-11-10's third pass: x4 for an unlocked strike, and a part lock's factor from the
+  centre's line; the third pass first built x2 on every vehicle.)
 - **Side effect.** The BF1 prims that join the ordnance subset now stop bolts and sight rays that used to pass
   through them to the hull behind; each sits on or inside its hull.
 - measure: maintainer playtest of rockets against BF1 vehicles (B7). Exposure per vehicle: the survey table in
@@ -105,7 +114,7 @@ BF2 snipers 300. BF1 rep_inf_clone_trooper, imp_inf_storm_trooper, all_inf_soldi
 |---|---|---|---|---|
 | 20/50/100/150 m | 300 (no kill, 100 left) | 900 kill* | 160 (no kill, 2 shots) | 480 kill |
 *BF2 AI shooters get ×3 only at difficulty level 3 (FUN_001e0580). Body shot kills only BF2/BF1 snipers? BF2 300 HP sniper: yes (300 >= 300) [D: kill test >=/>, untraced]; BF1 240 classes: no.
-openbf (2026-11-10, playtest B1): bots never get the ×3 head or ×4 critical-prim factor on ground rounds, at any tier (BF2's below-level-3 rule for every tier, so difficulty comes from behaviour; BF1, which has no gate, is a named deviation). Space rounds keep the old Hard-and-up gate. `Sim::hit_scale`.
+openbf (2026-11-10, playtest B1): bots never get the ×3 head or the weak-spot factor (×2, ×4 on the AT-TE, AT-AT and spider walker; `re-ordnance-kinds.md` §5.1) on ground rounds, at any tier (BF2's below-level-3 rule for every tier, so difficulty comes from behaviour; BF1, which has no gate, is a named deviation). Space rounds keep the old Hard-and-up gate. `Sim::hit_scale`.
 
 
 ## Part B: the headshot multiplier and the award

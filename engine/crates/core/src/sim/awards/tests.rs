@@ -49,6 +49,57 @@ fn rifleman() -> (Sim, UnitHandle, UnitHandle) {
     (s, p, b)
 }
 
+/// Make the player's class its team's hero class, as the hero manager does.
+fn make_hero(s: &mut Sim, p: UnitHandle) {
+    let class = s.unit(p).unwrap().spec.class;
+    s.heroes = Some(crate::sim::heroes::Heroes::new([Some(class), None]));
+}
+
+/// No medal row reaches a hero: the hero manager's class, or any class in a
+/// Hero Assault round, where every roster class is a hero.
+#[test]
+fn a_hero_never_gets_a_medal_effect() {
+    use crate::sim::buffs::{GUARDIAN, GUARDIAN_MEDAL, WAR_HERO, WAR_HERO_MEDAL};
+    let medals = [
+        WAR_HERO_MEDAL,
+        GUARDIAN_MEDAL,
+        ENDURANCE_MEDAL,
+        TECHNICIAN_MEDAL,
+    ];
+    let on = |s: &mut Sim| {
+        s.cheats.damage_award = true;
+        s.cheats.defense_award = true;
+        s.cheats.energy_award = true;
+        s.cheats.vehicle_award = true;
+    };
+    let (mut s, p, _) = rifleman();
+    on(&mut s);
+    let u = s.unit(p).unwrap();
+    assert!(medals.iter().all(|&m| s.medal_effect(u, m)), "a trooper");
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.offense, WAR_HERO);
+    assert_eq!(s.unit(p).unwrap().buffs.defense, GUARDIAN);
+
+    type Hero = fn(&mut Sim, UnitHandle);
+    let paths: [(Hero, &str); 2] = [
+        (make_hero, "the hero manager's class"),
+        (
+            |s, _| s.deathmatch = Some(crate::sim::deathmatch::Deathmatch::new(180, [8, 8])),
+            "a Hero Assault class",
+        ),
+    ];
+    for (hero, what) in paths {
+        let (mut s, p, _) = rifleman();
+        on(&mut s);
+        hero(&mut s, p);
+        let u = s.unit(p).unwrap();
+        assert!(medals.iter().all(|&m| !s.medal_effect(u, m)), "{what}");
+        s.step(&[pad(0)]);
+        let b = &s.unit(p).unwrap().buffs;
+        assert_eq!((b.dealt(), b.taken()), (1.0, 1.0), "{what}");
+    }
+}
+
 fn in_hand(s: &Sim, h: UnitHandle) -> &str {
     &s.weapon_classes[s.unit(h).unwrap().weapon_class].name
 }
@@ -200,7 +251,7 @@ fn the_damage_award_cheat_gives_x1_5() {
 
     // A hero gets none (the PS2 clears a hero's).
     s.cheats.damage_award = true;
-    s.unit_mut(p).unwrap().consts.hero = true;
+    make_hero(&mut s, p);
     s.step(&[pad(0)]);
     assert_eq!(s.unit(p).unwrap().buffs.dealt(), 1.0);
 
@@ -216,4 +267,129 @@ fn the_damage_award_cheat_gives_x1_5() {
         1.0,
         "space keeps its numbers"
     );
+}
+
+/// Each award row gives its own medals and no other: "Award weapons" the
+/// five weapon medals, each stat row its one. A bot holds none, and nothing
+/// is held in space.
+#[test]
+fn each_award_row_sets_only_its_medal() {
+    use crate::sim::state::Cheats;
+    type Row = (fn(&mut Cheats), u16);
+    let rows: [Row; 5] = [
+        (|c| c.all_awards = true, 0b11_0111),
+        (|c| c.damage_award = true, 1 << 8),
+        (|c| c.defense_award = true, 1 << 7),
+        (|c| c.energy_award = true, 1 << 6),
+        (|c| c.vehicle_award = true, 1 << 3),
+    ];
+    for (set, bits) in rows {
+        let (mut s, p, b) = rifleman();
+        set(&mut s.cheats);
+        assert_eq!(s.award_bits(s.unit(p).unwrap()), bits);
+        assert_eq!(s.award_bits(s.unit(b).unwrap()), 0, "a bot holds none");
+        s.landing_regions.push(crate::region::Region::sphere(
+            Vec3::new(0.0, -500.0, 0.0),
+            1.0,
+        ));
+        assert_eq!(s.award_bits(s.unit(p).unwrap()), 0, "none in space");
+    }
+    // Every row's id toggles its own field and no other.
+    let ids = Cheats::default().entries().map(|e| e.0);
+    for (k, id) in ids.iter().enumerate() {
+        let mut c = Cheats::default();
+        c.toggle(id);
+        let on: Vec<bool> = c.entries().iter().map(|e| e.2).collect();
+        assert!(on.iter().enumerate().all(|(j, &v)| v == (j == k)), "{id}");
+    }
+}
+
+/// The defense award (Guardian) halves the damage the player takes while
+/// it is on; a bot and a hero never get it, an officer's shorter Rally does
+/// not replace it, and it goes with the medal.
+#[test]
+fn the_damage_reduction_cheat_halves_damage_taken() {
+    use crate::sim::buffs::GUARDIAN;
+    let (mut s, p, b) = rifleman();
+    s.cheats.all_awards = true;
+    s.cheats.damage_award = true;
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.taken(), 1.0, "other rows: no");
+
+    s.cheats.defense_award = true;
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.defense, GUARDIAN);
+    assert_eq!(s.unit(p).unwrap().buffs.taken(), 0.5);
+    assert_eq!(s.buff_scale(Some(b), p), 0.5);
+    assert_eq!(s.unit(b).unwrap().buffs.taken(), 1.0, "a bot holds none");
+
+    // A 20 s Rally is shorter: Guardian stays.
+    s.units[p.index as usize]
+        .buffs
+        .apply_multipliers((0.0, 1.0), (20.0, 0.5));
+    for _ in 0..600 {
+        s.step(&[pad(0)]);
+    }
+    assert_eq!(s.unit(p).unwrap().buffs.defense, GUARDIAN);
+
+    s.cheats.defense_award = false;
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.taken(), 1.0, "gone with the medal");
+
+    // A hero gets none.
+    s.cheats.defense_award = true;
+    make_hero(&mut s, p);
+    s.step(&[pad(0)]);
+    assert_eq!(s.unit(p).unwrap().buffs.taken(), 1.0);
+}
+
+/// The energy award (Endurance) refills the player's energy at 1.5 x the
+/// class rate, standing still; a drain is untouched.
+#[test]
+fn the_energy_regen_award_refills_energy_1_5x() {
+    let gain = |on: bool| {
+        let (mut s, p, _) = rifleman();
+        s.cheats.energy_award = on;
+        s.step(&[pad(0)]);
+        let c = s.unit(p).unwrap().consts;
+        s.unit_mut(p).unwrap().soldier.energy = 10.0;
+        for _ in 0..30 {
+            s.step(&[pad(0)]);
+        }
+        (
+            s.unit(p).unwrap().soldier.energy - 10.0,
+            c.energy_restore_idle,
+        )
+    };
+    let (plain, idle) = gain(false);
+    let (award, _) = gain(true);
+    assert!((plain - idle).abs() < 0.01, "{plain} against {idle}");
+    assert!((award - 1.5 * idle).abs() < 0.01, "{award} against {idle}");
+    assert_eq!(super::endurance_rate(-5.0), -5.0, "a drain as it was");
+    assert_eq!(super::endurance_rate(10.0), 15.0);
+}
+
+/// Difficulty never meets a medal: with every award row on, a bot and the
+/// human proxy (a bot the sim treats as a human target) hold none and get
+/// no effect, so the tiers are tuned with every award off.
+#[test]
+fn a_bot_and_the_proxy_never_hold_a_medal() {
+    let (mut s, p, b) = rifleman();
+    s.units[b.index as usize].proxy_human = Some(crate::ai::proxy::Strength::Good.profile());
+    let c = &mut s.cheats;
+    c.all_awards = true;
+    c.damage_award = true;
+    c.defense_award = true;
+    c.energy_award = true;
+    c.vehicle_award = true;
+    s.step(&[pad(0)]);
+    let bot = s.unit(b).unwrap();
+    assert!(bot.is_human(), "the proxy counts as a human target");
+    assert_eq!(s.award_bits(bot), 0);
+    for medal in [3, 6, 7, 8] {
+        assert!(!s.medal_effect(bot, medal), "medal {medal}");
+        assert!(s.medal_effect(s.unit(p).unwrap(), medal), "medal {medal}");
+    }
+    assert_eq!((bot.buffs.dealt(), bot.buffs.taken()), (1.0, 1.0));
+    assert!(!bot.buffs.active());
 }

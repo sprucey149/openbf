@@ -75,22 +75,114 @@ fn a_beam_spreads_its_damage_over_its_life() {
     assert!(s.bolts.is_empty());
 }
 
+fn line_of_troopers(s: &mut Sim, at: &[f32]) -> Vec<UnitHandle> {
+    at.iter()
+        .map(|&x| {
+            s.spawn(&UnitSpec::trooper(1, Vec3::new(x, 0.0, 0.0)))
+                .unwrap()
+        })
+        .collect()
+}
+
+/// A 1 m slab across the beam's line, its near face at x = 29.5.
+fn wall(s: &mut Sim) {
+    use crate::collision::{Body, Shape};
+    s.collision.push_body(Body::new(
+        glam::Mat4::from_translation(Vec3::new(30.0, 5.0, 0.0)),
+        Shape::Box {
+            half: Vec3::new(0.5, 5.0, 5.0),
+        },
+    ));
+}
+
+fn struck(s: &Sim) -> Vec<u32> {
+    hits(s).iter().map(|h| h.0).collect()
+}
+
 #[test]
-fn a_beam_stops_on_the_first_soldier() {
+fn a_beam_without_pass_through_stops_on_the_first_soldier() {
     let (mut s, class, owner) = scene();
-    let near = s
-        .spawn(&UnitSpec::trooper(1, Vec3::new(10.0, 0.0, 0.0)))
-        .unwrap();
-    s.spawn(&UnitSpec::trooper(1, Vec3::new(20.0, 0.0, 0.0)))
-        .unwrap();
+    s.weapon_classes[class]
+        .ordnance
+        .beam
+        .as_mut()
+        .unwrap()
+        .pierce = false;
+    let line = line_of_troopers(&mut s, &[10.0, 20.0]);
     open(&mut s, class, owner, false);
     run(&mut s, 1);
-    assert_eq!(
-        hits(&s).iter().map(|h| h.0).collect::<Vec<_>>(),
-        [near.index]
-    );
+    assert_eq!(struck(&s), [line[0].index]);
     let len = s.beams[0].len;
     assert!(len > 9.0 && len < 10.5, "{len}");
+}
+
+/// PassThrough (BF2 FUN_00311d00): each soldier on the line takes his
+/// share once a tick, and the ray ends at the wall, so the one behind it
+/// is safe and the drawn beam reaches the wall.
+#[test]
+fn a_pass_through_beam_strikes_each_soldier_in_line_and_stops_at_a_wall() {
+    let (mut s, class, owner) = scene();
+    wall(&mut s);
+    let line = line_of_troopers(&mut s, &[10.0, 20.0, 40.0]);
+    open(&mut s, class, owner, false);
+    run(&mut s, 1);
+    assert_eq!(struck(&s), [line[0].index, line[1].index]);
+    let share = 30.0 * crate::TICK_DT / 0.15;
+    for (_, damage) in hits(&s) {
+        assert!((damage - share).abs() < 1e-3, "{damage}");
+    }
+    let len = s.beams[0].len;
+    assert!((len - 29.5).abs() < 1e-3, "{len}");
+    s.events.clear();
+    run(&mut s, 1);
+    assert_eq!(struck(&s), [line[0].index, line[1].index], "once a tick");
+}
+
+/// A vehicle is passed too: the hull and the soldier behind it each take
+/// a share.
+#[test]
+fn a_pass_through_beam_goes_on_through_a_hull() {
+    use crate::collision::{HullPart, Layers, Shape};
+    use crate::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    let (mut s, class, owner) = scene();
+    s.hull_parts = vec![Some(
+        vec![HullPart::new(
+            glam::Mat4::from_translation(Vec3::Y),
+            Shape::Box {
+                half: Vec3::new(2.0, 1.0, 3.0),
+            },
+            Layers::ALL,
+        )]
+        .into(),
+    )];
+    let v = s.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Hover,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: Vec3::new(10.0, 0.0, 0.0),
+        yaw: 0.0,
+        max_health: 900.0,
+        health_type: crate::weapon::HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    let behind = line_of_troopers(&mut s, &[20.0]);
+    open(&mut s, class, owner, false);
+    run(&mut s, 1);
+    assert!(s.vehicle(v).unwrap().health.cur < 900.0);
+    assert_eq!(struck(&s), [behind[0].index]);
+}
+
+/// Space keeps the first hit stopping every beam.
+#[test]
+fn a_space_round_beam_stops_on_the_first_soldier() {
+    let (mut s, class, owner) = scene();
+    s.space_assault = Some(crate::sim::SpaceAssault::new(10));
+    let line = line_of_troopers(&mut s, &[10.0, 20.0]);
+    open(&mut s, class, owner, false);
+    run(&mut s, 1);
+    assert_eq!(struck(&s), [line[0].index]);
 }
 
 #[test]

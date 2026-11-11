@@ -494,7 +494,8 @@ pub struct Body {
     /// A hull body's damage factor for a direct hit (its class's
     /// `HitLocation` for this prim: the vehicles' x4 critical prims, BF1's
     /// two x0 ones; issue #41, `analysis/re-ai-difficulty.md` 9.2); 1.0 for
-    /// every other body.
+    /// every other body. The data's: a ground round deals its vehicle
+    /// class's factor on every weak part (`Sim::weak_spot_factor`).
     pub hit_mult: f32,
     pub flyer_part: bool,
 }

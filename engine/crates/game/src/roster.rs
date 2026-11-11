@@ -860,8 +860,8 @@ pub fn held_slots(db: &ClassDb, soldier: &str, primary: u8) -> Vec<HeldSlot> {
 /// (re-jetpack.md §2.2, §12). Rows: (BF1 class, its BF2 twin,
 /// JetAcceleration, the jet row or None for the ctor default 0.3 / 0.3 / 1.0).
 /// `tests/suite/roster.rs` holds the numbers to the BF2 twins' baked classes.
-/// Every jet trooper flies on one fuel profile ([`JET_TROOPER_FUEL_COST`]);
-/// another BF1 hover class keeps BF1's net drain in flight
+/// Every jet trooper flies on one fuel profile ([`JET_TROOPER_FUEL_COST`]),
+/// Jango and Boba on theirs ([`JET_HERO_FUEL_COST`]); another BF1 hover class keeps BF1's net drain in flight
 /// ([`bf1_net_jet_fuel_cost`]).
 pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
     (
@@ -885,6 +885,20 @@ pub const BF1_JET_BORROW: &[(&str, &str, f32, Option<[f32; 3]>)] = &[
     ),
 ];
 
+/// `[ours]` one leap refill (the maintainer 2026-11-10: "make it the faster
+/// refill stat, again we're trying to normalize things across both games"):
+/// BF1's dark troopers refill their leap at their BF2 twin's
+/// `JetFuelRechargeRate`, 0.075 / s in place of BF1's 0.025. To the lift-off
+/// border 0.49 that is 6.5 s, not 19.6 s (the snow variant's 0.4: 5.3 s, not
+/// 16 s). The rest of the leap stays each disc's own (re-jetpack.md §6, §13).
+/// Rows: (BF1 class, its BF2 twin, the refill a second).
+/// `tests/suite/roster.rs` holds the value to the twin's baked class.
+/// measure: a playtest of the leap's wait on a BF1 map.
+pub const BF1_LEAP_REFILL: &[(&str, &str, f32)] = &[
+    ("imp_inf_dark_trooper", "imp_inf_dark_trooper", 0.075),
+    ("imp_inf_dark_troopersnow", "imp_inf_dark_trooper", 0.075),
+];
+
 /// The jet trooper classes' roots: BF1's own class and the BF2 base that
 /// the ep2, ep3, training, rifleman and sniper troopers inherit.
 pub const JET_TROOPER_ROOTS: &[&str] = &["rep_inf_jet_trooper", "rep_inf_default_jettrooper"];
@@ -898,11 +912,38 @@ pub const JET_TROOPER_ROOTS: &[&str] = &["rep_inf_jet_trooper", "rep_inf_default
 /// measure: a playtest hover from a full tank on a BF2 map against 7.5 s.
 pub const JET_TROOPER_FUEL_COST: f32 = 0.1;
 
-/// `[ours]` the jet trooper's refill per second outside the jet, BF1's rate
-/// (BF2's disc has 0.12): empty to the lift-off border in 2.4 s, to full in
-/// 10 s. BF1 maps keep their numbers exactly.
-/// replace: with the maintainer's rate after a playtest of the refill.
-pub const JET_TROOPER_FUEL_RECHARGE: f32 = 0.1;
+/// `[ours]` every jet pack's refill per second outside the jet (the
+/// maintainer 2026-11-10: BF1's flight time, BF2's refill), BF2's disc rate
+/// (BF1's is 0.1): empty to the lift-off border 0.24 in 2.0 s, to full in
+/// 8.3 s. The jet troopers and Jango / Boba Fett share it.
+/// measure: a playtest of the refill against BF1's 10 s empty to full.
+pub const JET_PACK_FUEL_RECHARGE: f32 = 0.12;
+
+/// The jet trooper's refill ([`JET_PACK_FUEL_RECHARGE`]).
+pub const JET_TROOPER_FUEL_RECHARGE: f32 = JET_PACK_FUEL_RECHARGE;
+
+/// Jango and Boba Fett's classes (BF2 only; BF1 has neither).
+pub const JET_HERO_ROOTS: &[&str] = &["cis_hero_jangofett", "imp_hero_bobafett"];
+
+/// `[ours]` Jango and Boba Fett fly a little longer than a jet trooper (the
+/// maintainer 2026-11-10: "say 8.5s vs the standard 7.5s"): on the disc's
+/// lift-off cost 0.25, (1 - 0.25) / 8.5 per second, 8.5 s from full and
+/// 2.8 s from the spawn's half tank. BF2's disc drain is 0.15 (5.0 s).
+/// measure: a playtest hover from a full tank against 8.5 s.
+pub const JET_HERO_FUEL_COST: f32 = (1.0 - 0.25) / 8.5;
+
+/// Jango or Boba Fett: a hover jet that can start, on a chain through
+/// [`JET_HERO_ROOTS`].
+pub fn is_jet_hero(db: &ClassDb, class: &str, c: &SoldierConstants) -> bool {
+    c.jet_hover
+        && c.jet_jump > 0.0
+        && c.jet_fuel_min_border <= 1.0
+        && db.chain(class).iter().any(|d| {
+            JET_HERO_ROOTS
+                .iter()
+                .any(|r| r.eq_ignore_ascii_case(&d.name))
+        })
+}
 
 /// A jet trooper class: a hover jet that can start (JetJump over 0, a
 /// border a full tank reaches) on a chain through [`JET_TROOPER_ROOTS`].
@@ -990,9 +1031,10 @@ pub fn soldier_constants(db: &ClassDb, class: &str) -> SoldierConstants {
 /// The class data `SoldierConstants::from_props` cannot read alone: the
 /// `ControlSpeed jet` row, child-most first (the PS2 applies each class's
 /// rows over its parent's, one stance at a time), the jet trooper's fuel
-/// profile on both discs ([`is_jet_trooper`]), and on a BF1 disc another
-/// hover class's net in-flight drain ([`bf1_net_jet_fuel_cost`]) and the
-/// [`BF1_JET_BORROW`] numbers.
+/// profile on both discs ([`is_jet_trooper`]), Jango's and Boba's
+/// ([`is_jet_hero`]), and on a BF1 disc another
+/// hover class's net in-flight drain ([`bf1_net_jet_fuel_cost`]), the
+/// [`BF1_LEAP_REFILL`] and the [`BF1_JET_BORROW`] numbers.
 fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
     let h = crate::classdb::fnv1a_lowercase("ControlSpeed");
     let row = db.chain(class).into_iter().find_map(|def| {
@@ -1009,11 +1051,20 @@ fn jet_class_data(db: &ClassDb, class: &str, c: &mut SoldierConstants) {
     if is_jet_trooper(db, class, c) {
         c.jet_fuel_cost = JET_TROOPER_FUEL_COST;
         c.jet_fuel_recharge = JET_TROOPER_FUEL_RECHARGE;
+    } else if is_jet_hero(db, class, c) {
+        c.jet_fuel_cost = JET_HERO_FUEL_COST;
+        c.jet_fuel_recharge = JET_PACK_FUEL_RECHARGE;
     } else if !db.is_bf2() {
         c.jet_fuel_cost = bf1_net_jet_fuel_cost(c);
     }
     if db.is_bf2() {
         return;
+    }
+    if let Some(&(_, _, refill)) = BF1_LEAP_REFILL
+        .iter()
+        .find(|(bf1, ..)| bf1.eq_ignore_ascii_case(class))
+    {
+        c.jet_fuel_recharge = refill;
     }
     if let Some(&(_, _, accel, row)) = BF1_JET_BORROW
         .iter()

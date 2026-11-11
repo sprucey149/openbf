@@ -3,7 +3,7 @@
 //! lose health with game time and regain it from enemy kills.
 
 use super::{buttons, Event, PadState, Sim};
-use crate::unit::{Controller, UnitHandle};
+use crate::unit::{Controller, Unit, UnitHandle};
 use crate::TICK_HZ;
 
 /// The offered slot's buttons the hero prompt owns while it is up: the
@@ -333,6 +333,12 @@ impl Sim {
             .get(usize::from(team))
             .copied()
             .flatten()
+    }
+
+    /// Is `u` a hero: the hero manager's class for its team, or any class
+    /// in Hero Assault, where every roster class is a hero.
+    pub fn hero_unit(&self, u: &Unit) -> bool {
+        self.deathmatch.is_some() || self.hero_class(u.team) == Some(u.spec.class)
     }
 
     pub fn is_hero(&self, h: UnitHandle) -> bool {

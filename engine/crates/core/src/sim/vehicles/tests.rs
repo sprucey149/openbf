@@ -958,16 +958,21 @@ fn a_bolt_at_a_parked_hull_damages_it() {
 }
 
 /// Issue #41: a bolt into a hull part its class authors a HitLocation
-/// for (the x4 critical prims) does that much more: a human's always. A
+/// over 1 for (the x4 critical prims) does more: a human's always, on a
+/// ground round its vehicle class's factor (`Sim::weak_spot_factor`: x2 by
+/// default, x4 on a big walker's row), the data's x4 in space. A
 /// bot's does plain damage at every tier on a ground round, as a headshot
 /// (playtest 2026-11-05 B1); a space round keeps the old gate (Hard up).
 #[test]
 fn a_critical_prim_takes_its_hit_location() {
     use crate::collision::{HullPart, Layers, Shape};
     use crate::skill::Difficulty;
-    let hit = |mult: f32, human: bool, d: Difficulty, space: bool| {
+    let hit_row = |mult: f32, human: bool, d: Difficulty, space: bool, row: Option<f32>| {
         let (mut s, p, v) = parked(true);
         s.difficulty = d;
+        if let Some(row) = row {
+            s.weak_spot_factor = vec![row];
+        }
         if space {
             s.install_ctf(crate::sim::ctf::CtfState::new_space_one_flag(
                 5,
@@ -1022,9 +1027,24 @@ fn a_critical_prim_takes_its_hit_location() {
         }
         (before - s.vehicle(v).unwrap().health.cur, critical)
     };
+    // A big walker's class row: x4 for a human on the ground, a bot plain,
+    // space the data's.
+    let walker = |human, d, space| hit_row(4.0, human, d, space, Some(4.0));
+    assert_eq!(walker(true, Difficulty::Normal, false), (32.0, true));
+    assert_eq!(walker(false, Difficulty::Elite, false), (8.0, false));
+    assert_eq!(walker(true, Difficulty::Normal, true), (32.0, true));
+    assert_eq!(
+        hit_row(1.0, true, Difficulty::Normal, false, Some(4.0)).0,
+        8.0
+    );
+    assert_eq!(
+        hit_row(4.0, true, Difficulty::Normal, false, Some(2.0)).0,
+        16.0
+    );
+    let hit = |mult, human, d, space| hit_row(mult, human, d, space, None);
     let damage = |mult, human, d| hit(mult, human, d, false);
-    // The critical-hit event (hitmark): the x4 hits that took health.
-    assert!(damage(4.0, true, Difficulty::Normal).1, "a human's x4");
+    // The critical-hit event (hitmark): the weak-part hits that took health.
+    assert!(damage(4.0, true, Difficulty::Normal).1, "a human's x2");
     assert!(!damage(1.0, true, Difficulty::Normal).1, "the hull: none");
     assert!(!damage(4.0, false, Difficulty::Normal).1, "a bot's x1");
     assert!(!damage(4.0, false, Difficulty::Hard).1, "nor on Hard");
@@ -1032,8 +1052,12 @@ fn a_critical_prim_takes_its_hit_location() {
     let damage = |mult, human, d| damage(mult, human, d).0;
     let plain = damage(1.0, true, Difficulty::Normal);
     assert_eq!(plain, 8.0, "the BF2 rifle's 80 x VehicleScale 0.1");
-    assert_eq!(damage(4.0, true, Difficulty::Normal), 32.0);
-    assert_eq!(damage(4.0, true, Difficulty::Elite), 32.0);
+    assert_eq!(
+        damage(4.0, true, Difficulty::Normal),
+        16.0,
+        "x2 on the ground"
+    );
+    assert_eq!(damage(4.0, true, Difficulty::Elite), 16.0);
     for d in [
         Difficulty::Easy,
         Difficulty::Normal,
@@ -1043,7 +1067,9 @@ fn a_critical_prim_takes_its_hit_location() {
         assert_eq!(damage(4.0, false, d), 8.0, "a bot: no x4 on {d:?}");
     }
     assert_eq!(damage(0.0, true, Difficulty::Normal), 0.0, "BF1's x0 prims");
-    // Space rounds keep the old gate: a bot's x4 from Hard up.
+    // Space rounds keep the old gate and the data's factor: a bot's x4
+    // from Hard up, a human's always.
+    assert_eq!(hit(4.0, true, Difficulty::Normal, true), (32.0, true));
     assert_eq!(hit(4.0, false, Difficulty::Normal, true).0, 8.0);
     assert_eq!(hit(4.0, false, Difficulty::Hard, true), (32.0, true));
     assert_eq!(hit(4.0, false, Difficulty::Elite, true).0, 32.0);
@@ -1281,4 +1307,112 @@ fn a_destroyed_turrets_gunner_dies_at_his_seat() {
         s.units[r.index as usize].soldier.pos, origin,
         "hover origin"
     );
+}
+
+/// One driven vehicle of `kind` with the skiff's or the AT-ST's numbers,
+/// refilling 10 energy a second, its driver a player (or a bot) in the
+/// pilot seat; a second player rides as a passenger when asked.
+fn medal_world(kind: VehicleKind, bot: bool, passenger: bool) -> (Sim, VehicleHandle, UnitHandle) {
+    use crate::vehicle::{hover, walker};
+    let mut s = Sim::empty(5);
+    s.heightfield = Some(flat_ground());
+    let mut spec = hover4(Some(0));
+    spec.kind = kind;
+    spec.pos = Vec3::new(0.0, 1.0, 0.0);
+    if kind == VehicleKind::Walker {
+        let mut wp = walker::tests::atst();
+        wp.energy_auto_restore = 10.0;
+        s.walker_params = vec![Some(wp)];
+    } else {
+        let mut hp = hover::tests::skiff();
+        hp.energy_auto_restore = 10.0;
+        s.hover_params = vec![Some(hp)];
+    }
+    let v = s.spawn_vehicle(&spec);
+    let driver = if bot {
+        UnitSpec::trooper(0, Vec3::ZERO)
+    } else {
+        UnitSpec::player(0, Vec3::ZERO)
+    };
+    let driver = s.spawn(&driver).unwrap();
+    if passenger {
+        let p = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+        assert!(s.seat_unit(p, v, 1));
+    }
+    assert!(s.seat_unit(driver, v, 0));
+    (s, v, driver)
+}
+
+fn vehicle_energy(s: &Sim, v: VehicleHandle) -> f32 {
+    let v = s.vehicle(v).unwrap();
+    if v.kind == VehicleKind::Walker {
+        v.walker.energy
+    } else {
+        v.hover.energy
+    }
+}
+
+/// The energy award (Endurance) refills the vehicle its holder drives at
+/// 1.5 x, a hover and a walker alike; a bot driver gets nothing.
+#[test]
+fn the_energy_regen_award_refills_the_drivers_vehicle_1_5x() {
+    for kind in [VehicleKind::Hover, VehicleKind::Walker] {
+        let gain = |on: bool, bot: bool| {
+            let (mut s, v, _) = medal_world(kind, bot, false);
+            s.cheats.energy_award = on;
+            let vm = s.vehicle_mut(v).unwrap();
+            vm.hover.energy = 10.0;
+            vm.walker.energy = 10.0;
+            for _ in 0..15 {
+                s.tick_hovers(crate::TICK_DT);
+                s.tick_walkers(crate::TICK_DT);
+            }
+            vehicle_energy(&s, v) - 10.0
+        };
+        let plain = gain(false, false);
+        assert!((plain - 5.0).abs() < 0.01, "{kind:?} {plain}");
+        assert!((gain(true, false) - 7.5).abs() < 0.01, "{kind:?}");
+        assert!((gain(true, true) - 5.0).abs() < 0.01, "{kind:?} bot");
+    }
+}
+
+/// The vehicle award (Technician): the vehicle its holder drives repairs
+/// 0.5 % of its maximum a second (the class's `PilotSkillRepairScale` when
+/// it has one), a hover and a walker alike. Not for a bot driver, a hero,
+/// or a holder riding as a passenger; never past full.
+#[test]
+fn the_vehicle_regen_award_repairs_the_drivers_vehicle() {
+    let after = |kind, bot, passenger, on: bool, scale: Option<f32>| {
+        let (mut s, v, _) = medal_world(kind, bot, passenger);
+        s.cheats.vehicle_award = on;
+        if let Some(scale) = scale {
+            s.repair_scale = vec![scale];
+        }
+        s.vehicle_mut(v).unwrap().health.cur = 450.0;
+        s.vehicle_regen(v.index as usize, 1.0);
+        s.vehicle(v).unwrap().health.cur
+    };
+    for kind in [VehicleKind::Hover, VehicleKind::Walker] {
+        assert_eq!(after(kind, false, false, false, None), 450.0, "off");
+        assert_eq!(after(kind, false, false, true, None), 454.5, "{kind:?}");
+        assert_eq!(after(kind, false, false, true, Some(0.02)), 468.0);
+        assert_eq!(after(kind, true, false, true, None), 450.0, "a bot");
+        assert_eq!(after(kind, true, true, true, None), 450.0, "a passenger");
+    }
+    // A hero holder gets none, in Hero Assault too; a full hull stays full.
+    let (mut s, v, driver) = medal_world(VehicleKind::Hover, false, false);
+    s.cheats.vehicle_award = true;
+    let class = s.unit(driver).unwrap().spec.class;
+    s.heroes = Some(crate::sim::heroes::Heroes::new([Some(class), None]));
+    s.vehicle_mut(v).unwrap().health.cur = 450.0;
+    s.vehicle_regen(v.index as usize, 1.0);
+    assert_eq!(s.vehicle(v).unwrap().health.cur, 450.0, "a hero");
+    s.heroes = None;
+    s.deathmatch = Some(crate::sim::deathmatch::Deathmatch::new(180, [8, 8]));
+    s.vehicle_regen(v.index as usize, 1.0);
+    assert_eq!(s.vehicle(v).unwrap().health.cur, 450.0, "Hero Assault");
+    s.deathmatch = None;
+    s.vehicle_mut(v).unwrap().health.cur = 899.0;
+    s.vehicle_regen(v.index as usize, 1.0);
+    assert_eq!(s.vehicle(v).unwrap().health.cur, 900.0);
 }

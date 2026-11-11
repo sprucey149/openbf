@@ -28,6 +28,32 @@ pub const HEADSHOT_SCALE: f32 = 3.0;
 
 const LARGE_SHIELD_RADIUS_SQ: f32 = 256.0;
 
+type SweptUnit = (
+    UnitHandle,
+    Option<VehicleHandle>,
+    crate::unit::BoltPrims,
+    Vec3,
+    Vec3,
+    Vec3,
+);
+type SweptDeka = (UnitHandle, Vec<Sphere>, Option<Sphere>, Vec3);
+
+/// The bodies a tick's bolt sweep tests ([`Sim::sweep_bodies`]).
+pub(super) struct SweepBodies {
+    units: Vec<SweptUnit>,
+    dekas: Vec<SweptDeka>,
+}
+
+/// Is `t` one of `passed`? A droideka's shield and body are one entity:
+/// a beam through either passes both.
+fn is_passed(passed: &[Target], t: Target) -> bool {
+    let key = |t: Target| match t {
+        Target::Shield(h) => Target::Unit(h),
+        t => t,
+    };
+    passed.iter().any(|&p| key(p) == key(t))
+}
+
 impl Sim {
     /// The PS2's per-frame bolt sweep (B1 FUN_00273128, BF2 FUN_0030fad0;
     /// `re-ordnance-kinds.md` §2.4 [V][M]; issue #41: the port had kept the
@@ -48,16 +74,18 @@ impl Sim {
             return;
         }
         self.sweep_fat_rays(dt);
-        type Body = (
-            UnitHandle,
-            Option<VehicleHandle>,
-            crate::unit::BoltPrims,
-            Vec3,
-            Vec3,
-            Vec3,
-        );
-        type Deka = (UnitHandle, Vec<Sphere>, Option<Sphere>, Vec3);
-        let dekas: Vec<Deka> = self
+        let bodies = self.sweep_bodies();
+        let mut bolts = std::mem::take(&mut self.bolts);
+        for b in bolts.iter_mut() {
+            self.sweep_bolt(&bodies, b, dt, &[]);
+        }
+        self.bolts = bolts;
+    }
+
+    /// What [`Self::sweep_bolts`] meets this tick: the live soldiers' bolt
+    /// prims and the droidekas' spheres.
+    pub(super) fn sweep_bodies(&self) -> SweepBodies {
+        let dekas: Vec<SweptDeka> = self
             .alive_units()
             .filter(|(_, u)| u.droideka.is_some())
             .map(|(h, u)| {
@@ -65,7 +93,7 @@ impl Sim {
                 (h, u.droideka_spheres(), u.droideka_shield(), back)
             })
             .collect();
-        let units: Vec<Body> = self
+        let units: Vec<SweptUnit> = self
             .alive_units()
             .filter(|(_, u)| u.droideka.is_none())
             .filter_map(|(h, u)| {
@@ -80,139 +108,163 @@ impl Sim {
                 Some((h, rides, p, min, max, vel))
             })
             .collect();
-        let (world, bolts, classes) = (&self.collision, &mut self.bolts, &self.weapon_classes);
-        for b in bolts.iter_mut() {
-            let ord = &classes[b.weapon_class].ordnance;
-            if ord.fat_ray.is_some() || (ord.is_tracer() && ord.explosion.is_none()) {
-                continue;
-            }
-            let step = dt.min(b.remaining.max(0.0));
-            let speed = b.vel.length();
-            if step <= 0.0 || speed <= 0.0 {
-                continue;
-            }
-            let dir = b.vel / speed;
-            let mut reach = speed * step;
-            let (from, to) = (b.pos, b.pos + dir * reach);
-            let (lo, hi) = (from.min(to), from.max(to));
-            let mut hit = None;
-            let crew = match b.hulls {
-                HullFilter::Except(s) | HullFilter::HullsExcept(s) => s,
-                _ => [None; 2],
+        SweepBodies { units, dekas }
+    }
+
+    /// One bolt's sweep for [`Self::sweep_bolts`], passing everything in
+    /// `passed` (a piercing beam's earlier victims this tick; empty for
+    /// every other round).
+    pub(super) fn sweep_bolt(
+        &self,
+        bodies: &SweepBodies,
+        b: &mut Bolt,
+        dt: f32,
+        passed: &[Target],
+    ) {
+        let space = self.space_round();
+        let (world, classes) = (&self.collision, &self.weapon_classes);
+        // The weak-spot factor of the struck vehicle's class on a ground
+        // map; `None` in a space round, which keeps the data's.
+        let (vehicles, weak_rows) = (&self.vehicles, &self.weak_spot_factor);
+        let ground = |v: VehicleHandle| {
+            let class = vehicles.get(v.index as usize).map_or(u32::MAX, |x| x.class);
+            (!space).then(|| super::weak_lock::class_factor(weak_rows, class))
+        };
+        let seen = |t: Target| is_passed(passed, t);
+        let ord = &classes[b.weapon_class].ordnance;
+        if ord.fat_ray.is_some() || (ord.is_tracer() && ord.explosion.is_none()) {
+            return;
+        }
+        let step = dt.min(b.remaining.max(0.0));
+        let speed = b.vel.length();
+        if step <= 0.0 || speed <= 0.0 {
+            return;
+        }
+        let dir = b.vel / speed;
+        let mut reach = speed * step;
+        let (from, to) = (b.pos, b.pos + dir * reach);
+        let (lo, hi) = (from.min(to), from.max(to));
+        let mut hit = None;
+        let crew = match b.hulls {
+            HullFilter::Except(s) | HullFilter::HullsExcept(s) => s,
+            _ => [None; 2],
+        };
+        let mut mult = 1.0;
+        let lag = crate::unit::human_meet_lag(speed, b.age);
+        for (h, rides, prims, min, max, vel) in &bodies.units {
+            let by = if b.shooter_is_player {
+                -*vel * lag
+            } else {
+                Vec3::ZERO
             };
-            let mut mult = 1.0;
-            let lag = crate::unit::human_meet_lag(speed, b.age);
-            for (h, rides, prims, min, max, vel) in &units {
-                let by = if b.shooter_is_player {
-                    -*vel * lag
+            if *h == b.owner
+                || (rides.is_some() && crew.contains(rides))
+                || (*max + by).cmplt(lo).any()
+                || (*min + by).cmpgt(hi).any()
+                || seen(Target::Unit(*h))
+            {
+                continue;
+            }
+            if let Some((t, zone)) = prims.moved(by).hit(from, dir, reach) {
+                reach = t;
+                hit = Some(Target::Unit(*h));
+                mult = if zone == crate::unit::HitZone::Head {
+                    HEADSHOT_SCALE
                 } else {
-                    Vec3::ZERO
+                    1.0
                 };
-                if *h == b.owner
-                    || (rides.is_some() && crew.contains(rides))
-                    || (*max + by).cmplt(lo).any()
-                    || (*min + by).cmpgt(hi).any()
-                {
-                    continue;
-                }
-                if let Some((t, zone)) = prims.moved(by).hit(from, dir, reach) {
+            }
+        }
+        for (h, spheres, shield, back) in &bodies.dekas {
+            if *h == b.owner || seen(Target::Unit(*h)) {
+                continue;
+            }
+            let by = if b.shooter_is_player {
+                *back
+            } else {
+                Vec3::ZERO
+            };
+            let moved = |s: &Sphere| Sphere {
+                center: s.center + by,
+                radius: s.radius,
+            };
+            if let Some(t) = shield
+                .as_ref()
+                .and_then(|s| droideka::ray_sphere(from, dir, reach, moved(s)))
+            {
+                reach = t;
+                hit = Some(Target::Shield(*h));
+                mult = 1.0;
+            }
+            for s in spheres {
+                if let Some(t) = droideka::ray_sphere(from, dir, reach, moved(s)) {
                     reach = t;
                     hit = Some(Target::Unit(*h));
-                    mult = if zone == crate::unit::HitZone::Head {
-                        HEADSHOT_SCALE
-                    } else {
-                        1.0
-                    };
-                }
-            }
-            for (h, spheres, shield, back) in &dekas {
-                if *h == b.owner {
-                    continue;
-                }
-                let by = if b.shooter_is_player {
-                    *back
-                } else {
-                    Vec3::ZERO
-                };
-                let moved = |s: &Sphere| Sphere {
-                    center: s.center + by,
-                    radius: s.radius,
-                };
-                if let Some(t) = shield
-                    .as_ref()
-                    .and_then(|s| droideka::ray_sphere(from, dir, reach, moved(s)))
-                {
-                    reach = t;
-                    hit = Some(Target::Shield(*h));
-                    mult = 1.0;
-                }
-                for s in spheres {
-                    if let Some(t) = droideka::ray_sphere(from, dir, reach, moved(s)) {
-                        reach = t;
-                        hit = Some(Target::Unit(*h));
-                        mult = 1.0;
-                    }
-                }
-            }
-            let mines = self.mines.iter().filter(|m| m.health > 0.0);
-            let droids = self
-                .droids
-                .iter()
-                .filter(|d| d.owner.index != b.owner.index);
-            let turrets = self
-                .turrets
-                .iter()
-                .filter(|t| t.owner.index != b.owner.index);
-            let items = mines
-                .map(|m| (Target::Mine(m.id), m.flight.pos, crate::mine::RADIUS))
-                .chain(droids.map(|d| (Target::Droid(d.id), d.pos, crate::remote::RADIUS)))
-                .chain(
-                    turrets.map(|t| (Target::Turret(t.id), t.centre(), crate::autoturret::RADIUS)),
-                );
-            for (target, at, radius) in items {
-                if let Some(t) =
-                    crate::unit::ray_sphere(from, dir, at, radius).filter(|&t| t <= reach)
-                {
-                    reach = t;
-                    hit = Some(target);
                     mult = 1.0;
                 }
             }
-            for r in self
-                .guided
-                .iter()
-                .filter(|r| r.owner.index != b.owner.index)
+        }
+        let mines = self.mines.iter().filter(|m| m.health > 0.0);
+        let droids = self
+            .droids
+            .iter()
+            .filter(|d| d.owner.index != b.owner.index);
+        let turrets = self
+            .turrets
+            .iter()
+            .filter(|t| t.owner.index != b.owner.index);
+        let items = mines
+            .map(|m| (Target::Mine(m.id), m.flight.pos, crate::mine::RADIUS))
+            .chain(droids.map(|d| (Target::Droid(d.id), d.pos, crate::remote::RADIUS)))
+            .chain(turrets.map(|t| (Target::Turret(t.id), t.centre(), crate::autoturret::RADIUS)))
+            .filter(|(target, _, _)| !seen(*target));
+        for (target, at, radius) in items {
+            if let Some(t) = crate::unit::ray_sphere(from, dir, at, radius).filter(|&t| t <= reach)
             {
-                if let Some(t) = crate::unit::ray_sphere(
-                    from,
-                    dir,
-                    r.pos,
-                    crate::guided::COLLISION_RADIUS_PROVISIONAL,
-                )
-                .filter(|&t| t <= reach)
-                {
-                    reach = t;
-                    hit = Some(Target::Guided(r.id));
-                    mult = 1.0;
+                reach = t;
+                hit = Some(target);
+                mult = 1.0;
+            }
+        }
+        for r in self
+            .guided
+            .iter()
+            .filter(|r| r.owner.index != b.owner.index && !seen(Target::Guided(r.id)))
+        {
+            if let Some(t) = crate::unit::ray_sphere(
+                from,
+                dir,
+                r.pos,
+                crate::guided::COLLISION_RADIUS_PROVISIONAL,
+            )
+            .filter(|&t| t <= reach)
+            {
+                reach = t;
+                hit = Some(Target::Guided(r.id));
+                mult = 1.0;
+            }
+        }
+        if let Some(filter) = b.hulls.hulls_only() {
+            let hull =
+                world.ray_past_owners(from, dir, reach, Layers::ORDNANCE, filter, [None; 2], |v| {
+                    seen(Target::Vehicle(v))
+                });
+            if let Some(r) = hull {
+                if let Some(v) = r.owner.filter(|_| r.t < reach) {
+                    reach = r.t;
+                    hit = Some(Target::Vehicle(v));
+                    // Any round on a weak part takes its vehicle
+                    // class's weak-spot factor, locked or not; any
+                    // other body its own.
+                    mult = super::weak_lock::struck_factor(r.hit_mult, ground(v));
                 }
             }
-            if let Some(filter) = b.hulls.hulls_only() {
-                if let Some(r) = world.ray_with(from, dir, reach, Layers::ORDNANCE, filter) {
-                    if let Some(v) = r.owner.filter(|_| r.t < reach) {
-                        reach = r.t;
-                        hit = Some(Target::Vehicle(v));
-                        // A rocket sent at this hull's weak part counts as
-                        // striking it wherever it meets the hull.
-                        mult = super::weak_lock::part_factor(world, b, v).unwrap_or(r.hit_mult);
-                    }
-                }
-            }
-            if let Some(target) = hit {
-                b.hit = Hit::Target(target);
-                b.hit_mult = mult;
-                b.end = from + dir * reach;
-                b.remaining = reach / speed;
-            }
+        }
+        if let Some(target) = hit {
+            b.hit = Hit::Target(target);
+            b.hit_mult = mult;
+            b.end = from + dir * reach;
+            b.remaining = reach / speed;
         }
     }
 
@@ -286,7 +338,9 @@ impl Sim {
     /// The struck prim's damage factor (issue #41): a soldier's head prim
     /// takes the default HitLocation x3 (BF2 FUN_002517e8 B2:170444-170450,
     /// BF1 FUN_0020e2e0 B1:122725; analysis/re-hitzones.md), a vehicle prim
-    /// its class's HitLocation (the x4 critical prims; BF1's two x0).
+    /// its class's HitLocation (BF1's two x0), a weak part its class's factor
+    /// on a ground map (x4 on the AT-TE, the AT-AT and the spider walker, x2
+    /// on the rest, `Sim::weak_spot_factor`; the data's x4 in space).
     ///
     /// A factor over 1 is a human's only: a bot's head or critical-prim hit
     /// does plain damage at every tier, on both games' maps. This is BF2's
@@ -317,13 +371,19 @@ impl Sim {
     /// FUN_00313c40 → FUN_001dfb38): damage only if the remembered target is
     /// still the same live entity (id guard).
     pub(super) fn resolve_bolt(&mut self, b: &Bolt) {
+        self.resolve_bolt_turned(b);
+    }
+
+    /// [`Self::resolve_bolt`], saying whether a saber turned the round aside
+    /// (it then strikes nothing: a piercing beam ends there).
+    pub(super) fn resolve_bolt_turned(&mut self, b: &Bolt) -> bool {
         match b.hit {
             Hit::Target(Target::Unit(h)) => {
                 if self.deflect_bolt(h, b) {
-                    return;
+                    return true;
                 }
                 if self.unit(h).is_none() {
-                    return; // died in flight → bolt dies, no impact
+                    return false; // died in flight → bolt dies, no impact
                 }
                 // Card TOKN: a bot without one of this human's tokens aimed
                 // beside him; a bolt that meets him anyway is real (counted).
@@ -367,7 +427,7 @@ impl Sim {
             }
             Hit::Target(Target::Shield(h)) => {
                 let Some(victim) = self.unit(h) else {
-                    return;
+                    return false;
                 };
                 let spared = self.bolt_spares(b, victim);
                 let ff = if self.allied(b.team, victim.team) {
@@ -405,7 +465,7 @@ impl Sim {
             // takes the damage.
             Hit::Target(Target::Vehicle(vh)) => {
                 let Some(v) = self.vehicle(vh) else {
-                    return;
+                    return false;
                 };
                 let surface =
                     if v.kind == crate::vehicle::VehicleKind::Turret && v.instance.is_some() {
@@ -428,8 +488,8 @@ impl Sim {
                     Some(b.team),
                     Some(b.vel.normalize_or_zero()),
                 );
-                // A critical prim's x4 (the weak spot) that took health:
-                // the critical hit, as a head's (hitmark).
+                // A weak part's factor that took health: the critical
+                // hit, as a head's (hitmark).
                 if scale > 1.0 && damage > 0.0 {
                     self.events.push(Event::CriticalHit {
                         shooter: b.owner,
@@ -455,10 +515,10 @@ impl Sim {
             // the same event, so the same puff and the same impact sound.
             Hit::Target(Target::Station(s)) => {
                 let Some(st) = self.stations.get(usize::from(s)) else {
-                    return;
+                    return false;
                 };
                 if st.destroyed {
-                    return;
+                    return false;
                 }
                 let desc = self.bolt_desc(b);
                 self.events.push(Event::BoltExpired {
@@ -513,6 +573,7 @@ impl Sim {
                 })
             }
         }
+        false
     }
 
     /// A struck bolt's impact explosion (card RKEX): the ordnance base's

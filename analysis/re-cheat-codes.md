@@ -289,12 +289,15 @@ Mapping of the authentic set onto the registry:
 | `80s` | (new, render) | force soldier LOD model. |
 | `at` | (new, fx) | needs `AddHitEffect` support in the weapon class; only the Wampa uses it. |
 | `alias` | no-op | PS2 GS post-filter. |
-`infinite_stamina` (which since 2026-10-28 also keeps a jet class's fuel full; the separate jet-fuel cheat was removed), `all_awards`, `damage_award` have **no PS2
-counterpart** (BF2 or BF1) — keep them as openbf extensions and label them so.
-`all_awards` (menu label "Award weapons", #142) gives the player every BF2 medal bit but the damage award's (medal 8, its own row `damage_award`, "Damage award (x1.5)") on either game's maps, so
+`infinite_stamina` (which since 2026-10-28 also keeps a jet class's fuel full; the separate jet-fuel cheat was removed), `all_awards`, `damage_award`,
+`defense_award`, `energy_award`, `vehicle_award` have **no PS2 counterpart** (BF2 or BF1) — keep them as openbf extensions and label them so.
+`all_awards` (menu label "Award weapons", #142) gives the player BF2's five weapon medals (0, 1, 2, 4, 5) on either game's maps, so
 the class's award weapons replace the ones they stand for through BF2's switch filter (re-grenades.md §2.4; a BF1 class
-carries BF2's awards, award-weapons.md §3); with `damage_award` on, the damage award's x1.5 applies (award-weapons.md §1); bots and the space
-modes keep their kits and numbers. The other medal effects, and earning medals, wait for #130.
+carries BF2's awards, award-weapons.md §3). Each stat medal is its own row (award-weapons.md §9), named after the medal
+and its bonus: `damage_award` (id `damage`, "War Hero: damage increase (x1.5)", medal 8), `defense_award` (id `guardian`,
+"Guardian: damage reduction (x0.5)", medal 7), `energy_award` (id `endurance`, "Endurance: energy regen (x1.5)", medal 6)
+and `vehicle_award` (id `technician`, "Technician: vehicle regen", medal 3); `--cheats` takes the same ids. Bots, the
+difficulty proxy, heroes (in Hero Assault every class) and the space modes get none of them, and no difficulty tier depends on them. Earning medals waits for #130.
 Persistence: flags live for the process, never saved to the profile, not reset
 by mission restart or return-to-shell; in a network session `sos`/`ammo`/`80s`
 must refuse to toggle and `at` must not apply.

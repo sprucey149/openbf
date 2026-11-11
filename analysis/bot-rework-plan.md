@@ -212,13 +212,21 @@ Each stage lands alone, deletes what it replaces, and uses only filtered tests (
 
 ### Stage 0: ground truth (no behaviour change)
 - Merge the five fixes. Replace the four space and ground predicates with one `RoundRules` (this also resolves the duplicate `Sim::space_round` between C5 and B1/B2, and restores `add_hazard`'s doc).
+  - **Done (7ae6e222):** the fixes are merged and every space-or-ground rule reads one test, `Sim::space_round()`; `add_hazard`'s doc is back. No `RoundRules` struct was needed for stage 0; later stages that mention it mean this test until one is built.
 - Pin golden hashes for bf2_spa1 Space Assault and one space CTF map (fail when assets are missing, do not skip). Pin the three ground check maps.
+  - **Pinned (2026-11-10, at 39c6f1eb):** `scripts/round_goldens.py` holds 14 goldens, each a seeded headless round whose `Sim::hash` is pinned at fixed ticks.
+    - Space: bf2_spa1 Space Assault and bf2_spa1 one-flag CTF, through the game's battle builder (`game --sim-trace --mode ass|1flag --mission ... --no-human --state-hashes`), bots only, Normal, seed 42, 9000 ticks, pinned at ticks 1800, 3600, 5400 and 9000. They need a PS2-only space bake and `gen_missions.py --space --ps2-only` missions in a folder of their own: the shared bake has no space map, and adding one would add rows to the sweep.
+    - Ground: bf1_yav2, tat1 and bf1_nab2, GCW, one full round per tier, seed 1, 16 a side on mission tickets, a Good proxy on team 0 (`round_to_outcome 90000 1 <map>`), pinned every 3000 ticks and at the round's end. These are the first pins with a human present at every tier.
+    - Each pin also stores the inputs' `world_fingerprint.py` hash. Missing inputs, a changed fingerprint, a failed run or two runs that disagree FAIL; nothing skips. A differing hash that repeats is MOVED, naming the first tick that moved.
+    - Check: `scripts/round_goldens.py` (about 25 s at 4 rounds at once). Re-bless: `scripts/round_goldens.py --bless` prints the pins file and never writes it; replacing the pins needs a card that declares the move and the maintainer's approval, and a space pin also needs the space owner's agreement. After an input change (a rebake makes every ground golden FAIL "inputs changed"), bless with a binary built from main, then check the branch against those pins; a branch binary would fold its own behaviour change into the new pins.
+    - Not yet a gates.py group: wiring it there, and protecting the pins file, edit protected gate files and wait for an approval.
 - Freeze the proxy's decisions on a fixed profile, so a smarter brain does not make the stand-in human smarter.
 - New census lines:
   - D1 "far-human preference": the share of picks where a human is chosen while an engageable bot is at least 2× nearer;
   - per-tier behaviour-lever counts;
   - think cost per bot, p50 and p99 (`worst_think` exists).
 - Re-baseline the proxy gate after B1/B2: 3 maps × 16 seeds × 2 sides per tier, with Wilson intervals.
+  - **Done (2026-11-10, bot/stage0):** the proxy is frozen on literal copies of today's tier rows and thinks through `ai::legacy_think`, with the asset-free `an_all_proxy_skirmish_keeps_its_hash` as its tripwire. The census lines (`BOT_CENSUS=1`: `d1`, `levers`, `think`) are stderr only and change no hash. The re-baseline (seeds 1-32, 768 rounds) and the 34-map census are in `analysis/bot-baseline-2026-11.md`, aggregated by `scripts/bot_census.py`.
 - **Accept:** golden hashes pinned; baseline table written; space hash unchanged by the merge (or the change explained to LightVelox).
 
 ### Stage 1: the skeleton (carve)

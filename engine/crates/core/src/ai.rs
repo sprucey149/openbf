@@ -88,6 +88,7 @@ pub mod arcm;
 mod arsenal;
 mod avoid;
 mod behave;
+pub mod census;
 mod command;
 pub mod dfocus;
 mod draw;
@@ -125,6 +126,16 @@ pub(crate) use abilities::input as ability_input;
 pub use arsenal::{droid_suited, item_suited, vehicle_bonus};
 pub use avoid::ROUND_MAX;
 pub use behave::think;
+/// The bot brain as it stands at the bot rework's stage 0, the entry point
+/// for proxies and for every AI unit of a space round (`Sim::step`). Today
+/// it is [`think`] itself. Contract for the rework's later stages: they build
+/// the new brain beside it and do not change what this runs for proxies or
+/// in space rounds without a declared, measured hash move; a shared leaf they
+/// need to change is forked into this path first. Being the same function,
+/// it changes with any edit to the brain: the tripwire for proxies is the
+/// pin `an_all_proxy_skirmish_keeps_its_hash` (`ai::proxy`), for space the
+/// space scenario goldens.
+pub use behave::think as legacy_think;
 pub use command::CmdState;
 pub use draw::{
     route_rand, stance_hold, unit_dir, unit_rand, unit_unit, SALT_BURST, SALT_CHARGE, SALT_DODGE,

@@ -551,9 +551,16 @@ secondaries or every capital-ship damageable subsystem.
   damage comes only from a rocket that happens to strike a critical part (openbf differs: §5.1). openbf uses this rule on every ground map
   for a human's launcher; space rounds keep the magnet. OURS one rule for both games: BF1 counted a human's dwell on
   the magnet (LockOnRange 175 m, 6° on, 10° off); on BF1 maps the torpedo launchers now take this lock with their own
-  vehicle-only kinds, BF2's LockTime 1.0 (the shared numbers, `gameplay-normalization.md`; the disc's 1.5), and the 100 / 110 m TargetLockMaxDistance / ...Lose defaults BF2's rocket
-  launcher also takes (neither game's launcher sets the key), so the reach drops from 175 m to 100 m and the cones
-  widen to the pick's dot 0.8 and the dwell's 25.8° (measure: maintainer playtest). Deviations: OURS auto lock
+  vehicle-only kinds and BF2's LockTime 1.0 (the shared numbers, `gameplay-normalization.md`; the disc's 1.5), and the
+  cones widen to the pick's dot 0.8 and the dwell's 25.8° (measure: maintainer playtest). OURS reach and far dwell
+  (2026-11-10, the maintainer: "let's keep bf1's longer reach, but maybe for vehicles farther out than 100m it takes
+  longer for the lock on to start"): on every ground map both games' launchers start a lock out to 175 m (BF1's
+  LockOnRange, `FOOT_REACH`) and lose it past 185 m (`FOOT_REACH_LOSE`, after the 2.0 s hold), in place of the
+  100 / 110 m TargetLockMaxDistance / ...Lose defaults (no launcher of either game sets those keys; they still serve
+  flyer and seat locks). Out to 100 m the dwell needs LockTime; past it the need rises in a line to 2 x LockTime at
+  175 m (`foot_dwell_scale`, from the eye to the target's centre). The clock counts dt / that factor each tick, so a
+  full lock stays full while the target draws away past 100 m: no second dwell. PROVISIONAL, measure: maintainer
+  playtest of the far lock. Bots, space rounds, flyer and seat locks are unchanged. Deviations: OURS auto lock
   (`FOOT_AUTO_LOCK`, for the B7 playtest: dwelling alone shows the box and curves the rocket): while no target is
   held, or the held one has left the 25.8° cone, the best target of the pick takes the lock; a target the button
   picked is left alone until the hold drops it or a long press clears it. One button serves reload and lock (openbf
@@ -593,32 +600,120 @@ the award. That is something I want different." Code: `core::sim::weak_lock`.
   AT-AT's neck from close by) keeps the clock running. Moving from one part to another does not restart the dwell.
 - **The rocket.** A rocket fired on a full lock takes the part chosen on the tick it leaves and steers to that
   part's centre every tick, following it as the vehicle moves; if the hull loses the part it steers to the centre.
-- **The hit.** A rocket sent at a part takes the part's factor wherever it meets that vehicle's hull. Steering alone
-  was not enough: in the survey below 260 of 275 BF2 part rockets and 149 of 170 BF1 ones struck the part itself;
-  the rest landed 0.5-1.7 m beside it (turn rate 2 rad/s; BF1's Republic and Alliance torpedoes waver). With the
-  rule every part rocket that met its vehicle was critical. Any other round, and a part rocket into another
-  vehicle, keeps the struck prim's factor.
-- **Who.** A human's on-foot launcher on a ground map: BF2's rocket launchers, BF1's torpedo launchers. A bot never
-  locks a vehicle and gets no factor over 1 on a ground round (`Sim::hit_scale`). Space rounds, flyer and seat locks
-  keep the centre (`lock_on.rs` is unchanged).
-- **The result in play.** The hit is the critical hit the reticle mark shows and the demolition award counts
-  (`re-target-hud.md` §12). From a side where the part shows, a BF2 rocket does up to 6000 (1500 after its first
-  half second, x4) against a tank's 8000: two rockets in place of six. A BF1 torpedo does 2400 in place of 600.
-- **State and hash.** `Missile::part` is the hull body's index; it adds `MSLPART` to the hash only when set, so
-  rounds with no human part lock hash as before.
+- **The hit (2026-11-10, third pass).** The maintainer: "If a rocket hits the weak spot it should do the increased
+  damage, regardless of it being a "lock" or something. Even a grenade or regular bullet in the weak spot can do
+  the increased damage." and then "ATTE, atat, and spider walker: make weak spot hits x4. Everything else x2 and
+  that seems good." One rule, the originals' with the port's factors: any round that strikes a vehicle's weak part
+  deals its vehicle class's factor on a ground map, locked or not, whatever the ordnance (rockets, torpedoes, a
+  salvo's later rounds, vehicle cannon bolts, rifle bolts, bullets, a mortar shell's own hit, beams):
+  - **x4** on the AT-TE, the AT-AT and the spider walker (`weak_lock::HEAVY_WALKER_WEAK_SPOT_FACTOR`, the
+    originals' own x4 kept): `rep_walk_atte`, `imp_walk_atat`, `cis_walk_spider` in both games and BF2's
+    `cis_walk_spiderkas`, and any class whose BASE chain reaches one, such as a map's own child class (none is
+    baked today); `game::vehicle_class::{HEAVY_WALKERS, weak_spot_factor}`.
+  - **x2** on every other vehicle's weak spot (`weak_lock::GROUND_WEAK_SPOT_FACTOR`, OURS; the originals author
+    x4).
 
-Survey (`game/tests/suite/rocket_weakspot.rs`, `weak_part_lock_survey`, run 2026-11-10): a human with the other
-side's launcher at 24 directions, 15 m and 30 m from each pad vehicle where it stands on the map, locking, dwelling
-and firing through the trigger. "Part" = rockets that left for a weak part, of the stands where the lock took the
-vehicle; the rest were centre locks.
+  The factor is per vehicle class, setup data the game layer fills (`Sim::weak_spot_factor`, not hashed). A hit on
+  any other body of the hull is plain (BF1's x0 bodies stay x0). The sweep sets the factor where the round meets
+  the hull (`weak_lock::struck_factor`). The reticle's claws and `Event::CriticalHit` fire on every strike of a
+  weak part that took health (a factor over 1), never on a part lock whose round met the hull beside the part;
+  the HUD still keeps the claws to a rocket launcher on a vehicle and a sniper rifle on a head (`re-target-hud.md`
+  §12), so a rifle bolt on a weak part raises the event and deals the factor but lights no claws. Space rounds
+  keep their data's factors exactly. (Earlier passes the same day: first, a part rocket took the part's x4
+  wherever it met the hull, two locked rockets killing a BF2 tank; second, a flat 1.0; third as first built, the
+  factor of the body on the line from the muzzle to the hull's centre, `weak_lock::part_factor`, removed; then x2
+  on every vehicle, before the maintainer's x4 for the three big walkers.)
+- **Blast damage is never located on a prim** [V], so it never takes the factor. BF2: the explosion
+  (`FUN_0030c8f8`) hands each object in range to its radius-damage slot; the per-object routine `FUN_002690d0`
+  (B2:185886-185973) scales the damage by the distance from the object's collision centre and calls the
+  no-prim damage `FUN_001e0900` with body `-1` (B2:185966), whose factor lookup returns 1.0 for `-1`
+  (B2:91684-91691). BF1: the per-object routine `FUN_00221600` (B1:135601-135662) calls `FUN_001bc8e0` (B1:135657), which
+  passes a fixed 1.0 (B1:64511-64516). A grenade's own contact is located: BF2's sticky contact handler
+  `FUN_00320fe8` calls the located damage slot (iface +0x1c) with the body the sweep struck (B2:314057-314058),
+  so the factor would apply to the ordnance's own `Damage` on its first contact. The thermal detonators of both
+  games and every mine author no `MaxDamage` or `Damage` (checked over the baked class files), so in both
+  originals a grenade or mine on the part does its blast at x1. The one sticky that authors a contact `Damage` is
+  BF2's mortar round `com_weap_inf_mortar_launcher_ord1` (100, the Wookiee's grenade launcher): in BF2 its first
+  contact on a weak prim takes x4. The port's thrown and launched stickies and its mines deal no contact damage on
+  any body (only their blast), so there is nothing there to multiply; replace: if sticky contact damage is built,
+  pass it through `weak_lock::struck_factor` with the struck body's factor.
+- **The demolition award** (issue #130, not built): count a launcher's hit on a weak part (factor > 1, the
+  `Event::CriticalHit` a rocket launcher raises), locked or not (`award-weapons.md` §5).
+- **Who.** A human's round. A bot never locks a vehicle and gets no factor over 1 on a ground round at any tier
+  (`Sim::hit_scale`, unchanged). Space rounds, flyer and seat locks keep the centre (`lock_on.rs` is unchanged).
+- **The result in play.** Rockets to destroy from 25-30 m at the vehicles' own health (pinned by
+  `rockets_to_destroy_a_vehicle_locked_and_aimed`, `game/tests/suite/rocket_weakspot.rs`). A rocket on a lock whose
+  box is on the part and an unlocked rocket aimed at the part deal the same factor. Locked counts trigger pulls;
+  aimed counts rounds that struck the part. They agree but against the Alliance on BF1 maps, whose torpedo launcher
+  fires two rounds a pull (the first steers to the part; the second, unguided, often meets the hull beside it):
+
+  | Map | Vehicle | Health | Factor | Locked (pulls) | Aimed (rounds on the part) |
+  |---|---|---|---|---|---|
+  | BF2 | Fighter tank (1500 a rocket, 3000 on the part) | 8000 | x2 | 3 | 3 |
+  | BF2 | Hailfire | 8000 | x2 | 3 | 3 |
+  | BF2 | AT-ST (snow) | 8000 | x2 | 3 | 3 |
+  | BF2 | One-man AT-ST | 4000 | x2 | 2 | 2 |
+  | BF2 | Spider walker (6000 on the part) | 20000 | x4 | 4 | 4 |
+  | BF2 | AT-TE | 40000 | x4 | 7 | 7 |
+  | BF2 | AT-AT | 60000 | x4 | 10 | 10 |
+  | BF1 | Fighter tank (600 a torpedo, 1200 on the part) | 6600 | x2 | 6 | 6 |
+  | BF1 | Hailfire | 5200 | x2 | 5 | 5 |
+  | BF1 | AT-ST (snow; the Alliance's pulls dealt 2400, 1800, 600) | 6000 | x2 | 3 | 5 |
+  | BF1 | Spider walker (2400 on the part) | 6000 | x4 | 3 | 3 |
+  | BF1 | AT-TE | 15000 | x4 | 7 | 7 |
+  | BF1 | AT-AT (the Alliance's pulls 3000 each) | 30000 | x4 | 10 | 13 |
+
+  A rifle bolt on the part (`a_rifle_bolt_on_the_part_deals_the_vehicles_factor`, BF2 Geonosis and Hoth): 20 on the
+  Republic fighter tank's part against 10 on its hull, 16 against 8 on the hailfire, 32 against 8 on the spider
+  walker and on the AT-AT. A BF1 rifle takes nothing off a BF1 vehicle today, so it has nothing to multiply there
+  until the vehicle pass. BF1 maps keep BF1's health and torpedo until the vehicle pass.
+- **Hits to kill under the rule** (`weak_spot_kill_table`, rerun 2026-11-10 with the per-class factor; one
+  unlocked round per line, a human's on the part against a bot's on the same line, which is plain, to part the
+  direct hit from the blast; the blast added nothing to any hull). BF2 maps use BF2's rocket (it grows from 500 to
+  1500 over its first half second, so about 1030 at 9-10 m and 1430 at 19-20 m); BF1 maps use BF1's torpedo (600 at
+  any range) until the vehicle pass. The range is the line's length to the struck point; where no line at the part
+  was found that close, the nearest is given.
+
+  | Game | Vehicle | Health | Factor | Body ~10 m | Body 20 m+ | Weak spot ~10 m | Weak spot 20 m+ |
+  |---|---|---|---|---|---|---|---|
+  | BF2 | Fighter tank (rep, imp) | 8000 | x2 | 9 | 6 | 4 | 3 |
+  | BF2 | AAT, hailfire | 8000 | x2 | 9 | 7 | 4 | 3 |
+  | BF2 | Snail tank | 8000 | x2 | 10 | 6 | 4 | 3 |
+  | BF2 | Combat speeder | 8000 | x2 | 9 | 6 | 5 (8 m) | 3 (18 m) |
+  | BF2 | AT-ST (snow, jungle) | 8000 | x2 | 8-9 | 6 | 4 | 3 |
+  | BF2 | One-man AT-ST | 4000 | x2 | 4 | 3 | 2 | 2 |
+  | BF2 | Spider walker | 20000 | x4 | 19 | 14 | 5 | 5 (15 m) |
+  | BF2 | AT-TE | 40000 | x4 | 37 | 28 | 10 | 7 |
+  | BF2 | AT-AT | 60000 | x4 | 63 | 44 | 12 (16 m) | 10 (23 m) |
+  | BF1 | Fighter tank (rep, imp), AAT | 6600 | x2 | 11 | 11 | 6 | 6 |
+  | BF1 | Hailfire | 5200 | x2 | 9 | 9 | 5 | 5 |
+  | BF1 | Combat speeder | 5400 | x2 | 9 | 9 | 5 | 5 |
+  | BF1 | AT-ST (all three) | 6000 | x2 | 10 | 10 | 5 | 5 |
+  | BF1 | Spider walker | 6000 | x4 | 10 | 10 | 3 | 3 |
+  | BF1 | AT-TE | 15000 | x4 | 25 | 25 | 7 | 7 |
+  | BF1 | AT-AT | 30000 | x4 | 50 | 50 | 13 (16 m) | 13 (23 m) |
+
+  Not in the table: BF2's imp_walk_atst (Endor and Hoth field the jungle and snow ones), Bespin combat speeder and
+  Kashyyyk spider (`cis_walk_spiderkas`, x4; the same hulls as their twins, not on a surveyed map's pads), BF1's
+  hovernaut and MTT (one command spawn on Rhen Var, not out on the first tick). Hits are rounds: the Alliance
+  torpedo fires two a trigger pull.
+- **State and hash.** `Missile::part` is the hull body's index; it goes into the hash (`MSLPART`, the index) only
+  when a part is set, so rounds with no human part lock hash as before. A bolt's `hit_mult` (hashed when not 1)
+  is the factor it deals, so a weak-part strike hashes its class's factor (2.0, or 4.0 on the three big walkers)
+  where it hashed the data's 4.0; `Sim::weak_spot_factor` itself is setup data and is not hashed.
+
+Survey (`game/tests/suite/rocket_weakspot.rs`, `weak_part_lock_survey`, run 2026-11-10 before the third pass): a
+human with the other side's launcher at 24 directions, 15 m and 30 m from each pad vehicle where it stands on the
+map, locking, dwelling and firing through the trigger. "Part" = rockets that left for a weak part, of the stands
+where the lock took the vehicle; the rest were centre locks.
 
 | Vehicle | BF2 part / locked | BF1 part / locked |
 |---|---|---|
 | Fighter tank (rep) | 18/37 Geonosis, 15/39 Kashyyyk, 14/36 Mygeeto | 10/31 Naboo |
 | Fighter tank (imp) | 5/32 Kashyyyk | 14/43 Rhen Var |
-| AAT | 21/45 Naboo, 7/26 Mygeeto, 13/37 Utapau | 7/37 Naboo, 9/38 Kashyyyk |
-| Hailfire | 15/46 Geonosis | 5/44 Geonosis |
-| Spider walker | 18/47 Geonosis | 15/40 Geonosis, 16/42 Kashyyyk |
+| AAT | 21/45 Naboo, 7/26 Mygeeto, 13/37 Utapau | 15/37 Naboo, 17/39 Kashyyyk |
+| Hailfire | 15/46 Geonosis | 10/44 Geonosis |
+| Spider walker | 18/47 Geonosis | 30/40 Geonosis, 33/42 Kashyyyk |
 | AT-TE | 21/43 Geonosis | 8/48 Geonosis |
 | AT-ST | 15/39 Hoth, 13/44 Endor | 16/40 Hoth, 12/33 Yavin, 13/44 Endor |
 | AT-AT | 21/46 Hoth | 20/48 Hoth, 18/45 Rhen Var |
@@ -626,10 +721,13 @@ vehicle; the rest were centre locks.
 | One-man AT-ST | 20/42 Naboo, 11/19 Felucia, 18/31 Utapau | - |
 | Snail tank | 13/34 Kashyyyk, 9/37 Felucia | - |
 
-Of 275 BF2 part rockets 270 were critical and 5 met the ground or a wall first; of 178 BF1 ones, 177 and 1. In one
-shot of 453 the part came into sight on the tick of the shot (the box was on the centre, the rocket took the part).
-Not surveyed: BF1's hovernaut and MTT (one command spawn on Rhen Var, not out on the first tick), BF2's Bespin
-combat speeder and Kashyyyk spider (the same hulls as their twins).
+Steering alone put 260 of 275 BF2 part rockets on the part itself (5 met the ground or a wall first, the rest the
+plate beside the part, now plain); of 178 BF1 ones, 177 arrived. On the Geonosis pair after this pass
+(`a_locked_rocket_finds_the_weak_spot`, 16 directions at 18 m) every part rocket that arrived struck the part:
+BF2 hailfire 6/6, fighter tank 7/7, spider walker 10/10, AT-TE 4/4; BF1 spider walker 10/10, hailfire 3/3. The
+survey's centre column (the same stands' rockets turned to the hull centre, as BF2's lock steers) shows how often
+BF2's centre lock met a weak prim by chance: always on the one-man AT-ST (its hip prim covers its centre), 13 of
+15 on the hailfire, almost never elsewhere.
 
 ## 6. The shell and the mortar launcher [V][O] (H3 §3-4)
 
@@ -775,25 +873,54 @@ flamethrowers.
 
 ## 9b. The fat ray and the beam [V] (2026-10-30)
 
-- `fatray` (the sonic blaster's secondary, the geonosian turret): class ctor `FUN_003183f0` (B2:295295, the bullet class
-  plus seven floats), setter `FUN_00318520` (B2:295351): MaxDamage 0x47d0e794 (+0x11c, ctor 20), 0xfe544f96 (min, +0x120,
+- `fatray` (the sonic blaster's secondary, the geonosian turret): class ctor `FUN_003183f0` (B2:307556, the bullet class
+  plus seven floats), setter `FUN_00318520` (B2:307612): MaxDamage 0x47d0e794 (+0x11c, ctor 20), 0xfe544f96 (min, +0x120,
   10), 0xaf922a6b (deduction, +0x124, 5), 0xaee05d99 / 0x3ed11ac3 / 0x58a7da24 (push max / min / deduction, 15 / 5 / 3),
-  RayRadius 0xa4c53efd (+0x134, 3). Instance `FUN_00317e10` (B2:295036): damage = lerp(min, max, charge), push alike.
-  Sweep `FUN_00317f20` (B2:295077) replaces the bullet sweep: bodies of mask 0x1022 (no vehicles) on the tick's
+  RayRadius 0xa4c53efd (+0x134, 3). Instance `FUN_00317e10` (B2:307297): damage = lerp(min, max, charge), push alike.
+  Sweep `FUN_00317f20` (B2:307338) replaces the bullet sweep: bodies of mask 0x1022 (no vehicles) on the tick's
   segment, owner skipped, at the soldier's target point with 0 < t < L and distance d < radius; f = 1 − d/radius;
   damage x f with every scale 1.0, then damage = max(damage − deduction x f, min); it returns 1 (the round flies on).
-- `beam` (the BF2 award sniper rifles, the vehicle beams): class `FUN_003126c0` (B2:291369, 0xe0 bytes), setter
-  `FUN_00312838` (B2:291429): Range 0xfadc0cd2 (+0xbc, ctor 150), LaserWidth / LaserTexture / LaserGlowColor, the pierce
+- `beam` (the BF2 award sniper rifles, the vehicle beams): class `FUN_003126c0` (B2:303630, 0xe0 bytes), setter
+  `FUN_00312838` (B2:303690): Range 0xfadc0cd2 (+0xbc, ctor 150), LaserWidth / LaserTexture / LaserGlowColor, the pierce
   bit 0x604e2441 (+0xd8), ImpactEffect 0x11727a92 (+0xdc); the bullet ImpactEffect* keys are dead on it. Instance
-  `FUN_00311b50` (B2:290798) holds the owner's nearest fire point. Update `FUN_00311d00` (B2:290892-291107), every frame
+  `FUN_00311b50` (B2:303059) holds the owner's nearest fire point. Update `FUN_00311d00` (B2:303153-303368), every frame
   of its LifeSpan: origin and direction again from the fire point, a ray of Range; an entity struck takes the class's
-  damage desc x dt / LifeSpan and spawns the +0xdc effect; without the pierce bit the first hit stops it, with it a
-  soldier-type hit (0x80 / 0x10 / 4) still does; the drawn ribbon is the reached length + 1 about its middle.
+  damage desc x dt / LifeSpan and spawns the +0xdc effect; without the pierce bit the first hit stops it. With it
+  (PassThrough 1) the ray goes on from each hit with the range left, past a list of the objects already struck (the
+  owner first, at most 128; B2:303281): every soldier,
+  vehicle or other object it crosses takes its share once an update. It stops on a hit whose collision type is
+  terrain 0x80, static 0x10 (buildings and props) or asteroid 4 (B2:303308; these are collision types, not soldier
+  types: the earlier reading here had them backwards), on a hit with no object behind it, on an accepted saber
+  deflect (the object's deflect call at B2:303289 leaves the update before any damage), when the list is full, or at
+  the end of its range. The drawn ribbon is the total reached length + 1 about its middle. Checked against the
+  original game.
 - The port: `Sim::sweep_fat_rays` (`sim/fatray.rs`); `Sim::beams` (`sim/beam.rs`) casts one full-range round a tick
-  through the bolt sweep, with damage x TICK_DT / LifeSpan. Deviations: a pierce beam stops at the first vehicle too;
-  a seat's beam keeps its spawn ray; the per-hit impact effect has a network-looking gate (DAT_00600548 / 0x549 /
-  0x560 / 0x6d85ad) that is taken as open.
-- B1's bullet render `FUN_00277130` (B1:197885) draws the class model (GeometryName, the bullet setter's +0x84) along the
+  through the bolt sweep, with damage x TICK_DT / LifeSpan. A PassThrough beam on a ground round goes on through
+  soldiers, droidekas (shield and body are one object), vehicles, droids, autoturrets, mines and guided rockets
+  (`Sim::pierce_beam`): each takes its share once a tick, and the ray ends at terrain, water, a map body, a station,
+  a building turret's building, a saber block or the end of its range; its drawn length is the whole reach.
+  Deviations: in a space round a pierce beam still stops at its first hit (space is kept as it is; trace: the space
+  beams `com_weap_veh_fly_beam_ord` and the space turret's `tur_weap_spa_beam_ord`, PassThrough 1); water stops it
+  (the original's ray flags were not traced for water; trace: the collision-type gate on a water hit); a building
+  turret's own gun hull (a vehicle with a turret instance) stops it as its building does (trace: whether the
+  original's turret object stops a beam or only the building's static body does); a seat's beam keeps its spawn ray;
+  the per-hit impact effect has a network-looking gate (DAT_00600548 / 0x549 / 0x560 / 0x6d85ad) that is taken as
+  open.
+  PassThrough beams on the discs, all BF2: the award sniper rifle (`com_weap_award_sniper_rifle_ord` and its four
+  sides), Han's target pistol (`all_weap_hero_targetpistol_ord`), the vehicle beam `com_weap_veh_beam_ord` (the
+  spider walker's `cis_weap_walk_spider_beam_ord`, both fighter tanks' gunner lasers
+  `rep/imp_weap_hover_fightertank_laser_ord`, the beam turret `tur_weap_beam_ord`) and the flyer beam
+  `com_weap_veh_fly_beam_ord` (the LAAT/i and Rebel gunship ball turrets `rep/all_weap_fly_gunship_ball_ord` and
+  the droid gunship's `cis_weap_fly_droidgunship_beam_ord`, all fired on ground maps; the space turret's
+  `tur_weap_spa_beam_ord`). BF2's LAAT wing guns and the chaingun tracers are beams without it.
+- One game, INTERIM: no BF1 beam sets PassThrough, so the BF1 versions of the same vehicles still stop at their
+  first hit: the fighter tank lasers `rep/imp_weap_hover_fightertank_laser_ord`, the spider walker's
+  `cis_weap_walk_spider_laser_ord` and the LAAT/i ball `rep_weap_fly_gunship_ball_ord` (BF1's MAF laser, hovernaut
+  cannon and LAAT wing guns have no piercing BF2 counterpart). On a BF2 map both sides fire BF2's classes, so a
+  fighter tank's gunner beam passes through there and not on a BF1 map. replace: the vehicle pass sets pierce on
+  BF1's counterparts together with their damage (`game::normalize`); measure: vehicle kills a minute on BF2 maps
+  against the pre-change baseline.
+- B1's bullet render `FUN_00277130` (B1:198108) draws the class model (GeometryName, the bullet setter's +0x84) along the
   velocity for any bullet-family round: the jet trooper's rocket is drawn as `com_weap_missile`.
 
 ## 10. The port today, and the build

@@ -1,9 +1,12 @@
 //! Hitmark (the maintainer 2026-10-28, `analysis/re-target-hud.md` §12): the human
 //! player's rocket launcher on a vehicle's weak spot - a hull prim its class
 //! authors a `HitLocation` x4 for (`analysis/re-hitzones.md` §3: the hits
-//! BF2's demolition award counts) - raises `Event::CriticalHit` and lights
-//! the reticle's critical-hit mark; the same rocket on the hull elsewhere,
-//! a rifle on the weak spot, or a bot's rocket on it does not.
+//! BF2's demolition award counts), dealt x4 on the AT-TE, the AT-AT and the
+//! spider walker and x2 on the rest on a ground map
+//! (`core::sim::Sim::weak_spot_factor`) - raises `Event::CriticalHit` and
+//! lights the reticle's critical-hit mark; the same rocket on the hull
+//! elsewhere or a bot's rocket on it does not, and a rifle on it raises the
+//! event but lights no mark.
 //!
 //! BF2 Geonosis, both sides: each pad vehicle whose hull carries a x4 part
 //! (the Republic's AT-TE and fighter tank, the CIS hailfire and spider
@@ -106,10 +109,27 @@ fn stand_in_line(
     vh: VehicleHandle,
     aims: &[Vec3],
     weak: bool,
+    dists: &[f32],
 ) -> Option<(Vec3, Vec3)> {
-    let floor = w.sim.vehicle(vh)?.pos.y;
+    lines_in_line(w, u, vh, aims, weak, dists, 1).pop()
+}
+
+/// As [`stand_in_line`], up to `most` such lines in the order tried.
+fn lines_in_line(
+    w: &mut World,
+    u: UnitHandle,
+    vh: VehicleHandle,
+    aims: &[Vec3],
+    weak: bool,
+    dists: &[f32],
+    most: usize,
+) -> Vec<(Vec3, Vec3)> {
+    let mut out = Vec::new();
+    let Some(floor) = w.sim.vehicle(vh).map(|v| v.pos.y) else {
+        return out;
+    };
     for &aim in aims {
-        for dist in [12.0f32, 18.0, 25.0] {
+        for &dist in dists {
             for k in 0..32 {
                 let a = k as f32 * std::f32::consts::TAU / 32.0;
                 let mut p = aim + Vec3::new(a.cos(), 0.0, a.sin()) * dist;
@@ -137,12 +157,15 @@ fn stand_in_line(
                     && h.hit_mult > 0.0
                     && core::perception::los_terrain(&w.sim, from, from + dir * h.t)
                 {
-                    return Some((from, dir));
+                    out.push((from, dir));
+                    if out.len() >= most {
+                        return out;
+                    }
                 }
             }
         }
     }
-    None
+    out
 }
 
 /// What one round did: the vehicle's drop, a critical-hit event on it, and
@@ -275,7 +298,7 @@ fn a_rocket_on_a_vehicle_weak_spot_lights_the_critical_mark() {
                 (spawn(&mut w, class_name, team, far, Controller::Ai), viewer)
             };
             let aims = parts(&w, *vh, weak);
-            let line = stand_in_line(&mut w, me, *vh, &aims, weak)?;
+            let line = stand_in_line(&mut w, me, *vh, &aims, weak, &[12.0, 18.0, 25.0])?;
             let s = lay_round(&mut w, me, viewer, *vh, weapon, line);
             let held = &w.sim.weapon_classes[w.sim.unit(me).unwrap().weapon_class].name;
             Some((s, held.clone()))
@@ -315,7 +338,7 @@ fn a_rocket_on_a_vehicle_weak_spot_lights_the_critical_mark() {
         assert_eq!(
             s.critical,
             s.drop > 0.0,
-            "{class}: the rifle's x4 that took health is a critical hit"
+            "{class}: the rifle's weak-spot hit that took health is a critical hit"
         );
         assert_eq!(s.mark, None, "{class}: but a rifle lights no mark");
         let (s, _) = one(true, &rocketeer, Some(&rocket), false).expect("the same line");
@@ -324,7 +347,7 @@ fn a_rocket_on_a_vehicle_weak_spot_lights_the_critical_mark() {
             s.drop, s.critical
         );
         assert!(s.drop > 0.0, "{class}: the bot's rocket did damage");
-        assert!(!s.critical, "{class}: a bot on Normal: no x4");
+        assert!(!s.critical, "{class}: a bot on Normal: plain");
         assert_eq!(s.mark, None, "{class}: a bot's rocket: no mark");
     }
     eprintln!("lit: {lit:?}");
@@ -426,7 +449,8 @@ fn the_bf1_torpedo_launchers_take_the_foot_lock() {
 
 // The weak-part lock (`analysis/re-ordnance-kinds.md` 5.1) on real data: a
 // human's launcher locks a vehicle's weak part in sight, the rocket steers to
-// it through the real trigger, and the hit there is the critical hit.
+// it through the real trigger, and its strike on the part is the critical
+// hit at its class's factor, as an unlocked rocket's on the part is.
 
 /// A map's conquest world with its mission's sides, `None` when unbaked.
 fn mission_world(map: &str, mission: &str) -> Option<(World, game::mission::MissionDef)> {
@@ -496,9 +520,30 @@ struct Stand {
     mark: bool,
 }
 
+/// The point a centre lock steers to and draws its box at: the vehicle's
+/// collision-sphere centre in its frame (BF2's lock, which never takes a
+/// part).
+fn aim_centre(w: &World, vh: VehicleHandle) -> Vec3 {
+    let v = w.sim.vehicle(vh).unwrap();
+    let c = match (v.aim_sphere, w.sim.blast_setup.get(v.class as usize)) {
+        (Some((c, _)), _) => c,
+        (None, Some(Some(b))) => b.sphere_centre,
+        _ => Vec3::ZERO,
+    };
+    v.pos + v.rot * c
+}
+
 /// From `p`: lock `vh` by looking at it, dwell on the lock box to a full
-/// lock and fire through the trigger; the vehicle is whole again after.
-fn lock_and_fire(w: &mut World, me: UnitHandle, vh: VehicleHandle, p: Vec3) -> Stand {
+/// lock and fire through the trigger. With `centre_only` the shot is BF2's:
+/// the reticle goes to the hull centre (where BF2's box is) for the shot,
+/// and the rocket steers to the centre, never to a part.
+fn lock_and_fire(
+    w: &mut World,
+    me: UnitHandle,
+    vh: VehicleHandle,
+    p: Vec3,
+    centre_only: bool,
+) -> Stand {
     use core::sim::{AimTarget, LockTarget};
     let mut out = Stand::default();
     let centre = {
@@ -538,11 +583,16 @@ fn lock_and_fire(w: &mut World, me: UnitHandle, vh: VehicleHandle, p: Vec3) -> S
         buttons: core::sim::buttons::FIRE,
         ..PadState::default()
     };
+    let at = if centre_only { aim_centre(w, vh) } else { at };
+    look(w, me, p, at);
     let mut flown = false;
-    for k in 0..240 {
+    for k in 0..400 {
         let weak = w.sim.foot_lock_weak(0);
+        // Pressed afresh every other tick: a launcher still in its refire
+        // wait ignores a held trigger.
+        let press = !flown && k % 2 == 0;
         w.sim
-            .step(&[if flown { PadState::default() } else { fire }]);
+            .step(&[if press { fire } else { PadState::default() }]);
         look(w, me, p, at);
         let mine = w
             .sim
@@ -555,6 +605,13 @@ fn lock_and_fire(w: &mut World, me: UnitHandle, vh: VehicleHandle, p: Vec3) -> S
             out.fired = true;
             out.weak = weak;
             out.part = m.part.is_some();
+            if centre_only {
+                for b in w.sim.bolts.iter_mut().filter(|b| b.owner == me) {
+                    if let Some(m) = b.missile.as_mut() {
+                        m.part = None;
+                    }
+                }
+            }
         }
         feed.tick(&w.sim, me);
         out.mark |= feed.hit_critical(w.sim.tick).is_some();
@@ -562,14 +619,18 @@ fn lock_and_fire(w: &mut World, me: UnitHandle, vh: VehicleHandle, p: Vec3) -> S
             matches!(e, Event::CriticalHit { shooter, victim, .. }
                 if *shooter == me && *victim == Target::Vehicle(vh))
         });
-        if (flown && mine.is_none()) || (!flown && k > 60) {
+        if (flown && mine.is_none()) || (!flown && k > 200) {
             break;
         }
     }
-    let v = w.sim.vehicle_mut(vh).unwrap();
-    out.drop = before - v.health.cur;
-    v.health.cur = v.health.max;
+    out.drop = before - w.sim.vehicle(vh).map_or(0.0, |v| v.health.cur.max(0.0));
     out
+}
+
+/// Make `vh` whole again.
+fn heal(w: &mut World, vh: VehicleHandle) {
+    let v = w.sim.vehicle_mut(vh).unwrap();
+    v.health.cur = v.health.max;
 }
 
 /// One class's stands around its pad vehicle.
@@ -577,7 +638,11 @@ fn lock_and_fire(w: &mut World, me: UnitHandle, vh: VehicleHandle, p: Vec3) -> S
 struct Survey {
     stands: usize,
     locked: usize,
+    /// Rockets that left for a weak part.
     weak: usize,
+    /// Of those, the ones that met the vehicle.
+    arrived: usize,
+    /// Critical hits by rockets sent at a part: those that struck it.
     critical: usize,
     /// Rockets sent at a part that never met the vehicle (the ground or a
     /// wall on the way).
@@ -585,7 +650,15 @@ struct Survey {
     /// Shots where the box and the rocket disagreed about the part: the
     /// part came into or left sight on the tick of the shot.
     edge: usize,
-    /// Drops of the critical hits and of the plain hits on a centre lock.
+    /// The same stands as `weak`, the rocket turned to the centre: those
+    /// that met the vehicle, and those that struck a weak prim on the way.
+    centre: usize,
+    centre_critical: usize,
+    /// Centre locks (no part in sight) and the ones that struck a weak prim.
+    plain: usize,
+    plain_critical: usize,
+    /// Drops of the plain part rockets and of the plain hits on a centre
+    /// lock.
     weak_drop: Vec<f32>,
     plain_drop: Vec<f32>,
     marks: usize,
@@ -635,40 +708,57 @@ fn survey(map: &str, mission: &str, dirs: usize, dists: &[f32]) -> Option<Vec<(S
                     continue;
                 }
                 s.stands += 1;
-                let r = lock_and_fire(&mut w, me, vh, p);
+                let r = lock_and_fire(&mut w, me, vh, p, false);
+                heal(&mut w, vh);
                 s.locked += usize::from(r.locked);
                 if !r.fired {
                     continue;
                 }
                 s.edge += usize::from(r.weak != r.part);
+                s.marks += usize::from(r.mark);
                 if r.part {
                     s.weak += 1;
-                    if r.critical {
-                        s.critical += 1;
-                        s.weak_drop.push(r.drop);
-                        s.marks += usize::from(r.mark);
+                    s.critical += usize::from(r.critical);
+                    if r.drop > 0.0 {
+                        s.arrived += 1;
+                        if !r.critical {
+                            s.weak_drop.push(r.drop);
+                        }
                     } else {
-                        assert_eq!(
-                            r.drop, 0.0,
-                            "{map} {class}: a part rocket's hit is critical"
-                        );
                         s.lost += 1;
                     }
-                } else if r.drop > 0.0 && !r.critical {
-                    s.plain_drop.push(r.drop);
+                    // The same stand with BF2's centre steering.
+                    let c = lock_and_fire(&mut w, me, vh, p, true);
+                    heal(&mut w, vh);
+                    if c.fired && c.drop > 0.0 {
+                        s.centre += 1;
+                        s.centre_critical += usize::from(c.critical);
+                    }
+                } else if r.drop > 0.0 {
+                    s.plain += 1;
+                    s.plain_critical += usize::from(r.critical);
+                    if !r.critical {
+                        s.plain_drop.push(r.drop);
+                    }
                 }
             }
         }
         eprintln!(
-            "{map} {class}: {} stands, {} locked, {} rockets to a weak part, {} critical \
-             ({} marks), {} lost, {} edge; critical drops {:?}, plain drops {:?}",
+            "{map} {class}: {} stands, {} locked, {} rockets to a weak part ({} arrived, {} \
+             critical, {} lost, {} edge); centre-steered there {} met, {} critical; centre \
+             locks {} met, {} critical; {} marks; part drops {:?}, plain drops {:?}",
             s.stands,
             s.locked,
             s.weak,
+            s.arrived,
             s.critical,
-            s.marks,
             s.lost,
             s.edge,
+            s.centre,
+            s.centre_critical,
+            s.plain,
+            s.plain_critical,
+            s.marks,
             span(&s.weak_drop),
             span(&s.plain_drop),
         );
@@ -684,9 +774,10 @@ fn span(v: &[f32]) -> Option<(f32, f32)> {
 }
 
 /// On both games' Geonosis, each pad vehicle with a weak part: from the
-/// stands where the part is in sight the lock box sits on it, the rocket
-/// leaves steering to it, and its hits there are critical (the event and
-/// the reticle mark) at about four times the plain hit of a centre lock.
+/// stands where the part is in sight the lock box sits on it and the rocket
+/// leaves steering to it, nearly every one that arrives strikes the part
+/// for the critical hit, the mark only on those, and a part rocket that
+/// meets the plate beside the part deals about a centre lock's plain drop.
 #[test]
 fn a_locked_rocket_finds_the_weak_spot() {
     let mut ran = 0;
@@ -712,56 +803,447 @@ fn a_locked_rocket_finds_the_weak_spot() {
                 .find(|(c, _)| c == class)
                 .unwrap_or_else(|| panic!("{map}: no {class} surveyed"));
             assert!(s.weak > 0, "{map} {class}: the part is in sight somewhere");
-            assert_eq!(
-                s.critical + s.lost,
-                s.weak,
-                "{map} {class}: a part rocket that meets the vehicle is critical"
+            assert_eq!(s.arrived + s.lost, s.weak, "{map} {class}");
+            assert!(s.arrived > 0, "{map} {class}: none arrived");
+            assert!(
+                s.critical * 10 >= s.arrived * 8,
+                "{map} {class}: part locks {} critical of {} arrived",
+                s.critical,
+                s.arrived
             );
-            assert!(s.critical > 0, "{map} {class}: none arrived");
-            assert_eq!(s.marks, s.critical, "{map} {class}: each lights the mark");
+            assert_eq!(
+                s.marks,
+                s.critical + s.plain_critical,
+                "{map} {class}: only a real weak-part strike lights the mark"
+            );
             assert_eq!(
                 s.edge, 0,
                 "{map} {class}: the box showed where the rocket went"
             );
             // BF2's rocket grows from 500 to 1500 over its first half
-            // second, so the spans are compared, not one pair of shots
-            // (the exact x4 is `core`'s `sim::weak_lock` test).
+            // second and the part lies nearer or farther than the centre,
+            // so the spans are compared, not one pair of shots.
             if let (Some(weak), Some(plain)) = (span(&s.weak_drop), span(&s.plain_drop)) {
-                assert!(weak.0 > 2.5 * plain.1, "{map} {class}: {weak:?} {plain:?}");
+                assert!(
+                    weak.0 >= 0.8 * plain.0 && weak.1 <= 1.25 * plain.1,
+                    "{map} {class}: {weak:?} {plain:?}"
+                );
             }
         }
     }
     eprintln!("{ran} of 2 maps checked");
 }
 
+/// Lay an unguided rocket of `me`'s launcher from `from` along `dir` (a
+/// skilled shot with no lock) and follow it out: the vehicle's drop. The
+/// round is a human's (`human`) or a bot's: a bot's strike on the weak part
+/// is plain, so the pair parts the direct hit from the blast.
+fn lay_rocket_as(
+    w: &mut World,
+    me: UnitHandle,
+    vh: VehicleHandle,
+    line: (Vec3, Vec3),
+    human: bool,
+) -> f32 {
+    lay_rocket_hit(w, me, vh, line, human).0
+}
+
+/// As [`lay_rocket_as`], and whether the round raised the critical hit on
+/// `vh` (it struck the weak part).
+fn lay_rocket_hit(
+    w: &mut World,
+    me: UnitHandle,
+    vh: VehicleHandle,
+    (from, dir): (Vec3, Vec3),
+    human: bool,
+) -> (f32, bool) {
+    let u = w.sim.unit(me).unwrap();
+    let who = Shooter {
+        owner: me,
+        team: u.team,
+        weapon_class: u.weapon_class,
+        is_player: human,
+    };
+    let o = w.sim.weapon_classes[u.weapon_class].ordnance.clone();
+    let mc = o.missile.expect("a missile launcher");
+    let mut b = Bolt::fire(
+        from,
+        dir,
+        o.velocity,
+        o.life_span,
+        who,
+        w.sim.heightfield.as_ref(),
+        w.sim.water_plane(),
+        &w.sim.collision,
+        HullFilter::All,
+    );
+    b.as_missile(&o, &mc, None, &mut w.sim.lcg);
+    w.sim.bolts.push(b);
+    let before = w.sim.vehicle(vh).unwrap().health.cur;
+    let mut critical = false;
+    for _ in 0..240 {
+        w.sim.step(&[PadState::default()]);
+        critical |= w.sim.events.iter().any(|e| {
+            matches!(e, Event::CriticalHit { shooter, victim, .. }
+                if *shooter == me && *victim == Target::Vehicle(vh))
+        });
+        if !w.sim.bolts.iter().any(|b| b.owner == me) {
+            break;
+        }
+    }
+    let drop = before - w.sim.vehicle(vh).map_or(0.0, |v| v.health.cur.max(0.0));
+    (drop, critical)
+}
+
+/// How many rockets of `team`'s launcher destroy `class`'s pad vehicle at
+/// its real health, from 25-30 m (past BF2's 0.5 s ramp): trigger pulls on a
+/// lock whose box is on the weak part, and rounds laid unlocked straight at
+/// the part that struck it. `None` for a count no stand gave.
+fn rockets_to_kill(map: &str, mission: &str, class: &str) -> (Option<usize>, Option<usize>) {
+    let count = |locked: bool| -> Option<usize> {
+        let (mut w, m) = mission_world(map, mission)?;
+        // A hover vehicle rises to its height after the pad makes it: let
+        // it settle before a line at its part is taken.
+        for _ in 0..150 {
+            w.sim.step(&[PadState::default()]);
+        }
+        let vh = w
+            .sim
+            .alive_vehicles()
+            .find(|(_, v)| w.classes[v.class as usize] == class)
+            .map(|(h, _)| h)
+            .unwrap_or_else(|| panic!("{map}: no {class}"));
+        let side = class.split('_').next().unwrap_or_default();
+        let home = usize::from(m.teams[1].faction == side);
+        let me = launcher_human(&mut w, &m, (1 - home) as u8)?;
+        w.sim.vehicle_mut(vh).unwrap().team = Some(home as u8);
+        let (centre, floor) = {
+            let v = w.sim.vehicle(vh).unwrap();
+            (v.pos, v.pos.y)
+        };
+        let gone = |w: &World| w.sim.vehicle(vh).is_none_or(|v| v.health.cur <= 0.0);
+        if locked {
+            // A stand where the lock box goes on the part.
+            for dist in [25.0f32, 30.0] {
+                for k in 0..24 {
+                    let a = k as f32 * std::f32::consts::TAU / 24.0;
+                    let mut p = centre + Vec3::new(a.cos(), 0.0, a.sin()) * dist;
+                    p.y = w.sim.spawn_ground(p);
+                    if (p.y - floor).abs() > 4.0 {
+                        continue;
+                    }
+                    let r = lock_and_fire(&mut w, me, vh, p, false);
+                    if !(r.part && r.drop > 0.0) {
+                        heal(&mut w, vh);
+                        continue;
+                    }
+                    let mut n = 1;
+                    while !gone(&w) && n < 100 {
+                        let r = lock_and_fire(&mut w, me, vh, p, false);
+                        assert!(r.part && r.drop > 0.0, "{map} {class}: shot {n} {r:?}");
+                        n += 1;
+                    }
+                    return Some(n);
+                }
+            }
+            None
+        } else {
+            let aims = parts(&w, vh, true);
+            let line = stand_in_line(&mut w, me, vh, &aims, true, &[25.0, 30.0])?;
+            let (mut n, mut beside) = (0, 0);
+            while !gone(&w) && n < 100 {
+                let (drop, struck) = lay_rocket_hit(&mut w, me, vh, line, true);
+                assert!(drop > 0.0, "{map} {class}: rocket {n} missed");
+                if !struck && !gone(&w) {
+                    // A torpedo's waver put it on the hull beside the
+                    // part: not a round on the part; undone, not counted.
+                    beside += 1;
+                    assert!(beside < 40, "{map} {class}: the part is never struck");
+                    w.sim.vehicle_mut(vh).unwrap().health.cur += drop;
+                    continue;
+                }
+                n += 1;
+            }
+            Some(n)
+        }
+    };
+    (count(true), count(false))
+}
+
+/// Rockets to destroy a vehicle at its real health from 25-30 m
+/// (`analysis/re-ordnance-kinds.md` 5.1): a rocket that strikes the weak
+/// part deals its class's factor whether it was locked or aimed by hand: x4
+/// on the AT-TE, the AT-AT and the spider walker, x2 on the rest. Locked
+/// counts trigger pulls, aimed counts rounds that struck the part (one a
+/// torpedo's waver put beside it is undone and not counted). The two agree
+/// but against the Alliance, whose torpedo launcher fires two a pull: its
+/// first steers to the part, the second flies where the first left (on the
+/// part or the hull beside it). BF1 maps keep BF1's health and torpedo
+/// (600) until the vehicle pass.
+#[test]
+fn rockets_to_destroy_a_vehicle_locked_and_aimed() {
+    let mut ran = 0;
+    let cases = [
+        // BF2: 1500 a rocket. 8000 at x2: 3000 on the part.
+        ("bf2_geo1", "bf2_geo1_con", "rep_hover_fightertank", 3, 3),
+        ("bf2_geo1", "bf2_geo1_con", "cis_tread_hailfire", 3, 3),
+        ("bf2_hot1", "bf2_hot1_con", "imp_walk_atst_snow", 3, 3),
+        // 4000 at x2.
+        ("bf2_nab2", "bf2_nab2_con_cw", "rep_walk_oneman_atst", 2, 2),
+        // x4, 6000 on the part: 20000, 40000, 60000.
+        ("bf2_geo1", "bf2_geo1_con", "cis_walk_spider", 4, 4),
+        ("bf2_geo1", "bf2_geo1_con", "rep_walk_atte", 7, 7),
+        ("bf2_hot1", "bf2_hot1_con", "imp_walk_atat", 10, 10),
+        // BF1: 600 a torpedo. x2, 1200 on the part: 6600, 5200.
+        ("bf1_nab1", "bf1_nab1_con_cw", "rep_hover_fightertank", 6, 6),
+        ("bf1_geo1", "bf1_geo1_con", "cis_tread_hailfire", 5, 5),
+        // 6000 at x2 by the Alliance: pulls of 2400, 1800, 600; five
+        // torpedoes on the part.
+        ("bf1_hot1", "bf1_hot1_con", "imp_walk_atst_snow", 3, 5),
+        // x4, 2400 on the part: 6000 (the Republic torpedo, which
+        // wavers), 15000; 30000 by the Alliance, 3000 a pull (the second
+        // torpedo on the hull), 13 torpedoes on the part.
+        ("bf1_geo1", "bf1_geo1_con", "cis_walk_spider", 3, 3),
+        ("bf1_geo1", "bf1_geo1_con", "rep_walk_atte", 7, 7),
+        ("bf1_hot1", "bf1_hot1_con", "imp_walk_atat", 10, 13),
+    ];
+    for (map, mission, class, locked, aimed) in cases {
+        if !game::assets::baked_root()
+            .join(map)
+            .join("manifest.ron")
+            .exists()
+        {
+            eprintln!("SKIP: {map} is not baked");
+            continue;
+        }
+        let (got_locked, got_aimed) = rockets_to_kill(map, mission, class);
+        eprintln!("{map} {class}: locked {got_locked:?}, aimed {got_aimed:?}");
+        assert_eq!(got_locked, Some(locked), "{map} {class}: locked");
+        assert_eq!(got_aimed, Some(aimed), "{map} {class}: aimed at the part");
+        ran += 1;
+    }
+    eprintln!("{ran} of {} vehicles checked", cases.len());
+}
+
+/// A human's rifle bolt on a vehicle's weak part deals its class's factor
+/// over the same bolt on the plain hull, and is the critical hit: x2 on a
+/// tank, x4 on an AT-AT and on a spider walker; on the hull it is plain.
+/// BF2 maps only: a BF1 rifle bolt takes nothing off a BF1 AAT today (0 on
+/// the part and the hull), so there is nothing to multiply there until the
+/// vehicle pass gives rifles their share against vehicles.
+#[test]
+fn a_rifle_bolt_on_the_part_deals_the_vehicles_factor() {
+    let mut ran = 0;
+    let cases = [
+        ("bf2_geo1", "bf2_geo1_con", "rep_hover_fightertank", 2.0),
+        ("bf2_geo1", "bf2_geo1_con", "cis_tread_hailfire", 2.0),
+        ("bf2_geo1", "bf2_geo1_con", "cis_walk_spider", 4.0),
+        ("bf2_hot1", "bf2_hot1_con", "imp_walk_atat", 4.0),
+    ];
+    for (map, mission, class, factor) in cases {
+        let one = |weak: bool| -> Option<Shot> {
+            let (mut w, m) = mission_world(map, mission)?;
+            for _ in 0..150 {
+                w.sim.step(&[PadState::default()]);
+            }
+            let vh = w
+                .sim
+                .alive_vehicles()
+                .find(|(_, v)| w.classes[v.class as usize] == class)
+                .map(|(h, _)| h)
+                .unwrap_or_else(|| panic!("{map}: no {class}"));
+            let side = class.split('_').next().unwrap_or_default();
+            let home = usize::from(m.teams[1].faction == side);
+            w.sim.vehicle_mut(vh).unwrap().team = Some(home as u8);
+            let team = 1 - home;
+            // The other side's first class, with the rifle in its hands.
+            let (soldier, ..) = &m.teams[team].classes[0];
+            let me = spawn(
+                &mut w,
+                soldier,
+                team as u8,
+                Vec3::new(5000.0, 0.0, 5000.0),
+                Controller::Player { slot: 0 },
+            );
+            let aims = parts(&w, vh, weak);
+            let line = stand_in_line(&mut w, me, vh, &aims, weak, &[12.0, 18.0, 25.0])?;
+            Some(lay_round(&mut w, me, me, vh, None, line))
+        };
+        if !game::assets::baked_root()
+            .join(map)
+            .join("manifest.ron")
+            .exists()
+        {
+            eprintln!("SKIP: {map} is not baked");
+            continue;
+        }
+        let part = one(true).unwrap_or_else(|| panic!("{map} {class}: no line at the part"));
+        let hull = one(false).unwrap_or_else(|| panic!("{map} {class}: no line at the hull"));
+        eprintln!(
+            "{map} {class}: rifle on the part {}, on the hull {}",
+            part.drop, hull.drop
+        );
+        assert!(hull.drop > 0.0, "{map} {class}: the bolt does damage");
+        assert!(!hull.critical, "{map} {class}: the hull is plain");
+        assert!(part.critical, "{map} {class}: the part is the critical hit");
+        assert!(
+            (part.drop - factor * hull.drop).abs() < 1e-3,
+            "{map} {class}: x{factor}: {} vs {}",
+            part.drop,
+            hull.drop
+        );
+        ran += 1;
+    }
+    eprintln!("{ran} of {} vehicles checked", cases.len());
+}
+
+/// The ground maps whose pad vehicles carry a weak part, both games.
+const WEAK_MAPS: [(&str, &str); 19] = [
+    ("bf2_geo1", "bf2_geo1_con"),
+    ("bf2_hot1", "bf2_hot1_con"),
+    ("bf2_nab2", "bf2_nab2_con_cw"),
+    ("bf2_kas2", "bf2_kas2_con_cw"),
+    ("bf2_kas2", "bf2_kas2_con"),
+    ("bf2_fel1", "bf2_fel1_con_cw"),
+    ("bf2_myg1", "bf2_myg1_con_cw"),
+    ("bf2_uta1", "bf2_uta1_con_cw"),
+    ("bf2_end1", "bf2_end1_con"),
+    ("bf1_geo1", "bf1_geo1_con"),
+    ("bf1_hot1", "bf1_hot1_con"),
+    ("bf1_nab1", "bf1_nab1_con_cw"),
+    ("bf1_kas1", "bf1_kas1_con_cw"),
+    ("bf1_kas1", "bf1_kas1_con"),
+    ("bf1_kas2", "bf1_kas2_con_cw"),
+    ("bf1_rhn1", "bf1_rhn1_con"),
+    ("bf1_rhn2", "bf1_rhn2_con_cw"),
+    ("bf1_yav1", "bf1_yav1_con"),
+    ("bf1_end1", "bf1_end1_con"),
+];
+
+/// The table behind `analysis/re-ordnance-kinds.md` 5.1's rockets to kill:
+/// each pad vehicle with a weak part, first seen on a map of
+/// [`WEAK_MAPS`], at its real health, shot by the other side's launcher
+/// (BF2's rocket on BF2 maps, BF1's torpedo on BF1 maps) from about 10 m
+/// and from 20-30 m. One round laid unlocked on the plain hull, and on the
+/// weak part as a human's (the class's factor `f`, x4 on the big walkers,
+/// x2 on the rest) and as a bot's (plain): the pair gives the direct hit
+/// `d = (human - bot) / (f - 1)` and the blast. Hits to kill = health /
+/// drop, rounded up. Run by name with `--ignored --nocapture`.
+#[test]
+#[ignore = "a table that prints; run by name"]
+fn weak_spot_kill_table() {
+    let mut seen: Vec<String> = Vec::new();
+    let hits = |health: f32, drop: f32| {
+        if drop > 0.0 {
+            format!("{}", (health / drop).ceil())
+        } else {
+            "-".to_owned()
+        }
+    };
+    for (map, mission) in WEAK_MAPS {
+        let Some((probe, _)) = mission_world(map, mission) else {
+            continue;
+        };
+        let mut classes: Vec<String> = Vec::new();
+        for (vh, v) in probe.sim.alive_vehicles() {
+            let c = probe.classes[v.class as usize].clone();
+            if !parts(&probe, vh, true).is_empty() && !classes.contains(&c) {
+                classes.push(c);
+            }
+        }
+        for class in classes {
+            let key = format!("{} {class}", &map[..3]);
+            if seen.contains(&key) {
+                continue;
+            }
+            seen.push(key);
+            for (label, dists) in [("10m", &[10.0f32, 12.0][..]), ("20m+", &[20.0, 25.0, 30.0])] {
+                let (mut w, m) = mission_world(map, mission).unwrap();
+                for _ in 0..150 {
+                    w.sim.step(&[PadState::default()]);
+                }
+                let Some(vh) = w
+                    .sim
+                    .alive_vehicles()
+                    .find(|(_, v)| w.classes[v.class as usize] == class)
+                    .map(|(h, _)| h)
+                else {
+                    continue;
+                };
+                let side = class.split('_').next().unwrap_or_default();
+                let home = usize::from(m.teams[1].faction == side);
+                let Some(me) = launcher_human(&mut w, &m, (1 - home) as u8) else {
+                    continue;
+                };
+                let launcher = w.sim.weapon_classes[w.sim.unit(me).unwrap().weapon_class]
+                    .name
+                    .clone();
+                w.sim.vehicle_mut(vh).unwrap().team = Some(home as u8);
+                let health = w.sim.vehicle(vh).unwrap().health.max;
+                let range = |w: &World, (from, dir): (Vec3, Vec3)| {
+                    w.sim
+                        .collision
+                        .ray_with(from, dir, 300.0, Layers::ORDNANCE, HullFilter::Only(vh))
+                        .map_or(0.0, |r| r.t)
+                };
+                let plain = parts(&w, vh, false);
+                let body = stand_in_line(&mut w, me, vh, &plain, false, dists).map(|l| {
+                    let r = range(&w, l);
+                    let d = lay_rocket_as(&mut w, me, vh, l, true);
+                    heal(&mut w, vh);
+                    (r, d)
+                });
+                // The first line whose round really strikes the part (a
+                // wavering torpedo can leave the line): the human's drop
+                // (the class's factor) over the bot's (plain).
+                let weak = parts(&w, vh, true);
+                let mut spot = None;
+                for l in lines_in_line(&mut w, me, vh, &weak, true, dists, 12) {
+                    let r = range(&w, l);
+                    let two = lay_rocket_as(&mut w, me, vh, l, true);
+                    heal(&mut w, vh);
+                    let one = lay_rocket_as(&mut w, me, vh, l, false);
+                    heal(&mut w, vh);
+                    if two > one {
+                        spot = Some((r, two, one));
+                        break;
+                    }
+                }
+                let body_cols = body.map_or("- | - | -".to_owned(), |(r, d)| {
+                    format!("{r:.0} m | {d:.0} | {}", hits(health, d))
+                });
+                let f = w
+                    .sim
+                    .ground_weak_spot_factor(w.sim.vehicle(vh).unwrap().class);
+                let spot_cols = spot.map_or("- | - | - | - | - | -".to_owned(), |(r, two, one)| {
+                    let d = (two - one) / (f - 1.0);
+                    format!(
+                        "{r:.0} m | x{f} | {d:.0} | {:.0} | {two:.0} | {}",
+                        (one - d).max(0.0),
+                        hits(health, two),
+                    )
+                });
+                eprintln!(
+                    "KILLS | {} | {map} | {class} | {launcher} | {health:.0} | {label} | \
+                     {body_cols} | {spot_cols}",
+                    &map[..3]
+                );
+            }
+        }
+    }
+    eprintln!("KILLS columns: game | map | class | launcher | health | band | body range | body drop | body hits | weak range | factor | direct d | blast | part drop | part hits");
+}
+
 /// The survey behind the note's table (`analysis/re-ordnance-kinds.md`
-/// 5.1): every class with a weak part, 24 directions at 15 m and 30 m.
+/// 5.1): every class with a weak part, 24 directions at 15 m and 30 m. Its
+/// centre column (the part stands' rockets turned to the hull centre, as
+/// BF2's lock steers) shows how often BF2's centre lock met a weak prim.
 /// Run by name with `--ignored --nocapture`.
 #[test]
 #[ignore = "a survey that prints; run by name"]
 fn weak_part_lock_survey() {
     let mut seen: Vec<String> = Vec::new();
-    for (map, mission) in [
-        ("bf2_geo1", "bf2_geo1_con"),
-        ("bf2_hot1", "bf2_hot1_con"),
-        ("bf2_nab2", "bf2_nab2_con_cw"),
-        ("bf2_kas2", "bf2_kas2_con_cw"),
-        ("bf2_kas2", "bf2_kas2_con"),
-        ("bf2_fel1", "bf2_fel1_con_cw"),
-        ("bf2_myg1", "bf2_myg1_con_cw"),
-        ("bf2_uta1", "bf2_uta1_con_cw"),
-        ("bf2_end1", "bf2_end1_con"),
-        ("bf1_geo1", "bf1_geo1_con"),
-        ("bf1_hot1", "bf1_hot1_con"),
-        ("bf1_nab1", "bf1_nab1_con_cw"),
-        ("bf1_kas1", "bf1_kas1_con_cw"),
-        ("bf1_kas1", "bf1_kas1_con"),
-        ("bf1_kas2", "bf1_kas2_con_cw"),
-        ("bf1_rhn1", "bf1_rhn1_con"),
-        ("bf1_rhn2", "bf1_rhn2_con_cw"),
-        ("bf1_yav1", "bf1_yav1_con"),
-        ("bf1_end1", "bf1_end1_con"),
-    ] {
+    for (map, mission) in WEAK_MAPS {
         for (class, _) in survey(map, mission, 24, &[15.0, 30.0]).unwrap_or_default() {
             let key = format!("{} {class}", &map[..3]);
             if !seen.contains(&key) {

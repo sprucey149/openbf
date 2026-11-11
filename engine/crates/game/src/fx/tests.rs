@@ -761,3 +761,96 @@ fn emitter_links_draw_their_lightning_and_only_those() {
     fx.ingest_sim(&sim);
     assert!(fx.arcs.is_empty(), "a class with no LightningEffect");
 }
+
+/// A BF1 map draws BF2's four soldier auras (the War Hero's red lightning
+/// among them), and nothing else of BF2's common layer comes with them.
+/// The damage award's aura follows the player and plays its looping
+/// crackle; both end with the cheat.
+#[test]
+fn a_bf1_library_carries_the_buff_auras_and_their_loops() {
+    let Some(lib) = bf1_common() else { return };
+    if !crate::assets::baked_root()
+        .join("common_bf2/effects.ron")
+        .exists()
+    {
+        eprintln!("no baked common_bf2/effects.ron: skipped");
+        return;
+    }
+    for hash in abilities::BUFF_EFFECTS {
+        assert!(lib.effects.contains_key(&hash), "{hash:08x}");
+    }
+    assert!(lib.get("com_sfx_buff_offense").is_none(), "auras only");
+    // BF2's files come after every BF1 directory: a BF1 name still wins.
+    let bf2 = crate::assets::baked_root().join("common_bf2");
+    assert_eq!(lib.texture_dirs.last(), Some(&bf2.join("textures")));
+    assert_eq!(lib.model_dirs.last(), Some(&bf2.join("models")));
+    assert_eq!(
+        lib.texture_dirs
+            .iter()
+            .filter(|d| d.starts_with(&bf2))
+            .count(),
+        1
+    );
+
+    let mut fx = Fx::with_library(lib);
+    let mut sim = Sim::empty(3);
+    let p = sim
+        .spawn(&core::unit::UnitSpec::player(0, Vec3::ZERO))
+        .unwrap();
+    sim.cheats.damage_award = true;
+    sim.step(&[core::sim::PadState::default()]);
+    fx.ingest_sim(&sim);
+    assert_eq!(
+        fx.buff_loops(&sim),
+        [(
+            p,
+            0,
+            "buff_rage_effect".to_owned(),
+            sim.unit(p).unwrap().soldier.pos
+        )]
+    );
+    sim.cheats.damage_award = false;
+    sim.step(&[core::sim::PadState::default()]);
+    fx.ingest_sim(&sim);
+    assert!(fx.buff_loops(&sim).is_empty(), "gone with the medal");
+}
+
+/// An ability's cast queues its activation effect's own sound
+/// (`com_sfx_buff_offense` carries `buff_rage_fire`).
+#[test]
+fn an_ability_cast_queues_its_effect_sound() {
+    let dir = crate::assets::baked_root().join("common_bf2");
+    if !dir.join("effects.ron").exists() {
+        eprintln!("no baked common_bf2/effects.ron: skipped");
+        return;
+    }
+    let lib = Library::load(&crate::assets::baked_root(), &dir, "bf2", &[]);
+    let mut fx = Fx::with_library(lib);
+    let mut sim = Sim::empty(3);
+    let p = sim
+        .spawn(&core::unit::UnitSpec::player(0, Vec3::ZERO))
+        .unwrap();
+    let class = sim.add_weapon_class(core::weapon::WeaponClass {
+        ability: Some(core::weapon::Ability {
+            radius: 10.0,
+            friends: true,
+            enemies: false,
+            self_on_hit: true,
+            offense: (15.0, 1.5),
+            defense: (0.0, 1.0),
+            regeneration: (0.0, 0.0),
+            poison: (0.0, 0.0),
+            activation_effect: Some("com_sfx_buff_offense".into()),
+        }),
+        ..core::weapon::WeaponClass::bf1_rifle()
+    });
+    let pos = sim.unit(p).unwrap().soldier.pos;
+    sim.events = vec![core::sim::Event::Ability {
+        unit: p,
+        weapon_class: class as u32,
+        pos,
+        charge: 1.0,
+    }];
+    fx.ingest_sim(&sim);
+    assert_eq!(fx.take_sounds(), [("buff_rage_fire".to_owned(), pos)]);
+}

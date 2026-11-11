@@ -63,6 +63,16 @@ pub fn focuses(d: Difficulty) -> bool {
     matches!(d, Difficulty::Hard | Difficulty::Elite)
 }
 
+/// Does unit `u` focus on the humans whose tokens it holds: its team's
+/// tier, or a proxy's frozen rule (`ai::proxy::frozen_focuses`)?
+pub(crate) fn focuses_as(sim: &Sim, u: &crate::unit::Unit) -> bool {
+    let d = sim.difficulty_of(u.team);
+    match u.proxy_human {
+        Some(_) => super::proxy::frozen_focuses(d),
+        None => focuses(d),
+    }
+}
+
 /// When a living human was first seen alive while focus was on (his spawn:
 /// a respawn is a new handle).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -206,7 +216,7 @@ pub fn remembers(sim: &Sim, bot: UnitHandle, human: UnitHandle) -> bool {
 /// for a bot on a post's job or in a seat.
 pub fn pick(sim: &Sim, me: UnitHandle, st: &crate::ai::AiState) -> Option<UnitHandle> {
     let u = sim.unit(me)?;
-    if u.mount.is_some() || !focuses(sim.difficulty_of(u.team)) || on_post(sim, me, u) {
+    if u.mount.is_some() || !focuses_as(sim, u) || on_post(sim, me, u) {
         return None;
     }
     let eye = u.muzzle();
@@ -247,7 +257,7 @@ pub fn fellows(sim: &Sim, me: UnitHandle, human: UnitHandle, at: Vec3) -> Vec<gl
     let Some(u) = sim.unit(me) else {
         return Vec::new();
     };
-    if !focuses(sim.difficulty_of(u.team)) || !super::tokn::holds(sim, me, human) {
+    if !focuses_as(sim, u) || !super::tokn::holds(sim, me, human) {
         return Vec::new();
     }
     sim.tokens

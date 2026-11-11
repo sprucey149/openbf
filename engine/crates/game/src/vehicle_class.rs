@@ -1177,6 +1177,67 @@ pub fn slice_time(db: &ClassDb, class: &str) -> f32 {
         .map_or(twin, |t| t.max(0.0))
 }
 
+/// `[ours]` A BF1 flyer's `PilotSkillRepairScale` is its BF2 twin's (the
+/// twins of [`BF1_SLICE_TIMES`]): BF1 authors 0.03 to 0.04 on its fighters,
+/// BF2 0.02 on every fighter and 0.01 on the gunship. Every ground vehicle
+/// of both games authors none and takes the 0.005 default. measure: a
+/// Technician in a damaged BF1 X-wing against a BF2 snowspeeder, in play.
+pub const BF1_REPAIR_SCALES: &[(&str, f32)] = &[
+    ("all_fly_xwing", 0.02),
+    ("all_fly_ywing", 0.02),
+    ("all_fly_snowspeeder", 0.02),
+    ("imp_fly_tiefighter", 0.02),
+    ("imp_fly_tiebomber", 0.02),
+    ("cis_fly_droidfighter", 0.02),
+    ("cis_fly_geofighter", 0.02),
+    ("rep_fly_jedifighter", 0.02),
+    ("rep_fly_gunship", 0.01),
+];
+
+/// The share of its maximum health class `class` repairs a second while a
+/// Technician (BF2 medal 3) drives it: `PilotSkillRepairScale` over the
+/// class chain, BF2's constructor default 0.005 without one (B2
+/// `FUN_00269410` reads class+0x2fc), and a BF1 flyer its BF2 twin's
+/// ([`BF1_REPAIR_SCALES`]).
+pub fn repair_scale(db: &ClassDb, class: &str) -> f32 {
+    let default = core::sim::DEFAULT_REPAIR_SCALE;
+    if !db.is_bf2() {
+        return BF1_REPAIR_SCALES
+            .iter()
+            .find(|(bf1, _)| bf1.eq_ignore_ascii_case(class))
+            .map_or(default, |row| row.1);
+    }
+    prop_float(db, class, "PilotSkillRepairScale").map_or(default, |s| s.max(0.0))
+}
+
+/// `[ours]` The vehicle classes whose weak spot deals x4 on a ground map
+/// (`core::sim::HEAVY_WALKER_WEAK_SPOT_FACTOR`): the AT-TE, the AT-AT and
+/// the spider walker, the same names in both games, and BF2's Kashyyyk
+/// spider (a class of its own, not a child of the spider). A class whose
+/// BASE chain reaches one (a map's own subclass; none is baked today) is one
+/// too. Every other class's weak spot deals x2. The maintainer 2026-11-10:
+/// "ATTE, atat, and spider walker: make weak spot hits x4. Everything else
+/// x2 and that seems good." measure: maintainer playtest of rockets to kill
+/// (`analysis/re-ordnance-kinds.md` §5.1).
+pub const HEAVY_WALKERS: &[&str] = &[
+    "rep_walk_atte",
+    "imp_walk_atat",
+    "cis_walk_spider",
+    "cis_walk_spiderkas",
+];
+
+/// The factor a strike on a weak part of `class` deals on a ground map
+/// (`core::sim::Sim::weak_spot_factor`): x4 when `class` or its BASE chain
+/// is one of [`HEAVY_WALKERS`], else x2.
+pub fn weak_spot_factor(db: &ClassDb, class: &str) -> f32 {
+    let heavy = |name: &str| HEAVY_WALKERS.iter().any(|w| w.eq_ignore_ascii_case(name));
+    if heavy(class) || db.chain(class).iter().any(|d| heavy(&d.name)) {
+        core::sim::HEAVY_WALKER_WEAK_SPOT_FACTOR
+    } else {
+        core::sim::GROUND_WEAK_SPOT_FACTOR
+    }
+}
+
 /// The hull pool's `HealthType`: the ODF's over the BASE chain, else the
 /// vehicle default (B1 FUN_00221e48 B1:136172-136195) — BF1's tauntaun is
 /// "animal". A building turret defaults to `building`: its class ctor B1
