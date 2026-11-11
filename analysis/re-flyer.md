@@ -40,6 +40,18 @@ used origin membership for both. The box calculation in `FUN_005ad8e0`
 radius. See `re-space-assault.md` for the rejected touchdown workaround and
 the unchecked original-game comparison.
 
+### Flyer form animation investigation
+
+BF2 `FUN_002120e8` (125355–125389) looks up the flyer's `takeoff` and `fins`
+clips in its named animation bank. `FUN_00201300` (114590–114640)
+samples `takeoff` at its lift fraction times the clip's last frame, with a
+render-frame adjustment during the transition. The local BF2 side banks
+contain a 121-frame `takeoff` clip for `all_fly_xwing` and a 72-frame clip
+for `cis_fly_droidfighter`; both are currently omitted by the vehicle bake,
+which only bakes walker skins. A correct fix needs the flyer skeleton and
+clip baked and the model posed through landed, takeoff, flying and landing,
+including moving muzzle and exhaust attachments. This remains unimplemented.
+
 **Installed for space only (2026-11-01).** The sim implements these rules against
 `Sim::landing_regions`, filled from the mission's `landing_regions`, which
 `scripts/gen_missions.py` reads from `AddLandingRegion`. Only the space scripts make

@@ -74,39 +74,89 @@ impl Fx {
 
     pub(super) fn flyer_spray(&mut self, sim: &Sim) {
         self.flyer_phases.resize(sim.vehicles.len(), None);
+        self.flyer_spray_depth.resize(sim.vehicles.len(), None);
         let mut hits = Vec::new();
         for (index, vehicle) in sim.vehicles.iter().enumerate() {
             let state = (vehicle.gen, vehicle.flyer.phase);
             let previous = self.flyer_phases[index].replace(state);
             let transition = previous.map(|(gen, phase)| (gen, phase, vehicle.flyer.phase));
-            let spray = matches!(transition,
-                Some((gen, FlightPhase::Landed, FlightPhase::Takeoff))
-                | Some((gen, FlightPhase::Landing, FlightPhase::Landed)) if gen == vehicle.gen
-            );
-            if !vehicle.alive || vehicle.kind != VehicleKind::Flyer || !spray {
+            let takeoff = matches!(transition, Some((gen, FlightPhase::Landed, FlightPhase::Takeoff)) if gen == vehicle.gen);
+            let landing = vehicle.flyer.phase == FlightPhase::Landing
+                || matches!(transition, Some((gen, FlightPhase::Landing, FlightPhase::Landed)) if gen == vehicle.gen);
+            if !vehicle.alive
+                || vehicle.kind != VehicleKind::Flyer
+                || (vehicle.flyer.phase != FlightPhase::Takeoff && !landing)
+            {
+                self.flyer_spray_depth[index] = None;
                 continue;
             }
-            let origin = vehicle.pos + Vec3::Y;
-            let body = sim
-                .collision
-                .ray_with(
-                    origin,
-                    Vec3::NEG_Y,
-                    1024.0,
-                    Layers::ORDNANCE,
-                    HullFilter::except(Some(VehicleHandle {
-                        index: index as u32,
-                        gen: vehicle.gen,
-                    })),
-                )
-                .map(|hit| hit.t);
-            let terrain = sim.terrain_ray(origin, Vec3::NEG_Y, 1024.0, 0.5);
-            let distance = match (body, terrain) {
-                (Some(a), Some(b)) => Some(a.min(b)),
-                (a, b) => a.or(b),
+            let ground = |origin, layers| {
+                let body = sim
+                    .collision
+                    .ray_with(
+                        origin,
+                        Vec3::NEG_Y,
+                        1024.0,
+                        layers,
+                        HullFilter::except(Some(VehicleHandle {
+                            index: index as u32,
+                            gen: vehicle.gen,
+                        })),
+                    )
+                    .map(|hit| hit.t);
+                let terrain = sim.terrain_ray(origin, Vec3::NEG_Y, 1024.0, 0.5);
+                let distance = match (body, terrain) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+                distance.map(|d| origin - Vec3::Y * d)
             };
-            if let Some(distance) = distance {
-                hits.push(origin - Vec3::Y * distance);
+            let sphere = sim
+                .blast_setup
+                .get(vehicle.class as usize)
+                .and_then(Option::as_ref);
+            let params = sim
+                .flyer_params
+                .get(vehicle.class as usize)
+                .and_then(Option::as_ref);
+            let bf2_landing = landing && params.is_some_and(|p| p.bf2);
+            let ray_origin = if bf2_landing {
+                vehicle.pos + vehicle.rot * sphere.map_or(Vec3::ZERO, |s| s.sphere_centre)
+            } else {
+                vehicle.pos + Vec3::Y
+            };
+            if let Some(hit) = ground(
+                ray_origin,
+                if bf2_landing {
+                    Layers::VEHICLE
+                } else {
+                    Layers::ORDNANCE
+                },
+            ) {
+                let clearance = vehicle.pos.y - hit.y;
+                let threshold = params.map_or(0.0, |p| p.landed_height)
+                    + sphere.map_or(0.0, |s| s.sphere_radius);
+                let previous_depth =
+                    self.flyer_spray_depth[index].replace((vehicle.gen, clearance));
+                let was_approaching = matches!(previous,
+                    Some((gen, FlightPhase::Takeoff | FlightPhase::Landing)) if gen == vehicle.gen
+                );
+                let crossed = if params.is_some_and(|p| p.bf2) {
+                    landing
+                        && clearance <= threshold
+                        && (!was_approaching
+                            || previous_depth
+                                .is_none_or(|(gen, depth)| gen != vehicle.gen || depth > threshold))
+                } else {
+                    matches!(transition, Some((gen, FlightPhase::Landing, FlightPhase::Landed)) if gen == vehicle.gen)
+                };
+                if takeoff || crossed {
+                    if let Some(effect_hit) = ground(vehicle.pos + Vec3::Y, Layers::ORDNANCE) {
+                        hits.push(effect_hit);
+                    }
+                }
+            } else {
+                self.flyer_spray_depth[index] = None;
             }
         }
         for hit in hits {
@@ -193,9 +243,23 @@ mod tests {
         sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Takeoff;
         fx.flyer_spray(&sim);
         assert_eq!(fx.live.len(), 1);
-        sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Landing;
+        sim.flyer_params = vec![Some(core::vehicle::flyer::FlyerParams {
+            landed_height: 1.0,
+            ..core::vehicle::flyer::FlyerParams::bf2()
+        })];
+        sim.blast_setup = vec![Some(core::vehicle::BlastSetup {
+            explosion: None,
+            sphere_centre: Vec3::ZERO,
+            sphere_radius: 2.0,
+        })];
+        let vehicle = sim.vehicle_mut(handle).unwrap();
+        vehicle.flyer.phase = FlightPhase::Landing;
+        vehicle.pos.y = 4.0;
         fx.flyer_spray(&sim);
         assert_eq!(fx.live.len(), 1);
+        sim.vehicle_mut(handle).unwrap().pos.y = 2.9;
+        fx.flyer_spray(&sim);
+        assert_eq!(fx.live.len(), 2);
         sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Landed;
         fx.flyer_spray(&sim);
         assert_eq!(fx.live.len(), 2);

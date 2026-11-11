@@ -735,6 +735,7 @@ fn splash_at(pos: Vec3, level: f32) -> Vec3 {
 pub struct Fx {
     vehicle_health: Vec<Option<(u32, f32)>>,
     flyer_phases: Vec<Option<(u32, core::vehicle::flyer::FlightPhase)>>,
+    flyer_spray_depth: Vec<Option<(u32, f32)>>,
     space_dust: Option<space_dust::SpaceDust>,
     puffs: Vec<Puff>,
     library: Option<Library>,
