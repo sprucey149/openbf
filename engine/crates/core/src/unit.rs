@@ -251,6 +251,16 @@ pub struct HeldWeapon {
     pub state: WeaponState,
 }
 
+/// The flyer a soldier stands on, as the carry last saw it (BF2 s+0x480 with
+/// the inverse pose at s+0x4f0 and the velocity at s+0x490,
+/// `analysis/re-flyer-deck.md`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Deck {
+    pub vehicle: crate::vehicle::VehicleHandle,
+    pub pose: glam::Mat4,
+    pub vel: Vec3,
+}
+
 #[derive(Clone, Debug)]
 pub struct Unit {
     pub choked: Option<crate::hero_weapon::Choked>,
@@ -344,6 +354,8 @@ pub struct Unit {
     /// — the push itself is already in `soldier.pos` — so no unit's motion,
     /// the player's least of all, depends on it.
     pub wall_push: Vec3,
+    /// The flyer he stands on (`crate::sim` deck carry), `None` off one.
+    pub deck: Option<Deck>,
     /// Tick this unit last FIRED, `u64::MAX` for never. Perception's hearing
     /// reads it (`crate::perception::scan`): a shot inside `HEAR_RADIUS`
     /// since the listener's last think puts the shooter in its memory with no
@@ -667,6 +679,14 @@ impl Unit {
         }
         for v in [self.wall_push.x, self.wall_push.y, self.wall_push.z] {
             eat(&v.to_bits().to_le_bytes());
+        }
+        if let Some(d) = self.deck {
+            eat(b"DECK");
+            eat(&d.vehicle.index.to_le_bytes());
+            eat(&d.vehicle.gen.to_le_bytes());
+            for v in d.pose.to_cols_array().into_iter().chain(d.vel.to_array()) {
+                eat(&v.to_bits().to_le_bytes());
+            }
         }
         if self.body {
             eat(&[1, self.drop_due as u8]);
@@ -1361,6 +1381,7 @@ impl UnitSpec {
             spec: self.clone(),
             capture_posts: self.capture_posts,
             wall_push: Vec3::ZERO,
+            deck: None,
             body: false,
             drop_due: false,
             chunk_mark: false,

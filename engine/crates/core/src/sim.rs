@@ -44,6 +44,7 @@ mod cloaks;
 mod combat;
 pub mod ctf;
 mod damage_regions;
+mod deck;
 pub mod deathmatch;
 mod doors;
 mod droid_death;
