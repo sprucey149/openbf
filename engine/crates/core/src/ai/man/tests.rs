@@ -26,6 +26,7 @@ fn gun_setup(weapon: usize, yaw: Option<[f32; 2]>) -> GunSetup {
             class: weapon,
             infinite: true,
             reserve_clips: 0,
+            fire_points: Vec::new(),
         }],
         fire_point: Vec3::new(0.0, 3.0, 2.0),
         pivot: Vec3::new(0.0, 3.0, 0.0),

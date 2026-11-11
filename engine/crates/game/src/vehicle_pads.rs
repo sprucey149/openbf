@@ -901,7 +901,10 @@ pub fn install_with_objective(
         .enumerate()
         .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
     {
-        if db.engine_base(&b.classes[class]).and_then(vehicle_kind) != Some(VehicleKind::Walker) {
+        if !matches!(
+            db.engine_base(&b.classes[class]).and_then(vehicle_kind),
+            Some(VehicleKind::Walker | VehicleKind::Flyer)
+        ) {
             continue;
         }
         for w in setup.guns.iter().flatten().flat_map(|g| &g.weapons) {
@@ -1230,11 +1233,17 @@ pub fn seat_gun(
     s: &vehicle_class::SeatSpec,
     hp: &[ManifestHardpoint],
 ) -> Option<GunSetup> {
+    let node = |n: &str| {
+        hp.iter()
+            .find(|h| h.name.eq_ignore_ascii_case(n.trim()))
+            .map(|h| Vec3::from(h.pos))
+    };
     let weapons: Vec<GunWeapon> = s
         .weapons
         .iter()
         .take(MAX_SEAT_WEAPONS)
-        .filter_map(|w| {
+        .enumerate()
+        .filter_map(|(weapon, w)| {
             let class = match sim
                 .weapon_classes
                 .iter()
@@ -1253,27 +1262,30 @@ pub fn seat_gun(
                 class,
                 infinite: w.ammo < 1,
                 reserve_clips: (w.ammo - 1).max(0) as u32,
+                fire_points: s
+                    .aimers
+                    .iter()
+                    .filter(|a| a.weapon == weapon)
+                    .flat_map(|a| {
+                        if a.fire_points.is_empty() {
+                            node(&a.node).into_iter().collect::<Vec<_>>()
+                        } else {
+                            a.fire_points.iter().filter_map(|n| node(n)).collect()
+                        }
+                    })
+                    .collect(),
             })
         })
         .collect();
     if weapons.is_empty() {
         return None;
     }
-    let node = |n: &Option<String>| {
-        n.as_deref().and_then(|n| {
-            hp.iter()
-                .find(|h| h.name.eq_ignore_ascii_case(n.trim()))
-                .map(|h| Vec3::from(h.pos))
-        })
-    };
-    let turret = node(&s.turret_node);
-    let fire_point = node(&s.fire_point)
-        .or_else(|| {
-            s.fire_point
-                .is_none()
-                .then(|| node(&Some("hp_fire".into())))
-                .flatten()
-        })
+    let turret = s.turret_node.as_deref().and_then(node);
+    let fire_point = s
+        .fire_point
+        .as_deref()
+        .and_then(node)
+        .or_else(|| s.fire_point.is_none().then(|| node("hp_fire")).flatten())
         .or(turret)
         .unwrap_or(Vec3::ZERO);
     let mut aimer = aimer(s.yaw_limits, s.pitch_limits, s.yaw_rate, s.pitch_rate);

@@ -94,7 +94,7 @@ pub fn loops(walk: &WalkSim) -> Vec<(UnitHandle, usize, &str, glam::Vec3)> {
             let Some(v) = walk
                 .sim
                 .vehicle(m.vehicle)
-                .filter(|v| v.kind == VehicleKind::Walker)
+                .filter(|v| matches!(v.kind, VehicleKind::Walker | VehicleKind::Flyer))
             else {
                 return Vec::new();
             };

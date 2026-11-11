@@ -15,6 +15,46 @@ use glam::Vec3;
 const DEG: f32 = std::f32::consts::PI / 180.0;
 
 #[test]
+fn flyer_salvo_uses_each_authored_muzzle() {
+    let (mut sim, pilot, h) = world(true);
+    let points = vec![
+        Vec3::new(0.0, 2.0, 3.0),
+        Vec3::new(2.0, -1.0, 3.0),
+        Vec3::new(-2.0, -1.0, 3.0),
+    ];
+    sim.seat_setup[0].as_mut().unwrap().guns[0]
+        .as_mut()
+        .unwrap()
+        .weapons[0]
+        .fire_points = points.clone();
+    sim.weapon_classes[0].shots_per_salvo = 3;
+    sim.weapon_classes[0].salvo_count = 1;
+    let vehicle = sim.vehicle_mut(h).unwrap();
+    vehicle.kind = VehicleKind::Flyer;
+    vehicle.flyer.phase = crate::vehicle::flyer::FlightPhase::Flying;
+    assert!(sim.seat_unit(pilot, h, 0));
+    sim.seat_gun(pilot.index as usize, &pad(buttons::FIRE));
+    let origins: Vec<_> = sim
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Shot { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .collect();
+    let v = sim.vehicle(h).unwrap();
+    let expected: Vec<_> = points.iter().map(|p| v.pos + v.rot * *p).collect();
+    assert_eq!(origins, expected);
+    let hash = sim.hash();
+    sim.vehicle_mut(h).unwrap().guns[0]
+        .as_mut()
+        .unwrap()
+        .weapons[0]
+        .shots_fired += 1;
+    assert_ne!(sim.hash(), hash);
+}
+
+#[test]
 fn flyer_pilot_looks_along_untilted_body_without_accumulating_stick_or_mouse_pitch() {
     let (mut sim, pilot, h) = world(true);
     let v = sim.vehicle_mut(h).unwrap();
@@ -83,6 +123,7 @@ fn gun(fire: [f32; 3], pivot: [f32; 3], yaw: [f32; 2], pilot: bool) -> GunSetup 
             class: 0,
             infinite: true,
             reserve_clips: 0,
+            fire_points: Vec::new(),
         }],
         fire_point: Vec3::from(fire),
         pivot: Vec3::from(pivot),

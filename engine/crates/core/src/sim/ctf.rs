@@ -530,6 +530,7 @@ mod tests {
                     class: 0,
                     infinite: true,
                     reserve_clips: 0,
+                    fire_points: Vec::new(),
                 }],
                 fire_point: Vec3::ZERO,
                 pivot: Vec3::ZERO,

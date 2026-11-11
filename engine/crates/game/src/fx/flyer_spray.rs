@@ -11,11 +11,12 @@ impl Fx {
         for (index, vehicle) in sim.vehicles.iter().enumerate() {
             let state = (vehicle.gen, vehicle.flyer.phase);
             let previous = self.flyer_phases[index].replace(state);
-            if !vehicle.alive
-                || vehicle.kind != VehicleKind::Flyer
-                || previous != Some((vehicle.gen, FlightPhase::Landed))
-                || vehicle.flyer.phase != FlightPhase::Takeoff
-            {
+            let transition = previous.map(|(gen, phase)| (gen, phase, vehicle.flyer.phase));
+            let spray = matches!(transition,
+                Some((gen, FlightPhase::Landed, FlightPhase::Takeoff))
+                | Some((gen, FlightPhase::Landing, FlightPhase::Landed)) if gen == vehicle.gen
+            );
+            if !vehicle.alive || vehicle.kind != VehicleKind::Flyer || !spray {
                 continue;
             }
             let origin = vehicle.pos + Vec3::Y;
@@ -87,9 +88,18 @@ mod tests {
         sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Takeoff;
         fx.flyer_spray(&sim);
         assert_eq!(fx.live.len(), 1);
+        sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Landing;
+        fx.flyer_spray(&sim);
+        assert_eq!(fx.live.len(), 1);
+        sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Landed;
+        fx.flyer_spray(&sim);
+        assert_eq!(fx.live.len(), 2);
+        assert_eq!(fx.live[1].name(), Some("FlyerSpray"));
+        fx.flyer_spray(&sim);
+        assert_eq!(fx.live.len(), 2);
         assert_eq!(fx.live[0].name(), Some("FlyerSpray"));
         assert!(fx.live[0].frame.pos.y.abs() < 0.001);
         fx.flyer_spray(&sim);
-        assert_eq!(fx.live.len(), 1);
+        assert_eq!(fx.live.len(), 2);
     }
 }

@@ -462,6 +462,18 @@ fn every_space_secondary_loadout_fires_and_hits() {
                 }
                 let gun = seats.guns[0].as_ref().unwrap();
                 assert_eq!(gun.weapons.len(), 2, "{map} {name}: primary and secondary");
+                if name == "cis_fly_tridroidfighter" {
+                    let points = &gun.weapons[1].fire_points;
+                    assert_eq!(points.len(), 3);
+                    assert!(points[0].distance(points[1]) > 2.0);
+                    assert!(points[1].distance(points[2]) > 3.0);
+                }
+                if name == "all_fly_awing" {
+                    for weapon in &gun.weapons {
+                        assert_eq!(weapon.fire_points.len(), 2);
+                        assert!(weapon.fire_points[0].distance(weapon.fire_points[1]) > 5.0);
+                    }
+                }
                 let wc = gun.weapons[1].class;
                 let w = &setup.weapon_classes[wc];
                 check_authored(&db, w);

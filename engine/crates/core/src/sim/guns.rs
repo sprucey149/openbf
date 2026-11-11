@@ -501,7 +501,18 @@ impl Sim {
                 weapon_class: w.class,
                 is_player,
             };
-            for spec in &shots {
+            let first_shot = st.weapons[k].shots_fired.saturating_sub(shots.len() as u64);
+            for (shot_index, spec) in shots.iter().enumerate() {
+                let origin = if g.pilot && self.vehicles[vi].kind == VehicleKind::Flyer {
+                    w.fire_points
+                        .get(
+                            ((first_shot + shot_index as u64) % w.fire_points.len().max(1) as u64)
+                                as usize,
+                        )
+                        .map_or(origin, |point| pos + rot * *point)
+                } else {
+                    origin
+                };
                 // The round's speed and life at its charge (the Hoth dish
                 // turret's charge points, re-weapon-charge §4).
                 let blend = self.weapon_classes[w.class].ordnance.charged(spec.charge);
