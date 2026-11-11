@@ -90,6 +90,7 @@ impl Fx {
         if restore {
             crate::render_blend::blend_in_looking(walk, look);
         }
+        self.follow_flyer_exhaust(walk);
         if let Some(vis) = vis {
             vis.update(walk, dt);
             let (muzzles, jets, burns) = (

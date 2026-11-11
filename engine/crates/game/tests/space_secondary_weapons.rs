@@ -467,6 +467,12 @@ fn every_space_secondary_loadout_fires_and_hits() {
                     assert_eq!(points.len(), 3);
                     assert!(points[0].distance(points[1]) > 2.0);
                     assert!(points[1].distance(points[2]) > 3.0);
+                    let exhaust = &build.flyer_exhaust[class];
+                    assert_eq!(exhaust.len(), 3);
+                    assert!(exhaust
+                        .iter()
+                        .all(|e| e.effect == "com_sfx_exhaust_jedistarfighter"));
+                    assert!(exhaust[0].local.w_axis.distance(exhaust[1].local.w_axis) > 0.5);
                 }
                 if name == "all_fly_awing" {
                     for weapon in &gun.weapons {

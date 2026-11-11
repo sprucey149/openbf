@@ -167,6 +167,7 @@ pub struct PadBuild {
     /// `classes`; filled by [`install`].
     pub seats: Vec<Vec<vehicle_class::SeatSpec>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
+    pub flyer_exhaust: Vec<Vec<FlyerExhaust>>,
     pub weapon_hud: Vec<Vec<Vec<crate::walk::WeaponHud>>>,
     /// Each class's `EngineSound` and `TurnOffTime` (card VSND), parallel
     /// to `classes`; filled by [`install`].
@@ -186,6 +187,53 @@ pub struct PadBuild {
     /// The building turrets, in manifest order (card VTURB): spawned by
     /// [`install`] before any pad vehicle.
     pub turrets: Vec<TurretDef>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FlyerExhaust {
+    pub effect: String,
+    pub local: glam::Mat4,
+}
+
+fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<FlyerExhaust> {
+    let mut effects: Vec<(String, Option<String>, Vec3)> = Vec::new();
+    for def in db.chain(class).into_iter().rev() {
+        for (key, value) in &def.props {
+            if *key == 143972182 && effects.len() < 8 {
+                effects.push((value.trim().to_owned(), None, Vec3::ZERO));
+            } else if let Some((_, node, offset)) = effects.last_mut() {
+                if *key == 772102128 {
+                    *node = Some(value.trim().to_owned());
+                } else if *key == 880236393 {
+                    let values: Vec<_> = value
+                        .split_whitespace()
+                        .filter_map(|x| x.parse::<f32>().ok())
+                        .collect();
+                    if let [x, y, z] = values.as_slice() {
+                        *offset = Vec3::new(*x, *y, *z);
+                    }
+                }
+            }
+        }
+    }
+    effects
+        .into_iter()
+        .map(|(effect, node, offset)| {
+            let base = node
+                .as_deref()
+                .and_then(|name| nodes.iter().find(|n| n.name.eq_ignore_ascii_case(name)))
+                .map_or(glam::Mat4::IDENTITY, |n| {
+                    crate::viewer::instance_matrix(
+                        n.axes.unwrap_or(glam::Mat3::IDENTITY.to_cols_array_2d()),
+                        n.pos,
+                    )
+                });
+            FlyerExhaust {
+                effect,
+                local: base * glam::Mat4::from_translation(offset),
+            }
+        })
+        .collect()
 }
 
 /// One armed-building instance as a vehicle: its spec (at the instance,
@@ -737,6 +785,22 @@ pub fn install_with_objective(
     }
     sim.blast_setup = setups;
     let damage_nodes = hardpoints_from(m, &sides);
+    b.flyer_exhaust = b
+        .classes
+        .iter()
+        .map(|c| {
+            if db.engine_base(c).and_then(vehicle_kind) != Some(VehicleKind::Flyer) {
+                return Vec::new();
+            }
+            flyer_exhaust(
+                &db,
+                c,
+                damage_nodes
+                    .get(&c.to_ascii_lowercase())
+                    .map_or(&[], Vec::as_slice),
+            )
+        })
+        .collect();
     sim.vehicle_damage_effects =
         b.classes
             .iter()

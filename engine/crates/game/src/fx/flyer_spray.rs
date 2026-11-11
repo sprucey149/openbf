@@ -5,6 +5,73 @@ use core::vehicle::{flyer::FlightPhase, VehicleHandle, VehicleKind};
 use glam::Vec3;
 
 impl Fx {
+    pub(super) fn follow_flyer_exhaust(&mut self, walk: &crate::walk::WalkSim) {
+        let active = |v: &core::vehicle::Vehicle| {
+            v.alive
+                && v.kind == VehicleKind::Flyer
+                && matches!(
+                    v.flyer.phase,
+                    FlightPhase::Takeoff | FlightPhase::Flying | FlightPhase::Landing
+                )
+        };
+        let frame = |v: &core::vehicle::Vehicle, local: glam::Mat4| {
+            let m = glam::Mat4::from_rotation_translation(v.rot, v.pos) * local;
+            Frame {
+                pos: m.w_axis.truncate(),
+                rot: glam::Mat3::from_mat4(m),
+                vel: v.vel,
+            }
+        };
+        for effect in &mut self.live {
+            let Some((handle, slot)) = effect.flyer_exhaust else {
+                continue;
+            };
+            let owner = walk
+                .sim
+                .vehicle(handle)
+                .filter(|v| active(v))
+                .and_then(|v| {
+                    walk.flyer_exhaust
+                        .get(v.class as usize)?
+                        .get(slot)
+                        .map(|e| (v, e))
+                });
+            if let Some((vehicle, exhaust)) = owner {
+                effect.frame = frame(vehicle, exhaust.local);
+            } else {
+                effect.stop();
+                effect.flyer_exhaust = None;
+            }
+        }
+        for (index, vehicle) in walk
+            .sim
+            .vehicles
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| active(v))
+        {
+            let handle = VehicleHandle {
+                index: index as u32,
+                gen: vehicle.gen,
+            };
+            let Some(exhausts) = walk.flyer_exhaust.get(vehicle.class as usize) else {
+                continue;
+            };
+            for (slot, exhaust) in exhausts.iter().enumerate() {
+                if self
+                    .live
+                    .iter()
+                    .any(|e| e.flyer_exhaust == Some((handle, slot)))
+                {
+                    continue;
+                }
+                if self.spawn(&exhaust.effect, frame(vehicle, exhaust.local)) {
+                    self.live.last_mut().unwrap().flyer_exhaust = Some((handle, slot));
+                }
+            }
+        }
+    }
+
     pub(super) fn flyer_spray(&mut self, sim: &Sim) {
         self.flyer_phases.resize(sim.vehicles.len(), None);
         let mut hits = Vec::new();
@@ -54,6 +121,44 @@ mod tests {
     use core::collision::{Body, CollisionWorld, Shape};
     use core::vehicle::VehicleSpec;
     use glam::Mat4;
+
+    #[test]
+    fn flyer_exhaust_follows_the_craft_and_stops_on_landing() {
+        let root = crate::assets::baked_root();
+        let mut fx = Fx::load(&root, &root.join("bf2_spa6"), "bf2", &["cis"]);
+        let mut walk = crate::walk::WalkSim::new(42, Vec3::ZERO, None);
+        walk.flyer_exhaust = vec![vec![crate::vehicle_pads::FlyerExhaust {
+            effect: "com_sfx_exhaust_jedistarfighter".into(),
+            local: Mat4::from_translation(Vec3::new(0.0, 1.0, -3.0)),
+        }]];
+        let handle = walk.sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: true,
+            spawn_pad: None,
+            pos: Vec3::new(0.0, 2.0, 0.0),
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![],
+        });
+        fx.follow_flyer_exhaust(&walk);
+        assert!(fx.live.is_empty());
+        walk.sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Flying;
+        fx.follow_flyer_exhaust(&walk);
+        assert_eq!(fx.live.len(), 1);
+        assert_eq!(fx.live[0].flyer_exhaust, Some((handle, 0)));
+        assert_eq!(fx.live[0].frame.pos, Vec3::new(0.0, 3.0, -3.0));
+        walk.sim.vehicle_mut(handle).unwrap().pos.x = 5.0;
+        fx.follow_flyer_exhaust(&walk);
+        assert_eq!(fx.live.len(), 1);
+        assert_eq!(fx.live[0].frame.pos, Vec3::new(5.0, 3.0, -3.0));
+        walk.sim.vehicle_mut(handle).unwrap().flyer.phase = FlightPhase::Landed;
+        fx.follow_flyer_exhaust(&walk);
+        assert_eq!(fx.live[0].flyer_exhaust, None);
+        assert!(fx.live[0].stopped);
+    }
 
     #[test]
     fn takeoff_emits_one_authored_plume_on_the_surface() {

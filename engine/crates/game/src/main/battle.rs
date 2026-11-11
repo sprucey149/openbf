@@ -474,6 +474,7 @@ pub(super) fn make_walk_with_counts(
                 walk.vehicle_seats = p.seats;
                 walk.vehicle_weapon_hud = p.weapon_hud;
                 walk.walker_shot_styles = p.walker_shot_styles;
+                walk.flyer_exhaust = p.flyer_exhaust;
                 walk.load_walker_views(&scene.manifest, scene.dir.parent().unwrap_or(&scene.dir));
                 walk.load_vehicle_tops(
                     &scene.manifest,

@@ -696,6 +696,7 @@ pub struct WalkSim {
     pub vehicle_tops: Vec<Option<f32>>,
     pub walker_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
+    pub flyer_exhaust: Vec<Vec<crate::vehicle_pads::FlyerExhaust>>,
     pub vehicle_weapon_hud: Vec<Vec<Vec<WeaponHud>>>,
     /// Each vehicle class's seats' rider hangs, parallel to `vehicle_seats`
     /// (visual only, card VRIDE): read by `crate::soldier_vis`.
@@ -878,6 +879,7 @@ impl WalkSim {
             walker_rigs: Vec::new(),
             vehicle_weapon_hud: Vec::new(),
             walker_shot_styles: Default::default(),
+            flyer_exhaust: Vec::new(),
             vehicle_riders: Vec::new(),
             vehicle_engines: Vec::new(),
             vehicle_sounds: Vec::new(),

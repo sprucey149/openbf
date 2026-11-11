@@ -407,6 +407,7 @@ pub struct LiveEffect {
     turret: Option<(u64, usize)>,
     station: Option<(usize, usize)>,
     vehicle: Option<(VehicleHandle, usize)>,
+    flyer_exhaust: Option<(VehicleHandle, usize)>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
 }
@@ -452,6 +453,7 @@ impl LiveEffect {
             turret: None,
             station: None,
             vehicle: None,
+            flyer_exhaust: None,
             burn: None,
             float: None,
         };
@@ -1237,6 +1239,7 @@ impl Fx {
     /// Read this tick's sim events into effects.
     pub fn ingest(&mut self, walk: &WalkSim) {
         self.ingest_sim(&walk.sim);
+        self.follow_flyer_exhaust(walk);
         self.soldier_water(walk);
         self.chunks.tick(walk, self.library.as_ref());
         self.follow_jets(&walk.sim, |u| {
