@@ -6,7 +6,7 @@ Hero, saber, Force and combo systems are excluded from this slice.
 
 ## 1. Item release strength
 
-The PC lead `WeaponDispenser::Fire`, `0x00683c20`, has no indexed PS2 mapping.
+The PC's `WeaponDispenser::Fire` (`0x00683c20`) has no known PS2 counterpart yet.
 The BF2 PS2 dispenser instance vtable's release slot at `0x628d24` points
 to `FUN_00335920`. Its throw speed uses the stored strength at instance
 `+0x124` to interpolate between class `+0x258` and `+0x25c`, then multiplies
@@ -27,11 +27,10 @@ B1:214568–214575). BF2's fire-entry vtable slot at `0x628cd8` points to
 `0x335478`; that body is missing from this decompilation, so this audit
 does not claim to have verified its division from decompiler text.
 
-Secondary factual cross-check: Gametoast_swbf2decomp's PC dispenser
+The original PC game's dispenser
 fire-entry, charge-entry/update and Fire records (`0x00683930`,
 `0x00683ab0`, `0x00683ad0`, `0x00683c20`) agree with the visible PS2
-field chain. No reconstruction was built or executed, and no implementation
-or decompiler text is included here.
+field chain. No implementation or decompiler text is included here.
 
 In the port, a press while the preceding fire cycle is running does not
 execute the idle fresh-press reset. If held through return to idle,

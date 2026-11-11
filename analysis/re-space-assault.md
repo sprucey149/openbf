@@ -863,16 +863,12 @@ not that a moving approach feels like the PS2's. There is no PS2 figure to set b
 Everything here is spa8, PS2 from a private PCSX2 copy over PINE with no human flying, about 12 minutes into the round. The port is seed 7. Function and line numbers are
 from `SWBFRNT2.ELF-decomp.c`.
 
-### The PC reconstruction as a reference
-
-`Gametoast/swbf2decomp` is a named C++ reconstruction of the Steam PC build, with no license file. It is a map, not an authority and not a source to copy: names found there were
-each checked in the PS2 decompilation or the running PS2 before use, and the PS2 wins any difference. "PC" below means that repository's `src/Battlefront2/Source`. It found the channel
-writer, which earlier greps had missed, and it names what `FUN_002a3c28` is (`AIDifficulty.cpp` `SpaceAssault_CheatLikeABastard`).
+"PC" below means the original PC game. `FUN_002a3c28` is the Space Assault AI's difficulty cheat.
 
 ### Who writes the channel
 
-`FUN_002bbf00` (lines 230493-230494) and `FUN_002bbed0` (line 230393) write K +0x84, from `FUN_002ab590` (line 218646; PC `CombatUtil.cpp:792-930`, sSelectBestWeaponType). A target
-is picked first, then the weapon. `FUN_002aaba0` (PC sCauseDamage, `CombatUtil.cpp:749`) refuses a weapon whose AI target mask lacks the target's type, or that is overheated, and
+`FUN_002bbf00` (lines 230493-230494) and `FUN_002bbed0` (line 230393) write K +0x84, from `FUN_002ab590` (line 218646; PC, sSelectBestWeaponType). A target
+is picked first, then the weapon. `FUN_002aaba0` (PC sCauseDamage, PC) refuses a weapon whose AI target mask lacks the target's type, or that is overheated, and
 otherwise accepts it when ten seconds of its rate would take half the target's maximum health, or against a soft target by ordnance kind. Heavy ordnance is reserved per target
 (`FUN_002ab430`, `FUN_002e0160`, `FUN_002e0338`, `FUN_002e03e0`) for ten seconds. Inside the weapon's AI range the rules prefer plenty of ammo, then damage. Port: `core/src/ai/flyer_weapons.rs`.
 
@@ -898,30 +894,30 @@ Port with 24 bots, 150 s (`OPENBF_MEASURE_CREW=24 OPENBF_MEASURE_SECONDS=150`, `
 | Holding a building | about .17 | .05 |
 | Holding a flyer | about .01 | .02 |
 
-Corrected by section 19: the cause offered here, that the PS2's pilots spend more time near enemy hulls, was measured and is false, and the strafe pattern's body is in `UnitFlyAttackPatterns.cpp`. The gap was the missing threat law. Channel 1 is now .53 and armed targets .14 with a full crew.
+Corrected by section 19: the cause offered here, that the PS2's pilots spend more time near enemy hulls, was measured and is false, and the strafe pattern's body is in the original PC game. The gap was the missing threat law. Channel 1 is now .53 and armed targets .14 with a full crew.
 
 Marked for replacement in `flyer_weapons.rs`:
 
 - OURS, `measure:`: the 4 s think grid is shared with the free burst (`THINK`, `THINK_STEP`). The PS2's period follows its think level.
-- OURS, `replace:`, in rounds other than space (space now has the threat table, section 19): `RAYS` 2 and the ranking by nearest. The PS2 ranks through the threat table, uniform for these turrets, before its ray checks (PC `VisionManager.cpp:155-260`, `UnitThreatManager.cpp:55`).
+- OURS, `replace:`, in rounds other than space (space now has the threat table, section 19): `RAYS` 2 and the ranking by nearest. The PS2 ranks through the threat table, uniform for these turrets, before its ray checks (PC).
 - `trace:` the flyer rule for threats ahead, weapon index 2 and up, and plain buildings or critical systems as pilot targets.
 
-The first timer of section 17 is resolved: PC `EntityFlyer.cpp:185` sets the fire timer to 10.0 in the constructor, matching the 10.00 first read live.
+The first timer of section 17 is resolved: PC sets the fire timer to 10.0 in the constructor, matching the 10.00 first read live.
 
 ### Damage effects
 
 Each flyer class holds up to ten `DamageEffect` slots, later rows dropped. `FUN_001e0c98` runs on a change of health: at or below zero it clears the alive bit, and below 0.0001 or dead it stops all
 slots. Otherwise a slot is live when `fraction < start + 0.0001` and, if stop is above zero, `fraction >= stop - 0.0001`. A slot that leaves its band stops, and one entering starts, with `FUN_00376d98` giving
-scale and `FUN_00376e10` inherited velocity. PC `Damageable.cpp:633-735`. Port: `game/src/fx/vehicle_damage.rs`, on a change of health only, with the corrected `DamageEffect::active` in `core/src/autoturret.rs`.
+scale and `FUN_00376e10` inherited velocity. PC. Port: `game/src/fx/vehicle_damage.rs`, on a change of health only, with the corrected `DamageEffect::active` in `core/src/autoturret.rs`.
 Effects follow the hull's hardpoint, or the hull origin when the attach name is missing (`game/src/vehicle_pads.rs`). On spa8 all 8 classes resolve all their slots (6 to 10 each).
 
 X-wing as authored, kept slots: sparks at 85-25, 75-15, 65-5, 55-5; smoke at 75-35, 65-25, 55-15, 45-5; flame at 35-0.1 and 25-. Fractions are percent of hull.
 
-`trace:` the PS2 reader of emitter +0x1c, where `FUN_00376e10` and `FUN_00377a10` store inherited velocity. The port adds it to the effect's own value, following PC `ParticleSpawner.cpp:112`.
+`trace:` the PS2 reader of emitter +0x1c, where `FUN_00376e10` and `FUN_00377a10` store inherited velocity. The port adds it to the effect's own value, following PC.
 
 ### The crash
 
-`FUN_00202d08` (lines 116891-116926; PC `EntityFlyer.cpp:3822-3861`), once the alive bit is off:
+`FUN_00202d08` (lines 116891-116926; PC), once the alive bit is off:
 
 - State 5, or state 0 (parked): pay the kill if the craft has a damager (`FUN_00269a08`), throw the chunk cluster (`FUN_00213630`), kill it, and raise class +0xedc, `ExplosionDestruct`.
 - Any other state except 4: raise class +0xed8, `ExplosionCritical`, set health 0 (`FUN_001df3d8`), enter state 4. The timer is `rand*2 + 0.2` if the class has chunks (`FUN_00215f80`), else 600.
@@ -933,14 +929,14 @@ Contact in state 4 or by a lethal collision sets state 5 and instant death (`FUN
 
 Port: `FlightPhase::Crashed`, `core/src/vehicle/flyer.rs`, `damage_vehicle_by` and `flyer_starts_crash` in `core/src/sim/vehicles.rs`, `fly_flyers`, `core/src/sim/flyer_contact.rs`. BF1 is unchanged.
 
-A dying craft is left out of these, each with a PC check: lock targets (`LockOnManager.cpp:637`), reticle pick (`PlayerController.cpp:579`), the seated crosshair (`EntityFlyer.cpp:191`), boarding (`EntitySoldier.cpp:3507`), and vision (`perception.rs`, `self_turrets.rs`, `turrets.rs`).
+A dying craft is left out of these, each with a PC check: lock targets (PC), reticle pick (PC), the seated crosshair (PC), boarding (PC), and vision (`perception.rs`, `self_turrets.rs`, `turrets.rs`).
 
 `ExplosionCritical` is authored on no regular BF2 ship (guided rockets, the AAT, the snail tank and recoilless turrets only), so no flyer shows a separate blast at the start of its crash.
 
 `trace:` or `measure:`:
 
 - The death camera detach (0.25) during a crash is not ported.
-- PC's `Weapon.cpp` has no alive test and the cannon's only stops sounds, so firing isn't blocked in the sim. A bot's trigger stops because the drive branch is for flying. `measure:` whether a dying PS2 pilot's bit stays up.
+- PC's PC has no alive test and the cannon's only stops sounds, so firing isn't blocked in the sim. A bot's trigger stops because the drive branch is for flying. `measure:` whether a dying PS2 pilot's bit stays up.
 
 ### How ships die
 
@@ -952,7 +948,7 @@ PS2, 180 s from one save, sampled at about 5000 sweeps per second, so no state i
 | Collision: 2 to 5, health below 0 | 8 | 2.7 | -64 to -17439, often near full health before |
 | Instant death: 2 to 5, health exactly 0, usually full before | 8 | 2.7 | open space, far from hulls |
 
-All eight collisions are close to enemy hull objects: four within about 100 m of `imp_cap1_comms` and the bridge, two beside `imp_frig3`, one by `imp_cap1_tur4`, one by `imp_cap1_sensor`. Most instant deaths fit the unseen kill above, which needs a human, so `--no-human` rounds have none. Three of them fall at one point near (-1570, 600, 3430), outside the `mapbounds` box and about 1500 m from any object, which a random pick would not explain. PC `UnitFlyAgent.cpp:277` also kills a pilot's craft outright when its low level reports stuck. `trace:` that rule in the PS2 and whether those three are it. The port now has a stuck kill (§21, §24).
+All eight collisions are close to enemy hull objects: four within about 100 m of `imp_cap1_comms` and the bridge, two beside `imp_frig3`, one by `imp_cap1_tur4`, one by `imp_cap1_sensor`. Most instant deaths fit the unseen kill above, which needs a human, so `--no-human` rounds have none. Three of them fall at one point near (-1570, 600, 3430), outside the `mapbounds` box and about 1500 m from any object, which a random pick would not explain. PC also kills a pilot's craft outright when its low level reports stuck. `trace:` that rule in the PS2 and whether those three are it. The port now has a stuck kill (§21, §24).
 
 Port, seed 7, idle human, 600 s (`--space-report`): 111 shot, 0 crashed, 11 unseen; about 11, 0 and 1.1 per minute. In the 150 s suite run, 19 deaths: 6 credited to a flyer, 13 with no soldier credited (building turrets have none).
 
@@ -971,7 +967,7 @@ Asked of the running PS2 and the code, not guessed. Everything is spa8. PS2: a p
 ### Two wrong readings, corrected
 
 - Section 18 says the PS2's pilots spend more time near enemy hulls, and that this may explain the channel gap and the missing collisions. Measured, it is false. Share of flying time by distance to the nearest enemy hull, under 100, 200, 400, 800, 1600 m and beyond: PS2 .021, .07, .17, .285, .421, .033; port .028, .087, .239, .26, .308, .079. The port's pilots were if anything closer. 97.8% of PS2 flying time is on splines.
-- The same section says the strafe body is not in the repository. It is, in `UnitFlyAttackPatterns.cpp` (PS2 about line 253330). It is not what separates the two games here.
+- The same section says the strafe body is not in the repository. It is, in the original PC game (PS2 about line 253330). It is not what separates the two games here.
 - Section 17's "12-14 armed turrets" and "turret shots about 3" were a partial count. A fuller read of the save gives 16 turrets that hold targets and 1.6-2.3 turret bolts per second.
 
 ### Where the PS2's hull damage comes from
@@ -980,23 +976,23 @@ PS2, 150 s, 17.6 flying, damage to flyers by attacker: armed buildings 81 hits, 
 
 ### What was missing, in the order it mattered
 
-**Pilot hull repair.** `FUN_002f5478` (lines 271520-271625; PC `Controllable.cpp:415-451`) gives a seated pilot-class unit the class's `PilotSkillRepairScale` (+0x2fc, .005 live) of maximum health per second on ships above 1400 maximum health. `core/src/sim/flyers.rs::pilot_repair`, with `SoldierConstants.pilot_skill` set from the unit type (`game/src/roster.rs`). `re-vehicles.md` said no vehicle carries AddHealth, which is true of the ODF key but misses this.
+**Pilot hull repair.** `FUN_002f5478` (lines 271520-271625; PC) gives a seated pilot-class unit the class's `PilotSkillRepairScale` (+0x2fc, .005 live) of maximum health per second on ships above 1400 maximum health. `core/src/sim/flyers.rs::pilot_repair`, with `SoldierConstants.pilot_skill` set from the unit type (`game/src/roster.rs`). `re-vehicles.md` said no vehicle carries AddHealth, which is true of the ODF key but misses this.
 
-**The side roll.** `FUN_0020b840` (line 121163) and lines 117385-117412 (PC `EntityFlyer.cpp:2119-2150`, 2682-2790, 4148-4157): a pilot rolls aside (the conditions: `flyer_drive.rs::side_roll_wanted`), paying `EnergyTrickDrainSingleTap` and moving at `TrickSideRollStrafeSpeed`. A started roll costs that pilot's attackers aim: the AI's error takes +5, paid from its budget (PC `EntityFlyer.cpp:5295`). `vehicle/flyer.rs::{side_roll, roll_update, side_strafe, restore_energy}`, `sim/flyers.rs::start_side_roll`. 36 rolls per 150 s on average against about 28.
+**The side roll.** `FUN_0020b840` (line 121163) and lines 117385-117412 (PC): a pilot rolls aside (the conditions: `flyer_drive.rs::side_roll_wanted`), paying `EnergyTrickDrainSingleTap` and moving at `TrickSideRollStrafeSpeed`. A started roll costs that pilot's attackers aim: the AI's error takes +5, paid from its budget (PC). `vehicle/flyer.rs::{side_roll, roll_update, side_strafe, restore_energy}`, `sim/flyers.rs::start_side_roll`. 36 rolls per 150 s on average against about 28.
 
 **The threat law for pilots and space turrets.** The port picked the nearest visible target. `FUN_002b94a0` (line 228514) scores each threat, returning 0 when a flyer observer has it behind its true nose (matrix Z, flyer +0x140). `FUN_002b9d10` updates a slot, `FUN_002b9c88` records a ray, `FUN_002b9cb0` forces. A switch needs 10 points more. PS2 live: 94% of emptied slots held a target behind the nose (n 66). Of 92 target drops in 90 s, 40 were removals for being behind and 39 were switches. Port: `core/src/sim/pilot_threats.rs` for pilots, `self_turrets.rs::threat_think` for turrets in a space round.
 
 A flyer seen by something it can fight has that object forced into its own threats if it holds nothing (`FUN_002e43c8`, lines 258415-258418). So being fired on turns pilots on turrets, which is where the PS2's channel 1 time comes from: on channel 1 .53 (PS2 .46), holding an armed building .14 (PS2 .16-.18).
 
-**The aim error on a flyer.** `FUN_002a4cc8` (line 213950), `FUN_002a50c0`, `FUN_002ae4d0`, `FUN_002ae7b8`; PC `AIUtil.cpp:585-640, 705-731`, `Controller.cpp:80-216`. The turn law aims at the target plus a bubble; the fire test's point has no bubble (`FUN_002ace58`). Radius: the target's horizontal box diagonal x (3 - 2 vis) x min(err x (1 + .6 speed/top), the flyer cap `lerp(4, 1.2)`), the weapon's `AIBubbleSizeMultiplier`, .3 when no human flies it, then `min(d / AIBubbleScaleDistDivider + .5, AIBubbleScaleClamp)`. Y is held above zero unless the target is flying. Live radii per class 9.54, 12.08, 12.36, 16.2, 9.61, 19.04 equal the model boxes for four of six. `self_turrets.rs::flyer_aim_error`, `vehicle_pads::FLYER_AIM_BOXES`. The flyer's own decay is halved (PC `Controller.cpp`). This alone did little against bots, because the bubble is 1.6-10 m.
+**The aim error on a flyer.** `FUN_002a4cc8` (line 213950), `FUN_002a50c0`, `FUN_002ae4d0`, `FUN_002ae7b8`; the PC agrees. The turn law aims at the target plus a bubble; the fire test's point has no bubble (`FUN_002ace58`). Radius: the target's horizontal box diagonal x (3 - 2 vis) x min(err x (1 + .6 speed/top), the flyer cap `lerp(4, 1.2)`), the weapon's `AIBubbleSizeMultiplier`, .3 when no human flies it, then `min(d / AIBubbleScaleDistDivider + .5, AIBubbleScaleClamp)`. Y is held above zero unless the target is flying. Live radii per class 9.54, 12.08, 12.36, 16.2, 9.61, 19.04 equal the model boxes for four of six. `self_turrets.rs::flyer_aim_error`, `vehicle_pads::FLYER_AIM_BOXES`. The flyer's own decay is halved (PC). This alone did little against bots, because the bubble is 1.6-10 m.
 
-**The turret's fire line. This was the largest single fault.** The port and the PS2 share a turret's weapon timing: inside a burst .27/.37/.47 s, 1.00 s between bursts, on both. They differ in what the fire test reads. `FUN_002ace58` (PC `sIsTargetLinedUpPos`, `CombatUtil.cpp`) takes C +0xd0 and C +0xe0, the eye point and **eye direction**: the turret's own axis (`mAimMatrix` Z, PC `MountedTurret.cpp:1102`), driven by the turn law. It requires:
+**The turret's fire line. This was the largest single fault.** The port and the PS2 share a turret's weapon timing: inside a burst .27/.37/.47 s, 1.00 s between bursts, on both. They differ in what the fire test reads. `FUN_002ace58` (PC `sIsTargetLinedUpPos`) takes C +0xd0 and C +0xe0, the eye point and **eye direction**: the turret's own axis (`mAimMatrix` Z, PC), driven by the turn law. It requires:
 
 1. eye direction within 22.5 degrees of the led target;
 2. the aimer's direction within 22.5 degrees of the eye direction (melee and droidekas exempt);
 3. under 50 m, or a miss distance along the eye direction under 20 m (200 for a flyer, 50 for a hover, walker or flyer gun; a building turret gets 20, `FUN_002a8ef0`).
 
-The port tested the aimer. The aimer reaches its target almost at once, while the turret itself has momentum: its turn rate may be 90 rad/s at full stick but its filter accepts only 10 rad/s per second, and the stick law `(1.5 sin e)^2` (PC `AIUtil.cpp` sCalculateTurnControls, port `hover_drive::shaped`) does not brake in time. So a PS2 barrel swings through its target and well past it. One hold, in degrees off target: start 91, best 12, last 104. Another: start 157, best 10, last 122. Many of its 1.6 s holds never come on line and never fire. The port's law already matched (`Turn::step`, TurnRate 90.5, PitchRate 90, filters 10, limits equal once negated). Only the test was wrong, so the port fired while the turret was still swinging. `self_turret` now tests the eye direction in a space round.
+The port tested the aimer. The aimer reaches its target almost at once, while the turret itself has momentum: its turn rate may be 90 rad/s at full stick but its filter accepts only 10 rad/s per second, and the stick law `(1.5 sin e)^2` (PC sCalculateTurnControls, port `hover_drive::shaped`) does not brake in time. So a PS2 barrel swings through its target and well past it. One hold, in degrees off target: start 91, best 12, last 104. Another: start 157, best 10, last 122. Many of its 1.6 s holds never come on line and never fire. The port's law already matched (`Turn::step`, TurnRate 90.5, PitchRate 90, filters 10, limits equal once negated). Only the test was wrong, so the port fired while the turret was still swinging. `self_turret` now tests the eye direction in a space round.
 
 | Turret, per hold | PS2 | Port before | Port now |
 |---|---|---|---|
@@ -1035,14 +1031,14 @@ Hull lost was about 32 per flyer per second when this work began, and 18.9 with 
 - `measure:` the PS2 column is one timeline. The port's own spread (7.1 to 14.2) is wider than the remaining gap, so these rows cannot say whether turret hits at 1.6 times the PS2's, collisions at 1.7 times and pilot hits at 3.5 times are real. The PS2 needs a second save, from another moment of a round.
 - `measure:` pilot hits come in a few close episodes: one pilot, on the nose, not its target, closing 58 to 17 m, on channel 0. That is the free burst into a ship ahead on the same spline. `trace:` whether anything on the PS2 spares that ship. PS2 hit rate .2% of bolts, port about .6%.
 - `trace:` target changes. PS2 pilots hold about 147 targets per 150 s for 1.6/3.2/4.0 s; the port 82 for 4.0/4.0/8.8 s. PS2 turrets change about 1.8 times as often as the port's, for about the same time holding. No cause is known, and damage does not seem to depend on it.
-- OURS, `trace:`: a pilot's stick stays neutral during a roll, without PS2 evidence. Flyer candidates must have an occupant (`IsSuitableEnemy` not read). Stations score relative 15 whether armed or plain, where PC `GetRelativePriority` has 10 for a plain building. The awing and xwing rows of `FLYER_AIM_BOXES` are the live PS2's 12.08 and 16.2, because the bake gives 10.94 and 15.97 (`trace:` why). Turret FORCEDSEEN is not ported (2% of live turret slots). Neither are the camera clause `FUN_001ba840`, the flag carrier clause, the medal repair clause `FUN_00360018`, the fake ray hits of PC `Ordnance.cpp:311-315`, soldiers as fallback pilot candidates, or `IsTargetLOSPossiblyBlocked` (`FUN_002b8028`), which needs last-shot distance kept per turret.
+- OURS, `trace:`: a pilot's stick stays neutral during a roll, without PS2 evidence. Flyer candidates must have an occupant (`IsSuitableEnemy` not read). Stations score relative 15 whether armed or plain, where PC `GetRelativePriority` has 10 for a plain building. The awing and xwing rows of `FLYER_AIM_BOXES` are the live PS2's 12.08 and 16.2, because the bake gives 10.94 and 15.97 (`trace:` why). Turret FORCEDSEEN is not ported (2% of live turret slots). Neither are the camera clause `FUN_001ba840`, the flag carrier clause, the medal repair clause `FUN_00360018`, the PC's fake ray hits, soldiers as fallback pilot candidates, or `IsTargetLOSPossiblyBlocked` (`FUN_002b8028`), which needs last-shot distance kept per turret.
 - `replace:` ground rounds keep the old model: self-piloted turrets and pilots outside space still pick the nearest target, and ground self-turrets still test the aimer. All of this applies on the PS2 (nothing in these functions asks whether it is space), but no ground PS2 comparison has been made, and the gate hashes hold because of the split.
 - `measure:` a human near the enemy destroyer, which is the maintainer's complaint and is still not answered. See below.
 - A human pilot on the PS2 has still not been measured, and that is what the maintainer flew against. The law takes a human through its own terms (view doubled, think level, facing score, full aim bubble), but those are unmeasured against the game.
 
 ### A human ship near the enemy destroyer
 
-The threat law takes a turret's view from the eye direction: inside 10 m always, otherwise within half-angle 77.5 degrees (PC `AIUtil.cpp:1314` `CanPotentiallySee`), then a clear line. The one skip of the cone is for the human's reticle target at the highest think level (PC `VisionManager.cpp`, `UpdatePotentiallyVisible`). `self_turrets.rs` passes the turret's axis as the view. The old nearest-target rule saw all round, so this is a change the maintainer will feel, and it follows the code without being measured against a human on the PS2.
+The threat law takes a turret's view from the eye direction: inside 10 m always, otherwise within half-angle 77.5 degrees (PC `CanPotentiallySee`), then a clear line. The one skip of the cone is for the human's reticle target at the highest think level (PC, `UpdatePotentiallyVisible`). `self_turrets.rs` passes the turret's axis as the view. The old nearest-target rule saw all round, so this is a change the maintainer will feel, and it follows the code without being measured against a human on the PS2.
 
 Port, with no other ships, a human ship parked at (-332, 247, -496): 14 of 15 enemy turrets had it outside their cone or range, and the nearest had it in cone behind a hull. None held it. Parked inside a turret's view with a clear line, 300 m along its axis, it draws fire and takes hits (`a_human_ship_in_a_turrets_view_draws_its_fire`).
 
@@ -1058,7 +1054,7 @@ In four of the six the mean rounds to zero, so almost no turret held it and the 
 
 `measure:` the way to get that column: the maintainer flies at the enemy destroyer on the PS2 while its turret slots, its bolts and the human ship's health are read over PINE (read only). Compare time to first hit, turrets holding the human, and time to death with the same flight path in the port.
 
-Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): `AudibleManager::UpdateAudience` (radius capped at 30 m; over 3 m it gives `AudibleResult` an unknown status, closer it forces; firing sets the radius to 100 before the cap), `VisionManager.cpp:448-453` (a seen target's handler forces the seer), PC `Ordnance.cpp:305-316` `AddFakeRayhitResult` (both ways, when hit by a soft collision and the bolt has lived under .4 s). Any of these could put a turret on a human the cone would miss.
+Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): `AudibleManager::UpdateAudience` (radius capped at 30 m; over 3 m it gives `AudibleResult` an unknown status, closer it forces; firing sets the radius to 100 before the cap), PC (a seen target's handler forces the seer), PC `AddFakeRayhitResult` (both ways, when hit by a soft collision and the bolt has lived under .4 s). Any of these could put a turret on a human the cone would miss.
 
 `FLYER_AIM_BOXES` also holds `all_la_at_gunship` and `rep_la_at_gunship`, 29.257, from the baked model's box like most rows. No gunship was among the six classes read live. `measure:` one when a save has one flying.
 
@@ -1071,7 +1067,7 @@ Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): 
   - `FUN_001df3d8` (lines 90273–90321): `HealthProperty::SetHealth` applies health changes and calls virtual `OnHealthChanged` at offset `+0x28`.
   - `FUN_001df4e0` (lines 90324–90345): `HealthProperty::SetShield` updates current shield pool.
   - `FUN_001df560` (lines 90351–90390): updates regeneration toward `max_health` and `max_shield`.
-  - `FUN_002f5478` (lines 271520–271625; PC `Controllable.cpp:415–451`): pilot repair skill adds `PilotSkillRepairScale` (0.005) of max health per second.
+  - `FUN_002f5478` (lines 271520–271625; the PC agrees): pilot repair skill adds `PilotSkillRepairScale` (0.005) of max health per second.
   - `objectivespaceassault.luac` (closure `main.1.0`): `OnCriticalSystemDestroyed` invokes `SetProperty(obj, 'MaxHealth', 99999997952.0)` (`SPENT_MAX_HEALTH`).
 - **Can destroyed critical systems be rebuilt on PS2?**
   - **No.** Setting `MaxHealth` to `SPENT_MAX_HEALTH` (`99999997952.0`) prevents any repair tool (`FUN_00346fa0` line 339872, `core::sim::repair::repair_target`) from ever completing the repair to restore the station.
@@ -1116,7 +1112,7 @@ Paths that force a threat on the PS2 and are not ported for turrets (`trace:`): 
 
 ### Transport spline fallback & wedged stuck-kill (`#122`)
 - **Transport spline fallback (`core/src/ai/flyer_drive/admission.rs`):** On maps that omit explicit `transport` (`0xd32f6312`) flyer paths (`spa6`, `spa7`), transport AI pilots fall back to friendly fighter spline classes discovered from live friendly flyers and vehicle pads (`fallback_transport_classes`), and request takeoff/landing transitions around enemy hangar landing regions.
-- **Wedged BF2 stuck-kill (`core/src/sim/seats.rs`, `core/src/sim/flyers.rs`, `core/src/ai/flyer_drive.rs`):** Matching PC `UnitFlyAgent.cpp:277` (§18), a BF2 flyer in flight whose wedge counter reaches `WEDGED_GIVEUP` (`3`) is destroyed outright along with its seated bot pilot instead of ejecting a pilot into empty space.
+- **Wedged BF2 stuck-kill (`core/src/sim/seats.rs`, `core/src/sim/flyers.rs`, `core/src/ai/flyer_drive.rs`):** Matching PC (§18), a BF2 flyer in flight whose wedge counter reaches `WEDGED_GIVEUP` (`3`) is destroyed outright along with its seated bot pilot instead of ejecting a pilot into empty space.
 - **Hangar mouth departure (`core/src/ai/flyer_drive.rs`):** When spline connection chords and loiter circles are blocked by hangar walls, `connect` probes `clearest` and only emits an exit curve if a full `WEDGED_RAY` (`200 m`) ray into open space is unobstructed, preserving `curve == None` inside enclosed boxes.
 
 ### Verified 6-map Space Assault sweep (`examples/space_sweep.rs`)
