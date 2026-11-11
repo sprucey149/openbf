@@ -401,6 +401,30 @@ impl SideData {
         for file in dirs
             .iter()
             .filter_map(|d| d.parent())
+            .map(|d| d.join("manifest.ron"))
+            .filter(|p| pak::is_file(p))
+        {
+            let Ok(text) = pak::read_to_string(&file) else {
+                continue;
+            };
+            let Ok(map) = ron::from_str::<manifest::Manifest>(&text) else {
+                eprintln!("chunks: {} unreadable", file.display());
+                continue;
+            };
+            for c in &map.collision {
+                if let [p] = &c.prims[..] {
+                    if let Some(prim) = crate::assets::prim_shape(p).as_ref().and_then(Prim::of) {
+                        out.prims.entry(c.geometry.to_ascii_lowercase()).or_insert((
+                            prim,
+                            crate::viewer::instance_matrix(p.rotation, p.translation),
+                        ));
+                    }
+                }
+            }
+        }
+        for file in dirs
+            .iter()
+            .filter_map(|d| d.parent())
             .map(|d| d.join("vehicles.ron"))
             .filter(|p| pak::is_file(p))
         {
@@ -497,6 +521,14 @@ fn floats(v: &str) -> Vec<f32> {
         .collect()
 }
 
+fn leading_number(v: &str) -> Option<f32> {
+    let v = v.trim_start();
+    let end = v
+        .find(|c: char| !matches!(c, '+' | '-' | '.' | '0'..='9' | 'e' | 'E'))
+        .unwrap_or(v.len());
+    v[..end].parse().ok()
+}
+
 #[derive(Default)]
 pub struct Chunks {
     defs: HashMap<String, Vec<Arc<Spec>>>,
@@ -580,7 +612,7 @@ impl Chunks {
                     continue;
                 }
                 let text = |key: &str| props.get(&hash(key)).map(String::as_str);
-                let number = |key: &str| text(key).and_then(|v| v.trim().parse::<f32>().ok());
+                let number = |key: &str| text(key).and_then(leading_number);
                 let vector = |key: &str| {
                     text(key)
                         .map(floats)
