@@ -11,7 +11,8 @@
 //! 6. Chunk world and live vehicle hull contact bounce per PS2 FUN_001d7740.
 
 use core::collision::{HullPart, Layers, Shape};
-use core::sim::{Event, Station, StationClass};
+use core::sim::{Event, Sim, Station, StationClass};
+use core::unit::UnitSpec;
 use core::vehicle::VehicleHandle;
 use core::weapon::ExplosionClass;
 use game::assets::{CpuMesh, CpuTexture, Scene};
@@ -717,4 +718,176 @@ fn test_chunk_contact_and_bounce_on_live_vehicle_hull() {
         "Chunk must be pushed out above the vehicle hull top (got pos.y = {})",
         pos.y
     );
+}
+
+fn baked_root(var: &str, fallback: &str) -> std::path::PathBuf {
+    std::env::var_os(var).map_or_else(
+        || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(fallback),
+        std::path::PathBuf::from,
+    )
+}
+
+fn mission_frigates(path: &Path) -> usize {
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|l| l.contains("\"frigates\", 18)"))
+        .count()
+}
+
+#[test]
+fn baked_frigates_break_into_their_hull_pieces_for_eight_seconds_on_all_six_maps() {
+    let root = baked_root("OPENBF_ASSETS_BAKED", "../../assets_baked");
+    let missions = baked_root("OPENBF_MISSIONS", "../../missions");
+    if !root.join("bf2_spa1").exists() {
+        assert!(
+            std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none(),
+            "space assets required"
+        );
+        eprintln!("skipping frigate destruction: local baked assets unavailable");
+        return;
+    }
+    let authored = [
+        ("all_prop_blockaderunner", 2usize),
+        ("spa1_prop_minidestroyer2", 3),
+        ("spa1_prop_correliancruiser", 4),
+        ("spa2_prop_minifedcruiser", 4),
+        ("spa2_prop_minirepassaultship", 5),
+    ];
+    let mut seen = std::collections::BTreeMap::<String, usize>::new();
+    for map in [
+        "bf2_spa1", "bf2_spa3", "bf2_spa6", "bf2_spa7", "bf2_spa8", "bf2_spa9",
+    ] {
+        let mut scene = game::assets::load_scene(&root.join(map)).unwrap();
+        scene.apply_mode_layer("ass").expect("the mission layer");
+        let mission =
+            game::mission::MissionDef::load(&missions.join(format!("{map}_ass.ron"))).unwrap();
+        let def = mission.space_assault.clone().expect("space assault");
+        let build = || {
+            let mut sim = Sim::empty(137);
+            scene.install_collision(&mut sim);
+            game::vehicle_pads::install_with_objective(
+                &mut sim,
+                &scene.manifest,
+                &scene.dir,
+                &root.join("classes"),
+                &mission.factions(),
+                Some((&def, 180)),
+            )
+            .unwrap();
+            sim
+        };
+        let sim = build();
+        let placed = mission_frigates(&missions.join(format!("{map}_ass.ron")));
+        let mut db = ClassDb::default();
+        db.load_map(&scene.dir).unwrap();
+        let names: Vec<String> = sim.station_classes.iter().map(|c| c.name.clone()).collect();
+        let dirs = [scene.dir.join("models")];
+        let mut map_frigates = 0;
+        for si in 0..sim.stations.len() {
+            let class = sim.station_classes[usize::from(sim.stations[si].class)].clone();
+            let Some(&(_, pieces)) = authored
+                .iter()
+                .find(|(n, _)| class.name.eq_ignore_ascii_case(n))
+            else {
+                continue;
+            };
+            let Some(points) = sim
+                .space_assault
+                .as_ref()
+                .and_then(|sa| sa.critical.iter().find(|c| c.station == si as u16))
+                .map(|c| c.points)
+            else {
+                continue;
+            };
+            map_frigates += 1;
+            *seen.entry(class.name.to_ascii_lowercase()).or_default() += 1;
+            let mut walk = WalkSim::new(1, Vec3::ZERO, None);
+            walk.sim = build();
+            let sim = &mut walk.sim;
+            let station = sim.stations[si];
+            let own = station.team.expect("a frigate has a side");
+            let instance = station.instance.expect("a placed frigate");
+            let solid = |sim: &Sim| {
+                sim.collision
+                    .bodies()
+                    .iter()
+                    .filter(|b| b.instance == Some(instance) && b.layers != Layers::NONE)
+                    .count()
+            };
+            assert!(solid(sim) > 0, "{map} {} hull collision", class.name);
+            assert_eq!(class.destroyed_geometry, None, "{map} {}", class.name);
+            let killer = sim
+                .spawn(&UnitSpec::trooper(1 - own, station.pos + Vec3::Y * 2000.0))
+                .unwrap();
+            let before = sim.space_assault.as_ref().unwrap().points;
+            let desc = core::weapon::DamageDesc {
+                damage: class.max_health - 1.0,
+                scales: [1.0; 7],
+                shield_scale: 1.0,
+            };
+            sim.events.clear();
+            sim.damage_station(si as u16, &desc, 1.0, Some(killer), Some(1 - own));
+            assert!(!sim.stations[si].destroyed, "{map} {} survives", class.name);
+            assert!(solid(sim) > 0, "{map} {} stays solid alive", class.name);
+            assert!(sim
+                .events
+                .iter()
+                .all(|e| !matches!(e, Event::StationDestroyed { .. })));
+            sim.damage_station(si as u16, &desc, 1.0, Some(killer), Some(1 - own));
+            sim.damage_station(si as u16, &desc, 1.0, Some(killer), Some(1 - own));
+            assert!(sim.stations[si].destroyed);
+            assert_eq!(solid(sim), 0, "{map} {} contact ends at death", class.name);
+            let deaths = sim
+                .events
+                .iter()
+                .filter(|e| matches!(e, Event::StationDestroyed { station, .. } if usize::from(*station) == si))
+                .count();
+            assert_eq!(deaths, 1, "{map} {} dies once", class.name);
+            let mut want = before;
+            want[usize::from(1 - own)] += points;
+            assert_eq!(
+                sim.space_assault.as_ref().unwrap().points,
+                want,
+                "{map} {} scores once at death",
+                class.name
+            );
+            let mut chunks = Chunks::load(&db, &names, &dirs, Era::Bf2);
+            chunks.tick(&walk, None);
+            assert_eq!(chunks.len(), pieces, "{map} {} pieces", class.name);
+            walk.sim.events.clear();
+            let mut ticks = 1;
+            while !chunks.is_empty() {
+                chunks.tick(&walk, None);
+                ticks += 1;
+                assert!(ticks < 400, "{map} {} cleanup is bounded", class.name);
+            }
+            {
+                let (mut t, mut life) = (0f32, 1);
+                while t < 8.0 {
+                    t += core::TICK_DT;
+                    life += 1;
+                }
+                assert_eq!(ticks, life, "{map} {} piece life", class.name);
+            }
+            assert_eq!(
+                walk.sim.space_assault.as_ref().unwrap().points,
+                want,
+                "{map} {} keeps its score",
+                class.name
+            );
+        }
+        assert_eq!(map_frigates, placed, "{map} frigates");
+        let hulls = sim
+            .stations
+            .iter()
+            .filter(|s| {
+                let c = &sim.station_classes[usize::from(s.class)];
+                c.name.contains("_cap_") || c.name.contains("_fly_fedcruiser")
+            })
+            .count();
+        assert!(hulls > 0, "{map} capital hulls");
+    }
+    eprintln!("frigate classes killed: {seen:?}");
+    assert_eq!(seen.len(), authored.len(), "{seen:?}");
 }

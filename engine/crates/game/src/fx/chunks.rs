@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 const MASS: f32 = 40.0;
+const SPACE_LIFE: f32 = 8.0;
 const CLUSTERS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -138,6 +139,7 @@ struct Piece {
     budget: u8,
     touched: bool,
     timer: f32,
+    space: bool,
     trails: Vec<(LiveEffect, Option<Mat4>)>,
     smoke: Vec<LiveEffect>,
 }
@@ -175,6 +177,7 @@ impl Piece {
         }
         match self.spec.mode {
             2 | 4 => 53.0,
+            _ if self.space => SPACE_LIFE,
             _ => 3.0,
         }
     }
@@ -629,7 +632,7 @@ impl Chunks {
                     },
                 };
                 let ps2 = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
-                let omega = vector("ChunkOmega").map_or(Vec3::ZERO, |w| Vec3::new(-w.x, -w.y, w.z));
+                let omega = vector("ChunkOmega").unwrap_or(Vec3::ZERO);
                 let spec = Arc::new(Spec {
                     model: model.to_owned(),
                     prim,
@@ -924,18 +927,20 @@ impl Chunks {
             let r = Mat3::from_quat(q);
             let world = r * Mat3::from_diagonal(spec.prim.inertia() * MASS) * r.transpose();
             let still = spec.mode == 2;
+            let omega = r * spec.omega;
             let mut piece = Piece {
                 spec: spec.clone(),
                 pos: at,
                 vel,
                 rot: q,
-                momentum: world * spec.omega,
-                omega: spec.omega,
+                momentum: world * omega,
+                omega,
                 moving: !still,
                 count: u8::from(still),
                 budget: if still { 0 } else { spec.budget },
                 touched: false,
                 timer: 0.0,
+                space: self.space,
                 trails: Vec::new(),
                 smoke: Vec::new(),
             };

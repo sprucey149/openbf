@@ -937,7 +937,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `game/tests/suite/guided_rockets.rs` 377 — all 14 inherited guided launchers, award gating, camera/interpolation restoration, smooth mouse/controller turning at 60/75/144 Hz and all-side/map-local equipment census.
 - `game/tests/suite/award_weapons.rs` 618 — award weapons on both games' baked classes: BF2's advantage per medal, BF1 award slots and looks, the cheat on a BF1 kit in the sim (150 a round x 1.5), the beam, and the Heavy Blast Cannon's numbers and medal gate.
 
-- `game/src/fx/chunks.rs` 1041 — cosmetic droid and vehicle chunk launch, bounded pool and floor contacts.
+- `game/src/fx/chunks.rs` 1190 — cosmetic droid, vehicle and frigate chunk launch, bounded pool, floor contacts and the space-round life.
 - `bake/src/attached_effects.rs` 149 — ordered AttachEffect replay and baked hardpoint frames/repeat bounds.
 - `game/src/fx/props.rs` 415 — static prop effect frames and optional repeat timers, presentation only.
 - `render/src/bloom.rs` 319 — selective BF2 pre-clamp emissive gather and authored blur · `Bloom`
@@ -950,7 +950,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `mungefs/src/lightbeam.rs` 267 — LightBeam config parsing and defensive numeric defaults · `LightBeamConfig`.
 - `mungefs/src/shadow.rs` 292 — `shdw` closed half-edge meshes, PS2 and Xbox/PC layouts · `ShadowPiece`, `is_skinned`; `analysis/re-vehicle-shadow.md` §9.
 - `game/src/forest.rs` 105 — scene bird configuration and read-only simulation actor snapshots · `configure`, `submit_actors`.
-- `game/src/fx/chunks/tests.rs` 664 — chunk launch, inertia, contacts, lifetime, pool and real-data regressions.
+- `game/src/fx/chunks/tests.rs` 819 — chunk launch, inertia, contacts, lifetime, pool and real-data regressions.
 - `render/src/falling/birds.rs` 313 — bounded anchor bird pool, motion, atlas wings and lifecycle · `ForestBirdType`.
 - `render/src/falling/ground.rs` 294 — terrain gusts and actor contact impulses · `LeafActor`.
 - `render/tests/suite/particle_blend.rs` 443 — GPU referees for display-byte blending, masked scene blur and leaf/bird cutouts.

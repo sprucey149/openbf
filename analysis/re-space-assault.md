@@ -1139,11 +1139,69 @@ Command: `cargo run --release --manifest-path engine/Cargo.toml -p game --exampl
 - OURS `measure:` the offset's reference frame and whether the craft keeps flying while its gunner steers, both against a PS2 bomber.
 - OURS `replace:` a bot gunner still fires the old plain round. Bots steering seat rockets are not traced.
 
-## 23. Capital ship and frigate destruction (not implemented)
+## 23. Frigate destruction (#137, measured 2026-11-11)
 
-A frigate is a `destructablebuilding` (`all_prop_blockaderunner`, `spa1_prop_minidestroyer2`, `spa1_prop_correliancruiser`). Its class data has `ExplosionName spa_prop_frigate_destruct_exp` (which uses `com_weap_obj_huge_exp`) and chunk entries with trail effects `spa_sfx_frigate_exp_1` to `_4`; the mini destroyer's chunks are `spa1_prop_minidestroyer2_chunk1` to `3`. Capital ships also have `all_cap_rebelcruiser_destruct*` classes.
+Source revision `3f98ba6` plus this change. One native death was recorded on the PS2 (USA v2.01, `SLUS-21240`) from save state `.10`, which is `spa8g_ass` (the mission name is in RAM and the HUD reads 0/180 on both sides). Dumps and states are under `engine/artifacts/lead_tmp/issue-137/`; the Tracking run is `01M756MJWQ35AQCYF05V638W1K`.
 
-The player reports that the PS2 plays a long sequence and the port removes the ship at once. `trace:` how these chunks are timed, what moves or swaps the hull, and whether `DeathAnimation` (setter 94683) is involved. Tracked as a GitHub issue.
+### Census
+
+A frigate is a `destructablebuilding` with `MaxHealth 90000`, `ExplosionName spa_prop_frigate_destruct_exp`, no destroyed or unbuilt model, and its hull cut into chunk slots. Every slot is `ChunkPhysics FULL`, `ChunkGravity 0 0 0`, `ChunkTerrainCollisions 0`, with a small `ChunkOmega` and the key `0xc74f3df1` set to 1.
+
+| Class | Slots | Trails | Maps (Assault frigates) |
+|---|---|---|---|
+| `all_prop_blockaderunner` | 2 | `spa_sfx_frigate_exp_1`, `_2` | spa1, spa9 |
+| `spa1_prop_minidestroyer2` | 3 | `_3`, `_4`, `_4` | spa1, spa8, spa9 |
+| `spa1_prop_correliancruiser` | 4 | `_1` on three, none on the fourth | spa1, spa8 |
+| `spa2_prop_minifedcruiser` | 4 | `_5`, `_5`, none, `_2` | spa3, spa6, spa7 |
+| `spa2_prop_minirepassaultship` | 5 | `_5`, `_1`, `_5`, none, none | spa3, spa6, spa7 |
+
+The missions list 2 scoring frigates on spa1 and spa3, 6 on spa6 and 4 on spa7, spa8 and spa9, 18 points each. The capital hulls (`*_cap_*`, `cis_fly_fedcruiser*`, `rep_cap_assultship*`) are separate objects and are not destroyed by this path. The `*_destruct*` and `*_damaged*` classes are the critical systems' own props and their pre-authored broken states; none of them is a frigate stage.
+
+### The recorded death
+
+Setup: state `.10` loaded and stepped. Two other frigates had their health written down to 300 (logged interventions) and were not hit in the window, so they play no part. The frigate that died, a Corellian cruiser at (-1079.07, 0, -240.32), was never written: it fell from 90000 to 15708 in the first 60 s under ordinary fire and died 7.8 s later. The break on `FUN_001e3638` showed the call chain ordnance hit `0x313c40` -> damage `FUN_001dfb38` -> handler `FUN_001e3458` -> death `FUN_001e3638`. Frames below are 60 Hz video frames after that entry; the game ticks at 30 Hz.
+
+| Frame | Seconds | Observed in RAM |
+|---|---|---|
+| 0 | 0 | health 0, state word 0, hull body and visible flag still set |
+| 1 | 0.02 | state word 1, alive bit clear, repair type 5, collision body pointer (entity +0x10) cleared, visible byte (entity +0x118) cleared |
+| 3 | 0.05 | chunk cluster `0x16f16d0` holds four pieces with timer 0.033; the team's score word `0x1dc7ba0` reads 18, up from 0 |
+| 60 | 1.0 | timers 0.967; pieces turning in place |
+| 240 | 4.0 | timers 3.983 |
+| 450 | 7.5 | timers 7.483 |
+| 510 | 8.5 | timers 8.016, all four pieces cleared |
+
+The frigate stays in state 1, hidden, for the rest of the window. Its class's `RespawnTime` reads as the largest float, so the regeneration `FUN_001e3638` sets is zero and it never rebuilds.
+
+So the sequence is one event with a tail, not a staged script. On the death tick the hull is hidden, its collision is removed, the explosion ordnance is fired, the points are scored and the hull's chunk pieces are launched. The pieces then turn slowly for 8.0 s and are removed. `DeathAnimation` takes no part: `FUN_001e3638` (B2:93584-93789) has no animation call, and nothing moved the hull entity.
+
+What moves each piece:
+- **Speed.** The body centres barely move: about 0.002 m in 0.45 s on the first slot (`ChunkSpeed 0.03`). The model origins travel 1 to 10 m/s only because each piece turns about a body centre 70 to 120 m from the frigate's origin.
+- **Spin.** The template keeps `ChunkOmega` as authored (first slot (0.03, 0.01, 0.01)). The piece's world angular velocity is that vector carried through the piece's body frame, with no sign change: the first slot's body frame is rolled 9 degrees and its world value reads (0.0312, 0.0052, 0.0100). After one tick the model's X axis reads (1, 0.000333, -0.000173), which is that rate for 1/30 s.
+- **Life.** 8.0 s from launch. A map without terrain runs the life timer from the first tick (`re-chunks.md` §4).
+- **Body.** The key `0xc74f3df1` sets the template's byte +0xdd. `FUN_001d5b00` then registers the piece's body even though the map has no terrain (B2:82835) and leaves out the exclusion it otherwise adds for one collision layer (B2:83026).
+
+### What the port did, and the change
+
+The port already hid the hull, emptied its collision, scored and launched the authored pieces on the death tick (`core/src/sim/stations.rs` `station_dies`, `install_station_wreck`; `game/src/fx/chunks.rs` `StationDestroyed`). Two things differed, and both made the frigate seem to vanish:
+
+1. Pieces lived 3 s everywhere, the `[ours]` rest life chosen for ground wrecks. In a space round the timer starts at launch, so a hull piece was fading after one second. A space round now uses the PS2's 8 s (`SPACE_LIFE`, `Piece::life`). Ground rounds keep 3 s.
+2. `ChunkOmega` had its X and Y negated and was used as a world vector. It is now kept as authored and turned by the launch frame (`Chunks::launch_posed`). This is the one init function for every chunk, so it changes the turning sense of all pieces, not their rates.
+
+### Checks
+
+- `cargo test -p game --lib fx::chunks`: 23 pass, 4 ignored. New: `a_space_round_keeps_a_piece_eight_seconds_and_fades_its_last_two`, `authored_omega_turns_with_the_launch_frame_as_the_ps2_cruiser_piece_does` (the recorded frame and rate).
+- `cargo test -p game --test space_destruction_scenarios`: `baked_frigates_break_into_their_hull_pieces_for_eight_seconds_on_all_six_maps` kills all 22 scoring frigates of the six Assault missions (all five classes). Each one survives a hit one point short, then dies once: one `StationDestroyed`, 18 points once, no live collision layers on its bodies that tick, the authored piece count, pieces gone after exactly the 8 s tick count, and the score unchanged afterwards.
+- Headless frames of the cruiser above at 0, 1, 5, 7 and 9 s after death (`port_after/walk_*.png`): explosion over the intact outline, trails burning on the pieces, the pieces visibly apart and shaded with the hull's materials, the fade, then empty space with the last smoke.
+
+### Not done
+
+- The native death was recorded as memory state only. No PS2 frame of the sequence was captured: the save's player is elsewhere and this launch exposes digital buttons only. `measure:` a PS2 frame series of a frigate death, for the fade, the trails and the explosion's look and sound.
+- One map and one class were recorded natively. The other five maps and four classes are covered in the port only, on the grounds that they share the class base, the keys and the death function. The issue's six-map PS2 comparison is still open.
+- `trace:` what a ship does on meeting a live hull piece. Byte +0xdd puts the pieces in the collision world on the PS2; the port's pieces are effects and stop nothing.
+- Asset gap, separate from the runtime: the bake writes chunk prims for side vehicles (`vehicles.ron`) but not for map models, so a frigate piece turns about its bounding box centre as a sphere. The PS2 turns it about its authored prim, 15 to 20 m away and rolled 9 degrees on the measured class. `replace:` bake the map chunk models' prims.
+- `spa2_prop_minifedcruiser` authors `ChunkSpeed = 4 .00` on its first slot. The port fails to parse it and takes the default. `trace:` what the PS2's reader makes of it.
+- The `[ours]` 3 s ground life and the failure of `real_sbd_and_magnaguard_profiles_launch_five_pieces_at_the_authored_frequency` (345/1000, the same without this change) are untouched.
 
 ## 24. Ground maps after the space merge (2026-11-10)
 

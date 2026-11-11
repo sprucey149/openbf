@@ -540,7 +540,7 @@ fn real_sbd_and_magnaguard_profiles_launch_five_pieces_at_the_authored_frequency
             assert!(matches!(spec.prim, Prim::Sphere(_)));
             assert_eq!(
                 (spec.speed, spec.budget, spec.omega),
-                (8.0, 4, Vec3::new(-4.0, -4.0, 4.0))
+                (8.0, 4, Vec3::new(4.0, 4.0, 4.0))
             );
         }
         let spec = UnitSpec::trooper(1, Vec3::Y * 10.0);
@@ -749,4 +749,90 @@ fn ground_settle_ray_ignores_vehicle_hulls() {
         c.tick(&walk, None);
         assert_eq!(piece(&c).moving, !space, "space {space}");
     }
+}
+
+#[test]
+fn a_space_round_keeps_a_piece_eight_seconds_and_fades_its_last_two() {
+    let mut s = spec(Prim::Sphere(0.5));
+    s.gravity = Vec3::ZERO;
+    s.speed = 0.03;
+    let mut c = chunks(s);
+    c.space = true;
+    let walk = WalkSim::new(1, Vec3::ZERO, None);
+    c.launch(
+        "fixture",
+        Vec3::Y * 50.0,
+        Vec3::ZERO,
+        Quat::IDENTITY,
+        1.0,
+        1.0,
+        None,
+    );
+    assert_eq!(piece(&c).life(), 8.0);
+    let (mut t, mut want) = (0f32, 0);
+    while t < 8.0 {
+        t += core::TICK_DT;
+        want += 1;
+    }
+    let mut ticks = 0;
+    while !c.is_empty() {
+        if ticks == 179 {
+            assert_eq!(piece(&c).opacity(), 1.0);
+        }
+        if ticks == 210 {
+            let o = piece(&c).opacity();
+            assert!((o - 0.5).abs() < 0.02, "{o}");
+        }
+        c.tick(&walk, None);
+        ticks += 1;
+    }
+    assert_eq!(ticks, want);
+    let mut ground = chunks(spec(Prim::Sphere(0.5)));
+    drop(&mut ground, Vec3::Y, Vec3::ZERO);
+    assert_eq!(piece(&ground).life(), 3.0);
+}
+
+#[test]
+fn authored_omega_turns_with_the_launch_frame_as_the_ps2_cruiser_piece_does() {
+    let mut s = spec(Prim::Box(Vec3::new(80.0, 40.0, 140.0)));
+    s.gravity = Vec3::ZERO;
+    s.omega = Vec3::new(0.03, 0.01, 0.01);
+    let mut c = chunks(s);
+    c.space = true;
+    let frame = Mat3::from_cols(
+        Vec3::new(0.98772, -0.15626, -0.00033),
+        Vec3::new(0.15626, 0.98772, 0.001),
+        Vec3::new(0.00017, -0.00104, 1.0),
+    );
+    let rot = Quat::from_mat3(&frame).normalize();
+    c.launch("fixture", Vec3::ZERO, Vec3::ZERO, rot, 1.0, 1.0, None);
+    let p = piece(&c);
+    assert!(
+        (p.omega - Vec3::new(0.03119, 0.00518, 0.01)).length() < 2e-4,
+        "{}",
+        p.omega
+    );
+    let walk = WalkSim::new(1, Vec3::ZERO, None);
+    let mut plain = chunks({
+        let mut s = spec(Prim::Sphere(1.0));
+        s.gravity = Vec3::ZERO;
+        s.omega = Vec3::new(0.03, 0.01, 0.01);
+        s
+    });
+    plain.space = true;
+    plain.launch(
+        "fixture",
+        Vec3::ZERO,
+        Vec3::ZERO,
+        Quat::IDENTITY,
+        1.0,
+        1.0,
+        None,
+    );
+    plain.tick(&walk, None);
+    let x = piece(&plain).model().x_axis.truncate();
+    assert!(
+        (x.y - 0.000333).abs() < 2e-5 && (x.z + 0.000333).abs() < 2e-5,
+        "{x}"
+    );
 }
