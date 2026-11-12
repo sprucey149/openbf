@@ -280,6 +280,8 @@ impl Bindings {
                 (Key(K::Tab), Bind::bits(b::SPAWN_CLASS_PREV)),
                 (Key(K::KeyG), Bind::bits(b::SWITCH_SECONDARY)),
                 (Key(K::KeyV), Bind::bits(b::VIEW_TOGGLE)),
+                (Key(K::AltLeft), Bind::bits(b::FLYER_TRICK)),
+                (Key(K::CapsLock), Bind::bits(b::FLYER_REVERSE)),
                 (
                     Key(K::ArrowUp),
                     Bind::bits(b::SQUAD_MOVE_OUT | b::SPAWN_POST_UP),

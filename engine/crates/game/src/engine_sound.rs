@@ -32,7 +32,7 @@
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::walk::WalkSim;
-use core::vehicle::flyer::FlightPhase;
+use core::vehicle::flyer::{FlightPhase, ManeuverKind};
 use core::vehicle::{Vehicle, VehicleKind};
 use glam::Vec3;
 use manifest::{EngineLayer, EngineSound};
@@ -155,6 +155,8 @@ pub struct EngineClass {
     pub takeoff: Option<String>,
     /// A flyer's `LandSound` (or `WindDownSound`, the same slot).
     pub land: Option<String>,
+    pub roll: Option<String>,
+    pub reversal: Option<String>,
     pub boost: Vec<BoostEntry>,
 }
 
@@ -196,7 +198,7 @@ impl EngineClass {
             return None;
         }
         let time = db.prop(class, "TurnOffTime");
-        let sound = |keys: [&str; 2]| {
+        let sound = |keys: &[&str]| {
             keys.iter()
                 .filter_map(|k| db.prop(class, k))
                 .map(|v| v.split_whitespace().next().unwrap_or("").to_owned())
@@ -207,8 +209,11 @@ impl EngineClass {
             turn_off_time: time
                 .and_then(|t| t.trim().parse().ok())
                 .unwrap_or(TURN_OFF_TIME),
-            takeoff: sound(["TakeoffSound", "WindUpSound"]),
-            land: sound(["LandSound", "WindDownSound"]),
+            takeoff: sound(&["TakeoffSound", "WindUpSound"]),
+            land: sound(&["LandSound", "WindDownSound"]),
+            // B2 FUN_00208e28 selects the two class sound slots.
+            roll: sound(&["TrickSound"]),
+            reversal: sound(&["FlipSound"]),
             boost: db
                 .props_all(class, "BoostSound")
                 .into_iter()
@@ -269,6 +274,7 @@ pub struct Instance {
     /// A flyer's time graphs, and the flight state it was last seen in.
     pub wind: Wind,
     phase: Option<FlightPhase>,
+    maneuver: Option<ManeuverKind>,
     /// A takeoff or a landing began in the last update.
     pub wind_began: bool,
     pub speed_step: Option<(f32, f32)>,
@@ -516,6 +522,22 @@ impl EngineSounds {
                     });
                 }
             }
+            let maneuver = v.flyer.active_maneuver();
+            let previous = std::mem::replace(&mut e.1.maneuver, maneuver);
+            if let Some(kind) = maneuver.filter(|_| maneuver != previous) {
+                let name = match kind {
+                    ManeuverKind::SideRoll => &ec.roll,
+                    ManeuverKind::Reversal => &ec.reversal,
+                };
+                if let Some(name) = name {
+                    self.shots.push(JetShot {
+                        unit: i,
+                        kind: JetShotKind::Maneuver(kind),
+                        name: name.clone(),
+                        pos: v.pos,
+                    });
+                }
+            }
             if let Some((previous, speed)) = e.1.speed_step {
                 for b in ec.boost.iter().filter(|b| b.crossed(previous, speed)) {
                     self.shots.push(JetShot {
@@ -705,6 +727,7 @@ pub enum JetShotKind {
     /// A flyer's: `unit` is then the vehicle's index.
     Takeoff,
     Land,
+    Maneuver(ManeuverKind),
     Boost {
         rising: bool,
     },

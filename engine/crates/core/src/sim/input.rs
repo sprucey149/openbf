@@ -78,6 +78,10 @@ pub mod buttons {
     pub const HERO_DECLINE: u32 = 1 << 25;
     pub const FIRST_PERSON: u32 = 1 << 26;
     pub const VIEW_TOGGLE: u32 = 1 << 27;
+    /// Dedicated starfighter reversal, consumed in a flyer's pilot seat.
+    pub const FLYER_REVERSE: u32 = 1 << 28;
+    /// Dedicated keyboard equivalent of the controller's contextual stunt button.
+    pub const FLYER_TRICK: u32 = 1 << 29;
 }
 
 pub const LOOK_UNIT: f32 = 1.0 / 65536.0;

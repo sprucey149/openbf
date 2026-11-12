@@ -272,3 +272,86 @@ fn mustafars_regions_hurt_as_on_the_ps2() {
         }
     }
 }
+
+/// The F9 witness left a hover attack active after its target vanished at the
+/// tunnel. Start in that state on the same collision and ordinary nav arc.
+#[test]
+fn bespin_jet_trooper_leaves_the_tunnel_after_losing_its_target() {
+    use core::ai::{jet::Flight, Route};
+    use core::soldier::{GroundRules, Stance};
+
+    let root = std::env::var_os("JET_BAKED")
+        .map_or_else(game::assets::baked_root, std::path::PathBuf::from);
+    let (scene, _) = game::assets::load_battle_scene(&root.join("bf1_bes1"), "con").unwrap();
+    let graph = game::layout::nav_graph(&scene.manifest, &scene.dir).unwrap();
+    let arc = &graph.arcs[45];
+    assert_eq!((arc.a, arc.b, arc.flags), (37, 11, 0));
+
+    let mut sim = Sim::empty(42);
+    sim.ground_rules = GroundRules::Bf1;
+    sim.heightfield = scene.heightfield();
+    scene.install_collision(&mut sim);
+    sim.nav = Some(graph);
+    let db = load_classdb(&root.join("classes"), "bf1", &["rep"]).unwrap();
+    let roster = ClassRoster::build(&db, "rep_inf_jet_trooper", 1, None).unwrap();
+    let class = roster.register(&mut sim, &mut Vec::new());
+    let start = Vec3::new(4.30, 98.75, -94.76);
+    let waypoint = Vec3::new(35.5, 98.7, -50.24);
+    let approach = Vec3::new(-4.48, 0.0, 3.81).normalize();
+    let bot = sim
+        .spawn(&class.spec(0, start, 3.75, Controller::Ai, 0, 0))
+        .unwrap();
+    let u = &mut sim.units[bot.index as usize];
+    u.soldier.pos = start;
+    u.soldier.fuel = 0.7;
+    u.soldier.stance = Stance::Hover;
+    u.soldier.grounded = false;
+    u.ai.next_think = u64::MAX;
+    u.ai.jet.flight = Some(Flight {
+        goal: start + approach * 30.0,
+        kick: Vec3::Y,
+        height: Some(start.y + 10.0),
+        route: false,
+        hop: false,
+        since: 0,
+        launched: true,
+        stop: false,
+    });
+    u.ai.install_route_for_fixture(Some(Route {
+        dest_hub: 39,
+        next_hub: 37,
+        via_arc: Some(45),
+        waypoint,
+        from: glam::Vec2::new(start.x, start.z),
+        ..Default::default()
+    }));
+    let capsule = sim.unit(bot).unwrap().capsule();
+    let contact = sim.collision.wall_sweep(&capsule, approach, 0.05);
+    assert!(contact.is_some(), "no tunnel contact: {capsule:?}");
+
+    let mut landed_at = None;
+    for _ in 0..300 {
+        sim.step(&[]);
+        let u = sim.unit(bot).expect("same trooper");
+        assert!(u.alive);
+        if sim.tick == 1 {
+            assert_eq!(u.soldier.stance, Stance::Fall, "stale hover attack");
+        }
+        if u.soldier.grounded {
+            landed_at.get_or_insert(sim.tick);
+        }
+        if let Some(landed) = landed_at.filter(|_| core::nav::xz_dist(u.soldier.pos, start) > 4.0) {
+            assert!(landed <= 30, "stayed in the air: {landed}");
+            println!(
+                "landed at tick {landed}; over 4 m from the tunnel at tick {}",
+                sim.tick
+            );
+            return;
+        }
+    }
+    let u = sim.unit(bot).unwrap();
+    panic!(
+        "never left the tunnel: landed {landed_at:?}, {:?}",
+        u.soldier.pos
+    );
+}

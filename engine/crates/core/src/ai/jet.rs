@@ -221,7 +221,11 @@ pub(super) fn run(
         || mv.serving;
     if let Some(mut f) = st.jet.flight {
         f.launched |= matches!(s.stance, Stance::Jet | Stance::Hover);
-        if (f.launched && !s.stance.airborne())
+        // A hover attack returns to its prior behavior if it loses its
+        // target (B2 FUN_002dc448, 265345–265379; exit FUN_002dc5c0).
+        let attack_lost_target = f.height.is_some() && !f.route && !f.hop && st.target.is_none();
+        if (attack_lost_target && !f.launched)
+            || (f.launched && !s.stance.airborne())
             || s.stance == Stance::Fall
             || (!f.launched && sim.tick > f.since + crate::TICK_HZ as u64)
         {
@@ -232,7 +236,7 @@ pub(super) fn run(
             } else {
                 nav::xz_dist(s.pos, f.goal) < 3.0 && (f.height.is_some() || f.hop)
             };
-            f.stop |= blocked || (f.launched && arrived);
+            f.stop |= blocked || attack_lost_target || (f.launched && arrived);
             st.jet.flight = Some(f);
         }
     }

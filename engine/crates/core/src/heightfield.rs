@@ -40,11 +40,18 @@ impl Heightfield {
         self.heights[(iz * self.size + ix) as usize]
     }
 
+    /// Clamped XZ coordinates in metres from the grid's minimum corner.
+    pub(crate) fn grid_point(&self, x: f32, z: f32) -> (f32, f32) {
+        let max = (self.size - 1) as f32 * self.unit;
+        (
+            (x + self.offset_x).clamp(0.0, max),
+            (z + self.offset_z).clamp(0.0, max),
+        )
+    }
+
     /// The clamped cell under (x, z) and the fractions inside it.
     fn cell(&self, x: f32, z: f32) -> (u32, u32, f32, f32) {
-        let max = (self.size - 1) as f32 * self.unit;
-        let fx = (x + self.offset_x).clamp(0.0, max);
-        let fz = (z + self.offset_z).clamp(0.0, max);
+        let (fx, fz) = self.grid_point(x, z);
         let inv = 1.0 / self.unit;
         let ix = (fx * inv) as u32;
         let iz = (fz * inv) as u32;

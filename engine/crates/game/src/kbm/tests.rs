@@ -159,6 +159,21 @@ fn a_saved_layout_from_before_the_viewpoint_key_keeps_its_remaps() {
 }
 
 #[test]
+fn existing_layouts_pick_up_both_starfighter_maneuver_keys() {
+    let mut saved = Bindings::pc_default();
+    saved
+        .table
+        .retain(|(_, bind)| bind.bits & (buttons::FLYER_TRICK | buttons::FLYER_REVERSE) == 0);
+    assert!(saved.remap(0, Trigger::Key(KeyCode::AltLeft)));
+    let upgraded = saved.with_new_actions();
+    assert!(upgraded.is_valid());
+    assert_eq!(upgraded.table[0].0, Trigger::Key(KeyCode::AltLeft));
+    for button in [buttons::FLYER_TRICK, buttons::FLYER_REVERSE] {
+        assert!(upgraded.table.iter().any(|(_, bind)| bind.bits == button));
+    }
+}
+
+#[test]
 fn a_controller_alone_passes_through_untouched() {
     let mut k = Kbm::default();
     let pad = PadState {

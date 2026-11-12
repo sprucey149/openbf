@@ -710,7 +710,11 @@ The integration with the port's own AI is [ours]: deterministic per-unit
 hashed draws, an initially delayed first hop, a committed flight destination,
 no ground ledge veto while in that flight, a 3 m attack end radius (route
 arrival needs the ordinary arrival radius and feet above the endpoint), and cancellation
-for boarding, tool use and off-map recovery. JetJump hints activate inside
+for boarding, tool use and off-map recovery. An attack whose target has
+gone also ends, as in BF2 FUN_002dc448 (B2:265345–265379), which returns to
+its previous behavior and runs the flight exit command. The shared bot
+policy drops a launched hover attack and discards a pending one. JetJump
+hints activate inside
 their authored radius (ordinary route arrival slack when absent); their
 endpoint/direction semantics remain a fidelity follow-up. The height
 correction changes the hover's flight axis without redirecting its weapon's

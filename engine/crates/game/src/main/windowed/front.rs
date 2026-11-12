@@ -103,6 +103,8 @@ fn action_name(bits: u32, walk: (i8, i8)) -> String {
         (b::SWITCH_WEAPON, "Next weapon"),
         (b::SWITCH_SECONDARY, "Secondary weapon"),
         (b::VIEW_TOGGLE, "Viewpoint"),
+        (b::FLYER_TRICK, "Starfighter stunt"),
+        (b::FLYER_REVERSE, "Starfighter reversal"),
         (b::SQUAD_MOVE_OUT, "Squad move"),
         (b::SQUAD_HOLD, "Squad hold"),
         (b::SQUAD_AT_EASE, "Squad at ease"),

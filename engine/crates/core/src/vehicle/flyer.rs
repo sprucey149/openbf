@@ -11,14 +11,19 @@ use super::Vehicle;
 use crate::fmath;
 use glam::{Quat, Vec3};
 
+mod maneuver;
+pub use maneuver::{FlightReversal, ManeuverKind, PilotManeuvers};
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct FlyerParams {
     pub bf2: bool,
     pub never_crash_when_unpiloted: bool,
     pub trick_roll_speed: f32,
+    pub trick_flip_speed: f32,
     pub pilot_repair_scale: f32,
     pub aim_box: f32,
     pub trick_drain: f32,
+    pub trick_flip_drain: f32,
     pub trick_side_strafe: f32,
     pub has_chunks: bool,
     pub view_fov: f32,
@@ -114,9 +119,11 @@ impl Default for FlyerParams {
             bf2: false,
             never_crash_when_unpiloted: false,
             trick_roll_speed: 1.0,
+            trick_flip_speed: 1.0,
             pilot_repair_scale: 0.005,
             aim_box: 0.0,
             trick_drain: 15.0,
+            trick_flip_drain: 50.0,
             trick_side_strafe: 0.0,
             has_chunks: false,
             view_fov: 48.0,
@@ -297,6 +304,8 @@ pub struct FlyerState {
     pub side_roll: Vec3,
     pub strafe_vertical: f32,
     pub roll_delta: f32,
+    pub pilot_maneuvers: PilotManeuvers,
+    pub reversal: FlightReversal,
     pub damager: Option<crate::unit::UnitHandle>,
     /// The AI pilot's flight state (`ai::flyer_drive`). Default unless a bot
     /// is flying it, so it adds no bytes to any other flyer's hash.
@@ -516,6 +525,8 @@ impl Default for FlyerState {
             side_roll: Vec3::ZERO,
             strafe_vertical: 0.0,
             roll_delta: 0.0,
+            pilot_maneuvers: PilotManeuvers::default(),
+            reversal: FlightReversal::default(),
             damager: None,
             ai: FlyerAi::default(),
         }
@@ -523,6 +534,18 @@ impl Default for FlyerState {
 }
 
 impl FlyerState {
+    pub fn active_maneuver(&self) -> Option<ManeuverKind> {
+        if self.phase != FlightPhase::Flying {
+            None
+        } else if self.reversal.active() {
+            Some(ManeuverKind::Reversal)
+        } else if self.side_roll != Vec3::ZERO {
+            Some(ManeuverKind::SideRoll)
+        } else {
+            None
+        }
+    }
+
     /// A pad's untouched flyer adds no bytes to the old ground-map hash.
     pub fn hash_into(&self, eat: &mut impl FnMut(&[u8])) {
         if *self == Self::default() {
@@ -580,6 +603,8 @@ impl FlyerState {
         }
         self.ai.hash_into(eat);
         self.threats.hash_into(eat);
+        self.pilot_maneuvers.hash_into(eat);
+        self.reversal.hash_into(eat);
     }
 }
 
@@ -703,7 +728,7 @@ fn crash_spin(s: &mut FlyerState, p: &FlyerParams, sign: f32, dt: f32) {
 }
 
 pub fn side_roll(s: &mut FlyerState, p: &FlyerParams, side: Vec3) {
-    if p.trick_drain == 0.0 || s.in_roll || s.drained {
+    if p.trick_drain == 0.0 || s.in_roll || s.reversal.active() || s.drained {
         s.side_roll = Vec3::ZERO;
         return;
     }
@@ -736,7 +761,7 @@ fn roll_stop(s: &mut FlyerState) {
     s.in_roll = false;
 }
 
-fn roll_update(s: &mut FlyerState, p: &FlyerParams, dt: f32) {
+fn roll_update(s: &mut FlyerState, p: &FlyerParams, speed: f32, dt: f32) {
     use std::f32::consts::{FRAC_PI_2, PI, TAU};
     if s.side_roll != Vec3::ZERO && s.crash_roll == s.crash_roll_target && s.roll_delta.abs() < 0.8
     {
@@ -773,6 +798,9 @@ fn roll_update(s: &mut FlyerState, p: &FlyerParams, dt: f32) {
         return;
     }
     if s.roll_delta.abs() < 0.25 {
+        if maneuver::continue_upside_down_roll(s, p, speed) {
+            return;
+        }
         if s.crash_roll_target.abs() <= FRAC_PI_2 {
             s.crash_roll_target = 0.0;
             if s.crash_roll == 0.0 && s.in_roll {
@@ -865,7 +893,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         vel,
         rot,
         state: s,
-        input,
+        mut input,
         occupied,
     } = f;
     let toggle = input.jump && !s.jump_was_down;
@@ -877,9 +905,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     // BF2's energy helper permits the tick which drains past zero, then
     // recovers at 20 (or the smaller authored maximum).
     // The original blocks recovery during stunts, not ordinary boost.
-    // Stunts remain unimplemented; below the normal speed ceiling a latched
-    // boost can therefore recover energy before this tick's drain.
-    if p.bf2 && !s.in_roll && current_speed <= p.max_speed + 0.0001 {
+    if p.bf2 && !s.in_roll && !s.reversal.active() && current_speed <= p.max_speed + 0.0001 {
         restore_energy(s, p, dt);
     }
 
@@ -946,6 +972,30 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         FlightPhase::Falling => s.lift = (s.lift - dt * 0.2).max(0.0),
         FlightPhase::Crashed => {}
     }
+    if !input.human || !p.bf2 {
+        s.pilot_maneuvers = PilotManeuvers::default();
+    }
+    if s.phase != FlightPhase::Flying {
+        s.reversal = FlightReversal::default();
+    }
+    if let Some(request) = s.pilot_maneuvers.take_request(
+        input,
+        input.human
+            && p.bf2
+            && s.phase == FlightPhase::Flying
+            && !env.in_landing_region
+            && p.trick_drain > 0.0
+            && p.trick_roll_speed > 0.0
+            && !s.drained,
+        s.in_roll || s.reversal.active(),
+        p.trick_flip_drain > 0.0 && p.trick_flip_speed > 0.0,
+        dt,
+    ) {
+        maneuver::start(s, p, request, current_speed);
+        input.pitch = 0.0;
+        input.turn = 0.0;
+        input.strafe = 0.0;
+    }
     if s.phase == FlightPhase::Landed {
         *vel = Vec3::ZERO;
         s.omega = Vec3::ZERO;
@@ -1005,7 +1055,8 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     if p.bf2 {
         match s.phase {
             FlightPhase::Flying => {
-                roll_update(s, p, dt);
+                roll_update(s, p, current_speed, dt);
+                maneuver::advance_reversal(s, p, &mut frame, dt);
                 side_strafe(s, p);
             }
             FlightPhase::Falling | FlightPhase::Crashed => {}
@@ -1016,7 +1067,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         }
     }
     if p.bf2 && s.phase == FlightPhase::Flying {
-        let roll = if env.in_landing_region || input.strafe.abs() < 0.3 {
+        let roll = if env.in_landing_region || s.reversal.active() || input.strafe.abs() < 0.3 {
             0.0
         } else {
             (input.strafe - 0.3 * input.strafe.signum()) / 0.7
@@ -1078,7 +1129,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             if p.bf2 {
                 s.omega.x = angular_slew(s.omega.x, pitch_target, p.pitch_filter, p.pitch_damp, dt);
                 s.omega.y = angular_slew(s.omega.y, turn_target, p.turn_filter, p.turn_damp, dt);
-                s.omega.z = if s.level_time >= 0.8 && !s.in_roll {
+                s.omega.z = if s.level_time >= 0.8 && !s.in_roll && !s.reversal.active() {
                     s.roll_input = 0.0;
                     -p.level_filter * right.y
                 } else {
@@ -1164,7 +1215,11 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         bank_speed
     };
     let bank_acceleration = s.omega.cross(local_velocity) / bank_divisor.max(f32::MIN_POSITIVE);
-    let pitch_tilt = throttle * p.thrust_pitch_angle * s.lift + bank_acceleration.z * p.bank_angle;
+    let mut pitch_tilt =
+        throttle * p.thrust_pitch_angle * s.lift + bank_acceleration.z * p.bank_angle;
+    if s.reversal.active() {
+        pitch_tilt += s.reversal.pitch();
+    }
     let rolling = s.phase == FlightPhase::Flying && (s.in_roll || s.crash_roll != 0.0);
     let roll_tilt =
         if p.bf2 && (rolling || matches!(s.phase, FlightPhase::Falling | FlightPhase::Crashed)) {
@@ -1175,6 +1230,7 @@ pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     s.tilt_pitch += (pitch_tilt - s.tilt_pitch) * p.bank_filter * dt;
     s.tilt_roll += (roll_tilt - s.tilt_roll) * p.bank_filter * dt;
     s.roll_delta = roll_tilt - s.tilt_roll;
+    maneuver::finish_reversal(s, pitch_tilt - s.tilt_pitch);
     let angular_speed = s.omega.length();
     if angular_speed > 0.0001 {
         let (sin, cos) = fmath::sin_cos(angular_speed * dt * 0.5);

@@ -628,6 +628,21 @@ fn terrain_march(hf: &Heightfield, a: Vec3, b: Vec3, clear: &mut bool) -> f32 {
     let mid = (d.x * d.x + d.z * d.z > TERRAIN_RAY_PIECE * TERRAIN_RAY_PIECE)
         .then(|| terrain_midpoint(a, b));
     if let Some(mid) = mid.filter(|&mid| mid != a && mid != b) {
+        // Both ends clamp to the same sample, so all recursive midpoints
+        // read its height too. Skip pieces whose endpoints keep the same
+        // side and cannot change the search state or produce a hit.
+        if hf.grid_point(a.x, a.z) == hf.grid_point(b.x, b.z) {
+            let height = hf.height_at(a.x, a.z);
+            let a_under = a.y < height;
+            let b_under = b.y < height;
+            if !a_under && !b_under {
+                *clear = true;
+                return 1.0;
+            }
+            if a_under && b_under && !*clear {
+                return 1.0;
+            }
+        }
         let f = terrain_march(hf, a, mid, clear);
         if f < 1.0 {
             return f * 0.5;
@@ -723,6 +738,24 @@ mod tests {
         s.heightfield = terrain_y.map(flat_hf);
         s.collision = world;
         s
+    }
+
+    #[test]
+    fn retail_terrain_ray_skips_long_runs_clamped_to_the_same_height() {
+        let hf = flat_hf(0.0);
+        let a = Vec3::new(-100_000_000.0, 1.0, 0.0);
+        let b = Vec3::new(100_000_000.0, 1.0, 0.0);
+        assert_eq!(ray_terrain_ps2(&hf, &[], a, b), None);
+        assert_eq!(
+            ray_terrain_ps2(&hf, &[], a.with_y(-1.0), b.with_y(-1.0)),
+            None
+        );
+
+        // First crossing is outside the grid, at the same clamped sample.
+        // The regular nearest-first split still supplies its fraction.
+        let b = b.with_y(-3.0);
+        let f = ray_terrain_ps2(&hf, &[], a, b).unwrap();
+        assert_eq!(f, 0.25);
     }
 
     #[test]
