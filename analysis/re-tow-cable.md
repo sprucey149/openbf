@@ -106,7 +106,8 @@ and twelve contacts respectively. The old solver first diverged
 at ticks 2,682 and 1,483. The largest single-update contact offsets
 fell from 2.530 m to 0.13 mm and from 2.669 m to 48.36 mm. These
 windows use the original motion and cover 13 recorded primitives.
-The complete port flight and six upper-body frames are still open.
+The staged port flight below extends this to a complete trip. Six
+upper-body reference frames remain open.
 
 The last ground contact keeps the link occupied for its update and
 omits the full span from drawing. The next update releases the link
@@ -119,3 +120,17 @@ walker has no live vehicle identity. The port removes the cable when
 the hull dies. The original's later corpse contacts and their random
 draws, death-phase movement and effects, and rear-seat drawing still
 need comparison.
+
+
+## Full staged port flights, November 12, 2026
+
+The input harness starts the authored Snowspeeder airborne near a stationary
+AT-AT on each Hoth map. It drives the rear gun and pilot with ordinary pad
+states through the fixed-tick simulation from launch through the fall. The
+PS2, PC, Xbox and mixed bakes agree within each era. The thirteenth contact,
+release with 60,000 HP still intact, and fatal damage occur on successive
+updates. Those are harness ticks 757–759 on BF1 and 875–877 on BF2. The
+walker enters the authored death clip and advances it over the next six
+updates. The sequence matches the three original BF2 updates above.
+Takeoff, an independently played trip, and matched visual fall and rear-seat
+effects remain open.
