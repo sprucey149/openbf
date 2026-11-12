@@ -340,6 +340,8 @@ use menu_actions::{apply_pause_action, resolve_direct_settings};
 mod idle;
 #[path = "windowed/mouse.rs"]
 mod mouse;
+#[path = "windowed/spawn_feedback.rs"]
+mod spawn_feedback;
 
 enum Screen {
     Shell,
@@ -460,6 +462,7 @@ struct App {
     /// Card DPRX: the whole round's record of the player (dev mode).
     matchlog: Option<game::matchlog::MatchLog>,
     snapshot_requested: bool,
+    snapshot_notice: Option<(bool, std::time::Instant)>,
     /// Quit chosen in the pause menu; handled after the frame.
     quit_clicked: bool,
     /// Restart Mission confirmed in the pause menu; handled after the frame.
@@ -742,6 +745,7 @@ impl App {
             blackbox: None,
             matchlog: None,
             snapshot_requested: false,
+            snapshot_notice: None,
             prev_menu_buttons: 0,
             gameplay_stick: GameplayStick::default(),
             stick_range: input::StickRange::default(),
@@ -1343,6 +1347,8 @@ impl App {
             bb.write("exit", Some(walk), true);
         }
         self.blackbox = None;
+        self.snapshot_requested = false;
+        self.snapshot_notice = None;
         // Card DPRX: a battle left before its outcome still writes its log.
         if let (Some(m), Some((walk, _))) = (self.matchlog.as_mut(), self.walk.as_ref()) {
             if let Some(p) = m.write(&walk.sim, "quit") {

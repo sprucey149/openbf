@@ -268,15 +268,16 @@ fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
 }
 
 #[test]
-fn bf1_first_spawn_shows_a_unit_only_after_a_post_is_confirmed() {
-    use core::sim::{buttons::SPAWN_ACCEPT, PadState};
+fn bf1_spawn_team_preview_keeps_the_command_post_before_unit_selection() {
+    use super::spawn_feedback::Selection;
+    use core::sim::{buttons, PadState, ScreenPick};
     use core::soldier::GroundRules;
     use ui::spawn_draw::SpawnPage;
 
     let mut walk = game::walk::WalkSim::new(42, glam::Vec3::ZERO, None);
     walk.sim.ground_rules = GroundRules::Bf1;
     let troop = &walk.teams[0];
-    walk.sim.classes[0].push(core::unit::UnitClass {
+    let class = core::unit::UnitClass {
         consts: troop.consts,
         max_health: troop.max_health,
         health_type: troop.health_type,
@@ -292,7 +293,10 @@ fn bf1_first_spawn_shows_a_unit_only_after_a_post_is_confirmed() {
         max: None,
         unlock_points: 0,
         droideka: None,
-    });
+    };
+    walk.sim.classes[0] = vec![class; 2];
+    let preview = walk.teams[0].classes[0].clone();
+    walk.teams[0].classes.push(preview);
     let at = glam::Vec3::ZERO;
     walk.sim.add_cp(
         core::cp::CpDef {
@@ -309,37 +313,91 @@ fn bf1_first_spawn_shows_a_unit_only_after_a_post_is_confirmed() {
         },
         Some(0),
     );
+    let other_post = glam::Vec3::X * 100.0;
+    let mut def = walk.sim.cps[0].def.clone();
+    def.name = "Second".into();
+    def.pos = other_post;
+    def.capture = core::region::Region::sphere(other_post, 10.0);
+    def.spawn_nodes = vec![(other_post, 0.0)];
+    walk.sim.add_cp(def, Some(0));
     assert!(walk.sim.open_spawn_screens(0, true));
 
     let feed = game::event_feed::EventFeed::for_walk(std::path::Path::new(""), "bf1", &walk);
     let accept = PadState {
-        buttons: SPAWN_ACCEPT,
+        buttons: buttons::SPAWN_ACCEPT,
         ..Default::default()
     };
     let side = game::spawn_page::page(&walk, &feed, 0).unwrap();
     assert!(matches!(side, SpawnPage::Side { .. }));
-    assert!(game::spawn_preview::opening_preview(&side, GroundRules::Bf1).is_none());
-    assert!(
-        game::spawn_preview::opening_preview(&side, GroundRules::Bf2)
-            .is_some_and(game::spawn_preview::stands)
+    assert_eq!(game::spawn_preview::shown(&side), Some((0, 0)));
+    let starting_side = Selection::read(&walk);
+    walk.step_tick(&[PadState {
+        buttons: buttons::SPAWN_POST_DOWN,
+        ..Default::default()
+    }]);
+    let other = game::spawn_page::page(&walk, &feed, 0).unwrap();
+    assert_eq!(game::spawn_preview::shown(&other), Some((1, 0)));
+    let changed_side = Selection::read(&walk);
+    assert_eq!(
+        starting_side.movement_cue(changed_side, GroundRules::Bf1),
+        Some("shell_select_unit")
+    );
+    assert_eq!(
+        starting_side.movement_cue(changed_side, GroundRules::Bf2),
+        Some("shell_select_change")
+    );
+    assert_eq!(
+        changed_side.movement_cue(changed_side, GroundRules::Bf1),
+        None
     );
 
-    walk.step_tick(&[accept]);
+    walk.step_tick(&[PadState {
+        pick: Some(ScreenPick::Side(0)),
+        ..accept
+    }]);
     let post = game::spawn_page::page(&walk, &feed, 0).unwrap();
     assert!(matches!(post, SpawnPage::Map { .. }));
-    assert!(
-        !game::spawn_preview::opening_preview(&post, GroundRules::Bf1)
-            .is_some_and(game::spawn_preview::stands)
+    assert!(!game::spawn_preview::stands(&post));
+
+    let first_post = Selection::read(&walk);
+    walk.step_tick(&[PadState {
+        pick: Some(ScreenPick::Post(1)),
+        ..Default::default()
+    }]);
+    assert_eq!(
+        first_post.movement_cue(Selection::read(&walk), GroundRules::Bf1),
+        Some("shell_select_change")
     );
 
     walk.step_tick(&[PadState::default()]);
     walk.step_tick(&[accept]);
     let class = game::spawn_page::page(&walk, &feed, 0).unwrap();
     assert!(matches!(class, SpawnPage::Class { .. }));
-    assert!(
-        game::spawn_preview::opening_preview(&class, GroundRules::Bf1)
-            .is_some_and(game::spawn_preview::stands)
+    assert!(game::spawn_preview::stands(&class));
+    let first_class = Selection::read(&walk);
+    walk.step_tick(&[PadState {
+        buttons: buttons::SPAWN_CLASS_NEXT,
+        ..Default::default()
+    }]);
+    assert_eq!(
+        first_class.movement_cue(Selection::read(&walk), GroundRules::Bf1),
+        Some("shell_select_unit")
     );
+}
+
+#[test]
+fn spawn_selection_cues_resolve_in_the_reported_battle_sound_banks() {
+    let Some(root) = std::env::var_os("SPAWN_PREVIEW_ASSETS") else {
+        eprintln!("SKIP: SPAWN_PREVIEW_ASSETS must name the owned mixed bake");
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    for map in ["bf1_bes1", "bf2_spa7"] {
+        let mut sounds = game::sounds::SoundLib::load(&root.join(map)).unwrap();
+        for cue in ["shell_select_change", "shell_select_unit"] {
+            assert!(!sounds.play_2d(None, cue).is_empty(), "{map}: {cue}");
+        }
+    }
 }
 
 #[path = "tests/assault.rs"]

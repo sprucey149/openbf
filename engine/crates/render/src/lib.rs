@@ -243,6 +243,7 @@ struct Globals {
     /// [`IFACE_DIR_CAMERA`] in the world, for [`LightPath::Iface`] draws.
     iface_dir: [f32; 3],
     _pad11: f32,
+    iface_view_proj: [[f32; 4]; 4],
 }
 
 /// The world's depth-writing pipelines with the shader's `CULLS` off, for a draw
@@ -547,7 +548,7 @@ mod tests {
 
     #[test]
     fn globals_matches_the_wgsl_uniform_size() {
-        assert_eq!(std::mem::size_of::<Globals>(), 688);
+        assert_eq!(std::mem::size_of::<Globals>(), 752);
         assert_eq!(std::mem::size_of::<Globals>() % 16, 0);
     }
 }

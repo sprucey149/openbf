@@ -1,5 +1,6 @@
 //! Native window lifecycle and event dispatch for the application.
 
+use super::spawn_feedback::{draw_snapshot_notice, Selection};
 use super::{
     apply_pause_action, autopilot_pad, hud_model, hud_title, load_and_upload, mouse, note_sounds,
     play_ambience, play_event_sounds, rain_splashes, record_round, spawn_model, start_take,
@@ -490,6 +491,7 @@ impl winit::application::ApplicationHandler for App {
                             gpu.step_stations(&walk.sim);
                         }
                         let mut tick_pad = pad;
+                        let mut selection = Selection::read(walk);
                         let ticks = walk.advance_with(dt, std::slice::from_ref(&pad), |walk| {
                             let hook_t0 = std::time::Instant::now();
                             if let Some(gpu) = self.gpu.as_mut() {
@@ -508,6 +510,13 @@ impl winit::application::ApplicationHandler for App {
                             if let (Some(audio), Some(sl)) =
                                 (self.audio.as_mut(), self.sounds.as_mut())
                             {
+                                let next = Selection::read(walk);
+                                if let Some(cue) =
+                                    selection.movement_cue(next, walk.sim.ground_rules)
+                                {
+                                    sl.play_2d(Some(audio), cue);
+                                }
+                                selection = next;
                                 play_event_sounds(
                                     audio,
                                     sl,
@@ -661,8 +670,11 @@ impl winit::application::ApplicationHandler for App {
                     }
                     // The black box: this frame's time, and a snapshot when
                     // F9 was pressed or the stuck alarm fired — written on its
-                    // own thread, with a line in the message box.
+                    // own thread. F9 reports the outcome above the menus.
                     if let Some(bb) = self.blackbox.as_mut() {
+                        if let Some(saved) = bb.poll_hotkey_write() {
+                            self.snapshot_notice = Some((saved, std::time::Instant::now()));
+                        }
                         let size = self.renderer.as_ref().map_or((0, 0), |r| r.size());
                         bb.frame(dt, [size.0, size.1]);
                         let reason = if std::mem::take(&mut self.snapshot_requested) {
@@ -672,14 +684,16 @@ impl winit::application::ApplicationHandler for App {
                         };
                         if let Some(reason) = reason {
                             bb.write(reason, Some(walk), false);
-                            self.feed.say(
-                                format!(
-                                    "snapshot saved ({reason}, {:.1} s)",
-                                    walk.sim.tick as f32 * core::TICK_DT
-                                ),
-                                ui::hud::message_color::YELLOW,
-                                walk.sim.tick,
-                            );
+                            if reason == "stuck" {
+                                self.feed.say(
+                                    format!(
+                                        "snapshot saved ({reason}, {:.1} s)",
+                                        walk.sim.tick as f32 * core::TICK_DT
+                                    ),
+                                    ui::hud::message_color::YELLOW,
+                                    walk.sim.tick,
+                                );
+                            }
                         }
                     }
                     if let Some(p) = self.frame_profile.as_mut() {
@@ -916,11 +930,7 @@ impl winit::application::ApplicationHandler for App {
                     let page = spawn
                         .as_ref()
                         .and_then(|s| s.page.as_ref())
-                        .filter(|_| self.hud_view.is_some() && !self.cheats.hud_hidden)
-                        .and_then(|page| {
-                            let (walk, _) = self.walk.as_ref()?;
-                            game::spawn_preview::opening_preview(page, walk.sim.ground_rules)
-                        });
+                        .filter(|_| self.hud_view.is_some() && !self.cheats.hud_hidden);
                     if let Some(vis) = self.soldier_vis.as_ref() {
                         let step = if self.paused { 0.0 } else { dt };
                         let (body, gun) = self.spawn_preview.draws_live(
@@ -953,6 +963,10 @@ impl winit::application::ApplicationHandler for App {
                     }
                     let hud_hidden = self.cheats.hud_hidden;
                     let pad_warning = self.pad_warning.clone();
+                    let snapshot_notice = self
+                        .snapshot_notice
+                        .filter(|(_, shown)| shown.elapsed().as_secs_f32() < 3.0)
+                        .map(|(saved, _)| saved);
                     // BF2's own HUD under the egui lines and the spawn
                     // screen (dead, it is the counts and the message box:
                     // the line that says who killed you); the `hud` cheat
@@ -1005,6 +1019,9 @@ impl winit::application::ApplicationHandler for App {
                                 }
                                 if let Some(w) = &pad_warning {
                                     ui::hud::draw_pad_warning(ctx, w);
+                                }
+                                if let Some(saved) = snapshot_notice {
+                                    draw_snapshot_notice(ctx, saved);
                                 }
                             });
                             let (n, bytes) = paint.texture_uploads();

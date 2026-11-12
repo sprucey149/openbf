@@ -76,7 +76,13 @@ impl Renderer {
         let guard = crate::affine::guard(aspect);
         self.shadows
             .prepare(&self.device, &self.queue, camera.view_proj(aspect));
-        let view_proj = camera.reaching(self.far_range).view_proj(aspect);
+        let scene_camera = camera.reaching(self.far_range);
+        let view_proj = scene_camera.view_proj(aspect);
+        let iface_view_proj = Camera {
+            position: glam::Vec3::ZERO,
+            ..scene_camera
+        }
+        .view_proj(aspect);
         let frustum = frustum::Frustum::from_view_proj(&view_proj);
         let (lighting, dome_gain) = self.lightning.unwrap_or((self.lighting, 1.0));
         let water_fog = lighting.water_fog.or(lighting.fog);
@@ -136,6 +142,7 @@ impl Renderer {
             character_ambient_on: f32::from(u8::from(self.lighting.character_ambient.is_some())),
             iface_dir: iface_dir(camera).to_array(),
             _pad11: 0.0,
+            iface_view_proj: iface_view_proj.to_cols_array_2d(),
         };
         self.queue
             .write_buffer(&self.globals_buf, 0, bytemuck::bytes_of(&globals));
@@ -189,7 +196,7 @@ impl Renderer {
         let eye = camera.position;
         // Each draw's world box: the frustum test, the distance bands and the
         // near-first order below all read it, so a draw computes it once.
-        let boxed = |d: &DrawCmd, meshes: &[GpuMesh]| {
+        let boxed = |d: &DrawCmd, meshes: &[GpuMesh], eye| {
             let m = meshes.get(d.mesh.0 as usize)?;
             let (lo, hi) = frustum::transformed_aabb(&d.model, m.bounds.0, m.bounds.1);
             Some((lo, hi, frustum::distance_range(lo, hi, eye)))
@@ -216,6 +223,7 @@ impl Renderer {
         let far_begin = self.lighting.far_fade.map(|f| f.begin);
         let mut keep = Vec::with_capacity(draws.len());
         let mut sorts: Vec<DrawSort> = Vec::with_capacity(draws.len());
+        let mut iface_frustum = None;
         for d in draws {
             // Past its switch or its fade (on a forest map, most of the
             // instances) a draw needs no box, and nothing reads its sort.
@@ -230,10 +238,18 @@ impl Renderer {
                 });
                 continue;
             }
-            let b = boxed(d, &self.meshes);
+            let iface = d.light == LightPath::Iface;
+            let eye = if iface { glam::Vec3::ZERO } else { eye };
+            let b = boxed(d, &self.meshes, eye);
             let mut v = switched(d);
             if self.cull {
-                v = v && visible(d, b, &frustum);
+                let view = if iface {
+                    iface_frustum
+                        .get_or_insert_with(|| frustum::Frustum::from_view_proj(&iface_view_proj))
+                } else {
+                    &frustum
+                };
+                v = v && visible(d, b, view);
                 culled += u32::from(!v);
             }
             keep.push(v);

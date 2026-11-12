@@ -1,5 +1,6 @@
 use super::*;
 use crate::{MeshHandle, SkinnedMeshHandle};
+use glam::Mat4;
 
 /// The interface light turns with the camera: looking down -Z it is the
 /// camera-frame direction itself; turned a quarter left (looking down
@@ -24,7 +25,7 @@ fn blend_draws_sort_far_to_near_and_ties_keep_submission_order() {
     let at = |z: f32| Mat4::from_translation(glam::Vec3::new(0.0, 0.0, z));
     let models = [at(-2.0), at(-9.0), at(-5.0), at(-9.0), at(3.0)];
     let mut order = vec![0, 1, 2, 3, 4];
-    sort_far_to_near(&mut order, glam::Vec3::ZERO, |i| models[i]);
+    sort_far_to_near(&mut order, |i| models[i].w_axis.truncate().length_squared());
     assert_eq!(order, vec![1, 3, 2, 4, 0]);
 }
 
