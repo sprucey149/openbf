@@ -741,8 +741,9 @@ impl Sim {
             let line = b.xz() - a.xz();
             let offset = Vec2::new(feet.x, feet.z) - a.xz();
             let t = line.dot(offset) / line.length_squared();
+            let r = a.radius.min(b.radius);
             (0.0..=1.0).contains(&t)
-                && (offset - line * t).length_squared() <= a.radius.min(b.radius).powi(2)
+                && (offset - line * t).length_squared() <= r * r
                 && (feet.y - (ay + (by - ay) * t)).abs() <= BOUND_DROP
                 && (self.floor_point_under_static(feet, feet.y + STEP_HEIGHT) - feet.y).abs()
                     <= STEP_HEIGHT

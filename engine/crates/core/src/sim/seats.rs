@@ -812,7 +812,8 @@ impl Sim {
                 return false;
             };
             let to = Vec3::new(hub.pos.x, y, hub.pos.z);
-            pos.distance_squared(to) <= crate::ai::RECYCLE_ROAM.powi(2) && self.floor_line(pos, to)
+            pos.distance_squared(to) <= crate::ai::RECYCLE_ROAM * crate::ai::RECYCLE_ROAM
+                && self.floor_line(pos, to)
         })
     }
 

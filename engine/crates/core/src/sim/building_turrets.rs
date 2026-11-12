@@ -68,7 +68,7 @@ pub struct BuildingTurret {
     pub posed: Option<PosedParts>,
     pub self_pilots: Vec<super::self_turrets::SelfPilot>,
     /// Prefer an exit with a walk back to the ground graph for bot gunners.
-    pub(super) prefer_walkable_exit: bool,
+    pub prefer_walkable_exit: bool,
 }
 
 /// A building turret's collision prims that hang on a node its gunner seat

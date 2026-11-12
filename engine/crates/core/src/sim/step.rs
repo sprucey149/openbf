@@ -167,7 +167,7 @@ impl Sim {
         if !u.alive
             || u.controller != Controller::Ai
             || u.droideka.is_some()
-            || u.wall_push.length_squared() < ai::HULL_PUSH_MIN.powi(2)
+            || u.wall_push.length_squared() < ai::HULL_PUSH_MIN * ai::HULL_PUSH_MIN
         {
             return;
         }
@@ -317,7 +317,8 @@ impl Sim {
                     return Some(s.pos);
                 }
             }
-            if exit.is_some_and(|p| p.distance_squared(s.pos) <= ai::RETURN_ARRIVE.powi(2))
+            if exit
+                .is_some_and(|p| p.distance_squared(s.pos) <= ai::RETURN_ARRIVE * ai::RETURN_ARRIVE)
                 && s.grounded
                 && self.level_at(s.pos) == super::Level::On
                 && self.soldier_clear(s.pos)
@@ -328,7 +329,7 @@ impl Sim {
         (exit.is_none()
             && !descent
             && s.grounded
-            && s.pos.distance_squared(start) > ai::PIN_WALKED.powi(2)
+            && s.pos.distance_squared(start) > ai::PIN_WALKED * ai::PIN_WALKED
             && self.level_at(s.pos) == super::Level::On
             && self.soldier_clear(s.pos))
         .then_some(s.pos)

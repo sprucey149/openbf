@@ -341,6 +341,7 @@ fn a_wreck_under_the_cutter_reads_its_rebuild_progress() {
         down: Some(200.0),
         posed: None,
         self_pilots: Vec::new(),
+        prefer_walkable_exit: false,
     });
     let t = s.feed.target(&s.sim, 0).expect("the fallen turret");
     assert_eq!(

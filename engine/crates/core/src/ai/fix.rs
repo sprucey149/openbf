@@ -390,7 +390,7 @@ pub(super) fn closer_stand(sim: &Sim, u: &Unit, st: &AiState, nominal: Vec3) -> 
     let away = Vec3::new(offset.x, 0.0, offset.z).try_normalize()?;
     let rise = centre.y - eye.y;
     let reach_xz_sq = reach * reach - rise * rise;
-    if reach <= 0.0 || reach_xz_sq <= super::HOLD_ARRIVE.powi(2) {
+    if reach <= 0.0 || reach_xz_sq <= super::HOLD_ARRIVE * super::HOLD_ARRIVE {
         return None;
     }
     let mut p = centre + away * (reach_xz_sq.sqrt() - super::HOLD_ARRIVE);
