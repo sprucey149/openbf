@@ -137,13 +137,20 @@ the port lands five of ten bolts in the matched Hard control.
 
 On BF1 Kashyyyk Docks the original targets a grounded soldier 9.57 m
 higher and about 34.8 m away. Its settled shots pitch up 17.43–17.55
-degrees during the sampled six-second window. In the port, the same
-horizontal placement settles the Droideka about 0.37 m lower. It
-deploys in a sustained-engagement control and emits no bolts before
-returning to recovery. From a supported point 2.62 m farther up the
-same slope, both actors stay grounded and the port lands seven of 36
-bolts on the higher target. The exact Docks placement and the
-individual animated barrel positions remain open comparisons.
+degrees and the target keeps full health. In the port the same
+horizontal placement settles the Droideka 0.37 m lower. A map collision
+body blocks the port's eye-to-capsule sight ray and both barrel paths.
+Raising the eye alone by 0.365 m clears sight. Both recorded original
+barrel directions still intersect that body when cast in the port's
+world.
+
+With horizontal movement held, the port keeps a heard contact and
+emits no bolts. With ordinary bot movement from the same start, it
+walks 0.97 m up the ramp, gets sight and begins firing on tick 69.
+All 93 bolts pitch uphill and the target takes no hits. From a
+supported point 2.62 m farther up the slope, one barrel has a clear
+path and the port lands seven of 36 bolts. The blocked Docks placement
+needs no slope or aiming correction for ground recovery.
 
 The port lands all 12 sampled shots in the settled BF2 uphill run and
 all 12 in a second downhill run. A separate downhill original shot
