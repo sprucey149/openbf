@@ -1013,10 +1013,15 @@ impl winit::application::ApplicationHandler for App {
                             if let Some((walk, _)) = self.walk.as_mut() {
                                 // A click sounds as the pad's press of it.
                                 let none = ui::menu::MenuInput::default();
-                                if let (Some(c), Some(sl)) = (
-                                    game::pause::pause_sound(none, 0, 0, &clicked),
-                                    self.sounds.as_mut(),
-                                ) {
+                                let mut cue = game::pause::pause_sound(none, 0, 0, &clicked);
+                                if clicked.iter().any(|a| {
+                                    *a != ui::menu::MenuAction::SetMusic(0.0)
+                                        && *a != ui::menu::MenuAction::Resume
+                                        && *a != ui::menu::MenuAction::Quit
+                                }) {
+                                    cue = Some(ui::shell_feel::MenuSound::Accept);
+                                }
+                                if let (Some(c), Some(sl)) = (cue, self.sounds.as_mut()) {
                                     sl.play_2d(self.audio.as_mut(), c.name());
                                 }
                                 for a in clicked {

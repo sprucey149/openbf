@@ -378,6 +378,10 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
         return Some(why.to_owned());
     }
     match row {
+        Row::Assist => Some(
+            "Aim assist intensity for controllers. Mouse aim uses raw input without assist."
+                .to_owned(),
+        ),
         // Over, the round keeps its teams; the value is the next round's.
         Row::AiCap if m.in_shell.is_none() && m.outcome_line.is_some() => Some(format!(
             "{}\nChanges apply from the next round.",
@@ -408,6 +412,64 @@ pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
     match row {
         Row::AiCap if m.team_size_off && m.in_shell.is_none() => {
             Some("Team size is fixed in this battle: it has no map team sizes to scale.")
+        }
+        _ => None,
+    }
+}
+
+/// Step a slider row forward (right) or backward (left). The pad's Left / Right
+/// and a pointer click of a row's side both step through here.
+pub fn step_slider_action(m: &MenuModel, row: Row, right: bool) -> Option<MenuAction> {
+    match row {
+        Row::Assist => {
+            let d = if right { 0.1 } else { -0.1 };
+            Some(MenuAction::SetAssist(
+                ((m.assist_intensity + d) * 10.0).round() / 10.0,
+            ))
+        }
+        Row::AiCap => {
+            let pct = if right {
+                m.team_size_pct
+                    .saturating_add(10)
+                    .min(crate::population::MAX_TEAM_PCT)
+            } else {
+                m.team_size_pct.saturating_sub(10).max(10)
+            };
+            Some(MenuAction::SetAiCap(pct))
+        }
+        Row::Reinforcements => {
+            let pct = if right {
+                m.reinforcements_pct.saturating_add(10).min(500)
+            } else {
+                m.reinforcements_pct.saturating_sub(10).max(10)
+            };
+            Some(MenuAction::SetReinforcements(pct))
+        }
+        Row::Fov => {
+            let d = if right { 0.05 } else { -0.05 };
+            Some(MenuAction::SetFov(
+                ((m.fov_scale + d) * 20.0).round() / 20.0,
+            ))
+        }
+        Row::Music => {
+            let d = if right { 0.1 } else { -0.1 };
+            Some(MenuAction::SetMusic(
+                ((m.music_volume + d) * 10.0).round().clamp(0.0, 10.0) / 10.0,
+            ))
+        }
+        Row::MouseSensitivity => {
+            let d = if right { 0.1 } else { -0.1 };
+            let (lo, hi) = MOUSE_SENSITIVITY_RANGE;
+            Some(MenuAction::SetMouseSensitivity(
+                (((m.mouse_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
+            ))
+        }
+        Row::PadLookSensitivity => {
+            let d = if right { 0.1 } else { -0.1 };
+            let (lo, hi) = PAD_LOOK_SENSITIVITY_RANGE;
+            Some(MenuAction::SetPadLookSensitivity(
+                (((m.pad_look_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
+            ))
         }
         _ => None,
     }
@@ -501,48 +563,17 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     }
     match rows[cursor] {
         row if row_locked(m, row).is_some() => {}
-        Row::Assist if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
-            actions.push(MenuAction::SetAssist(
-                ((m.assist_intensity + d) * 10.0).round() / 10.0,
-            ));
-        }
-        Row::AiCap if input.left || input.right => {
-            let pct = if input.right {
-                m.team_size_pct
-                    .saturating_add(10)
-                    .min(crate::population::MAX_TEAM_PCT)
-            } else {
-                m.team_size_pct.saturating_sub(10).max(10)
-            };
-            actions.push(MenuAction::SetAiCap(pct));
-        }
-        Row::Reinforcements if input.left || input.right => {
-            let pct = if input.right {
-                m.reinforcements_pct.saturating_add(10).min(500)
-            } else {
-                m.reinforcements_pct.saturating_sub(10).max(10)
-            };
-            actions.push(MenuAction::SetReinforcements(pct));
-        }
-        Row::Fov if input.left || input.right => {
-            let d = if input.right { 0.05 } else { -0.05 };
-            actions.push(MenuAction::SetFov(
-                ((m.fov_scale + d) * 20.0).round() / 20.0,
-            ));
-        }
-        Row::Music if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
-            actions.push(MenuAction::SetMusic(
-                ((m.music_volume + d) * 10.0).round().clamp(0.0, 10.0) / 10.0,
-            ));
-        }
-        Row::MouseSensitivity if input.left || input.right => {
-            let d = if input.right { 0.1 } else { -0.1 };
-            let (lo, hi) = MOUSE_SENSITIVITY_RANGE;
-            actions.push(MenuAction::SetMouseSensitivity(
-                (((m.mouse_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
-            ));
+        Row::Assist
+        | Row::AiCap
+        | Row::Reinforcements
+        | Row::Fov
+        | Row::Music
+        | Row::MouseSensitivity
+            if input.left || input.right =>
+        {
+            if let Some(act) = step_slider_action(m, rows[cursor], input.right) {
+                actions.push(act);
+            }
         }
         Row::PadLookSensitivity if input.left || input.right => {
             let d = if input.right { 0.1 } else { -0.1 };
@@ -1001,8 +1032,10 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     }
                     let rows = rows(m);
                     let has_help = rows.iter().any(|r| {
-                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity)
-                            || row_locked(m, *r).is_some()
+                        matches!(
+                            r,
+                            Row::Assist | Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity
+                        ) || row_locked(m, *r).is_some()
                     });
                     let mut hovered_help = None;
                     let room = ctx.content_rect().height()
@@ -1042,16 +1075,33 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                                     if let Some(a) = press(m, *row) {
                                         actions.push(a);
                                     }
-                                    match row {
-                                        Row::InvertY => actions.push(MenuAction::ToggleInvertY),
-                                        Row::LowPowerResolution => {
-                                            actions.push(MenuAction::ToggleLowPowerResolution)
+                                    // A value row's label is at its left end: a
+                                    // click of it steps back, as Left does. The
+                                    // arrows take their own clicks.
+                                    let side_step = match row {
+                                        Row::Assist
+                                        | Row::AiCap
+                                        | Row::Reinforcements
+                                        | Row::Fov
+                                        | Row::Music
+                                        | Row::MouseSensitivity
+                                        | Row::PadLookSensitivity => Some(false),
+                                        _ => None,
+                                    };
+                                    if let Some(right) = side_step {
+                                        actions.extend(step(m, i, right));
+                                    } else {
+                                        match row {
+                                            Row::InvertY => actions.push(MenuAction::ToggleInvertY),
+                                            Row::LowPowerResolution => {
+                                                actions.push(MenuAction::ToggleLowPowerResolution)
+                                            }
+                                            Row::InputIcons => {
+                                                actions.push(MenuAction::CycleInputIcons(1))
+                                            }
+                                            Row::Viewpoint => actions.push(MenuAction::ToggleViewpoint),
+                                            _ => {}
                                         }
-                                        Row::InputIcons => {
-                                            actions.push(MenuAction::CycleInputIcons(1))
-                                        }
-                                        Row::Viewpoint => actions.push(MenuAction::ToggleViewpoint),
-                                        _ => {}
                                     }
                                 }
                             }

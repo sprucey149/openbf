@@ -311,3 +311,120 @@ fn a_hovered_row_shows_its_help() {
     let gone = frame_texts(&ctx, &m, vec![]);
     assert!(!shows(&gone, why) && !shows(&gone, &pad_help));
 }
+
+/// The shared slider step: every value row moves by its own amount, the pad's
+/// Left / Right and a pointer click of a row's side alike.
+#[test]
+fn step_slider_action_increments_and_decrements_every_slider() {
+    let model = MenuModel {
+        mouse_sensitivity: 1.0,
+        fov_scale: 1.0,
+        music_volume: 0.8,
+        assist_intensity: 1.0,
+        team_size_pct: 100,
+        reinforcements_pct: 100,
+        pad_look_sensitivity: 1.0,
+        ..Default::default()
+    };
+    // Mouse sensitivity
+    assert_eq!(
+        step_slider_action(&model, Row::MouseSensitivity, true),
+        Some(MenuAction::SetMouseSensitivity(1.1))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::MouseSensitivity, false),
+        Some(MenuAction::SetMouseSensitivity(0.9))
+    );
+    // Field of view
+    assert_eq!(
+        step_slider_action(&model, Row::Fov, true),
+        Some(MenuAction::SetFov(1.05))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::Fov, false),
+        Some(MenuAction::SetFov(0.95))
+    );
+    // Music volume
+    assert_eq!(
+        step_slider_action(&model, Row::Music, true),
+        Some(MenuAction::SetMusic(0.9))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::Music, false),
+        Some(MenuAction::SetMusic(0.7))
+    );
+    // Aim assist intensity
+    assert_eq!(
+        step_slider_action(&model, Row::Assist, true),
+        Some(MenuAction::SetAssist(1.1))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::Assist, false),
+        Some(MenuAction::SetAssist(0.9))
+    );
+    // Team size
+    assert_eq!(
+        step_slider_action(&model, Row::AiCap, true),
+        Some(MenuAction::SetAiCap(110))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::AiCap, false),
+        Some(MenuAction::SetAiCap(90))
+    );
+    // Reinforcements
+    assert_eq!(
+        step_slider_action(&model, Row::Reinforcements, true),
+        Some(MenuAction::SetReinforcements(110))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::Reinforcements, false),
+        Some(MenuAction::SetReinforcements(90))
+    );
+    // Controller look speed
+    assert_eq!(
+        step_slider_action(&model, Row::PadLookSensitivity, true),
+        Some(MenuAction::SetPadLookSensitivity(1.1))
+    );
+    assert_eq!(
+        step_slider_action(&model, Row::PadLookSensitivity, false),
+        Some(MenuAction::SetPadLookSensitivity(0.9))
+    );
+    // A non-slider row returns None
+    assert_eq!(step_slider_action(&model, Row::InvertY, true), None);
+}
+
+/// A value row's label sits at its left end: a click of the label steps the
+/// row back, as Left does. The arrows keep their own clicks
+/// (`every_value_row_steps_by_pointer`).
+#[test]
+fn clicking_a_value_rows_label_side_steps_it_back() {
+    let m = MenuModel {
+        mouse_sensitivity: 1.0,
+        fov_scale: 1.0,
+        music_volume: 0.8,
+        assist_intensity: 1.0,
+        team_size_pct: 100,
+        reinforcements_pct: 100,
+        pad_look_sensitivity: 1.0,
+        respawn_label: Some("Respawn".into()),
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    for _ in 0..3 {
+        menu_frame(&ctx, &m, vec![]);
+    }
+    // The mouse sensitivity row: its label sits at the far left of the row.
+    let i = rows(&m)
+        .iter()
+        .position(|r| *r == Row::MouseSensitivity)
+        .unwrap();
+    let left = ctx.read_response(step_id(i, false)).unwrap().rect;
+    // Over the label's own text, at the row's left end (the label sits to the
+    // left of the row's ◀, on the row's own line).
+    let at = egui::pos2(left.center().x - 360.0, left.center().y);
+    assert_eq!(
+        click(&ctx, &m, at),
+        step(&m, i, false),
+        "label side steps back"
+    );
+}
