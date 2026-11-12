@@ -1,7 +1,7 @@
 //! A BF2 soldier's cloth (the Hoth snowtroopers' skirt, the clone capes) as
 //! extra skinned segments of its GLB, pinned rigid to its bones - card CLOTH
-//! slice 1, `analysis/re-cloth.md` [O]. The hero closure also writes an
-//! optional raw-physics companion for live cloth; the GLB stays a fallback.
+//! slice 1, `analysis/re-cloth.md` [O]. The soldier bake also writes a
+//! raw-physics companion for live cloth; the GLB stays a fallback.
 //!
 //! Who wears it (re-cloth 2): a cloth named in the model's `gmod` INFO list is
 //! worn when the side LVL also holds a class of that name with `BASE` `cloth`
@@ -23,7 +23,6 @@ use anyhow::{anyhow, bail, Result};
 use mungefs::cloth::Cloth;
 use mungefs::entity::{EntityClass, GeomModel};
 use mungefs::skel::{mul_row, xform_point, RowMat4, Skeleton};
-use std::path::Path;
 
 /// fnv1a("Transparent") / fnv1a("HardEdge"): EntityClothClass flag bits 36 and
 /// 35 (re-cloth 3, B2 FUN_001da5b0).
@@ -152,32 +151,6 @@ fn physics(c: &Cloth, class: &EntityClass) -> Result<manifest::cloth::Cloth> {
         mass,
         max_acceleration: scalar(0x4e99_4b61, 20.0)?,
     })
-}
-
-/// Write the optional live-cloth companion. Only the hero closure calls this
-/// until other cloth wearers receive their own real-content acceptance.
-pub fn bake_companion(lvl: &Path, model: &str, out: &Path) -> Result<usize> {
-    let data = std::fs::read(lvl)?;
-    let inner = mungefs::open(&data).map_err(|e| anyhow!("{e}"))?;
-    let (m, skel) = crate::soldier::find_soldier(inner, model)?;
-    let first = m
-        .segments
-        .iter()
-        .filter(|s| !s.triangles.is_empty())
-        .count();
-    let mut cloths: Vec<_> = worn_cloths(inner, model, &skel)?
-        .into_iter()
-        .map(|c| c.physics)
-        .collect();
-    for (k, c) in cloths.iter_mut().enumerate() {
-        c.part = first + k;
-    }
-    let path = manifest::cloth::path(out, model);
-    std::fs::write(
-        path,
-        ron::ser::to_string_pretty(&cloths, ron::ser::PrettyConfig::default())?,
-    )?;
-    Ok(cloths.len())
 }
 
 /// A class flag key's value: a number, non-zero = set (the disc writes `1`).
