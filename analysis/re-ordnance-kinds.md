@@ -484,6 +484,8 @@ capital-ship subsystem. Total: 768 locked sequences, 24 selection/dwell timing
 cases, 16 reload cases and 16 bomb-drop cases. Three asset-independent unit
 regressions cover the flyer mesh seed, targetable separation and sentinel
 handling. Optional native-contact replay consumes the retained local captures.
+That probe finds native damage and a port hull intersection within the same
+recording. The next comparison should pair the events in the same time sample.
 
 Run from `engine/` with `OPENBF_REQUIRE_SPACE_ASSETS=1` to reject a missing
 local bake. `OPENBF_SPACE_SECONDARY_REPORT` writes the per-weapon JSON result;

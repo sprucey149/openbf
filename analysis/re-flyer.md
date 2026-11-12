@@ -291,9 +291,8 @@ streams. Active state, including input-edge memory and energy, is hashed.
 
 The implementation is **not a complete original-game match**. Hull contact and
 its layers are built for a piloted craft (`re-space-assault.md` §11). Still owed:
-the landing sphere's origin
-offset and moving/flagged-surface rejection; fractional landing-region
-coverage (the implemented gate uses origin membership); all fighter dodge/stunt
+exact sphere selection and moving/flagged-surface rejection; combined coverage
+across overlapping landing regions; all fighter dodge/stunt
 maneuvers; the complete roll-level
 timer; BF1 per-player full-stick rate blending and BF2 sensitivity boosts;
 subclass boost-turn multipliers; transitional bank targets;

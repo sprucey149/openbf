@@ -7,10 +7,8 @@
 //! carry (`trace:` its s+0x950 setter's caller).
 
 use super::Sim;
-use crate::collision::{
-    Capsule, HullFilter, Layers, FOOT_RADIUS, FOOT_RING, FOOT_RING_DIRS, STEP_HEIGHT,
-};
-use crate::soldier::{GroundRules, Stance, FLOOR_CONTACT_GAP};
+use crate::collision::{Capsule, HullFilter, Layers};
+use crate::soldier::{GroundRules, Stance};
 use crate::unit::Deck;
 use crate::vehicle::{VehicleHandle, VehicleKind};
 use glam::{Mat4, Vec3};
@@ -83,7 +81,7 @@ impl Sim {
 
     /// After soldier `i`'s floor contact: a floor on a flyer is his deck; any
     /// other floor ends it; in the air he keeps what he had.
-    pub(super) fn touch_deck(&mut self, i: usize) {
+    pub(super) fn touch_deck(&mut self, i: usize, floor_owner: Option<VehicleHandle>) {
         let s = &self.units[i].soldier;
         if !s.grounded {
             if s.platform_vel.is_none() {
@@ -91,8 +89,8 @@ impl Sim {
             }
             return;
         }
-        let deck = self.flyer_under(s.pos).and_then(|h| {
-            let v = self.vehicle(h)?;
+        let deck = floor_owner.and_then(|h| {
+            let v = self.vehicle(h).filter(|v| v.kind == VehicleKind::Flyer)?;
             Some(Deck {
                 vehicle: h,
                 pose: hull_pose(v),
@@ -145,32 +143,6 @@ impl Sim {
         let s = &mut self.units[i].soldier;
         s.pos.x -= back.x;
         s.pos.z -= back.z;
-    }
-
-    /// The flyer whose hull is the floor the soldier at `feet` stands on: the
-    /// foot's centre ray, else its ring, meeting a flyer hull at his feet.
-    fn flyer_under(&self, feet: Vec3) -> Option<VehicleHandle> {
-        let probe = feet.y + STEP_HEIGHT;
-        let reach = STEP_HEIGHT + FLOOR_CONTACT_GAP;
-        let lift = FOOT_RADIUS - (FOOT_RADIUS * FOOT_RADIUS - FOOT_RING * FOOT_RING).sqrt();
-        let at = |dx: f32, dz: f32, sag: f32| {
-            let (y, _, owner) = self.collision.ray_down_owned(
-                Vec3::new(feet.x + dx, probe, feet.z + dz),
-                reach + sag,
-                HullFilter::Hulls,
-            )?;
-            let owner = owner?;
-            ((y - sag - feet.y).abs() <= FLOOR_CONTACT_GAP
-                && self
-                    .vehicle(owner)
-                    .is_some_and(|v| v.kind == VehicleKind::Flyer))
-            .then_some(owner)
-        };
-        at(0.0, 0.0, 0.0).or_else(|| {
-            FOOT_RING_DIRS
-                .iter()
-                .find_map(|&(dx, dz)| at(dx * FOOT_RING, dz * FOOT_RING, lift))
-        })
     }
 }
 

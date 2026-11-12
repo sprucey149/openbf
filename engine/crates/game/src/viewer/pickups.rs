@@ -70,16 +70,17 @@ fn flag_pose(
         )),
         core::sim::FlagStatus::Carried { carrier } => {
             let unit = sim.unit(carrier)?;
-            let rot = unit
-                .mount
-                .and_then(|mount| {
-                    sim.vehicles
-                        .get(mount.vehicle.index as usize)
-                        .filter(|v| v.gen == mount.vehicle.gen)
-                        .map(|v| v.rot)
-                })
-                .unwrap_or_else(|| Quat::from_rotation_y(unit.soldier.yaw));
-            Some((true, Mat4::from_rotation_translation(rot, flag.current_pos)))
+            let (pos, rot) = match unit.mount {
+                Some(mount) => {
+                    let vehicle = sim.vehicle(mount.vehicle)?;
+                    (vehicle.pos, vehicle.rot)
+                }
+                None => (unit.soldier.pos, Quat::from_rotation_y(unit.soldier.yaw)),
+            };
+            Some((
+                true,
+                Mat4::from_rotation_translation(rot, pos + rot * flag.carried_offset),
+            ))
         }
     }
 }
@@ -304,11 +305,27 @@ mod tests {
         let unit = sim
             .spawn(&core::unit::UnitSpec::trooper(0, glam::Vec3::ZERO))
             .unwrap();
-        sim.unit_mut(unit).unwrap().soldier.yaw = std::f32::consts::FRAC_PI_2;
+        let flyer = sim.spawn_vehicle(&core::vehicle::VehicleSpec {
+            kind: core::vehicle::VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: glam::Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![core::vehicle::SeatKind::Pilot],
+        });
+        assert!(sim.enter_vehicle(unit, flyer, 0));
         flag.status = core::sim::FlagStatus::Carried { carrier: unit };
+        let pos = glam::Vec3::new(-8.0, 5.0, 7.0);
+        let rot = Quat::from_rotation_z(0.5) * Quat::from_rotation_y(1.0);
+        let vehicle = sim.vehicle_mut(flyer).unwrap();
+        (vehicle.pos, vehicle.rot) = (pos, rot);
         let (carried, pose) = flag_pose(&sim, &flag, Quat::IDENTITY).unwrap();
         assert!(carried);
-        assert_eq!(pose.w_axis.truncate(), flag.current_pos);
-        assert!((pose.transform_vector3(glam::Vec3::Z) - glam::Vec3::X).length() < 0.001);
+        assert_eq!(pose.w_axis.truncate(), pos + rot * flag.carried_offset);
+        assert!((pose.transform_vector3(glam::Vec3::Z) - rot * glam::Vec3::Z).length() < 0.001);
     }
 }

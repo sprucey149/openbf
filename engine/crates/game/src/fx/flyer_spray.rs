@@ -314,7 +314,13 @@ mod tests {
     fn takeoff_emits_one_authored_plume_on_the_surface() {
         let root = crate::assets::baked_root();
         let map = root.join("bf2_spa6");
-        assert!(map.join("effects.ron").is_file());
+        if !map.join("effects.ron").is_file() {
+            assert!(
+                std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none(),
+                "missing SPA6 effects"
+            );
+            return;
+        }
         let mut fx = Fx::load(&root, &map, "bf2", &[]);
         let mut sim = Sim::empty(42);
         sim.collision = CollisionWorld::new(

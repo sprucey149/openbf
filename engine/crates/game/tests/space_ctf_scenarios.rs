@@ -409,7 +409,7 @@ fn space_one_flag_capture_scoring_and_win() {
 }
 
 #[test]
-fn space_one_flag_bot_steering_ai() {
+fn space_one_flag_bots_can_carry_a_flag_without_chasing_it() {
     let mut sim = setup_test_sim();
     let home = Vec3::new(0.0, 0.0, 0.0);
     let team0_goal = Vec3::new(800.0, 0.0, 0.0);
@@ -424,12 +424,11 @@ fn space_one_flag_bot_steering_ai() {
     sim.unit_mut(bot).unwrap().controller = Controller::Ai;
     sim.vehicle_mut(vh).unwrap().rot = glam::Quat::from_rotation_y(std::f32::consts::PI);
 
-    // Step AI - bot should plan a curve seeking neutral home flag
+    // The pilot plans a flight without using the neutral flag as a goal.
     step_sim(&mut sim, 0.1);
-    {
-        let v = sim.vehicle(vh).unwrap();
-        assert!(v.flyer.ai.curve.is_some() || v.flyer.ai.goal == Some(home));
-    }
+    let v = sim.vehicle(vh).unwrap();
+    assert!(v.flyer.ai.curve.is_some());
+    assert_ne!(v.flyer.ai.goal, Some(home));
 
     // A bot that flies through the flag carries it, but the PS2's space
     // one-flag gives `CTFOffense` weight 0 (`AIGoalWeight = 0.0` in every

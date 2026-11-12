@@ -63,13 +63,11 @@ fn the_game_menu_lists_the_original_rows_in_order() {
     assert_eq!(rows(&bare), vec![Row::Resume, Row::Options, Row::Quit]);
 }
 
-/// Space battles and the shell's settings page keep the flat list exactly;
-/// the flat Quit leaves at once.
+/// The shell's settings use the flat list. A flat Quit leaves at once.
 #[test]
 fn the_flat_menu_remains_available() {
     let space = MenuModel {
         page: None,
-        back_steps_out: true,
         ..ground()
     };
     let settings = [

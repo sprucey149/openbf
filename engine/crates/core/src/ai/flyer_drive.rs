@@ -809,9 +809,8 @@ fn bf2_plan(
         {
             // A hangar wall between the pad and the flag does not make the
             // direct hop flyable: only take it when every sampled chord is
-            // clear, else the authored route plans the way out (spa1). OURS:
-            // a route segment already begun is flown to its end first, and
-            // the hull must fit the whole hop ([`hull_clear`]).
+            // clear. The pilot finishes its current route segment before
+            // trying the sampled clearance check ([`hull_clear`]).
             let curve = ctf_curve(v, goal);
             if hull_clear(sim, v, &curve, handle) {
                 ai.goal = Some(goal);

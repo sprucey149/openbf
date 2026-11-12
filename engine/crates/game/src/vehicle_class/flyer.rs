@@ -4,6 +4,8 @@
 use super::{fill, float, h, section_scope, walker, Scope, FLYER_BASES};
 use crate::classdb::ClassDb;
 use core::vehicle::flyer::FlyerParams;
+use glam::Vec3;
+use manifest::ManifestHardpoint;
 
 /// How FUN_00300230 stores an authored follower number.
 #[derive(Clone, Copy)]
@@ -205,4 +207,89 @@ impl FlyerClass {
             fill(&mut p.collision_scale, value);
         }
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct FlyerExhaust {
+    pub effect: String,
+    pub local: glam::Mat4,
+    pub node: Option<String>,
+    pub offset: Vec3,
+    pub scale: [f32; 3],
+}
+
+/// The PS2 keeps at most eight thrust effects per class (`FUN_00211a40`,
+/// B2:124203-124223); a later `ThrustEffect` is dropped.
+const MAX_THRUST_EFFECTS: usize = 8;
+
+pub(crate) fn flyer_exhaust(
+    db: &ClassDb,
+    class: &str,
+    nodes: &[ManifestHardpoint],
+) -> Vec<FlyerExhaust> {
+    // `FUN_00211a40` reads these keys in ODF order, each applying to the most
+    // recent `ThrustEffect` (B2:124203-125043).
+    let (effect_key, point_key, offset_key) = (
+        h("ThrustEffect"),
+        h("ThrustAttachPoint"),
+        h("ThrustAttachOffset"),
+    );
+    let (min_scale_key, max_scale_key, start_scale_key) = (
+        h("ThrustEffectMinScale"),
+        h("ThrustEffectMaxScale"),
+        h("ThrustEffectScaleStart"),
+    );
+    let mut effects: Vec<(String, Option<String>, Vec3, [f32; 3])> = Vec::new();
+    'definitions: for def in db.chain(class).into_iter().rev() {
+        for (key, value) in &def.props {
+            if *key == effect_key {
+                if effects.len() == MAX_THRUST_EFFECTS {
+                    break 'definitions;
+                }
+                effects.push((value.trim().to_owned(), None, Vec3::ZERO, [1.0, 1.0, 0.0]));
+            } else if let Some((_, node, offset, scale)) = effects.last_mut() {
+                let slot = match *key {
+                    k if k == min_scale_key => Some(0),
+                    k if k == max_scale_key => Some(1),
+                    k if k == start_scale_key => Some(2),
+                    _ => None,
+                };
+                if let Some(i) = slot {
+                    if let Ok(v) = value.trim().parse::<f32>() {
+                        scale[i] = v;
+                    }
+                } else if *key == point_key {
+                    *node = Some(value.trim().to_owned());
+                } else if *key == offset_key {
+                    let mut values = value.split_whitespace().map(str::parse::<f32>);
+                    if let (Some(Ok(x)), Some(Ok(y)), Some(Ok(z)), None) =
+                        (values.next(), values.next(), values.next(), values.next())
+                    {
+                        *offset = Vec3::new(x, y, z);
+                    }
+                }
+            }
+        }
+    }
+    effects
+        .into_iter()
+        .map(|(effect, node, offset, scale)| {
+            let base = node
+                .as_deref()
+                .and_then(|name| nodes.iter().find(|n| n.name.eq_ignore_ascii_case(name)))
+                .map_or(glam::Mat4::IDENTITY, |n| {
+                    crate::viewer::instance_matrix(
+                        n.axes.unwrap_or(glam::Mat3::IDENTITY.to_cols_array_2d()),
+                        n.pos,
+                    )
+                });
+            FlyerExhaust {
+                effect,
+                local: base * glam::Mat4::from_translation(offset),
+                node,
+                offset,
+                scale,
+            }
+        })
+        .collect()
 }

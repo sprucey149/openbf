@@ -33,6 +33,7 @@ pub use flight::flight_paths;
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::vehicle_class;
+pub use crate::vehicle_class::FlyerExhaust;
 use core::vehicle::gun::{Aimer, GunSetup, GunWeapon, MAX_SEAT_WEAPONS};
 use core::vehicle::{BlastSetup, SeatSetup, VehicleKind, VehicleSpec};
 use core::vehicle_pad::{PadClass, PadDef, DECAY_TIME, SPAWN_TIME};
@@ -214,85 +215,6 @@ pub struct PadBuild {
     /// The building turrets, in manifest order (card VTURB): spawned by
     /// [`install`] before any pad vehicle.
     pub turrets: Vec<TurretDef>,
-}
-
-#[derive(Clone, Debug)]
-pub struct FlyerExhaust {
-    pub effect: String,
-    pub local: glam::Mat4,
-    pub node: Option<String>,
-    pub offset: Vec3,
-    pub scale: [f32; 3],
-}
-
-/// The PS2 keeps at most eight thrust effects per class (`FUN_00211a40`,
-/// B2:124203-124223); a later `ThrustEffect` is dropped.
-const MAX_THRUST_EFFECTS: usize = 8;
-
-fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<FlyerExhaust> {
-    // `FUN_00211a40` reads these keys in ODF order, each applying to the most
-    // recent `ThrustEffect` (B2:124203-125043).
-    let (effect_key, point_key, offset_key) = (
-        fnv1a_lowercase("ThrustEffect"),
-        fnv1a_lowercase("ThrustAttachPoint"),
-        fnv1a_lowercase("ThrustAttachOffset"),
-    );
-    let (min_scale_key, max_scale_key, start_scale_key) = (
-        fnv1a_lowercase("ThrustEffectMinScale"),
-        fnv1a_lowercase("ThrustEffectMaxScale"),
-        fnv1a_lowercase("ThrustEffectScaleStart"),
-    );
-    let mut effects: Vec<(String, Option<String>, Vec3, [f32; 3])> = Vec::new();
-    for def in db.chain(class).into_iter().rev() {
-        for (key, value) in &def.props {
-            if *key == effect_key && effects.len() < MAX_THRUST_EFFECTS {
-                effects.push((value.trim().to_owned(), None, Vec3::ZERO, [1.0, 1.0, 0.0]));
-            } else if let Some((_, node, offset, scale)) = effects.last_mut() {
-                let slot = match *key {
-                    k if k == min_scale_key => Some(0),
-                    k if k == max_scale_key => Some(1),
-                    k if k == start_scale_key => Some(2),
-                    _ => None,
-                };
-                if let Some(i) = slot {
-                    if let Ok(v) = value.trim().parse::<f32>() {
-                        scale[i] = v;
-                    }
-                } else if *key == point_key {
-                    *node = Some(value.trim().to_owned());
-                } else if *key == offset_key {
-                    let values: Vec<_> = value
-                        .split_whitespace()
-                        .filter_map(|x| x.parse::<f32>().ok())
-                        .collect();
-                    if let [x, y, z] = values.as_slice() {
-                        *offset = Vec3::new(*x, *y, *z);
-                    }
-                }
-            }
-        }
-    }
-    effects
-        .into_iter()
-        .map(|(effect, node, offset, scale)| {
-            let base = node
-                .as_deref()
-                .and_then(|name| nodes.iter().find(|n| n.name.eq_ignore_ascii_case(name)))
-                .map_or(glam::Mat4::IDENTITY, |n| {
-                    crate::viewer::instance_matrix(
-                        n.axes.unwrap_or(glam::Mat3::IDENTITY.to_cols_array_2d()),
-                        n.pos,
-                    )
-                });
-            FlyerExhaust {
-                effect,
-                local: base * glam::Mat4::from_translation(offset),
-                node,
-                offset,
-                scale,
-            }
-        })
-        .collect()
 }
 
 /// One armed-building instance as a vehicle: its spec (at the instance,
@@ -829,7 +751,7 @@ pub fn install_with_objective(
             if db.engine_base(c).and_then(vehicle_kind) != Some(VehicleKind::Flyer) {
                 return Vec::new();
             }
-            flyer_exhaust(
+            vehicle_class::flyer_exhaust(
                 &db,
                 c,
                 damage_nodes

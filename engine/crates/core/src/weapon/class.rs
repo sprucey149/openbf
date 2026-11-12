@@ -635,8 +635,8 @@ impl WeaponClass {
     /// `MaxRange` (128 m on every disc sniper, the AI's band for it), the cone
     /// its own `LockOnAngle` (1° on every disc sniper, the rifle's), the kinds
     /// it may take soldiers, animals and droids (the disc's bits) plus
-    /// vehicles when its round hurts them (BF2's VehicleScale 0.1; BF1's is
-    /// 0). The cone's length is at least the new reach. The mouse rule stays:
+    /// vehicles when its round hurts them. Both games use the shared armor
+    /// scale. The cone's length is at least the new reach. The mouse rule stays:
     /// a mouse-aimed pad is never pulled (`Sim::step` stage 2). Only the
     /// human's magnet reads these fields; the AI's own kinds
     /// (`ai_target_kind`) are left as parsed.

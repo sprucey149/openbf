@@ -104,15 +104,13 @@ pub struct MenuModel {
     pub icons: crate::input_icons::Icons,
     pub first_person: bool,
     pub cursor: usize,
-    /// The Game Menu page shown; `None` is the flat list (space battles, the
-    /// shell's settings page).
+    /// The Game Menu page shown. The shell's settings use a flat list.
     pub page: Option<PausePage>,
     /// The Yes/No popup open over the menu (Respawn: re-spawn-flow §7).
     pub popup: Option<Popup>,
     /// Restart Mission is offered (a battle launched from the shell).
     pub restart_available: bool,
     pub texts: PauseTexts,
-    pub back_steps_out: bool,
     /// None outside a live battle; caller may supply a localized label.
     pub respawn_label: Option<String>,
     /// Round result line, if the round is over.
@@ -459,16 +457,7 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     // Back resumes from anywhere, the class picker and the Respawn popup
     // included (playtest A3).
     if input.back {
-        let action = if !m.back_steps_out {
-            MenuAction::Resume
-        } else if m.class_choices.is_some() {
-            MenuAction::CloseClassPicker
-        } else if m.popup.is_some() {
-            MenuAction::CancelPopup
-        } else {
-            MenuAction::Resume
-        };
-        return (cursor, vec![action]);
+        return (cursor, vec![MenuAction::Resume]);
     }
     if let Some(picker) = &m.class_choices {
         let n = picker.tabs.len();

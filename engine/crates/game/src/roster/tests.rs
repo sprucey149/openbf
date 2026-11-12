@@ -11,6 +11,10 @@ type Row<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)]);
 
 /// A class db from in-memory rows, through the real loader.
 fn db(rows: &[Row<'_>]) -> ClassDb {
+    db_for_game("bf1", rows)
+}
+
+fn db_for_game(game: &str, rows: &[Row<'_>]) -> ClassDb {
     let defs: Vec<ClassDef> = rows
         .iter()
         .map(|(name, base, props)| ClassDef {
@@ -24,7 +28,7 @@ fn db(rows: &[Row<'_>]) -> ClassDb {
         })
         .collect();
     let path = std::env::temp_dir().join(format!(
-        "openbf-secondary-{}-{:?}.ron",
+        "{game}_openbf-secondary-{}-{:?}.ron",
         std::process::id(),
         std::thread::current().id()
     ));
@@ -39,32 +43,35 @@ const ROUND: Row<'static> = ("test_ord", "bolt", &[("MaxDamage", "65")]);
 
 #[test]
 fn missile_class_uses_the_last_authored_keys_before_the_next_charge() {
-    let d = db(&[
-        (
-            "base_missile",
-            "missile",
-            &[("TurnRate", "1"), ("WaverTurn", "0")],
-        ),
-        (
-            "stinger",
-            "base_missile",
-            &[
-                ("TurnRate", "0"),
-                ("TurnRate", "0.5"),
-                ("WaverRate", "2"),
-                ("WaverTurn", "0.25"),
-            ],
-        ),
-        (
-            "charged",
-            "base_missile",
-            &[
-                ("TurnRate", "1.25"),
-                ("NextCharge", "0.5"),
-                ("TurnRate", "2"),
-            ],
-        ),
-    ]);
+    let d = db_for_game(
+        "bf2",
+        &[
+            (
+                "base_missile",
+                "missile",
+                &[("TurnRate", "1"), ("WaverTurn", "0")],
+            ),
+            (
+                "stinger",
+                "base_missile",
+                &[
+                    ("TurnRate", "0"),
+                    ("TurnRate", "0.5"),
+                    ("WaverRate", "2"),
+                    ("WaverTurn", "0.25"),
+                ],
+            ),
+            (
+                "charged",
+                "base_missile",
+                &[
+                    ("TurnRate", "1.25"),
+                    ("NextCharge", "0.5"),
+                    ("TurnRate", "2"),
+                ],
+            ),
+        ],
+    );
     let m = weapon_db::fired_ordnance(&d, "stinger").missile.unwrap();
     assert_eq!(m.turn_rate, 0.5);
     assert_eq!(m.waver_rate, 2.0);

@@ -167,7 +167,7 @@ pub(in crate::ai) fn rejoin(sim: &Sim, me: crate::unit::UnitHandle, st: &mut AiS
         || (!retry
             && (st.lost.is_some()
                 || stall.walked.is_some_and(|p| {
-                    pos.distance_squared(p) < crate::ai::PIN_WALKED * crate::ai::PIN_WALKED
+                    pos.distance_squared(p) < crate::fmath::square(crate::ai::PIN_WALKED)
                 })))
     {
         return false;
@@ -444,13 +444,11 @@ fn approaching_hover(sim: &Sim, pos: Vec3) -> bool {
     sim.vehicles.iter().enumerate().any(|(i, vehicle)| {
         let advance = vehicle.vel.xz();
         let offset = pos - vehicle.pos;
-        let reach = advance.length() + 4.0;
         vehicle.alive
             && vehicle.kind == crate::vehicle::VehicleKind::Hover
             && offset.y.abs() < 2.0
-            && offset.xz().length_squared() <= reach * reach
-            && advance.length_squared()
-                > crate::ai::avoid::FOOT_STILL * crate::ai::avoid::FOOT_STILL
+            && offset.xz().length_squared() <= crate::fmath::square(advance.length() + 4.0)
+            && advance.length_squared() > crate::fmath::square(crate::ai::avoid::FOOT_STILL)
             && advance.dot(offset.xz()) > 0.0
             && crate::ai::avoid::footprint(sim, i, pos.y).is_some_and(|hull| {
                 hull.crosses_r(pos.xz(), pos.xz() - advance, crate::unit::SOLDIER_RADIUS)

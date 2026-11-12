@@ -273,8 +273,8 @@ fn a_station_under_the_reticle_reads_its_health() {
 /// health; with the rifle up, or off the cutter, a wreck shows nothing.
 #[test]
 fn a_wreck_under_the_cutter_reads_its_rebuild_progress() {
-    use core::sim::{BuildingTurret, Station, TurretFall};
-    use core::vehicle::{VehicleHandle, VehicleSpec};
+    use core::sim::{Station, TurretFall};
+    use core::vehicle::VehicleSpec;
     use core::weapon::{HealthType, Repair, WeaponClass};
     let mut s = scene();
     s.sim.reticle_pick.resize(1, None);
@@ -318,8 +318,8 @@ fn a_wreck_under_the_cutter_reads_its_rebuild_progress() {
     s.sim.stations.clear();
     // A fallen turret on its pad: its class's name and health / MaxHealth.
     s.feed.vehicles = vec!["Laser Turret".into()];
-    s.sim.building_turrets.push(BuildingTurret {
-        spec: VehicleSpec {
+    s.sim.add_building_turret(
+        VehicleSpec {
             kind: VehicleKind::Turret,
             class: 0,
             home_team: None,
@@ -331,18 +331,13 @@ fn a_wreck_under_the_cutter_reads_its_rebuild_progress() {
             health_type: HealthType::Building,
             seats: vec![SeatKind::Gunner(0)],
         },
-        rot: Quat::IDENTITY,
-        aim_sphere: Some((glam::Vec3::ZERO, 0.8)),
-        instance: 99,
-        handle: VehicleHandle { index: 0, gen: 0 },
-        fall: TurretFall::Pad,
-        fallen_parts: Vec::new(),
-        standing_parts: Vec::new(),
-        down: Some(200.0),
-        posed: None,
-        self_pilots: Vec::new(),
-        prefer_walkable_exit: false,
-    });
+        Quat::IDENTITY,
+        Some((glam::Vec3::ZERO, 0.8)),
+        99,
+        (TurretFall::Pad, Vec::new()),
+    );
+    s.sim.start_building_unbuilt(99);
+    s.sim.building_turrets[0].down = Some(200.0);
     let t = s.feed.target(&s.sim, 0).expect("the fallen turret");
     assert_eq!(
         (t.name.as_str(), t.health_fraction, t.relation, t.team0),

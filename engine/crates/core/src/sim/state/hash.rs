@@ -70,7 +70,9 @@ impl Sim {
             eat(&(self.vehicles.len() as u32).to_le_bytes());
             for v in &self.vehicles {
                 v.hash_into(&mut eat);
-                if v.kind == crate::vehicle::VehicleKind::Flyer {
+                if self.ground_rules == crate::soldier::GroundRules::Bf2
+                    && v.kind == crate::vehicle::VehicleKind::Flyer
+                {
                     if let Some(setup) = self
                         .seat_setup
                         .get(v.class as usize)

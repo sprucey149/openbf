@@ -1269,7 +1269,7 @@ On 2026-11-10, a 60-frame, 60-tick `--bench --bench-player-cam` run at 1280×720
 
 [O] Source under test: `26a12a0` plus this space-effect change. The six local PS2 space LVLs share the byte-identical `SpaceDust` scope cited above. `bake/src/map/space_dust.rs` writes its texture and 12 named properties to each map's `space_dust.ron`; `game/src/fx/space_dust.rs` loads the same file through `pak`, so a packed build reads the baked scope and a map without one stays unchanged. The scope enables `spacedust1` with values 150, 70, 20, 0.02, 0.1, 0.5, 35, 100, 2, 12, 35 and 170.
 
-The port's mapping follows the routines already cited. `FUN_00460928` (BF2 decompilation lines 511061–511367) places new samples on the plane across the flight direction, 150 m ahead, spread over ±70 m, with a 20 m central hole; it adds at most 20 samples per update into the 80-entry bank, drifts the bank backward at 100 m/s along the view, and drops samples behind the camera. The update interval is `0.02 * 35 / speed`, so the sample rate rises with the flyer's speed. Sample size is 0.1–0.5. The bank keeps the native 30000 s lifetime; it is presentation-only and uses an independent `Lcg(42)`, never the gameplay sequence. `Fx::advance_space_dust` runs it only while the player's mount is a flyer, and pauses (clearing the bank and the fractional accumulator) when the player leaves the craft or stops.
+The port's mapping follows the routines already cited. `FUN_00460928` (BF2 decompilation lines 511061–511367) places new samples on the plane across the flight direction, 150 m ahead, spread over ±70 m, with a 20 m central hole; it adds at most 20 samples per update into the 80-entry bank, drifts the bank backward at 100 m/s along the view, and drops samples behind the camera. The update interval is `0.02 * 35 / speed`, so the sample rate rises with the flyer's speed. Sample size is 0.1–0.5. The bank keeps the native 30000 s lifetime; it is presentation-only and uses an independent `Lcg(42)`, never the gameplay sequence. `Fx::advance_space_dust` runs it only while the player's mount is a flyer, and clears the bank when the player leaves the craft. At rest it stops spawning and resets the accumulator while existing particles drift and cull.
 
 `FUN_00461080` (511372–511520) draws each live sample as an additive capped ribbon from `spacedust1`, with the tail along the view's backward axis. The ribbon length interpolates from 2 to 12 m over speed 35–170 m/s. Alpha is `1 + 254 * clamp((depth - 50) / 30, 0, 1)`, so a sample fades in across the near 30 m. The port draws at most 80 ribbons and only when the map's effect library supplies the texture.
 
@@ -1281,7 +1281,7 @@ At revision 1a7c75da plus this change, `cargo test --manifest-path engine/Cargo.
 
 The local BF2 tri-fighter cannon inherits a secondary tracer and authors a continuous chaingun firing sound. The existing walker tracer and firing-loop paths now accept flyer weapons too. The playtest snapshot `dist/openbf_data/playtest/last.json` was recorded from binary 26a12a0aa82e plus edits; it records the tri-fighter missile sound three times per salvo. The maintainer subsequently reported that the cannon effect and sound seem to work. The landing plume still needs an original-game comparison.
 
-Flyer pilot weapons now use their individual authored aimer or fire-point positions. The tri-fighter has three missile positions and the A-wing has two positions for each weapon. PROVISIONAL: the port cycles through those points in authored order for consecutive projectiles; trace the original's aimer selection and compare firing order in PCSX2. These positions are bind-pose positions until flyer animation is implemented.
+Flyer pilot weapons now use their individual authored aimer or fire-point positions. The tri-fighter has three missile positions and the A-wing has two positions for each weapon. PROVISIONAL: the port cycles through those points in authored order for consecutive projectiles; trace the original's aimer selection and compare firing order in PCSX2. Projectile origins use bind-pose points. The drawn craft and its exhaust use the animated pose when the rig supplies one.
 
 At c52ec491a35e plus these edits, `cargo test --manifest-path engine/Cargo.toml -p core --lib flyer_salvo_uses_each_authored_muzzle` passed one test, including the muzzle-selection state hash. The `every_space_secondary_loadout_fires_and_hits` integration test passed with baked tri-fighter and A-wing point checks. These checks do not establish original-game firing order or missile trail smoothness.
 
@@ -1445,3 +1445,21 @@ The route table is right: from hub 40 (`Hub49`) row 0 is arc 37 to hub 46 (`Hub5
 ### Difficulty (not fixed)
 
 The user's Space Tatooine one-flag log `20261111-131734_bf2_spa9.jsonl` has eight deaths, all seated in a ship, 18 to 74 s after spawning. Seven are recorded as `Blast`, which is `Sim::unit_killed` with no killer. These ships were destroyed with no credited attacker: unmanned turrets, collisions with crashing bots, or blasts. §15 already records the port's turrets firing about twice the PS2's rate per living turret, because of OURS nearest-target selection. `measure:` with the black box which of these killed the ship.
+
+### Combined review, November 12, 2026
+
+A matched comparison on the stock Space Mygeeto one-flag mission uses
+the battle builder with no human, Normal difficulty, seeds 7 and 42,
+and 5,400 ticks per run. Lethal impacts in the first 30 seconds of a
+sortie fall from 100 across 175 takeoffs to 11 across 129 takeoffs.
+Samples within 6 m of a locked door fall from 155 to one. The paired
+Assault controls on the same map keep their takeoff and early-impact
+counts over that opening window.
+
+All six seed-7 bots-only Assault maps reach 180 points on the updated
+source. Space Hoth reaches the limit after 2,044 seconds with a score
+of 181–135, identical to the prior candidate. Space Kamino has no
+winner at 3,600 seconds in either build. The extended updated run
+reaches the limit at 4,451 seconds with a score of 107–183. These
+runs measure round completion. Matched original transport behavior,
+the trench floor and direct capital-system attacks remain open.

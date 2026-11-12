@@ -73,7 +73,8 @@ impl Sim {
 
     fn missile_guidance_aim(&self, t: MissileTarget, pos: Vec3, dir: Vec3) -> Option<Vec3> {
         let fallback = self.missile_aim(t)?;
-        let MissileTarget::Vehicle(h) = t else {
+        let (crate::soldier::GroundRules::Bf2, MissileTarget::Vehicle(h)) = (self.ground_rules, t)
+        else {
             return Some(fallback);
         };
         let v = self.vehicle(h)?;

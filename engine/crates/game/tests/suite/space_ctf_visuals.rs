@@ -82,20 +82,39 @@ fn live_space_flag_models_replace_home_on_all_maps() {
         assert!(dropped
             .iter()
             .all(|d| d.model.w_axis.truncate().distance(moved) < 0.01));
-        sim.ctf.as_mut().unwrap().flags[0].status =
-            core::sim::FlagStatus::Carried { carrier: player };
+        use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+        let flyer = sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: home,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        assert!(sim.enter_vehicle(player, flyer, 0));
+        let pos = moved + Vec3::new(8.0, 3.0, -4.0);
+        let rot = glam::Quat::from_rotation_z(0.5);
+        let vehicle = sim.vehicle_mut(flyer).unwrap();
+        (vehicle.pos, vehicle.rot) = (pos, rot);
+        let flag = &mut sim.ctf.as_mut().unwrap().flags[0];
+        flag.status = core::sim::FlagStatus::Carried { carrier: player };
+        let carried_pos = pos + rot * flag.carried_offset;
         let carried = visuals.draws(&mut renderer, &sim, &[]);
         assert!(!carried.is_empty(), "{name} carried flag model missing");
         assert!(carried
             .iter()
-            .all(|d| d.model.w_axis.truncate().distance(moved) < 0.01));
+            .all(|d| d.model.w_axis.truncate().distance(carried_pos) < 0.01));
         if name == "bf2_spa8" {
             let out = root.parent().unwrap().join("artifacts/lead_tmp/issue-144");
             std::fs::create_dir_all(&out).unwrap();
             for (label, draws, pos) in [
                 ("home", at_home, home),
                 ("dropped", dropped, moved),
-                ("carried", carried, moved),
+                ("carried", carried, carried_pos),
             ] {
                 let offset = if label == "carried" {
                     Vec3::new(1.5, 0.5, 3.0)

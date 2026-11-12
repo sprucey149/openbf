@@ -108,4 +108,8 @@ platform's executable strings (`StringsFromExecutable/`), a PC debug build and t
 (`community_mods/gametoast_lua/doc/Archives/`).
 
 ## PCSX2 automation & original-game verification (`emucap`)
-If `emucap` is configured in the local environment, the PCSX2 emulator can be automated via `tools/emucap/` over the PINE protocol. When available, agents can launch the emulator, load save states (`emulator/sstates/`), inject controller inputs, capture frame-buffer screenshots, and inspect EE memory / disassembly without GUI interaction. It supports both ground battles and space battles. See `tools/emucap/README.md` for tool parameters, MCP configuration, and setup instructions if you need to install it.
+A locally configured `emucap` adapter can drive PCSX2 over PINE.
+Its commands can launch the emulator, load a user-supplied save state,
+send controller input, capture frames and read emulated memory.
+Use the adapter's local setup instructions. The port black box
+records port-side play and simulation evidence.

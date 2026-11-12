@@ -1368,12 +1368,23 @@ impl Sim {
     /// lower, so a fall of more than a step in one tick (18 m/s, a 9 m drop)
     /// still finds the floor it crossed.
     pub fn ground_under_n(&self, feet: Vec3, rising: bool, from_y: f32) -> (f32, Vec3) {
+        let (y, n, _) = self.ground_contact(feet, rising, from_y, STEP_HEIGHT);
+        (y, n)
+    }
+
+    pub(super) fn ground_contact(
+        &self,
+        feet: Vec3,
+        rising: bool,
+        from_y: f32,
+        step: f32,
+    ) -> (f32, Vec3, Option<crate::vehicle::VehicleHandle>) {
         let probe = if rising {
             feet.y
         } else {
-            (feet.y + STEP_HEIGHT).max(from_y)
+            (feet.y + step).max(from_y)
         };
-        self.floor_under(feet, probe, crate::collision::HullFilter::All, true)
+        self.floor_contact(feet, probe, crate::collision::HullFilter::All, true)
     }
 
     /// [`Sim::ground_under_n`] as ONE ray, with no foot ring
@@ -1407,8 +1418,6 @@ impl Sim {
             .0
     }
 
-    /// The floor under `feet` for a down ray starting at height `probe`;
-    /// `ring` = the soldier's foot (the ring of rays), not a bare point.
     fn floor_under(
         &self,
         feet: Vec3,
@@ -1416,6 +1425,19 @@ impl Sim {
         hulls: crate::collision::HullFilter,
         ring: bool,
     ) -> (f32, Vec3) {
+        let (y, n, _) = self.floor_contact(feet, probe, hulls, ring);
+        (y, n)
+    }
+
+    /// The floor under `feet` for a down ray starting at height `probe`;
+    /// `ring` = the soldier's foot (the ring of rays), not a bare point.
+    fn floor_contact(
+        &self,
+        feet: Vec3,
+        probe: f32,
+        hulls: crate::collision::HullFilter,
+        ring: bool,
+    ) -> (f32, Vec3, Option<crate::vehicle::VehicleHandle>) {
         let mut terrain = self
             .heightfield
             .as_ref()
@@ -1432,7 +1454,7 @@ impl Sim {
             // y >= floor by construction of the ray length.
             let down = |x: f32, z: f32| {
                 self.collision
-                    .ray_down_with(Vec3::new(x, probe, z), probe - floor, hulls)
+                    .ray_down_owned(Vec3::new(x, probe, z), probe - floor, hulls)
             };
             let centre = down(feet.x, feet.z);
             // The PS2's foot is a sphere, not a point (`coll_body_lower`,
@@ -1445,16 +1467,18 @@ impl Sim {
             // sphere's reach looks for one, each hit lowered by how far the
             // sphere's underside is over the feet at that radius.
             // The terrain within a step is a floor too: no ring on open ground.
-            let near = |h: &(f32, Vec3)| h.0 >= feet.y - STEP_HEIGHT;
+            let near = |y| y >= feet.y - STEP_HEIGHT;
             let terrain_near = terrain.is_some_and(|t| t >= feet.y - STEP_HEIGHT);
-            if ring && !centre.as_ref().is_some_and(near) && !terrain_near {
+            if ring && !centre.is_some_and(|(y, _, _)| near(y)) && !terrain_near {
                 let lift = FOOT_RADIUS - (FOOT_RADIUS * FOOT_RADIUS - FOOT_RING * FOOT_RING).sqrt();
                 let mut best = centre;
                 for (dx, dz) in FOOT_RING_DIRS {
-                    if let Some((y, n)) = down(feet.x + dx * FOOT_RING, feet.z + dz * FOOT_RING) {
+                    if let Some((y, n, owner)) =
+                        down(feet.x + dx * FOOT_RING, feet.z + dz * FOOT_RING)
+                    {
                         let y = y - lift;
-                        if best.is_none_or(|(b, _)| y > b) {
-                            best = Some((y, n));
+                        if best.is_none_or(|(b, _, _)| y > b) {
+                            best = Some((y, n, owner));
                         }
                     }
                 }
@@ -1474,25 +1498,26 @@ impl Sim {
                 // the floor under the centre gives no hold, a ring ray that
                 // finds one that does, higher and within a step of the feet,
                 // is the floor: the top of the kerb, less the sphere's sag.
-                if ring && hit.1.y < self.ground_rules.climb_min_ny() && near(&hit) {
+                if ring && hit.1.y < self.ground_rules.climb_min_ny() && near(hit.0) {
                     let lift =
                         FOOT_RADIUS - (FOOT_RADIUS * FOOT_RADIUS - FOOT_RING * FOOT_RING).sqrt();
                     // The highest such surface wins; the feet never go
                     // under the face the centre found.
-                    let mut best: Option<(f32, Vec3)> = None;
+                    let mut best = None;
                     for (dx, dz) in FOOT_RING_DIRS {
-                        if let Some((y, n)) = down(feet.x + dx * FOOT_RING, feet.z + dz * FOOT_RING)
+                        if let Some((y, n, owner)) =
+                            down(feet.x + dx * FOOT_RING, feet.z + dz * FOOT_RING)
                         {
                             if n.y >= self.ground_rules.climb_min_ny()
                                 && y > hit.0
-                                && best.is_none_or(|(b, _)| y > b)
+                                && best.is_none_or(|(b, _, _)| y > b)
                             {
-                                best = Some((y, n));
+                                best = Some((y, n, owner));
                             }
                         }
                     }
                     return match best {
-                        Some((y, n)) => ((y - lift).max(hit.0), n),
+                        Some((y, n, owner)) => ((y - lift).max(hit.0), n, owner),
                         None => hit,
                     };
                 }
@@ -1500,8 +1525,8 @@ impl Sim {
             }
         }
         match (terrain, self.heightfield.as_ref()) {
-            (Some(t), Some(h)) => (t, Vec3::from(h.normal_at(feet.x, feet.z))),
-            _ => (floor, Vec3::Y),
+            (Some(t), Some(h)) => (t, Vec3::from(h.normal_at(feet.x, feet.z)), None),
+            _ => (floor, Vec3::Y, None),
         }
     }
 

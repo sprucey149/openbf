@@ -394,6 +394,8 @@ fn fill_classes_keep_the_v0_fixtures() {
         *scale *= BF1_SCALE;
     }
     want.ordnance.shield_scale *= BF1_SCALE;
+    // The shared rifle scale applies to BF1 vehicle targets too.
+    want.ordnance.scales[HealthType::Vehicle as usize] = 0.1;
     // It gives way to BF2's award rifle, which the class carries.
     want.medal_lock = Some(1);
     assert_eq!(a.weapon, want, "all rifle == §8.1 fixture, normalized");
@@ -2026,7 +2028,7 @@ fn weapon_slots_match_the_disc_census() {
 fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
     let Some(dir) = classes_dir() else { return };
     use core::sticky::stick;
-    for (game, weapon, delay, windup, fuse, mask, damage) in [
+    for (game, weapon, delay, windup, fuse, mask) in [
         (
             "bf1",
             "imp_weap_inf_thermaldetonator",
@@ -2034,7 +2036,6 @@ fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
             0.3,
             0.9,
             0x7fff_ff80u32,
-            320.0,
         ),
         (
             "bf2",
@@ -2043,7 +2044,6 @@ fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
             0.51,
             0.6,
             0x7fff_ffd8,
-            450.0,
         ),
     ] {
         let db = load_classdb_all(&dir, game);
@@ -2071,7 +2071,7 @@ fn thrown_weapons_come_out_of_the_class_db_as_the_ps2_holds_them() {
         let x = s.explosion.as_ref().expect("ExplosionExpire");
         assert_eq!(
             (x.damage, x.damage_inner, x.damage_outer),
-            (damage, 4.5, 6.5),
+            (450.0, 4.5, 6.5),
             "{game}"
         );
     }

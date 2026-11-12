@@ -353,6 +353,11 @@ fn a_flying_ship_is_no_walk_target_and_a_soldier_on_foot_is() {
     use crate::weapon::HealthType;
     let (mut sim, h) = l_sim();
     sim.space_assault = Some(crate::sim::SpaceAssault::new(10));
+    let weapon = sim.unit(h).unwrap().weapon_class;
+    let launcher = &mut sim.weapon_classes[weapon];
+    launcher.ordnance.kind = crate::weapon::OrdKind::Missile;
+    launcher.ordnance.scales[HealthType::Vehicle as usize] = 1.0;
+    launcher.ai_target_kind |= 1 << HealthType::Vehicle as u32;
     let at = Vec3::new(40.0, 0.0, -40.0);
     let foe = sim
         .spawn(&UnitSpec {
@@ -385,6 +390,11 @@ fn a_flying_ship_is_no_walk_target_and_a_soldier_on_foot_is() {
     };
     assert!(goals(&mut sim) > 0, "a foe on foot is walked at");
     assert!(sim.seat_unit(foe, ship, 0));
+    sim.vehicle_mut(ship).unwrap().flyer.phase = FlightPhase::Landed;
+    assert!(
+        goals(&mut sim) > 0,
+        "a stopped, targetable ship is walked at"
+    );
     sim.vehicle_mut(ship).unwrap().flyer.phase = FlightPhase::Flying;
     assert_eq!(goals(&mut sim), 0, "a foe flying a ship is not");
 }

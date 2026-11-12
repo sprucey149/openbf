@@ -30,7 +30,8 @@ mod aim;
 mod flyer;
 mod walker;
 pub use aim::AimerSpec;
-pub use flyer::FlyerClass;
+pub(crate) use flyer::flyer_exhaust;
+pub use flyer::{FlyerClass, FlyerExhaust};
 pub use walker::{WalkerClass, WALKER_BASES};
 
 use crate::classdb::{fnv1a_lowercase, ClassDb, ClassDef};

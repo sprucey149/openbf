@@ -39,7 +39,7 @@ fn every_sniper_rifle_and_only_those_gets_a_magnet() {
         eprintln!("SKIP: no baked classes");
         return;
     };
-    for (game, db, want, vehicle) in [
+    for (game, db, want) in [
         (
             "bf1",
             &bf1,
@@ -49,7 +49,6 @@ fn every_sniper_rifle_and_only_those_gets_a_magnet() {
                 "imp_weap_inf_sniperrifle",
                 "rep_weap_inf_sniperrifle",
             ][..],
-            false,
         ),
         (
             "bf2",
@@ -64,7 +63,6 @@ fn every_sniper_rifle_and_only_those_gets_a_magnet() {
                 "rep_weap_award_sniper_rifle",
                 "rep_weap_inf_sniper_rifle",
             ][..],
-            true,
         ),
     ] {
         let all = weapons(db);
@@ -76,7 +74,7 @@ fn every_sniper_rifle_and_only_those_gets_a_magnet() {
             assert_eq!(w.lock_on_range, 128.0, "{} range", w.name);
             assert_eq!(w.lock_on_angle, core::weapon::DEG, "{} angle", w.name);
             assert_eq!(w.target_team, 1, "{} enemies only", w.name);
-            assert_eq!(w.target_kind & 0x1f, 0b111 | if vehicle { 8 } else { 0 });
+            assert_eq!(w.target_kind & 0x1f, 0b1111);
             assert!(w.extreme_range >= w.lock_on_range, "{} reach", w.name);
         }
     }

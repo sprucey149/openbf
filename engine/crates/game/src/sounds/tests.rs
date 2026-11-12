@@ -3,7 +3,15 @@ use super::*;
 #[test]
 fn space_flag_announcements_resolve_to_audible_takes() {
     let root = crate::assets::baked_root();
-    let mut lib = SoundLib::load(&root.join("bf2_spa8")).expect("space sound bank");
+    let map = root.join("bf2_spa8");
+    if !map.join("sounds/sounds.ron").is_file() {
+        assert!(
+            std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none(),
+            "missing SPA8 sound bank"
+        );
+        return;
+    }
+    let mut lib = SoundLib::load(&map).expect("space sound bank");
     for listener in ["imp", "all"] {
         for subject in ["imp", "all"] {
             for name in [

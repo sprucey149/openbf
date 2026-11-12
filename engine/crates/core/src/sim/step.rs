@@ -167,7 +167,7 @@ impl Sim {
         if !u.alive
             || u.controller != Controller::Ai
             || u.droideka.is_some()
-            || u.wall_push.length_squared() < ai::HULL_PUSH_MIN * ai::HULL_PUSH_MIN
+            || u.wall_push.length_squared() < crate::fmath::square(ai::HULL_PUSH_MIN)
         {
             return;
         }
@@ -317,9 +317,9 @@ impl Sim {
                     return Some(s.pos);
                 }
             }
-            if exit
-                .is_some_and(|p| p.distance_squared(s.pos) <= ai::RETURN_ARRIVE * ai::RETURN_ARRIVE)
-                && s.grounded
+            if exit.is_some_and(|p| {
+                p.distance_squared(s.pos) <= crate::fmath::square(ai::RETURN_ARRIVE)
+            }) && s.grounded
                 && self.level_at(s.pos) == super::Level::On
                 && self.soldier_clear(s.pos)
             {
@@ -329,7 +329,7 @@ impl Sim {
         (exit.is_none()
             && !descent
             && s.grounded
-            && s.pos.distance_squared(start) > ai::PIN_WALKED * ai::PIN_WALKED
+            && s.pos.distance_squared(start) > crate::fmath::square(ai::PIN_WALKED)
             && self.level_at(s.pos) == super::Level::On
             && self.soldier_clear(s.pos))
         .then_some(s.pos)
@@ -1028,11 +1028,6 @@ impl Sim {
                 }
             }));
         self.saber_inputs(&mut unit_pads);
-        let decks = self.ground_rules == GroundRules::Bf2
-            && self
-                .vehicles
-                .iter()
-                .any(|v| v.alive && v.kind == crate::vehicle::VehicleKind::Flyer);
         // 3. Movement.
         let floor_seam = self.nav.as_ref().and_then(|g| g.floor_seam);
         for (i, pad_i) in unit_pads.iter_mut().enumerate() {
@@ -1212,13 +1207,13 @@ impl Sim {
                 to,
                 in_air,
             );
-            if carried && self.units[i].alive {
-                self.hold_at_walls(i, &from);
-            }
             self.keep_jet_landing_side(i, from);
             self.keep_solid_approach_side(i, from);
             if let Some(seam) = floor_seam.filter(|_| stepped == Some(true)) {
                 self.keep_floor_seam_side(i, from, seam);
+            }
+            if carried && self.units[i].alive {
+                self.hold_at_walls(i, &from);
             }
             self.push_turrets(i, from);
             // 3a'. The floor under the NEW feet, where the wall pass left them
@@ -1244,21 +1239,26 @@ impl Sim {
                 // still found), except for a face too steep to stand on
                 // over the air's step: the wall pass has just called it
                 // a wall, and lifting him onto it hangs him there.
-                let (mut fy, mut fnrm) = self.ground_under_n(s1.pos, rising, from.base.y);
+                let (mut fy, mut fnrm, mut floor_owner) =
+                    self.ground_contact(s1.pos, rising, from.base.y, STEP_HEIGHT);
                 if in_air
                     && !rising
                     && fnrm.y <= crate::soldier::FLOOR_MIN_NY
                     && fy > s1.pos.y + AIR_STEP
                 {
-                    (fy, fnrm) = self.ground_under_falling(s1.pos, from.base.y);
+                    (fy, fnrm, floor_owner) =
+                        self.ground_contact(s1.pos, false, from.base.y, AIR_STEP);
                 }
                 let vy_before = s1.vel.y;
                 let rules = self.ground_rules;
                 self.units[i]
                     .soldier
                     .resolve_ground(dt, fy, fnrm, from.base.y, rules);
-                if decks && self.units[i].alive {
-                    self.touch_deck(i);
+                if rules == GroundRules::Bf2
+                    && self.units[i].alive
+                    && (carried || floor_owner.is_some())
+                {
+                    self.touch_deck(i, floor_owner);
                 }
                 let landed = self.units[i].alive && !was_grounded && self.units[i].soldier.grounded;
                 // A hard landing UNDER THE MAP kills, cheat or not (card

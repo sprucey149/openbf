@@ -239,8 +239,7 @@ impl Sim {
             }
             if body.grounded
                 && deka.walk_state()
-                && body.pos.distance_squared(to)
-                    <= crate::ai::RETURN_ARRIVE * crate::ai::RETURN_ARRIVE
+                && body.pos.distance_squared(to) <= crate::fmath::square(crate::ai::RETURN_ARRIVE)
                 && self.level_at(body.pos) == super::Level::On
                 && self.soldier_clear(body.pos)
             {

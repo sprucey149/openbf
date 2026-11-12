@@ -495,3 +495,37 @@ fn a_text_key_is_localised_in_the_default_font() {
         ("game.nokey", "gamefont_medium")
     );
 }
+
+#[test]
+fn a_seat_keeps_the_soldier_bar_hidden_until_the_rider_leaves() {
+    use crate::hud::{feed, HudModel};
+    for first_in_seat in [false, true] {
+        let mut hud = crate::hud_tree::fixture::target_hud();
+        let mut model = HudModel {
+            hp: 300.0,
+            hp_max: 300.0,
+            ..Default::default()
+        };
+        if !first_in_seat {
+            feed(&mut hud, &model, &|_| false);
+            assert!(hud.last("player1.health").is_some());
+        }
+        model.seat_health = Some((800.0, 1000.0));
+        for _ in 0..3 {
+            feed(&mut hud, &model, &|_| false);
+            assert_eq!(hud.last("player1.health"), None);
+            assert_eq!(hud.last("player1.healthFraction"), None);
+            assert_eq!(
+                hud.last("player1.vehicle.healthFraction"),
+                Some(&EventValue::Number(0.8))
+            );
+        }
+        model.seat_health = None;
+        feed(&mut hud, &model, &|_| false);
+        assert_eq!(
+            hud.last("player1.healthFraction"),
+            Some(&EventValue::Number(1.0))
+        );
+        assert_eq!(hud.last("player1.vehicle.healthFraction"), None);
+    }
+}

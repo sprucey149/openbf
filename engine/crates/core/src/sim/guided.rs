@@ -393,7 +393,7 @@ impl Sim {
         };
         let f = &c.flight;
         let [low, high] = c.contact_damage;
-        let damage = if f.boost_speed <= 0.0 {
+        let damage = if f.boost_speed <= f.max_speed {
             low
         } else {
             let s = ((r.speed() - f.max_speed) / (f.boost_speed - f.max_speed)).clamp(0.0, 1.0);
@@ -447,19 +447,8 @@ impl Sim {
                 nearest = Some((distance, target));
             }
         };
-        if let Some(hf) = &self.heightfield {
-            if let Some(hit) = crate::collision::ray_heightfield(
-                hf,
-                &self.collision.cutters,
-                from,
-                dir,
-                len,
-                crate::projectile::TERRAIN_RAY_STEP,
-            ) {
-                if !self.collision.is_cut(from + dir * hit) {
-                    offer(hit, None);
-                }
-            }
+        if let Some(hit) = self.terrain_ray(from, dir, len, crate::projectile::TERRAIN_RAY_STEP) {
+            offer(hit, None);
         }
         if let Some(hit) =
             self.collision

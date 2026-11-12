@@ -54,6 +54,12 @@ pub fn powf(x: f32, y: f32) -> f32 {
     libm::powf(x, y)
 }
 
+/// Square a scalar with one deterministic multiplication.
+#[inline]
+pub fn square(x: f32) -> f32 {
+    x * x
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

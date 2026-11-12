@@ -356,7 +356,6 @@ impl winit::application::ApplicationHandler for App {
                             popup: self.pause_menu.confirm,
                             restart_available: self.map.is_none() && self.current.is_some(),
                             texts: game::pause::texts(&self.feed),
-                            back_steps_out: false,
                             // The disc's key; English fallback is §7's label.
                             respawn_label: (walk.sim.outcome.is_none()
                                 && walk.sim.unit(walk.player).is_some())

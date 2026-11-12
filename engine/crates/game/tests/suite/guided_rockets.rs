@@ -148,12 +148,23 @@ fn guided_turning_uses_display_interpolation_with_mouse_and_controller_input() {
                 }
             };
             let mut last_yaw = 0.0;
+            let mut tick_yaws = [reference.camera().yaw; 2];
+            let mut saw_between_ticks = false;
             for frame in 0..hz {
                 walk.advance(1.0 / hz as f32, &[input]);
+                let previous_tick = reference.sim.tick;
                 reference.advance(1.0 / hz as f32, &[input]);
-                let fraction = game::render_blend::fraction(&walk);
                 let tick = walk.sim.tick;
                 let hash = walk.sim.hash();
+                if reference.sim.tick > previous_tick {
+                    tick_yaws = [tick_yaws[1], reference.camera().yaw];
+                }
+                if hz != 60 && tick > 1 {
+                    walk.blend_in();
+                    let drawn = walk.camera().yaw;
+                    saw_between_ticks |= drawn > tick_yaws[1] + 1e-5 && drawn < tick_yaws[0] - 1e-5;
+                    walk.blend_out();
+                }
                 let pending = PadState {
                     buttons: if mouse { buttons::MOUSE_AIM } else { 0 },
                     mx: if mouse && frame % 2 == 0 { 500 } else { 0 },
@@ -161,7 +172,6 @@ fn guided_turning_uses_display_interpolation_with_mouse_and_controller_input() {
                 };
                 game::render_blend::blend_in_looking(&mut walk, &pending);
                 let yaw = walk.camera().yaw;
-                assert!((0.0..=1.0).contains(&fraction));
                 if tick > 1 {
                     assert!(
                         yaw <= last_yaw + 0.00001,
@@ -174,6 +184,10 @@ fn guided_turning_uses_display_interpolation_with_mouse_and_controller_input() {
                 assert_eq!(walk.sim.hash(), reference.sim.hash());
             }
             assert!(last_yaw < -0.1, "{hz} Hz mouse={mouse}: turned {last_yaw}");
+            assert!(
+                hz == 60 || saw_between_ticks,
+                "{hz} Hz mouse={mouse}: no interpolated camera angle"
+            );
         }
     }
 }

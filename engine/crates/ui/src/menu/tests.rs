@@ -28,7 +28,6 @@ fn model() -> MenuModel {
         popup: None,
         restart_available: false,
         texts: Default::default(),
-        back_steps_out: false,
         respawn_label: Some("Respawn".into()),
         outcome_line: None,
         in_shell: None,
@@ -554,12 +553,8 @@ fn back_resumes_from_every_pause_row() {
             "row {cursor}"
         );
     }
-    // A space battle keeps Back as the popup's cancel; its rows still resume.
-    m.back_steps_out = true;
-    m.cursor = 0;
-    assert_eq!(navigate(&m, back).1, vec![MenuAction::Resume]);
     m.popup = Some(Popup::Respawn);
-    assert_eq!(navigate(&m, back).1, vec![MenuAction::CancelPopup]);
+    assert_eq!(navigate(&m, back).1, vec![MenuAction::Resume]);
 }
 
 /// A value row's arrows sit clear of its label and inside the panel, on the

@@ -22,15 +22,23 @@ use glam::Vec3;
 use std::path::{Path, PathBuf};
 
 fn assets_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("OPENBF_ASSETS_BAKED") {
-        return PathBuf::from(dir);
+    std::env::var_os("OPENBF_ASSETS_BAKED")
+        .map(PathBuf::from)
+        .unwrap_or_else(game::assets::baked_root)
+}
+
+fn have_space_mission(root: &Path, map: &str, mission: &Path) -> bool {
+    let present = root.join(map).exists() && mission.exists();
+    assert!(
+        present || std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none(),
+        "missing {map} assets in {} or mission {}",
+        root.display(),
+        mission.display()
+    );
+    if !present {
+        eprintln!("skipping {map}: local baked assets or mission unavailable");
     }
-    let fallback = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets_baked");
-    if fallback.exists() {
-        fallback
-    } else {
-        game::assets::baked_root()
-    }
+    present
 }
 
 #[test]
@@ -40,8 +48,7 @@ fn baked_space_missiles_hit_moving_fighter_hulls() {
     for map in ["bf2_spa1"] {
         let root = assets_dir();
         let mission_path = missions_dir().join(format!("{map}_ass.ron"));
-        if !root.join(map).exists() || !mission_path.exists() {
-            eprintln!("skipping {map}: local baked assets or mission unavailable");
+        if !have_space_mission(&root, map, &mission_path) {
             continue;
         }
         let mut scene = game::assets::load_scene(&root.join(map)).unwrap();
@@ -167,8 +174,7 @@ fn baked_republic_secondary_keeps_its_lock_and_hits_moving_fighters() {
     use core::vehicle::flyer::FlightPhase;
     let root = assets_dir();
     let mission_path = missions_dir().join("bf2_spa6_1flag.ron");
-    if !root.join("bf2_spa6").exists() || !mission_path.exists() {
-        eprintln!("skipping Republic secondary scenario: local assets or mission unavailable");
+    if !have_space_mission(&root, "bf2_spa6", &mission_path) {
         return;
     }
     let mut scene = game::assets::load_scene(&root.join("bf2_spa6")).unwrap();

@@ -107,7 +107,6 @@ fn menu(icons: Icons, label: &'static str, shell: bool) -> ui::menu::MenuModel {
         popup: None,
         restart_available: false,
         texts: Default::default(),
-        back_steps_out: false,
         respawn_label: Some("Respawn".into()),
         outcome_line: None,
         in_shell: shell.then(|| "Game Options".to_owned()),

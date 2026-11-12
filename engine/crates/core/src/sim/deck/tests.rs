@@ -235,3 +235,20 @@ fn the_flyers_own_fin_does_not_shove_a_held_rider_through_the_shield() {
     assert!(furthest > z, "held on the hangar side: {furthest}");
     assert!(s.vehicles[v].pos.z < -9.0);
 }
+
+#[test]
+fn a_map_floor_just_above_a_flyer_is_not_its_deck() {
+    use crate::collision::{Body, CollisionWorld};
+    let (mut s, p, _) = deck(GroundRules::Bf2);
+    let floor = Body::new(
+        Mat4::from_translation(Vec3::new(0.0, 1.01, 0.0)),
+        Shape::Box { half: Vec3::ONE },
+    );
+    s.collision = CollisionWorld::new(vec![floor], Vec::new());
+    s.sync_hulls();
+    idle(&mut s);
+    let u = &s.units[p];
+    assert!(u.soldier.grounded);
+    assert!((u.soldier.pos.y - 2.01).abs() < 0.001);
+    assert!(u.deck.is_none(), "the selected contact is on the map floor");
+}

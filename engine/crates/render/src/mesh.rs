@@ -449,10 +449,13 @@ mod tests {
     fn gpu_struct_sizes_match_the_shader_layout() {
         // 3+3+2 f32 + 4 u8 = 36 bytes, matching Vertex::layout() stride.
         assert_eq!(std::mem::size_of::<Vertex>(), 36);
-        // mat4 + vec4 + the far cull band + the near-edge band + the light
-        // path + the fade (with its opacity) + the four light records = 124
-        // bytes.
-        assert_eq!(std::mem::size_of::<Instance>(), 124);
+        // The rigid path adds two vec4 region planes after the 124-byte prefix
+        // shared with the skinned path.
+        assert_eq!(std::mem::size_of::<Instance>(), 156);
+        assert_eq!(std::mem::offset_of!(Instance, region_top), 124);
+        assert_eq!(std::mem::offset_of!(Instance, region_bottom), 140);
+        assert_eq!(Instance::rigid_layout().attributes[10].offset, 124);
+        assert_eq!(Instance::rigid_layout().attributes[11].offset, 140);
         // Vertex + 4 u8 joints + 4 f32 weights = 56 bytes.
         assert_eq!(std::mem::size_of::<SkinnedVertex>(), 56);
         // Palette stride must satisfy the 256-B dynamic-offset alignment.

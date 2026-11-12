@@ -168,14 +168,21 @@ pub(super) fn fired_ordnance(db: &ClassDb, ord_name: &str) -> OrdnanceClass {
     if ord.kind == OrdKind::Missile {
         // Its steering keys (card UORD §4.1): TurnRate, the waver pair, the
         // ramp period, and BF2's MinSpeed / Acceleration.
-        let props = chain_props(db, ord_name);
-        let root_end = props
-            .iter()
-            .position(|p| p.0 == NEXT_CHARGE)
-            .unwrap_or(props.len());
-        let mut m = core::missile::MissileClass::from_props(&ListSrc {
-            props: &props[..root_end],
-        });
+        let mut m = if db.is_bf2() {
+            let props = chain_props(db, ord_name);
+            let root_end = props
+                .iter()
+                .position(|p| p.0 == NEXT_CHARGE)
+                .unwrap_or(props.len());
+            core::missile::MissileClass::from_props(&ListSrc {
+                props: &props[..root_end],
+            })
+        } else {
+            core::missile::MissileClass::from_props(&ClassSrc {
+                db,
+                class: ord_name,
+            })
+        };
         m.ramps = db.is_bf2();
         ord.missile = Some(m);
     }

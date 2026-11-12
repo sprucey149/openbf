@@ -391,8 +391,14 @@ impl Sim {
         // The weapons.
         let origin = pos + rot * g.muzzle(st.aim);
         let fwd = (rot * gun::dir(st.aim.0, st.aim.1)).normalize();
-        let lock_origin = pos + rot * g.ray_eye(st.look, st.zoom.is_some());
-        let lock_dir = (rot * gun::dir(st.look.0, st.look.1)).normalize_or_zero();
+        let bf2_flyer = self.ground_rules == crate::soldier::GroundRules::Bf2
+            && self.vehicles[vi].kind == VehicleKind::Flyer;
+        let lock_ray = bf2_flyer.then(|| {
+            (
+                pos + rot * g.ray_eye(st.look, st.zoom.is_some()),
+                (rot * gun::dir(st.look.0, st.look.1)).normalize_or_zero(),
+            )
+        });
         let right = fwd.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
         let up = right.cross(fwd).normalize();
         let is_player = driver.is_some_and(|i| self.units[i].is_player);
@@ -503,7 +509,7 @@ impl Sim {
             };
             let first_shot = st.weapons[k].shots_fired.saturating_sub(shots.len() as u64);
             for (shot_index, spec) in shots.iter().enumerate() {
-                let origin = if g.pilot && self.vehicles[vi].kind == VehicleKind::Flyer {
+                let origin = if g.pilot && bf2_flyer {
                     w.fire_points
                         .get(
                             ((first_shot + shot_index as u64) % w.fire_points.len().max(1) as u64)
@@ -581,6 +587,7 @@ impl Sim {
                         .and_then(|u| u.ai.target)
                         .and_then(|f| f.unit())
                         .map(crate::missile::MissileTarget::Unit);
+                    let (lock_origin, lock_dir) = lock_ray.unwrap_or((origin, d));
                     let locked = driver
                         .and_then(|i| self.seat_lock_target(i, w.class, lock_origin, lock_dir));
                     let armed = armed_target.map(crate::missile::MissileTarget::Vehicle);

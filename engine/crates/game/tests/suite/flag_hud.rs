@@ -1,12 +1,29 @@
 use ui::hud_flag::FlagStatus;
 
+fn baked_hud() -> Option<ui::hud_tree::Hud> {
+    let assets = std::env::var_os("OPENBF_ASSETS_BAKED")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(game::assets::baked_root);
+    let root = assets.join("common_bf2/hud");
+    let paths = ["1playerhud.ron", "hudtransforms.ron"].map(|name| root.join(name));
+    if paths.iter().any(|path| !path.is_file()) {
+        assert!(
+            std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none(),
+            "missing BF2 HUD layout at {}",
+            root.display()
+        );
+        return None;
+    }
+    let [nodes, transforms] =
+        paths.map(|path| ron::from_str(&std::fs::read_to_string(path).unwrap()).unwrap());
+    Some(ui::hud_tree::Hud::new(&nodes, &transforms))
+}
+
 #[test]
 fn flag_status_uses_original_hud_art_through_lifecycle() {
-    let root = game::assets::baked_root().join("common_bf2/hud");
-    let read = |name: &str| -> manifest::hud::HudLayout {
-        ron::from_str(&std::fs::read_to_string(root.join(name)).unwrap()).unwrap()
+    let Some(mut hud) = baked_hud() else {
+        return;
     };
-    let mut hud = ui::hud_tree::Hud::new(&read("1playerhud.ron"), &read("hudtransforms.ron"));
     let mut model = ui::hud::HudModel::default();
     let art = ui::hud_draw::HudArt::default();
     let draw = |hud: &mut ui::hud_tree::Hud, model: &ui::hud::HudModel| {
@@ -124,11 +141,9 @@ fn rendered_flag_hud_carrier_and_drop() {
 
 #[test]
 fn marker_styles_cover_occlusion_offscreen_and_flyer_scale() {
-    let root = game::assets::baked_root().join("common_bf2/hud");
-    let read = |name: &str| -> manifest::hud::HudLayout {
-        ron::from_str(&std::fs::read_to_string(root.join(name)).unwrap()).unwrap()
+    let Some(mut hud) = baked_hud() else {
+        return;
     };
-    let mut hud = ui::hud_tree::Hud::new(&read("1playerhud.ron"), &read("hudtransforms.ron"));
     let art = ui::hud_draw::HudArt::default();
     let mut marker = ui::hud_tree::HintMarker {
         ndc: [0.0, 0.0],
