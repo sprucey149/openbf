@@ -34,6 +34,10 @@ impl Sim {
             .and_then(Option::as_ref);
         let center = sphere.map_or(vehicle.pos, |s| vehicle.pos + vehicle.rot * s.sphere_centre);
         let radius = sphere.map_or(0.0, |s| s.sphere_radius.max(0.0));
+        self.landing_coverage(center, radius)
+    }
+
+    pub(super) fn landing_coverage(&self, center: Vec3, radius: f32) -> (bool, bool) {
         let mut touches = false;
         let mut inside = false;
         for region in &self.landing_regions {

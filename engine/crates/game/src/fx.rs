@@ -444,6 +444,12 @@ enum Gain {
 }
 
 impl LiveEffect {
+    fn set_size(&mut self, size: f32) {
+        for instance in &mut self.instances {
+            instance.size = size;
+        }
+    }
+
     fn follow_unit(&mut self, unit: &core::unit::Unit) {
         let delta = unit.soldier.pos - self.frame.pos;
         for instance in &mut self.instances {

@@ -229,7 +229,7 @@ impl Sim {
         for r in self
             .guided
             .iter()
-            .filter(|r| r.owner.index != b.owner.index && !seen(Target::Guided(r.id)))
+            .filter(|r| r.live() && r.owner.index != b.owner.index && !seen(Target::Guided(r.id)))
         {
             if let Some(t) = crate::unit::ray_sphere(
                 from,

@@ -1055,7 +1055,7 @@ impl SoundLib {
         listener: &Listener,
     ) {
         let mut requests = Vec::new();
-        for r in &sim.guided {
+        for r in sim.guided.iter().filter(|r| r.live()) {
             let Some(c) = sim.guided_class(r) else {
                 continue;
             };
@@ -1067,7 +1067,7 @@ impl SoundLib {
                 continue;
             };
             let inputs = crate::engine_sound::Inputs {
-                speed: r.vel.length() / c.boost_speed.max(c.speeds[2]).max(0.001),
+                speed: r.vel.length() / c.top_speed().max(0.001),
                 health: r.health / c.health.max(0.001),
                 timer: r.age,
                 ..Default::default()

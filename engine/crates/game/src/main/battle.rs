@@ -716,7 +716,7 @@ pub(super) fn hud_model(
         .and_then(|round| feed.space_status(&walk.sim, round, me.team));
     let (stamina, stamina_max) = me.stamina_bar();
     let (hp, hp_max, energy, energy_max) = match (guided, droid) {
-        (Some((r, c)), _) => (r.health, c.health, r.energy, c.energy),
+        (Some((r, c)), _) => (r.health, c.health, r.energy(), c.flight.energy_max),
         // [ours] Flying a droid, the stamina bar runs down its 90 s.
         (None, Some((d, c))) => (
             d.health,

@@ -82,6 +82,33 @@ pub fn flyer_aim_box(geometry: &str) -> f32 {
         .map_or(0.0, |(_, v)| *v)
 }
 
+pub fn flyer_params(
+    db: &crate::classdb::ClassDb,
+    c: &str,
+    bf2: bool,
+    landed: f32,
+) -> Option<core::vehicle::flyer::FlyerParams> {
+    vehicle_class::FlyerClass::from_db(db, c, bf2).map(|f| core::vehicle::flyer::FlyerParams {
+        never_crash_when_unpiloted: vehicle_class::prop_flag(db, c, "NeverCrashWhenUnpiloted"),
+        trick_roll_speed: vehicle_class::prop_float(db, c, "TrickRollSpeed").unwrap_or(1.0),
+        trick_drain: vehicle_class::prop_float(db, c, "EnergyTrickDrainSingleTap").unwrap_or(15.0),
+        trick_side_strafe: vehicle_class::prop_float(db, c, "TrickSideRollStrafeSpeed")
+            .unwrap_or(0.0),
+        aim_box: db
+            .prop(c, "GeometryName")
+            .map(|g| flyer_aim_box(g.trim()))
+            .unwrap_or(0.0),
+        pilot_repair_scale: vehicle_class::prop_float(db, c, "PilotSkillRepairScale")
+            .unwrap_or(0.005),
+        has_chunks: vehicle_class::has_chunks(db, c),
+        view_fov: vehicle_class::seats(db, c)
+            .first()
+            .and_then(|s| s.third_person_fov)
+            .unwrap_or(48.0),
+        ..f.params(landed)
+    })
+}
+
 /// The side-table row of a port faction key: (`Class<SideName>`, the
 /// `Class<Side>` stem of the Atk / Def keys).
 pub fn side_row(faction: &str) -> Option<(&'static str, &'static str)> {
@@ -195,16 +222,27 @@ pub struct FlyerExhaust {
     pub local: glam::Mat4,
     pub node: Option<String>,
     pub offset: Vec3,
+    pub scale: [f32; 3],
 }
 
 fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<FlyerExhaust> {
-    let mut effects: Vec<(String, Option<String>, Vec3)> = Vec::new();
+    let mut effects: Vec<(String, Option<String>, Vec3, [f32; 3])> = Vec::new();
     for def in db.chain(class).into_iter().rev() {
         for (key, value) in &def.props {
             if *key == 143972182 && effects.len() < 8 {
-                effects.push((value.trim().to_owned(), None, Vec3::ZERO));
-            } else if let Some((_, node, offset)) = effects.last_mut() {
-                if *key == 772102128 {
+                effects.push((value.trim().to_owned(), None, Vec3::ZERO, [1.0, 1.0, 0.0]));
+            } else if let Some((_, node, offset, scale)) = effects.last_mut() {
+                let slot = match *key {
+                    4050953208 => Some(0),
+                    3288168522 => Some(1),
+                    3916448184 => Some(2),
+                    _ => None,
+                };
+                if let Some(i) = slot {
+                    if let Ok(v) = value.trim().parse::<f32>() {
+                        scale[i] = v;
+                    }
+                } else if *key == 772102128 {
                     *node = Some(value.trim().to_owned());
                 } else if *key == 880236393 {
                     let values: Vec<_> = value
@@ -220,7 +258,7 @@ fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<
     }
     effects
         .into_iter()
-        .map(|(effect, node, offset)| {
+        .map(|(effect, node, offset, scale)| {
             let base = node
                 .as_deref()
                 .and_then(|name| nodes.iter().find(|n| n.name.eq_ignore_ascii_case(name)))
@@ -235,6 +273,7 @@ fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<
                 local: base * glam::Mat4::from_translation(offset),
                 node,
                 offset,
+                scale,
             }
         })
         .collect()
@@ -706,39 +745,7 @@ pub fn install_with_objective(
         .classes
         .iter()
         .enumerate()
-        .map(|(i, c)| {
-            vehicle_class::FlyerClass::from_db(&db, c, game == "bf2").map(|f| {
-                core::vehicle::flyer::FlyerParams {
-                    never_crash_when_unpiloted: vehicle_class::prop_flag(
-                        &db,
-                        c,
-                        "NeverCrashWhenUnpiloted",
-                    ),
-                    trick_roll_speed: vehicle_class::prop_float(&db, c, "TrickRollSpeed")
-                        .unwrap_or(1.0),
-                    trick_drain: vehicle_class::prop_float(&db, c, "EnergyTrickDrainSingleTap")
-                        .unwrap_or(15.0),
-                    trick_side_strafe: vehicle_class::prop_float(
-                        &db,
-                        c,
-                        "TrickSideRollStrafeSpeed",
-                    )
-                    .unwrap_or(0.0),
-                    aim_box: db
-                        .prop(c, "GeometryName")
-                        .map(|g| flyer_aim_box(g.trim()))
-                        .unwrap_or(0.0),
-                    pilot_repair_scale: vehicle_class::prop_float(&db, c, "PilotSkillRepairScale")
-                        .unwrap_or(0.005),
-                    has_chunks: vehicle_class::has_chunks(&db, c),
-                    view_fov: vehicle_class::seats(&db, c)
-                        .first()
-                        .and_then(|s| s.third_person_fov)
-                        .unwrap_or(48.0),
-                    ..f.params(landed[i].unwrap_or(0.0))
-                }
-            })
-        })
+        .map(|(i, c)| flyer_params(&db, c, game == "bf2", landed[i].unwrap_or(0.0)))
         .collect();
     // BF2's path Properties now survive the bake; older manifests use the
     // PS2 constructor defaults until rebaked (analysis/re-flyer-ai.md).

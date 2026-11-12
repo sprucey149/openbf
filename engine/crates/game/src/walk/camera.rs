@@ -4,33 +4,158 @@ use super::*;
 
 /// How long the seat view is held after the player dies in a vehicle (BF2: 4 s).
 pub const DEATH_VIEW_HOLD: f32 = 4.0;
-pub(super) const MEASURE_SEAT_TRANSITION_SECONDS_ON_PS2: f32 = 0.4;
+const HANDOVER_RATE: f32 = 2.0;
+const HANDOVER_REACH_SQUARED: f32 = 900.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CamOwner {
+    Soldier(UnitHandle),
+    Seat(core::vehicle::VehicleHandle, u8),
+    Guided(u64),
+    Droid(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Handover {
+    pub age: f32,
+    pub position: Vec3,
+    pub rot: Quat,
+}
+const SOLDIER_MOVE_TENSION: f32 = 15.0;
+const EXIT_SNAP_SQUARED: f32 = 62_500.0;
+const EXIT_SETTLED_SQUARED: f32 = 1.0e-6;
 
 impl WalkSim {
     pub fn camera(&self) -> Camera {
-        let target = self.camera_track().0;
-        if self.sim.controlled_guided(self.player).is_some() {
-            return target;
+        let cam = self.camera_track().0;
+        match self.cam_handover {
+            Some(h) => Camera {
+                near: cam.near,
+                far: cam.far,
+                ..flyer_camera::camera_at(h.position, h.rot, cam.fov_y)
+            },
+            None => cam,
         }
-        let Some((local_pos, local_rot, from_fov, elapsed, vehicle_handle)) = self.seat_transition
-        else {
-            return target;
+    }
+
+    pub(super) fn cam_owner_now(&self) -> Option<CamOwner> {
+        if self.round_end.as_ref().is_some_and(|r| r.shot.is_some())
+            || self.backdrop.is_some()
+            || self.death_cam.is_some()
+        {
+            return None;
+        }
+        let me = self.sim.unit(self.player).filter(|u| u.alive)?;
+        if let Some(r) = self.sim.controlled_guided(self.player) {
+            return Some(CamOwner::Guided(r.id));
+        }
+        if let Some(d) = self.sim.controlled_droid(self.player) {
+            return Some(CamOwner::Droid(d.id));
+        }
+        Some(match me.mount {
+            Some(m) => CamOwner::Seat(m.vehicle, m.seat),
+            None => CamOwner::Soldier(self.player),
+        })
+    }
+
+    fn cam_owner_point(&self) -> Option<Vec3> {
+        Some(match self.cam_owner_now()? {
+            CamOwner::Soldier(_) => self.sim.unit(self.player)?.soldier.pos,
+            CamOwner::Seat(v, _) => self.sim.vehicle(v)?.pos,
+            CamOwner::Guided(_) => self.sim.controlled_guided(self.player)?.pos,
+            CamOwner::Droid(_) => self.sim.controlled_droid(self.player)?.pos,
+        })
+    }
+
+    pub(super) fn next_cam_handover(&self, handed: bool, previous: &Camera) -> Option<Handover> {
+        let from_rot = camera_rotation(previous.yaw, previous.pitch, previous.roll);
+        if handed {
+            return Some(Handover {
+                age: 0.0,
+                position: previous.position,
+                rot: from_rot,
+            });
+        }
+        let held = self.cam_handover?;
+        if held.age.is_infinite() || self.cam_owner_now().is_none() {
+            return None;
+        }
+        let age = held.age + core::TICK_DT;
+        let f = HANDOVER_RATE * age;
+        let new = self.camera_track().0;
+        let to_rot = camera_rotation(new.yaw, new.pitch, new.roll);
+        let settled = Handover {
+            age: f32::INFINITY,
+            position: new.position,
+            rot: to_rot,
         };
-        let Some(vehicle) = self.sim.vehicle(vehicle_handle) else {
-            return target;
+        if f >= 1.0 {
+            return Some(settled);
+        }
+        let zoom = self
+            .sim
+            .unit(self.player)
+            .and_then(|u| u.zoom)
+            .or_else(|| self.sim.seat_zoom(self.player))
+            .map_or(1.0, |z| z.value);
+        if zoom != 1.0 || self.first_person() {
+            return Some(Handover { age, ..settled });
+        }
+        if new.position.distance_squared(previous.position) >= HANDOVER_REACH_SQUARED {
+            return Some(settled);
+        }
+        let mid_rot = crate::sim_pose::quat_slerp(from_rot, to_rot, 0.5);
+        let mid = (previous.position + new.position) * 0.5;
+        let bow = previous.position.distance(new.position) * 0.5 * (1.0 - f);
+        let arc = mid + mid_rot * Vec3::Z * bow;
+        let position = previous.position + (arc - previous.position) * f;
+        let position = match self.cam_owner_point() {
+            Some(p) => self.handover_clear(p + Vec3::Y * CAMERA_PULL_Y, position),
+            None => position,
         };
-        let t = (elapsed / MEASURE_SEAT_TRANSITION_SECONDS_ON_PS2).clamp(0.0, 1.0);
-        let t = t * t * (3.0 - 2.0 * t);
-        let current_from_pos = vehicle.pos + vehicle.rot * local_pos;
-        let current_from_rot = vehicle.rot * local_rot;
-        let target_rot = camera_rotation(target.yaw, target.pitch, target.roll);
-        let slerped_rot = crate::sim_pose::quat_slerp(current_from_rot, target_rot, t);
-        let lerped_pos = current_from_pos.lerp(target.position, t);
-        let lerped_fov = from_fov + (target.fov_y - from_fov) * t;
-        let mut cam = flyer_camera::camera_at(lerped_pos, slerped_rot, lerped_fov);
-        cam.near = target.near;
-        cam.far = target.far;
-        cam
+        Some(Handover {
+            age,
+            position,
+            rot: crate::sim_pose::quat_slerp(from_rot, to_rot, f * f),
+        })
+    }
+
+    fn handover_clear(&self, from: Vec3, to: Vec3) -> Vec3 {
+        let mut f = if self.camera_blockers.is_empty() {
+            1.0
+        } else {
+            self.camera_blockers
+                .fraction(from, to, None, |i| self.station_pose(i), &self.sim.doors)
+        };
+        let track = to - from;
+        let len = track.length();
+        if let Some(h) = self.sim.heightfield.as_ref().filter(|_| len > 1e-3) {
+            let cutters = &self.sim.collision.cutters;
+            if let Some(t) =
+                core::collision::ray_heightfield(h, cutters, from, track / len, len, 0.25)
+            {
+                f = f.min(t / len);
+            }
+        }
+        from + track * f
+    }
+
+    pub(super) fn feed_handover(&mut self) {
+        let Some(h) = self.cam_handover else {
+            return;
+        };
+        if let Some(c) = &mut self.cam_flyer {
+            c.eye = h.position;
+            c.rot = h.rot;
+        }
+        if let Some(c) = &mut self.cam_gunner {
+            c.eye = h.position;
+            c.rot = h.rot;
+        }
+        if let Some(c) = &mut self.cam_guided {
+            c.eye = h.position;
+            c.rot = h.rot;
+        }
     }
 
     /// The drawn camera, and for a camera the world pulls in, which one it
@@ -47,10 +172,8 @@ impl WalkSim {
         if let Some(b) = &self.backdrop {
             return (b.camera(), None);
         }
-        if let Some(r) = self.sim.controlled_guided(self.player) {
-            if let Some(c) = self.sim.guided_class(r) {
-                return (guided_camera(r, c, self.fov_y()), None);
-            }
+        if let Some(cam) = self.guided_seat_camera() {
+            return (cam, None);
         }
         if let Some(view) = self.held_seat_view() {
             return (view, None);
@@ -62,6 +185,9 @@ impl WalkSim {
             return got;
         }
         if let Some(got) = self.flyer_seat_camera() {
+            return got;
+        }
+        if let Some(got) = self.flyer_gunner_camera() {
             return got;
         }
         if let Some(got) = self.seat_camera() {
@@ -83,7 +209,7 @@ impl WalkSim {
         let body = me.soldier.pos + Vec3::Y * CAMERA_SIGHT_BODY_Y.min(center.y - me.soldier.pos.y);
         track.sights = [center, body];
         let cam = Camera {
-            position,
+            position: position + self.cam_exit.unwrap_or(Vec3::ZERO),
             yaw: me.soldier.yaw,
             pitch: core::fmath::atan2(ideal.forward.y, ideal.forward.with_y(0.0).length()),
             fov_y: self.fov_y(),
@@ -195,6 +321,32 @@ impl WalkSim {
         )
     }
 
+    pub(super) fn next_cam_exit(&self, was_mounted: bool, previous: &Camera) -> Option<Vec3> {
+        let me = self.sim.unit(self.player)?;
+        if !me.alive
+            || me.mount.is_some()
+            || me.eye_view()
+            || self.backdrop.is_some()
+            || self.death_cam.is_some()
+            || self.round_end.as_ref().is_some_and(|r| r.shot.is_some())
+            || self.sim.controlled_guided(self.player).is_some()
+            || self.sim.controlled_droid(self.player).is_some()
+        {
+            return None;
+        }
+        if self.cam_exit.is_none() && !was_mounted {
+            return None;
+        }
+        let ideal = self.camera_track().0.position - self.cam_exit.unwrap_or(Vec3::ZERO);
+        let center = me.soldier.pos + Vec3::Y * me.section().eye_y;
+        if center.distance_squared(previous.position) > EXIT_SNAP_SQUARED {
+            return None;
+        }
+        let lag =
+            (previous.position - ideal) * core::fmath::exp(-SOLDIER_MOVE_TENSION * core::TICK_DT);
+        (lag.length_squared() > EXIT_SETTLED_SQUARED).then_some(lag)
+    }
+
     pub(super) fn next_cam_jet_lag(&self) -> Vec3 {
         let Some(me) = self.sim.units.get(self.player.index as usize) else {
             return Vec3::ZERO;
@@ -269,8 +421,9 @@ impl WalkSim {
     /// tan(fov_y / 2) of the half height above the centre, at any aspect.
     /// A rider's stays on the centre (the seat cameras are PROVISIONAL).
     pub fn reticle_y(&self) -> f32 {
-        if self.sim.controlled_guided(self.player).is_some() {
-            return 0.5;
+        if let Some(r) = self.sim.controlled_guided(self.player) {
+            let clip = self.camera().view_proj(1.0) * (r.pos + r.forward() * 1024.0).extend(1.0);
+            return 0.5 - 0.5 * clip.y / clip.w;
         }
         let me = &self.sim.units[self.player.index as usize];
         if let Some(look) = self.sim.seat_look(self.player) {
@@ -518,7 +671,7 @@ impl WalkSim {
     /// The seat cameras take it too (card VSEAT, PROVISIONAL).
     pub fn fov_y(&self) -> f32 {
         let k = self.fov_scale.clamp(FOV_SCALE_RANGE.0, FOV_SCALE_RANGE.1);
-        if let Some(degrees) = self.flyer_fov() {
+        if let Some(degrees) = self.guided_fov().or_else(|| self.flyer_fov()) {
             let (s, c) = core::fmath::sin_cos(degrees.to_radians() * 0.5);
             return (2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0) * k).min(MAX_FOV_Y);
         }
@@ -634,5 +787,5 @@ impl WalkSim {
 pub(crate) fn camera_rotation(yaw: f32, pitch: f32, roll: f32) -> Quat {
     core::vehicle::hover::quat_y(yaw)
         * core::vehicle::hover::quat_x(pitch)
-        * core::vehicle::hover::quat_z(roll)
+        * core::vehicle::hover::quat_z(-roll)
 }

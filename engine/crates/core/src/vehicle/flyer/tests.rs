@@ -479,3 +479,25 @@ fn a_side_roll_turns_a_full_circle_and_comes_back_level() {
     assert_eq!(v.flyer.crash_roll, 0.0);
     assert_eq!(v.flyer.crash_roll_target, 0.0);
 }
+
+#[test]
+fn exhaust_scale_lerps_from_the_start_speed_to_the_top_speed_without_an_upper_clamp() {
+    let p = FlyerParams {
+        min_speed: 40.0,
+        max_speed: 120.0,
+        boost_speed: 225.0,
+        ..FlyerParams::default()
+    };
+    assert_eq!(p.exhaust_scale([0.25, 0.75, 0.0], 40.0), 0.25);
+    assert_eq!(p.exhaust_scale([0.25, 0.75, 0.0], 10.0), 0.25);
+    assert_eq!(p.exhaust_scale([0.25, 0.75, 0.0], 225.0), 0.75);
+    assert!((p.exhaust_scale([0.25, 0.75, 0.0], 410.0) - 1.25).abs() < 1e-6);
+    assert_eq!(p.exhaust_scale([0.95, 1.5, 0.5], 80.0), 0.95);
+    let slow = FlyerParams {
+        min_speed: 0.0,
+        max_speed: 0.0,
+        boost_speed: 0.0,
+        ..FlyerParams::default()
+    };
+    assert_eq!(slow.exhaust_scale([0.5, 1.5, 0.5], 0.75), 1.0);
+}

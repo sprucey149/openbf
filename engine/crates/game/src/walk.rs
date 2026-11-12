@@ -184,17 +184,6 @@ pub fn vehicle_camera(
     (v.pos + v.rot * origin, Camera { position, ..cam })
 }
 
-/// A flown guided rocket's camera (card GUIDED): the class's track centre
-/// and offset in the rocket's flight frame. The full frame includes roll, so
-/// a seat rocket's reticle stays centred while it banks.
-pub fn guided_camera(
-    r: &core::guided::GuidedRocket,
-    _c: &core::guided::GuidedClass,
-    fov_y: f32,
-) -> Camera {
-    flyer_camera::camera_at(r.pos, r.rot, fov_y)
-}
-
 /// `[ours]` The remote droid's chase offset (maintainer, 2026-10-28: "3rd
 /// person ... like the rest of the game"): the camera sits this far from
 /// the track centre in the tilted view frame (x right, y up, z back), as the
@@ -694,6 +683,7 @@ pub struct WalkSim {
     /// Each vehicle class's model top, by `Vehicle::class`
     /// ([`crate::viewer::model_tops`]), for [`vehicle_pull_height`].
     pub vehicle_tops: Vec<Option<f32>>,
+    pub guided_tops: Vec<Option<f32>>,
     pub walker_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub flyer_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
@@ -730,7 +720,11 @@ pub struct WalkSim {
     /// How far the chase camera lags a jetting soldier ([`core::unit::jet_camera_lag`]).
     pub cam_jet_lag: Vec3,
     pub cam_flyer: Option<FlyerCam>,
-    seat_transition: Option<(Vec3, Quat, f32, f32, core::vehicle::VehicleHandle)>,
+    pub cam_gunner: Option<GunnerCam>,
+    pub cam_exit: Option<Vec3>,
+    pub cam_handover: Option<Handover>,
+    pub cam_owner: Option<CamOwner>,
+    pub cam_guided: Option<GuidedCam>,
     seat_view: Option<Camera>,
     pub seat_view_timer: f32,
     /// The camera collision's stored track fraction (B1 `FUN_0019fd70`,
@@ -877,6 +871,7 @@ impl WalkSim {
             vehicle_geometry: Vec::new(),
             vehicle_seats: Vec::new(),
             vehicle_tops: Vec::new(),
+            guided_tops: Vec::new(),
             walker_rigs: Vec::new(),
             flyer_rigs: Vec::new(),
             vehicle_weapon_hud: Vec::new(),
@@ -894,7 +889,11 @@ impl WalkSim {
             cam_place: None,
             cam_jet_lag: Vec3::ZERO,
             cam_flyer: None,
-            seat_transition: None,
+            cam_gunner: None,
+            cam_exit: None,
+            cam_handover: None,
+            cam_owner: None,
+            cam_guided: None,
             seat_view: None,
             seat_view_timer: 0.0,
             cam_pull: 1.0,
@@ -1277,30 +1276,6 @@ impl WalkSim {
         if let Some(Some(h)) = self.sim.players.first() {
             self.player = *h;
         }
-        let new_mount = self.sim.unit(self.player).and_then(|u| u.mount);
-        if let (Some(old), Some(new)) = (old_mount, new_mount) {
-            if old.vehicle == new.vehicle && old.seat != new.seat {
-                if let Some(vehicle) = self.sim.vehicle(new.vehicle) {
-                    let old_rot =
-                        camera::camera_rotation(old_camera.yaw, old_camera.pitch, old_camera.roll);
-                    let local_pos = vehicle.rot.inverse() * (old_camera.position - vehicle.pos);
-                    let local_rot = vehicle.rot.inverse() * old_rot;
-                    self.seat_transition =
-                        Some((local_pos, local_rot, old_camera.fov_y, 0.0, new.vehicle));
-                }
-            }
-        }
-        if let Some((_, _, _, elapsed, vh)) = &mut self.seat_transition {
-            *elapsed += core::TICK_DT;
-            let mounted_same = self
-                .sim
-                .unit(self.player)
-                .and_then(|u| u.mount)
-                .is_some_and(|m| m.vehicle == *vh);
-            if *elapsed >= camera::MEASURE_SEAT_TRANSITION_SECONDS_ON_PS2 || !mounted_same {
-                self.seat_transition = None;
-            }
-        }
         self.refill_after_side_change();
         self.track_class_kills(kills_before);
         self.follow_backdrop();
@@ -1330,7 +1305,15 @@ impl WalkSim {
         self.cam_place = self.next_cam_place();
         self.cam_jet_lag = self.next_cam_jet_lag();
         self.step_cam_pull();
-        self.cam_flyer = self.next_cam_flyer();
+        self.cam_flyer = self.next_cam_flyer(old_camera.position);
+        self.cam_gunner = self.next_cam_gunner(&old_camera);
+        self.cam_exit = self.next_cam_exit(old_mount.is_some(), &old_camera);
+        self.cam_guided = self.next_cam_guided(old_camera.position);
+        let owner = self.cam_owner_now();
+        let handed = owner.is_some() && self.cam_owner.is_some() && owner != self.cam_owner;
+        self.cam_handover = self.next_cam_handover(handed, &old_camera);
+        self.cam_owner = owner;
+        self.feed_handover();
         let me = self.sim.units.get(self.player.index as usize);
         if me.is_some_and(|u| u.alive && u.mount.is_some()) {
             self.seat_view_timer = camera::DEATH_VIEW_HOLD;
@@ -1515,9 +1498,9 @@ pub(crate) fn turret_test_walk() -> (WalkSim, usize, usize) {
 mod camera;
 mod death_camera;
 mod flyer_camera;
-pub use camera::DEATH_VIEW_HOLD;
+pub use camera::{CamOwner, Handover, DEATH_VIEW_HOLD};
 pub use death_camera::DeathCam;
-pub use flyer_camera::{FlyerCam, FLYER_CRASH_DETACH_RATE};
+pub use flyer_camera::{guided_section, FlyerCam, GuidedCam, GunnerCam, FLYER_CRASH_DETACH_RATE};
 
 #[cfg(test)]
 mod tests;

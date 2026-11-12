@@ -70,6 +70,15 @@ impl Fx {
                 });
             if let Some((vehicle, exhaust)) = owner {
                 effect.frame = frame(handle.index as usize, vehicle, exhaust);
+                if let Some(p) = walk
+                    .sim
+                    .flyer_params
+                    .get(vehicle.class as usize)
+                    .and_then(Option::as_ref)
+                {
+                    let speed = vehicle.vel.dot(vehicle.rot * Vec3::Z);
+                    effect.set_size(p.exhaust_scale(exhaust.scale, speed));
+                }
             } else {
                 effect.stop();
                 effect.flyer_exhaust = None;
@@ -98,7 +107,9 @@ impl Fx {
                     continue;
                 }
                 if self.spawn(&exhaust.effect, frame(index, vehicle, exhaust)) {
-                    self.live.last_mut().unwrap().flyer_exhaust = Some((handle, slot));
+                    let live = self.live.last_mut().unwrap();
+                    live.flyer_exhaust = Some((handle, slot));
+                    live.set_size(exhaust.scale[0]);
                 }
             }
         }
@@ -233,6 +244,7 @@ mod tests {
             local: Mat4::IDENTITY,
             node: Some("engine".into()),
             offset: Vec3::Y,
+            scale: [1.0, 1.0, 0.0],
         }]];
         let handle = walk.sim.spawn_vehicle(&VehicleSpec {
             kind: VehicleKind::Flyer,
@@ -267,6 +279,7 @@ mod tests {
             local: Mat4::from_translation(Vec3::new(0.0, 1.0, -3.0)),
             node: None,
             offset: Vec3::ZERO,
+            scale: [1.0, 1.0, 0.0],
         }]];
         let handle = walk.sim.spawn_vehicle(&VehicleSpec {
             kind: VehicleKind::Flyer,

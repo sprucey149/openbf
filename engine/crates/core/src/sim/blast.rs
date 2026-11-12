@@ -196,7 +196,7 @@ impl Sim {
                     .iter()
                     .map(|t| (Target::Turret(t.id), t.centre(), crate::autoturret::RADIUS)),
             )
-            .chain(self.guided.iter().map(|r| {
+            .chain(self.guided.iter().filter(|r| r.live()).map(|r| {
                 (
                     Target::Guided(r.id),
                     r.pos,

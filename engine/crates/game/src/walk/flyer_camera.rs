@@ -12,6 +12,7 @@ const SNAP_SQUARED: f32 = 62_500.0;
 const DEGREES: f32 = 0.017_453_294;
 const FOV_RATE: f32 = 25.0;
 const DEFAULT_THIRD_FOV: f32 = 48.0;
+const GUNNER_AIM_TENSION: f32 = 1000.0;
 /// The camera detach factor during Falling / Crashed (SWBFRNT2.ELF FUN_0020d450 line 122651:
 /// move tension scaled by 0.25f, allowing camera to lag behind falling/crashing craft).
 pub const FLYER_CRASH_DETACH_RATE: f32 = 0.25;
@@ -22,6 +23,14 @@ pub struct FlyerCam {
     pub eye: Vec3,
     pub rot: Quat,
     pub fov: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GunnerCam {
+    pub vehicle: VehicleHandle,
+    pub seat: u8,
+    pub eye: Vec3,
+    pub rot: Quat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,6 +76,17 @@ impl FlyerSection {
             fast_offset: seat
                 .and_then(|s| s.fast_offset)
                 .map_or(Vec3::ZERO, Vec3::from),
+        }
+    }
+
+    pub fn gunner(seat: Option<&SeatSpec>) -> Self {
+        FlyerSection {
+            tilt: seat.and_then(|s| s.tilt_value).unwrap_or(0.0) * DEGREES,
+            aim_tension: Some(
+                seat.and_then(|s| s.aim_tension)
+                    .unwrap_or(GUNNER_AIM_TENSION),
+            ),
+            ..Self::of(seat, GroundRules::Bf1)
         }
     }
 
@@ -195,7 +215,7 @@ impl WalkSim {
         Some((camera_at(position, rot, self.fov_y()), Some(track)))
     }
 
-    pub(super) fn next_cam_flyer(&self) -> Option<FlyerCam> {
+    pub(super) fn next_cam_flyer(&self, previous: Vec3) -> Option<FlyerCam> {
         let (v, handle) = self.flyer_pilot()?;
         let section = self.flyer_section(v);
         let frame = core::vehicle::flyer::untilted(v);
@@ -232,9 +252,12 @@ impl WalkSim {
         } else {
             section.move_tension
         };
-        let eye = held.map_or(settled, |c| {
-            lag_eye(c.eye, settled, rot, &move_tension, core::TICK_DT)
-        });
+        let from = held.map_or(previous, |c| c.eye);
+        let eye = if center.distance_squared(from) <= SNAP_SQUARED {
+            lag_eye(from, settled, rot, &move_tension, core::TICK_DT)
+        } else {
+            settled
+        };
         let goal = section.fov_at(self.flyer_speed_fraction(v, &section));
         let was = self
             .cam_flyer
@@ -242,6 +265,226 @@ impl WalkSim {
             .map_or_else(|| chase_fovs().0, |c| c.fov);
         Some(FlyerCam {
             vehicle: handle,
+            eye,
+            rot,
+            fov: goal + (was - goal) * fmath::exp(-FOV_RATE * core::TICK_DT),
+        })
+    }
+}
+
+impl WalkSim {
+    fn flyer_gunner(&self) -> Option<(&Vehicle, VehicleHandle, u8, FlyerSection, Mat4)> {
+        if self.sim.seat_zoom(self.player).is_some() {
+            return None;
+        }
+        let mount = self.sim.unit(self.player)?.mount?;
+        let v = self.sim.vehicle(mount.vehicle)?;
+        if v.kind != VehicleKind::Flyer || mount.seat == 0 {
+            return None;
+        }
+        let seat = self
+            .vehicle_seats
+            .get(v.class as usize)?
+            .get(usize::from(mount.seat))?;
+        let l = self.sim.seat_look(self.player)?;
+        let [x, y, z] = core::vehicle::gun::frame(l.look);
+        let pivot = if l.gun.framed {
+            l.gun.pivot
+        } else {
+            Vec3::ZERO
+        };
+        let frame = Mat4::from_rotation_translation(v.rot, v.pos)
+            * Mat4::from_cols(
+                x.extend(0.0),
+                y.extend(0.0),
+                z.extend(0.0),
+                pivot.extend(1.0),
+            );
+        Some((
+            v,
+            mount.vehicle,
+            mount.seat,
+            FlyerSection::gunner(Some(seat)),
+            frame,
+        ))
+    }
+
+    fn gunner_settled(
+        &self,
+        v: &Vehicle,
+        handle: VehicleHandle,
+        section: &FlyerSection,
+        frame: Mat4,
+        rot: Quat,
+    ) -> (Vec3, Track) {
+        let target = frame.transform_point3(Vec3::Y * CAMERA_PULL_Y);
+        let ideal = frame.transform_point3(section.center) + rot * section.offset;
+        self.settle_camera(CamKind::Seat, target, ideal, v.instance, Some(handle))
+    }
+
+    pub(super) fn flyer_gunner_camera(&self) -> Option<(Camera, Option<Track>)> {
+        let (v, handle, seat, section, frame) = self.flyer_gunner()?;
+        let held = self
+            .cam_gunner
+            .filter(|c| c.vehicle == handle && c.seat == seat);
+        let rot = held.map_or_else(
+            || flyer_view(frame_rotation(frame), section.tilt),
+            |c| c.rot,
+        );
+        let (settled, track) = self.gunner_settled(v, handle, &section, frame, rot);
+        let position = held.map_or(settled, |c| c.eye);
+        Some((camera_at(position, rot, self.fov_y()), Some(track)))
+    }
+
+    pub(super) fn next_cam_gunner(&self, previous: &Camera) -> Option<GunnerCam> {
+        let (v, handle, seat, section, frame) = self.flyer_gunner()?;
+        let view = flyer_view(frame_rotation(frame), section.tilt);
+        let center = frame.transform_point3(section.center);
+        let (from_eye, from_rot) = self
+            .cam_gunner
+            .filter(|c| c.vehicle == handle && c.seat == seat)
+            .map_or_else(
+                || {
+                    (
+                        previous.position,
+                        camera::camera_rotation(previous.yaw, previous.pitch, previous.roll),
+                    )
+                },
+                |c| (c.eye, c.rot),
+            );
+        let snap = center.distance_squared(from_eye) > SNAP_SQUARED;
+        let rot = if snap {
+            view
+        } else {
+            let aim = section.aim_tension.unwrap_or(GUNNER_AIM_TENSION);
+            crate::sim_pose::quat_slerp(from_rot, view, 1.0 - fmath::exp(-aim * core::TICK_DT))
+        };
+        let (settled, _) = self.gunner_settled(v, handle, &section, frame, rot);
+        let eye = if snap {
+            settled
+        } else {
+            lag_eye(from_eye, settled, rot, &section.move_tension, core::TICK_DT)
+        };
+        Some(GunnerCam {
+            vehicle: handle,
+            seat,
+            eye,
+            rot,
+        })
+    }
+}
+
+fn frame_rotation(frame: Mat4) -> Quat {
+    Quat::from_mat3(&glam::Mat3::from_mat4(frame)).normalize()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GuidedCam {
+    pub rocket: u64,
+    pub eye: Vec3,
+    pub rot: Quat,
+    pub fov: f32,
+}
+
+pub fn guided_section(view: &core::guided::GuidedView) -> FlyerSection {
+    let mut seat = SeatSpec::new(core::vehicle::SeatKind::Pilot);
+    seat.eye_point_offset = view.eye_point_offset;
+    seat.track_center = view.track_center;
+    seat.track_offset = view.track_offset;
+    seat.slow_offset = view.slow_offset;
+    seat.fast_offset = view.fast_offset;
+    seat.fast_fov = view.fast_fov;
+    seat.third_person_fov = view.third_person_fov;
+    seat.move_tension = view.move_tension;
+    FlyerSection::of(Some(&seat), GroundRules::Bf2)
+}
+
+impl WalkSim {
+    fn guided_flown(&self) -> Option<(&core::guided::GuidedRocket, &core::guided::GuidedClass)> {
+        let r = self.sim.controlled_guided(self.player)?;
+        Some((r, self.sim.guided_class(r)?))
+    }
+
+    pub(super) fn guided_fov(&self) -> Option<f32> {
+        let (r, _) = self.guided_flown()?;
+        self.cam_guided.filter(|c| c.rocket == r.id).map(|c| c.fov)
+    }
+
+    fn guided_ideal(
+        &self,
+        r: &core::guided::GuidedRocket,
+        c: &core::guided::GuidedClass,
+        section: &FlyerSection,
+        rot: Quat,
+    ) -> (Vec3, Vec3) {
+        let frame = r.frame();
+        let top = self.guided_tops.get(r.weapon_class).copied().flatten();
+        let target = r.pos + frame * (Vec3::Y * vehicle_pull_height(VehicleKind::Flyer, top));
+        let fraction = section.speed_fraction(r.speed(), c.top_speed());
+        let ideal = r.pos + frame * section.center + rot * section.offset_at(fraction);
+        let (settled, _) = self.settle_camera(CamKind::Seat, target, ideal, None, None);
+        (target, settled)
+    }
+
+    pub(super) fn guided_seat_camera(&self) -> Option<Camera> {
+        let (r, c) = self.guided_flown()?;
+        let held = self.cam_guided.filter(|h| h.rocket == r.id);
+        let (eye, rot) = match held {
+            Some(h) => (h.eye, h.rot),
+            None => {
+                let section = guided_section(&c.view);
+                let rot = flyer_view(r.frame(), section.tilt);
+                (self.guided_ideal(r, c, &section, rot).1, rot)
+            }
+        };
+        Some(camera_at(eye, rot, self.fov_y()))
+    }
+
+    fn guided_hold_clear(&self, from: Vec3, to: Vec3) -> bool {
+        if self
+            .camera_blockers
+            .fraction(from, to, None, |i| self.station_pose(i), &self.sim.doors)
+            < 1.0
+        {
+            return false;
+        }
+        let Some(h) = &self.sim.heightfield else {
+            return true;
+        };
+        let (dir, len) = ((to - from).normalize_or_zero(), (to - from).length());
+        core::collision::ray_heightfield(h, &self.sim.collision.cutters, from, dir, len, 0.25)
+            .is_none()
+    }
+
+    pub(super) fn next_cam_guided(&self, previous: Vec3) -> Option<GuidedCam> {
+        let (r, c) = self.guided_flown()?;
+        let held = self.cam_guided.filter(|h| h.rocket == r.id);
+        if !r.live() {
+            let mut cam = held?;
+            let back = -(r.rot * Vec3::Z);
+            if (cam.eye - r.pos).dot(back) < c.hold_distance {
+                let to = cam.eye + back * (c.hold_speed * core::TICK_DT);
+                if self.guided_hold_clear(cam.eye, to) {
+                    cam.eye = to;
+                }
+            }
+            return Some(cam);
+        }
+        let section = guided_section(&c.view);
+        let frame = r.frame();
+        let rot = flyer_view(frame, section.tilt);
+        let (_, settled) = self.guided_ideal(r, c, &section, rot);
+        let center = r.pos + frame * section.center;
+        let from = held.map_or(previous, |h| h.eye);
+        let eye = if center.distance_squared(from) <= SNAP_SQUARED {
+            lag_eye(from, settled, rot, &section.move_tension, core::TICK_DT)
+        } else {
+            settled
+        };
+        let goal = section.fov_at(section.speed_fraction(r.speed(), c.top_speed()));
+        let was = held.map_or_else(|| chase_fovs().0, |h| h.fov);
+        Some(GuidedCam {
+            rocket: r.id,
             eye,
             rot,
             fov: goal + (was - goal) * fmath::exp(-FOV_RATE * core::TICK_DT),
@@ -262,6 +505,31 @@ mod tests {
         let view = flyer_view(frame, 0.0);
         assert!((view * Vec3::NEG_Z).abs_diff_eq(frame * Vec3::Z, 1e-5));
         assert!((view * Vec3::Y).abs_diff_eq(frame * Vec3::Y, 1e-5));
+    }
+
+    #[test]
+    fn a_drawn_camera_gives_back_the_turn_it_was_made_from() {
+        for (x, y, z) in [(0.0, 0.0, 0.0), (0.5, 2.0, -1.0), (-1.2, -2.5, 2.9)] {
+            let rot = Quat::from_euler(glam::EulerRot::YXZ, y, x, z);
+            let cam = camera_at(Vec3::ZERO, rot, 1.0);
+            let back = camera::camera_rotation(cam.yaw, cam.pitch, cam.roll);
+            assert!(back.dot(rot).abs() > 0.9999, "{x} {y} {z}");
+        }
+    }
+
+    #[test]
+    fn a_gunner_section_keeps_its_own_tilt_and_the_ps2_default_tensions() {
+        let mut seat = SeatSpec::new(core::vehicle::SeatKind::Gunner(0));
+        seat.track_offset = Some([0.0, 0.0, 20.0]);
+        seat.tilt_value = Some(-10.0);
+        let s = FlyerSection::gunner(Some(&seat));
+        assert!((s.tilt + 10.0 * DEGREES).abs() < 1e-6);
+        assert_eq!(s.aim_tension, Some(1000.0));
+        assert_eq!(s.move_tension, [[30.0; 2]; 3]);
+        assert_eq!(
+            (s.center, s.offset),
+            (Vec3::ZERO, Vec3::new(0.0, 0.0, 20.0))
+        );
     }
 
     #[test]
@@ -458,10 +726,10 @@ mod tests {
     #[test]
     fn a_held_eye_trails_the_ship_and_a_far_one_snaps() {
         let (mut w, h) = tie_pilot();
-        w.cam_flyer = w.next_cam_flyer();
+        w.cam_flyer = w.next_cam_flyer(w.camera().position);
         let start = w.cam_flyer.unwrap().eye;
         w.sim.vehicle_mut(h).unwrap().pos = Vec3::Z * 2.0;
-        let moved = w.next_cam_flyer().unwrap().eye;
+        let moved = w.next_cam_flyer(w.camera().position).unwrap().eye;
         let a = 1.0 - (-4.25f32 * core::TICK_DT).exp();
         assert!((moved.z - (start.z + 2.0 * a)).abs() < 1e-3, "{moved}");
         w.cam_flyer = Some(FlyerCam {
@@ -470,17 +738,34 @@ mod tests {
         });
         assert!((w.camera().position - moved).length() < 1e-5);
         w.sim.vehicle_mut(h).unwrap().pos = Vec3::Z * 300.0;
-        let far = w.next_cam_flyer().unwrap().eye;
+        let far = w.next_cam_flyer(w.camera().position).unwrap().eye;
         assert!(far.abs_diff_eq(Vec3::new(0.0, 5.0, 292.0), 1e-3), "{far}");
     }
 
     #[test]
     fn leaving_the_pilot_seat_ends_the_held_camera() {
         let (mut w, _) = tie_pilot();
-        w.cam_flyer = w.next_cam_flyer();
+        w.cam_flyer = w.next_cam_flyer(w.camera().position);
         assert!(w.cam_flyer.is_some());
         let player = w.player;
         w.sim.exit_vehicle(player);
-        assert!(w.next_cam_flyer().is_none());
+        assert!(w.next_cam_flyer(w.camera().position).is_none());
+    }
+
+    #[test]
+    fn boarding_eases_the_eye_from_the_previous_camera() {
+        let (w, _) = tie_pilot();
+        assert!(w.cam_flyer.is_none());
+        let settled = w.next_cam_flyer(w.camera().position).unwrap().eye;
+        let previous = settled + Vec3::X * 10.0;
+        let eye = w.next_cam_flyer(previous).unwrap().eye;
+        let kept = 10.0 * (-2.7f32 * core::TICK_DT).exp();
+        assert!(((eye - settled).x - kept).abs() < 1e-3, "{eye} {settled}");
+        let far = settled + Vec3::X * 400.0;
+        assert!(w
+            .next_cam_flyer(far)
+            .unwrap()
+            .eye
+            .abs_diff_eq(settled, 1e-3));
     }
 }

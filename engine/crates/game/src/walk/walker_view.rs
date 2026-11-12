@@ -49,6 +49,13 @@ impl WalkSim {
     ) {
         self.vehicle_tops =
             crate::viewer::model_tops(manifest, map_dir, root, &self.vehicle_geometry);
+        let guided: Vec<_> = self
+            .sim
+            .weapon_classes
+            .iter()
+            .map(|w| w.guided.as_ref().and(w.ordnance.geometry.clone()))
+            .collect();
+        self.guided_tops = crate::viewer::model_tops(manifest, map_dir, root, &guided);
     }
 
     pub(super) fn walker_fovs(&self) -> Option<(f32, f32)> {

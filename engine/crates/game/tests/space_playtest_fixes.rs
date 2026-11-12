@@ -932,3 +932,185 @@ fn baked_spa1_bomber_gunner_steers_its_guided_rocket_and_craft_board_by_their_sp
     let mount = walk.sim.unit(walk.player).unwrap().mount.expect("back in");
     assert_eq!(mount.seat, 1);
 }
+
+fn spa1_bomber_walk() -> Option<(WalkSim, usize)> {
+    let root = assets_dir();
+    let map_dir = root.join("bf2_spa1");
+    let mission_path = missions_dir().join("bf2_spa1_ass.ron");
+    if !map_dir.exists() || !mission_path.exists() {
+        return None;
+    }
+    let mut scene = game::assets::load_scene(&map_dir).expect("load bf2_spa1");
+    scene.apply_mode_layer("ass");
+    let m = game::mission::MissionDef::load(&mission_path).expect("load mission");
+    let mut sim = Sim::empty(5);
+    let def = m.space_assault.as_ref().expect("space_assault def");
+    let pads = game::vehicle_pads::install_with_objective(
+        &mut sim,
+        &scene.manifest,
+        &scene.dir,
+        &root.join("classes"),
+        &m.factions(),
+        Some((def, 180)),
+    )
+    .expect("install");
+    let bomber = pads
+        .classes
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("imp_fly_tiebomber_sc"))
+        .expect("bomber class");
+    let handle = sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Flyer,
+        class: bomber as u32,
+        home_team: Some(0),
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: Vec3::new(3000.0, 500.0, 0.0),
+        yaw: 0.0,
+        max_health: 750.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot, SeatKind::Gunner(0)],
+    });
+    let index = handle.index as usize;
+    sim.arm(index);
+    let mut walk = walk_from_sim(sim);
+    walk.vehicle_seats = pads.seats;
+    assert!(walk.sim.seat_unit(walk.player, handle, 0));
+    Some((walk, index))
+}
+
+#[test]
+fn baked_spa1_bomber_seat_switch_runs_the_ps2_handover_blend() {
+    use core::sim::{buttons, PadState};
+    use glam::{Mat3, Quat};
+    let Some((mut walk, index)) = spa1_bomber_walk() else {
+        return;
+    };
+    let pose = |walk: &WalkSim| {
+        let cam = walk.camera();
+        let up = cam.right().cross(cam.forward());
+        let rot = Quat::from_mat3(&Mat3::from_cols(cam.right(), up, -cam.forward()));
+        (cam.position, rot)
+    };
+    let r1 = PadState {
+        buttons: buttons::SWITCH_WEAPON,
+        ..Default::default()
+    };
+    let wait = |walk: &mut WalkSim| {
+        for _ in 0..90 {
+            walk.step_tick(&[PadState::default()]);
+        }
+    };
+    walk.sim.vehicles[index].rot = Quat::from_rotation_z(0.6);
+    wait(&mut walk);
+    let pilot = pose(&walk);
+    walk.step_tick(&[r1]);
+    assert_eq!(walk.sim.unit(walk.player).unwrap().mount.unwrap().seat, 1);
+    wait(&mut walk);
+    let gunner = pose(&walk);
+    let v = &walk.sim.vehicles[index];
+    let local = v.rot.inverse() * (gunner.0 - v.pos);
+    assert!(
+        local.abs_diff_eq(Vec3::new(0.0, -3.47, -19.70), 0.05),
+        "TrackOffset 20 under TiltValue -10: {local}"
+    );
+    walk.step_tick(&[r1]);
+    assert_eq!(walk.sim.unit(walk.player).unwrap().mount.unwrap().seat, 0);
+    wait(&mut walk);
+    assert!(pose(&walk).0.abs_diff_eq(pilot.0, 0.1));
+    let pilot = pose(&walk);
+    walk.step_tick(&[r1]);
+    let held = pose(&walk);
+    assert!(
+        held.0.abs_diff_eq(pilot.0, 1e-3),
+        "the handover's first frame is the last camera"
+    );
+    assert!(held.1.angle_between(pilot.1) < 1e-3);
+    walk.step_tick(&[PadState::default()]);
+    let f = 2.0 * core::TICK_DT;
+    let seat = gunner.0 + (pilot.0 - gunner.0) * (-30.0f32 * core::TICK_DT).exp();
+    let mid = (pilot.0 + seat) * 0.5
+        + pilot.1.slerp(gunner.1, 0.5) * Vec3::Z * (pilot.0.distance(seat) * 0.5 * (1.0 - f));
+    let expected = pilot.0 + (mid - pilot.0) * f;
+    let got = pose(&walk);
+    assert!(got.0.abs_diff_eq(expected, 0.05), "{} vs {expected}", got.0);
+    assert!(got.1.angle_between(pilot.1.slerp(gunner.1, f * f)) < 2e-3);
+    for _ in 0..14 {
+        assert!(walk.cam_handover.is_some_and(|h| h.age.is_finite()));
+        walk.step_tick(&[PadState::default()]);
+    }
+    assert!(
+        walk.cam_handover.is_some_and(|h| h.age.is_infinite()),
+        "half a second, then the seat's own camera"
+    );
+    walk.step_tick(&[PadState::default()]);
+    assert!(walk.cam_handover.is_none());
+}
+
+#[test]
+fn baked_spa1_bomber_seat_switch_and_exit_draw_without_a_snap_or_a_stall() {
+    use core::sim::{buttons, PadState};
+    use core::vehicle::flyer::FlightPhase;
+    let Some((mut walk, index)) = spa1_bomber_walk() else {
+        return;
+    };
+    walk.blend.on = true;
+    walk.sim.vehicles[index].flyer.phase = FlightPhase::Flying;
+    walk.sim.vehicles[index].vel = Vec3::Z * 60.0;
+    let hz = 144;
+    let tick = (hz as f32 * core::TICK_DT).ceil() as usize;
+    let mut last: Option<Vec3> = None;
+    let mut steps = Vec::new();
+    let mut stalls = 0;
+    let mut exit_lag = false;
+    let mut blended = false;
+    for frame in 0..hz * 4 {
+        let mut pad = PadState {
+            lx: if frame > hz { i16::MAX } else { 0 },
+            ..Default::default()
+        };
+        if frame == hz * 2 {
+            pad.buttons |= buttons::SWITCH_WEAPON;
+        }
+        if frame == hz * 3 {
+            walk.sim.vehicles[index].vel = Vec3::ZERO;
+            walk.sim.vehicles[index].flyer.phase = FlightPhase::Landed;
+        }
+        if (hz * 3 + 30..hz * 3 + 34).contains(&frame) {
+            pad.buttons |= buttons::ACTION;
+        }
+        walk.advance(1.0 / hz as f32, &[pad]);
+        game::render_blend::blend_in_looking(&mut walk, &PadState::default());
+        let cam = walk.camera();
+        exit_lag |= walk.cam_exit.is_some();
+        blended |= walk
+            .cam_handover
+            .is_some_and(|h| h.age > 0.0 && h.age.is_finite());
+        if let Some(l) = last {
+            let step = (cam.position - l).length();
+            if (hz + 10..hz * 3).contains(&frame) {
+                steps.push(step);
+                stalls += usize::from(step < 1e-3);
+            } else if frame > hz * 3 + 30 {
+                steps.push(step);
+            }
+        }
+        last = Some(cam.position);
+        walk.blend_out();
+    }
+    assert!(
+        walk.sim.unit(walk.player).unwrap().mount.is_none(),
+        "got out"
+    );
+    assert!(exit_lag, "the soldier's camera eases in from the seat's");
+    assert!(blended, "the player camera blends the handover");
+    let snaps = steps
+        .windows(3)
+        .filter(|w| w[1] > 0.2 && w[1] > 1.5 * w[0].max(w[2]))
+        .count();
+    assert_eq!(snaps, 0, "frames that jump against both neighbours");
+    assert!(
+        stalls <= tick,
+        "{stalls} still frames: only the handover's first, held frame"
+    );
+}
