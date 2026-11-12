@@ -347,20 +347,9 @@ enum Screen {
     Battle,
 }
 
-/// BF1 load-screen playback state (Screen::Loading).
-struct Loading {
-    map_name: String,
-    map_dir: PathBuf,
-    started: std::time::Instant,
-    /// egui textures of the sequence (empty = no load screen baked).
-    textures: Vec<ui::egui::TextureHandle>,
-    /// The final image has been presented; load the map next frame.
-    load_pending: bool,
-    beep: Option<audio::LoopHandle>,
-}
-
-/// Seconds per load-screen image (the PS2 zoom sequence paces about 1 s/step).
-const LOAD_STEP_SECS: f32 = 1.0;
+#[path = "windowed/loading.rs"]
+mod loading;
+use loading::Loading;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SpawnTarget {
@@ -425,6 +414,8 @@ struct App {
     assets_dir: PathBuf,
     missions_dir: PathBuf,
     loading: Option<Loading>,
+    loading_edges: loading::Edges<loading::Button>,
+    loading_pad_blocked: bool,
     audio: Option<audio::Audio>,
     sounds: Option<game::sounds::SoundLib>,
     /// The playing take of the battle's music (card AMBM); dropping it
@@ -713,6 +704,8 @@ impl App {
             session: ui::shell::SessionOptions::default(),
             round_over: false,
             loading: None,
+            loading_edges: Default::default(),
+            loading_pad_blocked: false,
             audio,
             sounds: None,
             music_voice: None,
@@ -965,31 +958,26 @@ impl App {
             f.stop_music();
         }
         let maps = game::assets::discover_maps(&self.assets_dir);
-        let Some((name, source_game, dir)) = maps.into_iter().find(|(k, ..)| *k == row.key) else {
+        let Some((name, _, dir)) = maps.into_iter().find(|(k, ..)| *k == row.key) else {
             eprintln!("playlist: {} is not baked; skipped", row.key);
             return false;
         };
-        self.mode = row.mode.subst().to_owned();
-        self.current = Some(row);
+        let mode = row.mode.subst().to_owned();
+        // The measured CPU parse overlaps playback; upload/setup stay here.
+        let worker = match loading::prepare(dir, mode.clone()) {
+            Ok(worker) => worker,
+            Err(e) => {
+                eprintln!("loading worker: {e:#}");
+                return false;
+            }
+        };
+        let art_started = std::time::Instant::now();
         let mut textures = Vec::new();
-        // A map's own screen, else the game's generic one (BF2 LOAD/COMMON.LVL
-        // `loadscreen`, baked into common_bf2/load).
-        let screen = game::assets::load_loadscreen(&dir).or_else(|| {
-            game::assets::load_loadscreen(&self.assets_dir.join(format!("common_{source_game}")))
-        });
-        if let (Some(overlay), Some(ls)) = (&self.overlay, screen) {
-            // BF2 stills: one image per load (pick rotates with the clock).
-            let sequence: Vec<(String, game::assets::CpuTexture)> = if ls.pool {
-                let n = ls.sequence.len();
-                let pick = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |d| d.as_secs() as usize)
-                    % n.max(1);
-                ls.sequence.into_iter().skip(pick).take(1).collect()
-            } else {
-                ls.sequence
-            };
-            for (tex_name, t) in sequence {
+        if let (Some(overlay), Some(ls)) = (
+            &self.overlay,
+            loading::presentation(&self.assets_dir, &row.key),
+        ) {
+            for (tex_name, t) in ls.sequence {
                 let img = ui::egui::ColorImage::from_rgba_unmultiplied(
                     [t.width as usize, t.height as usize],
                     &t.rgba,
@@ -1001,6 +989,16 @@ impl App {
                 ));
             }
         }
+        println!(
+            "loading: presentation_assets_ms={:.3}",
+            art_started.elapsed().as_secs_f64() * 1000.0
+        );
+        self.mode = mode;
+        self.current = Some(row);
+        // The launch edge was already drained by the shell. Seed held raw pad
+        // codes too: a held accept (including an unbound button) is not new.
+        self.seed_loading_pads();
+        self.clear_loading_input();
         // BF1 loading beep (load_xtracking = the 440 Hz ui_load_lp at pitch
         // 2.1, baked by `bake beep`).
         let beep = self.audio.as_mut().and_then(|a| {
@@ -1009,10 +1007,12 @@ impl App {
         });
         self.loading = Some(Loading {
             map_name: name,
-            map_dir: dir,
             started: std::time::Instant::now(),
+            playback: Default::default(),
             textures,
-            load_pending: false,
+            worker,
+            ready: None,
+            shown: false,
             beep,
         });
         self.screen = Screen::Loading;
@@ -1020,34 +1020,40 @@ impl App {
         true
     }
 
-    /// Loading frame: paint the current step; after the last step is shown,
-    /// perform the (synchronous) map load on the following frame.
-    fn redraw_loading(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
+    /// Poll CPU work and paint independently of the presentation clock. A skip
+    /// keeps drawing until CPU data is ready. GPU upload and setup still block
+    /// the event thread at the explicitly timed final boundary.
+    fn redraw_loading(&mut self) -> Result<()> {
+        self.pump_loading_pads();
         let Some(l) = self.loading.as_mut() else {
-            self.screen = Screen::Shell;
-            self.sync_grab();
-            return;
+            self.init_shell();
+            return Ok(());
         };
-        if l.load_pending {
-            if let (Some(a), Some(b)) = (self.audio.as_mut(), l.beep.as_mut()) {
-                a.stop(b);
+        if let Some(result) = l.worker.poll() {
+            match result {
+                Ok(prepared) => l.ready = Some(prepared),
+                Err(e) => {
+                    eprintln!("failed to prepare {}: {e:#}", l.map_name);
+                    self.finish_loading();
+                    self.loading_failed();
+                    return Ok(());
+                }
             }
-            let (name, dir) = (l.map_name.clone(), l.map_dir.clone());
-            self.loading = None;
-            self.start_battle(name, dir);
-            return;
         }
         let steps = l.textures.len().max(1);
-        let elapsed = l.started.elapsed().as_secs_f32();
-        let step = ((elapsed / LOAD_STEP_SECS) as usize).min(steps - 1);
-        let last_shown = step + 1 >= steps && elapsed >= LOAD_STEP_SECS * steps as f32;
+        let elapsed = l.started.elapsed();
+        let step = l.playback.step(elapsed, steps);
+        let finish = l
+            .playback
+            .can_enter(elapsed, steps, l.shown, l.ready.is_some());
         let image = l.textures.get(step).map(|t| t.id());
         let caption = l.map_name.to_uppercase();
+        let prompt = l.playback.prompt(elapsed);
         if let (Some(r), Some(overlay), Some(window)) =
             (&mut self.renderer, &mut self.overlay, &self.window)
         {
             let paint = overlay.begin(window, |ctx| {
-                ui::loading::draw_loading(ctx, image, &caption, step, steps);
+                ui::loading::draw_loading_with_skip(ctx, image, &caption, step, steps, prompt);
             });
             if let Err(e) = r.render_with_overlay(
                 &Camera::default(),
@@ -1055,14 +1061,46 @@ impl App {
                 [0.0, 0.0, 0.0, 1.0],
                 Some(&mut |dev, q, enc, view, size| overlay.paint(&paint, dev, q, enc, view, size)),
             ) {
-                eprintln!("render: {e}");
-                event_loop.exit();
+                self.finish_loading();
+                return Err(e.into());
             }
         }
-        if last_shown {
-            if let Some(l) = self.loading.as_mut() {
-                l.load_pending = true;
+        if finish {
+            let mut l = self.finish_loading().expect("loading round");
+            let prepared = l.ready.take().expect("ready CPU scene");
+            println!(
+                "loading: cpu_parse_ms={:.3} presentation_wall_ms={:.3}",
+                prepared.cpu_ms,
+                l.started.elapsed().as_secs_f64() * 1000.0
+            );
+            if let Err(e) = self.start_battle(l.map_name.clone(), prepared) {
+                eprintln!("failed to start {}: {e:#}", l.map_name);
+                self.loading_failed();
             }
+        } else if let Some(l) = self.loading.as_mut() {
+            l.shown = true;
+        }
+        Ok(())
+    }
+
+    fn finish_loading(&mut self) -> Option<Loading> {
+        let mut l = self.loading.take()?;
+        if let (Some(a), Some(b)) = (self.audio.as_mut(), l.beep.as_mut()) {
+            a.stop(b);
+        }
+        self.loading_edges.quarantine();
+        self.loading_pad_blocked = self.any_pad_button_down();
+        self.clear_loading_input();
+        Some(l)
+    }
+
+    fn loading_failed(&mut self) {
+        if let Some(r) = self.renderer.as_mut() {
+            r.clear_scene();
+        }
+        self.current = None;
+        if !self.next_round() {
+            self.init_shell();
         }
     }
 
@@ -1164,18 +1202,17 @@ impl App {
     }
 
     /// Load the map + build the battle with the shell's settings.
-    fn start_battle(&mut self, name: String, dir: PathBuf) {
-        let Some(renderer) = self.renderer.as_mut() else {
-            return;
-        };
-        let (gpu, scene) = match load_and_upload(renderer, &dir, &self.mode) {
-            Ok(x) => x,
-            Err(e) => {
-                eprintln!("failed to load map {name}: {e:#}");
-                return;
-            }
-        };
-        self.sounds = game::sounds::SoundLib::load(&dir);
+    fn start_battle(&mut self, name: String, prepared: loading::Prepared) -> Result<()> {
+        let renderer = self
+            .renderer
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("no renderer"))?;
+        let upload_started = std::time::Instant::now();
+        let scene = prepared.scene;
+        let gpu = super::battle::upload_battle_scene(renderer, &scene, &prepared.load)?;
+        let upload_ms = upload_started.elapsed().as_secs_f64() * 1000.0;
+        let setup_started = std::time::Instant::now();
+        self.sounds = game::sounds::SoundLib::load(&scene.dir);
         self.music_voice = None;
         // The mission whose pair was picked (Republic against CIS runs the
         // map's Clone Wars script), the player's army on its own team there;
@@ -1209,17 +1246,15 @@ impl App {
             None => println!("mission: none for {name} {}", self.mode),
         }
         let mut mission = pick.map(|p| p.mission);
-        if self.mode == "eli" && mission.is_none() {
-            eprintln!("failed to start battle {name}: Hero Assault requires a mission");
-            return;
-        }
-        if mission.as_ref().is_some_and(|m| m.mode != self.mode) {
-            eprintln!(
-                "failed to start battle {name}: mission mode differs from {}",
-                self.mode
-            );
-            return;
-        }
+        anyhow::ensure!(
+            self.mode != "eli" || mission.is_some(),
+            "Hero Assault requires a mission"
+        );
+        anyhow::ensure!(
+            mission.as_ref().is_none_or(|m| m.mode == self.mode),
+            "mission mode differs from {}",
+            self.mode
+        );
         let assault = mission.as_ref().is_some_and(|m| m.is_hero_assault());
         if let Some(m) = mission.as_mut().filter(|_| assault) {
             m.ai_alive_cap = self.session.ass_numbots.max(0) as u32;
@@ -1266,13 +1301,7 @@ impl App {
         let mut renderer = self.renderer.take().expect("loaded renderer");
         let resources = self.battle_resources(&mut renderer, &scene, Some(&setup));
         self.renderer = Some(renderer);
-        let (mut walk, cube) = match resources {
-            Ok(resources) => resources,
-            Err(error) => {
-                eprintln!("failed to start battle {name}: {error:#}");
-                return;
-            }
-        };
+        let (mut walk, cube) = resources?;
         super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref());
         self.profile.settings.last_map = Some(name);
         self.profile.settings.last_mode = Some(self.mode.clone());
@@ -1294,6 +1323,11 @@ impl App {
         self.screen = Screen::Battle;
         self.sync_grab();
         self.start_frame_record();
+        println!(
+            "loading: upload_ms={upload_ms:.3} setup_ms={:.3}",
+            setup_started.elapsed().as_secs_f64() * 1000.0
+        );
+        Ok(())
     }
 
     /// A battle's first frame is next: the frame record starts over and the
@@ -1417,7 +1451,15 @@ impl App {
             } else if self.active_pad.id != was {
                 self.pad_warning = input::active_pad_warning(g, map, &self.active_pad);
             }
-            if let Some((_, pad)) = input::active_gamepad(g, &self.active_pad) {
+            if self.loading_pad_blocked {
+                loading::suppress_pad_until_release(
+                    &mut self.loading_pad_blocked,
+                    loading::pad_buttons_down(g),
+                );
+            }
+            if let Some((_, pad)) =
+                input::active_gamepad(g, &self.active_pad).filter(|_| !self.loading_pad_blocked)
+            {
                 use gilrs::Button;
                 let bits = [
                     (Button::DPadUp, 1),
@@ -1497,6 +1539,14 @@ impl App {
             self.stick_range.reset();
         } else if self.active_pad.id != was {
             self.pad_warning = input::active_pad_warning(g, map, &self.active_pad);
+        }
+        if self.loading_pad_blocked
+            && loading::suppress_pad_until_release(
+                &mut self.loading_pad_blocked,
+                loading::pad_buttons_down(g),
+            )
+        {
+            return PadState::default();
         }
         match input::active_gamepad(g, &self.active_pad) {
             Some((id, pad)) => {

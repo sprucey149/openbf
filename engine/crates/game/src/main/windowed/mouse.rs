@@ -138,6 +138,7 @@ fn cursor_shown(active_gameplay: bool, grabbed: bool) -> bool {
 
 impl Drop for App {
     fn drop(&mut self) {
+        self.finish_loading();
         self.release_mouse();
     }
 }

@@ -64,6 +64,10 @@ if [ "${1:-}" = "--hud-item-layer" ]; then
   exec cargo test --release -p game --lib hud_feed::tests::item_layer_tests::weapon_pills_real_content_overlap -- --ignored --test-threads=1 --nocapture
 fi
 
+if [ "${1:-}" = "--loading" ]; then
+  exec cargo test --release -p game --bin game windowed::loading::tests::capture_loading_overlap_and_setup -- --ignored --test-threads=1 --nocapture
+fi
+
 if [ "${1:-}" = "--ui-sharp" ]; then
   shift
   exec cargo test --release -p game --test ui_sharp "$@" -- --ignored --test-threads=1 --nocapture

@@ -260,6 +260,11 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
   select (BF2), on every map of both games.
 - Announcer/VO: **per source map**. SFX where games differ: **BF2**.
 - Music: union, per-map source game.
+- Loading uses the BF1 sequence for locations with a matching sequence. BF2-only
+  locations use the BF1 galaxy view, with a plain loading frame when the art is
+  unavailable. The first fresh button press opens a three-second skip prompt.
+  A second fresh press while it is visible ends the presentation once the
+  battle is ready.
 
 ### Cheats (session-scoped, BF2-style pause-menu codes)
 - From the originals: invincibility, infinite ammo.
