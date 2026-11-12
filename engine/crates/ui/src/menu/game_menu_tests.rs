@@ -288,6 +288,54 @@ fn a_net_game_greys_restart_mission() {
     );
 }
 
+/// The Game Menu is a stack: the cursor wraps last <-> first, and every press
+/// clicks, including the wrap (re-bf2-menus.md §4, §680: stacks wrap and
+/// always click; lists are silent at the ends). A move plays select on the
+/// frame that moves.
+#[test]
+fn the_game_menu_wraps_at_the_ends() {
+    let m = ground();
+    let n = rows(&m).len();
+    // Up from the first row lands on the last; down from the last on the first.
+    let up = input(|i| i.up = true);
+    assert_eq!(
+        navigate(
+            &MenuModel {
+                cursor: 0,
+                ..m.clone()
+            },
+            up
+        )
+        .0,
+        n - 1
+    );
+    let down = input(|i| i.down = true);
+    assert_eq!(
+        navigate(
+            &MenuModel {
+                cursor: n - 1,
+                ..m.clone()
+            },
+            down
+        )
+        .0,
+        0
+    );
+    // The wrap is a move: the game's frame_sound plays select for it
+    // (game::pause::tests covers the cue; ui has no game dependency).
+    // A press on the wrapped row acts, as any stack press does.
+    let cross = input(|i| i.confirm = true);
+    let last = rows(&m)[n - 1];
+    let (cursor, acts) = navigate(
+        &MenuModel {
+            cursor: n - 1,
+            ..m.clone()
+        },
+        cross,
+    );
+    assert_eq!((cursor, &acts), (n - 1, &vec![press(&m, last).unwrap()]));
+}
+
 /// One frame at 1280 x 900; its actions and its shapes.
 fn frame(
     ctx: &egui::Context,
