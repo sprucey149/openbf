@@ -246,6 +246,74 @@ fn exit_stands_the_soldier_behind_the_vehicle_on_the_ground() {
 }
 
 #[test]
+fn a_bot_turret_exit_prefers_a_floor_with_a_walk_back() {
+    use crate::collision::{Body, CollisionWorld, Shape};
+    use crate::nav::{Hub, NavGraph, RouteTable};
+    use crate::sim::TurretFall;
+    use glam::Quat;
+
+    let mut sim = Sim::empty(1);
+    sim.heightfield = Some(flat_ground());
+    let ledge = Body::new(
+        glam::Mat4::from_translation(Vec3::new(0.0, 4.75, -4.0)),
+        Shape::Box {
+            half: Vec3::new(1.0, 0.25, 1.0),
+        },
+    );
+    sim.collision = CollisionWorld::new(vec![ledge], Vec::new());
+    let hub = Hub {
+        pos: Vec3::new(-4.0, 0.0, 2.0),
+        radius: 2.0,
+        arcs: Vec::new(),
+    };
+    sim.nav = NavGraph::new(vec![hub], vec![], RouteTable::empty(1), vec![], vec![]);
+    sim.nav_floors = vec![0.0];
+    sim.seat_setup = vec![Some(SeatSetup {
+        radius: 4.0 - EXIT_RING,
+        body_active: vec![],
+        boardable: vec![true],
+        exit_drop: 15.0,
+        ai_size: 1,
+        guns: Vec::new(),
+    })];
+    let spec = VehicleSpec {
+        kind: VehicleKind::Turret,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: Vec3::Y * 5.0,
+        yaw: 0.0,
+        max_health: 300.0,
+        health_type: HealthType::Building,
+        seats: vec![SeatKind::Gunner(0)],
+    };
+    let turret = sim.add_building_turret(spec, Quat::IDENTITY, None, 13, (TurretFall::Pad, vec![]));
+    let bot = sim
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    let human = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+    let ledge = Vec3::new(0.0, 5.0, -4.0);
+    let floor = Vec3::new(-4.0, 0.0, 0.0);
+
+    assert!(sim.seat_unit(bot, turret, 0));
+    sim.exit_vehicle(bot);
+    assert!(sim.unit(bot).unwrap().soldier.pos.distance(ledge) < 0.01);
+
+    sim.prefer_walkable_turret_exit(13);
+    assert!(sim.seat_unit(human, turret, 0));
+    sim.exit_vehicle(human);
+    assert!(sim.unit(human).unwrap().soldier.pos.distance(ledge) < 0.01);
+
+    assert!(sim.seat_unit(bot, turret, 0));
+    sim.exit_vehicle(bot);
+    assert!(sim.unit(bot).unwrap().soldier.pos.distance(floor) < 0.01);
+}
+
+#[test]
 fn a_bf2_rider_stays_in_a_flying_ship_and_may_leave_when_parked() {
     use crate::soldier::GroundRules;
     use crate::vehicle::flyer::FlightPhase;
@@ -745,4 +813,71 @@ fn a_player_takes_a_walkers_ai_held_pilot_seat_and_the_gunner_seat_stays_open() 
         .spawn(&UnitSpec::trooper(0, Vec3::new(0.0, 0.0, 2.0)))
         .unwrap();
     assert_eq!(s.enter_target(g), Some((v, 1)));
+}
+
+#[test]
+fn a_walker_bot_retries_an_exit_whose_ray_starts_under_the_floor() {
+    use crate::collision::{Body, CollisionWorld, HullFilter, Shape};
+    use crate::nav::{Barrier, Hub, NavGraph, RouteTable};
+    use crate::sim::Level;
+    use glam::{Mat4, Vec2};
+
+    let mut sim = Sim::empty(1);
+    let floor = |pos, half| Body::new(Mat4::from_translation(pos), Shape::Box { half });
+    sim.collision = CollisionWorld::new(
+        vec![
+            floor(Vec3::new(0.0, -0.5, 0.0), Vec3::new(40.0, 0.5, 40.0)),
+            floor(Vec3::new(22.0, 2.5, 0.0), Vec3::new(10.0, 0.5, 40.0)),
+        ],
+        Vec::new(),
+    );
+    let hub = |x, y| Hub {
+        pos: Vec3::new(x, y, 0.0),
+        radius: 3.0,
+        arcs: Vec::new(),
+    };
+    let barrier = |x| Barrier {
+        centre: Vec2::new(x, 0.0),
+        axes: [Vec2::X, Vec2::Y],
+        half: Vec2::new(0.2, 40.0),
+        mask: 1,
+        enabled: true,
+    };
+    sim.nav = Some(
+        NavGraph::new(
+            vec![hub(-18.0, 0.0), hub(18.0, 3.0)],
+            Vec::new(),
+            RouteTable::empty(2),
+            vec![barrier(-12.0), barrier(13.0)],
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    sim.nav_floors = vec![0.0, 3.0];
+    let centre = Vec3::new(0.0, -0.05, 0.0);
+    let exit = |ai| {
+        sim.exit_point(
+            centre,
+            Vec3::X,
+            Vec3::Z,
+            4.0,
+            15.0,
+            true,
+            HullFilter::All,
+            ai,
+            false,
+        )
+    };
+
+    let stock = exit(false);
+    assert!(
+        sim.level_at(stock).is_off() && stock.x.abs() < 0.01,
+        "{stock}"
+    );
+    let recovered = exit(true);
+    assert_eq!(sim.level_at(recovered), Level::On);
+    assert!(
+        recovered.x < -2.0 && recovered.y.abs() < 0.01,
+        "{recovered}"
+    );
 }

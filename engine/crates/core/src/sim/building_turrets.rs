@@ -67,6 +67,8 @@ pub struct BuildingTurret {
     /// none.
     pub posed: Option<PosedParts>,
     pub self_pilots: Vec<super::self_turrets::SelfPilot>,
+    /// Prefer an exit with a walk back to the ground graph for bot gunners.
+    pub(super) prefer_walkable_exit: bool,
 }
 
 /// A building turret's collision prims that hang on a node its gunner seat
@@ -154,10 +156,22 @@ impl Sim {
             down: None,
             posed: None,
             self_pilots: Vec::new(),
+            prefer_walkable_exit: false,
         };
         t.handle = self.stand_turret(&t);
         self.building_turrets.push(t);
         self.building_turrets[self.building_turrets.len() - 1].handle
+    }
+
+    /// Select a placed turret whose standard exit can strand its bot gunner.
+    pub fn prefer_walkable_turret_exit(&mut self, instance: u32) {
+        if let Some(t) = self
+            .building_turrets
+            .iter_mut()
+            .find(|t| t.instance == instance)
+        {
+            t.prefer_walkable_exit = true;
+        }
     }
 
     /// Initial BF2 build pad: retain the standing spec/rig but remove its

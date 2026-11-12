@@ -781,6 +781,18 @@ pub struct LostState {
     /// ends when the walk is spent and the route goes on; a window of it
     /// with no progress gives the bot up for good (`mover::run`).
     pub pinned: bool,
+    /// This walk ends when a grounded hunter has a route again.
+    pub hunt_rejoin: bool,
+    /// A heading validated by the full soldier move out of a mapped pocket.
+    pub escape_heading: Option<Vec3>,
+    /// Tick for the jump in a validated recovery walk.
+    pub escape_jump_tick: Option<u64>,
+    /// Keep the facing used by the narrow walk preview.
+    pub escape_hold_yaw: bool,
+    /// Replan when a verified walk rejoins the floor from another side.
+    pub replan_after_escape: bool,
+    /// The exit point is a heading plane for this mapped approach walk.
+    pub escape_arrival_plane: bool,
 }
 
 /// What a bot is DOING this tick (card MOVR; `analysis/bot-design.md` 4.4):
@@ -1282,6 +1294,28 @@ impl LostState {
         }
         if self.pinned {
             eat(&[5]);
+        }
+        if self.hunt_rejoin {
+            eat(&[6]);
+        }
+        if let Some(dir) = self.escape_heading {
+            eat(&[7]);
+            for v in dir.to_array() {
+                eat(&v.to_bits().to_le_bytes());
+            }
+        }
+        if self.replan_after_escape {
+            eat(&[8]);
+        }
+        if self.escape_arrival_plane {
+            eat(&[9]);
+        }
+        if let Some(tick) = self.escape_jump_tick {
+            eat(&[10]);
+            eat(&tick.to_le_bytes());
+        }
+        if self.escape_hold_yaw {
+            eat(&[11]);
         }
         // Card RETW: eaten once a walk was looked for.
         if self.plans > 0 {

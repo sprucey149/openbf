@@ -61,6 +61,60 @@ fn sim(hover: bool) -> (Sim, UnitHandle) {
     (sim, h)
 }
 #[test]
+fn a_tactical_hop_from_the_marked_deck_needs_supported_floor() {
+    let (mut sim, _) = sim(false);
+    sim.nav_floors = vec![0.0; 2];
+    let spot = Vec3::new(20.0, 0.0, 0.0);
+    let over_drop = spot.with_y(4.0);
+    assert!(hop_floor_clear(&sim, Vec3::Y * 4.0, over_drop));
+
+    sim.nav
+        .as_mut()
+        .unwrap()
+        .hop_support_areas
+        .push(crate::collision::Aabb {
+            min: Vec3::splat(-1.0),
+            max: Vec3::splat(5.0),
+        });
+    assert!(hop_floor_clear(&sim, Vec3::ZERO, spot));
+    assert!(!hop_floor_clear(&sim, Vec3::Y * 4.0, over_drop));
+    assert!(hop_floor_clear(&sim, Vec3::Y * 6.0, over_drop));
+
+    sim.heightfield = None;
+    assert!(!hop_floor_clear(&sim, Vec3::ZERO, spot));
+}
+
+#[test]
+fn a_marked_hop_landing_needs_room_to_coast() {
+    use crate::collision::{Aabb, Body, Layers, Shape};
+
+    let (mut sim, _) = sim(false);
+    sim.nav_floors = vec![0.0; 2];
+    let spot = Vec3::X * 20.0;
+    sim.collision.push_body(Body::with_layers(
+        glam::Mat4::from_translation(Vec3::new(26.0, 1.0, 0.0)),
+        Shape::Box {
+            half: Vec3::new(0.5, 1.0, 2.0),
+        },
+        Layers::ALL,
+    ));
+    assert!(hop_floor_clear(&sim, Vec3::ZERO, spot));
+
+    let area = Aabb {
+        min: spot - Vec3::ONE,
+        max: spot + Vec3::ONE,
+    };
+    sim.nav
+        .as_mut()
+        .unwrap()
+        .hop_landing_areas
+        .push((area, 12.0));
+    assert!(!hop_floor_clear(&sim, Vec3::ZERO, spot));
+    assert!(hop_floor_clear(&sim, 2.0 * spot, spot));
+    assert!(hop_floor_clear(&sim, Vec3::Z * 3.0, spot + Vec3::Z * 3.0));
+}
+
+#[test]
 fn bots_out_of_a_fight_do_not_hop_and_replay_identically() {
     for hover in [false, true] {
         let run = || {
@@ -243,6 +297,27 @@ fn hover_attack_needs_twenty_metres_and_fuel_for_the_trip() {
             assert_eq!(st.jet.flight.unwrap().height, Some(10.0));
         }
     }
+}
+#[test]
+fn a_marked_launch_area_blocks_the_hover_attack() {
+    let (mut sim, h) = sim(true);
+    sim.units[h.index as usize].soldier.fuel = 1.0;
+    let mut state = AiState::default();
+    engage(&mut sim, &mut state, 24.0);
+    let mut unmarked = state;
+    ask(&sim, h, &mut unmarked, &request());
+    assert!(unmarked.jet.flight.is_some());
+
+    sim.nav
+        .as_mut()
+        .unwrap()
+        .attack_takeoff_keepout
+        .push(crate::collision::Aabb {
+            min: Vec3::splat(-1.0),
+            max: Vec3::splat(1.0),
+        });
+    ask(&sim, h, &mut state, &request());
+    assert!(state.jet.flight.is_none());
 }
 #[test]
 fn a_pending_flight_jumps_first_then_uses_the_bot_kick_without_a_second_tap() {

@@ -257,6 +257,9 @@ pub struct WalkerParams {
     ///
     /// [`Sim::spawn_points`]: crate::sim::Sim::spawn_points
     pub spawn_points: Vec<(Vec3, f32)>,
+    /// Model SPHR centre for a live command post's spawn cast. Older side
+    /// bakes without a sphere use the existing floor placement.
+    pub spawn_sphere_centre: Option<Vec3>,
 }
 
 impl Default for WalkerParams {
@@ -290,6 +293,7 @@ impl Default for WalkerParams {
             clips: Vec::new(),
             building: Vec::new(),
             spawn_points: Vec::new(),
+            spawn_sphere_centre: None,
         }
     }
 }

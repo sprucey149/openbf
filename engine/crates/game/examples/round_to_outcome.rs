@@ -4649,12 +4649,15 @@ fn run_map(
         .parent()
         .map(|p| p.join("classes"))
         .unwrap_or_else(|| std::path::PathBuf::from("classes"));
-    let rosters = game::roster::FactionRoster::pair(
+    let mut rosters = game::roster::FactionRoster::pair(
         &classes_dir,
         &scene.manifest.source_game,
         [factions[0].as_str(), factions[1].as_str()],
         mission.as_ref(),
     );
+    if let Ok((rosters, _)) = &mut rosters {
+        game::droideka::install(rosters, &scene.dir, &scene.manifest.source_game);
+    }
     let mut tables: [Vec<core::unit::UnitClass>; 2] = [Vec::new(), Vec::new()];
     // `pair` returns its warnings so that they land in THIS map's ordered
     // output instead of on a stderr the worker pool interleaves (two sweeps

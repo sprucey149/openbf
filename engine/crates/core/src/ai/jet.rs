@@ -93,6 +93,13 @@ impl JetState {
 fn hop_spot(sim: &Sim, tk: &Tick) -> Option<Vec3> {
     let me = tk.me;
     let pos = tk.u.soldier.pos;
+    if sim.nav.as_ref().is_some_and(|g| {
+        g.hop_takeoff_keepout
+            .iter()
+            .any(|area| area.min.cmple(pos).all() && pos.cmplt(area.max).all())
+    }) {
+        return None;
+    }
     let radius = tk.u.consts.aim_size * 0.5;
     (0..HOP_TRIES).find_map(|k| {
         let draw = |axis: u32| {
@@ -118,8 +125,52 @@ fn hop_spot(sim: &Sim, tk: &Tick) -> Option<Vec3> {
                     b.enabled && b.stops(nav::SOLDIER) && b.crosses_r(pos.xz(), spot.xz(), radius)
                 })
             });
-        (!barred && !line_blocked && hop_sky_clear(sim, me, spot)).then_some(spot)
+        (!barred
+            && !line_blocked
+            && hop_sky_clear(sim, me, spot)
+            && hop_floor_clear(sim, pos, spot))
+        .then_some(spot)
     })
+}
+
+fn hop_floor_clear(sim: &Sim, from: Vec3, spot: Vec3) -> bool {
+    let Some(graph) = sim.nav.as_ref() else {
+        return true;
+    };
+    if graph
+        .hop_roof_areas
+        .iter()
+        .any(|area| area.hits_ray(from, spot - from, 1.0))
+    {
+        return false;
+    }
+    let contains = |area: &crate::collision::Aabb, point: Vec3| {
+        area.min.cmple(point).all() && point.cmplt(area.max).all()
+    };
+    let landing = graph
+        .hop_landing_areas
+        .iter()
+        .find(|(area, _)| contains(area, spot));
+    if landing.is_none()
+        && !graph
+            .hop_support_areas
+            .iter()
+            .any(|area| contains(area, from))
+    {
+        return true;
+    }
+    let (floor, normal) = sim.ground_point_under_n(spot, spot.y);
+    (floor - spot.y).abs() <= crate::collision::STEP_HEIGHT
+        && normal.y >= sim.ground_rules.climb_min_ny()
+        && sim.level_at(spot.with_y(floor)) == crate::sim::Level::On
+        && landing.is_none_or(|&(_, space)| {
+            let at = spot.with_y(floor);
+            space == 0.0
+                || sim.floor_line(
+                    at,
+                    at + (spot - from).with_y(0.0).normalize_or_zero() * space,
+                )
+        })
 }
 
 fn hop_sky_clear(sim: &Sim, me: UnitHandle, spot: Vec3) -> bool {
@@ -218,18 +269,23 @@ pub(super) fn run(
             }
             Some(goal)
         });
-        let attack = st
-            .target
-            .and_then(|t| perception::contact_of(st, t))
-            .map(|t| t.last_pos)
-            .filter(|p| {
-                let distance = p.distance(s.pos);
-                c.jet_hover
-                    && distance >= 20.0
-                    && c.jet_fuel_cost > 0.0
-                    && c.max_speed > 0.0
-                    && distance / c.max_speed <= (s.fuel - c.jet_fuel_initial) / c.jet_fuel_cost
-            });
+        let attack =
+            st.target
+                .and_then(|t| perception::contact_of(st, t))
+                .map(|t| t.last_pos)
+                .filter(|p| {
+                    let distance = p.distance(s.pos);
+                    c.jet_hover
+                        && !sim.nav.as_ref().is_some_and(|graph| {
+                            graph.attack_takeoff_keepout.iter().any(|area| {
+                                area.min.cmple(s.pos).all() && s.pos.cmplt(area.max).all()
+                            })
+                        })
+                        && distance >= 20.0
+                        && c.jet_fuel_cost > 0.0
+                        && c.max_speed > 0.0
+                        && distance / c.max_speed <= (s.fuel - c.jet_fuel_initial) / c.jet_fuel_cost
+                });
         let hint = if !c.jet_hover && sim.tick >= st.jet.next_hint {
             st.jet.next_hint = after(tk.me, sim.tick, 3, 8, HINT_SALT);
             // Authored radius is the hint's activation range. No radius means

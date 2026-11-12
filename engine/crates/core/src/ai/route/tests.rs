@@ -245,6 +245,43 @@ fn a_hunter_on_its_quarrys_hub_walks_at_the_quarry() {
     }
 }
 
+#[test]
+fn a_hunter_can_rejoin_a_disconnected_graph_over_walkable_floor() {
+    use crate::unit::UnitSpec;
+
+    let (mut sim, hunter) = l_sim();
+    let at = |x: f32| Vec3::new(x, 0.0, 0.0);
+    let hub = |x, arc| Hub {
+        pos: at(x),
+        radius: 2.0,
+        arcs: vec![arc],
+    };
+    let arc = |a, b| Arc {
+        a,
+        b,
+        type_mask: 1,
+        flags: 0,
+    };
+    let graph = NavGraph::new(
+        vec![hub(0.0, 0), hub(4.0, 0), hub(14.0, 1), hub(18.0, 1)],
+        vec![arc(0, 1), arc(2, 3)],
+        RouteTable::empty(4),
+        Vec::new(),
+        Vec::new(),
+    )
+    .expect("two disconnected components");
+    assert!(!graph.reachable(0, 3, nav::SOLDIER));
+    sim.nav = Some(graph);
+    sim.resolve_nav_floors();
+    sim.spawn(&UnitSpec::trooper(1, at(18.0))).expect("quarry");
+
+    let path = hunt_rejoin(&sim, hunter).expect("walk across the missing link");
+    let end = path.pts[usize::from(path.len - 1)];
+    assert!(end.x > 12.0 && end.y.abs() < 0.1);
+    sim.unit_mut(hunter).unwrap().soldier.pos = end;
+    assert!(hunt_rejoin(&sim, hunter).is_none(), "already connected");
+}
+
 fn wander_goals(sim: &mut Sim, h: UnitHandle, seconds: u32) -> Vec<(Vec3, u16)> {
     let mut seen: Vec<(Vec3, u16)> = Vec::new();
     for _ in 0..seconds * crate::TICK_HZ {

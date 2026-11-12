@@ -79,6 +79,7 @@ pub(crate) fn atst() -> WalkerParams {
         clips,
         building: Vec::new(),
         spawn_points: Vec::new(),
+        spawn_sphere_centre: None,
     }
 }
 

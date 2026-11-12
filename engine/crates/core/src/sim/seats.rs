@@ -637,6 +637,7 @@ impl Sim {
         let Some(m) = self.unit(u).and_then(|x| x.mount) else {
             return;
         };
+        let ai = self.unit(u).is_some_and(|u| u.controller == Controller::Ai);
         let spot = self.vehicle(m.vehicle).map(|v| {
             let drop = self
                 .seat_setup
@@ -651,8 +652,24 @@ impl Sim {
             let (right, fwd) = yaw_frame(v.rot);
             let paths = v.kind != VehicleKind::Turret;
             let past = HullFilter::except(Some(m.vehicle));
+            let prefer_walkable = ai
+                && v.kind == VehicleKind::Turret
+                && self
+                    .building_turrets
+                    .iter()
+                    .any(|t| t.handle == m.vehicle && t.prefer_walkable_exit);
             (
-                self.exit_point(v.pos, right, fwd, r + EXIT_RING, drop, paths, past),
+                self.exit_point(
+                    v.pos,
+                    right,
+                    fwd,
+                    r + EXIT_RING,
+                    drop,
+                    paths,
+                    past,
+                    ai && v.kind == VehicleKind::Walker,
+                    prefer_walkable,
+                ),
                 fwd,
             )
         });
@@ -690,8 +707,11 @@ impl Sim {
         drop: f32,
         paths: bool,
         hulls: HullFilter,
+        ai_walker: bool,
+        prefer_walkable: bool,
     ) -> Vec3 {
         let mut shut_in = None;
+        let mut first_turret_spot = None;
         for (k, &(x, z)) in EXIT_CANDIDATES.iter().enumerate() {
             let p = centre + right * (x * rho) + fwd * (z * rho) + Vec3::Y * EXIT_LIFT;
             if paths && k != 8 && self.first_hit(centre, p, hulls).is_some() {
@@ -703,8 +723,37 @@ impl Sim {
             // Card VMESH (ours): never a point shut inside a map body.
             match self.shut_in(p + Vec3::Y * SHUT_PROBE_UP) {
                 Some(b) => shut_in = shut_in.or(Some(b)),
-                None => return p,
+                None => {
+                    if prefer_walkable && !self.turret_exit_reaches_floor(p) {
+                        first_turret_spot.get_or_insert(p);
+                        continue;
+                    }
+                    // OURS: an embedded walker centre can occlude every ring
+                    // ray at its origin. If the centre fallback strands the
+                    // bot, retry from the ring's raised height.
+                    // measure: PS2 Hoth dismounts when the pivot is below the floor.
+                    if ai_walker && k == 8 && p.y > centre.y && self.level_at(p).is_off() {
+                        let raised = centre + Vec3::Y * EXIT_LIFT;
+                        for &(x, z) in &EXIT_CANDIDATES[..k] {
+                            let q = raised + right * (x * rho) + fwd * (z * rho);
+                            if self.first_hit(raised, q, hulls).is_some() {
+                                continue;
+                            }
+                            if let Some(q) = self.exit_drop(q, drop, hulls).filter(|q| {
+                                self.level_at(*q) == super::Level::On
+                                    && self.shut_in(*q + Vec3::Y * SHUT_PROBE_UP).is_none()
+                                    && !self.death_regions.iter().any(|r| r.contains(*q))
+                            }) {
+                                return q;
+                            }
+                        }
+                    }
+                    return p;
+                }
             }
+        }
+        if let Some(p) = first_turret_spot {
+            return p;
         }
         // Card VMESH (ours): every candidate was inside a body - the
         // vehicle's centre is in it (a bike through Endor's cp2 boulder, a
@@ -736,6 +785,35 @@ impl Sim {
             }
         }
         centre
+    }
+
+    /// OURS: a turret can drop a bot onto an isolated rim at the same
+    /// height. Try the other normal placements for a walk back to the graph.
+    /// measure: Coruscant's upper plaza turret exit, issue #108.
+    fn turret_exit_reaches_floor(&self, pos: Vec3) -> bool {
+        let Some(g) = self.nav.as_ref() else {
+            return true;
+        };
+        let (lift, radius) = super::soldier_blast_sphere(Stance::Stand);
+        if !self.soldier_clear(pos)
+            || self.death_regions.iter().any(|r| r.contains(pos))
+            || self
+                .damage_regions
+                .iter()
+                .any(|r| r.region.touches_sphere(pos + Vec3::Y * lift, radius))
+        {
+            return false;
+        }
+        let near = self.nearest_floor_hubs::<{ crate::ai::LEVEL_HUB_TRIES }>(g, pos, |i| {
+            self.nav_floor(i as u16)
+        });
+        near.into_iter().any(|(_, h)| {
+            let (Some(hub), Some(y)) = (g.hub(h), self.nav_floor(h)) else {
+                return false;
+            };
+            let to = Vec3::new(hub.pos.x, y, hub.pos.z);
+            pos.distance_squared(to) <= crate::ai::RECYCLE_ROAM.powi(2) && self.floor_line(pos, to)
+        })
     }
 
     /// Card VMESH (ours): the map body a point is SHUT inside - enclosed by

@@ -7,10 +7,14 @@ use super::{
 };
 use crate::aim_assist::AssistState;
 use crate::battle::SpawnOutcome;
+use crate::collision::{ray_terrain_ps2, HullFilter, Layers};
 use crate::sim::input::{buttons, PadState, ScreenPick};
 use crate::sim::state::{Event, Sim};
 use crate::unit::{Controller, SpawnPost, Unit, UnitHandle, UnitSpec};
+use crate::vehicle::VehicleHandle;
 use glam::{Vec2, Vec3};
+
+type RespawnNode = ((Vec3, f32), Option<VehicleHandle>);
 
 impl Sim {
     /// The floor a unit spawned at `node` stands on: the ground under the
@@ -210,14 +214,18 @@ impl Sim {
     /// in post order, then the points of its live command walkers
     /// ([`Sim::walker_spawn_points`]).
     pub fn spawn_points(&self, team: u8) -> Vec<(Vec3, f32)> {
-        let mut points: Vec<(Vec3, f32)> = self
-            .cps
+        self.team_spawn_nodes(team)
+            .map(|(point, _)| point)
+            .collect()
+    }
+
+    fn team_spawn_nodes(&self, team: u8) -> impl Iterator<Item = RespawnNode> + '_ {
+        self.cps
             .iter()
-            .filter(|c| c.spawnable_by(team))
+            .filter(move |c| c.spawnable_by(team))
             .flat_map(|c| c.def.spawn_nodes.iter().copied())
-            .collect();
-        points.extend(self.walker_spawn_points(team));
-        points
+            .map(|point| (point, None))
+            .chain(self.walker_spawn_nodes(team))
     }
 
     /// The live command walkers `team` may spawn at, in vehicle order: a
@@ -249,13 +257,30 @@ impl Sim {
     /// it, and BF2's bleed and all-posts rule — the port's on every map —
     /// leave it out (§7).
     pub fn walker_spawn_points(&self, team: u8) -> Vec<(Vec3, f32)> {
-        self.command_walkers(team)
-            .flat_map(|(_, v)| {
-                self.class_spawn_points(v.class)
-                    .iter()
-                    .map(|&p| walker_point(v.pos, v.rot, p))
-            })
+        self.walker_spawn_nodes(team)
+            .map(|(point, _)| point)
             .collect()
+    }
+
+    fn walker_spawn_nodes(&self, team: u8) -> impl Iterator<Item = RespawnNode> + '_ {
+        self.command_walkers(team).flat_map(move |(handle, v)| {
+            self.class_spawn_points(v.class)
+                .iter()
+                .map(move |&point| (walker_point(v.pos, v.rot, point), Some(handle)))
+        })
+    }
+
+    fn respawn_post_nodes(&self, team: u8, post: Option<SpawnPost>) -> Vec<RespawnNode> {
+        post.map_or_else(Vec::new, |p| {
+            let walker = match p {
+                SpawnPost::Walker(handle) => Some(handle),
+                SpawnPost::Post(_) => None,
+            };
+            self.spawn_post_nodes(team, p)
+                .into_iter()
+                .map(|point| (point, walker))
+                .collect()
+        })
     }
 
     /// The points of the command walkers `team`'s pads are about to build —
@@ -858,14 +883,12 @@ impl Sim {
             // The PS2 writes the kept-or-nearest post back to the member.
             let post = self.keep_or_nearest_post(team, chosen);
             self.spawn_post_choice[s] = post;
-            post.map_or_else(Vec::new, |p| self.spawn_post_nodes(team, p))
+            self.respawn_post_nodes(team, post)
         } else if is_player {
-            self.spawn_points(team)
+            self.team_spawn_nodes(team).collect()
         } else {
-            match self.keep_or_draw_spawn_post(i) {
-                Some(post) => self.spawn_post_nodes(team, post),
-                None => Vec::new(),
-            }
+            let post = self.keep_or_draw_spawn_post(i);
+            self.respawn_post_nodes(team, post)
         };
         if points.is_empty() {
             return;
@@ -874,8 +897,8 @@ impl Sim {
             return;
         }
         // Uniform node pick via the inline LCG (BF1 FUN_0029df70 / BF2
-        // FUN_00356998 draw), then ground snap.
-        let (pos, yaw) = points[self.lcg.index(points.len() as u32) as usize];
+        // FUN_00356998 draw). Keep a live walker's identity for placement.
+        let ((pos, yaw), walker) = points[self.lcg.index(points.len() as u32) as usize];
         let old = self.units[i].spec.clone();
         // A PLAYER comes back as the class their spawn screen chose (D5). A
         // choice past the end of the table clamps to the last class, so a
@@ -913,10 +936,68 @@ impl Sim {
                 },
             }
         };
-        self.replace_respawned_unit(i, spec);
+        let placement = walker.and_then(|owner| self.walker_respawn_point(owner, pos));
+        self.replace_respawned_unit(i, spec, placement);
     }
 
-    pub(in crate::sim) fn replace_respawned_unit(&mut self, i: usize, spec: UnitSpec) {
+    fn walker_respawn_point(&self, owner: VehicleHandle, node: Vec3) -> Option<Vec3> {
+        let v = self.vehicle(owner)?;
+        let centre = self
+            .walker_params
+            .get(v.class as usize)?
+            .as_ref()?
+            .spawn_sphere_centre?;
+        if !centre.is_finite() {
+            return None;
+        }
+        let from = v.pos + v.rot * centre;
+        let delta = node - from;
+        let length = delta.length();
+        if !length.is_finite() {
+            return None;
+        }
+        if length == 0.0 {
+            return Some(node);
+        }
+        // CWSP §4: BF1 0x48 / BF2 0x90 with flag 1 sees terrain and the
+        // building ordnance subset. Live hulls, including the owner, are
+        // outside that mask. A building must beat the terrain hit strictly.
+        let terrain = if let Some(hf) = &self.heightfield {
+            // OURS invalid-data guard. measure: the segment span of any
+            // supported command walker whose cast approaches the map size.
+            // Terrain subdivides the whole segment into short pieces.
+            let diagonal = hf.size.saturating_sub(1) as f32 * hf.unit * std::f32::consts::SQRT_2;
+            if !diagonal.is_finite() || length > diagonal {
+                return None;
+            }
+            ray_terrain_ps2(hf, &self.collision.cutters, from, node).unwrap_or(1.0)
+        } else {
+            1.0
+        };
+        let reach = terrain * length;
+        let hit = self.collision.ray_with(
+            from,
+            delta / length,
+            reach,
+            Layers::ORDNANCE,
+            HullFilter::Static,
+        );
+        let fraction = hit
+            .filter(|hit| hit.t < reach)
+            .map_or(terrain, |hit| hit.t / length);
+        Some(if fraction < 1.0 {
+            from + delta * fraction
+        } else {
+            node
+        })
+    }
+
+    pub(in crate::sim) fn replace_respawned_unit(
+        &mut self,
+        i: usize,
+        spec: UnitSpec,
+        placement: Option<Vec3>,
+    ) {
         let gen = self.units[i].gen + 1;
         let mut unit = spec.build(gen, &self.weapon_classes);
         // An AI respawn re-derives the tier's skill (D2): a difficulty change
@@ -928,7 +1009,12 @@ impl Sim {
         unit.deaths = self.units[i].deaths;
         // Card DPRX: a proxy comes back a proxy.
         unit.proxy_human = self.units[i].proxy_human;
-        self.settle_spawn(&mut unit, self.units[i].spawn_post);
+        if let Some(pos) = placement {
+            // The live walker segment already resolved its final point.
+            unit.soldier.pos = pos;
+        } else {
+            self.settle_spawn(&mut unit, self.units[i].spawn_post);
+        }
         crate::ai::proxy::hand_weapons(&mut unit);
         self.units[i] = unit;
         let h = UnitHandle {

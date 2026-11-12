@@ -646,7 +646,8 @@ impl Sim {
     /// [`BOUND_DROP`] under the floor
     /// walked toward it from one of the [`LEVEL_HUBS`] nearest resolved hubs
     /// (nearest in XZ and in height) — a walk that stops at the first barrier,
-    /// and then allows only [`RIM_DROP`].
+    /// and then allows only [`RIM_DROP`]. A marked slope can also support
+    /// the feet on the static floor inside its authored corridor.
     pub fn level_at(&self, feet: Vec3) -> Level {
         let Some(g) = self.nav.as_ref() else {
             return Level::Unknown;
@@ -718,9 +719,34 @@ impl Sim {
             }
         }
         match over {
+            Some(_) if self.on_supported_arc_floor(g, feet) => Level::On,
             Some(drop) => Level::Off(drop),
             None => Level::Unknown,
         }
+    }
+
+    fn on_supported_arc_floor(&self, g: &crate::nav::NavGraph, feet: Vec3) -> bool {
+        g.floor_support_arcs.iter().any(|&index| {
+            let Some(arc) = g.arcs.get(usize::from(index)) else {
+                return false;
+            };
+            let (Some(a), Some(b), Some(ay), Some(by)) = (
+                g.hub(arc.a),
+                g.hub(arc.b),
+                self.nav_floor(arc.a),
+                self.nav_floor(arc.b),
+            ) else {
+                return false;
+            };
+            let line = b.xz() - a.xz();
+            let offset = Vec2::new(feet.x, feet.z) - a.xz();
+            let t = line.dot(offset) / line.length_squared();
+            (0.0..=1.0).contains(&t)
+                && (offset - line * t).length_squared() <= a.radius.min(b.radius).powi(2)
+                && (feet.y - (ay + (by - ay) * t)).abs() <= BOUND_DROP
+                && (self.floor_point_under_static(feet, feet.y + STEP_HEIGHT) - feet.y).abs()
+                    <= STEP_HEIGHT
+        })
     }
 
     /// The rim census (card BOWL): is `feet` BEYOND a barrier from each of

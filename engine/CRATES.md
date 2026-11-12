@@ -239,6 +239,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/spawn/class_change.rs` 277 — issue #28: change class at a friendly command post while alive (use-button reach and facing, in-place swap, health carried, per-class per-life ammo) · `Sim::class_change_post`, `class_change_open`, `class_change_accept`.
 - `core/src/sim/spawn/tests.rs` 1267 — spawn waves, class shares, command walkers, respawn seating and post selection regressions; shared screen fixtures.
 - `core/src/sim/spawn/tests/class_change.rs` 354 — issue #28 class-change regressions: reach, facing, team posts, health carry, ammo memory and death reset.
+- `core/src/sim/spawn/tests/walker_placement.rs` — live command-walker spawn segments, collision filters, RNG and fallback placement.
 - `core/src/sim/spawn/tests/screens.rs` 499 — spawn-screen flow, carousel timing, class refusal and replay regressions.
 - `core/src/sim/abilities.rs` 86 — shared officer radius query and activation · `ability_targets`, `fire_ability`.
 - `core/src/sim/blast.rs` 1070 — shared explosion area-damage path · `Sim::explode`, `soldier_blast_sphere`, `BLAST_GATHER_MAX`; gather, LOS, falloff and team rules are specified in the module header and `analysis/re-vehicle-death.md` §2–§5.
@@ -254,7 +255,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/sim/self_turrets.rs` 1014 — placed BF2 self-piloted building controllers, targeting and shared seat-gun dispatch (issue #91).
 - `core/src/sim/guns.rs` 598 — mounted weapon ticking, seat switching and live look/eye/barrel queries for human and bot riders · `Sim::next_seat`, `Sim::switch_pass`, `Sim::seat_gun`, `Sim::seat_look`, `SeatLook`; shared weapon firing and bot fairness checks are specified in the header and `analysis/re-vehicles.md` §5/§9.
 - `core/src/sim/guns/tests.rs` 1132 — seat-switch/charge-tenure, human charge release, firing/aimer, occupancy-hash and bot-gunner regressions, including Mygeeto turret camera/building, barrel and muzzle alignment (TURR).
-- `core/src/sim/step.rs` 1557 — fixed-tick orchestration and after-writeback wait-start and routed-departure calls, unit separation, soldier wall/zoom handling and human aim rays · `Sim::step`, `Sim::aim_hit`, `Sim::tick_zoom`; tick order is in `sim.rs`, aim details in `analysis/re-aim-assist.md` §10 and zoom details in `analysis/re-zoom.md` §5; regressions live in `core/src/sim/step/tests.rs`.
+- `core/src/sim/step.rs` 1622 — fixed-tick orchestration, wait-start and routed-departure calls, unit separation, shared soldier wall response, descent preview, zoom and human aim rays · `Sim::step`, `Sim::aim_hit`, `Sim::tick_zoom`; tick order is in `sim.rs`, aim details in `analysis/re-aim-assist.md` §10 and zoom details in `analysis/re-zoom.md` §5; regressions live in `core/src/sim/step/tests.rs`.
 - `core/src/sim/step/tests.rs` 1644 — sim tick, salvo blast-clearance, separation and determinism regressions, extracted from the step implementation.
 - `core/src/sim/step/tests/scratch.rs` 45 — retained AI scratch versus fresh allocation: hashes, event order and buffer lifetime.
 - `core/src/sim/vehicles.rs` 1023 — vehicle slots, pickup/charge-tenure, pending-call and boarding-maintenance lifecycle, occupancy/team synchronization, hull damage/death, pad spawning/decay, vehicle ticking and collision hull synchronization; includes lifecycle/hash/pad/hull tests · `Sim::spawn_vehicle`, `Sim::seat_unit`, `Sim::unseat_unit`, `Sim::vehicle_team`, `Sim::damage_vehicle`, `Sim::impact_vehicle`, `Sim::destroy_vehicle`, `Sim::add_vehicle_pad`, `Sim::tick_walkers`, `Sim::sync_hulls`. Only the seat/unseat writers update both `Seat.occupant` and `Unit.mount`; lifecycle rules are specified in the header.
@@ -381,7 +382,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/ai/team.rs` 626 — derived think-window unit grid, follow spacing and team Cover/Flank roles · `UnitGrid`, `Sim::units_within`, `follow_ease`, `board`, `flank_cap`; shared perception stays in `perception::tell`. Grid lifetime/order, role rules and constants are specified in the header and `analysis/bot-design.md` 4.1/4.3/6.2; derived grid is not hashed.
 - `core/src/ai/team/tests.rs` 471 — unit-grid equivalence/lifetime, follow spacing and Cover/Flank role regressions, including diamond-route behavior.
 - `core/src/ai/brain.rs` 101 — per-unit dispatch, shared tick context, and movement/gun finish plans. Ground bots use the ground brain. Space and proxies use legacy.
-- `core/src/ai/brain/ground.rs` 530 — ground bot tick pipeline, from perception and destination updates to intent, gunner, mover and settled behaviour.
+- `core/src/ai/brain/ground.rs` 532 — ground bot tick pipeline, from perception and destination updates to intent, gunner, mover and settled behaviour, with last-resort descent before relocation.
 - `core/src/ai/brain/ground/tests.rs` 220 — foot aim, vehicle approach and movement witnesses against the ground brain.
 - `core/src/ai/brain/legacy.rs` 1154 — frozen priority chain for space bots and difficulty proxies.
 - `core/src/ai/brain/shadow.rs` 56 — feature-gated comparison of pads, diagnostic results, state and hash bytes on the same pre-writeback inputs.
@@ -398,7 +399,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `core/src/ai/brain/behaviours/order.rs` 47 — squad order travel and Cover-role upkeep.
 - `core/src/ai/brain/behaviours/overwatch.rs` 10 — recovery when a sniper cannot reach its spot.
 - `core/src/ai/brain/behaviours/pickup.rs` 20 — item candidate and failed detour cleanup.
-- `core/src/ai/brain/behaviours/recover.rs` 209 — off-level return, progress failure ladder and lost-bot jump probe.
+- `core/src/ai/brain/behaviours/recover.rs` 274 — off-level return, failed-walk recovery, a descent from a stranded shelf and lost-bot jump probes.
 - `core/src/ai/brain/behaviours/serve.rs` 10 — failed repair-walk claim release and recovery.
 - `core/src/ai/brain/behaviours/travel.rs` 75 — route advancement, base travel goal and the final health-station approach.
 - `core/src/ai/abilities.rs` 183 — pure officer support, remote-droid and auto-turret (the BF2 cluster rule) selection through secondary fire and switch inputs · `input` (re-exported as `ai::ability_input` in `ai.rs`).

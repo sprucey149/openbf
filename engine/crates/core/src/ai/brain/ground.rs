@@ -32,13 +32,38 @@ pub fn think(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick)
     let (was, cp) = (st.behaviour, st.target_cp);
     let (mut pad, mut nt, serve) = chain(sim, me, st);
     crate::ai::brain::finish_pad(sim, me, st, serve, &mut pad);
-    // Card UNSN: a bot on the level given up for going nowhere is moved on
-    // where no human sees it, else recycled.
+    // Try a physical rejoin before card UNSN's unseen move or recycle.
     if nt.stalled != 0 && nt.recycle == 0 {
-        if let Some(to) = crate::ai::unseen::spot(sim, me, st) {
+        if recover::rejoin(sim, me, st) {
+            nt.stalled = 0;
+        } else if let Some(to) = crate::ai::unseen::spot(sim, me, st)
+            .or_else(|| crate::ai::unseen::nearby_route(sim, me, st))
+        {
             nt.stalled = 0;
             nt.relocate = Some(to.to_array().map(f32::to_bits));
             crate::ai::unseen::reset(st, sim.tick);
+        }
+    }
+    if let Some(heading) = st.lost.and_then(|l| l.escape_heading) {
+        if let Some(u) = sim.unit(me) {
+            // The regular look-ahead can turn a valid walk back toward the support.
+            // Reuse the validated heading. The normal movement pass still collides.
+            (pad.lx, pad.ly) = PadState::walk_axes(u.soldier.yaw, heading);
+            pad.buttons &= !(crate::sim::buttons::JUMP
+                | crate::sim::buttons::SPRINT
+                | crate::sim::buttons::ROLL_STANCE);
+            if let Some(walk) = st.lost {
+                if walk.escape_hold_yaw || walk.escape_jump_tick.is_some() {
+                    pad.rx = 0;
+                }
+                if walk.escape_jump_tick == Some(sim.tick) {
+                    pad.buttons |= crate::sim::buttons::JUMP;
+                }
+            }
+            if u.droideka.is_some() {
+                pad.rx = 0;
+                pad.buttons &= !(crate::sim::buttons::FIRE | crate::sim::buttons::SECONDARY_FIRE);
+            }
         }
     }
     crate::ai::why::log(st, sim.tick, was, cp, &nt);
@@ -225,6 +250,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
     }
 
     travel::advance(sim, me, st, pos, &mut nt);
+    recover::join_arc_floor(sim, u, st);
     // ...and a grenade on the ground near by is a thing to run from.
     let flee = hazard_flee(sim, me, u, &tier);
     if thinking {
@@ -288,6 +314,10 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
     // straight at it on the last leg and with no route; ahead of the ring
     // and the spot (it walks only while no enemy is seen).
     let fixing = crate::ai::fix::walk(sim, me, st).filter(|_| no_urgent_move && st.cmd.is_none());
+    let closer_fix = fixing
+        .filter(|_| last_leg && serve.is_none())
+        .and_then(|p| fix::closer_stand(sim, u, st, p));
+    let fixing = closer_fix.or(fixing);
     // OURS: finish the walk at the droid's actual service sphere after the
     // graph has brought us to its hub. measure: Harbor Hard/Elite service
     // and recycles at the droid hubs (issue #108).
@@ -341,13 +371,15 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         super::ride::maintain(sim, me, st);
     }
     let route = st.route();
-    let arrive = step.arrive(
-        &cands,
-        composed,
-        route.filter(|r| r.is_last()).map(|r| r.waypoint),
-        route.is_none(),
-        st.cmd.is_some(),
-    );
+    let arrive = step
+        .arrive(
+            &cands,
+            composed,
+            route.filter(|r| r.is_last()).map(|r| r.waypoint),
+            route.is_none(),
+            st.cmd.is_some(),
+        )
+        .filter(|_| step != StepKind::Fix || closer_fix.is_none());
     let goal = composed.immediate(&cands);
 
     let Some(aim) = intent::compose_aim(sim, st, &frame, &cands, goal) else {

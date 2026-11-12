@@ -278,8 +278,18 @@ pub fn pick(sim: &Sim, me: UnitHandle, u: &Unit, left: Option<Vec3>) -> Option<S
         .hints
         .iter()
         .filter(|h| h.kind == HINT_SNIPE)
-        .map(|h| ((h.pos - pos).length(), h.pos, h.stance_mask))
-        .filter(|c| c.0 <= SNIPE_REACH)
+        .map(|h| ((h.pos - pos).length(), h))
+        .filter(|(dist, _)| *dist <= SNIPE_REACH)
+        .filter_map(|(dist, h)| {
+            if !g.snipe_hints_need_floor.contains(&h.pos) {
+                return Some((dist, h.pos, h.stance_mask));
+            }
+            let p = h.pos.with_y(sim.ground_under(h.pos, false));
+            (sim.level_at(p) == crate::sim::Level::On
+                && sim.soldier_clear(p)
+                && sim.floor_line(pos, p))
+            .then(|| ((p - pos).length(), p, h.stance_mask))
+        })
         .collect();
     if let Some(s) = best(&mut hints) {
         return Some(s);

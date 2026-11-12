@@ -31,10 +31,286 @@ fn endurance(c: &mut crate::soldier::SoldierConstants) {
     c.energy_override = c.energy_override.map(up);
 }
 
+fn resolve_soldier_walls(
+    collision: &crate::collision::CollisionWorld,
+    soldier: &mut crate::soldier::Soldier,
+    from: Capsule,
+    mut to: Capsule,
+    in_air: bool,
+) -> Vec3 {
+    if collision.is_empty() {
+        return Vec3::ZERO;
+    }
+    if let Some((t, normal)) = collision.ceiling_sweep(&from, &to) {
+        let delta = to.base - from.base;
+        let rest = delta * (1.0 - t);
+        let slide = rest - normal * rest.dot(normal).min(0.0);
+        soldier.pos = from.base + delta * t + slide;
+        let into = soldier.vel.dot(normal);
+        soldier.vel -= normal * into.min(0.0);
+        to.base = soldier.pos;
+    }
+    let drop = if in_air { STEP_HEIGHT - AIR_STEP } else { 0.0 };
+    let low = |c: Capsule| Capsule {
+        base: c.base - Vec3::Y * drop,
+        height: c.height + drop,
+        ..c
+    };
+    let push = collision.push_out_soldier_from(&low(from), &low(to));
+    soldier.pos += push;
+    let len = (push.x * push.x + push.z * push.z).sqrt();
+    if len > 0.0 {
+        let (nx, nz) = (push.x / len, push.z / len);
+        let v = &mut soldier.vel;
+        let into = v.x * nx + v.z * nz;
+        if into < 0.0 {
+            v.x -= into * nx;
+            v.z -= into * nz;
+        }
+    }
+    push
+}
+
 impl Sim {
+    /// OURS: recover a pinned soldier whose standing capsule straddles an
+    /// authored floor overlay while its feet are on the uncut terrain beneath.
+    /// measure: original BF2 Yavin Bazaar floor and pinned recovery (#108).
+    fn embedded_floor(&self, u: &crate::unit::Unit) -> Option<Vec3> {
+        let s = &u.soldier;
+        let pos = s.pos;
+        if !u.ai.lost.is_some_and(|l| l.pinned && l.since == self.tick)
+            || u.controller != Controller::Ai
+            || !u.alive
+            || u.mount.is_some()
+            || u.droideka.is_some()
+            || !s.grounded
+            || s.stance != Stance::Stand
+            || u.wall_push.length_squared() <= ai::HULL_PUSH_MIN * ai::HULL_PUSH_MIN
+            || self.collision.is_cut(pos)
+        {
+            return None;
+        }
+        let terrain = self.heightfield.as_ref()?.height_at(pos.x, pos.z);
+        if (terrain - pos.y).abs() > STEP_HEIGHT {
+            return None;
+        }
+        let mut cap = u.capsule();
+        let head_centre = pos + Vec3::Y * (cap.height - cap.radius);
+        let (y, normal) = self.collision.ray_down_with(
+            head_centre,
+            head_centre.y - pos.y - STEP_HEIGHT,
+            crate::collision::HullFilter::Static,
+        )?;
+        if normal.y < self.ground_rules.climb_min_ny() {
+            return None;
+        }
+        cap.base.y = y;
+        let p = cap.base;
+        let above = Capsule {
+            base: p + Vec3::Y * STEP_HEIGHT,
+            ..cap
+        };
+        if self.level_at(p) != super::Level::On
+            || self.death_regions.iter().any(|r| r.contains(p))
+            || self.shut_in_solid(cap.center()).is_some()
+            || self.collision.ceiling_sweep(&cap, &above).is_some()
+            || self
+                .collision
+                .push_out_soldier_from(&cap, &cap)
+                .length_squared()
+                > ai::HULL_PUSH_MIN * ai::HULL_PUSH_MIN
+        {
+            return None;
+        }
+        Some(p)
+    }
+
+    /// OURS: retain the approach side if the wall pass pushes a descending
+    /// jet bot inside the marked hall. The floor pass still resolves the fall.
+    /// measure: the Coruscant hall landing and subsequent H12 route (#108).
+    fn keep_jet_landing_side(&mut self, i: usize, from: Capsule) {
+        let Some(instance) = self.nav.as_ref().and_then(|g| g.jet_landing_wall) else {
+            return;
+        };
+        let u = &self.units[i];
+        let s = &u.soldier;
+        if !u.alive
+            || u.controller != Controller::Ai
+            || !matches!(s.stance, Stance::Jet | Stance::Hover)
+            || s.grounded
+            || s.vel.y >= 0.0
+            || u.wall_push.length_squared() <= from.radius * from.radius
+        {
+            return;
+        }
+        let closed = |p| self.shut_in_solid(p + Vec3::Y * ai::SHUT_PROBE_UP);
+        let Some(body) = closed(s.pos) else { return };
+        let approach = from.base.with_y(s.pos.y);
+        if self.collision.bodies()[body].instance != Some(instance) || closed(approach).is_some() {
+            return;
+        }
+        self.keep_approach_side(i, approach);
+    }
+
+    /// OURS: retain the approach side if the wall pass pushes a foot bot into
+    /// a marked prop. measure: BF2 Docks and BF1 Endor phase replays (#108).
+    fn keep_solid_approach_side(&mut self, i: usize, from: Capsule) {
+        let Some(g) = self
+            .nav
+            .as_ref()
+            .filter(|g| !g.wall_approach_props.is_empty())
+        else {
+            return;
+        };
+        let u = &self.units[i];
+        let s = &u.soldier;
+        if !u.alive
+            || u.controller != Controller::Ai
+            || u.droideka.is_some()
+            || u.wall_push.length_squared() < ai::HULL_PUSH_MIN.powi(2)
+        {
+            return;
+        }
+        let closed = |p| self.shut_in_solid(p + Vec3::Y * ai::SHUT_PROBE_UP);
+        let Some(body) = closed(s.pos) else { return };
+        let approach = from.base.with_y(s.pos.y);
+        if !self.collision.bodies()[body]
+            .instance
+            .is_some_and(|id| g.wall_approach_props.contains(&id))
+            || closed(approach).is_some()
+        {
+            return;
+        }
+        self.keep_approach_side(i, approach);
+    }
+
+    fn keep_approach_side(&mut self, i: usize, approach: Vec3) {
+        let u = &mut self.units[i];
+        let push = approach - u.soldier.pos;
+        u.soldier.pos = approach;
+        u.wall_push += push;
+        let normal = push.normalize_or_zero();
+        u.soldier.vel -= normal * u.soldier.vel.dot(normal).min(0.0);
+    }
+
+    /// Preview a walking approach and its first substantial landing. The
+    /// real bot will still walk and fall with the ordinary movement rules.
+    pub(crate) fn recovery_descent(&self, u: &crate::unit::Unit, dir: Vec3) -> Option<Vec3> {
+        self.preview_recovery_walk(u, dir, true, None, None)
+    }
+
+    pub(crate) fn preview_recovery_walk(
+        &self,
+        u: &crate::unit::Unit,
+        dir: Vec3,
+        descent: bool,
+        exit: Option<Vec3>,
+        jump_at: Option<u16>,
+    ) -> Option<Vec3> {
+        let mut s = u.soldier.clone();
+        let start = s.pos;
+        let mut last_floor = start.y;
+        let (sy, cy) = crate::fmath::sin_cos(s.yaw);
+        let mut pad = PadState {
+            lx: PadState::quantize(dir.x * cy - dir.z * sy),
+            ly: PadState::quantize(-dir.x * sy - dir.z * cy),
+            ..PadState::default()
+        };
+        let capsule = |s: &crate::soldier::Soldier| Capsule {
+            base: s.pos,
+            height: crate::unit::capsule_height(s.stance),
+            radius: crate::unit::SOLDIER_RADIUS,
+        };
+        // OURS: use the existing recovery window to bound each preview.
+        // measure: shelf descents and worst preview cost in the recovery sweep.
+        let ticks = if exit.is_some() {
+            // OURS: allow the marked walk to finish past the first clear floor.
+            // measure: Theed's lower street and the Harbor shelf descent (#108).
+            3 * ai::STUCK_WINDOW
+        } else if descent {
+            ai::STUCK_WINDOW
+        } else {
+            // The under-deck support takes longer to pass than a shelf edge.
+            2 * ai::STUCK_WINDOW
+        };
+        for tick in 0..ticks {
+            let grounded = s.grounded;
+            if grounded {
+                last_floor = s.pos.y;
+            }
+            let from = capsule(&s);
+            pad.buttons = if jump_at == Some(tick) {
+                super::buttons::JUMP
+            } else {
+                0
+            };
+            s.step(TICK_DT, &pad, &u.consts, self.ground_rules);
+            let in_air = !s.grounded && s.stance.airborne();
+            let to = capsule(&s);
+            resolve_soldier_walls(&self.collision, &mut s, from, to, in_air);
+            let rising = jump_at.is_some() && s.stance == Stance::Jump && s.vel.y > 0.0;
+            let (mut fy, mut n) = self.ground_under_n(s.pos, rising, from.base.y);
+            if in_air && n.y <= crate::soldier::FLOOR_MIN_NY && fy > s.pos.y + AIR_STEP {
+                (fy, n) = self.ground_under_falling(s.pos, from.base.y);
+            }
+            let vy = s.vel.y;
+            s.resolve_ground(TICK_DT, fy, n, from.base.y, self.ground_rules);
+            let (lift, radius) = super::soldier_blast_sphere(s.stance);
+            let centre = s.pos + Vec3::Y * lift;
+            if vy <= -LETHAL_LANDING_SPEED
+                || self.kill_floor.is_some_and(|floor| s.pos.y < floor)
+                || self.death_regions.iter().any(|r| r.contains(s.pos))
+                || self
+                    .damage_regions
+                    .iter()
+                    .any(|r| r.region.touches_sphere(centre, radius))
+            {
+                return None;
+            }
+            // Measure a brief loss of contact from the latest floor on a slope.
+            if !descent
+                && jump_at.is_none()
+                && !s.grounded
+                && (s.pos.y - last_floor).abs() > STEP_HEIGHT
+            {
+                return None;
+            }
+            if descent
+                && !grounded
+                && s.grounded
+                && start.y - s.pos.y > super::bounds::RETURN_STEP_DOWN
+            {
+                if self.lands_under_the_map(s.pos, vy)
+                    || self.level_at(s.pos) != super::Level::On
+                    || n.y < self.ground_rules.climb_min_ny()
+                {
+                    return None;
+                }
+                if exit.is_none() {
+                    return Some(s.pos);
+                }
+            }
+            if exit.is_some_and(|p| p.distance_squared(s.pos) <= ai::RETURN_ARRIVE.powi(2))
+                && s.grounded
+                && self.level_at(s.pos) == super::Level::On
+                && self.soldier_clear(s.pos)
+            {
+                return Some(s.pos);
+            }
+        }
+        (exit.is_none()
+            && !descent
+            && s.grounded
+            && s.pos.distance_squared(start) > ai::PIN_WALKED.powi(2)
+            && self.level_at(s.pos) == super::Level::On
+            && self.soldier_clear(s.pos))
+        .then_some(s.pos)
+    }
+
     /// Push overlapping alive units apart in XZ (see step 3b). Deterministic:
     /// pairs visited in index order, a coincident pair separates along +X.
     fn separate_units(&mut self) {
+        let separation_wall = self.nav.as_ref().and_then(|g| g.separation_wall);
         let n = self.units.len();
         for i in 0..n {
             if !self.units[i].alive || self.units[i].mount.is_some() {
@@ -71,6 +347,20 @@ impl Sim {
                 // never landing, so no fall could ever kill it. Airborne
                 // units keep their y as before.
                 for (k, n) in [(i, ni), (j, nj)] {
+                    // OURS: clip a separation push that crosses the marked wall.
+                    // measure: BF2 Yavin courtyard at tick 3377 (#108).
+                    if let Some(instance) = separation_wall {
+                        let u = &self.units[k];
+                        let closed = |p| self.shut_in_solid(p + Vec3::Y * ai::SHUT_PROBE_UP);
+                        if u.controller == Controller::Ai
+                            && closed(n).is_some_and(|body| {
+                                self.collision.bodies()[body].instance == Some(instance)
+                            })
+                            && closed(u.soldier.pos).is_none()
+                        {
+                            continue;
+                        }
+                    }
                     let mut y = n.y;
                     if self.units[k].soldier.grounded {
                         let g = self.ground_under(n, false);
@@ -673,6 +963,17 @@ impl Sim {
         self.saber_inputs(&mut unit_pads);
         // 3. Movement.
         for (i, pad_i) in unit_pads.iter_mut().enumerate() {
+            if let Some(floor) = self.embedded_floor(&self.units[i]) {
+                let u = &mut self.units[i];
+                u.soldier.pos = floor;
+                u.ai.lost = None;
+                if let Some(stall) = &mut u.ai.stall {
+                    stall.ticks = 0;
+                    stall.fails = 0;
+                }
+                u.ai.mv.round.end();
+                u.ai.slide = 0;
+            }
             // The contact accumulator is per TICK, so it is cleared for every
             // unit — dead ones included — before anything can set it, and the
             // wall pass below is the only writer.
@@ -819,42 +1120,16 @@ impl Sim {
             let s0 = &self.units[i].soldier;
             // (The jets too, card JETP: `Stance::airborne`.)
             let in_air = !s0.grounded && s0.stance.airborne();
-            if !self.collision.is_empty() {
-                let to = self.units[i].capsule();
-                if let Some((t, normal)) = self.collision.ceiling_sweep(&from, &to) {
-                    let delta = to.base - from.base;
-                    let rest = delta * (1.0 - t);
-                    let slide = rest - normal * rest.dot(normal).min(0.0);
-                    let soldier = &mut self.units[i].soldier;
-                    soldier.pos = from.base + delta * t + slide;
-                    let into = soldier.vel.dot(normal);
-                    soldier.vel -= normal * into.min(0.0);
-                }
-                let drop = if in_air { STEP_HEIGHT - AIR_STEP } else { 0.0 };
-                let low = |c: Capsule| Capsule {
-                    base: c.base - Vec3::Y * drop,
-                    height: c.height + drop,
-                    ..c
-                };
-                let push = self
-                    .collision
-                    .push_out_soldier_from(&low(from), &low(self.units[i].capsule()));
-                self.units[i].soldier.pos += push;
-                let len = (push.x * push.x + push.z * push.z).sqrt();
-                if len > 0.0 {
-                    let (nx, nz) = (push.x / len, push.z / len);
-                    let v = &mut self.units[i].soldier.vel;
-                    let into = v.x * nx + v.z * nz;
-                    if into < 0.0 {
-                        v.x -= into * nx;
-                        v.z -= into * nz;
-                    }
-                }
-                // RECORDED, not re-applied: the AI reads it next tick as "I am
-                // in contact on this side" (`Unit::wall_push`, PLAN "PHASE A.2
-                // DESIGN" decision 2). Motion is exactly what it was.
-                self.units[i].wall_push = push;
-            }
+            let to = self.units[i].capsule();
+            self.units[i].wall_push = resolve_soldier_walls(
+                &self.collision,
+                &mut self.units[i].soldier,
+                from,
+                to,
+                in_air,
+            );
+            self.keep_jet_landing_side(i, from);
+            self.keep_solid_approach_side(i, from);
             self.push_turrets(i, from);
             // 3a'. The floor under the NEW feet, where the wall pass left them
             // (card STHOP, analysis/re-soldier-ground.md §3: the PS2 finds the

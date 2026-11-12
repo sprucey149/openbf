@@ -56,6 +56,21 @@ fn the_form_order_deploys_only_to_fight() {
 }
 
 #[test]
+fn a_verified_escape_walk_unrolls_until_the_route_resumes() {
+    let mut state = AiState {
+        behaviour: Behaviour::Recover,
+        lost: Some(crate::ai::state::LostState {
+            escape_heading: Some(Vec3::X),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    assert_eq!(form_order(&state), Order::Deploy);
+    state.lost = None;
+    assert_eq!(form_order(&state), Order::Roll);
+}
+
+#[test]
 fn finish_clears_the_soldier_buttons_and_strafe_a_droideka_has_no_use_for() {
     let (s, me, _) = world();
     let misuse = buttons::ROLL_STANCE

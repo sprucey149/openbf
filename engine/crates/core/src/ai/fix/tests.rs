@@ -285,3 +285,47 @@ fn serve_finish_replaces_seat_input() {
         }
     );
 }
+
+#[test]
+fn a_bf1_pilot_repairs_an_elevated_turret_from_the_floor() {
+    // The last stand centre is in reach, but its arrival band extends
+    // past the cutter's range to the pilot's starting position.
+    for centre_y in [1.425, 7.775, 7.30] {
+        let (mut sim, bots, hover) = world(1, 9.43);
+        sim.ground_rules = crate::soldier::GroundRules::Bf1;
+        sim.weapon_classes[1].lock_on_range = 3.0;
+        sim.vehicle_mut(hover).unwrap().health.cur = 1000.0;
+        let turret = sim.add_building_turret(
+            VehicleSpec {
+                kind: VehicleKind::Turret,
+                class: 0,
+                home_team: None,
+                neutral_when_empty: true,
+                spawn_pad: None,
+                pos: Vec3::ZERO,
+                yaw: 0.0,
+                max_health: 300.0,
+                health_type: HealthType::Building,
+                seats: vec![],
+            },
+            glam::Quat::IDENTITY,
+            Some((Vec3::Y * centre_y, 8.202361)),
+            7,
+            (crate::sim::TurretFall::Hidden, vec![]),
+        );
+        sim.vehicle_mut(turret).unwrap().health.cur = 294.0;
+        assert_eq!(pick(&sim, bots[0], false), Some(FixTarget::Turret(0)));
+        for _ in 0..5 * TICK_HZ {
+            sim.step(&[]);
+            if sim.vehicle(turret).unwrap().health.cur == 300.0 {
+                break;
+            }
+        }
+        let feet = sim.unit(bots[0]).unwrap().soldier.pos;
+        assert_eq!(
+            sim.vehicle(turret).unwrap().health.cur,
+            300.0,
+            "turret centre {centre_y} m above floor, pilot stopped at {feet:?}",
+        );
+    }
+}

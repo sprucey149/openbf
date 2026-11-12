@@ -63,6 +63,42 @@ fn outcome(sim: &mut Sim, h: UnitHandle) -> Option<Vec3> {
     panic!("neither moved nor recycled in {bound} ticks");
 }
 
+#[test]
+fn long_failed_leg_can_use_a_nearby_connected_unseen_hub() {
+    let (mut sim, bot) = l_sim();
+    let graph = sim.nav.take().unwrap();
+    let arcs = graph.arcs.into_iter().filter(|a| a.a != 0 && a.b != 0);
+    sim.nav = NavGraph::new(
+        graph.hubs,
+        arcs.collect(),
+        Default::default(),
+        graph.barriers,
+        graph.hints,
+    );
+    sim.resolve_nav_floors();
+    sim.unit_mut(bot).unwrap().soldier.pos = Vec3::new(0.0, 0.0, 10.0);
+    let mut st = AiState::default();
+    st.install_route_for_fixture(Some(crate::ai::Route {
+        next_hub: 2,
+        dest_hub: 2,
+        ..Default::default()
+    }));
+    let hub = Vec3::new(0.0, 0.0, -40.0);
+    assert_eq!(spot(&sim, bot, &st), None);
+    assert_eq!(nearby_route(&sim, bot, &st), Some(hub));
+
+    let viewer = human(&mut sim, hub + 5.0 * Vec3::X, 0.0);
+    assert!(!seen_by_human(&sim, sim.unit(bot).unwrap().soldier.pos));
+    assert_eq!(nearby_route(&sim, bot, &st), None);
+
+    let watcher = sim.unit_mut(viewer).unwrap();
+    watcher.soldier.pos = Vec3::new(0.0, 0.0, 15.0);
+    watcher.soldier.yaw = std::f32::consts::PI;
+    assert!(seen_by_human(&sim, sim.unit(bot).unwrap().soldier.pos));
+    assert!(!seen_by_human(&sim, hub));
+    assert_eq!(nearby_route(&sim, bot, &st), None);
+}
+
 /// No human: the penned bot is moved to hub 1, the far end of the link it
 /// failed on, alive (no ticket spent); the census
 /// counts the move and its log says why; outside the pen it walks on to its

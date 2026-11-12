@@ -233,6 +233,10 @@ pub(super) fn retarget_to_post(
     // ([`stance_hold`]).
     st.want_stance = stance_hold(st.want_stance, found.map_or(0, |(_, m)| m), me, sim.tick);
     let spot = found.map(|(p, _)| p);
+    let hint_hub = g
+        .defend_hint_hub
+        .filter(|(p, _)| u.mount.is_none() && spot.is_some_and(|s| p.distance_squared(s) < 0.01));
+    let spot_hub = hint_hub.map(|(_, hub)| hub).or(post.nav_hub);
     // The leg we are already on is KEPT (Phase A's rule: re-planning every
     // think would also re-roll the chooser every ten ticks) — unless the
     // defence spot has to be written into it.
@@ -249,11 +253,11 @@ pub(super) fn retarget_to_post(
     let want = if rides {
         cur.and_then(|c| post_hub(g, m.ty, c, post, true))
     } else {
-        post.nav_hub
+        spot_hub
     };
     if let Some(r) = st.nav.route {
         if want == Some(r.dest_hub) {
-            match spot.filter(|_| r.is_last() && post.nav_hub == Some(r.dest_hub)) {
+            match spot.filter(|_| r.is_last() && spot_hub == Some(r.dest_hub)) {
                 Some(p) if r.waypoint != p => {
                     let mut r = r;
                     r.waypoint = p;
@@ -287,7 +291,7 @@ pub(super) fn retarget_to_post(
             }
             plan_to(sim, st, me, c, dest, nt);
             if let (Some(p), Some(mut r)) = (spot, st.nav.route) {
-                if r.is_last() && post.nav_hub == Some(r.dest_hub) {
+                if r.is_last() && spot_hub == Some(r.dest_hub) {
                     r.waypoint = p;
                     r.ref_dist = nav::xz_dist(pos, sub_point(&r, pos));
                     st.nav.route = Some(r);
@@ -390,6 +394,45 @@ pub(super) fn retarget_hunt(
             retarget_phase_a(sim, me, st, nearest_enemy, nt);
         }
     }
+}
+
+/// Find a way from a stranded hunter's feet into the quarry's component.
+/// OURS: a failed Hunt can cross a gap between authored graph components
+/// when the physical floor joins them. Measure: retained Mustafar witness
+/// and the Hard/Elite recovery cohort in issue #108.
+pub(in crate::ai) fn hunt_rejoin(sim: &Sim, me: UnitHandle) -> Option<crate::sim::ReturnPath> {
+    let u = sim.unit(me)?;
+    let g = sim.nav.as_ref()?;
+    let pos = u.soldier.pos;
+    let m = mover(sim, u);
+    let cur = start_hub(sim, g, me)?;
+    let eye = u.ai_eye();
+    let quarry = sim
+        .alive_units()
+        .filter(|(_, foe)| sim.hostile(u.team, foe.team))
+        .map(|(_, foe)| foe)
+        .min_by(|a, b| {
+            let dist = |foe: &crate::unit::Unit| eye.distance_squared(foe.capsule().center());
+            dist(a).total_cmp(&dist(b))
+        })?;
+    let dest = unit_goal_hub(sim, g, m, quarry.soldier.pos)?;
+    let connected = |hub| g.reachable_by(hub, dest, m);
+    if connected(cur) {
+        return None;
+    }
+
+    let nearest = sim.nearest_floor_hubs::<LEVEL_HUB_TRIES>(g, pos, |i| {
+        sim.nav_floor(i as u16).filter(|_| connected(i as u16))
+    });
+    nearest.into_iter().find_map(|(_, hub)| {
+        let p = g.hub(hub)?.pos;
+        let target = Vec3::new(p.x, sim.nav_floor(hub)?, p.z);
+        let path = sim.floor_walk_to(pos, target)?;
+        let end = path.pts[..usize::from(path.len)].last()?;
+        unit_goal_hub(sim, g, m, *end)
+            .is_some_and(connected)
+            .then_some(path)
+    })
 }
 
 /// Phase A's own objective rule, kept verbatim for a unit the commander has

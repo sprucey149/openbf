@@ -11,6 +11,61 @@ mod jet;
 mod ramps;
 mod scratch;
 
+#[test]
+fn a_pinned_bot_can_recover_onto_an_overlapping_floor() {
+    use crate::collision::{Body, Shape};
+    use crate::nav::{Hub, NavGraph, RouteTable};
+    use glam::Mat4;
+
+    let mut sim = Sim::empty(1);
+    sim.heightfield = Some(flat_ground());
+    let slab = |y| {
+        Body::new(
+            Mat4::from_translation(Vec3::Y * y),
+            Shape::Box {
+                half: Vec3::new(4.0, 0.05, 4.0),
+            },
+        )
+    };
+    sim.collision = CollisionWorld::new(vec![slab(1.25)], Vec::new());
+    sim.nav = Some(
+        NavGraph::new(
+            vec![Hub {
+                pos: Vec3::Y * 1.3,
+                radius: 4.0,
+                arcs: Vec::new(),
+            }],
+            Vec::new(),
+            RouteTable::empty(1),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap(),
+    );
+    sim.nav_floors = vec![1.3];
+    let h = sim.spawn(&ai(0, Vec3::ZERO, 0.0)).unwrap();
+    let u = sim.unit_mut(h).unwrap();
+    u.soldier.pos = Vec3::ZERO;
+    u.soldier.grounded = true;
+    u.wall_push = Vec3::X * 0.1;
+    assert!(sim.embedded_floor(sim.unit(h).unwrap()).is_none());
+
+    sim.unit_mut(h).unwrap().ai.lost = Some(crate::ai::LostState {
+        pinned: true,
+        ..Default::default()
+    });
+    let floor = sim.embedded_floor(sim.unit(h).unwrap()).unwrap();
+    assert!((floor.y - 1.3).abs() < 0.01 && floor.x == 0.0 && floor.z == 0.0);
+
+    sim.death_regions
+        .push(crate::region::Region::sphere(floor, 0.1));
+    assert!(sim.embedded_floor(sim.unit(h).unwrap()).is_none());
+
+    sim.death_regions.clear();
+    sim.collision = CollisionWorld::new(vec![slab(1.25), slab(3.0)], Vec::new());
+    assert!(sim.embedded_floor(sim.unit(h).unwrap()).is_none());
+}
+
 /// The combat calls `unit` asked over `ticks` steps: (tick, call).
 fn calls_of(s: &mut Sim, ticks: u32) -> Vec<(u64, UnitHandle, Call)> {
     let mut out = Vec::new();
@@ -420,6 +475,70 @@ fn a_standing_jump_with_the_stick_held_gets_onto_a_box() {
             assert_eq!(on_top, stick != 0, "{rules:?} stick {stick}");
         }
     }
+}
+
+#[test]
+fn separation_keeps_bots_outside_the_marked_wall() {
+    let mut wall = crate::collision::box_mesh(Vec3::Y * 2.0, Vec3::new(0.45, 2.0, 2.0), false);
+    wall.instance = Some(5);
+    let mut sim = Sim::empty(1);
+    sim.collision = CollisionWorld::new(vec![wall], Vec::new());
+    let near = Vec3::new(-0.55, 0.0, 0.0);
+    let far = Vec3::new(-0.70, 0.0, 0.0);
+    let a = sim.spawn(&UnitSpec::player(0, near)).unwrap();
+    let b = sim.spawn(&UnitSpec::player(0, far)).unwrap();
+    sim.units[a.index as usize].controller = Controller::Ai;
+    sim.units[b.index as usize].controller = Controller::Ai;
+
+    sim.separate_units();
+    let moved = sim.unit(a).unwrap().soldier.pos;
+    assert!(sim
+        .shut_in_solid(moved + Vec3::Y * ai::SHUT_PROBE_UP)
+        .is_some());
+
+    sim.units[a.index as usize].soldier.pos = near;
+    sim.units[b.index as usize].soldier.pos = far;
+    let mut nav = crate::nav::NavGraph::default();
+    nav.separation_wall = Some(5);
+    sim.nav = Some(nav);
+    sim.separate_units();
+    assert_eq!(sim.unit(a).unwrap().soldier.pos, near);
+    assert!(sim.unit(b).unwrap().soldier.pos.x < far.x);
+}
+
+#[test]
+fn jet_landing_keeps_the_approach_side_of_the_marked_wall() {
+    use crate::nav::NavGraph;
+
+    let mut sim = Sim::empty(1);
+    let mut wall = crate::collision::box_mesh(Vec3::Y * 2.0, Vec3::new(2.0, 2.0, 0.45), false);
+    wall.instance = Some(5);
+    sim.collision = CollisionWorld::new(vec![wall], Vec::new());
+    let h = sim.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+    let i = h.index as usize;
+    let u = &mut sim.units[i];
+    u.controller = Controller::Ai;
+    u.soldier.stance = Stance::Jet;
+    u.soldier.grounded = false;
+    u.soldier.pos = Vec3::new(0.0, 0.1, 0.2);
+    u.soldier.vel = Vec3::new(0.0, -10.0, -5.0);
+    u.wall_push = Vec3::Z * -0.9;
+    let inside = u.soldier.pos;
+    let from = Capsule {
+        base: Vec3::new(0.0, 0.55, 0.8),
+        ..u.capsule()
+    };
+
+    sim.nav = Some(NavGraph::default());
+    sim.keep_jet_landing_side(i, from);
+    assert_eq!(sim.units[i].soldier.pos, inside);
+
+    sim.nav.as_mut().unwrap().jet_landing_wall = Some(5);
+    sim.keep_jet_landing_side(i, from);
+    let soldier = &sim.units[i].soldier;
+    assert_eq!(soldier.pos, from.base.with_y(inside.y));
+    assert_eq!(soldier.vel.y, -10.0);
+    assert!(soldier.vel.z.abs() < 1e-6);
 }
 
 /// A 100 m mesh floor at y = 0 with a wall slab across −Z at

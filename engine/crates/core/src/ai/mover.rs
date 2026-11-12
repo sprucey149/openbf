@@ -244,6 +244,18 @@ pub(super) fn run(
             // Card RETW: ...but down to the point of its floor walk.
             let low = match ret {
                 Some(_) => pos.y.min(gp.y) - LOST_DOWN,
+                // OURS: a stale hold on a distant lower floor can pull a
+                // soldier off an active route after contact ends.
+                // measure: Citadel's archived shelf and native hold behavior (#108).
+                None if walk_kind == WalkAsk::HOLD
+                    && pos.y - gp.y > LEDGE_DROP
+                    && nav::xz_dist(pos, gp) > super::HOLD_RANGE
+                    && st.target.is_none()
+                    && route_leg.is_some_and(|r| r.via_arc.is_some())
+                    && u.soldier.grounded =>
+                {
+                    pos.y - LOST_DOWN
+                }
                 None => pos.y.min(gp.y) - LEDGE_DROP,
             };
             // The PS2's contact side-step (`FUN_0026aba8`) offsets the move
@@ -897,6 +909,29 @@ mod tests {
             nav::xz_dist(hold.goal, goal) > 0.5,
             "the point was given up"
         );
+    }
+
+    #[test]
+    fn a_hold_point_below_a_shelf_does_not_send_the_bot_over_the_edge() {
+        use crate::collision::{Body, CollisionWorld, Shape};
+        let (mut sim, h) = l_sim();
+        sim.collision = CollisionWorld::new(
+            vec![Body::new(
+                glam::Mat4::from_translation(Vec3::new(-5.0, 4.0, 0.0)),
+                Shape::Box {
+                    half: Vec3::new(7.0, 0.5, 8.0),
+                },
+            )],
+            Vec::new(),
+        );
+        sim.unit_mut(h).unwrap().soldier.pos = Vec3::Y * 4.5;
+        hold_at(&mut sim, h, Vec3::new(28.0, -4.5, 0.0));
+
+        for _ in 0..150 {
+            sim.step(&[PadState::default()]);
+            let feet = sim.unit(h).unwrap().soldier.pos;
+            assert!(feet.y >= 4.4, "fell from the shelf at {feet}");
+        }
     }
 
     /// Card MOVR (b): a request that alternates between two points 0.4 m

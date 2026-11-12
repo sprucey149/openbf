@@ -309,26 +309,29 @@ a post with no capture region is not read [H].
 
 ## 10. For the build
 
-Port today (`core/src/sim/spawn/runtime.rs`, `core/src/cp.rs`, `game/src/walk.rs`): `Sim::spawn_points(team)` pools the spawn
-nodes of every post the team owns and a respawn draws one node uniformly; the opening wave walks the pool round-robin;
-`game/src/main/battle.rs` `spawn_model` lists `spawnable_by` posts (the cursor does not steer the respawn yet — card
-SPSEL). No vehicle contributes. The class RONs already carry the two keys (hashes 844603213 and 2691158341 in
-`assets_baked/classes/bf{1,2}_{imp,rep}.ron`): no rebake.
+The port carries the `SpawnPointCount` / `SpawnPointLocation` entries for command walkers from
+`game/src/vehicle_class/walker.rs` into the sim's walker class. `game/src/vehicle_pads.rs` also carries the model
+`SPHR` centre when the vehicle manifest supplies it. Existing vehicle manifests already carry the sphere.
 
-1. **Class:** parse `SpawnPointCount` / `SpawnPointLocation` for a `commandwalker` class into
-   `Vec<(Vec3 local, f32 yaw)>` (`game/src/vehicle_class/walker.rs`), carried on the sim's walker class.
-2. **Sim:** a live command walker of team T adds its points — `pos = origin + x·right + z·forward`, yaw = the
-   walker's + the authored angle — to T's pool; on the ground through the existing `spawn_ground` (the PS2's ray from
-   the body lands a unit on the same ground; PROVISIONAL only in that substitution). Not a `CommandPost`: nothing to
-   capture, and BF2's bleed and all-posts rule leave it out (section 7), which is the rule the port plays on every map.
-3. **Order at the start:** the PS2's walker exists before the first unit spawns (BF2: walker at 0.06 s, units from
-   0.9 s; BF1: first wave at 10 s). `setup_conquest` places the opening wave before any pad has spawned, so either the
-   pads' first vehicles go in first or the opening wave takes the pad's pose for a command-walker pad.
-4. **Spawn screen:** the walker's entry (the class `Label`) in `spawn_model`'s list while it lives.
-5. **Dead walker:** its points leave the pool at once; the pad's rebuild brings them back.
-6. Out of this card (card SPST): the PS2 draws a POST, then a point of it; the port draws a node from the pooled
-   list, so a post with more nodes takes more spawns. With the walker in the pool the node-uniform draw gives BF1 Hoth
-   12 of 16 nodes at the AT-ATs (PS2: a third per post = two thirds) and BF2 Hoth 12 of 23 (PS2 a half).
+For a live command walker, `core/src/sim/spawn/runtime.rs` rotates the authored point and yaw through the current
+vehicle frame. After the node draw, it casts from the sphere centre in that same frame toward the node (section 4).
+The first terrain or static building ordnance hit supplies the final point, with exact ties going to terrain. When
+the segment is clear, the authored endpoint supplies the final point. A missing or invalid sphere retains ordinary
+floor placement. The command walker's entry is a spawn post for its team. The BF2 bleed and all-posts rule omits it
+on every map (section 7).
+
+The resolved live-walker point bypasses ordinary spawn-floor seating. Fixed-post spawns and walker fallbacks still
+use that seating path, including the same-post connected-node correction for ordinary bots on Endor. The opening
+wave keeps its pending-pad path. Post identity, node order and the existing RNG draws are preserved.
+
+The spawn map includes eligible live command walkers. The player's pick stays selected while eligible and otherwise
+falls back to the nearest eligible post when its location is available (SPSEL). A bot keeps or draws an eligible post
+before the node draw (BSPN). A player who has never selected a post draws from the pooled nodes. A dead walker's
+points leave the pool immediately and return when its replacement spawns.
+
+The opening wave is placed before the first vehicle-pad tick in `setup_conquest`. It uses the pending command walker
+pad's pose and ordinary floor placement. The retained original PS2 timings put the BF2 walker at 0.06 s and its
+first units from 0.9 s, with the BF1 first wave at 10 s.
 
 Test vectors: the six points above; RAM pose BF2 Hoth walker (228.79, −6.00, 51.06), right (0.308, 0, 0.952), forward
 (−0.952, 0, 0.308) → point 0 at (231.26, −6.00, 58.68), point 5 at (230.14, −6.00, 42.22) (`cp_ram2.py`).
