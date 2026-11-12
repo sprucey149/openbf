@@ -106,6 +106,7 @@ fn menu(icons: Icons, label: &'static str, shell: bool) -> ui::menu::MenuModel {
         page: None,
         popup: None,
         restart_available: false,
+        net_game: false,
         texts: Default::default(),
         back_steps_out: false,
         respawn_label: Some("Respawn".into()),

@@ -111,6 +111,11 @@ pub struct MenuModel {
     pub popup: Option<Popup>,
     /// Restart Mission is offered (a battle launched from the shell).
     pub restart_available: bool,
+    /// A net game: the original hides Restart Mission there (`ifs_pausemenu`
+    /// main.f9 pc 84-95, re-bf2-menus.md "ifs_pausemenu"). openbf has no net
+    /// sessions yet (PLAN §Modes), so the windowed caller always passes false;
+    /// the row is greyed with its reason when a net game sets this.
+    pub net_game: bool,
     pub texts: PauseTexts,
     /// Back closes the class picker or the Respawn popup instead of resuming
     /// (space battles keep this; the ground menu resumes from anywhere).
@@ -426,6 +431,9 @@ pub fn row_locked(m: &MenuModel, row: Row) -> Option<&'static str> {
         Row::AiCap if m.team_size_off && m.in_shell.is_none() => {
             Some("Team size is fixed in this battle: it has no map team sizes to scale.")
         }
+        // The original hides Restart in net games; openbf keeps the row
+        // greyed with its reason, as other unsupported rows do.
+        Row::Restart if m.net_game => Some("Restart Mission is not available in a net game."),
         _ => None,
     }
 }
@@ -618,8 +626,13 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
         cursor = 1 - cursor;
     }
     if input.confirm {
-        if let Some(a) = press(m, rows[cursor]) {
-            return (cursor, vec![a]);
+        // A greyed row takes nothing (row_locked): its press is refused, as a
+        // click on it is in draw_menu.
+        let row = rows[cursor];
+        if row_locked(m, row).is_none() {
+            if let Some(a) = press(m, row) {
+                return (cursor, vec![a]);
+            }
         }
     }
     match rows[cursor] {

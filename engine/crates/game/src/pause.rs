@@ -714,6 +714,27 @@ mod tests {
             frame_sound(&locked, MenuInput::default(), 10, locked.cursor, &[]),
             Some(MenuSound::Error)
         );
+        // A net game's greyed Restart takes no page and plays the refusal.
+        let ground = ui::menu::MenuModel {
+            page: Some(ui::menu::PausePage::Main),
+            restart_available: true,
+            ..Default::default()
+        };
+        let at_restart = ui::menu::rows(&ground)
+            .iter()
+            .position(|r| *r == ui::menu::Row::Restart)
+            .unwrap();
+        let restart = ui::menu::MenuModel {
+            cursor: at_restart,
+            net_game: true,
+            ..ground
+        };
+        let (_, acts) = page_after(&restart, ui::menu::PAGE_STEP, restart.cursor);
+        assert!(acts.is_empty());
+        assert_eq!(
+            frame_sound(&restart, MenuInput::default(), 10, restart.cursor, &[]),
+            Some(MenuSound::Error)
+        );
         // A confirm on a row that takes nothing is refused too.
         let flat = ui::menu::MenuModel {
             cursor: at(ui::menu::Row::Quit),

@@ -231,6 +231,63 @@ fn the_game_menu_is_titled_by_its_page() {
     assert_eq!(row_text(&flat, Row::Quit).0, "Quit to desktop");
 }
 
+/// A net game greys Restart Mission with its reason (the original hides it
+/// there, re-bf2-menus.md "ifs_pausemenu"): the row stays in the list, focus
+/// lands on it and moves past, no step or press takes it, and its help is the
+/// reason. Single player keeps it live.
+#[test]
+fn a_net_game_greys_restart_mission() {
+    let net = MenuModel {
+        page: Some(PausePage::Main),
+        respawn_label: Some("Respawn".into()),
+        restart_available: true,
+        net_game: true,
+        ..Default::default()
+    };
+    let at = rows(&net).iter().position(|r| *r == Row::Restart).unwrap();
+    assert_eq!(
+        row_locked(&net, Row::Restart),
+        Some("Restart Mission is not available in a net game.")
+    );
+    assert_eq!(
+        row_help(&net, Row::Restart).as_deref(),
+        row_locked(&net, Row::Restart)
+    );
+    // Cross and the pages take nothing; the cursor lands on it and moves on.
+    let cross = input(|i| i.confirm = true);
+    assert!(navigate(
+        &MenuModel {
+            cursor: at,
+            ..net.clone()
+        },
+        cross
+    )
+    .1
+    .is_empty());
+    let down = input(|i| i.down = true);
+    assert_eq!(
+        navigate(
+            &MenuModel {
+                cursor: at,
+                ..net.clone()
+            },
+            down
+        )
+        .0,
+        at + 1
+    );
+    // Single player keeps the row live.
+    let sp = MenuModel {
+        net_game: false,
+        ..net
+    };
+    assert_eq!(row_locked(&sp, Row::Restart), None);
+    assert_eq!(
+        navigate(&MenuModel { cursor: at, ..sp }, cross).1,
+        vec![MenuAction::RequestRestart]
+    );
+}
+
 /// One frame at 1280 x 900; its actions and its shapes.
 fn frame(
     ctx: &egui::Context,

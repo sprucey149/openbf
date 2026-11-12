@@ -367,6 +367,9 @@ impl winit::application::ApplicationHandler for App {
                             page: (!walk.space_battle()).then_some(self.pause_menu.page),
                             popup: self.pause_menu.confirm,
                             restart_available: self.map.is_none() && self.current.is_some(),
+                            // No net sessions yet (PLAN §Modes); the gate is
+                            // plumbed so a future net game can set it.
+                            net_game: false,
                             texts: game::pause::texts(&self.feed),
                             back_steps_out: walk.space_battle(),
                             // The disc's key; English fallback is §7's label.
