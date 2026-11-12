@@ -105,6 +105,137 @@ fn every_bf2_saber_hero_attacks_and_blocks_with_its_baked_program() {
     assert_eq!(checked, 15);
 }
 
+#[test]
+fn saber_sprint_attack_reads_the_current_keyboard_and_controller_movement() {
+    use core::heightfield::Heightfield;
+    use core::sim::{buttons, PadState, Sim};
+    use core::soldier::Stance;
+    use game::kbm::{Kbm, Trigger};
+    use game::roster::{ClassRoster, FactionRoster};
+    use game::walk::{ClassVisual, TeamTemplate, WalkSim};
+    use glam::Vec3;
+    use winit::{event::MouseButton, keyboard::KeyCode};
+
+    let root = game::assets::baked_root();
+    if !pak::exists(root.join("side_bf2/heroes.ron")) {
+        eprintln!("SKIP: BF2 hero bake absent");
+        return;
+    }
+    let db =
+        game::roster::load_classdb(&root.join("classes"), "bf2", &["all", "imp", "rep", "cis"])
+            .unwrap();
+    let mut names: Vec<_> = db
+        .names()
+        .filter(|n| n.split('_').nth(1) == Some("hero"))
+        .filter(|n| {
+            db.weapon_slots(n)
+                .into_iter()
+                .find(|s| s.channel == 0)
+                .is_some_and(|s| {
+                    db.chain(&s.weapon)
+                        .last()
+                        .is_some_and(|c| c.base.eq_ignore_ascii_case("melee"))
+                })
+        })
+        .collect();
+    names.sort_unstable();
+    assert_eq!(names.len(), 15);
+    let forward = Trigger::Key(KeyCode::KeyW);
+    let sprint = Trigger::Key(KeyCode::ShiftLeft);
+    let fire = Trigger::Mouse(MouseButton::Left);
+    for name in names {
+        let roster = ClassRoster::build(&db, name, 0, None).unwrap();
+        for (scenario, moving, established, keep_forward, keyboard, dash) in [
+            ("standing click", false, false, false, true, false),
+            ("Shift and click", true, false, true, true, true),
+            ("sprinting click", true, true, true, true, true),
+            ("release W and click", true, true, false, true, false),
+            ("latched stick and trigger", true, true, true, false, true),
+            ("release stick and trigger", true, true, false, false, false),
+        ] {
+            let mut sim = Sim::empty(42);
+            sim.ground_rules = core::soldier::GroundRules::Bf2;
+            let unit = roster.register(&mut sim, &mut Vec::new());
+            let faction = FactionRoster {
+                faction: "hero".into(),
+                classes: vec![roster.clone()],
+            };
+            let team =
+                TeamTemplate::from_roster(&faction, &unit, vec![ClassVisual::from_roster(&roster)]);
+            let ground = Heightfield {
+                size: 2,
+                unit: 400.0,
+                offset_x: 200.0,
+                offset_z: 200.0,
+                heights: vec![0.0; 4],
+            };
+            let mut walk =
+                WalkSim::with_teams(sim, Some(ground), Vec3::ZERO, [team.clone(), team], None);
+            let mut kbm = Kbm::default();
+            let mut latch = input::SprintLatch::default();
+            let mut step = |walk: &mut WalkSim, kbm: &mut Kbm, ly, bits| {
+                let pad = kbm.pad(PadState {
+                    ly,
+                    buttons: bits,
+                    ..PadState::default()
+                });
+                let pad = walk.apply_sprint_latch(&mut latch, pad);
+                walk.step_tick(&[pad]);
+                kbm.consumed(&pad, 1);
+            };
+            kbm.press(forward, keyboard && moving);
+            for _ in 0..12 {
+                step(&mut walk, &mut kbm, if keyboard { 0 } else { i16::MAX }, 0);
+            }
+            if established {
+                kbm.press(sprint, keyboard);
+                for frame in 0..4 {
+                    let buttons = if !keyboard && frame == 0 {
+                        buttons::SPRINT
+                    } else {
+                        0
+                    };
+                    step(
+                        &mut walk,
+                        &mut kbm,
+                        if keyboard { 0 } else { i16::MAX },
+                        buttons,
+                    );
+                }
+                assert_eq!(walk.soldier().stance, Stance::Sprint, "{name}: {scenario}");
+            }
+            if keyboard {
+                kbm.press(forward, keep_forward);
+                kbm.press(sprint, moving);
+                kbm.press(fire, true);
+                step(&mut walk, &mut kbm, 0, 0);
+            } else {
+                let ly = if keep_forward { i16::MAX } else { 0 };
+                step(&mut walk, &mut kbm, ly, buttons::FIRE);
+            }
+            let u = walk.sim.unit(walk.player).unwrap();
+            let saber = walk.sim.weapon_classes[u.weapon_class]
+                .saber
+                .as_ref()
+                .unwrap();
+            let state = u.weapon.melee.as_ref().unwrap().runtime.state;
+            let picked = saber
+                .combo
+                .states()
+                .nth(state)
+                .and_then(|field| field.text(0));
+            let expected = if dash && name == "rep_hero_kiyadimundi" {
+                "DASHFLIP"
+            } else if dash {
+                "DASHATTACK"
+            } else {
+                "ATTACK1"
+            };
+            assert_eq!(picked, Some(expected), "{name}: {scenario}");
+        }
+    }
+}
+
 fn capture_score_scene() -> (game::walk::WalkSim, game::event_feed::EventFeed) {
     use core::{cp::CpDef, region::Region, sim::PadState};
     use game::event_feed::{EventFeed, Texts};

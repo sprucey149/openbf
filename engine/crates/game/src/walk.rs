@@ -1157,6 +1157,16 @@ impl WalkSim {
             .is_some_and(|u| u.mount.is_none())
     }
 
+    pub fn apply_sprint_latch(&self, latch: &mut input::SprintLatch, pad: PadState) -> PadState {
+        let weapon = self.sim.units[self.player.index as usize].weapon_class;
+        latch.apply_with_fire_cancel(
+            pad,
+            self.player_on_foot(),
+            self.soldier().stance == core::soldier::Stance::Sprint,
+            self.sim.weapon_classes[weapon].saber.is_none(),
+        )
+    }
+
     /// Is the player in a flyer's pilot seat? (`input::flyer_sticks` applies.)
     pub fn player_pilots_flyer(&self) -> bool {
         self.sim

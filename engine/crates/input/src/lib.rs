@@ -241,7 +241,17 @@ pub struct SprintLatch {
 impl SprintLatch {
     /// `pad` as sampled; `on_foot` and `sprinting` are the player's soldier
     /// before this tick. Call once per sampled pad.
-    pub fn apply(&mut self, mut pad: PadState, on_foot: bool, sprinting: bool) -> PadState {
+    pub fn apply(&mut self, pad: PadState, on_foot: bool, sprinting: bool) -> PadState {
+        self.apply_with_fire_cancel(pad, on_foot, sprinting, true)
+    }
+
+    pub fn apply_with_fire_cancel(
+        &mut self,
+        mut pad: PadState,
+        on_foot: bool,
+        sprinting: bool,
+        fire_cancels_sprint: bool,
+    ) -> PadState {
         let down = pad.buttons & buttons::SPRINT != 0;
         let edge = down && !self.prev_down;
         self.prev_down = down;
@@ -260,7 +270,7 @@ impl SprintLatch {
             if (self.seen && !sprinting && !edge)
                 || (!self.seen && self.age > SPRINT_WAIT)
                 || pad.ly < SPRINT_KEEP_LY
-                || pad.buttons & buttons::FIRE != 0
+                || (fire_cancels_sprint && pad.pressed(buttons::FIRE))
             {
                 self.on = false;
             }

@@ -274,14 +274,9 @@ impl winit::application::ApplicationHandler for App {
                         game::pause::hold_for_resume(&mut self.resume_gate);
                         PadState::default()
                     } else {
-                        let (on_foot, sprinting, space) =
-                            self.walk.as_ref().map_or((false, false, false), |(w, _)| {
-                                (
-                                    w.player_on_foot(),
-                                    w.soldier().stance == core::soldier::Stance::Sprint,
-                                    w.space_battle(),
-                                )
-                            });
+                        let walk = &self.walk.as_ref().expect("battle walk").0;
+                        let on_foot = walk.player_on_foot();
+                        let space = walk.space_battle();
                         let pad = match self.autopilot {
                             true => autopilot_pad(self.walk.as_ref().map_or(0, |w| w.0.sim.tick)),
                             false => {
@@ -311,7 +306,11 @@ impl winit::application::ApplicationHandler for App {
                                 game::pause::resume_pad(&mut self.resume_gate, pad)
                             }
                         };
-                        self.sprint_latch.apply(pad, on_foot, sprinting)
+                        self.walk
+                            .as_ref()
+                            .expect("battle walk")
+                            .0
+                            .apply_sprint_latch(&mut self.sprint_latch, pad)
                     };
                     if self.view_toggle.pressed(&pad) {
                         let s = &mut self.profile.settings;

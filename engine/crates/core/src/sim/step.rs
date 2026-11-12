@@ -1113,10 +1113,13 @@ impl Sim {
                     }
                 }
                 _ => {
-                    // PROVISIONAL (BF2 feel): firing interrupts a sprint —
-                    // mask SPRINT while FIRE is held so the stance machine
-                    // drops to stand and stays there.
-                    if pad_i.pressed(buttons::FIRE) {
+                    // Firearms cancel sprint. The human melee combo owns
+                    // its attack's movement and input locks.
+                    let human_saber = self.units[i].is_player
+                        && self.weapon_classes[self.units[i].weapon_class]
+                            .saber
+                            .is_some();
+                    if pad_i.pressed(buttons::FIRE) && !human_saber {
                         pad_i.buttons &= !buttons::SPRINT;
                     }
                     let stamina_cheat = self.cheats.infinite_stamina;
