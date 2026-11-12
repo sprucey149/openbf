@@ -249,11 +249,13 @@ impl winit::application::ApplicationHandler for App {
                     // Start opens the pause menu with the accept click
                     // (menuref "In battle").
                     if self.paused {
-                        if let Some(sl) = self.sounds.as_mut() {
-                            sl.play_2d(
-                                self.audio.as_mut(),
-                                ui::shell_feel::MenuSound::Accept.name(),
-                            );
+                        // The open's accept goes through the menu's queue (not
+                        // a select, so no rate limit; one cue per frame).
+                        self.pause_menu.cue(ui::shell_feel::MenuSound::Accept);
+                        for c in self.pause_menu.take_cues(dt) {
+                            if let Some(sl) = self.sounds.as_mut() {
+                                sl.play_2d(self.audio.as_mut(), c.name());
+                            }
                         }
                     }
                 }
@@ -383,12 +385,18 @@ impl winit::application::ApplicationHandler for App {
                                 ),
                             }),
                         };
-                        const ADJUST: u32 =
-                            game::kbm::MENU_ADJUST_LEFT | game::kbm::MENU_ADJUST_RIGHT;
-                        let adjust = (edges
-                            | self.pause_repeat.step(self.prev_menu_buttons & ADJUST, dt))
-                            & ADJUST;
-                        // The D-pad's and arrows' presses: a step is not a Morse key.
+                        // The frame's row edges: the D-pad / arrows, the stick's
+                        // and A / D's value steps, and L1 / R1 (the shell's
+                        // paging arms) held through the hold repeat.
+                        let (rows_input, page_dir) = game::pause::row_edges(
+                            edges,
+                            dt,
+                            self.prev_menu_buttons,
+                            model.popup.is_some() || model.class_choices.is_some(),
+                            &mut self.pause_repeat,
+                        );
+                        // The D-pad's and arrows' presses feed the Morse matcher;
+                        // a step is not a Morse key.
                         let input = ui::menu::MenuInput {
                             up: edges & 1 != 0,
                             down: edges & 2 != 0,
@@ -397,17 +405,38 @@ impl winit::application::ApplicationHandler for App {
                             confirm: edges & 16 != 0,
                             back: edges & 32 != 0,
                         };
-                        let rows_input = game::pause::rows_input(
-                            input,
-                            adjust & game::kbm::MENU_ADJUST_LEFT != 0,
-                            adjust & game::kbm::MENU_ADJUST_RIGHT != 0,
-                            model.popup.is_some() || model.class_choices.is_some(),
-                        );
                         let (cursor, actions) = ui::menu::navigate(&model, rows_input);
-                        let click =
-                            game::pause::pause_sound(rows_input, model.cursor, cursor, &actions);
-                        if let (Some(c), Some(sl)) = (click, self.sounds.as_mut()) {
-                            sl.play_2d(self.audio.as_mut(), c.name());
+                        // L1 / R1 page the row navigate left under the cursor.
+                        let page_actions = game::pause::page_after(&model, page_dir, cursor).1;
+                        let click = game::pause::frame_sound(
+                            &model, rows_input, page_dir, cursor, &actions,
+                        );
+                        // The clicks go through the menu's rate-limited queue
+                        // (`shell_feel::Cues`): a select inside its 0.1 s
+                        // interval is dropped, as the PS2 refuses a start
+                        // inside its playinterval (re-bf2-menus §4.2). The
+                        // clock advances after the ask, so the frame's own
+                        // select counts from when it starts.
+                        if let Some(c) = click {
+                            self.pause_menu.cue(c);
+                        }
+                        // Menu clicks keep their baked pitch: the rate is reset
+                        // for them, and the slow cheat's own Accept sets its
+                        // 0.3 again on its success (the `rate_mul` pattern).
+                        let menu_rate = self.sounds.as_mut().map(|sl| {
+                            let saved = sl.rate_mul;
+                            sl.rate_mul = 1.0;
+                            saved
+                        });
+                        for c in self.pause_menu.take_cues(dt) {
+                            if let Some(sl) = self.sounds.as_mut() {
+                                sl.play_2d(self.audio.as_mut(), c.name());
+                            }
+                        }
+                        if let Some(saved) = menu_rate {
+                            if let Some(sl) = self.sounds.as_mut() {
+                                sl.rate_mul = saved;
+                            }
                         }
                         // The PS2 matcher runs beside the menu on the same
                         // edges (the cursor wiggle while typing is authentic).
@@ -421,6 +450,9 @@ impl winit::application::ApplicationHandler for App {
                                     self.audio.as_mut(),
                                     ui::shell_feel::MenuSound::Accept.name(),
                                 );
+                                // Menu clicks keep their baked pitch; the slow
+                                // cheat's rate is set again on its own success.
+                                sl.rate_mul = 1.0;
                             }
                             eprintln!("{line}");
                             self.feed
@@ -428,7 +460,7 @@ impl winit::application::ApplicationHandler for App {
                         }
                         self.pause_menu.cursor = cursor;
                         let mut quit = false;
-                        for a in actions {
+                        for a in actions.into_iter().chain(page_actions) {
                             self.restart_clicked |= a == ui::menu::MenuAction::Restart;
                             quit |= apply_pause_action(
                                 walk,
@@ -1011,7 +1043,11 @@ impl winit::application::ApplicationHandler for App {
                                 render::made::note("egui texture", Some("egui"), bytes, 0.0);
                             }
                             if let Some((walk, _)) = self.walk.as_mut() {
-                                // A click sounds as the pad's press of it.
+                                // A click sounds as the pad's press of it:
+                                // accept on a row that acts (the music's step
+                                // plays nothing), cancel on a popup's No. The
+                                // clicks go through the menu's rate-limited
+                                // queue, as the pad's do.
                                 let none = ui::menu::MenuInput::default();
                                 let mut cue = game::pause::pause_sound(none, 0, 0, &clicked);
                                 if clicked.iter().any(|a| {
@@ -1021,8 +1057,25 @@ impl winit::application::ApplicationHandler for App {
                                 }) {
                                     cue = Some(ui::shell_feel::MenuSound::Accept);
                                 }
-                                if let (Some(c), Some(sl)) = (cue, self.sounds.as_mut()) {
-                                    sl.play_2d(self.audio.as_mut(), c.name());
+                                if let Some(c) = cue {
+                                    self.pause_menu.cue(c);
+                                }
+                                // Menu clicks keep their baked pitch; the slow
+                                // cheat's rate is restored after the queue runs.
+                                let menu_rate = self.sounds.as_mut().map(|sl| {
+                                    let saved = sl.rate_mul;
+                                    sl.rate_mul = 1.0;
+                                    saved
+                                });
+                                for c in self.pause_menu.take_cues(dt) {
+                                    if let Some(sl) = self.sounds.as_mut() {
+                                        sl.play_2d(self.audio.as_mut(), c.name());
+                                    }
+                                }
+                                if let Some(saved) = menu_rate {
+                                    if let Some(sl) = self.sounds.as_mut() {
+                                        sl.rate_mul = saved;
+                                    }
                                 }
                                 for a in clicked {
                                     self.restart_clicked |= a == ui::menu::MenuAction::Restart;

@@ -71,10 +71,11 @@ impl PauseMenu {
     }
 
     /// The clicks asked for since the last frame, oldest first; `dt` seconds
-    /// advances the select click's rate limit.
+    /// advances the select click's rate limit *after* the take, so a cue queued
+    /// this frame counts from when it starts (the PS2 refuses a start inside
+    /// its playinterval).
     pub fn take_cues(&mut self, dt: f32) -> Vec<ui::shell_feel::MenuSound> {
-        self.cues.tick(dt);
-        self.cues.take()
+        self.cues.take_then_tick(dt)
     }
 
     pub fn class_picker_model(&self, walk: &WalkSim) -> Option<ui::menu::ClassPickerModel> {
@@ -245,6 +246,101 @@ pub fn rows_input(
     }
 }
 
+/// The frame's row edges from `kbm::menu_edges`' bits and `dt`: the D-pad /
+/// arrows as [`MenuInput`], with the value-step bits from the left stick and
+/// the A / D keys, and L1 / R1 (the shell's paging arms) held through
+/// [`ui::shell_feel::HoldRepeat`] so a page can repeat. Returns the row input
+/// and the page direction: +[`ui::menu::PAGE_STEP`] on R1,
+/// -[`ui::menu::PAGE_STEP`] on L1, 0 with neither. `prev_menu_buttons` is the
+/// last frame's held bits, for the stick latch; `dpad_steps`: the popup and
+/// the picker keep their D-pad.
+pub fn row_edges(
+    edges: u32,
+    dt: f32,
+    prev_menu_buttons: u32,
+    dpad_steps: bool,
+    repeat: &mut ui::shell_feel::HoldRepeat,
+) -> (ui::menu::MenuInput, i32) {
+    const ADJUST: u32 = crate::kbm::MENU_ADJUST_LEFT | crate::kbm::MENU_ADJUST_RIGHT;
+    // One repeat step per frame on every held arm (the stick's A / D steps and
+    // the L1 / R1 pages), so a held arm's delay runs from its press: two calls
+    // with arguments that differ reset the timer, and the page never repeats.
+    const ARMS: u32 = ADJUST | crate::kbm::MENU_L1 | crate::kbm::MENU_R1;
+    let arms = edges | repeat.step(prev_menu_buttons & ARMS, dt);
+    let adjust = arms & ADJUST;
+    // A held page repeats beside the stick's steps.
+    const PAGES: u32 = crate::kbm::MENU_L1 | crate::kbm::MENU_R1;
+    let pages = arms & PAGES;
+    let dir = if pages & crate::kbm::MENU_R1 != 0 {
+        ui::menu::PAGE_STEP
+    } else if pages & crate::kbm::MENU_L1 != 0 {
+        -ui::menu::PAGE_STEP
+    } else {
+        0
+    };
+    (
+        rows_input(
+            ui::menu::MenuInput {
+                up: edges & 1 != 0,
+                down: edges & 2 != 0,
+                left: edges & 4 != 0 && edges & ADJUST == 0,
+                right: edges & 8 != 0 && edges & ADJUST == 0,
+                confirm: edges & 16 != 0,
+                back: edges & 32 != 0,
+            },
+            adjust & crate::kbm::MENU_ADJUST_LEFT != 0,
+            adjust & crate::kbm::MENU_ADJUST_RIGHT != 0,
+            dpad_steps,
+        ),
+        dir,
+    )
+}
+
+/// The page step on the focused row: L1 / R1 (a `dir` of ±[`ui::menu::PAGE_STEP`])
+/// apply a value row's page, as the shell's Session Options' x10 steps. A
+/// locked row takes no page; rows that take no step stay as their Left / Right
+/// presses left them (`navigate` already ran).
+pub fn apply_page(model: &ui::menu::MenuModel, dir: i32, actions: &mut Vec<ui::menu::MenuAction>) {
+    if dir == 0 {
+        return;
+    }
+    let row = ui::menu::rows(model)[model.cursor];
+    if ui::menu::row_locked(model, row).is_some() {
+        return;
+    }
+    if let Some(a) = ui::menu::page_step_action(model, row, dir) {
+        actions.push(a);
+    }
+}
+
+/// A frame's page step on the model: the new model (the page applied to the
+/// cursor `navigate` left) and the actions it asks for. The windowed loop
+/// applies them through `apply_pause_action`, which reads walk values.
+pub fn page_after(
+    model: &ui::menu::MenuModel,
+    dir: i32,
+    cursor: usize,
+) -> (ui::menu::MenuModel, Vec<ui::menu::MenuAction>) {
+    let mut m = model.clone();
+    m.cursor = cursor;
+    let mut actions = Vec::new();
+    apply_page(&m, dir, &mut actions);
+    for a in &actions {
+        // The actions carry their own clamped values.
+        match *a {
+            ui::menu::MenuAction::SetAssist(v) => m.assist_intensity = v,
+            ui::menu::MenuAction::SetAiCap(v) => m.team_size_pct = v,
+            ui::menu::MenuAction::SetReinforcements(v) => m.reinforcements_pct = v,
+            ui::menu::MenuAction::SetFov(v) => m.fov_scale = v,
+            ui::menu::MenuAction::SetMusic(v) => m.music_volume = v,
+            ui::menu::MenuAction::SetMouseSensitivity(v) => m.mouse_sensitivity = v,
+            ui::menu::MenuAction::SetPadLookSensitivity(v) => m.pad_look_sensitivity = v,
+            _ => {}
+        }
+    }
+    (m, actions)
+}
+
 /// The pause menu's click for one frame (menuref "In battle" and its sound
 /// table): Back resumes with the exit click (from a popup too, playtest A3);
 /// a sub-page's Back row exit (the PS2's sub-page Triangle); Cross on No
@@ -276,6 +372,51 @@ pub fn pause_sound(
         return Some(MenuSound::Accept);
     }
     (from != to).then_some(MenuSound::Select)
+}
+
+/// The full click for a frame of the rows: `pause_sound`'s, with the page
+/// step's sound and the refusals'. A page that moved a row accepts, as its
+/// Left / Right press does; the music's page stays quiet (its audition is
+/// the voice, not a click). A confirm on a locked row - one shown greyed with
+/// its reason - plays the error click (menuref §4.1: a refused action), as
+/// does Cross on a row that takes nothing (the PS2's pause menu has no such
+/// row; `[ours]`'s plain-text rows), and a page step on a row that takes no
+/// step (a popup's No / Yes, a button row).
+pub fn frame_sound(
+    model: &ui::menu::MenuModel,
+    input: ui::menu::MenuInput,
+    dir: i32,
+    to: usize,
+    actions: &[ui::menu::MenuAction],
+) -> Option<ui::shell_feel::MenuSound> {
+    use ui::menu::MenuAction;
+    use ui::shell_feel::MenuSound;
+    let rows = ui::menu::rows(model);
+    let row = rows[model.cursor.min(rows.len().saturating_sub(1))];
+    if dir != 0 {
+        // A page on a greyed row, or with no value row under the cursor (a
+        // popup's No / Yes), is refused.
+        if ui::menu::row_locked(model, row).is_some() {
+            return Some(MenuSound::Error);
+        }
+        // A page that moved a value row accepts; the music's step plays nothing
+        // (its audition is the voice, not a click).
+        let moved = ui::menu::page_step_action(model, row, dir)
+            .is_some_and(|a| !matches!(a, MenuAction::SetMusic(_)));
+        if input.confirm && actions.is_empty() && ui::menu::row_locked(model, row).is_none() {
+            return Some(MenuSound::Error);
+        }
+        if moved {
+            // A page step is a press: accept as Game Options rows do.
+            return Some(MenuSound::Accept);
+        }
+        if ui::menu::page_step_action(model, row, dir).is_none() {
+            return Some(MenuSound::Error);
+        }
+    } else if input.confirm && actions.is_empty() && ui::menu::row_locked(model, row).is_none() {
+        return Some(MenuSound::Error);
+    }
+    pause_sound(input, model.cursor, to, actions)
 }
 
 #[cfg(test)]
@@ -505,6 +646,150 @@ mod tests {
             pause_sound(cross, 1, 1, &[MenuAction::RequestQuit]),
             Some(MenuSound::Accept)
         );
+    }
+
+    /// Phase 2's cue set: L1 / R1 page a value row by ten steps and accept as
+    /// its press does; the music's page is quiet (its audition is the voice);
+    /// a page on a greyed row plays the error click, as a refused action; a
+    /// confirm on a row that takes nothing is refused too. A held page repeats
+    /// after the shell's delay, every 5 updates.
+    #[test]
+    fn l1_r1_page_a_row_and_sound_as_its_press() {
+        let at = |row: ui::menu::Row| {
+            ui::menu::rows(&ui::menu::MenuModel::default())
+                .iter()
+                .position(|r| *r == row)
+                .unwrap()
+        };
+        let cross = MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        // A page moves the row and accepts.
+        let fov = ui::menu::MenuModel {
+            cursor: at(ui::menu::Row::Fov),
+            fov_scale: 1.0,
+            ..Default::default()
+        };
+        let (after, acts) = page_after(&fov, ui::menu::PAGE_STEP, fov.cursor);
+        assert_eq!(acts, vec![MenuAction::SetFov(1.5)]);
+        assert_eq!(after.fov_scale, 1.5);
+        assert_eq!(
+            frame_sound(&fov, MenuInput::default(), 10, fov.cursor, &[]),
+            Some(MenuSound::Accept)
+        );
+        // The music's page moves the voice and stays quiet (menuref §4.1).
+        let music = ui::menu::MenuModel {
+            cursor: at(ui::menu::Row::Music),
+            music_volume: 0.5,
+            ..Default::default()
+        };
+        let (_, acts) = page_after(&music, -ui::menu::PAGE_STEP, music.cursor);
+        assert_eq!(acts, vec![MenuAction::SetMusic(0.0)]);
+        assert_eq!(
+            frame_sound(&music, MenuInput::default(), -10, music.cursor, &[]),
+            None
+        );
+        // At the top, a page up clamps to 1.0 and stays quiet.
+        let music = ui::menu::MenuModel {
+            cursor: at(ui::menu::Row::Music),
+            music_volume: 1.0,
+            ..Default::default()
+        };
+        let (_, acts) = page_after(&music, ui::menu::PAGE_STEP, music.cursor);
+        assert_eq!(acts, vec![MenuAction::SetMusic(1.0)]);
+        assert_eq!(
+            frame_sound(&music, MenuInput::default(), 10, music.cursor, &[]),
+            None
+        );
+        // A page on a greyed row is refused: the error click (menuref §4.1).
+        let locked = ui::menu::MenuModel {
+            cursor: at(ui::menu::Row::AiCap),
+            team_size_off: true,
+            ..Default::default()
+        };
+        let (_, acts) = page_after(&locked, ui::menu::PAGE_STEP, locked.cursor);
+        assert!(acts.is_empty());
+        assert_eq!(
+            frame_sound(&locked, MenuInput::default(), 10, locked.cursor, &[]),
+            Some(MenuSound::Error)
+        );
+        // A confirm on a row that takes nothing is refused too.
+        let flat = ui::menu::MenuModel {
+            cursor: at(ui::menu::Row::Quit),
+            ..Default::default()
+        };
+        assert_eq!(
+            frame_sound(&flat, cross, 0, flat.cursor, &[]),
+            Some(MenuSound::Error)
+        );
+        // A page step with no row under it (a popup's No/Yes rows) takes the
+        // refusal's error click.
+        let popup = ui::menu::MenuModel {
+            popup: Some(Popup::Respawn),
+            cursor: 0,
+            ..Default::default()
+        };
+        assert_eq!(
+            frame_sound(&popup, MenuInput::default(), 10, 0, &[]),
+            Some(MenuSound::Error)
+        );
+    }
+
+    /// A held L1 / R1 presses once on its edge, then repeats after the shell's
+    /// delay every 5 updates; a press is not a Morse key, so the rows' Left /
+    /// Right keep the adjust bits out.
+    #[test]
+    fn a_held_page_repeats_after_the_delay() {
+        let mut repeat = ui::shell_feel::HoldRepeat::default();
+        let r1 = crate::kbm::MENU_R1;
+        // The edge frame: one press, no repeat yet.
+        let (input, dir) = row_edges(r1, 1.0 / 60.0, r1, false, &mut repeat);
+        assert_eq!(dir, ui::menu::PAGE_STEP);
+        assert!(!input.right && !input.left);
+        // Held: the first repeat at 0.62 s, then every 5 updates (the shell's
+        // steps run at 30 Hz). The press count is measured after the delay.
+        let mut presses = 0;
+        let mut t = 0.0;
+        while t < 1.0 {
+            t += 1.0 / 30.0;
+            let (_, dir) = row_edges(0, 1.0 / 30.0, r1, false, &mut repeat);
+            presses += (dir != 0) as usize;
+        }
+        // Past the delay: repeats land every 5 updates (REPEAT_EVERY), so a
+        // held second yields 3 presses at 0.62 / 0.79 / 0.96 s, never a flood.
+        assert!((3..=4).contains(&presses), "presses: {presses}");
+        // L1 pages back.
+        let mut repeat = ui::shell_feel::HoldRepeat::default();
+        let (_, dir) = row_edges(
+            crate::kbm::MENU_L1,
+            1.0 / 60.0,
+            crate::kbm::MENU_L1,
+            false,
+            &mut repeat,
+        );
+        assert_eq!(dir, -ui::menu::PAGE_STEP);
+    }
+
+    /// The menu's own click queue rate-limits a select to one per 0.1 s (the
+    /// PS2's playinterval), and takes the clicks oldest first.
+    #[test]
+    fn the_select_click_is_rate_limited() {
+        let mut menu = PauseMenu::default();
+        menu.cue(MenuSound::Select);
+        assert_eq!(menu.take_cues(1.0 / 60.0), vec![MenuSound::Select]);
+        // Inside the interval: dropped, as the PS2 refuses a start.
+        menu.cue(MenuSound::Select);
+        assert!(menu.take_cues(1.0 / 60.0).is_empty());
+        // Advance the clock past the first select's ok time (clock is now 3/60
+        // = 0.05, select_ok = 1/60 + 0.1 = 0.117): a take of 0.1 s moves the
+        // clock to 0.15 > select_ok, so the next select is allowed. An accept
+        // is never rate limited, so Cancel rides along.
+        menu.take_cues(0.1);
+        menu.cue(MenuSound::Select);
+        menu.cue(MenuSound::Cancel);
+        let got = menu.take_cues(0.1);
+        assert_eq!(got, vec![MenuSound::Select, MenuSound::Cancel]);
     }
 
     /// Issue #142: the controller look sensitivity reaches a ground battle's

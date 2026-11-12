@@ -475,6 +475,54 @@ pub fn step_slider_action(m: &MenuModel, row: Row, right: bool) -> Option<MenuAc
     }
 }
 
+/// `[ours]` L1 / R1 page a value row by ten of its Left / Right steps, as the
+/// shell's Session Options' x10 steps and the PC options' Page Up / Down do.
+pub const PAGE_STEP: i32 = 10;
+
+/// A value row stepped `dir` pages (±[`PAGE_STEP`] of its Left / Right step):
+/// the page's own rounding, with the row's ends as clamps. None on a row that
+/// takes no step.
+pub fn page_step_action(m: &MenuModel, row: Row, dir: i32) -> Option<MenuAction> {
+    let right = dir > 0;
+    // The page is `dir` single steps from the row's value, so every slider
+    // keeps its rounding and its ends.
+    let d10 = dir as f32 * 0.1;
+    match step_slider_action(m, row, right)? {
+        MenuAction::SetAssist(_) => Some(MenuAction::SetAssist(
+            (m.assist_intensity + d10).round() / 10.0,
+        )),
+        MenuAction::SetAiCap(_) => {
+            let pct = m.team_size_pct as i32 + dir * 10;
+            Some(MenuAction::SetAiCap(
+                pct.clamp(10, crate::population::MAX_TEAM_PCT as i32) as u32,
+            ))
+        }
+        MenuAction::SetReinforcements(_) => {
+            let pct = m.reinforcements_pct as i32 + dir * 10;
+            Some(MenuAction::SetReinforcements(pct.clamp(10, 500) as u32))
+        }
+        MenuAction::SetFov(_) => Some(MenuAction::SetFov(
+            ((m.fov_scale + dir as f32 * 0.05) * 20.0).round() / 20.0,
+        )),
+        MenuAction::SetMusic(_) => Some(MenuAction::SetMusic(
+            ((m.music_volume + d10).clamp(0.0, 1.0) * 10.0).round() / 10.0,
+        )),
+        MenuAction::SetMouseSensitivity(_) => {
+            let (lo, hi) = MOUSE_SENSITIVITY_RANGE;
+            Some(MenuAction::SetMouseSensitivity(
+                ((m.mouse_sensitivity + d10).round() / 10.0).clamp(lo, hi),
+            ))
+        }
+        MenuAction::SetPadLookSensitivity(_) => {
+            let (lo, hi) = PAD_LOOK_SENSITIVITY_RANGE;
+            Some(MenuAction::SetPadLookSensitivity(
+                ((m.pad_look_sensitivity + d10).round() / 10.0).clamp(lo, hi),
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// The rows a step changes (Left / Right, ◀ / ▶); Button prompts too.
 fn is_value_row(row: Row) -> bool {
     matches!(
@@ -982,7 +1030,9 @@ fn list_key(m: &MenuModel) -> u8 {
     }
 }
 
-/// Draw the menu; pointer clicks produce actions too.
+/// Draw the menu; pointer clicks produce actions too. A frame that produces
+/// no action and moves no cursor plays nothing, as a press on a row that takes
+/// nothing is refused (`game::pause::frame_sound`'s error click is the pad's).
 pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
     let mut actions = Vec::new();
     egui::Area::new(egui::Id::new("pause_menu"))

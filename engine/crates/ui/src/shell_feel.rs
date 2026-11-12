@@ -86,6 +86,14 @@ impl Cues {
     pub fn take(&mut self) -> Vec<MenuSound> {
         std::mem::take(&mut self.queued)
     }
+
+    /// Take the queue, then advance the clock: a cue queued this frame counts
+    /// from when it starts, as the PS2 refuses a start inside its playinterval.
+    pub fn take_then_tick(&mut self, dt: f32) -> Vec<MenuSound> {
+        let got = std::mem::take(&mut self.queued);
+        self.tick(dt);
+        got
+    }
 }
 
 /// The shell's update rate: the PS2 shell steps its animations 30 times a
