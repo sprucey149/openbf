@@ -396,6 +396,13 @@ pub struct SeparationSweep {
     pub direction: Vec3,
 }
 
+/// A floor edge where a grounded bot can keep its move along the seam.
+#[derive(Clone, Copy, Debug)]
+pub struct FloorSeam {
+    pub bounds: crate::collision::Aabb,
+    pub inward: Vec3,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum ApproachMotion {
     Any,
@@ -479,6 +486,8 @@ pub struct NavGraph {
     pub separation_wall: Option<u32>,
     /// Wall segment where separation must stop before crossing the face.
     pub separation_sweep: Option<SeparationSweep>,
+    /// Unsupported seam on a walking approach.
+    pub floor_seam: Option<FloorSeam>,
     /// Tactical hops from this deck need a supported landing at the sampled height.
     pub hop_support_areas: Vec<crate::collision::Aabb>,
     /// Narrow walking approaches without room for a tactical hop.
@@ -690,6 +699,7 @@ impl NavGraph {
             wall_approach_props: Vec::new(),
             separation_wall: None,
             separation_sweep: None,
+            floor_seam: None,
             hop_support_areas: Vec::new(),
             hop_takeoff_keepout: Vec::new(),
             attack_takeoff_keepout: Vec::new(),

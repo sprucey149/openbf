@@ -313,6 +313,19 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
                 instance,
                 direction: Vec3::Z,
             });
+        if g.hub(20).is_some_and(|h| {
+            Vec2::new(h.pos.x, h.pos.z).distance_squared(Vec2::new(-276.98, 147.84)) < 0.01
+        }) {
+            // OURS: keep a grounded step on the supported side of the lower seam.
+            // measure: original floor edge and Tantive IV Elite step trace (#108).
+            g.floor_seam = Some(core::nav::FloorSeam {
+                bounds: core::collision::Aabb {
+                    min: Vec3::new(-274.6, 1.8, 151.9),
+                    max: Vec3::new(-273.9, 2.2, 152.52),
+                },
+                inward: Vec3::Z,
+            });
+        }
     }
     // OURS: step out of the path of an approaching hover tank on the west street.
     // measure: BF1 Theed Hard seed 2 first hull contact and ordinary side step (#108).

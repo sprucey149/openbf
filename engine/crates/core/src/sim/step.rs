@@ -193,6 +193,33 @@ impl Sim {
         u.soldier.vel -= normal * u.soldier.vel.dot(normal).min(0.0);
     }
 
+    fn keep_floor_seam_side(&mut self, i: usize, from: Capsule, seam: crate::nav::FloorSeam) {
+        let unit = &self.units[i];
+        let to = unit.soldier.pos;
+        let across = (to - from.base).dot(seam.inward);
+        if unit.controller != Controller::Ai
+            || unit.soldier.stance != Stance::Stand
+            || across >= 0.0
+            || !seam.bounds.min.cmple(from.base).all()
+            || !from.base.cmple(seam.bounds.max).all()
+        {
+            return;
+        }
+        let low = from.base.y - STEP_HEIGHT;
+        if self.ground_point_under(to, false) >= low || self.ground_under(from.base, false) < low {
+            return;
+        }
+        let along = to - seam.inward * across;
+        let step = (along - from.base).with_y(0.0);
+        let safe = self.ground_point_under(along, false) >= low
+            && self
+                .collision
+                .wall_sweep(&from.stepped(), step, step.length())
+                .is_none();
+        let feet = if safe { along } else { from.base.with_y(to.y) };
+        self.keep_approach_side(i, feet);
+    }
+
     /// Preview a walking approach and its first substantial landing. The
     /// real bot will still walk and fall with the ordinary movement rules.
     pub(crate) fn recovery_descent(&self, u: &crate::unit::Unit, dir: Vec3) -> Option<Vec3> {
@@ -1001,6 +1028,7 @@ impl Sim {
             }));
         self.saber_inputs(&mut unit_pads);
         // 3. Movement.
+        let floor_seam = self.nav.as_ref().and_then(|g| g.floor_seam);
         for (i, pad_i) in unit_pads.iter_mut().enumerate() {
             if let Some(floor) = self.embedded_floor(&self.units[i]) {
                 let u = &mut self.units[i];
@@ -1169,6 +1197,9 @@ impl Sim {
             );
             self.keep_jet_landing_side(i, from);
             self.keep_solid_approach_side(i, from);
+            if let Some(seam) = floor_seam.filter(|_| stepped == Some(true)) {
+                self.keep_floor_seam_side(i, from, seam);
+            }
             self.push_turrets(i, from);
             // 3a'. The floor under the NEW feet, where the wall pass left them
             // (card STHOP, analysis/re-soldier-ground.md §3: the PS2 finds the
