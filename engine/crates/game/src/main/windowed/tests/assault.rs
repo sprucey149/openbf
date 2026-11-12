@@ -26,6 +26,18 @@ fn app(root: &std::path::Path) -> App {
     app
 }
 
+fn start(a: &mut App, name: &str) -> anyhow::Result<()> {
+    let (scene, load) = game::assets::load_battle_scene(&a.assets_dir.join(name), &a.mode)?;
+    a.start_battle(
+        name.into(),
+        loading::Prepared {
+            scene,
+            load,
+            cpu_ms: 0.0,
+        },
+    )
+}
+
 #[test]
 #[ignore = "owned Hero Assault assets and headless GPU; scripts/gpu_tests.sh --battle-launch"]
 fn shell_assault_preserves_authored_seats_options_and_spawn_flow() {
@@ -39,7 +51,7 @@ fn shell_assault_preserves_authored_seats_options_and_spawn_flow() {
         armies: ["imp".into(), "all".into()],
         label: String::new(),
     });
-    a.start_battle("tat2".to_owned(), root.join("assets_baked/tat2"));
+    start(&mut a, "tat2").unwrap();
     assert!(matches!(a.screen, Screen::Battle));
     assert_eq!(a.setup.mission_file.as_deref(), Some("tat2_eli.ron"));
     assert_eq!(a.setup.player_team, 1);
@@ -144,7 +156,7 @@ fn shell_assault_rejects_bad_launches_and_keeps_partial_heroes() {
     ] {
         let own = fixture_root.join(kind).join("engine");
         let mut a = app(&own);
-        a.start_battle(map.into(), own.join("assets_baked").join(map));
+        assert!(start(&mut a, map).is_err(), "{kind}");
         assert!(matches!(a.screen, Screen::Shell), "{kind}");
         assert!(
             a.walk.is_none() && a.gpu.is_none(),
@@ -153,12 +165,12 @@ fn shell_assault_rejects_bad_launches_and_keeps_partial_heroes() {
         assert!(a.renderer.is_some(), "{kind}: renderer retained for retry");
         a.assets_dir = root.join("assets_baked");
         a.missions_dir = root.join("missions");
-        a.start_battle("tat2".into(), root.join("assets_baked/tat2"));
+        start(&mut a, "tat2").unwrap();
         assert!(matches!(a.screen, Screen::Battle), "{kind}: retry succeeds");
         assert_eq!(a.walk.as_ref().unwrap().0.sim.classes[0].len(), 9);
     }
     let mut a = app(&root);
-    a.start_battle("bf2_hot1".into(), root.join("assets_baked/bf2_hot1"));
+    assert!(start(&mut a, "bf2_hot1").is_err());
     assert!(matches!(a.screen, Screen::Shell));
     assert!(a.walk.is_none());
     // Directory names remain valid while their owned missions are hostile.
@@ -171,8 +183,9 @@ fn shell_assault_rejects_bad_launches_and_keeps_partial_heroes() {
     ] {
         let mut a = app(&root);
         a.missions_dir = fixture_root.join("shell").join(kind);
-        a.start_battle("tat2".into(), root.join("assets_baked/tat2"));
+        let result = start(&mut a, "tat2");
         if kind == "partial-first" {
+            result.unwrap();
             assert!(matches!(a.screen, Screen::Battle));
             let w = &a.walk.as_ref().unwrap().0;
             assert_eq!([w.sim.classes[0].len(), w.sim.classes[1].len()], [8, 8]);
@@ -181,6 +194,7 @@ fn shell_assault_rejects_bad_launches_and_keeps_partial_heroes() {
                 .iter()
                 .all(|t| t.classes.iter().all(|c| c.name.contains("_hero_"))));
         } else {
+            assert!(result.is_err(), "{kind}");
             assert!(matches!(a.screen, Screen::Shell), "{kind}");
             assert!(a.walk.is_none(), "{kind}");
         }

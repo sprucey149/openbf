@@ -24,6 +24,16 @@ pub(super) fn load_and_upload(
     mode: &str,
 ) -> Result<(SceneGpu, game::assets::Scene)> {
     let (scene, load) = game::assets::load_battle_scene(dir, mode)?;
+    let gpu = upload_battle_scene(r, &scene, &load)?;
+    Ok((gpu, scene))
+}
+
+/// Event-thread half shared by direct launch and the shell's prepared scene.
+pub(super) fn upload_battle_scene(
+    r: &mut Renderer,
+    scene: &game::assets::Scene,
+    load: &game::assets::BattleLoad,
+) -> Result<SceneGpu> {
     if let Some(layer) = &load.layer {
         println!("mode layer '{layer}' merged");
     }
@@ -32,7 +42,7 @@ pub(super) fn load_and_upload(
         Some((cd, Err(e))) => eprintln!("common assets at {} unreadable: {e:#}", cd.display()),
         None => {}
     }
-    let gpu = upload_scene(r, &scene)?;
+    let gpu = upload_scene(r, scene)?;
     println!(
         "map '{}': {} draws ({} instances, {} skipped classes)",
         scene.manifest.map,
@@ -43,7 +53,7 @@ pub(super) fn load_and_upload(
     for (class, n) in &gpu.skipped {
         println!("  skipped {n:3}x {class} (no drawable model)");
     }
-    Ok((gpu, scene))
+    Ok(gpu)
 }
 
 /// The two squad-command icons (brief D11), both out of `common_bf1`: BF2

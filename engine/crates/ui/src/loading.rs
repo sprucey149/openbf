@@ -23,6 +23,18 @@ pub fn draw_loading(
     step: usize,
     steps: usize,
 ) {
+    draw_loading_with_skip(ctx, image, caption, step, steps, false);
+}
+
+/// The prompt is controlled by the loading input clock, never UI animation.
+pub fn draw_loading_with_skip(
+    ctx: &egui::Context,
+    image: Option<TextureId>,
+    caption: &str,
+    step: usize,
+    steps: usize,
+    prompt: bool,
+) {
     let screen = ctx.content_rect();
     let painter = ctx.layer_painter(egui::LayerId::background());
     painter.rect_filled(screen, 0.0, Color32::BLACK);
@@ -44,6 +56,16 @@ pub fn draw_loading(
                     .color(Color32::from_rgb(120, 190, 255)),
             );
         });
+    if prompt {
+        // Painter text has no Area fade-in/out: the deadline is exactly 3 s.
+        painter.text(
+            screen.right_bottom() - Vec2::new(24.0, 24.0),
+            Align2::RIGHT_BOTTOM,
+            "Push any button to skip",
+            egui::FontId::proportional(18.0),
+            Color32::WHITE,
+        );
+    }
 }
 
 #[cfg(test)]

@@ -117,6 +117,9 @@ impl winit::application::ApplicationHandler for App {
         if game::input_icons::is_keyboard_or_mouse_use(&event) {
             self.icon_device.keyboard_or_mouse();
         }
+        if self.loading_window_event(&event) {
+            return;
+        }
         if self.capture_keyboard(&event) {
             return;
         }
@@ -136,6 +139,7 @@ impl winit::application::ApplicationHandler for App {
                 self.prev_menu_buttons = 0;
             }
             WindowEvent::CloseRequested => {
+                self.finish_loading();
                 if let Some((walk, _)) = self.walk.as_mut() {
                     if !self.round_recorded {
                         self.round_recorded = true;
@@ -214,7 +218,11 @@ impl winit::application::ApplicationHandler for App {
                     return;
                 }
                 if matches!(self.screen, Screen::Loading) {
-                    self.redraw_loading(event_loop);
+                    if let Err(error) = self.redraw_loading() {
+                        eprintln!("render: {error:#}");
+                        event_loop.exit();
+                        return;
+                    }
                     if let Some(w) = &self.window {
                         w.request_redraw();
                     }

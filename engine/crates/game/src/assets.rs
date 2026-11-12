@@ -1390,6 +1390,12 @@ pub fn load_loadscreen(map_dir: &Path) -> Option<LoadScreenAssets> {
     for name in ls.sequence {
         let bytes = pak::read(dir.join(format!("{name}.ktx2"))).ok()?;
         let tex = load_ktx2(&bytes).ok()?;
+        let len = (tex.width as usize)
+            .checked_mul(tex.height as usize)?
+            .checked_mul(4)?;
+        if tex.width == 0 || tex.height == 0 || tex.rgba.len() != len {
+            return None;
+        }
         sequence.push((name, tex));
     }
     (!sequence.is_empty()).then_some(LoadScreenAssets {

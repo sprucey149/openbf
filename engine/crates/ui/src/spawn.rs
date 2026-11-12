@@ -199,8 +199,9 @@ pub fn draw_spawn(ctx: &egui::Context, m: &SpawnModel) {
                     });
                     ui.add_space(12.0);
 
-                    // The class row.
-                    if !m.classes.is_empty() {
+                    // The class row belongs to class select or the combined legacy panel.
+                    if !m.classes.is_empty() && matches!(m.screen, None | Some(SpawnScreen::Class))
+                    {
                         let pick = m.selected_class.min(m.classes.len() - 1);
                         ui.vertical_centered(|ui| {
                             ui.horizontal(|ui| {
@@ -475,6 +476,33 @@ mod tests {
             let prims = ctx.tessellate(out.shapes, out.pixels_per_point);
             assert!(!prims.is_empty(), "{screen:?} drew nothing");
         }
+    }
+
+    #[test]
+    fn the_post_screen_does_not_draw_the_class_row() {
+        let draws_class = |screen| {
+            let ctx = egui::Context::default();
+            let model = SpawnModel {
+                screen: Some(screen),
+                ..model()
+            };
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(1280.0, 720.0),
+                )),
+                ..Default::default()
+            };
+            let _ = ctx.run(input.clone(), |ctx| draw_spawn(ctx, &model));
+            ctx.run(input, |ctx| draw_spawn(ctx, &model))
+                .shapes
+                .iter()
+                .any(|clipped| {
+                    matches!(&clipped.shape, egui::Shape::Text(text) if text.galley.text() == "ASSAULT GUNNER")
+                })
+        };
+        assert!(draws_class(SpawnScreen::Class));
+        assert!(!draws_class(SpawnScreen::Map));
     }
 
     /// The class row draws for every table size the game can hand it — none
