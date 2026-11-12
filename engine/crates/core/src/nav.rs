@@ -387,6 +387,15 @@ pub struct FloorApproach {
     pub finish_on_heading_plane: bool,
 }
 
+/// A wall segment that can trap a grounded bot after a separation push.
+#[derive(Clone, Copy, Debug)]
+pub struct SeparationSweep {
+    pub origin: crate::collision::Aabb,
+    pub contact: crate::collision::Aabb,
+    pub instance: u32,
+    pub direction: Vec3,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum ApproachMotion {
     Any,
@@ -468,6 +477,8 @@ pub struct NavGraph {
     pub wall_approach_props: Vec<u32>,
     /// Instance where overlapping soldiers must separate along the outside.
     pub separation_wall: Option<u32>,
+    /// Wall segment where separation must stop before crossing the face.
+    pub separation_sweep: Option<SeparationSweep>,
     /// Tactical hops from this deck need a supported landing at the sampled height.
     pub hop_support_areas: Vec<crate::collision::Aabb>,
     /// Narrow walking approaches without room for a tactical hop.
@@ -678,6 +689,7 @@ impl NavGraph {
             jet_landing_wall: None,
             wall_approach_props: Vec::new(),
             separation_wall: None,
+            separation_sweep: None,
             hop_support_areas: Vec::new(),
             hop_takeoff_keepout: Vec::new(),
             attack_takeoff_keepout: Vec::new(),

@@ -507,6 +507,49 @@ fn separation_keeps_bots_outside_the_marked_wall() {
 }
 
 #[test]
+fn separation_rejects_crossing_the_marked_wall_face() {
+    use crate::collision::Aabb;
+    use crate::nav::{NavGraph, SeparationSweep};
+
+    let mut wall = crate::collision::box_mesh(Vec3::Y * 2.0, Vec3::new(0.45, 2.0, 2.0), false);
+    wall.instance = Some(5);
+    let mut sim = Sim::empty(1);
+    sim.collision = CollisionWorld::new(vec![wall], Vec::new());
+    let near = Vec3::new(-1.1, 0.0, 0.0);
+    let far = Vec3::new(-1.3, 0.0, 0.0);
+    let a = sim.spawn(&UnitSpec::player(0, near)).unwrap();
+    let b = sim.spawn(&UnitSpec::player(0, far)).unwrap();
+    for h in [a, b] {
+        let unit = sim.unit_mut(h).unwrap();
+        unit.controller = Controller::Ai;
+        unit.soldier.grounded = true;
+    }
+
+    sim.separate_units();
+    let unguarded = sim.unit(a).unwrap().soldier.pos;
+    assert!(unguarded.x > near.x);
+    sim.unit_mut(a).unwrap().soldier.pos = near;
+    sim.unit_mut(b).unwrap().soldier.pos = far;
+    let mut nav = NavGraph::default();
+    nav.separation_sweep = Some(SeparationSweep {
+        origin: Aabb {
+            min: Vec3::new(-1.2, -0.1, -0.1),
+            max: Vec3::new(-1.0, 0.1, 0.1),
+        },
+        contact: Aabb {
+            min: Vec3::new(-1.0, -0.1, -0.1),
+            max: Vec3::new(-0.9, 0.1, 0.1),
+        },
+        instance: 5,
+        direction: Vec3::X,
+    });
+    sim.nav = Some(nav);
+    sim.separate_units();
+    assert_eq!(sim.unit(a).unwrap().soldier.pos, near);
+    assert!(sim.unit(b).unwrap().soldier.pos.x < far.x);
+}
+
+#[test]
 fn jet_landing_keeps_the_approach_side_of_the_marked_wall() {
     use crate::nav::NavGraph;
 

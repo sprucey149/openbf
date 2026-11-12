@@ -311,6 +311,7 @@ impl Sim {
     /// pairs visited in index order, a coincident pair separates along +X.
     fn separate_units(&mut self) {
         let separation_wall = self.nav.as_ref().and_then(|g| g.separation_wall);
+        let separation_sweep = self.nav.as_ref().and_then(|g| g.separation_sweep);
         let n = self.units.len();
         for i in 0..n {
             if !self.units[i].alive || self.units[i].mount.is_some() {
@@ -361,6 +362,11 @@ impl Sim {
                             continue;
                         }
                     }
+                    if separation_sweep
+                        .is_some_and(|sweep| self.separation_crosses_wall(&self.units[k], n, sweep))
+                    {
+                        continue;
+                    }
                     let mut y = n.y;
                     if self.units[k].soldier.grounded {
                         let g = self.ground_under(n, false);
@@ -372,6 +378,39 @@ impl Sim {
                 }
             }
         }
+    }
+
+    fn separation_crosses_wall(
+        &self,
+        unit: &crate::unit::Unit,
+        to: Vec3,
+        sweep: crate::nav::SeparationSweep,
+    ) -> bool {
+        let from = unit.soldier.pos;
+        if unit.controller != Controller::Ai
+            || !unit.soldier.grounded
+            || !sweep.origin.min.cmple(from).all()
+            || !from.cmple(sweep.origin.max).all()
+        {
+            return false;
+        }
+        let offset = to - from;
+        let distance = offset.length();
+        // OURS: restrict the sweep to pushes crossing this face from the hall.
+        // measure: Tantive IV corridor contact directions on both eras (#108).
+        if distance == 0.0 || offset.dot(sweep.direction) / distance < 0.95 {
+            return false;
+        }
+        let cap = unit.capsule().stepped();
+        self.collision
+            .wall_sweep_body(&cap, offset, distance)
+            .is_some_and(|(t, normal, body)| {
+                let contact = from + offset * (t / distance);
+                body.instance == Some(sweep.instance)
+                    && offset.dot(normal) < 0.0
+                    && sweep.contact.min.cmple(contact).all()
+                    && contact.cmple(sweep.contact.max).all()
+            })
     }
 
     /// BF2: think each living unit's [`crate::unit::AimBlock`] - a bot's

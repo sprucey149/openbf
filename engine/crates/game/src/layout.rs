@@ -289,6 +289,31 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
             })
             .and_then(|i| u32::try_from(i).ok());
     }
+    // OURS: keep separation from pushing bots through the corridor seam.
+    // measure: Tantive IV lower corridor floor and phase traces (#108).
+    if m.source_game == "bf2" && m.map == "tan1" {
+        g.separation_sweep = m
+            .instances
+            .iter()
+            .position(|i| {
+                i.class == "tan4_bldg_corridor_c"
+                    && Vec3::from(i.translation).distance_squared(Vec3::new(-277.0, 2.0, 140.0))
+                        < 0.01
+            })
+            .and_then(|i| u32::try_from(i).ok())
+            .map(|instance| core::nav::SeparationSweep {
+                origin: core::collision::Aabb {
+                    min: Vec3::new(-275.89, 1.8, 142.0),
+                    max: Vec3::new(-275.70, 2.2, 142.55),
+                },
+                contact: core::collision::Aabb {
+                    min: Vec3::new(-275.89, 1.8, 142.36),
+                    max: Vec3::new(-275.75, 2.2, 142.43),
+                },
+                instance,
+                direction: Vec3::Z,
+            });
+    }
     // OURS: step out of the path of an approaching hover tank on the west street.
     // measure: BF1 Theed Hard seed 2 first hull contact and ordinary side step (#108).
     if m.source_game == "bf1"
