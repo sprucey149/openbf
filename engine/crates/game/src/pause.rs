@@ -48,6 +48,10 @@ pub struct PauseMenu {
     pub page: PausePage,
     /// The Game Menu row that opened the page shown, for its Back.
     pub opener: usize,
+    /// The clicks asked for since the last frame took them, with the select
+    /// click's 0.1 s rate limit on the pause menu's own clock (the shell's
+    /// `ShellMenus::cues` is the same kit).
+    pub cues: ui::shell_feel::Cues,
 }
 
 impl PauseMenu {
@@ -58,6 +62,19 @@ impl PauseMenu {
         self.class_picker = false;
         self.page = PausePage::Main;
         self.opener = 0;
+        self.cues = Default::default();
+    }
+
+    /// Ask for a menu click (rate limited on the pause menu's clock).
+    pub fn cue(&mut self, s: ui::shell_feel::MenuSound) {
+        self.cues.play(s);
+    }
+
+    /// The clicks asked for since the last frame, oldest first; `dt` seconds
+    /// advances the select click's rate limit.
+    pub fn take_cues(&mut self, dt: f32) -> Vec<ui::shell_feel::MenuSound> {
+        self.cues.tick(dt);
+        self.cues.take()
     }
 
     pub fn class_picker_model(&self, walk: &WalkSim) -> Option<ui::menu::ClassPickerModel> {
