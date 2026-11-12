@@ -29,7 +29,7 @@
 mod aim;
 mod flyer;
 mod walker;
-pub use aim::AimerSpec;
+pub use aim::{AimerSpec, BarrelSlot};
 pub(crate) use flyer::flyer_exhaust;
 pub use flyer::{FlyerClass, FlyerExhaust};
 pub use walker::{WalkerClass, WALKER_BASES};
@@ -596,6 +596,10 @@ pub struct SeatSpec {
     pub aim_tension: Option<f32>,
     pub move_tension: [Option<[f32; 2]>; 3],
     pub third_person_fov: Option<f32>,
+    /// `BoostFOV` (degrees; a hover's BODY, B2 K+0xf74): the FOV the hover's
+    /// camera widens to as its forward speed runs from `ForwardSpeed` to
+    /// `BoostSpeed` (B2 `FUN_00221388`).
+    pub boost_fov: Option<f32>,
     /// `FirstPersonFOV` (degrees): a building turret's zoomed view takes it
     /// (card VTURZ: B1 `FUN_00225ba0`, B2 `FUN_002703d0` read the class's
     /// +0x1bc when the zoom flag is set; the Controllable's default is 48).
@@ -735,6 +739,7 @@ impl SeatSpec {
             aim_tension: None,
             move_tension: [None; 3],
             third_person_fov: None,
+            boost_fov: None,
             first_person_fov: None,
             weapons: Vec::new(),
             fire_point: None,
@@ -774,9 +779,14 @@ impl SeatSpec {
     }
 
     fn set(&mut self, k: u32, v: &str) {
-        if k == h("AimerNodeName") {
-            self.aimers
-                .push(AimerSpec::new(v, self.weapons.len().saturating_sub(1)));
+        let weapon = self.weapons.len().saturating_sub(1);
+        if k == h("NextAimer") {
+            self.aimers.push(AimerSpec::new("", weapon));
+        } else if k == h("AimerNodeName") {
+            match self.aimers.last_mut() {
+                Some(a) if a.unnamed() && a.weapon == weapon => a.name(v),
+                _ => self.aimers.push(AimerSpec::new(v, weapon)),
+            }
         } else if let Some(a) = self.aimers.last_mut() {
             a.set(k, v);
         }
@@ -822,6 +832,8 @@ impl SeatSpec {
             self.move_tension[2] = tension_pair(v);
         } else if k == h("ThirdPersonFOV") {
             self.third_person_fov = v.trim().parse().ok();
+        } else if k == h("BoostFOV") {
+            self.boost_fov = float(v);
         } else if k == h("FirstPersonFOV") {
             self.first_person_fov = v.trim().parse().ok();
         } else if k == h("WeaponName") {
@@ -830,6 +842,7 @@ impl SeatSpec {
                     class: v.trim().to_string(),
                     ammo: 0,
                 });
+                self.aimers.push(AimerSpec::new("", self.weapons.len() - 1));
             }
         } else if k == h("FirePointName") {
             self.fire_point = Some(v.trim().to_string());
@@ -1309,6 +1322,9 @@ pub fn seats(db: &ClassDb, class: &str) -> Vec<SeatSpec> {
     // A building turret has no seat of its own (§8: neither Controllable
     // setter's callers include it) and, [D], no PassengerSlot: its setter
     // hands everything but the sections to the building's (FUN_001c0b10).
+    for s in std::iter::once(&mut pilot).chain(turrets.iter_mut().flatten()) {
+        s.aimers.retain(AimerSpec::authored);
+    }
     let turret = is_turret(db, class);
     let mut ring = if turret { Vec::new() } else { vec![pilot] };
     ring.extend(turrets.into_iter().flatten());

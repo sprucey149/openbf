@@ -298,6 +298,43 @@ fn animation_name(e: &mungefs::entity::EntityClass) -> String {
         .unwrap_or_default()
 }
 
+/// Card VPOSE (`analysis/re-vehicle-pose.md` 7.1): a hover class whose
+/// nodes move - a `FinAnimation`, or a turret, aimer or barrel node - gets a
+/// skin of its top LOD, with the fin clip from its `AnimationName` bank (the
+/// later of two tracks on one bone kept, 4.3).
+fn bake_hover(
+    e: &mungefs::entity::EntityClass,
+    ix: &Index,
+    geometry: &str,
+    out: &Path,
+    skinned: &mut Vec<String>,
+    banks: &[mungefs::anim::AnimBank<'_>],
+) -> Result<Option<manifest::ManifestHover>> {
+    let value = |name: &str| {
+        let key = mungefs::fnv1a_lowercase(name);
+        e.props
+            .iter()
+            .find(|p| p.key_hash == key && !p.value.trim().is_empty())
+            .map(|p| p.value.trim().to_owned())
+    };
+    let posed = ["TurretNodeName", "AimerNodeName", "BarrelNodeName"]
+        .iter()
+        .any(|n| value(n).is_some());
+    let bank_name = animation_name(e);
+    let bank = banks
+        .iter()
+        .find(|b| b.name.eq_ignore_ascii_case(&bank_name));
+    let fin = value("FinAnimation").filter(|f| bank.is_some_and(|b| b.clip_index(f).is_some()));
+    if !posed && fin.is_none() {
+        return Ok(None);
+    }
+    let skin = bake_skin(ix, geometry, out, skinned, "hover", |sk| {
+        let entries: Vec<(&str, bool)> = fin.iter().map(|f| (f.as_str(), false)).collect();
+        crate::walker::skin_glb_of(sk, bank, &entries, &[""], |_, _| {})
+    })?;
+    Ok(skin.map(|skin| manifest::ManifestHover { skin, fin }))
+}
+
 fn bake_skin(
     ix: &Index,
     geometry: &str,
@@ -499,6 +536,14 @@ pub fn bake_vehicles(
         } else {
             None
         };
+        let hover = if ["hover", "treaded", "commandhover"]
+            .iter()
+            .any(|b| e.base.eq_ignore_ascii_case(b))
+        {
+            bake_hover(e, &ix, geometry, out, &mut skinned, &banks)?
+        } else {
+            None
+        };
         vehicles.push(ManifestVehicle {
             class: crate::map::class_from_entc(e),
             chunks: chunk_names,
@@ -507,6 +552,7 @@ pub fn bake_vehicles(
             walker,
             flyer,
             vis_box,
+            hover,
         });
     }
 

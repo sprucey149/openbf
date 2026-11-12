@@ -441,46 +441,77 @@ pub struct UnitVisual {
     cloth_states: Vec<crate::cloth::State>,
 }
 
-/// What a seated gunner keeps from one sim tick to the next: the tick, the
-/// look's yaw then, the turn's rate over its speed (what a full-circle
-/// nine-pose seat's yaw number is made of, `turret_pose::nine_pose`) and the hang parent's matrix
-/// of the update before and of this one (an aimer-node seat hangs from the
-/// update before's, `analysis/re-turret-draw.md` 3.2).
-#[derive(Clone, Copy, Debug)]
+/// What a seated gunner keeps from the frames drawn of him: at each one's
+/// sim time (in ticks, `render_blend::Blend::shown_at`), the look's yaw and
+/// the hang parent's matrix, back to one tick before the newest. An
+/// aimer-node seat hangs from the update before's parent
+/// (`analysis/re-turret-draw.md` 3.2), and a seat whose gun has no turn rate
+/// leans by its look's turn over that update: both read one tick back along
+/// the drawn frames, so neither steps at the tick rate while the frames
+/// between ticks move.
+#[derive(Clone, Debug, Default)]
 struct SeatClock {
-    tick: u64,
-    yaw: f32,
-    stick: f32,
-    prev: Mat4,
-    cur: Mat4,
+    seen: std::collections::VecDeque<(f64, f32, Mat4)>,
+}
+
+/// A seat's state one tick before the frame drawn now.
+#[derive(Clone, Copy, Debug)]
+struct SeatThen {
+    /// The look's yaw turned over the last tick (rad).
+    turned: f32,
+    /// The hang parent's matrix one tick back.
+    held: Mat4,
 }
 
 impl SeatClock {
-    /// The clock of `slot` brought to `tick`: the look's yaw now, the turn
-    /// speed `yaw_rate`, the hang parent's matrix `held`.
-    fn advance(
-        slot: &mut Option<SeatClock>,
-        tick: u64,
-        yaw: f32,
-        yaw_rate: f32,
-        held: Mat4,
-    ) -> SeatClock {
-        let c = slot.get_or_insert(SeatClock {
-            tick,
-            yaw,
-            stick: 0.0,
-            prev: held,
-            cur: held,
-        });
-        if c.tick != tick {
-            let turned = (yaw - c.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
-                - std::f32::consts::PI;
-            let secs = tick.saturating_sub(c.tick).max(1) as f32 * core::TICK_DT;
-            c.stick = (turned / (secs * yaw_rate.max(1e-3))).clamp(-1.0, 1.0);
-            (c.tick, c.yaw, c.prev, c.cur) = (tick, yaw, c.cur, held);
+    /// The clock of `slot` with the frame drawn at sim time `at`: the look's
+    /// yaw then and the hang parent's matrix `held`.
+    fn advance(slot: &mut Option<SeatClock>, at: f64, yaw: f32, held: Mat4) -> SeatThen {
+        let c = slot.get_or_insert_with(SeatClock::default);
+        if c.seen.back().is_some_and(|b| b.0 > at) {
+            c.seen.clear();
         }
-        *c
+        if c.seen.back().is_some_and(|b| b.0 == at) {
+            c.seen.pop_back();
+        }
+        c.seen.push_back((at, yaw, held));
+        let then = at - 1.0;
+        while c.seen.get(1).is_some_and(|s| s.0 <= then) {
+            c.seen.pop_front();
+        }
+        let (y, m) = match (c.seen.front(), c.seen.get(1)) {
+            (Some(a), Some(b)) if a.0 < then => {
+                let f = ((then - a.0) / (b.0 - a.0)) as f32;
+                let (sa, ra, ta) = a.2.to_scale_rotation_translation();
+                let (sb, rb, tb) = b.2.to_scale_rotation_translation();
+                (
+                    crate::render_blend::lerp_angle(a.1, b.1, f),
+                    Mat4::from_scale_rotation_translation(
+                        sa.lerp(sb, f),
+                        ra.slerp(rb, f),
+                        ta.lerp(tb, f),
+                    ),
+                )
+            }
+            (Some(a), _) => (a.1, a.2),
+            _ => (yaw, held),
+        };
+        SeatThen {
+            turned: (yaw - y + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+                - std::f32::consts::PI,
+            held: m,
+        }
     }
+}
+
+/// A full-circle nine-pose seat's yaw number before each game's sign
+/// (`turret_pose::nine_pose`, `analysis/re-turret-draw.md` 3.3): the gun's
+/// own turn rate over its turn speed (B2:189542-189546) where it turns by
+/// one, else its look's turn over the last tick at that speed.
+fn turn_number(rate: Option<f32>, then: SeatThen, yaw_speed: f32) -> f32 {
+    let speed = yaw_speed.max(1e-3);
+    rate.map_or(then.turned / (core::TICK_DT * speed), |r| r / speed)
+        .clamp(-1.0, 1.0)
 }
 
 /// A seat its gunner is drawn in, as it stands this tick.
@@ -494,6 +525,8 @@ struct SeatNow<'a> {
     seat: &'a crate::vehicle_class::SeatSpec,
     look: (f32, f32),
     yaw_rate: f32,
+    /// The gun's yaw turn rate (rad/s) where it turns by a rate.
+    rate: Option<f32>,
 }
 
 /// The seat of mount `m` when the PS2 draws its soldier there (card VTURG):
@@ -526,11 +559,8 @@ fn seat_now<'a>(
         .and_then(Option::as_ref);
     // A bot's seat is armed on its first aim: until then the gun rests.
     let (look, _, aim) = setup.map_or(((0.0, 0.0), (0.0, 0.0), (0.0, 0.0)), |g| g.rest());
-    let (look, aim) = v
-        .guns
-        .get(s)
-        .and_then(Option::as_ref)
-        .map_or((look, aim), |g| (g.look, g.aim));
+    let gun = v.guns.get(s).and_then(Option::as_ref);
+    let (look, aim) = gun.map_or((look, aim), |g| (g.look, g.aim));
     let spec = tp::PoseSpec::of(&t.rig, seat);
     Some(SeatNow {
         hang,
@@ -540,6 +570,9 @@ fn seat_now<'a>(
         seat,
         look,
         yaw_rate: setup.map_or(2.0, |g| g.yaw_speed()),
+        rate: gun
+            .filter(|_| setup.is_some_and(|g| g.turn.is_some()))
+            .map(|g| g.rate.0),
     })
 }
 
@@ -550,6 +583,8 @@ struct RiderNow<'a> {
     seat: &'a crate::vehicle_class::SeatSpec,
     look: (f32, f32),
     yaw_rate: f32,
+    /// The gun's yaw turn rate (rad/s) where it turns by a rate.
+    rate: Option<f32>,
     /// A hover pilot's numbers.
     hover: Option<tp::HoverNine>,
 }
@@ -560,7 +595,8 @@ struct RiderNow<'a> {
 /// walker with no rig turns with its legs).
 fn rider_now<'a>(
     rigs: &[Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>],
-    nines: &[Option<HoverClock>],
+    hover_rigs: &[Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>],
+    nines: &tp::HoverClocks,
     walk: &'a WalkSim,
     m: core::vehicle::Mount,
     bf2: bool,
@@ -578,10 +614,21 @@ fn rider_now<'a>(
     }
     let hang = walk.vehicle_riders.get(class)?.get(s)?;
     let walker = v.kind == VehicleKind::Walker;
+    let hover = v.kind == VehicleKind::Hover;
+    let nine = nines.get(m.vehicle.index as usize, v.gen);
     let rig = rigs
         .get(class)
         .and_then(Option::as_deref)
         .filter(|_| walker);
+    let hover_rig = hover_rigs
+        .get(class)
+        .and_then(Option::as_deref)
+        .filter(|_| hover);
+    let hover_node = |name: &str| {
+        let r = hover_rig?;
+        let n = r.skeleton.index_of(name)?;
+        Some(r.hover_nodes(v, nine.map(tp::HoverNine::pose))[n])
+    };
     let rot = if walker && rig.is_none() {
         core::vehicle::walker::legs_rot(v)
     } else {
@@ -598,6 +645,7 @@ fn rider_now<'a>(
                     .map_or(1.0, |p| p.root_scale);
                 r.node_now(v, scale, seat.pilot_position.as_deref()?)
             })
+            .or_else(|| hover_node(seat.pilot_position.as_deref()?))
             .unwrap_or(*b),
         crate::vehicle_class::RiderHang::Node(name, b) => rig
             .and_then(|r| {
@@ -609,6 +657,7 @@ fn rider_now<'a>(
                     .map_or(1.0, |p| p.root_scale);
                 r.node_now(v, scale, name)
             })
+            .or_else(|| hover_node(name))
             .unwrap_or(*b),
     };
     let setup = walk
@@ -618,10 +667,8 @@ fn rider_now<'a>(
         .and_then(Option::as_ref)
         .and_then(|x| x.guns.get(s))
         .and_then(Option::as_ref);
-    let look = v
-        .guns
-        .get(s)
-        .and_then(Option::as_ref)
+    let gun = v.guns.get(s).and_then(Option::as_ref);
+    let look = gun
         .map(|g| g.look)
         .or_else(|| setup.map(|g| g.rest().0))
         .unwrap_or((0.0, 0.0));
@@ -631,12 +678,10 @@ fn rider_now<'a>(
         seat,
         look,
         yaw_rate: setup.map_or(2.0, |g| g.yaw_speed()),
-        hover: nines
-            .get(m.vehicle.index as usize)
-            .copied()
-            .flatten()
-            .filter(|c| pilot && v.kind == VehicleKind::Hover && c.gen == v.gen)
-            .map(|c| c.nine),
+        rate: gun
+            .filter(|_| setup.is_some_and(|g| g.turn.is_some()))
+            .map(|g| g.rate.0),
+        hover: nine.filter(|_| pilot && hover),
     })
 }
 
@@ -701,19 +746,14 @@ pub struct SoldierVisuals {
     /// [`SoldierVisuals::set_walker_rigs`]): an `AnimatedPilotPosition`
     /// rider hangs from its node now. Empty = every walker drawn rigid.
     pub walker_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
+    /// Each posed hover class's rig ([`SoldierVisuals::set_hover_rigs`]):
+    /// a rider rides its turret and fin nodes (card VPOSE).
+    pub hover_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     /// Per `Sim::vehicles` slot: a hover's rider numbers (card VRIDE).
-    hover_nine: Vec<Option<HoverClock>>,
+    hover_nine: tp::HoverClocks,
     /// Reused across generations; respawning resets CPU state, not GPU buffers.
     cloth_meshes: std::collections::HashMap<(usize, usize, usize), render::MeshHandle>,
     pub fp: first_person::FirstPersonVisuals,
-}
-
-/// A hover's [`tp::HoverNine`] and the vehicle and tick it was stepped for.
-#[derive(Clone, Copy, Debug)]
-struct HoverClock {
-    gen: u32,
-    tick: u64,
-    nine: tp::HoverNine,
 }
 
 /// Seconds a corpse stays drawn, counted from the death (`dead_for`), unless

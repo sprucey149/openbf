@@ -38,6 +38,7 @@ impl WalkSim {
     pub fn load_walker_views(&mut self, manifest: &manifest::Manifest, root: &std::path::Path) {
         self.walker_rigs = crate::viewer::walker_rigs(manifest, root, &self.vehicle_geometry);
         self.flyer_rigs = crate::viewer::flyer_rigs(manifest, root, &self.vehicle_geometry);
+        self.hover_rigs = crate::viewer::hover_rigs(manifest, root, &self.vehicle_geometry);
     }
 
     /// Read each vehicle class's model top, once [`Self::vehicle_geometry`] is set.
@@ -58,12 +59,15 @@ impl WalkSim {
         self.guided_tops = crate::viewer::model_tops(manifest, map_dir, root, &guided);
     }
 
-    pub(super) fn walker_fovs(&self) -> Option<(f32, f32)> {
+    /// A seat's (third-person, first-person) FOVs in degrees: the section's
+    /// `ThirdPersonFOV` / `FirstPersonFOV`, the Controllable ctor's 48 when
+    /// not authored (B2 `FUN_00221388` hover, `FUN_002703d0` MountedTurret).
+    /// PS2 RAM (KAS2, the IFT-X's pilot and its turret gunner, neither
+    /// section authors one): projection y scale 2.9299 = 2 atan(tan 24 deg x
+    /// 0.7666), 37.7 deg vertical.
+    pub(super) fn seat_fovs(&self) -> Option<(f32, f32)> {
         let mount = self.sim.unit(self.player)?.mount?;
         let v = self.sim.vehicle(mount.vehicle)?;
-        if v.kind != VehicleKind::Walker {
-            return None;
-        }
         let s = self
             .vehicle_seats
             .get(v.class as usize)?

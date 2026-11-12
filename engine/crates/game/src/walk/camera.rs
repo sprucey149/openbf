@@ -674,7 +674,7 @@ impl WalkSim {
             let (s, c) = core::fmath::sin_cos(degrees.to_radians() * 0.5);
             return (2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0) * k).min(MAX_FOV_Y);
         }
-        let mut fov = self.walker_fovs().map_or_else(chase_fov_y, |(third, _)| {
+        let mut fov = self.seat_fovs().map_or_else(chase_fov_y, |(third, _)| {
             let (s, c) = core::fmath::sin_cos(third.to_radians() * 0.5);
             2.0 * core::fmath::atan2(PS2_FOV_TAN_SCALE * s / c, 1.0)
         });
@@ -698,7 +698,7 @@ impl WalkSim {
     /// authored - `tur_bldg_recoilless_lg`'s 12.98 deg at zoom 3 against
     /// 13.0-13.5 fitted to the PS2's frame, `lead_tmp/vturz/fit_fov.py`).
     pub(super) fn zoom_fovs(&self) -> (f32, f32) {
-        if let Some(fovs) = self.walker_fovs() {
+        if let Some(fovs) = self.seat_fovs() {
             return fovs;
         }
         let soldier = chase_fovs();

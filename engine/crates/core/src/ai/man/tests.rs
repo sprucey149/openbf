@@ -27,6 +27,7 @@ fn gun_setup(weapon: usize, yaw: Option<[f32; 2]>) -> GunSetup {
             infinite: true,
             reserve_clips: 0,
             fire_points: Vec::new(),
+            fire_limits: Vec::new(),
         }],
         fire_point: Vec3::new(0.0, 3.0, 2.0),
         pivot: Vec3::new(0.0, 3.0, 0.0),
@@ -46,6 +47,7 @@ fn gun_setup(weapon: usize, yaw: Option<[f32; 2]>) -> GunSetup {
         )),
         framed: true,
         aimer_bind: glam::Quat::IDENTITY,
+        weapon_aimer: None,
         gunner: None,
     }
 }

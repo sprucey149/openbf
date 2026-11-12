@@ -50,7 +50,7 @@ pub struct SeatLook {
     pub scope_eye: Vec3,
     /// The look's direction, world.
     pub view: Vec3,
-    /// The fire point, world.
+    /// Where the seat's next shot leaves (its first weapon's fire ring), world.
     pub muzzle: Vec3,
     /// The barrel's direction, world.
     pub barrel: Vec3,
@@ -63,11 +63,11 @@ impl Sim {
         let gun = self.seat_gun_setup(u)?;
         let v = self.vehicle(m.vehicle)?;
         let (look, _, aim) = gun.rest();
-        let (look, aim, zoomed) = v
-            .guns
-            .get(usize::from(m.seat))
-            .and_then(Option::as_ref)
-            .map_or((look, aim, false), |g| (g.look, g.aim, g.zoom.is_some()));
+        let st = v.guns.get(usize::from(m.seat)).and_then(Option::as_ref);
+        let (look, aim, zoomed) =
+            st.map_or((look, aim, false), |g| (g.look, g.aim, g.zoom.is_some()));
+        let next = gun.next_point(0, st.and_then(|g| g.weapons.first()).map_or(0, |w| w.shots_fired));
+        let fixed = gun.pilot && v.kind == VehicleKind::Flyer;
         let (pos, rot) = (v.pos, v.rot);
         let eye = pos + rot * gun.ray_eye(look, zoomed);
         let scope_eye = pos + rot * gun.scope_eye(look);
@@ -78,7 +78,7 @@ impl Sim {
             eye,
             scope_eye,
             view: (rot * gun::dir(look.0, look.1)).normalize(),
-            muzzle: pos + rot * gun.muzzle(aim),
+            muzzle: pos + rot * gun.shot_point(0, next, aim, fixed),
             barrel: (rot * gun::dir(aim.0, aim.1)).normalize(),
             gun,
         })
@@ -354,6 +354,11 @@ impl Sim {
             // one fire point, so it aims that one's line (half the barrel
             // spacing, 0.36 m there, off the PS2's centre line).
             //
+            // The barrel is the one the first weapon's fire ring fires next
+            // (re-blaster-damage 3.1): the PS2's aimer that carries it is
+            // the one turning, and a shot leaves from it (the Hoth dish
+            // fires from its `barrel`, 1.5 m over the seat's fire point).
+            //
             // The line is measured from its point nearest the pivot, not
             // from the muzzle (playtest 2026-10-29, BF2 Geonosis: "jumpy and
             // jittery" while walking round a manned cannon). Both name the
@@ -361,7 +366,8 @@ impl Sim {
             // swings with the aim, and a muzzle far ahead of the pivot
             // (the cannon's 2.5 m) moved the asked direction against the
             // turn: from 5 m the aimer flipped about 4 deg every tick.
-            let off = g.muzzle(st.aim) - g.pivot;
+            let next = g.next_point(0, st.weapons.first().map_or(0, |w| w.shots_fired));
+            let off = g.shot_point(0, next, st.aim, false) - g.pivot;
             let d = gun::dir(st.aim.0, st.aim.1);
             let from = pos + rot * (g.pivot + off - d * off.dot(d));
             let w = (rot.inverse() * (target - from)).normalize_or_zero();
@@ -381,7 +387,7 @@ impl Sim {
             if hold_yaw {
                 want.0 = 0.0;
             }
-            st.aim = a.turn(st.aim, want, dt);
+            st.aim = g.weapon_aimer.unwrap_or(a).turn(st.aim, want, dt);
             if hold_yaw {
                 st.aim.0 = 0.0;
             }
@@ -393,6 +399,7 @@ impl Sim {
         let fwd = (rot * gun::dir(st.aim.0, st.aim.1)).normalize();
         let bf2_flyer = self.ground_rules == crate::soldier::GroundRules::Bf2
             && self.vehicles[vi].kind == VehicleKind::Flyer;
+        let fixed_guns = g.pilot && self.vehicles[vi].kind == VehicleKind::Flyer;
         let lock_ray = bf2_flyer.then(|| {
             (
                 pos + rot * g.ray_eye(st.look, st.zoom.is_some()),
@@ -509,15 +516,21 @@ impl Sim {
             };
             let first_shot = st.weapons[k].shots_fired.saturating_sub(shots.len() as u64);
             for (shot_index, spec) in shots.iter().enumerate() {
-                let origin = if g.pilot && bf2_flyer {
-                    w.fire_points
-                        .get(
-                            ((first_shot + shot_index as u64) % w.fire_points.len().max(1) as u64)
-                                as usize,
-                        )
-                        .map_or(origin, |point| pos + rot * *point)
+                let point = (!w.fire_points.is_empty()).then(|| {
+                    ((first_shot + shot_index as u64) % w.fire_points.len() as u64) as usize
+                });
+                let origin = point.map_or(origin, |p| {
+                    pos + rot * g.shot_point(k, Some(p), st.aim, fixed_guns)
+                });
+                let (fwd, right, up) = if g.turn.is_none() && !fixed_guns && w.fire_points.len() > 1 {
+                    ring_aim(&g, w.fire_limits.get(point.unwrap_or(0)), rot, origin, target, fwd)
                 } else {
-                    origin
+                    (fwd, right, up)
+                };
+                let beam_seat = super::beam::SeatBeam {
+                    mount: m,
+                    weapon: k as u8,
+                    point: point.map(|k| k as u8),
                 };
                 // The round's speed and life at its charge (the Hoth dish
                 // turret's charge points, re-weapon-charge §4).
@@ -595,7 +608,7 @@ impl Sim {
                     bolt.as_missile(&ord, &mc, target, &mut self.lcg);
                 }
                 self.note_bolt_shot(&mut bolt, origin, d);
-                self.launch_round(bolt, false);
+                self.launch_round_from(bolt, false, Some(beam_seat));
                 if self.weapon_classes[w.class].secondary.is_some() {
                     let round = st.weapons[k].count_secondary_round();
                     self.fire_secondary(who, w.class, round, origin, d, spec.charge);
@@ -613,6 +626,30 @@ impl Sim {
         }
         self.vehicles[vi].guns[seat] = Some(st);
     }
+}
+
+/// A shot's frame from one barrel of a weapon's fire ring on a seat without
+/// a turn law (a hover pilot's two cannons): the PS2 gives each barrel's
+/// aimer its own turn toward the seat's aim point (re-turret-draw 2.3), so
+/// the shot leaves along the line from its point to `target`, inside that
+/// barrel's aimer chain's limits (`GunWeapon::fire_limits`, else the seat's
+/// weapon aimer's); the port's one aim per seat has no per-aimer lag.
+fn ring_aim(
+    g: &GunSetup,
+    limits: Option<&[[f32; 2]; 2]>,
+    rot: Quat,
+    origin: Vec3,
+    target: Vec3,
+    fwd: Vec3,
+) -> (Vec3, Vec3, Vec3) {
+    let a = g.weapon_aimer.unwrap_or(g.aimer);
+    let [ly, lp] = limits.copied().unwrap_or([a.yaw, a.pitch]);
+    let (yaw, pitch) = gun::angles(rot.inverse() * (target - origin));
+    let d = (rot * gun::dir(yaw.clamp(ly[0], ly[1]), pitch.clamp(lp[0], lp[1])))
+        .try_normalize()
+        .unwrap_or(fwd);
+    let right = d.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
+    (d, right, right.cross(d).normalize())
 }
 
 #[cfg(test)]

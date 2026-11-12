@@ -874,11 +874,12 @@ pub fn install_with_objective(
             let hp = nodes.get(&c.to_ascii_lowercase()).unwrap_or(&empty);
             let building = vehicle_class::is_turret(&db, c);
             let walker = db.engine_base(c).and_then(vehicle_kind) == Some(VehicleKind::Walker);
+            let hover = db.engine_base(c).and_then(vehicle_kind) == Some(VehicleKind::Hover);
             setup.guns = ring
                 .iter()
                 .map(|s| {
                     let mut g = seat_gun(sim, &db, s, hp)?;
-                    if (building || walker) && !g.pilot {
+                    if !g.pilot {
                         turret_law(&mut g, s, game == "bf2");
                         if building {
                             g.gunner = gunner_seat(m, c, s, game == "bf2");
@@ -895,6 +896,13 @@ pub fn install_with_objective(
                                         .normalize();
                             }
                         }
+                    } else if hover {
+                        // The hover's eye E+0x340 is its matrix on the BODY
+                        // section's `EyePointOffset` from the model's origin
+                        // (B2:132251 `FUN_001ce880`), not from the gun: the
+                        // IFT-X's pivot is its right cannon, and its crosshair
+                        // ray ran out of that gun.
+                        g.eye = s.eye_point_offset.map_or(Vec3::ZERO, Vec3::from) - g.pivot;
                     } else if walker {
                         g.aimer = aimer(
                             s.aimer_yaw_limits.or(s.yaw_limits),
@@ -1301,22 +1309,13 @@ pub fn seat_gun(
                     }
                 },
             };
+            let (fire_points, fire_limits) = fire_ring(s, weapon, node);
             Some(GunWeapon {
                 class,
                 infinite: w.ammo < 1,
                 reserve_clips: (w.ammo - 1).max(0) as u32,
-                fire_points: s
-                    .aimers
-                    .iter()
-                    .filter(|a| a.weapon == weapon)
-                    .flat_map(|a| {
-                        if a.fire_points.is_empty() {
-                            node(&a.node).into_iter().collect::<Vec<_>>()
-                        } else {
-                            a.fire_points.iter().filter_map(|n| node(n)).collect()
-                        }
-                    })
-                    .collect(),
+                fire_points,
+                fire_limits,
             })
         })
         .collect();
@@ -1347,12 +1346,56 @@ pub fn seat_gun(
         turn: None,
         framed: false,
         aimer_bind: glam::Quat::IDENTITY,
+        weapon_aimer: (pilot && (s.aimer_pitch_limits.is_some() || s.aimer_yaw_limits.is_some()))
+            .then(|| {
+                self::aimer(
+                    s.aimer_yaw_limits,
+                    s.aimer_pitch_limits,
+                    s.aimer_yaw_rate,
+                    s.aimer_pitch_rate,
+                )
+            }),
         gunner: None,
     })
 }
 
-/// A building turret's gun under the PS2's MountedTurret law (card VTURL,
-/// `analysis/re-turret-draw.md` 2.2, 2.3 [O]; `core::vehicle::gun::Turn`):
+/// A seat weapon's fire ring (`analysis/re-blaster-damage.md` 3.1): every
+/// barrel of its firing aimers, in order, and the aim limits each barrel
+/// turns within (model frame, radians). A turn-only aimer (`lgun_x` before
+/// the IFT-X's `lgun_y`) carries the firing aimer after it, so the two
+/// aimers' ranges add: `lgun_x`'s pitch -30..90 with `lgun_y`'s yaw -30..15.
+fn fire_ring(
+    s: &vehicle_class::SeatSpec,
+    weapon: usize,
+    node: impl Fn(&str) -> Option<Vec3>,
+) -> (Vec<Vec3>, Vec<[[f32; 2]; 2]>) {
+    let d = std::f32::consts::PI / 180.0;
+    let lim = |l: [f32; 2]| [l[0].min(l[1]) * d, l[0].max(l[1]) * d];
+    let add = |a: [[f32; 2]; 2], b: [[f32; 2]; 2]| {
+        [[a[0][0] + b[0][0], a[0][1] + b[0][1]], [a[1][0] + b[1][0], a[1][1] + b[1][1]]]
+    };
+    let (mut points, mut limits) = (Vec::new(), Vec::new());
+    let mut carried = [[0.0; 2]; 2];
+    for a in s.aimers.iter().filter(|a| a.weapon == weapon) {
+        let own = [lim(a.yaw), lim(a.pitch)];
+        if a.no_fire {
+            carried = add(carried, own);
+            continue;
+        }
+        for p in a.muzzles().into_iter().filter_map(&node) {
+            points.push(p);
+            limits.push(add(carried, own));
+        }
+        carried = [[0.0; 2]; 2];
+    }
+    (points, limits)
+}
+
+/// A gunner seat's gun under the PS2's MountedTurret law (card VTURL,
+/// `analysis/re-turret-draw.md` 2.2, 2.3 [O]; `core::vehicle::gun::Turn`).
+/// Every TURRET section is one MountedTurret, a building's or a vehicle's
+/// (B2 `FUN_00270540`; the IFT-X gunner's camera hangs on its `turret_y`
+/// node, `analysis/re-hover-camera.md`):
 /// the look by `YawLimits` / `PitchLimits` (turret pitch + = nose down),
 /// the full-stick speeds and filters (class defaults 2.0 / 0.5 / 10, BF1
 /// exponential, BF2 linear), and the aimer from the `Aimer*` keys (defaults

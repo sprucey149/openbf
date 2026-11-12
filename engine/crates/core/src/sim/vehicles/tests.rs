@@ -1265,6 +1265,7 @@ fn a_destroyed_turrets_gunner_dies_at_his_seat() {
             turn: None,
             framed: false,
             aimer_bind: glam::Quat::IDENTITY,
+            weapon_aimer: None,
             gunner: Some(GunnerSeat {
                 node_bind: glam::Mat4::IDENTITY,
                 local: glam::Mat4::from_translation(seat),

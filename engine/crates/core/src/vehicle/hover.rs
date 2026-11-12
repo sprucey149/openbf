@@ -434,8 +434,14 @@ pub fn quat_z(a: f32) -> Quat {
 /// E's untilted frame U = M·E, M = Rz(−roll)·Rx(−pitch) (§6.2), as a
 /// rotation: columns right, up, fwd.
 fn untilted(v: &Vehicle) -> Mat3 {
+    Mat3::from_quat(untilted_rot(v))
+}
+
+/// [`untilted`] as a rotation: the body frame the hover's camera hangs on
+/// (B2 `FUN_00220d68` B2:135389-135404, B1 B1:100694-100696).
+pub fn untilted_rot(v: &Vehicle) -> Quat {
     let h = &v.hover;
-    Mat3::from_quat(v.rot * quat_x(-h.tilt_pitch) * quat_z(-h.tilt_roll))
+    v.rot * quat_x(-h.tilt_pitch) * quat_z(-h.tilt_roll)
 }
 
 /// §5.2, the player controller's timer (pad only): +dt while the RAW look

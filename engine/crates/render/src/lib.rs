@@ -96,7 +96,7 @@ mod texture;
 mod world_scale;
 
 pub use bloom::Bloom;
-pub use bolt::{BoltDraw, RibbonVertex};
+pub use bolt::{BeamRibbons, BoltDraw, RibbonVertex};
 pub use camera::Camera;
 pub use capture::{encode_png, encode_png_rgb};
 pub use device::HEADLESS_FORMAT;

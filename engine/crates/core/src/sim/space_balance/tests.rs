@@ -16,6 +16,7 @@ fn gun() -> GunSetup {
             infinite: true,
             reserve_clips: 0,
             fire_points: Vec::new(),
+            fire_limits: Vec::new(),
         }],
         fire_point: Vec3::ZERO,
         pivot: Vec3::ZERO,
@@ -25,6 +26,7 @@ fn gun() -> GunSetup {
         turn: None,
         framed: false,
         aimer_bind: glam::Quat::IDENTITY,
+        weapon_aimer: None,
         gunner: None,
     }
 }

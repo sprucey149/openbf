@@ -645,6 +645,10 @@ fn full_vehicles() -> VehicleManifest {
                 skin: "fighter".into(),
                 frames: 3,
             }),
+            hover: Some(ManifestHover {
+                skin: "rep_hover_fightertank".into(),
+                fin: Some("rep_fightertank_9pose".into()),
+            }),
             walker: Some(ManifestWalker {
                 bank: "imp_walk_atst".into(),
                 clips: vec![

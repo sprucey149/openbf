@@ -22,7 +22,7 @@ use super::look::far_cull;
 use super::scene::{draw_in, spec_cull};
 use super::upload::{upload_cpu_texture, upload_submeshes, upload_texture_file};
 use super::walker_pose::{skin, WalkerRig};
-use crate::assets::{load_glb, load_glb_joints, load_skinned_glb, CpuMesh, Scene};
+use crate::assets::{load_glb, load_glb_joints, load_skinned_glb, CpuMesh, Scene, SkinnedAsset};
 use anyhow::Result;
 use glam::Mat4;
 use render::{
@@ -106,6 +106,8 @@ pub struct VehicleVisuals {
     /// Per `Sim::vehicles` slot: the class its dynamic meshes were made for
     /// and one mesh per part (card WSKN).
     posed: std::collections::HashMap<usize, PosedMeshes<u32>>,
+    /// Each hover's fin numbers (card VPOSE), stepped with the sim.
+    hover_nines: super::turret_pose::HoverClocks,
     /// The world models' far cull and the specular pass's (`upload_scene`'s).
     cull: Option<f32>,
     spec_cull: Option<f32>,
@@ -129,6 +131,9 @@ struct Side {
     /// skin (card WSKN).
     walkers: HashMap<String, manifest::ManifestWalker>,
     flyers: HashSet<String>,
+    /// LOD0 model (lowercase) → its posed hover's `FinAnimation` clip
+    /// (card VPOSE).
+    hovers: HashMap<String, Option<String>>,
     walker_seats: HashMap<String, Vec<crate::vehicle_class::SeatSpec>>,
 }
 
@@ -193,8 +198,13 @@ impl VehicleSides {
                             .vehicles
                             .iter()
                             .filter_map(|v| {
+                                let skin = v
+                                    .walker
+                                    .as_ref()
+                                    .and_then(|w| w.skin.as_ref())
+                                    .or(v.hover.as_ref().map(|h| &h.skin))?;
                                 Some((
-                                    v.walker.as_ref()?.skin.as_ref()?.to_ascii_lowercase(),
+                                    skin.to_ascii_lowercase(),
                                     crate::vehicle_class::seats(&db, &v.class.name),
                                 ))
                             })
@@ -220,6 +230,12 @@ impl VehicleSides {
                                 .iter()
                                 .filter_map(|v| v.flyer.as_ref())
                                 .map(|f| f.skin.to_ascii_lowercase())
+                                .collect(),
+                            hovers: m
+                                .vehicles
+                                .iter()
+                                .filter_map(|v| v.hover.as_ref())
+                                .map(|h| (h.skin.to_ascii_lowercase(), h.fin.clone()))
                                 .collect(),
                             dir,
                         })
@@ -272,6 +288,7 @@ impl VehicleSides {
                         textures,
                         walkers: HashMap::new(),
                         flyers: HashSet::new(),
+                        hovers: HashMap::new(),
                         walker_seats: HashMap::new(),
                     });
                 }
@@ -378,6 +395,7 @@ impl VehicleVisuals {
             shadows_on: true,
             shadow_triangles: Vec::new(),
             posed: Default::default(),
+            hover_nines: Default::default(),
             cull,
             spec_cull: spec_cull(scene, cull),
             items: super::pickups::PickupVisuals::new(assets_dir, &game, cull),
@@ -484,6 +502,8 @@ impl VehicleVisuals {
             .iter()
             .map(|fall| fall.pose(sim.tick))
             .collect();
+        self.hover_nines
+            .step(sim, sim.ground_rules == core::soldier::GroundRules::Bf2);
         let live = sim.vehicles.iter().enumerate().filter(|(_, v)| v.alive);
         // Temporary fallen meshes keep their own slots if a pad recycles
         // the vehicle's sim slot before its clip finishes.
@@ -500,6 +520,13 @@ impl VehicleVisuals {
             let palette = class.skin.as_ref().and_then(|sk| {
                 if v.kind == core::vehicle::VehicleKind::Flyer {
                     return sk.rig.flyer_palette(v.flyer.lift);
+                }
+                if v.kind == core::vehicle::VehicleKind::Hover {
+                    let nine = self
+                        .hover_nines
+                        .get(slot, v.gen)
+                        .map(super::turret_pose::HoverNine::pose);
+                    return Some(sk.rig.hover_palette(v, nine));
                 }
                 if !walker {
                     return None;
@@ -729,7 +756,7 @@ pub fn walker_rigs(
     assets_dir: &Path,
     geometry: &[Option<String>],
 ) -> Vec<Option<std::sync::Arc<WalkerRig>>> {
-    skinned_rigs(manifest, assets_dir, geometry, false)
+    skinned_rigs(manifest, assets_dir, geometry, Rigged::Walker)
 }
 
 /// Each flyer class's skinned rig: its model's takeoff clip lifts the drawn
@@ -739,14 +766,45 @@ pub fn flyer_rigs(
     assets_dir: &Path,
     geometry: &[Option<String>],
 ) -> Vec<Option<std::sync::Arc<WalkerRig>>> {
-    skinned_rigs(manifest, assets_dir, geometry, true)
+    skinned_rigs(manifest, assets_dir, geometry, Rigged::Flyer)
+}
+
+/// Each posed hover class's rig (card VPOSE): its fins, turrets and aimers
+/// move the drawn nodes and the riders on them (`WalkerRig::hover_nodes`).
+pub fn hover_rigs(
+    manifest: &manifest::Manifest,
+    assets_dir: &Path,
+    geometry: &[Option<String>],
+) -> Vec<Option<std::sync::Arc<WalkerRig>>> {
+    skinned_rigs(manifest, assets_dir, geometry, Rigged::Hover)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Rigged {
+    Walker,
+    Flyer,
+    Hover,
+}
+
+/// The rig of side model `model` from its skin GLB: a walker's, a posed
+/// hover's or a flyer's, each with the seats of the class that names it.
+fn side_rig(side: &Side, model: &str, a: SkinnedAsset) -> WalkerRig {
+    let name = model.to_ascii_lowercase();
+    let seats = || side.walker_seats.get(&name).cloned().unwrap_or_default();
+    if let Some(w) = side.walkers.get(&name) {
+        WalkerRig::new(a.skeleton, a.clips, w).with_seats(seats())
+    } else if let Some(fin) = side.hovers.get(&name) {
+        WalkerRig::new_hover(a.skeleton, a.clips, fin.as_deref()).with_seats(seats())
+    } else {
+        WalkerRig::new_flyer(a.skeleton, a.clips)
+    }
 }
 
 fn skinned_rigs(
     manifest: &manifest::Manifest,
     assets_dir: &Path,
     geometry: &[Option<String>],
-    flyer: bool,
+    kind: Rigged,
 ) -> Vec<Option<std::sync::Arc<WalkerRig>>> {
     let sides = VehicleSides::load(assets_dir, &manifest.source_game.to_ascii_lowercase());
     geometry
@@ -758,19 +816,16 @@ fn skinned_rigs(
             let side = &sides.0[i];
             let name = model.to_ascii_lowercase();
             let path = sides.dir(i).join("walkers").join(format!("{model}.glb"));
-            let rig = if flyer {
-                if !side.flyers.contains(&name) {
-                    return None;
-                }
-                let a = load_skinned_glb(&path).ok()?;
-                WalkerRig::new_flyer(a.skeleton, a.clips)
-            } else {
-                let w = side.walkers.get(&name)?;
-                let a = load_skinned_glb(&path).ok()?;
-                WalkerRig::new(a.skeleton, a.clips, w)
-                    .with_seats(side.walker_seats.get(&name).cloned().unwrap_or_default())
+            let ours = match kind {
+                Rigged::Walker => side.walkers.contains_key(&name),
+                Rigged::Flyer => side.flyers.contains(&name),
+                Rigged::Hover => side.hovers.contains_key(&name),
             };
-            Some(std::sync::Arc::new(rig))
+            if !ours {
+                return None;
+            }
+            let a = load_skinned_glb(&path).ok()?;
+            Some(std::sync::Arc::new(side_rig(side, &model, a)))
         })
         .collect()
 }
@@ -835,22 +890,11 @@ fn upload_class(
             // Card WSKN: a walker model with its bones and a baked skin.
             let walker = sides.0[i].walkers.get(&model.to_ascii_lowercase());
             let flyer = sides.0[i].flyers.contains(&model.to_ascii_lowercase());
-            if !joints.is_empty() && (walker.is_some() || flyer) {
+            let hover = sides.0[i].hovers.get(&model.to_ascii_lowercase());
+            if !joints.is_empty() && (walker.is_some() || flyer || hover.is_some()) {
                 let path = dir.join("walkers").join(format!("{model}.glb"));
                 match load_skinned_glb(&path) {
-                    Ok(a) => {
-                        rig = Some(if let Some(w) = walker {
-                            WalkerRig::new(a.skeleton, a.clips, w).with_seats(
-                                sides.0[i]
-                                    .walker_seats
-                                    .get(&model.to_ascii_lowercase())
-                                    .cloned()
-                                    .unwrap_or_default(),
-                            )
-                        } else {
-                            WalkerRig::new_flyer(a.skeleton, a.clips)
-                        })
-                    }
+                    Ok(a) => rig = Some(side_rig(&sides.0[i], &model, a)),
                     Err(e) => eprintln!("vehicles: {}: {e:#} — drawn rigid", path.display()),
                 }
             }
@@ -1046,6 +1090,7 @@ mod texture_cache_tests {
             models: HashMap::new(),
             walkers: HashMap::new(),
             flyers: HashSet::new(),
+            hovers: HashMap::new(),
             walker_seats: HashMap::new(),
             textures: ["shared".to_owned()].into_iter().collect(),
         };

@@ -23,6 +23,8 @@ pub const HASH_IMPACT_SHIELD: u32 = 0x4bc6_c22f;
 pub const HASH_IMPACT_SHIELD_SMALL: u32 = 0x8fc7_9ebe;
 pub const HASH_IMPACT_SHIELD_LARGE: u32 = 0xf73e_c52a;
 pub const HASH_TRAIL_EFFECT: u32 = 0x7e71_e2c6;
+/// `ImpactEffect`, the beam setter's one impact slot (B2:291502).
+pub const HASH_BEAM_IMPACT: u32 = 0x1172_7a92;
 /// The explosion class's keys.
 pub const HASH_EFFECT: u32 = 0x6e6e_8d54;
 pub const HASH_WATER_EFFECT: u32 = 0x8773_3801;
@@ -109,6 +111,38 @@ impl ImpactLook {
         }
     }
 
+    /// An OrdnanceBeam's: its setter's one `ImpactEffect` (B1 `FUN_00275bd0`
+    /// class +0x94, B2 `FUN_00312838` class +0xdc), spawned at the beam's end
+    /// on every update it strikes something (B1:196819, B2:291073), with the
+    /// ordnance base's `TrailEffect`. No bullet ctor default and no
+    /// per-surface key: the beam's setter never reaches the bullet's. Water
+    /// shows none: the user's PS2 capture of BF2 Kashyyyk (2026-11-12) draws
+    /// the IFT-X beam's effect on the ground and none on the water; the
+    /// original's ray flags for water are not traced.
+    pub fn beam<'a>(props: impl IntoIterator<Item = (u32, &'a str)>) -> Self {
+        let mut effect = None;
+        let mut trail = None;
+        for (h, v) in props {
+            let v = Some(v.trim().to_owned()).filter(|s| !s.is_empty());
+            match h {
+                HASH_BEAM_IMPACT => effect = v,
+                HASH_TRAIL_EFFECT => trail = v,
+                _ => {}
+            }
+        }
+        Self {
+            soft: effect.clone(),
+            rigid: effect.clone(),
+            building: effect.clone(),
+            terrain: effect.clone(),
+            water: None,
+            shield: effect.clone(),
+            shield_large: effect,
+            trail,
+            explosion: None,
+        }
+    }
+
     /// The ctor, then `props` (the class chain, parent first, each class's
     /// in file order).
     pub fn replay<'a>(props: impl IntoIterator<Item = (u32, &'a str)>, bf2: bool) -> Self {
@@ -184,6 +218,28 @@ impl ExplosionLook {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A beam spawns its one `ImpactEffect` on every surface but water
+    /// (B2:291073, the PS2 capture), and takes no bullet default or
+    /// per-surface key.
+    #[test]
+    fn a_beam_has_one_impact_for_every_surface() {
+        let l = ImpactLook::beam([
+            (HASH_BEAM_IMPACT, "com_sfx_weap_beam_exp"),
+            (HASH_IMPACT_WATER, "com_sfx_watersplash_md"),
+        ]);
+        for s in [
+            Surface::Soldier,
+            Surface::Vehicle,
+            Surface::Building,
+            Surface::Terrain,
+            Surface::Shield,
+            Surface::ShieldLarge,
+        ] {
+            assert_eq!(l.effect(s), Some("com_sfx_weap_beam_exp"), "{s:?}");
+        }
+        assert_eq!(l.effect(Surface::Water), None);
+    }
 
     #[test]
     fn surface_keys_replay_over_the_ctor() {

@@ -84,12 +84,14 @@ fn setup_weapons_and_seats(sim: &mut Sim) {
                     infinite: true,
                     reserve_clips: 0,
                     fire_points: Vec::new(),
+                    fire_limits: Vec::new(),
                 },
                 GunWeapon {
                     class: c1,
                     infinite: false,
                     reserve_clips: 4,
                     fire_points: Vec::new(),
+                    fire_limits: Vec::new(),
                 },
             ],
             fire_point: Vec3::Z,
@@ -100,6 +102,7 @@ fn setup_weapons_and_seats(sim: &mut Sim) {
             turn: None,
             framed: false,
             aimer_bind: Quat::IDENTITY,
+            weapon_aimer: None,
             gunner: None,
         })],
     })];

@@ -24,6 +24,16 @@ pub const HASH_LIGHT_COLOR: u32 = 0x746c_e73e;
 pub const HASH_LIGHT_RADIUS: u32 = 0x2776_564d;
 pub const HASH_END_LIGHT_COLOR: u32 = 0x96e0_ccb1;
 
+/// The BF2 beam setter's own keys (B2 `FUN_00312838`, B2:291437-291560;
+/// `analysis/re-hover-camera.md` 6).
+pub const HASH_BEAM_COLOR: u32 = 0xa309_3acd;
+pub const HASH_BEAM_GLOW_WIDTH: u32 = 0x398b_9ad9;
+pub const HASH_BEAM_GLOW_TEXTURE: u32 = 0xc6bf_c336;
+
+/// A beam's glow half-width over its `LaserWidth` (B1 `FUN_002758e0`
+/// B1:196928, B2 setter B2:291470).
+pub const BEAM_GLOW_WIDTH: f32 = 2.5;
+
 /// The setters' length clamp (B1 `lui 0x4300` at 0x27cbb0).
 pub const LASER_MAX_LENGTH: f32 = 128.0;
 
@@ -63,6 +73,28 @@ pub struct LaserLook {
     pub end_light_color: [u8; 4],
     /// `LightRadius`, metres (ctor 0).
     pub light_radius: f32,
+    /// An OrdnanceBeam class's own draw, `None` for a bolt.
+    pub beam: Option<BeamLook>,
+}
+
+/// What an OrdnanceBeam class (`beam`) draws with (B1 `FUN_002758e0`
+/// B1:196842-196931, B2 `FUN_00312438` B2:291272-291366;
+/// `analysis/re-hover-camera.md` 6): two ribbons from the muzzle to the
+/// beam's end at one width each, no taper and no fade. The core is
+/// [`LaserLook::texture`] at half-width [`LaserLook::width`], NORMAL blend;
+/// the glow is `glow_texture` at `glow_width` in [`LaserLook::glow_color`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct BeamLook {
+    /// The core's vertex colour: BF2 `BeamColor` (ctor the static white),
+    /// BF1 the static white.
+    pub color: [u8; 4],
+    /// The glow's half-width: 2.5 x `LaserWidth`, BF2 `BeamGlowWidth`.
+    pub glow_width: f32,
+    /// BF2 `BeamGlowTexture` as authored; `None` = `lightglow` (both ctors).
+    pub glow_texture: Option<String>,
+    /// The glow blends ADDITIVE on BF1 (`FUN_004afac0(lightglow, 1)`,
+    /// B1:196927), NORMAL on BF2 (`FUN_00594270(C+0xd0, 0)`, B2:291360).
+    pub glow_additive: bool,
 }
 
 impl Default for LaserLook {
@@ -84,6 +116,7 @@ impl Default for LaserLook {
             light_color: [0; 4],
             end_light_color: [0; 4],
             light_radius: 0.0,
+            beam: None,
         }
     }
 }
@@ -179,6 +212,46 @@ impl LaserLook {
         l
     }
 
+    /// An OrdnanceBeam class's look: PROPs replayed through the beam
+    /// setter (B1 `FUN_00275bd0` B1:196986-197090, B2 `FUN_00312838`
+    /// B2:291437-291560). `LaserWidth` also sets the glow width to 2.5 x
+    /// (BF2); `LaserTexture`, `LaserGlowColor`, BF2 `BeamColor`,
+    /// `BeamGlowWidth` (which, as the decomp reads, also names the glow
+    /// texture after its own value) and `BeamGlowTexture`. Every other key
+    /// goes to the ordnance base: no light, lengths or fades.
+    pub fn replay_beam<'a>(props: impl IntoIterator<Item = (u32, &'a str)>, bf2: bool) -> Self {
+        let mut l = Self::default();
+        let mut b = BeamLook {
+            color: [255; 4],
+            glow_width: 0.0,
+            glow_texture: None,
+            glow_additive: !bf2,
+        };
+        for (h, v) in props {
+            let f = || v.split_whitespace().next()?.parse::<f32>().ok();
+            match h {
+                HASH_LASER_WIDTH => {
+                    l.width = f().unwrap_or(0.0);
+                    b.glow_width = l.width * BEAM_GLOW_WIDTH;
+                }
+                HASH_LASER_TEXTURE => l.texture = Some(v.trim().to_owned()),
+                HASH_LASER_GLOW_COLOR => colour_bytes(v, &mut l.glow_color),
+                HASH_BEAM_COLOR if bf2 => colour_bytes(v, &mut b.color),
+                HASH_BEAM_GLOW_WIDTH if bf2 => {
+                    b.glow_width = f().unwrap_or(0.0);
+                    b.glow_texture = Some(v.trim().to_owned());
+                }
+                HASH_BEAM_GLOW_TEXTURE if bf2 => b.glow_texture = Some(v.trim().to_owned()),
+                _ => {}
+            }
+        }
+        if !bf2 {
+            b.glow_width = l.width * BEAM_GLOW_WIDTH;
+        }
+        l.beam = Some(b);
+        l
+    }
+
     /// How long the drawn length may grow: max(LaserLength, GlowLength,
     /// BlurLength) (the spawn's cap, re-bolt §4).
     pub fn cap(&self) -> f32 {
@@ -237,6 +310,36 @@ impl LaserLook {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The beam setters (B1 `FUN_00275bd0`, B2 `FUN_00312838`): `LaserWidth`
+    /// sets the glow to 2.5 x; BF2 reads `BeamColor`, `BeamGlowTexture`, BF1
+    /// neither, and its glow adds. The bullet keys are not a beam's.
+    #[test]
+    fn a_beam_replays_its_own_setter() {
+        let props = [
+            (HASH_LASER_WIDTH, "0.4"),
+            (HASH_LASER_TEXTURE, "com_sfx_laser_blue"),
+            (HASH_LASER_GLOW_COLOR, "92 136 250 100"),
+            (HASH_BEAM_COLOR, "200 210 220 230"),
+            (HASH_BEAM_GLOW_TEXTURE, "glowy"),
+            (HASH_LIGHT_COLOR, "253 43 43 150"),
+            (HASH_LIGHT_RADIUS, "4"),
+        ];
+        let bf2 = LaserLook::replay_beam(props, true);
+        let b = bf2.beam.clone().unwrap();
+        assert_eq!(bf2.width, 0.4);
+        assert_eq!(bf2.texture.as_deref(), Some("com_sfx_laser_blue"));
+        assert_eq!(bf2.glow_color, [92, 136, 250, 100]);
+        assert_eq!(b.color, [200, 210, 220, 230]);
+        assert!((b.glow_width - 1.0).abs() < 1e-6);
+        assert_eq!(b.glow_texture.as_deref(), Some("glowy"));
+        assert!(!b.glow_additive);
+        assert_eq!(bf2.light(0.0), None);
+        let bf1 = LaserLook::replay_beam(props, false).beam.unwrap();
+        assert_eq!((bf1.color, bf1.glow_texture), ([255; 4], None));
+        assert!(bf1.glow_additive);
+        assert!((bf1.glow_width - 1.0).abs() < 1e-6);
+    }
 
     /// re-bolt §1's order rule: LaserLength also resets GlowLength = 3L and
     /// BlurLength = 15L (clamped to 128), so a later GlowLength wins and an

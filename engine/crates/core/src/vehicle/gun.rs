@@ -271,6 +271,8 @@ pub struct GunWeapon {
     /// Otherwise the spare clips (`WeaponState::new`'s).
     pub reserve_clips: u32,
     pub fire_points: Vec<Vec3>,
+    /// Each fire point's aim limits, model frame: [yaw, pitch] in radians.
+    pub fire_limits: Vec<[[f32; 2]; 2]>,
 }
 
 /// A seat's guns — SETUP data per class, like `SeatSetup`, NOT hashed.
@@ -297,6 +299,12 @@ pub struct GunSetup {
     /// else its base is the model frame.
     pub framed: bool,
     pub aimer_bind: glam::Quat,
+    /// A pilot seat's weapon aimer when the seat authors one (`AimerPitchLimits`
+    /// / `AimerYawLimits` / rates of its first aimer): the guns chase the look's
+    /// aim point inside these limits while the look itself keeps [`Self::aimer`]
+    /// (`PitchLimits`, re-hover §5.1 I11). The IFT-X looks over -8..25 deg and
+    /// its cannons turn over -30..90 deg (`analysis/re-hover-camera.md`).
+    pub weapon_aimer: Option<Aimer>,
     /// A building turret's drawn gunner: where his body stands
     /// ([`GunnerSeat`]); `None` = at the model's origin.
     pub gunner: Option<GunnerSeat>,
@@ -512,14 +520,38 @@ impl GunSetup {
     /// fire point is turned as it is (card TURR: Mygeeto's barrel 1.28 m
     /// to the side was moved onto the axis, 0.9 m off at 20 m).
     pub fn muzzle(&self, aim: (f32, f32)) -> Vec3 {
+        self.muzzle_from(self.fire_point, aim)
+    }
+
+    /// [`GunSetup::muzzle`] for another of the seat's bind-pose points.
+    pub fn muzzle_from(&self, point: Vec3, aim: (f32, f32)) -> Vec3 {
         let rest = if self.aimer_bind != glam::Quat::IDENTITY {
-            self.pivot + self.aimer_bind.inverse() * (self.fire_point - self.pivot)
+            self.pivot + self.aimer_bind.inverse() * (point - self.pivot)
         } else if self.turn.is_some() {
-            self.fire_point
+            point
         } else {
-            turned(self.fire_point, self.pivot, -self.bind_yaw(), 0.0)
+            turned(point, self.pivot, -self.bind_yaw(), 0.0)
         };
         turned(rest, self.pivot, aim.0, aim.1)
+    }
+
+    /// The barrel of `weapon`'s fire ring its next shot leaves from, after
+    /// `shots_fired` shots (re-blaster-damage 3.1).
+    pub fn next_point(&self, weapon: usize, shots_fired: u64) -> Option<usize> {
+        let n = self.weapons.get(weapon)?.fire_points.len() as u64;
+        (n > 0).then(|| (shots_fired % n) as usize)
+    }
+
+    /// Where a weapon's shot leaves, model space: the barrel `point` of its
+    /// fire ring (`GunWeapon::fire_points`) turned with the aim, else the
+    /// seat's fire point. A flyer pilot's guns do not turn: his points stay
+    /// where the model binds them.
+    pub fn shot_point(&self, weapon: usize, point: Option<usize>, aim: (f32, f32), fixed: bool) -> Vec3 {
+        match point.and_then(|p| self.weapons.get(weapon)?.fire_points.get(p)) {
+            Some(&p) if fixed => p,
+            Some(&p) => self.muzzle_from(p, aim),
+            None => self.muzzle(aim),
+        }
     }
 }
 
@@ -653,6 +685,7 @@ mod tests {
             turn: None,
             framed: false,
             aimer_bind: glam::Quat::IDENTITY,
+            weapon_aimer: None,
             gunner: None,
         };
         let b = g.bind_yaw();
@@ -701,6 +734,7 @@ mod tests {
             turn: None,
             framed: false,
             aimer_bind: glam::Quat::from_rotation_y(std::f32::consts::PI),
+            weapon_aimer: None,
             gunner: None,
         };
         let aim = g.aim_of((0.0, 0.0), (0.0, 0.0));

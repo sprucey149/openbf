@@ -98,7 +98,7 @@ mod weak_lock;
 pub use awards::{
     DEFAULT_REPAIR_SCALE, ENDURANCE, ENDURANCE_MEDAL, TECHNICIAN_MEDAL, WEAPON_MEDALS,
 };
-pub use beam::Beam;
+pub use beam::{Beam, SeatBeam};
 pub use blast::{soldier_blast_sphere, BLAST_GATHER_MAX};
 pub use bounds::{
     Level, ReturnPath, BOUND_DROP, KILL_FLOOR_DROP, LEVEL_HUBS, LEVEL_RISE, UNDER_MAP_SPEED,

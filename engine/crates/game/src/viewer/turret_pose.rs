@@ -229,9 +229,10 @@ pub fn nine_pose(
 /// A hover's rider numbers (card VRIDE, `analysis/re-vehicle-riders.md` 4.1
 /// [O]): the drive smooths the throttle into `p` and the turn into `y` at
 /// rate 5 a second while the hover has a pilot (B1 `FUN_001ec768`
-/// B1:99598-99626, B2 `FUN_0021d8b8` B2:134693-134723), both -1 from the
-/// constructor (B1:96488-96490, B2:130953-130955) and left as they are when
-/// he leaves. A nine-pose pilot seat (the speeder bikes, the BARC) is posed
+/// B1:99598-99626, B2 `FUN_0021d8b8` B2:134693-134723), both 0 from the
+/// constructor (B1:96395-96396, B2:130826-130827; it writes -1 only to a, b
+/// and c: `analysis/re-vehicle-pose.md` 0.6) and left as they are when he
+/// leaves. A nine-pose pilot seat (the speeder bikes, the BARC) is posed
 /// by [`HoverNine::pose`]. Visual only: the sim never reads them.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HoverNine {
@@ -241,7 +242,7 @@ pub struct HoverNine {
 
 impl HoverNine {
     /// The constructor's numbers.
-    pub const START: HoverNine = HoverNine { p: -1.0, y: -1.0 };
+    pub const START: HoverNine = HoverNine { p: 0.0, y: 0.0 };
 
     /// One drive update of `dt` seconds with the pilot's throttle, strafe
     /// and turn (the PS2's signs, the port's `HoverInput`). The turn the
@@ -272,6 +273,72 @@ impl HoverNine {
             b: self.y + if self.p > 0.0 { 1.0 } else { 7.0 },
             c: self.p.abs(),
         }
+    }
+}
+
+/// Per `Sim::vehicles` slot, each live hover's [`HoverNine`]: one drive
+/// update of the tick's length per tick while it has a pilot, with his input;
+/// a fresh vehicle starts at [`HoverNine::START`]. The rider's pose and the
+/// hover's own fins read the same numbers (card VPOSE).
+#[derive(Clone, Debug, Default)]
+pub struct HoverClocks(Vec<Option<HoverClock>>);
+
+#[derive(Clone, Copy, Debug)]
+struct HoverClock {
+    gen: u32,
+    tick: u64,
+    nine: HoverNine,
+}
+
+impl HoverClocks {
+    /// Bring every hover's numbers to `sim`'s tick.
+    pub fn step(&mut self, sim: &core::sim::Sim, bf2: bool) {
+        let tick = sim.tick;
+        let vs = &sim.vehicles;
+        self.0.resize(vs.len(), None);
+        for (slot, v) in vs.iter().enumerate() {
+            if !v.alive || v.kind != core::vehicle::VehicleKind::Hover {
+                self.0[slot] = None;
+                continue;
+            }
+            let fresh = HoverClock {
+                gen: v.gen,
+                tick,
+                nine: HoverNine::START,
+            };
+            let c = self.0[slot].get_or_insert(fresh);
+            if c.gen != v.gen {
+                *c = fresh;
+            }
+            let piloted = v.pilot_seat().is_some_and(|s| s.occupant.is_some());
+            if piloted {
+                let no_strafe = sim
+                    .hover_params
+                    .get(v.class as usize)
+                    .and_then(Option::as_ref)
+                    .is_some_and(|p| p.strafe_speed < 1e-4);
+                let i = v.input;
+                for _ in 0..tick.saturating_sub(c.tick).min(30) {
+                    c.nine = c.nine.step(
+                        [i.throttle, i.strafe, i.turn],
+                        no_strafe,
+                        bf2,
+                        core::TICK_DT,
+                    );
+                }
+            }
+            c.tick = tick;
+        }
+    }
+
+    /// Slot `slot`'s numbers, when they were stepped for generation `gen`.
+    pub fn get(&self, slot: usize, gen: u32) -> Option<HoverNine> {
+        self.0
+            .get(slot)
+            .copied()
+            .flatten()
+            .filter(|c| c.gen == gen)
+            .map(|c| c.nine)
     }
 }
 

@@ -88,6 +88,25 @@ impl FlyerSection {
         }
     }
 
+    /// A hover's pilot section (`analysis/re-hover-camera.md` 2): the
+    /// BODY's `TrackCenter` on the untilted body, `TrackOffset` along the
+    /// view, `TiltValue` in degrees, the section's `AimTension` (ctor 1000)
+    /// and `MoveTension`, and `BoostFOV` as the fast end of the FOV (B2
+    /// `FUN_00221388`). No slow or fast offset: the hover passes none.
+    pub fn hover(seat: Option<&SeatSpec>) -> Self {
+        FlyerSection {
+            tilt: seat.and_then(|s| s.tilt_value).unwrap_or(0.0) * DEGREES,
+            aim_tension: Some(
+                seat.and_then(|s| s.aim_tension)
+                    .unwrap_or(GUNNER_AIM_TENSION),
+            ),
+            fast_fov: seat.and_then(|s| s.boost_fov).unwrap_or(0.0),
+            slow_offset: Vec3::ZERO,
+            fast_offset: Vec3::ZERO,
+            ..Self::of(seat, GroundRules::Bf1)
+        }
+    }
+
     pub fn speed_fraction(&self, speed: f32, top: f32) -> f32 {
         if speed > 0.0 && self.fast_fov != 0.0 && top > 0.0 {
             (speed / top).clamp(0.0, 1.0)
@@ -182,7 +201,31 @@ impl WalkSim {
         }
         let mount = self.sim.unit(self.player)?.mount?;
         let v = self.sim.vehicle(mount.vehicle)?;
-        (v.kind == VehicleKind::Flyer && mount.seat == 0).then_some((v, mount.vehicle))
+        (matches!(v.kind, VehicleKind::Flyer | VehicleKind::Hover) && mount.seat == 0)
+            .then_some((v, mount.vehicle))
+    }
+
+    /// The body frame a pilot's camera hangs on: the craft or hover untilted.
+    fn pilot_frame(v: &Vehicle) -> Quat {
+        match v.kind {
+            VehicleKind::Hover => core::vehicle::hover::untilted_rot(v),
+            _ => core::vehicle::flyer::untilted(v),
+        }
+    }
+
+    /// A pilot's view: a flyer's along its body; a hover's along its aim
+    /// (E+0x350, the aim's pitch on the body: re-hover §5.1), each tilted
+    /// down by the section's tilt.
+    fn pilot_view(v: &Vehicle, frame: Quat, section: &FlyerSection) -> Quat {
+        let pitch = match v.kind {
+            VehicleKind::Hover => v
+                .guns
+                .first()
+                .and_then(Option::as_ref)
+                .map_or(0.0, |g| g.look.1),
+            _ => 0.0,
+        };
+        flyer_view(frame * quat_x(-pitch), section.tilt)
     }
 
     pub(super) fn flyer_fov(&self) -> Option<f32> {
@@ -193,6 +236,23 @@ impl WalkSim {
     }
 
     fn flyer_speed_fraction(&self, v: &Vehicle, section: &FlyerSection) -> f32 {
+        if v.kind == VehicleKind::Hover {
+            let Some(p) = self
+                .sim
+                .hover_params
+                .get(v.class as usize)
+                .and_then(Option::as_ref)
+            else {
+                return 0.0;
+            };
+            let (fs, bs) = (p.forward_speed, p.boost_speed);
+            let forward = v.vel.dot(v.rot * Vec3::Z);
+            return if section.fast_fov != 0.0 && forward > fs && bs > fs {
+                ((forward - fs) / (bs - fs)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+        }
         let top = self
             .sim
             .flyer_params
@@ -210,6 +270,9 @@ impl WalkSim {
             .vehicle_seats
             .get(v.class as usize)
             .and_then(|seats| seats.first());
+        if v.kind == VehicleKind::Hover {
+            return FlyerSection::hover(seat);
+        }
         FlyerSection::of(seat, self.sim.ground_rules)
     }
 
@@ -229,9 +292,9 @@ impl WalkSim {
     pub(super) fn flyer_seat_camera(&self) -> Option<(Camera, Option<Track>)> {
         let (v, handle) = self.flyer_pilot()?;
         let section = self.flyer_section(v);
-        let frame = core::vehicle::flyer::untilted(v);
+        let frame = Self::pilot_frame(v);
         let held = self.cam_flyer.filter(|c| c.vehicle == handle);
-        let rot = held.map_or_else(|| flyer_view(frame, section.tilt), |c| c.rot);
+        let rot = held.map_or_else(|| Self::pilot_view(v, frame, &section), |c| c.rot);
         let (target, ideal) = self.flyer_ideal(v, &section, frame, rot);
         let (settled, track) =
             self.settle_camera(CamKind::Seat, target, ideal, v.instance, Some(handle));
@@ -242,8 +305,8 @@ impl WalkSim {
     pub(super) fn next_cam_flyer(&self, previous: Vec3) -> Option<FlyerCam> {
         let (v, handle) = self.flyer_pilot()?;
         let section = self.flyer_section(v);
-        let frame = core::vehicle::flyer::untilted(v);
-        let view = flyer_view(frame, section.tilt);
+        let frame = Self::pilot_frame(v);
+        let view = Self::pilot_view(v, frame, &section);
         let center = v.pos + frame * section.center;
         let held = self
             .cam_flyer
@@ -286,7 +349,7 @@ impl WalkSim {
         }
         let mount = self.sim.unit(self.player)?.mount?;
         let v = self.sim.vehicle(mount.vehicle)?;
-        if v.kind != VehicleKind::Flyer || mount.seat == 0 {
+        if !matches!(v.kind, VehicleKind::Flyer | VehicleKind::Hover) || mount.seat == 0 {
             return None;
         }
         let seat = self

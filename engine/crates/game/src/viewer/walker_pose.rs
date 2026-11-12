@@ -45,6 +45,8 @@ pub struct WalkerRig {
     /// Per leg pair: the bones its layers move.
     masks: Vec<Vec<bool>>,
     bone_root: Option<usize>,
+    /// A posed hover's `FinAnimation` clip (card VPOSE).
+    fin: Option<usize>,
 }
 
 impl WalkerRig {
@@ -57,6 +59,49 @@ impl WalkerRig {
             layer_bones: Vec::new(),
         };
         Self::new(skeleton, clips, &flyer)
+    }
+
+    /// A hover's rig (card VPOSE, `analysis/re-vehicle-pose.md` 7): its
+    /// `FinAnimation` clip by name, if the bake found one.
+    pub fn new_hover(skeleton: Skeleton, clips: Vec<Clip>, fin: Option<&str>) -> Self {
+        let fin = fin.and_then(|f| clips.iter().position(|c| c.name.eq_ignore_ascii_case(f)));
+        Self {
+            fin,
+            ..Self::new_flyer(skeleton, clips)
+        }
+    }
+
+    /// The fin nine-pose (re-vehicle-pose 4.3): the clip at frame `a` and
+    /// frame `b`, each slerped between its keys, blended by `c`; the bind
+    /// with no clip or no numbers yet.
+    fn fin_palette(&self, nine: Option<super::turret_pose::NinePose>) -> Vec<Mat4> {
+        let pose = match (self.fin.map(|k| &self.clips[k]), nine) {
+            (Some(clip), Some(n)) => clip
+                .sample(&self.skeleton, n.a, false)
+                .blend(&clip.sample(&self.skeleton, n.b, false), n.c),
+            _ => Pose::bind(&self.skeleton),
+        };
+        self.skeleton.palette(&pose.locals())
+    }
+
+    /// A hover's nodes now: the fin pose, then its turret, aimer and barrel
+    /// writers from its seats' guns (re-vehicle-pose 2.3).
+    pub fn hover_nodes(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Vec<Mat4> {
+        let fins = self.bind_nodes(&self.fin_palette(nine));
+        self.aim.pose(&self.skeleton, &fins, v)
+    }
+
+    /// A hover's joint palette now ([`Self::hover_nodes`]).
+    pub fn hover_palette(
+        &self,
+        v: &core::vehicle::Vehicle,
+        nine: Option<super::turret_pose::NinePose>,
+    ) -> Vec<Mat4> {
+        self.aimed(self.fin_palette(nine), v)
     }
 
     pub fn flyer_palette(&self, lift: f32) -> Option<Vec<Mat4>> {
@@ -115,6 +160,7 @@ impl WalkerRig {
             entries,
             masks,
             bone_root,
+            fin: None,
         }
     }
 
@@ -218,7 +264,11 @@ impl WalkerRig {
     }
 
     pub fn aimed_palette(&self, v: &core::vehicle::Vehicle, root_scale: f32) -> Vec<Mat4> {
-        let palette = self.palette(&v.walker, root_scale);
+        self.aimed(self.palette(&v.walker, root_scale), v)
+    }
+
+    /// `palette` with the seats' turret, aimer and barrel writers applied.
+    fn aimed(&self, palette: Vec<Mat4>, v: &core::vehicle::Vehicle) -> Vec<Mat4> {
         let walk = self.bind_nodes(&palette);
         let now = self.aim.pose(&self.skeleton, &walk, v);
         now.iter()

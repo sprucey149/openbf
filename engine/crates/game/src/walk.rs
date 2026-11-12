@@ -689,6 +689,8 @@ pub struct WalkSim {
     pub guided_tops: Vec<Option<f32>>,
     pub walker_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub flyer_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
+    /// Each posed hover class's rig ([`crate::viewer::hover_rigs`], card VPOSE).
+    pub hover_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
     pub flyer_exhaust: Vec<Vec<crate::vehicle_pads::FlyerExhaust>>,
     pub vehicle_weapon_hud: Vec<Vec<Vec<WeaponHud>>>,
@@ -877,6 +879,7 @@ impl WalkSim {
             guided_tops: Vec::new(),
             walker_rigs: Vec::new(),
             flyer_rigs: Vec::new(),
+            hover_rigs: Vec::new(),
             vehicle_weapon_hud: Vec::new(),
             walker_shot_styles: Default::default(),
             flyer_exhaust: Vec::new(),

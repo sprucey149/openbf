@@ -160,6 +160,29 @@ while dtLeft > 3.0517578e-05:
 per-tick tail: spread recovery + timers (vtbl update)
 ```
 
+- The multi-barrel ring [V] (2026-11-12): a weapon's aimers are a ring (aimer +0x18),
+  the current one at weapon+0x70. The aimer setter (B2 `FUN_00302f10`, B1 around
+  B1:192246) starts a new aimer class on `NextAimer` (0x665d96ea, chained at class
+  +0x120 / B1 +0x364; the ctor B2 `FUN_00302d80` resets the barrel cursor);
+  `AimerNodeName` names the current one; `NextBarrel` (0xe98f377c) moves the barrel
+  cursor (four 0x30-byte slots); `BarrelNodeName` writes a slot's node and its fire
+  point, `FirePointName` the fire point only, and either (or BarrelRecoil /
+  BarrelLength) raises the barrel count class+0xc0 (B1 +0x300) to cursor + 1; key
+  0x407e801e (name uncracked) sets class+0x118 (B1 +0x358). The advance (B2
+  `FUN_00301d28`, B1 `FUN_0026d198`) steps the barrel index aimer+0x224 (B1 +0x144)
+  and at the barrel count moves to the next aimer, skipping those with +0x118 set.
+  The weapon ctor (B2 `FUN_00325448`) starts at the first aimer. The IFT-X pilot's
+  cannon authors flagged pivots `lgun_x` / `rgun_x` and firing aimers `lgun_y` /
+  `rgun_y` (fire points `hp_cannon_1` / `_2`), so it alternates sides; its missile's
+  two aimers `hp_missile_1` / `_2` have no barrel and fire from their nodes.
+  Port: `vehicle_class::AimerSpec` (`muzzles`, `no_fire`), `vehicle_pads::seat_gun`
+  (`GunWeapon::fire_points`), `Sim::drive_seat_gun` stepping them per shot for every
+  seat. Each barrel aims from its point at the seat's aim point within its aimer
+  chain's limits, a turn-only aimer's range added to the firing aimer's after it
+  (`GunWeapon::fire_limits`: the IFT-X's left cannon pitch -30..90 from `lgun_x`,
+  yaw -30..15 from `lgun_y`), so the two cannons meet at the crosshair. Deviations:
+  the seat has one aim, so every point turns about the seat's pivot, not its own
+  aimer's; a barrel's aim has no rate lag.
 - Refire time: BF1 = ShotDelay (min 0.01, parser-clamped). BF2 = **uniform
   random in [ShotDelayMin, ShotDelayMax]** re-rolled per trigger event
   (FUN_0032e758/FUN_0032edf8); a single ODF value sets min=max (deterministic).

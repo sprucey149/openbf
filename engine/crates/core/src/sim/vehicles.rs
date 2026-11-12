@@ -757,8 +757,10 @@ impl Sim {
                 collision: &self.collision,
             };
             let from = v.pos;
+            let held_up = v.rot * Vec3::Y;
             let impacts = hover::step(&mut self.vehicles[i], p, &world, dt);
             let (threshold, scale) = (p.collision_threshold, p.collision_scale);
+            self.hold_pilot_aim(i, held_up);
             self.vehicle_regen(i, dt);
             self.keep_out(i, from);
             self.ground_traffic(i, from);
@@ -772,6 +774,30 @@ impl Sim {
             for im in impacts {
                 self.impact_vehicle(h, im.normal_speed, im.n_up, im.n_fwd, threshold, scale, 1.0);
             }
+        }
+    }
+
+    /// re-hover §5.1 I10-I11: the drive's own pitch this tick comes off the
+    /// pilot's aim pitch (`aimPitch -= oldUp . E'.fwd`, B2:131896-131935), so
+    /// the aim holds its world direction while the body tips, then the aim is
+    /// clamped to `PitchLimits` again. PS2 RAM (KAS2, the IFT-X parked on a
+    /// slope 11 deg nose up): every hover's aim direction E+0x350 is level.
+    fn hold_pilot_aim(&mut self, i: usize, held_up: Vec3) {
+        let v = &self.vehicles[i];
+        let Some(a) = self
+            .seat_setup
+            .get(v.class as usize)
+            .and_then(Option::as_ref)
+            .and_then(|s| s.guns.first())
+            .and_then(Option::as_ref)
+            .filter(|g| g.pilot && g.turn.is_none())
+            .map(|g| g.aimer)
+        else {
+            return;
+        };
+        let fwd = v.rot * Vec3::Z;
+        if let Some(Some(st)) = self.vehicles[i].guns.first_mut() {
+            st.look.1 = (st.look.1 - held_up.dot(fwd)).clamp(a.pitch[0], a.pitch[1]);
         }
     }
 

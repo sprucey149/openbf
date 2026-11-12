@@ -85,6 +85,7 @@ fn the_beam_turret_strikes_with_its_impact_effect() {
     assert_eq!(beam.impact.as_deref(), Some("com_sfx_weap_beam_exp"));
     let impact = w.ordnance.impact.as_ref().unwrap();
     assert_eq!(impact.soft.as_deref(), Some("com_sfx_weap_beam_exp"));
+    assert_eq!(impact.terrain.as_deref(), Some("com_sfx_weap_beam_exp"));
     assert_eq!(impact.water, None);
 }
 

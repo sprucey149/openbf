@@ -921,13 +921,17 @@ flamethrowers.
   through the bolt sweep, with damage x TICK_DT / LifeSpan. A PassThrough beam on a ground round goes on through
   soldiers, droidekas (shield and body are one object), vehicles, droids, autoturrets, mines and guided rockets
   (`Sim::pierce_beam`): each takes its share once a tick, and the ray ends at terrain, water, a map body, a station,
-  a building turret's building, a saber block or the end of its range; its drawn length is the whole reach.
+  a building turret's building, a saber block or the end of its range; its drawn length is the whole reach. A
+  vehicle seat's beam (`sim::SeatBeam`) takes its origin from the barrel of the weapon's fire ring it left and its
+  direction from the seat's aim again every tick, and every hit but water spawns the class's
+  ImpactEffect (2026-11-12; before, a seat's beam kept its spawn ray and drew no impact on the ground; the user's
+  PS2 capture shows the effect on the ground and none on the water).
   Deviations: in a space round a pierce beam still stops at its first hit (space is kept as it is; trace: the space
   beams `com_weap_veh_fly_beam_ord` and the space turret's `tur_weap_spa_beam_ord`, PassThrough 1); water stops it
   (the original's ray flags were not traced for water; trace: the collision-type gate on a water hit); a building
   turret's own gun hull (a vehicle with a turret instance) stops it as its building does (trace: whether the
-  original's turret object stops a beam or only the building's static body does); a seat's beam keeps its spawn ray;
-  the per-hit impact effect has a network-looking gate (DAT_00600548 / 0x549 / 0x560 / 0x6d85ad) that is taken as
+  original's turret object stops a beam or only the building's static body does); the
+  per-hit impact effect has a network-looking gate (DAT_00600548 / 0x549 / 0x560 / 0x6d85ad) that is taken as
   open.
   PassThrough beams on the discs, all BF2: the award sniper rifle (`com_weap_award_sniper_rifle_ord` and its four
   sides), Han's target pistol (`all_weap_hero_targetpistol_ord`), the vehicle beam `com_weap_veh_beam_ord` (the

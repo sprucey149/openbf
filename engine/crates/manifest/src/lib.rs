@@ -809,6 +809,11 @@ pub struct ManifestVehicle {
     pub vis_box: Option<([f32; 3], [f32; 3])>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flyer: Option<ManifestFlyer>,
+    /// A hover class drawn posed (card VPOSE, `analysis/re-vehicle-pose.md`
+    /// 7): its skin, written when the class has a `FinAnimation` or names a
+    /// turret, aimer or barrel node. `None` = drawn rigid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hover: Option<ManifestHover>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -816,6 +821,16 @@ pub struct ManifestFlyer {
     pub bank: String,
     pub skin: String,
     pub frames: u16,
+}
+
+/// A posed hover's skin (`walkers/<skin>.glb`) and its `FinAnimation` clip,
+/// named in that GLB by the value as authored; `None` when the class has
+/// none or its bank lacks it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ManifestHover {
+    pub skin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fin: Option<String>,
 }
 
 /// What a walker's integrator reads from its bake (card WALK,

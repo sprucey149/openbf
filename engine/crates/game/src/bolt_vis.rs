@@ -326,26 +326,46 @@ pub fn bolt_draw(
         glow_texture: textures[1],
         core_color: [255, 255, 255, (fade.clamp(0.0, 1.0) * 255.0) as u8],
         glow_color: look.glow_bytes(age, fade),
+        beam: None,
     }
 }
 
+/// One beam's draw (B1 `FUN_002758e0`, B2 `FUN_00312438`;
+/// `analysis/re-hover-camera.md` 6): both ribbons over the reach plus 1 m
+/// about its middle (`analysis/re-ordnance-kinds.md` 9b), from `muzzle` when
+/// a scoped shot draws one off its ray, untapered and unfaded, the core in
+/// the class's beam colour and the glow in its `LaserGlowColor`. A bolt look (no
+/// [`LaserLook::beam`]) is drawn as the BF2 beam ctor's would be.
 pub fn beam_draw(
     look: &LaserLook,
     beam: &core::sim::Beam,
     textures: [Option<TextureHandle>; 2],
     muzzle: Option<Vec3>,
 ) -> BoltDraw {
-    let head = beam.origin + beam.dir * (beam.len + 0.5);
-    let (dir, len) = muzzle.map_or((beam.dir, beam.len + 1.0), |muzzle| {
-        let path = head - muzzle;
-        (path.normalize_or(beam.dir), path.length())
+    let b = look.beam.clone().unwrap_or(core::laser::BeamLook {
+        color: [255; 4],
+        glow_width: look.width * core::laser::BEAM_GLOW_WIDTH,
+        glow_texture: None,
+        glow_additive: false,
     });
-    let look = LaserLook {
-        length: len,
-        glow_length: len,
-        ..look.clone()
-    };
-    bolt_draw(&look, head, dir, len, 0.0, 1.0, textures)
+    let far = beam.origin + beam.dir * (beam.len + 0.5);
+    let near = muzzle.unwrap_or(beam.origin - beam.dir * 0.5);
+    let path = far - near;
+    BoltDraw {
+        head: near,
+        dir: -path.normalize_or(beam.dir),
+        core_len: path.length(),
+        glow_len: path.length(),
+        width: look.width,
+        core_texture: textures[0],
+        glow_texture: textures[1],
+        core_color: b.color,
+        glow_color: look.glow_color,
+        beam: Some(render::BeamRibbons {
+            glow_width: b.glow_width,
+            glow_additive: b.glow_additive,
+        }),
+    }
 }
 
 /// The texture a `LaserTexture` name draws with (lower-cased, as baked).
@@ -781,6 +801,10 @@ impl BoltVis {
                 .texture
                 .as_deref()
                 .and_then(|n| self.texture(r, &texture_name(n)));
+            let beam_glow = match look.beam.as_ref().and_then(|b| b.glow_texture.as_deref()) {
+                Some(n) => self.texture(r, &texture_name(n)),
+                None => glow,
+            };
             let muzzle = walk
                 .sim
                 .unit(walk.player)
@@ -801,7 +825,7 @@ impl BoltVis {
                         })
                         .unwrap_or_else(|| beam.origin - u.aim_frame().2 * (2.0 * width))
                 });
-            out.push(beam_draw(look, beam, [core, glow], muzzle));
+            out.push(beam_draw(look, beam, [core, beam_glow], muzzle));
         }
         for tow in &walk.sim.tow_cables {
             out.extend(tow.points.windows(2).filter_map(|segment| {
@@ -820,6 +844,7 @@ impl BoltVis {
                     glow_texture: None,
                     core_color: [37, 37, 38, 255],
                     glow_color: [0; 4],
+                    beam: None,
                 })
             }));
         }
