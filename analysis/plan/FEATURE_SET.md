@@ -24,9 +24,10 @@ and LAN are decisions for later work, not current tasks.
   glyphs. PC/Xbox builds require no PS2 copy. Battle HUD, spawn, loading and results
   retain their existing fonts, art and metrics.
 - **Grenades.** BF1 maps keep their grenade types, throwing rules, explosions
-  and sounds. The BF2 HUD's grenade slot shows a blue thermal detonator, a
-  wider gold concussion grenade or a narrower violet haywire grenade. The BF1
-  thermal also glows blue in flight. The [ground vehicle and ordnance rulebook](../vehicle-normalization.md)
+  and sounds. The BF2 HUD's round grenade artwork stays mostly gray, with a
+  light blue tint for thermals, gold for concussion grenades and violet for
+  haywire grenades. The BF1 thermal glows blue in flight. The
+  [ground vehicle and ordnance rulebook](../vehicle-normalization.md)
   records the shared damage and armor scales for each affected type.
 - **Health.** Vehicle and unit health are separate. The
   [soldier rulebook](../gameplay-normalization.md) defines the shared infantry scale.

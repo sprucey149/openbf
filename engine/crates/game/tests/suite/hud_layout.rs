@@ -863,8 +863,7 @@ fn the_detpack_shows_its_own_model_and_the_time_bomb_the_seismic_mine() {
     );
 }
 
-/// The three BF1 grenade types have distinguishable models in BF2's grenade
-/// slot. BF2 retains its own model and mortars still select their own art.
+/// The three BF1 grenade tints share the exact bounds of BF2's round model.
 #[test]
 fn bf1_grenade_types_switch_models_in_bf2s_hud() {
     let Some(mut v) = view([640, 480]) else {
@@ -884,7 +883,6 @@ fn bf1_grenade_types_switch_models_in_bf2s_hud() {
     };
     let bf2_box = place(&mut v, bf2_row);
     let bf1 = side_db("bf1");
-    let mut width = [0.0; 3];
     for (class, kind) in [
         ("rep_weap_inf_thermaldetonator", 0),
         ("rep_weap_inf_haywiredetonator", 1),
@@ -906,20 +904,8 @@ fn bf1_grenade_types_switch_models_in_bf2s_hud() {
             v.drawn_sheets().any(|s| s == "hud_thermaldetonator"),
             "{class}"
         );
-        assert!(
-            got[0] < bf2_box[2] && got[2] > bf2_box[0],
-            "{class}: {got:?}"
-        );
-        assert!(
-            got[1] < bf2_box[3] && got[3] > bf2_box[1],
-            "{class}: {got:?}"
-        );
-        if kind == 0 {
-            assert_eq!(got, bf2_box);
-        }
-        width[kind] = got[2] - got[0];
+        assert_eq!(got, bf2_box, "{class}");
     }
-    assert!(width[1] < width[0] && width[0] < width[2], "{width:?}");
     for side in ["all", "imp", "rep", "cis"] {
         let class = format!("{side}_weap_inf_thermaldetonator");
         let row = hud_row(&bf2, &class);

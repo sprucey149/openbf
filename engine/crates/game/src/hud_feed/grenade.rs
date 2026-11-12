@@ -1,41 +1,20 @@
-//! BF1 grenade variants use BF2's 3D HUD model and placement. Their color
-//! and proportions distinguish the types at the size of the secondary row.
+//! BF1 grenade variants lightly tint BF2's round grenade HUD artwork.
 
 use super::{Hud, HudArt, HudMesh, HudWeapon};
 
-const VARIANTS: [(&str, &str, [f32; 3], [f32; 3]); 3] = [
-    (
-        "thermaldetonator",
-        "hud_bf1_thermal",
-        [0.32, 0.69, 1.0],
-        [1.0, 1.0, 1.0],
-    ),
-    (
-        "crackgrenade",
-        "hud_bf1_concussion",
-        [1.0, 0.74, 0.25],
-        [1.2, 0.78, 1.2],
-    ),
-    (
-        "haywiredetonator",
-        "hud_bf1_haywire",
-        [0.81, 0.46, 1.0],
-        [0.85, 1.18, 0.85],
-    ),
+const VARIANTS: [(&str, &str, [f32; 3]); 3] = [
+    ("thermaldetonator", "hud_bf1_thermal", [0.82, 0.93, 1.0]),
+    ("crackgrenade", "hud_bf1_concussion", [1.0, 0.93, 0.79]),
+    ("haywiredetonator", "hud_bf1_haywire", [0.95, 0.84, 1.0]),
 ];
 
 pub(super) fn install(hud: &mut Hud, art: &mut HudArt, thermal: &HudMesh) {
-    for (_, name, tint, proportions) in VARIANTS {
+    for (_, name, tint) in VARIANTS {
         let mut mesh = thermal.clone();
         for part in &mut mesh.parts {
             for color in &mut part.colors {
                 for (channel, factor) in color.iter_mut().zip(tint) {
                     *channel *= factor;
-                }
-            }
-            for vertex in &mut part.positions {
-                for (axis, factor) in vertex.iter_mut().zip(proportions) {
-                    *axis *= factor;
                 }
             }
         }
