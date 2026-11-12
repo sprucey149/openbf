@@ -373,6 +373,9 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
 
 ### Platform & meta
 - Input: **controller first**; PS2 default mapping, full remap; on-screen keyboard for text entry.
+  **Flight controls** defaults to Classic. RC Mode 2 is an opt-in layout for
+  controller pilots, with yaw and throttle on the left stick and roll and pitch
+  on the right. The profile saves the choice.
   - Keyboard + mouse (2026-10-25, the public repo's pull request #1) is supported as a
     deliberate deviation. Controller play is unchanged. The mouse aims by angle (`PadState::mx`/`my`,
     `core/src/sim/look.rs`), under pointer lock, without aim assist; the bindings are one table in `game/src/kbm.rs`.

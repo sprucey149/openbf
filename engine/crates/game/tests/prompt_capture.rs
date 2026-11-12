@@ -97,6 +97,7 @@ fn menu(icons: Icons, label: &'static str, shell: bool) -> ui::menu::MenuModel {
         music_volume: 1.0,
         mouse_sensitivity: 1.0,
         pad_look_sensitivity: 1.0,
+        rc_flight_controls: false,
         invert_y: false,
         low_power_resolution: false,
         input_icons_label: label,

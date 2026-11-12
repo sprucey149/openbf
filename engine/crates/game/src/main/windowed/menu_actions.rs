@@ -32,6 +32,9 @@ pub(super) fn persist_setting(
         MenuAction::SetPadLookSensitivity(v) => {
             profile.settings.pad_look_sensitivity = game::profile::clamp_pad_look(v)
         }
+        MenuAction::ToggleFlightControls => {
+            profile.settings.flight_controls = profile.settings.flight_controls.toggled()
+        }
         MenuAction::ToggleInvertY => profile.settings.invert_y = !profile.settings.invert_y,
         MenuAction::ToggleLowPowerResolution => {
             profile.settings.low_power_resolution = !profile.settings.low_power_resolution

@@ -1188,7 +1188,21 @@ impl WalkSim {
 
     /// Is the player piloting a flyer or controlling a guided rocket?
     pub fn player_controls_flyer(&self) -> bool {
-        self.player_pilots_flyer() || self.sim.controlled_guided(self.player).is_some()
+        self.flight_controls(input::FlightControls::Classic)
+            .is_some()
+    }
+
+    /// Choose the controller layout for the player's current flight controls.
+    /// The ship preference applies in the pilot seat. Guided ordnance uses
+    /// its own Classic input scheme.
+    pub fn flight_controls(&self, pilot: input::FlightControls) -> Option<input::FlightControls> {
+        if self.player_pilots_flyer() {
+            Some(pilot)
+        } else {
+            self.sim
+                .controlled_guided(self.player)
+                .map(|_| input::FlightControls::Classic)
+        }
     }
 
     /// The magnet target when it is a unit (draw order of `target_draws`;

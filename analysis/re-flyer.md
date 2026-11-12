@@ -210,10 +210,12 @@ left stick does what a soldier's right stick does (pitch and turn), and the righ
 stick throttle and roll. BF1's three tables (file offset 0x3ba190, stride 0x50, its
 reader `FUN_0034a7e8`, functions 18..21) hold the same swap in the third. Static
 reading only: [H] BF1's third section is the flyer's by analogy with BF2, its
-selector not opened. `input::flyer_sticks` applies it to the controller for a pilot
-in a flyer; the keyboard and mouse keep walk keys for throttle and roll and the
-mouse for pitch and turn (held rate below). The PS2's options screen can change the table. The port has
-no such option yet.
+selector not opened. `input::FlightControls` uses those axes for the Classic
+setting. The port also offers RC Mode 2 for pilots, with yaw and throttle on
+the left stick and roll and pitch on the right. Guided ordnance uses Classic
+steering. The keyboard and mouse keep walk keys for throttle and roll and
+the mouse for pitch and turn (held rate below). The PS2's options screen can
+change its function table.
 
 ### The mouse in a flyer: the PC's held rate (2026-11-06)
 

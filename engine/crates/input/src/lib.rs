@@ -38,6 +38,10 @@
 use core::sim::{buttons, PadState};
 use gilrs::Button;
 
+mod flight;
+
+pub use flight::{flyer_sticks, FlightControls};
+
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Mapping {
     pub table: Vec<(Button, u32)>,
@@ -787,24 +791,6 @@ pub fn pad_from_gamepad_with_arms(
     )
 }
 
-/// A flyer pilot's sticks: the left stick pitches and turns, the right throttles
-/// and rolls. Both games' default tables for a flyer swap the two sticks' functions
-/// against the soldier's and the ground vehicle's (BF2 0x600ee0 words 16..19, 32 33 30
-/// 31, against 30 31 32 33 at 0x600e40; BF1 file offset 0x3ba210; read back by BF2
-/// `FUN_004333a0`, BF1 `FUN_0034a7e8`). The look stick's own [`LOOK_SCALE`] comes
-/// off: a flyer's stick reaches 1, and BF2's rate blend runs over 0.7 to 1.
-/// Only the controller's axes: the keyboard's walk keys are merged after this.
-pub fn flyer_sticks(pad: PadState) -> PadState {
-    let unscaled = |a: i16| PadState::quantize((PadState::axis(a) / LOOK_SCALE).clamp(-1.0, 1.0));
-    PadState {
-        lx: unscaled(pad.rx),
-        ly: unscaled(pad.ry),
-        rx: pad.lx,
-        ry: pad.ly,
-        ..pad
-    }
-}
-
 /// Trigger controller vibration/rumble feedback on the specified gamepad.
 ///
 /// `weak` and `strong` are normalized motor intensities in `[0.0, 1.0]`.
@@ -872,23 +858,6 @@ mod tests {
         assert_eq!(look_axis(1.0, 1.5), 32767);
         assert_eq!(look_axis(-1.0, 1.25), -32767);
         assert!(look_axis(0.7, 1.5) > look_axis(0.7, 1.0));
-    }
-
-    #[test]
-    fn a_flyer_pilots_sticks_swap_and_reach_full() {
-        let pad = PadState {
-            lx: PadState::quantize(1.0),
-            ly: PadState::quantize(-1.0),
-            rx: PadState::quantize(LOOK_SCALE),
-            ry: PadState::quantize(-LOOK_SCALE / 2.0),
-            buttons: buttons::FIRE,
-            ..PadState::default()
-        };
-        let f = flyer_sticks(pad);
-        assert_eq!((f.rx, f.ry), (pad.lx, pad.ly));
-        assert!((PadState::axis(f.lx) - 1.0).abs() < 1e-3);
-        assert!((PadState::axis(f.ly) + 0.5).abs() < 1e-3);
-        assert_eq!(f.buttons, pad.buttons);
     }
 
     /// The USB IDs decide first; the name only when they say nothing.

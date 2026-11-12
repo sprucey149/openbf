@@ -281,28 +281,22 @@ impl winit::application::ApplicationHandler for App {
                         let pad = match self.autopilot {
                             true => autopilot_pad(self.walk.as_ref().map_or(0, |w| w.0.sim.tick)),
                             false => {
-                                let flying = self
-                                    .walk
-                                    .as_ref()
-                                    .is_some_and(|(w, _)| w.player_controls_flyer());
-                                // A pilot's right stick throttles and rolls:
-                                // the look sensitivity is not his. Space
-                                // battles keep the stick as it is.
-                                let look = match &self.walk {
-                                    Some((w, _)) if !flying => w.pad_look_for_battle(
+                                let controls =
+                                    walk.flight_controls(self.profile.settings.flight_controls);
+                                let look = if controls.is_some() {
+                                    1.0
+                                } else {
+                                    walk.pad_look_for_battle(
                                         self.profile.settings.pad_look_sensitivity,
-                                    ),
-                                    Some(_) => 1.0,
-                                    None => self.profile.settings.pad_look_sensitivity,
+                                    )
                                 };
                                 let pad = self.sample_pad(look, on_foot && !space);
                                 if let Some(bb) = self.blackbox.as_mut() {
                                     bb.stick(self.stick_sample.0, self.stick_sample.1);
                                 }
-                                let pad = if flying {
-                                    self.kbm.flyer_pad(input::flyer_sticks(pad))
-                                } else {
-                                    self.kbm.pad(pad)
+                                let pad = match controls {
+                                    Some(layout) => self.kbm.flyer_pad(layout.map_sticks(pad)),
+                                    None => self.kbm.pad(pad),
                                 };
                                 game::pause::resume_pad(&mut self.resume_gate, pad)
                             }
@@ -354,6 +348,8 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
+                            rc_flight_controls: self.profile.settings.flight_controls
+                                == input::FlightControls::RcMode2,
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             input_icons_label: self.profile.settings.input_icons.label(),
@@ -464,6 +460,8 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
+                            rc_flight_controls: self.profile.settings.flight_controls
+                                == input::FlightControls::RcMode2,
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             input_icons_label: self.profile.settings.input_icons.label(),
