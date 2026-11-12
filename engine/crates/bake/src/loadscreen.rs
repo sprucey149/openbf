@@ -5,7 +5,9 @@
 //! between the shell and the battle (PLAN §Presentation: BF1 loading screens
 //! + beeps; 4:3 art presents PILLARBOXED).
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
+use manifest::{LoadingLayout, LoadingNoise, LoadingTarget};
+use mungefs::{config::ConfigNode, Chunk};
 use std::path::Path;
 
 /// The RON's struct and its style enum live in the `manifest` crate: ONE
@@ -16,14 +18,7 @@ pub use manifest::{LoadScreen, LoadStyle};
 
 /// Writes `<outdir>/load/<name>.ktx2` + `<outdir>/load/load.ron`.
 pub fn bake_loadscreen(lvl_path: &str, outdir: &str) -> Result<LoadScreen> {
-    let mut buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
-    if buf.len() >= 8 && &buf[0..4] == b"ucfb" {
-        let total =
-            8usize.saturating_add(u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize);
-        if total > buf.len() && total - buf.len() <= 65536 {
-            buf.resize(total, 0);
-        }
-    }
+    let buf = read_lvl(lvl_path)?;
     let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
     let out = Path::new(outdir).join("load");
     std::fs::create_dir_all(&out)?;
@@ -37,9 +32,7 @@ pub fn bake_loadscreen(lvl_path: &str, outdir: &str) -> Result<LoadScreen> {
         }
         let t = mungefs::texture::Texture::parse(&c)
             .map_err(|e| anyhow!("tex_ 0x{:X}: {e}", c.offset))?;
-        let mips: Vec<Vec<u8>> = (0..t.mips.len()).map(|m| t.rgba8(m)).collect();
-        let bytes = crate::ktx2w::write_rgba8(t.info.width, t.info.height, &mips);
-        std::fs::write(out.join(format!("{}.ktx2", t.name)), bytes)?;
+        write_texture(&out, &t)?;
         // Sequence order = trailing _<n>; unsuffixed textures are extras.
         match t
             .name
@@ -73,9 +66,157 @@ pub fn bake_loadscreen(lvl_path: &str, outdir: &str) -> Result<LoadScreen> {
     Ok(ls)
 }
 
+fn read_lvl(lvl_path: &str) -> Result<Vec<u8>> {
+    let mut buf = std::fs::read(lvl_path).with_context(|| lvl_path.to_string())?;
+    if buf.len() >= 8 && &buf[0..4] == b"ucfb" {
+        let total =
+            8usize.saturating_add(u32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize);
+        if total > buf.len() && total - buf.len() <= 65536 {
+            buf.resize(total, 0);
+        }
+    }
+    Ok(buf)
+}
+
+fn write_texture(dir: &Path, t: &mungefs::texture::Texture) -> Result<()> {
+    let mips: Vec<Vec<u8>> = (0..t.mips.len()).map(|m| t.rgba8(m)).collect();
+    let bytes = crate::ktx2w::write_rgba8(t.info.width, t.info.height, &mips);
+    std::fs::write(dir.join(format!("{}.ktx2", t.name)), bytes)?;
+    Ok(())
+}
+
+/// Bake the common config and only the sprites used by the zoom presentation.
+pub fn bake_loading_layout(lvl_path: &str, outdir: &str) -> Result<()> {
+    let buf = read_lvl(lvl_path)?;
+    let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
+    let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
+    let layout = parse_layout(
+        chunks
+            .iter()
+            .find(|c| &c.tag == b"load")
+            .context("BF1 load config")?,
+    )?;
+    let dir = Path::new(outdir).join("load");
+    std::fs::create_dir_all(&dir)?;
+    let mut wanted = std::collections::BTreeSet::from([
+        layout.disk.as_str(),
+        layout.led.as_str(),
+        layout.scanline.as_str(),
+        layout.edges[0].as_str(),
+        layout.edges[1].as_str(),
+        layout.edges[2].as_str(),
+    ]);
+    wanted.extend(layout.noise.frames.iter().map(String::as_str));
+    for chunk in chunks.iter().filter(|c| &c.tag == b"tex_") {
+        let texture = mungefs::texture::Texture::parse(chunk)
+            .map_err(|e| anyhow!("tex_ 0x{:X}: {e}", chunk.offset))?;
+        if wanted.remove(texture.name.as_str()) {
+            write_texture(&dir, &texture)?;
+        }
+    }
+    if !wanted.is_empty() {
+        bail!("missing BF1 loading sprites: {wanted:?}");
+    }
+    crate::write_ron(&dir.join("layout.ron"), &layout)
+}
+
+/// BF1 PS2 FUN_002c8aa0 reads the shared settings and map-local zoom boxes.
+fn parse_layout(chunk: &Chunk<'_>) -> Result<LoadingLayout> {
+    let nodes = mungefs::config::parse_tree(chunk).map_err(|e| anyhow!("{e}"))?;
+    let common = nodes
+        .iter()
+        .find(|n| n.hash == 0x8689_c861)
+        .context("shared loading settings")?;
+    let timing = common.find(0xb32f_0201).context("loading timing")?;
+    let seconds = |i| {
+        timing
+            .f32(i)
+            .filter(|v| (0.1..=15.0).contains(v))
+            .context("invalid loading duration")
+    };
+    let sprite = |node: &ConfigNode, i| {
+        node.str_arg(i)
+            .filter(|name| !name.is_empty())
+            .map(str::to_ascii_lowercase)
+            .context("missing loading sprite")
+    };
+    let edges = common.find(0x6ae7_b95f).context("tracking sprites")?;
+    let noise = common.find(0xa363_3da9).context("loading noise")?;
+    let prefix = sprite(noise, 0)?;
+    let frames = noise
+        .f32(1)
+        .filter(|n| (1.0..=16.0).contains(n))
+        .context("noise frames")? as usize;
+    let noise = LoadingNoise {
+        frames: (0..frames).map(|i| format!("{prefix}{i}")).collect(),
+        frame_rate: noise.f32(2).context("noise frame rate")?,
+        uv_start: [noise.f32(3).unwrap_or(1.0), noise.f32(4).unwrap_or(1.0)],
+    };
+    let mut layout = LoadingLayout {
+        tracking_seconds: seconds(0)?,
+        zoom_seconds: seconds(1)?,
+        disk: sprite(common.find(0x9880_e7ac).context("loading disk")?, 0)?,
+        led: sprite(common.find(0x9d5b_100a).context("loading dial lights")?, 0)?,
+        edges: [sprite(edges, 0)?, sprite(edges, 1)?, sprite(edges, 2)?],
+        scanline: sprite(common.find(0xe3dd_2365).context("loading scanline")?, 0)?,
+        noise,
+        maps: Default::default(),
+    };
+    for map in nodes.iter().filter(|n| n.hash == 0x37a3_e893) {
+        let Some(key) = map.str_arg(0) else { continue };
+        let mut targets = Vec::new();
+        for target in map.find_all(0xd7b3_7b83) {
+            let index = target.f32(0).context("loading image index")?;
+            let rect = [2, 3, 4, 5].map(|i| target.f32(i).unwrap_or(f32::NAN));
+            if !index.is_finite() || rect.iter().any(|v| !v.is_finite() || *v < 0.0) {
+                bail!("invalid loading target for {key}");
+            }
+            targets.push((
+                index,
+                LoadingTarget {
+                    image: sprite(target, 1)?,
+                    rect,
+                },
+            ));
+        }
+        targets.sort_by(|a, b| a.0.total_cmp(&b.0));
+        layout.maps.insert(
+            key.to_ascii_lowercase(),
+            targets.into_iter().map(|(_, t)| t).collect(),
+        );
+    }
+    Ok(layout)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bf1_common_layout_reads_the_authored_choreography() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../extracted/bf1/lvl/DATA/_LVL_PS2/LOAD/LOAD.LVL"
+        );
+        if !Path::new(path).exists() {
+            eprintln!("SKIP: extracted BF1 LOAD/LOAD.LVL not present");
+            return;
+        }
+        let bytes = read_lvl(path).unwrap();
+        let chunks = mungefs::content_chunks(mungefs::open(&bytes).unwrap()).unwrap();
+        let layout = parse_layout(chunks.iter().find(|c| &c.tag == b"load").unwrap()).unwrap();
+        assert_eq!((layout.tracking_seconds, layout.zoom_seconds), (3.5, 1.0));
+        assert_eq!(layout.maps.len(), 16);
+        assert_eq!(layout.noise.frames.len(), 6);
+        for targets in layout.maps.values() {
+            assert_eq!(targets.len(), 4);
+            assert_eq!(targets[0].image, "load_galacticmap_0");
+            assert!(targets[..3]
+                .iter()
+                .all(|t| t.rect[2] > 0.0 && t.rect[3] > 0.0));
+        }
+        assert_ne!(layout.maps["bes1"][2].rect, layout.maps["bes2"][2].rect);
+    }
 
     /// The writer and the reader (`game::assets::load_loadscreen`) are ONE
     /// struct now (queue item 13), so every `load.ron` the bake shipped must

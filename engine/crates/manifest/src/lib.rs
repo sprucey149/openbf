@@ -1129,7 +1129,7 @@ pub struct FoleyRon {
 /// How the game presents the textures.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum LoadStyle {
-    /// BF1: the `load_*_0..3` zoom steps play in order (~1 s each).
+    /// BF1: the `load_*_0..3` zoom steps play in order.
     #[default]
     Sequence,
     /// BF2: `<planet>_1..N` stills — the game shows one of them for the load
@@ -1141,15 +1141,38 @@ pub enum LoadStyle {
 pub struct LoadScreen {
     /// Texture names in display order (KTX2 files under `load/`).
     pub sequence: Vec<String>,
-    /// Extra textures not in the sequence — BF1's planet globe
-    /// (`load_planet_tattoine`), which the original composites over the
-    /// locale step. DELIBERATELY baked and not yet drawn: the load-screen
-    /// layout pass (PLAN §Milestones, M5 polish - the old P10) is where it
-    /// lands.
+    /// Extra textures outside the four zoom steps, such as the planet globe.
     pub extras: Vec<String>,
     /// Defaulted: keeps a bake made before BF2's still pools readable.
     #[serde(default)]
     pub style: LoadStyle,
+}
+
+/// The BF1 common load display, baked from LOAD/LOAD.LVL alongside its sprites.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoadingLayout {
+    pub tracking_seconds: f32,
+    pub zoom_seconds: f32,
+    pub disk: String,
+    pub led: String,
+    pub edges: [String; 3],
+    pub scanline: String,
+    pub noise: LoadingNoise,
+    pub maps: std::collections::BTreeMap<String, Vec<LoadingTarget>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoadingNoise {
+    pub frames: Vec<String>,
+    pub frame_rate: f32,
+    pub uv_start: [f32; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoadingTarget {
+    pub image: String,
+    /// Pixel x, y, width and height within the current image.
+    pub rect: [f32; 4],
 }
 
 // ---------------------------------------------------------------------------

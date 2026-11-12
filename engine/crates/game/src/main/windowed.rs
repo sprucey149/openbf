@@ -972,23 +972,12 @@ impl App {
             }
         };
         let art_started = std::time::Instant::now();
-        let mut textures = Vec::new();
-        if let (Some(overlay), Some(ls)) = (
-            &self.overlay,
-            loading::presentation(&self.assets_dir, &row.key),
-        ) {
-            for (tex_name, t) in ls.sequence {
-                let img = ui::egui::ColorImage::from_rgba_unmultiplied(
-                    [t.width as usize, t.height as usize],
-                    &t.rgba,
-                );
-                textures.push(overlay.ctx().load_texture(
-                    tex_name,
-                    img,
-                    ui::egui::TextureOptions::LINEAR,
-                ));
-            }
-        }
+        let display = self
+            .overlay
+            .as_ref()
+            .map_or_else(loading::Display::default, |overlay| {
+                loading::Display::load(&self.assets_dir, &row.key, overlay.ctx())
+            });
         println!(
             "loading: presentation_assets_ms={:.3}",
             art_started.elapsed().as_secs_f64() * 1000.0
@@ -999,21 +988,17 @@ impl App {
         // codes too: a held accept (including an unbound button) is not new.
         self.seed_loading_pads();
         self.clear_loading_input();
-        // BF1 loading beep (load_xtracking = the 440 Hz ui_load_lp at pitch
-        // 2.1, baked by `bake beep`).
-        let beep = self.audio.as_mut().and_then(|a| {
-            a.play_loop(&self.assets_dir.join("audio/load_xtracking.ogg"), 1.0, -8.0)
-                .ok()
-        });
+        let cues = (self.audio.is_some() && display.sample(std::time::Duration::ZERO).is_some())
+            .then(|| loading::Cues::load(&self.assets_dir));
         self.loading = Some(Loading {
             map_name: name,
             started: std::time::Instant::now(),
             playback: Default::default(),
-            textures,
+            display,
             worker,
             ready: None,
             shown: false,
-            beep,
+            cues,
         });
         self.screen = Screen::Loading;
         self.sync_grab();
@@ -1040,20 +1025,29 @@ impl App {
                 }
             }
         }
-        let steps = l.textures.len().max(1);
         let elapsed = l.started.elapsed();
-        let step = l.playback.step(elapsed, steps);
-        let finish = l
-            .playback
-            .can_enter(elapsed, steps, l.shown, l.ready.is_some());
-        let image = l.textures.get(step).map(|t| t.id());
-        let caption = l.map_name.to_uppercase();
+        let time = l.playback.time(elapsed);
+        let frame = l.display.sample(time);
+        let finish =
+            l.playback
+                .can_enter(elapsed, l.display.duration(), l.shown, l.ready.is_some());
         let prompt = l.playback.prompt(elapsed);
+        if let (Some(audio), Some(cues)) = (&mut self.audio, &mut l.cues) {
+            cues.update(
+                audio,
+                if l.playback.skipped() {
+                    None
+                } else {
+                    frame.as_ref()
+                },
+            );
+        }
         if let (Some(r), Some(overlay), Some(window)) =
             (&mut self.renderer, &mut self.overlay, &self.window)
         {
             let paint = overlay.begin(window, |ctx| {
-                ui::loading::draw_loading_with_skip(ctx, image, &caption, step, steps, prompt);
+                l.display
+                    .draw(ctx, &l.map_name, time, frame.as_ref(), prompt);
             });
             if let Err(e) = r.render_with_overlay(
                 &Camera::default(),
@@ -1085,9 +1079,7 @@ impl App {
 
     fn finish_loading(&mut self) -> Option<Loading> {
         let mut l = self.loading.take()?;
-        if let (Some(a), Some(b)) = (self.audio.as_mut(), l.beep.as_mut()) {
-            a.stop(b);
-        }
+        l.cues = None;
         self.loading_edges.quarantine();
         self.loading_pad_blocked = self.any_pad_button_down();
         self.clear_loading_input();

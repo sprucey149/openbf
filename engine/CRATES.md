@@ -87,7 +87,7 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/dlc.rs` 438 — selective optional Kit Fisto/Ventress bake: namespaced dependency classes, their effect layer and sound bank · `bake`, `bake_sounds`.
 - `bake/src/dlc_attachment.rs` 106 — Fisto's separate head tentacles folded into his body with their own joints.
 - `bake/src/dlc_output.rs` 383 — temporary DLC staging, texture aliases and installation without retail asset replacement.
-- `bake/src/main.rs` 750 — the CLI, one subcommand per bake (`map`, `common`, `soldier`, `vehicle`, `effects`, `sounds`, …)
+- `bake/src/main.rs` 754 — the CLI, one subcommand per bake (`map`, `common`, `soldier`, `vehicle`, `effects`, `sounds`, …)
 - `bake/src/lib.rs` 179 — module roots · `write_ron`
 - `bake/src/gameplay.rs` 484 — apply a reviewed PS2 gameplay correction set before decoding a donor LVL; PS2 content is returned verbatim
 - `bake/src/gameplay/program.rs` 518 — the correction set's collision, skeleton and animation-bank programs · `Programs`
@@ -185,12 +185,12 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `bake/src/hud_layout/text.rs` 218 — native PC font-role cap origins and selected-atlas metrics · `normalize`, `shift_y`.
 - `bake/src/hud_layout/tests.rs` 254 — stock source, hierarchy, duplicate mesh, controls and no-op regressions.
 - `bake/src/xbox_icons.rs` 136 — the original Xbox pad's `icon_duke_*` sheets from the player's Xbox `common.lvl` · `bake_xbox_icons`, `ICONS`
-- `bake/src/loadscreen.rs` 188 — BF1 loading-screen LVLs (the zoom sequence) and BF2's still pools → KTX2 + RON · `bake_loadscreen`
+- `bake/src/loadscreen.rs` 329 — BF1 loading images, authored zoom targets and overlays, and BF2's still pools → KTX2 + RON · `bake_loadscreen`, `bake_loading_layout`
 - `bake/src/xbox.rs` 863 — `bake xbox` and `bake xbox-prints`: an Xbox disc's maps, and the PS2 gameplay hashes every bake from one is held to · `bake_xbox`, `print_map`, `write_prints`
 - `bake/src/donor.rs` 304 — Card COVR: a BF1 map's Cover hints from the BF2 version of the same map (lead_tmp botre xbox_pc note finding 1). BF2's Yavin Temple authors 973
 
 ## manifest — the schema
-- `manifest/src/lib.rs` 1430 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
+- `manifest/src/lib.rs` 1453 — shared bake/runtime records and environment root re-exports · `Manifest`, `CommonManifest`, `VehicleManifest`, `ManifestWalker`, `ClassDef`, `FxSet`, `SoundsRon`, `FoleyRon`, `LoadScreen`, `LoadingLayout`, `SoldierSkins`, `ManifestTurretRig`, `music_body`, `foliage_bin`; schema compatibility rules in the crate header.
 - `manifest/src/environment.rs` 854 — environment schema: weather, local lights/HDR, foliage and `foliage.bin` codec, water, lighting, fog and sky · `ManifestPrecipitation`, `ManifestWind`, `ManifestLightning`, `ManifestPointLight`, `ManifestHdr`, `ManifestFoliage`, `foliage_bin`, `ManifestWater`, `ManifestLighting`, `ManifestSky`; all names re-exported at crate root.
 - `manifest/src/anim_sets.rs` 297 — `soldiers/<model>.sets.ron`: a soldier's animation sets over its GLB's clips, and the two games' slot name tables · `SoldierSets`, `Bf1Sets`, `Bf2Sets`, `bf1::weapon_set`, `bf2::base_name`
 - `manifest/src/fpm.rs` 152 — the first-person arm clip tables (BF1 5 rows, BF2 4, 11 columns) and the arm GLB path · `COLUMNS`, `BF1_TABLE`, `BF2_TABLE`, `clip_names`, `glb_path`; `analysis/re-first-person-arms.md` §2.
@@ -475,11 +475,11 @@ Flow: disc → `mungefs` → `bake` → `engine/assets_baked/` (schema `manifest
 - `game/src/main/battle/ctf_hud.rs` 211 — CTF HUD markers: the sight line past the viewer's own vehicle and building, and a marker's clamped screen position · `visible`, `marker_screen`, `hud_hints`.
 - `game/src/main/headless.rs` 1318 — offscreen bench, frame/orbit capture, walk/ride replay, scene reports and the asset-free scripted aim referee · `run_bench`, `run_headless`, `run_aim_replay`, `tick_event_feed` (drains unused HUD output each replay tick).
 - `game/src/main/headless/detailed_bench.rs` 507 — opt-in raw CPU tick and full replay-render frame measurements (thread CPU, instructions, allocations, memory), cold GPU objects, periodic sim hashes and captures · `run`.
-- `game/src/main/windowed.rs` 1635 — windowed shell/loading/battle state machine (the window opens maximized: `window_attributes`), the Instant Action playlist played row by row, per-tick event/audio and black-box hooks, pause/cheats and profile autosave, including newly earned class kills · `App`, `run_windowed`, `run_shell`, `play_event_sounds`, `start_take`.
+- `game/src/main/windowed.rs` 1627 — windowed shell/loading/battle state machine (the window opens maximized: `window_attributes`), the Instant Action playlist played row by row, per-tick event/audio and black-box hooks, pause/cheats and profile autosave, including newly earned class kills · `App`, `run_windowed`, `run_shell`, `play_event_sounds`, `start_take`.
 - `game/src/main/windowed/tests.rs` 391 — existing tests regressions extracted from the facade; logical test module paths and selectors unchanged
 - `game/src/main/windowed/events.rs` 1114 — native window lifecycle and application event dispatch · `ApplicationHandler for App`; headless automation never starts this path
-- `game/src/main/windowed/loading.rs` 385 — loading art selection, two-press skip, input release, and owned CPU scene preparation · `Playback`, `Worker`, `Loading`.
-- `game/src/main/windowed/loading_tests.rs` 578 — loading cadence, input, error recovery, headless captures, and team-screen timings.
+- `game/src/main/windowed/loading.rs` 621 — loading art, timed scan sounds, two-press skip, input release and owned CPU scene preparation · `Display`, `Cues`, `Playback`, `Worker`.
+- `game/src/main/windowed/loading_tests.rs` 605 — loading cadence, input, error recovery, headless captures, and team-screen timings.
 - `game/src/main/windowed/idle.rs` 321 — keeps the display awake while a round is played unpaused (Wayland idle-inhibit, X11 screen-saver reset, Windows `SetThreadExecutionState`; macOS no-op) · `IdleInhibit`, `wants_idle_inhibit`
 - `game/src/main/windowed/career.rs` 14 — finished/abandoned battle profile save and career summary logging, using the event feed's battle totals · `record_round`.
 - `game/src/main/windowed/front.rs` 1094 — shell front screens, movie/music (takes in turn), menu clicks, the BF2 Instant Action screen, Instant Action, settings and binding capture · `FrontShell`, `App::redraw_shell`; `ui::shell_ps2` owns the screen flow.
@@ -748,7 +748,7 @@ on a stripped copy): one file below about 3.9 GiB, an executable and `openbf.pak
 - `ui/src/stats.rs` 658 — the end of the round's stats pages as BF2's PS2 has them (issue #50): lists, sorting, the cursor, paging, the pad's buttons per page, the career box's unlocks page (UNLK3, ours) · `StatsScreens`, `StatRow`, `TeamList`, `Award`, `Career`, `CareerView`, `Medal`, `Pad`, `Command`, `sort_rows`, `clock`; module header.
 - `ui/src/stats_draw.rs` 829 — Team / Personal / Career Stats drawn in the HUD pass over black, every place measured on the statsref PS2 frames · `Ctx::stats_page`; `[M]` geometry, colours and stretches in the constants' docs.
 - `ui/src/spawn_draw.rs` 1070 — BF2 side/class/spawn-map screens in the HUD pass · `SpawnPage`, `window_point`; veil, button/help geometry and Hor+ layout in the module header (`analysis/re-spawn-flow.md` §2–§4, `analysis/re-bf2-shell.md` §3).
-- `ui/src/loading.rs` 94 — the BF1 loading screen · `draw_loading`
+- `ui/src/loading.rs` 476 — BF1 loading scan, zoom, dial and skip prompt · `Choreography`, `draw_choreography`, `draw_loading`
 - `ui/src/overlay.rs` 241 — egui ↔ winit ↔ wgpu glue; reapplies the game-owned native cursor after platform output · `EguiOverlay`
 - `ui/src/cursor.rs` 149 — the shell's pointer activity gate: hover moves menu focus only on fresh motion or a click; native cursor image and policy live in `game/src/main/windowed/mouse.rs` · `Pointer`
 - `ui/src/hud_scope.rs` 125 — The sniper scope's overlay — the PS2's `ScopeDisplay` HUD element (`analysis/re-zoom.md` §8 [V][O]; BF1 vtable 0x540880, update
