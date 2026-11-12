@@ -395,6 +395,10 @@ pub enum ApproachMotion {
     DroidekaStalled(Vec3),
     DroidekaStalledDescent(Vec3),
     DroidekaReturning(Vec3),
+    DroidekaPinned {
+        exit: Vec3,
+        min_windows: u16,
+    },
     Returning,
     ReturningOnArc(u16),
     Stalled {
@@ -413,6 +417,7 @@ pub enum ApproachMotion {
         arc: u16,
         velocity: Vec3,
         exit: Vec3,
+        descend: bool,
     },
 }
 
@@ -425,6 +430,7 @@ impl ApproachMotion {
                 | Self::DroidekaStalled(_)
                 | Self::DroidekaStalledDescent(_)
                 | Self::DroidekaReturning(_)
+                | Self::DroidekaPinned { .. }
         )
     }
 }

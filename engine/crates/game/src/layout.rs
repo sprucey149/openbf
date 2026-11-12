@@ -435,6 +435,7 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
                 arc: 33,
                 velocity: Vec3::Z,
                 exit: Vec3::new(88.5, -61.55, 217.1),
+                descend: false,
             },
             finish_on_heading_plane: true,
         });
@@ -484,6 +485,7 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
                 arc: 64,
                 velocity: Vec3::new(0.6, 0.0, -1.0),
                 exit,
+                descend: false,
             },
             finish_on_heading_plane: true,
         });
@@ -633,6 +635,7 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
                 arc: 48,
                 velocity: Vec3::X,
                 exit,
+                descend: false,
             },
             finish_on_heading_plane: true,
         });
@@ -698,6 +701,7 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
                 arc: 86,
                 velocity: Vec3::NEG_Z,
                 exit: Vec3::new(-22.15, -65.86, 84.2),
+                descend: false,
             },
             finish_on_heading_plane: true,
         });
@@ -810,6 +814,82 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
                 headings: EscapeHeadings::Compass(&[180.0, 175.0, 185.0, 190.0]),
             },
             motion: ApproachMotion::DroidekaReturning(Vec3::new(174.0, -5.94, 83.5)),
+            finish_on_heading_plane: true,
+        });
+    }
+    // OURS: unroll around the pier and walk down from the upper dock shelf.
+    // measure: original BF1 floor support and the two Docks Hard bot lives (#108).
+    if m.source_game == "bf1"
+        && m.map == "kas2"
+        && g.hub(132).is_some_and(|h| {
+            Vec2::new(h.pos.x, h.pos.z).distance_squared(Vec2::new(52.18, 9.47)) < 0.01
+        })
+        && g.hub(72).is_some_and(|h| {
+            Vec2::new(h.pos.x, h.pos.z).distance_squared(Vec2::new(229.18, -10.75)) < 0.01
+        })
+    {
+        use core::nav::{ApproachMotion, FloorApproach};
+        g.floor_approaches.extend([
+            FloorApproach {
+                escape: FloorEscape {
+                    bounds: core::collision::Aabb {
+                        min: Vec3::new(41.62, -6.05, 25.90),
+                        max: Vec3::new(41.95, -5.66, 26.42),
+                    },
+                    hub: 132,
+                    headings: EscapeHeadings::Compass(&[350.0]),
+                },
+                motion: ApproachMotion::DroidekaPinned {
+                    exit: Vec3::new(56.8, -5.76, 23.5),
+                    min_windows: 2,
+                },
+                finish_on_heading_plane: true,
+            },
+            FloorApproach {
+                escape: FloorEscape {
+                    bounds: core::collision::Aabb {
+                        min: Vec3::new(250.77, 7.83, -35.36),
+                        max: Vec3::new(251.34, 8.21, -34.84),
+                    },
+                    hub: 72,
+                    headings: EscapeHeadings::Compass(&[135.0]),
+                },
+                motion: ApproachMotion::DroidekaReturning(Vec3::new(244.23, -1.0, -26.46)),
+                finish_on_heading_plane: true,
+            },
+        ]);
+    }
+    // OURS: turn away from the upper seam toward the lower passage.
+    // measure: Tantive IV original floor support and Hard recovery traces (#108).
+    if m.source_game == "bf2"
+        && m.map == "tan1"
+        && g.arcs
+            .get(31)
+            .is_some_and(|a| a.touches(42) && a.touches(18))
+        && g.hub(18).is_some_and(|h| {
+            Vec2::new(h.pos.x, h.pos.z).distance_squared(Vec2::new(-276.52, 120.57)) < 0.01
+        })
+    {
+        use core::nav::{ApproachMotion, FloorApproach};
+        let exit = Vec3::new(-273.9, 8.18, 135.4);
+        g.floor_approaches.push(FloorApproach {
+            escape: FloorEscape {
+                bounds: core::collision::Aabb {
+                    min: Vec3::new(-266.4, 8.0, 143.9),
+                    max: Vec3::new(-262.5, 10.3, 145.9),
+                },
+                hub: 18,
+                headings: EscapeHeadings::CompassTo {
+                    angles: &[223.0],
+                    exit,
+                },
+            },
+            motion: ApproachMotion::AlongArc {
+                arc: 31,
+                velocity: Vec3::NEG_X,
+                exit,
+                descend: true,
+            },
             finish_on_heading_plane: true,
         });
     }
@@ -1062,6 +1142,7 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
                     arc: 20,
                     velocity: Vec3::X,
                     exit: Vec3::new(-170.1, 51.99, -229.0),
+                    descend: false,
                 },
                 finish_on_heading_plane: true,
             });
@@ -1107,6 +1188,7 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
                 arc: 107,
                 velocity: Vec3::NEG_X,
                 exit: Vec3::new(-190.05, 68.305, 45.2),
+                descend: false,
             },
             finish_on_heading_plane: true,
         });
@@ -1217,6 +1299,13 @@ pub fn nav_graph(m: &Manifest, dir: &Path) -> Option<NavGraph> {
         g.hop_roof_areas.push(core::collision::Aabb {
             min: Vec3::new(-288.0, -1.0, -250.0),
             max: Vec3::new(-270.0, 3.5, -224.0),
+        });
+        // OURS: take the lower ramp where a long attack launch overshoots
+        // the approach and lands behind the retaining wall.
+        // measure: Citadel Clone Wars Hard seed 2 landing and ramp walk (#108).
+        g.attack_takeoff_keepout.push(core::collision::Aabb {
+            min: Vec3::new(-274.8, -0.4, -251.5),
+            max: Vec3::new(-273.8, 0.4, -250.3),
         });
     }
     // OURS: the Cloud City upper route overlooks a lower street.

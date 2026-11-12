@@ -332,10 +332,19 @@ fn approach_walk(sim: &Sim, u: &Unit, st: &AiState) -> Option<LostState> {
             nav::ApproachMotion::YieldToHover(_) => {
                 approaching_hub && approaching_hover(sim, u.soldier.pos)
             }
-            nav::ApproachMotion::PinnedWalk(_) => {
+            nav::ApproachMotion::PinnedWalk(_) | nav::ApproachMotion::DroidekaPinned { .. } => {
+                let wait = match a.motion {
+                    nav::ApproachMotion::DroidekaPinned { min_windows, .. } => {
+                        u64::from(min_windows) * u64::from(STUCK_WINDOW)
+                    }
+                    _ => 0,
+                };
                 hub == Some(a.escape.hub)
                     && st.lost.is_some_and(|l| {
-                        l.pinned && l.escape_heading.is_none() && !l.replan_after_escape
+                        l.pinned
+                            && l.escape_heading.is_none()
+                            && !l.replan_after_escape
+                            && sim.tick.saturating_sub(l.since) >= wait
                     })
             }
             nav::ApproachMotion::DroidekaStalled(_)
@@ -374,12 +383,14 @@ fn approach_walk(sim: &Sim, u: &Unit, st: &AiState) -> Option<LostState> {
         | nav::ApproachMotion::DroidekaStalled(exit)
         | nav::ApproachMotion::DroidekaStalledDescent(exit)
         | nav::ApproachMotion::DroidekaReturning(exit)
+        | nav::ApproachMotion::DroidekaPinned { exit, .. }
         | nav::ApproachMotion::AlongArc { exit, .. } => Some(exit),
         _ => None,
     };
     let descent = matches!(
         approach.motion,
         nav::ApproachMotion::Stalled { descend: true, .. }
+            | nav::ApproachMotion::AlongArc { descend: true, .. }
             | nav::ApproachMotion::DroidekaStalledDescent(_)
     ) || matches!(approach.motion, nav::ApproachMotion::DroidekaReturning(to) if to.y < u.soldier.pos.y);
     let jump_at = match approach.motion {
