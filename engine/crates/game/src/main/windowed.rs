@@ -1326,15 +1326,8 @@ impl App {
         self.matchlog = None;
     }
 
-    /// Whether the battle's sound is held: a ground battle in the pause menu.
-    /// Space battles keep their own pause behaviour for now.
     fn game_audio_paused(&self) -> bool {
-        self.in_battle() && self.paused && !self.space_battle()
-    }
-
-    /// A space battle ([`game::walk::WalkSim::space_battle`]).
-    fn space_battle(&self) -> bool {
-        self.walk.as_ref().is_some_and(|(w, _)| w.space_battle())
+        self.in_battle() && self.paused
     }
 
     /// Pause or resume the game's mixer bus to match [`App::game_audio_paused`].
@@ -1478,12 +1471,7 @@ impl App {
         let shell = matches!(self.screen, Screen::Shell);
         now |= game::kbm::menu_bits(self.keys_held, shell);
         let tapped = game::kbm::menu_bits(std::mem::take(&mut self.keys_tapped), shell);
-        // BF2's pause menu backs out on Triangle too (re-bf2-menus,
-        // ifs_pausemenu); in play it is ACTION, which the resume gate keeps
-        // from play until released. Space battles have no such gate, so
-        // their pause menu keeps Triangle as it was.
-        let space = self.walk.as_ref().is_some_and(|(w, _)| w.space_battle());
-        let north_backs = self.paused && !space;
+        let north_backs = self.paused;
         let edges = game::kbm::menu_edges(now, self.prev_menu_buttons, tapped, north_backs);
         self.prev_menu_buttons = now;
         edges

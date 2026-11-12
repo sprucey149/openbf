@@ -77,11 +77,23 @@ impl CollisionWorld {
         max_len: f32,
         hulls: HullFilter,
     ) -> Option<(f32, Vec3)> {
+        self.ray_down_owned(origin, max_len, hulls)
+            .map(|(y, n, _)| (y, n))
+    }
+
+    /// [`Self::ray_down_with`] with the vehicle whose hull the hit is on
+    /// (`None` for a map body).
+    pub fn ray_down_owned(
+        &self,
+        origin: Vec3,
+        max_len: f32,
+        hulls: HullFilter,
+    ) -> Option<(f32, Vec3, Option<VehicleHandle>)> {
         if max_len <= 0.0 {
             return None;
         }
         super::cost::query();
-        let mut best: Option<(f32, Vec3)> = None;
+        let mut best: Option<(f32, Vec3, Option<VehicleHandle>)> = None;
         // The ray goes straight down, so its XZ footprint is one point.
         self.visit_xz(origin.x, origin.x, origin.z, origin.z, hulls, |body| {
             if !body.layers.contains(Layers::SOLDIER) {
@@ -125,8 +137,8 @@ impl CollisionWorld {
                     .transform_vector3(Vec3::new(hit.normal.x, hit.normal.y, hit.normal.z))
                     .normalize_or_zero();
                 if n.y.abs() >= WALKABLE_MIN_NY {
-                    if best.is_none_or(|(b, _)| t < b) {
-                        best = Some((t, n));
+                    if best.is_none_or(|(b, _, _)| t < b) {
+                        best = Some((t, n, body.owner));
                     }
                     return;
                 }
@@ -136,7 +148,7 @@ impl CollisionWorld {
                 }
             }
         });
-        best.map(|(t, n)| (origin.y - t, n))
+        best.map(|(t, n, owner)| (origin.y - t, n, owner))
     }
 
     /// First hit along `dir` (UNIT length) within `max_t`: `(t, world normal)`.

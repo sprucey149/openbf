@@ -14,8 +14,8 @@ use core::impact::Surface;
 use core::missile::{Missile, MissileTarget};
 use core::projectile::{Bolt, Hit};
 use core::sim::{
-    CriticalSystem, Event, PadState, ShieldGroup, Sim, SpaceAssault, Station, StationClass,
-    SPENT_MAX_HEALTH,
+    CriticalSystem, DeathCause, Event, PadState, ShieldGroup, Sim, SpaceAssault, Station,
+    StationClass, SPENT_MAX_HEALTH,
 };
 use core::unit::UnitSpec;
 use core::vehicle::flyer::FlyerParams;
@@ -182,7 +182,30 @@ fn incoming_missile_warning_lifecycle_and_hud_events() {
         Some(&EventValue::Number(dist_val))
     );
 
+    sim.unseat_unit(pilot);
+    sim.step(&[]);
+    assert_eq!(sim.incoming_missile(0), None);
+    feed(&mut hud, &HudModel::default(), &has_mesh);
+    assert_eq!(hud.last("player1.missileLock"), None);
+    assert_eq!(hud.last("player1.missileLockDistance"), None);
+
+    sim.units[pilot.index as usize].mount = Some(core::vehicle::Mount {
+        vehicle: vh,
+        seat: 0,
+    });
+    sim.vehicle_mut(vh).unwrap().seats[0].occupant = Some(pilot);
+    sim.step(&[]);
+    assert!(sim.incoming_missile(0).is_some());
+    feed(
+        &mut hud,
+        &HudModel {
+            incoming_missile: sim.incoming_missile(0),
+            ..Default::default()
+        },
+        &has_mesh,
+    );
     // Step 3: Missile hits or expires -> incoming_missile becomes None
+    let missile = sim.bolts[0].clone();
     sim.bolts.clear();
     sim.step(&[]);
     assert_eq!(sim.incoming_missile(0), None);
@@ -197,6 +220,23 @@ fn incoming_missile_warning_lifecycle_and_hud_events() {
         None,
         "warning turned off after missile expires"
     );
+    sim.bolts.push(missile);
+    sim.step(&[]);
+    assert!(sim.incoming_missile(0).is_some());
+    feed(
+        &mut hud,
+        &HudModel {
+            incoming_missile: sim.incoming_missile(0),
+            ..Default::default()
+        },
+        &has_mesh,
+    );
+    sim.kill_environment(pilot, DeathCause::VehicleDestroyed);
+    sim.step(&[]);
+    assert_eq!(sim.incoming_missile(0), None);
+    feed(&mut hud, &HudModel::default(), &has_mesh);
+    assert_eq!(hud.last("player1.missileLock"), None);
+    assert_eq!(hud.last("player1.missileLockDistance"), None);
 }
 
 #[test]
@@ -567,19 +607,18 @@ fn space_assault_has_no_spawn_briefing_and_keeps_lock_audio() {
         "a flyer's lock plays no launcher tone: {heard:?}"
     );
 
-    // Test incoming missile warning beep (distance < 100 -> interval 4, tick 16 % 4 == 0)
     walk.sim.lock_on[0].held = [0.0, 0.0];
     walk.sim.lock_on[0].charging = [false, false];
     walk.sim.lock_on[0].target = None;
     walk.sim.lock_on[0].incoming_missile = true;
-    walk.sim.lock_on[0].incoming_distance = 80.0;
-    walk.sim.tick = 16;
-    heard.clear();
-    game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
-    assert!(
-        heard
-            .iter()
-            .any(|s| s == "all_weap_inf_rocket_launcher_tracking"),
-        "incoming missile warning beep emitted when targeted by missile: {heard:?}"
-    );
+    for (distance, tick) in [(80.0, 16), (200.0, 16), (400.0, 30)] {
+        walk.sim.lock_on[0].incoming_distance = distance;
+        walk.sim.tick = tick;
+        heard.clear();
+        game::event_sounds::each(&walk, Vec3::ZERO, |name, _| heard.push(name.to_owned()));
+        assert!(
+            !heard.iter().any(|s| s.contains("rocket_launcher_tracking")),
+            "the incoming-missile warning is HUD-only at {distance} m: {heard:?}"
+        );
+    }
 }

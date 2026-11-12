@@ -5,8 +5,10 @@
 use super::{buttons, Event, PadState, Sim};
 use crate::collision::{HullFilter, Layers};
 use crate::guided::{GuidedClass, GuidedEnd, GuidedRocket, COLLISION_RADIUS_PROVISIONAL as RADIUS};
+use crate::projectile::{Hit, Target};
 use crate::unit::{Controller, UnitHandle};
-use crate::vehicle::hover::{quat_x, quat_y};
+use crate::vehicle::hover::HoverInput;
+use crate::weapon::DamageDesc;
 use glam::Vec3;
 
 impl Sim {
@@ -21,6 +23,10 @@ impl Sim {
         self.guided
             .iter()
             .find(|r| r.owner == owner && r.pending_end.is_none())
+    }
+
+    pub fn flown_guided(&self, owner: UnitHandle) -> Option<&GuidedRocket> {
+        self.controlled_guided(owner).filter(|r| r.live())
     }
 
     pub(super) fn guided_input(&mut self, i: usize, slot: Option<usize>, held: bool) -> bool {
@@ -71,24 +77,22 @@ impl Sim {
             weapon_class,
             seat: None,
             pos,
-            vel: fwd * c.class.speeds[1],
-            rot: quat_y(u.soldier.yaw) * quat_x(u.soldier.pitch),
-            pitch_rate: 0.0,
-            turn_rate: 0.0,
-            roll_input: 0.0,
-            bank: 0.0,
+            vel: fwd * c.class.flight.min_speed,
+            rot: GuidedRocket::body(fwd),
+            flyer: GuidedRocket::flying(&c.class),
             health: c.class.health,
-            energy: c.class.energy,
             age: 0.0,
-            boosted: false,
             prev_buttons: u.soldier.prev_buttons() | buttons::FIRE,
             pending_end: None,
+            spent: None,
             blind: 0.0,
         });
         let last = self.guided.len() - 1;
-        if let Some(at) = self.guided_contact(&self.guided[last], origin) {
-            self.guided[last].pos = at;
-            self.guided[last].pending_end = Some(GuidedEnd::Impact);
+        if let Some((at, target)) = self.guided_contact(&self.guided[last], origin) {
+            let mut r = self.guided[last].clone();
+            r.pos = at;
+            self.guided_strike(&mut r, target);
+            self.guided[last] = r;
         }
         self.events.push(Event::Shot {
             unit: owner,
@@ -126,9 +130,11 @@ impl Sim {
         let up = right.cross(fwd).normalize_or_zero();
         let offset = c.spawn_offset;
         let pos = muzzle + right * offset.x + up * offset.y + fwd * offset.z;
-        let yaw = crate::fmath::atan2(-fwd.x, -fwd.z);
-        let pitch = crate::fmath::asin(fwd.y.clamp(-1.0, 1.0));
-        let (speed, health, energy) = (c.class.speeds[1], c.class.health, c.class.energy);
+        let (speed, health, flyer) = (
+            c.class.flight.min_speed,
+            c.class.health,
+            GuidedRocket::flying(&c.class),
+        );
         let prev_buttons = self.units[i].soldier.prev_buttons() | buttons::FIRE;
         let team = self.units[i].team;
         self.next_guided_id = self
@@ -143,17 +149,13 @@ impl Sim {
             seat: Some((vehicle, seat)),
             pos,
             vel: fwd * speed,
-            rot: quat_y(yaw) * quat_x(pitch),
-            pitch_rate: 0.0,
-            turn_rate: 0.0,
-            roll_input: 0.0,
-            bank: 0.0,
+            rot: GuidedRocket::body(fwd),
+            flyer,
             health,
-            energy,
             age: 0.0,
-            boosted: false,
             prev_buttons,
             pending_end: None,
+            spent: None,
             blind: 0.0,
         });
         self.events.push(Event::Shot {
@@ -201,6 +203,11 @@ impl Sim {
             };
             self.take_remote_pad(owner, pads);
             let r = &mut self.guided[k];
+            if !r.live() {
+                r.prev_buttons = pad.buttons;
+                routed.push(PadState::default());
+                continue;
+            }
             r.blind = if lost { r.blind + crate::TICK_DT } else { 0.0 };
             let blind = r.blind >= crate::guided::BOT_BLIND - crate::TICK_DT * 0.5;
             if blind || pad.buttons & !r.prev_buttons & buttons::ACTION != 0 {
@@ -231,12 +238,37 @@ impl Sim {
                 }
             });
         let target = target.filter(|p| crate::perception::los(self, r.pos, *p))?;
-        let local = r.rot.inverse() * (target - r.pos).normalize_or_zero();
+        let local = r.frame().inverse() * (target - r.pos).normalize_or_zero();
         Some(PadState {
-            rx: PadState::quantize(crate::fmath::atan2(local.x, -local.z) * 2.0),
+            rx: PadState::quantize(crate::fmath::atan2(-local.x, local.z) * 2.0),
             ry: PadState::quantize(crate::fmath::asin(local.y.clamp(-1.0, 1.0)) * 2.0),
             ..Default::default()
         })
+    }
+
+    fn guided_flight_input(&self, r: &GuidedRocket, pad: &PadState) -> HoverInput {
+        let (input, _) = super::seats::driver_input(pad);
+        if self
+            .unit(r.owner)
+            .is_some_and(|u| matches!(u.controller, Controller::Player { .. }))
+        {
+            if !pad.has_look() {
+                return input;
+            }
+            let (turn, pitch) = super::look::look_steer(input.turn, input.pitch, pad.look());
+            HoverInput {
+                turn,
+                pitch,
+                ..input
+            }
+        } else {
+            HoverInput {
+                human: false,
+                boost: false,
+                jump: false,
+                ..input
+            }
+        }
     }
 
     pub(super) fn tick_guided(&mut self, pads: &[PadState], dt: f32) {
@@ -253,23 +285,46 @@ impl Sim {
             {
                 r.pending_end = Some(GuidedEnd::Returned);
             }
+            if let Some((end, held)) = r.spent {
+                let held = held + dt;
+                r.spent = Some((end, held));
+                if r.pending_end.is_none() && held > c.hold_time {
+                    r.pending_end = Some(end);
+                }
+                self.guided[k] = r;
+                continue;
+            }
             if r.health <= 0.0 && r.pending_end.is_none() {
                 r.pending_end = Some(GuidedEnd::Destroyed);
             }
+            if r.pending_end.is_none() && r.energy() <= 0.0 {
+                let end = if c.flight.boost_speed > 0.0
+                    && r.speed() >= c.flight.boost_speed * c.critical_speed
+                {
+                    GuidedEnd::CriticalExpiry
+                } else {
+                    GuidedEnd::Expired
+                };
+                r.spent = Some((end, dt));
+                self.guided_blast(&r, end);
+                self.guided[k] = r;
+                continue;
+            }
             if r.pending_end.is_none() {
                 let previous = r.pos;
-                r.fly(c, pads.get(k).unwrap_or(&PadState::default()), dt);
-                if let Some(pos) = self.guided_contact(&r, previous) {
+                let pad = pads.get(k).copied().unwrap_or_default();
+                let input = self.guided_flight_input(&r, &pad);
+                let env = self.flyer_environment(
+                    input.human,
+                    self.landing_coverage(r.pos, 0.0),
+                    None,
+                    true,
+                    [0.0; 4],
+                );
+                r.fly(c, input, env, dt);
+                if let Some((pos, target)) = self.guided_contact(&r, previous) {
                     r.pos = pos;
-                    r.pending_end = Some(GuidedEnd::Impact);
-                } else if r.energy <= 0.0 {
-                    r.pending_end = Some(
-                        if r.boosted && r.vel.length() >= c.boost_speed * c.critical_speed {
-                            GuidedEnd::CriticalExpiry
-                        } else {
-                            GuidedEnd::Expired
-                        },
-                    );
+                    self.guided_strike(&mut r, target);
                 } else if r.pos.y < -5000.0 || self.death_regions.iter().any(|v| v.contains(r.pos))
                 {
                     r.pending_end = Some(GuidedEnd::Destroyed);
@@ -284,20 +339,9 @@ impl Sim {
                 continue;
             };
             let r = self.guided.remove(k);
-            let explosion = self.weapon_classes[r.weapon_class]
-                .guided
-                .as_ref()
-                .and_then(|c| c.explosion(end))
-                .cloned();
-            if let Some(e) = explosion {
-                let owner = self.item_owner(r.owner, r.team);
-                self.explode(&e, r.pos, Some(owner), Some(r.team));
+            if r.live() {
+                self.guided_blast(&r, end);
             }
-            self.events.push(Event::GuidedGone {
-                pos: r.pos,
-                weapon_class: r.weapon_class as u32,
-                end,
-            });
             self.release_remote(r.owner, r.prev_buttons);
             if let Some((vehicle, seat)) = r.seat {
                 let gun = self
@@ -323,17 +367,84 @@ impl Sim {
         }
     }
 
-    fn guided_contact(&self, r: &GuidedRocket, from: Vec3) -> Option<Vec3> {
+    fn guided_blast(&mut self, r: &GuidedRocket, end: GuidedEnd) {
+        let explosion = self.weapon_classes[r.weapon_class]
+            .guided
+            .as_ref()
+            .and_then(|c| c.explosion(end))
+            .cloned();
+        if let Some(e) = explosion {
+            let owner = self.item_owner(r.owner, r.team);
+            self.explode(&e, r.pos, Some(owner), Some(r.team));
+        }
+        self.events.push(Event::GuidedGone {
+            pos: r.pos,
+            weapon_class: r.weapon_class as u32,
+            end,
+        });
+    }
+
+    pub(super) fn guided_strike(&mut self, r: &mut GuidedRocket, target: Option<Target>) {
+        if r.energy() <= 0.0 {
+            return;
+        }
+        let Some(c) = self.guided_class(r) else {
+            return;
+        };
+        let f = &c.flight;
+        let [low, high] = c.contact_damage;
+        let damage = if f.boost_speed <= 0.0 {
+            low
+        } else {
+            let s = ((r.speed() - f.max_speed) / (f.boost_speed - f.max_speed)).clamp(0.0, 1.0);
+            (1.0 - s) * low + s * high
+        };
+        r.flyer.energy = 0.0;
+        let Some(target) = target else {
+            return;
+        };
+        let desc = DamageDesc {
+            damage,
+            scales: [1.0; 7],
+            shield_scale: 1.0,
+        };
+        let owner = self.item_owner(r.owner, r.team);
+        let dir = r.vel.normalize_or_zero();
+        match target {
+            Target::Unit(h) => {
+                let shooter_is_player = self.unit(owner).is_some_and(|u| u.is_player);
+                let mult = self.buff_scale(Some(owner), h);
+                let Some(dealt) =
+                    self.shot_strikes_unit(r.team, shooter_is_player, h, &desc, mult, false)
+                else {
+                    return;
+                };
+                self.finish_direct_damage(h, Some(owner), dealt, 0.0, dir);
+            }
+            Target::Vehicle(vh) => {
+                self.damage_vehicle_by(vh, &desc, 1.0, Some(owner), Some(r.team), Some(dir));
+            }
+            Target::Station(s) => {
+                self.damage_station(s, &desc, 1.0, Some(owner), Some(r.team));
+            }
+            t @ (Target::Droid(_) | Target::Turret(_)) => {
+                self.damage_item(t, damage, &desc.scales, Some(r.team), Some(owner));
+            }
+            _ => {}
+        }
+    }
+
+    fn guided_contact(&self, r: &GuidedRocket, from: Vec3) -> Option<(Vec3, Option<Target>)> {
         let delta = r.pos - from;
         let len = delta.length();
         if len <= 0.0 {
             return None;
         }
         let dir = delta / len;
-        let mut nearest = None;
-        let mut offer = |distance: f32| {
-            if distance <= len && nearest.is_none_or(|t| distance < t) {
-                nearest = Some(distance);
+        let mut nearest: Option<(f32, Option<Target>)> = None;
+        let mut offer = |distance: f32, target: Option<Target>| {
+            if distance <= len && nearest.is_none_or(|(t, _)| distance < t) {
+                nearest = Some((distance, target));
             }
         };
         if let Some(hf) = &self.heightfield {
@@ -346,7 +457,7 @@ impl Sim {
                 crate::projectile::TERRAIN_RAY_STEP,
             ) {
                 if !self.collision.is_cut(from + dir * hit) {
-                    offer(hit);
+                    offer(hit, None);
                 }
             }
         }
@@ -354,20 +465,27 @@ impl Sim {
             self.collision
                 .ray_with(from, dir, len, Layers::ORDNANCE, HullFilter::All)
         {
-            offer(hit.t);
+            let target = match hit.owner {
+                Some(v) => Some(Target::Vehicle(v)),
+                None => match crate::projectile::building_hit(&self.collision, hit.instance) {
+                    Hit::Target(t) => Some(t),
+                    _ => None,
+                },
+            };
+            offer(hit.t, target);
         }
         if let Some(t) = self
             .water_plane()
             .and_then(|water| water.crossing(from, dir))
         {
-            offer(t);
+            offer(t, None);
         }
-        for (_, u) in self
+        for (h, u) in self
             .alive_units()
             .filter(|(h, u)| *h != r.owner && u.mount.is_none())
         {
             if let Some((t, _)) = u.bolt_prims().hit(from, dir, len) {
-                offer(t);
+                offer(t, Some(Target::Unit(h)));
             }
         }
         for d in self
@@ -378,7 +496,7 @@ impl Sim {
             if let Some(t) =
                 crate::unit::ray_sphere(from, dir, d.pos, crate::remote::RADIUS + RADIUS)
             {
-                offer(t);
+                offer(t, Some(Target::Droid(d.id)));
             }
         }
         for turret in self.turrets.iter().filter(|t| t.health > 0.0) {
@@ -388,10 +506,10 @@ impl Sim {
                 turret.centre(),
                 crate::autoturret::RADIUS + RADIUS,
             ) {
-                offer(t);
+                offer(t, Some(Target::Turret(turret.id)));
             }
         }
-        nearest.map(|t| from + dir * t)
+        nearest.map(|(t, target)| (from + dir * t, target))
     }
 }
 

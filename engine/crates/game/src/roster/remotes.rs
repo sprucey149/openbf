@@ -146,16 +146,31 @@ fn guided_weapon(db: &ClassDb, name: &str, src: &dyn PropSource, ord: &str) -> R
     class.noncritical = osrc
         .prop_hash(0x8a32_3f32)
         .and_then(|n| explosion_class(db, n.trim()));
+    class.flight = crate::vehicle_pads::flyer_params(db, ord, true, 0.0)
+        .with_context(|| format!("{name}: {ord} is not a flyer class"))?;
+    if let Some(seat) = crate::vehicle_class::seats(db, ord).first() {
+        class.view = core::guided::GuidedView {
+            eye_point_offset: seat.eye_point_offset,
+            track_center: seat.track_center,
+            track_offset: seat.track_offset,
+            slow_offset: seat.slow_offset,
+            fast_offset: seat.fast_offset,
+            fast_fov: seat.fast_fov,
+            third_person_fov: seat.third_person_fov,
+            move_tension: seat.move_tension,
+        };
+    }
     let mut w = WeaponClass::from_props(name, src, OrdnanceClass::default());
     core::weapon::Dispenser::new(&mut w, src, true, ());
     w.thrown = None;
     w.ordnance.geometry = db.prop(ord, "GeometryName").map(str::to_owned);
-    w.ordnance.velocity = class.speeds[1];
+    let f = &class.flight;
+    w.ordnance.velocity = f.min_speed;
     anyhow::ensure!(
-        class.speeds[1] > 0.0 && class.energy > 0.0 && class.energy_restore < 0.0,
+        f.min_speed > 0.0 && f.energy_max > 0.0 && f.energy_auto_restore < 0.0,
         "{name}: missing guided flyer movement or lifetime properties"
     );
-    w.ordnance.life_span = class.energy / -class.energy_restore;
+    w.ordnance.life_span = f.energy_max / -f.energy_auto_restore;
     w.ordnance.explosion = class.explosion.clone();
     w.guided = Some(Box::new(core::guided::GuidedWeapon::new(src, class)));
     Ok(w)

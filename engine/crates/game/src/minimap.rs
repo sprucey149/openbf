@@ -34,6 +34,67 @@ const CONE_COS: f32 = 0.913_545_5; // cos 24°
 /// `[ours]`, PROVISIONAL: "while the unit fires" = a shot within this many seconds.
 const FIRING_SECONDS: f32 = 0.5;
 
+pub fn carrier_marker(
+    sim: &core::sim::Sim,
+    carrier: core::unit::UnitHandle,
+    viewer: core::unit::UnitHandle,
+) -> Option<(Vec3, bool)> {
+    let unit = sim.unit(carrier)?;
+    if !unit.alive {
+        return None;
+    }
+    let friendly = unit.team == sim.unit(viewer)?.team;
+    if let Some(mount) = unit.mount {
+        let vehicle = sim
+            .vehicles
+            .get(mount.vehicle.index as usize)
+            .filter(|v| v.gen == mount.vehicle.gen && v.alive)?;
+        let radius = sim
+            .blast_setup
+            .get(vehicle.class as usize)
+            .and_then(Option::as_ref)
+            .map(|b| b.sphere_radius)
+            .or_else(|| {
+                sim.seat_setup
+                    .get(vehicle.class as usize)
+                    .and_then(Option::as_ref)
+                    .map(|s| s.radius)
+            })?;
+        let offset = if carrier == viewer {
+            Vec3::new(0.0, 0.3, -0.2 * radius)
+        } else {
+            Vec3::Y * (0.7 * radius).min(4.0)
+        };
+        Some((vehicle.pos + vehicle.rot * offset, friendly))
+    } else {
+        Some((
+            unit.soldier.pos + Vec3::Y * (0.7 * unit.capsule().height).min(4.0),
+            friendly,
+        ))
+    }
+}
+
+pub fn ctf_marker(sim: &core::sim::Sim, flag: &core::sim::Flag, team: u8) -> Option<(Vec3, bool)> {
+    match flag.status {
+        core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => {
+            Some((flag.current_pos, false))
+        }
+        core::sim::FlagStatus::Carried { carrier } => {
+            if sim.unit(carrier)?.team != team {
+                return None;
+            }
+            Some((
+                sim.ctf
+                    .as_ref()?
+                    .capture_regions
+                    .get(usize::from(team))?
+                    .pos,
+                true,
+            ))
+        }
+    }
+}
+
 /// A class's icon and view radii.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClassIcon {
@@ -443,6 +504,31 @@ impl MapStatic {
                 number: None,
             });
         }
+        let mut markers = Vec::new();
+        if let Some(ctf) = sim
+            .ctf
+            .as_ref()
+            .filter(|ctf| ctf.mode == core::sim::CtfMode::OneFlag)
+        {
+            for flag in &ctf.flags {
+                let Some((pos, delivery)) = ctf_marker(sim, flag, own) else {
+                    continue;
+                };
+                markers.push(MapIcon {
+                    pos: [pos.x, pos.z],
+                    texture: if delivery {
+                        "hud_objective_icon_circle"
+                    } else {
+                        "hud_target_flag_onscreen"
+                    }
+                    .into(),
+                    scale: 0.9 + 3.0 * (clock % 1.0),
+                    color: [223, 223, 32],
+                    heading: None,
+                    number: None,
+                });
+            }
+        }
         MapModel {
             sheet_dir: Some(self.sheet_dir.clone()),
             image: self.image.clone(),
@@ -455,6 +541,7 @@ impl MapStatic {
             radius: view_radius(view, (vel.x * vel.x + vel.z * vel.z).sqrt()),
             posts,
             units,
+            markers,
             ..MapModel::default()
         }
     }
@@ -574,6 +661,82 @@ pub fn spawn_still(scene: &crate::assets::Scene, select: Option<usize>) -> MapMo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_flag_markers_follow_the_carriers_team() {
+        let mut sim = core::sim::Sim::empty(1);
+        let home = Vec3::new(10.0, 20.0, 30.0);
+        let goal0 = Vec3::new(100.0, 0.0, 0.0);
+        let goal1 = -goal0;
+        sim.ctf = Some(core::sim::CtfState::new_space_one_flag(
+            5, home, goal0, goal1,
+        ));
+        let carrier = sim.spawn(&core::unit::UnitSpec::trooper(1, home)).unwrap();
+        assert_eq!(
+            ctf_marker(&sim, &sim.ctf.as_ref().unwrap().flags[0], 0),
+            Some((home, false))
+        );
+        sim.ctf.as_mut().unwrap().flags[0].status = core::sim::FlagStatus::Carried { carrier };
+        let flag = &sim.ctf.as_ref().unwrap().flags[0];
+        assert_eq!(ctf_marker(&sim, flag, 1), Some((goal1, true)));
+        assert_eq!(ctf_marker(&sim, flag, 0), None);
+    }
+
+    #[test]
+    fn carrier_marker_tracks_live_unit_and_relation() {
+        let mut sim = core::sim::Sim::empty(1);
+        let viewer = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, Vec3::ZERO))
+            .unwrap();
+        let carrier = sim
+            .spawn(&core::unit::UnitSpec::trooper(1, Vec3::new(2.0, 3.0, 4.0)))
+            .unwrap();
+        let (point, friendly) = carrier_marker(&sim, carrier, viewer).unwrap();
+        assert!(!friendly);
+        assert!(point.y > sim.unit(carrier).unwrap().soldier.pos.y);
+        sim.unit_mut(carrier).unwrap().team = 0;
+        assert!(carrier_marker(&sim, carrier, viewer).unwrap().1);
+        sim.unit_mut(carrier).unwrap().alive = false;
+        assert!(carrier_marker(&sim, carrier, viewer).is_none());
+    }
+
+    #[test]
+    fn carrier_marker_follows_flyer_rotation_and_viewer() {
+        use core::vehicle::{BlastSetup, SeatKind, VehicleKind, VehicleSpec};
+        let mut sim = core::sim::Sim::empty(1);
+        let pilot = sim
+            .spawn(&core::unit::UnitSpec::trooper(0, Vec3::ZERO))
+            .unwrap();
+        let observer = sim
+            .spawn(&core::unit::UnitSpec::trooper(1, Vec3::ZERO))
+            .unwrap();
+        let flyer = sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: Some(0),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::new(10.0, 20.0, 30.0),
+            yaw: 0.0,
+            max_health: 1000.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        sim.blast_setup = vec![Some(BlastSetup {
+            explosion: None,
+            sphere_centre: Vec3::ZERO,
+            sphere_radius: 10.0,
+        })];
+        assert!(sim.seat_unit(pilot, flyer, 0));
+        let vehicle = &mut sim.vehicles[flyer.index as usize];
+        vehicle.rot = glam::Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let (own, friendly) = carrier_marker(&sim, pilot, pilot).unwrap();
+        assert!(friendly);
+        assert!((own - Vec3::new(8.0, 20.3, 30.0)).length() < 0.001);
+        let (other, friendly) = carrier_marker(&sim, pilot, observer).unwrap();
+        assert!(!friendly);
+        assert!((other - Vec3::new(10.0, 24.0, 30.0)).length() < 0.001);
+    }
 
     fn region(rotation: [[f32; 3]; 3], size: [f32; 3]) -> ManifestRegion {
         ManifestRegion {

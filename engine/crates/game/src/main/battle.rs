@@ -5,6 +5,10 @@
 //! post boxes ([`walk_draws`]), the squad icons, and the HUD and spawn-screen
 //! models the `ui` crate paints.
 
+#[path = "battle/ctf_hud.rs"]
+mod ctf_hud;
+use ctf_hud::{hud_hints, marker_screen};
+
 use super::BattleSetup;
 use anyhow::Result;
 use game::viewer::{upload_scene, SceneGpu};
@@ -470,6 +474,7 @@ pub(super) fn make_walk_with_counts(
                 walk.vehicle_seats = p.seats;
                 walk.vehicle_weapon_hud = p.weapon_hud;
                 walk.walker_shot_styles = p.walker_shot_styles;
+                walk.flyer_exhaust = p.flyer_exhaust;
                 walk.load_walker_views(&scene.manifest, scene.dir.parent().unwrap_or(&scene.dir));
                 walk.load_vehicle_tops(
                     &scene.manifest,
@@ -643,89 +648,6 @@ fn ctf_capture_goals(
     goals
 }
 
-fn marker_screen(view_proj: glam::Mat4, pos: glam::Vec3) -> ([f32; 2], bool) {
-    let clip = view_proj * pos.extend(1.0);
-    // Divide by |w|, not w: a target behind the camera has w < 0, and the
-    // signed divide would mirror it to the wrong edge. |w| keeps the sign of
-    // the view-space x/y so the clamped marker points toward the target
-    // (`re-hud-map.md` §5, `FUN_00179c10`).
-    let w = clip.w.abs().max(1.0e-4);
-    let (mut x, mut y) = (clip.x / w, -clip.y / w);
-    let bound = x.abs().max(y.abs());
-    const EDGE: f32 = 0.9;
-    let on_screen = clip.w > 0.0 && bound <= EDGE;
-    if !on_screen && bound > 0.0 {
-        x *= EDGE / bound;
-        y *= EDGE / bound;
-    }
-    ([x, y], on_screen)
-}
-
-fn hud_hints(
-    walk: &WalkSim,
-    feed: &mut game::event_feed::EventFeed,
-    slot: usize,
-    aspect: f32,
-) -> Vec<ui::hud_tree::HintMarker> {
-    let locked = walk.sim.lock_on_target(slot).map(|(t, _)| t);
-    let camera = walk.camera();
-    let view_proj = camera.view_proj(aspect);
-    let mut hints: Vec<ui::hud_tree::HintMarker> = feed
-        .target_hints(&walk.sim, slot)
-        .iter()
-        .filter(|h| Some(h.target) != locked)
-        .filter_map(|h| {
-            let (ndc, on_screen) = marker_screen(view_proj, h.point);
-            on_screen.then(|| ui::hud_tree::HintMarker {
-                ndc,
-                distance: (h.point - camera.position).length(),
-                friendly: h.friendly,
-                visible: h.visible,
-                on_screen: true,
-                flag: false,
-                tint: None,
-            })
-        })
-        .collect();
-
-    if let Some(ctf) = &walk.sim.ctf {
-        let me_team = walk.sim.unit(walk.player).map_or(0, |u| u.team);
-        let yellow = Some(ui::hud::message_color::YELLOW.map(f32::from));
-        for flag in &ctf.flags {
-            let (pos, friendly) = match flag.status {
-                core::sim::FlagStatus::AtHome | core::sim::FlagStatus::Dropped { .. } => {
-                    (flag.current_pos, true)
-                }
-                core::sim::FlagStatus::Carried { carrier } => {
-                    if carrier == walk.player {
-                        (
-                            ctf.capture_regions
-                                .get(me_team as usize)
-                                .map_or(flag.current_pos, |r| r.pos),
-                            true,
-                        )
-                    } else {
-                        let carrier_team = walk.sim.unit(carrier).map_or(0, |u| u.team);
-                        (flag.current_pos, carrier_team == me_team)
-                    }
-                }
-            };
-            let (ndc, on_screen) = marker_screen(view_proj, pos);
-            hints.push(ui::hud_tree::HintMarker {
-                ndc,
-                distance: (pos - camera.position).length(),
-                friendly,
-                visible: true,
-                on_screen,
-                flag: true,
-                tint: yellow,
-            });
-        }
-    }
-
-    hints
-}
-
 fn hud_lock(
     walk: &WalkSim,
     feed: &game::event_feed::EventFeed,
@@ -794,7 +716,7 @@ pub(super) fn hud_model(
         .and_then(|round| feed.space_status(&walk.sim, round, me.team));
     let (stamina, stamina_max) = me.stamina_bar();
     let (hp, hp_max, energy, energy_max) = match (guided, droid) {
-        (Some((r, c)), _) => (r.health, c.health, r.energy, c.energy),
+        (Some((r, c)), _) => (r.health, c.health, r.energy(), c.flight.energy_max),
         // [ours] Flying a droid, the stamina bar runs down its 90 s.
         (None, Some((d, c))) => (
             d.health,
@@ -897,6 +819,24 @@ pub(super) fn hud_model(
                     .map(|(points, limit)| (points.map(|p| p as i32), limit))
             }),
         ctf: walk.sim.ctf.is_some(),
+        flag_status: walk
+            .sim
+            .ctf
+            .as_ref()
+            .filter(|c| c.mode == core::sim::CtfMode::OneFlag)
+            .and_then(|c| c.flags.first())
+            .and_then(|flag| match flag.status {
+                core::sim::FlagStatus::AtHome => None,
+                core::sim::FlagStatus::Dropped { .. } => Some(ui::hud_flag::FlagStatus::Dropped),
+                core::sim::FlagStatus::Carried { carrier } => {
+                    walk.sim
+                        .unit(carrier)
+                        .map(|unit| ui::hud_flag::FlagStatus::Carried {
+                            friendly: unit.team == me.team,
+                            player_first_person: carrier == walk.player && walk.first_person(),
+                        })
+                }
+            }),
         space: space_status,
         outcome: walk.sim.outcome,
         countdown: walk

@@ -318,7 +318,11 @@ impl<'a> Ctx<'a> {
     fn hint_markers(&mut self, size: [f32; 2], scale: [f32; 2]) {
         let hud = self.hud;
         for marker in &hud.hint_markers {
-            let styles = if marker.flag {
+            let styles = if marker.carrier {
+                &hud.carrier_styles
+            } else if marker.objective {
+                &hud.objective_styles
+            } else if marker.flag {
                 &hud.flag_styles
             } else {
                 &hud.hint_styles
@@ -339,11 +343,19 @@ impl<'a> Ctx<'a> {
             });
             let t = ((marker.distance - LOCK_RAMP_NEAR) / (LOCK_RAMP_FAR - LOCK_RAMP_NEAR))
                 .clamp(0.0, 1.0);
-            let s = if marker.flag || !marker.on_screen {
-                t * style.min_scale + (1.0 - t) * style.max_scale
+            let mut s = if marker.carrier && marker.flyer_view && marker.on_screen {
+                let scale = t * 0.5 + (1.0 - t) * 0.8;
+                scale * if marker.own_carrier { 1.6 } else { 1.0 }
+            } else if marker.flag || marker.carrier || marker.objective || !marker.on_screen {
+                t * style.max_scale + (1.0 - t) * style.min_scale
             } else {
                 t * HINT_SCALE_FAR + (1.0 - t) * HINT_SCALE_NEAR
             };
+            if marker.on_screen {
+                if let Some(pulse) = marker.pulse {
+                    s = s * (1.0 - pulse) + 0.9;
+                }
+            }
             let at = [
                 (marker.ndc[0] * 0.5 + 0.5) * size[0],
                 (marker.ndc[1] * 0.5 + 0.5) * size[1],

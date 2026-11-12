@@ -38,16 +38,12 @@ fn guided(walk: &WalkSim, class: usize) -> core::guided::GuidedRocket {
         pos: Vec3::ZERO,
         vel: Vec3::Z * 30.0,
         rot: Quat::IDENTITY,
-        pitch_rate: 0.0,
-        turn_rate: 0.0,
-        roll_input: 0.0,
-        bank: 0.0,
+        flyer: core::vehicle::flyer::FlyerState::default(),
         health: 1.0,
-        energy: 200.0,
         age: 1.0,
-        boosted: false,
         prev_buttons: 0,
         pending_end: None,
+        spent: None,
         blind: 0.0,
     }
 }

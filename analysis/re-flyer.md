@@ -32,6 +32,42 @@ overlap, writes the float at flyer+`0x668`, and sets bit 5 at +`0x660`
 refreshed (B2:116574–116580). These are hangar/landing caps, not generic
 BF2 speed caps and not a distinction between atmospheric and space physics.
 
+Correction after the shield-edge playtest: BF2 `FUN_00202d08` requires the
+overlap to exceed 0.99 when a flying craft requests landing (117193–117218),
+while any nonzero overlap blocks firing (118290–118318). The earlier port
+used origin membership for both. The box calculation in `FUN_005ad8e0`
+(732152–732215) makes the 0.99 threshold a sphere inset of 0.98 times its
+radius. See `re-space-assault.md` for the rejected touchdown workaround and
+the unchecked original-game comparison.
+
+### Flyer form animation investigation
+
+BF2 `FUN_002120e8` (125355–125389) looks up the flyer's `takeoff` and `fins`
+clips in its named animation bank. `FUN_00201300` (114590–114640)
+samples `takeoff` at its lift fraction times the clip's last frame, with a
+render-frame adjustment during the transition. The local BF2 side banks
+contain a 121-frame `takeoff` clip for `all_fly_xwing` and a 72-frame clip
+for `cis_fly_droidfighter`; both were omitted by the vehicle bake,
+which previously only baked walker skins. The vehicle bake now writes these
+flyer rigs and clips and the runtime samples them using the interpolated
+lift fraction. The rendered model can therefore transform through landed,
+takeoff, flying and landing. Exhaust attachments follow the sampled node;
+weapon origins still use their bind poses, so trace and implement their
+animated transforms. A matched PCSX2 visual comparison remains outstanding.
+The maintainer playtested the transformation build and reported that it worked.
+
+At revision b5f1818a plus this change, local PS2 ALL and CIS vehicle bakes
+produced the X-wing and droid starfighter rigs. Sampling their first and last
+frames moved 2,199 of 2,846 X-wing vertices and 3,031 of 3,031 droid
+starfighter vertices by over 1 cm. `cargo test --manifest-path
+engine/Cargo.toml -p game --test flyer baked_flyer_takeoff_clips_move_the_models`
+passed, as did the synthetic lift interpolation and manifest round-trip
+checks. These establish a changing pose, not visual agreement with PCSX2.
+`scripts/gpu_tests.sh --game-lib flyer_draw_changes_with_takeoff_lift` passed
+its serial headless GPU test, and `cargo test --manifest-path engine/Cargo.toml
+-p game --lib flyer_exhaust_follows_the_animated_attachment` passed its
+attachment test. Both are controlled tests rather than original-game captures.
+
 **Installed for space only (2026-11-01).** The sim implements these rules against
 `Sim::landing_regions`, filled from the mission's `landing_regions`, which
 `scripts/gen_missions.py` reads from `AddLandingRegion`. Only the space scripts make

@@ -277,6 +277,8 @@ impl Renderer {
                 light: s.emission.unwrap_or(LightPath::Lit) as u32,
                 fade: mesh::NO_FADE,
                 lights: [0; 4],
+                region_top: [0.0; 4],
+                region_bottom: [0.0; 4],
             })
             .collect();
         if dome_gain != 1.0 {
@@ -331,6 +333,13 @@ impl Renderer {
         }
         instances.extend(order.iter().map(|&i| {
             let (cull, cull_near) = crate::draw::instance_cull(&draws[i]);
+            let region = draws[i].region_lit.and_then(|sphere| {
+                crate::lighting::character_region_light(
+                    &self.character_light_regions,
+                    &lighting,
+                    sphere,
+                )
+            });
             Instance {
                 model: draws[i].model.to_cols_array_2d(),
                 color: draws[i].color,
@@ -341,6 +350,8 @@ impl Renderer {
                     .fade
                     .map_or(mesh::NO_FADE, |f| [f.begin, f.end, f.near, f.opacity]),
                 lights: draw_lights[i],
+                region_top: region.map_or([0.0; 4], |r| [r[0][0], r[0][1], r[0][2], r[0][3] + 1.0]),
+                region_bottom: region.map_or([0.0; 4], |r| r[1]),
             }
         }));
         if !instances.is_empty() {
@@ -401,6 +412,8 @@ impl Renderer {
                         light: d.light as u32 | crate::affine::layer_bit(d.layer),
                         fade: mesh::NO_FADE,
                         lights: skinned_lights(d.lit),
+                        region_top: [0.0; 4],
+                        region_bottom: [0.0; 4],
                     };
                     if d.light == LightPath::Character {
                         let sphere = d.lit.unwrap_or(crate::LitSphere {
@@ -1030,7 +1043,7 @@ impl Renderer {
             // skinned ones where their distance puts them. Passing from one
             // kind to the other rebinds the pipeline and the instance buffer.
             let mut world_slot = blend_base;
-            let mut bound_skinned: Option<bool> = None;
+            let mut bound_skinned: Option<(bool, bool, bool)> = None;
             if !ab.skips("sky") {
                 pass.set_bind_group(0, &self.globals_bg, &[]);
                 pass.set_vertex_buffer(1, self.instance_buf.slice(..));
@@ -1041,12 +1054,16 @@ impl Renderer {
             }
             for &b in blended.iter().filter(|_| !ab.skips("blend")) {
                 let skin = matches!(b, Blended::Skinned(_));
-                if bound_skinned != Some(skin) {
-                    pass.set_pipeline(match (skin, fade) {
-                        (false, false) => &self.blend_pipeline,
-                        (false, true) => &self.fade_blend_pipeline,
-                        (true, false) => &self.skinned_blend_pipeline,
-                        (true, true) => &self.fade_skinned_blend_pipeline,
+                let additive = matches!(b, Blended::World(i) if draws[i].additive);
+                let fading = fade || matches!(b, Blended::World(i) if draws[i].fade.is_some());
+                if bound_skinned != Some((skin, fading, additive)) {
+                    pass.set_pipeline(match (skin, fading, additive) {
+                        (false, false, true) => &self.additive_blend_pipeline,
+                        (false, true, true) => &self.fade_additive_blend_pipeline,
+                        (false, false, false) => &self.blend_pipeline,
+                        (false, true, false) => &self.fade_blend_pipeline,
+                        (true, false, _) => &self.skinned_blend_pipeline,
+                        (true, true, _) => &self.fade_skinned_blend_pipeline,
                     });
                     pass.set_bind_group(0, &self.globals_bg, &[]);
                     pass.set_vertex_buffer(
@@ -1057,7 +1074,7 @@ impl Renderer {
                             self.instance_buf.slice(..)
                         },
                     );
-                    bound_skinned = Some(skin);
+                    bound_skinned = Some((skin, fading, additive));
                 }
                 match b {
                     Blended::World(i) => {

@@ -150,6 +150,52 @@ fn a_rebuilt_generator_restores_the_full_pool() {
 }
 
 #[test]
+fn mainframe_repair_restores_linked_turret_team_only_at_full_health() {
+    let mut w = world(180);
+    let mainframe = station(&mut w.sim, 100.0, 1);
+    let turret = w.sim.add_building_turret(
+        VehicleSpec {
+            kind: VehicleKind::Turret,
+            class: 0,
+            home_team: Some(1),
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: HealthType::Vehicle,
+            seats: vec![],
+        },
+        glam::Quat::IDENTITY,
+        None,
+        42,
+        (TurretFall::Hidden, vec![]),
+    );
+    w.sim
+        .space_assault
+        .as_mut()
+        .unwrap()
+        .turrets
+        .push(LinkedTurretSet {
+            mainframe: Some(mainframe),
+            team: 1,
+            turrets: vec![42],
+            disabled: false,
+        });
+    assert_eq!(w.sim.vehicle(turret).unwrap().team, Some(1));
+    w.sim
+        .damage_station(mainframe, &desc(100.0), 1.0, None, Some(0));
+    w.sim.tick_space_assault(0.1);
+    assert_eq!(w.sim.vehicle(turret).unwrap().team, None);
+    w.sim.repair_station(mainframe, 99.0);
+    w.sim.tick_space_assault(0.1);
+    assert_eq!(w.sim.vehicle(turret).unwrap().team, None);
+    w.sim.repair_station(mainframe, 1.0);
+    w.sim.tick_space_assault(0.1);
+    assert_eq!(w.sim.vehicle(turret).unwrap().team, Some(1));
+}
+
+#[test]
 fn a_critical_system_scores_once_and_its_link_scores_nothing() {
     let mut w = world(180);
     let killer = soldier(&mut w.sim, 0);

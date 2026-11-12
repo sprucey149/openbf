@@ -6,7 +6,7 @@
 //! ray, height band and landing-region membership, then handles contacts.
 //! There is no terrain-following hover spring and no artificial pitch cap.
 
-use super::hover::{quat_x, quat_z};
+use super::hover::{quat_x, quat_z, HoverInput};
 use super::Vehicle;
 use crate::fmath;
 use glam::{Quat, Vec3};
@@ -185,6 +185,21 @@ impl FlyerParams {
         } else {
             [self.min_speed, self.mid_speed, self.max_speed]
         }
+    }
+
+    pub fn exhaust_scale(&self, [low, high, start]: [f32; 3], speed: f32) -> f32 {
+        let top = if self.max_speed != 0.0 {
+            self.max_speed
+        } else {
+            1.0
+        };
+        let floor = if self.min_speed != 0.0 {
+            self.min_speed + start * (top - self.min_speed)
+        } else {
+            start * top
+        };
+        let t = ((speed - floor) / (top.max(self.boost_speed) - floor)).max(0.0);
+        low + t * (high - low)
     }
 }
 
@@ -584,6 +599,7 @@ pub struct FlyerEnvironment {
     pub min_height: f32,
     pub max_height: f32,
     pub in_landing_region: bool,
+    pub almost_inside_landing_region: bool,
     /// BF2 maps which register landing regions permit the toggle only in
     /// one. Maps without any registered region retain unrestricted landing.
     pub require_landing_region: bool,
@@ -598,6 +614,7 @@ impl Default for FlyerEnvironment {
             min_height: -200.0,
             max_height: 200.0,
             in_landing_region: false,
+            almost_inside_landing_region: false,
             player_aboard: false,
             crash_random: [0.0; 4],
             require_landing_region: false,
@@ -806,7 +823,6 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     }
     let occupied = !v.is_empty();
     let has_pilot = v.has_pilot();
-    let input = v.input;
     if p.bf2
         && !p.never_crash_when_unpiloted
         && matches!(v.flyer.phase, FlightPhase::Takeoff | FlightPhase::Flying)
@@ -816,13 +832,48 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         v.flyer.phase = FlightPhase::Falling;
         v.flyer.crash_timer = ABANDONED_CRASH_TIME;
     }
-    let s = &mut v.flyer;
+    fly(
+        Flight {
+            pos: &mut v.pos,
+            vel: &mut v.vel,
+            rot: &mut v.rot,
+            state: &mut v.flyer,
+            input: v.input,
+            occupied,
+        },
+        p,
+        env,
+        dt,
+    );
+}
+
+/// A flyer body the kernel moves: a vehicle's, or a guided rocket's, which the
+/// PS2 builds as a flyer entity too (`analysis/re-guided-rockets.md`).
+pub struct Flight<'a> {
+    pub pos: &'a mut Vec3,
+    pub vel: &'a mut Vec3,
+    pub rot: &'a mut Quat,
+    pub state: &'a mut FlyerState,
+    pub input: HoverInput,
+    pub occupied: bool,
+}
+
+/// One tick of [`step`]'s motion after its abandoned-craft check.
+pub fn fly(f: Flight, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
+    let Flight {
+        pos,
+        vel,
+        rot,
+        state: s,
+        input,
+        occupied,
+    } = f;
     let toggle = input.jump && !s.jump_was_down;
     s.jump_was_down = input.jump;
-    let mut frame = v.rot * quat_x(-s.tilt_pitch) * quat_z(-s.tilt_roll);
-    let clearance = env.ground.map_or(1024.0, |g| v.pos.y - g.height);
+    let mut frame = *rot * quat_x(-s.tilt_pitch) * quat_z(-s.tilt_roll);
+    let clearance = env.ground.map_or(1024.0, |g| pos.y - g.height);
     let normal = env.ground.map_or(Vec3::Y, |g| g.normal);
-    let current_speed = v.vel.dot(v.rot * Vec3::Z);
+    let current_speed = vel.dot(*rot * Vec3::Z);
     // BF2's energy helper permits the tick which drains past zero, then
     // recovers at 20 (or the smaller authored maximum).
     // The original blocks recovery during stunts, not ordinary boost.
@@ -868,7 +919,8 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         }
         FlightPhase::Flying => {
             s.lift = 1.0;
-            if toggle && (!p.bf2 || !env.require_landing_region || env.in_landing_region) {
+            if toggle && (!p.bf2 || !env.require_landing_region || env.almost_inside_landing_region)
+            {
                 s.phase = FlightPhase::Landing;
             }
         }
@@ -895,10 +947,10 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         FlightPhase::Crashed => {}
     }
     if s.phase == FlightPhase::Landed {
-        v.vel = Vec3::ZERO;
+        *vel = Vec3::ZERO;
         s.omega = Vec3::ZERO;
         if s.tilt_pitch != 0.0 || s.tilt_roll != 0.0 {
-            v.rot = frame;
+            *rot = frame;
         }
         s.tilt_pitch = 0.0;
         s.tilt_roll = 0.0;
@@ -989,15 +1041,15 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
     let up = frame * Vec3::Y;
     let mut pitch = input.pitch.clamp(-1.0, 1.0);
     // Both updates bend the pitch back before the authored height band.
-    if s.phase == FlightPhase::Flying && v.vel.y != 0.0 && input.human {
-        let (height, away) = if v.vel.y < 0.0 {
+    if s.phase == FlightPhase::Flying && vel.y != 0.0 && input.human {
+        let (height, away) = if vel.y < 0.0 {
             (env.min_height, Vec3::Y)
         } else {
             (env.max_height, Vec3::NEG_Y)
         };
-        let proximity = ((height - v.pos.y) * 0.5 / v.vel.y).clamp(0.0, 1.0);
+        let proximity = ((height - pos.y) * 0.5 / vel.y).clamp(0.0, 1.0);
         let toward = away.dot(forward);
-        if proximity < 1.0 && toward * v.vel.dot(forward) <= 0.0 {
+        if proximity < 1.0 && toward * vel.dot(forward) <= 0.0 {
             let correction = if away.dot(up) > 0.0 { -toward } else { toward };
             let correction =
                 (correction / (p.pitch_rate * dt).max(f32::MIN_POSITIVE)).clamp(-1.0, 1.0);
@@ -1034,17 +1086,17 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
                 };
                 let blend = (p.velocity_filter * dt).clamp(0.0, 1.0);
                 let target =
-                    v.rot * Vec3::Z * speed - right * s.strafe_speed - up * s.strafe_vertical;
-                v.vel = v.vel * (1.0 - blend) + target * blend;
-                let forward_speed = v.vel.dot(v.rot * Vec3::Z);
+                    *rot * Vec3::Z * speed - right * s.strafe_speed - up * s.strafe_vertical;
+                *vel = *vel * (1.0 - blend) + target * blend;
+                let forward_speed = vel.dot(*rot * Vec3::Z);
                 if forward_speed > 0.0 && forward_speed != speed {
-                    v.vel *= speed / forward_speed;
+                    *vel *= speed / forward_speed;
                 }
             } else {
                 s.omega.x = filtered(s.omega.x, pitch_target, p.pitch_filter, dt);
                 s.omega.y = filtered(s.omega.y, turn_target, p.turn_filter, dt);
                 s.omega.z = -p.level_filter * right.y;
-                v.vel = cruise_velocity;
+                *vel = cruise_velocity;
             }
         }
         FlightPhase::Takeoff | FlightPhase::Landing => {
@@ -1061,22 +1113,22 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
                 -p.landing_speed
             };
             let vertical = Vec3::Y * vertical * (height_factor * 0.875 + 0.125);
-            v.vel = vertical + (cruise_velocity - vertical) * s.lift;
+            *vel = vertical + (cruise_velocity - vertical) * s.lift;
         }
         FlightPhase::Falling if p.bf2 => {
             crash_spin(s, p, env.crash_random[3], dt);
             let free = 1.0 - s.lift;
-            if v.vel.x * v.vel.x + v.vel.z * v.vel.z > 1.0 {
-                s.omega.x -= p.level_filter * up.dot(v.vel.normalize()) * free;
+            if vel.x * vel.x + vel.z * vel.z > 1.0 {
+                s.omega.x -= p.level_filter * up.dot(vel.normalize()) * free;
                 let blend = (p.pitch_filter * s.lift * dt).min(1.0);
                 s.omega.x += (pitch_target * 0.5 - s.omega.x) * blend;
             }
             let blend = (p.turn_filter * s.lift * dt).min(1.0);
             s.omega.y += (turn_target * 0.5 - s.omega.y) * blend;
             let blend = (p.level_filter * (s.lift * 0.75 + 0.25) * dt).min(1.0);
-            v.vel += (cruise_velocity - v.vel) * blend;
-            v.vel.y -= 9.8 * free * dt;
-            s.omega += forward.cross(v.vel) * CRASH_VELOCITY_SPIN * free * dt;
+            *vel += (cruise_velocity - *vel) * blend;
+            vel.y -= 9.8 * free * dt;
+            s.omega += forward.cross(*vel) * CRASH_VELOCITY_SPIN * free * dt;
             let [a, b, c, _] = env.crash_random;
             s.omega.x += (a - 0.5) * 0.25 + forward.y * 0.0625 + 0.0625;
             s.omega.y += (b - 0.5) * 0.25;
@@ -1091,13 +1143,13 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
             // and class-dependent death timers. Those are not transcribed;
             // this deterministic gravity/velocity component is a scoped slice.
             let response = p.level_filter * (s.lift * 0.75 + 0.25);
-            v.vel += (cruise_velocity - v.vel) * (response * dt).clamp(0.0, 1.0);
-            v.vel.y -= 9.8 * (1.0 - s.lift) * dt;
+            *vel += (cruise_velocity - *vel) * (response * dt).clamp(0.0, 1.0);
+            vel.y -= 9.8 * (1.0 - s.lift) * dt;
             s.omega *= (1.0 - p.level_filter * dt * 0.25).max(0.0);
         }
         FlightPhase::Landed | FlightPhase::Crashed => unreachable!(),
     }
-    let local_velocity = frame.conjugate() * v.vel;
+    let local_velocity = frame.conjugate() * *vel;
     // BF1 uses MaxSpeed; BF2 uses max(MaxSpeed, BoostSpeed) even outside
     // boost. Takeoff alone also divides by TurnRate (B1:85954;
     // B2:117113,118231,118641,118758).
@@ -1129,13 +1181,13 @@ pub fn step(v: &mut Vehicle, p: &FlyerParams, env: FlyerEnvironment, dt: f32) {
         let axis = s.omega * (sin / angular_speed);
         frame *= Quat::from_xyzw(axis.x, axis.y, axis.z, cos);
     }
-    v.pos += v.vel * dt;
+    *pos += *vel * dt;
     if p.bf2 {
         // Not `clamp`: a mission may set one end past the other's default,
         // and PS2's two tests do not panic. Its upper test goes first.
-        v.pos.y = v.pos.y.max(env.min_height - 0.2).min(env.max_height + 0.2);
+        pos.y = pos.y.max(env.min_height - 0.2).min(env.max_height + 0.2);
     }
-    v.rot = (frame * quat_z(s.tilt_roll) * quat_x(s.tilt_pitch)).normalize();
+    *rot = (frame * quat_z(s.tilt_roll) * quat_x(s.tilt_pitch)).normalize();
 }
 
 /// The uniform Catmull-Rom segment P1..P2 (FUN_00539970 / FUN_00539b60):

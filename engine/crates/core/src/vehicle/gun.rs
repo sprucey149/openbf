@@ -263,13 +263,14 @@ pub fn compose(look: (f32, f32), rel: (f32, f32)) -> (f32, f32) {
 }
 
 /// One weapon of a seat: its `Sim::weapon_classes` index and ammo.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GunWeapon {
     pub class: usize,
     /// `WeaponAmmo` < 1: never runs dry.
     pub infinite: bool,
     /// Otherwise the spare clips (`WeaponState::new`'s).
     pub reserve_clips: u32,
+    pub fire_points: Vec<Vec3>,
 }
 
 /// A seat's guns — SETUP data per class, like `SeatSetup`, NOT hashed.

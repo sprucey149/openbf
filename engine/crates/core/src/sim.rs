@@ -45,6 +45,7 @@ mod combat;
 pub mod ctf;
 mod damage_regions;
 pub mod deathmatch;
+mod deck;
 mod doors;
 mod droid_death;
 mod droidekas;

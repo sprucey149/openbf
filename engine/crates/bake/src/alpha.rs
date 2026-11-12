@@ -500,7 +500,15 @@ impl AlphaTable {
         } else {
             self.stats.get(&texture).copied()
         };
-        let (mode, rule) = verdict(seg.material_flags, &seg.render_type, stats.as_ref());
+        let (mode, rule) = if !texture.is_empty() && stats.is_none() {
+            match &seg.render_type {
+                RenderType::Bf2(_) => bf2_elf_verdict(seg.material_flags)
+                    .map_or((AlphaMode::Opaque, Rule::None), |mode| (mode, Rule::Elf)),
+                _ => verdict(seg.material_flags, &seg.render_type, None),
+            }
+        } else {
+            verdict(seg.material_flags, &seg.render_type, stats.as_ref())
+        };
         SegmentAlpha {
             texture,
             mode,
@@ -1423,5 +1431,42 @@ mod tests {
         assert_eq!(Rule::Mask.as_str(), "3");
         assert_eq!(Rule::None.as_str(), "none");
         assert_eq!(Rule::Elf.as_str(), "elf");
+    }
+
+    #[test]
+    fn bf2_external_texture_keeps_the_authored_blend_mode() {
+        let table = AlphaTable::new(&[]);
+        let mut segment = Segment {
+            vertex_count: 3,
+            index_count: 3,
+            bf2_material: true,
+            pc_geometry: false,
+            material_flags: 0x1010044,
+            render_type: RenderType::Bf2(3),
+            spec_power: 0,
+            spec_color: 0,
+            uv_anim: [0, 0],
+            textures: vec![(0, "spacedust1".into())],
+            bone: None,
+            group: None,
+            bmap: Vec::new(),
+            bind: Vec::new(),
+            wght: Vec::new(),
+            positions: Vec::new(),
+            normals: Vec::new(),
+            uvs: Vec::new(),
+            colors: None,
+            triangles: vec![[0, 1, 2]],
+        };
+        assert_eq!(table.segment(&segment).mode, AlphaMode::Blend);
+        segment.material_flags = 0x2010054;
+        segment.render_type = RenderType::Bf2(25);
+        segment.textures[0].1 = "com_sfx_laser_yellow".into();
+        assert_eq!(table.segment(&segment).mode, AlphaMode::Blend);
+        segment.material_flags = 0x10001;
+        assert_eq!(table.segment(&segment).mode, AlphaMode::Opaque);
+        segment.textures.clear();
+        segment.material_flags = 0x1010044;
+        assert_eq!(table.segment(&segment).mode, AlphaMode::Opaque);
     }
 }

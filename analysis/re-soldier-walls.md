@@ -283,8 +283,11 @@ The triangle behind §4.1, traced with `lead_tmp/wpsh/tools/wpsh_probe.rs` (ever
   are ceiling-like or shallower, so the capsule rose into the flare unopposed.
 
 `CollisionWorld::push_out_soldier_from(from, full)` (walls.rs), called from `Sim::step`'s wall pass, adds two rules:
-- **Sub-steps (M2).** The tick's move is cut into XZ steps of at most `SUBSTEP_OF_RADIUS` = 0.5 radii (0.25 m), at
-  most `MAX_SUBSTEPS` = 8, each followed by the pass. A BF1 walk is one step, as before.
+- **Sub-steps (M2).** The tick's move is cut into XZ steps of at most `SUBSTEP_OF_RADIUS` = 0.5 radii (0.25 m), each
+  followed by the pass. A BF1 walk is one step, as before. There is no cap on the count: the PS2's collision update
+  `FUN_00163d08` cuts a move into `int(d / step + 1)` pieces and only snaps a move over 100 m (B2:3393,
+  `SWEEP_SNAP`). The cap of 8 it had until 2026-11-11 let a rider carried out of a hangar at a ship's boost speed
+  through the shield (`re-flyer-deck.md` §3a).
 - **No far-side push (M3), `pushes_past`.** A mesh triangle's contact is dropped when its horizontal push points to
   the far side of the face from where the start pose's axis segment lay. It applies only when the whole segment lay on
   one side, and only when the segment's point at the triangle's mid height projects INSIDE the triangle. Without that

@@ -540,7 +540,7 @@ fn real_sbd_and_magnaguard_profiles_launch_five_pieces_at_the_authored_frequency
             assert!(matches!(spec.prim, Prim::Sphere(_)));
             assert_eq!(
                 (spec.speed, spec.budget, spec.omega),
-                (8.0, 4, Vec3::new(-4.0, -4.0, 4.0))
+                (8.0, 4, Vec3::new(4.0, 4.0, 4.0))
             );
         }
         let spec = UnitSpec::trooper(1, Vec3::Y * 10.0);
@@ -748,5 +748,211 @@ fn ground_settle_ray_ignores_vehicle_hulls() {
         c.live[0][0].count = 1;
         c.tick(&walk, None);
         assert_eq!(piece(&c).moving, !space, "space {space}");
+    }
+}
+
+#[test]
+fn a_space_round_keeps_a_piece_eight_seconds_and_fades_its_last_two() {
+    let mut s = spec(Prim::Sphere(0.5));
+    s.gravity = Vec3::ZERO;
+    s.speed = 0.03;
+    let mut c = chunks(s);
+    c.space = true;
+    let walk = WalkSim::new(1, Vec3::ZERO, None);
+    c.launch(
+        "fixture",
+        Vec3::Y * 50.0,
+        Vec3::ZERO,
+        Quat::IDENTITY,
+        1.0,
+        1.0,
+        None,
+    );
+    assert_eq!(piece(&c).life(), 8.0);
+    let (mut t, mut want) = (0f32, 0);
+    while t < 8.0 {
+        t += core::TICK_DT;
+        want += 1;
+    }
+    let mut ticks = 0;
+    while !c.is_empty() {
+        if ticks == 179 {
+            assert_eq!(piece(&c).opacity(), 1.0);
+        }
+        if ticks == 210 {
+            let o = piece(&c).opacity();
+            assert!((o - 0.5).abs() < 0.02, "{o}");
+        }
+        c.tick(&walk, None);
+        ticks += 1;
+    }
+    assert_eq!(ticks, want);
+    let mut ground = chunks(spec(Prim::Sphere(0.5)));
+    drop(&mut ground, Vec3::Y, Vec3::ZERO);
+    assert_eq!(piece(&ground).life(), 3.0);
+}
+
+#[test]
+fn a_whitespace_split_chunk_number_reads_its_leading_float_as_the_ps2_does() {
+    let number = crate::vehicle_class::float;
+    assert_eq!(number("4 .00"), Some(4.0));
+    assert_eq!(number(" 4.5"), Some(4.5));
+    assert_eq!(number("-1e-3"), Some(-1e-3));
+    assert_eq!(number("+0.25"), Some(0.25));
+    assert_eq!(number("full"), None);
+    assert_eq!(number(""), None);
+}
+
+#[test]
+fn authored_omega_turns_with_the_launch_frame_as_the_ps2_cruiser_piece_does() {
+    let mut s = spec(Prim::Box(Vec3::new(80.0, 40.0, 140.0)));
+    s.gravity = Vec3::ZERO;
+    s.omega = Vec3::new(0.03, 0.01, 0.01);
+    let mut c = chunks(s);
+    c.space = true;
+    let frame = Mat3::from_cols(
+        Vec3::new(0.98772, -0.15626, -0.00033),
+        Vec3::new(0.15626, 0.98772, 0.001),
+        Vec3::new(0.00017, -0.00104, 1.0),
+    );
+    let rot = Quat::from_mat3(&frame).normalize();
+    c.launch("fixture", Vec3::ZERO, Vec3::ZERO, rot, 1.0, 1.0, None);
+    let p = piece(&c);
+    assert!(
+        (p.omega - Vec3::new(0.03119, 0.00518, 0.01)).length() < 2e-4,
+        "{}",
+        p.omega
+    );
+    let walk = WalkSim::new(1, Vec3::ZERO, None);
+    let mut plain = chunks({
+        let mut s = spec(Prim::Sphere(1.0));
+        s.gravity = Vec3::ZERO;
+        s.omega = Vec3::new(0.03, 0.01, 0.01);
+        s
+    });
+    plain.space = true;
+    plain.launch(
+        "fixture",
+        Vec3::ZERO,
+        Vec3::ZERO,
+        Quat::IDENTITY,
+        1.0,
+        1.0,
+        None,
+    );
+    plain.tick(&walk, None);
+    let x = piece(&plain).model().x_axis.truncate();
+    assert!(
+        (x.y - 0.000333).abs() < 2e-5 && (x.z + 0.000333).abs() < 2e-5,
+        "{x}"
+    );
+}
+
+#[test]
+fn map_frigate_chunk_specs_keep_authored_prims_and_omega_across_all_maps() {
+    let root = crate::assets::baked_root();
+    let maps = [
+        (
+            "bf2_spa1",
+            [
+                ("all_prop_blockaderunner", 2),
+                ("spa1_prop_minidestroyer2", 3),
+                ("spa1_prop_correliancruiser", 4),
+            ]
+            .as_slice(),
+        ),
+        (
+            "bf2_spa3",
+            [
+                ("spa2_prop_minifedcruiser", 4),
+                ("spa2_prop_minirepassaultship", 5),
+            ]
+            .as_slice(),
+        ),
+        (
+            "bf2_spa6",
+            [
+                ("spa2_prop_minifedcruiser", 4),
+                ("spa2_prop_minirepassaultship", 5),
+            ]
+            .as_slice(),
+        ),
+        (
+            "bf2_spa7",
+            [
+                ("spa2_prop_minifedcruiser", 4),
+                ("spa2_prop_minirepassaultship", 5),
+            ]
+            .as_slice(),
+        ),
+        (
+            "bf2_spa8",
+            [
+                ("spa1_prop_minidestroyer2", 3),
+                ("spa1_prop_correliancruiser", 4),
+            ]
+            .as_slice(),
+        ),
+        (
+            "bf2_spa9",
+            [
+                ("all_prop_blockaderunner", 2),
+                ("spa1_prop_minidestroyer2", 3),
+            ]
+            .as_slice(),
+        ),
+    ];
+    if !maps
+        .iter()
+        .all(|(map, _)| root.join(map).join("manifest.ron").is_file())
+    {
+        assert!(
+            std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none(),
+            "space assets required"
+        );
+        eprintln!("skipping map frigate prims: local baked assets unavailable");
+        return;
+    }
+    for (map_name, classes) in maps {
+        let map = root.join(map_name);
+        let mut db = ClassDb::default();
+        db.load_map(&map).unwrap();
+        for (name, piece_count) in classes {
+            let c = Chunks::load(&db, &[(*name).into()], &[map.join("models")], Era::Bf2);
+            let specs = c.defs.get(*name).expect("map frigate chunk definitions");
+            let slots = chunk_properties(db.chain(name));
+            assert_eq!(specs.len(), *piece_count, "{map_name} {name} piece count");
+            assert_eq!(slots.len(), *piece_count, "{map_name} {name} slot count");
+            for (slot, spec) in slots.iter().zip(specs) {
+                let omega = floats(slot.props[&hash("ChunkOmega")].as_str());
+                assert_eq!(omega.len(), 3, "{map_name} {name} authored omega");
+                let expected = Vec3::new(omega[0], omega[1], omega[2]);
+                assert!(
+                    (spec.omega - expected).length() < 1e-5,
+                    "{map_name} {name} omega: {:?} != {expected}",
+                    spec.omega
+                );
+                assert!(
+                    !matches!(spec.prim, Prim::Sphere(_)),
+                    "{map_name} {name} {} must use its authored map prim",
+                    spec.model
+                );
+            }
+            if *name == "spa2_prop_minifedcruiser" {
+                assert_eq!(specs[0].speed, 4.0, "{map_name} ChunkSpeed = 4 .00");
+            }
+            if map_name == "bf2_spa8" && *name == "spa1_prop_correliancruiser" {
+                let Prim::Box(half) = specs[0].prim else {
+                    panic!("expected the authored box prim, got {:?}", specs[0].prim);
+                };
+                assert!((half - Vec3::new(64.03713, 10.072614, 108.157265)).length() < 1e-3);
+                assert!(
+                    (specs[0].local.w_axis.truncate() - Vec3::new(5.107916, 19.034204, 72.342255))
+                        .length()
+                        < 1e-3
+                );
+                assert!((specs[0].local.x_axis.truncate().y + 0.15658604).abs() < 1e-5);
+            }
+        }
     }
 }

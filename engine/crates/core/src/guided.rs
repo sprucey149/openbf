@@ -2,45 +2,45 @@
 //! end reasons and replay state. Follows `analysis/re-guided-rockets.md` (card
 //! GUIDED).
 
-use crate::sim::PadState;
 use crate::unit::UnitHandle;
-use crate::vehicle::hover::{quat_x, quat_y, quat_z};
+use crate::vehicle::flyer::{self, Flight, FlightPhase, FlyerEnvironment, FlyerParams, FlyerState};
+use crate::vehicle::hover::{quat_x, quat_y, quat_z, HoverInput};
 use crate::weapon::{pf, pf_hash, ExplosionClass, HealthType, PropSource};
 use glam::{Quat, Vec3};
 
 pub const COLLISION_RADIUS_PROVISIONAL: f32 = 0.2;
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GuidedView {
+    pub eye_point_offset: Option<[f32; 3]>,
+    pub track_center: Option<[f32; 3]>,
+    pub track_offset: Option<[f32; 3]>,
+    pub slow_offset: Option<[f32; 3]>,
+    pub fast_offset: Option<[f32; 3]>,
+    pub fast_fov: Option<f32>,
+    pub third_person_fov: Option<f32>,
+    pub move_tension: [Option<[f32; 2]>; 3],
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct GuidedClass {
-    pub acceleration: f32,
-    pub speeds: [f32; 3],
-    pub boost_speed: f32,
-    pub boost_acceleration: f32,
-    pub pitch_rate: f32,
-    pub turn_rate: f32,
-    pub roll_rate: f32,
-    pub pitch_filter: f32,
-    pub turn_filter: f32,
-    /// The class authors no `RollFilter`; the turn filter stands in for it
-    /// (`analysis/re-guided-rockets.md`).
-    pub roll_filter: f32,
-    pub pitch_damp: f32,
-    pub turn_damp: f32,
-    pub bank_angle: f32,
-    pub bank_filter: f32,
-    pub energy: f32,
-    pub energy_restore: f32,
-    pub boost_drain: f32,
+    pub flight: FlyerParams,
+    pub view: GuidedView,
     pub health: f32,
     pub health_type: HealthType,
     pub explosion: Option<ExplosionClass>,
     pub noncritical: Option<ExplosionClass>,
     pub critical_speed: f32,
+    pub contact_damage: [f32; 2],
+    pub hold_time: f32,
+    pub hold_speed: f32,
+    pub hold_distance: f32,
     pub track_center: Vec3,
     pub track_offset: Vec3,
     pub engine_sound: Option<String>,
     pub death_sound: Option<String>,
     pub trail: Option<String>,
+    pub trail_scale: [f32; 3],
 }
 
 fn vector(src: &dyn PropSource, hash: u32, default: Vec3) -> Vec3 {
@@ -58,27 +58,10 @@ fn vector(src: &dyn PropSource, hash: u32, default: Vec3) -> Vec3 {
 
 impl GuidedClass {
     pub fn from_props(src: &dyn PropSource) -> Self {
-        let f = |key, default| pf(src, key).unwrap_or(default);
-        let turn_filter = f("TurnFilter", 0.0);
         Self {
-            acceleration: f("Acceleraton", 0.0),
-            speeds: [f("MinSpeed", 0.0), f("MidSpeed", 0.0), f("MaxSpeed", 0.0)],
-            boost_speed: f("BoostSpeed", 0.0),
-            boost_acceleration: f("BoostAcceleration", 0.0),
-            pitch_rate: f("PitchRate", 0.0),
-            turn_rate: f("TurnRate", 0.0),
-            roll_rate: f("RollRate", 0.0),
-            pitch_filter: f("PitchFilter", 0.0),
-            turn_filter,
-            roll_filter: f("RollFilter", turn_filter),
-            pitch_damp: pf_hash(src, 0x53d5_cdc8).unwrap_or(0.0),
-            turn_damp: pf_hash(src, 0x1795_170d).unwrap_or(0.0),
-            bank_angle: f("BankAngle", 0.0),
-            bank_filter: f("BankFilter", 0.0),
-            energy: f("EnergyBar", 100.0),
-            energy_restore: f("EnergyAutoRestore", 0.0),
-            boost_drain: f("EnergyBoostDrain", 0.0),
-            health: f("MaxHealth", 1.0),
+            flight: FlyerParams::bf2(),
+            view: GuidedView::default(),
+            health: pf(src, "MaxHealth").unwrap_or(1.0),
             health_type: src
                 .prop("HealthType")
                 .and_then(HealthType::parse)
@@ -86,12 +69,32 @@ impl GuidedClass {
             explosion: None,
             noncritical: None,
             critical_speed: pf_hash(src, 0xbb30_82af).unwrap_or(0.8),
+            contact_damage: [
+                pf_hash(src, 0x376b_238a).unwrap_or(500.0),
+                pf_hash(src, 0x487b_2329).unwrap_or(2000.0),
+            ],
+            hold_time: pf_hash(src, 0x9bdf_a490).unwrap_or(1.0),
+            hold_speed: pf_hash(src, 0x962e_0745).unwrap_or(60.0),
+            hold_distance: pf_hash(src, 0x325b_f479).unwrap_or(20.0),
             track_center: vector(src, 0xe85d_5895, Vec3::ZERO),
             track_offset: vector(src, 0xfd3d_9507, Vec3::ZERO),
             engine_sound: src.prop("EngineSound").map(str::to_owned),
             death_sound: src.prop("DeathSound").map(str::to_owned),
             trail: src.prop_hash(0x0894_d756).map(str::to_owned),
+            trail_scale: [
+                pf_hash(src, 0xf174_a3f8).unwrap_or(1.0),
+                pf_hash(src, 0xc3fd_784a).unwrap_or(1.0),
+                pf_hash(src, 0xe970_41b8).unwrap_or(0.0),
+            ],
         }
+    }
+
+    pub fn trail_size(&self, speed: f32) -> f32 {
+        self.flight.exhaust_scale(self.trail_scale, speed)
+    }
+
+    pub fn top_speed(&self) -> f32 {
+        self.flight.boost_speed.max(self.flight.max_speed)
     }
 }
 
@@ -112,10 +115,7 @@ impl GuidedWeapon {
     }
 
     pub fn explosion(&self, end: GuidedEnd) -> Option<&ExplosionClass> {
-        if matches!(
-            end,
-            GuidedEnd::Impact | GuidedEnd::Destroyed | GuidedEnd::CriticalExpiry
-        ) {
+        if matches!(end, GuidedEnd::Destroyed | GuidedEnd::CriticalExpiry) {
             self.class.explosion.as_ref()
         } else {
             self.class.noncritical.as_ref()
@@ -125,7 +125,6 @@ impl GuidedWeapon {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GuidedEnd {
-    Impact,
     Destroyed,
     Expired,
     CriticalExpiry,
@@ -148,25 +147,54 @@ pub struct GuidedRocket {
     pub pos: Vec3,
     pub vel: Vec3,
     pub rot: Quat,
-    pub pitch_rate: f32,
-    pub turn_rate: f32,
-    /// A seat rocket's filtered roll stick; the on-foot rocket leaves it 0.
-    pub roll_input: f32,
-    pub bank: f32,
+    pub flyer: FlyerState,
     pub health: f32,
-    pub energy: f32,
     pub age: f32,
-    pub boosted: bool,
     pub prev_buttons: u32,
     pub pending_end: Option<GuidedEnd>,
+    pub spent: Option<(GuidedEnd, f32)>,
     /// `[ours]` A bot's seconds of flight with no target in sight; at
     /// [`BOT_BLIND`] it hands control back.
     pub blind: f32,
 }
 
 impl GuidedRocket {
+    pub fn body(aim: Vec3) -> Quat {
+        let f = aim.normalize_or_zero();
+        let yaw = crate::fmath::atan2(-f.x, -f.z);
+        let pitch = crate::fmath::asin(f.y.clamp(-1.0, 1.0));
+        (quat_y(yaw) * quat_x(pitch) * quat_y(std::f32::consts::PI)).normalize()
+    }
+
+    pub fn flying(c: &GuidedClass) -> FlyerState {
+        FlyerState {
+            phase: FlightPhase::Flying,
+            lift: 1.0,
+            energy: c.flight.energy_max,
+            level_time: 1.0,
+            initialized: true,
+            ..FlyerState::default()
+        }
+    }
+
+    pub fn frame(&self) -> Quat {
+        self.rot * quat_x(-self.flyer.tilt_pitch) * quat_z(-self.flyer.tilt_roll)
+    }
+
     pub fn forward(&self) -> Vec3 {
-        self.rot * -Vec3::Z
+        self.frame() * Vec3::Z
+    }
+
+    pub fn speed(&self) -> f32 {
+        self.vel.dot(self.rot * Vec3::Z)
+    }
+
+    pub fn energy(&self) -> f32 {
+        self.flyer.energy
+    }
+
+    pub fn live(&self) -> bool {
+        self.spent.is_none()
     }
 
     pub fn yaw_pitch(&self) -> (f32, f32) {
@@ -177,98 +205,24 @@ impl GuidedRocket {
         )
     }
 
-    pub fn steer(&mut self, c: &GuidedClass, pad: &PadState, dt: f32) {
-        // A seat rocket uses the flyer sticks: the left stick turns and
-        // pitches (mapped to rx, ry by flyer_sticks / flyer_pad), the right
-        // stick's X rolls (mapped to lx). The on-foot award rocket keeps
-        // its right-stick steering and mouse look.
-        let (turn, pitch, roll) = if self.seat.is_some() {
-            let turn = PadState::axis(pad.rx);
-            let pitch = PadState::axis(pad.ry);
-            let raw = PadState::axis(pad.lx);
-            let roll = if raw.abs() < 0.3 {
-                0.0
-            } else {
-                (raw - 0.3 * raw.signum()) / 0.7
-            };
-            (turn, pitch, roll)
-        } else {
-            let look = pad.look();
-            let turn = (PadState::axis(pad.rx) + look.0 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
-            let pitch =
-                (PadState::axis(pad.ry) + look.1 / crate::sim::MOUSE_STEER).clamp(-1.0, 1.0);
-            (turn, pitch, 0.0)
-        };
-        let slew = |value: f32, target: f32, accel: f32, damp: f32| {
-            let rate = if value * target > 0.0 && target.abs() > value.abs() {
-                accel
-            } else {
-                damp
-            };
-            value + (target - value).clamp(-rate * dt, rate * dt)
-        };
-        self.pitch_rate = slew(
-            self.pitch_rate,
-            c.pitch_rate * pitch,
-            c.pitch_filter,
-            c.pitch_damp,
-        );
-        self.turn_rate = slew(
-            self.turn_rate,
-            -c.turn_rate * turn,
-            c.turn_filter,
-            c.turn_damp,
-        );
-        self.roll_input = slew(
-            self.roll_input,
-            c.roll_rate * roll,
-            c.roll_filter,
-            c.roll_filter,
-        );
-        self.rot = (self.rot
-            * quat_y(self.turn_rate * dt)
-            * quat_x(self.pitch_rate * dt)
-            * quat_z(self.roll_input * dt))
-        .normalize();
-        self.bank +=
-            (-c.bank_angle * turn - self.bank).clamp(-c.bank_filter * dt, c.bank_filter * dt);
-    }
-
     pub fn drawn_rotation(&self) -> Quat {
-        self.rot * quat_z(self.bank)
+        self.rot
     }
 
-    pub fn fly(&mut self, c: &GuidedClass, pad: &PadState, dt: f32) {
-        self.steer(c, pad, dt);
-        self.boosted = pad.pressed(crate::sim::buttons::SPRINT) && self.energy > 0.0;
-        // A seat rocket's left stick pitches, so it has no throttle axis and
-        // holds the class's mid speed; sprint still boosts.
-        let throttle = if self.seat.is_some() {
-            0.0
-        } else {
-            PadState::axis(pad.ly)
-        };
-        let [min, mid, max] = c.speeds;
-        let target = if self.boosted {
-            c.boost_speed
-        } else if throttle >= 0.0 {
-            mid + throttle * (max - mid)
-        } else {
-            mid + throttle * (mid - min)
-        };
-        let acceleration = if self.boosted {
-            c.boost_acceleration
-        } else {
-            c.acceleration
-        };
-        let fwd = self.forward();
-        let speed = self.vel.dot(fwd);
-        let next = speed + (target - speed).clamp(-3.0 * acceleration * dt, acceleration * dt);
-        self.vel = fwd * next;
-        self.pos += self.vel * dt;
-        self.energy = (self.energy
-            + (c.energy_restore - if self.boosted { c.boost_drain } else { 0.0 }) * dt)
-            .clamp(0.0, c.energy);
+    pub fn fly(&mut self, c: &GuidedClass, input: HoverInput, env: FlyerEnvironment, dt: f32) {
+        flyer::fly(
+            Flight {
+                pos: &mut self.pos,
+                vel: &mut self.vel,
+                rot: &mut self.rot,
+                state: &mut self.flyer,
+                input,
+                occupied: true,
+            },
+            &c.flight,
+            env,
+            dt,
+        );
         self.age += dt;
     }
 
@@ -278,8 +232,8 @@ impl GuidedRocket {
         eat(&self.owner.gen.to_le_bytes());
         eat(&[
             self.team,
-            self.boosted as u8,
             self.pending_end.map_or(255, |e| e as u8),
+            self.spent.map_or(255, |(e, _)| e as u8),
         ]);
         eat(&(self.weapon_class as u64).to_le_bytes());
         for value in self
@@ -289,18 +243,15 @@ impl GuidedRocket {
             .chain(self.vel.to_array())
             .chain(self.rot.to_array())
             .chain([
-                self.pitch_rate,
-                self.turn_rate,
-                self.roll_input,
-                self.bank,
                 self.health,
-                self.energy,
                 self.age,
                 self.blind,
+                self.spent.map_or(0.0, |(_, t)| t),
             ])
         {
             eat(&value.to_bits().to_le_bytes());
         }
+        self.flyer.hash_into(eat);
         eat(&self.prev_buttons.to_le_bytes());
     }
 }

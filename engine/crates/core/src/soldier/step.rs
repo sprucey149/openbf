@@ -380,7 +380,7 @@ impl Soldier {
         self.vel += t1 * (new_fwd - cur_fwd) + t2 * (new_strafe - cur_strafe);
 
         // ── Gravity + move (contact: `resolve_ground`, after the move) ────
-        if !self.grounded {
+        if !self.grounded && self.platform_vel.is_none() {
             self.vel.y -= GRAVITY * dt;
         }
         self.pos += self.vel * dt;

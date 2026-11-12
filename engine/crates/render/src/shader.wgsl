@@ -136,6 +136,8 @@ struct VsIn {
     @location(6) m2: vec4<f32>,
     @location(7) m3: vec4<f32>,
     @location(8) inst_color: vec4<f32>,
+    @location(9) region_top: vec4<f32>,
+    @location(10) region_bottom: vec4<f32>,
     // Far-scene cull band [lo, hi], metres (render::mesh::NO_CULL = never).
     @location(11) cull: vec2<f32>,
     // Far scene's NEAR edge band, metres (render::mesh::NO_CULL_NEAR = 0 = never).
@@ -269,6 +271,8 @@ fn mesh_vertex(in: VsIn) -> VsOut {
     out.cull = in.cull;
     out.cull_near = in.cull_near;
     out.light = path;
+    out.region_top = in.region_top;
+    out.region_bottom = in.region_bottom;
     out.fade = fade_alpha(in.m3.xyz, in.fade);
     out.lighting = vertex_lighting(out, in.lights);
     out.wc = affine_w(out.clip_pos, in.light);
@@ -1075,7 +1079,7 @@ fn vs_spec(in: VsIn) -> VsSpecOut {
     // depth and the LessEqual test keeps it.
     let world_pos = model * vec4<f32>(in.position, 1.0);
     let world_normal = (model * vec4<f32>(in.normal, 0.0)).xyz;
-    return spec_varyings(world_pos, world_normal, in.uv, in.color, in.inst_color, in.cull, in.cull_near, in.light, fade_alpha(in.m3.xyz, in.fade), in.lights, vec4<f32>(0.0));
+    return spec_varyings(world_pos, world_normal, in.uv, in.color, in.inst_color, in.cull, in.cull_near, in.light, fade_alpha(in.m3.xyz, in.fade), in.lights, in.region_bottom, in.region_top);
 }
 
 // The skinned twin (queue SPEC2): `vs_skinned`'s expressions, so the pass
@@ -1092,7 +1096,7 @@ fn vs_spec_skinned(in: VsSkinnedIn) -> VsSpecOut {
     let world = model * skin;
     let world_pos = world * vec4<f32>(in.position, 1.0);
     let world_normal = (world * vec4<f32>(in.normal, 0.0)).xyz;
-    return spec_varyings(world_pos, world_normal, in.uv, in.color, in.inst_color, in.cull, in.cull_near, in.light, 1.0, in.lights, in.region_bottom);
+    return spec_varyings(world_pos, world_normal, in.uv, in.color, in.inst_color, in.cull, in.cull_near, in.light, 1.0, in.lights, in.region_bottom, vec4<f32>(0.0));
 }
 
 // The pass's varyings from one vertex's world position and normal: the base's
@@ -1109,6 +1113,7 @@ fn spec_varyings(
     fade: f32,
     lights: vec4<u32>,
     region_bottom: vec4<f32>,
+    rigid_region_top: vec4<f32>,
 ) -> VsSpecOut {
     var out: VsSpecOut;
     out.light = light & 0xffu;
@@ -1118,6 +1123,8 @@ fn spec_varyings(
     base.world_normal = world_normal;
     base.color = color;
     base.light = out.light;
+    base.region_top = rigid_region_top;
+    base.region_bottom = region_bottom;
     if (light & LIGHT_REGION) != 0u {
         base.region_top = region_top(cull, cull_near);
         base.region_bottom = region_bottom;

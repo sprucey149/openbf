@@ -1174,72 +1174,76 @@ fn a_ground_rider_lost_with_the_hull_holds_the_seat_view_past_four_seconds() {
 }
 
 #[test]
-fn a_controlled_guided_rocket_uses_first_person_camera_and_centered_reticle() {
+fn a_guided_rocket_flies_under_its_chase_camera_and_backs_off_when_spent() {
+    struct NoProps;
+    impl core::weapon::PropSource for NoProps {
+        fn prop(&self, _: &str) -> Option<&str> {
+            None
+        }
+        fn prop_hash(&self, _: u32) -> Option<&str> {
+            None
+        }
+    }
     let mut w = WalkSim::new(1, Vec3::ZERO, Some(flat_ground()));
+    let mut class = core::guided::GuidedClass::from_props(&NoProps);
+    class.flight.min_speed = 30.0;
+    class.flight.mid_speed = 30.0;
+    class.flight.max_speed = 30.0;
+    class.flight.energy_max = 100.0;
+    class.view.track_center = Some([0.0, 1.0, -3.0]);
+    class.view.track_offset = Some([0.0, 2.0, 6.0]);
+    let flying = core::guided::GuidedRocket::flying(&class);
     let wc = w.sim.add_weapon_class(core::weapon::WeaponClass {
         guided: Some(Box::new(core::guided::GuidedWeapon {
-            class: core::guided::GuidedClass {
-                acceleration: 0.0,
-                speeds: [30.0; 3],
-                boost_speed: 60.0,
-                boost_acceleration: 0.0,
-                pitch_rate: 1.0,
-                turn_rate: 1.0,
-                roll_rate: 1.0,
-                pitch_filter: 1.0,
-                turn_filter: 1.0,
-                roll_filter: 1.0,
-                pitch_damp: 1.0,
-                turn_damp: 1.0,
-                bank_angle: 0.0,
-                bank_filter: 1.0,
-                energy: 100.0,
-                energy_restore: 0.0,
-                boost_drain: 0.0,
-                health: 1.0,
-                health_type: core::weapon::HealthType::Droid,
-                explosion: None,
-                noncritical: None,
-                critical_speed: 0.8,
-                track_center: Vec3::ZERO,
-                track_offset: Vec3::ZERO,
-                engine_sound: None,
-                death_sound: None,
-                trail: None,
-            },
+            class,
             spawn_offset: Vec3::ZERO,
             requires_award: false,
         })),
         ..Default::default()
     });
     let player = w.player;
-    let pos = Vec3::new(10.0, 50.0, 30.0);
-    let rot = Quat::from_rotation_y(0.7);
+    w.sim.unit_mut(player).unwrap().weapon_class = wc;
+    let pos = Vec3::new(10.0, 30.0, 30.0);
+    let dir = Quat::from_rotation_y(0.7) * Vec3::NEG_Z;
     w.sim.guided.push(core::guided::GuidedRocket {
         id: 42,
         owner: player,
         team: 0,
         weapon_class: wc,
-        seat: Some((core::vehicle::VehicleHandle { index: 0, gen: 0 }, 1)),
+        seat: None,
         pos,
-        vel: rot * Vec3::NEG_Z * 30.0,
-        rot,
-        pitch_rate: 0.0,
-        turn_rate: 0.0,
-        roll_input: 0.0,
-        bank: 0.0,
+        vel: dir * 30.0,
+        rot: core::guided::GuidedRocket::body(dir),
+        flyer: flying,
         health: 1.0,
-        energy: 100.0,
         age: 0.0,
-        boosted: false,
         prev_buttons: 0,
         pending_end: None,
+        spent: None,
         blind: 0.0,
     });
     assert!(w.player_controls_flyer());
     let cam = w.camera();
-    assert_eq!(cam.position, pos);
-    assert_eq!(w.reticle_y(), 0.5);
+    let behind = (cam.position - pos).dot(-dir);
+    assert!((6.0..12.0).contains(&behind), "behind {behind}");
+    assert!(cam.position.y > pos.y);
+    assert!((cam.forward() - dir).length() < 0.2);
+    assert!((w.reticle_y() - 0.5).abs() < 0.2);
+    run_ticks(&mut w, PadState::default(), 3);
+    let held = w.cam_guided.expect("the guided camera holds its eye");
+    assert_eq!(held.rocket, 42);
+    let r = w.sim.guided[0].clone();
+    assert!((held.eye - r.pos).dot(-r.forward()) > 6.0);
+    w.sim.guided[0].flyer.energy = 0.0;
+    run_ticks(&mut w, PadState::default(), 15);
+    let r = w.sim.guided[0].clone();
+    assert!(!r.live());
+    let cam = w.cam_guided.expect("the spent rocket keeps the camera");
+    let back = (cam.eye - r.pos).dot(-(r.rot * Vec3::Z));
+    assert!((20.0..22.0).contains(&back), "backed off {back}");
+    run_ticks(&mut w, PadState::default(), 20);
+    assert!(w.sim.guided.is_empty());
+    assert!(w.cam_guided.is_none());
 }
 
 /// Playtest A7: a death on foot starts the death camera (the body drawn, a

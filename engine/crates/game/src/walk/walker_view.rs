@@ -37,6 +37,7 @@ pub fn camera_on_frame(
 impl WalkSim {
     pub fn load_walker_views(&mut self, manifest: &manifest::Manifest, root: &std::path::Path) {
         self.walker_rigs = crate::viewer::walker_rigs(manifest, root, &self.vehicle_geometry);
+        self.flyer_rigs = crate::viewer::flyer_rigs(manifest, root, &self.vehicle_geometry);
     }
 
     /// Read each vehicle class's model top, once [`Self::vehicle_geometry`] is set.
@@ -48,6 +49,13 @@ impl WalkSim {
     ) {
         self.vehicle_tops =
             crate::viewer::model_tops(manifest, map_dir, root, &self.vehicle_geometry);
+        let guided: Vec<_> = self
+            .sim
+            .weapon_classes
+            .iter()
+            .map(|w| w.guided.as_ref().and(w.ordnance.geometry.clone()))
+            .collect();
+        self.guided_tops = crate::viewer::model_tops(manifest, map_dir, root, &guided);
     }
 
     pub(super) fn walker_fovs(&self) -> Option<(f32, f32)> {

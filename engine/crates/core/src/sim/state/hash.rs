@@ -70,6 +70,34 @@ impl Sim {
             eat(&(self.vehicles.len() as u32).to_le_bytes());
             for v in &self.vehicles {
                 v.hash_into(&mut eat);
+                if v.kind == crate::vehicle::VehicleKind::Flyer {
+                    if let Some(setup) = self
+                        .seat_setup
+                        .get(v.class as usize)
+                        .and_then(Option::as_ref)
+                    {
+                        for (seat, (gun, state)) in setup.guns.iter().zip(&v.guns).enumerate() {
+                            if let (Some(gun), Some(state)) = (gun, state) {
+                                if gun.pilot {
+                                    for (slot, (weapon, state)) in
+                                        gun.weapons.iter().zip(&state.weapons).enumerate()
+                                    {
+                                        let count = weapon.fire_points.len();
+                                        if count > 1 {
+                                            let next = state.shots_fired % count as u64;
+                                            if next != 0 {
+                                                eat(b"FLYER_MUZZLE");
+                                                eat(&(seat as u32).to_le_bytes());
+                                                eat(&(slot as u32).to_le_bytes());
+                                                eat(&next.to_le_bytes());
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if (self.hero_rider_frames.is_some() || self.tow_frames.is_some())
                     && v.kind == crate::vehicle::VehicleKind::Walker
                 {

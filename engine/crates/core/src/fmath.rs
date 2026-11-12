@@ -555,6 +555,8 @@ mod tests {
             // `Sim` and nothing reads a pose back (card ANIML).
             "animator.rs",
             "animator/",
+            // Keeps the display awake while a round runs; it reads no `Sim`.
+            "main/windowed/idle.rs",
         ];
         let dir = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../game/src"));
         let offenders = offenders_under(dir, PRESENTATION);

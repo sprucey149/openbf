@@ -418,6 +418,7 @@ pub(super) fn bake_content(
     // Card WTHR: `Effect("Precipitation")` and `Effect("Wind")`, the first
     // `fx__` that carries each; kept only when enabled (re-weather.md §1:
     // nine maps and four), so every other map's manifest does not move.
+    super::space_dust::write(&expanded, out)?;
     let mut precipitation = None;
     let mut wind = None;
     let mut fog_cloud = None;

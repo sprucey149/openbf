@@ -7,6 +7,56 @@ use crate::skill::Difficulty;
 use crate::unit::UnitSpec;
 use glam::Vec3;
 
+#[test]
+fn station_impact_uses_shield_remaining_after_the_hit() {
+    use crate::sim::{Station, StationClass};
+    use crate::weapon::{Health, HealthType};
+
+    let mut sim = Sim::empty(42);
+    sim.weapon_classes[0].ordnance.max_damage = 50.0;
+    sim.add_station_class(StationClass::soldier("hull", 1.0, 0.0, 0));
+    let mut station = Station::new(0, Vec3::ZERO, 0.0);
+    station.team = Some(1);
+    station.health = Health::new(1000.0, HealthType::Building);
+    station.health.shield_max = 200.0;
+    sim.stations.push(station);
+    let shooter = sim.spawn(&UnitSpec::trooper(0, Vec3::ZERO)).unwrap();
+    let bolt = Bolt {
+        visual_shot: None,
+        pos: Vec3::ZERO,
+        vel: Vec3::Z,
+        remaining: 0.0,
+        age: 0.0,
+        owner: shooter,
+        team: 0,
+        weapon_class: 0,
+        hit: Hit::Target(Target::Station(0)),
+        end: Vec3::ZERO,
+        shooter_is_player: true,
+        hulls: crate::collision::HullFilter::All,
+        hit_mult: 1.0,
+        gravity: 0.0,
+        charge: 1.0,
+        missile: None,
+        fat: None,
+    };
+    for (shield, remaining, expected) in [
+        (100.0, 50.0, Surface::Shield),
+        (1.0, 0.0, Surface::Building),
+        (0.0, 0.0, Surface::Building),
+    ] {
+        sim.stations[0].health.shield = shield;
+        sim.events.clear();
+        sim.resolve_bolt(&bolt);
+        assert_eq!(sim.stations[0].health.shield, remaining);
+        let actual = sim.events.iter().find_map(|event| match event {
+            Event::Impact { surface, .. } => Some(*surface),
+            _ => None,
+        });
+        assert_eq!(actual, Some(expected), "initial shield {shield}");
+    }
+}
+
 /// Late projectiles cannot attribute the replacement occupant's identity
 /// to a prior life; matching-generation dead shooters still count.
 #[test]

@@ -184,6 +184,7 @@ pub struct DrawCmd {
     pub model: Mat4,
     /// Which pass this draw belongs to.
     pub layer: DrawLayer,
+    pub additive: bool,
     /// Metres from the eye past which this draw's fragments are DISCARDED, or
     /// `None` for a draw that is never culled by distance — the far-scene
     /// cull's mechanism. WHICH draw gets which distance is the caller's
@@ -224,6 +225,7 @@ pub struct DrawCmd {
     /// draw but a placed world model's. `Lit` and `Character` take all local
     /// lights; `Prelit`, `PrelitAdd` and PC `VertexLit` skip static lights.
     pub lit: Option<LitSphere>,
+    pub region_lit: Option<LitSphere>,
 }
 
 /// Which side of the far scene's switch a draw is ([`LodSwitch`]).
@@ -518,12 +520,14 @@ impl DrawCmd {
             color,
             model,
             layer: DrawLayer::Opaque,
+            additive: false,
             cull: None,
             cull_near: None,
             lod: None,
             light: LightPath::Lit,
             fade: None,
             lit: None,
+            region_lit: None,
         }
     }
 }

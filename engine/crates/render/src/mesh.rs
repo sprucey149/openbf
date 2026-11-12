@@ -75,6 +75,8 @@ pub(crate) struct Instance {
     /// The light-table records this instance's vertices add (card BPNT,
     /// `crate::point_light::gather`); 0 = none.
     pub lights: [u16; 4],
+    pub region_top: [f32; 4],
+    pub region_bottom: [f32; 4],
 }
 
 /// "This draw never fades": a begin no horizontal distance reaches, and no
@@ -96,7 +98,7 @@ impl Instance {
     // Locations 4..=8 continue after the mesh attributes; the cull skips to
     // 11 because `SkinnedVertex` already owns 9 and 10 and shares this
     // instance buffer.
-    const ATTRIBS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
+    const ATTRIBS: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
         4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4, // model cols
         8 => Float32x4, // color
         11 => Float32x2, // cull band [lo, hi], metres
@@ -104,13 +106,25 @@ impl Instance {
         13 => Uint32,   // light path
         14 => Float32x4, // fade [begin, end, near] metres, opacity
         15 => Uint16x4, // light-table records, 0 = none
+        // Rigid-only, after the fields every pipeline shares: the region
+        // light's top and bottom planes (`region_lit`).
+        9 => Float32x4,
+        10 => Float32x4,
     ];
+
+    pub(crate) fn rigid_layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Instance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &Self::ATTRIBS,
+        }
+    }
 
     pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Instance>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &Self::ATTRIBS,
+            attributes: &Self::ATTRIBS[..10],
         }
     }
 }

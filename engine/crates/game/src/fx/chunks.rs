@@ -13,6 +13,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 const MASS: f32 = 40.0;
+const SPACE_LIFE: f32 = 8.0;
 const CLUSTERS: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -138,6 +139,7 @@ struct Piece {
     budget: u8,
     touched: bool,
     timer: f32,
+    space: bool,
     trails: Vec<(LiveEffect, Option<Mat4>)>,
     smoke: Vec<LiveEffect>,
 }
@@ -175,6 +177,7 @@ impl Piece {
         }
         match self.spec.mode {
             2 | 4 => 53.0,
+            _ if self.space => SPACE_LIFE,
             _ => 3.0,
         }
     }
@@ -398,6 +401,21 @@ impl SideData {
         for file in dirs
             .iter()
             .filter_map(|d| d.parent())
+            .map(|d| d.join("manifest.ron"))
+            .filter(|p| pak::is_file(p))
+        {
+            let Ok(text) = pak::read_to_string(&file) else {
+                continue;
+            };
+            let Ok(map) = ron::from_str::<manifest::Manifest>(&text) else {
+                eprintln!("chunks: {} unreadable", file.display());
+                continue;
+            };
+            Self::record_prims(&mut out.prims, &map.collision, false);
+        }
+        for file in dirs
+            .iter()
+            .filter_map(|d| d.parent())
             .map(|d| d.join("vehicles.ron"))
             .filter(|p| pak::is_file(p))
         {
@@ -408,16 +426,7 @@ impl SideData {
                 eprintln!("chunks: {} unreadable", file.display());
                 continue;
             };
-            for c in &vm.collision {
-                if let [p] = &c.prims[..] {
-                    if let Some(prim) = crate::assets::prim_shape(p).as_ref().and_then(Prim::of) {
-                        out.prims.entry(c.geometry.to_ascii_lowercase()).or_insert((
-                            prim,
-                            crate::viewer::instance_matrix(p.rotation, p.translation),
-                        ));
-                    }
-                }
-            }
+            Self::record_prims(&mut out.prims, &vm.collision, false);
             for g in vm.geometries.iter().filter(|g| !g.hardpoints.is_empty()) {
                 out.nodes
                     .entry(g.name.to_ascii_lowercase())
@@ -445,21 +454,7 @@ impl SideData {
                     ron::from_str::<manifest::DroidChunkManifest>(&t).map_err(anyhow::Error::from)
                 }) {
                 Ok(meta) => {
-                    for c in meta.collision {
-                        if let [p] = &c.prims[..] {
-                            if let Some(prim) =
-                                crate::assets::prim_shape(p).as_ref().and_then(Prim::of)
-                            {
-                                out.prims.insert(
-                                    c.geometry.to_ascii_lowercase(),
-                                    (
-                                        prim,
-                                        crate::viewer::instance_matrix(p.rotation, p.translation),
-                                    ),
-                                );
-                            }
-                        }
-                    }
+                    Self::record_prims(&mut out.prims, &meta.collision, true);
                     out.nodes.extend(
                         meta.nodes
                             .into_iter()
@@ -470,6 +465,32 @@ impl SideData {
             }
         }
         out
+    }
+
+    /// Record each geometry's one-prim collision. A droid's bake replaces an
+    /// earlier record (`replace`); a map's or a vehicle's keeps the first.
+    fn record_prims(
+        out: &mut HashMap<String, (Prim, Mat4)>,
+        collision: &[manifest::ManifestCollision],
+        replace: bool,
+    ) {
+        for c in collision {
+            let [p] = &c.prims[..] else {
+                continue;
+            };
+            let Some(prim) = crate::assets::prim_shape(p).as_ref().and_then(Prim::of) else {
+                continue;
+            };
+            let entry = (
+                prim,
+                crate::viewer::instance_matrix(p.rotation, p.translation),
+            );
+            if replace {
+                out.insert(c.geometry.to_ascii_lowercase(), entry);
+            } else {
+                out.entry(c.geometry.to_ascii_lowercase()).or_insert(entry);
+            }
+        }
     }
 }
 
@@ -577,7 +598,7 @@ impl Chunks {
                     continue;
                 }
                 let text = |key: &str| props.get(&hash(key)).map(String::as_str);
-                let number = |key: &str| text(key).and_then(|v| v.trim().parse::<f32>().ok());
+                let number = |key: &str| text(key).and_then(crate::vehicle_class::float);
                 let vector = |key: &str| {
                     text(key)
                         .map(floats)
@@ -629,7 +650,7 @@ impl Chunks {
                     },
                 };
                 let ps2 = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
-                let omega = vector("ChunkOmega").map_or(Vec3::ZERO, |w| Vec3::new(-w.x, -w.y, w.z));
+                let omega = vector("ChunkOmega").unwrap_or(Vec3::ZERO);
                 let spec = Arc::new(Spec {
                     model: model.to_owned(),
                     prim,
@@ -924,18 +945,20 @@ impl Chunks {
             let r = Mat3::from_quat(q);
             let world = r * Mat3::from_diagonal(spec.prim.inertia() * MASS) * r.transpose();
             let still = spec.mode == 2;
+            let omega = r * spec.omega;
             let mut piece = Piece {
                 spec: spec.clone(),
                 pos: at,
                 vel,
                 rot: q,
-                momentum: world * spec.omega,
-                omega: spec.omega,
+                momentum: world * omega,
+                omega,
                 moving: !still,
                 count: u8::from(still),
                 budget: if still { 0 } else { spec.budget },
                 touched: false,
                 timer: 0.0,
+                space: self.space,
                 trails: Vec::new(),
                 smoke: Vec::new(),
             };

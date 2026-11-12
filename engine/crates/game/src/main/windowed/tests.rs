@@ -270,9 +270,6 @@ fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
 #[path = "tests/assault.rs"]
 mod assault;
 
-/// The game's sound pauses with a ground battle's pause menu and nowhere
-/// else: never in the shell (leaving from the pause menu), never once the
-/// pause ends, never in a space battle.
 #[test]
 fn pause_audio_follows_the_battle_pause_only() {
     let mut a = App::new(
@@ -301,7 +298,7 @@ fn pause_audio_follows_the_battle_pause_only() {
     a.screen = Screen::Battle;
     let region = core::region::Region::sphere(glam::Vec3::ZERO, 10.0);
     a.walk.as_mut().unwrap().0.sim.landing_regions.push(region);
-    assert!(!a.game_audio_paused(), "space battle");
+    assert!(a.game_audio_paused(), "space battle");
     let sim = &mut a.walk.as_mut().unwrap().0.sim;
     sim.landing_regions.clear();
     assert!(a.game_audio_paused(), "ground again");
@@ -312,7 +309,7 @@ fn pause_audio_follows_the_battle_pause_only() {
         glam::Vec3::NEG_X,
     );
     a.walk.as_mut().unwrap().0.sim.install_ctf(ctf);
-    assert!(!a.game_audio_paused(), "space CTF without landing regions");
+    assert!(a.game_audio_paused(), "space CTF without landing regions");
 }
 
 /// Playtest A5: the window opens maximized; a forced size stays exact.

@@ -306,6 +306,90 @@ fn a_foot_bot_in_a_space_round_walks_from_hub_to_hub_and_decides_again_on_arriva
 }
 
 #[test]
+fn a_foot_bot_in_a_space_one_flag_round_takes_the_same_walk() {
+    let (mut sim, h) = l_sim();
+    sim.install_ctf(crate::sim::CtfState::new_space_one_flag(
+        5,
+        Vec3::new(0.0, 500.0, 0.0),
+        Vec3::ZERO,
+        Vec3::ZERO,
+    ));
+    let goals = wander_goals(&mut sim, h, 120);
+    let hubs: std::collections::BTreeSet<u16> = goals.iter().map(|g| g.1).collect();
+    assert!(hubs.len() >= 2, "{goals:?}");
+}
+
+/// `FUN_002ec380` (B2:264272) draws a hub only when `FUN_002eb000` finds a hop
+/// in the route table. Space Mygeeto's one-flag script blocks `connection54`,
+/// whose `plnp` patch cuts the Republic hubs behind the doors it locks out of
+/// the table while the arcs still join them; the port asked the arcs, and its
+/// bots crowded the locked doors. Here hub 0's row leads to hub 1 only.
+#[test]
+fn the_space_walk_draws_no_hub_the_route_table_cuts_off() {
+    let (mut sim, h) = l_sim();
+    sim.space_assault = Some(crate::sim::SpaceAssault::new(10));
+    let n = 3usize;
+    let mut rows = vec![Vec::new(); crate::nav::TYPE_COUNT * n];
+    rows[nav::SOLDIER * n] = vec![0, 31 << 3, 0];
+    rows[nav::SOLDIER * n + 1] = vec![31 << 3, 0, 0];
+    rows[nav::SOLDIER * n + 2] = vec![31 << 3, 31 << 3, 0];
+    sim.nav.as_mut().unwrap().routes = RouteTable::from_rows(n, crate::nav::TYPE_COUNT, rows);
+    let mut drawn = std::collections::BTreeSet::new();
+    for k in 0..64 {
+        sim.tick = k;
+        let g = sim.nav.as_ref().unwrap();
+        let u = sim.unit(h).unwrap();
+        assert!(g.reachable_by(0, 2, mover(&sim, u)), "the arcs join hub 2");
+        drawn.insert(deathmatch_goal(&sim, g, h, u, 0).1);
+    }
+    assert!(drawn.contains(&1) && !drawn.contains(&2), "{drawn:?}");
+}
+
+#[test]
+fn a_flying_ship_is_no_walk_target_and_a_soldier_on_foot_is() {
+    use crate::unit::{Controller, UnitSpec};
+    use crate::vehicle::flyer::FlightPhase;
+    use crate::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    use crate::weapon::HealthType;
+    let (mut sim, h) = l_sim();
+    sim.space_assault = Some(crate::sim::SpaceAssault::new(10));
+    let at = Vec3::new(40.0, 0.0, -40.0);
+    let foe = sim
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(1, at)
+        })
+        .expect("spawned");
+    let ship = sim.spawn_vehicle(&VehicleSpec {
+        kind: VehicleKind::Flyer,
+        class: 0,
+        home_team: None,
+        neutral_when_empty: true,
+        spawn_pad: None,
+        pos: at,
+        yaw: 0.0,
+        max_health: 1000.0,
+        health_type: HealthType::Vehicle,
+        seats: vec![SeatKind::Pilot],
+    });
+    let goals = |sim: &mut Sim| {
+        let mut found = 0;
+        for k in 0..64 {
+            sim.tick = k;
+            let g = sim.nav.as_ref().unwrap();
+            let u = sim.unit(h).unwrap();
+            let cur = start_hub(sim, g, h).unwrap();
+            found += usize::from(deathmatch_enemy_goal(sim, g, h, u, cur).is_some());
+        }
+        found
+    };
+    assert!(goals(&mut sim) > 0, "a foe on foot is walked at");
+    assert!(sim.seat_unit(foe, ship, 0));
+    sim.vehicle_mut(ship).unwrap().flyer.phase = FlightPhase::Flying;
+    assert_eq!(goals(&mut sim), 0, "a foe flying a ship is not");
+}
+
+#[test]
 fn a_foot_bot_on_a_ground_map_takes_no_space_walk() {
     let (mut sim, h) = l_sim();
     assert!(wander_goals(&mut sim, h, 30).is_empty());

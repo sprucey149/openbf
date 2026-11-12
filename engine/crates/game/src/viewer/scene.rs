@@ -94,6 +94,8 @@ pub struct SceneGpu {
     /// and its far extension each push a range): what the chase camera's
     /// see-through props fade ([`SceneGpu::see_through`]).
     pub instance_draws: Vec<(u32, std::ops::Range<usize>)>,
+    pub flag_instances: Vec<u32>,
+    pub ctf_markers: Vec<(u32, Vec3)>,
     /// The props drawn see-through now, by manifest index and opacity
     /// (`crate::camera_collide`, set by [`SceneGpu::see_through`]).
     pub(super) faded: Vec<(u32, f32)>,
@@ -157,6 +159,39 @@ impl SpeckleAnim {
 }
 
 impl SceneGpu {
+    pub fn pose_ctf(&mut self, sim: &core::sim::Sim, player: core::unit::UnitHandle) {
+        for (ii, range) in &self.instance_draws {
+            if self.flag_instances.contains(ii) {
+                for draw in &mut self.draws[range.clone()] {
+                    draw.fade = sim.ctf.as_ref().map(|_| render::Fade::see_through(0.0));
+                }
+            }
+        }
+        let Some(ctf) = &sim.ctf else { return };
+        let Some(team) = sim.unit(player).map(|u| usize::from(u.team)) else {
+            return;
+        };
+        for (ii, pos) in &self.ctf_markers {
+            let Some(owner) = ctf
+                .capture_regions
+                .iter()
+                .position(|r| r.pos.distance_squared(*pos) < 1.0)
+            else {
+                continue;
+            };
+            let rgb = if owner == team {
+                [1.0, 86.0, 213.0]
+            } else {
+                [200.0, 100.0, 100.0]
+            };
+            let color = rgb.map(|x| render::srgb_decode(x / 128.0));
+            for (_, range) in self.instance_draws.iter().filter(|(index, _)| index == ii) {
+                for draw in &mut self.draws[range.clone()] {
+                    draw.color = [color[0], color[1], color[2], 1.0];
+                }
+            }
+        }
+    }
     /// Pose every drawn door at its sim door's `open` (`core::door`): each
     /// moving submesh at `instance · D(open)`, the collision bodies' own
     /// rule. A door with no sim twin (`OPENBF_DOORS_SOLID=1`) stays shut.

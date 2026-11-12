@@ -508,6 +508,12 @@ pub struct Soldier {
     pub drown_in: u32,
     pub jump_animation: Option<u8>,
     pub jump_animation_serial: u32,
+    /// The velocity of the flyer he stands on, while he has one (BF2's
+    /// platform, s+0x480; `analysis/re-flyer-deck.md`). `Sim` writes it; a
+    /// jump, a jet or a throw adds it to his own and leaves the deck, and
+    /// the hover, a fall, a tumble, the get-up or death leave it as he is
+    /// (`FUN_00247bf8`). No gravity acts while he has one.
+    pub platform_vel: Option<Vec3>,
     /// The previous tick's pad word — the EDGE source for every contextual
     /// button, and (Phase D) for the squad commands `Sim::step` phase 0b reads.
     /// NOT hashed: it is a copy of a pad the input log already determines, so a
@@ -781,6 +787,7 @@ impl Soldier {
             drown_in: 3 * crate::TICK_HZ,
             jump_animation: None,
             jump_animation_serial: 0,
+            platform_vel: None,
             prev_buttons: 0,
         }
     }
@@ -876,6 +883,17 @@ impl Soldier {
     }
 
     fn set_stance(&mut self, s: Stance) {
+        match s {
+            Stance::Jump | Stance::Jet | Stance::Thrown => {
+                if let Some(v) = self.platform_vel.take() {
+                    self.vel += v;
+                }
+            }
+            Stance::Hover | Stance::Fall | Stance::Tumble | Stance::GetUp | Stance::Dead => {
+                self.platform_vel = None;
+            }
+            _ => {}
+        }
         let upright = |s| matches!(s, Stance::Stand | Stance::Sprint);
         if !(upright(self.stance) && upright(s)) {
             self.stand_age = 0.0;
@@ -1219,6 +1237,12 @@ impl Soldier {
         }
         // Jet fuel (card JETP), when there is any: a class with no jet keeps
         // 0 and hashes as before. The jet state is the stance, above.
+        if let Some(v) = self.platform_vel {
+            eat(b"SOLDIER_DECK");
+            for c in [v.x, v.y, v.z] {
+                eat(&c.to_bits().to_le_bytes());
+            }
+        }
         if self.fuel != 0.0 {
             eat(b"SOLDIER_FUEL");
             eat(&self.fuel.to_bits().to_le_bytes());

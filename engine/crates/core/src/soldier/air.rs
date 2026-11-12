@@ -165,6 +165,16 @@ impl Soldier {
         }
     }
 
+    /// The flyer under him tipped past the deck's limit: BF2's tumble
+    /// (state 10, `FUN_00240bf8`, `analysis/re-flyer-deck.md`), refused to a
+    /// tumbling or dead soldier as `FUN_00247bf8` refuses it.
+    pub fn tip_off(&mut self) {
+        if self.stance != Stance::Tumble && self.stance != Stance::Dead {
+            self.set_stance(Stance::Tumble);
+            self.knock_rules = GroundRules::Bf2;
+        }
+    }
+
     /// A hold takes him out of whatever he was doing, a throw's state included.
     pub fn catch_upright(&mut self) {
         if self.stance != Stance::Stand {

@@ -289,7 +289,7 @@ fn fill(out: &mut [f32], v: &str) {
 
 /// The first number of a value; ODF lines can carry a trailing `//comment`
 /// (the skiff's `BankFilter = "3//low"`), which the PS2's sscanf stops at.
-fn float(v: &str) -> Option<f32> {
+pub(crate) fn float(v: &str) -> Option<f32> {
     let end = v
         .trim_start()
         .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))

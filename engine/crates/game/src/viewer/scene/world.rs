@@ -627,6 +627,9 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
             .with_light(*light)
             .with_fade(p.fade)
             .with_lit(lit);
+            base.additive = *layer == render::DrawLayer::Blend
+                && model.eq_ignore_ascii_case("com_prop_ctfdrop_space")
+                && scene.meshes[model].submeshes[k].4 & 0x40 != 0;
             if let Some(c) = p.color {
                 base.color = std::array::from_fn(|i| base.color[i] * c[i]);
             }
@@ -793,6 +796,28 @@ pub fn upload_scene(r: &mut Renderer, scene: &Scene) -> Result<SceneGpu> {
         turrets,
         stations,
         instance_draws,
+        flag_instances: scene
+            .manifest
+            .instances
+            .iter()
+            .enumerate()
+            .filter_map(|(i, x)| {
+                x.class
+                    .eq_ignore_ascii_case("com_icon_spaceflag")
+                    .then_some(i as u32)
+            })
+            .collect(),
+        ctf_markers: scene
+            .manifest
+            .instances
+            .iter()
+            .enumerate()
+            .filter_map(|(i, x)| {
+                x.class
+                    .eq_ignore_ascii_case("com_prop_ctfdrop_space")
+                    .then_some((i as u32, Vec3::from(x.translation)))
+            })
+            .collect(),
         faded: Vec::new(),
         fallen,
         lights: crate::point_light::scene_lights(scene),

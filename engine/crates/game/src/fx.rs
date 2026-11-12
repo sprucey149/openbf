@@ -49,12 +49,14 @@ pub mod chunks;
 pub mod draw;
 pub mod emitter;
 mod flame;
+mod flyer_spray;
 mod force;
 mod jet;
 mod props;
 mod repair;
 pub mod ripple;
 mod sky;
+mod space_dust;
 mod storm;
 mod trail;
 mod turret;
@@ -428,6 +430,7 @@ pub struct LiveEffect {
     turret: Option<(u64, usize)>,
     station: Option<(usize, usize)>,
     vehicle: Option<(VehicleHandle, usize)>,
+    flyer_exhaust: Option<(VehicleHandle, usize)>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
 }
@@ -441,6 +444,12 @@ enum Gain {
 }
 
 impl LiveEffect {
+    fn set_size(&mut self, size: f32) {
+        for instance in &mut self.instances {
+            instance.size = size;
+        }
+    }
+
     fn follow_unit(&mut self, unit: &core::unit::Unit) {
         let delta = unit.soldier.pos - self.frame.pos;
         for instance in &mut self.instances {
@@ -473,6 +482,7 @@ impl LiveEffect {
             turret: None,
             station: None,
             vehicle: None,
+            flyer_exhaust: None,
             burn: None,
             float: None,
         };
@@ -753,6 +763,9 @@ fn splash_at(pos: Vec3, level: f32) -> Vec3 {
 #[derive(Default)]
 pub struct Fx {
     vehicle_health: Vec<Option<(u32, f32)>>,
+    flyer_phases: Vec<Option<(u32, core::vehicle::flyer::FlightPhase)>>,
+    flyer_spray_depth: Vec<Option<(u32, f32)>>,
+    space_dust: Option<space_dust::SpaceDust>,
     puffs: Vec<Puff>,
     library: Option<Library>,
     live: Vec<LiveEffect>,
@@ -846,7 +859,9 @@ impl Fx {
 
     /// The map's effect layers (see [`Library::load`]).
     pub fn load(assets_dir: &Path, map_dir: &Path, game: &str, factions: &[&str]) -> Fx {
-        Fx::with_library(Library::load(assets_dir, map_dir, game, factions))
+        let mut fx = Fx::with_library(Library::load(assets_dir, map_dir, game, factions));
+        fx.space_dust = space_dust::SpaceDust::load(map_dir);
+        fx
     }
 
     /// The effect layers of the map at `map_dir` for `walk`'s two sides.
@@ -1175,6 +1190,9 @@ impl Fx {
                 textures: &mut self.textures,
                 models: &mut self.models,
             };
+            if let Some(dust) = &self.space_dust {
+                dust.draws(camera, &mut assets, &mut out);
+            }
             for e in &self.live {
                 e.draws_with_bias(
                     camera.position,
@@ -1251,6 +1269,7 @@ impl Fx {
     /// Read this tick's sim events into effects.
     pub fn ingest(&mut self, walk: &WalkSim) {
         self.ingest_sim(&walk.sim);
+        self.follow_flyer_exhaust(walk);
         self.soldier_water(walk);
         self.chunks.tick(walk, self.library.as_ref());
         self.follow_jets(&walk.sim, |u| {
@@ -1345,6 +1364,7 @@ impl Fx {
                     // depth, so overlapping puffs add up instead of one
                     // punching a hole in the others.
                     layer: render::DrawLayer::Blend,
+                    additive: false,
                     // An effect puff is a near-scene draw and takes no
                     // far-scene cull; the map's cull is applied to the
                     // world, the terrain and the water (`viewer::far_cull`).
@@ -1356,6 +1376,7 @@ impl Fx {
                     light: render::LightPath::Lit,
                     fade: None,
                     lit: None,
+                    region_lit: None,
                 }
             })
             .collect()

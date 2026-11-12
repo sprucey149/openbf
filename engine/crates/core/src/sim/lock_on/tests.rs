@@ -15,6 +15,7 @@ fn gun() -> GunSetup {
             class: 0,
             infinite: true,
             reserve_clips: 0,
+            fire_points: Vec::new(),
         }],
         fire_point: Vec3::ZERO,
         pivot: Vec3::ZERO,
@@ -324,4 +325,42 @@ fn a_cannon_with_no_lock_time_never_charges() {
     tap(&mut s);
     assert!(s.lock_on[0].target.is_some());
     assert_eq!(s.lock_on_charge(0, 0), None);
+}
+
+#[test]
+fn a_fully_locked_shot_keeps_its_target_when_its_tilt_leaves_the_lock_cone() {
+    let (mut s, p, own) = world();
+    s.vehicle_mut(own).unwrap().flyer.phase = crate::vehicle::flyer::FlightPhase::Flying;
+    let w = &mut s.weapon_classes[0];
+    w.lock_time = 3.0;
+    w.ordnance.missile = Some(Default::default());
+    w.shot_tilts = vec![(0.0, 30.0_f32.to_radians())];
+    w.pitch_spread = 0.0;
+    w.yaw_spread = 0.0;
+    let centre = ahead(&s, p, 500.0, 0.0);
+    let target = fighter(&mut s, 1, centre);
+    tap(&mut s);
+    let idle = pads(&s, false);
+    for _ in 0..91 {
+        s.tick_lock_on(&idle, STEP);
+    }
+    assert_eq!(s.lock_on_charge(0, 0), Some(1.0));
+    let fire = PadState {
+        buttons: buttons::FIRE,
+        ..Default::default()
+    };
+    for _ in 0..4 {
+        s.seat_gun(p.index as usize, &fire);
+        if !s.bolts.is_empty() {
+            break;
+        }
+    }
+    let missile = s
+        .bolts
+        .first()
+        .expect("the locked shot fires")
+        .missile
+        .unwrap();
+    assert!(missile.launch.dot(s.flyer_ray(p).1) < LOCK_FIRE_COS);
+    assert_eq!(missile.target, Some(MissileTarget::Vehicle(target)));
 }

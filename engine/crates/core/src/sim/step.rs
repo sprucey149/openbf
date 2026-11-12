@@ -167,7 +167,7 @@ impl Sim {
         if !u.alive
             || u.controller != Controller::Ai
             || u.droideka.is_some()
-            || u.wall_push.length_squared() < ai::HULL_PUSH_MIN.powi(2)
+            || u.wall_push.length_squared() < ai::HULL_PUSH_MIN * ai::HULL_PUSH_MIN
         {
             return;
         }
@@ -317,7 +317,8 @@ impl Sim {
                     return Some(s.pos);
                 }
             }
-            if exit.is_some_and(|p| p.distance_squared(s.pos) <= ai::RETURN_ARRIVE.powi(2))
+            if exit
+                .is_some_and(|p| p.distance_squared(s.pos) <= ai::RETURN_ARRIVE * ai::RETURN_ARRIVE)
                 && s.grounded
                 && self.level_at(s.pos) == super::Level::On
                 && self.soldier_clear(s.pos)
@@ -328,7 +329,7 @@ impl Sim {
         (exit.is_none()
             && !descent
             && s.grounded
-            && s.pos.distance_squared(start) > ai::PIN_WALKED.powi(2)
+            && s.pos.distance_squared(start) > ai::PIN_WALKED * ai::PIN_WALKED
             && self.level_at(s.pos) == super::Level::On
             && self.soldier_clear(s.pos))
         .then_some(s.pos)
@@ -1027,6 +1028,11 @@ impl Sim {
                 }
             }));
         self.saber_inputs(&mut unit_pads);
+        let decks = self.ground_rules == GroundRules::Bf2
+            && self
+                .vehicles
+                .iter()
+                .any(|v| v.alive && v.kind == crate::vehicle::VehicleKind::Flyer);
         // 3. Movement.
         let floor_seam = self.nav.as_ref().and_then(|g| g.floor_seam);
         for (i, pad_i) in unit_pads.iter_mut().enumerate() {
@@ -1054,6 +1060,13 @@ impl Sim {
             // the death block first, then the soldier's own update with no
             // stick, the wall pass and the floor.
             let corpse = !self.units[i].alive && self.units[i].body;
+            if self.units[i].deck.is_some()
+                && (!self.units[i].alive
+                    || self.units[i].mount.is_some()
+                    || self.units[i].droideka.is_some())
+            {
+                self.leave_deck(i);
+            }
             if !self.units[i].alive && !corpse {
                 continue;
             }
@@ -1077,6 +1090,10 @@ impl Sim {
             // Where the tick's move starts: the wall pass tests the move, not
             // only its end (card WPSH).
             let from = self.units[i].capsule();
+            let carried = self.units[i].deck.is_some();
+            if self.units[i].alive {
+                self.carry_on_deck(i);
+            }
             // Some(was_grounded) when the soldier stepped: his floor contact
             // resolves AFTER the wall pass (card STHOP).
             let mut stepped: Option<bool> = None;
@@ -1195,6 +1212,9 @@ impl Sim {
                 to,
                 in_air,
             );
+            if carried && self.units[i].alive {
+                self.hold_at_walls(i, &from);
+            }
             self.keep_jet_landing_side(i, from);
             self.keep_solid_approach_side(i, from);
             if let Some(seam) = floor_seam.filter(|_| stepped == Some(true)) {
@@ -1237,6 +1257,9 @@ impl Sim {
                 self.units[i]
                     .soldier
                     .resolve_ground(dt, fy, fnrm, from.base.y, rules);
+                if decks && self.units[i].alive {
+                    self.touch_deck(i);
+                }
                 let landed = self.units[i].alive && !was_grounded && self.units[i].soldier.grounded;
                 // A hard landing UNDER THE MAP kills, cheat or not (card
                 // KFLR, `sim/bounds.rs`); any other one at the lethal

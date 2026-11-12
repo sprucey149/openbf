@@ -82,6 +82,33 @@ pub fn flyer_aim_box(geometry: &str) -> f32 {
         .map_or(0.0, |(_, v)| *v)
 }
 
+pub fn flyer_params(
+    db: &crate::classdb::ClassDb,
+    c: &str,
+    bf2: bool,
+    landed: f32,
+) -> Option<core::vehicle::flyer::FlyerParams> {
+    vehicle_class::FlyerClass::from_db(db, c, bf2).map(|f| core::vehicle::flyer::FlyerParams {
+        never_crash_when_unpiloted: vehicle_class::prop_flag(db, c, "NeverCrashWhenUnpiloted"),
+        trick_roll_speed: vehicle_class::prop_float(db, c, "TrickRollSpeed").unwrap_or(1.0),
+        trick_drain: vehicle_class::prop_float(db, c, "EnergyTrickDrainSingleTap").unwrap_or(15.0),
+        trick_side_strafe: vehicle_class::prop_float(db, c, "TrickSideRollStrafeSpeed")
+            .unwrap_or(0.0),
+        aim_box: db
+            .prop(c, "GeometryName")
+            .map(|g| flyer_aim_box(g.trim()))
+            .unwrap_or(0.0),
+        pilot_repair_scale: vehicle_class::prop_float(db, c, "PilotSkillRepairScale")
+            .unwrap_or(0.005),
+        has_chunks: vehicle_class::has_chunks(db, c),
+        view_fov: vehicle_class::seats(db, c)
+            .first()
+            .and_then(|s| s.third_person_fov)
+            .unwrap_or(48.0),
+        ..f.params(landed)
+    })
+}
+
 /// The side-table row of a port faction key: (`Class<SideName>`, the
 /// `Class<Side>` stem of the Atk / Def keys).
 pub fn side_row(faction: &str) -> Option<(&'static str, &'static str)> {
@@ -167,6 +194,7 @@ pub struct PadBuild {
     /// `classes`; filled by [`install`].
     pub seats: Vec<Vec<vehicle_class::SeatSpec>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
+    pub flyer_exhaust: Vec<Vec<FlyerExhaust>>,
     pub weapon_hud: Vec<Vec<Vec<crate::walk::WeaponHud>>>,
     /// Each class's `EngineSound` and `TurnOffTime` (card VSND), parallel
     /// to `classes`; filled by [`install`].
@@ -186,6 +214,85 @@ pub struct PadBuild {
     /// The building turrets, in manifest order (card VTURB): spawned by
     /// [`install`] before any pad vehicle.
     pub turrets: Vec<TurretDef>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FlyerExhaust {
+    pub effect: String,
+    pub local: glam::Mat4,
+    pub node: Option<String>,
+    pub offset: Vec3,
+    pub scale: [f32; 3],
+}
+
+/// The PS2 keeps at most eight thrust effects per class (`FUN_00211a40`,
+/// B2:124203-124223); a later `ThrustEffect` is dropped.
+const MAX_THRUST_EFFECTS: usize = 8;
+
+fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<FlyerExhaust> {
+    // `FUN_00211a40` reads these keys in ODF order, each applying to the most
+    // recent `ThrustEffect` (B2:124203-125043).
+    let (effect_key, point_key, offset_key) = (
+        fnv1a_lowercase("ThrustEffect"),
+        fnv1a_lowercase("ThrustAttachPoint"),
+        fnv1a_lowercase("ThrustAttachOffset"),
+    );
+    let (min_scale_key, max_scale_key, start_scale_key) = (
+        fnv1a_lowercase("ThrustEffectMinScale"),
+        fnv1a_lowercase("ThrustEffectMaxScale"),
+        fnv1a_lowercase("ThrustEffectScaleStart"),
+    );
+    let mut effects: Vec<(String, Option<String>, Vec3, [f32; 3])> = Vec::new();
+    for def in db.chain(class).into_iter().rev() {
+        for (key, value) in &def.props {
+            if *key == effect_key && effects.len() < MAX_THRUST_EFFECTS {
+                effects.push((value.trim().to_owned(), None, Vec3::ZERO, [1.0, 1.0, 0.0]));
+            } else if let Some((_, node, offset, scale)) = effects.last_mut() {
+                let slot = match *key {
+                    k if k == min_scale_key => Some(0),
+                    k if k == max_scale_key => Some(1),
+                    k if k == start_scale_key => Some(2),
+                    _ => None,
+                };
+                if let Some(i) = slot {
+                    if let Ok(v) = value.trim().parse::<f32>() {
+                        scale[i] = v;
+                    }
+                } else if *key == point_key {
+                    *node = Some(value.trim().to_owned());
+                } else if *key == offset_key {
+                    let values: Vec<_> = value
+                        .split_whitespace()
+                        .filter_map(|x| x.parse::<f32>().ok())
+                        .collect();
+                    if let [x, y, z] = values.as_slice() {
+                        *offset = Vec3::new(*x, *y, *z);
+                    }
+                }
+            }
+        }
+    }
+    effects
+        .into_iter()
+        .map(|(effect, node, offset, scale)| {
+            let base = node
+                .as_deref()
+                .and_then(|name| nodes.iter().find(|n| n.name.eq_ignore_ascii_case(name)))
+                .map_or(glam::Mat4::IDENTITY, |n| {
+                    crate::viewer::instance_matrix(
+                        n.axes.unwrap_or(glam::Mat3::IDENTITY.to_cols_array_2d()),
+                        n.pos,
+                    )
+                });
+            FlyerExhaust {
+                effect,
+                local: base * glam::Mat4::from_translation(offset),
+                node,
+                offset,
+                scale,
+            }
+        })
+        .collect()
 }
 
 /// One armed-building instance as a vehicle: its spec (at the instance,
@@ -665,39 +772,7 @@ pub fn install_with_objective(
         .classes
         .iter()
         .enumerate()
-        .map(|(i, c)| {
-            vehicle_class::FlyerClass::from_db(&db, c, game == "bf2").map(|f| {
-                core::vehicle::flyer::FlyerParams {
-                    never_crash_when_unpiloted: vehicle_class::prop_flag(
-                        &db,
-                        c,
-                        "NeverCrashWhenUnpiloted",
-                    ),
-                    trick_roll_speed: vehicle_class::prop_float(&db, c, "TrickRollSpeed")
-                        .unwrap_or(1.0),
-                    trick_drain: vehicle_class::prop_float(&db, c, "EnergyTrickDrainSingleTap")
-                        .unwrap_or(15.0),
-                    trick_side_strafe: vehicle_class::prop_float(
-                        &db,
-                        c,
-                        "TrickSideRollStrafeSpeed",
-                    )
-                    .unwrap_or(0.0),
-                    aim_box: db
-                        .prop(c, "GeometryName")
-                        .map(|g| flyer_aim_box(g.trim()))
-                        .unwrap_or(0.0),
-                    pilot_repair_scale: vehicle_class::prop_float(&db, c, "PilotSkillRepairScale")
-                        .unwrap_or(0.005),
-                    has_chunks: vehicle_class::has_chunks(&db, c),
-                    view_fov: vehicle_class::seats(&db, c)
-                        .first()
-                        .and_then(|s| s.third_person_fov)
-                        .unwrap_or(48.0),
-                    ..f.params(landed[i].unwrap_or(0.0))
-                }
-            })
-        })
+        .map(|(i, c)| flyer_params(&db, c, game == "bf2", landed[i].unwrap_or(0.0)))
         .collect();
     // BF2's path Properties now survive the bake; older manifests use the
     // PS2 constructor defaults until rebaked (analysis/re-flyer-ai.md).
@@ -747,6 +822,22 @@ pub fn install_with_objective(
     }
     sim.blast_setup = setups;
     let damage_nodes = hardpoints_from(m, &sides);
+    b.flyer_exhaust = b
+        .classes
+        .iter()
+        .map(|c| {
+            if db.engine_base(c).and_then(vehicle_kind) != Some(VehicleKind::Flyer) {
+                return Vec::new();
+            }
+            flyer_exhaust(
+                &db,
+                c,
+                damage_nodes
+                    .get(&c.to_ascii_lowercase())
+                    .map_or(&[], Vec::as_slice),
+            )
+        })
+        .collect();
     sim.vehicle_damage_effects =
         b.classes
             .iter()
@@ -807,6 +898,19 @@ pub fn install_with_objective(
         |c| crate::assets::added_weak_parts(&db, c),
     );
     sim.sync_hulls();
+    sim.missile_target_points = b
+        .classes
+        .iter()
+        .map(|c| {
+            let Some((dir, k, entry)) = class_collision(m, map_dir, &sides, c) else {
+                return Vec::new();
+            };
+            let Ok(cg) = crate::assets::load_collision_geom(dir, &entry) else {
+                return Vec::new();
+            };
+            crate::assets::missile_target_points(&cg, &k.collision)
+        })
+        .collect();
     let nodes = hardpoints_from(m, &sides);
     b.riders = b
         .classes
@@ -910,7 +1014,10 @@ pub fn install_with_objective(
         .enumerate()
         .filter_map(|(i, s)| s.as_ref().map(|s| (i, s)))
     {
-        if db.engine_base(&b.classes[class]).and_then(vehicle_kind) != Some(VehicleKind::Walker) {
+        if !matches!(
+            db.engine_base(&b.classes[class]).and_then(vehicle_kind),
+            Some(VehicleKind::Walker | VehicleKind::Flyer)
+        ) {
             continue;
         }
         for w in setup.guns.iter().flatten().flat_map(|g| &g.weapons) {
@@ -1173,7 +1280,13 @@ fn hull_parts_from(
             }
             let (dir, k, entry) = class_collision(m, map_dir, sides, c)?;
             let cg = crate::assets::load_collision_geom(dir, &entry).ok()?;
-            let mut parts = crate::assets::hull_parts(&cg, &k.collision, &hit_locations(c));
+            let mut parts = if m.source_game.eq_ignore_ascii_case("bf2")
+                && vehicle_kind(&k.base) == Some(VehicleKind::Flyer)
+            {
+                crate::assets::bf2_flyer_hull_parts(&cg, &k.collision, &hit_locations(c))
+            } else {
+                crate::assets::hull_parts(&cg, &k.collision, &hit_locations(c))
+            };
             // After the model's own, so their order (and indices) stay.
             if !parts.is_empty() {
                 parts.extend(added(c));
@@ -1233,11 +1346,17 @@ pub fn seat_gun(
     s: &vehicle_class::SeatSpec,
     hp: &[ManifestHardpoint],
 ) -> Option<GunSetup> {
+    let node = |n: &str| {
+        hp.iter()
+            .find(|h| h.name.eq_ignore_ascii_case(n.trim()))
+            .map(|h| Vec3::from(h.pos))
+    };
     let weapons: Vec<GunWeapon> = s
         .weapons
         .iter()
         .take(MAX_SEAT_WEAPONS)
-        .filter_map(|w| {
+        .enumerate()
+        .filter_map(|(weapon, w)| {
             let class = match sim
                 .weapon_classes
                 .iter()
@@ -1261,27 +1380,30 @@ pub fn seat_gun(
                 class,
                 infinite: w.ammo < 1,
                 reserve_clips: (w.ammo - 1).max(0) as u32,
+                fire_points: s
+                    .aimers
+                    .iter()
+                    .filter(|a| a.weapon == weapon)
+                    .flat_map(|a| {
+                        if a.fire_points.is_empty() {
+                            node(&a.node).into_iter().collect::<Vec<_>>()
+                        } else {
+                            a.fire_points.iter().filter_map(|n| node(n)).collect()
+                        }
+                    })
+                    .collect(),
             })
         })
         .collect();
     if weapons.is_empty() {
         return None;
     }
-    let node = |n: &Option<String>| {
-        n.as_deref().and_then(|n| {
-            hp.iter()
-                .find(|h| h.name.eq_ignore_ascii_case(n.trim()))
-                .map(|h| Vec3::from(h.pos))
-        })
-    };
-    let turret = node(&s.turret_node);
-    let fire_point = node(&s.fire_point)
-        .or_else(|| {
-            s.fire_point
-                .is_none()
-                .then(|| node(&Some("hp_fire".into())))
-                .flatten()
-        })
+    let turret = s.turret_node.as_deref().and_then(node);
+    let fire_point = s
+        .fire_point
+        .as_deref()
+        .and_then(node)
+        .or_else(|| s.fire_point.is_none().then(|| node("hp_fire")).flatten())
         .or(turret)
         .unwrap_or(Vec3::ZERO);
     let mut aimer = aimer(s.yaw_limits, s.pitch_limits, s.yaw_rate, s.pitch_rate);

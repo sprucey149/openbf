@@ -15,6 +15,80 @@ use glam::Vec3;
 const DEG: f32 = std::f32::consts::PI / 180.0;
 
 #[test]
+fn flyer_salvo_uses_each_authored_muzzle() {
+    let (mut sim, pilot, h) = world(true);
+    let points = vec![
+        Vec3::new(0.0, 2.0, 3.0),
+        Vec3::new(2.0, -1.0, 3.0),
+        Vec3::new(-2.0, -1.0, 3.0),
+    ];
+    sim.seat_setup[0].as_mut().unwrap().guns[0]
+        .as_mut()
+        .unwrap()
+        .weapons[0]
+        .fire_points = points.clone();
+    sim.weapon_classes[0].shots_per_salvo = 3;
+    sim.weapon_classes[0].salvo_count = 1;
+    let vehicle = sim.vehicle_mut(h).unwrap();
+    vehicle.kind = VehicleKind::Flyer;
+    vehicle.flyer.phase = crate::vehicle::flyer::FlightPhase::Flying;
+    assert!(sim.seat_unit(pilot, h, 0));
+    sim.seat_gun(pilot.index as usize, &pad(buttons::FIRE));
+    let origins: Vec<_> = sim
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Shot { origin, .. } => Some(*origin),
+            _ => None,
+        })
+        .collect();
+    let v = sim.vehicle(h).unwrap();
+    let expected: Vec<_> = points.iter().map(|p| v.pos + v.rot * *p).collect();
+    assert_eq!(origins, expected);
+    let hash = sim.hash();
+    sim.vehicle_mut(h).unwrap().guns[0]
+        .as_mut()
+        .unwrap()
+        .weapons[0]
+        .shots_fired += 1;
+    assert_ne!(sim.hash(), hash);
+}
+
+#[test]
+fn flyer_region_overlap_distinguishes_firing_from_landing() {
+    for (x, overlap, inside) in [
+        (8.03, true, true),
+        (8.05, true, false),
+        (11.0, true, false),
+        (13.0, false, false),
+    ] {
+        let (mut sim, pilot, h) = world(true);
+        sim.flyer_params = vec![Some(crate::vehicle::flyer::FlyerParams::bf2())];
+        sim.blast_setup = vec![Some(crate::vehicle::BlastSetup {
+            explosion: None,
+            sphere_centre: Vec3::ZERO,
+            sphere_radius: 2.0,
+        })];
+        sim.landing_regions
+            .push(crate::region::Region::sphere(Vec3::ZERO, 10.0));
+        let v = sim.vehicle_mut(h).unwrap();
+        v.kind = VehicleKind::Flyer;
+        v.pos = Vec3::new(x, 0.0, 0.0);
+        v.flyer.phase = crate::vehicle::flyer::FlightPhase::Flying;
+        assert!(sim.seat_unit(pilot, h, 0));
+        assert_eq!(
+            sim.flyer_region_coverage(sim.vehicle(h).unwrap()),
+            (overlap, inside)
+        );
+        sim.seat_gun(pilot.index as usize, &pad(buttons::FIRE));
+        assert_eq!(
+            sim.events.iter().any(|e| matches!(e, Event::Shot { .. })),
+            !overlap
+        );
+    }
+}
+
+#[test]
 fn flyer_pilot_looks_along_untilted_body_without_accumulating_stick_or_mouse_pitch() {
     let (mut sim, pilot, h) = world(true);
     let v = sim.vehicle_mut(h).unwrap();
@@ -83,6 +157,7 @@ fn gun(fire: [f32; 3], pivot: [f32; 3], yaw: [f32; 2], pilot: bool) -> GunSetup 
             class: 0,
             infinite: true,
             reserve_clips: 0,
+            fire_points: Vec::new(),
         }],
         fire_point: Vec3::from(fire),
         pivot: Vec3::from(pivot),

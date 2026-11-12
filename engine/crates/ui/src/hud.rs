@@ -209,6 +209,7 @@ pub struct HudModel {
     pub team_points: Option<([i32; 2], u32)>,
     /// When true, 1-Flag CTF HUD displays flag icons and single-score points.
     pub ctf: bool,
+    pub flag_status: Option<crate::hud_flag::FlagStatus>,
     pub space: Option<crate::hud_space::SpaceStatus>,
     /// Reinforcements lost per second to the post bleed, team 0 / team 1.
     pub bleed: [f32; 2],
@@ -299,12 +300,7 @@ pub struct HudModel {
     pub scope: Option<crate::hud_scope::ScopeView>,
 }
 
-/// PROVISIONAL team accents for the egui HUD and spawn menu (orange/green);
-/// these RGB values have not been measured from the PS2 HUD.
-pub const TEAM_COLORS: [Color32; 2] = [
-    Color32::from_rgb(242, 100, 40),
-    Color32::from_rgb(80, 220, 90),
-];
+pub use crate::hud_flag::TEAM_COLORS;
 
 /// The reticle's place for a chase camera that looks `tilt` radians below
 /// the aim (`analysis/re-aim-assist.md` §10.4): tan(tilt) / tan(fov_y / 2) of
@@ -338,27 +334,30 @@ pub fn feed(hud: &mut Hud, m: &HudModel, has_mesh: &dyn Fn(&str) -> bool) {
         has_mesh,
     );
     hud.hint_markers.clone_from(&m.hints);
+    crate::hud_flag::feed(hud, m.flag_status, has_mesh);
     let mut put = |event: &str, v: EventValue| hud.publish(event, v, has_mesh);
     put("initialize", EventValue::None);
     let alive = !m.dead;
 
     // Health and stamina: shown while alive.
     if alive {
-        let frac = if m.hp_max > 0.0 { m.hp / m.hp_max } else { 0.0 };
-        let health = if m.hero {
-            "player1.hero.health"
-        } else {
-            "player1.health"
-        };
-        put(health, EventValue::Number(m.hp.max(0.0)));
-        put(
-            if m.hero {
-                "player1.hero.healthFraction"
+        if m.hero || m.seat_health.is_none() {
+            let frac = if m.hp_max > 0.0 { m.hp / m.hp_max } else { 0.0 };
+            let health = if m.hero {
+                "player1.hero.health"
             } else {
-                "player1.healthFraction"
-            },
-            EventValue::Number(frac.clamp(0.0, 1.0)),
-        );
+                "player1.health"
+            };
+            put(health, EventValue::Number(m.hp.max(0.0)));
+            put(
+                if m.hero {
+                    "player1.hero.healthFraction"
+                } else {
+                    "player1.healthFraction"
+                },
+                EventValue::Number(frac.clamp(0.0, 1.0)),
+            );
+        }
         put(
             if m.hero {
                 "player1.healthDisable"
@@ -1091,6 +1090,7 @@ mod tests {
             hints: Vec::new(),
             team_points: None,
             ctf: false,
+            flag_status: None,
             space: None,
             damage_flash: 0.0,
             gauge: Default::default(),
@@ -1496,5 +1496,42 @@ mod team_points_tests {
             Some(&EventValue::Text("0".to_owned()))
         );
         assert_eq!(hud.last("player1.team1.reinforcements"), None);
+    }
+}
+
+#[cfg(test)]
+mod seat_health_tests {
+    use super::*;
+    #[test]
+    fn a_seat_keeps_the_soldier_bar_hidden_until_the_rider_leaves() {
+        for first_in_seat in [false, true] {
+            let mut hud = crate::hud_tree::fixture::target_hud();
+            let mut model = HudModel {
+                hp: 300.0,
+                hp_max: 300.0,
+                ..Default::default()
+            };
+            if !first_in_seat {
+                feed(&mut hud, &model, &|_| false);
+                assert!(hud.last("player1.health").is_some());
+            }
+            model.seat_health = Some((800.0, 1000.0));
+            for _ in 0..3 {
+                feed(&mut hud, &model, &|_| false);
+                assert_eq!(hud.last("player1.health"), None);
+                assert_eq!(hud.last("player1.healthFraction"), None);
+                assert_eq!(
+                    hud.last("player1.vehicle.healthFraction"),
+                    Some(&EventValue::Number(0.8))
+                );
+            }
+            model.seat_health = None;
+            feed(&mut hud, &model, &|_| false);
+            assert_eq!(
+                hud.last("player1.healthFraction"),
+                Some(&EventValue::Number(1.0))
+            );
+            assert_eq!(hud.last("player1.vehicle.healthFraction"), None);
+        }
     }
 }

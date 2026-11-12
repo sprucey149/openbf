@@ -260,6 +260,254 @@ BF1 KAS2 Clone Wars as the ARC trooper (`ps2/out/b1_kas2_arc_spawned.p2s`), BF2 
   ended 0.6 / 1.5 m from the target point (hits). So the steering law, the target point and the handle re-check are
   measured; the lock that fills the fields in play is read code (§5), not measured.
 
+### 4.6 Space fighter target points and locked shots (2026-11-09) [V][M][O]
+
+Source checkpoint: `14db28ce58ce1030551a950c1a081c2640cf1a1f`, branch
+`feature/starfighter-ps2-parity`. Retail PS2 SLUS-21240 v2.01, disc CRC
+`02f4b541`, PCSX2 `fd9d310`, emucap build `8587968`, headless. Base state:
+`emulator/sstates/SLUS-21240 (02F4B541).10.p2s`, SHA-256
+`85da3e7445e4826eb55f17b90d0851b50fa9f65bed12a394acfb915a0b392371`.
+Local captures, savestates and replay analysis are retained under
+`engine/artifacts/lead_tmp/starfighter-parity/`; no RAM dumps or assets are public.
+Tracking run: `01M71E6VMGFQPRTXY8GC37ABBR`.
+
+The initial capital ship obstructs the fighter sightlines. For these controlled
+shots, only the player's craft was translated to a clear line; one shot also
+rotated that craft. Square selected the enemy, the retail launcher accumulated
+its dwell, and L1 fired. No missile, target-handle, target-pose, weapon-class or
+dwell fields were injected. Exact translations, rotation, input durations and
+frozen memory boundaries are in the local capture/Tracking records. The Y-wing
+and X-wing ready states retain the retail launcher with `held = limit = 3.0`,
+ready byte 1, and the selected target's pointer and generation.
+
+Three launches were observed: Y-wing at approximately 4.4 degrees, Y-wing at
+19.8 degrees, and X-wing at 19.7 degrees. The two Y-wing shots struck at about
+1.9 s; the X-wing shot approached to 7.78 m from its origin at age 1.683 s before
+impact and object reuse. Hull-health loss confirms the impacts. This is three
+controlled successful shots, not a measured general dogfight hit rate.
+
+The live TIE ordnance class has Velocity 350, MinSpeed 300, Acceleration 100,
+TurnRate 1.75, WaverTurn/WaverRate 0, LifeSpan 5. Ramp reaches 1 after one
+second; speed reaches 350 after half a second. Replaying the existing sine-clamped
+rotation and speed law against the recorded desired heading fits 55, 55 and 48
+clean update pairs, respectively, with maximum velocity errors 0.000043,
+0.000055 and 0.000042 m/s. The observed ordinary flight needs neither a turn-rate
+unit conversion nor a velocity-intercept lead. The current hull chord sweep
+does not need an enlarged missile radius to reproduce the tested contacts.
+
+**The missing rule is the authored targetable body.** In the current local
+decompilation, `FUN_00213488` lines 126088-126100 checks the TargetableCollision
+subset before its sphere fallback. `FUN_00168858` lines 7177-7219 visits those
+bodies in order, transforms each body's origin into world space and chooses the
+greatest positive dot between the missile direction and the normalized vector
+from missile to body. It starts with the entity origin and score zero. Without
+an authored targetable body, `FUN_00213488` lines 126103-126123 uses the collision
+sphere centre plus the class offset. These line numbers are from the current
+local file; the older sections above retain their original corpus numbering.
+
+The X-wing authors `TargetableCollision = collisionmesh`. Its targetable mesh
+origin is its model origin. Across 49 distinct clean X-wing states, the missile's
+desired heading matches the current target origin to 0.0000027 degrees in the
+double-precision replay comparison. Aiming at its enclosing sphere centre instead
+is wrong by up to 4.579 degrees near contact. OpenBF's former unconditional
+sphere-centre aim missed this craft at all three tested crossing speeds, 70,
+100 and 120 m/s, while the other seven GCW craft classes were struck in the same
+24-shot zero-aspect probe.
+
+The port now retains authored targetable body origins as class setup, applies
+the direction-scored choice for missile guidance, and keeps sphere targeting
+when that subset is empty. Existing baked manifests already contain these
+properties and bind-space primitive transforms, so this change needs no rebake.
+The collision shapes, ordnance masks, turn law and seeded random sequence are
+unchanged.
+
+**The launch cone is the firer's aim.** `FUN_0033a658` lines 319443-319475 checks
+the target against the firer controller's position and direction with dot at
+least 0.9, then LOS. It does not use the dispersed ordnance direction. OpenBF
+previously rechecked a full dwell against the individual round's spread/tilt
+direction and muzzle, which could leave that round unguided. Mounted firing now
+uses the seat's view ray for this check. A regression fires a fully charged
+launcher with a round tilt outside the cone and requires the target handle to
+remain attached; it fails before the correction and passes afterward.
+
+Acceptance is bounded: these captures do not measure countermeasure success,
+every authored waver class, every range/aspect/speed combination, or the flyer's
+extra maneuver-offset vcall (`FUN_0020ead8`). A 120 m/s crossing TIE at 500 m
+with 20 degrees of launch offset missed in a port diagnostic; no matching retail
+measurement establishes that case as a discrepancy. A separate Clone Wars
+diagnostic also missed the tridroid fighter at 70 m/s; its retail target-point
+and contact comparison remains unmeasured. No guidance buff is inferred from
+either case.
+
+Validation on the source checkpoint plus this patch:
+
+- `cargo test -p core`: 2,086 passed, two existing ignored tests; the original
+  deterministic hash pins pass. The missile scene subset passes 11 tests.
+- `cargo test -p game --test space_playtest_fixes`: eight passed. The new GCW
+  hull scenario hits all 28 cases: eight classes at 70/100/120 m/s crossing
+  speed and zero launch offset, plus both 20-degree offsets on X-wing and
+  Y-wing at 70 m/s. These are port regressions, not 28 retail measurements.
+- `cargo clippy --workspace -- -D warnings`, core with `--all-targets`, and the
+  touched game integration target all pass. The broader workspace
+  `--all-targets` check is blocked by existing missing `HudModel::ctf` fields
+  in `game/tests/golden_hud.rs:19` and `game/tests/suite/bug_checks.rs:152`.
+- Focused rustfmt and `git diff --check` pass. Logs are retained in the local
+  artifact directory. No GPU run or full source/edition alignment acceptance
+  is claimed for this guidance-only change.
+- Local handoff requires `cargo build --release -p game`, then that binary's
+  `--write-pack` over the current `engine/assets_baked` and `engine/missions`
+  into a staged executable before replacing `dist/openbf.exe`. The final
+  task handoff records whether replacement succeeded; the profile/playtest
+  directory must be preserved.
+
+### 4.7 Republic secondary: duplicate TurnRate disabled homing (2026-11-09) [V][M][O]
+
+The section 4.6 acceptance did not cover the Republic secondary. The maintainer's
+next black box is from clean build `482d8b455eb3`, `bf2_spa6` 1-flag CTF, seed
+290: Anakin's Republic Starfighter, 40 `rep_weap_fly_anakin_missile` rounds,
+66 total shots and no recorded hits. The retained copy is
+`engine/artifacts/lead_tmp/republic-parity/reported-blackbox.json`.
+
+Its ordnance, `rep_weap_fly_jedifighter_missile_ord`, authors TurnRate twice:
+first 0, later 0.5. `ClassDb::prop_hash` intentionally exposes the first value
+of a key. That lookup is unsuitable for this setter stream: the missile loader
+used `ClassSrc`, so it constructed TurnRate 0. The real missile setter
+`FUN_0031fd68`, current decompilation lines 300853-300855, writes each occurrence
+to class+0x120. The later authored value replaces the earlier one. The launcher
+can still acquire a full lock and attach a target to a zero-turn missile, but
+the flight law never steers it toward that target; waver alone still runs.
+
+This was reproduced through the mounted Republic craft's actual secondary
+channel, not by attaching a missile handle in the test. The real baked weapon
+and hulls were loaded, Square-equivalent input selected each CIS fighter, the
+secondary's charge reached 1.0, and held secondary fire emitted six rounds.
+All six retained the selected vehicle handle. Before correction the 12 sampled
+70 m/s crossing cases all missed with the loader's zero turn rate.
+
+**Native PS2 check.** On the same SLUS-21240 v2.01 disc and PCSX2/emucap build
+as section 4.6, Instant Action was navigated to Clone Wars Space Kashyyyk CTF
+(retail Space Hoth offers GCW only). A Republic pilot normally boarded the
+Republic Starfighter and took off. The live launcher at `0x1be2340` points to
+weapon class `0x1a09190`, whose ordnance at `0x1a09040` reads TurnRate 0.5,
+WaverRate 2, WaverTurn 0.25, Velocity 300 and LifeSpan 6. These are the same
+ordnance values used by the reported craft in the port.
+
+Two native locked missiles were recorded for 90 frozen boundaries. Across 178
+update pairs, the existing turn-and-waver law with those class values matches
+retail velocity to at most 0.000058 m/s. That particular shot passed a turning
+Tri-fighter and missed. A second native paired shot, trailing a moving Droid
+Starfighter at approximately 439 m when fired, stopped both missiles at age
+2.0 s while target hull health fell by about 600. Retail therefore permits both
+hits and misses with this weapon; restoring steering does not imply a guaranteed
+intercept against every crossing target.
+
+For the controlled shots only the player's pilot/craft pose was relocated or
+rotated. Boarding, takeoff, selection, the 0.1 s dwell and L1 firing were retail
+operations. No weapon class, missile state, target pose or target assignment was
+injected. Setup bytes, native save states, RAM boundaries and replay results
+are local under `engine/artifacts/lead_tmp/republic-parity/`, Tracking run
+`01M71JH8NSEM52XKCEKPCEZV2F`.
+
+The correction resolves missile keys through the existing parent-first ordered
+property view, taking the last value before the first NextCharge boundary.
+It keeps the root stage separate from later charge stages. The generic class
+database and flight kernel are unchanged; the existing baked property stream
+already preserves the repeated keys, so no rebake is required.
+
+Validation on base `482d8b455eb3598fe8f24916a4f4b3d854380ed5` plus this patch:
+
+- The asset-independent loader regression fails with 0 versus expected 0.5
+  before correction and passes afterward. All six `roster::tests` pass.
+- All nine `space_playtest_fixes` tests pass. The Republic scenario exercises
+  48 actual full-lock firing sequences across three CIS craft, with six of six
+  emitted missiles carrying the selected target in every sequence. Twelve of
+  twelve stationary, seven of twelve 35 m/s crossing, zero of twelve 70 m/s
+  crossing and twelve of twelve 70 m/s receding scenarios register damage.
+  These are controlled port regression cases, not retail hit-rate estimates.
+- Full core tests pass again: 2,086 passed, two existing ignored tests.
+- Strict workspace Clippy and the touched integration target pass. The prior
+  all-target HUD fixture failures noted in section 4.6 remain outside this fix.
+- The release executable must be rebuilt and repacked before local handoff.
+  The final handoff records the distribution result.
+
+### 4.8 Complete space secondary audit (2026-11-10) [V][M][O]
+
+Source base `1ea7aa2d4cf82e9b07866d04b9549b61db96e620`, same branch and
+SLUS-21240 v2.01 disc as sections 4.6-4.7. All six space maps were loaded in
+Assault and 1-flag CTF: 12 map/mode combinations, 86 mounted pilot secondaries,
+and 16 distinct craft loadouts. Several missions field six craft rather than
+eight; completeness is checked against the actual mission layers. Repeated
+loadouts must resolve to equal weapon classes across missions. The scan also
+checks every flyer seat for an inaccessible third weapon or an untested gunner
+secondary. All current secondaries belong to the pilot seat.
+
+There are twelve homing loadouts: TIE Fighter, TIE Interceptor, Imperial
+Transport, X-wing, A-wing, Rebel Transport, Droid Starfighter, Tri-fighter,
+Droid Gunship, ARC-170, Republic Starfighter and Republic Gunship. Four others
+are ballistic shells: TIE Bomber, Y-wing, V-wing and CIS Strike Bomber. The
+ARC-170's weapon name contains `bomb`, but its actual ordnance is a homing
+missile; the V-wing's `ptorpedo` name resolves to a shell. Tests use the loaded
+ordnance kind rather than class-name guesses.
+
+The authored-key audit checks velocity, life, damage and live steering or
+shell gravity against the last authored root-stage values. It found no other
+secondary with the Republic's repeated TurnRate problem. Gravity authored on
+a missile remains a dead key, consistent with section 4.3.
+
+The wider sweep did expose another bug: generic entity collision selection
+removed the X-wing fuselage from projectile contacts when named wing/laser
+primitives were present. `re-collision-layers.md` section 9 establishes the
+BF2 flyer's different setter behavior and the live PS2 class masks and hits.
+The correction retains the mesh in the flyer's soldier/ordnance accumulators.
+It changes hull setup, not missile turn rate, guidance, sweep radius or RNG.
+
+`game/tests/space_secondary_weapons.rs` exercises real loaded seat weapons,
+selection input, dwell, trigger input and complete salvos. It runs 768 locked
+sequences: 12 weapons, four opposing craft, four seeds and four motion cases
+(stationary, 35 m/s crossing, 70 m/s receding, and a requested 70 m/s shooter
+cruise with a target moving 70 m/s forward plus 35 m/s across). Initial range
+is 350 m. It requires hits against every opposing hull in the stationary and
+receding categories and some hits in both crossing categories per weapon.
+Every launched round must retain the selected handle and the salvo must emit
+its authored round count. These are controlled port fixtures, not retail
+hit-rate estimates or an assertion that every crossing missile must hit.
+
+Each missile weapon also runs without selection and with a newly selected,
+incompletely dwelled target. Shots emitted before readiness must be unguided;
+a delayed first emission may legitimately become ready before it launches.
+All sixteen weapons exhaust and reload their first clip, then fire again;
+finite reserves pay for the reload, infinite reserves remain infinite, and
+secondary input must not fire the primary. All four bomb weapons run four
+seeded flying drops each, fall under their authored gravity, and damage a
+large rectangular hull below. That hull is a test fixture, not a reconstructed
+capital-ship subsystem. Total: 768 locked sequences, 24 selection/dwell timing
+cases, 16 reload cases and 16 bomb-drop cases. Three asset-independent unit
+regressions cover the flyer mesh seed, targetable separation and sentinel
+handling. Optional native-contact replay consumes the retained local captures.
+
+Run from `engine/` with `OPENBF_REQUIRE_SPACE_ASSETS=1` to reject a missing
+local bake. `OPENBF_SPACE_SECONDARY_REPORT` writes the per-weapon JSON result;
+`OPENBF_NATIVE_CONTACTS` accepts the two native JSON paths separated by a
+semicolon. The recorded run enables both native replays. Receipts and command
+logs remain under `engine/artifacts/lead_tmp/republic-parity/`.
+
+Checks on this patch: the complete space-secondary integration target and both
+native contact replays pass; all nine existing `space_playtest_fixes` tests
+pass; collision-layer unit tests pass 15/15 and vehicle-pad unit tests 6/6.
+`cargo test -p core` passes 2,086 tests with two existing ignored tests and
+unchanged determinism pins. `cargo clippy --workspace -- -D warnings` and
+strict Clippy for both touched integration targets pass. The earlier all-target
+HUD fixture failure remains outside this patch. These scoped checks are not
+a complete cross-source alignment acceptance run; independent bake inputs for
+that gate were not supplied. The local handoff rebuilds and repacks the release
+distribution, preserving the profile and playtest files.
+
+Coverage is complete for the secondaries fielded by these twelve local space
+missions. Native evidence covers the shared flight law, both measured steering
+families and the X-wing contact correction; it does not independently measure
+every individual weapon's retail hit rate, every aspect angle, ground-map
+secondaries or every capital-ship damageable subsystem.
+
 ## 5. The lock: when a missile gets its target [V][O] (H4)
 
 - The packet's target is filled only when the weapon's vt+0x34 says so: B1 packet+0x38 = W+0x128 and +0x3c = W+0x130

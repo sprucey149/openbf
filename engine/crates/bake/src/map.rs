@@ -36,6 +36,7 @@ mod render_reassembly;
 mod render_recovery;
 mod render_symmetry;
 mod render_textures;
+mod space_dust;
 mod texture_alias;
 
 use content::bake_content;

@@ -206,6 +206,7 @@ pub struct Commander {
     pub space_round: Option<std::sync::Arc<crate::space_assault::SpaceRound>>,
     speaker_asks: Vec<SpeakerAsk>,
     first_reinforcements: Option<[f32; 2]>,
+    last_flag_voice: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -257,6 +258,7 @@ impl Commander {
             space_round: None,
             speaker_asks: Vec::new(),
             first_reinforcements: None,
+            last_flag_voice: None,
         }
     }
 
@@ -449,6 +451,47 @@ impl Commander {
         }
     }
 
+    fn flag_calls(&mut self, sim: &Sim) {
+        if !sim
+            .ctf
+            .as_ref()
+            .is_some_and(|ctf| ctf.mode == core::sim::CtfMode::OneFlag)
+        {
+            return;
+        }
+        let listener = self.announcer.listener();
+        let Some(speaker) = self.factions.get(listener) else {
+            return;
+        };
+        for event in &sim.events {
+            let (team, action) = match *event {
+                core::sim::Event::FlagPickedUp { team, .. } => (team, "take"),
+                core::sim::Event::FlagDropped { team, .. } => (team, "drop"),
+                core::sim::Event::FlagCaptured { team, .. } => (team, "score"),
+                _ => continue,
+            };
+            let Some(subject) = self.factions.get(usize::from(team)) else {
+                continue;
+            };
+            if faction_index(speaker).is_none() || faction_index(subject).is_none() {
+                continue;
+            }
+            if self
+                .last_flag_voice
+                .is_some_and(|tick| sim.tick.saturating_sub(tick) <= 3 * u64::from(core::TICK_HZ))
+            {
+                continue;
+            }
+            let name = if action == "score" {
+                format!("{speaker}_{subject}Flag_score")
+            } else {
+                format!("{speaker}_1Flag_{action}_{subject}")
+            };
+            self.queue.ask(Line::commander(&name));
+            self.last_flag_voice = Some(sim.tick);
+        }
+    }
+
     /// The combat calls of the tick the sim just stepped (card UCALL,
     /// `core::sim::Event::Call`): each asks its unit's class's property, at
     /// the unit. Held for [`Commander::gate_calls`]: the gates are the
@@ -513,6 +556,7 @@ impl Commander {
             }
         }
         self.space_calls(sim);
+        self.flag_calls(sim);
         for e in &sim.events {
             let core::sim::Event::Call { unit, call } = *e else {
                 continue;
@@ -839,6 +883,46 @@ mod leaving_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_flag_voice_uses_listener_and_event_team_with_cooldown() {
+        let mut sim = Sim::empty(1);
+        sim.ctf = Some(core::sim::CtfState::new_space_one_flag(
+            5,
+            glam::Vec3::ZERO,
+            glam::Vec3::X,
+            glam::Vec3::Z,
+        ));
+        let carrier = sim
+            .spawn(&core::unit::UnitSpec::trooper(1, glam::Vec3::ZERO))
+            .unwrap();
+        let mut commander =
+            Commander::new(BattleLines::default(), ["imp", "all"], 0, vec![], vec![]);
+        sim.events.push(core::sim::Event::FlagPickedUp {
+            flag: 0,
+            unit: carrier,
+            team: 1,
+        });
+        commander.flag_calls(&sim);
+        assert!(commander.queue.waiting("imp_1Flag_take_all"));
+        sim.events.clear();
+        sim.events.push(core::sim::Event::FlagDropped {
+            flag: 0,
+            team: 1,
+            pos: glam::Vec3::ZERO,
+        });
+        commander.flag_calls(&sim);
+        assert!(!commander.queue.waiting("imp_1Flag_drop_all"));
+        sim.tick += 3 * u64::from(core::TICK_HZ) + 1;
+        commander.flag_calls(&sim);
+        assert!(commander.queue.waiting("imp_1Flag_drop_all"));
+        sim.events.clear();
+        sim.events
+            .push(core::sim::Event::FlagCaptured { flag: 0, team: 0 });
+        sim.tick += 3 * u64::from(core::TICK_HZ) + 1;
+        commander.flag_calls(&sim);
+        assert!(commander.queue.waiting("imp_impFlag_score"));
+    }
 
     /// A script's four bleeding and four low-reinforcement calls: team 1 is
     /// `a`, team 2 is `b`.

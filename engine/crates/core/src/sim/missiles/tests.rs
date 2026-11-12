@@ -594,3 +594,84 @@ fn launcher_locks_a_turret_hashes_its_id_and_drops_a_destroyed_target() {
     assert_eq!(s.unit(me).unwrap().weapon.lock_target, None);
     assert_eq!(s.missile_aim(MissileTarget::Turret(19)), None);
 }
+
+#[test]
+fn targetable_body_selection_uses_world_alignment_and_keeps_the_sphere_fallback() {
+    let mut s = Sim::empty(3);
+    let h = s.spawn_vehicle(&bike(Vec3::new(12.0, 8.0, -50.0)));
+    let v = s.vehicle_mut(h).unwrap();
+    v.rot = crate::vehicle::hover::quat_y(0.7);
+    v.aim_sphere = Some((Vec3::Y * 8.0, 12.0));
+    let (pos, rot) = (v.pos, v.rot);
+    let t = MissileTarget::Vehicle(h);
+    let from = Vec3::new(10.0, 10.0, 0.0);
+    let points = [Vec3::new(-4.0, 1.0, 0.0), Vec3::new(5.0, -2.0, 0.0)];
+    assert_eq!(
+        s.missile_guidance_aim(t, from, Vec3::NEG_Z),
+        Some(pos + rot * (Vec3::Y * 8.0))
+    );
+    s.missile_target_points = vec![points.to_vec()];
+    for point in points {
+        let aim = pos + rot * point;
+        let dir = (aim - from).normalize_or_zero();
+        assert_eq!(s.missile_guidance_aim(t, from, dir), Some(aim));
+    }
+    assert_eq!(s.missile_guidance_aim(t, from, Vec3::Z), Some(pos));
+}
+
+#[test]
+fn a_targetable_fuselage_is_hit_instead_of_the_empty_space_at_its_enclosing_sphere() {
+    use crate::collision::{HullPart, Layers, Shape};
+    use std::sync::Arc;
+    for targetable in [false, true] {
+        let mut s = Sim::empty(17);
+        let me = s.spawn(&UnitSpec::player(0, Vec3::ZERO)).unwrap();
+        let mut w = torpedo();
+        w.ordnance.velocity = 350.0;
+        w.ordnance.life_span = 5.0;
+        w.ordnance.expire = None;
+        w.ordnance.missile = Some(crate::missile::MissileClass {
+            turn_rate: 1.75,
+            min_speed: 300.0,
+            acceleration: 100.0,
+            ramps: true,
+            ..Default::default()
+        });
+        let wc = s.add_weapon_class(w);
+        s.hull_parts = vec![Some(Arc::from(vec![HullPart::new(
+            glam::Mat4::IDENTITY,
+            Shape::Box {
+                half: Vec3::new(4.0, 0.2, 4.0),
+            },
+            Layers::ORDNANCE,
+        )]))];
+        s.missile_target_points = vec![if targetable {
+            vec![Vec3::ZERO]
+        } else {
+            Vec::new()
+        }];
+        let h = s.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            ..bike(Vec3::new(0.0, 100.0, -500.0))
+        });
+        s.vehicle_mut(h).unwrap().aim_sphere = Some((Vec3::Y * 2.0, 10.0));
+        launch(
+            &mut s,
+            me,
+            wc,
+            Vec3::Y * 100.0,
+            Vec3::NEG_Z,
+            Some(MissileTarget::Vehicle(h)),
+        );
+        for _ in 0..151 {
+            let v = s.vehicle_mut(h).unwrap();
+            v.pos.x += 100.0 * TICK_DT;
+            v.vel = Vec3::X * 100.0;
+            s.step(&[]);
+            if s.bolts.is_empty() {
+                break;
+            }
+        }
+        assert_eq!(s.vehicle(h).unwrap().health.cur < 500.0, targetable);
+    }
+}

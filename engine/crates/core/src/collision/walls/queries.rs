@@ -16,10 +16,11 @@ pub const WALL_ITERATIONS: u32 = 2;
 /// touching a sheet, a step under one radius leaves the axis on the near
 /// side; half a radius keeps a margin for the push's own slide.
 pub const SUBSTEP_OF_RADIUS: f32 = 0.5;
-/// PROVISIONAL (ours), card WPSH: at most this many sub-steps a tick (a
-/// 2 m move at the 0.25 m sub-step). Anything longer is not a step but a
-/// teleport; all sub-steps remain equal and can exceed the nominal limit.
-pub const MAX_SUBSTEPS: u32 = 8;
+/// A move longer than this, in metres, is not swept: the PS2's collision
+/// update `FUN_00163d08` cuts a move into `int(d / step + 1)` pieces with no
+/// other cap and snaps its start to the end past 100 m (B2:3393). A carried
+/// rider leaves a hangar at a ship's boost speed and is swept like any step.
+pub const SWEEP_SNAP: f32 = 100.0;
 /// PROVISIONAL (ours): the one tolerance [`CollisionWorld::wall_sweep`] has,
 /// in metres. It does three jobs, all of them the same 1 mm:
 ///
@@ -488,8 +489,8 @@ impl CollisionWorld {
         let d = full.base - from.base;
         let dxz = (d.x * d.x + d.z * d.z).sqrt();
         let limit = full.radius * SUBSTEP_OF_RADIUS;
-        let n = if limit > 0.0 {
-            ((dxz / limit).ceil() as u32).clamp(1, MAX_SUBSTEPS)
+        let n = if limit > 0.0 && d.length() <= SWEEP_SNAP {
+            ((dxz / limit).ceil() as u32).max(1)
         } else {
             1
         };

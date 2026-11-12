@@ -90,6 +90,7 @@ impl Fx {
         if restore {
             crate::render_blend::blend_in_looking(walk, look);
         }
+        self.follow_flyer_exhaust(walk);
         if let Some(vis) = vis {
             vis.update(walk, dt);
             let (muzzles, jets, burns) = (
@@ -108,6 +109,7 @@ impl Fx {
         // position as the model, as well as the attached NoRegisterStep head.
         // Otherwise each new tick leaves bright particles ahead of a blended model.
         let saved = self.drawn_round_frames(&walk.sim);
+        self.advance_space_dust(walk, dt);
         if restore {
             walk.blend_out();
         }

@@ -408,6 +408,7 @@ fn arm_gunner_seat(s: &mut Sim) {
                 class: 0,
                 infinite: true,
                 reserve_clips: 0,
+                fire_points: Vec::new(),
             }],
             fire_point: Vec3::new(0.0, 0.9, 4.2),
             pivot: Vec3::new(0.0, 0.8, 3.3),

@@ -286,7 +286,11 @@ fn write_model(
         let mut attributes = json!({"POSITION": pos_acc, "NORMAL": nrm_acc, "TEXCOORD_0": uv_acc});
         if let Some(c) = seg.colors.as_ref().filter(|_| vertex_light) {
             let glow_av = glow == Some(LightPath::Glow)
-                || (keep_col0_alpha && seg.material_flags & 0x200 == 0);
+                || (keep_col0_alpha && seg.material_flags & 0x200 == 0)
+                || (seg.bf2_material
+                    && seg.material_flags & 0x204 == 0x04
+                    && (m.name.eq_ignore_ascii_case("com_prop_ctfdrop_space")
+                        || m.name.eq_ignore_ascii_case("com_icon_spaceflag")));
             let lin: Vec<f32> = c
                 .iter()
                 .flat_map(|v| {
@@ -948,6 +952,32 @@ mod tests {
         let plain = model_to_glb(&m, &alphas, false).unwrap();
         let json = String::from_utf8_lossy(&plain[20..]).into_owned();
         assert!(!json.contains("COLOR_0") && !json.contains("\"light\""));
+    }
+
+    #[test]
+    fn space_ctf_effect_keeps_vertex_alpha() {
+        let mut m = model(vec![bf2(0x1010044, true)]);
+        m.name = "com_prop_ctfdrop_space".into();
+        m.segments[0].colors.as_mut().unwrap()[0] = [64, 64, 64, 64];
+        let alphas = vec![SegmentAlpha {
+            texture: "spacedust1".into(),
+            mode: AlphaMode::Blend,
+            rule: Rule::Elf,
+            flags: 0x1010044,
+            rtyp: RenderType::Bf2(3),
+            stats: None,
+        }];
+        let bytes = world_model_to_glb(&m, &alphas, false).unwrap();
+        let (doc, buffers, _) = gltf::import_slice(&bytes).unwrap();
+        let prim = doc.meshes().next().unwrap().primitives().next().unwrap();
+        let color = prim
+            .reader(|b| buffers.get(b.index()).map(|d| &d.0[..]))
+            .read_colors(0)
+            .unwrap()
+            .into_rgba_f32()
+            .next()
+            .unwrap();
+        assert_eq!(color[3], 0.5);
     }
 
     #[test]

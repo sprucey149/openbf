@@ -38,7 +38,7 @@ pub(in super::super) fn retarget(
             return;
         }
     }
-    if sim.round_rules().space_assault() && u.mount.is_none() && u.team < 2 {
+    if sim.round_rules().space_deathmatch() && u.mount.is_none() && u.team < 2 {
         retarget_deathmatch(sim, me, st, nt);
         return;
     }
@@ -120,7 +120,10 @@ pub(super) fn retarget_deathmatch(sim: &Sim, me: UnitHandle, st: &mut AiState, n
     }
 }
 
-fn deathmatch_goal(
+/// States 1 and 2 of `FUN_002c62a8`: half the time the enemy goal of state 3,
+/// else a hub `FUN_002ec380` (B2:264272) draws, which the route table must
+/// lead to from `cur` ([`NavGraph::routed_by`]).
+pub(super) fn deathmatch_goal(
     sim: &Sim,
     g: &NavGraph,
     me: UnitHandle,
@@ -139,12 +142,18 @@ fn deathmatch_goal(
     let hubs = g.hubs.len();
     let hub = (0..hubs * 2)
         .map(|k| ((roll(0x100 + k as u32) * hubs as f32) as u16).min(hubs.saturating_sub(1) as u16))
-        .find(|&h| h != cur && g.reachable_by(cur, h, m))
+        .find(|&h| h != cur && g.routed_by(cur, h, m))
         .unwrap_or(cur);
     (hub_point(sim, g, me, hub, pos, DM_HUB_INSET), hub)
 }
 
-fn deathmatch_enemy_goal(
+/// State 3 of `FUN_002c62a8`. A foe flying a ship is refused: the fight
+/// matrix `FUN_002ac8f8` (B2:219523) sends soldier-against-flyer to
+/// `FUN_002ac2b8` (B2:219222), which takes the normal test only for a craft in
+/// flight state 0 (`+0x60c`); otherwise `FUN_002ac270` (B2:219207) writes the
+/// weapon byte but no kind, so the matrix answers false and the walk draws a
+/// hub instead.
+pub(super) fn deathmatch_enemy_goal(
     sim: &Sim,
     g: &NavGraph,
     me: UnitHandle,
@@ -162,6 +171,11 @@ fn deathmatch_enemy_goal(
     let foe = foes.get((roll(2) * foes.len() as f32) as usize)?;
     let at = match foe.mount.and_then(|f| sim.vehicle(f.vehicle)) {
         Some(v) => {
+            if v.kind == crate::vehicle::VehicleKind::Flyer
+                && v.flyer.phase != crate::vehicle::flyer::FlightPhase::Landed
+            {
+                return None;
+            }
             if !crate::ai::arsenal::against_ride(sim, u, foe)?.1 {
                 return None;
             }
@@ -173,7 +187,7 @@ fn deathmatch_enemy_goal(
     let at = at + Vec3::new(spread(3), spread(4), spread(5));
     let hub = g.unit_hub_on(at, m, &|h| hub_on_level(sim, g, h, at.y))?;
     let hub = level_hub(sim, g, hub, at);
-    if hub != cur && !g.reachable_by(cur, hub, m) {
+    if hub != cur && !g.routed_by(cur, hub, m) {
         return None;
     }
     let inside = g

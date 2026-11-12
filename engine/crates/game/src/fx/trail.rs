@@ -169,6 +169,12 @@ impl Fx {
                     (now.pos, now.vel),
                 )
             })
+            .chain(
+                sim.guided
+                    .iter()
+                    .filter(|r| r.live())
+                    .map(|r| (Round::Guided(r.id), (r.pos, r.vel))),
+            )
             .collect();
         let mut saved = Vec::new();
         for e in self.live.iter_mut() {
@@ -222,9 +228,14 @@ impl Fx {
         for (g, id) in sim.stickies.iter().zip(ids) {
             now.insert(Round::Sticky(id), (g.pos, g.vel, trail(g.weapon_class)));
         }
-        for r in &sim.guided {
-            let trail = sim.guided_class(r).and_then(|c| c.trail.as_deref());
+        let mut sizes: HashMap<Round, f32> = HashMap::new();
+        for r in sim.guided.iter().filter(|r| r.live()) {
+            let class = sim.guided_class(r);
+            let trail = class.and_then(|c| c.trail.as_deref());
             now.insert(Round::Guided(r.id), (r.pos, r.vel, trail));
+            if let Some(c) = class {
+                sizes.insert(Round::Guided(r.id), c.trail_size(r.speed()));
+            }
         }
         self.rounds.tick = Some(sim.tick);
         for e in &mut self.live {
@@ -234,6 +245,9 @@ impl Fx {
                     e.frame.rot = along(vel);
                     e.frame.pos = pos;
                     e.frame.vel = vel;
+                    if let Some(&size) = sizes.get(&r) {
+                        e.set_size(size);
+                    }
                 }
                 None => {
                     e.stop();
@@ -258,6 +272,9 @@ impl Fx {
             if self.spawn(name, frame) {
                 if let Some(e) = self.live.last_mut() {
                     e.round = Some(r);
+                    if let Some(&size) = sizes.get(&r) {
+                        e.set_size(size);
+                    }
                 }
             }
         }
@@ -449,6 +466,64 @@ mod tests {
             fx.drawn_round_frames(&sim).is_empty(),
             "stale source tick must not attach"
         );
+    }
+
+    #[test]
+    fn a_guided_rockets_exhaust_head_follows_the_drawn_rocket() {
+        struct NoProps;
+        impl core::weapon::PropSource for NoProps {
+            fn prop(&self, _: &str) -> Option<&str> {
+                None
+            }
+            fn prop_hash(&self, _: u32) -> Option<&str> {
+                None
+            }
+        }
+        let root = crate::assets::baked_root();
+        let common = root.join("common_bf1");
+        if !common.join("effects.ron").exists() {
+            eprintln!("SKIP: common_bf1 effects are not baked");
+            return;
+        }
+        let mut fx = Fx::with_library(Library::load(&root, &common, "bf1", &[]));
+        let mut sim = Sim::empty(42);
+        let mut class = core::guided::GuidedClass::from_props(&NoProps);
+        class.trail = Some(crate::fx::BF1_IMPACT.into());
+        let flyer = core::guided::GuidedRocket::flying(&class);
+        let wc = sim.add_weapon_class(WeaponClass {
+            guided: Some(Box::new(core::guided::GuidedWeapon {
+                class,
+                spawn_offset: Vec3::ZERO,
+                requires_award: false,
+            })),
+            ..Default::default()
+        });
+        sim.guided.push(core::guided::GuidedRocket {
+            id: 7,
+            owner: UnitHandle { index: 1, gen: 0 },
+            team: 0,
+            weapon_class: wc,
+            seat: None,
+            pos: Vec3::ZERO,
+            vel: Vec3::Z * 120.0,
+            rot: core::guided::GuidedRocket::body(Vec3::Z),
+            flyer,
+            health: 1.0,
+            age: 0.0,
+            prev_buttons: 0,
+            pending_end: None,
+            spent: None,
+            blind: 0.0,
+        });
+        fx.follow_rounds(&sim);
+        assert_eq!(fx.live.len(), 1);
+        let frame = fx.live[0].frame;
+        sim.guided[0].pos -= Vec3::Z * (60.0 * core::TICK_DT);
+        let saved = fx.drawn_round_frames(&sim);
+        assert_eq!(saved.len(), 1);
+        assert_eq!(fx.live[0].frame.pos, sim.guided[0].pos);
+        fx.restore_round_frames(saved);
+        assert_eq!(fx.live[0].frame, frame);
     }
 
     #[test]

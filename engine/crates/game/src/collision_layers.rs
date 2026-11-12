@@ -65,11 +65,6 @@
 //! `com_inv_col_*` (BF2 common), whose `OrdnanceCollision = none` makes the
 //! invisible walls bolt-transparent.
 //!
-//! NOT BUILT: the building and
-//! terrain subsets (nothing queries them: the port's terrain is a heightfield
-//! sheet, not a collision object), and `TargetableCollision` (no body is ever
-//! in it by default, §2, and the port's aim assist ray-tests unit capsules,
-//! not a collision subset — `core::sim`'s magnet).
 
 /// One body of one model, in the manifest's body order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,8 +99,6 @@ impl BodyRef {
 /// The name a collision-layer property uses for the `coll` mesh body.
 pub const MESH_BODY: &str = "collisionmesh";
 
-/// The five layers a body can default into. `Targetable` is deliberately
-/// absent: no body is ever in it by default (§2) and nothing here queries it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Layer {
     Soldier,
@@ -113,6 +106,7 @@ pub enum Layer {
     Building,
     Terrain,
     Ordnance,
+    Targetable,
 }
 
 impl Layer {
@@ -124,6 +118,7 @@ impl Layer {
             Layer::Building => 0x04,
             Layer::Terrain => 0x08,
             Layer::Ordnance => 0x10,
+            Layer::Targetable => 0,
         }
     }
 
@@ -136,6 +131,7 @@ impl Layer {
             Layer::Building => "building",
             Layer::Terrain => "terrain",
             Layer::Ordnance => "ordnance",
+            Layer::Targetable => "targetable",
         }
     }
 }
@@ -158,18 +154,38 @@ fn is_empty_sentinel(body: &str) -> bool {
 pub const FLYER_USES_VEHICLE: &str = "flyer_uses_vehicle";
 
 pub fn layer_bodies(bodies: &[BodyRef], props: &[(String, String)], layer: Layer) -> Vec<bool> {
+    select_bodies(bodies, props, layer, false)
+}
+
+pub fn bf2_flyer_layer_bodies(
+    bodies: &[BodyRef],
+    props: &[(String, String)],
+    layer: Layer,
+) -> Vec<bool> {
+    select_bodies(bodies, props, layer, true)
+}
+
+fn select_bodies(
+    bodies: &[BodyRef],
+    props: &[(String, String)],
+    layer: Layer,
+    flyer: bool,
+) -> Vec<bool> {
+    let mesh_seed = flyer && matches!(layer, Layer::Soldier | Layer::Ordnance);
     // Seed from the MASK byte: 0 = no mask read = every subset.
     let bit = layer.mask_bit();
     let mut set: Vec<bool> = bodies
         .iter()
-        .map(|b| b.mask == 0 || b.mask & bit != 0)
+        .map(|b| layer != Layer::Targetable && (b.mask == 0 || b.mask & bit != 0))
         .collect();
-    // The engine's per-class accumulator, empty before the first line.
-    let mut acc = vec![false; bodies.len()];
+    let mut acc: Vec<bool> = bodies
+        .iter()
+        .map(|body| mesh_seed && body.name == MESH_BODY)
+        .collect();
     let key = layer.key();
     for (prop_layer, body) in props {
         if prop_layer == key {
-            if is_empty_sentinel(body) {
+            if is_empty_sentinel(body) && !mesh_seed {
                 // `accum = 0; setSubset(0)` — the layer is emptied.
                 acc.iter_mut().for_each(|a| *a = false);
                 set.copy_from_slice(&acc);
@@ -221,6 +237,53 @@ mod tests {
         let mut v = vec![BodyRef::mesh()];
         v.extend(prims.iter().map(|(n, m)| BodyRef::prim(n, *m)));
         v
+    }
+
+    #[test]
+    fn flyer_named_wings_keep_the_fuselage_in_soldier_and_ordnance_sets() {
+        let b = bodies(&[("wing", 0), ("foot", 0)]);
+        let p = props(&[
+            ("soldier", "wing"),
+            ("ordnance", "wing"),
+            ("vehicle", "foot"),
+            ("terrain", "foot"),
+        ]);
+        for layer in [Layer::Soldier, Layer::Ordnance] {
+            assert_eq!(bf2_flyer_layer_bodies(&b, &p, layer), [true, true, false]);
+            assert_eq!(layer_bodies(&b, &p, layer), [false, true, false]);
+        }
+        for layer in [Layer::Vehicle, Layer::Terrain] {
+            assert_eq!(bf2_flyer_layer_bodies(&b, &p, layer), [false, false, true]);
+        }
+    }
+
+    #[test]
+    fn flyer_mesh_seed_does_not_select_it_as_a_homing_target() {
+        let b = bodies(&[("wing", 0)]);
+        assert_eq!(
+            bf2_flyer_layer_bodies(&b, &[], Layer::Targetable),
+            [false, false]
+        );
+        assert_eq!(
+            bf2_flyer_layer_bodies(&b, &props(&[("targetable", "wing")]), Layer::Targetable),
+            [false, true]
+        );
+    }
+
+    #[test]
+    fn flyer_soldier_and_ordnance_overrides_ignore_unknown_body_names_and_sentinels() {
+        let b = bodies(&[("wing", 0)]);
+        let p = props(&[
+            ("ordnance", "wing"),
+            ("ordnance", "none"),
+            ("ordnance", "clear"),
+            ("ordnance", "absent"),
+        ]);
+        assert_eq!(
+            bf2_flyer_layer_bodies(&b, &p, Layer::Ordnance),
+            [true, true]
+        );
+        assert_eq!(layer_bodies(&b, &p, Layer::Ordnance), [false, false]);
     }
 
     /// BF1 NAB2.LVL entc `nab2_bldg_b_19` @0x3E99B4 (identical on BF2 NAB2
@@ -483,5 +546,19 @@ mod tests {
         let b = bodies(&[("p_cube", 0)]);
         let p = props(&[("vehicle", "p_cube"), ("targetable", MESH_BODY)]);
         assert_eq!(kept(&b, &p, Layer::Soldier), ["collisionmesh", "p_cube"]);
+    }
+
+    #[test]
+    fn targetable_bodies_start_empty_and_obey_authored_clear_and_accumulation() {
+        let b = bodies(&[("p_cube", 0), ("p_masked", 0x1f)]);
+        assert!(kept(&b, &[], Layer::Targetable).is_empty());
+        let p = props(&[("targetable", MESH_BODY), ("targetable", "p_cube")]);
+        assert_eq!(kept(&b, &p, Layer::Targetable), [MESH_BODY, "p_cube"]);
+        let p = props(&[
+            ("targetable", MESH_BODY),
+            ("targetable", "clear"),
+            ("targetable", "p_masked"),
+        ]);
+        assert_eq!(kept(&b, &p, Layer::Targetable), ["p_masked"]);
     }
 }

@@ -228,7 +228,7 @@ pub(super) fn claim(sim: &Sim, me: UnitHandle, u: &Unit, st: &mut AiState) {
         return;
     }
     let cp = st.target_cp.and_then(|i| sim.cps.get(i as usize));
-    let space = sim.round_rules().space_assault();
+    let space = sim.round_rules().space_deathmatch();
     if cp.is_none() && !space {
         return;
     }
@@ -525,7 +525,7 @@ pub(super) fn board_goal(
         u.command.is_some()
     } else if turret {
         !super::man::endgame(sim, u.team)
-    } else if sim.round_rules().space_assault()
+    } else if sim.round_rules().space_deathmatch()
         && sim
             .vehicle(vh)
             .is_some_and(|v| v.kind == VehicleKind::Flyer)

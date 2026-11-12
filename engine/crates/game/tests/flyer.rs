@@ -3,6 +3,59 @@ use game::vehicle_class::FlyerClass;
 use std::path::PathBuf;
 
 #[test]
+fn baked_flyer_takeoff_clips_move_the_models() {
+    use game::viewer::walker_pose::{skin, WalkerRig};
+    let root = game::assets::baked_root();
+    if !root.join("side_bf2/vehicles/all/vehicles.ron").is_file()
+        || !root.join("side_bf2/vehicles/cis/vehicles.ron").is_file()
+    {
+        assert!(std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none());
+        return;
+    }
+    for (side, model) in [("all", "all_fly_xwing"), ("cis", "cis_fly_droidfighter")] {
+        let dir = root.join("side_bf2/vehicles").join(side);
+        let path = dir.join("walkers").join(format!("{model}.glb"));
+        assert!(
+            path.is_file(),
+            "missing rebaked flyer rig: {}",
+            path.display()
+        );
+        let (mesh, joints) =
+            game::assets::load_glb_joints(&dir.join("models").join(format!("{model}.glb")))
+                .unwrap();
+        let asset = game::assets::load_skinned_glb(&path).unwrap();
+        assert!(
+            asset
+                .clips
+                .iter()
+                .find(|c| c.name == "takeoff")
+                .unwrap()
+                .frames
+                > 1
+        );
+        let rig = WalkerRig::new_flyer(asset.skeleton, asset.clips);
+        let (landed, _) = skin(
+            &rig.flyer_palette(0.0).unwrap(),
+            &mesh.positions,
+            &mesh.normals,
+            &joints,
+        );
+        let (flying, _) = skin(
+            &rig.flyer_palette(1.0).unwrap(),
+            &mesh.positions,
+            &mesh.normals,
+            &joints,
+        );
+        let moved = landed
+            .iter()
+            .zip(&flying)
+            .filter(|(a, b)| glam::Vec3::from(**a).distance(glam::Vec3::from(**b)) > 0.01)
+            .count();
+        assert!(moved > 100, "{model}: only {moved} vertices moved");
+    }
+}
+
+#[test]
 fn turret_first_refusal_and_chunk_fallback_preserve_flight_properties() {
     let file = std::env::temp_dir().join(format!("openbf-flyer-scope-{}.ron", std::process::id()));
     std::fs::write(&file, format!(r#"[

@@ -27,6 +27,56 @@ impl Default for FlightLimits {
 }
 
 impl Sim {
+    pub(super) fn flyer_region_coverage(&self, vehicle: &crate::vehicle::Vehicle) -> (bool, bool) {
+        let sphere = self
+            .blast_setup
+            .get(vehicle.class as usize)
+            .and_then(Option::as_ref);
+        let center = sphere.map_or(vehicle.pos, |s| vehicle.pos + vehicle.rot * s.sphere_centre);
+        let radius = sphere.map_or(0.0, |s| s.sphere_radius.max(0.0));
+        self.landing_coverage(center, radius)
+    }
+
+    /// The environment a flyer or a guided rocket flies in: its flight band,
+    /// landing-region coverage and ground contact.
+    pub(super) fn flyer_environment(
+        &self,
+        human: bool,
+        coverage: (bool, bool),
+        ground: Option<LandingSurface>,
+        player_aboard: bool,
+        crash_random: [f32; 4],
+    ) -> FlyerEnvironment {
+        let [min_height, max_height] = if human {
+            self.flight_limits.player
+        } else {
+            self.flight_limits.ai
+        };
+        let (in_landing_region, almost_inside_landing_region) = coverage;
+        FlyerEnvironment {
+            ground,
+            min_height,
+            max_height,
+            in_landing_region,
+            almost_inside_landing_region,
+            require_landing_region: !self.landing_regions.is_empty(),
+            player_aboard,
+            crash_random,
+        }
+    }
+
+    pub(super) fn landing_coverage(&self, center: Vec3, radius: f32) -> (bool, bool) {
+        let mut touches = false;
+        let mut inside = false;
+        for region in &self.landing_regions {
+            if region.contains(center) || (radius > 0.0 && region.touches_sphere(center, radius)) {
+                touches = true;
+                inside = region.almost_contains_sphere(center, radius);
+            }
+        }
+        (touches, inside)
+    }
+
     fn flyer_ground(&self, origin: Vec3, handle: VehicleHandle) -> Option<LandingSurface> {
         let mut surface = self.heightfield.as_ref().and_then(|hf| {
             let height = hf.height_at(origin.x, origin.z);
@@ -179,21 +229,13 @@ impl Sim {
                 p
             };
             let from = v.pos;
-            let [min_height, max_height] = if v.input.human {
-                self.flight_limits.player
-            } else {
-                self.flight_limits.ai
-            };
-            let env = FlyerEnvironment {
-                ground: self.flyer_ground(from, handle),
-                min_height,
-                max_height,
-                // PROVISIONAL: origin membership; PS2 tests the flyer's sphere.
-                in_landing_region: self.landing_regions.iter().any(|r| r.contains(from)),
-                require_landing_region: !self.landing_regions.is_empty(),
+            let env = self.flyer_environment(
+                v.input.human,
+                self.flyer_region_coverage(v),
+                self.flyer_ground(from, handle),
                 player_aboard,
                 crash_random,
-            };
+            );
             let row = super::flyer_contact::FlyerRow::of(p);
             if p.bf2
                 && !v.input.human

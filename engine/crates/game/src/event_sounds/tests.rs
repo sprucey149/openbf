@@ -215,6 +215,7 @@ fn seat_gun_contact_uses_seat_weapon() {
                 class: gun_class,
                 infinite: true,
                 reserve_clips: 0,
+                fire_points: Vec::new(),
             }],
             fire_point: Vec3::new(0.0, 1.0, 2.0),
             pivot: Vec3::Y,

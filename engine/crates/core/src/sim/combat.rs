@@ -229,7 +229,7 @@ impl Sim {
         for r in self
             .guided
             .iter()
-            .filter(|r| r.owner.index != b.owner.index && !seen(Target::Guided(r.id)))
+            .filter(|r| r.live() && r.owner.index != b.owner.index && !seen(Target::Guided(r.id)))
         {
             if let Some(t) = crate::unit::ray_sphere(
                 from,
@@ -301,25 +301,15 @@ impl Sim {
         desc: &DamageDesc,
         scale: f32,
     ) -> Option<f32> {
-        let victim = self.unit(h)?;
-        let spared = self.bolt_spares(b, victim);
-        let friendly = self.allied(b.team, victim.team);
-        let ff = self.friendly_fire_scale;
         let mult = self.buff_scale(Some(b.owner), h) * scale;
+        let friendly = self.unit(h).is_some_and(|v| self.allied(b.team, v.team));
         // Native fat-ray TakeDamage uses flags -1 (shield and health);
         // a bolt that hits the body from inside the bubble keeps flags 2.
         let area = self.weapon_classes[b.weapon_class]
             .ordnance
             .fat_ray
             .is_some();
-        let v = self.unit_mut(h)?;
-        let damage = if spared {
-            0.0
-        } else if area {
-            v.lend_droideka_shield(|health| health.take_damage(desc, mult, friendly, ff))
-        } else {
-            v.health.take_damage(desc, mult, friendly, ff)
-        };
+        let damage = self.shot_strikes_unit(b.team, b.shooter_is_player, h, desc, mult, area)?;
         if self
             .units
             .get(b.owner.index as usize)
@@ -333,6 +323,32 @@ impl Sim {
             self.nav_stats.friend_hits += 1;
         }
         Some(damage)
+    }
+
+    /// The unit half of a shot with no bolt of its own (a guided rocket, or
+    /// a bolt through [`Self::bolt_strikes_unit`]): the sparing rule, the
+    /// friendly scale and, for an area weapon, the droideka shield bubble.
+    pub(super) fn shot_strikes_unit(
+        &mut self,
+        team: u8,
+        shooter_is_player: bool,
+        h: UnitHandle,
+        desc: &DamageDesc,
+        mult: f32,
+        area: bool,
+    ) -> Option<f32> {
+        let victim = self.unit(h)?;
+        let spared = self.shot_spares(team, shooter_is_player, victim);
+        let friendly = self.allied(team, victim.team);
+        let ff = self.friendly_fire_scale;
+        let v = self.unit_mut(h)?;
+        Some(if spared {
+            0.0
+        } else if area {
+            v.lend_droideka_shield(|health| health.take_damage(desc, mult, friendly, ff))
+        } else {
+            v.health.take_damage(desc, mult, friendly, ff)
+        })
     }
 
     /// The struck prim's damage factor (issue #41): a soldier's head prim
@@ -525,11 +541,12 @@ impl Sim {
                     pos: b.end,
                     struck: true,
                 });
-                let surface = if st.health.shield > 0.0 {
-                    let large = st
-                        .instance
-                        .and_then(|i| self.collision.instance_radius_sq_at(i, b.end))
-                        .is_some_and(|r| r >= LARGE_SHIELD_RADIUS_SQ);
+                let large = st
+                    .instance
+                    .and_then(|i| self.collision.instance_radius_sq_at(i, b.end))
+                    .is_some_and(|r| r >= LARGE_SHIELD_RADIUS_SQ);
+                self.damage_station(s, &desc, 1.0, Some(b.owner), Some(b.team));
+                let surface = if self.stations[usize::from(s)].health.shield > 0.0 {
                     if large {
                         Surface::ShieldLarge
                     } else {
@@ -539,7 +556,6 @@ impl Sim {
                     Surface::Building
                 };
                 self.push_impact(b, surface, None);
-                self.damage_station(s, &desc, 1.0, Some(b.owner), Some(b.team));
                 self.bolt_explodes(b);
             }
             // A fallen building turret's bodies are plain world bodies: no

@@ -28,23 +28,6 @@ use glam::{Mat4, Vec3};
 use manifest::hud::{HudArg, HudFont, HudLayout, HudNode};
 use std::collections::{HashMap, VecDeque};
 
-/// The PS2 frame buffer the layout is authored against (`re-hud.md` §2.1 [M]:
-/// DAT_007d5f70/74). Every element-local length is one of its pixels.
-pub const FRAME_W: f32 = 512.0;
-pub const FRAME_H: f32 = 448.0;
-
-/// A value an event carries.
-#[derive(Debug, Clone, PartialEq)]
-pub enum EventValue {
-    /// Only shows / hides.
-    None,
-    Number(f32),
-    Text(String),
-    Color([u8; 3]),
-    /// A window position as a fraction of the window (the reticle).
-    Position([f32; 2]),
-}
-
 /// What an element does with an event (`re-hud.md` §2.1–§2.4 [V]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Listen {
@@ -61,50 +44,11 @@ enum Listen {
     Rotation,
 }
 
-pub const LOCK_STYLE_NAMES: [&str; 4] = [
-    "lockedonscreen",
-    "lockedonscreenbehind",
-    "lockedoffscreen",
-    "lockedoffscreenbehind",
-];
-
-pub const HINT_STYLE_NAMES: [&str; 4] = [
-    "hintonscreen",
-    "hintonscreenbehind",
-    "hintoffscreen",
-    "hintoffscreenbehind",
-];
-
-/// The `HintFlag*` styles a CTF / objective marker uses (`re-hud-map.md` §5:
-/// the target element's 16 attacker / locked / hint / hint-flag styles).
-pub const FLAG_STYLE_NAMES: [&str; 4] = [
-    "hintflagonscreen",
-    "hintflagonscreenbehind",
-    "hintflagoffscreen",
-    "hintflagoffscreenbehind",
-];
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct HintStyle {
-    pub elem: usize,
-    pub friendly: Option<[f32; 3]>,
-    pub min_scale: f32,
-    pub max_scale: f32,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct HintMarker {
-    pub ndc: [f32; 2],
-    pub distance: f32,
-    pub friendly: bool,
-    pub visible: bool,
-    /// Projected inside the ±0.9 NDC edge; `false` clamps to that edge.
-    pub on_screen: bool,
-    /// A CTF objective: draw with the `HintFlag*` styles.
-    pub flag: bool,
-    /// The marker's own colour (Lua `MapAddEntityMarker`), overriding the style.
-    pub tint: Option<[f32; 3]>,
-}
+mod styles;
+pub use styles::{
+    EventValue, HintMarker, HintStyle, CARRIER_STYLE_NAMES, FLAG_STYLE_NAMES, FRAME_H, FRAME_W,
+    HINT_STYLE_NAMES, LOCK_STYLE_NAMES, OBJECTIVE_STYLE_NAMES,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LockStyle {
@@ -719,6 +663,8 @@ pub struct Hud {
     pub lock_marker: Option<LockMarker>,
     pub hint_styles: [Option<HintStyle>; 4],
     pub flag_styles: [Option<HintStyle>; 4],
+    pub carrier_styles: [Option<HintStyle>; 4],
+    pub objective_styles: [Option<HintStyle>; 4],
     pub hint_markers: Vec<HintMarker>,
     pub space: Option<crate::hud_space::SpaceStatus>,
     /// The squad order cross this frame (`crate::hud_squad`); `None` draws
@@ -871,6 +817,8 @@ impl Hud {
             lock_marker: None,
             hint_styles: [None; 4],
             flag_styles: [None; 4],
+            carrier_styles: [None; 4],
+            objective_styles: [None; 4],
             hint_markers: Vec::new(),
             space: None,
             squad: None,
@@ -919,7 +867,13 @@ impl Hud {
             if kind == Kind::Other {
                 let hint_slot = HINT_STYLE_NAMES.iter().position(|n| *n == lname);
                 let flag_slot = FLAG_STYLE_NAMES.iter().position(|n| *n == lname);
-                if hint_slot.is_some() || flag_slot.is_some() {
+                let carrier_slot = CARRIER_STYLE_NAMES.iter().position(|n| *n == lname);
+                let objective_slot = OBJECTIVE_STYLE_NAMES.iter().position(|n| *n == lname);
+                if hint_slot.is_some()
+                    || flag_slot.is_some()
+                    || carrier_slot.is_some()
+                    || objective_slot.is_some()
+                {
                     let friendly = c
                         .children
                         .iter()
@@ -945,6 +899,12 @@ impl Hud {
                     }
                     if let Some(slot) = flag_slot {
                         self.flag_styles[slot] = style;
+                    }
+                    if let Some(slot) = carrier_slot {
+                        self.carrier_styles[slot] = style;
+                    }
+                    if let Some(slot) = objective_slot {
+                        self.objective_styles[slot] = style;
                     }
                     continue;
                 }

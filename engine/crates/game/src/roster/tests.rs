@@ -38,6 +38,47 @@ fn db(rows: &[Row<'_>]) -> ClassDb {
 const ROUND: Row<'static> = ("test_ord", "bolt", &[("MaxDamage", "65")]);
 
 #[test]
+fn missile_class_uses_the_last_authored_keys_before_the_next_charge() {
+    let d = db(&[
+        (
+            "base_missile",
+            "missile",
+            &[("TurnRate", "1"), ("WaverTurn", "0")],
+        ),
+        (
+            "stinger",
+            "base_missile",
+            &[
+                ("TurnRate", "0"),
+                ("TurnRate", "0.5"),
+                ("WaverRate", "2"),
+                ("WaverTurn", "0.25"),
+            ],
+        ),
+        (
+            "charged",
+            "base_missile",
+            &[
+                ("TurnRate", "1.25"),
+                ("NextCharge", "0.5"),
+                ("TurnRate", "2"),
+            ],
+        ),
+    ]);
+    let m = weapon_db::fired_ordnance(&d, "stinger").missile.unwrap();
+    assert_eq!(m.turn_rate, 0.5);
+    assert_eq!(m.waver_rate, 2.0);
+    assert_eq!(m.waver_turn, 0.25);
+    assert_eq!(
+        weapon_db::fired_ordnance(&d, "charged")
+            .missile
+            .unwrap()
+            .turn_rate,
+        1.25
+    );
+}
+
+#[test]
 fn bf1_tap_mortar_lifespan_uses_the_default_only_when_omitted() {
     let uncharged = db(&[
         (

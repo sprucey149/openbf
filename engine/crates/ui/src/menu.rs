@@ -112,8 +112,6 @@ pub struct MenuModel {
     /// Restart Mission is offered (a battle launched from the shell).
     pub restart_available: bool,
     pub texts: PauseTexts,
-    /// Back closes the class picker or the Respawn popup instead of resuming
-    /// (space battles keep this; the ground menu resumes from anywhere).
     pub back_steps_out: bool,
     /// None outside a live battle; caller may supply a localized label.
     pub respawn_label: Option<String>,
@@ -459,9 +457,7 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
     let mut cursor = m.cursor.min(n - 1);
     let mut actions = Vec::new();
     // Back resumes from anywhere, the class picker and the Respawn popup
-    // included (playtest A3). The PS2 backs a sub-page out one level
-    // (re-bf2-menus); openbf's pages keep their own Back and No rows for that,
-    // and space battles keep the PS2's step.
+    // included (playtest A3).
     if input.back {
         let action = if !m.back_steps_out {
             MenuAction::Resume

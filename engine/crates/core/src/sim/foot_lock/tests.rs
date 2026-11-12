@@ -163,6 +163,7 @@ fn launcher_locks_by_dwelling_alone() {
     }
 }
 
+#[allow(clippy::assertions_on_constants)] // the flag must be on for this rule's test
 fn launcher_locks_by_dwelling_alone_on(rules: GroundRules) {
     const { assert!(FOOT_AUTO_LOCK) };
     let (mut s, me) = scene_rules(launcher(), rules);

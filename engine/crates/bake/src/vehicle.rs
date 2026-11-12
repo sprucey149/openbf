@@ -470,12 +470,42 @@ pub fn bake_vehicles(
         } else {
             None
         };
+        let flyer = if ["flyer", "commandflyer"]
+            .iter()
+            .any(|b| e.base.eq_ignore_ascii_case(b))
+        {
+            let bank_name = animation_name(e);
+            let bank = banks
+                .iter()
+                .find(|b| b.name.eq_ignore_ascii_case(&bank_name));
+            if let Some((bank, clip)) = bank.and_then(|b| Some((b, b.clip("takeoff")?))) {
+                let skin = bake_skin(&ix, geometry, out, &mut skinned, "flyer", |sk| {
+                    crate::walker::skin_glb_of(
+                        sk,
+                        Some(bank),
+                        &[("takeoff", false)],
+                        &[""],
+                        |_, _| {},
+                    )
+                })?;
+                skin.map(|skin| manifest::ManifestFlyer {
+                    bank: bank_name,
+                    skin,
+                    frames: clip.frames,
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         vehicles.push(ManifestVehicle {
             class: crate::map::class_from_entc(e),
             chunks: chunk_names,
             sphere,
             vis_min_y,
             walker,
+            flyer,
             vis_box,
         });
     }

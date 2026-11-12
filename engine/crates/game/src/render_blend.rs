@@ -71,6 +71,7 @@ pub struct VehiclePose {
     /// `WalkerState::aim_yaw` / `aim_pitch`.
     pub aim: (f32, f32),
     pub walker: Option<WalkerPose>,
+    pub flyer_lift: Option<f32>,
 }
 
 /// One remote droid's or auto-turret's drawn pose, matched across ticks by its id.
@@ -101,13 +102,17 @@ pub struct Pose {
     pub vehicles: Vec<VehiclePose>,
     pub droids: Vec<ItemPose>,
     pub turrets: Vec<ItemPose>,
-    pub guided: Vec<(u64, Vec3, Quat, f32)>,
+    pub guided: Vec<(u64, Vec3, Quat, [f32; 2])>,
     pub projectiles: Vec<ProjectilePose>,
     pub zoom_s: f32,
     pub zoom_fov_mix: f32,
     pub cam_place: Option<(f32, Vec3)>,
     pub cam_pull: f32,
     pub cam_flyer: Option<crate::walk::FlyerCam>,
+    pub cam_gunner: Option<crate::walk::GunnerCam>,
+    pub cam_exit: Option<Vec3>,
+    pub cam_handover: Option<crate::walk::Handover>,
+    pub cam_guided: Option<crate::walk::GuidedCam>,
     /// The death camera's timer, eye and turn.
     pub cam_death: Option<(f32, Vec3, Quat)>,
 }
@@ -155,6 +160,7 @@ impl Pose {
                     .map(|g| g.as_ref().map(|g| [g.look, g.aim]))
                     .collect(),
                 aim: (v.walker.aim_yaw, v.walker.aim_pitch),
+                flyer_lift: (v.kind == core::vehicle::VehicleKind::Flyer).then_some(v.flyer.lift),
                 walker: (v.kind == core::vehicle::VehicleKind::Walker).then(|| {
                     WalkerPose::capture(
                         v,
@@ -184,8 +190,12 @@ impl Pose {
                 up: t.up,
             }));
         self.guided.clear();
-        self.guided
-            .extend(walk.sim.guided.iter().map(|r| (r.id, r.pos, r.rot, r.bank)));
+        self.guided.extend(
+            walk.sim
+                .guided
+                .iter()
+                .map(|r| (r.id, r.pos, r.rot, [r.flyer.tilt_pitch, r.flyer.tilt_roll])),
+        );
         self.projectiles.clear();
         self.projectiles.extend(
             walk.sim
@@ -219,6 +229,10 @@ impl Pose {
         self.cam_place = walk.cam_place;
         self.cam_pull = walk.cam_pull;
         self.cam_flyer = walk.cam_flyer;
+        self.cam_gunner = walk.cam_gunner;
+        self.cam_exit = walk.cam_exit;
+        self.cam_handover = walk.cam_handover;
+        self.cam_guided = walk.cam_guided;
         self.cam_death = walk.death_cam.map(|d| (d.timer, d.eye, d.rot));
     }
 
@@ -248,6 +262,9 @@ impl Pose {
                 }
             }
             (v.walker.aim_yaw, v.walker.aim_pitch) = p.aim;
+            if let Some(lift) = p.flyer_lift {
+                v.flyer.lift = lift;
+            }
             if let Some(p) = &p.walker {
                 p.write(v);
             }
@@ -264,7 +281,8 @@ impl Pose {
         }
         for (r, p) in walk.sim.guided.iter_mut().zip(&self.guided) {
             if r.id == p.0 {
-                (r.pos, r.rot, r.bank) = (p.1, p.2, p.3);
+                (r.pos, r.rot) = (p.1, p.2);
+                [r.flyer.tilt_pitch, r.flyer.tilt_roll] = p.3;
             }
         }
         for p in &self.projectiles {
@@ -277,6 +295,10 @@ impl Pose {
         walk.cam_place = self.cam_place;
         walk.cam_pull = self.cam_pull;
         walk.cam_flyer = self.cam_flyer;
+        walk.cam_gunner = self.cam_gunner;
+        walk.cam_exit = self.cam_exit;
+        walk.cam_handover = self.cam_handover;
+        walk.cam_guided = self.cam_guided;
         if let (Some(d), Some((_, eye, rot))) = (walk.death_cam.as_mut(), self.cam_death) {
             (d.eye, d.rot) = (eye, rot);
         }
@@ -373,6 +395,9 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
             }
         }
         o.aim = lerp_look(p.aim, o.aim, t);
+        if let (Some(current), Some(previous)) = (&mut o.flyer_lift, p.flyer_lift) {
+            *current = mix(previous, *current, t);
+        }
         if let (Some(o), Some(p)) = (o.walker.as_mut(), p.walker.as_ref()) {
             o.blend(p, t);
         }
@@ -383,7 +408,7 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
         if let Some(p) = prev.guided.iter().find(|p| p.0 == r.0) {
             r.1 = mix3(p.1, r.1, t);
             r.2 = p.2.lerp(r.2, t).normalize();
-            r.3 = mix(p.3, r.3, t);
+            r.3 = [mix(p.3[0], r.3[0], t), mix(p.3[1], r.3[1], t)];
         }
     }
     let mut previous: Vec<_> = prev.projectiles.iter().collect();
@@ -407,6 +432,16 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
     out.zoom_s = mix(prev.zoom_s, cur.zoom_s, t);
     out.zoom_fov_mix = mix(prev.zoom_fov_mix, cur.zoom_fov_mix, t);
     out.cam_pull = mix(prev.cam_pull, cur.cam_pull, t);
+    if let (Some(p), Some(c)) = (prev.cam_guided, cur.cam_guided) {
+        if p.rocket == c.rocket {
+            out.cam_guided = Some(crate::walk::GuidedCam {
+                eye: mix3(p.eye, c.eye, t),
+                rot: p.rot.lerp(c.rot, t).normalize(),
+                fov: mix(p.fov, c.fov, t),
+                ..c
+            });
+        }
+    }
     if let (Some(p), Some(c)) = (prev.cam_flyer, cur.cam_flyer) {
         if p.vehicle == c.vehicle {
             out.cam_flyer = Some(crate::walk::FlyerCam {
@@ -416,6 +451,25 @@ pub fn blend(prev: &Pose, cur: &Pose, t: f32) -> Pose {
                 ..c
             });
         }
+    }
+    if let (Some(p), Some(c)) = (prev.cam_gunner, cur.cam_gunner) {
+        if (p.vehicle, p.seat) == (c.vehicle, c.seat) {
+            out.cam_gunner = Some(crate::walk::GunnerCam {
+                eye: mix3(p.eye, c.eye, t),
+                rot: crate::sim_pose::quat_slerp(p.rot, c.rot, t),
+                ..c
+            });
+        }
+    }
+    if let (Some(p), Some(c)) = (prev.cam_exit, cur.cam_exit) {
+        out.cam_exit = Some(mix3(p, c, t));
+    }
+    if let (Some(p), Some(c)) = (prev.cam_handover, cur.cam_handover) {
+        out.cam_handover = Some(crate::walk::Handover {
+            position: mix3(p.position, c.position, t),
+            rot: crate::sim_pose::quat_slerp(p.rot, c.rot, t),
+            ..c
+        });
     }
     // The same run of the death camera (a replay restarts its timer: snap).
     if let (Some(p), Some(c)) = (prev.cam_death, cur.cam_death) {
@@ -866,9 +920,25 @@ mod tests {
         );
     }
 
-    /// A seat's aimer is blended with its look: a building turret's gun
-    /// draws along `GunState::aim`, and a 60 Hz frame of a bot's gun
-    /// turning 0.3 deg a tick drew it in 30 Hz steps.
+    #[test]
+    fn flyer_lift_is_drawn_between_ticks() {
+        let pose = |lift| Pose {
+            vehicles: vec![VehiclePose {
+                gen: 1,
+                alive: true,
+                pos: Vec3::ZERO,
+                rot: Quat::IDENTITY,
+                looks: Vec::new(),
+                aim: (0.0, 0.0),
+                walker: None,
+                flyer_lift: Some(lift),
+            }],
+            ..Pose::default()
+        };
+        let mid = blend(&pose(0.2), &pose(0.8), 0.5);
+        assert!((mid.vehicles[0].flyer_lift.unwrap() - 0.5).abs() < 1e-6);
+    }
+
     #[test]
     fn a_guns_aimer_is_drawn_between_its_ticks() {
         let pose = |look: f32, aim: f32| Pose {
@@ -880,6 +950,7 @@ mod tests {
                 looks: vec![None, Some([(look, 0.0), (aim, 0.2)])],
                 aim: (0.0, 0.0),
                 walker: None,
+                flyer_lift: None,
             }],
             ..Pose::default()
         };

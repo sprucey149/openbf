@@ -1549,7 +1549,7 @@ fn ship_weapons_keep_the_discs_clips_and_reloads() {
     };
 
     let bomber = pilot_gun(&mut sim, "imp_fly_tiebomber_sc");
-    let bomb = bomber.weapons[1];
+    let bomb = &bomber.weapons[1];
     let class = &sim.weapon_classes[bomb.class];
     assert_eq!(class.name, "imp_weap_fly_tiebomber_bomb");
     assert_eq!(class.rounds_per_clip, 6);
@@ -1557,7 +1557,7 @@ fn ship_weapons_keep_the_discs_clips_and_reloads() {
     assert!(bomb.infinite);
 
     let gunship = pilot_gun(&mut sim, "rep_fly_gunship_sc");
-    let missile = gunship.weapons[1];
+    let missile = &gunship.weapons[1];
     assert_eq!(sim.weapon_classes[missile.class].rounds_per_clip, 6);
     assert_eq!(missile.reserve_clips, 5);
     assert!(!missile.infinite);

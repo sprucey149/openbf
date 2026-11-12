@@ -140,6 +140,7 @@ impl ReplayFrame {
             walk.camera_see_through()
         };
         gpu.see_through(&see.props);
+        gpu.pose_ctf(&walk.sim, walk.player);
         let mut draws = gpu.view_draws(&walk.sim, walk.player);
         walk_draws(self.cube, walk, &mut draws, Some(&self.vis));
         draws.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
@@ -591,6 +592,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
         gpu.pose_doors(&walk.sim.doors);
         gpu.pose_turrets(&walk.sim, &walk.vehicle_seats);
         gpu.pose_stations(&walk.sim);
+        gpu.pose_ctf(&walk.sim, walk.player);
         let mut draws = gpu.draws.clone();
         walk_draws(cube, &walk, &mut draws, Some(&vis));
         draws.extend(vehicle_vis.draws(&mut r, &walk.sim, &[]));
@@ -849,6 +851,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
             frame.bolts.set_fire_points(fire_points);
             frame.fx.set_jet_frames(frame.vis.jet_frames(&walk));
             frame.fx.set_burn_frames(frame.vis.burn_frames(&walk));
+            frame.fx.advance_space_dust(&walk, core::TICK_DT);
             frame.fx.update(core::TICK_DT);
             if let Some(w) = frame.weather.as_mut() {
                 w.update(core::TICK_DT);

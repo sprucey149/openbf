@@ -154,6 +154,7 @@ fn hud_model(dead: bool) -> ui::hud::HudModel {
         damage_flash: 0.0,
         team_names: ["one".into(), "two".into()],
         team_points: None,
+        flag_status: None,
         lock: None,
         hints: Vec::new(),
         seat_health: None,

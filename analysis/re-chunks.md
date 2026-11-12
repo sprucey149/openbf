@@ -62,7 +62,9 @@ Addresses are BF2 (SWBFRNT2.ELF).
   - ChunkSpeed < 0: U(15, 30) / r along the direction (r = the vehicle's bound radius) when the squared distance
     is > 1. LEAF scales the result by 0.25 before the check below.
   - If |v| < 5 after that: v = direction × U(4, 6), with y raised to 2 + U(0, 1) when below 2.
-- **Spin.** L = I_w·Ω and ω = Ω (ChunkOmega).
+- **Spin.** L = I_w·Ω and ω = Ω, where Ω is ChunkOmega as authored, carried through the body frame. Read live on a
+  frigate's pieces (`re-space-assault.md` §23): the template holds the authored vector and the piece holds body frame × vector,
+  with no sign change.
 - **STATIC chunks** start with count 1 and budget 0, at rest.
 - **Trails** start at spawn (FUN_001d6368).
 - **The pool.** 8 clusters × 10 chunks, reused round-robin.
@@ -136,6 +138,7 @@ B2 lines 84822–85112 (`SWBFRNT2.ELF-decomp.c`):
 - A class with no chunk slot of its own throws nothing on the ground. In space it borrows its explosion class's
   slot, `NumChunks` copies (at most 10), on the vehicle law. The explosion's own debris law (`re-vehicle-death.md`
   §6.1: random direction, ChunkSpeed as a range, no bounce, 5 s) is not ported; `replace:` both with that law.
+- The rest life is 3 s on the ground on both games. A space round keeps BF2's 8 s, measured on a frigate (`re-space-assault.md` §23).
 - SIMPLE uses the FULL handler, since SIMPLE is never authored.
 - The push-out ignores the chunk's own collision layer, which is not traced.
 - Historical before issue #80: droid chunks used mesh-bounds spheres and ignored `ChunkNodeName`.

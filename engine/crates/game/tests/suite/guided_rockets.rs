@@ -97,6 +97,13 @@ fn guided_walk() -> game::walk::WalkSim {
     let owner = walk.sim.unit_mut(walk.player).unwrap();
     owner.weapon_class = class;
     owner.weapon = state;
+    let flyer = core::guided::GuidedRocket::flying(
+        &walk.sim.weapon_classes[class]
+            .guided
+            .as_ref()
+            .unwrap()
+            .class,
+    );
     walk.sim.guided.push(core::guided::GuidedRocket {
         id: 7,
         owner: walk.player,
@@ -105,17 +112,13 @@ fn guided_walk() -> game::walk::WalkSim {
         seat: None,
         pos: Vec3::new(0.0, 10.0, -20.0),
         vel: Vec3::new(0.0, 0.0, -30.0),
-        rot: glam::Quat::IDENTITY,
-        pitch_rate: 0.0,
-        turn_rate: 0.0,
-        roll_input: 0.0,
-        bank: 0.0,
+        rot: core::guided::GuidedRocket::body(Vec3::NEG_Z),
+        flyer,
         health: 1.0,
-        energy: 200.0,
         age: 1.0,
-        boosted: false,
         prev_buttons: 0,
         pending_end: None,
+        spent: None,
         blind: 0.0,
     });
     walk.sim.next_guided_id = 7;
@@ -131,9 +134,7 @@ fn guided_turning_uses_display_interpolation_with_mouse_and_controller_input() {
         for mouse in [false, true] {
             let mut walk = guided_walk();
             walk.blend.on = true;
-            walk.sim.guided[0].turn_rate = -1.2;
             let mut reference = guided_walk();
-            reference.sim.guided[0].turn_rate = -1.2;
             let input = if mouse {
                 PadState {
                     mx: PadState::quantize_look(f64::from(core::sim::MOUSE_STEER)),
@@ -160,19 +161,19 @@ fn guided_turning_uses_display_interpolation_with_mouse_and_controller_input() {
                 };
                 game::render_blend::blend_in_looking(&mut walk, &pending);
                 let yaw = walk.camera().yaw;
-                if tick > 0 {
-                    let expected = -1.2 * core::TICK_DT * (tick as f32 - 1.0 + fraction);
+                assert!((0.0..=1.0).contains(&fraction));
+                if tick > 1 {
                     assert!(
-                        (yaw - expected).abs() < 0.0001,
-                        "{hz} Hz mouse={mouse} frame={frame}: yaw={yaw}, expected={expected}"
+                        yaw <= last_yaw + 0.00001,
+                        "{hz} Hz mouse={mouse} frame={frame}: yaw={yaw}, last={last_yaw}"
                     );
-                    assert!(yaw <= last_yaw + 0.00001);
                 }
                 last_yaw = yaw;
                 walk.blend_out();
                 assert_eq!(walk.sim.hash(), hash);
                 assert_eq!(walk.sim.hash(), reference.sim.hash());
             }
+            assert!(last_yaw < -0.1, "{hz} Hz mouse={mouse}: turned {last_yaw}");
         }
     }
 }
@@ -182,28 +183,38 @@ fn guided_camera_and_interpolation_restore_the_sim_exactly() {
     if !bf2_classes_baked() {
         return;
     }
+    let mut chased = guided_walk();
+    for _ in 0..60 {
+        chased.step_tick(&[PadState::default()]);
+    }
+    let r = chased.sim.guided[0].clone();
+    let eye = chased.camera().position;
+    let behind = (eye - r.pos).dot(-r.forward());
+    assert!((2.0..6.0).contains(&behind), "behind {behind}");
     let mut walk = guided_walk();
     let initial = walk.camera();
-    assert_eq!(initial.position, Vec3::new(0.0, 10.0, -20.0));
-    assert_eq!((initial.yaw, initial.pitch, initial.roll), (0.0, 0.0, 0.0));
-    // A seat rocket's view carries the flight frame's roll and keeps the
-    // reticle centred.
+    assert!(initial.yaw.abs() < 1e-5 && initial.roll.abs() < 1e-5);
+    let level = walk.sim.guided[0].rot;
     let roll = 0.4;
-    walk.sim.guided[0].rot = glam::Quat::from_rotation_z(roll);
+    walk.sim.guided[0].rot = level * glam::Quat::from_rotation_z(roll);
     let rolled = walk.camera();
-    assert!((rolled.roll + roll).abs() < 1e-5, "roll {}", rolled.roll);
-    let want_right = walk.sim.guided[0].rot * Vec3::X;
+    assert!(
+        (rolled.roll.abs() - roll).abs() < 0.01,
+        "roll {}",
+        rolled.roll
+    );
+    let want_right = walk.sim.guided[0].rot * Vec3::NEG_X;
     assert!(
         rolled.right().distance(want_right) < 1e-5,
         "right {} / {want_right}",
         rolled.right()
     );
     assert!(
-        (walk.reticle_y() - 0.5).abs() < 0.01,
+        walk.reticle_y() > 0.35 && walk.reticle_y() < 0.5,
         "reticle at {}",
         walk.reticle_y()
     );
-    walk.sim.guided[0].rot = glam::Quat::IDENTITY;
+    walk.sim.guided[0].rot = level;
     let mut blend = game::render_blend::Blend::default();
     blend.on = true;
     blend.before_tick(&walk);
@@ -221,7 +232,7 @@ fn guided_camera_and_interpolation_restore_the_sim_exactly() {
             },
         )
         .is_none());
-    assert_eq!(walk.camera().yaw, 0.0);
+    assert!(walk.camera().yaw.abs() < 1e-5);
     blend.restore(&mut walk);
     assert_eq!(walk.sim.hash(), hash);
     assert_eq!(walk.sim.guided[0].pos.x, 2.0);
@@ -262,28 +273,38 @@ fn every_ordinary_disc_guided_launcher_is_gated_and_flies() {
             .weapon;
         let guide = weapon.guided.as_ref().unwrap();
         let c = &guide.class;
+        let f = &c.flight;
         assert!(guide.requires_award);
         assert_eq!(guide.spawn_offset, Vec3::new(-0.5, 1.0, 5.0));
         assert_eq!(
             (
-                c.acceleration,
-                c.speeds,
-                c.boost_speed,
-                c.boost_acceleration
+                f.acceleration,
+                [f.min_speed, f.mid_speed, f.max_speed],
+                f.boost_speed,
+                f.boost_acceleration
             ),
             (80.0, [30.0; 3], 80.0, 50.0)
         );
         assert_eq!(
-            (c.pitch_rate, c.turn_rate, c.pitch_filter, c.turn_filter),
-            (1.2, 1.2, 4.0, 4.0)
+            (f.pitch_rate, f.turn_rate, f.roll_rate, f.level_filter),
+            (1.2, 1.2, 3.15, 1.5)
         );
         assert_eq!(
-            (c.energy, c.energy_restore, c.boost_drain, c.health),
+            (
+                f.energy_max,
+                f.energy_auto_restore,
+                f.energy_boost_drain,
+                c.health
+            ),
             (200.0, -5.0, 20.0, 1.0)
         );
         assert_eq!(
-            (c.track_center, c.track_offset),
-            (Vec3::new(0.0, 1.0, -3.0), Vec3::new(0.0, 2.0, 6.0))
+            (c.view.track_center, c.view.track_offset),
+            (Some([0.0, 1.0, -3.0]), Some([0.0, 2.0, 6.0]))
+        );
+        assert_eq!(
+            (c.hold_time, c.hold_speed, c.hold_distance, c.critical_speed),
+            (1.0, 60.0, 20.0, 0.8)
         );
         assert_eq!(c.explosion.as_ref().unwrap().damage, 500.0);
         assert_eq!(c.noncritical.as_ref().unwrap().damage, 50.0);
@@ -395,4 +416,19 @@ fn every_ordinary_disc_guided_launcher_is_gated_and_flies() {
     );
     let hero = game::roster::weapon_from_db(&db, "all_weap_hero_rocket_launcher").unwrap();
     assert!(!hero.guided.as_ref().unwrap().requires_award);
+}
+
+#[test]
+fn tie_bomber_rocket_exhaust_runs_from_a_quarter_at_launch_to_three_quarters_at_boost() {
+    if !bf2_classes_baked() {
+        return;
+    }
+    let root = game::assets::baked_root();
+    let db = load_classdb(&root.join("classes"), "bf2", &["imp"]).unwrap();
+    let weapon = game::roster::weapon_from_db(&db, "imp_weap_fly_tiebomber_guided_rocket").unwrap();
+    let c = &weapon.guided.as_ref().unwrap().class;
+    assert_eq!(c.trail.as_deref(), Some("com_sfx_exhaust_xwing"));
+    assert_eq!(c.trail_scale, [0.25, 0.75, 0.0]);
+    assert_eq!(c.trail_size(c.flight.min_speed), 0.25);
+    assert!((c.trail_size(c.top_speed()) - 0.75).abs() < 1e-6);
 }

@@ -391,6 +391,8 @@ impl Sim {
         // The weapons.
         let origin = pos + rot * g.muzzle(st.aim);
         let fwd = (rot * gun::dir(st.aim.0, st.aim.1)).normalize();
+        let lock_origin = pos + rot * g.ray_eye(st.look, st.zoom.is_some());
+        let lock_dir = (rot * gun::dir(st.look.0, st.look.1)).normalize_or_zero();
         let right = fwd.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X);
         let up = right.cross(fwd).normalize();
         let is_player = driver.is_some_and(|i| self.units[i].is_player);
@@ -434,7 +436,7 @@ impl Sim {
                     .get(vehicle.class as usize)
                     .and_then(Option::as_ref)
                     .is_some_and(|p| p.bf2)
-                    && self.landing_regions.iter().any(|r| r.contains(vehicle.pos))));
+                    && self.flyer_region_coverage(vehicle).0));
         let mut shots = Vec::new();
         for (k, w) in g.weapons.iter().enumerate() {
             let held = match (channel, k) {
@@ -499,7 +501,18 @@ impl Sim {
                 weapon_class: w.class,
                 is_player,
             };
-            for spec in &shots {
+            let first_shot = st.weapons[k].shots_fired.saturating_sub(shots.len() as u64);
+            for (shot_index, spec) in shots.iter().enumerate() {
+                let origin = if g.pilot && self.vehicles[vi].kind == VehicleKind::Flyer {
+                    w.fire_points
+                        .get(
+                            ((first_shot + shot_index as u64) % w.fire_points.len().max(1) as u64)
+                                as usize,
+                        )
+                        .map_or(origin, |point| pos + rot * *point)
+                } else {
+                    origin
+                };
                 // The round's speed and life at its charge (the Hoth dish
                 // turret's charge points, re-weapon-charge §4).
                 let blend = self.weapon_classes[w.class].ordnance.charged(spec.charge);
@@ -568,7 +581,8 @@ impl Sim {
                         .and_then(|u| u.ai.target)
                         .and_then(|f| f.unit())
                         .map(crate::missile::MissileTarget::Unit);
-                    let locked = driver.and_then(|i| self.seat_lock_target(i, w.class, origin, d));
+                    let locked = driver
+                        .and_then(|i| self.seat_lock_target(i, w.class, lock_origin, lock_dir));
                     let armed = armed_target.map(crate::missile::MissileTarget::Vehicle);
                     let target = locked.or(armed).or(target);
                     bolt.as_missile(&ord, &mc, target, &mut self.lcg);
