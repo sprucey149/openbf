@@ -333,15 +333,19 @@ pub fn beam_draw(
     look: &LaserLook,
     beam: &core::sim::Beam,
     textures: [Option<TextureHandle>; 2],
+    muzzle: Option<Vec3>,
 ) -> BoltDraw {
-    let len = beam.len + 1.0;
+    let head = beam.origin + beam.dir * (beam.len + 0.5);
+    let (dir, len) = muzzle.map_or((beam.dir, beam.len + 1.0), |muzzle| {
+        let path = head - muzzle;
+        (path.normalize_or(beam.dir), path.length())
+    });
     let look = LaserLook {
         length: len,
         glow_length: len,
         ..look.clone()
     };
-    let head = beam.origin + beam.dir * (beam.len + 0.5);
-    bolt_draw(&look, head, beam.dir, len, 0.0, 1.0, textures)
+    bolt_draw(&look, head, dir, len, 0.0, 1.0, textures)
 }
 
 /// The texture a `LaserTexture` name draws with (lower-cased, as baked).
@@ -777,7 +781,27 @@ impl BoltVis {
                 .texture
                 .as_deref()
                 .and_then(|n| self.texture(r, &texture_name(n)));
-            out.push(beam_draw(look, beam, [core, glow]));
+            let muzzle = walk
+                .sim
+                .unit(walk.player)
+                .filter(|u| {
+                    walk.player == beam.shooter.owner
+                        && u.scoped()
+                        && walk.sim.weapon_classes[beam.shooter.weapon_class].is_sniper_rifle()
+                })
+                .map(|u| {
+                    // The beam's ray leaves the scope. Its ribbon needs a
+                    // muzzle off that axis or the eye sees only the far cap.
+                    // OURS for missing or on-axis muzzle art. measure: scoped
+                    // beam footprint and apparent origin in an original shot.
+                    let width = look.half_width(1.0);
+                    self.fire_point(walk.player.index)
+                        .filter(|p| {
+                            (*p - beam.origin).cross(beam.dir).length_squared() >= width * width
+                        })
+                        .unwrap_or_else(|| beam.origin - u.aim_frame().2 * (2.0 * width))
+                });
+            out.push(beam_draw(look, beam, [core, glow], muzzle));
         }
         for tow in &walk.sim.tow_cables {
             out.extend(tow.points.windows(2).filter_map(|segment| {

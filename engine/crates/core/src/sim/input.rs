@@ -807,10 +807,22 @@ impl Sim {
         let (eye, fwd) = p.aim_ray(self.ground_rules, self.views());
         let cap = p.capsule();
         let center = t.assist_ctr;
-        let ord = &self.weapon_classes[p.weapon_class].ordnance;
+        let weapon = &self.weapon_classes[p.weapon_class];
+        let ord = &weapon.ordnance;
         let speed = ord.velocity;
         let mut kept = None;
-        let (lead, lead_vel) = if self.assist_lead_on {
+        let sniper = weapon.is_sniper_rifle();
+        let instant_sniper = sniper
+            && matches!(m, AimTarget::Unit(_))
+            && (ord.beam.is_some() || crate::unit::fast_round(speed));
+        let (lead, lead_vel) = if self.assist_lead_on && instant_sniper {
+            // The beam sweeps its full range on the shot tick, and fast
+            // rounds meet the soldier where he was at the press. Aim at
+            // the interpolated body, clearing flight lead from the last gun.
+            let offset = t.vel * -crate::unit::HUMAN_SHOT_LAG;
+            kept = Some((m, Lead { vel: t.vel, offset }));
+            (Some(center + offset), Some(t.vel))
+        } else if self.assist_lead_on {
             // OURS (`core::aim_assist`'s lead): the low-passed velocity times
             // the round's flight from where it leaves (the fire point, the
             // scope point scoped), plus the drop a falling round makes up.
@@ -882,13 +894,13 @@ impl Sim {
             // Zoomed, the assist's rate is divided as the turn is
             // (`re-zoom.md` §6).
             zoom_factor: p.zoom.map(|z| z.divisor),
-            lock_on_range: self.weapon_classes[p.weapon_class].lock_on_range,
+            lock_on_range: weapon.lock_on_range,
             fire_held: pad.pressed(buttons::FIRE),
             armed: self.assist_armed,
             lead_vel,
             // OURS (C5): a scoped sniper rifle follows a share of its magnet
             // before the press (`aim_assist::SNIPER_FOLLOW`).
-            follow: match self.weapon_classes[p.weapon_class].is_sniper_rifle() && p.scoped() {
+            follow: match sniper && p.scoped() {
                 true => aim_assist::SNIPER_FOLLOW,
                 false => 0.0,
             },

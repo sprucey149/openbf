@@ -240,6 +240,48 @@ fn a_sniper_rifle_takes_a_magnet_out_to_its_max_range() {
     }
 }
 
+#[test]
+fn a_sniper_aims_at_the_visible_soldier_even_after_switching_from_a_slow_gun() {
+    let (mut sim, player, targets) = range(&[(1, Vec3::new(0.0, 0.0, -60.0))]);
+    let enemy = targets[0];
+    let velocity = Vec3::X * 8.0;
+    sim.unit_mut(enemy).unwrap().soldier.vel = velocity;
+    let magnet = AimTarget::Unit(enemy);
+    sim.assist_lead[0] = Some((
+        magnet,
+        Lead {
+            vel: velocity,
+            offset: Vec3::X * 4.0,
+        },
+    ));
+    let weapon = sim.unit(player).unwrap().weapon_class;
+    let player_unit = sim.unit_mut(player).unwrap();
+    player_unit.zoom = Some(crate::unit::Zoom {
+        step: 1,
+        value: 8.0,
+        divisor: 8.0,
+        scope: true,
+    });
+    let beam = crate::weapon::BeamClass {
+        range: 500.0,
+        life: 0.15,
+        pierce: true,
+        impact: None,
+    };
+    for (speed, beam) in [(2000.0, None), (150.0, Some(beam))] {
+        let mut class = crate::weapon::tests::disc_sniper(0.0);
+        class.ordnance.velocity = speed;
+        class.ordnance.beam = beam;
+        sim.weapon_classes[weapon] = class;
+        let (_, _, lead) = sim
+            .assisted(0, player, magnet, &PadState::default(), crate::TICK_DT)
+            .unwrap();
+        let (target, lead) = lead.unwrap();
+        assert_eq!(target, magnet);
+        assert_eq!(lead.offset, velocity * -crate::unit::HUMAN_SHOT_LAG);
+    }
+}
+
 /// The held magnet's cone widens by π/4 while FIRE is held: an enemy
 /// that steps 3 m off the axis at 20 m is kept while firing and dropped
 /// when not.

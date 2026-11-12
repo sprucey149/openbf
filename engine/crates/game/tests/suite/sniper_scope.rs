@@ -743,3 +743,60 @@ fn scope_pictures() {
         picture(&s, &mut r, &vis, &mut bolts, "4_scope_x8");
     }
 }
+
+#[test]
+#[ignore = "owned maps, award kit and headless GPU"]
+fn scoped_beam_rifle_draws_a_visible_shot() {
+    let root = game::assets::baked_root();
+    let mut s = scoped("bf1_tat2", "bf1", "all_inf_marksman", ["all", "imp"], 40.0)
+        .expect("owned BF1 map and lane");
+    s.walk.sim.cheats.all_awards = true;
+    tick(&mut s, 0);
+    let player = s.walk.player;
+    let weapon = s.walk.sim.unit(player).unwrap().weapon_class;
+    assert_eq!(
+        s.walk.sim.weapon_classes[weapon].name,
+        "all_weap_award_sniper_rifle"
+    );
+    zoom(&mut s);
+    assert!(s.walk.sim.unit(player).unwrap().scoped());
+    tick(&mut s, buttons::FIRE);
+    assert!(s.walk.sim.events.iter().any(|e| {
+        matches!(e, Event::Hit { shooter, victim, .. } if *shooter == player && *victim == s.enemy)
+    }));
+    assert!(s.walk.sim.beams.iter().any(|b| b.shooter.owner == player));
+
+    let mut r = render::Renderer::new_headless(SIZE[0], SIZE[1]).expect("headless renderer");
+    let gpu = game::viewer::upload_scene(&mut r, &s.scene).expect("upload");
+    let mut vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &root, &s.scene, &s.walk);
+    vis.update(&s.walk, core::TICK_DT);
+    let mut bolts = game::bolt_vis::BoltVis::new(&root, s.game);
+    bolts.set_fire_points(vis.fire_points(&s.walk));
+    let cam = s.walk.camera();
+    let feed = game::event_feed::EventFeed::for_walk(&root, s.game, &s.walk);
+    let mut hud = game::hud_feed::HudView::for_renderer(&root, &r).expect("owned scope HUD");
+    let model = model(&s, &feed);
+    assert!(model.scope.is_some());
+    hud.update(&model, 1.0, SIZE);
+    let mut render = |r: &mut render::Renderer| {
+        r.render_frame(
+            &cam,
+            &gpu.draws,
+            &[],
+            gpu.clear,
+            Some(&mut |dev, q, enc, view, size| hud.paint(dev, q, enc, view, size)),
+        )
+        .unwrap();
+        r.capture_rgba().unwrap().0
+    };
+    let before = render(&mut r);
+    bolts.submit(&mut r, &s.walk, cam.position, &[]);
+    let after = render(&mut r);
+    let pixels = before
+        .chunks_exact(4)
+        .zip(after.chunks_exact(4))
+        .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(a, b)| a.abs_diff(*b) > 12))
+        .count();
+    println!("Beam Rifle visibly changed {pixels} pixels");
+    assert!(pixels > 100, "scoped beam should occupy a visible streak");
+}
