@@ -111,11 +111,57 @@ The port now converges bot bolts from the gun hardpoint to the current aim
 line at the perceived contact's range, bounded by `AimerPitchLimits` and
 `AimerYawLimits`. It retains tracking error rather than pointing straight at
 the enemy's centre. Human shots retain their existing reticle convergence.
-This bot barrel rule is **PROVISIONAL**, trace: PCSX2 BF1/BF2 barrel spawn
-position and velocity on a ramp, including both `hp_gun_1/2`, alternation,
-convergence versus parallel fire and behavior beyond the pitch limit. The
-PS2 aimer-to-bolt path remains untraced; the synthetic ramp regression is
-port correctness evidence, not original-game acceptance.
+The original supplies the aimer with the eye's current direction scaled
+to the active weapon's live target distance, or 512 m if there is no live
+weapon target (BF1 `FUN_001d1fe8`, B1:80054–80135, and BF2
+`FUN_001f99d0`, B2:109764–109832). Each aimer turns from its own animated
+mount toward that point. Its angular limits are applied in BF1
+`FUN_0026dd70` (B1:192005 onward) and BF2 `FUN_00302a10`
+(B2:293851–293962).
+
+The cannon asks whether the aimer is inside its limits or its class
+allows fire outside them (BF1 `FUN_0026e0b8`, B1:192329–192339, and BF2
+`FUN_00302d58`, B2:294066). Both stock Droideka aimers have
+`FireOutsideLimits` enabled. The stock classes can emit a bolt while
+the aimer is clamped. BF1 live observations include upward and downward
+bolts, and a BF2 Geonosis engagement confirms uphill fire when the aim
+and weapon targets agree.
+
+In the BF1 capture, 220 of 241 bolts have a generation-checked live
+opposing weapon target. In the matched downhill placement the original
+settled bolts pitch down 6.48–7.41 degrees. The port sees the same target
+and lands hits with a shallower settled aim of about 1.4 degrees below
+level. A shallow Geonosis control confirms uphill fire at a grounded
+target in both builds. The original shot pitches up 0.13 degrees, and
+the port lands five of ten bolts in the matched Hard control.
+
+On BF1 Kashyyyk Docks the original targets a grounded soldier 9.57 m
+higher and about 34.8 m away. Its settled shots pitch up 17.43–17.55
+degrees and the target keeps full health. In the port the same
+horizontal placement settles the Droideka 0.37 m lower. A map collision
+body blocks the port's eye-to-capsule sight ray and both barrel paths.
+Raising the eye alone by 0.365 m clears sight. Both recorded original
+barrel directions still intersect that body when cast in the port's
+world.
+
+With horizontal movement held, the port keeps a heard contact and
+emits no bolts. With ordinary bot movement from the same start, it
+walks 0.97 m up the ramp, gets sight and begins firing on tick 69.
+All 93 bolts pitch uphill and the target takes no hits. From a
+supported point 2.62 m farther up the slope, one barrel has a clear
+path and the port lands seven of 36 bolts. The blocked Docks placement
+needs no slope or aiming correction for ground recovery.
+
+The port lands all 12 sampled shots in the settled BF2 uphill run and
+all 12 in a second downhill run. A separate downhill original shot
+passes a section where the port's loaded collision blocks the line.
+Raising the port target 1.8 m clears the obstruction. The collision
+difference and the first downhill placement remain open.
+
+The port's timing and mount origin remain **PROVISIONAL**, trace: the
+target changes, per-barrel rotation and animated spawn origins of settled
+and transitioning shots in both games. The port approximates the range
+with its last contact and uses the baked bind-pose muzzle points.
 
 ## 4. Forms, clips and times [V][M][O]
 

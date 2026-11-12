@@ -189,6 +189,15 @@ impl PadState {
         (v.clamp(-1.0, 1.0) * 32767.0) as i16
     }
 
+    /// Left-stick axes for a level heading in the body's local frame.
+    pub(crate) fn walk_axes(yaw: f32, heading: glam::Vec3) -> (i16, i16) {
+        let (sy, cy) = crate::fmath::sin_cos(yaw);
+        (
+            Self::quantize(heading.dot(glam::Vec3::new(cy, 0.0, -sy))),
+            Self::quantize(heading.dot(glam::Vec3::new(-sy, 0.0, -cy))),
+        )
+    }
+
     pub fn look(&self) -> (f32, f32) {
         (self.mx as f32 * LOOK_UNIT, self.my as f32 * LOOK_UNIT)
     }

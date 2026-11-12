@@ -248,10 +248,9 @@ pub const SEAT_REACH: u32 = 6;
 /// (`pos + x·right + y·up + z·forward`), facing the walker's heading turned
 /// by the authored angle, yaw only. RAM vector: `the_ram_walker_gives_its_six_points`.
 ///
-/// PROVISIONAL: the PS2 then pulls the point back along a ray from the
-/// walker's bounding-sphere centre to the first terrain or building hit; the
-/// port seats the unit with [`Sim::spawn_ground`] instead. The turn's sense
-/// is the stored quaternion's: BF2 Hoth's RAM holds (0, 0.0436, 0, ±0.9990)
+/// The live respawn path casts from the walker's bounding-sphere centre
+/// toward this node. The turn's sense is the stored quaternion's: BF2
+/// Hoth's RAM holds (0, 0.0436, 0, ±0.9990)
 /// for 5° / 355° (`lead_tmp/cwsp/cp_ram2.py`), the form of
 /// [`quat_y`](crate::vehicle::hover::quat_y) — the heading plus the angle,
 /// so the AT-AT's two sides face 5° outward. That a spawned unit shows the

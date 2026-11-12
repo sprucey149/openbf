@@ -7,10 +7,9 @@ use crate::vehicle::VehicleKind;
 pub const SIGHT_FIGHT: f32 = 10.0;
 pub const SHIELD_RAISE: f32 = 0.5;
 
-/// The form a bot droideka is told to take: deployed to fight, rolled
-/// otherwise (`analysis/re-droideka-unit.md` 5.1).
+/// Deploy to fight and for a verified recovery walk (`analysis/re-droideka-unit.md` 5.1).
 ///
-/// OURS (2026-11-10): a droideka in Recover rolls too. The original deploys
+/// OURS (2026-11-10): a droideka on a recovery leg normally rolls. The original deploys
 /// only for its stuck walk, a short walk to a point within 10 m that ends
 /// 2 m out, and rolls again. The port's Recover is not that walk: it keeps
 /// the leg to the goal until a progress window passes. Deployed, the slow
@@ -21,6 +20,9 @@ pub const SHIELD_RAISE: f32 = 0.5;
 /// measure: droideka Recover share, enemy-post time and both CW pairings'
 /// bot-only win share against that note.
 pub fn form_order(st: &AiState) -> Order {
+    if st.lost.is_some_and(|lost| lost.escape_heading.is_some()) {
+        return Order::Deploy;
+    }
     match st.behaviour {
         Behaviour::Fight => Order::Deploy,
         _ => Order::Roll,

@@ -175,7 +175,7 @@ impl Sim {
         };
         spec.pos = pos;
         spec.yaw = yaw;
-        self.replace_respawned_unit(i, spec);
+        self.replace_respawned_unit(i, spec, None);
     }
 
     pub(super) fn hash_native_teams(&self, eat: &mut impl FnMut(&[u8])) {

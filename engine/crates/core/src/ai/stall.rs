@@ -510,6 +510,9 @@ mod tests {
     fn a_bot_under_its_posts_floor_has_not_arrived() {
         let (mut sim, h) = slab_sim();
         let under = Vec3::new(40.0, 0.0, -40.0);
+        sim.spawn(&UnitSpec::player(0, under + Vec3::X * 7.0))
+            .expect("witness outside the capture region");
+        assert!(super::super::unseen::seen_by_human(&sim, under));
         sim.unit_mut(h).expect("alive").soldier.pos = under;
         let at = stalls(&mut sim, u64::from(RECYCLE_AFTER) + 150, |s| {
             if let Some(u) = s.unit_mut(h) {
@@ -747,13 +750,16 @@ mod tests {
         (plans, resets)
     }
 
-    /// ...with no floor walk out (walls 3 m high) it is given up within a
-    /// few windows of the bound, not after the two minutes of
+    /// ...with no floor walk out (walls 3 m high) and a witness it is given
+    /// up within a few windows of the bound, before the two minutes of
     /// [`RECYCLE_AFTER`]; it respawns at its post and walks on.
     #[test]
     fn a_bot_shut_in_one_place_is_given_up_within_the_bound() {
         let (mut sim, h, _) = home_sim();
         cell(&mut sim, 3.0);
+        sim.spawn(&UnitSpec::player(0, Vec3::new(1.3, 3.0, 0.0)))
+            .expect("witness on the cell wall");
+        assert!(super::super::unseen::seen_by_human(&sim, Vec3::ZERO));
         let (plans, resets) = pin(&mut sim, h);
         let mut left = 6 * u64::from(crate::ai::STUCK_WINDOW);
         while stalls(&mut sim, 1, |_| {}).is_empty() {
@@ -798,5 +804,76 @@ mod tests {
         assert!(u.ai.lost.is_none(), "the walk is over");
         let p = u.soldier.pos;
         assert!(p.x.abs() > 2.5 || p.z.abs() > 2.5, "out of the cell: {p}");
+    }
+
+    fn elevated_bot(height: f32) -> (Sim, UnitHandle) {
+        let (mut sim, h, _) = home_sim();
+        sim.nav_floors = vec![0.0; 3];
+        sim.collision = CollisionWorld::new(
+            vec![Body::new(
+                Mat4::from_translation(Vec3::new(0.0, height - 0.5, 0.0)),
+                Shape::Box {
+                    half: Vec3::new(1.5, 0.5, 1.5),
+                },
+            )],
+            Vec::new(),
+        );
+        let pos = Vec3::new(0.0, height, 0.0);
+        let u = sim.unit_mut(h).unwrap();
+        u.soldier.pos = pos;
+        u.ai.stall = Some(StallState {
+            at: pos,
+            lo: pos,
+            hi: pos,
+            ticks: RECYCLE_AFTER - 1,
+            pin: pos,
+            fails: 0,
+            walked: None,
+        });
+        (sim, h)
+    }
+
+    #[test]
+    fn a_stalled_bot_descends_to_playable_floor() {
+        let (mut sim, h) = elevated_bot(6.0);
+        sim.step(&[PadState::default()]);
+        let u = sim.unit(h).expect("the same life begins its descent");
+        assert!(u.ai.lost.is_some_and(|l| l.pinned));
+        assert!(u.soldier.pos.y > 5.9, "starts on the shelf");
+        let mut fell = false;
+        for _ in 0..240 {
+            sim.step(&[PadState::default()]);
+            let u = sim.unit(h).expect("the same life survives");
+            fell |= !u.soldier.grounded && u.soldier.pos.y > 0.0 && u.soldier.pos.y < 5.9;
+            assert!(
+                !sim.events
+                    .iter()
+                    .any(|e| matches!(e, Event::Relocated { unit, .. } if *unit == h)),
+                "the descent used ordinary movement"
+            );
+        }
+        let u = sim.unit(h).unwrap();
+        assert!(fell && u.soldier.grounded && u.soldier.pos.y.abs() < 0.1);
+        assert!(
+            u.ai.lost.is_none() && u.soldier.pos.z < -10.0,
+            "resumed its route"
+        );
+    }
+
+    #[test]
+    fn descent_preview_rejects_hazardous_and_lethal_landings() {
+        let (mut sim, h) = elevated_bot(6.0);
+        assert!(sim
+            .recovery_descent(sim.unit(h).unwrap(), Vec3::Z)
+            .is_some());
+        sim.death_regions
+            .push(Region::sphere(Vec3::new(0.0, 1.0, 4.0), 4.0));
+        assert!(sim
+            .recovery_descent(sim.unit(h).unwrap(), Vec3::Z)
+            .is_none());
+        let (sim, h) = elevated_bot(25.0);
+        assert!(sim
+            .recovery_descent(sim.unit(h).unwrap(), Vec3::Z)
+            .is_none());
     }
 }

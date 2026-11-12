@@ -131,6 +131,12 @@ fn the_route_is_part_of_the_ai_hash() {
         |st: &mut AiState| st.lost.as_mut().unwrap().ref_dist = 1.0,
         |st: &mut AiState| st.lost.as_mut().unwrap().shut = true,
         |st: &mut AiState| st.lost.as_mut().unwrap().pinned = true,
+        |st: &mut AiState| st.lost.as_mut().unwrap().hunt_rejoin = true,
+        |st: &mut AiState| st.lost.as_mut().unwrap().escape_heading = Some(Vec3::X),
+        |st: &mut AiState| st.lost.as_mut().unwrap().replan_after_escape = true,
+        |st: &mut AiState| st.lost.as_mut().unwrap().escape_jump_tick = Some(10),
+        |st: &mut AiState| st.lost.as_mut().unwrap().escape_hold_yaw = true,
+        |st: &mut AiState| st.lost.as_mut().unwrap().escape_arrival_plane = true,
         |st: &mut AiState| st.lost.as_mut().unwrap().plans = 1,
         |st: &mut AiState| {
             let l = st.lost.as_mut().unwrap();

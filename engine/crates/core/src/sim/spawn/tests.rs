@@ -1179,6 +1179,7 @@ fn the_post_choice_is_hashed_and_replays() {
 
 mod class_change;
 mod screens;
+mod walker_placement;
 
 #[test]
 fn bots_retry_an_authored_node_when_the_picked_spawn_has_no_walkable_exit() {

@@ -6,7 +6,9 @@
 //! its goal - within [`REACH`], on a floor, clear of the map's bodies and of
 //! every soldier, on the level and outside the death regions. Only when no
 //! human player has a line of sight to the bot or to the spot
-//! ([`seen_by_human`]); with none such, the recycle stays.
+//! ([`seen_by_human`]). The ground dispatcher may also use a nearby hub
+//! connected to the goal when every forward spot fails. If neither search
+//! finds a safe spot, the recycle stays.
 //!
 //! Every move is still a defect: the WHY code [`super::why::Why::Relocated`],
 //! the census's failed-walk column and an [`crate::sim::Event::Relocated`]
@@ -77,6 +79,24 @@ pub(super) fn spot(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<Vec3> {
         hub = next;
     }
     None
+}
+
+/// OURS: a bot can be trapped before a long leg whose far end is out of
+/// reach. Use a nearby connected hub when the forward spots all fail.
+/// measure: the Kashyyyk dock and Geonosis Great Spire last-resort cases (#108).
+pub(super) fn nearby_route(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<Vec3> {
+    let u = sim.unit(me).filter(|u| u.mount.is_none())?;
+    let g = sim.nav.as_ref()?;
+    let dest = st.route()?.dest_hub;
+    let pos = u.soldier.pos;
+    if seen_by_human(sim, pos) {
+        return None;
+    }
+    let mover = super::route::mover(sim, u);
+    sim.nearest_floor_hubs::<{ super::LEVEL_HUB_TRIES }>(g, pos, |i| sim.nav_floor(i as u16))
+        .into_iter()
+        .filter(|&(_, hub)| g.hub(hub).is_some() && g.reachable_by(hub, dest, mover))
+        .find_map(|(_, hub)| hub_spot(sim, g, hub, pos))
 }
 
 /// A free spot at hub `h` for a bot at `pos`: the hub's centre on its floor,

@@ -3,7 +3,7 @@ use glam::Vec3;
 use super::input::{buttons, PadState};
 use super::state::{DeathCause, Event, Sim};
 use crate::collision::Capsule;
-use crate::droideka::{local_to_world, Body, DroidekaClass, Form, Input, Sphere};
+use crate::droideka::{local_to_world, Body, Droideka, DroidekaClass, Form, Input, Order, Sphere};
 use crate::unit::{Controller, Unit};
 
 pub const FLOOR_SNAP: f32 = 0.05;
@@ -131,10 +131,128 @@ fn droideka_pitch(
 }
 
 impl Sim {
+    fn droideka_cramped(&self, d: &Droideka, class: &DroidekaClass, pos: Vec3) -> bool {
+        let walk_room = capsule_of(class, Form::Walk, pos);
+        d.form() == Form::Ball
+            && !self.collision.is_empty()
+            && self
+                .collision
+                .push_out_soldier(&Capsule {
+                    height: walk_room.height * UNROLL_HEADROOM,
+                    ..walk_room
+                })
+                .length_squared()
+                > 1e-6
+    }
+
+    fn resolve_droideka_motion(
+        &self,
+        deka: &mut Droideka,
+        class: &DroidekaClass,
+        body: &mut Body,
+        from: Capsule,
+        dt: f32,
+    ) -> (Option<Vec3>, Vec3) {
+        let wall = (!self.collision.is_empty()).then(|| {
+            let push = self
+                .collision
+                .push_out_soldier_from(&from, &capsule_of(class, deka.form(), body.pos));
+            body.pos += push;
+            let len = (push.x * push.x + push.z * push.z).sqrt();
+            if len > 0.0 {
+                let (nx, nz) = (push.x / len, push.z / len);
+                let into = body.vel.x * nx + body.vel.z * nz;
+                if into < 0.0 {
+                    body.vel.x -= into * nx;
+                    body.vel.z -= into * nz;
+                }
+            }
+            push
+        });
+        let rising = body.vel.y > 0.0;
+        let (fy, n) = self.ground_under_n(body.pos, rising, from.base.y);
+        let grounded = !rising && body.pos.y <= fy + FLOOR_SNAP;
+        if grounded {
+            body.pos.y = fy;
+        }
+        deka.land(body, grounded, dt);
+        (wall, n)
+    }
+
+    /// Validate the deployed droid's own body and movement on a marked exit.
+    pub(crate) fn preview_droideka_walk(
+        &self,
+        u: &Unit,
+        heading: Vec3,
+        to: Vec3,
+        descent: bool,
+    ) -> Option<Vec3> {
+        let class = u.droideka_class()?;
+        let mut deka = u.droideka.as_deref()?.clone();
+        deka.order = Order::Deploy;
+        let start = u.soldier.pos;
+        let mut body = Body {
+            pos: start,
+            vel: u.soldier.vel,
+            yaw: u.soldier.yaw,
+            grounded: u.soldier.grounded,
+        };
+        let mut last_floor = start.y;
+        let (lx, ly) = PadState::walk_axes(body.yaw, heading);
+        let mut input = Input {
+            fwd: PadState::axis(ly),
+            strafe: PadState::axis(lx),
+            ..Input::default()
+        };
+        // OURS: allow time to unroll and walk the marked crossing.
+        // measure: BF1 Kamino H49 to H48 on the same life (#108).
+        for _ in 0..6 * crate::ai::STUCK_WINDOW {
+            if body.grounded {
+                last_floor = body.pos.y;
+            }
+            input.cramped = self.droideka_cramped(&deka, class, body.pos);
+            let from = capsule_of(class, deka.form(), body.pos);
+            deka.step(crate::TICK_DT, &input, class, &mut body);
+            self.resolve_droideka_motion(&mut deka, class, &mut body, from, crate::TICK_DT);
+            let capsule = capsule_of(class, deka.form(), body.pos);
+            let depth = self
+                .water_plane()
+                .and_then(|w| w.under(body.pos))
+                .map(|level| level - body.pos.y);
+            let beyond_floor = if descent {
+                body.pos.y < to.y - crate::collision::STEP_HEIGHT
+            } else {
+                !body.grounded && (body.pos.y - last_floor).abs() > crate::collision::STEP_HEIGHT
+            };
+            if beyond_floor
+                || self.kill_floor.is_some_and(|floor| body.pos.y < floor)
+                || self.death_regions.iter().any(|r| r.contains(body.pos))
+                || self.damage_regions.iter().any(|r| {
+                    r.region.touches_sphere(
+                        capsule.base + Vec3::Y * (0.5 * capsule.height),
+                        capsule.radius.max(0.5 * capsule.height),
+                    )
+                })
+                || deka.water_tick(crate::TICK_DT, depth, class) > 0.0
+            {
+                return None;
+            }
+            if body.grounded
+                && deka.walk_state()
+                && body.pos.distance_squared(to) <= crate::ai::RETURN_ARRIVE.powi(2)
+                && self.level_at(body.pos) == super::Level::On
+                && self.soldier_clear(body.pos)
+            {
+                return Some(body.pos);
+            }
+        }
+        None
+    }
+
     /// Converge a bot's barrel on its CURRENT aim line at the perceived range,
     /// keeping the tracker's error and the body's world-level pitch clamp.
-    /// PROVISIONAL, trace: PCSX2 hp_gun_1/2 spawn position/velocity on a ramp,
-    /// convergence, alternation and pitch-limit firing (PS2 aimers untraced).
+    /// PROVISIONAL, trace: exact animated muzzle origins and aim timing on
+    /// matched ramps in both originals. See analysis/re-droideka-unit.md.
     pub(super) fn bot_droideka_shot(&self, i: usize) -> Option<(Vec3, (Vec3, Vec3, Vec3))> {
         let u = &self.units[i];
         let c = u.droideka_class()?;
@@ -170,17 +288,7 @@ impl Sim {
         let human = matches!(u.controller, Controller::Player { .. });
         let prev = deka.prev_buttons;
         let edge = |b: u32| pad.buttons & b != 0 && prev & b == 0;
-        let walk_room = capsule_of(class, Form::Walk, u.soldier.pos);
-        let cramped = deka.form() == Form::Ball
-            && !self.collision.is_empty()
-            && self
-                .collision
-                .push_out_soldier(&Capsule {
-                    height: walk_room.height * UNROLL_HEADROOM,
-                    ..walk_room
-                })
-                .length_squared()
-                > 1e-6;
+        let cramped = self.droideka_cramped(deka, class, u.soldier.pos);
         Some(Input {
             fwd: PadState::axis(pad.ly),
             strafe: PadState::axis(pad.lx),
@@ -259,30 +367,10 @@ impl Sim {
         if report.weapons_off {
             u.weapon.salvo_counter = 0;
         }
-        let form = deka.form();
-        if !self.collision.is_empty() {
-            let push = self
-                .collision
-                .push_out_soldier_from(&from, &capsule_of(&class, form, body.pos));
-            body.pos += push;
-            let len = (push.x * push.x + push.z * push.z).sqrt();
-            if len > 0.0 {
-                let (nx, nz) = (push.x / len, push.z / len);
-                let into = body.vel.x * nx + body.vel.z * nz;
-                if into < 0.0 {
-                    body.vel.x -= into * nx;
-                    body.vel.z -= into * nz;
-                }
-            }
+        let (wall, n) = self.resolve_droideka_motion(&mut deka, &class, &mut body, from, dt);
+        if let Some(push) = wall {
             self.units[i].wall_push = push;
         }
-        let rising = body.vel.y > 0.0;
-        let (fy, n) = self.ground_under_n(body.pos, rising, from.base.y);
-        let grounded = !rising && body.pos.y <= fy + FLOOR_SNAP;
-        if grounded {
-            body.pos.y = fy;
-        }
-        deka.land(&mut body, grounded, dt);
         let depth = self
             .water_plane()
             .and_then(|w| w.under(body.pos))

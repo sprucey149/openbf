@@ -359,6 +359,98 @@ pub enum Locus {
 /// The result of one chooser step.
 pub type Hop = (u16, u16);
 
+/// A place where the full standing capsule must walk around a support
+/// before ordinary route following can resume.
+#[derive(Clone, Copy, Debug)]
+pub struct FloorEscape {
+    pub bounds: crate::collision::Aabb,
+    pub hub: u16,
+    pub headings: EscapeHeadings,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum EscapeHeadings {
+    /// Try either side of the direct line to the hub.
+    AroundSupport,
+    /// Tested world-space angles in degrees from +X toward +Z.
+    Compass(&'static [f32]),
+    /// Tested heading to a clear exit between authored hubs.
+    CompassTo { angles: &'static [f32], exit: Vec3 },
+}
+
+/// A route approach that needs a floor detour before a bot gets stuck.
+#[derive(Clone, Copy, Debug)]
+pub struct FloorApproach {
+    pub escape: FloorEscape,
+    pub motion: ApproachMotion,
+    /// Resume ordinary routing after passing the projected exit on clear floor.
+    pub finish_on_heading_plane: bool,
+}
+
+/// A wall segment that can trap a grounded bot after a separation push.
+#[derive(Clone, Copy, Debug)]
+pub struct SeparationSweep {
+    pub origin: crate::collision::Aabb,
+    pub contact: crate::collision::Aabb,
+    pub instance: u32,
+    pub direction: Vec3,
+}
+
+/// A floor edge where a grounded bot can keep its move along the seam.
+#[derive(Clone, Copy, Debug)]
+pub struct FloorSeam {
+    pub bounds: crate::collision::Aabb,
+    pub inward: Vec3,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ApproachMotion {
+    Any,
+    Droideka,
+    DroidekaApproaching(Vec3),
+    DroidekaStalled(Vec3),
+    DroidekaStalledDescent(Vec3),
+    DroidekaReturning(Vec3),
+    DroidekaPinned {
+        exit: Vec3,
+        min_windows: u16,
+    },
+    Returning,
+    ReturningOnArc(u16),
+    Stalled {
+        exit: Vec3,
+        descend: bool,
+    },
+    PinnedHop {
+        exit: Vec3,
+        delay: u16,
+    },
+    YieldToHover(Vec3),
+    PinnedWalk(Vec3),
+    Sliding,
+    Toward(Vec3),
+    AlongArc {
+        arc: u16,
+        velocity: Vec3,
+        exit: Vec3,
+        descend: bool,
+    },
+}
+
+impl ApproachMotion {
+    pub(crate) fn droideka(self) -> bool {
+        matches!(
+            self,
+            Self::Droideka
+                | Self::DroidekaApproaching(_)
+                | Self::DroidekaStalled(_)
+                | Self::DroidekaStalledDescent(_)
+                | Self::DroidekaReturning(_)
+                | Self::DroidekaPinned { .. }
+        )
+    }
+}
+
 /// The whole authored graph for one world.
 #[derive(Debug, Clone, Default)]
 pub struct NavGraph {
@@ -372,10 +464,42 @@ pub struct NavGraph {
     pub barrier_names: Vec<u32>,
     /// Authored hints for defence spots, combat positions and stance selection.
     pub hints: Vec<Hint>,
+    /// Snipe hints that need a supported approach on the same floor.
+    pub snipe_hints_need_floor: Vec<Vec3>,
     /// BF2: a hub contains a point by its XZ disc (`FUN_002ea878`); `false`,
     /// BF1: by its sphere (`FUN_00265d38`). Set by the loader from the
     /// manifest's game ([`NavGraph::locate`]).
     pub hub_discs: bool,
+    /// Authored arcs whose floor must be joined before a foot bot follows
+    /// their corridor. Populated by the world loader for measured approaches.
+    pub floor_join_arcs: Vec<u16>,
+    /// Walkable slopes whose model floor extends outside a rim barrier.
+    pub floor_support_arcs: Vec<u16>,
+    /// Measured pockets from which a bot can walk toward authored hubs.
+    pub floor_escapes: Vec<FloorEscape>,
+    pub floor_approaches: Vec<FloorApproach>,
+    /// Placed hall whose foot-level shell can push a descending jet bot inside.
+    pub jet_landing_wall: Option<u32>,
+    /// Placed props whose wall push can drive a bot inside.
+    pub wall_approach_props: Vec<u32>,
+    /// Instance where overlapping soldiers must separate along the outside.
+    pub separation_wall: Option<u32>,
+    /// Wall segment where separation must stop before crossing the face.
+    pub separation_sweep: Option<SeparationSweep>,
+    /// Unsupported seam on a walking approach.
+    pub floor_seam: Option<FloorSeam>,
+    /// Tactical hops from this deck need a supported landing at the sampled height.
+    pub hop_support_areas: Vec<crate::collision::Aabb>,
+    /// Narrow walking approaches without room for a tactical hop.
+    pub hop_takeoff_keepout: Vec<crate::collision::Aabb>,
+    /// Ground approaches where an attack flight runs into a roof or wall.
+    pub attack_takeoff_keepout: Vec<crate::collision::Aabb>,
+    /// Tactical hop destinations and the supported space required past them.
+    pub hop_landing_areas: Vec<(crate::collision::Aabb, f32)>,
+    /// Tactical hop approaches that pass through the footprint of a roof.
+    pub hop_roof_areas: Vec<crate::collision::Aabb>,
+    /// Authored cover and its approach hub when it sits below the post.
+    pub defend_hint_hub: Option<(Vec3, u16)>,
     /// BF2's `plnp` route patches and the blocked-group mask in force
     /// (`crate::route_patch`); `None` on BF1 and on maps that ship none.
     pub(crate) patches: Option<crate::route_patch::RoutePatches>,
@@ -565,7 +689,23 @@ impl NavGraph {
             barriers,
             barrier_names: Vec::new(),
             hints,
+            snipe_hints_need_floor: Vec::new(),
             hub_discs: false,
+            floor_join_arcs: Vec::new(),
+            floor_support_arcs: Vec::new(),
+            floor_escapes: Vec::new(),
+            floor_approaches: Vec::new(),
+            jet_landing_wall: None,
+            wall_approach_props: Vec::new(),
+            separation_wall: None,
+            separation_sweep: None,
+            floor_seam: None,
+            hop_support_areas: Vec::new(),
+            hop_takeoff_keepout: Vec::new(),
+            attack_takeoff_keepout: Vec::new(),
+            hop_landing_areas: Vec::new(),
+            hop_roof_areas: Vec::new(),
+            defend_hint_hub: None,
             patches: None,
             comp: Vec::new(),
             adj,

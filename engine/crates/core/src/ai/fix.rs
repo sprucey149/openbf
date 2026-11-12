@@ -52,6 +52,7 @@ pub const FIX_GIVE_UP: u64 = 20 * TICK_HZ as u64;
 pub const RETRY: u64 = 15 * TICK_HZ as u64;
 /// The bot stands this far outside the turret's sphere, m.
 const STAND_OFF: f32 = 1.0;
+const SERVICE_MARGIN: f32 = 0.25;
 /// Issue #35: how far a fixer looks for a vehicle or droid to aid, m.
 pub const AID_REACH: f32 = 20.0;
 /// Issue #35: an aid claim with no health gained for this long is given up
@@ -366,6 +367,43 @@ pub(super) fn walk(sim: &Sim, me: UnitHandle, st: &AiState) -> Option<Vec3> {
     stand(sim, u, c.target).map(|(p, _, _)| p)
 }
 
+/// A fixer at its stand can still be short of the cutter's 3D range.
+/// OURS: correct the last few steps on its floor, after the normal route.
+/// measure: the elevated BF1 Yavin turret and the cutter arrival boundary (#108).
+pub(super) fn closer_stand(sim: &Sim, u: &Unit, st: &AiState, nominal: Vec3) -> Option<Vec3> {
+    let claim = st.fix.cur?;
+    if claim.target.aid()
+        || !u.soldier.grounded
+        || crate::nav::xz_dist(u.soldier.pos, nominal) > super::HOLD_ARRIVE + super::ARRIVED_SLACK
+        || (u.soldier.pos.y - nominal.y).abs() > crate::collision::STEP_HEIGHT
+    {
+        return None;
+    }
+    let (centre, radius) = sphere_of(sim, claim.target)?;
+    let (class, _) = cutter(sim, u)?;
+    let reach = sim.weapon_classes[class].lock_on_range + radius - SERVICE_MARGIN;
+    let eye = u.muzzle();
+    if eye.distance_squared(centre) <= reach * reach {
+        return None;
+    }
+    let offset = u.soldier.pos - centre;
+    let away = Vec3::new(offset.x, 0.0, offset.z).try_normalize()?;
+    let rise = centre.y - eye.y;
+    let reach_xz_sq = reach * reach - rise * rise;
+    if reach <= 0.0 || reach_xz_sq <= super::HOLD_ARRIVE.powi(2) {
+        return None;
+    }
+    let mut p = centre + away * (reach_xz_sq.sqrt() - super::HOLD_ARRIVE);
+    p.y = sim.ground_under(Vec3::new(p.x, u.soldier.pos.y, p.z), false);
+    let from = p + (eye - u.soldier.pos);
+    let dir = (centre - from).normalize_or_zero();
+    (p.y > crate::collision::NO_GROUND
+        && (p.y - u.soldier.pos.y).abs() <= crate::collision::STEP_HEIGHT
+        && from.distance_squared(centre) <= reach * reach
+        && crate::perception::los_terrain(sim, from, centre - dir * radius))
+    .then_some(p)
+}
+
 /// The walk to the turret failed: give it up for [`RETRY`].
 pub(super) fn walk_failed(sim: &Sim, st: &mut AiState) {
     if let Some(c) = st.fix.cur.take() {
@@ -393,7 +431,7 @@ pub(super) fn serve_plan(sim: &Sim, u: &Unit, st: &AiState) -> Option<ServePlan>
     // his eye, like Kashyyyk's sunk pad, needs him closer than its flat distance.
     let to = centre - eye;
     let dir = to.normalize_or_zero();
-    if to.length() > wc.lock_on_range + radius - 0.25
+    if to.length() > wc.lock_on_range + radius - SERVICE_MARGIN
         || !crate::perception::los_terrain(sim, eye, centre - dir * radius)
     {
         return None;

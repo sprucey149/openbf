@@ -723,6 +723,11 @@ pub fn install_with_objective(
             None => Vec::new(),
         };
         sim.add_building_turret(t.spec.clone(), t.rot, sphere, t.instance, (t.fall.0, parts));
+        // OURS: this plaza turret's first exit is a ledge across a wall.
+        // measure: Coruscant upper plaza turret exit and native ledge (#108).
+        if game == "bf2" && m.map == "cor1" && t.name.eq_ignore_ascii_case("tur_bldg_laser16") {
+            sim.prefer_walkable_turret_exit(t.instance);
+        }
         sim.set_building_self_pilots(t.instance, &t.self_seats);
         if let Some(posed) = posed_parts(sim, m, &common, &db, t, class) {
             sim.set_turret_posed(t.instance, posed);
@@ -749,12 +754,18 @@ pub fn install_with_objective(
     // The walker numbers per class (card WALK), with each class's baked
     // anim table and prim origins from the side bakes.
     let walkers = walker_bakes_from(&sides);
+    let spheres = spheres_from(&sides);
     sim.walker_params = b
         .classes
         .iter()
         .map(|c| {
-            vehicle_class::WalkerClass::from_db(&db, c)
-                .map(|w| w.params(walkers.get(&c.to_ascii_lowercase())))
+            let name = c.to_ascii_lowercase();
+            vehicle_class::WalkerClass::from_db(&db, c).map(|w| {
+                let mut params = w.params(walkers.get(&name));
+                params.spawn_sphere_centre =
+                    spheres.get(&name).map(|&[x, y, z, _]| Vec3::new(x, y, z));
+                params
+            })
         })
         .collect();
     sim.flyer_params = b
@@ -798,7 +809,6 @@ pub fn install_with_objective(
     // A building turret's model is the map's (or its game's common bake's),
     // not a side's: its sphere is that model's, as a station's is
     // (`stations::geometry_sphere`).
-    let spheres = spheres_from(&sides);
     let common = crate::stations::load_common(m, map_dir)?;
     let mut setups = Vec::with_capacity(b.classes.len());
     for c in &b.classes {

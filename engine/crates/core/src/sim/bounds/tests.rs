@@ -186,6 +186,27 @@ fn the_level_test_tells_the_deck_from_what_is_under_it() {
     assert_eq!(bare.level_at(Vec3::ZERO), Level::Unknown);
 }
 
+#[test]
+fn a_marked_arc_requires_real_support_on_its_slope() {
+    let mut sim = decks();
+    let graph = sim.nav.as_mut().unwrap();
+    for x in [4.0, 36.0] {
+        graph.barriers.push(crate::nav::Barrier {
+            centre: Vec2::new(x, 0.0),
+            axes: [Vec2::X, Vec2::Y],
+            half: Vec2::new(0.5, 10.0),
+            mask: 1,
+            enabled: true,
+        });
+    }
+    let ramp = Vec3::new(20.0, 13.0, 0.0);
+    assert!(sim.level_at(ramp).is_off());
+    sim.nav.as_mut().unwrap().floor_support_arcs.push(0);
+    assert_eq!(sim.level_at(ramp), Level::On);
+    assert!(sim.level_at(ramp + 4.0 * Vec3::Z).is_off());
+    assert!(sim.level_at(Vec3::new(20.0, 2.0, 0.0)).is_off());
+}
+
 /// A barrier along a deck's rim stops the walk: a hull that falls away
 /// past it is off the level a few metres down, where without the
 /// barrier the walk would follow it down and call it on.

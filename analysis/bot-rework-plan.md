@@ -294,6 +294,13 @@ timing within budget.
   - the per-map 60 fps population table finally measured.
 - **Delete:** `avoid::pick`'s heading sweep.
 
+Ground recovery cleared the #108 sweep on November 12, 2026. All 129
+Hard and 102 standard Elite rounds ended without recycles or fallback
+relocation. The 32-per-side AI wall-time budget passed on all 34 ground
+maps. Steering remained 29–40% of ground think instructions on four
+sampled maps. Both adapters met the headless 720p budget at that
+population. Live windowed capacity and the mover redesign remain open.
+
 ### Stage 7: one brain
 - Remove the legacy chain for space when LightVelox signs off, or when the space goldens match.
 

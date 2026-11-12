@@ -1,5 +1,19 @@
 # OPUS RE (2026-09-30) - [O] UNAUDITED: no Fable pass
 
+## Physical descent after a failed ground walk, November 11, 2026
+
+A stranded ground bot with a lower resolved navigation floor nearby can try a
+descent before the last-resort relocation or recycle. The preview steps the
+soldier and uses the same world wall response as the simulation. It rejects
+lethal speed, death and damage volumes, landings under the map, and floors that
+are off the playable level or too steep to climb. The bot uses an ordinary
+return waypoint and resumes its route after the descent.
+
+This is an openbf recovery rule. The original BF2 stuck check
+(`FUN_002f24e8`, B2:281420–281538) hands a stopped soldier a temporary random
+walk (`FUN_002cb2c8` / `FUN_002cb580`, B2:253566–253735). Compare native
+shelf escapes in play before claiming parity.
+
 ## Why rounds stall — current source checkpoint, November 4, 2026
 
 The dated September/October census below remains historical evidence. The
