@@ -9,7 +9,7 @@ use game::normalize::{
     health_row, is_infantry_damage, vehicles, BF1_SCALE, HEALTH, KEYS, PERSON_DAMAGE,
     REFERENCE_HEALTH,
 };
-use game::roster::{load_classdb, weapon_from_db, ClassRoster, ClassSrc};
+use game::roster::{load_classdb, weapon_from_db, ClassRoster, ClassSrc, FactionRoster};
 use std::path::PathBuf;
 
 pub(super) const SIDES: [&str; 4] = ["all", "imp", "rep", "cis"];
@@ -391,6 +391,33 @@ fn equivalent_weapons_deal_equal_person_damage() {
             bf2.prop_f32(class, key),
             "{class}"
         );
+    }
+}
+
+#[test]
+fn the_conquest_e11_restores_five_body_hits_in_both_games() {
+    let Some(dir) = dir() else { return };
+    let mut mission: game::mission::MissionDef = ron::from_str(
+        r#"(map: "fixture", mode: "con", source_game: "bf2", teams: [],
+            ai_alive_cap: 16, spawn_delay: 0.0, spawn_interval: 1.0)"#,
+    )
+    .unwrap();
+    let person = HealthType::Person as usize;
+    for game in ["bf1", "bf2"] {
+        mission.mode = "con".into();
+        let ([_, empire], _) =
+            FactionRoster::pair(&dir, game, ["all", "imp"], Some(&mission)).unwrap();
+        let ground = &empire.fill_class().weapon.ordnance;
+        assert_eq!(empire.fill_class().weapon.name, "imp_weap_inf_rifle");
+        assert!((ground.max_damage * ground.scales[person] - 80.0).abs() < 1e-4);
+
+        mission.mode = "ass".into();
+        let ([_, empire], _) =
+            FactionRoster::pair(&dir, game, ["all", "imp"], Some(&mission)).unwrap();
+        let space = &empire.fill_class().weapon.ordnance;
+        assert!((space.max_damage * space.scales[person] - 70.0).abs() < 1e-4);
+        assert_eq!(ground.scales[1..], space.scales[1..]);
+        assert_eq!(ground.falloff, space.falloff);
     }
 }
 

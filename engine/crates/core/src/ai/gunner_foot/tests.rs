@@ -4,6 +4,76 @@ use crate::ai::think;
 mod droideka;
 mod radius_rows;
 
+#[test]
+fn a_staged_mortar_waits_for_idle_before_charging() {
+    use crate::sticky::StickyClass;
+    use crate::unit::{Controller, UnitSpec};
+    use crate::weapon::{ChargeStage, FireState, OrdKind};
+
+    let mut mortar = WeaponClass::bf1_rifle();
+    mortar.max_pressed_time = 0.75;
+    mortar.ordnance.kind = OrdKind::Shell;
+    let mut sticky = mortar.clone();
+    sticky.ordnance.kind = OrdKind::Other;
+    sticky.ordnance.sticky = Some(StickyClass::new(false));
+    mortar.stages.push(ChargeStage {
+        threshold: 0.9,
+        class: Box::new(sticky),
+        index: usize::MAX,
+    });
+    let mut sim = Sim::empty(7);
+    let bot = sim
+        .spawn(&UnitSpec {
+            controller: Controller::Ai,
+            ..UnitSpec::trooper(0, Vec3::ZERO)
+        })
+        .unwrap();
+    let mut ai = AiState::default();
+    let skill = crate::skill::Skill::from_level(15);
+    let pressed = |sim: &Sim, ai: &mut AiState, friend_in_line| {
+        let mut pad = PadState::default();
+        charge(
+            sim,
+            bot,
+            ai,
+            &mortar,
+            &skill,
+            true,
+            friend_in_line,
+            &mut pad,
+        );
+        pad.buttons & buttons::FIRE != 0
+    };
+
+    sim.unit_mut(bot).unwrap().weapon.state = FireState::Firing;
+    assert!(
+        !pressed(&sim, &mut ai, false),
+        "a press during cooldown cannot start a new charge"
+    );
+    sim.unit_mut(bot).unwrap().weapon.state = FireState::Idle;
+    assert!(pressed(&sim, &mut ai, false));
+    assert!(ai.charge_until > sim.tick + 1);
+    sim.tick = ai.charge_until;
+    assert!(
+        pressed(&sim, &mut ai, true),
+        "a friendly in the line delays release"
+    );
+    sim.tick += 1;
+    assert!(
+        !pressed(&sim, &mut ai, false),
+        "release as soon as the line clears"
+    );
+    assert_eq!(ai.charge_until, 0);
+
+    assert!(sim.set_proxy(bot, Some(crate::ai::proxy::Strength::Good.profile())));
+    sim.unit_mut(bot).unwrap().weapon.state = FireState::Firing;
+    assert!(pressed(&sim, &mut ai, false));
+    assert!(
+        ai.charge_until > sim.tick + 1,
+        "the proxy retains its charge timing"
+    );
+}
+
 /// Card CLSE2: the radius formula against the PS2's own RAM - 80 rows
 /// at rest (69 standing, 11 crouched), each within 1e-4 m.
 #[test]

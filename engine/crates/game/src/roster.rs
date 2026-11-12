@@ -1521,7 +1521,7 @@ impl FactionRoster {
                 .map(|t| t.classes.as_slice())
                 .unwrap_or(&[]);
             let assault = mission.is_some_and(MissionDef::is_hero_assault);
-            let (roster, skipped) = Self::build_with_fallback(&db, game, f, mix, !assault)
+            let (mut roster, skipped) = Self::build_with_fallback(&db, game, f, mix, !assault)
                 .with_context(|| {
                     format!(
                         "{}team {} ({f})",
@@ -1546,6 +1546,22 @@ impl FactionRoster {
                     skipped.len(),
                     mix.len()
                 ));
+            }
+            if mission.is_none_or(|m| m.mode == "con") {
+                // OURS: in ground Conquest, the E-11 takes five close-range
+                // body hits against a trooper, as in BF1. Only Person damage
+                // changes. measure: paired faction wins on baked rounds.
+                let damage = crate::normalize::REFERENCE_HEALTH / 5.0;
+                for class in &mut roster.classes {
+                    let weapons = std::iter::once(&mut class.weapon)
+                        .chain(class.held.iter_mut().map(|held| &mut held.weapon));
+                    for w in weapons
+                        .filter(|w| w.name == "imp_weap_inf_rifle" && w.ordnance.max_damage > 0.0)
+                    {
+                        w.ordnance.scales[core::weapon::HealthType::Person as usize] =
+                            damage / w.ordnance.max_damage;
+                    }
+                }
             }
             out.push(roster);
         }
