@@ -15,9 +15,11 @@ use std::path::Path;
 use ui::spawn_draw::SpawnPage;
 
 fn fixture(root: &Path, map: &str) -> (WalkSim, game::assets::Scene, game::mission::MissionDef) {
-    let (scene, _) = game::assets::load_battle_scene(&root.join(map), "con").unwrap();
+    let space = map.starts_with("bf2_spa");
+    let mode = if space { "ass" } else { "con" };
+    let (scene, _) = game::assets::load_battle_scene(&root.join(map), mode).unwrap();
     let missions = root.parent().unwrap().join("missions");
-    let mission = [format!("{map}_con_cw.ron"), format!("{map}_con.ron")]
+    let mission = [format!("{map}_{mode}_cw.ron"), format!("{map}_{mode}.ron")]
         .into_iter()
         .map(|f| missions.join(f))
         .find(|p| p.exists())
@@ -60,6 +62,52 @@ fn fixture(root: &Path, map: &str) -> (WalkSim, game::assets::Scene, game::missi
     game::heroes::install(&mut sim, heroes);
     let walk = WalkSim::with_teams(sim, scene.heightfield(), Vec3::ZERO, teams, None);
     (walk, scene, mission)
+}
+
+#[test]
+#[ignore = "owned Space Felucia models and headless GPU"]
+fn republic_preview_is_stable_at_the_space_felucia_camera() {
+    let root = std::env::var_os("SPAWN_PREVIEW_ASSETS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(game::assets::baked_root);
+    let (walk, scene, mission) = fixture(&root, "bf2_spa7");
+    let mut r = Renderer::new_headless(1920, 1126).unwrap();
+    r.cull = true;
+    let vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &root, &scene, &walk);
+    assert_eq!(walk.teams[0].faction, "rep");
+    assert_eq!(walk.teams[0].classes.len(), 2);
+    let camera = mission.camera_shots()[3].camera();
+    let centered = Camera {
+        position: Vec3::ZERO,
+        ..camera
+    };
+    for class in 0..2 {
+        let page = page(0, class, 2);
+        let mut render = |camera: &Camera| {
+            let (body, weapons) = Preview::default().draws_live(
+                &mut r,
+                &vis,
+                Some(&page),
+                camera,
+                0.0,
+                |_, _, _, _, _| None,
+            );
+            assert!(!body.is_empty() && !weapons.is_empty());
+            r.render_frame(camera, &weapons, &body, [0.0, 0.0, 0.0, 1.0], None)
+                .unwrap();
+            r.capture_rgba().unwrap().0
+        };
+        let near = render(&centered);
+        let far = render(&camera);
+        assert!(near.chunks_exact(4).filter(|p| p[..3] != [0; 3]).count() > 1000);
+        let changed = near
+            .chunks_exact(4)
+            .zip(far.chunks_exact(4))
+            .filter(|(a, b)| a[..3].iter().zip(&b[..3]).any(|(a, b)| a.abs_diff(*b) > 8))
+            .count();
+        println!("Republic class {class}: {changed} changed pixels from camera translation");
+        assert_eq!(changed, 0, "the same close model and pose should be stable");
+    }
 }
 
 fn page(team: usize, class: usize, n: usize) -> SpawnPage {

@@ -1157,6 +1157,16 @@ impl WalkSim {
             .is_some_and(|u| u.mount.is_none())
     }
 
+    pub fn apply_sprint_latch(&self, latch: &mut input::SprintLatch, pad: PadState) -> PadState {
+        let weapon = self.sim.units[self.player.index as usize].weapon_class;
+        latch.apply_with_fire_cancel(
+            pad,
+            self.player_on_foot(),
+            self.soldier().stance == core::soldier::Stance::Sprint,
+            self.sim.weapon_classes[weapon].saber.is_none(),
+        )
+    }
+
     /// Is the player in a flyer's pilot seat? (`input::flyer_sticks` applies.)
     pub fn player_pilots_flyer(&self) -> bool {
         self.sim
@@ -1178,7 +1188,21 @@ impl WalkSim {
 
     /// Is the player piloting a flyer or controlling a guided rocket?
     pub fn player_controls_flyer(&self) -> bool {
-        self.player_pilots_flyer() || self.sim.controlled_guided(self.player).is_some()
+        self.flight_controls(input::FlightControls::Classic)
+            .is_some()
+    }
+
+    /// Choose the controller layout for the player's current flight controls.
+    /// The ship preference applies in the pilot seat. Guided ordnance uses
+    /// its own Classic input scheme.
+    pub fn flight_controls(&self, pilot: input::FlightControls) -> Option<input::FlightControls> {
+        if self.player_pilots_flyer() {
+            Some(pilot)
+        } else {
+            self.sim
+                .controlled_guided(self.player)
+                .map(|_| input::FlightControls::Classic)
+        }
     }
 
     /// The magnet target when it is a unit (draw order of `target_draws`;

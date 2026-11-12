@@ -23,8 +23,11 @@ and LAN are decisions for later work, not current tasks.
   and mirror their right parenthesis: a similar treatment using different source
   glyphs. PC/Xbox builds require no PS2 copy. Battle HUD, spawn, loading and results
   retain their existing fonts, art and metrics.
-- **Grenades.** BF1 maps keep their grenade types and throwing rules, with BF2's
-  grenade HUD. The [ground vehicle and ordnance rulebook](../vehicle-normalization.md)
+- **Grenades.** BF1 maps keep their grenade types, throwing rules, explosions
+  and sounds. The BF2 HUD's round grenade artwork stays mostly gray, with a
+  light blue tint for thermals, gold for concussion grenades and violet for
+  haywire grenades. The BF1 thermal glows blue in flight. The
+  [ground vehicle and ordnance rulebook](../vehicle-normalization.md)
   records the shared damage and armor scales for each affected type.
 - **Health.** Vehicle and unit health are separate. The
   [soldier rulebook](../gameplay-normalization.md) defines the shared infantry scale.
@@ -373,6 +376,12 @@ witnesses: `analysis/re-round-stalls.md`, current checkpoint below its header.
 
 ### Platform & meta
 - Input: **controller first**; PS2 default mapping, full remap; on-screen keyboard for text entry.
+  **Flight controls** defaults to Classic. RC Mode 2 is an opt-in layout for
+  controller pilots, with yaw and throttle on the left stick and roll and pitch
+  on the right. The profile saves the choice.
+  BF2 aircraft with authored stunts use the contextual roll button followed
+  by a direction. Double-tap it before steering to reverse. Keyboard pilots
+  can use Left Alt plus direction or Caps Lock for a reversal.
   - Keyboard + mouse (2026-10-25, the public repo's pull request #1) is supported as a
     deliberate deviation. Controller play is unchanged. The mouse aims by angle (`PadState::mx`/`my`,
     `core/src/sim/look.rs`), under pointer lock, without aim assist; the bindings are one table in `game/src/kbm.rs`.

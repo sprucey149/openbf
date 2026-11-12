@@ -472,7 +472,7 @@ fn a_side_roll_turns_a_full_circle_and_comes_back_level() {
     side_roll(&mut v.flyer, &p, Vec3::X);
     let mut ticks = 0;
     while v.flyer.in_roll && ticks < 600 {
-        roll_update(&mut v.flyer, &p, DT);
+        roll_update(&mut v.flyer, &p, 0.0, DT);
         ticks += 1;
     }
     assert!(!v.flyer.in_roll, "still rolling after {ticks} ticks");

@@ -12,10 +12,10 @@ fn skip_deadline_is_exact_and_expired_prompt_rearms() {
     assert!(p.prompt(Duration::from_millis(3999)));
     assert!(!p.prompt(Duration::from_secs(4)));
     p.press(Duration::from_secs(4));
-    assert!(!p.done(Duration::from_secs(4), 10));
+    assert!(!p.done(Duration::from_secs(4), Duration::from_secs(10)));
     assert!(p.prompt(Duration::from_millis(6999)));
     p.press(Duration::from_millis(6999));
-    assert!(p.done(Duration::from_millis(6999), 10));
+    assert!(p.done(Duration::from_millis(6999), Duration::from_secs(10)));
     assert!(!p.prompt(Duration::from_millis(6999)));
 }
 
@@ -36,7 +36,7 @@ fn launch_holds_repeat_motion_and_release_do_not_skip() {
             p.press(Duration::from_millis(20));
         }
     }
-    assert!(p.done(Duration::from_millis(20), 4));
+    assert!(p.done(Duration::from_millis(20), Duration::from_secs(4)));
     e.quarantine();
     assert_eq!(e.update(99, true, true), (false, true));
     assert_eq!(e.update(99, false, false), (false, true));
@@ -46,19 +46,21 @@ fn launch_holds_repeat_motion_and_release_do_not_skip() {
 #[test]
 fn playback_and_readiness_are_independent() {
     let mut p = Playback::default();
-    assert_eq!(p.step(Duration::from_secs(30), 0), 0);
-    assert!(!p.done(Duration::from_millis(999), 0));
-    assert!(p.done(Duration::from_secs(1), 0));
-    assert_eq!(p.step(Duration::from_millis(1500), 4), 1);
+    assert!(!p.done(Duration::from_millis(999), Duration::from_secs(1)));
+    assert!(p.done(Duration::from_secs(1), Duration::from_secs(1)));
+    assert_eq!(
+        p.time(Duration::from_millis(1500)),
+        Duration::from_millis(1500)
+    );
     p.press(Duration::ZERO);
     p.press(Duration::from_millis(1));
-    assert!(p.done(Duration::from_millis(1), 4));
-    assert!(!p.can_enter(Duration::from_secs(10), 4, true, false));
-    assert!(!p.can_enter(Duration::from_secs(10), 4, false, true));
-    assert!(p.can_enter(Duration::from_millis(1), 4, true, true));
+    assert!(p.done(Duration::from_millis(1), Duration::from_secs(4)));
+    assert!(!p.can_enter(Duration::from_secs(10), Duration::from_secs(4), true, false));
+    assert!(!p.can_enter(Duration::from_secs(10), Duration::from_secs(4), false, true));
+    assert!(p.can_enter(Duration::from_millis(1), Duration::from_secs(4), true, true));
     assert_eq!(
-        p.step(Duration::from_secs(10), 4),
-        0,
+        p.time(Duration::from_secs(10)),
+        Duration::from_millis(1),
         "skip freezes playback while CPU preparation finishes"
     );
     // Readiness must still gate the transition after a skip (tested with a
@@ -112,17 +114,30 @@ fn worker_failure_panic_close_and_next_round_are_owned() {
 }
 
 #[test]
-fn only_shared_locations_have_ground_sequences() {
-    for (key, source) in [
+fn bf2_locations_use_only_same_planet_loading_donors() {
+    for (key, donor) in [
+        ("bf2_end1", "bf1_end1"),
+        ("bf2_geo1", "bf1_geo1"),
         ("bf2_hot1", "bf1_hot1"),
+        ("bf2_kam1", "bf1_kam1"),
+        ("bf2_kas2", "bf1_kas2"),
+        ("bf2_nab2", "bf1_nab2"),
         ("bf2_yav1", "bf1_yav1"),
         ("tat2", "bf1_tat2"),
         ("bf2_tat2", "bf1_tat2"),
+        ("bf2_tat3", "tat1"),
+        ("bf2_spa1", "bf1_yav1"),
+        ("bf2_spa3", "bf1_kas2"),
+        ("bf2_spa8", "bf1_hot1"),
+        ("bf2_spa9", "tat1"),
     ] {
-        assert_eq!(equivalent(key), Some(source));
+        assert_eq!(bf1_donor(key), Some(donor));
     }
-    for key in ["bf2_pol1", "bf2_uta1", "bf2_tat3", "bf2_myg1", "bf2_cor1"] {
-        assert_eq!(equivalent(key), None);
+    for key in [
+        "bf2_cor1", "bf2_dag1", "bf2_dea1", "bf2_fel1", "bf2_mus1", "bf2_myg1", "bf2_pol1",
+        "bf2_tan1", "bf2_uta1", "bf2_spa6", "bf2_spa7",
+    ] {
+        assert_eq!(bf1_donor(key), None);
     }
     assert!(presentation(Path::new("/nonexistent/loading-assets"), "bf2_pol1").is_none());
 }
@@ -295,7 +310,12 @@ fn raw_mouse_buttons_are_consumed_through_release_and_motion_is_not_a_press() {
         button: MouseButton::Middle,
     };
     assert!(a.loading_window_event(&second));
-    assert!(a.loading.as_ref().unwrap().playback.done(Duration::ZERO, 4));
+    assert!(a
+        .loading
+        .as_ref()
+        .unwrap()
+        .playback
+        .done(Duration::ZERO, Duration::from_secs(4)));
     a.finish_loading();
     a.init_shell();
     assert!(a.loading_window_event(&event(ElementState::Pressed)));
@@ -318,6 +338,35 @@ fn capture_loading_overlap_and_setup() {
     );
     std::fs::create_dir_all(&out).unwrap();
     let mut receipts = Vec::new();
+    let context = ui::egui::Context::default();
+    for key in [
+        "bf2_end1", "bf2_geo1", "bf2_hot1", "bf2_kam1", "bf2_kas2", "bf2_nab2", "bf2_yav1", "tat2",
+        "bf2_tat3", "bf2_spa1", "bf2_spa3", "bf2_spa8", "bf2_spa9",
+    ] {
+        let display = Display::load(&root, key, &context);
+        assert!(
+            display.sample(Duration::ZERO).is_some(),
+            "{key} must play its planet's sequence"
+        );
+        assert_eq!(display.duration(), Duration::from_millis(13_500), "{key}");
+    }
+    let mut coruscant = app(root.clone());
+    coruscant.renderer = Some(render::Renderer::new_headless(640, 480).unwrap());
+    let mut session = ui::shell::SessionOptions::default();
+    for _ in 0..3 {
+        session.adjust(ui::shell::Opt::ConMult, -1, 1);
+    }
+    assert_eq!(session.con_mult, 70);
+    coruscant.start_playlist(vec![row("bf2_cor1", ui::shell::Mode::Con)], session);
+    let loading = coruscant.loading.as_mut().unwrap();
+    let prepared = await_worker(&mut loading.worker).unwrap();
+    coruscant.finish_loading();
+    coruscant.start_battle("bf2_cor1".into(), prepared).unwrap();
+    let walk = &coruscant.walk.as_ref().unwrap().0;
+    let tickets = walk.sim.battle.teams.map(|team| team.tickets());
+    assert_eq!(tickets, [145, 145]);
+    println!("Coruscant at {}%: {tickets:?}", walk.reinforcement_pct);
+    drop(coruscant);
     for key in ["bf1_bes1", "bf2_hot1", "bf2_pol1"] {
         let mut a = app(root.clone());
         let mut r = render::Renderer::new_headless(1280, 720).unwrap();
@@ -331,34 +380,25 @@ fn capture_loading_overlap_and_setup() {
         if key == "bf2_hot1" {
             assert!(ls.sequence.iter().any(|(n, _)| n.contains("hoth")));
         }
-        let textures: Vec<_> = ls
-            .sequence
-            .into_iter()
-            .map(|(n, t)| {
-                overlay.ctx().load_texture(
-                    n,
-                    ui::egui::ColorImage::from_rgba_unmultiplied(
-                        [t.width as usize, t.height as usize],
-                        &t.rgba,
-                    ),
-                    Default::default(),
-                )
-            })
-            .collect();
+        let display = Display::load(&root, key, overlay.ctx());
+        if key == "bf2_pol1" {
+            assert!(display.sample(Duration::ZERO).is_none());
+            assert_eq!(display.duration(), Duration::from_secs(1));
+        } else {
+            assert!(
+                display.sample(Duration::ZERO).is_some(),
+                "{key} must play BF1 animation"
+            );
+            assert_eq!(display.duration(), Duration::from_millis(13_500));
+        }
         let mut frames_pending = 0;
         let prepared = loop {
             if let Some(result) = worker.poll() {
                 break result.unwrap();
             }
             let paint = overlay.begin_headless([1280, 720], 1.0, |ctx| {
-                ui::loading::draw_loading_with_skip(
-                    ctx,
-                    Some(textures[0].id()),
-                    key,
-                    0,
-                    textures.len(),
-                    false,
-                )
+                let frame = display.sample(Duration::ZERO);
+                display.draw(ctx, key, Duration::ZERO, frame.as_ref(), false);
             });
             r.render_with_overlay(
                 &render::Camera::default(),
@@ -393,15 +433,12 @@ fn capture_loading_overlap_and_setup() {
                 p.press(t);
             }
             assert!(held.poll().is_none());
+            // Freeze the animation in the prompt comparison so unrelated
+            // moving pixels cannot make a missing prompt test pass.
+            let time = Duration::ZERO;
+            let frame = display.sample(time);
             let paint = overlay.begin_headless([1280, 720], 1.0, |ctx| {
-                ui::loading::draw_loading_with_skip(
-                    ctx,
-                    Some(textures[p.step(t, textures.len())].id()),
-                    key,
-                    p.step(t, textures.len()),
-                    textures.len(),
-                    p.prompt(t),
-                )
+                display.draw(ctx, key, time, frame.as_ref(), p.prompt(t));
             });
             r.render_with_overlay(
                 &render::Camera::default(),
@@ -444,7 +481,39 @@ fn capture_loading_overlap_and_setup() {
             images[2], images[3],
             "expired prompt must disappear, then rearm"
         );
-        assert!(p.done(Duration::from_millis(3030), textures.len()));
+        assert!(p.done(Duration::from_millis(3030), display.duration()));
+        if display.authored.is_some() {
+            for (name, ms) in [
+                ("vertical", 300),
+                ("horizontal", 2000),
+                ("locked", 3300),
+                ("zoom", 4000),
+                ("locale", 4900),
+                ("landsat", 9800),
+                ("level", 13500),
+            ] {
+                let time = Duration::from_millis(ms);
+                let frame = display.sample(time);
+                let paint = overlay.begin_headless([1280, 720], 1.0, |ctx| {
+                    display.draw(ctx, key, time, frame.as_ref(), false);
+                });
+                r.render_with_overlay(
+                    &render::Camera::default(),
+                    &[],
+                    [0.0, 0.0, 0.0, 1.0],
+                    Some(&mut |dev, q, enc, view, size| {
+                        overlay.paint(&paint, dev, q, enc, view, size)
+                    }),
+                )
+                .unwrap();
+                let rgba = r.capture_rgba().unwrap().0;
+                std::fs::write(
+                    out.join(format!("{key}-{name}.png")),
+                    render::encode_png(&rgba, 1280, 720).unwrap(),
+                )
+                .unwrap();
+            }
+        }
         tx.send(()).unwrap();
         await_worker(&mut held).unwrap();
         a.renderer = Some(r);
@@ -501,7 +570,7 @@ fn hoth_team_screen_time(root: &Path, skip: bool) -> (f64, u64) {
     a.renderer = Some(renderer);
     let start = Instant::now();
     assert!(a.begin_loading(row("bf2_hot1", ui::shell::Mode::Con)));
-    assert!(a.loading.as_ref().unwrap().textures.len() > 1);
+    assert!(a.loading.as_ref().unwrap().display.textures.len() > 1);
     a.redraw_loading().unwrap();
     if skip {
         for state in [
@@ -518,7 +587,7 @@ fn hoth_team_screen_time(root: &Path, skip: bool) -> (f64, u64) {
         let loading = a.loading.as_ref().unwrap();
         assert!(loading
             .playback
-            .done(loading.started.elapsed(), loading.textures.len()));
+            .done(loading.started.elapsed(), loading.display.duration()));
     }
     while matches!(a.screen, super::super::Screen::Loading) {
         assert!(
@@ -549,10 +618,10 @@ fn held_controller_must_release_and_unbound_button_can_confirm_skip() {
     p.press(Duration::from_millis(5));
     assert!(p.prompt(Duration::from_millis(5)));
     assert!(!edges.update(accept, true, true).0);
-    assert!(!p.done(Duration::from_millis(6), 4));
+    assert!(!p.done(Duration::from_millis(6), Duration::from_secs(4)));
     assert!(edges.update(unbound, true, false).0);
     p.press(Duration::from_millis(7));
-    assert!(p.done(Duration::from_millis(7), 4));
+    assert!(p.done(Duration::from_millis(7), Duration::from_secs(4)));
     edges.quarantine();
     assert_eq!(edges.update(accept, false, false), (false, true));
     assert_eq!(edges.update(unbound, false, false), (false, true));

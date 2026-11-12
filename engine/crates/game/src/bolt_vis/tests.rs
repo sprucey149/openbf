@@ -1053,7 +1053,7 @@ fn a_beam_draws_from_its_origin_to_what_it_struck() {
         len: 40.0,
         follow: true,
     };
-    let d = beam_draw(&look, &beam, [None, None]);
+    let d = beam_draw(&look, &beam, [None, None], None);
     assert_eq!(d.head, Vec3::new(40.5, 1.0, 0.0));
     assert_eq!(d.dir, Vec3::X);
     assert_eq!((d.core_len, d.glow_len), (41.0, 41.0));

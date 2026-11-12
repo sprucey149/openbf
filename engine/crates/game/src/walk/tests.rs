@@ -1174,6 +1174,43 @@ fn a_ground_rider_lost_with_the_hull_holds_the_seat_view_past_four_seconds() {
 }
 
 #[test]
+fn rc_flight_controls_follow_the_preference_in_ground_and_space_pilot_seats() {
+    use core::vehicle::{SeatKind, VehicleKind, VehicleSpec};
+    use input::FlightControls;
+    for space in [false, true] {
+        let mut walk = WalkSim::new(42, Vec3::ZERO, None);
+        if space {
+            walk.sim.space_assault = Some(core::sim::SpaceAssault::new(10));
+        }
+        let rc = FlightControls::RcMode2;
+        assert_eq!(walk.flight_controls(rc), None);
+        let flyer = walk.sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot, SeatKind::Gunner(0)],
+        });
+        assert!(walk.sim.seat_unit(walk.player, flyer, 1));
+        assert_eq!(walk.flight_controls(rc), None);
+        walk.sim.unseat_unit(walk.player);
+        assert!(walk.sim.seat_unit(walk.player, flyer, 0));
+        assert_eq!(walk.flight_controls(rc), Some(rc));
+        assert_eq!(
+            walk.flight_controls(rc.toggled()),
+            Some(FlightControls::Classic)
+        );
+        walk.sim.unseat_unit(walk.player);
+        assert_eq!(walk.flight_controls(rc), None);
+    }
+}
+
+#[test]
 fn a_guided_rocket_flies_under_its_chase_camera_and_backs_off_when_spent() {
     struct NoProps;
     impl core::weapon::PropSource for NoProps {
@@ -1223,6 +1260,10 @@ fn a_guided_rocket_flies_under_its_chase_camera_and_backs_off_when_spent() {
         blind: 0.0,
     });
     assert!(w.player_controls_flyer());
+    assert_eq!(
+        w.flight_controls(input::FlightControls::RcMode2),
+        Some(input::FlightControls::Classic)
+    );
     let cam = w.camera();
     let behind = (cam.position - pos).dot(-dir);
     assert!((6.0..12.0).contains(&behind), "behind {behind}");

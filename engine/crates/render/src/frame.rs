@@ -25,7 +25,6 @@ use crate::{
     Camera, DrawCmd, DrawLayer, LightPath, RenderError, Renderer, SkinnedDrawCmd, TextureHandle,
     PALETTE_STRIDE,
 };
-use glam::Mat4;
 
 /// What the last `render_frame` submitted.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -349,24 +348,28 @@ fn blend_order(
                 .map(Blended::Skinned),
         )
         .collect();
-    sort_far_to_near(&mut order, eye, |b| match b {
-        Blended::World(i) => draws[i].model,
-        Blended::Skinned(i) => skinned[i].model,
+    sort_far_to_near(&mut order, |b| {
+        let (model, light) = match b {
+            Blended::World(i) => (draws[i].model, draws[i].light),
+            Blended::Skinned(i) => (skinned[i].model, skinned[i].light),
+        };
+        let eye = if light == crate::LightPath::Iface {
+            glam::Vec3::ZERO
+        } else {
+            eye
+        };
+        (model.w_axis.truncate() - eye).length_squared()
     });
     order
 }
 
-/// Order a blend pass's draws FAR TO NEAR by the distance from `eye` to each
-/// draw's model origin (`model_of(d)` for draw `d`). Alpha compositing is
+/// Order a blend pass's draws FAR TO NEAR by their squared eye distance.
+/// Alpha compositing is
 /// order-dependent, so blended draws are sorted per draw rather than batched
 /// — the standard approximation; intersecting surfaces can still resolve
 /// wrongly. The sort is stable, so equal distances keep the input order.
-fn sort_far_to_near<T: Copy>(order: &mut [T], eye: glam::Vec3, model_of: impl Fn(T) -> Mat4) {
-    order.sort_by(|&a, &b| {
-        let da = (model_of(a).w_axis.truncate() - eye).length_squared();
-        let db = (model_of(b).w_axis.truncate() - eye).length_squared();
-        db.total_cmp(&da) // far first
-    });
+fn sort_far_to_near<T: Copy>(order: &mut [T], distance: impl Fn(T) -> f32) {
+    order.sort_by(|&a, &b| distance(b).total_cmp(&distance(a)));
 }
 
 /// A render pass over `view` and `depth` that keeps what is there — the

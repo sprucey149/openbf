@@ -1753,7 +1753,7 @@ static HOOK: std::sync::Once = std::sync::Once::new();
 pub struct BlackBox {
     ring: Arc<Mutex<Ring>>,
     dir: PathBuf,
-    writer: Option<std::thread::JoinHandle<()>>,
+    writer: Option<std::thread::JoinHandle<(bool, bool)>>,
     /// `OPENBF_BLACKBOX_PANIC=<tick>`: panic at that tick (the check that a
     /// panic still writes a file).
     panic_at: Option<u64>,
@@ -1929,9 +1929,13 @@ impl BlackBox {
         if let Some(h) = self.writer.take() {
             let _ = h.join();
         }
-        let job = move || match write_rotating(&dir, &snap) {
-            Ok(p) => eprintln!("blackbox: wrote {} ({})", p.display(), snap.header.reason),
-            Err(e) => eprintln!("blackbox: {e}"),
+        let job = move || {
+            let written = write_rotating(&dir, &snap);
+            match &written {
+                Ok(p) => eprintln!("blackbox: wrote {} ({})", p.display(), snap.header.reason),
+                Err(e) => eprintln!("blackbox: {e}"),
+            }
+            (snap.header.reason == "hotkey", written.is_ok())
         };
         if wait {
             job();
@@ -1939,6 +1943,15 @@ impl BlackBox {
             self.writer = Some(std::thread::spawn(job));
         }
         self.dir.join("last.json")
+    }
+
+    /// Poll an asynchronous F9 write without blocking the drawing thread.
+    pub fn poll_hotkey_write(&mut self) -> Option<bool> {
+        if !self.writer.as_ref()?.is_finished() {
+            return None;
+        }
+        let (hotkey, saved) = self.writer.take()?.join().ok()?;
+        hotkey.then_some(saved)
     }
 
     /// The recorder's memory, bytes.
@@ -2260,6 +2273,34 @@ mod tests {
         );
         assert!(!s.names.weapons.is_empty());
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn f9_write_reports_success_and_failure_to_the_window_once() {
+        let w = walk();
+        let root = scratch("hotkey-write");
+        let file = root.join("not-a-directory");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&file, []).unwrap();
+        for (dir, saved) in [(root.clone(), true), (file, false)] {
+            let mut bb = BlackBox::start(true, meta(), &w, Vec::new(), dir).unwrap();
+            let path = bb.write("hotkey", Some(&w), false);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            let result = loop {
+                if let Some(saved) = bb.poll_hotkey_write() {
+                    break saved;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "the F9 write did not finish"
+                );
+                std::thread::yield_now();
+            };
+            assert_eq!(result, saved);
+            assert_eq!(path.is_file(), saved);
+            assert_eq!(bb.poll_hotkey_write(), None);
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     /// Schema 5 (card CPBAR): a post's row carries the units that count

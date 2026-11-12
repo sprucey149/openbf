@@ -80,6 +80,7 @@ struct Globals {
     // `render::IFACE_DIR_CAMERA` in the world (travel direction), for
     // LIGHT_IFACE draws.
     iface_dir: vec3<f32>, _pad11: f32,
+    iface_view_proj: mat4x4<f32>,
 };
 
 // The twins in `render::NoDiscard` set this false: a draw whose bands and fade
@@ -248,11 +249,25 @@ fn point_sum(p: vec3<f32>, normal: vec3<f32>, lights: vec4<u32>) -> vec3<f32> {
     return sum;
 }
 
+fn mesh_clip(pos: vec4<f32>, light: u32) -> vec4<f32> {
+    if (light & 0xffu) == LIGHT_IFACE {
+        return globals.iface_view_proj * pos;
+    }
+    return globals.view_proj * pos;
+}
+
+fn mesh_eye_delta(pos: vec3<f32>, light: u32) -> vec3<f32> {
+    if (light & 0xffu) == LIGHT_IFACE {
+        return pos;
+    }
+    return pos - globals.camera_pos;
+}
+
 fn mesh_vertex(in: VsIn) -> VsOut {
     let model = mat4x4<f32>(in.m0, in.m1, in.m2, in.m3);
     var out: VsOut;
     let world_pos = model * vec4<f32>(in.position, 1.0);
-    out.clip_pos = globals.view_proj * world_pos;
+    out.clip_pos = mesh_clip(world_pos, in.light);
     // NOTE: correct for rotation + uniform scale only (fine for map props);
     // non-uniform scale would need an inverse-transpose normal matrix.
     out.world_normal = (model * vec4<f32>(in.normal, 0.0)).xyz;
@@ -265,7 +280,7 @@ fn mesh_vertex(in: VsIn) -> VsOut {
     if path == LIGHT_GLOW {
         out.color = in.color;
     }
-    out.view_dist = length(world_pos.xyz - globals.camera_pos);
+    out.view_dist = length(mesh_eye_delta(world_pos.xyz, in.light));
     out.fog_depth = out.clip_pos.w;
     out.world_pos = world_pos.xyz;
     out.cull = in.cull;
@@ -1130,7 +1145,7 @@ fn spec_varyings(
         base.region_bottom = region_bottom;
     }
     out.lighting = vertex_lighting(base, lights);
-    out.clip_pos = globals.view_proj * world_pos;
+    out.clip_pos = mesh_clip(world_pos, light);
     out.world_normal = world_normal;
     out.uv = uv;
     out.color = color;
@@ -1139,7 +1154,8 @@ fn spec_varyings(
         out.color = vec4<f32>(color.rgb * out.wc, color.a);
         out.lighting = out.lighting * out.wc;
     }
-    out.view_dist = length(world_pos.xyz - globals.camera_pos);
+    let eye_delta = mesh_eye_delta(world_pos.xyz, light);
+    out.view_dist = length(eye_delta);
     out.fog_depth = out.clip_pos.w;
     out.cull = cull;
     out.cull_near = cull_near;
@@ -1149,7 +1165,7 @@ fn spec_varyings(
     }
 
     let n = normalize(world_normal);
-    let i = normalize(world_pos.xyz - globals.camera_pos);
+    let i = normalize(eye_delta);
     let r = 2.0 * dot(n, i) * n - i;
     let l = normalize(globals.sun_dir);
     var d = dot(l, r);
@@ -1232,11 +1248,11 @@ fn vs_skinned(in: VsSkinnedIn) -> VsOut {
     let world = model * skin;
     var out: VsOut;
     let world_pos = world * vec4<f32>(in.position, 1.0);
-    out.clip_pos = globals.view_proj * world_pos;
+    out.clip_pos = mesh_clip(world_pos, in.light);
     out.world_normal = (world * vec4<f32>(in.normal, 0.0)).xyz;
     out.uv = in.uv;
     out.color = in.color * in.inst_color;
-    out.view_dist = length(world_pos.xyz - globals.camera_pos);
+    out.view_dist = length(mesh_eye_delta(world_pos.xyz, in.light));
     out.fog_depth = out.clip_pos.w;
     out.world_pos = world_pos.xyz;
     out.cull = in.cull;

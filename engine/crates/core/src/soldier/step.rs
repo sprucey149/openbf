@@ -3,6 +3,36 @@
 use super::*;
 
 impl Soldier {
+    /// The ground mover's sprint transition, also sampled by a human's
+    /// melee combo before the move applies the chosen attack's root motion.
+    pub(crate) fn sprint_stance(
+        &self,
+        pad: &PadState,
+        c: &SoldierConstants,
+        rules: GroundRules,
+        fwd: f32,
+        strafe: f32,
+    ) -> Stance {
+        let held = pad.pressed(buttons::SPRINT);
+        match self.stance {
+            Stance::Sprint
+                if self.energy <= 0.0 || !held || !Self::sprint_predicate(fwd, strafe, true) =>
+            {
+                Stance::Stand
+            }
+            Stance::Stand
+                if held
+                    && Self::sprint_predicate(fwd, strafe, false)
+                    && self.sprint_start_speed(c, rules)
+                    && !self.energy_depleted
+                    && self.energy > 0.0 =>
+            {
+                Stance::Sprint
+            }
+            stance => stance,
+        }
+    }
+
     pub fn step_looking(
         &mut self,
         dt: f32,
@@ -110,23 +140,12 @@ impl Soldier {
                     }
                 }
                 // Sprint enter/exit (hold-to-sprint; BF2 predicate).
-                if self.stance == Stance::Sprint {
-                    if self.energy <= 0.0 {
-                        self.energy_depleted = true;
-                        self.set_stance(Stance::Stand);
-                    } else if !pad.pressed(buttons::SPRINT)
-                        || !Self::sprint_predicate(fwd_in, strafe_in, true)
-                    {
-                        self.set_stance(Stance::Stand);
-                    }
-                } else if self.stance == Stance::Stand
-                    && pad.pressed(buttons::SPRINT)
-                    && Self::sprint_predicate(fwd_in, strafe_in, false)
-                    && self.sprint_start_speed(c, rules)
-                    && !self.energy_depleted
-                    && self.energy > 0.0
-                {
-                    self.set_stance(Stance::Sprint);
+                if self.stance == Stance::Sprint && self.energy <= 0.0 {
+                    self.energy_depleted = true;
+                }
+                let sprint = self.sprint_stance(pad, c, rules, fwd_in, strafe_in);
+                if sprint != self.stance {
+                    self.set_stance(sprint);
                 }
                 // Jump: paid and applied after this update's ground move
                 // ([`Soldier::pay_jump`], [`Soldier::take_off`]). A crouch

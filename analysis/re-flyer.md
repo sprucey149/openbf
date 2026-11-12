@@ -210,10 +210,12 @@ left stick does what a soldier's right stick does (pitch and turn), and the righ
 stick throttle and roll. BF1's three tables (file offset 0x3ba190, stride 0x50, its
 reader `FUN_0034a7e8`, functions 18..21) hold the same swap in the third. Static
 reading only: [H] BF1's third section is the flyer's by analogy with BF2, its
-selector not opened. `input::flyer_sticks` applies it to the controller for a pilot
-in a flyer; the keyboard and mouse keep walk keys for throttle and roll and the
-mouse for pitch and turn (held rate below). The PS2's options screen can change the table. The port has
-no such option yet.
+selector not opened. `input::FlightControls` uses those axes for the Classic
+setting. The port also offers RC Mode 2 for pilots, with yaw and throttle on
+the left stick and roll and pitch on the right. Guided ordnance uses Classic
+steering. The keyboard and mouse keep walk keys for throttle and roll and
+the mouse for pitch and turn (held rate below). The PS2's options screen can
+change its function table.
 
 ### The mouse in a flyer: the PC's held rate (2026-11-06)
 
@@ -243,6 +245,36 @@ clears pilot and mounted-turret fire inputs at B1:86443–86482. BF2 permits
 fire only in flying with zero landing-region overlap, clearing both pilot
 and mounted-turret inputs otherwise (B2:118975–119007). This applies to
 gunners as well as the pilot.
+
+### BF2 player maneuvers
+
+The PS2 arms a stunt for one second on a qualifying button edge. It
+starts the stunt when yaw or pitch exceeds 0.2 outside landing-region
+coverage (FUN_00202d08, B2:117074–117107 and 118310–118350). The double
+press requires a first hold of at most 0.30 s and a release-to-press gap
+of at most 0.50 s (FUN_002b0548, B2:234961–234999). A single tap drives
+the roll and lateral or vertical strafe. A double tap selects a pitch
+reversal, combined with a roll on sideways input. A pitch reversal
+changes the travel frame after the half turn and settles upright
+(FUN_00208e28 and FUN_00208a20, B2:119897–120161).
+
+The port reuses the side-roll flight path. Reversals advance at
+`TrickFlipSpeed` and draw `EnergyTrickDrainDoubleTap`. A side roll draws
+`EnergyTrickDrainSingleTap`. Zero in the single-tap slot disables both,
+and zero in the double-tap slot disables reversal. The ARC-170 authors
+15 and 30 energy, both rates at 5 rad/s, and distinct `TrickSound` and
+`FlipSound` cues. Successful maneuvers apply the pilot's existing
+evasion response and play the authored cue once. The flight input and
+state replay at the sim tick rate.
+
+The controller uses the contextual roll button with either flight layout.
+The manual-roll axis also selects the side when yaw is neutral. The
+keyboard defaults to Left Alt and Caps Lock, as in the
+[BF2 PC manual](https://cdn.akamai.steamstatic.com/steam/apps/6060/manuals/BF2_Manual-English.pdf#page=4).
+Live chase-camera feel, including the original's stunt-specific camera
+smoothing, still needs a paired comparison. The original BF1 shipped
+flyer update has ordinary steering and banking. No BF1 triggered stunt
+has been verified.
 
 ## Numbers checked against the actual PS2 side files
 
@@ -292,8 +324,7 @@ streams. Active state, including input-edge memory and energy, is hashed.
 The implementation is **not a complete original-game match**. Hull contact and
 its layers are built for a piloted craft (`re-space-assault.md` §11). Still owed:
 exact sphere selection and moving/flagged-surface rejection; combined coverage
-across overlapping landing regions; all fighter dodge/stunt
-maneuvers; the complete roll-level
+across overlapping landing regions; the complete roll-level
 timer; BF1 per-player full-stick rate blending and BF2 sensitivity boosts;
 subclass boost-turn multipliers; transitional bank targets;
 uncontrolled tumble, shared original RNG and death timers; carrier cargo.

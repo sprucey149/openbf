@@ -78,6 +78,7 @@ fn the_flat_menu_remains_available() {
         Row::Music,
         Row::MouseSensitivity,
         Row::PadLookSensitivity,
+        Row::FlightControls,
         Row::InvertY,
         Row::LowPowerResolution,
         Row::InputIcons,

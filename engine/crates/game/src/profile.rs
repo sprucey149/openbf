@@ -116,6 +116,8 @@ pub struct Settings {
     pub keyboard_bindings: crate::kbm::Bindings,
     #[serde(default, deserialize_with = "controller_bindings")]
     pub controller_bindings: input::Mapping,
+    #[serde(default)]
+    pub flight_controls: input::FlightControls,
     /// Which icons the control prompts draw; Auto follows the device in use.
     #[serde(default, deserialize_with = "input_icons_or_auto")]
     pub input_icons: crate::input_icons::IconChoice,
@@ -145,6 +147,7 @@ impl Default for Settings {
             viewpoint: crate::viewpoint::Viewpoint::default(),
             keyboard_bindings: crate::kbm::Bindings::default(),
             controller_bindings: input::Mapping::default(),
+            flight_controls: input::FlightControls::default(),
             input_icons: crate::input_icons::IconChoice::default(),
             team_size_pct: 100,
             reinforcement_pct: 100,
@@ -414,6 +417,20 @@ mod tests {
         assert_eq!(s.assist_intensity, 0.5);
         assert_eq!(s.keyboard_bindings, crate::kbm::Bindings::default());
         assert_eq!(s.controller_bindings, input::Mapping::default());
+    }
+
+    #[test]
+    fn rc_flight_controls_round_trip_and_old_settings_choose_classic() {
+        use input::FlightControls;
+        let mut settings: Settings = ron::from_str("(assist_intensity: 0.5)").unwrap();
+        assert_eq!(settings.flight_controls, FlightControls::Classic);
+        settings.flight_controls = FlightControls::RcMode2;
+        let profile = Profile {
+            settings,
+            ..Default::default()
+        };
+        let saved = ron::to_string(&profile).unwrap();
+        assert_eq!(ron::from_str::<Profile>(&saved).unwrap(), profile);
     }
 
     #[test]

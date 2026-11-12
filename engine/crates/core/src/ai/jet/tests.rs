@@ -699,3 +699,72 @@ fn kamino_hops_require_clear_barrier_lines_only_when_blind_jumps_are_off() {
         "mission policy affects deterministic continuation"
     );
 }
+
+#[test]
+fn abandoned_hover_attack_drops_to_the_deck_after_wall_contact() {
+    use crate::soldier::{AirEnv, GroundRules};
+
+    let (mut sim, h) = sim(true);
+    let mut state = AiState {
+        jet: JetState {
+            flight: Some(Flight {
+                goal: Vec3::NEG_Z * 30.0,
+                kick: Vec3::Y,
+                height: Some(10.0),
+                route: false,
+                hop: false,
+                since: 0,
+                launched: true,
+                stop: false,
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    sim.tick = 90;
+    let u = &mut sim.units[h.index as usize];
+    u.soldier.stance = Stance::Hover;
+    u.soldier.grounded = false;
+    u.soldier.pos.y = 0.03;
+    u.soldier.fuel = 0.5;
+    u.soldier.time_in_stance = 2.0;
+    // The wall pass removed the previous step's entire forward movement.
+    u.wall_push = Vec3::Z * 0.02;
+
+    let mut linked = state;
+    linked.jet.flight.as_mut().unwrap().route = true;
+    ask(&sim, h, &mut linked, &request());
+    assert!(!linked.jet.command().unwrap().stop);
+
+    let mut tracking = state;
+    engage(&mut sim, &mut tracking, 30.0);
+    ask(&sim, h, &mut tracking, &request());
+    assert!(!tracking.jet.command().unwrap().stop);
+
+    let mut pending = state;
+    pending.jet.flight.as_mut().unwrap().launched = false;
+    sim.units[h.index as usize].soldier.stance = Stance::Jump;
+    ask(&sim, h, &mut pending, &request());
+    assert!(pending.jet.command().is_none());
+    sim.units[h.index as usize].soldier.stance = Stance::Hover;
+
+    let pad = ask(&sim, h, &mut state, &request());
+    assert!(
+        state.jet.command().unwrap().stop,
+        "still flying into the wall"
+    );
+    let u = &mut sim.units[h.index as usize];
+    u.soldier.step_looking(
+        crate::TICK_DT,
+        &pad,
+        &u.consts,
+        GroundRules::Bf2,
+        1.0,
+        AirEnv {
+            human: false,
+            bot_jet: state.jet.command(),
+            ..Default::default()
+        },
+    );
+    assert_eq!(u.soldier.stance, Stance::Fall);
+}

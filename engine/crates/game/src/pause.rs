@@ -202,6 +202,7 @@ pub fn apply_menu_action(
         MenuAction::Quit
         | MenuAction::Restart
         | MenuAction::SetMouseSensitivity(_)
+        | MenuAction::ToggleFlightControls
         | MenuAction::ToggleInvertY
         | MenuAction::ToggleLowPowerResolution
         | MenuAction::CycleInputIcons(_)

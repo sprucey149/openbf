@@ -92,7 +92,10 @@ pub fn flyer_params(
     vehicle_class::FlyerClass::from_db(db, c, bf2).map(|f| core::vehicle::flyer::FlyerParams {
         never_crash_when_unpiloted: vehicle_class::prop_flag(db, c, "NeverCrashWhenUnpiloted"),
         trick_roll_speed: vehicle_class::prop_float(db, c, "TrickRollSpeed").unwrap_or(1.0),
+        trick_flip_speed: vehicle_class::prop_float(db, c, "TrickFlipSpeed").unwrap_or(1.0),
         trick_drain: vehicle_class::prop_float(db, c, "EnergyTrickDrainSingleTap").unwrap_or(15.0),
+        trick_flip_drain: vehicle_class::prop_float(db, c, "EnergyTrickDrainDoubleTap")
+            .unwrap_or(50.0),
         trick_side_strafe: vehicle_class::prop_float(db, c, "TrickSideRollStrafeSpeed")
             .unwrap_or(0.0),
         aim_box: db

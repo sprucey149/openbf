@@ -779,3 +779,103 @@ fn hoths_baked_snowspeeder_has_its_loop_and_its_wind_shots() {
         assert!(lib.has(name), "{name}");
     }
 }
+
+#[test]
+#[ignore = "requires owned BF2 Space Felucia classes and sound banks"]
+fn stock_arc170_maneuvers_spend_energy_and_play_one_authored_sound_each() {
+    use core::sim::{buttons, PadState};
+    use core::vehicle::{SeatKind, VehicleSpec};
+
+    let root = std::env::var_os("STUNT_BAKED")
+        .map_or_else(crate::assets::baked_root, std::path::PathBuf::from);
+    let map = root.join("bf2_spa7");
+    let lib = crate::sounds::SoundLib::load(&map).expect("Space Felucia sound banks");
+    let db = crate::roster::load_classdb(&root.join("classes"), "bf2", &["rep"]).unwrap();
+    let class = "rep_fly_arc170fighter_sc";
+    let params = crate::vehicle_pads::flyer_params(&db, class, true, 1.0).unwrap();
+    let engine = EngineClass::from_db(&db, class).unwrap();
+    assert_eq!(params.trick_flip_speed, 5.0);
+    assert_eq!(params.trick_roll_speed, 5.0);
+    assert_eq!(params.trick_flip_drain, 30.0);
+    assert_eq!(params.trick_drain, 15.0);
+    for (kind, expected_sound, button, axis, energy_cost) in [
+        (
+            ManeuverKind::SideRoll,
+            "rep_fly_arc170_roll",
+            buttons::ROLL_STANCE,
+            i16::MAX,
+            params.trick_drain,
+        ),
+        (
+            ManeuverKind::Reversal,
+            "rep_fly_arc170_flip",
+            buttons::FLYER_REVERSE,
+            0,
+            params.trick_flip_drain,
+        ),
+    ] {
+        let mut walk = WalkSim::new(42, Vec3::ZERO, None);
+        walk.sim.flyer_params = vec![Some(params.clone())];
+        walk.vehicle_engines = vec![Some(engine.clone())];
+        let flyer = walk.sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Flyer,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::Y * 75.0,
+            yaw: 0.0,
+            max_health: 1000.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        assert!(walk.sim.seat_unit(walk.player, flyer, 0));
+        let v = walk.sim.vehicle_mut(flyer).unwrap();
+        v.flyer.phase = FlightPhase::Flying;
+        v.flyer.lift = 1.0;
+        v.flyer.initialized = true;
+        v.flyer.energy = params.energy_max;
+        v.vel = Vec3::Z * params.mid_speed;
+        let mut mixer = EngineSounds::new(&map, &walk);
+        let mut voices = Vec::new();
+
+        let mut shots = Vec::new();
+        for i in 0..120 {
+            walk.sim.step(&[if i == 0 {
+                PadState {
+                    buttons: button,
+                    rx: axis,
+                    ..PadState::default()
+                }
+            } else {
+                PadState::default()
+            }]);
+            if i == 0 {
+                let v = walk.sim.vehicle(flyer).unwrap();
+                assert_eq!(v.flyer.energy, params.energy_max - energy_cost);
+                assert_eq!(v.flyer.active_maneuver(), Some(kind));
+            }
+            mixer.tick(&walk, |hash, levels| lib.engine(hash, levels), &mut voices);
+            shots.extend(
+                mixer
+                    .take_jet_shots()
+                    .into_iter()
+                    .filter(|s| matches!(s.kind, JetShotKind::Maneuver(_))),
+            );
+        }
+        assert_eq!(shots.len(), 1, "{kind:?}: {shots:?}");
+        assert_eq!(shots[0].kind, JetShotKind::Maneuver(kind));
+        assert_eq!(shots[0].name, expected_sound);
+        assert!(lib.has(expected_sound));
+
+        let v = walk.sim.vehicle(flyer).unwrap();
+        assert!(v.flyer.active_maneuver().is_none());
+        assert!((v.rot * Vec3::Y).y > 0.9, "{kind:?}: exits upright");
+        let heading = if kind == ManeuverKind::SideRoll {
+            1.0
+        } else {
+            -1.0
+        };
+        assert!((v.rot * Vec3::Z).z * heading > 0.9, "{kind:?}: {v:?}");
+    }
+}

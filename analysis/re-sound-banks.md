@@ -34,7 +34,7 @@ The iconic repeating "boop-beep" of the load screen = the x/y tracking-crosshair
 looping this one 440 Hz tone at pitches 2.1 and 1.8. Confidence: **high** — property names match
 the `load_*` element names in the LOAD.LVL loading-screen config verbatim, the wave name decodes
 to `ui_load_lp` ("UI load loop"), the bank is in the always-resident CORE.LVL, and the decoded
-waveform is a clean beep (verification numbers below). Not verified by running the game.
+waveform is a clean beep (verification numbers below). The later [PS2 loading captures](re-hud-bf1-loading.md) confirm the two pitches and the pauses.
 
 Negative results: `LOAD/*.LVL` contain only textures/models/`load+` config, **no** audio chunks;
 `COMMON/ENG/COMMON.LVL` has no `snd_`/bank chunks either. `SOUND/SHELL.LVL` holds shell music/VO,
@@ -186,5 +186,3 @@ Decoded `ui_load_lp` (WAVs in scratchpad `re-beep/wav/`):
   numerically confirmed, names unknown.
 - Wave names for global-bank samples 2–5 and the `load_transition` wave 0xE502F23B (defined
   elsewhere — likely SHELL/ENG/SHELL.LVL or a movie stream) not resolved.
-- Runtime confirmation (hearing the beep from these properties in-emulator) not done; the chain
-  LOAD.LVL `load+` element names ↔ CORE.LVL property names ↔ `ui_load_lp` is the evidence.

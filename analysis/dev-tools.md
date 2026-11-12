@@ -9,6 +9,7 @@ what shuts their way and which map body it is, positions, trails; the maintainer
 posts, vehicles, events) on **F9**, on quit, on a panic and on a stuck alarm (20 s of pushing the stick without getting
 2 m away). Files: `engine/artifacts/playtest/last.json` (newest) and `prev1..prev5.json`. There is no `last.png`: the
 windowed renderer cannot read its frame back, so the picture is the maintainer's own screenshot.
+The F9 save notice appears over the spawn and pause menus after the write finishes.
 
 - **When the maintainer reports something he saw ("a bot walks into a wall", "this guy is stuck"), read the snapshot first.**
   Run from the worktree root with its own Cargo target.

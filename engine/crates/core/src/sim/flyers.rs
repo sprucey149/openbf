@@ -249,7 +249,14 @@ impl Sim {
                 self.flyer_contact(i, handle, from, row);
                 continue;
             }
+            let watch_maneuver = v.input.human && v.flyer.active_maneuver().is_none();
             flyer::step(&mut self.vehicles[i], p, env, dt);
+            let v = &self.vehicles[i];
+            if watch_maneuver && v.flyer.active_maneuver().is_some() {
+                if let Some(pilot) = v.pilot_seat().and_then(|seat| seat.occupant) {
+                    self.apply_maneuver_evasion(pilot);
+                }
+            }
             self.flyer_contact(i, handle, from, row);
         }
     }
@@ -270,13 +277,19 @@ impl Sim {
         flyer::side_roll(&mut v.flyer, p, side);
         if !was && v.flyer.in_roll {
             if let Some(h) = v.seats.iter().find_map(|s| s.occupant) {
-                let floor = self
-                    .unit(h)
-                    .map_or(0.0, |u| self.enemy_skill_of(u.team).err_floor);
-                if let Some(u) = self.units.get_mut(h.index as usize) {
-                    u.aim.trick(floor);
-                }
+                self.apply_maneuver_evasion(h);
             }
+        }
+    }
+
+    // The original invokes the controller's evasion response at the start
+    // of a stunt (B2 FUN_00208e28, 120156–120159).
+    fn apply_maneuver_evasion(&mut self, pilot: crate::unit::UnitHandle) {
+        let floor = self
+            .unit(pilot)
+            .map_or(0.0, |u| self.enemy_skill_of(u.team).err_floor);
+        if let Some(u) = self.units.get_mut(pilot.index as usize) {
+            u.aim.trick(floor);
         }
     }
 
@@ -431,6 +444,133 @@ mod tests {
         assert!((v.vel.length() - 82.0).abs() < 0.01);
         let pilot = v.seats[0].occupant.unwrap();
         assert_eq!(a.unit(pilot).unwrap().soldier.pos, v.pos);
+    }
+
+    fn stunt_world() -> (Sim, VehicleHandle) {
+        let (mut sim, h) = world();
+        sim.heightfield = None;
+        let p = sim.flyer_params[0].as_mut().unwrap();
+        p.bf2 = true;
+        p.trick_roll_speed = 6.0;
+        p.trick_flip_speed = 4.0;
+        p.trick_side_strafe = 25.0;
+        p.energy_auto_restore = 0.0;
+        p.velocity_filter = 8.0;
+        let v = sim.vehicle_mut(h).unwrap();
+        v.pos = Vec3::Y * 75.0;
+        v.vel = Vec3::Z * 50.0;
+        v.flyer.phase = FlightPhase::Flying;
+        v.flyer.lift = 1.0;
+        v.flyer.initialized = true;
+        (sim, h)
+    }
+
+    #[test]
+    fn player_maneuver_rolls_to_either_side_through_normal_pads() {
+        for (side, button) in [(-1.0, buttons::ROLL_STANCE), (1.0, buttons::FLYER_TRICK)] {
+            let (mut sim, h) = stunt_world();
+            let idle = PadState::default();
+            sim.step(&[PadState {
+                buttons: button,
+                ..idle
+            }]);
+            sim.step(&[PadState {
+                rx: PadState::quantize(side),
+                ..idle
+            }]);
+            let v = sim.vehicle(h).unwrap();
+            assert_eq!(v.flyer.energy, 85.0);
+            assert!(v.flyer.in_roll);
+            assert_eq!(v.flyer.side_roll, Vec3::X * side);
+            for _ in 0..120 {
+                sim.step(&[idle]);
+            }
+            let v = sim.vehicle(h).unwrap();
+            assert!(!v.flyer.in_roll);
+            assert_eq!(v.flyer.energy, 85.0);
+            assert!(v.pos.x * side < -10.0, "{:?}", v.pos);
+            assert!((flyer::untilted(v) * Vec3::Z).dot(Vec3::Z) > 0.99);
+        }
+    }
+
+    #[test]
+    fn player_maneuver_reversal_replays_and_exits_in_opposite_heading() {
+        for inputs in [
+            vec![PadState {
+                buttons: buttons::FLYER_REVERSE,
+                ..PadState::default()
+            }],
+            vec![
+                PadState {
+                    buttons: buttons::ROLL_STANCE,
+                    ..PadState::default()
+                },
+                PadState::default(),
+                PadState {
+                    buttons: buttons::ROLL_STANCE,
+                    ..PadState::default()
+                },
+                PadState {
+                    rx: i16::MAX,
+                    ..PadState::default()
+                },
+            ],
+        ] {
+            let (mut a, h) = stunt_world();
+            let (mut b, _) = stunt_world();
+            for pad in inputs
+                .into_iter()
+                .chain(std::iter::repeat_n(PadState::default(), 180))
+            {
+                a.step(&[pad]);
+                b.step(&[pad]);
+                assert_eq!(a.hash(), b.hash(), "tick {}", a.tick);
+            }
+            let v = a.vehicle(h).unwrap();
+            assert_eq!(v.flyer.energy, 50.0);
+            assert!((flyer::untilted(v) * Vec3::Z).dot(Vec3::NEG_Z) > 0.99);
+            assert!(v.vel.z < -45.0 && (v.rot * Vec3::Y).y > 0.9, "{v:?}");
+        }
+    }
+
+    #[test]
+    fn player_maneuvers_respect_landing_coverage_and_disabled_classes() {
+        let stunt = PadState {
+            buttons: buttons::ROLL_STANCE,
+            rx: i16::MAX,
+            ..PadState::default()
+        };
+        let reverse = PadState {
+            buttons: buttons::FLYER_REVERSE,
+            ..PadState::default()
+        };
+        for pad in [stunt, reverse] {
+            for (reason, energy) in [
+                ("landing coverage", 100.0),
+                ("BF1 airframe", 100.0),
+                ("stunts disabled", 100.0),
+                ("energy depleted", 0.0),
+            ] {
+                let (mut sim, h) = stunt_world();
+                let params = sim.flyer_params[0].as_mut().unwrap();
+                match reason {
+                    "landing coverage" => sim
+                        .landing_regions
+                        .push(crate::region::Region::sphere(Vec3::Y * 75.0, 50.0)),
+                    "BF1 airframe" => params.bf2 = false,
+                    "stunts disabled" => params.trick_drain = 0.0,
+                    _ => {
+                        let state = &mut sim.vehicle_mut(h).unwrap().flyer;
+                        state.drained = true;
+                        state.energy = energy;
+                    }
+                }
+                sim.step(&[pad]);
+                let f = &sim.vehicle(h).unwrap().flyer;
+                assert_eq!(f.energy, energy, "{reason}");
+                assert!(!f.in_roll, "{reason}");
+            }
+        }
     }
 
     /// BF1 Bespin's kill floor is 24 m under its decks and its mission lets a

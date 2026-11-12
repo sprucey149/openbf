@@ -1,5 +1,41 @@
 use super::*;
 
+#[test]
+fn rc_flight_controls_can_be_changed_in_shell_ground_and_space_options() {
+    for (in_shell, page) in [
+        (Some("Game Options".into()), None),
+        (None, Some(PausePage::Options)),
+        (None, None),
+    ] {
+        let mut menu = MenuModel {
+            in_shell,
+            page,
+            ..Default::default()
+        };
+        menu.cursor = rows(&menu)
+            .iter()
+            .position(|r| *r == Row::FlightControls)
+            .unwrap();
+        let expected = vec![MenuAction::ToggleFlightControls];
+        let confirm = MenuInput {
+            confirm: true,
+            ..Default::default()
+        };
+        assert_eq!(navigate(&menu, confirm).1, expected);
+        assert_eq!(step(&menu, menu.cursor, false), expected);
+        assert_eq!(step(&menu, menu.cursor, true), expected);
+        assert_eq!(
+            row_text(&menu, Row::FlightControls).1.as_deref(),
+            Some("Classic")
+        );
+        menu.rc_flight_controls = true;
+        assert_eq!(
+            row_text(&menu, Row::FlightControls).1.as_deref(),
+            Some("RC Mode 2")
+        );
+    }
+}
+
 fn model() -> MenuModel {
     MenuModel {
         class_picker_available: false,
@@ -18,6 +54,7 @@ fn model() -> MenuModel {
         music_volume: 1.0,
         mouse_sensitivity: 1.0,
         pad_look_sensitivity: 1.0,
+        rc_flight_controls: false,
         invert_y: false,
         low_power_resolution: false,
         input_icons_label: "Auto",
@@ -148,6 +185,7 @@ fn the_pause_rows_show_whole_at_any_window() {
                     );
                     let label = match row {
                         Row::Respawn => Some("Respawn"),
+                        Row::FlightControls => Some("Flight controls"),
                         Row::InputIcons => Some("Button prompts"),
                         Row::Quit => Some("Quit to desktop"),
                         _ => None,
@@ -204,9 +242,9 @@ fn a_scrolled_list_moves_and_settles_on_a_row() {
 fn a_tall_window_shows_every_pause_row() {
     let mut m = model();
     m.cursor = rows(&m).iter().position(|r| *r == Row::InputIcons).unwrap();
-    for h in [805.0, 1080.0] {
+    for h in [900.0, 1080.0] {
         let (_, whole, _) = settled_text(&m, [1920.0, h]);
-        for label in ["Resume", "Respawn", "Quit to desktop"] {
+        for label in ["Resume", "Flight controls", "Respawn", "Quit to desktop"] {
             assert!(whole.iter().any(|t| t == label), "{h}: {label}");
         }
     }

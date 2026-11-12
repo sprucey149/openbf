@@ -1,5 +1,6 @@
 //! Native window lifecycle and event dispatch for the application.
 
+use super::spawn_feedback::{draw_snapshot_notice, Selection};
 use super::{
     apply_pause_action, autopilot_pad, hud_model, hud_title, load_and_upload, mouse, note_sounds,
     play_ambience, play_event_sounds, rain_splashes, record_round, spawn_model, start_take,
@@ -274,44 +275,37 @@ impl winit::application::ApplicationHandler for App {
                         game::pause::hold_for_resume(&mut self.resume_gate);
                         PadState::default()
                     } else {
-                        let (on_foot, sprinting, space) =
-                            self.walk.as_ref().map_or((false, false, false), |(w, _)| {
-                                (
-                                    w.player_on_foot(),
-                                    w.soldier().stance == core::soldier::Stance::Sprint,
-                                    w.space_battle(),
-                                )
-                            });
+                        let walk = &self.walk.as_ref().expect("battle walk").0;
+                        let on_foot = walk.player_on_foot();
+                        let space = walk.space_battle();
                         let pad = match self.autopilot {
                             true => autopilot_pad(self.walk.as_ref().map_or(0, |w| w.0.sim.tick)),
                             false => {
-                                let flying = self
-                                    .walk
-                                    .as_ref()
-                                    .is_some_and(|(w, _)| w.player_controls_flyer());
-                                // A pilot's right stick throttles and rolls:
-                                // the look sensitivity is not his. Space
-                                // battles keep the stick as it is.
-                                let look = match &self.walk {
-                                    Some((w, _)) if !flying => w.pad_look_for_battle(
+                                let controls =
+                                    walk.flight_controls(self.profile.settings.flight_controls);
+                                let look = if controls.is_some() {
+                                    1.0
+                                } else {
+                                    walk.pad_look_for_battle(
                                         self.profile.settings.pad_look_sensitivity,
-                                    ),
-                                    Some(_) => 1.0,
-                                    None => self.profile.settings.pad_look_sensitivity,
+                                    )
                                 };
                                 let pad = self.sample_pad(look, on_foot && !space);
                                 if let Some(bb) = self.blackbox.as_mut() {
                                     bb.stick(self.stick_sample.0, self.stick_sample.1);
                                 }
-                                let pad = if flying {
-                                    self.kbm.flyer_pad(input::flyer_sticks(pad))
-                                } else {
-                                    self.kbm.pad(pad)
+                                let pad = match controls {
+                                    Some(layout) => self.kbm.flyer_pad(layout.map_sticks(pad)),
+                                    None => self.kbm.pad(pad),
                                 };
                                 game::pause::resume_pad(&mut self.resume_gate, pad)
                             }
                         };
-                        self.sprint_latch.apply(pad, on_foot, sprinting)
+                        self.walk
+                            .as_ref()
+                            .expect("battle walk")
+                            .0
+                            .apply_sprint_latch(&mut self.sprint_latch, pad)
                     };
                     if self.view_toggle.pressed(&pad) {
                         let s = &mut self.profile.settings;
@@ -354,6 +348,8 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
+                            rc_flight_controls: self.profile.settings.flight_controls
+                                == input::FlightControls::RcMode2,
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             input_icons_label: self.profile.settings.input_icons.label(),
@@ -464,6 +460,8 @@ impl winit::application::ApplicationHandler for App {
                                 .map_or(self.profile.settings.music_volume, |m| m.volume),
                             mouse_sensitivity: self.profile.settings.mouse_sensitivity,
                             pad_look_sensitivity: self.profile.settings.pad_look_sensitivity,
+                            rc_flight_controls: self.profile.settings.flight_controls
+                                == input::FlightControls::RcMode2,
                             invert_y: self.profile.settings.invert_y,
                             low_power_resolution: self.profile.settings.low_power_resolution,
                             input_icons_label: self.profile.settings.input_icons.label(),
@@ -491,6 +489,7 @@ impl winit::application::ApplicationHandler for App {
                             gpu.step_stations(&walk.sim);
                         }
                         let mut tick_pad = pad;
+                        let mut selection = Selection::read(walk);
                         let ticks = walk.advance_with(dt, std::slice::from_ref(&pad), |walk| {
                             let hook_t0 = std::time::Instant::now();
                             if let Some(gpu) = self.gpu.as_mut() {
@@ -509,6 +508,13 @@ impl winit::application::ApplicationHandler for App {
                             if let (Some(audio), Some(sl)) =
                                 (self.audio.as_mut(), self.sounds.as_mut())
                             {
+                                let next = Selection::read(walk);
+                                if let Some(cue) =
+                                    selection.movement_cue(next, walk.sim.ground_rules)
+                                {
+                                    sl.play_2d(Some(audio), cue);
+                                }
+                                selection = next;
                                 play_event_sounds(
                                     audio,
                                     sl,
@@ -662,8 +668,11 @@ impl winit::application::ApplicationHandler for App {
                     }
                     // The black box: this frame's time, and a snapshot when
                     // F9 was pressed or the stuck alarm fired — written on its
-                    // own thread, with a line in the message box.
+                    // own thread. F9 reports the outcome above the menus.
                     if let Some(bb) = self.blackbox.as_mut() {
+                        if let Some(saved) = bb.poll_hotkey_write() {
+                            self.snapshot_notice = Some((saved, std::time::Instant::now()));
+                        }
                         let size = self.renderer.as_ref().map_or((0, 0), |r| r.size());
                         bb.frame(dt, [size.0, size.1]);
                         let reason = if std::mem::take(&mut self.snapshot_requested) {
@@ -673,14 +682,16 @@ impl winit::application::ApplicationHandler for App {
                         };
                         if let Some(reason) = reason {
                             bb.write(reason, Some(walk), false);
-                            self.feed.say(
-                                format!(
-                                    "snapshot saved ({reason}, {:.1} s)",
-                                    walk.sim.tick as f32 * core::TICK_DT
-                                ),
-                                ui::hud::message_color::YELLOW,
-                                walk.sim.tick,
-                            );
+                            if reason == "stuck" {
+                                self.feed.say(
+                                    format!(
+                                        "snapshot saved ({reason}, {:.1} s)",
+                                        walk.sim.tick as f32 * core::TICK_DT
+                                    ),
+                                    ui::hud::message_color::YELLOW,
+                                    walk.sim.tick,
+                                );
+                            }
                         }
                     }
                     if let Some(p) = self.frame_profile.as_mut() {
@@ -950,6 +961,10 @@ impl winit::application::ApplicationHandler for App {
                     }
                     let hud_hidden = self.cheats.hud_hidden;
                     let pad_warning = self.pad_warning.clone();
+                    let snapshot_notice = self
+                        .snapshot_notice
+                        .filter(|(_, shown)| shown.elapsed().as_secs_f32() < 3.0)
+                        .map(|(saved, _)| saved);
                     // BF2's own HUD under the egui lines and the spawn
                     // screen (dead, it is the counts and the message box:
                     // the line that says who killed you); the `hud` cheat
@@ -1002,6 +1017,9 @@ impl winit::application::ApplicationHandler for App {
                                 }
                                 if let Some(w) = &pad_warning {
                                     ui::hud::draw_pad_warning(ctx, w);
+                                }
+                                if let Some(saved) = snapshot_notice {
+                                    draw_snapshot_notice(ctx, saved);
                                 }
                             });
                             let (n, bytes) = paint.texture_uploads();

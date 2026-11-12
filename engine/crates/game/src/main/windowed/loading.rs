@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 /// User contract: the second fresh press must precede this deadline.
 const SKIP_WINDOW: Duration = Duration::from_secs(3);
-/// PROVISIONAL presentation cadence, inherited from the flat slideshow;
-/// trace: original BF1 transition/zoom/crosshair timing before replacing playback.
-const STEP: Duration = Duration::from_secs(1);
+/// OURS: hold time for each still when the disc has no matching BF1 layout.
+/// measure: the galaxy-only launch and plain frame on each source profile.
+const FALLBACK_STEP: Duration = Duration::from_secs(1);
 
 #[derive(Default)]
 pub(super) struct Playback {
@@ -36,24 +36,26 @@ impl Playback {
         self.prompt_until.is_some_and(|until| elapsed < until) && self.skipped_at.is_none()
     }
 
-    pub(super) fn step(&self, elapsed: Duration, steps: usize) -> usize {
-        (self.skipped_at.unwrap_or(elapsed).as_secs_f64() / STEP.as_secs_f64())
-            .floor()
-            .min(steps.max(1).saturating_sub(1) as f64) as usize
+    pub(super) fn skipped(&self) -> bool {
+        self.skipped_at.is_some()
     }
 
-    pub(super) fn done(&self, elapsed: Duration, steps: usize) -> bool {
-        self.skipped_at.is_some() || elapsed >= STEP * steps.max(1) as u32
+    pub(super) fn time(&self, elapsed: Duration) -> Duration {
+        self.skipped_at.unwrap_or(elapsed)
+    }
+
+    pub(super) fn done(&self, elapsed: Duration, duration: Duration) -> bool {
+        self.skipped_at.is_some() || elapsed >= duration
     }
 
     pub(super) fn can_enter(
         &self,
         elapsed: Duration,
-        steps: usize,
+        duration: Duration,
         shown: bool,
         ready: bool,
     ) -> bool {
-        shown && ready && self.done(elapsed, steps)
+        shown && ready && self.done(elapsed, duration)
     }
 }
 
@@ -154,14 +156,20 @@ pub(super) fn prepare(dir: PathBuf, mode: String) -> anyhow::Result<Worker<Prepa
     })
 }
 
-/// Only direct shared locations get a complete BF1 sequence. Other locations
-/// use the galaxy alone, never another planet's ground imagery. This flat
-/// fallback is an openbf presentation choice, not original BF1 choreography.
-fn equivalent(key: &str) -> Option<&str> {
+/// BF2 locations reuse an authored sequence from the same planet. Prefer
+/// the matching location where BF1 has one. Space maps use their planet's
+/// ground sequence. A destination with no BF1 planet gets the galaxy view.
+fn bf1_donor(key: &str) -> Option<&str> {
     match key {
-        "bf2_hot1" => Some("bf1_hot1"),
-        "bf2_yav1" => Some("bf1_yav1"),
+        "bf2_end1" => Some("bf1_end1"),
+        "bf2_geo1" => Some("bf1_geo1"),
+        "bf2_hot1" | "bf2_spa8" => Some("bf1_hot1"),
+        "bf2_kam1" => Some("bf1_kam1"),
+        "bf2_kas2" | "bf2_spa3" => Some("bf1_kas2"),
+        "bf2_nab2" => Some("bf1_nab2"),
+        "bf2_yav1" | "bf2_spa1" => Some("bf1_yav1"),
         "tat2" | "bf2_tat2" => Some("bf1_tat2"),
+        "bf2_tat3" | "bf2_spa9" => Some("tat1"),
         _ => None,
     }
 }
@@ -173,7 +181,7 @@ pub(super) fn presentation(root: &Path, key: &str) -> Option<game::assets::LoadS
         .iter()
         .find(|(k, source, _)| k == key && source == "bf1")
         .map(|(_, _, dir)| dir.clone());
-    let target = own.or_else(|| equivalent(key).map(|k| root.join(k)));
+    let target = own.or_else(|| bf1_donor(key).map(|k| root.join(k)));
     if let Some(dir) = target {
         if let Some(ls) = game::assets::load_loadscreen(&dir).filter(|s| !s.pool) {
             return Some(ls);
@@ -199,15 +207,249 @@ pub(super) fn presentation(root: &Path, key: &str) -> Option<game::assets::LoadS
     None // Missing/corrupt owned data: the UI still paints a loading frame.
 }
 
+#[derive(Default)]
+pub(super) struct Display {
+    textures: Vec<ui::egui::TextureHandle>,
+    authored: Option<AuthoredDisplay>,
+}
+
+struct AuthoredDisplay {
+    motion: ui::loading::Choreography,
+    sprites: ui::loading::Sprites,
+}
+
+impl Display {
+    pub(super) fn load(root: &Path, key: &str, ctx: &ui::egui::Context) -> Self {
+        let Some(assets) = presentation(root, key) else {
+            return Self::default();
+        };
+        let authored = Self::load_authored(root, key, &assets, ctx);
+        let textures = assets
+            .sequence
+            .into_iter()
+            .filter_map(|(name, texture)| {
+                upload(ctx, name, texture, ui::egui::TextureOptions::LINEAR)
+            })
+            .collect();
+        Self { textures, authored }
+    }
+
+    fn load_authored(
+        root: &Path,
+        key: &str,
+        assets: &game::assets::LoadScreenAssets,
+        ctx: &ui::egui::Context,
+    ) -> Option<AuthoredDisplay> {
+        let count = assets.sequence.len();
+        if count < 2 {
+            return None;
+        }
+        let dir = root.join("common_bf1/load");
+        let config = pak::read_to_string(dir.join("layout.ron")).ok()?;
+        let layout: manifest::LoadingLayout = ron::from_str(&config).ok()?;
+        let key = bf1_donor(key).unwrap_or(key);
+        let targets = layout.maps.get(key.strip_prefix("bf1_").unwrap_or(key))?;
+        if targets.len() != count {
+            return None;
+        }
+        let rects = targets[..count - 1]
+            .iter()
+            .zip(&assets.sequence)
+            .map(|(target, (name, texture))| {
+                if target.image != *name {
+                    return None;
+                }
+                let [x, y, w, h] = target.rect;
+                let (tw, th) = (texture.width as f32, texture.height as f32);
+                Some(ui::egui::Rect::from_min_max(
+                    ui::egui::pos2(x / tw, y / th),
+                    ui::egui::pos2((x + w) / tw, (y + h) / th),
+                ))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        if targets.last()?.image != assets.sequence.last()?.0 {
+            return None;
+        }
+        let motion =
+            ui::loading::Choreography::new(layout.tracking_seconds, layout.zoom_seconds, rects)?;
+        use ui::egui::TextureOptions;
+        let read = |name, options| load_texture(ctx, &dir, name, options);
+        let [h, v, c] = layout.edges;
+        let noise = layout.noise;
+        let sprites = ui::loading::Sprites {
+            disk: read(layout.disk, TextureOptions::LINEAR)?,
+            led: read(layout.led, TextureOptions::LINEAR)?,
+            edges: [
+                read(h, TextureOptions::LINEAR)?,
+                read(v, TextureOptions::LINEAR)?,
+                read(c, TextureOptions::LINEAR)?,
+            ],
+            scanline: read(layout.scanline, TextureOptions::LINEAR_REPEAT)?,
+            noise: ui::loading::Noise {
+                frames: noise
+                    .frames
+                    .into_iter()
+                    .filter_map(|name| read(name, TextureOptions::LINEAR_REPEAT))
+                    .collect(),
+                frame_rate: noise.frame_rate,
+                uv_start: noise.uv_start,
+            },
+            label: loading_label(ctx, &root.join("common_bf1/fonts")),
+        };
+        Some(AuthoredDisplay { motion, sprites })
+    }
+
+    pub(super) fn duration(&self) -> Duration {
+        self.authored.as_ref().map_or_else(
+            || FALLBACK_STEP * self.textures.len().max(1) as u32,
+            |display| display.motion.duration(),
+        )
+    }
+
+    pub(super) fn sample(&self, time: Duration) -> Option<ui::loading::Frame> {
+        Some(self.authored.as_ref()?.motion.sample(time))
+    }
+
+    pub(super) fn draw(
+        &self,
+        ctx: &ui::egui::Context,
+        caption: &str,
+        time: Duration,
+        frame: Option<&ui::loading::Frame>,
+        prompt: bool,
+    ) {
+        let image = |index| self.textures.get(index).map(ui::egui::TextureHandle::id);
+        if let (Some(display), Some(frame)) = (&self.authored, frame) {
+            ui::loading::draw_choreography(
+                ctx,
+                [image(frame.step), image(frame.step + 1)],
+                frame,
+                &display.sprites,
+                time,
+                prompt,
+            );
+        } else {
+            let step = (time.as_secs() as usize).min(self.textures.len().saturating_sub(1));
+            ui::loading::draw_loading_with_skip(
+                ctx,
+                image(step),
+                caption,
+                step,
+                self.textures.len(),
+                prompt,
+            );
+        }
+    }
+}
+
+fn loading_label(ctx: &ui::egui::Context, dir: &Path) -> Option<ui::loading::Label> {
+    let source = pak::read_to_string(dir.join("bf1_gamefont_large.ron")).ok()?;
+    let font: manifest::hud::HudFont = ron::from_str(&source).ok()?;
+    let pages = font
+        .pages
+        .iter()
+        .map(|name| load_texture(ctx, dir, name.clone(), ui::egui::TextureOptions::LINEAR))
+        .collect::<Option<Vec<_>>>()?;
+    Some(ui::loading::Label { font, pages })
+}
+
+fn load_texture(
+    ctx: &ui::egui::Context,
+    dir: &Path,
+    name: String,
+    options: ui::egui::TextureOptions,
+) -> Option<ui::egui::TextureHandle> {
+    let bytes = pak::read(dir.join(format!("{name}.ktx2"))).ok()?;
+    upload(ctx, name, game::assets::load_ktx2(&bytes).ok()?, options)
+}
+
+fn upload(
+    ctx: &ui::egui::Context,
+    name: String,
+    texture: game::assets::CpuTexture,
+    options: ui::egui::TextureOptions,
+) -> Option<ui::egui::TextureHandle> {
+    let size = [texture.width as usize, texture.height as usize];
+    if size.contains(&0) || size[0].checked_mul(size[1])?.checked_mul(4)? != texture.rgba.len() {
+        return None;
+    }
+    Some(ctx.load_texture(
+        name,
+        ui::egui::ColorImage::from_rgba_unmultiplied(size, &texture.rgba),
+        options,
+    ))
+}
+
+/// OURS: loading-bus gain matched to the PS2 captures on Bespin and Hoth.
+/// measure: the original loading bus and SPU2 output gain directly.
+const LOADING_OUTPUT_DB: f32 = -8.5;
+
+pub(super) struct Cues {
+    vertical: Option<audio::SoundData>,
+    horizontal: Option<audio::SoundData>,
+    zoom: Option<audio::SoundData>,
+    current: Option<(usize, ui::loading::Cue)>,
+    tracking: Option<audio::Voice>,
+    shot: Option<audio::Shot>,
+}
+
+impl Cues {
+    pub(super) fn load(root: &Path) -> Self {
+        let track = |axis| {
+            audio::decode(&root.join(format!("audio/load_{axis}tracking.ogg")))
+                .or_else(|_| audio::decode(&root.join(format!("audio/load_{axis}tracking.wav"))))
+                .ok()
+        };
+        Self {
+            vertical: track("y"),
+            horizontal: track("x"),
+            zoom: audio::decode(&root.join("core_bf1/sounds/1dff06ae/b75d27cd.wav")).ok(),
+            current: None,
+            tracking: None,
+            shot: None,
+        }
+    }
+
+    pub(super) fn update(&mut self, audio: &mut audio::Audio, frame: Option<&ui::loading::Frame>) {
+        use ui::loading::Cue;
+        let next = frame.and_then(|f| f.cue.map(|cue| (f.step, cue)));
+        if next == self.current {
+            return;
+        }
+        self.current = next;
+        self.tracking = None;
+        self.shot = None;
+        match next.map(|(_, cue)| cue) {
+            Some(Cue::Zoom) => {
+                self.shot = self
+                    .zoom
+                    .as_ref()
+                    .and_then(|s| audio.play_shot(s, LOADING_OUTPUT_DB, 1.5, 0.0));
+            }
+            Some(Cue::Vertical | Cue::Horizontal) => {
+                let source = if matches!(next, Some((_, Cue::Vertical))) {
+                    &self.vertical
+                } else {
+                    &self.horizontal
+                };
+                self.tracking = source.as_ref().and_then(|s| {
+                    audio.play_voice(s, LOADING_OUTPUT_DB + 20.0 * 0.7_f32.log10(), 1.0, 0.0)
+                });
+            }
+            None => {}
+        }
+    }
+}
+
 pub(super) struct Loading {
     pub map_name: String,
     pub started: Instant,
     pub playback: Playback,
-    pub textures: Vec<ui::egui::TextureHandle>,
+    pub display: Display,
     pub worker: Worker<Prepared>,
     pub ready: Option<Prepared>,
     pub shown: bool,
-    pub beep: Option<audio::LoopHandle>,
+    pub cues: Option<Cues>,
 }
 
 #[cfg(test)]

@@ -153,6 +153,7 @@ pub enum LightPath {
     /// ([`IFACE_AMBIENT`], [`IFACE_DIR_CAMERA`]), no map light. The draw's
     /// colour is the model's colour word, a factor on that light, not on
     /// the texel (`game::spawn_preview::colour_unit`).
+    /// Its model origin is relative to the eye, in world axes.
     Iface = 9,
     /// PC geometry with baked vertex lighting; only dynamic local lights are added.
     VertexLit = 10,

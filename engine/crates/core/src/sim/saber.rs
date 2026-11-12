@@ -88,9 +88,17 @@ impl Sim {
                 u.consts.energy_restore_idle
             };
 
+            // The original ground mover resolves sprint before attack selection.
+            // Sample that transition so the selected combo can drive this move.
+            let stance = if u.is_player && !u.soldier.look_frozen() {
+                u.soldier
+                    .sprint_stance(pad, &u.consts, self.ground_rules, forward, strafe)
+            } else {
+                u.soldier.stance
+            };
             let input = ComboInput {
                 buttons,
-                posture: posture(u.soldier.stance),
+                posture: posture(stance),
                 energy: u.soldier.energy,
                 energy_depleted: u.soldier.energy_depleted,
                 normal_restore_rate,
@@ -106,7 +114,11 @@ impl Sim {
                     -sy * u.soldier.vel.x - cy * u.soldier.vel.z,
                 )
                 .to_degrees(),
-                time_in_posture: u.soldier.time_in_stance,
+                time_in_posture: if stance == u.soldier.stance {
+                    u.soldier.time_in_stance
+                } else {
+                    0.0
+                },
                 animation_velocity: [0.0; 2],
             };
             // The thrown saber (FUN_0033cda8, B2:333212-333249): while it

@@ -170,6 +170,7 @@ fn every_value_row_steps_by_pointer() {
         Row::Music,
         Row::MouseSensitivity,
         Row::PadLookSensitivity,
+        Row::FlightControls,
         Row::InputIcons,
     ];
     for m in [base, shell] {

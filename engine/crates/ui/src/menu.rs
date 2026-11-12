@@ -97,6 +97,7 @@ pub struct MenuModel {
     pub mouse_sensitivity: f32,
     /// The right stick's look sensitivity ([`PAD_LOOK_SENSITIVITY_RANGE`]).
     pub pad_look_sensitivity: f32,
+    pub rc_flight_controls: bool,
     pub invert_y: bool,
     pub low_power_resolution: bool,
     /// The Button prompts row's value and the footer's names.
@@ -148,6 +149,7 @@ pub enum MenuAction {
     SetMusic(f32),
     SetMouseSensitivity(f32),
     SetPadLookSensitivity(f32),
+    ToggleFlightControls,
     ToggleInvertY,
     ToggleLowPowerResolution,
     /// The Button prompts row, a step on (+1) or back (-1) through its choices.
@@ -247,6 +249,7 @@ pub enum Row {
     Music,
     MouseSensitivity,
     PadLookSensitivity,
+    FlightControls,
     InvertY,
     LowPowerResolution,
     InputIcons,
@@ -261,7 +264,7 @@ pub enum Row {
 
 /// The settings rows, in order: the shell's settings page and the Game
 /// Menu's Options page alike.
-pub fn settings_rows() -> [Row; 11] {
+pub fn settings_rows() -> [Row; 12] {
     [
         Row::Assist,
         Row::AiCap,
@@ -270,6 +273,7 @@ pub fn settings_rows() -> [Row; 11] {
         Row::Music,
         Row::MouseSensitivity,
         Row::PadLookSensitivity,
+        Row::FlightControls,
         Row::InvertY,
         Row::LowPowerResolution,
         Row::InputIcons,
@@ -348,6 +352,7 @@ pub fn press(m: &MenuModel, row: Row) -> Option<MenuAction> {
         Row::Cheats => MenuAction::OpenPage(PausePage::Cheats),
         Row::PageBack => MenuAction::ClosePage,
         Row::Restart => MenuAction::RequestRestart,
+        Row::FlightControls => MenuAction::ToggleFlightControls,
         // The flat list (space battles) quits at once, as it always has.
         Row::Quit if m.page.is_some() => MenuAction::RequestQuit,
         Row::Quit => MenuAction::Quit,
@@ -394,6 +399,14 @@ pub fn row_help(m: &MenuModel, row: Row) -> Option<String> {
              full turning speed before the stick's end. Flying a ship and space battles are not affected."
                 .to_owned(),
         ),
+        Row::FlightControls => Some(
+            if m.rc_flight_controls {
+                "Left stick controls yaw and throttle. Right stick controls roll and pitch."
+            } else {
+                "Left stick controls yaw and pitch. Right stick controls roll and throttle."
+            }
+            .to_owned(),
+        ),
         _ => None,
     }
 }
@@ -420,6 +433,7 @@ fn is_value_row(row: Row) -> bool {
             | Row::Music
             | Row::MouseSensitivity
             | Row::PadLookSensitivity
+            | Row::FlightControls
             | Row::InputIcons
     )
 }
@@ -535,6 +549,9 @@ pub fn navigate(m: &MenuModel, input: MenuInput) -> (usize, Vec<MenuAction>) {
             actions.push(MenuAction::SetPadLookSensitivity(
                 (((m.pad_look_sensitivity + d) * 10.0).round() / 10.0).clamp(lo, hi),
             ));
+        }
+        Row::FlightControls if input.left || input.right => {
+            actions.push(MenuAction::ToggleFlightControls)
         }
         Row::InvertY if input.confirm || input.left || input.right => {
             actions.push(MenuAction::ToggleInvertY)
@@ -892,6 +909,17 @@ fn row_text(m: &MenuModel, row: Row) -> (String, Option<String>) {
             "Controller look sensitivity".into(),
             Some(format!("{:.1}", m.pad_look_sensitivity)),
         ),
+        Row::FlightControls => (
+            "Flight controls".into(),
+            Some(
+                if m.rc_flight_controls {
+                    "RC Mode 2"
+                } else {
+                    "Classic"
+                }
+                .into(),
+            ),
+        ),
         Row::InvertY => ("Invert mouse Y".into(), on_off(m.invert_y)),
         Row::LowPowerResolution => (
             "Low power resolution".into(),
@@ -986,7 +1014,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                     }
                     let rows = rows(m);
                     let has_help = rows.iter().any(|r| {
-                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity)
+                        matches!(r, Row::Reinforcements | Row::InputIcons | Row::PadLookSensitivity | Row::FlightControls)
                             || row_locked(m, *r).is_some()
                     });
                     let mut hovered_help = None;

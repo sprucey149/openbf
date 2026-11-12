@@ -477,6 +477,12 @@ impl Preview {
             f32,
         ) -> Option<Vec<DrawCmd>>,
     ) -> (Vec<SkinnedDrawCmd>, Vec<DrawCmd>) {
+        // Interface draws use the camera's orientation and a local origin.
+        // A distant backdrop must not round away the preview's skin and depth.
+        let cam = &Camera {
+            position: Vec3::ZERO,
+            ..*cam
+        };
         let who = page.and_then(shown);
         let line = match page {
             Some(SpawnPage::Class {

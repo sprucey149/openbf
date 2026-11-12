@@ -103,6 +103,8 @@ fn action_name(bits: u32, walk: (i8, i8)) -> String {
         (b::SWITCH_WEAPON, "Next weapon"),
         (b::SWITCH_SECONDARY, "Secondary weapon"),
         (b::VIEW_TOGGLE, "Viewpoint"),
+        (b::FLYER_TRICK, "Starfighter stunt"),
+        (b::FLYER_REVERSE, "Starfighter reversal"),
         (b::SQUAD_MOVE_OUT, "Squad move"),
         (b::SQUAD_HOLD, "Squad hold"),
         (b::SQUAD_AT_EASE, "Squad at ease"),
@@ -248,7 +250,9 @@ fn setting_sound(
     }
     match rows.get(to)? {
         Row::Music | Row::Resume => None,
-        Row::InvertY | Row::InputIcons if input.confirm || input.left || input.right => {
+        Row::InvertY | Row::InputIcons | Row::FlightControls
+            if input.confirm || input.left || input.right =>
+        {
             Some(MenuSound::Accept)
         }
         _ if input.left || input.right => Some(MenuSound::Accept),
@@ -673,6 +677,7 @@ impl App {
                 music_volume: settings.music_volume,
                 mouse_sensitivity: settings.mouse_sensitivity,
                 pad_look_sensitivity: settings.pad_look_sensitivity,
+                rc_flight_controls: settings.flight_controls == input::FlightControls::RcMode2,
                 invert_y: settings.invert_y,
                 low_power_resolution: settings.low_power_resolution,
                 input_icons_label: settings.input_icons.label(),
@@ -694,9 +699,12 @@ impl App {
             for a in acts {
                 self.apply_shell_setting(&mut front, a);
             }
-            settings_model = front
-                .settings
-                .map(|cursor| ui::menu::MenuModel { cursor, ..model });
+            settings_model = front.settings.map(|cursor| ui::menu::MenuModel {
+                cursor,
+                rc_flight_controls: self.profile.settings.flight_controls
+                    == input::FlightControls::RcMode2,
+                ..model
+            });
         } else {
             match front.menus.step(input, start, dt) {
                 Some(ui::shell_ps2::ShellCommand::InstantAction) => {
@@ -906,6 +914,7 @@ impl App {
             MenuAction::SetPadLookSensitivity(v) => {
                 s.pad_look_sensitivity = game::profile::clamp_pad_look(v)
             }
+            MenuAction::ToggleFlightControls => s.flight_controls = s.flight_controls.toggled(),
             MenuAction::ToggleInvertY => s.invert_y = !s.invert_y,
             MenuAction::ToggleLowPowerResolution => {
                 s.low_power_resolution = !s.low_power_resolution

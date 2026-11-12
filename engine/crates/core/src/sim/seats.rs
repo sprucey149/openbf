@@ -925,6 +925,9 @@ impl Sim {
         }
         if human {
             v.input = inp;
+            if v.kind == VehicleKind::Flyer {
+                v.flyer.pilot_maneuvers.observe(pad.buttons);
+            }
             let full = super::look::mouse_drive(v, pad, full, walker.as_ref());
             ramp_stick_timer(&mut v.hover, full, crate::TICK_DT);
         } else if ai {
