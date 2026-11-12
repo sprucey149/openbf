@@ -114,17 +114,30 @@ fn worker_failure_panic_close_and_next_round_are_owned() {
 }
 
 #[test]
-fn only_shared_locations_have_ground_sequences() {
-    for (key, source) in [
+fn bf2_locations_use_only_same_planet_loading_donors() {
+    for (key, donor) in [
+        ("bf2_end1", "bf1_end1"),
+        ("bf2_geo1", "bf1_geo1"),
         ("bf2_hot1", "bf1_hot1"),
+        ("bf2_kam1", "bf1_kam1"),
+        ("bf2_kas2", "bf1_kas2"),
+        ("bf2_nab2", "bf1_nab2"),
         ("bf2_yav1", "bf1_yav1"),
         ("tat2", "bf1_tat2"),
         ("bf2_tat2", "bf1_tat2"),
+        ("bf2_tat3", "tat1"),
+        ("bf2_spa1", "bf1_yav1"),
+        ("bf2_spa3", "bf1_kas2"),
+        ("bf2_spa8", "bf1_hot1"),
+        ("bf2_spa9", "tat1"),
     ] {
-        assert_eq!(equivalent(key), Some(source));
+        assert_eq!(bf1_donor(key), Some(donor));
     }
-    for key in ["bf2_pol1", "bf2_uta1", "bf2_tat3", "bf2_myg1", "bf2_cor1"] {
-        assert_eq!(equivalent(key), None);
+    for key in [
+        "bf2_cor1", "bf2_dag1", "bf2_dea1", "bf2_fel1", "bf2_mus1", "bf2_myg1", "bf2_pol1",
+        "bf2_tan1", "bf2_uta1", "bf2_spa6", "bf2_spa7",
+    ] {
+        assert_eq!(bf1_donor(key), None);
     }
     assert!(presentation(Path::new("/nonexistent/loading-assets"), "bf2_pol1").is_none());
 }
@@ -325,6 +338,35 @@ fn capture_loading_overlap_and_setup() {
     );
     std::fs::create_dir_all(&out).unwrap();
     let mut receipts = Vec::new();
+    let context = ui::egui::Context::default();
+    for key in [
+        "bf2_end1", "bf2_geo1", "bf2_hot1", "bf2_kam1", "bf2_kas2", "bf2_nab2", "bf2_yav1", "tat2",
+        "bf2_tat3", "bf2_spa1", "bf2_spa3", "bf2_spa8", "bf2_spa9",
+    ] {
+        let display = Display::load(&root, key, &context);
+        assert!(
+            display.sample(Duration::ZERO).is_some(),
+            "{key} must play its planet's sequence"
+        );
+        assert_eq!(display.duration(), Duration::from_millis(13_500), "{key}");
+    }
+    let mut coruscant = app(root.clone());
+    coruscant.renderer = Some(render::Renderer::new_headless(640, 480).unwrap());
+    let mut session = ui::shell::SessionOptions::default();
+    for _ in 0..3 {
+        session.adjust(ui::shell::Opt::ConMult, -1, 1);
+    }
+    assert_eq!(session.con_mult, 70);
+    coruscant.start_playlist(vec![row("bf2_cor1", ui::shell::Mode::Con)], session);
+    let loading = coruscant.loading.as_mut().unwrap();
+    let prepared = await_worker(&mut loading.worker).unwrap();
+    coruscant.finish_loading();
+    coruscant.start_battle("bf2_cor1".into(), prepared).unwrap();
+    let walk = &coruscant.walk.as_ref().unwrap().0;
+    let tickets = walk.sim.battle.teams.map(|team| team.tickets());
+    assert_eq!(tickets, [145, 145]);
+    println!("Coruscant at {}%: {tickets:?}", walk.reinforcement_pct);
+    drop(coruscant);
     for key in ["bf1_bes1", "bf2_hot1", "bf2_pol1"] {
         let mut a = app(root.clone());
         let mut r = render::Renderer::new_headless(1280, 720).unwrap();

@@ -156,14 +156,20 @@ pub(super) fn prepare(dir: PathBuf, mode: String) -> anyhow::Result<Worker<Prepa
     })
 }
 
-/// Only direct shared locations get a complete BF1 sequence. Other locations
-/// use the galaxy alone, never another planet's ground imagery. This flat
-/// fallback is an openbf presentation choice, not original BF1 choreography.
-fn equivalent(key: &str) -> Option<&str> {
+/// BF2 locations reuse an authored sequence from the same planet. Prefer
+/// the matching location where BF1 has one. Space maps use their planet's
+/// ground sequence. A destination with no BF1 planet gets the galaxy view.
+fn bf1_donor(key: &str) -> Option<&str> {
     match key {
-        "bf2_hot1" => Some("bf1_hot1"),
-        "bf2_yav1" => Some("bf1_yav1"),
+        "bf2_end1" => Some("bf1_end1"),
+        "bf2_geo1" => Some("bf1_geo1"),
+        "bf2_hot1" | "bf2_spa8" => Some("bf1_hot1"),
+        "bf2_kam1" => Some("bf1_kam1"),
+        "bf2_kas2" | "bf2_spa3" => Some("bf1_kas2"),
+        "bf2_nab2" => Some("bf1_nab2"),
+        "bf2_yav1" | "bf2_spa1" => Some("bf1_yav1"),
         "tat2" | "bf2_tat2" => Some("bf1_tat2"),
+        "bf2_tat3" | "bf2_spa9" => Some("tat1"),
         _ => None,
     }
 }
@@ -175,7 +181,7 @@ pub(super) fn presentation(root: &Path, key: &str) -> Option<game::assets::LoadS
         .iter()
         .find(|(k, source, _)| k == key && source == "bf1")
         .map(|(_, _, dir)| dir.clone());
-    let target = own.or_else(|| equivalent(key).map(|k| root.join(k)));
+    let target = own.or_else(|| bf1_donor(key).map(|k| root.join(k)));
     if let Some(dir) = target {
         if let Some(ls) = game::assets::load_loadscreen(&dir).filter(|s| !s.pool) {
             return Some(ls);
@@ -241,7 +247,7 @@ impl Display {
         let dir = root.join("common_bf1/load");
         let config = pak::read_to_string(dir.join("layout.ron")).ok()?;
         let layout: manifest::LoadingLayout = ron::from_str(&config).ok()?;
-        let key = equivalent(key).unwrap_or(key);
+        let key = bf1_donor(key).unwrap_or(key);
         let targets = layout.maps.get(key.strip_prefix("bf1_").unwrap_or(key))?;
         if targets.len() != count {
             return None;
