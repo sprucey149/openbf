@@ -431,7 +431,9 @@ fn space_one_flag_bot_steering_ai() {
         assert!(v.flyer.ai.curve.is_some() || v.flyer.ai.goal == Some(home));
     }
 
-    // Pick up flag and verify AI goal changes to enemy capture region
+    // A bot that flies through the flag carries it, but the PS2's space
+    // one-flag gives `CTFOffense` weight 0 (`AIGoalWeight = 0.0` in every
+    // `spa*_1flag.luac`), so it takes no capture goal.
     sim.vehicle_mut(vh).unwrap().pos = home;
     step_sim(&mut sim, 0.1);
     let occupant = sim.vehicle(vh).unwrap().seats[0].occupant.unwrap();
@@ -439,5 +441,6 @@ fn space_one_flag_bot_steering_ai() {
 
     step_sim(&mut sim, 0.1);
     let v = sim.vehicle(vh).unwrap();
-    assert_eq!(v.flyer.ai.goal, Some(team0_goal));
+    assert_ne!(v.flyer.ai.goal, Some(team0_goal));
+    assert_ne!(v.flyer.ai.goal, Some(team1_goal));
 }

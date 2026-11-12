@@ -19,8 +19,11 @@ impl RoundRules {
         self.space.is_none()
     }
 
-    pub(crate) fn space_assault(self) -> bool {
-        matches!(self.space, Some(Space::Assault))
+    /// A space round whose scripts give the bots `AddAIGoal(team,
+    /// "Deathmatch", 100)`: every `spa*_ass.luac` and every `spa*_1flag.luac`
+    /// (whose CTF goal has weight 0, see `ai::flyer_drive::ctf_goal`).
+    pub(crate) fn space_deathmatch(self) -> bool {
+        matches!(self.space, Some(Space::Assault | Space::OneFlag))
     }
 }
 

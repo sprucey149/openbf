@@ -515,18 +515,11 @@ fn a_wall_refuses_a_route_and_a_vehicle_clear_field_does_not() {
 #[test]
 fn a_blocked_ctf_hop_keeps_the_authored_route() {
     use crate::collision::{Body, CollisionWorld, Layers, Shape};
-    let (mut s, b, v) = bf2_world();
-    let at = Vec3::new(0.0, 40.0, 0.0);
-    {
-        let c = s.vehicle_mut(v).unwrap();
-        c.pos = at;
-        c.vel = Vec3::ZERO;
-        c.flyer.phase = FlightPhase::Flying;
-    }
+    let (mut s, b, v, goal) = hop_world();
     // One wall between the pad and the flag, clear of the authored route.
     s.collision = CollisionWorld::new(
         vec![Body::with_layers(
-            glam::Mat4::from_translation(at + Vec3::X * 60.0),
+            glam::Mat4::from_translation(Vec3::new(60.0, 40.0, 0.0)),
             Shape::Box {
                 half: Vec3::new(5.0, 200.0, 200.0),
             },
@@ -534,28 +527,98 @@ fn a_blocked_ctf_hop_keeps_the_authored_route() {
         )],
         Vec::new(),
     );
-    let goal = Vec3::new(400.0, 40.0, 0.0);
-    s.install_ctf(CtfState::new_space_one_flag(
-        5,
-        goal,
-        Vec3::ZERO,
-        Vec3::ZERO,
-    ));
-    let p = s.flyer_params[s.vehicle(v).unwrap().class as usize]
-        .clone()
-        .unwrap();
+    s.install_ctf(one_flag(false, goal));
     let mut ai = FlyerAi::default();
-    bf2_plan(&s, b, s.vehicle(v).unwrap(), v, &p, &mut ai, None);
+    plan(&s, b, v, &mut ai);
     assert_ne!(ai.goal, Some(goal), "the blocked hop was taken");
     assert!(ai.cursor.is_some(), "the authored route plans the way out");
 
     // Without the wall the same goal is a direct hop.
     s.collision = CollisionWorld::new(Vec::new(), Vec::new());
     let mut ai = FlyerAi::default();
-    let c = s.vehicle(v).unwrap();
-    bf2_plan(&s, b, c, v, &p, &mut ai, None);
+    plan(&s, b, v, &mut ai);
     assert_eq!(ai.goal, Some(goal));
-    assert_eq!(ai.curve, Some(ctf_curve(c, goal)));
+    assert_eq!(ai.curve, Some(ctf_curve(s.vehicle(v).unwrap(), goal)));
+}
+
+/// A craft flying at (0, 40, 0) and a flag 400 m east of it.
+fn hop_world() -> (Sim, UnitHandle, VehicleHandle, Vec3) {
+    let (mut s, b, v) = bf2_world();
+    let c = s.vehicle_mut(v).unwrap();
+    c.pos = Vec3::new(0.0, 40.0, 0.0);
+    c.vel = Vec3::ZERO;
+    c.flyer.phase = FlightPhase::Flying;
+    (s, b, v, Vec3::new(400.0, 40.0, 0.0))
+}
+
+fn one_flag(space: bool, flag: Vec3) -> CtfState {
+    if space {
+        CtfState::new_space_one_flag(5, flag, Vec3::ZERO, Vec3::ZERO)
+    } else {
+        CtfState::new_ground_one_flag(5, flag, Vec3::ZERO, Vec3::ZERO)
+    }
+}
+
+fn plan(s: &Sim, b: UnitHandle, v: VehicleHandle, ai: &mut FlyerAi) {
+    let c = s.vehicle(v).unwrap();
+    let p = s.flyer_params[c.class as usize].clone().unwrap();
+    bf2_plan(s, b, c, v, &p, ai, None);
+}
+
+#[test]
+fn a_space_flag_draws_no_pilot() {
+    let (mut s, b, v, goal) = hop_world();
+    s.install_ctf(one_flag(true, goal));
+    let mut ai = FlyerAi::default();
+    plan(&s, b, v, &mut ai);
+    assert_ne!(ai.goal, Some(goal), "the flag was chased");
+    assert!(ai.cursor.is_some(), "the authored route is flown");
+}
+
+#[test]
+fn a_ctf_hop_the_hull_does_not_fit_is_refused() {
+    use crate::collision::{Body, CollisionWorld, HullPart, Layers, Shape};
+    let (mut s, b, v, goal) = hop_world();
+    s.install_ctf(one_flag(false, goal));
+    s.collision = CollisionWorld::new(
+        vec![Body::with_layers(
+            glam::Mat4::from_translation(Vec3::new(200.0, 45.0, 0.0)),
+            Shape::Box {
+                half: Vec3::new(150.0, 0.5, 100.0),
+            },
+            Layers::ALL | Layers::VEHICLE | Layers::FLYER,
+        )],
+        Vec::new(),
+    );
+    let mut ai = FlyerAi::default();
+    plan(&s, b, v, &mut ai);
+    assert_eq!(ai.goal, Some(goal), "a point craft passes under the slab");
+    s.hull_parts = vec![Some(std::sync::Arc::from(vec![HullPart::new(
+        glam::Mat4::IDENTITY,
+        Shape::Sphere { radius: 5.0 },
+        Layers::VEHICLE,
+    )
+    .with_flyer_subsets(true, true)]))];
+    let mut ai = FlyerAi::default();
+    plan(&s, b, v, &mut ai);
+    assert_ne!(ai.goal, Some(goal), "a 5 m hull grazes the slab");
+}
+
+#[test]
+fn a_route_segment_begun_is_flown_before_a_ctf_hop() {
+    let (mut s, b, v, goal) = hop_world();
+    s.install_ctf(one_flag(true, goal));
+    let mut ai = FlyerAi::default();
+    plan(&s, b, v, &mut ai);
+    let route = (ai.curve, ai.cursor);
+    assert!(route.1.is_some());
+    s.install_ctf(one_flag(false, goal));
+    ai.t = 0.5;
+    plan(&s, b, v, &mut ai);
+    assert_eq!((ai.curve, ai.cursor), route, "the segment was cut");
+    ai.t = 1.0;
+    plan(&s, b, v, &mut ai);
+    assert_eq!(ai.goal, Some(goal), "the hop follows the segment's end");
 }
 
 #[test]

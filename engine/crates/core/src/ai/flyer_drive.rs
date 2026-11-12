@@ -87,6 +87,9 @@ pub const WEDGED_MOVE: f32 = hover_drive::STUCK_MOVE;
 pub const WEDGED_TICKS: u64 = (hover_drive::STUCK_STILL * crate::TICK_HZ as f32) as u64;
 /// OURS: the ray's reach in that search.
 pub const WEDGED_RAY: f32 = 200.0;
+/// OURS: chords [`hull_clear`] samples a CTF hop at. `replace:` with the
+/// original's test once traced.
+const HOP_SAMPLES: usize = 8;
 /// OURS: how long a way out holds against the upward probe.
 pub const WEDGED_HOLD: u64 = 6 * crate::TICK_HZ as u64;
 /// OURS: how many ways out a craft tries before its pilot leaves it, or, a
@@ -327,8 +330,13 @@ fn post_point(sim: &Sim, me: UnitHandle, salt: u32) -> Option<Vec3> {
     Some(sim.cps[k].def.pos + Vec3::Y * POST_CLEARANCE)
 }
 
+/// The flag a pilot flies at, or its own capture region while carrying it.
+/// None in a space round: every PS2 `spa*_1flag.luac` builds its
+/// `ObjectiveOneFlagCTF` with `AIGoalWeight = 0.0`, and
+/// `objectiveoneflagctf.luac` registers `CTFOffense` at 100 x that weight, so
+/// the space bots' only goal is the script's `Deathmatch` at 100.
 fn ctf_goal(sim: &Sim, me: UnitHandle) -> Option<Vec3> {
-    let ctf = sim.ctf.as_ref()?;
+    let ctf = sim.ctf.as_ref().filter(|c| !c.is_space())?;
     let my_team = sim.unit(me).map_or(0, |u| u.team);
     for flag in &ctf.flags {
         match flag.status {
@@ -616,9 +624,40 @@ pub(crate) fn clear_chord(sim: &Sim, a: Vec3, b: Vec3, handle: VehicleHandle) ->
 fn curve_clear(sim: &Sim, curve: &[Vec3; 4], handle: VehicleHandle) -> bool {
     let points =
         [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0].map(|t| crate::vehicle::flyer::curve_at(curve, t).0);
-    points
-        .windows(2)
-        .all(|w| clear_chord(sim, w[0], w[1], handle))
+    chords_clear(sim, &points, 0.0, handle)
+}
+
+/// OURS, for the CTF hop only: `curve` sampled at [`HOP_SAMPLES`] chords, each
+/// tested down its centre and at the hull's bounding radius above, below and
+/// to each side. A centre ray alone let a hop graze a hangar's frame on spa6
+/// one-flag, killing 16 of 42 sorties 1.5 to 3 s after takeoff (seed 7).
+/// `replace:` with the original's clearance test if a CTF flight goal is
+/// ever traced; the PS2's space one-flag gives its CTF goal weight 0
+/// (`objectiveoneflagctf.luac`), so space pilots never take this hop.
+fn hull_clear(sim: &Sim, v: &Vehicle, curve: &[Vec3; 4], handle: VehicleHandle) -> bool {
+    let radius = sim
+        .hull_parts
+        .get(v.class as usize)
+        .and_then(Option::as_deref)
+        .map_or(0.0, crate::collision::bounding_radius);
+    let points: [Vec3; HOP_SAMPLES + 1] = std::array::from_fn(|k| {
+        crate::vehicle::flyer::curve_at(curve, k as f32 / HOP_SAMPLES as f32).0
+    });
+    chords_clear(sim, &points, radius, handle)
+}
+
+/// Every chord between consecutive `points` clear ([`clear_chord`]); with a
+/// `radius`, also the four chords that far above, below and to each side.
+fn chords_clear(sim: &Sim, points: &[Vec3], radius: f32, handle: VehicleHandle) -> bool {
+    points.windows(2).all(|w| {
+        let along = (w[1] - w[0]).try_normalize().unwrap_or(Vec3::Z);
+        let side = along.cross(Vec3::Y).try_normalize().unwrap_or(Vec3::X) * radius;
+        let up = side.cross(along);
+        let ring = [Vec3::ZERO, up, -up, side, -side];
+        let ring = if radius > 0.0 { &ring[..] } else { &ring[..1] };
+        ring.iter()
+            .all(|o| clear_chord(sim, w[0] + *o, w[1] + *o, handle))
+    })
 }
 
 /// FUN_002ff478 and FUN_002f9498: the best path end to join, as a connection
@@ -763,14 +802,18 @@ fn bf2_plan(
     }
     if let Some(goal) = ctf_goal(sim, me) {
         let to = goal - v.pos;
+        let on_route = ai.cursor.is_some() && ai.curve.is_some() && ai.t < 1.0;
         if to.length_squared() > 15.0 * 15.0
+            && !on_route
             && (ai.curve.is_none() || ai.t >= 1.0 || ai.goal != Some(goal))
         {
             // A hangar wall between the pad and the flag does not make the
             // direct hop flyable: only take it when every sampled chord is
-            // clear, else the authored route plans the way out (spa1).
+            // clear, else the authored route plans the way out (spa1). OURS:
+            // a route segment already begun is flown to its end first, and
+            // the hull must fit the whole hop ([`hull_clear`]).
             let curve = ctf_curve(v, goal);
-            if curve_clear(sim, &curve, handle) {
+            if hull_clear(sim, v, &curve, handle) {
                 ai.goal = Some(goal);
                 ai.curve = Some(curve);
                 ai.cursor = None;

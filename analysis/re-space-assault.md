@@ -1396,3 +1396,52 @@ The isolated release executable packed 28,729 files and replaced `dist/openbf.ex
 **Distribution data after smoke check.** The later inventory had 125 files including hidden files and 17,704,691 bytes. `profile.ron` had a newer modification time and the playtest `last.json`/`prev*.json` chain had rotated. A SHA-256 verified copy of the current tree is at `engine/artifacts/lead_tmp/dist-openbf_data-after-smoke-2026-11-11/`, with its manifest at `engine/artifacts/lead_tmp/dist-openbf_data-after-smoke-2026-11-11.json`; the check record is `engine/artifacts/lead_tmp/issue-137/dist-data-smoke-side-effect-2026-11-11.txt` [M]. The earlier manifest captured sizes and timestamps only, and no exact backup of the older rolling files or profile contents was available. I left the current data tree untouched rather than restore from incomplete metadata and risk discarding newer playtest state. No further `dist/openbf.exe` process was launched.
 
 **Closure decision (2026-11-11).** The maintainer asked the parity PR to close #123 and #137 on merge. The chunk/prim/parser change is `09de63b`. #137 closes on the measured native death, the replayed 0/1/4/7.5/8.5 s image sequence and timer tail, plus the port's six-map/22-frigate lifecycle test and the map-prim/Omega checks. The six-map native comparison and a camera-matched scale/brightness comparison were not completed; they are recorded as unmeasured above and are not promoted to evidence by this decision. #123 closes on the traced dispatch and warning paths, the controlled native warning/dispatch samples, the localized shield-impact image change and the focused port tests. A positive natural enemy-launch missile sample and exact HUD-distance conversion, host audio capture, native repair/re-destruction scoring, and the twelve played map/side captures were not completed. Those gaps remain visible in this record and in the issue comments; closing the issues does not claim them as measured.
+
+## 28. Space bots: one-flag goals, takeoff crashes, the walk target (2026-11-12, #122)
+
+Report: on spa6, bots on foot crowd around the shield area, most bots taking off hit their own ship and die, and the round feels much harder than the PS2's. The user's own match logs (`dist/openbf_data/playtest/matches/`) are almost all `*_1flag.ron`, so both one-flag and Assault were measured. A scratch harness built like `game/examples/space_sweep.rs` (not kept) ran 5400 ticks of seed 7 with no human, logging takeoffs, impacts and the foot bots' goals every 2 s.
+
+### One-flag runs the Assault bots' goal
+
+Every PS2 `spa*_1flag.luac` (spa1g, spa3c, spa6c, spa7c, spa8g, spa9g) builds `ObjectiveOneFlagCTF` with `AIGoalWeight = 0.0` and adds `AddAIGoal(team, "Deathmatch", 100)` for both teams. `objectiveoneflagctf.luac` registers `CTFOffense` at 100 × `AIGoalWeight`. The goals were read with `scripts/gen_missions.py`'s 5.0 reader (`calls50`, `consts`). So the space bots never play the flag. Their only goal is the Deathmatch walk of §15, the same as in Assault.
+
+The port gave one-flag bots neither: no Deathmatch walk on foot and no 50 m flyer claim, and its pilots chased the flag with a direct hop (`flyer_drive::ctf_goal` / `ctf_curve`, OURS, never traced). Now `RoundRules::space_deathmatch` (Assault or OneFlag) gates the walk (`route/retarget.rs`) and the claim (`ai/ride.rs`), and `ctf_goal` answers `None` in a space round. A ground CTF keeps the hop. `measure:` that a PS2 bot never picks up the space flag on purpose.
+
+### Takeoff crashes
+
+One-flag, spa6 seed 7, before: 42 takeoffs, 44 impacts within 30 s of takeoff, 16 lethal. Single hits of 1,100 to 6,700 damage came 1.5 to 3 s after takeoff at fixed spots in both hangars, e.g. (-446, 22, -1170) and (-907, -130, 266). Each followed a CTF hop taken either at the first Flying tick or partway through the authored route's first segment. The hop's chords were tested with centre rays only, so a hop that grazed the hangar frame passed.
+
+After the changes: 27 takeoffs, 22 impacts, 4 lethal. Assault is unchanged at 52 takeoffs and 4 lethal (it never took the hop). For a ground CTF, the hop now waits for a begun route segment to end, and must clear the hull's bounding radius above, below and to each side over 8 chords (`hull_clear`, OURS, `replace:` once a CTF flight goal is traced).
+
+The remaining early deaths are flyer against flyer (20% of MaxHealth per contact, §Hull contact) and bots in flight. Whether the PS2 keeps its AI followers apart is open. `FUN_002fccd0` has no follower-against-follower avoidance (its corrections are the jink timer `+0x7c`, the launch block at `+0xfc`, and the 15/10 m jump limit). `FUN_00202880` writes the body's matrix after the follower, and FUN_0020bff8's response skips a pair when the other body's collision value is lower (line 121755, `trace:` what that value is).
+
+### The walk target: a flying ship is not one
+
+State 3 of `FUN_002c62a8` asks `FUN_002accb0` → `FUN_002ac8f8` (line 219523), which returns `*kind != 0`. For soldier against flyer (type 5), `FUN_002ac2b8` (219222) takes the normal test `FUN_002abee0` only when the craft's flight state `+0x60c` is 0 and it is of class `DAT_0069a420`. Otherwise `FUN_002ac270` (219207) writes only the weapon byte (`FUN_002ab590`) and leaves the kind at 0. `deathmatch_enemy_goal` now refuses a foe in a flyer that is not Landed. At seed 7 this changed nothing: `against_ride` had already refused those foes for rifle-armed soldiers. The rule is kept as traced.
+
+### The one-flag crowd at the locked doors
+
+The playtest of the one-flag build on spa6 found the bots on foot massed at closed doors in their own ship. `bf2_spa6_1flag` locks six doors (`rep_cap2_door1`..`3`, `cis_cap1_door3`..`5`), leaves the six `*_cap*_bar*` barriers on them enabled, and calls `BlockPlanningGraphArcs("connection54")`. That block selects `plnp` group 1. With the patch applied, the route table holds no entry from Republic hubs 34-40 (hangar, shield room) to hubs 41-48, which lie behind the three Republic doors. In Assault every one of those entries is present.
+
+`FUN_002ec380` (B2:264272) is the hub draw of state 2. It finds the bot's nearest hub of its type, then draws up to 2 × n hubs and takes the first for which `FUN_002eb000` (B2:263410), called with no arc barred, returns a hop. That answer comes from the route table rows alone. The port asked arc connectivity (`NavGraph::reachable_by`), which the patch does not change, so its bots drew hubs 41-48 and walked into the locked doors. `NavGraph::routed_by` now asks the table. It falls back to the arcs only for a hub with no table row. Both the hub draw and the port's reachability test on the enemy goal use it.
+
+spa6 one-flag, seed 7, 5400 ticks, foot samples every 2 s from 20 s on:
+
+| | foot samples | within 6 m of a locked door | bot takeoffs | lethal impacts within 30 s |
+|---|---|---|---|---|
+| before | 1465 | most of team 0's top cells | 27 | 4 |
+| after | 569 | 0 | 54 | 6 |
+
+Assault is unchanged at 52 takeoffs and 4 lethal impacts. `the_space_walk_draws_no_hub_the_route_table_cuts_off` holds the rule.
+
+### Why they crowd: Hub56's floor (not fixed)
+
+On spa6, team 0's foot goals land on hub index 47 (`Hub56`, (-440, -1313), radius 2) in 96 of the 2 s samples, and the bots circle 24 to 58 m short of it. Both games aim at the hub's centre: `FUN_002a9150` (217205) draws 40 points with `FUN_002ea128` (262790), which is centre + random direction × max(r − 10, 0), and falls back to ±100 m only when no hub was found.
+
+The route table is right: from hub 40 (`Hub49`) row 0 is arc 37 to hub 46 (`Hub55`), then arc 39 to 47. The port's floor resolution is wrong (`Sim::resolve_nav_floors`). The breadth-first walk gives `Hub55` the deck at 0.54. `Hub56` and `Hub57` lie across a 7 m trench whose floor is -2.1 to -2.7, so they resolve to -2.11 and -2.12. They then out-vote `Hub55` onto the hidden floor under the deck (-2.13). The follower rejects the leg to `Hub55` as off the unit's level, the chooser takes a random other arc (`any_other_arc`), and the bots loop through the `Hub50`..`Hub53` spur. That loop is the crowd.
+
+`measure:` on the PS2 how its soldiers reach `Hub56` across the trench. Then fix the vote, which is OURS and applies to every map.
+
+### Difficulty (not fixed)
+
+The user's Space Tatooine one-flag log `20261111-131734_bf2_spa9.jsonl` has eight deaths, all seated in a ship, 18 to 74 s after spawning. Seven are recorded as `Blast`, which is `Sim::unit_killed` with no killer. These ships were destroyed with no credited attacker: unmanned turrets, collisions with crashing bots, or blasts. §15 already records the port's turrets firing about twice the PS2's rate per living turret, because of OURS nearest-target selection. `measure:` with the black box which of these killed the ship.

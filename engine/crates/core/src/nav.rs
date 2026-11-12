@@ -631,6 +631,24 @@ impl NavGraph {
             || (m.jet && self.route_bfs(from, to, m, &|_| true).is_some())
     }
 
+    /// Whether the route table, as the mission's `plnp` patches left it, leads
+    /// from `from` towards `to`: `FUN_002eb000` (B2:263410) with no arc
+    /// barred answers a hop iff one of `from`'s rows holds a non-zero entry
+    /// for `to`. `FUN_002ec380` (B2:264272) draws a Deathmatch hub only when
+    /// it does, so a hub a blocked group cuts off (the doors spa6 one-flag
+    /// locks with `BlockPlanningGraphArcs("connection54")`) is never drawn,
+    /// though its arcs still join it. Without a table for this hub it falls
+    /// back to [`NavGraph::reachable_by`], the port's BFS stand-in.
+    pub(crate) fn routed_by(&self, from: u16, to: u16, m: Mover) -> bool {
+        if from == to {
+            return true;
+        }
+        if self.routes.row(m.ty, from as usize, 0).is_none() {
+            return self.reachable_by(from, to, m);
+        }
+        self.routes.entries(m.ty, from, to).next().is_some()
+    }
+
     pub fn hub(&self, i: u16) -> Option<&Hub> {
         self.hubs.get(i as usize)
     }
