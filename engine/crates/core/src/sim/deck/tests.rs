@@ -32,7 +32,9 @@ fn deck(rules: GroundRules) -> (Sim, usize, usize) {
         .into(),
     )];
     s.sync_hulls();
-    let p = s.spawn(&UnitSpec::player(0, Vec3::new(0.0, 2.0, 0.0))).unwrap();
+    let p = s
+        .spawn(&UnitSpec::player(0, Vec3::new(0.0, 2.0, 0.0)))
+        .unwrap();
     s.sync_slot_tables();
     (s, p.index as usize, v.index as usize)
 }
@@ -127,7 +129,10 @@ fn off_the_flyers_floor_for_half_a_second_he_is_let_go() {
     assert!((0.5..0.6).contains(&t), "let go after {t} s");
     let y = s.units[p].soldier.pos.y;
     let one_tick = crate::soldier::GRAVITY * TICK_DT * TICK_DT;
-    assert!((y - (2.5 - one_tick)).abs() < 1e-3, "no gravity while carried: {y}");
+    assert!(
+        (y - (2.5 - one_tick)).abs() < 1e-3,
+        "no gravity while carried: {y}"
+    );
 }
 
 #[test]

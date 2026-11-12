@@ -72,13 +72,16 @@ impl WalkerRig {
     }
 
     pub fn flyer_nodes(&self, lift: f32) -> Option<Vec<Mat4>> {
-        Some(
-            self.flyer_palette(lift)?
-                .iter()
-                .zip(&self.skeleton.global_bind)
-                .map(|(palette, bind)| *palette * *bind)
-                .collect(),
-        )
+        Some(self.bind_nodes(&self.flyer_palette(lift)?))
+    }
+
+    /// Bone nodes in bind space (`palette * global_bind`).
+    fn bind_nodes(&self, palette: &[Mat4]) -> Vec<Mat4> {
+        palette
+            .iter()
+            .zip(&self.skeleton.global_bind)
+            .map(|(p, b)| *p * *b)
+            .collect()
     }
 
     /// The rig from a skin GLB's skeleton and clips and the class's walker
@@ -210,22 +213,13 @@ impl WalkerRig {
     }
 
     pub fn nodes(&self, v: &core::vehicle::Vehicle, root_scale: f32) -> Vec<Mat4> {
-        let walk: Vec<_> = self
-            .palette(&v.walker, root_scale)
-            .iter()
-            .zip(&self.skeleton.global_bind)
-            .map(|(p, b)| *p * *b)
-            .collect();
+        let walk = self.bind_nodes(&self.palette(&v.walker, root_scale));
         self.aim.pose(&self.skeleton, &walk, v)
     }
 
     pub fn aimed_palette(&self, v: &core::vehicle::Vehicle, root_scale: f32) -> Vec<Mat4> {
         let palette = self.palette(&v.walker, root_scale);
-        let walk: Vec<_> = palette
-            .iter()
-            .zip(&self.skeleton.global_bind)
-            .map(|(p, b)| *p * *b)
-            .collect();
+        let walk = self.bind_nodes(&palette);
         let now = self.aim.pose(&self.skeleton, &walk, v);
         now.iter()
             .enumerate()
@@ -269,12 +263,7 @@ impl WalkerRig {
         if let Some(r) = self.bone_root.filter(|_| root_scale != 1.0) {
             locals[r] *= Mat4::from_scale(Vec3::splat(root_scale));
         }
-        self.skeleton
-            .palette(&locals)
-            .iter()
-            .zip(&self.skeleton.global_bind)
-            .map(|(p, b)| *p * *b)
-            .collect()
+        self.bind_nodes(&self.skeleton.palette(&locals))
     }
 
     pub fn node_now(

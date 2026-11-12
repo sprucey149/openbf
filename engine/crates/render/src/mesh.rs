@@ -98,7 +98,7 @@ impl Instance {
     // Locations 4..=8 continue after the mesh attributes; the cull skips to
     // 11 because `SkinnedVertex` already owns 9 and 10 and shares this
     // instance buffer.
-    const ATTRIBS: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
+    const ATTRIBS: [wgpu::VertexAttribute; 12] = wgpu::vertex_attr_array![
         4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4, // model cols
         8 => Float32x4, // color
         11 => Float32x2, // cull band [lo, hi], metres
@@ -106,35 +106,17 @@ impl Instance {
         13 => Uint32,   // light path
         14 => Float32x4, // fade [begin, end, near] metres, opacity
         15 => Uint16x4, // light-table records, 0 = none
+        // Rigid-only, after the fields every pipeline shares: the region
+        // light's top and bottom planes (`region_lit`).
+        9 => Float32x4,
+        10 => Float32x4,
     ];
 
     pub(crate) fn rigid_layout() -> wgpu::VertexBufferLayout<'static> {
-        const ATTRS: [wgpu::VertexAttribute; 12] = [
-            Instance::ATTRIBS[0],
-            Instance::ATTRIBS[1],
-            Instance::ATTRIBS[2],
-            Instance::ATTRIBS[3],
-            Instance::ATTRIBS[4],
-            Instance::ATTRIBS[5],
-            Instance::ATTRIBS[6],
-            Instance::ATTRIBS[7],
-            Instance::ATTRIBS[8],
-            Instance::ATTRIBS[9],
-            wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32x4,
-                offset: std::mem::offset_of!(Instance, region_top) as u64,
-                shader_location: 9,
-            },
-            wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32x4,
-                offset: std::mem::offset_of!(Instance, region_bottom) as u64,
-                shader_location: 10,
-            },
-        ];
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Instance>() as u64,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &ATTRS,
+            attributes: &Self::ATTRIBS,
         }
     }
 
@@ -142,7 +124,7 @@ impl Instance {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<Instance>() as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &Self::ATTRIBS,
+            attributes: &Self::ATTRIBS[..10],
         }
     }
 }

@@ -7,7 +7,6 @@ use crate::collision::{HullFilter, Layers};
 use crate::guided::{GuidedClass, GuidedEnd, GuidedRocket, COLLISION_RADIUS_PROVISIONAL as RADIUS};
 use crate::projectile::{Hit, Target};
 use crate::unit::{Controller, UnitHandle};
-use crate::vehicle::flyer::FlyerEnvironment;
 use crate::vehicle::hover::HoverInput;
 use crate::weapon::DamageDesc;
 use glam::Vec3;
@@ -247,25 +246,6 @@ impl Sim {
         })
     }
 
-    fn guided_env(&self, r: &GuidedRocket, human: bool) -> FlyerEnvironment {
-        let (in_landing_region, almost_inside_landing_region) = self.landing_coverage(r.pos, 0.0);
-        let [min_height, max_height] = if human {
-            self.flight_limits.player
-        } else {
-            self.flight_limits.ai
-        };
-        FlyerEnvironment {
-            ground: None,
-            min_height,
-            max_height,
-            in_landing_region,
-            almost_inside_landing_region,
-            require_landing_region: !self.landing_regions.is_empty(),
-            player_aboard: true,
-            crash_random: [0.0; 4],
-        }
-    }
-
     fn guided_flight_input(&self, r: &GuidedRocket, pad: &PadState) -> HoverInput {
         let (input, _) = super::seats::driver_input(pad);
         if self
@@ -275,10 +255,10 @@ impl Sim {
             if !pad.has_look() {
                 return input;
             }
-            let (dy, dp) = pad.look();
+            let (turn, pitch) = super::look::look_steer(input.turn, input.pitch, pad.look());
             HoverInput {
-                turn: (input.turn + dy / super::MOUSE_STEER).clamp(-1.0, 1.0),
-                pitch: (input.pitch + dp / super::MOUSE_STEER).clamp(-1.0, 1.0),
+                turn,
+                pitch,
                 ..input
             }
         } else {
@@ -334,9 +314,14 @@ impl Sim {
                 let previous = r.pos;
                 let pad = pads.get(k).copied().unwrap_or_default();
                 let input = self.guided_flight_input(&r, &pad);
-                let env = self.guided_env(&r, input.human);
-                let c = c.clone();
-                r.fly(&c, input, env, dt);
+                let env = self.flyer_environment(
+                    input.human,
+                    self.landing_coverage(r.pos, 0.0),
+                    None,
+                    true,
+                    [0.0; 4],
+                );
+                r.fly(c, input, env, dt);
                 if let Some((pos, target)) = self.guided_contact(&r, previous) {
                     r.pos = pos;
                     self.guided_strike(&mut r, target);
@@ -428,18 +413,11 @@ impl Sim {
         match target {
             Target::Unit(h) => {
                 let shooter_is_player = self.unit(owner).is_some_and(|u| u.is_player);
-                let Some(victim) = self.unit(h) else {
-                    return;
-                };
-                let spared = self.shot_spares(r.team, shooter_is_player, victim);
-                let friendly = self.allied(r.team, victim.team);
-                let ff = self.friendly_fire_scale;
                 let mult = self.buff_scale(Some(owner), h);
-                let dealt = if spared {
-                    0.0
-                } else {
-                    self.unit_mut(h)
-                        .map_or(0.0, |u| u.health.take_damage(&desc, mult, friendly, ff))
+                let Some(dealt) =
+                    self.shot_strikes_unit(r.team, shooter_is_player, h, &desc, mult, false)
+                else {
+                    return;
                 };
                 self.finish_direct_damage(h, Some(owner), dealt, 0.0, dir);
             }

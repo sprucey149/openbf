@@ -225,26 +225,42 @@ pub struct FlyerExhaust {
     pub scale: [f32; 3],
 }
 
+/// The PS2 keeps at most eight thrust effects per class (`FUN_00211a40`,
+/// B2:124203-124223); a later `ThrustEffect` is dropped.
+const MAX_THRUST_EFFECTS: usize = 8;
+
 fn flyer_exhaust(db: &ClassDb, class: &str, nodes: &[ManifestHardpoint]) -> Vec<FlyerExhaust> {
+    // `FUN_00211a40` reads these keys in ODF order, each applying to the most
+    // recent `ThrustEffect` (B2:124203-125043).
+    let (effect_key, point_key, offset_key) = (
+        fnv1a_lowercase("ThrustEffect"),
+        fnv1a_lowercase("ThrustAttachPoint"),
+        fnv1a_lowercase("ThrustAttachOffset"),
+    );
+    let (min_scale_key, max_scale_key, start_scale_key) = (
+        fnv1a_lowercase("ThrustEffectMinScale"),
+        fnv1a_lowercase("ThrustEffectMaxScale"),
+        fnv1a_lowercase("ThrustEffectScaleStart"),
+    );
     let mut effects: Vec<(String, Option<String>, Vec3, [f32; 3])> = Vec::new();
     for def in db.chain(class).into_iter().rev() {
         for (key, value) in &def.props {
-            if *key == 143972182 && effects.len() < 8 {
+            if *key == effect_key && effects.len() < MAX_THRUST_EFFECTS {
                 effects.push((value.trim().to_owned(), None, Vec3::ZERO, [1.0, 1.0, 0.0]));
             } else if let Some((_, node, offset, scale)) = effects.last_mut() {
                 let slot = match *key {
-                    4050953208 => Some(0),
-                    3288168522 => Some(1),
-                    3916448184 => Some(2),
+                    k if k == min_scale_key => Some(0),
+                    k if k == max_scale_key => Some(1),
+                    k if k == start_scale_key => Some(2),
                     _ => None,
                 };
                 if let Some(i) = slot {
                     if let Ok(v) = value.trim().parse::<f32>() {
                         scale[i] = v;
                     }
-                } else if *key == 772102128 {
+                } else if *key == point_key {
                     *node = Some(value.trim().to_owned());
-                } else if *key == 880236393 {
+                } else if *key == offset_key {
                     let values: Vec<_> = value
                         .split_whitespace()
                         .filter_map(|x| x.parse::<f32>().ok())

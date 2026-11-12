@@ -531,6 +531,13 @@ impl VehicleVisuals {
                 v.rot
             };
             let m = Mat4::from_rotation_translation(rot, v.pos);
+            let sphere = sim
+                .blast_setup
+                .get(v.class as usize)
+                .and_then(Option::as_ref);
+            let (centre, radius) = sphere.map_or((v.pos, 0.0), |s| {
+                (m.transform_point3(s.sphere_centre), s.sphere_radius)
+            });
             if self.bf1_shadows
                 && self.shadows_on
                 && v.kind != core::vehicle::VehicleKind::Turret
@@ -542,12 +549,6 @@ impl VehicleVisuals {
                 } else {
                     150.0
                 };
-                let sphere = sim
-                    .blast_setup
-                    .get(v.class as usize)
-                    .and_then(Option::as_ref);
-                let radius = sphere.map_or(0.0, |s| s.sphere_radius);
-                let centre = sphere.map_or(v.pos, |s| m.transform_point3(s.sphere_centre));
                 let origin = if walker {
                     let leg_radius = sim
                         .walker_params
@@ -594,15 +595,8 @@ impl VehicleVisuals {
                 (self.cull, self.spec_cull),
                 fade,
             );
-            if let Some(sphere) = sim
-                .blast_setup
-                .get(v.class as usize)
-                .and_then(Option::as_ref)
-            {
-                let lit = render::LitSphere {
-                    centre: m.transform_point3(sphere.sphere_centre),
-                    radius: sphere.sphere_radius,
-                };
+            if sphere.is_some() {
+                let lit = render::LitSphere { centre, radius };
                 for draw in &mut out[first_draw..] {
                     draw.lit = Some(lit);
                     draw.region_lit = Some(lit);
@@ -735,34 +729,24 @@ pub fn walker_rigs(
     assets_dir: &Path,
     geometry: &[Option<String>],
 ) -> Vec<Option<std::sync::Arc<WalkerRig>>> {
-    let sides = VehicleSides::load(assets_dir, &manifest.source_game.to_ascii_lowercase());
-    geometry
-        .iter()
-        .map(|g| {
-            let Some(ModelSource::Side(i, model)) = find_model(manifest, &sides, g.as_deref()?)
-            else {
-                return None;
-            };
-            let w = sides.0[i].walkers.get(&model.to_ascii_lowercase())?;
-            let path = sides.dir(i).join("walkers").join(format!("{model}.glb"));
-            let a = load_skinned_glb(&path).ok()?;
-            Some(std::sync::Arc::new(
-                WalkerRig::new(a.skeleton, a.clips, w).with_seats(
-                    sides.0[i]
-                        .walker_seats
-                        .get(&model.to_ascii_lowercase())
-                        .cloned()
-                        .unwrap_or_default(),
-                ),
-            ))
-        })
-        .collect()
+    skinned_rigs(manifest, assets_dir, geometry, false)
 }
 
+/// Each flyer class's skinned rig: its model's takeoff clip lifts the drawn
+/// nodes (`WalkerRig::flyer_palette`).
 pub fn flyer_rigs(
     manifest: &manifest::Manifest,
     assets_dir: &Path,
     geometry: &[Option<String>],
+) -> Vec<Option<std::sync::Arc<WalkerRig>>> {
+    skinned_rigs(manifest, assets_dir, geometry, true)
+}
+
+fn skinned_rigs(
+    manifest: &manifest::Manifest,
+    assets_dir: &Path,
+    geometry: &[Option<String>],
+    flyer: bool,
 ) -> Vec<Option<std::sync::Arc<WalkerRig>>> {
     let sides = VehicleSides::load(assets_dir, &manifest.source_game.to_ascii_lowercase());
     geometry
@@ -771,15 +755,22 @@ pub fn flyer_rigs(
             let ModelSource::Side(i, model) = find_model(manifest, &sides, g.as_deref()?)? else {
                 return None;
             };
-            if !sides.0[i].flyers.contains(&model.to_ascii_lowercase()) {
-                return None;
-            }
+            let side = &sides.0[i];
+            let name = model.to_ascii_lowercase();
             let path = sides.dir(i).join("walkers").join(format!("{model}.glb"));
-            let asset = load_skinned_glb(&path).ok()?;
-            Some(std::sync::Arc::new(WalkerRig::new_flyer(
-                asset.skeleton,
-                asset.clips,
-            )))
+            let rig = if flyer {
+                if !side.flyers.contains(&name) {
+                    return None;
+                }
+                let a = load_skinned_glb(&path).ok()?;
+                WalkerRig::new_flyer(a.skeleton, a.clips)
+            } else {
+                let w = side.walkers.get(&name)?;
+                let a = load_skinned_glb(&path).ok()?;
+                WalkerRig::new(a.skeleton, a.clips, w)
+                    .with_seats(side.walker_seats.get(&name).cloned().unwrap_or_default())
+            };
+            Some(std::sync::Arc::new(rig))
         })
         .collect()
 }

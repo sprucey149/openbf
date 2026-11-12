@@ -205,18 +205,22 @@ impl EffectModel {
     }
 }
 
+/// The submesh flag bit that marks an additive sheet in `era`'s bake.
+pub fn additive_bit(era: Era) -> u32 {
+    match era {
+        Era::Bf1 => 0x80,
+        Era::Bf2 => 0x40,
+    }
+}
+
 pub fn geometry_look(
     era: Era,
     forced: bool,
     flags: u32,
     color: [u8; 4],
 ) -> Option<(bool, [u8; 4])> {
-    let additive_bit = match era {
-        Era::Bf1 => 0x80,
-        Era::Bf2 => 0x40,
-    };
     (forced || color[3] != 255 || flags & 0x06 != 0)
-        .then_some((forced || flags & additive_bit != 0, color))
+        .then_some((forced || flags & additive_bit(era) != 0, color))
 }
 
 /// A GEOMETRY particle's model matrix (§6.6): `T(pos)·basis·R_y(rot)·S(size)`

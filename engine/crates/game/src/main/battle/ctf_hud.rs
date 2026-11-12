@@ -7,25 +7,22 @@ fn visible(
     from: glam::Vec3,
     to: glam::Vec3,
 ) -> bool {
-    let mounted = |unit| sim.unit(unit).and_then(|u| u.mount).map(|m| m.vehicle);
-    let own = mounted(viewer);
-    let other = target.and_then(mounted);
-    let building = |vehicle: Option<core::vehicle::VehicleHandle>| {
-        vehicle
-            .and_then(|v| sim.vehicle(v))
-            .and_then(|v| v.instance)
-    };
+    let target = target.unwrap_or(viewer);
     core::perception::los_seat(
         sim,
         from,
         to,
-        core::collision::HullFilter::Except([own, other]),
-        [building(own), building(other)],
+        core::perception::past_mounts(sim, viewer, target),
+        core::perception::past_buildings(sim, viewer, target),
     )
 }
 
 pub(super) fn marker_screen(view_proj: glam::Mat4, pos: glam::Vec3) -> ([f32; 2], bool) {
     let clip = view_proj * pos.extend(1.0);
+    // Divide by |w|, not w: a target behind the camera has w < 0, and the
+    // signed divide would mirror it to the wrong edge. |w| keeps the sign of
+    // the view-space x/y so the clamped marker points toward the target
+    // (`re-hud-map.md` §5, `FUN_00179c10`).
     let w = clip.w.abs().max(1.0e-4);
     let (mut x, mut y) = (clip.x / w, -clip.y / w);
     let bound = x.abs().max(y.abs());

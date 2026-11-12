@@ -86,6 +86,9 @@ pub const PS2_FOV_TAN_SCALE: f32 = 0.7666;
 
 const CAMERA_MOVE_TENSION: f32 = 15.0;
 const VIEW_SETTLE_EPSILON: f32 = 1e-4;
+/// A camera target further than this from its held eye snaps instead of
+/// easing (250 m; the flyer cameras and the exit camera).
+const CAMERA_SNAP_SQUARED: f32 = 250.0 * 250.0;
 
 fn ease_camera_place(from: (f32, Vec3), to: (f32, Vec3), dt: f32) -> (f32, Vec3) {
     let k = core::fmath::exp(-CAMERA_MOVE_TENSION * dt);

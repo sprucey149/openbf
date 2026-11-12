@@ -806,9 +806,9 @@ pub struct ManifestVehicle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub walker: Option<ManifestWalker>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub flyer: Option<ManifestFlyer>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vis_box: Option<([f32; 3], [f32; 3])>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flyer: Option<ManifestFlyer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

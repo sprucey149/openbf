@@ -8,9 +8,7 @@ use core::vehicle::{Vehicle, VehicleHandle, VehicleKind};
 const BF2_TILT: f32 = 0.087_665;
 const BF1_AIM_TENSION: f32 = 30.0;
 const DEFAULT_MOVE_TENSION: [f32; 2] = [30.0; 2];
-const SNAP_SQUARED: f32 = 62_500.0;
 const DEGREES: f32 = 0.017_453_294;
-const FOV_RATE: f32 = 25.0;
 const DEFAULT_THIRD_FOV: f32 = 48.0;
 const GUNNER_AIM_TENSION: f32 = 1000.0;
 /// The camera detach factor during Falling / Crashed (SWBFRNT2.ELF FUN_0020d450 line 122651:
@@ -114,6 +112,12 @@ impl FlyerSection {
             self.third_fov * (1.0 - fraction) + self.fast_fov * fraction
         }
     }
+
+    /// The move tensions while a craft falls or has crashed.
+    fn crash_tension(&self) -> [[f32; 2]; 3] {
+        self.move_tension
+            .map(|axis| axis.map(|t| t * FLYER_CRASH_DETACH_RATE))
+    }
 }
 
 pub fn flyer_view(frame: Quat, tilt: f32) -> Quat {
@@ -133,6 +137,26 @@ pub fn lag_eye(previous: Vec3, ideal: Vec3, rot: Quat, tension: &[[f32; 2]; 3], 
                 eased(step.y, &tension[1]),
                 eased(step.z, &tension[2]),
             )
+}
+
+/// Is a held eye close enough to its view pivot to keep easing toward it?
+fn within_snap(centre: Vec3, from: Vec3) -> bool {
+    centre.distance_squared(from) <= CAMERA_SNAP_SQUARED
+}
+
+/// The eye `from` eased toward `settled`, or `settled` at once when `held` is
+/// false (the pivot jumped past the snap distance).
+fn kept_eye(held: bool, from: Vec3, settled: Vec3, rot: Quat, tension: &[[f32; 2]; 3]) -> Vec3 {
+    if held {
+        lag_eye(from, settled, rot, tension, core::TICK_DT)
+    } else {
+        settled
+    }
+}
+
+/// The PS2's FOV ease toward `goal`.
+fn ease_fov(goal: f32, was: f32) -> f32 {
+    goal + (was - goal) * fmath::exp(-ZOOM_EASE_RATE * core::TICK_DT)
 }
 
 pub fn camera_at(position: Vec3, rot: Quat, fov_y: f32) -> Camera {
@@ -223,7 +247,7 @@ impl WalkSim {
         let center = v.pos + frame * section.center;
         let held = self
             .cam_flyer
-            .filter(|c| c.vehicle == handle && center.distance_squared(c.eye) <= SNAP_SQUARED);
+            .filter(|c| c.vehicle == handle && within_snap(center, c.eye));
         let rot = match (held, section.aim_tension) {
             (Some(c), Some(aim)) => c.rot.lerp(view, 1.0 - fmath::exp(-aim * core::TICK_DT)),
             _ => view,
@@ -235,29 +259,12 @@ impl WalkSim {
             v.flyer.phase,
             core::vehicle::flyer::FlightPhase::Falling | core::vehicle::flyer::FlightPhase::Crashed
         ) {
-            [
-                [
-                    section.move_tension[0][0] * FLYER_CRASH_DETACH_RATE,
-                    section.move_tension[0][1] * FLYER_CRASH_DETACH_RATE,
-                ],
-                [
-                    section.move_tension[1][0] * FLYER_CRASH_DETACH_RATE,
-                    section.move_tension[1][1] * FLYER_CRASH_DETACH_RATE,
-                ],
-                [
-                    section.move_tension[2][0] * FLYER_CRASH_DETACH_RATE,
-                    section.move_tension[2][1] * FLYER_CRASH_DETACH_RATE,
-                ],
-            ]
+            section.crash_tension()
         } else {
             section.move_tension
         };
         let from = held.map_or(previous, |c| c.eye);
-        let eye = if center.distance_squared(from) <= SNAP_SQUARED {
-            lag_eye(from, settled, rot, &move_tension, core::TICK_DT)
-        } else {
-            settled
-        };
+        let eye = kept_eye(within_snap(center, from), from, settled, rot, &move_tension);
         let goal = section.fov_at(self.flyer_speed_fraction(v, &section));
         let was = self
             .cam_flyer
@@ -267,7 +274,7 @@ impl WalkSim {
             vehicle: handle,
             eye,
             rot,
-            fov: goal + (was - goal) * fmath::exp(-FOV_RATE * core::TICK_DT),
+            fov: ease_fov(goal, was),
         })
     }
 }
@@ -352,19 +359,15 @@ impl WalkSim {
                 },
                 |c| (c.eye, c.rot),
             );
-        let snap = center.distance_squared(from_eye) > SNAP_SQUARED;
-        let rot = if snap {
-            view
-        } else {
+        let held = within_snap(center, from_eye);
+        let rot = if held {
             let aim = section.aim_tension.unwrap_or(GUNNER_AIM_TENSION);
             crate::sim_pose::quat_slerp(from_rot, view, 1.0 - fmath::exp(-aim * core::TICK_DT))
+        } else {
+            view
         };
         let (settled, _) = self.gunner_settled(v, handle, &section, frame, rot);
-        let eye = if snap {
-            settled
-        } else {
-            lag_eye(from_eye, settled, rot, &section.move_tension, core::TICK_DT)
-        };
+        let eye = kept_eye(held, from_eye, settled, rot, &section.move_tension);
         Some(GunnerCam {
             vehicle: handle,
             seat,
@@ -476,18 +479,20 @@ impl WalkSim {
         let (_, settled) = self.guided_ideal(r, c, &section, rot);
         let center = r.pos + frame * section.center;
         let from = held.map_or(previous, |h| h.eye);
-        let eye = if center.distance_squared(from) <= SNAP_SQUARED {
-            lag_eye(from, settled, rot, &section.move_tension, core::TICK_DT)
-        } else {
-            settled
-        };
+        let eye = kept_eye(
+            within_snap(center, from),
+            from,
+            settled,
+            rot,
+            &section.move_tension,
+        );
         let goal = section.fov_at(section.speed_fraction(r.speed(), c.top_speed()));
         let was = held.map_or_else(|| chase_fovs().0, |h| h.fov);
         Some(GuidedCam {
             rocket: r.id,
             eye,
             rot,
-            fov: goal + (was - goal) * fmath::exp(-FOV_RATE * core::TICK_DT),
+            fov: ease_fov(goal, was),
         })
     }
 }

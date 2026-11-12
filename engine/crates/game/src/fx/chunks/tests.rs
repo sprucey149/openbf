@@ -794,12 +794,13 @@ fn a_space_round_keeps_a_piece_eight_seconds_and_fades_its_last_two() {
 
 #[test]
 fn a_whitespace_split_chunk_number_reads_its_leading_float_as_the_ps2_does() {
-    assert_eq!(leading_number("4 .00"), Some(4.0));
-    assert_eq!(leading_number(" 4.5"), Some(4.5));
-    assert_eq!(leading_number("-1e-3"), Some(-1e-3));
-    assert_eq!(leading_number("+0.25"), Some(0.25));
-    assert_eq!(leading_number("full"), None);
-    assert_eq!(leading_number(""), None);
+    let number = crate::vehicle_class::float;
+    assert_eq!(number("4 .00"), Some(4.0));
+    assert_eq!(number(" 4.5"), Some(4.5));
+    assert_eq!(number("-1e-3"), Some(-1e-3));
+    assert_eq!(number("+0.25"), Some(0.25));
+    assert_eq!(number("full"), None);
+    assert_eq!(number(""), None);
 }
 
 #[test]

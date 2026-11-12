@@ -97,8 +97,8 @@ impl SpaceDust {
         let hole = self.value(0x1c5d2dda);
         let low = self.value(0x7efe380d);
         let high = self.value(0xde77e423);
-        // `FUN_00460928` records at most 20 dead slots per update (the
-        // `iVar7 < 0x14` guard) even though each bank holds 80.
+        // `FUN_00460928` records at most 20 dead slots per update (its loop
+        // stops at 20) even though each bank holds 80.
         for _ in 0..count.min(20).min(80 - self.particles.len()) {
             let mut x = (1.0 - 2.0 * self.rng.float()) * spread;
             let mut y = (1.0 - 2.0 * self.rng.float()) * spread;

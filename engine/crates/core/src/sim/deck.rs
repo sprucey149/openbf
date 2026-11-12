@@ -77,7 +77,7 @@ impl Sim {
                 vel,
             });
         } else {
-            self.units[i].deck = None;
+            self.leave_deck(i);
         }
     }
 

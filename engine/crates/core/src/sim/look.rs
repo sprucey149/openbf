@@ -58,6 +58,15 @@ pub(super) fn walker_aim(w: &WalkerState, p: &WalkerParams, d: (f32, f32)) -> (f
     (yaw, pitch)
 }
 
+/// A stick's `(turn, pitch)` turned by a mouse look, as both a flyer's pad
+/// and a guided rocket read it.
+pub(super) fn look_steer(turn: f32, pitch: f32, d: (f32, f32)) -> (f32, f32) {
+    (
+        (turn + d.0 / MOUSE_STEER).clamp(-1.0, 1.0),
+        (pitch + d.1 / MOUSE_STEER).clamp(-1.0, 1.0),
+    )
+}
+
 pub(super) fn mouse_drive(
     v: &mut Vehicle,
     pad: &PadState,
@@ -75,10 +84,10 @@ pub(super) fn mouse_drive(
         };
         return full;
     }
-    let turn = (v.input.turn + dy / MOUSE_STEER).clamp(-1.0, 1.0);
+    let (turn, pitch) = look_steer(v.input.turn, v.input.pitch, (dy, dp));
     v.input.turn = turn;
     if v.kind == VehicleKind::Flyer {
-        v.input.pitch = (v.input.pitch + dp / MOUSE_STEER).clamp(-1.0, 1.0);
+        v.input.pitch = pitch;
     }
     full || turn * turn + v.input.pitch * v.input.pitch >= 0.9
 }

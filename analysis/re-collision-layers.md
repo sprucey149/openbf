@@ -350,7 +350,7 @@ BF2 ordnance 0x90 (building|terrain). Soldier world pass: mask 0xd + terrain.
 The generic entity rule above is not the BF2 flyer's SoldierCollision and
 OrdnanceCollision rule. `FUN_0020fd58` handles these keys itself. In the current
 local decompilation, its GeometryName branch (lines 124396-124419) loads the
-mesh and seeds both flyer accumulators, `DAT_005fcf44` and `DAT_005fcf48`, with
+mesh and seeds both flyer accumulators (the globals at 0x5fcf44 and 0x5fcf48) with
 that body's bit. Its SoldierCollision branch (124684-124698) and
 OrdnanceCollision branch (125151-125162) add named bodies to those seeded
 accumulators. Neither branch handles `none` or `clear` as a special value:

@@ -964,6 +964,7 @@ fn water_field_order_is_the_wire_format() {
             "triangles",
             "config",
             "wet",
+            "gameplay_wet",
             "vertex_diffuse",
         ]
     );
@@ -1037,7 +1038,8 @@ fn vehicle_manifest_field_order_is_the_wire_format() {
             "sphere",
             "vis_min_y",
             "walker",
-            "vis_box"
+            "vis_box",
+            "flyer"
         ]
     );
 }

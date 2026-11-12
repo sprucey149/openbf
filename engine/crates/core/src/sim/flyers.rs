@@ -37,6 +37,34 @@ impl Sim {
         self.landing_coverage(center, radius)
     }
 
+    /// The environment a flyer or a guided rocket flies in: its flight band,
+    /// landing-region coverage and ground contact.
+    pub(super) fn flyer_environment(
+        &self,
+        human: bool,
+        coverage: (bool, bool),
+        ground: Option<LandingSurface>,
+        player_aboard: bool,
+        crash_random: [f32; 4],
+    ) -> FlyerEnvironment {
+        let [min_height, max_height] = if human {
+            self.flight_limits.player
+        } else {
+            self.flight_limits.ai
+        };
+        let (in_landing_region, almost_inside_landing_region) = coverage;
+        FlyerEnvironment {
+            ground,
+            min_height,
+            max_height,
+            in_landing_region,
+            almost_inside_landing_region,
+            require_landing_region: !self.landing_regions.is_empty(),
+            player_aboard,
+            crash_random,
+        }
+    }
+
     pub(super) fn landing_coverage(&self, center: Vec3, radius: f32) -> (bool, bool) {
         let mut touches = false;
         let mut inside = false;
@@ -201,22 +229,13 @@ impl Sim {
                 p
             };
             let from = v.pos;
-            let [min_height, max_height] = if v.input.human {
-                self.flight_limits.player
-            } else {
-                self.flight_limits.ai
-            };
-            let (in_landing_region, almost_inside_landing_region) = self.flyer_region_coverage(v);
-            let env = FlyerEnvironment {
-                ground: self.flyer_ground(from, handle),
-                min_height,
-                max_height,
-                in_landing_region,
-                almost_inside_landing_region,
-                require_landing_region: !self.landing_regions.is_empty(),
+            let env = self.flyer_environment(
+                v.input.human,
+                self.flyer_region_coverage(v),
+                self.flyer_ground(from, handle),
                 player_aboard,
                 crash_random,
-            };
+            );
             let row = super::flyer_contact::FlyerRow::of(p);
             if p.bf2
                 && !v.input.human

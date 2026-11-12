@@ -31,6 +31,25 @@ struct Part {
     additive: bool,
 }
 
+impl Part {
+    fn new(
+        cpu: &crate::assets::CpuMesh,
+        k: usize,
+        mesh: MeshHandle,
+        texture: Option<TextureHandle>,
+        layer: DrawLayer,
+        additive: bool,
+    ) -> Self {
+        Self {
+            mesh,
+            texture,
+            layer,
+            light: cpu.light_path(k),
+            additive,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct FlagVisuals {
     loose: Vec<Part>,
@@ -83,6 +102,13 @@ impl FlagVisuals {
             instance.rotation,
             instance.translation,
         ));
+        let additive_bit = crate::fx::draw::additive_bit(
+            if scene.manifest.source_game.eq_ignore_ascii_case("bf1") {
+                crate::fx::emitter::Era::Bf1
+            } else {
+                crate::fx::emitter::Era::Bf2
+            },
+        );
         for (name, carried) in [
             ("com_icon_spaceflag", false),
             ("com_icon_spaceflag_carried", true),
@@ -102,13 +128,14 @@ impl FlagVisuals {
                         .and_then(|t| super::upload::upload_cpu_texture(r, t, name).ok())
                 });
                 if texture.is_some() {
-                    parts.push(Part {
+                    parts.push(Part::new(
+                        cpu,
+                        k,
                         mesh,
                         texture,
                         layer,
-                        light: cpu.light_path(k),
-                        additive: layer == DrawLayer::Blend && flags & 0x40 != 0,
-                    });
+                        layer == DrawLayer::Blend && flags & additive_bit != 0,
+                    ));
                 }
             }
             if carried {
@@ -188,13 +215,7 @@ impl PickupVisuals {
             {
                 continue;
             }
-            parts.push(Part {
-                mesh,
-                texture,
-                layer,
-                light: cpu.light_path(k),
-                additive: false,
-            });
+            parts.push(Part::new(&cpu, k, mesh, texture, layer, false));
         }
         Ok(parts)
     }

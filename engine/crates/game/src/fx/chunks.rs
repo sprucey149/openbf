@@ -411,16 +411,7 @@ impl SideData {
                 eprintln!("chunks: {} unreadable", file.display());
                 continue;
             };
-            for c in &map.collision {
-                if let [p] = &c.prims[..] {
-                    if let Some(prim) = crate::assets::prim_shape(p).as_ref().and_then(Prim::of) {
-                        out.prims.entry(c.geometry.to_ascii_lowercase()).or_insert((
-                            prim,
-                            crate::viewer::instance_matrix(p.rotation, p.translation),
-                        ));
-                    }
-                }
-            }
+            Self::record_prims(&mut out.prims, &map.collision, false);
         }
         for file in dirs
             .iter()
@@ -435,16 +426,7 @@ impl SideData {
                 eprintln!("chunks: {} unreadable", file.display());
                 continue;
             };
-            for c in &vm.collision {
-                if let [p] = &c.prims[..] {
-                    if let Some(prim) = crate::assets::prim_shape(p).as_ref().and_then(Prim::of) {
-                        out.prims.entry(c.geometry.to_ascii_lowercase()).or_insert((
-                            prim,
-                            crate::viewer::instance_matrix(p.rotation, p.translation),
-                        ));
-                    }
-                }
-            }
+            Self::record_prims(&mut out.prims, &vm.collision, false);
             for g in vm.geometries.iter().filter(|g| !g.hardpoints.is_empty()) {
                 out.nodes
                     .entry(g.name.to_ascii_lowercase())
@@ -472,21 +454,7 @@ impl SideData {
                     ron::from_str::<manifest::DroidChunkManifest>(&t).map_err(anyhow::Error::from)
                 }) {
                 Ok(meta) => {
-                    for c in meta.collision {
-                        if let [p] = &c.prims[..] {
-                            if let Some(prim) =
-                                crate::assets::prim_shape(p).as_ref().and_then(Prim::of)
-                            {
-                                out.prims.insert(
-                                    c.geometry.to_ascii_lowercase(),
-                                    (
-                                        prim,
-                                        crate::viewer::instance_matrix(p.rotation, p.translation),
-                                    ),
-                                );
-                            }
-                        }
-                    }
+                    Self::record_prims(&mut out.prims, &meta.collision, true);
                     out.nodes.extend(
                         meta.nodes
                             .into_iter()
@@ -497,6 +465,32 @@ impl SideData {
             }
         }
         out
+    }
+
+    /// Record each geometry's one-prim collision. A droid's bake replaces an
+    /// earlier record (`replace`); a map's or a vehicle's keeps the first.
+    fn record_prims(
+        out: &mut HashMap<String, (Prim, Mat4)>,
+        collision: &[manifest::ManifestCollision],
+        replace: bool,
+    ) {
+        for c in collision {
+            let [p] = &c.prims[..] else {
+                continue;
+            };
+            let Some(prim) = crate::assets::prim_shape(p).as_ref().and_then(Prim::of) else {
+                continue;
+            };
+            let entry = (
+                prim,
+                crate::viewer::instance_matrix(p.rotation, p.translation),
+            );
+            if replace {
+                out.insert(c.geometry.to_ascii_lowercase(), entry);
+            } else {
+                out.entry(c.geometry.to_ascii_lowercase()).or_insert(entry);
+            }
+        }
     }
 }
 
@@ -519,14 +513,6 @@ fn floats(v: &str) -> Vec<f32> {
     v.split_whitespace()
         .map_while(|t| t.parse::<f32>().ok())
         .collect()
-}
-
-fn leading_number(v: &str) -> Option<f32> {
-    let v = v.trim_start();
-    let end = v
-        .find(|c: char| !matches!(c, '+' | '-' | '.' | '0'..='9' | 'e' | 'E'))
-        .unwrap_or(v.len());
-    v[..end].parse().ok()
 }
 
 #[derive(Default)]
@@ -612,7 +598,7 @@ impl Chunks {
                     continue;
                 }
                 let text = |key: &str| props.get(&hash(key)).map(String::as_str);
-                let number = |key: &str| text(key).and_then(leading_number);
+                let number = |key: &str| text(key).and_then(crate::vehicle_class::float);
                 let vector = |key: &str| {
                     text(key)
                         .map(floats)

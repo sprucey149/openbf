@@ -22,7 +22,6 @@ pub struct Handover {
     pub rot: Quat,
 }
 const SOLDIER_MOVE_TENSION: f32 = 15.0;
-const EXIT_SNAP_SQUARED: f32 = 62_500.0;
 const EXIT_SETTLED_SQUARED: f32 = 1.0e-6;
 
 impl WalkSim {
@@ -339,7 +338,7 @@ impl WalkSim {
         }
         let ideal = self.camera_track().0.position - self.cam_exit.unwrap_or(Vec3::ZERO);
         let center = me.soldier.pos + Vec3::Y * me.section().eye_y;
-        if center.distance_squared(previous.position) > EXIT_SNAP_SQUARED {
+        if center.distance_squared(previous.position) > CAMERA_SNAP_SQUARED {
             return None;
         }
         let lag =
