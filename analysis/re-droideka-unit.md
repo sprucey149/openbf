@@ -131,9 +131,19 @@ In the BF1 capture, 220 of 241 bolts have a generation-checked live
 opposing weapon target. In the matched downhill placement the original
 settled bolts pitch down 6.48–7.41 degrees. The port sees the same target
 and lands hits with a shallower settled aim of about 1.4 degrees below
-level. The sampled BF1 upward shot had an airborne target. In both builds
-that placement falls to the lower terrain, so a matched grounded BF1
-uphill shot remains unchecked.
+level. A shallow Geonosis control confirms uphill fire at a grounded
+target in both builds. The original shot pitches up 0.13 degrees, and
+the port lands five of ten bolts in the matched Hard control.
+
+On BF1 Kashyyyk Docks the original targets a grounded soldier 9.57 m
+higher and about 34.8 m away. Its settled shots pitch up 17.43–17.55
+degrees during the sampled six-second window. In the port, the same
+horizontal placement settles the Droideka about 0.37 m lower. It
+deploys in a sustained-engagement control and emits no bolts before
+returning to recovery. From a supported point 2.62 m farther up the
+same slope, both actors stay grounded and the port lands seven of 36
+bolts on the higher target. The exact Docks placement and the
+individual animated barrel positions remain open comparisons.
 
 The port lands all 12 sampled shots in the settled BF2 uphill run and
 all 12 in a second downhill run. A separate downhill original shot
