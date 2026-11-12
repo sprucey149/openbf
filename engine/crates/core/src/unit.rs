@@ -656,6 +656,21 @@ impl Unit {
                 u8::from(self.spec.consts.collision_damage_immune),
             ]);
         }
+        for (i, c) in [&self.consts, &self.spec.consts].into_iter().enumerate() {
+            if c.collision_threshold != [10.0, 3.0, 0.0]
+                || c.collision_damage_scale != [1.0, 0.0, 0.0]
+            {
+                eat(b"COLLISION_DAMAGE");
+                eat(&[i as u8]);
+                for value in c
+                    .collision_threshold
+                    .into_iter()
+                    .chain(c.collision_damage_scale)
+                {
+                    eat(&value.to_bits().to_le_bytes());
+                }
+            }
+        }
         eat(&[
             self.alive as u8,
             self.team,

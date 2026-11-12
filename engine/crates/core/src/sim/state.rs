@@ -1,6 +1,6 @@
 //! What the sim IS, and how it is hashed: the [`Sim`] struct with its
 //! counters ([`NavStats`]), cheats ([`Cheats`]) and per-tick output
-//! ([`Event`], [`DeathCause`]) and the fall rule ([`LETHAL_LANDING_SPEED`]);
+//! ([`Event`], [`DeathCause`]);
 //! the constructors ([`Sim::empty`], [`Sim::new`]); the queries — a unit by
 //! handle, the ground under a point ([`Sim::ground_under`]), the terrain ray;
 //! [`omni_radius_for`]; and [`Sim::hash`], what every replay gate compares.
@@ -21,15 +21,6 @@ use crate::rng::SimRng;
 use crate::unit::{Unit, UnitHandle, UnitSpec};
 use crate::weapon::WeaponClass;
 use glam::Vec3;
-
-/// PROVISIONAL (ours): a soldier that lands at or beyond this DOWNWARD speed
-/// dies unless its class has zero collision damage — 25 m/s, about a 17 m drop at the soldier's g = 18
-/// (`core::soldier::GRAVITY`). Both games deal landing damage by a law the
-/// port does not have yet — (approach − CollisionThreshold)² × CollisionScale
-/// per class (`analysis/re-soldier-ground.md` §4; cards SLAND, DTHR) — so this
-/// is a single lethal-speed cut-off, not a damage model. It is also what makes
-/// [`crate::collision::NO_GROUND`] mean what it says — nothing catches you.
-pub const LETHAL_LANDING_SPEED: f32 = 25.0;
 
 /// [`Event::Hit`]'s `age` for a blast's hit: no round flew to the victim.
 /// A bolt that lands in its first update strikes at age 0 (`Bolt::advance`;

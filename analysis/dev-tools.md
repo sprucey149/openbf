@@ -52,6 +52,8 @@ The F9 save notice appears over the spawn and pause menus after the write finish
 - **When the maintainer reports damage or firing that feels wrong** ("it only took half his health", "I fired two at once"): read
   the event rows (`--events`). Since schema 8 they carry each of his shots (`#n fired <weapon>`) and every hit he deals
   or takes: the damage, the victim's health after it, and direct (with the round's flight time) or blast.
+  Schema 17 also records `fall_damage`: `a` is the human victim, and `v` holds damage and remaining health.
+  The reader prints these as landing damage; they carry no attacker or weapon credit.
 - **When a controller walks slowly, will not sprint or roll** (#142): the human rows carry the left stick as gilrs
   gave it (`stick_raw`, schema 16) next to the scaled `lx`/`ly`, and `stick_full`, the travel the game took as a full
   push on each axis that tick (`input::StickRange`: the pad's own learned peak per axis for a soldier on foot in a

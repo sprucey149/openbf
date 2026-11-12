@@ -966,27 +966,24 @@ pub fn is_jet_trooper(db: &ClassDb, class: &str, c: &SoldierConstants) -> bool {
 pub fn soldier_constants(db: &ClassDb, class: &str) -> SoldierConstants {
     let mut c = SoldierConstants::from_props(&ClassSrc { db, class });
     jet_class_data(db, class, &mut c);
-    // Both PS2 constructors default CollisionScale to (1, 0, 0): BF1
-    // FUN_0020d238:121825–121832, BF2 FUN_00250488:169421–169427.
-    // Vector setters replace only supplied components, in class-chain order.
-    let mut collision_damage_scale = [1.0, 0.0, 0.0];
     for def in db.chain(class).into_iter().rev() {
-        for (_, value) in def
-            .props
-            .iter()
-            .filter(|p| p.0 == crate::classdb::fnv1a_lowercase("CollisionScale"))
-        {
-            for (slot, value) in collision_damage_scale
-                .iter_mut()
-                .zip(value.split_whitespace())
-            {
-                if let Ok(value) = value.parse::<f32>() {
-                    *slot = value;
+        for (key, value) in &def.props {
+            let slots = if *key == crate::classdb::fnv1a_lowercase("CollisionScale") {
+                &mut c.collision_damage_scale
+            } else if *key == crate::classdb::fnv1a_lowercase("CollisionThreshold") {
+                &mut c.collision_threshold
+            } else {
+                continue;
+            };
+            for (slot, value) in slots.iter_mut().zip(value.split_whitespace()) {
+                match value.parse::<f32>() {
+                    Ok(value) if value.is_finite() => *slot = value,
+                    _ => break,
                 }
             }
         }
     }
-    c.collision_damage_immune = collision_damage_scale == [0.0; 3];
+    c.collision_damage_immune = c.collision_damage_scale == [0.0; 3];
     if let Some(row) = db.chain(class).into_iter().find_map(|def| {
         def.props
             .iter()

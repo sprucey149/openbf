@@ -299,6 +299,12 @@ fn event_line(snap: &Snapshot, e: &EventRow) -> String {
             body_name(snap, e.b)
         ),
         Ev::Shot => format!("#{} fired {}", e.a, weapon_name(snap, e.c)),
+        Ev::FallDamage => format!(
+            "#{} took {} landing damage, {} health left at {at}",
+            e.a,
+            e.v.first().copied().unwrap_or(0.0),
+            e.v.get(1).copied().unwrap_or(0.0),
+        ),
         Ev::Hit => {
             let v = |i: usize| e.v.get(i).copied().unwrap_or(0.0);
             format!(

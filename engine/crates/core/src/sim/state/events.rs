@@ -129,6 +129,11 @@ pub enum Event {
         from: Vec3,
         to: Vec3,
     },
+    FallDamage {
+        victim: UnitHandle,
+        damage: f32,
+        health_left: f32,
+    },
     Hit {
         /// Presentation metadata only: a direct contact that plays the hit
         /// pose and sets the death side: a round (including a zero-damage
@@ -493,7 +498,6 @@ pub enum Call {
 pub enum DeathCause {
     /// Inside one of the mission's `AddDeathRegion` volumes.
     DeathRegion,
-    /// Landed at or beyond [`LETHAL_LANDING_SPEED`].
     Fall,
     /// Riding a vehicle destroyed by no attacker (a crash into the world,
     /// [`Sim::destroy_vehicle`]); a destroyer's riders are his kills.

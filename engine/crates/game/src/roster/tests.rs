@@ -42,6 +42,42 @@ fn db_for_game(game: &str, rows: &[Row<'_>]) -> ClassDb {
 const ROUND: Row<'static> = ("test_ord", "bolt", &[("MaxDamage", "65")]);
 
 #[test]
+fn collision_damage_vectors_replay_partial_overrides_in_class_order() {
+    for game in ["bf1", "bf2"] {
+        let d = db_for_game(
+            game,
+            &[
+                (
+                    "parent",
+                    "soldier",
+                    &[
+                        ("CollisionThreshold", "8 4 2"),
+                        ("CollisionScale", "2 1 0.5"),
+                    ],
+                ),
+                (
+                    "child",
+                    "parent",
+                    &[
+                        ("CollisionThreshold", "12"),
+                        ("CollisionScale", "3"),
+                        ("CollisionScale", "4 2"),
+                    ],
+                ),
+                ("immune", "child", &[("CollisionScale", "0 0 0")]),
+            ],
+        );
+        let c = soldier_constants(&d, "child");
+        assert_eq!(c.collision_threshold, [12.0, 4.0, 2.0]);
+        assert_eq!(c.collision_damage_scale, [4.0, 2.0, 0.5]);
+        assert!(!c.collision_damage_immune);
+        let c = soldier_constants(&d, "immune");
+        assert_eq!(c.collision_damage_scale, [0.0; 3]);
+        assert!(c.collision_damage_immune);
+    }
+}
+
+#[test]
 fn missile_class_uses_the_last_authored_keys_before_the_next_charge() {
     let d = db_for_game(
         "bf2",

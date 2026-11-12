@@ -210,6 +210,14 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
     use core::sim::Event;
     for e in events {
         let line = match e {
+            Event::FallDamage {
+                victim,
+                damage,
+                health_left,
+            } => format!(
+                "{tick},fall_damage,{},,{damage:.3}:{health_left:.3}\n",
+                victim.index
+            ),
             Event::ForceHit {
                 owner,
                 weapon_class,

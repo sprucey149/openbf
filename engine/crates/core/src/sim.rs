@@ -61,6 +61,7 @@ mod guns;
 mod hero_bodies;
 pub mod heroes;
 mod input;
+mod landing;
 mod lock_on;
 mod look;
 mod mines;
@@ -139,8 +140,7 @@ pub use space_balance::SpaceBalance;
 pub use spawn::{ClassAmmo, ClassRefusal, SideChoice, SpawnStage, SpawnWaves, CLASS_CHANGE_FACING};
 pub use state::{
     omni_radius_for, Call, Cheats, DeathCause, Event, Hazard, MissionAi, NavStats, Sim, TickCost,
-    UnitCost, BLAST_AGE, HAZARD_RADIUS, LETHAL_LANDING_SPEED, OUTCOME_DRAW,
-    SNIPE_SUITABILITY_DEFAULT,
+    UnitCost, BLAST_AGE, HAZARD_RADIUS, OUTCOME_DRAW, SNIPE_SUITABILITY_DEFAULT,
 };
 pub use stations::{
     Station, StationAnim, StationClass, StationDamageEffect, StationMotion,

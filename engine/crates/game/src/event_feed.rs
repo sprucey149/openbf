@@ -780,6 +780,11 @@ impl EventFeed {
                 damage,
                 health_left,
                 ..
+            }
+            | Event::FallDamage {
+                victim,
+                damage,
+                health_left,
             } = *e
             {
                 if victim == viewer {
