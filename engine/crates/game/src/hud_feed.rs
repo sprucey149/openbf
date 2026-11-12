@@ -502,6 +502,8 @@ fn place_secondary_cutters(hud: &mut Hud, has_bf2_mesh: impl Fn(&str) -> bool) {
     }
 }
 
+mod grenade;
+
 /// The HUD's own art (`hud_*`) composites by its sheets' alpha
 /// (`re-hud-icons.md` §2); any other model the HUD shows is a world model
 /// drawn by its material, and an opaque part's sheet alpha is not coverage
@@ -649,6 +651,12 @@ impl HudView {
                 .get(name)
                 .is_some_and(|path| path.parent() == Some(bf2_weapons.as_path()))
         });
+        if let Some(thermal) = mesh_files
+            .get("hud_thermaldetonator")
+            .and_then(|path| load_mesh(path).ok())
+        {
+            grenade::install(&mut hud, &mut art, &thermal);
+        }
         // The two faded pills belong behind the weapon images, including
         // bitmap fallbacks. Our per-model depth slices follow draw order,
         // so the source ZOrder(8) would shade the default-128 item groups.
@@ -746,7 +754,10 @@ impl HudView {
         }
         {
             let files = &self.mesh_files;
-            ui::hud::feed(&mut self.hud, &model, &|n: &str| files.contains_key(n));
+            let meshes = &self.art.meshes;
+            ui::hud::feed(&mut self.hud, &model, &|n: &str| {
+                files.contains_key(n) || meshes.contains_key(n)
+            });
         }
         if let Some(dir) = model.space.as_ref().and_then(|m| m.sheet_dir.as_ref()) {
             if !self.texture_dirs.contains(dir) {
@@ -852,6 +863,9 @@ impl HudView {
     /// row: a BF1 class keys BF2's table by its own name when its geometry
     /// has no entry, and a weapon with no BF2 mesh shows its icon sheet.
     pub fn weapon_mesh(&self, row: u8, w: &HudWeapon) -> (String, Option<String>) {
+        if let Some(mesh) = grenade::mesh_for(&self.hud, &self.art, row, w) {
+            return (mesh.to_owned(), Some(mesh.to_owned()));
+        }
         let files = &self.mesh_files;
         let has = |n: &str| files.contains_key(n);
         let event = format!("player1.weapon{row}.change");

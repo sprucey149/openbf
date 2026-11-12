@@ -225,8 +225,25 @@ impl Fx {
             now.insert(r, (b.pos, b.vel, trail(b.weapon_class)));
         }
         let ids = self.rounds.sticky_ids(sim);
+        let blue = "com_sfx_weap_grenade_blue";
+        let has_blue = self
+            .library
+            .as_ref()
+            .is_some_and(|lib| lib.get(blue).is_some());
         for (g, id) in sim.stickies.iter().zip(ids) {
-            now.insert(Round::Sticky(id), (g.pos, g.vel, trail(g.weapon_class)));
+            let mut name = trail(g.weapon_class);
+            // The BF1 thermal uses a blue glow in openbf. Keep the native
+            // blast and sound, which come from its explosion class.
+            if has_blue
+                && name == Some("com_sfx_weap_grenade_red")
+                && sim.weapon_classes.get(g.weapon_class).is_some_and(|w| {
+                    w.name.ends_with("_thermaldetonator")
+                        && w.ordnance.sticky.as_ref().is_some_and(|s| !s.bf2)
+                })
+            {
+                name = Some(blue);
+            }
+            now.insert(Round::Sticky(id), (g.pos, g.vel, name));
         }
         let mut sizes: HashMap<Round, f32> = HashMap::new();
         for r in sim.guided.iter().filter(|r| r.live()) {

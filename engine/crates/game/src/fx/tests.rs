@@ -576,6 +576,43 @@ fn a_round_carries_its_trail_until_it_is_gone() {
 }
 
 #[test]
+fn a_bf1_thermal_trails_blue_and_plays_its_native_blast() {
+    use core::sticky::Sticky;
+
+    let Some(lib) = bf1_common() else { return };
+    let root = crate::assets::baked_root();
+    let classes = root.join("classes");
+    if !classes.join("bf1_rep.ron").is_file() {
+        return;
+    }
+    let db = crate::roster::load_classdb(&classes, "bf1", &["rep"]).unwrap();
+    let weapon = crate::roster::thrown_weapon_from_db(&db, "rep_weap_inf_thermaldetonator")
+        .unwrap()
+        .unwrap();
+    let sticky = weapon.ordnance.sticky.as_ref().unwrap().clone();
+    let blast = &sticky.explosion.as_ref().unwrap().look;
+    assert_eq!(blast.effects.len(), 1);
+    assert!(blast.sound.is_some());
+
+    let mut fx = Fx::with_library(lib);
+    let mut sim = Sim::empty(1);
+    let wc = sim.add_weapon_class(weapon);
+    sim.stickies.push(Sticky::new(
+        Vec3::Y,
+        Vec3::NEG_Z,
+        &sticky,
+        1.0,
+        UnitHandle { index: 0, gen: 0 },
+        0,
+        wc,
+    ));
+    fx.ingest_sim(&sim);
+    assert_eq!(fx.live[0].name(), Some("com_sfx_weap_grenade_blue"));
+    assert!(fx.explode(blast, Vec3::Y, None));
+    assert_eq!(fx.live[1].name(), Some(blast.effects[0].as_str()));
+}
+
+#[test]
 fn grenade_trails_keep_their_rounds_when_an_earlier_one_goes_off() {
     use core::sticky::{Sticky, StickyClass};
     use core::weapon::WeaponClass;

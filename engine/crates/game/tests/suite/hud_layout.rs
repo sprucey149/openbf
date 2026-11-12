@@ -863,13 +863,10 @@ fn the_detpack_shows_its_own_model_and_the_time_bomb_the_seismic_mine() {
     );
 }
 
-/// The standing rule (the maintainer, 2026-11-01): the HUD is BF2's on every
-/// map for every class. Every BF1 grenade, thermal, crack or haywire, shows
-/// BF2's grenade model in the grenade's place, never BF1's icon sheet; BF2's
-/// own classes are unchanged, and a mortar launcher (the same base class) is
-/// no grenade.
+/// The three BF1 grenade types have distinguishable models in BF2's grenade
+/// slot. BF2 retains its own model and mortars still select their own art.
 #[test]
-fn every_grenade_shows_bf2s_hud_model_on_every_map() {
+fn bf1_grenade_types_switch_models_in_bf2s_hud() {
     let Some(mut v) = view([640, 480]) else {
         return;
     };
@@ -887,27 +884,42 @@ fn every_grenade_shows_bf2s_hud_model_on_every_map() {
     };
     let bf2_box = place(&mut v, bf2_row);
     let bf1 = side_db("bf1");
-    for class in [
-        // The jet trooper's, and the clone trooper's two.
-        "rep_weap_inf_thermaldetonator",
-        "rep_weap_inf_haywiredetonator",
-        "rep_weap_inf_crackgrenade",
-        "all_weap_inf_thermaldetonator",
-        "all_weap_inf_crackgrenade",
-        "imp_weap_inf_thermaldetonator",
-        "imp_weap_inf_crackgrenade",
-        "cis_weap_inf_thermaldetonator",
-        "cis_weap_inf_crackgrenade",
-        "gun_weap_inf_haywiredetonator",
+    let mut width = [0.0; 3];
+    for (class, kind) in [
+        ("rep_weap_inf_thermaldetonator", 0),
+        ("rep_weap_inf_haywiredetonator", 1),
+        ("rep_weap_inf_crackgrenade", 2),
+        ("all_weap_inf_thermaldetonator", 0),
+        ("all_weap_inf_crackgrenade", 2),
+        ("imp_weap_inf_thermaldetonator", 0),
+        ("imp_weap_inf_crackgrenade", 2),
+        ("cis_weap_inf_thermaldetonator", 0),
+        ("cis_weap_inf_crackgrenade", 2),
+        ("gun_weap_inf_haywiredetonator", 1),
     ] {
+        let model = ["hud_bf1_thermal", "hud_bf1_haywire", "hud_bf1_concussion"][kind];
         let row = hud_row(&bf1, class);
         assert!(!row.bf2, "{class}");
-        assert_eq!(v.weapon_mesh(2, &row).1, want, "{class}");
+        assert_eq!(v.weapon_mesh(2, &row).1.as_deref(), Some(model), "{class}");
         let got = place(&mut v, row);
-        for k in 0..4 {
-            near(class, got[k], bf2_box[k], 0.5);
+        assert!(
+            v.drawn_sheets().any(|s| s == "hud_thermaldetonator"),
+            "{class}"
+        );
+        assert!(
+            got[0] < bf2_box[2] && got[2] > bf2_box[0],
+            "{class}: {got:?}"
+        );
+        assert!(
+            got[1] < bf2_box[3] && got[3] > bf2_box[1],
+            "{class}: {got:?}"
+        );
+        if kind == 0 {
+            assert_eq!(got, bf2_box);
         }
+        width[kind] = got[2] - got[0];
     }
+    assert!(width[1] < width[0] && width[0] < width[2], "{width:?}");
     for side in ["all", "imp", "rep", "cis"] {
         let class = format!("{side}_weap_inf_thermaldetonator");
         let row = hud_row(&bf2, &class);

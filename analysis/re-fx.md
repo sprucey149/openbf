@@ -516,12 +516,16 @@ BF1 KAS1 (`bf1_kas1`) showed three effects missing from the port: no splash wher
   - spawns `ImpactEffectWater` at (x, water + 0.02, z);
   - `Fx::explode` applies the native rule, using `ExplosionLook::radius_outer` from `DamageRadius` / `DamageRadiusOuter`;
   - the impact explosion of a water hit runs through the same rule.
-- `game/src/fx/trail.rs` starts every ordnance's `TrailEffect`, bolts and thrown grenades alike, at the round with the measured axes, carries it each tick, and stops it when the round is gone. It is render-side only, so the sim is unchanged apart from `Hit::Water`.
+- `game/src/fx/trail.rs` starts ordnance trails at the round with the measured
+  axes, carries them each tick, and stops them when the round is gone. The BF1
+  thermal detonator uses the BF1 blue trail where it is available, by the
+  maintainer's choice on #158. Its native explosion effect and sound still
+  come from its explosion class. Trails run on the render side.
 - Regressions:
   - `core sim::combat::tests::water_stops_bolts_and_names_the_surface`;
   - `hash_bolts` (Water is not an alias);
   - `fx::tests::water_takes_the_impact_onto_its_surface_and_swaps_the_blast`, `a_round_carries_its_trail_until_it_is_gone`, `grenade_trails_keep_their_rounds_when_an_earlier_one_goes_off`;
-  - the asset check `game/tests/suite/water_fx.rs`: the real BF1 class db and effects, the red glow on the GPU, and `watersplash_lg` with no land effect when the fuse runs out in the water. `OPENBF_WATER_CAPTURE=<dir>` writes the frame.
+  - the asset check `game/tests/suite/water_fx.rs`: the real BF1 class db and effects, the chosen blue glow on the GPU, and `watersplash_lg` with no land effect when the fuse runs out in the water. `OPENBF_WATER_CAPTURE=<dir>` writes the frame.
 
 Not matched (the wet mask, the ripples and the splash re-snap were added later, §15):
 - The `FUN_001a8740` spray. It is gated off in the measured session.

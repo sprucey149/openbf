@@ -13,7 +13,7 @@ fn names(fx: &Fx) -> Vec<String> {
 }
 
 #[test]
-fn the_bf1_thermal_detonator_glows_red_in_flight_and_splashes_in_water() {
+fn the_bf1_thermal_detonator_glows_blue_in_flight_and_splashes_in_water() {
     let root = game::assets::baked_root();
     let map = root.join("common_bf1");
     if !map.join("effects.ron").exists() || !root.join("classes").exists() {
@@ -24,8 +24,9 @@ fn the_bf1_thermal_detonator_glows_red_in_flight_and_splashes_in_water() {
     let w = game::roster::thrown_weapon_from_db(&db, "imp_weap_inf_thermaldetonator")
         .unwrap()
         .unwrap();
-    let trail = w.ordnance.impact.as_ref().and_then(|l| l.trail.clone());
-    assert_eq!(trail.as_deref(), Some("com_sfx_weap_grenade_red"));
+    let source_trail = w.ordnance.impact.as_ref().and_then(|l| l.trail.as_deref());
+    assert_eq!(source_trail, Some("com_sfx_weap_grenade_red"));
+    let trail = Some("com_sfx_weap_grenade_blue");
     let class = w.ordnance.sticky.clone().unwrap();
     let look = class.explosion.as_ref().unwrap().look.clone();
     assert_eq!(look.water_effect.as_deref(), Some("watersplash_lg"));
@@ -61,7 +62,7 @@ fn the_bf1_thermal_detonator_glows_red_in_flight_and_splashes_in_water() {
             let e = fx
                 .live()
                 .iter()
-                .find(|e| e.name() == trail.as_deref() && !e.is_dead())
+                .find(|e| e.name() == trail && !e.is_dead())
                 .unwrap_or_else(|| panic!("tick {tick}: no trail on the grenade"));
             assert_eq!(e.frame.pos, g.pos, "tick {tick}: the trail rides the round");
             if tick == 6 {
@@ -74,16 +75,16 @@ fn the_bf1_thermal_detonator_glows_red_in_flight_and_splashes_in_water() {
                     fx.submit(r, &camera);
                     r.render(&camera, &[], [0.01, 0.01, 0.01, 1.0]).unwrap();
                     let (rgba, w, h) = r.capture_rgba().unwrap();
-                    let red = rgba
+                    let blue = rgba
                         .chunks_exact(4)
                         .filter(|p| {
-                            i16::from(p[0]) - i16::from(p[1]) > 15
-                                && i16::from(p[0]) - i16::from(p[2]) > 15
+                            i16::from(p[2]) - i16::from(p[0]) > 15
+                                && i16::from(p[2]) - i16::from(p[1]) > 15
                         })
                         .count();
                     assert!(
-                        red > 20,
-                        "only {red} red pixels of the glow reached the frame"
+                        blue > 20,
+                        "only {blue} blue pixels of the glow reached the frame"
                     );
                     if let Some(dir) = std::env::var_os("OPENBF_WATER_CAPTURE") {
                         let dir = std::path::PathBuf::from(dir);
@@ -120,7 +121,7 @@ fn the_bf1_thermal_detonator_glows_red_in_flight_and_splashes_in_water() {
     assert!(fx
         .live()
         .iter()
-        .filter(|e| e.name() == trail.as_deref())
+        .filter(|e| e.name() == trail)
         .all(|e| e.is_stopped()));
     assert!(rendered || renderer.is_none());
 }
