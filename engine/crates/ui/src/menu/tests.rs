@@ -296,6 +296,77 @@ fn a_battle_without_team_sizes_greys_the_team_size_row() {
     assert!(whole.iter().any(|t| t == reason), "{whole:?}");
 }
 
+/// The Game Menu's stack is the original's width (260 PS2 safe-area units at
+/// the shell's safe-area scale, re-bf2-menus.md "ifs_pausemenu"), and rows
+/// sit with the pause menu's ySpacing 5 gap: a row's drawn box spans the
+/// stack, and consecutive rows' boxes are `row height + 5` apart.
+#[test]
+fn the_game_menu_draws_the_stack_at_its_width() {
+    let m = MenuModel {
+        page: Some(PausePage::Main),
+        respawn_label: Some("Respawn".into()),
+        restart_available: true,
+        ..Default::default()
+    };
+    let ctx = egui::Context::default();
+    // Settle the list's measured pitch over a few frames.
+    let mut out = None;
+    for _ in 0..8 {
+        out = Some(menu_frame(&ctx, &m, [1280.0, 900.0], Vec::new()));
+    }
+    // Row boxes: the filled frames under the focused row and the panel's
+    // row lines; measure from the text rows' bounds per frame.
+    let out = out.unwrap();
+    let mut tops = Vec::new();
+    for c in &out.shapes {
+        if let egui::Shape::Text(t) = &c.shape {
+            let r = t.visual_bounding_rect();
+            if c.clip_rect.contains_rect(r.shrink(1.0)) {
+                tops.push((r.min.x, r.min.y));
+            }
+        }
+    }
+    // The row labels all start at the same left edge inside the stack, and
+    // the stack is at least PAUSE_STACK_WIDTH wide: a value row's arrows sit
+    // at its right end, so the widest drawn row spans it.
+    let left = tops.iter().map(|(x, _)| *x).fold(f32::MAX, f32::min);
+    let right = out
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Text(t) => Some(t.visual_bounding_rect().max.x),
+            _ => None,
+        })
+        .fold(f32::MIN, f32::max);
+    assert!(
+        right - left >= PAUSE_STACK_WIDTH - 1.0,
+        "width {} < stack",
+        right - left
+    );
+    // Two consecutive row labels sit one pitch apart: text height + the gap.
+    tops.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+    let first = tops[0].1;
+    let second = tops.iter().find(|(_, y)| *y > first + 1.0).map(|(_, y)| *y);
+    if let Some(second) = second {
+        let text_h = out
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some(t.visual_bounding_rect().height()),
+                _ => None,
+            })
+            .next()
+            .unwrap();
+        // The row's frame adds its margins; the gap between rows is 5, so
+        // pitch >= text height + gap. Rows are uniform, so every pair matches.
+        let pitch = second - first;
+        assert!(
+            pitch >= text_h + PAUSE_ROW_GAP,
+            "pitch {pitch} < text {text_h} + gap"
+        );
+    }
+}
+
 /// Issue #142: the controller look row steps by tenths in its range, in a
 /// round and in the shell, and says what it does.
 #[test]

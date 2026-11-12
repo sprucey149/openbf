@@ -160,6 +160,19 @@ pub enum MenuAction {
     Quit,
 }
 
+/// The Game Menu's stack width in the PS2 safe-area units its scripts use
+/// (`ifs_pausemenu` `width` 260, re-bf2-menus.md "ifs_pausemenu"; a stack row
+/// is `font h + ySpacing`, so gamefont_large rows are 27 tall). The menu
+/// draws in egui points at the shell's safe-area scale (512 / 460.8, the
+/// ratio the shell's pointer mapping uses), so the stack is drawn this wide.
+pub const PAUSE_STACK_WIDTH: f32 = 260.0 * 512.0 / 460.8;
+
+/// The vertical gap between stack rows (the pause menu's `ySpacing` 5,
+/// re-bf2-menus.md "ifs_pausemenu"; the options stacks use the same). egui's
+/// default item spacing is not the row pitch: [`RowList`] measures the whole
+/// row's pitch every frame.
+pub const PAUSE_ROW_GAP: f32 = 5.0;
+
 pub const MOUSE_SENSITIVITY_RANGE: (f32, f32) = (0.1, 5.0);
 
 /// OURS: the controller look sensitivity, a factor on the right stick before
@@ -198,7 +211,7 @@ pub fn draw_controls(
                         ui.label(message);
                     }
                     let room = ctx.content_rect().height() - PANEL_MARGINS - ui.min_rect().height();
-                    let gap = ui.spacing().item_spacing.y;
+                    let gap = PAUSE_ROW_GAP;
                     let list = RowList::for_frame(ctx, (None, 0), cursor, labels.len(), room, gap);
                     let shown = list.area(None, gap).show(ui, |ui| {
                         for (i, (name, value)) in labels.iter().enumerate() {
@@ -672,8 +685,10 @@ enum RowKind {
 
 /// The value's width between a value row's arrows, so the arrows line up.
 const STEP_VALUE_WIDTH: f32 = 112.0;
-/// A pause-menu row's least width: the longest label, the arrows and the value.
-const MENU_ROW_WIDTH: f32 = 460.0;
+/// A pause-menu row's least width: the longest label, the arrows and the
+/// value. The Game Menu's stack is [`PAUSE_STACK_WIDTH`] scaled to points; a
+/// row is that plus its own margins, so the stack fits inside the rows.
+const MENU_ROW_WIDTH: f32 = PAUSE_STACK_WIDTH + 20.0;
 
 /// The height of a row's 18-point text: a value row's arrows and value keep
 /// to it, so every row has the same pitch ([`RowList`]).
@@ -727,7 +742,7 @@ fn menu_row(
         .corner_radius(3.0)
         .show(ui, |ui| {
             ui.set_min_width(if kind == RowKind::Plain {
-                360.0
+                PAUSE_STACK_WIDTH
             } else {
                 MENU_ROW_WIDTH
             });
@@ -1093,7 +1108,7 @@ pub fn draw_menu(ctx: &egui::Context, m: &MenuModel) -> Vec<MenuAction> {
                         - ui.min_rect().height()
                         - FOOTER_ROOM
                         - if has_help { HELP_ROOM } else { 0.0 };
-                    let gap = ui.spacing().item_spacing.y;
+                    let gap = PAUSE_ROW_GAP;
                     let list = RowList::for_frame(
                         ctx,
                         (m.class_choices.as_ref().map(|p| p.tab), list_key(m)),
