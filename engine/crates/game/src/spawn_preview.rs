@@ -81,6 +81,16 @@ pub const SHRINK: f32 = 0.25;
 // He stands within a metre and a half of the eye.
 const _: () = assert!(SIDE_AT.z * SHRINK < 1.5);
 
+/// BF1's opening team choice is text-only in the port. Its unit previews
+/// belong to the class screen after the command post is confirmed.
+pub fn opening_preview(page: &SpawnPage, rules: core::soldier::GroundRules) -> Option<&SpawnPage> {
+    if rules == core::soldier::GroundRules::Bf1 && matches!(page, SpawnPage::Side { .. }) {
+        None
+    } else {
+        Some(page)
+    }
+}
+
 /// The soldier the side select shows: (team, class), or `None`.
 pub fn shown(page: &SpawnPage) -> Option<(u8, u8)> {
     match page {

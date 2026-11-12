@@ -267,6 +267,81 @@ fn step_spawn_pointer_puts_side_and_map_picks_in_the_pad() {
     );
 }
 
+#[test]
+fn bf1_first_spawn_shows_a_unit_only_after_a_post_is_confirmed() {
+    use core::sim::{buttons::SPAWN_ACCEPT, PadState};
+    use core::soldier::GroundRules;
+    use ui::spawn_draw::SpawnPage;
+
+    let mut walk = game::walk::WalkSim::new(42, glam::Vec3::ZERO, None);
+    walk.sim.ground_rules = GroundRules::Bf1;
+    let troop = &walk.teams[0];
+    walk.sim.classes[0].push(core::unit::UnitClass {
+        consts: troop.consts,
+        max_health: troop.max_health,
+        health_type: troop.health_type,
+        weapon_class: troop.weapon_class,
+        total_clips: troop.total_clips,
+        weapon_slot: troop.weapon_slot,
+        slots: troop.slots.clone(),
+        jet: false,
+        capture_posts: true,
+        drops: troop.drops,
+        chunk: None,
+        min: 0,
+        max: None,
+        unlock_points: 0,
+        droideka: None,
+    });
+    let at = glam::Vec3::ZERO;
+    walk.sim.add_cp(
+        core::cp::CpDef {
+            name: "Home".into(),
+            pos: at,
+            capture: core::region::Region::sphere(at, 10.0),
+            control: None,
+            value_bleed: 1,
+            value_atk: [1, 1],
+            value_def: [1, 1],
+            spawn_nodes: vec![(at, 0.0)],
+            capture_time: 10.0,
+            neutralize_time: 10.0,
+        },
+        Some(0),
+    );
+    assert!(walk.sim.open_spawn_screens(0, true));
+
+    let feed = game::event_feed::EventFeed::for_walk(std::path::Path::new(""), "bf1", &walk);
+    let accept = PadState {
+        buttons: SPAWN_ACCEPT,
+        ..Default::default()
+    };
+    let side = game::spawn_page::page(&walk, &feed, 0).unwrap();
+    assert!(matches!(side, SpawnPage::Side { .. }));
+    assert!(game::spawn_preview::opening_preview(&side, GroundRules::Bf1).is_none());
+    assert!(
+        game::spawn_preview::opening_preview(&side, GroundRules::Bf2)
+            .is_some_and(game::spawn_preview::stands)
+    );
+
+    walk.step_tick(&[accept]);
+    let post = game::spawn_page::page(&walk, &feed, 0).unwrap();
+    assert!(matches!(post, SpawnPage::Map { .. }));
+    assert!(
+        !game::spawn_preview::opening_preview(&post, GroundRules::Bf1)
+            .is_some_and(game::spawn_preview::stands)
+    );
+
+    walk.step_tick(&[PadState::default()]);
+    walk.step_tick(&[accept]);
+    let class = game::spawn_page::page(&walk, &feed, 0).unwrap();
+    assert!(matches!(class, SpawnPage::Class { .. }));
+    assert!(
+        game::spawn_preview::opening_preview(&class, GroundRules::Bf1)
+            .is_some_and(game::spawn_preview::stands)
+    );
+}
+
 #[path = "tests/assault.rs"]
 mod assault;
 

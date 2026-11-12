@@ -917,7 +917,11 @@ impl winit::application::ApplicationHandler for App {
                     let page = spawn
                         .as_ref()
                         .and_then(|s| s.page.as_ref())
-                        .filter(|_| self.hud_view.is_some() && !self.cheats.hud_hidden);
+                        .filter(|_| self.hud_view.is_some() && !self.cheats.hud_hidden)
+                        .and_then(|page| {
+                            let (walk, _) = self.walk.as_ref()?;
+                            game::spawn_preview::opening_preview(page, walk.sim.ground_rules)
+                        });
                     if let Some(vis) = self.soldier_vis.as_ref() {
                         let step = if self.paused { 0.0 } else { dt };
                         let (body, gun) = self.spawn_preview.draws_live(
