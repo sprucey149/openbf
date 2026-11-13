@@ -120,6 +120,188 @@ pub fn bake_loading_layout(lvl_path: &str, outdir: &str) -> Result<()> {
     crate::write_ron(&dir.join("layout.ron"), &layout)
 }
 
+/// The stock BF2 Galactic Conquest surface, clouds and (where present) an
+/// extra surface layer. The baked view is presentation art built locally.
+pub fn bake_loading_orbits(lvl_path: &str, outdir: &str) -> Result<()> {
+    let planets = [
+        (
+            "coruscant",
+            "coruscant_hi_land",
+            Some("coruscant_hi_clouds"),
+            Some("coruscant_hi_land2"),
+        ),
+        (
+            "dagobah",
+            "dagobah_hi_land",
+            Some("dagobah_hi_clouds"),
+            None,
+        ),
+        (
+            "felucia",
+            "felucia_hi_land",
+            Some("felucia_hi_clouds"),
+            None,
+        ),
+        (
+            "mustafar",
+            "mustafar_hi_land",
+            Some("mustafar_hi_clouds"),
+            Some("mustafar_hi_land2"),
+        ),
+        (
+            "mygeeto",
+            "mygeeto_hi_land",
+            Some("mygeeto_hi_clouds"),
+            None,
+        ),
+        ("polismassa", "polismassa_hi_land", None, None),
+        // Here the opaque cloud color is the base and the land is a cutout.
+        ("utapau", "utapau_hi_clouds", Some("utapau_hi_land"), None),
+        (
+            "death_star",
+            "death_star_hi",
+            None,
+            Some("death_star_turret"),
+        ),
+    ];
+    let buf = read_lvl(lvl_path)?;
+    let inner = mungefs::open(&buf).map_err(|e| anyhow!("{e}"))?;
+    let chunks = mungefs::content_chunks(inner).map_err(|e| anyhow!("{e}"))?;
+    let dir = Path::new(outdir).join("load");
+    std::fs::create_dir_all(&dir)?;
+    let read = |name: &str| {
+        let full = format!("gal_prp_{name}");
+        let chunk = chunks
+            .iter()
+            .filter(|c| &c.tag == b"tex_")
+            .find(|c| {
+                c.child_string(b"NAME")
+                    .is_some_and(|n| n.eq_ignore_ascii_case(&full))
+            })
+            .with_context(|| format!("BF2 loading orbit texture {full}"))?;
+        let texture = mungefs::texture::Texture::parse(chunk).map_err(|e| anyhow!("{e}"))?;
+        let size = [texture.info.width as usize, texture.info.height as usize];
+        anyhow::ensure!(
+            !texture.mips.is_empty(),
+            "missing BF2 loading orbit mip {full}"
+        );
+        let rgba = texture.rgba8(0);
+        let expected = size[0].checked_mul(size[1]).and_then(|n| n.checked_mul(4));
+        anyhow::ensure!(
+            !size.contains(&0) && expected == Some(rgba.len()),
+            "invalid BF2 loading orbit texture {full}"
+        );
+        Ok::<_, anyhow::Error>(OrbitTexture { size, rgba })
+    };
+    for (name, base, layer, detail) in planets {
+        let base = read(base)?;
+        let layer = layer.map(read).transpose()?;
+        let detail = detail.map(read).transpose()?;
+        let dish = name == "death_star";
+        let rgba = orbit_frame(&base, layer.as_ref(), detail.as_ref(), dish);
+        std::fs::write(
+            dir.join(format!("orbit_{name}.ktx2")),
+            crate::ktx2w::write_rgba8(ORBIT_WIDTH, ORBIT_HEIGHT, &[rgba]),
+        )?;
+    }
+    Ok(())
+}
+
+const ORBIT_WIDTH: u32 = 512;
+const ORBIT_HEIGHT: u32 = 384;
+
+struct OrbitTexture {
+    size: [usize; 2],
+    rgba: Vec<u8>,
+}
+
+impl OrbitTexture {
+    fn sample(&self, u: f32, v: f32) -> [f32; 4] {
+        let x = (u * self.size[0] as f32).rem_euclid(self.size[0] as f32);
+        let y = (v * self.size[1] as f32).clamp(0.0, (self.size[1] - 1) as f32);
+        let x0 = x as usize % self.size[0];
+        let x1 = (x0 + 1) % self.size[0];
+        let y0 = y as usize;
+        let y1 = (y0 + 1).min(self.size[1] - 1);
+        let px = x.fract();
+        let py = y.fract();
+        std::array::from_fn(|channel| {
+            let get = |x, y| self.rgba[(y * self.size[0] + x) * 4 + channel] as f32;
+            let top = get(x0, y0) * (1.0 - px) + get(x1, y0) * px;
+            let bottom = get(x0, y1) * (1.0 - px) + get(x1, y1) * px;
+            top * (1.0 - py) + bottom * py
+        })
+    }
+}
+
+/// OURS: project the owned color maps as a lit globe against a static star
+/// field. The same composition is used for each BF2-only orbit.
+/// measure: compare the framing and contrast with the original BF1 locale shots.
+fn orbit_frame(
+    base: &OrbitTexture,
+    layer: Option<&OrbitTexture>,
+    detail: Option<&OrbitTexture>,
+    dish: bool,
+) -> Vec<u8> {
+    let radius = ORBIT_HEIGHT as f32 * 0.32;
+    let mut rgba = Vec::with_capacity((ORBIT_WIDTH * ORBIT_HEIGHT * 4) as usize);
+    for y in 0..ORBIT_HEIGHT {
+        for x in 0..ORBIT_WIDTH {
+            let hash = x.wrapping_mul(0x9e37_79b1) ^ y.wrapping_mul(0x85eb_ca6b);
+            let hash = (hash ^ (hash >> 16)).wrapping_mul(0x7feb_352d);
+            let star = if hash & 0x3ff == 0 {
+                20 + ((hash >> 10) & 0x3f) as u8
+            } else {
+                0
+            };
+            let sky = [1 + star, 2 + star, 7 + star];
+            let nx = (x as f32 + 0.5 - ORBIT_WIDTH as f32 / 2.0) / radius;
+            let ny = (y as f32 + 0.5 - ORBIT_HEIGHT as f32 / 2.0) / radius;
+            let r2 = nx * nx + ny * ny;
+            if r2 >= 1.0 {
+                rgba.extend_from_slice(&[sky[0], sky[1], sky[2], 255]);
+                continue;
+            }
+            let nz = (1.0 - r2).sqrt();
+            let u = 0.52 + nx.atan2(nz) / std::f32::consts::TAU;
+            let v = 0.5 + ny.asin() / std::f32::consts::PI;
+            let mut color = base.sample(u, v);
+            if let Some(layer) = layer {
+                blend_orbit(&mut color, layer.sample(u, v), 1.0);
+            }
+            if let Some(detail) = detail {
+                if dish {
+                    let dx = (nx + 0.27) / 0.36;
+                    let dy = (ny + 0.37) / 0.36;
+                    let coverage = ((1.0 - dx * dx - dy * dy) * 5.0).clamp(0.0, 1.0);
+                    if coverage > 0.0 {
+                        let sample = detail.sample(0.5 + dx * 0.5, 0.5 + dy * 0.5);
+                        blend_orbit(&mut color, sample, coverage);
+                    }
+                } else {
+                    blend_orbit(&mut color, detail.sample(u, v), 0.7);
+                }
+            }
+            let light = 0.17 + 0.83 * (-0.53 * nx - 0.35 * ny + 0.77 * nz).max(0.0);
+            let coverage = ((1.0 - r2.sqrt()) * radius).min(1.0);
+            for (channel, bg) in color[..3].iter().zip(sky) {
+                rgba.push(
+                    (channel * light * coverage + bg as f32 * (1.0 - coverage)).round() as u8,
+                );
+            }
+            rgba.push(255);
+        }
+    }
+    rgba
+}
+
+fn blend_orbit(base: &mut [f32; 4], layer: [f32; 4], opacity: f32) {
+    let alpha = layer[3] * (opacity / 255.0);
+    for (base, overlay) in base[..3].iter_mut().zip(layer) {
+        *base = *base * (1.0 - alpha) + overlay * alpha;
+    }
+}
+
 /// BF1 PS2 FUN_002c8aa0 reads the shared settings and map-local zoom boxes.
 fn parse_layout(chunk: &Chunk<'_>) -> Result<LoadingLayout> {
     let nodes = mungefs::config::parse_tree(chunk).map_err(|e| anyhow!("{e}"))?;

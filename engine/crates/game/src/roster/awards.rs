@@ -166,13 +166,6 @@ pub fn bf1_award(weapon: &str) -> Option<(&'static AwardRow, String)> {
     Some((row, format!("{side}{}", row.award)))
 }
 
-/// The medal whose award takes a BF1 weapon's place (`WeaponClass::medal_lock`).
-pub(super) fn bf1_medal_lock(weapon: &str) -> Option<i8> {
-    bf1_award(weapon)
-        .filter(|(row, _)| row.replaces)
-        .map(|(row, _)| row.medal)
-}
-
 /// The clips BF2 gives `award` (a `side` class's): its count on the first
 /// [`KITS`] class that carries it.
 fn bf2_clips(bf2: &ClassDb, side: &str, award: &str) -> Option<u32> {

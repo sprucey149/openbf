@@ -1,10 +1,84 @@
 use super::*;
 
 #[test]
+fn graphics_fov_uses_degrees_and_fps_is_a_toggle() {
+    let mut menu = MenuModel {
+        page: Some(PausePage::Settings(SettingsPage::Graphics)),
+        fov_deg: 51.8,
+        fov_scale: 1.0,
+        ..Default::default()
+    };
+    assert_eq!(row_text(&menu, Row::Fov).1.as_deref(), Some("52°"));
+    assert_eq!(row_text(&menu, Row::FpsCounter).1.as_deref(), Some("Off"));
+    assert_eq!(
+        press(&menu, Row::FpsCounter),
+        Some(MenuAction::SetFpsCounter(FpsCounter::On))
+    );
+    menu.fps_counter = FpsCounter::from_index(2);
+    assert_eq!(row_text(&menu, Row::FpsCounter).1.as_deref(), Some("On"));
+    let row = rows(&menu)
+        .iter()
+        .position(|r| *r == Row::FpsCounter)
+        .unwrap();
+    assert_eq!(
+        step(&menu, row, true),
+        vec![MenuAction::SetFpsCounter(FpsCounter::Off)]
+    );
+}
+
+#[test]
+fn fps_counter_draws_on_one_line() {
+    let ctx = egui::Context::default();
+    let mut output = egui::FullOutput::default();
+    for _ in 0..2 {
+        output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(320.0, 240.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| draw_fps_counter(ctx, FpsCounter::On, 1.0 / 60.0),
+        );
+    }
+    assert!(output.shapes.iter().any(|clipped| {
+        matches!(&clipped.shape, egui::Shape::Text(text)
+            if text.galley.text() == "60 FPS" && text.galley.rows.len() == 1)
+    }));
+}
+
+#[test]
+fn graphics_quality_is_fixed_at_normal_in_shell_and_pause() {
+    for in_shell in [None, Some(String::new())] {
+        let mut menu = MenuModel {
+            page: Some(PausePage::Settings(SettingsPage::Graphics)),
+            in_shell,
+            ..Default::default()
+        };
+        menu.cursor = rows(&menu)
+            .iter()
+            .position(|r| *r == Row::GraphicsQuality)
+            .unwrap();
+        assert_eq!(
+            row_text(&menu, Row::GraphicsQuality).1.as_deref(),
+            Some("Normal")
+        );
+        assert!(row_locked(&menu, Row::GraphicsQuality).is_some());
+        assert!(step(&menu, menu.cursor, false).is_empty());
+        assert!(step(&menu, menu.cursor, true).is_empty());
+        assert_eq!(press(&menu, Row::GraphicsQuality), None);
+    }
+}
+
+#[test]
 fn rc_flight_controls_can_be_changed_in_shell_ground_and_space_options() {
     for (in_shell, page) in [
-        (Some("Game Options".into()), None),
-        (None, Some(PausePage::Options)),
+        (
+            Some(String::new()),
+            Some(PausePage::Settings(SettingsPage::Gamepad)),
+        ),
+        (None, Some(PausePage::Settings(SettingsPage::Gamepad))),
         (None, None),
     ] {
         let mut menu = MenuModel {
@@ -55,6 +129,8 @@ fn model() -> MenuModel {
         mouse_sensitivity: 1.0,
         pad_look_sensitivity: 1.0,
         rc_flight_controls: false,
+        rumble_strength: 1.0,
+        career_awards_disabled: false,
         invert_y: false,
         low_power_resolution: false,
         input_icons_label: "Auto",
@@ -68,6 +144,7 @@ fn model() -> MenuModel {
         respawn_label: Some("Respawn".into()),
         outcome_line: None,
         in_shell: None,
+        ..Default::default()
     }
 }
 
@@ -521,7 +598,7 @@ fn navigation_wraps_toggles_and_adjusts() {
             ..Default::default()
         },
     );
-    assert_eq!(a, vec![MenuAction::SetAssist(1.1)]);
+    assert_eq!(a, vec![MenuAction::SetAssist(1.0)]);
     m.cursor = 4; // AiCap
     m.team_size_pct = 10;
     let (_, a) = navigate(

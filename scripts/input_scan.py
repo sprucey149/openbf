@@ -9,8 +9,8 @@ folders, and the Xbox DLC folder. Anything else is named and refused, not guesse
 
 The choice, per game:
   - gameplay and shared UI: the PS2 data whenever it is present. Numbers and shapes the sim reads never change with
-    what else went in. The optional DLC heroes are the one exception, and only once a player turns on the DLC Heroes row
-    in Hero Options (scripts/DLC.md).
+    what else went in. The optional DLC heroes are the one exception. They join Hero Assault by default when installed
+    (scripts/DLC.md).
   - look: every other copy is a texture donor. bake::tier keeps the largest same-art copy of each texture.
   - each game needs one source. PC BF1 plus PC BF2 also works without a console disc. A folder that holds other, unusable
     things still builds; the summary says what was refused. A game left with no usable source stops the build, and
@@ -604,7 +604,7 @@ def summary_lines(plan):
                          f"(add a PS2 {SHORT[game]} disc to play them): {', '.join(withheld_maps(game, gameplay))}")
     dlc = plan["dlc"]
     if dlc["present"]:
-        lines.append(f"  DLC: {dlc['path']} ({'Kit Fisto and Asajj Ventress used, off until the DLC Heroes row in Hero Options is turned on' if dlc['used'] else 'recognized; not supported yet'})")
+        lines.append(f"  DLC: {dlc['path']} ({'Kit Fisto and Asajj Ventress used in Hero Assault' if dlc['used'] else 'recognized; not supported yet'})")
     else:
         lines.append("  DLC: absent (optional)")
     lines.append("Everything found:")

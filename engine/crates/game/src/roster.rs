@@ -1417,9 +1417,13 @@ impl FactionRoster {
         mission_classes: &[(String, u32, Option<u32>)],
         allow_defaults: bool,
     ) -> Result<(FactionRoster, Vec<SkippedClass>)> {
-        let defaults = default_classes(game, faction).with_context(|| {
-            format!("unknown faction {faction} on a {game} map (all|imp|rep|cis)")
-        })?;
+        let defaults = if allow_defaults {
+            default_classes(game, faction).with_context(|| {
+                format!("unknown faction {faction} on a {game} map (all|imp|rep|cis)")
+            })?
+        } else {
+            &[]
+        };
         let mut skipped = Vec::new();
         let mut classes = Vec::new();
         if !mission_classes.is_empty() {
@@ -1454,8 +1458,7 @@ impl FactionRoster {
         }
         if classes.is_empty() {
             return Err(anyhow!(
-                "{faction}: no soldier class could be built ({} skipped)",
-                skipped.len()
+                "{faction}: no soldier class could be built: {skipped:?}"
             ));
         }
         Ok((
@@ -1509,7 +1512,42 @@ impl FactionRoster {
                 sides.push(&load.side);
             }
         }
-        let db = load_classdb(classes_dir, game, &sides)?;
+        let hunt = mission.filter(|m| m.is_hunt());
+        let db = if let Some(m) = hunt {
+            let mut db = ClassDb::default();
+            let mut loaded = std::collections::BTreeSet::new();
+            for side in &m.class_load_order {
+                let key = side.side.to_ascii_lowercase();
+                if loaded.insert(key.clone()) {
+                    let path = classes_dir.join(format!("{game}_{key}.ron"));
+                    if pak::is_file(&path) {
+                        db.load(&path)?;
+                    }
+                }
+            }
+            for file in class_files(game, &sides) {
+                let path = classes_dir.join(file);
+                if pak::is_file(&path) {
+                    db.load(&path)?;
+                }
+            }
+            db.load_droid_chunks(&classes_dir.join("droid_chunks.ron"))?;
+            db
+        } else {
+            load_classdb(classes_dir, game, &sides)?
+        };
+        let hunt = hunt.is_some();
+        let jawa = if hunt && game == "bf1" && factions.contains(&"jawa") {
+            // [ours] The BF1 Jawa is a neutral repairer. Its playable Hunt
+            // variant uses the BF2 Jawa's authored attack and keeps its
+            // own repair tool. measure: BF1 Mos Eisley both sides and tiers.
+            let mut jawa = ClassDb::default();
+            jawa.load(&classes_dir.join("bf2_des.ron"))?;
+            jawa.load(&classes_dir.join("bf2_ingame.ron"))?;
+            Some(jawa)
+        } else {
+            None
+        };
         let mut warnings = Vec::new();
         let mut out = Vec::new();
         for (i, f) in factions.into_iter().enumerate() {
@@ -1518,14 +1556,64 @@ impl FactionRoster {
                 .map(|t| t.classes.as_slice())
                 .unwrap_or(&[]);
             let assault = mission.is_some_and(MissionDef::is_hero_assault);
-            let (mut roster, skipped) = Self::build_with_fallback(&db, game, f, mix, !assault)
-                .with_context(|| {
-                    format!(
-                        "{}team {} ({f})",
-                        if assault { "Hero Assault " } else { "" },
-                        i + 1
-                    )
-                })?;
+            let (mut roster, skipped) =
+                Self::build_with_fallback(&db, game, f, mix, !assault && !hunt).with_context(
+                    || {
+                        format!(
+                            "{}team {} ({f})",
+                            if assault { "Hero Assault " } else { "" },
+                            i + 1
+                        )
+                    },
+                )?;
+            if let Some(donor) = jawa.as_ref().filter(|_| f == "jawa") {
+                for class in &mut roster.classes {
+                    let original = class.weapon.clone();
+                    let original_hud = class.weapon_hud.clone();
+                    class.weapon = weapon_from_db(donor, "tat_weap_inf_jawa_arccaster")?;
+                    class.weapon_hud = weapon_hud(donor, &class.weapon.name);
+                    let slot = (0..8)
+                        .find(|slot| {
+                            *slot != class.weapon_slot
+                                && !class.held.iter().any(|w| w.slot == *slot)
+                        })
+                        .context("BF1 Hunt Jawa has no free repair-tool slot")?;
+                    class.held.push(HeldSlot {
+                        slot,
+                        channel: 0,
+                        clips: 0,
+                        weapon: original,
+                        hud: original_hud,
+                        geometry: class.weapon_geometry.clone(),
+                        first_person: class.first_person_weapon.clone(),
+                    });
+                    class.first_person_weapon =
+                        first_person_weapon(donor, &class.weapon.name, class.weapon.offhand_weapon);
+                    class.weapon_geometry = donor
+                        .prop(&class.weapon.name, "GeometryName")
+                        .map(str::to_owned);
+                }
+            }
+            if hunt && !skipped.is_empty() {
+                anyhow::bail!("Hunt team {} ({f}) has missing classes: {skipped:?}", i + 1);
+            }
+            if hunt {
+                for class in &mut roster.classes {
+                    for weapon in std::iter::once(&mut class.weapon)
+                        .chain(class.held.iter_mut().map(|slot| &mut slot.weapon))
+                    {
+                        if weapon.thrown.is_none()
+                            && db.engine_base(&weapon.name) == Some("grenade")
+                        {
+                            if let Some(thrown) = weapon_db::thrown_weapon(&db, &weapon.name, true)?
+                            {
+                                *weapon = thrown;
+                            }
+                        }
+                    }
+                    class.unlock_points = 0;
+                }
+            }
             for s in &skipped {
                 warnings.push(format!(
                     "roster {f}: skipped class {} — {}",

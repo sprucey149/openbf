@@ -442,6 +442,12 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         free,
     };
     let melee_goal = melee::goal(sim, &frame, st, after_aim.free);
+    let close_on = after_aim.gun.close_on.filter(|_| after_aim.free);
+    if close_on.is_some() {
+        super::super::tactic::release(st, sim.tick);
+        st.hold = None;
+        st.fight.mode = 0;
+    }
     fight::keep_remembered(sim, &tk, st, frame.held, after_aim.free, thinking, &mut nt);
     let manning = boarding.is_some()
         && st
@@ -454,7 +460,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         st,
         after_aim
             .fight
-            .filter(|_| after_aim.free && melee_goal.is_none()),
+            .filter(|_| after_aim.free && melee_goal.is_none() && close_on.is_none()),
         after_aim.free,
         thinking,
         &mut nt,
@@ -474,7 +480,11 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
         .map(|h| h.goal);
     let arrive = held_goal.map(|p| (p, HOLD_ARRIVE)).or(intent.arrive);
     let goal = held_goal.or(intent.goal);
-    let step = intent.step.after_aim(melee_goal);
+    let step = if close_on.is_some() {
+        StepKind::Leg
+    } else {
+        intent.step.after_aim(melee_goal)
+    };
     st.step = step;
     let mut mv = MoveRequest {
         kind: step.move_kind() as u8,
@@ -515,7 +525,7 @@ fn chain(sim: &Sim, me: UnitHandle, st: &mut AiState) -> (PadState, NavTick, Opt
                 ),
         },
     };
-    melee::steer(&mut mv, melee_goal);
+    melee::steer(&mut mv, melee_goal.or(close_on));
     // The mover: the move sticks, the stance, the roll and the jump. It
     // answers whether the bot stands at its post.
     let moved = mover::run(sim, &tk, st, &mv, &mut pad, &mut nt);

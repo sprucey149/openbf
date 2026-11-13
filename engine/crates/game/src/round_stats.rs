@@ -15,19 +15,13 @@
 //!   "HEAVY TROOPER 1:31"); a rider holds his seat's first gun ("LASER
 //!   CANNONS"); Nemesis = who killed him most, Bait = whom he killed most,
 //!   with the count.
-//! - **Awards** `[H]` by their names (the rules were not read): Tank Buster
-//!   most vehicles destroyed, Killing Spree most kills in one life, Traitor
-//!   most team kills, Bantha Fodder most deaths (each matches the captures'
-//!   winners where their rows are shown: UNIT 466 and LOT KROTAN have the
-//!   most deaths of their lists); the first unit of the most wins a tie; none
-//!   with 0. Camper (a time), Survivalist, Public Enemy and Dead Eye are not
-//!   tracked and stay blank.
-//! - Not tracked: head shots (0), the
-//!   medals (none in a round, every career count 0 "Green"), the rank
-//!   ("Private", the first).
+//! - **Awards**: BF2's round awards use the maxima of each stat across
+//!   soldiers (FUN_00365010 / FUN_00365118, B2 361042–361130).
+//! - **Head Shots** and **Dead Eye** use the same critical-hit counter in
+//!   BF2 (B2 47580–47583, 361120–361122), including vehicle weak points.
 
 use crate::event_feed::points;
-use core::sim::Sim;
+use core::sim::{MedalCounts, Sim};
 use core::unit::UnitHandle;
 use std::collections::BTreeMap;
 use ui::stats::{clock, Award, Career, Medal, StatRow, StatsScreens, StatsTexts, TeamList};
@@ -41,9 +35,16 @@ pub struct UnitRound {
     pub kills: i32,
     pub posts: u32,
     pub team_kills: u32,
-    /// Kills in the current life, and the most in one life.
-    pub spree: u32,
+    kills_this_life: u32,
+    most_kills_in_life: u32,
+    last_kill: Option<u64>,
+    spree: u32,
     pub best_spree: u32,
+    low_health_kills: u32,
+    critical_hits: u32,
+    camp_origin: glam::Vec3,
+    camp_ticks: u32,
+    longest_camp: u32,
     pub vehicles: u32,
     /// Ticks alive per class index (`UnitSpec::class`) and per weapon class
     /// (`Sim::weapon_classes` index).
@@ -71,6 +72,8 @@ impl UnitRound {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RoundStats {
     pub units: Vec<UnitRound>,
+    /// Career totals at battle creation, before the profile autosaves.
+    pub(crate) opening_medals: Option<MedalCounts>,
 }
 
 impl RoundStats {
@@ -81,37 +84,69 @@ impl RoundStats {
         &mut self.units[i]
     }
 
-    /// `Event::Kill`.
-    pub fn kill(&mut self, sim: &Sim, shooter: UnitHandle, victim: UnitHandle) {
+    #[cfg(test)]
+    fn kill(&mut self, sim: &Sim, shooter: UnitHandle, victim: UnitHandle) {
+        let k = &sim.units[shooter.index as usize];
+        let d = &sim.units[victim.index as usize];
+        let amount = if shooter == victim {
+            points::SUICIDE
+        } else if sim.allied(k.team, d.team) {
+            points::TEAM_KILL
+        } else {
+            points::kill(d.is_player, sim.hero_unit(d))
+        };
+        self.kill_with_points(sim, shooter, victim, amount);
+    }
+
+    /// `Event::Kill` and its score from the event feed.
+    pub(crate) fn kill_with_points(
+        &mut self,
+        sim: &Sim,
+        shooter: UnitHandle,
+        victim: UnitHandle,
+        amount: i32,
+    ) {
         let (s, v) = (shooter.index as usize, victim.index as usize);
         let (Some(k), Some(d)) = (sim.units.get(s), sim.units.get(v)) else {
             return;
         };
-        let human = d.is_player;
-        let hero = sim.hero_class(k.team) == Some(k.spec.class);
+        let hero = sim.hero_unit(k);
         let same_team = sim.allied(k.team, d.team);
         self.died(v);
         let me = self.unit(s);
+        me.score(amount, hero);
         if s == v {
             me.kills -= 1;
-            me.score(points::SUICIDE, hero);
             return;
         }
         if same_team {
             me.kills -= 1;
-            me.score(points::TEAM_KILL, hero);
             me.team_kills += 1;
         } else {
             me.kills += 1;
-            me.score(
-                points::kill(human, sim.hero_class(d.team) == Some(d.spec.class)),
-                hero,
-            );
+            // BF2's kill stat groups kills no more than four seconds apart.
+            // Its survivalist check uses the last health sample (B2 359243–359276).
+            if me
+                .last_kill
+                .is_none_or(|tick| sim.tick - tick > 4 * u64::from(core::TICK_HZ))
+            {
+                me.spree = 0;
+            }
+            me.last_kill = Some(sim.tick);
             me.spree += 1;
             me.best_spree = me.best_spree.max(me.spree);
+            me.kills_this_life += 1;
+            me.most_kills_in_life = me.most_kills_in_life.max(me.kills_this_life);
+            if k.health.cur < k.health.max * 0.25 {
+                me.low_health_kills += 1;
+            }
         }
         *me.killed.entry(v).or_default() += 1;
         *self.unit(v).killed_by.entry(s).or_default() += 1;
+    }
+
+    pub(crate) fn score(&mut self, unit: UnitHandle, amount: i32, hero: bool) {
+        self.unit(unit.index as usize).score(amount, hero);
     }
 
     /// `Event::EnvDeath`: the world killed him.
@@ -119,14 +154,19 @@ impl RoundStats {
         let i = unit.index as usize;
         self.died(i);
         let u = &sim.units[i];
-        self.unit(i).score(
-            points::SUICIDE,
-            sim.hero_class(u.team) == Some(u.spec.class),
-        );
+        self.unit(i).score(points::SUICIDE, sim.hero_unit(u));
     }
 
     fn died(&mut self, i: usize) {
-        self.unit(i).spree = 0;
+        let u = self.unit(i);
+        u.spree = 0;
+        u.last_kill = None;
+        u.kills_this_life = 0;
+    }
+
+    /// The damage path has already decided whether the hit was critical.
+    pub fn critical_hit(&mut self, shooter: UnitHandle) {
+        self.unit(shooter.index as usize).critical_hits += 1;
     }
 
     /// A capture credited to unit `i`: `first` when he was longest in the
@@ -172,6 +212,18 @@ impl RoundStats {
             let weapon = seat_gun.unwrap_or(u.weapon_class);
             let class = u.spec.class;
             let me = self.unit(i);
+            let pos = u
+                .mount
+                .and_then(|mount| sim.vehicle(mount.vehicle))
+                .map_or(u.soldier.pos, |vehicle| vehicle.pos);
+            // FUN_00363948 (B2 359907–359942): reset after leaving the 10 m radius.
+            if me.camp_origin.distance_squared(pos) > 100.0 {
+                me.camp_origin = pos;
+                me.camp_ticks = 0;
+            } else {
+                me.camp_ticks += 1;
+                me.longest_camp = me.longest_camp.max(me.camp_ticks);
+            }
             *me.class_ticks.entry(class).or_default() += 1;
             *me.weapon_ticks.entry(weapon).or_default() += 1;
         }
@@ -205,33 +257,21 @@ pub struct Names<'a> {
     pub sides: [&'a str; 2],
 }
 
-/// The nine medals in the career page's order (left column, then right),
-/// their text keys and the counts that earn one (B2 table 0x62c560, 12 bytes
-/// each, read from the ELF: gunslinger 6, frenzy 12, demolition 4,
-/// technician 1, marksman 6, regulator 8, endurance 12, guardian 24, war
-/// hero 36 [V]).
-pub const MEDALS: [(&str, &str, u32); 9] = [
-    ("gunslinger", "Gunslinger", 6),
-    ("demolition", "Demolition", 4),
-    ("regulator", "Regulator", 8),
-    ("guardian", "Guardian", 24),
-    ("frenzy", "Frenzy", 12),
-    ("technician", "Technician", 1),
-    ("marksman", "Marksman", 6),
-    ("endurance", "Endurance", 12),
-    ("warhero", "War Hero", 36),
+/// Medal IDs in the career screen's column order.
+pub const MEDAL_NAMES: [(&str, &str); 9] = [
+    ("gunslinger", "Gunslinger"),
+    ("frenzy", "Frenzy"),
+    ("demolition", "Demolition"),
+    ("technician", "Technician"),
+    ("marksman", "Marksman"),
+    ("regulator", "Regulator"),
+    ("endurance", "Endurance"),
+    ("guardian", "Guardian"),
+    ("warhero", "War Hero"),
 ];
+pub const CAREER_MEDAL_ORDER: [usize; 9] = [0, 2, 5, 7, 1, 3, 4, 6, 8];
 
-/// A medal count's level (B2 `FUN_0035fc98` [V]): 0-3 Green, 4-31 Veteran,
-/// 32-63 Elite, 64 and more Legendary.
-pub fn medal_level(count: u32) -> usize {
-    match count {
-        0..=3 => 0,
-        4..=31 => 1,
-        32..=63 => 2,
-        _ => 3,
-    }
-}
+pub use core::sim::medal_level;
 
 const LEVELS: [(&str, &str); 4] = [
     ("ifs.stats.medallevel.green", "Green"),
@@ -268,6 +308,19 @@ pub fn screens(
     let of = |i: usize| round.units.get(i).unwrap_or(&none);
     let label = |key: &str, en: &str| t(key, en);
     let with_count = |i: usize, n: u32| format!("{} ({n})", (names.unit)(i));
+    let match_medals = || {
+        let Some((opening, current)) = round.opening_medals.zip(sim.medal_counts()) else {
+            return Vec::new();
+        };
+        MEDAL_NAMES
+            .into_iter()
+            .enumerate()
+            .filter_map(|(id, (key, en))| {
+                let earned = current[id].saturating_sub(opening[id]);
+                (earned > 0).then(|| (t(&format!("game.awards.medal.{key}"), en), earned))
+            })
+            .collect()
+    };
     let lists = [0u8, 1].map(|team| TeamList {
         icon: emblem(names.sides[usize::from(team)], team),
         rows: sim
@@ -297,14 +350,7 @@ pub fn screens(
                     posts: r.posts as i32,
                     me: i == viewer.index as usize,
                     personal: vec![
-                        (
-                            label("ifs.stats.points", "Player Points"),
-                            r.points.to_string(),
-                        ),
-                        (
-                            label("ifs.stats.hero_points", "Hero Points"),
-                            r.hero_points.to_string(),
-                        ),
+                        (label("ifs.stats.score", "Points"), r.points.to_string()),
                         (label("ifs.stats.kills", "Kills"), r.kills.to_string()),
                         (label("ifs.stats.deaths", "Deaths"), u.deaths.to_string()),
                         (String::new(), String::new()),
@@ -316,10 +362,18 @@ pub fn screens(
                             label("ifs.stats.favweapon", "Favorite Weapon"),
                             favourite_weapon,
                         ),
-                        (label("ifs.stats.headshots", "Head Shots"), "0".into()),
+                        (
+                            label("ifs.stats.headshots", "Head Shots"),
+                            r.critical_hits.to_string(),
+                        ),
                         (label("ifs.stats.nemesis", "Nemesis"), nemesis),
                         (label("ifs.stats.bait", "Bait"), bait),
                     ],
+                    medals: if i == viewer.index as usize {
+                        match_medals()
+                    } else {
+                        Vec::new()
+                    },
                 }
             })
             .collect(),
@@ -336,12 +390,16 @@ pub fn screens(
             .filter(|(_, n)| *n > 0);
         Award {
             label: label(key, en),
-            winner: best.map(|(i, n)| with_count(i, n)).unwrap_or_default(),
+            winner: best
+                .map(|(i, n)| {
+                    if key == "ifs.stats.camper" {
+                        format!("{} {}", (names.unit)(i), clock(n as f32))
+                    } else {
+                        with_count(i, n)
+                    }
+                })
+                .unwrap_or_default(),
         }
-    };
-    let blank = |key: &str, en: &str| Award {
-        label: label(key, en),
-        winner: String::new(),
     };
     let awards = [
         vec![
@@ -349,22 +407,27 @@ pub fn screens(
             award("ifs.stats.killingspree", "Killing Spree", &|i| {
                 of(i).best_spree
             }),
-            blank("ifs.stats.camper", "Camper"),
-            blank("ifs.stats.survivalist", "Survivalist"),
+            award("ifs.stats.camper", "Camper", &|i| {
+                of(i).longest_camp / core::TICK_HZ
+            }),
+            award("ifs.stats.survivalist", "Survivalist", &|i| {
+                of(i).low_health_kills
+            }),
         ],
         vec![
             award("ifs.stats.traitor", "Traitor", &|i| of(i).team_kills),
-            blank("ifs.stats.publicenemy", "Public Enemy"),
+            award("ifs.stats.publicenemy", "Public Enemy", &|i| {
+                of(i).most_kills_in_life
+            }),
             Award {
                 // Bantha Fodder's key path is not known: its text by hash.
                 label: t("#1f913713", "Bantha Fodder"),
                 ..award("", "", &|i| sim.units[i].deaths)
             },
-            blank("ifs.stats.deadeye", "Dead Eye"),
+            award("ifs.stats.deadeye", "Dead Eye", &|i| of(i).critical_hits),
         ],
     ];
     let lives = career.deaths.max(1);
-    let level = t(LEVELS[medal_level(0)].0, LEVELS[medal_level(0)].1);
     let career = Career {
         values: vec![
             (
@@ -389,15 +452,21 @@ pub fn screens(
                 (career.points / i64::from(lives)).to_string(),
             ),
         ],
-        medals: MEDALS
-            .iter()
-            .map(|(key, en, needed)| Medal {
-                name: t(&format!("game.awards.medal.{key}"), en),
-                count: 0,
-                level: level.clone(),
-                info: t(&format!("game.awards.medalinfo.{key}"), "%s")
-                    .replacen("%s", &needed.to_string(), 1)
-                    .replace("\\'", "'"),
+        medals: CAREER_MEDAL_ORDER
+            .into_iter()
+            .map(|id| {
+                let (key, en) = MEDAL_NAMES[id];
+                let count = career.medals[id];
+                let (level_key, level_label) = LEVELS[medal_level(count)];
+                let needed = core::sim::medal_threshold(id, count);
+                Medal {
+                    name: t(&format!("game.awards.medal.{key}"), en),
+                    count,
+                    level: t(level_key, level_label),
+                    info: t(&format!("game.awards.medalinfo.{key}"), "%s")
+                        .replacen("%s", &needed.to_string(), 1)
+                        .replace("\\'", "'"),
+                }
             })
             .collect(),
         unlocks: crate::unlocks::rows(career, t),
@@ -526,11 +595,56 @@ mod tests {
             .find(|r| r.name == format!("U{}", a[0].index))
             .unwrap();
         assert_eq!(row.personal[0].1, row.points.to_string());
-        assert_eq!(row.personal[9].1, format!("U{} (2)", b[0].index), "Bait");
+        assert_eq!(row.personal[8].1, format!("U{} (2)", b[0].index), "Bait");
         assert_eq!(s.career.values[3].1, "1.50");
         assert_eq!(s.career.values[5].1, "3");
         assert_eq!(s.career.medals[0].info, "6");
         assert_eq!(s.career.medals[0].level, "Green");
+    }
+
+    #[test]
+    fn round_awards_distinguish_sprees_lives_and_critical_hits() {
+        let mut w = walk();
+        let shooter = w.player;
+        let victim = w
+            .sim
+            .alive_units()
+            .find(|(_, u)| u.team != w.sim.unit(shooter).unwrap().team)
+            .map(|(h, _)| h)
+            .unwrap();
+        let mut round = RoundStats::default();
+        w.sim.unit_mut(shooter).unwrap().health.cur = 1.0;
+        round.kill(&w.sim, shooter, victim);
+        w.sim.tick += 4 * u64::from(core::TICK_HZ) + 1;
+        round.kill(&w.sim, shooter, victim);
+        round.critical_hit(shooter);
+        round.critical_hit(shooter);
+        round.unit(shooter.index as usize).score(5, true);
+        for _ in 0..=core::TICK_HZ {
+            round.tick(&w.sim);
+        }
+        let u = &round.units[shooter.index as usize];
+        assert_eq!(u.best_spree, 1);
+        assert_eq!(u.most_kills_in_life, 2);
+        assert_eq!(u.low_health_kills, 2);
+        assert_eq!(u.critical_hits, 2);
+        assert!(u.longest_camp >= core::TICK_HZ - 1);
+
+        let unit = |i| format!("U{i}");
+        let text = |_: &str, fallback: &str| fallback.to_owned();
+        let names = names_for(&unit, &text);
+        let s = screens(&w.sim, &round, shooter, &Default::default(), &names);
+        let winner = format!("U{} (2)", shooter.index);
+        for award in [&s.awards[0][3], &s.awards[1][1], &s.awards[1][3]] {
+            assert_eq!(award.winner, winner);
+        }
+        assert!(s.awards[0][2].winner.ends_with("0:01"));
+        let personal = &s.selected().unwrap().personal;
+        assert_eq!(personal[0], ("Points".into(), "7".into()));
+        assert_eq!(u.ordinary_points(), 2);
+        assert!(personal
+            .iter()
+            .any(|(label, value)| label == "Head Shots" && value == "2"));
     }
 
     /// Time alive goes to the class and the weapon held, and prints as the
@@ -556,11 +670,11 @@ mod tests {
         );
         let row = s.selected().unwrap();
         assert!(
-            row.personal[5].1.ends_with(" 0:36"),
+            row.personal[4].1.ends_with(" 0:36"),
             "{:?}",
-            row.personal[5]
+            row.personal[4]
         );
-        assert!(row.personal[6].1.starts_with('W'), "{:?}", row.personal[6]);
+        assert!(row.personal[5].1.starts_with('W'), "{:?}", row.personal[5]);
     }
 
     #[test]

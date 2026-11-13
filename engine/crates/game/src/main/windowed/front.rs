@@ -11,6 +11,7 @@
 //! the CORE.LVL bank (`SoundLib::load_shell`).
 
 use super::{App, Camera};
+use ui::menu::{ControlContext, PausePage, SettingsPage};
 use ui::shell_feel::MenuSound;
 
 /// The BF2 PS2 shell's front screens (card BSHLA, `ui::shell_ps2`): Press
@@ -30,8 +31,8 @@ pub(super) struct FrontShell {
     /// It is up.
     ia_open: bool,
     /// The settings page is up, at this cursor.
-    settings: Option<usize>,
-    controls: Option<Controls>,
+    settings: Option<(PausePage, usize)>,
+    settings_animation: ui::pause_draw::Animation,
     sounds: Option<game::sounds::SoundLib>,
     pub(super) music: Option<audio::MusicVoice>,
     /// `shell_soundtrack`'s gain (x its bus) and takes, and which one plays
@@ -49,80 +50,149 @@ pub(super) struct FrontShell {
     was_covered: bool,
 }
 
-struct Controls {
-    cursor: usize,
-    capture: Option<usize>,
-    ready: bool,
-    controller: Option<gilrs::GamepadId>,
+pub(super) struct Controls {
+    context: ControlContext,
+    layout: Layout,
+    pub(super) cursor: usize,
+    capture: Option<Capture>,
+    original: Vec<Binding>,
     message: Option<String>,
 }
 
-const CONTROL_COMMAND_ROWS: usize = 2;
+enum Layout {
+    Keyboard(Vec<Option<game::kbm::Trigger>>),
+    Gamepad(Vec<Option<gilrs::Button>>),
+}
 
-impl Controls {
-    /// Start always cancels, including keyboard rows and simultaneous button presses.
-    /// A held accept button must be released before it can become a new binding.
-    fn capture_button(
-        &mut self,
-        mut down: impl FnMut(gilrs::Button) -> bool,
-    ) -> Option<gilrs::Button> {
-        if down(gilrs::Button::Start) {
-            self.capture = None;
-            self.message = Some("Binding change cancelled".into());
-            return None;
-        }
-        let pressed = PAD_BUTTONS.iter().copied().find(|b| down(*b));
-        if !self.ready {
-            self.ready = pressed.is_none();
-            None
-        } else {
-            pressed
+impl Layout {
+    fn complete(&self) -> Vec<Binding> {
+        match self {
+            Self::Keyboard(items) => items
+                .iter()
+                .flatten()
+                .copied()
+                .map(Binding::Keyboard)
+                .collect(),
+            Self::Gamepad(items) => items
+                .iter()
+                .flatten()
+                .copied()
+                .map(Binding::Gamepad)
+                .collect(),
         }
     }
 }
 
-fn action_name(bits: u32, walk: (i8, i8)) -> String {
-    use core::sim::buttons as b;
-    let mut names = Vec::new();
-    match walk {
-        (0, 1) => names.push("Move forward"),
-        (0, -1) => names.push("Move backward"),
-        (-1, 0) => names.push("Move left"),
-        (1, 0) => names.push("Move right"),
-        _ => {}
-    }
-    for (bit, name) in [
-        (b::FIRE, "Fire"),
-        (b::SECONDARY_FIRE, "Secondary fire"),
-        (b::ZOOM, "Zoom"),
-        (b::JUMP, "Jump"),
-        (b::ROLL_STANCE, "Roll / stance"),
-        (b::SPRINT, "Sprint"),
-        (b::RELOAD, "Reload"),
-        (b::ACTION, "Action"),
-        (b::SWITCH_WEAPON, "Next weapon"),
-        (b::SWITCH_SECONDARY, "Secondary weapon"),
-        (b::VIEW_TOGGLE, "Viewpoint"),
-        (b::FLYER_TRICK, "Starfighter stunt"),
-        (b::FLYER_REVERSE, "Starfighter reversal"),
-        (b::SQUAD_MOVE_OUT, "Squad move"),
-        (b::SQUAD_HOLD, "Squad hold"),
-        (b::SQUAD_AT_EASE, "Squad at ease"),
-        (b::SQUAD_FOLLOW, "Squad follow"),
-        (b::SPAWN_ACCEPT, "Spawn accept"),
-        (b::SPAWN_BACK, "Spawn back"),
-        (b::SPAWN_CLASS_NEXT, "Next class"),
-        (b::SPAWN_CLASS_PREV, "Previous class"),
-        (b::SPAWN_POST_UP, "Post up"),
-        (b::SPAWN_POST_DOWN, "Post down"),
-        (b::SPAWN_POST_LEFT, "Post left"),
-        (b::SPAWN_POST_RIGHT, "Post right"),
-    ] {
-        if bits & bit != 0 {
-            names.push(name);
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Binding {
+    Keyboard(game::kbm::Trigger),
+    Gamepad(gilrs::Button),
+}
+
+struct Capture {
+    row: usize,
+    ready: bool,
+    controller: Option<gilrs::GamepadId>,
+    candidate: Option<(Binding, std::time::Instant)>,
+}
+
+const CONTROL_COMMAND_ROWS: usize = 2;
+const CANCEL_HOLD: std::time::Duration = std::time::Duration::from_millis(600);
+
+impl Controls {
+    pub(super) fn new(
+        device: SettingsPage,
+        context: ControlContext,
+        settings: &game::profile::Settings,
+    ) -> Self {
+        use game::control_layout;
+        let layout = if device == SettingsPage::KeyboardMouse {
+            let saved = settings.keyboard_layouts.get(context);
+            Layout::Keyboard(if control_layout::keyboard(context, saved).is_some() {
+                saved.iter().copied().map(Some).collect()
+            } else {
+                control_layout::keyboard_defaults(context, &settings.keyboard_bindings)
+            })
+        } else {
+            let saved = settings.gamepad_layouts.get(context);
+            Layout::Gamepad(if control_layout::gamepad(context, saved).is_some() {
+                saved.iter().copied().map(Some).collect()
+            } else {
+                control_layout::gamepad_defaults(context, &settings.controller_bindings)
+            })
+        };
+        let original = layout.complete();
+        Self {
+            context,
+            layout,
+            original,
+            cursor: 0,
+            capture: None,
+            message: None,
         }
     }
-    names.join(" / ")
+
+    fn keyboard(&self) -> bool {
+        matches!(self.layout, Layout::Keyboard(_))
+    }
+
+    fn len(&self) -> usize {
+        match &self.layout {
+            Layout::Keyboard(items) => items.len(),
+            Layout::Gamepad(items) => items.len(),
+        }
+    }
+
+    fn missing(&self) -> Option<usize> {
+        match &self.layout {
+            Layout::Keyboard(items) => items.iter().position(Option::is_none),
+            Layout::Gamepad(items) => items.iter().position(Option::is_none),
+        }
+    }
+
+    fn cancel(&mut self, reason: &str) -> MenuSound {
+        self.capture = None;
+        self.message = Some(reason.into());
+        MenuSound::Cancel
+    }
+
+    fn assign(&mut self, bind: Binding) -> MenuSound {
+        let Some(capture) = self.capture.as_mut() else {
+            return MenuSound::Error;
+        };
+        let row = capture.row;
+        let actions = game::control_layout::actions(self.context, self.keyboard());
+        fn assign<T: Copy + Eq>(items: &mut [Option<T>], row: usize, trigger: T) -> Option<usize> {
+            let conflict = items
+                .iter()
+                .position(|t| *t == Some(trigger))
+                .filter(|i| *i != row);
+            if let Some(i) = conflict {
+                items[i] = None;
+            }
+            items[row] = Some(trigger);
+            conflict
+        }
+        let conflict = match (&mut self.layout, bind) {
+            (Layout::Keyboard(items), Binding::Keyboard(t)) => {
+                if !game::control_layout::accepts_trigger(actions[row], t) {
+                    self.message = Some(
+                        "Mouse wheel cannot hold movement; choose a key or mouse button".into(),
+                    );
+                    return MenuSound::Error;
+                }
+                assign(items, row, t)
+            }
+            (Layout::Gamepad(items), Binding::Gamepad(b)) => assign(items, row, b),
+            _ => return MenuSound::Error,
+        };
+        self.capture = None;
+        self.message = Some(match conflict {
+            Some(i) => format!("{} is unassigned", actions[i].name),
+            None => "Binding assigned".into(),
+        });
+        MenuSound::Accept
+    }
 }
 
 const PAD_BUTTONS: [gilrs::Button; 17] = [
@@ -146,13 +216,6 @@ const PAD_BUTTONS: [gilrs::Button; 17] = [
 ];
 
 impl FrontShell {
-    pub(super) fn reset_control_device(&mut self) {
-        if let Some(controls) = self.controls.as_mut() {
-            controls.ready = false;
-            controls.controller = None;
-        }
-    }
-
     pub(super) fn new(assets_dir: &std::path::Path) -> Self {
         let texts = game::event_feed::Texts::load(assets_dir, "bf2");
         let text = |key: &str, english: &str| {
@@ -178,7 +241,7 @@ impl FrontShell {
             ia: None,
             ia_open: false,
             settings: None,
-            controls: None,
+            settings_animation: Default::default(),
             sounds,
             music: None,
             music_takes,
@@ -250,7 +313,7 @@ fn setting_sound(
     }
     match rows.get(to)? {
         Row::Music | Row::Resume => None,
-        Row::InvertY | Row::InputIcons | Row::FlightControls
+        Row::InvertY | Row::InputIcons | Row::FlightControls | Row::CareerAwards
             if input.confirm || input.left || input.right =>
         {
             Some(MenuSound::Accept)
@@ -266,7 +329,9 @@ fn setting_sound(
 fn shell_click_sound(action: ui::menu::MenuAction) -> Option<MenuSound> {
     use ui::menu::MenuAction;
     match action {
-        MenuAction::SetMusic(_) | MenuAction::Resume | MenuAction::Quit => None,
+        MenuAction::SetMusic(_) | MenuAction::Resume | MenuAction::Quit | MenuAction::ClosePage => {
+            None
+        }
         _ => Some(MenuSound::Accept),
     }
 }
@@ -283,73 +348,189 @@ impl App {
         }
     }
 
-    fn control_labels(&self) -> Vec<(String, String)> {
-        let mut rows = vec![
+    pub(super) fn activate_control_row(&mut self, row: usize) -> Option<MenuSound> {
+        let controls = self.controls.as_mut()?;
+        if controls.capture.is_some() {
+            return None;
+        }
+        controls.cursor = row;
+        match row {
+            0 => {
+                if let Some(first) = controls.missing() {
+                    controls.cursor = CONTROL_COMMAND_ROWS + first;
+                    controls.message = Some("Assign every action before leaving this page".into());
+                    return Some(MenuSound::Error);
+                }
+                let controls = self.controls.take()?;
+                if controls.original == controls.layout.complete() {
+                    return Some(MenuSound::Exit);
+                }
+                let settings = &mut self.profile.settings;
+                match controls.layout {
+                    Layout::Keyboard(items) => settings
+                        .keyboard_layouts
+                        .set(controls.context, items.into_iter().flatten().collect()),
+                    Layout::Gamepad(items) => settings
+                        .gamepad_layouts
+                        .set(controls.context, items.into_iter().flatten().collect()),
+                }
+                self.refresh_context_bindings();
+                self.kbm.release_keys();
+                self.sprint_latch = input::SprintLatch::default();
+                if let Err(e) = self.profile.save() {
+                    eprintln!("profile autosave failed: {e:#}");
+                }
+                Some(MenuSound::Exit)
+            }
+            1 => {
+                controls.layout = if controls.keyboard() {
+                    Layout::Keyboard(game::control_layout::keyboard_defaults(
+                        controls.context,
+                        &game::kbm::Bindings::default(),
+                    ))
+                } else {
+                    Layout::Gamepad(game::control_layout::gamepad_defaults(
+                        controls.context,
+                        &input::Mapping::default(),
+                    ))
+                };
+                controls.original.clear();
+                controls.message = Some("Default bindings restored".into());
+                Some(MenuSound::Accept)
+            }
+            _ => {
+                if row >= CONTROL_COMMAND_ROWS + controls.len() {
+                    return None;
+                }
+                controls.message = None;
+                controls.capture = Some(Capture {
+                    row: row - CONTROL_COMMAND_ROWS,
+                    ready: false,
+                    controller: None,
+                    candidate: None,
+                });
+                Some(MenuSound::Accept)
+            }
+        }
+    }
+
+    pub(super) fn reset_control_device(&mut self) {
+        if let Some(capture) = self.controls.as_mut().and_then(|c| c.capture.as_mut()) {
+            if capture.controller.take().is_some() {
+                capture.ready = false;
+                capture.candidate = None;
+            }
+        }
+    }
+
+    pub(super) fn step_controls(&mut self, input: ui::menu::MenuInput) -> Option<MenuSound> {
+        let controls = self.controls.as_mut()?;
+        let keyboard = controls.keyboard();
+        if let Some(capture) = controls.capture.as_mut() {
+            let now = std::time::Instant::now();
+            if capture
+                .candidate
+                .is_some_and(|(_, start)| now.duration_since(start) >= CANCEL_HOLD)
+            {
+                return Some(controls.cancel("Binding change cancelled"));
+            }
+            if keyboard {
+                return None;
+            }
+            let pad = self
+                .gilrs
+                .as_ref()
+                .and_then(|g| input::active_gamepad(g, &self.active_pad));
+            let Some((id, pad)) = pad else {
+                return Some(controls.cancel("Controller disconnected; binding unchanged"));
+            };
+            if capture.controller != Some(id) {
+                capture.controller = Some(id);
+                capture.ready = false;
+                capture.candidate = None;
+            }
+            if input::is_down(&pad, gilrs::Button::Start) {
+                return Some(controls.cancel("Binding change cancelled"));
+            }
+            let pressed = PAD_BUTTONS
+                .iter()
+                .copied()
+                .find(|&b| input::is_down(&pad, b));
+            if !capture.ready {
+                capture.ready = pressed.is_none();
+                return None;
+            }
+            if let Some((Binding::Gamepad(button), _)) = capture.candidate {
+                if !input::is_down(&pad, button) {
+                    return Some(controls.assign(Binding::Gamepad(button)));
+                }
+            } else if let Some(button) = pressed {
+                capture.candidate = Some((Binding::Gamepad(button), now));
+            }
+            return None;
+        }
+
+        let count = CONTROL_COMMAND_ROWS + controls.len();
+        let from = controls.cursor;
+        if input.up {
+            controls.cursor = (controls.cursor + count - 1) % count;
+        }
+        if input.down {
+            controls.cursor = (controls.cursor + 1) % count;
+        }
+        let cursor = controls.cursor;
+        if input.back || input.confirm {
+            return self.activate_control_row(if input.back { 0 } else { cursor });
+        }
+        (from != cursor).then_some(MenuSound::Select)
+    }
+
+    pub(super) fn controls_model(
+        &self,
+        icons: ui::input_icons::Icons,
+    ) -> Option<ui::menu::MenuModel> {
+        let controls = self.controls.as_ref()?;
+        let mut labels = vec![
             ("Back".into(), String::new()),
             ("Restore defaults".into(), String::new()),
         ];
-        for (trigger, bind) in &self.profile.settings.keyboard_bindings.table {
-            rows.push((
-                format!("Keyboard / mouse: {}", action_name(bind.bits, bind.walk)),
-                format!("{trigger:?}"),
-            ));
-        }
-        // Named as the pad in use: the Controls page may be reached from a
-        // keyboard, where `pad_name` answers the PS2's names.
         let set = self.icon_device.set(self.profile.settings.input_icons);
-        for (button, bits) in &self.profile.settings.controller_bindings.table {
-            rows.push((
-                format!("Controller: {}", action_name(*bits, (0, 0))),
-                game::input_icons::pad_button(*button).map_or_else(
-                    || format!("{button:?}"),
-                    |b| ui::input_icons::pad_name(set, b).to_owned(),
-                ),
-            ));
-        }
-        rows
+        let values = match &controls.layout {
+            Layout::Keyboard(items) => items
+                .iter()
+                .map(|t| t.map(game::control_layout::keyboard_name))
+                .collect::<Vec<_>>(),
+            Layout::Gamepad(items) => items
+                .iter()
+                .map(|t| t.map(|b| game::control_layout::gamepad_name(b, set)))
+                .collect(),
+        };
+        labels.extend(
+            game::control_layout::actions(controls.context, controls.keyboard())
+                .into_iter()
+                .zip(values)
+                .map(|(a, value)| (a.name.into(), value.unwrap_or_else(|| "Unassigned".into()))),
+        );
+        Some(ui::menu::MenuModel {
+            bindings: Some(ui::menu::BindingRows {
+                title: controls.context.title(),
+                labels,
+                capture: controls.capture.is_some(),
+                message: controls.message.clone(),
+            }),
+            cursor: controls.cursor,
+            icons,
+            ..Default::default()
+        })
     }
 
-    fn save_controls(&mut self) {
-        self.kbm.follow(&self.profile.settings);
-        self.kbm.release_keys();
-        if let Some(g) = self.gilrs.as_ref() {
-            self.pad_warning = input::log_pads_with(
-                g,
-                &self.profile.settings.controller_bindings,
-                &self.active_pad,
-            );
-        }
-        if let Err(e) = self.profile.save() {
-            eprintln!("profile autosave failed: {e:#}");
-        }
-    }
-
-    fn activate_control_row(&mut self, front: &mut FrontShell, row: usize) {
-        if let Some(controls) = front.controls.as_mut() {
-            controls.cursor = row;
-        }
-        if row != 0 {
-            front.cue(MenuSound::Accept);
-        }
-        match row {
-            0 => front.controls = None,
-            1 => {
-                self.profile.settings.keyboard_bindings = game::kbm::Bindings::default();
-                self.profile.settings.controller_bindings = input::Mapping::default();
-                self.sprint_latch = input::SprintLatch::default();
-                if let Some(controls) = front.controls.as_mut() {
-                    controls.message = Some("Default bindings restored".into());
-                }
-                self.save_controls();
+    fn play_binding_sound(&mut self, sound: MenuSound) {
+        if matches!(self.screen, super::Screen::Shell) {
+            if let Some(front) = self.front.as_mut() {
+                front.cue(sound);
             }
-            _ => {
-                if let Some(controls) = front.controls.as_mut() {
-                    controls.message = None;
-                    controls.capture = Some(row);
-                    controls.ready = false;
-                    controls.controller = None;
-                }
-            }
+        } else if let Some(sounds) = self.sounds.as_mut() {
+            sounds.play_2d(self.audio.as_mut(), sound.name());
         }
     }
 
@@ -357,101 +538,73 @@ impl App {
         use game::kbm::Trigger;
         use winit::event::{ElementState, MouseScrollDelta, WindowEvent};
         use winit::keyboard::{KeyCode, PhysicalKey};
-        let Some(front) = self.front.as_mut() else {
+        let Some(controls) = self.controls.as_mut() else {
             return false;
         };
-        let FrontShell {
-            controls, menus, ..
-        } = front;
-        let Some(controls) = controls.as_mut() else {
+        let keyboard = controls.keyboard();
+        let Some(capture) = controls.capture.as_mut() else {
             return false;
         };
-        let Some(row) = controls.capture else {
-            return false;
-        };
-        let cues = &mut menus.cues;
         if matches!(event, WindowEvent::Focused(false)) {
-            controls.capture = None;
-            controls.message = Some("Binding change cancelled on focus loss".into());
+            controls.cancel("Binding change cancelled on focus loss");
             return false;
         }
-        let count = self.profile.settings.keyboard_bindings.table.len();
-        if row < CONTROL_COMMAND_ROWS || row >= CONTROL_COMMAND_ROWS + count {
-            if matches!(event, WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed && event.physical_key == PhysicalKey::Code(KeyCode::Escape))
-            {
-                controls.capture = None;
-                controls.message = Some("Binding change cancelled".into());
-                cues.play(MenuSound::Cancel);
-                return true;
-            }
-            return false;
-        }
-        let trigger = match event {
-            WindowEvent::KeyboardInput { event, .. }
-                if event.state == ElementState::Pressed && !event.repeat =>
-            {
-                match event.physical_key {
-                    PhysicalKey::Code(KeyCode::Escape) => {
-                        controls.capture = None;
-                        controls.message = Some("Binding change cancelled".into());
-                        cues.play(MenuSound::Cancel);
-                        return true;
-                    }
-                    PhysicalKey::Code(code) => Some(Trigger::Key(code)),
-                    _ => None,
-                }
-            }
-            WindowEvent::MouseInput {
-                state: ElementState::Pressed,
-                button,
+        let (trigger, state) = match event {
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
                 ..
-            } => Some(Trigger::Mouse(*button)),
-            WindowEvent::MouseWheel { delta, .. } => {
+            } => {
+                let PhysicalKey::Code(code) = event.physical_key else {
+                    return keyboard;
+                };
+                if code == KeyCode::Escape && event.state.is_pressed() {
+                    let sound = controls.cancel("Binding change cancelled");
+                    self.play_binding_sound(sound);
+                    return true;
+                }
+                (Trigger::Key(code), event.state)
+            }
+            WindowEvent::MouseInput { state, button, .. } => (Trigger::Mouse(*button), *state),
+            WindowEvent::MouseWheel { delta, .. } if keyboard => {
                 let y = match delta {
                     MouseScrollDelta::LineDelta(_, y) => *y,
                     MouseScrollDelta::PixelDelta(p) => p.y as f32,
                 };
-                if y > 0.0 {
-                    Some(Trigger::WheelUp)
-                } else if y < 0.0 {
-                    Some(Trigger::WheelDown)
-                } else {
-                    None
+                if y != 0.0 {
+                    let trigger = if y > 0.0 {
+                        Trigger::WheelUp
+                    } else {
+                        Trigger::WheelDown
+                    };
+                    let sound = controls.assign(Binding::Keyboard(trigger));
+                    self.play_binding_sound(sound);
                 }
-            }
-            _ => None,
-        };
-        if let Some(trigger) = trigger {
-            let index = row - CONTROL_COMMAND_ROWS;
-            let bindings = &mut self.profile.settings.keyboard_bindings;
-            let swapped = bindings
-                .table
-                .iter()
-                .enumerate()
-                .find(|(i, (t, _))| *i != index && *t == trigger)
-                .map(|(_, (_, bind))| action_name(bind.bits, bind.walk));
-            if !bindings.remap(index, trigger) {
-                controls.message =
-                    Some("Mouse wheel cannot hold movement; choose a key or mouse button".into());
-                cues.play(MenuSound::Error);
                 return true;
             }
-            cues.play(MenuSound::Accept);
-            controls.message = Some(swapped.map_or_else(
-                || "Binding saved".into(),
-                |name| format!("Binding saved; swapped with {name}"),
-            ));
-            controls.capture = None;
-            self.save_controls();
+            _ => return false,
+        };
+        if !keyboard {
+            return false;
         }
-        matches!(event, WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed)
-            || matches!(
-                event,
-                WindowEvent::MouseInput {
-                    state: ElementState::Pressed,
-                    ..
-                } | WindowEvent::MouseWheel { .. }
-            )
+        if state == ElementState::Pressed {
+            if capture.candidate.is_none()
+                && !matches!(event, WindowEvent::KeyboardInput { event, .. } if event.repeat)
+            {
+                capture.candidate = Some((Binding::Keyboard(trigger), std::time::Instant::now()));
+            }
+        } else if let Some((Binding::Keyboard(candidate), start)) = capture.candidate {
+            if trigger == candidate {
+                capture.candidate = None;
+                let sound = if start.elapsed() >= CANCEL_HOLD {
+                    controls.cancel("Binding change cancelled")
+                } else {
+                    controls.assign(Binding::Keyboard(trigger))
+                };
+                self.play_binding_sound(sound);
+            }
+        }
+        true
     }
 
     /// Shell frame: the PS2 front screens (card BSHLA), the Instant Action
@@ -495,7 +648,7 @@ impl App {
             self.renderer.as_ref().map(|r| r.size()),
             front.view.as_ref(),
         ) {
-            if !front.ia_open && front.settings.is_none() && front.controls.is_none() {
+            if !front.ia_open && front.settings.is_none() && self.controls.is_none() {
                 if let Some(row) = view.shell_row_at(&front.menus, point, [w as f32, h as f32]) {
                     front.menus.focus_row(row);
                     input.confirm |= click;
@@ -508,7 +661,7 @@ impl App {
         let mut quit = false;
         let mut settings_model = None;
         let mut controls_model = None;
-        let stack_frame = !front.ia_open && front.controls.is_none() && front.settings.is_none();
+        let stack_frame = !front.ia_open && self.controls.is_none() && front.settings.is_none();
         if !stack_frame {
             front.menus.tick(dt);
         }
@@ -585,87 +738,49 @@ impl App {
             for s in ia.take_clicks() {
                 front.menus.cues.play(s);
             }
-        } else if let Some(controls) = front.controls.as_mut() {
-            let count = CONTROL_COMMAND_ROWS
-                + self.profile.settings.keyboard_bindings.table.len()
-                + self.profile.settings.controller_bindings.table.len();
-            let mut activate = None;
-            if let Some(row) = controls.capture {
-                let keyboard_count = self.profile.settings.keyboard_bindings.table.len();
-                let controller_row = row >= CONTROL_COMMAND_ROWS + keyboard_count;
-                let pad = self
-                    .gilrs
-                    .as_ref()
-                    .and_then(|g| input::active_gamepad(g, &self.active_pad));
-                if let Some((id, pad)) = pad {
-                    if controls.controller != Some(id) {
-                        controls.controller = Some(id);
-                        controls.ready = false;
-                    }
-                    let was = controls.capture;
-                    let button = controls.capture_button(|b| input::is_down(&pad, b));
-                    if was.is_some() && controls.capture.is_none() {
-                        front.menus.cues.play(MenuSound::Cancel);
-                    }
-                    if controller_row {
-                        if let Some(button) = button {
-                            let index = row - CONTROL_COMMAND_ROWS - keyboard_count;
-                            let bindings = &mut self.profile.settings.controller_bindings;
-                            let swapped = bindings
-                                .table
-                                .iter()
-                                .enumerate()
-                                .find(|(i, (b, _))| *i != index && *b == button)
-                                .map(|(_, (_, bits))| action_name(*bits, (0, 0)));
-                            bindings.remap(index, button);
-                            controls.capture = None;
-                            front.menus.cues.play(MenuSound::Accept);
-                            controls.message = Some(swapped.map_or_else(
-                                || "Binding saved".into(),
-                                |name| format!("Binding saved; swapped with {name}"),
-                            ));
-                            self.sprint_latch = input::SprintLatch::default();
-                            self.save_controls();
+        } else if self.controls.is_some() {
+            if let Some(sound) = self.step_controls(input) {
+                front.cue(sound);
+            }
+            let icons = self.current_icons();
+            controls_model = self.controls_model(icons);
+            front.settings_animation.advance(dt);
+            if let Some(model) = controls_model.as_mut().filter(|_| !input.back) {
+                let native = front.view.as_ref().is_some_and(|v| v.can_draw_pause());
+                if native {
+                    if wheel != 0.0 {
+                        ui::pause_draw::scroll(model, wheel);
+                        if let Some(controls) = self.controls.as_mut() {
+                            controls.cursor = model.cursor;
                         }
                     }
-                } else if controller_row {
-                    controls.capture = None;
-                    controls.message = Some("Controller disconnected; binding unchanged".into());
-                    front.menus.cues.play(MenuSound::Error);
-                }
-            } else {
-                let from = controls.cursor;
-                if input.up {
-                    controls.cursor = (controls.cursor + count - 1) % count;
-                }
-                if input.down {
-                    controls.cursor = (controls.cursor + 1) % count;
-                }
-                front.menus.cues.list_move(from, controls.cursor);
-                if input.back {
-                    controls.cursor = 0;
-                }
-                if input.confirm || input.back {
-                    activate = Some(controls.cursor);
+                    if let Some((point, true)) = pointer {
+                        if let Some((w, h)) = self.renderer.as_ref().map(|r| r.size()) {
+                            if let Some(ui::pause_draw::Target::Row(row)) = ui::pause_draw::target(
+                                model,
+                                &front.settings_animation,
+                                point,
+                                [w as f32, h as f32],
+                            ) {
+                                if let Some(sound) = self.activate_control_row(row) {
+                                    front.cue(sound);
+                                }
+                                controls_model = self.controls_model(icons);
+                            }
+                        }
+                    }
                 }
             }
-            if let Some(row) = activate {
-                self.activate_control_row(&mut front, row);
-            }
-            controls_model = front.controls.as_ref().map(|c| {
-                (
-                    self.control_labels(),
-                    c.cursor,
-                    c.capture.is_some(),
-                    c.message.clone(),
-                )
-            });
-        } else if let Some(cursor) = front.settings {
+        } else if let Some((page, cursor)) = front.settings {
             let icons = self.current_icons();
             let settings = &self.profile.settings;
             let k = settings.fov_scale;
-            let model = ui::menu::MenuModel {
+            let mut model = ui::menu::MenuModel {
                 assist_intensity: settings.assist_intensity,
+                difficulty: game::shell_ia::ia_level(settings.difficulty),
+                effects_volume: settings.effects_volume,
+                dialogue_volume: settings.dialogue_volume,
+                fps_counter: ui::menu::FpsCounter::from_index(settings.fps_counter),
                 team_size_pct: settings.team_size_pct,
                 reinforcements_pct: settings.reinforcement_pct,
                 population_note: game::conquest_defaults::menu_note(
@@ -675,6 +790,9 @@ impl App {
                 fov_scale: k,
                 fov_deg: (game::walk::chase_fov_y() * k).to_degrees(),
                 music_volume: settings.music_volume,
+                rumble_strength: settings.rumble_strength,
+                rumble_on_fire: settings.rumble_on_fire,
+                career_awards_disabled: !settings.career_awards,
                 mouse_sensitivity: settings.mouse_sensitivity,
                 pad_look_sensitivity: settings.pad_look_sensitivity,
                 rc_flight_controls: settings.flight_controls == input::FlightControls::RcMode2,
@@ -684,27 +802,67 @@ impl App {
                 icons,
                 first_person: settings.viewpoint.is_first(),
                 cursor,
-                in_shell: Some(
-                    front.menus.options.rows[front.menus.options.focus]
-                        .label
-                        .clone(),
-                ),
+                page: Some(page),
+                in_shell: Some(String::new()),
                 ..Default::default()
             };
-            let (cursor, acts) = ui::menu::navigate(&model, input);
-            if let Some(s) = setting_sound(&model, input, cursor) {
-                front.cue(s);
+            front.settings_animation.advance(dt);
+            let native = front.view.as_ref().is_some_and(|v| v.can_draw_pause());
+            let pointer_hit = if native && click && !input.back {
+                pointer.and_then(|(point, _)| {
+                    let (w, h) = self.renderer.as_ref()?.size();
+                    ui::pause_draw::target(
+                        &model,
+                        &front.settings_animation,
+                        point,
+                        [w as f32, h as f32],
+                    )
+                })
+            } else {
+                None
+            };
+            if wheel != 0.0 && native {
+                ui::pause_draw::scroll(&mut model, wheel);
             }
-            front.settings = Some(cursor);
+            let (cursor, acts) = if let Some(hit) = pointer_hit {
+                let result = ui::pause_draw::click(&mut model, hit);
+                if let Some(sound) = result.1.first().copied().and_then(shell_click_sound) {
+                    front.cue(sound);
+                }
+                result
+            } else {
+                let result = ui::menu::navigate(&model, input);
+                if let Some(sound) = setting_sound(&model, input, result.0)
+                    .or_else(|| result.1.first().copied().and_then(shell_click_sound))
+                {
+                    front.cue(sound);
+                }
+                result
+            };
+            front.settings = Some((page, cursor));
             for a in acts {
                 self.apply_shell_setting(&mut front, a);
             }
-            settings_model = front.settings.map(|cursor| ui::menu::MenuModel {
-                cursor,
-                rc_flight_controls: self.profile.settings.flight_controls
-                    == input::FlightControls::RcMode2,
-                ..model
-            });
+            settings_model =
+                front
+                    .settings
+                    .filter(|_| self.controls.is_none())
+                    .map(|(page, cursor)| ui::menu::MenuModel {
+                        cursor,
+                        page: Some(page),
+                        difficulty: game::shell_ia::ia_level(self.profile.settings.difficulty),
+                        effects_volume: self.profile.settings.effects_volume,
+                        dialogue_volume: self.profile.settings.dialogue_volume,
+                        fps_counter: ui::menu::FpsCounter::from_index(
+                            self.profile.settings.fps_counter,
+                        ),
+                        rumble_strength: self.profile.settings.rumble_strength,
+                        rumble_on_fire: self.profile.settings.rumble_on_fire,
+                        career_awards_disabled: !self.profile.settings.career_awards,
+                        rc_flight_controls: self.profile.settings.flight_controls
+                            == input::FlightControls::RcMode2,
+                        ..model
+                    });
         } else {
             match front.menus.step(input, start, dt) {
                 Some(ui::shell_ps2::ShellCommand::InstantAction) => {
@@ -725,15 +883,8 @@ impl App {
                     }
                     front.ia_open = true;
                 }
-                Some(ui::shell_ps2::ShellCommand::Settings) => front.settings = Some(0),
-                Some(ui::shell_ps2::ShellCommand::Controls) => {
-                    front.controls = Some(Controls {
-                        cursor: 0,
-                        capture: None,
-                        ready: false,
-                        controller: None,
-                        message: None,
-                    });
+                Some(ui::shell_ps2::ShellCommand::Settings(page)) => {
+                    front.settings = Some((PausePage::Settings(page), 0));
                 }
                 Some(ui::shell_ps2::ShellCommand::Quit) => quit = true,
                 None => {}
@@ -774,7 +925,7 @@ impl App {
                 }
             }
         }
-        front.menus.covered = front.ia_open || front.settings.is_some() || front.controls.is_some();
+        front.menus.covered = front.ia_open || front.settings.is_some() || self.controls.is_some();
         let movie_name = front.menus.movie();
         let mut has_movie = false;
         if let Some(m) = front.movie.as_mut() {
@@ -791,7 +942,7 @@ impl App {
         let ia = front
             .ia
             .as_ref()
-            .filter(|_| front.ia_open && front.settings.is_none() && front.controls.is_none());
+            .filter(|_| front.ia_open && front.settings.is_none() && self.controls.is_none());
         let movie_shown = has_movie && ia.is_none_or(|ia| ia.page != ui::shell::Page::Missions);
         let icons = self.current_icons();
         let mut control_clicked = None;
@@ -800,21 +951,53 @@ impl App {
             (&mut self.renderer, &mut self.overlay, &self.window)
         {
             let (w, h) = r.size();
+            let native_options = front.view.as_ref().is_some_and(|v| v.can_draw_pause());
             if let Some(v) = front.view.as_mut() {
                 v.set_icons(icons);
                 match ia {
                     Some(ia) => v.update_instant(&front.menus, ia, movie_shown, [w, h]),
-                    None => v.update_shell(&front.menus, has_movie, [w, h]),
+                    None => {
+                        if let Some(model) = controls_model
+                            .as_ref()
+                            .or(settings_model.as_ref())
+                            .filter(|_| native_options)
+                        {
+                            v.update_shell_options(
+                                &front.menus,
+                                has_movie,
+                                model,
+                                &front.settings_animation,
+                                [w, h],
+                            );
+                        } else {
+                            v.update_shell(&front.menus, has_movie, [w, h]);
+                        }
+                    }
                 }
             }
             let warning = self.pad_warning.as_deref();
             let paint = overlay.begin(window, |ctx| {
-                if let Some(m) = &settings_model {
+                ui::menu::draw_fps_counter(
+                    ctx,
+                    ui::menu::FpsCounter::from_index(self.profile.settings.fps_counter),
+                    self.frame_seconds,
+                );
+                if let Some(m) = settings_model.as_ref().filter(|_| !native_options) {
                     setting_clicked = ui::menu::draw_menu(ctx, m);
                 }
-                if let Some((labels, cursor, capture, message)) = &controls_model {
-                    control_clicked =
-                        ui::menu::draw_controls(ctx, labels, *cursor, *capture, message.as_deref());
+                if let Some(bindings) = controls_model
+                    .as_ref()
+                    .filter(|_| !native_options)
+                    .and_then(|m| m.bindings.as_ref().map(|bindings| (m.cursor, bindings)))
+                {
+                    let (cursor, bindings) = bindings;
+                    control_clicked = ui::menu::draw_controls(
+                        ctx,
+                        &bindings.labels,
+                        cursor,
+                        bindings.capture,
+                        bindings.message.as_deref(),
+                    );
                 }
                 if let Some(w) = warning {
                     ui::hud::draw_pad_warning(ctx, w);
@@ -836,10 +1019,8 @@ impl App {
                 event_loop.exit();
             }
         }
-        if let (Some(row), Some(controls)) = (control_clicked, front.controls.as_mut()) {
-            if controls.capture.is_none() {
-                self.activate_control_row(&mut front, row);
-            }
+        if let Some(sound) = control_clicked.and_then(|row| self.activate_control_row(row)) {
+            front.cue(sound);
         }
         for action in setting_clicked {
             if let Some(s) = shell_click_sound(action) {
@@ -849,11 +1030,15 @@ impl App {
         }
         // A page of the port's own closed: the screen under it is entered
         // again (its exit click, its entrance).
-        let covered = front.ia_open || front.settings.is_some() || front.controls.is_some();
+        let covered = front.ia_open || front.settings.is_some() || self.controls.is_some();
         if front.was_covered && !covered {
             front.menus.uncover();
         }
         front.was_covered = covered;
+        if let Some(sounds) = front.sounds.as_mut() {
+            let s = &self.profile.settings;
+            sounds.set_user_volumes(s.effects_volume, s.dialogue_volume);
+        }
         front.play_cues(self.audio.as_mut(), dt);
         self.front = Some(front);
         if quit {
@@ -877,22 +1062,57 @@ impl App {
             MenuAction::RequestRespawn
             | MenuAction::CancelPopup
             | MenuAction::Respawn
-            | MenuAction::OpenPage(_)
             | MenuAction::RequestQuit
             | MenuAction::RequestRestart
             | MenuAction::Restart => return,
-            // The shell page is flat (no Game Menu pages): Back closes it.
-            MenuAction::Resume | MenuAction::Quit | MenuAction::ClosePage => {
+            MenuAction::OpenPage(page) => {
+                front.settings = Some((page, 0));
+                return;
+            }
+            MenuAction::EditBindings(device, context) => {
+                self.controls = Some(Controls::new(device, context, &self.profile.settings));
+                return;
+            }
+            MenuAction::Resume | MenuAction::Quit => {
                 front.settings = None;
                 return;
             }
+            MenuAction::ClosePage => {
+                front.settings = front.settings.and_then(|(page, _)| {
+                    let (parent, row) = page.parent()?;
+                    if parent == PausePage::Options {
+                        return None;
+                    }
+                    let model = ui::menu::MenuModel {
+                        page: Some(parent),
+                        ..Default::default()
+                    };
+                    let cursor = ui::menu::rows(&model).iter().position(|r| *r == row)?;
+                    Some((parent, cursor))
+                });
+                return;
+            }
             MenuAction::ToggleCheat(_) => return,
-            MenuAction::SetAssist(v) => s.assist_intensity = v.clamp(0.0, 1.5),
+            MenuAction::SetDifficulty(v) => {
+                s.difficulty = game::shell_ia::port_difficulty(v);
+                if let Some(ia) = front.ia.as_mut() {
+                    ia.options.difficulty = v;
+                }
+            }
+            MenuAction::SetEffectsVolume(v) => s.effects_volume = v.clamp(0.0, 1.0),
+            MenuAction::SetDialogueVolume(v) => s.dialogue_volume = v.clamp(0.0, 1.0),
+            MenuAction::SetFpsCounter(v) => s.fps_counter = v as u8,
+            MenuAction::SetAssist(v) => {
+                s.assist_intensity = game::profile::clamp_assist_intensity(v)
+            }
             MenuAction::SetAiCap(c) => s.team_size_pct = c,
             MenuAction::SetReinforcements(c) => s.reinforcement_pct = c,
             MenuAction::SetFov(k) => {
                 s.fov_scale = k.clamp(game::walk::FOV_SCALE_RANGE.0, game::walk::FOV_SCALE_RANGE.1)
             }
+            MenuAction::SetCareerAwards(on) => s.career_awards = on,
+            MenuAction::SetRumble(v) => s.rumble_strength = v.clamp(0.0, 1.0),
+            MenuAction::ToggleRumbleOnFire => s.rumble_on_fire = !s.rumble_on_fire,
             MenuAction::SetMusic(v) => {
                 s.music_volume = v.clamp(game::music::VOLUME_RANGE.0, game::music::VOLUME_RANGE.1);
                 // The take playing follows the level; off stops it.
@@ -922,6 +1142,14 @@ impl App {
             MenuAction::CycleInputIcons(dir) => s.input_icons = s.input_icons.cycled(dir),
             MenuAction::ToggleViewpoint => s.viewpoint = s.viewpoint.toggled(),
         }
+        if matches!(a, MenuAction::SetRumble(_)) {
+            game::rumble::preview(
+                self.gilrs.as_mut(),
+                &self.active_pad,
+                &mut self.rumble_effect,
+                s.rumble_strength,
+            );
+        }
         self.kbm.follow(&self.profile.settings);
         if let Err(e) = self.profile.save() {
             eprintln!("profile autosave failed: {e:#}");
@@ -933,14 +1161,19 @@ impl App {
 mod tests {
     use super::*;
 
-    fn controls(row: usize) -> Controls {
-        Controls {
-            cursor: row,
-            capture: Some(row),
+    fn controls() -> Controls {
+        let mut controls = Controls::new(
+            SettingsPage::KeyboardMouse,
+            ControlContext::Infantry,
+            &Default::default(),
+        );
+        controls.capture = Some(Capture {
+            row: 0,
             ready: false,
             controller: None,
-            message: None,
-        }
+            candidate: None,
+        });
+        controls
     }
 
     /// re-bf2-menus §4.1: a settings move clicks; a value step plays accept
@@ -1003,35 +1236,12 @@ mod tests {
     }
 
     #[test]
-    fn start_cancels_either_device_before_accept_or_release_gate() {
-        for row in [
-            CONTROL_COMMAND_ROWS,
-            CONTROL_COMMAND_ROWS + game::kbm::Bindings::default().table.len(),
-        ] {
-            for ready in [false, true] {
-                let mut c = controls(row);
-                c.ready = ready;
-                assert_eq!(
-                    c.capture_button(|b| matches!(b, gilrs::Button::Start | gilrs::Button::South)),
-                    None
-                );
-                assert_eq!(c.capture, None);
-                assert_eq!(c.message.as_deref(), Some("Binding change cancelled"));
-            }
-        }
-    }
-
-    #[test]
-    fn held_accept_must_release_before_controller_binding() {
-        let mut c = controls(CONTROL_COMMAND_ROWS + game::kbm::Bindings::default().table.len());
-        assert_eq!(c.capture_button(|b| b == gilrs::Button::South), None);
-        assert!(!c.ready);
-        assert_eq!(c.capture_button(|_| false), None);
-        assert!(c.ready);
-        assert_eq!(
-            c.capture_button(|b| b == gilrs::Button::West),
-            Some(gilrs::Button::West)
-        );
+    fn occupied_binding_leaves_the_displaced_action_unassigned() {
+        let mut c = controls();
+        let key = game::kbm::Trigger::Key(winit::keyboard::KeyCode::KeyS);
+        assert_eq!(c.assign(Binding::Keyboard(key)), MenuSound::Accept);
+        assert_eq!(c.missing(), Some(1));
+        assert_eq!(c.message.as_deref(), Some("Move backward is unassigned"));
     }
 
     #[test]
@@ -1069,9 +1279,7 @@ mod tests {
             None,
             Default::default(),
         );
-        let mut front = FrontShell::new(std::path::Path::new("__no_assets_for_capture_test__"));
-        front.controls = Some(controls(CONTROL_COMMAND_ROWS));
-        app.front = Some(front);
+        app.controls = Some(controls());
         let before = app.profile.clone();
         assert!(
             app.capture_keyboard(&winit::event::WindowEvent::MouseWheel {
@@ -1081,7 +1289,7 @@ mod tests {
             })
         );
         assert_eq!(app.profile, before);
-        let c = app.front.as_ref().unwrap().controls.as_ref().unwrap();
+        let c = app.controls.as_ref().unwrap();
         assert!(c.capture.is_some());
         assert!(c
             .message
@@ -1089,15 +1297,7 @@ mod tests {
             .unwrap()
             .contains("wheel cannot hold movement"));
         assert!(!app.capture_keyboard(&winit::event::WindowEvent::Focused(false)));
-        assert!(app
-            .front
-            .as_ref()
-            .unwrap()
-            .controls
-            .as_ref()
-            .unwrap()
-            .capture
-            .is_none());
+        assert!(app.controls.as_ref().unwrap().capture.is_none());
         assert_eq!(app.profile, before);
     }
 }

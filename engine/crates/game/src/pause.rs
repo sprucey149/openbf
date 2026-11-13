@@ -21,6 +21,14 @@ pub const SUICIDE_PROMPT_KEY: &str = "game.pause.suicide_prompt";
 pub const QUIT_PROMPT_KEY: &str = "ifs.pause.warn_host_quit";
 pub const RESTART_PROMPT_KEY: &str = "ifs.pause.warn_restart";
 
+/// The original single-player menu shows Respawn until the round ends.
+pub fn respawn_label(walk: &WalkSim, feed: &crate::event_feed::EventFeed) -> Option<String> {
+    walk.sim
+        .outcome
+        .is_none()
+        .then(|| feed.screen_text(RESPAWN_LABEL_KEY, "Respawn"))
+}
+
 /// The Game Menu's words from the feed's BF2 table, English without one.
 pub fn texts(feed: &crate::event_feed::EventFeed) -> ui::menu::PauseTexts {
     let d = ui::menu::PauseTexts::default();
@@ -40,23 +48,22 @@ pub fn texts(feed: &crate::event_feed::EventFeed) -> ui::menu::PauseTexts {
 #[derive(Default)]
 pub struct PauseMenu {
     pub cursor: usize,
+    pub animation: ui::pause_draw::Animation,
     /// The Yes/No popup open, if any.
     pub confirm: Option<Popup>,
     pub class_picker: bool,
     pub class_tab: usize,
     pub page: PausePage,
-    /// The Game Menu row that opened the page shown, for its Back.
-    pub opener: usize,
 }
 
 impl PauseMenu {
     /// Closed: the next pause opens on the Game Menu's first row.
     pub fn reset(&mut self) {
         self.cursor = 0;
+        self.animation = Default::default();
         self.confirm = None;
         self.class_picker = false;
         self.page = PausePage::Main;
-        self.opener = 0;
     }
 
     pub fn class_picker_model(&self, walk: &WalkSim) -> Option<ui::menu::ClassPickerModel> {
@@ -134,17 +141,25 @@ pub fn apply_menu_action(
         }
         MenuAction::OpenPage(page) => {
             if *paused {
-                menu.opener = menu.cursor;
                 menu.page = page;
                 menu.cursor = 0;
             }
         }
         MenuAction::ClosePage => {
-            menu.page = PausePage::Main;
-            menu.cursor = menu.opener;
+            if let Some((page, row)) = menu.page.parent() {
+                let model = ui::menu::MenuModel {
+                    page: Some(page),
+                    ..Default::default()
+                };
+                menu.page = page;
+                menu.cursor = ui::menu::rows(&model)
+                    .iter()
+                    .position(|r| *r == row)
+                    .unwrap_or(0);
+            }
         }
         MenuAction::RequestRespawn => {
-            if *paused && walk.sim.outcome.is_none() && walk.sim.unit(walk.player).is_some() {
+            if *paused && walk.sim.outcome.is_none() {
                 menu.confirm = Some(Popup::Respawn);
                 menu.cursor = 0; // No is the safe initial selection.
             }
@@ -167,7 +182,9 @@ pub fn apply_menu_action(
         }
         MenuAction::Respawn => {
             if *paused && menu.confirm == Some(Popup::Respawn) && walk.sim.outcome.is_none() {
-                walk.request_respawn();
+                if walk.sim.unit(walk.player).is_some() {
+                    walk.request_respawn();
+                }
                 *paused = false;
             }
             menu.confirm = None;
@@ -178,7 +195,9 @@ pub fn apply_menu_action(
             walk.sim.cheats.toggle(id);
             println!("cheat {id}: {}", walk.sim.cheats.entries()[i].2);
         }
-        MenuAction::SetAssist(v) => walk.sim.assist_intensity = v.clamp(0.0, 1.5),
+        MenuAction::SetAssist(v) => {
+            walk.sim.assist_intensity = crate::profile::clamp_assist_intensity(v)
+        }
         MenuAction::SetAiCap(c) => walk.set_team_size_percent(c),
         MenuAction::SetReinforcements(c) => walk.reinforcement_pct = c.clamp(10, 500),
         MenuAction::SetMusic(v) => {
@@ -197,10 +216,18 @@ pub fn apply_menu_action(
         MenuAction::SetPadLookSensitivity(v) => {
             walk.sim.pad_look_sensitivity = walk.pad_look_for_battle(v)
         }
+        MenuAction::SetCareerAwards(on) => walk.sim.set_career_award_bonuses(on),
         // Quit: --map launches exit, shell launches return to the shell;
         // Restart reloads the playlist row. Both are the caller's (App state).
         MenuAction::Quit
         | MenuAction::Restart
+        | MenuAction::SetDifficulty(_)
+        | MenuAction::SetEffectsVolume(_)
+        | MenuAction::SetDialogueVolume(_)
+        | MenuAction::SetFpsCounter(_)
+        | MenuAction::EditBindings(..)
+        | MenuAction::SetRumble(_)
+        | MenuAction::ToggleRumbleOnFire
         | MenuAction::SetMouseSensitivity(_)
         | MenuAction::ToggleFlightControls
         | MenuAction::ToggleInvertY
@@ -266,6 +293,47 @@ mod tests {
     use super::*;
     use ui::menu::{MenuAction, MenuInput};
     use ui::shell_feel::MenuSound;
+
+    #[test]
+    fn respawn_stays_in_the_active_round_menu_while_the_player_is_dead() {
+        let mut walk = WalkSim::new(42, glam::Vec3::ZERO, None);
+        let feed = crate::event_feed::EventFeed::new(
+            crate::event_feed::Texts::builtin(),
+            ["rep", "cis"],
+            &[],
+        );
+        let (mut paused, mut menu) = (true, PauseMenu::default());
+        assert!(walk.sim.unit(walk.player).is_some());
+        apply_menu_action(
+            &mut walk,
+            MenuAction::RequestRespawn,
+            &mut paused,
+            &mut menu,
+        );
+        assert_eq!(menu.confirm, Some(Popup::Respawn));
+        apply_menu_action(&mut walk, MenuAction::Respawn, &mut paused, &mut menu);
+        walk.step_tick(&[]);
+        assert!(walk.sim.unit(walk.player).is_none());
+        assert_eq!(respawn_label(&walk, &feed).as_deref(), Some("Respawn"));
+        let death_tick = walk.sim.units[walk.player.index as usize].respawn_at;
+        paused = true;
+        apply_menu_action(
+            &mut walk,
+            MenuAction::RequestRespawn,
+            &mut paused,
+            &mut menu,
+        );
+        assert_eq!(menu.confirm, Some(Popup::Respawn));
+        apply_menu_action(&mut walk, MenuAction::Respawn, &mut paused, &mut menu);
+        assert!(!paused);
+        walk.step_tick(&[]);
+        assert_eq!(
+            walk.sim.units[walk.player.index as usize].respawn_at,
+            death_tick
+        );
+        walk.sim.outcome = Some(0);
+        assert_eq!(respawn_label(&walk, &feed), None);
+    }
 
     /// A paused D-pad types Morse and never steps a value; the stick or A / D
     /// reach every slider, and the popup keeps the D-pad.

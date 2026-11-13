@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 fn mission() -> MissionDef {
     ron::from_str(
-        r#"(map:"bf2_myg1",mode:"con",source_game:"bf2",teams:[],
+        r#"(map:"tat2",mode:"eli",source_game:"bf2",teams:[],
             heroes:[],ai_alive_cap:16,spawn_delay:10.0,spawn_interval:0.25,era:Some("cw"))"#,
     )
     .unwrap()
@@ -37,6 +37,23 @@ impl Drop for Scratch {
     fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.0);
     }
+}
+
+#[test]
+fn dlc_heroes_default_to_on_only_with_the_bake_marker() {
+    let scratch = Scratch::new();
+    let root = &scratch.0;
+    let options =
+        || crate::shell_ia::instant_action(root, root, core::skill::Difficulty::Normal).options;
+    let absent = options();
+    assert!(!absent.dlc_heroes_installed);
+    assert!(!absent.dlc_heroes);
+    scratch.manifest(BOTH);
+    let mut present = options();
+    assert!(present.dlc_heroes_installed);
+    assert!(present.dlc_heroes);
+    present.adjust(ui::shell::Opt::DlcHeroes, 1, 1);
+    assert!(!present.dlc_heroes);
 }
 
 #[test]
@@ -78,44 +95,22 @@ fn absent_addon_and_other_sides_keep_authored_assignments() {
     assert_eq!(hero(&classes, &m, "rep").unwrap(), None);
 }
 
-/// The side decides, on every BF2 map: the mission RONs say which sides fight
-/// and who their authored heroes are, and each is read here rather than listed.
 #[test]
-fn every_republic_and_cis_hero_slot_is_theirs_and_no_other_side_changes() {
-    let missions = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"));
-    let Ok(entries) = std::fs::read_dir(missions) else {
-        eprintln!("skipped: no missions at {}", missions.display());
-        return;
-    };
+fn the_dlc_manifest_resolves_heroes_only_for_bf2_hero_assault() {
     let root = Scratch::new();
     let classes = root.0.join("classes");
     root.manifest(BOTH);
     std::fs::write(classes.join(CLASSES), "[]").unwrap();
-    let mut slots = 0;
-    for entry in entries {
-        let path = entry.unwrap().path();
-        if path.extension().is_none_or(|e| e != "ron") {
-            continue;
-        }
-        let Ok(mission) = MissionDef::load(&path) else {
-            continue;
-        };
-        for team in mission.teams.iter().map(|t| t.faction.as_str()) {
-            let want = match (mission.source_game.as_str(), team) {
-                ("bf2", "rep") => Some("dlc_hero_fisto"),
-                ("bf2", "cis") => Some("dlc_hero_ventress"),
-                _ => None,
-            };
+    let mut m = mission();
+    for mode in ["eli", "con", "ass", "ctf", "hun"] {
+        m.mode = mode.into();
+        for (side, class) in HEROES {
             assert_eq!(
-                hero(&classes, &mission, team).unwrap(),
-                want,
-                "{}",
-                path.display()
+                hero(&classes, &m, side).unwrap(),
+                (mode == "eli").then_some(class)
             );
-            slots += usize::from(want.is_some());
         }
     }
-    assert!(slots == 0 || slots >= 2, "only {slots} slots read");
 }
 
 #[test]
@@ -243,61 +238,51 @@ fn first_difference<T: std::fmt::Debug + PartialEq>(name: &str, a: &[T], b: &[T]
     }
 }
 
-/// Every BF2 mission a Republic or CIS team fights in really fields them, by
-/// the same path a battle takes, with the rest of its roster unmoved.
+fn hero_assault() -> MissionDef {
+    MissionDef::load(
+        &Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions")).join("tat2_eli.ron"),
+    )
+    .unwrap()
+}
+
+fn assault_rosters(
+    root: &Path,
+    mission: &MissionDef,
+    dlc: bool,
+) -> [crate::roster::FactionRoster; 2] {
+    let classes = root.join("classes");
+    let (mut pair, warnings) =
+        crate::roster::FactionRoster::pair(&classes, "bf2", ["all", "imp"], Some(mission)).unwrap();
+    assert!(warnings.is_empty(), "{warnings:?}");
+    for (team, roster) in pair.iter_mut().enumerate() {
+        crate::heroes::prepare_assault(roster, &classes, mission, team, dlc).unwrap();
+    }
+    pair
+}
+
 #[test]
 #[ignore = "requires OPENBF_DLC_TEST_ROOT selective DLC bake over retail assets"]
-fn real_dlc_heroes_append_on_every_map_their_sides_fight_on() {
+fn real_dlc_heroes_extend_both_hero_assault_rosters() {
     let root = PathBuf::from(std::env::var_os("OPENBF_DLC_TEST_ROOT").expect("DLC test overlay"));
-    let missions = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"));
-    let (mut fielded, mut authored) = (0, 0);
-    for entry in std::fs::read_dir(missions).unwrap() {
-        let path = entry.unwrap().path();
-        let Ok(m) = MissionDef::load(&path) else {
-            continue;
-        };
-        if m.source_game != "bf2" || m.heroes.is_empty() || m.teams.len() != 2 {
-            continue;
-        }
-        let factions = [m.teams[0].faction.as_str(), m.teams[1].faction.as_str()];
-        let (mut pair, _) =
-            crate::roster::FactionRoster::pair(&root.join("classes"), "bf2", factions, Some(&m))
-                .unwrap();
-        let (mut own, _) =
-            crate::roster::FactionRoster::pair(&root.join("classes"), "bf2", factions, Some(&m))
-                .unwrap();
-        for (team, roster) in pair.iter_mut().enumerate() {
-            let before = roster.classes.len();
-            // The session's default: the map's own hero, bake or no bake.
-            if let Some(index) =
-                crate::heroes::append(&mut own[team], &root.join("classes"), Some(&m), team)
-            {
-                let class = &own[team].classes[usize::from(index)].class;
-                assert!(!class.starts_with("dlc_"), "{}: {class}", path.display());
-                authored += 1;
-            }
-            let Some(index) =
-                crate::heroes::append_with(roster, &root.join("classes"), Some(&m), team, true)
-            else {
-                continue;
-            };
-            let class = roster.classes[usize::from(index)].class.clone();
-            let want = HEROES
-                .iter()
-                .find(|(side, _)| *side == roster.faction)
-                .map(|(_, class)| *class);
-            if let Some(want) = want {
-                assert_eq!(class, want, "{}", path.display());
-                assert_eq!(usize::from(index), before);
-                fielded += 1;
-            } else {
-                assert!(!class.starts_with("dlc_"), "{}: {class}", path.display());
-            }
-        }
+    let mission = hero_assault();
+    let without = assault_rosters(&root, &mission, false);
+    let with = assault_rosters(&root, &mission, true);
+    for (team, (stock, extended)) in without.iter().zip(&with).enumerate() {
+        assert_eq!(stock.classes.len(), mission.teams[team].classes.len());
+        let (added, retained) = extended.classes.split_last().unwrap();
+        assert!(stock
+            .classes
+            .iter()
+            .map(|c| &c.class)
+            .eq(retained.iter().map(|c| &c.class)));
+        assert_eq!(added.class, HEROES[team].1);
+        assert_eq!(Some(added.label.as_str()), label(&added.class));
+        assert!(
+            added.weapon.saber.is_some(),
+            "{}: usable saber",
+            added.class
+        );
     }
-    eprintln!("DLC heroes fielded in {fielded} hero slots; the maps' own in {authored}");
-    assert!(fielded >= 30, "only {fielded} Republic and CIS hero slots");
-    assert!(authored >= fielded, "only {authored} authored hero slots");
 }
 
 /// The optional bake's effect layer, read last, and only with its marker.
@@ -354,94 +339,6 @@ fn real_fisto_tentacles_hang_from_his_head_and_sway_alone() {
     assert!(at.length() > 0.001 && at.length() < 0.25, "{at:?}");
 }
 
-/// An explicit real-data gate: missing prerequisites fail rather than silently
-/// passing. The root must be an owned overlay, never the shared bake directory.
-#[test]
-#[ignore = "requires OPENBF_DLC_TEST_ROOT selective DLC bake over retail assets"]
-fn real_dlc_heroes_use_the_existing_offer_spawn_and_health_rules() {
-    use core::{
-        sim::{buttons, PadState},
-        unit::UnitSpec,
-    };
-    use glam::Vec3;
-    let root = PathBuf::from(std::env::var_os("OPENBF_DLC_TEST_ROOT").expect("DLC test overlay"));
-    let m = mygeeto();
-    let mut rosters = rosters(&root, &m);
-    let mut selected = [None; 2];
-    for (team, roster) in rosters.iter_mut().enumerate() {
-        let ordinary: Vec<_> = roster.classes.iter().map(|c| c.class.clone()).collect();
-        selected[team] =
-            crate::heroes::append_with(roster, &root.join("classes"), Some(&m), team, true);
-        let hero = &roster.classes[usize::from(selected[team].expect("DLC hero append"))];
-        assert_eq!(hero.class, HEROES[team].1);
-        assert_eq!(Some(hero.label.as_str()), label(&hero.class));
-        assert!(hero.weapon.saber.is_some(), "{}: usable saber", hero.class);
-        assert_eq!(
-            roster.classes[..ordinary.len()]
-                .iter()
-                .map(|c| &c.class)
-                .collect::<Vec<_>>(),
-            ordinary.iter().collect::<Vec<_>>()
-        );
-        println!(
-            "{}: {} HP, {}, {:?}",
-            hero.class, hero.max_health, hero.weapon.name, hero.geometry
-        );
-    }
-    for team in 0..2 {
-        let mut sim = register(&rosters, selected);
-        let player = sim
-            .spawn(&UnitSpec::player(team as u8, Vec3::X * team as f32 * 100.0))
-            .unwrap();
-        assert_eq!(
-            sim.ai_class_weights(team as u8)[usize::from(selected[team].unwrap())],
-            0.0
-        );
-        sim.heroes
-            .as_mut()
-            .unwrap()
-            .points
-            .resize(sim.units.len(), 0);
-        sim.heroes.as_mut().unwrap().points[player.index as usize] = 10;
-        sim.step(&[PadState::default()]);
-        assert_eq!(sim.hero_offer(0).unwrap().0, selected[team].unwrap());
-        let tickets = sim.battle.teams[team].tickets();
-        sim.step(&[PadState {
-            buttons: buttons::HERO_ACCEPT,
-            ..Default::default()
-        }]);
-        let player = sim.players[0].unwrap();
-        assert!(sim.is_hero(player));
-        assert_eq!(sim.unit(player).unwrap().deaths, 0);
-        assert_eq!(sim.battle.teams[team].tickets(), tickets);
-        let health = sim.unit(player).unwrap().health.cur;
-        let mut attacked = false;
-        for tick in 0..90 {
-            sim.step(&[PadState {
-                buttons: if tick % 10 < 5 { buttons::FIRE } else { 0 },
-                ..Default::default()
-            }]);
-            attacked |= sim
-                .unit(player)
-                .unwrap()
-                .weapon
-                .melee
-                .as_ref()
-                .is_some_and(|melee| !melee.attacks.is_empty());
-        }
-        assert!(
-            attacked,
-            "{}: FIRE opens an authored melee attack",
-            HEROES[team].1
-        );
-        let after = sim.unit(player).unwrap().health.cur;
-        assert!(
-            after < health && after > 0.0,
-            "existing hero drain: {health} -> {after}"
-        );
-    }
-}
-
 /// Reconstruct the former append path independently, then compare stepped sim
 /// hashes with this branch's absent-addon path on the same retail class data.
 #[test]
@@ -468,13 +365,8 @@ fn absent_dlc_matches_authored_hero_sim_hashes() {
         authored.anim.custom =
             crate::animator::custom::for_hero(&root.join("classes"), &m, name).unwrap();
         reference[team].classes.push(authored);
-        selected[team] = crate::heroes::append_with(
-            &mut current[team],
-            &root.join("classes"),
-            Some(&m),
-            team,
-            true,
-        );
+        selected[team] =
+            crate::heroes::append(&mut current[team], &root.join("classes"), Some(&m), team);
         assert_eq!(
             selected[team],
             Some((reference[team].classes.len() - 1) as u8)
@@ -502,11 +394,10 @@ fn absent_dlc_matches_authored_hero_sim_hashes() {
     );
 }
 
-/// The row at its default: a build holding the bake plays the map's own hero, hash
-/// for hash, as a build without the bake does.
+/// Conquest keeps the authored heroes and their state with either bake.
 #[test]
 #[ignore = "requires OPENBF_DLC_TEST_ROOT and OPENBF_DLC_TEST_BASE_ROOT"]
-fn the_row_off_matches_a_build_without_the_bake_hash_for_hash() {
+fn conquest_heroes_match_with_or_without_the_dlc_bake() {
     let installed =
         PathBuf::from(std::env::var_os("OPENBF_DLC_TEST_ROOT").expect("DLC test overlay"));
     let absent =
@@ -518,8 +409,7 @@ fn the_row_off_matches_a_build_without_the_bake_hash_for_hash() {
         let mut rosters = rosters(root, &m);
         let mut selected = [None; 2];
         for (team, roster) in rosters.iter_mut().enumerate() {
-            selected[team] =
-                crate::heroes::append_with(roster, &root.join("classes"), Some(&m), team, false);
+            selected[team] = crate::heroes::append(roster, &root.join("classes"), Some(&m), team);
             let hero = &roster.classes[usize::from(selected[team].expect("authored hero"))];
             assert!(!hero.class.starts_with("dlc_"), "{}", hero.class);
         }
@@ -528,7 +418,7 @@ fn the_row_off_matches_a_build_without_the_bake_hash_for_hash() {
         sim
     });
     for tick in 0..120 {
-        assert_eq!(on_bake.hash(), plain.hash(), "row Off tick {tick}");
+        assert_eq!(on_bake.hash(), plain.hash(), "Conquest tick {tick}");
         let pad = battle_pad(tick);
         on_bake.step(&[pad, pad]);
         plain.step(&[pad, pad]);
@@ -540,22 +430,26 @@ fn the_row_off_matches_a_build_without_the_bake_hash_for_hash() {
 fn ps2_and_pc_dlc_sources_have_identical_hero_sim_hashes() {
     let roots = ["OPENBF_DLC_TEST_ROOT", "OPENBF_DLC_TEST_PC_ROOT"]
         .map(|key| PathBuf::from(std::env::var_os(key).expect(key)));
-    let mission = mygeeto();
+    let mission = hero_assault();
     let [mut ps2, mut pc] = roots.map(|root| {
-        let mut rosters = rosters(&root, &mission);
-        let mut selected = [None; 2];
-        for (team, roster) in rosters.iter_mut().enumerate() {
-            selected[team] = crate::heroes::append_with(
-                roster,
-                &root.join("classes"),
-                Some(&mission),
-                team,
-                true,
-            );
-            assert!(selected[team].is_some(), "{} team {team}", root.display());
+        let mut rosters = assault_rosters(&root, &mission, true);
+        for (roster, (_, name)) in rosters.iter_mut().zip(HEROES) {
+            roster.classes.retain(|class| class.class == name);
+            assert_eq!(roster.classes.len(), 1);
         }
-        let mut sim = register(&rosters, selected);
-        spawn_scored_players(&mut sim);
+        let mut sim = register(&rosters, [None; 2]);
+        for team in 0..2 {
+            let spec = sim.classes[team][0].spec(
+                team as u8,
+                glam::Vec3::X * team as f32 * 100.0,
+                0.0,
+                core::unit::Controller::Player { slot: team as u8 },
+                0,
+                0,
+            );
+            sim.spawn(&spec).unwrap();
+        }
+        sim.deathmatch = Some(core::sim::deathmatch::Deathmatch::new(50, [0, 0]));
         // Each hero has an ordinary enemy within saber range. The two
         // players' own bases are apart, so these targets isolate their hits.
         for team in 0..2 {
@@ -648,7 +542,9 @@ fn ps2_and_pc_dlc_sources_have_identical_hero_sim_hashes() {
         ps2.step(&[pad, pad]);
         pc.step(&[pad, pad]);
     }
-    assert!(ps2.players.iter().flatten().all(|h| ps2.is_hero(*h)));
+    for handle in ps2.players.iter().take(2) {
+        assert!(ps2.hero_unit(ps2.unit(handle.unwrap()).unwrap()));
+    }
     println!(
         "PS2/PC DLC: 120 identical hero sim hashes; final {:016x}; target HP {:?}",
         ps2.hash(),

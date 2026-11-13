@@ -74,6 +74,35 @@ fn blade_parser_accepts_eight_edges_and_refuses_nine_before_loading_assets() {
 }
 
 #[test]
+fn untextured_zero_length_melee_edges_keep_their_axis_for_combo_reach() {
+    let prop = |name: &str, value: &str| (crate::classdb::fnv1a_lowercase(name), value.into());
+    let edge_props = vec![
+        prop("AttachedFirePoint", "bone_head 1 0 0 0 0 0"),
+        prop("LightSaberLength", "0.0"),
+        prop("LightSaberWidth", "0.08"),
+    ];
+    let fixture = Fixture::new(vec![
+        crate::classdb::ClassDef {
+            name: "paw".into(),
+            kind: "wpnc".into(),
+            base: "melee".into(),
+            props: edge_props,
+        },
+        crate::classdb::ClassDef {
+            name: "visible_paw".into(),
+            kind: "wpnc".into(),
+            base: "paw".into(),
+            props: vec![prop("LightSaberTexture", "lightsabre")],
+        },
+    ]);
+    let bindings = blade_bindings(&fixture.root, &fixture.db, "paw").unwrap();
+    let binding = &bindings[0];
+    assert_eq!(binding.blade.length, 0.0);
+    assert_eq!(binding.local.end - binding.local.start, Vec3::X);
+    assert!(blade_bindings(&fixture.root, &fixture.db, "visible_paw").is_err());
+}
+
+#[test]
 fn weapon_node_float_inputs_are_rejected_before_creating_physical_edges() {
     let prop = |name: &str, value: &str| (crate::classdb::fnv1a_lowercase(name), value.into());
     let f = Fixture::new(vec![crate::classdb::ClassDef {

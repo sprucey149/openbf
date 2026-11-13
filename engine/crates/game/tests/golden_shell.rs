@@ -302,19 +302,19 @@ fn ia_screens_match_golden() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-/// The DLC row makes the Hero page six rows, one more than fit: the page says so
-/// with the scroll arrow the lists use, and a five-row page draws none. `IA_OUT=<dir>`:
-/// also the frames.
+/// The Hero page shows a scroll arrow only when there are more options.
 #[test]
 #[ignore = "requires a GPU adapter + the BF2 common bake with the IA sheets"]
-fn the_hero_page_with_the_dlc_row_shows_it_scrolls() {
+fn the_hero_options_page_shows_the_scroll_arrow_when_needed() {
     common::force_ps2_tier();
     let assets = game::assets::baked_root();
     let missions = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../missions"));
     let base = game::shell_ia::instant_action(&assets, &missions, core::skill::Difficulty::Normal);
-    let page = |installed: bool, cursor: usize| {
+    let page = |heroes: bool, cursor: usize| {
         let mut ia = base.clone();
-        ia.options.dlc_heroes_installed = installed;
+        ia.options.heroes = heroes;
+        ia.options.dlc_heroes_installed = false;
+        ia.options.dlc_heroes = false;
         ia.page = ui::shell::Page::Group(
             ui::shell::Group::Hero,
             ui::shell::ListCursor { at: 0, top: cursor },
@@ -323,14 +323,17 @@ fn the_hero_page_with_the_dlc_row_shows_it_scrolls() {
         if let Some(dir) = std::env::var_os("IA_OUT").map(std::path::PathBuf::from) {
             image::RgbaImage::from_raw(w, h, rgba.clone())
                 .expect("frame")
-                .save(dir.join(format!("hero_{installed}_{cursor}.png")))
+                .save(dir.join(format!("hero_{heroes}_{cursor}.png")))
                 .expect("write");
         }
         rgba
     };
-    // The same five rows are shown either way but for the row the DLC adds, so
-    // compare a page with itself scrolled: the arrow moves from below to above.
-    let (five, six, six_scrolled) = (page(false, 0), page(true, 0), page(true, 1));
+    let last_page = base
+        .options
+        .rows(ui::shell::Group::Hero)
+        .len()
+        .saturating_sub(ui::shell::OPTION_ROWS);
+    let (short, long, scrolled) = (page(false, 0), page(true, 0), page(true, last_page));
     let bottom_edge = |rgba: &[u8]| -> Vec<u8> {
         // Across the middle of the window's bottom border, where the arrow's ink falls.
         (440..840)
@@ -339,9 +342,9 @@ fn the_hero_page_with_the_dlc_row_shows_it_scrolls() {
             .collect()
     };
     assert_eq!(
-        bottom_edge(&five),
-        bottom_edge(&six_scrolled),
-        "no arrow on five rows, nor at the end of six"
+        bottom_edge(&short),
+        bottom_edge(&scrolled),
+        "no lower arrow at the end of either list"
     );
-    assert_ne!(bottom_edge(&five), bottom_edge(&six), "the arrow below");
+    assert_ne!(bottom_edge(&short), bottom_edge(&long), "the arrow below");
 }

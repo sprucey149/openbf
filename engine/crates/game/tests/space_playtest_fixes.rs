@@ -1120,3 +1120,192 @@ fn baked_spa1_bomber_seat_switch_and_exit_draw_without_a_snap_or_a_stall() {
         "{stalls} still frames: only the handover's first, held frame"
     );
 }
+
+#[test]
+fn stock_hangar_shields_keep_bolts_and_missile_damage_on_their_side() {
+    use core::collision::Layers;
+    use core::projectile::Shooter;
+    use core::sim::{PadState, SpaceAssault};
+
+    let root = assets_dir();
+    let maps = [
+        "bf2_spa1", "bf2_spa3", "bf2_spa6", "bf2_spa7", "bf2_spa8", "bf2_spa9",
+    ];
+    if !maps.iter().all(|map| root.join(map).is_dir()) {
+        assert!(
+            std::env::var_os("OPENBF_REQUIRE_SPACE_ASSETS").is_none(),
+            "missing stock space maps"
+        );
+        return;
+    }
+    let db = game::roster::load_classdb(&root.join("classes"), "bf2", &["all"]).unwrap();
+    let ship_missile = game::roster::weapon_from_db(&db, "all_weap_fly_xwing_ptorpedo").unwrap();
+    let ordnance = &ship_missile.ordnance;
+    let guidance = ordnance.missile.unwrap();
+    let explosion = ordnance.explosion.as_ref().unwrap();
+    let mut control = Sim::empty(1);
+    control.install_space_assault(SpaceAssault::new(180));
+    let witness = control.spawn(&UnitSpec::trooper(1, Vec3::ZERO)).unwrap();
+    let unit = control.unit_mut(witness).unwrap();
+    unit.soldier.pos = Vec3::ZERO;
+    let health = unit.health.cur;
+    control.explode(explosion, Vec3::new(4.2, 1.0, 0.0), None, Some(0));
+    assert!(
+        control.unit(witness).is_none_or(|u| u.health.cur < health),
+        "the same distance takes blast damage with no barrier"
+    );
+    let mut shield_only = 0;
+    let mut directions = 0;
+    let mut missiles = 0;
+    for map in maps {
+        for mode in ["ass", "1flag"] {
+            let (scene, _) = game::assets::load_battle_scene(&root.join(map), mode).unwrap();
+            let mut sim = Sim::empty(1);
+            sim.install_space_assault(SpaceAssault::new(180));
+            scene.install_collision(&mut sim);
+            let weapon = sim.add_weapon_class(ship_missile.clone());
+            let attacker = sim.spawn(&UnitSpec::trooper(0, Vec3::ZERO)).unwrap();
+            let victim = sim.spawn(&UnitSpec::trooper(1, Vec3::ZERO)).unwrap();
+            let shooter = Shooter {
+                owner: attacker,
+                team: 0,
+                weapon_class: weapon,
+                is_player: false,
+            };
+            let mut shields = 0;
+            for (index, instance) in scene.manifest.instances.iter().enumerate() {
+                let Some(class) = scene.resolve_class(&instance.class) else {
+                    continue;
+                };
+                if !class
+                    .collision
+                    .iter()
+                    .any(|(k, v)| k == "vehicle" && v == "clear")
+                    || !class
+                        .collision
+                        .iter()
+                        .any(|(k, _)| k == "flyer_uses_vehicle")
+                {
+                    continue;
+                }
+                let geom = class.geometry.as_deref().unwrap().to_ascii_lowercase();
+                let mesh = scene.collision[&geom].mesh.as_ref().unwrap();
+                let xf = game::viewer::instance_matrix(instance.rotation, instance.translation);
+                let mut largest = None;
+                for tri in mesh.indices.chunks_exact(3) {
+                    let [a, b, c] = [tri[0], tri[1], tri[2]]
+                        .map(|i| xf.transform_point3(Vec3::from(mesh.positions[i as usize])));
+                    let normal = (b - a).cross(c - a);
+                    let area = normal.length_squared();
+                    let Some(dir) = normal.try_normalize() else {
+                        continue;
+                    };
+                    let at = (a + b + c) / 3.0;
+                    if largest.is_none_or(|(size, _, _)| area > size) {
+                        largest = Some((area, at, dir));
+                    }
+                    for dir in [dir, -dir] {
+                        let start = at - dir;
+                        let bolt = Bolt::fire(
+                            start,
+                            dir,
+                            100.0,
+                            0.02,
+                            shooter,
+                            None,
+                            None,
+                            &sim.collision,
+                            HullFilter::All,
+                        );
+                        assert_ne!(
+                            bolt.hit,
+                            Hit::None,
+                            "{map}/{mode} {} at {at}",
+                            instance.name
+                        );
+                        assert!(
+                            sim.collision
+                                .ray_with(start, dir, 2.0, Layers::FLYER, HullFilter::Static)
+                                .is_none_or(|r| r.instance != Some(index as u32)),
+                            "{map}/{mode} {} blocks a flyer",
+                            instance.name
+                        );
+                        if sim
+                            .collision
+                            .ray_with(start, dir, 2.0, Layers::ORDNANCE, HullFilter::Static)
+                            .is_some_and(|hit| hit.instance == Some(index as u32))
+                            && sim
+                                .collision
+                                .ray_past(
+                                    start,
+                                    dir,
+                                    2.0,
+                                    Layers::ORDNANCE,
+                                    HullFilter::Static,
+                                    [Some(index as u32), None],
+                                )
+                                .is_none()
+                        {
+                            shield_only += 1;
+                        }
+                        directions += 1;
+                    }
+                }
+
+                // Fire a stock ship missile into the boundary in each direction.
+                // Its nearby witness is on the other side and inside blast range.
+                let (_, at, dir) = largest.expect("nondegenerate collision mesh");
+                for dir in [dir, -dir] {
+                    let from = at - dir * 2.0;
+                    let u = sim.unit_mut(victim).unwrap();
+                    u.soldier.pos = at + dir * 2.0 - Vec3::Y;
+                    u.soldier.vel = Vec3::ZERO;
+                    let health = u.health.cur;
+                    let mut missile = Bolt::fire(
+                        from,
+                        dir,
+                        ordnance.velocity,
+                        ordnance.life_span,
+                        shooter,
+                        None,
+                        None,
+                        &sim.collision,
+                        HullFilter::All,
+                    );
+                    missile.as_missile(ordnance, &guidance, None, &mut sim.lcg);
+                    sim.bolts.push(missile);
+                    let mut struck = false;
+                    for _ in 0..10 {
+                        sim.step(&[PadState::default()]);
+                        struck |= sim
+                            .events
+                            .iter()
+                            .any(|e| matches!(e, Event::BoltExpired { struck: true, .. }));
+                        if struck {
+                            break;
+                        }
+                    }
+                    assert!(
+                        struck,
+                        "{map}/{mode} {} must stop the missile",
+                        instance.name
+                    );
+                    assert_eq!(
+                        sim.unit(victim).unwrap().health.cur,
+                        health,
+                        "{map}/{mode} {} must keep the blast on its side",
+                        instance.name
+                    );
+                    missiles += 1;
+                }
+                shields += 1;
+            }
+            assert_eq!(shields, 2, "{map}/{mode} should have both hangar shields");
+        }
+    }
+    assert!(
+        shield_only > 0,
+        "the exposed opening needs the shield collision"
+    );
+    eprintln!("hangar shields: {shield_only} stop on the shield alone, {directions} directional bolt casts and {missiles} missile impacts");
+}

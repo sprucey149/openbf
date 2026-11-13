@@ -2,10 +2,9 @@
 //!
 //! Pads do not count as seat input, so a pad-only round lets the desktop's
 //! idle timer dim and sleep the screen. While a round runs unpaused the
-//! window asks the platform to stay awake: the Wayland idle-inhibit protocol
-//! on the window's surface, a periodic screen-saver reset on X11, and
-//! `SetThreadExecutionState` on Windows. Menus, loading, the pause menu and
-//! exit release it. Every backend fails silently: no inhibit, no error.
+//! window asks the platform to stay awake: the desktop session bus on Wayland,
+//! a periodic screen-saver reset on X11, and `SetThreadExecutionState` on
+//! Windows. Menus, loading, the pause menu and exit release it.
 //! macOS is a no-op for now (follow-up: an IOPM assertion).
 
 /// Whether the display should be kept awake: only in a round being played.
@@ -57,12 +56,6 @@ impl IdleInhibit {
 
 impl Drop for IdleInhibit {
     fn drop(&mut self) {
-        // Unwinding, the event loop (and the display connection the
-        // backend borrows) may be gone: the compositor or server drops the
-        // inhibit with the connection.
-        if std::thread::panicking() {
-            return;
-        }
         self.set(false);
     }
 }
@@ -77,28 +70,18 @@ impl Drop for IdleInhibit {
     ))
 ))]
 mod platform {
-    use winit::raw_window_handle::{
-        HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
-    };
+    use winit::raw_window_handle::{HasDisplayHandle, RawDisplayHandle};
 
     pub(super) enum Imp {
-        Wayland(Box<wl::Inhibit>),
+        Wayland(wl::Inhibit),
         X11(Box<x11::Reset>),
     }
 
     impl Imp {
         pub(super) fn new(window: &winit::window::Window) -> Option<Imp> {
-            let display = window.display_handle().ok()?.as_raw();
-            let surface = window.window_handle().ok()?.as_raw();
-            match (display, surface) {
-                (RawDisplayHandle::Wayland(d), RawWindowHandle::Wayland(w)) => {
-                    // SAFETY: winit owns the display and the surface and keeps
-                    // both alive while the window exists; the app drops this
-                    // inhibitor in `exiting()`, before the window goes.
-                    unsafe { wl::Inhibit::new(d.display, w.surface) }
-                        .map(|i| Imp::Wayland(Box::new(i)))
-                }
-                (RawDisplayHandle::Xlib(_) | RawDisplayHandle::Xcb(_), _) => {
+            match window.display_handle().ok()?.as_raw() {
+                RawDisplayHandle::Wayland(_) => wl::Inhibit::new().map(Imp::Wayland),
+                RawDisplayHandle::Xlib(_) | RawDisplayHandle::Xcb(_) => {
                     x11::Reset::new().map(|r| Imp::X11(Box::new(r)))
                 }
                 _ => None,
@@ -121,93 +104,93 @@ mod platform {
     }
 
     mod wl {
-        use std::ffi::c_void;
-        use std::ptr::NonNull;
-        use wayland_client::backend::{Backend, ObjectId};
-        use wayland_client::globals::{registry_queue_init, GlobalListContents};
-        use wayland_client::protocol::{wl_registry::WlRegistry, wl_surface::WlSurface};
-        use wayland_client::{delegate_noop, Connection, Dispatch, EventQueue, Proxy, QueueHandle};
-        use wayland_protocols::wp::idle_inhibit::zv1::client::{
-            zwp_idle_inhibit_manager_v1::ZwpIdleInhibitManagerV1,
-            zwp_idle_inhibitor_v1::ZwpIdleInhibitorV1,
-        };
+        use std::sync::mpsc::{self, Receiver, Sender};
+        use std::time::Duration;
+        use zbus::blocking::{connection, Connection, Proxy};
 
-        pub struct State;
+        const SERVICE: &str = "org.freedesktop.ScreenSaver";
+        const PATH: &str = "/org/freedesktop/ScreenSaver";
 
-        impl Dispatch<WlRegistry, GlobalListContents> for State {
-            fn event(
-                _: &mut State,
-                _: &WlRegistry,
-                _: <WlRegistry as Proxy>::Event,
-                _: &GlobalListContents,
-                _: &Connection,
-                _: &QueueHandle<State>,
-            ) {
-            }
-        }
-        delegate_noop!(State: ZwpIdleInhibitManagerV1);
-        delegate_noop!(State: ZwpIdleInhibitorV1);
-
-        /// A private queue on winit's own connection: the manager global, the
-        /// window's surface and, while held, the inhibitor on it.
-        pub struct Inhibit {
-            conn: Connection,
-            queue: EventQueue<State>,
-            manager: ZwpIdleInhibitManagerV1,
-            surface: WlSurface,
-            inhibitor: Option<ZwpIdleInhibitorV1>,
-        }
+        pub struct Inhibit(Sender<bool>);
 
         impl Inhibit {
-            /// `None` when the compositor has no idle-inhibit global.
-            ///
-            /// # Safety
-            /// `display` and `surface` are winit's live `wl_display` and
-            /// `wl_surface`, and stay alive for as long as the result.
-            pub unsafe fn new(display: NonNull<c_void>, surface: NonNull<c_void>) -> Option<Self> {
-                let backend = unsafe { Backend::from_foreign_display(display.as_ptr().cast()) };
-                let conn = Connection::from_backend(backend);
-                let (globals, queue) = registry_queue_init::<State>(&conn).ok()?;
-                let manager = globals
-                    .bind::<ZwpIdleInhibitManagerV1, State, ()>(&queue.handle(), 1..=1, ())
+            pub fn new() -> Option<Self> {
+                let (tx, rx) = mpsc::channel();
+                // Desktop service startup and calls can block. Own the session
+                // connection on a worker, away from winit's event loop.
+                std::thread::Builder::new()
+                    .name("openbf-idle".into())
+                    .spawn(move || run(rx))
                     .ok()?;
-                let id =
-                    unsafe { ObjectId::from_ptr(WlSurface::interface(), surface.as_ptr().cast()) }
-                        .ok()?;
-                let surface = WlSurface::from_id(&conn, id).ok()?;
-                Some(Inhibit {
-                    conn,
-                    queue,
-                    manager,
-                    surface,
-                    inhibitor: None,
-                })
+                Some(Self(tx))
             }
 
-            pub fn set(&mut self, hold: bool) {
-                // Registry events land on this queue; drain them so they do not pile up.
-                let _ = self.queue.dispatch_pending(&mut State);
-                if hold {
-                    if self.inhibitor.is_none() {
-                        let qh = self.queue.handle();
-                        self.inhibitor =
-                            Some(self.manager.create_inhibitor(&self.surface, &qh, ()));
-                    }
-                } else if let Some(i) = self.inhibitor.take() {
-                    i.destroy();
-                }
-                let _ = self.conn.flush();
+            pub fn set(&self, hold: bool) {
+                let _ = self.0.send(hold);
             }
         }
 
-        impl Drop for Inhibit {
-            fn drop(&mut self) {
-                if std::thread::panicking() {
-                    return;
+        struct Hold {
+            connection: Connection,
+            cookie: u32,
+        }
+
+        impl Hold {
+            fn acquire() -> zbus::Result<Self> {
+                let connection = connection::Builder::session()?
+                    .method_timeout(Duration::from_secs(1))
+                    .build()?;
+                let cookie =
+                    Self::proxy(&connection)?.call("Inhibit", &("openbf", "Playing a battle"))?;
+                Ok(Self { connection, cookie })
+            }
+
+            fn proxy(connection: &Connection) -> zbus::Result<Proxy<'_>> {
+                Proxy::new(connection, SERVICE, PATH, SERVICE)
+            }
+
+            fn release(self) -> zbus::Result<()> {
+                let result: zbus::Result<()> = Self::proxy(&self.connection)
+                    .and_then(|proxy| proxy.call("UnInhibit", &(self.cookie,)));
+                // The service also releases this sender's cookie on disconnect.
+                result.and(self.connection.close())
+            }
+        }
+
+        fn run(changes: Receiver<bool>) {
+            let mut held = None;
+            let mut reported = false;
+            while let Ok(hold) = changes.recv() {
+                match (changes.try_iter().last().unwrap_or(hold), &held) {
+                    (true, None) => match Hold::acquire() {
+                        Ok(token) => held = Some(token),
+                        Err(error) if !reported => {
+                            eprintln!(
+                                "idle inhibit: Wayland desktop service unavailable ({error})"
+                            );
+                            reported = true;
+                        }
+                        Err(_) => {}
+                    },
+                    (false, Some(_)) => {
+                        let _ = held.take().unwrap().release();
+                    }
+                    _ => {}
                 }
-                self.set(false);
-                self.manager.destroy();
-                let _ = self.conn.flush();
+            }
+            if let Some(held) = held {
+                let _ = held.release();
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            use super::*;
+
+            #[test]
+            #[ignore = "requires a desktop session with the idle inhibition service"]
+            fn wayland_idle_service_acquires_and_releases() {
+                Hold::acquire().unwrap().release().unwrap();
             }
         }
     }

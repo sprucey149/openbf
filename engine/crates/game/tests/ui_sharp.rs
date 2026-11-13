@@ -534,3 +534,220 @@ fn shared_conquest_hud_geometry() {
         }
     }
 }
+
+/// Exercise the baked pause frame and its hit regions at desktop and handheld sizes.
+#[test]
+#[ignore = "requires GPU and UI_SHARP_ASSETS owned source bake"]
+fn capture_battle_pause_theme() {
+    use ui::menu::{MenuAction, MenuInput, MenuModel, PausePage, Popup, Row, SettingsPage};
+    use ui::pause_draw::{self, Animation, Target};
+
+    let (assets, out) = paths();
+    for size in [[640, 480], [1280, 720], [2560, 1080], [540, 960]] {
+        let mut r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+        let mut view = game::hud_feed::HudView::for_renderer(&assets, &r).unwrap();
+        assert!(view.can_draw_pause());
+        let hud = ui::hud::HudModel::default();
+        let mut animation = Animation::default();
+        let mut menu = MenuModel {
+            page: Some(PausePage::Main),
+            respawn_label: Some("Respawn".into()),
+            restart_available: true,
+            team_size_pct: 100,
+            reinforcements_pct: 100,
+            fov_scale: 1.0,
+            fov_deg: 60.0,
+            music_volume: 0.6,
+            mouse_sensitivity: 1.0,
+            pad_look_sensitivity: 1.0,
+            rumble_strength: 1.0,
+            input_icons_label: "Auto",
+            ..Default::default()
+        };
+
+        let hit = |menu: &MenuModel, anim: &Animation, wanted| {
+            let frame = size.map(|n| n as f32);
+            (0..size[1]).step_by(5).any(|y| {
+                (0..size[0]).step_by(5).any(|x| {
+                    pause_draw::target(menu, anim, [x as f32, y as f32], frame) == Some(wanted)
+                })
+            })
+        };
+        assert!(!hit(&menu, &animation, Target::Row(4)));
+        animation.advance(1.0);
+        for (name, state) in [
+            ("pause_game_menu", menu.clone()),
+            (
+                "pause_categories",
+                MenuModel {
+                    page: Some(PausePage::Options),
+                    ..menu.clone()
+                },
+            ),
+            (
+                "pause_controls",
+                MenuModel {
+                    page: Some(PausePage::Settings(SettingsPage::Controls)),
+                    ..menu.clone()
+                },
+            ),
+            (
+                "pause_options",
+                MenuModel {
+                    page: Some(PausePage::Settings(SettingsPage::Game)),
+                    career_awards_disabled: true,
+                    cursor: 4,
+                    ..menu.clone()
+                },
+            ),
+            (
+                "pause_quit",
+                MenuModel {
+                    popup: Some(Popup::Quit),
+                    ..menu.clone()
+                },
+            ),
+            (
+                "pause_graphics",
+                MenuModel {
+                    page: Some(PausePage::Settings(SettingsPage::Graphics)),
+                    cursor: 2,
+                    ..menu.clone()
+                },
+            ),
+            (
+                "pause_gamepad",
+                MenuModel {
+                    page: Some(PausePage::Settings(SettingsPage::Gamepad)),
+                    rumble_strength: 0.67,
+                    rumble_on_fire: true,
+                    cursor: 4,
+                    ..menu.clone()
+                },
+            ),
+            (
+                "pause_binding_scroll",
+                MenuModel {
+                    page: None,
+                    bindings: Some(ui::menu::BindingRows {
+                        title: "Infantry Controls",
+                        labels: (1..=18)
+                            .map(|i| (format!("Action {i}"), format!("Button {i}")))
+                            .collect(),
+                        capture: false,
+                        message: None,
+                    }),
+                    cursor: 9,
+                    ..menu.clone()
+                },
+            ),
+        ] {
+            view.update_pause(&hud, &state, &animation, size);
+            r.render_with_overlay(
+                &render::Camera::default(),
+                &[],
+                [0.15, 0.2, 0.25, 1.0],
+                Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+            )
+            .unwrap();
+            assert_all_sheets_bound(&view);
+            assert!(view
+                .drawn_sheets()
+                .any(|sheet| sheet == "bf2_buttons_title_center"));
+            assert!(view
+                .drawn_sheets()
+                .any(|sheet| sheet == "bf2_buttons_botright"));
+            assert!(view.drawn_sheets().any(|sheet| sheet.contains("menu_face")));
+            save(&out, name, &r);
+        }
+        assert!(hit(&menu, &animation, Target::Row(4)));
+        let (_, actions) = pause_draw::click(&mut menu, Target::Row(1));
+        assert_eq!(actions, vec![MenuAction::OpenPage(PausePage::Options)]);
+        menu.page = Some(PausePage::Options);
+        let (_, actions) = pause_draw::click(&mut menu, Target::Row(1));
+        assert_eq!(
+            actions,
+            [MenuAction::OpenPage(PausePage::Settings(
+                SettingsPage::Game
+            ))]
+        );
+        menu.page = Some(PausePage::Settings(SettingsPage::Game));
+        let row = ui::menu::rows(&menu)
+            .iter()
+            .position(|r| *r == Row::CareerAwards)
+            .unwrap();
+        let disable = Target::Step { row, right: false };
+        assert!(hit(&menu, &animation, disable));
+        let (_, actions) = pause_draw::click(&mut menu, disable);
+        assert_eq!(actions, vec![MenuAction::SetCareerAwards(false)]);
+        menu.popup = Some(Popup::Quit);
+        menu.cursor = 0;
+        let (_, actions) = ui::menu::navigate(
+            &menu,
+            MenuInput {
+                confirm: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(actions, vec![MenuAction::CancelPopup]);
+    }
+}
+
+#[test]
+#[ignore = "requires GPU and UI_SHARP_ASSETS owned source bake"]
+fn capture_personal_stats_medals() {
+    let (assets, out) = paths();
+    let size = [1280, 720];
+    let mut r = render::Renderer::new_headless(size[0], size[1]).unwrap();
+    let mut view = game::hud_feed::HudView::for_renderer(&assets, &r).unwrap();
+    let mut stats = ui::stats::StatsScreens {
+        page: ui::stats::Page::Personal,
+        texts: ui::stats::StatsTexts {
+            personal_title: "Personal Stats".into(),
+            medals_title: "Medals".into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    stats.lists[0].rows.push(ui::stats::StatRow {
+        name: "Player 1".into(),
+        me: true,
+        personal: vec![("Kills".into(), "66".into()), ("Deaths".into(), "9".into())],
+        ..Default::default()
+    });
+    let mut paint = |stats: &ui::stats::StatsScreens| {
+        view.update(
+            &ui::hud::HudModel {
+                round_end: Some(ui::hud::RoundEndModel {
+                    stats: Some(stats.clone()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            0.0,
+            size,
+        );
+        r.render_with_overlay(
+            &render::Camera::default(),
+            &[],
+            [0.0, 0.0, 0.0, 1.0],
+            Some(&mut |dev, q, enc, target, size| view.paint(dev, q, enc, target, size)),
+        )
+        .unwrap();
+        assert_all_sheets_bound(&view);
+        assert!(view.drawn_sheets().any(|sheet| sheet == "listbox_cursor"));
+        r.capture_rgba().unwrap().0
+    };
+    let blank = paint(&stats);
+    stats.lists[0].rows[0].medals = vec![("Endurance".into(), 2), ("Guardian".into(), 1)];
+    let earned = paint(&stats);
+    let changed = |x0, x1| {
+        (430..550)
+            .flat_map(|y| (x0..x1).map(move |x| 4 * (y * size[0] as usize + x)))
+            .filter(|&i| earned[i..i + 4] != blank[i..i + 4])
+            .count()
+    };
+    assert!(changed(200, 640) > 100);
+    assert!(changed(640, 1000) > 100);
+    save(&out, "personal_stats_medals", &r);
+}

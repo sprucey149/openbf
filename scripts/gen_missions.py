@@ -999,6 +999,110 @@ MAPS = [
     ("bf2_cor1", "bf2", "COR", {"gcw": ("cor1g_eli", "cor1g_eli")}),
 ]
 
+HUNT_MAPS = [
+    ("bf2_end1", "bf2", "END", {"gcw": ("end1g_hunt", "end1g_hunt")}),
+    ("bf2_geo1", "bf2", "GEO", {"cw": ("geo1c_hunt", "geo1c_hunt")}),
+    ("bf2_hot1", "bf2", "HOT", {"gcw": ("hot1g_hunt", "hot1g_hunt")}),
+    ("bf2_kas2", "bf2", "KAS", {"cw": ("kas2c_hunt", "kas2c_hunt")}),
+    ("bf2_nab2", "bf2", "NAB", {"cw": ("nab2c_hunt", "nab2c_hunt")}),
+    ("tat2", "bf2", "tat", {"gcw": ("tat2g_hunt", "tat2g_hunt")}),
+]
+
+HUNT_FACTIONS = {
+    "Ewoks": "ewk", "Geonosians": "geo", "wampa": "snw",
+    "Wookiees": "wok", "gungan": "gun", "Tuskens": "tusken", "Jawas": "jawa",
+}
+
+# [ours] BF1 variants promote an encounter's native faction to a playable
+# team. The first two columns select the original mission and its team IDs.
+BF1_HUNTS = {
+    "bf1_end1": ("end1a_h", 2, 3, "ewk"),
+    "bf1_geo1": ("geo1r", 1, 3, "geo"),
+    "bf1_kas1": ("kas1c_h", 1, 2, "wok"),
+    "bf1_kas2": ("kas2c", 1, 3, "wok"),
+    "bf1_nab1": ("nab1c_h", 1, 2, "gun"),
+    "bf1_nab2": ("nab2c_h", 1, 2, "gar"),
+    "tat1": ("tat1i", 1, 3, "tusken"),
+    "bf1_tat2": ("tat2i", 1, 3, "jawa"),
+}
+
+# openbf Hunt balance in mission team order. Rows are Easy, Normal, Hard
+# and Elite. Population includes the player. See issue #161 for validation.
+# Each tuple contains combatants, optional health percent and optional
+# BF1 points per kill. BF2 always reads points per kill from its scripts.
+HUNT_BALANCE = {
+    "bf1_end1": (
+        [[8, 24], [8, 24], [8, 24], [8, 24]],
+        [[70, 165], [70, 180], [60, 230], [70, 180]],
+        [[1, 6], [1, 6], [1, 5], [1, 7]],
+    ),
+    "bf1_geo1": (
+        [[10, 20], [10, 20], [10, 20], [10, 20]],
+        [[90, 150], [70, 240], [90, 150], [70, 250]],
+        [[1, 7], [1, 4], [1, 7], [1, 4]],
+    ),
+    "bf1_kas1": (
+        [[18, 24], [18, 24], [18, 24], [18, 24]],
+        [[100, 125], [100, 100], [100, 100], [100, 125]],
+        [[1, 2], [1, 2], [1, 2], [1, 2]],
+    ),
+    "bf1_kas2": (
+        [[10, 16], [10, 16], [10, 16], [10, 16]],
+        [[100, 150], [100, 120], [100, 100], [100, 110]],
+        [[1, 2], [1, 2], [1, 2], [1, 2]],
+    ),
+    "bf1_nab1": (
+        [[13, 24], [12, 24], [14, 24], [12, 24]],
+        [[100, 150], [100, 175], [100, 165], [100, 175]],
+        [[1, 3], [1, 3], [1, 3], [1, 4]],
+    ),
+    "bf1_nab2": (
+        [[15, 22], [15, 22], [15, 22], [17, 22]],
+        [[100, 135], [100, 135], [100, 115], [100, 135]],
+        None,
+    ),
+    "bf1_tat2": (
+        [[20, 14], [22, 16], [20, 16], [20, 16]],
+        [[100, 100], [100, 115], [100, 145], [100, 145]],
+        None,
+    ),
+    "bf2_end1": (
+        [[3, 24], [3, 28], [4, 28], [3, 28]],
+        [[62, 265], [65, 280], [55, 280], [65, 280]],
+        None,
+    ),
+    "bf2_geo1": (
+        [[10, 20], [8, 18], [8, 24], [6, 24]],
+        [[100, 100], [100, 100], [100, 135], [100, 145]],
+        None,
+    ),
+    "bf2_hot1": (
+        [[7, 24], [8, 24], [8, 24], [8, 25]],
+        [[90, 150], [90, 140], [90, 140], [80, 180]],
+        None,
+    ),
+    "bf2_kas2": (
+        [[5, 24], [5, 24], [4, 24], [5, 24]],
+        [[55, 190], [55, 190], [60, 210], [55, 220]],
+        None,
+    ),
+    "bf2_nab2": (
+        [[8, 16], [8, 18], [10, 16], [8, 16]],
+        [[100, 150], [100, 125], [100, 100], [100, 100]],
+        None,
+    ),
+    "tat1": (
+        [[21, 22], [20, 20], [21, 19], [22, 17]],
+        [[80, 175], [90, 155], [100, 100], [100, 100]],
+        None,
+    ),
+    "tat2": (
+        [[16, 8], [16, 10], [16, 10], [16, 14]],
+        [[185, 65], [185, 70], [150, 100], [145, 90]],
+        None,
+    ),
+}
+
 OPTIONAL_SCRIPTS = {"cor1g_eli"}
 ASSAULT_SIDES = {"hero": "all", "villain": "imp"}
 
@@ -1027,7 +1131,7 @@ PRETTY = {
 }
 
 ERA_NAME = {"gcw": "GCW", "cw": "CW"}
-MODE_NAME = {"con": "Conquest", "ass": "Space Assault", "eli": "Hero Assault", "1flag": "1-Flag CTF"}
+MODE_NAME = {"con": "Conquest", "ass": "Space Assault", "eli": "Hero Assault", "1flag": "1-Flag CTF", "hunt": "Hunt"}
 
 
 
@@ -1248,8 +1352,8 @@ NO_TICKET_LIMIT = 999999
 
 
 def mission_mode(script):
-    """The mode a mission script runs: `_ass`, `_eli`, `_1flag`, else Conquest."""
-    for mode in ("ass", "eli", "1flag"):
+    """The mode a mission script runs, defaulting to Conquest."""
+    for mode in ("ass", "eli", "1flag", "hunt"):
         if script.endswith("_" + mode):
             return mode
     return "con"
@@ -1448,7 +1552,52 @@ def ctf_facts50(f):
     return None
 
 
-def build(key, game, planet, era, pc_stem, ps2_name):
+def hunt_facts(calls):
+    """Read the teams and each team's points per kill from ObjectiveTDM."""
+    for call in calls:
+        if call.name == "ObjectiveTDM:New" and len(call.args) > 1:
+            options = call.args[1]
+            if isinstance(options, dict):
+                weights = [None, None]
+                for role in ("ATT", "DEF"):
+                    team = options.get("team" + role)
+                    points = options.get("pointsPerKill" + role)
+                    if team not in (1, 2) or points not in (1, 2, 3):
+                        raise ValueError(f"unsupported Hunt team or kill value: {team}, {points}")
+                    weights[int(team) - 1] = int(points)
+                if None not in weights:
+                    return weights
+    raise ValueError("Hunt mission has no complete ObjectiveTDM declaration")
+
+
+def bf1_hunt(key, planet, era):
+    source, army, native, faction = BF1_HUNTS[key]
+    m = build(key, "bf1", planet, era, source, source, native_encounter=True)
+    d = m.d
+    if any(not d["classes"].get(team) or not d["units"].get(team)
+           for team in (army, native)):
+        raise ValueError(f"{key}: missing BF1 Hunt encounter roster in {source}")
+    m.teams = [(d["names"][army], d["units"][army], NO_TICKET_LIMIT),
+               (faction, d["units"][native], NO_TICKET_LIMIT)]
+    m.classes = [d["classes"][army], d["classes"][native]]
+    m.class_load_order = d.get("class_load_order", [])
+    m.local_teams = []
+    m.attacking = 1
+    m.cap = max(m.teams[0][1], m.teams[1][1])
+    m.hunt = [1, 1]
+    m.posts, m.cps, m.killed = [], [], []
+    m.ai_no_capture = []
+    m.ai_aggr = [(target, d["ai_aggr"][team])
+                 for target, team in enumerate((army, native), 1) if team in d["ai_aggr"]]
+    for field in ("vo_bleed", "vo_low", "vo_oob", "mus_amb", "mus_vic", "mus_def"):
+        team_map = {army: 1, native: 2}
+        setattr(m, field, [(team_map[row[0]], *row[1:])
+                           for row in getattr(m, field) if row[0] in team_map])
+    m.death_drains = []
+    return m
+
+
+def build(key, game, planet, era, pc_stem, ps2_name, *, native_encounter=False):
     """Apply known canonical mission facts over the selected script evidence.
 
     Table-only imports require the canonical playable team names, sizes,
@@ -1460,6 +1609,7 @@ def build(key, game, planet, era, pc_stem, ps2_name):
     m.prov, m.dis = [], []
     m.space = None
     m.ctf = None
+    m.hunt = None
 
     if PS2_ONLY:
         m.pc, src = None, ""
@@ -1507,17 +1657,25 @@ def build(key, game, planet, era, pc_stem, ps2_name):
             calls = [c for c in calls if c.prototype not in callbacks
                      or c.name not in ("KillObject", "SetProperty", "SetObjectTeam")]
         ps2 = facts_from_calls(calls)
+        if mission_mode(ps2_name) == "hunt":
+            m.hunt = hunt_facts(calls)
         d = ps2
     canonical = GAMEPLAY_REFERENCES.get(game, {}).get(ps2_name.lower())
-    if game in GAMEPLAY_REFERENCES:
-        if canonical is None:
-            raise ValueError(f"{game}/{ps2_name}: no canonical mission correction record")
+    is_hunt = mission_mode(ps2_name) == "hunt"
+    if canonical is not None:
         from gameplay_missions import overlay
         ps2 = overlay(ps2 if ps2 is not None else facts_from_calls([]), canonical,
-                      require_complete=not has_ps2_source, context=f"{game}/{ps2_name}")
+                      require_complete=not has_ps2_source and not (is_hunt or native_encounter),
+                      context=f"{game}/{ps2_name}")
         d = ps2
         if not has_ps2_source:
             m.prov = ["PS2 declaration table; donor presentation; dynamic callbacks remain unmeasured"]
+    elif game in GAMEPLAY_REFERENCES:
+        if not (f is not None and (is_hunt or native_encounter)):
+            raise ValueError(f"{game}/{ps2_name}: no canonical mission correction record")
+    if is_hunt and (m.hunt is None or any(not d["classes"].get(team) or not d["units"].get(team)
+                                          for team in (1, 2))):
+        raise ValueError(f"{game}/{ps2_name}: missing Hunt teams or kill values")
     m.d = d
     # The voice-over setters exist only in the bytecode scan (the PC scan
     # never read them); a mission with no PS2 script carries none.
@@ -1594,6 +1752,8 @@ def build(key, game, planet, era, pc_stem, ps2_name):
         if fac is None:
             fac = "unknown"
         fac = ASSAULT_SIDES.get(fac, fac)
+        if m.hunt is not None:
+            fac = HUNT_FACTIONS.get(fac, fac)
         m.teams.append((fac, pick("units", t, "units", 20 if game == "bf2" else 25),
                         pick("tickets", t, "tickets", 150 if game == "bf2" else 200)))
 
@@ -1677,14 +1837,22 @@ def f32_text(x):
 
 def ron(m):
     pretty = PRETTY.get(m.key, m.key)
+    mode = "hunt" if m.hunt is not None else mission_mode(m.ps2)
     L = []
     L.append("// %s %s — %s (%s). GENERATED by scripts/gen_missions.py:"
              % ("BF1" if m.game == "bf1" else "BF2", pretty,
-                MODE_NAME[mission_mode(m.ps2)],
+                MODE_NAME[mode],
                 ERA_NAME[m.era]))
-    L.append("// every value is read out of the PS2 mission bytecode (the")
-    L.append("// target), with the PC mod-tools .lua of the same name as the")
-    L.append("// readable referee (audit A6). Do not hand-edit — regenerate.")
+    if m.game == "bf1" and mode == "hunt":
+        L.append("// openbf adaptation using the original native encounter's roster.")
+    if mode == "hunt":
+        L.append("// Roster and map facts come from PS2 mission bytecode.")
+        L.append("// The openbf balance table supplies per-difficulty adjustments.")
+        L.append("// Do not hand-edit — regenerate.")
+    else:
+        L.append("// every value is read out of the PS2 mission bytecode (the")
+        L.append("// target), with the PC mod-tools .lua of the same name as the")
+        L.append("// readable referee (audit A6). Do not hand-edit — regenerate.")
     L.append("//   PC  : %s" % (m.pc or "(not read: --ps2-only)"))
     L.append("//   PS2 : extracted/%s/lua/mission/%s.luac%s"
              % (m.game, m.ps2, "" if m.checked else "   (ABSENT)"))
@@ -1703,12 +1871,22 @@ def ron(m):
             L.append("//   - %s" % p)
     L.append("(")
     L.append('    map: "%s",' % m.key)
-    L.append('    mode: "%s",' % mission_mode(m.ps2))
+    L.append('    mode: "%s",' % mode)
     L.append('    source_game: "%s",' % m.game)
+    cap = m.cap
+    if m.hunt is not None:
+        L.append('    hunt_points_per_kill: Some((%d, %d)),' % tuple(m.hunt))
+        combatants, health, kill_values = HUNT_BALANCE[m.key]
+        for field, rows in (("combatants", combatants), ("health_percent", health),
+                            ("kill_values", kill_values)):
+            if rows is not None:
+                L.append(f'    hunt_{field}: Some(('
+                         + ", ".join("(%d, %d)" % tuple(pair) for pair in rows) + ")),")
+        cap = max(cap, max(n for row in combatants for n in row))
     if m.heroes:
         L.append('    heroes: [%s],' % ", ".join(
             '(%d, "%s")' % (t, name) for t, name in m.heroes))
-    if m.game == "bf2":
+    if m.game == "bf2" or mode == "hunt":
         L.append('    class_load_order: [%s],' % ", ".join(
             '(side: "%s", request: "%s")' % (side, request)
             for side, request in m.class_load_order))
@@ -1727,7 +1905,7 @@ def ron(m):
                         "None" if mx is None else "Some(%d)" % mx))
         L.append("        ]),")
     L.append("    ],")
-    L.append("    ai_alive_cap: %d," % m.cap)
+    L.append("    ai_alive_cap: %d," % cap)
     L.append("    spawn_delay: %s," % fmtf(m.spawn[0]))
     L.append("    spawn_interval: %s," % fmtf(m.spawn[1]))
     L.append('    era: Some("%s"),' % m.era)
@@ -1951,7 +2129,7 @@ def ron(m):
                             "None" if mx is None else "Some(%d)" % mx))
             L.append("        ]),")
         L.append("    ],")
-    if relations := m.d.get("local_team_relations"):
+    if (relations := m.d.get("local_team_relations")) and mode != "hunt":
         L.append("    local_team_relations: [%s],"
                  % ", ".join("(%d, %d, %s)" % (source, target,
                                                "true" if friendly else "false")
@@ -1974,6 +2152,8 @@ def main():
     ap.add_argument("--out", metavar="DIR", help="default engine/missions")
     ap.add_argument("--space", action="store_true",
                     help="also write the six Space Assault missions")
+    ap.add_argument("--hunt", action="store_true",
+                    help="also generate the six BF2 Hunts and the BF1 Hunt adaptations")
     ap.add_argument("--gameplay-reference", action="append", default=[], metavar="TABLE",
                     help="absolute PS2 mission declarations from a fingerprinted correction table; repeat per game")
     ap.add_argument("--gameplay-source", action="append", default=[], metavar="GAME=SOURCE",
@@ -2019,7 +2199,7 @@ def main():
         return
 
     rows, written = [], 0
-    for key, game, planet, eras in MAPS:
+    for key, game, planet, eras in MAPS + (HUNT_MAPS if args.hunt else []):
         for era in ("gcw", "cw"):
             if era not in eras:
                 continue
@@ -2044,6 +2224,19 @@ def main():
                     fh.write(ron(m))
                 written += 1
             rows.append((os.path.basename(out), m))
+
+    if args.hunt:
+        for key, game, planet, eras in MAPS:
+            if game != "bf1" or key not in BF1_HUNTS:
+                continue
+            era = "gcw" if key in ("bf1_end1", "tat1", "bf1_tat2") else "cw"
+            m = bf1_hunt(key, planet, era)
+            name = f"{key}_hunt.ron"
+            if not args.check:
+                with open(os.path.join(OUT_DIR, name), "w", encoding="utf-8", newline="\n") as fh:
+                    fh.write(ron(m))
+                written += 1
+            rows.append((name, m))
 
     for name, m in rows:
         print("%-24s %-3s %-3s %-8s %-8s %2d/%-2d %4d/%-4d cap%-3d att%-5s "

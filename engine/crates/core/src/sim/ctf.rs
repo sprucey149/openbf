@@ -317,6 +317,7 @@ impl Sim {
                             .map_or(0, |u| u.team);
                         self.events.push(Event::FlagDropped {
                             flag: flag_idx as u8,
+                            unit: carrier,
                             team,
                             pos: carrier_pos,
                         });
@@ -345,6 +346,7 @@ impl Sim {
                             ctf.team_points[carrier_team] += 1;
                             self.events.push(Event::FlagCaptured {
                                 flag: flag_idx as u8,
+                                unit: carrier,
                                 team: scoring_team,
                             });
 

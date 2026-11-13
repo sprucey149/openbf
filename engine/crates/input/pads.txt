@@ -7,3 +7,6 @@
 # The same-layout GameSir mapping on this GUID; verified by the maintainer on the real pad
 # 2026-09-28.
 03000000373500002210000010010000,GameSir G7 Pro,a:b0,b:b1,back:b10,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b12,leftshoulder:b6,leftstick:b13,lefttrigger:a5,leftx:a0,lefty:a1,rightshoulder:b7,rightstick:b14,righttrigger:a4,rightx:a2,righty:a3,start:b11,x:b3,y:b4,platform:Linux,
+
+# GameSir G7 Pro wireless USB receiver in Xbox mode (3537:109c, xpad).
+03000000373500009c10000046010000,GameSir G7 Pro (Xbox Mode),a:b0,b:b1,back:b6,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,guide:b8,leftshoulder:b4,leftstick:b9,lefttrigger:a2,leftx:a0,lefty:a1,rightshoulder:b5,rightstick:b10,righttrigger:a5,rightx:a3,righty:a4,start:b7,x:b2,y:b3,platform:Linux,

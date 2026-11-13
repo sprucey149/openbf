@@ -1229,3 +1229,40 @@ fn round_contact_metadata_does_not_change_sim_hash_or_damage_bookkeeping() {
     ));
     assert_eq!(round.hash(), other.hash());
 }
+
+#[test]
+fn a_nonlethal_sniper_critical_hit_earns_marksman() {
+    let (mut s, player, target) = duel();
+    s.weapon_classes[0].medals_type = Some(4);
+    s.install_medal_career(player, [0; 9]);
+    let victim = s.unit_mut(target).unwrap();
+    victim.health.max = 100_000.0;
+    victim.health.cur = 100_000.0;
+    let mut shot = Bolt::fire(
+        Vec3::ZERO,
+        -Vec3::Z,
+        80.0,
+        1.5,
+        crate::projectile::Shooter {
+            owner: player,
+            team: 0,
+            weapon_class: 0,
+            is_player: true,
+        },
+        None,
+        None,
+        &s.collision,
+        crate::collision::HullFilter::All,
+    );
+    shot.hit = Hit::Target(Target::Unit(target));
+    for _ in 0..6 {
+        s.resolve_bolt(&shot);
+    }
+    assert_eq!(s.medal_counts().unwrap()[4], 0, "body hits do not count");
+    shot.hit_mult = 3.0;
+    for _ in 0..6 {
+        s.resolve_bolt(&shot);
+    }
+    assert!(s.unit(target).is_some(), "the target survives");
+    assert_eq!(s.medal_counts().unwrap()[4], 1);
+}

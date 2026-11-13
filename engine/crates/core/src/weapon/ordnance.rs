@@ -156,6 +156,9 @@ pub struct DamageDesc {
 }
 
 impl OrdnanceClass {
+    pub(crate) fn shot_is_direct(&self) -> bool {
+        self.max_damage > 0.0 || self.knots.iter().any(|k| k.damage > 0.0)
+    }
     /// Is this ordnance a TRACER - a round that exists only to be drawn? Every
     /// BF2 class a weapon names as its `SecondaryOrdnanceName` is one
     /// (`com_weap_inf_shotgun_tracer`, `com_weap_inf_chaingun_tracer`, ...:

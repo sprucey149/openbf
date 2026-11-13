@@ -584,6 +584,13 @@ secondaries or every capital-ship damageable subsystem.
 - `re-vehicles.md` corrections (H4): BF1's lock HUD square is B1:262320-262339 (B1:262211 is the refire alpha); BF2's
   Controllable ticks copy TargetLockMaxDistance / ...Lose and the Target* mask, not LockOnRange / Angle / OffAngle.
 
+A hostile airborne fighter belongs to the same vehicle target kind as
+a ground vehicle. The launcher's native lock update filters by target kind
+(BF1 FUN_0025e098 and BF2 FUN_0033a658, B2 331689–331750). The stock
+launcher test in `game/tests/flyer.rs` follows the dwell and fire paths
+through to a guided round with a moving aircraft target in both games
+on the ground and with the BF2 launcher in Space Assault.
+
 ### 5.1 OURS: the lock goes to the vehicle's weak part (2026-11-10)
 
 A named deviation; neither original does this. The maintainer: "I want the lock onto vehicle weak parts that give

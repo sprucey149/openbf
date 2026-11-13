@@ -54,12 +54,12 @@ impl Group {
         }
     }
 
-    /// Whether the port honours the group's options: Global (AI per team,
-    /// AI difficulty) and Conquest (AI per team, reinforcements, timer).
-    /// Heroes, CTF, Hunt and Assault have no port mode: dimmed (§7); their
-    /// values are still the PS2's.
+    /// Expose the groups whose values are applied when the playlist launches.
     pub fn honoured(self) -> bool {
-        matches!(self, Group::Global | Group::Conquest)
+        matches!(
+            self,
+            Group::Global | Group::Hero | Group::Conquest | Group::Assault | Group::Hunt
+        )
     }
 }
 
@@ -69,6 +69,7 @@ pub enum Opt {
     NumBots,
     AiDifficulty,
     HeroesOnOff,
+    AiHeroes,
     HeroUnlock,
     HeroUnlockVal,
     HeroAssign,
@@ -102,6 +103,10 @@ impl Opt {
                 "ifs.mp.createopts.helptext.heroes_onoff",
                 "Determine whether or not heroes will appear for all maps on your playlist.",
             ),
+            Opt::AiHeroes => (
+                "openbf.heroopts.help.aiheroes",
+                "Allow AI teammates and enemies to earn a hero through the same rules as players.",
+            ),
             Opt::HeroUnlock => (
                 "ifs.mp.createopts.helptext.hero_unlock_1",
                 "Set the condition that will cause the hero to become available to a player.",
@@ -120,7 +125,7 @@ impl Opt {
             ),
             Opt::DlcHeroes => (
                 "ifs.mp.createopts.helptext.dlc_heroes",
-                "Off: each map keeps its own hero. On: Kit Fisto and Asajj Ventress are the Republic and CIS heroes.",
+                "Include Kit Fisto and Asajj Ventress in Hero Assault.",
             ),
             Opt::ConNumBots => (
                 "ifs.mp.createopts.helptext.con_numbots",
@@ -179,6 +184,7 @@ pub struct SessionOptions {
     /// 2026-10-28: the port's four tiers replace the PS2's three).
     pub difficulty: i32,
     pub heroes: bool,
+    pub ai_heroes: bool,
     /// 3 Points or 5 Timer.
     pub hero_unlock: i32,
     pub hero_unlock_val: i32,
@@ -186,11 +192,9 @@ pub struct SessionOptions {
     pub hero_assign: i32,
     /// 0 Always, 1..120 s, -1 Never.
     pub hero_respawn: i32,
-    /// [ours] The optional DLC heroes' bake is installed, so their row shows.
+    /// The optional DLC heroes' bake is available.
     pub dlc_heroes_installed: bool,
-    /// [ours] Kit Fisto and Asajj Ventress take the Republic's and the CIS's
-    /// one hero slot in place of the map's own. Off by default: they are an
-    /// option added to the game and no existing hero is lost to them.
+    /// Add both DLC heroes to Hero Assault. Enabled when the bake is installed.
     pub dlc_heroes: bool,
     pub con_numbots: i32,
     pub con_mult: i32,
@@ -219,6 +223,7 @@ impl Default for SessionOptions {
             num_bots: 100,
             difficulty: 2,
             heroes: true,
+            ai_heroes: false,
             hero_unlock: 3,
             hero_unlock_val: 10,
             hero_assign: 1,
@@ -257,25 +262,24 @@ impl SessionOptions {
         })
     }
 
-    /// The group's rows; Heroes Off hides the other hero rows (main.f8).
+    pub fn option_enabled(&self, option: Opt) -> bool {
+        option != Opt::DlcHeroes || self.dlc_heroes_installed
+    }
+
+    /// Heroes Off hides the rows that configure hero offers (main.f8).
     pub fn rows(&self, g: Group) -> Vec<Opt> {
         match g {
             Group::Global => vec![Opt::NumBots, Opt::AiDifficulty],
-            Group::Hero if !self.heroes => vec![Opt::HeroesOnOff],
-            Group::Hero => {
-                let mut rows = vec![
-                    Opt::HeroesOnOff,
-                    Opt::HeroUnlock,
-                    Opt::HeroUnlockVal,
-                    Opt::HeroAssign,
-                    Opt::HeroRespawn,
-                ];
-                // Beside the switch: a sixth row would start out of sight.
-                if self.dlc_heroes_installed {
-                    rows.insert(1, Opt::DlcHeroes);
-                }
-                rows
-            }
+            Group::Hero if !self.heroes => vec![Opt::HeroesOnOff, Opt::DlcHeroes],
+            Group::Hero => vec![
+                Opt::HeroesOnOff,
+                Opt::DlcHeroes,
+                Opt::AiHeroes,
+                Opt::HeroUnlock,
+                Opt::HeroUnlockVal,
+                Opt::HeroAssign,
+                Opt::HeroRespawn,
+            ],
             Group::Conquest => vec![Opt::ConNumBots, Opt::ConMult, Opt::ConTimer],
             Group::Ctf => vec![Opt::CtfNumBots, Opt::CtfScore, Opt::CtfTimer],
             Group::Hunt => vec![Opt::HunTimer, Opt::HunScore],
@@ -287,6 +291,9 @@ impl SessionOptions {
     /// R1); `Clamp`, no wrap (main.f5, f6). The ranges are the PS2's
     /// (menuref "Session Options" table, `so_*` clips).
     pub fn adjust(&mut self, o: Opt, dir: i32, mult: i32) {
+        if !self.option_enabled(o) {
+            return;
+        }
         let d = dir * mult;
         let clamp = |v: i32, lo: i32, hi: i32| v.clamp(lo, hi);
         match o {
@@ -304,6 +311,7 @@ impl SessionOptions {
             // `5 - x`, Normal <-> Elite (a named deviation, the maintainer 2026-10-28).
             Opt::AiDifficulty => self.difficulty = clamp(self.difficulty + d, 1, DIFFICULTY_LEVELS),
             Opt::HeroesOnOff => self.heroes = !self.heroes,
+            Opt::AiHeroes => self.ai_heroes = !self.ai_heroes,
             Opt::HeroUnlock => self.hero_unlock = if self.hero_unlock == 3 { 5 } else { 3 },
             Opt::HeroUnlockVal => self.hero_unlock_val = clamp(self.hero_unlock_val + d, 1, 120),
             // Best -> Worst -> Random, no wrap (menuref `so_hero_ranges`).

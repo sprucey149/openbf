@@ -22,11 +22,13 @@ pub enum Event {
     },
     FlagDropped {
         flag: u8,
+        unit: UnitHandle,
         team: u8,
         pos: Vec3,
     },
     FlagCaptured {
         flag: u8,
+        unit: UnitHandle,
         team: u8,
     },
     FlagReturned {

@@ -341,12 +341,14 @@ impl Sim {
             return;
         }
         v.slice = 0.0;
+        let health_type = v.health.health_type;
         let riders: Vec<_> = v.seats.iter().filter_map(|s| s.occupant).collect();
         for r in riders {
             self.exit_vehicle(r);
         }
         let until = self.tick + (SLICE_RESERVE * crate::TICK_HZ as f32) as u64;
         let slicer = self.handle(i);
+        self.medal_slice(slicer, health_type);
         if let Some(v) = self.vehicle_mut(vh) {
             v.slice_hold = Some((slicer, until));
         }

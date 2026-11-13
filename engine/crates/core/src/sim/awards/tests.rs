@@ -393,3 +393,87 @@ fn a_bot_and_the_proxy_never_hold_a_medal() {
     assert_eq!((bot.buffs.dealt(), bot.buffs.taken()), (1.0, 1.0));
     assert!(!bot.buffs.active());
 }
+
+#[test]
+fn earned_medals_unlock_at_veteran_for_one_life_and_at_legendary_for_every_life() {
+    use crate::weapon::HealthType;
+    let (mut s, p, bot) = rifleman();
+    let mut counts = [0; 9];
+    counts[1] = 3;
+    counts[6] = 63;
+    s.install_medal_career(p, counts);
+    let class = s.unit(p).unwrap().weapon_class;
+    s.weapon_classes[class].medals_type = Some(1);
+    s.medal_weapon_hit(bot, class, HealthType::Person, true, false);
+    for _ in 0..12 {
+        s.medal_weapon_hit(p, class, HealthType::Person, false, false);
+    }
+    assert_eq!(s.medal_counts().unwrap(), counts);
+    for _ in 0..13 {
+        s.medal_weapon_hit(p, class, HealthType::Person, true, false);
+    }
+    assert_eq!(s.medal_counts().unwrap()[1], 4, "only one award per life");
+    assert_ne!(s.award_bits(s.unit(p).unwrap()) & (1 << 1), 0);
+    assert_eq!(s.award_bits(s.unit(bot).unwrap()), 0);
+    s.score_medal_points(p, 8);
+    assert_eq!(s.medal_counts().unwrap()[6], 63);
+    s.score_medal_points(p, 1);
+    assert_eq!(s.medal_counts().unwrap()[6], 64);
+    s.units[p.index as usize].gen += 1;
+    let next = s.handle(p.index as usize);
+    assert_eq!(s.award_bits(s.unit(next).unwrap()), 1 << 6);
+    s.medal_weapon_hit(p, class, HealthType::Person, true, false);
+    assert_eq!(
+        s.medal_counts().unwrap()[1],
+        4,
+        "old projectiles cannot earn in the new life"
+    );
+}
+
+#[test]
+fn career_award_bonuses_can_be_disabled_while_progress_continues() {
+    use crate::sim::buffs::{GUARDIAN, GUARDIAN_MEDAL, WAR_HERO, WAR_HERO_MEDAL};
+    use crate::weapon::HealthType;
+
+    let (mut s, player, _) = rifleman();
+    let mut counts = [0; 9];
+    counts[1] = 64;
+    counts[6] = 3;
+    counts[usize::from(GUARDIAN_MEDAL)] = 64;
+    counts[usize::from(WAR_HERO_MEDAL)] = 64;
+    s.install_medal_career(player, counts);
+    let rifle = s.unit(player).unwrap().weapon_class;
+    s.weapon_classes[rifle].medals_type = Some(1);
+    s.step(&[pad(0)]);
+    let u = s.unit(player).unwrap();
+    assert_eq!(s.weapon_classes[u.weapon_class].name, "award_rifle");
+    assert_eq!((u.buffs.offense, u.buffs.defense), (WAR_HERO, GUARDIAN));
+
+    s.set_career_award_bonuses(false);
+    let u = s.unit(player).unwrap();
+    assert_eq!(s.award_bits(u), 0);
+    assert_eq!(u.weapon_class, rifle);
+    assert_eq!((u.buffs.dealt(), u.buffs.taken()), (1.0, 1.0));
+    for _ in 0..medal_threshold(1, counts[1]) {
+        s.medal_weapon_hit(player, rifle, HealthType::Person, true, false);
+    }
+    s.score_medal_points(player, 12);
+    counts[1] = 65;
+    counts[6] = 4;
+    assert_eq!(s.medal_counts(), Some(counts));
+    s.step(&[pad(0)]);
+    let u = s.unit(player).unwrap();
+    assert_eq!(s.award_bits(u), 0);
+    assert_eq!(u.weapon_class, rifle);
+    assert_eq!((u.buffs.dealt(), u.buffs.taken()), (1.0, 1.0));
+
+    s.cheats.all_awards = true;
+    assert_eq!(s.award_bits(s.unit(player).unwrap()), WEAPON_MEDALS);
+    s.cheats.all_awards = false;
+    s.set_career_award_bonuses(true);
+    let u = s.unit(player).unwrap();
+    assert_eq!(s.weapon_classes[u.weapon_class].name, "award_rifle");
+    assert_eq!((u.buffs.offense, u.buffs.defense), (WAR_HERO, GUARDIAN));
+    assert!(s.medal_effect(u, ENDURANCE_MEDAL));
+    assert_eq!(s.medal_counts(), Some(counts));
+}

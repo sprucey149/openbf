@@ -84,6 +84,8 @@ pub struct StickyClass {
     pub explosion: Option<ExplosionClass>,
     /// `CollisionOtherSound`: what a bounce or a stick plays.
     pub bounce_sound: Option<String>,
+    /// BF1 grenade ordnance's authored rebound and friction.
+    pub grenade_bounce: Option<(f32, f32)>,
 }
 
 impl StickyClass {
@@ -95,6 +97,7 @@ impl StickyClass {
             bf2,
             explosion: None,
             bounce_sound: None,
+            grenade_bounce: None,
         }
     }
 
@@ -178,13 +181,17 @@ pub enum Contact {
 /// The bounce (§4.3; B1 204520-204595, B2 314270-314345): `None` when the
 /// velocity does not point into the surface (the grenade rests instead).
 pub fn bounce(v: Vec3, n: Vec3) -> Option<Vec3> {
+    bounce_with(v, n, RESTITUTION, FRICTION, FRICTION_GAIN)
+}
+
+fn bounce_with(v: Vec3, n: Vec3, rebound: f32, friction: f32, gain: f32) -> Option<Vec3> {
     let vn = v.dot(n);
     if vn >= 0.0 {
         return None;
     }
     let vt = v - n * vn;
-    let f = (-vn * FRICTION * FRICTION_GAIN / vt.length()).min(1.0);
-    Some(vt * (1.0 - f) - n * (vn * RESTITUTION))
+    let f = (-vn * friction * gain / vt.length()).min(1.0);
+    Some(vt * (1.0 - f) - n * (vn * rebound))
 }
 
 /// A human's throw direction (§3.3, B1 215847-215862): the aim with
@@ -216,6 +223,8 @@ pub struct Sticky {
     pub warning_id: Option<u64>,
     pub owner: UnitHandle,
     pub team: u8,
+    /// Launch charge, flight age and player credit, for damaging contact rounds.
+    pub direct: Option<(f32, f32, bool)>,
     /// Index into `Sim::weapon_classes` of the weapon that threw it.
     pub weapon_class: usize,
 }
@@ -243,6 +252,7 @@ impl Sticky {
             warning_id: None,
             owner,
             team,
+            direct: None,
             weapon_class,
         }
     }
@@ -322,7 +332,13 @@ impl Sticky {
             return Contact::Stuck;
         }
         if self.bounces < REST_BOUNCES {
-            match bounce(self.vel, n) {
+            let next = match c.grenade_bounce {
+                Some((rebound, friction)) => {
+                    bounce_with(self.vel, n, rebound, friction, 1.0 + rebound)
+                }
+                None => bounce(self.vel, n),
+            };
+            match next {
                 None => self.bounces = REST_BOUNCES,
                 Some(v) => {
                     self.pos = point + n * push_off;
@@ -359,6 +375,12 @@ impl Sticky {
         eat(&[self.team]);
         eat(&self.owner.index.to_le_bytes());
         eat(&self.owner.gen.to_le_bytes());
+        if let Some((charge, age, player)) = self.direct {
+            eat(b"STICKY_DIRECT");
+            eat(&charge.to_bits().to_le_bytes());
+            eat(&age.to_bits().to_le_bytes());
+            eat(&[u8::from(player)]);
+        }
         eat(&[u8::from(self.touched.is_some())]);
         if let Some(tick) = self.touched {
             eat(&tick.to_le_bytes());

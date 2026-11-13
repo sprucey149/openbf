@@ -31,7 +31,7 @@ pub struct IaTexts {
 }
 
 /// The option rows' text keys and English.
-pub(super) const OPTION_TEXTS: [(&str, &str); 19] = [
+pub(super) const OPTION_TEXTS: [(&str, &str); 20] = [
     (
         "ifs.mp.createopts.numbots",
         "AI Units Per Team: {OptionL} %s {OptionR}",
@@ -41,6 +41,10 @@ pub(super) const OPTION_TEXTS: [(&str, &str); 19] = [
         "AI Difficulty Level: {OptionL} %s {OptionR}",
     ),
     ("ifs.mp.createopts.heroes", "Heroes: {OptionL} %s {OptionR}"),
+    (
+        "openbf.heroopts.aiheroes",
+        "AI heroes: {OptionL} %s {OptionR}",
+    ),
     (
         "ifs.mp.heroopts.herounlock3",
         "Unlock Hero: {OptionL} Points {OptionR}",
@@ -170,6 +174,7 @@ impl IaTexts {
                 Opt::NumBots,
                 Opt::AiDifficulty,
                 Opt::HeroesOnOff,
+                Opt::AiHeroes,
                 Opt::HeroUnlock,
                 Opt::HeroUnlockVal,
                 Opt::HeroAssign,
@@ -307,6 +312,14 @@ impl IaTexts {
                 self.get("ifs.mp.createopts.heroes"),
                 &[self.get(if v.heroes { "common.on" } else { "common.off" })],
             ),
+            Opt::AiHeroes => pieces(
+                self.get("openbf.heroopts.aiheroes"),
+                &[self.get(if v.ai_heroes {
+                    "common.on"
+                } else {
+                    "common.off"
+                })],
+            ),
             Opt::HeroUnlock => pieces(
                 self.get(if v.hero_unlock == 5 {
                     "ifs.mp.heroopts.herounlock5"
@@ -340,14 +353,23 @@ impl IaTexts {
                 };
                 pieces(self.get("ifs.mp.heroopts.respawntimer"), &[&value, unit])
             }
-            Opt::DlcHeroes => pieces(
-                self.get("ifs.mp.heroopts.dlcheroes"),
-                &[self.get(if v.dlc_heroes {
-                    "common.on"
+            Opt::DlcHeroes => {
+                let template = self.get("ifs.mp.heroopts.dlcheroes");
+                if v.dlc_heroes_installed {
+                    let key = if v.dlc_heroes {
+                        "common.on"
+                    } else {
+                        "common.off"
+                    };
+                    pieces(template, &[self.get(key)])
                 } else {
-                    "common.off"
-                })],
-            ),
+                    let label = template.replace("{OptionL} ", "").replace(" {OptionR}", "");
+                    pieces(&label, &[self.get("common.off")])
+                        .into_iter()
+                        .filter(|piece| matches!(piece, Piece::Text(_)))
+                        .collect()
+                }
+            }
             Opt::ConMult => {
                 vec![
                     Piece::Text("Reinforcements: ".into()),

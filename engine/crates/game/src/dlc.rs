@@ -1,12 +1,5 @@
-//! Optional, native hero assignments. No addon mission or script is loaded.
-//!
-//! [ours] With their selective bake installed, the Hero Options gain a row
-//! that lets Kit Fisto take the Republic's hero slot and Asajj Ventress the
-//! CIS's on every BF2 mission that fields a hero for that side. A battle has
-//! one hero per team (`core::sim::heroes`), so the row chooses between them and
-//! the authored hero, which stays the default; without the bake nothing
-//! changes. Alliance and Empire keep their own: these two belong to neither
-//! side.
+//! The optional DLC adds Kit Fisto and Asajj Ventress to Hero Assault.
+//! Each joins the stock roster on their respective side.
 
 use crate::mission::MissionDef;
 use anyhow::{ensure, Context, Result};
@@ -53,17 +46,13 @@ struct Hero {
     side: String,
 }
 
-/// The DLC hero this side could field in this mission, for the shell's row to
-/// choose. A missing optional manifest takes the exact ordinary hero path. The bake's
-/// manifest is a completion marker: a partial or unrelated pack cannot enable
-/// an assignment. The class file joins only that hero's private db and
-/// the private db of a reader that looks up a hero's weapon ([`load_classes`]).
+/// Resolve a Hero Assault addition from the selective bake's completion marker.
 pub(crate) fn hero(
     classes_dir: &Path,
     mission: &MissionDef,
     faction: &str,
 ) -> Result<Option<&'static str>> {
-    if mission.source_game != "bf2" {
+    if mission.source_game != "bf2" || !mission.is_hero_assault() {
         return Ok(None);
     }
     let Some((_, class)) = HEROES.iter().find(|(side, _)| *side == faction) else {

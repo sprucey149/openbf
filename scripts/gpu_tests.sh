@@ -10,7 +10,7 @@
 #   scripts/gpu_tests.sh --game --include-ignored FILTER # include ordinary game suite tests
 #   scripts/gpu_tests.sh --game-lib [--include-ignored] [CARGO_ARGS] # serial game lib
 #   scripts/gpu_tests.sh --battle-launch # owned Hero Assault shell launch checks
-#   scripts/gpu_tests.sh --render   # only the render crate's GPU tests
+#   scripts/gpu_tests.sh --render [CARGO_ARGS] # only the render crate's GPU tests
 #   scripts/gpu_tests.sh --hit-feedback # issue #104 captures on fresh side bakes
 #   scripts/gpu_tests.sh --hud-item-layer # issue #114 real-content weapon overlap
 set -euo pipefail

@@ -495,11 +495,13 @@ fn append_events(csv: &mut String, tick: usize, events: &[core::sim::Event]) {
             Event::FlagPickedUp { flag, unit, team } => {
                 format!("{tick},flag_picked_up,{flag},{team},{}\n", unit.index)
             }
-            Event::FlagDropped { flag, team, pos } => format!(
+            Event::FlagDropped {
+                flag, team, pos, ..
+            } => format!(
                 "{tick},flag_dropped,{flag},{team},{:.2}:{:.2}:{:.2}\n",
                 pos.x, pos.y, pos.z
             ),
-            Event::FlagCaptured { flag, team } => {
+            Event::FlagCaptured { flag, team, .. } => {
                 format!("{tick},flag_captured,{flag},{team},\n")
             }
             Event::FlagReturned { flag, team } => {

@@ -9,12 +9,11 @@
 //!   The cursor starts on the player's row. Up / Down move it a row, L1 / R1
 //!   to the first / last shown row (a page further when already there),
 //!   Left / Right to the other list on the same shown row (wrapping);
-//!   X opens the row's Personal Stats; Square ("Done") quits; Triangle does
+//!   X opens the local player's Personal Stats; Square ("Done") quits; Triangle does
 //!   nothing (`ifs_teamstats` main.f11-f13 [V]). The awards panel sits
 //!   under the lists.
-//! - **Personal Stats** of the row X was pressed on: X goes on to Career
-//!   Stats from the player's own page only (a bot's page shows "Done" on
-//!   Square there); Triangle goes back; Square quits (main.f10-f12 [V]).
+//! - **Personal Stats** of the local player: X opens Career Stats, Triangle
+//!   goes back, Square quits. Up / Down move the highlight.
 //! - **Career Stats**: the profile's numbers and the nine medals; Up / Down /
 //!   Left / Right move the medal cursor, whose text shows below; Triangle
 //!   goes back; X ("Done" on its help line) quits; Square quits too
@@ -49,6 +48,8 @@ pub struct StatRow {
     /// The Personal Stats lines: label and value; a blank pair keeps its
     /// line's pitch.
     pub personal: Vec<(String, String)>,
+    /// Localized medal names and the counts earned in this round.
+    pub medals: Vec<(String, u32)>,
 }
 
 /// One team's list: the side's emblem sheet and its rows, sorted.
@@ -217,6 +218,8 @@ pub struct StatsScreens {
     pub row: usize,
     /// Per list, its first shown row.
     pub first: [usize; 2],
+    /// The focused stat on the Personal Stats page.
+    pub personal_row: usize,
     /// The career page's medal cursor (`career.medals` index).
     pub medal: usize,
 }
@@ -259,6 +262,7 @@ impl StatsScreens {
             list,
             row,
             first,
+            personal_row: 0,
             medal: 0,
         }
     }
@@ -268,9 +272,19 @@ impl StatsScreens {
         self.lists[self.list].rows.get(self.row)
     }
 
-    /// Whether the Personal Stats page shown is the viewer's own.
-    pub fn personal_is_mine(&self) -> bool {
-        self.selected().is_some_and(|r| r.me)
+    pub fn player_row(&self) -> Option<&StatRow> {
+        self.lists
+            .iter()
+            .flat_map(|list| &list.rows)
+            .find(|row| row.me)
+    }
+
+    pub fn selection(&self) -> (Page, usize, usize) {
+        match self.page {
+            Page::Team => (self.page, self.list, self.row),
+            Page::Personal => (self.page, 0, self.personal_row),
+            Page::Career => (self.page, 0, self.medal),
+        }
     }
 
     /// One frame's presses. `Some(Quit)` leaves the stats.
@@ -280,8 +294,9 @@ impl StatsScreens {
                 if p.square {
                     return Some(Command::Quit);
                 }
-                if p.cross && self.selected().is_some() {
+                if p.cross && self.player_row().is_some() {
                     self.page = Page::Personal;
+                    self.personal_row = 0;
                 } else if p.up {
                     self.step(-1);
                 } else if p.down {
@@ -300,9 +315,11 @@ impl StatsScreens {
                 }
                 if p.triangle {
                     self.page = Page::Team;
-                } else if p.cross && self.personal_is_mine() {
+                } else if p.cross {
                     self.page = Page::Career;
                     self.medal = 0;
+                } else if p.up || p.down {
+                    self.move_personal_row(p.up);
                 }
             }
             Page::Career => {
@@ -321,6 +338,19 @@ impl StatsScreens {
 
     fn len(&self) -> usize {
         self.lists[self.list].rows.len()
+    }
+
+    fn move_personal_row(&mut self, up: bool) {
+        let Some(row) = self.player_row() else { return };
+        let valid = |i: &usize| !row.personal[*i].0.is_empty();
+        let next = if up {
+            (0..self.personal_row).rev().find(valid)
+        } else {
+            (self.personal_row + 1..row.personal.len()).find(valid)
+        };
+        if let Some(next) = next {
+            self.personal_row = next;
+        }
     }
 
     /// Keep the cursor's row shown.
@@ -565,7 +595,7 @@ mod tests {
         assert_eq!((s.list, s.row), (0, 3), "an empty list is not entered");
     }
 
-    /// X: Team -> the row's Personal -> (the player's own only) Career;
+    /// X: Team -> the player's Personal -> the player's Career;
     /// Triangle back; Triangle does nothing on Team; Square quits from Team
     /// and Personal, X or Square from Career.
     #[test]
@@ -575,19 +605,26 @@ mod tests {
         assert_eq!(s.page, Page::Team);
         s.input(press(|p| p.cross = true));
         assert_eq!(s.page, Page::Personal);
-        assert!(s.personal_is_mine());
+        assert!(s.selected().unwrap().me);
         s.input(press(|p| p.cross = true));
         assert_eq!(s.page, Page::Career);
         s.input(press(|p| p.triangle = true));
         s.input(press(|p| p.triangle = true));
         assert_eq!(s.page, Page::Team);
-        // A bot's page: X does nothing, Square quits.
+        // Browsing a bot does not change whose personal and career stats open.
         s.input(press(|p| p.down = true));
+        let viewed = (s.list, s.row);
+        assert!(!s.selected().unwrap().me);
         s.input(press(|p| p.cross = true));
         assert_eq!(s.page, Page::Personal);
-        assert!(!s.personal_is_mine());
+        assert!(s.player_row().unwrap().me);
         assert_eq!(s.input(press(|p| p.cross = true)), None);
+        assert_eq!(s.page, Page::Career);
+        s.input(press(|p| p.triangle = true));
         assert_eq!(s.page, Page::Personal);
+        s.input(press(|p| p.triangle = true));
+        assert_eq!((s.list, s.row), viewed);
+        s.input(press(|p| p.cross = true));
         assert_eq!(s.input(press(|p| p.square = true)), Some(Command::Quit));
         let mut s = screens(3, 3, (0, 0));
         assert_eq!(s.input(press(|p| p.square = true)), Some(Command::Quit));

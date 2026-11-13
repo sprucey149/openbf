@@ -576,8 +576,7 @@ struct BattleSetup {
     /// The session's hero rules (`game::heroes::rules`); `None` = Heroes
     /// Off, no hero installed. The CLI takes the retail defaults.
     heroes: Option<core::sim::heroes::HeroRules>,
-    /// The shell's "DLC Heroes" row: the DLC heroes for the map's own
-    /// (`game::heroes::append_with`). The CLI keeps the map's own.
+    /// Include installed DLC heroes in Hero Assault.
     dlc_heroes: bool,
     score_limit: u32,
 }
@@ -607,10 +606,9 @@ impl BattleSetup {
             .as_deref()
             .map(game::mission::MissionDef::load)
             .transpose()?;
-        if let Some(mission) = mission
-            .as_ref()
-            .filter(|m| v.mode == "eli" || m.is_hero_assault())
-        {
+        if let Some(mission) = mission.as_ref().filter(|m| {
+            matches!(v.mode.as_str(), "eli" | "hunt") || m.is_hero_assault() || m.is_hunt()
+        }) {
             anyhow::ensure!(
                 mission.mode == v.mode,
                 "mission mode {} differs from --mode {}",
@@ -651,8 +649,12 @@ impl BattleSetup {
             mission_file: mission_file.as_deref().and_then(file_name),
             player_team: u8::from(own_seat),
             heroes: Some(core::sim::heroes::HeroRules::default()),
-            dlc_heroes: false,
-            score_limit: core::sim::deathmatch::ASSAULT_SCORE_LIMIT,
+            dlc_heroes: v.mode == "eli",
+            score_limit: if v.mode == "hunt" {
+                50
+            } else {
+                core::sim::deathmatch::ASSAULT_SCORE_LIMIT
+            },
             classes_dir: v.classes.clone().unwrap_or_else(|| {
                 v.map
                     .parent()

@@ -30,7 +30,13 @@ pub const OPTION_ROWS: usize = 5;
 /// `ScriptCB_GetNetGameDefaults`' non-network branch).
 pub const MAX_BOTS: i32 = 16;
 /// The modes the port's sim can run (§7 dims the rest).
-pub const PORT_MODES: [Mode; 4] = [Mode::Con, Mode::Eli, Mode::Assault, Mode::OneFlag];
+pub const PORT_MODES: [Mode; 5] = [
+    Mode::Con,
+    Mode::Eli,
+    Mode::Assault,
+    Mode::OneFlag,
+    Mode::Hunt,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Game {
@@ -298,6 +304,23 @@ impl ListCursor {
         moved
     }
 
+    fn step_wrapping(&mut self, live: &[bool], down: bool, shown: usize) -> bool {
+        if self.step(live, if down { 1 } else { -1 }, shown) {
+            return true;
+        }
+        let Some(other_end) = (if down {
+            live.iter().position(|&enabled| enabled)
+        } else {
+            live.iter().rposition(|&enabled| enabled)
+        }) else {
+            return false;
+        };
+        let moved = self.at != other_end;
+        self.at = other_end;
+        self.show(live.len(), shown);
+        moved
+    }
+
     /// The first live row (or 0), shown.
     fn first(live: &[bool], shown: usize) -> ListCursor {
         let mut c = ListCursor {
@@ -472,19 +495,10 @@ impl InstantAction {
         match self.page {
             Page::Missions => {
                 if let (Some(point), Some(size)) = (point, size) {
-                    if size[0] > 0.0 && size[1] > 0.0 {
-                        let box_w = 4.0 / 3.0 * size[1];
-                        let x = (point[0] - (size[0] - box_w) * 0.5) / (box_w / 512.0);
-                        if (crate::shell_ia::RIGHT_WINDOW[0]..=crate::shell_ia::RIGHT_WINDOW[2])
-                            .contains(&x)
-                        {
-                            return self.scroll_right(delta);
-                        }
-                        if (crate::shell_ia::LEFT_WINDOW[0]..=crate::shell_ia::LEFT_WINDOW[2])
-                            .contains(&x)
-                        {
-                            return self.scroll_left(delta);
-                        }
+                    match crate::shell_ia::list_under_pointer(point, size) {
+                        Some(true) => return self.scroll_right(delta),
+                        Some(false) => return self.scroll_left(delta),
+                        None => {}
                     }
                 }
                 if self.state == State::Playlist {
@@ -537,9 +551,10 @@ impl InstantAction {
             }
             PointerTarget::Option(k, _) => {
                 if let Page::Group(g, mut cur) = self.page {
-                    if k < self.options.rows(g).len() {
+                    let rows = self.options.rows(g);
+                    if rows.get(k).is_some_and(|o| self.options.option_enabled(*o)) {
                         cur.at = k;
-                        cur.show(self.options.rows(g).len(), OPTION_ROWS);
+                        cur.show(rows.len(), OPTION_ROWS);
                         self.page = Page::Group(g, cur);
                         return true;
                     }
@@ -661,7 +676,13 @@ impl InstantAction {
             .iter()
             .map(|&p| match p {
                 ModePick::One(m) => ListRow {
-                    text: self.texts.mode(m).0.to_owned(),
+                    text: if m == Mode::Hunt
+                        && matches!(self.picked_map, MapPick::One(i) if self.maps[i].game == Game::Bf1)
+                    {
+                        format!("{} (openbf)", self.texts.mode(m).0)
+                    } else {
+                        self.texts.mode(m).0.to_owned()
+                    },
                     enabled: self.mode_live(p),
                     icon: Some(m.icon()),
                     icon2: None,
@@ -891,7 +912,7 @@ impl InstantAction {
                     key: m.key.clone(),
                     game: m.game,
                     mode: e.mode,
-                    armies: e.side.armies().map(str::to_owned),
+                    armies: m.launch_armies(e.mode, e.side),
                     label: m.label.clone(),
                 }
             })

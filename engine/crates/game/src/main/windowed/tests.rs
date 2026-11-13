@@ -386,6 +386,60 @@ fn bf1_spawn_team_preview_keeps_the_command_post_before_unit_selection() {
 }
 
 #[test]
+#[ignore = "requires the owned mixed bake and missions"]
+fn bespin_platforms_initial_spawn_pages_use_each_selection_once() {
+    use core::sim::{buttons::SPAWN_ACCEPT, ScreenPick, SpawnStage};
+    use ui::spawn_draw::SpawnPage;
+
+    let assets = PathBuf::from(std::env::var_os("SPAWN_PREVIEW_ASSETS").unwrap());
+    let (scene, _) = game::assets::load_battle_scene(&assets.join("bf1_bes1"), "con").unwrap();
+    let missions = assets.join("../missions");
+    for armies in [["rep", "cis"], ["all", "imp"]] {
+        let mission = game::mission::pick(&missions, "bf1_bes1", "con", armies).unwrap();
+        assert!(mission.own);
+        let mut setup = setup(None);
+        setup.classes_dir = assets.join("classes");
+        setup.teams = Some(mission.mission.factions());
+        setup.mission = Some(mission.mission);
+        setup.player_team = mission.player_team;
+        let mut walk = super::super::battle::make_walk(&scene, &setup).unwrap();
+        let mut feed = game::event_feed::EventFeed::for_walk(&assets, "bf1", &walk);
+        super::super::battle::open_spawn_screens(&mut walk, setup.mission.as_ref());
+        assert!(matches!(
+            super::super::battle::hud_model(&walk, &mut feed, 16.0 / 9.0).spawn,
+            Some(SpawnPage::Side { .. })
+        ));
+
+        let accept = PadState {
+            buttons: SPAWN_ACCEPT,
+            ..PadState::default()
+        };
+        walk.step_tick(&[PadState {
+            pick: Some(ScreenPick::Side(mission.player_team)),
+            ..accept
+        }]);
+        for pad in [accept, PadState::default()] {
+            walk.step_tick(&[pad]);
+            let model = super::super::battle::hud_model(&walk, &mut feed, 16.0 / 9.0);
+            assert!(
+                matches!(model.spawn, Some(SpawnPage::Map { .. })),
+                "{armies:?}"
+            );
+            assert_eq!(model.map.unwrap().view, ui::hud_map::MapView::Spawn);
+        }
+        walk.step_tick(&[accept]);
+        assert!(matches!(
+            super::super::battle::hud_model(&walk, &mut feed, 16.0 / 9.0).spawn,
+            Some(SpawnPage::Class { .. })
+        ));
+        walk.step_tick(&[PadState::default()]);
+        walk.step_tick(&[accept]);
+        assert_eq!(walk.sim.spawn_stage[0], SpawnStage::Accepted);
+        assert!(walk.sim.unit(walk.player).is_some());
+    }
+}
+
+#[test]
 fn spawn_selection_cues_resolve_in_the_reported_battle_sound_banks() {
     let Some(root) = std::env::var_os("SPAWN_PREVIEW_ASSETS") else {
         eprintln!("SKIP: SPAWN_PREVIEW_ASSETS must name the owned mixed bake");

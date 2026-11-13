@@ -223,21 +223,37 @@ wait.
 
 `fMAX_IDLE_TIME = 30.0` in all three (main pc 73 / 45 / 22).
 
-## What the port has
+## Current port status (2026-11-12)
 
-- `core/src/sim/round.rs` + `core/src/cp.rs` `tick_domination`: a team at 0 tickets loses at once; one team owning
-  every post for 20.0 s wins (state reset by any other owner or neutral); the opt-in time limit. `sim.outcome` =
-  winner (or `OUTCOME_DRAW`). No countdown is exposed for display.
-- `ui/src/hud.rs`: a centred egui text banner "ROUND OVER — <TEAM> WINS" / "TIME UP — BOTH TEAMS WIN" in the team
-  colour while `outcome` is set (around line 584); no Victory In / Defeat In.
-- `ui/src/menu.rs` `outcome_line`, filled in `game/src/main/windowed.rs` 1429: the same sentence under the pause
-  menu title. After the outcome the game stops the ambience, prints the title and records the round to the profile;
-  the battle view stays as it is. No end camera, no banner texture, no stats screens.
-- Pieces to reuse: every mission RON in `engine/missions/` carries `camera_shots` (26 of 26 BF1, all BF2), and
-  `game/src/spawn_backdrop.rs` already turns a shot into a camera and picks one at random; BF1's
-  `ig_victory_defeat.ktx2` is baked; `core/src/unit.rs` has per-unit `kills` / `deaths`.
+- The end camera uses the mission shots. The HUD uses the baked
+  `ig_victory_defeat` sheet and keeps the banner for the selected end
+  music's length, clamped to 5–7 s, with 5 s as the fallback
+  (`game::round_end`, `game::music`, `ui::hud`).
+- Team, Personal and Career Stats use the BF2 presentation on both
+  games' maps. Team rows track points, kills, deaths and captures.
+  The capture column uses `stats_cpp`. Its original meaning still
+  needs a nonzero stock witness.
+- The original lets the team scoreboard open any character's Personal Stats,
+  then only offers Career Stats for human rows. Its Personal Stats has no
+  row cursor or directional handlers (ifs_personalstats main PCs 113–119
+  and main.f10). The port keeps all scoreboard rows browsable, opens the
+  local player's Personal Stats on Continue, and adds a focus bar and menu
+  clicks. The future split-screen and LAN flow is in the feature set.
+- The round-award callbacks select the highest individual value
+  (BF2 FUN_00365010 and FUN_00365118, B2 361042–361130).
+  Killing Spree uses kills spaced at most four seconds apart, Public
+  Enemy uses kills within one life, and Survivalist counts kills
+  below 25% health (B2 359243–359276). Camper measures time within
+  10 m of a reference position (FUN_00363948, B2 359907–359942).
+  Dead Eye and the Personal Stats “Head Shots” row share the critical
+  counter (B2 47580–47583 and 361120–361122).
+- The local review implements these awards from match events. The port
+  aggregates across lives and reads the shooter's current health at the
+  event tick. Native hero and team partitions and exact original
+  countdown, banner and stats transitions still need the comparisons
+  below. The local #130 review adds separate career medal counts.
 
-## A build plan (smallest pieces, in order, each testable)
+## Original implementation plan
 
 The maintainer's target is BF1's ending. For the countdown the two games differ; the deviation to name is which
 rule both maps get. Suggested: **BF2's domination rule** (it is the port's rule today, and BF1's per-team rule is
