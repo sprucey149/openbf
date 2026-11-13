@@ -217,7 +217,7 @@ fn tan_prop(deg: f32) -> f32 {
 }
 
 /// strtol(value) ≠ 0: the leading integer.
-fn strtol_nonzero(v: &str) -> bool {
+pub(super) fn strtol_nonzero(v: &str) -> bool {
     let t = v.trim_start();
     let end = t
         .char_indices()

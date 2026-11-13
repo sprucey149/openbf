@@ -27,6 +27,7 @@ fn the_terrain_meets_a_sphere_only_within_its_radius() {
     let w = WorldContacts {
         heightfield: Some(&hf),
         collision: &collision,
+        water: None,
     };
     let depth = |y: f32| {
         let mut out = Vec::new();
@@ -1202,6 +1203,7 @@ fn player_ground_traffic_keeps_the_legacy_locomotion_response() {
             let world = super::WorldContacts {
                 heightfield: s.heightfield.as_ref(),
                 collision: &s.collision,
+                water: s.water_plane(),
             };
             if kind == VehicleKind::Walker {
                 walker::step(&mut expected, &wp, &world, crate::TICK_DT);
@@ -1416,4 +1418,30 @@ fn the_vehicle_regen_award_repairs_the_drivers_vehicle() {
     s.vehicle_mut(v).unwrap().health.cur = 899.0;
     s.vehicle_regen(v.index as usize, 1.0);
     assert_eq!(s.vehicle(v).unwrap().health.cur, 900.0);
+}
+
+/// A hover pressed into a standing soldier at 20 m/s deals the PS2's impact
+/// damage (re-hover §13.9): the closing speed 20 over the soldier's
+/// threshold 10 (side contact, T0) is (20 − 10)² × 1 = 100. At 8 m/s it
+/// deals none, nor does the hover the soldier stands on.
+#[test]
+fn a_moving_hover_runs_a_soldier_over() {
+    let hit = |speed: f32, stood_on: bool| {
+        let (mut s, p, v) = parked(true);
+        let i = p.index as usize;
+        let vehicle = s.vehicle_mut(v).unwrap();
+        vehicle.pos = Vec3::new(0.0, 0.0, -3.2);
+        vehicle.vel = Vec3::new(0.0, 0.0, speed);
+        s.sync_hulls();
+        if stood_on {
+            s.units[i].stood_on = Some(v);
+        }
+        let before = s.units[i].health.cur;
+        let cap = s.units[i].capsule();
+        s.vehicle_impacts(i, &cap);
+        before - s.units[i].health.cur
+    };
+    assert!((hit(20.0, false) - 100.0).abs() < 1e-3, "{}", hit(20.0, false));
+    assert_eq!(hit(8.0, false), 0.0);
+    assert_eq!(hit(20.0, true), 0.0);
 }

@@ -10,11 +10,16 @@ use core::collision::{HullFilter, Layers, Shape};
 use core::sim::{Event, Sim};
 use glam::{Mat3, Mat4, Quat, Vec3};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::f32::consts::{PI, TAU};
 use std::sync::Arc;
 
 const MASS: f32 = 40.0;
 const SPACE_LIFE: f32 = 8.0;
 const CLUSTERS: usize = 8;
+/// An explosion's debris rests 5 s whatever its life: settling starts its
+/// timer 5 s short of it (B2 FUN_001d6608 B2:83830-83835, 3.0 of BF2's 8 s;
+/// BF1 −2.0 of 3 s, `re-vehicle-death.md` §6.2).
+const BLAST_REST: f32 = 5.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Prim {
@@ -140,11 +145,58 @@ struct Piece {
     touched: bool,
     timer: f32,
     space: bool,
+    /// An explosion's debris ([`Chunks::blast`]): it rests [`BLAST_REST`].
+    blast: bool,
     trails: Vec<(LiveEffect, Option<Mat4>)>,
     smoke: Vec<LiveEffect>,
 }
 
 impl Piece {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        spec: &Arc<Spec>,
+        at: Vec3,
+        vel: Vec3,
+        q: Quat,
+        space: bool,
+        blast: bool,
+        lib: Option<&Library>,
+        rng: &mut Lcg,
+    ) -> Piece {
+        let r = Mat3::from_quat(q);
+        let world = r * Mat3::from_diagonal(spec.prim.inertia() * MASS) * r.transpose();
+        let still = spec.mode == 2;
+        let omega = r * spec.omega;
+        let mut piece = Piece {
+            spec: spec.clone(),
+            pos: at,
+            vel,
+            rot: q,
+            momentum: world * omega,
+            omega,
+            moving: !still,
+            count: u8::from(still),
+            budget: if still { 0 } else { spec.budget },
+            touched: false,
+            timer: 0.0,
+            space,
+            blast,
+            trails: Vec::new(),
+            smoke: Vec::new(),
+        };
+        if let Some(lib) = lib {
+            for (name, node) in &spec.trails {
+                if let Some(def) = lib.get(name) {
+                    let frame = piece.trail_frame(*node);
+                    piece
+                        .trails
+                        .push((LiveEffect::new(def.clone(), frame, rng), *node));
+                }
+            }
+        }
+        piece
+    }
+
     fn inverse_inertia(&self) -> Mat3 {
         let r = Mat3::from_quat(self.rot);
         r * Mat3::from_diagonal(self.spec.inverse_inertia()) * r.transpose()
@@ -307,6 +359,9 @@ impl Piece {
     }
 
     fn settle(&mut self, lib: Option<&Library>, rng: &mut Lcg) {
+        if self.blast {
+            self.timer = self.life() - BLAST_REST;
+        }
         let Some(lib) = lib else {
             return;
         };
@@ -524,10 +579,102 @@ pub struct Chunks {
     bf1: bool,
     posed_nodes: HashMap<u32, Vec<(String, Mat4)>>,
     lit: HashSet<String>,
-    /// Space rules: explosion-class pieces stand in for a class without its
-    /// own, and the pieces' floor rays see vehicle hulls. Ground modes keep
-    /// the class's own pieces and the map's bodies.
+    /// Each explosion class's debris, by its lowercase name.
+    blasts: HashMap<String, Blast>,
+    /// Space rules: the pieces' floor rays see vehicle hulls and rest 8 s.
+    /// Ground modes see the map's bodies.
     space: bool,
+}
+
+/// An explosion class's debris (`re-vehicle-death.md` §6.1, B2 explode
+/// FUN_0030c8f8 B2:288030-288248, B1 FUN_002701a0 B1:193847-194058): one
+/// piece template, which `ChunkGeometryName` resets (B2 FUN_0030bb88
+/// B2:287390-287430) and whose bounce, friction, dampings and lifetime the
+/// class cannot set, so they stay 0, 0, 0, 0 and −1; the count (`NumChunks`,
+/// +0xd0), the speed range (`ChunkSpeed`, +0x1d0/+0x1d4, ctor −1 −1), the
+/// start distance (`ChunkStartDistance`, +0x1d8, ctor 0) and `PushRadius`
+/// (+0x9c), the speed when no range is set.
+#[derive(Clone)]
+struct Blast {
+    spec: Arc<Spec>,
+    count: usize,
+    speed: [f32; 2],
+    start: f32,
+    push_radius: f32,
+}
+
+impl Blast {
+    fn load(
+        db: &ClassDb,
+        class: &str,
+        side: &SideData,
+        bounds: &mut HashMap<String, Option<(Vec3, f32)>>,
+        dirs: &[std::path::PathBuf],
+    ) -> Option<Blast> {
+        use crate::classdb::fnv1a_lowercase as hash;
+        let template = [
+            "ChunkGeometryName",
+            "ChunkTerrainCollisions",
+            "ChunkTerrainEffect",
+            "ChunkPhysics",
+            "ChunkOmega",
+            "ChunkGravity",
+            "ChunkTrailEffect",
+            "ChunkSmokeEffect",
+        ]
+        .map(hash);
+        let mut slot = None::<Slot>;
+        let mut count = 0usize;
+        let mut speed = [-1.0f32; 2];
+        let mut start = 0.0;
+        let mut push_radius = 0.0;
+        for def in db.chain(class).into_iter().rev() {
+            for (key, value) in &def.props {
+                let v = value.trim();
+                if *key == hash("ChunkGeometryName") {
+                    slot = Some(Slot::default());
+                }
+                if template.contains(key) {
+                    if let Some(s) = slot.as_mut() {
+                        s.take(*key, value);
+                    }
+                } else if *key == hash("NumChunks") {
+                    count = v.parse::<u8>().map_or(0, usize::from);
+                } else if *key == hash("ChunkSpeed") {
+                    let f = floats(v);
+                    if let Some(&min) = f.first() {
+                        speed[0] = min;
+                    }
+                    if let Some(&max) = f.get(1) {
+                        speed[1] = max;
+                    }
+                } else if *key == hash("ChunkStartDistance") {
+                    start = crate::vehicle_class::float(v).unwrap_or(start);
+                } else if *key == hash("PushRadius") || *key == hash("PushRadiusOuter") {
+                    push_radius = crate::vehicle_class::float(v).unwrap_or(push_radius);
+                }
+            }
+        }
+        let slot = slot?;
+        if count == 0 {
+            return None;
+        }
+        let spec = slot_spec(side, bounds, dirs, &slot, &[])?;
+        Some(Blast {
+            spec: Arc::new(Spec {
+                bounce: 0.0,
+                stick: 0.0,
+                linear_damping: 0.0,
+                angular_damping: 0.0,
+                lifetime: -1.0,
+                ..spec
+            }),
+            count: count.min(10),
+            speed,
+            start,
+            push_radius,
+        })
+    }
 }
 
 impl Chunks {
@@ -538,8 +685,12 @@ impl Chunks {
         dirs: &[std::path::PathBuf],
         era: Era,
     ) {
-        for (name, pieces) in Self::load_for(db, names, dirs, era, self.space).defs {
+        let more = Self::load_for(db, names, dirs, era, self.space);
+        for (name, pieces) in more.defs {
             self.defs.entry(name).or_insert(pieces);
+        }
+        for (name, blast) in more.blasts {
+            self.blasts.entry(name).or_insert(blast);
         }
     }
 
@@ -548,8 +699,9 @@ impl Chunks {
         Self::load_for(db, names, dirs, era, true)
     }
 
-    /// The pieces of `names`. Under ground rules (`space` false) a class
-    /// throws only its own pieces, one per slot.
+    /// The pieces of `names`: each class throws its own pieces, one per
+    /// slot. Every explosion class in `db` with debris gets its own law
+    /// ([`Chunks::blast`]).
     pub fn load_for(
         db: &ClassDb,
         names: &[String],
@@ -557,7 +709,6 @@ impl Chunks {
         era: Era,
         space: bool,
     ) -> Self {
-        use crate::classdb::fnv1a_lowercase as hash;
         let mut out = Self {
             bf1: era == Era::Bf1,
             space,
@@ -566,7 +717,6 @@ impl Chunks {
         let side = SideData::load(dirs);
         let mut bounds = HashMap::new();
         for name in names {
-            let mut specs = Vec::new();
             let vehicle_nodes = side
                 .classes
                 .get(&name.to_ascii_lowercase())
@@ -575,150 +725,21 @@ impl Chunks {
                         .and_then(|g| side.nodes.get(&g.to_ascii_lowercase()))
                 })
                 .map_or(&[][..], Vec::as_slice);
-            let mut slots = chunk_properties(db.chain(name));
-            let mut exp_name = None;
-            if space
-                && !slots.iter().any(|s| {
-                    s.props
-                        .get(&hash("ChunkGeometryName"))
-                        .is_some_and(|m| !m.trim().is_empty())
-                })
-            {
-                if let Some(exp) = crate::vehicle_class::explosion_name(db, name) {
-                    slots = chunk_properties(db.chain(&exp));
-                    exp_name = Some(exp);
-                }
-            }
-            for slot in &slots {
-                let props = &slot.props;
-                let Some(model) = props.get(&hash("ChunkGeometryName")) else {
-                    continue;
-                };
-                if model.trim().is_empty() {
-                    continue;
-                }
-                let text = |key: &str| props.get(&hash(key)).map(String::as_str);
-                let number = |key: &str| text(key).and_then(crate::vehicle_class::float);
-                let vector = |key: &str| {
-                    text(key)
-                        .map(floats)
-                        .filter(|v| v.len() >= 3)
-                        .map(|v| Vec3::new(v[0], v[1], v[2]))
-                };
-                let key = model.to_ascii_lowercase();
-                let (prim, local) = match side.prims.get(&key) {
-                    Some(p) => *p,
-                    None => {
-                        let bound = bounds.entry(key.clone()).or_insert_with(|| {
-                            let file = dirs
-                                .iter()
-                                .map(|d| d.join(format!("{model}.glb")))
-                                .find(|p| pak::is_file(p))?;
-                            let mesh = crate::assets::load_glb(&file).ok()?;
-                            let (mut lo, mut hi) =
-                                (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-                            for &v in &mesh.positions {
-                                lo = lo.min(Vec3::from(v));
-                                hi = hi.max(Vec3::from(v));
-                            }
-                            (!mesh.positions.is_empty())
-                                .then_some(((lo + hi) * 0.5, (hi - lo).length() * 0.5))
-                        });
-                        let (centre, radius) = match *bound {
-                            Some((c, r)) => (c, r),
-                            None => {
-                                if dirs.is_empty() {
-                                    (Vec3::ZERO, 0.5)
-                                } else {
-                                    eprintln!("chunk model {model}: missing bake, no piece drawn");
-                                    continue;
-                                }
-                            }
-                        };
-                        (Prim::Sphere(radius), Mat4::from_translation(centre))
-                    }
-                };
-                let chunk_nodes = side.nodes.get(&key).map_or(&[][..], Vec::as_slice);
-                let mode = match text("ChunkPhysics").map(|v| v.trim().to_ascii_lowercase()) {
-                    None => 0,
-                    Some(v) => match v.as_str() {
-                        "full" => 0,
-                        "static" => 2,
-                        "leaf" => 3,
-                        "cockpit" => 4,
-                        _ => 1,
-                    },
-                };
-                let ps2 = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
-                let omega = vector("ChunkOmega").unwrap_or(Vec3::ZERO);
-                let spec = Arc::new(Spec {
-                    model: model.to_owned(),
-                    prim,
-                    local,
-                    speed: number("ChunkSpeed").unwrap_or(-1.0),
-                    inherit: number("ChunkVelocityFactor").unwrap_or(1.0),
-                    up: number("ChunkUpFactor").unwrap_or(0.25),
-                    bounce: number("ChunkBounciness").unwrap_or(0.6),
-                    stick: number("ChunkStickiness").unwrap_or(0.7),
-                    linear_damping: number("ChunkLinearDamping").unwrap_or(0.001),
-                    angular_damping: number("ChunkAngularDamping").unwrap_or(0.004),
-                    gravity: vector("ChunkGravity").map_or(Vec3::new(0.0, -9.8, 0.0), ps2),
-                    omega,
-                    lifetime: number("ChunkLifetime").unwrap_or(-1.0),
-                    mode,
-                    budget: text("ChunkTerrainCollisions")
-                        .and_then(|v| v.trim().parse::<i64>().ok())
-                        .map_or(0, |v| v as u8),
-                    terrain_effect: text("ChunkTerrainEffect").map(|v| v.trim().to_owned()),
-                    trails: slot
-                        .trails
-                        .iter()
-                        .map(|(e, n)| {
-                            (
-                                e.trim().to_owned(),
-                                n.as_deref().and_then(|n| node_matrix(chunk_nodes, n)),
-                            )
-                        })
-                        .collect(),
-                    smoke: slot
-                        .smoke
-                        .iter()
-                        .map(|(e, n)| {
-                            (
-                                e.trim().to_owned(),
-                                n.as_deref()
-                                    .and_then(|n| node_matrix(chunk_nodes, n))
-                                    .unwrap_or(Mat4::IDENTITY),
-                            )
-                        })
-                        .collect(),
-                    node: text("ChunkNodeName").and_then(|n| node_matrix(vehicle_nodes, n)),
-                    node_name: text("ChunkNodeName").map(|n| n.trim().to_owned()),
-                });
-                // NumChunks belongs to explosion classes, whose own law
-                // (`re-vehicle-death.md` §6.1) is not ported; the ground
-                // throws each slot once.
-                let count = text("NumChunks")
-                    .filter(|_| space)
-                    .or_else(|| {
-                        (slots.len() == 1)
-                            .then(|| db.prop(name, "NumChunks"))
-                            .flatten()
-                    })
-                    .or_else(|| {
-                        (slots.len() == 1)
-                            .then(|| exp_name.as_deref().and_then(|e| db.prop(e, "NumChunks")))
-                            .flatten()
-                    })
-                    .filter(|_| space)
-                    .and_then(|v| v.trim().parse::<usize>().ok())
-                    .map_or(1, |n| n.clamp(1, 10));
-                for _ in 0..count {
-                    specs.push(Arc::clone(&spec));
-                }
-            }
+            let specs: Vec<_> = chunk_properties(db.chain(name))
+                .iter()
+                .filter_map(|slot| slot_spec(&side, &mut bounds, dirs, slot, vehicle_nodes))
+                .map(Arc::new)
+                .collect();
             if !specs.is_empty() {
                 out.defs.insert(name.clone(), specs);
+            }
+        }
+        for name in db.names() {
+            if db.engine_base(name) != Some("explosion") {
+                continue;
+            }
+            if let Some(blast) = Blast::load(db, name, &side, &mut bounds, dirs) {
+                out.blasts.insert(name.to_ascii_lowercase(), blast);
             }
         }
         out
@@ -942,37 +963,58 @@ impl Chunks {
                 rng,
             );
             let q = Quat::from_mat3(&Mat3::from_mat4(body)).normalize();
-            let r = Mat3::from_quat(q);
-            let world = r * Mat3::from_diagonal(spec.prim.inertia() * MASS) * r.transpose();
-            let still = spec.mode == 2;
-            let omega = r * spec.omega;
-            let mut piece = Piece {
-                spec: spec.clone(),
-                pos: at,
-                vel,
-                rot: q,
-                momentum: world * omega,
-                omega,
-                moving: !still,
-                count: u8::from(still),
-                budget: if still { 0 } else { spec.budget },
-                touched: false,
-                timer: 0.0,
-                space: self.space,
-                trails: Vec::new(),
-                smoke: Vec::new(),
-            };
-            if let Some(lib) = lib {
-                for (name, node) in &spec.trails {
-                    if let Some(def) = lib.get(name) {
-                        let frame = piece.trail_frame(*node);
-                        piece
-                            .trails
-                            .push((LiveEffect::new(def.clone(), frame, rng), *node));
-                    }
+            cluster.push(Piece::new(spec, at, vel, q, self.space, false, lib, rng));
+        }
+        self.live.push_back(cluster);
+    }
+
+    /// The debris of the explosion class `class` going off at `pos`
+    /// ([`Blast`]): `NumChunks` pieces (at most 10) of its one template, each
+    /// with a random orientation, thrown up and out at its own speed from
+    /// `ChunkStartDistance` along its direction. Nothing for a class without
+    /// debris.
+    pub fn blast(&mut self, class: &str, pos: Vec3, lib: Option<&Library>) {
+        let Some(blast) = self.blasts.get(&class.to_ascii_lowercase()) else {
+            return;
+        };
+        let blast = blast.clone();
+        let rng = self.rng.get_or_insert(Lcg(0xdeb1_5eed));
+        if self.live.len() == CLUSTERS {
+            if let Some(old) = self.live.pop_front() {
+                for p in old {
+                    p.stop(&mut self.loose);
                 }
             }
-            cluster.push(piece);
+        }
+        let mut cluster = Vec::with_capacity(blast.count);
+        for _ in 0..blast.count {
+            let (s1, c1) = core::fmath::sin_cos(rng.float() * TAU);
+            let (s2, c2) = core::fmath::sin_cos(rng.float() * TAU);
+            let axis = Vec3::new(c1 * s2, s1, c1 * c2);
+            let (s3, c3) = core::fmath::sin_cos(rng.float() * PI);
+            let q = Quat::from_xyzw(axis.x * s3, axis.y * s3, axis.z * s3, c3).normalize();
+            let (speed, x, y) = if blast.speed[0] >= 0.0 {
+                let speed = blast.speed[0] + rng.float() * (blast.speed[1] - blast.speed[0]);
+                let x = 2.0 * (0.5 - rng.float());
+                (speed, x, rng.float() + 0.5)
+            } else {
+                let speed = blast.push_radius + rng.float() * blast.push_radius;
+                let x = 2.0 * (0.5 - rng.float());
+                (speed, x, (rng.float() + 1.0) * 4.0)
+            };
+            let z = 2.0 * (0.5 - rng.float());
+            let dir = Vec3::new(x, y, z).normalize_or_zero();
+            let at = pos + dir * blast.start;
+            cluster.push(Piece::new(
+                &blast.spec,
+                at,
+                dir * speed,
+                q,
+                self.space,
+                true,
+                lib,
+                rng,
+            ));
         }
         self.live.push_back(cluster);
     }
@@ -1022,7 +1064,11 @@ impl Chunks {
     }
 
     pub fn models(&self) -> impl Iterator<Item = &str> {
-        self.defs.values().flatten().map(|s| s.model.as_str())
+        self.defs
+            .values()
+            .flatten()
+            .chain(self.blasts.values().map(|b| &b.spec))
+            .map(|s| s.model.as_str())
     }
 
     pub fn set_lit(&mut self, names: impl IntoIterator<Item = String>) {
@@ -1117,6 +1163,122 @@ impl Slot {
             self.props.insert(key, value.to_owned());
         }
     }
+}
+
+/// One chunk slot's piece: its model's prim (a sphere round the mesh bounds
+/// for a model with none baked), its body numbers and its effects; `None`
+/// with no model.
+fn slot_spec(
+    side: &SideData,
+    bounds: &mut HashMap<String, Option<(Vec3, f32)>>,
+    dirs: &[std::path::PathBuf],
+    slot: &Slot,
+    vehicle_nodes: &[manifest::ManifestHardpoint],
+) -> Option<Spec> {
+    use crate::classdb::fnv1a_lowercase as hash;
+    let props = &slot.props;
+    let model = props.get(&hash("ChunkGeometryName"))?;
+    if model.trim().is_empty() {
+        return None;
+    }
+    let text = |key: &str| props.get(&hash(key)).map(String::as_str);
+    let number = |key: &str| text(key).and_then(crate::vehicle_class::float);
+    let vector = |key: &str| {
+        text(key)
+            .map(floats)
+            .filter(|v| v.len() >= 3)
+            .map(|v| Vec3::new(v[0], v[1], v[2]))
+    };
+    let key = model.to_ascii_lowercase();
+    let (prim, local) = match side.prims.get(&key) {
+        Some(p) => *p,
+        None => {
+            let bound = bounds.entry(key.clone()).or_insert_with(|| {
+                let file = dirs
+                    .iter()
+                    .map(|d| d.join(format!("{model}.glb")))
+                    .find(|p| pak::is_file(p))?;
+                let mesh = crate::assets::load_glb(&file).ok()?;
+                let (mut lo, mut hi) =
+                    (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+                for &v in &mesh.positions {
+                    lo = lo.min(Vec3::from(v));
+                    hi = hi.max(Vec3::from(v));
+                }
+                (!mesh.positions.is_empty())
+                    .then_some(((lo + hi) * 0.5, (hi - lo).length() * 0.5))
+            });
+            let (centre, radius) = match *bound {
+                Some((c, r)) => (c, r),
+                None => {
+                    if dirs.is_empty() {
+                        (Vec3::ZERO, 0.5)
+                    } else {
+                        eprintln!("chunk model {model}: missing bake, no piece drawn");
+                        return None;
+                    }
+                }
+            };
+            (Prim::Sphere(radius), Mat4::from_translation(centre))
+        }
+    };
+    let chunk_nodes = side.nodes.get(&key).map_or(&[][..], Vec::as_slice);
+    let mode = match text("ChunkPhysics").map(|v| v.trim().to_ascii_lowercase()) {
+        None => 0,
+        Some(v) => match v.as_str() {
+            "full" => 0,
+            "static" => 2,
+            "leaf" => 3,
+            "cockpit" => 4,
+            _ => 1,
+        },
+    };
+    let ps2 = |v: Vec3| Vec3::new(v.x, v.y, -v.z);
+    let omega = vector("ChunkOmega").unwrap_or(Vec3::ZERO);
+    Some(Spec {
+        model: model.to_owned(),
+        prim,
+        local,
+        speed: number("ChunkSpeed").unwrap_or(-1.0),
+        inherit: number("ChunkVelocityFactor").unwrap_or(1.0),
+        up: number("ChunkUpFactor").unwrap_or(0.25),
+        bounce: number("ChunkBounciness").unwrap_or(0.6),
+        stick: number("ChunkStickiness").unwrap_or(0.7),
+        linear_damping: number("ChunkLinearDamping").unwrap_or(0.001),
+        angular_damping: number("ChunkAngularDamping").unwrap_or(0.004),
+        gravity: vector("ChunkGravity").map_or(Vec3::new(0.0, -9.8, 0.0), ps2),
+        omega,
+        lifetime: number("ChunkLifetime").unwrap_or(-1.0),
+        mode,
+        budget: text("ChunkTerrainCollisions")
+            .and_then(|v| v.trim().parse::<i64>().ok())
+            .map_or(0, |v| v as u8),
+        terrain_effect: text("ChunkTerrainEffect").map(|v| v.trim().to_owned()),
+        trails: slot
+            .trails
+            .iter()
+            .map(|(e, n)| {
+                (
+                    e.trim().to_owned(),
+                    n.as_deref().and_then(|n| node_matrix(chunk_nodes, n)),
+                )
+            })
+            .collect(),
+        smoke: slot
+            .smoke
+            .iter()
+            .map(|(e, n)| {
+                (
+                    e.trim().to_owned(),
+                    n.as_deref()
+                        .and_then(|n| node_matrix(chunk_nodes, n))
+                        .unwrap_or(Mat4::IDENTITY),
+                )
+            })
+            .collect(),
+        node: text("ChunkNodeName").and_then(|n| node_matrix(vehicle_nodes, n)),
+        node_name: text("ChunkNodeName").map(|n| n.trim().to_owned()),
+    })
 }
 
 fn chunk_properties(chain: Vec<&crate::classdb::ClassDef>) -> Vec<Slot> {

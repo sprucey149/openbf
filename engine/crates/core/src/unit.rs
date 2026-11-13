@@ -356,6 +356,9 @@ pub struct Unit {
     pub wall_push: Vec3,
     /// The flyer he stands on (`crate::sim` deck carry), `None` off one.
     pub deck: Option<Deck>,
+    /// The vehicle whose hull he last stood on (B2 soldier +0x480): it deals
+    /// him no impact damage (`Sim::vehicle_impacts`).
+    pub stood_on: Option<crate::vehicle::VehicleHandle>,
     /// Tick this unit last FIRED, `u64::MAX` for never. Perception's hearing
     /// reads it (`crate::perception::scan`): a shot inside `HEAR_RADIUS`
     /// since the listener's last think puts the shooter in its memory with no
@@ -1405,6 +1408,7 @@ impl UnitSpec {
             capture_posts: self.capture_posts,
             wall_push: Vec3::ZERO,
             deck: None,
+            stood_on: None,
             body: false,
             drop_due: false,
             chunk_mark: false,

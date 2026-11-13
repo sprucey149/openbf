@@ -265,6 +265,17 @@ U+½, 2(½−U))` (upward-biased); unset → `(PushRadius + U·PushRadius) × no
 starts `ChunkStartDistance` along its velocity direction (B1:194039); cluster tag 0 (B1:193847). The explosion class's
 chunk template has ChunkBounciness 0, ChunkStickiness 0, both dampings 0 and ChunkLifetime −1 (ctor B1:192934-192951;
 ChunkGeometryName handler B1:193340-193353) — explosion debris does not bounce.
+BF2 is the same law (2026-11-13). The explode `FUN_0030c8f8` (B2:287824) skips the land `Effect` in water but always
+reaches the debris loop at LAB_0030ce4c (B2:288030-288248). The orientation is two U·2π angles for the axis
+(c1·s2, s1, c1·c2) and U·π for the angle. ChunkSpeed min ≥ 0 gives U(min, max) (+0x1d0/+0x1d4, B2:288098-288104),
+else (1 + U)·PushRadius (+0x9c, B2:288144-288146). The start is ChunkStartDistance (+0x1d8, B2:288230) along the
+direction. The count byte is +0xd0, capped at 10 (B2:288248). Every vehicle death passes no impact normal (the hover's
+call is B2:131346). The setter `FUN_0030bb88` (B2:287283) has no Bounciness, Stickiness, Damping or Lifetime keys; its
+ChunkGeometryName handler zeroes the template with lifetime −1 and gravity (0, −9.8, 0) (B2:287390-287430).
+**Built** in `game::fx::chunks::Blast` / `Chunks::blast`, called from `Fx::explode` for every explosion with debris
+(49 explosion classes on the two discs). Before, a ground death threw only the vehicle's own CHUNKn and no explosion
+debris, which the user saw as the BARC coming apart "like lego". Test `real_barc_explosion_throws_eight_small_chunks`:
+`rep_hover_speederbike_exp` throws 8 `com_smallchunk1` at 10–13 m/s with `com_sfx_chunktrail_xs`.
 
 ### 6.2 The body (B1 chunk init FUN_001b80d0, tick FUN_001b8c60, contacts FUN_001ba570; B2 FUN_001d6608 …)
 - A rigid body of **mass 40** (inverse 0.025, B1:61235-61236), inertia from its prim × 40, restitution = ChunkBounciness

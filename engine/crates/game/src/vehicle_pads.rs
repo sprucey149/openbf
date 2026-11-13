@@ -199,6 +199,9 @@ pub struct PadBuild {
     pub seats: Vec<Vec<vehicle_class::SeatSpec>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
     pub flyer_exhaust: Vec<Vec<FlyerExhaust>>,
+    /// Each hover class's `WaterEffect` (BF2 K+0xca4, BF1 K+0x26b4), the
+    /// wake it keeps on the water under it; parallel to `classes`.
+    pub hover_water: Vec<Option<String>>,
     pub weapon_hud: Vec<Vec<Vec<crate::walk::WeaponHud>>>,
     /// Each class's `EngineSound` and `TurnOffTime` (card VSND), parallel
     /// to `classes`; filled by [`install`].
@@ -583,9 +586,25 @@ pub fn install_with_objective(
     factions: &[String; 2],
     space: Option<(&crate::mission::SpaceAssaultDef, u32)>,
 ) -> anyhow::Result<PadBuild> {
+    install_for_mission(sim, m, map_dir, classes_dir, factions, space, &[])
+}
+
+/// [`install_with_objective`] for a mission that names its class loads
+/// (`MissionDef::class_load_order`): its damage slots then take the rows
+/// later classes write into them on the PS2 ([`ClassDb::replay_damage_loads`]).
+pub fn install_for_mission(
+    sim: &mut core::sim::Sim,
+    m: &Manifest,
+    map_dir: &std::path::Path,
+    classes_dir: &std::path::Path,
+    factions: &[String; 2],
+    space: Option<(&crate::mission::SpaceAssaultDef, u32)>,
+    loads: &[crate::mission::SideClassLoad],
+) -> anyhow::Result<PadBuild> {
     let mut db = ClassDb::default();
     db.load_map(map_dir)?;
     let game = m.source_game.to_ascii_lowercase();
+    db.replay_damage_loads(classes_dir, &game, loads);
     let f: Vec<&str> = factions.iter().map(String::as_str).collect();
     let map = map_dir
         .file_name()
@@ -730,6 +749,21 @@ pub fn install_with_objective(
                 .filter(|l| !l.is_empty())
         })
         .collect();
+    sim.hover_chase = sim
+        .hover_params
+        .iter()
+        .zip(&b.seats)
+        .map(|(h, ring)| {
+            h.as_ref()?;
+            let seat = ring.first();
+            let s = crate::walk::FlyerSection::hover(seat, sim.ground_rules);
+            Some(core::vehicle::hover::ChaseSection {
+                center: s.center,
+                offset: s.offset,
+                tilt: s.tilt,
+            })
+        })
+        .collect();
     // Each class's death explosion and blast sphere (card VDTH).
     // A building turret's model is the map's (or its game's common bake's),
     // not a side's: its sphere is that model's, as a station's is
@@ -761,6 +795,18 @@ pub fn install_with_objective(
                     .get(&c.to_ascii_lowercase())
                     .map_or(&[], Vec::as_slice),
             )
+        })
+        .collect();
+    b.hover_water = b
+        .classes
+        .iter()
+        .map(|c| {
+            db.engine_base(c)
+                .filter(|base| vehicle_class::HOVER_BASES.contains(base))
+                .and_then(|_| db.prop(c, "WaterEffect"))
+                .map(str::trim)
+                .filter(|e| !e.is_empty())
+                .map(str::to_owned)
         })
         .collect();
     sim.vehicle_damage_effects =
@@ -821,6 +867,7 @@ pub fn install_with_objective(
         |c| vehicle_class::is_turret(&db, c),
         |c| crate::assets::hit_locations(&db, c),
         |c| crate::assets::added_weak_parts(&db, c),
+        |c, cg, collision| crate::assets::spring_hull_parts(&db, c, cg, collision),
     );
     sim.sync_hulls();
     sim.missile_target_points = b
@@ -1193,6 +1240,7 @@ pub fn hull_parts(
         turret,
         |_| Vec::new(),
         |_| Vec::new(),
+        |_, _, _| Vec::new(),
     )
 }
 
@@ -1204,6 +1252,11 @@ fn hull_parts_from(
     turret: impl Fn(&str) -> bool,
     hit_locations: impl Fn(&str) -> Vec<(String, f32)>,
     added: impl Fn(&str) -> Vec<core::collision::HullPart>,
+    springs: impl Fn(
+        &str,
+        &crate::assets::CollisionGeom,
+        &[(String, String)],
+    ) -> Vec<core::collision::HullPart>,
 ) -> Vec<Option<std::sync::Arc<[core::collision::HullPart]>>> {
     classes
         .iter()
@@ -1224,6 +1277,7 @@ fn hull_parts_from(
             if !parts.is_empty() {
                 parts.extend(added(c));
             }
+            parts.extend(springs(c, &cg, &k.collision));
             (!parts.is_empty()).then(|| parts.into())
         })
         .collect()

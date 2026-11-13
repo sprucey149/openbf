@@ -11,6 +11,7 @@ const DEFAULT_MOVE_TENSION: [f32; 2] = [30.0; 2];
 const DEGREES: f32 = 0.017_453_294;
 const DEFAULT_THIRD_FOV: f32 = 48.0;
 const GUNNER_AIM_TENSION: f32 = 1000.0;
+const HOVER_MOVE_TENSION: [f32; 2] = [12.0; 2];
 /// The camera detach factor during Falling / Crashed (SWBFRNT2.ELF FUN_0020d450 line 122651:
 /// move tension scaled by 0.25f, allowing camera to lag behind falling/crashing craft).
 pub const FLYER_CRASH_DETACH_RATE: f32 = 0.25;
@@ -90,16 +91,26 @@ impl FlyerSection {
 
     /// A hover's pilot section (`analysis/re-hover-camera.md` 2): the
     /// BODY's `TrackCenter` on the untilted body, `TrackOffset` along the
-    /// view, `TiltValue` in degrees, the section's `AimTension` (ctor 1000)
-    /// and `MoveTension`, and `BoostFOV` as the fast end of the FOV (B2
-    /// `FUN_00221388`). No slow or fast offset: the hover passes none.
-    pub fn hover(seat: Option<&SeatSpec>) -> Self {
+    /// view, `TiltValue` in degrees, the section's `AimTension` and
+    /// `MoveTension`, and `BoostFOV` as the fast end of the FOV (B2
+    /// `FUN_00221388`). No slow or fast offset: the hover passes none. The
+    /// hover class ctor sets the BODY section's six move tensions to 12 and
+    /// its aim tension to FLT_MAX in BF2 (B2:136004-136011), 30 in BF1
+    /// (B1:101081-101087); a class's own `MoveTension` / `AimTension`
+    /// replace them (re-hover §13.13).
+    pub fn hover(seat: Option<&SeatSpec>, rules: GroundRules) -> Self {
+        let tension = |axis: usize| {
+            seat.and_then(|s| s.move_tension[axis])
+                .unwrap_or(HOVER_MOVE_TENSION)
+        };
+        let aim = seat.and_then(|s| s.aim_tension);
         FlyerSection {
             tilt: seat.and_then(|s| s.tilt_value).unwrap_or(0.0) * DEGREES,
-            aim_tension: Some(
-                seat.and_then(|s| s.aim_tension)
-                    .unwrap_or(GUNNER_AIM_TENSION),
-            ),
+            aim_tension: match rules {
+                GroundRules::Bf2 => aim,
+                _ => Some(aim.unwrap_or(BF1_AIM_TENSION)),
+            },
+            move_tension: [tension(0), tension(1), tension(2)],
             fast_fov: seat.and_then(|s| s.boost_fov).unwrap_or(0.0),
             slow_offset: Vec3::ZERO,
             fast_offset: Vec3::ZERO,
@@ -271,7 +282,7 @@ impl WalkSim {
             .get(v.class as usize)
             .and_then(|seats| seats.first());
         if v.kind == VehicleKind::Hover {
-            return FlyerSection::hover(seat);
+            return FlyerSection::hover(seat, self.sim.ground_rules);
         }
         FlyerSection::of(seat, self.sim.ground_rules)
     }
@@ -734,6 +745,69 @@ mod tests {
         assert_eq!(section.center, Vec3::new(1.0, 2.0, 3.0));
         assert_eq!(section.offset, Vec3::ZERO);
         assert_eq!(section.move_tension, [DEFAULT_MOVE_TENSION; 3]);
+    }
+
+    fn barc_pilot(rules: GroundRules) -> (WalkSim, VehicleHandle) {
+        use core::vehicle::{SeatKind, VehicleSpec};
+        let mut w = WalkSim::new(1, Vec3::ZERO, None);
+        let h = w.sim.spawn_vehicle(&VehicleSpec {
+            kind: VehicleKind::Hover,
+            class: 0,
+            home_team: None,
+            neutral_when_empty: false,
+            spawn_pad: None,
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            max_health: 100.0,
+            health_type: core::weapon::HealthType::Vehicle,
+            seats: vec![SeatKind::Pilot],
+        });
+        let mut seat = SeatSpec::new(SeatKind::Pilot);
+        seat.track_center = Some([0.0, 2.5, -6.0]);
+        seat.track_offset = Some([0.0, 0.0, 0.0]);
+        seat.tilt_value = Some(5.0);
+        w.vehicle_seats = vec![vec![seat]];
+        w.sim.ground_rules = rules;
+        let player = w.player;
+        assert!(w.sim.seat_unit(player, h, 0));
+        (w, h)
+    }
+
+    /// re-hover §13.13: the BARC's camera against two PS2 save states. Held
+    /// at full stick with no speed (ω.yaw 2) it sits at (0.800, 2.514,
+    /// −5.861) in the hull's frame; at 40 m/s straight, 8.713 behind. Both
+    /// are the hover ctor's move tension 12 (B2:136004-136011).
+    #[test]
+    fn a_hovers_camera_trails_a_turn_and_a_run_as_the_ps2s_does() {
+        let (mut w, h) = barc_pilot(GroundRules::Bf2);
+        let section = w.flyer_section(w.sim.vehicle(h).unwrap());
+        assert_eq!(section.move_tension, [[12.0; 2]; 3]);
+        assert_eq!(section.aim_tension, None);
+        let mut yaw = 0.0f32;
+        for _ in 0..120 {
+            yaw += 2.0 * core::TICK_DT;
+            w.sim.vehicle_mut(h).unwrap().rot = Quat::from_rotation_y(yaw);
+            w.cam_flyer = w.next_cam_flyer(w.camera().position);
+        }
+        let local = Quat::from_rotation_y(yaw).inverse() * w.cam_flyer.unwrap().eye;
+        assert!((local.x.abs() - 0.800).abs() < 0.02, "{local}");
+        assert!((local.y - 2.5).abs() < 0.02, "{local}");
+        assert!((local.z + 5.861).abs() < 0.02, "{local}");
+
+        let (mut w, h) = barc_pilot(GroundRules::Bf2);
+        let mut pos = Vec3::ZERO;
+        for _ in 0..120 {
+            pos.z += 40.0 * core::TICK_DT;
+            w.sim.vehicle_mut(h).unwrap().pos = pos;
+            w.cam_flyer = w.next_cam_flyer(w.camera().position);
+        }
+        let behind = pos.z - w.cam_flyer.unwrap().eye.z;
+        assert!((behind - 8.713).abs() < 0.02, "{behind}");
+
+        let (w, h) = barc_pilot(GroundRules::Bf1);
+        let section = w.flyer_section(w.sim.vehicle(h).unwrap());
+        assert_eq!(section.move_tension, [[12.0; 2]; 3]);
+        assert_eq!(section.aim_tension, Some(30.0));
     }
 
     fn tie_pilot() -> (WalkSim, VehicleHandle) {

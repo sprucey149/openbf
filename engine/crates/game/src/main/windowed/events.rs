@@ -359,7 +359,7 @@ impl winit::application::ApplicationHandler for App {
                                 let look = if controls.is_some() {
                                     1.0
                                 } else {
-                                    walk.pad_look_for_battle(
+                                    walk.pad_look_for_seat(
                                         self.profile.settings.pad_look_sensitivity,
                                     )
                                 };

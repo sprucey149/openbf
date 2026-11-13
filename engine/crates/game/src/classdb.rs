@@ -23,6 +23,7 @@ pub use core::hero_weapon::sound_hash as fnv1a_lowercase;
 // One record of a classes.ron — `manifest`'s struct, the same one
 // `bake::classes` writes (queue item CT), so the reader cannot drift.
 pub use manifest::ClassDef;
+use manifest::DAMAGE_ORDER_DIR;
 
 /// A map's own classes file, beside its `manifest.ron` (`bake::map::bake_map`
 /// writes it).
@@ -68,6 +69,10 @@ pub struct ClassDb {
     assets_root: Option<std::path::PathBuf>,
     /// Keep every class as its disc wrote it ([`ClassDb::disc`]).
     disc: bool,
+    /// Damage-slot rows a later class wrote into this one's slots, keyed by
+    /// lowercase class name: (the class's own `DamageStartPercent` ordinal,
+    /// key hash, raw value) ([`ClassDb::replay_damage_loads`]).
+    damage_patches: HashMap<String, Vec<(usize, u32, String)>>,
 }
 
 impl ClassDb {
@@ -174,6 +179,81 @@ impl ClassDb {
                 .and_then(|txt| ron::from_str::<manifest::ManifestHead>(&txt).ok())
                 .is_some_and(|h| crate::normalize::covers_map(&h.source_game));
         self.load_file(&p, bf1_map)
+    }
+
+    /// Replay how the PS2 creates a BF2 mission's classes, to find damage
+    /// rows that land in another class's slots (re-hover §13.12). The
+    /// damageable setter `FUN_0026a340` points its global `DAT_005fd2c0` at
+    /// the slot each `DamageStartPercent` allocates (B2:186058-186096) and
+    /// writes every other damage row through it (B2:186129-186167,
+    /// 186306-186313, 186362-186400); nothing resets it between classes, so a
+    /// class whose damage rows come before any Start (BF2's guided-rocket
+    /// ordnance) writes into the last slot of the class created before it.
+    /// Order: `ingame.lvl` whole, then each run of `loads` on one side file
+    /// as one `ReadDataFile` call, its requested sub-levels and top level in
+    /// file order; a class already created is not created again. Checked on
+    /// a KAS2 save state: the BARC's 20 % flame holds scale 1.0 there, and
+    /// the STAP and snail tank loaded after it keep theirs.
+    pub fn replay_damage_loads(
+        &mut self,
+        classes_dir: &Path,
+        game: &str,
+        loads: &[crate::mission::SideClassLoad],
+    ) {
+        self.damage_patches.clear();
+        if game != "bf2" || loads.is_empty() {
+            return;
+        }
+        let read = |file: &str| -> Vec<manifest::DamageLoad> {
+            let p = classes_dir.join(DAMAGE_ORDER_DIR).join(file);
+            pak::read_to_string(&p)
+                .ok()
+                .and_then(|t| ron::from_str(&t).ok())
+                .unwrap_or_default()
+        };
+        let mut reads: Vec<(Vec<manifest::DamageLoad>, Option<Vec<u32>>)> =
+            vec![(read("bf2_ingame.ron"), None)];
+        for run in loads.chunk_by(|a, b| a.side.eq_ignore_ascii_case(&b.side)) {
+            let file = format!("bf2_{}.ron", run[0].side.to_ascii_lowercase());
+            let wanted = run.iter().map(|l| fnv1a_lowercase(&l.request)).collect();
+            reads.push((read(&file), Some(wanted)));
+        }
+        let start = fnv1a_lowercase("DamageStartPercent");
+        let mut created = std::collections::HashSet::new();
+        let mut starts: HashMap<String, usize> = HashMap::new();
+        let mut cur: Option<(String, usize)> = None;
+        for (order, wanted) in &reads {
+            for d in order {
+                let loaded = match (d.sub, wanted) {
+                    (Some(sub), Some(w)) => w.contains(&sub),
+                    _ => true,
+                };
+                let name = d.class.to_ascii_lowercase();
+                if !loaded || !created.insert(name.clone()) {
+                    continue;
+                }
+                for (k, v) in &d.rows {
+                    if *k == start {
+                        let n = starts.entry(name.clone()).or_default();
+                        cur = (*n < 10).then(|| (name.clone(), *n));
+                        *n += 1;
+                    } else if let Some((owner, i)) = cur.as_ref().filter(|c| c.0 != name) {
+                        self.damage_patches
+                            .entry(owner.clone())
+                            .or_default()
+                            .push((*i, *k, v.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The damage rows later classes wrote into `class`'s own slots
+    /// ([`ClassDb::replay_damage_loads`]).
+    pub fn damage_patches(&self, class: &str) -> &[(usize, u32, String)] {
+        self.damage_patches
+            .get(&class.to_ascii_lowercase())
+            .map_or(&[], Vec::as_slice)
     }
 
     /// `class` and its BASE chain, child first, down to the last def the db

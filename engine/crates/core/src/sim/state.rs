@@ -359,6 +359,10 @@ pub struct Sim {
     /// SETUP data like `weapon_classes`, NOT hashed. A vehicle whose class
     /// has none, or is past the end, stands still (`Sim::tick_hovers`).
     pub hover_params: Vec<Option<crate::vehicle::hover::HoverParams>>,
+    /// Per vehicle CLASS, a hover pilot seat's camera section, where a
+    /// player's aim ray starts (`ChaseSection::ray_origin`) — `None` for a
+    /// class that is not a hover. SETUP data, NOT hashed.
+    pub hover_chase: Vec<Option<crate::vehicle::hover::ChaseSection>>,
     /// Per vehicle CLASS, the walker numbers (card WALK) — `None` for a
     /// class that is not a walker. SETUP data, NOT hashed. A walker whose
     /// class has none stands still (`Sim::tick_walkers`).
@@ -1056,6 +1060,7 @@ impl Sim {
             vehicle_pads: Vec::new(),
             building_turrets: Vec::new(),
             hover_params: Vec::new(),
+            hover_chase: Vec::new(),
             flyer_params: Vec::new(),
             flight_limits: super::flyers::FlightLimits::default(),
             landing_regions: Vec::new(),

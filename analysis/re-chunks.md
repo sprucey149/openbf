@@ -135,10 +135,14 @@ B2 lines 84822–85112 (`SWBFRNT2.ELF-decomp.c`):
 - Ground modes keep the PS2 floor rays: the settle ray and the below-terrain ray see the map's bodies only
   (`HullFilter::Static`; §4's masks 0x90 and 0x10 hold no vehicle), so a piece never rests on a hull that drives
   away. Space rounds cast them at every hull.
-- A class with no chunk slot of its own throws nothing on the ground. In space it borrows its explosion class's
-  slot, `NumChunks` copies (at most 10), on the vehicle law. The explosion's own debris law (`re-vehicle-death.md`
-  §6.1: random direction, ChunkSpeed as a range, no bounce, 5 s) is not ported; `replace:` both with that law.
+- A vehicle's death throws its own slots only, on both rules. Its explosion's debris goes off with the explosion
+  (`Chunks::blast`, from `Fx::explode`), as every explosion's does on the PS2 (`re-vehicle-death.md` §6.1, built
+  2026-11-13). It throws `NumChunks` pieces (at most 10) of the class's one template, each randomly oriented, at a
+  speed in the `ChunkSpeed` range (or U(1, 2)·PushRadius), up and out, from `ChunkStartDistance` along the direction.
+  The template has no bounce, stickiness or damping. The space rounds' old stand-in, which borrowed this template on
+  the vehicle law, is gone.
 - The rest life is 3 s on the ground on both games. A space round keeps BF2's 8 s, measured on a frigate (`re-space-assault.md` §23).
+  Explosion debris rests 5 s on both (B2 FUN_001d6608 B2:83830-83835 starts its timer at 3.0 of 8; BF1 at −2 of 3).
 - SIMPLE uses the FULL handler, since SIMPLE is never authored.
 - The push-out ignores the chunk's own collision layer, which is not traced.
 - Historical before issue #80: droid chunks used mesh-bounds spheres and ignored `ChunkNodeName`.

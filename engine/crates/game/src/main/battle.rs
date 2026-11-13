@@ -543,13 +543,14 @@ pub(super) fn make_walk_with_counts(
                 b.space_score_limit,
             )
         });
-        match game::vehicle_pads::install_with_objective(
+        match game::vehicle_pads::install_for_mission(
             &mut walk.sim,
             &scene.manifest,
             &scene.dir,
             &b.classes_dir,
             &factions,
             space.as_ref().map(|(def, limit)| (def, *limit)),
+            b.mission.as_ref().map_or(&[][..], |m| &m.class_load_order),
         ) {
             Ok(p) => {
                 println!(
@@ -567,6 +568,7 @@ pub(super) fn make_walk_with_counts(
                 walk.vehicle_weapon_hud = p.weapon_hud;
                 walk.walker_shot_styles = p.walker_shot_styles;
                 walk.flyer_exhaust = p.flyer_exhaust;
+                walk.hover_water = p.hover_water;
                 walk.load_walker_views(&scene.manifest, scene.dir.parent().unwrap_or(&scene.dir));
                 walk.load_vehicle_tops(
                     &scene.manifest,

@@ -1204,6 +1204,7 @@ impl Sim {
             // (The jets too, card JETP: `Stance::airborne`.)
             let in_air = !s0.grounded && s0.stance.airborne();
             let to = self.units[i].capsule();
+            self.vehicle_impacts(i, &to);
             self.units[i].wall_push = resolve_soldier_walls(
                 &self.collision,
                 &mut self.units[i].soldier,
@@ -1259,6 +1260,9 @@ impl Sim {
                 self.units[i]
                     .soldier
                     .resolve_ground(dt, fy, fnrm, from.base.y, rules);
+                if self.units[i].soldier.grounded {
+                    self.units[i].stood_on = floor_owner;
+                }
                 if rules == GroundRules::Bf2
                     && self.units[i].alive
                     && (carried || floor_owner.is_some())

@@ -172,6 +172,9 @@ impl ImpactLook {
 /// or below the water + 0.3 m (B1 `FUN_002701a0` B1:193761–193807).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ExplosionLook {
+    /// The explosion class's name, lowercase: its debris
+    /// (`game::fx::chunks::Chunks::blast`) goes off with it.
+    pub class: String,
     pub effects: Vec<String>,
     pub water_effect: Option<String>,
     /// `SoundProperty`: played once per explosion, at the blast, whatever

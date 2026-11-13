@@ -1179,6 +1179,56 @@ fn hull_parts_for(
     out
 }
 
+/// A hover's `AddSpringBody` spheres as hull parts, in the soldier, vehicle
+/// and ordnance subsets [`crate::vehicle_class::HoverClass::spring_subsets`]
+/// leaves them in (`analysis/re-hover.md` §13.8). On a class whose lines do
+/// not name them afterwards (the BARC speeder) these are what stops a
+/// soldier and a bolt well clear of the drawn bike. No sphere for a class
+/// that is no hover, or one left in none of the three.
+pub fn spring_hull_parts(
+    db: &crate::classdb::ClassDb,
+    class: &str,
+    cg: &CollisionGeom,
+    class_collision: &[(String, String)],
+) -> Vec<core::collision::HullPart> {
+    use crate::collision_layers::{FLYER_USES_VEHICLE, MESH_BODY};
+    use core::collision::{HullPart, Layers, Shape};
+    let Some(hover) = crate::vehicle_class::HoverClass::from_db(db, class) else {
+        return Vec::new();
+    };
+    let bodies: Vec<String> = cg
+        .mesh
+        .iter()
+        .map(|_| MESH_BODY.to_owned())
+        .chain(cg.prims.iter().map(|p| p.name.to_ascii_lowercase()))
+        .collect();
+    let flyer_vehicle = class_collision.iter().any(|(k, _)| k == FLYER_USES_VEHICLE);
+    hover
+        .springs()
+        .iter()
+        .zip(hover.spring_subsets(&bodies))
+        .filter_map(|(s, [soldier, vehicle, ordnance])| {
+            let flyer = if flyer_vehicle { vehicle } else { soldier };
+            let layers = [
+                (soldier, Layers::SOLDIER),
+                (ordnance, Layers::ORDNANCE),
+                (vehicle, Layers::VEHICLE),
+                (flyer, Layers::FLYER),
+            ]
+            .into_iter()
+            .filter(|(on, _)| *on)
+            .fold(Layers::NONE, |all, (_, l)| all | l);
+            (layers != Layers::NONE).then(|| {
+                HullPart::new(
+                    glam::Mat4::from_translation(s.pos),
+                    Shape::Sphere { radius: s.radius },
+                    layers,
+                )
+            })
+        })
+        .collect()
+}
+
 /// The factor of a weak spot this port gives a vehicle: BF2's own, on every
 /// one of its critical prims.
 pub const WEAK_SPOT_FACTOR: f32 = 4.0;

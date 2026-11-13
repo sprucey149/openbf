@@ -693,6 +693,8 @@ pub struct WalkSim {
     pub hover_rigs: Vec<Option<std::sync::Arc<crate::viewer::walker_pose::WalkerRig>>>,
     pub walker_shot_styles: std::collections::HashMap<usize, crate::walker_shots::Style>,
     pub flyer_exhaust: Vec<Vec<crate::vehicle_pads::FlyerExhaust>>,
+    /// Each vehicle class's hover `WaterEffect` ([`crate::vehicle_pads::PadBuild::hover_water`]).
+    pub hover_water: Vec<Option<String>>,
     pub vehicle_weapon_hud: Vec<Vec<Vec<WeaponHud>>>,
     /// Each vehicle class's seats' rider hangs, parallel to `vehicle_seats`
     /// (visual only, card VRIDE): read by `crate::soldier_vis`.
@@ -883,6 +885,7 @@ impl WalkSim {
             vehicle_weapon_hud: Vec::new(),
             walker_shot_styles: Default::default(),
             flyer_exhaust: Vec::new(),
+            hover_water: Vec::new(),
             vehicle_riders: Vec::new(),
             vehicle_engines: Vec::new(),
             vehicle_sounds: Vec::new(),
@@ -1186,6 +1189,22 @@ impl WalkSim {
         match self.space_battle() {
             true => 1.0,
             false => crate::profile::clamp_pad_look(value),
+        }
+    }
+
+    /// The right stick's scale for the player's seat now. On foot it is the
+    /// battle's look sensitivity over [`input::LOOK_SCALE`] (ours, the
+    /// soldier camera's feel). In any vehicle seat the stick reaches 1 at a
+    /// full throw, as the PS2's does (`re-look-ramp.md` §1 [M]: BF2's stick
+    /// word is 1.0 at a full throw and the game applies no sensitivity),
+    /// so the full-stick timer (turn² + pitch² ≥ 0.9, B2 `FUN_002b0548`,
+    /// `re-hover.md` §5.2) runs and a hover turns at its TurnRate rather
+    /// than its PitchRate. A flyer's own sticks undo the scale the same way
+    /// (`input::flyer_sticks`).
+    pub fn pad_look_for_seat(&self, value: f32) -> f32 {
+        match self.player_on_foot() {
+            true => self.pad_look_for_battle(value),
+            false => 1.0 / input::LOOK_SCALE,
         }
     }
 
@@ -1543,7 +1562,9 @@ mod death_camera;
 mod flyer_camera;
 pub use camera::{CamOwner, Handover, DEATH_VIEW_HOLD};
 pub use death_camera::DeathCam;
-pub use flyer_camera::{guided_section, FlyerCam, GuidedCam, GunnerCam, FLYER_CRASH_DETACH_RATE};
+pub use flyer_camera::{
+    guided_section, FlyerCam, FlyerSection, GuidedCam, GunnerCam, FLYER_CRASH_DETACH_RATE,
+};
 
 #[cfg(test)]
 mod tests;

@@ -140,7 +140,26 @@ pub struct HoverClass {
     /// a spring holds exactly the bodies named, never the layer default.
     pub terrain_bodies: Vec<String>,
     pub building_bodies: Vec<String>,
+    /// The soldier, vehicle and ordnance lines and the `AddSpringBody`
+    /// spheres in PROP order, for [`Self::spring_subsets`].
+    spring_steps: Vec<SpringStep>,
 }
+
+/// One PROP of [`HoverClass::spring_subsets`]'s replay.
+#[derive(Clone, Debug, PartialEq)]
+enum SpringStep {
+    /// `GeometryName`: the generic parser resets the layer accumulators
+    /// (B2:127747-127766, B1:92633-92651).
+    Geometry,
+    /// `SoldierCollision` (0), `VehicleCollision` (1) or
+    /// `OrdnanceCollision` (2) naming a body, lowercased.
+    Line(usize, String),
+    /// An `AddSpringBody` sphere joins the model.
+    Spring,
+}
+
+/// The [`SpringStep::Line`] index of each subset key.
+const SPRING_STEP_KEYS: [&str; 3] = ["SoldierCollision", "VehicleCollision", "OrdnanceCollision"];
 
 /// `SetSpringBody` (re-hover §13.2): a spring on an existing primitive.
 const SET_SPRING_BODY: u32 = 0x577b_739e;
@@ -194,6 +213,7 @@ impl Default for HoverClass {
                 energy_boost_drain: 0.0,
                 jump: JumpParams::default(),
                 random_spring: true,
+                floats_on_water: true,
                 springs: Vec::new(),
                 bf1_ai: false,
                 hull: Vec::new(),
@@ -204,6 +224,7 @@ impl Default for HoverClass {
             level_damp: 3.0,
             terrain_bodies: Vec::new(),
             building_bodies: Vec::new(),
+            spring_steps: Vec::new(),
         }
     }
 }
@@ -317,6 +338,7 @@ impl HoverClass {
             c.motion.springs.clear();
             c.terrain_bodies.clear();
             c.building_bodies.clear();
+            c.spring_steps.clear();
             c.motion.velocity_spring = d.motion.velocity_spring;
             c.motion.velocity_damp = d.motion.velocity_damp;
             c.motion.omega_x_spring = d.motion.omega_x_spring;
@@ -416,9 +438,57 @@ impl HoverClass {
         &self.motion.springs
     }
 
+    /// Whether each [`Self::springs`] sphere ends in the class model's
+    /// soldier, vehicle and ordnance subsets (`analysis/re-hover.md` §13.8).
+    /// `bodies` are the lowercased names of the bodies the geometry gave the
+    /// model before any spring: `collisionmesh` when it has a mesh, and each
+    /// primitive.
+    ///
+    /// The sphere joins with MASK 0, which ORs it into all five subsets
+    /// (B2 `FUN_00167048`, B2:5917-5966). A later line of a layer then
+    /// replaces that subset with its accumulator, so the sphere stays only if
+    /// a line named it (B2 `FUN_00216378` / `FUN_002160a8` / `FUN_00216288`);
+    /// `none` / `clear` empties it, and a name no body has writes nothing.
+    /// `VehicleCollisionOnly` is read only by `FUN_0022f6e8` (B2:145579),
+    /// which the hover setter never calls.
+    pub fn spring_subsets(&self, bodies: &[String]) -> Vec<[bool; 3]> {
+        let mut names: Vec<String> = bodies.to_vec();
+        let mut acc: [Vec<String>; 3] = Default::default();
+        let mut out: Vec<[bool; 3]> = Vec::new();
+        let spring = |j: usize| format!("{SPRING_BODY}{}", j + 1);
+        for step in &self.spring_steps {
+            match step {
+                SpringStep::Geometry => acc.iter_mut().for_each(Vec::clear),
+                SpringStep::Spring => {
+                    names.push(spring(out.len()));
+                    out.push([true; 3]);
+                }
+                SpringStep::Line(k, v) => {
+                    if v == "none" || v == "clear" {
+                        acc[*k].clear();
+                    } else if names.contains(v) {
+                        if !acc[*k].contains(v) {
+                            acc[*k].push(v.clone());
+                        }
+                    } else {
+                        continue;
+                    }
+                    for (j, s) in out.iter_mut().enumerate() {
+                        s[*k] = acc[*k].contains(&spring(j));
+                    }
+                }
+            }
+        }
+        out
+    }
+
     fn set(&mut self, k: u32, v: &str) {
         if k == h("NoRandomSpring") {
             self.motion.random_spring = false;
+            return;
+        }
+        if k == h("FloatsOnWater") {
+            self.motion.floats_on_water = walker::strtol_nonzero(v);
             return;
         }
         let scalars: [(&str, &mut f32); 34] = [
@@ -486,6 +556,10 @@ impl HoverClass {
             // The generic parser resets the layer accumulators (§13.2 step 1).
             self.terrain_bodies.clear();
             self.building_bodies.clear();
+            self.spring_steps.push(SpringStep::Geometry);
+        } else if let Some(layer) = SPRING_STEP_KEYS.iter().position(|n| k == h(n)) {
+            self.spring_steps
+                .push(SpringStep::Line(layer, v.trim().to_ascii_lowercase()));
         } else if k == h("TerrainCollision") {
             name_body(&mut self.terrain_bodies, v);
         } else if k == h("BuildingCollision") {
@@ -501,6 +575,7 @@ impl HoverClass {
                     let name = format!("{SPRING_BODY}{}", self.motion.springs.len());
                     name_body(&mut self.building_bodies, &name);
                     name_body(&mut self.terrain_bodies, &name);
+                    self.spring_steps.push(SpringStep::Spring);
                 }
             }
         } else if let Some(p) = self.motion.springs.last_mut() {
@@ -942,10 +1017,12 @@ impl DamageEffect {
 /// still unset — a Start with no Effect is overwritten by the next — and
 /// every other damage prop writes the slot it picked; with all 10 slots
 /// holding an effect, the rest are dropped. The pointer is a global the
-/// PS2 never resets between classes; here it starts empty per class, which
-/// differs only for a class whose first damage prop is not a Start (none
-/// on the discs, [H]). BODY scope (portable turrets also author these after
-/// TURRET1), over the BASE chain root first.
+/// PS2 never resets between classes; here it starts empty per class, and
+/// the rows a later class writes through it (BF2's guided-rocket ordnance
+/// authors damage rows before any Start) come from
+/// [`ClassDb::replay_damage_loads`], applied after each def's own rows.
+/// BODY scope (portable turrets also author these after TURRET1), over the
+/// BASE chain root first.
 pub fn damage_effects(db: &ClassDb, class: &str) -> Vec<DamageEffect> {
     // An empty `effect` is the PS2's null effect: the slot is still free.
     let mut slots: Vec<DamageEffect> = Vec::new();
@@ -956,11 +1033,13 @@ pub fn damage_effects(db: &ClassDb, class: &str) -> Vec<DamageEffect> {
         .engine_base(class)
         .is_some_and(|base| FLYER_BASES.contains(&base));
     for def in db.chain(class).into_iter().rev() {
+        let mut own: Vec<Option<usize>> = Vec::new();
         for (scope, k, v) in scoped_rows(def, !flyer) {
             if scope != Scope::Body && !portable && !flyer {
                 continue;
             }
             if k == h("DamageStartPercent") {
+                own.push(None);
                 cur = slots.iter().position(|s| s.effect.is_empty());
                 if cur.is_none() && slots.len() < MAX_DAMAGE_EFFECTS {
                     slots.push(DamageEffect {
@@ -977,25 +1056,35 @@ pub fn damage_effects(db: &ClassDb, class: &str) -> Vec<DamageEffect> {
                     slots[i].start = float(v).unwrap_or(0.0) * 0.01;
                     slots[i].stop = 0.0;
                 }
+                if let Some(o) = own.last_mut() {
+                    *o = cur;
+                }
                 continue;
             }
-            let Some(s) = cur.map(|i| &mut slots[i]) else {
-                continue;
-            };
-            match k {
-                _ if k == h("DamageStopPercent") => s.stop = float(v).unwrap_or(0.0) * 0.01,
-                _ if k == h("DamageEffect") => s.effect = v.trim().to_owned(),
-                _ if k == h("DamageAttachPoint") => s.attach = Some(v.trim().to_owned()),
-                _ if k == h("DamageEffectScale") => s.scale = float(v).unwrap_or(0.0),
-                _ if k == h("DamageInheritVelocity") => {
-                    s.inherit_velocity = float(v).unwrap_or(0.0)
-                }
-                _ => {}
+            if let Some(s) = cur.map(|i| &mut slots[i]) {
+                set_damage_row(s, k, v);
+            }
+        }
+        for (n, k, v) in db.damage_patches(&def.name) {
+            if let Some(&Some(i)) = own.get(*n) {
+                set_damage_row(&mut slots[i], *k, v);
             }
         }
     }
     slots.retain(|s| !s.effect.is_empty());
     slots
+}
+
+/// One damage row other than `DamageStartPercent` into slot `s`.
+fn set_damage_row(s: &mut DamageEffect, k: u32, v: &str) {
+    match k {
+        _ if k == h("DamageStopPercent") => s.stop = float(v).unwrap_or(0.0) * 0.01,
+        _ if k == h("DamageEffect") => s.effect = v.trim().to_owned(),
+        _ if k == h("DamageAttachPoint") => s.attach = Some(v.trim().to_owned()),
+        _ if k == h("DamageEffectScale") => s.scale = float(v).unwrap_or(0.0),
+        _ if k == h("DamageInheritVelocity") => s.inherit_velocity = float(v).unwrap_or(0.0),
+        _ => {}
+    }
 }
 
 pub fn prop_float(db: &ClassDb, class: &str, key: &str) -> Option<f32> {

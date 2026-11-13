@@ -53,6 +53,7 @@ const PAD_HOLD_RISE: f32 = 4.0;
 struct WorldContacts<'a> {
     heightfield: Option<&'a Heightfield>,
     collision: &'a CollisionWorld,
+    water: Option<crate::water::Plane<'a>>,
 }
 
 impl WorldContacts<'_> {
@@ -125,6 +126,10 @@ impl ContactSource for WorldContacts<'_> {
             );
             self.buildings(shape, to_world, out);
         }
+    }
+
+    fn water_under(&self, at: Vec3) -> Option<f32> {
+        self.water.as_ref().and_then(|w| w.under(at))
     }
 }
 
@@ -755,6 +760,15 @@ impl Sim {
             let world = WorldContacts {
                 heightfield: self.heightfield.as_ref(),
                 collision: &self.collision,
+                water: self.water_level.map(|level| crate::water::Plane {
+                    level: level
+                        + if self.water_oscillates {
+                            crate::water::bob(self.tick as f32 * crate::TICK_DT)
+                        } else {
+                            0.0
+                        },
+                    mask: self.water_mask.as_ref(),
+                }),
             };
             let from = v.pos;
             let held_up = v.rot * Vec3::Y;
@@ -835,6 +849,15 @@ impl Sim {
             let world = WorldContacts {
                 heightfield: self.heightfield.as_ref(),
                 collision: &self.collision,
+                water: self.water_level.map(|level| crate::water::Plane {
+                    level: level
+                        + if self.water_oscillates {
+                            crate::water::bob(self.tick as f32 * crate::TICK_DT)
+                        } else {
+                            0.0
+                        },
+                    mask: self.water_mask.as_ref(),
+                }),
             };
             let from = v.pos;
             walker::step(&mut self.vehicles[i], p, &world, dt);

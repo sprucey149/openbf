@@ -1220,6 +1220,22 @@ pub struct SoldierLod {
     pub sphere: [f32; 4],
 }
 
+/// The subfolder of a classes folder that holds each class file's
+/// [`DamageLoad`] list, under the class file's own name.
+pub const DAMAGE_ORDER_DIR: &str = "load_order";
+
+/// One class definition that sets damage-slot keys, as a side or shared LVL
+/// holds it (`classes/load_order/<class file>`, `bake::classes::damage_load_order`):
+/// the PS2 creates a read file's classes in this order (re-hover §13.12).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DamageLoad {
+    /// The `lvl_` sub-level hash that holds it; `None` at the top level.
+    pub sub: Option<u32>,
+    pub class: String,
+    /// Its damage-slot rows, (key hash, raw value), in file order.
+    pub rows: Vec<(u32, String)>,
+}
+
 /// One munged gameplay class: its name, the chunk it came from, its BASE and
 /// its PROP list as stored. Keys stay FNV-1a hashes and values raw strings;
 /// the lookups live with their callers (`bake::classes::ClassProps`,

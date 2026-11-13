@@ -172,10 +172,10 @@ pub(crate) fn explosion_class(db: &ClassDb, name: &str) -> Option<ExplosionClass
 /// when the class is not in the db.
 pub fn explosion_look(db: &ClassDb, explosion: &str) -> Option<ExplosionLook> {
     db.get(explosion)?;
-    Some(ExplosionLook::replay(
-        chain_props(db, explosion),
-        db.is_bf2(),
-    ))
+    Some(ExplosionLook {
+        class: explosion.trim().to_ascii_lowercase(),
+        ..ExplosionLook::replay(chain_props(db, explosion), db.is_bf2())
+    })
 }
 
 pub(super) fn capitalise(s: &str) -> String {

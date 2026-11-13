@@ -782,6 +782,49 @@ impl CollisionWorld {
         );
     }
 
+    /// Each vehicle whose hull's soldier subset `cap` penetrates, with the
+    /// unit normal of its deepest contact (out of the hull, at the soldier),
+    /// in ascending hull order: the vehicle contacts of the soldier's
+    /// collision response (B2 `FUN_0023cfd0`, `analysis/re-hover.md` §13.9).
+    pub fn soldier_hull_contacts(&self, cap: &Capsule) -> Vec<(crate::vehicle::VehicleHandle, Vec3)> {
+        let (shape, iso) = cap.to_parry();
+        let aabb = cap.aabb();
+        let mut out: Vec<(crate::vehicle::VehicleHandle, f32, Vec3)> = Vec::new();
+        self.visit_xz(
+            aabb.min.x,
+            aabb.max.x,
+            aabb.min.z,
+            aabb.max.z,
+            HullFilter::Hulls,
+            |body| {
+                let Some(owner) = body.owner else {
+                    return;
+                };
+                if !body.layers.contains(Layers::SOLDIER) || !body.aabb.overlaps(&aabb) {
+                    return;
+                }
+                let c = match &body.shape {
+                    Shape::Mesh(mesh) => mesh_contact(mesh, body, &shape, &iso, None, false),
+                    _ => body.shape.with_parry(&mut |s| {
+                        parry3d::query::contact(&iso, &shape, &body.iso, s, 0.0)
+                            .ok()
+                            .flatten()
+                    }),
+                };
+                let Some(c) = c.filter(|c| c.dist < 0.0) else {
+                    return;
+                };
+                let n = Vec3::new(c.normal2.x, c.normal2.y, c.normal2.z);
+                match out.iter_mut().find(|(o, _, _)| *o == owner) {
+                    Some(seen) if seen.1 < -c.dist => *seen = (owner, -c.dist, n),
+                    Some(_) => {}
+                    None => out.push((owner, -c.dist, n)),
+                }
+            },
+        );
+        out.into_iter().map(|(owner, _, n)| (owner, n)).collect()
+    }
+
     /// PROVISIONAL (ours): the first WALL the capsule would SWEEP into moving
     /// `dist` metres along `dir_xz` — `(distance to the hit, unit XZ push
     /// normal)`, or `None` when the whole sweep is clear. The normal is the

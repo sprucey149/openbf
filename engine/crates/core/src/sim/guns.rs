@@ -206,6 +206,38 @@ impl Sim {
         }
     }
 
+    /// Where a seat's aim ray starts: `eye`, except for a player driving a
+    /// hover in the chase view, whose ray starts at the chase camera carried
+    /// to the eye's depth along the aim (`ChaseSection::ray_origin`,
+    /// B2:132343-132461). The PS2 takes the eye itself when E+0x3e0 is set or
+    /// the view is first person (B2:132343-132373, 132462-132472); the port
+    /// takes it zoomed (which of the two a zoom sets is not traced). A bot's
+    /// driven hover keeps the eye too: which drivers have the E+0x2a0 the
+    /// branch tests (B2:132335-132342) is not traced.
+    #[allow(clippy::too_many_arguments)]
+    fn chase_ray_origin(
+        &self,
+        m: crate::vehicle::Mount,
+        g: &GunSetup,
+        driver: Option<usize>,
+        look_pitch: f32,
+        zoomed: bool,
+        eye: Vec3,
+        dir: Vec3,
+    ) -> Vec3 {
+        let player = driver.is_some_and(|i| matches!(self.units[i].controller, Controller::Player { .. }));
+        let Some(v) = self.vehicle(m.vehicle).filter(|v| v.kind == VehicleKind::Hover) else {
+            return eye;
+        };
+        if !g.pilot || zoomed || !player {
+            return eye;
+        }
+        match self.hover_chase.get(v.class as usize).copied().flatten() {
+            Some(c) => c.ray_origin(v, look_pitch, eye, dir),
+            None => eye,
+        }
+    }
+
     /// The first surface or soldier along the camera ray, else its end —
     /// past the seat's own vehicle's hull (card VHULL) and a building
     /// turret's own building (card TURR).
@@ -335,12 +367,9 @@ impl Sim {
         // (`ai::ManState::aim`, the PS2's AI seat).
         let target = bot_aim.unwrap_or_else(|| {
             let eye = pos + rot * g.ray_eye(st.look, st.zoom.is_some());
-            self.aim_point(
-                eye,
-                rot * gun::dir(st.look.0, st.look.1),
-                &riders,
-                m.vehicle,
-            )
+            let dir = rot * gun::dir(st.look.0, st.look.1);
+            let eye = self.chase_ray_origin(m, &g, driver, st.look.1, st.zoom.is_some(), eye, dir);
+            self.aim_point(eye, dir, &riders, m.vehicle)
         });
         let pivot = pos + rot * g.pivot;
         if g.turn.is_some() {

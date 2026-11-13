@@ -28,6 +28,9 @@ camera matrix and the projection. Every number below reproduces those states to 
 - [L] Slot 8: the camera at (0, 2.075, -11.02) in the hover's untilted frame, looking 7 degrees below the level aim.
   That is the chase law with center `TrackCenter` (0, 2, -5) in the hover's frame, `TrackOffset` (0, 0.5, 6) in the
   view's frame (x right, y up, z back), the view the aim direction tilted down by `TiltValue` 7.
+- [V][L] The section's tensions: the hover class ctor sets its six move tensions to 12 and its aim tension to FLT_MAX
+  (B2:136004-136011; BF1 12 and 30, B1:101081-101087), not the generic 30 / 1000; the BARC's section in RAM holds 12
+  and 0x7f7fffff (re-hover 13.13).
 - [O] The look, re-hover 5.1: the stick adds `pit x PitchRate x 30 x dt^2` to the aim pitch (I8, `rate` radians a
   second at 30 Hz); each update takes the body's own pitch change back out, `aimPitch -= oldUp . E'.fwd`
   (B2:131896-131935, I10), so the aim stays put in the world while the body pitches; then it clamps to

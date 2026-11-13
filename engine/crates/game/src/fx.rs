@@ -51,6 +51,7 @@ pub mod emitter;
 mod flame;
 mod flyer_spray;
 mod force;
+mod hover_water;
 mod jet;
 mod props;
 mod repair;
@@ -431,6 +432,7 @@ pub struct LiveEffect {
     station: Option<(usize, usize)>,
     vehicle: Option<(VehicleHandle, usize)>,
     flyer_exhaust: Option<(VehicleHandle, usize)>,
+    hover_water: Option<VehicleHandle>,
     burn: Option<(UnitHandle, usize, usize)>,
     float: Option<f32>,
 }
@@ -483,6 +485,7 @@ impl LiveEffect {
             station: None,
             vehicle: None,
             flyer_exhaust: None,
+            hover_water: None,
             burn: None,
             float: None,
         };
@@ -995,8 +998,10 @@ impl Fx {
     /// Detonate an explosion class's look at `pos` (B1 FUN_002701a0
     /// B1:193756–193807): its `Effect` — BF2 one of its rows at random (B2
     /// FUN_0030c8f8), or at or below `water` + 0.3 m its `WaterEffect` on the
-    /// surface, and only with a damage radius. False when nothing spawned.
+    /// surface, and only with a damage radius. Its debris is thrown either
+    /// way (B2:287993-288244). False when no effect spawned.
     pub fn explode(&mut self, look: &ExplosionLook, pos: Vec3, water: Option<f32>) -> bool {
+        self.chunks.blast(&look.class, pos, self.library.as_ref());
         let (spawned, pos) = match water.filter(|w| pos.y <= w + WATER_BLAST_DEPTH) {
             Some(w) => {
                 if look.radius_outer <= 0.0 {
@@ -1270,6 +1275,7 @@ impl Fx {
     pub fn ingest(&mut self, walk: &WalkSim) {
         self.ingest_sim(&walk.sim);
         self.follow_flyer_exhaust(walk);
+        self.follow_hover_water(walk);
         self.soldier_water(walk);
         self.chunks.tick(walk, self.library.as_ref());
         self.follow_jets(&walk.sim, |u| {
