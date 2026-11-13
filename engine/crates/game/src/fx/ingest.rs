@@ -7,6 +7,7 @@ impl Fx {
     pub fn ingest_sim(&mut self, sim: &Sim) {
         use core::sim::Event;
         self.tick = sim.tick;
+        self.shake_blasts.clear();
         self.follow_turrets(sim);
         self.follow_station_damage(sim);
         self.follow_vehicle_damage(sim);

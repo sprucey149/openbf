@@ -887,6 +887,8 @@ impl winit::application::ApplicationHandler for App {
                     // see-through (`game::camera_collide`).
                     see = walk.camera_see_through();
                     if let Some(r) = self.renderer.as_mut() {
+                        self.vehicle_vis
+                            .set_tick_share(game::render_blend::share(walk));
                         extra.extend(self.vehicle_vis.draws(r, &walk.sim, &see.vehicles));
                         extra.extend(self.vehicle_vis.chunk_draws(self.fx.lit_chunk_poses()));
                         self.deka_vis.eye = Some(walk.camera().position);
@@ -970,7 +972,7 @@ impl winit::application::ApplicationHandler for App {
                     spawn =
                         spawn_model(walk, &self.feed).map(|s| ui::spawn::SpawnModel { icons, ..s });
                     death_view = walk.death_cam.is_some() || walk.holds_seat_view();
-                    let camera = walk.camera();
+                    let camera = self.fx.shake.apply(walk.camera());
                     if let (Some(p), Some(me)) =
                         (self.frame_profile.as_mut(), walk.sim.unit(walk.player))
                     {

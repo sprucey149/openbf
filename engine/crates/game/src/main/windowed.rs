@@ -1187,6 +1187,7 @@ impl App {
             &self.assets_dir,
             &walk.vehicle_geometry,
         );
+        self.vehicle_vis.set_treads(walk.hover_treads.clone());
         let lit_chunks = self.vehicle_vis.load_chunks(
             renderer,
             scene,

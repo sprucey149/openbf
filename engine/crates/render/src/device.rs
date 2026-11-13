@@ -254,6 +254,24 @@ impl Renderer {
         Ok(TextureHandle(self.textures.len() as u32 - 1))
     }
 
+    /// A new handle on `base`'s pixels with params of its own, for a draw
+    /// whose UV offset moves on its own ([`Self::set_texture_uv_offset`]).
+    pub fn add_texture_instance(&mut self, base: TextureHandle) -> Option<TextureHandle> {
+        let tex = self
+            .textures
+            .get(base.0 as usize)?
+            .instance(&self.device, &self.texture_bgl);
+        self.textures.push(tex);
+        Some(TextureHandle(self.textures.len() as u32 - 1))
+    }
+
+    /// Shift every UV `texture` is sampled at by `offset` from now on.
+    pub fn set_texture_uv_offset(&mut self, texture: TextureHandle, offset: [f32; 2]) {
+        if let Some(t) = self.textures.get_mut(texture.0 as usize) {
+            t.set_uv_offset(&self.queue, offset);
+        }
+    }
+
     // ── Misc ─────────────────────────────────────────────────────────────────
 
     /// Current target size in pixels.

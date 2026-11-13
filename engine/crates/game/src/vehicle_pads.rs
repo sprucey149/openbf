@@ -202,6 +202,9 @@ pub struct PadBuild {
     /// Each hover class's `WaterEffect` (BF2 K+0xca4, BF1 K+0x26b4), the
     /// wake it keeps on the water under it; parallel to `classes`.
     pub hover_water: Vec<Option<String>>,
+    /// Each hover class's tread scroll (BF2 K+0xf9c, [`vehicle_class::tread`]);
+    /// parallel to `classes`, empty for a class with none.
+    pub hover_treads: Vec<Vec<vehicle_class::tread::Tread>>,
     pub weapon_hud: Vec<Vec<Vec<crate::walk::WeaponHud>>>,
     /// Each class's `EngineSound` and `TurnOffTime` (card VSND), parallel
     /// to `classes`; filled by [`install`].
@@ -795,6 +798,15 @@ pub fn install_for_mission(
                     .get(&c.to_ascii_lowercase())
                     .map_or(&[], Vec::as_slice),
             )
+        })
+        .collect();
+    b.hover_treads = b
+        .classes
+        .iter()
+        .map(|c| {
+            vehicle_class::HoverClass::from_db(&db, c)
+                .map(|h| h.treads.list().to_vec())
+                .unwrap_or_default()
         })
         .collect();
     b.hover_water = b

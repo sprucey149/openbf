@@ -29,6 +29,7 @@ pub mod leaf;
 mod look;
 mod pickups;
 mod scene;
+mod treads;
 pub mod stations;
 pub mod turret_fall;
 pub mod turret_pose;

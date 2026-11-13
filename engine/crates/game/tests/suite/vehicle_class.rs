@@ -313,6 +313,74 @@ fn bf2_speederbike_boost_energy_and_jump() {
     assert_eq!(t.jump.speed_factor, 0.3, "the ctor default");
 }
 
+/// BF2's tread scroll (`analysis/re-hover.md` §6.18): the disc's two
+/// treaded classes, through the whole class parse; no BF1 class has any.
+#[test]
+fn bf2_treads_are_the_authored_segments_and_rates() {
+    let mut db = ClassDb::default();
+    if !load_from(&mut db, "bf2", "SIDE/CIS.LVL", "cis2") {
+        return;
+    }
+    let treads = |c: &str| {
+        HoverClass::from_db(&db, c)
+            .expect("a hover")
+            .treads
+            .list()
+            .to_vec()
+    };
+    let snail = treads("cis_tread_snailtank");
+    assert_eq!(snail.len(), 1);
+    assert_eq!(snail[0].segment, "cis_tank_tread_tracks");
+    assert_eq!(
+        (snail[0].veloc, snail[0].omega),
+        ([0.0, -0.8333333], [0.0, 0.0])
+    );
+    let hail = treads("cis_tread_hailfire");
+    let rows: Vec<_> = hail
+        .iter()
+        .map(|t| (t.segment.as_str(), t.veloc, t.omega))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("wheel_left", [0.4, 0.0], [-1.1, 0.0]),
+            ("wheel_right", [0.4, 0.0], [1.1, 0.0]),
+        ]
+    );
+    let mut bf1 = ClassDb::default();
+    if load(&mut bf1, "SIDE/CIS.LVL", "cis1") {
+        let h = HoverClass::from_db(&bf1, "cis_tread_hailfire").expect("a hover");
+        assert!(h.treads.list().is_empty());
+    }
+}
+
+/// The snail tank authors its five damage bands after its eight
+/// `CHUNKSECTION`s; a chunk section closes nothing (B2 FUN_00214600
+/// B2:126998, B2 FUN_0026a340 B2:186058), so all five are the hull's.
+#[test]
+fn bf2_damage_rows_after_chunk_sections_are_the_hulls() {
+    let mut db = ClassDb::default();
+    if !load_from(&mut db, "bf2", "SIDE/CIS.LVL", "cis2-dmg") {
+        return;
+    }
+    let pct = |p: f32| p * 0.01;
+    let got: Vec<_> = damage_effects(&db, "cis_tread_snailtank")
+        .into_iter()
+        .map(|d| (d.start, d.stop, d.effect, d.attach.unwrap_or_default()))
+        .collect();
+    let row = |a: f32, b: f32, e: &str, n: &str| (pct(a), pct(b), e.to_owned(), n.to_owned());
+    assert_eq!(
+        got,
+        [
+            row(60.0, 20.0, "com_sfx_vehiclespark", "hp_damage2"),
+            row(70.0, 20.0, "com_sfx_vehiclespark", "hp_damage3"),
+            row(70.0, 20.0, "com_sfx_vehiclespark", "hp_damage2"),
+            row(50.0, 0.0, "com_sfx_vehiclesmoke", "hp_damage1"),
+            row(5.0, 0.0, "com_sfx_vehicleflame", "hp_damage1"),
+        ]
+    );
+}
+
 /// Card VDTH (`analysis/re-vehicle-death.md` §3 [O]): the sphere a blast
 /// measures each BF1 vehicle class by — `max(modl SPHR r, the farthest
 /// AddSpringBody / ODF collision primitive)` about the SPHR centre — against

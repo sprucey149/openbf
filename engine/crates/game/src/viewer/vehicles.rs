@@ -23,6 +23,7 @@ use super::scene::{draw_in, spec_cull};
 use super::upload::{upload_cpu_texture, upload_submeshes, upload_texture_file};
 use super::walker_pose::{skin, WalkerRig};
 use crate::assets::{load_glb, load_glb_joints, load_skinned_glb, CpuMesh, Scene, SkinnedAsset};
+use crate::vehicle_class::tread::Tread;
 use anyhow::Result;
 use glam::Mat4;
 use render::{
@@ -44,6 +45,8 @@ struct Part {
     /// A skinned walker's submesh (card WSKN): the model's vertices it uses
     /// and its triangles over them.
     skin: Option<(Vec<u32>, Vec<u32>)>,
+    /// The segment's MNAM, which a class's tread names ([`super::treads`]).
+    group: Option<String>,
 }
 
 /// A walker class's skin (card WSKN): the rig and the model's bind-pose
@@ -77,9 +80,24 @@ impl ClassVis {
         cull: (Option<f32>, Option<f32>),
         fade: Option<render::Fade>,
     ) {
+        self.draws_with(out, meshes, m, cull, fade, &[]);
+    }
+
+    /// [`Self::draws`], part `k` drawn with `textures[k]` where that is
+    /// `Some` (a tread's own instance, [`super::treads`]).
+    fn draws_with(
+        &self,
+        out: &mut Vec<DrawCmd>,
+        meshes: Option<&[MeshHandle]>,
+        m: Mat4,
+        cull: (Option<f32>, Option<f32>),
+        fade: Option<render::Fade>,
+        textures: &[Option<TextureHandle>],
+    ) {
         for (k, p) in self.parts.iter().enumerate() {
             let mesh = meshes.map_or(p.mesh, |h| h[k]);
-            if let (Some(t), Some((rgb, power))) = (p.texture, p.spec) {
+            let texture = textures.get(k).copied().flatten().or(p.texture);
+            if let (Some(t), Some((rgb, power))) = (texture, p.spec) {
                 out.push(
                     DrawCmd::specular(mesh, t, rgb, power, m)
                         .with_cull(cull.1)
@@ -87,7 +105,7 @@ impl ClassVis {
                         .with_fade(fade),
                 );
             }
-            let base = match p.texture {
+            let base = match texture {
                 Some(t) => draw_in(p.layer, mesh, t, m),
                 None => DrawCmd::flat(mesh, [0.6, 0.6, 0.6, 1.0], m),
             };
@@ -108,6 +126,11 @@ pub struct VehicleVisuals {
     posed: std::collections::HashMap<usize, PosedMeshes<u32>>,
     /// Each hover's fin numbers (card VPOSE), stepped with the sim.
     hover_nines: super::turret_pose::HoverClocks,
+    /// Each class's treads ([`Self::set_treads`]) and each hover's offsets.
+    treads: Vec<Vec<Tread>>,
+    tread_clocks: super::treads::TreadClocks,
+    /// How far this frame is into the next tick ([`Self::set_tick_share`]).
+    tick_share: f32,
     /// The world models' far cull and the specular pass's (`upload_scene`'s).
     cull: Option<f32>,
     spec_cull: Option<f32>,
@@ -396,6 +419,9 @@ impl VehicleVisuals {
             shadow_triangles: Vec::new(),
             posed: Default::default(),
             hover_nines: Default::default(),
+            treads: Vec::new(),
+            tread_clocks: Default::default(),
+            tick_share: 1.0,
             cull,
             spec_cull: spec_cull(scene, cull),
             items: super::pickups::PickupVisuals::new(assets_dir, &game, cull),
@@ -430,6 +456,18 @@ impl VehicleVisuals {
             out.classes.push(parts);
         }
         out
+    }
+
+    /// Each class's tread scroll, by `Vehicle::class`
+    /// ([`crate::vehicle_pads::PadBuild::hover_treads`]).
+    pub fn set_treads(&mut self, treads: Vec<Vec<Tread>>) {
+        self.treads = treads;
+    }
+
+    /// The share of the way from the last tick to this one the frame's
+    /// poses are drawn at (`crate::render_blend::share`); 1 by default.
+    pub fn set_tick_share(&mut self, share: f32) {
+        self.tick_share = share;
     }
 
     pub fn load_chunks(
@@ -504,6 +542,7 @@ impl VehicleVisuals {
             .collect();
         self.hover_nines
             .step(sim, sim.ground_rules == core::soldier::GroundRules::Bf2);
+        self.tread_clocks.step(sim, &self.treads);
         let live = sim.vehicles.iter().enumerate().filter(|(_, v)| v.alive);
         // Temporary fallen meshes keep their own slots if a pad recycles
         // the vehicle's sim slot before its clip finishes.
@@ -614,13 +653,34 @@ impl VehicleVisuals {
                     shadow.append_volume(m * node, sun * length, &mut self.shadow_triangles);
                 }
             }
+            let treads = self.treads.get(v.class as usize).map_or(&[][..], Vec::as_slice);
+            let textures: Vec<Option<TextureHandle>> = if treads.is_empty() {
+                Vec::new()
+            } else {
+                class
+                    .parts
+                    .iter()
+                    .enumerate()
+                    .map(|(k, p)| {
+                        let base = p.texture?;
+                        let offset = self.tread_clocks.offset(
+                            slot,
+                            treads,
+                            p.group.as_deref(),
+                            self.tick_share,
+                        )?;
+                        Some(self.tread_clocks.texture(r, slot, k, base, offset))
+                    })
+                    .collect()
+            };
             let first_draw = out.len();
-            class.draws(
+            class.draws_with(
                 &mut out,
                 posed.as_deref(),
                 m,
                 (self.cull, self.spec_cull),
                 fade,
+                &textures,
             );
             if sphere.is_some() {
                 let lit = render::LitSphere { centre, radius };
@@ -995,6 +1055,7 @@ pub(super) fn upload_parts(
                 let (start, count) = (cpu.submeshes[k].0 as usize, cpu.submeshes[k].1 as usize);
                 compact(&cpu.indices[start..start + count], cpu.positions.len())
             }),
+            group: cpu.group(k).map(str::to_owned),
         });
     }
     let skin = rig.map(|rig| Skin {
@@ -1297,6 +1358,7 @@ mod local_light_tests {
                 spec: None,
                 light: LightPath::Lit,
                 skin: Some((vec![0, 1, 2], indices)),
+                group: None,
             }],
             skin: Some(Skin {
                 rig: WalkerRig::new_flyer(skeleton, vec![clip]),
@@ -1354,6 +1416,7 @@ mod local_light_tests {
                 spec: None,
                 light: LightPath::Lit,
                 skin: None,
+                group: None,
             }],
             skin: None,
             shadows: Vec::new(),

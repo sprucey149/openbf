@@ -573,6 +573,7 @@ pub(super) fn run_bench(v: &ViewerArgs) -> Result<()> {
     let mut vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
     let mut vehicle_vis =
         game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
+    vehicle_vis.set_treads(walk.hover_treads.clone());
     let mut deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
     let cube = upload_unit_cube(&mut r)?;
     let mut tick = game::bench::Samples::default();
@@ -773,6 +774,7 @@ pub(super) fn run_headless(v: &ViewerArgs) -> Result<()> {
         let vis = game::soldier_vis::SoldierVisuals::for_walk(&mut r, &assets_dir, &scene, &walk);
         let mut vehicle_vis =
             game::viewer::VehicleVisuals::load(&mut r, &scene, &assets_dir, &walk.vehicle_geometry);
+        vehicle_vis.set_treads(walk.hover_treads.clone());
         let deka_vis = game::viewer::DroidekaVisuals::load(&mut r, &scene, &assets_dir, &walk);
         let quad = game::viewer::upload_billboard_quad(&mut r)?;
         let sprite = game::viewer::upload_fx_sprite(&mut r).ok();

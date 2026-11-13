@@ -86,6 +86,7 @@ fn canonical_terrain_query_frame_preserves_float32_interpolation() {
             spec: vec![],
             light: vec![],
             scroll: vec![],
+            groups: Vec::new(),
             sphere: None,
             vis_top: None,
             render_grid: None,

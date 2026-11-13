@@ -795,6 +795,11 @@ pub struct Fx {
     sky: Vec<sky::SkyEffect>,
     storm: Option<storm::Storm>,
     pub particle_lod_bias: f32,
+    /// The local player's camera shake ([`crate::camera_shake`]), fed by
+    /// this tick's blasts in [`Fx::ingest`].
+    pub shake: crate::camera_shake::CameraShake,
+    /// This tick's blasts with a shake, and where, until [`Fx::ingest`].
+    shake_blasts: Vec<(Vec3, core::impact::Shake)>,
 }
 
 impl std::fmt::Debug for Fx {
@@ -1002,6 +1007,9 @@ impl Fx {
     /// way (B2:287993-288244). False when no effect spawned.
     pub fn explode(&mut self, look: &ExplosionLook, pos: Vec3, water: Option<f32>) -> bool {
         self.chunks.blast(&look.class, pos, self.library.as_ref());
+        if look.shake.outer > 0.0 {
+            self.shake_blasts.push((pos, look.shake));
+        }
         let (spawned, pos) = match water.filter(|w| pos.y <= w + WATER_BLAST_DEPTH) {
             Some(w) => {
                 if look.radius_outer <= 0.0 {
@@ -1274,6 +1282,7 @@ impl Fx {
     /// Read this tick's sim events into effects.
     pub fn ingest(&mut self, walk: &WalkSim) {
         self.ingest_sim(&walk.sim);
+        self.shake_player(walk);
         self.follow_flyer_exhaust(walk);
         self.follow_hover_water(walk);
         self.soldier_water(walk);
@@ -1285,6 +1294,31 @@ impl Fx {
                 .effect
                 .as_deref()
         });
+    }
+
+    /// This tick's blasts shake the local player's camera, measured from
+    /// the object he controls: his vehicle when seated, else his soldier,
+    /// each by its blast sphere; none while dead (B2:288300-288322). Then
+    /// one camera update of a tick: the PS2's camera ran once per 30 Hz
+    /// frame. OURS: a gunner measures from the vehicle he rides, where the
+    /// PS2 asks his controlled turret. trace: B2:288305 vtable +0x24.
+    fn shake_player(&mut self, walk: &WalkSim) {
+        let sim = &walk.sim;
+        let from = sim.unit(walk.player).filter(|u| u.alive).map(|u| {
+            match sim.seat_of(walk.player).and_then(|(h, _)| sim.vehicle(h)) {
+                Some(v) => (v.pos, sim.vehicle_blast_sphere(v).1),
+                None => (
+                    u.soldier.pos,
+                    core::sim::soldier_blast_sphere(u.soldier.stance).1,
+                ),
+            }
+        });
+        for (pos, shake) in std::mem::take(&mut self.shake_blasts) {
+            if let Some((at, w)) = from {
+                self.shake.blast(&shake, at.distance(pos), w);
+            }
+        }
+        self.shake.tick(core::TICK_DT);
     }
 
     pub fn update(&mut self, dt: f32) {

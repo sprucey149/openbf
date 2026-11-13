@@ -263,6 +263,7 @@ pub fn load_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
         spec: vec![],
         light: vec![],
         scroll: vec![],
+        groups: Vec::new(),
         sphere: None,
         vis_top: None,
         render_grid: None,
@@ -354,6 +355,7 @@ pub fn load_glb_joints(path: &Path) -> Result<(CpuMesh, Vec<[u8; 4]>)> {
             mesh.spec.push(extras.spec_pass);
             mesh.light.push(light_of(extras.light.as_deref()));
             mesh.scroll.push(extras.uv_scroll.unwrap_or_default());
+            mesh.groups.push(extras.group);
         }
     }
     if !joints.is_empty() {
@@ -401,6 +403,7 @@ struct MatExtras {
     spec_pass: Option<SpecPass>,
     light: Option<String>,
     uv_scroll: Option<[f32; 2]>,
+    group: Option<String>,
 }
 
 fn mat_extras(prim: &gltf::Primitive<'_>) -> Option<MatExtras> {

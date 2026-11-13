@@ -126,7 +126,8 @@ keep their offsets. Also used here [V]:
   speeder bikes 0.3).
 - **Jump** — +0xf88 (0), +0xf8c (0), +0xf90 (0), +0xf94 (0.3), +0xf98 (0). The two BF2 speeder bikes author 0.1,
   0.35, 50, 0.4, 100.
-- **Tread UV scroll** — count +0xf9c (hailfire 2, snailtank 1); scales +0xfb0/+0xfc0/+0xfd0/+0xfe0.
+- **Tread UV scroll** — count +0xf9c (hailfire 2, snailtank 1); segment MNAM hashes +0xfa0; scales +0xfb0/+0xfc0/+0xfd0/+0xfe0
+  (§6.18).
 - **Landing effect** — g threshold +0xcd4 = 0.9.
 - **Aim** — +0x684 = 1.0 (aim yaw rate); aim-yaw clamp +0x690/+0x694 = 0/0. Neither setter writes these two (§12).
 
@@ -331,7 +332,25 @@ Next tick, §6.2's U = mat(q'), but §6.11's q = quat(T·mat(q')). So each tick'
 **6.17 Effects and sound** (B2:134602-134741). A landing effect (FUN_0043ceb0) fires when g rises past its previous
 value while g ≤ K+0xcd4 = 0.9. Engine sound: FUN_0044c650 / FUN_00441350. Pilot anim blend: E+0x54c / E+0x550.
 
-**6.18 Tread UV scroll** (B2:134742-134797): for i < K+0xf9c, uv += dt·(vF·scale + ω.yaw·scale), wrapped to [0, 1).
+**6.18 Tread UV scroll** (B2:134057-134109): for i < K+0xf9c, u_i += dt·(vF·K[0xfb0+4i] + ω.yaw·K[0xfd0+4i]) and
+v_i += dt·(vF·K[0xfc0+4i] + ω.yaw·K[0xfe0+4i]), each brought back by one when below 0 or above 1. u_i is E+0x5a8+4i,
+v_i E+0x5b8+4i; vF = E+0x4c0 · E+0x140 (velocity along the tilted model +z), ω.yaw = E+0x4d4. [V]
+- **Props** (setter `FUN_002223a0`): an unnamed select (hash 0x1a6593db, value strtol − 1, B2:136514-136516) picks
+  slot i, reset to 0 by the constructor and the derive (B2:135947, B2:136122); `WheelTexture` (0x80841697) writes the
+  MNAM hash to +0xfa0+4i and raises the count to i+1 (B2:137081-137090); `WheelVelocToU` / `WheelVelocToV` /
+  `WheelOmegaToU` / `WheelOmegaToV` (0x4b8c0d9f / 0x4c8c0f32 / 0xba991e3d / 0xb7991984) write +0xfb0 / +0xfc0 /
+  +0xfd0 / +0xfe0 at slot i. The derive copies the count and the tables (B2:136276-136281). The names are the FNV
+  hashes; only the select's name is not known.
+- **Authored** (LVL scan): `cis_tread_snailtank` slot 1 `cis_tank_tread_tracks`, VelocToV −0.8333333, OmegaToV 0;
+  BF2 `cis_tread_hailfire` slot 1 `wheel_left` VelocToU 0.4 OmegaToU −1.1, slot 2 `wheel_right` 0.4 / 1.1. No BF1
+  class authors any.
+- **Draw** (`FUN_0021a968`, B2:131113-131151): per tread, the model segment whose MNAM hash (segment +0x7c,
+  `FUN_0057dce0`) is K+0xfa0+4i gets a UV block (param 0x3f0d728a) with words 1-4 = identity when unset and words 5, 6
+  = u_i, v_i; the segment draw takes that block in place of its material's (B2:711237-711239, 711303-711336).
+- **RAM (2026-11-13, BF2 Kashyyyk, maintainer's save state 8 in a private PCSX2 of the same build):** five snail tanks
+  hold K = 0x1acff50; E+0x5a8 stays 0 on all; a bot reversing at vF = −8.0 m/s raises E+0x5b8 by ≈0.25 per ~35 ms
+  update (≈7/s against the formula's 6.67/s), one driving on at +9 to +10 m/s lowers it, the parked ones stay put. The
+  port: `game::vehicle_class::tread`, `game::viewer::treads`.
 
 **6.19** (B2:134798-134800): if SetAltitude ≤ 0: g = 0.
 

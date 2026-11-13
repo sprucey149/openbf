@@ -191,6 +191,10 @@ pub struct CpuMesh {
     /// every map GLB baked before LITEB. Read through [`CpuMesh::light_path`].
     pub light: Vec<render::LightPath>,
     pub scroll: Vec<[f32; 2]>,
+    /// Per submesh (aligned with `submeshes`, or empty): the segment's MNAM
+    /// as the bake wrote it (`extras.group`, `bake::glb`), `None` where the
+    /// segment has none or the GLB predates it. Read through [`CpuMesh::group`].
+    pub groups: Vec<Option<String>>,
     /// The model's own sphere `[x, y, z, r]`, model space, as the map bake
     /// wrote it on the mesh (`extras.sphere`, `bake::glb::model_sphere`,
     /// card BPNT); `None` on every other GLB.
@@ -258,6 +262,11 @@ impl CpuMesh {
 
     pub fn uv_scroll(&self, i: usize) -> [f32; 2] {
         self.scroll.get(i).copied().unwrap_or_default()
+    }
+
+    /// Submesh `i`'s MNAM, `None` when the bake wrote none.
+    pub fn group(&self, i: usize) -> Option<&str> {
+        self.groups.get(i).and_then(Option::as_deref)
     }
 
     /// The V range of submesh `i`'s own vertices — the UVs its index range

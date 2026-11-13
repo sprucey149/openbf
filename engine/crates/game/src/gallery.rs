@@ -1201,6 +1201,7 @@ mod tests {
                 spec: Vec::new(),
                 light: Vec::new(),
                 scroll: Vec::new(),
+                groups: Vec::new(),
                 sphere: None,
                 vis_top: None,
                 render_grid: None,

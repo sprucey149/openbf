@@ -695,6 +695,8 @@ pub struct WalkSim {
     pub flyer_exhaust: Vec<Vec<crate::vehicle_pads::FlyerExhaust>>,
     /// Each vehicle class's hover `WaterEffect` ([`crate::vehicle_pads::PadBuild::hover_water`]).
     pub hover_water: Vec<Option<String>>,
+    /// Each vehicle class's tread scroll ([`crate::vehicle_pads::PadBuild::hover_treads`]).
+    pub hover_treads: Vec<Vec<crate::vehicle_class::tread::Tread>>,
     pub vehicle_weapon_hud: Vec<Vec<Vec<WeaponHud>>>,
     /// Each vehicle class's seats' rider hangs, parallel to `vehicle_seats`
     /// (visual only, card VRIDE): read by `crate::soldier_vis`.
@@ -886,6 +888,7 @@ impl WalkSim {
             walker_shot_styles: Default::default(),
             flyer_exhaust: Vec::new(),
             hover_water: Vec::new(),
+            hover_treads: Vec::new(),
             vehicle_riders: Vec::new(),
             vehicle_engines: Vec::new(),
             vehicle_sounds: Vec::new(),

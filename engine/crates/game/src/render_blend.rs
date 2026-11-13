@@ -706,9 +706,19 @@ fn stabilized_walker(walk: &WalkSim) -> Option<core::vehicle::VehicleHandle> {
 /// preview is drawn whole. A controller's on foot is drawn the frame's share
 /// of the way into the next tick's turn (all of it with the blend off), so
 /// the aim moves smoothly; [`Blend::stamp`] fires a press there.
+/// The share of the way from the last tick to this one a frame draws at:
+/// [`fraction`] with the blend on, 1 (the tick itself) with it off.
+pub fn share(walk: &WalkSim) -> f32 {
+    if walk.blend.on {
+        fraction(walk)
+    } else {
+        1.0
+    }
+}
+
 pub fn blend_in_looking(walk: &mut WalkSim, look: &PadState) {
     let mut preview = walk.sim.look_preview(walk.player, look);
-    let share = if walk.blend.on { fraction(walk) } else { 1.0 };
+    let share = share(walk);
     walk.blend.drawn = None;
     let stick = !look.has_look() && !look.mouse_aim();
     if let (true, Some(LookPreview::Foot { unit, yaw, pitch })) = (stick, preview.as_mut()) {

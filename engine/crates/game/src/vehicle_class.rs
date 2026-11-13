@@ -10,7 +10,11 @@
 //! vehicle's own (hover drive + the pilot seat); `TURRET1..8` open a
 //! MountedTurret gunner seat whose props (its own `TurnRate`, `PitchLimits`,
 //! weapons) never reach the hover (B1 FUN_001f0648 B1:102492-102537).
-//! `CHUNKSECTION` opens a destruction chunk, read by neither.
+//! `CHUNKSECTION` only picks the destruction chunk later `Chunk*` keys fill
+//! (B2 FUN_00214600 B2:126998-127046, the base setter every vehicle setter
+//! falls through to); it closes no section, so the body's rows after it
+//! (the snail tank's `DamageStartPercent` rows, B2 FUN_0026a340
+//! B2:186058, read with no section state) are still the body's.
 //!
 //! A building turret (`armedbuilding` / `armedbuildingdynamic`, §8, card
 //! VTURB) splits its list the same way with `BuildingSection` (hash
@@ -28,6 +32,7 @@
 
 mod aim;
 mod flyer;
+pub mod tread;
 mod walker;
 pub use aim::{AimerSpec, BarrelSlot};
 pub(crate) use flyer::flyer_exhaust;
@@ -143,6 +148,8 @@ pub struct HoverClass {
     /// The soldier, vehicle and ordnance lines and the `AddSpringBody`
     /// spheres in PROP order, for [`Self::spring_subsets`].
     spring_steps: Vec<SpringStep>,
+    /// BF2's tread scroll ([`tread`]); empty on every BF1 class.
+    pub treads: tread::Treads,
 }
 
 /// One PROP of [`HoverClass::spring_subsets`]'s replay.
@@ -225,6 +232,7 @@ impl Default for HoverClass {
             terrain_bodies: Vec::new(),
             building_bodies: Vec::new(),
             spring_steps: Vec::new(),
+            treads: tread::Treads::default(),
         }
     }
 }
@@ -236,8 +244,6 @@ enum Scope {
     Body,
     /// MountedTurret section index 0..=7 (TURRET / TURRET1 → 0, TURRETn → n−1).
     Turret(u8),
-    /// A destruction chunk (`CHUNKSECTION`).
-    Chunk,
 }
 
 const SLOW_OFFSET: u32 = 0x5dbc_abb0;
@@ -269,11 +275,7 @@ fn section_scope(value: &str) -> Scope {
 /// chain claims ([`walker::turret_claims`]) are the section's, the rest the
 /// body's.
 fn scoped(def: &ClassDef) -> Vec<(Scope, u32, &str)> {
-    scoped_rows(def, true)
-}
-
-fn scoped_rows(def: &ClassDef, chunk_closes: bool) -> Vec<(Scope, u32, &str)> {
-    let (flyer, building, chunk) = (h("FLYERSECTION"), h("BuildingSection"), h("CHUNKSECTION"));
+    let (flyer, building) = (h("FLYERSECTION"), h("BuildingSection"));
     let walker = h("WalkerSection");
     let mut scope = Scope::Body;
     let mut by_walker = false;
@@ -282,10 +284,6 @@ fn scoped_rows(def: &ClassDef, chunk_closes: bool) -> Vec<(Scope, u32, &str)> {
         if *k == flyer || *k == building || *k == walker {
             scope = section_scope(v);
             by_walker = *k == walker;
-        } else if *k == chunk {
-            if chunk_closes {
-                scope = Scope::Chunk;
-            }
         } else if by_walker && matches!(scope, Scope::Turret(_)) && !walker::turret_claims(*k) {
             // The walker setter gives the turret setter first refusal
             // (B2:182865-182869); what it does not claim is the walker's.
@@ -339,6 +337,7 @@ impl HoverClass {
             c.terrain_bodies.clear();
             c.building_bodies.clear();
             c.spring_steps.clear();
+            c.treads.derive();
             c.motion.velocity_spring = d.motion.velocity_spring;
             c.motion.velocity_damp = d.motion.velocity_damp;
             c.motion.omega_x_spring = d.motion.omega_x_spring;
@@ -483,6 +482,9 @@ impl HoverClass {
     }
 
     fn set(&mut self, k: u32, v: &str) {
+        if self.treads.set(k, v) {
+            return;
+        }
         if k == h("NoRandomSpring") {
             self.motion.random_spring = false;
             return;
@@ -1034,7 +1036,7 @@ pub fn damage_effects(db: &ClassDb, class: &str) -> Vec<DamageEffect> {
         .is_some_and(|base| FLYER_BASES.contains(&base));
     for def in db.chain(class).into_iter().rev() {
         let mut own: Vec<Option<usize>> = Vec::new();
-        for (scope, k, v) in scoped_rows(def, !flyer) {
+        for (scope, k, v) in scoped(def) {
             if scope != Scope::Body && !portable && !flyer {
                 continue;
             }
@@ -1395,7 +1397,7 @@ pub fn seats(db: &ClassDb, class: &str) -> Vec<SeatSpec> {
         return Vec::new();
     }
     for def in chain.into_iter().rev() {
-        for (scope, k, v) in scoped_rows(def, false) {
+        for (scope, k, v) in scoped(def) {
             match scope {
                 Scope::Body if k == h("PassengerSlots") => {
                     passengers = v.trim().parse::<i64>().unwrap_or(0).clamp(0, 4) as usize;
@@ -1404,7 +1406,6 @@ pub fn seats(db: &ClassDb, class: &str) -> Vec<SeatSpec> {
                 Scope::Turret(i) => turrets[i as usize]
                     .get_or_insert_with(|| SeatSpec::new(SeatKind::Gunner(i)))
                     .set(k, v),
-                Scope::Chunk => {}
             }
         }
     }

@@ -569,6 +569,7 @@ pub(super) fn make_walk_with_counts(
                 walk.walker_shot_styles = p.walker_shot_styles;
                 walk.flyer_exhaust = p.flyer_exhaust;
                 walk.hover_water = p.hover_water;
+                walk.hover_treads = p.hover_treads;
                 walk.load_walker_views(&scene.manifest, scene.dir.parent().unwrap_or(&scene.dir));
                 walk.load_vehicle_tops(
                     &scene.manifest,
@@ -1238,6 +1239,7 @@ mod tests {
             spec: Vec::new(),
             light: Vec::new(),
             scroll: Vec::new(),
+            groups: Vec::new(),
             sphere: None,
             vis_top: None,
             render_grid: None,
