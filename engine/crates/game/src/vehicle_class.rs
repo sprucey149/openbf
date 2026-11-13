@@ -64,12 +64,13 @@ pub(crate) fn is_turret_base(base: &str) -> bool {
 pub const MAX_SPRING_POINTS: usize = 6;
 
 /// Vehicle sound properties authored in the ODF chain (card VSND / card UCRY).
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct VehicleSoundClass {
     pub collision_sound: Option<String>,
     pub hurt_sound: Option<String>,
     pub death_sound: Option<String>,
     pub cockpit_sound: Option<String>,
+    pub walker_steps: Option<crate::engine_sound::walker::Class>,
 }
 
 impl VehicleSoundClass {
@@ -80,6 +81,7 @@ impl VehicleSoundClass {
             death_sound: crate::roster::sound_key(db, class, "DeathSound"),
             cockpit_sound: crate::roster::sound_key(db, class, "Cockpit3rdPersonSound")
                 .or_else(|| crate::roster::sound_key(db, class, "Cockpit1stPersonSound")),
+            walker_steps: None,
         }
     }
 }
@@ -857,7 +859,9 @@ impl SeatSpec {
     }
 
     fn set(&mut self, k: u32, v: &str) {
-        let weapon = self.weapons.len().saturating_sub(1);
+        // A seat-level aimer authored before WeaponName (AT-AT's head)
+        // turns the rig but belongs to no weapon fire ring.
+        let weapon = self.weapons.len().checked_sub(1).unwrap_or(usize::MAX);
         if k == h("NextAimer") {
             self.aimers.push(AimerSpec::new("", weapon));
         } else if k == h("AimerNodeName") {

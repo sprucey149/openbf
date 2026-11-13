@@ -67,13 +67,13 @@ pub fn frame(walk: &WalkSim, unit: UnitHandle, class: usize, shot: u64) -> Optio
     let points: Vec<_> = seat
         .aimers
         .iter()
-        .filter(|a| a.weapon == weapon)
-        .flat_map(|a| &a.fire_points)
+        .filter(|a| a.weapon == weapon && !a.no_fire)
+        .flat_map(|a| a.muzzles())
         .collect();
     let name = points
         .get(shot as usize % points.len().max(1))
         .copied()
-        .or(seat.fire_point.as_ref())?;
+        .or(seat.fire_point.as_deref())?;
     let rig = walk.walker_rigs.get(v.class as usize)?.as_ref()?;
     let scale = walk
         .sim

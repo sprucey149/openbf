@@ -751,6 +751,12 @@ pub fn install_for_mission(
         .iter()
         .map(|c| vehicle_class::VehicleSoundClass::from_db(&db, c))
         .collect();
+    for (class, sound) in b.classes.iter().zip(&mut b.sounds) {
+        if let Some((_, _, geometry)) = class_collision(m, map_dir, &sides, class) {
+            sound.walker_steps =
+                crate::engine_sound::walker::Class::from_db(&db, class, &geometry.prims);
+        }
+    }
     b.labels = b
         .classes
         .iter()

@@ -1171,6 +1171,11 @@ impl SoldierVisuals {
         let now = walk.sim.tick as f64 * f64::from(core::TICK_DT);
         let mut out = Vec::new();
         for (i, u) in walk.sim.units.iter().enumerate() {
+            // Mounted guns never call the weapon render slot on PS2
+            // (re-muzzle-flash §5, B2 FUN_00239bb0:155363-155377).
+            if u.mount.is_some() {
+                continue;
+            }
             let (Some(v), Some(Some(p))) = (self.units.get(i), points.get(i)) else {
                 continue;
             };

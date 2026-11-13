@@ -27,8 +27,9 @@
 //!   landing switch its time graphs to wind-up and wind-down and play `TakeoffSound`
 //!   and `LandSound` ([`JetShot`]).
 //!
-//! Not here (card VSN2): the vehicles' `TurnOnSound` / `TurnOffSound`, walker
-//! steps, the turret whir, collision.
+//! [`walker`] supplies animated footstep one-shots through the same queue.
+//! Not here (card VSN2): the vehicles' `TurnOnSound` / `TurnOffSound`,
+//! leg hydraulics, the turret whir, collision.
 
 use crate::classdb::{fnv1a_lowercase, ClassDb};
 use crate::walk::WalkSim;
@@ -37,6 +38,8 @@ use core::vehicle::{Vehicle, VehicleKind};
 use glam::Vec3;
 use manifest::{EngineLayer, EngineSound};
 use std::collections::HashMap;
+
+pub mod walker;
 
 /// `TurnOffTime` from the component's constructor (B1 `FUN_00366cb8`).
 pub const TURN_OFF_TIME: f32 = 3.0;
@@ -418,6 +421,7 @@ pub struct Voice {
 /// The engines of a battle's vehicles.
 #[derive(Default)]
 pub struct EngineSounds {
+    walker_steps: walker::Steps,
     /// By vehicle index: the vehicle's generation and its instance.
     instances: HashMap<u32, (u32, Instance)>,
     /// By unit index: the soldier's generation and his jet's instance.
@@ -456,6 +460,7 @@ impl EngineSounds {
         record: impl Fn(u32, &[u32]) -> Option<&'a EngineSound>,
         out: &mut Vec<Voice>,
     ) -> Count {
+        self.shots.extend(self.walker_steps.tick(walk));
         let mut count = Count::default();
         let mut live = Vec::new();
         for (i, v) in walk.sim.vehicles.iter().enumerate() {
@@ -721,6 +726,7 @@ pub struct JetMotion<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JetShotKind {
+    WalkerStep,
     TurnOn,
     TurningOff,
     TurnOff,

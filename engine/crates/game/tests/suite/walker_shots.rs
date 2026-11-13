@@ -5,6 +5,146 @@ use game::bolt_vis::BoltVis;
 use game::walk::WalkSim;
 use glam::Vec3;
 
+#[test]
+#[ignore = "requires local BF2 Hoth assets and headless GPU"]
+fn atat_rounds_alternate_animated_barrels_without_a_muzzle_flash_and_walk_has_steps() {
+    let root = game::assets::baked_root();
+    let (mut w, _) = walker_battle::battle_on(&root, "bf2_hot1", "bf2_hot1_con").unwrap();
+    let class = w
+        .vehicle_classes
+        .iter()
+        .position(|c| c == "imp_walk_atat")
+        .unwrap();
+    let (i, v) = w
+        .sim
+        .vehicles
+        .iter()
+        .enumerate()
+        .find(|(_, v)| v.alive && v.class as usize == class)
+        .unwrap();
+    let h = core::vehicle::VehicleHandle {
+        index: i as u32,
+        gen: v.gen,
+    };
+    // The map may start the human on the opposite side; use an empty friendly walker.
+    w.sim.vehicles[i].team = Some(w.sim.unit(w.player).unwrap().team);
+    assert!(w.sim.seat_unit(w.player, h, 0));
+    let head_slot = w.sim.seat_setup[class].as_ref().unwrap().guns[0]
+        .as_ref()
+        .unwrap()
+        .weapons
+        .iter()
+        .position(|g| w.sim.weapon_classes[g.class].name == "imp_weap_walk_atat_cannon_head")
+        .unwrap();
+    let mut renderer = render::Renderer::new_headless(64, 64).unwrap();
+    let mut visuals =
+        game::soldier_vis::SoldierVisuals::load(&mut renderer, &root, "bf2", &w.teams);
+    visuals.set_walker_rigs(w.walker_rigs.clone());
+    let mut counts = Vec::new();
+    for slot in [head_slot, 1 - head_slot] {
+        let weapon = w.sim.seat_setup[class].as_ref().unwrap().guns[0]
+            .as_ref()
+            .unwrap()
+            .weapons[slot]
+            .class;
+        let points = &w.sim.seat_setup[class].as_ref().unwrap().guns[0]
+            .as_ref()
+            .unwrap()
+            .weapons[slot]
+            .fire_points;
+        assert_eq!(points.len(), 2, "{:#?}", w.vehicle_seats[class][0].aimers);
+        assert!(w.sim.weapon_classes[weapon].flash.as_ref().unwrap().draws());
+        let mut count = 0;
+        for _ in 0..150 {
+            w.step_tick(&[core::sim::PadState {
+                buttons: if slot == 0 {
+                    core::sim::buttons::FIRE
+                } else {
+                    core::sim::buttons::SECONDARY_FIRE
+                },
+                ..Default::default()
+            }]);
+            visuals.update(&w, core::TICK_DT);
+            for (event, e) in w.sim.events.iter().enumerate() {
+                if matches!(e, core::sim::Event::Shot { unit, weapon_class, .. } if *unit == w.player && *weapon_class as usize == weapon)
+                {
+                    let shot = game::walker_shots::ordinal(&w, w.player, weapon, event);
+                    let name = if slot == head_slot {
+                        if shot % 2 == 0 {
+                            "hp_fire_Lgun"
+                        } else {
+                            "hp_fire_Rgun"
+                        }
+                    } else {
+                        if shot % 2 == 0 {
+                            "barrel_Lcannon"
+                        } else {
+                            "barrel_Rcannon"
+                        }
+                    };
+                    let v = w.sim.vehicle(h).unwrap();
+                    let rig = w.walker_rigs[class].as_ref().unwrap();
+                    let scale = w.sim.walker_params[class].as_ref().unwrap().root_scale;
+                    let expected = glam::Mat4::from_rotation_translation(v.rot, v.pos)
+                        * rig.node_now(v, scale, name).unwrap();
+                    let actual = game::walker_shots::frame(&w, w.player, weapon, shot).unwrap();
+                    assert!(actual.abs_diff_eq(expected, 0.001), "shot {shot}: {name}");
+                    assert!(visuals.flash_draws(&w).is_empty());
+                    count += 1;
+                }
+            }
+        }
+        assert!(count >= 4, "only {count} shots");
+        counts.push(count);
+    }
+    let config = w.vehicle_sounds[class]
+        .walker_steps
+        .as_ref()
+        .unwrap()
+        .clone();
+    assert_eq!(config.feet.len(), 4);
+    assert!(config.feet.iter().all(|f| f.sound.is_some()));
+    let sounds = game::sounds::SoundLib::load(&root.join("bf2_hot1")).unwrap();
+    for foot in &config.feet {
+        assert!(
+            sounds.has(foot.sound.as_deref().unwrap()),
+            "missing {:?}",
+            foot.sound
+        );
+    }
+    let mut engine = game::engine_sound::EngineSounds::default();
+    let mut voices = Vec::new();
+    let mut steps = Vec::new();
+    for _ in 0..400 {
+        w.step_tick(&[core::sim::PadState {
+            ly: -127,
+            ..Default::default()
+        }]);
+        engine.tick(&w, |_, _| None, &mut voices);
+        steps.extend(engine.take_jet_shots());
+    }
+    assert!(
+        steps.len() > 4,
+        "must continue past the initial four contacts: {} steps",
+        steps.len()
+    );
+    assert!(steps.iter().all(|s| config
+        .feet
+        .iter()
+        .any(|f| f.sound.as_ref() == Some(&s.name))));
+    // No repeated contact voices while idle, or after the vehicle is destroyed.
+    w.sim.vehicles[i].walker.anim = core::vehicle::walker::ANIM_IDLE;
+    engine.tick(&w, |_, _| None, &mut voices);
+    assert!(engine.take_jet_shots().is_empty());
+    w.sim.vehicles[i].alive = false;
+    engine.tick(&w, |_, _| None, &mut voices);
+    assert!(engine.take_jet_shots().is_empty());
+    eprintln!(
+        "AT-AT: {counts:?} alternating head/chin shots; {} steps in 400 ticks",
+        steps.len()
+    );
+}
+
 fn scene() -> (WalkSim, usize) {
     let mut walk = WalkSim::new(42, Vec3::ZERO, None);
     let class = walk.sim.unit(walk.player).unwrap().weapon_class;
@@ -24,6 +164,83 @@ fn scene() -> (WalkSim, usize) {
     );
     walk.sim.events.clear();
     (walk, class)
+}
+
+#[test]
+#[ignore = "requires local BF2 Hoth assets"]
+fn hoth_atst_steps_use_both_animated_feet_and_the_authored_sound() {
+    let root = game::assets::baked_root();
+    let (mut w, _) = walker_battle::battle_on(&root, "bf2_hot1", "bf2_hot1_con").unwrap();
+    let class = w
+        .vehicle_classes
+        .iter()
+        .position(|c| c == "imp_walk_atst_snow")
+        .unwrap();
+    // Exercise this class independently of Hoth's scripted pad availability.
+    let mut spec = w
+        .sim
+        .vehicle_pads
+        .iter()
+        .find_map(|pad| {
+            let class_spec = pad
+                .def
+                .classes
+                .iter()
+                .flatten()
+                .find(|c| c.spec.class as usize == class)?;
+            let mut spec = class_spec.spec.clone();
+            spec.pos = pad.def.pos;
+            spec.yaw = pad.def.yaw;
+            Some(spec)
+        })
+        .unwrap();
+    spec.home_team = Some(w.sim.unit(w.player).unwrap().team);
+    let h = w.sim.spawn_vehicle(&spec);
+    let i = h.index as usize;
+    assert!(w.sim.seat_unit(w.player, h, 0));
+    let config = w.vehicle_sounds[class].walker_steps.as_ref().unwrap();
+    assert_eq!(config.feet.len(), 2);
+    assert_ne!(config.feet[0].bone, config.feet[1].bone);
+    assert!(config
+        .feet
+        .iter()
+        .all(|f| f.sound.as_deref() == Some("com_weap_layered_at_step")));
+    let mut engine = game::engine_sound::EngineSounds::default();
+    let mut voices = Vec::new();
+    let mut steps = Vec::new();
+    // Replay the authored walk clip independently of obstacles at the pad.
+    // Entries 7 and 8 move opposite feet: walk_leftfoot_rightfoot and
+    // walk_rightfoot_leftfoot (the PS2 walker animation table).
+    let mut entry = core::vehicle::walker::ANIM_WALK;
+    let mut time = 0.0;
+    for _ in 0..180 {
+        let duration = w.sim.walker_params[class].as_ref().unwrap().clips[entry]
+            .as_ref()
+            .unwrap()
+            .duration;
+        if time >= duration {
+            time -= duration;
+            entry = if entry == 7 { 8 } else { 7 };
+        }
+        w.sim.vehicles[i].walker.anim = entry as u8;
+        w.sim.vehicles[i].walker.clip_time = time;
+        time += core::TICK_DT;
+        engine.tick(&w, |_, _| None, &mut voices);
+        steps.extend(
+            engine
+                .take_jet_shots()
+                .into_iter()
+                .filter(|s| s.unit == i as u32),
+        );
+    }
+    assert!(steps.len() > 4, "{} steps", steps.len());
+    assert!(steps.iter().all(|s| s.name == "com_weap_layered_at_step"));
+    // In model space the two feet have opposite horizontal offsets.
+    let right = w.sim.vehicles[i].rot * Vec3::X;
+    let centre = w.sim.vehicles[i].pos;
+    assert!(steps.iter().any(|s| (s.pos - centre).dot(right) > 0.0));
+    assert!(steps.iter().any(|s| (s.pos - centre).dot(right) < 0.0));
+    eprintln!("AT-ST: {} steps in 180 ticks", steps.len());
 }
 
 fn bolt(walk: &WalkSim, class: usize, direction: Vec3) -> Bolt {
